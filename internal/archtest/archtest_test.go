@@ -46,7 +46,7 @@ var imports = map[string][]string{
 	"internal/media":     {"internal/fsx", "internal/textx"},
 	"internal/otp":       {"internal/fsx", "internal/history"},
 	"internal/outbound":  {"internal/store", "internal/textx"},
-	"internal/pipeline":  {"internal/brain", "internal/chat", "internal/outbound", "internal/testutil"},
+	"internal/pipeline":  {"internal/brain", "internal/chat", "internal/claudecli", "internal/otp", "internal/outbound", "internal/testutil"},
 	"internal/platform":  nil,
 	"internal/plaud":     {"internal/fsx", "internal/jsonx", "internal/logx", "internal/media", "internal/outbound", "internal/platform", "internal/testutil", "internal/textx"},
 	"internal/prompt":    {"internal/chat", "internal/history", "internal/testutil"},

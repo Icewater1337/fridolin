@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"slices"
 	"strings"
@@ -24,7 +23,6 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
-	"github.com/Icewater1337/fridolin/internal/otp"
 	"github.com/Icewater1337/fridolin/internal/version"
 )
 
@@ -103,28 +101,15 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Under the chat's JID as inbound messages have it, whatever form the
-	// request used, so the brain's next run sees it in the chat's history.
-	if err := b.wa.SendChunked(r.Context(), jid, req.Text); err != nil {
-		log.Printf("HTTP send error to %s: %v", jid, err)
-		// What did go out is in the chat, so it goes in the history too.
-		var partial *outboundmsg.PartialSendError
-		if errors.As(err, &partial) {
-			b.appendHTTPMessageToHistory(who, jid, strings.Join(partial.Sent, "\n"), "")
-		}
+	request, err := b.pipeline.SendExternal(r.Context(), who, jid, req.Text)
+	if err != nil {
 		httpapi.WriteErr(w, sendErrStatus(err), "send failed: "+err.Error())
 		return
 	}
-
-	// A message that asks for a one-time code gets an id, which the
-	// hand-off of the code that answers it repeats (see handOffCode).
 	resp := map[string]string{"status": "sent"}
-	request := ""
-	if br := b.brainMgr.BrainFor(jid, chat.IsGroupJID(jid)); br != nil && br.AsksForCode(req.Text) {
-		request = otp.NewRequestID()
+	if request != "" {
 		resp["otp_request"] = request
 	}
-	b.appendHTTPMessageToHistory(who, jid, req.Text, request)
 	httpapi.WriteJSON(w, http.StatusOK, resp)
 }
 
@@ -255,26 +240,11 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	paths, err := mediaInboxAt(b.cfgs.Boot().MediaDir).Resolve(br.ID(), req.Paths, who.Kind == chat.CallerBrain)
+	jid, err := b.pipeline.Ingest(who, br, req.Paths, req.Sender, req.Text, ownerChat(cfg))
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	jid := b.replyChatFor(br, cfg)
-	if jid == "" {
-		httpapi.WriteErr(w, http.StatusBadRequest, "brain "+br.ID()+" has no chat to reply in — set reply_chat in its settings")
-		return
-	}
-	sender := req.Sender
-	if sender == "" {
-		sender = "upload"
-	}
-	text := req.Text
-	if text == "" {
-		text = "New files were uploaded."
-	}
-	go b.handOff(br, jid, sender, text, paths)
 	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "jid": jid})
 }
 
