@@ -59,7 +59,7 @@ func (m *SiteManager) git(ctx context.Context, dir string, args ...string) (stri
 	full := append([]string{"-c", "user.name=" + siteGitAuthor, "-c", "user.email=" + siteGitEmail, "-c", "core.hooksPath=/dev/null"}, args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Dir = dir
-	cmd.Env = append(gitEnv(os.Environ()), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/bin/false")
+	cmd.Env = append(gitEnv(m.host.Environ()), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=/bin/false")
 	if key := m.dir("deploy_key"); fsx.Exists(key) {
 		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND="+fmt.Sprintf(
 			"ssh -i %s -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=%s",
@@ -154,7 +154,7 @@ func (m *SiteManager) AddDeployKeyWithGH(ctx context.Context, addr string) (stri
 	if repo == "" {
 		return "", errors.New("the repository is not on GitHub; add the key in its settings by hand")
 	}
-	gh, err := findTool("gh")
+	gh, err := m.host.Tool("gh")
 	if err != nil {
 		return "", errors.New("the GitHub CLI (gh) is not installed")
 	}
@@ -174,7 +174,7 @@ func (m *SiteManager) CreateGitHubRepo(ctx context.Context, name string) (string
 	if !regexp.MustCompile(`^[\w.-]{1,100}$`).MatchString(name) {
 		return "", errors.New("a repository name is letters, digits, . _ and -")
 	}
-	gh, err := findTool("gh")
+	gh, err := m.host.Tool("gh")
 	if err != nil {
 		return "", errors.New("the GitHub CLI (gh) is not installed")
 	}
@@ -698,24 +698,24 @@ func (m *SiteManager) prepareCheckout(ctx context.Context, job *siteJob, commit,
 // is the home folder, a relative path is inside the module folder).
 func (m *SiteManager) runBuild(ctx context.Context, moduleDir, cwd string, run []string) error {
 	dir := moduleDir
-	switch cwd = fsx.ExpandHome(cwd, homeDir()); {
+	switch cwd = fsx.ExpandHome(cwd, m.host.Home()); {
 	case filepath.IsAbs(cwd):
 		dir = cwd
 	case cwd != "":
 		dir = filepath.Join(moduleDir, cwd)
 	}
-	node, _ := findNode()
+	node, _ := m.host.Node()
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 	bin := run[0]
 	if !strings.Contains(bin, "/") {
-		if p, err := findTool(bin); err == nil {
+		if p, err := m.host.Tool(bin); err == nil {
 			bin = p
 		}
 	}
 	cmd := exec.CommandContext(ctx, bin, run[1:]...)
 	cmd.Dir = dir
-	cmd.Env = siteEnv(node)
+	cmd.Env = m.host.Env(node)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%v\n%s", err, textx.Tail(string(out), 1500))

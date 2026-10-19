@@ -120,7 +120,7 @@ func (m *SiteManager) SandboxStatus() SiteSandboxStatus {
 // sandboxInput gathers what the live site's profile is built from.
 func (m *SiteManager) sandboxInput(node, deploy, root, rtFile string, mods []sandbox.SiteModule) sandbox.SitePolicy {
 	in := sandbox.SitePolicy{
-		Home:    homeDir(),
+		Home:    m.host.Home(),
 		DataDir: m.dataDir,
 		Shell:   m.dir("shell"),
 		Deploy:  deploy,
@@ -140,8 +140,8 @@ func (m *SiteManager) sandboxInput(node, deploy, root, rtFile string, mods []san
 	if m.googleClient != nil {
 		in.Reads = append(in.Reads, m.googleClient())
 	}
-	if m.hooks.siteLimits != nil {
-		in.SiteLimits = m.hooks.siteLimits()
+	if m.hooks.SiteLimits != nil {
+		in.SiteLimits = m.hooks.SiteLimits()
 	}
 	return in
 }

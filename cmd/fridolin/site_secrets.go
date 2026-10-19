@@ -142,7 +142,7 @@ type SiteModuleSecrets struct {
 func (m *SiteManager) Secrets() ([]SiteModuleSecrets, error) {
 	byID := map[string]*SiteModuleSecrets{}
 	if approved := m.Settings().Approved; approved != "" {
-		for _, c := range readModuleCaps(m.modulesDirOf(approved), homeDir()) {
+		for _, c := range readModuleCaps(m.modulesDirOf(approved), m.host.Home()) {
 			if len(c.Secrets) > 0 {
 				byID[c.ID] = &SiteModuleSecrets{Module: c.ID, Title: c.Title, Live: true, Declared: slices.Clone(c.Secrets), Set: []string{}}
 			}
