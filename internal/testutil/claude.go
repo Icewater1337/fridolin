@@ -1,4 +1,4 @@
-package main
+package testutil
 
 import (
 	"bufio"
@@ -19,7 +19,7 @@ import (
 
 // fakeNewMessage is the new message in prompt, as the fake CLI echoes it:
 // "<from> says: <text>".
-func fakeNewMessage(prompt string) string {
+func NewMessage(prompt string) string {
 	msg := prompt
 	if i := strings.LastIndex(prompt, "<new_message>\n"); i >= 0 {
 		msg = strings.TrimSuffix(strings.TrimSpace(prompt[i+len("<new_message>\n"):]), "</new_message>")
@@ -65,7 +65,7 @@ func runFakeClaude(version string, polls func(io.Writer) int) {
 		// Each run's prompt after a line of its own (fakePromptsIn).
 		f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 		if err == nil {
-			fmt.Fprintf(f, "%s\n%s\n", fakePromptMark, prompt)
+			fmt.Fprintf(f, "%s\n%s\n", PromptMark, prompt)
 			f.Close()
 		}
 	}
@@ -150,7 +150,7 @@ func runFakeClaude(version string, polls func(io.Writer) int) {
 		// What a brain inherits, one VAR=value per line.
 		_ = os.WriteFile(log, []byte(strings.Join(os.Environ(), "\n")+"\n"), 0o600)
 	}
-	msg := fakeNewMessage(prompt)
+	msg := NewMessage(prompt)
 	wd, _ := os.Getwd()
 	out := fmt.Sprintf("echo:%s:%s", wd, msg)
 	if p := os.Getenv("FRIDOLIN_FAKE_READ"); p != "" {
@@ -204,7 +204,7 @@ func runFakeClaude(version string, polls func(io.Writer) int) {
 
 // fakeClaudeEnv makes brains in this test spawn the fake CLI.
 // fakePromptMark starts each prompt in FRIDOLIN_FAKE_PROMPT_LOG.
-const fakePromptMark = "=====PROMPT====="
+const PromptMark = "=====PROMPT====="
 
 func isPlaudCommand(c string) bool {
 	switch c {

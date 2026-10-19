@@ -1,4 +1,4 @@
-package main
+package testutil
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 
 // assertGolden compares got with the golden file name (a path below
 // goldenDir), or writes it there with -update.
-func sharedAssertGolden(t testing.TB, root, name string, got []byte, update bool) {
+func AssertGolden(t testing.TB, root, name string, got []byte, update bool) {
 	t.Helper()
 	// The tests run in an empty directory whose testdata links to the
 	// package's (linkTestdata), so the path is the same either way.
@@ -31,7 +31,7 @@ func sharedAssertGolden(t testing.TB, root, name string, got []byte, update bool
 	}
 	if !bytes.Equal(got, want) {
 		t.Errorf("%s differs from the golden file (-want +got):\n%s\nIf the change is intended, rewrite it with: go test -run '%s' -update .",
-			name, lineDiff(string(want), string(got)), testPattern(t))
+			name, LineDiff(string(want), string(got)), testPattern(t))
 	}
 }
 
@@ -44,7 +44,7 @@ func testPattern(t testing.TB) string {
 // lineDiff shows the lines of want and got that differ, with a line of
 // context, as -want and +got. It is a plain longest-common-subsequence
 // diff: golden files are small.
-func lineDiff(want, got string) string {
+func LineDiff(want, got string) string {
 	a, b := strings.Split(want, "\n"), strings.Split(got, "\n")
 	// lcs[i][j] is the length of the longest common subsequence of a[i:]
 	// and b[j:].
@@ -98,11 +98,4 @@ func lineDiff(want, got string) string {
 		shown, last = shown+1, k
 	}
 	return sb.String()
-}
-
-func TestLineDiff(t *testing.T) {
-	got := lineDiff("a\nb\nc\nd\ne\n", "a\nB\nc\nd\ne\n")
-	if want := " a\n-b\n+B\n c\n"; got != want {
-		t.Errorf("diff = %q, want %q", got, want)
-	}
 }

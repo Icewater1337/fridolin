@@ -1,4 +1,4 @@
-package main
+package testutil
 
 import (
 	"fmt"
@@ -43,7 +43,11 @@ import (
 //
 // A test binary that finds its own process ID in testPIDVariable has been
 // executed again in place, and fails at once, see reexecutedInPlace.
-func sharedTestMain(m *testing.M, opts sharedMainOptions) {
+func Main(m *testing.M, options ...MainOptions) {
+	var opts MainOptions
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	if reexecutedInPlace() {
 		fmt.Fprintln(os.Stderr, "TestMain: a restart re-executed the bridge, and with it this test binary in place (serve in a test, with the real execSelf?): the tests that were running never finished")
 		os.Exit(2)
@@ -72,7 +76,7 @@ func sharedTestMain(m *testing.M, opts sharedMainOptions) {
 	if opts.BeforeChildren != nil {
 		opts.BeforeChildren()
 	}
-	for _, k := range bridgeVariables() {
+	for _, k := range BridgeVariables() {
 		if err := os.Unsetenv(k); err != nil {
 			fmt.Fprintf(os.Stderr, "unsetting %s: %v\n", k, err)
 			os.Exit(1)
@@ -138,7 +142,7 @@ func useEmptyHome() (func(), error) {
 // runInEmptyDir runs the tests in a new, empty working directory. A relative
 // path in a test must not reach the checkout, where a developer may keep a
 // config.json. Only the package's testdata is linked in, see linkTestdata.
-func runInEmptyDir(m *testing.M, ready func(sharedTestPaths)) (int, error) {
+func runInEmptyDir(m *testing.M, ready func(Paths)) (int, error) {
 	var err error
 	if sharedPaths.PackageDir, err = os.Getwd(); err != nil {
 		return 0, err
@@ -169,7 +173,7 @@ func runInEmptyDir(m *testing.M, ready func(sharedTestPaths)) (int, error) {
 	if err := os.Setenv("PWD", wd); err != nil {
 		return 0, err
 	}
-	if err := linkTestdata(sharedPaths.PackageDir, wd); err != nil {
+	if err := LinkTestdata(sharedPaths.PackageDir, wd); err != nil {
 		return 0, err
 	}
 	sharedMainInstalled = true
@@ -198,26 +202,26 @@ func moduleRoot(dir string) (string, error) {
 // -fuzz` would save a crash into a directory that is removed when the tests
 // end. The link is made even when the package has no testdata yet, so that
 // saving a crash then fails loudly instead of going nowhere.
-func linkTestdata(pkgDir, wd string) error {
+func LinkTestdata(pkgDir, wd string) error {
 	return os.Symlink(filepath.Join(pkgDir, "testdata"), filepath.Join(wd, "testdata"))
 }
 
 // bridgeVariables are the environment variables the bridge reads:
 // FRIDOLIN_CONFIG picks the config, and a false BRAIN_MODE refuses it.
-func bridgeVariables() []string {
+func BridgeVariables() []string {
 	return []string{"FRIDOLIN_CONFIG", "BRAIN_MODE"}
 }
 
 // sharedMainOptions connects command-specific subprocess modes to the shared
 // fake process and isolated test harness. All callbacks run before m.Run.
-type sharedMainOptions struct {
+type MainOptions struct {
 	Version                              string
 	RunMain, BeforeChildren, BeforeTests func()
 	Extra                                func() (handled bool, exitCode int)
 	Polls                                func(io.Writer) int
-	Ready                                func(sharedTestPaths)
+	Ready                                func(Paths)
 }
-type sharedTestPaths struct{ Home, OriginalHome, PackageDir, RepoDir string }
+type Paths struct{ Home, OriginalHome, PackageDir, RepoDir string }
 
-var sharedPaths sharedTestPaths
+var sharedPaths Paths
 var sharedMainInstalled bool

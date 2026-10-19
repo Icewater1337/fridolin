@@ -1,4 +1,4 @@
-package main
+package testutil
 
 import (
 	"os"
@@ -8,7 +8,7 @@ import (
 
 // clearEnv unsets keys for the rest of the test and restores them afterwards,
 // so a value the code under test exports cannot leak into the next test.
-func clearEnv(t *testing.T, keys ...string) {
+func ClearEnv(t *testing.T, keys ...string) {
 	t.Helper()
 	for _, k := range keys {
 		t.Setenv(k, "") // registers the restore
@@ -19,7 +19,7 @@ func clearEnv(t *testing.T, keys ...string) {
 }
 
 // waitFor polls cond until it holds or the timeout passes.
-func waitFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {
+func WaitFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {

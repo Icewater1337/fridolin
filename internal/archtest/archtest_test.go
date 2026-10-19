@@ -24,7 +24,7 @@ import (
 // edge is a change to this table, made and reviewed in the same pull
 // request. Imports from outside the module are not checked here.
 var imports = map[string][]string{
-	"cmd/fridolin":       {"examples", "internal/activity", "internal/chat", "internal/claudecli", "internal/config", "internal/fsx", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/manifest", "internal/media", "internal/otp", "internal/platform", "internal/prompt", "internal/registry", "internal/route", "internal/sandbox", "internal/store", "internal/textx", "internal/trigger", "internal/version", "site", "web"},
+	"cmd/fridolin":       {"examples", "internal/activity", "internal/chat", "internal/claudecli", "internal/config", "internal/fsx", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/manifest", "internal/media", "internal/otp", "internal/platform", "internal/prompt", "internal/registry", "internal/route", "internal/sandbox", "internal/store", "internal/testutil", "internal/textx", "internal/trigger", "internal/version", "site", "web"},
 	"examples":           nil,
 	"internal/activity":  {"internal/history", "internal/textx"},
 	"internal/archtest":  nil,
@@ -45,6 +45,7 @@ var imports = map[string][]string{
 	"internal/prompt":    {"internal/chat", "internal/history"},
 	"internal/sandbox":   {"internal/fsx", "internal/textx"},
 	"internal/store":     {"internal/fsx", "internal/logx"},
+	"internal/testutil":  nil,
 	"internal/textx":     nil,
 	"internal/trigger":   nil,
 	"internal/version":   nil,
@@ -58,7 +59,8 @@ var imports = map[string][]string{
 var ambientAllowed = map[string]bool{
 	"internal/platform": true,
 	// Temporary R5 exception: HomeDir retains the existing resolution contract; R6 injects paths.
-	"internal/config": true,
+	"internal/config":   true,
+	"internal/testutil": true,
 }
 
 // ambient are the calls that read process-wide state. Code below internal/
@@ -179,6 +181,8 @@ func TestImportRules(t *testing.T) {
 				switch {
 				case rel == dir:
 					// An external test of the package itself.
+				case rel == "internal/testutil" && slices.Contains(pkg.Imports, imp):
+					report("%s imports testutil from production code; only tests may import it", dir)
 				case strings.HasPrefix(rel, "cmd/"):
 					report("%s imports %s: nothing imports a command", dir, imp)
 				case !slices.Contains(allowed, rel):
@@ -314,6 +318,22 @@ func TestPlatformHasNoMutableGlobals(t *testing.T) {
 			if gen, ok := decl.(*ast.GenDecl); ok && gen.Tok == token.VAR {
 				t.Errorf("%s:%d declares mutable package state; keep it on the owning value", filepath.Base(file), fset.Position(gen.Pos()).Line)
 			}
+		}
+	}
+}
+
+// TestTestutilUsesOnlyStandardLibrary keeps the shared fake executable usable
+// from the internal tests of every package without hidden dependency cycles.
+func TestTestutilUsesOnlyStandardLibrary(t *testing.T) {
+	root := moduleRoot(t)
+	p, err := build.Default.ImportDir(filepath.Join(root, "internal", "testutil"), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, imp := range p.Imports {
+		dep, err := build.Default.Import(imp, "", build.FindOnly)
+		if err != nil || !dep.Goroot {
+			t.Errorf("testutil imports non-standard-library package %s (%v)", imp, err)
 		}
 	}
 }
