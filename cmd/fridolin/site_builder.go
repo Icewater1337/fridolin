@@ -23,7 +23,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,7 +32,6 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -742,123 +740,4 @@ func (m *SiteManager) writePreviewsFile() error {
 	m.mu.Unlock()
 	data, _ := json.MarshalIndent(list, "", "  ")
 	return fsx.WriteFileAtomic(m.dir("previews.json"), data, 0o600, false)
-}
-
-// ── the HTTP side of the MCP server ────────────────────────────────────────
-
-// builderHandler serves /builder/ for the MCP servers of builder brains.
-// Each brain's token works only for its own workspace.
-func (b *Bridge) builderHandler() http.Handler {
-	mux := http.NewServeMux()
-	m := b.site
-	call := func(fn func(r *http.Request, brainID string) (any, error)) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			brainID := m.brainForToken(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-			if brainID == "" {
-				httpapi.WriteErr(w, http.StatusUnauthorized, "this brain may not build the site (Fridolin dashboard → Site → Builders)")
-				return
-			}
-			out, err := fn(r, brainID)
-			if err != nil {
-				httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-				return
-			}
-			httpapi.WriteJSON(w, http.StatusOK, out)
-		}
-	}
-	mux.HandleFunc("GET /builder/context", call(func(r *http.Request, id string) (any, error) {
-		return m.BuilderContext(id), nil
-	}))
-	mux.HandleFunc("POST /builder/check", call(func(r *http.Request, id string) (any, error) {
-		return m.BuilderCheck(r.Context(), id)
-	}))
-	mux.HandleFunc("POST /builder/preview", call(func(r *http.Request, id string) (any, error) {
-		return m.BuilderPreview(r.Context(), id)
-	}))
-	mux.HandleFunc("POST /builder/sync", call(func(r *http.Request, id string) (any, error) {
-		out, err := m.BuilderSync(r.Context(), id)
-		return map[string]string{"result": out}, err
-	}))
-	mux.HandleFunc("POST /builder/propose", call(func(r *http.Request, id string) (any, error) {
-		var req struct{ Title, Summary string }
-		if err := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 64*1024)).Decode(&req); err != nil {
-			return nil, err
-		}
-		p, changes, err := m.BuilderPropose(r.Context(), id, req.Title, req.Summary)
-		return map[string]any{"proposal": p, "changes": changes}, err
-	}))
-	return mux
-}
-
-// gitPath is git's full path: sandbox-exec runs a program by path.
-func gitPath() string {
-	if p, err := exec.LookPath("git"); err == nil {
-		return p
-	}
-	return "/usr/bin/git"
-}
-
-// siteBuilderHooks connect the site to this bridge's brains and sandbox.
-func (b *Bridge) siteBuilderHooks() builderHooks {
-	return builderHooks{
-		brainDir: func(id string) string {
-			if br := b.brainMgr.Get(id); br != nil {
-				return br.Dir()
-			}
-			return ""
-		},
-		sandbox: func(brainID, bin string, args []string) (string, []string, []string, error) {
-			sp := b.brainMgr.profiler
-			if sp == nil || !sp.Enabled() {
-				return bin, args, nil, nil
-			}
-			cfg := runtimeConfig(b.cfgs)
-			env, err := prepareBrainState(absPath(cfg.DataDir), cfg.MediaDir, brainID, cfg.InheritClaudeUserConfig)
-			if err != nil {
-				return "", nil, nil, err
-			}
-			sbBin, sbArgs, err := sp.Command(brainID, bin, args)
-			return sbBin, sbArgs, env, err
-		},
-		bridgeURL: func() string { return "http://" + b.cfgs.Boot().HTTPListen },
-		executable: func() (string, error) {
-			exe, err := os.Executable()
-			if err != nil {
-				return "", err
-			}
-			return filepath.EvalSymlinks(exe)
-		},
-		siteLimits: func() sandbox.SiteLimits {
-			var l sandbox.SiteLimits
-			if sp := b.brainMgr.profiler; sp != nil {
-				l.Deny, l.NoWrite = sp.sitePaths()
-			}
-			if cfg := runtimeConfig(b.cfgs); cfg.HTTPEnabled() {
-				if _, port, err := net.SplitHostPort(cfg.HTTPListen); err == nil {
-					l.BridgePort = port
-				}
-			}
-			return l
-		},
-		mediaDir: func() string { return b.cfgs.Boot().MediaDir },
-		search:   b.runBrainSearch,
-		device:   b.plaud.DeviceRequest,
-		// As /ingest: the brain's reply chat gets the answer, and the brain
-		// must take the files now (its queue is not full).
-		ingest: func(brainID, sender, text string, files []string) error {
-			cfg := runtimeConfig(b.cfgs)
-			if !cfg.Ingest.Enabled {
-				return errors.New("ingest is turned off (ingest.enabled)")
-			}
-			br := b.brainMgr.Get(brainID)
-			if br == nil {
-				return fmt.Errorf("no brain %q", brainID)
-			}
-			jid := b.replyChatFor(br, cfg)
-			if jid == "" {
-				return fmt.Errorf("brain %s has no chat to reply in; set its reply chat", brainID)
-			}
-			return b.submitHandOff(br, jid, sender, text, files, nil)
-		},
-	}
 }

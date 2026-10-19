@@ -15,10 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/plaud"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
-	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 // What the site hands to the bridge (docs/SITE.md, "Handing files to a
@@ -397,46 +395,4 @@ func (m *SiteManager) runSpoolSearch(ctx context.Context, root *os.Root, entry s
 		return errors.New("stopped")
 	}
 	return err
-}
-
-// runBrainSearch is the bridge's search hook: a read-only Claude agent in
-// the brain's folder, under the brain's sandbox, with the brain's login.
-func (b *Bridge) runBrainSearch(ctx context.Context, brainID, prompt string, out io.Writer) error {
-	br := b.brainMgr.Get(brainID)
-	if br == nil {
-		return fmt.Errorf("no brain %q", brainID)
-	}
-	cfg := runtimeConfig(b.cfgs)
-	// Only the brain folder's own setup, as for a brain's runs, and tools
-	// that only read.
-	args := claudecli.ArgList(true, excludeInstructionsAbove(br.Dir()), "--tools", "Read,Grep,Glob")
-	bin := cfg.ClaudePath
-	env := childEnv(claudeChild, cfg.ChildEnvPassthrough)
-	if sp := b.brainMgr.profiler; sp != nil && sp.Enabled() {
-		// The brain's own Claude Code config dir, TMPDIR and caches, as for
-		// its runs (see invoke): it may write nowhere else.
-		state, err := prepareBrainState(absPath(cfg.DataDir), cfg.MediaDir, brainID, cfg.InheritClaudeUserConfig)
-		if err != nil {
-			return fmt.Errorf("the brain's sandbox: %w", err)
-		}
-		sbBin, sbArgs, err := sp.Command(brainID, bin, args)
-		if err != nil {
-			return fmt.Errorf("the brain's sandbox: %w", err)
-		}
-		bin, args = sbBin, sbArgs
-		env = append(append(env, state...), "DISABLE_AUTOUPDATER=1")
-	}
-	proc, err := claudecli.Start(ctx, claudecli.Spawn{WaitDelay: runWaitDelay, Binary: bin, Args: args, Dir: br.Dir(), Env: env, Prompt: prompt, Stdout: out})
-	if err == nil {
-		err = proc.Wait()
-	}
-	switch {
-	case err == nil:
-		return nil
-	case ctx.Err() != nil:
-		return ctx.Err()
-	case proc == nil:
-		return fmt.Errorf("claude: %w", err)
-	}
-	return fmt.Errorf("claude: %w: %s", err, textx.Tail(proc.StderrTail(), 400))
 }
