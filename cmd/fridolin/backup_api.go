@@ -216,13 +216,6 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.Version == "" {
-		req.Version = "current"
-	}
-	if !backupNameOK(req.Brain) || !restoreVersionRe.MatchString(req.Version) {
-		httpapi.WriteErr(w, http.StatusBadRequest, "invalid brain or version")
-		return
-	}
 	target, err := b.backup.Restore(BackupRestoreRequest{Brain: req.Brain, Version: req.Version, Target: req.Target}, b.restoreTarget)
 	if err != nil {
 		status := http.StatusInternalServerError
@@ -235,6 +228,9 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusConflict
 		case apperr.Unavailable:
 			status = http.StatusServiceUnavailable
+		}
+		if errors.Is(err, errBackupRestoreRequest) {
+			status = http.StatusBadRequest
 		}
 		httpapi.WriteErr(w, status, err.Error())
 		return

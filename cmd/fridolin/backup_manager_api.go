@@ -197,8 +197,19 @@ type BackupRestoreRequest struct {
 	Target  string
 }
 
-// Restore starts a background restore after the caller checks destination overlap.
+// errBackupRestoreRequest distinguishes malformed remote path components from a
+// rejected local destination. HTTP presents the former as 400 and the latter as 422.
+var errBackupRestoreRequest = errors.New("invalid brain or version")
+
+// Restore validates the remote path components and starts a background restore
+// after the supplied checker resolves and validates destination overlap.
 func (m *BackupManager) Restore(req BackupRestoreRequest, overlapCheck func(string) (string, error)) (string, error) {
+	if req.Version == "" {
+		req.Version = "current"
+	}
+	if !backupNameOK(req.Brain) || !restoreVersionRe.MatchString(req.Version) {
+		return "", errBackupRestoreRequest
+	}
 	if !m.connected() {
 		return "", apperr.New(apperr.Precondition, "Google Drive is not connected")
 	}
