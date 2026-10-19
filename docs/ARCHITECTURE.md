@@ -200,6 +200,8 @@ behaviour unless its title says so. The steps so far:
   authentication, recipient and pipeline capabilities. `StatusAPI` serializes
   a command-projected status snapshot. `ChatsAPI` owns allow, revoke, member
   and ignored-chat responses through live registry, store and config callbacks.
+  `FilesystemAPI` preserves home-confined browsing and picker responses; the
+  command supplies picker execution, its shared lock and home/boot paths.
   Remaining resource handlers and the guarded router are still in the command.
 
 Everything else is still `package main` in `cmd/fridolin`, one file per
