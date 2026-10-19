@@ -1,4 +1,4 @@
-package main
+package registry
 
 import (
 	"errors"
@@ -18,38 +18,37 @@ import (
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
-	"github.com/Icewater1337/fridolin/internal/registry"
 	"github.com/Icewater1337/fridolin/internal/route"
 )
 
-// brainRegistry owns brain configuration workflows and their serialization.
+// Registry owns brain configuration workflows and their serialization.
 // Home and CheckDir are evaluated at the original operation boundaries, so
 // moving a workflow does not freeze the command's security policy.
-type brainRegistry struct {
+type Registry struct {
 	store   *config.Store
-	options brainRegistryOptions
+	options Options
 	addMu   sync.Mutex
 }
 
-type brainRegistryOptions struct {
+type Options struct {
 	Home        func() string
 	CheckDir    func(dir, configured string, cfg *config.Config, home string) error
-	Templates   registry.Templates
+	Templates   Templates
 	HistoryFile string
 }
 
-func newBrainRegistry(store *config.Store, options brainRegistryOptions) *brainRegistry {
-	return &brainRegistry{store: store, options: options}
+func New(store *config.Store, options Options) *Registry {
+	return &Registry{store: store, options: options}
 }
 
-func (g *brainRegistry) resolve(cfg *config.Config) ([]manifest.Spec, []registry.Issue) {
-	return registry.Resolve(cfg.BrainDirs, func(dir, configured string) error {
+func (g *Registry) resolve(cfg *config.Config) ([]manifest.Spec, []Issue) {
+	return Resolve(cfg.BrainDirs, func(dir, configured string) error {
 		return g.options.CheckDir(dir, configured, cfg, g.options.Home())
 	})
 }
 
-func (g *brainRegistry) checkPath(path string, cfg *config.Config, others []string) (string, []string, []string) {
-	return registry.CheckPath(path, registry.PathContext{Home: g.options.Home(), Others: others,
+func (g *Registry) checkPath(path string, cfg *config.Config, others []string) (string, []string, []string) {
+	return CheckPath(path, PathContext{Home: g.options.Home(), Others: others,
 		CheckDir: func(dir, configured, home string) error {
 			return g.options.CheckDir(dir, configured, cfg, home)
 		},
@@ -61,7 +60,7 @@ func (g *brainRegistry) checkPath(path string, cfg *config.Config, others []stri
 // brain.json in the brain's folder, so that the two change together and
 // the change is not reported as drift. It is the one way the bridge
 // changes a manifest; an error from mutate leaves both as they were.
-func (g *brainRegistry) updateManifestIn(c *config.Config, tx *config.Tx, id string, mutate func(m *manifest.Manifest) error) error {
+func (g *Registry) updateManifestIn(c *config.Config, tx *config.Tx, id string, mutate func(m *manifest.Manifest) error) error {
 	for i := range c.BrainDirs {
 		ref := &c.BrainDirs[i]
 		if ref.Approved == nil || ref.Approved.ID != id {
@@ -84,7 +83,7 @@ func (g *brainRegistry) updateManifestIn(c *config.Config, tx *config.Tx, id str
 	return apperr.New(apperr.NotFound, fmt.Sprintf("no brain %q", id))
 }
 
-func (g *brainRegistry) UpdateManifest(id string, mutate func(m *manifest.Manifest) error) error {
+func (g *Registry) UpdateManifest(id string, mutate func(m *manifest.Manifest) error) error {
 	_, err := g.store.UpdateTx("", func(c *config.Config, tx *config.Tx) error { return g.updateManifestIn(c, tx, id, mutate) })
 	return err
 }
@@ -93,7 +92,7 @@ func (g *brainRegistry) UpdateManifest(id string, mutate func(m *manifest.Manife
 // in their manifests (brain.json, staged in tx, and the approved copy). The
 // chosen brain goes first, so that one that is not there is refused before
 // the others are looked at.
-func (g *brainRegistry) assignGroup(c *config.Config, tx *config.Tx, jid, brainID string) error {
+func (g *Registry) assignGroup(c *config.Config, tx *config.Tx, jid, brainID string) error {
 	if err := g.updateManifestIn(c, tx, brainID, func(m *manifest.Manifest) error {
 		if !slices.Contains(m.Routing.Groups, jid) {
 			m.Routing.Groups = append(m.Routing.Groups, jid)
@@ -116,7 +115,7 @@ func (g *brainRegistry) assignGroup(c *config.Config, tx *config.Tx, jid, brainI
 }
 
 // updateBrainBackup changes one brain's backup settings in its manifest.
-func (g *brainRegistry) updateBrainBackup(c *config.Config, tx *config.Tx, id string, enabled *bool, exclude []string) error {
+func (g *Registry) updateBrainBackup(c *config.Config, tx *config.Tx, id string, enabled *bool, exclude []string) error {
 	return g.updateManifestIn(c, tx, id, func(m *manifest.Manifest) error {
 		if enabled != nil {
 			m.Backup.Enabled = *enabled
@@ -134,14 +133,14 @@ func (g *brainRegistry) updateBrainBackup(c *config.Config, tx *config.Tx, id st
 	})
 }
 
-func (g *brainRegistry) UpdateBackup(id string, enabled *bool, exclude []string) error {
+func (g *Registry) UpdateBackup(id string, enabled *bool, exclude []string) error {
 	_, err := g.store.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
 		return g.updateBrainBackup(c, tx, id, enabled, exclude)
 	})
 	return err
 }
 
-func (g *brainRegistry) AllowChat(dm bool, entry, brainID string) error {
+func (g *Registry) AllowChat(dm bool, entry, brainID string) error {
 	_, err := g.store.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
 		if dm {
 			if !slices.Contains(c.AllowedNumbers, entry) {
@@ -160,7 +159,7 @@ func (g *brainRegistry) AllowChat(dm bool, entry, brainID string) error {
 	return err
 }
 
-func (g *brainRegistry) Update(id string, input manifest.Manifest) error {
+func (g *Registry) Update(id string, input manifest.Manifest) error {
 	m := input.Normalized()
 	if m.ID != id {
 		return apperr.New(apperr.Invalid, "a brain's id cannot change — remove it and add the folder again under a new id")
@@ -179,7 +178,7 @@ func (g *brainRegistry) Update(id string, input manifest.Manifest) error {
 	return err
 }
 
-func (g *brainRegistry) Approve(id string, reviewed manifest.Manifest) error {
+func (g *Registry) Approve(id string, reviewed manifest.Manifest) error {
 	_, err := g.store.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
 		for i := range c.BrainDirs {
 			ref := &c.BrainDirs[i]
@@ -191,7 +190,7 @@ func (g *brainRegistry) Approve(id string, reviewed manifest.Manifest) error {
 				return err
 			}
 			if !disk.Equal(reviewed) {
-				return errReviewedManifestChanged
+				return ErrReviewedManifestChanged
 			}
 			if disk.ID != id {
 				return fmt.Errorf("the brain.json on disk changed the id to %q — ids cannot change", disk.ID)
@@ -208,7 +207,7 @@ func (g *brainRegistry) Approve(id string, reviewed manifest.Manifest) error {
 	return err
 }
 
-func (g *brainRegistry) Remove(id string) error {
+func (g *Registry) Remove(id string) error {
 	_, err := g.store.Update("", func(c *config.Config) error {
 		for i, ref := range c.BrainDirs {
 			if ref.Approved != nil && ref.Approved.ID == id {
@@ -221,7 +220,7 @@ func (g *brainRegistry) Remove(id string) error {
 	return err
 }
 
-func (g *brainRegistry) RemoveDir(path string) error {
+func (g *Registry) RemoveDir(path string) error {
 	want := fsx.Canonical(fsx.ExpandHome(path, g.options.Home()))
 	_, err := g.store.Update("", func(c *config.Config) error {
 		for i, ref := range c.BrainDirs {
@@ -242,7 +241,7 @@ func (g *brainRegistry) RemoveDir(path string) error {
 // hand edit broke say, is not the edit's doing, and does not keep the
 // other brains from being edited or approved. Issues are told apart by
 // brain, kind and detail.
-func (g *brainRegistry) CheckSet(before, after *config.Config) error {
+func (g *Registry) CheckSet(before, after *config.Config) error {
 	_, was := g.resolve(before)
 	seen := map[string]bool{}
 	for _, is := range was {
@@ -258,28 +257,28 @@ func (g *brainRegistry) CheckSet(before, after *config.Config) error {
 }
 
 // issueKey tells brain issues apart for checkSet.
-func issueKey(is registry.Issue) string {
+func issueKey(is Issue) string {
 	return is.ID + "\x00" + string(is.Kind) + "\x00" + is.Detail
 }
 
-// errReviewedManifestChanged refuses an approval of a brain.json that is no
+// ErrReviewedManifestChanged refuses an approval of a brain.json that is no
 // longer the one on disk.
-var errReviewedManifestChanged = apperr.New(apperr.Conflict, "brain.json changed again since you reviewed it — look at the new changes and approve those")
+var ErrReviewedManifestChanged = apperr.New(apperr.Conflict, "brain.json changed again since you reviewed it — look at the new changes and approve those")
 
-type brainAddInput struct {
+type AddInput struct {
 	Path        string
 	Manifest    manifest.Manifest
 	BackupGiven bool
 	CreateDir   bool
 	UseExisting bool
 }
-type brainAddResult struct {
+type AddResult struct {
 	ID      string   `json:"id"`
 	Path    string   `json:"path"`
 	Created []string `json:"created"`
 }
 
-func (g *brainRegistry) Add(req brainAddInput) (brainAddResult, error) {
+func (g *Registry) Add(req AddInput) (AddResult, error) {
 	m, backupGiven := req.Manifest, req.BackupGiven
 	// One add at a time, from the checks to the registration, so that an
 	// add's checks see every brain the adds before it registered. Two adds
@@ -291,28 +290,28 @@ func (g *brainRegistry) Add(req brainAddInput) (brainAddResult, error) {
 	cfg := g.store.Get()
 	abs, problems, _ := g.checkPath(req.Path, cfg, g.OtherDirs(cfg))
 	if len(problems) > 0 {
-		return brainAddResult{}, apperr.New(apperr.Invalid, strings.Join(problems, "; "))
+		return AddResult{}, apperr.New(apperr.Invalid, strings.Join(problems, "; "))
 	}
 	abs, ok := g.inHome(abs)
 	if !ok {
-		return brainAddResult{}, apperr.New(apperr.Invalid, "brain folders must be inside your home folder")
+		return AddResult{}, apperr.New(apperr.Invalid, "brain folders must be inside your home folder")
 	}
 	if st, err := os.Stat(abs); err != nil {
 		if !req.CreateDir {
-			return brainAddResult{}, apperr.New(apperr.Invalid, "folder does not exist")
+			return AddResult{}, apperr.New(apperr.Invalid, "folder does not exist")
 		}
 	} else if !st.IsDir() {
-		return brainAddResult{}, apperr.New(apperr.Invalid, "not a folder")
+		return AddResult{}, apperr.New(apperr.Invalid, "not a folder")
 	}
 
 	if req.UseExisting {
 		disk, err := manifest.Read(abs)
 		if err != nil {
-			return brainAddResult{}, apperr.New(apperr.Invalid, "no readable brain.json in that folder: "+err.Error())
+			return AddResult{}, apperr.New(apperr.Invalid, "no readable brain.json in that folder: "+err.Error())
 		}
 		m = *disk
 	} else if _, err := manifest.Read(abs); err == nil {
-		return brainAddResult{}, apperr.New(apperr.Conflict, "this folder already has a brain.json — review it and add it with “use existing”")
+		return AddResult{}, apperr.New(apperr.Conflict, "this folder already has a brain.json — review it and add it with “use existing”")
 	}
 	switch {
 	case req.UseExisting:
@@ -325,22 +324,22 @@ func (g *brainRegistry) Add(req brainAddInput) (brainAddResult, error) {
 	}
 	m = m.Normalized()
 	if err := m.Validate(); err != nil {
-		return brainAddResult{}, apperr.Wrap(apperr.Invalid, err)
+		return AddResult{}, apperr.Wrap(apperr.Invalid, err)
 	}
 
 	// Check the new brain against the others before touching the disk.
 	if err := g.checkNewBrain(cfg, m, abs); err != nil {
-		return brainAddResult{}, apperr.Wrap(apperr.Invalid, err)
+		return AddResult{}, apperr.Wrap(apperr.Invalid, err)
 	}
 
 	// Everything but brain.json, which goes with the update that registers
 	// the brain: written only once the checks there pass, and taken away
 	// again if config.json then cannot be written.
-	scaffold, err := registry.ScaffoldFolder(abs, &m, g.options.Templates)
+	scaffold, err := ScaffoldFolder(abs, &m, g.options.Templates)
 	if err != nil {
 		defer scaffold.Close()
 		scaffold.Rollback()
-		return brainAddResult{}, apperr.Wrap(apperr.Unknown, err)
+		return AddResult{}, apperr.Wrap(apperr.Unknown, err)
 	}
 	defer scaffold.Close()
 	created := scaffold.Created()
@@ -370,20 +369,20 @@ func (g *brainRegistry) Add(req brainAddInput) (brainAddResult, error) {
 		return nil
 	}); err != nil {
 		scaffold.Rollback()
-		return brainAddResult{}, apperr.Wrap(apperr.Invalid, err)
+		return AddResult{}, apperr.Wrap(apperr.Invalid, err)
 	}
 	if writesManifest {
 		created = append(created, manifest.File)
 		sort.Strings(created)
 	}
 	log.Printf("brain %s: added (%s), created %v", m.ID, abs, created)
-	return brainAddResult{ID: m.ID, Path: abs, Created: registryNonNil(created)}, nil
+	return AddResult{ID: m.ID, Path: abs, Created: nonNil(created)}, nil
 }
 
 // checkNewBrain checks brain m, to go in folder abs, against the brains cfg
 // (an effective configuration) has: the folder must be none of theirs, in
 // or around one, and m must not clash with them.
-func (g *brainRegistry) checkNewBrain(cfg *config.Config, m manifest.Manifest, abs string) error {
+func (g *Registry) checkNewBrain(cfg *config.Config, m manifest.Manifest, abs string) error {
 	if _, problems, _ := g.checkPath(abs, cfg, g.OtherDirs(cfg)); len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
 	}
@@ -394,7 +393,7 @@ func (g *brainRegistry) checkNewBrain(cfg *config.Config, m manifest.Manifest, a
 // otherDirs lists every folder in c's brain_dirs, ~ expanded, approved or
 // not: a new brain, or a restore, must not land in, around or on any of
 // them, an entry still waiting for approval included.
-func (g *brainRegistry) OtherDirs(c *config.Config) []string {
+func (g *Registry) OtherDirs(c *config.Config) []string {
 	var dirs []string
 	for _, ref := range c.BrainDirs {
 		dirs = append(dirs, ref.Dir(g.options.Home()))
@@ -412,10 +411,10 @@ func prettyName(s string) string {
 	return string(unicode.ToUpper(r)) + s[size:]
 }
 
-func (g *brainRegistry) Inspect(path string) (map[string]any, error) {
+func (g *Registry) Inspect(path string) (map[string]any, error) {
 	cfg := g.store.Get()
 	abs, problems, warnings := g.checkPath(path, cfg, g.OtherDirs(cfg))
-	resp := map[string]any{"abs_path": abs, "problems": registryNonNil(problems), "warnings": registryNonNil(warnings)}
+	resp := map[string]any{"abs_path": abs, "problems": nonNil(problems), "warnings": nonNil(warnings)}
 	if len(problems) > 0 {
 		// A folder that cannot be a brain is not looked into: outside the
 		// home folder that would be a way to probe any path on disk.
@@ -432,9 +431,9 @@ func (g *brainRegistry) Inspect(path string) (map[string]any, error) {
 		defer root.Close()
 		entries, _ := os.ReadDir(abs)
 		resp["entries"] = len(entries)
-		resp["is_git"] = registryFileExistsInRoot(root, filepath.Join(abs, ".git"))
-		resp["has_prompt"] = registryFileExistsInRoot(root, filepath.Join(abs, manifest.DefaultPromptFile))
-		resp["has_history"] = registryFileExistsInRoot(root, filepath.Join(abs, g.options.HistoryFile))
+		resp["is_git"] = fileExistsInRoot(root, filepath.Join(abs, ".git"))
+		resp["has_prompt"] = fileExistsInRoot(root, filepath.Join(abs, manifest.DefaultPromptFile))
+		resp["has_history"] = fileExistsInRoot(root, filepath.Join(abs, g.options.HistoryFile))
 		if m, err := manifest.Read(abs); err == nil {
 			resp["manifest"] = m
 		}
@@ -453,7 +452,7 @@ func (g *brainRegistry) Inspect(path string) (map[string]any, error) {
 	return resp, nil
 }
 
-func registryFileExistsInRoot(root *os.Root, p string) bool {
+func fileExistsInRoot(root *os.Root, p string) bool {
 	rel, err := filepath.Rel(root.Name(), fsx.Canonical(p))
 	if err != nil || (rel != "." && !filepath.IsLocal(rel)) {
 		return false
@@ -468,7 +467,7 @@ func registryFileExistsInRoot(root *os.Root, p string) bool {
 // the one the request named. What a handler then makes, lists or removes is
 // built this way, inside the home folder by construction. ok is false for
 // the home folder itself and for anything outside it.
-func (g *brainRegistry) inHome(p string) (string, bool) {
+func (g *Registry) inHome(p string) (string, bool) {
 	home := fsx.Canonical(g.options.Home())
 	rel, err := filepath.Rel(home, p)
 	if home == "" || err != nil || rel == "." || !filepath.IsLocal(rel) {
@@ -477,18 +476,18 @@ func (g *brainRegistry) inHome(p string) (string, bool) {
 	return filepath.Join(home, rel), true
 }
 
-type brainRegistryView struct {
+type View struct {
 	ID       string             `json:"id"`
 	Name     string             `json:"name"`
 	Path     string             `json:"path"`
 	Status   string             `json:"status"`
 	Manifest *manifest.Manifest `json:"manifest"`
 	Disk     *manifest.Manifest `json:"disk_manifest,omitempty"`
-	Issues   []registry.Issue   `json:"issues"`
+	Issues   []Issue            `json:"issues"`
 }
 
-func registryViews(cfg *config.Config, issues []registry.Issue) []brainRegistryView {
-	byEntry := map[int][]registry.Issue{}
+func Views(cfg *config.Config, issues []Issue) []View {
+	byEntry := map[int][]Issue{}
 	for _, is := range issues {
 		// One found at load is about the entry it had then; skip it if the
 		// entries changed since.
@@ -497,9 +496,9 @@ func registryViews(cfg *config.Config, issues []registry.Issue) []brainRegistryV
 		}
 		byEntry[is.Entry] = append(byEntry[is.Entry], is)
 	}
-	var out []brainRegistryView
+	var out []View
 	for _, ref := range cfg.BrainDirs {
-		v := brainRegistryView{Path: ref.Path, Status: "ok", Manifest: ref.Approved}
+		v := View{Path: ref.Path, Status: "ok", Manifest: ref.Approved}
 		if ref.Approved != nil {
 			v.ID, v.Name = ref.Approved.ID, ref.Approved.Name
 		}
@@ -509,18 +508,18 @@ func registryViews(cfg *config.Config, issues []registry.Issue) []brainRegistryV
 		out = append(out, v)
 	}
 	for i := range out {
-		out[i].Issues = registryNonNil(byEntry[i])
+		out[i].Issues = nonNil(byEntry[i])
 		for _, is := range out[i].Issues {
 			if out[i].Status == "ok" || is.Kind != "drift" {
 				out[i].Status = string(is.Kind)
 			}
 		}
 	}
-	return registryNonNil(out)
+	return nonNil(out)
 }
 
-// registryNonNil retains the dashboard's empty-array representation.
-func registryNonNil[T any](s []T) []T {
+// nonNil retains the dashboard's empty-array representation.
+func nonNil[T any](s []T) []T {
 	if s == nil {
 		return []T{}
 	}

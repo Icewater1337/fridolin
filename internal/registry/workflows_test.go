@@ -1,4 +1,4 @@
-package main
+package registry
 
 import (
 	"encoding/json"
@@ -12,18 +12,17 @@ import (
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
-	"github.com/Icewater1337/fridolin/internal/registry"
 )
 
 // Workflow tests supply every environmental input and can run concurrently.
-func testBrainRegistry(t *testing.T) (*brainRegistry, string) {
+func testBrainRegistry(t *testing.T) (*Registry, string) {
 	t.Helper()
 	home := fsx.Canonical(t.TempDir())
-	g := newBrainRegistry(nil, brainRegistryOptions{
+	g := New(nil, Options{
 		Home:        func() string { return home },
 		CheckDir:    func(string, string, *config.Config, string) error { return nil },
 		HistoryFile: "history.md",
-		Templates:   registry.Templates{Prompt: "Test prompt", IdentityMapPath: "identity-map.md"},
+		Templates:   Templates{Prompt: "Test prompt", IdentityMapPath: "identity-map.md"},
 	})
 	cs, err := config.Open(filepath.Join(home, "config.json"), config.Options{
 		Paths: config.Paths{Home: home, DefaultDataDir: filepath.Join(home, "data")},
@@ -39,9 +38,9 @@ func testBrainRegistry(t *testing.T) (*brainRegistry, string) {
 func TestRegistryWorkflowsKeepApprovalAndAllowlistingAtomic(t *testing.T) {
 	t.Parallel()
 	g, home := testBrainRegistry(t)
-	add := func(id string) brainAddResult {
+	add := func(id string) AddResult {
 		t.Helper()
-		result, err := g.Add(brainAddInput{Path: filepath.Join(home, id), CreateDir: true,
+		result, err := g.Add(AddInput{Path: filepath.Join(home, id), CreateDir: true,
 			Manifest: manifest.Manifest{ID: id, Name: id}})
 		if err != nil {
 			t.Fatal(err)
@@ -87,7 +86,7 @@ func TestRegistryWorkflowsKeepApprovalAndAllowlistingAtomic(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(second.Path, manifest.File), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := g.Approve(second.ID, reviewed); !errors.Is(err, errReviewedManifestChanged) {
+	if err := g.Approve(second.ID, reviewed); !errors.Is(err, ErrReviewedManifestChanged) {
 		t.Fatalf("stale approval: %v", err)
 	}
 	if g.store.Snapshot().Version != before.Version {
@@ -140,7 +139,7 @@ func TestRegistryInspectStopsAtRefusedPath(t *testing.T) {
 func TestInHome(t *testing.T) {
 	t.Parallel()
 	home := fsx.Canonical(t.TempDir())
-	g := newBrainRegistry(nil, brainRegistryOptions{Home: func() string { return home }})
+	g := New(nil, Options{Home: func() string { return home }})
 	cases := []struct {
 		name, path, want string
 	}{
@@ -164,7 +163,7 @@ func TestInHome(t *testing.T) {
 		})
 	}
 	t.Run("no home folder", func(t *testing.T) {
-		g := newBrainRegistry(nil, brainRegistryOptions{Home: func() string { return "" }})
+		g := New(nil, Options{Home: func() string { return "" }})
 		if got, ok := g.inHome("/x"); ok {
 			t.Fatalf("inHome with no home folder = %q", got)
 		}
