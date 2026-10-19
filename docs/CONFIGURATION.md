@@ -67,6 +67,9 @@ bridge refuses.
 
 ---
 
+The optional `_comment` field holds a note in the config file and has no effect
+on the bridge.
+
 ## `version`
 
 `config.json` says which version of the file it is: `"version": 2` today.
@@ -1274,7 +1277,9 @@ Google Drive backups; see [BACKUP.md](BACKUP.md).
 
 ### `plaud`
 
-The Plaud recorder integration; see [PLAUD.md](PLAUD.md) for every setting.
+The Plaud recorder integration; see [PLAUD.md](PLAUD.md) for every setting,
+including `interval_seconds`, `polished`, `message`, `phone_dir` and
+`phone_upload`.
 
 ### `dashboard`
 
