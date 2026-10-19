@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
@@ -133,7 +134,7 @@ func TestStopWhileOutputIsHeld(t *testing.T) {
 				t.Errorf("the stop took %v", el)
 			}
 			waitFor(t, 5*time.Second, "the stopped run", func() bool { return d.count() == 1 })
-			if res := d.all()[0].res; !errors.Is(res.Err, errBrainInterrupted) {
+			if res := d.all()[0].res; !errors.Is(res.Err, claudecli.ErrInterrupted) {
 				t.Errorf("result = %+v, want interrupted", res)
 			}
 		})
@@ -215,7 +216,7 @@ func TestStopBeforeTheCLIStartsIsAnInterruption(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, 5*time.Second, "the run", func() bool { return d.count() == 1 })
-	if res := d.all()[0].res; !errors.Is(res.Err, errBrainInterrupted) {
+	if res := d.all()[0].res; !errors.Is(res.Err, claudecli.ErrInterrupted) {
 		t.Errorf("result = %+v, want interrupted", res)
 	}
 	if last := br.Snapshot().Last; last == nil || last.Outcome != outcomeInterrupted || last.Error != "" {
@@ -282,10 +283,10 @@ func TestSiteSearchKeepsOnlyTheEndOfStderr(t *testing.T) {
 // output is still open. Keep both answers and the CLI's own error then.
 func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 	cases := []struct {
-		name     string
-		cliError string
-		timeout  bool
-		empty    bool
+		name      string
+		errorText string
+		timeout   bool
+		empty     bool
 	}{
 		{"stop after answer", "", false, false},
 		{"stop after empty result", "", false, true},
@@ -310,8 +311,8 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 					switch {
 					case tc.empty:
 						output = `{"type":"turn.completed"}`
-					case tc.cliError != "":
-						output = `{"type":"turn.failed","error":{"message":` + strconv.Quote(tc.cliError) + `}}`
+					case tc.errorText != "":
+						output = `{"type":"turn.failed","error":{"message":` + strconv.Quote(tc.errorText) + `}}`
 					default:
 						output = `{"type":"item.completed","item":{"type":"agent_message","text":` + strconv.Quote(answer) + `}}` + "\n" + `{"type":"turn.completed"}`
 					}
@@ -319,8 +320,8 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 					switch {
 					case tc.empty:
 						output = `{"type":"result","result":""}`
-					case tc.cliError != "":
-						output = `{"type":"result","is_error":true,"result":` + strconv.Quote(tc.cliError) + `}`
+					case tc.errorText != "":
+						output = `{"type":"result","is_error":true,"result":` + strconv.Quote(tc.errorText) + `}`
 					default:
 						output = `{"type":"result","result":` + strconv.Quote(answer) + `}`
 					}
@@ -334,7 +335,7 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 				defer cancel()
 				m := dm("answer before stopping")
 				run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m}
-				result := make(chan RunResult, 1)
+				result := make(chan claudecli.Result, 1)
 				go func() { result <- br.invokeGuarded(run, ctx, &settings, m) }()
 				waitFor(t, 5*time.Second, "the recorded result", func() bool {
 					data, _ := os.ReadFile(filepath.Join(br.workDir, streamLogName))
@@ -346,17 +347,17 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 				select {
 				case res := <-result:
 					if tc.empty {
-						if !errors.Is(res.Err, errNoResult) {
+						if !errors.Is(res.Err, claudecli.ErrNoResult) {
 							t.Errorf("result = %+v, want errNoResult", res)
 						}
-					} else if tc.cliError == "" {
+					} else if tc.errorText == "" {
 						if res.Err != nil || res.Text != answer {
 							t.Errorf("result = %+v, want the recorded answer", res)
 						}
 					} else {
-						var cliErr *cliError
-						if !errors.As(res.Err, &cliErr) || cliErr.msg != tc.cliError || cliErr.provider != provider {
-							t.Errorf("result = %+v, want CLI error %q", res, tc.cliError)
+						var cliErr *claudecli.Error
+						if !errors.As(res.Err, &cliErr) || cliErr.Message != tc.errorText || cliErr.Provider != provider {
+							t.Errorf("result = %+v, want CLI error %q", res, tc.errorText)
 						}
 					}
 				case <-time.After(10 * time.Second):
@@ -377,7 +378,7 @@ func TestKillRunsWaitsForProcessCancellation(t *testing.T) {
 	for range 2 {
 		ctx, cancel := context.WithCancel(context.Background())
 		t.Cleanup(cancel)
-		run := &brainRun{cancel: cancel, done: make(chan struct{}), process: &claudeProcess{stopped: make(chan struct{})}}
+		run := &brainRun{cancel: cancel, done: make(chan struct{}), process: &fakeProcessStop{stopped: make(chan struct{})}}
 		runs = append(runs, run)
 		contexts = append(contexts, ctx)
 		mgr.order = append(mgr.order, &Brain{current: run})
@@ -393,7 +394,7 @@ func TestKillRunsWaitsForProcessCancellation(t *testing.T) {
 	go func() { mgr.KillRuns(); close(finished) }()
 	defer func() {
 		for _, run := range runs {
-			run.process.acknowledgeStop()
+			run.process.(*fakeProcessStop).acknowledgeStop()
 		}
 		<-finished
 	}()
@@ -409,13 +410,13 @@ func TestKillRunsWaitsForProcessCancellation(t *testing.T) {
 		t.Fatal("force-exit returned before either supervisor acknowledged the kill")
 	case <-time.After(50 * time.Millisecond):
 	}
-	runs[0].process.acknowledgeStop()
+	runs[0].process.(*fakeProcessStop).acknowledgeStop()
 	select {
 	case <-finished:
 		t.Fatal("force-exit returned before the second supervisor acknowledged the kill")
 	case <-time.After(50 * time.Millisecond):
 	}
-	runs[1].process.acknowledgeStop()
+	runs[1].process.(*fakeProcessStop).acknowledgeStop()
 	select {
 	case <-finished:
 	case <-time.After(time.Second):
@@ -434,9 +435,9 @@ func TestKillRunsPreventsALateProcess(t *testing.T) {
 	// An independent context deliberately tests the startup barrier,
 	// rather than relying on os/exec noticing the cancelled run context.
 	marker := filepath.Join(t.TempDir(), "started")
-	proc, err := run.startProcess(context.Background(), claudeRun{binary: "/bin/sh", args: []string{"-c", `echo started > "$1"`, "sh", marker}})
+	proc, err := run.startProcess(context.Background(), claudecli.Spawn{WaitDelay: runWaitDelay, Binary: "/bin/sh", Args: []string{"-c", `echo started > "$1"`, "sh", marker}})
 	if proc != nil {
-		_ = proc.wait()
+		_ = proc.Wait()
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("late start = %v, want cancellation", err)
@@ -456,11 +457,11 @@ func TestKillRunsAfterCLIExit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &brainRun{cancel: cancel, done: make(chan struct{})}
-	proc, err := run.startProcess(ctx, claudeRun{binary: "/bin/sh", args: []string{"-c", "exit 0"}})
+	proc, err := run.startProcess(ctx, claudecli.Spawn{WaitDelay: runWaitDelay, Binary: "/bin/sh", Args: []string{"-c", "exit 0"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := proc.wait(); err != nil {
+	if err := proc.Wait(); err != nil {
 		t.Fatal(err)
 	}
 	mgr := &BrainManager{order: []*Brain{{current: run}}}
@@ -476,7 +477,7 @@ func TestKillRunsAfterCLIExit(t *testing.T) {
 func TestKillRunsIncludesRetiringBrains(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	proc := &claudeProcess{stopped: make(chan struct{})}
+	proc := &fakeProcessStop{stopped: make(chan struct{})}
 	proc.acknowledgeStop()
 	old := &Brain{current: &brainRun{cancel: cancel, process: proc}}
 	mgr := &BrainManager{retired: map[*Brain]struct{}{old: {}}}
@@ -503,7 +504,7 @@ func TestKillRunsFreezesQueuedAndNewRuns(t *testing.T) {
 			var once sync.Once
 			releaseDelivery := sync.OnceFunc(func() { close(release) })
 			defer releaseDelivery()
-			mgr.SetHooks(BrainHooks{Deliver: func(br *Brain, m Inbound, res RunResult) {
+			mgr.SetHooks(BrainHooks{Deliver: func(br *Brain, m Inbound, res claudecli.Result) {
 				once.Do(func() { close(delivering) })
 				<-release
 				d.add(br, m, res)
@@ -596,7 +597,7 @@ func TestReloadTracksRetirementUntilDeliveryFinishes(t *testing.T) {
 	delivering, release := make(chan struct{}), make(chan struct{})
 	releaseDelivery := sync.OnceFunc(func() { close(release) })
 	defer releaseDelivery()
-	mgr.SetHooks(BrainHooks{Deliver: func(*Brain, Inbound, RunResult) {
+	mgr.SetHooks(BrainHooks{Deliver: func(*Brain, Inbound, claudecli.Result) {
 		close(delivering)
 		<-release
 	}})
@@ -631,3 +632,13 @@ func TestReloadTracksRetirementUntilDeliveryFinishes(t *testing.T) {
 		t.Error("completed retirement remained in the force-stop set")
 	}
 }
+
+// fakeProcessStop lets manager tests delay the supervisor acknowledgement
+// without exposing or mutating the real process owner's internal state.
+type fakeProcessStop struct {
+	stopped chan struct{}
+	once    sync.Once
+}
+
+func (p *fakeProcessStop) Stopped() <-chan struct{} { return p.stopped }
+func (p *fakeProcessStop) acknowledgeStop()         { p.once.Do(func() { close(p.stopped) }) }

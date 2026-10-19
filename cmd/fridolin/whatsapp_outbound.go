@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"go.mau.fi/whatsmeow"

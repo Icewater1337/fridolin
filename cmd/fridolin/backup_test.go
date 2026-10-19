@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/devchat"
 	"io"
 	"maps"
 	"net/url"
@@ -20,6 +19,8 @@ import (
 	"testing/synctest"
 	"time"
 	_ "time/tzdata" // TestNextDue's time zone, on machines without one
+
+	"github.com/Icewater1337/fridolin/internal/devchat"
 
 	"github.com/Icewater1337/fridolin/internal/config"
 

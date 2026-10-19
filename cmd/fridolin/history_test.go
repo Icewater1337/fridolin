@@ -9,6 +9,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/history"
+	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 )
 
 // A run's prompt reads the history back from its end, not the whole file:
@@ -60,7 +61,7 @@ func TestPromptHistoryIsReadFromTheEnd(t *testing.T) {
 			br := bareBrain(t)
 			logged := captureLog(t)
 			c.setup(br)
-			before, since := br.historyBefore(br.logInbound(dm("now")), dmHistoryWindow)
+			before, since := br.historyBefore(br.logInbound(dm("now")), prompttext.DMHistoryWindow)
 			if entryTexts(before) != c.want || len(since) != 0 {
 				t.Errorf("historyBefore = %q, %q; want %q", entryTexts(before), entryTexts(since), c.want)
 			}

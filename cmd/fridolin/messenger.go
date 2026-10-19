@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/chat"

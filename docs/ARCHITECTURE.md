@@ -95,6 +95,16 @@ behaviour unless its title says so. The steps so far:
   ambient environment or home, so its temporary architecture exception is gone.
   Boot path projections and the full field table follow in the next slice.
 
+- **R8, prompt slice**: `prompt` owns prompt rendering, identity-map parsing,
+  and history-window limits; `chat` owns shared phone/identity normalization.
+  The command supplies message content and dashboard-chat context.
+
+- **R8, provider slice**: `claudecli` owns Claude/Codex argument policies,
+  stream parsers, version probing and process supervision. Callers supply
+  resolved paths/environment and runtime callbacks. The runtime keeps the
+  start/force-stop barrier; the process owner acknowledges group cancellation
+  independently of output hooks and delivery.
+
 - **R11, access slice**: `access` owns pure admission, group addressing,
   silence and text decisions. Transports project facts into `chat.Envelope`;
   the command projects one config snapshot. WhatsApp identity/group lookups,

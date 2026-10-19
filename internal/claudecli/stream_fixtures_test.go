@@ -1,4 +1,4 @@
-package main
+package claudecli
 
 import (
 	"errors"
@@ -6,17 +6,18 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 )
 
-// recordingSink is a StreamSink that keeps what parseStream tells it.
+// recordingSink is a StreamSink that keeps what Parse tells it.
 type recordingSink struct {
 	logs      []string
 	questions []string
-	results   []RunResult
+	results   []Result
 	refuse    bool // no question goes out
 }
 
@@ -30,10 +31,10 @@ func (s *recordingSink) Question(text string) bool {
 	return true
 }
 
-func (s *recordingSink) Result(res RunResult) { s.results = append(s.results, res) }
+func (s *recordingSink) Result(res Result) { s.results = append(s.results, res) }
 
 // skippedLog is the activity log's line for a line of size bytes that
-// parseStream skipped.
+// Parse skipped.
 func skippedLog(size int) string {
 	return fmt.Sprintf("⚠️ Skipped a line of %d bytes, longer than the 4 MiB the bridge reads", size)
 }
@@ -44,7 +45,7 @@ const fillLine = "@@FILL@@"
 
 // TestParseStreamFixtures runs the parser over whole streams as Claude Code
 // prints them with --output-format stream-json --verbose, in
-// testdata/stream: the events of a run at testedClaudeVersion, with every
+// testdata/stream: the events of a run at TestedClaudeVersion, with every
 // field the CLI sends, the system init event and the tool results the
 // parser has no use for among them. Their paths, IDs and texts are made
 // up. An answer after a tool call, an API error, a failed login that only
@@ -135,7 +136,7 @@ func TestParseStreamFixtures(t *testing.T) {
 				stream = strings.Replace(stream, fillLine, strings.Repeat("x", c.fill), 1)
 			}
 			var sink recordingSink
-			res := parseStream(strings.NewReader(stream), &sink)
+			res := Parse(strings.NewReader(stream), &sink)
 			if res.Text != c.text || res.Asked != c.asked {
 				t.Errorf("result = %+v, want the text %q, asked: %v", res, c.text, c.asked)
 			}
@@ -166,7 +167,7 @@ func assistantTextLine(size int) string {
 	return head + strings.Repeat("x", size-len(head)-len(end)) + end
 }
 
-// TestParseStreamLongLines: a line longer than maxStreamLine is skipped,
+// TestParseStreamLongLines: a line longer than MaxStreamLine is skipped,
 // wherever it is, and the activity log says so; the rest of the stream
 // counts as ever, so the run keeps its answer. The bridge failed such a
 // run with "token too long" and lost its result. A line just as long as
@@ -179,19 +180,19 @@ func TestParseStreamLongLines(t *testing.T) {
 		stream string
 		logs   []string
 	}{
-		{"as long as one may be", assistantTextLine(maxStreamLine) + "\n" + result + "\n",
+		{"as long as one may be", assistantTextLine(MaxStreamLine) + "\n" + result + "\n",
 			[]string{long, "✅ Result: done"}},
-		{"a byte longer", assistantTextLine(maxStreamLine+1) + "\n" + result + "\n",
-			[]string{skippedLog(maxStreamLine + 1), "✅ Result: done"}},
-		{"the last line, without a newline", result + "\n" + assistantTextLine(maxStreamLine+1),
-			[]string{"✅ Result: done", skippedLog(maxStreamLine + 1)}},
+		{"a byte longer", assistantTextLine(MaxStreamLine+1) + "\n" + result + "\n",
+			[]string{skippedLog(MaxStreamLine + 1), "✅ Result: done"}},
+		{"the last line, without a newline", result + "\n" + assistantTextLine(MaxStreamLine+1),
+			[]string{"✅ Result: done", skippedLog(MaxStreamLine + 1)}},
 		{"one after the other", assistantTextLine(5<<20) + "\n" + assistantTextLine(9<<20) + "\n" + result + "\n",
 			[]string{skippedLog(5 << 20), skippedLog(9 << 20), "✅ Result: done"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var sink recordingSink
-			res := parseStream(strings.NewReader(c.stream), &sink)
+			res := Parse(strings.NewReader(c.stream), &sink)
 			if res.Err != nil || res.Text != "done" {
 				t.Errorf("result = %+v, want the text done", res)
 			}
@@ -225,7 +226,7 @@ func TestParseStreamReadErrors(t *testing.T) {
 		err  error
 		want func(error) bool
 	}{
-		{"pipe closed", closed, func(err error) bool { return errors.Is(err, errBrainInterrupted) }},
+		{"pipe closed", closed, func(err error) bool { return errors.Is(err, ErrInterrupted) }},
 		{"another error", errors.New("boom"), func(err error) bool {
 			return err != nil && err.Error() == "reading claude output: boom"
 		}},
@@ -233,7 +234,7 @@ func TestParseStreamReadErrors(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			r := &failingReader{data: strings.NewReader(`{"type":"assistant","message":{"content":[{"type":"text","text":"Working"}]}}` + "\n"), err: c.err}
-			if res := parseStream(r, &recordingSink{}); !c.want(res.Err) || res.Text != "" {
+			if res := Parse(r, &recordingSink{}); !c.want(res.Err) || res.Text != "" {
 				t.Errorf("result = %+v", res)
 			}
 		})
@@ -260,9 +261,9 @@ func TestParseStreamErrorResults(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var sink recordingSink
-			res := parseStream(strings.NewReader(c.stream+"\n"), &sink)
-			var cliErr *cliError
-			if !errors.As(res.Err, &cliErr) || cliErr.msg != c.want || res.Text != "" {
+			res := Parse(strings.NewReader(c.stream+"\n"), &sink)
+			var cliErr *Error
+			if !errors.As(res.Err, &cliErr) || cliErr.Message != c.want || res.Text != "" {
 				t.Fatalf("result = %+v, want the error %q", res, c.want)
 			}
 			if last := sink.logs[len(sink.logs)-1]; last != "❌ Error: "+c.want {
@@ -292,7 +293,7 @@ func TestParseStreamDrainsAfterAnError(t *testing.T) {
 		written <- err
 	}()
 	var sink recordingSink
-	res := parseStream(r, &sink)
+	res := Parse(r, &sink)
 	select {
 	case err := <-written:
 		if err != nil {
@@ -301,8 +302,8 @@ func TestParseStreamDrainsAfterAnError(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the parser left the rest of the output unread")
 	}
-	var cliErr *cliError
-	if !errors.As(res.Err, &cliErr) || cliErr.msg != "API Error: 429" || res.Text != "" || res.Asked {
+	var cliErr *Error
+	if !errors.As(res.Err, &cliErr) || cliErr.Message != "API Error: 429" || res.Text != "" || res.Asked {
 		t.Errorf("result = %+v, want the error result", res)
 	}
 	if len(sink.questions) > 0 || len(sink.results) != 1 || len(sink.logs) != 2 {
@@ -330,7 +331,7 @@ func TestParseStreamUnknownEvents(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var sink recordingSink
-			res := parseStream(strings.NewReader(strings.Join(append(c.events, result), "\n")+"\n"), &sink)
+			res := Parse(strings.NewReader(strings.Join(append(c.events, result), "\n")+"\n"), &sink)
 			if res.Err != nil || res.Text != "done" {
 				t.Errorf("result = %+v, want the text done", res)
 			}
@@ -349,14 +350,14 @@ func TestParseStreamKeepsTheFirstResult(t *testing.T) {
 		name, stream, text string
 		err                error
 	}{
-		{"empty result", `{"type":"result","result":""}`, "", errNoResult},
+		{"empty result", `{"type":"result","result":""}`, "", ErrNoResult},
 		{"answer then error", `{"type":"result","result":"done"}` + "\n" + `{"type":"result","is_error":true,"result":"late error"}`, "done", nil},
 		{"answer then answer", `{"type":"result","result":"done"}` + "\n" + `{"type":"result","result":"late answer"}`, "done", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var sink recordingSink
-			res := parseStream(strings.NewReader(tc.stream+"\n"), &sink)
+			res := Parse(strings.NewReader(tc.stream+"\n"), &sink)
 			if res.Text != tc.text || !errors.Is(res.Err, tc.err) {
 				t.Errorf("result = %+v, want text %q and error %v", res, tc.text, tc.err)
 			}
@@ -365,4 +366,13 @@ func TestParseStreamKeepsTheFirstResult(t *testing.T) {
 			}
 		})
 	}
+}
+
+func fixture(t testing.TB, name string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }

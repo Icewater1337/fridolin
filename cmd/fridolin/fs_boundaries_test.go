@@ -2,12 +2,13 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/Icewater1337/fridolin/internal/registry"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/Icewater1337/fridolin/internal/registry"
 )
 
 func TestScaffoldRefusesEscapingParentSymlinks(t *testing.T) {

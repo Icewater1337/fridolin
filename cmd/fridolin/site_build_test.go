@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -12,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
 

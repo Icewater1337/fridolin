@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"io"
 	"log"
 	"net"
@@ -23,11 +22,14 @@ import (
 	"testing"
 	"time"
 
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+
 	"github.com/Icewater1337/fridolin/internal/config"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
@@ -441,7 +443,7 @@ func TestStopWaitsForTheDelivery(t *testing.T) {
 	setShutdownGrace(t, 10*time.Second)
 	mgr, _, _ := queueTestManager(t, 300, "")
 	var delivered atomic.Bool
-	mgr.SetHooks(BrainHooks{Deliver: func(br *Brain, m Inbound, res RunResult) {
+	mgr.SetHooks(BrainHooks{Deliver: func(br *Brain, m Inbound, res claudecli.Result) {
 		time.Sleep(500 * time.Millisecond) // the outbox's write, slowed down
 		delivered.Store(true)
 	}})
@@ -461,7 +463,7 @@ func TestStopWaitsForARemovedBrainsDelivery(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	releaseDelivery := sync.OnceFunc(func() { close(release) })
 	defer releaseDelivery()
-	tb.brainMgr.SetHooks(BrainHooks{Deliver: func(*Brain, Inbound, RunResult) {
+	tb.brainMgr.SetHooks(BrainHooks{Deliver: func(*Brain, Inbound, claudecli.Result) {
 		close(entered)
 		<-release
 	}})
@@ -532,7 +534,7 @@ func TestStopWaitsForDeliveryAfterTheKillTimeout(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	releaseDelivery := sync.OnceFunc(func() { close(release) })
 	defer releaseDelivery()
-	mgr.SetHooks(BrainHooks{Deliver: func(*Brain, Inbound, RunResult) {
+	mgr.SetHooks(BrainHooks{Deliver: func(*Brain, Inbound, claudecli.Result) {
 		close(entered)
 		<-release
 	}})

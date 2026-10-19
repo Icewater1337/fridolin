@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 )
 
 // catalogue is every message of messages.go, by the name it has there,

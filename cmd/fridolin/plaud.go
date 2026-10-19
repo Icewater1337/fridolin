@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"io"
 	"io/fs"
 	"log"
@@ -26,8 +25,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/config"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
+	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/platform"
@@ -1247,7 +1248,7 @@ func (p *PlaudManager) runEnded(id string) func(error) {
 			switch {
 			case runErr == nil:
 				fw.Status, fw.Error = plaudRunDone, ""
-			case errors.Is(runErr, errBrainInterrupted) || errors.Is(runErr, errBrainDropped) || errors.Is(runErr, context.Canceled):
+			case errors.Is(runErr, claudecli.ErrInterrupted) || errors.Is(runErr, errBrainDropped) || errors.Is(runErr, context.Canceled):
 				fw.Status, fw.Error = plaudRunStopped, ""
 				log.Printf("plaud %s: stopped before brain %s answered it; it is not sent again unless you send it again from the dashboard", id, brain)
 			default:

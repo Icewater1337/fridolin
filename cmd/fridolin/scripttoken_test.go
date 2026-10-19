@@ -15,6 +15,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
+	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 )
 
 const (
@@ -236,7 +237,7 @@ func TestOutboundSender(t *testing.T) {
 		{"script", "api", "Script without a token (via /send)"},
 	}
 	for _, c := range cases {
-		if got := outboundSender("a", history.Entry{From: c.from, Via: c.via, Type: "out"}); got != c.want {
+		if got := prompttext.OutboundSender("a", history.Entry{From: c.from, Via: c.via, Type: "out"}); got != c.want {
 			t.Errorf("from %q via %q: %q, want %q", c.from, c.via, got, c.want)
 		}
 	}

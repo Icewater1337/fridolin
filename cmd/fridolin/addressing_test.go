@@ -1,10 +1,11 @@
 package main
 
 import (
-	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
 

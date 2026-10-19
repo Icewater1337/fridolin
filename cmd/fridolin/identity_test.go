@@ -12,18 +12,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
-
+	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/manifest"
-
+	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 
 	"google.golang.org/protobuf/proto"
-
-	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 func TestChatJID(t *testing.T) {
@@ -58,24 +56,6 @@ func TestChatJID(t *testing.T) {
 				t.Errorf("chatJID(%q) = %v, %v; want %s", c.in, got, err, c.want)
 			}
 		})
-	}
-}
-
-func TestIdentityKey(t *testing.T) {
-	cases := map[string]string{
-		"15551234567":                    "15551234567",
-		"+1 555 123 4567":                "15551234567",
-		"+1 (555) 123-4567":              "15551234567",
-		"+1\u00a0555\u00a0123\u00a04567": "15551234567", // no-break spaces
-		"15551234567@s.whatsapp.net":     "15551234567",
-		bridgeLID + "@lid":               bridgeLID,
-		"1 555 123 4567@lid":             "15551234567", // keys as its key does
-		"Alex":                           "Alex",
-	}
-	for in, want := range cases {
-		if got := chat.IdentityKey(in); got != want {
-			t.Errorf("identityKey(%q) = %q, want %q", in, got, want)
-		}
 	}
 }
 
@@ -235,7 +215,7 @@ func TestGroupSenderAndQuoteByNumber(t *testing.T) {
 		t.Fatal(err)
 	}
 	idMap := "| WhatsApp Number | Person | Notes |\n| --- | --- | --- |\n| +1 555 123 4567 | Alex | |\n"
-	if err := os.WriteFile(filepath.Join(br.Dir(), identityMapFile), []byte(idMap), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(br.Dir(), prompttext.IdentityMapPath), []byte(idMap), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	own := types.JID{User: otherNumber, Device: 12, Server: types.DefaultUserServer}

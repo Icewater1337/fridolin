@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
-	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"io"
 	"maps"
 	"os"
@@ -15,19 +13,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/manifest"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
+	"github.com/Icewater1337/fridolin/internal/activity"
+	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/manifest"
+	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
-
-	"github.com/Icewater1337/fridolin/internal/activity"
-	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // newMainBridge is a test bridge with one folder brain, "main", that takes
@@ -766,7 +767,7 @@ func TestResetByLIDStartsTheDMAfresh(t *testing.T) {
 	tb, br := newMainBridge(t, "")
 	br.appendHistory(testDMChat, "15551234567", "before the reset", history.In)
 	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: otherNumber + "@lid", Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
-	if before, _ := br.historyBefore(dm("next"), dmHistoryWindow); len(before) != 0 {
+	if before, _ := br.historyBefore(dm("next"), prompttext.DMHistoryWindow); len(before) != 0 {
 		t.Errorf("the DM's next run would read %+v", before)
 	}
 }

@@ -3,15 +3,17 @@ package main
 import (
 	"context"
 	"errors"
-	"github.com/Icewater1337/fridolin/internal/devchat"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/devchat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/history"
 )
 
@@ -53,16 +55,16 @@ func TestRepliesAreRecordedAsSent(t *testing.T) {
 		name   string
 		wa     func(tb *testBridge) Messenger // nil: the dev messenger
 		silent bool
-		res    RunResult
+		res    claudecli.Result
 		want   []string // the brain's outbound history in the chat
 	}{
-		{name: "a reply", res: RunResult{Text: "Here you go."}, want: []string{"Here you go."}},
-		{name: "a poll and text", res: RunResult{Text: "See you there.\n" + poll}, want: []string{pollText + "\n\nSee you there."}},
-		{name: "a poll sent as text", wa: refusePolls, res: RunResult{Text: poll + "\nSee you there."}, want: []string{pollText + "\n\nSee you there."}},
-		{name: "a poll alone", res: RunResult{Text: poll}, want: []string{pollText}},
-		{name: "WhatsApp is down", wa: offline, res: RunResult{Text: "Here you go."}},
-		{name: "a silent run", silent: true, res: RunResult{Text: "Noted."}},
-		{name: "an error", res: RunResult{Err: errors.New("claude error: quota")}},
+		{name: "a reply", res: claudecli.Result{Text: "Here you go."}, want: []string{"Here you go."}},
+		{name: "a poll and text", res: claudecli.Result{Text: "See you there.\n" + poll}, want: []string{pollText + "\n\nSee you there."}},
+		{name: "a poll sent as text", wa: refusePolls, res: claudecli.Result{Text: poll + "\nSee you there."}, want: []string{pollText + "\n\nSee you there."}},
+		{name: "a poll alone", res: claudecli.Result{Text: poll}, want: []string{pollText}},
+		{name: "WhatsApp is down", wa: offline, res: claudecli.Result{Text: "Here you go."}},
+		{name: "a silent run", silent: true, res: claudecli.Result{Text: "Noted."}},
+		{name: "an error", res: claudecli.Result{Err: errors.New("claude error: quota")}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

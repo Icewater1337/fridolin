@@ -16,6 +16,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -231,7 +232,7 @@ func TestCheckDoesNotExecuteBrainPATHPrograms(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ownedBin, "claude"), []byte(planted), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	versionCLI(t, filepath.Join(trustedBin, "claude"), testedClaudeVersion+" trusted")
+	versionCLI(t, filepath.Join(trustedBin, "claude"), claudecli.TestedClaudeVersion+" trusted")
 	t.Setenv("PATH", strings.Join([]string{ownedBin, trustedBin, "/usr/bin", "/bin"}, string(filepath.ListSeparator)))
 	path := writeConfig(t, `{"claude_path":"claude","data_dir":"`+home+`/data"`+brainDirsJSON(t,
 		brainFolder(t, brain, manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
@@ -243,7 +244,7 @@ func TestCheckDoesNotExecuteBrainPATHPrograms(t *testing.T) {
 	if fsx.Exists(marker) {
 		t.Error("check ran the brain's planted Claude outside the sandbox")
 	}
-	if got := lineWith(out.String(), "claude:"); !strings.Contains(got, testedClaudeVersion+" trusted") || strings.Contains(got, "planted") {
+	if got := lineWith(out.String(), "claude:"); !strings.Contains(got, claudecli.TestedClaudeVersion+" trusted") || strings.Contains(got, "planted") {
 		t.Errorf("Claude summary %q, want the trusted CLI", got)
 	}
 }

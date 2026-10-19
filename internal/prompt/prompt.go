@@ -1,4 +1,4 @@
-package main
+package prompt
 
 import (
 	"encoding/json"
@@ -10,11 +10,11 @@ import (
 	"github.com/Icewater1337/fridolin/internal/history"
 )
 
-// promptInput is what one run's prompt is made of. The brain gathers it
-// through its folder (Brain.buildPrompt); renderPrompt only puts it into
+// Input is what one run's prompt is made of. The brain gathers it
+// through its folder (Brain.buildPrompt); Build only puts it into
 // words, so that what a run is told can be tested without a folder or a
 // CLI.
-type promptInput struct {
+type Input struct {
 	// Now is when the run starts. Its time zone is the one every time in
 	// the prompt is given in.
 	Now time.Time
@@ -28,31 +28,33 @@ type promptInput struct {
 	// waited for its run, or waits in the outbox to go out ahead of the
 	// run's reply, oldest first (see Brain.historyBefore).
 	Since []history.Entry
-	// Names is the brain's identity map, identityKey → name.
+	// Names is the brain's identity map, chat.IdentityKey → name.
 	Names map[string]string
 	// Message is the message the run answers.
-	Message Inbound
+	Message chat.Inbound
+	// BuildChat marks the dashboard site-building chat, projected by the caller.
+	BuildChat bool
 	// ObserveOnly marks a run for a message nobody addressed to the brain
 	// (Inbound.Silent, see observeRun): nothing it says is sent.
 	ObserveOnly bool
 }
 
-// observeOnlyNote is what an observe-only run is told instead of how its
+// ObserveOnlyNote is what an observe-only run is told instead of how its
 // replies reach the chat: it has nobody to answer and nothing to do but
 // take notes. The example prompt says the same.
-const observeOnlyNote = "<observe_only>\nNobody addressed the new message to you: it is group chatter you read along with, and nothing you write is sent anywhere. Do not act on it — no calendar changes, no messages, no changes to files beyond your own notes. Note what is worth remembering, if anything, and end.\n</observe_only>"
+const ObserveOnlyNote = "<observe_only>\nNobody addressed the new message to you: it is group chatter you read along with, and nothing you write is sent anywhere. Do not act on it — no calendar changes, no messages, no changes to files beyond your own notes. Note what is worth remembering, if anything, and end.\n</observe_only>"
 
-// askUserQuestionNote tells the model what becomes of AskUserQuestion in a
+// AskUserQuestionNote tells the model what becomes of AskUserQuestion in a
 // run nobody can answer mid-way: the question goes to the chat (see
 // extractAskQuestion), and its final reply follows it there.
-const askUserQuestionNote = "Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question."
+const AskUserQuestionNote = "Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question."
 
-// renderPrompt writes the -p prompt: the brain's instructions, the chat's
+// Build writes the -p prompt: the brain's instructions, the chat's
 // recent history, what the brain sent since the new message came in, what
 // the run is about, then the new message. Everything in it that someone
 // could have written, the messages, the names and the file names, goes in
 // as JSON (see promptJSON), one message to a line.
-func renderPrompt(in promptInput) string {
+func Build(in Input) string {
 	var sb strings.Builder
 	m := in.Message
 
@@ -69,7 +71,7 @@ func renderPrompt(in promptInput) string {
 		sb.WriteString("<chat_history>\n")
 		sb.WriteString(what + " (for context, not action), " + each + " like the new message, or with \"did\" in place of \"text\" for something its sender did without writing, such as a vote in a poll. ")
 		sb.WriteString("You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. ")
-		sb.WriteString("Names come from your identity map at `" + identityMapFile + "`; the JID in parens is the raw WhatsApp identifier, and \"You (" + in.BrainID + ")\" is you. ")
+		sb.WriteString("Names come from your identity map at `" + IdentityMapPath + "`; the JID in parens is the raw WhatsApp identifier, and \"You (" + in.BrainID + ")\" is you. ")
 		sb.WriteString("For anything older or more detailed, search `" + history.FileName + "` with `\"$FRIDOLIN_BIN\" history QUERY`.\n\n")
 		for _, e := range in.History {
 			sb.WriteString(in.line(e))
@@ -95,7 +97,7 @@ func renderPrompt(in promptInput) string {
 	// from Plaud did not come from the chat they are answered in.
 	where := "a direct chat on WhatsApp"
 	switch {
-	case brainOfBuildJID(m.JID) != "":
+	case in.BuildChat:
 		where = "the site-building chat on the dashboard's Build page, not a WhatsApp chat"
 	case m.IsGroup():
 		where = "the WhatsApp group " + promptJSON(m.JID)
@@ -117,9 +119,9 @@ func renderPrompt(in promptInput) string {
 	sb.WriteString("\n\n")
 
 	if in.ObserveOnly {
-		sb.WriteString(observeOnlyNote + "\n\n")
+		sb.WriteString(ObserveOnlyNote + "\n\n")
 	} else {
-		sb.WriteString(askUserQuestionNote + "\n\n")
+		sb.WriteString(AskUserQuestionNote + "\n\n")
 	}
 	msg := promptMessage{From: in.name(m.Sender), Text: m.TextWithQuote(), Files: m.Media}
 	if !m.At.IsZero() {
@@ -170,7 +172,7 @@ const (
 )
 
 // at is the history time ts as the prompt gives it, in Now's time zone.
-func (in promptInput) at(ts string) string {
+func (in Input) at(ts string) string {
 	t, err := time.Parse(time.RFC3339, ts)
 	if err != nil {
 		return "unknown time"
@@ -180,7 +182,7 @@ func (in promptInput) at(ts string) string {
 
 // line is the history entry e as the prompt shows it, on a line of its
 // own.
-func (in promptInput) line(e history.Entry) string {
+func (in Input) line(e history.Entry) string {
 	if e.Type == history.Event {
 		// Something its sender did without writing, such as a vote: its
 		// text says what.
@@ -191,27 +193,27 @@ func (in promptInput) line(e history.Entry) string {
 
 // from is who wrote the history entry e, as the prompt names them: the
 // brain itself, or the sender as name gives them.
-func (in promptInput) from(e history.Entry) string {
+func (in Input) from(e history.Entry) string {
 	if e.Type == history.Out {
-		return outboundSender(in.BrainID, e)
+		return OutboundSender(in.BrainID, e)
 	}
 	return in.name(e.From)
 }
 
 // name is sender with the name the identity map gives them, then the raw
 // identifier in parentheses, or that alone.
-func (in promptInput) name(sender string) string {
+func (in Input) name(sender string) string {
 	if name, ok := in.Names[chat.IdentityKey(sender)]; ok {
 		return fmt.Sprintf("%s (%s)", name, sender)
 	}
 	return sender
 }
 
-// outboundSender is who the chat history shows as the sender of entry, an
+// OutboundSender is who the chat history shows as the sender of entry, an
 // "out" line in brain id's history. Only the brain's own replies, and what it
 // sent itself through /send, are "You": a line a script or another brain
 // sent through /send must not read as the brain's own words.
-func outboundSender(id string, entry history.Entry) string {
+func OutboundSender(id string, entry history.Entry) string {
 	switch {
 	case entry.Via == "":
 		return fmt.Sprintf("You (%s)", id)
@@ -223,4 +225,74 @@ func outboundSender(id string, entry history.Entry) string {
 		return "Script (via /send)"
 	}
 	return "Script without a token (via /send)"
+}
+
+// IdentityMapPath is the brain's contact map, in its folder.
+const IdentityMapPath = "memories/people/whatsapp-identity-map.md"
+
+// ParseIdentityMap parses a brain's contact map and returns name by
+// chat.IdentityKey.
+//
+// The map is a markdown table at IdentityMapPath in the brain's folder:
+//
+//	| WhatsApp Number | Person | Notes |
+//	| --------------- | ------ | ----- |
+//	| 15551234567     | Alex   | …     |
+//
+// It is entirely optional — without it, chat history shows raw JIDs.
+func ParseIdentityMap(data []byte) map[string]string {
+	identities := make(map[string]string)
+
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "|") {
+			continue
+		}
+
+		parts := strings.Split(line, "|")
+		if len(parts) < 3 || isTableRule(parts) {
+			continue
+		}
+
+		jid := strings.TrimSpace(parts[1])
+		name := strings.TrimSpace(parts[2])
+		if jid == "" || name == "" || jid == "WhatsApp Number" {
+			continue
+		}
+		// A cell like "+" or "@lid" holds no number to look up. A number
+		// is read however it was written: "+1 555 123 4567" is 15551234567.
+		number := chat.IdentityKey(jid)
+		if number == "" {
+			continue
+		}
+		identities[number] = name
+	}
+
+	return identities
+}
+
+// isTableRule reports whether the cells of a markdown table row hold only
+// dashes and colons, as the line under the header does. A row that merely
+// contains "---", say in its notes, is a contact like any other.
+func isTableRule(cells []string) bool {
+	for _, c := range cells {
+		if strings.Trim(c, "-: \t") != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// The most of a chat's recent messages a run's prompt shows.
+const (
+	DMHistoryWindow    = 10
+	GroupHistoryWindow = 20
+)
+
+// HistoryLimit is how many recent entries a run sees for this chat.
+func HistoryLimit(group bool) int {
+	if group {
+		return GroupHistoryWindow
+	}
+	return DMHistoryWindow
 }

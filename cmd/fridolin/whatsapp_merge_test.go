@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
 	"testing"

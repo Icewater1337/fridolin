@@ -6,8 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/devchat"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"image/png"
 	"io"
 	"log"
@@ -24,6 +22,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/devchat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+
 	"github.com/Icewater1337/fridolin/internal/config"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -31,6 +32,8 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
+	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
+
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 	"github.com/Icewater1337/fridolin/internal/otp"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -794,7 +797,7 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	if !slices.ContainsFunc(readHistory(t, up), func(e history.Entry) bool { return e.Type == history.Reset && e.Chat == dm }) {
 		t.Errorf("up's history has no reset marker for the chat:\n%+v", readHistory(t, up))
 	}
-	if before, _ := up.historyBefore(Inbound{Inbound: chat.Inbound{JID: dm, Brain: "up", Sender: "upload", Text: "next file", Source: chat.SourceIngest}}, dmHistoryWindow); len(before) != 0 {
+	if before, _ := up.historyBefore(Inbound{Inbound: chat.Inbound{JID: dm, Brain: "up", Sender: "upload", Text: "next file", Source: chat.SourceIngest}}, prompttext.DMHistoryWindow); len(before) != 0 {
 		t.Errorf("up's next run in the chat would read %+v", before)
 	}
 }
@@ -1345,36 +1348,6 @@ func TestAllowListEntries(t *testing.T) {
 			}
 		})
 	}
-}
-
-// FuzzPhoneNumber: whatever is typed into the dashboard's "Add number"
-// box, what reaches allowed_numbers is 6 to 15 digits, all of them from
-// the input, and it goes in unchanged a second time.
-func FuzzPhoneNumber(f *testing.F) {
-	for _, s := range []string{"15551234567", "+1 (555) 123-4567", "15551234567@s.whatsapp.net", "", "+", "1-2", "١٥٥٥١٢٣٤٥٦٧"} {
-		f.Add(s)
-	}
-	f.Fuzz(func(t *testing.T, in string) {
-		n, err := chat.PhoneNumber(in)
-		if err != nil {
-			return
-		}
-		if !chat.IsPhoneNumber(n) {
-			t.Fatalf("phoneNumber(%q) = %q, not 6 to 15 digits", in, n)
-		}
-		digits := strings.Map(func(r rune) rune {
-			if '0' <= r && r <= '9' {
-				return r
-			}
-			return -1
-		}, in)
-		if !strings.Contains(digits, n) {
-			t.Errorf("phoneNumber(%q) = %q, digits that are not in the input", in, n)
-		}
-		if again, err := chat.PhoneNumber(n); err != nil || again != n {
-			t.Errorf("phoneNumber(%q) = %q, %v; want it unchanged", n, again, err)
-		}
-	})
 }
 
 func TestAllowAndRevokeChats(t *testing.T) {

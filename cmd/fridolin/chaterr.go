@@ -3,16 +3,12 @@ package main
 import (
 	"context"
 	"errors"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"strings"
+
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 )
-
-// cliError is the error the CLI itself reported in its result event, as
-// opposed to a failure of the process or of the bridge. Its text is the
-// CLI's own short account, such as "Credit balance is too low".
-type cliError struct{ msg, provider string }
-
-func (e *cliError) Error() string { return agentName(e.provider) + " error: " + e.msg }
 
 // chatErrorText is what a chat is told about a run that failed with err,
 // one of the chatErr messages of messages.go, or "" for a run that was
@@ -20,19 +16,19 @@ func (e *cliError) Error() string { return agentName(e.provider) + " error: " + 
 // allowed number: there alone the CLI's own error text may show, since
 // only the person who asked reads it.
 func chatErrorText(err error, inDM bool) string {
-	if err == nil || errors.Is(err, errBrainInterrupted) || errors.Is(err, context.Canceled) {
+	if err == nil || errors.Is(err, claudecli.ErrInterrupted) || errors.Is(err, context.Canceled) {
 		return ""
 	}
 	if errors.Is(err, errSandboxUnavailable) {
 		return outboundmsg.ChatErrSandbox(errSandboxUnavailable)
 	}
-	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errRunTimedOut) {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, claudecli.ErrTimedOut) {
 		return outboundmsg.ChatErrTimeout
 	}
 	text := strings.ToLower(err.Error())
-	var ce *cliError
+	var ce *claudecli.Error
 	fromCLI := errors.As(err, &ce)
-	codex := (fromCLI && ce.provider == "codex") || strings.HasPrefix(text, "codex ")
+	codex := (fromCLI && ce.Provider == "codex") || strings.HasPrefix(text, "codex ")
 	if codex && containsAny(text, "not logged in", "not signed in", "401", "invalid api key", "authentication", "access token", "refresh token") {
 		return outboundmsg.ChatErrCodexNotSignedIn
 	}
@@ -50,9 +46,9 @@ func chatErrorText(err error, inDM bool) string {
 	}
 	if inDM && fromCLI {
 		if codex {
-			return outboundmsg.ChatErrCodex(ce.msg)
+			return outboundmsg.ChatErrCodex(ce.Message)
 		}
-		return outboundmsg.ChatErrClaude(ce.msg)
+		return outboundmsg.ChatErrClaude(ce.Message)
 	}
 	return outboundmsg.ChatErrGeneric
 }

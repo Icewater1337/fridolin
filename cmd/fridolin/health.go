@@ -3,11 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"log"
 	"slices"
 	"strings"
 	"time"
+
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/config"
 

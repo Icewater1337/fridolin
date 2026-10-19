@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/chat"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -16,12 +15,12 @@ import (
 	"testing"
 	"unicode"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
+
 	"github.com/Icewater1337/fridolin/internal/config"
-
-	"github.com/Icewater1337/fridolin/internal/manifest"
-
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/logx"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
