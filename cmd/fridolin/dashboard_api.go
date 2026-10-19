@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -13,7 +12,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -26,8 +24,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
-	"github.com/Icewater1337/fridolin/internal/manifest"
-	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/registry"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/internal/version"
@@ -67,9 +63,9 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("POST /api/brains/{id}/stop", b.newConnectionAPI().StopRun)
 	mux.HandleFunc("DELETE /api/brain-dirs", b.newBrainsAPI().RemoveDir)
 
-	mux.HandleFunc("GET /api/fs/capabilities", b.apiFSCaps)
-	mux.HandleFunc("POST /api/fs/pick", b.apiFSPick)
-	mux.HandleFunc("GET /api/fs/list", b.apiFSList)
+	mux.HandleFunc("GET /api/fs/capabilities", b.newFilesystemAPI().Caps)
+	mux.HandleFunc("POST /api/fs/pick", b.newFilesystemAPI().Pick)
+	mux.HandleFunc("GET /api/fs/list", b.newFilesystemAPI().List)
 
 	mux.HandleFunc("GET /api/backup/status", b.newBackupAPI().Status)
 	mux.HandleFunc("POST /api/backup/connect", b.newBackupAPI().Connect)
@@ -350,39 +346,6 @@ func (b *Bridge) brainViews() []httpapi.BrainView {
 
 var pickMu sync.Mutex
 
-func (b *Bridge) apiFSCaps(w http.ResponseWriter, r *http.Request) {
-	home := homeDir()
-	picker := ""
-	if p := platform.FolderPicker(home); p != nil {
-		picker = filepath.Base(p[0])
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"picker": picker, "home": home})
-}
-
-func (b *Bridge) apiFSPick(w http.ResponseWriter, r *http.Request) {
-	argv := platform.FolderPicker(homeDir())
-	if argv == nil {
-		httpapi.WriteErr(w, http.StatusNotImplemented, "no native folder picker on this system — browse or type the path instead")
-		return
-	}
-	if !pickMu.TryLock() {
-		httpapi.WriteErr(w, http.StatusConflict, "a folder picker is already open")
-		return
-	}
-	defer pickMu.Unlock()
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Minute)
-	defer cancel()
-	p, err := runPicker(ctx, argv)
-	switch {
-	case errors.Is(err, errPickerCancelled):
-		httpapi.WriteJSON(w, http.StatusOK, map[string]any{"cancelled": true})
-	case err != nil:
-		httpapi.WriteErr(w, http.StatusInternalServerError, fmt.Sprintf("the folder dialog failed (%v) — browse or type the path instead", err))
-	default:
-		httpapi.WriteJSON(w, http.StatusOK, map[string]any{"path": p})
-	}
-}
-
 // errPickerCancelled is a folder dialog closed without a choice.
 var errPickerCancelled = errors.New("no folder was chosen")
 
@@ -434,94 +397,6 @@ func textTail(s string, n int) string {
 		return s
 	}
 	return "…" + s[len(s)-n:]
-}
-
-// apiFSList lists folders inside your home folder, for the in-dashboard
-// folder browser. The bridge's data folder is hidden.
-func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
-	home := fsx.Canonical(b.cfgs.Boot().Home)
-	p := r.URL.Query().Get("path")
-	if p == "" {
-		p = home
-	}
-	p = fsx.Canonical(fsx.ExpandHome(p, home))
-	if !fsx.Within(p, home) {
-		httpapi.WriteErr(w, http.StatusForbidden, "only folders inside your home folder can be browsed")
-		return
-	}
-	showHidden := r.URL.Query().Get("hidden") == "1"
-	root, err := os.OpenRoot(home)
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	defer root.Close()
-	rel, err := filepath.Rel(home, p)
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	dir, err := root.Open(rel)
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	entries, err := dir.ReadDir(-1)
-	dir.Close()
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	data := fsx.Canonical(b.cfgs.Boot().DataDir)
-	type entry struct {
-		Name    string `json:"name"`
-		Path    string `json:"path"`
-		IsBrain bool   `json:"is_brain"`
-		IsGit   bool   `json:"is_git"`
-	}
-	out := []entry{}
-	for _, e := range entries {
-		if !e.IsDir() && e.Type()&fs.ModeSymlink == 0 {
-			continue
-		}
-		if strings.HasPrefix(e.Name(), ".") && !showHidden {
-			continue
-		}
-		full := filepath.Join(p, e.Name())
-		// Checking the parent is not enough: a child may be a symlink out
-		// of home. Resolve it before probing its type or marker files, then
-		// use the home root so a subsequent symlink swap cannot escape.
-		resolved := fsx.Canonical(full)
-		if !fsx.Within(resolved, home) || resolved == data {
-			continue
-		}
-		child, err := filepath.Rel(home, resolved)
-		if err != nil {
-			continue
-		}
-		if st, err := root.Stat(child); err != nil || !st.IsDir() {
-			continue
-		}
-		out = append(out, entry{Name: e.Name(), Path: full, IsBrain: fileExistsInRoot(root, filepath.Join(resolved, manifest.File)), IsGit: fileExistsInRoot(root, filepath.Join(resolved, ".git"))})
-	}
-	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
-	parent := filepath.Dir(p)
-	if p == home {
-		parent = ""
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"path": p, "parent": parent, "home": home, "entries": out})
-}
-
-// fileExistsInRoot probes metadata only inside root. Resolve first so an
-// absolute symlink to another allowed location works too; Root.Stat keeps
-// a later symlink replacement from redirecting the probe outside the root.
-func fileExistsInRoot(root *os.Root, p string) bool {
-	rel, err := filepath.Rel(root.Name(), fsx.Canonical(p))
-	if err != nil || (rel != "." && !filepath.IsLocal(rel)) {
-		return false
-	}
-	_, err = root.Stat(rel)
-	return err == nil
 }
 
 // ── dev mode ─────────────────────────────────────────────────────────────
