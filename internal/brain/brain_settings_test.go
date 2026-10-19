@@ -1,4 +1,4 @@
-package main
+package brain
 
 import (
 	"reflect"
@@ -18,9 +18,9 @@ func TestMergeBrainSettingsProviderOverrides(t *testing.T) {
 		{"Codex defaults", "codex", "", "", "codex-model", "high"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			g := brainGlobals{Defaults: brainSettings{Provider: tc.provider, Model: "sonnet", Effort: "low", MediaDir: "/media", DataDir: "/data"}, CodexModel: "codex-model", CodexEffort: "high"}
+			g := Globals{Defaults: Settings{Provider: tc.provider, Model: "sonnet", Effort: "low", MediaDir: "/media", DataDir: "/data"}, CodexModel: "codex-model", CodexEffort: "high"}
 			sp := manifest.Spec{Manifest: manifest.Manifest{ID: "a", Name: "Example", Model: tc.model, Effort: tc.effort, Observe: "all"}, PromptFile: "prompt.md"}
-			s := mergeBrainSettings(g, sp)
+			s := MergeSettings(g, sp)
 			if s.Model != tc.wantModel || s.Effort != tc.wantEffort {
 				t.Fatalf("provider settings = %q/%q, want %q/%q", s.Model, s.Effort, tc.wantModel, tc.wantEffort)
 			}
@@ -32,7 +32,7 @@ func TestMergeBrainSettingsProviderOverrides(t *testing.T) {
 }
 
 func TestMergeBrainSettingsOwnsMutableRunSlices(t *testing.T) {
-	g := brainGlobals{Defaults: brainSettings{
+	g := Globals{Defaults: Settings{
 		DisallowedTools: []string{"global-tool"}, OTPMarkers: []string{"marker"}, EnvPassthrough: []string{"EXAMPLE_ENV"},
 	}}
 	manifestTools := []string{"manifest-tool"}
@@ -47,7 +47,7 @@ func TestMergeBrainSettingsOwnsMutableRunSlices(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sp := manifest.Spec{Manifest: manifest.Manifest{DisallowedTools: tc.tools}}
-			s := mergeBrainSettings(g, sp)
+			s := MergeSettings(g, sp)
 			if !reflect.DeepEqual(s.DisallowedTools, tc.want) {
 				t.Fatalf("tools = %v, want %v", s.DisallowedTools, tc.want)
 			}
@@ -58,7 +58,7 @@ func TestMergeBrainSettingsOwnsMutableRunSlices(t *testing.T) {
 			if g.Defaults.DisallowedTools[0] != "global-tool" || manifestTools[0] != "manifest-tool" || g.Defaults.OTPMarkers[0] != "marker" || g.Defaults.EnvPassthrough[0] != "EXAMPLE_ENV" {
 				t.Fatal("one run changed its global or manifest settings")
 			}
-			next := mergeBrainSettings(g, sp)
+			next := MergeSettings(g, sp)
 			if !reflect.DeepEqual(next.DisallowedTools, tc.want) || next.OTPMarkers[0] != "marker" || next.EnvPassthrough[0] != "EXAMPLE_ENV" {
 				t.Fatal("one run changed the next run's settings")
 			}

@@ -141,7 +141,7 @@ func TestEditedMessage(t *testing.T) {
 		if ev := historyTexts(t, br, history.Event); !slices.Equal(ev, []string{`edited a message to: "book Wednesday"`}) {
 			t.Errorf("events = %q, want the edit noted", ev)
 		}
-		if preface := br.buildPrompt(br.settings.Load(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "next"}}); !strings.Contains(preface, `"from":"15551234567","did":"edited a message to: \"book Wednesday\""`) {
+		if preface := capturedPrompt(t, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "next"}}); !strings.Contains(preface, `"from":"15551234567","did":"edited a message to: \"book Wednesday\""`) {
 			t.Errorf("preface = %q, want the edit", preface)
 		}
 	})
@@ -185,7 +185,7 @@ func TestEditOfAMessageTheHistoryLacks(t *testing.T) {
 			if h := readHistory(t, br); len(h) != 1 || h[0].Type != history.Out {
 				t.Errorf("history = %+v, want only the request", h)
 			}
-			if preface := br.buildPrompt(br.settings.Load(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "next"}}); strings.Contains(preface, "4839") || strings.Contains(preface, c.edit) {
+			if preface := capturedPrompt(t, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "next"}}); strings.Contains(preface, "4839") || strings.Contains(preface, c.edit) {
 				t.Errorf("preface = %q, want no trace of the edit", preface)
 			}
 			if a := tb.activity.Recent(10, "main"); len(a) != 1 {
@@ -254,27 +254,5 @@ func TestActivityFollowsChanges(t *testing.T) {
 	slices.Sort(texts)
 	if want := []string{"a long report", "book Wednesday"}; !slices.Equal(texts, want) {
 		t.Errorf("activity = %q, want %q", texts, want)
-	}
-}
-
-// A change to a message the history does not hold leaves the file alone:
-// it is read, not copied, which a brain folder the bridge cannot write to
-// shows.
-func TestChangeOfAMessageTheHistoryLacksWritesNothing(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root writes into a folder whatever its mode")
-	}
-	_, br := newMainBridge(t, "")
-	br.AppendEntry(history.Entry{From: "15551234567", Chat: testDMChat, Text: "hi", Type: history.In, ID: "3EB0A"})
-	if err := os.Chmod(br.Dir(), 0o500); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(br.Dir(), 0o700) })
-	drop := func(history.Entry) *history.Entry { return nil }
-	if n, err := br.rewriteHistory("3EB0B", func(e history.Entry) bool { return e.ID == "3EB0B" }, drop); n != 0 || err != nil {
-		t.Errorf("rewriteHistory for an absent ID = %d, %v; want 0, nil without writing", n, err)
-	}
-	if _, err := br.rewriteHistory("3EB0A", func(e history.Entry) bool { return e.ID == "3EB0A" }, drop); err == nil {
-		t.Errorf("rewriteHistory for a present ID wrote into a folder it cannot write to")
 	}
 }

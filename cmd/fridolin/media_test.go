@@ -66,7 +66,6 @@ func TestRemovedBrainHandsItsFilesOn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a := mgr.Get("a")
 	var once sync.Once
 	// Between a's taking the files and its finding out that it is removed:
 	// its history line is written in between.
@@ -78,11 +77,11 @@ func TestRemovedBrainHandsItsFilesOn(t *testing.T) {
 			if err := mgr.Apply(next); err != nil {
 				t.Error(err)
 			}
-			testutil.WaitFor(t, 10*time.Second, "brain a to be removed", func() bool {
-				a.mu.Lock()
-				defer a.mu.Unlock()
-				return a.retired
-			})
+			// Apply freezes the removed queue before returning; its worker
+			// may still finish delivery in the background.
+			if mgr.Get("a") != nil {
+				t.Error("removed brain remained routable")
+			}
 		})
 	}})
 	media := next.MediaDir
@@ -126,14 +125,14 @@ func TestMergedMessageNamesItsFilesInTheInbox(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			mgr, d, _ := queueTestManager(t, 30000, "")
+			mgr, d, home := queueTestManager(t, 30000, "")
 			br := mgr.Get("a")
 			if _, _, _, err := mgr.Submit(dm("a long report")); err != nil {
 				t.Fatal(err)
 			}
 			testutil.WaitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 
-			media := br.settings.Load().MediaDir
+			media := filepath.Join(home, "data", "media")
 			inbox := mediaInboxAt(media).Path("a")
 			part := func(id, file string) Inbound {
 				m := dm("")

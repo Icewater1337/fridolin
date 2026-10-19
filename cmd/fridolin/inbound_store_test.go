@@ -19,11 +19,21 @@ func TestInboundQueueKeepsWhatTheStopLeft(t *testing.T) {
 		return history.Entry{TS: sent.Format(time.RFC3339), From: "15551234567", Chat: harnessDM, Text: text, Type: history.In, ID: id}
 	}
 	first := Inbound{Inbound: chat.Inbound{JID: harnessDM, ChatAlt: "15559876543@lid", Sender: "15551234567", Text: "what is this?",
-		Media: []string{"/Users/you/.fridolin/media/a.jpg"}, Source: chat.SourceWhatsApp, At: sent, ID: "3EB0A"}, logged: logged("3EB0A", "what is this?")}
+		Media: []string{"/Users/you/.fridolin/media/a.jpg"}, Source: chat.SourceWhatsApp, At: sent, ID: "3EB0A"}}
+	firstSaved := first.Save()
+	firstLog := logged("3EB0A", "what is this?")
+	firstSaved.Logged = &firstLog
+	first = firstSaved.Restore()
 	second := Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "and this", Quoted: &chat.Quote{From: "15559876543", Text: "lunch?"},
-		Source: chat.SourceWhatsApp, At: sent.Add(time.Second), ID: "3EB0B"}, logged: logged("3EB0B", "and this")}
+		Source: chat.SourceWhatsApp, At: sent.Add(time.Second), ID: "3EB0B"}}
+	secondSaved := second.Save()
+	secondLog := logged("3EB0B", "and this")
+	secondSaved.Logged = &secondLog
+	second = secondSaved.Restore()
 	merged := first.Merge(second)
-	merged.logged = first.logged
+	mergedSaved := merged.Save()
+	mergedSaved.Logged = first.Save().Logged
+	merged = mergedSaved.Restore()
 	chatter := Inbound{Inbound: chat.Inbound{JID: harnessGroup, Sender: "15559876543", Text: "see you", Silent: true, Source: chat.SourceWhatsApp, At: sent, ID: "3EB0C"}}
 	late := Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "!stop", Source: chat.SourceWhatsApp, At: sent.Add(time.Minute), ID: "3EB0D"}}
 	edit := chat.Change{Kind: chat.ChangeEdit, Chat: harnessDM, Sender: "15551234567", Target: "3EB0A", Text: "what is that?"}
@@ -68,9 +78,11 @@ func TestInboundQueueKeepsWhatTheStopLeft(t *testing.T) {
 		got[i].ID = 0
 		got[i].SentAt = got[i].SentAt.UTC()
 		got[i].Msg.At = got[i].Msg.At.UTC()
-		for j := range got[i].Msg.parts {
-			got[i].Msg.parts[j].At = got[i].Msg.parts[j].At.UTC()
+		saved := got[i].Msg.Save()
+		for j := range saved.Parts {
+			saved.Parts[j].At = saved.Parts[j].At.UTC()
 		}
+		got[i].Msg = saved.Restore()
 		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("row %d:\n got %+v\nwant %+v", i, got[i], want[i])
 		}

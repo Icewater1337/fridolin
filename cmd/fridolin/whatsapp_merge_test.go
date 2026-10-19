@@ -28,8 +28,8 @@ func TestPhotoThenQuestionMergePhotoFirst(t *testing.T) {
 	time.AfterFunc(100*time.Millisecond, func() { close(dl.hold) })
 	select {
 	case m := <-merged:
-		if m.Text != "look\n\nwhat is this?" || len(m.Media) != 1 || len(m.parts) != 2 || m.parts[0].ID != "3EB0PHOTO" {
-			t.Errorf("merged %q with %v from %d parts, want the photo and its caption first", m.Text, m.Media, len(m.parts))
+		if m.Text != "look\n\nwhat is this?" || len(m.Media) != 1 || len(m.Save().Parts) != 2 || m.Save().Parts[0].ID != "3EB0PHOTO" {
+			t.Errorf("merged %q with %v from %d parts, want the photo and its caption first", m.Text, m.Media, len(m.Save().Parts))
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("nothing reached the brain")

@@ -39,7 +39,7 @@ func TestRunStderrIsBounded(t *testing.T) {
 	if !strings.Contains(string(data), ":\n…") || !strings.Contains(string(data), "fatal: the last thing the CLI said") {
 		t.Errorf("activity log = %q, want the end of stderr", textx.Tail(string(data), 300))
 	}
-	if len(data) > 2*stderrLogBytes {
-		t.Errorf("activity log holds %d bytes, want at most the last %d of stderr", len(data), stderrLogBytes)
+	if len(data) > 2*4000 {
+		t.Errorf("activity log holds %d bytes, want at most the last %d of stderr", len(data), 4000)
 	}
 }

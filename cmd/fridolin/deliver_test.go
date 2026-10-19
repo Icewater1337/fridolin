@@ -101,7 +101,7 @@ func TestSilentRunLeavesNoReplyInTheHistory(t *testing.T) {
 	// it is not stopped for the DM, and is delivered before the DM's run
 	// starts: one worker runs the brain's messages in turn.
 	testutil.WaitFor(t, 10*time.Second, "the silent run", func() bool { return br.Snapshot().Last != nil })
-	if last := br.Snapshot().Last; last.Chat != testGroup || last.Outcome != outcomeOK {
+	if last := br.Snapshot().Last; last.Chat != testGroup || last.Outcome != "ok" {
 		t.Fatalf("the silent run ended %+v, want it answered", last)
 	}
 	tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hello", Source: chat.SourceWhatsApp}})
@@ -179,7 +179,7 @@ func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
 			if sent != c.sent || recorded != c.sent {
 				t.Errorf("question sent %v, in the history %v; want %v", sent, recorded, c.sent)
 			}
-			if last := br.Snapshot().Last; (last.Outcome == outcomeQuestion) != c.asked {
+			if last := br.Snapshot().Last; (last.Outcome == "question") != c.asked {
 				t.Errorf("the run ended %q, want it to have asked: %v", last.Outcome, c.asked)
 			}
 			if notice := slices.Contains(chatJID(), outboundmsg.WorkingNotice); notice != c.notice {
@@ -206,8 +206,8 @@ func TestQuestionAndFinalReplyBothReachTheChat(t *testing.T) {
 	if got := outbound(t, br)[testDMChat]; !slices.Equal(got, sent) {
 		t.Errorf("outbound history = %q, want what was sent, %q", got, sent)
 	}
-	if last := br.Snapshot().Last; last == nil || last.Outcome != outcomeQuestion {
-		t.Errorf("last run = %+v, want the outcome %q", last, outcomeQuestion)
+	if last := br.Snapshot().Last; last == nil || last.Outcome != "question" {
+		t.Errorf("last run = %+v, want the outcome %q", last, "question")
 	}
 }
 

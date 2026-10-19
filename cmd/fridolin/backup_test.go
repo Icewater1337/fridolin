@@ -874,7 +874,7 @@ func TestPrunePurgesExpiredVersionFolders(t *testing.T) {
 		}
 		return []byte(`[{"Name":"` + expired + `"},{"Name":"` + recent + `"},{"Name":"keep-me"}]`), nil
 	}
-	notes := &Brain{id: "notes"}
+	notes := namedTestBrain(t, "notes")
 	tb.backup.prune(context.Background(), []*Brain{notes})
 	var purged []string
 	for _, c := range calls {
@@ -898,7 +898,7 @@ func TestPrunePurgesExpiredVersionFolders(t *testing.T) {
 func TestPruneKeepsItsConfigAndStopsWhenCancelled(t *testing.T) {
 	listing := []byte(`[{"Name":"` + versionName(time.Now().AddDate(0, 0, -31)) + `"},` +
 		`{"Name":"` + versionName(time.Now().AddDate(0, 0, -60)) + `"}]`)
-	brains := []*Brain{{id: "notes"}, {id: "work"}}
+	brains := []*Brain{namedTestBrain(t, "notes"), namedTestBrain(t, "work")}
 
 	t.Run("backup.root changed mid-run", func(t *testing.T) {
 		tb := newTestBridge(t, `, "backup": {"keep_versions_days": 30}`)
@@ -2528,9 +2528,7 @@ func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
 			br := tb.brainMgr.Get("notes")
 			tb.backup.idleWait = c.wait
 			running := func() bool {
-				br.mu.Lock()
-				defer br.mu.Unlock()
-				return br.current != nil
+				return br.Snapshot().Running != nil
 			}
 			var syncedWhileRunning []bool
 			tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {

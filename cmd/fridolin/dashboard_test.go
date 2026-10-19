@@ -22,21 +22,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/devchat"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
-
-	"github.com/Icewater1337/fridolin/internal/config"
-
-	"github.com/Icewater1337/fridolin/internal/manifest"
-
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/devchat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
-	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
-	"github.com/Icewater1337/fridolin/internal/testutil"
-
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 	"github.com/Icewater1337/fridolin/internal/otp"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/internal/version"
 )
@@ -798,7 +793,7 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	if !slices.ContainsFunc(readHistory(t, up), func(e history.Entry) bool { return e.Type == history.Reset && e.Chat == dm }) {
 		t.Errorf("up's history has no reset marker for the chat:\n%+v", readHistory(t, up))
 	}
-	if before, _ := up.historyBefore(Inbound{Inbound: chat.Inbound{JID: dm, Brain: "up", Sender: "upload", Text: "next file", Source: chat.SourceIngest}}, prompttext.DMHistoryWindow); len(before) != 0 {
+	if before := promptBlock(capturedPrompt(t, up, Inbound{Inbound: chat.Inbound{JID: dm, Brain: "up", Sender: "upload", Text: "next file", Source: chat.SourceIngest}}), "chat_history"); before != "" {
 		t.Errorf("up's next run in the chat would read %+v", before)
 	}
 }

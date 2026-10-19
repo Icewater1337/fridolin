@@ -1,4 +1,4 @@
-package main
+package brain
 
 // admit returns the queue after m arrives without mutating the supplied slice.
 // It keeps the existing supersede and capacity rules; gone contains only work
@@ -25,7 +25,7 @@ func admit(pending []Inbound, m Inbound, mode string, max int) (next, gone []Inb
 			}
 		}
 		if !displaced {
-			return next, gone, interrupting, errQueueFull
+			return next, gone, interrupting, ErrQueueFull
 		}
 	}
 	return append(next, m), gone, interrupting, nil

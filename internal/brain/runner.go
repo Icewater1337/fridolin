@@ -1,4 +1,4 @@
-package main
+package brain
 
 import (
 	"context"
@@ -8,15 +8,15 @@ import (
 
 // brainRunner owns host-specific process preparation and supervision. The
 // brain owns queue state, start publication, stream callbacks and delivery.
-type brainRunner interface {
-	Run(context.Context, brainRunSpec, claudecli.Callbacks) claudecli.Result
+type Runner interface {
+	Run(context.Context, RunSpec, claudecli.Callbacks) claudecli.Result
 }
 
 // brainRunSpec is one run's immutable input. BeforeStart preserves the point
 // where the viewer may start: after environment and sandbox setup succeed,
 // before the process is spawned. It must not be called for a refused run.
-type brainRunSpec struct {
+type RunSpec struct {
 	ID, Dir, Prompt string
-	Settings        *brainSettings
+	Settings        *Settings
 	BeforeStart     func()
 }

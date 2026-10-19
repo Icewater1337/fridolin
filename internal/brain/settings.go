@@ -1,4 +1,4 @@
-package main
+package brain
 
 import (
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -7,11 +7,11 @@ import (
 
 // brainQueueInterrupt is the runtime protocol value. Composition pins it to
 // the independently owned configuration enum without a runtime config import.
-const brainQueueInterrupt = "interrupt"
+const QueueInterrupt = "interrupt"
 
 // brainInputRules supplies content-only decisions from command composition.
 // The runtime does not depend on transport identity or pipeline filtering.
-type brainInputRules struct {
+type InputRules struct {
 	Chats     func(chat.Inbound) []string
 	Observe   func(string, chat.Inbound) bool
 	BuildChat func(string) bool
@@ -20,15 +20,15 @@ type brainInputRules struct {
 // brainGlobals is the runtime-owned snapshot projected by the command. Its
 // defaults contain no per-brain manifest or prompt selection. The two Codex
 // values remain distinct because that provider ignores Claude overrides.
-type brainGlobals struct {
-	Defaults                brainSettings
+type Globals struct {
+	Defaults                Settings
 	CodexModel, CodexEffort string
 	RunLimit                int
 }
 
 // mergeBrainSettings applies only the manifest's run overrides. It reads no
 // process state and owns every mutable settings slice, as settingsFor did.
-func mergeBrainSettings(g brainGlobals, sp manifest.Spec) *brainSettings {
+func MergeSettings(g Globals, sp manifest.Spec) *Settings {
 	m := sp.Manifest
 	s := g.Defaults
 	s.Name, s.Manifest, s.PromptFile, s.Observe = m.Name, m, sp.PromptFile, m.Observe

@@ -14,12 +14,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/whatsapp"
-
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/otp"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"google.golang.org/protobuf/proto"
 )
@@ -123,6 +124,7 @@ func TestRestartOnlyPathsStayAtBootAfterAPISave(t *testing.T) {
 func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 	tb := newTestBridge(t, `, "plaud":{"phone_upload":true}`)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
+	runSettings := captureBootRunSettings(t, tb)
 	boot := tb.cfgs.Boot()
 	next := filepath.Join(tb.home, "next-start")
 	w := tb.editConfig(t, func(c map[string]any) {
@@ -149,7 +151,7 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 			t.Errorf("%s = %q, want %q", label, pair[0], pair[1])
 		}
 	}
-	s := tb.brainMgr.Get("main").settings.Load()
+	s := runSettings()
 	if s.DataDir != boot.DataDir || s.DBPath != boot.DBPath || s.MediaDir != boot.MediaDir || s.CredsDir != boot.DataDir {
 		t.Errorf("brain startup paths drifted: %#v", s)
 	}
@@ -172,7 +174,7 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatal(w.Body.String())
 	}
-	if tb.google.credsDir() != explicitCreds || tb.plaud.phoneDir() != explicitPhone || tb.plaud.cliHome() != boot.Home || tb.brainMgr.Get("main").settings.Load().CredsDir != explicitCreds {
+	if tb.google.credsDir() != explicitCreds || tb.plaud.phoneDir() != explicitPhone || tb.plaud.cliHome() != boot.Home || runSettings().CredsDir != explicitCreds {
 		t.Error("explicit credential/phone paths or Plaud access stopped applying live")
 	}
 
@@ -195,6 +197,49 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 	profile, err = tb.brainMgr.profiler.Profile("main")
 	if err != nil || !strings.Contains(profile, filepath.Join(boot.Home, ".ssh")) || strings.Contains(profile, filepath.Join(replacementHome, ".ssh")) {
 		t.Errorf("sandbox home changed after startup: %v", err)
+	}
+}
+
+// bootSettingsRunner observes the run's actual immutable settings at the
+// process boundary, after the command's config reload has applied them.
+type bootSettingsRunner struct{ settings chan brain.Settings }
+
+func (r bootSettingsRunner) Run(_ context.Context, spec brain.RunSpec, _ claudecli.Callbacks) claudecli.Result {
+	r.settings <- *spec.Settings
+	return claudecli.Result{}
+}
+
+func captureBootRunSettings(t *testing.T, tb *testBridge) func() brain.Settings {
+	t.Helper()
+	runner := bootSettingsRunner{settings: make(chan brain.Settings, 1)}
+	mgr := tb.brainMgr
+	mgr.brainManager.Stop()
+	mgr.brainManager = brain.NewManager(brain.Options{
+		Runner: runner, Sink: brainHooksSink{mgr.hooks},
+		Input: commandBrainInputRules(), ClaimMedia: claimBrainMedia,
+		ShutdownGrace: func() time.Duration { return 0 },
+	})
+	if err := mgr.Apply(runtimeConfig(tb.cfgs)); err != nil {
+		t.Fatal(err)
+	}
+	return func() brain.Settings {
+		t.Helper()
+		br, _, _, err := mgr.Submit(brain.Inbound{Inbound: chat.Inbound{
+			JID: harnessDM, Brain: "main", Text: "capture settings", Source: chat.SourceIngest,
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var settings brain.Settings
+		select {
+		case settings = <-runner.settings:
+		case <-time.After(10 * time.Second):
+			t.Fatal("run did not reach the injected runner")
+		}
+		if !br.WaitIdle(t.Context(), 10*time.Second) {
+			t.Fatal("captured run did not finish")
+		}
+		return settings
 	}
 }
 

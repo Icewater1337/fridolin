@@ -1,4 +1,4 @@
-package main
+package brain
 
 import (
 	"context"
@@ -55,9 +55,9 @@ type Brain struct {
 	// rather than the path, which could lead elsewhere by then.
 	root *os.Root
 
-	settings   atomic.Pointer[brainSettings]
-	runner     brainRunner
-	input      brainInputRules
+	settings   atomic.Pointer[Settings]
+	runner     Runner
+	input      InputRules
 	claimMedia func(mediaDir, brainID string, paths []string) map[string]string
 	sink       *brainSinkRef
 	// slots are the run slots all brains share (max_concurrent_runs); nil
@@ -103,7 +103,7 @@ type Brain struct {
 
 // brainSettings is everything about a brain that can change while it runs.
 // Each run takes one snapshot, so an edit never changes a run half-way.
-type brainSettings struct {
+type Settings struct {
 	Name            string
 	Manifest        manifest.Manifest
 	ClaudePath      string
@@ -170,13 +170,13 @@ type brainRun struct {
 }
 
 var (
-	errBrainDropped = errors.New("dropped before it ran")
-	errBrainRetired = errors.New("brain was removed")
-	errQueueFull    = errors.New("brain queue is full")
+	ErrDropped   = errors.New("dropped before it ran")
+	ErrRetired   = errors.New("brain was removed")
+	ErrQueueFull = errors.New("brain queue is full")
 
 	// errSandboxUnavailable is what the chat sees. The cause goes to the log
 	// only, because it can name private paths.
-	errSandboxUnavailable = errors.New("the sandbox could not be set up, so this message was not run (details in the bridge log)")
+	ErrSandboxUnavailable = errors.New("the sandbox could not be set up, so this message was not run (details in the bridge log)")
 )
 
 // ID is the brain's stable identifier.
@@ -273,12 +273,12 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	br.mu.Lock()
 	if br.retired {
 		br.mu.Unlock()
-		return 0, false, errBrainRetired
+		return 0, false, ErrRetired
 	}
 	if queues && !br.hasRoomLocked(*m, s) {
 		if !m.Silent {
 			br.mu.Unlock()
-			return 0, true, errQueueFull
+			return 0, true, ErrQueueFull
 		}
 		// Chatter that finds no place is kept in the history all the
 		// same, without a run of its own: it was said in the chat, and
@@ -301,7 +301,7 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	br.mu.Lock()
 	if br.retired {
 		br.mu.Unlock()
-		return 0, false, errBrainRetired
+		return 0, false, ErrRetired
 	}
 
 	// A newer message from the same chat supersedes queued untagged chatter:
@@ -314,7 +314,7 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	// the last one. Observe-only runs are another matter, see below.
 	next, gone, interrupting, err := admit(br.pending, *m, s.QueueMode, s.MaxPending)
 	br.pending = next
-	defer dropped(gone)
+	defer Dropped(gone)
 	if err != nil {
 		br.mu.Unlock()
 		return 0, true, err
@@ -435,7 +435,7 @@ func (br *Brain) queueOrderLocked() []int {
 // whether it interrupts its sender's own run, which only a request does in
 // interrupt mode, and which waiting or running messages it replaces.
 func supersedes(m Inbound, mode string) (interrupting bool, replaces func(Inbound) bool) {
-	interrupting = mode == brainQueueInterrupt && !m.Silent && m.Source != chat.SourceIngest
+	interrupting = mode == QueueInterrupt && !m.Silent && m.Source != chat.SourceIngest
 	return interrupting, func(p Inbound) bool {
 		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != chat.SourceIngest))
 	}
@@ -444,7 +444,7 @@ func supersedes(m Inbound, mode string) (interrupting bool, replaces func(Inboun
 // hasRoomLocked reports whether the queue takes m: it has a free place,
 // or one m makes by what it replaces, or untagged chatter to drop. br.mu is
 // held.
-func (br *Brain) hasRoomLocked(m Inbound, s *brainSettings) bool {
+func (br *Brain) hasRoomLocked(m Inbound, s *Settings) bool {
 	_, replaces := supersedes(m, s.QueueMode)
 	n, silent := 0, false
 	for _, p := range br.pending {
@@ -485,7 +485,7 @@ func (br *Brain) worker() {
 			// observe-only run it stops.
 			br.mu.Unlock()
 			slot.release()
-			dropped([]Inbound{m})
+			Dropped([]Inbound{m})
 			continue
 		}
 		br.takeTurnLocked(m.JID)
@@ -556,7 +556,7 @@ func (br *Brain) stopObservation() {
 // so that the run is finished and recorded like any failed one and the
 // worker goes on with the next message. Unrecovered, the panic would end
 // the whole bridge and leave every brain's running claude behind.
-func (br *Brain) invokeGuarded(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) (res claudecli.Result) {
+func (br *Brain) invokeGuarded(run *brainRun, ctx context.Context, s *Settings, m Inbound) (res claudecli.Result) {
 	defer func() {
 		if p := recover(); p != nil {
 			log.Printf("brain %s: the run for %s panicked: %v\n%s", br.id, m.JID, p, debug.Stack())
@@ -594,10 +594,10 @@ func runContext(timeout time.Duration) (context.Context, context.CancelFunc) {
 }
 
 // dropped tells the messages in ms that will not run, outside br.mu.
-func dropped(ms []Inbound) {
+func Dropped(ms []Inbound) {
 	for _, m := range ms {
 		if m.Done != nil {
-			m.Done(errBrainDropped)
+			m.Done(ErrDropped)
 		}
 	}
 }
@@ -660,7 +660,7 @@ func (br *Brain) StopCurrent(clearQueue bool) bool {
 	}
 	cur := br.current
 	br.mu.Unlock()
-	dropped(gone)
+	Dropped(gone)
 	return br.stopRun(cur)
 }
 
@@ -685,7 +685,7 @@ func (br *Brain) StopChat(jid string) (stopped bool, n int) {
 		cur = nil
 	}
 	br.mu.Unlock()
-	dropped(gone)
+	Dropped(gone)
 	return br.stopRun(cur), len(gone)
 }
 
@@ -724,12 +724,12 @@ func (br *Brain) StopHandOffs(jid string) (stopped bool, n int) {
 		cur = nil
 	}
 	br.mu.Unlock()
-	dropped(gone)
+	Dropped(gone)
 	return br.stopRun(cur), len(gone)
 }
 
 // stopRunWait is how long a stop waits for a run it killed to end.
-const stopRunWait = 10 * time.Second
+const StopRunWait = 10 * time.Second
 
 // stopRun kills run, if there is one, and waits for it to end.
 func (br *Brain) stopRun(run *brainRun) bool {
@@ -739,8 +739,8 @@ func (br *Brain) stopRun(run *brainRun) bool {
 	br.interruptRun(run)
 	select {
 	case <-run.done:
-	case <-time.After(stopRunWait):
-		log.Printf("brain %s: run did not stop within %v", br.id, stopRunWait)
+	case <-time.After(StopRunWait):
+		log.Printf("brain %s: run did not stop within %v", br.id, StopRunWait)
 	}
 	return true
 }
@@ -775,8 +775,8 @@ func (br *Brain) shutdown(grace time.Duration) {
 		}
 		select {
 		case <-idle:
-		case <-time.After(stopRunWait):
-			log.Printf("brain %s: worker still finishing %v after the interrupt; waiting for its delivery", br.id, stopRunWait)
+		case <-time.After(StopRunWait):
+			log.Printf("brain %s: worker still finishing %v after the interrupt; waiting for its delivery", br.id, StopRunWait)
 			// Closing the store now would lose an answer the worker is
 			// still handing to the outbox. The grace bounds the run, not
 			// the hand-off of its result.
@@ -825,7 +825,7 @@ func (br *Brain) freezeQueueLocked() {
 // the activity viewer: not when the brain moved, where the brain that runs
 // in the new folder replaces the tmux session of that name.
 func (br *Brain) retire(closeViewer bool) {
-	dropped(br.closeQueue())
+	Dropped(br.closeQueue())
 	br.StopCurrent(false)
 	// run.done precedes delivery. Retirement must finish that hand-off
 	// before closing the folder, requeuing work in its replacement, or
@@ -863,7 +863,7 @@ func (br *Brain) readFile(name string) ([]byte, error) {
 }
 
 // BrainRuntime is a brain's live state, for the dashboard.
-type BrainRuntime struct {
+type Runtime struct {
 	ID       string            `json:"id"`
 	Name     string            `json:"name"`
 	Dir      string            `json:"dir"`
@@ -898,9 +898,9 @@ type QueuedView struct {
 
 // Snapshot returns the brain's live state, the queue in the order it will
 // run.
-func (br *Brain) Snapshot() BrainRuntime {
+func (br *Brain) Snapshot() Runtime {
 	s := br.settings.Load()
-	rt := BrainRuntime{
+	rt := Runtime{
 		ID: br.id, Name: s.Name, Dir: br.workDir,
 		Routing: s.Manifest.Routing, Model: s.Model, Effort: s.Effort,
 		Backup: s.Manifest.Backup, Manifest: s.Manifest, Queue: []QueuedView{},
@@ -926,7 +926,7 @@ func (br *Brain) Snapshot() BrainRuntime {
 // It does so in the background, one start at a time: tmux and osascript,
 // which can wait on an Automation consent prompt under launchd, must not
 // hold up the run.
-func (br *Brain) ensureViewer(s *brainSettings) {
+func (br *Brain) ensureViewer(s *Settings) {
 	if !s.Viewer {
 		return
 	}
@@ -955,14 +955,14 @@ func (br *Brain) ensureViewer(s *brainSettings) {
 
 // startViewerUnlessAlive starts a viewer unless tv still runs. It returns
 // the new viewer, or nil when tv runs or none could start.
-func (br *Brain) startViewerUnlessAlive(tv *platform.Viewer, s *brainSettings) *platform.Viewer {
+func (br *Brain) startViewerUnlessAlive(tv *platform.Viewer, s *Settings) *platform.Viewer {
 	if tv != nil && tv.IsAlive() {
 		return nil
 	}
 	// tail fails on a log that does not exist yet, so create it first,
 	// through the folder as a run opens it: touch would have followed a
 	// dangling symlink there and created the file it points to.
-	f, err := fsx.OpenInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := fsx.OpenInFolder(br.root, StreamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("brain %s: no tmux viewer: could not open stream log: %v", br.id, err)
 		return nil
@@ -990,15 +990,15 @@ func (br *Brain) closeViewer() {
 }
 
 // streamLogName is the brain's activity log, in its folder.
-const streamLogName = "claude-stream.log"
+const StreamLogName = "claude-stream.log"
 
 func (br *Brain) StreamLogPath() string {
-	return filepath.Join(br.workDir, streamLogName)
+	return filepath.Join(br.workDir, StreamLogName)
 }
 
 // invoke runs the selected CLI once for m.
-func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) claudecli.Result {
-	return br.runner.Run(ctx, brainRunSpec{
+func (br *Brain) invoke(run *brainRun, ctx context.Context, s *Settings, m Inbound) claudecli.Result {
+	return br.runner.Run(ctx, RunSpec{
 		ID: br.id, Dir: br.workDir, Settings: s, Prompt: br.buildPrompt(s, m),
 		BeforeStart: func() { br.ensureViewer(s) },
 	}, claudecli.Callbacks{
@@ -1035,7 +1035,7 @@ func (br *Brain) logStderr(m Inbound, pid int, stderr string) {
 	if stderr == "" {
 		return
 	}
-	f, err := fsx.OpenInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	f, err := fsx.OpenInFolder(br.root, StreamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("brain %s: could not open stream log: %v", br.id, err)
 		return
@@ -1151,7 +1151,7 @@ func (br *Brain) identities() map[string]string {
 // buildPrompt gathers what m's run is told, through the brain's folder: its
 // prompt file, the chat's recent history and the identity map. renderPrompt
 // puts it into words.
-func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
+func (br *Brain) buildPrompt(s *Settings, m Inbound) string {
 	in := prompttext.Input{Now: time.Now(), BrainID: br.id, Message: m.Inbound, BuildChat: br.input.BuildChat != nil && br.input.BuildChat(m.JID), ObserveOnly: m.Silent}
 	if name := s.PromptFile; name != "" {
 		if data, err := br.readFile(name); err != nil {
@@ -1169,7 +1169,7 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 // runHeading starts a run's part of the activity log: what it answers and
 // with what, so that it can be told from the others and matched to the
 // run the dashboard shows.
-func runHeading(m Inbound, s *brainSettings, pid int) string {
+func runHeading(m Inbound, s *Settings, pid int) string {
 	model := s.Model
 	if model == "" {
 		model = "the CLI's default"
@@ -1206,11 +1206,11 @@ const (
 // rotateStreamLog moves a full activity log aside, through the folder: a
 // rename replaces a symlink at streamLogOld itself, never what it points to.
 func (br *Brain) rotateStreamLog() {
-	fi, err := br.root.Lstat(streamLogName)
+	fi, err := br.root.Lstat(StreamLogName)
 	if err != nil || !fi.Mode().IsRegular() || fi.Size() < streamLogMax {
 		return
 	}
-	if err := br.root.Rename(streamLogName, streamLogOld); err != nil {
+	if err := br.root.Rename(StreamLogName, streamLogOld); err != nil {
 		log.Printf("brain %s: could not rotate its stream log: %v", br.id, err)
 	}
 }
@@ -1259,7 +1259,7 @@ func (br *Brain) openRunStream(m Inbound, heading string, onResult func(claudecl
 	br.rotateStreamLog()
 	// Through the folder, like the history: a brain can swap the log for a
 	// symlink to a file its sandbox denies it writing.
-	streamLog, err := fsx.OpenInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	streamLog, err := fsx.OpenInFolder(br.root, StreamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("brain %s: could not open stream log: %v", br.id, err)
 	}
@@ -1440,7 +1440,7 @@ func withUndelivered(entries, pending []history.Entry) []history.Entry {
 // brainManager owns the brains and routes messages to them. Its brain set can
 // be replaced at any time with Apply: unchanged brains keep running untouched,
 // removed brains finish being stopped in the background.
-type brainManager struct {
+type Manager struct {
 	reloadMu sync.Mutex // serialises Apply
 	// stopped is set by Stop, under reloadMu: the brains are stopped for
 	// good, and a reload would start new ones.
@@ -1458,7 +1458,7 @@ type brainManager struct {
 	order   []*Brain
 	routes  *route.Table
 
-	options brainManagerOptions
+	options Options
 	sink    *brainSinkRef
 	// slots bound the runs of every brain together, across reloads.
 	slots *runSlots
@@ -1466,10 +1466,10 @@ type brainManager struct {
 
 // brainManagerOptions supplies runtime dependencies without configuration or
 // host policy. The same Runner and Sink serve live and retired brains.
-type brainManagerOptions struct {
-	Runner      brainRunner
-	Sink        brainSink
-	Input       brainInputRules
+type Options struct {
+	Runner      Runner
+	Sink        Sink
+	Input       InputRules
 	ViewerStart func(name, streamLog, cwd string, passthrough []string) (*platform.Viewer, error)
 	ClaimMedia  func(mediaDir, brainID string, paths []string) map[string]string
 	// ShutdownGrace is read when Stop reaches each live brain, at the old
@@ -1481,7 +1481,7 @@ type brainManagerOptions struct {
 // reloadMu, outside mu, before publishing the new brain set. Its closure
 // captures the configuration used for this Apply, rather than reading a
 // newer live configuration while updating sandbox profiles.
-type brainApplyOptions struct {
+type ApplyOptions struct {
 	Held    []route.Held
 	OwnPATH map[string][]string
 	SetDirs func(map[string][]string)
@@ -1489,13 +1489,13 @@ type brainApplyOptions struct {
 
 // brainOpenFailure reports a root which became unavailable after resolution.
 // It is converted into a registry diagnostic by command composition only.
-type brainOpenFailure struct {
+type OpenFailure struct {
 	Spec manifest.Spec
 	Err  error
 }
 
-func newBrainManager(options brainManagerOptions) *brainManager {
-	return &brainManager{
+func NewManager(options Options) *Manager {
+	return &Manager{
 		brains: map[string]*Brain{}, options: options,
 		sink: &brainSinkRef{target: options.Sink}, slots: newRunSlots(0),
 	}
@@ -1504,20 +1504,20 @@ func newBrainManager(options brainManagerOptions) *brainManager {
 // PauseRuns holds new run-slot grants until the returned function is called.
 // Startup replay uses it to apply later persisted edits before a queued run
 // can start. Releasing the pause is idempotent.
-func (bm *brainManager) PauseRuns() func() { return bm.slots.pause() }
+func (bm *Manager) PauseRuns() func() { return bm.slots.pause() }
 
 // SetSink wires runtime delivery before the first message. Every current and
 // future brain shares this reference, like the former hooks pointer.
-func (bm *brainManager) SetSink(s brainSink) { bm.sink.target = s }
+func (bm *Manager) SetSink(s Sink) { bm.sink.target = s }
 
 // apply keeps unchanged brains running and retires removed ones in the
 // background. Resolution and process policy are supplied by the caller.
-func (bm *brainManager) Apply(specs []manifest.Spec, globals brainGlobals, options brainApplyOptions) ([]brainOpenFailure, error) {
+func (bm *Manager) Apply(specs []manifest.Spec, globals Globals, options ApplyOptions) ([]OpenFailure, error) {
 	bm.reloadMu.Lock()
 	defer bm.reloadMu.Unlock()
 
 	if bm.stopped || bm.forced.Load() {
-		return nil, errBrainsStopped
+		return nil, ErrStopped
 	}
 	if err := route.Validate(specs); err != nil {
 		return nil, err
@@ -1531,7 +1531,7 @@ func (bm *brainManager) Apply(specs []manifest.Spec, globals brainGlobals, optio
 	order := make([]*Brain, 0, len(specs))
 	active := make([]manifest.Spec, 0, len(specs))
 	held := append([]route.Held(nil), options.Held...)
-	var failures []brainOpenFailure
+	var failures []OpenFailure
 	workDirs := map[string][]string{}
 
 	// The folders opened for new brains, closed again unless they run.
@@ -1553,14 +1553,14 @@ func (bm *brainManager) Apply(specs []manifest.Spec, globals brainGlobals, optio
 		if sp.Path != "" && sp.Path != sp.Dir {
 			workDirs[m.ID] = []string{sp.Path, sp.Dir}
 		}
-		s := mergeBrainSettings(globals, sp)
+		s := MergeSettings(globals, sp)
 		s.OwnPATH = append([]string(nil), options.OwnPATH[m.ID]...)
 		br, ok := old[m.ID]
 		if !ok || br.workDir != sp.Dir || !br.holdsFolder(sp.Dir) {
 			root, err := os.OpenRoot(sp.Dir)
 			if err != nil {
 				log.Printf("brain %s: leaving it out: %v", m.ID, err)
-				failures = append(failures, brainOpenFailure{Spec: sp, Err: err})
+				failures = append(failures, OpenFailure{Spec: sp, Err: err})
 				held = append(held, route.Held{ID: m.ID, Routing: m.Routing})
 				continue
 			}
@@ -1610,7 +1610,7 @@ func (bm *brainManager) Apply(specs []manifest.Spec, globals brainGlobals, optio
 	// cannot miss a newly published brain or one about to retire.
 	if bm.forced.Load() {
 		bm.mu.Unlock()
-		return nil, errBrainsStopped
+		return nil, ErrStopped
 	}
 	if bm.retired == nil {
 		bm.retired = make(map[*Brain]struct{})
@@ -1647,14 +1647,14 @@ func (bm *brainManager) Apply(specs []manifest.Spec, globals brainGlobals, optio
 }
 
 // errBrainsStopped is a reload after Stop.
-var errBrainsStopped = errors.New("the brains are stopped")
+var ErrStopped = errors.New("the brains are stopped")
 
 // requeue hands what from had waiting when a reload took it out, which
 // never ran, to the brains that take it now: the brain in its new folder,
 // or the one its chat goes to. A message keeps its history lines where
 // that brain's history has them (see Brain.logInbound). One no brain takes
 // is dropped.
-func (bm *brainManager) requeue(from *Brain, ms []Inbound) {
+func (bm *Manager) requeue(from *Brain, ms []Inbound) {
 	if bm.keepRetiredWaiting(from, ms) {
 		return
 	}
@@ -1667,7 +1667,7 @@ func (bm *brainManager) requeue(from *Brain, ms []Inbound) {
 				continue
 			}
 			log.Printf("brain %s: dropping a message for %s that waited for it: %v", from.id, m.JID, err)
-			dropped([]Inbound{m})
+			Dropped([]Inbound{m})
 		case to.id != from.id:
 			log.Printf("brain %s: handed a message for %s that waited for it to brain %s", from.id, m.JID, to.id)
 		}
@@ -1676,7 +1676,7 @@ func (bm *brainManager) requeue(from *Brain, ms []Inbound) {
 
 // keepRetiredWaiting sends a retired queue to shutdown persistence once
 // Stop has begun, instead of starting new work in the replacement brain.
-func (bm *brainManager) keepRetiredWaiting(from *Brain, ms []Inbound) bool {
+func (bm *Manager) keepRetiredWaiting(from *Brain, ms []Inbound) bool {
 	bm.reloadMu.Lock()
 	stopped := bm.stopped
 	bm.reloadMu.Unlock()
@@ -1689,14 +1689,14 @@ func (bm *brainManager) keepRetiredWaiting(from *Brain, ms []Inbound) bool {
 
 // BrainFor returns the brain that handles a chat, or nil when the route is
 // reserved for an unavailable brain (see HeldFor).
-func (bm *brainManager) BrainFor(jid string, isGroup bool) *Brain {
+func (bm *Manager) BrainFor(jid string, isGroup bool) *Brain {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
 	return bm.brains[bm.routes.For(jid, isGroup)]
 }
 
 // HeldFor returns the unavailable brain that reserves the chat, or empty.
-func (bm *brainManager) HeldFor(jid string, isGroup bool) string {
+func (bm *Manager) HeldFor(jid string, isGroup bool) string {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
 	return bm.routes.HeldFor(jid, isGroup)
@@ -1704,27 +1704,27 @@ func (bm *brainManager) HeldFor(jid string, isGroup bool) string {
 
 // DMBrain returns the brain that gets direct messages: the one with
 // handles_dms, else the fallback brain, or nil.
-func (bm *brainManager) DMBrain() *Brain { return bm.BrainFor("", false) }
+func (bm *Manager) DMBrain() *Brain { return bm.BrainFor("", false) }
 
 // Fallback returns the brain BrainFor falls back to, for the allowed groups
 // no brain claims and, while no brain has handles_dms, for direct
 // messages: the one marked default, else the first brain; nil when there
 // is none.
-func (bm *brainManager) Fallback() *Brain {
+func (bm *Manager) Fallback() *Brain {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
 	return bm.brains[bm.routes.Default()]
 }
 
 // Get returns a brain by id.
-func (bm *brainManager) Get(id string) *Brain {
+func (bm *Manager) Get(id string) *Brain {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
 	return bm.brains[id]
 }
 
 // Brains returns the brains in configuration order.
-func (bm *brainManager) Brains() []*Brain {
+func (bm *Manager) Brains() []*Brain {
 	bm.mu.RLock()
 	defer bm.mu.RUnlock()
 	return append([]*Brain(nil), bm.order...)
@@ -1733,7 +1733,7 @@ func (bm *brainManager) Brains() []*Brain {
 // Route returns the brain that handles m: the brain it names, else the one
 // its chat routes to. A message that names a brain that no longer exists gets
 // nil rather than whichever brain owns its chat.
-func (bm *brainManager) Route(m Inbound) *Brain {
+func (bm *Manager) Route(m Inbound) *Brain {
 	if m.Brain != "" {
 		return bm.Get(m.Brain)
 	}
@@ -1743,10 +1743,10 @@ func (bm *brainManager) Route(m Inbound) *Brain {
 // Submit routes a message to its brain. A message that lands on a brain being
 // removed at that moment is routed again once, with its files where that
 // brain left them (see Brain.submit).
-func (bm *brainManager) Submit(m Inbound) (br *Brain, pos int, busy bool, err error) {
+func (bm *Manager) Submit(m Inbound) (br *Brain, pos int, busy bool, err error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		if bm.forced.Load() {
-			return nil, 0, false, errBrainsStopped
+			return nil, 0, false, ErrStopped
 		}
 		br = bm.Route(m)
 		if br == nil && m.Brain != "" {
@@ -1756,7 +1756,7 @@ func (bm *brainManager) Submit(m Inbound) (br *Brain, pos int, busy bool, err er
 			return nil, 0, false, fmt.Errorf("no brain configured for %s", m.JID)
 		}
 		pos, busy, err = br.submit(&m)
-		if !errors.Is(err, errBrainRetired) {
+		if !errors.Is(err, ErrRetired) {
 			return br, pos, busy, err
 		}
 	}
@@ -1768,19 +1768,19 @@ func (bm *brainManager) Submit(m Inbound) (br *Brain, pos int, busy bool, err er
 // reply chat, often a chat another brain owns, so !stop there must reach it.
 // It reports whether a run was stopped and how many waiting messages were
 // dropped.
-func (bm *brainManager) StopHandOffs(jid string) (stopped bool, dropped int) {
+func (bm *Manager) StopHandOffs(jid string) (stopped bool, Dropped int) {
 	for _, br := range bm.Brains() {
 		s, d := br.StopHandOffs(jid)
-		stopped, dropped = stopped || s, dropped+d
+		stopped, Dropped = stopped || s, Dropped+d
 	}
-	return stopped, dropped
+	return stopped, Dropped
 }
 
 // KillRuns cancels every brain's run in flight at once, for a second signal.
 // Before os.Exit it waits for each process supervisor to acknowledge the
 // kill, never for the runs' output or delivery. Cancellation alone could
 // return before os/exec's watcher had a chance to signal the process group.
-func (bm *brainManager) KillRuns() {
+func (bm *Manager) KillRuns() {
 	bm.mu.Lock()
 	bm.forced.Store(true)
 	brains := append([]*Brain(nil), bm.order...)
@@ -1811,7 +1811,7 @@ func (bm *brainManager) KillRuns() {
 // Brain.shutdown), all at once, after the brains reloads took out have
 // kept what they had waiting. Each run in flight gets shutdownGrace
 // to finish and be delivered.
-func (bm *brainManager) Stop() {
+func (bm *Manager) Stop() {
 	bm.reloadMu.Lock()
 	bm.stopped = true
 	brains := bm.Brains()

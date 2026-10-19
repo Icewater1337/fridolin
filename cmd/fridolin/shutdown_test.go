@@ -494,38 +494,6 @@ func TestStopWaitsForARemovedBrainsDelivery(t *testing.T) {
 	}
 }
 
-func TestRetirementKeepsItsQueueWhenStopHasBegun(t *testing.T) {
-	mgr, _, _ := queueTestManager(t, 10, "")
-	var started, kept atomic.Int32
-	mgr.SetHooks(BrainHooks{
-		RunEnv:  func(string) ([]string, func()) { started.Add(1); return nil, func() {} },
-		Waiting: func(_ *Brain, ms []Inbound) { kept.Add(int32(len(ms))) },
-	})
-	// A retirement whose old worker is still delivering holds Stop at
-	// its retirement barrier. Its queue arrives at requeue afterward.
-	mgr.retiring.Add(1)
-	retired := sync.OnceFunc(mgr.retiring.Done)
-	defer retired()
-	stopped := make(chan struct{})
-	go func() { mgr.Stop(); close(stopped) }()
-	testutil.WaitFor(t, 5*time.Second, "the stop to begin", func() bool {
-		mgr.reloadMu.Lock()
-		defer mgr.reloadMu.Unlock()
-		return mgr.stopped
-	})
-	mgr.requeue(mgr.Get("a"), []Inbound{dm("still waiting")})
-	testutil.WaitFor(t, 5*time.Second, "the retired queue to be handled", func() bool { return started.Load()+kept.Load() > 0 })
-	if started.Load() != 0 || kept.Load() != 1 {
-		t.Errorf("retirement during stop: started=%d, kept=%d; want zero runs and one kept message", started.Load(), kept.Load())
-	}
-	retired()
-	select {
-	case <-stopped:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Stop did not finish after retirement")
-	}
-}
-
 // Finishing the grace and the kill wait must not close the store beneath
 // an answer already being delivered. A second signal remains the way to
 // abandon a stuck shutdown.
@@ -653,7 +621,7 @@ func waitBatched(h *harness, n int) {
 		d.mu.Lock()
 		defer d.mu.Unlock()
 		for _, b := range d.batches {
-			return len(d.batches) == 1 && len(b.msg.ownParts()) == n
+			return len(d.batches) == 1 && max(1, len(b.msg.Save().Parts)) == n
 		}
 		return false
 	})

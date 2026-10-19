@@ -1,4 +1,4 @@
-package main
+package brain
 
 import "github.com/Icewater1337/fridolin/internal/history"
 

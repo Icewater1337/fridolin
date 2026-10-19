@@ -1,4 +1,4 @@
-package main
+package brain
 
 import (
 	"github.com/Icewater1337/fridolin/internal/claudecli"
@@ -9,7 +9,7 @@ import (
 // is an ephemeral notice; Question reports whether the chat accepted it.
 // History runs after the history lock is released. Undelivered is queried
 // under that lock, ordering the outbox-to-history transition.
-type brainSink interface {
+type Sink interface {
 	Working(jid string)
 	Question(br *Brain, jid, text string) bool
 	Finished(br *Brain, m Inbound, res claudecli.Result)
@@ -21,7 +21,7 @@ type brainSink interface {
 
 // brainSinkRef is shared by the manager's live and retired brains. Wiring is
 // done before messages arrive; no lock is held across delivery callbacks.
-type brainSinkRef struct{ target brainSink }
+type brainSinkRef struct{ target Sink }
 
 func (s *brainSinkRef) Working(jid string) {
 	if s != nil && s.target != nil {
@@ -40,7 +40,7 @@ func (s *brainSinkRef) Waiting(br *Brain, ms []Inbound) {
 	if s != nil && s.target != nil {
 		s.target.Waiting(br, ms)
 	} else {
-		dropped(ms)
+		Dropped(ms)
 	}
 }
 func (s *brainSinkRef) Interrupted(br *Brain, m Inbound) {

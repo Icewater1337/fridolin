@@ -50,7 +50,6 @@ type BrainHooks struct {
 // to the owned Sink interface. Chat formatting stays in command composition.
 type brainHooksSink struct{ hooks *BrainHooks }
 
-func sinkForHooks(h *BrainHooks) *brainSinkRef { return &brainSinkRef{target: brainHooksSink{h}} }
 func (s brainHooksSink) Working(jid string) {
 	if s.hooks != nil && s.hooks.Notice != nil {
 		s.hooks.Notice(jid, outboundmsg.WorkingNotice)

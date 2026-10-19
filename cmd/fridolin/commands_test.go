@@ -13,21 +13,18 @@ import (
 	"testing"
 	"time"
 
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
-	"github.com/Icewater1337/fridolin/internal/whatsapp"
-
 	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/manifest"
-	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/testutil"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
-
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
 )
@@ -768,7 +765,7 @@ func TestResetByLIDStartsTheDMAfresh(t *testing.T) {
 	tb, br := newMainBridge(t, "")
 	br.AppendHistory(testDMChat, "15551234567", "before the reset", history.In)
 	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: otherNumber + "@lid", Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
-	if before, _ := br.historyBefore(dm("next"), prompttext.DMHistoryWindow); len(before) != 0 {
+	if before := promptBlock(capturedPrompt(t, br, dm("next")), "chat_history"); before != "" {
 		t.Errorf("the DM's next run would read %+v", before)
 	}
 }

@@ -303,7 +303,7 @@ func TestCalendarDefaultIsOneOfTheBrainsCalendars(t *testing.T) {
 			if w := tb.do("POST", "/api/brains/a/approve", map[string]any{"manifest": m}); w.Code != 200 {
 				t.Fatal(w.Body.String())
 			}
-			if got := tb.brainMgr.Get("a").settings.Load().Manifest.Calendar; got.Default != def {
+			if got := tb.brainMgr.Get("a").Manifest().Calendar; got.Default != def {
 				t.Fatalf("the approved manifest has default %q, want %q", got.Default, def)
 			}
 
@@ -329,7 +329,7 @@ func TestCalendarDefaultIsOneOfTheBrainsCalendars(t *testing.T) {
 func TestCalendarWithNoCalendarsChosen(t *testing.T) {
 	f := newFakeCalendarAPI(t)
 	tb, url, token := calendarBrain(t, f, nil, "", false)
-	if tb.brainMgr.Get("a").settings.Load().Manifest.Calendar != nil {
+	if tb.brainMgr.Get("a").Manifest().Calendar != nil {
 		t.Fatal("the brain has calendars chosen")
 	}
 	code, doc := brainTool(t, calendarCmd, url, token, "calendars")

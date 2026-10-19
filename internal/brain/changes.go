@@ -1,4 +1,4 @@
-package main
+package brain
 
 import (
 	"log"
@@ -54,7 +54,7 @@ func (br *Brain) Change(c chat.Change) (waiting bool, edited *Inbound) {
 		}
 	}
 	br.mu.Unlock()
-	dropped(gone)
+	Dropped(gone)
 	if stop != nil {
 		// Not waiting for it to end: this runs on whatsmeow's event
 		// goroutine, and a stopped run sends nothing anyway.

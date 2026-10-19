@@ -49,7 +49,7 @@ func TestWhatsAppCallbackProjections(t *testing.T) {
 	calls := 0
 	handler := whatsAppInboundHandler(func(gotCtx context.Context, m Inbound) {
 		calls++
-		if gotCtx != ctx || !reflect.DeepEqual(m.Inbound, in) || !reflect.ValueOf(m.logged).IsZero() || len(m.parts) != 0 {
+		if gotCtx != ctx || !reflect.DeepEqual(m.Inbound, in) || m.Save().Logged != nil || len(m.Save().Parts) != 0 {
 			t.Fatalf("inbound projection = %+v", m)
 		}
 	})

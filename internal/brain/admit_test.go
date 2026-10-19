@@ -1,4 +1,4 @@
-package main
+package brain
 
 import (
 	"errors"
@@ -50,7 +50,7 @@ func TestAdmitPreservesQueueBoundaries(t *testing.T) {
 			t.Parallel()
 			before := slices.Clone(tc.pending)
 			next, gone, interrupt, err := admit(tc.pending, tc.message, tc.mode, tc.limit)
-			if !reflect.DeepEqual(ids(next), tc.want) || !reflect.DeepEqual(ids(gone), tc.gone) || interrupt != tc.interrupt || errors.Is(err, errQueueFull) != tc.full {
+			if !reflect.DeepEqual(ids(next), tc.want) || !reflect.DeepEqual(ids(gone), tc.gone) || interrupt != tc.interrupt || errors.Is(err, ErrQueueFull) != tc.full {
 				t.Fatalf("got queue=%v gone=%v interrupt=%t err=%v; want queue=%v gone=%v interrupt=%t full=%t", ids(next), ids(gone), interrupt, err, tc.want, tc.gone, tc.interrupt, tc.full)
 			}
 			if !reflect.DeepEqual(tc.pending, before) {

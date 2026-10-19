@@ -1,4 +1,4 @@
-package main
+package brain
 
 import (
 	"context"
@@ -10,9 +10,9 @@ import (
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 )
 
-type brainRunnerFunc func(context.Context, brainRunSpec, claudecli.Callbacks) claudecli.Result
+type brainRunnerFunc func(context.Context, RunSpec, claudecli.Callbacks) claudecli.Result
 
-func (f brainRunnerFunc) Run(ctx context.Context, spec brainRunSpec, callbacks claudecli.Callbacks) claudecli.Result {
+func (f brainRunnerFunc) Run(ctx context.Context, spec RunSpec, callbacks claudecli.Callbacks) claudecli.Result {
 	return f(ctx, spec, callbacks)
 }
 
@@ -20,11 +20,11 @@ func TestBrainRunnerPreservesOrderPositionAndSettingsSnapshot(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		mgr, d, _ := queueTestManager(t, 0, "")
 		br := mgr.Get("a")
-		started := make(chan brainRunSpec, 3)
+		started := make(chan RunSpec, 3)
 		release := make(chan struct{})
 		defer close(release)
 		runs := 0
-		br.runner = brainRunnerFunc(func(ctx context.Context, spec brainRunSpec, callbacks claudecli.Callbacks) claudecli.Result {
+		br.runner = brainRunnerFunc(func(ctx context.Context, spec RunSpec, callbacks claudecli.Callbacks) claudecli.Result {
 			runs++
 			spec.BeforeStart()
 			if cleanup := callbacks.Started(runs); cleanup != nil {

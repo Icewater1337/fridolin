@@ -244,7 +244,7 @@ func TestGroupSenderAndQuoteByNumber(t *testing.T) {
 	}
 	// The next run's history names them from the identity map (the
 	// starter prompt names Alex too, in an example).
-	preface := br.buildPrompt(br.settings.Load(), Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15559876543", Text: "next"}})
+	preface := capturedPrompt(t, br, Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15559876543", Text: "next"}})
 	if !strings.Contains(promptBlock(preface, "chat_history"), "Alex (15551234567)") {
 		t.Errorf("preface = %q, want Alex named", preface)
 	}
@@ -258,7 +258,7 @@ func TestPrefaceReadsADMsLIDHistory(t *testing.T) {
 	br.AppendHistory(lid, "15551234567", "OLD-UNDER-LID", history.In)
 	br.AppendHistory(testDMChat, "15551234567", "NEW-UNDER-NUMBER", history.In)
 	br.AppendHistory("15559876543@s.whatsapp.net", "15559876543", "SOMEONE-ELSE", history.In)
-	preface := br.buildPrompt(&brainSettings{}, Inbound{Inbound: chat.Inbound{JID: testDMChat, ChatAlt: lid, Sender: "15551234567", Text: "next"}})
+	preface := capturedPrompt(t, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, ChatAlt: lid, Sender: "15551234567", Text: "next"}})
 	if !strings.Contains(preface, "OLD-UNDER-LID") || !strings.Contains(preface, "NEW-UNDER-NUMBER") {
 		t.Errorf("preface = %q, want both parts of the chat", preface)
 	}

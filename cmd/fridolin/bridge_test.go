@@ -773,7 +773,7 @@ func TestNamesReadOutsideGo(t *testing.T) {
 		file string
 		want []string
 	}{
-		{"web/assets/components/brain.js", []string{outcomeOK + ": [", outcomeError + ": [", outcomeInterrupted + ": [", outcomeQuestion + ": ["}},
+		{"web/assets/components/brain.js", []string{"ok" + ": [", "error" + ": [", "interrupted" + ": [", "question" + ": ["}},
 		{"web/assets/pages/settings.js", []string{"def: '" + config.QueueModeQueue + "'", "['" + config.QueueModeQueue + "', ", "['" + config.QueueModeInterrupt + "', "}},
 		{"web/assets/lib/brain.js", []string{"export const BRIDGE_BACKUP_ID = '" + bridgeBackupID + "';", "[['" + manifest.ObserveHistory + "', ", "['" + manifest.ObserveRun + "', "}},
 		{"web/assets/pages/brain.js", []string{"m.observe || '" + manifest.ObserveHistory + "'"}},

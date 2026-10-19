@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/jsonx"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/store"
@@ -101,7 +104,7 @@ func takeInbound(ctx context.Context, s *store.Store) ([]keptInbound, error) {
 		switch k.Kind {
 		case inboundQueued, inboundHeld, inboundLate:
 			var m storedInbound
-			if err := json.Unmarshal([]byte(body), &m); err != nil {
+			if err := decodeSavedInbound([]byte(body), &m); err != nil {
 				bad = append(bad, fmt.Errorf("row %d: %w", k.ID, err))
 				return
 			}
@@ -124,4 +127,21 @@ func takeInbound(ctx context.Context, s *store.Store) ([]keptInbound, error) {
 		return nil, err
 	}
 	return out, errors.Join(bad...)
+}
+
+// decodeSavedInbound preserves the persisted queue's decoder diagnostics when
+// its representation moves to the runtime package. The underlying typed error
+// remains available to callers through errors.As.
+func decodeSavedInbound(body []byte, out *storedInbound) error {
+	return jsonx.RenameTypeError(json.Unmarshal(body, out), func(t reflect.Type) string {
+		if t == reflect.TypeFor[storedInbound]() {
+			return "main.storedInbound"
+		}
+		return ""
+	}, func(name string) string {
+		if name == "SavedInbound" {
+			return "storedInbound"
+		}
+		return ""
+	})
 }
