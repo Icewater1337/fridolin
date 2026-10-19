@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/logx"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"log"
 	"net"
 	"net/http"
@@ -15,7 +17,7 @@ import (
 	"unicode"
 
 	"github.com/Icewater1337/fridolin/internal/platform"
-	"go.mau.fi/whatsmeow/store"
+	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -40,12 +42,12 @@ func isJunkMessage(text string) bool {
 type Bridge struct {
 	cfgs     *ConfigStore
 	lock     *platform.Lock
-	store    *Store
+	store    *store.Store
 	wa       Messenger
 	dev      *devMessenger // non-nil in --no-whatsapp mode
 	brainMgr *BrainManager
 	deb      *Debouncer
-	logs     *LogRing
+	logs     *logx.Ring
 	activity *Activity
 	token    *DashboardToken
 	// tokenAtStart is dashboard.require_token as the bridge started.
@@ -73,7 +75,7 @@ type Bridge struct {
 	// lids is whatsmeow's map between LIDs and phone numbers, nil in dev
 	// mode, for what knows a person by LID outside an event: a /send to
 	// one.
-	lids func() store.LIDStore
+	lids func() wastore.LIDStore
 
 	httpSrv *http.Server
 	// loops are the goroutines Start leaves running past its return,
@@ -94,7 +96,7 @@ type Bridge struct {
 // BridgeOptions are the run-time switches from the command line.
 type BridgeOptions struct {
 	NoWhatsApp bool
-	Logs       *LogRing
+	Logs       *logx.Ring
 	// Restart asks whoever runs the bridge to stop it and run it again
 	// (POST /api/restart): runCmd ends its context with errRestart. Nil
 	// leaves the bridge unable to restart itself.
@@ -139,7 +141,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 			log.Printf("media: readying %s for inboxes: %v", cfg.MediaDir, err)
 		}
 	}
-	store, err := NewStore(cfg)
+	store, err := store.Open(cfg.DBPath, cfg.LogLevel)
 	if err != nil {
 		return nil, fmt.Errorf("creating store: %w", err)
 	}
@@ -169,7 +171,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	}
 	b.exe = bridgeBinary()
 	if b.logs == nil {
-		b.logs = NewLogRing(logRingLines)
+		b.logs = logx.NewRing(logRingLines)
 	}
 
 	mgr, err := NewBrainManager(cfg)
@@ -386,7 +388,7 @@ func (b *Bridge) connectLoop(ctx context.Context) {
 		if err == nil {
 			return
 		}
-		if errors.Is(err, store.ErrDeviceDeleted) || errors.Is(err, errPairingLive) {
+		if errors.Is(err, wastore.ErrDeviceDeleted) || errors.Is(err, errPairingLive) {
 			log.Printf("WhatsApp connect failed: %v", err)
 			return
 		}
@@ -458,7 +460,7 @@ func (b *Bridge) keep(kind, brain string, m Inbound) {
 		dropped([]Inbound{m})
 		return
 	}
-	if err := b.store.KeepInbound(context.Background(), kind, brain, m); err != nil {
+	if err := keepInbound(context.Background(), b.store, kind, brain, m); err != nil {
 		log.Printf("%v; it is lost", err)
 	}
 }
@@ -471,7 +473,7 @@ func (b *Bridge) keepInterrupted(br *Brain, m Inbound) {
 	if m.Source != sourceWhatsApp || m.Silent {
 		return
 	}
-	if err := b.store.KeepInterrupted(context.Background(), br.ID(), m); err != nil {
+	if err := keepInterrupted(context.Background(), b.store, br.ID(), m); err != nil {
 		log.Printf("brain %s: %v", br.ID(), err)
 	}
 }
@@ -491,7 +493,7 @@ func (b *Bridge) resume(ctx context.Context) {
 	// that begins meanwhile keeps what is still waiting again, but a
 	// notice it cut off would be lost.
 	ctx = context.WithoutCancel(ctx)
-	rows, err := b.store.TakeInbound(ctx)
+	rows, err := takeInbound(ctx, b.store)
 	if err != nil {
 		log.Printf("taking up what the last stop kept: %v", err)
 	}
@@ -640,7 +642,7 @@ func (b *Bridge) keepLate(m Inbound) {
 func (b *Bridge) handleChange(c messageChange) {
 	if !b.intake.enter() {
 		kept := b.intake.keep(func() {
-			if err := b.store.KeepChange(context.Background(), c, time.Now()); err != nil {
+			if err := keepChange(context.Background(), b.store, c, time.Now()); err != nil {
 				log.Printf("%v; it is lost", err)
 			}
 		})
@@ -913,7 +915,7 @@ func (b *Bridge) deliver(br *Brain, m Inbound, res RunResult) {
 // records it in the history of the brain that wrote it: only now is it
 // something the brain said. The history gets it only once its row is gone,
 // so the retry after a failed removal does not record it twice.
-func (b *Bridge) delivered(ctx context.Context, r outboxRow) error {
+func (b *Bridge) delivered(ctx context.Context, r store.OutboxRow) error {
 	remove := func() error { return b.store.OutboxDelivered(ctx, r.ID) }
 	if r.Brain == "" || r.History == "" {
 		return remove()

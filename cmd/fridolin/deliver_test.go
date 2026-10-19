@@ -145,7 +145,7 @@ func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
 			t.Setenv("FRIDOLIN_FAKE_ASK", `{"questions":[{"question":"Which day?"}]}`)
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "300") // time for the working notice
 			if c.refused {
-				if _, err := tb.store.db.Exec(`CREATE TRIGGER refuse_outbox BEFORE INSERT ON outbox BEGIN SELECT RAISE(FAIL, 'disk full'); END`); err != nil {
+				if _, err := testStoreSQL(t, tb.cfgs.Startup().DBPath).Exec(`CREATE TRIGGER refuse_outbox BEFORE INSERT ON outbox BEGIN SELECT RAISE(FAIL, 'disk full'); END`); err != nil {
 					t.Fatal(err)
 				}
 			}

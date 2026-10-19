@@ -15,6 +15,7 @@ import (
 	"testing"
 	"unicode"
 
+	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
@@ -520,7 +521,7 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 		matches = append(matches, string(m))
 	}
 	// The bridge takes a level in any case; the docs write it in lower.
-	for l := range waLevels {
+	for _, l := range logx.Levels() {
 		levels = append(levels, strings.ToLower(l))
 	}
 	tests := []struct {

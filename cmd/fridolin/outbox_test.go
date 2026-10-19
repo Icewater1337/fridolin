@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/store"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
@@ -244,21 +245,22 @@ func TestWithUndelivered(t *testing.T) {
 // line that the retry writes again, nor the chat get the reply twice.
 func TestReplyIsRecordedOnceWhenItsRowStays(t *testing.T) {
 	tb, br := newMainBridge(t, "")
+	db := testStoreSQL(t, tb.cfgs.Startup().DBPath)
 	// bridge.db refuses to delete from the outbox until the trigger goes.
-	if _, err := tb.store.db.Exec(`CREATE TRIGGER keep_outbox BEFORE DELETE ON outbox BEGIN SELECT RAISE(FAIL, 'disk I/O error'); END`); err != nil {
+	if _, err := db.Exec(`CREATE TRIGGER keep_outbox BEFORE DELETE ON outbox BEGIN SELECT RAISE(FAIL, 'disk I/O error'); END`); err != nil {
 		t.Fatal(err)
 	}
 	tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "hello", Source: sourceWhatsApp})
 	waitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
 	waitFor(t, 5*time.Second, "the row, all of it sent", func() bool {
 		var left int
-		err := tb.store.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE state = 'pending' AND next_part = 1`).Scan(&left)
+		err := db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE state = 'pending' AND next_part = 1`).Scan(&left)
 		return err == nil && left == 1
 	})
 	if out := historyTexts(t, br, historyOut); len(out) != 0 {
 		t.Errorf("history holds %q while the reply is still in the outbox", out)
 	}
-	if _, err := tb.store.db.Exec(`DROP TRIGGER keep_outbox`); err != nil {
+	if _, err := db.Exec(`DROP TRIGGER keep_outbox`); err != nil {
 		t.Fatal(err)
 	}
 	tb.outbox.Wake()
@@ -276,10 +278,12 @@ func TestReplyIsRecordedOnceWhenItsRowStays(t *testing.T) {
 // Asking for the summary, which the dashboard does every few seconds,
 // changes nothing; the outbox itself forgets replies given up on long ago.
 func TestOutboxSummaryOnlyReads(t *testing.T) {
-	s := openOutboxStore(t, t.TempDir())
+	dir := t.TempDir()
+	s := openOutboxStore(t, dir)
+	db := testStoreSQL(t, filepath.Join(dir, "bridge.db"))
 	ctx := context.Background()
-	old := time.Now().Add(-outboxFailedKeep - time.Hour)
-	id, err := s.AddOutbox(ctx, outboxRow{Chat: testDMChat, Parts: []outboxPart{{Text: "x"}}, CreatedAt: old})
+	old := time.Now().Add(-store.OutboxFailedKeep - time.Hour)
+	id, err := s.AddOutbox(ctx, store.OutboxRow{Chat: testDMChat, Parts: []store.OutboxPart{{Text: "x"}}, CreatedAt: old})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,7 +292,7 @@ func TestOutboxSummaryOnlyReads(t *testing.T) {
 	}
 	rows := func() int {
 		var n int
-		if err := s.db.QueryRow(`SELECT COUNT(*) FROM outbox`).Scan(&n); err != nil {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM outbox`).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n
@@ -319,9 +323,9 @@ func TestQuestionsWaitAndNoticesDoNot(t *testing.T) {
 }
 
 // openOutboxStore opens a bridge.db in dir.
-func openOutboxStore(t *testing.T, dir string) *Store {
+func openOutboxStore(t *testing.T, dir string) *store.Store {
 	t.Helper()
-	s, err := NewStore(&Config{DBPath: filepath.Join(dir, "bridge.db"), LogLevel: "error"})
+	s, err := store.Open(filepath.Join(dir, "bridge.db"), "error")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +340,7 @@ func TestOutboxSurvivesARestart(t *testing.T) {
 	cfg := func() *Config { return &Config{MaxChunkSize: 4000} }
 	s := openOutboxStore(t, dir)
 	down := newFlakyMessenger(cfg, false)
-	first := newOutbox(s, func() Messenger { return down }, 0, func(context.Context, outboxRow) error {
+	first := newOutbox(s, func() Messenger { return down }, 0, func(context.Context, store.OutboxRow) error {
 		t.Error("delivered while offline")
 		return nil
 	})
@@ -353,8 +357,8 @@ func TestOutboxSurvivesARestart(t *testing.T) {
 
 	s = openOutboxStore(t, dir)
 	up := newFlakyMessenger(cfg, true)
-	got := make(chan outboxRow, 1)
-	second := newOutbox(s, func() Messenger { return up }, 0, func(ctx context.Context, r outboxRow) error {
+	got := make(chan store.OutboxRow, 1)
+	second := newOutbox(s, func() Messenger { return up }, 0, func(ctx context.Context, r store.OutboxRow) error {
 		got <- r
 		return s.OutboxDelivered(ctx, r.ID)
 	})
@@ -380,17 +384,19 @@ func TestOutboxSurvivesARestart(t *testing.T) {
 // text, and a recipient the bridge refuses is given up on at once. Either
 // way the dashboard hears of it.
 func TestOutboxGivesUp(t *testing.T) {
-	s := openOutboxStore(t, t.TempDir())
+	dir := t.TempDir()
+	s := openOutboxStore(t, dir)
+	db := testStoreSQL(t, filepath.Join(dir, "bridge.db"))
 	m := newFlakyMessenger(func() *Config { return &Config{} }, true)
 	o := newOutbox(s, func() Messenger { return m }, 0, nil)
 	defer o.Stop()
-	if _, err := s.AddOutbox(context.Background(), outboxRow{Chat: testDMChat, Brain: "main", History: "stale", Parts: []outboxPart{{Text: "stale"}}, CreatedAt: time.Now().Add(-2 * outboxTTL)}); err != nil {
+	if _, err := s.AddOutbox(context.Background(), store.OutboxRow{Chat: testDMChat, Brain: "main", History: "stale", Parts: []store.OutboxPart{{Text: "stale"}}, CreatedAt: time.Now().Add(-2 * outboxTTL)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := o.Text(context.Background(), "status@broadcast", "to everyone", 0); err != nil {
 		t.Fatal(err)
 	}
-	var sum outboxSummary
+	var sum store.OutboxSummary
 	waitFor(t, 5*time.Second, "both given up", func() bool {
 		sum, _ = s.OutboxSummary(context.Background(), time.Now())
 		return sum.Failed == 2
@@ -402,7 +408,7 @@ func TestOutboxGivesUp(t *testing.T) {
 		t.Errorf("sent %+v", sent)
 	}
 	var texts int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE parts != '[]' OR history != ''`).Scan(&texts); err != nil || texts != 0 {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE parts != '[]' OR history != ''`).Scan(&texts); err != nil || texts != 0 {
 		t.Errorf("%d rows still hold their text (%v)", texts, err)
 	}
 }
@@ -443,10 +449,10 @@ func TestStatusWarnsAboutTheOutbox(t *testing.T) {
 	tb := newTestBridge(t, "")
 	tb.wa = newFlakyMessenger(tb.cfgs.Get, false)
 	ctx := context.Background()
-	if _, err := tb.store.AddOutbox(ctx, outboxRow{Chat: testDMChat, Parts: []outboxPart{{Text: "late"}}, CreatedAt: time.Now().Add(-10 * time.Minute)}); err != nil {
+	if _, err := tb.store.AddOutbox(ctx, store.OutboxRow{Chat: testDMChat, Parts: []store.OutboxPart{{Text: "late"}}, CreatedAt: time.Now().Add(-10 * time.Minute)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tb.store.AddOutbox(ctx, outboxRow{Chat: testGroup, Parts: []outboxPart{{Text: "too late"}}, CreatedAt: time.Now().Add(-2 * outboxTTL)}); err != nil {
+	if _, err := tb.store.AddOutbox(ctx, store.OutboxRow{Chat: testGroup, Parts: []store.OutboxPart{{Text: "too late"}}, CreatedAt: time.Now().Add(-2 * outboxTTL)}); err != nil {
 		t.Fatal(err)
 	}
 	tb.outbox.Wake()
@@ -460,9 +466,11 @@ func TestStatusWarnsAboutTheOutbox(t *testing.T) {
 // reads counts as waiting or as given up on, never as both or neither.
 // TestOutboxGivesUp saw one counted twice on CI.
 func TestOutboxSummaryIsOneMoment(t *testing.T) {
-	s := openOutboxStore(t, t.TempDir())
+	dir := t.TempDir()
+	s := openOutboxStore(t, dir)
+	db := testStoreSQL(t, filepath.Join(dir, "bridge.db"))
 	ctx := context.Background()
-	if _, err := s.AddOutbox(ctx, outboxRow{Chat: testDMChat, Parts: []outboxPart{{Text: "hi"}}, CreatedAt: time.Now()}); err != nil {
+	if _, err := s.AddOutbox(ctx, store.OutboxRow{Chat: testDMChat, Parts: []store.OutboxPart{{Text: "hi"}}, CreatedAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	// The reply goes back and forth between waiting and given up on.
@@ -476,7 +484,7 @@ func TestOutboxSummaryIsOneMoment(t *testing.T) {
 				return
 			default:
 			}
-			if _, err := s.db.ExecContext(ctx, `UPDATE outbox SET state = CASE state WHEN 'pending' THEN 'failed' ELSE 'pending' END, next_try_at = ?`, time.Now().UTC()); err != nil {
+			if _, err := db.ExecContext(ctx, `UPDATE outbox SET state = CASE state WHEN 'pending' THEN 'failed' ELSE 'pending' END, next_try_at = ?`, time.Now().UTC()); err != nil {
 				flipped <- err
 				return
 			}

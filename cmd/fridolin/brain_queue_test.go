@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"github.com/Icewater1337/fridolin/internal/logx"
 	"log"
 	"maps"
 	"os"
@@ -971,7 +972,7 @@ func TestMCPConfigOf(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ring := NewLogRing(10)
+			ring := logx.NewRing(10)
 			prev := log.Writer()
 			log.SetOutput(ring)
 			t.Cleanup(func() { log.SetOutput(prev) })
@@ -1039,7 +1040,7 @@ func TestMCPConfigOfDropsServersTurnedOff(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ring := NewLogRing(10)
+			ring := logx.NewRing(10)
 			prev := log.Writer()
 			log.SetOutput(ring)
 			t.Cleanup(func() { log.SetOutput(prev) })
@@ -1125,7 +1126,7 @@ func TestMCPConfigOfStaysInTheBrainFolder(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ring := NewLogRing(10)
+			ring := logx.NewRing(10)
 			prev := log.Writer()
 			log.SetOutput(ring)
 			t.Cleanup(func() { log.SetOutput(prev) })

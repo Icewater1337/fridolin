@@ -565,17 +565,17 @@ func TestResumeAppliesChangesBeforeStartingQueuedRuns(t *testing.T) {
 		return nil, func() {}
 	}})
 	m := Inbound{JID: harnessDM, Sender: "15551234567", Text: "must not run", Source: sourceWhatsApp, At: time.Now(), ID: "3EB0DELETED"}
-	if err := tb.store.KeepInbound(t.Context(), inboundQueued, "a", m); err != nil {
+	if err := keepInbound(t.Context(), tb.store, inboundQueued, "a", m); err != nil {
 		t.Fatal(err)
 	}
 	for i := range 128 {
 		help := m
 		help.Text, help.ID = "!help", fmt.Sprintf("3EB0HELP%d", i)
-		if err := tb.store.KeepInbound(t.Context(), inboundLate, "", help); err != nil {
+		if err := keepInbound(t.Context(), tb.store, inboundLate, "", help); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := tb.store.KeepChange(t.Context(), messageChange{Kind: changeRevoke, Chat: m.JID, Sender: m.Sender, Target: m.ID}, time.Now()); err != nil {
+	if err := keepChange(t.Context(), tb.store, messageChange{Kind: changeRevoke, Chat: m.JID, Sender: m.Sender, Target: m.ID}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	tb.resume(t.Context())
@@ -627,7 +627,7 @@ func TestShutdownKeepsWhatItHolds(t *testing.T) {
 func TestResumeOutlivesItsContext(t *testing.T) {
 	tb := newTestBridge(t, "")
 	m := Inbound{JID: harnessDM, Sender: "15551234567", Text: "summarise", Source: sourceWhatsApp, At: time.Now(), ID: "3EB0CUT"}
-	if err := tb.store.KeepInterrupted(t.Context(), "main", m); err != nil {
+	if err := keepInterrupted(t.Context(), tb.store, "main", m); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -723,6 +723,7 @@ func TestShutdownKeepsWhatComesInDuringTheStop(t *testing.T) {
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
 
 	b := h.b
+	db := testStoreSQL(t, b.cfgs.Get().DBPath)
 	stopped := make(chan struct{})
 	go func() {
 		h.Shutdown()
@@ -738,7 +739,7 @@ func TestShutdownKeepsWhatComesInDuringTheStop(t *testing.T) {
 	h.WhatsApp(dmEvent("3EB0DEL", revokeMsg("3EB0DOOMED")))
 	h.WaitFor("what came in to be kept", func() bool {
 		var n int
-		err := b.store.db.QueryRow(`SELECT COUNT(*) FROM inbound_queue WHERE kind IN ('late', 'change')`).Scan(&n)
+		err := db.QueryRow(`SELECT COUNT(*) FROM inbound_queue WHERE kind IN ('late', 'change')`).Scan(&n)
 		return err == nil && n == 3
 	})
 	<-stopped

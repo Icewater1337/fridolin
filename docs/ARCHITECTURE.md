@@ -29,6 +29,10 @@ behaviour unless its title says so. The steps so far:
 - **R3**: the foundation packages `fsx`, `textx`, `version`, `trigger` and
   `platform` below `internal/`, and `internal/archtest`, which enforces the
   rules of section 4 that already apply.
+- **R4, first slice**: `logx` owns the log ring and whatsmeow logger adapter;
+  `store` owns the database, poll, outbox and inbound queue repositories.
+  The shared file permission helper lives in `fsx`. Process logger setup and file rotation
+  remain in `cmd/fridolin`.
 
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
@@ -77,7 +81,7 @@ them needs its own migration plan, not a refactor.
 
 | Contract | Owner | Today |
 | --- | --- | --- |
-| `bridge.db`: the whatsmeow device store plus `polls`, `poll_votes`, `ignored_chats` and `outbox`, versioned in `fridolin_version`. The retired `sessions` and `process_state` tables stay in the schema and are never dropped. Opening an existing file must never force a re-pair. | `internal/store` | `store.go`, `outbox_store.go` |
+| `bridge.db`: the whatsmeow device store plus `polls`, `poll_votes`, `ignored_chats`, `outbox` and `inbound_queue`, versioned in `fridolin_version`. The retired `sessions` and `process_state` tables stay in the schema and are never dropped. Opening an existing file must never force a re-pair. | `internal/store` | `internal/store/store.go`, `internal/store/outbox_store.go` |
 | `config.json` keys and meanings. The retired keys `model`, `work_dir`, `brain_mode` and `brains` still load. | `internal/config` | `config.go`, `configstore.go` |
 | `brain.json`, version 1. | `internal/manifest` | `manifest.go` |
 | `conversation-history.jsonl`: one JSON object per line, `{ts, from, chat, text, type}`. | `internal/history` | `brain.go` |
@@ -142,8 +146,9 @@ responsibility and says what it must not do.
   parameter), `Canonical` (clean and resolve symlinks), `Resolve` (the real
   path of an absolute path, through the part that exists, which `Canonical`
   falls back on for a path that does not exist yet), `Within` (containment
-  that avoids the sibling-prefix trap) and `Exists`. *Planned:* helpers for
-  working inside an `*os.Root`.
+  that avoids the sibling-prefix trap), `Exists`, and `RestrictToOwner`
+  (remove group/other access while preserving owner access and special bits).
+  *Planned:* helpers for working inside an `*os.Root`.
 - **`textx`**: `Truncate` and `Tail`, which shorten text from its end or its
   start to a byte limit without splitting a rune.
 - **`version`**: `String()`, which returns the `-ldflags -X` value, or
@@ -175,9 +180,9 @@ responsibility and says what it must not do.
   resolved helper path, allowlisted environment and timeout. Trusted helper
   lookup stays in the composition code. *Planned:* process start times
   from `procstart_*.go`.
-- **`logx`** *(to come, R4; `logbuf.go`, `logfile*.go`)*: the in-memory log
-  ring the dashboard reads, the whatsmeow logger adapter, and the process
-  logger setup.
+- **`logx`**: the in-memory `Ring` and `Line` the dashboard reads, and
+  `NewWaLogger`, the whatsmeow logger adapter. The process logger setup,
+  configured ring capacity and file rotation remain in `cmd/fridolin`.
 
 ### Formats and storage
 
@@ -190,10 +195,16 @@ responsibility and says what it must not do.
   It provides `Entry`, `Append`, `Tail` and `ForChat`, all through the
   brain's `os.Root`. A file is read back from its end, a block at a time,
   and `ForChat` stops at the chat's newest reset marker.
-- **`store`** *(to come, R4; `store.go`, `outbox_store.go`)*: `bridge.db`.
+- **`store`**: `bridge.db`, opened with `Open(dbPath, logLevel)`.
   Fridolin's own tables are versioned in the `fridolin_version` table, kept
   apart from whatsmeow's `whatsmeow_version`, and migrations only add.
-  Repositories handle polls, poll votes, ignored chats and the outbox.
+  Repositories handle polls, poll votes, ignored chats, the outbox and inbound
+  queue rows. Inbound JSON encoding and decoding stay in `cmd/fridolin`,
+  alongside the message and history types; store handles opaque bodies and
+  preserves SQL ordering and transactional deletion after the codec visits
+  every row. A failed transaction exposes none of the decoded rows.
+  The raw SQL connection stays private; integration tests open separate
+  connections to their scratch databases for assertions and failure injection.
   *Planned (R19):* one `*sql.DB` shared by the whatsmeow device container
   and Fridolin's tables.
 - **`media`** *(to come, R4; `media.go`)*: the media folder and each
@@ -364,7 +375,7 @@ google ─► manifest, fsx, apperr
 plaud  ─► media, platform, chat, fsx, textx, apperr
 
 activity ─► history, textx
-store    ─► logx
+store    ─► fsx, logx
 history  ─► fsx
 media    ─► fsx
 manifest ─► fsx, apperr

@@ -32,11 +32,11 @@ func TestInboundQueueKeepsWhatTheStopLeft(t *testing.T) {
 	// In the order a stop keeps them, which is not the order to take
 	// them up in.
 	for _, keep := range []func() error{
-		func() error { return s.KeepInbound(ctx, inboundLate, "", late) },
-		func() error { return s.KeepInbound(ctx, inboundHeld, "", chatter) },
-		func() error { return s.KeepInbound(ctx, inboundQueued, "main", merged) },
-		func() error { return s.KeepChange(ctx, edit, sent.Add(2*time.Minute)) },
-		func() error { return s.KeepInterrupted(ctx, "family", running) },
+		func() error { return keepInbound(ctx, s, inboundLate, "", late) },
+		func() error { return keepInbound(ctx, s, inboundHeld, "", chatter) },
+		func() error { return keepInbound(ctx, s, inboundQueued, "main", merged) },
+		func() error { return keepChange(ctx, s, edit, sent.Add(2*time.Minute)) },
+		func() error { return keepInterrupted(ctx, s, "family", running) },
 	} {
 		if err := keep(); err != nil {
 			t.Fatal(err)
@@ -47,7 +47,7 @@ func TestInboundQueueKeepsWhatTheStopLeft(t *testing.T) {
 	}
 
 	s = openTestStore(t, dbPath)
-	got, err := s.TakeInbound(ctx)
+	got, err := takeInbound(ctx, s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestInboundQueueKeepsWhatTheStopLeft(t *testing.T) {
 			t.Errorf("row %d:\n got %+v\nwant %+v", i, got[i], want[i])
 		}
 	}
-	if again, err := s.TakeInbound(ctx); err != nil || len(again) != 0 {
+	if again, err := takeInbound(ctx, s); err != nil || len(again) != 0 {
 		t.Errorf("the queue still holds %+v (%v) once taken", again, err)
 	}
 }
@@ -80,28 +80,30 @@ func TestInboundQueueKeepsWhatTheStopLeft(t *testing.T) {
 // A row the bridge cannot read, written by another version say, is left
 // out with an error, and the rest is taken all the same.
 func TestInboundQueueSkipsARowItCannotRead(t *testing.T) {
-	s := openTestStore(t, filepath.Join(t.TempDir(), "bridge.db"))
+	path := filepath.Join(t.TempDir(), "bridge.db")
+	s := openTestStore(t, path)
+	db := testStoreSQL(t, path)
 	ctx := t.Context()
 	m := Inbound{JID: harnessDM, Sender: "15551234567", Text: "hello", Source: sourceWhatsApp, At: time.Now()}
-	if err := s.KeepInbound(ctx, inboundHeld, "", m); err != nil {
+	if err := keepInbound(ctx, s, inboundHeld, "", m); err != nil {
 		t.Fatal(err)
 	}
 	for _, stmt := range []string{
 		`INSERT INTO inbound_queue (kind, chat_jid, body, sent_at, created_at) VALUES ('held', 'x', '{not json', datetime('now'), datetime('now'))`,
 		`INSERT INTO inbound_queue (kind, chat_jid, sent_at, created_at) VALUES ('newer', 'x', datetime('now'), datetime('now'))`,
 	} {
-		if _, err := s.db.Exec(stmt); err != nil {
+		if _, err := db.Exec(stmt); err != nil {
 			t.Fatal(err)
 		}
 	}
-	got, err := s.TakeInbound(ctx)
+	got, err := takeInbound(ctx, s)
 	if err == nil {
 		t.Error("no error for the rows it could not read")
 	}
 	if len(got) != 1 || got[0].Msg.Text != "hello" {
 		t.Errorf("took %+v, want the one message it can read", got)
 	}
-	if again, _ := s.TakeInbound(ctx); len(again) != 0 {
+	if again, _ := takeInbound(ctx, s); len(again) != 0 {
 		t.Errorf("the queue still holds %+v", again)
 	}
 }

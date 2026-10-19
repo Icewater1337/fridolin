@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"log"
 	"math"
 	"strings"
@@ -24,7 +25,7 @@ import (
 // since an answer that late would only confuse, and the dashboard says
 // so. Replies to one chat go out in order.
 type Outbox struct {
-	store *Store
+	store *store.Store
 	// messenger is the bridge's, read at each reply and each send: the
 	// bridge wraps it after the outbox is made.
 	messenger func() Messenger
@@ -34,7 +35,7 @@ type Outbox struct {
 	// delivered takes each reply that went out in full out of the outbox
 	// (Bridge.delivered, which records it in its brain's history too);
 	// nil only removes it.
-	delivered func(ctx context.Context, r outboxRow) error
+	delivered func(ctx context.Context, r store.OutboxRow) error
 	now       func() time.Time
 
 	wake   chan struct{}
@@ -57,7 +58,7 @@ const (
 
 // newOutbox makes an outbox and starts delivering, the replies a
 // previous run of the bridge left first. Stop ends it.
-func newOutbox(store *Store, messenger func() Messenger, pace time.Duration, delivered func(context.Context, outboxRow) error) *Outbox {
+func newOutbox(store *store.Store, messenger func() Messenger, pace time.Duration, delivered func(context.Context, store.OutboxRow) error) *Outbox {
 	ctx, cancel := context.WithCancel(context.Background())
 	o := &Outbox{
 		store: store, messenger: messenger, pace: pace, delivered: delivered, now: time.Now,
@@ -82,25 +83,25 @@ func (o *Outbox) Stop() {
 // text. The [POLL] markup never reached anyone.
 func (o *Outbox) Reply(ctx context.Context, brain, chat, text string, maxChunk int) error {
 	polls, remaining := extractPolls(text)
-	var parts []outboxPart
+	var parts []store.OutboxPart
 	var said []string
 	// The polls go before the text that introduces them, as the example
 	// prompt promises (see sendPolls).
 	for _, p := range polls {
-		parts = append(parts, outboxPart{Question: p.Question, Options: p.Options, Max: p.MaxSelectable})
+		parts = append(parts, store.OutboxPart{Question: p.Question, Options: p.Options, Max: p.MaxSelectable})
 		said = append(said, pollAsText(p))
 	}
 	parts = append(parts, o.textParts(chat, remaining, maxChunk)...)
 	if remaining != "" {
 		said = append(said, remaining)
 	}
-	return o.add(ctx, outboxRow{Chat: chat, Brain: brain, History: strings.Join(said, "\n\n"), Parts: parts})
+	return o.add(ctx, store.OutboxRow{Chat: chat, Brain: brain, History: strings.Join(said, "\n\n"), Parts: parts})
 }
 
 // Text puts text into the outbox, in chunks of at most maxChunk
 // characters, recorded in no history: an alert of the bridge's own.
 func (o *Outbox) Text(ctx context.Context, chat, text string, maxChunk int) error {
-	return o.add(ctx, outboxRow{Chat: chat, Parts: o.textParts(chat, text, maxChunk)})
+	return o.add(ctx, store.OutboxRow{Chat: chat, Parts: o.textParts(chat, text, maxChunk)})
 }
 
 // Question puts a question brain asks mid-run into the outbox, in chunks
@@ -108,14 +109,14 @@ func (o *Outbox) Text(ctx context.Context, chat, text string, maxChunk int) erro
 // records it once all of it went out: the answer comes as the chat's next
 // message, and the run for it must see what it answers.
 func (o *Outbox) Question(ctx context.Context, brain, chat, text string, maxChunk int) error {
-	return o.add(ctx, outboxRow{Chat: chat, Brain: brain, History: text, Parts: o.textParts(chat, text, maxChunk)})
+	return o.add(ctx, store.OutboxRow{Chat: chat, Brain: brain, History: text, Parts: o.textParts(chat, text, maxChunk)})
 }
 
 // textParts is text as the messages it goes to chat as.
-func (o *Outbox) textParts(chat, text string, maxChunk int) []outboxPart {
-	var parts []outboxPart
+func (o *Outbox) textParts(chat, text string, maxChunk int) []store.OutboxPart {
+	var parts []store.OutboxPart
 	for _, c := range o.chunks(chat, text, maxChunk) {
-		parts = append(parts, outboxPart{Text: c})
+		parts = append(parts, store.OutboxPart{Text: c})
 	}
 	return parts
 }
@@ -136,7 +137,7 @@ func (o *Outbox) chunks(chat, text string, maxChunk int) []string {
 	return ChunkMessage(text, maxChunk)
 }
 
-func (o *Outbox) add(ctx context.Context, r outboxRow) error {
+func (o *Outbox) add(ctx context.Context, r store.OutboxRow) error {
 	if len(r.Parts) == 0 {
 		return nil
 	}
@@ -166,7 +167,7 @@ func (o *Outbox) run(ctx context.Context) {
 		// it does every few seconds.
 		if now := o.now(); now.Sub(pruned) >= outboxPruneEvery {
 			pruned = now
-			if err := o.store.PruneOutbox(ctx, now.Add(-outboxFailedKeep)); err != nil && ctx.Err() == nil {
+			if err := o.store.PruneOutbox(ctx, now.Add(-store.OutboxFailedKeep)); err != nil && ctx.Err() == nil {
 				log.Printf("outbox: %v", err)
 			}
 		}
@@ -267,7 +268,7 @@ func outboxDelay(attempts int) time.Duration {
 }
 
 // deliver sends what is left of r, saving its progress after each part.
-func (o *Outbox) deliver(ctx context.Context, r *outboxRow) error {
+func (o *Outbox) deliver(ctx context.Context, r *store.OutboxRow) error {
 	m := o.messenger()
 	for i := r.NextPart; i < len(r.Parts); i++ {
 		if i > r.NextPart && o.pace > 0 {
@@ -299,7 +300,7 @@ func (o *Outbox) deliver(ctx context.Context, r *outboxRow) error {
 var errNotRecorded = errors.New("delivered, but not taken out of the outbox")
 
 // finish takes r, which went out in full, out of the outbox.
-func (o *Outbox) finish(ctx context.Context, r outboxRow) error {
+func (o *Outbox) finish(ctx context.Context, r store.OutboxRow) error {
 	if o.delivered != nil {
 		return o.delivered(ctx, r)
 	}
@@ -308,10 +309,10 @@ func (o *Outbox) finish(ctx context.Context, r outboxRow) error {
 
 // send sends one part. A poll WhatsApp refuses while connected goes out
 // as a numbered list instead; while it is not, the poll waits like text.
-func (o *Outbox) send(ctx context.Context, m Messenger, r *outboxRow, p outboxPart) error {
+func (o *Outbox) send(ctx context.Context, m Messenger, r *store.OutboxRow, p store.OutboxPart) error {
 	ctx, cancel := context.WithTimeout(ctx, outboxSendLimit)
 	defer cancel()
-	if !p.isPoll() {
+	if !p.IsPoll() {
 		return m.SendMessage(ctx, r.Chat, p.Text)
 	}
 	poll := pollData{Question: p.Question, Options: p.Options, MaxSelectable: p.Max}
@@ -333,7 +334,7 @@ func (o *Outbox) send(ctx context.Context, m Messenger, r *outboxRow, p outboxPa
 }
 
 // giveUp stops trying r, logs why and keeps the fact for the dashboard.
-func (o *Outbox) giveUp(ctx context.Context, r outboxRow, why string) {
+func (o *Outbox) giveUp(ctx context.Context, r store.OutboxRow, why string) {
 	log.Printf("outbox: giving up on a reply to %s after %d attempts: %s", r.Chat, r.Attempts, why)
 	if err := o.store.OutboxGiveUp(ctx, r.ID, why, o.now()); err != nil && ctx.Err() == nil {
 		log.Printf("outbox: %v", err)

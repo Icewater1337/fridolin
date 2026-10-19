@@ -1,4 +1,4 @@
-package main
+package store
 
 import (
 	"context"
@@ -6,7 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
+	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/logx"
 	"log"
 	"os"
 	"time"
@@ -21,18 +22,18 @@ type Store struct {
 	Container *sqlstore.Container
 }
 
-// NewStore opens (or creates) the SQLite database and initialises both the
+// Open opens (or creates) the SQLite database and initialises both the
 // whatsmeow device container and the bridge's own tables. When it fails it
 // closes whatever it had opened, since the caller gets no store to close:
 // NewBridge gives the instance lock back on that error, and whoever takes it
 // next must be the only one with bridge.db open.
-func NewStore(cfg *Config) (*Store, error) {
-	if err := makePrivateDB(cfg.DBPath); err != nil {
+func Open(dbPath, logLevel string) (*Store, error) {
+	if err := makePrivateDB(dbPath); err != nil {
 		return nil, fmt.Errorf("creating database file: %w", err)
 	}
-	dbURL := "file:" + cfg.DBPath + "?_foreign_keys=on"
+	dbURL := "file:" + dbPath + "?_foreign_keys=on"
 
-	logger := newWaLogger("Store", cfg.LogLevel)
+	logger := logx.NewWaLogger("Store", logLevel)
 
 	container, err := sqlstore.New(context.Background(), "sqlite3", dbURL, logger)
 	if err != nil {
@@ -76,7 +77,7 @@ func makePrivateDB(path string) error {
 		// Not fatal: a database the bridge can open but not chmod (another
 		// user's file) worked before, and refusing to start would take the
 		// bridge offline.
-		if err := restrictToOwner(p); err != nil {
+		if err := fsx.RestrictToOwner(p); err != nil {
 			log.Printf("warning: could not make %s private: %v", p, err)
 		}
 	}
@@ -89,32 +90,6 @@ func sidecarPaths(dbPath string) []string {
 		out[i] = dbPath + suffix
 	}
 	return out
-}
-
-// restrictToOwner takes group and other permissions away from an existing
-// file or directory, and logs when it had to. It never adds permissions,
-// keeps the setuid, setgid and sticky bits, and leaves a path that does not
-// exist alone.
-func restrictToOwner(path string) error {
-	st, err := os.Stat(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	old := st.Mode()
-	if old.Perm()&0o077 == 0 {
-		return nil
-	}
-	// Chmod sets the special bits too, so pass them on or they are lost:
-	// a setgid folder would stop handing its group to new files.
-	mode := old & (fs.ModePerm | fs.ModeSetuid | fs.ModeSetgid | fs.ModeSticky) &^ 0o077
-	if err := os.Chmod(path, mode); err != nil {
-		return err
-	}
-	log.Printf("%s was open to other users (mode %04o); changed it to %04o", path, uint32(old.Perm()), uint32(mode.Perm()))
-	return nil
 }
 
 // appMigrations are the bridge's own schema changes, in order. The
@@ -242,8 +217,8 @@ func (s *Store) SavePoll(msgID, chatJID, brain, question string, options []strin
 	return err
 }
 
-// sentPoll is what the bridge keeps of a poll it sent, for its votes.
-type sentPoll struct {
+// SentPoll is what the bridge keeps of a poll it sent, for its votes.
+type SentPoll struct {
 	Chat     string
 	Brain    string // "" for a poll from before polls recorded it
 	Question string
@@ -251,13 +226,13 @@ type sentPoll struct {
 }
 
 // SentPoll returns the poll sent as message msgID, or sql.ErrNoRows.
-func (s *Store) SentPoll(ctx context.Context, msgID string) (sentPoll, error) {
-	var p sentPoll
+func (s *Store) SentPoll(ctx context.Context, msgID string) (SentPoll, error) {
+	var p SentPoll
 	var optJSON string
 	err := s.db.QueryRowContext(ctx, `SELECT chat_jid, brain, question, options FROM polls WHERE msg_id = ?`, msgID).
 		Scan(&p.Chat, &p.Brain, &p.Question, &optJSON)
 	if err != nil {
-		return sentPoll{}, err
+		return SentPoll{}, err
 	}
 	p.Options = jsonStrings(optJSON)
 	return p, nil

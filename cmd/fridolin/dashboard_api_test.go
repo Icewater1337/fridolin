@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/logx"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1084,7 +1085,7 @@ func TestListLimitsClampToTheMaximum(t *testing.T) {
 	}
 	count := map[string]func([]byte) int{
 		"/api/logs": func(b []byte) int {
-			var logs struct{ Lines []LogLine }
+			var logs struct{ Lines []logx.Line }
 			_ = json.Unmarshal(b, &logs)
 			return len(logs.Lines)
 		},

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"log"
 	"regexp"
 	"slices"
@@ -136,7 +137,7 @@ func matchVote(hashes [][]byte, options []string) []string {
 
 // pollVote is a vote the bridge recorded in one of its polls.
 type pollVote struct {
-	Poll     sentPoll
+	Poll     store.SentPoll
 	Voter    types.JID // as canonicalUser has them
 	Selected []string  // empty: the vote was taken back
 }

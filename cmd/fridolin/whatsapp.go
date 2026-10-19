@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/logx"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"io"
 	"io/fs"
 	"log"
@@ -19,7 +21,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
-	"go.mau.fi/whatsmeow/store"
+	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
@@ -73,7 +75,7 @@ type IgnoredHandler func(kind, jid, name, sender, pushName string)
 // WhatsAppClient wraps a whatsmeow client.
 type WhatsAppClient struct {
 	cfg       func() *Config
-	store     *Store
+	store     *store.Store
 	handler   InboundHandler
 	onIgnored IgnoredHandler
 	onVote    func(pollVote)      // a vote was recorded; may be nil
@@ -125,8 +127,8 @@ type WhatsAppClient struct {
 }
 
 // NewWhatsAppClient creates a client. It does NOT connect — call Connect.
-func NewWhatsAppClient(cfg func() *Config, store *Store, handler InboundHandler, onIgnored IgnoredHandler) (*WhatsAppClient, error) {
-	logger := newWaLogger("WhatsApp", cfg().LogLevel)
+func NewWhatsAppClient(cfg func() *Config, store *store.Store, handler InboundHandler, onIgnored IgnoredHandler) (*WhatsAppClient, error) {
+	logger := logx.NewWaLogger("WhatsApp", cfg().LogLevel)
 
 	deviceStore, err := store.Container.GetFirstDevice(context.Background())
 	if err != nil {
@@ -1161,7 +1163,7 @@ func (wa *WhatsAppClient) groupName(jid types.JID) string {
 
 // lidStore is whatsmeow's map between LIDs and phone numbers, or nil
 // without a client.
-func (wa *WhatsAppClient) lidStore() store.LIDStore {
+func (wa *WhatsAppClient) lidStore() wastore.LIDStore {
 	cli := wa.cl()
 	if cli == nil || cli.Store == nil {
 		return nil
