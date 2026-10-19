@@ -14,6 +14,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/plaud"
 	"github.com/Icewater1337/fridolin/internal/registry"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
@@ -459,11 +460,11 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 		}
 		mgr := newTestManager(t, cfg)
 		t.Cleanup(mgr.Stop)
-		p := newPlaudManager(PlaudOptions{
+		p := plaud.New(plaud.Options{
 			PlaudDir: filepath.Join(home, "data", "plaud"), Home: home,
-			Settings: func() *PlaudSnapshot { return plaudSnapshotOf(cfg) },
+			Settings: func() *plaud.Snapshot { return plaudSnapshotOf(cfg) },
 			FindCLI:  findPlaudCLI, CLIVersion: plaudCLIVersion,
-			Target:     func(id string) *PlaudTarget { return plaudTargetOf(mgr, id, nil) },
+			Target:     func(id string) *plaud.Target { return plaudTargetOf(mgr, id, nil) },
 			HeldTarget: func() string { return mgr.HeldFor("", false) },
 		})
 		t.Cleanup(p.Stop)

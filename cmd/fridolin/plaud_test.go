@@ -21,6 +21,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/devchat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/plaud"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
@@ -54,9 +55,9 @@ func plaudBridge(t *testing.T, extra string) (*testBridge, *testutil.PlaudFixtur
 
 // plaudBridgeWith takes top-level settings (allowed numbers), extra plaud
 // settings and the folder brains to add once the bridge runs.
-func plaudBridgeWith(t *testing.T, top, plaud string, brains ...manifest.Manifest) (*testBridge, *testutil.PlaudFixture) {
+func plaudBridgeWith(t *testing.T, top, plaudConfig string, brains ...manifest.Manifest) (*testBridge, *testutil.PlaudFixture) {
 	fp := newFakePlaud(t)
-	tb := newTestBridge(t, top+`, "plaud": {"enabled": true, "cli_path": "`+os.Args[0]+`"`+plaud+`}`)
+	tb := newTestBridge(t, top+`, "plaud": {"enabled": true, "cli_path": "`+os.Args[0]+`"`+plaudConfig+`}`)
 	for _, m := range brains {
 		tb.addFolderBrain(t, m)
 	}
@@ -317,7 +318,7 @@ type plaudRecorder struct {
 	refuse error
 }
 
-func (r *plaudRecorder) submit(br *PlaudTarget, jid, sender, text string, media []string, done func(error)) error {
+func (r *plaudRecorder) submit(br *plaud.Target, jid, sender, text string, media []string, done func(error)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.refuse != nil {
@@ -1126,7 +1127,7 @@ func TestPlaudCheckNowWhileChecking(t *testing.T) {
 	entered, release := make(chan struct{}), make(chan struct{})
 	var enteredOnce, releaseOnce sync.Once
 	defer releaseOnce.Do(func() { close(release) })
-	tb.replacePlaud(t, func(o *PlaudOptions) {
+	tb.replacePlaud(t, func(o *plaud.Options) {
 		o.Runner = func(ctx context.Context, _, _ string, _ io.Writer, args ...string) (string, error) {
 			enteredOnce.Do(func() { close(entered) })
 			select {
@@ -1184,7 +1185,7 @@ func TestPlaudStopEndsCheckNow(t *testing.T) {
 		{"in a command", func(t *testing.T, tb *testBridge, fp *testutil.PlaudFixture, held func(context.Context) error) {
 			plaudSignIn(t, tb)
 			fp.Files(plaudOld1)
-			tb.replacePlaud(t, func(o *PlaudOptions) {
+			tb.replacePlaud(t, func(o *plaud.Options) {
 				o.Runner = func(ctx context.Context, _, _ string, _ io.Writer, args ...string) (string, error) {
 					return "", held(ctx)
 				}
@@ -1192,7 +1193,7 @@ func TestPlaudStopEndsCheckNow(t *testing.T) {
 		}, context.Canceled},
 		{"sending the expiry notice", func(t *testing.T, tb *testBridge, fp *testutil.PlaudFixture, held func(context.Context) error) {
 			plaudRevokeLogin(t, tb, fp)
-			tb.replacePlaud(t, func(o *PlaudOptions) { o.Notify = func(ctx context.Context, _, _ string) error { return held(ctx) } })
+			tb.replacePlaud(t, func(o *plaud.Options) { o.Notify = func(ctx context.Context, _, _ string) error { return held(ctx) } })
 		}, errors.New("the Plaud login expired")},
 	}
 	for _, c := range cases {
@@ -1520,7 +1521,7 @@ func TestPlaudConnectJudgesTheSignInByTheLogin(t *testing.T) {
 			if rec := tb.do("POST", "/api/plaud/connect", nil); rec.Code != 202 {
 				t.Fatalf("connect: %d %s", rec.Code, rec.Body)
 			}
-			var job PlaudConnect
+			var job plaud.ConnectJob
 			testutil.WaitFor(t, 10*time.Second, "the sign-in to end", func() bool {
 				job = *tb.plaud.Status().Connect
 				return job.State != "running"

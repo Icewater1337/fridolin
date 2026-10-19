@@ -16,6 +16,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/devchat"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+	"github.com/Icewater1337/fridolin/internal/plaud"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
 	"github.com/Icewater1337/fridolin/internal/registry"
@@ -73,7 +74,7 @@ type Bridge struct {
 	scriptAuth    *scriptAuth
 	backup        *BackupManager
 	google        *GoogleAuth
-	plaud         *PlaudManager
+	plaud         *plaud.Manager
 	site          *SiteManager
 	outbox        *outboundmsg.Outbox
 	otp           otp.Handoff

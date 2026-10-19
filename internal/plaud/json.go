@@ -7,7 +7,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/jsonx"
 )
 
-// plaudDecodeError keeps the on-disk and API decoder diagnostics stable when
+// DecodeError keeps the on-disk and API decoder diagnostics stable when
 // their types move packages. errors.As still exposes the original metadata.
 func DecodeError(err error) error {
 	names := map[reflect.Type]string{

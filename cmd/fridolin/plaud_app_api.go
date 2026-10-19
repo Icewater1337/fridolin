@@ -6,12 +6,13 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
+	"github.com/Icewater1337/fridolin/internal/plaud"
 )
 
 func (b *Bridge) apiPlaudAppCredentials(w http.ResponseWriter, r *http.Request) {
-	var d plaudDeveloper
+	var d plaud.Developer
 	if err := httpapi.DecodeJSON(r, &d); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, plaudDecodeError(err).Error())
+		httpapi.WriteErr(w, http.StatusBadRequest, plaud.DecodeError(err).Error())
 		return
 	}
 	if err := b.plaud.SaveDeveloper(d); err != nil {
@@ -23,7 +24,7 @@ func (b *Bridge) apiPlaudAppCredentials(w http.ResponseWriter, r *http.Request) 
 
 func (b *Bridge) apiPlaudAppBuild(w http.ResponseWriter, r *http.Request) {
 	switch err := b.plaud.BuildApp(); {
-	case errors.Is(err, errPlaudAppBuilding):
+	case errors.Is(err, plaud.ErrAppBuilding):
 		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 	case err != nil:
 		httpapi.WriteErr(w, http.StatusPreconditionFailed, err.Error())
@@ -44,7 +45,7 @@ func (b *Bridge) apiPlaudAppDownload(w http.ResponseWriter, r *http.Request) {
 
 func (b *Bridge) apiPlaudRevokeDevice(w http.ResponseWriter, r *http.Request) {
 	switch err := b.plaud.RevokeDevice(r.PathValue("id")); {
-	case errors.Is(err, errPlaudUnknownDevice):
+	case errors.Is(err, plaud.ErrUnknownDevice):
 		httpapi.WriteErr(w, http.StatusNotFound, err.Error())
 	case err != nil:
 		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())

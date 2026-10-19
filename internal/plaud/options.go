@@ -8,7 +8,7 @@ import (
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 )
 
-// PlaudSettings is the integration's live configuration, including its dashboard shape.
+// Settings is the integration's live configuration, including its dashboard shape.
 // The command projection's explicit conversion checks that every field is represented.
 type Settings struct {
 	Enabled         bool   `json:"enabled"`
@@ -22,7 +22,7 @@ type Settings struct {
 	PhoneUpload     bool   `json:"phone_upload,omitempty"`
 }
 
-// PlaudSnapshot keeps one poll's policy and paths together.
+// Snapshot keeps one poll's policy and paths together.
 type Snapshot struct {
 	Plaud             Settings
 	DataDir, MediaDir string
@@ -31,7 +31,7 @@ type Snapshot struct {
 	Interval          time.Duration
 }
 
-// PlaudOptions supplies startup paths and current settings without a config store.
+// Options supplies startup paths and current settings without a config store.
 type Options struct {
 	PlaudDir, Home   string
 	Settings         func() *Snapshot
@@ -51,7 +51,7 @@ type Options struct {
 	Runner           RunFunc
 }
 
-// PlaudTarget retains the selected runtime for a handoff. Its callbacks read
+// Target retains the selected runtime for a handoff. Its callbacks read
 // that runtime's current reply settings and submit to that same runtime even
 // when a reload replaces it with another brain bearing the same ID.
 type Target struct {
@@ -63,7 +63,7 @@ type Target struct {
 
 func (t *Target) ID() string { return t.BrainID }
 
-// PlaudRunFunc executes one CLI call after login checks and serialization.
+// RunFunc executes one CLI call after login checks and serialization.
 // out receives live output during browser sign-in; returned text is parsed by
 // the poller. Nil uses the built-in process runner with Options.Environ.
 type RunFunc func(ctx context.Context, bin, home string, out io.Writer, args ...string) (string, error)

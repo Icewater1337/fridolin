@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/plaud"
 )
 
 // These fixtures describe the persisted version-2 state contract. Command
@@ -28,7 +29,7 @@ type plaudFixtureState struct {
 	Pending map[string]*plaudFixturePending `json:"pending"`
 	// Forwarded lists the latest recordings handed to a brain, one entry
 	// each, the latest last, with how their runs went, for the card.
-	Forwarded []PlaudForward `json:"forwarded,omitempty"`
+	Forwarded []plaud.Forward `json:"forwarded,omitempty"`
 	// GivenUp lists the latest recordings Fridolin gave up on, oldest
 	// first, for the card.
 	GivenUp []plaudFixtureGivenUp `json:"given_up,omitempty"`
@@ -135,21 +136,21 @@ func newPlaudFixtureState() *plaudFixtureState {
 func (tb *testBridge) plaudTokenPath() string {
 	return filepath.Join(tb.plaudFixtureHome(), ".plaud", "tokens.json")
 }
-func (tb *testBridge) replacePlaud(t *testing.T, change func(*PlaudOptions)) {
+func (tb *testBridge) replacePlaud(t *testing.T, change func(*plaud.Options)) {
 	t.Helper()
 	tb.plaud.Stop()
 	options := plaudOptions(tb.cfgs, tb.brainMgr, tb.submitHandOff, tb.wa.SendMessage, nil)
 	change(&options)
-	tb.plaud = newPlaudManager(options)
+	tb.plaud = plaud.New(options)
 	// Bridge.Stop owns the current manager; keep its original cleanup order.
 }
 
 // usePlaudRecorder replaces only the runtime submit callback, preserving the
 // real settings/selection/projection and notification adapters for HTTP cases.
 func (tb *testBridge) usePlaudRecorder(t *testing.T, rec *plaudRecorder) {
-	tb.replacePlaud(t, func(o *PlaudOptions) {
+	tb.replacePlaud(t, func(o *plaud.Options) {
 		target := o.Target
-		o.Target = func(id string) *PlaudTarget {
+		o.Target = func(id string) *plaud.Target {
 			br := target(id)
 			if br == nil {
 				return nil

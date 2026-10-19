@@ -8,24 +8,25 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/plaud"
 )
 
 // NewPlaudManager supplies settings and the paths captured for this bridge start.
 func NewPlaudManager(cfgs *config.Store, brains *BrainManager,
 	submit func(*Brain, string, string, string, []string, func(error)) error,
-	notify func(context.Context, string, string) error, siteURL func() string) *PlaudManager {
-	return newPlaudManager(plaudOptions(cfgs, brains, submit, notify, siteURL))
+	notify func(context.Context, string, string) error, siteURL func() string) *plaud.Manager {
+	return plaud.New(plaudOptions(cfgs, brains, submit, notify, siteURL))
 }
 
 // plaudOptions projects command policy and host dependencies into the service.
 func plaudOptions(cfgs *config.Store, brains *BrainManager,
 	submit func(*Brain, string, string, string, []string, func(error)) error,
-	notify func(context.Context, string, string) error, siteURL func() string) PlaudOptions {
+	notify func(context.Context, string, string) error, siteURL func() string) plaud.Options {
 	boot := cfgs.Boot()
-	return PlaudOptions{
+	return plaud.Options{
 		PlaudDir: boot.PlaudDir(), Home: boot.Home,
-		Settings:   func() *PlaudSnapshot { return plaudSnapshotOf(runtimeConfig(cfgs)) },
-		Target:     func(id string) *PlaudTarget { return plaudTargetOf(brains, id, submit) },
+		Settings:   func() *plaud.Snapshot { return plaudSnapshotOf(runtimeConfig(cfgs)) },
+		Target:     func(id string) *plaud.Target { return plaudTargetOf(brains, id, submit) },
 		HeldTarget: func() string { return brains.HeldFor("", false) },
 		Notify:     notify,
 		FindCLI:    findPlaudCLI, CLIVersion: plaudCLIVersion,
@@ -42,9 +43,9 @@ func plaudOptions(cfgs *config.Store, brains *BrainManager,
 }
 
 // plaudSnapshotOf projects one config snapshot; a poll retains it for its full pass.
-func plaudSnapshotOf(c *config.Config) *PlaudSnapshot {
-	return &PlaudSnapshot{
-		Plaud: PlaudSettings(c.Plaud), DataDir: c.DataDir, MediaDir: c.MediaDir,
+func plaudSnapshotOf(c *config.Config) *plaud.Snapshot {
+	return &plaud.Snapshot{
+		Plaud: plaud.Settings(c.Plaud), DataDir: c.DataDir, MediaDir: c.MediaDir,
 		QueueMaxPending: c.Queue.MaxPending, OwnerChat: ownerChat(c), Interval: c.Plaud.Interval(),
 	}
 }
@@ -77,7 +78,7 @@ func brainPlaudPATH(cfg *config.Config) string {
 
 // plaudTargetOf captures the selected runtime, rather than looking it up again
 // by ID when the transcript is finally submitted after filesystem work.
-func plaudTargetOf(brains *BrainManager, id string, submit func(*Brain, string, string, string, []string, func(error)) error) *PlaudTarget {
+func plaudTargetOf(brains *BrainManager, id string, submit func(*Brain, string, string, string, []string, func(error)) error) *plaud.Target {
 	var br *Brain
 	if id != "" {
 		br = brains.Get(id)
@@ -87,7 +88,7 @@ func plaudTargetOf(brains *BrainManager, id string, submit func(*Brain, string, 
 	if br == nil {
 		return nil
 	}
-	return &PlaudTarget{
+	return &plaud.Target{
 		BrainID:   br.ID(),
 		ReplyChat: func() string { return br.settings.Load().manifest.ReplyChat },
 		OtherOwner: func(jid string) string {

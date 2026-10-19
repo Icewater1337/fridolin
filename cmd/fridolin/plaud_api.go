@@ -7,6 +7,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
+	"github.com/Icewater1337/fridolin/internal/plaud"
 )
 
 func (b *Bridge) apiPlaudResend(w http.ResponseWriter, r *http.Request) {
@@ -18,9 +19,9 @@ func (b *Bridge) apiPlaudResend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch err := b.plaud.Resend(req.ID); {
-	case errors.Is(err, errPlaudUnknownRecording):
+	case errors.Is(err, plaud.ErrUnknownRecording):
 		httpapi.WriteErr(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, errPlaudAlreadyWaiting):
+	case errors.Is(err, plaud.ErrAlreadyWaiting):
 		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 	case err != nil:
 		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
@@ -35,9 +36,9 @@ func (b *Bridge) apiPlaudStatus(w http.ResponseWriter, r *http.Request) {
 
 func (b *Bridge) apiPlaudConnect(w http.ResponseWriter, r *http.Request) {
 	switch err := b.plaud.Connect(); {
-	case errors.Is(err, errPlaudNotInstalled):
+	case errors.Is(err, plaud.ErrNotInstalled):
 		httpapi.WriteErr(w, http.StatusPreconditionFailed, "Install Plaud's CLI first: npm install -g @plaud-ai/cli")
-	case errors.Is(err, errPlaudSigningIn):
+	case errors.Is(err, plaud.ErrSigningIn):
 		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 	case err != nil:
 		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
@@ -104,11 +105,11 @@ func (b *Bridge) apiPlaudSettings(w http.ResponseWriter, r *http.Request) {
 func (b *Bridge) apiPlaudSync(w http.ResponseWriter, r *http.Request) {
 	started, err := b.plaud.CheckNow()
 	switch {
-	case errors.Is(err, errPlaudNotConnected):
+	case errors.Is(err, plaud.ErrNotConnected):
 		httpapi.WriteErr(w, http.StatusPreconditionFailed, "Plaud is not connected")
-	case errors.Is(err, errPlaudSendingOff):
+	case errors.Is(err, plaud.ErrSendingOff):
 		httpapi.WriteErr(w, http.StatusConflict, "Turn on “Send new recordings to a brain” first: a check hands new recordings to the brain")
-	case errors.Is(err, errPlaudStopping):
+	case errors.Is(err, plaud.ErrStopping):
 		httpapi.WriteErr(w, http.StatusServiceUnavailable, "Fridolin is stopping: the next start checks Plaud")
 	case err != nil:
 		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())

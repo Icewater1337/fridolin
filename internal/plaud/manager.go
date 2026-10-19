@@ -260,7 +260,7 @@ func (st *plaudState) pendingInOrder() []string {
 	return ids
 }
 
-// PlaudForward is a recording handed to a brain, and how its run went.
+// Forward is a recording handed to a brain, and how its run went.
 type Forward struct {
 	ID    string    `json:"id"`
 	Name  string    `json:"name"`
@@ -274,7 +274,7 @@ type Forward struct {
 	Error  string `json:"error,omitempty"`
 }
 
-// The statuses of a PlaudForward.
+// The statuses of a Forward.
 const (
 	plaudRunHanded  = "handed"
 	plaudRunDone    = "done"
@@ -292,7 +292,7 @@ func (st *plaudState) forwardOf(id string) *Forward {
 	return nil
 }
 
-// PlaudManager runs the CLI, the poller and the connect flow. It knows the
+// Manager runs the CLI, the poller and the connect flow. It knows the
 // rest of the bridge only through its options and callbacks, so it can be
 // tested without a bridge.
 type Manager struct {
@@ -358,7 +358,7 @@ type Manager struct {
 	appJob *plaudAppJob
 }
 
-// newPlaudManager creates the manager from its settings and runtime callbacks.
+// New creates the manager from its settings and runtime callbacks.
 func New(options Options) *Manager {
 	p := &Manager{options: options, notify: options.Notify, inFlight: map[string]bool{}}
 	p.submit = func(target *Target, jid, sender, text string, media []string, done func(error)) error {
@@ -1755,7 +1755,7 @@ var (
 	ErrStopping         = errors.New("stopping: the next start checks Plaud")
 )
 
-// PlaudCLI says whether the Plaud CLI is installed, where, and which
+// CLI says whether the Plaud CLI is installed, where, and which
 // version, with a warning when it is not one Fridolin reads.
 type CLI struct {
 	Found       bool   `json:"found"`
@@ -1765,7 +1765,7 @@ type CLI struct {
 	InstallHint string `json:"install_hint"`
 }
 
-// PlaudConnect is the sign-in progress shown by the dashboard.
+// ConnectJob is the sign-in progress shown by the dashboard.
 // The service keeps cancellation private and copies the job in Status.
 type ConnectJob struct {
 	State   string `json:"state"` // running, done, error
@@ -1774,7 +1774,7 @@ type ConnectJob struct {
 	cancel  context.CancelFunc
 }
 
-// PlaudStatus is what the dashboard's Plaud card shows.
+// Status is what the dashboard's Plaud card shows.
 type Status struct {
 	CLI       CLI      `json:"cli"`
 	Connected bool     `json:"connected"`

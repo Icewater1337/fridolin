@@ -364,7 +364,7 @@ func (p *Manager) takeTranscript(assertion string, body []byte, now time.Time) e
 
 // ── building the app ─────────────────────────────────────────────────────
 
-// plaudDeveloper is the Plaud developer app the phone app is built with
+// Developer is the Plaud developer app the phone app is built with
 // (portal.plaud.ai): <data_dir>/plaud/developer.json. The dashboard only
 // learns whether it is there.
 type Developer struct {
@@ -526,7 +526,7 @@ func (p *Manager) buildApp(ctx context.Context, src, javaHome, sdk, site string,
 
 // ── the dashboard ────────────────────────────────────────────────────────
 
-// PlaudAppStatus is the phone app part of the Plaud card, there while
+// AppStatus is the phone app part of the Plaud card, there while
 // plaud.phone_upload is on.
 type AppStatus struct {
 	// Credentials says whether Plaud's developer keys are saved.
@@ -538,7 +538,7 @@ type AppStatus struct {
 	Devices []PhoneRow   `json:"devices"`
 }
 
-// PlaudPhoneRow is a paired phone on the card.
+// PhoneRow is a paired phone on the card.
 type PhoneRow struct {
 	ID         string    `json:"id"`
 	Paired     time.Time `json:"paired"`
