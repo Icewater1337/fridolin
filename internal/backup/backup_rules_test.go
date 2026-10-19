@@ -1,4 +1,4 @@
-package main
+package backup
 
 import (
 	"fmt"
@@ -8,7 +8,7 @@ import (
 )
 
 func TestFilterLines(t *testing.T) {
-	got := BackupFilterLines([]string{"node_modules/", "*.log", " /work/ ", "", "+ /sneaky", "- already-prefixed"})
+	got := FilterLines([]string{"node_modules/", "*.log", " /work/ ", "", "+ /sneaky", "- already-prefixed"})
 	want := "- node_modules/**\n- *.log\n- /work/**\n- already-prefixed\n"
 	if got != want {
 		t.Errorf("filterLines =\n%q\nwant\n%q", got, want)
@@ -52,7 +52,7 @@ func TestNextDue(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			due, now := BackupDue(tc.now, tc.dailyAt, tc.lastRun, tc.armed)
+			due, now := Due(tc.now, tc.dailyAt, tc.lastRun, tc.armed)
 			if !due.Equal(tc.wantDue) || now != tc.wantNow {
 				t.Errorf("nextDue = %v, %v; want %v, %v", due, now, tc.wantDue, tc.wantNow)
 			}
@@ -66,7 +66,7 @@ func TestNextDue(t *testing.T) {
 		second := time.Date(2026, 10, 25, 1, 30, 0, 0, time.UTC).In(zurich) // 02:30 winter time
 		ranAt := time.Time{}
 		for _, now := range []time.Time{first, second} {
-			if _, runNow := BackupDue(now, "02:30", ranOn(ranAt), time.Time{}); runNow {
+			if _, runNow := Due(now, "02:30", ranOn(ranAt), time.Time{}); runNow {
 				if !ranAt.IsZero() {
 					t.Fatalf("due again at %v after running at %v", now, ranAt)
 				}
@@ -84,23 +84,23 @@ func ranOn(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.Format(BackupDayLayout)
+	return t.Format(DayLayout)
 }
 
 func TestRcloneSection(t *testing.T) {
 	conf := "[other]\ntype = s3\n\n[brain-gdrive]\ntype = drive\nscope = drive.file\ntoken = {\"x\":1}\n"
-	s := BackupRcloneSection(conf, "brain-gdrive")
+	s := RcloneSection(conf, "brain-gdrive")
 	if s["type"] != "drive" || s["token"] == "" {
 		t.Errorf("section = %v", s)
 	}
-	if BackupRcloneSection(conf, "missing") != nil {
+	if RcloneSection(conf, "missing") != nil {
 		t.Error("missing section should be nil")
 	}
 }
 
 func TestExpiredVersions(t *testing.T) {
 	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.Local)
-	stamp := func(days int) string { return BackupVersionName(now.AddDate(0, 0, -days)) }
+	stamp := func(days int) string { return VersionName(now.AddDate(0, 0, -days)) }
 	cases := []struct {
 		name  string
 		names []string
@@ -117,7 +117,7 @@ func TestExpiredVersions(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := BackupExpiredVersions(c.names, now, c.days)
+			got := ExpiredVersions(c.names, now, c.days)
 			if fmt.Sprint(got) != fmt.Sprint(c.want) {
 				t.Errorf("expiredVersions = %v, want %v", got, c.want)
 			}
@@ -137,16 +137,16 @@ func TestVersionNamesKeepTheirOrderWhenClocksGoBack(t *testing.T) {
 	// 2026-10-25: 02:30 summer time, then 02:15 winter time 45 minutes later.
 	first := time.Date(2026, 10, 25, 0, 30, 0, 0, time.UTC).In(zurich)
 	second := first.Add(45 * time.Minute)
-	names := []string{BackupVersionName(first), BackupVersionName(second)}
-	BackupSortVersions(names)
-	if names[0] != BackupVersionName(second) {
+	names := []string{VersionName(first), VersionName(second)}
+	SortVersions(names)
+	if names[0] != VersionName(second) {
 		t.Errorf("versions = %v, want the later run first", names)
 	}
 	for _, n := range names {
-		if !BackupVersionOK(n) {
+		if !VersionOK(n) {
 			t.Errorf("%s cannot be restored", n)
 		}
-		if got, ok := BackupParseVersion(n); !ok || !(got.Equal(first) || got.Equal(second)) {
+		if got, ok := ParseVersion(n); !ok || !(got.Equal(first) || got.Equal(second)) {
 			t.Errorf("parseVersion(%s) = %v, %v", n, got, ok)
 		}
 	}
