@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Icewater1337/fridolin/internal/jsonx"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
@@ -201,7 +203,7 @@ func ReadManifest(dir string) (*BrainManifest, error) {
 // readManifestRoot keeps inspection and transaction reads on their pinned folder.
 func readManifestRoot(root *os.Root) (*BrainManifest, error) {
 	path := filepath.Join(root.Name(), ManifestFile)
-	data, err := readBrainFileRoot(root, ManifestFile)
+	data, err := fsx.ReadBrainFileRoot(root, ManifestFile)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -237,7 +239,7 @@ var loggedManifestKeys sync.Map // path → the keys, joined
 // left out where the bridge uses the manifest, and dropped from the file
 // the next time the dashboard writes it.
 func warnUnknownManifestKeys(path string, data []byte) {
-	keys := unknownKeys(data, reflect.TypeOf(BrainManifest{}), "")
+	keys := jsonx.UnknownKeys(data, reflect.TypeOf(BrainManifest{}), "")
 	joined := strings.Join(keys, " ")
 	if prev, ok := loggedManifestKeys.Swap(path, joined); ok && prev == joined || !ok && joined == "" {
 		return
@@ -306,7 +308,7 @@ func openManifestRoot(dir string, overwrite bool) (*os.Root, error) {
 // removing and replacing it cannot recycle its identity while we own it.
 func writeManifestDataRoot(root *os.Root, data []byte, overwrite bool) (*os.File, fs.FileInfo, error) {
 	path := filepath.Join(root.Name(), ManifestFile)
-	if prev, err := readBrainFileRoot(root, ManifestFile); overwrite && err == nil {
+	if prev, err := fsx.ReadBrainFileRoot(root, ManifestFile); overwrite && err == nil {
 		var v struct {
 			Version int `json:"version"`
 		}

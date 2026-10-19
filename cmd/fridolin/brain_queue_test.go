@@ -973,7 +973,7 @@ func TestMCPConfigOf(t *testing.T) {
 				t.Fatal(err)
 			}
 		}, false, "not a regular file"},
-		{"huge", write(`{"mcpServers": {}, "pad": "` + strings.Repeat("x", maxBrainFile) + `"}`), false, "larger than"},
+		{"huge", write(`{"mcpServers": {}, "pad": "` + strings.Repeat("x", fsx.MaxBrainFile) + `"}`), false, "larger than"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/Icewater1337/fridolin/internal/jsonx"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
@@ -417,7 +418,7 @@ func (tx *Tx) write() error {
 			return err
 		}
 		w.root = root
-		prev, err := readBrainFileRoot(root, ManifestFile)
+		prev, err := fsx.ReadBrainFileRoot(root, ManifestFile)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			w.existed, w.prev = false, nil
@@ -456,7 +457,7 @@ func (tx *Tx) rollback() {
 		}
 		if err == nil {
 			var current []byte
-			current, err = readBrainFileRoot(w.root, ManifestFile)
+			current, err = fsx.ReadBrainFileRoot(w.root, ManifestFile)
 			if err == nil && !bytes.Equal(current, w.data) {
 				continue
 			}
@@ -698,89 +699,7 @@ func listDiff(a, b []string) string {
 // version 1 are already removed and logged by the migration; the same keys
 // in a version 2 file are unknown settings.
 func warnUnknownKeys(path string, data []byte) {
-	if unknown := unknownKeys(data, reflect.TypeOf(Config{}), ""); len(unknown) > 0 {
+	if unknown := jsonx.UnknownKeys(data, reflect.TypeOf(Config{}), ""); len(unknown) > 0 {
 		log.Printf("config %s: ignoring unknown settings %v (they will be dropped when the dashboard saves)", path, unknown)
 	}
-}
-
-// unknownKeys lists the keys in data, a JSON value for a t, that no field
-// of t takes when data is decoded into one, each by its path from path:
-// sandbox.enable, brain_dirs[0].approved.nmae. It looks into the objects
-// of structs, and into arrays and objects that hold structs, but not into
-// a type that decodes itself. Keys are matched as encoding/json matches
-// them, an exact match first and then one that differs only in case.
-func unknownKeys(data []byte, t reflect.Type, path string) []string {
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	if reflect.PointerTo(t).Implements(jsonUnmarshaler) {
-		return nil
-	}
-	var out []string
-	switch t.Kind() {
-	case reflect.Struct:
-		var obj map[string]json.RawMessage
-		if json.Unmarshal(data, &obj) != nil {
-			return nil
-		}
-		fields := jsonFieldsOf(t)
-		for _, k := range slices.Sorted(maps.Keys(obj)) {
-			ft, ok := fields[k]
-			if !ok {
-				for name, f := range fields {
-					if strings.EqualFold(name, k) {
-						ft, ok = f, true
-						break
-					}
-				}
-			}
-			if !ok {
-				out = append(out, unknownKeyPath(path, k))
-				continue
-			}
-			out = append(out, unknownKeys(obj[k], ft, unknownKeyPath(path, k))...)
-		}
-	case reflect.Slice, reflect.Array:
-		var arr []json.RawMessage
-		if json.Unmarshal(data, &arr) != nil {
-			return nil
-		}
-		for i, el := range arr {
-			out = append(out, unknownKeys(el, t.Elem(), fmt.Sprintf("%s[%d]", path, i))...)
-		}
-	case reflect.Map:
-		var obj map[string]json.RawMessage
-		if json.Unmarshal(data, &obj) != nil {
-			return nil
-		}
-		for _, k := range slices.Sorted(maps.Keys(obj)) {
-			out = append(out, unknownKeys(obj[k], t.Elem(), unknownKeyPath(path, k))...)
-		}
-	}
-	return out
-}
-
-// jsonFieldsOf maps the JSON keys of the struct type t to their types.
-func jsonFieldsOf(t reflect.Type) map[string]reflect.Type {
-	fields := map[string]reflect.Type{}
-	for i := 0; i < t.NumField(); i++ {
-		f := t.Field(i)
-		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
-		if !f.IsExported() || name == "-" {
-			continue
-		}
-		if name == "" {
-			name = f.Name
-		}
-		fields[name] = f.Type
-	}
-	return fields
-}
-
-// unknownKeyPath is the path of key k in the object at path.
-func unknownKeyPath(path, k string) string {
-	if path == "" {
-		return k
-	}
-	return path + "." + k
 }

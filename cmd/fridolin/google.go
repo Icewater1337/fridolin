@@ -638,7 +638,7 @@ func readRegularFile(path string, singleLink bool) ([]byte, error) {
 	if st, ok := fi.Sys().(*syscall.Stat_t); ok && singleLink && st.Nlink != 1 {
 		return nil, fmt.Errorf("%s: it has more than one link, which the bridge does not trust", path)
 	}
-	data, err := readAtMost(f)
+	data, err := fsx.ReadAtMost(f)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}

@@ -1008,7 +1008,7 @@ func (br *Brain) readFile(name string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	return readAtMost(f)
+	return fsx.ReadAtMost(f)
 }
 
 // BrainRuntime is a brain's live state, for the dashboard.
@@ -1275,7 +1275,7 @@ func globEscape(p string) string {
 // mcpServers it takes in its stride.
 func mcpConfigOf(brainID, dir string) string {
 	p := filepath.Join(dir, ".mcp.json")
-	data, err := readBrainFile(dir, ".mcp.json")
+	data, err := fsx.ReadBrainFile(dir, ".mcp.json")
 	if errors.Is(err, fs.ErrNotExist) {
 		return ""
 	}
@@ -1325,7 +1325,7 @@ func disabledMCPServers(dir string) (map[string]bool, error) {
 	disabled := map[string]bool{}
 	for _, name := range []string{"settings.json", "settings.local.json"} {
 		p := filepath.Join(dir, ".claude", name)
-		data, err := readBrainFile(dir, filepath.Join(".claude", name))
+		data, err := fsx.ReadBrainFile(dir, filepath.Join(".claude", name))
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -1379,47 +1379,6 @@ func jsonObject(data []byte) (map[string]json.RawMessage, error) {
 		return nil, errors.New("not a JSON object: null")
 	}
 	return obj, nil
-}
-
-// maxBrainFile bounds what the bridge reads of the files a brain can
-// write: its .mcp.json, settings, prompt, identity map and calendar token.
-// That is far more than any real one holds, so that a brain cannot make
-// the bridge load gigabytes into memory on every run, and little enough to
-// pass a .mcp.json on the command line.
-const maxBrainFile = 256 << 10
-
-// readAtMost reads r to the end, and refuses it when that is more than
-// maxBrainFile.
-func readAtMost(r io.Reader) ([]byte, error) {
-	data, err := io.ReadAll(io.LimitReader(r, maxBrainFile+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(data) > maxBrainFile {
-		return nil, fmt.Errorf("larger than %d KiB", maxBrainFile>>10)
-	}
-	return data, nil
-}
-
-// readBrainFile reads the file name, relative to the brain folder dir, as
-// openInFolder opens it. It refuses a file larger than maxBrainFile.
-func readBrainFile(dir, name string) ([]byte, error) {
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		return nil, err
-	}
-	defer root.Close()
-	return readBrainFileRoot(root, name)
-}
-
-// readBrainFileRoot keeps a transaction's reads on its already pinned folder.
-func readBrainFileRoot(root *os.Root, name string) ([]byte, error) {
-	f, err := fsx.OpenInFolder(root, name, os.O_RDONLY, 0)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return readAtMost(f)
 }
 
 // invoke runs the selected CLI once for m.

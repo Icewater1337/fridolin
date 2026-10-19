@@ -498,7 +498,7 @@ func TestOversizedCalendarTokenIsRefused(t *testing.T) {
 		ClientID: "123-abc.apps.googleusercontent.com", ClientSecret: "TEST-CLIENT-SECRET",
 		Expiry: "2020-01-01T00:00:00.000000Z",
 	})
-	tok = append(tok, strings.Repeat(" ", maxBrainFile)...)
+	tok = append(tok, strings.Repeat(" ", fsx.MaxBrainFile)...)
 	if err := os.WriteFile(tb.google.tokenPath("a"), tok, 0o600); err != nil {
 		t.Fatal(err)
 	}
