@@ -3,13 +3,14 @@ package main
 import (
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"net/http"
 	"time"
 )
 
 func (b *Bridge) buildAPI(mux *http.ServeMux) {
-	(&BuildChatAPI{
+	(&httpapi.BuildChatAPI{
 		Brain: func(id string) *brain.Brain {
 			br := b.brainMgr.Get(id)
 			if br == nil || !b.site.IsBuilder(id) {

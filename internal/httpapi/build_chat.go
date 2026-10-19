@@ -1,11 +1,10 @@
-package main
+package httpapi
 
 import (
 	"net/http"
 	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/brain"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
 
 type BuildChatAPI struct {
@@ -29,7 +28,7 @@ func (a *BuildChatAPI) buildBrain(w http.ResponseWriter, r *http.Request) *brain
 	id := r.PathValue("id")
 	br := a.Brain(id)
 	if br == nil {
-		httpapi.WriteErr(w, http.StatusNotFound, "no builder brain "+id+" (Site → Builders)")
+		WriteErr(w, http.StatusNotFound, "no builder brain "+id+" (Site → Builders)")
 		return nil
 	}
 	return br
@@ -41,7 +40,7 @@ func (a *BuildChatAPI) Chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := a.View(br)
-	httpapi.WriteJSON(w, http.StatusOK, resp)
+	WriteJSON(w, http.StatusOK, resp)
 }
 
 func (a *BuildChatAPI) Send(w http.ResponseWriter, r *http.Request) {
@@ -52,25 +51,25 @@ func (a *BuildChatAPI) Send(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Text string `json:"text"`
 	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	text := strings.TrimSpace(req.Text)
 	if text == "" || len(text) > 20000 {
-		httpapi.WriteErr(w, http.StatusBadRequest, "write a message (up to 20,000 characters)")
+		WriteErr(w, http.StatusBadRequest, "write a message (up to 20,000 characters)")
 		return
 	}
 	thread, err := a.AppendUser(br.ID(), text)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
+		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if err := a.Submit(br, thread, text); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
 }
 
 func (a *BuildChatAPI) New(w http.ResponseWriter, r *http.Request) {
@@ -79,10 +78,10 @@ func (a *BuildChatAPI) New(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := a.NewThread(br.ID()); err != nil {
-		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
+		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (a *BuildChatAPI) Stop(w http.ResponseWriter, r *http.Request) {
@@ -91,8 +90,8 @@ func (a *BuildChatAPI) Stop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !a.StopCurrent(br) {
-		httpapi.WriteErr(w, http.StatusConflict, "nothing is running in this chat")
+		WriteErr(w, http.StatusConflict, "nothing is running in this chat")
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
