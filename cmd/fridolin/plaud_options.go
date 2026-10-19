@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"io"
 	"time"
+
+	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 )
 
 // PlaudSettings is the integration's live configuration, including its dashboard shape.
@@ -30,11 +33,21 @@ type PlaudSnapshot struct {
 
 // PlaudOptions supplies startup paths and current settings without a config store.
 type PlaudOptions struct {
-	PlaudDir, Home string
-	Settings       func() *PlaudSnapshot
-	Target         func(id string) *PlaudTarget
-	HeldTarget     func() string
-	Notify         func(context.Context, string, string) error
+	PlaudDir, Home   string
+	Settings         func() *PlaudSnapshot
+	Target           func(id string) *PlaudTarget
+	HeldTarget       func() string
+	Notify           func(context.Context, string, string) error
+	FindCLI          func(string) (string, error)
+	CLIVersion       func(string) string
+	Environ          func(context.Context, string, string) []string
+	DesktopContext   func(context.Context) context.Context
+	Inbox            func(string) mediafiles.Inbox
+	RunInterrupted   func(error) bool
+	AppSource        func() (string, error)
+	AndroidToolchain func() (string, string, error)
+	AppEnviron       func(context.Context, string, string) []string
+	Runner           PlaudRunFunc
 }
 
 // PlaudTarget retains the selected runtime for a handoff. Its callbacks read
@@ -48,3 +61,8 @@ type PlaudTarget struct {
 }
 
 func (t *PlaudTarget) ID() string { return t.BrainID }
+
+// PlaudRunFunc executes one CLI call after login checks and serialization.
+// out receives live output during browser sign-in; returned text is parsed by
+// the poller. Nil uses the built-in process runner with Options.Environ.
+type PlaudRunFunc func(ctx context.Context, bin, home string, out io.Writer, args ...string) (string, error)

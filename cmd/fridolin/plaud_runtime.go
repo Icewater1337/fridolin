@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
 )
 
@@ -19,6 +21,16 @@ func NewPlaudManager(cfgs *config.Store, brains *BrainManager,
 		Target:     func(id string) *PlaudTarget { return plaudTargetOf(brains, id, submit) },
 		HeldTarget: func() string { return brains.HeldFor("", false) },
 		Notify:     notify,
+		FindCLI:    findPlaudCLI, CLIVersion: plaudCLIVersion,
+		Environ: plaudEnvironment, DesktopContext: withDesktop,
+		Inbox: mediaInboxAt,
+		RunInterrupted: func(err error) bool {
+			return errors.Is(err, claudecli.ErrInterrupted) || errors.Is(err, errBrainDropped) || errors.Is(err, context.Canceled)
+		},
+		AppSource: plaudAppSource, AndroidToolchain: androidToolchain,
+		AppEnviron: func(ctx context.Context, javaHome, sdk string) []string {
+			return childEnv(helperScope(ctx), nil, "JAVA_HOME="+javaHome, "ANDROID_HOME="+sdk)
+		},
 	})
 }
 
@@ -81,4 +93,10 @@ func plaudTargetOf(brains *BrainManager, id string, submit func(*Brain, string, 
 			return submit(br, jid, sender, text, media, done)
 		},
 	}
+}
+
+// plaudEnvironment resolves host variables at the original process boundary.
+func plaudEnvironment(ctx context.Context, bin, home string) []string {
+	return childEnv(helperScope(ctx), nil, "HOME="+home, "PATH="+plaudPATH(bin),
+		"DO_NOT_TRACK=1", "PLAUD_TELEMETRY_DISABLED=1", "PLAUD_NO_UPDATE_NOTIFIER=1", "NO_COLOR=1")
 }

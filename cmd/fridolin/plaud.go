@@ -18,13 +18,11 @@ import (
 	"regexp"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/platform"
@@ -466,103 +464,13 @@ func (p *PlaudManager) loginStamp() string {
 
 // cliPath finds the plaud binary.
 func (p *PlaudManager) cliPath() (string, error) {
-	return findPlaudCLI(p.cfg().Plaud.CLIPath)
-}
-
-// nvmNodeVersions is where nvm installs node versions, relative to HOME.
-const nvmNodeVersions = ".nvm/versions/node"
-
-// findPlaudCLI finds the plaud binary, given plaud.cli_path. The sandbox
-// profile uses it too, to keep brains from replacing the CLI (see
-// bridgeProgramsOf). Without cli_path it looks only in the PATH folders
-// helperPath keeps, since the CLI runs outside the sandbox, then in nvm
-// and the usual prefixes.
-func findPlaudCLI(c string) (string, error) {
-	if c != "" {
-		if _, err := os.Stat(c); err != nil {
-			return "", fmt.Errorf("plaud.cli_path %s: %w", c, err)
-		}
-		return c, nil
-	}
-	if found := lookPathIn("plaud", helperPath()); found != "" {
-		return found, nil
-	}
-	candidates, _ := filepath.Glob(filepath.Join(homeDir(), nvmNodeVersions, "*/bin/plaud"))
-	// The newest node first: by version, not by name, which would put
-	// v20.9.0 before v20.10.0, and v9 before v24.
-	slices.SortStableFunc(candidates, func(a, b string) int {
-		return -compareNodeVersions(filepath.Base(filepath.Dir(filepath.Dir(a))), filepath.Base(filepath.Dir(filepath.Dir(b))))
-	})
-	candidates = append(candidates, "/opt/homebrew/bin/plaud", "/usr/local/bin/plaud")
-	for _, c := range candidates {
-		if fsx.Exists(c) {
-			return c, nil
-		}
-	}
-	return "", errors.New("the Plaud CLI is not installed")
-}
-
-// cliNodeDir is the folder of the Plaud CLI at bin when that also holds a
-// node, as nvm installs them: the node the CLI was installed with. ""
-// otherwise.
-func cliNodeDir(bin string) string {
-	if dir := filepath.Dir(bin); filepath.IsAbs(dir) && lookPathIn("node", dir) != "" {
-		return filepath.Clean(dir)
-	}
-	return ""
-}
-
-// plaudOptOut keeps Plaud's CLI from sending usage statistics to Plaud's
-// analytics and from asking npm for updates. Fridolin's own runs get it,
-// and so does every brain's run: with plaud.brain_access brains run the
-// CLI themselves, and the bridge's environment has neither variable. It
-// names Plaud's own variables, not DO_NOT_TRACK, which other tools in a
-// brain's run read too, Claude Code among them.
-var plaudOptOut = []string{"PLAUD_TELEMETRY_DISABLED=1", "PLAUD_NO_UPDATE_NOTIFIER=1"}
-
-// compareNodeVersions compares two nvm version folder names ("v20.10.0")
-// number by number. A name that is not a version sorts before every one.
-func compareNodeVersions(a, b string) int {
-	parse := func(v string) []int {
-		var n []int
-		for _, part := range strings.Split(strings.TrimPrefix(v, "v"), ".") {
-			i, err := strconv.Atoi(part)
-			if err != nil {
-				return nil
-			}
-			n = append(n, i)
-		}
-		return n
-	}
-	return slices.Compare(parse(a), parse(b))
+	return p.options.FindCLI(p.cfg().Plaud.CLIPath)
 }
 
 // plaudCLITested is the version of @plaud-ai/cli whose output Fridolin
 // reads (testdata/plaud holds what it prints). The CLI is not 1.0 yet, so
 // another 0.x may print otherwise.
 const plaudCLITested = "0.3.15"
-
-// plaudCLIVersion reads the version of the CLI at bin from the package.json
-// of the npm package it belongs to, without running it: `plaud version`
-// asks npm for updates. "" means it cannot tell (a wrapper script, say).
-func plaudCLIVersion(bin string) string {
-	pkg := nodePackage(fsx.Resolve(bin))
-	if pkg == "" {
-		return ""
-	}
-	data, err := os.ReadFile(filepath.Join(pkg, "package.json"))
-	if err != nil {
-		return ""
-	}
-	var m struct {
-		Name    string `json:"name"`
-		Version string `json:"version"`
-	}
-	if json.Unmarshal(data, &m) != nil || m.Name != "@plaud-ai/cli" {
-		return ""
-	}
-	return m.Version
-}
 
 // plaudCLIWarning says what to do about a CLI of version v, or "" when it
 // is the tested version or a later 0.3 one, or the version is unknown.
@@ -580,34 +488,6 @@ func plaudCLIWarning(v string) string {
 		return fmt.Sprintf("Plaud's CLI %s is older than %s, the version Fridolin reads; update it: npm install -g @plaud-ai/cli@%s", v, plaudCLITested, plaudCLITested)
 	}
 	return fmt.Sprintf("Plaud's CLI %s is newer than %s, the version Fridolin was tested with, and may print things Fridolin does not read; if recordings stop arriving, install that one: npm install -g @plaud-ai/cli@%s", v, plaudCLITested, plaudCLITested)
-}
-
-// plaudPATH is the PATH the Plaud CLI at bin runs with, outside the
-// sandbox, where its #!/usr/bin/env node looks node up: its own folder
-// first when that holds a node, as nvm installs them, so that it gets the
-// one it was installed with; then the folders of the bridge's PATH that
-// helperPath keeps, then helperDirs for a PATH that lacks them. Never the
-// whole PATH: a node a brain planted in a folder of it outside HOME would
-// run outside the sandbox. A CLI folder without a node comes last, and
-// still comes: the sandbox keeps brains from planting the names the bridge
-// runs in the folders of this PATH under HOME (see plantablePrograms), so
-// that none can put a node there that would move the folder first.
-func plaudPATH(bin string) string {
-	var dirs []string
-	first := cliNodeDir(bin)
-	if first != "" {
-		dirs = append(dirs, first)
-	}
-	rest := append(filepath.SplitList(helperPath()), helperDirs...)
-	if dir := filepath.Dir(bin); first == "" && filepath.IsAbs(dir) {
-		rest = append(rest, filepath.Clean(dir))
-	}
-	for _, dir := range rest {
-		if !slices.Contains(dirs, dir) {
-			dirs = append(dirs, dir)
-		}
-	}
-	return strings.Join(dirs, string(filepath.ListSeparator))
 }
 
 // plaudOutputLimit caps what Fridolin keeps of the CLI's stdout: a
@@ -655,9 +535,15 @@ func (p *PlaudManager) runCLIIn(ctx context.Context, home string, out io.Writer,
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return "", err
 	}
+	if p.options.Runner != nil {
+		return p.options.Runner(ctx, bin, home, out, args...)
+	}
+	return p.runCLIProcess(ctx, bin, home, out, args...)
+}
+
+func (p *PlaudManager) runCLIProcess(ctx context.Context, bin, home string, out io.Writer, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Env = childEnv(helperScope(ctx), nil, "HOME="+home, "PATH="+plaudPATH(bin),
-		"DO_NOT_TRACK=1", "PLAUD_TELEMETRY_DISABLED=1", "PLAUD_NO_UPDATE_NOTIFIER=1", "NO_COLOR=1")
+	cmd.Env = p.options.Environ(ctx, bin, home)
 	// The CLI loads a .env from its working folder (dotenv), and the
 	// bridge's is its data folder under the service: the CLI's home is
 	// the CLI's own.
@@ -670,7 +556,7 @@ func (p *PlaudManager) runCLIIn(ctx context.Context, home string, out io.Writer,
 	if out != nil {
 		cmd.Stdout, cmd.Stderr = io.MultiWriter(stdout, out), io.MultiWriter(stderr, out)
 	}
-	err = cmd.Run()
+	err := cmd.Run()
 	text := ansiRe.ReplaceAllString(stdout.String(), "")
 	if err != nil {
 		return text, plaudRunError(args[0], err, ansiRe.ReplaceAllString(stderr.String(), ""))
@@ -953,14 +839,14 @@ func (p *PlaudManager) forward(ctx context.Context, cfg *PlaudSnapshot, id strin
 
 	// Into the plaud folder of the brain's own inbox: no other brain may
 	// read the recording.
-	file := plaudTranscriptPath(filepath.Join(mediaInboxAt(cfg.MediaDir).Path(br.ID()), "plaud"), rec.day, rec.name, id)
+	file := plaudTranscriptPath(filepath.Join(p.options.Inbox(cfg.MediaDir).Path(br.ID()), "plaud"), rec.day, rec.name, id)
 	var body strings.Builder
 	fmt.Fprintf(&body, "Plaud recording: %s\nRecorded: %s\nDuration: %s\nPlaud ID: %s\n%s\n", rec.name, rec.when, rec.duration, id, rec.note)
 	if rec.summary != "" {
 		body.WriteString("=== Plaud AI summary ===\n" + rec.summary + "\n\n")
 	}
 	body.WriteString("=== Transcript ===\n" + strings.TrimSpace(rec.transcript) + "\n")
-	path, err := mediaInboxAt(cfg.MediaDir).Write(br.ID(), filepath.Join("plaud", filepath.Base(file)), []byte(body.String()))
+	path, err := p.options.Inbox(cfg.MediaDir).Write(br.ID(), filepath.Join("plaud", filepath.Base(file)), []byte(body.String()))
 	if err != nil {
 		return nil, err
 	}
@@ -1220,7 +1106,7 @@ func (p *PlaudManager) runEnded(id string) func(error) {
 			switch {
 			case runErr == nil:
 				fw.Status, fw.Error = plaudRunDone, ""
-			case errors.Is(runErr, claudecli.ErrInterrupted) || errors.Is(runErr, errBrainDropped) || errors.Is(runErr, context.Canceled):
+			case p.options.RunInterrupted(runErr):
 				fw.Status, fw.Error = plaudRunStopped, ""
 				log.Printf("plaud %s: stopped before brain %s answered it; it is not sent again unless you send it again from the dashboard", id, brain)
 			default:
@@ -1952,7 +1838,7 @@ func (p *PlaudManager) Status() PlaudStatus {
 	}
 	if path, err := p.cliPath(); err == nil {
 		s.CLI.Found, s.CLI.Path = true, path
-		s.CLI.Version = plaudCLIVersion(path)
+		s.CLI.Version = p.options.CLIVersion(path)
 		s.CLI.Warning = plaudCLIWarning(s.CLI.Version)
 	}
 	if br := p.targetBrain(cfg); br != nil {
@@ -2029,7 +1915,7 @@ func (p *PlaudManager) Connect() error {
 	if err != nil {
 		return errPlaudNotInstalled
 	}
-	if w := plaudCLIWarning(plaudCLIVersion(bin)); w != "" {
+	if w := plaudCLIWarning(p.options.CLIVersion(bin)); w != "" {
 		log.Printf("plaud: %s", w)
 	}
 	p.mu.Lock()
@@ -2085,7 +1971,7 @@ func (p *PlaudManager) Connect() error {
 		})
 		// The CLI opens the sign-in page in your browser itself.
 		before, refusedNow := p.loginStamp(), false
-		_, err := p.runCLIOut(withDesktop(ctx), out, "login")
+		_, err := p.runCLIOut(p.options.DesktopContext(ctx), out, "login")
 		// A CLI that fails after it wrote a new login signed in all the
 		// same; its error would sit on a card whose login works. One that
 		// fails and leaves the old login did not.

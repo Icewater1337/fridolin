@@ -37,7 +37,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -448,11 +447,11 @@ func (p *PlaudManager) BuildApp() error {
 	if site == "" {
 		return errors.New("the site has no domain yet (Site → Domain): the app uploads through it")
 	}
-	src := filepath.Join(ownLayout().Source, "plaud-android")
-	if ownLayout().Source == "" || !fsx.Exists(filepath.Join(src, "gradlew")) {
-		return errors.New("the app's source is not here: Fridolin builds it from plaud-android/ in the checkout it was installed from")
+	src, err := p.options.AppSource()
+	if err != nil {
+		return err
 	}
-	javaHome, sdk, err := androidToolchain()
+	javaHome, sdk, err := p.options.AndroidToolchain()
 	if err != nil {
 		return err
 	}
@@ -510,7 +509,7 @@ func (p *PlaudManager) buildApp(ctx context.Context, src, javaHome, sdk, site st
 		"--project-cache-dir", filepath.Join(dir, "gradle"),
 		"-PfridolinConfig="+props, "-PfridolinBuildDir="+filepath.Join(dir, "build"), "assembleDebug")
 	cmd.Dir = src
-	cmd.Env = childEnv(helperScope(ctx), nil, "JAVA_HOME="+javaHome, "ANDROID_HOME="+sdk)
+	cmd.Env = p.options.AppEnviron(ctx, javaHome, sdk)
 	out := &cappedBuffer{limit: 256 << 10}
 	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Run(); err != nil {
@@ -522,49 +521,6 @@ func (p *PlaudManager) buildApp(ctx context.Context, src, javaHome, sdk, site st
 		return time.Time{}, "", err
 	}
 	return exp, "", fsx.WriteFileAtomic(p.appFile(), apk, 0o600, false)
-}
-
-// androidToolchain finds a JDK and the Android SDK to build the app with:
-// JAVA_HOME and ANDROID_HOME (or ANDROID_SDK_ROOT) of the bridge's
-// environment, else where macOS, Homebrew and Android Studio put them.
-func androidToolchain() (javaHome, sdk string, err error) {
-	home := homeDir()
-	javas := []string{os.Getenv("JAVA_HOME")}
-	sdks := []string{os.Getenv("ANDROID_HOME"), os.Getenv("ANDROID_SDK_ROOT"), filepath.Join(home, "Library", "Android", "sdk"), filepath.Join(home, "Android", "Sdk")}
-	if runtime.GOOS == "darwin" {
-		if out, err := exec.Command("/usr/libexec/java_home").Output(); err == nil {
-			javas = append(javas, strings.TrimSpace(string(out)))
-		}
-	}
-	for _, prefix := range []string{"/opt/homebrew", "/usr/local", filepath.Join(home, "homebrew")} {
-		for _, jdk := range []string{"openjdk", "openjdk@21", "openjdk@17"} {
-			javas = append(javas, filepath.Join(prefix, "opt", jdk, "libexec", "openjdk.jdk", "Contents", "Home"))
-		}
-		sdks = append(sdks, filepath.Join(prefix, "share", "android-commandlinetools"))
-	}
-	javas = append(javas, "/Applications/Android Studio.app/Contents/jbr/Contents/Home")
-	if jvms, _ := filepath.Glob("/usr/lib/jvm/*"); len(jvms) > 0 {
-		javas = append(javas, jvms...)
-	}
-	for _, j := range javas {
-		if j != "" && fsx.Exists(filepath.Join(j, "bin", "java")) {
-			javaHome = j
-			break
-		}
-	}
-	for _, s := range sdks {
-		if s != "" && isDir(filepath.Join(s, "platforms")) {
-			sdk = s
-			break
-		}
-	}
-	switch {
-	case javaHome == "":
-		return "", "", errors.New("no JDK found to build the app with: install one (brew install openjdk@17), or set JAVA_HOME in the service's environment")
-	case sdk == "":
-		return "", "", errors.New(`no Android SDK found to build the app with: brew install --cask android-commandlinetools, then sdkmanager "platforms;android-35" "build-tools;35.0.0"; or set ANDROID_HOME in the service's environment`)
-	}
-	return javaHome, sdk, nil
 }
 
 // ── the dashboard ────────────────────────────────────────────────────────
