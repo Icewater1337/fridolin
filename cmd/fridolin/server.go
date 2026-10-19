@@ -19,6 +19,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/otp"
 	"github.com/Icewater1337/fridolin/internal/version"
 )
 
@@ -164,7 +165,7 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]string{"status": "sent"}
 	request := ""
 	if br := b.brainMgr.BrainFor(jid, chat.IsGroupJID(jid)); br != nil && br.asksForCode(req.Text) {
-		request = newOTPRequestID()
+		request = otp.NewRequestID()
 		resp["otp_request"] = request
 	}
 	b.appendHTTPMessageToHistory(who, jid, req.Text, request)

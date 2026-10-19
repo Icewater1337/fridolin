@@ -813,7 +813,7 @@ cannot go out within an hour is given up on, and the Overview says so.
 
 **`server.go`** — the localhost `/send` and `/ingest` endpoints.
 
-**`otp.go`** — the OTP guard: a one-time code a chat was just asked for
+**`internal/otp`** — the OTP guard: a one-time code a chat was just asked for
 is kept out of the history and the model, and handed to the script that
 asked for it through `<data_dir>/otp/`, until it expires.
 

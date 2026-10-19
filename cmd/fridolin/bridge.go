@@ -20,6 +20,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/logx"
+	"github.com/Icewater1337/fridolin/internal/otp"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/store"
 )
@@ -64,7 +65,7 @@ type Bridge struct {
 	plaud         *PlaudManager
 	site          *SiteManager
 	outbox        *Outbox
-	otp           otpHandoffs
+	otp           otp.Handoff
 	started       time.Time
 	// restart is BridgeOptions.Restart.
 	restart func()
@@ -128,7 +129,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	}()
 	protectDataDir(cfg)
 	pruneRunTokens(cfg.DataDir)
-	sweepOTPHandoffs(filepath.Join(cfg.DataDir, "otp"), time.Now())
+	otp.Sweep(filepath.Join(cfg.DataDir, "otp"), time.Now())
 	// With the lock held no other bridge runs here, so any run the last one
 	// recorded that is still going was left behind by a crash.
 	reapOrphanedRuns(cfg.DataDir)
@@ -430,7 +431,7 @@ func (b *Bridge) stop() {
 	// After the brains, whose last runs may still reply; what does not go
 	// out stays in bridge.db for the next start.
 	b.outbox.Stop()
-	b.otp.stop()
+	b.otp.Stop()
 	b.wa.Disconnect()
 	// The connect loop ends with Start's context, unless it is connecting
 	// still, which Disconnect cuts short.
