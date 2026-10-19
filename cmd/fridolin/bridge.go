@@ -101,7 +101,7 @@ type BridgeOptions struct {
 	NoWhatsApp bool
 	Logs       *logx.Ring
 	// Restart asks whoever runs the bridge to stop it and run it again
-	// (POST /api/restart): runCmd ends its context with errRestart. Nil
+	// (POST /api/restart): runCmd ends its context with app.ErrRestart. Nil
 	// leaves the bridge unable to restart itself.
 	Restart func()
 }

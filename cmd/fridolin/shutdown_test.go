@@ -210,7 +210,7 @@ func TestServe(t *testing.T) {
 			}
 			ctx, cancel := context.WithCancelCause(context.Background())
 			defer cancel(nil)
-			tb.restart = func() { cancel(errRestart) }
+			tb.restart = func() { cancel(app.ErrRestart) }
 			code := make(chan int, 1)
 			go func() { code <- serve(ctx, tb.Bridge, func() bool { return tc.signalled }) }()
 			tc.end(t, tb, cancel)
