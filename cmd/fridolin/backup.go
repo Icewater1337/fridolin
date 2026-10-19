@@ -1749,7 +1749,7 @@ func checkRestoreTarget(target string, cfg *config.Config, home string) error {
 		denied = append(denied, p)
 	}
 	for _, p := range cfg.Sandbox.DenyPaths {
-		denied = append(denied, sandbox.ProtectedPath{fsx.ExpandHome(p, home), true, "the deny_paths entry " + p})
+		denied = append(denied, sandbox.ProtectedPath{Path: fsx.ExpandHome(p, home), Inside: true, What: "the deny_paths entry " + p})
 	}
 	if what, ok := protectedIn(target, denied); ok {
 		return fmt.Errorf("%s, which the sandbox keeps from brains", what)

@@ -79,7 +79,7 @@ func sandboxPolicyOf(cfg *config.Config) sandboxConfig {
 	if data := p.DataDir; data != "" {
 		p.State = func(id string) sandbox.StatePaths {
 			s := brainStateOf(data, id)
-			return sandbox.StatePaths{s.dir, s.folders()}
+			return sandbox.StatePaths{Dir: s.dir, Folders: s.folders()}
 		}
 		p.Tokens = func(id string) string { return runTokenDir(data, id) }
 	}
