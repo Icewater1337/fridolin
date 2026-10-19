@@ -66,14 +66,20 @@ behaviour unless its title says so. The steps so far:
 
 - **R9, scaffolding slice**: `registry` owns starter-template loading,
   confined folder creation and retained-root rollback. The command supplies
-  embedded assets and the runtime's identity-map path; registration workflows
-  remain in the command until their later extraction.
+  embedded assets and the runtime's identity-map path.
 
 - **R9, resolution slice**: `registry.Resolve` and `CheckPath` own reference
   resolution, drift/conflict reporting and path confinement. Security-policy
   evaluation remains an injected command callback at the existing check
   point. Three resolution tests now run with explicit temporary folders in
   parallel; command integration tests still exercise sandbox protection.
+
+- **R9, workflow slice**: `registry.Registry` owns folder inspection, add,
+  update, approve, removal, group assignment, backup edits and metadata views.
+  HTTP handlers retain anonymous decoding types, response shapes and status
+  codes. Manifest/config changes still commit together through `config.Tx`;
+  add serialization and retained-root rollback are unchanged. `apperr` adds
+  error categories without changing diagnostic text.
 
 - **R5, configuration values**: `config` owns the file shape, section types,
   defaults, validation, migrations and approved brain references.
@@ -245,10 +251,10 @@ responsibility and says what it must not do.
 - **`version`**: `String()`, which returns the `-ldflags -X` value, or
   `dev-<rev>[+dirty]` from the build info, and `Line()`, the build, Go
   release and platform for the first log line.
-- **`apperr`** *(to come, R9)*: error kinds (`NotFound`, `Invalid`,
-  `Conflict`, `Busy`, `Precondition`, `Unavailable`) and an `Error` type
-  whose message is exactly the text a user sees. Domain packages classify
-  errors with it. Only `httpapi` turns kinds into status codes.
+- **`apperr`**: standard-library-only error kinds, text-preserving errors,
+  cause wrapping and `KindOf` classification. Registry workflows use it for
+  invalid input, conflicts and missing brains. HTTP handlers keep their
+  existing status mapping until the later error-model change.
 - **`trigger`**: group trigger keywords. `List` accepts a string or an
   object per entry in JSON; `Matches`, `Strip` and `First` match
   Unicode-correctly on byte offsets in the original text. `BoundaryAt` and
@@ -344,9 +350,13 @@ responsibility and says what it must not do.
   callback; `CheckPath` takes explicit home/other-folder inputs and a checker.
   The command evaluates its sandbox policy at the same per-candidate points
   as before, so registry has no sandbox or ambient-environment dependency.
-  Internal issue metadata stays out of JSON. *Planned:* the add, update,
-  approve, remove, group assignment, backup and calendar workflows still in
-  the command will move here once configuration transactions are extracted.
+  Internal issue metadata stays out of JSON. `Registry` owns inspect, add,
+  update, approve, remove, allowlist/group reassignment, backup edits and
+  manifest mutation for calendar changes. Its store commits staged manifests
+  and configuration together. Injected home/security callbacks keep their
+  existing evaluation points. `Views` owns config/disk metadata; the command
+  adds runtime snapshots and fallback identity. The command still supplies
+  sandbox policy, templates and the runtime history filename.
 
 ### Runtime
 

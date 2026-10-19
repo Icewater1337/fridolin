@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/devchat"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+	"github.com/Icewater1337/fridolin/internal/registry"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"log"
 	"net"
@@ -100,8 +101,8 @@ type Bridge struct {
 	// intake is what comes in from WhatsApp, which Stop closes first.
 	intake intake
 
-	// addMu makes adding a brain one step at a time (apiAddBrain).
-	addMu sync.Mutex
+	// registry owns the brain workflows, including add serialization.
+	registry *registry.Registry
 	// applyMu keeps reading the configuration and applying it to the
 	// brains together, see the config subscriber in NewBridge.
 	applyMu sync.Mutex
@@ -171,6 +172,7 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 
 	b := &Bridge{
 		cfgs:     cfgs,
+		registry: registryFor(cfgs),
 		lock:     lock,
 		store:    store,
 		logs:     opts.Logs,

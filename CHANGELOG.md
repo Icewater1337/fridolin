@@ -19,6 +19,9 @@ for compatibility.
 
 ### Changed
 
+- Brain folder workflows now live in the registry package. Dashboard responses,
+  approval checks and transactional manifest/config writes remain unchanged.
+
 - Configuration resolution uses explicit home, default-directory and platform
   inputs, captured when its store opens. Later saves keep those inputs even if
   the process environment or default folders change. Loading and saving still

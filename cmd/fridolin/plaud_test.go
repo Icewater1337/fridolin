@@ -2317,6 +2317,12 @@ func TestPlaudRetryRewritesTheSameTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, 10*time.Second, "brain reply", func() bool { return len(tb.dev.Outbox()) == 1 })
+	// Delivery precedes the completion callback. Let it finish saving state
+	// before replacing that state to simulate a retry after a crash.
+	waitFor(t, 10*time.Second, "the first run to be noted", func() bool {
+		last := tb.plaud.Status().LastForwarded
+		return last != nil && last.ID == plaudNew && last.Status == plaudRunDone
+	})
 
 	renamed := fp.teamSync(plaudNew, true)
 	renamed.Name = "Weekly sync"
