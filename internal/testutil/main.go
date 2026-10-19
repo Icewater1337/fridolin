@@ -64,6 +64,9 @@ func Main(m *testing.M, options ...MainOptions) {
 	if os.Getenv("FRIDOLIN_FAKE_PLAUD") == "1" && len(os.Args) > 1 && isPlaudCommand(os.Args[1]) {
 		os.Exit(fakePlaud(os.Args[1:]))
 	}
+	if raw := os.Getenv(scenarioEnv); raw != "" {
+		os.Exit(scenarioMain(raw))
+	}
 	if os.Getenv("FRIDOLIN_FAKE_CLAUDE") == "1" {
 		runFakeClaude(opts.Version, opts.Polls)
 		return
@@ -76,33 +79,23 @@ func Main(m *testing.M, options ...MainOptions) {
 	if opts.BeforeChildren != nil {
 		opts.BeforeChildren()
 	}
-	for _, k := range BridgeVariables() {
-		if err := os.Unsetenv(k); err != nil {
-			fmt.Fprintf(os.Stderr, "unsetting %s: %v\n", k, err)
-			os.Exit(1)
-		}
-	}
-	if err := os.Setenv(testPIDVariable, strconv.Itoa(os.Getpid())); err != nil {
-		fmt.Fprintf(os.Stderr, "setting %s: %v\n", testPIDVariable, err)
-		os.Exit(1)
-	}
-	sharedPaths.OriginalHome = os.Getenv("HOME")
-	// The tests of the stop set a grace of their own.
+
 	if opts.BeforeTests != nil {
 		opts.BeforeTests()
 	}
-	removeHome, err := useEmptyHome()
+	paths, cleanup, err := Isolate()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "giving the tests an empty HOME: %v\n", err)
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	code, err := runInEmptyDir(m, opts.Ready)
-	removeHome()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "moving the tests out of the checkout: %v\n", err)
-		os.Exit(1)
+	sharedMainInstalled = true
+	if opts.Ready != nil {
+		opts.Ready(paths)
 	}
+	code := m.Run()
+	cleanup()
 	os.Exit(code)
+
 }
 
 // testPIDVariable holds the process ID of the test binary that runs the
@@ -142,10 +135,10 @@ func useEmptyHome() (func(), error) {
 // runInEmptyDir runs the tests in a new, empty working directory. A relative
 // path in a test must not reach the checkout, where a developer may keep a
 // config.json. Only the package's testdata is linked in, see linkTestdata.
-func runInEmptyDir(m *testing.M, ready func(Paths)) (int, error) {
+func isolateWorkingDir() (func(), error) {
 	var err error
 	if sharedPaths.PackageDir, err = os.Getwd(); err != nil {
-		return 0, err
+		return nil, err
 	}
 	// A test that runs this binary again starts it in the empty directory
 	// it runs in itself, whose testdata link leads back to the package.
@@ -153,34 +146,36 @@ func runInEmptyDir(m *testing.M, ready func(Paths)) (int, error) {
 		sharedPaths.PackageDir = filepath.Dir(target)
 	}
 	if sharedPaths.RepoDir, err = moduleRoot(sharedPaths.PackageDir); err != nil {
-		return 0, err
+		return nil, err
 	}
 	// Tests run this binary again through os.Args[0], which must keep
 	// working from the new directory when it was started by a relative path.
 	if strings.ContainsRune(os.Args[0], filepath.Separator) {
 		if os.Args[0], err = filepath.Abs(os.Args[0]); err != nil {
-			return 0, err
+			return nil, err
 		}
 	}
 	wd, err := os.MkdirTemp("", "fridolin-test-wd-")
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	defer os.RemoveAll(wd)
+	ready := false
+	defer func() {
+		if !ready {
+			os.RemoveAll(wd)
+		}
+	}()
 	if err := os.Chdir(wd); err != nil {
-		return 0, err
+		return nil, err
 	}
 	if err := os.Setenv("PWD", wd); err != nil {
-		return 0, err
+		return nil, err
 	}
 	if err := LinkTestdata(sharedPaths.PackageDir, wd); err != nil {
-		return 0, err
+		return nil, err
 	}
-	sharedMainInstalled = true
-	if ready != nil {
-		ready(sharedPaths)
-	}
-	return m.Run(), nil
+	ready = true
+	return func() { os.RemoveAll(wd) }, nil
 }
 
 // moduleRoot is the folder of the go.mod at or above dir.
@@ -225,3 +220,56 @@ type Paths struct{ Home, OriginalHome, PackageDir, RepoDir string }
 
 var sharedPaths Paths
 var sharedMainInstalled bool
+
+// Isolate installs an empty HOME and working directory, clears bridge config
+// selectors, and links the package's testdata. Call it before starting tests,
+// never concurrently with them. The returned cleanup restores process state
+// and removes only directories created by this call.
+func Isolate() (Paths, func(), error) {
+	originalDir, err := os.Getwd()
+	if err != nil {
+		return Paths{}, nil, fmt.Errorf("moving the tests out of the checkout: %w", err)
+	}
+	type entry struct {
+		value string
+		set   bool
+	}
+	saved := map[string]entry{}
+	for _, k := range append(BridgeVariables(), "HOME", "PWD", testPIDVariable) {
+		v, ok := os.LookupEnv(k)
+		saved[k] = entry{v, ok}
+	}
+	restore := func() {
+		_ = os.Chdir(originalDir)
+		for k, e := range saved {
+			if e.set {
+				_ = os.Setenv(k, e.value)
+			} else {
+				_ = os.Unsetenv(k)
+			}
+		}
+	}
+	for _, k := range BridgeVariables() {
+		if err := os.Unsetenv(k); err != nil {
+			restore()
+			return Paths{}, nil, fmt.Errorf("unsetting %s: %w", k, err)
+		}
+	}
+	if err := os.Setenv(testPIDVariable, strconv.Itoa(os.Getpid())); err != nil {
+		restore()
+		return Paths{}, nil, fmt.Errorf("setting %s: %w", testPIDVariable, err)
+	}
+	sharedPaths.OriginalHome = os.Getenv("HOME")
+	removeHome, err := useEmptyHome()
+	if err != nil {
+		restore()
+		return Paths{}, nil, fmt.Errorf("giving the tests an empty HOME: %w", err)
+	}
+	removeDir, err := isolateWorkingDir()
+	if err != nil {
+		restore()
+		removeHome()
+		return Paths{}, nil, fmt.Errorf("moving the tests out of the checkout: %w", err)
+	}
+	return sharedPaths, func() { restore(); removeDir(); removeHome() }, nil
+}

@@ -73,7 +73,7 @@ func (f *fakePlaudFixture) teamSync(id string, transcriptReady bool) testutil.Pl
 	r := testutil.PlaudRecording{ID: id, Name: "Team sync", CreatedAt: start, StartAt: &start, Duration: 300000,
 		Notes: []testutil.PlaudBlock{{DataType: "auto_sum_note", Content: "Decided to ship on Friday.", TabName: "Summary"}}}
 	if transcriptReady {
-		r.Sources = []testutil.PlaudBlock{{DataType: "transaction", Content: testutil.PlaudTranscript(testutil.PlaudSegment{0, 4000, "Speaker 1", "Let's ship on Friday."})}}
+		r.Sources = []testutil.PlaudBlock{{DataType: "transaction", Content: testutil.PlaudTranscript(testutil.PlaudSegment{Start: 0, End: 4000, Speaker: "Speaker 1", Content: "Let's ship on Friday."})}}
 	}
 	return r
 }
@@ -1958,22 +1958,22 @@ func TestPlaudForwardReadsWhatTheCLIPrints(t *testing.T) {
 		want    []string // in the file, which starts with its name
 		notWant []string
 	}{
-		{"a summary line that starts like the spinner",
-			func(r *testutil.PlaudRecording) { r.Notes[0].Content = plaudGoldenSummary },
-			[]string{"=== Plaud AI summary ===\n" + plaudGoldenSummary + "\n\n=== Transcript ===\n"},
-			[]string{"Team sync\n## Team sync"}},
-		{"the transcript without its header",
-			func(*testutil.PlaudRecording) {},
-			[]string{"=== Transcript ===\n[00:00 - 00:04] Speaker 1: Let's ship on Friday.\n"},
-			[]string{"Transcript: Team sync"}},
-		{"no start time: the day it reached Plaud",
-			func(r *testutil.PlaudRecording) { r.StartAt, r.CreatedAt = nil, "2026-10-15T07:30:00" },
-			[]string{created.Format("2006-01-02") + " - Team sync - ", "Recorded: " + created.Format("2006-01-02 15:04") + "\n"},
-			[]string{"Recorded: -"}},
-		{"an empty summary note",
-			func(r *testutil.PlaudRecording) { r.Notes[0].Content = "" },
-			nil,
-			[]string{"=== Plaud AI summary ===", "no content yet"}},
+		{name: "a summary line that starts like the spinner",
+			change:  func(r *testutil.PlaudRecording) { r.Notes[0].Content = plaudGoldenSummary },
+			want:    []string{"=== Plaud AI summary ===\n" + plaudGoldenSummary + "\n\n=== Transcript ===\n"},
+			notWant: []string{"Team sync\n## Team sync"}},
+		{name: "the transcript without its header",
+			change:  func(*testutil.PlaudRecording) {},
+			want:    []string{"=== Transcript ===\n[00:00 - 00:04] Speaker 1: Let's ship on Friday.\n"},
+			notWant: []string{"Transcript: Team sync"}},
+		{name: "no start time: the day it reached Plaud",
+			change:  func(r *testutil.PlaudRecording) { r.StartAt, r.CreatedAt = nil, "2026-10-15T07:30:00" },
+			want:    []string{created.Format("2006-01-02") + " - Team sync - ", "Recorded: " + created.Format("2006-01-02 15:04") + "\n"},
+			notWant: []string{"Recorded: -"}},
+		{name: "an empty summary note",
+			change:  func(r *testutil.PlaudRecording) { r.Notes[0].Content = "" },
+			want:    nil,
+			notWant: []string{"=== Plaud AI summary ===", "no content yet"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			tb, fp := plaudBridge(t, "")
@@ -2027,7 +2027,7 @@ func TestPlaudPolishedFallsBackToTheRawTranscript(t *testing.T) {
 			if c.polished != nil {
 				b := testutil.PlaudBlock{DataType: "transaction_polish"}
 				if *c.polished != "" {
-					b.Content = testutil.PlaudTranscript(testutil.PlaudSegment{0, 4000, "Speaker 1", *c.polished})
+					b.Content = testutil.PlaudTranscript(testutil.PlaudSegment{Start: 0, End: 4000, Speaker: "Speaker 1", Content: *c.polished})
 				}
 				r.Sources = append(r.Sources, b)
 			}

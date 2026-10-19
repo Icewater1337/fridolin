@@ -45,7 +45,7 @@ SHELLCHECK  ?= shellcheck
 FUZZTIME ?= 10s
 
 .DEFAULT_GOAL := build
-.PHONY: help build install test race race-shard vet fmt fmt-check tidy-check root-check \
+.PHONY: help build install test race race-shard race-process vet fmt fmt-check tidy-check root-check \
 	notices notices-check \
 	lint lint-go lint-sh lint-py lint-actions lint-web \
 	test-py test-web test-sh smoke fuzz-short check clean
@@ -68,6 +68,9 @@ race: ## Go tests with the race detector, as CI runs them
 
 race-shard: ## one slice of the race tests, SHARD=i/n (CI splits the macOS run)
 	GO="$(GO)" scripts/test-shard.sh $(subst /, ,$(SHARD)) -race -count=1
+
+race-process: ## repeat extracted provider process tests under the race detector
+	$(GO) test -race -shuffle=on -count=5 ./internal/claudecli
 
 # The second vet covers the Linux-only files from macOS (CI also runs Linux).
 vet: ## go vet, natively and for Linux without cgo
@@ -176,7 +179,7 @@ fuzz-short: ## run every fuzz target for FUZZTIME (default 10s)
 
 # No build: smoke compiles the binary into a temp dir, and bin/fridolin stays
 # as it was.
-check: fmt-check vet tidy-check notices-check root-check race lint test-py test-web test-sh smoke ## what CI's build, lint and test jobs run
+check: fmt-check vet tidy-check notices-check root-check race race-process lint test-py test-web test-sh smoke ## what CI's build, lint and test jobs run
 
 clean: ## remove the binary
 	rm -f "$(BINARY)"

@@ -86,10 +86,10 @@ const plaudGoldenSummary = "## Team sync\n\nDecisions: ship Friday.\nFetching th
 // and every recording.
 func plaudGoldenRecordings() ([]string, []testutil.PlaudRecording) {
 	tr := testutil.PlaudBlock{DataType: "transaction", Content: testutil.PlaudTranscript(
-		testutil.PlaudSegment{0, 4000, "Speaker 1", "Let's ship on Friday."},
-		testutil.PlaudSegment{4000, 9500, "Speaker 2", "Fetching the release notes is Anna's job."})}
+		testutil.PlaudSegment{Start: 0, End: 4000, Speaker: "Speaker 1", Content: "Let's ship on Friday."},
+		testutil.PlaudSegment{Start: 4000, End: 9500, Speaker: "Speaker 2", Content: "Fetching the release notes is Anna's job."})}
 	pol := testutil.PlaudBlock{DataType: "transaction_polish", Content: testutil.PlaudTranscript(
-		testutil.PlaudSegment{0, 4000, "Speaker 1", "Let us ship on Friday."})}
+		testutil.PlaudSegment{Start: 0, End: 4000, Speaker: "Speaker 1", Content: "Let us ship on Friday."})}
 	sum := testutil.PlaudBlock{DataType: "auto_sum_note", Content: plaudGoldenSummary, TabName: "Summary", Title: "Team sync"}
 	at := func(s string) *string { return &s }
 	rec := func(id, name string, start *string, sources, notes []testutil.PlaudBlock) testutil.PlaudRecording {
