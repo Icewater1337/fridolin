@@ -25,7 +25,7 @@ func (f testRunnerFunc) Run(c context.Context, s brain.RunSpec, h claudecli.Call
 // integration test's live queue/history. Only its three prompt inputs are
 // copied into a fresh scratch folder. Confinement tests live beside the runtime
 // and use the original pinned root directly.
-func capturedPrompt(t *testing.T, br *Brain, m Inbound) string {
+func capturedPrompt(t *testing.T, br *brain.Brain, m brain.Inbound) string {
 	t.Helper()
 	dir := t.TempDir()
 	manifestValue := br.Manifest()

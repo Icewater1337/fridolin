@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/history"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
@@ -16,17 +17,17 @@ type BrainHooks struct {
 	// reply. br's history records it once it arrived, like an answer: the
 	// reply to it comes as a new message, whose run must see what it
 	// answers. A silent run asks nothing (see runSink.Question).
-	Question func(br *Brain, jid, text string) bool
+	Question func(br *brain.Brain, jid, text string) bool
 	// Deliver receives every finished run. It records the answer in the
 	// brain's history once it is sent.
-	Deliver func(br *Brain, m Inbound, res claudecli.Result)
+	Deliver func(br *brain.Brain, m brain.Inbound, res claudecli.Result)
 	// Waiting gets, as the bridge stops, what br had waiting, which never
 	// ran, before its run in flight gets its grace (see shutdown). Nil
 	// drops it.
-	Waiting func(br *Brain, ms []Inbound)
+	Waiting func(br *brain.Brain, ms []brain.Inbound)
 	// Interrupted gets, as the bridge stops, the message whose run br
 	// stopped once its grace was over.
-	Interrupted func(br *Brain, m Inbound)
+	Interrupted func(br *brain.Brain, m brain.Inbound)
 	// Undelivered returns the brain's answers still on their way to
 	// WhatsApp, as its history will record them once they arrived. A
 	// chat gets them before anything a later run says there, so that run
@@ -55,22 +56,22 @@ func (s brainHooksSink) Working(jid string) {
 		s.hooks.Notice(jid, outboundmsg.WorkingNotice)
 	}
 }
-func (s brainHooksSink) Question(br *Brain, jid, text string) bool {
+func (s brainHooksSink) Question(br *brain.Brain, jid, text string) bool {
 	return s.hooks != nil && s.hooks.Question != nil && s.hooks.Question(br, jid, outboundmsg.QuestionPrefix+text)
 }
-func (s brainHooksSink) Finished(br *Brain, m Inbound, res claudecli.Result) {
+func (s brainHooksSink) Finished(br *brain.Brain, m brain.Inbound, res claudecli.Result) {
 	if s.hooks != nil && s.hooks.Deliver != nil {
 		s.hooks.Deliver(br, m, res)
 	}
 }
-func (s brainHooksSink) Waiting(br *Brain, ms []Inbound) {
+func (s brainHooksSink) Waiting(br *brain.Brain, ms []brain.Inbound) {
 	if s.hooks != nil && s.hooks.Waiting != nil {
 		s.hooks.Waiting(br, ms)
 	} else {
-		dropped(ms)
+		brain.Dropped(ms)
 	}
 }
-func (s brainHooksSink) Interrupted(br *Brain, m Inbound) {
+func (s brainHooksSink) Interrupted(br *brain.Brain, m brain.Inbound) {
 	if s.hooks != nil && s.hooks.Interrupted != nil {
 		s.hooks.Interrupted(br, m)
 	}

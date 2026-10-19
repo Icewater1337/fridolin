@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 	"github.com/Icewater1337/fridolin/internal/testutil"
@@ -83,14 +84,14 @@ func TestPromptShowsTheMessageOnce(t *testing.T) {
 func TestPromptSaysWhatChatItIs(t *testing.T) {
 	cases := []struct {
 		name     string
-		m        Inbound
+		m        brain.Inbound
 		want     string
 		handedIn bool
 	}{
-		{"a direct chat", Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", Source: chat.SourceWhatsApp}}, "This chat is a direct chat on WhatsApp.", false},
-		{"a group", Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567", Text: "hi", Source: chat.SourceWhatsApp}}, "This chat is the WhatsApp group ", false},
-		{"a build chat", Inbound{Inbound: chat.Inbound{JID: buildChatJID("main", 2), Sender: "owner", Text: "make the header blue", Source: chat.SourceDev}}, "This chat is the site-building chat on the dashboard's Build page, not a WhatsApp chat.", false},
-		{"files handed in", Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "upload", Text: "a scan", Media: []string{"/media/a.pdf"}, Source: chat.SourceIngest}}, "This chat is a direct chat on WhatsApp.", true},
+		{"a direct chat", brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", Source: chat.SourceWhatsApp}}, "This chat is a direct chat on WhatsApp.", false},
+		{"a group", brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567", Text: "hi", Source: chat.SourceWhatsApp}}, "This chat is the WhatsApp group ", false},
+		{"a build chat", brain.Inbound{Inbound: chat.Inbound{JID: buildChatJID("main", 2), Sender: "owner", Text: "make the header blue", Source: chat.SourceDev}}, "This chat is the site-building chat on the dashboard's Build page, not a WhatsApp chat.", false},
+		{"files handed in", brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "upload", Text: "a scan", Media: []string{"/media/a.pdf"}, Source: chat.SourceIngest}}, "This chat is a direct chat on WhatsApp.", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

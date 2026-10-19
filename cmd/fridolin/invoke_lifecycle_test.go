@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/testutil"
@@ -90,7 +91,7 @@ func TestDetachedChildDoesNotHoldTheBrain(t *testing.T) {
 			if err := os.Unsetenv("FRIDOLIN_FAKE_SETSID_CHILD"); err != nil {
 				t.Fatal(err)
 			}
-			next := Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "next"}}
+			next := brain.Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "next"}}
 			if _, _, _, err := mgr.Submit(next); err != nil {
 				t.Fatal(err)
 			}
@@ -192,7 +193,7 @@ func TestKillRunsRejectsReloadAlreadyInProgress(t *testing.T) {
 		t.Fatal("force-stop waited for a blocked reload")
 	}
 	release()
-	if err := <-reloaded; !errors.Is(err, errBrainsStopped) {
+	if err := <-reloaded; !errors.Is(err, brain.ErrStopped) {
 		t.Fatalf("in-flight reload after force-stop = %v", err)
 	}
 	if mgr.Get("a") == nil {

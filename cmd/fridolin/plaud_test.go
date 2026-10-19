@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/devchat"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -425,7 +426,7 @@ type plaudRecorder struct {
 	refuse error
 }
 
-func (r *plaudRecorder) submit(br *Brain, jid, sender, text string, media []string, done func(error)) error {
+func (r *plaudRecorder) submit(br *brainruntime.Brain, jid, sender, text string, media []string, done func(error)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.refuse != nil {
@@ -462,7 +463,7 @@ func (r *plaudRecorder) count() int {
 // take it (its queue is full) leaves it waiting, with the reason on the
 // card. After a restart, one whose run never ended is handed over again.
 func TestPlaudRecordingIsSeenOnlyOnceItsRunEnds(t *testing.T) {
-	stop := []error{claudecli.ErrInterrupted, errBrainDropped}
+	stop := []error{claudecli.ErrInterrupted, brainruntime.ErrDropped}
 	for _, c := range []struct {
 		name    string
 		ends    []error // the runs' outcomes, one per check
@@ -541,7 +542,7 @@ func TestPlaudRecordingIsSeenOnlyOnceItsRunEnds(t *testing.T) {
 	}
 	t.Run("not taken", func(t *testing.T) {
 		tb, fp := plaudBridge(t, "")
-		rec := &plaudRecorder{refuse: errQueueFull}
+		rec := &plaudRecorder{refuse: brainruntime.ErrQueueFull}
 		tb.plaud.submit = rec.submit
 		plaudSignIn(t, tb)
 		if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
@@ -645,12 +646,12 @@ func TestPlaudHandOffThroughTheBridge(t *testing.T) {
 	if err := tb.submitHandOff(br, dm, "plaud", "second", nil, done("second")); err != nil {
 		t.Fatal(err)
 	}
-	if err := tb.submitHandOff(br, dm, "plaud", "third", nil, done("third")); !errors.Is(err, errQueueFull) {
+	if err := tb.submitHandOff(br, dm, "plaud", "third", nil, done("third")); !errors.Is(err, brainruntime.ErrQueueFull) {
 		t.Errorf("a hand-off to a full queue = %v, want errQueueFull", err)
 	}
-	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: "whatsapp"}})
+	tb.handleInbound(context.Background(), brainruntime.Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: "whatsapp"}})
 	testutil.WaitFor(t, 10*time.Second, "both to end", func() bool { mu.Lock(); defer mu.Unlock(); return len(ended) == 2 })
-	if !errors.Is(ended["first"], claudecli.ErrInterrupted) || !errors.Is(ended["second"], errBrainDropped) {
+	if !errors.Is(ended["first"], claudecli.ErrInterrupted) || !errors.Is(ended["second"], brainruntime.ErrDropped) {
 		t.Errorf("ended = %v, want the first stopped and the second dropped", ended)
 	}
 	for _, m := range tb.dev.Outbox() {
@@ -927,7 +928,7 @@ func TestPlaudManagerUsesOnlyWhatItIsGiven(t *testing.T) {
 	}
 	var got []handed
 	p := NewPlaudManager(tb.cfgs, tb.brainMgr)
-	p.submit = func(br *Brain, jid, sender, text string, media []string, done func(error)) error {
+	p.submit = func(br *brainruntime.Brain, jid, sender, text string, media []string, done func(error)) error {
 		got = append(got, handed{br.ID(), jid, sender, text, media})
 		return nil
 	}
@@ -1922,7 +1923,7 @@ func TestPlaudMessageSaysWhatArrived(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb, fp := plaudBridge(t, c.settings)
 			var text, file string
-			tb.plaud.submit = func(br *Brain, jid, sender, txt string, media []string, done func(error)) error {
+			tb.plaud.submit = func(br *brainruntime.Brain, jid, sender, txt string, media []string, done func(error)) error {
 				text, file = txt, filepath.Base(media[0])
 				return nil
 			}
@@ -2077,7 +2078,7 @@ func plaudIDs(prefix string, n int) []string {
 func TestPlaudPagesBackToTheLastKnownRecording(t *testing.T) {
 	tb, fp := plaudBridge(t, "")
 	var handed []string
-	tb.plaud.submit = func(br *Brain, jid, sender, text string, media []string, done func(error)) error {
+	tb.plaud.submit = func(br *brainruntime.Brain, jid, sender, text string, media []string, done func(error)) error {
 		handed = append(handed, strings.TrimSuffix(media[0][strings.LastIndex(media[0], " - ")+3:], ".txt"))
 		done(nil)
 		return nil
@@ -2182,7 +2183,7 @@ func TestPlaudBacklogLeavesRoomInTheBrainsQueue(t *testing.T) {
 			t.Fatalf("check %d: %d with the brain and %d waiting, want %d and %d", i+1, *s.Handed, *s.Pending, limit, len(backlog)-limit)
 		}
 	}
-	if _, _, _, err := tb.brainMgr.Submit(Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}}); err != nil {
+	if _, _, _, err := tb.brainMgr.Submit(brainruntime.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}}); err != nil {
 		t.Errorf("your own message to the brain = %v, want it taken", err)
 	}
 }
@@ -2287,7 +2288,7 @@ func TestPlaudPendingGoesOldestFirst(t *testing.T) {
 	const older, newer = "of_00000000000000000000bb", "of_00000000000000000000ba"
 	tb, fp := plaudBridge(t, "")
 	var order []string
-	tb.plaud.submit = func(br *Brain, jid, sender, text string, media []string, done func(error)) error {
+	tb.plaud.submit = func(br *brainruntime.Brain, jid, sender, text string, media []string, done func(error)) error {
 		order = append(order, media[0][len(media[0])-len(older)-4:len(media[0])-4])
 		done(nil)
 		return nil
@@ -2893,7 +2894,7 @@ func TestBrainRunsKeepPlaudTelemetryOff(t *testing.T) {
 	tb, _ := plaudBridge(t, "")
 	envLog := filepath.Join(t.TempDir(), "brain.env")
 	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
-	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
+	tb.handleInbound(context.Background(), brainruntime.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
 	testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return len(tb.dev.Outbox()) > 0 })
 	logged, err := os.ReadFile(envLog)
 	if err != nil {
@@ -2915,7 +2916,7 @@ func TestBrainsFindThePlaudCLIWhenTheyMayUseIt(t *testing.T) {
 			tb, _ := plaudBridge(t, fmt.Sprintf(`, "brain_access": %v`, access))
 			envLog := filepath.Join(t.TempDir(), "brain.env")
 			t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
-			tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
+			tb.handleInbound(context.Background(), brainruntime.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
 			testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return len(tb.dev.Outbox()) > 0 })
 			logged, _ := os.ReadFile(envLog)
 			var path string

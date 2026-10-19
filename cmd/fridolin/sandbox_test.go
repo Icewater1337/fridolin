@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/config"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -41,7 +42,7 @@ func TestSandboxFailsClosed(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			viewerCalls := make(chan struct{}, 4)
-			mgr, d, home := queueTestManager(t, 0, `, "viewer": true`, func(opts *brainManagerOptions) {
+			mgr, d, home := queueTestManager(t, 0, `, "viewer": true`, func(opts *brainruntime.Options) {
 				opts.ViewerStart = func(string, string, string, []string) (*platform.Viewer, error) {
 					viewerCalls <- struct{}{}
 					return nil, errors.New("no tmux in tests")
@@ -62,7 +63,7 @@ func TestSandboxFailsClosed(t *testing.T) {
 			testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
 
 			res := d.all()[0].res
-			if !errors.Is(res.Err, errSandboxUnavailable) {
+			if !errors.Is(res.Err, brainruntime.ErrSandboxUnavailable) {
 				t.Fatalf("run result = %+v, want errSandboxUnavailable", res)
 			}
 			if strings.Contains(res.Err.Error(), home) {

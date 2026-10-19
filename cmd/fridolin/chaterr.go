@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/claudecli"
@@ -19,8 +20,8 @@ func chatErrorText(err error, inDM bool) string {
 	if err == nil || errors.Is(err, claudecli.ErrInterrupted) || errors.Is(err, context.Canceled) {
 		return ""
 	}
-	if errors.Is(err, errSandboxUnavailable) {
-		return outboundmsg.ChatErrSandbox(errSandboxUnavailable)
+	if errors.Is(err, brain.ErrSandboxUnavailable) {
+		return outboundmsg.ChatErrSandbox(brain.ErrSandboxUnavailable)
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, claudecli.ErrTimedOut) {
 		return outboundmsg.ChatErrTimeout

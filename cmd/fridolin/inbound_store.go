@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"time"
 
+	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/jsonx"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -53,7 +54,7 @@ type keptInbound struct {
 	SentAt time.Time
 	// Msg is the message of a queued, held or late row, Change the change
 	// of a change row.
-	Msg    Inbound
+	Msg    brainruntime.Inbound
 	Change chat.Change
 }
 
@@ -69,7 +70,7 @@ type storedChange struct {
 
 // keepInbound keeps m, a message of kind inboundQueued, inboundHeld or
 // inboundLate that brain had ("" for none), for the next start.
-func keepInbound(ctx context.Context, s *store.Store, kind, brain string, m Inbound) error {
+func keepInbound(ctx context.Context, s *store.Store, kind, brain string, m brainruntime.Inbound) error {
 	body, err := json.Marshal(m.Save())
 	if err != nil {
 		return err
@@ -88,7 +89,7 @@ func keepChange(ctx context.Context, s *store.Store, c chat.Change, at time.Time
 }
 
 // keepInterrupted keeps that the stop cut short brain's run for m.
-func keepInterrupted(ctx context.Context, s *store.Store, brain string, m Inbound) error {
+func keepInterrupted(ctx context.Context, s *store.Store, brain string, m brainruntime.Inbound) error {
 	return s.KeepInbound(ctx, store.InboundRow{Kind: inboundInterrupted, Chat: m.JID, Brain: brain, MsgID: m.ID, SentAt: m.At})
 }
 
@@ -103,7 +104,7 @@ func takeInbound(ctx context.Context, s *store.Store) ([]keptInbound, error) {
 
 		switch k.Kind {
 		case inboundQueued, inboundHeld, inboundLate:
-			var m storedInbound
+			var m brainruntime.SavedInbound
 			if err := decodeSavedInbound([]byte(body), &m); err != nil {
 				bad = append(bad, fmt.Errorf("row %d: %w", k.ID, err))
 				return
@@ -132,9 +133,9 @@ func takeInbound(ctx context.Context, s *store.Store) ([]keptInbound, error) {
 // decodeSavedInbound preserves the persisted queue's decoder diagnostics when
 // its representation moves to the runtime package. The underlying typed error
 // remains available to callers through errors.As.
-func decodeSavedInbound(body []byte, out *storedInbound) error {
+func decodeSavedInbound(body []byte, out *brainruntime.SavedInbound) error {
 	return jsonx.RenameTypeError(json.Unmarshal(body, out), func(t reflect.Type) string {
-		if t == reflect.TypeFor[storedInbound]() {
+		if t == reflect.TypeFor[brainruntime.SavedInbound]() {
 			return "main.storedInbound"
 		}
 		return ""

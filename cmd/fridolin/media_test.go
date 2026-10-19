@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
@@ -33,7 +34,7 @@ func TestBrainTakesItsFilesIntoItsInbox(t *testing.T) {
 	media := tb.cfgs.Get().MediaDir
 	p := writeTestFile(t, filepath.Join(media, mediafiles.IncomingDir, "voice.ogg"), "OggS")
 
-	tb.handleInbound(t.Context(), Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "listen", Media: []string{p}, Source: "whatsapp", At: time.Now()}})
+	tb.handleInbound(t.Context(), brain.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "listen", Media: []string{p}, Source: "whatsapp", At: time.Now()}})
 	testutil.WaitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.dev.Outbox()) > 0 })
 
 	want := filepath.Join(media, "dm", "voice.ogg")
@@ -134,7 +135,7 @@ func TestMergedMessageNamesItsFilesInTheInbox(t *testing.T) {
 
 			media := filepath.Join(home, "data", "media")
 			inbox := mediaInboxAt(media).Path("a")
-			part := func(id, file string) Inbound {
+			part := func(id, file string) brain.Inbound {
 				m := dm("")
 				m.ID = id
 				m.Media = []string{writeTestFile(t, filepath.Join(media, mediafiles.IncomingDir, file), file)}

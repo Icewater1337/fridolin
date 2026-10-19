@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/devchat"
@@ -781,7 +782,7 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	}
 	testutil.WaitFor(t, 5*time.Second, "the second file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
 
-	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
+	tb.handleInbound(context.Background(), brainruntime.Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
 	if !tb.sentPrefix(dm, "✅ Reset. I stopped what this chat had running or waiting") {
 		t.Errorf("!reset answered %q, want that it cleared the chat", tb.sentTo(dm))
 	}
@@ -793,7 +794,7 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	if !slices.ContainsFunc(readHistory(t, up), func(e history.Entry) bool { return e.Type == history.Reset && e.Chat == dm }) {
 		t.Errorf("up's history has no reset marker for the chat:\n%+v", readHistory(t, up))
 	}
-	if before := promptBlock(capturedPrompt(t, up, Inbound{Inbound: chat.Inbound{JID: dm, Brain: "up", Sender: "upload", Text: "next file", Source: chat.SourceIngest}}), "chat_history"); before != "" {
+	if before := promptBlock(capturedPrompt(t, up, brainruntime.Inbound{Inbound: chat.Inbound{JID: dm, Brain: "up", Sender: "upload", Text: "next file", Source: chat.SourceIngest}}), "chat_history"); before != "" {
 		t.Errorf("up's next run in the chat would read %+v", before)
 	}
 }
@@ -812,7 +813,7 @@ func TestStopCountsWaitingHandOffs(t *testing.T) {
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	up := tb.brainMgr.Get("up")
 
-	if _, _, _, err := tb.brainMgr.Submit(Inbound{Inbound: chat.Inbound{JID: group, Sender: "15551234567", Text: "group work", Source: chat.SourceWhatsApp}}); err != nil {
+	if _, _, _, err := tb.brainMgr.Submit(brainruntime.Inbound{Inbound: chat.Inbound{JID: group, Sender: "15551234567", Text: "group work", Source: chat.SourceWhatsApp}}); err != nil {
 		t.Fatal(err)
 	}
 	testutil.WaitFor(t, 5*time.Second, "up's group run", func() bool { r := up.Snapshot().Running; return r != nil && r.PID > 0 })
@@ -821,7 +822,7 @@ func TestStopCountsWaitingHandOffs(t *testing.T) {
 	}
 	testutil.WaitFor(t, 5*time.Second, "the file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
 
-	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: chat.SourceWhatsApp}})
+	tb.handleInbound(context.Background(), brainruntime.Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: chat.SourceWhatsApp}})
 	if !tb.sentPrefix(dm, "🛑 Nothing was running for this chat; cleared") {
 		t.Errorf("!stop answered %q, want that it cleared the waiting file", tb.sentTo(dm))
 	}

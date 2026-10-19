@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/claudecli"
@@ -42,7 +43,7 @@ func TestConfigDefaultsMatchRuntimeContracts(t *testing.T) {
 }
 
 func TestBrainQueueModeMatchesConfiguration(t *testing.T) {
-	if brainQueueInterrupt != config.QueueModeInterrupt {
+	if brain.QueueInterrupt != config.QueueModeInterrupt {
 		t.Fatal("runtime and configuration interrupt modes differ")
 	}
 }

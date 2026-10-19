@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
@@ -28,7 +29,7 @@ func TestRunStderrIsBounded(t *testing.T) {
 	if len(res.Err.Error()) > 1000 {
 		t.Errorf("the error holds %d bytes of stderr, want a short tail", len(res.Err.Error()))
 	}
-	data, err := os.ReadFile(filepath.Join(mgr.Get("a").Dir(), streamLogName))
+	data, err := os.ReadFile(filepath.Join(mgr.Get("a").Dir(), brain.StreamLogName))
 	if err != nil {
 		t.Fatal(err)
 	}

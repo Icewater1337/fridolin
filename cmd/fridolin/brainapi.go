@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -191,7 +192,7 @@ func (b *Bridge) brainAPIHandler() http.Handler {
 
 // brainCall authenticates a brain API call by the run's token and hands
 // the brain it belongs to on to fn.
-func (b *Bridge) brainCall(fn func(w http.ResponseWriter, r *http.Request, br *Brain)) http.HandlerFunc {
+func (b *Bridge) brainCall(fn func(w http.ResponseWriter, r *http.Request, br *brainruntime.Brain)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tok, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		br := b.brainMgr.Get(b.runTokens.brainOf(tok))
@@ -210,13 +211,13 @@ func (b *Bridge) brainCall(fn func(w http.ResponseWriter, r *http.Request, br *B
 // ownsChat reports whether chat is one of br's: a chat that routes to it,
 // or the one it replies in. A brain sees only the polls of those, since a
 // poll's voters are the people of the chat it was sent to.
-func (b *Bridge) ownsChat(br *Brain, chatJID string) bool {
+func (b *Bridge) ownsChat(br *brainruntime.Brain, chatJID string) bool {
 	return b.brainMgr.BrainFor(chatJID, chat.IsGroupJID(chatJID)) == br || b.replyChatFor(br, b.cfgs.Get()) == chatJID
 }
 
 // brainPolls answers GET /brain/polls: ?id=MSG_ID for one poll, else the
 // ?recent=N (default 10) newest, of ?chat=JID when given.
-func (b *Bridge) brainPolls(w http.ResponseWriter, r *http.Request, br *Brain) {
+func (b *Bridge) brainPolls(w http.ResponseWriter, r *http.Request, br *brainruntime.Brain) {
 	q := r.URL.Query()
 	owns := func(chatJID string) bool { return b.ownsChat(br, chatJID) }
 	if id := q.Get("id"); id != "" {
@@ -273,8 +274,8 @@ type calendarHandler func(ctx context.Context, r *http.Request, cals brainCalend
 
 // calendarCall runs fn for a brain's call and answers with its result. The
 // brain's calendars come from its approved manifest, never from the call.
-func (b *Bridge) calendarCall(fn calendarHandler) func(w http.ResponseWriter, r *http.Request, br *Brain) {
-	return func(w http.ResponseWriter, r *http.Request, br *Brain) {
+func (b *Bridge) calendarCall(fn calendarHandler) func(w http.ResponseWriter, r *http.Request, br *brainruntime.Brain) {
+	return func(w http.ResponseWriter, r *http.Request, br *brainruntime.Brain) {
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
 		cals := calendarsOf(br.Manifest())

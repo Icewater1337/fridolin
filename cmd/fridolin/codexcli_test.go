@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -47,7 +48,7 @@ func TestCodexDefaultsAndValidation(t *testing.T) {
 func TestCodexArgsPermissions(t *testing.T) {
 	for _, external := range []bool{false, true} {
 		for _, tools := range []bool{false, true} {
-			s := &brainSettings{Dangerously: tools, DataDir: "/data", MediaDir: "/media", Manifest: manifest.Manifest{ID: "a"}}
+			s := &brain.Settings{Dangerously: tools, DataDir: "/data", MediaDir: "/media", Manifest: manifest.Manifest{ID: "a"}}
 			args := codexArgs(s, "/brain", external)
 			if args[len(args)-1] != "-" || !slices.Contains(args, claudecli.DefaultCodexModel) || !slices.Contains(args, `model_reasoning_effort="high"`) {
 				t.Fatalf("missing stdin/defaults: %q", args)
@@ -75,7 +76,7 @@ func TestCodexWebToolRestrictions(t *testing.T) {
 		if err := claudecli.ValidateCodexTools(blocked); err != nil {
 			t.Fatal(err)
 		}
-		args := codexArgs(&brainSettings{DisallowedTools: blocked}, "/brain", false)
+		args := codexArgs(&brain.Settings{DisallowedTools: blocked}, "/brain", false)
 		if slices.Contains(args, `web_search="disabled"`) != (len(blocked) > 0) {
 			t.Fatalf("web restriction %v not applied: %v", blocked, args)
 		}

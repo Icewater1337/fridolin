@@ -4,6 +4,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/otp"
 )
 
@@ -13,7 +14,7 @@ import (
 // cannot read it (the sandbox denies the data folder), and it never
 // reaches the history or the model. A newer code for the brain replaces
 // it.
-func (b *Bridge) handOffCode(br *Brain, m Inbound, c OTPCatch) {
+func (b *Bridge) handOffCode(br *brain.Brain, m brain.Inbound, c brain.OTPCatch) {
 	now := time.Now()
 	h := otp.Record{
 		Brain: br.ID(), Chat: m.JID, Sender: m.Sender, Code: c.Code, Typed: c.Typed,

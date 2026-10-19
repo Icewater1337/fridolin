@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -10,14 +11,14 @@ import (
 // settingsFor is the current composition boundary. The manager's later Apply
 // seam receives brainGlobals directly; configuration and host discovery stay
 // here rather than becoming imports of the brain runtime.
-func settingsFor(cfg *config.Config, sp manifest.Spec) *brainSettings {
-	return mergeBrainSettings(brainGlobalsOf(cfg), sp)
+func settingsFor(cfg *config.Config, sp manifest.Spec) *brain.Settings {
+	return brain.MergeSettings(brainGlobalsOf(cfg), sp)
 }
 
-func brainGlobalsOf(cfg *config.Config) brainGlobals {
-	return brainGlobals{
+func brainGlobalsOf(cfg *config.Config) brain.Globals {
+	return brain.Globals{
 		CodexModel: cfg.CodexModel, CodexEffort: cfg.CodexEffort, RunLimit: cfg.RunLimit(),
-		Defaults: brainSettings{
+		Defaults: brain.Settings{
 			ClaudePath: cfg.ClaudePath, Provider: cfg.AgentProvider, CodexPath: cfg.CodexPath,
 			Model: cfg.BrainModel, Effort: cfg.BrainEffort,
 			DisallowedTools: append([]string(nil), cfg.DisallowedTools...),
@@ -37,7 +38,7 @@ func brainGlobalsOf(cfg *config.Config) brainGlobals {
 // tools/ read these until the bridge answered them (brainapi.go); compat:
 // brains and their scripts rely on these names, as on the other BRIDGE_
 // variables.
-func dataEnv(s *brainSettings) []string {
+func dataEnv(s *brain.Settings) []string {
 	return []string{"BRIDGE_DATA_DIR=" + s.DataDir, "BRIDGE_DB_PATH=" + s.DBPath}
 }
 
@@ -58,10 +59,10 @@ func startBrainViewer(name, streamLog, cwd string, passthrough []string) (*platf
 
 func isBuildChat(jid string) bool { return brainOfBuildJID(jid) != "" }
 
-func commandBrainInputRules() brainInputRules {
-	return brainInputRules{
-		Chats:     func(m chat.Inbound) []string { return chatJIDs(Inbound{Inbound: m}) },
-		Observe:   func(mode string, m chat.Inbound) bool { return observeRuns(mode, Inbound{Inbound: m}) },
+func commandBrainInputRules() brain.InputRules {
+	return brain.InputRules{
+		Chats:     func(m chat.Inbound) []string { return chatJIDs(brain.Inbound{Inbound: m}) },
+		Observe:   func(mode string, m chat.Inbound) bool { return observeRuns(mode, brain.Inbound{Inbound: m}) },
 		BuildChat: isBuildChat,
 	}
 }

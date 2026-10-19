@@ -25,6 +25,7 @@ import (
 	"syscall"
 	"time"
 
+	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/claudecli"
@@ -308,7 +309,7 @@ type PlaudManager struct {
 	// submit gives a recording's transcript to br, whose answer goes to
 	// jid. An error means br did not take it; done then hears how its run
 	// ended (see Inbound.Done).
-	submit func(br *Brain, jid, sender, text string, media []string, done func(error)) error
+	submit func(br *brainruntime.Brain, jid, sender, text string, media []string, done func(error)) error
 	// notify sends text to a chat (the expiry notice).
 	notify func(ctx context.Context, jid, text string) error
 
@@ -969,7 +970,7 @@ func (p *PlaudManager) accountID(ctx context.Context) (string, error) {
 // forward hands one waiting recording to br, whose answer goes to jid, and
 // says what it handed over: nil while Plaud has not finished the
 // transcript. It notes the recording's name in item once Plaud said it.
-func (p *PlaudManager) forward(ctx context.Context, cfg *config.Config, id string, item *plaudPending, br *Brain, jid string) (*PlaudForward, error) {
+func (p *PlaudManager) forward(ctx context.Context, cfg *config.Config, id string, item *plaudPending, br *brainruntime.Brain, jid string) (*PlaudForward, error) {
 	fetch := p.fetchCloud
 	if plaudPhoneDir(cfg) != "" {
 		fetch = fetchPhone
@@ -1248,7 +1249,7 @@ func (p *PlaudManager) runEnded(id string) func(error) {
 			switch {
 			case runErr == nil:
 				fw.Status, fw.Error = plaudRunDone, ""
-			case errors.Is(runErr, claudecli.ErrInterrupted) || errors.Is(runErr, errBrainDropped) || errors.Is(runErr, context.Canceled):
+			case errors.Is(runErr, claudecli.ErrInterrupted) || errors.Is(runErr, brainruntime.ErrDropped) || errors.Is(runErr, context.Canceled):
 				fw.Status, fw.Error = plaudRunStopped, ""
 				log.Printf("plaud %s: stopped before brain %s answered it; it is not sent again unless you send it again from the dashboard", id, brain)
 			default:
@@ -1313,7 +1314,7 @@ func safePlaudName(s string) string {
 }
 
 // targetBrain is the configured brain, else the DM brain, else the default.
-func (p *PlaudManager) targetBrain(cfg *config.Config) *Brain {
+func (p *PlaudManager) targetBrain(cfg *config.Config) *brainruntime.Brain {
 	if id := cfg.Plaud.Brain; id != "" {
 		return p.brains.Get(id)
 	}
@@ -1325,7 +1326,7 @@ func (p *PlaudManager) targetBrain(cfg *config.Config) *Brain {
 // group, whatever chats the brain serves: its reply_chat when that is a
 // direct chat, else your own DM (the first allowed number). "" means there
 // is no private chat to use.
-func (p *PlaudManager) summaryChat(cfg *config.Config, br *Brain) string {
+func (p *PlaudManager) summaryChat(cfg *config.Config, br *brainruntime.Brain) string {
 	if rc := br.Manifest().ReplyChat; isDirectChat(rc) {
 		return rc
 	}
@@ -1341,7 +1342,7 @@ func isDirectChat(jid string) bool {
 // destination returns the brain that receives recordings and the private
 // chat its answers go to, under cfg. A check reads the configuration once
 // and passes it on, so that it never mixes two versions of it.
-func (p *PlaudManager) destination(cfg *config.Config) (*Brain, string, error) {
+func (p *PlaudManager) destination(cfg *config.Config) (*brainruntime.Brain, string, error) {
 	br := p.targetBrain(cfg)
 	if br == nil {
 		if id := cfg.Plaud.Brain; id != "" {

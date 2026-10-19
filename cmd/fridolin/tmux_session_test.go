@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 )
@@ -50,7 +51,7 @@ func TestViewerGetsTheAllowlistedEnvironment(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	viewer, err := startBrainViewer("claude-a", filepath.Join(dir, streamLogName), dir, []string{"GROQ_API_KEY"})
+	viewer, err := startBrainViewer("claude-a", filepath.Join(dir, brain.StreamLogName), dir, []string{"GROQ_API_KEY"})
 	if err != nil || viewer == nil {
 		t.Fatalf("no viewer started: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestViewerRunsOnlySystemPrograms(t *testing.T) {
 	osascript = filepath.Join(fakes, "osascript")
 	t.Cleanup(func() { osascript = oldOsascript })
 
-	tv := &platform.Viewer{TmuxPath: findTmux(), Osascript: osascript, Timeout: viewerTimeout, Name: "claude-a", StreamLog: filepath.Join(home, streamLogName), CWD: home,
+	tv := &platform.Viewer{TmuxPath: findTmux(), Osascript: osascript, Timeout: viewerTimeout, Name: "claude-a", StreamLog: filepath.Join(home, brain.StreamLogName), CWD: home,
 		Env: []string{"HOME=" + home, "PATH=" + planted + ":/usr/bin:/bin", "TMUX_TMPDIR=" + filepath.Join(logs, "tmux")}}
 	if err := tv.Start(); err != nil {
 		t.Fatal(err)
@@ -181,7 +182,7 @@ func TestViewerWithRealTmux(t *testing.T) {
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	logPath := filepath.Join(dir, streamLogName)
+	logPath := filepath.Join(dir, brain.StreamLogName)
 	if err := os.WriteFile(logPath, []byte("hello from the log\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}

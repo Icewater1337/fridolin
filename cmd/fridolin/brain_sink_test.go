@@ -3,12 +3,13 @@ package main
 import (
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 )
 
 func TestBrainSinkKeepsWaitingFallbackAndQuestionAcknowledgement(t *testing.T) {
 	accepted := false
-	sink := brainHooksSink{&BrainHooks{Question: func(_ *Brain, jid, text string) bool {
+	sink := brainHooksSink{&BrainHooks{Question: func(_ *brain.Brain, jid, text string) bool {
 		if jid != "chat" || text != outboundmsg.QuestionPrefix+outboundmsg.WorkingNotice {
 			t.Fatalf("question lost its distinct prefix: %q %q", jid, text)
 		}

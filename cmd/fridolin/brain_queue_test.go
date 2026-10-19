@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -34,11 +35,11 @@ type deliveries struct {
 
 type delivered struct {
 	brain string
-	msg   Inbound
+	msg   brainruntime.Inbound
 	res   claudecli.Result
 }
 
-func (d *deliveries) add(br *Brain, m Inbound, res claudecli.Result) {
+func (d *deliveries) add(br *brainruntime.Brain, m brainruntime.Inbound, res claudecli.Result) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.runs = append(d.runs, delivered{br.ID(), m, res})
@@ -59,7 +60,7 @@ func (d *deliveries) all() []delivered {
 // queueTestManager builds a manager with folder brains a (DMs) and b (a
 // group) running the fake CLI. b observes its group with runs, so that
 // untagged chatter there queues like the rest.
-func queueTestManager(t *testing.T, sleepMS int, extra string, modify ...func(*brainManagerOptions)) (*BrainManager, *deliveries, string) {
+func queueTestManager(t *testing.T, sleepMS int, extra string, modify ...func(*brainruntime.Options)) (*BrainManager, *deliveries, string) {
 	t.Helper()
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
@@ -77,12 +78,12 @@ func queueTestManager(t *testing.T, sleepMS int, extra string, modify ...func(*b
 	}
 	mgr := newTestManager(t, cfg)
 	if len(modify) > 0 {
-		mgr.brainManager.Stop()
-		opts := brainManagerOptions{Runner: &commandRunner{sandbox: mgr.profiler, hooks: mgr.hooks}, Sink: brainHooksSink{mgr.hooks}, Input: commandBrainInputRules(), ViewerStart: startBrainViewer, ClaimMedia: claimBrainMedia, ShutdownGrace: func() time.Duration { return shutdownGrace }}
+		mgr.Manager.Stop()
+		opts := brainruntime.Options{Runner: &commandRunner{sandbox: mgr.profiler, hooks: mgr.hooks}, Sink: brainHooksSink{mgr.hooks}, Input: commandBrainInputRules(), ViewerStart: startBrainViewer, ClaimMedia: claimBrainMedia, ShutdownGrace: func() time.Duration { return shutdownGrace }}
 		for _, f := range modify {
 			f(&opts)
 		}
-		mgr.brainManager = newBrainManager(opts)
+		mgr.Manager = brainruntime.NewManager(opts)
 		if err := mgr.Apply(cfg); err != nil {
 			t.Fatal(err)
 		}
@@ -93,8 +94,8 @@ func queueTestManager(t *testing.T, sleepMS int, extra string, modify ...func(*b
 	return mgr, d, home
 }
 
-func dm(text string) Inbound {
-	return Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: text}}
+func dm(text string) brainruntime.Inbound {
+	return brainruntime.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: text}}
 }
 
 func TestBrainRunsAndDeliversInOrder(t *testing.T) {
@@ -173,22 +174,22 @@ func TestStopHandOffsLeavesOtherWorkAlone(t *testing.T) {
 		other   = "120363000000000001@g.us"
 		group   = "120363000000000000@g.us"
 	)
-	handOff := func(jid, text string) Inbound {
-		return Inbound{Inbound: chat.Inbound{JID: jid, Brain: "b", Sender: "upload", Text: text}}
+	handOff := func(jid, text string) brainruntime.Inbound {
+		return brainruntime.Inbound{Inbound: chat.Inbound{JID: jid, Brain: "b", Sender: "upload", Text: text}}
 	}
 	for _, c := range []struct {
 		name    string
-		running Inbound   // b's run in flight
-		queued  []Inbound // waiting behind it
+		running brainruntime.Inbound   // b's run in flight
+		queued  []brainruntime.Inbound // waiting behind it
 		stopped bool
 		dropped int    // hand-offs that were waiting
 		left    string // b's work afterwards, running or waiting
 	}{
 		{"a hand-off answering in the chat is running", handOff(chatJID, "handed"),
-			[]Inbound{{Inbound: chat.Inbound{JID: group, Text: "group"}}, handOff(chatJID, "handed again"), handOff(other, "elsewhere")},
+			[]brainruntime.Inbound{{Inbound: chat.Inbound{JID: group, Text: "group"}}, handOff(chatJID, "handed again"), handOff(other, "elsewhere")},
 			true, 1, "group,elsewhere"},
-		{"the brain's own chat is running", Inbound{Inbound: chat.Inbound{JID: group, Text: "group"}},
-			[]Inbound{handOff(chatJID, "handed"), handOff(other, "elsewhere")},
+		{"the brain's own chat is running", brainruntime.Inbound{Inbound: chat.Inbound{JID: group, Text: "group"}},
+			[]brainruntime.Inbound{handOff(chatJID, "handed"), handOff(other, "elsewhere")},
 			false, 1, "group,elsewhere"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -246,18 +247,18 @@ func TestInterruptModeSupersedes(t *testing.T) {
 // answered either.
 func TestInterruptModeOnlyReplacesTheSendersOwnRun(t *testing.T) {
 	const group = "120363000000000000@g.us" // brain b's group
-	g := func(sender, text string, silent bool) Inbound {
-		return Inbound{Inbound: chat.Inbound{JID: group, Sender: sender, Text: text, Silent: silent}}
+	g := func(sender, text string, silent bool) brainruntime.Inbound {
+		return brainruntime.Inbound{Inbound: chat.Inbound{JID: group, Sender: sender, Text: text, Silent: silent}}
 	}
-	otherDM := Inbound{Inbound: chat.Inbound{JID: "15559876543@s.whatsapp.net", Sender: "15559876543", Text: "unrelated"}} // also brain a
+	otherDM := brainruntime.Inbound{Inbound: chat.Inbound{JID: "15559876543@s.whatsapp.net", Sender: "15559876543", Text: "unrelated"}} // also brain a
 	// ingest is a file handed to brain a through /ingest, answered in the DM.
-	ingest := func(sender, text string) Inbound {
-		return Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: sender, Text: text, Source: chat.SourceIngest}}
+	ingest := func(sender, text string) brainruntime.Inbound {
+		return brainruntime.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: sender, Text: text, Source: chat.SourceIngest}}
 	}
 	cases := []struct {
 		name          string
-		running, next Inbound
-		waiting       []Inbound // queued before next arrives
+		running, next brainruntime.Inbound
+		waiting       []brainruntime.Inbound // queued before next arrives
 		interrupts    bool
 		queue         []string // what waits afterwards, if not just next
 	}{
@@ -269,9 +270,9 @@ func TestInterruptModeOnlyReplacesTheSendersOwnRun(t *testing.T) {
 		{"a request from another chat", dm("old"), otherDM, nil, false, nil},
 		// The newer request replaces the earlier one in the queue; the run
 		// of the other chat is left alone.
-		{"a newer request while the earlier one waits", otherDM, dm("q1 again"), []Inbound{dm("q1")}, false, nil},
+		{"a newer request while the earlier one waits", otherDM, dm("q1 again"), []brainruntime.Inbound{dm("q1")}, false, nil},
 		{"a second ingested file", ingest("plaud", "recording 1"), ingest("plaud", "recording 2"), nil, false, nil},
-		{"a second ingested file while the first waits", otherDM, ingest("plaud", "recording 2"), []Inbound{ingest("plaud", "recording 1")}, false, []string{"recording 1", "recording 2"}},
+		{"a second ingested file while the first waits", otherDM, ingest("plaud", "recording 2"), []brainruntime.Inbound{ingest("plaud", "recording 1")}, false, []string{"recording 1", "recording 2"}},
 		{"a request after a file ingested in the sender's name", ingest("15551234567", "notes"), dm("new"), nil, false, nil},
 		{"a file ingested in the sender's name after their request", dm("question"), ingest("15551234567", "notes"), nil, false, nil},
 	}
@@ -330,24 +331,24 @@ func TestInterruptModeOnlyReplacesTheSendersOwnRun(t *testing.T) {
 // asked for before and the chat's chatter; other people, and other chats
 // served by the same brain, keep their place.
 func TestInterruptModeKeepsOthersWaiting(t *testing.T) {
-	g := func(sender, text string, silent bool) Inbound {
-		return Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: sender, Text: text, Silent: silent}}
+	g := func(sender, text string, silent bool) brainruntime.Inbound {
+		return brainruntime.Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: sender, Text: text, Silent: silent}}
 	}
-	otherDM := func(text string) Inbound { // brain a, like dm
-		return Inbound{Inbound: chat.Inbound{JID: "15559876543@s.whatsapp.net", Sender: "15559876543", Text: text}}
+	otherDM := func(text string) brainruntime.Inbound { // brain a, like dm
+		return brainruntime.Inbound{Inbound: chat.Inbound{JID: "15559876543@s.whatsapp.net", Sender: "15559876543", Text: text}}
 	}
 	cases := []struct {
 		name    string
-		running Inbound
-		waiting []Inbound
-		next    Inbound
+		running brainruntime.Inbound
+		waiting []brainruntime.Inbound
+		next    brainruntime.Inbound
 		want    []string // the answered runs after the interrupted one
 	}{
 		{"another member of the group", g("15551234567", "q1", false),
-			[]Inbound{g("15559876543", "q2", false), g("15559876543", "chatter", true)},
+			[]brainruntime.Inbound{g("15559876543", "q2", false), g("15559876543", "chatter", true)},
 			g("15551234567", "q1 again", false), []string{"q2", "q1 again"}},
 		{"another chat of the same brain", dm("old"),
-			[]Inbound{otherDM("unrelated")},
+			[]brainruntime.Inbound{otherDM("unrelated")},
 			dm("new"), []string{"unrelated", "new"}},
 	}
 	for _, c := range cases {
@@ -388,20 +389,20 @@ func TestInterruptModeQueueIsBounded(t *testing.T) {
 	}
 	testutil.WaitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 	for _, jid := range []string{"120363000000000001@g.us", "120363000000000002@g.us"} {
-		if _, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: jid, Sender: "15559876543", Text: "question"}}); err != nil {
+		if _, _, err := br.Submit(brainruntime.Inbound{Inbound: chat.Inbound{JID: jid, Sender: "15559876543", Text: "question"}}); err != nil {
 			t.Fatalf("%s: %v", jid, err)
 		}
 	}
-	_, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: "120363000000000003@g.us", Sender: "15559876543", Text: "one more"}})
-	if !errors.Is(err, errQueueFull) {
+	_, _, err := br.Submit(brainruntime.Inbound{Inbound: chat.Inbound{JID: "120363000000000003@g.us", Sender: "15559876543", Text: "one more"}})
+	if !errors.Is(err, brainruntime.ErrQueueFull) {
 		t.Errorf("err = %v, want the queue full", err)
 	}
 }
 
 func TestSilentMessagesAreSupersededAndQueueOverflows(t *testing.T) {
 	mgr, d, _ := queueTestManager(t, 500, `, "queue": {"max_pending": 2}`)
-	g := func(text string, silent bool) Inbound {
-		return Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: text, Silent: silent}}
+	g := func(text string, silent bool) brainruntime.Inbound {
+		return brainruntime.Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: text, Silent: silent}}
 	}
 	_, _, _, _ = mgr.Submit(g("running", false))
 	testutil.WaitFor(t, 5*time.Second, "run", func() bool { return mgr.Get("b").Snapshot().Running != nil })
@@ -412,7 +413,7 @@ func TestSilentMessagesAreSupersededAndQueueOverflows(t *testing.T) {
 	}
 	_, _, _, _ = mgr.Submit(g("question", false)) // supersedes chatter 2 too
 	_, _, _, _ = mgr.Submit(g("question 2", false))
-	if _, _, _, err := mgr.Submit(g("question 3", false)); err != errQueueFull {
+	if _, _, _, err := mgr.Submit(g("question 3", false)); err != brainruntime.ErrQueueFull {
 		t.Errorf("err = %v, want queue full", err)
 	}
 	testutil.WaitFor(t, 10*time.Second, "runs", func() bool { return d.count() == 3 })
@@ -426,7 +427,7 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 	t.Setenv("FRIDOLIN_FAKE_WAIT_FILE", release)
 	a, b := mgr.Get("a"), mgr.Get("b")
 	_, _, _, _ = mgr.Submit(dm("keep going"))
-	_, _, _, _ = mgr.Submit(Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "doomed"}})
+	_, _, _, _ = mgr.Submit(brainruntime.Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "doomed"}})
 	testutil.WaitFor(t, 5*time.Second, "both processes running", func() bool {
 		ar, br := a.Snapshot().Running, b.Snapshot().Running
 		return ar != nil && ar.PID > 0 && br != nil && br.PID > 0
@@ -670,20 +671,20 @@ func TestClaudeArgs(t *testing.T) {
 	const settings = `{"claudeMdExcludes":["/brains/CLAUDE.md"]}`
 	cases := []struct {
 		name                string
-		s                   brainSettings
+		s                   brainruntime.Settings
 		mcpConfig, settings string
 		want, dontWant      []string
 	}{
-		{"own setup only", brainSettings{}, "", "",
+		{"own setup only", brainruntime.Settings{}, "", "",
 			[]string{"--setting-sources project,local", "--strict-mcp-config"},
 			[]string{"--settings", "--mcp-config", "--dangerously-skip-permissions", "--model", "--effort", "--disallowed-tools"}},
-		{"with the folder's .mcp.json", brainSettings{}, mcp, "",
+		{"with the folder's .mcp.json", brainruntime.Settings{}, mcp, "",
 			[]string{"--setting-sources project,local", "--strict-mcp-config --mcp-config " + mcp}, nil},
-		{"with the instructions above excluded", brainSettings{}, mcp, settings,
+		{"with the instructions above excluded", brainruntime.Settings{}, mcp, settings,
 			[]string{"--setting-sources project,local", "--settings " + settings, "--mcp-config " + mcp}, nil},
-		{"inherit_claude_user_config", brainSettings{InheritUser: true}, mcp, settings,
+		{"inherit_claude_user_config", brainruntime.Settings{InheritUser: true}, mcp, settings,
 			nil, []string{"--setting-sources", "--strict-mcp-config", "--settings", "--mcp-config"}},
-		{"model, effort, tools, permissions", brainSettings{Model: "m", Effort: "high", DisallowedTools: []string{"WebFetch", "WebSearch"}, Dangerously: true}, mcp, settings,
+		{"model, effort, tools, permissions", brainruntime.Settings{Model: "m", Effort: "high", DisallowedTools: []string{"WebFetch", "WebSearch"}, Dangerously: true}, mcp, settings,
 			[]string{"--model m", "--effort high", "--disallowed-tools WebFetch,WebSearch", "--dangerously-skip-permissions"}, nil},
 	}
 	for _, tc := range cases {
@@ -1396,13 +1397,13 @@ func TestPanicsInARunAreContained(t *testing.T) {
 		}},
 		{"while its output is read", map[string]string{"FRIDOLIN_FAKE_ASK_ON": "says: one"}, 0, true, func(d *deliveries, first *sync.Once) BrainHooks {
 			// The question goes out from the goroutine that reads the output.
-			return BrainHooks{Deliver: d.add, Question: func(*Brain, string, string) bool {
+			return BrainHooks{Deliver: d.add, Question: func(*brainruntime.Brain, string, string) bool {
 				first.Do(func() { panic("boom in sending the question") })
 				return true
 			}}
 		}},
 		{"while it is delivered", nil, 0, false, func(d *deliveries, first *sync.Once) BrainHooks {
-			return BrainHooks{Deliver: func(br *Brain, m Inbound, res claudecli.Result) {
+			return BrainHooks{Deliver: func(br *brainruntime.Brain, m brainruntime.Inbound, res claudecli.Result) {
 				d.add(br, m, res)
 				first.Do(func() { panic("boom in Deliver") })
 			}}
@@ -1497,7 +1498,7 @@ func TestRunTimeoutStopsAStuckRun(t *testing.T) {
 				defer mu.Unlock()
 				sent = append(sent, text)
 			}
-			mgr.SetHooks(BrainHooks{Deliver: d.add, Notice: say, Question: func(_ *Brain, jid, text string) bool {
+			mgr.SetHooks(BrainHooks{Deliver: d.add, Notice: say, Question: func(_ *brainruntime.Brain, jid, text string) bool {
 				say(jid, text)
 				return true
 			}})
@@ -1607,13 +1608,13 @@ func TestRunTimeoutSetting(t *testing.T) {
 func TestBusyChatDoesNotHoldUpAnother(t *testing.T) {
 	mgr, d, _ := queueTestManager(t, 400, "")
 	br := mgr.Get("a")
-	other := Inbound{Inbound: chat.Inbound{JID: otherNumber + "@s.whatsapp.net", Sender: otherNumber, Text: "other 1"}}
+	other := brainruntime.Inbound{Inbound: chat.Inbound{JID: otherNumber + "@s.whatsapp.net", Sender: otherNumber, Text: "other 1"}}
 	if _, _, err := br.Submit(dm("dm 1")); err != nil {
 		t.Fatal(err)
 	}
 	testutil.WaitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 	var pos []int
-	for _, m := range []Inbound{dm("dm 2"), dm("dm 3"), other} {
+	for _, m := range []brainruntime.Inbound{dm("dm 2"), dm("dm 3"), other} {
 		p, busy, err := br.Submit(m)
 		if err != nil || !busy {
 			t.Fatalf("%s: busy %v, %v", m.Text, busy, err)

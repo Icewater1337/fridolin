@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/logx"
@@ -74,11 +75,11 @@ func brainASetup(t *testing.T) (*config.Config, string) {
 }
 
 // bareBrain is brain a in a fresh folder, outside any manager.
-func bareBrain(t testing.TB) *Brain {
+func bareBrain(t testing.TB) *brain.Brain {
 	t.Helper()
-	mgr := newBrainManager(brainManagerOptions{Input: commandBrainInputRules()})
+	mgr := brain.NewManager(brain.Options{Input: commandBrainInputRules()})
 	t.Cleanup(mgr.Stop)
-	_, err := mgr.Apply([]manifest.Spec{{Dir: t.TempDir(), Manifest: manifest.Manifest{ID: "a"}}}, brainGlobals{}, brainApplyOptions{})
+	_, err := mgr.Apply([]manifest.Spec{{Dir: t.TempDir(), Manifest: manifest.Manifest{ID: "a"}}}, brain.Globals{}, brain.ApplyOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,16 +282,16 @@ func TestManifestIsNotFollowedOutOfTheFolder(t *testing.T) {
 	}
 }
 
-func namedTestBrain(t testing.TB, id string) *Brain {
+func namedTestBrain(t testing.TB, id string) *brain.Brain {
 	t.Helper()
-	mgr := newBrainManager(brainManagerOptions{Input: commandBrainInputRules()})
+	mgr := brain.NewManager(brain.Options{Input: commandBrainInputRules()})
 	t.Cleanup(mgr.Stop)
-	if f, e := mgr.Apply([]manifest.Spec{{Dir: t.TempDir(), Manifest: manifest.Manifest{ID: id}}}, brainGlobals{}, brainApplyOptions{}); e != nil || len(f) > 0 {
+	if f, e := mgr.Apply([]manifest.Spec{{Dir: t.TempDir(), Manifest: manifest.Manifest{ID: id}}}, brain.Globals{}, brain.ApplyOptions{}); e != nil || len(f) > 0 {
 		t.Fatalf("Apply: %v %v", f, e)
 	}
 	return mgr.Get(id)
 }
-func hasRun(t *testing.T, br *Brain) {
+func hasRun(t *testing.T, br *brain.Brain) {
 	t.Helper()
 	testutil.WaitFor(t, 5*time.Second, br.ID()+"'s run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 }

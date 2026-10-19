@@ -213,8 +213,8 @@ func captureBootRunSettings(t *testing.T, tb *testBridge) func() brain.Settings 
 	t.Helper()
 	runner := bootSettingsRunner{settings: make(chan brain.Settings, 1)}
 	mgr := tb.brainMgr
-	mgr.brainManager.Stop()
-	mgr.brainManager = brain.NewManager(brain.Options{
+	mgr.Manager.Stop()
+	mgr.Manager = brain.NewManager(brain.Options{
 		Runner: runner, Sink: brainHooksSink{mgr.hooks},
 		Input: commandBrainInputRules(), ClaimMedia: claimBrainMedia,
 		ShutdownGrace: func() time.Duration { return 0 },

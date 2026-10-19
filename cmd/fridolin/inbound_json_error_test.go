@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"reflect"
 	"testing"
 )
@@ -32,12 +33,12 @@ func TestSavedInboundDecoderDiagnostics(t *testing.T) {
 			if inner {
 				want = tc.old
 			}
-			var out storedInbound
+			var out brain.SavedInbound
 			err := decodeSavedInbound([]byte(tc.input), &out)
 			if err == nil || err.Error() != want {
 				t.Fatalf("diagnostic=%v; want %q", err, want)
 			}
-			var rawOut storedInbound
+			var rawOut brain.SavedInbound
 			raw := json.Unmarshal([]byte(tc.input), &rawOut)
 			var actual, original *json.UnmarshalTypeError
 			if !errors.As(err, &actual) || !errors.As(raw, &original) {
@@ -48,7 +49,7 @@ func TestSavedInboundDecoderDiagnostics(t *testing.T) {
 			}
 		})
 	}
-	var out storedInbound
+	var out brain.SavedInbound
 	raw := json.Unmarshal([]byte(`{"jid":`), &out)
 	got := decodeSavedInbound([]byte(`{"jid":`), &out)
 	var syntax *json.SyntaxError

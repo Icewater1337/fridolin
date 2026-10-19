@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/registry"
@@ -13,7 +14,7 @@ import (
 // BrainManager composes the runtime with configuration, host policy and
 // resolution diagnostics. Those dependencies stay outside the runtime core.
 type BrainManager struct {
-	*brainManager
+	*brain.Manager
 	applyMu  sync.Mutex
 	profiler *SandboxProfiler
 	hooks    *BrainHooks
@@ -30,7 +31,7 @@ func newCommandBrainManager(cfg *config.Config) *BrainManager {
 	profiler := NewSandboxProfiler(nil, cfg)
 	return &BrainManager{
 		profiler: profiler, hooks: hooks,
-		brainManager: newBrainManager(brainManagerOptions{
+		Manager: brain.NewManager(brain.Options{
 			Runner: &commandRunner{sandbox: profiler, hooks: hooks},
 			Sink:   brainHooksSink{hooks}, Input: commandBrainInputRules(),
 			ViewerStart: startBrainViewer, ClaimMedia: claimBrainMedia,
@@ -71,7 +72,7 @@ func (bm *BrainManager) reload(specs []manifest.Spec, issues []registry.Issue, c
 }
 
 func (bm *BrainManager) reloadLocked(specs []manifest.Spec, issues []registry.Issue, cfg *config.Config, ownPATH map[string][]string) error {
-	failures, err := bm.brainManager.Apply(specs, brainGlobalsOf(cfg), brainApplyOptions{
+	failures, err := bm.Manager.Apply(specs, brainGlobalsOf(cfg), brain.ApplyOptions{
 		Held: heldBrainRoutes(issues), OwnPATH: ownPATH,
 		SetDirs: func(dirs map[string][]string) { bm.profiler.Update(dirs, cfg) },
 	})

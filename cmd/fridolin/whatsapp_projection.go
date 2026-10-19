@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/config"
 
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
@@ -14,7 +15,7 @@ import (
 )
 
 // InboundHandler receives every allowed message at the command boundary.
-type InboundHandler func(context.Context, Inbound)
+type InboundHandler func(context.Context, brain.Inbound)
 
 func whatsAppSettings(get func() *config.Config) func() whatsapp.Settings {
 	return func() whatsapp.Settings {
@@ -27,7 +28,7 @@ func whatsAppInboundHandler(handler InboundHandler) func(context.Context, chat.I
 	if handler == nil {
 		return nil
 	}
-	return func(ctx context.Context, m chat.Inbound) { handler(ctx, Inbound{Inbound: m}) }
+	return func(ctx context.Context, m chat.Inbound) { handler(ctx, brain.Inbound{Inbound: m}) }
 }
 
 func whatsAppVoteHandler(handler func(pollVote)) func(whatsapp.Vote) {

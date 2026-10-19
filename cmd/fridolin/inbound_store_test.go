@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 )
@@ -18,13 +19,13 @@ func TestInboundQueueKeepsWhatTheStopLeft(t *testing.T) {
 	logged := func(id, text string) history.Entry {
 		return history.Entry{TS: sent.Format(time.RFC3339), From: "15551234567", Chat: harnessDM, Text: text, Type: history.In, ID: id}
 	}
-	first := Inbound{Inbound: chat.Inbound{JID: harnessDM, ChatAlt: "15559876543@lid", Sender: "15551234567", Text: "what is this?",
+	first := brain.Inbound{Inbound: chat.Inbound{JID: harnessDM, ChatAlt: "15559876543@lid", Sender: "15551234567", Text: "what is this?",
 		Media: []string{"/Users/you/.fridolin/media/a.jpg"}, Source: chat.SourceWhatsApp, At: sent, ID: "3EB0A"}}
 	firstSaved := first.Save()
 	firstLog := logged("3EB0A", "what is this?")
 	firstSaved.Logged = &firstLog
 	first = firstSaved.Restore()
-	second := Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "and this", Quoted: &chat.Quote{From: "15559876543", Text: "lunch?"},
+	second := brain.Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "and this", Quoted: &chat.Quote{From: "15559876543", Text: "lunch?"},
 		Source: chat.SourceWhatsApp, At: sent.Add(time.Second), ID: "3EB0B"}}
 	secondSaved := second.Save()
 	secondLog := logged("3EB0B", "and this")
@@ -34,10 +35,10 @@ func TestInboundQueueKeepsWhatTheStopLeft(t *testing.T) {
 	mergedSaved := merged.Save()
 	mergedSaved.Logged = first.Save().Logged
 	merged = mergedSaved.Restore()
-	chatter := Inbound{Inbound: chat.Inbound{JID: harnessGroup, Sender: "15559876543", Text: "see you", Silent: true, Source: chat.SourceWhatsApp, At: sent, ID: "3EB0C"}}
-	late := Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "!stop", Source: chat.SourceWhatsApp, At: sent.Add(time.Minute), ID: "3EB0D"}}
+	chatter := brain.Inbound{Inbound: chat.Inbound{JID: harnessGroup, Sender: "15559876543", Text: "see you", Silent: true, Source: chat.SourceWhatsApp, At: sent, ID: "3EB0C"}}
+	late := brain.Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "!stop", Source: chat.SourceWhatsApp, At: sent.Add(time.Minute), ID: "3EB0D"}}
 	edit := chat.Change{Kind: chat.ChangeEdit, Chat: harnessDM, Sender: "15551234567", Target: "3EB0A", Text: "what is that?"}
-	running := Inbound{Inbound: chat.Inbound{JID: harnessGroup, Sender: "15551234567", Text: "summarise", Source: chat.SourceWhatsApp, At: sent, ID: "3EB0E"}}
+	running := brain.Inbound{Inbound: chat.Inbound{JID: harnessGroup, Sender: "15551234567", Text: "summarise", Source: chat.SourceWhatsApp, At: sent, ID: "3EB0E"}}
 
 	dbPath := filepath.Join(t.TempDir(), "bridge.db")
 	s := openTestStore(t, dbPath)
@@ -99,7 +100,7 @@ func TestInboundQueueSkipsARowItCannotRead(t *testing.T) {
 	s := openTestStore(t, path)
 	db := testStoreSQL(t, path)
 	ctx := t.Context()
-	m := Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "hello", Source: chat.SourceWhatsApp, At: time.Now()}}
+	m := brain.Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "hello", Source: chat.SourceWhatsApp, At: time.Now()}}
 	if err := keepInbound(ctx, s, inboundHeld, "", m); err != nil {
 		t.Fatal(err)
 	}

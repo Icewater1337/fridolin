@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 )
@@ -19,7 +20,7 @@ type commandRunner struct {
 	hooks   *BrainHooks
 }
 
-func (r *commandRunner) Run(ctx context.Context, spec brainRunSpec, callbacks claudecli.Callbacks) claudecli.Result {
+func (r *commandRunner) Run(ctx context.Context, spec brain.RunSpec, callbacks claudecli.Callbacks) claudecli.Result {
 	s, prompt := spec.Settings, spec.Prompt
 
 	mcpConfig, settings := "", ""
@@ -99,7 +100,7 @@ func (r *commandRunner) Run(ctx context.Context, spec brainRunSpec, callbacks cl
 		}
 		if err != nil {
 			log.Printf("brain %s: sandbox unavailable, refusing to run: %v", spec.ID, err)
-			return claudecli.Result{Err: errSandboxUnavailable}
+			return claudecli.Result{Err: brain.ErrSandboxUnavailable}
 		}
 		extraEnv = append(extraEnv, stateEnv...)
 		if s.Provider == "codex" {
