@@ -22,8 +22,8 @@ import (
 	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
-// Config holds all configuration for the bridge.
-type Config struct {
+// File is the JSON configuration stored on disk, including optional values.
+type File struct {
 	Comment string `json:"_comment,omitempty"`
 
 	// Version is the version of config.json the file was written in, see
@@ -493,7 +493,7 @@ const (
 )
 
 // RunLimit is how many Claude runs may go at once, 0 for no limit.
-func (c *Config) RunLimit() int { return IntOr(c.MaxConcurrentRuns, defaultConcurrentRuns) }
+func (c *File) RunLimit() int { return IntOr(c.MaxConcurrentRuns, defaultConcurrentRuns) }
 
 func BoolOr(p *bool, def bool) bool {
 	if p == nil {
@@ -510,20 +510,20 @@ func IntOr(p *int, def int) int {
 }
 
 // QueueNotify reports whether to tell the sender their message is queued.
-func (c *Config) QueueNotify() bool { return BoolOr(c.Queue.Notify, true) }
+func (c *File) QueueNotify() bool { return BoolOr(c.Queue.Notify, true) }
 
 // DebounceQuietMS and DebounceMaxWaitMS return the debounce timings.
-func (c *Config) DebounceQuietMS() int   { return IntOr(c.Debounce.QuietMS, DefaultQuietMS) }
-func (c *Config) DebounceMaxWaitMS() int { return IntOr(c.Debounce.MaxWaitMS, defaultMaxWaitMS) }
+func (c *File) DebounceQuietMS() int   { return IntOr(c.Debounce.QuietMS, DefaultQuietMS) }
+func (c *File) DebounceMaxWaitMS() int { return IntOr(c.Debounce.MaxWaitMS, defaultMaxWaitMS) }
 
 // DashboardRequiresToken reports whether API calls need the dashboard token.
-func (c *Config) DashboardRequiresToken() bool { return BoolOr(c.Dashboard.RequireToken, true) }
+func (c *File) DashboardRequiresToken() bool { return BoolOr(c.Dashboard.RequireToken, true) }
 
 // TokenlessSend reports whether /send works without a token.
-func (c *Config) TokenlessSend() bool { return BoolOr(c.ScriptAPI.TokenlessSend, true) }
+func (c *File) TokenlessSend() bool { return BoolOr(c.ScriptAPI.TokenlessSend, true) }
 
 // MaxMediaBytes is the largest attachment to download, in bytes.
-func (c *Config) MaxMediaBytes() int64 {
+func (c *File) MaxMediaBytes() int64 {
 	mb := c.MaxMediaMB
 	if mb <= 0 {
 		mb = defaultMaxMediaMB
@@ -532,14 +532,14 @@ func (c *Config) MaxMediaBytes() int64 {
 }
 
 // HTTPEnabled reports whether the local HTTP server should run.
-func (c *Config) HTTPEnabled() bool { return c.HTTPListen != "" && c.HTTPListen != "off" }
+func (c *File) HTTPEnabled() bool { return c.HTTPListen != "" && c.HTTPListen != "off" }
 
 // AllowsAnyDM reports whether an empty allowed_numbers list means everyone.
 // It takes an explicit allow_any_dm: true.
-func (c *Config) AllowsAnyDM() bool { return BoolOr(c.AllowAnyDM, false) }
+func (c *File) AllowsAnyDM() bool { return BoolOr(c.AllowAnyDM, false) }
 
 // AnyoneCanDM reports whether every sender passes the DM allowlist.
-func (c *Config) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.AllowsAnyDM() }
+func (c *File) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.AllowsAnyDM() }
 
 // WarnOddChats logs entries of allowed_numbers and allowed_groups that can
 // never match a chat: an entry that is no phone number, and a group the
@@ -547,7 +547,7 @@ func (c *Config) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.All
 // read however it was written (chat.PhoneNumber), so only one that is none is
 // named. They are logged rather than refused, so a config that ran
 // before still starts.
-func WarnOddChats(path string, c *Config) {
+func WarnOddChats(path string, c *File) {
 	var odd []string
 	for _, n := range c.AllowedNumbers {
 		if _, err := chat.PhoneNumber(n); err != nil {
@@ -631,7 +631,7 @@ func DataDirSource(value, dir, home string) string {
 // Resolve derives the running configuration from the on-disk layer:
 // defaults, ~ expansion and platform validation from explicit inputs. It reads
 // no environment or filesystem state and writes nothing, see EnsureDirs.
-func Resolve(file *Config, paths Paths, goos string) (*Config, error) {
+func Resolve(file *File, paths Paths, goos string) (*File, error) {
 	cfg, err := file.Clone()
 	if err != nil {
 		return nil, err
@@ -768,13 +768,13 @@ func Resolve(file *Config, paths Paths, goos string) (*Config, error) {
 	return cfg, nil
 }
 
-// Clone deep-copies a Config through JSON.
-func (c *Config) Clone() (*Config, error) {
+// Clone deep-copies a File through JSON.
+func (c *File) Clone() (*File, error) {
 	data, err := json.Marshal(c)
 	if err != nil {
 		return nil, err
 	}
-	out := &Config{}
+	out := &File{}
 	if err := json.Unmarshal(data, out); err != nil {
 		return nil, err
 	}
@@ -789,7 +789,7 @@ var validGitConfigs = map[string]bool{"read": true, "deny": true}
 // when they are resolved (ResolveBrains), which leaves one that clashes with
 // another out instead of stopping them all. Zero brains is fine: a fresh
 // install adds its first brain from the dashboard.
-func (c *Config) Validate(goos string) error {
+func (c *File) Validate(goos string) error {
 	if c.AgentProvider != "claude" && c.AgentProvider != "codex" {
 		return fmt.Errorf("agent_provider must be claude or codex, not %q", c.AgentProvider)
 	}
@@ -882,7 +882,7 @@ func IsTruthy(v string) bool {
 }
 
 // RunMinutes is the configured run limit in minutes, or its default.
-func (c *Config) RunMinutes() int { return IntOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes) }
+func (c *File) RunMinutes() int { return IntOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes) }
 
 // These configuration defaults also belong to the direct provider/chunker
 // contracts. Composition tests keep the independent boundaries consistent.

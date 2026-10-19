@@ -23,7 +23,7 @@ type BackupService interface {
 
 type BackupAPI struct {
 	Backup        func() BackupService
-	UpdateConfig  func(func(*config.Config) error) error
+	UpdateConfig  func(func(*config.File) error) error
 	IncludeBridge func() bool
 	UpdateBrain   func(string, *bool, []string) error
 	RestoreTarget func(string) (string, error)
@@ -74,7 +74,7 @@ func (a *BackupAPI) Settings(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	err := a.UpdateConfig(func(c *config.Config) error {
+	err := a.UpdateConfig(func(c *config.File) error {
 		if req.Enabled != nil {
 			c.Backup.Enabled = *req.Enabled
 		}

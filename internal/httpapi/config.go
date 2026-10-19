@@ -10,7 +10,7 @@ import (
 type ConfigStore interface {
 	Snapshot() config.Snapshot
 	Path() string
-	UpdateTx(string, func(*config.Config, *config.Tx) error) (config.UpdateResult, error)
+	UpdateTx(string, func(*config.File, *config.Tx) error) (config.UpdateResult, error)
 }
 type ConfigAPI struct{ Store func() ConfigStore }
 
@@ -52,7 +52,7 @@ func (a *ConfigAPI) Put(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	res, err := a.Store().UpdateTx(req.ETag, func(c *config.Config, _ *config.Tx) error {
+	res, err := a.Store().UpdateTx(req.ETag, func(c *config.File, _ *config.Tx) error {
 		incoming.BrainDirs = c.BrainDirs
 		*c = *incoming
 		return nil

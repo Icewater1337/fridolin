@@ -58,7 +58,7 @@ type SandboxProfiler struct {
 }
 
 // sandboxPolicyOf takes the profiles' settings from cfg.
-func sandboxPolicyOf(cfg *config.Config) sandboxConfig {
+func sandboxPolicyOf(cfg *config.File) sandboxConfig {
 	// These may be relative, and the bridge opens them relative to its
 	// working directory; the comparisons need them absolute.
 	p := sandboxConfig{Settings: sandbox.Settings{
@@ -95,7 +95,7 @@ func sandboxPolicyOf(cfg *config.Config) sandboxConfig {
 }
 
 // NewSandboxProfiler builds a profiler for the configured brains.
-func NewSandboxProfiler(workDirs map[string][]string, cfg *config.Config) *SandboxProfiler {
+func NewSandboxProfiler(workDirs map[string][]string, cfg *config.File) *SandboxProfiler {
 	sp := &SandboxProfiler{execPath: sandbox.ExecPath, home: homeDir()}
 	if exe, err := os.Executable(); err == nil {
 		sp.bridgeExe = exe
@@ -106,7 +106,7 @@ func NewSandboxProfiler(workDirs map[string][]string, cfg *config.Config) *Sandb
 
 // Update replaces the brain set and settings. Profiles are built per run,
 // so the next run of every brain picks the change up.
-func (sp *SandboxProfiler) Update(workDirs map[string][]string, cfg *config.Config) {
+func (sp *SandboxProfiler) Update(workDirs map[string][]string, cfg *config.File) {
 	wd := make(map[string][]string, len(workDirs))
 	for k, v := range workDirs {
 		// Made absolute, "" would be the bridge's working directory.

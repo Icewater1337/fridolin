@@ -15,7 +15,7 @@ type Options struct {
 	Paths       Paths
 	GOOS        string
 	Getenv      func(string) string
-	CheckBrains func(old, next *Config) error
+	CheckBrains func(old, next *File) error
 }
 
 func (o Options) getenv(name string) string {

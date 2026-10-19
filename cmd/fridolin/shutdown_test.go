@@ -477,7 +477,7 @@ func TestStopWaitsForARemovedBrainsDelivery(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("run did not reach delivery")
 	}
-	if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.BrainDirs = nil; return nil }); err != nil {
+	if _, err := tb.cfgs.Update("", func(c *config.File) error { c.BrainDirs = nil; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	stopped := make(chan struct{})

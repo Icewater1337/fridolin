@@ -204,7 +204,7 @@ func TestOwnerChat(t *testing.T) {
 		{[]string{"my phone"}, ""},
 	}
 	for _, c := range cases {
-		if got := ownerChat(&config.Config{AllowedNumbers: c.numbers}); got != c.want {
+		if got := ownerChat(&config.File{AllowedNumbers: c.numbers}); got != c.want {
 			t.Errorf("ownerChat(%q) = %q, want %q", c.numbers, got, c.want)
 		}
 	}

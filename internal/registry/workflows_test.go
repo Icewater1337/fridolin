@@ -20,7 +20,7 @@ func testBrainRegistry(t *testing.T) (*Registry, string) {
 	home := fsx.Canonical(t.TempDir())
 	g := New(nil, Options{
 		Home:        func() string { return home },
-		CheckDir:    func(string, string, *config.Config, string) error { return nil },
+		CheckDir:    func(string, string, *config.File, string) error { return nil },
 		HistoryFile: "history.md",
 		Templates:   Templates{Prompt: "Test prompt", IdentityMapPath: "identity-map.md"},
 	})
@@ -116,7 +116,7 @@ func TestRegistryInspectStopsAtRefusedPath(t *testing.T) {
 	t.Parallel()
 	g, home := testBrainRegistry(t)
 	called := 0
-	g.options.CheckDir = func(string, string, *config.Config, string) error {
+	g.options.CheckDir = func(string, string, *config.File, string) error {
 		called++
 		return errors.New("protected test folder")
 	}

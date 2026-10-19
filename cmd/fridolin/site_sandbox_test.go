@@ -74,7 +74,7 @@ func TestSiteAPISecrets(t *testing.T) {
 func TestSandboxProfilerSitePaths(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	cfg := &config.Config{DataDir: filepath.Join(home, "data"), DBPath: filepath.Join(home, "db", "bridge.db")}
+	cfg := &config.File{DataDir: filepath.Join(home, "data"), DBPath: filepath.Join(home, "db", "bridge.db")}
 	cfg.Sandbox.CredentialsDir = filepath.Join(home, "creds")
 	cfg.Sandbox.DenyPaths = []string{filepath.Join(home, "private")}
 	sp := NewSandboxProfiler(nil, cfg)

@@ -152,7 +152,7 @@ func TestAddWritesBrainJSONWithTheRegistration(t *testing.T) {
 	// Another writer holds the config update while the add scaffolds.
 	inside, release, saved := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 	go func() {
-		_, err := tb.cfgs.Update("", func(c *config.Config) error {
+		_, err := tb.cfgs.Update("", func(c *config.File) error {
 			close(inside)
 			<-release
 			return nil
@@ -279,7 +279,7 @@ func TestUnknownBrainJSONFieldsAreLogged(t *testing.T) {
 // edit, as a hand edit of the file can, past the checks of the dashboard.
 func breakApproved(t *testing.T, tb *testBridge, id string, edit func(m *manifest.Manifest)) {
 	t.Helper()
-	if _, err := tb.cfgs.Update("", func(c *config.Config) error {
+	if _, err := tb.cfgs.Update("", func(c *config.File) error {
 		for _, ref := range c.BrainDirs {
 			if ref.Approved != nil && ref.Approved.ID == id {
 				edit(ref.Approved)

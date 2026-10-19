@@ -16,9 +16,9 @@ import (
 )
 
 func TestWhatsAppProjectionReadBoundaries(t *testing.T) {
-	cfg := &config.Config{AllowedNumbers: []string{"15551234567"}, MediaDir: "incoming", MaxChunkSize: 4000, MaxMediaMB: 12}
+	cfg := &config.File{AllowedNumbers: []string{"15551234567"}, MediaDir: "incoming", MaxChunkSize: 4000, MaxMediaMB: 12}
 	reads := 0
-	get := func() *config.Config { reads++; return cfg }
+	get := func() *config.File { reads++; return cfg }
 	s := openTestStore(t, filepath.Join(t.TempDir(), "bridge.db"))
 	opts := whatsAppOptions(get, s, nil, nil)
 	wa, err := whatsapp.New(opts)
@@ -33,7 +33,7 @@ func TestWhatsAppProjectionReadBoundaries(t *testing.T) {
 	if reads != 2 || first.MediaDir != cfg.MediaDir || first.MaxChunkSize != 4000 || first.MaxMediaBytes != cfg.MaxMediaBytes() || !reflect.DeepEqual(first.AllowedNumbers, cfg.AllowedNumbers) {
 		t.Fatalf("first settings = %+v, reads=%d", first, reads)
 	}
-	cfg = &config.Config{AllowedNumbers: []string{"15559876543"}, MediaDir: "later", MaxChunkSize: 2000, MaxMediaMB: 24}
+	cfg = &config.File{AllowedNumbers: []string{"15559876543"}, MediaDir: "later", MaxChunkSize: 2000, MaxMediaMB: 24}
 	second := opts.Settings()
 	if reads != 3 || second.MediaDir != "later" || second.MaxChunkSize != 2000 || second.MaxMediaBytes != cfg.MaxMediaBytes() || second.AllowedNumbers[0] != "15559876543" {
 		t.Fatalf("later settings = %+v, reads=%d", second, reads)
