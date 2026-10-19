@@ -3093,18 +3093,26 @@ func TestPlaudCLIRunsContained(t *testing.T) {
 		tb, fp := plaudBridge(t, "")
 		plaudSignIn(t, tb)
 		fp.write("hang", "")
-		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		start := time.Now()
-		if _, err := tb.plaud.run(ctx, "files"); err == nil {
-			t.Fatal("a cancelled run reported success")
-		}
-		if d := time.Since(start); d > 8*time.Second {
-			t.Errorf("the cancelled run took %v to end", d)
-		}
-		pid, _ := strconv.Atoi(strings.TrimSpace(func() string { b, _ := os.ReadFile(filepath.Join(fp.dir, "child.pid")); return string(b) }()))
-		if pid <= 0 {
-			t.Fatal("the fake started no child")
+		done := make(chan error, 1)
+		go func() { _, err := tb.plaud.run(ctx, "files"); done <- err }()
+		// Cancel only once the child exists: slow runner startup must not
+		// turn this process-group test into cancellation before execution.
+		pid := 0
+		waitFor(t, 10*time.Second, "the fake child to start", func() bool {
+			data, _ := os.ReadFile(filepath.Join(fp.dir, "child.pid"))
+			pid, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+			return pid > 0
+		})
+		cancel()
+		select {
+		case err := <-done:
+			if err == nil {
+				t.Fatal("a cancelled run reported success")
+			}
+		case <-time.After(8 * time.Second):
+			t.Fatal("the cancelled run did not end")
 		}
 		waitFor(t, 5*time.Second, "the child to end", func() bool { return syscall.Kill(pid, 0) != nil })
 	})
@@ -3448,7 +3456,7 @@ func writeExecutables(t *testing.T, paths ...string) {
 func TestPlaudConfigValidation(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	for _, bad := range []string{`{"plaud":{"brain":"Not A Slug"}}`, `{"plaud":{"interval_seconds":5}}`} {
-		if _, err := LoadConfig(writeConfig(t, bad)); err == nil {
+		if _, err := config.Load(writeConfig(t, bad)); err == nil {
 			t.Errorf("%s should be rejected", bad)
 		}
 	}

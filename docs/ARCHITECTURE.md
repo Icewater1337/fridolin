@@ -59,7 +59,7 @@ behaviour unless its title says so. The steps so far:
 
 - **R5, manifest slice**: `manifest` owns portable brain descriptions,
   validation, normalized defaults and rooted publication. Runtime addressing
-  and the config transaction retain their command-owned orchestration.
+  remains command-owned; `config` owns the staged manifest transaction.
 
 - **R5, routing slice**: `route` owns set validation and pure chat/reply
   selection. The manager still owns live maps, held routes and brain identity.
@@ -67,12 +67,16 @@ behaviour unless its title says so. The steps so far:
 - **R9, scaffolding slice**: `registry` owns starter-template loading,
   confined folder creation and retained-root rollback. The command supplies
   embedded assets and the runtime's identity-map path; registration workflows
-  and config transactions remain in the command until their later extraction.
+  remain in the command until their later extraction.
 
 - **R5, configuration values**: `config` owns the file shape, section types,
-  defaults, validation, migrations and approved brain references. Loading,
-  transaction orchestration and startup permission changes remain in the command
-  for the next slice. `Resolve` still looks up the home folder; R6 injects paths.
+  defaults, validation, migrations and approved brain references. `Resolve` still
+  looks up the home folder; R6 injects paths.
+
+- **R5, configuration store**: `config` owns loading, starter files, atomic
+  snapshots, ordered notifications and retained-root manifest transactions.
+  The command supplies brain-set validation, run timing and startup permission
+  changes. Store validation runs under the commit lock before any write.
 
 - **R11, access slice**: `access` owns pure admission, group addressing,
   silence and text decisions. Transports project facts into `chat.Envelope`;
@@ -309,11 +313,12 @@ responsibility and says what it must not do.
 
 ### Configuration and brain set
 
-- **`config`** *(to come, R5, R6, R18; `config.go`, `configstore.go`)*:
-  covers the whole config file. It provides the `config.json` schema
-  (`File`), the retired-keys shim, the single defaults table, a pure
-  `Resolve` into `Settings{Boot, Live}`, field validation, the field table,
-  and the live `Store` (section 5).
+- **`config`**: owns the `Config` file shape, defaults, migrations, validation,
+  `Open`/`Load`/`LoadExisting`, starter files and the live `Store` with `Tx`.
+  `Open` accepts command-owned brain-set validation; transactions retain
+  config-last publication and rollback through pinned manifest roots. Pure
+  injected resolution, the field table and Boot/Live projections follow in R6;
+  pointer-free settings follow in R18 (section 5).
 - **`route`**: pure validation and routing for approved, runnable specs.
   `Build` validates the set and returns an immutable `Table` with `For`, `Has`,
   `Default`, `Dirs` and `ReplyChat`. It keeps configured ordering and copies
@@ -1271,10 +1276,16 @@ state (`sandbox.go`, `media.go`, `childenv.go`).
 ### Configuration value extraction boundary
 
 The extracted `config` package uses `manifest`, `trigger`, `fsx`, and the pure
-`chat` phone normalization and `textx` validation helpers. It imports no runtime
-manager, provider, transport or HTTP package. `HomeDir` is the explicit temporary
-ambient lookup exception until R6 supplies paths. The store and its retained-root
-manifest transaction remain command-owned in this slice.
+`chat` phone normalization, `textx` validation and `jsonx` inspection helpers.
+It imports no runtime manager, provider, transport or HTTP package. `HomeDir`
+and the retired `BRAIN_MODE` check are explicit temporary ambient exceptions
+until R6 supplies paths and environment. `Store` retains a single immutable
+atomic snapshot, locked external-file reread and validation, ordered callbacks,
+and manifest-first/config-last publication. A brain-set checker is supplied at
+open and runs inside that lock before writes; without it, brain edits fail
+closed. Registry workflows and bridge reconciliation stay in the command.
+Private rollback state and its tests move together, preserving retained root
+handles, writer identity checks, reverse rollback and deferred handle closure.
 
 Configuration owns its saved provider/chunk defaults; direct provider and chunker
 calls retain their defensive fallback constants. Composition tests compare those

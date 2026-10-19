@@ -58,7 +58,7 @@ func newTestBridge(t *testing.T, extra string) *testBridge {
 		"allowed_groups": ["120363000000000000@g.us"],
 		"debounce": {"quiet_ms": 0}`+extra+`
 	}`)
-	cfgs, err := OpenConfigStore(path)
+	cfgs, err := openConfigStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

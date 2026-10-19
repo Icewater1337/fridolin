@@ -65,7 +65,7 @@ func queueTestManager(t *testing.T, sleepMS int, extra string) (*BrainManager, *
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	claude := fakeClaudeEnv(t, sleepMS)
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := config.Load(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+claude+`"`+brainDirsJSON(t,
@@ -442,7 +442,7 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 	}
 
 	// Remove b, give a a new model, add c.
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := config.Load(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+os.Args[0]+`",
@@ -535,7 +535,7 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 			t.Setenv("HOME", home)
 			claude := fakeClaudeEnv(t, 30000)
 			configValue := func(refs ...config.BrainRef) *config.Config {
-				cfg, err := LoadConfig(writeConfig(t, `{
+				cfg, err := config.Load(writeConfig(t, `{
 					"data_dir": "`+home+`/data",
 					"claude_path": "`+claude+`"`+brainDirsJSON(t, refs...)+`
 				}`))
@@ -627,7 +627,7 @@ func TestReloadRefusesAClashingSet(t *testing.T) {
 	const group = "120363000000000000@g.us"
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
-	cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/data"`+brainDirsJSON(t,
+	cfg, err := config.Load(writeConfig(t, `{"data_dir": "`+home+`/data"`+brainDirsJSON(t,
 		brainFolder(t, "~/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 		brainFolder(t, "~/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Groups: []string{group}}}),
 	)+`}`))
@@ -1257,7 +1257,7 @@ func TestBrainsDoNotSeeTheDotEnv(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(path), ".env"), []byte(dotenv), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(path)
+	cfg, err := config.Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1333,7 +1333,7 @@ func TestBrainsAreToldTheDataDir(t *testing.T) {
 				brainFolder(t, home+"/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 			)+`
 			}`)
-			cfg, err := LoadConfig(path)
+			cfg, err := config.Load(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1601,7 +1601,7 @@ func TestRunTimeoutSetting(t *testing.T) {
 		t.Run(tc.json, func(t *testing.T) {
 			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
-			cfg, err := LoadConfig(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data"`+tc.json+`}`))
+			cfg, err := config.Load(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data"`+tc.json+`}`))
 			if tc.wantErr {
 				if err == nil || !strings.Contains(err.Error(), "run_timeout_minutes") {
 					t.Errorf("err = %v, want run_timeout_minutes refused", err)
@@ -1820,7 +1820,7 @@ func limitTestManager(t *testing.T, sleepMS, limit int) (*BrainManager, *deliver
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	claude := fakeClaudeEnv(t, sleepMS)
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := config.Load(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+claude+`",
@@ -2124,7 +2124,7 @@ func TestRunLimitSetting(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.json, func(t *testing.T) {
 			home := t.TempDir()
-			cfg, err := LoadConfig(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data"`+c.json+`}`))
+			cfg, err := config.Load(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data"`+c.json+`}`))
 			if c.err != "" {
 				if err == nil || !strings.Contains(err.Error(), c.err) {
 					t.Errorf("err = %v, want %q", err, c.err)

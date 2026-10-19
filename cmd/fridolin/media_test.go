@@ -14,11 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/manifest"
-
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 )
 
@@ -56,7 +57,7 @@ func TestBrainTakesItsFilesIntoItsInbox(t *testing.T) {
 func TestRemovedBrainHandsItsFilesOn(t *testing.T) {
 	mgr, d, home := queueTestManager(t, 0, "")
 	// The same brains, with a removed and b taking the direct messages.
-	next, err := LoadConfig(writeConfig(t, `{
+	next, err := config.Load(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+os.Args[0]+`"`+brainDirsJSON(t,
@@ -235,7 +236,7 @@ func TestCheckLeavesTheMediaFolderAlone(t *testing.T) {
 		t.Errorf("check left the media folder holding %q, want it as it was", names)
 	}
 	// The bridge itself still does it when it starts.
-	cfgs, err := OpenConfigStore(path)
+	cfgs, err := openConfigStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}

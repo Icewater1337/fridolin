@@ -132,7 +132,7 @@ func TestBrainRunsGetTheirOwnPATHFolders(t *testing.T) {
 	t.Setenv("PATH", home+"/assistant/personal/bin:/usr/bin:/bin")
 	t.Setenv("FRIDOLIN_FAKE_ENV", "PATH")
 	claude := fakeClaudeEnv(t, 0)
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := config.Load(writeConfig(t, `{
 		"brain_mode": true,
 		"claude_path": "`+claude+`",
 		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
