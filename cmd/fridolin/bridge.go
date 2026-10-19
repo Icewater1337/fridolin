@@ -16,6 +16,7 @@ import (
 	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/devchat"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+	"github.com/Icewater1337/fridolin/internal/pipeline"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
 	"github.com/Icewater1337/fridolin/internal/registry"
@@ -44,7 +45,7 @@ type Bridge struct {
 	wa       Messenger
 	dev      *devchat.Messenger // non-nil in --no-whatsapp mode
 	brainMgr *BrainManager
-	deb      *Debouncer
+	deb      *pipeline.Debouncer
 	logs     *logx.Ring
 	activity *activity.Feed
 	token    *httpapi.Token
@@ -185,7 +186,7 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 	}
 	logDMAccess(nil, cfg)
 
-	b.deb = NewDebouncer(
+	b.deb = pipeline.NewDebouncer(
 		func() time.Duration { return time.Duration(b.cfgs.Get().DebounceQuietMS()) * time.Millisecond },
 		func() time.Duration { return time.Duration(b.cfgs.Get().DebounceMaxWaitMS()) * time.Millisecond },
 		b.dispatch,

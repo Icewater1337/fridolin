@@ -129,14 +129,14 @@ func TestAuthorizeReadsTheBearerScheme(t *testing.T) {
 	scripts := auth.scripts.Value()
 	cases := []struct {
 		name, header string
-		want         PrincipalKind
+		want         chat.PrincipalKind
 		bad          bool
 	}{
-		{"none", "", CallerAnonymous, false},
-		{"Bearer", "Bearer " + scripts, CallerScript, false},
-		{"lower case", "bearer " + scripts, CallerScript, false},
-		{"upper case, extra spaces", "BEARER   " + scripts + " ", CallerScript, false},
-		{"a brain's run's", "Bearer " + run, CallerBrain, false},
+		{"none", "", chat.CallerAnonymous, false},
+		{"Bearer", "Bearer " + scripts, chat.CallerScript, false},
+		{"lower case", "bearer " + scripts, chat.CallerScript, false},
+		{"upper case, extra spaces", "BEARER   " + scripts + " ", chat.CallerScript, false},
+		{"a brain's run's", "Bearer " + run, chat.CallerBrain, false},
 		{"another scheme", "Basic " + scripts, 0, true},
 		{"no scheme", scripts, 0, true},
 		{"no token", "Bearer ", 0, true},

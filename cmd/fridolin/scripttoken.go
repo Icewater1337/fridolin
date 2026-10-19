@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
 
@@ -59,23 +60,23 @@ func newScriptAuth(dataDir string, brainOf func(tok string) string, exists func(
 // CallerAnonymous; a token the bridge did not give out, one of a run that
 // is over or one of a brain that is gone, is errBadToken rather than a
 // fall back to anonymous.
-func (a *scriptAuth) authorize(r *http.Request) (Principal, error) {
+func (a *scriptAuth) authorize(r *http.Request) (chat.Principal, error) {
 	h := r.Header.Get("Authorization")
 	if h == "" {
-		return Principal{Kind: CallerAnonymous}, nil
+		return chat.Principal{Kind: chat.CallerAnonymous}, nil
 	}
 	// The scheme is case-insensitive (RFC 7235): some clients send "bearer".
 	scheme, tok, _ := strings.Cut(strings.TrimSpace(h), " ")
 	tok = strings.TrimSpace(tok)
 	if !strings.EqualFold(scheme, "Bearer") || tok == "" {
-		return Principal{}, errBadToken
+		return chat.Principal{}, errBadToken
 	}
 	if a.scripts.Matches(tok) {
-		return Principal{Kind: CallerScript}, nil
+		return chat.Principal{Kind: chat.CallerScript}, nil
 	}
 	id := a.brainOf(tok)
 	if id == "" || !a.exists(id) {
-		return Principal{}, errBadToken
+		return chat.Principal{}, errBadToken
 	}
-	return Principal{Kind: CallerBrain, Brain: id}, nil
+	return chat.Principal{Kind: chat.CallerBrain, Brain: id}, nil
 }
