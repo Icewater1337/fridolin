@@ -91,7 +91,7 @@ func TestAssignGroupPutsBackTheFirstBrainJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(b, 0o700) })
-	w := h.Do("POST", "/api/chats/allow", chatRequest{JID: harnessGroup, Kind: "group", Brain: "a"})
+	w := h.Do("POST", "/api/chats/allow", ChatRequest{JID: harnessGroup, Kind: "group", Brain: "a"})
 	if err := os.Chmod(b, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +321,7 @@ func TestOneBrokenBrainDoesNotBlockTheOthers(t *testing.T) {
 			return tb.do("POST", "/api/brains/a/approve", map[string]any{"manifest": m})
 		}, 200, ""},
 		{"allowing a group for a", func() *httptest.ResponseRecorder {
-			return tb.do("POST", "/api/chats/allow", chatRequest{JID: "120363000000000000@g.us", Kind: "group", Brain: "a"})
+			return tb.do("POST", "/api/chats/allow", ChatRequest{JID: "120363000000000000@g.us", Kind: "group", Brain: "a"})
 		}, 200, ""},
 		{"a clash", func() *httptest.ResponseRecorder {
 			return tb.do("PUT", "/api/brains/a", map[string]any{"manifest": manifest.Manifest{ID: "a", Name: "A3", Routing: manifest.Routing{HandlesDMs: true, Default: true}}})
@@ -366,7 +366,7 @@ func TestAllowingAGroupChecksTheBrains(t *testing.T) {
 	}
 	cfgBefore := readFile(t, tb.cfgs.Path())
 
-	w := tb.do("POST", "/api/chats/allow", chatRequest{JID: group, Kind: "group", Brain: "c"})
+	w := tb.do("POST", "/api/chats/allow", ChatRequest{JID: group, Kind: "group", Brain: "c"})
 	if w.Code != 422 || !strings.Contains(w.Body.String(), `brains \"b\" and \"c\" both handle DMs`) {
 		t.Errorf("allow: %d %s, want the 422 for the DMs b and c would both claim", w.Code, w.Body.String())
 	}
