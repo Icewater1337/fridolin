@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/sandbox"
 )
 
 // TestSiteSandboxEnforcesDeclarations runs system programs under the live
@@ -60,12 +61,12 @@ func TestSiteSandboxEnforcesDeclarations(t *testing.T) {
 	defer other.Close()
 	_, bridgePort, _ := net.SplitHostPort(bridge.Listener.Addr().String())
 
-	in := siteProfileInput{
-		home: home, dataDir: data,
-		shell: filepath.Join(site, "shell"), deploy: filepath.Join(site, "deploys", "abc"),
-		tmp: filepath.Join(site, "tmp"), reads: []string{users},
-		siteBridgeLimits: siteBridgeLimits{deny: []string{config}, bridgePort: bridgePort},
-		modules: []siteModuleCaps{{ID: "m", Dir: mod, Files: []siteFileCap{
+	in := sandbox.SitePolicy{
+		Home: home, DataDir: data,
+		Shell: filepath.Join(site, "shell"), Deploy: filepath.Join(site, "deploys", "abc"),
+		Tmp: filepath.Join(site, "tmp"), Reads: []string{users},
+		SiteLimits: sandbox.SiteLimits{Deny: []string{config}, BridgePort: bridgePort},
+		Modules: []sandbox.SiteModule{{ID: "m", Dir: mod, Files: []sandbox.FileCapability{
 			{Name: "note", Path: readable, Access: "read"},
 			{Name: "docs", Path: readDir, Access: "read", Folder: true},
 			{Name: "db", Path: db, Access: "write"},
@@ -78,14 +79,14 @@ func TestSiteSandboxEnforcesDeclarations(t *testing.T) {
 			{Name: "users", Path: users, Access: "write"},
 			{Name: "config", Path: config, Access: "read"},
 		}, Commands: []string{"/bin/cat", "/bin/mv", "/bin/ln", "/bin/rm", "/usr/bin/curl"}}},
-		path: "/usr/bin:/bin",
+		Path: "/usr/bin:/bin",
 	}
 	profile, err := siteSandboxProfile(in)
 	if err != nil {
 		t.Fatal(err)
 	}
 	run := func(args ...string) (string, error) {
-		cmd := exec.Command(sandboxExecPath, append([]string{"-p", profile}, args...)...)
+		cmd := exec.Command(sandbox.ExecPath, append([]string{"-p", profile}, args...)...)
 		cmd.Dir = files
 		out, err := cmd.CombinedOutput()
 		return strings.TrimSpace(string(out)), err

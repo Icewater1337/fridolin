@@ -38,6 +38,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/sandbox"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/site"
 )
@@ -135,7 +136,7 @@ func NewSiteManager(dataDir string, googleClient func() string) *SiteManager {
 		previews:     map[string]*sitePreview{},
 		site:         newSiteProc("site"),
 		tunnel:       newSiteProc("tunnel"),
-		sandboxExec:  sandboxExecPath,
+		sandboxExec:  sandbox.ExecPath,
 	}
 	m.npmInstall = m.runNpmInstall
 	m.workspaceInstall = m.npmInstallAsBrain
@@ -664,7 +665,7 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 		GoogleClientFile: m.googleClientFile(), PreviewLabel: label,
 	}
 	live := label == ""
-	var mods []siteModuleCaps
+	var mods []sandbox.SiteModule
 	if live {
 		rt.PreviewsFile = m.dir("previews.json")
 		if s.Domain != "" {
@@ -711,7 +712,7 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 		deploy := m.deployDir(s.Approved)
 		root := filepath.Join(deploy, filepath.FromSlash(s.Repo.Subdir))
 		in := m.sandboxInput(node, deploy, root, rtFile, mods)
-		prepareDeclaredFolders(mods, in.unwritable)
+		prepareDeclaredFolders(mods, in.Unwritable)
 		switch err := siteSandboxAvailable(m.sandboxExec); {
 		case err == nil:
 			profile, err := siteSandboxProfile(in)

@@ -10,12 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/manifest"
-
+	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
-
-	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 // run is one run of the fake Claude CLI, from FRIDOLIN_FAKE_RUN_LOG.
@@ -146,9 +145,9 @@ func TestGoldenRuns(t *testing.T) {
 		// examples/, which changes more often, is TestGoldenScaffold's.
 		filepath.Join(dir, manifest.DefaultPromptFile):    []byte(goldenBrainPrompt),
 		filepath.Join(family, manifest.DefaultPromptFile): []byte(goldenBrainPrompt),
-		historyPath:                         fixture(t, "history-v1.jsonl"),
-		filepath.Join(dir, identityMapFile): []byte(goldenIdentityMap),
-		filepath.Join(dir, ".mcp.json"):     []byte(`{"mcpServers": {"notes": {"command": "notes-mcp"}}}`),
+		historyPath: fixture(t, "history-v1.jsonl"),
+		filepath.Join(dir, prompttext.IdentityMapPath): []byte(goldenIdentityMap),
+		filepath.Join(dir, ".mcp.json"):                []byte(`{"mcpServers": {"notes": {"command": "notes-mcp"}}}`),
 	} {
 		if err := os.WriteFile(path, data, 0o600); err != nil {
 			t.Fatal(err)

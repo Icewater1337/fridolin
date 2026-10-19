@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/registry"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,14 +16,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/config"
-
-	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/registry"
 
 	"github.com/Icewater1337/fridolin/internal/activity"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/logx"
+	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // Every request body the dashboard sends (web/assets) gets past the strict
@@ -788,7 +788,7 @@ func TestAddBrainRechecksAgainstOtherWriters(t *testing.T) {
 	}()
 	// It scaffolds only after its first check passed; brain.json waits for
 	// the update that registers the brain.
-	waitFor(t, 5*time.Second, "the add's scaffold", func() bool { return fsx.Exists(filepath.Join(tb.home, "b", manifest.DefaultPromptFile)) })
+	testutil.WaitFor(t, 5*time.Second, "the add's scaffold", func() bool { return fsx.Exists(filepath.Join(tb.home, "b", manifest.DefaultPromptFile)) })
 	close(release)
 	if err := <-saved; err != nil {
 		t.Fatal(err)

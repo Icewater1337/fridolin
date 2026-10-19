@@ -15,12 +15,11 @@ import (
 	"testing"
 	"unicode"
 
+	chat "github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
-
-	"github.com/Icewater1337/fridolin/internal/manifest"
-
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/logx"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
@@ -581,7 +580,7 @@ func TestConfigSchemaTakesPhoneNumbersAsWritten(t *testing.T) {
 	set := newSchemaSet(t)
 	for _, n := range []string{"15551234567", "+1 555 123 4567", "+1 (555) 123-4567", "+1\u00a0555\u00a0123\u00a04567", "1.555.123.4567", "15551234567@s.whatsapp.net", " +15551234567 ", "155512"} {
 		t.Run(n, func(t *testing.T) {
-			if _, err := phoneNumber(n); err != nil {
+			if _, err := chat.PhoneNumber(n); err != nil {
 				t.Fatalf("the bridge refuses it: %v", err)
 			}
 			data, err := json.Marshal(n)

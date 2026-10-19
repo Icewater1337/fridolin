@@ -16,6 +16,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/store"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
@@ -136,7 +137,7 @@ func TestReplyIsRecordedOnceDelivered(t *testing.T) {
 	tb.wa = wa
 
 	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: strings.Repeat("a long question ", 12), Source: chat.SourceWhatsApp}})
-	waitFor(t, 10*time.Second, "a failed attempt", func() bool {
+	testutil.WaitFor(t, 10*time.Second, "a failed attempt", func() bool {
 		wa.mu.Lock()
 		defer wa.mu.Unlock()
 		return wa.tries >= 2
@@ -149,7 +150,7 @@ func TestReplyIsRecordedOnceDelivered(t *testing.T) {
 	}
 
 	wa.setOnline(true)
-	waitFor(t, 10*time.Second, "the history line", func() bool { return len(historyTexts(t, br, history.Out)) == 1 })
+	testutil.WaitFor(t, 10*time.Second, "the history line", func() bool { return len(historyTexts(t, br, history.Out)) == 1 })
 	got := wa.sent(testDMChat)
 	n := len(got)
 	for i, c := range got {
@@ -192,9 +193,9 @@ func TestQueuedRunReadsTheAnswerBeforeIt(t *testing.T) {
 				tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: text, Source: chat.SourceWhatsApp}})
 			}
 			ask("first question")
-			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+			testutil.WaitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 			ask("second question")
-			waitFor(t, 20*time.Second, "the second run", func() bool { return len(fakePromptsIn(t, prompts)) == 2 })
+			testutil.WaitFor(t, 20*time.Second, "the second run", func() bool { return len(fakePromptsIn(t, prompts)) == 2 })
 			second := fakePromptsIn(t, prompts)[1]
 			answered := slices.ContainsFunc(strings.Split(second, "\n"), func(line string) bool {
 				return strings.Contains(line, `"from":"You (main)","text":"echo:`) && strings.Contains(line, "first question")
@@ -255,8 +256,8 @@ func TestReplyIsRecordedOnceWhenItsRowStays(t *testing.T) {
 		t.Fatal(err)
 	}
 	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hello", Source: chat.SourceWhatsApp}})
-	waitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
-	waitFor(t, 5*time.Second, "the row, all of it sent", func() bool {
+	testutil.WaitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the row, all of it sent", func() bool {
 		var left int
 		err := db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE state = 'pending' AND next_part = 1`).Scan(&left)
 		return err == nil && left == 1
@@ -268,7 +269,7 @@ func TestReplyIsRecordedOnceWhenItsRowStays(t *testing.T) {
 		t.Fatal(err)
 	}
 	tb.outbox.Wake()
-	waitFor(t, 15*time.Second, "the history line", func() bool { return len(historyTexts(t, br, history.Out)) == 1 })
+	testutil.WaitFor(t, 15*time.Second, "the history line", func() bool { return len(historyTexts(t, br, history.Out)) == 1 })
 	tb.outbox.Wake()
 	time.Sleep(200 * time.Millisecond)
 	if out := historyTexts(t, br, history.Out); len(out) != 1 {
@@ -310,7 +311,7 @@ func TestOutboxSummaryOnlyReads(t *testing.T) {
 	}
 	o := newOutbox(s, func() Messenger { return newFlakyMessenger(func() *config.Config { return &config.Config{} }, true) }, 0, nil)
 	defer o.Stop()
-	waitFor(t, 5*time.Second, "the outbox to forget it", func() bool { return rows() == 0 })
+	testutil.WaitFor(t, 5*time.Second, "the outbox to forget it", func() bool { return rows() == 0 })
 }
 
 // A question a brain asks mid-run waits in the outbox for the connection;
@@ -351,7 +352,7 @@ func TestOutboxSurvivesARestart(t *testing.T) {
 	if err := first.Reply(context.Background(), "main", testDMChat, "hello\n[POLL]\nQuestion: Lunch?\n- yes\n- no\n[/POLL]", 0); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "an attempt", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "an attempt", func() bool {
 		down.mu.Lock()
 		defer down.mu.Unlock()
 		return down.tries > 0
@@ -401,7 +402,7 @@ func TestOutboxGivesUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	var sum store.OutboxSummary
-	waitFor(t, 5*time.Second, "both given up", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "both given up", func() bool {
 		sum, _ = s.OutboxSummary(context.Background(), time.Now())
 		return sum.Failed == 2
 	})
@@ -429,7 +430,7 @@ func TestOutboxKeepsAChatsOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	waitFor(t, 5*time.Second, "a failed attempt", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "a failed attempt", func() bool {
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		return m.tries > 0
@@ -441,7 +442,7 @@ func TestOutboxKeepsAChatsOrder(t *testing.T) {
 		t.Errorf("%d sends tried, want only the first reply's while it fails", tries)
 	}
 	m.setOnline(true)
-	waitFor(t, 5*time.Second, "both", func() bool { return len(m.sent(testDMChat)) == 2 })
+	testutil.WaitFor(t, 5*time.Second, "both", func() bool { return len(m.sent(testDMChat)) == 2 })
 	if got := m.sent(testDMChat); !slices.Equal(got, []string{"first", "second"}) {
 		t.Errorf("sent %q, want them in order", got)
 	}
@@ -460,7 +461,7 @@ func TestStatusWarnsAboutTheOutbox(t *testing.T) {
 		t.Fatal(err)
 	}
 	tb.outbox.Wake()
-	waitFor(t, 5*time.Second, "the warnings", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "the warnings", func() bool {
 		w := tb.outboxWarnings(ctx)
 		return len(w) == 2 && strings.Contains(w[0], "1 reply is waiting") && strings.Contains(w[1], "1 reply could not be delivered")
 	})

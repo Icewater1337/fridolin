@@ -1,4 +1,4 @@
-package main
+package testutil
 
 import (
 	"encoding/json"
@@ -19,21 +19,21 @@ import (
 
 // fakePlaudRecording is one recording, in the shape Plaud's API returns it
 // and the CLI reads it.
-type fakePlaudRecording struct {
+type PlaudRecording struct {
 	ID        string  `json:"id"`
 	Name      string  `json:"name"`
 	CreatedAt string  `json:"created_at"`
 	StartAt   *string `json:"start_at"`
 	// Duration is in milliseconds.
-	Duration     int64            `json:"duration"`
-	SerialNumber *string          `json:"serial_number"`
-	Sources      []fakePlaudBlock `json:"source_list"`
-	Notes        []fakePlaudBlock `json:"note_list"`
+	Duration     int64        `json:"duration"`
+	SerialNumber *string      `json:"serial_number"`
+	Sources      []PlaudBlock `json:"source_list"`
+	Notes        []PlaudBlock `json:"note_list"`
 }
 
 // fakePlaudBlock is a transcript block (data_type "transaction",
 // "transaction_polish") or a note ("auto_sum_note").
-type fakePlaudBlock struct {
+type PlaudBlock struct {
 	DataType string `json:"data_type"`
 	Content  string `json:"data_content"`
 	TabName  string `json:"data_tab_name,omitempty"`
@@ -41,14 +41,14 @@ type fakePlaudBlock struct {
 }
 
 // fakePlaudSegment is one line of a transcript block's content.
-type fakePlaudSegment struct {
+type PlaudSegment struct {
 	Start   int64  `json:"start_time"`
 	End     int64  `json:"end_time"`
 	Speaker string `json:"speaker"`
 	Content string `json:"content"`
 }
 
-func fakePlaudTranscript(segs ...fakePlaudSegment) string {
+func PlaudTranscript(segs ...PlaudSegment) string {
 	data, _ := json.Marshal(segs)
 	return string(data)
 }
@@ -112,12 +112,12 @@ func (f fakePlaudCLI) read(name string) string {
 	return string(b)
 }
 
-func (f fakePlaudCLI) recording(id string) (*fakePlaudRecording, bool) {
+func (f fakePlaudCLI) recording(id string) (*PlaudRecording, bool) {
 	data, err := os.ReadFile(filepath.Join(f.dir, "rec_"+id+".json"))
 	if err != nil {
 		return nil, false
 	}
-	var r fakePlaudRecording
+	var r PlaudRecording
 	if err := json.Unmarshal(data, &r); err != nil {
 		return nil, false
 	}
@@ -292,7 +292,7 @@ func (f fakePlaudCLI) files(args []string) int {
 	for _, id := range ids {
 		r, ok := f.recording(id)
 		if !ok {
-			r = &fakePlaudRecording{ID: id, Name: "Some name", CreatedAt: "2026-10-16T18:00:00", Duration: 300000}
+			r = &PlaudRecording{ID: id, Name: "Some name", CreatedAt: "2026-10-16T18:00:00", Duration: 300000}
 		}
 		name := []rune(r.Name)
 		col := fmt.Sprintf("%-36s", r.Name)
@@ -310,7 +310,7 @@ func (f fakePlaudCLI) file(id string) int {
 	if !ok {
 		return fail(1, "NOT_FOUND", "File not found: "+id)
 	}
-	avail := func(blocks []fakePlaudBlock, typ string) string {
+	avail := func(blocks []PlaudBlock, typ string) string {
 		for _, b := range blocks {
 			if b.DataType == typ {
 				return "available"
@@ -349,7 +349,7 @@ func (f fakePlaudCLI) transcript(args []string) int {
 	if hasFlag(args, "--polished") {
 		block = "transaction_polish"
 	}
-	var src *fakePlaudBlock
+	var src *PlaudBlock
 	var available []string
 	for i, b := range r.Sources {
 		available = append(available, b.DataType)
@@ -373,7 +373,7 @@ func (f fakePlaudCLI) transcript(args []string) int {
 		}
 		return 0
 	}
-	var segs []fakePlaudSegment
+	var segs []PlaudSegment
 	out := src.Content
 	if json.Unmarshal([]byte(src.Content), &segs) == nil {
 		lines := make([]string, len(segs))
@@ -400,7 +400,7 @@ func (f fakePlaudCLI) summary(args []string) int {
 		fmt.Fprintln(os.Stderr, "Error: API error: 404 Not Found")
 		return code
 	}
-	var sum *fakePlaudBlock
+	var sum *PlaudBlock
 	var available []string
 	for i, n := range r.Notes {
 		available = append(available, n.DataType)

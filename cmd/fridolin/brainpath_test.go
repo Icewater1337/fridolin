@@ -16,7 +16,9 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // TestSetBridgePATH: your shell's PATH may name a folder inside a brain's
@@ -159,7 +161,7 @@ func TestBrainRunsGetTheirOwnPATHFolders(t *testing.T) {
 	if _, _, _, err := mgr.Submit(group); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 20*time.Second, "both runs", func() bool { return d.count() == 2 })
+	testutil.WaitFor(t, 20*time.Second, "both runs", func() bool { return d.count() == 2 })
 	for _, r := range d.all() {
 		if r.res.Err != nil {
 			t.Fatalf("run failed: %v", r.res.Err)
@@ -231,7 +233,7 @@ func TestCheckDoesNotExecuteBrainPATHPrograms(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ownedBin, "claude"), []byte(planted), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	versionCLI(t, filepath.Join(trustedBin, "claude"), testedClaudeVersion+" trusted")
+	versionCLI(t, filepath.Join(trustedBin, "claude"), claudecli.TestedClaudeVersion+" trusted")
 	t.Setenv("PATH", strings.Join([]string{ownedBin, trustedBin, "/usr/bin", "/bin"}, string(filepath.ListSeparator)))
 	path := writeConfig(t, `{"claude_path":"claude","data_dir":"`+home+`/data"`+brainDirsJSON(t,
 		brainFolder(t, brain, manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
@@ -243,7 +245,7 @@ func TestCheckDoesNotExecuteBrainPATHPrograms(t *testing.T) {
 	if fsx.Exists(marker) {
 		t.Error("check ran the brain's planted Claude outside the sandbox")
 	}
-	if got := lineWith(out.String(), "claude:"); !strings.Contains(got, testedClaudeVersion+" trusted") || strings.Contains(got, "planted") {
+	if got := lineWith(out.String(), "claude:"); !strings.Contains(got, claudecli.TestedClaudeVersion+" trusted") || strings.Contains(got, "planted") {
 		t.Errorf("Claude summary %q, want the trusted CLI", got)
 	}
 }

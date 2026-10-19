@@ -7,7 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/registry"
 	"io"
 	"log"
 	"os"
@@ -19,16 +18,16 @@ import (
 	"sync/atomic"
 	"syscall"
 
-	"github.com/Icewater1337/fridolin/internal/config"
-
-	"github.com/Icewater1337/fridolin/internal/textx"
+	"github.com/Icewater1337/fridolin/internal/registry"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/logx"
-
+	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
+	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/internal/version"
 )
 
@@ -713,8 +712,8 @@ func claudeSummary(path string, passthrough []string) string {
 		return st.Path + " (`--version` gave no answer)"
 	}
 	s := st.Path + " (" + st.Version + ")"
-	if claudeVersionWarning(st) != "" {
-		s += " — older than " + testedClaudeVersion + ", the oldest release tested; update it (claude update)"
+	if claudecli.VersionWarning(st) != "" {
+		s += " — older than " + claudecli.TestedClaudeVersion + ", the oldest release tested; update it (claude update)"
 	}
 	return s
 }

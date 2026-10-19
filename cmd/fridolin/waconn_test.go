@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
-
+	"github.com/Icewater1337/fridolin/internal/testutil"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
 
@@ -196,7 +197,7 @@ func TestFollowPairingEndsWithItsContext(t *testing.T) {
 		tw.followPairing(ctx, cancel, qr)
 	}()
 	qr <- whatsmeow.QRChannelItem{Event: whatsmeow.QRChannelEventCode, Code: "2@code"}
-	waitFor(t, 2*time.Second, "the code", func() bool { return tw.State().QRCode == "2@code" })
+	testutil.WaitFor(t, 2*time.Second, "the code", func() bool { return tw.State().QRCode == "2@code" })
 	cancel()
 	select {
 	case <-done:

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/registry"
 	"log"
 	"net"
 	"net/http"
@@ -15,14 +14,12 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Icewater1337/fridolin/internal/registry"
+
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
-
-	"github.com/Icewater1337/fridolin/internal/manifest"
-
 	"github.com/Icewater1337/fridolin/internal/httpapi"
-
-	wastore "go.mau.fi/whatsmeow/store"
-	"go.mau.fi/whatsmeow/types"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -31,6 +28,8 @@ import (
 	"github.com/Icewater1337/fridolin/internal/otp"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/store"
+	wastore "go.mau.fi/whatsmeow/store"
+	"go.mau.fi/whatsmeow/types"
 )
 
 // isJunkMessage reports whether a message is too trivial to be worth a Claude
@@ -885,10 +884,10 @@ func (b *Bridge) dispatch(m Inbound) {
 }
 
 // deliver sends a finished brain run's answer.
-func (b *Bridge) deliver(br *Brain, m Inbound, res RunResult) {
+func (b *Bridge) deliver(br *Brain, m Inbound, res claudecli.Result) {
 	ctx := context.Background()
 	if res.Err != nil {
-		if errors.Is(res.Err, errBrainInterrupted) || errors.Is(res.Err, context.Canceled) {
+		if errors.Is(res.Err, claudecli.ErrInterrupted) || errors.Is(res.Err, context.Canceled) {
 			log.Printf("brain %s: run for %s was stopped", br.ID(), m.JID)
 			return
 		}

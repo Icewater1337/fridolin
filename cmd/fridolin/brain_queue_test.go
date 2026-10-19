@@ -21,9 +21,11 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/logx"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // deliveries records what brains hand back to the bridge.
@@ -35,10 +37,10 @@ type deliveries struct {
 type delivered struct {
 	brain string
 	msg   Inbound
-	res   RunResult
+	res   claudecli.Result
 }
 
-func (d *deliveries) add(br *Brain, m Inbound, res RunResult) {
+func (d *deliveries) add(br *Brain, m Inbound, res claudecli.Result) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.runs = append(d.runs, delivered{br.ID(), m, res})
@@ -93,7 +95,7 @@ func TestBrainRunsAndDeliversInOrder(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	waitFor(t, 10*time.Second, "three runs", func() bool { return d.count() == 3 })
+	testutil.WaitFor(t, 10*time.Second, "three runs", func() bool { return d.count() == 3 })
 	for i, want := range []string{"one", "two", "three"} {
 		r := d.all()[i]
 		if r.res.Err != nil {
@@ -117,12 +119,12 @@ func TestBusyReportedAndQueuePosition(t *testing.T) {
 	if busy {
 		t.Error("an idle brain reported busy")
 	}
-	waitFor(t, 5*time.Second, "first run to start", func() bool { return mgr.Get("a").Snapshot().Running != nil })
+	testutil.WaitFor(t, 5*time.Second, "first run to start", func() bool { return mgr.Get("a").Snapshot().Running != nil })
 	_, pos, busy, _ := mgr.Submit(dm("second"))
 	if !busy || pos != 1 {
 		t.Errorf("second: busy=%v pos=%d, want busy at #1", busy, pos)
 	}
-	waitFor(t, 10*time.Second, "both runs", func() bool { return d.count() == 2 })
+	testutil.WaitFor(t, 10*time.Second, "both runs", func() bool { return d.count() == 2 })
 }
 
 func TestStopKillsTheRunningProcess(t *testing.T) {
@@ -132,7 +134,7 @@ func TestStopKillsTheRunningProcess(t *testing.T) {
 	_, _, _, _ = mgr.Submit(dm("long task"))
 	_, _, _, _ = mgr.Submit(dm("queued"))
 	br := mgr.Get("a")
-	waitFor(t, 5*time.Second, "run with a pid", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "run with a pid", func() bool {
 		rt := br.Snapshot()
 		return rt.Running != nil && rt.Running.PID > 0
 	})
@@ -143,7 +145,7 @@ func TestStopKillsTheRunningProcess(t *testing.T) {
 	if time.Since(start) > 5*time.Second {
 		t.Error("stopping took too long — the process was not killed")
 	}
-	waitFor(t, 5*time.Second, "interrupted delivery", func() bool { return d.count() == 1 })
+	testutil.WaitFor(t, 5*time.Second, "interrupted delivery", func() bool { return d.count() == 1 })
 	if r := d.all()[0]; r.res.Err == nil || !strings.Contains(r.res.Err.Error(), "interrupted") {
 		t.Errorf("result = %+v, want interrupted", r.res)
 	}
@@ -185,7 +187,7 @@ func TestStopHandOffsLeavesOtherWorkAlone(t *testing.T) {
 			a, b := mgr.Get("a"), mgr.Get("b")
 			_, _, _, _ = mgr.Submit(dm("a's own"))
 			_, _, _, _ = mgr.Submit(c.running)
-			waitFor(t, 5*time.Second, "both runs", func() bool {
+			testutil.WaitFor(t, 5*time.Second, "both runs", func() bool {
 				ra, rb := a.Snapshot().Running, b.Snapshot().Running
 				return ra != nil && ra.PID > 0 && rb != nil && rb.PID > 0
 			})
@@ -219,10 +221,10 @@ func TestStopHandOffsLeavesOtherWorkAlone(t *testing.T) {
 func TestInterruptModeSupersedes(t *testing.T) {
 	mgr, d, _ := queueTestManager(t, 30000, `, "queue": {"mode": "interrupt"}`)
 	_, _, _, _ = mgr.Submit(dm("old"))
-	waitFor(t, 5*time.Second, "old run", func() bool { r := mgr.Get("a").Snapshot().Running; return r != nil && r.PID > 0 })
+	testutil.WaitFor(t, 5*time.Second, "old run", func() bool { r := mgr.Get("a").Snapshot().Running; return r != nil && r.PID > 0 })
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
 	_, _, _, _ = mgr.Submit(dm("new"))
-	waitFor(t, 10*time.Second, "two deliveries", func() bool { return d.count() == 2 })
+	testutil.WaitFor(t, 10*time.Second, "two deliveries", func() bool { return d.count() == 2 })
 	runs := d.all()
 	if runs[0].res.Err == nil || runs[1].res.Err != nil || !strings.HasSuffix(runs[1].res.Text, "says: new") {
 		t.Errorf("runs = %+v", runs)
@@ -268,7 +270,7 @@ func TestInterruptModeOnlyReplacesTheSendersOwnRun(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			mgr, d, _ := queueTestManager(t, 30000, `, "queue": {"mode": "interrupt"}`)
 			br, _, _, _ := mgr.Submit(c.running)
-			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+			testutil.WaitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 			pid := br.Snapshot().Running.PID
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
 			for _, w := range c.waiting {
@@ -285,9 +287,9 @@ func TestInterruptModeOnlyReplacesTheSendersOwnRun(t *testing.T) {
 				if busy {
 					t.Errorf("busy = true at #%d, want the message to take over the run", pos)
 				}
-				waitFor(t, 10*time.Second, "two deliveries", func() bool { return d.count() == 2 })
+				testutil.WaitFor(t, 10*time.Second, "two deliveries", func() bool { return d.count() == 2 })
 				runs := d.all()
-				if !errors.Is(runs[0].res.Err, errBrainInterrupted) || runs[1].res.Err != nil || !strings.HasSuffix(runs[1].res.Text, "says: "+c.next.Text) {
+				if !errors.Is(runs[0].res.Err, claudecli.ErrInterrupted) || runs[1].res.Err != nil || !strings.HasSuffix(runs[1].res.Text, "says: "+c.next.Text) {
 					t.Errorf("runs = %+v, want the first interrupted and the second answered", runs)
 				}
 				return
@@ -343,7 +345,7 @@ func TestInterruptModeKeepsOthersWaiting(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			mgr, d, _ := queueTestManager(t, 30000, `, "queue": {"mode": "interrupt"}`)
 			br, _, _, _ := mgr.Submit(c.running)
-			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+			testutil.WaitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
 			for _, w := range c.waiting {
 				_, _, _, _ = mgr.Submit(w)
@@ -353,9 +355,9 @@ func TestInterruptModeKeepsOthersWaiting(t *testing.T) {
 				t.Errorf("busy = %v at #%d, want it waiting behind %q at #2", busy, pos, c.want[0])
 			}
 
-			waitFor(t, 10*time.Second, "three deliveries", func() bool { return d.count() == 3 })
+			testutil.WaitFor(t, 10*time.Second, "three deliveries", func() bool { return d.count() == 3 })
 			runs := d.all()
-			if !errors.Is(runs[0].res.Err, errBrainInterrupted) {
+			if !errors.Is(runs[0].res.Err, claudecli.ErrInterrupted) {
 				t.Errorf("%s: %+v, want it interrupted", c.running.Text, runs[0].res)
 			}
 			for i, want := range c.want {
@@ -375,7 +377,7 @@ func TestInterruptModeQueueIsBounded(t *testing.T) {
 	if _, _, err := br.Submit(dm("long task")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+	testutil.WaitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 	for _, jid := range []string{"120363000000000001@g.us", "120363000000000002@g.us"} {
 		if _, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: jid, Sender: "15559876543", Text: "question"}}); err != nil {
 			t.Fatalf("%s: %v", jid, err)
@@ -393,7 +395,7 @@ func TestSilentMessagesAreSupersededAndQueueOverflows(t *testing.T) {
 		return Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: text, Silent: silent}}
 	}
 	_, _, _, _ = mgr.Submit(g("running", false))
-	waitFor(t, 5*time.Second, "run", func() bool { return mgr.Get("b").Snapshot().Running != nil })
+	testutil.WaitFor(t, 5*time.Second, "run", func() bool { return mgr.Get("b").Snapshot().Running != nil })
 	_, _, _, _ = mgr.Submit(g("chatter 1", true))
 	_, _, _, _ = mgr.Submit(g("chatter 2", true)) // supersedes chatter 1
 	if q := mgr.Get("b").Snapshot().Queue; len(q) != 1 || q[0].Preview != "chatter 2" {
@@ -404,7 +406,7 @@ func TestSilentMessagesAreSupersededAndQueueOverflows(t *testing.T) {
 	if _, _, _, err := mgr.Submit(g("question 3", false)); err != errQueueFull {
 		t.Errorf("err = %v, want queue full", err)
 	}
-	waitFor(t, 10*time.Second, "runs", func() bool { return d.count() == 3 })
+	testutil.WaitFor(t, 10*time.Second, "runs", func() bool { return d.count() == 3 })
 }
 
 func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
@@ -416,7 +418,7 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 	a, b := mgr.Get("a"), mgr.Get("b")
 	_, _, _, _ = mgr.Submit(dm("keep going"))
 	_, _, _, _ = mgr.Submit(Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "doomed"}})
-	waitFor(t, 5*time.Second, "both processes running", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "both processes running", func() bool {
 		ar, br := a.Snapshot().Running, b.Snapshot().Running
 		return ar != nil && ar.PID > 0 && br != nil && br.PID > 0
 	})
@@ -471,14 +473,14 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 	if mgr.Get("b") != nil {
 		t.Error("b should be gone")
 	}
-	waitFor(t, 10*time.Second, "the removed brain's delivery", func() bool { return d.count() == 1 })
+	testutil.WaitFor(t, 10*time.Second, "the removed brain's delivery", func() bool { return d.count() == 1 })
 	if run := a.Snapshot().Running; run == nil || run.PID == 0 {
 		t.Fatal("a's process must stay running through the reload")
 	}
 	if err := os.WriteFile(release, nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "both deliveries", func() bool { return d.count() == 2 })
+	testutil.WaitFor(t, 10*time.Second, "both deliveries", func() bool { return d.count() == 2 })
 	for _, r := range d.all() {
 		switch r.brain {
 		case "a":
@@ -563,11 +565,11 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 			if err := mgr.Apply(configValue(refs...)); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 10*time.Second, "both runs to end", func() bool { return d.count() == 2 })
+			testutil.WaitFor(t, 10*time.Second, "both runs to end", func() bool { return d.count() == 2 })
 			for _, r := range d.all() {
 				switch r.msg.Text {
 				case "first":
-					if !errors.Is(r.res.Err, errBrainInterrupted) {
+					if !errors.Is(r.res.Err, claudecli.ErrInterrupted) {
 						t.Errorf("first: %q %v, want its run stopped", r.res.Text, r.res.Err)
 					}
 				case "second":
@@ -720,7 +722,7 @@ func TestPromptGoesOnStdin(t *testing.T) {
 			if _, _, _, err := mgr.Submit(dm(c.text)); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+			testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
 			if res := d.all()[0].res; res.Err != nil || !strings.HasSuffix(res.Text, "says: "+c.text) {
 				t.Errorf("run = %v, %.80q; want the message echoed from stdin", res.Err, res.Text)
 			}
@@ -889,7 +891,7 @@ func TestBrainRunsWithItsOwnClaudeSetup(t *testing.T) {
 			if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+			testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
 			if err := d.all()[0].res.Err; err != nil {
 				t.Fatalf("run: %v", err)
 			}
@@ -1221,14 +1223,14 @@ func TestStopKillsProcessesClaudeStarted(t *testing.T) {
 	t.Setenv("FRIDOLIN_FAKE_CHILD", "1")
 	_, _, _, _ = mgr.Submit(dm("long task with a child"))
 	br := mgr.Get("a")
-	waitFor(t, 5*time.Second, "run with a pid", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "run with a pid", func() bool {
 		rt := br.Snapshot()
 		return rt.Running != nil && rt.Running.PID > 0
 	})
 	time.Sleep(200 * time.Millisecond) // let the child start
 	start := time.Now()
 	br.StopCurrent(false)
-	waitFor(t, 4*time.Second, "interrupted delivery", func() bool { return d.count() == 1 })
+	testutil.WaitFor(t, 4*time.Second, "interrupted delivery", func() bool { return d.count() == 1 })
 	if el := time.Since(start); el > 3*time.Second {
 		t.Errorf("stop took %v — the child kept the run alive", el)
 	}
@@ -1240,7 +1242,7 @@ func TestBrainsDoNotSeeTheDotEnv(t *testing.T) {
 	// inherits, so any brain could read it with `env`.
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
-	clearEnv(t, "MODEL", "FRIDOLIN_TEST_DOTENV_ONLY")
+	testutil.ClearEnv(t, "MODEL", "FRIDOLIN_TEST_DOTENV_ONLY")
 	envLog := filepath.Join(home, "brain.env")
 	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
 	claude := fakeClaudeEnv(t, 0)
@@ -1268,7 +1270,7 @@ func TestBrainsDoNotSeeTheDotEnv(t *testing.T) {
 	if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+	testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
 	if err := d.all()[0].res.Err; err != nil {
 		t.Fatal(err)
 	}
@@ -1344,7 +1346,7 @@ func TestBrainsAreToldTheDataDir(t *testing.T) {
 			if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+			testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
 			if err := d.all()[0].res.Err; err != nil {
 				t.Fatal(err)
 			}
@@ -1418,7 +1420,7 @@ func TestPanicsInARunAreContained(t *testing.T) {
 			}}
 		}},
 		{"while it is delivered", nil, 0, false, func(d *deliveries, first *sync.Once) BrainHooks {
-			return BrainHooks{Deliver: func(br *Brain, m Inbound, res RunResult) {
+			return BrainHooks{Deliver: func(br *Brain, m Inbound, res claudecli.Result) {
 				d.add(br, m, res)
 				first.Do(func() { panic("boom in Deliver") })
 			}}
@@ -1463,7 +1465,7 @@ func TestPanicsInARunAreContained(t *testing.T) {
 			if !strings.Contains(strings.Join(logs(), "\n"), "panicked: boom") {
 				t.Error("the panic was not logged")
 			}
-			if tc.panicked && (len(runs) == 0 || !errors.Is(runs[0].res.Err, errRunPanicked)) {
+			if tc.panicked && (len(runs) == 0 || !errors.Is(runs[0].res.Err, claudecli.ErrPanicked)) {
 				t.Errorf("runs = %+v, want the first to end with errRunPanicked", runs)
 			}
 			// Each run's process is gone, reaped too: a zombie still
@@ -1521,9 +1523,9 @@ func TestRunTimeoutStopsAStuckRun(t *testing.T) {
 			if _, _, _, err := mgr.Submit(dm("stuck")); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 10*time.Second, "the run to be stopped", func() bool { return d.count() == 1 })
+			testutil.WaitFor(t, 10*time.Second, "the run to be stopped", func() bool { return d.count() == 1 })
 			res := d.all()[0].res
-			if !errors.Is(res.Err, errRunTimedOut) || !strings.Contains(res.Err.Error(), "run_timeout_minutes") {
+			if !errors.Is(res.Err, claudecli.ErrTimedOut) || !strings.Contains(res.Err.Error(), "run_timeout_minutes") {
 				t.Errorf("result = %+v, want errRunTimedOut", res)
 			}
 			if el := time.Since(start); el > 5*time.Second {
@@ -1555,7 +1557,7 @@ func TestRunEndsSoonAfterItsResult(t *testing.T) {
 	if _, _, _, err := mgr.Submit(dm("quick answer")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "the answer", func() bool { return d.count() == 1 })
+	testutil.WaitFor(t, 10*time.Second, "the answer", func() bool { return d.count() == 1 })
 	if res := d.all()[0].res; res.Err != nil || !strings.HasSuffix(res.Text, "says: quick answer") {
 		t.Errorf("result = %+v, want the answer", res)
 	}
@@ -1576,7 +1578,7 @@ func TestRunTimeoutKeepsAnAnswerThatCame(t *testing.T) {
 	if _, _, _, err := mgr.Submit(dm("answer in time")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+	testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
 	if res := d.all()[0].res; res.Err != nil || !strings.HasSuffix(res.Text, "says: answer in time") {
 		t.Errorf("result = %+v, want the answer that came before the deadline", res)
 	}
@@ -1635,7 +1637,7 @@ func TestStreamLogIsRotatedAndNamesEachRun(t *testing.T) {
 	if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+	testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
 	if fi, err := os.Stat(filepath.Join(home, "a", streamLogOld)); err != nil || fi.Size() != streamLogMax {
 		t.Errorf("rotated log: %v, %v; want the full one", fi, err)
 	}
@@ -1675,7 +1677,7 @@ func TestHistoryLineIsWrittenOnceTakenAtItsOwnTime(t *testing.T) {
 			if _, _, err := br.Submit(dm("long task")); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+			testutil.WaitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 			if _, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "waiting"}}); err != nil {
 				t.Fatal(err)
 			}
@@ -1685,7 +1687,7 @@ func TestHistoryLineIsWrittenOnceTakenAtItsOwnTime(t *testing.T) {
 			if _, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "long task"}}); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+			testutil.WaitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 			if _, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "waiting"}}); err != nil {
 				t.Fatal(err)
 			}
@@ -1786,7 +1788,7 @@ func TestBusyChatDoesNotHoldUpAnother(t *testing.T) {
 	if _, _, err := br.Submit(dm("dm 1")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+	testutil.WaitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 	var pos []int
 	for _, m := range []Inbound{dm("dm 2"), dm("dm 3"), other} {
 		p, busy, err := br.Submit(m)
@@ -1801,7 +1803,7 @@ func TestBusyChatDoesNotHoldUpAnother(t *testing.T) {
 	if q := queuePreviews(br); strings.Join(q, "|") != "other 1|dm 2|dm 3" {
 		t.Errorf("queue = %q, want the other chat's message first", q)
 	}
-	waitFor(t, 20*time.Second, "four runs", func() bool { return d.count() == 4 })
+	testutil.WaitFor(t, 20*time.Second, "four runs", func() bool { return d.count() == 4 })
 	var ran []string
 	for _, r := range d.all() {
 		ran = append(ran, r.msg.Text)
@@ -1871,7 +1873,7 @@ func waitsForSlot(br *Brain) bool {
 // hasRun waits until br runs claude.
 func hasRun(t *testing.T, br *Brain) {
 	t.Helper()
-	waitFor(t, 5*time.Second, br.ID()+"'s run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+	testutil.WaitFor(t, 5*time.Second, br.ID()+"'s run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 }
 
 // running counts the brains with a run going.
@@ -1909,7 +1911,7 @@ func TestRunLimitBoundsRunsAcrossBrains(t *testing.T) {
 				}
 			}
 			most := 0
-			waitFor(t, 20*time.Second, "three runs", func() bool {
+			testutil.WaitFor(t, 20*time.Second, "three runs", func() bool {
 				most = max(most, running(mgr))
 				return d.count() == 3
 			})
@@ -1933,14 +1935,14 @@ func TestRunSlotsGoToBrainsInTurn(t *testing.T) {
 	if _, _, err := a.Submit(dm("a 1")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "a's first run", func() bool { r := a.Snapshot().Running; return r != nil && r.PID > 0 })
+	testutil.WaitFor(t, 5*time.Second, "a's first run", func() bool { r := a.Snapshot().Running; return r != nil && r.PID > 0 })
 	for _, m := range []Inbound{dm("a 2"), {Inbound: chat.Inbound{JID: "120363000000000001@g.us", Sender: otherNumber, Text: "c 1"}}} {
 		if _, _, _, err := mgr.Submit(m); err != nil {
 			t.Fatal(err)
 		}
 	}
 	most := 0
-	waitFor(t, 20*time.Second, "three runs", func() bool {
+	testutil.WaitFor(t, 20*time.Second, "three runs", func() bool {
 		most = max(most, running(mgr))
 		return d.count() == 3
 	})
@@ -1961,17 +1963,17 @@ func TestRequestStopsChatterInAnotherBrainForASlot(t *testing.T) {
 	if _, _, err := b.Submit(Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: otherNumber, Text: "chatter here", Silent: true}}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "b's observe-only run", func() bool { r := b.Snapshot().Running; return r != nil && r.PID > 0 })
+	testutil.WaitFor(t, 5*time.Second, "b's observe-only run", func() bool { r := b.Snapshot().Running; return r != nil && r.PID > 0 })
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
 	if _, _, _, err := mgr.Submit(dm("question")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 15*time.Second, "both runs to end", func() bool { return d.count() == 2 })
+	testutil.WaitFor(t, 15*time.Second, "both runs to end", func() bool { return d.count() == 2 })
 	got := map[string]error{}
 	for _, r := range d.all() {
 		got[r.msg.Text] = r.res.Err
 	}
-	if !errors.Is(got["chatter here"], errBrainInterrupted) || got["question"] != nil {
+	if !errors.Is(got["chatter here"], claudecli.ErrInterrupted) || got["question"] != nil {
 		t.Errorf("results %v, want the chatter's run stopped and the question answered", got)
 	}
 }
@@ -2020,17 +2022,17 @@ func TestRequestUpgradesAWaitForChatter(t *testing.T) {
 	if _, _, err := c.Submit(groupMsg(groupC, "chatter in c", true)); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "c to wait for a slot", func() bool { return waitsForSlot(c) })
+	testutil.WaitFor(t, 5*time.Second, "c to wait for a slot", func() bool { return waitsForSlot(c) })
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
 	if _, _, err := c.Submit(groupMsg(groupC, "question for c", false)); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "both runs to end", func() bool { return d.count() == 2 })
+	testutil.WaitFor(t, 10*time.Second, "both runs to end", func() bool { return d.count() == 2 })
 	got := map[string]error{}
 	for _, r := range d.all() {
 		got[r.msg.Text] = r.res.Err
 	}
-	if !errors.Is(got["chatter in b"], errBrainInterrupted) || got["question for c"] != nil {
+	if !errors.Is(got["chatter in b"], claudecli.ErrInterrupted) || got["question for c"] != nil {
 		t.Errorf("results %v, want b's chatter stopped and c's question answered", got)
 	}
 }
@@ -2047,9 +2049,9 @@ func TestRetiredBrainGivesUpItsWaitForASlot(t *testing.T) {
 	if _, _, err := a.Submit(dm("for a")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "a to wait for a slot", func() bool { return waitsForSlot(a) })
+	testutil.WaitFor(t, 5*time.Second, "a to wait for a slot", func() bool { return waitsForSlot(a) })
 	a.retire(false)
-	waitFor(t, 3*time.Second, "a's worker to end", func() bool {
+	testutil.WaitFor(t, 3*time.Second, "a's worker to end", func() bool {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		return !a.working
@@ -2071,7 +2073,7 @@ func TestChatterAskedToGiveWayBeforeItsRunDoesNotRun(t *testing.T) {
 	if _, _, err := b.Submit(groupMsg(groupB, "chatter in b", true)); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "b to wait for a slot", func() bool { return waitsForSlot(b) })
+	testutil.WaitFor(t, 5*time.Second, "b to wait for a slot", func() bool { return waitsForSlot(b) })
 
 	// Holding b's lock keeps its worker between the slot it is granted and
 	// the run, while a's request asks the slot to give way.
@@ -2083,16 +2085,16 @@ func TestChatterAskedToGiveWayBeforeItsRunDoesNotRun(t *testing.T) {
 		}
 	}()
 	c.StopCurrent(false)
-	waitFor(t, 5*time.Second, "b to get the slot", func() bool { held, waiting, _ := slotState(mgr); return held == 1 && waiting == 0 })
+	testutil.WaitFor(t, 5*time.Second, "b to get the slot", func() bool { held, waiting, _ := slotState(mgr); return held == 1 && waiting == 0 })
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
 	if _, _, err := a.Submit(dm("question")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "a to ask b's slot to give way", func() bool { _, _, stopped := slotState(mgr); return stopped })
+	testutil.WaitFor(t, 5*time.Second, "a to ask b's slot to give way", func() bool { _, _, stopped := slotState(mgr); return stopped })
 	b.mu.Unlock()
 	locked = false
 
-	waitFor(t, 10*time.Second, "a's answer", func() bool {
+	testutil.WaitFor(t, 10*time.Second, "a's answer", func() bool {
 		return slices.ContainsFunc(d.all(), func(r delivered) bool { return r.msg.Text == "question" })
 	})
 	time.Sleep(300 * time.Millisecond)

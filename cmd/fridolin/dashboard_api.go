@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/apperr"
 	"io/fs"
 	"log"
 	"net/http"
@@ -24,6 +23,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/apperr"
+
 	"github.com/Icewater1337/fridolin/internal/config"
 
 	"github.com/Icewater1337/fridolin/internal/registry"
@@ -35,6 +36,7 @@ import (
 	"rsc.io/qr"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -159,24 +161,24 @@ func etagListed(header, etag string) bool {
 // ── status ───────────────────────────────────────────────────────────────
 
 type statusResponse struct {
-	Version       string           `json:"version"`
-	StartedAt     time.Time        `json:"started_at"`
-	UptimeS       int64            `json:"uptime_s"`
-	ConfigPath    string           `json:"config_path"`
-	DataDir       string           `json:"data_dir"`
-	DevMode       bool             `json:"dev_mode"`
-	Platform      string           `json:"platform"`
-	WhatsApp      waStatus         `json:"whatsapp"`
-	Claude        claudeStatus     `json:"claude"`
-	AgentProvider string           `json:"agent_provider"`
-	Codex         *claudeStatus    `json:"codex,omitempty"`
-	Sandbox       sandboxStatus    `json:"sandbox"`
-	Brains        []BrainRuntime   `json:"brains"`
-	Issues        []registry.Issue `json:"issues"`
-	Warnings      []string         `json:"warnings"`
-	Backup        backupSummary    `json:"backup"`
-	Ingest        bool             `json:"ingest"`
-	Pending       int              `json:"debouncing"`
+	Version       string            `json:"version"`
+	StartedAt     time.Time         `json:"started_at"`
+	UptimeS       int64             `json:"uptime_s"`
+	ConfigPath    string            `json:"config_path"`
+	DataDir       string            `json:"data_dir"`
+	DevMode       bool              `json:"dev_mode"`
+	Platform      string            `json:"platform"`
+	WhatsApp      waStatus          `json:"whatsapp"`
+	Claude        claudecli.Status  `json:"claude"`
+	AgentProvider string            `json:"agent_provider"`
+	Codex         *claudecli.Status `json:"codex,omitempty"`
+	Sandbox       sandboxStatus     `json:"sandbox"`
+	Brains        []BrainRuntime    `json:"brains"`
+	Issues        []registry.Issue  `json:"issues"`
+	Warnings      []string          `json:"warnings"`
+	Backup        backupSummary     `json:"backup"`
+	Ingest        bool              `json:"ingest"`
+	Pending       int               `json:"debouncing"`
 	// Settings saved since the start that only apply after a restart. The
 	// dashboard shows its restart banner from this, in every tab.
 	RestartRequired []string `json:"restart_required"`
@@ -185,12 +187,6 @@ type statusResponse struct {
 type waStatus struct {
 	chat.LinkState
 	QRAvailable bool `json:"qr_available"`
-}
-
-type claudeStatus struct {
-	Path    string `json:"path"`
-	Found   bool   `json:"found"`
-	Version string `json:"version,omitempty"`
 }
 
 type sandboxStatus struct {
@@ -243,7 +239,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		resp.Warnings = append(resp.Warnings, "allowed_numbers is empty, so anyone who can message this WhatsApp account can use the assistant. Add your number under Chats → Allowed numbers.")
 	}
 	resp.Warnings = append(resp.Warnings, b.tokenWarnings(b.cfgs.Get(), runtime.GOOS)...)
-	if w := claudeVersionWarning(resp.Claude); cfg.AgentProvider != "codex" && w != "" {
+	if w := claudecli.VersionWarning(resp.Claude); cfg.AgentProvider != "codex" && w != "" {
 		resp.Warnings = append(resp.Warnings, w)
 	}
 	if cfg.TokenlessSend() {
@@ -510,7 +506,7 @@ func (req chatRequest) listEntry() (dm bool, entry string, err error) {
 		entry, err = config.AllowListGroup(req.sent())
 		return false, entry, err
 	case "dm":
-		entry, err = phoneNumber(req.sent())
+		entry, err = chat.PhoneNumber(req.sent())
 		return true, entry, err
 	default:
 		return false, "", errors.New("kind must be group or dm")
@@ -571,7 +567,7 @@ func (b *Bridge) apiRevokeChat(w http.ResponseWriter, r *http.Request) {
 	}
 	canon, name := config.AllowListGroup, "allowed_groups"
 	if dm {
-		canon, name = phoneNumber, "allowed_numbers"
+		canon, name = chat.PhoneNumber, "allowed_numbers"
 	}
 	var removed []string
 	_, err := b.cfgs.Update("", func(c *config.Config) error {
@@ -1242,7 +1238,7 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 // group's own digits when the request names no sender, is no number, like
 // a member WhatsApp names only by a LID nothing maps to a number.
 func devGroupSender(sender string) groupSender {
-	if n, err := phoneNumber(sender); err == nil {
+	if n, err := chat.PhoneNumber(sender); err == nil {
 		return groupSender{Number: n, Resolved: true}
 	}
 	user, server, _ := strings.Cut(strings.TrimSpace(sender), "@")

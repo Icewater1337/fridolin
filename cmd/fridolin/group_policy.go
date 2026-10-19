@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 
+	chat "github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
 )
 
@@ -55,7 +56,7 @@ func groupSenderAllowed(cfg *config.Config, group string, s groupSender) bool {
 		return false
 	case listed:
 		number := s.Number
-		if n, err := phoneNumber(number); err == nil {
+		if n, err := chat.PhoneNumber(number); err == nil {
 			number = n
 		}
 		return slices.Contains(allowedNumbersAsNumbers(members), number)

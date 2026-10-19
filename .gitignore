@@ -45,3 +45,11 @@ venv/
 
 # ── personal data guard ──────────────────────────────────────────────────
 .personal-denylist
+
+!internal/prompt/
+
+!internal/claudecli/
+
+!internal/sandbox/
+
+!internal/testutil/

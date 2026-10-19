@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/registry"
 	"io"
 	"io/fs"
 	"log"
@@ -22,6 +21,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/registry"
+
 	"github.com/Icewater1337/fridolin/internal/config"
 
 	"github.com/Icewater1337/fridolin/internal/route"
@@ -29,67 +30,15 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/sandbox"
+
+	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
-
-// identityMapFile is the brain's contact map, in its folder.
-const identityMapFile = "memories/people/whatsapp-identity-map.md"
-
-// parseIdentityMap parses a brain's contact map and returns name by
-// identityKey.
-//
-// The map is a markdown table at identityMapFile in the brain's folder:
-//
-//	| WhatsApp Number | Person | Notes |
-//	| --------------- | ------ | ----- |
-//	| 15551234567     | Alex   | …     |
-//
-// It is entirely optional — without it, chat history shows raw JIDs.
-func parseIdentityMap(data []byte) map[string]string {
-	identities := make(map[string]string)
-
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, "|") {
-			continue
-		}
-
-		parts := strings.Split(line, "|")
-		if len(parts) < 3 || isTableRule(parts) {
-			continue
-		}
-
-		jid := strings.TrimSpace(parts[1])
-		name := strings.TrimSpace(parts[2])
-		if jid == "" || name == "" || jid == "WhatsApp Number" {
-			continue
-		}
-		// A cell like "+" or "@lid" holds no number to look up. A number
-		// is read however it was written: "+1 555 123 4567" is 15551234567.
-		number := identityKey(jid)
-		if number == "" {
-			continue
-		}
-		identities[number] = name
-	}
-
-	return identities
-}
-
-// isTableRule reports whether the cells of a markdown table row hold only
-// dashes and colons, as the line under the header does. A row that merely
-// contains "---", say in its notes, is a contact like any other.
-func isTableRule(cells []string) bool {
-	for _, c := range cells {
-		if strings.Trim(c, "-: \t") != "" {
-			return false
-		}
-	}
-	return true
-}
 
 // ── Brain ────────────────────────────────────────────────────────────────
 
@@ -203,7 +152,7 @@ type BrainHooks struct {
 	Question func(br *Brain, jid, text string) bool
 	// Deliver receives every finished run. It records the answer in the
 	// brain's history once it is sent.
-	Deliver func(br *Brain, m Inbound, res RunResult)
+	Deliver func(br *Brain, m Inbound, res claudecli.Result)
 	// Waiting gets, as the bridge stops, what br had waiting, which never
 	// ran, before its run in flight gets its grace (see shutdown). Nil
 	// drops it.
@@ -235,16 +184,6 @@ type BrainHooks struct {
 // for it.
 var workingNoticeAfter = 10 * time.Second
 
-// RunResult is the outcome of one brain run.
-type RunResult struct {
-	Text string
-	// Asked is set when the run forwarded a question mid-run. Its answer
-	// comes as a new message; Text, the run's own final reply, is sent too.
-	Asked    bool
-	Err      error
-	Duration time.Duration
-}
-
 // RunInfo summarises the last finished run, for the dashboard.
 type RunInfo struct {
 	Chat     string    `json:"chat"`
@@ -269,7 +208,7 @@ type brainRun struct {
 	// processMu serialises starting a CLI with the second signal's stop.
 	// Once forceStopped is set, no process can start for this run.
 	processMu    sync.Mutex
-	process      *claudeProcess
+	process      interface{ Stopped() <-chan struct{} }
 	forceStopped bool
 	// pid is the CLI's while it runs, and 0 once Wait has reaped it: for
 	// the dashboard, which shows it. Stopping a run takes no PID (see
@@ -280,13 +219,10 @@ type brainRun struct {
 }
 
 var (
-	errBrainInterrupted = errors.New("brain run interrupted")
-	errBrainDropped     = errors.New("dropped before it ran")
-	errBrainRetired     = errors.New("brain was removed")
-	errQueueFull        = errors.New("brain queue is full")
-	errNoResult         = errors.New("no result from the agent (empty output)")
-	// errRunTimedOut is a run that took longer than run_timeout_minutes.
-	errRunTimedOut = errors.New("the run took too long and was stopped")
+	errBrainDropped = errors.New("dropped before it ran")
+	errBrainRetired = errors.New("brain was removed")
+	errQueueFull    = errors.New("brain queue is full")
+
 	// errSandboxUnavailable is what the chat sees. The cause goes to the log
 	// only, because it can name private paths.
 	errSandboxUnavailable = errors.New("the sandbox could not be set up, so this message was not run (details in the bridge log)")
@@ -682,19 +618,15 @@ func (br *Brain) stopObservation() {
 	}
 }
 
-// errRunPanicked is what a run that panicked inside the bridge ends with;
-// the panic and its stack go to the log only.
-var errRunPanicked = errors.New("the bridge failed while running this message (details in the bridge log)")
-
 // invokeGuarded is invoke with a panic in it turned into the run's error,
 // so that the run is finished and recorded like any failed one and the
 // worker goes on with the next message. Unrecovered, the panic would end
 // the whole bridge and leave every brain's running claude behind.
-func (br *Brain) invokeGuarded(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) (res RunResult) {
+func (br *Brain) invokeGuarded(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) (res claudecli.Result) {
 	defer func() {
 		if p := recover(); p != nil {
 			log.Printf("brain %s: the run for %s panicked: %v\n%s", br.id, m.JID, p, debug.Stack())
-			res = RunResult{Err: errRunPanicked}
+			res = claudecli.Result{Err: claudecli.ErrPanicked}
 		}
 	}()
 	return br.invoke(run, ctx, s, m)
@@ -703,7 +635,7 @@ func (br *Brain) invokeGuarded(run *brainRun, ctx context.Context, s *brainSetti
 // deliverGuarded hands a finished run to the bridge and then to whoever
 // waits for the message, each with a panic logged rather than ending the
 // worker, and the one waiting told even when the delivery panicked.
-func (br *Brain) deliverGuarded(m Inbound, res RunResult) {
+func (br *Brain) deliverGuarded(m Inbound, res claudecli.Result) {
 	guard := func(what string, fn func()) {
 		defer func() {
 			if p := recover(); p != nil {
@@ -727,15 +659,6 @@ func runContext(timeout time.Duration) (context.Context, context.CancelFunc) {
 		return context.WithTimeout(context.Background(), timeout)
 	}
 	return context.WithCancel(context.Background())
-}
-
-// runTimedOut is the error of a run stopped at run_timeout_minutes.
-func runTimedOut(timeout time.Duration) error {
-	after := timeout.String()
-	if timeout%time.Minute == 0 {
-		after = fmt.Sprintf("%d minutes", int(timeout/time.Minute))
-	}
-	return fmt.Errorf("%w after %s (run_timeout_minutes)", errRunTimedOut, after)
 }
 
 // dropped tells the messages in ms that will not run, outside br.mu.
@@ -779,10 +702,10 @@ func (br *Brain) waitIdle(ctx context.Context, max time.Duration) bool {
 	}
 }
 
-func (br *Brain) recordLast(m Inbound, res RunResult) {
+func (br *Brain) recordLast(m Inbound, res claudecli.Result) {
 	info := &RunInfo{Chat: m.JID, Finished: time.Now(), Seconds: res.Duration.Seconds(), Outcome: outcomeOK}
 	switch {
-	case errors.Is(res.Err, errBrainInterrupted):
+	case errors.Is(res.Err, claudecli.ErrInterrupted):
 		info.Outcome = outcomeInterrupted
 	case res.Err != nil:
 		info.Outcome, info.Error = outcomeError, res.Err.Error()
@@ -1154,31 +1077,6 @@ func (br *Brain) streamLogPath() string {
 	return filepath.Join(br.workDir, streamLogName)
 }
 
-// claudeArgs builds the CLI arguments for one run. mcpConfig is what
-// mcpConfigOf returned for the brain's folder, or "" for none; settings is
-// the brain's excludeInstructionsAbove. They end in -p: the prompt goes on
-// stdin (see startClaude).
-func claudeArgs(s *brainSettings, mcpConfig, settings string) []string {
-	var args []string
-	if !s.inheritUser && mcpConfig != "" {
-		// --mcp-config takes several files: an option must follow.
-		args = append(args, "--mcp-config", mcpConfig)
-	}
-	if s.dangerously {
-		args = append(args, "--dangerously-skip-permissions")
-	}
-	if s.model != "" {
-		args = append(args, "--model", s.model)
-	}
-	if s.effort != "" {
-		args = append(args, "--effort", s.effort)
-	}
-	if len(s.disallowedTools) > 0 {
-		args = append(args, "--disallowed-tools", strings.Join(s.disallowedTools, ","))
-	}
-	return claudeArgList(!s.inheritUser, settings, args...)
-}
-
 // withArgsBeforePrint puts extra before the trailing -p that claudeArgs
 // ends with, which ends an option list such as --mcp-config's.
 func withArgsBeforePrint(args, extra []string) []string {
@@ -1236,7 +1134,7 @@ func instructionsAbove(dir, home string) []string {
 	}
 	inDotClaude := []string{filepath.Join(".claude", "CLAUDE.md"), filepath.Join(".claude", "rules", "**")}
 	for _, d := range folders {
-		patterns(d, instructionFiles...)
+		patterns(d, sandbox.InstructionFiles()...)
 		patterns(d, inDotClaude...)
 	}
 	if filepath.IsAbs(home) {
@@ -1388,7 +1286,7 @@ func jsonObject(data []byte) (map[string]json.RawMessage, error) {
 }
 
 // invoke runs the selected CLI once for m.
-func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) RunResult {
+func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) claudecli.Result {
 	prompt := br.buildPrompt(s, m)
 
 	mcpConfig, settings := "", ""
@@ -1398,17 +1296,17 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	}
 	args := claudeArgs(s, mcpConfig, settings)
 	if s.provider == "codex" {
-		if err := validateCodexTools(s.disallowedTools); err != nil {
-			return RunResult{Err: err}
+		if err := claudecli.ValidateCodexTools(s.disallowedTools); err != nil {
+			return claudecli.Result{Err: err}
 		}
 		args = codexArgs(s, br.workDir, br.sandbox != nil && br.sandbox.Enabled())
-		prompt = strings.ReplaceAll(prompt, askUserQuestionNote, "If you need clarification, ask in your final reply and end the turn. The answer arrives as a new message.")
+		prompt = strings.ReplaceAll(prompt, prompttext.AskUserQuestionNote, "If you need clarification, ask in your final reply and end the turn. The answer arrives as a new message.")
 	}
 	var providerEnv []string
 	if s.provider == "codex" && br.hooks != nil && br.hooks.CodexSetup != nil {
 		extra, env, instructions, err := br.hooks.CodexSetup(br.id)
 		if err != nil {
-			return RunResult{Err: err}
+			return claudecli.Result{Err: err}
 		}
 		args = withArgsBeforePrint(args, extra)
 		providerEnv = env
@@ -1468,7 +1366,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		}
 		if err != nil {
 			log.Printf("brain %s: sandbox unavailable, refusing to run: %v", br.id, err)
-			return RunResult{Err: errSandboxUnavailable}
+			return claudecli.Result{Err: errSandboxUnavailable}
 		}
 		extraEnv = append(extraEnv, stateEnv...)
 		if s.provider == "codex" {
@@ -1490,165 +1388,39 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	// Only once the sandbox is settled: a refused run starts no process.
 	br.ensureViewer(s)
 
-	// The run's processes end with this context: when ctx does, at a stop
-	// or run_timeout, and when the grace after the result runs out.
-	// cmd.Cancel then kills the run's process group, and WaitDelay closes
-	// the pipes something outside the group may still hold.
-	cmdCtx, stopCmd := context.WithCancel(ctx)
-	defer stopCmd()
-
-	// The output goes through a pipe of the bridge's own, which the parser
-	// reads: os/exec copies it there, and Wait waits for the copy, up to
-	// WaitDelay after the CLI exited. So Wait, which runs alongside the
-	// parser, ends the run even when a process the bridge cannot stop,
-	// one that left the run's process group, holds the CLI's output open,
-	// and the parser gets all the CLI wrote before that.
-	stdout, stdoutW := io.Pipe()
-	proc, err := run.startProcess(cmdCtx, claudeRun{binary: binary, args: finalArgs, dir: br.workDir, env: env, prompt: prompt, stdout: stdoutW})
-	if err != nil {
-		stdout.Close()
-		stdoutW.Close()
-		if ctx.Err() != nil {
-			// Stopped before the CLI started, which Start then refuses: a
-			// stop like any other, no failure.
-			return RunResult{Err: errBrainInterrupted}
-		}
-		return RunResult{Err: fmt.Errorf("starting %s: %w", agentName(s.provider), err)}
-	}
-	pid := proc.pid()
-	br.setRunPID(run, pid)
-	// Removed once Wait has returned and the run is over; a bridge that
-	// crashes before leaves it to the next start (reapOrphanedRuns).
-	if rec := recordRun(s.dataDir, br.id, pid); rec != "" {
-		defer os.Remove(rec)
-	}
-
-	var waitErr error
-	waited := make(chan struct{})
-	go func() {
-		defer close(waited)
-		waitErr = proc.wait()
-		// The PID is free for another process now.
-		br.setRunPID(run, 0)
-		// Everything the CLI wrote has reached the parser: this ends its
-		// output.
-		stdoutW.Close()
-	}()
-	// However invoke ends, a panic in a hook included, the run's processes
-	// are stopped and reaped here, before its record goes: left running,
-	// the CLI would stay a zombie for as long as the bridge runs.
-	defer func() {
-		stopCmd()
-		<-waited
-	}()
-
-	// Parse the stream in a goroutine so we can race it against the 10s timer.
-	parseDone := make(chan RunResult, 1)
-	resultSeen := make(chan struct{})
-	var resultOnce sync.Once
-	var recordedResult RunResult
-	go func() {
-		// Once the parser is done, the copy into its pipe ends too: a parser
-		// that failed would leave it blocked otherwise.
-		defer stdout.Close()
-		// A panic while the output is read, in the hook that sends a
-		// question to the chat say, ends the run as one in invoke does
-		// (invokeGuarded). In a goroutine of its own, unrecovered, it would
-		// end the whole bridge.
-		defer func() {
-			if p := recover(); p != nil {
-				log.Printf("brain %s: reading the output of the run for %s panicked: %v\n%s", br.id, m.JID, p, debug.Stack())
-				parseDone <- RunResult{Err: errRunPanicked}
+	return claudecli.Run(ctx, claudecli.Invocation{
+		Run:      claudecli.Spawn{WaitDelay: runWaitDelay, Binary: binary, Args: finalArgs, Dir: br.workDir, Env: env, Prompt: prompt},
+		Provider: s.provider, ExitGrace: postResultGrace, NoticeAfter: workingNoticeAfter,
+		DeadlineError: claudecli.TimedOut(s.runTimeout),
+	}, claudecli.Callbacks{
+		Start: run.startProcess,
+		Started: func(pid int) func() {
+			br.setRunPID(run, pid)
+			if rec := recordRun(s.dataDir, br.id, pid); rec != "" {
+				return func() { _ = os.Remove(rec) }
 			}
-		}()
-		parseDone <- br.readAgentStream(m, stdout, runHeading(m, s, pid), func(res RunResult) {
-			resultOnce.Do(func() {
-				recordedResult = res
-				close(resultSeen)
-			})
-		}, s.provider)
-	}()
-
-	notice := time.NewTimer(workingNoticeAfter)
-	defer notice.Stop()
-
-	invocationStart := time.Now()
-	var res RunResult
-	parsed := false
-	var grace <-chan time.Time
-	resultIn, stopped := resultSeen, ctx.Done() // each nil once it came
-	for running := true; running; {
-		select {
-		case <-waited:
-			running = false
-		case res = <-parseDone:
-			// The parser reads to the end of the output, which comes after
-			// Wait, unless it failed: then nothing reads what the CLI
-			// writes any more, and the run is over.
-			parsed, parseDone = true, nil
-			stopCmd()
-		case <-notice.C:
-			// Untagged (silent) messages never produce a visible reply, so they
-			// must not produce a visible "working" notice either.
+			return nil
+		},
+		Reaped: func() { br.setRunPID(run, 0) },
+		OpenStream: func(pid int, result func(claudecli.Result)) (claudecli.StreamSink, func()) {
+			return br.openRunStream(m, runHeading(m, s, pid), result)
+		},
+		ReadPanic: func(p any, stack []byte) {
+			log.Printf("brain %s: reading the output of the run for %s panicked: %v\n%s", br.id, m.JID, p, stack)
+		},
+		Notice: func() {
 			if !m.Silent && br.hooks != nil && br.hooks.Notice != nil {
 				br.hooks.Notice(m.JID, workingNotice)
 			}
-		case <-resultIn:
-			// The answer is in, and the CLI exits right after it, unless
-			// it, or something it started, keeps going with its output
-			// open, a command left running in the background, say. That
-			// gets postResultGrace, or the brain would stay busy as long
-			// as it ran.
-			resultIn, grace = nil, time.After(postResultGrace)
-			notice.Stop()
-		case <-grace:
-			grace = nil
-			log.Printf("brain %s: %s's output was still open %v after its result; stopping what is left of the run", br.id, agentName(s.provider), postResultGrace)
-			stopCmd()
-		case <-stopped:
-			// Stopped, or at run_timeout: cmdCtx ends with ctx, which
-			// stops the process group. Nothing is working on it any more.
-			stopped = nil
-			notice.Stop()
-		}
-	}
-	if !parsed {
-		res = <-parseDone
-	}
-
-	if elapsed := time.Since(invocationStart); elapsed > 5*time.Minute && res.Text != "" {
-		log.Printf("brain %s: response took %v for %s (slow response)", br.id, elapsed, m.JID)
-	}
-
-	stderr := proc.stderrTail()
-	br.logStderr(m, pid, stderr)
-	// Whether the result event came: readStream has returned, so it would
-	// have closed resultSeen by now.
-	gotResult := false
-	select {
-	case <-resultSeen:
-		gotResult = true
-	default:
-	}
-	// A result is the CLI's final answer, including an error result. A
-	// stop while its inherited output drains must not replace it with an
-	// interruption or timeout, even when Wait had to close those pipes.
-	if gotResult && ctx.Err() != nil {
-		return recordedResult
-	}
-	switch {
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return RunResult{Err: runTimedOut(s.runTimeout)}
-	case ctx.Err() != nil:
-		return RunResult{Err: errBrainInterrupted}
-	case waitErr != nil:
-		// Without a result, what the CLI wrote to stderr is the only
-		// account of what went wrong.
-		if errors.Is(res.Err, errNoResult) {
-			return RunResult{Err: fmt.Errorf("%s exited: %w — stderr: %s", agentName(s.provider), waitErr, textx.Tail(stderr, 500))}
-		}
-	}
-	return res
+		},
+		GraceExpired: func() {
+			log.Printf("brain %s: %s's output was still open %v after its result; stopping what is left of the run", br.id, claudecli.AgentName(s.provider), postResultGrace)
+		},
+		SlowResponse: func(elapsed time.Duration) {
+			log.Printf("brain %s: response took %v for %s (slow response)", br.id, elapsed, m.JID)
+		},
+		Stderr: func(pid int, text string) { br.logStderr(m, pid, text) },
+	})
 }
 
 // postResultGrace is how long a run may go on after its result, a
@@ -1676,12 +1448,6 @@ func (br *Brain) logStderr(m Inbound, pid int, stderr string) {
 
 // stderrLogBytes is how much of a run's stderr goes to its activity log.
 const stderrLogBytes = 4000
-
-// The most of a chat's recent messages a run's prompt shows.
-const (
-	dmHistoryWindow    = 10
-	groupHistoryWindow = 20
-)
 
 // promptHistoryBudget is how far back from the end of the history a run's
 // prompt looks for its chat's messages: far more than a window of them
@@ -1776,18 +1542,18 @@ func (m Inbound) loggedIn(entries []history.Entry) int {
 // swapped for a symlink to another brain's would put that brain's contacts
 // in this one's prompt.
 func (br *Brain) identities() map[string]string {
-	idMap, err := br.readFile(identityMapFile)
+	idMap, err := br.readFile(prompttext.IdentityMapPath)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		log.Printf("brain %s: could not read identity map %s: %v", br.id, identityMapFile, err)
+		log.Printf("brain %s: could not read identity map %s: %v", br.id, prompttext.IdentityMapPath, err)
 	}
-	return parseIdentityMap(idMap)
+	return prompttext.ParseIdentityMap(idMap)
 }
 
 // buildPrompt gathers what m's run is told, through the brain's folder: its
 // prompt file, the chat's recent history and the identity map. renderPrompt
 // puts it into words.
 func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
-	in := promptInput{Now: time.Now(), BrainID: br.id, Message: m, ObserveOnly: m.Silent}
+	in := prompttext.Input{Now: time.Now(), BrainID: br.id, Message: m.Inbound, BuildChat: brainOfBuildJID(m.JID) != "", ObserveOnly: m.Silent}
 	if name := s.promptFile; name != "" {
 		if data, err := br.readFile(name); err != nil {
 			log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)
@@ -1795,13 +1561,10 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 			in.Instructions = strings.TrimSpace(string(data))
 		}
 	}
-	limit := dmHistoryWindow
-	if m.IsGroup() {
-		limit = groupHistoryWindow
-	}
+	limit := prompttext.HistoryLimit(m.IsGroup())
 	in.History, in.Since = br.historyBefore(m, limit)
 	in.Names = br.identities()
-	return renderPrompt(in)
+	return prompttext.Build(in)
 }
 
 // runHeading starts a run's part of the activity log: what it answers and
@@ -1859,7 +1622,7 @@ type runSink struct {
 	br       *Brain
 	m        Inbound
 	log      *os.File // nil when it could not be opened
-	onResult func(RunResult)
+	onResult func(claudecli.Result)
 }
 
 func (s *runSink) Log(line string) {
@@ -1875,7 +1638,7 @@ func (s *runSink) Question(text string) bool {
 	return !s.m.Silent && h != nil && h.Question != nil && h.Question(s.br, s.m.JID, questionPrefix+text)
 }
 
-func (s *runSink) Result(res RunResult) {
+func (s *runSink) Result(res claudecli.Result) {
 	if s.onResult != nil {
 		s.onResult(res)
 	}
@@ -1884,23 +1647,39 @@ func (s *runSink) Result(res RunResult) {
 // readStream is parseStream for m's run, with heading as the run's first
 // line in the activity log, calling onResult, when set, as soon as the
 // result is in, while the stream may still go on.
-func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResult func(RunResult)) RunResult {
+func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResult func(claudecli.Result)) claudecli.Result {
 	return br.readAgentStream(m, reader, heading, onResult, "claude")
 }
 
-func (br *Brain) readAgentStream(m Inbound, reader io.Reader, heading string, onResult func(RunResult), provider string) RunResult {
+func (br *Brain) readAgentStream(m Inbound, reader io.Reader, heading string, onResult func(claudecli.Result), provider string) claudecli.Result {
+	sink, closeStream := br.openRunStream(m, heading, onResult)
+	defer closeStream()
+	return claudecli.ParseProvider(reader, sink, provider)
+}
+
+func (br *Brain) openRunStream(m Inbound, heading string, onResult func(claudecli.Result)) (claudecli.StreamSink, func()) {
 	br.rotateStreamLog()
 	// Through the folder, like the history: a brain can swap the log for a
 	// symlink to a file its sandbox denies it writing.
 	streamLog, err := fsx.OpenInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("brain %s: could not open stream log: %v", br.id, err)
-	} else {
-		defer streamLog.Close()
 	}
+	closeStream := func() {
+		if streamLog != nil {
+			_ = streamLog.Close()
+		}
+	}
+	ready := false
+	defer func() {
+		if !ready {
+			closeStream()
+		}
+	}()
 	sink := &runSink{br: br, m: m, log: streamLog, onResult: onResult}
 	sink.Log(heading)
-	return parseAgentStream(reader, sink, provider)
+	ready = true
+	return sink, closeStream
 }
 
 func (br *Brain) finishRun(run *brainRun) {
@@ -1923,13 +1702,13 @@ func (br *Brain) setRunPID(run *brainRun, pid int) {
 
 // startProcess publishes a started process before a force-stop can return.
 // Ordinary stops still use only context cancellation through os/exec.
-func (run *brainRun) startProcess(ctx context.Context, spec claudeRun) (*claudeProcess, error) {
+func (run *brainRun) startProcess(ctx context.Context, spec claudecli.Spawn) (*claudecli.Process, error) {
 	run.processMu.Lock()
 	defer run.processMu.Unlock()
 	if run.forceStopped {
 		return nil, context.Canceled
 	}
-	proc, err := startClaude(ctx, spec)
+	proc, err := claudecli.Start(ctx, spec)
 	if err == nil {
 		run.process = proc
 	}
@@ -1945,7 +1724,7 @@ func (run *brainRun) awaitProcessStop() {
 	proc := run.process
 	run.processMu.Unlock()
 	if proc != nil {
-		<-proc.stopped
+		<-proc.Stopped()
 	}
 }
 

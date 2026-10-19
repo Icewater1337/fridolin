@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // ingestCalls records what the site handed to brains.
@@ -220,7 +221,7 @@ export default (ctx) => express.Router().get('/probe', async (_req, res) => {
 	if _, err := m.UpdateSettings(SiteSettingsUpdate{Enabled: &on}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 60*time.Second, "the site to answer", func() bool { return siteHealthy(listen) })
+	testutil.WaitFor(t, 60*time.Second, "the site to answer", func() bool { return siteHealthy(listen) })
 
 	body, _ := json.Marshal(map[string]string{"username": "sam", "password": "long enough pw"})
 	resp, err := http.Post("http://"+listen+"/auth/login", "application/json", bytes.NewReader(body))
@@ -298,7 +299,7 @@ func TestSiteSpoolSearch(t *testing.T) {
 	ctx := context.Background()
 	m.processSpool(ctx)
 	m.processSpool(ctx) // a second look starts nothing twice
-	waitFor(t, 5*time.Second, "the searches to answer", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "the searches to answer", func() bool {
 		return fsx.Exists(filepath.Join(ok, "result.json")) && fsx.Exists(filepath.Join(other, "result.json")) && fsx.Exists(filepath.Join(planted, "result.json"))
 	})
 	if a := readSpoolAnswer(t, ok); a["ok"] != true {
@@ -317,7 +318,7 @@ func TestSiteSpoolSearch(t *testing.T) {
 		t.Errorf("the symlink's target was written: %q", data)
 	}
 	os.WriteFile(filepath.Join(slow, "cancel"), nil, 0o600)
-	waitFor(t, 5*time.Second, "the cancelled search to answer", func() bool { return fsx.Exists(filepath.Join(slow, "result.json")) })
+	testutil.WaitFor(t, 5*time.Second, "the cancelled search to answer", func() bool { return fsx.Exists(filepath.Join(slow, "result.json")) })
 	if a := readSpoolAnswer(t, slow); a["ok"] != false || a["error"] != "stopped" {
 		t.Errorf("cancelled: %v", a)
 	}

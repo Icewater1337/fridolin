@@ -1,5 +1,25 @@
 package main
 
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/sandbox"
+	"github.com/Icewater1337/fridolin/internal/textx"
+)
+
 // What the site hands to the bridge (docs/SITE.md, "Handing files to a
 // brain" and "Searching a brain's folder").
 //
@@ -20,24 +40,6 @@ package main
 // the site's to write. So the bridge reaches it only through an os.Root,
 // which refuses a symlink that leads out of the folder, trusts no name, and
 // creates what it writes with O_EXCL.
-
-import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"log"
-	"os"
-	"path"
-	"path/filepath"
-	"regexp"
-	"slices"
-	"strings"
-	"time"
-
-	"github.com/Icewater1337/fridolin/internal/textx"
-)
 
 // spoolRequest is a module's request.json (ctx.ingest).
 type spoolRequest struct {
@@ -168,17 +170,17 @@ func spoolAnswer(root *os.Root, entry string, err error, extra map[string]any) {
 }
 
 // liveCaps is the live commit's capabilities of a module, or false.
-func (m *SiteManager) liveCaps(module string) (siteModuleCaps, error) {
+func (m *SiteManager) liveCaps(module string) (sandbox.SiteModule, error) {
 	s := m.Settings()
 	if s.Approved == "" {
-		return siteModuleCaps{}, errors.New("no commit of the site is live")
+		return sandbox.SiteModule{}, errors.New("no commit of the site is live")
 	}
 	for _, mod := range readModuleCaps(m.modulesDirOf(s.Approved), homeDir()) {
 		if mod.ID == module {
 			return mod, nil
 		}
 	}
-	return siteModuleCaps{}, fmt.Errorf("module %q is not live", module)
+	return sandbox.SiteModule{}, fmt.Errorf("module %q is not live", module)
 }
 
 // ── ctx.ingest ────────────────────────────────────────────────────────────
@@ -406,7 +408,7 @@ func (b *Bridge) runBrainSearch(ctx context.Context, brainID, prompt string, out
 	cfg := runtimeConfig(b.cfgs)
 	// Only the brain folder's own setup, as for a brain's runs, and tools
 	// that only read.
-	args := claudeArgList(true, excludeInstructionsAbove(br.Dir()), "--tools", "Read,Grep,Glob")
+	args := claudecli.ArgList(true, excludeInstructionsAbove(br.Dir()), "--tools", "Read,Grep,Glob")
 	bin := cfg.ClaudePath
 	env := childEnv(claudeChild, cfg.ChildEnvPassthrough)
 	if sp := b.brainMgr.profiler; sp != nil && sp.Enabled() {
@@ -423,9 +425,9 @@ func (b *Bridge) runBrainSearch(ctx context.Context, brainID, prompt string, out
 		bin, args = sbBin, sbArgs
 		env = append(append(env, state...), "DISABLE_AUTOUPDATER=1")
 	}
-	proc, err := startClaude(ctx, claudeRun{binary: bin, args: args, dir: br.Dir(), env: env, prompt: prompt, stdout: out})
+	proc, err := claudecli.Start(ctx, claudecli.Spawn{WaitDelay: runWaitDelay, Binary: bin, Args: args, Dir: br.Dir(), Env: env, Prompt: prompt, Stdout: out})
 	if err == nil {
-		err = proc.wait()
+		err = proc.Wait()
 	}
 	switch {
 	case err == nil:
@@ -435,5 +437,5 @@ func (b *Bridge) runBrainSearch(ctx context.Context, brainID, prompt string, out
 	case proc == nil:
 		return fmt.Errorf("claude: %w", err)
 	}
-	return fmt.Errorf("claude: %w: %s", err, textx.Tail(proc.stderrTail(), 400))
+	return fmt.Errorf("claude: %w: %s", err, textx.Tail(proc.StderrTail(), 400))
 }

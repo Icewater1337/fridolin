@@ -11,6 +11,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/config"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // useLayout makes the bridge believe its own files are laid out as l.
@@ -104,7 +105,7 @@ func TestBrainRunsKnowWhereTheToolsAre(t *testing.T) {
 			if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 20*time.Second, "the run", func() bool { return d.count() == 1 })
+			testutil.WaitFor(t, 20*time.Second, "the run", func() bool { return d.count() == 1 })
 			res := d.all()[0].res
 			if res.Err != nil {
 				t.Fatalf("run failed: %v", res.Err)

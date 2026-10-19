@@ -21,6 +21,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // captureStdout returns what fn prints to standard output.
@@ -183,7 +184,7 @@ func TestConfigPath(t *testing.T) {
 				}
 				return filepath.Join(other, strings.TrimPrefix(p, "other/"))
 			}
-			clearEnv(t, "FRIDOLIN_CONFIG", "CONFIG_FILE")
+			testutil.ClearEnv(t, "FRIDOLIN_CONFIG", "CONFIG_FILE")
 			if tc.fridolinCfg != "" {
 				t.Setenv("FRIDOLIN_CONFIG", abs(tc.fridolinCfg))
 			}
@@ -232,7 +233,7 @@ func TestRunLogsConfigWarningsToTheDashboard(t *testing.T) {
 	// before, the CONFIG_FILE warning would reach stderr but not the
 	// dashboard's log.
 	t.Setenv("HOME", t.TempDir())
-	clearEnv(t, "FRIDOLIN_CONFIG")
+	testutil.ClearEnv(t, "FRIDOLIN_CONFIG")
 	old := filepath.Join(t.TempDir(), "old.json")
 	t.Setenv("CONFIG_FILE", old)
 	prev := log.Writer()
@@ -268,7 +269,7 @@ func TestRunLogNamesTheConfigFile(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			clearEnv(t, "FRIDOLIN_CONFIG", "CONFIG_FILE")
+			testutil.ClearEnv(t, "FRIDOLIN_CONFIG", "CONFIG_FILE")
 			if tc.env != "" {
 				t.Setenv("FRIDOLIN_CONFIG", tc.env)
 			}
@@ -431,7 +432,7 @@ func TestFuzzCorpusIsThePackagesTestdata(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(corpus, "seed"), []byte("go test fuzz v1\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if err := linkTestdata(pkg, wd); err != nil {
+		if err := testutil.LinkTestdata(pkg, wd); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Stat(filepath.Join(wd, "testdata", "fuzz", "FuzzX", "seed")); err != nil {
@@ -452,7 +453,7 @@ func TestFuzzCorpusIsThePackagesTestdata(t *testing.T) {
 
 	t.Run("a package without testdata", func(t *testing.T) {
 		pkg, wd := t.TempDir(), t.TempDir()
-		if err := linkTestdata(pkg, wd); err != nil {
+		if err := testutil.LinkTestdata(pkg, wd); err != nil {
 			t.Fatalf("linking a missing testdata: %v", err)
 		}
 		if _, err := os.ReadDir(filepath.Join(wd, "testdata", "fuzz", "FuzzX")); !errors.Is(err, fs.ErrNotExist) {
@@ -484,7 +485,7 @@ func TestShellBridgeVariablesDoNotReachTests(t *testing.T) {
 	// the way a developer's shell might export them for a real bridge, and
 	// checks from inside that TestMain cleared them before any test ran.
 	if os.Getenv("FRIDOLIN_TEST_CHECK_BRIDGE_VARIABLES_CLEARED") == "1" {
-		for _, k := range bridgeVariables() {
+		for _, k := range testutil.BridgeVariables() {
 			if _, ok := os.LookupEnv(k); ok {
 				t.Errorf("%s from the shell reached the tests", k)
 			}
@@ -494,7 +495,7 @@ func TestShellBridgeVariablesDoNotReachTests(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestShellBridgeVariablesDoNotReachTests$", "-test.count=1", "-test.v")
 	cmd.Env = append(os.Environ(), "FRIDOLIN_TEST_CHECK_BRIDGE_VARIABLES_CLEARED=1")
 	notTheTests := filepath.Join(t.TempDir(), "not-the-tests")
-	for _, k := range bridgeVariables() {
+	for _, k := range testutil.BridgeVariables() {
 		cmd.Env = append(cmd.Env, k+"="+notTheTests)
 	}
 	out, err := cmd.CombinedOutput()
@@ -648,7 +649,7 @@ func TestPaths(t *testing.T) {
 				}
 				return filepath.Join(other, strings.TrimPrefix(p, "other/"))
 			}
-			clearEnv(t, "FRIDOLIN_CONFIG", "CONFIG_FILE")
+			testutil.ClearEnv(t, "FRIDOLIN_CONFIG", "CONFIG_FILE")
 			if tc.env != "" {
 				t.Setenv("FRIDOLIN_CONFIG", abs(tc.env))
 			}
@@ -730,7 +731,7 @@ func TestPathsAgreesWithTheLoadedConfig(t *testing.T) {
 
 func TestPathsRefuses(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	clearEnv(t, "FRIDOLIN_CONFIG", "CONFIG_FILE")
+	testutil.ClearEnv(t, "FRIDOLIN_CONFIG", "CONFIG_FILE")
 	cases := []struct {
 		name string
 		args []string
@@ -765,7 +766,7 @@ func TestCheckRedact(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", home)
-	clearEnv(t, "FRIDOLIN_CONFIG", "CONFIG_FILE")
+	testutil.ClearEnv(t, "FRIDOLIN_CONFIG", "CONFIG_FILE")
 	// otherWritten has a note after the number, which makes it no number
 	// to the bridge, and oddGroup has no @g.us, so loading the config
 	// logs both as they are written.

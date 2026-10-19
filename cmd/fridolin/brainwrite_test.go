@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/Icewater1337/fridolin/internal/registry"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -14,11 +13,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/registry"
+
 	"github.com/Icewater1337/fridolin/internal/config"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // A short write must not publish part of a new manifest: a transaction
@@ -162,7 +164,7 @@ func TestAddWritesBrainJSONWithTheRegistration(t *testing.T) {
 		added <- tb.do("POST", "/api/brains", map[string]any{"path": "~/b", "manifest": manifest.Manifest{ID: "b", Name: "B"}, "create_dir": true})
 	}()
 	dir := filepath.Join(tb.home, "b")
-	waitFor(t, 5*time.Second, "the add's scaffold", func() bool { return fsx.Exists(filepath.Join(dir, "skills", "README.md")) })
+	testutil.WaitFor(t, 5*time.Second, "the add's scaffold", func() bool { return fsx.Exists(filepath.Join(dir, "skills", "README.md")) })
 	time.Sleep(100 * time.Millisecond) // what the scaffold would write next
 	if _, err := os.Lstat(filepath.Join(dir, manifest.File)); !os.IsNotExist(err) {
 		t.Errorf("brain.json is there before the update that registers the brain: %v", err)

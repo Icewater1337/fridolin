@@ -1,17 +1,16 @@
-package main
+package claudecli
 
 import (
 	"cmp"
 	"encoding/json"
 	"fmt"
-	"path/filepath"
 	"slices"
 	"strconv"
 )
 
-const defaultCodexModel = "gpt-6.1-sol"
+const DefaultCodexModel = "gpt-6.1-sol"
 
-func agentName(provider string) string {
+func AgentName(provider string) string {
 	if provider == "codex" {
 		return "codex"
 	}
@@ -20,7 +19,7 @@ func agentName(provider string) string {
 
 // Codex's combined web tool covers both Claude web tools. Turning it off
 // honors either restriction. Other Claude tool names have no safe mapping.
-func validateCodexTools(blocked []string) error {
+func ValidateCodexTools(blocked []string) error {
 	for _, tool := range blocked {
 		if tool != "WebFetch" && tool != "WebSearch" {
 			return fmt.Errorf("the Codex CLI cannot enforce Claude's blocked tools entry %q; use Claude mode while it is configured", tool)
@@ -33,10 +32,10 @@ func validateCodexTools(blocked []string) error {
 // configuration and ancestor instructions must not bring personal tools,
 // hooks or conversations into a brain. The brain prompt is supplied by
 // Fridolin, and its files remain available in the working directory.
-func codexArgs(s *brainSettings, dir string, externalSandbox bool) []string {
+func CodexArgs(s Options, dir string, externalSandbox bool) []string {
 	args := []string{"exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config", "--ignore-rules",
-		"--color", "never", "--model", cmp.Or(s.model, defaultCodexModel),
-		"-c", "model_reasoning_effort=" + strconv.Quote(cmp.Or(s.effort, "high")),
+		"--color", "never", "--model", cmp.Or(s.Model, DefaultCodexModel),
+		"-c", "model_reasoning_effort=" + strconv.Quote(cmp.Or(s.Effort, "high")),
 		"-c", "approval_policy=\"never\"",
 		"-c", "project_doc_max_bytes=0",
 		"-c", "projects." + strconv.Quote(dir) + ".trust_level=\"untrusted\"",
@@ -44,18 +43,18 @@ func codexArgs(s *brainSettings, dir string, externalSandbox bool) []string {
 		"-c", "shell_environment_policy.inherit=\"all\"",
 		"-c", "shell_environment_policy.ignore_default_excludes=true",
 	}
-	if slices.Contains(s.disallowedTools, "WebFetch") || slices.Contains(s.disallowedTools, "WebSearch") {
+	if slices.Contains(s.DisallowedTools, "WebFetch") || slices.Contains(s.DisallowedTools, "WebSearch") {
 		args = append(args, "-c", "web_search=\"disabled\"")
 	}
-	if s.dangerously && externalSandbox {
+	if s.Dangerously && externalSandbox {
 		// The outer Fridolin sandbox constrains the CLI itself and every
 		// child. macOS cannot nest a second sandbox-exec inside it.
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
-	} else if s.dangerously {
+	} else if s.Dangerously {
 		args = append(args, "--sandbox", "workspace-write", "-c", "sandbox_workspace_write.network_access=true",
-			"--add-dir", brainStateOf(s.dataDir, s.manifest.ID).dir)
-		if s.mediaDir != "" {
-			args = append(args, "--add-dir", mediaInboxAt(s.mediaDir).Path(s.manifest.ID))
+			"--add-dir", s.StateDir)
+		if s.MediaInbox != "" {
+			args = append(args, "--add-dir", s.MediaInbox)
 		}
 	} else {
 		args = append(args, "--sandbox", "read-only")
@@ -106,10 +105,4 @@ func (s *codexStream) event(line []byte) streamEvent {
 		return streamEvent{Type: "result", IsError: true, Error: cmp.Or(e.Error.Message, e.Message, s.err, "Codex run failed")}
 	}
 	return streamEvent{}
-}
-
-// codexLoginHint points at this brain's isolated login, never the user's
-// personal Codex home. No credential contents are read by the bridge.
-func codexLoginHint(dataDir, id string) string {
-	return "CODEX_HOME=" + shellQuote(filepath.Join(dataDir, brainStatesDirName, id, "codex")) + " codex -c 'cli_auth_credentials_store=\"file\"' login"
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/testutil"
 	"github.com/Icewater1337/fridolin/internal/version"
 )
 
@@ -15,7 +16,7 @@ func TestRunLogsItsVersionFirst(t *testing.T) {
 	// when the bridge then refuses to start: the CONFIG_FILE warning that
 	// configPath logs comes after it, in the console and on the dashboard.
 	t.Setenv("HOME", t.TempDir())
-	clearEnv(t, "FRIDOLIN_CONFIG")
+	testutil.ClearEnv(t, "FRIDOLIN_CONFIG")
 	t.Setenv("CONFIG_FILE", filepath.Join(t.TempDir(), "old.json"))
 	prev := log.Writer()
 	t.Cleanup(func() { log.SetOutput(prev) })

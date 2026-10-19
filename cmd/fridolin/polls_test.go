@@ -24,6 +24,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/store"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 func TestExtractPolls(t *testing.T) {
@@ -492,7 +493,7 @@ func TestSentPollRemembersItsBrain(t *testing.T) {
 		t.Fatal(err)
 	}
 	var polls []store.PollResult
-	waitFor(t, 5*time.Second, "the poll", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "the poll", func() bool {
 		polls, _ = tb.store.RecentPolls(context.Background(), "", 10, func(string) bool { return true })
 		return len(polls) == 1
 	})

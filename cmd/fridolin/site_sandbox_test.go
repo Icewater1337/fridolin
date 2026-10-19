@@ -18,10 +18,10 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
-
-	"github.com/Icewater1337/fridolin/internal/textx"
-
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/sandbox"
+	"github.com/Icewater1337/fridolin/internal/testutil"
+	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 // requireSiteRuntime skips a test that runs the live site without what it
@@ -37,8 +37,8 @@ func requireSiteRuntime(t *testing.T) {
 		t.Skip("run npm install in site/ first")
 	}
 	if runtime.GOOS == "darwin" {
-		if out, err := exec.Command(sandboxExecPath, "-p", "(version 1)(allow default)", "/usr/bin/true").CombinedOutput(); err != nil {
-			t.Skipf("%s cannot apply a profile here: %v: %s", sandboxExecPath, err, out)
+		if out, err := exec.Command(sandbox.ExecPath, "-p", "(version 1)(allow default)", "/usr/bin/true").CombinedOutput(); err != nil {
+			t.Skipf("%s cannot apply a profile here: %v: %s", sandbox.ExecPath, err, out)
 		}
 	}
 }
@@ -170,7 +170,7 @@ func TestSiteModuleCapabilities(t *testing.T) {
 	if _, err := m.UpdateSettings(SiteSettingsUpdate{Enabled: &on}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 60*time.Second, "the site to answer", func() bool { return siteHealthy(listen) })
+	testutil.WaitFor(t, 60*time.Second, "the site to answer", func() bool { return siteHealthy(listen) })
 
 	body, _ := json.Marshal(map[string]string{"username": "sam", "password": "long enough pw"})
 	resp, err := http.Post("http://"+listen+"/auth/login", "application/json", bytes.NewReader(body))
@@ -349,51 +349,6 @@ func TestSiteAPISecrets(t *testing.T) {
 	}
 }
 
-// TestSiteSandboxProfileOrder: the last matching rule wins, so what no
-// module may be given comes after what the modules declare, and the site's
-// own files after that.
-func TestSiteSandboxProfileOrder(t *testing.T) {
-	home := t.TempDir()
-	data := filepath.Join(home, config.DataDirName)
-	in := siteProfileInput{
-		home: home, dataDir: data,
-		shell: filepath.Join(data, "site", "shell"), deploy: filepath.Join(data, "site", "deploys", "abc"),
-		tmp: filepath.Join(data, "site", "tmp"), reads: []string{filepath.Join(data, "site", "users.json")},
-		modules: []siteModuleCaps{{ID: "m", Dir: filepath.Join(data, "site", "deploys", "abc", "modules", "m"), Files: []siteFileCap{
-			{Name: "keys", Path: filepath.Join(home, ".ssh"), Access: "read", Folder: true},
-			{Name: "db", Path: filepath.Join(home, "data", "m.db"), Access: "write"},
-			{Name: "secrets", Path: filepath.Join(data, "site", "secrets"), Access: "read", Folder: true},
-		}}},
-	}
-	profile, err := siteSandboxProfile(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	at := func(rule string) int {
-		t.Helper()
-		i := strings.LastIndex(profile, rule)
-		if i < 0 {
-			t.Fatalf("no %s in\n%s", rule, profile)
-		}
-		return i
-	}
-	q := func(p string) string { s, _ := textx.SBPLString(p); return s }
-	sshAllow := at(`(allow file-read* (subpath ` + q(filepath.Join(home, ".ssh")) + `))`)
-	sshDeny := at(`(deny file-read* (subpath ` + q(filepath.Join(home, ".ssh")) + `))`)
-	secretsAllow := at(`(allow file-read* (subpath ` + q(filepath.Join(data, "site", "secrets")) + `))`)
-	dataDeny := at(`(deny file-read* (subpath ` + q(data) + `))`)
-	shellAllow := at(`(allow file-read* (subpath ` + q(in.shell) + `))`)
-	if !(sshAllow < sshDeny && secretsAllow < dataDeny && dataDeny < shellAllow) {
-		t.Errorf("rules out of order: ssh allow %d deny %d, secrets allow %d, data deny %d, shell allow %d", sshAllow, sshDeny, secretsAllow, dataDeny, shellAllow)
-	}
-	db := filepath.Join(home, "data", "m.db")
-	at(`(allow file-read* file-write* (regex "^` + strings.ReplaceAll(regexp.QuoteMeta(db), `\`, `\\`) + `(-journal|-wal|-shm)?$"))`)
-	at(`(deny file-write-create (require-all (literal ` + q(db) + `) (vnode-type SYMLINK)))`)
-	if strings.Contains(profile, "allow file-write* (subpath "+q(in.shell)) {
-		t.Error("the shell is writable")
-	}
-}
-
 // TestSiteProfileClosesBrowserProfiles: no declaration opens a browser's
 // profile to module code, the browsers whose release channels the brains'
 // profile denies by the start of the folder's name included, and a
@@ -406,7 +361,7 @@ func TestSiteProfileClosesBrowserProfiles(t *testing.T) {
 	q := func(p string) string { s, _ := textx.SBPLString(p); return s }
 	// The prefix rule, as the profile writes it; its strings escape a
 	// backslash, as the regex's \. needs.
-	prefixRule := strings.ReplaceAll("^"+regexp.QuoteMeta(appSupport)+browserProfilePattern(), `\`, `\\`)
+	prefixRule := strings.ReplaceAll("^"+regexp.QuoteMeta(appSupport)+sandbox.BrowserProfilePattern(), `\`, `\\`)
 	for _, c := range []struct {
 		folder string
 		closed bool
@@ -422,18 +377,18 @@ func TestSiteProfileClosesBrowserProfiles(t *testing.T) {
 	} {
 		t.Run(c.folder, func(t *testing.T) {
 			dir := filepath.Join(appSupport, c.folder, "Default")
-			in := siteProfileInput{
-				home: home, dataDir: data,
-				shell: filepath.Join(data, "site", "shell"), deploy: filepath.Join(data, "site", "deploys", "abc"),
-				tmp: filepath.Join(data, "site", "tmp"),
-				modules: []siteModuleCaps{{ID: "m", Dir: filepath.Join(data, "site", "deploys", "abc", "modules", "m"), Files: []siteFileCap{
+			in := sandbox.SitePolicy{
+				Home: home, DataDir: data,
+				Shell: filepath.Join(data, "site", "shell"), Deploy: filepath.Join(data, "site", "deploys", "abc"),
+				Tmp: filepath.Join(data, "site", "tmp"),
+				Modules: []sandbox.SiteModule{{ID: "m", Dir: filepath.Join(data, "site", "deploys", "abc", "modules", "m"), Files: []sandbox.FileCapability{
 					{Name: "profile", Path: dir, Access: "write", Folder: true},
 				}}},
 			}
-			if got := in.unwritable(dir); got != c.closed {
+			if got := in.Unwritable(dir); got != c.closed {
 				t.Errorf("unwritable = %v, want %v", got, c.closed)
 			}
-			prepareDeclaredFolders(in.modules, in.unwritable)
+			prepareDeclaredFolders(in.Modules, in.Unwritable)
 			if pathExists(dir) == c.closed {
 				t.Errorf("the declared folder exists = %v, want %v", pathExists(dir), !c.closed)
 			}

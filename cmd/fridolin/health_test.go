@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // The dashboard shows the required files missing now: one restored
@@ -57,7 +59,7 @@ func TestRequiredFilesAlertOncePerChange(t *testing.T) {
 		}
 		return n
 	}
-	waitFor(t, 5*time.Second, "the alert", func() bool { return alerts() == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the alert", func() bool { return alerts() == 1 })
 	time.Sleep(150 * time.Millisecond) // several more looks
 	if n := alerts(); n != 1 {
 		t.Errorf("%d alerts for one change, want 1", n)
@@ -69,7 +71,7 @@ func TestRequiredFilesAlertOncePerChange(t *testing.T) {
 	if err := os.Remove(a); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "the second alert", func() bool { return alerts() == 2 })
+	testutil.WaitFor(t, 5*time.Second, "the second alert", func() bool { return alerts() == 2 })
 	cancel()
 	select {
 	case <-done:

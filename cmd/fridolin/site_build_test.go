@@ -16,6 +16,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 func TestBuildChatJIDs(t *testing.T) {
@@ -119,7 +120,7 @@ func TestSiteBuildChat(t *testing.T) {
 		Thread   int            `json:"thread"`
 		Running  bool           `json:"running"`
 	}
-	waitFor(t, 20*time.Second, "the brain's answer", func() bool {
+	testutil.WaitFor(t, 20*time.Second, "the brain's answer", func() bool {
 		w := tb.do("GET", "/api/site/build/web", nil)
 		json.Unmarshal(w.Body.Bytes(), &chatJID)
 		return len(chatJID.Messages) == 2 && !chatJID.Running
@@ -196,7 +197,7 @@ func TestLongBuildChatAnswerStaysWhole(t *testing.T) {
 				}
 				return out
 			}
-			waitFor(t, 10*time.Second, "the answer", func() bool { return len(received()) >= c.want })
+			testutil.WaitFor(t, 10*time.Second, "the answer", func() bool { return len(received()) >= c.want })
 			time.Sleep(100 * time.Millisecond) // for a part too many
 			got := received()
 			if c.build {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 type flushes struct {
@@ -44,7 +45,7 @@ func TestDebounceMergesBurstAndKeepsTrigger(t *testing.T) {
 	d.Add(m1)
 	d.Add(m2)
 	d.Add(m3)
-	waitFor(t, 2*time.Second, "flush", func() bool { return f.n() == 1 })
+	testutil.WaitFor(t, 2*time.Second, "flush", func() bool { return f.n() == 1 })
 	got := f.got[0]
 	if len(got.Media) != 2 || got.Media[0] != "/m/1.jpg" || got.Media[1] != "/m/2.jpg" {
 		t.Errorf("media = %v", got.Media)
@@ -72,7 +73,7 @@ loop:
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	waitFor(t, time.Second, "flushes", func() bool { return f.n() >= 3 })
+	testutil.WaitFor(t, time.Second, "flushes", func() bool { return f.n() >= 3 })
 	f.mu.Lock()
 	first := f.at[0].Sub(start)
 	f.mu.Unlock()
@@ -86,7 +87,7 @@ func TestDebounceSeparatesSendersAndChats(t *testing.T) {
 	d.Add(Inbound{Inbound: chat.Inbound{JID: "g", Sender: "1", Text: "a"}})
 	d.Add(Inbound{Inbound: chat.Inbound{JID: "g", Sender: "2", Text: "b"}})
 	d.Add(Inbound{Inbound: chat.Inbound{JID: "h", Sender: "1", Text: "c"}})
-	waitFor(t, time.Second, "three flushes", func() bool { return f.n() == 3 })
+	testutil.WaitFor(t, time.Second, "three flushes", func() bool { return f.n() == 3 })
 }
 
 // Two hand-offs for different brains that answer in the same chat, from the
@@ -95,7 +96,7 @@ func TestDebounceKeepsTargetBrainsApart(t *testing.T) {
 	d, f := newTestDebouncer(40*time.Millisecond, time.Second)
 	d.Add(Inbound{Inbound: chat.Inbound{JID: "dm", Brain: "up", Sender: "upload", Text: "a"}})
 	d.Add(Inbound{Inbound: chat.Inbound{JID: "dm", Brain: "notes", Sender: "upload", Text: "b"}})
-	waitFor(t, time.Second, "two flushes", func() bool { return f.n() == 2 })
+	testutil.WaitFor(t, time.Second, "two flushes", func() bool { return f.n() == 2 })
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	got := map[string]string{}
@@ -163,7 +164,7 @@ func TestDebounceDrain(t *testing.T) {
 		f.add(m)
 	})
 	d.Add(Inbound{Inbound: chat.Inbound{JID: "c", Sender: "1", Text: "slow"}})
-	waitFor(t, time.Second, "the flush to begin", func() bool { return d.Pending() == 0 })
+	testutil.WaitFor(t, time.Second, "the flush to begin", func() bool { return d.Pending() == 0 })
 	d.Add(Inbound{Inbound: chat.Inbound{JID: "c", Sender: "2", Text: "older"}})
 	time.Sleep(5 * time.Millisecond)
 	d.Add(Inbound{Inbound: chat.Inbound{JID: "c", Sender: "3", Text: "newer"}})

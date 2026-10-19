@@ -2,9 +2,10 @@ package main
 
 import (
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/platform"
 	"sync"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
 var (

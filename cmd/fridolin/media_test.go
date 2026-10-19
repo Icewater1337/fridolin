@@ -20,6 +20,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // TestBrainTakesItsFilesIntoItsInbox: a message's files move into the inbox
@@ -33,7 +34,7 @@ func TestBrainTakesItsFilesIntoItsInbox(t *testing.T) {
 	p := writeTestFile(t, filepath.Join(media, mediafiles.IncomingDir, "voice.ogg"), "OggS")
 
 	tb.handleInbound(t.Context(), Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "listen", Media: []string{p}, Source: "whatsapp", At: time.Now()}})
-	waitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.dev.Outbox()) > 0 })
+	testutil.WaitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.dev.Outbox()) > 0 })
 
 	want := filepath.Join(media, "dm", "voice.ogg")
 	if data, err := os.ReadFile(want); err != nil || string(data) != "OggS" {
@@ -77,7 +78,7 @@ func TestRemovedBrainHandsItsFilesOn(t *testing.T) {
 			if err := mgr.Apply(next); err != nil {
 				t.Error(err)
 			}
-			waitFor(t, 10*time.Second, "brain a to be removed", func() bool {
+			testutil.WaitFor(t, 10*time.Second, "brain a to be removed", func() bool {
 				a.mu.Lock()
 				defer a.mu.Unlock()
 				return a.retired
@@ -99,7 +100,7 @@ func TestRemovedBrainHandsItsFilesOn(t *testing.T) {
 	if names := dirNames(t, filepath.Join(media, "a")); len(names) != 0 {
 		t.Errorf("the removed brain's inbox kept %q", names)
 	}
-	waitFor(t, 10*time.Second, "b's run", func() bool { return d.count() == 1 })
+	testutil.WaitFor(t, 10*time.Second, "b's run", func() bool { return d.count() == 1 })
 	if got := d.all()[0].msg.Media; !slices.Equal(got, []string{want}) {
 		t.Errorf("b's run got the files %q, want [%s]", got, want)
 	}
@@ -130,7 +131,7 @@ func TestMergedMessageNamesItsFilesInTheInbox(t *testing.T) {
 			if _, _, _, err := mgr.Submit(dm("a long report")); err != nil {
 				t.Fatal(err)
 			}
-			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+			testutil.WaitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 
 			media := br.settings.Load().mediaDir
 			inbox := mediaInboxAt(media).Path("a")
@@ -171,7 +172,7 @@ func TestMergedMessageNamesItsFilesInTheInbox(t *testing.T) {
 
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
 			br.StopCurrent(false)
-			waitFor(t, 10*time.Second, "the merged message's run", func() bool { return d.count() == 2 })
+			testutil.WaitFor(t, 10*time.Second, "the merged message's run", func() bool { return d.count() == 2 })
 			got := d.all()[1].msg.Media
 			if !slices.Equal(got, want) {
 				t.Errorf("the run got the files %q, want %q", got, want)

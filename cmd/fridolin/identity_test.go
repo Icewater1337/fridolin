@@ -12,19 +12,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
-
+	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/manifest"
-
+	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
+
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
-
-	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/history"
 )
 
 func TestChatJID(t *testing.T) {
@@ -59,24 +59,6 @@ func TestChatJID(t *testing.T) {
 				t.Errorf("chatJID(%q) = %v, %v; want %s", c.in, got, err, c.want)
 			}
 		})
-	}
-}
-
-func TestIdentityKey(t *testing.T) {
-	cases := map[string]string{
-		"15551234567":                    "15551234567",
-		"+1 555 123 4567":                "15551234567",
-		"+1 (555) 123-4567":              "15551234567",
-		"+1\u00a0555\u00a0123\u00a04567": "15551234567", // no-break spaces
-		"15551234567@s.whatsapp.net":     "15551234567",
-		bridgeLID + "@lid":               bridgeLID,
-		"1 555 123 4567@lid":             "15551234567", // keys as its key does
-		"Alex":                           "Alex",
-	}
-	for in, want := range cases {
-		if got := identityKey(in); got != want {
-			t.Errorf("identityKey(%q) = %q, want %q", in, got, want)
-		}
 	}
 }
 
@@ -323,7 +305,7 @@ func TestGroupSenderAndQuoteByNumber(t *testing.T) {
 		t.Fatal(err)
 	}
 	idMap := "| WhatsApp Number | Person | Notes |\n| --- | --- | --- |\n| +1 555 123 4567 | Alex | |\n"
-	if err := os.WriteFile(filepath.Join(br.Dir(), identityMapFile), []byte(idMap), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(br.Dir(), prompttext.IdentityMapPath), []byte(idMap), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	own := types.JID{User: otherNumber, Device: 12, Server: types.DefaultUserServer}
@@ -340,7 +322,7 @@ func TestGroupSenderAndQuoteByNumber(t *testing.T) {
 	evt.Info.Sender = lid
 	evt.Info.AddressingMode = types.AddressingModeLID
 	wa.handleMessage(evt)
-	waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) > 0 })
+	testutil.WaitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) > 0 })
 	// The new message names its sender from the map too.
 	if got := tb.sentTo(testGroup)[0]; !strings.Contains(got, `Alex (15551234567) says: [reply to 15551234567: "I'm in"]`) {
 		t.Errorf("answered %q, want the sender and the quote's author by number", got)

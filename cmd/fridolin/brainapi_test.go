@@ -19,6 +19,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 const (
@@ -170,7 +171,7 @@ func TestRunsGetATokenForTheirRunOnly(t *testing.T) {
 	t.Setenv("FRIDOLIN_FAKE_POLLS", "1")
 
 	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"}})
-	waitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(apiTestDM)) > 0 })
+	testutil.WaitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(apiTestDM)) > 0 })
 	reply := tb.sentTo(apiTestDM)[0]
 	if !strings.Contains(reply, `polls=0 { "count": 1, "polls": [`) || !strings.Contains(reply, `"question": "Lunch?"`) {
 		t.Errorf("the run's fridolin polls answered:\n%s", reply)
@@ -196,7 +197,7 @@ func TestRunsGetATokenForTheirRunOnly(t *testing.T) {
 	if env["FRIDOLIN_BIN"] != exe {
 		t.Errorf("run env: FRIDOLIN_BIN=%q, want %q", env["FRIDOLIN_BIN"], exe)
 	}
-	waitFor(t, 5*time.Second, "the run's token to be revoked and its file deleted", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "the run's token to be revoked and its file deleted", func() bool {
 		_, err := os.Stat(file)
 		tb.runTokens.mu.Lock()
 		defer tb.runTokens.mu.Unlock()

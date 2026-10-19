@@ -1,7 +1,6 @@
 package main
 
 import (
-	"github.com/Icewater1337/fridolin/internal/platform"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +11,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // TestViewerGetsTheAllowlistedEnvironment: a tmux server the viewer starts
@@ -151,7 +153,7 @@ func TestViewerRunsOnlySystemPrograms(t *testing.T) {
 // viewerIdle waits for the start of br's viewer that ensureViewer began.
 func viewerIdle(t *testing.T, br *Brain) {
 	t.Helper()
-	waitFor(t, 20*time.Second, "the viewer's start", func() bool {
+	testutil.WaitFor(t, 20*time.Second, "the viewer's start", func() bool {
 		br.viewerMu.Lock()
 		defer br.viewerMu.Unlock()
 		return !br.viewerStarting
@@ -205,7 +207,7 @@ func TestViewerClosedWhileItStarts(t *testing.T) {
 				// Close logs last, after its tmux call: waiting for that
 				// also orders the start's use of tmuxPath before the
 				// cleanup that puts it back.
-				waitFor(t, 5*time.Second, "the viewer to be closed", func() bool {
+				testutil.WaitFor(t, 5*time.Second, "the viewer to be closed", func() bool {
 					return strings.Contains(strings.Join(logs(), "\n"), "[viewer] closed claude-a")
 				})
 			}
@@ -309,7 +311,7 @@ func TestViewerWithRealTmux(t *testing.T) {
 	if err := tv.Start(); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "the log in the viewer", func() bool {
+	testutil.WaitFor(t, 10*time.Second, "the log in the viewer", func() bool {
 		// A pane's target names the session as "=name:"; "=name" alone
 		// is taken for a pane of that name, which there is none of.
 		out, _ := tmuxCmd("capture-pane", "-p", "-t", "=claude-work:").Output()
