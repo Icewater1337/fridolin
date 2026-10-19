@@ -76,7 +76,7 @@ func main() {
 
 	switch cmd {
 	case "run":
-		runCmd(args)
+		os.Exit(runCmd(args))
 	case "check":
 		checkCmd(args)
 	case "open":
@@ -238,13 +238,13 @@ func parseRunFlags(args []string, output io.Writer) (runOptions, error) {
 	return o, fs.Parse(args)
 }
 
-func runCmd(args []string) {
+func runCmd(args []string) int {
 	opts, err := parseRunFlags(args, os.Stderr)
 	switch {
 	case errors.Is(err, flag.ErrHelp):
-		os.Exit(0)
+		return 0
 	case err != nil:
-		os.Exit(2) // the flag package has said what is wrong
+		return 2 // the flag package has said what is wrong
 	}
 
 	// Under launchd stderr is a file, which --log-file keeps small.
@@ -267,7 +267,8 @@ func runCmd(args []string) {
 	}
 	cfgs, err := config.Open(path, inputs)
 	if err != nil {
-		log.Fatalf("loading config: %v", err)
+		log.Printf("loading config: %v", err)
+		return 1
 	}
 	cfg := cfgs.Get()
 	logDataDir(cfgs)
@@ -280,7 +281,8 @@ func runCmd(args []string) {
 	// data dir is refused next to the running bridge too.
 	bridge, err := NewBridge(cfgs, BridgeOptions{NoWhatsApp: opts.noWhatsApp, Logs: ring, Restart: func() { cancel(errRestart) }})
 	if err != nil {
-		log.Fatalf("creating bridge: %v", err)
+		log.Printf("creating bridge: %v", err)
+		return 1
 	}
 	if cfg.AgentProvider == "codex" {
 		go func() { log.Printf("Codex CLI: %+v", codexInfo(cfg.CodexPath, cfg.ChildEnvPassthrough)) }()
@@ -289,6 +291,7 @@ func runCmd(args []string) {
 	}
 
 	signalled, stopSignals := stopOnSignals(cancel, bridge.brainMgr.KillRuns)
+	defer stopSignals()
 
 	if platform.IsTerminal(os.Stdout) && cfg.HTTPEnabled() && !cfg.Dashboard.Disabled {
 		// Only on an interactive terminal: even a code that works once
@@ -301,9 +304,7 @@ func runCmd(args []string) {
 		go func() { _ = platform.OpenBrowser(httpapi.LoginURL(cfg.HTTPListen, code)) }()
 	}
 
-	code := serve(ctx, bridge, signalled)
-	stopSignals()
-	os.Exit(code)
+	return serve(ctx, bridge, signalled)
 }
 
 // errRestart is the cause runCmd's context ends with when the dashboard
