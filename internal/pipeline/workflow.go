@@ -1,4 +1,4 @@
-package main
+package pipeline
 
 import (
 	"context"
@@ -11,27 +11,26 @@ import (
 	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
-	"github.com/Icewater1337/fridolin/internal/pipeline"
 )
 
-// messageSettings is one operation's live policy snapshot. Runtime routing
+// Settings is one operation's live policy snapshot. Runtime routing
 // stays with the Manager; transport and host capabilities are supplied below.
-type messageSettings struct {
+type Settings struct {
 	FirstTrigger string
 	QueueNotify  bool
 	OwnerChat    string
 }
 
-// messagePipeline owns message decisions independently of bridge lifecycle.
+// Workflow owns message decisions independently of bridge lifecycle.
 // The command intake wrapper still owns admission and persistence on shutdown.
-type messagePipeline struct {
-	brains      *brainruntime.Manager
-	deb         *pipeline.Debouncer
-	settings    func() messageSettings
-	notice      func(context.Context, string, string) error
-	handOffCode func(*brainruntime.Brain, brainruntime.Inbound, brainruntime.OTPCatch)
-	chats       func(brainruntime.Inbound) []string
-	replyChat   func(*brainruntime.Brain, string) string
+type Workflow struct {
+	Brains      *brainruntime.Manager
+	Debouncer   *Debouncer
+	Settings    func() Settings
+	Notice      func(context.Context, string, string) error
+	HandOffCode func(*brainruntime.Brain, brainruntime.Inbound, brainruntime.OTPCatch)
+	Chats       func(brainruntime.Inbound) []string
+	ReplyChat   func(*brainruntime.Brain, string) string
 }
 
 // handleInbound is the entry point for every allowed message. Access control
@@ -42,9 +41,9 @@ type messagePipeline struct {
 // on to their brain like the rest: it keeps them in its history. Once the
 // bridge stops, a message is kept for the next start instead: no command
 // runs and no notice goes out (see intake).
-func (p *messagePipeline) handle(ctx context.Context, m brainruntime.Inbound) {
+func (p *Workflow) Handle(ctx context.Context, m brainruntime.Inbound) {
 	m.Text = strings.TrimSpace(m.Text)
-	settings := p.settings()
+	settings := p.Settings()
 
 	// Commands come from a chat. A message handed to a brain (/ingest, Plaud,
 	// a dev message that names one) carries none: its text is for that brain.
@@ -60,14 +59,14 @@ func (p *messagePipeline) handle(ctx context.Context, m brainruntime.Inbound) {
 
 	// Resolved like the run itself (BrainManager.Submit), so the OTP guard
 	// checks the brain that would read the message.
-	br := p.brains.Route(m)
+	br := p.Brains.Route(m)
 	if br == nil && m.Brain != "" {
 		log.Printf("brain %s is not configured; dropping the message for %s", m.Brain, m.JID)
 		return
 	}
 	if br == nil {
 		reply := outboundmsg.NoBrainNotice
-		if id := p.brains.HeldFor(m.JID, m.IsGroup()); id != "" {
+		if id := p.Brains.HeldFor(m.JID, m.IsGroup()); id != "" {
 			// Not the default brain instead: what was meant for this
 			// brain, your DMs say, must not land in another one.
 			log.Printf("brain %s, which handles %s, cannot run (see its issue on the Brains page); the message goes to no other brain", id, m.JID)
@@ -76,7 +75,7 @@ func (p *messagePipeline) handle(ctx context.Context, m brainruntime.Inbound) {
 			log.Printf("No brain configured for %s — add one in the dashboard", m.JID)
 		}
 		if !m.Silent && m.Source != chat.SourceIngest {
-			_ = p.notice(ctx, m.JID, reply)
+			_ = p.Notice(ctx, m.JID, reply)
 		}
 		return
 	}
@@ -87,18 +86,18 @@ func (p *messagePipeline) handle(ctx context.Context, m brainruntime.Inbound) {
 	// looks lost.
 	if code, ok := br.CatchesCode(m, time.Now()); ok {
 		log.Printf("brain %s: kept a one-time code out of the conversation (OTP guard)", br.ID())
-		p.handOffCode(br, m, code)
+		p.HandOffCode(br, m, code)
 		if !m.Silent {
-			_ = p.notice(ctx, m.JID, outboundmsg.OtpCaughtNotice)
+			_ = p.Notice(ctx, m.JID, outboundmsg.OtpCaughtNotice)
 		}
 		return
 	}
 
-	p.deb.Add(m)
+	p.Debouncer.Add(m)
 }
 
 // handleCommand runs !help, !reset and !stop. It reports whether text was one.
-func (p *messagePipeline) handleCommand(ctx context.Context, m brainruntime.Inbound, settings messageSettings) bool {
+func (p *Workflow) handleCommand(ctx context.Context, m brainruntime.Inbound, settings Settings) bool {
 	switch strings.ToLower(m.Text) {
 	case "!reset":
 		// A reset stops what !stop stops for the chat, hand-offs from other
@@ -108,11 +107,11 @@ func (p *messagePipeline) handleCommand(ctx context.Context, m brainruntime.Inbo
 		// happened: the brain's memory files stay, and a chat no brain
 		// answers has no history to start afresh.
 		p.stopChat(m)
-		_ = p.notice(ctx, m.JID, outboundmsg.ResetReply(p.resetChat(m)))
+		_ = p.Notice(ctx, m.JID, outboundmsg.ResetReply(p.resetChat(m)))
 		return true
 
 	case "!stop":
-		_ = p.notice(ctx, m.JID, outboundmsg.StopReply(p.stopChat(m)))
+		_ = p.Notice(ctx, m.JID, outboundmsg.StopReply(p.stopChat(m)))
 		return true
 
 	case "!help":
@@ -120,7 +119,7 @@ func (p *messagePipeline) handleCommand(ctx context.Context, m brainruntime.Inbo
 		if m.IsGroup() {
 			trigger = settings.FirstTrigger
 		}
-		_ = p.notice(ctx, m.JID, outboundmsg.HelpReply(trigger))
+		_ = p.Notice(ctx, m.JID, outboundmsg.HelpReply(trigger))
 		return true
 	}
 	return false
@@ -129,15 +128,15 @@ func (p *messagePipeline) handleCommand(ctx context.Context, m brainruntime.Inbo
 // stopChat stops what is going on for m's chat, for !stop and !reset. It
 // reports whether a run was stopped and how many waiting messages were
 // dropped.
-func (p *messagePipeline) stopChat(m brainruntime.Inbound) (stopped bool, dropped int) {
+func (p *Workflow) stopChat(m brainruntime.Inbound) (stopped bool, dropped int) {
 	// Only this chat's work: a brain serves several chats, and one chat must
 	// not cancel what another asked for. A DM goes by two JIDs (see
 	// chatJIDs), and its run may have come in under either.
-	chats := p.chats(m)
+	chats := p.Chats(m)
 	for _, jid := range chats {
-		p.deb.Drop(jid)
+		p.Debouncer.Drop(jid)
 	}
-	if br := p.brains.BrainFor(m.JID, m.IsGroup()); br != nil {
+	if br := p.Brains.BrainFor(m.JID, m.IsGroup()); br != nil {
 		for _, jid := range chats {
 			s, d := br.StopChat(jid)
 			stopped, dropped = stopped || s, dropped+d
@@ -147,7 +146,7 @@ func (p *messagePipeline) stopChat(m brainruntime.Inbound) (stopped bool, droppe
 	// the chat's own brain knows nothing about it. What waits for one counts
 	// as this chat's, for the reply.
 	for _, jid := range chats {
-		s, d := p.brains.StopHandOffs(jid)
+		s, d := p.Brains.StopHandOffs(jid)
 		stopped, dropped = stopped || s, dropped+d
 	}
 	return stopped, dropped
@@ -157,13 +156,13 @@ func (p *messagePipeline) stopChat(m brainruntime.Inbound) (stopped bool, droppe
 // answers there and in every brain whose reply chat it is, which answers
 // files handed to it there: !reset is about the chat, whichever brain
 // speaks in it. It reports whether any brain does.
-func (p *messagePipeline) resetChat(m brainruntime.Inbound) bool {
-	settings := p.settings()
-	chats := p.chats(m)
-	owner := p.brains.BrainFor(m.JID, m.IsGroup())
+func (p *Workflow) resetChat(m brainruntime.Inbound) bool {
+	settings := p.Settings()
+	chats := p.Chats(m)
+	owner := p.Brains.BrainFor(m.JID, m.IsGroup())
 	reset := false
-	for _, br := range p.brains.Brains() {
-		if br == owner || slices.Contains(chats, p.replyChat(br, settings.OwnerChat)) {
+	for _, br := range p.Brains.Brains() {
+		if br == owner || slices.Contains(chats, p.ReplyChat(br, settings.OwnerChat)) {
 			br.ResetChat(chats, m.Sender)
 			reset = true
 		}
@@ -172,10 +171,10 @@ func (p *messagePipeline) resetChat(m brainruntime.Inbound) bool {
 }
 
 // dispatch hands a (debounced) message to its brain.
-func (p *messagePipeline) dispatch(m brainruntime.Inbound) {
+func (p *Workflow) Dispatch(m brainruntime.Inbound) {
 	ctx := context.Background()
-	settings := p.settings()
-	br, pos, busy, err := p.brains.Submit(m)
+	settings := p.Settings()
+	br, pos, busy, err := p.Brains.Submit(m)
 	switch {
 	case errors.Is(err, brainruntime.ErrQueueFull):
 		log.Printf("brain %s: queue full, rejecting message from %s", br.ID(), m.Sender)
@@ -186,12 +185,12 @@ func (p *messagePipeline) dispatch(m brainruntime.Inbound) {
 			if t := settings.FirstTrigger; m.IsGroup() && t != "" {
 				stop = t + " !stop"
 			}
-			_ = p.notice(ctx, m.JID, outboundmsg.QueueFullNotice(stop))
+			_ = p.Notice(ctx, m.JID, outboundmsg.QueueFullNotice(stop))
 		}
 	case err != nil:
 		log.Printf("routing message for %s: %v", m.JID, err)
 	case busy && !m.Silent && settings.QueueNotify:
 		// Interrupt mode queues too: behind other chats and other people.
-		_ = p.notice(ctx, m.JID, outboundmsg.QueuedNotice(pos))
+		_ = p.Notice(ctx, m.JID, outboundmsg.QueuedNotice(pos))
 	}
 }

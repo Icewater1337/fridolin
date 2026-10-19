@@ -47,7 +47,7 @@ type Bridge struct {
 	dev      *devchat.Messenger // non-nil in --no-whatsapp mode
 	brainMgr *BrainManager
 	deb      *pipeline.Debouncer
-	pipeline *messagePipeline
+	pipeline *pipeline.Workflow
 	logs     *logx.Ring
 	activity *activity.Feed
 	token    *httpapi.Token
@@ -192,9 +192,9 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 	b.deb = pipeline.NewDebouncer(
 		func() time.Duration { return time.Duration(b.cfgs.Get().DebounceQuietMS()) * time.Millisecond },
 		func() time.Duration { return time.Duration(b.cfgs.Get().DebounceMaxWaitMS()) * time.Millisecond },
-		b.pipeline.dispatch,
+		b.pipeline.Dispatch,
 	)
-	b.pipeline.deb = b.deb
+	b.pipeline.Debouncer = b.deb
 
 	if opts.NoWhatsApp {
 		b.dev = devchat.New(func(text string) []string { return outboundmsg.Chunk(text, cfgs.Get().MaxChunkSize) })
@@ -665,7 +665,7 @@ func (b *Bridge) handleInbound(ctx context.Context, m brainruntime.Inbound) {
 		return
 	}
 	defer b.intake.leave()
-	b.pipeline.handle(ctx, m)
+	b.pipeline.Handle(ctx, m)
 }
 
 // chatJIDs lists the JIDs m's chat goes by: the chat and, for a DM, its
