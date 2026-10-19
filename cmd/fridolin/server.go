@@ -158,14 +158,14 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 // its own chats (see brainChat), a caller without a token only to the
 // allowed chats and only while script_api.tokenless_send is on. The
 // scripts token may send anywhere checkSendJID lets through.
-func (b *Bridge) maySend(who principal, jid string, cfg *config.Config) error {
-	switch who.kind {
-	case callerScript:
+func (b *Bridge) maySend(who chat.Principal, jid string, cfg *config.Config) error {
+	switch who.Kind {
+	case chat.CallerScript:
 		return nil
-	case callerBrain:
-		br := b.brainMgr.Get(who.brain)
+	case chat.CallerBrain:
+		br := b.brainMgr.Get(who.Brain)
 		if br == nil || !b.brainChat(br, jid, cfg) {
-			return fmt.Errorf("brain %s may send only to its own chats, and %s is not one of them", who.brain, jid)
+			return fmt.Errorf("brain %s may send only to its own chats, and %s is not one of them", who.Brain, jid)
 		}
 		return nil
 	}
@@ -216,16 +216,16 @@ func sendErrStatus(err error) int {
 // history of whichever brain owns the target chat, marked with how it came
 // in: the brain must not take a line a script or another brain sent for its
 // own words. request is the id of the code request it makes, "" for none.
-func (b *Bridge) appendHTTPMessageToHistory(who principal, jid, text, request string) {
+func (b *Bridge) appendHTTPMessageToHistory(who chat.Principal, jid, text, request string) {
 	br := b.brainMgr.BrainFor(jid, chat.IsGroupJID(jid))
 	if br == nil {
 		return
 	}
 	from := "script"
-	if who.kind == callerBrain {
-		from = who.brain
+	if who.Kind == chat.CallerBrain {
+		from = who.Brain
 	}
-	br.AppendEntry(history.Entry{From: from, Chat: jid, Text: text, Type: history.Out, Via: who.via(), OTPRequest: request})
+	br.AppendEntry(history.Entry{From: from, Chat: jid, Text: text, Type: history.Out, Via: who.Via(), OTPRequest: request})
 }
 
 // httpIngest handles POST /ingest. It feeds files that arrived outside
@@ -245,7 +245,7 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	who, err := b.scriptAuth.authorize(r)
-	if err == nil && who.kind == callerAnonymous {
+	if err == nil && who.Kind == chat.CallerAnonymous {
 		err = errTokenRequired
 	}
 	if err != nil {
@@ -266,12 +266,12 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.ToLower(strings.TrimSpace(req.Brain))
-	if who.kind == callerBrain {
+	if who.Kind == chat.CallerBrain {
 		if id == "" {
-			id = who.brain
+			id = who.Brain
 		}
-		if id != who.brain {
-			httpapi.WriteErr(w, http.StatusForbidden, fmt.Sprintf("brain %s may hand files only to itself, not to %q", who.brain, id))
+		if id != who.Brain {
+			httpapi.WriteErr(w, http.StatusForbidden, fmt.Sprintf("brain %s may hand files only to itself, not to %q", who.Brain, id))
 			return
 		}
 	}
@@ -281,7 +281,7 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	paths, err := mediaInboxAt(b.cfgs.Boot().MediaDir).Resolve(br.ID(), req.Paths, who.kind == callerBrain)
+	paths, err := mediaInboxAt(b.cfgs.Boot().MediaDir).Resolve(br.ID(), req.Paths, who.Kind == chat.CallerBrain)
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return

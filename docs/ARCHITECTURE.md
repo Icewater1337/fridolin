@@ -159,6 +159,14 @@ behaviour unless its title says so. The steps so far:
   join. Command composition supplies the live transport and confirmed-delivery
   history callback; pipeline extraction follows R10.
 
+- **R12, pipeline primitives**: `pipeline` owns the junk filter and the
+  debouncer, retaining `brain.Inbound` parts, timer generations and ordered
+  shutdown draining. `chat.Principal` carries the existing anonymous, script
+  or brain caller identity and history label. Token lookup, authorization
+  policy and the remaining inbound/delivery workflows still live in the
+  command. The pipeline depends on `brain` and `chat`; its tests also use
+  `testutil`. It imports no configuration, transport, database or HTTP package.
+
 - **R14, Google Calendar**: `google` owns OAuth clients and pending state,
   token locking/refresh/revocation, calendar operations, credential naming and
   legacy environment variables. Constructor options provide fixed startup paths,
@@ -315,8 +323,10 @@ responsibility and says what it must not do.
   deletions, with `Names` checking chat, sender and message ID. `LinkState`
   and `Group` retain the dashboard JSON tags; `NormalizeJID`, `IsGroupJID`
   and `DMJID` share the JID rules. Source and change-kind constants keep
-  their existing string values. Transport envelopes and script principals
-  remain in the command until the adapter and pipeline extractions.
+  their existing string values. `Envelope` holds transport facts for access
+  decisions. `Principal` carries the authenticated script or brain identity,
+  with an anonymous zero value; `Via` keeps the persisted history labels.
+  Token parsing and scope decisions stay outside this shared vocabulary.
 - **`platform`**: OS integration behind build tags. It provides the instance
   `Lock` (`AcquireLock`, `Release`; a value, not a global, which `NewBridge`
   takes today and `main` will own), process isolation (a session and
@@ -451,11 +461,12 @@ responsibility and says what it must not do.
   side effects. Dev DMs and `fridolin check --route` use `NumberAllowed`,
   preserving their user-supplied number comparison; WhatsApp supplies explicit
   resolved identity. Transport-specific ignored-chat notifications stay outside.
-- **`pipeline`** *(to come, R12; `bridge.go`, `debounce.go`)*: the single
-  intake for every message source. It handles chat commands, the junk
-  filter, choosing the brain, the OTP gate and debouncing. It dispatches to
-  `brain.Manager`, turns finished runs into deliveries, and provides `Ingest`
-  and `SendExternal` for `/ingest`, `/send`, Plaud and the site.
+- **`pipeline`**: the pure junk filter and message debouncer. `Debouncer`
+  retains each message's runtime parts through merging, edits and deletions;
+  `Drain` waits for started flushes and returns pending batches oldest first
+  for durable shutdown. New messages after draining flush immediately.
+  Commands, routing, the OTP gate, dispatch, delivery, `Ingest` and
+  `SendExternal` still live in the command and are the remaining R12 slices.
 - **`outbound`**: chunking, poll parsing, shared send errors, paced sends,
   minimal transport contracts and the catalogue of every chat-facing message.
   `Outbox` owns persisted replies, per-part progress, poll fallback, retries

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
 	"github.com/Icewater1337/fridolin/internal/registry"
@@ -242,7 +243,34 @@ func (h *harness) Inject(m inbound) {
 // the dev outbox.
 func (h *harness) WhatsApp(ev *events.Message) {
 	h.t.Helper()
-	opts := whatsAppOptions(func() *config.Config { return runtimeConfig(h.b.cfgs) }, h.b.store, h.b.handleInbound, nil)
+	h.whatsApp(ev, h.b.handleInbound)
+}
+
+// WhatsAppAndWait hands an inbound message to the normal WhatsApp adapter
+// and waits until the bridge has handled it. Unlike WhatsApp, this is only
+// for events that become inbound messages, not edits, deletions or ignored
+// chatter. It lets a test stop the bridge after intake without inspecting
+// the debouncer or the brain's private queue.
+func (h *harness) WhatsAppAndWait(ev *events.Message) {
+	h.t.Helper()
+	handled := make(chan struct{})
+	h.whatsApp(ev, func(ctx context.Context, m brain.Inbound) {
+		h.b.handleInbound(ctx, m)
+		close(handled)
+	})
+	h.WaitFor("WhatsApp intake to finish", func() bool {
+		select {
+		case <-handled:
+			return true
+		default:
+			return false
+		}
+	})
+}
+
+func (h *harness) whatsApp(ev *events.Message, handle InboundHandler) {
+	h.t.Helper()
+	opts := whatsAppOptions(func() *config.Config { return runtimeConfig(h.b.cfgs) }, h.b.store, handle, nil)
 	opts.Container = fixedDeviceContainer{&store.Device{}}
 	opts.Log = waLog.Noop
 	opts.OnChange = h.b.handleChange
