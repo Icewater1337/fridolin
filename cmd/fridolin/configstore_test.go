@@ -21,7 +21,7 @@ func TestConfigStoreUpdateWritesAtomicallyAndKeepsTilde(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	path := writeConfig(t, `{"data_dir":"~/data","allowed_numbers":["15551234567"]}`)
-	cs, err := OpenConfigStore(path)
+	cs, err := openConfigStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestConfigStoreUpdateWritesAtomicallyAndKeepsTilde(t *testing.T) {
 	}
 
 	// A stale etag is a conflict and changes nothing.
-	if _, err := cs.Update(etag, func(c *config.Config) error { c.BrainModel = "x"; return nil }); !errors.Is(err, ErrConfigConflict) {
+	if _, err := cs.Update(etag, func(c *config.Config) error { c.BrainModel = "x"; return nil }); !errors.Is(err, config.ErrConflict) {
 		t.Errorf("stale etag: err = %v, want conflict", err)
 	}
 	// An invalid edit is rejected and changes nothing.
@@ -136,7 +136,7 @@ func TestEnvironmentDoesNotOverrideTheConfig(t *testing.T) {
 // configuration as JSON.
 func effectiveJSON(t *testing.T, path string) string {
 	t.Helper()
-	cfg, err := LoadConfig(path)
+	cfg, err := loadConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func effectiveJSON(t *testing.T, path string) string {
 
 func TestConfigDefaultsAndLoopbackOnly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	cfg, err := LoadConfig(writeConfig(t, `{}`))
+	cfg, err := loadConfig(writeConfig(t, `{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,11 +165,11 @@ func TestConfigDefaultsAndLoopbackOnly(t *testing.T) {
 	if (&config.Config{}).AllowsAnyDM() {
 		t.Error("a Config built without the defaults must not let anyone DM either")
 	}
-	cfg, err = LoadConfig(writeConfig(t, `{"http_listen":"off"}`))
+	cfg, err = loadConfig(writeConfig(t, `{"http_listen":"off"}`))
 	if err != nil || cfg.HTTPEnabled() {
 		t.Error(`"off" must disable the HTTP server`)
 	}
-	if _, err := LoadConfig(writeConfig(t, `{"http_listen":"0.0.0.0:8765"}`)); err == nil {
+	if _, err := loadConfig(writeConfig(t, `{"http_listen":"0.0.0.0:8765"}`)); err == nil {
 		t.Error("a non-loopback http_listen must be rejected")
 	}
 }
@@ -180,7 +180,7 @@ func TestStarterConfigLoads(t *testing.T) {
 	if err := ensureConfigFile(path); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(path)
+	cfg, err := loadConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestConfigRefusesClassicMode(t *testing.T) {
 			if c.env != "" {
 				t.Setenv("BRAIN_MODE", c.env)
 			}
-			_, err := LoadConfig(writeConfig(t, c.config))
+			_, err := loadConfig(writeConfig(t, c.config))
 			switch {
 			case c.want == "" && err != nil:
 				t.Fatalf("load: %v, want it to load", err)
@@ -259,7 +259,7 @@ func TestConfigRefusesClassicMode(t *testing.T) {
 func TestConfigSavesKeepBrainModeOn(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	path := writeConfig(t, `{"log_level": "info"}`)
-	cs, err := OpenConfigStore(path)
+	cs, err := openConfigStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestConfigSavesKeepBrainModeOn(t *testing.T) {
 	if raw := readRawConfig(t, path); string(raw["brain_mode"]) != "true" {
 		t.Errorf(`saved "brain_mode": %s, want true`, raw["brain_mode"])
 	}
-	if _, err := LoadConfig(path); err != nil {
+	if _, err := loadConfig(path); err != nil {
 		t.Errorf("the saved config does not load: %v", err)
 	}
 }
@@ -290,7 +290,7 @@ func TestConfigRefusesInlineBrains(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			_, err := OpenConfigStore(writeConfig(t, c.config))
+			_, err := openConfigStore(writeConfig(t, c.config))
 			switch {
 			case err == nil:
 				t.Fatalf("loaded, want an error containing %q", c.want)
@@ -338,7 +338,7 @@ func TestRetiredConfigKeys(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
 			path := writeConfig(t, c.config)
 			logs := captureLog(t)
-			cs, err := OpenConfigStore(path)
+			cs, err := openConfigStore(path)
 			if err != nil {
 				t.Fatalf("load: %v, want it to load", err)
 			}
@@ -390,7 +390,7 @@ func TestRetiredConfigKeys(t *testing.T) {
 // model of their own: they must keep running with that model.
 func TestBrainsKeepTheRetiredModel(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	cfg, err := LoadConfig(writeConfig(t, `{"model": "sonnet"}`))
+	cfg, err := loadConfig(writeConfig(t, `{"model": "sonnet"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +427,7 @@ func TestLegacyDataDir(t *testing.T) {
 				}
 			}
 			logs := captureLog(t)
-			cs, err := OpenConfigStore(writeConfig(t, c.config))
+			cs, err := openConfigStore(writeConfig(t, c.config))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -445,7 +445,7 @@ func TestConfigStoreRejectsTooSmallChunkSize(t *testing.T) {
 	// The dashboard asks for at least 100 too, but the server must not rely
 	// on it: a smaller limit would leave no room for the numbering.
 	t.Setenv("HOME", t.TempDir())
-	cs, err := OpenConfigStore(writeConfig(t, `{}`))
+	cs, err := openConfigStore(writeConfig(t, `{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,7 +478,7 @@ func TestDMAccessFollowsAllowAnyDM(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			cfg, err := LoadConfig(writeConfig(t, tc.config))
+			cfg, err := loadConfig(writeConfig(t, tc.config))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -493,7 +493,7 @@ func TestRemovingTheLastNumberDoesNotOpenDMs(t *testing.T) {
 	// A config from before allow_any_dm existed: once the dashboard removes
 	// its last number, the list is empty and the flag is still unset.
 	t.Setenv("HOME", t.TempDir())
-	cs, err := OpenConfigStore(writeConfig(t, `{"allowed_numbers":["15551234567"]}`))
+	cs, err := openConfigStore(writeConfig(t, `{"allowed_numbers":["15551234567"]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -554,7 +554,7 @@ func TestDotEnvIsNotRead(t *testing.T) {
 				path = "config.json"
 			}
 			logs := captureLog(t)
-			cs, err := OpenConfigStore(path)
+			cs, err := openConfigStore(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -602,7 +602,7 @@ func TestConfigVersionOnDisk(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		const body = `{"model": "sonnet", "log_level": "info"}`
 		path := writeConfig(t, body)
-		cs, err := OpenConfigStore(path)
+		cs, err := openConfigStore(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -619,7 +619,7 @@ func TestConfigVersionOnDisk(t *testing.T) {
 		if string(raw["version"]) != "2" || string(raw["brain_model"]) != `"sonnet"` || raw["model"] != nil {
 			t.Errorf("saved version %s, brain_model %s, model %s; want 2, \"sonnet\" and no model", raw["version"], raw["brain_model"], raw["model"])
 		}
-		if _, err := OpenConfigStore(path); err != nil {
+		if _, err := openConfigStore(path); err != nil {
 			t.Errorf("the saved file does not load: %v", err)
 		}
 	})
@@ -627,7 +627,7 @@ func TestConfigVersionOnDisk(t *testing.T) {
 	t.Run("no file", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		path := filepath.Join(t.TempDir(), "config.json")
-		cs, err := OpenConfigStore(path)
+		cs, err := openConfigStore(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -643,7 +643,7 @@ func TestConfigVersionOnDisk(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		path := writeConfig(t, `{"version": 2, "model": "sonnet"}`)
 		logs := captureLog(t)
-		cs, err := OpenConfigStore(path)
+		cs, err := openConfigStore(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -659,7 +659,7 @@ func TestConfigVersionOnDisk(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		const body = `{"version": 3, "allowed_numbers": ["15551234567"], "a_newer_setting": true}`
 		path := writeConfig(t, body)
-		_, err := OpenConfigStore(path)
+		_, err := openConfigStore(path)
 		if err == nil || !errors.Is(err, config.ErrTooNew) {
 			t.Fatalf("err = %v, want errConfigTooNew", err)
 		}
@@ -675,7 +675,7 @@ func TestConfigVersionOnDisk(t *testing.T) {
 
 	t.Run("a newer dashboard save", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
-		cs, err := OpenConfigStore(writeConfig(t, `{}`))
+		cs, err := openConfigStore(writeConfig(t, `{}`))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -684,10 +684,10 @@ func TestConfigVersionOnDisk(t *testing.T) {
 			t.Fatal(err)
 		}
 		newer := strings.Replace(string(whole), `"version":2`, `"version":3`, 1)
-		if _, err := decodeConfigReplacement([]byte(newer)); !errors.Is(err, config.ErrTooNew) {
+		if _, err := config.DecodeReplacement([]byte(newer)); !errors.Is(err, config.ErrTooNew) {
 			t.Errorf("a version 3 save: err = %v, want errConfigTooNew", err)
 		}
-		if _, err := decodeConfigReplacement(whole); err != nil {
+		if _, err := config.DecodeReplacement(whole); err != nil {
 			t.Errorf("a version 2 save: %v", err)
 		}
 	})

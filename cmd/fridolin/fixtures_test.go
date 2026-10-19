@@ -77,7 +77,7 @@ func TestGoldenConfigFixtures(t *testing.T) {
 			}
 			s := newScrubber(root)
 			logs := captureLog(t)
-			cs, err := OpenConfigStore(path)
+			cs, err := openConfigStore(path)
 			if err != nil {
 				t.Fatal(err)
 			}

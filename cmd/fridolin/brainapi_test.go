@@ -250,7 +250,7 @@ func TestBridgePrunesStaleRunTokens(t *testing.T) {
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	data := filepath.Join(home, "data")
-	cfgs, err := OpenConfigStore(writeConfig(t, `{"data_dir": "`+data+`", "http_listen": "off"}`))
+	cfgs, err := openConfigStore(writeConfig(t, `{"data_dir": "`+data+`", "http_listen": "off"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

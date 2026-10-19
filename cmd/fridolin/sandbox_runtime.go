@@ -328,7 +328,7 @@ func sandboxInstallLayoutOf(l bridgeLayout) sandbox.InstallLayout {
 func (sp *SandboxProfiler) Profile(id string) (string, error) {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
-	ctx := sandboxContextNow(config.HomeDir())
+	ctx := sandboxContextNow(homeDir())
 	var layout sandbox.InstallLayout
 	if sp.bridgeExe != "" {
 		layout = sandboxInstallLayoutOf(layoutOf(sp.bridgeExe))

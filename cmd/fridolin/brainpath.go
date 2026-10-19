@@ -43,7 +43,7 @@ type pathOwner struct {
 func pathOwners(cfg *config.Config) []pathOwner {
 	var out []pathOwner
 	for _, ref := range cfg.BrainDirs {
-		dir := ref.Dir()
+		dir := ref.Dir(homeDir())
 		if !filepath.IsAbs(dir) {
 			continue
 		}

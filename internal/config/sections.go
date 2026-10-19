@@ -138,7 +138,7 @@ type BrainRef struct {
 // Dir is the brain's folder with ~ expanded, for code that works on the
 // file layer, where Path is kept as typed. The Resolve configuration has
 // Path expanded already.
-func (r BrainRef) Dir() string { return fsx.ExpandHome(r.Path, HomeDir()) }
+func (r BrainRef) Dir(home string) string { return fsx.ExpandHome(r.Path, home) }
 
 // IsLoopbackAddr reports whether addr binds to a loopback interface.
 func IsLoopbackAddr(addr string) bool {

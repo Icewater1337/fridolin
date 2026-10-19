@@ -13,7 +13,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -27,7 +26,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/textx"
-	"github.com/Icewater1337/fridolin/internal/trigger"
 	"github.com/Icewater1337/fridolin/internal/version"
 )
 
@@ -130,6 +128,10 @@ const (
 
 // configPathFrom is configPath, and says where the file came from.
 func configPathFrom(flagValue string) (path, source string) {
+	return configPathFromPaths(flagValue, configPaths())
+}
+
+func configPathFromPaths(flagValue string, paths config.Paths) (path, source string) {
 	if old := os.Getenv("CONFIG_FILE"); old != "" {
 		log.Printf("warning: CONFIG_FILE=%s is ignored: set FRIDOLIN_CONFIG instead, or pass --config", old)
 	}
@@ -139,7 +141,7 @@ func configPathFrom(flagValue string) (path, source string) {
 	if p := os.Getenv("FRIDOLIN_CONFIG"); p != "" {
 		return p, configFromEnv
 	}
-	return filepath.Join(config.DefaultDataDir(config.HomeDir()), "config.json"), configFromDefault
+	return config.DefaultPath(paths), configFromDefault
 }
 
 // resolvedPaths are the config file and the data dir a command uses, both
@@ -154,11 +156,12 @@ type resolvedPaths struct {
 // resolvePaths finds the config file as configPath does and the data dir it
 // names, as loading it would, without creating either.
 func resolvePaths(configFlag string) (resolvedPaths, error) {
-	home := config.HomeDir()
+	home := homeDir()
 	if home == "" {
 		return resolvedPaths{}, errors.New("getting home dir: $HOME is not set")
 	}
-	path, source := configPathFrom(configFlag)
+	paths := configPathsFor(home)
+	path, source := configPathFromPaths(configFlag, paths)
 	// A missing file is a fresh install, which gets the default data dir.
 	var file struct {
 		DataDir string `json:"data_dir"`
@@ -170,7 +173,7 @@ func resolvePaths(configFlag string) (resolvedPaths, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return resolvedPaths{}, fmt.Errorf("reading config file %q: %w", path, err)
 	}
-	dir, dirSource := config.ResolveDataDir(file.DataDir, home)
+	dir, dirSource := config.ResolveDataDir(file.DataDir, paths)
 	return resolvedPaths{Config: absPath(path), ConfigSource: source, DataDir: absPath(dir), DataDirSource: dirSource}, nil
 }
 
@@ -209,61 +212,6 @@ func pathsCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "config=%s\nconfig_source=%s\ndata_dir=%s\ndata_dir_source=%s\n", p.Config, p.ConfigSource, p.DataDir, p.DataDirSource)
 	return 0
-}
-
-// starterConfig is written on the very first run, so the bridge can start and
-// everything else can be set up in the dashboard.
-func starterConfig() *config.Config {
-	f := false
-	return &config.Config{
-		Comment:                    "Edit this in the dashboard (fridolin open). Every option: docs/CONFIGURATION.md",
-		Version:                    config.Version,
-		AllowedNumbers:             []string{},
-		AllowAnyDM:                 &f,
-		AllowedGroups:              []string{},
-		Triggers:                   trigger.FromStrings([]string{"@claude"}),
-		DangerouslySkipPermissions: true,
-		HTTPListen:                 config.DefaultHTTPListen,
-		OTPGuard:                   true,
-		Sandbox:                    config.SandboxConfig{Enabled: runtime.GOOS == "darwin", DenyPaths: []string{}, AllowPaths: []string{}},
-		// A new install has no scripts written before tokens.
-		ScriptAPI: config.ScriptAPIConfig{TokenlessSend: &f},
-	}
-}
-
-func ensureConfigFile(path string) error {
-	return writeStarterConfig(path, "", "")
-}
-
-// writeStarterConfig writes the starter config to path unless there is a
-// file there. Its data_dir is dataDir, else starterDataDir's: without one
-// every start would pick the data dir again, by which folders exist.
-func writeStarterConfig(path, claudePath, dataDir string) error {
-	if _, err := os.Stat(path); err == nil || !os.IsNotExist(err) {
-		return err
-	}
-	cfg := starterConfig()
-	cfg.ClaudePath = claudePath
-	cfg.DataDir = dataDir
-	if dataDir == "" {
-		cfg.DataDir = starterDataDir(config.HomeDir())
-	}
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return err
-	}
-	log.Printf("No config found — writing a starter config to %s", path)
-	return fsx.WriteFileAtomic(path, append(data, '\n'), 0o600, false)
-}
-
-// starterDataDir is the data dir a new config gets when none is given: the
-// folder the bridge would pick now, written with ~ so that the config
-// still holds when a backup of it is restored under another home folder.
-func starterDataDir(home string) string {
-	if _, source := config.ResolveDataDir("", home); source == config.DataDirFromLegacy {
-		return "~/" + config.LegacyDataDirName
-	}
-	return "~/" + config.DataDirName
 }
 
 // runOptions are the run command's flags.
@@ -307,15 +255,16 @@ func runCmd(args []string) {
 			console = lf
 		}
 	}
-	ring, path := runLog(console, opts.config)
+	inputs := configOptions()
+	ring, path := runLogWithPaths(console, opts.config, inputs.Paths)
 	if logErr != nil {
 		// Once the log reaches the dashboard too.
 		log.Printf("%v; logging to stderr without rotating it", logErr)
 	}
-	if err := ensureConfigFile(path); err != nil {
+	if err := config.EnsureFile(path, inputs.Paths, inputs.GOOS); err != nil {
 		log.Fatalf("creating config: %v", err)
 	}
-	cfgs, err := OpenConfigStore(path)
+	cfgs, err := config.Open(path, inputs)
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}
@@ -426,10 +375,14 @@ func stopOnSignals(cancel context.CancelCauseFunc, brains *BrainManager) func() 
 // to start (no config, one that does not load, another bridge on the data
 // dir).
 func runLog(console io.Writer, configFlag string) (*logx.Ring, string) {
+	return runLogWithPaths(console, configFlag, configPaths())
+}
+
+func runLogWithPaths(console io.Writer, configFlag string, paths config.Paths) (*logx.Ring, string) {
 	ring := logx.NewRing(logRingLines)
 	log.SetOutput(io.MultiWriter(console, ring))
 	log.Printf("Starting %s", version.Line())
-	path, source := configPathFrom(configFlag)
+	path, source := configPathFromPaths(configFlag, paths)
 	log.Printf("Config file: %s (%s)", absPath(path), source)
 	return ring, path
 }
@@ -437,8 +390,8 @@ func runLog(console io.Writer, configFlag string) (*logx.Ring, string) {
 // logDataDir names the data dir the bridge runs on, and with it the
 // WhatsApp session, and where it came from: without data_dir in the
 // config, which folders exist decides it.
-func logDataDir(cfgs *ConfigStore) {
-	home := config.HomeDir()
+func logDataDir(cfgs *config.Store) {
+	home := cfgs.Paths().Home
 	dir := cfgs.Get().DataDir
 	log.Printf("Data dir: %s (%s)", absPath(dir), config.DataDirSource(cfgs.FileCopy().DataDir, dir, home))
 }
@@ -449,15 +402,16 @@ func initCmd(args []string) {
 	claudePath := fs.String("claude-path", "", "path to the Claude Code CLI")
 	dataDir := fs.String("data-dir", "", "data folder to write into the config (default ~/.fridolin, or the folder from before the rename when only that exists)")
 	_ = fs.Parse(args)
-	path := configPath(*cfgPath)
+	inputs := configOptions()
+	path, _ := configPathFromPaths(*cfgPath, inputs.Paths)
 	if fsx.Exists(path) {
 		fmt.Printf("%s already exists — leaving it alone.\n", path)
 		return
 	}
-	if err := writeStarterConfig(path, *claudePath, *dataDir); err != nil {
+	if err := config.WriteStarter(path, *claudePath, *dataDir, inputs.Paths, inputs.GOOS); err != nil {
 		log.Fatalf("writing %s: %v", path, err)
 	}
-	if _, err := LoadConfig(path); err != nil {
+	if _, err := config.Load(path, inputs); err != nil {
 		log.Fatalf("the starter config does not load: %v", err)
 	}
 }
@@ -467,9 +421,10 @@ func openCmd(args []string) {
 	cfgPath := fs.String("config", "", configFlagHelp)
 	printOnly := fs.Bool("print", false, "print the URL instead of opening it")
 	_ = fs.Parse(args)
-	path := configPath(*cfgPath)
+	inputs := configOptions()
+	path, _ := configPathFromPaths(*cfgPath, inputs.Paths)
 
-	cfg, err := LoadExistingConfig(path)
+	cfg, err := config.LoadExisting(path, inputs)
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}
@@ -519,7 +474,7 @@ func rotateTokenCmd(args []string) {
 	fs := flag.NewFlagSet("rotate-token", flag.ExitOnError)
 	cfgPath := fs.String("config", "", configFlagHelp)
 	_ = fs.Parse(args)
-	cfg, err := LoadExistingConfig(configPath(*cfgPath))
+	cfg, err := loadExistingConfig(configPath(*cfgPath))
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}
@@ -628,9 +583,10 @@ func leftOutBrains(issues []BrainIssue) []string {
 // is logged meanwhile and the error that ends it, if one does, are
 // redacted: the output then goes into a public bug report as it is.
 func writeCheck(w io.Writer, o checkOptions) error {
+	inputs := configOptions()
 	var red *redactor
 	if o.redact {
-		red = newRedactor(config.HomeDir())
+		red = newRedactor(inputs.Paths.Home)
 		red.addChats(o.routes...)
 		// The log entries of loading the config name paths, and the
 		// allowed chats it finds odd, as they are written.
@@ -638,11 +594,11 @@ func writeCheck(w io.Writer, o checkOptions) error {
 		log.SetOutput(redactingWriter{prev, red})
 		defer log.SetOutput(prev)
 	}
-	path := configPath(o.config)
+	path, _ := configPathFromPaths(o.config, inputs.Paths)
 	if red != nil {
 		red.addConfig(path)
 	}
-	cfg, err := LoadExistingConfig(path)
+	cfg, err := config.LoadExisting(path, inputs)
 	if err != nil {
 		return red.err(fmt.Errorf("loading config: %w", err))
 	}

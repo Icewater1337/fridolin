@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -17,7 +18,7 @@ import (
 )
 
 func TestCodexDefaultsAndValidation(t *testing.T) {
-	cfg, err := config.Resolve(&config.Config{})
+	cfg, err := config.Resolve(&config.Config{}, configPaths(), runtime.GOOS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,7 +26,7 @@ func TestCodexDefaultsAndValidation(t *testing.T) {
 		t.Fatalf("wrong agent defaults: %s %s %s %s", cfg.AgentProvider, cfg.CodexPath, cfg.CodexModel, cfg.CodexEffort)
 	}
 	for _, c := range []*config.Config{{AgentProvider: "other"}, {CodexEffort: "minimal"}} {
-		if _, err := config.Resolve(c); err == nil {
+		if _, err := config.Resolve(c, configPaths(), runtime.GOOS); err == nil {
 			t.Fatal("accepted invalid configuration")
 		}
 	}

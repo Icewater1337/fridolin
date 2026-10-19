@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,11 +24,11 @@ import (
 
 // openTxStore opens a config store on a config.json with body, in a temp
 // HOME of its own.
-func openTxStore(t *testing.T, body string) *ConfigStore {
+func openTxStore(t *testing.T, body string) *config.Store {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	cs, err := OpenConfigStore(writeConfig(t, body))
+	cs, err := openConfigStore(writeConfig(t, body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +125,7 @@ func TestGetConfigSendsTheETagOfItsConfig(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if got := etagOf(append(data, '\n')); got != v.ETag {
+		if got := configETag(append(data, '\n')); got != v.ETag {
 			return fmt.Errorf("etag %s with a config whose hash is %s (_comment %q)", v.ETag, got, c.Comment)
 		}
 		return nil
@@ -276,9 +278,9 @@ func TestBrainsRunOnTheLatestConfig(t *testing.T) {
 func TestBridgeAppliesTheLatestConfigOnALateNotification(t *testing.T) {
 	tb := newTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
-	rename := func(name string) ConfigSnapshot {
+	rename := func(name string) config.Snapshot {
 		t.Helper()
-		if err := tb.cfgs.UpdateManifest("main", func(m *manifest.Manifest) error { m.Name = name; return nil }); err != nil {
+		if err := updateManifest(tb.cfgs, "main", func(m *manifest.Manifest) error { m.Name = name; return nil }); err != nil {
 			t.Fatal(err)
 		}
 		return tb.cfgs.Snapshot()
@@ -286,12 +288,7 @@ func TestBridgeAppliesTheLatestConfigOnALateNotification(t *testing.T) {
 	before := tb.cfgs.Snapshot()
 	first := rename("First")
 	rename("Second")
-	tb.cfgs.subsMu.Lock()
-	subs := slices.Clone(tb.cfgs.subs)
-	tb.cfgs.subsMu.Unlock()
-	for _, fn := range subs {
-		fn(before.Effective, first.Effective) // the first update's, late
-	}
+	tb.configChanged(before.Effective, first.Effective) // the first update's, late
 	if got := tb.brainMgr.Get("main").Snapshot().Name; got != "Second" {
 		t.Errorf("after a late notification the brain runs as %q, want Second", got)
 	}
@@ -489,7 +486,7 @@ func TestTheConfigMakesNoFolders(t *testing.T) {
 		}
 	}
 
-	if _, err := LoadConfig(filepath.Join(root, "typo.json")); err != nil {
+	if _, err := loadConfig(filepath.Join(root, "typo.json")); err != nil {
 		t.Fatal(err)
 	}
 	noFolders("loading a config file that is not there")
@@ -499,7 +496,7 @@ func TestTheConfigMakesNoFolders(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cs, err := OpenConfigStore(path)
+	cs, err := openConfigStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -625,11 +622,11 @@ func TestConfigExternalEditMigrationKeepsItsETag(t *testing.T) {
 		t.Fatal(err)
 	}
 	called := false
-	if _, err := cs.Update(old, func(c *config.Config) error { called = true; return nil }); !errors.Is(err, ErrConfigConflict) || called {
+	if _, err := cs.Update(old, func(c *config.Config) error { called = true; return nil }); !errors.Is(err, config.ErrConflict) || called {
 		t.Fatalf("update = %v, mutation called %v; want conflict before mutation", err, called)
 	}
 	snap := cs.Snapshot()
-	if snap.File.Version != config.Version || snap.Effective.BrainModel != "opus" || snap.File.BrainModel != "opus" || snap.ETag != etagOf([]byte(external)) {
+	if snap.File.Version != config.Version || snap.Effective.BrainModel != "opus" || snap.File.BrainModel != "opus" || snap.ETag != configETag([]byte(external)) {
 		t.Fatalf("hand edit was not migrated into a consistent snapshot: %+v", snap)
 	}
 	if data, err := os.ReadFile(cs.Path()); err != nil || string(data) != external {
@@ -646,7 +643,7 @@ func TestConfigExternalEditMigrationKeepsItsETag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cs.ETag() != etagOf(data) {
+	if cs.ETag() != configETag(data) {
 		t.Fatal("saved snapshot ETag does not identify the saved file")
 	}
 	if backup, err := os.ReadFile(cs.Path() + ".bak"); err != nil || string(backup) != external {
@@ -673,3 +670,6 @@ func TestConfigUpdateRefusesANewerExternalVersion(t *testing.T) {
 		t.Fatalf("future file changed: %s (%v)", data, err)
 	}
 }
+
+// configETag independently checks the raw file-byte checksum contract.
+func configETag(data []byte) string { sum := sha256.Sum256(data); return hex.EncodeToString(sum[:8]) }

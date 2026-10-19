@@ -162,7 +162,7 @@ func TestBridgeReapsWhenItStarts(t *testing.T) {
 	if recordRun(data, "a", cmd.Process.Pid) == "" {
 		t.Fatal("not recorded")
 	}
-	cfgs, err := OpenConfigStore(writeConfig(t, `{"brain_mode": true, "data_dir": "`+data+`"}`))
+	cfgs, err := openConfigStore(writeConfig(t, `{"brain_mode": true, "data_dir": "`+data+`"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

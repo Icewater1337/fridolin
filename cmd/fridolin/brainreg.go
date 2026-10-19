@@ -67,7 +67,7 @@ func ResolveBrains(cfg *config.Config) ([]manifest.Spec, []BrainIssue) {
 		// The dashboard refuses such a folder, but brain_dirs can be edited
 		// by hand, and a folder can be moved, or a symlink on its way
 		// changed, after it was added.
-		if err := checkBrainDir(dir, ref.Path, cfg, config.HomeDir()); err != nil {
+		if err := checkBrainDir(dir, ref.Path, cfg, homeDir()); err != nil {
 			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "invalid", Detail: "the folder " + err.Error() + ", so it cannot hold a brain; move the brain to a folder of its own", entry: i, routing: m.Routing})
 			continue
 		}
@@ -96,7 +96,7 @@ func ResolveBrains(cfg *config.Config) ([]manifest.Spec, []BrainIssue) {
 // CheckBrainPath vets a folder before it becomes a brain. Problems block it;
 // warnings are shown but allowed.
 func CheckBrainPath(path string, cfg *config.Config, otherDirs []string) (abs string, problems, warnings []string) {
-	home := config.HomeDir()
+	home := homeDir()
 	abs = fsx.Canonical(fsx.ExpandHome(strings.TrimSpace(path), home))
 	if !filepath.IsAbs(abs) {
 		return abs, []string{"enter an absolute path (or one starting with ~/)"}, nil
@@ -174,7 +174,7 @@ func checkBrainDir(dir, configured string, cfg *config.Config, home string) erro
 // built this way, inside the home folder by construction. ok is false for
 // the home folder itself and for anything outside it.
 func inHome(p string) (string, bool) {
-	home := fsx.Canonical(config.HomeDir())
+	home := fsx.Canonical(homeDir())
 	rel, err := filepath.Rel(home, p)
 	if home == "" || err != nil || rel == "." || !filepath.IsLocal(rel) {
 		return "", false
@@ -182,9 +182,9 @@ func inHome(p string) (string, bool) {
 	return filepath.Join(home, rel), true
 }
 
-// UpdateManifest changes one brain's manifest, see updateManifestIn.
-func (cs *ConfigStore) UpdateManifest(id string, mutate func(m *manifest.Manifest) error) error {
-	_, err := cs.UpdateTx("", func(c *config.Config, tx *Tx) error { return updateManifestIn(c, tx, id, mutate) })
+// updateManifest changes one brain's manifest, see updateManifestIn.
+func updateManifest(cs *config.Store, id string, mutate func(m *manifest.Manifest) error) error {
+	_, err := cs.UpdateTx("", func(c *config.Config, tx *config.Tx) error { return updateManifestIn(c, tx, id, mutate) })
 	return err
 }
 
@@ -193,7 +193,7 @@ func (cs *ConfigStore) UpdateManifest(id string, mutate func(m *manifest.Manifes
 // brain.json in the brain's folder, so that the two change together and
 // the change is not reported as drift. It is the one way the bridge
 // changes a manifest; an error from mutate leaves both as they were.
-func updateManifestIn(c *config.Config, tx *Tx, id string, mutate func(m *manifest.Manifest) error) error {
+func updateManifestIn(c *config.Config, tx *config.Tx, id string, mutate func(m *manifest.Manifest) error) error {
 	for i := range c.BrainDirs {
 		ref := &c.BrainDirs[i]
 		if ref.Approved == nil || ref.Approved.ID != id {
@@ -206,7 +206,7 @@ func updateManifestIn(c *config.Config, tx *Tx, id string, mutate func(m *manife
 		if m.ID != id {
 			return fmt.Errorf("a brain's id cannot change")
 		}
-		if err := tx.WriteManifest(ref.Dir(), &m); err != nil {
+		if err := tx.WriteManifest(ref.Dir(homeDir()), &m); err != nil {
 			return err
 		}
 		n := m.Normalized()
