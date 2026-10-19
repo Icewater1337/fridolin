@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -45,7 +47,7 @@ func TestNewManifestWriteFailureLeavesNoFile(t *testing.T) {
 	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &limit); err != nil {
 		t.Fatal(err)
 	}
-	err := WriteManifest(dir, &BrainManifest{ID: "new", Name: strings.Repeat("n", 4096)}, false)
+	err := manifest.Write(dir, &manifest.Manifest{ID: "new", Name: strings.Repeat("n", 4096)}, false)
 	if err == nil {
 		t.Fatal("manifest write exceeded the file-size limit without failing")
 	}
@@ -73,10 +75,10 @@ func TestAssignGroupPutsBackTheFirstBrainJSON(t *testing.T) {
 		t.Skip("root can write into a read-only folder")
 	}
 	h := newHarness(t, "")
-	a := h.AddBrain(BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
-	b := h.AddBrain(BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{Groups: []string{harnessGroup}}})
-	aBefore := readFile(t, filepath.Join(a, ManifestFile))
-	bBefore := readFile(t, filepath.Join(b, ManifestFile))
+	a := h.AddBrain(manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
+	b := h.AddBrain(manifest.Manifest{ID: "b", Name: "B", Routing: manifest.Routing{Groups: []string{harnessGroup}}})
+	aBefore := readFile(t, filepath.Join(a, manifest.File))
+	bBefore := readFile(t, filepath.Join(b, manifest.File))
 	cfgBefore := readFile(t, filepath.Join(h.Root(), "config.json"))
 	// b's brain.json is replaced through a temp file beside it.
 	if err := os.Chmod(b, 0o500); err != nil {
@@ -90,10 +92,10 @@ func TestAssignGroupPutsBackTheFirstBrainJSON(t *testing.T) {
 	if w.Code != 422 || !strings.Contains(w.Body.String(), "permission denied") {
 		t.Errorf("allow with b's folder read-only: %d %s, want the 422 with the write's error", w.Code, w.Body.String())
 	}
-	if got := readFile(t, filepath.Join(a, ManifestFile)); got != aBefore {
+	if got := readFile(t, filepath.Join(a, manifest.File)); got != aBefore {
 		t.Errorf("a's brain.json kept the group:\n%s", got)
 	}
-	if got := readFile(t, filepath.Join(b, ManifestFile)); got != bBefore {
+	if got := readFile(t, filepath.Join(b, manifest.File)); got != bBefore {
 		t.Errorf("b's brain.json changed:\n%s", got)
 	}
 	if got := readFile(t, filepath.Join(h.Root(), "config.json")); got != cfgBefore {
@@ -118,7 +120,7 @@ func TestAFailedAddLeavesNoBrainJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(h.Root(), 0o700) })
-	w := h.Do("POST", "/api/brains", map[string]any{"path": "~/new", "manifest": BrainManifest{ID: "new", Name: "New"}, "create_dir": true})
+	w := h.Do("POST", "/api/brains", map[string]any{"path": "~/new", "manifest": manifest.Manifest{ID: "new", Name: "New"}, "create_dir": true})
 	if err := os.Chmod(h.Root(), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -128,10 +130,10 @@ func TestAFailedAddLeavesNoBrainJSON(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(h.Home(), "new")); !os.IsNotExist(err) {
 		t.Errorf("the failed add left its folder: %v", err)
 	}
-	if w := h.Do("POST", "/api/brains", map[string]any{"path": "~/new", "manifest": BrainManifest{ID: "new", Name: "New"}, "create_dir": true}); w.Code != 200 {
+	if w := h.Do("POST", "/api/brains", map[string]any{"path": "~/new", "manifest": manifest.Manifest{ID: "new", Name: "New"}, "create_dir": true}); w.Code != 200 {
 		t.Errorf("adding the folder again: %d %s", w.Code, w.Body.String())
 	}
-	if m, err := ReadManifest(filepath.Join(h.Home(), "new")); err != nil || m.Name != "New" {
+	if m, err := manifest.Read(filepath.Join(h.Home(), "new")); err != nil || m.Name != "New" {
 		t.Errorf("brain.json after the add: %+v, %v", m, err)
 	}
 }
@@ -154,12 +156,12 @@ func TestAddWritesBrainJSONWithTheRegistration(t *testing.T) {
 	<-inside
 	added := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
-		added <- tb.do("POST", "/api/brains", map[string]any{"path": "~/b", "manifest": BrainManifest{ID: "b", Name: "B"}, "create_dir": true})
+		added <- tb.do("POST", "/api/brains", map[string]any{"path": "~/b", "manifest": manifest.Manifest{ID: "b", Name: "B"}, "create_dir": true})
 	}()
 	dir := filepath.Join(tb.home, "b")
 	waitFor(t, 5*time.Second, "the add's scaffold", func() bool { return fsx.Exists(filepath.Join(dir, "skills", "README.md")) })
 	time.Sleep(100 * time.Millisecond) // what the scaffold would write next
-	if _, err := os.Lstat(filepath.Join(dir, ManifestFile)); !os.IsNotExist(err) {
+	if _, err := os.Lstat(filepath.Join(dir, manifest.File)); !os.IsNotExist(err) {
 		t.Errorf("brain.json is there before the update that registers the brain: %v", err)
 	}
 	close(release)
@@ -171,10 +173,10 @@ func TestAddWritesBrainJSONWithTheRegistration(t *testing.T) {
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &resp) != nil {
 		t.Fatalf("add: %d %s", w.Code, w.Body.String())
 	}
-	if !slices.Contains(resp.Created, ManifestFile) {
+	if !slices.Contains(resp.Created, manifest.File) {
 		t.Errorf("created = %v, want brain.json in it", resp.Created)
 	}
-	if m, err := ReadManifest(dir); err != nil || m.ID != "b" {
+	if m, err := manifest.Read(dir); err != nil || m.ID != "b" {
 		t.Errorf("brain.json after the add: %+v, %v", m, err)
 	}
 }
@@ -184,15 +186,15 @@ func TestAddWritesBrainJSONWithTheRegistration(t *testing.T) {
 // writing it back would drop the settings this version does not know.
 func TestANewerBrainJSONIsRefusedAndKept(t *testing.T) {
 	h := newHarness(t, "")
-	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
-	path := filepath.Join(dir, ManifestFile)
+	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
+	path := filepath.Join(dir, manifest.File)
 	newer := `{"version": 2, "id": "main", "name": "Main", "routing": {"handles_dms": true}, "voice": {"reply": "audio"}}` + "\n"
 	if err := os.WriteFile(path, []byte(newer), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	const why = "version 2 is newer than the version 1 this build of Fridolin reads"
 
-	if _, err := ReadManifest(dir); err == nil || !strings.Contains(err.Error(), why) {
+	if _, err := manifest.Read(dir); err == nil || !strings.Contains(err.Error(), why) {
 		t.Errorf("ReadManifest: %v, want the versions named", err)
 	}
 	views := h.brainViews()
@@ -204,7 +206,7 @@ func TestANewerBrainJSONIsRefusedAndKept(t *testing.T) {
 		do   func() (int, string)
 	}{
 		{"saving its settings", func() (int, string) {
-			w := h.Do("PUT", "/api/brains/main", map[string]any{"manifest": BrainManifest{ID: "main", Name: "Renamed", Routing: BrainRouting{HandlesDMs: true}}})
+			w := h.Do("PUT", "/api/brains/main", map[string]any{"manifest": manifest.Manifest{ID: "main", Name: "Renamed", Routing: manifest.Routing{HandlesDMs: true}}})
 			return w.Code, w.Body.String()
 		}},
 		{"its backup settings", func() (int, string) {
@@ -212,13 +214,13 @@ func TestANewerBrainJSONIsRefusedAndKept(t *testing.T) {
 			return w.Code, w.Body.String()
 		}},
 		{"approving it", func() (int, string) {
-			var m BrainManifest
+			var m manifest.Manifest
 			_ = json.Unmarshal([]byte(newer), &m)
 			w := h.Do("POST", "/api/brains/main/approve", map[string]any{"manifest": m})
 			return w.Code, w.Body.String()
 		}},
 		{"WriteManifest", func() (int, string) {
-			err := WriteManifest(dir, &BrainManifest{ID: "main", Name: "Main"}, true)
+			err := manifest.Write(dir, &manifest.Manifest{ID: "main", Name: "Main"}, true)
 			if err == nil {
 				return 200, ""
 			}
@@ -246,12 +248,12 @@ func TestUnknownBrainJSONFieldsAreLogged(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	dir := t.TempDir()
 	body := `{"version": 1, "id": "a", "name": "A", "nmae": "x", "routing": {"handles_dm": true, "groups": []}}`
-	if err := os.WriteFile(filepath.Join(dir, ManifestFile), []byte(body), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, manifest.File), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	logs := captureLog(t)
 	for range 3 {
-		m, err := ReadManifest(dir)
+		m, err := manifest.Read(dir)
 		if err != nil || m.ID != "a" {
 			t.Fatalf("ReadManifest: %+v, %v", m, err)
 		}
@@ -262,14 +264,14 @@ func TestUnknownBrainJSONFieldsAreLogged(t *testing.T) {
 			lines = append(lines, l)
 		}
 	}
-	if len(lines) != 1 || !strings.Contains(lines[0], "[nmae routing.handles_dm]") || !strings.Contains(lines[0], filepath.Join(dir, ManifestFile)) {
+	if len(lines) != 1 || !strings.Contains(lines[0], "[nmae routing.handles_dm]") || !strings.Contains(lines[0], filepath.Join(dir, manifest.File)) {
 		t.Errorf("logged %q, want one line naming nmae and routing.handles_dm", lines)
 	}
 }
 
 // breakApproved changes brain id's approved manifest in config.json with
 // edit, as a hand edit of the file can, past the checks of the dashboard.
-func breakApproved(t *testing.T, tb *testBridge, id string, edit func(m *BrainManifest)) {
+func breakApproved(t *testing.T, tb *testBridge, id string, edit func(m *manifest.Manifest)) {
 	t.Helper()
 	if _, err := tb.cfgs.Update("", func(c *Config) error {
 		for _, ref := range c.BrainDirs {
@@ -288,10 +290,10 @@ func breakApproved(t *testing.T, tb *testBridge, id string, edit func(m *BrainMa
 // an edit that makes brains clash is still refused.
 func TestOneBrokenBrainDoesNotBlockTheOthers(t *testing.T) {
 	tb := newTestBridge(t, "")
-	a := tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
-	tb.addFolderBrain(t, BrainManifest{ID: "b", Name: "B"})
-	tb.addFolderBrain(t, BrainManifest{ID: "c", Name: "C", Routing: BrainRouting{Default: true}})
-	breakApproved(t, tb, "b", func(m *BrainManifest) { m.Effort = "huge" })
+	a := tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "b", Name: "B"})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "c", Name: "C", Routing: manifest.Routing{Default: true}})
+	breakApproved(t, tb, "b", func(m *manifest.Manifest) { m.Effort = "huge" })
 	if _, issues := ResolveBrains(tb.cfgs.Get()); !slices.ContainsFunc(issues, func(is BrainIssue) bool { return is.ID == "b" && is.Kind == "invalid" }) {
 		t.Fatalf("b is not invalid: %+v", issues)
 	}
@@ -303,11 +305,11 @@ func TestOneBrokenBrainDoesNotBlockTheOthers(t *testing.T) {
 		contains string
 	}{
 		{"saving a", func() *httptest.ResponseRecorder {
-			return tb.do("PUT", "/api/brains/a", map[string]any{"manifest": BrainManifest{ID: "a", Name: "A2", Routing: BrainRouting{HandlesDMs: true}}})
+			return tb.do("PUT", "/api/brains/a", map[string]any{"manifest": manifest.Manifest{ID: "a", Name: "A2", Routing: manifest.Routing{HandlesDMs: true}}})
 		}, 200, ""},
 		{"approving a's brain.json", func() *httptest.ResponseRecorder {
-			m := BrainManifest{ID: "a", Name: "A3", Routing: BrainRouting{HandlesDMs: true}}
-			if err := WriteManifest(a, &m, true); err != nil {
+			m := manifest.Manifest{ID: "a", Name: "A3", Routing: manifest.Routing{HandlesDMs: true}}
+			if err := manifest.Write(a, &m, true); err != nil {
 				t.Fatal(err)
 			}
 			return tb.do("POST", "/api/brains/a/approve", map[string]any{"manifest": m})
@@ -316,17 +318,17 @@ func TestOneBrokenBrainDoesNotBlockTheOthers(t *testing.T) {
 			return tb.do("POST", "/api/chats/allow", chatRequest{JID: "120363000000000000@g.us", Kind: "group", Brain: "a"})
 		}, 200, ""},
 		{"a clash", func() *httptest.ResponseRecorder {
-			return tb.do("PUT", "/api/brains/a", map[string]any{"manifest": BrainManifest{ID: "a", Name: "A3", Routing: BrainRouting{HandlesDMs: true, Default: true}}})
+			return tb.do("PUT", "/api/brains/a", map[string]any{"manifest": manifest.Manifest{ID: "a", Name: "A3", Routing: manifest.Routing{HandlesDMs: true, Default: true}}})
 		}, 422, `brains \"a\" and \"c\" are both marked default`},
 	}
 	for _, st := range steps {
-		before := readFile(t, filepath.Join(a, ManifestFile))
+		before := readFile(t, filepath.Join(a, manifest.File))
 		w := st.do()
 		if w.Code != st.code || !strings.Contains(w.Body.String(), st.contains) {
 			t.Errorf("%s: %d %s, want %d %s", st.name, w.Code, w.Body.String(), st.code, st.contains)
 		}
 		if st.code != 200 {
-			if got := readFile(t, filepath.Join(a, ManifestFile)); got != before {
+			if got := readFile(t, filepath.Join(a, manifest.File)); got != before {
 				t.Errorf("%s: the refused edit changed a's brain.json:\n%s", st.name, got)
 			}
 		}
@@ -345,16 +347,16 @@ func TestOneBrokenBrainDoesNotBlockTheOthers(t *testing.T) {
 func TestAllowingAGroupChecksTheBrains(t *testing.T) {
 	const group = "120363000000000000@g.us"
 	tb := newTestBridge(t, "")
-	a := tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{Groups: []string{group}}})
-	b := tb.addFolderBrain(t, BrainManifest{ID: "b", Name: "B"})
-	c := tb.addFolderBrain(t, BrainManifest{ID: "c", Name: "C", Routing: BrainRouting{HandlesDMs: true}})
-	breakApproved(t, tb, "b", func(m *BrainManifest) { m.Routing = BrainRouting{HandlesDMs: true, Groups: []string{group}} })
+	a := tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{Groups: []string{group}}})
+	b := tb.addFolderBrain(t, manifest.Manifest{ID: "b", Name: "B"})
+	c := tb.addFolderBrain(t, manifest.Manifest{ID: "c", Name: "C", Routing: manifest.Routing{HandlesDMs: true}})
+	breakApproved(t, tb, "b", func(m *manifest.Manifest) { m.Routing = manifest.Routing{HandlesDMs: true, Groups: []string{group}} })
 	if br := tb.brainMgr.BrainFor("15551234567@s.whatsapp.net", false); br == nil || br.ID() != "c" {
 		t.Fatalf("the DMs go to %v, want c", br)
 	}
 	var before []string
 	for _, dir := range []string{a, b, c} {
-		before = append(before, readFile(t, filepath.Join(dir, ManifestFile)))
+		before = append(before, readFile(t, filepath.Join(dir, manifest.File)))
 	}
 	cfgBefore := readFile(t, tb.cfgs.Path())
 
@@ -363,7 +365,7 @@ func TestAllowingAGroupChecksTheBrains(t *testing.T) {
 		t.Errorf("allow: %d %s, want the 422 for the DMs b and c would both claim", w.Code, w.Body.String())
 	}
 	for i, dir := range []string{a, b, c} {
-		if got := readFile(t, filepath.Join(dir, ManifestFile)); got != before[i] {
+		if got := readFile(t, filepath.Join(dir, manifest.File)); got != before[i] {
 			t.Errorf("the refused allow changed %s:\n%s", dir, got)
 		}
 	}

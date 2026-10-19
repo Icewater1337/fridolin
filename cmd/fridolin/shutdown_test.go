@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/platform"
 )
@@ -251,7 +253,7 @@ func secondSignalStopsAtOnce(t *testing.T, provider string) {
 	t.Helper()
 	addr := freePort(t)
 	root, cfg := cliFixture(t, `"http_listen": "`+addr+`", "debounce": {"quiet_ms": 0}`, func(home string) []BrainRef {
-		return []BrainRef{brainFolder(t, "~/main", BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})}
+		return []BrainRef{brainFolder(t, "~/main", manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})}
 	})
 	home := filepath.Join(root, "home")
 	configBytes, err := os.ReadFile(cfg)
@@ -396,7 +398,7 @@ func TestStopGivesTheRunInFlightItsGrace(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			setShutdownGrace(t, tc.grace)
 			h := newHarness(t, "")
-			dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+			dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", tc.runMS)
 			h.Inject(inbound{JID: harnessDM, Text: "almost done"})
 			h.WaitFor("the run", func() bool { return h.Running("main") })
@@ -452,7 +454,7 @@ func TestStopWaitsForTheDelivery(t *testing.T) {
 
 func TestStopWaitsForARemovedBrainsDelivery(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	entered, release := make(chan struct{}), make(chan struct{})
 	releaseDelivery := sync.OnceFunc(func() { close(release) })
 	defer releaseDelivery()
@@ -559,7 +561,7 @@ func TestStopWaitsForDeliveryAfterTheKillTimeout(t *testing.T) {
 // intervening messages takes long enough to schedule a worker.
 func TestResumeAppliesChangesBeforeStartingQueuedRuns(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	var started atomic.Int32
 	tb.brainMgr.SetHooks(BrainHooks{RunEnv: func(string) ([]string, func()) {
 		started.Add(1)
@@ -595,7 +597,7 @@ func TestResumeAppliesChangesBeforeStartingQueuedRuns(t *testing.T) {
 func TestShutdownKeepsWhatItHolds(t *testing.T) {
 	setShutdownGrace(t, 200*time.Millisecond)
 	h := newHarness(t, "")
-	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	h.WhatsApp(dmEvent("3EB0FIRST", textMsg("first")))
 	h.WaitFor("the first run", func() bool { return h.Running("main") })
@@ -656,7 +658,7 @@ func waitBatched(h *harness, n int) {
 // once.
 func TestShutdownKeepsTheDebouncedBatch(t *testing.T) {
 	h := newHarness(t, `{"debounce": {"quiet_ms": 60000, "max_wait_ms": 120000}}`)
-	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	h.WhatsApp(dmEvent("3EB0ONE", textMsg("part one")))
 	waitBatched(h, 1)
 	h.WhatsApp(dmEvent("3EB0TWO", textMsg("part two")))
@@ -684,7 +686,7 @@ func TestShutdownKeepsTheDebouncedBatch(t *testing.T) {
 func TestShutdownDropsWhatIsKeptTooLong(t *testing.T) {
 	setShutdownGrace(t, 200*time.Millisecond)
 	h := newHarness(t, "")
-	h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	h.WhatsApp(dmEvent("3EB0RUN", textMsg("a long one")))
 	h.WaitFor("the run", func() bool { return h.Running("main") })
@@ -715,7 +717,7 @@ func TestShutdownDropsWhatIsKeptTooLong(t *testing.T) {
 func TestShutdownKeepsWhatComesInDuringTheStop(t *testing.T) {
 	setShutdownGrace(t, 20*time.Second)
 	h := newHarness(t, "")
-	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "3000")
 	h.WhatsApp(dmEvent("3EB0FIRST", textMsg("first")))
 	h.WaitFor("the first run", func() bool { return h.Running("main") })

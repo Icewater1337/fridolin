@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
@@ -229,7 +231,7 @@ func TestStopBeforeTheCLIStartsIsAnInterruption(t *testing.T) {
 // it.
 func TestSiteSearchStartsClaudeAsBrainRunsDo(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	argsLog := filepath.Join(tb.home, "args.log")
 	t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
 	const prompt = "SEARCH-PROMPT where is the letter?"
@@ -261,7 +263,7 @@ func TestSiteSearchStartsClaudeAsBrainRunsDo(t *testing.T) {
 // names the error. It was all kept in memory.
 func TestSiteSearchKeepsOnlyTheEndOfStderr(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	const flood = 16 << 20
 	t.Setenv("FRIDOLIN_FAKE_STDERR_BYTES", strconv.Itoa(flood))
 	var before, after runtime.MemStats

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"go.mau.fi/whatsmeow"
 )
 
@@ -35,7 +37,7 @@ func (tb *testBridge) script(method, path, body, token string) *httptest.Respons
 // code and the shape of every body. Errors are JSON {"error": ...}.
 func TestScriptAPIContract(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
-	tb.addFolderBrain(t, BrainManifest{ID: "personal", Name: "Personal", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "personal", Name: "Personal", Routing: manifest.Routing{HandlesDMs: true}})
 	media := tb.cfgs.Get().MediaDir
 	inside := filepath.Join(media, "scan.pdf")
 	if err := os.WriteFile(inside, []byte("%PDF"), 0o600); err != nil {
@@ -154,7 +156,7 @@ func TestSendFailureStatus(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tb := newTestBridge(t, "")
-			dir := tb.addFolderBrain(t, BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}})
+			dir := tb.addFolderBrain(t, manifest.Manifest{ID: "p", Name: "P", Routing: manifest.Routing{HandlesDMs: true}})
 			tb.wa = failingMessenger{devMessenger: tb.dev, err: c.err}
 			w := tb.script("POST", "/send", `{"jid":"`+dm+`","text":"first half second half"}`, "")
 			if w.Code != c.want || !strings.Contains(w.Body.String(), `"error"`) {

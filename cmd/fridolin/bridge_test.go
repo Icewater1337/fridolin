@@ -14,6 +14,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
@@ -589,9 +591,9 @@ func TestBrainRouting(t *testing.T) {
 	cfg, err := LoadConfig(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
-		brainFolder(t, home+"/p", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, home+"/t", BrainManifest{ID: "team", Routing: BrainRouting{Groups: []string{"team@g.us"}}}),
-		brainFolder(t, home+"/o", BrainManifest{ID: "other", Routing: BrainRouting{Default: true}}),
+		brainFolder(t, home+"/p", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, home+"/t", manifest.Manifest{ID: "team", Routing: manifest.Routing{Groups: []string{"team@g.us"}}}),
+		brainFolder(t, home+"/o", manifest.Manifest{ID: "other", Routing: manifest.Routing{Default: true}}),
 	)+`
 	}`))
 	if err != nil {
@@ -620,8 +622,8 @@ func TestRouteHonoursTheNamedBrain(t *testing.T) {
 	cfg, err := LoadConfig(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
-		brainFolder(t, home+"/p", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, home+"/t", BrainManifest{ID: "team", Routing: BrainRouting{Groups: []string{"team@g.us"}}}),
+		brainFolder(t, home+"/p", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, home+"/t", manifest.Manifest{ID: "team", Routing: manifest.Routing{Groups: []string{"team@g.us"}}}),
 	)+`
 	}`))
 	if err != nil {
@@ -688,7 +690,7 @@ func TestBrainRoutingFallsBackToFirstBrain(t *testing.T) {
 
 	cfg, err := LoadConfig(writeConfig(t, `{
 		"brain_mode": true,
-		"data_dir": "`+home+`/data"`+brainDirsJSON(t, brainFolder(t, home+"/o", BrainManifest{ID: "only"}))+`
+		"data_dir": "`+home+`/data"`+brainDirsJSON(t, brainFolder(t, home+"/o", manifest.Manifest{ID: "only"}))+`
 	}`))
 	if err != nil {
 		t.Fatal(err)
@@ -896,8 +898,8 @@ func TestNamesReadOutsideGo(t *testing.T) {
 	}{
 		{"web/assets/components/brain.js", []string{outcomeOK + ": [", outcomeError + ": [", outcomeInterrupted + ": [", outcomeQuestion + ": ["}},
 		{"web/assets/pages/settings.js", []string{"def: '" + queueModeQueue + "'", "['" + queueModeQueue + "', ", "['" + queueModeInterrupt + "', "}},
-		{"web/assets/lib/brain.js", []string{"export const BRIDGE_BACKUP_ID = '" + bridgeBackupID + "';", "[['" + observeHistory + "', ", "['" + observeRun + "', "}},
-		{"web/assets/pages/brain.js", []string{"m.observe || '" + observeHistory + "'"}},
+		{"web/assets/lib/brain.js", []string{"export const BRIDGE_BACKUP_ID = '" + bridgeBackupID + "';", "[['" + manifest.ObserveHistory + "', ", "['" + manifest.ObserveRun + "', "}},
+		{"web/assets/pages/brain.js", []string{"m.observe || '" + manifest.ObserveHistory + "'"}},
 	}
 	for _, c := range cases {
 		t.Run(c.file, func(t *testing.T) {

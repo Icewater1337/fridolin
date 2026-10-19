@@ -24,7 +24,7 @@ import (
 // edge is a change to this table, made and reviewed in the same pull
 // request. Imports from outside the module are not checked here.
 var imports = map[string][]string{
-	"cmd/fridolin":      {"examples", "internal/activity", "internal/chat", "internal/fsx", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/media", "internal/otp", "internal/platform", "internal/store", "internal/textx", "internal/trigger", "internal/version", "site", "web"},
+	"cmd/fridolin":      {"examples", "internal/activity", "internal/chat", "internal/fsx", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/manifest", "internal/media", "internal/otp", "internal/platform", "internal/store", "internal/textx", "internal/trigger", "internal/version", "site", "web"},
 	"examples":          nil,
 	"internal/activity": {"internal/history", "internal/textx"},
 	"internal/archtest": nil,
@@ -34,6 +34,7 @@ var imports = map[string][]string{
 	"internal/history":  {"internal/fsx"},
 	"internal/httpapi":  {"internal/fsx"},
 	"internal/logx":     nil,
+	"internal/manifest": {"internal/chat", "internal/fsx", "internal/jsonx"},
 	"internal/otp":      {"internal/history", "internal/fsx"},
 	"internal/media":    {"internal/fsx", "internal/textx"},
 	"internal/platform": nil,

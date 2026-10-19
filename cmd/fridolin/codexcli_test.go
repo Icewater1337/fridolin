@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -27,7 +29,7 @@ func TestCodexDefaultsAndValidation(t *testing.T) {
 		}
 	}
 	cfg.BrainModel, cfg.BrainEffort = "sonnet", "low"
-	sp := BrainSpec{Manifest: BrainManifest{ID: "a", Model: "opus", Effort: "max"}}
+	sp := manifest.Spec{Manifest: manifest.Manifest{ID: "a", Model: "opus", Effort: "max"}}
 	cfg.AgentProvider = "codex"
 	s := settingsFor(cfg, sp)
 	if s.model != defaultCodexModel || s.effort != "high" {
@@ -43,7 +45,7 @@ func TestCodexDefaultsAndValidation(t *testing.T) {
 func TestCodexArgsPermissions(t *testing.T) {
 	for _, external := range []bool{false, true} {
 		for _, tools := range []bool{false, true} {
-			s := &brainSettings{dangerously: tools, dataDir: "/data", mediaDir: "/media", manifest: BrainManifest{ID: "a"}}
+			s := &brainSettings{dangerously: tools, dataDir: "/data", mediaDir: "/media", manifest: manifest.Manifest{ID: "a"}}
 			args := codexArgs(s, "/brain", external)
 			if args[len(args)-1] != "-" || !slices.Contains(args, defaultCodexModel) || !slices.Contains(args, `model_reasoning_effort="high"`) {
 				t.Fatalf("missing stdin/defaults: %q", args)
@@ -133,7 +135,7 @@ func TestCodexDashboardSwitch(t *testing.T) {
 	cli := fakeCodex(t)
 	cfg, _ := json.Marshal(map[string]any{"codex_path": cli, "brain_model": "sonnet", "brain_effort": "low", "disallowed_tools": []string{"WebFetch", "WebSearch"}})
 	h := newHarness(t, string(cfg))
-	h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}, Model: "opus", Effort: "max"})
+	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}, Model: "opus", Effort: "max"})
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-claude-token")
 	t.Setenv("CODEX_API_KEY", "test-codex-key")
 	change := func(provider string) {

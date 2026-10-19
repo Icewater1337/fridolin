@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
 // tree lists the files below dir for a golden file: each one's path, mode
@@ -87,6 +89,6 @@ func TestGoldenBackupFiles(t *testing.T) {
 // examples' skills by checksum.
 func TestGoldenScaffold(t *testing.T) {
 	h := newHarness(t, "")
-	dir := h.AddBrain(BrainManifest{ID: "notes", Name: "Notes", Routing: BrainRouting{Groups: []string{harnessGroup}}})
-	assertGolden(t, "scaffold/tree.golden", tree(t, h.scrubber(), dir, ManifestFile, defaultPromptFile, identityMapFile))
+	dir := h.AddBrain(manifest.Manifest{ID: "notes", Name: "Notes", Routing: manifest.Routing{Groups: []string{harnessGroup}}})
+	assertGolden(t, "scaffold/tree.golden", tree(t, h.scrubber(), dir, manifest.File, manifest.DefaultPromptFile, identityMapFile))
 }

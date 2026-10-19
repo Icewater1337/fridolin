@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -18,8 +20,8 @@ import (
 // itself your DMs or another brain's groups that way. Differences show up in
 // the dashboard as "changed on disk" until you approve them.
 type BrainRef struct {
-	Path     string         `json:"path"`
-	Approved *BrainManifest `json:"approved"`
+	Path     string             `json:"path"`
+	Approved *manifest.Manifest `json:"approved"`
 }
 
 // Dir is the brain's folder with ~ expanded, for code that works on the
@@ -42,7 +44,7 @@ type BrainIssue struct {
 	entry int
 	// routing is what the approved manifest routes to the brain, whose
 	// chats no other brain takes while it is left out (see leavesOut).
-	routing BrainRouting
+	routing manifest.Routing
 }
 
 // leavesOut reports whether the issue keeps an approved brain from running:
@@ -55,8 +57,8 @@ func (is BrainIssue) leavesOut() bool {
 // ResolveBrains turns the brain folders in the configuration into runnable
 // brains. Brains with problems are left out and reported, so one broken
 // folder never takes the others down.
-func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
-	var specs []BrainSpec
+func ResolveBrains(cfg *Config) ([]manifest.Spec, []BrainIssue) {
+	var specs []manifest.Spec
 	var issues []BrainIssue
 
 	for i, ref := range cfg.BrainDirs {
@@ -81,20 +83,20 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "invalid", Detail: "the folder " + err.Error() + ", so it cannot hold a brain; move the brain to a folder of its own", entry: i, routing: m.Routing})
 			continue
 		}
-		if disk, err := ReadManifest(dir); err == nil && !disk.Equal(m) {
+		if disk, err := manifest.Read(dir); err == nil && !disk.Equal(m) {
 			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "drift", Detail: "brain.json changed on disk — review and approve it in the dashboard", entry: i})
 		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			issues = append(issues, BrainIssue{ID: m.ID, Path: ref.Path, Kind: "drift", Detail: err.Error(), entry: i})
 		}
 		// Validate kept prompt_file inside the folder; the folder's os.Root
 		// keeps it there when the bridge reads it.
-		specs = append(specs, BrainSpec{Manifest: m, Dir: dir, Path: filepath.Clean(ref.Path), PromptFile: m.PromptFile, Entry: i})
+		specs = append(specs, manifest.Spec{Manifest: m, Dir: dir, Path: filepath.Clean(ref.Path), PromptFile: m.PromptFile, Entry: i})
 	}
 
 	// Drop brains that clash with an earlier one rather than refusing to run.
-	var ok []BrainSpec
+	var ok []manifest.Spec
 	for _, s := range specs {
-		if err := ValidateBrainSet(append(append([]BrainSpec{}, ok...), s)); err != nil {
+		if err := ValidateBrainSet(append(append([]manifest.Spec{}, ok...), s)); err != nil {
 			issues = append(issues, BrainIssue{ID: s.Manifest.ID, Path: s.Dir, Kind: "invalid", Detail: err.Error(), entry: s.Entry, routing: s.Manifest.Routing})
 			continue
 		}
@@ -107,7 +109,7 @@ func ResolveBrains(cfg *Config) ([]BrainSpec, []BrainIssue) {
 // owned by one brain, at most one DM brain and one default, no two brains in
 // one folder and no brain folder inside another (sandbox profiles deny other
 // brains' folders, so a nested brain could not read itself).
-func ValidateBrainSet(specs []BrainSpec) error {
+func ValidateBrainSet(specs []manifest.Spec) error {
 	ids := map[string]string{}
 	groups := map[string]string{}
 	dm, def := "", ""
@@ -240,7 +242,7 @@ func inHome(p string) (string, bool) {
 }
 
 // UpdateManifest changes one brain's manifest, see updateManifestIn.
-func (cs *ConfigStore) UpdateManifest(id string, mutate func(m *BrainManifest) error) error {
+func (cs *ConfigStore) UpdateManifest(id string, mutate func(m *manifest.Manifest) error) error {
 	_, err := cs.UpdateTx("", func(c *Config, tx *Tx) error { return updateManifestIn(c, tx, id, mutate) })
 	return err
 }
@@ -250,7 +252,7 @@ func (cs *ConfigStore) UpdateManifest(id string, mutate func(m *BrainManifest) e
 // brain.json in the brain's folder, so that the two change together and
 // the change is not reported as drift. It is the one way the bridge
 // changes a manifest; an error from mutate leaves both as they were.
-func updateManifestIn(c *Config, tx *Tx, id string, mutate func(m *BrainManifest) error) error {
+func updateManifestIn(c *Config, tx *Tx, id string, mutate func(m *manifest.Manifest) error) error {
 	for i := range c.BrainDirs {
 		ref := &c.BrainDirs[i]
 		if ref.Approved == nil || ref.Approved.ID != id {
@@ -277,14 +279,14 @@ func updateManifestIn(c *Config, tx *Tx, id string, mutate func(m *BrainManifest
 // starter prompt file, the memory layout and brain.json. It never replaces
 // a file that already exists, so adopting a folder with content is safe. It
 // returns the files it created.
-func ScaffoldBrain(dir string, m *BrainManifest) ([]string, error) {
+func ScaffoldBrain(dir string, m *manifest.Manifest) ([]string, error) {
 	created, err := scaffoldFolder(dir, m)
 	if err != nil {
 		return created, err
 	}
-	if err := WriteManifest(dir, m, false); err == nil {
-		created = append(created, ManifestFile)
-	} else if !errors.Is(err, errManifestExists) {
+	if err := manifest.Write(dir, m, false); err == nil {
+		created = append(created, manifest.File)
+	} else if !errors.Is(err, manifest.ErrExists) {
 		return created, err
 	}
 	sort.Strings(created)
@@ -293,13 +295,13 @@ func ScaffoldBrain(dir string, m *BrainManifest) ([]string, error) {
 
 // scaffoldFolder is ScaffoldBrain without brain.json, which the dashboard
 // writes with the update that adds the brain (see apiAddBrain).
-func scaffoldFolder(dir string, m *BrainManifest) ([]string, error) {
+func scaffoldFolder(dir string, m *manifest.Manifest) ([]string, error) {
 	s, err := scaffoldFolderTx(dir, m)
 	defer s.close()
 	return s.created, err
 }
 
-func scaffoldFolderTx(dir string, m *BrainManifest) (*scaffoldTx, error) {
+func scaffoldFolderTx(dir string, m *manifest.Manifest) (*scaffoldTx, error) {
 	s, err := newScaffold(dir)
 	if err != nil {
 		return s, err
@@ -339,6 +341,6 @@ with the country code, any way you like: +1 555 123-4567 works.
 // $FRIDOLIN_BIN and its helpers by $FRIDOLIN_TOOLS_DIR, which every run
 // sets (see brainRunEnv), and never by a path: a brain folder keeps
 // working when it or the bridge moves.
-func renderTemplate(tpl string, m *BrainManifest) string {
+func renderTemplate(tpl string, m *manifest.Manifest) string {
 	return strings.NewReplacer("{{BRAIN_NAME}}", m.Name).Replace(tpl)
 }

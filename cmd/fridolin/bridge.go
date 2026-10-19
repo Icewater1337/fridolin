@@ -14,6 +14,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 
 	wastore "go.mau.fi/whatsmeow/store"
@@ -967,6 +969,6 @@ func logDMAccess(prev, next *Config) {
 }
 
 // groupRulesFor is what addresses the bridge in the brain's groups.
-func groupRulesFor(r BrainRouting) groupRules {
+func groupRulesFor(r manifest.Routing) groupRules {
 	return groupRules{files: boolOr(r.AnswerFiles, true), forwards: boolOr(r.AnswerForwards, true)}
 }

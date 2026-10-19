@@ -21,6 +21,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
@@ -153,7 +155,7 @@ type Brain struct {
 // Each run takes one snapshot, so an edit never changes a run half-way.
 type brainSettings struct {
 	name            string
-	manifest        BrainManifest
+	manifest        manifest.Manifest
 	claudePath      string
 	provider        string
 	codexPath       string
@@ -1012,17 +1014,17 @@ func (br *Brain) readFile(name string) ([]byte, error) {
 
 // BrainRuntime is a brain's live state, for the dashboard.
 type BrainRuntime struct {
-	ID       string        `json:"id"`
-	Name     string        `json:"name"`
-	Dir      string        `json:"dir"`
-	Routing  BrainRouting  `json:"routing"`
-	Model    string        `json:"model"`
-	Effort   string        `json:"effort"`
-	Running  *RunView      `json:"running"`
-	Queue    []QueuedView  `json:"queue"`
-	Last     *RunInfo      `json:"last"`
-	Backup   BrainBackup   `json:"backup"`
-	Manifest BrainManifest `json:"manifest"`
+	ID       string            `json:"id"`
+	Name     string            `json:"name"`
+	Dir      string            `json:"dir"`
+	Routing  manifest.Routing  `json:"routing"`
+	Model    string            `json:"model"`
+	Effort   string            `json:"effort"`
+	Running  *RunView          `json:"running"`
+	Queue    []QueuedView      `json:"queue"`
+	Last     *RunInfo          `json:"last"`
+	Backup   manifest.Backup   `json:"backup"`
+	Manifest manifest.Manifest `json:"manifest"`
 }
 
 // RunView describes the run in flight.
@@ -2119,7 +2121,7 @@ func (bm *BrainManager) Apply(cfg *Config) error {
 
 // reload runs the brains specs, with issues the problems ResolveBrains
 // found and ownPATH each brain's own PATH folders (see setBridgePATH).
-func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Config, ownPATH map[string][]string) error {
+func (bm *BrainManager) reload(specs []manifest.Spec, issues []BrainIssue, cfg *Config, ownPATH map[string][]string) error {
 	bm.reloadMu.Lock()
 	defer bm.reloadMu.Unlock()
 
@@ -2298,7 +2300,7 @@ func (bm *BrainManager) keepRetiredWaiting(from *Brain, ms []Inbound) bool {
 }
 
 // settingsFor combines global settings with a brain's own.
-func settingsFor(cfg *Config, sp BrainSpec) *brainSettings {
+func settingsFor(cfg *Config, sp manifest.Spec) *brainSettings {
 	m := sp.Manifest
 	model := m.Model
 	if model == "" {

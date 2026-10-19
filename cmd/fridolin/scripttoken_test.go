@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 )
@@ -28,8 +30,8 @@ const (
 func tokenBridge(t *testing.T, extra string) *testBridge {
 	t.Helper()
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}, "allowed_groups": ["`+tokenTestGroupA+`", "`+tokenTestGroupB+`", "`+tokenTestGroupC+`"]`+extra)
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true, Groups: []string{tokenTestGroupA}}})
-	tb.addFolderBrain(t, BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{Groups: []string{tokenTestGroupB}}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true, Groups: []string{tokenTestGroupA}}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "b", Name: "B", Routing: manifest.Routing{Groups: []string{tokenTestGroupB}}})
 	return tb
 }
 
@@ -39,7 +41,7 @@ func TestBrainRunsAreNotToldTheScriptsToken(t *testing.T) {
 	envLog := filepath.Join(t.TempDir(), "brain.env")
 	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	if w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": tokenTestDM, "text": "hi"}); w.Code != 202 {
 		t.Fatalf("inbound: %d %s", w.Code, w.Body.String())
 	}

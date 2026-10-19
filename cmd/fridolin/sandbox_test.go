@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/platform"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,6 +11,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/platform"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
@@ -461,8 +463,8 @@ func TestSandboxProfileCoversBrainFoldersBothWays(t *testing.T) {
 	}
 	t.Setenv("HOME", home)
 	dirs := brainDirsJSON(t,
-		brainFolder(t, "~/assistant/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, "~/ext/b", BrainManifest{ID: "b"}),
+		brainFolder(t, "~/assistant/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, "~/ext/b", manifest.Manifest{ID: "b"}),
 	)
 	rule := func(verb, op, filter, p string) string {
 		return `(` + verb + ` ` + op + ` (` + filter + ` "` + p + `"))`
@@ -533,8 +535,8 @@ func TestSandboxProfileCoversTheFolderABrainRunsIn(t *testing.T) {
 	}
 	t.Setenv("HOME", home)
 	dirs := brainDirsJSON(t,
-		brainFolder(t, "~/assistant/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, "~/b", BrainManifest{ID: "b"}),
+		brainFolder(t, "~/assistant/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, "~/b", manifest.Manifest{ID: "b"}),
 	)
 	cfg, err := LoadConfig(writeConfig(t, fmt.Sprintf(`{"data_dir": %q%s}`, home+"/data", dirs)))
 	if err != nil {
@@ -1580,7 +1582,7 @@ func TestViewerClosesWithItsBrain(t *testing.T) {
 			cfg, err := LoadConfig(writeConfig(t, `{
 				"data_dir": "`+home+`/data",
 				"viewer": true`+brainDirsJSON(t,
-				brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+				brainFolder(t, home+"/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 			)+`
 			}`))
 			if err != nil {

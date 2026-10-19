@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -66,7 +68,7 @@ func TestCheckShowsWhoMayDM(t *testing.T) {
 				"brain_mode": true,
 				"claude_path": "`+fakeClaudeEnv(t, 0)+`",
 				"data_dir": "`+home+`/data"`+brainDirsJSON(t,
-				brainFolder(t, home+"/main", BrainManifest{ID: "main", Routing: BrainRouting{HandlesDMs: true}}),
+				brainFolder(t, home+"/main", manifest.Manifest{ID: "main", Routing: manifest.Routing{HandlesDMs: true}}),
 			)+`,
 				`+tc.access+`
 			}`)
@@ -789,7 +791,7 @@ func TestCheckRedact(t *testing.T) {
 		"allowed_groups": ["` + allowedGroup + `", "` + oddGroup + `"],
 		"group_members": {"` + allowedGroup + `": ["` + memberOnly + `"]},
 		"not_a_setting": true` + brainDirsJSON(t,
-		brainFolder(t, home+"/brains/main", BrainManifest{ID: "main", Routing: BrainRouting{HandlesDMs: true, Groups: []string{brainGroup}}}),
+		brainFolder(t, home+"/brains/main", manifest.Manifest{ID: "main", Routing: manifest.Routing{HandlesDMs: true, Groups: []string{brainGroup}}}),
 	) + `}`
 	if err := os.WriteFile(path, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
@@ -960,13 +962,13 @@ func TestCheckExitsWhenABrainCannotRun(t *testing.T) {
 	// No CLI to ask for its version: the fake would take the place of
 	// the test in the process check runs in.
 	data := home + `/data", "claude_path": "` + home + `/no-claude`
-	main := brainFolder(t, home+"/main", BrainManifest{ID: "main", Routing: BrainRouting{HandlesDMs: true}})
-	drifted := brainFolder(t, home+"/notes", BrainManifest{ID: "notes"})
+	main := brainFolder(t, home+"/main", manifest.Manifest{ID: "main", Routing: manifest.Routing{HandlesDMs: true}})
+	drifted := brainFolder(t, home+"/notes", manifest.Manifest{ID: "notes"})
 	renamed := *drifted.Approved
 	renamed.Name = "Notes, approved before"
 	drifted.Approved = &renamed
-	inData := brainFolder(t, home+"/data/inside", BrainManifest{ID: "inside"})
-	gone := brainDirsJSON(t, main, BrainRef{Path: home + "/gone", Approved: &BrainManifest{ID: "gone", Name: "gone"}})
+	inData := brainFolder(t, home+"/data/inside", manifest.Manifest{ID: "inside"})
+	gone := brainDirsJSON(t, main, BrainRef{Path: home + "/gone", Approved: &manifest.Manifest{ID: "gone", Name: "gone"}})
 	cases := []struct {
 		name   string
 		config string

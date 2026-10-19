@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
@@ -84,11 +86,11 @@ func (f *fakePlaudFixture) calls() string {
 }
 
 // plaudDMBrain is brain p, which gets the DMs: the one brain of plaudBridge.
-var plaudDMBrain = BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}}
+var plaudDMBrain = manifest.Manifest{ID: "p", Name: "P", Routing: manifest.Routing{HandlesDMs: true}}
 
 // plaudGroupBrain is a brain id that serves the group and no DMs.
-func plaudGroupBrain(id string) BrainManifest {
-	return BrainManifest{ID: id, Name: strings.ToUpper(id), Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}
+func plaudGroupBrain(id string) manifest.Manifest {
+	return manifest.Manifest{ID: id, Name: strings.ToUpper(id), Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}
 }
 
 func plaudBridge(t *testing.T, extra string) (*testBridge, *fakePlaudFixture) {
@@ -97,7 +99,7 @@ func plaudBridge(t *testing.T, extra string) (*testBridge, *fakePlaudFixture) {
 
 // plaudBridgeWith takes top-level settings (allowed numbers), extra plaud
 // settings and the folder brains to add once the bridge runs.
-func plaudBridgeWith(t *testing.T, top, plaud string, brains ...BrainManifest) (*testBridge, *fakePlaudFixture) {
+func plaudBridgeWith(t *testing.T, top, plaud string, brains ...manifest.Manifest) (*testBridge, *fakePlaudFixture) {
 	fp := newFakePlaud(t)
 	tb := newTestBridge(t, top+`, "plaud": {"enabled": true, "cli_path": "`+os.Args[0]+`"`+plaud+`}`)
 	for _, m := range brains {
@@ -138,7 +140,7 @@ func plaudDeliverRecording(t *testing.T, tb *testBridge, fp *fakePlaudFixture, r
 func TestPlaudRunsInThePickedBrain(t *testing.T) {
 	const dm = "15551234567@s.whatsapp.net"
 	tb, fp := plaudBridge(t, "")
-	gDir := tb.addFolderBrain(t, BrainManifest{ID: "g", Name: "Recordings", ReplyChat: dm})
+	gDir := tb.addFolderBrain(t, manifest.Manifest{ID: "g", Name: "Recordings", ReplyChat: dm})
 	if w := tb.do("PUT", "/api/plaud/settings", map[string]any{"brain": "g"}); w.Code != 200 {
 		t.Fatalf("settings: %d %s", w.Code, w.Body.String())
 	}
@@ -178,21 +180,21 @@ func TestPlaudSummariesStayOutOfGroups(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		plaud  string
-		brains []BrainManifest
+		brains []manifest.Manifest
 		brain  string // brain that must run the recording
 		want   string // chat that must get the answer
 	}{
 		{name: "group brain without a reply chat answers in your DM",
-			brains: []BrainManifest{plaudDMBrain, plaudGroupBrain("g")},
+			brains: []manifest.Manifest{plaudDMBrain, plaudGroupBrain("g")},
 			plaud:  `, "brain": "g"`, brain: "g", want: dm},
 		{name: "a group as reply chat is passed over for your DM",
-			brains: []BrainManifest{plaudDMBrain, {ID: "g", Name: "G", ReplyChat: group}},
+			brains: []manifest.Manifest{plaudDMBrain, {ID: "g", Name: "G", ReplyChat: group}},
 			plaud:  `, "brain": "g"`, brain: "g", want: dm},
 		{name: "a direct reply chat is used",
-			brains: []BrainManifest{plaudDMBrain, {ID: "g", Name: "G", ReplyChat: other}},
+			brains: []manifest.Manifest{plaudDMBrain, {ID: "g", Name: "G", ReplyChat: other}},
 			plaud:  `, "brain": "g"`, brain: "g", want: other},
 		{name: "automatic: the fallback brain that serves a group answers in your DM",
-			brains: []BrainManifest{plaudGroupBrain("f")},
+			brains: []manifest.Manifest{plaudGroupBrain("f")},
 			brain:  "f", want: dm},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -264,7 +266,7 @@ func TestPlaudStatusNamesTheAutomaticBrain(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			tb, _ := plaudBridge(t, "")
-			tb.addFolderBrain(t, BrainManifest{ID: "g", Name: "Recordings"})
+			tb.addFolderBrain(t, manifest.Manifest{ID: "g", Name: "Recordings"})
 			if w := tb.do("PUT", "/api/plaud/settings", map[string]any{"brain": c.picked}); w.Code != 200 {
 				t.Fatalf("settings: %d %s", w.Code, w.Body.String())
 			}

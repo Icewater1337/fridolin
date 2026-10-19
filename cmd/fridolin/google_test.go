@@ -18,6 +18,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -101,7 +103,7 @@ func TestParseGoogleClient(t *testing.T) {
 func TestCalendarSignInFlow(t *testing.T) {
 	srv, got := fakeGoogle(t)
 	tb := newTestBridge(t, "")
-	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/fam", "create_dir": true, "manifest": BrainManifest{ID: "fam", Name: "Fam"}}); w.Code != 200 {
+	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/fam", "create_dir": true, "manifest": manifest.Manifest{ID: "fam", Name: "Fam"}}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
 
@@ -181,7 +183,7 @@ func TestCalendarSignInFlow(t *testing.T) {
 	}
 
 	// The manifest records the account; the primary calendar is selected.
-	m, _ := ReadManifest(filepath.Join(tb.home, "fam"))
+	m, _ := manifest.Read(filepath.Join(tb.home, "fam"))
 	if m.Calendar == nil || m.Calendar.Account != "you@example.com" || m.Calendar.Default != "you@example.com" {
 		t.Fatalf("manifest calendar = %+v", m.Calendar)
 	}
@@ -225,7 +227,7 @@ func TestCalendarSignInFlow(t *testing.T) {
 func TestCalendarSignInErrorsAreShown(t *testing.T) {
 	srv, _ := fakeGoogle(t)
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "p", Name: "P"})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "p", Name: "P"})
 	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 	start := func() string {
 		var r struct {
@@ -306,7 +308,7 @@ func TestCalendarTokenIsNotFollowed(t *testing.T) {
 				t.Fatal(w.Body.String())
 			}
 			for _, id := range []string{"a", "b"} {
-				if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/" + id, "create_dir": true, "manifest": BrainManifest{ID: id, Name: strings.ToUpper(id)}}); w.Code != 200 {
+				if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/" + id, "create_dir": true, "manifest": manifest.Manifest{ID: id, Name: strings.ToUpper(id)}}); w.Code != 200 {
 					t.Fatal(w.Body.String())
 				}
 			}
@@ -410,7 +412,7 @@ func TestCalendarTokenRequestsGoToGoogleWithYourClient(t *testing.T) {
 			if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, other.URL)}); w.Code != 200 {
 				t.Fatal(w.Body.String())
 			}
-			if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": BrainManifest{ID: "a", Name: "A"}}); w.Code != 200 {
+			if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": manifest.Manifest{ID: "a", Name: "A"}}); w.Code != 200 {
 				t.Fatal(w.Body.String())
 			}
 			tok, _ := json.Marshal(googleToken{
@@ -456,7 +458,7 @@ func TestCalendarTokenRequestsGoToGoogleWithYourClient(t *testing.T) {
 		if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, other.URL)}); w.Code != 200 {
 			t.Fatal(w.Body.String())
 		}
-		if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": BrainManifest{ID: "a", Name: "A"}}); w.Code != 200 {
+		if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": manifest.Manifest{ID: "a", Name: "A"}}); w.Code != 200 {
 			t.Fatal(w.Body.String())
 		}
 		var start struct {
@@ -489,7 +491,7 @@ func TestOversizedCalendarTokenIsRefused(t *testing.T) {
 	if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
-	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": BrainManifest{ID: "a", Name: "A"}}); w.Code != 200 {
+	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": manifest.Manifest{ID: "a", Name: "A"}}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
 	// Valid JSON, expired, padded past the limit.
@@ -559,7 +561,7 @@ func TestCalendarSignInScopes(t *testing.T) {
 			defer func() { googleAPIBase, googleTokenEndpoint = prevAPI, prevToken }()
 
 			tb := newTestBridge(t, "")
-			tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+			tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 			if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, google.URL)}); w.Code != 200 {
 				t.Fatal(w.Body.String())
 			}
@@ -636,7 +638,7 @@ func TestCalendarRefreshRecordsGrantedScopes(t *testing.T) {
 			defer func() { googleTokenEndpoint = prev }()
 
 			tb := newTestBridge(t, "")
-			tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+			tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 			if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, google.URL)}); w.Code != 200 {
 				t.Fatal(w.Body.String())
 			}
@@ -709,9 +711,9 @@ func TestCalendarDisconnectRevokesOnlyAnUnsharedGrant(t *testing.T) {
 			srv, got := fakeGoogle(t)
 			tb := newTestBridge(t, "")
 			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
-			tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+			tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 			if tc.otherBrain {
-				tb.addFolderBrain(t, BrainManifest{ID: "b", Name: "B"})
+				tb.addFolderBrain(t, manifest.Manifest{ID: "b", Name: "B"})
 			}
 			writeCalendarToken(t, tb, "a", tc.account, "RT-A")
 			if tc.other != "-" {
@@ -752,7 +754,7 @@ func TestCalendarDisconnectWhenGoogleDoesNotRevoke(t *testing.T) {
 	srv, got := fakeGoogle(t)
 	tb := newTestBridge(t, "")
 	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 	writeCalendarToken(t, tb, "a", "you@example.com", "FAIL-REVOKE")
 
 	w := tb.do("DELETE", "/api/brains/a/calendar", nil)
@@ -823,7 +825,7 @@ func TestCalendarDisconnectEndsWhatTheBrainShows(t *testing.T) {
 			srv, _ := fakeGoogle(t)
 			tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds"}`)
 			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
-			dir := tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+			dir := tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 			tb.google.mu.Lock()
 			tb.google.lastError["a"] = "sign-in cancelled"
 			tb.google.mu.Unlock()
@@ -864,7 +866,7 @@ func TestCalendarSwitchRevokesTheOldAccount(t *testing.T) {
 			srv, got := fakeGoogle(t)
 			tb := newTestBridge(t, "")
 			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
-			tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+			tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 			writeCalendarToken(t, tb, "a", tc.old, "RT-OLD")
 			if tc.shared {
 				writeCalendarToken(t, tb, "b", tc.old, "RT-B")
@@ -914,7 +916,7 @@ func TestCalendarRefreshKeepsTheToken(t *testing.T) {
 	srv, got := fakeGoogle(t)
 	tb := newTestBridge(t, "")
 	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 	expiredCalendarToken(t, tb, "A-REFRESH")
 
 	var st struct {
@@ -956,7 +958,7 @@ func TestCalendarRevokedSignInAsksToReconnect(t *testing.T) {
 			srv, _ := fakeGoogle(t)
 			tb := newTestBridge(t, "")
 			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
-			tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+			tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 			expiredCalendarToken(t, tb, tc.refreshToken)
 			var st struct {
 				ListError       string `json:"list_error"`
@@ -979,7 +981,7 @@ func TestCalendarRefreshThatCannotBeSavedIsLogged(t *testing.T) {
 	srv, _ := fakeGoogle(t)
 	tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds"}`)
 	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 	expiredCalendarToken(t, tb, "A-REFRESH")
 	if err := os.Chmod(tb.google.credsDir(), 0o500); err != nil {
 		t.Fatal(err)
@@ -1027,7 +1029,7 @@ func TestCalendarSignInSurvivesTheBrowserLeaving(t *testing.T) {
 	srv, _ := fakeGoogle(t)
 	tb := newTestBridge(t, "")
 	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 	gone, cancel := context.WithCancel(context.Background())
 	cancel()
 	signInCallback(t, tb, "a", gone, nil)
@@ -1043,7 +1045,7 @@ func TestCalendarSignInForARemovedBrain(t *testing.T) {
 	srv, _ := fakeGoogle(t)
 	tb := newTestBridge(t, "")
 	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 	signInCallback(t, tb, "a", context.Background(), func() {
 		if w := tb.do("DELETE", "/api/brains/a", nil); w.Code != 200 {
 			t.Fatalf("remove = %d %s", w.Code, w.Body.String())
@@ -1085,7 +1087,7 @@ func TestCalendarSignInThatCannotBeSaved(t *testing.T) {
 			srv, got := fakeGoogle(t)
 			tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds"}`)
 			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
-			dir := tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+			dir := tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 			if err := os.MkdirAll(tb.google.credsDir(), 0o700); err != nil {
 				t.Fatal(err)
 			}
@@ -1123,7 +1125,7 @@ func TestCalendarRedirectIsTheAddressServed(t *testing.T) {
 	tb := newTestBridge(t, "")
 	served := "http://" + tb.cfgs.Get().HTTPListen + "/"
 	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 	if _, err := tb.cfgs.Update("", func(c *Config) error { c.HTTPListen = "127.0.0.1:1"; return nil }); err != nil {
 		t.Fatal(err)
 	}
@@ -1206,7 +1208,7 @@ func gatedCalendarBrain(t *testing.T, g *gatedGoogle, account string) *testBridg
 	if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, g.srv.URL)}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 	if w := tb.do("PUT", "/api/brains/a/calendar", map[string]any{"account": account, "calendars": []string{account}, "default": account}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
@@ -1514,7 +1516,7 @@ func TestLeftoverClientCopiesAreReported(t *testing.T) {
 			srv, _ := fakeGoogle(t)
 			tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds"}`)
 			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
-			tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A"})
+			tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 			writeCalendarToken(t, tb, "a", "you@example.com", "RT-A")
 			dir := tb.google.credsDir()
 			for name, content := range tc.files {
@@ -1611,17 +1613,17 @@ func TestLeftoverClientCopiesAreReported(t *testing.T) {
 func TestCalendarEnv(t *testing.T) {
 	cases := []struct {
 		name string
-		cal  *BrainCalendar
+		cal  *manifest.Calendar
 		want []string
 	}{
 		{"no calendars chosen", nil, []string{"BRIDGE_BRAIN_ID=a"}},
-		{"none ticked", &BrainCalendar{Account: "you@example.com"}, []string{"BRIDGE_BRAIN_ID=a"}},
-		{"calendars chosen", &BrainCalendar{Account: "you@example.com", Calendars: []string{"you@example.com", "team@example.com"}, Default: "team@example.com"},
+		{"none ticked", &manifest.Calendar{Account: "you@example.com"}, []string{"BRIDGE_BRAIN_ID=a"}},
+		{"calendars chosen", &manifest.Calendar{Account: "you@example.com", Calendars: []string{"you@example.com", "team@example.com"}, Default: "team@example.com"},
 			[]string{"BRIDGE_BRAIN_ID=a", "BRIDGE_CALENDARS=you@example.com,team@example.com", "BRIDGE_CALENDAR_DEFAULT=team@example.com"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := calendarEnv("a", BrainManifest{ID: "a", Calendar: tc.cal}, "/Users/you/creds"); !slices.Equal(got, tc.want) {
+			if got := calendarEnv("a", manifest.Manifest{ID: "a", Calendar: tc.cal}, "/Users/you/creds"); !slices.Equal(got, tc.want) {
 				t.Errorf("calendarEnv = %q, want %q", got, tc.want)
 			}
 		})

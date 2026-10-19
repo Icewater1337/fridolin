@@ -192,7 +192,7 @@ func (m Manifest) Equal(o Manifest) bool {
 // Read loads <dir>/brain.json. It returns os.ErrNotExist (wrapped)
 // when the folder is not a brain yet. The brain may write the file, and
 // the bridge reads it outside the sandbox (for the drift check, too), so
-// it goes as readBrainFile reads: nothing outside the folder, no symlink,
+// it goes as fsx.ReadBrainFile reads: nothing outside the folder, no symlink,
 // only a regular file, so that a FIFO cannot hang a reload.
 func Read(dir string) (*Manifest, error) {
 	path := filepath.Join(dir, File)
@@ -285,8 +285,8 @@ func writeManifestData(dir string, data []byte, overwrite bool) error {
 	return err
 }
 
-// Overwriting historically creates a missing folder; exclusive creation
-// requires the caller to have created it. Preserve that choice before pinning.
+// OpenRoot pins the manifest folder. Overwriting historically creates a
+// missing folder; exclusive creation requires the caller to have created it.
 func OpenRoot(dir string, overwrite bool) (*os.Root, error) {
 	if overwrite {
 		if err := os.MkdirAll(dir, 0o700); err != nil {

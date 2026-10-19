@@ -7,8 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/store"
 	"net"
 	"os"
 	"os/exec"
@@ -17,6 +15,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/store"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
@@ -122,7 +124,7 @@ func TestSandboxedRunTurnsOffTheAutoUpdater(t *testing.T) {
 func TestSandboxedSiteSearchGetsTheBrainsOwnState(t *testing.T) {
 	requireSandboxExec(t)
 	tb := newTestBridge(t, `, "sandbox": {"enabled": true}`)
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	state := filepath.Join(tb.home, "data", "brains", "a")
 	for name, want := range map[string]string{"CLAUDE_CONFIG_DIR": state + "/claude", "TMPDIR": state + "/tmp"} {
 		t.Run(name, func(t *testing.T) {
@@ -967,8 +969,8 @@ func TestSandboxKeepsRunTokensToTheirBrain(t *testing.T) {
 	requireSandboxExec(t)
 	tb, _ := serveTestBridge(t, `, "sandbox": {"enabled": true}`)
 	dirs := map[string]string{
-		"a": tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}}),
-		"g": tb.addFolderBrain(t, BrainManifest{ID: "g", Name: "G", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+		"a": tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}}),
+		"g": tb.addFolderBrain(t, manifest.Manifest{ID: "g", Name: "G", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}),
 	}
 	tokenFile := func(brain string) string {
 		env, done := tb.brainRunEnv(brain)
@@ -1020,7 +1022,7 @@ func TestSandboxKeepsRunTokensToTheirBrain(t *testing.T) {
 func TestSandboxedRunReachesTheBrainAPI(t *testing.T) {
 	requireSandboxExec(t)
 	tb, _ := serveTestBridge(t, `, "sandbox": {"enabled": true}`)
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	savePoll(t, tb, "P1", apiTestDM, "Lunch?", []string{"Yes", "No"}, nil)
 	t.Setenv("FRIDOLIN_FAKE_POLLS", "1")
 	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"}})
@@ -1581,8 +1583,8 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map
 			"allow_paths":     []string{"~/Documents/share"},
 		},
 		"brain_dirs": []BrainRef{
-			brainFolder(t, "~/assistant/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-			brainFolder(t, "~/assistant/"+otherBrain, BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+			brainFolder(t, "~/assistant/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+			brainFolder(t, "~/assistant/"+otherBrain, manifest.Manifest{ID: "b", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}),
 		},
 	}
 	for _, e := range extra {
@@ -1716,8 +1718,8 @@ func resolvedForTest(t *testing.T, p string) string {
 // "On" from the config alone, so the status warns when runs are refused for
 // a missing sandbox-exec or a profile that cannot be built.
 func TestStatusWarnsWhenSandboxDoesNotApply(t *testing.T) {
-	a := BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}}
-	b := BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}
+	a := manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}}
+	b := manifest.Manifest{ID: "b", Name: "B", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}
 	cases := []struct {
 		name      string
 		atHome    bool // brain a's folder is the home folder, and there is no b

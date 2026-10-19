@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
@@ -22,11 +24,11 @@ func TestObserveRuns(t *testing.T) {
 		want bool
 	}{
 		{"chatter, default", "", chatter, false},
-		{"chatter, history", observeHistory, chatter, false},
-		{"chatter, run", observeRun, chatter, true},
-		{"junk, run", observeRun, junk, false},
-		{"a file, run", observeRun, file, true},
-		{"a file, history", observeHistory, file, false},
+		{"chatter, history", manifest.ObserveHistory, chatter, false},
+		{"chatter, run", manifest.ObserveRun, chatter, true},
+		{"junk, run", manifest.ObserveRun, junk, false},
+		{"a file, run", manifest.ObserveRun, file, true},
+		{"a file, history", manifest.ObserveHistory, file, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -46,12 +48,12 @@ func TestUntaggedChatterRunsOnlyWhenObserved(t *testing.T) {
 		runs    int // Claude runs for the chatter and the DM after it
 	}{
 		{"", 1},
-		{observeHistory, 1},
-		{observeRun, 2},
+		{manifest.ObserveHistory, 1},
+		{manifest.ObserveRun, 2},
 	}
 	for _, c := range cases {
 		t.Run("observe "+c.observe, func(t *testing.T) {
-			tb, br := newMainBridgeWith(t, `, "queue": {"notify": false}`, BrainManifest{Observe: c.observe})
+			tb, br := newMainBridgeWith(t, `, "queue": {"notify": false}`, manifest.Manifest{Observe: c.observe})
 			argsLog := filepath.Join(tb.home, "args.log")
 			t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
 			ctx := context.Background()

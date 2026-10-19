@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"go.mau.fi/whatsmeow/types/events"
@@ -276,7 +278,7 @@ func (h *harness) SentTo(jid string) []string {
 
 // AddBrain adds a brain in a new folder ~/<id> through the API, as the Add
 // brain page does, and returns the folder.
-func (h *harness) AddBrain(m BrainManifest) string {
+func (h *harness) AddBrain(m manifest.Manifest) string {
 	h.t.Helper()
 	// A manifest that sets no backup goes without the key, so the brain
 	// gets the defaults the page starts with: backed up, with the default
@@ -313,7 +315,7 @@ func (h *harness) Answer(m inbound) string {
 
 // Approved returns the approved copy of each brain's brain.json, by id, as
 // config.json holds them.
-func (h *harness) Approved() map[string]BrainManifest {
+func (h *harness) Approved() map[string]manifest.Manifest {
 	h.t.Helper()
 	var file struct {
 		BrainDirs []BrainRef `json:"brain_dirs"`
@@ -322,7 +324,7 @@ func (h *harness) Approved() map[string]BrainManifest {
 	if err != nil || json.Unmarshal(data, &file) != nil {
 		h.t.Fatalf("config.json: %v\n%s", err, data)
 	}
-	out := map[string]BrainManifest{}
+	out := map[string]manifest.Manifest{}
 	for _, ref := range file.BrainDirs {
 		if ref.Approved != nil {
 			out[ref.Approved.ID] = *ref.Approved
@@ -424,7 +426,7 @@ func (h *harness) scrubber() *scrubber {
 
 func TestHarnessAnswersADM(t *testing.T) {
 	h := newHarness(t, "")
-	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	h.Inject(inbound{JID: harnessDM, Text: "hello"})
 	if got := h.WaitSent(harnessDM, "hello"); got != "echo:"+dir+":"+chat.NormalizeJID(harnessDM)+" says: hello" {
 		t.Errorf("reply = %q", got)

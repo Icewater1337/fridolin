@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
@@ -113,7 +115,7 @@ func TestStatusWarnsAboutAnAllowedNumberThatIsNone(t *testing.T) {
 // none is the script's mistake, a 400, not a failed send.
 func TestHTTPSendTakesANumber(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "p", Name: "P", Routing: manifest.Routing{HandlesDMs: true}})
 	br := tb.brainMgr.Get("p")
 	send := func(jid string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("POST", "http://127.0.0.1:8765/send", strings.NewReader(`{"jid":"`+jid+`","text":"from a script"}`))
@@ -183,7 +185,7 @@ func (s storedLIDs) GetLIDForPN(ctx context.Context, pn types.JID) (types.JID, e
 // the JID the chat's runs read its history by.
 func TestHTTPSendToALIDUsesTheNumber(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "p", Name: "P", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "p", Name: "P", Routing: manifest.Routing{HandlesDMs: true}})
 	tb.lids = func() store.LIDStore { return personLIDs{} }
 	r := httptest.NewRequest("POST", "http://127.0.0.1:8765/send", strings.NewReader(`{"jid":"`+personLID+`@lid","text":"from a script"}`))
 	r.Host = "127.0.0.1:8765"

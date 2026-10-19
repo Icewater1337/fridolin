@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 )
@@ -915,10 +917,10 @@ func (c *Config) validate() error {
 	if c.AgentProvider != "claude" && c.AgentProvider != "codex" {
 		return fmt.Errorf("agent_provider must be claude or codex, not %q", c.AgentProvider)
 	}
-	if !ValidEffort(c.CodexEffort) {
+	if !manifest.ValidEffort(c.CodexEffort) {
 		return fmt.Errorf("codex_effort %q must be one of low, medium, high, xhigh, max", c.CodexEffort)
 	}
-	if !ValidEffort(c.BrainEffort) {
+	if !manifest.ValidEffort(c.BrainEffort) {
 		return fmt.Errorf("brain_effort %q must be one of low, medium, high, xhigh, max", c.BrainEffort)
 	}
 	if !validQueueModes[c.Queue.Mode] {

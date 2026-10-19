@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -389,10 +391,10 @@ func TestBrainsKeepTheRetiredModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := settingsFor(cfg, BrainSpec{Manifest: BrainManifest{ID: "a"}}).model; got != "sonnet" {
+	if got := settingsFor(cfg, manifest.Spec{Manifest: manifest.Manifest{ID: "a"}}).model; got != "sonnet" {
 		t.Errorf("a brain without a model of its own runs %q, want sonnet", got)
 	}
-	if got := settingsFor(cfg, BrainSpec{Manifest: BrainManifest{ID: "a", Model: "opus"}}).model; got != "opus" {
+	if got := settingsFor(cfg, manifest.Spec{Manifest: manifest.Manifest{ID: "a", Model: "opus"}}).model; got != "opus" {
 		t.Errorf("a brain with model opus runs %q, want opus", got)
 	}
 }

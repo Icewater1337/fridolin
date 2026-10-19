@@ -20,6 +20,8 @@ import (
 	"time"
 	_ "time/tzdata" // TestNextDue's time zone, on machines without one
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
@@ -550,7 +552,7 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 		t.Fatal("alias remote not recognised")
 	}
 
-	m := BrainManifest{ID: "notes", Name: "Notes", Backup: BrainBackup{Enabled: true, Exclude: []string{"node_modules/", "*.log", "/private/"}}}
+	m := manifest.Manifest{ID: "notes", Name: "Notes", Backup: manifest.Backup{Enabled: true, Exclude: []string{"node_modules/", "*.log", "/private/"}}}
 	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/notes", "manifest": m, "create_dir": true}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
@@ -744,7 +746,7 @@ func rcloneTestBridge(t *testing.T, extra string) (*testBridge, string) {
 // addBackupBrain adds a brain with backups on and returns its folder.
 func addBackupBrain(t *testing.T, tb *testBridge, id string) string {
 	t.Helper()
-	m := BrainManifest{ID: id, Name: id, Backup: BrainBackup{Enabled: true}}
+	m := manifest.Manifest{ID: id, Name: id, Backup: manifest.Backup{Enabled: true}}
 	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/" + id, "manifest": m, "create_dir": true}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
