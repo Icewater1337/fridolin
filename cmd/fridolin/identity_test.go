@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -84,7 +85,7 @@ func TestLoadConfigNormalisesAllowedNumbers(t *testing.T) {
 // The Overview says when allowed_numbers holds an entry that lets nobody in.
 func TestStatusWarnsAboutAnAllowedNumberThatIsNone(t *testing.T) {
 	tb := newTestBridge(t, `, "allowed_numbers": ["15551234567", "my phone"]`)
-	var st statusResponse
+	var st httpapi.StatusResponse
 	if err := json.Unmarshal(tb.do("GET", "/api/status", nil).Body.Bytes(), &st); err != nil {
 		t.Fatal(err)
 	}

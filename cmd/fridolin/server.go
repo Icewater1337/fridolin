@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -11,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/brain"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/config"
 
@@ -26,117 +23,8 @@ import (
 	"github.com/Icewater1337/fridolin/internal/version"
 )
 
-// sendRequest is the JSON body expected by POST /send.
-type sendRequest struct {
-	JID  string `json:"jid"`
-	Text string `json:"text"`
-}
-
-// ingestRequest is the JSON body expected by POST /ingest. Brain names the
-// brain; Paths are files already written at the top of the media directory
-// (or in the brain's own inbox), which move into the brain's inbox; Text is
-// the message that goes with them.
-type ingestRequest struct {
-	Brain  string   `json:"brain"`
-	Paths  []string `json:"paths"`
-	Text   string   `json:"text"`
-	Sender string   `json:"sender"`
-	// Scope is the name Brain had before. It is no longer read: a request
-	// that still sends it is refused with the field to use instead, rather
-	// than failing on a brain it does not name.
-	Scope string `json:"scope"`
-}
-
-// readyResponse is the body of GET /ready: whether messages can go out and
-// which build answers. Nothing in it identifies the account.
-type readyResponse struct {
-	Ready     bool      `json:"ready"`
-	WhatsApp  string    `json:"whatsapp"` // WAState.Mode
-	Version   string    `json:"version"`
-	StartedAt time.Time `json:"started_at"`
-}
-
-// httpReady handles GET /ready: 200 when /send can deliver (WhatsApp is
-// connected, or dev mode simulates it), else 503 with the same body, so a
-// script can tell a bridge that still needs pairing from one that was
-// logged out. /health stays plain liveness: right after setup the bridge
-// is up but not paired, and waiting for ready there would never end.
 func (b *Bridge) httpReady(w http.ResponseWriter, r *http.Request) {
-	mode := b.wa.State().Mode
-	resp := readyResponse{
-		Ready:     mode == "connected" || b.dev != nil,
-		WhatsApp:  mode,
-		Version:   version.String(),
-		StartedAt: b.started,
-	}
-	status := http.StatusOK
-	if !resp.Ready {
-		status = http.StatusServiceUnavailable
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	httpapi.WriteJSON(w, status, resp)
-}
-
-// httpSend handles POST /send {"jid":"…","text":"…"} for local scripts.
-// docs/API.md is its contract.
-//
-// The sent message is appended to the owning brain's history so the brain can
-// see what was said on its behalf — for example, so the OTP guard recognises a
-// code request that a script sent out.
-func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
-	who, err := b.scriptAuth.authorize(r)
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnauthorized, err.Error())
-		return
-	}
-	var req sendRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	// Blank text would send nothing (ChunkMessage gives no chunks for it),
-	// so refuse it rather than answer "sent" and log a message to history.
-	if req.JID == "" || strings.TrimSpace(req.Text) == "" {
-		httpapi.WriteErr(w, http.StatusBadRequest, "jid and text are required")
-		return
-	}
-	// Refused before sending: a script gets a 400 for its own mistake rather
-	// than a failed send, and dev mode, whose messenger takes any JID,
-	// refuses it too. A bare number is the DM with it.
-	to, err := chatJID(req.JID)
-	if err == nil {
-		err = checkRecipient(to)
-	}
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	// A person is their number to the bridge (canonicalUser): sent to a
-	// LID, the message would go into a history the chat's runs, which
-	// look under the number, find only when they know the LID too.
-	if to.Server == types.HiddenUserServer && b.lids != nil {
-		to = canonicalUser(r.Context(), b.lids(), to, types.EmptyJID)
-	}
-	jid := to.String()
-	if err := b.maySend(who, jid, b.cfgs.Get()); err != nil {
-		status := http.StatusForbidden
-		if errors.Is(err, errTokenRequired) {
-			status = http.StatusUnauthorized
-		}
-		httpapi.WriteErr(w, status, err.Error())
-		return
-	}
-
-	request, err := b.pipeline.SendExternal(r.Context(), who, jid, req.Text)
-	if err != nil {
-		httpapi.WriteErr(w, sendErrStatus(err), "send failed: "+err.Error())
-		return
-	}
-	resp := map[string]string{"status": "sent"}
-	if request != "" {
-		resp["otp_request"] = request
-	}
-	httpapi.WriteJSON(w, http.StatusOK, resp)
+	httpapi.ReadyAPI{Connection: b.wa, DevMode: b.dev != nil, Version: version.String, StartedAt: b.started}.ServeHTTP(w, r)
 }
 
 // maySend refuses a /send that who may not make: a brain may send only to
@@ -184,19 +72,6 @@ func allowedChat(jid string, cfg *config.Config) bool {
 	return strings.HasSuffix(jid, "@"+types.DefaultUserServer) && slices.Contains(cfg.AllowedNumbers, chat.NormalizeJID(jid))
 }
 
-// sendErrStatus is the status for a send that failed with err: 503 while
-// WhatsApp is not connected (try again later), 400 for a chat WhatsApp
-// does not know, else 500.
-func sendErrStatus(err error) int {
-	switch {
-	case errors.Is(err, outboundmsg.ErrOffline):
-		return http.StatusServiceUnavailable
-	case errors.Is(err, outboundmsg.ErrBadRecipient), errors.Is(err, outboundmsg.ErrRefusedRecipient):
-		return http.StatusBadRequest
-	}
-	return http.StatusInternalServerError
-}
-
 // appendHTTPMessageToHistory records a message who sent through /send in the
 // history of whichever brain owns the target chat, marked with how it came
 // in: the brain must not take a line a script or another brain sent for its
@@ -211,67 +86,6 @@ func (b *Bridge) appendHTTPMessageToHistory(who chat.Principal, jid, text, reque
 		from = who.Brain
 	}
 	br.AppendEntry(history.Entry{From: from, Chat: jid, Text: text, Type: history.Out, Via: who.Via(), OTPRequest: request})
-}
-
-// httpIngest handles POST /ingest. It feeds files that arrived outside
-// WhatsApp (a web upload, a recorder sync) through the same pipeline as a
-// WhatsApp attachment. They run in the brain the request names, and the
-// brain's reply goes to its reply chat, even when that chat routes to another
-// brain. Responds 202 at once; processing is asynchronous. docs/API.md is
-// its contract.
-//
-// It needs a token: the brain it names runs with its own folder, memories
-// and credentials, so handing work to a brain is not for any program on
-// this computer. A brain may hand files only to itself.
-func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
-	cfg := b.cfgs.Get()
-	if !cfg.Ingest.Enabled {
-		httpapi.WriteErr(w, http.StatusNotFound, "ingest is disabled (set ingest.enabled in the dashboard)")
-		return
-	}
-	who, err := b.scriptAuth.authorize(r)
-	if err == nil && who.Kind == chat.CallerAnonymous {
-		err = errTokenRequired
-	}
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnauthorized, err.Error())
-		return
-	}
-	var req ingestRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
-		return
-	}
-	if req.Scope != "" {
-		httpapi.WriteErr(w, http.StatusBadRequest, `"scope" is no longer read: name the brain in "brain"`)
-		return
-	}
-	if len(req.Paths) == 0 && strings.TrimSpace(req.Text) == "" {
-		httpapi.WriteErr(w, http.StatusBadRequest, "paths or text required")
-		return
-	}
-	id := strings.ToLower(strings.TrimSpace(req.Brain))
-	if who.Kind == chat.CallerBrain {
-		if id == "" {
-			id = who.Brain
-		}
-		if id != who.Brain {
-			httpapi.WriteErr(w, http.StatusForbidden, fmt.Sprintf("brain %s may hand files only to itself, not to %q", who.Brain, id))
-			return
-		}
-	}
-	br := b.brainMgr.Get(id)
-	if br == nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, fmt.Sprintf("unknown brain %q", id))
-		return
-	}
-
-	jid, err := b.pipeline.Ingest(who, br, req.Paths, req.Sender, req.Text, ownerChat(cfg))
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "jid": jid})
 }
 
 // handOff feeds files that arrived outside WhatsApp to the brain picked for

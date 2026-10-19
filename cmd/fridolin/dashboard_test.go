@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"image/png"
 	"io"
 	"log"
@@ -331,7 +332,7 @@ func TestHTTPSendRefusesStatusBroadcastAndChannels(t *testing.T) {
 	h := newHarness(t, "")
 	for _, jid := range []string{"status@broadcast", "1700000000@broadcast", "120363000000000000@newsletter"} {
 		t.Run(jid, func(t *testing.T) {
-			body, _ := json.Marshal(sendRequest{JID: jid, Text: "hello"})
+			body, _ := json.Marshal(httpapi.SendRequest{JID: jid, Text: "hello"})
 			w := h.Script("POST", "/send", string(body))
 			var resp map[string]string
 			if w.Code != http.StatusBadRequest || w.Header().Get("Content-Type") != "application/json" ||
@@ -415,7 +416,7 @@ func TestReadyReportsWhetherMessagesCanGoOut(t *testing.T) {
 			if c.ready {
 				want = http.StatusOK
 			}
-			var resp readyResponse
+			var resp httpapi.ReadyResponse
 			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != want {
 				t.Fatalf("status %d (%v) %s, want %d with JSON", w.Code, err, w.Body.String(), want)
 			}
@@ -1057,7 +1058,7 @@ func TestApproveDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var views []brainView
+	var views []httpapi.BrainView
 	_ = json.Unmarshal(h.Do("GET", "/api/brains", nil).Body.Bytes(), &views)
 	if len(views) != 1 || views[0].Status != "drift" || views[0].Disk == nil {
 		t.Fatalf("views = %+v", views)

@@ -42,7 +42,7 @@ func TestManifestJSONDiagnosticContracts(t *testing.T) {
 			for _, endpoint := range []struct {
 				name    string
 				handler http.HandlerFunc
-			}{{"update", bridge.apiUpdateBrain}, {"approve", bridge.apiApproveBrain}} {
+			}{{"update", bridge.newBrainsAPI().Update}, {"approve", bridge.newBrainsAPI().Approve}} {
 				rec := httptest.NewRecorder()
 				req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 				endpoint.handler(rec, req)
@@ -87,7 +87,7 @@ func TestAddBrainManifestJSONDiagnosticContracts(t *testing.T) {
 			}
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"manifest":`+tc.input+`}`))
-			(&Bridge{}).apiAddBrain(rec, req)
+			(&Bridge{}).newBrainsAPI().Add(rec, req)
 			var response struct {
 				Error string `json:"error"`
 			}
