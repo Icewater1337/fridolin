@@ -25,18 +25,14 @@ func DecodeOptionalJSON(r *http.Request, v any) error { return decodeBody(r, v, 
 
 // DecodeStrict decodes data, one JSON value, as strictly as DecodeJSON.
 func DecodeStrict(data []byte, v any) error {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
+	if err := decodeSingleJSON(bytes.NewReader(data), v); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
 	}
 	return nil
 }
 
 func decodeBody(r *http.Request, v any, optional bool) error {
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
+	if err := decodeSingleJSON(r.Body, v); err != nil {
 		if errors.Is(err, io.EOF) {
 			if optional {
 				return nil
@@ -45,9 +41,20 @@ func decodeBody(r *http.Request, v any, optional bool) error {
 		}
 		return fmt.Errorf("invalid JSON: %w", err)
 	}
+	return nil
+}
+
+// decodeSingleJSON leaves error decoration to the endpoint, preserving its
+// published diagnostics while enforcing the same complete-body boundary.
+func decodeSingleJSON(reader io.Reader, v any) error {
+	dec := json.NewDecoder(reader)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
 	var extra json.RawMessage
 	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
-		return errors.New("invalid JSON: the body must be a single JSON value")
+		return errors.New("the body must be a single JSON value")
 	}
 	return nil
 }
