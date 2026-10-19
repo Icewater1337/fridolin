@@ -44,6 +44,7 @@ type App struct {
 	runMu     sync.Mutex
 	runCancel context.CancelCauseFunc
 	runUsed   bool
+	runDone   chan struct{}
 	cfgs      *config.Store
 	lock      *platform.Lock
 	store     *store.Store
@@ -304,7 +305,24 @@ func (b *App) connectLoop(ctx context.Context) { whatsapp.RunConnectLoop(ctx, b.
 // Stop shuts everything down in dependency order, once: a restart and a
 // signal that come together, or a test and its cleanup, stop the bridge
 // one time between them.
+// Stop cancels an owned Run and waits for its teardown. Before Run it releases
+// construction resources and permanently closes the application.
 func (b *App) Stop() {
+	b.runMu.Lock()
+	done, cancel := b.runDone, b.runCancel
+	b.runUsed = true
+	b.runMu.Unlock()
+	if done != nil {
+		if cancel != nil {
+			cancel(nil)
+		}
+		<-done
+		return
+	}
+	b.stopResources()
+}
+
+func (b *App) stopResources() {
 	b.supervisor.Stop(StopOptions{
 		CloseIntake: b.intake.Close, HTTPGrace: httpStopWait,
 		Background: []func(){b.backup.Stop, b.plaud.Stop, b.site.Stop},

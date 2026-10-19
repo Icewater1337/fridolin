@@ -16,12 +16,14 @@ func (b *App) Run(parent context.Context) error {
 	}
 	ctx, cancel := context.WithCancelCause(parent)
 	b.runUsed, b.runCancel = true, cancel
+	b.runDone = make(chan struct{})
 	b.runMu.Unlock()
 	defer func() {
 		cancel(nil)
-		b.Stop()
+		b.stopResources()
 		b.runMu.Lock()
 		b.runCancel = nil
+		close(b.runDone)
 		b.runMu.Unlock()
 	}()
 	if err := b.Start(ctx); err != nil {
