@@ -40,6 +40,83 @@ most five are with the brain at once, waiting or running (fewer when
 arrives oldest first, as the brain gets through it, and never fills the
 brain's queue, which then would turn your own messages away.
 
+## Without Plaud's cloud: the phone app
+
+Plaud's own app syncs a NotePin only while it is open, so a recording can
+take hours to reach Plaud's cloud, and Fridolin with it. The Plaud Sync app
+in [`plaud-android/`](../plaud-android/README.md) replaces it on an Android
+phone: it keeps the pin connected, pulls every recording off it as soon as
+it stops, has Plaud transcribe it, and saves `YYYY-MM-DD_HH-MM-SS.mp3` and
+`.txt` in the phone's `Documents/PlaudSync`. Recordings no longer go to
+your Plaud account then, and Plaud makes no AI summary of them. The
+transcripts reach Fridolin through your site, or through a folder you sync.
+
+### Through your site
+
+With [your site](SITE.md) running under a domain, the app uploads each
+transcript there as soon as Plaud has made it, and Fridolin builds the app
+for you:
+
+1. Dashboard → **Integrations → Plaud**: turn on **Recordings come from the
+   Plaud Sync phone app, through your site** (or, before Plaud is
+   connected, **Use the Plaud Sync phone app instead**), pick the brain and
+   save.
+2. Enter your Plaud developer app's **client ID**, **client secret** and
+   **API key** ([portal.plaud.ai](https://portal.plaud.ai) → App Settings;
+   the API key is under API Keys). Fridolin keeps them in
+   `<data_dir>/plaud/developer.json` and never shows them again.
+3. **Build phone app**. Fridolin builds `plaud-android/` of the checkout it
+   was installed from with Gradle, which needs a JDK 17 or newer and the
+   Android SDK on this computer (`brew install openjdk@17`, `brew install
+   --cask android-commandlinetools`, then `sdkmanager "platforms;android-35"
+   "build-tools;35.0.0"`). It finds them through `JAVA_HOME` and
+   `ANDROID_HOME` in the service's environment, else where Homebrew and
+   Android Studio put them. The first build downloads Gradle and Plaud's
+   SDK and takes a few minutes.
+4. **Download app (APK)**, copy it to the phone and install it. Remove the
+   NotePin from Plaud's app, then tap **Pair NotePin** in Plaud Sync.
+
+The app carries your site's address and a pairing code that works once,
+within 24 hours; build again for another phone, or after one was unpaired.
+On its first start the app makes a key pair in the phone's keystore, whose
+private key never leaves the phone, and pairs: it sends the public key and
+the code, signed with that key, to `https://<domain>/_fridolin/devices/pair`.
+Each upload then goes to `/_fridolin/devices/plaud/transcripts` with a JWT
+(ES256) the phone signed, which names the recording and the transcript's
+SHA-256, so it is good for that one transcript and for ten minutes at most.
+The site checks the signature to turn junk away, and Fridolin checks it
+again, since module code runs in the site's process; it keeps only the
+phones' public keys. A transcript that passes goes into
+`<data_dir>/plaud/inbox/` and from there to the brain at once, as described
+below. A phone offline meanwhile keeps its transcripts and sends them later.
+
+The card lists the paired phones; **Unpair** refuses a phone's uploads from
+then on. The developer keys are inside the app too, so keep the APK to
+yourself; the key a phone pairs with is not.
+
+### Through a synced folder
+
+To hand them to a brain without the site, sync that folder to a folder on
+this computer —
+[Syncthing](https://syncthing.net) does it directly, without a cloud
+(Syncthing-Fork on the phone, `brew install syncthing` here) — and set
+that folder in `config.json`:
+
+```json
+"plaud": { "enabled": true, "phone_dir": "~/PlaudSync" }
+```
+
+then `fridolin service restart`. Plaud's CLI and its login are not used
+while `phone_dir` is set; the card says **Phone folder** instead of who is
+signed in. Everything else is as below: the first check only remembers the
+transcripts already there, each new one goes to the brain as a
+`[Plaud] New recording "Phone recording" (<when>, <length>)…` message with
+the transcript attached, and the card lists what was handed over or given
+up. A transcript is in the folder only once Plaud finished it, so it is
+handed over at the next check. Only the app's own file names count: a sync
+tool's temporary and conflict files are left alone, and so are the MP3s.
+Fridolin only reads the folder; delete old recordings on the phone.
+
 ## What happens
 
 Every minute (`plaud.interval_seconds`) Fridolin asks Plaud for recent
@@ -52,7 +129,8 @@ and the private chat summaries go to (see below) gets one notice. A
 recording deleted in Plaud meanwhile is given up at once, without a notice.
 Once it is ready, Fridolin
 writes a `.txt` with the details, Plaud's summary and the timestamped
-transcript to `~/.fridolin/media/plaud/` (as
+transcript to the `plaud` folder of that brain's media inbox,
+`~/.fridolin/media/<brain id>/plaud/` (as
 `YYYY-MM-DD - <name> - <Plaud ID>.txt`, by the day it was recorded; a
 recording handed over again rewrites its file rather than adding a copy),
 and gives it to the brain like a WhatsApp attachment. The message with it
@@ -87,18 +165,31 @@ summaries go, and warns when that chat belongs to another brain.
 
 New brains get a `skills/plaud.md` that tells them how to file recordings.
 
-The transcript sits in the media inbox (`<media_dir>/plaud/`, by default
-`~/.fridolin/media/plaud/`) until the brain files it; under the sandbox every
-brain may read the inbox. **Disconnect** signs out and stops the checks; the
-transcripts already written, the brains' filed copies and the list of
-recordings Fridolin has seen (`~/.fridolin/plaud/state.json`) stay, so
-connecting the same account again sends nothing twice.
+The transcript sits in the picked brain's media inbox
+(`<media_dir>/<brain id>/plaud/`, by default
+`~/.fridolin/media/<brain id>/plaud/`) until the brain files it; under the
+sandbox no other brain can read it. Older versions wrote every brain's
+transcripts to `media/plaud/`. Before the first inbox, the bridge moves
+that folder to `media/.old/plaud/`, where no brain can read it, not even
+one called `plaud`, whose inbox `media/plaud/` would otherwise have been,
+and `/ingest` takes nothing from it. **Disconnect** signs out and stops
+the checks; the transcripts already written, the brains' filed copies and
+the list of recordings Fridolin has seen (`~/.fridolin/plaud/state.json`)
+stay, so connecting the same account again sends nothing twice.
 
 If Plaud's login expires, that private chat gets one notice a day until you
 connect again or disconnect (the card offers both); without one, only the
 dashboard shows it.
 Plaud's tool deletes a login once it has expired. Fridolin remembers that it
 signed in, so the card says **Login expired** rather than *Not connected*.
+It says so too while Plaud refuses a login the tool still has (revoked on
+Plaud's side). **Connect again** then signs that login out first, since the
+tool's sign-in would otherwise just keep it ("Already logged in"). A
+sign-in that still finds that login, because the sign-out could not
+remove it (Plaud unreachable, say), fails, and so does one whose new login
+Plaud refuses as well; the card and the notices then stay as they were.
+A first sign-in whose login Plaud refuses right away fails too, and the
+card shows **Login expired**.
 A login that goes because you disconnected, or changed where it lives (see
 below), while a check ran gets no notice: it did not expire.
 
@@ -106,26 +197,46 @@ below), while a check ran gets no notice: it did not expire.
 
 Plaud's tool stores its login in `<home>/.plaud/tokens.json`. By default
 Fridolin runs it with a private home in `~/.fridolin/plaud/home/`, which the
-sandbox denies to brains, and denies brains `~/.plaud/` as well. It runs the
-tool in that home folder, never in its own working folder (the tool would
-read a `.env` there), and stops it, with anything it started, when a check
-is cancelled. Fridolin runs the tool itself outside the sandbox, so when it
-is installed in your home folder (with nvm, for example) its whole npm
-package and the `node` that runs it are read-only to brains. Unless
-`cli_path` is set, Fridolin takes the tool from the newest nvm node version
-that has it, so brains cannot write anywhere in `~/.nvm/versions/node`, and
-they cannot add a `plaud` or `node` to a `PATH` folder in your home folder
-either. One in
-`/opt/homebrew` or `/usr/local` is not protected yet; see
-[what the sandbox does not cover yet](CONFIGURATION.md#what-the-sandbox-does-not-cover-yet).
+sandbox denies to brains, and denies brains `~/.plaud/` as well. It runs
+the tool in that home folder, never in its own working folder (the tool
+would read a `.env` there), and stops it, with anything it started, when a
+check is cancelled. The tool's `#!/usr/bin/env node` finds `node` on a
+`PATH` of Fridolin's: the tool's own folder first when that holds a
+`node` (as with nvm), then only the folders of the service's `PATH` that
+Fridolin takes its helpers from (see
+[CONFIGURATION.md](CONFIGURATION.md#helper-programs)), and last the tool's
+folder when it holds none. Fridolin runs the tool itself outside the
+sandbox, but brains can write nothing outside their own places (see
+[the sandbox](CONFIGURATION.md#writing)), so they can neither change the
+tool, its npm package or the `node` that runs it, wherever they are
+installed, nor add a newer node version to nvm or a `plaud` or `node` to a
+`PATH` folder, where Fridolin would find it next.
 
 **Let brains use the Plaud CLI** (`plaud.brain_access`) keeps the login in
 `~/.plaud/` instead, so brains can run `plaud search`, `plaud transcript` and
-so on themselves. Their `PATH` then starts with the tool's folder, as
-Fridolin's own runs do, so they find it, and the `node` it was installed
-with, also where the service's `PATH` does not have them. A brain could
+so on themselves. Their `PATH` then has the tool's folder as well as the
+service's whole `PATH`, so they find the tool also where the service's
+`PATH` does not have it: first when the folder holds the `node` the tool
+was installed with (as with nvm), so that they get that one, and
+otherwise last, so that nothing in it runs in place of a program on the
+service's `PATH`, such as `claude` for another brain's run. A brain could
 then also read the token — turn it on only if you want brains to look
-things up in Plaud directly.
+things up in Plaud directly. A brain's `plaud` also refreshes the login
+when it is about to expire and saves it, as yours does: the sandbox lets
+brains rewrite `~/.plaud/tokens.json` in place and set its mode, and
+nothing else in `~/.plaud/`. Without that, a brain's command failed as not
+logged in once the login had expired, and a refresh token Plaud replaced
+was lost, which signed Plaud out. Brains cannot remove, rename or replace
+the file: one that put a symlink in its place would have had Fridolin's
+own `plaud`, which runs outside the sandbox, write your next sign-in
+wherever the link points. Older versions' sandbox did not stop that, so
+Fridolin also checks before each run of the tool: if `tokens.json` is a
+symlink or has a second name (a hard link), or `~/.plaud` is a symlink, it
+does not run it (a sign-out aside, which removes only the link), and the
+Plaud card says to remove the link and connect again. A
+brain's `plaud logout` still revokes the login at Plaud, as anything
+holding the token can, though the file stays: Fridolin's next check then
+finds the login refused.
 
 Changing it does not move a login. Fridolin stops checking until you
 connect again (a check that is running ends there, and the recordings it
@@ -164,4 +275,6 @@ for updates either; `plaud` in your own terminal follows your own settings.
 | `polished` | `false` | use Plaud's AI-cleaned transcript; when Plaud has none an hour after the recording showed up, the raw one is sent, with a note saying so |
 | `message` | follow `skills/plaud.md` | instruction sent with each recording, after the fixed first line |
 | `brain_access` | `false` | share the login with brains (see above) |
-| `cli_path` | found on `PATH`, else in the newest nvm node version, else in `/opt/homebrew/bin` or `/usr/local/bin` | path to `plaud` |
+| `phone_dir` | unset | a folder the phone app's files are synced to; recordings come from there instead of Plaud's cloud (see above) |
+| `phone_upload` | `false` | recordings come from the phone app, which uploads them through the site (see above); they go into `phone_dir` when that is set, else `<data_dir>/plaud/inbox` |
+| `cli_path` | found in the folders of `PATH` Fridolin takes its helpers from (see [CONFIGURATION.md](CONFIGURATION.md#helper-programs)), else in the newest nvm node version, else in `/opt/homebrew/bin` or `/usr/local/bin` | path to `plaud` |

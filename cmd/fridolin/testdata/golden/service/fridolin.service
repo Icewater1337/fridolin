@@ -1,0 +1,25 @@
+# systemd user unit for Fridolin, written by "fridolin service install",
+# which rewrites it on every install. Keep your own settings in a drop-in:
+#     systemctl --user edit fridolin
+# "fridolin service uninstall" removes it. To keep the bridge running after
+# you log out: sudo loginctl enable-linger $USER
+#
+# The sandbox layer is macOS-only: here brains run with whatever access this
+# user has, so run the bridge as a dedicated user.
+
+[Unit]
+Description=Fridolin
+
+[Service]
+Type=simple
+WorkingDirectory=/Users/you/.fridolin
+ExecStart="/Users/you/.local/lib/fridolin/fridolin" --config "/Users/you/.fridolin/config.json"
+Environment="HOME=/Users/you"
+Environment="PATH=/Users/you/.local/bin:/opt/homebrew/bin:/usr/bin:/bin"
+Restart=on-failure
+RestartSec=5s
+# Nothing the bridge or a brain starts can gain privileges (no sudo).
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import io
-import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -67,8 +67,20 @@ def fake_fridolin(testcase: unittest.TestCase, stdout: str = '{"ok": true}', cod
 
 
 def run_tool(name: str, argv: list[str], env: dict[str, str]) -> tuple[int, str, str]:
-    """Run tools/name as its own process, with env and PATH as its whole
-    environment, and return (exit code, stdout, stderr)."""
-    r = subprocess.run([sys.executable, str(TOOLS_DIR / name), *argv], capture_output=True, text=True,
-                       env={"PATH": os.environ.get("PATH", ""), **env}, timeout=60)
+    """Run a scratch copy, without a real checkout or installed binary nearby.
+
+    Only explicit environment entries reach the child. In particular, the
+    wrappers must never discover and execute a user's fridolin build while
+    testing how they behave when no binary is available.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        tools = root / "tools"
+        tools.mkdir()
+        for source in TOOLS_DIR.glob("*.py"):
+            shutil.copyfile(source, tools / source.name)
+        home = root / "home"
+        home.mkdir()
+        r = subprocess.run([sys.executable, str(tools / name), *argv], capture_output=True, text=True,
+                           cwd=root, env={"PATH": "", "HOME": str(home), **env}, timeout=60)
     return r.returncode, r.stdout, r.stderr

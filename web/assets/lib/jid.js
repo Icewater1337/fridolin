@@ -20,6 +20,21 @@ export function shortJid(jid) {
   return jid.length > 28 ? `${jid.slice(0, 12)}…${jid.slice(-10)}` : jid;
 }
 
+/**
+ * A phone number as the bridge keeps it, digits with the country code, or
+ * null for anything the bridge refuses as one (phoneNumber in
+ * identity.go): a +, spaces, dashes, dots, brackets and @s.whatsapp.net
+ * go, and 6 to 15 digits must be left. A @lid JID holds WhatsApp's
+ * internal id for a sender, no number.
+ */
+export function phoneDigits(s) {
+  const t = String(s ?? '').trim();
+  const at = t.indexOf('@');
+  if (at >= 0 && t.slice(at + 1) !== 's.whatsapp.net') return null;
+  const n = (at >= 0 ? t.slice(0, at) : t).replace(/^[+\s]+/, '').trim().replace(/[ \u00a0\-.()]/g, '');
+  return /^[0-9]{6,15}$/.test(n) ? n : null;
+}
+
 export function phone(num) {
   return num ? `+${String(num).replace(/^\+/, '')}` : '';
 }

@@ -1,0 +1,39 @@
+{
+  "_comment": "Edit this in the dashboard (fridolin open). Every option: docs/CONFIGURATION.md",
+  "allow_any_dm": false,
+  "allowed_groups": [],
+  "allowed_numbers": [],
+  "backup": {
+    "enabled": false
+  },
+  "brain_mode": true,
+  "brain_model": "",
+  "claude_path": "/opt/claude/bin/claude",
+  "dangerously_skip_permissions": true,
+  "dashboard": {},
+  "data_dir": "~/.fridolin",
+  "debounce": {},
+  "http_listen": "127.0.0.1:8765",
+  "ingest": {
+    "enabled": false
+  },
+  "otp_guard": true,
+  "plaud": {
+    "enabled": false
+  },
+  "queue": {},
+  "sandbox": {
+    "allow_paths": [],
+    "deny_paths": [],
+    "enabled": "<ENABLED>"
+  },
+  "script_api": {
+    "tokenless_send": false
+  },
+  "startup_checks": {},
+  "triggers": [
+    "@claude"
+  ],
+  "version": 2,
+  "viewer": false
+}

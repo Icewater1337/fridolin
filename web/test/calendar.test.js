@@ -35,6 +35,81 @@ test('Disconnect stays busy until the card shows the result', async (t) => {
   assert.ok(button(card, 'Connect Google Calendar'), 'the card shows the result');
 });
 
+test('a revocation Google does not confirm offers to delete the token here only', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const document = installDom();
+  const net = stubFetch(t);
+  const card = calendarCard('work');
+  document.body.append(card);
+  net.answer(0, connected);
+  await tick();
+
+  button(card, 'Disconnect').click();
+  await tick();
+  button(document.querySelector('dialog'), 'Disconnect').click();
+  await tick();
+  net.answer(1, { error: 'the revocation was not confirmed by Google: 503 Service Unavailable' }, 502);
+  await tick();
+  await tick();
+  const dialog = document.querySelectorAll('dialog').at(-1);
+  assert.ok(dialog.textContent.includes('not confirmed by Google'), dialog.textContent);
+  button(dialog, 'Delete the token').click();
+  await tick();
+  assert.equal(net.calls[2].init.method, 'DELETE');
+  assert.equal(net.calls[2].url, '/api/brains/work/calendar?local_only=1');
+});
+
+test('a sign-in Google no longer accepts says so', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const document = installDom();
+  const net = stubFetch(t);
+  const card = calendarCard('work');
+  document.body.append(card);
+  net.answer(0, { ...connected, calendars: [], list_error: 'the sign-in no longer works at Google — connect this brain again', reconnect_needed: true });
+  await tick();
+  assert.ok(card.textContent.includes('Google no longer accepts this sign-in'), card.textContent);
+  assert.ok(button(card, 'Sign in again'));
+});
+
+test('the broad-access warning says when Disconnect leaves the old access', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const document = installDom();
+  const net = stubFetch(t);
+  const card = calendarCard('work');
+  document.body.append(card);
+  net.answer(0, { ...connected, broad_access: true });
+  await tick();
+  assert.ok(card.textContent.includes('More access than the calendar needs'), card.textContent);
+  // Google keeps a grant another brain shares, so one Disconnect is not enough.
+  assert.ok(card.textContent.includes('unless another brain is signed in to the same Google account'), card.textContent);
+});
+
+test('files like old copies of the OAuth client are named, connected or not', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const document = installDom();
+  const net = stubFetch(t);
+  const copies = ['google_calendar_credentials_a.json', 'google_calendar_credentials_old.json'];
+  for (const [i, status] of [connected, { connected: false, client_configured: true }, { connected: false, client_configured: false }].entries()) {
+    const card = calendarCard('work');
+    document.body.append(card);
+    net.answer(i, { ...status, leftover_client_copies: copies });
+    await tick();
+    const text = card.textContent;
+    assert.ok(text.includes('Client secrets in the credentials folder'), text);
+    assert.ok(copies.every((n) => text.includes(n)), text);
+    // The bridge knows a name and a secret, not that a file is such a copy.
+    assert.ok(text.includes('Files named like the copies of the OAuth client'), text);
+    assert.ok(!text.includes('Nothing reads them'), text);
+    // The bridge deletes none itself: one may be yours, in use elsewhere.
+    assert.ok(text.includes('delete them by hand, unless something else of yours uses them'), text);
+  }
+  const card = calendarCard('work');
+  document.body.append(card);
+  net.answer(3, { ...connected, leftover_client_copies: [] });
+  await tick();
+  assert.ok(!card.textContent.includes('Client secrets in the credentials folder'), 'no copies, no warning');
+});
+
 test('a reload error reaches the button instead of an unhandled rejection', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const document = installDom();

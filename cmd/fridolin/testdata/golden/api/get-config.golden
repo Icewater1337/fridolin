@@ -1,0 +1,119 @@
+GET /api/config
+200 OK
+Content-Type: application/json
+
+{
+  "config": {
+    "allowed_groups": [
+      "120363000000000000@g.us"
+    ],
+    "allowed_numbers": [
+      "15551234567"
+    ],
+    "backup": {
+      "enabled": true,
+      "rclone_path": "<FAKES>/rclone"
+    },
+    "brain_mode": true,
+    "brain_model": "",
+    "claude_path": "<TEST_BINARY>",
+    "dangerously_skip_permissions": false,
+    "dashboard": {},
+    "data_dir": "<HOME>/.fridolin",
+    "debounce": {
+      "quiet_ms": 0
+    },
+    "http_listen": "",
+    "ingest": {
+      "enabled": true
+    },
+    "otp_guard": false,
+    "plaud": {
+      "cli_path": "<TEST_BINARY>",
+      "enabled": true
+    },
+    "queue": {},
+    "sandbox": {
+      "allow_paths": null,
+      "deny_paths": null,
+      "enabled": false
+    },
+    "script_api": {},
+    "startup_checks": {},
+    "triggers": [],
+    "version": 2,
+    "viewer": false
+  },
+  "effective": {
+    "agent_provider": "claude",
+    "allow_any_dm": false,
+    "allowed_groups": [
+      "120363000000000000@g.us"
+    ],
+    "allowed_numbers": [
+      "15551234567"
+    ],
+    "backup": {
+      "daily_at": "03:30",
+      "enabled": true,
+      "include_bridge_config": true,
+      "keep_versions_days": 30,
+      "rclone_path": "<FAKES>/rclone",
+      "remote": "brain-gdrive",
+      "root": "fridolin-backup"
+    },
+    "brain_mode": true,
+    "brain_model": "",
+    "claude_path": "<TEST_BINARY>",
+    "codex_effort": "high",
+    "codex_model": "gpt-6.1-sol",
+    "codex_path": "codex",
+    "dangerously_skip_permissions": false,
+    "dashboard": {
+      "require_token": true
+    },
+    "data_dir": "<HOME>/.fridolin",
+    "db_path": "<HOME>/.fridolin/bridge.db",
+    "debounce": {
+      "max_wait_ms": 10000,
+      "quiet_ms": 0
+    },
+    "http_listen": "127.0.0.1:8765",
+    "ingest": {
+      "enabled": true
+    },
+    "log_level": "info",
+    "max_chunk_size": 3900,
+    "max_concurrent_runs": 2,
+    "max_media_mb": 100,
+    "media_dir": "<HOME>/.fridolin/media",
+    "otp_guard": false,
+    "plaud": {
+      "cli_path": "<TEST_BINARY>",
+      "enabled": true
+    },
+    "queue": {
+      "max_pending": 10,
+      "mode": "queue",
+      "notify": true
+    },
+    "run_timeout_minutes": 30,
+    "sandbox": {
+      "allow_paths": null,
+      "deny_paths": null,
+      "enabled": false,
+      "git_config": "read"
+    },
+    "script_api": {
+      "tokenless_send": true
+    },
+    "startup_checks": {},
+    "triggers": [
+      "@claude"
+    ],
+    "version": 2,
+    "viewer": false
+  },
+  "etag": "<ETAG>",
+  "path": "<ROOT>/config.json"
+}

@@ -133,6 +133,102 @@ expect "--all-history finds the string at HEAD" 1 "$repo" --all-history
 expect_output "--all-history names HEAD and the file" "HEAD:notes.txt:1"
 git -C "$repo" switch -q main
 
+# --staged, the pre-commit hook's mode: the change about to be committed.
+# stage FILE TEXT — a new repository, $staged, with FILE holding TEXT
+# staged in it.
+cases=0
+stage() {
+  cases=$((cases + 1))
+  staged="$work/staged-$cases"
+  new_repo "$staged"
+  mkdir -p "$(dirname "$staged/$1")"
+  printf '%s\n' "$2" >"$staged/$1"
+  git -C "$staged" add "$1"
+}
+stage notes.txt "nothing to see"
+expect "--staged of a clean change passes" 0 "$staged" --staged
+stage notes.txt "call $secret tomorrow"
+expect "--staged finds the denylisted string" 1 "$staged" --staged
+expect_output "--staged names the staged file" "staged:notes.txt"
+stage notes.txt "15551234567@s.whatsapp.net 120363000000000000@g.us you@example.com /Users/you"
+expect "--staged passes the documented placeholders" 0 "$staged" --staged
+
+# One case per generic pattern. Each value is written here with a # that
+# keeps the pattern from matching this file, which the check scans too;
+# the planted value is without it. The check must name the file and print
+# the value masked: its first three characters and its length, never all
+# of it, since CI logs are public.
+for planted in \
+  "a phone number|+49#1701234567" \
+  "a phone number in a JSON string|\"49#1701234567\"" \
+  "a WhatsApp JID|491701234567#@s.whatsapp.net" \
+  "a group JID|120363123456789012#@g.us" \
+  "a LID|123456789012345#@lid" \
+  "a GitHub token|ghp#_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8" \
+  "a fine-grained GitHub token|github#_pat_11ABCDEFG0123456789abcdefghij" \
+  "an Anthropic key|sk#-ant-api03-AbCdEfGh12345678" \
+  "an email address|jane.doe#@company.test" \
+  "a macOS home path|/Use#rs/jane" \
+  "a Linux home path|/ho#me/jane"; do
+  name="${planted%%|*}"
+  value="$(printf '%s' "${planted#*|}" | tr -d '#')"
+  stage leak.txt "note: $value"
+  expect "--staged catches $name" 1 "$staged" --staged
+  expect_output "--staged names the file with $name" "staged:leak.txt"
+  expect_output "--staged masks $name" "${value:0:3}…(${#value} chars)"
+  case "$out" in
+    *"$value"*) printf 'FAIL  --staged prints %s whole:\n%s\n' "$name" "$out"; failed=$((failed + 1)) ;;
+    *) printf 'ok    --staged does not print %s whole\n' "$name" ;;
+  esac
+done
+
+# THIRD_PARTY_NOTICES quotes the licences of the modules the binary links
+# word for word, and some name their authors by email address: the email
+# pattern alone skips that file, at the top of the repository only.
+author="$(printf '%s' "Jane Doe <jane.doe#@company.test>" | tr -d '#')"
+stage THIRD_PARTY_NOTICES "Copyright (c) 2016 $author"
+expect "--staged lets THIRD_PARTY_NOTICES name a licence's author" 0 "$staged" --staged
+stage THIRD_PARTY_NOTICES "$(printf '%s' "built in /Use#rs/jane" | tr -d '#')"
+expect "--staged still catches a home path in THIRD_PARTY_NOTICES" 1 "$staged" --staged
+stage THIRD_PARTY_NOTICES "call $secret tomorrow"
+expect "--staged still reads THIRD_PARTY_NOTICES for the denylist" 1 "$staged" --staged
+stage docs/THIRD_PARTY_NOTICES "Copyright (c) 2016 $author"
+expect "--staged catches an address in a THIRD_PARTY_NOTICES elsewhere" 1 "$staged" --staged
+stage NOTICES.txt "Copyright (c) 2016 $author"
+expect "--staged catches an address in another notices file" 1 "$staged" --staged
+notices_repo="$work/notices-repo"
+new_repo "$notices_repo"
+commit "$notices_repo" THIRD_PARTY_NOTICES "Copyright (c) 2016 $author" >/dev/null
+expect "--all-history lets THIRD_PARTY_NOTICES name a licence's author" 0 "$notices_repo" --all-history
+
+# The public module identifier is a build contract, not an exception for
+# every occurrence of its account name or the rest of a line.
+account="Icewater""1337"
+module="github.com/$account/fridolin"
+printf '%s\n' "$account" "$secret" >"$PERSONAL_DENYLIST"
+for reference in "module $module" "\"$module/internal/fsx\"" "-X $module/internal/version.version=dev"; do
+  stage module.txt "$reference"
+  expect "canonical module reference passes" 0 "$staged" --staged
+done
+for reference in "$account" "$module-private" "other.$module" "$module $secret" "$module/$secret"; do
+  stage notes.txt "$reference"
+  expect "module exception keeps other denylist occurrences blocked" 1 "$staged" --staged
+done
+stage notes.txt "$module /Users/""jane"
+expect "module exception keeps generic patterns on the line" 1 "$staged" --staged
+printf '%s\n' "$secret" >"$PERSONAL_DENYLIST"
+stage notes.txt "Co-Authored-By: Codex <noreply@openai.com>"
+expect "Codex automation attribution passes" 0 "$staged" --staged
+
+# The denylist's place from before the rename is still read, and named.
+old_place="$HOME/.config/whatsapp-claude-bridge/personal-denylist"
+mkdir -p "$(dirname "$old_place")"
+cp "$PERSONAL_DENYLIST" "$old_place"
+stage notes.txt "call $secret tomorrow"
+PERSONAL_DENYLIST="" expect "the denylist's old place is read" 1 "$staged" --staged
+expect_output "the denylist's old place is named, with the new one" "move it to ~/.config/fridolin/personal-denylist"
+rm -r "$HOME/.config/whatsapp-claude-bridge"
+
 if [ "$failed" -gt 0 ]; then
   printf '\n%d case(s) failed\n' "$failed" >&2
   exit 1

@@ -1,0 +1,16 @@
+[
+  "--output-format",
+  "stream-json",
+  "--verbose",
+  "--setting-sources",
+  "project,local",
+  "--strict-mcp-config",
+  "--settings",
+  "{\n  \"claudeMdExcludes\": [\n    \"<HOME>/CLAUDE.md\",\n    \"<HOME>/CLAUDE.local.md\",\n    \"<HOME>/.claude/CLAUDE.md\",\n    \"<HOME>/.claude/rules/**\",\n    \"<ROOT>/CLAUDE.md\",\n    \"<ROOT>/CLAUDE.local.md\",\n    \"<ROOT>/.claude/CLAUDE.md\",\n    \"<ROOT>/.claude/rules/**\",\n    \"<ABOVE>/CLAUDE.md  [×each folder above]\",\n    \"<ABOVE>/CLAUDE.local.md  [×each folder above]\",\n    \"<ABOVE>/.claude/CLAUDE.md  [×each folder above]\",\n    \"<ABOVE>/.claude/rules/**  [×each folder above]\",\n    \"/CLAUDE.md\",\n    \"/CLAUDE.local.md\",\n    \"/.claude/CLAUDE.md\",\n    \"/.claude/rules/**\"\n  ]\n}",
+  "--dangerously-skip-permissions",
+  "--model",
+  "opus",
+  "--effort",
+  "low",
+  "-p"
+]

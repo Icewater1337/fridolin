@@ -1,20 +1,46 @@
-// Talking to the bridge's JSON API. Every call carries the dashboard token;
-// writes also carry X-Bridge-Dashboard, which a cross-site form cannot send.
+// Talking to the bridge's JSON API. Every call carries the session signIn
+// got: its cookie, which the browser sends, and its binding, in the
+// X-Bridge-Session header. Writes also carry X-Bridge-Dashboard, which a
+// cross-site form cannot send.
+//
+// The page never holds the dashboard token: it trades a login code (from
+// `fridolin open`) or a pasted token for a session. The cookie is one page
+// scripts cannot read, but the browser sends it to every server on this
+// host, whatever its port, a brain's site preview included. The binding
+// is what such a server lacks: it lives in this origin's localStorage,
+// which another port cannot read, and the bridge takes the cookie only
+// with it. That holds only while the browser's profile on disk, where the
+// binding is too, is one the sandbox denies to brains, or while no brain's
+// server is opened in it (see dashsession.go for the list and for Firefox
+// forks, which need no such server). Older versions kept the token in
+// localStorage, where it stayed for good, readable from the browser's
+// files; it goes now.
 
 import { withDeadline } from '../lib/abort.js';
+import { h } from '../lib/dom.js';
 
-const TOKEN_KEY = 'bridgeToken';
-let token = '';
-try { token = localStorage.getItem(TOKEN_KEY) || ''; } catch { /* storage blocked */ }
+try { localStorage.removeItem('bridgeToken'); } catch { /* storage blocked */ }
 
-export function getToken() { return token; }
+// localStorage, so that every tab of this dashboard shares the session;
+// read on every call, so a tab follows another one's sign-in. Without
+// storage it lasts as long as the tab.
+const BINDING_KEY = 'fridolin.session';
+let bindingInMemory = '';
 
-export function setToken(t) {
-  token = (t || '').trim();
+function sessionBinding() {
   try {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
-  } catch { /* storage blocked: keep it in memory for this tab */ }
+    const stored = localStorage.getItem(BINDING_KEY);
+    if (stored !== null) return stored;
+  } catch { /* storage blocked */ }
+  return bindingInMemory;
+}
+
+function keepBinding(binding) {
+  bindingInMemory = binding || '';
+  try {
+    if (bindingInMemory) localStorage.setItem(BINDING_KEY, bindingInMemory);
+    else localStorage.removeItem(BINDING_KEY);
+  } catch { /* storage blocked: kept in memory for this tab */ }
 }
 
 export class ApiError extends Error {
@@ -57,10 +83,32 @@ export const DEFAULT_TIMEOUT_MS = 30000;
  * answers), or with what the caller's signal aborted with (an AbortError
  * unless the caller gave a reason).
  */
-export async function api(method, path, body, { signal, timeout = DEFAULT_TIMEOUT_MS } = {}) {
+export async function api(method, path, body, { signal, timeout } = {}) {
+  return (await request(method, path, body, { signal, timeout })).data;
+}
+
+/** What getIfChanged resolves with when the answer the caller has still holds. */
+export const NOT_MODIFIED = Symbol('not modified');
+
+/**
+ * get for a poll: sends etag, the ETag of the answer the caller has, back
+ * in If-None-Match. Resolves with NOT_MODIFIED when the bridge answers 304
+ * (that answer still holds, and nothing is downloaded), else with {data,
+ * etag}: the new answer and its ETag, '' when it came without one. Rejects
+ * as api does.
+ */
+export async function getIfChanged(path, etag, { signal, timeout } = {}) {
+  const { res, data } = await request('GET', path, undefined, { signal, timeout, etag });
+  if (res.status === 304) return NOT_MODIFIED;
+  return { data, etag: res.headers.get('ETag') || '' };
+}
+
+async function request(method, path, body, { signal, timeout = DEFAULT_TIMEOUT_MS, etag = '' } = {}) {
   const deadline = withDeadline(signal, timeout);
   const headers = { Accept: 'application/json' };
-  if (token) headers['X-Bridge-Token'] = token;
+  const binding = sessionBinding();
+  if (binding) headers['X-Bridge-Session'] = binding;
+  if (etag) headers['If-None-Match'] = etag;
   const init = { method, headers, signal: deadline.signal, cache: 'no-store', credentials: 'same-origin' };
   if (method !== 'GET' && method !== 'HEAD') {
     headers['X-Bridge-Dashboard'] = '1';
@@ -91,15 +139,63 @@ export async function api(method, path, body, { signal, timeout = DEFAULT_TIMEOU
   if (text) {
     try { data = JSON.parse(text); } catch { data = text; }
   }
-  if (!res.ok) {
+  if (!res.ok && !(etag && res.status === 304)) {
     const msg = (data && typeof data === 'object' && data.error) ? data.error
       : (typeof data === 'string' && data.trim()) ? data.trim()
       : `Request failed (${res.status} ${res.statusText})`;
     const err = new ApiError(msg, res.status, data);
-    if (res.status === 401) listeners.unauthorized.forEach((fn) => fn(err));
+    // A refused sign-in says nothing about the session the browser has.
+    if (res.status === 401 && path !== LOGIN) listeners.unauthorized.forEach((fn) => fn(err));
     throw err;
   }
-  return data;
+  return { res, data };
+}
+
+const LOGIN = '/api/login';
+
+/**
+ * Signs this browser in with { code } from a login link or { token } the
+ * person pasted. Rejects with an ApiError (401 when the bridge refused it);
+ * a refusal leaves a session the browser had as it was.
+ */
+export async function signIn(credential) {
+  // Short: the app waits for it before it starts, and the boot watch in
+  // theme.js reports a dashboard that has not started after ten seconds.
+  const r = await api('POST', LOGIN, credential, { timeout: 8000 });
+  keepBinding(r && r.binding);
+  return r;
+}
+
+/** Ends this browser's session. */
+export async function signOut() {
+  const r = await api('POST', '/api/logout');
+  keepBinding('');
+  return r;
+}
+
+/**
+ * Signs every browser out and replaces the dashboard token. This browser
+ * gets a new session, so it stays signed in.
+ */
+export async function rotateToken() {
+  const r = await api('POST', '/api/token/rotate');
+  if (r && r.binding) keepBinding(r.binding);
+  return r;
+}
+
+/**
+ * Saves the file a GET of path answers with as filename, signed in as the
+ * API's calls are (a plain link would not be). Rejects with an ApiError.
+ */
+export async function download(path, filename) {
+  const headers = {};
+  const binding = sessionBinding();
+  if (binding) headers['X-Bridge-Session'] = binding;
+  const res = await fetch(path, { headers, cache: 'no-store', credentials: 'same-origin' });
+  if (!res.ok) throw new ApiError(`Download failed (${res.status} ${res.statusText})`, res.status, null);
+  const url = URL.createObjectURL(await res.blob());
+  h('a', { href: url, download: filename }).click();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 export const get = (path, opts) => api('GET', path, undefined, opts);

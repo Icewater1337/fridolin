@@ -8,9 +8,12 @@ import { btn, runBusy } from '../components/buttons.js';
 import { field, textInput, toggle } from '../components/fields.js';
 import { timeAgo, empty, pageHeader, callout, longText } from '../components/common.js';
 import { chatEl, chatName } from '../components/chat.js';
+import { isGroupJid } from '../lib/jid.js';
 
 const DM = '15551234567@s.whatsapp.net';
 const GROUP = '120363000000000000@g.us';
+const DM_SENDER = 'defaults to the number in the JID';
+const GROUP_SENDER = 'the member’s number, one the group admits';
 
 export default {
   title: 'Dev',
@@ -20,18 +23,23 @@ export default {
     const sent = h('div.outbox');
 
     const jidIn = textInput({ value: DM, class: 'mono', required: true });
-    const senderIn = textInput({ placeholder: 'defaults to the number in the JID', class: 'mono' });
+    const senderIn = textInput({ placeholder: DM_SENDER, class: 'mono' });
     const brainIn = textInput({ placeholder: 'the brain that owns the chat', class: 'mono' });
     const textIn = h('textarea', { rows: 4, placeholder: 'Message text — in a group, include a trigger such as @claude to get a reply' });
-    const silentSw = toggle({ label: 'Silent — like an untagged group message: the brain reads along but does not reply' });
+    const silentSw = toggle({ label: 'Silent — like an untagged group message: it goes into the brain’s history, gets a run only if the brain runs on untagged messages, and no reply' });
     const sendBtn = btn('Send to the bridge', { kind: 'primary', icon: 'send', type: 'submit' });
+    // A group message without a sender is from no number, which only a
+    // group open to every member hears: the hint asks for a member there.
+    const hintSender = () => senderIn.setAttribute('placeholder', isGroupJid(jidIn.value.trim()) ? GROUP_SENDER : DM_SENDER);
+    const pick = (jid) => { jidIn.value = jid; hintSender(); };
+    jidIn.addEventListener('input', hintSender);
     const form = h('form.card.form',
       h('div.form-grid',
         field({ label: 'Chat JID', control: h('div.stack', jidIn, h('div.chip-row',
-          h('button.chip', { type: 'button', onclick: () => { jidIn.value = DM; } }, 'Direct message'),
-          h('button.chip', { type: 'button', onclick: () => { jidIn.value = GROUP; } }, 'Group'))),
-        help: 'The chat the message appears to come from. Dev messages skip the allow lists and trigger words, so every one reaches the brain that owns the chat, or the Brain below.' }),
-        field({ label: 'Sender', control: senderIn, help: 'Phone number of the person writing, digits only. In a group this is the member.' }),
+          h('button.chip', { type: 'button', onclick: () => pick(DM) }, 'Direct message'),
+          h('button.chip', { type: 'button', onclick: () => pick(GROUP) }, 'Group'))),
+        help: 'The chat the message appears to come from. Dev messages go through the allow lists, group_members and the trigger words as WhatsApp messages do, and reach the brain that owns the chat, or the Brain below.' }),
+        field({ label: 'Sender', control: senderIn, help: 'Phone number of the person writing, digits only. In a group this is the member, whom the group’s group_members entry must admit (without one, the allowed numbers); left empty, a group message is from no number, and only a group open to every member hears it.' }),
         field({ label: 'Brain', control: brainIn, help: 'Optional brain id: the message runs there and the reply goes to the chat above, like a file handed in through /ingest. Commands such as !stop are then passed on as text.' })),
       field({ label: 'Message', control: textIn, wide: true }),
       h('div.field', silentSw),
@@ -40,7 +48,14 @@ export default {
     const send = () => runBusy(sendBtn, async () => {
       const jid = jidIn.value.trim();
       if (!jid) { jidIn.focus(); return; }
-      await post('/api/dev/inbound', { jid, sender: senderIn.value.trim(), brain: brainIn.value.trim(), text: textIn.value, silent: silentSw.input.checked });
+      const r = await post('/api/dev/inbound', { jid, sender: senderIn.value.trim(), brain: brainIn.value.trim(), text: textIn.value, silent: silentSw.input.checked });
+      // The bridge turns a message away as it would the same one from
+      // WhatsApp, and answers 202 all the same: say why, and keep the text
+      // to send again.
+      if (r && r.status === 'ignored') {
+        toast(`Ignored: ${r.reason}`, 'warn');
+        return;
+      }
       toast('Message injected', 'ok', { timeout: 2000 });
       textIn.value = '';
       textIn.focus();
@@ -75,7 +90,7 @@ export default {
       try {
         items = await get('/api/dev/outbox', { signal });
       } catch (e) {
-        if (e.status === 404) { paint(outbox, { unavailable: e.message }, () => empty('Not available', e.message)); return; }
+        if (e.status === 404) { paint(outbox, 'unavailable', () => empty('Not available', 'Only in dev mode: start the bridge with --no-whatsapp.')); return; }
         throw e;
       }
       paintOutbox();

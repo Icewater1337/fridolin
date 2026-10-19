@@ -1,6 +1,5 @@
 # ── secrets and live config — never commit ────────────────────────────────
 config.json
-config.json.backup.*
 config.json.bak*
 .env
 .env.*
@@ -13,8 +12,8 @@ dashboard.token
 *.db
 *.db-shm
 *.db-wal
-qrcode.png
 media/
+!internal/media/
 *.log
 conversation-history.jsonl
 # transcribe.py's default output folder, wherever it ran in this checkout
@@ -23,6 +22,8 @@ transcripts/
 # ── build output ──────────────────────────────────────────────────────────
 /bin/
 /fridolin
+# what a plain `go build` writes in the main package's folder
+/cmd/fridolin/fridolin
 /whatsapp-claude-bridge
 /bridge
 dist/

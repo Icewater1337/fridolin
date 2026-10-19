@@ -1,0 +1,6 @@
+--config <HOME>/.fridolin/rclone/rclone.conf lsjson -R --files-only --no-modtime --no-mimetype --links <HOME>/main/ --filter-from <HOME>/.fridolin/backup/filters-main.txt
+--config <HOME>/.fridolin/rclone/rclone.conf lsjson -R --files-only --no-modtime --no-mimetype --links brain-gdrive:fridolin-backup/main/current --filter-from <HOME>/.fridolin/backup/filters-main.txt
+--config <HOME>/.fridolin/rclone/rclone.conf sync <HOME>/main/ brain-gdrive:fridolin-backup/main/current --backup-dir brain-gdrive:fridolin-backup/main/versions/<STAMP> --links --use-json-log --stats 15s --stats-log-level NOTICE -v --transfers 4 --checkers 8 --drive-chunk-size 32M --retries 3 --retries-sleep 10s --filter-from <HOME>/.fridolin/backup/filters-main.txt --max-delete 0
+--config <HOME>/.fridolin/rclone/rclone.conf sync <HOME>/.fridolin/backup/_staging/ brain-gdrive:fridolin-backup/_bridge/current --backup-dir brain-gdrive:fridolin-backup/_bridge/versions/<STAMP> --links --use-json-log --stats 15s --stats-log-level NOTICE -v --transfers 4 --checkers 8 --drive-chunk-size 32M --retries 3 --retries-sleep 10s
+--config <HOME>/.fridolin/rclone/rclone.conf lsjson --dirs-only brain-gdrive:fridolin-backup/_bridge/versions
+--config <HOME>/.fridolin/rclone/rclone.conf lsjson --dirs-only brain-gdrive:fridolin-backup/main/versions

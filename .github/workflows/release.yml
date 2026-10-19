@@ -42,6 +42,11 @@ jobs:
         if: matrix.test
         run: go test -count=1 ./...
 
+      # Each archive carries THIRD_PARTY_NOTICES, which must list what
+      # this build links.
+      - name: THIRD_PARTY_NOTICES is current
+        run: scripts/third-party-notices.sh --check
+
       - name: build
         env:
           GOOS_TARGET: ${{ matrix.goos }}

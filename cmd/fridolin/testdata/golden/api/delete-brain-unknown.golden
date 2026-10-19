@@ -1,0 +1,7 @@
+DELETE /api/brains/nope
+422 Unprocessable Entity
+Content-Type: application/json
+
+{
+  "error": "no brain \"nope\""
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "The JSON answer of POST /send",
+  "description": "200 with {\"status\": \"sent\"} once every part went out, and an otp_request for a message that asks for a one-time code, else an error with the status docs/API.md lists. The guards in front of it (421 for another Host, 403 for a write from a web page) answer in plain text instead. Keys are added, never renamed or removed: a reader ignores those it does not know. This schema describes exactly the answers this version gives, and refuses any other key so that tests hold it to the code: a client validating against it should allow unknown keys, as later versions add them.",
+  "oneOf": [{"$ref": "#/$defs/sent"}, {"$ref": "#/$defs/error"}],
+  "$defs": {
+    "sent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {"const": "sent"},
+        "otp_request": {"type": "string", "minLength": 1, "description": "For a message that asks for a one-time code the OTP guard would catch: an id, which the hand-off of the code repeats."}
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error"],
+      "properties": {"error": {"type": "string", "minLength": 1}}
+    }
+  }
+}

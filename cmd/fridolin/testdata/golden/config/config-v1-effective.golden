@@ -1,0 +1,141 @@
+{
+  "_comment": "A config with every setting this version reads, for the tests. Synthetic values only.",
+  "agent_provider": "claude",
+  "allow_any_dm": false,
+  "allowed_groups": [
+    "120363000000000000@g.us",
+    "120363000000000001@g.us"
+  ],
+  "allowed_numbers": [
+    "15551234567",
+    "15559876543"
+  ],
+  "backup": {
+    "daily_at": "04:15",
+    "enabled": true,
+    "include_bridge_config": false,
+    "include_secret_files": true,
+    "keep_versions_days": 14,
+    "rclone_path": "<HOME>/bin/rclone",
+    "remote": "brain-gdrive",
+    "root": "fridolin-backup"
+  },
+  "brain_dirs": [
+    {
+      "approved": {
+        "backup": {
+          "enabled": true,
+          "exclude": [
+            "node_modules/"
+          ]
+        },
+        "id": "main",
+        "name": "Main",
+        "prompt_file": "brain-prompt.md",
+        "routing": {
+          "default": true,
+          "groups": [
+            "120363000000000000@g.us"
+          ],
+          "handles_dms": true
+        },
+        "version": 1
+      },
+      "path": "<HOME>/brains/main"
+    }
+  ],
+  "brain_effort": "high",
+  "brain_mode": true,
+  "brain_model": "sonnet",
+  "child_env_passthrough": [
+    "GROQ_API_KEY"
+  ],
+  "claude_path": "<HOME>/bin/claude",
+  "codex_effort": "high",
+  "codex_model": "gpt-6.1-sol",
+  "codex_path": "codex",
+  "dangerously_skip_permissions": true,
+  "dashboard": {
+    "require_token": true
+  },
+  "data_dir": "<HOME>/.fridolin",
+  "db_path": "<HOME>/.fridolin/bridge.db",
+  "debounce": {
+    "max_wait_ms": 8000,
+    "quiet_ms": 1500
+  },
+  "disallowed_tools": [
+    "WebFetch"
+  ],
+  "group_members": {
+    "120363000000000000@g.us": [
+      "15551234567",
+      "15559876543"
+    ]
+  },
+  "http_listen": "127.0.0.1:8765",
+  "ingest": {
+    "enabled": true
+  },
+  "log_level": "debug",
+  "max_chunk_size": 2000,
+  "max_concurrent_runs": 3,
+  "max_media_mb": 50,
+  "media_dir": "<HOME>/.fridolin/media",
+  "otp_guard": true,
+  "otp_markers": [
+    "verification code"
+  ],
+  "plaud": {
+    "brain": "main",
+    "brain_access": true,
+    "cli_path": "~/bin/plaud",
+    "enabled": true,
+    "interval_seconds": 120,
+    "message": "[Plaud] {name} ({when}, {duration})",
+    "phone_dir": "<HOME>/PlaudSync",
+    "phone_upload": true,
+    "polished": true
+  },
+  "queue": {
+    "max_pending": 5,
+    "mode": "interrupt",
+    "notify": false
+  },
+  "run_timeout_minutes": 45,
+  "sandbox": {
+    "allow_paths": [
+      "<HOME>/Documents/shared"
+    ],
+    "credentials_dir": "<HOME>/.fridolin/credentials",
+    "deny_paths": [
+      "<HOME>/clients"
+    ],
+    "enabled": false,
+    "git_config": "deny"
+  },
+  "script_api": {
+    "tokenless_send": false
+  },
+  "startup_checks": {
+    "hint": "Restore the credentials from the backup.",
+    "notify_jid": "15551234567@s.whatsapp.net",
+    "notify_whatsapp": true,
+    "required_files": [
+      "<HOME>/.fridolin/credentials/google_calendar_token_main.json"
+    ]
+  },
+  "triggers": [
+    "@claude",
+    {
+      "match": "start",
+      "text": "!bot"
+    },
+    {
+      "match": "word",
+      "text": "assistant"
+    }
+  ],
+  "version": 2,
+  "viewer": false
+}

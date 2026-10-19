@@ -1,0 +1,8 @@
+GET /api/brains/main/backup/versions
+200 OK
+Content-Type: application/json
+
+{
+  "brain": "main",
+  "versions": []
+}

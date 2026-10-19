@@ -1,0 +1,13 @@
+POST /send
+{"jid": "15551234567@s.whatsapp.net", "text": "hello"}
+200 OK
+Content-Type: application/json
+
+{
+  "status": "sent"
+}
+
+sent:
+  15551234567@s.whatsapp.net "hello"
+history:
+  main: {"ts":"<TIME>","from":"script","chat":"15551234567@s.whatsapp.net","text":"hello","type":"out","via":"api"}

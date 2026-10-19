@@ -1,0 +1,62 @@
+GET /api/site
+200 OK
+Content-Type: application/json
+
+{
+  "accounts": {
+    "admins": 0,
+    "total": 0
+  },
+  "deploy": null,
+  "google": {
+    "redirect_uri": "http://127.0.0.1:8780/auth/callback",
+    "source": "shared",
+    "type": "installed"
+  },
+  "repo": {
+    "connected": false,
+    "github": ""
+  },
+  "runtime": "<RUNTIME>",
+  "settings": {
+    "approved": "",
+    "builders": [],
+    "domain": "",
+    "enabled": false,
+    "history": [],
+    "listen": "127.0.0.1:8780",
+    "proposals": [],
+    "repo": {
+      "branch": "main",
+      "subdir": "",
+      "url": ""
+    },
+    "roles": [
+      "admin",
+      "member"
+    ],
+    "title": "My site",
+    "tunnel": false
+  },
+  "site": {
+    "healthy": false,
+    "local_url": "http://127.0.0.1:8780/",
+    "process": {
+      "log": null,
+      "restarts": 0,
+      "state": "stopped"
+    },
+    "sandbox": {
+      "note": "<NOTE>",
+      "on": "<ON>"
+    }
+  },
+  "tunnel": {
+    "process": {
+      "log": null,
+      "restarts": 0,
+      "state": "stopped"
+    },
+    "token_saved": false
+  }
+}

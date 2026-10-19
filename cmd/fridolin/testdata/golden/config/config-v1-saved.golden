@@ -1,0 +1,141 @@
+{
+  "_comment": "A config with every setting this version reads, for the tests. Synthetic values only.",
+  "version": 2,
+  "allowed_numbers": [
+    "15551234567",
+    "15559876543"
+  ],
+  "allow_any_dm": false,
+  "allowed_groups": [
+    "120363000000000000@g.us",
+    "120363000000000001@g.us"
+  ],
+  "group_members": {
+    "120363000000000000@g.us": [
+      "15551234567",
+      "15559876543"
+    ]
+  },
+  "triggers": [
+    "@claude",
+    {
+      "text": "!bot",
+      "match": "start"
+    },
+    {
+      "text": "assistant",
+      "match": "word"
+    }
+  ],
+  "claude_path": "~/bin/claude",
+  "agent_provider": "claude",
+  "codex_path": "codex",
+  "codex_model": "gpt-6.1-sol",
+  "codex_effort": "high",
+  "data_dir": "~/.fridolin",
+  "db_path": "~/.fridolin/bridge.db",
+  "media_dir": "~/.fridolin/media",
+  "max_chunk_size": 2000,
+  "max_media_mb": 50,
+  "brain_model": "sonnet",
+  "brain_effort": "high",
+  "disallowed_tools": [
+    "WebFetch"
+  ],
+  "dangerously_skip_permissions": true,
+  "run_timeout_minutes": 45,
+  "max_concurrent_runs": 3,
+  "child_env_passthrough": [
+    "GROQ_API_KEY"
+  ],
+  "http_listen": "127.0.0.1:8765",
+  "log_level": "debug",
+  "brain_mode": true,
+  "brain_dirs": [
+    {
+      "path": "~/brains/main",
+      "approved": {
+        "version": 1,
+        "id": "main",
+        "name": "Main",
+        "routing": {
+          "handles_dms": true,
+          "default": true,
+          "groups": [
+            "120363000000000000@g.us"
+          ]
+        },
+        "prompt_file": "brain-prompt.md",
+        "backup": {
+          "enabled": true,
+          "exclude": [
+            "node_modules/"
+          ]
+        }
+      }
+    }
+  ],
+  "sandbox": {
+    "enabled": false,
+    "deny_paths": [
+      "~/clients"
+    ],
+    "allow_paths": [
+      "~/Documents/shared"
+    ],
+    "git_config": "deny",
+    "credentials_dir": "~/.fridolin/credentials"
+  },
+  "otp_guard": true,
+  "otp_markers": [
+    "verification code"
+  ],
+  "viewer": false,
+  "queue": {
+    "mode": "interrupt",
+    "max_pending": 5,
+    "notify": false
+  },
+  "debounce": {
+    "quiet_ms": 1500,
+    "max_wait_ms": 8000
+  },
+  "ingest": {
+    "enabled": true
+  },
+  "startup_checks": {
+    "required_files": [
+      "~/.fridolin/credentials/google_calendar_token_main.json"
+    ],
+    "notify_whatsapp": true,
+    "notify_jid": "15551234567@s.whatsapp.net",
+    "hint": "Restore the credentials from the backup."
+  },
+  "backup": {
+    "enabled": true,
+    "remote": "brain-gdrive",
+    "root": "fridolin-backup",
+    "daily_at": "04:15",
+    "rclone_path": "~/bin/rclone",
+    "keep_versions_days": 14,
+    "include_bridge_config": false,
+    "include_secret_files": true
+  },
+  "plaud": {
+    "enabled": true,
+    "brain": "main",
+    "cli_path": "~/bin/plaud",
+    "interval_seconds": 120,
+    "polished": true,
+    "message": "[Plaud] {name} ({when}, {duration})",
+    "brain_access": true,
+    "phone_dir": "~/PlaudSync",
+    "phone_upload": true
+  },
+  "dashboard": {
+    "require_token": true
+  },
+  "script_api": {
+    "tokenless_send": false
+  }
+}

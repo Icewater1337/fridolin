@@ -1,2 +1,5 @@
 # Only the forms: each one asks reporters to redact personal data first.
+# Security reports need no contact link here: since the repository has a
+# SECURITY.md, GitHub's issue chooser links it (and, with private
+# vulnerability reporting on, the private form) by itself.
 blank_issues_enabled: false

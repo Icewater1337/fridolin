@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTs, relTime, hhmmss, fmtDuration, fmtBytes, plural, prettyJSON } from '../assets/lib/format.js';
+import { parseTs, relTime, hhmmss, stamp, fmtDuration, fmtBytes, plural, prettyJSON } from '../assets/lib/format.js';
 
 test('parseTs', async (t) => {
   const cases = [
@@ -53,6 +53,21 @@ test('relTime', async (t) => {
 test('hhmmss', async (t) => {
   await t.test('local time, zero-padded', () => assert.equal(hhmmss(new Date(2026, 0, 2, 3, 4, 5).toISOString()), '03:04:05'));
   await t.test('unparseable', () => assert.equal(hhmmss('later'), ''));
+});
+
+test('stamp', async (t) => {
+  const cases = [
+    ['local time, zero-padded', new Date(2026, 0, 2, 3, 4, 59), '20260102-0304'],
+    ['two-digit month, day and time', new Date(2026, 11, 31, 23, 59), '20261231-2359'],
+    ['midnight', new Date(2026, 9, 18, 0, 0), '20261018-0000'],
+  ];
+  for (const [name, d, want] of cases) {
+    await t.test(name, () => assert.equal(stamp(d), want));
+  }
+  await t.test('now by default', (t) => {
+    t.mock.timers.enable({ apis: ['Date'], now: new Date(2026, 9, 18, 9, 5) });
+    assert.equal(stamp(), '20261018-0905');
+  });
 });
 
 test('fmtDuration', async (t) => {

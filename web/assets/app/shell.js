@@ -14,28 +14,20 @@ import { store } from './store.js';
 
 const THEMES = ['auto', 'light', 'dark'];
 
-function getTheme() {
-  try { return localStorage.getItem('bridgeTheme') || 'auto'; } catch { return 'auto'; }
-}
-
-function applyTheme(t) {
-  if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
-  else document.documentElement.removeAttribute('data-theme');
-  try { localStorage.setItem('bridgeTheme', t); } catch { /* ignore */ }
-}
-
+// theme.js, which runs before the modules, applied the saved theme and
+// gives the buttons window.fridolinTheme to change it with.
 function themeButton() {
+  const theme = window.fridolinTheme;
   const b = h('button.icon-btn.theme-toggle', { type: 'button' });
   const paint = () => {
-    const t = getTheme();
+    const t = theme.current();
     const label = { auto: 'Theme: follows your system', light: 'Theme: light', dark: 'Theme: dark' }[t];
     b.title = `${label} (click to change)`;
     b.setAttribute('aria-label', b.title);
     mount(b, icon(t === 'auto' ? 'auto' : t === 'light' ? 'sun' : 'moon'));
   };
   b.addEventListener('click', () => {
-    const next = THEMES[(THEMES.indexOf(getTheme()) + 1) % THEMES.length];
-    applyTheme(next);
+    theme.set(THEMES[(THEMES.indexOf(theme.current()) + 1) % THEMES.length]);
     document.querySelectorAll('.theme-toggle').forEach((x) => x.dispatchEvent(new Event('repaint')));
   });
   b.addEventListener('repaint', paint);

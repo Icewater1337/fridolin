@@ -1,0 +1,13 @@
+GET /api/site/builders
+200 OK
+Content-Type: application/json
+
+{
+  "brains": [
+    {
+      "builder": false,
+      "id": "main",
+      "name": "Main"
+    }
+  ]
+}

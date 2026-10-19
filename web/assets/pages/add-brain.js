@@ -5,11 +5,12 @@ import { folderBrowser } from '../components/folder-browser.js';
 import { routingEditor } from '../components/routing-editor.js';
 import { h, mount } from '../lib/dom.js';
 import { prettyJSON } from '../lib/format.js';
-import { routingSummary, slugify, BRAIN_ID_RE, EFFORTS, DEFAULT_BACKUP_EXCLUDES } from '../lib/brain.js';
+import { routingSummary, hasDMBrain, slugify, BRAIN_ID_RE, DEFAULT_BACKUP_EXCLUDES } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { toast, toastError } from '../components/toast.js';
 import { btn, runBusy } from '../components/buttons.js';
-import { field, textInput, select, toggle, linesArea, linesOf } from '../components/fields.js';
+import { field, textInput } from '../components/fields.js';
+import { brainSettingsFields } from '../components/brain-fields.js';
 import { tabs } from '../components/tabs.js';
 import { callout, mono, spinner, loading } from '../components/common.js';
 
@@ -44,7 +45,7 @@ export default {
 
     function paintStepper() {
       const idx = STEPS.findIndex(([k]) => k === step);
-      mount(stepper, STEPS.map(([k, label], i) => h(`li.${i < idx || step === 'done' ? 'done' : i === idx ? 'current' : 'todo'}`,
+      mount(stepper, STEPS.map(([, label], i) => h(`li.${i < idx || step === 'done' ? 'done' : i === idx ? 'current' : 'todo'}`,
         { 'aria-current': i === idx ? 'step' : null },
         h('span.step-num', i < idx || step === 'done' ? icon('check') : String(i + 1)),
         h('span.step-label', label))));
@@ -103,7 +104,7 @@ export default {
       });
       mount(body, h('div.card.wizard-card',
         h('h2', 'Choose a folder'),
-        h('p.muted', 'Use a folder of its own, inside your home folder — for example ', h('code.mono', '~/assistant/personal'), '. Avoid Documents, Desktop and Downloads: macOS protects them and the sandbox blocks them.'),
+        h('p.muted', 'Use a folder of its own, inside your home folder — for example ', h('code.mono', '~/assistant/personal'), '. Avoid Documents, Desktop and Downloads: macOS protects them, and the bridge can work there only with your permission under Privacy & Security.'),
         caps.picker ? h('div.choose-row',
           btn('Choose folder…', { kind: 'primary', icon: 'folder', onClick: () => nativePick() }),
           h('span.muted.small', `Opens ${pickerName} on the computer running the bridge.`)) : null,
@@ -156,30 +157,31 @@ export default {
       const notDir = r.exists && !r.is_dir;
       if (notDir) problems.push('This path is a file, not a folder.');
       const facts = [];
-      if (!r.exists) facts.push(['folderPlus', 'New folder — it will be created when you add the brain.']);
-      else if (r.is_dir) facts.push(['folder', r.entries ? `Existing folder with ${r.entries} item${r.entries === 1 ? '' : 's'}.` : 'Existing, empty folder.']);
-      if (r.is_git) facts.push(['git', 'Git repository — the brain’s files (history, memories) will show up as changes. Consider ignoring them.']);
-      if (r.has_prompt) facts.push(['check', 'Has brain-prompt.md — it is kept as it is.']);
-      else if (!r.manifest) facts.push(['edit', 'A starter brain-prompt.md will be created for you to edit.']);
-      if (r.has_history) facts.push(['check', 'Has conversation history — it is kept and the brain picks up from it.']);
+      // The bridge does not look into a folder that cannot be a brain, so
+      // there are no facts about it to show.
+      if (!problems.length) {
+        if (!r.exists) facts.push(['folderPlus', 'New folder — it will be created when you add the brain.']);
+        else if (r.is_dir) facts.push(['folder', r.entries ? `Existing folder with ${r.entries} item${r.entries === 1 ? '' : 's'}.` : 'Existing, empty folder.']);
+        if (r.is_git) facts.push(['git', 'Git repository — the brain’s files (history, memories) will show up as changes. Consider ignoring them.']);
+        if (r.has_prompt) facts.push(['check', 'Has brain-prompt.md — it is kept as it is.']);
+        else if (!r.manifest) facts.push(['edit', 'A starter brain-prompt.md will be created for you to edit.']);
+        if (r.has_history) facts.push(['check', 'Has conversation history — it is kept and the brain picks up from it.']);
+      }
 
       const actions = h('div.actions.wizard-actions', btn('Choose another folder', { icon: 'left', onClick: () => go('folder') }));
       let manifestBox = null;
       if (r.manifest && !problems.length) {
         const m = r.manifest;
-        manifestBox = h('div.callout.info',
-          icon('info', 'callout-icon'),
-          h('div.callout-body',
-            h('strong', 'This folder already has a brain.json'),
-            h('div', 'You can add it as it is. Check what it asks for — especially which chats it wants to answer.'),
-            h('dl.kv',
-              h('dt', 'Name'), h('dd', m.name || '—'),
-              h('dt', 'Id'), h('dd', mono(m.id || '—')),
-              h('dt', 'Chats'), h('dd', routingSummary(m.routing)),
-              m.routing && m.routing.groups && m.routing.groups.length ? [h('dt', 'Groups'), h('dd', m.routing.groups.map((g) => h('div', mono(g))))] : null,
-              h('dt', 'Model'), h('dd', m.model || 'inherit'),
-              m.disallowed_tools ? [h('dt', 'Blocked tools'), h('dd', m.disallowed_tools.length ? m.disallowed_tools.join(', ') : 'none (all tools allowed)')] : null),
-            h('details', h('summary', 'Show brain.json'), h('pre.code', prettyJSON(m)))));
+        manifestBox = callout('info', 'This folder already has a brain.json',
+          h('div', 'You can add it as it is. Check what it asks for — especially which chats it wants to answer.'),
+          h('dl.kv',
+            h('dt', 'Name'), h('dd', m.name || '—'),
+            h('dt', 'Id'), h('dd', mono(m.id || '—')),
+            h('dt', 'Chats'), h('dd', routingSummary(m.routing)),
+            m.routing && m.routing.groups && m.routing.groups.length ? [h('dt', 'Groups'), h('dd', m.routing.groups.map((g) => h('div', mono(g))))] : null,
+            h('dt', 'Model'), h('dd', m.model || 'inherit'),
+            m.disallowed_tools ? [h('dt', 'Blocked tools'), h('dd', m.disallowed_tools.length ? m.disallowed_tools.join(', ') : 'none (all tools allowed)')] : null),
+          h('details', h('summary', 'Show brain.json'), h('pre.code', prettyJSON(m))));
         actions.append(btn('Use the brain.json already in this folder', { kind: 'primary', icon: 'check', onClick: () => submit({ useExisting: true }) }));
       } else if (!problems.length) {
         actions.append(btn('Continue', { kind: 'primary', icon: 'right', onClick: () => go('configure') }));
@@ -245,10 +247,7 @@ export default {
         allowedGroups,
         signal: ctx.signal,
       });
-      const modelIn = textInput({ placeholder: eff.brain_model ? `inherit (${eff.brain_model})` : 'inherit', class: 'mono' });
-      const effortSel = select(EFFORTS.map(([v, l]) => [v, v === '' && eff.brain_effort ? `Inherit (${eff.brain_effort})` : l]), '');
-      const backupSw = toggle({ checked: true, label: 'Include in Google Drive backups' });
-      const excludes = linesArea(DEFAULT_BACKUP_EXCLUDES, { rows: 5 });
+      const fields = brainSettingsFields({ backup: { enabled: true, exclude: DEFAULT_BACKUP_EXCLUDES } }, eff);
 
       // The manifest the brain is added with.
       const value = () => ({
@@ -256,9 +255,7 @@ export default {
         id: idIn.value,
         name: nameIn.value.trim(),
         routing: routing.getValue(),
-        model: modelIn.value.trim(),
-        effort: effortSel.value,
-        backup: { enabled: backupSw.input.checked, exclude: linesOf(excludes) },
+        ...fields.value(),
       });
       const form = h('form.wizard-card.card.form',
         h('h2', 'Configure the brain'),
@@ -267,14 +264,8 @@ export default {
           field({ label: 'Name', control: nameIn, help: 'Shown in the dashboard.' }),
           h('div', field({ label: 'Id', control: idIn, help: 'Permanent. Used for history, logs, sandbox rules and backups.' }), idErr)),
         h('fieldset.fieldset', h('legend', 'Which chats does it answer?'), routing),
-        h('fieldset.fieldset', h('legend', 'Model'),
-          h('div.form-grid',
-            field({ label: 'Model', control: modelIn, help: 'e.g. sonnet, opus, or a full model id. Empty uses the global brain model.' }),
-            field({ label: 'Effort', control: effortSel, help: 'How hard the model thinks. Inherit uses the global setting.' }))),
-        h('fieldset.fieldset', h('legend', 'Backup'),
-          h('div.field', backupSw, h('div.help', 'Backs up this folder with the daily backup, once Google Drive is connected.')),
-          h('details.details', h('summary', 'Files to leave out of backups'),
-            field({ label: 'Exclude patterns', control: excludes, help: 'One per line, relative to the brain folder. A trailing / means a folder.' }))),
+        h('fieldset.fieldset', h('legend', 'Model'), fields.model),
+        h('fieldset.fieldset', h('legend', 'Backup'), fields.backup),
         h('div.actions.wizard-actions',
           btn('Back', { icon: 'left', onClick: () => go('inspect') }),
           btn('Add brain', { kind: 'primary', type: 'submit', icon: 'check' })));
@@ -302,15 +293,28 @@ export default {
       configure = null;
       paintStepper();
       const m = useExisting ? r.manifest : manifest;
-      const quiet = m && m.routing && !m.routing.handles_dms && !m.routing.default && !(m.routing.groups || []).length;
+      const name = (m && m.name) || res.id;
+      // The first brain, or one added while no other runs, is the fallback
+      // brain whatever its brain.json says: it gets the chats no brain
+      // claims. Only the bridge knows (/api/brains marks it), and without
+      // its answer the page says neither that nor that no chat comes.
+      const brains = await get('/api/brains').catch(() => null);
+      const fallback = Array.isArray(brains) && brains.some((b) => b.fallback && b.id === res.id);
+      const quiet = Array.isArray(brains) && !fallback && m && m.routing && !m.routing.handles_dms && !m.routing.default && !(m.routing.groups || []).length;
+      const isDefault = !!(m && m.routing && m.routing.default);
       mount(body, h('div.card.wizard-card.done-card',
         h('div.done-icon', icon('check')),
-        h('h2', `${(m && m.name) || res.id} is ready`),
+        h('h2', `${name} is ready`),
         h('p', 'The brain is registered and will answer from ', mono(res.path), '.'),
         (res.created || []).length ? h('div',
           h('p.muted', 'Created:'),
           h('ul.created-list', res.created.map((c) => h('li', mono(c))))) : h('p.muted', 'No files were created — the folder already had everything.'),
         quiet ? callout('warn', 'No chats yet', 'This brain does not answer any chat yet. Give it direct messages or groups on its page.') : null,
+        fallback ? callout('info', 'The fallback brain',
+          `${name} answers the allowed groups no other brain claims`,
+          hasDMBrain(brains) ? '. ' : ', and your direct messages too, since no brain handles them. ',
+          isDefault ? '' : 'To hand them to another brain, turn on “Default for unassigned chats” there. ',
+          'See The fallback brain in docs/BRAINS.md.') : null,
         callout('info', 'Next: tell it who it is', 'Edit ', h('code.mono', (m && m.prompt_file) || 'brain-prompt.md'), ' in the folder. It is the brain’s instructions — who it works for, what it does, how it should answer.'),
         h('div.actions',
           btn('Open the brain', { kind: 'primary', href: `#/brains/${encodeURIComponent(res.id)}`, icon: 'right' }),

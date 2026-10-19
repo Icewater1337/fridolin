@@ -1,7 +1,10 @@
 // Labels for the WhatsApp connection modes the bridge reports in /api/status.
 
 export function waKind(mode) {
-  return { connected: 'ok', connecting: 'warn', pairing: 'warn', 'qr-expired': 'warn', disconnected: 'warn', 'logged-out': 'bad', replaced: 'bad', disabled: 'neutral' }[mode] || 'neutral';
+  return {
+    connected: 'ok', connecting: 'warn', pairing: 'warn', 'qr-expired': 'warn', disconnected: 'warn',
+    'logged-out': 'bad', replaced: 'bad', outdated: 'bad', banned: 'bad', failed: 'bad', disabled: 'neutral',
+  }[mode] || 'neutral';
 }
 
 export function waLabel(mode) {
@@ -13,6 +16,9 @@ export function waLabel(mode) {
     disconnected: 'WhatsApp disconnected',
     'logged-out': 'Logged out of WhatsApp',
     replaced: 'Session used elsewhere',
+    outdated: 'Fridolin needs an update',
+    banned: 'Temporarily banned by WhatsApp',
+    failed: 'WhatsApp refused the connection',
     disabled: 'WhatsApp off',
   }[mode] || (mode ? `WhatsApp: ${mode}` : 'WhatsApp');
 }

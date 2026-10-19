@@ -1,0 +1,16 @@
+Config OK: <ROOT>/config.json
+  claude:    <ROOT>/bin/fridolin (2.1.302 (Claude Code))
+  data dir:  <HOME>/.fridolin
+  dashboard: http://127.0.0.1:8765/
+  DM allow:  [15551234567]
+  groups:    [120363000000000000@g.us]
+  heard in 120363000000000000@g.us: [15551234567] (no group_members entry: allowed_numbers)
+  triggers:  ["@claude"]
+  brain main           → <HOME>/main (dms=true default=false groups=[])
+  brain family         → <HOME>/family (dms=false default=false groups=[120363000000000000@g.us])
+  brain drifted        → <HOME>/drifted (dms=false default=false groups=[])
+  ! drift <HOME>/drifted: brain.json changed on disk — review and approve it in the dashboard
+  ! missing <HOME>/missing: folder not found
+<TIME> config: group 120363000000000000@g.us has no group_members entry: only allowed_numbers can start runs there, and what other members write is not read; an entry of ["*"] for it lets every member in, as before, or list their numbers
+<TIME> brain missing cannot run; see the issue above
+exit 3

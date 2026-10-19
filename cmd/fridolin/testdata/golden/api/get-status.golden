@@ -1,0 +1,105 @@
+GET /api/status
+200 OK
+Content-Type: application/json
+
+{
+  "agent_provider": "claude",
+  "backup": {
+    "connected": true,
+    "enabled": true,
+    "last_ok": "<TIME>",
+    "next_run": "<TIME>",
+    "running": false
+  },
+  "brains": [
+    {
+      "backup": {
+        "enabled": true,
+        "exclude": [
+          "node_modules/",
+          "*.log",
+          "- private.txt"
+        ]
+      },
+      "dir": "<HOME>/main",
+      "effort": "",
+      "id": "main",
+      "last": {
+        "chat": "15551234567@s.whatsapp.net",
+        "finished": "<TIME>",
+        "outcome": "ok",
+        "seconds": "<SECONDS>"
+      },
+      "manifest": {
+        "backup": {
+          "enabled": true,
+          "exclude": [
+            "node_modules/",
+            "*.log",
+            "- private.txt"
+          ]
+        },
+        "calendar": {
+          "account": "you@example.com",
+          "calendars": [
+            "you@example.com",
+            "team@example.com"
+          ],
+          "default": "you@example.com"
+        },
+        "id": "main",
+        "name": "Main",
+        "observe": "history",
+        "prompt_file": "brain-prompt.md",
+        "routing": {
+          "default": true,
+          "groups": [
+            "120363000000000000@g.us"
+          ],
+          "handles_dms": true
+        },
+        "version": 1
+      },
+      "model": "",
+      "name": "Main",
+      "queue": [],
+      "routing": {
+        "default": true,
+        "groups": [
+          "120363000000000000@g.us"
+        ],
+        "handles_dms": true
+      },
+      "running": null
+    }
+  ],
+  "claude": {
+    "found": true,
+    "path": "<TEST_BINARY>",
+    "version": "2.1.302 (Claude Code)"
+  },
+  "config_path": "<ROOT>/config.json",
+  "data_dir": "<HOME>/.fridolin",
+  "debouncing": 0,
+  "dev_mode": true,
+  "ingest": true,
+  "issues": [],
+  "platform": "<PLATFORM>",
+  "restart_required": [],
+  "sandbox": {
+    "enabled": false,
+    "supported": "<SUPPORTED>"
+  },
+  "started_at": "<TIME>",
+  "uptime_s": "<UPTIME_S>",
+  "version": "<VERSION>",
+  "warnings": [
+    "/send works without a token (script_api.tokenless_send), so any program on this computer, brains included, can message your allowed chats. Have your scripts send the token in scripts.token in the data folder, then turn it off under Settings → Advanced."
+  ],
+  "whatsapp": {
+    "detail": "Dev mode (--no-whatsapp): messages are simulated",
+    "mode": "disabled",
+    "qr_available": false,
+    "since": "<TIME>"
+  }
+}

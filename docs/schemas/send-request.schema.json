@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "The body of POST /send",
+  "description": "Sends a WhatsApp message, as docs/API.md describes it. Keys the bridge does not know are ignored; keys are added, never renamed or removed.",
+  "type": "object",
+  "required": ["jid", "text"],
+  "properties": {
+    "jid": {"type": "string", "minLength": 1, "description": "The chat: …@s.whatsapp.net, …@lid or …@g.us, or a phone number with the country code for the direct chat with it."},
+    "text": {"type": "string", "pattern": "\\S", "description": "Sent as it is, split into numbered parts when it is longer than max_chunk_size."}
+  }
+}

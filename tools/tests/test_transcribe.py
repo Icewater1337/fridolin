@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
+import re
 import shlex
 import shutil
 import sys
@@ -377,6 +379,8 @@ class EngineChoiceTest(TempDirTestCase):
 
     def test_install_hints_name_the_requirements_file_itself(self):
         # Brains run the tool from their own folder, where tools/ is no path.
+        # The packages go into the venv the skill runs the tool with: a
+        # plain pip install fails on Homebrew's and Debian's Python.
         want = support.TOOLS_DIR / "requirements-transcription.txt"
         self.assertTrue(want.is_file())
         self.local_available.result = self.groq_available.result = False
@@ -384,7 +388,15 @@ class EngineChoiceTest(TempDirTestCase):
             with self.subTest(name):
                 code, out, _ = self.run_tool(*flags)
                 self.assertEqual(code, 1)
-                self.assertIn(f"pip install -r {shlex.quote(str(want))}", out["error"])
+                self.assertIn(f"python3 -m venv {transcribe.VENV} && "
+                              f"{transcribe.VENV}/bin/pip install -r {shlex.quote(str(want))}", out["error"])
+                self.assertIn(f"run this tool with {transcribe.VENV}/bin/python", out["error"])
+
+    def test_groq_hint_installs_into_the_venv(self):
+        self.local_available.result = self.groq_available.result = False
+        code, out, _ = self.run_tool("--engine", "groq")
+        self.assertEqual(code, 1)
+        self.assertIn(f"{transcribe.VENV}/bin/pip install groq", out["error"])
 
     def test_groq_hints_name_child_env_passthrough(self):
         # Brains get GROQ_API_KEY only when the bridge's config names it.
@@ -536,6 +548,54 @@ class FFmpegTest(TempDirTestCase):
         self.assertNotIn("copy", cmd)
         self.assertIn("-acodec pcm_s16le -ac 1 -ar 16000", " ".join(cmd))
         self.assertEqual([c.name for c in chunks], ["chunk-000.wav", "chunk-001.wav"])
+
+
+class ScriptMetadataTest(unittest.TestCase):
+    """`uv run --script` installs the PEP 723 block at the top of
+    transcribe.py, pip and Dependabot read requirements-transcription.txt:
+    the two lists must not drift apart."""
+
+    # The reference regular expression of PEP 723.
+    BLOCK = re.compile(r"(?m)^# /// (?P<type>[a-zA-Z0-9-]+)$\s(?P<content>(^#(| .*)$\s)+)^# ///$")
+
+    def script_metadata(self, text: str) -> dict:
+        blocks = [m for m in self.BLOCK.finditer(text) if m.group("type") == "script"]
+        self.assertEqual(len(blocks), 1, "one script metadata block")
+        toml = "".join(line[2:] if line.startswith("# ") else line[1:]
+                       for line in blocks[0].group("content").splitlines(keepends=True))
+        try:
+            import tomllib
+        except ImportError:  # Python before 3.11: the array is a Python literal too
+            found = re.search(r"(?ms)^dependencies\s*=\s*(\[.*?\])", toml)
+            self.assertIsNotNone(found, toml)
+            return {"dependencies": ast.literal_eval(found.group(1))}
+        return tomllib.loads(toml)
+
+    def test_the_dependencies_are_the_requirements(self):
+        text = (support.TOOLS_DIR / "transcribe.py").read_text(encoding="utf-8")
+        deps = self.script_metadata(text)["dependencies"]
+        lines = (support.TOOLS_DIR / "requirements-transcription.txt").read_text(encoding="utf-8").splitlines()
+        reqs = [line.strip() for line in lines if line.strip() and not line.lstrip().startswith("#")]
+        self.assertEqual(sorted("".join(d.split()) for d in deps), sorted("".join(r.split()) for r in reqs),
+                         "transcribe.py's script metadata and requirements-transcription.txt differ")
+
+    def test_a_drifted_block_is_seen(self):
+        text = (support.TOOLS_DIR / "transcribe.py").read_text(encoding="utf-8")
+        drifted = text.replace('"transformers>=4.57.0,<5"', '"transformers>=4.57.0,<6"', 1)
+        self.assertNotEqual(drifted, text)
+        self.assertIn("transformers>=4.57.0,<6", self.script_metadata(drifted)["dependencies"])
+
+
+class SkillTest(unittest.TestCase):
+    def test_the_skill_runs_the_tool_with_the_venvs_python(self):
+        # The venv the install hints name is the one the skill runs.
+        skill = (support.TOOLS_DIR.parent / "examples" / "skills" / "transcription.md").read_text(encoding="utf-8")
+        venv_python = transcribe.VENV.replace("~", "$HOME", 1) + "/bin/python"
+        self.assertIn(f'py="{venv_python}"; [ -x "$py" ] || py=python3', skill)
+        runs = [line for line in skill.splitlines() if '/transcribe.py"' in line and "uv run" not in line]
+        self.assertTrue(runs)
+        for line in runs:
+            self.assertTrue(line.startswith('"$py" '), line)
 
 
 class ErrorBoundaryTest(TranscribeTestCase):

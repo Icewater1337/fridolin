@@ -1,0 +1,8 @@
+PUT /api/plaud/settings
+{"brain":"nope"}
+422 Unprocessable Entity
+Content-Type: application/json
+
+{
+  "error": "there is no approved brain \"nope\""
+}

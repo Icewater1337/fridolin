@@ -1,0 +1,8 @@
+POST /api/brains
+{"create_dir":true,"manifest":{"id":"main","name":"Main"},"path":"~/main2"}
+422 Unprocessable Entity
+Content-Type: application/json
+
+{
+  "error": "two brains use the id \"main\" (<HOME>/main and <HOME>/main2)"
+}

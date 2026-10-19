@@ -1,0 +1,7 @@
+PUT /api/config
+409 Conflict
+Content-Type: application/json
+
+{
+  "error": "config changed since it was loaded — reload and try again"
+}

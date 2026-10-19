@@ -22,6 +22,18 @@ desktop session's, so that it can open your browser
 The link uses Google's `drive.file` scope: rclone can only see files it
 created itself. Your other Drive files stay invisible to it.
 
+To link another Google account, **Disconnect** first, then connect again:
+connecting replaces the link, so the bridge refuses it while Drive is
+connected (an abandoned sign-in would otherwise leave backups without
+one), and both are refused while a backup or restore runs. Disconnect
+stops a sign-in that is still waiting for the browser before it removes
+the link, refuses backups, restores and a new sign-in until it is done, and
+says so when the link could not be removed. It removes only the
+bridge's own link: to take away rclone's access entirely, remove it at
+[myaccount.google.com/permissions](https://myaccount.google.com/permissions),
+as the Disconnect dialog says. While daily backups are on but Drive is
+not connected, the overview says so and the log repeats it once a day.
+
 ## What is backed up
 
 ```
@@ -37,15 +49,32 @@ fridolin-backup/        (backup.root)
 
 Each run is an incremental `rclone sync`: only changed files upload. When a
 file changes or disappears, the previous copy moves to `versions/<timestamp>/`
-instead of being lost. The timestamp is the local time of that run
-(`YYYYMMDD-HHMMSS`), and the whole folder is deleted `keep_versions_days`
-(default 30, `0` keeps them forever) after that run, however old the files in
-it are. A version folder holds only what changed in that run, not a full
-snapshot. Folders in `versions/` whose name is not such a timestamp are never
-deleted.
+instead of being lost. The timestamp is the time of that run in UTC
+(`YYYYMMDD-HHMMSSZ`), so that the hour the clocks go back cannot reorder
+runs or give two the same name; folders from before are in local time,
+without the `Z`, and are read as such. The whole folder is deleted
+`keep_versions_days` (default 30, `0` keeps them forever) after that run,
+however old the files in it are. A version folder holds only what changed
+in that run, not a full snapshot. Folders in `versions/` whose name is not
+such a timestamp are never deleted.
 
-**Never uploaded:** the WhatsApp session (`bridge.db`), `.env` files, the
-dashboard token, the rclone config, downloaded media in the data folder.
+A backup is a copy of a live folder, not an atomic snapshot. While a brain
+runs, it changes its folder (its history, its memories, a git repository
+in it), so a brain's backup waits for the brain to finish what it is
+running, up to two minutes, and then copies the folder anyway; the log says
+when it did. A file that changes while rclone copies it fails that try, and
+rclone tries the sync again up to three times, ten seconds apart, which the
+log notes too.
+
+**Never uploaded:** the WhatsApp session (`bridge.db`), the dashboard token,
+the rclone config, downloaded media and every brain's own state in the data
+folder. Nor, from brain folders, whatever their excludes say: `.env`,
+`.env.*`, `*.pem`, `*.p12`, `id_rsa*`, `id_ecdsa*`, `id_ed25519*`,
+`google_calendar_*.json` and `.credentials.json` files, in any folder of
+the brain. Set `backup.include_secret_files` to `true` in `config.json` to
+upload them too (the dashboard has no field for it). Files a version from
+before this rule uploaded stay in Drive's `current/` and `versions/` until
+you delete them there.
 
 ## Excluding things
 
@@ -67,19 +96,31 @@ employer).
 ## Schedule
 
 Turn on the daily backup and pick a time (default 03:30). If the machine was
-asleep, the backup runs as soon as it wakes. *Back up now* runs one
-immediately; one brain or all.
+asleep, the backup runs as soon as it wakes. Switching the schedule on, or
+moving it to a time that has already passed today, does not start a backup
+at once: the first run is tomorrow's (a time still to come today runs
+today, unless today's scheduled backup already ran). The next run shown on
+the Backup page and the overview is the one that will happen; there is none
+while Google Drive is not connected.
+*Back up now* runs one immediately; one brain or all.
 
 ## Mass deletions
 
 Before each brain's sync the bridge compares the brain folder with
-`current/`. If the folder is empty or missing, or more than half of the
-backed-up files are gone from it, it does **not** mirror that: the brain's
-result says "refusing to mirror a mass deletion", `current/` in Drive stays as
-it was, and the error shows on the Backup page and the overview. Otherwise a
+`current/`. If the folder is empty or missing, or too many of the backed-up
+files are gone from it (more than half; more than a fifth, once that is ten
+files or more; or 250 files or more), or more than half of those in one of
+its top-level folders that had at least five (a wiped `memories/`, say), it
+does **not** mirror that: the brain's result says "refusing to mirror a mass
+deletion" and what is gone, `current/` in Drive stays as it was, and the
+error shows on the Backup page and the overview. Otherwise a
 wiped folder (a brain told to delete everything, an unmounted disk, a botched
 move) would reach Drive in one run, and its files would leave `versions/`
 after `keep_versions_days` without anyone noticing.
+Ordinary housekeeping can be refused too: renaming a top-level folder, or
+a `git gc` in a brain folder that is a git repository, which packs its
+loose objects (`.git/` is backed up unless you exclude it). Mirror that
+with **Mirror the deletion…** (below), or exclude `.git/`.
 
 When a **scheduled** run refuses, the brain's chat also gets one WhatsApp
 message about it (your DM for the DM brain, or the brain's `reply_chat`, as
@@ -98,13 +139,14 @@ deletion. Scheduled runs never force; they keep refusing until you do.
 
 Only files that are gone count: changed files do not, and neither do excluded
 ones (a sync never deletes those from Drive). As a backstop for files that
-disappear while the backup runs, the sync gets rclone's `--max-delete` at half
-of the backed-up files. rclone deletes up to that limit and then stops, so in
-this rare case Drive is not left untouched: up to that many files have already
-moved from `current/` to `versions/<timestamp>/`, and the error names that
-folder. They expire with that folder after `keep_versions_days`, so restore
-them from there if the deletion was a mistake. The bridge settings (`_bridge`)
-are not checked; the bridge writes them itself.
+disappear while the backup runs, the sync gets rclone's `--max-delete` at the
+most files those counts let go. rclone deletes up to that limit and then
+stops, so in this rare case Drive is not left untouched: up to that many
+files have already moved from `current/` to `versions/<timestamp>/`, and the
+error names that folder. They expire with that folder after
+`keep_versions_days`, so restore them from there if the deletion was a
+mistake. The bridge settings (`_bridge`) are not checked; the bridge writes
+them itself.
 
 A brain folder that rclone can only partly read (a subfolder it may not open,
 a folder removed while it was being listed) is never taken for a wiped one.
@@ -118,10 +160,24 @@ be listed, the run fails without syncing.
 ## Restoring
 
 Backup → Restore: choose a brain, `current` or a version, and a **new, empty**
-folder. The bridge never restores over an existing brain. Inspect the result,
-then add it as a brain (the dashboard picks up its `brain.json`) or swap
-folders yourself, which the bridge picks up when it restarts or you next
-save a setting (see [Moving a brain](BRAINS.md#moving-a-brain)).
+folder. The bridge never restores over an existing brain. The folder must
+pass the checks a new brain's folder does (see [adding a brain](BRAINS.md)):
+inside your home folder, not in or around a brain, and not in the bridge's
+data folder or the credentials folder. Nor may it lie inside what the
+sandbox keeps from brains, such as `~/.claude`, `~/.ssh`, `~/Library/Mail`
+or a `deny_paths` entry, since the bridge writes the copy outside any
+sandbox. The folders of your own files (`~/Documents`, `~/Desktop`,
+`~/Downloads`, `~/Movies`, `~/Music`, `~/Pictures`) are fine, as they are
+for a new brain. Each check
+looks where the folder really is, through any symlink on the way. The
+restore runs in the background (one at a time, and not while a
+backup runs), and the Backup page shows how the last one went, a failure
+included, with what rclone said. Inspect the result, then add it as a brain
+(the dashboard picks up its `brain.json`) or swap folders yourself, which
+the bridge picks up when it restarts or you next save a setting (see
+[Moving a brain](BRAINS.md#moving-a-brain)). Until then, every brain can
+read the copy: the sandbox keeps brains out of each other's folders, and a
+restored copy is not a brain's folder yet.
 
 On a new machine: install the bridge, connect Drive, restore each brain into a
 new folder, add them, and pair WhatsApp again. `_bridge/current/config.json`

@@ -1,20 +1,22 @@
 // Chats: who is waiting for access, the account's groups, and the allow
-// lists. This is the one page that edits the allow lists; every change goes
-// through the bridge (/api/chats/allow and /api/chats/revoke), which checks
-// it, and the page shows the bridge's answer when it refuses one.
+// lists. This is the one page that edits the allow lists and who is heard
+// in each allowed group (group_members); every change goes through the
+// bridge (/api/chats/allow, /api/chats/revoke and /api/chats/members),
+// which checks it, and the page shows the bridge's answer when it refuses
+// one.
 
 import { post } from '../app/api.js';
 import { store, loadGroups, rememberName } from '../app/store.js';
 import { brainsResource, configResource, ignoredResource } from '../app/resources.js';
 import { h, mount, paint, reconcile, syncOptions } from '../lib/dom.js';
 import { plural } from '../lib/format.js';
-import { brainLabel } from '../lib/brain.js';
-import { phone, shortJid } from '../lib/jid.js';
+import { brainLabel, defaultBrainOption } from '../lib/brain.js';
+import { phone, phoneDigits, shortJid } from '../lib/jid.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn, runBusy } from '../components/buttons.js';
-import { confirmDialog } from '../components/dialog.js';
-import { select, textInput } from '../components/fields.js';
+import { confirmDialog, openDialog } from '../components/dialog.js';
+import { field, listEditor, select, textInput } from '../components/fields.js';
 import { pill, badge, timeAgo, mono, empty, pageHeader, spinner } from '../components/common.js';
 import { chatName } from '../components/chat.js';
 
@@ -33,7 +35,8 @@ export default {
     const numbersList = h('ul.plain-list');
     const allowedGroupsBox = h('div');
     const allowedGroupsList = h('ul.plain-list');
-    const refreshGroups = btn('Refresh', { small: true, kind: 'ghost', icon: 'refresh', onClick: () => loadGroups(true) });
+    // Refresh has the bridge ask WhatsApp; the other reloads take its list.
+    const refreshGroups = btn('Refresh', { small: true, kind: 'ghost', icon: 'refresh', onClick: () => loadGroups(true, { fresh: true }) });
 
     // The add boxes are built once, so what is typed in them stays while
     // the lists refresh.
@@ -75,14 +78,12 @@ export default {
     // its own.
     const refreshAll = () => Promise.all([ignoredResource.refresh(), brainsResource.refresh(), configResource.refresh()]);
 
-    const defaultBrain = () => (brains || []).find((b) => b.manifest && b.manifest.routing && b.manifest.routing.default);
-    const brainOptions = (withDefault) => {
-      const d = defaultBrain();
-      return [
-        ...(withDefault ? [['', d ? `Default brain (${d.name || d.id})` : 'Default brain']] : []),
-        ...(brains || []).filter((b) => b.id).map((b) => [b.id, brainLabel(b)]),
-      ];
-    };
+    // A group that names no brain goes to the fallback brain, which is
+    // the default brain or else the first: the option names it either way.
+    const brainOptions = (withDefault) => [
+      ...(withDefault ? [['', defaultBrainOption(brains)]] : []),
+      ...(brains || []).filter((b) => b.id).map((b) => [b.id, brainLabel(b)]),
+    ];
     const explicitOwner = (jid) => {
       const b = (brains || []).find((x) => x.manifest && x.manifest.routing && (x.manifest.routing.groups || []).includes(jid));
       return b ? b.id : '';
@@ -241,6 +242,7 @@ export default {
       const eff = cfg.effective || {};
       const numbers = file.allowed_numbers || [];
       const groups = file.allowed_groups || [];
+      const members = file.group_members || {};
       // Only an explicit true opens an empty list; unset means nobody.
       const anyDM = eff.allow_any_dm === true;
 
@@ -262,12 +264,103 @@ export default {
         paint(allowedGroupsBox, 'none', () => h('p.muted', 'No groups allowed. The bridge ignores every group until you allow one.'));
       } else {
         paint(allowedGroupsBox, 'list', () => allowedGroupsList);
-        reconcile(allowedGroupsList, groups.map((g) => ({ g, name: chatName(g), owner: explicitOwner(g) })), (x) => x.g, ({ g, name, owner }) => h('li',
-          h('div', name ? h('div', h('strong', name)) : null, h('div.small', mono(g))),
+        // An entry is null for a group without one: allowed_numbers decide.
+        const items = groups.map((g) => ({ g, name: chatName(g), owner: explicitOwner(g), entry: Object.hasOwn(members, g) ? members[g] : null, numbers: numbers.length, anyDM }));
+        reconcile(allowedGroupsList, items, (x) => x.g, ({ g, name, owner, entry, numbers: n, anyDM: any }) => h('li',
+          h('div', name ? h('div', h('strong', name)) : null, h('div.small', mono(g)), h('div.small.muted.heard', heardSummary(entry, n, any))),
           h('span.muted.small', owner ? `→ ${owner}` : '→ default'),
+          btn('Members', { small: true, kind: 'ghost', icon: 'users', title: 'Who is heard in this group', onClick: () => editMembers(g, name, entry) }),
           removeBtn('Stop answering in this group?', 'The bridge ignores the group from now on. Its brain keeps the history, and allowing the group again sends it to the same brain.',
             { kind: 'group', jid: g }, 'Removed the group')));
       }
+    }
+
+    // ── who is heard in a group (group_members) ──
+
+    // Whose messages in a group reach its brain, as the bridge decides
+    // (groupSenderAllowed): its entry, or without one the allowed numbers.
+    function heardSummary(entry, numbers, anyDM) {
+      if (entry === null) {
+        if (!numbers) return anyDM ? 'Heard: every member, since anyone may message the bridge' : 'Heard: nobody, until you allow a number';
+        return 'Heard: the allowed numbers';
+      }
+      if (entry.length === 1 && entry[0] === '*') return 'Heard: every member';
+      if (!entry.length) return 'Heard: nobody';
+      return `Heard: ${entry.map(phone).join(', ')}`;
+    }
+
+    // The editor checks each number as the bridge does (validateGroupMembers),
+    // and the bridge checks the list again when it saves.
+    function editMembers(g, name, entry) {
+      const everyone = entry !== null && entry.length === 1 && entry[0] === '*';
+      const mode = entry === null ? '' : (everyone ? '*' : 'list');
+      const modeSel = select([
+        ['', 'Whom the allowed numbers admit'],
+        ['*', 'Every member of the group'],
+        ['list', 'Only these numbers'],
+      ], mode, { 'aria-label': 'Who is heard' });
+      const modeHelp = h('div.help');
+      const list = listEditor({
+        values: mode === 'list' ? entry : [],
+        placeholder: '15551234567',
+        addLabel: 'Add number',
+        validate: (v) => {
+          if (v === '*') return 'Pick “Every member of the group” instead';
+          return phoneDigits(v) ? '' : 'Not a phone number: use digits with the country code, e.g. 15551234567';
+        },
+        empty: 'No numbers: nobody but the bridge’s own account is heard.',
+      });
+      const listField = field({ label: 'Numbers', control: list, help: 'With the country code; a +, spaces and dashes are fine. The allowed numbers do not count here, so list your own too.' });
+      const err = h('div.form-error.small', { hidden: true });
+      const sync = () => {
+        listField.hidden = modeSel.value !== 'list';
+        modeHelp.textContent = {
+          '': 'As without an entry: the allowed numbers on this page are heard, and while that list is empty and “Let anyone message” is on, anyone.',
+          '*': 'Everyone in the group, also whoever its admins add later, can start a run with every permission the brain has.',
+          list: 'Only these members can start a run or stop one; what the others write is not read, not even into the brain’s history.',
+        }[modeSel.value];
+      };
+      modeSel.addEventListener('change', () => { err.hidden = true; sync(); });
+      list.addEventListener('input', () => { err.hidden = true; });
+      sync();
+      return openDialog({
+        title: `Who is heard in ${name || 'this group'}`,
+        body: h('div.stack',
+          field({ label: 'Who is heard', control: modeSel }),
+          modeHelp,
+          listField,
+          err,
+          h('p.help', 'Messages from the bridge’s own account always get through.')),
+        actions: [
+          { label: 'Cancel', value: null },
+          {
+            label: 'Save', kind: 'primary',
+            onClick: async () => {
+              let members = null;
+              if (modeSel.value === '*') members = ['*'];
+              if (modeSel.value === 'list') {
+                if (!list.isValid()) {
+                  err.hidden = false;
+                  err.textContent = 'Some entries are no phone numbers: fix or remove the ones marked.';
+                  return false;
+                }
+                members = list.getValues();
+              }
+              try {
+                await post('/api/chats/members', { jid: g, members });
+              } catch (ex) {
+                if (ex.status !== 400 && ex.status !== 422) throw ex;
+                err.hidden = false;
+                err.textContent = ex.message;
+                return false;
+              }
+              toast(`Saved who is heard in ${name || 'the group'}`, 'ok');
+              await configResource.refresh();
+              return true;
+            },
+          },
+        ],
+      });
     }
 
     function removeBtn(title, message, body, done) {

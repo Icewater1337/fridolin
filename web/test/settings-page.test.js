@@ -7,14 +7,14 @@ import { createPage } from '../assets/app/page.js';
 import { configResource } from '../assets/app/resources.js';
 import page from '../assets/pages/settings.js';
 
-async function openPage(t, { params, focusAt } = {}) {
+async function openPage(t, { params, focusAt, config = { claude_path: 'claude', brain_model: '', allowed_numbers: ['15551234567'] } } = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
   const scrolled = [];
   globalThis.window = { scrollTo: (to) => scrolled.push(to) };
   t.after(() => { delete globalThis.window; });
-  const bridge = { etag: 'e1', config: { claude_path: 'claude', brain_model: '', allowed_numbers: ['15551234567'] }, puts: [], conflicts: 0 };
+  const bridge = { etag: 'e1', config, puts: [], conflicts: 0 };
   serve(t, (path, init) => {
     if (path === '/api/config' && init.method === 'PUT') {
       const body = JSON.parse(init.body);
@@ -112,13 +112,62 @@ test('a save refused twice without a clash says to save again, not that it clash
   assert.equal(bridge.config.claude_path, '/usr/local/bin/claude');
 });
 
+// Settings such as queue.max_pending live in objects of config.json: an
+// edit goes into its object, made if it is missing, beside what is there.
+test('an edited nested setting is saved inside its object, beside the others', async (t) => {
+  const { bridge, inputFor, save } = await openPage(t, { config: { claude_path: 'claude', queue: { mode: 'interrupt', notify: false } } });
+  type(inputFor('Waiting messages per brain'), '5');
+  const sandbox = inputFor('Sandbox brains');
+  sandbox.checked = true;
+  sandbox.dispatchEvent(new Event('change', { bubbles: true }));
+  await save();
+  assert.equal(bridge.puts.length, 1);
+  assert.deepEqual(bridge.puts[0].config, {
+    claude_path: 'claude',
+    queue: { mode: 'interrupt', notify: false, max_pending: 5 },
+    sandbox: { enabled: true },
+  });
+});
+
+test('a dangerous setting says why in a warning beside it', async (t) => {
+  const { inputFor } = await openPage(t);
+  const field = inputFor('Let brains use tools without asking').closest('.field');
+  const warn = field.querySelector('.callout.warn.inline-callout');
+  assert.ok(warn, 'the help is a warning');
+  // Without it, a run is refused the tools that need approval; it does
+  // not wait forever for one.
+  assert.match(warn.textContent, /Off: .*every tool that needs approval is refused/);
+  assert.doesNotMatch(warn.textContent, /waits forever/);
+  assert.match(warn.textContent, /Codex mode uses its read-only sandbox/);
+  assert.match(warn.textContent, /The sandbox \(below\) limits what a run can reach either way/);
+  assert.equal(field.querySelector('.help'), null, 'and is not repeated as plain help');
+});
+
 test('a link to a section gives the focus to its heading', async (t) => {
   for (const params of [{ section: 'claude' }, { section: 'google' }, { section: 'nope' }, {}]) {
     await t.test(params.section || 'no section', async (t) => {
       const asked = [];
       await openPage(t, { params, focusAt: (el) => asked.push(el.textContent) });
-      const want = { claude: ['Claude'], google: ['Google sign-in'] }[params.section] || [];
+      const want = { claude: ['AI mode'], google: ['Google sign-in'] }[params.section] || [];
       assert.deepEqual(asked, want);
     });
   }
+});
+
+test('AI mode defaults to Claude and preserves separate model settings when switching', async (t) => {
+  const { bridge, inputFor, save } = await openPage(t, { config: { claude_path: 'claude', brain_model: 'opus', brain_effort: 'max' } });
+  assert.equal(inputFor('Mode').value, 'claude');
+  assert.equal(inputFor('Codex model').getAttribute('placeholder'), 'gpt-6.1-sol');
+  assert.equal(inputFor('Codex effort').value, 'high');
+  const mode = inputFor('Mode');
+  mode.value = 'codex';
+  mode.dispatchEvent(new Event('change'));
+  await save();
+  assert.equal(bridge.config.agent_provider, 'codex');
+  assert.equal(bridge.config.brain_model, 'opus');
+  assert.equal(bridge.config.brain_effort, 'max');
+  inputFor('Mode').value = 'claude';
+  inputFor('Mode').dispatchEvent(new Event('change'));
+  await save();
+  assert.equal(bridge.config.agent_provider, 'claude');
 });

@@ -2,18 +2,19 @@
 // everything else in the file (including fields this page does not show) is
 // sent back exactly as received.
 
-import { put } from '../app/api.js';
+import { put, rotateToken, signOut } from '../app/api.js';
 import { setRestartRequired } from '../app/store.js';
 import { configResource } from '../app/resources.js';
 import { h, mount, paint } from '../lib/dom.js';
 import { plural } from '../lib/format.js';
+import { getPath, setPath } from '../lib/keypath.js';
 import { EFFORTS } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn } from '../components/buttons.js';
 import { confirmDialog } from '../components/dialog.js';
 import { field, toggle, select, textInput, listEditor } from '../components/fields.js';
-import { mono, pageHeader, loading } from '../components/common.js';
+import { callout, mono, pageHeader, loading } from '../components/common.js';
 import { googleClientCard } from '../components/calendar.js';
 import { saveBar } from '../components/save-bar.js';
 import { liveForm } from '../components/live-form.js';
@@ -28,20 +29,26 @@ const SECTIONS = [
     intro: 'Who may talk to the bridge. Everyone else is ignored and shows up on the Chats page.',
     fields: [
       { type: 'allowLists', label: 'Allowed numbers and groups' },
-      { key: 'allow_any_dm', type: 'bool', label: 'Let anyone message while the list is empty', help: 'Only matters while the allowed numbers (on the Chats page) are none. Off (the default): nobody can send direct messages until you add a number. On: anyone who knows the account’s number can use the assistant.' },
+      { key: 'allow_any_dm', type: 'bool', label: 'Let anyone message while the list is empty', help: 'Only matters while the allowed numbers (on the Chats page) are none. Off (the default): nobody can send direct messages until you add a number. On: anyone who knows the account’s number can use the assistant, and in an allowed group without a group_members entry every member is read.' },
       { key: 'triggers', type: 'triggers', label: 'Group triggers', help: 'Words that address the bridge in a group; they are removed before the brain sees the message. An @-mention of the bridge’s account always counts, and direct messages never need a trigger. “Start” fits short shorthands like @c.' },
     ],
   },
   {
     id: 'claude',
-    title: 'Claude',
-    intro: 'How the bridge runs Claude Code.',
+    title: 'AI mode',
+    intro: 'Choose the assistant for all brains. Saved changes apply to new runs; a run already in progress finishes in its original mode.',
     fields: [
+      { key: 'agent_provider', type: 'select', def: 'claude', label: 'Mode', options: [['claude', 'Claude (default)'], ['codex', 'Codex']], help: 'Claude and Codex share the brain’s prompt, files and chat history. Their model settings stay separate.' },
+      { key: 'codex_path', type: 'text', placeholder: 'codex', mono: true, label: 'Codex CLI', help: 'Codex CLI 0.163.0 or newer. Use codex on PATH or the full binary path.' },
+      { key: 'codex_model', type: 'text', mono: true, label: 'Codex model', placeholder: 'gpt-6.1-sol', help: 'Used by every brain in Codex mode. Claude model overrides are preserved for Claude mode.' },
+      { key: 'codex_effort', type: 'select', def: 'high', label: 'Codex effort', options: EFFORTS.filter(([v]) => v !== ''), help: 'Defaults to High.' },
       { key: 'claude_path', type: 'text', mono: true, label: 'Claude CLI', help: '“claude” finds it on your PATH. Otherwise the full path to the claude binary.' },
-      { key: 'brain_model', type: 'text', mono: true, label: 'Brain model', placeholder: 'CLI default', help: 'sonnet, opus, haiku or a full model id. Brains can override it.' },
-      { key: 'brain_effort', type: 'select', label: 'Brain effort', options: EFFORTS.map(([v, l]) => [v, v === '' ? 'CLI default' : l]), help: 'How hard the model thinks. Brains can override it.' },
-      { key: 'disallowed_tools', type: 'list', label: 'Blocked tools', placeholder: 'WebFetch', addLabel: 'Add tool', help: 'Tools brains may not use. A brain can override this list in its own settings.' },
-      { key: 'dangerously_skip_permissions', type: 'bool', label: 'Let brains use tools without asking', danger: true, help: 'Nobody sits at the keyboard to approve a tool, so without this every tool call waits forever and brains can only chat. With it, a brain can run commands and edit files on its own — the sandbox (below) is the safety net that keeps it out of everything else.' },
+      { key: 'brain_model', type: 'text', mono: true, label: 'Claude model', placeholder: 'CLI default', help: 'sonnet, opus, haiku or a full model id. Brains can override it.' },
+      { key: 'brain_effort', type: 'select', label: 'Claude effort', options: EFFORTS.map(([v, l]) => [v, v === '' ? 'CLI default' : l]), help: 'How hard the model thinks. Brains can override it.' },
+      { key: 'run_timeout_minutes', type: 'int', def: 30, min: 0, max: 1440, nullable: true, label: 'Stop a run after (minutes)', help: 'A run that takes longer is stopped and the chat is told, so one stuck run cannot hold up its brain’s other messages. 0 lets runs take as long as they take.' },
+      { key: 'max_concurrent_runs', type: 'int', def: 2, min: 0, max: 64, nullable: true, label: 'Runs at once, all brains together', help: 'Each run is a full agent, on this computer and on your account’s rate limits. A brain whose turn it is waits for a free run, requests ahead of untagged chatter. 0 lets every brain run whenever it has work.' },
+      { key: 'disallowed_tools', type: 'list', label: 'Blocked tools', placeholder: 'WebFetch', addLabel: 'Add tool', help: 'A brain can override this list. WebFetch or WebSearch disables Codex’s web tool. Other Claude tool names prevent Codex runs because they have no safe equivalent.' },
+      { key: 'dangerously_skip_permissions', type: 'bool', label: 'Let brains use tools without asking', danger: true, help: 'On: a brain runs commands and edits files on its own. Off: in Claude mode, every tool that needs approval is refused; a brain can still read and search its files and answer. Codex mode uses its read-only sandbox without interactive approvals. The sandbox (below) limits what a run can reach either way, and with this on it is what keeps a brain out of everything else.' },
     ],
   },
   {
@@ -49,26 +56,26 @@ const SECTIONS = [
     title: 'Messages',
     intro: 'Queueing, batching and splitting.',
     fields: [
-      { key: 'queue.mode', type: 'select', def: 'queue', label: 'When a brain is busy', options: [['queue', 'Queue — answer one after another'], ['interrupt', 'Interrupt — a newer request replaces the sender’s own']], help: 'Interrupt stops a run only for a newer request from the same person in the same chat. Other chats and other people still wait their turn; untagged group chatter and ingested files never interrupt.' },
+      { key: 'queue.mode', type: 'select', def: 'queue', label: 'When a brain is busy', options: [['queue', 'Queue — answer one after another'], ['interrupt', 'Interrupt — a newer request replaces the sender’s own']], help: 'Either way a brain answers one message at a time, each chat’s in order and the chats taking turns, so one busy chat does not hold up the others. Interrupt stops a run only for a newer request from the same person in the same chat. Other chats and other people still wait their turn, and untagged group chatter and ingested files never interrupt a request. In both modes, an observe-only run on group chatter gives way to any other message, which also goes ahead of the chatter waiting.' },
       { key: 'queue.max_pending', type: 'int', def: 10, min: 1, label: 'Waiting messages per brain', help: 'Messages beyond this are turned away.' },
       { key: 'queue.notify', type: 'bool', def: true, label: 'Tell people their message is queued', help: 'Sends “⏳ queued” when a tagged message has to wait.' },
       { key: 'debounce.quiet_ms', type: 'int', def: 2000, min: 0, nullable: true, label: 'Gather messages for (ms)', help: 'Messages from the same person within this pause are answered together — several photos plus a question. 0 turns it off.' },
       { key: 'debounce.max_wait_ms', type: 'int', def: 10000, min: 0, nullable: true, label: 'Never gather longer than (ms)' },
       { key: 'max_chunk_size', type: 'int', def: 3900, min: 100, label: 'Longest single message (characters)', help: 'Counted in characters, the [1/3] numbering included; longer replies are split and numbered. At least 100; the default stays under the 4096 commonly given as WhatsApp’s limit.' },
       { key: 'max_media_mb', type: 'int', def: 100, min: 1, max: 2048, label: 'Largest attachment (MB)', help: 'Bigger files are not downloaded, and the sender is told. A download also has two minutes to finish. At most 2048.' },
-      { key: 'otp_guard', type: 'bool', label: 'Hold back one-time codes', help: 'After the assistant asked for a code, a message that is only a 4–8 digit number is dropped before the model sees it, and kept in the data folder’s otp/ for the local script that asked for it.' },
-      { key: 'otp_markers', type: 'list', label: 'Phrases that ask for a code', placeholder: 'verification code', addLabel: 'Add phrase', help: 'Empty uses the built-in list: 🔐, OTP, 2FA, one-time code, verification code.' },
-      { key: 'ingest.enabled', type: 'bool', label: 'Accept files through /ingest', help: 'Lets local programs (a web upload, a recorder sync) hand files to a brain with POST /ingest.' },
+      { key: 'otp_guard', type: 'bool', label: 'Hold back one-time codes', help: 'For ten minutes after the assistant or a script asked a chat for a code, a message there that is only a code (4–8 digits, also as 483 920, or letters and digits such as G-483920) is dropped before the model sees it, and kept in the data folder’s otp/ for the local script that asked for it. The sender is told.' },
+      { key: 'otp_markers', type: 'list', label: 'Phrases that ask for a code', placeholder: 'verification code', addLabel: 'Add phrase', help: 'Matched in any letter case, as whole words. Empty uses the built-in list: 🔐, OTP, 2FA, one-time code, verification code.' },
+      { key: 'ingest.enabled', type: 'bool', label: 'Accept files through /ingest', help: 'Lets local programs (a web upload, a recorder sync) hand files they write to the top of the media folder to a brain with POST /ingest. Every call needs a token: your programs send the one in scripts.token in the data folder (Authorization: Bearer …); a brain sends its own, and may hand only files in its own inbox, only to itself.' },
     ],
   },
   {
     id: 'sandbox',
     title: 'Sandbox',
-    intro: 'macOS only. Every brain run is wrapped in sandbox-exec: brains cannot read or change other brains’ folders, your keys, mail, messages, browser profiles, Documents, Desktop or Downloads.',
+    intro: 'macOS only. Every brain run is wrapped in sandbox-exec: brains may write only their own folder, media inbox and state, and cannot read other brains’ folders, your keys, mail, messages, browser profiles, Documents, Desktop, Downloads or your Claude Code setup.',
     fields: [
-      { key: 'sandbox.enabled', type: 'bool', label: 'Sandbox brains', help: 'Strongly recommended while brains may use tools without asking.' },
-      { key: 'sandbox.deny_paths', type: 'list', mono: true, label: 'Also block', placeholder: '~/clients', validate: absPath, addLabel: 'Add folder', help: 'Extra folders brains must not read or change. Absolute, or starting with ~/.' },
-      { key: 'sandbox.allow_paths', type: 'list', mono: true, label: 'Re-allow', placeholder: '~/Documents/assistant-share', validate: absPath, addLabel: 'Add folder', help: 'Folders brains may read again despite the built-in blocks (reading only), except other brains’ folders, the bridge’s own data and your CLAUDE.md files above a brain’s folder. Rarely needed. Absolute, or starting with ~/.' },
+      { key: 'sandbox.enabled', type: 'bool', label: 'Sandbox brains', help: 'Strongly recommended while brains may use tools without asking. Sandboxed brains cannot read your keychain, which holds your own login, so they log in with CLAUDE_CODE_OAUTH_TOKEN (from claude setup-token) or ANTHROPIC_API_KEY in the bridge’s environment.' },
+      { key: 'sandbox.deny_paths', type: 'list', mono: true, label: 'Also block', placeholder: '~/clients', validate: absPath, addLabel: 'Add folder', help: 'Extra folders brains must not read (they write nowhere but their own places anyway). One inside a brain’s folder wins over the folder. Absolute, or starting with ~/.' },
+      { key: 'sandbox.allow_paths', type: 'list', mono: true, label: 'Re-allow', placeholder: '~/Documents/assistant-share', validate: absPath, addLabel: 'Add folder', help: 'Folders brains may read again despite the built-in blocks (reading only), except other brains’ folders, the bridge’s own data, the keychains and your CLAUDE.md files above a brain’s folder. Rarely needed. Absolute, or starting with ~/.' },
       { key: 'sandbox.git_config', type: 'select', def: 'read', label: 'Git settings (~/.gitconfig)', options: [['read', 'Readable — brains can commit in their folder'], ['deny', 'Blocked']] },
       { key: 'sandbox.credentials_dir', type: 'text', mono: true, label: 'Credentials folder', placeholder: 'not set', help: 'A folder for the brains’ calendar tokens, which the bridge uses for them. No brain may read it. Absolute, or starting with ~/.' },
     ],
@@ -93,24 +100,39 @@ const SECTIONS = [
       { key: 'data_dir', type: 'text', mono: true, restart: true, label: 'Data folder', help: 'Holds the WhatsApp pairing, the database, media and the dashboard token. Changing it does not move those files — the bridge starts fresh (and unpaired) in the new folder. At startup the folder is made private to your user (mode 0700), unless it is your home folder, one above it or another user’s folder.' },
       { key: 'log_level', type: 'select', restart: true, label: 'Log level', options: [['', 'Default (info)'], ['debug', 'Debug — very verbose'], ['info', 'Info'], ['warn', 'Warnings'], ['error', 'Errors only']] },
       { key: 'viewer', type: 'bool', label: 'Open a terminal viewer per brain', help: 'macOS, needs tmux. Opens a Terminal window per brain that follows its activity. Handy while tuning a prompt. Its tmux runs outside the sandbox, and brains can send it commands.' },
-      { key: 'dashboard.require_token', type: 'bool', def: true, label: 'Require the dashboard token', confirmOff: true, help: 'Brains run on this computer and can reach this dashboard. The token is what stops a manipulated brain from changing these settings — or turning the sandbox off.' },
+      { key: 'script_api.tokenless_send', type: 'bool', def: true, label: 'Let /send work without a token', help: 'For scripts written before /send had tokens: without one, it reaches only your allowed chats. While this is on, any program on this computer — a brain too — can message those chats. Scripts send the token in scripts.token in the data folder; brains get their own.' },
+      { key: 'dashboard.require_token', type: 'bool', def: true, label: 'Require the dashboard token', confirmOff: true, help: 'Brains run on this computer and can reach this dashboard. The token is what stops a manipulated brain from changing these settings — or turning the sandbox off. Turning it off takes effect after a restart; turning it on, at once.' },
     ],
   },
 ];
 
-function getPath(obj, key) {
-  return key.split('.').reduce((o, k) => (o && typeof o === 'object' ? o[k] : undefined), obj);
-}
-
-function setPath(obj, key, value) {
-  const parts = key.split('.');
-  let o = obj;
-  for (const p of parts.slice(0, -1)) {
-    if (!o[p] || typeof o[p] !== 'object') o[p] = {};
-    o = o[p];
-  }
-  if (value === undefined) delete o[parts[parts.length - 1]];
-  else o[parts[parts.length - 1]] = value;
+// Signing out this browser, or every browser and script that holds the
+// dashboard token, which `fridolin rotate-token` does too.
+function dashboardSignInCard() {
+  return h('section.card.settings-section', { id: 'sec-signin' },
+    h('h2', 'Dashboard sign-in'),
+    h('p.muted.section-intro', 'This browser stays signed in for 30 days: a cookie page scripts cannot read, which counts only with a key this page keeps for its own address. Signing out everywhere also replaces the dashboard token, so a copy of it that got out stops working.'),
+    h('div.actions',
+      btn('Sign out', {
+        icon: 'lock',
+        onClick: async () => { await signOut(); location.reload(); },
+      }),
+      btn('Sign out everywhere…', {
+        kind: 'danger', icon: 'key',
+        onClick: async () => {
+          const ok = await confirmDialog({
+            title: 'Sign out everywhere?',
+            message: h('div',
+              h('p', 'Every other browser is signed out, and the dashboard token is replaced: scripts that send the old one are refused. This browser stays signed in.'),
+              h('p.muted', 'Open the dashboard elsewhere again with fridolin open.')),
+            confirm: 'Sign out everywhere',
+            danger: true,
+          });
+          if (!ok) return;
+          await rotateToken();
+          toast('Every other browser was signed out, and the dashboard token replaced', 'ok');
+        },
+      })));
 }
 
 export default {
@@ -120,6 +142,7 @@ export default {
     const bar = saveBar({ save: btn('Save', { kind: 'primary', icon: 'check', onClick: () => save() }), onDiscard: () => form.discard(), floating: true });
     const where = h('span'); // the file, once the settings have loaded
     const googleCard = googleClientCard({ signal: ctx.signal });
+    const signInCard = dashboardSignInCard();
     mount(root, pageHeader('Settings', where), body, bar);
 
     // Only the settings edited here count as a conflict: one changed
@@ -181,8 +204,9 @@ export default {
         return el;
       });
       chip('Google sign-in', 'google', googleCard);
+      chip('Dashboard sign-in', 'signin', signInCard);
       return {
-        el: h('div.page-stack', nav, sections, googleCard),
+        el: h('div.page-stack', nav, sections, googleCard, signInCard),
         value: () => controls.map((c) => c.value()),
         controls,
       };
@@ -256,6 +280,7 @@ function makeControl(f, cfg, eff, onChange) {
             title: 'Turn off the dashboard token?',
             message: h('div',
               h('p', 'Without the token, any program on this computer can change the bridge’s settings — including a brain that was tricked by a message into doing so. It could allow new chats, widen its own routing or switch the sandbox off.'),
+              h('p', 'It takes effect after the bridge restarts. Until then the token is still required.'),
               h('p', h('strong', 'Only do this on a machine where nothing untrusted runs.'))),
             confirm: 'Turn it off',
             danger: true,
@@ -264,7 +289,7 @@ function makeControl(f, cfg, eff, onChange) {
         }
         onChange();
       });
-      if (f.danger) extra = h('div.callout.warn.inline-callout', icon('alert', 'callout-icon'), h('div.callout-body', f.help));
+      if (f.danger) extra = callout('warn', null, { class: 'inline-callout' }, f.help);
       const el = h('div.field.bool-field', sw,
         f.danger ? extra : (f.help ? h('div.help', f.help) : null),
         tag ? h('span.field-tag', tag) : null);

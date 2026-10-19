@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent for Fridolin, written by "fridolin service install", which
+  rewrites it on every install. Variables you add under EnvironmentVariables
+  are kept. "fridolin service uninstall" removes it.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.fridolin.bridge</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/you/.local/lib/fridolin/fridolin</string>
+        <string>--config</string>
+        <string>/Users/you/.fridolin/config.json</string>
+        <string>--log-file</string>
+        <string>/Users/you/Library/Logs/fridolin/stderr.log</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/you/.fridolin</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>/Users/you/</string>
+        <key>PATH</key>
+        <string>/Users/you/.local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+        <key>GROQ_API_KEY</key>
+        <string>&lt;KEY&gt;</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/you/Library/Logs/fridolin/stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/you/Library/Logs/fridolin/stderr.log</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>

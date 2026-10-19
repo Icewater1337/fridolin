@@ -4,6 +4,7 @@
 import { store, loadGroups, chatName } from '../app/store.js';
 import { h, mount } from '../lib/dom.js';
 import { GROUP_JID_RE } from '../lib/jid.js';
+import { brainLabel } from '../lib/brain.js';
 import { btn } from './buttons.js';
 import { toggle, field, textInput, nextId } from './fields.js';
 import { mono, loading } from './common.js';
@@ -12,14 +13,16 @@ import { mono, loading } from './common.js';
  * routingEditor({routing, selfId, brains, allowedGroups, onChange, signal})
  * brains: the /api/brains list (to see which brain holds DMs, default, groups).
  * signal: the page's; once it aborts, the editor stops following the groups.
- * Returns an element with getValue() → {handles_dms, default, groups}.
+ * Returns an element with getValue() → {handles_dms, default, groups,
+ * answer_files, answer_forwards}; the last two are left out while on, the
+ * default, so a brain.json only names them when they are off.
  */
 export function routingEditor({ routing = {}, selfId = '', brains = [], allowedGroups = [], onChange, signal }) {
   const others = brains.filter((b) => b.id && b.id !== selfId && b.manifest);
   const dmOwner = others.find((b) => b.manifest.routing && b.manifest.routing.handles_dms);
   const defOwner = others.find((b) => b.manifest.routing && b.manifest.routing.default);
   const claimed = new Map();
-  for (const b of others) for (const g of (b.manifest.routing && b.manifest.routing.groups) || []) claimed.set(g, b.name || b.id);
+  for (const b of others) for (const g of (b.manifest.routing && b.manifest.routing.groups) || []) claimed.set(g, brainLabel(b));
 
   const changedFn = () => { if (onChange) onChange(); };
   const dmWarn = h('div.help.warn-text', { hidden: true });
@@ -34,10 +37,15 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
     label: 'Default for unassigned chats',
     onChange: (v) => { defWarn.hidden = !(v && defOwner); changedFn(); },
   });
-  if (dmOwner) dmWarn.textContent = `“${dmOwner.name || dmOwner.id}” handles direct messages now. Only one brain can — turn it off there first, or saving will fail.`;
-  if (defOwner) defWarn.textContent = `“${defOwner.name || defOwner.id}” is the default now. Only one brain can be — turn it off there first, or saving will fail.`;
+  if (dmOwner) dmWarn.textContent = `“${brainLabel(dmOwner)}” handles direct messages now. Only one brain can — turn it off there first, or saving will fail.`;
+  if (defOwner) defWarn.textContent = `“${brainLabel(defOwner)}” is the default now. Only one brain can be — turn it off there first, or saving will fail.`;
   dmWarn.hidden = !(routing.handles_dms && dmOwner);
   defWarn.hidden = !(routing.default && defOwner);
+
+  // What addresses the bridge in the brain's groups, besides the trigger,
+  // an @-mention and a reply to one of its messages.
+  const files = toggle({ checked: routing.answer_files !== false, label: 'Answer files sent in its groups', onChange: changedFn });
+  const forwards = toggle({ checked: routing.answer_forwards !== false, label: 'Answer forwarded messages in its groups', onChange: changedFn });
 
   const selected = new Set(routing.groups || []);
   const extra = new Set(); // JIDs typed in by hand
@@ -90,7 +98,7 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
     }
     note.textContent = groups === null && groupsError
       ? `Group names are unavailable (${groupsError}). You can still pick allowed groups by JID.`
-      : 'Only allowed groups are listed. A group can belong to one brain; members still need to tag the bridge (see Settings → Access → Triggers).';
+      : 'Only allowed groups are listed. A group can belong to one brain; members still need to tag the bridge (see Settings → Access → Triggers), and only the members the group admits are read (Chats → Allowed groups → Members).';
   }
 
   const el = h('div.routing-editor',
@@ -99,8 +107,15 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
     field({ label: 'Groups', control: groupsBox, wide: true }),
     note,
     h('div.field', h('label.field-label', { for: addIn.id }, 'Add a group by its JID'), h('div.inline-add', addIn, addBtn)),
-    addErr);
-  el.getValue = () => ({ handles_dms: dm.input.checked, default: def.input.checked, groups: [...selected] });
+    addErr,
+    h('div.field', files, h('div.help', 'A photo, document, voice note or video gets an answer. Off: the brain reads only its caption, without answering, and the file is not downloaded; tag the bridge to ask about one.')),
+    h('div.field', forwards, h('div.help', 'Off: a forwarded message is chatter the brain reads without answering.')));
+  el.getValue = () => {
+    const v = { handles_dms: dm.input.checked, default: def.input.checked, groups: [...selected] };
+    if (!files.input.checked) v.answer_files = false;
+    if (!forwards.input.checked) v.answer_forwards = false;
+    return v;
+  };
 
   // Paints once the groups are known (or failed to load), and again when
   // they or their names change. It stops when the page goes, or when a

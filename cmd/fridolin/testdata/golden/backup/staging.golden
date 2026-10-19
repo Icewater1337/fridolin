@@ -1,0 +1,116 @@
+README.txt -rw------- aee0d4de8f1f57ac
+	Bridge configuration backup.
+
+	To restore on a new machine: put config.json at the default config location
+	(~/.fridolin/config.json), restore each brain folder from <brain-id>/current, and pair WhatsApp
+	again from the dashboard.
+	The WhatsApp session, .env files and tokens are deliberately not backed up.
+brains/ -rwx------
+brains/main.brain.json -rw------- e3f60208265f5cbf
+	{
+	  "version": 1,
+	  "id": "main",
+	  "name": "Main",
+	  "routing": {
+	    "handles_dms": true,
+	    "default": true,
+	    "groups": [
+	      "120363000000000000@g.us"
+	    ]
+	  },
+	  "prompt_file": "brain-prompt.md",
+	  "observe": "history",
+	  "backup": {
+	    "enabled": true,
+	    "exclude": [
+	      "node_modules/",
+	      "*.log",
+	      "- private.txt"
+	    ]
+	  },
+	  "calendar": {
+	    "account": "you@example.com",
+	    "calendars": [
+	      "you@example.com",
+	      "team@example.com"
+	    ],
+	    "default": "you@example.com"
+	  }
+	}
+config.json -rw------- 88f2d08dd60506b2
+	{
+	  "version": 2,
+	  "allowed_numbers": [
+	    "15551234567"
+	  ],
+	  "allowed_groups": [
+	    "120363000000000000@g.us"
+	  ],
+	  "triggers": [],
+	  "claude_path": "<TEST_BINARY>",
+	  "data_dir": "<HOME>/.fridolin",
+	  "brain_model": "",
+	  "dangerously_skip_permissions": false,
+	  "http_listen": "",
+	  "brain_mode": true,
+	  "brain_dirs": [
+	    {
+	      "path": "~/main",
+	      "approved": {
+	        "version": 1,
+	        "id": "main",
+	        "name": "Main",
+	        "routing": {
+	          "handles_dms": true,
+	          "default": true,
+	          "groups": [
+	            "120363000000000000@g.us"
+	          ]
+	        },
+	        "prompt_file": "brain-prompt.md",
+	        "observe": "history",
+	        "backup": {
+	          "enabled": true,
+	          "exclude": [
+	            "node_modules/",
+	            "*.log",
+	            "- private.txt"
+	          ]
+	        },
+	        "calendar": {
+	          "account": "you@example.com",
+	          "calendars": [
+	            "you@example.com",
+	            "team@example.com"
+	          ],
+	          "default": "you@example.com"
+	        }
+	      }
+	    }
+	  ],
+	  "sandbox": {
+	    "enabled": false,
+	    "deny_paths": null,
+	    "allow_paths": null
+	  },
+	  "otp_guard": false,
+	  "viewer": false,
+	  "queue": {},
+	  "debounce": {
+	    "quiet_ms": 0
+	  },
+	  "ingest": {
+	    "enabled": true
+	  },
+	  "startup_checks": {},
+	  "backup": {
+	    "enabled": true,
+	    "rclone_path": "<FAKES>/rclone"
+	  },
+	  "plaud": {
+	    "enabled": true,
+	    "cli_path": "<TEST_BINARY>"
+	  },
+	  "dashboard": {},
+	  "script_api": {}
+	}

@@ -12,9 +12,24 @@ In the dashboard: **Brains → Add brain**, then pick a folder. You can
 - browse your home folder inside the dashboard (and name a new folder there),
 - or type a path (`~/assistant/family`).
 
-The bridge checks the folder (it must be inside your home folder, must not be
-inside or contain another brain, and must not be the bridge's data folder),
-then writes what is missing:
+The bridge checks the folder, by where it really is (through any symlink on
+the way, also for a folder it is about to create): it must be inside your
+home folder, must not be inside or contain another brain, and must not be,
+hold or lie inside what the sandbox keeps from brains, such as the
+bridge's data, media or credentials folder, `~/.claude`,
+`~/Library/LaunchAgents`, the keychains, the bridge's install folder or
+checkout, or must not be or hold a folder like `~/.ssh` or `~/.config`, a
+program the bridge runs or a folder it finds programs in (`~/.local/bin`).
+A folder of your `PATH` inside it is fine: the bridge runs nothing from
+it and hands it to this brain's runs only (see
+[writing](CONFIGURATION.md#writing)).
+The bridge checks configured brains the same way whenever it loads them,
+also those you add to `brain_dirs` by hand, and leaves out one that fails,
+with an issue on the Brains page; `fridolin check` then exits with status
+3, and `setup.sh` stops before it installs. Until you fix the folder, the
+chats such a brain would take go to no other brain: a DM brain left out
+does not hand your DMs to the default brain, nor a default brain left out
+its chats to the first one. The chat is told that its brain cannot run. Then it writes what is missing:
 
 ```
 <folder>/
@@ -47,23 +62,49 @@ restart.
   "disallowed_tools": ["WebFetch"],
   "prompt_file": "brain-prompt.md",
   "reply_chat": "",
+  "observe": "history",
   "backup": { "enabled": true, "exclude": ["node_modules/", "*.log", "/big-exports/"] }
 }
 ```
 
 | Field | Meaning |
 | --- | --- |
+| `version` | The version of `brain.json` the file is written in, `1` today; a file without it is version 1. A bridge refuses a `brain.json` of a newer version than it reads, from a newer Fridolin before you went back to an older one say: the Brains page shows it as changed on disk, with both versions, the approved copy keeps running, and no edit or approval writes over the file, which would drop the settings the older bridge does not know. |
 | `id` | Stable identifier (lowercase, digits, `-`, `_`). Used for history attribution, the sandbox profile and per-brain credential file names. It cannot be changed; remove the brain and add the folder again under a new id instead. |
 | `name` | Display name. |
-| `routing.handles_dms` | This brain answers direct messages. At most one brain. |
-| `routing.default` | This brain answers allowed groups no brain claims. At most one; without one, the first brain is the fallback. |
+| `routing.handles_dms` | This brain answers direct messages. At most one brain; without one, the [fallback brain](#the-fallback-brain) answers them. |
+| `routing.default` | This brain is the [fallback brain](#the-fallback-brain): it answers the allowed groups no brain claims, and direct messages while no brain handles them. At most one; without one, the first brain is the fallback. A default brain that cannot run (see above) is replaced by no other. |
 | `routing.groups` | Group JIDs this brain answers. The group must also be allowed in the global settings. |
-| `model`, `effort` | Override the global `brain_model` / `brain_effort`. |
+| `routing.answer_files` | In this brain's groups, a file someone sends (photo, document, voice note, video) addresses the bridge, which answers it. Default `true`; `false` makes it chatter: the brain reads its caption without answering, and the file is not downloaded. The trigger, an @-mention or a reply to the bridge still address it. |
+| `routing.answer_forwards` | The same for a forwarded message. Default `true`. |
+| `model`, `effort` | Override the global `brain_model` / `brain_effort` in Claude mode. Codex uses the separate global `codex_model` / `codex_effort`. |
 | `disallowed_tools` | Override the global list; omit to inherit, `[]` to allow every tool. |
 | `prompt_file` | The prompt sent ahead of every message, relative to the folder. It must stay inside the folder, and be a file rather than a symlink (see [Files the bridge reads and writes](#files-the-bridge-reads-and-writes)). |
-| `reply_chat` | Where answers go for files handed in through `/ingest`. The files are handled by this brain even when the chat belongs to another one, so a brain without chats can answer in your DM. `!stop` and `!reset` in that chat also stop this brain's work on them. Default: the first allowed number for the brain that gets DMs (the DM brain, or the fallback brain when none handles DMs), else the brain's first group. |
+| `reply_chat` | Where answers go for files handed in through `/ingest`. The files are handled by this brain even when the chat belongs to another one, so a brain without chats can answer in your DM. `!stop` and `!reset` in that chat also stop this brain's work on them, and `!reset` starts the chat afresh for this brain too. Default: the first allowed number for the brain that gets DMs (the DM brain, or the fallback brain when none handles DMs), else the brain's first group. |
+| `observe` | What the brain does with untagged group messages, the ones nobody addressed to it (see [triggers](CONFIGURATION.md#triggers)). `history`, the default, keeps them in its history, where its next run in that group reads them; they cost nothing. `run` also gives each one a run of its own (a bare "ok" or emoji excepted), for a brain that keeps notes as the conversation goes: its prompt marks it `<observe_only>`, nothing it writes is sent, and a message addressed to the brain stops it and goes first, but each costs a full Claude run, with tools, on whatever any member the group's `group_members` admits writes (see [group_members](CONFIGURATION.md#group_members)). Set in the dashboard under *Untagged group messages*. |
 | `backup` | Google Drive backup for this folder; see [BACKUP.md](BACKUP.md). |
 | `calendar` | The Google account this brain signed in with and the calendars it may use; set by *Connect Google Calendar*, see [CALENDAR.md](CALENDAR.md). |
+
+[`schemas/brain.schema.json`](schemas/brain.schema.json) is a JSON Schema
+of the file, version 1.
+
+A field the bridge does not know, a typo such as `routing.handles_dm` or
+one a newer version added, is logged by its path when the bridge reads the
+file; the brain loads without it, and the next edit in the dashboard drops
+it from the file.
+
+### The fallback brain
+
+The brain marked `routing.default`, or without one the first brain in
+`brain_dirs` that runs, is the fallback brain. It answers the allowed
+groups no brain claims, and your direct messages as well while no brain
+has `routing.handles_dms`: with a single brain, that brain answers your
+DMs whatever its `handles_dms` says. A brain that cannot run (see above)
+keeps its chats from it: a DM brain left out keeps your DMs, and a
+default brain left out leaves no fallback brain at all. The dashboard
+names the fallback brain on the Overview, the Brains page ("Fallback for
+other chats") and the Chats page (a group's *Default brain*), and *Add
+brain* says so when the brain it adds becomes it.
 
 ## Approval
 
@@ -75,7 +116,15 @@ edit its own `brain.json` — for instance after reading a document with
 instructions hidden in it — to claim your direct messages or another brain's
 group. Such a change has no effect: the dashboard marks the brain as
 *changed on disk* and shows the difference, and you approve it or not.
-Edits you make in the dashboard update both copies.
+Edits you make in the dashboard update both copies, together: `brain.json`
+is written once the edit has passed its checks, just before the bridge's
+config, and when the config then cannot be written, the save fails and
+`brain.json` is put back as it was. An edit of a brain whose `brain.json`
+is not a file the bridge reads (see below) fails rather than replace it.
+An edit or approval is refused when it would make brains clash (two
+brains for your DMs, one group for two brains and so on) or leave one that
+cannot run; a brain that cannot run already, after a hand edit of
+`config.json` say, keeps none of the others from being edited.
 
 ## Files the bridge reads and writes
 
@@ -83,18 +132,62 @@ The bridge itself, outside the sandbox, works on these files in a brain's
 folder: it reads the prompt file, `brain.json` (to tell when it changed on
 disk) and `memories/people/whatsapp-identity-map.md`, appends every message
 to `conversation-history.jsonl` and reads it back, and logs what each run
-did in `claude-stream.log`. A brain can change any file in its folder, and
-put a symlink to `~/.ssh` or to another brain's history in place of one of
-them, so the bridge never leaves the folder through a symlink, and takes
-only a regular file there: not a symlink at the file itself, even one to
-another file in the folder. Nor does it take a prompt file, `brain.json`
-or identity map larger than 256 KiB. It treats such a file as missing and
-writes nothing through it; its log says why, and the dashboard shows a
-`brain.json` it cannot read. It opens the folder once when it loads the
-brain and goes through that handle from then on (`brain.json` excepted,
-which it reads for brains that are not running too), so a folder you put
-in a brain's place takes a reload; see [Moving a brain](#moving-a-brain).
-Copy a file into the folder rather than link it.
+did in `claude-stream.log`, each run under a line naming its chat, sender,
+process and model, and after it the end of what the CLI wrote to stderr,
+under a line naming the run. A line of the CLI's output longer than 4 MiB,
+a tool's large result say, is not read; the log notes its size. For Claude,
+it also names each kind of event in the output that the bridge does not read,
+once a run, so that a new CLI that sends something new shows there. A
+history line (see [below](#conversation-historyjsonl)) has the type `in`, `out` for an
+answer, written once all of it reached WhatsApp as what the chat got (a
+poll as its question and numbered options), `event` for a vote in one
+of the brain's polls or an edit of a message a run already read, or
+`reset`, without text, where someone sent `!reset` in the chat: a run's
+prompt shows only the chat's messages after the newest one, while the
+file keeps the ones before for `fridolin history`, which, like the
+dashboard's feed, leaves the marker out. A message from WhatsApp carries
+its `id`. An `in` line is written once the
+brain took the message (not for one its full queue turned away), with
+the time it was sent as its `ts`. A message deleted for everyone is
+taken out of the history again, by rewriting the file. A run that finds the
+log over 5 MB first moves it to `claude-stream.1.log`, replacing the one
+before. A brain can change any file in its folder, and put a symlink to
+`~/.ssh` or to another brain's history in place of one of them, so the
+bridge never leaves the folder through a symlink, and takes only a regular
+file there: not a symlink at the file itself, even one to another file in
+the folder. Nor does it take a prompt file, `brain.json` or identity map
+larger than 256 KiB. It treats such a file as missing and writes nothing
+through it; its log says why, and the dashboard shows a `brain.json` it
+cannot read. It opens the folder once when it loads the brain and goes
+through that handle from then on (`brain.json` excepted, which it reads for
+brains that are not running too), so a folder you put in a brain's place
+takes a reload; see [Moving a brain](#moving-a-brain). Copy a file into the
+folder rather than link it.
+
+### `conversation-history.jsonl`
+
+The history is one JSON object per line, in UTF-8, appended as things
+happen. `fridolin history` searches it, and a brain's own scripts may read
+it too. A line has these fields
+([`schemas/history-line.schema.json`](schemas/history-line.schema.json)):
+
+| Field | Meaning |
+| --- | --- |
+| `ts` | For an `in` line when the message was sent, for the others when the line was written: an RFC 3339 time to the second, with the offset of the bridge's time zone (`2026-01-02T09:00:00+01:00`), or `Z` when the offset is zero (UTC, or for example London in winter). Python before 3.11 reads one with `datetime.fromisoformat` only after a final `Z` is replaced by `+00:00`. |
+| `from` | For `in`, `event` and `reset`, who wrote it, did it or sent `!reset`: their phone number, or the sender an `/ingest` named. For `out`, the brain's id; for a line sent through `/send`, the brain that sent it or `script`. |
+| `chat` | The chat's JID: `<number>@s.whatsapp.net` for a person, `…@g.us` for a group. |
+| `text` | What was said. A quoted message and the paths of attachments are lines of their own in it; for an `event`, what happened, said after the name in `from`; empty for a `reset`. |
+| `type` | `in`, a message to the brain; `out`, one it sent or that was sent for it; `event`, something that happened in the chat without a message; `reset`, where `!reset` started the chat afresh. |
+| `via` | Only on an `out` line that came in through [`/send`](API.md#post-send): `brain`, `script` or `api` (no token). |
+| `id` | Only on a message from WhatsApp: its id, which an edit or a deletion names. |
+| `otp_request` | Only on the `out` line of a `/send` that asked for a one-time code: the id `/send` answered with, which the [hand-off of the code](CONFIGURATION.md#otp_guard-and-otp_markers) repeats. |
+
+Fields and types are added, never renamed or removed, so a reader ignores
+the fields it does not know and the lines of a type it does not know.
+Lines carry no version of their own. The schema describes exactly the
+lines this version writes, and refuses any other field or type, which
+keeps it to the code: a reader that checks lines against it should let
+unknown fields and types through, since later versions add them.
 
 ## Moving a brain
 
@@ -108,13 +201,31 @@ say, move the old one aside, put the new one in its place, then restart the
 bridge or save a setting in the dashboard. Until it loads its brains again,
 the bridge goes on reading the prompt and writing the history in the folder
 it opened, the one you moved aside, while runs start in the new one. The
-reload stops the brain's run in progress, drops the messages waiting for
-it, and starts it afresh in the new folder.
+reload stops the brain's run in progress and starts it afresh in the new
+folder, which then answers the messages that were waiting for it. Their
+lines go into the new folder's history, unless it has them already: a
+folder you moved, rather than swapped, keeps its history.
 
 ## Removing a brain
 
-*Remove* unregisters the brain: its runs stop and its chats fall back to the
-default brain. The folder is left exactly as it was.
+*Remove* unregisters the brain: its runs stop and its chats go to the
+[fallback brain](#the-fallback-brain), which also answers the messages
+that were waiting for it (files and recordings handed to the removed
+brain are dropped). When the brain you remove is the fallback, the next
+brain becomes it and takes the chats no brain claims, and your DMs while
+no brain handles them. The dialog names the brain that takes over, and
+warns when it would start answering your DMs. The folder is left exactly
+as it was.
+
+So are the brain's media inbox (`<brain id>/` in the media folder, which is
+`media/` in the data folder unless `media_dir` puts it elsewhere) and its
+state in the data folder (`brains/<brain id>/`: its Claude Code config
+folder with the CLI's transcripts, todos and `.claude.json`, its `TMPDIR`
+and its caches). A brain added later under the same id, from any folder,
+takes both over and can read what is in them, the old brain's transcripts
+and files included. To start such a brain afresh, move `brains/<brain id>/`
+out of the data folder and `<brain id>/` out of the media folder while the
+bridge is stopped, or give it another id.
 
 ## Configs with inline brains
 
@@ -151,17 +262,27 @@ version, go through what it printed:
 Then run `fridolin check` with this version. It must load the config,
 and a brain whose folder was in `brain_dirs` already may now be listed
 twice, which it reports as two brains with the same id: remove one of the
-two entries from `brain_dirs` in `config.json`. Until you do, the
-dashboard refuses to save any brain's settings.
+two entries from `brain_dirs` in `config.json`. Until you do, the bridge
+runs only the first of the two.
 
 ## What a brain loads
 
 Each message is one `claude -p` run in the brain's folder. Its prompt is
-the brain's prompt file (`brain-prompt.md`) followed by the recent chat
-history and the new message; Claude Code adds its own system prompt. From
-the brain's folder it also loads the Claude Code setup a session started
-there would: `CLAUDE.md` and `CLAUDE.local.md`, the settings, skills,
-agents, commands and rules in `.claude/`, and the MCP servers in
+the brain's prompt file (`brain-prompt.md`) followed by the messages of
+the chat before the new one (the last 10 of a direct chat, 20 of a
+group, looked for in the last 16 MB of the history, which the bridge
+reads back from its end, skipping a line longer than 4 MB), what went
+out there while the new one waited for its run or still waits to go
+out to WhatsApp (the reply to the message before it, say), and the new
+message; Claude Code adds its own system prompt. Each
+message is one line of JSON with its time, sender and text, so that
+nothing someone writes can pass for the prompt's own structure or for
+another sender. The prompt reaches the CLI on stdin, not among its
+arguments, which process listings show and the system limits in size
+(about a megabyte in all on macOS, 128 KiB for one argument on Linux).
+From the brain's folder it also loads the Claude Code setup a session
+started there would: `CLAUDE.md` and `CLAUDE.local.md`, the settings,
+skills, agents, commands and rules in `.claude/`, and the MCP servers in
 `.mcp.json`, except those its `.claude` settings turn off with
 `disabledMcpjsonServers`.
 
@@ -223,26 +344,50 @@ nothing says so: copy such a file into the brain's folder instead.
 
 ## Isolation
 
-With `sandbox.enabled` (macOS), every run is wrapped in `sandbox-exec`: the
-brain cannot read or write any other brain's folder, the bridge's data folder
-(except the shared media inbox), or the usual secrets (SSH keys, cloud
-credentials, browser and mail data, shell history), and it cannot rename or
-delete the folders above them, which would move them out from under the
-sandbox's rules. Nor can it read your own Claude Code instructions, unless
-`inherit_claude_user_config` is on: the `CLAUDE.md` and `CLAUDE.local.md`
-files and the `.claude` folders above its folder, up to `/`, and
-`~/.claude/CLAUDE.md` and `~/.claude/rules` (the rest of `~/.claude` is
-Claude Code's own state, which a brain's run needs). It can read but not
-change the other files that run outside its sandbox: Claude Code's
-settings, hooks, skills and plugins (which your own sessions load), Claude
-Code's auto-memory, `~/Library/LaunchAgents`, your shell startup files, and
-the bridge's own binary, its helpers and source checkout, and the tools it
-runs. It can still write most other
-places your user can, including the Claude Code state all brains share;
-[the sandbox section](CONFIGURATION.md#what-the-sandbox-does-not-cover-yet)
+With `sandbox.enabled` (macOS), every run is wrapped in `sandbox-exec`. The
+brain may write only its own folder, its own media inbox
+(`media/<brain id>/`, where the files sent to its chats land) and its own
+state in the bridge's data folder (`brains/<brain id>/`: a Claude Code
+config folder, `TMPDIR` and caches), so nothing it writes runs or loads
+outside its sandbox, in another brain or in your own Claude Code sessions.
+It cannot read any other brain's folder or inbox, the rest of the bridge's
+data folder, or the usual secrets (SSH keys, the keychains, cloud
+credentials, browser and mail data, shell history). Nor can it read your
+own Claude Code setup and instructions, unless
+`inherit_claude_user_config` is on: all of `~/.claude` and
+`~/.claude.json`, and the `CLAUDE.md` and `CLAUDE.local.md` files and the
+`.claude` folders above its folder, up to `/`. Since your login lives in
+the keychain, it logs in with a token in the bridge's environment
+(`claude setup-token`; see [the sandbox section](CONFIGURATION.md#writing)),
+with `inherit_claude_user_config` too.
+[What the sandbox does not cover](CONFIGURATION.md#what-the-sandbox-does-not-cover)
 lists what that leaves open. Its own folder is always readable and
 writable, even if it lives somewhere the defaults deny, but it cannot move
-or replace the folder itself and it re-opens nothing denied inside it; a
-brain whose folder is your home folder, or is itself something the sandbox
-protects, is refused. A run that cannot be sandboxed is refused, never run
-without it.
+or replace the folder itself, and the bridge's own files and other brains
+stay closed inside it; a brain whose folder is your home folder, or is,
+holds or lies inside something the sandbox protects, is refused. A run that
+cannot be sandboxed is refused, never run without it.
+
+A brain also reaches the bridge's [script API](API.md) only as itself,
+with its run's token, which `FRIDOLIN_BRAIN_TOKEN_FILE` names and which
+stops working when the run ends. With it a brain can send a message to its
+own chats (to tell you a job it runs finished, say) and hand files to
+itself, but not message other chats or make another brain run:
+
+```bash
+curl -X POST "$FRIDOLIN_API/send" \
+  -H "Authorization: Bearer $(cat "$FRIDOLIN_BRAIN_TOKEN_FILE")" \
+  -H 'Content-Type: application/json' \
+  -d '{"jid":"15551234567@s.whatsapp.net","text":"The report is ready"}'
+```
+
+### Codex mode
+
+[Settings → AI mode](CONFIGURATION.md#ai-mode) selects the provider for new
+runs of every brain. Both providers read this brain's prompt and chat
+history. Codex keeps a separate login and state in
+`<data_dir>/brains/<id>/codex`; sign-in instructions are in the configuration
+guide. Claude-specific model overrides and user plugins do not transfer
+to Codex. Blocking `WebFetch` or `WebSearch` disables Codex's web tool;
+other blocked-tool names refuse Codex runs because they have no safe
+equivalent.

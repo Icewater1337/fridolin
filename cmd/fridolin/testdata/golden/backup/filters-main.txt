@@ -1,0 +1,12 @@
+- .env
+- .env.*
+- *.pem
+- *.p12
+- id_rsa*
+- id_ecdsa*
+- id_ed25519*
+- google_calendar_*.json
+- .credentials.json
+- node_modules/**
+- *.log
+- private.txt

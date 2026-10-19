@@ -1,0 +1,11 @@
+GET /api/dev/outbox
+200 OK
+Content-Type: application/json
+
+[
+  {
+    "jid": "15551234567@s.whatsapp.net",
+    "text": "echo:<HOME>/main:15551234567 says: hello",
+    "ts": "<TIME>"
+  }
+]

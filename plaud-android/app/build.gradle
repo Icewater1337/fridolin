@@ -1,0 +1,72 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+// What the app is built with, never kept in this repo: the file Fridolin's dashboard writes
+// (-PfridolinConfig: Plaud's developer keys, the site to upload to and a one-time pairing code),
+// else ~/.plaud/plaud-secrets (the developer keys alone: no uploads). They end up inside the
+// APK, so don't share the APK.
+def secrets = new Properties()
+def secretsFile = findProperty('fridolinConfig') ? file(findProperty('fridolinConfig')) : new File(System.getProperty('user.home'), '.plaud/plaud-secrets')
+if (secretsFile.exists()) secretsFile.withInputStream { secrets.load(it) }
+
+// Plaud's Embedded SDK (Apache-2.0) is not kept in this repository: the first build fetches it
+// from github.com/Plaud-AI/plaud-sdk-public at a pinned commit and checks its hash.
+def sdkAar = file('libs/plaud-sdk.aar')
+def sdkUrl = 'https://raw.githubusercontent.com/Plaud-AI/plaud-sdk-public/d532d5a4ddff3714bc153f51467589cfd6b12f4c/sdk/android/plaud-sdk.aar'
+def sdkSha256 = '041a6f8814d350dbc8bcd4a515487136529bb8bb4368fc88c9b36c9a386aedce'
+if (!sdkAar.exists()) {
+    def bytes = new URL(sdkUrl).bytes
+    def got = java.security.MessageDigest.getInstance('SHA-256').digest(bytes).encodeHex().toString()
+    if (got != sdkSha256) throw new GradleException("plaud-sdk.aar from $sdkUrl has SHA-256 $got, expected $sdkSha256")
+    sdkAar.parentFile.mkdirs()
+    sdkAar.bytes = bytes
+}
+
+android {
+    namespace 'local.plaudsync'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'local.plaudsync'
+        minSdk 31
+        targetSdk 35
+        versionCode 2
+        versionName '0.2'
+        ['client_id', 'client_secret', 'api_key', 'site_url', 'pairing_code'].each { k ->
+            buildConfigField 'String', k.toUpperCase(), "\"${secrets.getProperty(k, '').trim()}\""
+        }
+        // Plain http only for a site on this computer (a test); a real one is https.
+        manifestPlaceholders = [cleartext: secrets.getProperty('site_url', '').startsWith('http://').toString()]
+    }
+
+    buildFeatures { buildConfig true }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+}
+
+dependencies {
+    implementation files('libs/plaud-sdk.aar')
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+
+    // Runtime deps the Plaud SDK aar expects the app to provide (same list as Plaud's template app).
+    // androidx.core: initSDK and the BLE layer call ContextCompat; without it the app crashes on start.
+    implementation 'androidx.core:core:1.12.0'
+    implementation 'com.jakewharton.timber:timber:4.7.1'
+    implementation 'com.squareup.retrofit2:retrofit:2.9.0'
+    implementation 'com.squareup.retrofit2:converter-gson:2.9.0'
+    implementation 'com.google.code.gson:gson:2.10.1'
+    implementation 'com.squareup.okhttp3:okhttp:4.9.3'
+    implementation 'com.squareup.okhttp3:logging-interceptor:4.9.3'
+    implementation 'com.github.tony19:logback-android:2.0.0'
+    implementation 'org.slf4j:slf4j-api:1.7.32'
+    implementation 'org.bouncycastle:bcprov-jdk15on:1.70'
+    implementation 'org.conscrypt:conscrypt-android:2.5.2'
+    implementation 'org.java-websocket:Java-WebSocket:1.5.1'
+    implementation 'com.google.guava:guava:28.2-android'
+}

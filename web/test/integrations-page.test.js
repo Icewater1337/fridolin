@@ -110,9 +110,16 @@ for (const c of [
   });
 }
 
-test('a card that was never connected offers only Connect', async (t) => {
+test('a card that was never connected offers Connect, or the phone app instead, but no Disconnect', async (t) => {
   const { root } = await openPage(t, { ...status('2026-10-18T10:00:00Z'), connected: false });
-  assert.deepEqual(root.querySelectorAll('button').map((b) => b.textContent), ['Connect Plaud']);
+  assert.deepEqual(root.querySelectorAll('button').map((b) => b.textContent), ['Connect Plaud', 'Use the Plaud Sync phone app instead']);
+});
+
+test('the brains to pick are named with their ids', async (t) => {
+  const now = status('2026-10-18T10:00:00Z');
+  const { root } = await openPage(t, { ...now, settings: { ...now.settings, brain: 'personal' }, brain_missing: true });
+  const options = root.querySelectorAll('select option').map((o) => [o.value, o.textContent]);
+  assert.deepEqual(options.slice(1), [['work', 'Work (work)'], ['personal', 'Personal (personal) (missing)']]);
 });
 
 test('Automatic names the brain it picks, not the one picked instead', async (t) => {
@@ -155,4 +162,82 @@ test('Disconnect says it is done', async (t) => {
   button(document.querySelector('dialog'), 'Disconnect').click(); // confirm
   await settle();
   assert.ok(toasts().includes('Plaud disconnected'));
+});
+
+// The status changes on its own only with a check, at most every 30 s,
+// so the page asks for it seldom, except while a sign-in runs, whose end
+// it shows at once.
+test('the Plaud status is asked for every 2 s while a sign-in runs', async (t) => {
+  const signingIn = { ...status('2026-10-18T10:00:00Z'), connected: false, connect: { state: 'running', auth_url: 'https://web.plaud.ai/platform/oauth?client_id=x' } };
+  const { calls } = await openPage(t, signingIn);
+  const asked = () => calls.filter((c) => c.path === '/api/plaud/status').length;
+  const wait = async (ms) => { t.mock.timers.tick(ms); await settle(); };
+  assert.equal(asked(), 1);
+  await wait(1999);
+  assert.equal(asked(), 1);
+  await wait(1);
+  assert.equal(asked(), 2, 'again after 2 s while signing in');
+  await wait(2000);
+  assert.equal(asked(), 3);
+});
+
+test('a finished sign-in slows the Plaud status down', async (t) => {
+  const signingIn = { ...status('2026-10-18T10:00:00Z'), connected: false, connect: { state: 'running' } };
+  const { calls, poll } = await openPage(t, signingIn);
+  const asked = () => calls.filter((c) => c.path === '/api/plaud/status').length;
+  const wait = async (ms) => { t.mock.timers.tick(ms); await settle(); };
+  await poll(status('2026-10-18T10:00:30Z')); // signed in
+  const n = asked();
+  await wait(19999);
+  assert.equal(asked(), n, 'nothing for almost 20 s');
+  await wait(1);
+  assert.equal(asked(), n + 1, 'then once');
+});
+
+test('a phone folder needs no Plaud CLI or login on the card', async (t) => {
+  const s = status('2026-10-18T10:00:00Z');
+  const { root } = await openPage(t, {
+    ...s, cli: { found: false, install_hint: 'npm install -g @plaud-ai/cli' }, account: '',
+    settings: { ...s.settings, phone_dir: '/Users/you/PlaudSync' },
+  });
+  assert.match(root.textContent, /Phone folder/);
+  assert.match(root.textContent, /\/Users\/you\/PlaudSync/);
+  assert.doesNotMatch(root.textContent, /Install Plaud’s command-line tool|Login stored in|Let brains use|AI-cleaned/);
+  assert.equal(button(root, 'Disconnect'), undefined);
+  assert.ok(button(root, 'Save') && button(root, 'Check now'));
+});
+
+test('the phone app part: keys, the build, its download and the paired phones', async (t) => {
+  const s = status('2026-10-18T10:00:00Z');
+  const app = {
+    credentials: true, site_url: 'https://example.com', built: '2026-10-18T09:00:00Z',
+    build: { state: 'done', started: '2026-10-18T08:58:00Z', pairing_expires: '2026-10-19T09:00:00Z' },
+    devices: [{ id: 'dev_abc', paired: '2026-10-18T09:10:00Z', last_upload: '2026-10-18T09:20:00Z' }],
+  };
+  const { root, poll, calls } = await openPage(t, {
+    ...s, cli: { found: false, install_hint: 'npm install -g @plaud-ai/cli' }, account: '',
+    settings: { ...s.settings, phone_upload: true }, app,
+  });
+  assert.match(root.textContent, /Phone app/);
+  assert.doesNotMatch(root.textContent, /Install Plaud’s command-line tool|Login stored in|AI-cleaned/);
+  assert.ok(button(root, 'Download app (APK)') && button(root, 'Build again') && button(root, 'Unpair'));
+  assert.match(root.textContent, /dev_abc/);
+
+  const key = root.querySelector('input[type=password]');
+  type(key, 'typed');
+  await poll({ ...s, cli: { found: false }, account: '', settings: { ...s.settings, phone_upload: true }, app: { ...app, devices: [] } });
+  assert.equal(root.querySelector('input[type=password]').value, 'typed', 'a refresh keeps keys being typed');
+  assert.match(root.textContent, /No phone is paired yet/);
+
+  button(root, 'Build again').click();
+  await settle();
+  assert.ok(calls.some((c) => c.path === '/api/plaud/app/build' && c.method === 'POST'), 'Build was posted');
+});
+
+test('without a site domain or keys, the app cannot be built', async (t) => {
+  const s = status('2026-10-18T10:00:00Z');
+  const { root } = await openPage(t, { ...s, settings: { ...s.settings, phone_upload: true }, app: { credentials: false, devices: [] } });
+  assert.match(root.textContent, /The site has no domain yet/);
+  assert.equal(button(root, 'Build phone app').disabled, true);
+  assert.equal(button(root, 'Download app (APK)'), undefined);
 });

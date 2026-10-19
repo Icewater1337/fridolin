@@ -1,23 +1,34 @@
 # Optional — only for local transcription with tools/transcribe.py.
 #
+# Install it into a venv of its own, outside the bridge's data folder, which
+# brains cannot read. Homebrew's and Debian's Python refuse a plain pip
+# install (PEP 668), and the transcription skill runs the tool with this
+# venv's python:
+#
+#     python3 -m venv ~/.local/share/fridolin/venv
+#     ~/.local/share/fridolin/venv/bin/pip install -r tools/requirements-transcription.txt
+#
 # These are large (torch alone is over 1 GB) and the first run downloads the
 # model on top of that. If you would rather not, skip this file entirely and
 # use the Groq engine instead:
 #
-#     pip install groq
+#     ~/.local/share/fridolin/venv/bin/pip install groq
 #     export GROQ_API_KEY=...
-#     python3 tools/transcribe.py recording.ogg --engine groq
+#     ~/.local/share/fridolin/venv/bin/python tools/transcribe.py recording.ogg --engine groq
+#
+# Or let uv keep the environment: `uv run --script tools/transcribe.py ...`
+# installs the list at the top of transcribe.py (PEP 723 metadata), which
+# must stay the same as this file; tools/tests fails when they differ.
 #
 # ffmpeg is required either way (macOS: brew install ffmpeg).
 
 #
 # Each line is a floor that was checked and a ceiling at the next major
 # release, which may break what the tool calls (transformers 5 drops the
-# torch_dtype argument it passes); Dependabot proposes moving them. pip
-# picks the newest release in range for the Python it runs on. Brains run
-# the first python3 on the service's PATH, which may be macOS's own
-# /usr/bin/python3 (3.9, where torch stops at 2.8) or Homebrew's: install
-# into that one.
+# torch_dtype argument it passes). Dependabot proposes moving them here
+# only: carry each move over to transcribe.py's list. pip picks the newest
+# release in range for the Python the venv was made with; with macOS's own
+# /usr/bin/python3 (3.9) torch stops at 2.8.
 
 torch>=2.1.0,<3
 # --prompt (Whisper prompt_ids under the pipeline's 30 s chunking) was checked

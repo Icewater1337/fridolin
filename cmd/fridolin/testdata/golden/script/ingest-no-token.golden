@@ -1,0 +1,11 @@
+POST /ingest
+{"brain": "main", "text": "x"}
+401 Unauthorized
+Content-Type: application/json
+
+{
+  "error": "a token is required: send the one in <data_dir>/scripts.token as Authorization: Bearer …"
+}
+
+sent:
+history:

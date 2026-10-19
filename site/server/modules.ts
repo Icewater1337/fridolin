@@ -18,10 +18,12 @@
  */
 
 import express from 'express'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { isAbsolute, join, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { page, type SessionUser } from './auth.ts'
+import { makeIngest, makeSearch, type IngestRequest, type IngestResult, type SearchRequest } from './ingest.ts'
 
 // ── Manifest ──────────────────────────────────────────────────────────────────
 
@@ -71,6 +73,10 @@ export type ModuleManifest = {
     files?: Record<string, { path: string; access: 'read' | 'write' }>
     commands?: string[]
     secrets?: string[]
+    /** Brains the module may hand files to with ctx.ingest. */
+    ingest?: string[]
+    /** Brains whose folder the module may search with ctx.search. */
+    search?: string[]
   }
 }
 
@@ -84,6 +90,8 @@ export const RESERVED_ROUTES = ['auth', 'api']
 const ID_RE = /^[a-z0-9][a-z0-9-]*$/
 /** A secret's name; Fridolin's dashboard checks the same (site_secrets.go). */
 const SECRET_RE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/
+// A brain's id, as Fridolin's manifest.go checks it.
+const BRAIN_ID_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/
 
 /** Checks a parsed module.json; throws an Error saying what is wrong. */
 export function validateManifest(raw: unknown, folder: string): ModuleManifest {
@@ -168,6 +176,13 @@ export function validateManifest(raw: unknown, folder: string): ModuleManifest {
     for (const name of (c.secrets ?? []) as string[]) {
       if (!SECRET_RE.test(name)) fail(`"capabilities.secrets" entry "${name}" must be a letter, then up to 63 letters, digits, _ or -`)
     }
+    for (const k of ['ingest', 'search'] as const) {
+      if (c[k] === undefined) continue
+      if (!isStringArray(c[k])) fail(`"capabilities.${k}" must be a list of brain ids`)
+      for (const b of c[k] as string[]) {
+        if (!BRAIN_ID_RE.test(b)) fail(`"capabilities.${k}" entry "${b}" is not a brain id`)
+      }
+    }
   }
 
   return m as unknown as ModuleManifest
@@ -248,7 +263,32 @@ export type ModuleContext = {
    * one that has no value yet.
    */
   secret: (name: string) => string
+  /**
+   * A folder of the module's own that survives deploys, readable and
+   * writable (<data_dir>/site/data/<id> on the live site): logs, state,
+   * uploads on their way to a brain.
+   */
+  dataDir: string
+  /**
+   * Hands files to a brain listed in capabilities.ingest, as a WhatsApp
+   * attachment would reach it. The files are moved. Only the live site can.
+   */
+  ingest: (req: IngestRequest) => Promise<IngestResult>
+  /**
+   * Runs a read-only Claude agent (Read, Grep, Glob) in the folder of a brain
+   * listed in capabilities.search, under that brain's sandbox, and yields its
+   * stream-json events. Only the live site can.
+   */
+  search: (req: SearchRequest) => AsyncGenerator<unknown>
   log: (...args: unknown[]) => void
+}
+
+/** Where the site keeps what modules write: from runtime.json. */
+export type ModuleHost = {
+  /** Holds one folder per module (ctx.dataDir); a temp folder when unset. */
+  dataDir?: string
+  /** The handoff folder Fridolin watches (ctx.ingest); unset in previews and checks. */
+  spoolDir?: string
 }
 
 /**
@@ -310,6 +350,7 @@ export async function mountModules(
   loaded: { modules: SiteModule[]; broken: BrokenModule[] },
   requireAuth: express.RequestHandler,
   secrets?: ModuleSecrets,
+  host: ModuleHost = {},
 ): Promise<{ mounted: string[]; broken: BrokenModule[] }> {
   const mounted: SiteModule[] = []
   const broken = [...loaded.broken]
@@ -317,7 +358,7 @@ export async function mountModules(
   for (const mod of loaded.modules) {
     try {
       // Load the server code first: if it fails, nothing of the module is mounted.
-      const router = mod.manifest.server ? await loadServer(mod, secrets) : undefined
+      const router = mod.manifest.server ? await loadServer(mod, secrets, host) : undefined
       mountModule(app, mod, router, requireAuth)
       mounted.push(mod)
     } catch (err) {
@@ -358,7 +399,7 @@ function explain(err: unknown): string {
   return msg
 }
 
-async function loadServer(mod: SiteModule, secrets: ModuleSecrets | undefined): Promise<express.Router> {
+async function loadServer(mod: SiteModule, secrets: ModuleSecrets | undefined, host: ModuleHost): Promise<express.Router> {
   const { id } = mod.manifest
   // Only this module's own, kept here: no other module's ctx can name them.
   const declared = new Set(mod.manifest.capabilities?.secrets ?? [])
@@ -386,9 +427,20 @@ async function loadServer(mod: SiteModule, secrets: ModuleSecrets | undefined): 
       if (!secrets) throw new Error(`secret "${name}": previews and checks get no secrets, only the live site does`)
       throw new Error(`secret "${name}" of module "${id}" is not set: set it in Fridolin's dashboard (Site → Secrets)`)
     },
+    dataDir: moduleDataDir(id, host),
+    ingest: makeIngest(id, mod.manifest.capabilities?.ingest ?? [], host.spoolDir),
+    search: makeSearch(id, mod.manifest.capabilities?.search ?? [], host.spoolDir),
     log: (...args) => console.log(`[module:${id}]`, ...args),
   }
   return exported(ctx)
+}
+
+// The module's data folder, made if missing. Without a host data folder (a
+// check) it is a temp folder of its own.
+function moduleDataDir(id: string, host: ModuleHost): string {
+  const dir = host.dataDir ? join(host.dataDir, id) : join(tmpdir(), 'fridolin-site-data', id)
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  return dir
 }
 
 function mountModule(app: express.Express, mod: SiteModule, router: express.Router | undefined, requireAuth: express.RequestHandler) {
