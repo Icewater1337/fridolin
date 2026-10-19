@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 import (
 	"context"
@@ -8,7 +8,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/apperr"
 	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/config"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
 
 // BackupService is the backup job surface used by the HTTP adapter.
@@ -31,7 +30,7 @@ type BackupAPI struct {
 }
 
 func (a *BackupAPI) Status(w http.ResponseWriter, r *http.Request) {
-	httpapi.WriteJSON(w, http.StatusOK, a.Backup().Status())
+	WriteJSON(w, http.StatusOK, a.Backup().Status())
 }
 
 func (a *BackupAPI) Connect(w http.ResponseWriter, r *http.Request) {
@@ -45,10 +44,10 @@ func (a *BackupAPI) Connect(w http.ResponseWriter, r *http.Request) {
 		case apperr.Unavailable:
 			status = http.StatusServiceUnavailable
 		}
-		httpapi.WriteErr(w, status, err.Error())
+		WriteErr(w, status, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
+	WriteJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
 }
 
 func (a *BackupAPI) Disconnect(w http.ResponseWriter, r *http.Request) {
@@ -57,10 +56,10 @@ func (a *BackupAPI) Disconnect(w http.ResponseWriter, r *http.Request) {
 		if apperr.KindOf(err) == apperr.Conflict {
 			status = http.StatusConflict
 		}
-		httpapi.WriteErr(w, status, err.Error())
+		WriteErr(w, status, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
 }
 
 func (a *BackupAPI) Settings(w http.ResponseWriter, r *http.Request) {
@@ -71,8 +70,8 @@ func (a *BackupAPI) Settings(w http.ResponseWriter, r *http.Request) {
 		KeepVersionsDays    *int    `json:"keep_versions_days"`
 		IncludeBridgeConfig *bool   `json:"include_bridge_config"`
 	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	err := a.UpdateConfig(func(c *config.Config) error {
@@ -94,10 +93,10 @@ func (a *BackupAPI) Settings(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
 // apiBrainBackup changes one brain's backup settings, which live in its
@@ -107,15 +106,15 @@ func (a *BackupAPI) BrainSettings(w http.ResponseWriter, r *http.Request) {
 		Enabled *bool    `json:"enabled"`
 		Exclude []string `json:"exclude"`
 	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := a.UpdateBrain(r.PathValue("id"), req.Enabled, req.Exclude); err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
 func (a *BackupAPI) Run(w http.ResponseWriter, r *http.Request) {
@@ -126,30 +125,30 @@ func (a *BackupAPI) Run(w http.ResponseWriter, r *http.Request) {
 		// files are gone (see checkMassDeletion).
 		Force bool `json:"force"`
 	}
-	if err := httpapi.DecodeOptionalJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := DecodeOptionalJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// Forcing is a decision about one brain's folder, made after looking at
 	// it; without a list it would mirror every brain's deletions at once.
 	if req.Force && len(req.Brains) == 0 {
-		httpapi.WriteErr(w, http.StatusBadRequest, "force needs a brain: name the brains to mirror in \"brains\"")
+		WriteErr(w, http.StatusBadRequest, "force needs a brain: name the brains to mirror in \"brains\"")
 		return
 	}
 	include := config.BoolOr(req.IncludeBridge, a.IncludeBridge())
 	if err := a.Backup().StartRun(req.Brains, include, "manual", req.Force); err != nil {
-		httpapi.WriteErr(w, http.StatusConflict, err.Error())
+		WriteErr(w, http.StatusConflict, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+	WriteJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
 }
 
 func (a *BackupAPI) Cancel(w http.ResponseWriter, r *http.Request) {
 	if err := a.Backup().Cancel(); err != nil {
-		httpapi.WriteErr(w, http.StatusConflict, err.Error())
+		WriteErr(w, http.StatusConflict, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "cancelling"})
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "cancelling"})
 }
 
 func (a *BackupAPI) Versions(w http.ResponseWriter, r *http.Request) {
@@ -163,10 +162,10 @@ func (a *BackupAPI) Versions(w http.ResponseWriter, r *http.Request) {
 		case apperr.Precondition:
 			status = http.StatusPreconditionFailed
 		}
-		httpapi.WriteErr(w, status, err.Error())
+		WriteErr(w, status, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"brain": id, "versions": versions})
+	WriteJSON(w, http.StatusOK, map[string]any{"brain": id, "versions": versions})
 }
 
 // apiBackupRestore copies a backup into a new, empty folder. It never writes
@@ -179,8 +178,8 @@ func (a *BackupAPI) Restore(w http.ResponseWriter, r *http.Request) {
 		Version string `json:"version"` // "current" or a versions/<ts> name
 		Target  string `json:"target"`
 	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	target, err := a.Backup().Restore(backup.RestoreRequest{Brain: req.Brain, Version: req.Version, Target: req.Target}, a.RestoreTarget)
@@ -199,8 +198,8 @@ func (a *BackupAPI) Restore(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, backup.ErrRestoreRequest) {
 			status = http.StatusBadRequest
 		}
-		httpapi.WriteErr(w, status, err.Error())
+		WriteErr(w, status, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "restoring", "target": target})
+	WriteJSON(w, http.StatusAccepted, map[string]string{"status": "restoring", "target": target})
 }

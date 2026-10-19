@@ -1,10 +1,13 @@
 package main
 
-import "github.com/Icewater1337/fridolin/internal/config"
+import (
+	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
+)
 
-func (b *Bridge) newBackupAPI() *BackupAPI {
-	return &BackupAPI{
-		Backup:        func() BackupService { return b.backup },
+func (b *Bridge) newBackupAPI() *httpapi.BackupAPI {
+	return &httpapi.BackupAPI{
+		Backup:        func() httpapi.BackupService { return b.backup },
 		UpdateConfig:  func(update func(*config.Config) error) error { _, err := b.cfgs.Update("", update); return err },
 		IncludeBridge: func() bool { return b.cfgs.Get().Backup.IncludeBridge() },
 		UpdateBrain: func(id string, enabled *bool, exclude []string) error {
