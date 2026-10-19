@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"io"
 	"net"
 	"os"
@@ -17,8 +18,8 @@ import (
 )
 
 // siteBuilderHooks connect the site to this bridge's brains and sandbox.
-func (b *Bridge) siteBuilderHooks() SiteBuilderHooks {
-	return SiteBuilderHooks{
+func (b *Bridge) siteBuilderHooks() sitesvc.SiteBuilderHooks {
+	return sitesvc.SiteBuilderHooks{
 		BrainDir: func(id string) string {
 			if br := b.brainMgr.Get(id); br != nil {
 				return br.Dir()

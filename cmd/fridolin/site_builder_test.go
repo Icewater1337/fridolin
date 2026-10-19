@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 
 	"net/http"
 	"net/http/httptest"
@@ -17,14 +18,14 @@ import (
 
 // newTestBuilderSite is a test site whose one brain, "web", has a folder
 // and runs without a sandbox (tests cannot nest sandbox-exec).
-func newTestBuilderSite(t *testing.T) (*SiteManager, string) {
+func newTestBuilderSite(t *testing.T) (*sitesvc.SiteManager, string) {
 	t.Helper()
 	opts := testSiteOptions(t)
 	brainDir := filepath.Join(t.TempDir(), "web-brain")
 	if err := os.MkdirAll(brainDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	opts.Builder = SiteBuilderHooks{
+	opts.Builder = sitesvc.SiteBuilderHooks{
 		BrainDir: func(id string) string {
 			if id == "web" {
 				return brainDir

@@ -1,4 +1,4 @@
-package main
+package site
 
 // The public website (docs/SITE.md): its settings, accounts, repository and
 // processes.
@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	sitesvc "github.com/Icewater1337/fridolin/internal/site"
+
 	"io"
 	"io/fs"
 	"log"
@@ -66,8 +66,8 @@ type SiteManager struct {
 	secretsMu sync.Mutex // site_secrets.go
 
 	mu       sync.Mutex
-	settings sitesvc.SiteSettings
-	users    []sitesvc.SiteUser
+	settings SiteSettings
+	users    []SiteUser
 	site     *siteProc
 	tunnel   *siteProc
 	deploy   *SiteJob
@@ -83,7 +83,7 @@ type SiteManager struct {
 }
 
 // NewSiteManager loads the site's settings and accounts from opts.DataDir/site.
-func newSiteManager(opts SiteOptions) *SiteManager {
+func New(opts SiteOptions) *SiteManager {
 	m := &SiteManager{
 		dataDir:      opts.DataDir,
 		host:         opts.Host,
@@ -116,8 +116,8 @@ func (m *SiteManager) dir(parts ...string) string {
 	return filepath.Join(append([]string{m.dataDir, "site"}, parts...)...)
 }
 
-func (m *SiteManager) loadSettings() sitesvc.SiteSettings {
-	var s sitesvc.SiteSettings
+func (m *SiteManager) loadSettings() SiteSettings {
+	var s SiteSettings
 	if data, err := os.ReadFile(m.dir("settings.json")); err == nil {
 		if err := json.Unmarshal(data, &s); err != nil {
 			log.Printf("[site] %s is not valid JSON, using defaults: %v", m.dir("settings.json"), err)
@@ -147,15 +147,15 @@ func (m *SiteManager) saveSettingsLocked() error {
 }
 
 // Settings returns a copy of the current settings.
-func (m *SiteManager) Settings() sitesvc.SiteSettings {
+func (m *SiteManager) Settings() SiteSettings {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := m.settings
 	s.Roles = slices.Clone(s.Roles)
 	// [] rather than null in JSON.
-	s.History = append([]sitesvc.SiteDeploy{}, s.History...)
+	s.History = append([]SiteDeploy{}, s.History...)
 	s.Builders = append([]string{}, s.Builders...)
-	s.Proposals = append([]sitesvc.SiteProposal{}, s.Proposals...)
+	s.Proposals = append([]SiteProposal{}, s.Proposals...)
 	return s
 }
 
@@ -168,14 +168,14 @@ var (
 
 // UpdateSettings validates and saves a change, then starts, restarts or
 // stops what the change affects.
-func (m *SiteManager) UpdateSettings(u sitesvc.SiteSettingsUpdate) (sitesvc.SiteSettings, error) {
+func (m *SiteManager) UpdateSettings(u SiteSettingsUpdate) (SiteSettings, error) {
 	m.mu.Lock()
 	next := m.settings
 	if u.Title != nil {
 		t := strings.TrimSpace(*u.Title)
 		if t == "" || len(t) > 80 {
 			m.mu.Unlock()
-			return sitesvc.SiteSettings{}, errors.New("the title must be 1 to 80 characters")
+			return SiteSettings{}, errors.New("the title must be 1 to 80 characters")
 		}
 		next.Title = t
 	}
@@ -183,7 +183,7 @@ func (m *SiteManager) UpdateSettings(u sitesvc.SiteSettingsUpdate) (sitesvc.Site
 		host, port, err := net.SplitHostPort(strings.TrimSpace(*u.Listen))
 		if err != nil || port == "" || port == "0" {
 			m.mu.Unlock()
-			return sitesvc.SiteSettings{}, errors.New(`listen must be host:port, e.g. "127.0.0.1:8780"`)
+			return SiteSettings{}, errors.New(`listen must be host:port, e.g. "127.0.0.1:8780"`)
 		}
 		next.Listen = net.JoinHostPort(host, port)
 	}
@@ -192,7 +192,7 @@ func (m *SiteManager) UpdateSettings(u sitesvc.SiteSettingsUpdate) (sitesvc.Site
 		d = strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(d, "https://"), "http://"), "/")
 		if d != "" && !siteDomainRE.MatchString(d) {
 			m.mu.Unlock()
-			return sitesvc.SiteSettings{}, fmt.Errorf("%q is not a host name like example.com", d)
+			return SiteSettings{}, fmt.Errorf("%q is not a host name like example.com", d)
 		}
 		next.Domain = d
 	}
@@ -203,7 +203,7 @@ func (m *SiteManager) UpdateSettings(u sitesvc.SiteSettingsUpdate) (sitesvc.Site
 		next.Tunnel = *u.Tunnel
 		if next.Tunnel && !fsx.Exists(m.dir("tunnel.token")) {
 			m.mu.Unlock()
-			return sitesvc.SiteSettings{}, errors.New("save a Cloudflare tunnel token first")
+			return SiteSettings{}, errors.New("save a Cloudflare tunnel token first")
 		}
 	}
 	restart := next.Listen != m.settings.Listen || next.Domain != m.settings.Domain || next.Title != m.settings.Title
@@ -211,7 +211,7 @@ func (m *SiteManager) UpdateSettings(u sitesvc.SiteSettingsUpdate) (sitesvc.Site
 	err := m.saveSettingsLocked()
 	m.mu.Unlock()
 	if err != nil {
-		return sitesvc.SiteSettings{}, err
+		return SiteSettings{}, err
 	}
 	m.reconcile(restart)
 	return m.Settings(), nil
@@ -245,9 +245,9 @@ func (m *SiteManager) SetRoles(roles []string) error {
 
 // ── accounts ────────────────────────────────────────────────────────────────
 
-func (m *SiteManager) loadUsers() []sitesvc.SiteUser {
+func (m *SiteManager) loadUsers() []SiteUser {
 	var f struct {
-		Users []sitesvc.SiteUser `json:"users"`
+		Users []SiteUser `json:"users"`
 	}
 	data, err := os.ReadFile(m.dir("users.json"))
 	if err != nil {
@@ -265,10 +265,10 @@ func (m *SiteManager) saveUsersLocked() error {
 }
 
 // Users returns the accounts without their password hashes.
-func (m *SiteManager) Users() []sitesvc.SiteUser {
+func (m *SiteManager) Users() []SiteUser {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]sitesvc.SiteUser, len(m.users))
+	out := make([]SiteUser, len(m.users))
 	for i, u := range m.users {
 		u.PasswordHash = ""
 		out[i] = u
@@ -288,58 +288,58 @@ func (m *SiteManager) checkRoleLocked(kind, role string) error {
 }
 
 // AddUser creates an account.
-func (m *SiteManager) AddUser(in sitesvc.SiteUserInput) (sitesvc.SiteUser, error) {
+func (m *SiteManager) AddUser(in SiteUserInput) (SiteUser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	u := sitesvc.SiteUser{ID: "u_" + siteRandomToken(9), Kind: in.Kind, Name: strings.TrimSpace(in.Name), Role: in.Role, Created: time.Now().UTC().Format(time.RFC3339)}
+	u := SiteUser{ID: "u_" + siteRandomToken(9), Kind: in.Kind, Name: strings.TrimSpace(in.Name), Role: in.Role, Created: time.Now().UTC().Format(time.RFC3339)}
 	switch in.Kind {
 	case "google":
 		u.Email = strings.ToLower(strings.TrimSpace(in.Email))
 		if !siteEmailRE.MatchString(u.Email) {
-			return sitesvc.SiteUser{}, errors.New("enter the Google account's email address")
+			return SiteUser{}, errors.New("enter the Google account's email address")
 		}
 		for _, x := range m.users {
 			if x.Kind == "google" && x.Email == u.Email {
-				return sitesvc.SiteUser{}, fmt.Errorf("%s already has an account", u.Email)
+				return SiteUser{}, fmt.Errorf("%s already has an account", u.Email)
 			}
 		}
 	case "password":
 		u.Username = strings.TrimSpace(in.Username)
 		if !siteUserRE.MatchString(u.Username) {
-			return sitesvc.SiteUser{}, errors.New("a username is 2–40 letters, digits, . _ or -")
+			return SiteUser{}, errors.New("a username is 2–40 letters, digits, . _ or -")
 		}
 		for _, x := range m.users {
 			if x.Kind == "password" && strings.EqualFold(x.Username, u.Username) {
-				return sitesvc.SiteUser{}, fmt.Errorf("the username %s is taken", u.Username)
+				return SiteUser{}, fmt.Errorf("the username %s is taken", u.Username)
 			}
 		}
 		h, err := newSitePasswordHash(in)
 		if err != nil {
-			return sitesvc.SiteUser{}, err
+			return SiteUser{}, err
 		}
 		u.PasswordHash = h
 	default:
-		return sitesvc.SiteUser{}, errors.New(`kind must be "google" or "password"`)
+		return SiteUser{}, errors.New(`kind must be "google" or "password"`)
 	}
 	if err := m.checkRoleLocked(u.Kind, u.Role); err != nil {
-		return sitesvc.SiteUser{}, err
+		return SiteUser{}, err
 	}
 	m.users = append(m.users, u)
 	if err := m.saveUsersLocked(); err != nil {
 		m.users = m.users[:len(m.users)-1]
-		return sitesvc.SiteUser{}, err
+		return SiteUser{}, err
 	}
 	u.PasswordHash = ""
 	return u, nil
 }
 
 // UpdateUser changes an account's name, role or password.
-func (m *SiteManager) UpdateUser(id string, in sitesvc.SiteUserInput) (sitesvc.SiteUser, error) {
+func (m *SiteManager) UpdateUser(id string, in SiteUserInput) (SiteUser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	i := slices.IndexFunc(m.users, func(u sitesvc.SiteUser) bool { return u.ID == id })
+	i := slices.IndexFunc(m.users, func(u SiteUser) bool { return u.ID == id })
 	if i < 0 {
-		return sitesvc.SiteUser{}, errors.New("no such account")
+		return SiteUser{}, errors.New("no such account")
 	}
 	u := m.users[i]
 	if in.Name != "" {
@@ -347,20 +347,20 @@ func (m *SiteManager) UpdateUser(id string, in sitesvc.SiteUserInput) (sitesvc.S
 	}
 	if in.Role != "" && in.Role != u.Role {
 		if err := m.checkRoleLocked(u.Kind, in.Role); err != nil {
-			return sitesvc.SiteUser{}, err
+			return SiteUser{}, err
 		}
 		if u.Role == "admin" && m.adminCountLocked() == 1 {
-			return sitesvc.SiteUser{}, errors.New("this is the only admin; make someone else admin first")
+			return SiteUser{}, errors.New("this is the only admin; make someone else admin first")
 		}
 		u.Role = in.Role
 	}
 	if in.Password != "" {
 		if u.Kind != "password" {
-			return sitesvc.SiteUser{}, errors.New("accounts that sign in with Google have no password here")
+			return SiteUser{}, errors.New("accounts that sign in with Google have no password here")
 		}
 		h, err := hashSitePassword(in.Password)
 		if err != nil {
-			return sitesvc.SiteUser{}, err
+			return SiteUser{}, err
 		}
 		u.PasswordHash = h
 	}
@@ -368,7 +368,7 @@ func (m *SiteManager) UpdateUser(id string, in sitesvc.SiteUserInput) (sitesvc.S
 	m.users[i] = u
 	if err := m.saveUsersLocked(); err != nil {
 		m.users[i] = prev
-		return sitesvc.SiteUser{}, err
+		return SiteUser{}, err
 	}
 	u.PasswordHash = ""
 	return u, nil
@@ -379,7 +379,7 @@ func (m *SiteManager) UpdateUser(id string, in sitesvc.SiteUserInput) (sitesvc.S
 func (m *SiteManager) RemoveUser(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	i := slices.IndexFunc(m.users, func(u sitesvc.SiteUser) bool { return u.ID == id })
+	i := slices.IndexFunc(m.users, func(u SiteUser) bool { return u.ID == id })
 	if i < 0 {
 		return errors.New("no such account")
 	}
@@ -424,7 +424,7 @@ func hashSitePassword(pw string) (string, error) {
 
 // newSitePasswordHash is what a new password account keeps: Fridolin's hash
 // of its password, or a bcrypt hash brought over from another app.
-func newSitePasswordHash(in sitesvc.SiteUserInput) (string, error) {
+func newSitePasswordHash(in SiteUserInput) (string, error) {
 	switch {
 	case in.PasswordHash == "":
 		return hashSitePassword(in.Password)
@@ -857,10 +857,10 @@ func (p *siteProc) set(state, errText string) {
 	p.state, p.lastErr, p.since = state, errText, time.Now()
 }
 
-func (p *siteProc) status() sitesvc.SiteProcStatus {
+func (p *siteProc) status() SiteProcStatus {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	st := sitesvc.SiteProcStatus{State: p.state, Error: p.lastErr, Restarts: p.restarts, Log: slices.Clone(p.lines)}
+	st := SiteProcStatus{State: p.state, Error: p.lastErr, Restarts: p.restarts, Log: slices.Clone(p.lines)}
 	if !p.since.IsZero() {
 		st.Since = p.since.UTC().Format(time.RFC3339)
 	}

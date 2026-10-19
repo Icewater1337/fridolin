@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 
 	"encoding/json"
 	"fmt"
-	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 
 	"net"
 	"net/http"
@@ -27,14 +27,14 @@ import (
 // copy the site package's own node_modules (no network in tests). A copy, not
 // a link: the live site's sandbox allows the deploy's real path, not the
 // checkout a link would lead to.
-func newTestSite(t *testing.T) *SiteManager {
+func newTestSite(t *testing.T) *sitesvc.SiteManager {
 	t.Helper()
 	return NewSiteManager(testSiteOptions(t))
 }
 
-func testSiteOptions(t *testing.T) SiteOptions {
+func testSiteOptions(t *testing.T) sitesvc.SiteOptions {
 	t.Helper()
-	opts := SiteOptions{DataDir: t.TempDir(), GoogleClient: func() string { return "" }}
+	opts := sitesvc.SiteOptions{DataDir: t.TempDir(), GoogleClient: func() string { return "" }}
 	opts.NPMInstall = func(ctx context.Context, dir string, prod bool) error {
 		src := filepath.Join(repoDir, "site", "node_modules")
 		if !fsx.Exists(src) {
@@ -68,7 +68,7 @@ func newBareRepo(t *testing.T) string {
 	return dir
 }
 
-func waitDeploy(t *testing.T, m *SiteManager) *sitesvc.DeploySnapshot {
+func waitDeploy(t *testing.T, m *sitesvc.SiteManager) *sitesvc.DeploySnapshot {
 	t.Helper()
 	var j *sitesvc.DeploySnapshot
 	testutil.WaitFor(t, 2*time.Minute, "the deploy to finish", func() bool {

@@ -6,6 +6,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"log"
 	"os"
 	"os/exec"
@@ -99,7 +100,7 @@ func toolFallbackDirs() []string {
 }
 
 // NewSiteManager supplies the host capabilities before constructing the service.
-func NewSiteManager(opts SiteOptions) *SiteManager {
+func NewSiteManager(opts sitesvc.SiteOptions) *sitesvc.SiteManager {
 	h := &opts.Host
 	if h.Home == nil {
 		h.Home = homeDir
@@ -131,7 +132,7 @@ func NewSiteManager(opts SiteOptions) *SiteManager {
 			return c.Type, nil
 		}
 	}
-	return newSiteManager(opts)
+	return sitesvc.New(opts)
 }
 
 func siteSandboxProfile(in sandbox.SitePolicy) (string, error) {

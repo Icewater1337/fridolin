@@ -72,15 +72,21 @@ func TestSiteBuildChat(t *testing.T) {
 	argsLog := filepath.Join(t.TempDir(), "args.log")
 	t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "web", Name: "Web"})
-	m := tb.site
 	link := func(ctx context.Context, dir string, _ bool) error {
 		if src := filepath.Join(repoDir, "site", "node_modules"); fsx.Exists(src) {
 			return os.Symlink(src, filepath.Join(dir, "node_modules"))
 		}
 		return nil
 	}
-	m.npmInstall = link
-	m.workspaceInstall = func(ctx context.Context, _, dir string) error { return link(ctx, dir, false) }
+
+	m := NewSiteManager(sitesvc.SiteOptions{DataDir: tb.cfgs.Get().DataDir,
+		GoogleClient: tb.google.ClientPath, Builder: tb.siteBuilderHooks(), NPMInstall: link,
+		WorkspaceInstall: func(ctx context.Context, _, dir string) error { return link(ctx, dir, false) },
+	})
+	tb.site = m
+	messenger := tb.wa.(siteChatMessenger)
+	messenger.appendMessage = m.AppendBuildMessage
+	tb.wa = messenger
 
 	ctx := context.Background()
 	if err := m.ConnectRepo(ctx, sitesvc.SiteRepo{URL: newBareRepo(t)}); err != nil {
@@ -103,9 +109,9 @@ func TestSiteBuildChat(t *testing.T) {
 		t.Fatalf("send: %d %s", w.Code, w.Body.String())
 	}
 	var chatJID struct {
-		Messages []BuildMessage `json:"messages"`
-		Thread   int            `json:"thread"`
-		Running  bool           `json:"running"`
+		Messages []sitesvc.BuildMessage `json:"messages"`
+		Thread   int                    `json:"thread"`
+		Running  bool                   `json:"running"`
 	}
 	testutil.WaitFor(t, 20*time.Second, "the brain's answer", func() bool {
 		w := tb.do("GET", "/api/site/build/web", nil)

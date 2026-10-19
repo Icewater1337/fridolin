@@ -1,4 +1,4 @@
-package main
+package site
 
 // The Build page (docs/SITE.md): a chat with a builder brain in the
 // dashboard, next to its preview.

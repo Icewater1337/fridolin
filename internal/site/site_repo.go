@@ -1,4 +1,4 @@
-package main
+package site
 
 // The site repository: connecting it, the starter files, what changed since
 // the approved commit, and deploying a commit.
@@ -15,7 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	sitesvc "github.com/Icewater1337/fridolin/internal/site"
+
 	"io/fs"
 	"log"
 	"net/url"
@@ -208,7 +208,7 @@ func validRepoURL(u string) bool {
 
 // ConnectRepo clones the site repository. Changing to another repository
 // means disconnecting first.
-func (m *SiteManager) ConnectRepo(ctx context.Context, r sitesvc.SiteRepo) error {
+func (m *SiteManager) ConnectRepo(ctx context.Context, r SiteRepo) error {
 	r.URL, r.Branch = strings.TrimSpace(r.URL), strings.TrimSpace(r.Branch)
 	r.Subdir = strings.Trim(path.Clean("/"+strings.TrimSpace(r.Subdir)), "/")
 	if r.Branch == "" {
@@ -265,7 +265,7 @@ func (m *SiteManager) DisconnectRepo() error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.settings.Repo = sitesvc.SiteRepo{Branch: "main"}
+	m.settings.Repo = SiteRepo{Branch: "main"}
 	m.settings.Approved = ""
 	m.settings.History = nil
 	return m.saveSettingsLocked()
@@ -347,16 +347,16 @@ func copyEmbedded(fsys fs.FS, root, dst string) error {
 // ── what changed ────────────────────────────────────────────────────────────
 
 // Fetch updates the clone and reports what the branch has beyond the approved commit.
-func (m *SiteManager) Fetch(ctx context.Context) (sitesvc.SiteUpdates, error) {
+func (m *SiteManager) Fetch(ctx context.Context) (SiteUpdates, error) {
 	s := m.Settings()
 	if !fsx.Exists(m.repoDir()) {
-		return sitesvc.SiteUpdates{}, errors.New("no repository connected")
+		return SiteUpdates{}, errors.New("no repository connected")
 	}
 	if _, err := m.git(ctx, m.repoDir(), "fetch", "--prune", "origin"); err != nil {
-		return sitesvc.SiteUpdates{}, err
+		return SiteUpdates{}, err
 	}
 	head, _ := m.git(ctx, m.repoDir(), "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+s.Repo.Branch)
-	up := sitesvc.SiteUpdates{Head: head, Approved: s.Approved, Commits: []sitesvc.SiteCommit{}, Changes: []sitesvc.ModuleChange{}}
+	up := SiteUpdates{Head: head, Approved: s.Approved, Commits: []SiteCommit{}, Changes: []ModuleChange{}}
 	if head == "" {
 		return up, nil // empty repository
 	}
@@ -370,7 +370,7 @@ func (m *SiteManager) Fetch(ctx context.Context) (sitesvc.SiteUpdates, error) {
 	}
 	for _, line := range strings.Split(out, "\n") {
 		if f := strings.Split(line, "\x1f"); len(f) == 4 {
-			up.Commits = append(up.Commits, sitesvc.SiteCommit{Commit: f[0], Subject: f[1], Author: f[2], At: f[3]})
+			up.Commits = append(up.Commits, SiteCommit{Commit: f[0], Subject: f[1], Author: f[2], At: f[3]})
 		}
 	}
 	if head != s.Approved {
@@ -380,7 +380,7 @@ func (m *SiteManager) Fetch(ctx context.Context) (sitesvc.SiteUpdates, error) {
 }
 
 // ModuleChanges compares the modules of two commits ("" = nothing approved yet).
-func (m *SiteManager) ModuleChanges(ctx context.Context, from, to string) ([]sitesvc.ModuleChange, error) {
+func (m *SiteManager) ModuleChanges(ctx context.Context, from, to string) ([]ModuleChange, error) {
 	prefix := m.Settings().Repo.Subdir
 	if prefix != "" {
 		prefix += "/"
@@ -400,7 +400,7 @@ func (m *SiteManager) ModuleChanges(ctx context.Context, from, to string) ([]sit
 		}
 		files = strings.Fields(out)
 	}
-	byID := map[string]*sitesvc.ModuleChange{}
+	byID := map[string]*ModuleChange{}
 	var order []string
 	for _, f := range files {
 		rest := strings.TrimPrefix(f, prefix)
@@ -410,14 +410,14 @@ func (m *SiteManager) ModuleChanges(ctx context.Context, from, to string) ([]sit
 		}
 		c := byID[id]
 		if c == nil {
-			c = &sitesvc.ModuleChange{ID: id, Review: []sitesvc.ReviewItem{}}
+			c = &ModuleChange{ID: id, Review: []ReviewItem{}}
 			byID[id] = c
 			order = append(order, id)
 		}
 		c.Files = append(c.Files, rest)
 	}
 	slices.Sort(order)
-	out := make([]sitesvc.ModuleChange, 0, len(order))
+	out := make([]ModuleChange, 0, len(order))
 	for _, id := range order {
 		c := byID[id]
 		oldM := m.manifestAt(ctx, from, prefix+id+"/module.json")
@@ -452,7 +452,7 @@ func (m *SiteManager) manifestAt(ctx context.Context, commit, file string) map[s
 }
 
 // reviewManifest lists the manifest fields an approver must look at.
-func reviewManifest(oldM, newM map[string]any) []sitesvc.ReviewItem {
+func reviewManifest(oldM, newM map[string]any) []ReviewItem {
 	fields := []struct{ path, note string }{
 		{"route", "where it is served"},
 		{"access", "who may open it"},
@@ -469,7 +469,7 @@ func reviewManifest(oldM, newM map[string]any) []sitesvc.ReviewItem {
 		{"app.build", "a command Fridolin runs when deploying"},
 		{"invalid", "the manifest does not parse"},
 	}
-	items := []sitesvc.ReviewItem{}
+	items := []ReviewItem{}
 	for _, f := range fields {
 		o, n := lookupPath(oldM, f.path), lookupPath(newM, f.path)
 		if f.path == "server" {
@@ -477,7 +477,7 @@ func reviewManifest(oldM, newM map[string]any) []sitesvc.ReviewItem {
 			o, n = boolOrNil(o != nil), boolOrNil(n != nil)
 		}
 		if !reflect.DeepEqual(o, n) {
-			items = append(items, sitesvc.ReviewItem{Field: f.path, Old: o, New: n, Note: f.note})
+			items = append(items, ReviewItem{Field: f.path, Old: o, New: n, Note: f.note})
 		}
 	}
 	return items
@@ -523,17 +523,17 @@ func (j *SiteJob) step(format string, args ...any) {
 	j.Log = append(j.Log, j.Step)
 }
 
-func (j *SiteJob) snapshot() *sitesvc.DeploySnapshot {
+func (j *SiteJob) snapshot() *DeploySnapshot {
 	if j == nil {
 		return nil
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	return &sitesvc.DeploySnapshot{Commit: j.Commit, State: j.State, Step: j.Step, Error: j.Error, Log: slices.Clone(j.Log), Started: j.Started, Finished: j.Finished}
+	return &DeploySnapshot{Commit: j.Commit, State: j.State, Step: j.Step, Error: j.Error, Log: slices.Clone(j.Log), Started: j.Started, Finished: j.Finished}
 }
 
 // DeployStatus returns the running or last deploy.
-func (m *SiteManager) DeployStatus() *sitesvc.DeploySnapshot {
+func (m *SiteManager) DeployStatus() *DeploySnapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.deploy.snapshot()
@@ -552,7 +552,7 @@ func (m *SiteManager) Deploy(ctx context.Context, commit string) error {
 	if !fsx.Exists(m.repoDir()) {
 		return errors.New("no repository connected")
 	}
-	known := slices.ContainsFunc(s.History, func(d sitesvc.SiteDeploy) bool { return d.Commit == commit })
+	known := slices.ContainsFunc(s.History, func(d SiteDeploy) bool { return d.Commit == commit })
 	if !known {
 		// Only what is on the branch can be approved: not a stray commit or another branch.
 		if _, err := m.git(ctx, m.repoDir(), "merge-base", "--is-ancestor", commit, "refs/remotes/origin/"+s.Repo.Branch); err != nil {
@@ -591,8 +591,8 @@ func (m *SiteManager) runDeploy(ctx context.Context, job *SiteJob, commit string
 	subject, _ := m.git(ctx, m.repoDir(), "log", "-1", "--format=%s", commit)
 	m.mu.Lock()
 	m.settings.Approved = commit
-	m.settings.History = slices.DeleteFunc(m.settings.History, func(d sitesvc.SiteDeploy) bool { return d.Commit == commit })
-	m.settings.History = append(m.settings.History, sitesvc.SiteDeploy{Commit: commit, Subject: subject, At: time.Now().UTC().Format(time.RFC3339)})
+	m.settings.History = slices.DeleteFunc(m.settings.History, func(d SiteDeploy) bool { return d.Commit == commit })
+	m.settings.History = append(m.settings.History, SiteDeploy{Commit: commit, Subject: subject, At: time.Now().UTC().Format(time.RFC3339)})
 	if len(m.settings.History) > 30 {
 		m.settings.History = m.settings.History[len(m.settings.History)-30:]
 	}

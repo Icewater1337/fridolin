@@ -1,4 +1,4 @@
-package main
+package site
 
 import (
 	"bytes"
@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
-	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"io/fs"
 
 	"net/http"
@@ -94,33 +93,33 @@ func TestSiteShellIsTheEmbeddedProcess(t *testing.T) {
 
 func TestSiteAccounts(t *testing.T) {
 	m := newTestSite(t)
-	admin, err := m.AddUser(sitesvc.SiteUserInput{Kind: "google", Email: "  OWNER@example.com ", Role: "admin"})
+	admin, err := m.AddUser(SiteUserInput{Kind: "google", Email: "  OWNER@example.com ", Role: "admin"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if admin.Email != "owner@example.com" {
 		t.Errorf("email = %q, want it trimmed and lower-cased", admin.Email)
 	}
-	if _, err := m.AddUser(sitesvc.SiteUserInput{Kind: "google", Email: "owner@example.com", Role: "member"}); err == nil {
+	if _, err := m.AddUser(SiteUserInput{Kind: "google", Email: "owner@example.com", Role: "member"}); err == nil {
 		t.Error("a second account for the same Google address was accepted")
 	}
-	if _, err := m.AddUser(sitesvc.SiteUserInput{Kind: "password", Username: "sam", Password: "long enough pw", Role: "admin"}); err == nil {
+	if _, err := m.AddUser(SiteUserInput{Kind: "password", Username: "sam", Password: "long enough pw", Role: "admin"}); err == nil {
 		t.Error("a password admin was accepted")
 	}
-	if _, err := m.AddUser(sitesvc.SiteUserInput{Kind: "password", Username: "sam", Password: "short", Role: "member"}); err == nil {
+	if _, err := m.AddUser(SiteUserInput{Kind: "password", Username: "sam", Password: "short", Role: "member"}); err == nil {
 		t.Error("a short password was accepted")
 	}
-	if _, err := m.AddUser(sitesvc.SiteUserInput{Kind: "password", Username: "sam", Password: "long enough pw", Role: "boss"}); err == nil {
+	if _, err := m.AddUser(SiteUserInput{Kind: "password", Username: "sam", Password: "long enough pw", Role: "boss"}); err == nil {
 		t.Error("an unknown role was accepted")
 	}
-	sam, err := m.AddUser(sitesvc.SiteUserInput{Kind: "password", Username: "sam", Name: "Sam", Password: "long enough pw", Role: "member"})
+	sam, err := m.AddUser(SiteUserInput{Kind: "password", Username: "sam", Name: "Sam", Password: "long enough pw", Role: "member"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if sam.PasswordHash != "" {
 		t.Error("AddUser returned the password hash")
 	}
-	if _, err := m.AddUser(sitesvc.SiteUserInput{Kind: "password", Username: "SAM", Password: "long enough pw", Role: "member"}); err == nil {
+	if _, err := m.AddUser(SiteUserInput{Kind: "password", Username: "SAM", Password: "long enough pw", Role: "member"}); err == nil {
 		t.Error("a username differing only in case was accepted")
 	}
 
@@ -138,13 +137,13 @@ func TestSiteAccounts(t *testing.T) {
 		}
 	}
 
-	if _, err := m.UpdateUser(admin.ID, sitesvc.SiteUserInput{Role: "member"}); err == nil {
+	if _, err := m.UpdateUser(admin.ID, SiteUserInput{Role: "member"}); err == nil {
 		t.Error("the only admin was demoted")
 	}
-	if _, err := m.UpdateUser(sam.ID, sitesvc.SiteUserInput{Password: "x"}); err == nil {
+	if _, err := m.UpdateUser(sam.ID, SiteUserInput{Password: "x"}); err == nil {
 		t.Error("a short new password was accepted")
 	}
-	if _, err := m.UpdateUser(sam.ID, sitesvc.SiteUserInput{Password: "another long one"}); err != nil {
+	if _, err := m.UpdateUser(sam.ID, SiteUserInput{Password: "another long one"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.SetRoles([]string{"guest"}); err == nil {
@@ -172,8 +171,8 @@ func TestSiteAccounts(t *testing.T) {
 func TestSiteAccountWithBroughtHash(t *testing.T) {
 	m := newTestSite(t)
 	const salted = "F48X9LFXjtA2Te5nMw.Y/emwxyBEOJIqP85ZEYE.5adtF22W1jdn2"
-	add := func(username, hash, password string) (sitesvc.SiteUser, error) {
-		return m.AddUser(sitesvc.SiteUserInput{Kind: "password", Username: username, PasswordHash: hash, Password: password, Role: "member"})
+	add := func(username, hash, password string) (SiteUser, error) {
+		return m.AddUser(SiteUserInput{Kind: "password", Username: username, PasswordHash: hash, Password: password, Role: "member"})
 	}
 	for _, h := range []string{"$2b$10$" + salted, "$2y$12$" + salted, "$2a$14$" + salted} {
 		name := "u" + h[2:3] + h[4:6]
@@ -184,7 +183,7 @@ func TestSiteAccountWithBroughtHash(t *testing.T) {
 		if u.PasswordHash != "" {
 			t.Error("AddUser returned the hash")
 		}
-		i := slices.IndexFunc(m.users, func(x sitesvc.SiteUser) bool { return x.ID == u.ID })
+		i := slices.IndexFunc(m.users, func(x SiteUser) bool { return x.ID == u.ID })
 		if m.users[i].PasswordHash != h {
 			t.Errorf("%s stored as %q, want it as it came", name, m.users[i].PasswordHash)
 		}
@@ -237,7 +236,7 @@ process.stdout.write(timingSafeEqual(got, want) ? 'ok' : 'no')`
 func TestSiteSettingsValidation(t *testing.T) {
 	m := newTestSite(t)
 	str := func(s string) *string { return &s }
-	for _, bad := range []sitesvc.SiteSettingsUpdate{
+	for _, bad := range []SiteSettingsUpdate{
 		{Domain: str("not a domain")},
 		{Domain: str("localhost")},
 		{Listen: str("8780")},
@@ -249,10 +248,10 @@ func TestSiteSettingsValidation(t *testing.T) {
 		}
 	}
 	tunnel := true
-	if _, err := m.UpdateSettings(sitesvc.SiteSettingsUpdate{Tunnel: &tunnel}); err == nil {
+	if _, err := m.UpdateSettings(SiteSettingsUpdate{Tunnel: &tunnel}); err == nil {
 		t.Error("the tunnel was turned on without a token")
 	}
-	s, err := m.UpdateSettings(sitesvc.SiteSettingsUpdate{Domain: str("https://Example.com/"), Title: str("Team site")})
+	s, err := m.UpdateSettings(SiteSettingsUpdate{Domain: str("https://Example.com/"), Title: str("Team site")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,10 +316,10 @@ func TestSiteRepoStarterDeployAndReview(t *testing.T) {
 	ctx := context.Background()
 	m := newTestSite(t)
 	remote := newBareRepo(t)
-	if err := m.ConnectRepo(ctx, sitesvc.SiteRepo{URL: "--upload-pack=x"}); err == nil {
+	if err := m.ConnectRepo(ctx, SiteRepo{URL: "--upload-pack=x"}); err == nil {
 		t.Fatal("an option-like URL was accepted")
 	}
-	if err := m.ConnectRepo(ctx, sitesvc.SiteRepo{URL: remote, Branch: "main"}); err != nil {
+	if err := m.ConnectRepo(ctx, SiteRepo{URL: remote, Branch: "main"}); err != nil {
 		t.Fatal(err)
 	}
 	up, err := m.Fetch(ctx)
@@ -416,22 +415,22 @@ func TestSiteProcessEndToEnd(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	m := newTestSite(t)
-	if err := m.ConnectRepo(ctx, sitesvc.SiteRepo{URL: newBareRepo(t)}); err != nil {
+	if err := m.ConnectRepo(ctx, SiteRepo{URL: newBareRepo(t)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.AddStarter(ctx); err != nil {
 		t.Fatal(err)
 	}
 	up, _ := m.Fetch(ctx)
-	if _, err := m.AddUser(sitesvc.SiteUserInput{Kind: "google", Email: "owner@example.com", Role: "admin"}); err != nil {
+	if _, err := m.AddUser(SiteUserInput{Kind: "google", Email: "owner@example.com", Role: "admin"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.AddUser(sitesvc.SiteUserInput{Kind: "password", Username: "sam", Password: "long enough pw", Role: "member"}); err != nil {
+	if _, err := m.AddUser(SiteUserInput{Kind: "password", Username: "sam", Password: "long enough pw", Role: "member"}); err != nil {
 		t.Fatal(err)
 	}
 	listen := freePort(t)
 	on := true
-	if _, err := m.UpdateSettings(sitesvc.SiteSettingsUpdate{Listen: &listen}); err != nil {
+	if _, err := m.UpdateSettings(SiteSettingsUpdate{Listen: &listen}); err != nil {
 		t.Fatal(err)
 	}
 	m.Start(ctx)
@@ -440,7 +439,7 @@ func TestSiteProcessEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitDeploy(t, m)
-	if _, err := m.UpdateSettings(sitesvc.SiteSettingsUpdate{Enabled: &on}); err != nil {
+	if _, err := m.UpdateSettings(SiteSettingsUpdate{Enabled: &on}); err != nil {
 		t.Fatal(err)
 	}
 	testutil.WaitFor(t, 60*time.Second, "the site to answer", func() bool { return siteHealthy(listen) })
@@ -484,7 +483,7 @@ func TestSiteProcessEndToEnd(t *testing.T) {
 	}
 
 	off := false
-	if _, err := m.UpdateSettings(sitesvc.SiteSettingsUpdate{Enabled: &off}); err != nil {
+	if _, err := m.UpdateSettings(SiteSettingsUpdate{Enabled: &off}); err != nil {
 		t.Fatal(err)
 	}
 	if siteHealthy(listen) {
@@ -507,7 +506,7 @@ func TestSiteGitIgnoresInheritedGitVariables(t *testing.T) {
 
 	m := newTestSite(t)
 	remote := newBareRepo(t)
-	if err := m.ConnectRepo(ctx, sitesvc.SiteRepo{URL: remote, Branch: "main"}); err != nil {
+	if err := m.ConnectRepo(ctx, SiteRepo{URL: remote, Branch: "main"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.AddStarter(ctx); err != nil {
