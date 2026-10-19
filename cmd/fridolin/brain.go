@@ -23,6 +23,7 @@ import (
 
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
+	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/registry"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -1333,7 +1334,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	finalArgs := args
 	extraEnv := append([]string{"FRIDOLIN_BRAIN_ID=" + br.id}, dataEnv(s)...)
 	extraEnv = append(extraEnv, providerEnv...)
-	extraEnv = append(extraEnv, calendarEnv(br.id, s.manifest, s.credsDir)...)
+	extraEnv = append(extraEnv, google.CalendarEnv(br.id, s.manifest, s.credsDir)...)
 	extraEnv = append(extraEnv, plaudOptOut...)
 	if s.toolsDir != "" {
 		// Prompts and skills run the helpers as $FRIDOLIN_TOOLS_DIR/<tool>,

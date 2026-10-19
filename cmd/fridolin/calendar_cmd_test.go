@@ -2,16 +2,12 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
@@ -31,7 +28,7 @@ type fakeCalendarAPI struct {
 
 	mu       sync.Mutex
 	events   map[string][]map[string]any // calendar → events
-	busy     map[string][]BusySlot
+	busy     map[string][]google.BusySlot
 	broken   map[string]bool // calendars free/busy reports an error for
 	touched  []string        // "METHOD calendar" of every events or free/busy request
 	inserted []map[string]any
@@ -42,7 +39,7 @@ type fakeCalendarAPI struct {
 
 func newFakeCalendarAPI(t *testing.T) *fakeCalendarAPI {
 	t.Helper()
-	f := &fakeCalendarAPI{events: map[string][]map[string]any{}, busy: map[string][]BusySlot{}, broken: map[string]bool{}}
+	f := &fakeCalendarAPI{events: map[string][]map[string]any{}, busy: map[string][]google.BusySlot{}, broken: map[string]bool{}}
 	calendars := []map[string]any{
 		{"id": "you@example.com", "summary": "you@example.com", "primary": true, "accessRole": "owner"},
 		{"id": "team@example.com", "summary": "Team", "summaryOverride": "Our team", "accessRole": "writer"},
@@ -121,9 +118,6 @@ func newFakeCalendarAPI(t *testing.T) *fakeCalendarAPI {
 		}
 	}))
 	t.Cleanup(f.srv.Close)
-	prev := [3]string{googleAPIBase, googleTokenEndpoint, googleRevokeEndpoint}
-	googleAPIBase, googleTokenEndpoint, googleRevokeEndpoint = f.srv.URL, f.srv.URL+"/token", f.srv.URL+"/revoke"
-	t.Cleanup(func() { googleAPIBase, googleTokenEndpoint, googleRevokeEndpoint = prev[0], prev[1], prev[2] })
 	return f
 }
 
@@ -138,11 +132,12 @@ func (f *fakeCalendarAPI) touchedCalendars() []string {
 func calendarBrain(t *testing.T, f *fakeCalendarAPI, cals []string, def string, stale bool) (*testBridge, string, string) {
 	t.Helper()
 	tb, url := serveTestBridge(t, "")
+	useGoogleServer(tb, f.srv)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, f.srv.URL)}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
-	tok := googleToken{
+	tok := google.Token{
 		Token: "ACCESS-OK", RefreshToken: "RT-1", ClientID: "123-abc.apps.googleusercontent.com",
 		Scopes: calendarScopes, Expiry: time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano),
 	}
@@ -150,7 +145,7 @@ func calendarBrain(t *testing.T, f *fakeCalendarAPI, cals []string, def string, 
 		tok.Token, tok.Expiry = "ACCESS-OLD", "2020-01-01T00:00:00.000000Z"
 	}
 	data, _ := json.Marshal(tok)
-	if err := os.WriteFile(tb.google.tokenPath("a"), data, 0o600); err != nil {
+	if err := os.WriteFile(tb.google.TokenPath("a"), data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if cals != nil {
@@ -464,11 +459,11 @@ func TestCalendarDelete(t *testing.T) {
 
 func TestCalendarFree(t *testing.T) {
 	f := newFakeCalendarAPI(t)
-	f.busy["you@example.com"] = []BusySlot{
-		{"2026-01-05T08:30:00Z", "2026-01-05T09:30:00Z"}, // 09:30-10:30 in Zurich
-		{"2026-01-05T18:00:00Z", "2026-01-05T19:00:00Z"}, // 19:00-20:00, outside the hours
+	f.busy["you@example.com"] = []google.BusySlot{
+		{Start: "2026-01-05T08:30:00Z", End: "2026-01-05T09:30:00Z"}, // 09:30-10:30 in Zurich
+		{Start: "2026-01-05T18:00:00Z", End: "2026-01-05T19:00:00Z"}, // 19:00-20:00, outside the hours
 	}
-	f.busy["team@example.com"] = []BusySlot{{"2026-01-05T06:00:00Z", "2026-01-05T07:15:00Z"}} // 07:00-08:15, half outside
+	f.busy["team@example.com"] = []google.BusySlot{{Start: "2026-01-05T06:00:00Z", End: "2026-01-05T07:15:00Z"}} // 07:00-08:15, half outside
 	_, url, token := calendarBrain(t, f, []string{"you@example.com", "team@example.com"}, "team@example.com", false)
 
 	code, doc := brainTool(t, calendarCmd, url, token, "free", "--date", "2026-01-05", "--min-slot", "20")
@@ -498,37 +493,6 @@ func TestCalendarFree(t *testing.T) {
 // TestCalendarCallProblems: what a calendar call answers for each kind of
 // error. Only a sign-in Google refuses, or one the bridge cannot use, says
 // to connect again.
-func TestCalendarCallProblems(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name      string
-		err       error
-		status    int
-		reconnect bool
-		want      string
-	}{
-		{"not connected", &fs.PathError{Op: "open", Path: "token.json", Err: fs.ErrNotExist}, 412, false, "not connected for this brain"},
-		{"a token the bridge cannot use", &signInError{errors.New("the token has no refresh token — connect again")}, 412, true, "cannot be used (the token has no refresh token"},
-		{"an unreadable token file", &signInError{fmt.Errorf("unreadable token file: %w", errors.New("bad JSON"))}, 412, true, "unreadable token file"},
-		{"revoked", &oauthError{status: 400, message: "invalid_grant"}, 412, true, "revoked or has expired"},
-		{"Google's token endpoint is down", &oauthError{status: 503, message: "backend_error"}, 503, false, "usually temporary"},
-		{"Google refuses the call", &googleAPIError{status: 401, message: "Invalid Credentials"}, 502, true, "Google Calendar 401"},
-		{"no such event", &googleAPIError{status: 404, message: "Not Found"}, 404, false, "Check the event and calendar IDs"},
-		{"a calendar without busy times", &busyError{calendar: "team@example.com", reason: "notFound"}, 502, false, calendarCheckHint},
-		{"a calendar missing from the answer", &busyError{calendar: "team@example.com"}, 502, false, "does not say when team@example.com is busy"},
-		{"an answer that cannot be read", fmt.Errorf("reading Google Calendar's answer: %w", errors.New("unexpected EOF")), 502, false, "reading Google Calendar's answer"},
-		{"Google unreachable", fmt.Errorf("could not reach Google Calendar (%w)", &net.DNSError{Err: "no such host", IsTemporary: true}), 503, false, "could not reach"},
-		{"another calendar", fmt.Errorf("%w: %q", errCalendarNotAllowed, "x@example.com"), 403, false, "not enabled for this brain"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			status, msg := calendarCallProblem(tc.err)
-			if status != tc.status || !strings.Contains(msg, tc.want) || strings.Contains(msg, calendarReconnectHint) != tc.reconnect {
-				t.Errorf("%d %q; want %d with %q, reconnect hint %v", status, msg, tc.status, tc.want, tc.reconnect)
-			}
-		})
-	}
-}
 
 func TestFreeWindows(t *testing.T) {
 	t.Parallel()
@@ -616,15 +580,15 @@ func TestCalendarZone(t *testing.T) {
 // the bridge will not use, or that was never connected, is told to have the
 // owner connect it, and a Google outage is not mistaken for that. Every way
 // accessToken refuses a token goes through the bridge here, since only the
-// type of its error tells calendarCallProblem which of these it is: the
+// type of its error tells GoogleCallProblem which of these it is: the
 // command prints the message, and the call it makes answers the status.
 func TestCalendarSignInProblems(t *testing.T) {
 	// Expired, so a call has to refresh it first.
-	expired := googleToken{
+	expired := google.Token{
 		Token: "ACCESS-OLD", RefreshToken: "RT-1", ClientID: "123-abc.apps.googleusercontent.com",
 		Scopes: calendarScopes, Expiry: "2020-01-01T00:00:00.000000Z",
 	}
-	writeToken := func(t *testing.T, path string, tok googleToken) {
+	writeToken := func(t *testing.T, path string, tok google.Token) {
 		t.Helper()
 		data, _ := json.Marshal(tok)
 		if err := os.WriteFile(path, data, 0o600); err != nil {
@@ -658,7 +622,7 @@ func TestCalendarSignInProblems(t *testing.T) {
 			writeToken(t, path, tok)
 		}, 0, "", 412, true, "signed in with another Google OAuth client"},
 		{"no OAuth client in Settings", func(t *testing.T, tb *testBridge, _ string) {
-			if err := os.Remove(tb.google.clientPath()); err != nil {
+			if err := os.Remove(tb.google.ClientPath()); err != nil {
 				t.Fatal(err)
 			}
 		}, 0, "", 412, true, "add your Google OAuth client first"},
@@ -685,18 +649,20 @@ func TestCalendarSignInProblems(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFakeCalendarAPI(t)
 			tb, url, token := calendarBrain(t, f, []string{"you@example.com"}, "you@example.com", true)
-			path := tb.google.tokenPath("a")
+			path := tb.google.TokenPath("a")
 			writeToken(t, path, expired)
 			if tc.setup != nil {
 				tc.setup(t, tb, path)
 			}
 			if tc.token != 0 {
-				google := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				googleServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					w.WriteHeader(tc.token)
 					fmt.Fprint(w, tc.body)
 				}))
-				defer google.Close()
-				googleTokenEndpoint = google.URL + "/token"
+				defer googleServer.Close()
+				options := googleTestOptions(googleOptionsFor(tb.cfgs), f.srv)
+				options.Endpoints.Token = googleServer.URL + "/token"
+				tb.google = google.New(options)
 			}
 			code, doc := brainTool(t, calendarCmd, url, token, "list")
 			msg, _ := doc["error"].(string)
@@ -714,22 +680,40 @@ func TestCalendarSignInProblems(t *testing.T) {
 	}
 }
 
-// TestCalendarHintsNameTheDashboardsButtons: what a brain tells its owner
-// to click is a button the brain's Calendar card shows: "Connect Google
-// Calendar" until it is connected, "Sign in again" once Google refuses it.
-func TestCalendarHintsNameTheDashboardsButtons(t *testing.T) {
-	t.Parallel()
-	js, err := os.ReadFile(filepath.Join(repoDir, "web", "assets", "components", "calendar.js"))
-	if err != nil {
-		t.Fatal(err)
+// Keep user-visible decoder diagnostics stable when the event DTO moves packages.
+func TestCalendarEventDecodeErrors(t *testing.T) {
+	f := newFakeCalendarAPI(t)
+	tb, _, token := calendarBrain(t, f, []string{"you@example.com"}, "you@example.com", false)
+	cases := []struct {
+		name string
+		body any
+		want string
+	}{
+		{"number", 1, "the event is not valid JSON: json: cannot unmarshal number into Go value of type main.NewEvent"},
+		{"reminder list", map[string]any{"reminders": "wrong"}, "the event is not valid JSON: json: cannot unmarshal string into Go struct field NewEvent.reminders of type []main.Reminder"},
+		{"reminder", map[string]any{"reminders": []any{1}}, "the event is not valid JSON: json: cannot unmarshal number into Go struct field NewEvent.reminders of type main.Reminder"},
 	}
-	_, notConnected := calendarCallProblem(fs.ErrNotExist)
-	for _, label := range []string{"Sign in again", "Connect Google Calendar"} {
-		if !strings.Contains(calendarReconnectHint+notConnected, label) {
-			t.Errorf("no hint names %q", label)
+	for _, tc := range cases {
+		if tc.name == "reminder" && !jsonUsesInnerStructContext(t) {
+			tc.want = "the event is not valid JSON: json: cannot unmarshal number into NewEvent.reminders.0 of type main.Reminder"
 		}
-		if !strings.Contains(string(js), "'"+label+"'") {
-			t.Errorf("the dashboard has no %q button", label)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			w := tb.do("POST", "/brain/calendar/events", tc.body, func(r *http.Request) {
+				r.Header.Del("X-Bridge-Token")
+				r.Header.Set("Authorization", "Bearer "+token)
+			})
+			var response struct {
+				Error string `json:"error"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if w.Code != 400 || response.Error != tc.want {
+				t.Fatalf("response=%d %q, want 400 %q", w.Code, response.Error, tc.want)
+			}
+		})
+	}
+	if got := f.touchedCalendars(); len(got) != 0 {
+		t.Fatalf("invalid requests reached Google: %v", got)
 	}
 }

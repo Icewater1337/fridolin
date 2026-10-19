@@ -16,6 +16,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/devchat"
+	"github.com/Icewater1337/fridolin/internal/google"
 
 	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -72,7 +73,7 @@ type Bridge struct {
 	sessionCookie string
 	scriptAuth    *scriptAuth
 	backup        *backup.Manager
-	google        *GoogleAuth
+	google        *google.Auth
 	plaud         *PlaudManager
 	site          *SiteManager
 	outbox        *outboundmsg.Outbox
@@ -268,11 +269,11 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 	// A refused scheduled backup goes to the brain's chat, like Plaud's
 	// expired-login notice: the owner may not open the dashboard for weeks.
 	b.backup = newProjectedBackup(cfgs, b.brainMgr, b.notifyBackup)
-	b.google = NewGoogleAuth(cfgs)
+	b.google = google.New(googleOptionsFor(cfgs))
 	b.plaud = NewPlaudManager(cfgs, b.brainMgr)
 	b.plaud.submit = b.submitHandOff
 	b.plaud.notify = b.wa.SendMessage
-	b.site = NewSiteManager(cfg.DataDir, b.google.clientPath)
+	b.site = NewSiteManager(cfg.DataDir, b.google.ClientPath)
 	b.plaud.siteURL = func() string {
 		if d := b.site.Settings().Domain; d != "" {
 			return "https://" + d

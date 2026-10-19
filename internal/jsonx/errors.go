@@ -49,10 +49,10 @@ func renamedType(t reflect.Type, name func(reflect.Type) string) string {
 	if name == nil {
 		return t.String()
 	}
+	if replacement := name(t); replacement != "" {
+		return replacement
+	}
 	if t.Name() != "" {
-		if replacement := name(t); replacement != "" {
-			return replacement
-		}
 		return t.String()
 	}
 	switch t.Kind() {
