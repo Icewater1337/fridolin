@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 import (
 	"crypto/sha256"
@@ -9,7 +9,7 @@ import (
 	"path"
 )
 
-// staticHandler serves the page's files from root. http.FileServer alone
+// StaticHandler serves the page's files from root. http.FileServer alone
 // lists the files of a folder (GET /assets/), and embedded files have no
 // modification time, so it sends no validator and the browser downloads
 // every module again on each visit. Here a folder is not found, and each
@@ -17,7 +17,7 @@ import (
 // browser asks each time, which keeps an upgraded bridge's files from
 // being mixed with cached old ones, and the answer is a 304 for every
 // file the upgrade did not change.
-func staticHandler(root fs.FS) http.Handler {
+func StaticHandler(root fs.FS) http.Handler {
 	etags := map[string]string{}
 	err := fs.WalkDir(root, ".", func(name string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {

@@ -1,23 +1,22 @@
-package main
+package httpapi
 
 import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"net/http"
 	"strings"
 )
 
-// writeJSONIfChanged writes v as writeJSON does, with an ETag of the body,
+// WriteJSONIfChanged writes v as writeJSON does, with an ETag of the body,
 // and answers a request whose If-None-Match names that ETag with 304 and
 // no body. The dashboard follows the activity feed and the brains every
 // few seconds and sends back the ETag of what it has, so a poll that finds
 // nothing new is not downloaded and compared again (app/resources.js).
-func writeJSONIfChanged(w http.ResponseWriter, r *http.Request, v any) {
+func WriteJSONIfChanged(w http.ResponseWriter, r *http.Request, v any) {
 	body, err := json.Marshal(v)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
+		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	body = append(body, '\n') // as writeJSON's encoder ends it

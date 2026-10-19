@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 import (
 	"net/http"
@@ -24,7 +24,7 @@ func TestJSONValidatorPreservesBodyAndWeakComparison(t *testing.T) {
 			r := httptest.NewRequest(http.MethodGet, "/", nil)
 			r.Header.Set("If-None-Match", c.header)
 			w := httptest.NewRecorder()
-			writeJSONIfChanged(w, r, map[string]any{"z": nil, "a": []string{"one"}})
+			WriteJSONIfChanged(w, r, map[string]any{"z": nil, "a": []string{"one"}})
 			if w.Code != c.status || w.Header().Get("ETag") != etag {
 				t.Fatalf("response = %d %v", w.Code, w.Header())
 			}
@@ -41,7 +41,7 @@ func TestJSONValidatorPreservesBodyAndWeakComparison(t *testing.T) {
 
 func TestJSONValidatorReportsMarshalFailureBeforeHeaders(t *testing.T) {
 	w := httptest.NewRecorder()
-	writeJSONIfChanged(w, httptest.NewRequest(http.MethodGet, "/", nil), make(chan int))
+	WriteJSONIfChanged(w, httptest.NewRequest(http.MethodGet, "/", nil), make(chan int))
 	if w.Code != http.StatusInternalServerError || w.Header().Get("ETag") != "" || !strings.Contains(w.Body.String(), "json: unsupported type: chan int") {
 		t.Fatalf("marshal failure = %d %v %s", w.Code, w.Header(), w.Body)
 	}

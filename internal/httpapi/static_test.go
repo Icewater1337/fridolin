@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 import (
 	"io/fs"
@@ -8,7 +8,7 @@ import (
 )
 
 func TestStaticFilesServeAnInjectedFilesystem(t *testing.T) {
-	h := staticHandler(fstest.MapFS{
+	h := StaticHandler(fstest.MapFS{
 		"index.html":     {Data: []byte("page")},
 		"assets/app.txt": {Data: []byte("hello")},
 	})
@@ -47,7 +47,7 @@ func TestStaticFilesRejectUnreadableEmbeddedRoot(t *testing.T) {
 			t.Fatal("invalid filesystem silently accepted")
 		}
 	}()
-	staticHandler(unreadableDashboardFS{})
+	StaticHandler(unreadableDashboardFS{})
 }
 
 type unreadableDashboardFS struct{}
