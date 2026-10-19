@@ -332,10 +332,16 @@ func (b *Bridge) submitHandOff(br *brain.Brain, jid, sender, text string, media 
 // handed in privately must not land in a group because the brain also
 // serves one.
 func (b *Bridge) replyChatFor(br *brain.Brain, cfg *config.Config) string {
+	return replyChatForBrain(b.brainMgr.Manager, br, ownerChat(cfg))
+}
+
+// replyChatForBrain keeps runtime identity in reply selection, including a
+// retained brain whose ID has since been reused by a different runtime.
+func replyChatForBrain(mgr *brain.Manager, br *brain.Brain, ownerDM string) string {
 	m := br.Manifest()
 	if m.ReplyChat != "" {
 		return m.ReplyChat
 	}
-	getsDMs := m.Routing.HandlesDMs || b.brainMgr.DMBrain() == br
-	return route.ReplyChat(m, getsDMs, ownerChat(cfg))
+	getsDMs := m.Routing.HandlesDMs || mgr.DMBrain() == br
+	return route.ReplyChat(m, getsDMs, ownerDM)
 }
