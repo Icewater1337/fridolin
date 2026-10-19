@@ -6,45 +6,84 @@ import (
 	"strings"
 )
 
-func (m *SiteManager) StatusView() map[string]any {
+type StatusSnapshot struct {
+	Accounts  AccountCounts    `json:"accounts"`
+	Deploy    *DeploySnapshot  `json:"deploy"`
+	DeployKey *string          `json:"deploy_key,omitempty"`
+	Google    GoogleStatus     `json:"google"`
+	PublicURL string           `json:"public_url,omitempty"`
+	Repo      RepositoryStatus `json:"repo"`
+	Runtime   RuntimeStatus    `json:"runtime"`
+	Settings  SiteSettings     `json:"settings"`
+	Site      ProcessStatus    `json:"site"`
+	Tunnel    TunnelStatus     `json:"tunnel"`
+}
+type AccountCounts struct {
+	Admins int `json:"admins"`
+	Total  int `json:"total"`
+}
+type GoogleStatus struct {
+	RedirectURI string  `json:"redirect_uri"`
+	Source      string  `json:"source"`
+	Type        *string `json:"type,omitempty"`
+}
+type RepositoryStatus struct {
+	Connected bool   `json:"connected"`
+	GitHub    string `json:"github"`
+}
+type RuntimeStatus struct {
+	Cloudflared bool    `json:"cloudflared"`
+	GH          bool    `json:"gh"`
+	Node        string  `json:"node"`
+	NodeError   *string `json:"node_error,omitempty"`
+}
+type ProcessStatus struct {
+	Healthy  bool              `json:"healthy"`
+	LocalURL string            `json:"local_url"`
+	Process  SiteProcStatus    `json:"process"`
+	Sandbox  SiteSandboxStatus `json:"sandbox"`
+}
+type TunnelStatus struct {
+	Process    SiteProcStatus `json:"process"`
+	TokenSaved bool           `json:"token_saved"`
+}
+
+func (m *SiteManager) StatusView() StatusSnapshot {
 	s := m.Settings()
-	resp := map[string]any{"settings": s}
+	resp := StatusSnapshot{Settings: s}
 
 	node, nodeErr := m.host.Node()
 	_, cfErr := m.host.Tool("cloudflared")
 	_, ghErr := m.host.Tool("gh")
-	rt := map[string]any{"node": node, "cloudflared": cfErr == nil, "gh": ghErr == nil}
+	rt := RuntimeStatus{Node: node, Cloudflared: cfErr == nil, GH: ghErr == nil}
 	if nodeErr != nil {
-		rt["node_error"] = nodeErr.Error()
+		message := nodeErr.Error()
+		rt.NodeError = &message
 	}
-	resp["runtime"] = rt
+	resp.Runtime = rt
 
 	site := m.site.status()
-	resp["site"] = map[string]any{
-		"process":   site,
-		"healthy":   site.State == "running" && siteHealthy(s.Listen),
-		"local_url": "http://" + s.Listen + "/",
-		"sandbox":   m.SandboxStatus(),
-	}
+	resp.Site = ProcessStatus{Process: site, Healthy: site.State == "running" && siteHealthy(s.Listen), LocalURL: "http://" + s.Listen + "/", Sandbox: m.SandboxStatus()}
 	if s.Domain != "" {
-		resp["public_url"] = "https://" + s.Domain + "/"
+		resp.PublicURL = "https://" + s.Domain + "/"
 	}
-	resp["tunnel"] = map[string]any{"process": m.tunnel.status(), "token_saved": fsx.Exists(m.dir("tunnel.token"))}
+	resp.Tunnel = TunnelStatus{Process: m.tunnel.status(), TokenSaved: fsx.Exists(m.dir("tunnel.token"))}
 
-	repo := map[string]any{"connected": fsx.Exists(m.repoDir()), "github": githubRepo(s.Repo.URL)}
-	resp["repo"] = repo
+	repo := RepositoryStatus{Connected: fsx.Exists(m.repoDir()), GitHub: githubRepo(s.Repo.URL)}
+	resp.Repo = repo
 	if pub, err := os.ReadFile(m.dir("deploy_key.pub")); err == nil {
-		resp["deploy_key"] = strings.TrimSpace(string(pub))
+		key := strings.TrimSpace(string(pub))
+		resp.DeployKey = &key
 	}
 
-	googleStatus := map[string]any{"source": "none"}
+	googleStatus := GoogleStatus{Source: "none"}
 	if p := m.googleClientFile(); p != "" {
 		if data, err := os.ReadFile(p); err == nil {
 			if clientType, err := m.host.GoogleClientType(data); err == nil {
-				googleStatus["type"] = clientType
-				googleStatus["source"] = "shared"
+				googleStatus.Type = &clientType
+				googleStatus.Source = "shared"
 				if p == m.dir("google_client.json") {
-					googleStatus["source"] = "site"
+					googleStatus.Source = "site"
 				}
 			}
 		}
@@ -53,8 +92,8 @@ func (m *SiteManager) StatusView() map[string]any {
 	if s.Domain != "" {
 		origin = "https://" + s.Domain
 	}
-	googleStatus["redirect_uri"] = origin + "/auth/callback"
-	resp["google"] = googleStatus
+	googleStatus.RedirectURI = origin + "/auth/callback"
+	resp.Google = googleStatus
 
 	users := m.Users()
 	admins := 0
@@ -63,7 +102,7 @@ func (m *SiteManager) StatusView() map[string]any {
 			admins++
 		}
 	}
-	resp["accounts"] = map[string]int{"total": len(users), "admins": admins}
-	resp["deploy"] = m.DeployStatus()
+	resp.Accounts = AccountCounts{Total: len(users), Admins: admins}
+	resp.Deploy = m.DeployStatus()
 	return resp
 }

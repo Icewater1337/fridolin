@@ -21,7 +21,7 @@ type GoogleService interface {
 	SetClient([]byte) (*google.Client, error)
 	DeleteClient() error
 	StartSignIn(string) (string, error)
-	CalendarStatus(context.Context, string, *manifest.Calendar, bool) map[string]any
+	CalendarStatus(context.Context, string, *manifest.Calendar, bool) google.CalendarSnapshot
 	Select(string, manifest.Calendar) error
 	Disconnect(context.Context, string, bool) (bool, string, error)
 }

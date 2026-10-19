@@ -2,11 +2,12 @@ package main
 
 import (
 	"github.com/Icewater1337/fridolin/internal/httpapi"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"net/http"
 )
 
 func (b *Bridge) siteAPI(mux *http.ServeMux) {
-	(&httpapi.SiteAPI{Site: func() httpapi.SiteService { return b.site }, StatusView: func() map[string]any { return b.site.StatusView() }, BuildersView: b.siteBuildersView, BuildRoutes: b.buildAPI}).Register(mux)
+	(&httpapi.SiteAPI{Site: func() httpapi.SiteService { return b.site }, StatusView: func() sitesvc.StatusSnapshot { return b.site.StatusView() }, BuildersView: b.siteBuildersView, BuildRoutes: b.buildAPI}).Register(mux)
 }
 func (b *Bridge) siteBuildersView() []map[string]any {
 	out := []map[string]any{}

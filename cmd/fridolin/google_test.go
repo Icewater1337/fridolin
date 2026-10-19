@@ -983,7 +983,7 @@ func TestCalendarSignInForARemovedBrain(t *testing.T) {
 	}
 	// Refused before anything is written, not taken back after the brain's
 	// settings could not be saved.
-	msg, _ := tb.google.CalendarStatus(t.Context(), "a", nil, false)["last_error"].(string)
+	msg := tb.google.CalendarStatus(t.Context(), "a", nil, false).LastError
 	if !strings.Contains(msg, "removed while it signed in") {
 		t.Errorf("sign-in error = %q, want it to say the brain was removed", msg)
 	}
