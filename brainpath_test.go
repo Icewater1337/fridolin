@@ -205,3 +205,38 @@ func TestCheckRunsABrainWhoseFolderHoldsAPATHFolder(t *testing.T) {
 		t.Errorf("check printed no profile:\n%s", out.String())
 	}
 }
+
+// check probes the Claude version outside the sandbox, so it must remove
+// brain-owned PATH folders before that first subprocess, just as startup
+// does before the dashboard can probe it.
+func TestCheckDoesNotExecuteBrainPATHPrograms(t *testing.T) {
+	home := canonicalDir(t.TempDir())
+	t.Setenv("HOME", home)
+	brain := filepath.Join(home, "brain")
+	ownedBin, trustedBin := filepath.Join(brain, "bin"), filepath.Join(home, "trusted", "bin")
+	for _, dir := range []string{ownedBin, trustedBin} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	marker := filepath.Join(home, "probe-outside-brain")
+	planted := "#!/bin/sh\nprintf planted > \"$HOME/probe-outside-brain\"\nprintf '9.9.9 planted\\n'\n"
+	if err := os.WriteFile(filepath.Join(ownedBin, "claude"), []byte(planted), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	versionCLI(t, filepath.Join(trustedBin, "claude"), testedClaudeVersion+" trusted")
+	t.Setenv("PATH", strings.Join([]string{ownedBin, trustedBin, "/usr/bin", "/bin"}, string(filepath.ListSeparator)))
+	path := writeConfig(t, `{"claude_path":"claude","data_dir":"`+home+`/data"`+brainDirsJSON(t,
+		brainFolder(t, brain, BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+	)+`}`)
+	var out bytes.Buffer
+	if err := writeCheck(&out, checkOptions{config: path}); err != nil {
+		t.Fatalf("check: %v\n%s", err, out.String())
+	}
+	if fileExists(marker) {
+		t.Error("check ran the brain's planted Claude outside the sandbox")
+	}
+	if got := lineWith(out.String(), "claude:"); !strings.Contains(got, testedClaudeVersion+" trusted") || strings.Contains(got, "planted") {
+		t.Errorf("Claude summary %q, want the trusted CLI", got)
+	}
+}

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -12,7 +11,6 @@ import (
 	"log"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
@@ -242,7 +240,7 @@ type BrainHooks struct {
 	// one, and reports whether it is on its way, ahead of the run's final
 	// reply. br's history records it once it arrived, like an answer: the
 	// reply to it comes as a new message, whose run must see what it
-	// answers. A silent run asks nothing (see readStream).
+	// answers. A silent run asks nothing (see runSink.Question).
 	Question func(br *Brain, jid, text string) bool
 	// Deliver receives every finished run. It records the answer in the
 	// brain's history once it is sent.
@@ -307,10 +305,17 @@ const (
 )
 
 type brainRun struct {
-	cancel  context.CancelFunc
-	done    chan struct{}
+	cancel context.CancelFunc
+	done   chan struct{}
+	// processMu serialises starting a CLI with the second signal's stop.
+	// Once forceStopped is set, no process can start for this run.
+	processMu    sync.Mutex
+	process      *claudeProcess
+	forceStopped bool
+	// pid is the CLI's while it runs, and 0 once Wait has reaped it: for
+	// the dashboard, which shows it. Stopping a run takes no PID (see
+	// interruptRun).
 	pid     int
-	once    sync.Once // guards close(done) against a double close
 	msg     Inbound
 	started time.Time
 }
@@ -997,13 +1002,19 @@ func (br *Brain) shutdown(grace time.Duration) {
 func (br *Brain) closeQueue() []Inbound {
 	br.mu.Lock()
 	defer br.mu.Unlock()
-	br.retired = true
+	br.freezeQueueLocked()
 	gone := br.pending
 	br.pending = nil
+	return gone
+}
+
+// freezeQueueLocked stops admission and further turns, retaining pending
+// messages for shutdown persistence. br.mu is held.
+func (br *Brain) freezeQueueLocked() {
+	br.retired = true
 	if br.slotWait != nil {
 		br.slots.giveUp(br.slotWait)
 	}
-	return gone
 }
 
 // retire stops the brain for good after a reload took it out, removed
@@ -1190,24 +1201,12 @@ func (br *Brain) streamLogPath() string {
 // claudeArgs builds the CLI arguments for one run. mcpConfig is what
 // mcpConfigOf returned for the brain's folder, or "" for none; settings is
 // the brain's excludeInstructionsAbove. They end in -p: the prompt goes on
-// stdin (see invoke).
+// stdin (see startClaude).
 func claudeArgs(s *brainSettings, mcpConfig, settings string) []string {
-	args := []string{"--output-format", "stream-json", "--verbose"}
-	if !s.inheritUser {
-		// Only the brain folder's own Claude Code setup. Your user settings
-		// (with their hooks, plugins and permissions), skills, agents,
-		// commands and the MCP servers in ~/.claude.json are yours, and a
-		// brain answers whoever may message it; under
-		// --dangerously-skip-permissions it would call those MCP tools
-		// without asking.
-		args = append(args, "--setting-sources", "project,local", "--strict-mcp-config")
-		if settings != "" {
-			args = append(args, "--settings", settings)
-		}
-		if mcpConfig != "" {
-			// --mcp-config takes several files: an option must follow.
-			args = append(args, "--mcp-config", mcpConfig)
-		}
+	var args []string
+	if !s.inheritUser && mcpConfig != "" {
+		// --mcp-config takes several files: an option must follow.
+		args = append(args, "--mcp-config", mcpConfig)
 	}
 	if s.dangerously {
 		args = append(args, "--dangerously-skip-permissions")
@@ -1221,7 +1220,7 @@ func claudeArgs(s *brainSettings, mcpConfig, settings string) []string {
 	if len(s.disallowedTools) > 0 {
 		args = append(args, "--disallowed-tools", strings.Join(s.disallowedTools, ","))
 	}
-	return append(args, "-p")
+	return claudeArgList(!s.inheritUser, settings, args...)
 }
 
 // withArgsBeforePrint puts extra before the trailing -p that claudeArgs
@@ -1623,67 +1622,67 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	// Only once the sandbox is settled: a refused run starts no process.
 	br.ensureViewer(s)
 
-	cmd := exec.CommandContext(ctx, binary, finalArgs...)
-	cmd.Dir = br.workDir
-	cmd.Env = env
-	isolateProcessGroup(cmd)
+	// The run's processes end with this context: when ctx does, at a stop
+	// or run_timeout, and when the grace after the result runs out.
+	// cmd.Cancel then kills the run's process group, and WaitDelay closes
+	// the pipes something outside the group may still hold.
+	cmdCtx, stopCmd := context.WithCancel(ctx)
+	defer stopCmd()
 
-	// The prompt goes on stdin, which -p reads to its end, rather than in
-	// argv: argv is bounded by ARG_MAX, about 1 MiB on macOS with the
-	// environment, and on Linux one argument by 128 KiB, which a long
-	// prompt file and a few pasted texts reach; and every process listing
-	// shows it. The CLI takes 10 MB on stdin.
-	stdin, err := cmd.StdinPipe()
+	// The output goes through a pipe of the bridge's own, which the parser
+	// reads: os/exec copies it there, and Wait waits for the copy, up to
+	// WaitDelay after the CLI exited. So Wait, which runs alongside the
+	// parser, ends the run even when a process the bridge cannot stop,
+	// one that left the run's process group, holds the CLI's output open,
+	// and the parser gets all the CLI wrote before that.
+	stdout, stdoutW := io.Pipe()
+	proc, err := run.startProcess(cmdCtx, claudeRun{binary: binary, args: finalArgs, dir: br.workDir, env: env, prompt: prompt, stdout: stdoutW})
 	if err != nil {
-		return RunResult{Err: fmt.Errorf("stdin pipe: %w", err)}
-	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return RunResult{Err: fmt.Errorf("stdout pipe: %w", err)}
-	}
-
-	// Only the end of stderr is kept: the CLI, or something it started that
-	// holds on to its stderr, could otherwise make the bridge hold any
-	// amount of it, and only the last error is of use.
-	stderrBuf := newTailBuffer(stderrTailBytes)
-	cmd.Stderr = stderrBuf
-	// Wait waits for that copy to end, which a background process holding
-	// stderr could put off for good; after this long it stops waiting.
-	cmd.WaitDelay = runWaitDelay
-
-	if err := cmd.Start(); err != nil {
+		stdout.Close()
+		stdoutW.Close()
+		if ctx.Err() != nil {
+			// Stopped before the CLI started, which Start then refuses: a
+			// stop like any other, no failure.
+			return RunResult{Err: errBrainInterrupted}
+		}
 		return RunResult{Err: fmt.Errorf("starting %s: %w", agentName(s.provider), err)}
 	}
-	br.setRunPID(run, cmd.Process.Pid)
+	pid := proc.pid()
+	br.setRunPID(run, pid)
 	// Removed once Wait has returned and the run is over; a bridge that
 	// crashes before leaves it to the next start (reapOrphanedRuns).
-	if rec := recordRun(s.dataDir, br.id, cmd.Process.Pid); rec != "" {
+	if rec := recordRun(s.dataDir, br.id, pid); rec != "" {
 		defer os.Remove(rec)
 	}
-	// A panic from here on, in a hook say, skips the Wait below. The run's
-	// process group is then stopped and reaped here, before its record
-	// goes: cancelling the run alone would leave the CLI a zombie for as
-	// long as the bridge runs.
-	waited := false
-	defer func() {
-		if !waited {
-			_ = killProcessGroup(cmd.Process.Pid)
-			_ = cmd.Wait()
-		}
-	}()
+
+	var waitErr error
+	waited := make(chan struct{})
 	go func() {
-		// Nothing waits for this: Wait closes the pipe once the CLI has
-		// exited, which ends a write it never read.
-		_, _ = io.WriteString(stdin, prompt)
-		stdin.Close()
+		defer close(waited)
+		waitErr = proc.wait()
+		// The PID is free for another process now.
+		br.setRunPID(run, 0)
+		// Everything the CLI wrote has reached the parser: this ends its
+		// output.
+		stdoutW.Close()
+	}()
+	// However invoke ends, a panic in a hook included, the run's processes
+	// are stopped and reaped here, before its record goes: left running,
+	// the CLI would stay a zombie for as long as the bridge runs.
+	defer func() {
+		stopCmd()
+		<-waited
 	}()
 
 	// Parse the stream in a goroutine so we can race it against the 10s timer.
 	parseDone := make(chan RunResult, 1)
 	resultSeen := make(chan struct{})
 	var resultOnce sync.Once
+	var recordedResult RunResult
 	go func() {
+		// Once the parser is done, the copy into its pipe ends too: a parser
+		// that failed would leave it blocked otherwise.
+		defer stdout.Close()
 		// A panic while the output is read, in the hook that sends a
 		// question to the chat say, ends the run as one in invoke does
 		// (invokeGuarded). In a goroutine of its own, unrecovered, it would
@@ -1694,7 +1693,12 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 				parseDone <- RunResult{Err: errRunPanicked}
 			}
 		}()
-		parseDone <- br.readAgentStream(m, stdout, runHeading(m, s, cmd.Process.Pid), func() { resultOnce.Do(func() { close(resultSeen) }) }, s.provider)
+		parseDone <- br.readAgentStream(m, stdout, runHeading(m, s, pid), func(res RunResult) {
+			resultOnce.Do(func() {
+				recordedResult = res
+				close(resultSeen)
+			})
+		}, s.provider)
 	}()
 
 	notice := time.NewTimer(workingNoticeAfter)
@@ -1702,12 +1706,19 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 
 	invocationStart := time.Now()
 	var res RunResult
+	parsed := false
 	var grace <-chan time.Time
-	resultIn := resultSeen // nil once the grace runs
-	for parsing := true; parsing; {
+	resultIn, stopped := resultSeen, ctx.Done() // each nil once it came
+	for running := true; running; {
 		select {
+		case <-waited:
+			running = false
 		case res = <-parseDone:
-			parsing = false
+			// The parser reads to the end of the output, which comes after
+			// Wait, unless it failed: then nothing reads what the CLI
+			// writes any more, and the run is over.
+			parsed, parseDone = true, nil
+			stopCmd()
 		case <-notice.C:
 			// Untagged (silent) messages never produce a visible reply, so they
 			// must not produce a visible "working" notice either.
@@ -1716,45 +1727,33 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 			}
 		case <-resultIn:
 			// The answer is in, and the CLI exits right after it, unless
-			// something it started still holds its output open, a command
-			// left running in the background, say. That gets
-			// postResultGrace, or the brain would stay busy as long as it ran.
+			// it, or something it started, keeps going with its output
+			// open, a command left running in the background, say. That
+			// gets postResultGrace, or the brain would stay busy as long
+			// as it ran.
 			resultIn, grace = nil, time.After(postResultGrace)
 			notice.Stop()
 		case <-grace:
 			grace = nil
 			log.Printf("brain %s: %s's output was still open %v after its result; stopping what is left of the run", br.id, agentName(s.provider), postResultGrace)
-			if err := killProcessGroup(cmd.Process.Pid); err != nil {
-				log.Printf("brain %s: failed to kill process group %d: %v", br.id, cmd.Process.Pid, err)
-			}
+			stopCmd()
+		case <-stopped:
+			// Stopped, or at run_timeout: cmdCtx ends with ctx, which
+			// stops the process group. Nothing is working on it any more.
+			stopped = nil
+			notice.Stop()
 		}
+	}
+	if !parsed {
+		res = <-parseDone
 	}
 
 	if elapsed := time.Since(invocationStart); elapsed > 5*time.Minute && res.Text != "" {
 		log.Printf("brain %s: response took %v for %s (slow response)", br.id, elapsed, m.JID)
 	}
 
-	// The result event is final, but the CLI may still be winding down. Ask it
-	// to exit, then hard-kill anything still alive 5 seconds later.
-	if cmd.Process != nil {
-		exited := make(chan struct{})
-		defer close(exited)
-		go func() {
-			select {
-			case <-exited:
-			case <-time.After(5 * time.Second):
-				if err := killProcessGroup(cmd.Process.Pid); err == nil {
-					log.Printf("brain %s: killed %s process group %d", br.id, agentName(s.provider), cmd.Process.Pid)
-				}
-			}
-		}()
-		_ = cmd.Process.Signal(os.Interrupt)
-	}
-
-	waitErr := cmd.Wait()
-	waited = true
-	stderr := strings.TrimSpace(stderrBuf.String())
-	br.logStderr(m, cmd.Process.Pid, stderr)
+	stderr := proc.stderrTail()
+	br.logStderr(m, pid, stderr)
 	// Whether the result event came: readStream has returned, so it would
 	// have closed resultSeen by now.
 	gotResult := false
@@ -1763,18 +1762,17 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		gotResult = true
 	default:
 	}
+	// A result is the CLI's final answer, including an error result. A
+	// stop while its inherited output drains must not replace it with an
+	// interruption or timeout, even when Wait had to close those pipes.
+	if gotResult && ctx.Err() != nil {
+		return recordedResult
+	}
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		// The deadline may come in the grace after the result, which is
-		// the run's answer then all the same. A question sent before the
-		// run hung is not: the chat must hear that the run was stopped.
-		if res.Err != nil || !gotResult {
-			return RunResult{Err: runTimedOut(s.runTimeout)}
-		}
+		return RunResult{Err: runTimedOut(s.runTimeout)}
 	case ctx.Err() != nil:
-		if waitErr != nil || res.Text == "" {
-			return RunResult{Err: errBrainInterrupted}
-		}
+		return RunResult{Err: errBrainInterrupted}
 	case waitErr != nil:
 		// Without a result, what the CLI wrote to stderr is the only
 		// account of what went wrong.
@@ -1785,13 +1783,9 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	return res
 }
 
-// postResultGrace is how long a run may keep its output open after its
-// result, a variable so tests need not wait for it.
+// postResultGrace is how long a run may go on after its result, a
+// variable so tests need not wait for it.
 var postResultGrace = 5 * time.Second
-
-// runWaitDelay is how long Wait waits, once the CLI has exited, for the
-// copy of its stderr to end.
-const runWaitDelay = 5 * time.Second
 
 // logStderr adds what the CLI wrote to stderr to the brain's activity log,
 // the end of it when there is much, where a failed run can be looked into
@@ -1976,13 +1970,6 @@ func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
 	return renderPrompt(in)
 }
 
-// parseStream reads the stream-json output of m's run from the Claude CLI
-// and returns the result, writing a human-readable activity log alongside
-// it.
-func (br *Brain) parseStream(m Inbound, reader io.Reader) RunResult {
-	return br.readStream(m, reader, "── New invocation ──", nil)
-}
-
 // runHeading starts a run's part of the activity log: what it answers and
 // with what, so that it can be told from the others and matched to the
 // run the dashboard shows.
@@ -2032,124 +2019,54 @@ func (br *Brain) rotateStreamLog() {
 	}
 }
 
-// readStream is parseStream with heading as the first line of the run in
-// the activity log, calling onResult, when set, as soon as the result is
-// in, while the stream may still go on.
-func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResult func()) RunResult {
+// runSink is the StreamSink of m's run in br: the brain's activity log, and
+// the chat for the questions the run asks.
+type runSink struct {
+	br       *Brain
+	m        Inbound
+	log      *os.File // nil when it could not be opened
+	onResult func(RunResult)
+}
+
+func (s *runSink) Log(line string) {
+	if s.log != nil {
+		_, _ = fmt.Fprintf(s.log, "[%s] %s\n", time.Now().Format("15:04:05"), line)
+	}
+}
+
+// Question sends text to the run's chat. Untagged (silent) messages never
+// produce a visible reply, so they must not ask anything either.
+func (s *runSink) Question(text string) bool {
+	h := s.br.hooks
+	return !s.m.Silent && h != nil && h.Question != nil && h.Question(s.br, s.m.JID, questionPrefix+text)
+}
+
+func (s *runSink) Result(res RunResult) {
+	if s.onResult != nil {
+		s.onResult(res)
+	}
+}
+
+// readStream is parseStream for m's run, with heading as the run's first
+// line in the activity log, calling onResult, when set, as soon as the
+// result is in, while the stream may still go on.
+func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResult func(RunResult)) RunResult {
 	return br.readAgentStream(m, reader, heading, onResult, "claude")
 }
 
-func (br *Brain) readAgentStream(m Inbound, reader io.Reader, heading string, onResult func(), provider string) RunResult {
-	scanner := bufio.NewScanner(reader)
-	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
-
+func (br *Brain) readAgentStream(m Inbound, reader io.Reader, heading string, onResult func(RunResult), provider string) RunResult {
 	br.rotateStreamLog()
 	// Through the folder, like the history: a brain can swap the log for a
 	// symlink to a file its sandbox denies it writing.
-	streamLog, logErr := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
-	if logErr != nil {
-		log.Printf("brain %s: could not open stream log: %v", br.id, logErr)
+	streamLog, err := openInFolder(br.root, streamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		log.Printf("brain %s: could not open stream log: %v", br.id, err)
+	} else {
+		defer streamLog.Close()
 	}
-	writeLog := func(msg string) {
-		if streamLog != nil {
-			_, _ = fmt.Fprintf(streamLog, "[%s] %s\n", time.Now().Format("15:04:05"), msg)
-		}
-	}
-	defer func() {
-		if streamLog != nil {
-			streamLog.Close()
-		}
-	}()
-
-	writeLog(heading)
-
-	var finalResult, lastText string
-	asked := false
-	var codex codexStream
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if !strings.HasPrefix(line, "{") {
-			continue
-		}
-
-		var event streamEvent
-		if provider == "codex" {
-			event = codex.event([]byte(line))
-		} else if err := json.Unmarshal([]byte(line), &event); err != nil {
-			continue
-		}
-
-		switch event.Type {
-		case "assistant":
-			if event.Message == nil {
-				continue
-			}
-			for _, content := range event.Message.Content {
-				switch content.Type {
-				case "text":
-					if content.Text != "" {
-						lastText = content.Text
-						writeLog("💬 " + truncate(content.Text, 2000))
-					}
-				case "tool_use":
-					writeLog("🔧 Tool: " + content.Name)
-					if content.Name == "AskUserQuestion" {
-						// Untagged (silent) messages never produce a visible
-						// reply, so they must not ask anything either. Only a
-						// question on its way counts as asked.
-						question := extractAskQuestion(content.Input)
-						if question != "" && !m.Silent && br.hooks != nil && br.hooks.Question != nil && br.hooks.Question(br, m.JID, questionPrefix+question) {
-							asked = true
-						}
-					}
-				}
-			}
-
-		case "result":
-			if event.IsError || event.Error != "" {
-				errMsg := event.Error
-				if errMsg == "" {
-					errMsg = event.Result
-				}
-				if errMsg == "" {
-					// The CLI reports some failures (authentication, quota) only
-					// as its last message.
-					errMsg = truncate(lastText, 300)
-				}
-				if errMsg == "" {
-					errMsg = "(claude exited with an error but no message)"
-				}
-				writeLog("❌ Error: " + errMsg)
-				return RunResult{Err: &cliError{msg: errMsg, provider: provider}, Asked: asked}
-			}
-			finalResult = event.Result
-			writeLog("✅ Result: " + truncate(finalResult, 2000))
-			if onResult != nil {
-				onResult()
-			}
-		}
-	}
-
-	if err := scanner.Err(); err != nil && err != io.EOF {
-		if errors.Is(err, os.ErrClosed) {
-			return RunResult{Err: errBrainInterrupted}
-		}
-		return RunResult{Err: fmt.Errorf("reading %s output: %w", agentName(provider), err)}
-	}
-
-	// A -p run is stateless and nobody answers its AskUserQuestion, so the
-	// model goes on after asking, often to an answer of its own ("I booked
-	// Monday"), which the chat must get too. A run that only asked has said
-	// what it had to say.
-	if finalResult == "" && !asked {
-		if provider == "codex" && codex.err != "" {
-			return RunResult{Err: &cliError{msg: codex.err, provider: "codex"}}
-		}
-		return RunResult{Err: errNoResult}
-	}
-
-	return RunResult{Text: finalResult, Asked: asked}
+	sink := &runSink{br: br, m: m, log: streamLog, onResult: onResult}
+	sink.Log(heading)
+	return parseAgentStream(reader, sink, provider)
 }
 
 // truncate shortens s to at most n bytes without splitting a UTF-8 rune.
@@ -2190,7 +2107,7 @@ func (br *Brain) finishRun(run *brainRun) {
 	}
 	br.mu.Unlock()
 
-	run.once.Do(func() { close(run.done) })
+	close(run.done)
 }
 
 func (br *Brain) setRunPID(run *brainRun, pid int) {
@@ -2199,24 +2116,41 @@ func (br *Brain) setRunPID(run *brainRun, pid int) {
 	br.mu.Unlock()
 }
 
-// interruptRun cancels a run and kills its process.
+// startProcess publishes a started process before a force-stop can return.
+// Ordinary stops still use only context cancellation through os/exec.
+func (run *brainRun) startProcess(ctx context.Context, spec claudeRun) (*claudeProcess, error) {
+	run.processMu.Lock()
+	defer run.processMu.Unlock()
+	if run.forceStopped {
+		return nil, context.Canceled
+	}
+	proc, err := startClaude(ctx, spec)
+	if err == nil {
+		run.process = proc
+	}
+	return proc, err
+}
+
+// awaitProcessStop prevents a later start, then waits only for the supervisor
+// to acknowledge killing the process group (or finishing Wait). It does not
+// wait for output readers, hooks or reply delivery, which may be blocked.
+func (run *brainRun) awaitProcessStop() {
+	run.processMu.Lock()
+	run.forceStopped = true
+	proc := run.process
+	run.processMu.Unlock()
+	if proc != nil {
+		<-proc.stopped
+	}
+}
+
+// interruptRun stops a run by cancelling its context, on which cmd.Cancel
+// kills the run's process group (see invoke): the one way a run is
+// stopped. It signals no process itself, so a stop that comes once the
+// CLI was reaped cannot hit another process that got its PID meanwhile.
 func (br *Brain) interruptRun(run *brainRun) {
-	if run == nil {
-		return
-	}
-
-	run.cancel()
-
-	br.mu.Lock()
-	pid := run.pid
-	br.mu.Unlock()
-
-	if pid <= 0 {
-		return
-	}
-	// The run's process group: Claude and anything it started.
-	if err := killProcessGroup(pid); err != nil {
-		log.Printf("brain %s: failed to kill process group %d: %v", br.id, pid, err)
+	if run != nil {
+		run.cancel()
 	}
 }
 
@@ -2361,9 +2295,13 @@ type BrainManager struct {
 	// retiring are the brains reloads took out, while they stop and hand
 	// on what they had waiting (see requeue); Stop waits for them.
 	retiring sync.WaitGroup
+	// forced stops admission and publication without waiting for reloadMu,
+	// which may be held by filesystem work during a reload.
+	forced atomic.Bool
 
 	mu       sync.RWMutex // guards the fields below; never held while calling into a Brain
 	brains   map[string]*Brain
+	retired  map[*Brain]struct{} // removed from order, until retirement finishes
 	order    []*Brain
 	byGroup  map[string]*Brain
 	dmBrain  *Brain // brain with handles_dms; nil falls through to fallback
@@ -2414,7 +2352,7 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	bm.reloadMu.Lock()
 	defer bm.reloadMu.Unlock()
 
-	if bm.stopped {
+	if bm.stopped || bm.forced.Load() {
 		return errBrainsStopped
 	}
 	if err := ValidateBrainSet(specs); err != nil {
@@ -2503,6 +2441,18 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 	bm.slots.setLimit(cfg.RunLimit())
 
 	bm.mu.Lock()
+	// KillRuns publishes its latch under this same lock, so its snapshot
+	// cannot miss a newly published brain or one about to retire.
+	if bm.forced.Load() {
+		bm.mu.Unlock()
+		return errBrainsStopped
+	}
+	if bm.retired == nil {
+		bm.retired = make(map[*Brain]struct{})
+	}
+	for _, br := range removed {
+		bm.retired[br] = struct{}{}
+	}
 	bm.brains, bm.order, bm.byGroup, bm.dmBrain, bm.fallback, bm.issues, bm.held = next, order, byGroup, dm, def, issues, held
 	bm.mu.Unlock()
 	applied = true
@@ -2519,6 +2469,11 @@ func (bm *BrainManager) reload(specs []BrainSpec, issues []BrainIssue, cfg *Conf
 		// folder while the old run still works there.
 		waiting := br.closeQueue()
 		bm.retiring.Go(func() {
+			defer func() {
+				bm.mu.Lock()
+				delete(bm.retired, br)
+				bm.mu.Unlock()
+			}()
 			br.retire(!moved)
 			bm.requeue(br, waiting)
 		})
@@ -2758,6 +2713,9 @@ func (bm *BrainManager) Route(m Inbound) *Brain {
 // brain left them (see Brain.submit).
 func (bm *BrainManager) Submit(m Inbound) (br *Brain, pos int, busy bool, err error) {
 	for attempt := 0; attempt < 2; attempt++ {
+		if bm.forced.Load() {
+			return nil, 0, false, errBrainsStopped
+		}
 		br = bm.Route(m)
 		if br == nil && m.Brain != "" {
 			return nil, 0, false, fmt.Errorf("brain %s is not configured", m.Brain)
@@ -2786,14 +2744,34 @@ func (bm *BrainManager) StopHandOffs(jid string) (stopped bool, dropped int) {
 	return stopped, dropped
 }
 
-// KillRuns kills every brain's run in flight at once, for a second signal
-// while the bridge stops: nothing waits for the runs to end.
+// KillRuns cancels every brain's run in flight at once, for a second signal.
+// Before os.Exit it waits for each process supervisor to acknowledge the
+// kill, never for the runs' output or delivery. Cancellation alone could
+// return before os/exec's watcher had a chance to signal the process group.
 func (bm *BrainManager) KillRuns() {
-	for _, br := range bm.Brains() {
+	bm.mu.Lock()
+	bm.forced.Store(true)
+	brains := append([]*Brain(nil), bm.order...)
+	for br := range bm.retired {
+		brains = append(brains, br)
+	}
+	bm.mu.Unlock()
+
+	var runs []*brainRun
+	for _, br := range brains {
 		br.mu.Lock()
+		// Freeze admission and the worker's next turn before capturing
+		// current. Keep pending intact for concurrent graceful shutdown.
+		br.freezeQueueLocked()
 		cur := br.current
 		br.mu.Unlock()
-		br.interruptRun(cur)
+		if cur != nil {
+			br.interruptRun(cur)
+			runs = append(runs, cur)
+		}
+	}
+	for _, run := range runs {
+		run.awaitProcessStop()
 	}
 }
 

@@ -34,8 +34,9 @@ import (
 // FRIDOLIN_FAKE_SLEEP_AFTER_ASK_MS answers that much later), with
 // FRIDOLIN_FAKE_ASK every run first calls AskUserQuestion with that input,
 // FRIDOLIN_FAKE_PID_LOG gets each run's process ID and
-// FRIDOLIN_FAKE_PROMPT_LOG its prompt, and with
-// FRIDOLIN_FAKE_STDERR_BYTES it floods stderr and fails instead. Asked for
+// FRIDOLIN_FAKE_PROMPT_LOG its prompt, with FRIDOLIN_FAKE_SETSID_CHILD
+// it leaves a grandchild in a session of its own holding its output, and
+// with FRIDOLIN_FAKE_STDERR_BYTES it floods stderr and fails instead. Asked for
 // --version, it answers testedClaudeVersion. Tests point claude_path at
 // os.Args[0], so no script or real CLI is needed. With
 // FRIDOLIN_FAKE_CONNECT it connects to that unix socket instead (see
@@ -323,7 +324,31 @@ func fakeClaude() {
 		// A grandchild that inherits stdout, like a shell command Claude ran.
 		child := exec.Command("sleep", "30")
 		child.Stdout = os.Stdout
-		_ = child.Start()
+		if child.Start() == nil {
+			if path := os.Getenv("FRIDOLIN_FAKE_CHILD_PID_LOG"); path != "" {
+				_ = os.WriteFile(path, []byte(strconv.Itoa(child.Process.Pid)), 0600)
+			}
+		}
+	}
+	if holds := os.Getenv("FRIDOLIN_FAKE_SETSID_CHILD"); holds != "" {
+		// A grandchild that leaves the run's process group, as a daemon or
+		// setsid does, holding stdout, or stdout and stderr with
+		// "stdout,stderr": no kill of the group reaches it. Its PID goes
+		// to FRIDOLIN_FAKE_PID_LOG after the CLI's own.
+		child := exec.Command("sleep", "30")
+		child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		child.Stdout = os.Stdout
+		if strings.Contains(holds, "stderr") {
+			child.Stderr = os.Stderr
+		}
+		if child.Start() == nil {
+			if log := os.Getenv("FRIDOLIN_FAKE_PID_LOG"); log != "" {
+				if f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
+					fmt.Fprintln(f, child.Process.Pid)
+					f.Close()
+				}
+			}
+		}
 	}
 	if ms, _ := strconv.Atoi(os.Getenv("FRIDOLIN_FAKE_SLEEP_MS")); ms > 0 {
 		time.Sleep(time.Duration(ms) * time.Millisecond)
@@ -407,6 +432,10 @@ func fakeClaude() {
 	if ask := os.Getenv("FRIDOLIN_FAKE_ASK"); ask != "" {
 		// An AskUserQuestion call, its input as given, which nobody answers.
 		fmt.Printf(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":%s}]}}`+"\n", ask)
+	}
+	if result := os.Getenv("FRIDOLIN_FAKE_RESULT"); result != "" {
+		fmt.Println(result)
+		return
 	}
 	q := strconv.Quote(out)
 	fmt.Printf(`{"type":"assistant","message":{"content":[{"type":"text","text":%s}]}}`+"\n", q)

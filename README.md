@@ -724,13 +724,21 @@ file and recent chat history, which `history.go` reads back from the end
 of the file. Events are parsed live, so an `AskUserQuestion` reaches
 WhatsApp immediately, with its options numbered (the answer comes as the
 next message, and the run's final reply is sent too), and a run over 10
-seconds gets a "working on it" notice (the event types are in
-`stream.go`). A run is stopped at
+seconds gets a "working on it" notice. The parser, in `stream.go`, skips
+a line over 4 MiB (a tool's large result, say) with a note in the activity
+log rather than failing the run. A run is stopped at
 `run_timeout_minutes`, and five seconds after its result when something it
-started holds its output open. Runs are listed in `<data_dir>/runs/` while
-they last, so that a bridge that crashed stops what is left of them when it
-starts again. `BrainManager.Apply` swaps the brain set at runtime without
-touching brains that did not change, and hands what a brain it takes out
+started holds its output open; output that a process outside the run's
+process group holds is let go of five seconds after the CLI exited. Runs
+are listed in `<data_dir>/runs/` while they last, so that a bridge that
+crashed stops what is left of them when it starts again. A second shutdown
+signal waits for the process supervisor to acknowledge the group kill before
+exiting, without waiting for output readers or reply delivery; a run still
+preparing cannot start a CLI after that force-stop. It freezes admission,
+queue turns and reload publication, and also stops runs in removed brains
+whose retirement has not finished.
+`BrainManager.Apply` swaps the brain set at runtime without touching
+brains that did not change, and hands what a brain it takes out
 had waiting to the brain that takes it now.
 
 **`manifest.go`, `brainreg.go`** — `brain.json`, the brain registry, path

@@ -118,6 +118,8 @@ func isEmojiStart(r rune) bool {
 // notChatText are the strings outside messages.go that start like a
 // message of the bridge but go nowhere near a chat.
 var notChatText = map[string]string{
+	"⚠️ Skipped a line of %d bytes, longer than the %d MiB the bridge reads": "a line of a run's activity log",
+	"❔ Event of a type the bridge does not read: %q":                         "a line of a run's activity log",
 	"💬 ":         "a line of a run's activity log",
 	"🔧 Tool: ":   "a line of a run's activity log",
 	"❌ Error: ":  "a line of a run's activity log",

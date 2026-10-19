@@ -375,9 +375,11 @@ for await (const event of ctx.search({ brain: 'office', prompt, signal })) {
 The bridge runs a read-only agent (`--tools Read,Grep,Glob`) in the brain's
 folder, with only that folder's own Claude Code setup and the bridge's login,
 under **that brain's sandbox**: it reaches what the brain reaches and nothing
-of another brain's folder, whatever the site process can read. At most four
-searches run at once, each for up to three minutes; aborting `signal` stops
-one.
+of another brain's folder, whatever the site process can read. It starts
+Claude as a brain's runs do, with the prompt on stdin, out of process
+listings, and stops whatever the agent left running when it ends. At most
+four searches run at once, each for up to three minutes; aborting `signal`
+stops one.
 
 ### Secrets
 

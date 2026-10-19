@@ -1191,17 +1191,6 @@ func TestBuildPromptNamesTheHistorySearch(t *testing.T) {
 	}
 }
 
-func TestParseStreamReportsErrorText(t *testing.T) {
-	br := bareBrain(t)
-	stream := `{"type":"assistant","message":{"content":[{"type":"text","text":"Failed to authenticate. API Error: 401"}]}}
-{"type":"result","is_error":true}
-`
-	res := br.parseStream(Inbound{JID: "x"}, strings.NewReader(stream))
-	if res.Err == nil || !strings.Contains(res.Err.Error(), "Failed to authenticate") {
-		t.Errorf("err = %v, want the CLI's own message", res.Err)
-	}
-}
-
 func TestStopKillsProcessesClaudeStarted(t *testing.T) {
 	// A command Claude started keeps the output pipe open; stopping must kill
 	// the whole process group, not just the CLI, or the stop hangs.
@@ -1530,12 +1519,13 @@ func TestRunTimeoutStopsAStuckRun(t *testing.T) {
 }
 
 // TestRunEndsSoonAfterItsResult: a command Claude left running with the
-// output open does not keep the brain busy once the result is in: after
-// postResultGrace the rest of the run is stopped, and the answer goes out.
+// output open does not keep the brain busy once the result is in: once
+// the CLI has exited, Wait stops waiting for the output after
+// runWaitDelay, the rest of the run is stopped, and the answer goes out.
 func TestRunEndsSoonAfterItsResult(t *testing.T) {
-	prev := postResultGrace
-	postResultGrace = 300 * time.Millisecond
-	t.Cleanup(func() { postResultGrace = prev })
+	prevGrace, prevDelay := postResultGrace, runWaitDelay
+	postResultGrace, runWaitDelay = 300*time.Millisecond, 300*time.Millisecond
+	t.Cleanup(func() { postResultGrace, runWaitDelay = prevGrace, prevDelay })
 	mgr, d, _ := queueTestManager(t, 10, "")
 	t.Setenv("FRIDOLIN_FAKE_CHILD", "1") // sleeps 30 s holding the output open
 	start := time.Now()

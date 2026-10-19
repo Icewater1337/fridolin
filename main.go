@@ -662,6 +662,9 @@ func writeCheck(w io.Writer, o checkOptions) error {
 
 // checkReport writes what check says of cfg, the config loaded from path.
 func checkReport(w io.Writer, path string, cfg *Config, o checkOptions) error {
+	// Before even the version probe: it runs outside the sandbox, so a
+	// Claude planted in a brain's PATH folder must not be selected.
+	ownPATH := setBridgePATH(cfg)
 	fmt.Fprintf(w, "Config OK: %s\n", path)
 	if cfg.AgentProvider == "codex" {
 		st := codexInfo(cfg.CodexPath, cfg.ChildEnvPassthrough)
@@ -678,9 +681,8 @@ func checkReport(w io.Writer, path string, cfg *Config, o checkOptions) error {
 	}
 	trig, _ := json.Marshal(cfg.Triggers)
 	fmt.Fprintf(w, "  triggers:  %s\n", trig)
-	// As the bridge does before it loads the brains, so that the brains
-	// and profiles are the ones it would run.
-	ownPATH := setBridgePATH(cfg)
+	// With the same PATH as startup, the brains and profiles match what
+	// the bridge would run.
 	specs, issues := ResolveBrains(cfg)
 	if len(specs) == 0 {
 		fmt.Fprintln(w, "  brains:    none yet — add one in the dashboard")
