@@ -619,7 +619,7 @@ var errBrainsLeftOut = errors.New("cannot run")
 func leftOutBrains(issues []BrainIssue) []string {
 	var ids []string
 	for _, is := range issues {
-		if is.leavesOut() && !slices.Contains(ids, is.ID) {
+		if is.LeavesOut() && !slices.Contains(ids, is.ID) {
 			ids = append(ids, is.ID)
 		}
 	}

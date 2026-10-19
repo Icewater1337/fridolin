@@ -2172,7 +2172,7 @@ func (bm *BrainManager) reload(specs []manifest.Spec, issues []BrainIssue, cfg *
 			root, err := os.OpenRoot(sp.Dir)
 			if err != nil {
 				log.Printf("brain %s: leaving it out: %v", m.ID, err)
-				issues = append(issues, BrainIssue{ID: m.ID, Path: sp.Dir, Kind: "missing", Detail: "the folder cannot be opened: " + err.Error(), atLoad: true, entry: sp.Entry, routing: m.Routing})
+				issues = append(issues, BrainIssue{ID: m.ID, Path: sp.Dir, Kind: "missing", Detail: "the folder cannot be opened: " + err.Error(), AtLoad: true, Entry: sp.Entry, Routing: m.Routing})
 				continue
 			}
 			br = &Brain{
@@ -2381,18 +2381,18 @@ type heldRoutes struct {
 func heldRoutesOf(issues []BrainIssue, dm *Brain, byGroup map[string]*Brain) heldRoutes {
 	h := heldRoutes{groups: map[string]string{}}
 	for _, is := range issues {
-		if !is.leavesOut() {
+		if !is.LeavesOut() {
 			continue
 		}
-		if is.routing.HandlesDMs && dm == nil && h.dms == "" {
+		if is.Routing.HandlesDMs && dm == nil && h.dms == "" {
 			h.dms = is.ID
 		}
-		for _, g := range is.routing.Groups {
+		for _, g := range is.Routing.Groups {
 			if _, ok := byGroup[g]; !ok && h.groups[g] == "" {
 				h.groups[g] = is.ID
 			}
 		}
-		if is.routing.Default && h.fallback == "" {
+		if is.Routing.Default && h.fallback == "" {
 			h.fallback = is.ID
 		}
 	}
