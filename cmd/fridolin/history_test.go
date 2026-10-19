@@ -23,7 +23,7 @@ func TestPromptHistoryIsReadFromTheEnd(t *testing.T) {
 	filler := strings.Repeat("chatter ", 128)
 	other := func(br *Brain, bytes int) {
 		for range bytes / len(filler) {
-			br.appendHistory(testGroup, "15559876543", filler, history.In)
+			br.AppendHistory(testGroup, "15559876543", filler, history.In)
 		}
 	}
 	cases := []struct {
@@ -32,27 +32,27 @@ func TestPromptHistoryIsReadFromTheEnd(t *testing.T) {
 		want  string
 	}{
 		{"behind another chat's megabytes", func(br *Brain) {
-			br.appendHistory(testDMChat, "15551234567", "one", history.In)
+			br.AppendHistory(testDMChat, "15551234567", "one", history.In)
 			other(br, 3<<20)
 		}, "one"},
 		{"after a line too long to take", func(br *Brain) {
-			br.appendHistory(testDMChat, "15551234567", "old", history.In)
+			br.AppendHistory(testDMChat, "15551234567", "old", history.In)
 			// JSON writes each < as \u003c, six bytes.
-			br.appendHistory(testDMChat, "15551234567", strings.Repeat("<", history.MaxLine/2), history.In)
-			br.appendHistory(testDMChat, "15551234567", "newest", history.In)
+			br.AppendHistory(testDMChat, "15551234567", strings.Repeat("<", history.MaxLine/2), history.In)
+			br.AppendHistory(testDMChat, "15551234567", "newest", history.In)
 		}, "old newest"},
 		{"after a line that is no JSON", func(br *Brain) {
-			br.appendHistory(testDMChat, "15551234567", "old", history.In)
+			br.AppendHistory(testDMChat, "15551234567", "old", history.In)
 			f, err := os.OpenFile(filepath.Join(br.Dir(), history.FileName), os.O_APPEND|os.O_WRONLY, 0o600)
 			if err != nil {
 				t.Fatal(err)
 			}
 			fmt.Fprintln(f, `{"chat":"`+testDMChat+`", broken`)
 			f.Close()
-			br.appendHistory(testDMChat, "15551234567", "newest", history.In)
+			br.AppendHistory(testDMChat, "15551234567", "newest", history.In)
 		}, "old newest"},
 		{"further back than the budget", func(br *Brain) {
-			br.appendHistory(testDMChat, "15551234567", "ancient", history.In)
+			br.AppendHistory(testDMChat, "15551234567", "ancient", history.In)
 			other(br, 5<<20)
 		}, ""},
 	}
@@ -79,7 +79,7 @@ func TestPromptHistoryIsReadFromTheEnd(t *testing.T) {
 func TestActivitySeedReadsTheLastLines(t *testing.T) {
 	br := bareBrain(t)
 	for i := range 60 {
-		br.appendHistory(testDMChat, "15551234567", fmt.Sprintf("message %d", i), history.In)
+		br.AppendHistory(testDMChat, "15551234567", fmt.Sprintf("message %d", i), history.In)
 	}
 	feed := activity.New(100)
 	seedActivity(feed, br)

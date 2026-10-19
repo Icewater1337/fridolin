@@ -9,6 +9,6 @@ import (
 // original seed-once lock around loading and sorting the feed.
 func seedActivity(a *activity.Feed, br *Brain) {
 	a.Seed(br.ID(), func() []history.Entry {
-		return br.recentHistory(50, 128<<10)
+		return br.Tail(50, 128<<10)
 	})
 }

@@ -73,7 +73,7 @@ func (d *Debouncer) addLocked(m Inbound, quiet time.Duration, now time.Time) (In
 	key := batchKey(m)
 	b, ok := d.batches[key]
 	if ok {
-		b.msg = b.msg.merge(m)
+		b.msg = b.msg.Merge(m)
 		b.timer.Stop()
 	} else {
 		b = &pendingBatch{msg: m, started: now}
@@ -118,10 +118,10 @@ func (d *Debouncer) Change(c chat.Change) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for k, b := range d.batches {
-		if !b.msg.changes(c) {
+		if !b.msg.Changes(c) {
 			continue
 		}
-		msg, _, keep := b.msg.applyChange(c)
+		msg, _, keep := b.msg.ApplyChange(c)
 		if !keep {
 			b.timer.Stop()
 			delete(d.batches, k)

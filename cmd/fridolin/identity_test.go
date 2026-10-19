@@ -255,9 +255,9 @@ func TestGroupSenderAndQuoteByNumber(t *testing.T) {
 func TestPrefaceReadsADMsLIDHistory(t *testing.T) {
 	br := bareBrain(t)
 	lid := types.NewJID(personLID, types.HiddenUserServer).String()
-	br.appendHistory(lid, "15551234567", "OLD-UNDER-LID", history.In)
-	br.appendHistory(testDMChat, "15551234567", "NEW-UNDER-NUMBER", history.In)
-	br.appendHistory("15559876543@s.whatsapp.net", "15559876543", "SOMEONE-ELSE", history.In)
+	br.AppendHistory(lid, "15551234567", "OLD-UNDER-LID", history.In)
+	br.AppendHistory(testDMChat, "15551234567", "NEW-UNDER-NUMBER", history.In)
+	br.AppendHistory("15559876543@s.whatsapp.net", "15559876543", "SOMEONE-ELSE", history.In)
 	preface := br.buildPrompt(&brainSettings{}, Inbound{Inbound: chat.Inbound{JID: testDMChat, ChatAlt: lid, Sender: "15551234567", Text: "next"}})
 	if !strings.Contains(preface, "OLD-UNDER-LID") || !strings.Contains(preface, "NEW-UNDER-NUMBER") {
 		t.Errorf("preface = %q, want both parts of the chat", preface)

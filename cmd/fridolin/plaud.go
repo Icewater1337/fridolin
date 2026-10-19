@@ -1326,7 +1326,7 @@ func (p *PlaudManager) targetBrain(cfg *config.Config) *Brain {
 // direct chat, else your own DM (the first allowed number). "" means there
 // is no private chat to use.
 func (p *PlaudManager) summaryChat(cfg *config.Config, br *Brain) string {
-	if rc := br.settings.Load().manifest.ReplyChat; isDirectChat(rc) {
+	if rc := br.Manifest().ReplyChat; isDirectChat(rc) {
 		return rc
 	}
 	return ownerChat(cfg)

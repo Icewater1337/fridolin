@@ -1624,7 +1624,7 @@ func TestRunTimeoutSetting(t *testing.T) {
 // TestStreamLogIsRotatedAndNamesEachRun: a full activity log is moved to
 // claude-stream.1.log when the next run starts, and each run's part of it
 // starts with the chat, the sender, the process and the model, in a line
-// runHeadingPID reads back.
+// RunHeadingPID reads back.
 func TestStreamLogIsRotatedAndNamesEachRun(t *testing.T) {
 	mgr, d, home := queueTestManager(t, 10, `, "brain_model": "sonnet"`)
 	logPath := filepath.Join(home, "a", streamLogName)
@@ -1652,8 +1652,8 @@ func TestStreamLogIsRotatedAndNamesEachRun(t *testing.T) {
 		t.Errorf("new log starts %q (%d bytes), want the run named", first, len(data))
 	}
 	// The Build page finds the run's part of the log by this heading.
-	if pid, ok := runHeadingPID(first); !ok || pid <= 0 {
-		t.Errorf("runHeadingPID(%q) = %d, %v; want the run's pid", first, pid, ok)
+	if pid, ok := RunHeadingPID(first); !ok || pid <= 0 {
+		t.Errorf("RunHeadingPID(%q) = %d, %v; want the run's pid", first, pid, ok)
 	}
 }
 
@@ -1672,7 +1672,7 @@ func TestHistoryLineIsWrittenOnceTakenAtItsOwnTime(t *testing.T) {
 	}{
 		{"a message, at its time", nil, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", At: sent}},
 			nil, []string{"hi@" + sent.Format(time.RFC3339)}},
-		{"each part at its own time", nil, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "photo", At: sent}}.merge(
+		{"each part at its own time", nil, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "photo", At: sent}}.Merge(
 			Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "what is it?", At: sent.Add(5 * time.Second)}}),
 			nil, []string{"photo@" + sent.Format(time.RFC3339), "what is it?@" + sent.Add(5*time.Second).Format(time.RFC3339)}},
 		{"turned away by a full queue", func(t *testing.T, br *Brain) {

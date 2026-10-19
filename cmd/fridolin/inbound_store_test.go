@@ -22,7 +22,7 @@ func TestInboundQueueKeepsWhatTheStopLeft(t *testing.T) {
 		Media: []string{"/Users/you/.fridolin/media/a.jpg"}, Source: chat.SourceWhatsApp, At: sent, ID: "3EB0A"}, logged: logged("3EB0A", "what is this?")}
 	second := Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "and this", Quoted: &chat.Quote{From: "15559876543", Text: "lunch?"},
 		Source: chat.SourceWhatsApp, At: sent.Add(time.Second), ID: "3EB0B"}, logged: logged("3EB0B", "and this")}
-	merged := first.merge(second)
+	merged := first.Merge(second)
 	merged.logged = first.logged
 	chatter := Inbound{Inbound: chat.Inbound{JID: harnessGroup, Sender: "15559876543", Text: "see you", Silent: true, Source: chat.SourceWhatsApp, At: sent, ID: "3EB0C"}}
 	late := Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "!stop", Source: chat.SourceWhatsApp, At: sent.Add(time.Minute), ID: "3EB0D"}}

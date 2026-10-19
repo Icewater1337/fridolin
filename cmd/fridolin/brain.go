@@ -193,6 +193,10 @@ func (br *Brain) Name() string { return br.settings.Load().name }
 // Dir is the brain's folder.
 func (br *Brain) Dir() string { return br.workDir }
 
+// Manifest returns the immutable manifest snapshot used by current runs.
+// Callers must not mutate its slices or optional nested settings.
+func (br *Brain) Manifest() manifest.Manifest { return br.settings.Load().manifest }
+
 // logInbound writes m to the brain's history: a line for each part of a
 // merged message, with its ID, so that one deleted later is taken out
 // alone, and with the time it was sent, not the time the debouncer let it
@@ -213,7 +217,7 @@ func (br *Brain) logInbound(m Inbound) Inbound {
 		if at.IsZero() {
 			at = m.At
 		}
-		parts[i].logged = br.appendEntry(history.Entry{TS: historyTime(at), Chat: m.JID, From: p.Sender, Text: chat.HistoryText(p.TextWithQuote(), p.Media), Type: history.In, ID: p.ID})
+		parts[i].logged = br.AppendEntry(history.Entry{TS: historyTime(at), Chat: m.JID, From: p.Sender, Text: chat.HistoryText(p.TextWithQuote(), p.Media), Type: history.In, ID: p.ID})
 	}
 	if len(m.parts) > 0 {
 		m.parts = parts
@@ -603,11 +607,11 @@ func dropped(ms []Inbound) {
 	}
 }
 
-// waitIdle waits until the brain has nothing running or queued, for at
+// WaitIdle waits until the brain has nothing running or queued, for at
 // most max, and reports whether it got there. A backup asks before it
 // copies the brain's folder (see backupBrain). Between two queued runs no
 // run is current for a moment, so it waits for the worker to stop.
-func (br *Brain) waitIdle(ctx context.Context, max time.Duration) bool {
+func (br *Brain) WaitIdle(ctx context.Context, max time.Duration) bool {
 	deadline := time.NewTimer(max)
 	defer deadline.Stop()
 	for {
@@ -698,7 +702,7 @@ func (br *Brain) StopChat(jid string) (stopped bool, n int) {
 // sent !reset.
 func (br *Brain) ResetChat(chats []string, by string) {
 	for _, jid := range chats {
-		br.appendEntry(history.Entry{Chat: jid, From: by, Type: history.Reset})
+		br.AppendEntry(history.Entry{Chat: jid, From: by, Type: history.Reset})
 	}
 }
 
@@ -975,7 +979,7 @@ func (br *Brain) startViewerUnlessAlive(tv *platform.Viewer, s *brainSettings) *
 		return nil
 	}
 	f.Close()
-	nv, err := br.viewerStart("claude-"+br.id, br.streamLogPath(), br.workDir, s.envPassthrough)
+	nv, err := br.viewerStart("claude-"+br.id, br.StreamLogPath(), br.workDir, s.envPassthrough)
 	if err != nil {
 		log.Printf("brain %s: could not start tmux viewer: %v", br.id, err)
 		return nil
@@ -999,7 +1003,7 @@ func (br *Brain) closeViewer() {
 // streamLogName is the brain's activity log, in its folder.
 const streamLogName = "claude-stream.log"
 
-func (br *Brain) streamLogPath() string {
+func (br *Brain) StreamLogPath() string {
 	return filepath.Join(br.workDir, streamLogName)
 }
 
@@ -1197,9 +1201,9 @@ func runHeading(m Inbound, s *brainSettings, pid int) string {
 // model does.
 var runHeadingRE = regexp.MustCompile(`^\[\d\d:\d\d:\d\d\] ── Run for .*, pid (\d+), model .* ──$`)
 
-// runHeadingPID returns the pid of the run whose heading line is, and
+// RunHeadingPID returns the pid of the run whose heading line is, and
 // false for any other line of the activity log.
-func runHeadingPID(line string) (int, bool) {
+func RunHeadingPID(line string) (int, bool) {
 	m := runHeadingRE.FindStringSubmatch(line)
 	if m == nil {
 		return 0, false
@@ -1350,21 +1354,21 @@ func (br *Brain) interruptRun(run *brainRun) {
 	}
 }
 
-// appendHistory appends one JSONL entry to the brain's history file.
-func (br *Brain) appendHistory(chatJID, from, text, typ string) {
+// AppendHistory appends one JSONL entry to the brain's history file.
+func (br *Brain) AppendHistory(chatJID, from, text, typ string) {
 	br.appendHistoryVia(chatJID, from, text, typ, "")
 }
 
-// appendHistoryVia is appendHistory for a line marked with how it came in
+// appendHistoryVia is AppendHistory for a line marked with how it came in
 // (see historyEntry.Via).
 func (br *Brain) appendHistoryVia(chatJID, from, text, typ, via string) {
-	br.appendEntry(history.Entry{From: from, Chat: chatJID, Text: text, Type: typ, Via: via})
+	br.AppendEntry(history.Entry{From: from, Chat: chatJID, Text: text, Type: typ, Via: via})
 }
 
-// appendEntry appends entry to the brain's history file, stamped with the
+// AppendEntry appends entry to the brain's history file, stamped with the
 // time now unless it has a time. It returns the line as it reads back, or
 // none when the file could not be opened.
-func (br *Brain) appendEntry(entry history.Entry) history.Entry {
+func (br *Brain) AppendEntry(entry history.Entry) history.Entry {
 	br.historyMu.Lock()
 	entry, err := history.Append(br.root, entry)
 	br.historyMu.Unlock()
@@ -1375,13 +1379,13 @@ func (br *Brain) appendEntry(entry history.Entry) history.Entry {
 	return entry
 }
 
-// recordDelivered writes the brain's answer text to chat into its
+// RecordDelivered writes the brain's answer text to chat into its
 // history once it reached WhatsApp, after remove took it out of the
 // outbox; when remove fails, it writes nothing and returns the error, and
 // the outbox tries again later, so the answer is recorded once. Both
 // happen under historyMu, which undelivered reads the outbox under: a run
 // finds the answer in the outbox or in the history, never in neither.
-func (br *Brain) recordDelivered(chatJID, text string, remove func() error) error {
+func (br *Brain) RecordDelivered(chatJID, text string, remove func() error) error {
 	br.historyMu.Lock()
 	if err := remove(); err != nil {
 		br.historyMu.Unlock()
@@ -1405,7 +1409,7 @@ func (br *Brain) entryWritten(entry history.Entry, err error) {
 
 // undelivered returns the brain's answers in the chat that goes by chats
 // which are still on their way (brainSink.Undelivered). It reads them
-// under historyMu, which recordDelivered moves an answer from the outbox
+// under historyMu, which RecordDelivered moves an answer from the outbox
 // into the history under: the history, read after, holds every answer
 // this did not return.
 func (br *Brain) undelivered(chats []string) []history.Entry {
@@ -1511,6 +1515,11 @@ func newBrainManager(options brainManagerOptions) *brainManager {
 		sink: &brainSinkRef{target: options.Sink}, slots: newRunSlots(0),
 	}
 }
+
+// PauseRuns holds new run-slot grants until the returned function is called.
+// Startup replay uses it to apply later persisted edits before a queued run
+// can start. Releasing the pause is idempotent.
+func (bm *brainManager) PauseRuns() func() { return bm.slots.pause() }
 
 // SetSink wires runtime delivery before the first message. Every current and
 // future brain shares this reference, like the former hooks pointer.

@@ -209,7 +209,7 @@ func (b *Bridge) apiBuildChat(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := map[string]any{"messages": ch.Messages, "thread": ch.Thread, "running": running, "queued": queued, "activity": []string{}}
 	if running {
-		resp["activity"] = currentRunLog(br.streamLogPath(), rt.Running.PID)
+		resp["activity"] = currentRunLog(br.StreamLogPath(), rt.Running.PID)
 	}
 	if p := b.site.previewOf(br.ID()); p != nil {
 		resp["preview"] = b.site.previewURLs(br.ID(), p)
@@ -316,7 +316,7 @@ func currentRunLog(path string, pid int) []string {
 	}
 	start, end, headings := -1, len(lines), 0
 	for i, l := range lines {
-		p, ok := runHeadingPID(l)
+		p, ok := RunHeadingPID(l)
 		if !ok {
 			continue
 		}
@@ -360,7 +360,7 @@ func precedingRunPID(r io.Reader) int {
 	for {
 		line, err := reader.ReadSlice('\n')
 		if !fragment && err != bufio.ErrBufferFull {
-			if p, ok := runHeadingPID(strings.TrimSuffix(string(line), "\n")); ok {
+			if p, ok := RunHeadingPID(strings.TrimSuffix(string(line), "\n")); ok {
 				pid = p
 			}
 		}

@@ -176,7 +176,7 @@ func TestEditOfAMessageTheHistoryLacks(t *testing.T) {
 			if c.alt != "" {
 				askIn = c.alt
 			}
-			br.appendHistory(askIn, "main", "🔐 Please send me the verification code", history.Out)
+			br.AppendHistory(askIn, "main", "🔐 Please send me the verification code", history.Out)
 			if c.code {
 				tb.handleInbound(t.Context(), Inbound{Inbound: chat.Inbound{JID: testDMChat, ChatAlt: c.alt, Sender: "15551234567", Text: "483920", Source: chat.SourceWhatsApp, ID: "3EB0OTP"}})
 			}
@@ -265,7 +265,7 @@ func TestChangeOfAMessageTheHistoryLacksWritesNothing(t *testing.T) {
 		t.Skip("root writes into a folder whatever its mode")
 	}
 	_, br := newMainBridge(t, "")
-	br.appendEntry(history.Entry{From: "15551234567", Chat: testDMChat, Text: "hi", Type: history.In, ID: "3EB0A"})
+	br.AppendEntry(history.Entry{From: "15551234567", Chat: testDMChat, Text: "hi", Type: history.In, ID: "3EB0A"})
 	if err := os.Chmod(br.Dir(), 0o500); err != nil {
 		t.Fatal(err)
 	}

@@ -199,7 +199,7 @@ func TestQuotedReplyReachesModelAndHistory(t *testing.T) {
 // the code must still be kept out of the history and the model.
 func TestOTPGuardDropsQuotedCode(t *testing.T) {
 	tb, br := newMainBridge(t, "")
-	br.appendHistory(testDMChat, "main", "🔐 Please send me the verification code", history.Out)
+	br.AppendHistory(testDMChat, "main", "🔐 Please send me the verification code", history.Out)
 
 	tb.whatsApp(t).ProcessMessage(replyEvent("483920", "🔐 Please send me the verification code"))
 
@@ -246,7 +246,7 @@ func TestOTPGuardIsScopedToTheChatAndTheWindow(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newObservingBridge(t, "")
-			br.appendEntry(history.Entry{TS: time.Now().Add(-c.askedAgo).Format(time.RFC3339), Chat: c.askIn, From: "main", Text: "🔐 Please send me the verification code", Type: history.Out})
+			br.AppendEntry(history.Entry{TS: time.Now().Add(-c.askedAgo).Format(time.RFC3339), Chat: c.askIn, From: "main", Text: "🔐 Please send me the verification code", Type: history.Out})
 			c.m.Source = chat.SourceWhatsApp
 			tb.handleInbound(context.Background(), c.m)
 
@@ -766,7 +766,7 @@ func TestInterruptModeQueuedNotice(t *testing.T) {
 // either: the next message by the number starts afresh all the same.
 func TestResetByLIDStartsTheDMAfresh(t *testing.T) {
 	tb, br := newMainBridge(t, "")
-	br.appendHistory(testDMChat, "15551234567", "before the reset", history.In)
+	br.AppendHistory(testDMChat, "15551234567", "before the reset", history.In)
 	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: otherNumber + "@lid", Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
 	if before, _ := br.historyBefore(dm("next"), prompttext.DMHistoryWindow); len(before) != 0 {
 		t.Errorf("the DM's next run would read %+v", before)

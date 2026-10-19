@@ -1017,7 +1017,7 @@ func (b *Bridge) apiCalendarStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	g := b.google
-	m := br.settings.Load().manifest
+	m := br.Manifest()
 	resp := map[string]any{
 		"client_configured": g.Client() != nil,
 		"connected":         false,

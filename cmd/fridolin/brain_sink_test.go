@@ -33,7 +33,7 @@ func TestBrainSinkPreservesHistoryLockOrdering(t *testing.T) {
 			return []history.Entry{{Chat: "chat", Text: "waiting"}, {Chat: "other", Text: "elsewhere"}}
 		},
 	})
-	br.appendEntry(history.Entry{Chat: "chat", Text: "recorded", Type: history.In})
+	br.AppendEntry(history.Entry{Chat: "chat", Text: "recorded", Type: history.In})
 	got := br.undelivered([]string{"chat"})
 	if written != 1 || !queried || len(got) != 1 || got[0].Text != "waiting" {
 		t.Fatalf("callbacks/filtering: written=%d queried=%v entries=%+v", written, queried, got)

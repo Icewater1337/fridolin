@@ -227,8 +227,8 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		}
 		if os.Getenv("CODEX_API_KEY") == "" {
 			for _, br := range b.brainMgr.Brains() {
-				if !fsx.Exists(filepath.Join(brainStateOf(cfg.DataDir, br.id).codex, "auth.json")) {
-					resp.Warnings = append(resp.Warnings, "Sign Codex in for brain "+br.id+" from Terminal: "+codexLoginHint(cfg.DataDir, br.id))
+				if !fsx.Exists(filepath.Join(brainStateOf(cfg.DataDir, br.ID()).codex, "auth.json")) {
+					resp.Warnings = append(resp.Warnings, "Sign Codex in for brain "+br.ID()+" from Terminal: "+codexLoginHint(cfg.DataDir, br.ID()))
 				}
 			}
 		}

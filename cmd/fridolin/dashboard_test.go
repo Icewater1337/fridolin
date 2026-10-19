@@ -701,7 +701,7 @@ func TestIngestedCodeIsNotCaught(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}, "otp_guard": true, "otp_markers": ["Examplebank 2FA"]`)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "dm", Name: "DM", Routing: manifest.Routing{HandlesDMs: true}})
 	upDir := tb.addFolderBrain(t, manifest.Manifest{ID: "up", Name: "Uploads", ReplyChat: dm})
-	tb.brainMgr.Get("up").appendHistory(dm, "up", "Examplebank 2FA: reply with the code", history.Out)
+	tb.brainMgr.Get("up").AppendHistory(dm, "up", "Examplebank 2FA: reply with the code", history.Out)
 
 	if w := tb.ingest(`{"brain":"up","text":"483920"}`); w.Code != 202 {
 		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())

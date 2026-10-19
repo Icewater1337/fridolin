@@ -277,7 +277,7 @@ func (b *Bridge) calendarCall(fn calendarHandler) func(w http.ResponseWriter, r 
 	return func(w http.ResponseWriter, r *http.Request, br *Brain) {
 		ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 		defer cancel()
-		cals := calendarsOf(br.settings.Load().manifest)
+		cals := calendarsOf(br.Manifest())
 		out, err := fn(ctx, r, cals, func() (*googleToken, error) { return b.google.accessToken(ctx, br.ID()) })
 		if err != nil {
 			var ce *callError

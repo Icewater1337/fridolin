@@ -459,7 +459,7 @@ func (b *Bridge) keepInterrupted(br *Brain, m Inbound) {
 // change is not, since a deletion must take its message out of the
 // history however late.
 func (b *Bridge) resume(ctx context.Context) {
-	resumeRuns := b.brainMgr.slots.pause()
+	resumeRuns := b.brainMgr.PauseRuns()
 	defer resumeRuns()
 	// Taken out of bridge.db, what was kept is handed on whole: a stop
 	// that begins meanwhile keeps what is still waiting again, but a
@@ -631,7 +631,7 @@ func (b *Bridge) handleChange(c chat.Change) {
 	// message edited stays as it was.
 	if c.Kind == chat.ChangeEdit && br != nil {
 		edited := Inbound{Inbound: chat.Inbound{JID: c.Chat, ChatAlt: c.ChatAlt, Sender: c.Sender, Text: c.Text, Source: chat.SourceWhatsApp}}
-		if code, ok := br.catchesCode(edited, time.Now()); ok {
+		if code, ok := br.CatchesCode(edited, time.Now()); ok {
 			log.Printf("brain %s: kept an edited one-time code out of the conversation (OTP guard)", br.ID())
 			b.handOffCode(br, edited, code)
 			return
@@ -644,7 +644,7 @@ func (b *Bridge) handleChange(c chat.Change) {
 		return
 	}
 	waiting, edited := br.Change(c)
-	br.recordChange(c, waiting, edited)
+	br.RecordChange(c, waiting, edited)
 	// The dashboard's feed shows the history's lines: a deleted message
 	// must not linger there either.
 	text := ""
@@ -661,7 +661,7 @@ func (b *Bridge) handleChange(c chat.Change) {
 // routing of the brain that answers there says.
 func (b *Bridge) groupRules(jid string) groupRules {
 	if br := b.brainMgr.BrainFor(jid, true); br != nil {
-		return groupRulesFor(br.settings.Load().manifest.Routing)
+		return groupRulesFor(br.Manifest().Routing)
 	}
 	return defaultGroupRules
 }
@@ -729,7 +729,7 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	// the model. Whoever sent it is told, unless it was untagged chatter,
 	// which the bridge never answers: a code that vanished without a word
 	// looks lost.
-	if code, ok := br.catchesCode(m, time.Now()); ok {
+	if code, ok := br.CatchesCode(m, time.Now()); ok {
 		log.Printf("brain %s: kept a one-time code out of the conversation (OTP guard)", br.ID())
 		b.handOffCode(br, m, code)
 		if !m.Silent {
@@ -900,7 +900,7 @@ func (b *Bridge) delivered(ctx context.Context, r store.OutboxRow) error {
 		log.Printf("brain %s: delivered a reply to %s, but the brain is gone", r.Brain, r.Chat)
 		return remove()
 	}
-	return br.recordDelivered(r.Chat, r.History, remove)
+	return br.RecordDelivered(r.Chat, r.History, remove)
 }
 
 // undelivered is what brainID answered that waits in the outbox, as its

@@ -548,9 +548,9 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	rows := []brainRow{}
 	for _, br := range b.brainMgr.Brains() {
-		s := br.settings.Load()
-		rows = append(rows, brainRow{ID: br.ID(), Name: s.name, Dir: br.Dir(), Enabled: s.manifest.Backup.Enabled,
-			Exclude: nonNil(s.manifest.Backup.Exclude), Last: copyOf(m.state.Brains[br.ID()])})
+		manifest := br.Manifest()
+		rows = append(rows, brainRow{ID: br.ID(), Name: manifest.Name, Dir: br.Dir(), Enabled: manifest.Backup.Enabled,
+			Exclude: nonNil(manifest.Backup.Exclude), Last: copyOf(m.state.Brains[br.ID()])})
 	}
 	var job map[string]any
 	if j := m.job; j != nil {
@@ -969,8 +969,8 @@ func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger strin
 	}
 	var targets []*Brain
 	for _, br := range m.bm.Brains() {
-		s := br.settings.Load()
-		if len(ids) == 0 && !s.manifest.Backup.Enabled {
+		manifest := br.Manifest()
+		if len(ids) == 0 && !manifest.Backup.Enabled {
 			continue
 		}
 		if len(ids) > 0 && !slices.Contains(ids, br.ID()) {
@@ -1089,7 +1089,7 @@ func (m *BackupManager) noticeRefusal(ctx context.Context, br *Brain, res *Backu
 	if !send {
 		return
 	}
-	name := br.settings.Load().name
+	name := br.Name()
 	if name == "" {
 		name = id
 	}
@@ -1149,16 +1149,16 @@ func (m *BackupManager) backupBrain(ctx context.Context, br *Brain, trigger stri
 	// finish, but not for ever: a brain busy for hours must still be backed
 	// up, and an append that comes in during the sync is what rclone's
 	// retries are for (see syncDir).
-	if !br.waitIdle(ctx, m.idleWait) && ctx.Err() == nil {
+	if !br.WaitIdle(ctx, m.idleWait) && ctx.Err() == nil {
 		log.Printf("backup %s: the brain is still running after %v, so its folder is copied while it changes", br.ID(), m.idleWait)
 	}
-	s := br.settings.Load()
+	manifest := br.Manifest()
 	// One config snapshot for the filter, the check and the sync, so a
 	// backup.root changed mid-run cannot count one folder and sync into
 	// another.
 	cfg := m.cfgs.Get()
 	filter := filepath.Join(m.dir(), "filters-"+br.ID()+".txt")
-	if err := fsx.WriteFileAtomic(filter, []byte(brainFilter(s.manifest.Backup.Exclude, cfg.Backup.IncludeSecretFiles)), 0o600, false); err != nil {
+	if err := fsx.WriteFileAtomic(filter, []byte(brainFilter(manifest.Backup.Exclude, cfg.Backup.IncludeSecretFiles)), 0o600, false); err != nil {
 		return fail(err.Error())
 	}
 	base := backupPath(cfg.Backup, br.ID())

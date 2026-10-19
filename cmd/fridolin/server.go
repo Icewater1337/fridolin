@@ -145,7 +145,7 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 	// hand-off of the code that answers it repeats (see handOffCode).
 	resp := map[string]string{"status": "sent"}
 	request := ""
-	if br := b.brainMgr.BrainFor(jid, chat.IsGroupJID(jid)); br != nil && br.asksForCode(req.Text) {
+	if br := b.brainMgr.BrainFor(jid, chat.IsGroupJID(jid)); br != nil && br.AsksForCode(req.Text) {
 		request = otp.NewRequestID()
 		resp["otp_request"] = request
 	}
@@ -224,7 +224,7 @@ func (b *Bridge) appendHTTPMessageToHistory(who principal, jid, text, request st
 	if who.kind == callerBrain {
 		from = who.brain
 	}
-	br.appendEntry(history.Entry{From: from, Chat: jid, Text: text, Type: history.Out, Via: who.via(), OTPRequest: request})
+	br.AppendEntry(history.Entry{From: from, Chat: jid, Text: text, Type: history.Out, Via: who.via(), OTPRequest: request})
 }
 
 // httpIngest handles POST /ingest. It feeds files that arrived outside
@@ -331,7 +331,7 @@ func (b *Bridge) submitHandOff(br *Brain, jid, sender, text string, media []stri
 // handed in privately must not land in a group because the brain also
 // serves one.
 func (b *Bridge) replyChatFor(br *Brain, cfg *config.Config) string {
-	m := br.settings.Load().manifest
+	m := br.Manifest()
 	if m.ReplyChat != "" {
 		return m.ReplyChat
 	}

@@ -88,13 +88,13 @@ func TestPromptShowsTheMessageOnce(t *testing.T) {
 func TestHistoryBefore(t *testing.T) {
 	br := bareBrain(t)
 	for _, text := range []string{"one", "two", "three"} {
-		br.appendHistory(testDMChat, "15551234567", text, history.In)
+		br.AppendHistory(testDMChat, "15551234567", text, history.In)
 	}
-	br.appendHistory(testGroup, "15551234567", "elsewhere", history.In)
-	logged := br.appendEntry(history.Entry{Chat: testDMChat, From: "15551234567", Text: "four", Type: history.In})
-	br.appendHistory(testDMChat, "15551234567", "five", history.In)
-	br.appendHistory(testDMChat, br.ID(), "reply", history.Out)
-	br.appendHistory(testGroup, br.ID(), "reply elsewhere", history.Out)
+	br.AppendHistory(testGroup, "15551234567", "elsewhere", history.In)
+	logged := br.AppendEntry(history.Entry{Chat: testDMChat, From: "15551234567", Text: "four", Type: history.In})
+	br.AppendHistory(testDMChat, "15551234567", "five", history.In)
+	br.AppendHistory(testDMChat, br.ID(), "reply", history.Out)
+	br.AppendHistory(testGroup, br.ID(), "reply elsewhere", history.Out)
 	br.appendHistoryVia(testDMChat, "script", "scripted", history.Out, "script")
 	texts := func(es []history.Entry) string {
 		var out []string
@@ -131,10 +131,10 @@ func TestHistoryBefore(t *testing.T) {
 // it is looked for as is the one that reads back.
 func TestHistoryBeforeFindsInvalidUTF8(t *testing.T) {
 	br := bareBrain(t)
-	br.appendHistory(testDMChat, "15551234567", "one", history.In)
+	br.AppendHistory(testDMChat, "15551234567", "one", history.In)
 	m := dm("bad \xff text")
-	m.logged = br.appendEntry(history.Entry{Chat: m.JID, From: m.Sender, Text: m.Text, Type: history.In})
-	br.appendHistory(testDMChat, "15551234567", "later", history.In)
+	m.logged = br.AppendEntry(history.Entry{Chat: m.JID, From: m.Sender, Text: m.Text, Type: history.In})
+	br.AppendHistory(testDMChat, "15551234567", "later", history.In)
 	if before, since := br.historyBefore(m, 10); len(before) != 1 || before[0].Text != "one" || len(since) != 0 {
 		t.Errorf("historyBefore = %+v, %+v; want only the line before", before, since)
 	}
@@ -162,21 +162,21 @@ func TestHistoryBeforeAfterChanges(t *testing.T) {
 		{"a merged message, its first part deleted", func(br *Brain) Inbound {
 			first, second := dm("first part"), dm("second part")
 			first.ID, second.ID = "3EB0A", "3EB0B"
-			m := br.logInbound(first.merge(second))
+			m := br.logInbound(first.Merge(second))
 			c := chat.Change{Kind: chat.ChangeRevoke, Chat: testDMChat, Sender: first.Sender, Target: "3EB0A"}
-			m, _, _ = m.applyChange(c)
-			br.recordChange(c, true, nil)
-			br.appendHistory(testDMChat, br.ID(), "reply", history.Out)
+			m, _, _ = m.ApplyChange(c)
+			br.RecordChange(c, true, nil)
+			br.AppendHistory(testDMChat, br.ID(), "reply", history.Out)
 			return m
 		}, "one", "reply"},
 		{"a message edited while it waited", func(br *Brain) Inbound {
 			msg := dm("book Tuesday")
 			msg.ID = "3EB0A"
 			m := br.logInbound(msg)
-			br.appendHistory(testDMChat, "15551234567", "later", history.In)
+			br.AppendHistory(testDMChat, "15551234567", "later", history.In)
 			c := chat.Change{Kind: chat.ChangeEdit, Chat: testDMChat, Sender: msg.Sender, Target: "3EB0A", Text: "book Wednesday"}
-			m, _, _ = m.applyChange(c)
-			br.recordChange(c, true, &m)
+			m, _, _ = m.ApplyChange(c)
+			br.RecordChange(c, true, &m)
 			return m
 		}, "one", ""},
 		{"answers in the outbox", func(br *Brain) Inbound {
@@ -191,14 +191,14 @@ func TestHistoryBeforeAfterChanges(t *testing.T) {
 				}
 			}})
 			m := br.logInbound(dm("two"))
-			br.appendHistory(testDMChat, br.ID(), "delivered", history.Out)
+			br.AppendHistory(testDMChat, br.ID(), "delivered", history.Out)
 			return m
 		}, "one", "waiting delivered"},
 		{"a quiet chat behind a busy one", func(br *Brain) Inbound {
 			filler := strings.Repeat("chatter ", 128)
 			// More than a block of the reader, well within its budget.
 			for range (2 << 20) / len(filler) {
-				br.appendHistory(testGroup, "15559876543", filler, history.In)
+				br.AppendHistory(testGroup, "15559876543", filler, history.In)
 			}
 			return br.logInbound(dm("two"))
 		}, "one", ""},
@@ -206,7 +206,7 @@ func TestHistoryBeforeAfterChanges(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			br := bareBrain(t)
-			br.appendHistory(testDMChat, "15551234567", "one", history.In)
+			br.AppendHistory(testDMChat, "15551234567", "one", history.In)
 			m := c.setup(br)
 			before, since := br.historyBefore(m, prompttext.DMHistoryWindow)
 			if texts(before) != c.before || texts(since) != c.since {

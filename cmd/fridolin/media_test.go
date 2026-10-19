@@ -141,7 +141,7 @@ func TestMergedMessageNamesItsFilesInTheInbox(t *testing.T) {
 				m.Media = []string{writeTestFile(t, filepath.Join(media, mediafiles.IncomingDir, file), file)}
 				return m
 			}
-			m := part("3EB0ONE", "one.jpg").merge(part("3EB0TWO", "two.jpg"))
+			m := part("3EB0ONE", "one.jpg").Merge(part("3EB0TWO", "two.jpg"))
 			if _, _, _, err := mgr.Submit(m); err != nil {
 				t.Fatal(err)
 			}
@@ -152,7 +152,7 @@ func TestMergedMessageNamesItsFilesInTheInbox(t *testing.T) {
 				if !waiting {
 					t.Fatal("the merged message was not waiting")
 				}
-				br.recordChange(ch, waiting, edited)
+				br.RecordChange(ch, waiting, edited)
 			}
 
 			// Every file the history names is in the inbox.
