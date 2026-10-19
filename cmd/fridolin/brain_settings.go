@@ -1,6 +1,21 @@
 package main
 
-import "github.com/Icewater1337/fridolin/internal/manifest"
+import (
+	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/manifest"
+)
+
+// brainQueueInterrupt is the runtime protocol value. Composition pins it to
+// the independently owned configuration enum without a runtime config import.
+const brainQueueInterrupt = "interrupt"
+
+// brainInputRules supplies content-only decisions from command composition.
+// The runtime does not depend on transport identity or pipeline filtering.
+type brainInputRules struct {
+	Chats     func(chat.Inbound) []string
+	Observe   func(string, chat.Inbound) bool
+	BuildChat func(string) bool
+}
 
 // brainGlobals is the runtime-owned snapshot projected by the command. Its
 // defaults contain no per-brain manifest or prompt selection. The two Codex

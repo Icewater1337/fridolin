@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/platform"
@@ -56,3 +57,11 @@ func startBrainViewer(name, streamLog, cwd string, passthrough []string) (*platf
 }
 
 func isBuildChat(jid string) bool { return brainOfBuildJID(jid) != "" }
+
+func commandBrainInputRules() brainInputRules {
+	return brainInputRules{
+		Chats:     func(m chat.Inbound) []string { return chatJIDs(Inbound{Inbound: m}) },
+		Observe:   func(mode string, m chat.Inbound) bool { return observeRuns(mode, Inbound{Inbound: m}) },
+		BuildChat: isBuildChat,
+	}
+}

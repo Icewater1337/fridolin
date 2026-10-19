@@ -59,10 +59,10 @@ type Brain struct {
 	// rather than the path, which could lead elsewhere by then.
 	root *os.Root
 
-	settings  atomic.Pointer[brainSettings]
-	runner    brainRunner
-	buildChat func(string) bool
-	sink      *brainSinkRef
+	settings atomic.Pointer[brainSettings]
+	runner   brainRunner
+	input    brainInputRules
+	sink     *brainSinkRef
 	// slots are the run slots all brains share (max_concurrent_runs); nil
 	// for no limit.
 	slots *runSlots
@@ -232,7 +232,7 @@ func (br *Brain) holdsLines(m Inbound) bool {
 	if m.logged == (history.Entry{}) {
 		return false
 	}
-	return m.loggedIn(history.ForChat(br.root, br.id, chatJIDs(m), promptHistoryBudget, m.enoughBefore(1))) >= 0
+	return m.loggedIn(history.ForChat(br.root, br.id, br.input.Chats(m.Inbound), promptHistoryBudget, m.enoughBefore(1))) >= 0
 }
 
 // historyTime is t as a history line has it, "" for none: the time the
@@ -268,7 +268,7 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	s := br.settings.Load()
 	// Untagged chatter needs nothing more than the history, unless the
 	// brain observes it with runs: the next run in the chat reads it there.
-	queues := !m.Silent || observeRuns(s.observe, *m)
+	queues := !m.Silent || br.input.Observe(s.observe, m.Inbound)
 
 	// Turned away before anything is written: a message the brain does not
 	// take is not in its history, where the sender's retry after "queue is
@@ -439,7 +439,7 @@ func (br *Brain) queueOrderLocked() []int {
 // whether it interrupts its sender's own run, which only a request does in
 // interrupt mode, and which waiting or running messages it replaces.
 func supersedes(m Inbound, mode string) (interrupting bool, replaces func(Inbound) bool) {
-	interrupting = mode == config.QueueModeInterrupt && !m.Silent && m.Source != chat.SourceIngest
+	interrupting = mode == brainQueueInterrupt && !m.Silent && m.Source != chat.SourceIngest
 	return interrupting, func(p Inbound) bool {
 		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != chat.SourceIngest))
 	}
@@ -1072,7 +1072,7 @@ const stderrLogBytes = 4000
 var promptHistoryBudget int64 = 16 << 20
 
 // historyBefore returns what m's run is shown of its chat, the one that
-// goes by chatJIDs(m), oldest first and at most limit entries in all.
+// goes by br.input.Chats(m.Inbound), oldest first and at most limit entries in all.
 // before is the chat's history before m's own lines (Inbound.logged).
 // since is what went out to the chat after them, while m waited in the
 // queue, and what waits in the outbox to go out ahead of anything m's
@@ -1086,7 +1086,7 @@ var promptHistoryBudget int64 = 16 << 20
 // empty; when the history cannot be read (see openInFolder), only the
 // outbox's are left.
 func (br *Brain) historyBefore(m Inbound, limit int) (before, since []history.Entry) {
-	chats := chatJIDs(m)
+	chats := br.input.Chats(m.Inbound)
 	// The answers on their way first, then the history: one delivered in
 	// between is in both, and withUndelivered takes it once.
 	pending := br.undelivered(chats)
@@ -1169,7 +1169,7 @@ func (br *Brain) identities() map[string]string {
 // prompt file, the chat's recent history and the identity map. renderPrompt
 // puts it into words.
 func (br *Brain) buildPrompt(s *brainSettings, m Inbound) string {
-	in := prompttext.Input{Now: time.Now(), BrainID: br.id, Message: m.Inbound, BuildChat: br.buildChat != nil && br.buildChat(m.JID), ObserveOnly: m.Silent}
+	in := prompttext.Input{Now: time.Now(), BrainID: br.id, Message: m.Inbound, BuildChat: br.input.BuildChat != nil && br.input.BuildChat(m.JID), ObserveOnly: m.Silent}
 	if name := s.promptFile; name != "" {
 		if data, err := br.readFile(name); err != nil {
 			log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)
@@ -1584,7 +1584,7 @@ func (bm *BrainManager) reload(specs []manifest.Spec, issues []registry.Issue, c
 				root:        root,
 				runner:      &commandRunner{sandbox: bm.profiler, hooks: bm.hooks},
 				viewerStart: startBrainViewer,
-				buildChat:   isBuildChat,
+				input:       commandBrainInputRules(),
 				sink:        bm.sink,
 				slots:       bm.slots,
 			}

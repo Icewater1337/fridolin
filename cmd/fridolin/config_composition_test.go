@@ -40,3 +40,9 @@ func TestConfigDefaultsMatchRuntimeContracts(t *testing.T) {
 		t.Fatal("config accepted less than the chunker's minimum")
 	}
 }
+
+func TestBrainQueueModeMatchesConfiguration(t *testing.T) {
+	if brainQueueInterrupt != config.QueueModeInterrupt {
+		t.Fatal("runtime and configuration interrupt modes differ")
+	}
+}
