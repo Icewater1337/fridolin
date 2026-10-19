@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"github.com/Icewater1337/fridolin/internal/testutil"
 	"sync"
 	"testing"
 	"testing/synctest"
@@ -8,7 +9,6 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 type flushes struct {
