@@ -323,7 +323,7 @@ func TestGroupSenderAndQuoteByNumber(t *testing.T) {
 		t.Fatal(err)
 	}
 	own := types.JID{User: otherNumber, Device: 12, Server: types.DefaultUserServer}
-	wa := tb.whatsAppOffline(&store.Device{ID: &own, LIDs: personLIDs{}})
+	wa := tb.whatsAppOffline(t, &store.Device{ID: &own, LIDs: personLIDs{}})
 	lid := types.NewJID(personLID, types.HiddenUserServer)
 	evt := groupEvent(&waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 		Text: proto.String("@claude and you?"),
@@ -335,7 +335,7 @@ func TestGroupSenderAndQuoteByNumber(t *testing.T) {
 	}})
 	evt.Info.Sender = lid
 	evt.Info.AddressingMode = types.AddressingModeLID
-	wa.handleMessage(evt)
+	wa.ProcessMessage(evt)
 	waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) > 0 })
 	// The new message names its sender from the map too.
 	if got := tb.sentTo(testGroup)[0]; !strings.Contains(got, `Alex (15551234567) says: [reply to 15551234567: "I'm in"]`) {

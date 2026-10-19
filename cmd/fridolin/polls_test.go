@@ -353,7 +353,7 @@ func TestPollVoteBecomesAHistoryEvent(t *testing.T) {
 			if err := tb.store.SavePoll("3EB0POLL", testGroup, c.sentBy, "When should we meet?", []string{"Monday 2pm", "Tuesday 3pm"}); err != nil {
 				t.Fatal(err)
 			}
-			tb.whatsApp().recordVote("3EB0POLL", voter, [][]byte{hash("Tuesday 3pm")})
+			tb.whatsApp(t).ProcessVote("3EB0POLL", voter, [][]byte{hash("Tuesday 3pm")})
 
 			for _, br := range []*Brain{mainBrain, tb.brainMgr.Get("files")} {
 				h := readHistory(t, br)
@@ -388,10 +388,9 @@ func TestPollVoteIsLoggedAtDebug(t *testing.T) {
 	if err := tb.store.SavePoll("3EB0POLL", testGroup, "main", "When should we meet?", []string{"Monday 2pm", "Tuesday 3pm"}); err != nil {
 		t.Fatal(err)
 	}
-	wa := tb.whatsApp()
 	rec := &testWhatsApp{}
-	wa.log = testWaLogger{rec}
-	wa.recordVote("3EB0POLL", types.NewJID(otherNumber, types.DefaultUserServer), [][]byte{hash("Tuesday 3pm")})
+	wa := tb.whatsAppOffline(t, &wastore.Device{}, func(opts *waOptions) { opts.Log = testWaLogger{rec} })
+	wa.ProcessVote("3EB0POLL", types.NewJID(otherNumber, types.DefaultUserServer), [][]byte{hash("Tuesday 3pm")})
 	if got := strings.Join(logged(), "\n"); strings.Contains(got, otherNumber) || strings.Contains(got, "Tuesday 3pm") {
 		t.Errorf("main log %q names the voter or the choice", got)
 	}
@@ -445,15 +444,14 @@ func TestPollVoteFailuresMaskTheVoter(t *testing.T) {
 	}{
 		{"not decrypted", func(t *testing.T, _ *testBridge, wa *WhatsAppClient) {
 			// The bridge keeps another secret than the phone used.
-			wa.client = whatsmeow.NewClient(&wastore.Device{MsgSecrets: pollSecrets{key: make([]byte, 32)}}, waLog.Noop)
-			wa.handlePollVote(pollVoteEvent(t, []byte("0123456789abcdef0123456789abcdef"), voter, "3EB0POLL", "Tuesday 3pm"))
+			wa.ProcessMessage(pollVoteEvent(t, []byte("0123456789abcdef0123456789abcdef"), voter, "3EB0POLL", "Tuesday 3pm"))
 		}, "ERROR Failed to decrypt poll vote from " + maskPhone(otherNumber) + "@s.whatsapp.net: "},
 		{"not saved", func(t *testing.T, tb *testBridge, wa *WhatsAppClient) {
 			if _, err := testStoreSQL(t, tb.cfgs.Get().DBPath).Exec(`CREATE TRIGGER refuse_votes BEFORE INSERT ON poll_votes BEGIN SELECT RAISE(ABORT, 'the disk is full'); END`); err != nil {
 				t.Fatal(err)
 			}
 			hash := sha256.Sum256([]byte("Tuesday 3pm"))
-			wa.recordVote("3EB0POLL", voter, [][]byte{hash[:]})
+			wa.ProcessVote("3EB0POLL", voter, [][]byte{hash[:]})
 		}, "ERROR Failed to save poll vote from " + maskPhone(otherNumber) + "@s.whatsapp.net: "},
 	}
 	for _, c := range cases {
@@ -463,9 +461,8 @@ func TestPollVoteFailuresMaskTheVoter(t *testing.T) {
 			if err := tb.store.SavePoll("3EB0POLL", voter.String(), "main", "When should we meet?", []string{"Monday 2pm", "Tuesday 3pm"}); err != nil {
 				t.Fatal(err)
 			}
-			wa := tb.whatsApp()
 			rec := &testWhatsApp{}
-			wa.log = testWaLogger{rec}
+			wa := tb.whatsAppOffline(t, &wastore.Device{MsgSecrets: pollSecrets{key: make([]byte, 32)}}, func(opts *waOptions) { opts.Log = testWaLogger{rec} })
 			c.vote(t, tb, wa)
 			// The debug log may name the voter; nothing else may.
 			got := logged()

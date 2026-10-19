@@ -203,15 +203,16 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		b.dev = devchat.New(func(text string) []string { return ChunkMessage(text, cfgs.Get().MaxChunkSize) })
 		b.wa = b.dev
 	} else {
-		wa, err := NewWhatsAppClient(cfgs.Get, store, b.handleInbound, b.recordIgnored)
+		waOpts := whatsAppOptions(cfgs.Get, store, b.handleInbound, b.recordIgnored)
+		waOpts.OnVote = whatsAppVoteHandler(b.recordVote)
+		waOpts.OnChange = b.handleChange
+		waOpts.GroupRules = whatsAppGroupRules(b.groupRules)
+		wa, err := newWhatsAppClient(waOpts)
 		if err != nil {
 			return nil, fmt.Errorf("creating whatsapp client: %w", err)
 		}
-		wa.onVote = whatsAppVoteHandler(b.recordVote)
-		wa.onChange = b.handleChange
-		wa.groupRules = whatsAppGroupRules(b.groupRules)
 		b.wa = wa
-		b.lids = wa.lidStore
+		b.lids = wa.LIDStore
 	}
 
 	b.brainMgr.SetHooks(BrainHooks{

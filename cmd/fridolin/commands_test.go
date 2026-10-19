@@ -66,24 +66,36 @@ func newMainBridgeWith(t *testing.T, extra string, m BrainManifest) (*testBridge
 // messages and poll votes to the test bridge, like the real one. It
 // cannot download an attachment, and sends what it tells a chat about one
 // through the test bridge.
-func (tb *testBridge) whatsApp() *WhatsAppClient {
-	ctx, cancel := context.WithCancel(context.Background())
-	wa := &WhatsAppClient{cfg: whatsAppSettings(tb.cfgs.Get), container: tb.store.Container, polls: whatsAppPollStore{tb.store}, chunks: ChunkMessage, identity: whatsAppIdentity(), intake: chatQueues{mask: maskChatJID}, outbound: whatsAppOutbound(), text: whatsAppText(), inbox: mediaInboxAt, log: waLog.Noop, handler: whatsAppInboundHandler(tb.handleInbound), onVote: whatsAppVoteHandler(tb.recordVote), onChange: tb.handleChange, groupRules: whatsAppGroupRules(tb.groupRules), ctx: ctx, cancel: cancel}
-	wa.media = wa.client // nil: every download fails with ErrClientIsNil
-	wa.notify = func(jid, text string) { tb.dev.SendMessage(ctx, jid, text) }
-	return wa
+func (tb *testBridge) whatsApp(t *testing.T) *WhatsAppClient {
+	return tb.whatsAppOffline(t, &store.Device{}, func(opts *waOptions) { opts.Downloader = (*whatsmeow.Client)(nil) })
 }
 
-// whatsAppOffline is whatsApp with a whatsmeow client that never connected,
-// on dev, the bridge account's device store, whose JIDs and LIDs the group
-// path reads; what it would ask WhatsApp fails at once, without reaching
-// the network.
-func (tb *testBridge) whatsAppOffline(dev *store.Device) *WhatsAppClient {
-	wa := tb.whatsApp()
-	wa.client = whatsmeow.NewClient(dev, waLog.Noop)
-	wa.media = wa.client
-	// As whatsmeow reports them once connected.
-	wa.setOwn(dev.GetJID(), dev.GetLID())
+// fixedDeviceContainer makes an offline transport use the supplied device.
+// GetFirstDevice cannot fail and NewDevice returns a fresh empty session.
+type fixedDeviceContainer struct{ device *store.Device }
+
+func (c fixedDeviceContainer) GetFirstDevice(context.Context) (*store.Device, error) {
+	return c.device, nil
+}
+func (c fixedDeviceContainer) NewDevice() *store.Device { return &store.Device{} }
+
+func (tb *testBridge) whatsAppOffline(t *testing.T, dev *store.Device, configure ...func(*waOptions)) *WhatsAppClient {
+	t.Helper()
+	opts := whatsAppOptions(tb.cfgs.Get, tb.store, tb.handleInbound, nil)
+	opts.Container = fixedDeviceContainer{dev}
+	opts.Log = waLog.Noop
+	opts.OnVote = whatsAppVoteHandler(tb.recordVote)
+	opts.OnChange = tb.handleChange
+	opts.GroupRules = whatsAppGroupRules(tb.groupRules)
+	opts.Notify = func(jid, text string) { _ = tb.dev.SendMessage(context.Background(), jid, text) }
+	for _, apply := range configure {
+		apply(&opts)
+	}
+	wa, err := newWhatsAppClient(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(wa.Disconnect)
 	return wa
 }
 
@@ -181,7 +193,7 @@ func startLongRun(t *testing.T, tb *testBridge, br *Brain, m Inbound) {
 // "[reply to …]" line it has always been.
 func TestQuotedReplyReachesModelAndHistory(t *testing.T) {
 	tb, br := newMainBridge(t, "")
-	tb.whatsApp().handleMessage(replyEvent("yes, book it", "Lunch at 12?"))
+	tb.whatsApp(t).ProcessMessage(replyEvent("yes, book it", "Lunch at 12?"))
 
 	want := `[reply to ` + otherNumber + `: "Lunch at 12?"]` + "\nyes, book it"
 	waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testDMChat)) > 0 })
@@ -200,7 +212,7 @@ func TestOTPGuardDropsQuotedCode(t *testing.T) {
 	tb, br := newMainBridge(t, "")
 	br.appendHistory(testDMChat, "main", "🔐 Please send me the verification code", history.Out)
 
-	tb.whatsApp().handleMessage(replyEvent("483920", "🔐 Please send me the verification code"))
+	tb.whatsApp(t).ProcessMessage(replyEvent("483920", "🔐 Please send me the verification code"))
 
 	otpFile := filepath.Join(tb.cfgs.Get().DataDir, "otp", "main.json")
 	waitFor(t, 5*time.Second, "the code to be handed over", func() bool {
@@ -316,10 +328,10 @@ func TestTriggerOnlyReplyAsksAboutTheQuote(t *testing.T) {
 		send func(tb *testBridge)
 	}{
 		{"in a group, from WhatsApp", testGroup, func(tb *testBridge) {
-			tb.whatsAppOffline(&store.Device{}).handleMessage(groupEvent(replyMessage("@claude", "Lunch?")))
+			tb.whatsAppOffline(t, &store.Device{}).ProcessMessage(groupEvent(replyMessage("@claude", "Lunch?")))
 		}},
 		{"in a DM, from WhatsApp", testDMChat, func(tb *testBridge) {
-			tb.whatsApp().handleMessage(replyEvent("", "Lunch?"))
+			tb.whatsApp(t).ProcessMessage(replyEvent("", "Lunch?"))
 		}},
 		{"in a group, handed to the bridge", testGroup, func(tb *testBridge) {
 			tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567",
@@ -352,13 +364,13 @@ func TestFailedDownloadIsAnswered(t *testing.T) {
 	}{
 		{"in a DM", testDMChat, func(tb *testBridge) {
 			chatJID := types.NewJID("15551234567", types.DefaultUserServer)
-			tb.whatsApp().handleMessage(&events.Message{
+			tb.whatsApp(t).ProcessMessage(&events.Message{
 				Info:    types.MessageInfo{MessageSource: types.MessageSource{Chat: chatJID, Sender: chatJID}, ID: "3EB0PHOTO", Timestamp: time.Now()},
 				Message: photo,
 			})
 		}},
 		{"in a group", testGroup, func(tb *testBridge) {
-			tb.whatsAppOffline(&store.Device{}).handleMessage(groupEvent(photo))
+			tb.whatsAppOffline(t, &store.Device{}).ProcessMessage(groupEvent(photo))
 		}},
 	}
 	for _, c := range cases {
@@ -402,7 +414,7 @@ func TestPreviewShowsTheQuote(t *testing.T) {
 func TestQuotedCommandIsRecognised(t *testing.T) {
 	t.Run("!help", func(t *testing.T) {
 		tb, br := newMainBridge(t, "")
-		tb.whatsApp().handleMessage(replyEvent("!help", "Here is your summary."))
+		tb.whatsApp(t).ProcessMessage(replyEvent("!help", "Here is your summary."))
 		waitFor(t, 5*time.Second, "the help text", func() bool { return tb.sentPrefix(testDMChat, "🤖 *Fridolin*") })
 		time.Sleep(200 * time.Millisecond)
 		if h := readHistory(t, br); len(h) > 0 {
@@ -413,7 +425,7 @@ func TestQuotedCommandIsRecognised(t *testing.T) {
 	t.Run("!stop", func(t *testing.T) {
 		tb, br := newMainBridge(t, "")
 		startLongRun(t, tb, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "write a long report", Source: chat.SourceWhatsApp}})
-		tb.whatsApp().handleMessage(replyEvent("!stop", workingNotice))
+		tb.whatsApp(t).ProcessMessage(replyEvent("!stop", workingNotice))
 		// The confirmation goes out once the run has stopped, so wait for it
 		// rather than for the run: the snapshot clears a moment earlier.
 		waitFor(t, 10*time.Second, "the stop confirmation", func() bool { return tb.sentPrefix(testDMChat, "🛑") })
@@ -456,8 +468,8 @@ func TestMentionAddressesTheBridge(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tb, _ := newMainBridge(t, "")
-			wa := tb.whatsAppOffline(&store.Device{ID: &own, LIDs: bridgeLIDs{}})
-			wa.handleMessage(groupEvent(&waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+			wa := tb.whatsAppOffline(t, &store.Device{ID: &own, LIDs: bridgeLIDs{}})
+			wa.ProcessMessage(groupEvent(&waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 				Text:        proto.String(c.text),
 				ContextInfo: &waE2E.ContextInfo{MentionedJID: []string{c.mentioned}},
 			}}))

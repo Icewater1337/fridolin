@@ -61,6 +61,10 @@ type waOptions struct {
 	Outbound   waOutbound
 	Text       waText
 	Inbox      func(string) mediafiles.Inbox
+	// Optional I/O consumers use the current WhatsApp client when nil.
+	Downloader mediaDownloader
+	Groups     groupLister
+	Notify     func(jid, text string)
 }
 
 // waOutbound preserves the shared recipient errors and partial-send contract

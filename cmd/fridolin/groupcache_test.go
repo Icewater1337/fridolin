@@ -340,7 +340,7 @@ func TestJoinedGroupsAnswersFromTheCache(t *testing.T) {
 			tw.lister = fl
 			for i := range 2 {
 				if i == 1 && c.evt != nil {
-					tw.eventHandler(c.evt)
+					tw.HandleEvent(c.evt)
 				}
 				got, err := tw.JoinedGroups(t.Context())
 				if err != nil || !slices.Equal(got, want) {

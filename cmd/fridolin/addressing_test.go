@@ -81,8 +81,8 @@ func TestAddressGroup(t *testing.T) {
 func TestGroupReplyToTheBridgeIsAnswered(t *testing.T) {
 	tb, _ := newMainBridge(t, "")
 	own := types.JID{User: otherNumber, Device: 12, Server: types.DefaultUserServer}
-	wa := tb.whatsAppOffline(&store.Device{ID: &own, LIDs: bridgeLIDs{}})
-	wa.handleMessage(groupEvent(replyMessage("and on Sunday?", "The pool opens at 9 on Saturday.")))
+	wa := tb.whatsAppOffline(t, &store.Device{ID: &own, LIDs: bridgeLIDs{}})
+	wa.ProcessMessage(groupEvent(replyMessage("and on Sunday?", "The pool opens at 9 on Saturday.")))
 	waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) > 0 })
 }
 
@@ -97,13 +97,12 @@ func TestGroupFilesAndForwardsCanBeChatter(t *testing.T) {
 	}})
 	br := tb.brainMgr.Get("family")
 	own := types.JID{User: otherNumber, Device: 12, Server: types.DefaultUserServer}
-	wa := tb.whatsAppOffline(&store.Device{ID: &own, LIDs: bridgeLIDs{}})
 	dl := &fakeDownloader{body: "jpeg"}
-	wa.media = dl
+	wa := tb.whatsAppOffline(t, &store.Device{ID: &own, LIDs: bridgeLIDs{}}, func(opts *waOptions) { opts.Downloader = dl })
 
-	wa.handleMessage(groupEvent(&waE2E.Message{ImageMessage: &waE2E.ImageMessage{}}))
-	wa.handleMessage(groupEvent(&waE2E.Message{ImageMessage: &waE2E.ImageMessage{Caption: proto.String("the view from the hut")}}))
-	wa.handleMessage(groupEvent(&waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+	wa.ProcessMessage(groupEvent(&waE2E.Message{ImageMessage: &waE2E.ImageMessage{}}))
+	wa.ProcessMessage(groupEvent(&waE2E.Message{ImageMessage: &waE2E.ImageMessage{Caption: proto.String("the view from the hut")}}))
+	wa.ProcessMessage(groupEvent(&waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 		Text: proto.String("a chain letter"), ContextInfo: &waE2E.ContextInfo{IsForwarded: proto.Bool(true)},
 	}}))
 	// Each arrives on a goroutine of its own, in any order.
@@ -130,7 +129,7 @@ func TestGroupFilesAndForwardsCanBeChatter(t *testing.T) {
 	}
 
 	// The trigger still addresses the bridge, a file along with it.
-	wa.handleMessage(groupEvent(&waE2E.Message{ImageMessage: &waE2E.ImageMessage{Caption: proto.String("@claude what is this?")}}))
+	wa.ProcessMessage(groupEvent(&waE2E.Message{ImageMessage: &waE2E.ImageMessage{Caption: proto.String("@claude what is this?")}}))
 	waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) > 0 })
 	if n := dl.callCount(); n != 1 {
 		t.Errorf("%d downloads, want the addressed photo's", n)

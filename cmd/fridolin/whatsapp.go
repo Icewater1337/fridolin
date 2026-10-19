@@ -132,6 +132,8 @@ func newWhatsAppClient(opts waOptions) (*WhatsAppClient, error) {
 		onChange:   opts.OnChange,
 		groupRules: opts.GroupRules,
 		log:        logger,
+		media:      opts.Downloader,
+		lister:     opts.Groups,
 		ctx:        ctx,
 		cancel:     cancel,
 		state:      chat.LinkState{Mode: "connecting", Since: time.Now()},
@@ -140,9 +142,12 @@ func newWhatsAppClient(opts waOptions) (*WhatsAppClient, error) {
 		ownLID: deviceStore.GetLID().ToNonAD(),
 	}
 	wa.state.OwnNumber = wa.own.User
-	wa.notify = wa.sendNotice
+	wa.notify = opts.Notify
+	if wa.notify == nil {
+		wa.notify = wa.sendNotice
+	}
 
-	client.AddEventHandler(wa.eventHandler)
+	client.AddEventHandler(wa.HandleEvent)
 	return wa, nil
 }
 
@@ -227,12 +232,12 @@ func (wa *WhatsAppClient) JoinedGroups(ctx context.Context) ([]chat.Group, error
 	})
 }
 
-// eventHandler handles all whatsmeow events, on whatsmeow's one event
+// HandleEvent handles all whatsmeow events, on whatsmeow's one event
 // goroutine, which must not wait: a message, an edit, a deletion or a
 // poll vote goes onto its chat's queue, whose worker handles it (see
 // chatQueues); the connection's events go to connectionEvent. The group
 // list sees each first, as group and connection events are what drop it.
-func (wa *WhatsAppClient) eventHandler(rawEvt interface{}) {
+func (wa *WhatsAppClient) HandleEvent(rawEvt interface{}) {
 	wa.groups.observe(rawEvt)
 	if evt, ok := rawEvt.(*events.Message); ok {
 		wa.enqueue(evt)
@@ -249,7 +254,7 @@ func (wa *WhatsAppClient) enqueue(evt *events.Message) {
 		wa.handleMessage(evt)
 		return
 	}
-	if err := wa.intake.add(chatJID, func() { wa.handleEvent(evt) }); errors.Is(err, errIntakeClosed) {
+	if err := wa.intake.add(chatJID, func() { wa.ProcessMessage(evt) }); errors.Is(err, errIntakeClosed) {
 		wa.log.Debugf("Dropped message %s: the client is disconnecting", evt.Info.ID)
 	}
 }
@@ -272,13 +277,14 @@ func (wa *WhatsAppClient) queueChat(src types.MessageSource) (string, bool) {
 		if !src.IsFromMe && (src.Sender.IsEmpty() || src.Sender.ToNonAD() == chatJID) {
 			alt = src.SenderAlt
 		}
-		chatJID = wa.identity.Canonical(wa.storeCtx(), wa.lidStore(), chatJID, alt)
+		chatJID = wa.identity.Canonical(wa.storeCtx(), wa.LIDStore(), chatJID, alt)
 	}
 	return chatJID.String(), true
 }
 
-// handleEvent handles a message event, on its chat's worker.
-func (wa *WhatsAppClient) handleEvent(evt *events.Message) {
+// ProcessMessage handles one message synchronously. The event adapter calls
+// it from the chat's FIFO worker; callers supplying events own their ordering.
+func (wa *WhatsAppClient) ProcessMessage(evt *events.Message) {
 	if evt.Message.GetPollUpdateMessage() != nil {
 		wa.handlePollVote(evt)
 		return
@@ -302,14 +308,14 @@ func (wa *WhatsAppClient) handlePollVote(evt *events.Message) {
 	}
 	// One voter, however WhatsApp addressed them: a vote changed later
 	// must replace the first, not count as a second voter's.
-	voter := wa.identity.Canonical(wa.storeCtx(), wa.lidStore(), evt.Info.Sender, evt.Info.SenderAlt)
-	wa.recordVote(pollMsgID, voter, pollVote.GetSelectedOptions())
+	voter := wa.identity.Canonical(wa.storeCtx(), wa.LIDStore(), evt.Info.Sender, evt.Info.SenderAlt)
+	wa.ProcessVote(pollMsgID, voter, pollVote.GetSelectedOptions())
 }
 
-// recordVote stores voter's choice in the poll sent as pollMsgID, given
+// ProcessVote stores voter's choice in the poll sent as pollMsgID, given
 // as WhatsApp sends it, the hashes of the chosen options, and tells
 // onVote. A vote for a poll the bridge did not keep is dropped.
-func (wa *WhatsAppClient) recordVote(pollMsgID string, voter types.JID, hashes [][]byte) {
+func (wa *WhatsAppClient) ProcessVote(pollMsgID string, voter types.JID, hashes [][]byte) {
 	poll, err := wa.polls.SentPoll(wa.storeCtx(), pollMsgID)
 	if err != nil {
 		// Not necessarily an error: the poll may predate vote tracking.
@@ -452,7 +458,7 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID,
 	// may be under the LID WhatsApp addressed them by.
 	alt := msg.Info.Chat.ToNonAD()
 	if alt == sender {
-		alt = wa.identity.LID(wa.storeCtx(), wa.lidStore(), sender)
+		alt = wa.identity.LID(wa.storeCtx(), wa.LIDStore(), sender)
 	}
 	senderNumber := sender.User
 	text := extractText(msg.Message)
@@ -759,7 +765,7 @@ func (wa *WhatsAppClient) ownMentionJIDs() []types.JID {
 		return nil
 	}
 	if lid.User == "" {
-		lid = wa.identity.LID(wa.storeCtx(), wa.lidStore(), own)
+		lid = wa.identity.LID(wa.storeCtx(), wa.LIDStore(), own)
 	}
 	out := []types.JID{own}
 	if lid.User != "" && lid != own {
@@ -784,7 +790,7 @@ func stripMentions(text string, jids []types.JID) string {
 // resolved is false for a LID nothing maps to a number, whose digits are
 // WhatsApp's internal id and must match no number on a list.
 func (wa *WhatsAppClient) senderOf(src types.MessageSource) (sender types.JID, resolved bool) {
-	sender = wa.identity.Canonical(wa.storeCtx(), wa.lidStore(), src.Sender, src.SenderAlt)
+	sender = wa.identity.Canonical(wa.storeCtx(), wa.LIDStore(), src.Sender, src.SenderAlt)
 	return sender, sender.Server == types.DefaultUserServer
 }
 
@@ -814,9 +820,9 @@ func (wa *WhatsAppClient) groupName(jid types.JID) string {
 	})
 }
 
-// lidStore is whatsmeow's map between LIDs and phone numbers, or nil
+// LIDStore is whatsmeow's map between LIDs and phone numbers, or nil
 // without a client.
-func (wa *WhatsAppClient) lidStore() wastore.LIDStore {
+func (wa *WhatsAppClient) LIDStore() wastore.LIDStore {
 	cli := wa.cl()
 	if cli == nil || cli.Store == nil {
 		return nil
@@ -833,7 +839,7 @@ func (wa *WhatsAppClient) quoteOf(msg *waE2E.Message) *chat.Quote {
 	}
 	p, err := types.ParseJID(msg.GetExtendedTextMessage().GetContextInfo().GetParticipant())
 	if err == nil && p.Server == types.HiddenUserServer {
-		q.From = wa.identity.Canonical(wa.storeCtx(), wa.lidStore(), p, types.EmptyJID).User
+		q.From = wa.identity.Canonical(wa.storeCtx(), wa.LIDStore(), p, types.EmptyJID).User
 	}
 	return q
 }
