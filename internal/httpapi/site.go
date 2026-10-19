@@ -49,7 +49,7 @@ type SiteService interface {
 type SiteAPI struct {
 	Site         func() SiteService
 	StatusView   func() sitesvc.StatusSnapshot
-	BuildersView func() []map[string]any
+	BuildersView func() []BuilderRow
 	BuildRoutes  func(*http.ServeMux)
 }
 
