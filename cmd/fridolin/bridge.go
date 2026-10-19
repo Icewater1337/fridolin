@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"context"
 	"errors"
@@ -107,7 +109,7 @@ type BridgeOptions struct {
 // NewBridge creates and wires up all components. It holds the data
 // directory's instance lock until Stop.
 func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
-	cfg := runtimeConfig(cfgs)
+	cfg := app.RuntimeConfig(cfgs)
 	// Before the lock, which is a file in the data dir.
 	if err := cfgs.Boot().EnsureDirs(); err != nil {
 		return nil, err
@@ -272,7 +274,7 @@ var listenHTTP = net.Listen
 // failing to bind is fatal: an already-running bridge holds it, and two
 // bridges must never share one WhatsApp session.
 func (b *Bridge) Start(ctx context.Context) error {
-	cfg := runtimeConfig(b.cfgs)
+	cfg := app.RuntimeConfig(b.cfgs)
 	run, fail := context.WithCancelCause(ctx)
 	defer fail(nil)
 	if b.listen != "" {
@@ -712,7 +714,7 @@ func groupRulesFor(r manifest.Routing) groupRules {
 // the latest configuration and never on one an update has replaced.
 func (b *Bridge) configChanged(prev, next *config.File) {
 	b.applyMu.Lock()
-	err := b.brainMgr.Apply(runtimeConfig(b.cfgs))
+	err := b.brainMgr.Apply(app.RuntimeConfig(b.cfgs))
 	b.applyMu.Unlock()
 	if err != nil {
 		log.Printf("applying configuration: %v", err)

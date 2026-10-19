@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"context"
 	"encoding/json"
@@ -261,7 +263,7 @@ func captureBootRunSettings(t *testing.T, tb *testBridge) func() brain.Settings 
 		Input: commandBrainInputRules(), ClaimMedia: claimBrainMedia,
 		ShutdownGrace: func() time.Duration { return 0 },
 	})
-	if err := mgr.Apply(runtimeConfig(tb.cfgs)); err != nil {
+	if err := mgr.Apply(app.RuntimeConfig(tb.cfgs)); err != nil {
 		t.Fatal(err)
 	}
 	return func() brain.Settings {

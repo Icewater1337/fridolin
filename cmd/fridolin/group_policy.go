@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/app"
+
 import (
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/logx"
@@ -44,7 +46,7 @@ type groupSender struct {
 // numbers, or anyone while it is empty and allow_any_dm is true. A sender
 // known only by a LID is admitted only where everyone is.
 func groupSenderAllowed(cfg *config.File, group string, s groupSender) bool {
-	return access.GroupSenderAllowed(policyOf(cfg), group, s.Number, s.Resolved, s.FromMe)
+	return access.GroupSenderAllowed(app.AccessPolicy(cfg), group, s.Number, s.Resolved, s.FromMe)
 }
 
 // masked is the sender for the log: a number down to its country code and

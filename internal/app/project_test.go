@@ -1,4 +1,6 @@
-package main
+package app_test
+
+import "github.com/Icewater1337/fridolin/internal/app"
 
 import (
 	"context"
@@ -18,7 +20,7 @@ func TestBackupSettingsProjectionPreservesStatusJSON(t *testing.T) {
 		if err := json.Unmarshal([]byte(raw), &file); err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := config.Resolve(&file, configPaths(), runtime.GOOS)
+		cfg, err := config.Resolve(&file, config.Paths{Home: t.TempDir()}, runtime.GOOS)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -26,7 +28,7 @@ func TestBackupSettingsProjectionPreservesStatusJSON(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		after, err := json.Marshal(backupSettings(cfg))
+		after, err := json.Marshal(app.BackupSettings(cfg))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -50,7 +52,7 @@ func TestBackupTargetProjectionKeepsIdentityAndOwnsExcludes(t *testing.T) {
 	br := mgr.Get("notes")
 	original := br
 	var notified *brain.Brain
-	target := backupTarget(br, func(_ context.Context, got *brain.Brain, _ string) error { notified = got; return nil })
+	target := app.BackupTarget(br, func(_ context.Context, got *brain.Brain, _ string) error { notified = got; return nil })
 	first := target.Settings()
 	first.Exclude[0] = "changed by consumer"
 	if !reflect.DeepEqual(target.Settings().Exclude, []string{"one"}) {
