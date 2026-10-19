@@ -35,15 +35,7 @@ func (a *BackupAPI) Status(w http.ResponseWriter, r *http.Request) {
 
 func (a *BackupAPI) Connect(w http.ResponseWriter, r *http.Request) {
 	if err := a.Backup().Connect(); err != nil {
-		status := http.StatusInternalServerError
-		switch apperr.KindOf(err) {
-		case apperr.Precondition:
-			status = http.StatusPreconditionFailed
-		case apperr.Conflict:
-			status = http.StatusConflict
-		case apperr.Unavailable:
-			status = http.StatusServiceUnavailable
-		}
+		status := statusFor(apperr.KindOf(err))
 		WriteErr(w, status, err.Error())
 		return
 	}
@@ -52,10 +44,7 @@ func (a *BackupAPI) Connect(w http.ResponseWriter, r *http.Request) {
 
 func (a *BackupAPI) Disconnect(w http.ResponseWriter, r *http.Request) {
 	if err := a.Backup().Disconnect(r.Context()); err != nil {
-		status := http.StatusInternalServerError
-		if apperr.KindOf(err) == apperr.Conflict {
-			status = http.StatusConflict
-		}
+		status := statusFor(apperr.KindOf(err))
 		WriteErr(w, status, err.Error())
 		return
 	}
@@ -184,17 +173,7 @@ func (a *BackupAPI) Restore(w http.ResponseWriter, r *http.Request) {
 	}
 	target, err := a.Backup().Restore(backup.RestoreRequest{Brain: req.Brain, Version: req.Version, Target: req.Target}, a.RestoreTarget)
 	if err != nil {
-		status := http.StatusInternalServerError
-		switch apperr.KindOf(err) {
-		case apperr.Precondition:
-			status = http.StatusPreconditionFailed
-		case apperr.Invalid:
-			status = http.StatusUnprocessableEntity
-		case apperr.Conflict:
-			status = http.StatusConflict
-		case apperr.Unavailable:
-			status = http.StatusServiceUnavailable
-		}
+		status := statusFor(apperr.KindOf(err))
 		if errors.Is(err, backup.ErrRestoreRequest) {
 			status = http.StatusBadRequest
 		}

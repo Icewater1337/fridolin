@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -26,6 +27,12 @@ func TestBackupConnectClassifiesServiceFailures(t *testing.T) {
 		err    error
 		status int
 	}{
+		{apperr.New(apperr.NotFound, "missing"), 404},
+		{apperr.New(apperr.Invalid, "invalid"), 422},
+		{fmt.Errorf("operation: %w", apperr.New(apperr.Busy, "busy")), 409},
+		{apperr.New(apperr.TooLarge, "large"), 413},
+		{apperr.New(apperr.BadJSON, "bad JSON"), 400},
+		{apperr.New(apperr.Kind(255), "future kind"), 500},
 		{nil, 202}, {apperr.New(apperr.Precondition, "missing tool"), 412}, {apperr.New(apperr.Conflict, "busy"), 409}, {apperr.New(apperr.Unavailable, "offline"), 503}, {errors.New("unexpected"), 500},
 	} {
 		f := &backupConnectFake{err: tc.err}
