@@ -145,7 +145,7 @@ type backupJob struct {
 
 // BackupManager runs and schedules backups.
 type BackupManager struct {
-	cfgs *ConfigStore
+	cfgs *config.Store
 	bm   *BrainManager
 
 	mu      sync.Mutex
@@ -196,7 +196,7 @@ var refusalNoticeTimeout = 30 * time.Second
 // be read is kept as state.json.corrupt and the bridge starts with none: the
 // last results and the day of the last scheduled run are gone then, and the
 // log says so rather than leaving it to the next scheduled run to show.
-func NewBackupManager(cfgs *ConfigStore, bm *BrainManager) *BackupManager {
+func NewBackupManager(cfgs *config.Store, bm *BrainManager) *BackupManager {
 	m := &BackupManager{cfgs: cfgs, bm: bm, now: time.Now, idleWait: backupIdleWait}
 	m.runner = m.runRclone
 	data, err := os.ReadFile(m.statePath())
@@ -313,7 +313,7 @@ var errRcloneMissing = errors.New("rclone is not installed")
 // folders of PATH it looks in first, a variable so tests can point it at
 // their own files.
 var rcloneFallbacks = func() []string {
-	return []string{"/opt/homebrew/bin/rclone", "/usr/local/bin/rclone", filepath.Join(config.HomeDir(), ".local/bin/rclone")}
+	return []string{"/opt/homebrew/bin/rclone", "/usr/local/bin/rclone", filepath.Join(homeDir(), ".local/bin/rclone")}
 }
 
 // rcloneMissingHint says what to do about findRclone's error: install
@@ -901,7 +901,7 @@ func (b *Bridge) apiBrainBackup(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if _, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
+	if _, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
 		return updateBrainBackup(c, tx, r.PathValue("id"), req.Enabled, req.Exclude)
 	}); err != nil {
 		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
@@ -911,7 +911,7 @@ func (b *Bridge) apiBrainBackup(w http.ResponseWriter, r *http.Request) {
 }
 
 // updateBrainBackup changes one brain's backup settings in its manifest.
-func updateBrainBackup(c *config.Config, tx *Tx, id string, enabled *bool, exclude []string) error {
+func updateBrainBackup(c *config.Config, tx *config.Tx, id string, enabled *bool, exclude []string) error {
 	return updateManifestIn(c, tx, id, func(m *manifest.Manifest) error {
 		if enabled != nil {
 			m.Backup.Enabled = *enabled
@@ -1766,12 +1766,12 @@ func checkRestoreTarget(target string, cfg *config.Config, home string) error {
 // It returns the folder, resolved.
 func (b *Bridge) restoreTarget(p string) (string, error) {
 	cfg := b.cfgs.Get()
-	target, problems, _ := CheckBrainPath(resolveExisting(fsx.ExpandHome(strings.TrimSpace(p), config.HomeDir())), cfg, brainDirs(cfg))
+	target, problems, _ := CheckBrainPath(resolveExisting(fsx.ExpandHome(strings.TrimSpace(p), homeDir())), cfg, brainDirs(cfg))
 	if creds := fsx.Canonical(cfg.Sandbox.CredentialsDir); len(problems) == 0 && creds != "" && (fsx.Within(target, creds) || fsx.Within(creds, target)) {
 		problems = append(problems, "the credentials folder cannot be (or contain) the restore folder")
 	}
 	if len(problems) == 0 {
-		if err := checkRestoreTarget(target, cfg, config.HomeDir()); err != nil {
+		if err := checkRestoreTarget(target, cfg, homeDir()); err != nil {
 			problems = append(problems, "the restore folder "+err.Error()+" — pick a new folder")
 		}
 	}
@@ -1782,7 +1782,7 @@ func (b *Bridge) restoreTarget(p string) (string, error) {
 	// on it. Build what is listed, made and copied into from your home
 	// folder and a part of it that stays inside, so that it is there by
 	// construction and not only by that report.
-	home := fsx.Canonical(config.HomeDir())
+	home := fsx.Canonical(homeDir())
 	rel, err := filepath.Rel(home, target)
 	if err != nil || rel == "." || !filepath.IsLocal(rel) {
 		return "", errors.New("restore into a new folder inside your home folder")

@@ -290,7 +290,7 @@ func TestSiteSecrets(t *testing.T) {
 	}
 
 	// The site gets keeper's declared value, trimmed, and nothing of the rest.
-	payload, err := m.secretsFor(readModuleCaps(m.modulesDirOf(commit), config.HomeDir()))
+	payload, err := m.secretsFor(readModuleCaps(m.modulesDirOf(commit), homeDir()))
 	if err != nil {
 		t.Fatal(err)
 	}

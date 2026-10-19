@@ -104,7 +104,7 @@ func newHarness(t *testing.T, cfgJSON string) *harness {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfgs, err := OpenConfigStore(path)
+	cfgs, err := openConfigStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func (h *harness) Restart() {
 func (h *harness) Reopen() {
 	h.t.Helper()
 	h.sentBefore = h.Outbox()
-	cfgs, err := OpenConfigStore(h.cfg)
+	cfgs, err := openConfigStore(h.cfg)
 	if err != nil {
 		h.t.Fatal(err)
 	}

@@ -53,7 +53,7 @@ func isJunkMessage(text string) bool {
 
 // Bridge connects WhatsApp to the brains, and serves the dashboard.
 type Bridge struct {
-	cfgs     *ConfigStore
+	cfgs     *config.Store
 	lock     *platform.Lock
 	store    *store.Store
 	wa       Messenger
@@ -118,7 +118,7 @@ type BridgeOptions struct {
 
 // NewBridge creates and wires up all components. It holds the data
 // directory's instance lock until Stop.
-func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
+func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 	cfg := cfgs.Get()
 	// Before the lock, which is a file in the data dir.
 	if err := cfg.EnsureDirs(); err != nil {
@@ -248,23 +248,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 		seedActivity(b.activity, br)
 	}
 
-	// Configuration edits (from the dashboard) apply to the brains at once.
-	// The brains get the configuration as it is now rather than next, under
-	// a lock, so that whichever notification comes last, the brains end on
-	// the latest configuration and never on one an update has replaced.
-	cfgs.Subscribe(func(prev, next *config.Config) {
-		b.applyMu.Lock()
-		err := b.brainMgr.Apply(b.cfgs.Get())
-		b.applyMu.Unlock()
-		if err != nil {
-			log.Printf("applying configuration: %v", err)
-		}
-		logDMAccess(prev, next)
-		logSecurityChanges(prev, next)
-		for _, br := range b.brainMgr.Brains() {
-			seedActivity(b.activity, br)
-		}
-	})
+	cfgs.Subscribe(b.configChanged)
 
 	tok, err := httpapi.LoadDashboardToken(cfg.DataDir)
 	if err != nil {
@@ -950,4 +934,22 @@ func logDMAccess(prev, next *config.Config) {
 // groupRulesFor is what addresses the bridge in the brain's groups.
 func groupRulesFor(r manifest.Routing) groupRules {
 	return groupRules{files: config.BoolOr(r.AnswerFiles, true), forwards: config.BoolOr(r.AnswerForwards, true)}
+}
+
+// Configuration edits (from the dashboard) apply to the brains at once.
+// The brains get the configuration as it is now rather than next, under
+// a lock, so that whichever notification comes last, the brains end on
+// the latest configuration and never on one an update has replaced.
+func (b *Bridge) configChanged(prev, next *config.Config) {
+	b.applyMu.Lock()
+	err := b.brainMgr.Apply(b.cfgs.Get())
+	b.applyMu.Unlock()
+	if err != nil {
+		log.Printf("applying configuration: %v", err)
+	}
+	logDMAccess(prev, next)
+	config.LogSecurityChanges(prev, next)
+	for _, br := range b.brainMgr.Brains() {
+		seedActivity(b.activity, br)
+	}
 }

@@ -1598,7 +1598,7 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(writeConfig(t, string(cfgJSON)))
+	cfg, err := loadConfig(writeConfig(t, string(cfgJSON)))
 	if err != nil {
 		t.Fatal(err)
 	}

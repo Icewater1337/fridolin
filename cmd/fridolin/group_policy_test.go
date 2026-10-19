@@ -147,10 +147,10 @@ func TestLoadConfigGroupMembers(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
-			cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", `+groups+`, "group_members": `+c.members+`}`))
+			cfg, err := loadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", `+groups+`, "group_members": `+c.members+`}`))
 			if c.err != "" {
 				if err == nil || !strings.Contains(err.Error(), c.err) {
-					t.Fatalf("LoadConfig: %v, want an error saying %q", err, c.err)
+					t.Fatalf("Load: %v, want an error saying %q", err, c.err)
 				}
 				return
 			}
@@ -204,7 +204,7 @@ func TestGroupMembersErrorNamesNoEntry(t *testing.T) {
 func TestConfigUpdateRefusesStrayGroupMembers(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	cs, err := OpenConfigStore(writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_groups": ["120363000000000000@g.us"], "group_members": {"120363000000000000@g.us": ["15551234567"]}}`))
+	cs, err := openConfigStore(writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_groups": ["120363000000000000@g.us"], "group_members": {"120363000000000000@g.us": ["15551234567"]}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestConfigWarnsAboutGroupsWithoutMembers(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	logged := captureLog(t)
-	cs, err := OpenConfigStore(writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_numbers": ["15551234567"],
+	cs, err := openConfigStore(writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_numbers": ["15551234567"],
 		"allowed_groups": ["120363000000000000@g.us", "`+listed+`"], "group_members": {"`+listed+`": ["15559876543"]}}`))
 	if err != nil {
 		t.Fatal(err)
@@ -281,7 +281,7 @@ func TestNoGroupWarningWhileAnyoneMayDM(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	logged := captureLog(t)
-	if _, err := OpenConfigStore(writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_numbers": [], "allow_any_dm": true, "allowed_groups": ["120363000000000000@g.us"]}`)); err != nil {
+	if _, err := openConfigStore(writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_numbers": [], "allow_any_dm": true, "allowed_groups": ["120363000000000000@g.us"]}`)); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(logged(), "\n"); strings.Contains(got, "group_members") {
@@ -296,7 +296,7 @@ func TestLogSecurityChangesNamesGroupMembers(t *testing.T) {
 	logged := captureLog(t)
 	prev := &config.Config{GroupMembers: map[string][]string{testGroup: {"15551234567"}}}
 	next := &config.Config{GroupMembers: map[string][]string{testGroup: {"15559876543"}, other: {}}}
-	logSecurityChanges(prev, next)
+	config.LogSecurityChanges(prev, next)
 	got := strings.Join(logged(), "\n")
 	for _, want := range []string{"group_members", "+" + testGroup + ":15559876543", "+" + other + ":", "-" + testGroup + ":15551234567"} {
 		if !strings.Contains(got, want) {

@@ -530,7 +530,7 @@ func (b *Bridge) apiAllowChat(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	_, err = b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
+	_, err = b.cfgs.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
 		if dm {
 			if !slices.Contains(c.AllowedNumbers, entry) {
 				c.AllowedNumbers = append(c.AllowedNumbers, entry)
@@ -701,7 +701,7 @@ func revokeEntry(list []string, sent, entry string, valid bool, canon func(strin
 // in their manifests (brain.json, staged in tx, and the approved copy). The
 // chosen brain goes first, so that one that is not there is refused before
 // the others are looked at.
-func assignGroup(c *config.Config, tx *Tx, jid, brainID string) error {
+func assignGroup(c *config.Config, tx *config.Tx, jid, brainID string) error {
 	if err := updateManifestIn(c, tx, brainID, func(m *manifest.Manifest) error {
 		if !slices.Contains(m.Routing.Groups, jid) {
 			m.Routing.Groups = append(m.Routing.Groups, jid)
@@ -749,9 +749,9 @@ func (b *Bridge) apiGetConfig(w http.ResponseWriter, r *http.Request) {
 	// save that comes back with it would pass the conflict check over a
 	// write the page never saw.
 	snap := b.cfgs.Snapshot()
-	file := mustClone(snap.File)
+	file := config.MustClone(snap.File)
 	file.BrainDirs = nil
-	eff := mustClone(snap.Effective)
+	eff := config.MustClone(snap.Effective)
 	eff.BrainDirs = nil
 	httpapi.WriteJSON(w, http.StatusOK, map[string]any{
 		"etag":      snap.ETag,
@@ -765,7 +765,7 @@ func (b *Bridge) apiGetConfig(w http.ResponseWriter, r *http.Request) {
 // endpoints and are carried over untouched.
 //
 // It replaces the whole file layer, so it takes only the whole of it, as
-// GET /api/config returned it (see decodeConfigReplacement), and only with
+// GET /api/config returned it (see DecodeReplacement), and only with
 // the etag it came with: a script that sends one setting, or a tab that
 // saves over a newer change, would otherwise reset the rest to defaults —
 // the sandbox off, nobody allowed, another data dir.
@@ -782,18 +782,18 @@ func (b *Bridge) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusPreconditionRequired, "etag required: send the etag GET /api/config returned along with the config")
 		return
 	}
-	incoming, err := decodeConfigReplacement(req.Config)
+	incoming, err := config.DecodeReplacement(req.Config)
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	res, err := b.cfgs.UpdateTx(req.ETag, func(c *config.Config, _ *Tx) error {
+	res, err := b.cfgs.UpdateTx(req.ETag, func(c *config.Config, _ *config.Tx) error {
 		incoming.BrainDirs = c.BrainDirs
 		*c = *incoming
 		return nil
 	})
 	switch {
-	case errors.Is(err, ErrConfigConflict):
+	case errors.Is(err, config.ErrConflict):
 		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 		return
 	case err != nil:
@@ -919,7 +919,7 @@ func (b *Bridge) apiBrain(w http.ResponseWriter, r *http.Request) {
 func brainDirs(c *config.Config) []string {
 	var dirs []string
 	for _, ref := range c.BrainDirs {
-		dirs = append(dirs, ref.Dir())
+		dirs = append(dirs, ref.Dir(homeDir()))
 	}
 	return dirs
 }
@@ -941,7 +941,7 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
-	root, err := os.OpenRoot(fsx.Canonical(config.HomeDir()))
+	root, err := os.OpenRoot(fsx.Canonical(homeDir()))
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -1174,12 +1174,12 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 	defer scaffold.Close()
 	created := scaffold.Created()
 	writesManifest := false
-	if _, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
+	if _, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
 		// Again, against the config this update changes. addMu keeps adds
 		// apart, but not the other config writers: a brain saved or
 		// approved since the check above may claim the same group or the
 		// DMs, and the two must not both be registered.
-		eff, err := config.Resolve(c)
+		eff, err := b.cfgs.Resolve(c)
 		if err != nil {
 			return err
 		}
@@ -1195,7 +1195,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 			writesManifest = true
 		}
 		approved := m
-		c.BrainDirs = append(c.BrainDirs, config.BrainRef{Path: fsx.Tilde(abs, config.HomeDir()), Approved: &approved})
+		c.BrainDirs = append(c.BrainDirs, config.BrainRef{Path: fsx.Tilde(abs, homeDir()), Approved: &approved})
 		return nil
 	}); err != nil {
 		scaffold.Rollback()
@@ -1242,7 +1242,7 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 	}
 	// The brain.json the update stages has it check the brain set with
 	// the edit before anything is written (see checkSet).
-	_, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
+	_, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
 		return updateManifestIn(c, tx, id, func(cur *manifest.Manifest) error {
 			*cur = m
 			return nil
@@ -1304,13 +1304,13 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, "manifest required: send the brain.json you reviewed")
 		return
 	}
-	_, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
+	_, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
 		for i := range c.BrainDirs {
 			ref := &c.BrainDirs[i]
 			if ref.Approved == nil || ref.Approved.ID != id {
 				continue
 			}
-			disk, err := manifest.Read(ref.Dir())
+			disk, err := manifest.Read(ref.Dir(homeDir()))
 			if err != nil {
 				return err
 			}
@@ -1369,10 +1369,10 @@ func (b *Bridge) apiRemoveBrainDir(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, "path required")
 		return
 	}
-	want := fsx.Canonical(fsx.ExpandHome(path, config.HomeDir()))
+	want := fsx.Canonical(fsx.ExpandHome(path, homeDir()))
 	_, err := b.cfgs.Update("", func(c *config.Config) error {
 		for i, ref := range c.BrainDirs {
-			if ref.Approved == nil && fsx.Canonical(ref.Dir()) == want {
+			if ref.Approved == nil && fsx.Canonical(ref.Dir(homeDir())) == want {
 				c.BrainDirs = slices.Delete(c.BrainDirs, i, i+1)
 				return nil
 			}
@@ -1391,7 +1391,7 @@ func (b *Bridge) apiRemoveBrainDir(w http.ResponseWriter, r *http.Request) {
 var pickMu sync.Mutex
 
 func (b *Bridge) apiFSCaps(w http.ResponseWriter, r *http.Request) {
-	home := config.HomeDir()
+	home := homeDir()
 	picker := ""
 	if p := platform.FolderPicker(home); p != nil {
 		picker = filepath.Base(p[0])
@@ -1400,7 +1400,7 @@ func (b *Bridge) apiFSCaps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Bridge) apiFSPick(w http.ResponseWriter, r *http.Request) {
-	argv := platform.FolderPicker(config.HomeDir())
+	argv := platform.FolderPicker(homeDir())
 	if argv == nil {
 		httpapi.WriteErr(w, http.StatusNotImplemented, "no native folder picker on this system — browse or type the path instead")
 		return
@@ -1479,7 +1479,7 @@ func textTail(s string, n int) string {
 // apiFSList lists folders inside your home folder, for the in-dashboard
 // folder browser. The bridge's data folder is hidden.
 func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
-	home := fsx.Canonical(config.HomeDir())
+	home := fsx.Canonical(homeDir())
 	p := r.URL.Query().Get("path")
 	if p == "" {
 		p = home

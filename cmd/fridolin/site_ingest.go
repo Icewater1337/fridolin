@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/claudecli"
-	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
@@ -175,7 +174,7 @@ func (m *SiteManager) liveCaps(module string) (siteModuleCaps, error) {
 	if s.Approved == "" {
 		return siteModuleCaps{}, errors.New("no commit of the site is live")
 	}
-	for _, mod := range readModuleCaps(m.modulesDirOf(s.Approved), config.HomeDir()) {
+	for _, mod := range readModuleCaps(m.modulesDirOf(s.Approved), homeDir()) {
 		if mod.ID == module {
 			return mod, nil
 		}

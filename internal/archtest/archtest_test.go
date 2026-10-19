@@ -60,8 +60,6 @@ var imports = map[string][]string{
 // (TestNoAmbientEnv).
 var ambientAllowed = map[string]bool{
 	"internal/platform": true,
-	// Temporary R5 exception: HomeDir retains the existing resolution contract; R6 injects paths.
-	"internal/config": true,
 }
 
 // ambient are the calls that read process-wide state. Code below internal/

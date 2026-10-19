@@ -1037,7 +1037,7 @@ func TestConfigWarnsAboutOddChats(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	logged := captureLog(t)
 	path := writeConfig(t, `{"data_dir": "`+t.TempDir()+`", "allowed_numbers": ["15551234567", "+1 555 987 6543", "call me"], "allowed_groups": ["120363000000000000@g.us", " 120363000000000001@g.us", "@g.us"]}`)
-	if _, err := OpenConfigStore(path); err != nil {
+	if _, err := openConfigStore(path); err != nil {
 		t.Fatal(err)
 	}
 	got := strings.Join(logged(), "\n")
