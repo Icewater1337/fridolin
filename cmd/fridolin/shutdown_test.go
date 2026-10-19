@@ -140,7 +140,7 @@ func TestStopEndsTheRequestsInFlight(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if tb.httpSrv.BaseContext == nil || tb.httpSrv.BaseContext(nil).Err() == nil {
+	if tb.supervisor.HTTPContext() == nil || tb.supervisor.HTTPContext().Err() == nil {
 		t.Error("the requests' context goes on after the bridge began to stop")
 	}
 	stopped := time.Now()

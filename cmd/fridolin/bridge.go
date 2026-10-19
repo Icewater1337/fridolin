@@ -4,7 +4,6 @@ import "github.com/Icewater1337/fridolin/internal/app"
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"log"
@@ -80,10 +79,7 @@ type Bridge struct {
 	// one.
 	lids func() wastore.LIDStore
 
-	httpSrv *http.Server
-	// loops are the goroutines Start leaves running past its return,
-	// the WhatsApp connect loop: Stop waits for them.
-	loops sync.WaitGroup
+	supervisor app.Supervisor
 	// stopOnce makes Stop run once, whoever calls it how often.
 	stopOnce sync.Once
 	// intake is what comes in from WhatsApp, which Stop closes first.
@@ -275,49 +271,14 @@ var listenHTTP = net.Listen
 // bridges must never share one WhatsApp session.
 func (b *Bridge) Start(ctx context.Context) error {
 	cfg := app.RuntimeConfig(b.cfgs)
-	run, fail := context.WithCancelCause(ctx)
-	defer fail(nil)
-	if b.listen != "" {
-		ln, err := listenHTTP("tcp", b.listen)
-		if err != nil {
-			return fmt.Errorf("listening on %s (is another bridge running?): %w", b.listen, err)
-		}
-		b.httpSrv = httpapi.NewServer(b.newHTTPHandler(b.listen))
-		// Requests end with the bridge: one that waits for you or for
-		// Google (a folder picker, a sign-in) gives up once the bridge
-		// stops, rather than hold up Stop.
-		b.httpSrv.BaseContext = func(net.Listener) context.Context { return run }
-		go func() {
-			// Serve ends with ErrServerClosed when Stop shuts it down. Any
-			// other end leaves /send and the dashboard dead while the
-			// bridge would run on and look healthy, so it stops instead.
-			if err := b.httpSrv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
-				fail(fmt.Errorf("HTTP server: %w", err))
-			}
-		}()
-		if !cfg.Dashboard.Disabled {
-			log.Printf("Dashboard: http://%s/  (open it with: fridolin open)", b.listen)
-		}
-	}
-
-	// Before WhatsApp connects: what the last stop kept goes to the
-	// brains ahead of what comes in now.
-	b.resume(run)
-	b.loops.Go(func() { b.connectLoop(run) })
-	// Waited for: it queues alerts in the outbox, which Stop closes.
-	var wg sync.WaitGroup
-	wg.Go(func() { b.watchRequiredFiles(run, requiredFilesEvery) })
-	b.backup.Start(run)
-	b.plaud.Start(run)
-	b.site.Start(run)
-
-	log.Println("Bridge started. Waiting for messages…")
-	<-run.Done()
-	wg.Wait()
-	if ctx.Err() == nil {
-		return context.Cause(run)
-	}
-	return nil
+	return b.supervisor.Run(ctx, app.RunOptions{
+		Address: b.listen, Listen: listenHTTP,
+		Handler:          func() http.Handler { return b.newHTTPHandler(b.listen) },
+		DashboardEnabled: !cfg.Dashboard.Disabled,
+		Resume:           b.resume, Connect: b.connectLoop,
+		Watch:      func(ctx context.Context) { b.watchRequiredFiles(ctx, requiredFilesEvery) },
+		Background: []func(context.Context){b.backup.Start, b.plaud.Start, b.site.Start},
+	})
 }
 
 // connectLoop retains the bridge's ownership of the connection goroutine.
@@ -353,7 +314,7 @@ func (b *Bridge) stop() {
 	b.wa.Disconnect()
 	// The connect loop ends with Start's context, unless it is connecting
 	// still, which Disconnect cuts short.
-	if !waitWithin(&b.loops, connectStopWait) {
+	if !b.supervisor.WaitConnections(connectStopWait) {
 		log.Printf("WhatsApp: still connecting %v after the disconnect; stopping without waiting for it", connectStopWait)
 	}
 	b.intake.End()
@@ -460,37 +421,7 @@ const connectStopWait = 5 * time.Second
 
 // stopHTTP stops the HTTP server, if Start began one: it takes no more
 // requests, and those in flight get httpStopWait to end.
-func (b *Bridge) stopHTTP() {
-	if b.httpSrv == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), httpStopWait)
-	defer cancel()
-	if err := b.httpSrv.Shutdown(ctx); err != nil {
-		// Shutdown leaves the connections it did not see end open: Close
-		// ends them, and the handlers still running find out on their
-		// next write.
-		log.Printf("HTTP server: requests still running %v after the stop began (%v); cutting them off", httpStopWait, err)
-		_ = b.httpSrv.Close()
-	}
-}
-
-// waitWithin waits for wg for at most d, and reports whether it ended.
-func waitWithin(wg *sync.WaitGroup, d time.Duration) bool {
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-done:
-		return true
-	case <-t.C:
-		return false
-	}
-}
+func (b *Bridge) stopHTTP() { b.supervisor.StopHTTP(httpStopWait) }
 
 // keepLate keeps m, which came in once the bridge had begun to stop, for
 // the next start, which handles it as if it came in then: nothing has
