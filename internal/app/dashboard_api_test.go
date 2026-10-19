@@ -219,7 +219,7 @@ func TestIsolationHeadersAndOAuthCallback(t *testing.T) {
 		want         int
 	}{
 		{"GET", "/", 200},
-		{"GET", "/assets/css", 200},
+		{"GET", "/assets/app.css", 200},
 		// A HEAD does not reach the callback, which would use up the state.
 		{"HEAD", "/?state=abc&code=x", 200},
 		{"GET", "/?state=abc&code=x", 400},

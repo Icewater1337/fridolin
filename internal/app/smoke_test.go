@@ -46,8 +46,8 @@ func TestSmoke(t *testing.T) {
 	if raceDetector {
 		args = append(args, "-race")
 	}
-	build := exec.Command("go", append(args, ".")...)
-	build.Dir = pkgDir
+	build := exec.Command("go", append(args, "./cmd/fridolin")...)
+	build.Dir = repoDir
 	// The go command's caches are under the HOME the tests started with.
 	build.Env = append(os.Environ(), "HOME="+goToolHome)
 	if out, err := build.CombinedOutput(); err != nil {
