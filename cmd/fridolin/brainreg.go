@@ -3,8 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/registry"
-	"path/filepath"
 
 	"github.com/Icewater1337/fridolin/internal/config"
 
@@ -67,51 +67,16 @@ func checkBrainDir(dir, configured string, cfg *config.Config, home string) erro
 	return nil
 }
 
-// inHome builds p, an absolute path a request named, again from your home
-// folder and the part of p below it. CheckBrainPath decides whether such a
-// folder may be used, but it only reports: the folder it hands back is still
-// the one the request named. What a handler then makes, lists or removes is
-// built this way, inside the home folder by construction. ok is false for
-// the home folder itself and for anything outside it.
-func inHome(p string) (string, bool) {
-	home := fsx.Canonical(homeDir())
-	rel, err := filepath.Rel(home, p)
-	if home == "" || err != nil || rel == "." || !filepath.IsLocal(rel) {
-		return "", false
-	}
-	return filepath.Join(home, rel), true
-}
-
 // updateManifest changes one brain's manifest, see updateManifestIn.
 func updateManifest(cs *config.Store, id string, mutate func(m *manifest.Manifest) error) error {
-	_, err := cs.UpdateTx("", func(c *config.Config, tx *config.Tx) error { return updateManifestIn(c, tx, id, mutate) })
-	return err
+	return registryFor(cs).UpdateManifest(id, mutate)
 }
 
-// updateManifestIn changes brain id's manifest in c: mutate edits a copy of
-// the approved one, which becomes the approved copy and is staged in tx as
-// brain.json in the brain's folder, so that the two change together and
-// the change is not reported as drift. It is the one way the bridge
-// changes a manifest; an error from mutate leaves both as they were.
-func updateManifestIn(c *config.Config, tx *config.Tx, id string, mutate func(m *manifest.Manifest) error) error {
-	for i := range c.BrainDirs {
-		ref := &c.BrainDirs[i]
-		if ref.Approved == nil || ref.Approved.ID != id {
-			continue
-		}
-		m := *ref.Approved
-		if err := mutate(&m); err != nil {
-			return err
-		}
-		if m.ID != id {
-			return fmt.Errorf("a brain's id cannot change")
-		}
-		if err := tx.WriteManifest(ref.Dir(homeDir()), &m); err != nil {
-			return err
-		}
-		n := m.Normalized()
-		ref.Approved = &n
-		return nil
-	}
-	return fmt.Errorf("no brain %q", id)
+// registryFor supplies command-owned dependencies at their existing read points.
+func registryFor(cs *config.Store) *registry.Registry {
+	return registry.New(cs, registry.Options{Home: homeDir, CheckDir: checkBrainDir, Templates: brainTemplates, HistoryFile: history.FileName})
 }
+
+func checkSet(before, after *config.Config) error { return registryFor(nil).CheckSet(before, after) }
+
+func brainDirs(c *config.Config) []string { return registryFor(nil).OtherDirs(c) }

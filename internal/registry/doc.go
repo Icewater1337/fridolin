@@ -1,7 +1,6 @@
-// Package registry resolves configured brains and prepares their folders.
-// Resolution receives explicit references and a caller-supplied security
-// checker; path checks also receive the home and other configured folders.
-// The scaffold transaction retains handles and ownership records so rollback
-// removes only unchanged files it created. Configuration registration and
-// runtime reconciliation still belong to the caller.
+// Package registry resolves configured brains and owns their folder and
+// configuration workflows. Resolution and edits receive explicit inputs and
+// caller-supplied security checks. Manifest/config changes use the Store's
+// retained-root transaction; scaffolding retains ownership for rollback.
+// Runtime reconciliation and HTTP decoding remain the caller's responsibility.
 package registry

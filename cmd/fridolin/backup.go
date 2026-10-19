@@ -25,8 +25,6 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/config"
 
-	"github.com/Icewater1337/fridolin/internal/manifest"
-
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -899,32 +897,11 @@ func (b *Bridge) apiBrainBackup(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if _, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
-		return updateBrainBackup(c, tx, r.PathValue("id"), req.Enabled, req.Exclude)
-	}); err != nil {
+	if err := b.registry.UpdateBackup(r.PathValue("id"), req.Enabled, req.Exclude); err != nil {
 		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
-}
-
-// updateBrainBackup changes one brain's backup settings in its manifest.
-func updateBrainBackup(c *config.Config, tx *config.Tx, id string, enabled *bool, exclude []string) error {
-	return updateManifestIn(c, tx, id, func(m *manifest.Manifest) error {
-		if enabled != nil {
-			m.Backup.Enabled = *enabled
-		}
-		if exclude != nil {
-			var clean []string
-			for _, x := range exclude {
-				if x = strings.TrimSpace(x); x != "" {
-					clean = append(clean, x)
-				}
-			}
-			m.Backup.Exclude = clean
-		}
-		return m.Validate()
-	})
 }
 
 // ── running backups ──────────────────────────────────────────────────────

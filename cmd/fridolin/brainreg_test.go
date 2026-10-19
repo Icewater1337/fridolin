@@ -131,41 +131,6 @@ func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
 	}
 }
 
-// inHome gives back a folder below the home folder as it was, built from
-// the home folder, and refuses the home folder and everything else.
-func TestInHome(t *testing.T) {
-	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
-	cases := []struct {
-		name, path, want string
-	}{
-		{"a folder", filepath.Join(home, "brains", "work"), filepath.Join(home, "brains", "work")},
-		{"a name starting with dots", filepath.Join(home, "..work"), filepath.Join(home, "..work")},
-		{"untidy", home + "/brains//work/", filepath.Join(home, "brains", "work")},
-		{"the home folder", home, ""},
-		{"out and back in", home + "/brains/../../" + filepath.Base(home) + "/x", filepath.Join(home, "x")},
-		{"out of it", home + "/../elsewhere", ""},
-		{"a sibling with its name as a prefix", home + "-other/x", ""},
-		{"the root", "/", ""},
-		{"relative", "brains/work", ""},
-		{"empty", "", ""},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got, ok := inHome(c.path)
-			if got != c.want || ok != (c.want != "") {
-				t.Fatalf("inHome(%q) = %q, %v; want %q", c.path, got, ok, c.want)
-			}
-		})
-	}
-	t.Run("no home folder", func(t *testing.T) {
-		t.Setenv("HOME", "")
-		if got, ok := inHome("/x"); ok {
-			t.Fatalf("inHome with no home folder = %q", got)
-		}
-	})
-}
-
 func TestScaffoldBrainNeverOverwrites(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "brain")
 	_ = os.MkdirAll(dir, 0o700)
