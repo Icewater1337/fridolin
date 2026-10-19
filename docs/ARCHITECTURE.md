@@ -202,7 +202,17 @@ behaviour unless its title says so. The steps so far:
   and ignored-chat responses through live registry, store and config callbacks.
   `FilesystemAPI` preserves home-confined browsing and picker responses; the
   command supplies picker execution, its shared lock and home/boot paths.
-  Remaining resource handlers and the guarded router are still in the command.
+  `DevAPI`, `BuilderAPI`, `BuildChatAPI`, `BrainAPI` and `SiteAPI` now own
+  the remaining resource handlers. The guarded router, dashboard sessions,
+  run-token lifecycle and restart wiring remain in the command.
+
+- **R16, site service**: `internal/site` owns settings, accounts, secrets,
+  repository operations, deploys, process supervision, builder previews,
+  build-chat persistence and spool processing. `SiteOptions` supplies paths,
+  live builder callbacks and host capabilities. The command retains host
+  discovery, brain integration, chat routing and HTTP composition. Service
+  unit tests run in the new package; HTTP and runtime integration tests remain
+  in the command.
 
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
@@ -541,9 +551,10 @@ responsibility and says what it must not do.
   The `jsonx` adapter preserves legacy decoder diagnostics. Service tests
   use injected callbacks and an isolated CLI fixture; command tests retain
   real brain, sandbox, configuration and HTTP integration coverage.
-- The site manager (`site*.go`) is not in the plan's steps yet. It will get
-  a package of its own below `internal/`; the name `site` is the embed
-  package's.
+- **`site`**: `internal/site` owns the Go site service and consumes host and
+  builder callbacks. The root `site` package continues to embed the separate
+  Node process and its assets. Google/config imports in the internal package
+  are confined to isolated test fixtures.
 
 ### Surface and wiring
 
@@ -1065,14 +1076,19 @@ contains the token, the OAuth client secret or a refresh token.
 
 ### Handlers
 
-There is one unexported handler type per resource: `statusAPI`,
-`whatsappAPI`, `activityAPI`, `chatsAPI`, `configAPI`, `brainsAPI`, `fsAPI`,
-`backupAPI`, `googleAPI`, `plaudAPI`, `siteAPI`, `devAPI`, `scriptAPI` and
-`brainAPI`. Each holds only the dependencies it uses, as small interfaces
-declared next to it and listing exactly the methods it calls. A handler
-decodes the request, calls one service method and encodes the result.
-Workflows live in the services: brain changes in `registry`, the backup job
-lifecycle in `backup`, calendar status in `google`.
+Resource handlers live in `internal/httpapi`: `StatusAPI`, `ConnectionAPI`,
+`ChatsAPI`, `ConfigAPI`, `BrainsAPI`, `FilesystemAPI`, `BackupAPI`, `GoogleAPI`,
+`PlaudAPI`, `SiteAPI`, `DevAPI`, `ScriptAPI`, `BrainAPI`, `BuilderAPI` and
+`BuildChatAPI`, `ActivityAPI`, `LogsAPI` and `ReadyAPI`. Each receives only the interfaces or callbacks it uses.
+Command adapters construct them and retain host-specific operations and runtime
+composition. Callbacks for replaceable services resolve the current instance at
+the original operation boundary.
+
+Handlers preserve request validation, authorization, response shapes and status
+codes. Workflows remain in services: brain changes in `registry`, backup jobs in
+`backup`, calendar status in `google`, and inbound dispatch in `pipeline`.
+The site service and its public value types live in `internal/site`; command
+adapters supply host discovery and the bridge's live brain capabilities.
 
 ### Responses and errors
 

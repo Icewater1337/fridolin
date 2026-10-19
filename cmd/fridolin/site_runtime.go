@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"io"
 	"net"
 	"os"
@@ -17,8 +18,8 @@ import (
 )
 
 // siteBuilderHooks connect the site to this bridge's brains and sandbox.
-func (b *Bridge) siteBuilderHooks() SiteBuilderHooks {
-	return SiteBuilderHooks{
+func (b *Bridge) siteBuilderHooks() sitesvc.SiteBuilderHooks {
+	return sitesvc.SiteBuilderHooks{
 		BrainDir: func(id string) string {
 			if br := b.brainMgr.Get(id); br != nil {
 				return br.Dir()
@@ -127,7 +128,7 @@ func (b *Bridge) runBrainSearch(ctx context.Context, brainID, prompt string, out
 // everything else on as before.
 type siteChatMessenger struct {
 	Messenger
-	chats *siteChats
+	appendMessage func(string, string, string) error
 }
 
 func (s siteChatMessenger) SendMessage(ctx context.Context, jid, text string) error {
@@ -162,5 +163,5 @@ func (s siteChatMessenger) toChat(brainID, text string) error {
 	if text == outboundmsg.WorkingNotice {
 		return nil
 	}
-	return s.chats.add(brainID, "assistant", text)
+	return s.appendMessage(brainID, "assistant", text)
 }

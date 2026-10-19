@@ -39,30 +39,13 @@ func TestBuildChatJIDs(t *testing.T) {
 	}
 }
 
-// A chat's file is named only by a valid brain id.
-func TestBuildChatPathNeedsABrainID(t *testing.T) {
-	c := &siteChats{m: newTestSite(t)}
-	for _, bad := range []string{"../../etc/passwd", "..", "web/../x", "", "Web", "a b"} {
-		if _, err := c.path(bad); err == nil {
-			t.Errorf("path(%q) was accepted", bad)
-		}
-		if err := c.add(bad, "user", "hi"); err == nil {
-			t.Errorf("add(%q) wrote a chat", bad)
-		}
-	}
-	p, err := c.path("web")
-	if err != nil || filepath.Dir(p) != c.m.dir("build") {
-		t.Errorf("path(web) = %q, %v", p, err)
-	}
-}
-
 // The Build page shows that a run is working on its own, so the working
 // notice is left out of a build chat. Every other notice reaches it, those
 // that start with the same ⏳ too, such as the one about Claude's usage
 // limit.
 func TestBuildChatLeavesOutOnlyTheWorkingNotice(t *testing.T) {
-	c := &siteChats{m: newTestSite(t)}
-	s := siteChatMessenger{chats: c}
+	m := newTestSite(t)
+	s := siteChatMessenger{appendMessage: m.AppendBuildMessage}
 	for _, tc := range []struct {
 		text  string
 		shown bool
@@ -72,11 +55,11 @@ func TestBuildChatLeavesOutOnlyTheWorkingNotice(t *testing.T) {
 		{"⏳ Queued (#2) — I'll get to this right after the current task.", true},
 		{"Here is the new page.", true},
 	} {
-		before := len(c.get("web").Messages)
+		before := len(m.BuildChat("web").Messages)
 		if err := s.SendMessage(context.Background(), buildChatJID("web", 1), tc.text); err != nil {
 			t.Fatal(err)
 		}
-		if shown := len(c.get("web").Messages) > before; shown != tc.shown {
+		if shown := len(m.BuildChat("web").Messages) > before; shown != tc.shown {
 			t.Errorf("%q in the build chat: %v, want %v", tc.text, shown, tc.shown)
 		}
 	}
@@ -89,15 +72,21 @@ func TestSiteBuildChat(t *testing.T) {
 	argsLog := filepath.Join(t.TempDir(), "args.log")
 	t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "web", Name: "Web"})
-	m := tb.site
 	link := func(ctx context.Context, dir string, _ bool) error {
 		if src := filepath.Join(repoDir, "site", "node_modules"); fsx.Exists(src) {
 			return os.Symlink(src, filepath.Join(dir, "node_modules"))
 		}
 		return nil
 	}
-	m.npmInstall = link
-	m.workspaceInstall = func(ctx context.Context, _, dir string) error { return link(ctx, dir, false) }
+
+	m := NewSiteManager(sitesvc.SiteOptions{DataDir: tb.cfgs.Get().DataDir,
+		GoogleClient: tb.google.ClientPath, Builder: tb.siteBuilderHooks(), NPMInstall: link,
+		WorkspaceInstall: func(ctx context.Context, _, dir string) error { return link(ctx, dir, false) },
+	})
+	tb.site = m
+	messenger := tb.wa.(siteChatMessenger)
+	messenger.appendMessage = m.AppendBuildMessage
+	tb.wa = messenger
 
 	ctx := context.Background()
 	if err := m.ConnectRepo(ctx, sitesvc.SiteRepo{URL: newBareRepo(t)}); err != nil {
@@ -120,9 +109,9 @@ func TestSiteBuildChat(t *testing.T) {
 		t.Fatalf("send: %d %s", w.Code, w.Body.String())
 	}
 	var chatJID struct {
-		Messages []BuildMessage `json:"messages"`
-		Thread   int            `json:"thread"`
-		Running  bool           `json:"running"`
+		Messages []sitesvc.BuildMessage `json:"messages"`
+		Thread   int                    `json:"thread"`
+		Running  bool                   `json:"running"`
 	}
 	testutil.WaitFor(t, 20*time.Second, "the brain's answer", func() bool {
 		w := tb.do("GET", "/api/site/build/web", nil)
@@ -200,7 +189,7 @@ func TestLongBuildChatAnswerStaysWhole(t *testing.T) {
 					return tb.sentTo(chatJID)
 				}
 				var out []string
-				for _, m := range tb.site.chats.get("web").Messages {
+				for _, m := range tb.site.BuildChat("web").Messages {
 					out = append(out, m.Text)
 				}
 				return out

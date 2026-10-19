@@ -1,10 +1,10 @@
-package main
+package site
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	sitesvc "github.com/Icewater1337/fridolin/internal/site"
+
 	"log"
 	"os"
 	"path/filepath"
@@ -105,11 +105,11 @@ func siteSandboxAvailable(execPath string) error {
 }
 
 // SandboxStatus says whether the live site runs sandboxed.
-func (m *SiteManager) SandboxStatus() sitesvc.SiteSandboxStatus {
+func (m *SiteManager) SandboxStatus() SiteSandboxStatus {
 	if err := siteSandboxAvailable(m.sandboxExec); err != nil {
-		return sitesvc.SiteSandboxStatus{Note: err.Error()}
+		return SiteSandboxStatus{Note: err.Error()}
 	}
-	return sitesvc.SiteSandboxStatus{On: true, Note: "module code reaches only the files, programs and secrets its module.json declares"}
+	return SiteSandboxStatus{On: true, Note: "module code reaches only the files, programs and secrets its module.json declares"}
 }
 
 // sandboxInput gathers what the live site's profile is built from.
@@ -130,7 +130,7 @@ func (m *SiteManager) sandboxInput(node, deploy, root, rtFile string, mods []san
 			m.dir("google_client.json"),
 		},
 		Modules: mods,
-		Path:    siteEnvPath(node),
+		Path:    siteProcessPath(node),
 	}
 	if m.googleClient != nil {
 		in.Reads = append(in.Reads, m.googleClient())
@@ -159,17 +159,11 @@ func prepareDeclaredFolders(mods []sandbox.SiteModule, closed func(string) bool)
 			if closed(dir) || closed(fsx.Resolve(dir)) {
 				continue
 			}
-			if !pathExists(dir) {
+			if !sitePathExists(dir) {
 				if err := os.MkdirAll(dir, 0o700); err != nil {
 					log.Printf("[site] module %s: could not create %s for capabilities.files.%s: %v", mod.ID, dir, f.Name, err)
 				}
 			}
 		}
 	}
-}
-
-func siteSandboxProfile(in sandbox.SitePolicy) (string, error) {
-	in.WorkingDir, in.WorkingDirErr = os.Getwd()
-	in.Logf = log.Printf
-	return sandbox.SiteProfile(in)
 }
