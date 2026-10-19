@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 
@@ -51,7 +53,7 @@ func TestPollVoteBecomesAHistoryEvent(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			tb, mainBrain := newMainBridge(t, "")
-			tb.addFolderBrain(t, BrainManifest{ID: "files", Name: "Files"})
+			tb.addFolderBrain(t, manifest.Manifest{ID: "files", Name: "Files"})
 			if err := tb.store.SavePoll("3EB0POLL", testGroup, c.sentBy, "When should we meet?", []string{"Monday 2pm", "Tuesday 3pm"}); err != nil {
 				t.Fatal(err)
 			}

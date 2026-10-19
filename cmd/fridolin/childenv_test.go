@@ -334,7 +334,7 @@ func brainRunEnv(t *testing.T, env map[string]string, config string) (map[string
 	if _, err := ScaffoldBrain(filepath.Join(home, "a"), &m); err != nil {
 		t.Fatal(err)
 	}
-	approved, err := json.Marshal(m.normalized())
+	approved, err := json.Marshal(m.Normalized())
 	if err != nil {
 		t.Fatal(err)
 	}

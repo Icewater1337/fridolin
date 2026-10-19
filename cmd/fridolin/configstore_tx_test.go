@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/jsonx"
 )
 
@@ -239,14 +241,14 @@ func TestConfigSubscriberPanicIsLogged(t *testing.T) {
 // store has, not on one an update replaced.
 func TestBrainsRunOnTheLatestConfig(t *testing.T) {
 	h := newHarness(t, "")
-	h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	for round := 0; round < 5; round++ {
 		var wg sync.WaitGroup
 		for i := 0; i < 10; i++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				m := BrainManifest{ID: "main", Name: fmt.Sprintf("Main %d-%d", round, i), Routing: BrainRouting{HandlesDMs: true}}
+				m := manifest.Manifest{ID: "main", Name: fmt.Sprintf("Main %d-%d", round, i), Routing: manifest.Routing{HandlesDMs: true}}
 				if w := h.Do("PUT", "/api/brains/main", map[string]any{"manifest": m}); w.Code != 200 {
 					t.Errorf("PUT /api/brains/main: %d %s", w.Code, w.Body.String())
 				}
@@ -272,10 +274,10 @@ func TestBrainsRunOnTheLatestConfig(t *testing.T) {
 // after a later update's leaves the brains on the later one.
 func TestBridgeAppliesTheLatestConfigOnALateNotification(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	rename := func(name string) ConfigSnapshot {
 		t.Helper()
-		if err := tb.cfgs.UpdateManifest("main", func(m *BrainManifest) error { m.Name = name; return nil }); err != nil {
+		if err := tb.cfgs.UpdateManifest("main", func(m *manifest.Manifest) error { m.Name = name; return nil }); err != nil {
 			t.Fatal(err)
 		}
 		return tb.cfgs.Snapshot()

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
 // The tests in this file pin bugs that are known and left as they are while
@@ -24,29 +26,29 @@ func TestAFailedConfigWriteLeavesBrainJSONAsItWas(t *testing.T) {
 		t.Skip("root can write into a read-only folder")
 	}
 	h := newHarness(t, "")
-	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
-	before := readFile(t, filepath.Join(dir, ManifestFile))
+	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
+	before := readFile(t, filepath.Join(dir, manifest.File))
 	// config.json is replaced through a temp file beside it, which a
 	// read-only folder refuses. HOME, below it, stays writable.
 	if err := os.Chmod(h.Root(), 0o500); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(h.Root(), 0o700) })
-	w := h.Do("PUT", "/api/brains/main", map[string]any{"manifest": BrainManifest{ID: "main", Name: "Renamed", Routing: BrainRouting{HandlesDMs: true}}})
+	w := h.Do("PUT", "/api/brains/main", map[string]any{"manifest": manifest.Manifest{ID: "main", Name: "Renamed", Routing: manifest.Routing{HandlesDMs: true}}})
 	if err := os.Chmod(h.Root(), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if w.Code != 422 || !strings.Contains(w.Body.String(), "permission denied") {
 		t.Errorf("save with config.json not writable: %d %s, want the 422 with the write's error", w.Code, w.Body.String())
 	}
-	disk, err := ReadManifest(dir)
+	disk, err := manifest.Read(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if disk.Name != "Main" {
 		t.Errorf("brain.json names the brain %q, want Main as before the failed save", disk.Name)
 	}
-	if after := readFile(t, filepath.Join(dir, ManifestFile)); after != before {
+	if after := readFile(t, filepath.Join(dir, manifest.File)); after != before {
 		t.Errorf("brain.json changed:\n%s\nwas\n%s", after, before)
 	}
 	if got := h.Approved()["main"].Name; got != "Main" {

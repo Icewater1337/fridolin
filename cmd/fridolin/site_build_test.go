@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
@@ -82,7 +84,7 @@ func TestSiteBuildChat(t *testing.T) {
 	tb := newTestBridge(t, "")
 	argsLog := filepath.Join(t.TempDir(), "args.log")
 	t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
-	tb.addFolderBrain(t, BrainManifest{ID: "web", Name: "Web"})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "web", Name: "Web"})
 	m := tb.site
 	link := func(ctx context.Context, dir string, _ bool) error {
 		if src := filepath.Join(repoDir, "site", "node_modules"); fsx.Exists(src) {
@@ -181,7 +183,7 @@ func TestLongBuildChatAnswerStaysWhole(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tb := newTestBridge(t, `, "max_chunk_size": 200`)
-			tb.addFolderBrain(t, BrainManifest{ID: "web", Name: "Web"})
+			tb.addFolderBrain(t, manifest.Manifest{ID: "web", Name: "Web"})
 			chatJID := testDMChat
 			if c.build {
 				chatJID = buildChatJID("web", 1)

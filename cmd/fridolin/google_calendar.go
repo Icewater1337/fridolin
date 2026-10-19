@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
 // The calendar calls of brains. A brain's Google token stays with the
@@ -35,7 +37,7 @@ type brainCalendars struct {
 // calendarsOf reads them from the brain's approved manifest. A brain with
 // no calendars chosen there (one connected by hand, or a brain.json edited
 // since) may use its primary calendar only.
-func calendarsOf(m BrainManifest) brainCalendars {
+func calendarsOf(m manifest.Manifest) brainCalendars {
 	if m.Calendar == nil || len(m.Calendar.Calendars) == 0 {
 		return brainCalendars{allowed: []string{"primary"}, def: "primary"}
 	}

@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/types"
 
@@ -226,14 +228,14 @@ func TestUnsetKeys(t *testing.T) {
 // written again byte for byte, as Add brain and every manifest edit write it.
 func TestBrainV1Fixture(t *testing.T) {
 	data := fixture(t, "brain-v1.json")
-	m, err := decodeManifest(data)
+	m, err := manifest.Decode(data)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := m.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	out, err := encodeManifest(m)
+	out, err := manifest.Encode(m)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +243,7 @@ func TestBrainV1Fixture(t *testing.T) {
 		t.Errorf("brain-v1.json written again (-fixture +written):\n%s", lineDiff(string(data), string(out)))
 	}
 	// Every field is set, so a new one shows up here.
-	for _, key := range unsetKeys(t, reflect.TypeFor[BrainManifest](), data) {
+	for _, key := range unsetKeys(t, reflect.TypeFor[manifest.Manifest](), data) {
 		t.Errorf("brain-v1.json has no %q", key)
 	}
 }

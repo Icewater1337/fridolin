@@ -1,4 +1,4 @@
-package main
+package manifest
 
 import (
 	"crypto/rand"
@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 
@@ -20,23 +22,23 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
-// ManifestFile is the file that turns a folder into a brain.
-const ManifestFile = "brain.json"
+// File is the file that turns a folder into a brain.
+const File = "brain.json"
 
-// defaultPromptFile is the prompt file of a brain whose brain.json names
+// DefaultPromptFile is the prompt file of a brain whose brain.json names
 // none, and the one a new brain is scaffolded with.
-const defaultPromptFile = "brain-prompt.md"
+const DefaultPromptFile = "brain-prompt.md"
 
-// BrainManifest is a brain's portable description, stored as brain.json in
+// Manifest is a brain's portable description, stored as brain.json in
 // the brain's own folder. Copy the folder to another machine (or restore it
 // from a backup), add it in the dashboard, and the brain comes back with its
 // routing and settings.
-type BrainManifest struct {
+type Manifest struct {
 	Version int    `json:"version"`
 	ID      string `json:"id"`   // stable slug: history sender, sandbox profile and credential file names
 	Name    string `json:"name"` // display name
 
-	Routing BrainRouting `json:"routing"`
+	Routing Routing `json:"routing"`
 
 	Model  string `json:"model,omitempty"`
 	Effort string `json:"effort,omitempty"`
@@ -44,7 +46,7 @@ type BrainManifest struct {
 	DisallowedTools *[]string `json:"disallowed_tools,omitempty"`
 
 	// PromptFile is the prompt file sent ahead of each message, relative to
-	// the folder (default defaultPromptFile). It must stay inside the folder.
+	// the folder (default DefaultPromptFile). It must stay inside the folder.
 	PromptFile string `json:"prompt_file,omitempty"`
 
 	// ReplyChat is where replies go for messages that did not come from a
@@ -52,27 +54,27 @@ type BrainManifest struct {
 	ReplyChat string `json:"reply_chat,omitempty"`
 
 	// Observe is what the brain does with untagged group messages:
-	// observeHistory (the default) or observeRun, see observe.go.
+	// ObserveHistory (the default) or ObserveRun, see observe.go.
 	Observe string `json:"observe,omitempty"`
 
-	Backup BrainBackup `json:"backup"`
+	Backup Backup `json:"backup"`
 
 	// Calendar is the Google account this brain signed in with and the
 	// calendars it may use. Set by "Connect Google Calendar" in the dashboard.
-	Calendar *BrainCalendar `json:"calendar,omitempty"`
+	Calendar *Calendar `json:"calendar,omitempty"`
 }
 
-// BrainCalendar is a brain's Google Calendar access. Google grants access to
+// Calendar is a brain's Google Calendar access. Google grants access to
 // a whole account; the calendar tool keeps the brain to the calendars listed
 // here.
-type BrainCalendar struct {
+type Calendar struct {
 	Account   string   `json:"account"`
 	Calendars []string `json:"calendars"`
 	Default   string   `json:"default"`
 }
 
-// BrainRouting decides which chats a brain answers.
-type BrainRouting struct {
+// Routing decides which chats a brain answers.
+type Routing struct {
 	HandlesDMs bool     `json:"handles_dms"`
 	Default    bool     `json:"default"`
 	Groups     []string `json:"groups"`
@@ -86,37 +88,34 @@ type BrainRouting struct {
 	AnswerForwards *bool `json:"answer_forwards,omitempty"`
 }
 
-// groupRules is what addresses the bridge in the brain's groups.
-func (r BrainRouting) groupRules() groupRules {
-	return groupRules{files: boolOr(r.AnswerFiles, true), forwards: boolOr(r.AnswerForwards, true)}
-}
-
-// BrainBackup controls this brain's Google Drive backup.
-type BrainBackup struct {
+// Backup controls this brain's Google Drive backup.
+type Backup struct {
 	Enabled bool `json:"enabled"`
 	// Exclude lists rclone filter globs, relative to the brain folder:
 	// "node_modules/", "*.log", "/big-folder/".
 	Exclude []string `json:"exclude"`
 }
 
-// DefaultBackupExcludes are applied to every new brain: rebuildable or
-// ephemeral files that only cost upload time.
-var DefaultBackupExcludes = []string{"node_modules/", "*.log", ".DS_Store", ".venv/", "__pycache__/"}
+// DefaultBackupExcludes returns a fresh list for each new brain: rebuildable
+// or ephemeral files that only cost upload time.
+func DefaultBackupExcludes() []string {
+	return []string{"node_modules/", "*.log", ".DS_Store", ".venv/", "__pycache__/"}
+}
 
-// manifestVersion is the version of brain.json this bridge reads and
+// Version is the version of brain.json this bridge reads and
 // writes. A newer one is refused, see checkManifestVersion.
-const manifestVersion = 1
+const Version = 1
 
-// errManifestTooNew means a brain.json is of a version newer than this
+// ErrTooNew means a brain.json is of a version newer than this
 // bridge reads.
-var errManifestTooNew = errors.New("a newer Fridolin wrote it, and this one would drop the settings it does not know")
+var ErrTooNew = errors.New("a newer Fridolin wrote it, and this one would drop the settings it does not know")
 
 // checkManifestVersion refuses a brain.json of version v when that is newer
 // than this bridge's: it may have fields this one does not know, which
 // writing it back would drop, or ones that mean something else now.
 func checkManifestVersion(v int) error {
-	if v > manifestVersion {
-		return fmt.Errorf("version %d is newer than the version %d this build of Fridolin reads: %w", v, manifestVersion, errManifestTooNew)
+	if v > Version {
+		return fmt.Errorf("version %d is newer than the version %d this build of Fridolin reads: %w", v, Version, ErrTooNew)
 	}
 	return nil
 }
@@ -124,18 +123,18 @@ func checkManifestVersion(v int) error {
 var brainIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}$`)
 
 // Validate checks the manifest on its own (not against other brains).
-func (m *BrainManifest) Validate() error {
-	if !brainIDRe.MatchString(m.ID) {
+func (m *Manifest) Validate() error {
+	if !ValidID(m.ID) {
 		return fmt.Errorf("brain id %q must be 1–40 lowercase letters, digits, - or _", m.ID)
 	}
 	if strings.TrimSpace(m.Name) == "" {
 		return fmt.Errorf("brain %q needs a name", m.ID)
 	}
-	if !validEfforts[m.Effort] {
+	if !ValidEffort(m.Effort) {
 		return fmt.Errorf("brain %q: effort %q must be one of low, medium, high, xhigh, max", m.ID, m.Effort)
 	}
-	if !validObserve[m.Observe] {
-		return fmt.Errorf("brain %q: observe %q must be %q or %q", m.ID, m.Observe, observeHistory, observeRun)
+	if !ValidObserve(m.Observe) {
+		return fmt.Errorf("brain %q: observe %q must be %q or %q", m.ID, m.Observe, ObserveHistory, ObserveRun)
 	}
 	if m.PromptFile != "" {
 		if filepath.IsAbs(m.PromptFile) || strings.HasPrefix(filepath.Clean(m.PromptFile), "..") {
@@ -162,52 +161,56 @@ func (m *BrainManifest) Validate() error {
 	return nil
 }
 
-// normalized returns a copy with defaults filled in, so two manifests that
+// Normalized returns a copy with defaults filled in, so two manifests that
 // mean the same thing compare equal.
-func (m BrainManifest) normalized() BrainManifest {
+func (m Manifest) Normalized() Manifest {
 	if m.Version == 0 {
-		m.Version = manifestVersion
+		m.Version = Version
 	}
 	if m.PromptFile == "" {
-		m.PromptFile = defaultPromptFile
+		m.PromptFile = DefaultPromptFile
 	}
 	if m.Observe == "" {
-		m.Observe = observeHistory
+		m.Observe = ObserveHistory
 	}
-	m.Routing.Groups = nonNil(m.Routing.Groups)
-	m.Backup.Exclude = nonNil(m.Backup.Exclude)
+	if m.Routing.Groups == nil {
+		m.Routing.Groups = []string{}
+	}
+	if m.Backup.Exclude == nil {
+		m.Backup.Exclude = []string{}
+	}
 	return m
 }
 
 // Equal reports whether two manifests describe the same brain.
-func (m BrainManifest) Equal(o BrainManifest) bool {
-	a, _ := json.Marshal(m.normalized())
-	b, _ := json.Marshal(o.normalized())
+func (m Manifest) Equal(o Manifest) bool {
+	a, _ := json.Marshal(m.Normalized())
+	b, _ := json.Marshal(o.Normalized())
 	return string(a) == string(b)
 }
 
-// ReadManifest loads <dir>/brain.json. It returns os.ErrNotExist (wrapped)
+// Read loads <dir>/brain.json. It returns os.ErrNotExist (wrapped)
 // when the folder is not a brain yet. The brain may write the file, and
 // the bridge reads it outside the sandbox (for the drift check, too), so
-// it goes as readBrainFile reads: nothing outside the folder, no symlink,
+// it goes as fsx.ReadBrainFile reads: nothing outside the folder, no symlink,
 // only a regular file, so that a FIFO cannot hang a reload.
-func ReadManifest(dir string) (*BrainManifest, error) {
+func Read(dir string) (*Manifest, error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", filepath.Join(dir, ManifestFile), err)
+		return nil, fmt.Errorf("%s: %w", filepath.Join(dir, File), err)
 	}
 	defer root.Close()
-	return readManifestRoot(root)
+	return ReadRoot(root)
 }
 
-// readManifestRoot keeps inspection and transaction reads on their pinned folder.
-func readManifestRoot(root *os.Root) (*BrainManifest, error) {
-	path := filepath.Join(root.Name(), ManifestFile)
-	data, err := fsx.ReadBrainFileRoot(root, ManifestFile)
+// ReadRoot keeps inspection and transaction reads on their pinned folder.
+func ReadRoot(root *os.Root) (*Manifest, error) {
+	path := filepath.Join(root.Name(), File)
+	data, err := fsx.ReadBrainFileRoot(root, File)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	m, err := decodeManifest(data)
+	m, err := Decode(data)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -215,17 +218,17 @@ func readManifestRoot(root *os.Root) (*BrainManifest, error) {
 	return m, nil
 }
 
-// decodeManifest decodes the contents of a brain.json, with defaults filled
+// Decode decodes the contents of a brain.json, with defaults filled
 // in. It does not validate them, but refuses a newer version's.
-func decodeManifest(data []byte) (*BrainManifest, error) {
-	m := &BrainManifest{}
+func Decode(data []byte) (*Manifest, error) {
+	m := &Manifest{}
 	if err := json.Unmarshal(data, m); err != nil {
 		return nil, err
 	}
 	if err := checkManifestVersion(m.Version); err != nil {
 		return nil, err
 	}
-	n := m.normalized()
+	n := m.Normalized()
 	return &n, nil
 }
 
@@ -239,7 +242,7 @@ var loggedManifestKeys sync.Map // path → the keys, joined
 // left out where the bridge uses the manifest, and dropped from the file
 // the next time the dashboard writes it.
 func warnUnknownManifestKeys(path string, data []byte) {
-	keys := jsonx.UnknownKeys(data, reflect.TypeOf(BrainManifest{}), "")
+	keys := jsonx.UnknownKeys(data, reflect.TypeOf(Manifest{}), "")
 	joined := strings.Join(keys, " ")
 	if prev, ok := loggedManifestKeys.Swap(path, joined); ok && prev == joined || !ok && joined == "" {
 		return
@@ -249,10 +252,10 @@ func warnUnknownManifestKeys(path string, data []byte) {
 	}
 }
 
-// encodeManifest returns the contents WriteManifest writes for m, or why m
+// Encode returns the contents Write writes for m, or why m
 // is not a valid manifest.
-func encodeManifest(m *BrainManifest) ([]byte, error) {
-	n := m.normalized()
+func Encode(m *Manifest) ([]byte, error) {
+	n := m.Normalized()
 	if err := n.Validate(); err != nil {
 		return nil, err
 	}
@@ -263,38 +266,38 @@ func encodeManifest(m *BrainManifest) ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
-// errManifestExists means a brain.json is already there and overwrite was off.
-var errManifestExists = errors.New("brain.json already exists")
+// ErrExists means a brain.json is already there and overwrite was off.
+var ErrExists = errors.New("brain.json already exists")
 
-// WriteManifest writes <dir>/brain.json. Without overwrite it refuses to
+// Write writes <dir>/brain.json. Without overwrite it refuses to
 // replace an existing file.
-func WriteManifest(dir string, m *BrainManifest, overwrite bool) error {
-	data, err := encodeManifest(m)
+func Write(dir string, m *Manifest, overwrite bool) error {
+	data, err := Encode(m)
 	if err != nil {
 		return err
 	}
 	return writeManifestData(dir, data, overwrite)
 }
 
-// writeManifestData writes data, a brain.json encodeManifest made, as
-// WriteManifest does. It refuses to replace a brain.json of a newer
+// writeManifestData writes data, a brain.json Encode made, as
+// Write does. It refuses to replace a brain.json of a newer
 // version, whose fields this bridge would drop.
 func writeManifestData(dir string, data []byte, overwrite bool) error {
-	root, err := openManifestRoot(dir, overwrite)
+	root, err := OpenRoot(dir, overwrite)
 	if err != nil {
 		return err
 	}
 	defer root.Close()
-	file, _, err := writeManifestDataRoot(root, data, overwrite)
+	file, _, err := WriteDataRoot(root, data, overwrite)
 	if file != nil {
 		file.Close()
 	}
 	return err
 }
 
-// Overwriting historically creates a missing folder; exclusive creation
-// requires the caller to have created it. Preserve that choice before pinning.
-func openManifestRoot(dir string, overwrite bool) (*os.Root, error) {
+// OpenRoot pins the manifest folder. Overwriting historically creates a
+// missing folder; exclusive creation requires the caller to have created it.
+func OpenRoot(dir string, overwrite bool) (*os.Root, error) {
 	if overwrite {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, err
@@ -303,12 +306,12 @@ func openManifestRoot(dir string, overwrite bool) (*os.Root, error) {
 	return os.OpenRoot(dir)
 }
 
-// writeManifestDataRoot reads and publishes through one pinned folder handle.
+// WriteDataRoot reads and publishes through one pinned folder handle.
 // The returned file retains the published inode until commit or rollback, so
 // removing and replacing it cannot recycle its identity while we own it.
-func writeManifestDataRoot(root *os.Root, data []byte, overwrite bool) (*os.File, fs.FileInfo, error) {
-	path := filepath.Join(root.Name(), ManifestFile)
-	if prev, err := fsx.ReadBrainFileRoot(root, ManifestFile); overwrite && err == nil {
+func WriteDataRoot(root *os.Root, data []byte, overwrite bool) (*os.File, fs.FileInfo, error) {
+	path := filepath.Join(root.Name(), File)
+	if prev, err := fsx.ReadBrainFileRoot(root, File); overwrite && err == nil {
 		var v struct {
 			Version int `json:"version"`
 		}
@@ -370,12 +373,12 @@ func writeManifestDataRoot(root *os.Root, data []byte, overwrite bool) (*os.File
 		return nil, nil, err
 	}
 	if overwrite {
-		err = root.Rename(name, ManifestFile)
+		err = root.Rename(name, File)
 	} else {
 		// Link publishes a complete file without replacing a raced-in one.
-		err = root.Link(name, ManifestFile)
+		err = root.Link(name, File)
 		if errors.Is(err, fs.ErrExist) {
-			err = errManifestExists
+			err = ErrExists
 		}
 	}
 	if err != nil {
@@ -385,8 +388,8 @@ func writeManifestDataRoot(root *os.Root, data []byte, overwrite bool) (*os.File
 	return retained, info, nil
 }
 
-// slugify turns a folder or display name into a brain id candidate.
-func slugify(s string) string {
+// Slugify turns a folder or display name into a brain id candidate.
+func Slugify(s string) string {
 	var b strings.Builder
 	dash := false
 	for _, r := range strings.ToLower(s) {
@@ -410,3 +413,61 @@ func slugify(s string) string {
 	}
 	return out
 }
+
+// Spec is a brain ready to run.
+type Spec struct {
+	Manifest Manifest
+	Dir      string // absolute, symlinks resolved
+	// Path is the folder as configured, ~ expanded. The sandbox profiles
+	// cover it as well as Dir, which the brain runs in: a symlink on the
+	// way to the folder, such as ~/assistant on another volume, is one a
+	// brain could swap for its own and so move another brain's folder.
+	Path string
+	// PromptFile is the prompt file relative to Dir. The bridge reads it
+	// through the brain's open folder, which stops a brain from pointing it
+	// at ~/.ssh with a symlink; checking the path here would not, as the
+	// brain can plant one at any time after.
+	PromptFile string
+	// Entry is the spec's index in brain_dirs, which its issues carry.
+	Entry int `json:"-"`
+}
+
+// validEfforts are the values brain_effort and a brain's effort take, ""
+// being the CLI's default. Like the other sets of values a setting takes
+// (validGitConfigs, validQueueModes, validTriggerMatches, validObserve,
+// waLevels), it is what the schemas in docs/schemas list for the setting,
+// which TestSchemaEnumsAreTheBridgesValues checks.
+var validEfforts = map[string]bool{"": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true}
+
+// What a brain does with untagged group messages, the ones nobody
+// addressed to it (Inbound.Silent): Manifest.Observe. Either way the
+// message goes into the brain's history first, and nothing is ever sent
+// back for it.
+const (
+	// ObserveHistory, the default, keeps them in the history only. The
+	// next run in that chat reads them there, which is all most brains
+	// need, and chatter costs no run and holds up nobody's request.
+	ObserveHistory = "history"
+	// ObserveRun also gives each one an observe-only run, for a brain that
+	// keeps notes on what it reads. Each costs a full Claude run, with
+	// tools, on text anyone in the group may have written.
+	ObserveRun = "run"
+)
+
+// validObserve are the values brain.json may give observe.
+var validObserve = map[string]bool{"": true, ObserveHistory: true, ObserveRun: true}
+
+// ValidID reports whether id is the stable slug accepted for a brain.
+func ValidID(id string) bool { return brainIDRe.MatchString(id) }
+
+// ValidEffort reports whether effort is an accepted CLI effort setting.
+func ValidEffort(effort string) bool { return validEfforts[effort] }
+
+// Efforts returns the accepted settings, including the unset value, in order.
+func Efforts() []string { return slices.Sorted(maps.Keys(validEfforts)) }
+
+// ValidObserve reports whether mode is a supported untagged-message policy.
+func ValidObserve(mode string) bool { return validObserve[mode] }
+
+// ObserveModes returns the accepted settings, including the unset value.
+func ObserveModes() []string { return slices.Sorted(maps.Keys(validObserve)) }

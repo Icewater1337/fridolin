@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
@@ -30,7 +32,7 @@ func TestGroupReplyToTheBridgeIsAnswered(t *testing.T) {
 func TestGroupFilesAndForwardsCanBeChatter(t *testing.T) {
 	tb := newTestBridge(t, `, "otp_guard": true`)
 	off := false
-	tb.addFolderBrain(t, BrainManifest{ID: "family", Name: "Family", Routing: BrainRouting{
+	tb.addFolderBrain(t, manifest.Manifest{ID: "family", Name: "Family", Routing: manifest.Routing{
 		Groups: []string{testGroup}, AnswerFiles: &off, AnswerForwards: &off,
 	}})
 	br := tb.brainMgr.Get("family")

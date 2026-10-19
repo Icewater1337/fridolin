@@ -22,6 +22,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
@@ -456,9 +458,9 @@ func (g *GoogleAuth) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		fail("saving the token failed: " + err.Error())
 		return
 	}
-	if err := g.cfgs.UpdateManifest(p.brainID, func(m *BrainManifest) error {
+	if err := g.cfgs.UpdateManifest(p.brainID, func(m *manifest.Manifest) error {
 		if m.Calendar == nil || m.Calendar.Account != account {
-			m.Calendar = &BrainCalendar{Account: account, Calendars: []string{account}, Default: account}
+			m.Calendar = &manifest.Calendar{Account: account, Calendars: []string{account}, Default: account}
 		}
 		return nil
 	}); err != nil {
@@ -882,7 +884,7 @@ func (g *GoogleAuth) Disconnect(ctx context.Context, brainID string, localOnly b
 	g.mu.Lock()
 	delete(g.lastError, brainID)
 	g.mu.Unlock()
-	if err := g.cfgs.UpdateManifest(brainID, func(m *BrainManifest) error { m.Calendar = nil; return nil }); err != nil {
+	if err := g.cfgs.UpdateManifest(brainID, func(m *manifest.Manifest) error { m.Calendar = nil; return nil }); err != nil {
 		return revoked, note, fmt.Errorf("the token was deleted, but saving the brain's calendar settings failed: %w", err)
 	}
 	return revoked, note, nil
@@ -1095,12 +1097,12 @@ func (b *Bridge) apiCalendarSelect(w http.ResponseWriter, r *http.Request) {
 	if req.Default == "" || !slices.Contains(req.Calendars, req.Default) {
 		req.Default = req.Calendars[0]
 	}
-	err := b.cfgs.UpdateManifest(br.ID(), func(m *BrainManifest) error {
+	err := b.cfgs.UpdateManifest(br.ID(), func(m *manifest.Manifest) error {
 		account := req.Account
 		if account == "" && m.Calendar != nil {
 			account = m.Calendar.Account
 		}
-		m.Calendar = &BrainCalendar{Account: account, Calendars: req.Calendars, Default: req.Default}
+		m.Calendar = &manifest.Calendar{Account: account, Calendars: req.Calendars, Default: req.Default}
 		return nil
 	})
 	if err != nil {
@@ -1142,7 +1144,7 @@ func (b *Bridge) apiCalendarDisconnect(w http.ResponseWriter, r *http.Request) {
 // (leftoverClientCopies), which a brain the sandbox does not hold can
 // read. The last argument, that folder, is not used any more; it stays
 // until the caller in brain.go stops passing it.
-func calendarEnv(id string, m BrainManifest, _ string) []string {
+func calendarEnv(id string, m manifest.Manifest, _ string) []string {
 	env := []string{"BRIDGE_BRAIN_ID=" + id}
 	if m.Calendar != nil && len(m.Calendar.Calendars) > 0 {
 		env = append(env, "BRIDGE_CALENDARS="+strings.Join(m.Calendar.Calendars, ","), "BRIDGE_CALENDAR_DEFAULT="+m.Calendar.Default)

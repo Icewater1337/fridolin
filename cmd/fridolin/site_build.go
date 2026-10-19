@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
@@ -50,7 +52,7 @@ type siteChats struct {
 // path is the file of a brain's build chat. The id arrives in a request
 // URL, so only a valid brain id names a file (and so one in this folder).
 func (c *siteChats) path(brainID string) (string, error) {
-	if !brainIDRe.MatchString(brainID) {
+	if !manifest.ValidID(brainID) {
 		return "", fmt.Errorf("%q is not a brain id", brainID)
 	}
 	return c.m.dir("build", brainID+".json"), nil

@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
@@ -33,21 +35,21 @@ import (
 // several chats, as in most setups.
 func newMainBridge(t *testing.T, extra string) (*testBridge, *Brain) {
 	t.Helper()
-	return newMainBridgeWith(t, extra, BrainManifest{})
+	return newMainBridgeWith(t, extra, manifest.Manifest{})
 }
 
 // newObservingBridge is newMainBridge with a brain that gives untagged
 // group messages observe-only runs of their own (observeRun).
 func newObservingBridge(t *testing.T, extra string) (*testBridge, *Brain) {
 	t.Helper()
-	return newMainBridgeWith(t, extra, BrainManifest{Observe: observeRun})
+	return newMainBridgeWith(t, extra, manifest.Manifest{Observe: manifest.ObserveRun})
 }
 
 // newMainBridgeWith is newMainBridge with m's settings for the brain.
-func newMainBridgeWith(t *testing.T, extra string, m BrainManifest) (*testBridge, *Brain) {
+func newMainBridgeWith(t *testing.T, extra string, m manifest.Manifest) (*testBridge, *Brain) {
 	t.Helper()
 	tb := newTestBridge(t, `, "otp_guard": true`+extra)
-	m.ID, m.Name, m.Routing = "main", "Main", BrainRouting{HandlesDMs: true}
+	m.ID, m.Name, m.Routing = "main", "Main", manifest.Routing{HandlesDMs: true}
 	tb.addFolderBrain(t, m)
 	br := tb.brainMgr.Get("main")
 	if br == nil {

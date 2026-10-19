@@ -17,6 +17,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 
 	wastore "go.mau.fi/whatsmeow/store"
@@ -674,7 +676,7 @@ func (b *Bridge) handleChange(c chat.Change) {
 // routing of the brain that answers there says.
 func (b *Bridge) groupRules(jid string) groupRules {
 	if br := b.brainMgr.BrainFor(jid, true); br != nil {
-		return br.settings.Load().manifest.Routing.groupRules()
+		return groupRulesFor(br.settings.Load().manifest.Routing)
 	}
 	return defaultGroupRules
 }
@@ -942,4 +944,9 @@ func logDMAccess(prev, next *Config) {
 	case prev == nil && len(next.AllowedNumbers) == 0:
 		log.Printf("allowed_numbers is empty, so nobody can send the bridge direct messages yet. Add your number under Chats → Allowed numbers.")
 	}
+}
+
+// groupRulesFor is what addresses the bridge in the brain's groups.
+func groupRulesFor(r manifest.Routing) groupRules {
+	return groupRules{files: boolOr(r.AnswerFiles, true), forwards: boolOr(r.AnswerForwards, true)}
 }

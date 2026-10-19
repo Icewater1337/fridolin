@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
@@ -35,8 +37,8 @@ func TestSetBridgePATH(t *testing.T) {
 	if err := os.Symlink(home+"/real/q", home+"/q"); err != nil {
 		t.Fatal(err)
 	}
-	personal := brainFolder(t, home+"/assistant/personal", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}})
-	q := brainFolder(t, home+"/q", BrainManifest{ID: "q"})
+	personal := brainFolder(t, home+"/assistant/personal", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}})
+	q := brainFolder(t, home+"/q", manifest.Manifest{ID: "q"})
 	unapproved := BrainRef{Path: home + "/new"}
 	path := strings.Join([]string{home + "/assistant/personal/bin", "/usr/bin", home + "/real/q/bin", "relative", home + "/new/bin", home + "/assistant/personal/tools/", "/bin"}, ":")
 	cases := []struct {
@@ -132,8 +134,8 @@ func TestBrainRunsGetTheirOwnPATHFolders(t *testing.T) {
 		"brain_mode": true,
 		"claude_path": "`+claude+`",
 		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
-		brainFolder(t, home+"/assistant/personal", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, home+"/team", BrainManifest{ID: "team", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+		brainFolder(t, home+"/assistant/personal", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, home+"/team", manifest.Manifest{ID: "team", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}),
 	)+`}`))
 	if err != nil {
 		t.Fatal(err)
@@ -185,8 +187,8 @@ func TestCheckRunsABrainWhoseFolderHoldsAPATHFolder(t *testing.T) {
 		"brain_mode": true,
 		"claude_path": "`+fakeClaudeEnv(t, 0)+`",
 		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
-		brainFolder(t, home+"/assistant/personal", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, home+"/work", BrainManifest{ID: "work", Routing: BrainRouting{Default: true}}),
+		brainFolder(t, home+"/assistant/personal", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, home+"/work", manifest.Manifest{ID: "work", Routing: manifest.Routing{Default: true}}),
 	)+`}`)
 	o := checkOptions{config: path, routes: []string{"15551234567@s.whatsapp.net"}}
 	if runtime.GOOS == "darwin" {
@@ -230,7 +232,7 @@ func TestCheckDoesNotExecuteBrainPATHPrograms(t *testing.T) {
 	versionCLI(t, filepath.Join(trustedBin, "claude"), testedClaudeVersion+" trusted")
 	t.Setenv("PATH", strings.Join([]string{ownedBin, trustedBin, "/usr/bin", "/bin"}, string(filepath.ListSeparator)))
 	path := writeConfig(t, `{"claude_path":"claude","data_dir":"`+home+`/data"`+brainDirsJSON(t,
-		brainFolder(t, brain, BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+		brainFolder(t, brain, manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 	)+`}`)
 	var out bytes.Buffer
 	if err := writeCheck(&out, checkOptions{config: path}); err != nil {

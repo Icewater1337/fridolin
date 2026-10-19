@@ -22,6 +22,8 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/platform"
 )
@@ -766,7 +768,7 @@ func logContains(logs func() []string, substr string) bool {
 // and returns the brain_dirs entry that runs it with m approved. path goes
 // into the config as given, and a ~ in it is the test's HOME, so set that
 // first. A manifest without a name is named after its id.
-func brainFolder(t testing.TB, path string, m BrainManifest) BrainRef {
+func brainFolder(t testing.TB, path string, m manifest.Manifest) BrainRef {
 	t.Helper()
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -775,7 +777,7 @@ func brainFolder(t testing.TB, path string, m BrainManifest) BrainRef {
 	if m.Name == "" {
 		m.Name = m.ID
 	}
-	m = m.normalized()
+	m = m.Normalized()
 	if _, err := ScaffoldBrain(fsx.ExpandHome(path, home), &m); err != nil {
 		t.Fatal(err)
 	}

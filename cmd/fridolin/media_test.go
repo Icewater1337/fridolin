@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
@@ -25,8 +27,8 @@ import (
 // brain's inbox gets nothing.
 func TestBrainTakesItsFilesIntoItsInbox(t *testing.T) {
 	tb := newTestBridge(t, "")
-	dmDir := tb.addFolderBrain(t, BrainManifest{ID: "dm", Name: "DM", Routing: BrainRouting{HandlesDMs: true}})
-	tb.addFolderBrain(t, BrainManifest{ID: "g", Name: "Group", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}})
+	dmDir := tb.addFolderBrain(t, manifest.Manifest{ID: "dm", Name: "DM", Routing: manifest.Routing{HandlesDMs: true}})
+	tb.addFolderBrain(t, manifest.Manifest{ID: "g", Name: "Group", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}})
 	media := tb.cfgs.Get().MediaDir
 	p := writeTestFile(t, filepath.Join(media, mediafiles.IncomingDir, "voice.ogg"), "OggS")
 
@@ -58,7 +60,7 @@ func TestRemovedBrainHandsItsFilesOn(t *testing.T) {
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+os.Args[0]+`"`+brainDirsJSON(t,
-		brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{HandlesDMs: true}}),
+		brainFolder(t, home+"/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{HandlesDMs: true}}),
 	)+`}`))
 	if err != nil {
 		t.Fatal(err)
@@ -212,7 +214,7 @@ func TestCheckLeavesTheMediaFolderAlone(t *testing.T) {
 		"brain_mode": true,
 		"claude_path": "`+home+`/no-claude",
 		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
-		brainFolder(t, home+"/personal", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
+		brainFolder(t, home+"/personal", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
 	)+`}`)
 	media := filepath.Join(home, "data", "media")
 	before := processStarted.Add(-time.Hour)

@@ -16,6 +16,8 @@ import (
 	"testing"
 	"unicode"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/trigger"
@@ -46,7 +48,7 @@ type schemaType struct {
 // schemaTypes are the schemas of docs/schemas and their Go types.
 var schemaTypes = []schemaType{
 	{schema: "config.schema.json", typ: reflect.TypeFor[Config](), closed: true, extra: retiredKeyNames()},
-	{schema: "brain.schema.json", typ: reflect.TypeFor[BrainManifest](), closed: true},
+	{schema: "brain.schema.json", typ: reflect.TypeFor[manifest.Manifest](), closed: true},
 	{schema: "history-line.schema.json", typ: reflect.TypeFor[history.Entry](), closed: true},
 	{schema: "send-request.schema.json", typ: reflect.TypeFor[sendRequest]()},
 	{schema: "ingest-request.schema.json", typ: reflect.TypeFor[ingestRequest](), refused: []string{"scope"}},
@@ -532,15 +534,15 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 		values  []string
 		file    string // a file that sets it, %s for the value as JSON
 	}{
-		{"brain_effort", "config.schema.json#/properties/brain_effort", keys(validEfforts), `{"brain_effort": %s}`},
+		{"brain_effort", "config.schema.json#/properties/brain_effort", manifest.Efforts(), `{"brain_effort": %s}`},
 		{"agent_provider", "config.schema.json#/properties/agent_provider", []string{"", "claude", "codex"}, `{"agent_provider": %s}`},
-		{"codex_effort", "config.schema.json#/properties/codex_effort", keys(validEfforts), `{"codex_effort": %s}`},
+		{"codex_effort", "config.schema.json#/properties/codex_effort", manifest.Efforts(), `{"codex_effort": %s}`},
 		{"queue.mode", "config.schema.json#/properties/queue/properties/mode", keys(validQueueModes), `{"queue": {"mode": %s}}`},
 		{"sandbox.git_config", "config.schema.json#/properties/sandbox/properties/git_config", keys(validGitConfigs), `{"sandbox": {"git_config": %s}}`},
 		{"triggers match", "config.schema.json#/properties/triggers/items/oneOf/1/properties/match", matches, `{"triggers": [{"text": "@c", "match": %s}]}`},
 		{"log_level", "config.schema.json#/properties/log_level", levels, `{"log_level": %s}`},
-		{"brain.json effort", "brain.schema.json#/properties/effort", keys(validEfforts), `{"id": "a", "name": "A", "effort": %s}`},
-		{"brain.json observe", "brain.schema.json#/properties/observe", keys(validObserve), `{"id": "a", "name": "A", "observe": %s}`},
+		{"brain.json effort", "brain.schema.json#/properties/effort", manifest.Efforts(), `{"id": "a", "name": "A", "effort": %s}`},
+		{"brain.json observe", "brain.schema.json#/properties/observe", manifest.ObserveModes(), `{"id": "a", "name": "A", "observe": %s}`},
 	}
 	set := newSchemaSet(t)
 	t.Setenv("HOME", t.TempDir())
@@ -565,8 +567,8 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 				doc := fmt.Sprintf(tc.file, value)
 				var err error
 				if schema == "brain.schema.json" {
-					var m *BrainManifest
-					if m, err = decodeManifest([]byte(doc)); err == nil {
+					var m *manifest.Manifest
+					if m, err = manifest.Decode([]byte(doc)); err == nil {
 						err = m.Validate()
 					}
 				} else {
@@ -606,8 +608,8 @@ func TestBrainFilesFollowTheSchema(t *testing.T) {
 	assertValid(t, set, "brain.schema.json", "brain-v1.json", fixture(t, "brain-v1.json"))
 
 	h := newHarness(t, "")
-	dir := h.AddBrain(BrainManifest{ID: "notes", Name: "Notes", Routing: BrainRouting{HandlesDMs: true}})
-	data, err := os.ReadFile(filepath.Join(dir, ManifestFile))
+	dir := h.AddBrain(manifest.Manifest{ID: "notes", Name: "Notes", Routing: manifest.Routing{HandlesDMs: true}})
+	data, err := os.ReadFile(filepath.Join(dir, manifest.File))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -623,7 +625,7 @@ func TestBrainFilesFollowTheSchema(t *testing.T) {
 // files is refused when the brain is added or loaded, and by the schema.
 func TestBrainSchemaRefusesWhatTheBridgeRefuses(t *testing.T) {
 	set := newSchemaSet(t)
-	for _, manifest := range []string{
+	for _, manifestJSON := range []string{
 		`{"name": "No id"}`,
 		`{"id": "Bad Id", "name": "Bad"}`,
 		`{"id": "a"}`,
@@ -637,11 +639,11 @@ func TestBrainSchemaRefusesWhatTheBridgeRefuses(t *testing.T) {
 		`{"id": "a", "name": "A", "calendar": {"account": "you@example.com", "calendars": ["a,b"], "default": ""}}`,
 		`{"id": "a", "name": "A", "backup": {"enabled": true, "exclude": ["+ keep"]}}`,
 	} {
-		t.Run(manifest, func(t *testing.T) {
-			if m, err := decodeManifest([]byte(manifest)); err == nil && m.Validate() == nil {
+		t.Run(manifestJSON, func(t *testing.T) {
+			if m, err := manifest.Decode([]byte(manifestJSON)); err == nil && m.Validate() == nil {
 				t.Fatal("the bridge takes it")
 			}
-			if len(set.ValidateJSON("brain.schema.json", []byte(manifest))) == 0 {
+			if len(set.ValidateJSON("brain.schema.json", []byte(manifestJSON))) == 0 {
 				t.Error("the schema takes it")
 			}
 		})
@@ -658,7 +660,7 @@ func TestHistoryLinesFollowTheSchema(t *testing.T) {
 	}
 
 	h := newHarness(t, "")
-	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	h.Answer(inbound{JID: harnessDM, Sender: "15551234567", Text: "hello"})
 	h.WaitFor("the answer in the history", func() bool { return len(historyLines(t, dir)) == 2 })
 	h.Answer(inbound{JID: harnessDM, Sender: "15551234567", Text: "!reset"})
@@ -717,7 +719,7 @@ func assertScriptAPIContract(t *testing.T, path, body string, w *httptest.Respon
 // schema, and so does the history line it writes.
 func TestSendSchemaTakesTheOTPRequest(t *testing.T) {
 	h := newHarness(t, `{"otp_guard": true}`)
-	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	body := `{"jid": "` + harnessDM + `", "text": "Please send me the 6-digit verification code."}`
 	w := h.Script("POST", "/send", body)
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"otp_request"`) {
@@ -731,7 +733,7 @@ func TestSendSchemaTakesTheOTPRequest(t *testing.T) {
 // add, follow the schemas.
 func TestScriptAPISchemasTakeWhatTheBridgeTakes(t *testing.T) {
 	h := newHarness(t, `{"ingest": {"enabled": true}}`)
-	dir := h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	for _, tc := range []struct{ path, body string }{
 		{"/send", `{"jid": "15551234567", "text": "to a number", "comment": "ignored"}`},
 		{"/ingest", `{"brain": "main", "text": "an empty scope", "scope": ""}`},

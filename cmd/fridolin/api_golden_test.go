@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -35,11 +37,11 @@ exit 0
 
 // goldenManifest is the brain of goldenBridge: the DM brain and the
 // default, serving harnessGroup, backed up, with a calendar.
-var goldenManifest = BrainManifest{
+var goldenManifest = manifest.Manifest{
 	ID: "main", Name: "Main",
-	Routing: BrainRouting{HandlesDMs: true, Default: true, Groups: []string{harnessGroup}},
-	Backup:  BrainBackup{Enabled: true, Exclude: []string{"node_modules/", "*.log", "- private.txt"}},
-	Calendar: &BrainCalendar{
+	Routing: manifest.Routing{HandlesDMs: true, Default: true, Groups: []string{harnessGroup}},
+	Backup:  manifest.Backup{Enabled: true, Exclude: []string{"node_modules/", "*.log", "- private.txt"}},
+	Calendar: &manifest.Calendar{
 		Account: "you@example.com", Calendars: []string{"you@example.com", "team@example.com"}, Default: "you@example.com",
 	},
 }
@@ -191,7 +193,7 @@ func TestGoldenGETEndpoints(t *testing.T) {
 func TestGoldenConfigWrites(t *testing.T) {
 	h := newHarness(t, "")
 	s := h.scrubber()
-	h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})
+	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	cfg := h.Config()
 	var file map[string]any
 	if err := json.Unmarshal(cfg.Config, &file); err != nil {

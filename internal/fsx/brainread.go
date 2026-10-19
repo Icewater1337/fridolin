@@ -27,7 +27,7 @@ func ReadAtMost(r io.Reader) ([]byte, error) {
 }
 
 // ReadBrainFile reads the file name, relative to the brain folder dir, as
-// openInFolder opens it. It refuses a file larger than MaxBrainFile.
+// OpenInFolder opens it. It refuses a file larger than MaxBrainFile.
 func ReadBrainFile(dir, name string) ([]byte, error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {

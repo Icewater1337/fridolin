@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 )
 
@@ -232,7 +234,7 @@ func prepareBrainState(dataDir, mediaDir, id string, inheritUser bool) ([]string
 	if dataDir == "" {
 		return nil, errors.New("the sandbox needs the data folder, which holds each brain's own state")
 	}
-	if !brainIDRe.MatchString(id) {
+	if !manifest.ValidID(id) {
 		return nil, fmt.Errorf("brain id %q cannot name a folder", id)
 	}
 	if mediaDir != "" {

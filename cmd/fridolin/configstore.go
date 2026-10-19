@@ -18,6 +18,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/jsonx"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -378,18 +380,18 @@ type stagedManifest struct {
 // WriteManifest stages m as the brain.json of the folder dir. m is checked
 // and encoded at once, so an invalid one fails the update before anything
 // is written. A later write for the same folder replaces this one.
-func (tx *Tx) WriteManifest(dir string, m *BrainManifest) error {
+func (tx *Tx) WriteManifest(dir string, m *manifest.Manifest) error {
 	return tx.stage(dir, m, false)
 }
 
 // CreateManifest stages m as the brain.json of dir, a new brain's folder.
 // The update fails if the folder has one by the time it is written.
-func (tx *Tx) CreateManifest(dir string, m *BrainManifest) error {
+func (tx *Tx) CreateManifest(dir string, m *manifest.Manifest) error {
 	return tx.stage(dir, m, true)
 }
 
-func (tx *Tx) stage(dir string, m *BrainManifest, create bool) error {
-	data, err := encodeManifest(m)
+func (tx *Tx) stage(dir string, m *manifest.Manifest, create bool) error {
+	data, err := manifest.Encode(m)
 	if err != nil {
 		return err
 	}
@@ -412,13 +414,13 @@ func (tx *Tx) stage(dir string, m *BrainManifest, create bool) error {
 // there, could not be, and is not replaced.
 func (tx *Tx) write() error {
 	for _, w := range tx.writes {
-		path := filepath.Join(w.dir, ManifestFile)
-		root, err := openManifestRoot(w.dir, !w.create)
+		path := filepath.Join(w.dir, manifest.File)
+		root, err := manifest.OpenRoot(w.dir, !w.create)
 		if err != nil {
 			return err
 		}
 		w.root = root
-		prev, err := fsx.ReadBrainFileRoot(root, ManifestFile)
+		prev, err := fsx.ReadBrainFileRoot(root, manifest.File)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			w.existed, w.prev = false, nil
@@ -427,7 +429,7 @@ func (tx *Tx) write() error {
 		default:
 			w.existed, w.prev = true, prev
 		}
-		file, info, err := writeManifestDataRoot(root, w.data, !w.create)
+		file, info, err := manifest.WriteDataRoot(root, w.data, !w.create)
 		if err != nil {
 			return err
 		}
@@ -446,8 +448,8 @@ func (tx *Tx) rollback() {
 			continue
 		}
 		w.written = false
-		path := filepath.Join(w.dir, ManifestFile)
-		info, err := w.root.Lstat(ManifestFile)
+		path := filepath.Join(w.dir, manifest.File)
+		info, err := w.root.Lstat(manifest.File)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -457,7 +459,7 @@ func (tx *Tx) rollback() {
 		}
 		if err == nil {
 			var current []byte
-			current, err = fsx.ReadBrainFileRoot(w.root, ManifestFile)
+			current, err = fsx.ReadBrainFileRoot(w.root, manifest.File)
 			if err == nil && !bytes.Equal(current, w.data) {
 				continue
 			}
@@ -467,12 +469,12 @@ func (tx *Tx) rollback() {
 		if err == nil {
 			if w.existed {
 				var restored *os.File
-				restored, _, err = writeManifestDataRoot(w.root, w.prev, true)
+				restored, _, err = manifest.WriteDataRoot(w.root, w.prev, true)
 				if restored != nil {
 					restored.Close()
 				}
 			} else {
-				err = w.root.Remove(ManifestFile)
+				err = w.root.Remove(manifest.File)
 			}
 		}
 		if err != nil {

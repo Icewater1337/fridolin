@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 )
@@ -905,13 +907,6 @@ func (c *Config) clone() (*Config, error) {
 	return out, nil
 }
 
-// validEfforts are the values brain_effort and a brain's effort take, ""
-// being the CLI's default. Like the other sets of values a setting takes
-// (validGitConfigs, validQueueModes, validTriggerMatches, validObserve,
-// waLevels), it is what the schemas in docs/schemas list for the setting,
-// which TestSchemaEnumsAreTheBridgesValues checks.
-var validEfforts = map[string]bool{"": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true}
-
 // validGitConfigs are the values sandbox.git_config takes once
 // effective() has filled in the default, "read".
 var validGitConfigs = map[string]bool{"read": true, "deny": true}
@@ -924,10 +919,10 @@ func (c *Config) validate() error {
 	if c.AgentProvider != "claude" && c.AgentProvider != "codex" {
 		return fmt.Errorf("agent_provider must be claude or codex, not %q", c.AgentProvider)
 	}
-	if !validEfforts[c.CodexEffort] {
+	if !manifest.ValidEffort(c.CodexEffort) {
 		return fmt.Errorf("codex_effort %q must be one of low, medium, high, xhigh, max", c.CodexEffort)
 	}
-	if !validEfforts[c.BrainEffort] {
+	if !manifest.ValidEffort(c.BrainEffort) {
 		return fmt.Errorf("brain_effort %q must be one of low, medium, high, xhigh, max", c.BrainEffort)
 	}
 	if !validQueueModes[c.Queue.Mode] {

@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
@@ -65,8 +67,8 @@ func queueTestManager(t *testing.T, sleepMS int, extra string) (*BrainManager, *
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+claude+`"`+brainDirsJSON(t,
-		brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}, Observe: observeRun}),
+		brainFolder(t, home+"/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, home+"/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}, Observe: manifest.ObserveRun}),
 	)+extra+`
 	}`))
 	if err != nil {
@@ -443,8 +445,8 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+os.Args[0]+`",
 		"brain_model": "new-model"`+brainDirsJSON(t,
-		brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, home+"/c", BrainManifest{ID: "c", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+		brainFolder(t, home+"/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, home+"/c", manifest.Manifest{ID: "c", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}),
 	)+`
 	}`))
 	if err != nil {
@@ -509,19 +511,19 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 				t.Fatal(err)
 			}
 			return []BrainRef{
-				brainFolder(t, home+"/a-moved", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-				brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Default: true}}),
+				brainFolder(t, home+"/a-moved", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+				brainFolder(t, home+"/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Default: true}}),
 			}, filepath.Join(home, "a-moved")
 		}},
 		{"another folder", func(t *testing.T, home string) ([]BrainRef, string) {
 			return []BrainRef{
-				brainFolder(t, home+"/a-copy", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-				brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Default: true}}),
+				brainFolder(t, home+"/a-copy", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+				brainFolder(t, home+"/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Default: true}}),
 			}, filepath.Join(home, "a-copy")
 		}},
 		{"removed", func(t *testing.T, home string) ([]BrainRef, string) {
 			return []BrainRef{
-				brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Default: true}}),
+				brainFolder(t, home+"/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Default: true}}),
 			}, filepath.Join(home, "b")
 		}},
 	}
@@ -541,8 +543,8 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 				return cfg
 			}
 			mgr := newTestManager(t, config(
-				brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-				brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Default: true}}),
+				brainFolder(t, home+"/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+				brainFolder(t, home+"/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Default: true}}),
 			))
 			d := &deliveries{}
 			mgr.SetHooks(BrainHooks{Deliver: d.add})
@@ -592,10 +594,10 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 func TestReloadRunsTheApprovedManifest(t *testing.T) {
 	const dmChat = "15551234567@s.whatsapp.net"
 	tb := newTestBridge(t, "")
-	tb.addFolderBrain(t, BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true}})
-	dir := tb.addFolderBrain(t, BrainManifest{ID: "b", Name: "B"})
-	grab := BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{HandlesDMs: true}}
-	if err := WriteManifest(dir, &grab, true); err != nil {
+	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
+	dir := tb.addFolderBrain(t, manifest.Manifest{ID: "b", Name: "B"})
+	grab := manifest.Manifest{ID: "b", Name: "B", Routing: manifest.Routing{HandlesDMs: true}}
+	if err := manifest.Write(dir, &grab, true); err != nil {
 		t.Fatal(err)
 	}
 	if err := tb.brainMgr.Apply(tb.cfgs.Get()); err != nil {
@@ -624,8 +626,8 @@ func TestReloadRefusesAClashingSet(t *testing.T) {
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/data"`+brainDirsJSON(t,
-		brainFolder(t, "~/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, "~/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{group}}}),
+		brainFolder(t, "~/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, "~/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Groups: []string{group}}}),
 	)+`}`))
 	if err != nil {
 		t.Fatal(err)
@@ -1245,7 +1247,7 @@ func TestBrainsDoNotSeeTheDotEnv(t *testing.T) {
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+claude+`"`+brainDirsJSON(t,
-		brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+		brainFolder(t, home+"/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 	)+`
 	}`)
 	// One key older versions read as a setting, one they only exported.
@@ -1326,7 +1328,7 @@ func TestBrainsAreToldTheDataDir(t *testing.T) {
 			claude := fakeClaudeEnv(t, 0)
 			path := writeConfig(t, `{`+c.settings+`
 				"claude_path": "`+claude+`"`+brainDirsJSON(t,
-				brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
+				brainFolder(t, home+"/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 			)+`
 			}`)
 			cfg, err := LoadConfig(path)
@@ -1371,7 +1373,7 @@ func TestBrainsAreToldTheDataDir(t *testing.T) {
 func TestDataEnvIsAbsolute(t *testing.T) {
 	cwd := fsx.Canonical(t.TempDir())
 	t.Chdir(cwd)
-	s := settingsFor(&Config{DataDir: "rel", DBPath: "rel/bridge.db"}, BrainSpec{})
+	s := settingsFor(&Config{DataDir: "rel", DBPath: "rel/bridge.db"}, manifest.Spec{})
 	want := []string{"BRIDGE_DATA_DIR=" + cwd + "/rel", "BRIDGE_DB_PATH=" + cwd + "/rel/bridge.db"}
 	if got := dataEnv(s); !slices.Equal(got, want) {
 		t.Errorf("dataEnv = %q, want %q", got, want)
@@ -1821,9 +1823,9 @@ func limitTestManager(t *testing.T, sleepMS, limit int) (*BrainManager, *deliver
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+claude+`",
 		"max_concurrent_runs": `+strconv.Itoa(limit)+brainDirsJSON(t,
-		brainFolder(t, home+"/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true}}),
-		brainFolder(t, home+"/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}, Observe: observeRun}),
-		brainFolder(t, home+"/c", BrainManifest{ID: "c", Routing: BrainRouting{Groups: []string{"120363000000000001@g.us"}}, Observe: observeRun}),
+		brainFolder(t, home+"/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
+		brainFolder(t, home+"/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}, Observe: manifest.ObserveRun}),
+		brainFolder(t, home+"/c", manifest.Manifest{ID: "c", Routing: manifest.Routing{Groups: []string{"120363000000000001@g.us"}}, Observe: manifest.ObserveRun}),
 	)+`
 	}`))
 	if err != nil {

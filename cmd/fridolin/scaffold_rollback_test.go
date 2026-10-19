@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
 func TestScaffoldRollbackKeepsSelectedSymlink(t *testing.T) {
@@ -12,7 +14,7 @@ func TestScaffoldRollbackKeepsSelectedSymlink(t *testing.T) {
 	if err := os.Symlink(target, selected); err != nil {
 		t.Fatal(err)
 	}
-	s, err := scaffoldFolderTx(selected, &BrainManifest{ID: "a", Name: "A"})
+	s, err := scaffoldFolderTx(selected, &manifest.Manifest{ID: "a", Name: "A"})
 	defer s.close()
 	if err != nil {
 		t.Fatal(err)

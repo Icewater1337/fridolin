@@ -57,6 +57,10 @@ behaviour unless its title says so. The steps so far:
   `fsx` owns bounded regular-file reads through pinned brain folders.
   Configuration and manifest policies remain at their callers.
 
+- **R5, manifest slice**: `manifest` owns portable brain descriptions,
+  validation, normalized defaults and rooted publication. Runtime addressing
+  and the config transaction retain their command-owned orchestration.
+
 - **R11, access slice**: `access` owns pure admission, group addressing,
   silence and text decisions. Transports project facts into `chat.Envelope`;
   the command projects one config snapshot. WhatsApp identity/group lookups,
@@ -241,11 +245,15 @@ responsibility and says what it must not do.
 
 ### Formats and storage
 
-- **`manifest`** *(to come, R5; `manifest.go`)*: `brain.json`. It provides
-  `Manifest`, `Routing`, `Backup` and `Calendar`, plus `Validate`,
-  `Normalized`, `Equal`, and `Read`/`Write` through the brain folder's
-  `os.Root`. A `Spec` is an approved manifest located on disk and ready to
-  run: manifest, canonical folder, prompt path.
+- **`manifest`**: portable `brain.json` descriptions, validation, normalized
+  defaults, copied backup exclusions and accepted effort/observe values.
+  `Read` and `Write` retain bounded regular-file reads and complete exclusive
+  publication. `OpenRoot`, `Encode` and `WriteDataRoot` let configuration
+  transactions keep pinned folders and published inode handles until commit
+  or rollback. `Spec` retains the manifest, canonical folder, configured path,
+  relative prompt file and configuration entry index. The package uses only
+  `chat`'s group suffix predicate, `fsx` and the pure `jsonx` inspector.
+
 - **`history`**: `conversation-history.jsonl`.
   It provides `Entry`, `Append`, `Tail` and `ForChat`, all through the
   brain's `os.Root`. A file is read back from its end, a block at a time,

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
 // The check/open interval is explicit: no racing goroutine or global hook is
@@ -37,7 +38,7 @@ func TestInspectRejectsReplacedCanonicalComponents(t *testing.T) {
 				if err := os.MkdirAll(target, 0o700); err != nil {
 					t.Fatal(err)
 				}
-				if err := WriteManifest(target, ptr(testManifest("private")), false); err != nil {
+				if err := manifest.Write(target, ptr(testManifest("private")), false); err != nil {
 					t.Fatal(err)
 				}
 				if err := os.Rename(entry, entry+".original"); err != nil {
@@ -112,7 +113,7 @@ func TestInspectManifestKeepsPinnedFolder(t *testing.T) {
 		if err := os.Mkdir(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := WriteManifest(dir, ptr(testManifest(id)), false); err != nil {
+		if err := manifest.Write(dir, ptr(testManifest(id)), false); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -132,7 +133,7 @@ func TestInspectManifestKeepsPinnedFolder(t *testing.T) {
 	if err := root.Symlink("private", "candidate"); err != nil {
 		t.Fatal(err)
 	}
-	m, err := readManifestRoot(dir)
+	m, err := manifest.ReadRoot(dir)
 	if err != nil || m.ID != "candidate" {
 		t.Fatalf("pinned manifest = %+v, %v", m, err)
 	}
@@ -144,7 +145,7 @@ func TestInspectPreservesAcceptedAliasesAndFileMetadata(t *testing.T) {
 	if err := os.MkdirAll(brain, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteManifest(brain, ptr(testManifest("candidate")), false); err != nil {
+	if err := manifest.Write(brain, ptr(testManifest("candidate")), false); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Dir(brain), filepath.Join(tb.home, "alias")); err != nil {
@@ -168,7 +169,7 @@ func TestInspectPreservesAcceptedAliasesAndFileMetadata(t *testing.T) {
 			Exists      bool
 			IsDirectory bool `json:"is_dir"`
 			Entries     int
-			Manifest    *BrainManifest
+			Manifest    *manifest.Manifest
 		}
 		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 			t.Fatal(err)

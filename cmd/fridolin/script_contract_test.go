@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/history"
 )
 
@@ -95,8 +97,8 @@ func TestGoldenSendContract(t *testing.T) {
 	s := h.scrubber()
 	// The DM brain, and a brain that owns the group.
 	brains := map[string]string{
-		"main":   h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}}),
-		"family": h.AddBrain(BrainManifest{ID: "family", Name: "Family", Routing: BrainRouting{Groups: []string{harnessGroup}}}),
+		"main":   h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}}),
+		"family": h.AddBrain(manifest.Manifest{ID: "family", Name: "Family", Routing: manifest.Routing{Groups: []string{harnessGroup}}}),
 	}
 	long := strings.Repeat("All work and no play. ", 12)
 	tests := []struct {
@@ -134,7 +136,7 @@ func TestGoldenSendContract(t *testing.T) {
 
 	t.Run("no-token-tokenless-off", func(t *testing.T) {
 		h := newHarness(t, `{"script_api": {"tokenless_send": false}}`)
-		brains := map[string]string{"main": h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})}
+		brains := map[string]string{"main": h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})}
 		assertGolden(t, "script/send-no-token-tokenless-off.golden", scriptCall(t, h, h.scrubber(), brains, `{"jid": "`+harnessDM+`", "text": "hello"}`, withoutToken))
 	})
 }
@@ -151,9 +153,9 @@ func TestGoldenIngestContract(t *testing.T) {
 	h := newHarness(t, `{"ingest": {"enabled": true}}`)
 	s := h.scrubber()
 	brains := map[string]string{
-		"main": h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}}),
+		"main": h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}}),
 		// A brain with no chat to answer in.
-		"quiet": h.AddBrain(BrainManifest{ID: "quiet", Name: "Quiet"}),
+		"quiet": h.AddBrain(manifest.Manifest{ID: "quiet", Name: "Quiet"}),
 	}
 	inbox := filepath.Join(h.DataDir(), "media")
 	file := func(name string) string {
@@ -208,7 +210,7 @@ func TestGoldenIngestContract(t *testing.T) {
 
 	t.Run("disabled", func(t *testing.T) {
 		h := newHarness(t, "")
-		brains := map[string]string{"main": h.AddBrain(BrainManifest{ID: "main", Name: "Main", Routing: BrainRouting{HandlesDMs: true}})}
+		brains := map[string]string{"main": h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})}
 		assertGolden(t, "script/ingest-disabled.golden", scriptCall(t, h, h.scrubber(), brains, `{"brain": "main", "text": "x"}`))
 	})
 }

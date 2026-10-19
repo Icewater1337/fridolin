@@ -26,6 +26,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/platform"
@@ -91,7 +93,7 @@ func (pc PlaudConfig) interval() time.Duration {
 }
 
 func (pc PlaudConfig) validate() error {
-	if pc.Brain != "" && !brainIDRe.MatchString(pc.Brain) {
+	if pc.Brain != "" && !manifest.ValidID(pc.Brain) {
 		return fmt.Errorf("plaud.brain %q is not a brain id", pc.Brain)
 	}
 	if pc.IntervalSeconds != 0 && pc.IntervalSeconds < 30 {

@@ -3,8 +3,6 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,37 +10,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
-func testManifest(id string) BrainManifest {
-	return BrainManifest{ID: id, Name: strings.ToUpper(id[:1]) + id[1:], Backup: BrainBackup{Enabled: true, Exclude: DefaultBackupExcludes}}
-}
-
-func TestManifestValidate(t *testing.T) {
-	good := testManifest("work-1")
-	if err := good.Validate(); err != nil {
-		t.Fatal(err)
-	}
-	bad := map[string]func(m *BrainManifest){
-		"uppercase id":       func(m *BrainManifest) { m.ID = "Work" },
-		"empty name":         func(m *BrainManifest) { m.Name = " " },
-		"absolute prompt":    func(m *BrainManifest) { m.PromptFile = "/etc/passwd" },
-		"escaping prompt":    func(m *BrainManifest) { m.PromptFile = "../other/brain-prompt.md" },
-		"bad effort":         func(m *BrainManifest) { m.Effort = "huge" },
-		"group not a group":  func(m *BrainManifest) { m.Routing.Groups = []string{"15551234567@s.whatsapp.net"} },
-		"filter injection":   func(m *BrainManifest) { m.Backup.Exclude = []string{"+ /secret"} },
-		"newline in exclude": func(m *BrainManifest) { m.Backup.Exclude = []string{"a\n+ b"} },
-	}
-	for name, mutate := range bad {
-		m := testManifest("work")
-		mutate(&m)
-		if err := m.Validate(); err == nil {
-			t.Errorf("%s: expected a validation error", name)
-		}
-	}
+func testManifest(id string) manifest.Manifest {
+	return manifest.Manifest{ID: id, Name: strings.ToUpper(id[:1]) + id[1:], Backup: manifest.Backup{Enabled: true, Exclude: manifest.DefaultBackupExcludes()}}
 }
 
 func TestCheckBrainPath(t *testing.T) {
@@ -125,8 +101,8 @@ func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
 	t.Setenv("PATH", home+"/tools/bin:/usr/bin:/bin")
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ref := brainFolder(t, tc.path, BrainManifest{ID: "x", Routing: BrainRouting{HandlesDMs: true}})
-			other := brainFolder(t, "~/elsewhere/y", BrainManifest{ID: "y"})
+			ref := brainFolder(t, tc.path, manifest.Manifest{ID: "x", Routing: manifest.Routing{HandlesDMs: true}})
+			other := brainFolder(t, "~/elsewhere/y", manifest.Manifest{ID: "y"})
 			// x second: the dashboard shows an issue on the entry it
 			// names, which was the first one for these.
 			cfg := &Config{DataDir: filepath.Join(home, "box", ".fridolin"), BrainDirs: []BrainRef{other, ref}}
@@ -201,7 +177,7 @@ func TestScaffoldBrainNeverOverwrites(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(dir, "brain-prompt.md")); string(data) != "mine" {
 		t.Error("an existing prompt was overwritten")
 	}
-	if !slices.Contains(created, ManifestFile) || !slices.Contains(created, "memories/people/whatsapp-identity-map.md") {
+	if !slices.Contains(created, manifest.File) || !slices.Contains(created, "memories/people/whatsapp-identity-map.md") {
 		t.Errorf("created = %v", created)
 	}
 	if slices.Contains(created, "brain-prompt.md") {
@@ -277,7 +253,7 @@ func TestResolveBrainsUsesApprovedManifestAndReportsDrift(t *testing.T) {
 	// The brain grants itself the DMs by editing its own brain.json.
 	evil := m
 	evil.Routing.HandlesDMs = true
-	if err := WriteManifest(dir, &evil, true); err != nil {
+	if err := manifest.Write(dir, &evil, true); err != nil {
 		t.Fatal(err)
 	}
 	specs, issues = ResolveBrains(cfg)
@@ -294,7 +270,7 @@ func TestResolveBrainsSkipsMissingAndClashing(t *testing.T) {
 	t.Setenv("HOME", home)
 	a, b := testManifest("a"), testManifest("b")
 	a.Routing.HandlesDMs, b.Routing.HandlesDMs = true, true
-	for _, m := range []BrainManifest{a, b} {
+	for _, m := range []manifest.Manifest{a, b} {
 		m := m
 		if _, err := ScaffoldBrain(filepath.Join(home, m.ID), &m); err != nil {
 			t.Fatal(err)
@@ -327,26 +303,26 @@ func TestResolveBrainsLeavesOutBadBrains(t *testing.T) {
 	cases := []struct {
 		name   string
 		dir    string // the second brain's folder, below home
-		second *BrainManifest
+		second *manifest.Manifest
 		kind   string
 		detail string
 	}{
-		{"same id", "b", &BrainManifest{ID: "a", Name: "Other A"}, "invalid", `two brains use the id "a"`},
-		{"second DM brain", "b", &BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{HandlesDMs: true}}, "invalid", "both handle DMs"},
-		{"second default", "b", &BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{Default: true}}, "invalid", "both marked default"},
-		{"group claimed twice", "b", &BrainManifest{ID: "b", Name: "B", Routing: BrainRouting{Groups: []string{group}}}, "invalid", "is claimed by both"},
-		{"folder inside the other brain's", "a/b", &BrainManifest{ID: "b", Name: "B"}, "invalid", "is inside brain folder"},
-		{"the other brain's folder", "a", &BrainManifest{ID: "b", Name: "B"}, "invalid", `brains "a" and "b" use the same folder`},
-		{"id that is not a slug", "b", &BrainManifest{ID: "Work.Brain", Name: "B"}, "invalid", "must be 1–40 lowercase letters"},
-		{"no name", "b", &BrainManifest{ID: "b"}, "invalid", "needs a name"},
+		{"same id", "b", &manifest.Manifest{ID: "a", Name: "Other A"}, "invalid", `two brains use the id "a"`},
+		{"second DM brain", "b", &manifest.Manifest{ID: "b", Name: "B", Routing: manifest.Routing{HandlesDMs: true}}, "invalid", "both handle DMs"},
+		{"second default", "b", &manifest.Manifest{ID: "b", Name: "B", Routing: manifest.Routing{Default: true}}, "invalid", "both marked default"},
+		{"group claimed twice", "b", &manifest.Manifest{ID: "b", Name: "B", Routing: manifest.Routing{Groups: []string{group}}}, "invalid", "is claimed by both"},
+		{"folder inside the other brain's", "a/b", &manifest.Manifest{ID: "b", Name: "B"}, "invalid", "is inside brain folder"},
+		{"the other brain's folder", "a", &manifest.Manifest{ID: "b", Name: "B"}, "invalid", `brains "a" and "b" use the same folder`},
+		{"id that is not a slug", "b", &manifest.Manifest{ID: "Work.Brain", Name: "B"}, "invalid", "must be 1–40 lowercase letters"},
+		{"no name", "b", &manifest.Manifest{ID: "b"}, "invalid", "needs a name"},
 		{"no approved manifest", "b", nil, "unapproved", "remove this entry and add the folder again"},
-		{"no folder", "gone", &BrainManifest{ID: "b", Name: "B"}, "missing", "folder not found"},
+		{"no folder", "gone", &manifest.Manifest{ID: "b", Name: "B"}, "missing", "folder not found"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
-			first := BrainManifest{ID: "a", Name: "A", Routing: BrainRouting{HandlesDMs: true, Default: true, Groups: []string{group}}}
+			first := manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true, Default: true, Groups: []string{group}}}
 			for _, d := range []string{"a", "a/b", "b"} {
 				if err := os.MkdirAll(filepath.Join(home, d), 0o700); err != nil {
 					t.Fatal(err)
@@ -367,12 +343,6 @@ func TestResolveBrainsLeavesOutBadBrains(t *testing.T) {
 	}
 }
 
-func TestReadManifestMissing(t *testing.T) {
-	if _, err := ReadManifest(t.TempDir()); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("err = %v, want not-exist", err)
-	}
-}
-
 // FuzzDecodeManifest: the brain can write its own brain.json, so it can
 // hold anything. What decodes is normalised, and what also validates is
 // safe to use: the id is a plain file name, the prompt file stays in the
@@ -382,10 +352,10 @@ func TestReadManifestMissing(t *testing.T) {
 // written. (ReadManifest and WriteManifest add only the file around these.)
 func FuzzDecodeManifest(f *testing.F) {
 	full := testManifest("work")
-	full.Routing = BrainRouting{HandlesDMs: true, Groups: []string{"120363000000000000@g.us"}}
+	full.Routing = manifest.Routing{HandlesDMs: true, Groups: []string{"120363000000000000@g.us"}}
 	full.Effort, full.Model, full.PromptFile, full.ReplyChat = "high", "opus", "prompts/main.md", "120363000000000000@g.us"
 	full.DisallowedTools = &[]string{}
-	full.Calendar = &BrainCalendar{Account: "you@example.com", Calendars: []string{"primary", "team"}, Default: "primary"}
+	full.Calendar = &manifest.Calendar{Account: "you@example.com", Calendars: []string{"primary", "team"}, Default: "primary"}
 	data, err := json.Marshal(full)
 	if err != nil {
 		f.Fatal(err)
@@ -403,14 +373,14 @@ func FuzzDecodeManifest(f *testing.F) {
 		f.Add([]byte(s))
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		m, err := decodeManifest(data)
+		m, err := manifest.Decode(data)
 		if err != nil {
 			return
 		}
-		if n := m.normalized(); !reflect.DeepEqual(n, *m) {
+		if n := m.Normalized(); !reflect.DeepEqual(n, *m) {
 			t.Errorf("decoded %+v, normalised %+v", *m, n)
 		}
-		out, err := encodeManifest(m)
+		out, err := manifest.Encode(m)
 		if m.Validate() != nil {
 			if err == nil {
 				t.Errorf("encoded %+v, which does not validate", *m)
@@ -440,7 +410,7 @@ func FuzzDecodeManifest(f *testing.F) {
 			}
 		}
 
-		back, err := decodeManifest(out)
+		back, err := manifest.Decode(out)
 		if err != nil {
 			t.Fatalf("decoding %s again: %v", out, err)
 		}
@@ -495,11 +465,11 @@ func TestBrainsDocExampleIsAValidManifest(t *testing.T) {
 	}
 	dec := json.NewDecoder(strings.NewReader(block))
 	dec.DisallowUnknownFields()
-	var m BrainManifest
+	var m manifest.Manifest
 	if err := dec.Decode(&m); err != nil {
 		t.Fatalf("the example does not decode as brain.json: %v", err)
 	}
-	m = m.normalized()
+	m = m.Normalized()
 	if err := m.Validate(); err != nil {
 		t.Errorf("the example is not a valid manifest: %v", err)
 	}
@@ -570,29 +540,29 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 	}{
 		{"every brain runs", func(home string) []BrainRef {
 			return []BrainRef{
-				brainFolder(t, home+"/personal", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
-				brainFolder(t, home+"/team", BrainManifest{ID: "team", Routing: BrainRouting{Groups: []string{testGroup}}}),
-				brainFolder(t, home+"/work", BrainManifest{ID: "work", Routing: BrainRouting{Default: true}}),
+				brainFolder(t, home+"/personal", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
+				brainFolder(t, home+"/team", manifest.Manifest{ID: "team", Routing: manifest.Routing{Groups: []string{testGroup}}}),
+				brainFolder(t, home+"/work", manifest.Manifest{ID: "work", Routing: manifest.Routing{Default: true}}),
 			}
 		}, "personal", "team", "work"},
 		{"the DM brain's folder cannot hold a brain", func(home string) []BrainRef {
 			return []BrainRef{
-				brainFolder(t, home+"/data/personal", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
-				brainFolder(t, home+"/team", BrainManifest{ID: "team", Routing: BrainRouting{Groups: []string{testGroup}}}),
-				brainFolder(t, home+"/work", BrainManifest{ID: "work", Routing: BrainRouting{Default: true}}),
+				brainFolder(t, home+"/data/personal", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
+				brainFolder(t, home+"/team", manifest.Manifest{ID: "team", Routing: manifest.Routing{Groups: []string{testGroup}}}),
+				brainFolder(t, home+"/work", manifest.Manifest{ID: "work", Routing: manifest.Routing{Default: true}}),
 			}
 		}, "!personal", "team", "work"},
 		{"a group brain's folder is gone", func(home string) []BrainRef {
 			return []BrainRef{
-				brainFolder(t, home+"/personal", BrainManifest{ID: "personal", Routing: BrainRouting{HandlesDMs: true}}),
-				{Path: home + "/gone", Approved: &BrainManifest{ID: "team", Name: "team", Routing: BrainRouting{Groups: []string{testGroup}}}},
-				brainFolder(t, home+"/work", BrainManifest{ID: "work", Routing: BrainRouting{Default: true}}),
+				brainFolder(t, home+"/personal", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
+				{Path: home + "/gone", Approved: &manifest.Manifest{ID: "team", Name: "team", Routing: manifest.Routing{Groups: []string{testGroup}}}},
+				brainFolder(t, home+"/work", manifest.Manifest{ID: "work", Routing: manifest.Routing{Default: true}}),
 			}
 		}, "personal", "!team", "work"},
 		{"the default brain's folder is gone", func(home string) []BrainRef {
 			return []BrainRef{
-				brainFolder(t, home+"/team", BrainManifest{ID: "team", Routing: BrainRouting{Groups: []string{testGroup}}}),
-				{Path: home + "/gone", Approved: &BrainManifest{ID: "work", Name: "work", Routing: BrainRouting{Default: true}}},
+				brainFolder(t, home+"/team", manifest.Manifest{ID: "team", Routing: manifest.Routing{Groups: []string{testGroup}}}),
+				{Path: home + "/gone", Approved: &manifest.Manifest{ID: "work", Name: "work", Routing: manifest.Routing{Default: true}}},
 			}
 		}, "!work", "team", "!work"},
 	}
@@ -634,8 +604,8 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 		home := fsx.Canonical(t.TempDir())
 		t.Setenv("HOME", home)
 		cfg, err := LoadConfig(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data", "allowed_numbers": ["15551234567"]`+brainDirsJSON(t,
-			BrainRef{Path: home + "/gone", Approved: &BrainManifest{ID: "personal", Name: "personal", Routing: BrainRouting{HandlesDMs: true}}},
-			brainFolder(t, home+"/work", BrainManifest{ID: "work", Routing: BrainRouting{Default: true}}),
+			BrainRef{Path: home + "/gone", Approved: &manifest.Manifest{ID: "personal", Name: "personal", Routing: manifest.Routing{HandlesDMs: true}}},
+			brainFolder(t, home+"/work", manifest.Manifest{ID: "work", Routing: manifest.Routing{Default: true}}),
 		)+`}`))
 		if err != nil {
 			t.Fatal(err)
@@ -650,8 +620,8 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 	t.Run("the chat is told", func(t *testing.T) {
 		brains := fsx.Canonical(t.TempDir())
 		tb := newTestBridge(t, brainDirsJSON(t,
-			BrainRef{Path: brains + "/personal", Approved: &BrainManifest{ID: "personal", Name: "personal", Routing: BrainRouting{HandlesDMs: true}}},
-			brainFolder(t, brains+"/work", BrainManifest{ID: "work", Routing: BrainRouting{Default: true}}),
+			BrainRef{Path: brains + "/personal", Approved: &manifest.Manifest{ID: "personal", Name: "personal", Routing: manifest.Routing{HandlesDMs: true}}},
+			brainFolder(t, brains+"/work", manifest.Manifest{ID: "work", Routing: manifest.Routing{Default: true}}),
 		))
 		tb.handleInbound(t.Context(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", Source: chat.SourceWhatsApp}})
 		sent := tb.sentTo(testDMChat)

@@ -24,6 +24,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -965,7 +967,7 @@ func (b *Bridge) apiBrainBackup(w http.ResponseWriter, r *http.Request) {
 
 // updateBrainBackup changes one brain's backup settings in its manifest.
 func updateBrainBackup(c *Config, tx *Tx, id string, enabled *bool, exclude []string) error {
-	return updateManifestIn(c, tx, id, func(m *BrainManifest) error {
+	return updateManifestIn(c, tx, id, func(m *manifest.Manifest) error {
 		if enabled != nil {
 			m.Backup.Enabled = *enabled
 		}

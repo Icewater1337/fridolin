@@ -27,6 +27,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 
 	"rsc.io/qr"
@@ -714,7 +716,7 @@ func revokeEntry(list []string, sent, entry string, valid bool, canon func(strin
 // chosen brain goes first, so that one that is not there is refused before
 // the others are looked at.
 func assignGroup(c *Config, tx *Tx, jid, brainID string) error {
-	if err := updateManifestIn(c, tx, brainID, func(m *BrainManifest) error {
+	if err := updateManifestIn(c, tx, brainID, func(m *manifest.Manifest) error {
 		if !slices.Contains(m.Routing.Groups, jid) {
 			m.Routing.Groups = append(m.Routing.Groups, jid)
 		}
@@ -724,7 +726,7 @@ func assignGroup(c *Config, tx *Tx, jid, brainID string) error {
 	}
 	for _, ref := range c.BrainDirs {
 		if a := ref.Approved; a != nil && a.ID != brainID && slices.Contains(a.Routing.Groups, jid) {
-			if err := updateManifestIn(c, tx, a.ID, func(m *BrainManifest) error {
+			if err := updateManifestIn(c, tx, a.ID, func(m *manifest.Manifest) error {
 				m.Routing.Groups = slices.DeleteFunc(slices.Clone(m.Routing.Groups), func(g string) bool { return g == jid })
 				return nil
 			}); err != nil {
@@ -834,14 +836,14 @@ func (b *Bridge) apiRestart(w http.ResponseWriter, r *http.Request) {
 // ── brains ───────────────────────────────────────────────────────────────
 
 type brainView struct {
-	ID       string         `json:"id"`
-	Name     string         `json:"name"`
-	Path     string         `json:"path"`
-	Status   string         `json:"status"` // ok, drift, missing, invalid, unapproved
-	Manifest *BrainManifest `json:"manifest"`
-	Disk     *BrainManifest `json:"disk_manifest,omitempty"`
-	Issues   []BrainIssue   `json:"issues"`
-	Runtime  *BrainRuntime  `json:"runtime,omitempty"`
+	ID       string             `json:"id"`
+	Name     string             `json:"name"`
+	Path     string             `json:"path"`
+	Status   string             `json:"status"` // ok, drift, missing, invalid, unapproved
+	Manifest *manifest.Manifest `json:"manifest"`
+	Disk     *manifest.Manifest `json:"disk_manifest,omitempty"`
+	Issues   []BrainIssue       `json:"issues"`
+	Runtime  *BrainRuntime      `json:"runtime,omitempty"`
 	// Fallback marks the brain that takes the chats no other brain
 	// claims (BrainManager.Fallback). Without a default brain that is the
 	// first one, which no brain.json says, so the dashboard names it.
@@ -881,7 +883,7 @@ func (b *Bridge) brainViews() []brainView {
 		if ref.Approved != nil {
 			v.ID, v.Name = ref.Approved.ID, ref.Approved.Name
 		}
-		if disk, err := ReadManifest(fsx.Canonical(ref.Path)); err == nil && (ref.Approved == nil || !disk.Equal(*ref.Approved)) {
+		if disk, err := manifest.Read(fsx.Canonical(ref.Path)); err == nil && (ref.Approved == nil || !disk.Equal(*ref.Approved)) {
 			v.Disk = disk
 		}
 		out = append(out, v)
@@ -960,7 +962,7 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	defer root.Close()
 	inspectFolderMetadata(root, abs, resp)
-	id := slugify(filepath.Base(abs))
+	id := manifest.Slugify(filepath.Base(abs))
 	taken := map[string]bool{}
 	for _, ref := range cfg.BrainDirs {
 		if ref.Approved != nil {
@@ -968,7 +970,7 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for i := 2; taken[id]; i++ {
-		id = fmt.Sprintf("%s-%d", slugify(filepath.Base(abs)), i)
+		id = fmt.Sprintf("%s-%d", manifest.Slugify(filepath.Base(abs)), i)
 	}
 	resp["suggested"] = map[string]string{"id": id, "name": prettyName(filepath.Base(abs))}
 	httpapi.WriteJSON(w, http.StatusOK, resp)
@@ -992,9 +994,9 @@ func inspectFolderMetadata(home *os.Root, abs string, resp map[string]any) {
 	}
 	resp["entries"] = entries
 	resp["is_git"] = fileExistsInRoot(home, filepath.Join(abs, ".git"))
-	resp["has_prompt"] = fileExistsInRoot(home, filepath.Join(abs, defaultPromptFile))
+	resp["has_prompt"] = fileExistsInRoot(home, filepath.Join(abs, manifest.DefaultPromptFile))
 	resp["has_history"] = fileExistsInRoot(home, filepath.Join(abs, history.FileName))
-	if m, err := readManifestRoot(dir); err == nil {
+	if m, err := manifest.ReadRoot(dir); err == nil {
 		resp["manifest"] = m
 	}
 }
@@ -1098,7 +1100,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	var m BrainManifest
+	var m manifest.Manifest
 	backupGiven := false
 	if !req.UseExisting {
 		if len(req.Manifest) == 0 {
@@ -1142,13 +1144,13 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.UseExisting {
-		disk, err := ReadManifest(abs)
+		disk, err := manifest.Read(abs)
 		if err != nil {
 			httpapi.WriteErr(w, http.StatusUnprocessableEntity, "no readable brain.json in that folder: "+err.Error())
 			return
 		}
 		m = *disk
-	} else if _, err := ReadManifest(abs); err == nil {
+	} else if _, err := manifest.Read(abs); err == nil {
 		httpapi.WriteErr(w, http.StatusConflict, "this folder already has a brain.json — review it and add it with “use existing”")
 		return
 	}
@@ -1157,11 +1159,11 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 	case !backupGiven:
 		// No backup settings given: new brains are backed up, with the
 		// default exclusions.
-		m.Backup = BrainBackup{Enabled: true, Exclude: append([]string{}, DefaultBackupExcludes...)}
+		m.Backup = manifest.Backup{Enabled: true, Exclude: append([]string{}, manifest.DefaultBackupExcludes()...)}
 	case m.Backup.Exclude == nil:
-		m.Backup.Exclude = append([]string{}, DefaultBackupExcludes...)
+		m.Backup.Exclude = append([]string{}, manifest.DefaultBackupExcludes()...)
 	}
-	m = m.normalized()
+	m = m.Normalized()
 	if err := m.Validate(); err != nil {
 		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -1199,7 +1201,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		}
 		// A brain.json the folder has, one that does not load say, stays
 		// as ScaffoldBrain would leave it.
-		if _, err := fsx.ReadBrainFile(abs, ManifestFile); !req.UseExisting && errors.Is(err, fs.ErrNotExist) {
+		if _, err := fsx.ReadBrainFile(abs, manifest.File); !req.UseExisting && errors.Is(err, fs.ErrNotExist) {
 			if err := tx.CreateManifest(abs, &m); err != nil {
 				return err
 			}
@@ -1214,7 +1216,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if writesManifest {
-		created = append(created, ManifestFile)
+		created = append(created, manifest.File)
 		sort.Strings(created)
 	}
 	log.Printf("brain %s: added (%s), created %v", m.ID, abs, created)
@@ -1224,25 +1226,25 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 // checkNewBrain checks brain m, to go in folder abs, against the brains cfg
 // (an effective configuration) has: the folder must be none of theirs, in
 // or around one, and m must not clash with them.
-func checkNewBrain(cfg *Config, m BrainManifest, abs string) error {
+func checkNewBrain(cfg *Config, m manifest.Manifest, abs string) error {
 	if _, problems, _ := CheckBrainPath(abs, cfg, brainDirs(cfg)); len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
 	}
 	specs, _ := ResolveBrains(cfg)
-	return ValidateBrainSet(append(specs, BrainSpec{Manifest: m, Dir: abs}))
+	return ValidateBrainSet(append(specs, manifest.Spec{Manifest: m, Dir: abs}))
 }
 
 // apiUpdateBrain saves edited settings for a brain.
 func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req struct {
-		Manifest BrainManifest `json:"manifest"`
+		Manifest manifest.Manifest `json:"manifest"`
 	}
 	if err := httpapi.DecodeJSON(r, &req); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	m := req.Manifest.normalized()
+	m := req.Manifest.Normalized()
 	if m.ID != id {
 		httpapi.WriteErr(w, http.StatusUnprocessableEntity, "a brain's id cannot change — remove it and add the folder again under a new id")
 		return
@@ -1254,7 +1256,7 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 	// The brain.json the update stages has it check the brain set with
 	// the edit before anything is written (see checkSet).
 	_, err := b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
-		return updateManifestIn(c, tx, id, func(cur *BrainManifest) error {
+		return updateManifestIn(c, tx, id, func(cur *manifest.Manifest) error {
 			*cur = m
 			return nil
 		})
@@ -1305,7 +1307,7 @@ var errReviewedManifestChanged = errors.New("brain.json changed again since you 
 func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req struct {
-		Manifest *BrainManifest `json:"manifest"`
+		Manifest *manifest.Manifest `json:"manifest"`
 	}
 	if err := httpapi.DecodeJSON(r, &req); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
@@ -1321,7 +1323,7 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 			if ref.Approved == nil || ref.Approved.ID != id {
 				continue
 			}
-			disk, err := ReadManifest(ref.Dir())
+			disk, err := manifest.Read(ref.Dir())
 			if err != nil {
 				return err
 			}
@@ -1553,7 +1555,7 @@ func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
 		if st, err := root.Stat(child); err != nil || !st.IsDir() {
 			continue
 		}
-		out = append(out, entry{Name: e.Name(), Path: full, IsBrain: fileExistsInRoot(root, filepath.Join(resolved, ManifestFile)), IsGit: fileExistsInRoot(root, filepath.Join(resolved, ".git"))})
+		out = append(out, entry{Name: e.Name(), Path: full, IsBrain: fileExistsInRoot(root, filepath.Join(resolved, manifest.File)), IsGit: fileExistsInRoot(root, filepath.Join(resolved, ".git"))})
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
 	parent := filepath.Dir(p)

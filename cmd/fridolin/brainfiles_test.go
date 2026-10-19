@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
 	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -73,7 +75,7 @@ func brainASetup(t *testing.T) (*Config, string) {
 	if err := os.WriteFile(filepath.Join(home, ".ssh", "id_test"), []byte("FAKE-PRIVATE-KEY\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	approved, err := json.Marshal(m.normalized())
+	approved, err := json.Marshal(m.Normalized())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,8 +180,8 @@ func TestBrainWhoseFolderCannotBeOpenedIsLeftOut(t *testing.T) {
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	dirs := brainDirsJSON(t,
-		brainFolder(t, "~/a", BrainManifest{ID: "a", Routing: BrainRouting{HandlesDMs: true, Default: true}}),
-		brainFolder(t, "~/b", BrainManifest{ID: "b", Routing: BrainRouting{Groups: []string{"120363000000000000@g.us"}}}),
+		brainFolder(t, "~/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true, Default: true}}),
+		brainFolder(t, "~/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}),
 	)
 	locked := filepath.Join(home, "b")
 	if err := os.Chmod(locked, 0); err != nil {
@@ -236,7 +238,7 @@ func TestLeftOutBrainShowsWhyOnItsPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
-	approved := m.normalized()
+	approved := m.Normalized()
 	if _, err := tb.cfgs.Update("", func(c *Config) error {
 		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: dir, Approved: &approved})
 		return nil
@@ -297,14 +299,14 @@ func TestReplacedFolderIsOpenedOnReload(t *testing.T) {
 				if err := os.Rename(dir, dir+".old"); err != nil {
 					t.Fatal(err)
 				}
-				manifest, err := os.ReadFile(filepath.Join(dir+".old", ManifestFile))
+				manifestData, err := os.ReadFile(filepath.Join(dir+".old", manifest.File))
 				if err != nil {
 					t.Fatal(err)
 				}
 				if err := os.Mkdir(dir, 0o700); err != nil {
 					t.Fatal(err)
 				}
-				for name, data := range map[string]string{ManifestFile: string(manifest), "brain-prompt.md": want + "\n"} {
+				for name, data := range map[string]string{manifest.File: string(manifestData), "brain-prompt.md": want + "\n"} {
 					if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o600); err != nil {
 						t.Fatal(err)
 					}
@@ -617,13 +619,13 @@ func TestManifestIsNotFollowedOutOfTheFolder(t *testing.T) {
 		want  string // in the error
 	}{
 		{"symlink to a manifest outside", func(t *testing.T, home string) {
-			plant(t, filepath.Join(home, "a", ManifestFile), filepath.Join(home, "b", ManifestFile))
+			plant(t, filepath.Join(home, "a", manifest.File), filepath.Join(home, "b", manifest.File))
 		}, fsx.ErrSymlink.Error()},
 		{"symlink inside the folder", func(t *testing.T, home string) {
-			plant(t, filepath.Join(home, "a", ManifestFile), "copy.json")
+			plant(t, filepath.Join(home, "a", manifest.File), "copy.json")
 		}, fsx.ErrSymlink.Error()},
 		{"FIFO", func(t *testing.T, home string) {
-			p := filepath.Join(home, "a", ManifestFile)
+			p := filepath.Join(home, "a", manifest.File)
 			if err := os.Remove(p); err != nil {
 				t.Fatal(err)
 			}
@@ -644,23 +646,23 @@ func TestManifestIsNotFollowedOutOfTheFolder(t *testing.T) {
 				if err := os.MkdirAll(dir, 0o700); err != nil {
 					t.Fatal(err)
 				}
-				if err := WriteManifest(dir, &other, false); err != nil {
+				if err := manifest.Write(dir, &other, false); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if err := os.Rename(filepath.Join(home, "a", "copy", ManifestFile), filepath.Join(home, "a", "copy.json")); err != nil {
+			if err := os.Rename(filepath.Join(home, "a", "copy", manifest.File), filepath.Join(home, "a", "copy.json")); err != nil {
 				t.Fatal(err)
 			}
 			tc.plant(t, home)
 
 			type resolved struct {
-				specs  []BrainSpec
+				specs  []manifest.Spec
 				issues []BrainIssue
 				err    error
 			}
 			done := make(chan resolved, 1)
 			go func() {
-				_, err := ReadManifest(filepath.Join(home, "a"))
+				_, err := manifest.Read(filepath.Join(home, "a"))
 				specs, issues := ResolveBrains(cfg)
 				done <- resolved{specs, issues, err}
 			}()
@@ -670,7 +672,7 @@ func TestManifestIsNotFollowedOutOfTheFolder(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("reading brain.json hangs")
 			}
-			if got.err == nil || !strings.Contains(got.err.Error(), filepath.Join(home, "a", ManifestFile)+": "+tc.want) {
+			if got.err == nil || !strings.Contains(got.err.Error(), filepath.Join(home, "a", manifest.File)+": "+tc.want) {
 				t.Errorf("ReadManifest: %v, want %q for it", got.err, tc.want)
 			}
 			if len(got.specs) != 1 || len(got.specs[0].Manifest.Routing.Groups) != 0 || !got.specs[0].Manifest.Routing.HandlesDMs {
