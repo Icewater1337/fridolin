@@ -30,7 +30,7 @@ var imports = map[string][]string{
 	"internal/activity": {"internal/history", "internal/textx"},
 	"internal/archtest": nil,
 	"internal/chat":     nil,
-	"internal/config":   {"internal/chat", "internal/fsx", "internal/manifest", "internal/textx", "internal/trigger"},
+	"internal/config":   {"internal/chat", "internal/fsx", "internal/jsonx", "internal/manifest", "internal/textx", "internal/trigger"},
 	"internal/devchat":  {"internal/chat", "internal/textx"},
 	"internal/fsx":      nil,
 	"internal/jsonx":    nil,

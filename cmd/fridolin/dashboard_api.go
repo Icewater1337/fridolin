@@ -1098,7 +1098,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 			httpapi.WriteErr(w, http.StatusBadRequest, "manifest required (or use_existing, to add the brain.json in the folder)")
 			return
 		}
-		if err := httpapi.DecodeStrict(req.Manifest, &m); err != nil {
+		if err := manifest.JSONError(httpapi.DecodeStrict(req.Manifest, &m)); err != nil {
 			httpapi.WriteErr(w, http.StatusBadRequest, "manifest: "+err.Error())
 			return
 		}
@@ -1232,7 +1232,7 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Manifest manifest.Manifest `json:"manifest"`
 	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
+	if err := manifest.JSONError(httpapi.DecodeJSON(r, &req)); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -1301,7 +1301,7 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Manifest *manifest.Manifest `json:"manifest"`
 	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
+	if err := manifest.JSONError(httpapi.DecodeJSON(r, &req)); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
