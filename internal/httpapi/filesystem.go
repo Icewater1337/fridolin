@@ -96,13 +96,8 @@ func (a *FilesystemAPI) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := fsx.Canonical(a.DataDir())
-	type entry struct {
-		Name    string `json:"name"`
-		Path    string `json:"path"`
-		IsBrain bool   `json:"is_brain"`
-		IsGit   bool   `json:"is_git"`
-	}
-	out := []entry{}
+
+	out := []DirectoryEntry{}
 	for _, e := range entries {
 		if !e.IsDir() && e.Type()&fs.ModeSymlink == 0 {
 			continue
@@ -125,7 +120,7 @@ func (a *FilesystemAPI) List(w http.ResponseWriter, r *http.Request) {
 		if st, err := root.Stat(child); err != nil || !st.IsDir() {
 			continue
 		}
-		out = append(out, entry{Name: e.Name(), Path: full, IsBrain: fileExistsInRoot(root, filepath.Join(resolved, manifest.File)), IsGit: fileExistsInRoot(root, filepath.Join(resolved, ".git"))})
+		out = append(out, DirectoryEntry{Name: e.Name(), Path: full, IsBrain: fileExistsInRoot(root, filepath.Join(resolved, manifest.File)), IsGit: fileExistsInRoot(root, filepath.Join(resolved, ".git"))})
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
 	parent := filepath.Dir(p)
