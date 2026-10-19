@@ -83,6 +83,32 @@ loop:
 	}
 }
 
+// If intake gets the lock after a batch's maximum wait but before its timer
+// can flush, Add must flush both messages immediately. Set the recorded start
+// in the past so this case does not depend on which goroutine the scheduler
+// runs first; the timer itself stays an hour away.
+func TestDebounceExpiredBatchFlushesOnAdd(t *testing.T) {
+	d, f := newTestDebouncer(time.Hour, time.Hour)
+	t.Cleanup(func() { d.Drain() })
+	first := brain.Inbound{Inbound: chat.Inbound{JID: "c", Sender: "1", Text: "first"}}
+	d.Add(first)
+	d.mu.Lock()
+	d.batches[batchKey(first)].started = time.Now().Add(-2 * time.Hour)
+	d.mu.Unlock()
+	second := first
+	second.Text = "second"
+	d.Add(second)
+	if n := f.n(); n != 1 {
+		t.Fatalf("%d flushes, want the expired batch flushed before Add returns", n)
+	}
+	if got := f.got[0].Text; got != "first\n\nsecond" {
+		t.Errorf("flushed %q, want both messages", got)
+	}
+	if n := d.Pending(); n != 0 {
+		t.Errorf("%d pending batches, want the flushed batch removed", n)
+	}
+}
+
 func TestDebounceSeparatesSendersAndChats(t *testing.T) {
 	d, f := newTestDebouncer(40*time.Millisecond, time.Second)
 	d.Add(brain.Inbound{Inbound: chat.Inbound{JID: "g", Sender: "1", Text: "a"}})
