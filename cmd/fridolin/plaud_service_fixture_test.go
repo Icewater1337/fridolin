@@ -256,3 +256,14 @@ func plaudServiceWriteFile(t *testing.T, p, content string) string {
 	}
 	return p
 }
+
+// updateSettings publishes a fresh snapshot at the point a scenario changes
+// the supplied live settings; configuration persistence belongs to integration tests.
+func (f *plaudServiceFixture) updateSettings(change func(*PlaudSnapshot) error) error {
+	next := *f.settings.Load()
+	if err := change(&next); err != nil {
+		return err
+	}
+	f.settings.Store(&next)
+	return nil
+}
