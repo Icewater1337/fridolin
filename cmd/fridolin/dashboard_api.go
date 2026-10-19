@@ -242,7 +242,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 	if cfg.AnyoneCanDM() {
 		resp.Warnings = append(resp.Warnings, "allowed_numbers is empty, so anyone who can message this WhatsApp account can use the assistant. Add your number under Chats → Allowed numbers.")
 	}
-	resp.Warnings = append(resp.Warnings, b.tokenWarnings(cfg, runtime.GOOS)...)
+	resp.Warnings = append(resp.Warnings, b.tokenWarnings(b.cfgs.Get(), runtime.GOOS)...)
 	if w := claudeVersionWarning(resp.Claude); cfg.AgentProvider != "codex" && w != "" {
 		resp.Warnings = append(resp.Warnings, w)
 	}
