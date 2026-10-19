@@ -10,13 +10,10 @@ import (
 	"io"
 	"log"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
-	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/google"
@@ -291,7 +288,7 @@ func runCmd(args []string) {
 		go logClaudeCLI(cfg.ClaudePath, cfg.ChildEnvPassthrough)
 	}
 
-	signalled := stopOnSignals(cancel, bridge.brainMgr)
+	signalled, stopSignals := stopOnSignals(cancel, bridge.brainMgr.KillRuns)
 
 	if platform.IsTerminal(os.Stdout) && cfg.HTTPEnabled() && !cfg.Dashboard.Disabled {
 		// Only on an interactive terminal: even a code that works once
@@ -304,7 +301,9 @@ func runCmd(args []string) {
 		go func() { _ = platform.OpenBrowser(httpapi.LoginURL(cfg.HTTPListen, code)) }()
 	}
 
-	os.Exit(serve(ctx, bridge, signalled))
+	code := serve(ctx, bridge, signalled)
+	stopSignals()
+	os.Exit(code)
 }
 
 // errRestart is the cause runCmd's context ends with when the dashboard
@@ -345,30 +344,6 @@ func serve(ctx context.Context, b *Bridge, signalled func() bool) int {
 	// the bridge again after an exit 1.
 	log.Printf("restart failed: %v", err)
 	return 1
-}
-
-// stopOnSignals stops the bridge on SIGINT or SIGTERM. The first ends ctx
-// through cancel, and serve stops the bridge in order, which lets the
-// brains' runs finish for a while (shutdownGrace); a restart under way
-// stops instead of running the bridge again. A second while that stop is
-// under way stops the runs still going at once and exits 1, leaving the
-// rest of the stop undone. The function returned reports whether a signal
-// came.
-func stopOnSignals(cancel context.CancelCauseFunc, brains *BrainManager) func() bool {
-	var got atomic.Bool
-	sigCh := make(chan os.Signal, 2)
-	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-	go func() {
-		sig := <-sigCh
-		got.Store(true)
-		log.Printf("Received signal %s, shutting down… (send it again to stop at once)", sig)
-		cancel(fmt.Errorf("received signal %s", sig))
-		sig = <-sigCh
-		log.Printf("Received signal %s again: stopping the runs still going and exiting", sig)
-		brains.KillRuns()
-		os.Exit(1)
-	}()
-	return got.Load
 }
 
 // runLog sends the log to console and to a ring the dashboard shows, logs
