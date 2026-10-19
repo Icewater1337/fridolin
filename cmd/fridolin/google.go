@@ -24,7 +24,6 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
@@ -947,118 +946,57 @@ func (g *GoogleAuth) sharingGrant(brainID string, t *googleToken) string {
 	return ""
 }
 
-// ── API ──────────────────────────────────────────────────────────────────
-
-func (b *Bridge) apiGoogleClient(w http.ResponseWriter, r *http.Request) {
-	g := b.google
-	resp := map[string]any{"configured": false, "redirect_uri": g.redirectURI()}
-	if c := g.Client(); c != nil {
-		hint := c.ClientID
-		if i := strings.Index(hint, "-"); i > 0 {
-			hint = hint[:i] + "-…"
-		}
-		resp["configured"], resp["type"], resp["client_id_hint"] = true, c.Type, hint
+// DeleteClient removes the shared OAuth client, leaving existing tokens alone.
+func (g *GoogleAuth) DeleteClient() error {
+	if err := os.Remove(g.clientPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
-	httpapi.WriteJSON(w, http.StatusOK, resp)
+	return nil
 }
 
-func (b *Bridge) apiSetGoogleClient(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		JSON string `json:"json"`
-	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	c, err := b.google.SetClient([]byte(strings.TrimSpace(req.JSON)))
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	note := ""
-	if c.Type == "web" {
-		note = "This is a Web application client: add " + b.google.redirectURI() + " to its Authorized redirect URIs in Google Cloud Console, or create a Desktop app client instead."
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved", "type": c.Type, "note": note})
-}
-
-func (b *Bridge) apiDeleteGoogleClient(w http.ResponseWriter, r *http.Request) {
-	if err := os.Remove(b.google.clientPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
-		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"})
-}
-
-func (b *Bridge) calendarBrain(w http.ResponseWriter, r *http.Request) *Brain {
-	br := b.brainMgr.Get(r.PathValue("id"))
-	if br == nil {
-		httpapi.WriteErr(w, http.StatusNotFound, "no such brain")
-	}
-	return br
-}
-
-func (b *Bridge) apiCalendarConnect(w http.ResponseWriter, r *http.Request) {
-	br := b.calendarBrain(w, r)
-	if br == nil {
-		return
-	}
-	u, err := b.google.StartSignIn(br.ID())
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusPreconditionFailed, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"auth_url": u})
-}
-
-func (b *Bridge) apiCalendarStatus(w http.ResponseWriter, r *http.Request) {
-	br := b.calendarBrain(w, r)
-	if br == nil {
-		return
-	}
-	g := b.google
-	m := br.settings.Load().manifest
+// CalendarStatus returns the current connection and optional calendar list.
+// The caller supplies the brain's selected calendars from its runtime snapshot.
+func (g *GoogleAuth) CalendarStatus(ctx context.Context, brainID string, cal *manifest.Calendar, list bool) map[string]any {
 	resp := map[string]any{
 		"client_configured": g.Client() != nil,
 		"connected":         false,
-		"token_path":        g.tokenPath(br.ID()),
+		"token_path":        g.tokenPath(brainID),
 		"calendars":         []CalendarEntry{},
 		"selected":          []string{},
 		// Of every brain, not only this one: any brain the sandbox does not
 		// hold can read them.
 		"leftover_client_copies": nonNil(g.leftoverClientCopies()),
 	}
-	if m.Calendar != nil {
-		resp["account"], resp["selected"], resp["default"] = m.Calendar.Account, nonNil(m.Calendar.Calendars), m.Calendar.Default
+	if cal != nil {
+		resp["account"], resp["selected"], resp["default"] = cal.Account, nonNil(cal.Calendars), cal.Default
 	}
 	g.mu.Lock()
-	if e := g.lastError[br.ID()]; e != "" {
+	if e := g.lastError[brainID]; e != "" {
 		resp["last_error"] = e
 	}
 	g.mu.Unlock()
 	// Lstat: a symlink there shows as connected, with the reason it is not
 	// used in list_error.
-	if _, err := os.Lstat(g.tokenPath(br.ID())); err != nil {
-		httpapi.WriteJSON(w, http.StatusOK, resp)
-		return
+	if _, err := os.Lstat(g.tokenPath(brainID)); err != nil {
+		return resp
 	}
 	resp["connected"] = true
-	if t, err := g.loadToken(br.ID()); err == nil && len(extraScopes(t.Scopes)) > 0 {
+	if t, err := g.loadToken(brainID); err == nil && len(extraScopes(t.Scopes)) > 0 {
 		// Connected with an older version, which asked for every calendar
 		// right there is. Signing in again alone keeps that grant alive at
 		// Google; Disconnect revokes it, and the next sign-in asks for
 		// calendarScopes only.
 		resp["broad_access"] = true
 	}
-	if r.URL.Query().Get("list") != "0" {
-		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	if list {
+		ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
-		tok, err := g.accessToken(ctx, br.ID())
+		tok, err := g.accessToken(ctx, brainID)
 		if err == nil {
 			var cals []CalendarEntry
 			if cals, err = g.calendarList(ctx, tok); err == nil {
 				resp["calendars"] = cals
-				if m.Calendar == nil {
+				if cal == nil {
 					for _, c := range cals {
 						if c.Primary {
 							resp["account"] = c.ID
@@ -1073,65 +1011,25 @@ func (b *Bridge) apiCalendarStatus(w http.ResponseWriter, r *http.Request) {
 			resp["reconnect_needed"] = errors.As(err, &oe) && oe.revoked()
 		}
 	}
-	httpapi.WriteJSON(w, http.StatusOK, resp)
+	return resp
 }
 
-func (b *Bridge) apiCalendarSelect(w http.ResponseWriter, r *http.Request) {
-	br := b.calendarBrain(w, r)
-	if br == nil {
-		return
+// Select updates the brain's chosen calendars in one manifest transaction.
+func (g *GoogleAuth) Select(brainID string, cal manifest.Calendar) error {
+	if len(cal.Calendars) == 0 {
+		return errors.New("choose at least one calendar (or disconnect)")
 	}
-	var req struct {
-		Account   string   `json:"account"`
-		Calendars []string `json:"calendars"`
-		Default   string   `json:"default"`
+	if cal.Default == "" || !slices.Contains(cal.Calendars, cal.Default) {
+		cal.Default = cal.Calendars[0]
 	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if len(req.Calendars) == 0 {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, "choose at least one calendar (or disconnect)")
-		return
-	}
-	if req.Default == "" || !slices.Contains(req.Calendars, req.Default) {
-		req.Default = req.Calendars[0]
-	}
-	err := updateManifest(b.cfgs, br.ID(), func(m *manifest.Manifest) error {
-		account := req.Account
+	return updateManifest(g.cfgs, brainID, func(m *manifest.Manifest) error {
+		account := cal.Account
 		if account == "" && m.Calendar != nil {
 			account = m.Calendar.Account
 		}
-		m.Calendar = &manifest.Calendar{Account: account, Calendars: req.Calendars, Default: req.Default}
+		m.Calendar = &manifest.Calendar{Account: account, Calendars: cal.Calendars, Default: cal.Default}
 		return nil
 	})
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
-}
-
-// apiCalendarDisconnect ends a brain's calendar access. ?local_only=1
-// deletes the token without revoking it, for when Google would not confirm
-// the revocation.
-func (b *Bridge) apiCalendarDisconnect(w http.ResponseWriter, r *http.Request) {
-	br := b.calendarBrain(w, r)
-	if br == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
-	defer cancel()
-	revoked, note, err := b.google.Disconnect(ctx, br.ID(), r.URL.Query().Get("local_only") == "1")
-	switch {
-	case errors.Is(err, errNotRevoked):
-		httpapi.WriteErr(w, http.StatusBadGateway, err.Error()+"; the token was kept, so try again, or remove it here only")
-		return
-	case err != nil:
-		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"status": "disconnected", "revoked": revoked, "note": note})
 }
 
 // calendarEnv tells a run which brain it is and which calendars it may use.
