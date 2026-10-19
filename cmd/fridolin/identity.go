@@ -26,24 +26,7 @@ var phoneNumberRE = regexp.MustCompile(`^[0-9]{6,15}$`)
 // code. It takes the ways people write a number (a +, spaces, dashes,
 // dots, brackets, a WhatsApp JID) and refuses anything else, a @lid JID
 // too: its digits are WhatsApp's internal id for the sender, not a number.
-func phoneNumber(s string) (string, error) {
-	if _, server, ok := strings.Cut(strings.TrimSpace(s), "@"); ok && server != types.DefaultUserServer {
-		return "", fmt.Errorf("%q holds no phone number: send the number with the country code, e.g. 15551234567", strings.TrimSpace(s))
-	}
-	n := strings.Map(func(r rune) rune {
-		switch r {
-		// A no-break space too, which a number copied from a contact
-		// card can hold.
-		case ' ', '\u00a0', '-', '.', '(', ')':
-			return -1
-		}
-		return r
-	}, chat.NormalizeJID(s))
-	if !phoneNumberRE.MatchString(n) {
-		return "", fmt.Errorf("%q is not a phone number: use digits with the country code, e.g. 15551234567", strings.TrimSpace(s))
-	}
-	return n, nil
-}
+func phoneNumber(s string) (string, error) { return chat.PhoneNumber(s) }
 
 // identityKey is the form a person is looked up by in a brain's identity
 // map: the phone number for anything phoneNumber takes, so that a row
@@ -52,31 +35,12 @@ func phoneNumber(s string) (string, error) {
 // read as a number too when it is one: "0 00000@lid" would otherwise be
 // the key "0 00000", which itself keys as 000000, so no sender's key
 // could ever match it.
-func identityKey(s string) string {
-	if n, err := phoneNumber(s); err == nil {
-		return n
-	}
-	k := chat.NormalizeJID(s)
-	if n, err := phoneNumber(k); err == nil {
-		return n
-	}
-	return k
-}
+func identityKey(s string) string { return chat.IdentityKey(s) }
 
 // allowedNumbersAsNumbers is allowed_numbers with each entry in the form
 // the bridge compares, digits only. An entry that is no phone number stays
 // as written: it lets nobody in, and badAllowedNumbers names it.
-func allowedNumbersAsNumbers(list []string) []string {
-	out := make([]string, len(list))
-	for i, s := range list {
-		if n, err := phoneNumber(s); err == nil {
-			out[i] = n
-		} else {
-			out[i] = s
-		}
-	}
-	return out
-}
+func allowedNumbersAsNumbers(list []string) []string { return chat.NumbersAsNumbers(list) }
 
 // badAllowedNumbers lists the entries of allowed_numbers that are no phone
 // number. config.json may be edited by hand, and such an entry silently

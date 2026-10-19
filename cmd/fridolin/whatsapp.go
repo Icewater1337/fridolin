@@ -9,14 +9,12 @@ import (
 	"github.com/Icewater1337/fridolin/internal/store"
 	"log"
 	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 	"github.com/Icewater1337/fridolin/internal/textx"
-	"github.com/Icewater1337/fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	wastore "go.mau.fi/whatsmeow/store"
@@ -484,7 +482,9 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 	// allowed phone number until WhatsApp resolves it. Keep the deliberate
 	// open-empty-list mode, using one config snapshot for both decisions.
 	cfg := wa.cfg()
-	allowed := cfg.AnyoneCanDM() || (resolved && numberAllowed(cfg, sender.User))
+	policy := policyOf(cfg)
+	envelope := chat.Envelope{Sender: sender.User, SenderResolved: resolved}
+	allowed := accessAuthorize(policy, envelope).Allowed
 	if !allowed {
 		log.Printf("DM from %s: ignored (not in allowed_numbers)", who)
 		if wa.onIgnored != nil {
@@ -505,7 +505,7 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 	case kindOther:
 		wa.log.Debugf("DM %s from %s: nothing the bridge reads (a reaction, a sticker, …)", msg.Info.ID, sender.User)
 	default:
-		wa.handleDMMessage(msg, sender)
+		wa.handleDMMessage(msg, sender, policy, envelope)
 	}
 }
 
@@ -525,7 +525,7 @@ func (wa *WhatsAppClient) change(kind msgKind, target, chatJID, alt, sender, tex
 
 // handleDMMessage handles an allowed direct message from sender, the
 // person as canonicalUser has them.
-func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID) {
+func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID, policy accessPolicy, envelope chat.Envelope) {
 	chatJID := sender.String()
 	// The chat's other JID: history from before DMs were keyed by number
 	// may be under the LID WhatsApp addressed them by.
@@ -541,13 +541,8 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID)
 	if notice != "" {
 		go wa.notify(chatJID, notice)
 	}
-	if caption != "" {
-		if text == "" {
-			text = caption
-		} else {
-			text = caption + "\n\n" + text
-		}
-	}
+	envelope.Text, envelope.Caption = text, caption
+	text = accessDecide(policy, envelope).Text
 
 	if text == "" && mediaPath == "" && quoted == nil {
 		return
@@ -631,32 +626,19 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 		return
 	}
 
-	text := extractText(msg.Message)
-	addr := addressGroup(msg.Message, text, cfg.Triggers, own, wa.rulesFor(groupJID))
-	// Untagged: the brain's history, no reply.
-	silent := !addr.tagged
+	envelope := groupEnvelope(msg.Message, extractText(msg.Message), own)
+	envelope.Chat, envelope.Sender, envelope.SenderResolved, envelope.FromMe = groupJID, senderNumber, resolved, msg.Info.IsFromMe
+	policy := policyOf(cfg)
+	rules := wa.rulesFor(groupJID)
+	policy.Files, policy.Forwards = rules.files, rules.forwards
+	decision := accessDecide(policy, envelope)
+	silent := decision.Silent
 	if kind == kindViewOnce {
 		if !silent {
 			go wa.notify(groupJID, viewOnceNotice)
 		}
 		return
 	}
-
-	if addr.byCaption {
-		if img := msg.Message.GetImageMessage(); img != nil {
-			text = img.GetCaption()
-		} else {
-			text = msg.Message.GetDocumentMessage().GetCaption()
-		}
-	}
-	// An @-mention is written into the text as "@" and the bridge's number
-	// (or LID). Like a trigger keyword, it only addresses the bridge, so it
-	// goes too: "@Fridolin !stop" must be the command "!stop".
-	var ownMentions []types.JID
-	if addr.mentioned {
-		ownMentions = own
-	}
-	text = stripMentions(cfg.Triggers.Strip(text), ownMentions)
 	quoted := wa.quoteOf(msg.Message)
 
 	// A file is fetched only for a message that addresses the bridge. In
@@ -673,14 +655,8 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	if notice != "" {
 		go wa.notify(groupJID, notice)
 	}
-	if caption != "" {
-		caption = stripMentions(cfg.Triggers.Strip(caption), ownMentions)
-		if text == "" {
-			text = caption
-		} else if caption != text {
-			text = caption + "\n\n" + text
-		}
-	}
+	envelope.Caption = caption
+	text := accessDecide(policy, envelope).Text
 
 	// A reply that is only the trigger asks about the quoted message.
 	if text == "" && mediaPath == "" && quoted == nil {
@@ -850,13 +826,7 @@ func saveAttachment(ctx context.Context, dl mediaDownloader, dir string, att att
 // still lets 15551234567 in. Anything that is no phone number is compared
 // as it is.
 func numberAllowed(cfg *Config, number string) bool {
-	if len(cfg.AllowedNumbers) == 0 {
-		return cfg.AllowsAnyDM()
-	}
-	if n, err := phoneNumber(number); err == nil {
-		number = n
-	}
-	return slices.Contains(allowedNumbersAsNumbers(cfg.AllowedNumbers), number)
+	return accessNumberAllowed(policyOf(cfg), number)
 }
 
 // rulesFor returns what addresses the bridge in the group jid, as its
@@ -871,7 +841,7 @@ func (wa *WhatsAppClient) rulesFor(jid string) groupRules {
 // isAllowedGroup reports whether the group JID is in cfg's allowed_groups.
 // Unlike DMs, groups are deny-by-default: an empty list means no groups.
 func isAllowedGroup(cfg *Config, jid string) bool {
-	return slices.Contains(cfg.AllowedGroups, jid)
+	return accessGroupAllowed(policyOf(cfg), jid)
 }
 
 // ownMentionJIDs returns every JID form the bridge account may be mentioned as.
@@ -897,27 +867,11 @@ func (wa *WhatsAppClient) ownMentionJIDs() []types.JID {
 // trims the result. A mention is "@" and the account's user part, and must
 // not be the start of a longer number.
 func stripMentions(text string, jids []types.JID) string {
-	for _, jid := range jids {
-		if jid.User == "" {
-			continue
-		}
-		mention := "@" + jid.User
-		for from := 0; from < len(text); {
-			i := strings.Index(text[from:], mention)
-			if i < 0 {
-				break
-			}
-			i += from
-			end := i + len(mention)
-			if (i > 0 && !trigger.BoundaryBefore(text, i)) || !trigger.BoundaryAt(text, end) {
-				from = end
-				continue
-			}
-			text = text[:i] + text[end:]
-			from = i
-		}
+	users := make([]string, len(jids))
+	for i, jid := range jids {
+		users[i] = jid.User
 	}
-	return strings.TrimSpace(text)
+	return accessStripMentions(text, users)
 }
 
 // senderOf is who sent src, as canonicalUser has them: by phone number

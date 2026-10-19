@@ -1544,14 +1544,16 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 			httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "sender not admitted by group_members"})
 			return
 		}
-		files := len(m.Media) > 0 && b.groupRules(m.JID).files
-		if !cfg.Triggers.Matches(m.Text) && !files {
+		policy := policyOf(cfg)
+		policy.Files = b.groupRules(m.JID).files
+		who := devGroupSender(m.Sender)
+		decision := accessDecide(policy, chat.Envelope{Chat: m.JID, Sender: who.Number, SenderResolved: who.Resolved, Group: true, Text: m.Text, HasFile: len(m.Media) > 0})
+		if decision.Silent {
 			m.Silent = true
-			// As on WhatsApp, a file that does not address the bridge is
-			// chatter, and not fetched.
+			// As on WhatsApp, a file that does not address the bridge is chatter.
 			m.Media = nil
 		}
-		m.Text = cfg.Triggers.Strip(m.Text)
+		m.Text = decision.Text
 	} else if !numberAllowed(cfg, m.Sender) {
 		b.recordIgnored("dm", m.JID, "", m.Sender, "")
 		httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "number not allowed"})
