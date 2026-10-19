@@ -184,7 +184,14 @@ behaviour unless its title says so. The steps so far:
 - **R16, HTTP response support**: `httpapi` owns conditional JSON responses
   and static filesystem serving. Both preserve existing body bytes, ETags,
   weak comparisons, directory rejection and redirect headers. Command wiring
-  still supplies the embedded dashboard filesystem and all resource handlers.
+  still supplies the embedded dashboard filesystem. `ActivityAPI`, `LogsAPI`
+  and `ReadyAPI` consume narrow readers for feed polling, log cursors and
+  connection state. Per-request command projections preserve late-bound
+  services. `BackupAPI` owns backup HTTP decoding and status mapping, with
+  live service/configuration callbacks and command-owned restore-path checks.
+  `GoogleAPI` owns client, calendar and OAuth callback responses through a
+  narrow Google service and live brain lookup. Other resource handlers remain
+  in the command.
 
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
