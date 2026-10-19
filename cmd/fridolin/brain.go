@@ -359,34 +359,14 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	// chatter never interrupts a run. Nor do ingested files interrupt a
 	// request, or get replaced: each is a job of its own, not a correction of
 	// the last one. Observe-only runs are another matter, see below.
-	interrupting, replaces := supersedes(*m, s)
-	var gone []Inbound
-	kept := br.pending[:0]
-	for _, p := range br.pending {
-		if replaces(p) {
-			gone = append(gone, p)
-		} else {
-			kept = append(kept, p)
-		}
-	}
-	br.pending = kept
+	next, gone, interrupting, err := admit(br.pending, *m, s.queueMode, s.maxPending)
+	br.pending = next
 	defer dropped(gone)
-	if len(br.pending) >= s.maxPending {
-		// Only when another message took the last place since the check
-		// above.
-		dropped := false
-		for i, p := range br.pending {
-			if p.Silent {
-				br.pending = append(br.pending[:i], br.pending[i+1:]...)
-				dropped = true
-				break
-			}
-		}
-		if !dropped {
-			br.mu.Unlock()
-			return 0, true, errQueueFull
-		}
+	if err != nil {
+		br.mu.Unlock()
+		return 0, true, err
 	}
+	_, replaces := supersedes(*m, s.queueMode)
 	// Work addressed to the brain does not wait for an observe-only run: it
 	// stops the one in flight and goes ahead of those waiting. Their chatter
 	// is in the history, where the next run in its chat reads it.
@@ -394,7 +374,6 @@ func (br *Brain) submit(m *Inbound) (pos int, busy bool, err error) {
 	if cur := br.current; cur != nil && (interrupting && replaces(cur.msg) || !m.Silent && cur.msg.Silent) {
 		interrupt = cur
 	}
-	br.pending = append(br.pending, *m)
 	pos = slices.Index(br.queueOrderLocked(), len(br.pending)-1) + 1
 	busy = pos > 1 || (br.current != nil && interrupt == nil) || br.slots.busy(!m.Silent)
 	start := !br.working
@@ -502,8 +481,8 @@ func (br *Brain) queueOrderLocked() []int {
 // supersedes says what m replaces when it joins the queue (see Submit):
 // whether it interrupts its sender's own run, which only a request does in
 // interrupt mode, and which waiting or running messages it replaces.
-func supersedes(m Inbound, s *brainSettings) (interrupting bool, replaces func(Inbound) bool) {
-	interrupting = s.queueMode == config.QueueModeInterrupt && !m.Silent && m.Source != chat.SourceIngest
+func supersedes(m Inbound, mode string) (interrupting bool, replaces func(Inbound) bool) {
+	interrupting = mode == config.QueueModeInterrupt && !m.Silent && m.Source != chat.SourceIngest
 	return interrupting, func(p Inbound) bool {
 		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != chat.SourceIngest))
 	}
@@ -513,7 +492,7 @@ func supersedes(m Inbound, s *brainSettings) (interrupting bool, replaces func(I
 // or one m makes by what it replaces, or untagged chatter to drop. br.mu is
 // held.
 func (br *Brain) hasRoomLocked(m Inbound, s *brainSettings) bool {
-	_, replaces := supersedes(m, s)
+	_, replaces := supersedes(m, s.queueMode)
 	n, silent := 0, false
 	for _, p := range br.pending {
 		if !replaces(p) {
