@@ -12,15 +12,14 @@ import (
 // and the question about it reach the brain as one message, the photo
 // first.
 func TestPhotoThenQuestionMergePhotoFirst(t *testing.T) {
-	tw := newTestWhatsApp(t)
 	dl := &fakeDownloader{body: "JPEG", hold: make(chan struct{})}
-	tw.media = dl
+	tw := newTestWhatsApp(t, func(opts *waOptions) { opts.Downloader = dl })
 	merged := make(chan Inbound, 1)
 	deb := NewDebouncer(func() time.Duration { return 200 * time.Millisecond }, func() time.Duration { return 0 }, func(m Inbound) { merged <- m })
-	recordArrivals(tw, "3EB0PHOTO") // for the handler that takes its time
-	slow := tw.handler
-	tw.handler = func(ctx context.Context, m Inbound) {
-		slow(ctx, m)
+	tw.handler = func(_ context.Context, m Inbound) {
+		if m.ID == "3EB0PHOTO" {
+			time.Sleep(50 * time.Millisecond)
+		}
 		deb.Add(m)
 	}
 	tw.feed(dmEvent("3EB0PHOTO", photoMsg("look")), dmEvent("3EB0TEXT", textMsg("what is this?")))

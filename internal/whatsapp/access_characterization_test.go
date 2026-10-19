@@ -1,4 +1,4 @@
-package main
+package whatsapp
 
 import (
 	"testing"
@@ -25,12 +25,12 @@ func TestGroupAccessCharacterization(t *testing.T) {
 		return text("@"+who+" hello", &waE2E.ContextInfo{MentionedJID: []string{who + "@s.whatsapp.net"}})
 	}
 	forward := text("hello", &waE2E.ContextInfo{IsForwarded: proto.Bool(true)})
-	none := groupRules{}
+	none := testGroupRules{}
 	cases := []struct {
 		name       string
 		msg        *waE2E.Message
 		match      trigger.Match
-		rules      *groupRules
+		rules      *testGroupRules
 		denyGroup  bool
 		denyMember bool
 		fromMe     bool
@@ -80,7 +80,7 @@ func TestGroupAccessCharacterization(t *testing.T) {
 				cfg.GroupMembers = map[string][]string{testGroup: {}}
 			}
 			if c.rules != nil {
-				tw.groupRules = whatsAppGroupRules(func(string) groupRules { return *c.rules })
+				tw.groupRules = func(string) GroupRules { return GroupRules{Files: c.rules.files, Forwards: c.rules.forwards} }
 			}
 			lister := &fakeLister{info: "Group"}
 			tw.lister = lister

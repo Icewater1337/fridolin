@@ -1,4 +1,4 @@
-package main
+package whatsapp
 
 import (
 	"context"
@@ -222,7 +222,7 @@ func TestStartPairingRefusesASecondPairing(t *testing.T) {
 // connect again: pairing again gets a client on a new device instead of
 // failing until a restart.
 func TestNewSessionAfterLogout(t *testing.T) {
-	wa, err := newWhatsAppClient(waOptions{Container: fixedDeviceContainer{&store.Device{}}, Log: waLog.Noop})
+	wa, err := New(Options{Container: fixedDeviceContainer{&store.Device{}}, Log: waLog.Noop})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestConnectLoopStopsOnPermanentErrors(t *testing.T) {
 			done := make(chan struct{})
 			go func() {
 				defer close(done)
-				runConnectLoop(context.Background(), m.Connect)
+				RunConnectLoop(context.Background(), m.Connect)
 			}()
 			select {
 			case <-done:

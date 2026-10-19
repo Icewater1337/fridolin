@@ -1,10 +1,11 @@
-package main
+package whatsapp
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
+	"github.com/Icewater1337/fridolin/internal/access"
+
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -25,7 +26,7 @@ import (
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
-	"go.mau.fi/whatsmeow/util/cbcutil"
+
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
 )
@@ -73,16 +74,16 @@ func TestIncomingChat(t *testing.T) {
 	}
 }
 
-// testWhatsApp is a WhatsAppClient without a whatsmeow connection. Anything
+// testWhatsApp is a Client without a whatsmeow connection. Anything
 // that would reach WhatsApp (a download, a group lookup) fails or panics on
 // the nil client and shows up in the log, so a test can tell that a message
 // was dropped before that work. A test that wants a download to work sets
 // media to a fakeDownloader.
 type testWhatsApp struct {
-	*WhatsAppClient
-	cfg     func() *Config
-	handler InboundHandler
-	inbound chan Inbound
+	*Client
+	cfg     func() *Settings
+	handler func(context.Context, chat.Inbound)
+	inbound chan chat.Inbound
 
 	mu      sync.Mutex
 	ignored []string // chat JIDs offered on the dashboard
@@ -111,20 +112,20 @@ func (l testWaLogger) Sub(string) waLog.Logger { return l }
 
 func newTestWhatsApp(t *testing.T) *testWhatsApp {
 	t.Helper()
-	cfg := &Config{AllowedNumbers: []string{"15551234567"}, MediaDir: t.TempDir(), MaxChunkSize: 4000}
-	tw := &testWhatsApp{cfg: func() *Config { return cfg }, inbound: make(chan Inbound, 4), notices: make(chan string, 4)}
+	cfg := &Settings{Policy: access.Policy{AllowedNumbers: []string{"15551234567"}}, MediaDir: t.TempDir(), MaxChunkSize: 4000, MaxMediaBytes: 100 << 20}
+	tw := &testWhatsApp{cfg: func() *Settings { return cfg }, inbound: make(chan chat.Inbound, 4), notices: make(chan string, 4)}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	tw.handler = func(_ context.Context, m Inbound) { tw.inbound <- m }
-	tw.WhatsAppClient = &WhatsAppClient{
-		cfg:      whatsAppSettings(func() *Config { return tw.cfg() }),
-		chunks:   ChunkMessage,
-		identity: whatsAppIdentity(), intake: chatQueues{mask: maskChatJID}, outbound: whatsAppOutbound(), text: whatsAppText(), inbox: mediaInboxAt,
+	tw.handler = func(_ context.Context, m chat.Inbound) { tw.inbound <- m }
+	tw.Client = &Client{
+		cfg:      func() Settings { return *tw.cfg() },
+		chunks:   testChunks,
+		identity: testIdentity(), intake: chatQueues{mask: maskChatJID}, outbound: Outbound{}, text: testText(), inbox: testInbox,
 		log:     testWaLogger{tw},
 		ctx:     ctx,
 		cancel:  cancel,
 		notify:  func(jid, text string) { tw.notices <- jid + ": " + text },
-		handler: func(ctx context.Context, m chat.Inbound) { tw.handler(ctx, Inbound{Inbound: m}) },
+		handler: func(ctx context.Context, m chat.Inbound) { tw.handler(ctx, m) },
 		onIgnored: func(_, jid, _, _, _ string) {
 			tw.mu.Lock()
 			defer tw.mu.Unlock()
@@ -148,14 +149,14 @@ func (tw *testWhatsApp) handle(t *testing.T, evt *events.Message) {
 	tw.handleMessage(evt)
 }
 
-// next returns the Inbound handed to the brains, or false when none arrives
+// next returns the chat.Inbound handed to the brains, or false when none arrives
 // within wait.
-func (tw *testWhatsApp) next(wait time.Duration) (Inbound, bool) {
+func (tw *testWhatsApp) next(wait time.Duration) (chat.Inbound, bool) {
 	select {
 	case m := <-tw.inbound:
 		return m, true
 	case <-time.After(wait):
-		return Inbound{}, false
+		return chat.Inbound{}, false
 	}
 }
 
@@ -235,31 +236,6 @@ func TestHandleMessageBroadcastListIsDM(t *testing.T) {
 			t.Errorf("dashboard was offered %v, want the sender's DM chat", tw.ignored)
 		}
 	})
-}
-
-// fakeMACLength is the length of whatsmeow's media MAC.
-const fakeMACLength = 10
-
-// decryptInPlace turns the n encrypted bytes in f back into the attachment
-// the way whatsmeow's DownloadToFile does: it reads the MAC off the end,
-// truncates it away, and decrypts the rest in place, which writes over the
-// file with WriteAt and truncates off the padding.
-func decryptInPlace(f whatsmeow.File, n int64) error {
-	mac := make([]byte, fakeMACLength)
-	if _, err := f.ReadAt(mac, n-fakeMACLength); err != nil {
-		return err
-	}
-	if err := f.Truncate(n - fakeMACLength); err != nil {
-		return err
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-	if err := cbcutil.DecryptFile(fakeMediaKey, fakeMediaIV, f); err != nil {
-		return err
-	}
-	_, err := f.Seek(0, io.SeekStart)
-	return err
 }
 
 // All four kinds of attachment go through one path; the name a file is
@@ -761,7 +737,7 @@ func TestGroupMemberReachesTheBrain(t *testing.T) {
 		alt     types.JID
 		lids    store.LIDStore
 		fromMe  bool
-		want    string // Inbound.Sender; "" means not handed over
+		want    string // chat.Inbound.Sender; "" means not handed over
 	}{
 		{name: "listed by number", members: []string{"15551234567"}, sender: member, want: "15551234567"},
 		{name: "listed, by LID with the number along", members: []string{"15551234567"}, sender: lid, alt: member, want: "15551234567"},
@@ -784,7 +760,7 @@ func TestGroupMemberReachesTheBrain(t *testing.T) {
 			if c.numbers != nil {
 				cfg.AllowedNumbers = c.numbers
 			}
-			cfg.AllowAnyDM = &c.anyDM
+			cfg.AllowAnyDM = c.anyDM
 			if c.lids != nil {
 				tw.client = whatsmeow.NewClient(&store.Device{LIDs: c.lids}, waLog.Noop)
 			}
@@ -904,10 +880,10 @@ func TestGroupNonMemberReactionIsQuiet(t *testing.T) {
 // only the owner.
 func TestGroupMessageReadsOneConfig(t *testing.T) {
 	tw, _ := newGroupTestWhatsApp(t, nil)
-	before := &Config{AllowedNumbers: []string{}, AllowAnyDM: proto.Bool(true), MediaDir: t.TempDir(), MaxChunkSize: 4000}
+	before := &Settings{Policy: access.Policy{AllowedNumbers: []string{}, AllowAnyDM: true}, MediaDir: t.TempDir(), MaxChunkSize: 4000, MaxMediaBytes: 100 << 20}
 	after := tw.cfg()
 	var reads atomic.Int32
-	tw.cfg = func() *Config {
+	tw.cfg = func() *Settings {
 		if reads.Add(1) == 1 {
 			return before
 		}
@@ -1063,7 +1039,7 @@ func TestAllowedGroupNameIsNeverLookedUp(t *testing.T) {
 type arrivals struct {
 	mu   sync.Mutex
 	seen []string
-	msgs []Inbound
+	msgs []chat.Inbound
 }
 
 func (a *arrivals) list() []string {
@@ -1072,7 +1048,7 @@ func (a *arrivals) list() []string {
 	return slices.Clone(a.seen)
 }
 
-func (a *arrivals) messages() []Inbound {
+func (a *arrivals) messages() []chat.Inbound {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return slices.Clone(a.msgs)
@@ -1083,7 +1059,7 @@ func (a *arrivals) messages() []Inbound {
 // bridge's may: what does not wait for it to return overtakes it.
 func recordArrivals(tw *testWhatsApp, slow string) *arrivals {
 	a := &arrivals{}
-	tw.handler = func(_ context.Context, m Inbound) {
+	tw.handler = func(_ context.Context, m chat.Inbound) {
 		if m.ID == slow {
 			time.Sleep(50 * time.Millisecond)
 		}
@@ -1294,13 +1270,9 @@ func TestDisconnectHandsOnWhatIsQueued(t *testing.T) {
 			tw, dl := newGroupTestWhatsApp(t, []string{"15551234567"})
 			dl.hold = make(chan struct{}) // never released
 			tw.client = whatsmeow.NewClient(&store.Device{LIDs: storedLIDs{}, MsgSecrets: pollSecrets{key: key}}, waLog.Noop)
-			pollDB := openTestStore(t, filepath.Join(t.TempDir(), "bridge.db"))
-			tw.polls = whatsAppPollStore{pollDB}
-			if err := pollDB.SavePoll("3EB0POLL", testDMChat, "main", "When should we meet?", []string{"Monday 2pm", "Tuesday 3pm"}); err != nil {
-				t.Fatal(err)
-			}
+			tw.polls = testQueuedPolls{poll: SentPoll{Chat: testDMChat, Brain: "main", Question: "When should we meet?", Options: []string{"Monday 2pm", "Tuesday 3pm"}}}
 			a := recordArrivals(tw, "")
-			tw.onVote = func(v waVote) {
+			tw.onVote = func(v Vote) {
 				a.mu.Lock()
 				defer a.mu.Unlock()
 				a.seen = append(a.seen, "vote "+strings.Join(v.Selected, ","))
@@ -1337,7 +1309,7 @@ func TestDisconnectDrainsPastTheWarning(t *testing.T) {
 		tw := newTestWhatsApp(t)
 		stuck := make(chan struct{})
 		delivered := make(chan string, 3)
-		tw.handler = func(_ context.Context, m Inbound) {
+		tw.handler = func(_ context.Context, m chat.Inbound) {
 			if m.ID == "3EB0A" {
 				<-stuck
 			}

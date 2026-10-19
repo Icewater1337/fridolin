@@ -1,4 +1,4 @@
-package main
+package whatsapp
 
 import (
 	"github.com/Icewater1337/fridolin/internal/access"
@@ -22,7 +22,7 @@ type groupAddressing struct {
 // of the bridge or a quote-reply to one of its messages; a file and a
 // forward do as rules say. Video captions do not count: they are the
 // video's metadata, and a video is a file.
-func addressGroup(msg *waE2E.Message, text string, triggers trigger.List, own []types.JID, rules groupRules) groupAddressing {
+func addressGroup(msg *waE2E.Message, text string, triggers trigger.List, own []types.JID, rules testGroupRules) groupAddressing {
 	e := groupEnvelope(msg, text, own)
 	a := access.AddressGroup(access.Policy{Triggers: triggers, Files: rules.files, Forwards: rules.forwards}, e)
 	return groupAddressing{tagged: a.Tagged, mentioned: a.Mentioned, byCaption: a.ByCaption, file: a.File}

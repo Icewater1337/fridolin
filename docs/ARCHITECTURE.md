@@ -62,10 +62,13 @@ behaviour unless its title says so. The steps so far:
 - **R11, devchat slice**: `devchat` owns the simulated messenger and its
   bounded synchronized outbox. The command supplies live chunking policy.
 
-- **R11, WhatsApp preparation**: the transport now consumes owned settings,
-  device/poll interfaces and `chat.Inbound` callbacks. The command projects
-  config, store and runtime values; implementation and integration tests
-  remain in `cmd/fridolin` until the adapter move.
+- **R11, WhatsApp slice**: `whatsapp` owns connection/pairing, FIFO workers,
+  group caches, protobuf processing and downloads. The command supplies
+  owned settings, store/identity/privacy/outbound consumers and runtime
+  callbacks. Transport tests live with the package; command integration
+  still covers configuration, SQL polls, runtime bookkeeping and delivery.
+  `HandleEvent` retains queued production intake. `ProcessMessage` and
+  `ProcessVote` are synchronous worker boundaries whose callers own order.
 
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
@@ -333,8 +336,7 @@ responsibility and says what it must not do.
   `chaterr.go`)*: sending on top of a minimal `Transport`: the durable
   outbox, chunking, pacing, polls with a text fallback, saving sent polls,
   and the catalogue of every chat-facing message the pipeline sends.
-- **`whatsapp`** *(to come, R11; `whatsapp.go`, `waconn.go`,
-  `groupcache.go`)*: the WhatsApp transport and nothing else. It connects,
+- **`whatsapp`** (`internal/whatsapp`): the WhatsApp transport and nothing else. It connects,
   pairs, tracks connection state, keeps the group list, sends text and
   polls, decrypts poll votes, turns protobuf messages into an `Envelope` (a
   pure function), and downloads media into the inbox.
@@ -443,7 +445,9 @@ leaves (standard library only): fsx, textx, version, apperr, trigger, chat,
 
 Today `cmd/fridolin` imports `web`, `examples`, `site`, `fsx`, `textx`,
 `version`, `trigger`, `platform`, `chat`, `history`, `logx`, `store`,
-`otp`, `media`, `activity`, `httpapi`, `access` and `devchat`. Devchat imports `chat` and `textx`. Access imports only
+`otp`, `media`, `activity`, `httpapi`, `access`, `devchat` and `whatsapp`. WhatsApp imports `access`,
+`media`, `platform`, `chat` and `textx`; its fixtures also use `logx` and
+`trigger`. Devchat imports `chat` and `textx`. Access imports only
 `chat` and `trigger`; HTTP helpers import `fsx`. History imports `fsx`; store imports `fsx`
 and `logx`; OTP imports `history` and `fsx`; media imports `fsx` and `textx`;
 activity imports `history` and `textx`. The other extracted packages import

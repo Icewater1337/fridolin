@@ -1,4 +1,4 @@
-package main
+package whatsapp
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 
 // Run connects the client, retrying until connected, permanently refused,
 // or cancelled. Its caller owns the goroutine and joins it on shutdown.
-func (wa *WhatsAppClient) Run(ctx context.Context) { runConnectLoop(ctx, wa.Connect) }
+func (wa *Client) Run(ctx context.Context) { RunConnectLoop(ctx, wa.Connect) }
 
 // Connection retries: the first after connectFirstRetry, doubling up to
 // connectMaxRetry.
@@ -22,7 +22,7 @@ const (
 // connectLoop connects to WhatsApp, retrying while the network is down.
 // Once connected, whatsmeow reconnects by itself. An error that another
 // try cannot fix ends it: the dashboard's state says what to do.
-func runConnectLoop(ctx context.Context, connect func() error) {
+func RunConnectLoop(ctx context.Context, connect func() error) {
 	for delay := connectFirstRetry; ctx.Err() == nil; delay = min(2*delay, connectMaxRetry) {
 		err := connect()
 		if err == nil {

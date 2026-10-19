@@ -1,4 +1,4 @@
-package main
+package whatsapp
 
 import (
 	"github.com/Icewater1337/fridolin/internal/access"

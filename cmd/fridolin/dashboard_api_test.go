@@ -901,9 +901,8 @@ func TestFailedAddRemovesTheScaffold(t *testing.T) {
 // button, with ?fresh=1, has the client ask WhatsApp again.
 func TestGroupsAskWhatsAppOnlyWhenFresh(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tw := newTestWhatsApp(t)
 	fl := &fakeLister{}
-	tw.lister = fl
+	tw := newTestWhatsApp(t, func(opts *waOptions) { opts.Groups = fl })
 	tb.wa = tw.WhatsAppClient
 	steps := []struct {
 		path    string
