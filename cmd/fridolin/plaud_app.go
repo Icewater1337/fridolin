@@ -43,8 +43,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/config"
-
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
@@ -532,7 +530,7 @@ func (p *PlaudManager) buildApp(ctx context.Context, src, javaHome, sdk, site st
 // JAVA_HOME and ANDROID_HOME (or ANDROID_SDK_ROOT) of the bridge's
 // environment, else where macOS, Homebrew and Android Studio put them.
 func androidToolchain() (javaHome, sdk string, err error) {
-	home := config.HomeDir()
+	home := homeDir()
 	javas := []string{os.Getenv("JAVA_HOME")}
 	sdks := []string{os.Getenv("ANDROID_HOME"), os.Getenv("ANDROID_SDK_ROOT"), filepath.Join(home, "Library", "Android", "sdk"), filepath.Join(home, "Android", "Sdk")}
 	if runtime.GOOS == "darwin" {

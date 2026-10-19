@@ -76,13 +76,18 @@ behaviour unless its title says so. The steps so far:
   parallel; command integration tests still exercise sandbox protection.
 
 - **R5, configuration values**: `config` owns the file shape, section types,
-  defaults, validation, migrations and approved brain references. `Resolve` still
-  looks up the home folder; R6 injects paths.
+  defaults, validation, migrations and approved brain references.
 
 - **R5, configuration store**: `config` owns loading, starter files, atomic
   snapshots, ordered notifications and retained-root manifest transactions.
   The command supplies brain-set validation, run timing and startup permission
   changes. Store validation runs under the commit lock before any write.
+
+- **R6, explicit inputs**: `Resolve` receives captured paths and platform. Store
+  open receives those inputs, the retired-environment lookup and the brain-set
+  checker; later saves reuse the same paths/platform. Configuration reads no
+  ambient environment or home, so its temporary architecture exception is gone.
+  Boot path projections and the full field table follow in the next slice.
 
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
@@ -298,9 +303,9 @@ responsibility and says what it must not do.
 - **`config`**: owns the `Config` file shape, defaults, migrations, validation,
   `Open`/`Load`/`LoadExisting`, starter files and the live `Store` with `Tx`.
   `Open` accepts command-owned brain-set validation; transactions retain
-  config-last publication and rollback through pinned manifest roots. Pure
-  injected resolution, the field table and Boot/Live projections follow in R6;
-  pointer-free settings follow in R18 (section 5).
+  config-last publication and rollback through pinned manifest roots. Resolution
+  receives explicit paths and platform. The field table and Boot/Live projections
+  follow in the next R6 slice; pointer-free settings follow in R18 (section 5).
 - **`route`**: pure validation and routing for approved, runnable specs.
   `Build` validates the set and returns an immutable `Table` with `For`, `Has`,
   `Default`, `Dirs` and `ReplyChat`. It keeps configured ordering and copies
@@ -1256,10 +1261,14 @@ state (`sandbox.go`, `media.go`, `childenv.go`).
 
 The extracted `config` package uses `manifest`, `trigger`, `fsx`, and the pure
 `chat` phone normalization, `textx` validation and `jsonx` inspection helpers.
-It imports no runtime manager, provider, transport or HTTP package. `HomeDir`
-and the retired `BRAIN_MODE` check are explicit temporary ambient exceptions
-until R6 supplies paths and environment. `Store` retains a single immutable
-atomic snapshot, locked external-file reread and validation, ordered callbacks,
+It imports no runtime manager, provider, transport or HTTP package and performs
+no ambient environment/home lookup. `Paths{Home, DefaultDataDir}` and the platform
+are passed to pure `Resolve`. The command probes the legacy default directory
+when constructing inputs. `Open` accepts `Options`, reads only `BRAIN_MODE`
+through the supplied environment callback, and retains paths/platform for saves.
+Starter writers receive those inputs explicitly; `init` still writes its
+requested starter file. `BrainRef.Dir(home)` expands file-layer paths explicitly.
+`Store` retains a single immutable atomic snapshot, locked external-file reread and validation, ordered callbacks,
 and manifest-first/config-last publication. A brain-set checker is supplied at
 open and runs inside that lock before writes; without it, brain edits fail
 closed. Registry workflows and bridge reconciliation stay in the command.

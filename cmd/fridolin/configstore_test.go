@@ -135,7 +135,7 @@ func TestEnvironmentDoesNotOverrideTheConfig(t *testing.T) {
 // configuration as JSON.
 func effectiveJSON(t *testing.T, path string) string {
 	t.Helper()
-	cfg, err := config.Load(path)
+	cfg, err := loadConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func effectiveJSON(t *testing.T, path string) string {
 
 func TestConfigDefaultsAndLoopbackOnly(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	cfg, err := config.Load(writeConfig(t, `{}`))
+	cfg, err := loadConfig(writeConfig(t, `{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,11 +164,11 @@ func TestConfigDefaultsAndLoopbackOnly(t *testing.T) {
 	if (&config.Config{}).AllowsAnyDM() {
 		t.Error("a Config built without the defaults must not let anyone DM either")
 	}
-	cfg, err = config.Load(writeConfig(t, `{"http_listen":"off"}`))
+	cfg, err = loadConfig(writeConfig(t, `{"http_listen":"off"}`))
 	if err != nil || cfg.HTTPEnabled() {
 		t.Error(`"off" must disable the HTTP server`)
 	}
-	if _, err := config.Load(writeConfig(t, `{"http_listen":"0.0.0.0:8765"}`)); err == nil {
+	if _, err := loadConfig(writeConfig(t, `{"http_listen":"0.0.0.0:8765"}`)); err == nil {
 		t.Error("a non-loopback http_listen must be rejected")
 	}
 }
@@ -176,10 +176,10 @@ func TestConfigDefaultsAndLoopbackOnly(t *testing.T) {
 func TestStarterConfigLoads(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := config.EnsureFile(path); err != nil {
+	if err := ensureConfigFile(path); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.Load(path)
+	cfg, err := loadConfig(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestConfigRefusesClassicMode(t *testing.T) {
 			if c.env != "" {
 				t.Setenv("BRAIN_MODE", c.env)
 			}
-			_, err := config.Load(writeConfig(t, c.config))
+			_, err := loadConfig(writeConfig(t, c.config))
 			switch {
 			case c.want == "" && err != nil:
 				t.Fatalf("load: %v, want it to load", err)
@@ -268,7 +268,7 @@ func TestConfigSavesKeepBrainModeOn(t *testing.T) {
 	if raw := readRawConfig(t, path); string(raw["brain_mode"]) != "true" {
 		t.Errorf(`saved "brain_mode": %s, want true`, raw["brain_mode"])
 	}
-	if _, err := config.Load(path); err != nil {
+	if _, err := loadConfig(path); err != nil {
 		t.Errorf("the saved config does not load: %v", err)
 	}
 }
@@ -389,7 +389,7 @@ func TestRetiredConfigKeys(t *testing.T) {
 // model of their own: they must keep running with that model.
 func TestBrainsKeepTheRetiredModel(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	cfg, err := config.Load(writeConfig(t, `{"model": "sonnet"}`))
+	cfg, err := loadConfig(writeConfig(t, `{"model": "sonnet"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -477,7 +477,7 @@ func TestDMAccessFollowsAllowAnyDM(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			cfg, err := config.Load(writeConfig(t, tc.config))
+			cfg, err := loadConfig(writeConfig(t, tc.config))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -43,7 +44,7 @@ func protectDataDir(cfg *config.Config) {
 	// check.
 	dataDir := absPath(cfg.DataDir)
 	dbDir := absPath(filepath.Dir(cfg.DBPath))
-	home := config.HomeDir()
+	home := homeDir()
 	homeOrAbove := func(dir string) bool {
 		return home != "" && fsx.Within(fsx.Canonical(home), fsx.Canonical(dir))
 	}
@@ -99,4 +100,20 @@ func openToOthers(dir string) (os.FileMode, bool) {
 }
 
 // openConfigStore wires registry validation into each writing store.
-func openConfigStore(path string) (*config.Store, error) { return config.Open(path, checkSet) }
+func openConfigStore(path string) (*config.Store, error) { return config.Open(path, configOptions()) }
+
+// homeDir is the ambient home lookup at the command composition boundary.
+func homeDir() string { home, _ := os.UserHomeDir(); return home }
+
+func configPathsFor(home string) config.Paths {
+	return config.Paths{Home: home, DefaultDataDir: config.DefaultDataDir(home)}
+}
+func configPaths() config.Paths { return configPathsFor(homeDir()) }
+func configOptions() config.Options {
+	return config.Options{Paths: configPaths(), GOOS: runtime.GOOS, Getenv: os.Getenv, CheckBrains: checkSet}
+}
+func loadConfig(path string) (*config.Config, error) { return config.Load(path, configOptions()) }
+func loadExistingConfig(path string) (*config.Config, error) {
+	return config.LoadExisting(path, configOptions())
+}
+func ensureConfigFile(path string) error { return config.EnsureFile(path, configPaths(), runtime.GOOS) }

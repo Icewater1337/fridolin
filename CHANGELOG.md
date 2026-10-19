@@ -19,6 +19,12 @@ for compatibility.
 
 ### Changed
 
+- Configuration resolution uses explicit home, default-directory and platform
+  inputs, captured when its store opens. Later saves keep those inputs even if
+  the process environment or default folders change. Loading and saving still
+  create no runtime data directories; `init` retains its intentional starter
+  config write.
+
 - **In an allowed group, only the numbers in `allowed_numbers` reach the
   brain now**, unless the group has a `group_members` entry. Before, every
   member of an allowed group could start a run with all of the brain's

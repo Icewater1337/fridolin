@@ -17,7 +17,7 @@ import (
 // security policy or ambient home/layout inputs between candidate folders.
 func ResolveBrains(cfg *config.Config) ([]manifest.Spec, []registry.Issue) {
 	return registry.Resolve(cfg.BrainDirs, func(dir, configured string) error {
-		return checkBrainDir(dir, configured, cfg, config.HomeDir())
+		return checkBrainDir(dir, configured, cfg, homeDir())
 	})
 }
 
@@ -25,7 +25,7 @@ func ResolveBrains(cfg *config.Config) ([]manifest.Spec, []registry.Issue) {
 // command boundary; the registry receives explicit inputs and one checker.
 func CheckBrainPath(path string, cfg *config.Config, otherDirs []string) (string, []string, []string) {
 	return registry.CheckPath(path, registry.PathContext{
-		Home: config.HomeDir(), Others: otherDirs,
+		Home: homeDir(), Others: otherDirs,
 		CheckDir: func(dir, configured, home string) error {
 			return checkBrainDir(dir, configured, cfg, home)
 		},
@@ -74,7 +74,7 @@ func checkBrainDir(dir, configured string, cfg *config.Config, home string) erro
 // built this way, inside the home folder by construction. ok is false for
 // the home folder itself and for anything outside it.
 func inHome(p string) (string, bool) {
-	home := fsx.Canonical(config.HomeDir())
+	home := fsx.Canonical(homeDir())
 	rel, err := filepath.Rel(home, p)
 	if home == "" || err != nil || rel == "." || !filepath.IsLocal(rel) {
 		return "", false
@@ -106,7 +106,7 @@ func updateManifestIn(c *config.Config, tx *config.Tx, id string, mutate func(m 
 		if m.ID != id {
 			return fmt.Errorf("a brain's id cannot change")
 		}
-		if err := tx.WriteManifest(ref.Dir(), &m); err != nil {
+		if err := tx.WriteManifest(ref.Dir(homeDir()), &m); err != nil {
 			return err
 		}
 		n := m.Normalized()

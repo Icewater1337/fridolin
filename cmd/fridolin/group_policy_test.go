@@ -145,7 +145,7 @@ func TestLoadConfigGroupMembers(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
-			cfg, err := config.Load(writeConfig(t, `{"data_dir": "`+home+`/data", `+groups+`, "group_members": `+c.members+`}`))
+			cfg, err := loadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", `+groups+`, "group_members": `+c.members+`}`))
 			if c.err != "" {
 				if err == nil || !strings.Contains(err.Error(), c.err) {
 					t.Fatalf("Load: %v, want an error saying %q", err, c.err)
