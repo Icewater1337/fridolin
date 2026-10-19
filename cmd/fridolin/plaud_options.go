@@ -1,6 +1,9 @@
 package main
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // PlaudSettings is the integration's live configuration, including its dashboard shape.
 // The command projection's explicit conversion checks that every field is represented.
@@ -29,4 +32,19 @@ type PlaudSnapshot struct {
 type PlaudOptions struct {
 	PlaudDir, Home string
 	Settings       func() *PlaudSnapshot
+	Target         func(id string) *PlaudTarget
+	HeldTarget     func() string
+	Notify         func(context.Context, string, string) error
 }
+
+// PlaudTarget retains the selected runtime for a handoff. Its callbacks read
+// that runtime's current reply settings and submit to that same runtime even
+// when a reload replaces it with another brain bearing the same ID.
+type PlaudTarget struct {
+	BrainID    string
+	ReplyChat  func() string
+	OtherOwner func(jid string) string
+	Submit     func(jid, sender, text string, media []string, done func(error)) error
+}
+
+func (t *PlaudTarget) ID() string { return t.BrainID }

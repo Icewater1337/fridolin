@@ -296,15 +296,14 @@ func (st *plaudState) forwardOf(id string) *PlaudForward {
 }
 
 // PlaudManager runs the CLI, the poller and the connect flow. It knows the
-// rest of the bridge only through the configuration, the brains and two
-// functions, like the backup manager, so it can be tested without a bridge.
+// rest of the bridge only through its options and callbacks, so it can be
+// tested without a bridge.
 type PlaudManager struct {
 	options PlaudOptions
-	brains  *BrainManager
 	// submit gives a recording's transcript to br, whose answer goes to
 	// jid. An error means br did not take it; done then hears how its run
 	// ended (see Inbound.Done).
-	submit func(br *Brain, jid, sender, text string, media []string, done func(error)) error
+	submit func(br *PlaudTarget, jid, sender, text string, media []string, done func(error)) error
 	// notify sends text to a chat (the expiry notice).
 	notify func(ctx context.Context, jid, text string) error
 
@@ -364,9 +363,12 @@ type PlaudManager struct {
 	siteURL func() string
 }
 
-// newPlaudManager creates the manager. The caller sets submit and notify.
-func newPlaudManager(options PlaudOptions, brains *BrainManager) *PlaudManager {
-	p := &PlaudManager{options: options, brains: brains, inFlight: map[string]bool{}}
+// newPlaudManager creates the manager from its settings and runtime callbacks.
+func newPlaudManager(options PlaudOptions) *PlaudManager {
+	p := &PlaudManager{options: options, notify: options.Notify, inFlight: map[string]bool{}}
+	p.submit = func(target *PlaudTarget, jid, sender, text string, media []string, done func(error)) error {
+		return target.Submit(jid, sender, text, media, done)
+	}
 	p.life, p.stop = context.WithCancel(context.Background())
 	p.run = p.runCLI
 	return p
@@ -939,7 +941,7 @@ func (p *PlaudManager) accountID(ctx context.Context) (string, error) {
 // forward hands one waiting recording to br, whose answer goes to jid, and
 // says what it handed over: nil while Plaud has not finished the
 // transcript. It notes the recording's name in item once Plaud said it.
-func (p *PlaudManager) forward(ctx context.Context, cfg *PlaudSnapshot, id string, item *plaudPending, br *Brain, jid string) (*PlaudForward, error) {
+func (p *PlaudManager) forward(ctx context.Context, cfg *PlaudSnapshot, id string, item *plaudPending, br *PlaudTarget, jid string) (*PlaudForward, error) {
 	fetch := p.fetchCloud
 	if plaudPhoneDir(cfg) != "" {
 		fetch = fetchPhone
@@ -1283,11 +1285,8 @@ func safePlaudName(s string) string {
 }
 
 // targetBrain is the configured brain, else the DM brain, else the default.
-func (p *PlaudManager) targetBrain(cfg *PlaudSnapshot) *Brain {
-	if id := cfg.Plaud.Brain; id != "" {
-		return p.brains.Get(id)
-	}
-	return p.brains.BrainFor("", false)
+func (p *PlaudManager) targetBrain(cfg *PlaudSnapshot) *PlaudTarget {
+	return p.options.Target(cfg.Plaud.Brain)
 }
 
 // summaryChat is where br's answer to a recording and the expiry notice go.
@@ -1295,8 +1294,8 @@ func (p *PlaudManager) targetBrain(cfg *PlaudSnapshot) *Brain {
 // group, whatever chats the brain serves: its reply_chat when that is a
 // direct chat, else your own DM (the first allowed number). "" means there
 // is no private chat to use.
-func (p *PlaudManager) summaryChat(cfg *PlaudSnapshot, br *Brain) string {
-	if rc := br.settings.Load().manifest.ReplyChat; isDirectChat(rc) {
+func (p *PlaudManager) summaryChat(cfg *PlaudSnapshot, br *PlaudTarget) string {
+	if rc := br.ReplyChat(); isDirectChat(rc) {
 		return rc
 	}
 	return cfg.OwnerChat
@@ -1311,13 +1310,13 @@ func isDirectChat(jid string) bool {
 // destination returns the brain that receives recordings and the private
 // chat its answers go to, under cfg. A check reads the configuration once
 // and passes it on, so that it never mixes two versions of it.
-func (p *PlaudManager) destination(cfg *PlaudSnapshot) (*Brain, string, error) {
+func (p *PlaudManager) destination(cfg *PlaudSnapshot) (*PlaudTarget, string, error) {
 	br := p.targetBrain(cfg)
 	if br == nil {
 		if id := cfg.Plaud.Brain; id != "" {
 			return nil, "", fmt.Errorf("brain %s, picked for Plaud recordings, was removed or is not approved — pick another one under Integrations → Plaud", id)
 		}
-		if id := p.brains.HeldFor("", false); id != "" {
+		if id := p.options.HeldTarget(); id != "" {
 			// Not the default brain meanwhile: recordings are private.
 			return nil, "", fmt.Errorf("brain %s, which gets Plaud recordings, cannot run — its issue is on the Brains page", id)
 		}
@@ -1963,7 +1962,7 @@ func (p *PlaudManager) Status() PlaudStatus {
 	}
 	// What "Automatic" stands for in the card's brain select: the target
 	// is the picked brain while one is picked.
-	if br := p.brains.BrainFor("", false); br != nil {
+	if br := p.options.Target(""); br != nil {
 		s.AutoBrain = br.ID()
 	}
 	// Where summaries go, for the card: a chat that belongs to another brain
@@ -1973,9 +1972,7 @@ func (p *PlaudManager) Status() PlaudStatus {
 	} else {
 		s.SummaryChat = jid
 		s.SummaryToYou = jid != "" && jid == cfg.OwnerChat
-		if owner := p.brains.BrainFor(jid, false); owner != nil && owner != br {
-			s.SummaryChatBrain = owner.ID()
-		}
+		s.SummaryChatBrain = br.OtherOwner(jid)
 	}
 	if st, _ := p.loadState(); st != nil {
 		if st.Seeded {

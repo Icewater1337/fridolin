@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 
@@ -8,12 +9,17 @@ import (
 )
 
 // NewPlaudManager supplies settings and the paths captured for this bridge start.
-func NewPlaudManager(cfgs *config.Store, brains *BrainManager) *PlaudManager {
+func NewPlaudManager(cfgs *config.Store, brains *BrainManager,
+	submit func(*Brain, string, string, string, []string, func(error)) error,
+	notify func(context.Context, string, string) error) *PlaudManager {
 	boot := cfgs.Boot()
 	return newPlaudManager(PlaudOptions{
 		PlaudDir: boot.PlaudDir(), Home: boot.Home,
-		Settings: func() *PlaudSnapshot { return plaudSnapshotOf(runtimeConfig(cfgs)) },
-	}, brains)
+		Settings:   func() *PlaudSnapshot { return plaudSnapshotOf(runtimeConfig(cfgs)) },
+		Target:     func(id string) *PlaudTarget { return plaudTargetOf(brains, id, submit) },
+		HeldTarget: func() string { return brains.HeldFor("", false) },
+		Notify:     notify,
+	})
 }
 
 // plaudSnapshotOf projects one config snapshot; a poll retains it for its full pass.
@@ -48,4 +54,31 @@ func brainPlaudPATH(cfg *config.Config) string {
 		return dir + ":" + path
 	}
 	return path + ":" + filepath.Dir(bin)
+}
+
+// plaudTargetOf captures the selected runtime, rather than looking it up again
+// by ID when the transcript is finally submitted after filesystem work.
+func plaudTargetOf(brains *BrainManager, id string, submit func(*Brain, string, string, string, []string, func(error)) error) *PlaudTarget {
+	var br *Brain
+	if id != "" {
+		br = brains.Get(id)
+	} else {
+		br = brains.BrainFor("", false)
+	}
+	if br == nil {
+		return nil
+	}
+	return &PlaudTarget{
+		BrainID:   br.ID(),
+		ReplyChat: func() string { return br.settings.Load().manifest.ReplyChat },
+		OtherOwner: func(jid string) string {
+			if owner := brains.BrainFor(jid, false); owner != nil && owner != br {
+				return owner.ID()
+			}
+			return ""
+		},
+		Submit: func(jid, sender, text string, media []string, done func(error)) error {
+			return submit(br, jid, sender, text, media, done)
+		},
+	}
 }

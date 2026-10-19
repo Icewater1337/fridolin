@@ -425,7 +425,7 @@ type plaudRecorder struct {
 	refuse error
 }
 
-func (r *plaudRecorder) submit(br *Brain, jid, sender, text string, media []string, done func(error)) error {
+func (r *plaudRecorder) submit(br *PlaudTarget, jid, sender, text string, media []string, done func(error)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.refuse != nil {
@@ -911,8 +911,7 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 // plaudAfterRestart is a new manager on tb's configuration and brains, as
 // after a restart, wired the way the bridge wires its own.
 func plaudAfterRestart(tb *testBridge) *PlaudManager {
-	p := NewPlaudManager(tb.cfgs, tb.brainMgr)
-	p.submit, p.notify = tb.submitHandOff, tb.wa.SendMessage
+	p := NewPlaudManager(tb.cfgs, tb.brainMgr, tb.submitHandOff, tb.wa.SendMessage)
 	return p
 }
 
@@ -926,8 +925,8 @@ func TestPlaudManagerUsesOnlyWhatItIsGiven(t *testing.T) {
 		media                    []string
 	}
 	var got []handed
-	p := NewPlaudManager(tb.cfgs, tb.brainMgr)
-	p.submit = func(br *Brain, jid, sender, text string, media []string, done func(error)) error {
+	p := NewPlaudManager(tb.cfgs, tb.brainMgr, tb.submitHandOff, tb.wa.SendMessage)
+	p.submit = func(br *PlaudTarget, jid, sender, text string, media []string, done func(error)) error {
 		got = append(got, handed{br.ID(), jid, sender, text, media})
 		return nil
 	}
@@ -1922,7 +1921,7 @@ func TestPlaudMessageSaysWhatArrived(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb, fp := plaudBridge(t, c.settings)
 			var text, file string
-			tb.plaud.submit = func(br *Brain, jid, sender, txt string, media []string, done func(error)) error {
+			tb.plaud.submit = func(br *PlaudTarget, jid, sender, txt string, media []string, done func(error)) error {
 				text, file = txt, filepath.Base(media[0])
 				return nil
 			}
@@ -2077,7 +2076,7 @@ func plaudIDs(prefix string, n int) []string {
 func TestPlaudPagesBackToTheLastKnownRecording(t *testing.T) {
 	tb, fp := plaudBridge(t, "")
 	var handed []string
-	tb.plaud.submit = func(br *Brain, jid, sender, text string, media []string, done func(error)) error {
+	tb.plaud.submit = func(br *PlaudTarget, jid, sender, text string, media []string, done func(error)) error {
 		handed = append(handed, strings.TrimSuffix(media[0][strings.LastIndex(media[0], " - ")+3:], ".txt"))
 		done(nil)
 		return nil
@@ -2287,7 +2286,7 @@ func TestPlaudPendingGoesOldestFirst(t *testing.T) {
 	const older, newer = "of_00000000000000000000bb", "of_00000000000000000000ba"
 	tb, fp := plaudBridge(t, "")
 	var order []string
-	tb.plaud.submit = func(br *Brain, jid, sender, text string, media []string, done func(error)) error {
+	tb.plaud.submit = func(br *PlaudTarget, jid, sender, text string, media []string, done func(error)) error {
 		order = append(order, media[0][len(media[0])-len(older)-4:len(media[0])-4])
 		done(nil)
 		return nil
