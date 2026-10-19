@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/plaud"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
@@ -303,7 +304,7 @@ func (m *SiteManager) takeDeviceEntry(root *os.Root, entry string) (map[string]a
 	}
 	var body []byte
 	if spoolHas(root, entry, "body.txt") {
-		if body, err = spoolRead(root, path.Join(entry, "body.txt"), plaudTranscriptMax); err != nil {
+		if body, err = spoolRead(root, path.Join(entry, "body.txt"), plaud.TranscriptMax); err != nil {
 			return nil, err
 		}
 	}

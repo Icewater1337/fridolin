@@ -123,7 +123,7 @@ func TestRestartOnlyPathsStayAtBootAfterAPISave(t *testing.T) {
 }
 
 func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
-	tb := newTestBridge(t, `, "plaud":{"phone_upload":true}`)
+	tb := newTestBridge(t, `, "plaud":{"phone_upload":true,"enabled":true}`)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	runSettings := captureBootRunSettings(t, tb)
 	boot := tb.cfgs.Boot()
@@ -140,9 +140,7 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 	for label, pair := range map[string][2]string{
 		"Google credentials fallback": {tb.google.CredsDir(), boot.DataDir},
 		"Google redirect":             {tb.google.RedirectURI(), "http://" + boot.HTTPListen + "/"},
-		"Plaud state":                 {tb.plaud.dir(), boot.PlaudDir()},
-		"Plaud private HOME":          {tb.plaud.cliHome(), filepath.Join(boot.PlaudDir(), "home")},
-		"Plaud phone inbox":           {tb.plaud.phoneDir(), filepath.Join(boot.PlaudDir(), "inbox")},
+		"Plaud private login":         {tb.plaud.Status().LoginDir, filepath.Join(boot.PlaudDir(), "home", ".plaud")},
 		"site media":                  {tb.siteBuilderHooks().mediaDir(), boot.MediaDir},
 		"site bridge address":         {tb.siteBuilderHooks().bridgeURL(), "http://" + boot.HTTPListen},
 	} {
@@ -164,6 +162,7 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 	if _, err := os.Stat(next); !os.IsNotExist(err) {
 		t.Errorf("backup created next-start path: %v", err)
 	}
+	checkPlaudPhonePaths(t, tb, filepath.Join(boot.PlaudDir(), "inbox"))
 	s := runSettings()
 	if s.DataDir != boot.DataDir || s.DBPath != boot.DBPath || s.MediaDir != boot.MediaDir || s.CredsDir != boot.DataDir {
 		t.Errorf("brain startup paths drifted: %#v", s)
@@ -187,9 +186,13 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatal(w.Body.String())
 	}
-	if tb.google.CredsDir() != explicitCreds || tb.plaud.phoneDir() != explicitPhone || tb.plaud.cliHome() != boot.Home || runSettings().CredsDir != explicitCreds {
+	if tb.google.CredsDir() != explicitCreds || tb.plaud.Status().LoginDir != filepath.Join(boot.Home, ".plaud") || runSettings().CredsDir != explicitCreds {
 		t.Error("explicit credential/phone paths or Plaud access stopped applying live")
 	}
+	if err := os.MkdirAll(explicitPhone, 0700); err != nil {
+		t.Fatal(err)
+	}
+	checkPlaudPhonePaths(t, tb, explicitPhone)
 
 	if runtime.GOOS == "darwin" {
 		if w := tb.editConfig(t, func(c map[string]any) { c["sandbox"].(map[string]any)["enabled"] = true }); w.Code != http.StatusOK {
@@ -213,46 +216,30 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 	}
 }
 
-// bootSettingsRunner observes the run's actual immutable settings at the
-// process boundary, after the command's config reload has applied them.
-type bootSettingsRunner struct{ settings chan brain.Settings }
-
-func (r bootSettingsRunner) Run(_ context.Context, spec brain.RunSpec, _ claudecli.Callbacks) claudecli.Result {
-	r.settings <- *spec.Settings
-	return claudecli.Result{}
-}
-
-func captureBootRunSettings(t *testing.T, tb *testBridge) func() brain.Settings {
+// A first phone poll records which folder it read without handing old files
+// to a brain. This exercises the real read/write paths through the public API.
+func checkPlaudPhonePaths(t *testing.T, tb *testBridge, inbox string) {
 	t.Helper()
-	runner := bootSettingsRunner{settings: make(chan brain.Settings, 1)}
-	mgr := tb.brainMgr
-	mgr.Manager.Stop()
-	mgr.Manager = brain.NewManager(brain.Options{
-		Runner: runner, Sink: brainHooksSink{mgr.hooks},
-		Input: commandBrainInputRules(), ClaimMedia: claimBrainMedia,
-		ShutdownGrace: func() time.Duration { return 0 },
-	})
-	if err := mgr.Apply(runtimeConfig(tb.cfgs)); err != nil {
+	if err := tb.plaud.Poll(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	return func() brain.Settings {
-		t.Helper()
-		br, _, _, err := mgr.Submit(brain.Inbound{Inbound: chat.Inbound{
-			JID: harnessDM, Brain: "main", Text: "capture settings", Source: chat.SourceIngest,
-		}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		var settings brain.Settings
-		select {
-		case settings = <-runner.settings:
-		case <-time.After(10 * time.Second):
-			t.Fatal("run did not reach the injected runner")
-		}
-		if !br.WaitIdle(t.Context(), 10*time.Second) {
-			t.Fatal("captured run did not finish")
-		}
-		return settings
+	var state struct {
+		Account string `json:"account"`
+		Seeded  bool   `json:"seeded"`
+	}
+	path := filepath.Join(tb.cfgs.Boot().PlaudDir(), "state.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatal(err)
+	}
+	if !state.Seeded || state.Account != "phone "+inbox {
+		t.Errorf("Plaud read the wrong inbox or saved elsewhere: %+v", state)
+	}
+	if info, err := os.Stat(inbox); err != nil || !info.IsDir() {
+		t.Errorf("Plaud phone inbox was not created: %v", err)
 	}
 }
 
@@ -408,3 +395,49 @@ func TestRestoreKeepsRunningPathsProtectedAfterAPISave(t *testing.T) {
 		t.Fatalf("ordinary restore destination refused: %v", err)
 	}
 }
+
+// bootSettingsRunner observes the run's actual immutable settings at the
+// process boundary, after the command's config reload has applied them.
+type bootSettingsRunner struct{ settings chan brain.Settings }
+
+func (r bootSettingsRunner) Run(_ context.Context, spec brain.RunSpec, _ claudecli.Callbacks) claudecli.Result {
+	r.settings <- *spec.Settings
+	return claudecli.Result{}
+}
+
+func captureBootRunSettings(t *testing.T, tb *testBridge) func() brain.Settings {
+	t.Helper()
+	runner := bootSettingsRunner{settings: make(chan brain.Settings, 1)}
+	mgr := tb.brainMgr
+	mgr.Manager.Stop()
+	mgr.Manager = brain.NewManager(brain.Options{
+		Runner: runner, Sink: brainHooksSink{mgr.hooks},
+		Input: commandBrainInputRules(), ClaimMedia: claimBrainMedia,
+		ShutdownGrace: func() time.Duration { return 0 },
+	})
+	if err := mgr.Apply(runtimeConfig(tb.cfgs)); err != nil {
+		t.Fatal(err)
+	}
+	return func() brain.Settings {
+		t.Helper()
+		br, _, _, err := mgr.Submit(brain.Inbound{Inbound: chat.Inbound{
+			JID: harnessDM, Brain: "main", Text: "capture settings", Source: chat.SourceIngest,
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var settings brain.Settings
+		select {
+		case settings = <-runner.settings:
+		case <-time.After(10 * time.Second):
+			t.Fatal("run did not reach the injected runner")
+		}
+		if !br.WaitIdle(t.Context(), 10*time.Second) {
+			t.Fatal("captured run did not finish")
+		}
+		return settings
+	}
+}
+
+// Exercise the options used by NewBridge with only I/O consumers replaced.
+// A settings callback accidentally wired to Get would fail this.
