@@ -557,7 +557,7 @@ func TestKillRunsFreezesQueuedAndNewRuns(t *testing.T) {
 
 func TestKillRunsRejectsReloadAlreadyInProgress(t *testing.T) {
 	mgr, _, home := queueTestManager(t, 0, "")
-	cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", "claude_path": "`+os.Args[0]+`"}`))
+	cfg, err := Load(writeConfig(t, `{"data_dir": "`+home+`/data", "claude_path": "`+os.Args[0]+`"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -609,7 +609,7 @@ func TestReloadTracksRetirementUntilDeliveryFinishes(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("run did not reach delivery")
 	}
-	cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", "claude_path": "`+os.Args[0]+`"}`))
+	cfg, err := Load(writeConfig(t, `{"data_dir": "`+home+`/data", "claude_path": "`+os.Args[0]+`"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

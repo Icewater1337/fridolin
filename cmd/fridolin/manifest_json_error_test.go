@@ -43,7 +43,7 @@ func TestManifestJSONDiagnosticContracts(t *testing.T) {
 					t.Errorf("%s: %d %q; want %q", endpoint.name, rec.Code, response.Error, "invalid JSON: "+tc.request)
 				}
 			}
-			_, err := decodeConfigReplacement([]byte(`{"brain_dirs":[{"path":"/x","approved":` + tc.input + `}]}`))
+			_, err := DecodeReplacement([]byte(`{"brain_dirs":[{"path":"/x","approved":` + tc.input + `}]}`))
 			if err == nil || err.Error() != "invalid config: "+tc.approved {
 				t.Errorf("config: %v; want %q", err, "invalid config: "+tc.approved)
 			}

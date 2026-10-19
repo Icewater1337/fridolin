@@ -753,9 +753,9 @@ func (b *Bridge) apiGetConfig(w http.ResponseWriter, r *http.Request) {
 	// save that comes back with it would pass the conflict check over a
 	// write the page never saw.
 	snap := b.cfgs.Snapshot()
-	file := mustClone(snap.File)
+	file := MustClone(snap.File)
 	file.BrainDirs = nil
-	eff := mustClone(snap.Effective)
+	eff := MustClone(snap.Effective)
 	eff.BrainDirs = nil
 	httpapi.WriteJSON(w, http.StatusOK, map[string]any{
 		"etag":      snap.ETag,
@@ -769,7 +769,7 @@ func (b *Bridge) apiGetConfig(w http.ResponseWriter, r *http.Request) {
 // endpoints and are carried over untouched.
 //
 // It replaces the whole file layer, so it takes only the whole of it, as
-// GET /api/config returned it (see decodeConfigReplacement), and only with
+// GET /api/config returned it (see DecodeReplacement), and only with
 // the etag it came with: a script that sends one setting, or a tab that
 // saves over a newer change, would otherwise reset the rest to defaults —
 // the sandbox off, nobody allowed, another data dir.
@@ -786,7 +786,7 @@ func (b *Bridge) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusPreconditionRequired, "etag required: send the etag GET /api/config returned along with the config")
 		return
 	}
-	incoming, err := decodeConfigReplacement(req.Config)
+	incoming, err := DecodeReplacement(req.Config)
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -797,7 +797,7 @@ func (b *Bridge) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	switch {
-	case errors.Is(err, ErrConfigConflict):
+	case errors.Is(err, ErrConflict):
 		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 		return
 	case err != nil:

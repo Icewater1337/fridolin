@@ -136,7 +136,7 @@ func writeConfig(t *testing.T, body string) string {
 
 func TestLoadConfigDefaults(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	cfg, err := LoadConfig(writeConfig(t, `{}`))
+	cfg, err := Load(writeConfig(t, `{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestLoadConfigMaxMediaMB(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.body, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			cfg, err := LoadConfig(writeConfig(t, c.body))
+			cfg, err := Load(writeConfig(t, c.body))
 			if c.want == 0 {
 				if err == nil {
 					t.Errorf("loaded with max_media_mb %d, want an error", cfg.MaxMediaMB)
@@ -190,7 +190,7 @@ func TestLoadConfigMaxMediaMB(t *testing.T) {
 func TestLoadConfigExpandsHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := Load(writeConfig(t, `{
 		"data_dir": "~/data",
 		"brain_mode": true,
 		"brain_dirs": [{"path": "~/brains/a", "approved": {"id": "a", "name": "A"}}]
@@ -243,7 +243,7 @@ func TestProtectDataDirMakesExistingDataDirPrivate(t *testing.T) {
 			}
 			logs := captureLog(t)
 
-			cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+dataDir+`"}`))
+			cfg, err := Load(writeConfig(t, `{"data_dir": "`+dataDir+`"}`))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -285,7 +285,7 @@ func TestProtectDataDirLeavesHomeAlone(t *testing.T) {
 			}
 			t.Setenv("HOME", home)
 			t.Chdir(home)
-			cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+tc.dataDir(root, home)+`"}`))
+			cfg, err := Load(writeConfig(t, `{"data_dir": "`+tc.dataDir(root, home)+`"}`))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -344,7 +344,7 @@ func TestProtectDataDirOnlyWarnsAboutOpenDBFolder(t *testing.T) {
 			} else {
 				mkdirMode(t, dbDir, tc.mode)
 			}
-			cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/`+tc.dataDir+`", "db_path": "`+dbDir+`/bridge.db"}`))
+			cfg, err := Load(writeConfig(t, `{"data_dir": "`+home+`/`+tc.dataDir+`", "db_path": "`+dbDir+`/bridge.db"}`))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -415,7 +415,7 @@ func TestNewBridgeMakesDataDirPrivate(t *testing.T) {
 	t.Setenv("HOME", home)
 	data := filepath.Join(home, "data")
 	mkdirMode(t, data, 0o755)
-	cfgs, err := OpenConfigStore(writeConfig(t, `{"brain_mode": true, "data_dir": "`+data+`"}`))
+	cfgs, err := openConfigStore(writeConfig(t, `{"brain_mode": true, "data_dir": "`+data+`"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,7 +445,7 @@ func TestConfigWritesLeaveFolderModesAlone(t *testing.T) {
 	mkdirMode(t, shared, 0o755)
 	logs := captureLog(t)
 
-	cs, err := OpenConfigStore(writeConfig(t, `{"data_dir": "`+data+`", "db_path": "`+shared+`/bridge.db"}`))
+	cs, err := openConfigStore(writeConfig(t, `{"data_dir": "`+data+`", "db_path": "`+shared+`/bridge.db"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +466,7 @@ func TestConfigWritesLeaveFolderModesAlone(t *testing.T) {
 func TestLoadConfigAllowsNoBrains(t *testing.T) {
 	// A fresh install starts with no brains and adds them in the dashboard.
 	t.Setenv("HOME", t.TempDir())
-	if _, err := LoadConfig(writeConfig(t, `{"brain_mode":true,"brain_dirs":[]}`)); err != nil {
+	if _, err := Load(writeConfig(t, `{"brain_mode":true,"brain_dirs":[]}`)); err != nil {
 		t.Fatalf("an empty brain list must load: %v", err)
 	}
 }
@@ -489,7 +489,7 @@ func TestLoadConfigMaxChunkSize(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			cfg, err := LoadConfig(writeConfig(t, tc.body))
+			cfg, err := Load(writeConfig(t, tc.body))
 			if tc.want == 0 {
 				if err == nil || !strings.Contains(err.Error(), "max_chunk_size") {
 					t.Fatalf("expected a max_chunk_size error, got %v", err)
@@ -515,7 +515,7 @@ func TestExampleConfigIsValid(t *testing.T) {
 	cfgPath := writeConfig(t, string(example))
 	if runtime.GOOS != "darwin" {
 		// The example turns the sandbox on, which only macOS can honour.
-		if _, err := LoadConfig(cfgPath); err == nil || !strings.Contains(err.Error(), "sandbox.enabled") {
+		if _, err := Load(cfgPath); err == nil || !strings.Contains(err.Error(), "sandbox.enabled") {
 			t.Fatalf("config.example.json on %s: err = %v, want the sandbox.enabled error", runtime.GOOS, err)
 		}
 		// The rest of it must load all the same.
@@ -534,7 +534,7 @@ func TestExampleConfigIsValid(t *testing.T) {
 		}
 		cfgPath = writeConfig(t, string(data))
 	}
-	if _, err := LoadConfig(cfgPath); err != nil {
+	if _, err := Load(cfgPath); err != nil {
 		t.Fatalf("config.example.json does not load: %v", err)
 	}
 }
@@ -590,7 +590,7 @@ func TestBrainRouting(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := Load(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
 		brainFolder(t, home+"/p", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
@@ -621,7 +621,7 @@ func TestBrainRouting(t *testing.T) {
 func TestRouteHonoursTheNamedBrain(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := Load(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
 		brainFolder(t, home+"/p", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
@@ -690,7 +690,7 @@ func TestBrainRoutingFallsBackToFirstBrain(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := Load(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data"`+brainDirsJSON(t, brainFolder(t, home+"/o", manifest.Manifest{ID: "only"}))+`
 	}`))

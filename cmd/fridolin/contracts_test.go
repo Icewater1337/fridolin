@@ -370,7 +370,7 @@ func TestConfigFilesFollowTheSchema(t *testing.T) {
 			if err := os.WriteFile(path, data, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			cs, err := OpenConfigStore(path)
+			cs, err := openConfigStore(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -387,7 +387,7 @@ func TestConfigFilesFollowTheSchema(t *testing.T) {
 	t.Run("starter", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		path := filepath.Join(t.TempDir(), "config.json")
-		if err := ensureConfigFile(path); err != nil {
+		if err := EnsureFile(path); err != nil {
 			t.Fatal(err)
 		}
 		data, err := os.ReadFile(path)
@@ -455,7 +455,7 @@ func TestConfigSchemaRefusesWhatTheBridgeRefuses(t *testing.T) {
 	} {
 		t.Run(config, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			if _, err := LoadConfig(writeConfig(t, config)); err == nil {
+			if _, err := Load(writeConfig(t, config)); err == nil {
 				t.Fatal("the bridge loads it")
 			}
 			if len(set.ValidateJSON("config.schema.json", []byte(config))) == 0 {
@@ -494,7 +494,7 @@ func TestConfigSchemaTakesWhatTheBridgeTakes(t *testing.T) {
 		{`{"http_listen": "127.0.0.1:"}`, true},
 	} {
 		t.Run(tc.config, func(t *testing.T) {
-			if _, err := LoadConfig(writeConfig(t, tc.config)); err != nil {
+			if _, err := Load(writeConfig(t, tc.config)); err != nil {
 				t.Fatalf("the bridge refuses it: %v", err)
 			}
 			if problems := set.ValidateJSON("config.schema.json", []byte(tc.config)); len(problems) > 0 != tc.refused {
@@ -564,7 +564,7 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 						err = m.Validate()
 					}
 				} else {
-					_, err = LoadConfig(writeConfig(t, doc))
+					_, err = Load(writeConfig(t, doc))
 				}
 				if err != nil {
 					t.Errorf("the bridge refuses %s: %v", doc, err)
@@ -870,8 +870,8 @@ func headingAnchors(md string) []string {
 func TestRestartSettingsAreMarked(t *testing.T) {
 	set := newSchemaSet(t)
 	restart := map[string]bool{}
-	for _, f := range restartFields {
-		restart[f.name] = true
+	for _, name := range RestartFieldNames() {
+		restart[name] = true
 	}
 
 	var described func(at schemaAt, path string)
@@ -914,9 +914,9 @@ func TestRestartSettingsAreMarked(t *testing.T) {
 			}
 		}
 	}
-	for _, f := range restartFields {
-		if !marked[f.name] {
-			t.Errorf("CONFIGURATION.md does not say that %s needs a restart", f.name)
+	for _, name := range RestartFieldNames() {
+		if !marked[name] {
+			t.Errorf("CONFIGURATION.md does not say that %s needs a restart", name)
 		}
 	}
 }

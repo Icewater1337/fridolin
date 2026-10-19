@@ -574,7 +574,7 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			path := writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data", "claude_path": "`+home+`/no-claude", "allowed_groups": ["`+testGroup+`", "`+otherGroup+`"]`+brainDirsJSON(t, c.brains(home)...)+`}`)
-			cfg, err := LoadConfig(path)
+			cfg, err := Load(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -606,7 +606,7 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 	t.Run("Plaud recordings wait", func(t *testing.T) {
 		home := fsx.Canonical(t.TempDir())
 		t.Setenv("HOME", home)
-		cfg, err := LoadConfig(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data", "allowed_numbers": ["15551234567"]`+brainDirsJSON(t,
+		cfg, err := Load(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data", "allowed_numbers": ["15551234567"]`+brainDirsJSON(t,
 			config.BrainRef{Path: home + "/gone", Approved: &manifest.Manifest{ID: "personal", Name: "personal", Routing: manifest.Routing{HandlesDMs: true}}},
 			brainFolder(t, home+"/work", manifest.Manifest{ID: "work", Routing: manifest.Routing{Default: true}}),
 		)+`}`))

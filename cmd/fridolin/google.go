@@ -148,7 +148,7 @@ type oauthPending struct {
 
 // GoogleAuth manages the client, sign-ins and per-brain tokens.
 type GoogleAuth struct {
-	cfgs *ConfigStore
+	cfgs *Store
 
 	mu         sync.Mutex
 	pending    map[string]oauthPending  // state → sign-in in progress
@@ -158,7 +158,7 @@ type GoogleAuth struct {
 
 // NewGoogleAuth creates the manager, and logs the files in the credentials
 // dir that look like the copies of the OAuth client older versions left.
-func NewGoogleAuth(cfgs *ConfigStore) *GoogleAuth {
+func NewGoogleAuth(cfgs *Store) *GoogleAuth {
 	g := &GoogleAuth{cfgs: cfgs, pending: map[string]oauthPending{}, lastError: map[string]string{}, tokenLocks: map[string]chan struct{}{}}
 	if copies := g.leftoverClientCopies(); len(copies) > 0 {
 		log.Printf("WARNING: the credentials folder holds files named like the copies of the Google OAuth client that older versions wrote for the calendar tool, "+
@@ -458,7 +458,7 @@ func (g *GoogleAuth) HandleCallback(w http.ResponseWriter, r *http.Request) {
 		fail("saving the token failed: " + err.Error())
 		return
 	}
-	if err := g.cfgs.UpdateManifest(p.brainID, func(m *manifest.Manifest) error {
+	if err := updateManifest(g.cfgs, p.brainID, func(m *manifest.Manifest) error {
 		if m.Calendar == nil || m.Calendar.Account != account {
 			m.Calendar = &manifest.Calendar{Account: account, Calendars: []string{account}, Default: account}
 		}
@@ -884,7 +884,7 @@ func (g *GoogleAuth) Disconnect(ctx context.Context, brainID string, localOnly b
 	g.mu.Lock()
 	delete(g.lastError, brainID)
 	g.mu.Unlock()
-	if err := g.cfgs.UpdateManifest(brainID, func(m *manifest.Manifest) error { m.Calendar = nil; return nil }); err != nil {
+	if err := updateManifest(g.cfgs, brainID, func(m *manifest.Manifest) error { m.Calendar = nil; return nil }); err != nil {
 		return revoked, note, fmt.Errorf("the token was deleted, but saving the brain's calendar settings failed: %w", err)
 	}
 	return revoked, note, nil
@@ -1097,7 +1097,7 @@ func (b *Bridge) apiCalendarSelect(w http.ResponseWriter, r *http.Request) {
 	if req.Default == "" || !slices.Contains(req.Calendars, req.Default) {
 		req.Default = req.Calendars[0]
 	}
-	err := b.cfgs.UpdateManifest(br.ID(), func(m *manifest.Manifest) error {
+	err := updateManifest(b.cfgs, br.ID(), func(m *manifest.Manifest) error {
 		account := req.Account
 		if account == "" && m.Calendar != nil {
 			account = m.Calendar.Account

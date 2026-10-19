@@ -143,7 +143,7 @@ type backupJob struct {
 
 // BackupManager runs and schedules backups.
 type BackupManager struct {
-	cfgs *ConfigStore
+	cfgs *Store
 	bm   *BrainManager
 
 	mu      sync.Mutex
@@ -194,7 +194,7 @@ var refusalNoticeTimeout = 30 * time.Second
 // be read is kept as state.json.corrupt and the bridge starts with none: the
 // last results and the day of the last scheduled run are gone then, and the
 // log says so rather than leaving it to the next scheduled run to show.
-func NewBackupManager(cfgs *ConfigStore, bm *BrainManager) *BackupManager {
+func NewBackupManager(cfgs *Store, bm *BrainManager) *BackupManager {
 	m := &BackupManager{cfgs: cfgs, bm: bm, now: time.Now, idleWait: backupIdleWait}
 	m.runner = m.runRclone
 	data, err := os.ReadFile(m.statePath())

@@ -182,8 +182,8 @@ func inHome(p string) (string, bool) {
 	return filepath.Join(home, rel), true
 }
 
-// UpdateManifest changes one brain's manifest, see updateManifestIn.
-func (cs *ConfigStore) UpdateManifest(id string, mutate func(m *manifest.Manifest) error) error {
+// updateManifest changes one brain's manifest, see updateManifestIn.
+func updateManifest(cs *Store, id string, mutate func(m *manifest.Manifest) error) error {
 	_, err := cs.UpdateTx("", func(c *config.Config, tx *Tx) error { return updateManifestIn(c, tx, id, mutate) })
 	return err
 }

@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/registry"
 	"maps"
 	"os"
 	"path/filepath"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/registry"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
@@ -253,12 +254,12 @@ func TestChildEnvPassthroughNames(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
 			names, _ := json.Marshal([]string{tc.name})
-			_, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", "child_env_passthrough": `+string(names)+`}`))
+			_, err := Load(writeConfig(t, `{"data_dir": "`+home+`/data", "child_env_passthrough": `+string(names)+`}`))
 			if tc.ok && err != nil {
-				t.Fatalf("LoadConfig: %v", err)
+				t.Fatalf("Load: %v", err)
 			}
 			if !tc.ok && (err == nil || !strings.Contains(err.Error(), "child_env_passthrough")) {
-				t.Fatalf("LoadConfig = %v, want an error naming child_env_passthrough", err)
+				t.Fatalf("Load = %v, want an error naming child_env_passthrough", err)
 			}
 		})
 	}
@@ -339,7 +340,7 @@ func brainRunEnv(t *testing.T, env map[string]string, config string) (map[string
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := Load(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+os.Args[0]+`",

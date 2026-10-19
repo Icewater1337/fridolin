@@ -317,7 +317,7 @@ func TestRunLogsTheDataDir(t *testing.T) {
 				}
 			}
 			logs := captureLog(t)
-			cfgs, err := OpenConfigStore(writeConfig(t, strings.ReplaceAll(tc.config, "HOME", home)))
+			cfgs, err := openConfigStore(writeConfig(t, strings.ReplaceAll(tc.config, "HOME", home)))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -526,7 +526,7 @@ func TestNewConfigsHoldTheirDataDir(t *testing.T) {
 		{"init with both folders", initWith(), []string{".fridolin", ".whatsapp-claude-bridge"}, "~/.fridolin", "HOME/.fridolin"},
 		{"init --data-dir", initWith("--data-dir", "HOME/elsewhere/data"), nil, "HOME/elsewhere/data", "HOME/elsewhere/data"},
 		{"the first start", func(t *testing.T, path string) {
-			if err := ensureConfigFile(path); err != nil {
+			if err := EnsureFile(path); err != nil {
 				t.Fatal(err)
 			}
 		}, nil, "~/.fridolin", "HOME/.fridolin"},
@@ -547,7 +547,7 @@ func TestNewConfigsHoldTheirDataDir(t *testing.T) {
 			if err := json.Unmarshal(readRawConfig(t, path)["data_dir"], &raw); err != nil || raw != expand(c.raw) {
 				t.Errorf("data_dir written as %q (%v), want %q", raw, err, expand(c.raw))
 			}
-			cfg, err := LoadConfig(path)
+			cfg, err := Load(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -717,7 +717,7 @@ func TestPathsAgreesWithTheLoadedConfig(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			cfg, err := LoadConfig(path)
+			cfg, err := Load(path)
 			if err != nil {
 				t.Fatal(err)
 			}

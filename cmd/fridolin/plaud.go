@@ -301,7 +301,7 @@ func (st *plaudState) forwardOf(id string) *PlaudForward {
 // rest of the bridge only through the configuration, the brains and two
 // functions, like the backup manager, so it can be tested without a bridge.
 type PlaudManager struct {
-	cfgs   *ConfigStore
+	cfgs   *Store
 	brains *BrainManager
 	// submit gives a recording's transcript to br, whose answer goes to
 	// jid. An error means br did not take it; done then hears how its run
@@ -367,7 +367,7 @@ type PlaudManager struct {
 }
 
 // NewPlaudManager creates the manager. The caller sets submit and notify.
-func NewPlaudManager(cfgs *ConfigStore, brains *BrainManager) *PlaudManager {
+func NewPlaudManager(cfgs *Store, brains *BrainManager) *PlaudManager {
 	p := &PlaudManager{cfgs: cfgs, brains: brains, inFlight: map[string]bool{}}
 	p.life, p.stop = context.WithCancel(context.Background())
 	p.run = p.runCLI
