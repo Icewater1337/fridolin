@@ -864,7 +864,7 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 // plaudAfterRestart is a new manager on tb's configuration and brains, as
 // after a restart, wired the way the bridge wires its own.
 func plaudAfterRestart(tb *testBridge) *PlaudManager {
-	p := NewPlaudManager(tb.cfgs, tb.brainMgr, tb.submitHandOff, tb.wa.SendMessage)
+	p := NewPlaudManager(tb.cfgs, tb.brainMgr, tb.submitHandOff, tb.wa.SendMessage, nil)
 	return p
 }
 
@@ -878,7 +878,7 @@ func TestPlaudManagerUsesOnlyWhatItIsGiven(t *testing.T) {
 		media                    []string
 	}
 	var got []handed
-	p := NewPlaudManager(tb.cfgs, tb.brainMgr, tb.submitHandOff, tb.wa.SendMessage)
+	p := NewPlaudManager(tb.cfgs, tb.brainMgr, tb.submitHandOff, tb.wa.SendMessage, nil)
 	p.submit = func(br *PlaudTarget, jid, sender, text string, media []string, done func(error)) error {
 		got = append(got, handed{br.ID(), jid, sender, text, media})
 		return nil
@@ -1223,7 +1223,7 @@ func TestPlaudConnectAgainAfterARefusedLogin(t *testing.T) {
 			if err := tb.plaud.Connect(); err != nil {
 				t.Fatal(err)
 			}
-			var job connectJob
+			var job PlaudConnect
 			var refused bool
 			// Not through Status: once the sign-in ended, that may ask who
 			// is signed in, a command of its own.
@@ -1372,7 +1372,7 @@ func TestPlaudConnectGivesTheSignOutItsOwnTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Well below the 30 s the fake's logout hangs for.
-	var job connectJob
+	var job PlaudConnect
 	testutil.WaitFor(t, 10*time.Second, "the sign-in to end", func() bool {
 		tb.plaud.mu.Lock()
 		defer tb.plaud.mu.Unlock()
@@ -3145,7 +3145,7 @@ func TestPlaudSignInSaysWhyItFailed(t *testing.T) {
 			if err := tb.plaud.Connect(); err != nil {
 				t.Fatal(err)
 			}
-			var job connectJob
+			var job PlaudConnect
 			testutil.WaitFor(t, 10*time.Second, "the sign-in to end", func() bool {
 				job = *tb.plaud.Status().Connect
 				return job.State != "running"
@@ -3186,7 +3186,7 @@ func TestPlaudConnectJudgesTheSignInByTheLogin(t *testing.T) {
 			if rec := tb.do("POST", "/api/plaud/connect", nil); rec.Code != 202 {
 				t.Fatalf("connect: %d %s", rec.Code, rec.Body)
 			}
-			var job connectJob
+			var job PlaudConnect
 			testutil.WaitFor(t, 10*time.Second, "the sign-in to end", func() bool {
 				job = *tb.plaud.Status().Connect
 				return job.State != "running"

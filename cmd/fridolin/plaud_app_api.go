@@ -33,13 +33,13 @@ func (b *Bridge) apiPlaudAppBuild(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Bridge) apiPlaudAppDownload(w http.ResponseWriter, r *http.Request) {
-	if !fsx.Exists(b.plaud.appFile()) {
+	if !fsx.Exists(b.plaud.AppFile()) {
 		httpapi.WriteErr(w, http.StatusNotFound, "no phone app built yet")
 		return
 	}
 	w.Header().Set("Content-Type", "application/vnd.android.package-archive")
 	w.Header().Set("Content-Disposition", `attachment; filename="plaud-sync.apk"`)
-	http.ServeFile(w, r, b.plaud.appFile())
+	http.ServeFile(w, r, b.plaud.AppFile())
 }
 
 func (b *Bridge) apiPlaudRevokeDevice(w http.ResponseWriter, r *http.Request) {

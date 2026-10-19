@@ -246,11 +246,11 @@ func (p *PlaudManager) RevokeDevice(id string) error {
 
 var errPlaudUnknownDevice = errors.New("there is no such paired phone")
 
-// deviceRequest answers a phone's request that the site passed on:
+// DeviceRequest answers a phone's request that the site passed on:
 // "pair", or "transcript" with the transcript in body (site_ingest.go).
 // Its errors go back to the phone, so they name what is wrong and nothing
 // the request carried.
-func (p *PlaudManager) deviceRequest(op, assertion string, body []byte) (map[string]any, error) {
+func (p *PlaudManager) DeviceRequest(op, assertion string, body []byte) (map[string]any, error) {
 	switch op {
 	case "pair":
 		id, err := p.pairDevice(assertion, time.Now())
@@ -422,7 +422,7 @@ type plaudAppJob struct {
 var errPlaudAppBuilding = errors.New("the phone app is being built already")
 
 func (p *PlaudManager) appDir() string  { return filepath.Join(p.dir(), "app") }
-func (p *PlaudManager) appFile() string { return filepath.Join(p.appDir(), "plaud-sync.apk") }
+func (p *PlaudManager) AppFile() string { return filepath.Join(p.appDir(), "plaud-sync.apk") }
 
 // BuildApp starts building the phone app in the background, with the
 // site's address and a new pairing code: Gradle, in plaud-android/ of the
@@ -441,8 +441,8 @@ func (p *PlaudManager) BuildApp() error {
 		return errors.New("enter the Plaud developer app's client ID, client secret and API key first")
 	}
 	site := ""
-	if p.siteURL != nil {
-		site = p.siteURL()
+	if p.options.SiteURL != nil {
+		site = p.options.SiteURL()
 	}
 	if site == "" {
 		return errors.New("the site has no domain yet (Site → Domain): the app uploads through it")
@@ -484,7 +484,7 @@ func (p *PlaudManager) BuildApp() error {
 	return nil
 }
 
-// buildApp runs the build and copies the app to appFile. On failure it
+// buildApp runs the build and copies the app to AppFile. On failure it
 // returns the end of Gradle's output.
 func (p *PlaudManager) buildApp(ctx context.Context, src, javaHome, sdk, site string, dev plaudDeveloper) (time.Time, string, error) {
 	dir := p.appDir()
@@ -520,7 +520,7 @@ func (p *PlaudManager) buildApp(ctx context.Context, src, javaHome, sdk, site st
 	if err != nil {
 		return time.Time{}, "", err
 	}
-	return exp, "", fsx.WriteFileAtomic(p.appFile(), apk, 0o600, false)
+	return exp, "", fsx.WriteFileAtomic(p.AppFile(), apk, 0o600, false)
 }
 
 // ── the dashboard ────────────────────────────────────────────────────────
@@ -546,10 +546,10 @@ type PlaudPhoneRow struct {
 
 func (p *PlaudManager) appStatus() *PlaudAppStatus {
 	s := &PlaudAppStatus{Credentials: p.loadDeveloper().complete(), Devices: []PlaudPhoneRow{}}
-	if p.siteURL != nil {
-		s.SiteURL = p.siteURL()
+	if p.options.SiteURL != nil {
+		s.SiteURL = p.options.SiteURL()
 	}
-	if st, err := os.Stat(p.appFile()); err == nil {
+	if st, err := os.Stat(p.AppFile()); err == nil {
 		t := st.ModTime()
 		s.Built = &t
 	}

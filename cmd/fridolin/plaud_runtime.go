@@ -13,9 +13,16 @@ import (
 // NewPlaudManager supplies settings and the paths captured for this bridge start.
 func NewPlaudManager(cfgs *config.Store, brains *BrainManager,
 	submit func(*Brain, string, string, string, []string, func(error)) error,
-	notify func(context.Context, string, string) error) *PlaudManager {
+	notify func(context.Context, string, string) error, siteURL func() string) *PlaudManager {
+	return newPlaudManager(plaudOptions(cfgs, brains, submit, notify, siteURL))
+}
+
+// plaudOptions projects command policy and host dependencies into the service.
+func plaudOptions(cfgs *config.Store, brains *BrainManager,
+	submit func(*Brain, string, string, string, []string, func(error)) error,
+	notify func(context.Context, string, string) error, siteURL func() string) PlaudOptions {
 	boot := cfgs.Boot()
-	return newPlaudManager(PlaudOptions{
+	return PlaudOptions{
 		PlaudDir: boot.PlaudDir(), Home: boot.Home,
 		Settings:   func() *PlaudSnapshot { return plaudSnapshotOf(runtimeConfig(cfgs)) },
 		Target:     func(id string) *PlaudTarget { return plaudTargetOf(brains, id, submit) },
@@ -27,11 +34,11 @@ func NewPlaudManager(cfgs *config.Store, brains *BrainManager,
 		RunInterrupted: func(err error) bool {
 			return errors.Is(err, claudecli.ErrInterrupted) || errors.Is(err, errBrainDropped) || errors.Is(err, context.Canceled)
 		},
-		AppSource: plaudAppSource, AndroidToolchain: androidToolchain,
+		SiteURL: siteURL, AppSource: plaudAppSource, AndroidToolchain: androidToolchain,
 		AppEnviron: func(ctx context.Context, javaHome, sdk string) []string {
 			return childEnv(helperScope(ctx), nil, "JAVA_HOME="+javaHome, "ANDROID_HOME="+sdk)
 		},
-	})
+	}
 }
 
 // plaudSnapshotOf projects one config snapshot; a poll retains it for its full pass.

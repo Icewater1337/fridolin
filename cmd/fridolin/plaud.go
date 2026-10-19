@@ -317,7 +317,7 @@ type PlaudManager struct {
 	cliMu sync.Mutex
 
 	mu       sync.Mutex
-	connect  *connectJob
+	connect  *PlaudConnect
 	lastPoll time.Time
 	lastErr  string
 	// refused is set while Plaud refuses a login whose tokens.json is still
@@ -354,11 +354,9 @@ type PlaudManager struct {
 
 	// The phone app uploading through the site (plaud_app.go). devMu makes
 	// every change to devices.json a read, change and write of its own;
-	// appJob is the last build of the app (under mu). siteURL is the site's
-	// address, "" while it has no domain; the caller sets it.
-	devMu   sync.Mutex
-	appJob  *plaudAppJob
-	siteURL func() string
+	// appJob is the last build of the app (under mu).
+	devMu  sync.Mutex
+	appJob *plaudAppJob
 }
 
 // newPlaudManager creates the manager from its settings and runtime callbacks.
@@ -1768,6 +1766,15 @@ type PlaudCLI struct {
 	InstallHint string `json:"install_hint"`
 }
 
+// PlaudConnect is the sign-in progress shown by the dashboard.
+// The service keeps cancellation private and copies the job in Status.
+type PlaudConnect struct {
+	State   string `json:"state"` // running, done, error
+	AuthURL string `json:"auth_url,omitempty"`
+	Error   string `json:"error,omitempty"`
+	cancel  context.CancelFunc
+}
+
 // PlaudStatus is what the dashboard's Plaud card shows.
 type PlaudStatus struct {
 	CLI       PlaudCLI      `json:"cli"`
@@ -1796,7 +1803,7 @@ type PlaudStatus struct {
 	Seen          *int          `json:"seen,omitempty"`
 	Pending       *int          `json:"pending,omitempty"`
 	Handed        *int          `json:"handed,omitempty"`
-	Connect       *connectJob   `json:"connect,omitempty"`
+	Connect       *PlaudConnect `json:"connect,omitempty"`
 	LastPoll      *time.Time    `json:"last_poll,omitempty"`
 	LastError     string        `json:"last_error,omitempty"`
 	LastForwarded *PlaudForward `json:"last_forwarded,omitempty"`
@@ -1928,7 +1935,7 @@ func (p *PlaudManager) Connect() error {
 		return errPlaudSigningIn
 	}
 	ctx, cancel := context.WithTimeout(p.lifetime(), 10*time.Minute)
-	job := &connectJob{State: "running", cancel: cancel}
+	job := &PlaudConnect{State: "running", cancel: cancel}
 	p.connect = job
 	// Only a login that is Fridolin's and in use: not one brain_access
 	// moved away from, nor your terminal's in ~/.plaud. Its home is taken

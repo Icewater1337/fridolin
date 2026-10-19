@@ -44,6 +44,7 @@ type PlaudOptions struct {
 	DesktopContext   func(context.Context) context.Context
 	Inbox            func(string) mediafiles.Inbox
 	RunInterrupted   func(error) bool
+	SiteURL          func() string
 	AppSource        func() (string, error)
 	AndroidToolchain func() (string, string, error)
 	AppEnviron       func(context.Context, string, string) []string

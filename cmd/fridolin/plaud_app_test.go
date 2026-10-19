@@ -111,14 +111,14 @@ func TestPlaudPhoneUploadsThroughTheSite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := tb.plaud.deviceRequest("pair", phone.pairing(t, "never-made"), nil); err == nil {
+	if _, err := tb.plaud.DeviceRequest("pair", phone.pairing(t, "never-made"), nil); err == nil {
 		t.Fatal("a made-up pairing code paired")
 	}
 	code, _, err := tb.plaud.newPairing()
 	if err != nil {
 		t.Fatal(err)
 	}
-	ans, err := tb.plaud.deviceRequest("pair", phone.pairing(t, code), nil)
+	ans, err := tb.plaud.DeviceRequest("pair", phone.pairing(t, code), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestPlaudPhoneUploadsThroughTheSite(t *testing.T) {
 	if !strings.HasPrefix(device, "dev_") {
 		t.Fatalf("pairing answered %v", ans)
 	}
-	if _, err := tb.plaud.deviceRequest("pair", newTestPhone(t).pairing(t, code), nil); err == nil {
+	if _, err := tb.plaud.DeviceRequest("pair", newTestPhone(t).pairing(t, code), nil); err == nil {
 		t.Error("a pairing code worked twice")
 	}
 	// The site's copy has the public key and nothing else.
@@ -137,16 +137,16 @@ func TestPlaudPhoneUploadsThroughTheSite(t *testing.T) {
 
 	text := "[00:00 - 00:04] Speaker 1: Let's ship on Friday.\n[00:04 - 02:10] Speaker 2: Agreed.\n"
 	name := "2026-10-18_10-00-00"
-	if _, err := tb.plaud.deviceRequest("transcript", phone.upload(t, device, name, text), []byte("[00:00 - 00:01] Speaker 1: Something else.")); err == nil {
+	if _, err := tb.plaud.DeviceRequest("transcript", phone.upload(t, device, name, text), []byte("[00:00 - 00:01] Speaker 1: Something else.")); err == nil {
 		t.Error("a transcript the phone did not sign was taken")
 	}
-	if _, err := tb.plaud.deviceRequest("transcript", newTestPhone(t).upload(t, device, name, text), []byte(text)); err == nil {
+	if _, err := tb.plaud.DeviceRequest("transcript", newTestPhone(t).upload(t, device, name, text), []byte(text)); err == nil {
 		t.Error("a transcript signed with another key was taken")
 	}
-	if _, err := tb.plaud.deviceRequest("transcript", phone.upload(t, device, "../../escape", text), []byte(text)); err == nil {
+	if _, err := tb.plaud.DeviceRequest("transcript", phone.upload(t, device, "../../escape", text), []byte(text)); err == nil {
 		t.Error("a transcript with a path for a name was taken")
 	}
-	if _, err := tb.plaud.deviceRequest("transcript", phone.upload(t, device, name, text), []byte(text)); err != nil {
+	if _, err := tb.plaud.DeviceRequest("transcript", phone.upload(t, device, name, text), []byte(text)); err != nil {
 		t.Fatal(err)
 	}
 	if err := tb.plaud.Poll(ctx); err != nil {
@@ -167,7 +167,7 @@ func TestPlaudPhoneUploadsThroughTheSite(t *testing.T) {
 	if err := tb.plaud.RevokeDevice(device); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tb.plaud.deviceRequest("transcript", phone.upload(t, device, "2026-10-18_11-00-00", text), []byte(text)); err == nil || !strings.Contains(err.Error(), "not paired") {
+	if _, err := tb.plaud.DeviceRequest("transcript", phone.upload(t, device, "2026-10-18_11-00-00", text), []byte(text)); err == nil || !strings.Contains(err.Error(), "not paired") {
 		t.Errorf("an unpaired phone's upload: %v", err)
 	}
 	if data, _ := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "site", "devices.json")); strings.Contains(string(data), device) {
@@ -179,7 +179,7 @@ func TestPlaudPhoneUploadOffRefusesPhones(t *testing.T) {
 	tb, _ := plaudBridge(t, "")
 	phone := newTestPhone(t)
 	code, _, _ := tb.plaud.newPairing()
-	if _, err := tb.plaud.deviceRequest("pair", phone.pairing(t, code), nil); err == nil || !strings.Contains(err.Error(), "phone_upload") {
+	if _, err := tb.plaud.DeviceRequest("pair", phone.pairing(t, code), nil); err == nil || !strings.Contains(err.Error(), "phone_upload") {
 		t.Errorf("pairing with uploads off: %v", err)
 	}
 }
