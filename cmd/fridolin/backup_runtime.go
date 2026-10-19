@@ -90,3 +90,25 @@ func rcloneInstallHint() string {
 		return "See https://rclone.org/install/"
 	}
 }
+
+// resolveExisting resolves the symlinks of absolute path p as far as it
+// exists, and puts back the part that does not. CheckBrainPath resolves
+// only a path that exists, so a new folder under a symlink would be checked
+// where the link is, and then made, and restored into, where it points: in
+// a brain, say.
+func resolveExisting(p string) string {
+	if !filepath.IsAbs(p) {
+		return p
+	}
+	p = filepath.Clean(p)
+	rest := ""
+	for d := p; ; d = filepath.Dir(d) {
+		if r, err := filepath.EvalSymlinks(d); err == nil {
+			return filepath.Join(r, rest)
+		}
+		if filepath.Dir(d) == d {
+			return p
+		}
+		rest = filepath.Join(filepath.Base(d), rest)
+	}
+}

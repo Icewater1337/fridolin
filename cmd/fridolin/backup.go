@@ -1166,28 +1166,6 @@ func backupPath(bc BackupSettings, id string, parts ...string) string {
 	return bc.Remote + ":" + strings.Join(append([]string{bc.Root, id}, parts...), "/")
 }
 
-// resolveExisting resolves the symlinks of absolute path p as far as it
-// exists, and puts back the part that does not. CheckBrainPath resolves
-// only a path that exists, so a new folder under a symlink would be checked
-// where the link is, and then made, and restored into, where it points: in
-// a brain, say.
-func resolveExisting(p string) string {
-	if !filepath.IsAbs(p) {
-		return p
-	}
-	p = filepath.Clean(p)
-	rest := ""
-	for d := p; ; d = filepath.Dir(d) {
-		if r, err := filepath.EvalSymlinks(d); err == nil {
-			return filepath.Join(r, rest)
-		}
-		if filepath.Dir(d) == d {
-			return p
-		}
-		rest = filepath.Join(filepath.Base(d), rest)
-	}
-}
-
 // restore copies src, a backup of brain, into target, and says how it went.
 func (m *BackupManager) restore(ctx context.Context, src, brain, version, target string) *RestoreResult {
 	res := &RestoreResult{Brain: brain, Version: version, Target: target, Started: time.Now()}
