@@ -1,4 +1,4 @@
-package main
+package route
 
 import (
 	"slices"
@@ -38,10 +38,10 @@ func TestRouteValidationPreservesErrorsAndOrder(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			specs := []manifest.Spec{a, b}
 			tc.edit(specs)
-			if err := ValidateBrainSet(specs); err == nil || err.Error() != tc.want {
+			if err := Validate(specs); err == nil || err.Error() != tc.want {
 				t.Fatalf("validation = %v, want %q", err, tc.want)
 			}
-			if table, err := buildRouteTable(specs); table != nil || err == nil || err.Error() != tc.want {
+			if table, err := Build(specs); table != nil || err == nil || err.Error() != tc.want {
 				t.Fatalf("build = %+v, %v", table, err)
 			}
 		})
@@ -56,7 +56,7 @@ func TestRouteTableSelectionAndOwnedValues(t *testing.T) {
 		routeSpec("dm", manifest.Routing{HandlesDMs: true, Groups: []string{group}}),
 		routeSpec("fallback", manifest.Routing{Default: true}),
 	}
-	table, err := buildRouteTable(specs)
+	table, err := Build(specs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestRouteReplyChatAndFallbackCases(t *testing.T) {
 				specs = append(specs, routeSpec("owner", manifest.Routing{HandlesDMs: true}))
 			}
 			specs = append(specs, spec)
-			table, err := buildRouteTable(specs)
+			table, err := Build(specs)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -122,7 +122,7 @@ func TestRouteReplyChatAndFallbackCases(t *testing.T) {
 			}
 		})
 	}
-	empty, err := buildRouteTable(nil)
+	empty, err := Build(nil)
 	if err != nil || empty.For("", false) != "" || empty.For(group, true) != "" || empty.Default() != "" || len(empty.Dirs()) != 0 {
 		t.Fatalf("empty table = %+v, %v", empty, err)
 	}

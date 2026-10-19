@@ -1,4 +1,4 @@
-package main
+package route
 
 import (
 	"fmt"
@@ -7,11 +7,11 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
-// ValidateBrainSet checks brains against each other: unique ids, every group
+// Validate checks brains against each other: unique ids, every group
 // owned by one brain, at most one DM brain and one default, no two brains in
 // one folder and no brain folder inside another (sandbox profiles deny other
 // brains' folders, so a nested brain could not read itself).
-func ValidateBrainSet(specs []manifest.Spec) error {
+func Validate(specs []manifest.Spec) error {
 	ids := map[string]string{}
 	groups := map[string]string{}
 	dm, def := "", ""
@@ -54,10 +54,10 @@ func ValidateBrainSet(specs []manifest.Spec) error {
 	return nil
 }
 
-// routeTable is a snapshot of routing from approved, runnable brain specs.
+// Table is a snapshot of routing from approved, runnable brain specs.
 // Runtime routes held for unavailable brains remain with the manager until
 // its later extraction; this table does not replace that runtime state.
-type routeTable struct {
+type Table struct {
 	entries  map[string]routeEntry
 	groups   map[string]string
 	dm       string
@@ -66,21 +66,21 @@ type routeTable struct {
 }
 
 type routeEntry struct {
-	replyChat  string
+	ReplyChat  string
 	groups     []string
 	handlesDMs bool
 }
 
-// buildRouteTable validates the set and records its current routing values.
+// Build validates the set and records its current routing values.
 // Individual manifest validation belongs to the caller resolving the specs.
-func buildRouteTable(specs []manifest.Spec) (*routeTable, error) {
-	if err := ValidateBrainSet(specs); err != nil {
+func Build(specs []manifest.Spec) (*Table, error) {
+	if err := Validate(specs); err != nil {
 		return nil, err
 	}
-	t := &routeTable{entries: make(map[string]routeEntry, len(specs)), groups: map[string]string{}}
+	t := &Table{entries: make(map[string]routeEntry, len(specs)), groups: map[string]string{}}
 	for _, s := range specs {
 		m := s.Manifest
-		t.entries[m.ID] = routeEntry{replyChat: m.ReplyChat, groups: append([]string(nil), m.Routing.Groups...), handlesDMs: m.Routing.HandlesDMs}
+		t.entries[m.ID] = routeEntry{ReplyChat: m.ReplyChat, groups: append([]string(nil), m.Routing.Groups...), handlesDMs: m.Routing.HandlesDMs}
 		t.dirs = append(t.dirs, s.Dir)
 		for _, group := range m.Routing.Groups {
 			t.groups[group] = m.ID
@@ -99,7 +99,7 @@ func buildRouteTable(specs []manifest.Spec) (*routeTable, error) {
 }
 
 // For returns the brain id that handles the chat, or empty for an empty set.
-func (t *routeTable) For(jid string, isGroup bool) string {
+func (t *Table) For(jid string, isGroup bool) string {
 	if isGroup {
 		if id, ok := t.groups[jid]; ok {
 			return id
@@ -111,27 +111,27 @@ func (t *routeTable) For(jid string, isGroup bool) string {
 }
 
 // Has reports whether id belongs to this table.
-func (t *routeTable) Has(id string) bool { _, ok := t.entries[id]; return ok }
+func (t *Table) Has(id string) bool { _, ok := t.entries[id]; return ok }
 
 // Default returns the explicit default brain, or the first configured brain.
-func (t *routeTable) Default() string { return t.fallback }
+func (t *Table) Default() string { return t.fallback }
 
 // Dirs returns the canonical folders in configured order as a fresh slice.
-func (t *routeTable) Dirs() []string { return append([]string(nil), t.dirs...) }
+func (t *Table) Dirs() []string { return append([]string(nil), t.dirs...) }
 
 // ReplyChat selects the reply destination for a brain in this table.
-func (t *routeTable) ReplyChat(id, ownerDM string) string {
+func (t *Table) ReplyChat(id, ownerDM string) string {
 	e, ok := t.entries[id]
 	if !ok {
 		return ""
 	}
-	m := manifest.Manifest{ReplyChat: e.replyChat, Routing: manifest.Routing{HandlesDMs: e.handlesDMs, Groups: e.groups}}
-	return replyChat(m, e.handlesDMs || t.For("", false) == id, ownerDM)
+	m := manifest.Manifest{ReplyChat: e.ReplyChat, Routing: manifest.Routing{HandlesDMs: e.handlesDMs, Groups: e.groups}}
+	return ReplyChat(m, e.handlesDMs || t.For("", false) == id, ownerDM)
 }
 
-// replyChat preserves the configured reply, then DM-before-group ordering.
+// ReplyChat preserves the configured reply, then DM-before-group ordering.
 // The runtime caller supplies getsDMs from its current pointer/held-route state.
-func replyChat(m manifest.Manifest, getsDMs bool, ownerDM string) string {
+func ReplyChat(m manifest.Manifest, getsDMs bool, ownerDM string) string {
 	if m.ReplyChat != "" {
 		return m.ReplyChat
 	}
