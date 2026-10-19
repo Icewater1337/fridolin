@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"net/http"
 
 	"github.com/Icewater1337/fridolin/internal/httpapi"
@@ -35,44 +33,14 @@ func (b *Bridge) requiresToken() bool {
 	return b.tokenAtStart || b.cfgs.Get().DashboardRequiresToken()
 }
 
-// newHTTPHandler builds the whole HTTP surface.
 func (b *Bridge) newHTTPHandler(listen string) http.Handler {
-	hosts := httpapi.AllowedHosts(listen)
 	b.sessionCookie = httpapi.SessionCookieName(listen)
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "ok")
+	return NewHTTPHandler(HTTPDeps{
+		Listen: listen, Ready: b.httpReady, Send: b.newScriptAPI().Send, Ingest: b.newScriptAPI().Ingest,
+		Builder: b.builderHandler, Brain: b.brainAPIHandler,
+		DashboardDisabled: func() bool { return b.cfgs.Get().Dashboard.Disabled }, Static: web.FS,
+		GoogleCallback: func(w http.ResponseWriter, r *http.Request) { b.newGoogleAPI().Callback(w, r) },
+		Login:          b.newDashboardAuth().Login, Token: b.token, RequiresToken: b.requiresToken,
+		SignedIn: b.newDashboardAuth().SignedIn, API: b.apiMux,
 	})
-	mux.HandleFunc("GET /ready", b.httpReady)
-	mux.HandleFunc("POST /send", b.newScriptAPI().Send)
-	mux.HandleFunc("POST /ingest", b.newScriptAPI().Ingest)
-	// The site builder's MCP servers; each brain's own token (site_builder.go).
-	mux.Handle("/builder/", b.builderHandler())
-	// The tools brains run; each run's own token (brainapi.go).
-	mux.Handle("/brain/", b.brainAPIHandler())
-
-	if !b.cfgs.Get().Dashboard.Disabled {
-		static := httpapi.StaticHandler(web.FS)
-		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodGet && r.Method != http.MethodHead {
-				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-				return
-			}
-			// Google sign-in returns here (the redirect URI is the dashboard
-			// itself). The one-time state ties it to a sign-in the dashboard
-			// started, so it needs no token. Google sends the browser back
-			// with a GET; a HEAD, say from a link prefetcher, must not use
-			// up the state.
-			if r.Method == http.MethodGet && r.URL.Path == "/" && httpapi.IsOAuthCallback(r) {
-				b.newGoogleAPI().Callback(w, r)
-				return
-			}
-			static.ServeHTTP(w, r)
-		}))
-		mux.HandleFunc("POST /api/login", b.newDashboardAuth().Login)
-		mux.Handle("/api/", httpapi.APIGuard(b.token, b.requiresToken, b.newDashboardAuth().SignedIn, b.apiMux()))
-	}
-
-	return httpapi.SecurityHeaders(httpapi.HostGuard(hosts, httpapi.OriginGuard(hosts, mux)))
 }
