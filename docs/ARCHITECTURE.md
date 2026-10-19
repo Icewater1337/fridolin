@@ -64,6 +64,30 @@ behaviour unless its title says so. The steps so far:
 - **R5, routing slice**: `route` owns set validation and pure chat/reply
   selection. The manager still owns live maps, held routes and brain identity.
 
+- **R11, access slice**: `access` owns pure admission, group addressing,
+  silence and text decisions. Transports project facts into `chat.Envelope`;
+  the command projects one config snapshot. WhatsApp identity/group lookups,
+  FIFO workers, downloads and delivery stay in the adapter. Shared phone
+  normalization lives in the stdlib-only `chat` package.
+
+- **R11, devchat slice**: `devchat` owns the simulated messenger and its
+  bounded synchronized outbox. The command supplies live chunking policy.
+
+- **R11, WhatsApp slice**: `whatsapp` owns connection/pairing, FIFO workers,
+  group caches, protobuf processing and downloads. The command supplies
+  owned settings, store/identity/privacy/outbound consumers and runtime
+  callbacks. Transport tests live with the package; command integration
+  still covers configuration, SQL polls, runtime bookkeeping and delivery.
+  `HandleEvent` retains queued production intake. `ProcessMessage` and
+  `ProcessVote` are synchronous worker boundaries whose callers own order.
+
+- **R12, outbound helpers**: `outbound` owns chunking, poll parsing, the
+  chat-message catalogue, shared send errors and the paced send loop. Its
+  minimal transport interfaces describe only sends and connection observation.
+  The durable outbox owns persistence, retries, poll fallback and its Stop
+  join. Command composition supplies the live transport and confirmed-delivery
+  history callback; pipeline extraction follows R10.
+
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
 that is not yet extracted is marked *(to come, Rn)* with the step that
@@ -325,26 +349,29 @@ responsibility and says what it must not do.
   consumer interfaces cut it off from processes and transports. `Runner`
   does one run, and `Sink` receives the working notice, forwarded
   questions, finished runs and history lines.
-- **`access`** *(to come, R11; `addressing.go`, `group_policy.go`,
-  `whatsapp.go`)*: decides who may talk to the bridge, in a group who of
+- **`access`** (`internal/access`; transport projections remain in `addressing.go`, `group_policy.go`,
+  `whatsapp.go`): decides who may talk to the bridge, in a group who of
   its members (`group_members`), and whether a message addresses it.
-  `Decide(Policy, Envelope)` is one pure, table-tested function used by
-  WhatsApp, dev mode and `fridolin check --route`.
+  `Decide(Policy, chat.Envelope)` supplies WhatsApp and dev group decisions.
+  Admission is also exposed separately so edits and downloads are gated before
+  side effects. Dev DMs and `fridolin check --route` use `NumberAllowed`,
+  preserving their user-supplied number comparison; WhatsApp supplies explicit
+  resolved identity. Transport-specific ignored-chat notifications stay outside.
 - **`pipeline`** *(to come, R12; `bridge.go`, `debounce.go`)*: the single
   intake for every message source. It handles chat commands, the junk
   filter, choosing the brain, the OTP gate and debouncing. It dispatches to
   `brain.Manager`, turns finished runs into deliveries, and provides `Ingest`
   and `SendExternal` for `/ingest`, `/send`, Plaud and the site.
-- **`outbound`** *(to come, R12; `chunks.go`, `polls.go`, `outbox.go`,
-  `chaterr.go`)*: sending on top of a minimal `Transport`: the durable
-  outbox, chunking, pacing, polls with a text fallback, saving sent polls,
-  and the catalogue of every chat-facing message the pipeline sends.
-- **`whatsapp`** *(to come, R11; `whatsapp.go`, `waconn.go`,
-  `groupcache.go`)*: the WhatsApp transport and nothing else. It connects,
+- **`outbound`**: chunking, poll parsing, shared send errors, paced sends,
+  minimal transport contracts and the catalogue of every chat-facing message.
+  `Outbox` owns persisted replies, per-part progress, poll fallback, retries
+  and shutdown joining. The command supplies the confirmed-delivery history
+  callback and retains provider-aware error selection and pipeline wiring.
+- **`whatsapp`** (`internal/whatsapp`): the WhatsApp transport and nothing else. It connects,
   pairs, tracks connection state, keeps the group list, sends text and
   polls, decrypts poll votes, turns protobuf messages into an `Envelope` (a
   pure function), and downloads media into the inbox.
-- **`devchat`** *(to come, R11)*: the in-memory transport for dev mode. It
+- **`devchat`** (`internal/devchat`): the in-memory transport for dev mode. It
   keeps sent messages for the dashboard and the tests.
 - **`activity`**: the dashboard's in-memory feed of recent history lines.
   `Feed` owns the bounded buffer, ordering, and edit/delete updates. The
@@ -449,7 +476,10 @@ leaves (standard library only): fsx, textx, version, apperr, trigger, chat,
 
 Today `cmd/fridolin` imports `web`, `examples`, `site`, `fsx`, `textx`,
 `version`, `trigger`, `platform`, `chat`, `history`, `logx`, `store`,
-`otp`, `media` and `activity`. History imports `fsx`; store imports `fsx`
+`otp`, `media`, `activity`, `httpapi`, `access`, `devchat` and `whatsapp`. WhatsApp imports `access`,
+`media`, `platform`, `chat` and `textx`; its fixtures also use `logx` and
+`trigger`. Devchat imports `chat` and `textx`. Access imports only
+`chat` and `trigger`; HTTP helpers import `fsx`. History imports `fsx`; store imports `fsx`
 and `logx`; OTP imports `history` and `fsx`; media imports `fsx` and `textx`;
 activity imports `history` and `textx`. The other extracted packages import
 nothing of the module.
