@@ -25,6 +25,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -219,7 +220,7 @@ func (p *PlaudManager) updateDevices(fn func(st *plaudDevices) error) error {
 
 // newPairing makes a pairing code for the next build of the app.
 func (p *PlaudManager) newPairing() (string, time.Time, error) {
-	code := randomToken(18)
+	code := plaudRandomToken(18)
 	exp := time.Now().Add(plaudPairingLifetime)
 	sum := sha256.Sum256([]byte(code))
 	return code, exp, p.updateDevices(func(st *plaudDevices) error {
@@ -282,7 +283,7 @@ func (p *PlaudManager) pairDevice(assertion string, now time.Time) (string, erro
 	}
 	sum := sha256.Sum256([]byte(c.Code))
 	hash := hex.EncodeToString(sum[:])
-	id := "dev_" + randomToken(9)
+	id := "dev_" + plaudRandomToken(9)
 	err = p.updateDevices(func(st *plaudDevices) error {
 		i := slices.IndexFunc(st.Pairings, func(pp plaudPairing) bool {
 			return subtle.ConstantTimeCompare([]byte(pp.Hash), []byte(hash)) == 1 && now.Before(pp.Expires)
@@ -565,4 +566,11 @@ func (p *PlaudManager) appStatus() *PlaudAppStatus {
 		}
 	}
 	return s
+}
+
+// plaudRandomToken creates a private pairing token with the same encoding as the site.
+func plaudRandomToken(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
 }

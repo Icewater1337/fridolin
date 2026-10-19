@@ -27,7 +27,6 @@ import (
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/textx"
-	"go.mau.fi/whatsmeow/types"
 )
 
 // Plaud integration: recordings from a Plaud voice recorder reach a brain as
@@ -1188,7 +1187,7 @@ func (p *PlaudManager) summaryChat(cfg *PlaudSnapshot, br *PlaudTarget) string {
 // isDirectChat reports whether jid is a one-to-one chat (a phone number or a
 // LID), not a group, a broadcast list or a channel.
 func isDirectChat(jid string) bool {
-	return strings.HasSuffix(jid, "@"+types.DefaultUserServer) || strings.HasSuffix(jid, "@"+types.HiddenUserServer)
+	return strings.HasSuffix(jid, "@s.whatsapp.net") || strings.HasSuffix(jid, "@lid")
 }
 
 // destination returns the brain that receives recordings and the private
