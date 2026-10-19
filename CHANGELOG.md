@@ -19,6 +19,16 @@ for compatibility.
 
 ### Changed
 
+- Saving restart-only data, database, media or listener settings now keeps all
+  running components on their startup paths until restart. Backup and OAuth
+  files, Plaud state, OTP handoffs, attachment inboxes, brain/site state and
+  tokens no longer move early. The sandbox and folder browser keep protecting
+  the running data. Provider, queue and explicit credential/Plaud options
+  continue to apply immediately.
+
+- Brain folder workflows now live in the registry package. Dashboard responses,
+  approval checks and transactional manifest/config writes remain unchanged.
+
 - Configuration resolution uses explicit home, default-directory and platform
   inputs, captured when its store opens. Later saves keep those inputs even if
   the process environment or default folders change. Loading and saving still

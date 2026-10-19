@@ -1,5 +1,6 @@
-// Package registry prepares brain folders from caller-supplied templates.
-// Its scaffold transaction retains directory handles and ownership records so
-// a failed registration removes only unchanged files it created. Configuration
-// registration and runtime reconciliation still belong to the caller.
+// Package registry resolves configured brains and owns their folder and
+// configuration workflows. Resolution and edits receive explicit inputs and
+// caller-supplied security checks. Manifest/config changes use the Store's
+// retained-root transaction; scaffolding retains ownership for rollback.
+// Runtime reconciliation and HTTP decoding remain the caller's responsibility.
 package registry

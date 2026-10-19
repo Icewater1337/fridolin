@@ -122,7 +122,7 @@ func TestBridgeClosesTheStoreWhenItGivesUpTheLock(t *testing.T) {
 				t.Skip("root can write a read-only file")
 			}
 			cfg := cfgs.Get()
-			if err := cfg.EnsureDirs(); err != nil {
+			if err := cfgs.Boot().EnsureDirs(); err != nil {
 				t.Fatal(err)
 			}
 			s, err := store.Open(cfg.DBPath, cfg.LogLevel)

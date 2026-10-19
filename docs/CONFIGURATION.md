@@ -67,6 +67,9 @@ bridge refuses.
 
 ---
 
+The optional `_comment` field holds a note in the config file and has no effect
+on the bridge.
+
 ## `version`
 
 `config.json` says which version of the file it is: `"version": 2` today.
@@ -1070,7 +1073,12 @@ config, from `fridolin init`, `setup.sh` or the first start, gets the folder
 chosen then (written with `~`), so later starts do not choose again.
 `db_path` and `media_dir` override individually, each also *(restart)*. The bridge makes the
 data dir and the folders of both as it starts, and no sooner: a folder typed
-into Settings is made by the restart that uses it. A `media_dir` must be
+into Settings is made by the restart that uses it. Until then backup and
+Google files, Plaud state and its default phone inbox, one-time-code handoffs,
+attachments, and brain/site state and tokens stay at their running paths.
+The sandbox and folder browser keep protecting the running data directory.
+An explicitly configured `sandbox.credentials_dir` or `plaud.phone_dir` still
+changes immediately. A `media_dir` must be
 the bridge's alone: on the first start of a version with media inboxes,
 every folder in it and every file at its top moves to `.old/` in it (see
 [reading](#reading)). Brains cannot read it,
@@ -1274,7 +1282,9 @@ Google Drive backups; see [BACKUP.md](BACKUP.md).
 
 ### `plaud`
 
-The Plaud recorder integration; see [PLAUD.md](PLAUD.md) for every setting.
+The Plaud recorder integration; see [PLAUD.md](PLAUD.md) for every setting,
+including `interval_seconds`, `polished`, `message`, `phone_dir` and
+`phone_upload`.
 
 ### `dashboard`
 

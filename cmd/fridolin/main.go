@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/registry"
 	"io"
 	"log"
 	"os"
@@ -569,10 +570,10 @@ var errBrainsLeftOut = errors.New("cannot run")
 
 // leftOutBrains returns the ids of the approved brains issues leaves out,
 // each once, in their order.
-func leftOutBrains(issues []BrainIssue) []string {
+func leftOutBrains(issues []registry.Issue) []string {
 	var ids []string
 	for _, is := range issues {
-		if is.leavesOut() && !slices.Contains(ids, is.ID) {
+		if is.LeavesOut() && !slices.Contains(ids, is.ID) {
 			ids = append(ids, is.ID)
 		}
 	}
@@ -688,7 +689,7 @@ func checkReport(w io.Writer, path string, cfg *config.Config, o checkOptions) e
 }
 
 // leftOutError is errBrainsLeftOut for the brains issues leaves out, or nil.
-func leftOutError(issues []BrainIssue) error {
+func leftOutError(issues []registry.Issue) error {
 	switch ids := leftOutBrains(issues); len(ids) {
 	case 0:
 		return nil
