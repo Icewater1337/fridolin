@@ -26,14 +26,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/history"
 )
 
-const (
-	testDMChat = "15551234567@s.whatsapp.net"
-	testGroup  = "120363000000000000@g.us"
-	// otherNumber is a second person: another member of the group, or the
-	// bridge's own account as a quote names it.
-	otherNumber = "15559876543"
-)
-
 // newMainBridge is a test bridge with one folder brain, "main", that takes
 // the DMs and, as the only brain, the allowed group too: one brain serving
 // several chats, as in most setups.
@@ -77,6 +69,7 @@ type fixedDeviceContainer struct{ device *store.Device }
 func (c fixedDeviceContainer) GetFirstDevice(context.Context) (*store.Device, error) {
 	return c.device, nil
 }
+
 func (c fixedDeviceContainer) NewDevice() *store.Device { return &store.Device{} }
 
 func (tb *testBridge) whatsAppOffline(t *testing.T, dev *store.Device, configure ...func(*waOptions)) *WhatsAppClient {
@@ -165,16 +158,6 @@ func replyMessage(text, quoted string) *waE2E.Message {
 			QuotedMessage: &waE2E.Message{Conversation: proto.String(quoted)},
 		},
 	}}
-}
-
-// groupEvent is msg, sent by the allowed number in the allowed group.
-func groupEvent(msg *waE2E.Message) *events.Message {
-	src := types.MessageSource{
-		Chat:    types.NewJID("120363000000000000", types.GroupServer),
-		Sender:  types.NewJID("15551234567", types.DefaultUserServer),
-		IsGroup: true,
-	}
-	return &events.Message{Info: types.MessageInfo{MessageSource: src, ID: "3EB0GROUP", Timestamp: time.Now()}, Message: msg}
 }
 
 // startLongRun puts a long run for chat on the brain and waits until its
@@ -433,21 +416,6 @@ func TestQuotedCommandIsRecognised(t *testing.T) {
 			t.Errorf("running = %+v after the stop confirmation, want nothing", rt.Running)
 		}
 	})
-}
-
-// bridgeLID is the LID of the bridge's own account (otherNumber) in tests:
-// short, so it cannot be anyone's real one.
-const bridgeLID = "424242"
-
-// bridgeLIDs is the part of whatsmeow's store that maps the bridge's own
-// number to its LID.
-type bridgeLIDs struct{ store.LIDStore }
-
-func (bridgeLIDs) GetLIDForPN(_ context.Context, pn types.JID) (types.JID, error) {
-	if pn.User == otherNumber {
-		return types.NewJID(bridgeLID, types.HiddenUserServer), nil
-	}
-	return types.EmptyJID, nil
 }
 
 // An @-mention addresses the bridge like the trigger keyword, commands

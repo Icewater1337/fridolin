@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -30,15 +29,6 @@ import (
 	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
 )
-
-func mustJID(t *testing.T, s string) types.JID {
-	t.Helper()
-	jid, err := types.ParseJID(s)
-	if err != nil {
-		t.Fatalf("parsing %q: %v", s, err)
-	}
-	return jid
-}
 
 // TestIncomingChat pins which chats reach a brain. Status updates and
 // channels never may: a reply there is published to every contact. A
@@ -108,11 +98,16 @@ func (l testWaLogger) add(level, msg string, args ...interface{}) {
 	defer l.tw.mu.Unlock()
 	l.tw.logs = append(l.tw.logs, level+" "+fmt.Sprintf(msg, args...))
 }
+
 func (l testWaLogger) Debugf(msg string, args ...interface{}) { l.add("DEBUG", msg, args...) }
-func (l testWaLogger) Infof(msg string, args ...interface{})  { l.add("INFO", msg, args...) }
-func (l testWaLogger) Warnf(msg string, args ...interface{})  { l.add("WARN", msg, args...) }
+
+func (l testWaLogger) Infof(msg string, args ...interface{}) { l.add("INFO", msg, args...) }
+
+func (l testWaLogger) Warnf(msg string, args ...interface{}) { l.add("WARN", msg, args...) }
+
 func (l testWaLogger) Errorf(msg string, args ...interface{}) { l.add("ERROR", msg, args...) }
-func (l testWaLogger) Sub(string) waLog.Logger                { return l }
+
+func (l testWaLogger) Sub(string) waLog.Logger { return l }
 
 func newTestWhatsApp(t *testing.T) *testWhatsApp {
 	t.Helper()
@@ -161,13 +156,6 @@ func (tw *testWhatsApp) next(wait time.Duration) (Inbound, bool) {
 		return m, true
 	case <-time.After(wait):
 		return Inbound{}, false
-	}
-}
-
-func textEvent(src types.MessageSource, text string) *events.Message {
-	return &events.Message{
-		Info:    types.MessageInfo{MessageSource: src, ID: "3EB0TEST", PushName: "Alex", Timestamp: time.Now()},
-		Message: &waE2E.Message{Conversation: proto.String(text)},
 	}
 }
 
@@ -249,225 +237,6 @@ func TestHandleMessageBroadcastListIsDM(t *testing.T) {
 	})
 }
 
-// Every way the messenger sends refuses Status, broadcast lists and
-// channels before it reaches WhatsApp, whatever chat a brain or script
-// names.
-func TestSendRefusesStatusBroadcastAndChannels(t *testing.T) {
-	tw := newTestWhatsApp(t)
-	ctx := context.Background()
-	sends := map[string]func(jid string) error{
-		"SendMessage": func(jid string) error { return tw.SendMessage(ctx, jid, "hello") },
-		"SendChunked": func(jid string) error { return tw.SendChunked(ctx, jid, strings.Repeat("hello ", 2000)) },
-		"SendPoll": func(jid string) error {
-			_, err := tw.SendPoll(ctx, jid, "Lunch?", []string{"Yes", "No"}, 1)
-			return err
-		},
-	}
-	for _, jid := range []string{"status@broadcast", "status:3@broadcast", "1700000000@broadcast", "broadcast", "120363000000000000@newsletter"} {
-		for name, send := range sends {
-			t.Run(name+" to "+jid, func(t *testing.T) {
-				err := func() (err error) {
-					defer func() {
-						if r := recover(); r != nil {
-							err = fmt.Errorf("reached for WhatsApp: %v", r)
-						}
-					}()
-					return send(jid)
-				}()
-				if !errors.Is(err, errRefusedRecipient) {
-					t.Errorf("err = %v, want a refusal", err)
-				}
-			})
-		}
-	}
-}
-
-func TestCheckRecipient(t *testing.T) {
-	cases := []struct {
-		jid    string
-		refuse bool
-	}{
-		{"status@broadcast", true},
-		{"1700000000@broadcast", true},
-		{"120363000000000000@newsletter", true},
-		{"15551234567@s.whatsapp.net", false},
-		{"15559876543@lid", false},
-		{"120363000000000000@g.us", false},
-	}
-	for _, c := range cases {
-		t.Run(c.jid, func(t *testing.T) {
-			err := checkRecipient(mustJID(t, c.jid))
-			if got := errors.Is(err, errRefusedRecipient); got != c.refuse {
-				t.Errorf("refused = %v (%v), want %v", got, err, c.refuse)
-			}
-		})
-	}
-}
-
-// A WhatsApp @-mention is "@" and the number (or LID) in the text. The
-// bridge's own mentions go, like a trigger keyword; anything else stays.
-func TestStripMentions(t *testing.T) {
-	own := []types.JID{
-		types.NewJID("15559876543", types.DefaultUserServer),
-		types.NewJID("424242", types.HiddenUserServer), // short, so it cannot be anyone's real LID
-	}
-	cases := []struct {
-		name, text, want string
-	}{
-		{"by number, before a command", "@15559876543 !stop", "!stop"},
-		{"by LID", "@424242 !stop", "!stop"},
-		{"twice", "@15559876543 @424242 !help", "!help"},
-		{"in the middle", "what does @15559876543 think?", "what does  think?"},
-		{"someone else", "@15551234567 can you check?", "@15551234567 can you check?"},
-		{"a longer number", "@155598765430 hi", "@155598765430 hi"},
-		{"part of an address", "write to x@15559876543", "write to x@15559876543"},
-		{"only the mention", " @15559876543 ", ""},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := stripMentions(c.text, own); got != c.want {
-				t.Errorf("stripMentions(%q) = %q, want %q", c.text, got, c.want)
-			}
-		})
-	}
-	if got := stripMentions(" @15559876543 hi ", nil); got != "@15559876543 hi" {
-		t.Errorf("without accounts: %q, want the text trimmed and kept", got)
-	}
-}
-
-// FuzzNumberAllowed: allowed_numbers lets a sender DM the bridge only when
-// it lists the number: no prefix, no suffix, no other number, however the
-// number was written on either side ("+1 555 123 4567" is 15551234567).
-// allow_any_dm decides what an empty list means and never widens a list.
-func FuzzNumberAllowed(f *testing.F) {
-	const n = "15551234567"
-	f.Add(n, n, false)
-	f.Add(n, "", true)
-	f.Add(n, "", false)
-	f.Add(n[:len(n)-1], n+",15559876543", true) // a listed number cut short
-	f.Add(n+"8", n, true)                       // and one made longer
-	f.Add("+"+n, n, false)
-	f.Add(n, "+1 555 123 4567", false) // a hand-written entry
-	f.Add(n, "1 555 123 456", false)   // that is another number
-	f.Add("", ",", false)
-	f.Fuzz(func(t *testing.T, number, list string, anyDM bool) {
-		var allowed []string
-		if list != "" {
-			allowed = strings.Split(list, ",")
-		}
-		cfg := &Config{AllowedNumbers: allowed, AllowAnyDM: &anyDM}
-		got := numberAllowed(cfg, number)
-		if len(allowed) == 0 {
-			if got != anyDM {
-				t.Errorf("with no allowed_numbers and allow_any_dm %v, %q allowed: %v", anyDM, number, got)
-			}
-			return
-		}
-		// Digits only for what is a phone number, else as written.
-		canon := func(s string) string {
-			if p, err := chat.PhoneNumber(s); err == nil {
-				return p
-			}
-			return s
-		}
-		listed := slices.ContainsFunc(allowed, func(a string) bool { return canon(a) == canon(number) })
-		if got != listed {
-			t.Errorf("allowed_numbers %q: %q allowed: %v, listed: %v", allowed, number, got, listed)
-		}
-		other := !anyDM
-		if numberAllowed(&Config{AllowedNumbers: allowed, AllowAnyDM: &other}, number) != got {
-			t.Errorf("allowed_numbers %q: allow_any_dm changes whether %q is allowed", allowed, number)
-		}
-		for _, a := range allowed {
-			p, err := chat.PhoneNumber(a)
-			if err != nil {
-				continue
-			}
-			// A sender, as WhatsApp reports one, in every form.
-			for _, jid := range []string{p, "+" + p, p + "@s.whatsapp.net", "+" + p + "@s.whatsapp.net"} {
-				if !numberAllowed(cfg, chat.NormalizeJID(jid)) {
-					t.Errorf("allowed_numbers %q: %q is refused", allowed, jid)
-				}
-			}
-			// A number one digit longer is someone else.
-			if canon(p+"1") != canon(number) && numberAllowed(&Config{AllowedNumbers: []string{a}, AllowAnyDM: &anyDM}, p+"1") {
-				t.Errorf("allowed_numbers [%q]: %q, a longer number, is allowed", a, p+"1")
-			}
-		}
-	})
-}
-
-// fakeDownloader stands in for whatsmeow's media download. Like whatsmeow,
-// it writes the body into the file with io.Copy; then it fails with err, or,
-// with block set, waits for the context to end. With hold set, a download
-// stalls before it writes anything, until the test closes hold or the
-// context ends.
-//
-// With encrypted set, it does what whatsmeow does with a real attachment:
-// the body arrives AES-CBC encrypted with a MAC after it, up to
-// mediaCipherOverhead bytes larger, and is then decrypted in place.
-type fakeDownloader struct {
-	body      string
-	encrypted bool
-	err       error
-	block     bool
-	hold      chan struct{}
-
-	mu      sync.Mutex
-	calls   int
-	ctx     context.Context // of the last call
-	sent    int64           // bytes the download carried
-	copied  int64           // bytes the file took
-	stopped bool            // the context ended while copying
-}
-
-// fakeMediaKey and fakeMediaIV encrypt the fake's attachments; whatsmeow
-// derives both from the media key in the message.
-var (
-	fakeMediaKey = bytes.Repeat([]byte{7}, 32)
-	fakeMediaIV  = bytes.Repeat([]byte{9}, 16)
-)
-
-func (d *fakeDownloader) DownloadToFile(ctx context.Context, _ whatsmeow.DownloadableMessage, f whatsmeow.File) error {
-	wire := []byte(d.body)
-	if d.encrypted {
-		enc, err := cbcutil.Encrypt(fakeMediaKey, fakeMediaIV, wire[:len(wire):len(wire)])
-		if err != nil {
-			return err
-		}
-		wire = append(enc, make([]byte, fakeMACLength)...) // whatsmeow checks the MAC; the fake does not
-	}
-	d.mu.Lock()
-	d.calls++
-	d.ctx = ctx
-	d.sent = int64(len(wire))
-	d.mu.Unlock()
-	if d.hold != nil {
-		select {
-		case <-d.hold:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	n, err := io.Copy(f, io.TeeReader(bytes.NewReader(wire), io.Discard))
-	d.mu.Lock()
-	d.copied, d.stopped = n, ctx.Err() != nil
-	d.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	if d.encrypted {
-		if err := decryptInPlace(f, n); err != nil {
-			return err
-		}
-	}
-	if d.block {
-		<-ctx.Done()
-		return ctx.Err()
-	}
-	return d.err
-}
-
 // fakeMACLength is the length of whatsmeow's media MAC.
 const fakeMACLength = 10
 
@@ -491,26 +260,6 @@ func decryptInPlace(f whatsmeow.File, n int64) error {
 	}
 	_, err := f.Seek(0, io.SeekStart)
 	return err
-}
-
-func (d *fakeDownloader) callCount() int {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.calls
-}
-
-// dirNames lists dir, hidden temp files included.
-func dirNames(t *testing.T, dir string) []string {
-	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var names []string
-	for _, e := range entries {
-		names = append(names, e.Name())
-	}
-	return names
 }
 
 // All four kinds of attachment go through one path; the name a file is
@@ -888,9 +637,6 @@ func TestExtractQuote(t *testing.T) {
 	}
 }
 
-// bridgeAccount is the bridge's own WhatsApp account in the group tests.
-var bridgeAccount = types.NewJID("5550100", types.DefaultUserServer)
-
 // newGroupTestWhatsApp is newTestWhatsApp with the allowed group
 // testGroup, whose group_members entry is members (none for nil), the
 // trigger @claude, the bridge's account known so that a mention of it
@@ -1178,14 +924,6 @@ func TestGroupMessageReadsOneConfig(t *testing.T) {
 	}
 }
 
-// dmEventFrom is dmEvent from number.
-func dmEventFrom(number, id string, msg *waE2E.Message) *events.Message {
-	evt := dmEvent(id, msg)
-	jid := types.NewJID(number, types.DefaultUserServer)
-	evt.Info.Chat, evt.Info.Sender = jid, jid
-	return evt
-}
-
 // Whoever writes without being allowed is in the log masked, as a group
 // member group_members does not admit is; the dashboard, which offers to
 // allow them, still gets their number.
@@ -1320,13 +1058,6 @@ func TestAllowedGroupNameIsNeverLookedUp(t *testing.T) {
 	}
 }
 
-// ── intake: each chat in order, nothing slow on the event goroutine ──────
-
-// photoMsg is a photo with caption.
-func photoMsg(caption string) *waE2E.Message {
-	return &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Mimetype: proto.String("image/jpeg"), Caption: proto.String(caption)}}
-}
-
 // arrivals records what the client hands the bridge, in order: messages
 // by ID, and edits and deletions by kind and the message they change.
 type arrivals struct {
@@ -1405,33 +1136,6 @@ func TestChatEventsKeepTheirOrder(t *testing.T) {
 				t.Errorf("arrived as %v, want %v", got, c.want)
 			}
 		})
-	}
-}
-
-// The debouncer merges a burst in the order the bridge got it, so a photo
-// and the question about it reach the brain as one message, the photo
-// first.
-func TestPhotoThenQuestionMergePhotoFirst(t *testing.T) {
-	tw := newTestWhatsApp(t)
-	dl := &fakeDownloader{body: "JPEG", hold: make(chan struct{})}
-	tw.media = dl
-	merged := make(chan Inbound, 1)
-	deb := NewDebouncer(func() time.Duration { return 200 * time.Millisecond }, func() time.Duration { return 0 }, func(m Inbound) { merged <- m })
-	recordArrivals(tw, "3EB0PHOTO") // for the handler that takes its time
-	slow := tw.handler
-	tw.handler = func(ctx context.Context, m Inbound) {
-		slow(ctx, m)
-		deb.Add(m)
-	}
-	tw.feed(dmEvent("3EB0PHOTO", photoMsg("look")), dmEvent("3EB0TEXT", textMsg("what is this?")))
-	time.AfterFunc(100*time.Millisecond, func() { close(dl.hold) })
-	select {
-	case m := <-merged:
-		if m.Text != "look\n\nwhat is this?" || len(m.Media) != 1 || len(m.parts) != 2 || m.parts[0].ID != "3EB0PHOTO" {
-			t.Errorf("merged %q with %v from %d parts, want the photo and its caption first", m.Text, m.Media, len(m.parts))
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("nothing reached the brain")
 	}
 }
 

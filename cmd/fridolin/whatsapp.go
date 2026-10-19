@@ -23,23 +23,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Messenger is what the bridge needs from a chat network. The real one is
-// WhatsApp; dev mode (--no-whatsapp) swaps in a fake that records outgoing
-// messages, so the dashboard and brains can be tried without pairing a phone.
-type Messenger interface {
-	Connect() error
-	Disconnect()
-	SendMessage(ctx context.Context, jid, text string) error
-	SendChunked(ctx context.Context, jid, text string) error
-	SendPoll(ctx context.Context, jid, question string, options []string, maxSelectable int) (string, error)
-	State() chat.LinkState
-	// Connected returns a channel that is closed while the messenger can
-	// send: at once when it is connected, else when it next connects.
-	Connected() <-chan struct{}
-	StartPairing() error
-	JoinedGroups(ctx context.Context) ([]chat.Group, error)
-}
-
 // IgnoredHandler is told about chats that wrote but are not allowed, so the
 // dashboard can offer to allow them. It never receives message text.
 type IgnoredHandler func(kind, jid, name, sender, pushName string)
@@ -772,17 +755,6 @@ func (wa *WhatsAppClient) ownMentionJIDs() []types.JID {
 		out = append(out, lid)
 	}
 	return out
-}
-
-// stripMentions removes the @-mentions of the given accounts from text and
-// trims the result. A mention is "@" and the account's user part, and must
-// not be the start of a longer number.
-func stripMentions(text string, jids []types.JID) string {
-	users := make([]string, len(jids))
-	for i, jid := range jids {
-		users[i] = jid.User
-	}
-	return access.StripMentions(text, users)
 }
 
 // senderOf is who sent src, as canonicalUser has them: by phone number
