@@ -1007,7 +1007,7 @@ func (br *Brain) readFile(name string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	return readAtMost(f)
+	return fsx.ReadAtMost(f)
 }
 
 // BrainRuntime is a brain's live state, for the dashboard.
@@ -1274,7 +1274,7 @@ func globEscape(p string) string {
 // mcpServers it takes in its stride.
 func mcpConfigOf(brainID, dir string) string {
 	p := filepath.Join(dir, ".mcp.json")
-	data, err := readBrainFile(dir, ".mcp.json")
+	data, err := fsx.ReadBrainFile(dir, ".mcp.json")
 	if errors.Is(err, fs.ErrNotExist) {
 		return ""
 	}
@@ -1324,7 +1324,7 @@ func disabledMCPServers(dir string) (map[string]bool, error) {
 	disabled := map[string]bool{}
 	for _, name := range []string{"settings.json", "settings.local.json"} {
 		p := filepath.Join(dir, ".claude", name)
-		data, err := readBrainFile(dir, filepath.Join(".claude", name))
+		data, err := fsx.ReadBrainFile(dir, filepath.Join(".claude", name))
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}

@@ -693,8 +693,8 @@ func TestBrainFilesAreReadUpToALimit(t *testing.T) {
 		size int
 		ok   bool
 	}{
-		{"at the limit", maxBrainFile, true},
-		{"over the limit", maxBrainFile + 1, false},
+		{"at the limit", fsx.MaxBrainFile, true},
+		{"over the limit", fsx.MaxBrainFile + 1, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

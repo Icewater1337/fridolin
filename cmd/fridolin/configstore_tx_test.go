@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/jsonx"
+
 	"go.mau.fi/whatsmeow/proto/waE2E"
 )
 
@@ -620,7 +622,7 @@ func TestUnknownKeysInMapsAndSlices(t *testing.T) {
 		Plain  string
 	}
 	data := `{"items": [{"name": "a"}, {"nmae": "b"}], "by_name": {"x": {"name": "x", "extra": 1}}, "tags": ["t"], "ptr": {"bad": 1}, "Plain": "p", "other": 2}`
-	got := unknownKeys([]byte(data), reflect.TypeOf(doc{}), "")
+	got := jsonx.UnknownKeys([]byte(data), reflect.TypeOf(doc{}), "")
 	want := []string{"by_name.x.extra", "items[1].nmae", "other", "ptr.bad"}
 	if !slices.Equal(got, want) {
 		t.Errorf("unknownKeys = %v, want %v", got, want)

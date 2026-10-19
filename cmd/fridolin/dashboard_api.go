@@ -1122,7 +1122,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		}
 		// A brain.json the folder has, one that does not load say, stays
 		// as ScaffoldBrain would leave it.
-		if _, err := readBrainFile(abs, ManifestFile); !req.UseExisting && errors.Is(err, fs.ErrNotExist) {
+		if _, err := fsx.ReadBrainFile(abs, ManifestFile); !req.UseExisting && errors.Is(err, fs.ErrNotExist) {
 			if err := tx.CreateManifest(abs, &m); err != nil {
 				return err
 			}

@@ -53,6 +53,10 @@ behaviour unless its title says so. The steps so far:
   edit/delete updates. The command supplies history entries and the lazy
   seed reader, which still runs under the feed lock.
 
+- **R5, shared readers**: `jsonx` owns recursive unknown-field inspection;
+  `fsx` owns bounded regular-file reads through pinned brain folders.
+  Configuration and manifest policies remain at their callers.
+
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
 that is not yet extracted is marked *(to come, Rn)* with the step that
@@ -160,7 +164,9 @@ responsibility and says what it must not do.
 
 ### Foundation
 
-- **`fsx`**: file-system primitives. `WriteFileAtomic` (temp file, fsync,
+- **`fsx`**: file-system primitives. Bounded brain-file readers keep the
+  existing 256 KiB limit, reject non-regular entries and symlinks, and may
+  reuse an already pinned `os.Root`. `WriteFileAtomic` (temp file, fsync,
   rename, optional `.bak`), `ExpandHome` and `Tilde` (the home dir is always a
   parameter), `Canonical` (clean and resolve symlinks), `Resolve` (the real
   path of an absolute path, through the part that exists, which `Canonical`
@@ -169,6 +175,9 @@ responsibility and says what it must not do.
   (remove group/other access while preserving owner access and special bits).
   `OpenInFolder` opens a regular file through an `*os.Root`, refusing
   symlinks, special files and a file replaced during the open.
+- **`jsonx`**: standard-library-only JSON field inspection. `UnknownKeys`
+  reports recursively sorted field paths while respecting custom decoders
+  and case-insensitive JSON field matching.
 - **`textx`**: `Truncate` and `Tail`, which shorten text from its end or its
   start to a byte limit without splitting a rune.
 - **`version`**: `String()`, which returns the `-ldflags -X` value, or

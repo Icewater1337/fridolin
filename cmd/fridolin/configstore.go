@@ -18,6 +18,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/Icewater1337/fridolin/internal/jsonx"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -416,7 +418,7 @@ func (tx *Tx) write() error {
 			return err
 		}
 		w.root = root
-		prev, err := readBrainFileRoot(root, ManifestFile)
+		prev, err := fsx.ReadBrainFileRoot(root, ManifestFile)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			w.existed, w.prev = false, nil
@@ -455,7 +457,7 @@ func (tx *Tx) rollback() {
 		}
 		if err == nil {
 			var current []byte
-			current, err = readBrainFileRoot(w.root, ManifestFile)
+			current, err = fsx.ReadBrainFileRoot(w.root, ManifestFile)
 			if err == nil && !bytes.Equal(current, w.data) {
 				continue
 			}
@@ -697,7 +699,7 @@ func listDiff(a, b []string) string {
 // version 1 are already removed and logged by the migration; the same keys
 // in a version 2 file are unknown settings.
 func warnUnknownKeys(path string, data []byte) {
-	if unknown := unknownKeys(data, reflect.TypeOf(Config{}), ""); len(unknown) > 0 {
+	if unknown := jsonx.UnknownKeys(data, reflect.TypeOf(Config{}), ""); len(unknown) > 0 {
 		log.Printf("config %s: ignoring unknown settings %v (they will be dropped when the dashboard saves)", path, unknown)
 	}
 }
