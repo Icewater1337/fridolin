@@ -10,10 +10,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/backup"
+
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/plaud"
 	"github.com/Icewater1337/fridolin/internal/registry"
@@ -246,13 +249,13 @@ func FuzzDecodeManifest(f *testing.F) {
 		if !filepath.IsLocal(m.PromptFile) {
 			t.Errorf("prompt file %q is not inside the folder", m.PromptFile)
 		}
-		for _, line := range strings.SplitAfter(filterLines(m.Backup.Exclude), "\n") {
+		for _, line := range strings.SplitAfter(backup.FilterLines(m.Backup.Exclude), "\n") {
 			if line != "" && (!strings.HasPrefix(line, "- ") || !strings.HasSuffix(line, "\n")) {
 				t.Errorf("excludes %q gave the filter line %q", m.Backup.Exclude, line)
 			}
 		}
 		if c := m.Calendar; c != nil && len(c.Calendars) > 0 {
-			for _, kv := range calendarEnv(m.ID, *m, "/creds") {
+			for _, kv := range google.CalendarEnv(m.ID, *m, "/creds") {
 				if v, ok := strings.CutPrefix(kv, "BRIDGE_CALENDARS="); ok && !reflect.DeepEqual(strings.Split(v, ","), c.Calendars) {
 					t.Errorf("calendars %q reach the tool as %q", c.Calendars, v)
 				}

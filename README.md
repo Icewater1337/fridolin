@@ -828,7 +828,7 @@ asked for it through `<data_dir>/otp/`, until it expires.
 for, with a token that works only while that run lasts.
 **`toolcmd.go`, `history_cmd.go`, `polls_cmd.go`, `calendar_cmd.go`** —
 `fridolin history`, `fridolin polls` and `fridolin calendar`, which brains
-run. **`google.go`, `google_calendar.go`** — the calendar sign-in, and the
+run. **`internal/google`**, with HTTP adapters in `google_api.go` — the calendar sign-in, and the
 calendar calls the bridge makes for brains.
 
 ---

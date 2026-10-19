@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 	_ "time/tzdata" // a timezone by name even where the system has no zoneinfo
+
+	"github.com/Icewater1337/fridolin/internal/google"
 )
 
 // `fridolin calendar` is the brain's Google Calendar. It asks the bridge,
@@ -79,7 +81,7 @@ func calendarCmd(args []string, t toolIO) int {
 		limit := flags.Int("max-results", 100, "the most events, across all calendars; the result says truncated when there were more")
 		run = func() (any, error) { return c.list(*calID, *from, *to, *limit) }
 	case "create":
-		var ev NewEvent
+		var ev google.NewEvent
 		flags.StringVar(&ev.Title, "title", "", "the event's title (required)")
 		start := flags.String("start", "", "YYYY-MM-DDTHH:MM[:SS], or YYYY-MM-DD for all day (required)")
 		end := flags.String("end", "", "the same as --start; an all-day event's end date is the day after its last day (required)")
@@ -181,7 +183,7 @@ func (c *calendarRun) list(calendar, from, to string, limit int) (any, error) {
 	return out, err
 }
 
-func (c *calendarRun) create(calendar string, ev NewEvent, start, end, attendees, reminders string) (any, error) {
+func (c *calendarRun) create(calendar string, ev google.NewEvent, start, end, attendees, reminders string) (any, error) {
 	if ev.Title == "" || start == "" || end == "" {
 		return nil, errors.New("create needs --title, --start and --end")
 	}
@@ -257,7 +259,7 @@ func (c *calendarRun) free(calendar, date, hours string, minSlot int) (any, erro
 	next := day.AddDate(0, 0, 1)
 	req := map[string]string{"from": day.Format(time.RFC3339), "to": next.Format(time.RFC3339), "time_zone": c.loc.String(), "calendar": calendar}
 	var resp struct {
-		Busy []BusySlot `json:"busy"`
+		Busy []google.BusySlot `json:"busy"`
 	}
 	if err := c.call("POST", "/brain/calendar/freebusy", req, &resp); err != nil {
 		return nil, err
@@ -404,18 +406,18 @@ func (c *calendarRun) eventTime(s string) (string, error) {
 
 // parseReminders reads --reminders popup:10,email:60. Empty means the
 // default, one popup ten minutes before.
-func parseReminders(s string) ([]Reminder, error) {
+func parseReminders(s string) ([]google.Reminder, error) {
 	if strings.TrimSpace(s) == "" {
 		return nil, nil
 	}
-	var out []Reminder
+	var out []google.Reminder
 	for _, r := range strings.Split(s, ",") {
 		method, minutes, ok := strings.Cut(strings.TrimSpace(r), ":")
 		n, err := strconv.Atoi(strings.TrimSpace(minutes))
 		if !ok || strings.TrimSpace(method) == "" || err != nil || n < 0 {
 			return nil, fmt.Errorf("bad --reminders entry %q: use method:minutes, such as popup:10", r)
 		}
-		out = append(out, Reminder{Method: strings.TrimSpace(method), Minutes: n})
+		out = append(out, google.Reminder{Method: strings.TrimSpace(method), Minutes: n})
 	}
 	return out, nil
 }

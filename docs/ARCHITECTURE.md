@@ -159,6 +159,15 @@ behaviour unless its title says so. The steps so far:
   join. Command composition supplies the live transport and confirmed-delivery
   history callback; pipeline extraction follows R10.
 
+- **R14, Google Calendar**: `google` owns OAuth clients and pending state,
+  token locking/refresh/revocation, calendar operations, credential naming and
+  legacy environment variables. Constructor options provide fixed startup paths,
+  live credential/configuration callbacks and per-instance HTTP dependencies.
+  Command adapters retain routing, request validation and response rendering.
+  Service tests run in the package; bridge-dependent sign-in, concurrency and
+  API/profile golden tests remain in the command. A narrow `jsonx` edge preserves
+  existing decoder diagnostics when DTOs move.
+
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
 that is not yet extracted is marked *(to come, Rn)* with the step that
@@ -214,7 +223,7 @@ them needs its own migration plan, not a refactor.
 | The brain API `/brain/` and the commands brains run with it: `fridolin history`, `fridolin polls`, `fridolin calendar`. | `internal/httpapi`, `cmd/fridolin` | `brainapi.go`, `toolcmd.go`, `*_cmd.go` |
 | Dashboard headers `X-Bridge-Token` and `X-Bridge-Dashboard`; the token files `<data_dir>/dashboard.token` and `<data_dir>/scripts.token`; the login sessions of `fridolin open`. | `internal/httpapi` | `dashboard.go`, `dashsession.go` |
 | Environment variables a run gets: `FRIDOLIN_BRAIN_ID`, `FRIDOLIN_BIN`, `FRIDOLIN_TOOLS_DIR`, `FRIDOLIN_API`, `FRIDOLIN_BRAIN_TOKEN_FILE`, `BRIDGE_DATA_DIR`, `BRIDGE_DB_PATH`, and for one release `BRIDGE_BRAIN_ID`, `BRIDGE_CALENDARS`, `BRIDGE_CALENDAR_DEFAULT`; in the sandbox the brain's own state, `CLAUDE_CONFIG_DIR` (unless `inherit_claude_user_config` is on), `TMPDIR`, `CLAUDE_CODE_TMPDIR`, `TMPPREFIX`, `XDG_CACHE_HOME` and `npm_config_cache` (docs/CONFIGURATION.md). | `internal/app`, `internal/google` | `childenv.go` |
-| Credential files `google_calendar_{credentials,token}_<brain>.json` in Google's "authorized user" format. | `internal/google` | `google.go` |
+| Credential files `google_calendar_{credentials,token}_<brain>.json` in Google's "authorized user" format. | `internal/google` | — |
 | The OTP hand-off file `<data_dir>/otp/<brain>.json`. | `internal/otp` | `bridge.go` |
 | The service command line `fridolin --config PATH` (a leading flag means `run`), and the install in `~/.local/lib/fridolin`. | `cmd/fridolin` | `main.go`, `service.go` |
 | The legacy data dir `~/.whatsapp-claude-bridge`, used when `~/.fridolin` does not exist. | `internal/config` | `config.go` |
@@ -465,12 +474,19 @@ responsibility and says what it must not do.
 
 ### Integrations
 
-- **`backup`** *(to come, R13; `backup.go`, `connectjob.go`)*: Google Drive
-  backups through an isolated rclone (its own `--config`, `RCLONE_*`
-  stripped from the environment, stdout never logged). It covers connect,
-  run, the daily schedule, prune, versions and restore, and has no HTTP
-  code.
-- **`google`** *(to come, R14; `google.go`, `google_calendar.go`)*: the
+- **`backup`** (`internal/backup`, R13): `Manager` owns Google Drive backups
+  through an isolated rclone (its own `--config`, `RCLONE_*` stripped from the
+  environment, stdout never logged). It covers connect, run, daily scheduling,
+  prune, versions, restore, state persistence and exclusion filters. Its
+  stateful fixtures use owned settings, retained target callbacks, ordered
+  bridge-file snapshots and explicit process adapters. The command supplies
+  current config projections, runtime targets, host discovery and restore
+  target validation; the package imports neither config nor runtime brains
+  and has no HTTP code. Bridge-file serialization completes from one immutable
+  snapshot before staging writes, preserving snapshot, write and error order.
+  `jsonx` preserves the existing visible decoder type names without changing
+  typed error identity, offsets or stored bytes.
+- **`google`**: the
   OAuth client and per-brain calendar sign-in with PKCE. It handles tokens,
   the calendar list and the calendar calls the brain API makes for runs,
   revocation, credential file naming and the calendar variables for runs.
@@ -551,8 +567,8 @@ sandbox   ─► fsx
 otp       ─► history, fsx
 route     ─► manifest, chat, fsx
 
-backup ─► fsx, textx, apperr
-google ─► manifest, fsx, apperr
+backup ─► fsx, textx, apperr, jsonx
+google ─► manifest, fsx, jsonx, apperr
 plaud  ─► media, platform, chat, fsx, textx, apperr
 
 activity ─► history, textx

@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -802,7 +803,7 @@ func (m *SiteManager) SetGoogleClient(data []byte) error {
 		}
 		return nil
 	}
-	c, err := ParseGoogleClient(data)
+	c, err := google.ParseClient(data)
 	if err != nil {
 		return err
 	}

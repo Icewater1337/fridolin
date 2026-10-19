@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
 
@@ -81,14 +82,14 @@ func (b *Bridge) apiSiteStatus(w http.ResponseWriter, r *http.Request) {
 		resp["deploy_key"] = strings.TrimSpace(string(pub))
 	}
 
-	google := map[string]any{"source": "none"}
+	googleStatus := map[string]any{"source": "none"}
 	if p := m.googleClientFile(); p != "" {
 		if data, err := os.ReadFile(p); err == nil {
-			if c, err := ParseGoogleClient(data); err == nil {
-				google["type"] = c.Type
-				google["source"] = "shared"
+			if c, err := google.ParseClient(data); err == nil {
+				googleStatus["type"] = c.Type
+				googleStatus["source"] = "shared"
 				if p == m.dir("google_client.json") {
-					google["source"] = "site"
+					googleStatus["source"] = "site"
 				}
 			}
 		}
@@ -97,8 +98,8 @@ func (b *Bridge) apiSiteStatus(w http.ResponseWriter, r *http.Request) {
 	if s.Domain != "" {
 		origin = "https://" + s.Domain
 	}
-	google["redirect_uri"] = origin + "/auth/callback"
-	resp["google"] = google
+	googleStatus["redirect_uri"] = origin + "/auth/callback"
+	resp["google"] = googleStatus
 
 	users := m.Users()
 	admins := 0

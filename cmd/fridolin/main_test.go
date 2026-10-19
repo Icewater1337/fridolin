@@ -920,7 +920,7 @@ func TestRedactorText(t *testing.T) {
 		{"[15551234567 15559876543]", "[1…67 1…43]"},                       // numbers configured or routed
 		{`"120363000000000009" (digits@g.us)`, `"…09" (digits@g.us)`},      // a group written without @g.us
 		{"+15559876543 and +4917012345678", "+1…43 and +49…78"},            // international format; personal-data:ignore
-		{"you@example.com", "y…@example.com"},                              // as maskEmail
+		{"you@example.com", "y…@example.com"},                              // as GoogleMaskEmail
 		{"/srv/first.last/.fridolin", "~/.fridolin"},                       // a path
 		{`(subpath "/srv/first.last")`, `(subpath "~")`},                   // the folder itself
 		{`(regex "^/srv/first\\.last/x(/.*)?$")`, `(regex "^~/x(/.*)?$")`}, // in a sandbox profile's regular expression

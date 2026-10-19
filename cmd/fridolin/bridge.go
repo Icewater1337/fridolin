@@ -14,8 +14,10 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Icewater1337/fridolin/internal/backup"
 	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/devchat"
+	"github.com/Icewater1337/fridolin/internal/google"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/plaud"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
@@ -35,6 +37,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/otp"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/store"
+
 	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -74,8 +77,8 @@ type Bridge struct {
 	// sessionCookie names the session cookie for the address served on.
 	sessionCookie string
 	scriptAuth    *scriptAuth
-	backup        *BackupManager
-	google        *GoogleAuth
+	backup        *backup.Manager
+	google        *google.Auth
 	plaud         *plaud.Manager
 	site          *SiteManager
 	outbox        *outboundmsg.Outbox
@@ -268,24 +271,17 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 	if !b.tokenAtStart {
 		log.Printf("warning: dashboard.require_token is off: any program on this computer, brains included, can change every setting through the dashboard API")
 	}
-	b.backup = NewBackupManager(cfgs, b.brainMgr)
 	// A refused scheduled backup goes to the brain's chat, like Plaud's
 	// expired-login notice: the owner may not open the dashboard for weeks.
-	b.backup.notify = func(ctx context.Context, br *brainruntime.Brain, text string) error {
-		jid := b.replyChatFor(br, b.cfgs.Get())
-		if jid == "" {
-			return fmt.Errorf("brain %s has no chat to send it to — set its reply chat", br.ID())
-		}
-		return b.wa.SendMessage(ctx, jid, text)
-	}
-	b.google = NewGoogleAuth(cfgs)
+	b.backup = newProjectedBackup(cfgs, b.brainMgr, b.notifyBackup)
+	b.google = google.New(googleOptionsFor(cfgs))
 	b.plaud = NewPlaudManager(cfgs, b.brainMgr, b.submitHandOff, b.wa.SendMessage, func() string {
 		if d := b.site.Settings().Domain; d != "" {
 			return "https://" + d
 		}
 		return ""
 	})
-	b.site = NewSiteManager(cfg.DataDir, b.google.clientPath)
+	b.site = NewSiteManager(cfg.DataDir, b.google.ClientPath)
 	b.site.hooks = b.siteBuilderHooks()
 	// What builder brains say in the Build page's chats goes there, not to WhatsApp.
 	b.wa = siteChatMessenger{Messenger: b.wa, chats: b.site.chats}
