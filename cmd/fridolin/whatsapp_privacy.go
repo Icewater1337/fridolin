@@ -1,5 +1,7 @@
 package main
 
+import "github.com/Icewater1337/fridolin/internal/logx"
+
 import "go.mau.fi/whatsmeow/types"
 
 // maskChatJID is chat, a queue's JID, for the log: a group's as the rest
@@ -8,9 +10,9 @@ func maskChatJID(chat string) string {
 	jid, err := types.ParseJID(chat)
 	switch {
 	case err != nil:
-		return maskDigits(chat, 0)
+		return logx.MaskDigits(chat, 0)
 	case jid.Server == types.GroupServer:
 		return chat
 	}
-	return maskJID(jid.User, "", jid.Server)
+	return logx.MaskJID(jid.User, "", jid.Server)
 }
