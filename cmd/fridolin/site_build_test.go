@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -60,8 +61,8 @@ func TestBuildChatLeavesOutOnlyTheWorkingNotice(t *testing.T) {
 		text  string
 		shown bool
 	}{
-		{workingNotice, false},
-		{chatErrLimit, true},
+		{outboundmsg.WorkingNotice, false},
+		{outboundmsg.ChatErrLimit, true},
 		{"⏳ Queued (#2) — I'll get to this right after the current task.", true},
 		{"Here is the new page.", true},
 	} {

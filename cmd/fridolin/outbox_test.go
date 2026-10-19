@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/devchat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -41,7 +42,7 @@ type flakyMessenger struct {
 }
 
 func newFlakyMessenger(cfg func() *Config, online bool) *flakyMessenger {
-	f := &flakyMessenger{Messenger: devchat.New(func(text string) []string { return ChunkMessage(text, cfg().MaxChunkSize) }), online: make(chan struct{}), dropAfter: -1}
+	f := &flakyMessenger{Messenger: devchat.New(func(text string) []string { return outboundmsg.Chunk(text, cfg().MaxChunkSize) }), online: make(chan struct{}), dropAfter: -1}
 	if online {
 		close(f.online)
 	}
@@ -82,12 +83,12 @@ func (f *flakyMessenger) try() error {
 	select {
 	case <-f.online:
 	default:
-		return errOffline
+		return outboundmsg.ErrOffline
 	}
 	if f.dropAfter == 0 {
 		f.dropAfter = -1
 		f.setOnlineLocked(false)
-		return errOffline
+		return outboundmsg.ErrOffline
 	}
 	if f.dropAfter > 0 {
 		f.dropAfter--
@@ -98,7 +99,7 @@ func (f *flakyMessenger) try() error {
 func (f *flakyMessenger) SendMessage(ctx context.Context, jid, text string) error {
 	time.Sleep(f.delay)
 	// Refused like WhatsApp refuses it, which the dev messenger does not.
-	if _, err := parseRecipient(jid); errors.Is(err, errRefusedRecipient) {
+	if _, err := parseRecipient(jid); errors.Is(err, outboundmsg.ErrRefusedRecipient) {
 		return err
 	}
 	if err := f.try(); err != nil {
@@ -317,7 +318,7 @@ func TestOutboxSummaryOnlyReads(t *testing.T) {
 func TestQuestionsWaitAndNoticesDoNot(t *testing.T) {
 	tb, br := newMainBridge(t, "")
 	tb.wa = newFlakyMessenger(tb.cfgs.Get, false)
-	br.hooks.Question(br, testDMChat, questionPrefix+"Which day suits you?")
+	br.hooks.Question(br, testDMChat, outboundmsg.QuestionPrefix+"Which day suits you?")
 	br.hooks.Notice(testDMChat, "⏳ Still at it")
 	sum, err := tb.store.OutboxSummary(context.Background(), time.Now())
 	if err != nil || sum.Waiting != 1 {

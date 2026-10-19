@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/store"
 	"log"
 	"math"
@@ -82,14 +83,14 @@ func (o *Outbox) Stop() {
 // numbered options, as it reads when WhatsApp refuses the poll, then the
 // text. The [POLL] markup never reached anyone.
 func (o *Outbox) Reply(ctx context.Context, brain, chat, text string, maxChunk int) error {
-	polls, remaining := extractPolls(text)
+	polls, remaining := outboundmsg.ExtractPolls(text)
 	var parts []store.OutboxPart
 	var said []string
 	// The polls go before the text that introduces them, as the example
 	// prompt promises (see sendPolls).
 	for _, p := range polls {
 		parts = append(parts, store.OutboxPart{Question: p.Question, Options: p.Options, Max: p.MaxSelectable})
-		said = append(said, pollAsText(p))
+		said = append(said, outboundmsg.PollAsText(p))
 	}
 	parts = append(parts, o.textParts(chat, remaining, maxChunk)...)
 	if remaining != "" {
@@ -134,7 +135,7 @@ func (o *Outbox) chunks(chat, text string, maxChunk int) []string {
 	if w, ok := o.messenger().(wholeText); ok && w.TakesWhole(chat) {
 		maxChunk = math.MaxInt
 	}
-	return ChunkMessage(text, maxChunk)
+	return outboundmsg.Chunk(text, maxChunk)
 }
 
 func (o *Outbox) add(ctx context.Context, r store.OutboxRow) error {
@@ -233,7 +234,7 @@ func (o *Outbox) flush(ctx context.Context, force bool) (wait time.Duration, wai
 			continue
 		case ctx.Err() != nil:
 			return wait, true, offline
-		case errors.Is(err, errRefusedRecipient) || errors.Is(err, errNotAChat):
+		case errors.Is(err, outboundmsg.ErrRefusedRecipient) || errors.Is(err, errNotAChat):
 			o.giveUp(ctx, r, err.Error())
 			continue
 		case errors.Is(err, errNotRecorded):
@@ -309,21 +310,21 @@ func (o *Outbox) finish(ctx context.Context, r store.OutboxRow) error {
 
 // send sends one part. A poll WhatsApp refuses while connected goes out
 // as a numbered list instead; while it is not, the poll waits like text.
-func (o *Outbox) send(ctx context.Context, m outboundLink, r *store.OutboxRow, p store.OutboxPart) error {
+func (o *Outbox) send(ctx context.Context, m outboundmsg.Link, r *store.OutboxRow, p store.OutboxPart) error {
 	ctx, cancel := context.WithTimeout(ctx, outboxSendLimit)
 	defer cancel()
 	if !p.IsPoll() {
 		return m.SendMessage(ctx, r.Chat, p.Text)
 	}
-	poll := pollData{Question: p.Question, Options: p.Options, MaxSelectable: p.Max}
+	poll := outboundmsg.Poll{Question: p.Question, Options: p.Options, MaxSelectable: p.Max}
 	log.Printf("Sending poll to %s: %q (%d options)", r.Chat, p.Question, len(p.Options))
 	msgID, err := m.SendPoll(ctx, r.Chat, p.Question, p.Options, p.Max)
 	if err != nil {
-		if !isConnected(m) || ctx.Err() != nil || errors.Is(err, errRefusedRecipient) {
+		if !isConnected(m) || ctx.Err() != nil || errors.Is(err, outboundmsg.ErrRefusedRecipient) {
 			return err
 		}
 		log.Printf("failed to send poll to %s: %v — falling back to text", r.Chat, err)
-		return m.SendMessage(ctx, r.Chat, pollAsText(poll))
+		return m.SendMessage(ctx, r.Chat, outboundmsg.PollAsText(poll))
 	}
 	// Kept so the votes can be matched back to its options and reach the
 	// brain that sent it.
@@ -342,7 +343,7 @@ func (o *Outbox) giveUp(ctx context.Context, r store.OutboxRow, why string) {
 }
 
 // isConnected reports whether m can send now.
-func isConnected(m outboundLink) bool {
+func isConnected(m outboundmsg.Link) bool {
 	select {
 	case <-m.Connected():
 		return true

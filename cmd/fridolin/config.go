@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/chat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"io/fs"
 	"log"
 	"os"
@@ -696,7 +697,7 @@ func effective(file *Config) (*Config, error) {
 	cfg.DBPath = fsx.ExpandHome(cfg.DBPath, home)
 	cfg.MediaDir = fsx.ExpandHome(cfg.MediaDir, home)
 	if cfg.MaxChunkSize == 0 {
-		cfg.MaxChunkSize = defaultChunkSize
+		cfg.MaxChunkSize = outboundmsg.DefaultChunkSize
 	}
 	if cfg.MaxMediaMB == 0 {
 		cfg.MaxMediaMB = defaultMaxMediaMB
@@ -943,8 +944,8 @@ func (c *Config) validate() error {
 			return fmt.Errorf("child_env_passthrough: %q is not a variable name: use letters, digits and _, and do not start with a digit", name)
 		}
 	}
-	if c.MaxChunkSize < minChunkSize {
-		return fmt.Errorf("max_chunk_size %d is too small: use at least %d, or 0 for the default of %d", c.MaxChunkSize, minChunkSize, defaultChunkSize)
+	if c.MaxChunkSize < outboundmsg.MinChunkSize {
+		return fmt.Errorf("max_chunk_size %d is too small: use at least %d, or 0 for the default of %d", c.MaxChunkSize, outboundmsg.MinChunkSize, outboundmsg.DefaultChunkSize)
 	}
 	if n := intOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes); n < 0 || n > maxRunTimeoutMinutes {
 		return fmt.Errorf("run_timeout_minutes must be between 0 (no limit) and %d, not %d", maxRunTimeoutMinutes, n)

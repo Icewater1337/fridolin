@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"slices"
 	"strings"
 	"testing"
@@ -263,7 +264,7 @@ func TestMidRunMessagesReachTheChatMarked(t *testing.T) {
 {"type":"result","result":"asked"}
 `
 	readTestStream(br, Inbound{Inbound: chat.Inbound{JID: dm}}, stream)
-	br.hooks.Notice(dm, workingNotice)
+	br.hooks.Notice(dm, outboundmsg.WorkingNotice)
 	// The question goes through the outbox, after the notice.
 	waitFor(t, 5*time.Second, "both messages", func() bool { return len(tb.sentTo(dm)) == 2 })
 	sent := tb.sentTo(dm)

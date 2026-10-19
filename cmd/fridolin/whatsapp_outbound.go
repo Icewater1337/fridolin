@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
@@ -14,9 +15,9 @@ import (
 func classifySendErr(err error) error {
 	switch {
 	case errors.Is(err, whatsmeow.ErrNotConnected), errors.Is(err, whatsmeow.ErrNotLoggedIn):
-		return fmt.Errorf("%w: %w", errOffline, err)
+		return fmt.Errorf("%w: %w", outboundmsg.ErrOffline, err)
 	case errors.Is(err, whatsmeow.ErrUnknownServer):
-		return fmt.Errorf("%w: %w", errBadRecipient, err)
+		return fmt.Errorf("%w: %w", outboundmsg.ErrBadRecipient, err)
 	}
 	return err
 }
@@ -29,7 +30,7 @@ func classifySendErr(err error) error {
 // a brain's reply, its reply_chat, or a script calling /send.
 func checkRecipient(jid types.JID) error {
 	if jid.Server == types.BroadcastServer || jid.Server == types.NewsletterServer {
-		return fmt.Errorf("%w: %s", errRefusedRecipient, jid)
+		return fmt.Errorf("%w: %s", outboundmsg.ErrRefusedRecipient, jid)
 	}
 	return nil
 }

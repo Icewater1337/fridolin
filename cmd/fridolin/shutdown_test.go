@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"io"
 	"log"
 	"net"
@@ -634,7 +635,7 @@ func TestResumeOutlivesItsContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	tb.resume(ctx)
-	waitFor(t, 5*time.Second, "the notice", func() bool { return slices.Contains(tb.sentTo(harnessDM), restartedNotice) })
+	waitFor(t, 5*time.Second, "the notice", func() bool { return slices.Contains(tb.sentTo(harnessDM), outboundmsg.RestartedNotice) })
 }
 
 // waitBatched waits until the debouncer holds one batch of n messages.
