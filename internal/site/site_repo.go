@@ -234,7 +234,7 @@ func (m *SiteManager) ConnectRepo(ctx context.Context, r SiteRepo) error {
 		if err := os.MkdirAll(m.dir(), 0o700); err != nil {
 			return err
 		}
-		if _, err := m.git(ctx, m.dir(), "clone", "--no-checkout", "--", r.URL, m.repoDir()); err != nil {
+		if _, err := m.git(ctx, m.dir(), []string{"clone", "--no-checkout", "--", r.URL, m.repoDir()}...); err != nil {
 			return err
 		}
 	}
@@ -352,10 +352,16 @@ func (m *SiteManager) Fetch(ctx context.Context) (SiteUpdates, error) {
 	if !fsx.Exists(m.repoDir()) {
 		return SiteUpdates{}, errors.New("no repository connected")
 	}
+	// Settings can also come from disk. Validate the branch at the command
+	// boundary instead of relying only on the connect request's validation.
+	branch := s.Repo.Branch
+	if !siteBranchRE.MatchString(branch) || strings.Contains(branch, "..") {
+		return SiteUpdates{}, fmt.Errorf("%q is not a branch name", branch)
+	}
 	if _, err := m.git(ctx, m.repoDir(), "fetch", "--prune", "origin"); err != nil {
 		return SiteUpdates{}, err
 	}
-	head, _ := m.git(ctx, m.repoDir(), "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+s.Repo.Branch)
+	head, _ := m.git(ctx, m.repoDir(), "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+branch)
 	up := SiteUpdates{Head: head, Approved: s.Approved, Commits: []SiteCommit{}, Changes: []ModuleChange{}}
 	if head == "" {
 		return up, nil // empty repository
@@ -388,13 +394,13 @@ func (m *SiteManager) ModuleChanges(ctx context.Context, from, to string) ([]Mod
 	prefix += "modules/"
 	var files []string
 	if from == "" {
-		out, err := m.git(ctx, m.repoDir(), "ls-tree", "-r", "--name-only", to, "--", prefix)
+		out, err := m.git(ctx, m.repoDir(), []string{"ls-tree", "-r", "--name-only", to, "--", prefix}...)
 		if err != nil {
 			return nil, err
 		}
 		files = strings.Fields(out)
 	} else {
-		out, err := m.git(ctx, m.repoDir(), "diff", "--name-only", from, to, "--", prefix)
+		out, err := m.git(ctx, m.repoDir(), []string{"diff", "--name-only", from, to, "--", prefix}...)
 		if err != nil {
 			return nil, err
 		}
@@ -584,6 +590,11 @@ func (m *SiteManager) Deploy(ctx context.Context, commit string) error {
 }
 
 func (m *SiteManager) runDeploy(ctx context.Context, job *SiteJob, commit string) error {
+	// Validate again in the worker before deriving paths or Git arguments.
+	// This also protects internal callers independently of the HTTP boundary.
+	if !siteCommitRE.MatchString(commit) {
+		return errors.New("name a commit by its full id")
+	}
 	dir := m.deployDir(commit)
 	if err := m.prepareCheckout(ctx, job, commit, dir); err != nil {
 		return err
