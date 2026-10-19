@@ -124,13 +124,11 @@ func TestRegistryInspectStopsAtRefusedPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if called != 1 || len(got["problems"].([]string)) == 0 {
+	if called != 1 || len(got.Problems) == 0 {
 		t.Fatalf("path checks: %#v, calls=%d", got, called)
 	}
-	for _, key := range []string{"exists", "is_dir", "entries", "manifest", "suggested"} {
-		if _, present := got[key]; present {
-			t.Errorf("refused path exposed %s", key)
-		}
+	if got.Exists != nil || got.IsDir != nil || got.Entries != nil || got.Manifest != nil || got.Suggested != nil {
+		t.Errorf("refused path exposed metadata: %+v", got)
 	}
 }
 
