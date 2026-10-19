@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -42,7 +43,7 @@ func newFakeService(t *testing.T, goos string) *fakeService {
 	t.Setenv("HOME", home)
 	f := &fakeService{t: t, home: home, out: &strings.Builder{}, health: 200, clock: time.Now()}
 	f.ready = func() (int, []byte) {
-		data, _ := json.Marshal(readyResponse{Ready: false, WhatsApp: "pairing", Version: version.String(), StartedAt: time.Now()})
+		data, _ := json.Marshal(httpapi.ReadyResponse{Ready: false, WhatsApp: "pairing", Version: version.String(), StartedAt: time.Now()})
 		return 503, data
 	}
 	f.cfg = writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/.fridolin", "http_listen": "127.0.0.1:18765"}`)
@@ -864,7 +865,7 @@ func TestServiceInstallNoStartLeavesTheServiceAlone(t *testing.T) {
 func TestServiceInstallChecksTheNewBridgeAnswers(t *testing.T) {
 	// The health check used to pass against the old process, so setup
 	// reported success while the old binary kept running.
-	ready := func(v readyResponse) func() (int, []byte) {
+	ready := func(v httpapi.ReadyResponse) func() (int, []byte) {
 		return func() (int, []byte) {
 			data, _ := json.Marshal(v)
 			return 200, data
@@ -879,26 +880,26 @@ func TestServiceInstallChecksTheNewBridgeAnswers(t *testing.T) {
 		wantOut string
 	}{
 		{"new bridge, paired", 200, func() (int, []byte) {
-			return ready(readyResponse{Ready: true, WhatsApp: "connected", Version: version.String(), StartedAt: time.Now()})()
+			return ready(httpapi.ReadyResponse{Ready: true, WhatsApp: "connected", Version: version.String(), StartedAt: time.Now()})()
 		}, "", "", "WhatsApp is connected"},
 		{"dev mode", 200, func() (int, []byte) {
-			return ready(readyResponse{Ready: true, WhatsApp: "disabled", Version: version.String(), StartedAt: time.Now()})()
+			return ready(httpapi.ReadyResponse{Ready: true, WhatsApp: "disabled", Version: version.String(), StartedAt: time.Now()})()
 		}, "", "", "runs in dev mode"},
 		{"logged out", 200, func() (int, []byte) {
-			return ready(readyResponse{WhatsApp: "logged-out", Version: version.String(), StartedAt: time.Now()})()
+			return ready(httpapi.ReadyResponse{WhatsApp: "logged-out", Version: version.String(), StartedAt: time.Now()})()
 		}, "", "", "pair again"},
-		{"the old bridge still answers", 200, ready(readyResponse{WhatsApp: "connected", Version: version.String(), StartedAt: time.Now().Add(-time.Hour)}), "", "is still the one started", ""},
+		{"the old bridge still answers", 200, ready(httpapi.ReadyResponse{WhatsApp: "connected", Version: version.String(), StartedAt: time.Now().Add(-time.Hour)}), "", "is still the one started", ""},
 		{"the old bridge answers while it shuts down", 200, func() func() (int, []byte) {
 			calls := 0
 			return func() (int, []byte) {
 				if calls++; calls < 3 {
-					return ready(readyResponse{WhatsApp: "connected", Version: "v0.0.1", StartedAt: time.Now().Add(-time.Hour)})()
+					return ready(httpapi.ReadyResponse{WhatsApp: "connected", Version: "v0.0.1", StartedAt: time.Now().Add(-time.Hour)})()
 				}
-				return ready(readyResponse{WhatsApp: "connected", Version: version.String(), StartedAt: time.Now()})()
+				return ready(httpapi.ReadyResponse{WhatsApp: "connected", Version: version.String(), StartedAt: time.Now()})()
 			}
 		}(), "", "", "the bridge is running"},
 		{"another build answers", 200, func() (int, []byte) {
-			return ready(readyResponse{WhatsApp: "connected", Version: "v0.0.1", StartedAt: time.Now()})()
+			return ready(httpapi.ReadyResponse{WhatsApp: "connected", Version: "v0.0.1", StartedAt: time.Now()})()
 		}, "", "runs version v0.0.1", ""},
 		{"a build without /ready", 200, func() (int, []byte) { return 404, []byte("404 page not found\n") }, "", "older build", ""},
 		{"nothing answers", 0, nil, "", "did not answer", ""},
@@ -932,7 +933,7 @@ func TestServiceInstallChecksTheNewBridgeAnswers(t *testing.T) {
 }
 
 func TestServiceInstallGivesUpOnANewBridgeThatDoesNotComeUp(t *testing.T) {
-	old := func(code int, v readyResponse) func() (int, []byte) {
+	old := func(code int, v httpapi.ReadyResponse) func() (int, []byte) {
 		return func() (int, []byte) {
 			data, _ := json.Marshal(v)
 			if code != 200 {
@@ -941,7 +942,7 @@ func TestServiceInstallGivesUpOnANewBridgeThatDoesNotComeUp(t *testing.T) {
 			return code, data
 		}
 	}
-	oldBridge := readyResponse{WhatsApp: "connected", Version: "v0.0.1", StartedAt: time.Now().Add(-time.Hour)}
+	oldBridge := httpapi.ReadyResponse{WhatsApp: "connected", Version: "v0.0.1", StartedAt: time.Now().Add(-time.Hour)}
 	cases := []struct {
 		name    string
 		ready   func() (int, []byte)

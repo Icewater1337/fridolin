@@ -16,7 +16,6 @@ import (
 	"runtime"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -396,12 +395,7 @@ func (b *Bridge) apiGroups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Bridge) apiActivity(w http.ResponseWriter, r *http.Request) {
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 {
-		limit = 100
-	}
-	limit = min(limit, 500)
-	httpapi.WriteJSONIfChanged(w, r, b.activity.Recent(limit, r.URL.Query().Get("brain")))
+	httpapi.ActivityAPI{Reader: b.activity}.ServeHTTP(w, r)
 }
 
 func (b *Bridge) apiStopRun(w http.ResponseWriter, r *http.Request) {
@@ -421,14 +415,7 @@ func (b *Bridge) apiStopRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Bridge) apiLogs(w http.ResponseWriter, r *http.Request) {
-	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 {
-		limit = 500
-	}
-	limit = min(limit, logRingLines)
-	lines, next := b.logs.Since(after, limit)
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"lines": nonNil(lines), "next": next, "boot": b.started.Unix()})
+	httpapi.LogsAPI{Reader: b.logs, StartedAt: b.started, MaxLines: logRingLines}.ServeHTTP(w, r)
 }
 
 // ── chats ────────────────────────────────────────────────────────────────

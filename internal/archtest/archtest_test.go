@@ -39,7 +39,7 @@ var imports = map[string][]string{
 	"internal/fsx":       nil,
 	"internal/google":    {"internal/manifest", "internal/fsx", "internal/apperr", "internal/jsonx", "internal/testutil"},
 	"internal/history":   {"internal/fsx"},
-	"internal/httpapi":   {"internal/fsx"},
+	"internal/httpapi":   {"internal/activity", "internal/chat", "internal/fsx", "internal/logx"},
 	"internal/jsonx":     nil,
 	"internal/logx":      nil,
 	"internal/manifest":  {"internal/chat", "internal/fsx", "internal/jsonx"},

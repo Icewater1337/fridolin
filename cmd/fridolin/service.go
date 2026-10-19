@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"io"
 	"net/http"
 	"os"
@@ -1140,8 +1141,8 @@ func (h *serviceHost) restart(cfg *config.Config, unitPath, want string) error {
 // bridgeAnswer is what one poll of the bridge got.
 type bridgeAnswer struct {
 	up      bool // /health answered
-	r       readyResponse
-	readErr error // /ready gave no readyResponse: an older build
+	r       httpapi.ReadyResponse
+	readErr error // /ready gave no httpapi.ReadyResponse: an older build
 }
 
 func (h *serviceHost) askBridge(base string) bridgeAnswer {

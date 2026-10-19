@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"image/png"
 	"io"
 	"log"
@@ -412,7 +413,7 @@ func TestReadyReportsWhetherMessagesCanGoOut(t *testing.T) {
 			if c.ready {
 				want = http.StatusOK
 			}
-			var resp readyResponse
+			var resp httpapi.ReadyResponse
 			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != want {
 				t.Fatalf("status %d (%v) %s, want %d with JSON", w.Code, err, w.Body.String(), want)
 			}
