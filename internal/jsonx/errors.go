@@ -18,32 +18,46 @@ func RenameTypeError(err error, typeName func(reflect.Type) string, structName f
 		return err
 	}
 	copy := *typed
+	oldType := typed.Type.String()
+	oldDiagnostic := typed.Error()
+	var previous renamedTypeError
+	if errors.As(err, &previous) {
+		copy, oldType = previous.diagnostic, previous.typeName
+		oldDiagnostic = renderTypeError(copy, oldType)
+	}
 	if structName != nil {
 		if name := structName(copy.Struct); name != "" {
 			copy.Struct = name
 		}
 	}
-	message := copy.Error()
-	if name := renamedType(typed.Type, typeName); name != typed.Type.String() {
-		message = strings.TrimSuffix(message, typed.Type.String()) + name
+	name := renamedType(typed.Type, typeName)
+	if name == typed.Type.String() {
+		name = oldType
 	}
-	if message == typed.Error() {
+	message := renderTypeError(copy, name)
+	if message == oldDiagnostic {
 		return err
 	}
-	prefix, ok := strings.CutSuffix(err.Error(), typed.Error())
+	prefix, ok := strings.CutSuffix(err.Error(), oldDiagnostic)
 	if !ok {
 		return err
 	}
-	return renamedTypeError{cause: err, message: prefix + message}
+	return renamedTypeError{cause: err, message: prefix + message, diagnostic: copy, typeName: name}
 }
 
 type renamedTypeError struct {
-	cause   error
-	message string
+	cause      error
+	message    string
+	diagnostic json.UnmarshalTypeError
+	typeName   string
 }
 
 func (e renamedTypeError) Error() string { return e.message }
 func (e renamedTypeError) Unwrap() error { return e.cause }
+
+func renderTypeError(err json.UnmarshalTypeError, typeName string) string {
+	return strings.TrimSuffix(err.Error(), err.Type.String()) + typeName
+}
 
 func renamedType(t reflect.Type, name func(reflect.Type) string) string {
 	if name == nil {
