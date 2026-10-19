@@ -87,8 +87,8 @@ func FuzzGroupSenderAllowed(f *testing.F) {
 		if list != "" {
 			members = strings.Split(list, ",")
 		}
-		cfg := &config.File{AllowedGroups: []string{testGroup}, AllowAnyDM: &anyDM, GroupMembers: map[string][]string{testGroup: members}}
-		got := groupSenderAllowed(resolvedSettings(t, cfg), testGroup, groupSender{Number: number, Resolved: resolved})
+		cfg := &config.Settings{Live: config.Live{AllowedGroups: []string{testGroup}, AllowAnyDM: anyDM, GroupMembers: map[string][]string{testGroup: members}}}
+		got := groupSenderAllowed(cfg, testGroup, groupSender{Number: number, Resolved: resolved})
 		if slices.Equal(members, []string{AnyMember}) {
 			if !got {
 				t.Errorf("[%q] refused %q", AnyMember, number)
@@ -112,10 +112,10 @@ func FuzzGroupSenderAllowed(f *testing.F) {
 			t.Errorf("group_members %q: %q (resolved %v) admitted: %v, listed: %v", members, number, resolved, got, listed)
 		}
 		cfg.AllowedNumbers = []string{number}
-		if groupSenderAllowed(resolvedSettings(t, cfg), testGroup, groupSender{Number: number, Resolved: resolved}) != got {
+		if groupSenderAllowed(cfg, testGroup, groupSender{Number: number, Resolved: resolved}) != got {
 			t.Errorf("group_members %q: allowed_numbers changes whether %q is admitted", members, number)
 		}
-		if !groupSenderAllowed(resolvedSettings(t, cfg), testGroup, groupSender{Number: number, Resolved: resolved, FromMe: true}) {
+		if !groupSenderAllowed(cfg, testGroup, groupSender{Number: number, Resolved: resolved, FromMe: true}) {
 			t.Errorf("group_members %q: the bridge's own account is refused", members)
 		}
 	})
@@ -294,9 +294,9 @@ func TestNoGroupWarningWhileAnyoneMayDM(t *testing.T) {
 func TestLogSecurityChangesNamesGroupMembers(t *testing.T) {
 	const other = "120363000000000001@g.us"
 	logged := captureLog(t)
-	prev := &config.File{GroupMembers: map[string][]string{testGroup: {"15551234567"}}}
-	next := &config.File{GroupMembers: map[string][]string{testGroup: {"15559876543"}, other: {}}}
-	config.LogSecurityChanges(resolvedSettings(t, prev), resolvedSettings(t, next))
+	prev := &config.Settings{Live: config.Live{GroupMembers: map[string][]string{testGroup: {"15551234567"}}}}
+	next := &config.Settings{Live: config.Live{GroupMembers: map[string][]string{testGroup: {"15559876543"}, other: {}}}}
+	config.LogSecurityChanges(prev, next)
 	got := strings.Join(logged(), "\n")
 	for _, want := range []string{"group_members", "+" + testGroup + ":15559876543", "+" + other + ":", "-" + testGroup + ":15551234567"} {
 		if !strings.Contains(got, want) {
