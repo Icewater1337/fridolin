@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/Icewater1337/fridolin/internal/devchat"
 	"strings"
 	"sync"
 	"testing"
@@ -244,7 +245,7 @@ func TestNewSessionAfterLogout(t *testing.T) {
 
 // connectMessenger is the dev messenger whose Connect fails with err.
 type connectMessenger struct {
-	*devMessenger
+	*devchat.Messenger
 	err   error
 	mu    sync.Mutex
 	tries int
@@ -261,7 +262,7 @@ func (c *connectMessenger) Connect() error {
 func TestConnectLoopStopsOnPermanentErrors(t *testing.T) {
 	for _, err := range []error{store.ErrDeviceDeleted, errPairingLive} {
 		t.Run(err.Error(), func(t *testing.T) {
-			m := &connectMessenger{devMessenger: &devMessenger{}, err: err}
+			m := &connectMessenger{Messenger: &devchat.Messenger{}, err: err}
 			b := &Bridge{wa: m}
 			done := make(chan struct{})
 			go func() {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"github.com/Icewater1337/fridolin/internal/devchat"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -15,7 +16,7 @@ import (
 
 // pollRefuser is the dev messenger in front of a WhatsApp that is
 // connected but refuses every poll, so that the outbox sends each as text.
-type pollRefuser struct{ *devMessenger }
+type pollRefuser struct{ *devchat.Messenger }
 
 func (pollRefuser) SendPoll(context.Context, string, string, []string, int) (string, error) {
 	return "", errors.New("polls are refused")
