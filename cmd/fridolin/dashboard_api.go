@@ -401,7 +401,7 @@ func (b *Bridge) apiActivity(w http.ResponseWriter, r *http.Request) {
 		limit = 100
 	}
 	limit = min(limit, 500)
-	writeJSONIfChanged(w, r, b.activity.Recent(limit, r.URL.Query().Get("brain")))
+	httpapi.WriteJSONIfChanged(w, r, b.activity.Recent(limit, r.URL.Query().Get("brain")))
 }
 
 func (b *Bridge) apiStopRun(w http.ResponseWriter, r *http.Request) {
@@ -781,7 +781,7 @@ func (b *Bridge) brainViews() []brainView {
 }
 
 func (b *Bridge) apiBrains(w http.ResponseWriter, r *http.Request) {
-	writeJSONIfChanged(w, r, b.brainViews())
+	httpapi.WriteJSONIfChanged(w, r, b.brainViews())
 }
 
 // apiBrain answers GET /api/brains/{id} with that brain's entry of
@@ -796,7 +796,7 @@ func (b *Bridge) apiBrain(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	for _, v := range b.brainViews() {
 		if v.ID == id {
-			writeJSONIfChanged(w, r, v)
+			httpapi.WriteJSONIfChanged(w, r, v)
 			return
 		}
 	}

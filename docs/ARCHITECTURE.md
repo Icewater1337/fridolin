@@ -168,6 +168,11 @@ behaviour unless its title says so. The steps so far:
   API/profile golden tests remain in the command. A narrow `jsonx` edge preserves
   existing decoder diagnostics when DTOs move.
 
+- **R16, HTTP response support**: `httpapi` owns conditional JSON responses
+  and static filesystem serving. Both preserve existing body bytes, ETags,
+  weak comparisons, directory rejection and redirect headers. Command wiring
+  still supplies the embedded dashboard filesystem and all resource handlers.
+
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
 that is not yet extracted is marked *(to come, Rn)* with the step that

@@ -173,7 +173,7 @@ func (b *Bridge) newHTTPHandler(listen string) http.Handler {
 	mux.Handle("/brain/", b.brainAPIHandler())
 
 	if !b.cfgs.Get().Dashboard.Disabled {
-		static := staticHandler(web.FS)
+		static := httpapi.StaticHandler(web.FS)
 		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
