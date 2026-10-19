@@ -525,17 +525,17 @@ func (j *SiteJob) step(format string, args ...any) {
 	j.Log = append(j.Log, j.Step)
 }
 
-func (j *SiteJob) snapshot() *SiteJob {
+func (j *SiteJob) snapshot() *sitesvc.DeploySnapshot {
 	if j == nil {
 		return nil
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	return &SiteJob{Commit: j.Commit, State: j.State, Step: j.Step, Error: j.Error, Log: slices.Clone(j.Log), Started: j.Started, Finished: j.Finished}
+	return &sitesvc.DeploySnapshot{Commit: j.Commit, State: j.State, Step: j.Step, Error: j.Error, Log: slices.Clone(j.Log), Started: j.Started, Finished: j.Finished}
 }
 
 // DeployStatus returns the running or last deploy.
-func (m *SiteManager) DeployStatus() *SiteJob {
+func (m *SiteManager) DeployStatus() *sitesvc.DeploySnapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.deploy.snapshot()

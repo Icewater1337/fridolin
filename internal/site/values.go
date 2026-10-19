@@ -162,3 +162,14 @@ func (u SiteUser) Display() string {
 	}
 	return u.Username
 }
+
+// DeploySnapshot is an owned copy of a deployment job for consumers.
+type DeploySnapshot struct {
+	Commit   string   `json:"commit"`
+	State    string   `json:"state"` // running, done, error
+	Step     string   `json:"step"`
+	Error    string   `json:"error,omitempty"`
+	Log      []string `json:"log"`
+	Started  string   `json:"started"`
+	Finished string   `json:"finished,omitempty"`
+}

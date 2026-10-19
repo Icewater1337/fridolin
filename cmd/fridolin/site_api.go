@@ -26,7 +26,7 @@ type SiteService interface {
 	CreateGitHubRepo(ctx context.Context, name string) (string, error)
 	Deploy(ctx context.Context, commit string) error
 	DeployKey(ctx context.Context) (string, error)
-	DeployStatus() *SiteJob
+	DeployStatus() *sitesvc.DeploySnapshot
 	DiscardProposal(brainID string) error
 	DisconnectRepo() error
 	Fetch(ctx context.Context) (sitesvc.SiteUpdates, error)

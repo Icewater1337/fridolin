@@ -65,9 +65,9 @@ func newBareRepo(t *testing.T) string {
 	return dir
 }
 
-func waitDeploy(t *testing.T, m *SiteManager) *SiteJob {
+func waitDeploy(t *testing.T, m *SiteManager) *sitesvc.DeploySnapshot {
 	t.Helper()
-	var j *SiteJob
+	var j *sitesvc.DeploySnapshot
 	testutil.WaitFor(t, 2*time.Minute, "the deploy to finish", func() bool {
 		j = m.DeployStatus()
 		return j != nil && j.State != "running"
