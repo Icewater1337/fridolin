@@ -251,7 +251,7 @@ func pairingState(item whatsmeow.QRChannelItem) (mode, detail string, ok bool) {
 // pairing again needs a client on a new one. The rest of bridge.db (polls,
 // ignored chats, the outbox) stays.
 func (wa *WhatsAppClient) newSession() *whatsmeow.Client {
-	cli := whatsmeow.NewClient(wa.store.Container.NewDevice(), wa.log)
+	cli := whatsmeow.NewClient(wa.container.NewDevice(), wa.log)
 	cli.AddEventHandler(wa.eventHandler)
 	wa.mu.Lock()
 	old := wa.client

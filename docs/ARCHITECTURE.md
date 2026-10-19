@@ -62,6 +62,11 @@ behaviour unless its title says so. The steps so far:
 - **R11, devchat slice**: `devchat` owns the simulated messenger and its
   bounded synchronized outbox. The command supplies live chunking policy.
 
+- **R11, WhatsApp preparation**: the transport now consumes owned settings,
+  device/poll interfaces and `chat.Inbound` callbacks. The command projects
+  config, store and runtime values; implementation and integration tests
+  remain in `cmd/fridolin` until the adapter move.
+
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
 that is not yet extracted is marked *(to come, Rn)* with the step that
