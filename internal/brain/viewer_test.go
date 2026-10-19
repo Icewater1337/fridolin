@@ -37,7 +37,7 @@ func TestViewerClosedWhileItStarts(t *testing.T) {
 			br.viewerStart = func(name, streamLog, cwd string, env []string) (*platform.Viewer, error) {
 				close(starting)
 				<-release
-				return &platform.Viewer{TmuxPath: filepath.Join(bin, "tmux"), Osascript: "/usr/bin/false", Timeout: time.Second, Name: name, StreamLog: streamLog, CWD: cwd, Env: env}, nil
+				return &platform.Viewer{TmuxPath: filepath.Join(bin, "tmux"), Osascript: "/usr/bin/false", Timeout: 5 * time.Second, Name: name, StreamLog: streamLog, CWD: cwd, Env: env}, nil
 			}
 
 			logs := captureLog(t)

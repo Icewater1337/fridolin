@@ -614,30 +614,14 @@ func TestResumeOutlivesItsContext(t *testing.T) {
 	testutil.WaitFor(t, 5*time.Second, "the notice", func() bool { return slices.Contains(tb.sentTo(harnessDM), outboundmsg.RestartedNotice) })
 }
 
-// waitBatched waits until the debouncer holds one batch of n messages.
-func waitBatched(h *harness, n int) {
-	h.t.Helper()
-	d := h.b.deb
-	h.WaitFor(fmt.Sprintf("a batch of %d", n), func() bool {
-		d.mu.Lock()
-		defer d.mu.Unlock()
-		for _, b := range d.batches {
-			return len(d.batches) == 1 && max(1, len(b.msg.Save().Parts)) == n
-		}
-		return false
-	})
-}
-
 // A batch the debouncer holds when the bridge stops is answered after the
 // next start, as the one message it was, each of its parts in the history
 // once.
 func TestShutdownKeepsTheDebouncedBatch(t *testing.T) {
 	h := newHarness(t, `{"debounce": {"quiet_ms": 60000, "max_wait_ms": 120000}}`)
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
-	h.WhatsApp(dmEvent("3EB0ONE", textMsg("part one")))
-	waitBatched(h, 1)
-	h.WhatsApp(dmEvent("3EB0TWO", textMsg("part two")))
-	waitBatched(h, 2)
+	h.WhatsAppAndWait(dmEvent("3EB0ONE", textMsg("part one")))
+	h.WhatsAppAndWait(dmEvent("3EB0TWO", textMsg("part two")))
 	h.Restart()
 	if got := h.WaitSent(harnessDM, "says: part one"); !strings.HasSuffix(got, "part one\n\npart two") {
 		t.Errorf("answered %q, want both parts in one run", got)

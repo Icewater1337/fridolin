@@ -1,9 +1,8 @@
 package brain
 
 // admit returns the queue after m arrives without mutating the supplied slice.
-// It keeps the existing supersede and capacity rules; gone contains only work
-// superseded by m. Chatter displaced solely for capacity has historically had
-// no completion callback, so that behavior stays with this extraction.
+// It keeps the existing supersede and capacity rules; gone contains accepted
+// work which will not run, including chatter displaced to make room for m.
 // Fair turn ordering and current-run interruption are decided by the caller.
 func admit(pending []Inbound, m Inbound, mode string, max int) (next, gone []Inbound, interrupting bool, err error) {
 	interrupting, replaces := supersedes(m, mode)
@@ -19,6 +18,7 @@ func admit(pending []Inbound, m Inbound, mode string, max int) (next, gone []Inb
 		displaced := false
 		for i, p := range next {
 			if p.Silent {
+				gone = append(gone, p)
 				next = append(next[:i], next[i+1:]...)
 				displaced = true
 				break
