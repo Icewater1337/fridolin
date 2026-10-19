@@ -309,7 +309,7 @@ func (o *Outbox) finish(ctx context.Context, r store.OutboxRow) error {
 
 // send sends one part. A poll WhatsApp refuses while connected goes out
 // as a numbered list instead; while it is not, the poll waits like text.
-func (o *Outbox) send(ctx context.Context, m Messenger, r *store.OutboxRow, p store.OutboxPart) error {
+func (o *Outbox) send(ctx context.Context, m outboundLink, r *store.OutboxRow, p store.OutboxPart) error {
 	ctx, cancel := context.WithTimeout(ctx, outboxSendLimit)
 	defer cancel()
 	if !p.IsPoll() {
@@ -342,7 +342,7 @@ func (o *Outbox) giveUp(ctx context.Context, r store.OutboxRow, why string) {
 }
 
 // isConnected reports whether m can send now.
-func isConnected(m Messenger) bool {
+func isConnected(m outboundLink) bool {
 	select {
 	case <-m.Connected():
 		return true
