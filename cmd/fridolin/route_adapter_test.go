@@ -14,7 +14,7 @@ func TestReplyChatKeepsHeldDMAndRetiredBrainIdentity(t *testing.T) {
 	const group = "120363000000000000@g.us"
 	const owner = "15551234567@s.whatsapp.net"
 
-	cfg := &config.Config{AllowedNumbers: []string{"15551234567"}}
+	cfg := &config.File{AllowedNumbers: []string{"15551234567"}}
 	for _, tc := range []struct {
 		name       string
 		heldDM     string

@@ -11,7 +11,7 @@ import (
 )
 
 func TestBrainManagerCommandKeepsDiagnosticsOutsideRuntime(t *testing.T) {
-	cfg := &config.Config{}
+	cfg := &config.File{}
 	mgr := newCommandBrainManager(cfg)
 	t.Cleanup(mgr.Stop)
 	sp := manifest.Spec{Dir: filepath.Join(t.TempDir(), "absent"), Entry: 3, Manifest: manifest.Manifest{ID: "missing", Routing: manifest.Routing{HandlesDMs: true}}}

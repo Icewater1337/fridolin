@@ -32,7 +32,7 @@ type Registry struct {
 
 type Options struct {
 	Home        func() string
-	CheckDir    func(dir, configured string, cfg *config.Config, home string) error
+	CheckDir    func(dir, configured string, cfg *config.File, home string) error
 	Templates   Templates
 	HistoryFile string
 }
@@ -41,13 +41,13 @@ func New(store *config.Store, options Options) *Registry {
 	return &Registry{store: store, options: options}
 }
 
-func (g *Registry) resolve(cfg *config.Config) ([]manifest.Spec, []Issue) {
+func (g *Registry) resolve(cfg *config.File) ([]manifest.Spec, []Issue) {
 	return Resolve(cfg.BrainDirs, func(dir, configured string) error {
 		return g.options.CheckDir(dir, configured, cfg, g.options.Home())
 	})
 }
 
-func (g *Registry) checkPath(path string, cfg *config.Config, others []string) (string, []string, []string) {
+func (g *Registry) checkPath(path string, cfg *config.File, others []string) (string, []string, []string) {
 	return CheckPath(path, PathContext{Home: g.options.Home(), Others: others,
 		CheckDir: func(dir, configured, home string) error {
 			return g.options.CheckDir(dir, configured, cfg, home)
@@ -60,7 +60,7 @@ func (g *Registry) checkPath(path string, cfg *config.Config, others []string) (
 // brain.json in the brain's folder, so that the two change together and
 // the change is not reported as drift. It is the one way the bridge
 // changes a manifest; an error from mutate leaves both as they were.
-func (g *Registry) updateManifestIn(c *config.Config, tx *config.Tx, id string, mutate func(m *manifest.Manifest) error) error {
+func (g *Registry) updateManifestIn(c *config.File, tx *config.Tx, id string, mutate func(m *manifest.Manifest) error) error {
 	for i := range c.BrainDirs {
 		ref := &c.BrainDirs[i]
 		if ref.Approved == nil || ref.Approved.ID != id {
@@ -84,7 +84,7 @@ func (g *Registry) updateManifestIn(c *config.Config, tx *config.Tx, id string, 
 }
 
 func (g *Registry) UpdateManifest(id string, mutate func(m *manifest.Manifest) error) error {
-	_, err := g.store.UpdateTx("", func(c *config.Config, tx *config.Tx) error { return g.updateManifestIn(c, tx, id, mutate) })
+	_, err := g.store.UpdateTx("", func(c *config.File, tx *config.Tx) error { return g.updateManifestIn(c, tx, id, mutate) })
 	return err
 }
 
@@ -92,7 +92,7 @@ func (g *Registry) UpdateManifest(id string, mutate func(m *manifest.Manifest) e
 // in their manifests (brain.json, staged in tx, and the approved copy). The
 // chosen brain goes first, so that one that is not there is refused before
 // the others are looked at.
-func (g *Registry) assignGroup(c *config.Config, tx *config.Tx, jid, brainID string) error {
+func (g *Registry) assignGroup(c *config.File, tx *config.Tx, jid, brainID string) error {
 	if err := g.updateManifestIn(c, tx, brainID, func(m *manifest.Manifest) error {
 		if !slices.Contains(m.Routing.Groups, jid) {
 			m.Routing.Groups = append(m.Routing.Groups, jid)
@@ -115,7 +115,7 @@ func (g *Registry) assignGroup(c *config.Config, tx *config.Tx, jid, brainID str
 }
 
 // updateBrainBackup changes one brain's backup settings in its manifest.
-func (g *Registry) updateBrainBackup(c *config.Config, tx *config.Tx, id string, enabled *bool, exclude []string) error {
+func (g *Registry) updateBrainBackup(c *config.File, tx *config.Tx, id string, enabled *bool, exclude []string) error {
 	return g.updateManifestIn(c, tx, id, func(m *manifest.Manifest) error {
 		if enabled != nil {
 			m.Backup.Enabled = *enabled
@@ -134,14 +134,14 @@ func (g *Registry) updateBrainBackup(c *config.Config, tx *config.Tx, id string,
 }
 
 func (g *Registry) UpdateBackup(id string, enabled *bool, exclude []string) error {
-	_, err := g.store.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
+	_, err := g.store.UpdateTx("", func(c *config.File, tx *config.Tx) error {
 		return g.updateBrainBackup(c, tx, id, enabled, exclude)
 	})
 	return err
 }
 
 func (g *Registry) AllowChat(dm bool, entry, brainID string) error {
-	_, err := g.store.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
+	_, err := g.store.UpdateTx("", func(c *config.File, tx *config.Tx) error {
 		if dm {
 			if !slices.Contains(c.AllowedNumbers, entry) {
 				c.AllowedNumbers = append(c.AllowedNumbers, entry)
@@ -169,7 +169,7 @@ func (g *Registry) Update(id string, input manifest.Manifest) error {
 	}
 	// The brain.json the update stages has it check the brain set with
 	// the edit before anything is written (see checkSet).
-	_, err := g.store.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
+	_, err := g.store.UpdateTx("", func(c *config.File, tx *config.Tx) error {
 		return g.updateManifestIn(c, tx, id, func(cur *manifest.Manifest) error {
 			*cur = m
 			return nil
@@ -179,7 +179,7 @@ func (g *Registry) Update(id string, input manifest.Manifest) error {
 }
 
 func (g *Registry) Approve(id string, reviewed manifest.Manifest) error {
-	_, err := g.store.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
+	_, err := g.store.UpdateTx("", func(c *config.File, tx *config.Tx) error {
 		for i := range c.BrainDirs {
 			ref := &c.BrainDirs[i]
 			if ref.Approved == nil || ref.Approved.ID != id {
@@ -208,7 +208,7 @@ func (g *Registry) Approve(id string, reviewed manifest.Manifest) error {
 }
 
 func (g *Registry) Remove(id string) error {
-	_, err := g.store.Update("", func(c *config.Config) error {
+	_, err := g.store.Update("", func(c *config.File) error {
 		for i, ref := range c.BrainDirs {
 			if ref.Approved != nil && ref.Approved.ID == id {
 				c.BrainDirs = slices.Delete(c.BrainDirs, i, i+1)
@@ -222,7 +222,7 @@ func (g *Registry) Remove(id string) error {
 
 func (g *Registry) RemoveDir(path string) error {
 	want := fsx.Canonical(fsx.ExpandHome(path, g.options.Home()))
-	_, err := g.store.Update("", func(c *config.Config) error {
+	_, err := g.store.Update("", func(c *config.File) error {
 		for i, ref := range c.BrainDirs {
 			if ref.Approved == nil && fsx.Canonical(ref.Dir(g.options.Home())) == want {
 				c.BrainDirs = slices.Delete(c.BrainDirs, i, i+1)
@@ -241,7 +241,7 @@ func (g *Registry) RemoveDir(path string) error {
 // hand edit broke say, is not the edit's doing, and does not keep the
 // other brains from being edited or approved. Issues are told apart by
 // brain, kind and detail.
-func (g *Registry) CheckSet(before, after *config.Config) error {
+func (g *Registry) CheckSet(before, after *config.File) error {
 	_, was := g.resolve(before)
 	seen := map[string]bool{}
 	for _, is := range was {
@@ -344,7 +344,7 @@ func (g *Registry) Add(req AddInput) (AddResult, error) {
 	defer scaffold.Close()
 	created := scaffold.Created()
 	writesManifest := false
-	if _, err := g.store.UpdateTx("", func(c *config.Config, tx *config.Tx) error {
+	if _, err := g.store.UpdateTx("", func(c *config.File, tx *config.Tx) error {
 		// Again, against the config this update changes. addMu keeps adds
 		// apart, but not the other config writers: a brain saved or
 		// approved since the check above may claim the same group or the
@@ -382,7 +382,7 @@ func (g *Registry) Add(req AddInput) (AddResult, error) {
 // checkNewBrain checks brain m, to go in folder abs, against the brains cfg
 // (an effective configuration) has: the folder must be none of theirs, in
 // or around one, and m must not clash with them.
-func (g *Registry) checkNewBrain(cfg *config.Config, m manifest.Manifest, abs string) error {
+func (g *Registry) checkNewBrain(cfg *config.File, m manifest.Manifest, abs string) error {
 	if _, problems, _ := g.checkPath(abs, cfg, g.OtherDirs(cfg)); len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
 	}
@@ -393,7 +393,7 @@ func (g *Registry) checkNewBrain(cfg *config.Config, m manifest.Manifest, abs st
 // otherDirs lists every folder in c's brain_dirs, ~ expanded, approved or
 // not: a new brain, or a restore, must not land in, around or on any of
 // them, an entry still waiting for approval included.
-func (g *Registry) OtherDirs(c *config.Config) []string {
+func (g *Registry) OtherDirs(c *config.File) []string {
 	var dirs []string
 	for _, ref := range c.BrainDirs {
 		dirs = append(dirs, ref.Dir(g.options.Home()))
@@ -583,7 +583,7 @@ type View struct {
 	Issues   []Issue            `json:"issues"`
 }
 
-func Views(cfg *config.Config, issues []Issue) []View {
+func Views(cfg *config.File, issues []Issue) []View {
 	byEntry := map[int][]Issue{}
 	for _, is := range issues {
 		// One found at load is about the entry it had then; skip it if the

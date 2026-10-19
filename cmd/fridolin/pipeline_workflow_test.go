@@ -31,7 +31,7 @@ func TestMessagePipelineReadsLiveSettingsAndTransport(t *testing.T) {
 	tb.wa = recorder
 	t.Cleanup(func() { tb.wa = original })
 	for _, keyword := range []string{"@first", "@second"} {
-		if _, err := tb.cfgs.Update("", func(c *config.Config) error {
+		if _, err := tb.cfgs.Update("", func(c *config.File) error {
 			c.Triggers = trigger.FromStrings([]string{keyword})
 			return nil
 		}); err != nil {

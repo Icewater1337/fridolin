@@ -43,7 +43,7 @@ func TestRestartOnlyPathsStayAtBootAfterAPISave(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("save: %d %s", w.Code, w.Body.String())
 	}
-	var saved config.Config
+	var saved config.File
 	if err := json.Unmarshal(h.Config().Effective, &saved); err != nil || saved.DataDir != next {
 		t.Fatalf("API lost next-start projection: %s, %v", h.Config().Effective, err)
 	}
@@ -401,7 +401,7 @@ func TestRuntimeResolutionKeepsRunningPathsProtectedAfterFileEdit(t *testing.T) 
 		t.Fatal(err)
 	}
 	// A regular settings save reads the external edit, publishes, and reconciles.
-	if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.Comment = "reload the external edit"; return nil }); err != nil {
+	if _, err := tb.cfgs.Update("", func(c *config.File) error { c.Comment = "reload the external edit"; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if tb.brainMgr.Get("private") != nil {

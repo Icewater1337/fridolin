@@ -26,7 +26,7 @@ func TestStoreChecksBrainsBeforeWriting(t *testing.T) {
 	refused := errors.New("brain set refused")
 	var cs *Store
 	called := 0
-	check := func(old, next *Config) error {
+	check := func(old, next *File) error {
 		called++
 		if cs.mu.TryLock() {
 			cs.mu.Unlock()
@@ -45,7 +45,7 @@ func TestStoreChecksBrainsBeforeWriting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = cs.UpdateTx("", func(c *Config, tx *Tx) error {
+	_, err = cs.UpdateTx("", func(c *File, tx *Tx) error {
 		c.LogLevel, c.DataDir = "debug", "~/chosen"
 		return tx.CreateManifest(dir, &manifest.Manifest{Version: manifest.Version, ID: "main", Name: "Main"})
 	})
@@ -61,7 +61,7 @@ func TestStoreChecksBrainsBeforeWriting(t *testing.T) {
 	if cs.Get().LogLevel != "info" {
 		t.Error("refused transaction published a snapshot")
 	}
-	if _, err := cs.Update("", func(c *Config) error { c.Comment = "after refusal"; return nil }); err != nil {
+	if _, err := cs.Update("", func(c *File) error { c.Comment = "after refusal"; return nil }); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -74,7 +74,7 @@ func TestStoreRefusesUncheckedBrainUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = cs.UpdateTx("", func(c *Config, tx *Tx) error {
+	_, err = cs.UpdateTx("", func(c *File, tx *Tx) error {
 		c.Comment = "refused"
 		tx.CheckBrains()
 		return nil

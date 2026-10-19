@@ -474,7 +474,7 @@ func needRclone(t *testing.T) string {
 // ~/.local/bin, say) is not under it, and the bridge would not look there.
 func useRclone(t *testing.T, tb *testBridge, rclone string) {
 	t.Helper()
-	if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.Backup.RclonePath = rclone; return nil }); err != nil {
+	if _, err := tb.cfgs.Update("", func(c *config.File) error { c.Backup.RclonePath = rclone; return nil }); err != nil {
 		t.Fatal(err)
 	}
 }

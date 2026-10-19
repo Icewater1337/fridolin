@@ -692,7 +692,7 @@ func (b *Bridge) undelivered(brainID string) []history.Entry {
 // and again when an edit opens DMs to everyone. Allowed senders run Claude
 // with all its permissions, so an open allowlist must not go unnoticed, and
 // a closed one explains why DMs get no answer.
-func logDMAccess(prev, next *config.Config) {
+func logDMAccess(prev, next *config.File) {
 	switch {
 	case next.AnyoneCanDM() && (prev == nil || !prev.AnyoneCanDM()):
 		log.Printf("WARNING: anyone who can message this WhatsApp account can use the assistant: allowed_numbers is empty and allow_any_dm is true. Add your number under Chats → Allowed numbers, or turn allow_any_dm off.")
@@ -710,7 +710,7 @@ func groupRulesFor(r manifest.Routing) groupRules {
 // The brains get the configuration as it is now rather than next, under
 // a lock, so that whichever notification comes last, the brains end on
 // the latest configuration and never on one an update has replaced.
-func (b *Bridge) configChanged(prev, next *config.Config) {
+func (b *Bridge) configChanged(prev, next *config.File) {
 	b.applyMu.Lock()
 	err := b.brainMgr.Apply(runtimeConfig(b.cfgs))
 	b.applyMu.Unlock()

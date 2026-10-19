@@ -70,7 +70,7 @@ func TestSetBridgePATH(t *testing.T) {
 			var logs bytes.Buffer
 			log.SetOutput(&logs)
 			t.Cleanup(func() { log.SetOutput(os.Stderr) })
-			own := setBridgePATH(&config.Config{BrainDirs: c.refs})
+			own := setBridgePATH(&config.File{BrainDirs: c.refs})
 			if got := os.Getenv("PATH"); got != c.want {
 				t.Errorf("PATH = %q, want %q", got, c.want)
 			}
@@ -96,7 +96,7 @@ func TestSetBridgePATH(t *testing.T) {
 		log.SetOutput(&logs)
 		t.Cleanup(func() { log.SetOutput(os.Stderr) })
 		for range 2 {
-			setBridgePATH(&config.Config{BrainDirs: []config.BrainRef{personal}})
+			setBridgePATH(&config.File{BrainDirs: []config.BrainRef{personal}})
 		}
 		if n := strings.Count(logs.String(), "goes to brain personal's runs"); n != 1 {
 			t.Errorf("logged %d times, want once:\n%s", n, logs.String())
@@ -105,11 +105,11 @@ func TestSetBridgePATH(t *testing.T) {
 	t.Run("a removed brain's folder stays off the bridge's PATH", func(t *testing.T) {
 		t.Setenv("PATH", path)
 		t.Setenv(brainPATHVar, "")
-		setBridgePATH(&config.Config{BrainDirs: []config.BrainRef{personal}})
+		setBridgePATH(&config.File{BrainDirs: []config.BrainRef{personal}})
 		var logs bytes.Buffer
 		log.SetOutput(&logs)
 		t.Cleanup(func() { log.SetOutput(os.Stderr) })
-		own := setBridgePATH(&config.Config{})
+		own := setBridgePATH(&config.File{})
 		if got := os.Getenv("PATH"); strings.Contains(got, "/assistant/personal/") {
 			t.Errorf("PATH = %q after brain personal was removed, want its folders still out", got)
 		}

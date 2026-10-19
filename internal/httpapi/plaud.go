@@ -22,7 +22,7 @@ type PlaudAPI struct {
 	Plaud        func() PlaudService
 	CurrentBrain func() string
 	HasBrain     func(string) bool
-	UpdateConfig func(func(*config.Config) error) error
+	UpdateConfig func(func(*config.File) error) error
 }
 
 func (a *PlaudAPI) Resend(w http.ResponseWriter, r *http.Request) {
@@ -89,7 +89,7 @@ func (a *PlaudAPI) Settings(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("there is no approved brain %q", *req.Brain))
 		return
 	}
-	err := a.UpdateConfig(func(c *config.Config) error {
+	err := a.UpdateConfig(func(c *config.File) error {
 		if req.Enabled != nil {
 			c.Plaud.Enabled = *req.Enabled
 		}

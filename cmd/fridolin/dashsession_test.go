@@ -439,7 +439,7 @@ func TestDashboardLink(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cfg := &config.Config{DataDir: t.TempDir(), HTTPListen: stubBridge(t, c.status, c.body)}
+			cfg := &config.File{DataDir: t.TempDir(), HTTPListen: stubBridge(t, c.status, c.body)}
 			if err := os.WriteFile(filepath.Join(cfg.DataDir, "dashboard.token"), []byte(token+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -527,7 +527,7 @@ func TestRotateTokenCommand(t *testing.T) {
 			}
 			sessions, _ := httpapi.LoadDashboardSessions(dataDir, time.Now)
 			id, binding, _, _ := sessions.Create()
-			cfg := &config.Config{DataDir: dataDir, HTTPListen: closedPort(t)}
+			cfg := &config.File{DataDir: dataDir, HTTPListen: closedPort(t)}
 			cfg.Dashboard.Disabled = c.off
 			if err := rotateToken(cfg); err != nil {
 				t.Fatal(err)

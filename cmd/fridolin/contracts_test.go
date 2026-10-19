@@ -49,7 +49,7 @@ type schemaType struct {
 
 // schemaTypes are the schemas of docs/schemas and their Go types.
 var schemaTypes = []schemaType{
-	{schema: "config.schema.json", typ: reflect.TypeFor[config.Config](), closed: true, extra: config.RetiredKeyNames()},
+	{schema: "config.schema.json", typ: reflect.TypeFor[config.File](), closed: true, extra: config.RetiredKeyNames()},
 	{schema: "brain.schema.json", typ: reflect.TypeFor[manifest.Manifest](), closed: true},
 	{schema: "history-line.schema.json", typ: reflect.TypeFor[history.Entry](), closed: true},
 	{schema: "send-request.schema.json", typ: reflect.TypeFor[httpapi.SendRequest]()},
@@ -375,7 +375,7 @@ func TestConfigFilesFollowTheSchema(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := cs.Update(cs.ETag(), func(*config.Config) error { return nil }); err != nil {
+			if _, err := cs.Update(cs.ETag(), func(*config.File) error { return nil }); err != nil {
 				t.Fatal(err)
 			}
 			saved, err := os.ReadFile(path)

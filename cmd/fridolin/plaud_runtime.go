@@ -44,7 +44,7 @@ func plaudOptions(cfgs *config.Store, brains *BrainManager,
 }
 
 // plaudSnapshotOf projects one config snapshot; a poll retains it for its full pass.
-func plaudSnapshotOf(c *config.Config) *plaud.Snapshot {
+func plaudSnapshotOf(c *config.File) *plaud.Snapshot {
 	return &plaud.Snapshot{
 		Plaud: plaud.Settings(c.Plaud), DataDir: c.DataDir, MediaDir: c.MediaDir,
 		QueueMaxPending: c.Queue.MaxPending, OwnerChat: ownerChat(c), Interval: c.Plaud.Interval(),
@@ -62,7 +62,7 @@ func plaudSnapshotOf(c *config.Config) *plaud.Snapshot {
 // runs in place of a program on the bridge's PATH, such as the claude that
 // sandbox-exec starts for every brain's run. The sandbox also keeps brains
 // from writing to every folder on that PATH (see bridgeProgramsOf).
-func brainPlaudPATH(cfg *config.Config) string {
+func brainPlaudPATH(cfg *config.File) string {
 	if !cfg.Plaud.BrainAccess {
 		return ""
 	}

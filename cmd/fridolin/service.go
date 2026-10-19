@@ -681,7 +681,7 @@ func checkInstallDir(dir, home, dataDir string, l platform.BridgeLayout) error {
 // installPlan is what an install writes, worked out before it writes
 // anything.
 type installPlan struct {
-	cfg      *config.Config
+	cfg      *config.File
 	unitPath string
 	dir      string
 	binary   string                // the installed binary
@@ -1108,7 +1108,7 @@ func (h *serviceHost) retireLegacyAgent() {
 // launchd reads a rewritten plist only then, and bootout stops the bridge
 // with SIGTERM, so it shuts down cleanly. systemd's `enable --now` would
 // leave a running unit alone, hence the restart.
-func (h *serviceHost) restart(cfg *config.Config, unitPath, want string) error {
+func (h *serviceHost) restart(cfg *config.File, unitPath, want string) error {
 	started := time.Now()
 	switch h.goos {
 	case "darwin":
@@ -1164,7 +1164,7 @@ func (h *serviceHost) askBridge(base string) bridgeAnswer {
 // started after since: the old one may still answer for a moment while it
 // shuts down. Then it checks the version is want (unless that is "") and
 // says whether WhatsApp still needs pairing.
-func (h *serviceHost) waitForBridge(cfg *config.Config, since time.Time, want string) error {
+func (h *serviceHost) waitForBridge(cfg *config.File, since time.Time, want string) error {
 	if !cfg.HTTPEnabled() {
 		h.printf("http_listen is off, so there is nothing to check; see the log: %s", h.logHint())
 		return nil

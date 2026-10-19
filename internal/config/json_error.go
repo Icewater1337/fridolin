@@ -12,10 +12,18 @@ import (
 // compat: these diagnostics are part of the CLI and dashboard contracts.
 func JSONError(err error) error {
 	err = jsonx.RenameTypeError(err, func(t reflect.Type) string {
-		if t.PkgPath() == reflect.TypeFor[Config]().PkgPath() {
+		if t == reflect.TypeFor[File]() {
+			return "main.Config"
+		}
+		if t.PkgPath() == reflect.TypeFor[File]().PkgPath() {
 			return "main." + t.Name()
 		}
 		return ""
-	}, nil)
+	}, func(name string) string {
+		if name == "File" {
+			return "Config"
+		}
+		return ""
+	})
 	return manifest.JSONError(err)
 }

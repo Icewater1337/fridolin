@@ -42,9 +42,6 @@ var (
 	remoteNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
 )
 
-// defaultIncludeBridgeConfig is include_bridge_config's default.
-const defaultIncludeBridgeConfig = true
-
 // includeBridge and keepVersions read the two settings that are pointers so
 // that an unset one can be told from false or 0. Resolve fills both in,
 // with the same defaults, so the default of each lives in one place.
