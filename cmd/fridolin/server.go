@@ -49,34 +49,8 @@ type ingestRequest struct {
 	Scope string `json:"scope"`
 }
 
-// readyResponse is the body of GET /ready: whether messages can go out and
-// which build answers. Nothing in it identifies the account.
-type readyResponse struct {
-	Ready     bool      `json:"ready"`
-	WhatsApp  string    `json:"whatsapp"` // WAState.Mode
-	Version   string    `json:"version"`
-	StartedAt time.Time `json:"started_at"`
-}
-
-// httpReady handles GET /ready: 200 when /send can deliver (WhatsApp is
-// connected, or dev mode simulates it), else 503 with the same body, so a
-// script can tell a bridge that still needs pairing from one that was
-// logged out. /health stays plain liveness: right after setup the bridge
-// is up but not paired, and waiting for ready there would never end.
 func (b *Bridge) httpReady(w http.ResponseWriter, r *http.Request) {
-	mode := b.wa.State().Mode
-	resp := readyResponse{
-		Ready:     mode == "connected" || b.dev != nil,
-		WhatsApp:  mode,
-		Version:   version.String(),
-		StartedAt: b.started,
-	}
-	status := http.StatusOK
-	if !resp.Ready {
-		status = http.StatusServiceUnavailable
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	httpapi.WriteJSON(w, status, resp)
+	ReadyAPI{Connection: b.wa, DevMode: b.dev != nil, Version: version.String, StartedAt: b.started}.ServeHTTP(w, r)
 }
 
 // httpSend handles POST /send {"jid":"…","text":"…"} for local scripts.
