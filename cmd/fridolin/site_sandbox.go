@@ -103,12 +103,6 @@ func siteSandboxAvailable(execPath string) error {
 	return nil
 }
 
-// SiteSandboxStatus is what the dashboard shows about the sandbox.
-type SiteSandboxStatus struct {
-	On   bool   `json:"on"`
-	Note string `json:"note"`
-}
-
 // SandboxStatus says whether the live site runs sandboxed.
 func (m *SiteManager) SandboxStatus() SiteSandboxStatus {
 	if err := siteSandboxAvailable(m.sandboxExec); err != nil {

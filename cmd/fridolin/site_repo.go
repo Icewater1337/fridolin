@@ -347,40 +347,6 @@ func copyEmbedded(fsys fs.FS, root, dst string) error {
 
 // ── what changed ────────────────────────────────────────────────────────────
 
-// SiteCommit is one commit on the branch.
-type SiteCommit struct {
-	Commit  string `json:"commit"`
-	Subject string `json:"subject"`
-	Author  string `json:"author"`
-	At      string `json:"at"`
-}
-
-// SiteUpdates is what the branch has beyond the approved commit.
-type SiteUpdates struct {
-	Head     string         `json:"head"`
-	Approved string         `json:"approved"`
-	Commits  []SiteCommit   `json:"commits"`
-	Changes  []ModuleChange `json:"changes"`
-}
-
-// ModuleChange is one module that differs between the approved commit and another one.
-type ModuleChange struct {
-	ID     string `json:"id"`
-	Status string `json:"status"` // added, removed, changed
-	// Review lists what an approver should look at: access, routes, server
-	// code, files, commands, secrets, public files.
-	Review []ReviewItem `json:"review"`
-	Files  []string     `json:"files"`
-}
-
-// ReviewItem is one security-relevant manifest field that changed.
-type ReviewItem struct {
-	Field string `json:"field"`
-	Old   any    `json:"old"`
-	New   any    `json:"new"`
-	Note  string `json:"note"`
-}
-
 // Fetch updates the clone and reports what the branch has beyond the approved commit.
 func (m *SiteManager) Fetch(ctx context.Context) (SiteUpdates, error) {
 	s := m.Settings()

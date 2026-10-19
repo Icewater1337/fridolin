@@ -124,19 +124,6 @@ func (m *SiteManager) RemoveSecret(module, name string) error {
 	return m.saveSecretsLocked(module, v)
 }
 
-// SiteModuleSecrets is one module's secrets as the dashboard shows them:
-// the names, never the values.
-type SiteModuleSecrets struct {
-	Module string `json:"module"`
-	Title  string `json:"title"`
-	// Live: the module is in the live commit.
-	Live bool `json:"live"`
-	// Declared are the names its live module.json lists; Set those with a
-	// value, declared or not (a value nobody declares reaches no module).
-	Declared []string `json:"declared"`
-	Set      []string `json:"set"`
-}
-
 // Secrets lists the live modules that declare secrets, and every module
 // with a value saved.
 func (m *SiteManager) Secrets() ([]SiteModuleSecrets, error) {

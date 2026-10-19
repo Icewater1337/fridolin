@@ -36,16 +36,6 @@ import (
 	"github.com/Icewater1337/fridolin/site"
 )
 
-// SiteProposal is a change a builder brain pushed for review.
-type SiteProposal struct {
-	Branch  string `json:"branch"` // builder/<brain>
-	Brain   string `json:"brain"`
-	Title   string `json:"title"`
-	Summary string `json:"summary"`
-	Commit  string `json:"commit"`
-	At      string `json:"at"`
-}
-
 func (m *SiteManager) builderBase(brainID string) string {
 	dir := ""
 	if m.hooks.BrainDir != nil {
@@ -384,19 +374,6 @@ func (m *SiteManager) BuilderContext(brainID string) map[string]any {
 		}
 	}
 	return ctx
-}
-
-// CheckResult is what site_check returns.
-type CheckResult struct {
-	Mounted []string       `json:"mounted"`
-	Broken  []BrokenModule `json:"broken"`
-	Review  []ModuleChange `json:"review"`
-}
-
-// BrokenModule is a module the site would skip, and why.
-type BrokenModule struct {
-	ID    string `json:"id"`
-	Error string `json:"error"`
 }
 
 // BuilderCheck loads the workspace's modules the way the site will — inside

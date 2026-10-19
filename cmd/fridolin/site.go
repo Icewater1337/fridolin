@@ -49,54 +49,6 @@ const (
 	siteKeepDeploys   = 3
 )
 
-// SiteSettings is <data_dir>/site/settings.json, edited from the dashboard.
-type SiteSettings struct {
-	Enabled bool   `json:"enabled"`
-	Title   string `json:"title"`
-	// Listen is where the site process listens; a tunnel forwards the domain to it.
-	Listen string `json:"listen"`
-	// Domain is the public host name, e.g. "example.com" (https assumed).
-	Domain string   `json:"domain"`
-	Repo   SiteRepo `json:"repo"`
-	// Roles users can have. "admin" is always one of them.
-	Roles []string `json:"roles"`
-	// Approved is the commit the live site serves.
-	Approved string       `json:"approved"`
-	History  []SiteDeploy `json:"history"`
-	// Tunnel runs cloudflared with the saved tunnel token.
-	Tunnel bool `json:"tunnel"`
-	// Builders are the brains allowed to build the site (site_builder.go).
-	Builders  []string       `json:"builders"`
-	Proposals []SiteProposal `json:"proposals"`
-}
-
-// SiteRepo is the private repository that holds the site's modules.
-type SiteRepo struct {
-	URL    string `json:"url"`
-	Branch string `json:"branch"`
-	// Subdir is the folder inside the repository that holds modules/ ("" = the root).
-	Subdir string `json:"subdir"`
-}
-
-// SiteDeploy is one approved commit.
-type SiteDeploy struct {
-	Commit  string `json:"commit"`
-	Subject string `json:"subject"`
-	At      string `json:"at"`
-}
-
-// SiteUser is one account in users.json. The site process reads the same file.
-type SiteUser struct {
-	ID           string `json:"id"`
-	Kind         string `json:"kind"` // google | password
-	Email        string `json:"email,omitempty"`
-	Username     string `json:"username,omitempty"`
-	Name         string `json:"name,omitempty"`
-	Role         string `json:"role"`
-	PasswordHash string `json:"password_hash,omitempty"`
-	Created      string `json:"created"`
-}
-
 // SiteManager runs the site.
 type SiteManager struct {
 	dataDir      string
@@ -213,15 +165,6 @@ var (
 	siteEmailRE  = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 )
 
-// SiteSettingsUpdate is what the dashboard may change directly.
-type SiteSettingsUpdate struct {
-	Enabled *bool   `json:"enabled"`
-	Title   *string `json:"title"`
-	Listen  *string `json:"listen"`
-	Domain  *string `json:"domain"`
-	Tunnel  *bool   `json:"tunnel"`
-}
-
 // UpdateSettings validates and saves a change, then starts, restarts or
 // stops what the change affects.
 func (m *SiteManager) UpdateSettings(u SiteSettingsUpdate) (SiteSettings, error) {
@@ -337,20 +280,6 @@ func (m *SiteManager) Users() []SiteUser {
 		out[i] = u
 	}
 	return out
-}
-
-// SiteUserInput adds or changes an account.
-type SiteUserInput struct {
-	Kind     string `json:"kind"`
-	Email    string `json:"email"`
-	Username string `json:"username"`
-	Name     string `json:"name"`
-	Role     string `json:"role"`
-	Password string `json:"password"`
-	// PasswordHash moves a password account over from another app with the
-	// password its owner had there: a bcrypt hash, which the site checks as
-	// it is. Only when adding an account, instead of Password.
-	PasswordHash string `json:"password_hash"`
 }
 
 func (m *SiteManager) checkRoleLocked(kind, role string) error {
@@ -906,15 +835,6 @@ func (m *SiteManager) runNpmInstall(ctx context.Context, dir string, prod bool) 
 		return fmt.Errorf("npm %s: %v\n%s", args[0], err, textx.Tail(string(out), 1500))
 	}
 	return nil
-}
-
-// SiteProcStatus is what the dashboard shows about one process.
-type SiteProcStatus struct {
-	State    string   `json:"state"` // stopped, starting, running, crashed
-	Since    string   `json:"since,omitempty"`
-	Error    string   `json:"error,omitempty"`
-	Restarts int      `json:"restarts"`
-	Log      []string `json:"log"`
 }
 
 // siteProc keeps one process running: it restarts it after a crash, waiting
