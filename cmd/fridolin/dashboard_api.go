@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/access"
+	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/brain"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -178,7 +179,7 @@ type statusResponse struct {
 	Brains        []brain.Runtime   `json:"brains"`
 	Issues        []registry.Issue  `json:"issues"`
 	Warnings      []string          `json:"warnings"`
-	Backup        backupSummary     `json:"backup"`
+	Backup        backup.Summary    `json:"backup"`
 	Ingest        bool              `json:"ingest"`
 	Pending       int               `json:"debouncing"`
 	// Settings saved since the start that only apply after a restart. The

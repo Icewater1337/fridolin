@@ -1,4 +1,4 @@
-package main
+package backup
 
 import (
 	"bytes"
@@ -10,30 +10,20 @@ import (
 	"io/fs"
 	"log"
 	"maps"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 
-	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
-
-	"github.com/Icewater1337/fridolin/internal/config"
-	"github.com/Icewater1337/fridolin/internal/registry"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
-	"github.com/Icewater1337/fridolin/internal/sandbox"
 	"github.com/Icewater1337/fridolin/internal/textx"
-	"golang.org/x/text/unicode/norm"
 )
 
 // Backups go to Google Drive through rclone (https://rclone.org), driven by
@@ -54,33 +44,16 @@ import (
 // scheduled run that refuses tells the owner on WhatsApp (see
 // noticeRefusal).
 
-// bridgeBackupID stands for the bridge's own settings wherever backups
+// BridgeID stands for the bridge's own settings wherever backups
 // list brains by id: in a job, in the backup state, and in Drive, where it
 // is the folder name above, so it must not change. The dashboard holds it
 // as BRIDGE_BACKUP_ID (web/assets/lib/brain.js) and shows it as "Bridge
 // settings". It cannot clash with a brain: brain ids start with a letter
 // or digit.
-const bridgeBackupID = "_bridge"
+const BridgeID = "_bridge"
 
-// backupSecretExcludes are the files of a brain folder a backup leaves out
-// whatever the brain's exclude list says, unless include_secret_files is on:
-// a brain may keep API keys in a .env, private keys, and a calendar token
-// or CLI login copied into its folder, and a copy in Drive is one more
-// place they can leak from. Every '+' line of an exclude list is dropped
-// (see filterLines), so none can include them again. "*.key" is not among
-// them: it is also Keynote's extension. docs/BACKUP.md and the dashboard's
-// Backup page list them; TestBackupSecretExcludesAreDocumented keeps the
-// docs in step.
-var backupSecretExcludes = []string{
-	".env", ".env.*",
-	"*.pem", "*.p12",
-	"id_rsa*", "id_ecdsa*", "id_ed25519*",
-	"google_calendar_*.json",
-	".credentials.json",
-}
-
-// BackupResult is the outcome of backing up one brain (or the bridge config).
-type BackupResult struct {
+// Result is the outcome of backing up one brain (or the bridge config).
+type Result struct {
 	Started  time.Time `json:"started"`
 	Finished time.Time `json:"finished"`
 	OK       bool      `json:"ok"`
@@ -100,9 +73,9 @@ type backupState struct {
 	// ArmedAt is when the daily backup was last switched on or moved to
 	// another time. That day's run is due only if its time comes after
 	// this, so neither starts a backup at once (see nextDue).
-	ArmedAt time.Time                `json:"armed_at,omitzero"`
-	Brains  map[string]*BackupResult `json:"brains"`
-	Bridge  *BackupResult            `json:"bridge"`
+	ArmedAt time.Time          `json:"armed_at,omitzero"`
+	Brains  map[string]*Result `json:"brains"`
+	Bridge  *Result            `json:"bridge"`
 	// LastRestore is how the last restore went, for the Backup page.
 	LastRestore *RestoreResult `json:"last_restore,omitempty"`
 	// RefusalNotices holds when the owner was told on WhatsApp that a
@@ -144,10 +117,9 @@ type backupJob struct {
 	cancel        context.CancelFunc
 }
 
-// BackupManager runs and schedules backups.
-type BackupManager struct {
-	cfgs *config.Store
-	bm   *BrainManager
+// Manager runs and schedules backups.
+type Manager struct {
+	opts Options
 
 	mu      sync.Mutex
 	state   backupState
@@ -170,7 +142,7 @@ type BackupManager struct {
 	now func() time.Time
 	// notify sends a WhatsApp message about a brain to its owner. The bridge
 	// sets it; nil sends nothing.
-	notify func(ctx context.Context, br *brainruntime.Brain, text string) error
+	notify func(ctx context.Context, target Target, text string) error
 	// idleWait is how long a brain's backup waits for the brain to finish
 	// what it is running; see backupBrain.
 	idleWait time.Duration
@@ -193,13 +165,16 @@ const (
 // Back up now disabled.
 var refusalNoticeTimeout = 30 * time.Second
 
-// NewBackupManager loads the saved backup state. A state file that cannot
+// New loads the saved backup state. A state file that cannot
 // be read is kept as state.json.corrupt and the bridge starts with none: the
 // last results and the day of the last scheduled run are gone then, and the
 // log says so rather than leaving it to the next scheduled run to show.
-func NewBackupManager(cfgs *config.Store, bm *BrainManager) *BackupManager {
-	m := &BackupManager{cfgs: cfgs, bm: bm, now: time.Now, idleWait: backupIdleWait}
-	m.runner = m.runRclone
+func New(opts Options) *Manager {
+	m := &Manager{opts: opts, now: time.Now, idleWait: backupIdleWait, notify: opts.Notify}
+	m.runner = opts.Runner
+	if m.runner == nil {
+		m.runner = m.runRclone
+	}
 	data, err := os.ReadFile(m.statePath())
 	switch {
 	case err == nil:
@@ -209,34 +184,24 @@ func NewBackupManager(cfgs *config.Store, bm *BrainManager) *BackupManager {
 			if werr := fsx.WriteFileAtomic(kept, data, 0o600, false); werr != nil {
 				kept = "not kept: " + werr.Error()
 			}
-			log.Printf("backup: %s is unreadable (%v); starting without the last results and schedule (the old file: %s)", m.statePath(), jerr, kept)
+			log.Printf("backup: %s is unreadable (%v); starting without the last results and schedule (the old file: %s)", m.statePath(), backupJSONError(jerr), kept)
 		}
 	case !errors.Is(err, fs.ErrNotExist):
 		log.Printf("backup: reading %s: %v; starting without the last results and schedule", m.statePath(), err)
 	}
 	if m.state.Brains == nil {
-		m.state.Brains = map[string]*BackupResult{}
+		m.state.Brains = map[string]*Result{}
 	}
-	// After the change is saved, never while it is being made: a change
-	// that validation or the write then refuses must not move the schedule.
-	cfgs.Subscribe(func(prev, next *config.Config) {
-		if next.Backup.Enabled && (!prev.Backup.Enabled || prev.Backup.DailyAt != next.Backup.DailyAt) {
-			m.mu.Lock()
-			m.state.ArmedAt = m.now()
-			m.saveStateLocked()
-			m.mu.Unlock()
-		}
-	})
 	return m
 }
 
-func (m *BackupManager) dir() string       { return m.cfgs.Boot().BackupDir() }
-func (m *BackupManager) statePath() string { return filepath.Join(m.dir(), "state.json") }
-func (m *BackupManager) rcloneConf() string {
-	return m.cfgs.Boot().RcloneConf()
+func (m *Manager) dir() string       { return m.opts.BackupDir }
+func (m *Manager) statePath() string { return filepath.Join(m.dir(), "state.json") }
+func (m *Manager) rcloneConf() string {
+	return m.opts.RcloneConf
 }
 
-func (m *BackupManager) saveStateLocked() {
+func (m *Manager) saveStateLocked() {
 	data, err := json.MarshalIndent(m.state, "", "  ")
 	if err == nil {
 		err = fsx.WriteFileAtomic(m.statePath(), data, 0o600, false)
@@ -248,7 +213,7 @@ func (m *BackupManager) saveStateLocked() {
 
 // goLocked runs fn in a goroutine that Stop waits for, unless Stop already
 // ran. Hold m.mu.
-func (m *BackupManager) goLocked(fn func()) error {
+func (m *Manager) goLocked(fn func()) error {
 	if m.stopped {
 		return errBackupStopped
 	}
@@ -264,79 +229,22 @@ func (m *BackupManager) goLocked(fn func()) error {
 var errBackupStopped = errors.New("the bridge is stopping")
 
 // rclonePath finds the rclone binary.
-func (m *BackupManager) rclonePath() (string, error) {
-	return findRclone(m.cfgs.Get().Backup.RclonePath)
-}
-
-// findRclone finds the rclone binary, given backup.rclone_path. The sandbox
-// profile uses it too, to keep brains from replacing the binary (see
-// bridgeProgramsOf).
-//
-// A configured path must work as it is: falling back would quietly run
-// another rclone, maybe another version, than the one you named, and hide
-// the typo. A name without a folder, and rclone itself when none is
-// configured, is looked up only in the PATH folders helperPath keeps:
-// rclone runs outside the sandbox. Only without a configured one does it
-// look further, where launchd's PATH lacks Homebrew's folder and rclone's
-// installer's.
-func findRclone(p string) (string, error) {
-	if p != "" {
-		if !strings.Contains(p, "/") {
-			if found := lookPathIn(p, helperPath()); found != "" {
-				return found, nil
-			}
-			return "", fmt.Errorf("backup.rclone_path %s: %w", p, exec.ErrNotFound)
-		}
-		found, err := exec.LookPath(p)
-		if err != nil {
-			return "", fmt.Errorf("backup.rclone_path %s: %w", p, err)
-		}
-		return found, nil
-	}
-	if found := lookPathIn("rclone", helperPath()); found != "" {
-		return found, nil
-	}
-	for _, c := range rcloneFallbacks() {
-		// For an absolute path LookPath only checks that it is an
-		// executable file: one that merely exists would fail to run.
-		if found, err := exec.LookPath(c); err == nil {
-			return found, nil
-		}
-	}
-	return "", errRcloneMissing
-}
-
-// errRcloneMissing is findRclone's error when no rclone_path is set and no
-// rclone is found.
-var errRcloneMissing = errors.New("rclone is not installed")
-
-// rcloneFallbacks are where findRclone looks when rclone is not in the
-// folders of PATH it looks in first, a variable so tests can point it at
-// their own files.
-var rcloneFallbacks = func() []string {
-	return []string{"/opt/homebrew/bin/rclone", "/usr/local/bin/rclone", filepath.Join(homeDir(), ".local/bin/rclone")}
+func (m *Manager) rclonePath() (string, error) {
+	return m.opts.FindRclone(m.opts.Settings().RclonePath)
 }
 
 // rcloneMissingHint says what to do about findRclone's error: install
 // rclone, or fix backup.rclone_path, whose error names the path.
-func rcloneMissingHint(err error) string {
-	if errors.Is(err, errRcloneMissing) {
-		return err.Error() + " — " + rcloneInstallHint()
+func (m *Manager) rcloneMissingHint(err error) string {
+	if errors.Is(err, ErrRcloneMissing) {
+		return err.Error() + " — " + m.opts.InstallHint()
 	}
 	return err.Error()
 }
 
-// rcloneEnv is the environment for rclone run as scope (see helperScope):
-// what childEnv gives it, and the bridge's own config file. None of your
-// RCLONE_* settings are on childEnvAllowlist, and child_env_passthrough is
-// for brains, so rclone gets neither.
-func (m *BackupManager) rcloneEnv(scope childScope) []string {
-	return childEnv(scope, nil, "RCLONE_CONFIG="+m.rcloneConf())
-}
-
 // runRclone runs rclone with the isolated config. Stdout is returned to the
 // caller and never logged (config commands print tokens there).
-func (m *BackupManager) runRclone(ctx context.Context, args []string, stderr io.Writer) ([]byte, error) {
+func (m *Manager) runRclone(ctx context.Context, args []string, stderr io.Writer) ([]byte, error) {
 	bin, err := m.rclonePath()
 	if err != nil {
 		return nil, err
@@ -351,7 +259,7 @@ func (m *BackupManager) runRclone(ctx context.Context, args []string, stderr io.
 	// there rcloneStopGrace later.
 	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
 	cmd.WaitDelay = rcloneStopGrace
-	cmd.Env = m.rcloneEnv(helperScope(ctx))
+	cmd.Env = m.opts.Environ(ctx)
 	cmd.Stdin = nil
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -375,12 +283,12 @@ var (
 // connected reports whether the isolated rclone config has a usable remote:
 // a Drive remote with a token, or any other kind of remote someone set up by
 // hand (rclone supports dozens of storage providers).
-func (m *BackupManager) connected() bool {
+func (m *Manager) connected() bool {
 	data, err := os.ReadFile(m.rcloneConf())
 	if err != nil {
 		return false
 	}
-	section := rcloneSection(string(data), m.cfgs.Get().Backup.Remote)
+	section := RcloneSection(string(data), m.opts.Settings().Remote)
 	if section == nil {
 		return false
 	}
@@ -390,33 +298,9 @@ func (m *BackupManager) connected() bool {
 	return section["type"] != ""
 }
 
-// rcloneSection returns the key/values of one [name] section of an rclone
-// config file, or nil when it is absent.
-func rcloneSection(conf, name string) map[string]string {
-	var cur map[string]string
-	for _, line := range strings.Split(conf, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			if cur != nil {
-				return cur
-			}
-			if line[1:len(line)-1] == name {
-				cur = map[string]string{}
-			}
-			continue
-		}
-		if cur != nil {
-			if k, v, ok := strings.Cut(line, "="); ok {
-				cur[strings.TrimSpace(k)] = strings.TrimSpace(v)
-			}
-		}
-	}
-	return cur
-}
-
 // ── summary and status ───────────────────────────────────────────────────
 
-type backupSummary struct {
+type Summary struct {
 	Connected bool       `json:"connected"`
 	Enabled   bool       `json:"enabled"`
 	Running   bool       `json:"running"`
@@ -433,18 +317,18 @@ type backupSummary struct {
 // brains that run and the bridge's settings, as the Backup page does, and
 // its error is the latest failure among them, whatever order the results
 // are stored in: with several, a refresh must not show another each time.
-func (m *BackupManager) Summary() backupSummary {
-	cfg := m.cfgs.Get()
-	brains := m.bm.Brains()
+func (m *Manager) Summary() Summary {
+	cfg := m.opts.Settings()
+	brains := m.opts.Targets()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	s := backupSummary{Connected: m.connected(), Enabled: cfg.Backup.Enabled, Running: m.job != nil}
+	s := Summary{Connected: m.connected(), Enabled: cfg.Enabled, Running: m.job != nil}
 	s.Restoring = s.Running && m.job.kind == jobRestore
-	results := map[string]*BackupResult{bridgeBackupID: m.state.Bridge}
+	results := map[string]*Result{BridgeID: m.state.Bridge}
 	for _, br := range brains {
-		results[br.ID()] = m.state.Brains[br.ID()]
+		results[br.ID] = m.state.Brains[br.ID]
 	}
-	var failed *BackupResult
+	var failed *Result
 	for id, r := range results {
 		switch {
 		case r == nil:
@@ -471,13 +355,12 @@ func (m *BackupManager) Summary() backupSummary {
 // brain that reuses an id does not start with another's last result. A
 // brain whose folder is missing for now is still configured, and keeps
 // its result. Hold m.mu.
-func (m *BackupManager) forgetRemovedLocked(cfg *config.Config) {
+func (m *Manager) forgetRemovedLocked(cfg Settings) {
 	configured := map[string]bool{}
-	for _, ref := range cfg.BrainDirs {
-		if ref.Approved != nil {
-			configured[ref.Approved.ID] = true
-		}
+	for _, id := range cfg.ConfiguredIDs {
+		configured[id] = true
 	}
+
 	for id := range m.state.Brains {
 		if !configured[id] {
 			delete(m.state.Brains, id)
@@ -485,100 +368,20 @@ func (m *BackupManager) forgetRemovedLocked(cfg *config.Config) {
 	}
 }
 
-// dayLayout names a day in backupState.LastScheduledDay.
-const dayLayout = "2006-01-02"
-
-// dueOn is daily_at on day's date, in day's time zone. On a day whose
-// clocks skip that time it is the moment the clocks jump to, as time.Date
-// has it. daily_at is valid HH:MM: effective refuses anything else.
-func dueOn(day time.Time, dailyAt string) time.Time {
-	t, _ := time.Parse("15:04", dailyAt)
-	y, m, d := day.Date()
-	return time.Date(y, m, d, t.Hour(), t.Minute(), 0, 0, day.Location())
-}
-
-// nextDue is the daily schedule, for the scheduler and the status page
-// alike: the next scheduled run is today's at daily_at, unless it already
-// ran today (lastRunDay) or the schedule was switched on or moved after
-// today's time (armedAt). Then it is tomorrow's. runNow says that today's
-// is due: the time has come, perhaps while the machine slept.
-func nextDue(now time.Time, dailyAt, lastRunDay string, armedAt time.Time) (due time.Time, runNow bool) {
-	due = dueOn(now, dailyAt)
-	if lastRunDay == now.Format(dayLayout) || !due.After(armedAt) {
-		y, m, d := now.Date()
-		return dueOn(time.Date(y, m, d+1, 12, 0, 0, 0, now.Location()), dailyAt), false
-	}
-	return due, !now.Before(due)
-}
-
 // nextRunLocked is when the next scheduled backup runs, for the status:
 // none while the schedule is off or Drive is not connected, since it would
 // never come, and now for a run that is due and only waits for the next
 // tick. Hold m.mu.
-func (m *BackupManager) nextRunLocked(cfg *config.Config, connected bool) *time.Time {
-	if !cfg.Backup.Enabled || !connected {
+func (m *Manager) nextRunLocked(cfg Settings, connected bool) *time.Time {
+	if !cfg.Enabled || !connected {
 		return nil
 	}
 	now := m.now()
-	due, runNow := nextDue(now, cfg.Backup.DailyAt, m.state.LastScheduledDay, m.state.ArmedAt)
+	due, runNow := Due(now, cfg.DailyAt, m.state.LastScheduledDay, m.state.ArmedAt)
 	if runNow {
 		due = now
 	}
 	return &due
-}
-
-func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
-	m := b.backup
-	cfg := b.cfgs.Get()
-	rc := map[string]any{"found": false, "install_hint": rcloneInstallHint()}
-	if p, err := m.rclonePath(); err == nil {
-		rc["found"], rc["path"], rc["version"] = true, p, rcloneVersion(p, m.rcloneEnv(anyChild))
-	} else if !errors.Is(err, errRcloneMissing) {
-		rc["error"] = err.Error() // backup.rclone_path names one that does not work
-	}
-	// The response is built under the lock and written after it: a client
-	// that reads slowly must not hold up the backup job.
-	m.mu.Lock()
-	type brainRow struct {
-		ID      string        `json:"id"`
-		Name    string        `json:"name"`
-		Dir     string        `json:"dir"`
-		Enabled bool          `json:"enabled"`
-		Exclude []string      `json:"exclude"`
-		Last    *BackupResult `json:"last"`
-	}
-	rows := []brainRow{}
-	for _, br := range b.brainMgr.Brains() {
-		manifest := br.Manifest()
-		rows = append(rows, brainRow{ID: br.ID(), Name: manifest.Name, Dir: br.Dir(), Enabled: manifest.Backup.Enabled,
-			Exclude: nonNil(manifest.Backup.Exclude), Last: copyOf(m.state.Brains[br.ID()])})
-	}
-	var job map[string]any
-	if j := m.job; j != nil {
-		job = map[string]any{"kind": j.kind, "started": j.started, "current": j.current,
-			"queue": slices.Clone(j.queue), "done": slices.Clone(j.done)}
-		if j.kind == jobRestore {
-			job["brain"], job["target"] = j.brain, j.target
-		}
-	}
-	connected := m.connected()
-	resp := map[string]any{
-		"rclone":                rc,
-		"connected":             connected,
-		"connect":               copyOf(m.connect),
-		"settings":              cfg.Backup,
-		"include_bridge_config": cfg.Backup.IncludeBridge(),
-		"secret_excludes":       backupSecretExcludes,
-		"brains":                rows,
-		"bridge":                copyOf(m.state.Bridge),
-		"job":                   job,
-		"last_restore":          copyOf(m.state.LastRestore),
-	}
-	if next := m.nextRunLocked(cfg, connected); next != nil {
-		resp["next_run"] = *next
-	}
-	m.mu.Unlock()
-	httpapi.WriteJSON(w, http.StatusOK, resp)
 }
 
 // rcloneVersionKey names one build of rclone: an upgrade in place (brew
@@ -617,17 +420,6 @@ func rcloneVersion(p string, env []string) string {
 	return v
 }
 
-func rcloneInstallHint() string {
-	switch {
-	case fsx.Exists("/opt/homebrew/bin/brew") || fsx.Exists("/usr/local/bin/brew"):
-		return "brew install rclone"
-	case fsx.Exists("/usr/bin/apt-get"):
-		return "sudo apt-get install rclone   (or: sudo -v ; curl https://rclone.org/install.sh | sudo bash)"
-	default:
-		return "See https://rclone.org/install/"
-	}
-}
-
 // ── connecting Google Drive ──────────────────────────────────────────────
 
 var authURLRe = regexp.MustCompile(`http://127\.0\.0\.1:\d+/auth\?state=[A-Za-z0-9_-]+`)
@@ -657,62 +449,6 @@ func answerFor(q rcloneQuestion) string {
 	return q.Option.DefaultStr
 }
 
-func (b *Bridge) apiBackupConnect(w http.ResponseWriter, r *http.Request) {
-	m := b.backup
-	if _, err := m.rclonePath(); err != nil {
-		httpapi.WriteErr(w, http.StatusPreconditionFailed, rcloneMissingHint(err))
-		return
-	}
-	// Connecting starts by deleting the remote, so it would throw away a
-	// working link, for good if the new sign-in is then abandoned, and a
-	// backup running on it would fail half-way. Disconnect comes first.
-	if m.connected() {
-		httpapi.WriteErr(w, http.StatusConflict, "Google Drive is already connected — disconnect it first to connect another account")
-		return
-	}
-	m.mu.Lock()
-	if m.connect != nil && m.connect.State == "running" {
-		m.mu.Unlock()
-		httpapi.WriteErr(w, http.StatusConflict, "already connecting — finish in the browser tab rclone opened")
-		return
-	}
-	if m.job != nil {
-		m.mu.Unlock()
-		httpapi.WriteErr(w, http.StatusConflict, "a backup or restore is running — wait for it or cancel it first")
-		return
-	}
-	if m.disconnecting {
-		m.mu.Unlock()
-		httpapi.WriteErr(w, http.StatusConflict, errDisconnecting.Error())
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
-	job := &connectJob{State: "running", cancel: cancel, done: make(chan struct{})}
-	err := m.goLocked(func() {
-		defer close(job.done)
-		defer cancel()
-		err := m.connectDrive(ctx, job)
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		if err != nil {
-			job.State, job.Error = "error", err.Error()
-			log.Printf("backup: connecting Google Drive failed: %v", err)
-			return
-		}
-		job.State, job.AuthURL = "done", ""
-		log.Printf("backup: Google Drive connected")
-	})
-	if err != nil {
-		m.mu.Unlock()
-		cancel()
-		httpapi.WriteErr(w, http.StatusServiceUnavailable, err.Error())
-		return
-	}
-	m.connect = job
-	m.mu.Unlock()
-	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
-}
-
 // connectTimeout is how long a Drive sign-in waits for you to approve it.
 const connectTimeout = 10 * time.Minute
 
@@ -724,9 +460,9 @@ const connectSteps = 10
 // starts rclone's local OAuth listener and opens the browser, which is why
 // its runs get your desktop session's variables; that step blocks until you
 // approve access (or connectTimeout runs out).
-func (m *BackupManager) connectDrive(ctx context.Context, job *connectJob) error {
-	ctx = withDesktop(ctx)
-	remote := m.cfgs.Get().Backup.Remote
+func (m *Manager) connectDrive(ctx context.Context, job *connectJob) error {
+	ctx = m.opts.DesktopContext(ctx)
+	remote := m.opts.Settings().Remote
 	// What is left of a remote that is not connected, one whose sign-in was
 	// abandoned say, would make config create fail. apiBackupConnect keeps
 	// a connected one from getting here.
@@ -753,7 +489,7 @@ func (m *BackupManager) connectDrive(ctx context.Context, job *connectJob) error
 		}
 		var q rcloneQuestion
 		if err := json.Unmarshal(out, &q); err != nil {
-			return fmt.Errorf("unexpected rclone output: %w %s", err, stderr.tail())
+			return fmt.Errorf("unexpected rclone output: %w %s", backupJSONError(err), stderr.tail())
 		}
 		if q.Error != "" {
 			return errors.New(q.Error)
@@ -770,7 +506,7 @@ func (m *BackupManager) connectDrive(ctx context.Context, job *connectJob) error
 		return errors.New("access to Google Drive was not authorised")
 	}
 	// Prove the link works and create the backup folder.
-	if _, err := m.runner(ctx, []string{"mkdir", remote + ":" + m.cfgs.Get().Backup.Root}, nil); err != nil {
+	if _, err := m.runner(ctx, []string{"mkdir", remote + ":" + m.opts.Settings().Root}, nil); err != nil {
 		return fmt.Errorf("connected, but creating the backup folder failed: %v", err)
 	}
 	return nil
@@ -807,149 +543,7 @@ func (a *authURLWatcher) tail() string {
 // Disconnect removes it.
 var errDisconnecting = errors.New("the Google Drive link is being removed — wait for Disconnect to finish")
 
-func (b *Bridge) apiBackupDisconnect(w http.ResponseWriter, r *http.Request) {
-	m := b.backup
-	m.mu.Lock()
-	switch {
-	case m.job != nil:
-		m.mu.Unlock()
-		httpapi.WriteErr(w, http.StatusConflict, "a backup or restore is running — wait for it or cancel it first")
-		return
-	case m.disconnecting:
-		m.mu.Unlock()
-		httpapi.WriteErr(w, http.StatusConflict, errDisconnecting.Error())
-		return
-	}
-	m.disconnecting = true
-	job := m.connect
-	m.mu.Unlock()
-	defer func() {
-		m.mu.Lock()
-		m.disconnecting = false
-		m.mu.Unlock()
-	}()
-	// A sign-in still running writes its token into the config when it
-	// ends. It has to be gone before the delete, or a token written after it
-	// would leave Drive connected behind the dashboard's back. It stays
-	// m.connect until it has ended, so that one that does not stop still
-	// shows on the status page and keeps another from starting next to it.
-	if job != nil && job.cancel != nil {
-		job.cancel()
-		select {
-		case <-job.done:
-		case <-time.After(backupStopWait):
-			httpapi.WriteErr(w, http.StatusInternalServerError, "the Google Drive sign-in did not stop — try again in a moment")
-			return
-		}
-	}
-	m.mu.Lock()
-	if m.connect == job {
-		m.connect = nil
-	}
-	m.mu.Unlock()
-	if _, err := m.runner(r.Context(), []string{"config", "delete", b.cfgs.Get().Backup.Remote}, nil); err != nil {
-		httpapi.WriteErr(w, http.StatusInternalServerError, "removing the Google Drive link failed: "+err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
-}
-
-func (b *Bridge) apiBackupSettings(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Enabled             *bool   `json:"enabled"`
-		DailyAt             *string `json:"daily_at"`
-		Root                *string `json:"root"`
-		KeepVersionsDays    *int    `json:"keep_versions_days"`
-		IncludeBridgeConfig *bool   `json:"include_bridge_config"`
-	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	_, err := b.cfgs.Update("", func(c *config.Config) error {
-		if req.Enabled != nil {
-			c.Backup.Enabled = *req.Enabled
-		}
-		if req.DailyAt != nil {
-			c.Backup.DailyAt = *req.DailyAt
-		}
-		if req.Root != nil {
-			c.Backup.Root = *req.Root
-		}
-		if req.KeepVersionsDays != nil {
-			c.Backup.KeepVersionsDays = req.KeepVersionsDays
-		}
-		if req.IncludeBridgeConfig != nil {
-			c.Backup.IncludeBridgeConfig = req.IncludeBridgeConfig
-		}
-		return nil
-	})
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
-}
-
-// apiBrainBackup changes one brain's backup settings, which live in its
-// manifest: whether it is backed up and what is left out.
-func (b *Bridge) apiBrainBackup(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Enabled *bool    `json:"enabled"`
-		Exclude []string `json:"exclude"`
-	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := b.registry.UpdateBackup(r.PathValue("id"), req.Enabled, req.Exclude); err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
-}
-
 // ── running backups ──────────────────────────────────────────────────────
-
-func (b *Bridge) apiBackupRun(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Brains        []string `json:"brains"`
-		IncludeBridge *bool    `json:"include_bridge"`
-		// Force mirrors the named brains even when most of their backed-up
-		// files are gone (see checkMassDeletion).
-		Force bool `json:"force"`
-	}
-	if err := httpapi.DecodeOptionalJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	// Forcing is a decision about one brain's folder, made after looking at
-	// it; without a list it would mirror every brain's deletions at once.
-	if req.Force && len(req.Brains) == 0 {
-		httpapi.WriteErr(w, http.StatusBadRequest, "force needs a brain: name the brains to mirror in \"brains\"")
-		return
-	}
-	include := config.BoolOr(req.IncludeBridge, b.cfgs.Get().Backup.IncludeBridge())
-	if err := b.backup.StartRun(req.Brains, include, "manual", req.Force); err != nil {
-		httpapi.WriteErr(w, http.StatusConflict, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
-}
-
-func (b *Bridge) apiBackupCancel(w http.ResponseWriter, r *http.Request) {
-	b.backup.mu.Lock()
-	job := b.backup.job
-	if job != nil {
-		job.cancel()
-	}
-	b.backup.mu.Unlock()
-	if job == nil {
-		httpapi.WriteErr(w, http.StatusConflict, "no backup is running")
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "cancelling"})
-}
 
 // copyOf returns a copy of *p, or nil: what the status shows of state a
 // job goes on changing once the lock is released.
@@ -964,17 +558,17 @@ func copyOf[T any](p *T) *T {
 // StartRun backs up the given brains (all with backup enabled when empty).
 // force skips the mass-deletion check, for a manual run that mirrors a
 // deletion the owner meant.
-func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger string, force bool) error {
+func (m *Manager) StartRun(ids []string, includeBridge bool, trigger string, force bool) error {
 	if !m.connected() {
 		return errors.New("not connected to Google Drive")
 	}
-	var targets []*brainruntime.Brain
-	for _, br := range m.bm.Brains() {
-		manifest := br.Manifest()
-		if len(ids) == 0 && !manifest.Backup.Enabled {
+	var targets []Target
+	for _, br := range m.opts.Targets() {
+		s := br.Settings()
+		if len(ids) == 0 && !s.Enabled {
 			continue
 		}
-		if len(ids) > 0 && !slices.Contains(ids, br.ID()) {
+		if len(ids) > 0 && !slices.Contains(ids, br.ID) {
 			continue
 		}
 		targets = append(targets, br)
@@ -991,20 +585,20 @@ func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger strin
 	ctx, cancel := context.WithCancel(context.Background())
 	job := &backupJob{kind: jobBackup, started: time.Now(), cancel: cancel}
 	for _, br := range targets {
-		job.queue = append(job.queue, br.ID())
+		job.queue = append(job.queue, br.ID)
 	}
 	if includeBridge {
-		job.queue = append(job.queue, bridgeBackupID)
+		job.queue = append(job.queue, BridgeID)
 	}
 	err := m.goLocked(func() {
 		defer cancel()
 		for _, br := range targets {
-			if res := m.runOne(ctx, job, br.ID(), func() *BackupResult { return m.backupBrain(ctx, br, trigger, force) }); res != nil {
+			if res := m.runOne(ctx, job, br.ID, func() *Result { return m.backupBrain(ctx, br, trigger, force) }); res != nil {
 				m.noticeRefusal(ctx, br, res)
 			}
 		}
 		if includeBridge {
-			m.runOne(ctx, job, bridgeBackupID, func() *BackupResult { return m.backupBridge(ctx, trigger) })
+			m.runOne(ctx, job, BridgeID, func() *Result { return m.backupBridge(ctx, trigger) })
 		}
 		if ctx.Err() == nil {
 			m.prune(ctx, targets)
@@ -1025,7 +619,7 @@ func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger strin
 
 // runOne runs and records one backup. It returns its result, or nil when
 // the job was cancelled before it started.
-func (m *BackupManager) runOne(ctx context.Context, job *backupJob, id string, fn func() *BackupResult) *BackupResult {
+func (m *Manager) runOne(ctx context.Context, job *backupJob, id string, fn func() *Result) *Result {
 	m.mu.Lock()
 	job.current = id
 	if len(job.queue) > 0 {
@@ -1037,14 +631,14 @@ func (m *BackupManager) runOne(ctx context.Context, job *backupJob, id string, f
 	}
 	res := fn()
 	m.mu.Lock()
-	if id == bridgeBackupID {
+	if id == BridgeID {
 		m.state.Bridge = res
 	} else {
 		m.state.Brains[id] = res
 	}
 	job.done = append(job.done, id)
 	job.current = ""
-	m.forgetRemovedLocked(m.cfgs.Get())
+	m.forgetRemovedLocked(m.opts.Settings())
 	m.saveStateLocked()
 	m.mu.Unlock()
 	if res.OK {
@@ -1061,11 +655,11 @@ func (m *BackupManager) runOne(ctx context.Context, job *backupJob, id string, f
 // files in versions/ get closer to expiring. It is told once per streak:
 // later refusals stay quiet until a backup of the brain succeeds. A notice
 // that could not be sent is tried again with the next scheduled refusal.
-func (m *BackupManager) noticeRefusal(ctx context.Context, br *brainruntime.Brain, res *BackupResult) {
-	id := br.ID()
+func (m *Manager) noticeRefusal(ctx context.Context, br Target, res *Result) {
+	id := br.ID
 	live := map[string]bool{}
-	for _, b := range m.bm.Brains() {
-		live[b.ID()] = true
+	for _, b := range m.opts.Targets() {
+		live[b.ID] = true
 	}
 	m.mu.Lock()
 	changed := false
@@ -1090,12 +684,12 @@ func (m *BackupManager) noticeRefusal(ctx context.Context, br *brainruntime.Brai
 	if !send {
 		return
 	}
-	name := br.Name()
+	name := br.Settings().Name
 	if name == "" {
 		name = id
 	}
 	sctx, cancel := context.WithTimeout(ctx, refusalNoticeTimeout)
-	err := m.notify(sctx, br, outboundmsg.BackupRefusedAlert(name, res.Error))
+	err := m.notify(sctx, br, m.opts.RefusalText(name, res.Error))
 	cancel()
 	if err != nil {
 		log.Printf("backup %s: could not send the refusal notice: %v", id, err)
@@ -1110,38 +704,11 @@ func (m *BackupManager) noticeRefusal(ctx context.Context, br *brainruntime.Brai
 	m.mu.Unlock()
 }
 
-// filterLines turns exclude globs into an rclone filter file.
-func filterLines(excludes []string) string {
-	var sb strings.Builder
-	for _, x := range excludes {
-		x = strings.TrimSpace(x)
-		if x == "" || strings.ContainsAny(x, "\r\n") || strings.HasPrefix(x, "+") {
-			continue
-		}
-		x = strings.TrimPrefix(x, "- ")
-		if strings.HasSuffix(x, "/") {
-			x += "**"
-		}
-		sb.WriteString("- " + x + "\n")
-	}
-	return sb.String()
-}
-
-// brainFilter is the rclone filter file for a brain folder: the secret
-// files first, unless includeSecrets, then the brain's own excludes. rclone
-// stops at the first rule that matches.
-func brainFilter(excludes []string, includeSecrets bool) string {
-	if includeSecrets {
-		return filterLines(excludes)
-	}
-	return filterLines(backupSecretExcludes) + filterLines(excludes)
-}
-
-func (m *BackupManager) backupBrain(ctx context.Context, br *brainruntime.Brain, trigger string, force bool) *BackupResult {
+func (m *Manager) backupBrain(ctx context.Context, br Target, trigger string, force bool) *Result {
 	started := time.Now()
-	fail := func(msg string) *BackupResult {
+	fail := func(msg string) *Result {
 		now := time.Now()
-		return &BackupResult{Started: started, Finished: now, Seconds: now.Sub(started).Seconds(), Error: msg, Trigger: trigger}
+		return &Result{Started: started, Finished: now, Seconds: now.Sub(started).Seconds(), Error: msg, Trigger: trigger}
 	}
 	// A run changes the brain's folder as it goes: the bridge appends to its
 	// history, Claude edits memories and maybe a git repository. A sync of
@@ -1151,23 +718,23 @@ func (m *BackupManager) backupBrain(ctx context.Context, br *brainruntime.Brain,
 	// up, and an append that comes in during the sync is what rclone's
 	// retries are for (see syncDir).
 	if !br.WaitIdle(ctx, m.idleWait) && ctx.Err() == nil {
-		log.Printf("backup %s: the brain is still running after %v, so its folder is copied while it changes", br.ID(), m.idleWait)
+		log.Printf("backup %s: the brain is still running after %v, so its folder is copied while it changes", br.ID, m.idleWait)
 	}
-	manifest := br.Manifest()
+	s := br.Settings()
 	// One config snapshot for the filter, the check and the sync, so a
 	// backup.root changed mid-run cannot count one folder and sync into
 	// another.
-	cfg := m.cfgs.Get()
-	filter := filepath.Join(m.dir(), "filters-"+br.ID()+".txt")
-	if err := fsx.WriteFileAtomic(filter, []byte(brainFilter(manifest.Backup.Exclude, cfg.Backup.IncludeSecretFiles)), 0o600, false); err != nil {
+	cfg := m.opts.Settings()
+	filter := filepath.Join(m.dir(), "filters-"+br.ID+".txt")
+	if err := fsx.WriteFileAtomic(filter, []byte(BrainFilter(s.Exclude, cfg.IncludeSecretFiles)), 0o600, false); err != nil {
 		return fail(err.Error())
 	}
-	base := backupPath(cfg.Backup, br.ID())
+	base := backupPath(cfg, br.ID)
 	if force {
-		return m.syncDir(ctx, br.Dir(), base, filter, trigger, -1)
+		return m.syncDir(ctx, br.Dir, base, filter, trigger, -1)
 	}
-	check, err := m.checkMassDeletion(ctx, br.Dir(), base, filter)
-	refuse := func(what string) *BackupResult {
+	check, err := m.checkMassDeletion(ctx, br.Dir, base, filter)
+	refuse := func(what string) *Result {
 		res := fail(fmt.Sprintf("%s: %s, so the backup in Drive was left as it was. "+
 			"If the deletion was intended, mirror it with a forced backup of this brain.", massDeletionError, what))
 		res.Refused = true
@@ -1181,7 +748,7 @@ func (m *BackupManager) backupBrain(ctx context.Context, br *brainruntime.Brain,
 		// skipping its sync would leave its readable new and changed files
 		// out of the backup as well. Sync it with no deletion allowed:
 		// rclone uploads what it can read and fails on the rest.
-		res := m.syncDir(ctx, br.Dir(), base, filter, trigger, 0)
+		res := m.syncDir(ctx, br.Dir, base, filter, trigger, 0)
 		if !res.OK && !res.Refused && ctx.Err() == nil {
 			// rclone's own error only says it deleted nothing because of
 			// read errors; the listing's names what it could not read.
@@ -1197,7 +764,7 @@ func (m *BackupManager) backupBrain(ctx context.Context, br *brainruntime.Brain,
 	}
 	// The check and the sync are moments apart; --max-delete keeps a brain
 	// that deletes files in between from slipping past the limit.
-	return m.syncDir(ctx, br.Dir(), base, filter, trigger, maxDeletions(check.backedUp))
+	return m.syncDir(ctx, br.Dir, base, filter, trigger, maxDeletions(check.backedUp))
 }
 
 // massDeletionError starts the error of a run that refused to mirror a
@@ -1250,7 +817,7 @@ type deletionCheck struct {
 // maxDeletions and massDeletionFolderSize. Both sides are listed with the
 // sync's own filters and symlink handling, so excluded files, which the
 // sync never deletes, do not count.
-func (m *BackupManager) checkMassDeletion(ctx context.Context, src, base, filterFile string) (deletionCheck, error) {
+func (m *Manager) checkMassDeletion(ctx context.Context, src, base, filterFile string) (deletionCheck, error) {
 	// Only a brain folder that is not there at all counts as empty (all of
 	// it gone). One that rclone could only partly read (a subfolder it may
 	// not open, a folder removed while it was listed) is never reported as
@@ -1312,7 +879,7 @@ var errDirNotFound = errors.New("directory not found")
 var errListingBrain = errors.New("listing the brain folder")
 
 // listFiles lists the paths of the files under an rclone path.
-func (m *BackupManager) listFiles(ctx context.Context, path, filterFile string) ([]string, error) {
+func (m *Manager) listFiles(ctx context.Context, path, filterFile string) ([]string, error) {
 	args := []string{"lsjson", "-R", "--files-only", "--no-modtime", "--no-mimetype", "--links", path}
 	if filterFile != "" {
 		args = append(args, "--filter-from", filterFile)
@@ -1346,18 +913,18 @@ func (m *BackupManager) listFiles(ctx context.Context, path, filterFile string) 
 // staging folder that could not be written in full is not synced: the
 // sync would move the good copies in Drive to versions/ and report OK
 // without them.
-func (m *BackupManager) backupBridge(ctx context.Context, trigger string) *BackupResult {
+func (m *Manager) backupBridge(ctx context.Context, trigger string) *Result {
 	started := time.Now()
 	stage := filepath.Join(m.dir(), "_staging")
 	if err := m.stageBridge(stage); err != nil {
 		now := time.Now()
-		return &BackupResult{Started: started, Finished: now, Seconds: now.Sub(started).Seconds(), Trigger: trigger,
+		return &Result{Started: started, Finished: now, Seconds: now.Sub(started).Seconds(), Trigger: trigger,
 			Error: "staging the bridge's settings failed, so nothing was synced: " + err.Error()}
 	}
 	// No deletion limit: the bridge writes this folder itself, and removing
 	// a brain drops its manifest, a deletion the backup must mirror.
-	cfg := m.cfgs.Get()
-	return m.syncDir(ctx, stage, backupPath(cfg.Backup, bridgeBackupID), "", trigger, -1)
+	cfg := m.opts.Settings()
+	return m.syncDir(ctx, stage, backupPath(cfg, BridgeID), "", trigger, -1)
 }
 
 // writeStaged writes one file into the staging folder, a variable so tests
@@ -1366,7 +933,7 @@ var writeStaged = os.WriteFile
 
 // stageBridge writes config.json, the approved manifests and a README
 // into a fresh staging folder, and returns every error on the way.
-func (m *BackupManager) stageBridge(stage string) error {
+func (m *Manager) stageBridge(stage string) error {
 	// What the last run staged must go, or a removed brain's manifest
 	// would stay in the backup.
 	if err := os.RemoveAll(stage); err != nil {
@@ -1375,22 +942,19 @@ func (m *BackupManager) stageBridge(stage string) error {
 	if err := os.MkdirAll(filepath.Join(stage, "brains"), 0o700); err != nil {
 		return err
 	}
-	file := m.cfgs.FileCopy()
-	data, err := json.MarshalIndent(file, "", "  ")
+	files, err := m.opts.BridgeFiles()
 	if err != nil {
 		return err
 	}
-	errs := []error{writeStaged(filepath.Join(stage, "config.json"), data, 0o600)}
-	for _, ref := range file.BrainDirs {
-		if ref.Approved == nil {
-			continue
-		}
-		md, err := json.MarshalIndent(ref.Approved, "", "  ")
+	errs := []error{writeStaged(filepath.Join(stage, "config.json"), files.Config, 0o600)}
+	for _, file := range files.Manifests {
+		err := file.Err
 		if err == nil {
-			err = writeStaged(filepath.Join(stage, "brains", ref.Approved.ID+".brain.json"), md, 0o600)
+			err = writeStaged(filepath.Join(stage, "brains", file.ID+".brain.json"), file.Data, 0o600)
 		}
 		errs = append(errs, err)
 	}
+
 	readme := "Bridge configuration backup.\n\nTo restore on a new machine: put config.json at the default config location\n" +
 		"(~/.fridolin/config.json), restore each brain folder from <brain-id>/current, and pair WhatsApp\n" +
 		"again from the dashboard.\n" +
@@ -1399,26 +963,12 @@ func (m *BackupManager) stageBridge(stage string) error {
 	return errors.Join(errs...)
 }
 
-// versionLayout names a version folder after the time of its run, in UTC
-// (versionName). Local time comes twice in the hour the clocks go back, and
-// would sort a later run's folder before an earlier one's or give two runs
-// one name. legacyVersionLayout is the local time the folders made before
-// are named in. Prune and the restore list read the run time back out of
-// either.
-const (
-	versionLayout       = "20060102-150405Z"
-	legacyVersionLayout = "20060102-150405"
-)
-
-// versionName is the version folder name of a run that started at t.
-func versionName(t time.Time) string { return t.UTC().Format(versionLayout) }
-
 // syncDir runs one incremental sync with versioning into base
 // (remote:root/<id>). With maxDelete >= 0, rclone stops after that many
 // deletions and the run is refused as a mass deletion.
-func (m *BackupManager) syncDir(ctx context.Context, src, base, filterFile, trigger string, maxDelete int) *BackupResult {
-	res := &BackupResult{Started: time.Now(), Trigger: trigger}
-	res.Version = versionName(res.Started)
+func (m *Manager) syncDir(ctx context.Context, src, base, filterFile, trigger string, maxDelete int) *Result {
+	res := &Result{Started: time.Now(), Trigger: trigger}
+	res.Version = VersionName(res.Started)
 	args := []string{"sync", src + "/", base + "/current",
 		"--backup-dir", base + "/versions/" + res.Version,
 		"--links", "--use-json-log", "--stats", "15s", "--stats-log-level", "NOTICE", "-v",
@@ -1540,21 +1090,21 @@ func (j *jsonStats) lastError() string {
 // file times: a file moved into versions/ keeps its own modification time,
 // so filtering on that (rclone delete --min-age) would throw away the only
 // copy of a long-unchanged file in the very run that replaced or deleted it.
-func (m *BackupManager) prune(ctx context.Context, targets []*brainruntime.Brain) {
-	cfg := m.cfgs.Get()
-	days := cfg.Backup.KeepVersions()
+func (m *Manager) prune(ctx context.Context, targets []Target) {
+	cfg := m.opts.Settings()
+	days := cfg.KeepVersionsDays
 	if days <= 0 {
 		return
 	}
-	ids := []string{bridgeBackupID}
+	ids := []string{BridgeID}
 	for _, br := range targets {
-		ids = append(ids, br.ID())
+		ids = append(ids, br.ID)
 	}
 	now := time.Now()
 	for _, id := range ids {
 		// One config snapshot for the listing and the purges, so a backup.root
 		// changed mid-run cannot make them point at different folders.
-		versions := backupPath(cfg.Backup, id, "versions")
+		versions := backupPath(cfg, id, "versions")
 		names, err := m.listVersions(ctx, versions)
 		if ctx.Err() != nil {
 			return // cancelled: stop rather than log a failure for every id
@@ -1563,7 +1113,7 @@ func (m *BackupManager) prune(ctx context.Context, targets []*brainruntime.Brain
 			log.Printf("backup %s: listing versions to prune failed: %v", id, err)
 			continue
 		}
-		for _, v := range expiredVersions(names, now, days) {
+		for _, v := range ExpiredVersions(names, now, days) {
 			_, err := m.runner(ctx, []string{"purge", versions + "/" + v}, nil)
 			if ctx.Err() != nil {
 				return
@@ -1575,50 +1125,10 @@ func (m *BackupManager) prune(ctx context.Context, targets []*brainruntime.Brain
 	}
 }
 
-// parseVersion reads the run time out of a version folder name, of
-// either layout.
-func parseVersion(name string) (time.Time, bool) {
-	if t, err := time.Parse(versionLayout, name); err == nil {
-		return t, true
-	}
-	t, err := time.ParseInLocation(legacyVersionLayout, name, time.Local)
-	return t, err == nil
-}
-
-// expiredVersions picks the version folders whose run is more than days
-// before now. A name that is not a version stamp is never picked, so prune
-// only ever deletes folders the bridge made.
-func expiredVersions(names []string, now time.Time, days int) []string {
-	cutoff := now.AddDate(0, 0, -days)
-	var out []string
-	for _, name := range names {
-		if t, ok := parseVersion(name); ok && t.Before(cutoff) {
-			out = append(out, name)
-		}
-	}
-	return out
-}
-
-// sortVersions orders version folder names newest run first; names that
-// are not version stamps go last.
-func sortVersions(names []string) {
-	sort.SliceStable(names, func(i, j int) bool {
-		ti, iok := parseVersion(names[i])
-		tj, jok := parseVersion(names[j])
-		if iok != jok {
-			return iok
-		}
-		if !iok {
-			return names[i] > names[j]
-		}
-		return ti.After(tj)
-	})
-}
-
 // listVersions returns the folder names in one backup's versions/ folder
 // (an rclone path). A missing versions folder (no run has replaced or
 // deleted a file yet) is an empty list, not an error.
-func (m *BackupManager) listVersions(ctx context.Context, versions string) ([]string, error) {
+func (m *Manager) listVersions(ctx context.Context, versions string) ([]string, error) {
 	var stderr strings.Builder
 	out, err := m.runner(ctx, []string{"lsjson", "--dirs-only", versions}, &stderr)
 	if err != nil {
@@ -1649,222 +1159,13 @@ func (m *BackupManager) listVersions(ctx context.Context, versions string) ([]st
 // backupPath is the rclone path of the backup named id under backup.root,
 // with parts below it: backupPath(bc, "notes", "versions") is
 // "brain-gdrive:fridolin-backup/notes/versions". Every path the backups
-// use is built here, from a name that backupNameOK accepts.
-func backupPath(bc config.BackupConfig, id string, parts ...string) string {
+// use is built here, from a name that NameOK accepts.
+func backupPath(bc Settings, id string, parts ...string) string {
 	return bc.Remote + ":" + strings.Join(append([]string{bc.Root, id}, parts...), "/")
 }
 
-// backupNameOK reports whether id can name a backup in Drive: one path
-// segment, not "." or "..", with no separator, colon or control character
-// that would make the remote path name another folder. That covers the
-// bridge's own (bridgeBackupID) and every brain id, and the names of brains
-// backed up before ids were held to brainIDRe, which may still be restored.
-func backupNameOK(id string) bool {
-	if id == "" || id == "." || id == ".." || len(id) > 100 {
-		return false
-	}
-	return !strings.ContainsFunc(id, func(r rune) bool {
-		return r == '/' || r == '\\' || r == ':' || unicode.IsControl(r)
-	})
-}
-
-// restoreVersionRe matches what a restore may copy: the latest copy, or a
-// version folder named as the runs name them, in either layout (see
-// versionLayout).
-var restoreVersionRe = regexp.MustCompile(`^(current|\d{8}-\d{6}Z?)$`)
-
-func (b *Bridge) apiBackupVersions(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	if !backupNameOK(id) {
-		httpapi.WriteErr(w, http.StatusBadRequest, "invalid brain")
-		return
-	}
-	if !b.backup.connected() {
-		httpapi.WriteErr(w, http.StatusPreconditionFailed, "Google Drive is not connected")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-	defer cancel()
-	versions, err := b.backup.listVersions(ctx, backupPath(b.cfgs.Get().Backup, id, "versions"))
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadGateway, "listing versions failed: "+err.Error())
-		return
-	}
-	sortVersions(versions)
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"brain": id, "versions": versions})
-}
-
-// resolveExisting resolves the symlinks of absolute path p as far as it
-// exists, and puts back the part that does not. CheckBrainPath resolves
-// only a path that exists, so a new folder under a symlink would be checked
-// where the link is, and then made, and restored into, where it points: in
-// a brain, say.
-func resolveExisting(p string) string {
-	if !filepath.IsAbs(p) {
-		return p
-	}
-	p = filepath.Clean(p)
-	rest := ""
-	for d := p; ; d = filepath.Dir(d) {
-		if r, err := filepath.EvalSymlinks(d); err == nil {
-			return filepath.Join(r, rest)
-		}
-		if filepath.Dir(d) == d {
-			return p
-		}
-		rest = filepath.Join(filepath.Base(d), rest)
-	}
-}
-
-// checkRestoreTarget reports why target, a folder by its real path, lies
-// in what the sandbox keeps from brains ("is inside …", like
-// checkBrainDir), or nil. The bridge writes the copy outside any sandbox,
-// so where a brain folder may still live, inside ~/.ssh or a deny_paths
-// entry, no restore needs to write. The folders of your own files are the
-// exception, ~/Documents and the rest of sandboxUserFileFolders(): brains live
-// there, and so may a restored one, as CheckBrainPath lets a new one.
-func checkRestoreTarget(target string, cfg *config.Config, home string) error {
-	var denied []sandbox.ProtectedPath
-	for _, p := range sandboxPolicyOf(cfg).protected(home, ownLayout()) {
-		if !slices.ContainsFunc(sandbox.UserFileFolders(), func(sub string) bool { return p.Path == filepath.Join(home, sub) }) {
-			p.Inside = true
-		}
-		denied = append(denied, p)
-	}
-	for _, p := range cfg.Sandbox.DenyPaths {
-		denied = append(denied, sandbox.ProtectedPath{Path: fsx.ExpandHome(p, home), Inside: true, What: "the deny_paths entry " + p})
-	}
-	if what, ok := protectedIn(target, denied); ok {
-		return fmt.Errorf("%s, which the sandbox keeps from brains", what)
-	}
-	return nil
-}
-
-// restoreTarget checks the folder a restore copies into, as for a new brain
-// (CheckBrainPath): inside your home folder, neither the data dir nor in or
-// around a brain, and not the credentials folder either; and new or empty.
-// It returns the folder, resolved.
-func (b *Bridge) restoreTarget(p string) (string, error) {
-	cfg := b.cfgs.Get()
-	home := b.cfgs.Boot().Home
-	checkDir := brainDirCheck(b.cfgs)
-	target, problems, _ := registry.CheckPath(resolveExisting(fsx.ExpandHome(strings.TrimSpace(p), home)), registry.PathContext{
-		Home: home, Others: registryFor(b.cfgs).OtherDirs(cfg),
-		CheckDir: func(dir, configured, home string) error { return checkDir(dir, configured, cfg, home) },
-	})
-	if creds := fsx.Canonical(cfg.Sandbox.CredentialsDir); len(problems) == 0 && creds != "" && (fsx.Within(target, creds) || fsx.Within(creds, target)) {
-		problems = append(problems, "the credentials folder cannot be (or contain) the restore folder")
-	}
-	if len(problems) == 0 {
-		if err := checkRestoreTarget(target, cfg, home); err != nil {
-			problems = append(problems, "the restore folder "+err.Error()+" — pick a new folder")
-		}
-	}
-	if len(problems) == 0 {
-		if err := checkRestoreTarget(target, runtimeConfig(b.cfgs), home); err != nil {
-			problems = append(problems, "the restore folder "+err.Error()+" — pick a new folder")
-		}
-	}
-	if len(problems) > 0 {
-		return "", errors.New(strings.Join(problems, "; "))
-	}
-	// The folder comes from the request, and CheckBrainPath only reports
-	// on it. Build what is listed, made and copied into from your home
-	// folder and a part of it that stays inside, so that it is there by
-	// construction and not only by that report.
-	home = fsx.Canonical(home)
-	rel, err := filepath.Rel(home, target)
-	if err != nil || rel == "." || !filepath.IsLocal(rel) {
-		return "", errors.New("restore into a new folder inside your home folder")
-	}
-	target = filepath.Join(home, rel)
-	entries, err := os.ReadDir(target)
-	switch {
-	case err == nil && len(entries) > 0:
-		return "", errors.New("the restore folder must be new or empty")
-	case err != nil && !errors.Is(err, fs.ErrNotExist):
-		return "", err
-	}
-	return target, nil
-}
-
-// apiBackupRestore copies a backup into a new, empty folder. It never writes
-// into an existing brain: you inspect the copy and add it as a brain (or
-// swap folders) yourself. The restore runs as the job; how it went is saved
-// as the state's LastRestore, which the Backup page shows.
-func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Brain   string `json:"brain"`
-		Version string `json:"version"` // "current" or a versions/<ts> name
-		Target  string `json:"target"`
-	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if req.Version == "" {
-		req.Version = "current"
-	}
-	if !backupNameOK(req.Brain) || !restoreVersionRe.MatchString(req.Version) {
-		httpapi.WriteErr(w, http.StatusBadRequest, "invalid brain or version")
-		return
-	}
-	m := b.backup
-	if !m.connected() {
-		httpapi.WriteErr(w, http.StatusPreconditionFailed, "Google Drive is not connected")
-		return
-	}
-	target, err := b.restoreTarget(req.Target)
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	src := backupPath(b.cfgs.Get().Backup, req.Brain, "current")
-	if req.Version != "current" {
-		src = backupPath(b.cfgs.Get().Backup, req.Brain, "versions", req.Version)
-	}
-	m.mu.Lock()
-	if m.job != nil {
-		m.mu.Unlock()
-		httpapi.WriteErr(w, http.StatusConflict, "a backup or restore is already running")
-		return
-	}
-	if m.disconnecting {
-		m.mu.Unlock()
-		httpapi.WriteErr(w, http.StatusConflict, errDisconnecting.Error())
-		return
-	}
-	// Made here, so that a folder that cannot be made is the request's
-	// error rather than a restore that fails out of sight.
-	if err := os.MkdirAll(target, 0o700); err != nil {
-		m.mu.Unlock()
-		httpapi.WriteErr(w, http.StatusInternalServerError, "creating the restore folder failed: "+err.Error())
-		return
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	job := &backupJob{kind: jobRestore, started: time.Now(), cancel: cancel, brain: req.Brain, target: target}
-	err = m.goLocked(func() {
-		defer cancel()
-		res := m.restore(ctx, src, req.Brain, req.Version, target)
-		m.mu.Lock()
-		m.state.LastRestore = res
-		m.saveStateLocked()
-		m.job = nil
-		m.mu.Unlock()
-	})
-	if err != nil {
-		m.mu.Unlock()
-		cancel()
-		httpapi.WriteErr(w, http.StatusServiceUnavailable, err.Error())
-		return
-	}
-	m.job = job
-	m.mu.Unlock()
-	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "restoring", "target": target})
-}
-
 // restore copies src, a backup of brain, into target, and says how it went.
-func (m *BackupManager) restore(ctx context.Context, src, brain, version, target string) *RestoreResult {
+func (m *Manager) restore(ctx context.Context, src, brain, version, target string) *RestoreResult {
 	res := &RestoreResult{Brain: brain, Version: version, Target: target, Started: time.Now()}
 	stderr := &jsonStats{}
 	_, err := m.runner(ctx, []string{"copy", src, target, "--links", "--use-json-log", "-v",
@@ -1891,7 +1192,7 @@ func (m *BackupManager) restore(ctx context.Context, src, brain, version, target
 
 // Start runs the daily schedule. A run missed while the machine slept runs
 // as soon as it is awake again (once per day).
-func (m *BackupManager) Start(ctx context.Context) {
+func (m *Manager) Start(ctx context.Context) {
 	ctx, cancel := context.WithCancel(ctx)
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1910,9 +1211,9 @@ func (m *BackupManager) Start(ctx context.Context) {
 	})
 }
 
-func (m *BackupManager) tick(now time.Time) {
-	cfg := m.cfgs.Get()
-	if !cfg.Backup.Enabled {
+func (m *Manager) tick(now time.Time) {
+	cfg := m.opts.Settings()
+	if !cfg.Enabled {
 		return
 	}
 	if !m.connected() {
@@ -1920,18 +1221,18 @@ func (m *BackupManager) tick(now time.Time) {
 		return
 	}
 	m.mu.Lock()
-	_, runNow := nextDue(now, cfg.Backup.DailyAt, m.state.LastScheduledDay, m.state.ArmedAt)
+	_, runNow := Due(now, cfg.DailyAt, m.state.LastScheduledDay, m.state.ArmedAt)
 	busy := m.job != nil || m.disconnecting
 	m.mu.Unlock()
 	if !runNow || busy {
 		return
 	}
-	if err := m.StartRun(nil, cfg.Backup.IncludeBridge(), "scheduled", false); err != nil {
+	if err := m.StartRun(nil, cfg.IncludeBridgeConfig, "scheduled", false); err != nil {
 		log.Printf("scheduled backup: %v", err)
 		return
 	}
 	m.mu.Lock()
-	m.state.LastScheduledDay = now.Format(dayLayout)
+	m.state.LastScheduledDay = now.Format(DayLayout)
 	m.saveStateLocked()
 	m.mu.Unlock()
 }
@@ -1939,8 +1240,8 @@ func (m *BackupManager) tick(now time.Time) {
 // warnNotConnected logs, once a day, that the daily backup is on but has no
 // Drive link to run on: after an abandoned reconnect, say. The overview says
 // so too; without either, the backups would just stop.
-func (m *BackupManager) warnNotConnected(now time.Time) {
-	day := now.Format(dayLayout)
+func (m *Manager) warnNotConnected(now time.Time) {
+	day := now.Format(DayLayout)
 	m.mu.Lock()
 	warned := m.warnedDay == day
 	m.warnedDay = day
@@ -1955,7 +1256,7 @@ func (m *BackupManager) warnNotConnected(now time.Time) {
 // a cancelled run's result to be saved. Otherwise both could still be going
 // on after the bridge closed everything else, or be cut off half-way when
 // the process exits. Nothing starts after Stop.
-func (m *BackupManager) Stop() {
+func (m *Manager) Stop() {
 	m.mu.Lock()
 	m.stopped = true
 	if m.stop != nil {

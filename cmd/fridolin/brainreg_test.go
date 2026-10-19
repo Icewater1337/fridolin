@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/backup"
+
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -246,7 +248,7 @@ func FuzzDecodeManifest(f *testing.F) {
 		if !filepath.IsLocal(m.PromptFile) {
 			t.Errorf("prompt file %q is not inside the folder", m.PromptFile)
 		}
-		for _, line := range strings.SplitAfter(filterLines(m.Backup.Exclude), "\n") {
+		for _, line := range strings.SplitAfter(backup.FilterLines(m.Backup.Exclude), "\n") {
 			if line != "" && (!strings.HasPrefix(line, "- ") || !strings.HasSuffix(line, "\n")) {
 				t.Errorf("excludes %q gave the filter line %q", m.Backup.Exclude, line)
 			}

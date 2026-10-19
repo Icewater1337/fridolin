@@ -282,15 +282,6 @@ func TestManifestIsNotFollowedOutOfTheFolder(t *testing.T) {
 	}
 }
 
-func namedTestBrain(t testing.TB, id string) *brain.Brain {
-	t.Helper()
-	mgr := brain.NewManager(brain.Options{Input: commandBrainInputRules()})
-	t.Cleanup(mgr.Stop)
-	if f, e := mgr.Apply([]manifest.Spec{{Dir: t.TempDir(), Manifest: manifest.Manifest{ID: id}}}, brain.Globals{}, brain.ApplyOptions{}); e != nil || len(f) > 0 {
-		t.Fatalf("Apply: %v %v", f, e)
-	}
-	return mgr.Get(id)
-}
 func hasRun(t *testing.T, br *brain.Brain) {
 	t.Helper()
 	testutil.WaitFor(t, 5*time.Second, br.ID()+"'s run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })

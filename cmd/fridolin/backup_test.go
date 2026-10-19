@@ -6,19 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
-	"testing/synctest"
 	"time"
 	_ "time/tzdata" // TestNextDue's time zone, on machines without one
+
+	"github.com/Icewater1337/fridolin/internal/backup"
 
 	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/devchat"
@@ -28,241 +27,52 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 )
-
-func TestFilterLines(t *testing.T) {
-	got := filterLines([]string{"node_modules/", "*.log", " /work/ ", "", "+ /sneaky", "- already-prefixed"})
-	want := "- node_modules/**\n- *.log\n- /work/**\n- already-prefixed\n"
-	if got != want {
-		t.Errorf("filterLines =\n%q\nwant\n%q", got, want)
-	}
-}
-
-// TestNextDue is the daily schedule: today's run is due at daily_at unless
-// it already ran today or the schedule was switched on or moved after that
-// time, and a run missed while the machine slept is due as soon as it is
-// awake.
-func TestNextDue(t *testing.T) {
-	zurich, err := time.LoadLocation("Europe/Zurich")
-	if err != nil {
-		t.Fatal(err)
-	}
-	at := func(y int, mo time.Month, d, h, mi int) time.Time { return time.Date(y, mo, d, h, mi, 0, 0, zurich) }
-	day := at(2026, 3, 10, 0, 0)
-	cases := []struct {
-		name    string
-		now     time.Time
-		dailyAt string
-		lastRun string
-		armed   time.Time
-		wantDue time.Time
-		wantNow bool
-	}{
-		{"before the time", at(2026, 3, 10, 2, 0), "03:30", "", time.Time{}, at(2026, 3, 10, 3, 30), false},
-		{"at the time", at(2026, 3, 10, 3, 30), "03:30", "", time.Time{}, at(2026, 3, 10, 3, 30), true},
-		{"after the time: missed while asleep", at(2026, 3, 10, 9, 0), "03:30", "2026-03-09", day.AddDate(0, 0, -5), at(2026, 3, 10, 3, 30), true},
-		{"already ran today", at(2026, 3, 10, 9, 0), "03:30", "2026-03-10", time.Time{}, at(2026, 3, 11, 3, 30), false},
-		{"ran yesterday, later today", at(2026, 3, 10, 9, 0), "23:15", "2026-03-09", time.Time{}, at(2026, 3, 10, 23, 15), false},
-		{"switched on after the time", at(2026, 3, 10, 9, 0), "03:30", "", at(2026, 3, 10, 8, 59), at(2026, 3, 11, 3, 30), false},
-		{"switched on before the time", at(2026, 3, 10, 9, 0), "10:00", "", at(2026, 3, 10, 8, 59), at(2026, 3, 10, 10, 0), false},
-		{"moved to a time already past", at(2026, 3, 10, 15, 0), "14:00", "2026-03-09", at(2026, 3, 10, 14, 30), at(2026, 3, 11, 14, 0), false},
-		{"switched on in the due minute", at(2026, 3, 10, 3, 30), "03:30", "", at(2026, 3, 10, 3, 30).Add(20 * time.Second), at(2026, 3, 11, 3, 30), false},
-		{"end of the month", at(2026, 3, 31, 9, 0), "03:30", "2026-03-31", time.Time{}, at(2026, 4, 1, 3, 30), false},
-		// 2026-03-29: the clocks jump from 02:00 to 03:00.
-		{"a time the clocks skip", at(2026, 3, 29, 1, 0), "02:30", "", time.Time{}, at(2026, 3, 29, 3, 30), false},
-		{"a time the clocks skip, once it came", at(2026, 3, 29, 3, 31), "02:30", "", time.Time{}, at(2026, 3, 29, 3, 30), true},
-		{"the day before the clocks skip it", at(2026, 3, 28, 9, 0), "02:30", "2026-03-28", time.Time{}, at(2026, 3, 29, 3, 30), false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			due, now := nextDue(tc.now, tc.dailyAt, tc.lastRun, tc.armed)
-			if !due.Equal(tc.wantDue) || now != tc.wantNow {
-				t.Errorf("nextDue = %v, %v; want %v, %v", due, now, tc.wantDue, tc.wantNow)
-			}
-		})
-	}
-
-	// 2026-10-25: the clocks go back from 03:00 to 02:00, so 02:30 comes
-	// twice. The run is due once.
-	t.Run("a time that comes twice", func(t *testing.T) {
-		first := time.Date(2026, 10, 25, 0, 30, 0, 0, time.UTC).In(zurich)  // 02:30 summer time
-		second := time.Date(2026, 10, 25, 1, 30, 0, 0, time.UTC).In(zurich) // 02:30 winter time
-		ranAt := time.Time{}
-		for _, now := range []time.Time{first, second} {
-			if _, runNow := nextDue(now, "02:30", ranOn(ranAt), time.Time{}); runNow {
-				if !ranAt.IsZero() {
-					t.Fatalf("due again at %v after running at %v", now, ranAt)
-				}
-				ranAt = now
-			}
-		}
-		if ranAt.IsZero() {
-			t.Error("never due")
-		}
-	})
-}
-
-// ranOn is the LastScheduledDay of a run at t, "" for none.
-func ranOn(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.Format(dayLayout)
-}
 
 // TestBackupScheduleIsArmedOnlyBySavedChanges: switching the schedule on or
 // moving it marks when, so that neither starts a backup at once, and only
 // once the change is saved. One the config refuses changes nothing.
 func TestBackupScheduleIsArmedOnlyBySavedChanges(t *testing.T) {
 	tb := newTestBridge(t, `, "backup": {"daily_at": "03:30"}`)
-	m := tb.backup
-	clock := time.Date(2026, 10, 18, 9, 0, 0, 0, time.Local)
-	m.now = func() time.Time { return clock }
-	armed := func() time.Time {
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		return m.state.ArmedAt
-	}
-
-	// Refused (the root is no plain folder name): not armed.
+	armed := func() time.Time { return persistedBackupState(t, tb).ArmedAt }
 	if w := tb.do("PUT", "/api/backup/settings", map[string]any{"enabled": true, "root": "../x"}); w.Code != 422 {
 		t.Fatalf("settings = %d %s, want 422", w.Code, w.Body.String())
 	}
 	if a := armed(); !a.IsZero() {
 		t.Errorf("a refused change armed the schedule at %v", a)
 	}
+	before := time.Now()
 	if w := tb.do("PUT", "/api/backup/settings", map[string]any{"enabled": true}); w.Code != 200 {
 		t.Fatalf("settings = %d %s", w.Code, w.Body.String())
 	}
-	if a := armed(); !a.Equal(clock) {
-		t.Errorf("armed at %v, want %v", a, clock)
+	first := armed()
+	if first.Before(before) || first.After(time.Now()) {
+		t.Errorf("armed at %v, outside the successful save", first)
 	}
-	if _, runNow := nextDue(clock.Add(time.Minute), "03:30", "", armed()); runNow {
-		t.Error("switching on after today's time starts a backup at once")
-	}
-	clock = clock.Add(time.Hour)
 	if w := tb.do("PUT", "/api/backup/settings", map[string]any{"keep_versions_days": 7}); w.Code != 200 {
 		t.Fatalf("settings = %d %s", w.Code, w.Body.String())
 	}
-	if a := armed(); a.Equal(clock) {
+	if a := armed(); !a.Equal(first) {
 		t.Error("another backup setting re-armed the schedule")
 	}
+	before = time.Now()
 	if w := tb.do("PUT", "/api/backup/settings", map[string]any{"daily_at": "08:00"}); w.Code != 200 {
 		t.Fatalf("settings = %d %s", w.Code, w.Body.String())
 	}
-	if a := armed(); !a.Equal(clock) {
-		t.Errorf("moving the time armed at %v, want %v", a, clock)
-	}
-	// Saved, it is there after a restart.
-	if a := NewBackupManager(tb.cfgs, tb.brainMgr).state.ArmedAt; !a.Equal(clock) {
-		t.Errorf("armed time after a restart = %v, want %v", a, clock)
-	}
-}
-
-// TestBackupSchedulerTicks: Start looks at the schedule every minute, runs
-// the backup once its time has come, only once that day, and stops with
-// Stop.
-func TestBackupSchedulerTicks(t *testing.T) {
-	// A bubble's clock starts at 2000-01-01 00:00 UTC. Where 90 minutes on
-	// is the next day already (a zone a little behind UTC), today's time
-	// would be past at the first tick: the test then starts at midnight.
-	bubble := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
-	start := bubble.In(time.Local)
-	if due := start.Add(90 * time.Minute); due.Day() != start.Day() {
-		start = time.Date(due.Year(), due.Month(), due.Day(), 0, 0, 0, 0, time.Local)
-	}
-	dailyAt := start.Add(90 * time.Minute).Format("15:04")
-	tb := newTestBridge(t, `, "backup": {"enabled": true, "include_bridge_config": false, "daily_at": "`+dailyAt+`"}`)
-	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
-	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
-	addBackupBrain(t, tb, "notes")
-	synctest.Test(t, func(t *testing.T) {
-		time.Sleep(start.Sub(bubble))
-		m := NewBackupManager(tb.cfgs, tb.brainMgr)
-		d := &deletionRunner{src: []string{"a"}, cur: []string{"a"}}
-		m.runner = d.run
-		m.Start(context.Background())
-		syncs := func() int {
-			synctest.Wait()
-			d.mu.Lock()
-			defer d.mu.Unlock()
-			return len(d.syncs)
-		}
-		time.Sleep(89*time.Minute + time.Second)
-		if n := syncs(); n != 0 {
-			t.Fatalf("%d syncs before the time", n)
-		}
-		time.Sleep(time.Minute)
-		if n := syncs(); n != 1 {
-			t.Fatalf("%d syncs once the time came, want 1", n)
-		}
-		time.Sleep(3 * time.Hour)
-		if n := syncs(); n != 1 {
-			t.Errorf("%d syncs later that day, want still 1", n)
-		}
-		m.mu.Lock()
-		res, last := m.state.Brains["notes"], m.state.LastScheduledDay
-		m.mu.Unlock()
-		if res == nil || !res.OK || res.Trigger != "scheduled" || last != start.Format(dayLayout) {
-			t.Errorf("result %+v, last scheduled day %q; want a scheduled run on %s", res, last, start.Format(dayLayout))
-		}
-		m.Stop()
-	})
-}
-
-// TestBackupNextRun: the status shows the run that will happen: tomorrow's
-// once today's ran, now for one that is due, and none while Drive is not
-// connected.
-func TestBackupNextRun(t *testing.T) {
-	tb := newTestBridge(t, `, "backup": {"enabled": true, "daily_at": "03:30"}`)
-	m := tb.backup
-	clock := time.Date(2026, 10, 18, 9, 0, 0, 0, time.Local)
-	m.now = func() time.Time { return clock }
-	next := func() *time.Time {
-		var st struct {
-			NextRun *time.Time `json:"next_run"`
-		}
-		_ = json.Unmarshal(tb.do("GET", "/api/backup/status", nil).Body.Bytes(), &st)
-		if s := m.Summary().NextRun; (s == nil) != (st.NextRun == nil) || s != nil && !s.Equal(*st.NextRun) {
-			t.Errorf("the overview's next run %v differs from the Backup page's %v", s, st.NextRun)
-		}
-		return st.NextRun
-	}
-	if n := next(); n != nil {
-		t.Errorf("next run %v while Drive is not connected", n)
-	}
-	_ = os.MkdirAll(filepath.Dir(m.rcloneConf()), 0o700)
-	_ = os.WriteFile(m.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
-	if n := next(); n == nil || !n.Equal(clock) {
-		t.Errorf("next run = %v, want now (today's is due)", n)
-	}
-	m.mu.Lock()
-	m.state.LastScheduledDay = clock.Format(dayLayout)
-	m.mu.Unlock()
-	if n, want := next(), time.Date(2026, 10, 19, 3, 30, 0, 0, time.Local); n == nil || !n.Equal(want) {
-		t.Errorf("next run = %v, want %v", n, want)
-	}
-}
-
-func TestRcloneSection(t *testing.T) {
-	conf := "[other]\ntype = s3\n\n[brain-gdrive]\ntype = drive\nscope = drive.file\ntoken = {\"x\":1}\n"
-	s := rcloneSection(conf, "brain-gdrive")
-	if s["type"] != "drive" || s["token"] == "" {
-		t.Errorf("section = %v", s)
-	}
-	if rcloneSection(conf, "missing") != nil {
-		t.Error("missing section should be nil")
+	if a := armed(); a.Before(before) || a.After(time.Now()) {
+		t.Errorf("moving the time armed at %v, outside the successful save", a)
 	}
 }
 
 // fakeRunner scripts rclone's answers for the connect flow.
 type fakeRunner struct {
-	mu     sync.Mutex
-	calls  [][]string
-	scopes []childScope // each call's helperScope
-	conf   string
+	mu        sync.Mutex
+	calls     [][]string
+	scopes    []childScope // each call's helperScope
+	conf      string
+	authReady chan struct{}
+	release   <-chan struct{}
 }
 
 func (f *fakeRunner) run(ctx context.Context, args []string, stderr io.Writer) ([]byte, error) {
@@ -277,6 +87,10 @@ func (f *fakeRunner) run(ctx context.Context, args []string, stderr io.Writer) (
 		if stderr != nil {
 			fmt.Fprintln(stderr, "NOTICE: Please go to the following link: http://127.0.0.1:53682/auth?state=abc123")
 		}
+		if f.authReady != nil {
+			close(f.authReady)
+			<-f.release
+		}
 		// rclone writes the token into the config file — and prints it.
 		_ = os.WriteFile(f.conf, []byte("[brain-gdrive]\ntype = drive\nscope = drive.file\ntoken = {\"access_token\":\"SECRET-TOKEN\"}\n"), 0o600)
 		return []byte(`{"State":"*teamdrive","Option":{"Name":"config_change_team_drive","DefaultStr":"false"},"Result":"SECRET-TOKEN"}`), nil
@@ -290,28 +104,40 @@ func (f *fakeRunner) run(ctx context.Context, args []string, stderr io.Writer) (
 }
 
 func TestConnectDriveWalksQuestionsAndHidesToken(t *testing.T) {
-	tb := newTestBridge(t, "")
-	m := tb.backup
-	f := &fakeRunner{conf: m.rcloneConf()}
-	m.runner = f.run
-	_ = os.MkdirAll(filepath.Dir(m.rcloneConf()), 0o700)
-
-	job := &connectJob{State: "running"}
-	if err := m.connectDrive(context.Background(), job); err != nil {
+	release := make(chan struct{})
+	f := &fakeRunner{authReady: make(chan struct{}), release: release}
+	tb := connectTestBridge(t, f.run)
+	f.conf = tb.cfgs.Boot().RcloneConf()
+	var once sync.Once
+	t.Cleanup(func() { once.Do(func() { close(release) }) })
+	if w := tb.do("POST", "/api/backup/connect", nil); w.Code != 202 {
+		t.Fatalf("connect = %d %s", w.Code, w.Body.String())
+	}
+	select {
+	case <-f.authReady:
+	case <-time.After(10 * time.Second):
+		t.Fatal("sign-in did not reach browser approval")
+	}
+	var st struct {
+		Connect struct {
+			AuthURL string `json:"auth_url"`
+		} `json:"connect"`
+	}
+	if err := json.Unmarshal(tb.do("GET", "/api/backup/status", nil).Body.Bytes(), &st); err != nil {
 		t.Fatal(err)
 	}
-	if job.AuthURL != "http://127.0.0.1:53682/auth?state=abc123" {
-		t.Errorf("auth url = %q", job.AuthURL)
+	if st.Connect.AuthURL != "http://127.0.0.1:53682/auth?state=abc123" {
+		t.Errorf("auth url = %q", st.Connect.AuthURL)
 	}
-	if !m.connected() {
+	once.Do(func() { close(release) })
+	waitBackupConnect(t, tb)
+	if !connectedBackup(tb) {
 		t.Error("not connected after the flow")
 	}
 	last := f.calls[len(f.calls)-1]
 	if last[0] != "mkdir" || last[1] != "brain-gdrive:"+config.DefaultBackupRoot {
-		t.Errorf("last call = %v, want mkdir of the backup root", last)
+		t.Errorf("last call = %v, want mkdir of backup root", last)
 	}
-	// rclone opens the browser from one of these runs, so they all get the
-	// desktop session's variables.
 	for i, scope := range f.scopes {
 		if scope != desktopChild {
 			t.Errorf("call %v ran as scope %d, want desktopChild", f.calls[i], scope)
@@ -319,25 +145,26 @@ func TestConnectDriveWalksQuestionsAndHidesToken(t *testing.T) {
 	}
 	body := tb.do("GET", "/api/backup/status", nil).Body.String()
 	if strings.Contains(body, "SECRET-TOKEN") {
-		t.Error("the Drive token leaked into the API")
+		t.Error("Drive token leaked into API")
 	}
 }
 
 func TestRunRcloneUsesIsolatedConfig(t *testing.T) {
 	bin := t.TempDir()
 	script := filepath.Join(bin, "rclone")
-	_ = os.WriteFile(script, []byte("#!/bin/sh\necho \"$@\" > \"$(dirname \"$0\")/args\"\nenv > \"$(dirname \"$0\")/env\"\n"), 0o700)
+	_ = os.WriteFile(script, []byte("#!/bin/sh\necho \"$@\" > \"$(dirname \"$0\")/args\"\nenv > \"$(dirname \"$0\")/env\"\necho '[]'\n"), 0o700)
 	tb := newTestBridge(t, `, "backup": {"rclone_path": "`+script+`"}`)
 	t.Setenv("RCLONE_CONFIG_EVIL_TYPE", "local")
-	if _, err := tb.backup.runRclone(context.Background(), []string{"lsd", "x:"}, nil); err != nil {
+	connectAlias(t, tb)
+	if _, err := tb.backup.Versions(context.Background(), "notes"); err != nil {
 		t.Fatal(err)
 	}
 	args, _ := os.ReadFile(filepath.Join(bin, "args"))
 	env, _ := os.ReadFile(filepath.Join(bin, "env"))
-	if !strings.HasPrefix(string(args), "--config "+tb.backup.rcloneConf()) {
+	if !strings.HasPrefix(string(args), "--config "+tb.cfgs.Boot().RcloneConf()) {
 		t.Errorf("args = %s", args)
 	}
-	if strings.Contains(string(env), "RCLONE_CONFIG_EVIL") || !strings.Contains(string(env), "RCLONE_CONFIG="+tb.backup.rcloneConf()) {
+	if strings.Contains(string(env), "RCLONE_CONFIG_EVIL") || !strings.Contains(string(env), "RCLONE_CONFIG="+tb.cfgs.Boot().RcloneConf()) {
 		t.Error("the user's RCLONE_* environment must not reach the bridge's rclone")
 	}
 }
@@ -435,30 +262,6 @@ func TestBackupStatusNamesABrokenRclonePath(t *testing.T) {
 	}
 }
 
-// TestRcloneVersionNoticesAnUpgrade: the version is asked once per build,
-// so the dashboard shows the new one after rclone was upgraded in place.
-func TestRcloneVersionNoticesAnUpgrade(t *testing.T) {
-	script := filepath.Join(t.TempDir(), "rclone")
-	install := func(version string, mod time.Time) {
-		t.Helper()
-		if err := os.WriteFile(script, []byte("#!/bin/sh\necho rclone "+version+"\n"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chtimes(script, mod, mod); err != nil {
-			t.Fatal(err)
-		}
-	}
-	day := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
-	install("v1.70.0", day)
-	if v := rcloneVersion(script, nil); v != "rclone v1.70.0" {
-		t.Fatalf("version = %q", v)
-	}
-	install("v1.71.0", day.Add(24*time.Hour))
-	if v := rcloneVersion(script, nil); v != "rclone v1.71.0" {
-		t.Errorf("version after the upgrade = %q, want v1.71.0", v)
-	}
-}
-
 // TestRcloneGetsTheAllowlistedEnvironment: rclone, for a backup, for the
 // version the dashboard shows and while it connects Google Drive, gets what
 // childEnv gives a helper program: no RCLONE_* setting of yours, not the
@@ -469,7 +272,7 @@ func TestRcloneGetsTheAllowlistedEnvironment(t *testing.T) {
 	bin := t.TempDir()
 	script := filepath.Join(bin, "rclone")
 	// Each run records its environment under its command.
-	fake := "#!/bin/sh\ndir=$(dirname \"$0\")\n[ \"$1\" = --config ] && shift 2\nenv > \"$dir/env.$1\"\necho rclone v9.9\n"
+	fake := "#!/bin/sh\ndir=$(dirname \"$0\")\n[ \"$1\" = --config ] && shift 2\nenv > \"$dir/env.$1\"\ncase \"$1\" in version) echo rclone v9.9;; config) if [ \"$2\" = create ]; then printf '[brain-gdrive]\\ntype = alias\\nremote = /nowhere\\n' > \"$RCLONE_CONFIG\"; fi; echo '{\"State\":\"\"}';; *) echo '[]';; esac\n"
 	if err := os.WriteFile(script, []byte(fake), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -486,28 +289,34 @@ func TestRcloneGetsTheAllowlistedEnvironment(t *testing.T) {
 	} {
 		t.Setenv(k, v)
 	}
-	run := func(ctx context.Context, arg string) error {
-		_, err := tb.backup.runRclone(ctx, []string{arg, "x:"}, nil)
-		return err
-	}
+	connectAlias(t, tb)
 	desktop := []string{"DISPLAY=:0", "DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/test-bus", "XDG_DATA_DIRS=/usr/share:/var/lib/snapd/desktop"}
 	cases := []struct {
 		name, log string
-		run       func() error
+		run       func(*testing.T) error
 		desktop   bool
 	}{
-		{"backup", "env.lsd", func() error { return run(context.Background(), "lsd") }, false},
-		{"version", "env.version", func() error {
-			if v := rcloneVersion(script, tb.backup.rcloneEnv(anyChild)); v != "rclone v9.9" {
+		{"backup", "env.lsjson", func(t *testing.T) error { _, err := tb.backup.Versions(context.Background(), "notes"); return err }, false},
+		{"version", "env.version", func(t *testing.T) error {
+			if v := tb.backup.Status()["rclone"].(map[string]any)["version"]; v != "rclone v9.9" {
 				return fmt.Errorf("version = %q", v)
 			}
 			return nil
 		}, false},
-		{"connect", "env.config", func() error { return run(withDesktop(context.Background()), "config") }, true},
+		{"connect", "env.config", func(t *testing.T) error {
+			if err := os.Remove(tb.cfgs.Boot().RcloneConf()); err != nil {
+				return err
+			}
+			if err := tb.backup.Connect(); err != nil {
+				return err
+			}
+			waitBackupConnect(t, tb)
+			return nil
+		}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := tc.run(); err != nil {
+			if err := tc.run(t); err != nil {
 				t.Fatal(err)
 			}
 			data, err := os.ReadFile(filepath.Join(bin, tc.log))
@@ -515,7 +324,7 @@ func TestRcloneGetsTheAllowlistedEnvironment(t *testing.T) {
 				t.Fatal(err)
 			}
 			env := strings.Split(string(data), "\n")
-			for _, want := range []string{"HOME=" + os.Getenv("HOME"), "HTTPS_PROXY=http://proxy.example.com:3128", "RCLONE_CONFIG=" + tb.backup.rcloneConf()} {
+			for _, want := range []string{"HOME=" + os.Getenv("HOME"), "HTTPS_PROXY=http://proxy.example.com:3128", "RCLONE_CONFIG=" + tb.cfgs.Boot().RcloneConf()} {
 				if !slices.Contains(env, want) {
 					t.Errorf("rclone lacks %s", want)
 				}
@@ -544,9 +353,9 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 	tb := newTestBridge(t, `, "backup": {"keep_versions_days": 0}`)
 	useRclone(t, tb, rclone)
 	remoteDir := filepath.Join(t.TempDir(), "drive")
-	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
-	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = "+remoteDir+"\n"), 0o600)
-	if !tb.backup.connected() {
+	_ = os.MkdirAll(filepath.Dir(tb.cfgs.Boot().RcloneConf()), 0o700)
+	_ = os.WriteFile(tb.cfgs.Boot().RcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = "+remoteDir+"\n"), 0o600)
+	if !connectedBackup(tb) {
 		t.Fatal("alias remote not recognised")
 	}
 
@@ -622,41 +431,14 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 	})
 }
 
-func TestExpiredVersions(t *testing.T) {
-	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.Local)
-	stamp := func(days int) string { return versionName(now.AddDate(0, 0, -days)) }
-	cases := []struct {
-		name  string
-		names []string
-		days  int
-		want  []string
-	}{
-		{"older than the window", []string{stamp(31), stamp(29)}, 30, []string{stamp(31)}},
-		{"exactly on the cutoff stays", []string{stamp(30)}, 30, nil},
-		{"one day window", []string{stamp(2), stamp(0)}, 1, []string{stamp(2)}},
-		{"names that are not version stamps stay", []string{"keep-me", "2025", "20250101-0000", "20250101-000000X", stamp(90)}, 30, []string{stamp(90)}},
-		// Folders named before the names were in UTC are in local time.
-		{"local-time names", []string{now.AddDate(0, 0, -31).Format(legacyVersionLayout), now.AddDate(0, 0, -29).Format(legacyVersionLayout)}, 30,
-			[]string{now.AddDate(0, 0, -31).Format(legacyVersionLayout)}},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := expiredVersions(c.names, now, c.days)
-			if fmt.Sprint(got) != fmt.Sprint(c.want) {
-				t.Errorf("expiredVersions = %v, want %v", got, c.want)
-			}
-		})
-	}
-}
-
 // TestBackupVersionsNewestFirst lists version folders by the time in their
 // names, with anything else after them.
 func TestBackupVersionsNewestFirst(t *testing.T) {
 	tb := newTestBridge(t, "")
 	connectAlias(t, tb)
-	tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
+	installBackupRunner(t, tb, func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
 		return []byte(`[{"Name":"20261001-120000"},{"Name":"manual-copy"},{"Name":"20261016-080000Z"},{"Name":"20261015-080000"},{"Name":"20250101-000000"}]`), nil
-	}
+	})
 	w := tb.do("GET", "/api/brains/notes/backup/versions", nil)
 	if w.Code != 200 {
 		t.Fatal(w.Body.String())
@@ -668,33 +450,6 @@ func TestBackupVersionsNewestFirst(t *testing.T) {
 	want := []string{"20261016-080000Z", "20261015-080000", "20261001-120000", "20250101-000000", "manual-copy"}
 	if fmt.Sprint(resp.Versions) != fmt.Sprint(want) {
 		t.Errorf("versions = %v, want %v", resp.Versions, want)
-	}
-}
-
-// TestVersionNamesKeepTheirOrderWhenClocksGoBack: version folders are
-// named in UTC, so a run in the hour the clocks go back sorts after the run
-// an hour of local time "later" that came before it, and neither name can
-// come twice.
-func TestVersionNamesKeepTheirOrderWhenClocksGoBack(t *testing.T) {
-	zurich, err := time.LoadLocation("Europe/Zurich")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// 2026-10-25: 02:30 summer time, then 02:15 winter time 45 minutes later.
-	first := time.Date(2026, 10, 25, 0, 30, 0, 0, time.UTC).In(zurich)
-	second := first.Add(45 * time.Minute)
-	names := []string{versionName(first), versionName(second)}
-	sortVersions(names)
-	if names[0] != versionName(second) {
-		t.Errorf("versions = %v, want the later run first", names)
-	}
-	for _, n := range names {
-		if !restoreVersionRe.MatchString(n) {
-			t.Errorf("%s cannot be restored", n)
-		}
-		if got, ok := parseVersion(n); !ok || !(got.Equal(first) || got.Equal(second)) {
-			t.Errorf("parseVersion(%s) = %v, %v", n, got, ok)
-		}
 	}
 }
 
@@ -733,9 +488,9 @@ func rcloneTestBridge(t *testing.T, extra string) (*testBridge, string) {
 	tb := newTestBridge(t, extra)
 	useRclone(t, tb, rclone)
 	remoteDir := filepath.Join(t.TempDir(), "drive")
-	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
-	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = "+remoteDir+"\n"), 0o600)
-	if !tb.backup.connected() {
+	_ = os.MkdirAll(filepath.Dir(tb.cfgs.Boot().RcloneConf()), 0o700)
+	_ = os.WriteFile(tb.cfgs.Boot().RcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = "+remoteDir+"\n"), 0o600)
+	if !connectedBackup(tb) {
 		t.Fatal("alias remote not recognised")
 	}
 	return tb, remoteDir
@@ -752,7 +507,7 @@ func addBackupBrain(t *testing.T, tb *testBridge, id string) string {
 }
 
 // runBackup starts a backup of one brain, waits for it, and returns its result.
-func runBackup(t *testing.T, tb *testBridge, id string) *BackupResult {
+func runBackup(t *testing.T, tb *testBridge, id string) *backup.Result {
 	t.Helper()
 	if err := tb.backup.StartRun([]string{id}, false, "manual", false); err != nil {
 		t.Fatal(err)
@@ -762,9 +517,9 @@ func runBackup(t *testing.T, tb *testBridge, id string) *BackupResult {
 
 // waitBackup waits until no backup runs, as the Backup page sees it, and
 // returns the last result of brain id.
-func waitBackup(t *testing.T, tb *testBridge, id string) *BackupResult {
+func waitBackup(t *testing.T, tb *testBridge, id string) *backup.Result {
 	t.Helper()
-	var res *BackupResult
+	var res *backup.Result
 	testutil.WaitFor(t, 60*time.Second, "backup", func() bool {
 		running, last := backupStatus(t, tb)
 		res = last[id]
@@ -778,19 +533,19 @@ func waitBackup(t *testing.T, tb *testBridge, id string) *BackupResult {
 
 // backupStatus reports from GET /api/backup/status whether a backup runs,
 // and each brain's last result.
-func backupStatus(t *testing.T, tb *testBridge) (running bool, last map[string]*BackupResult) {
+func backupStatus(t *testing.T, tb *testBridge) (running bool, last map[string]*backup.Result) {
 	t.Helper()
 	var st struct {
 		Job    any `json:"job"`
 		Brains []struct {
-			ID   string        `json:"id"`
-			Last *BackupResult `json:"last"`
+			ID   string         `json:"id"`
+			Last *backup.Result `json:"last"`
 		} `json:"brains"`
 	}
 	if w := tb.do("GET", "/api/backup/status", nil); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &st) != nil {
 		t.Fatalf("backup status: %d %s", w.Code, w.Body.String())
 	}
-	last = map[string]*BackupResult{}
+	last = map[string]*backup.Result{}
 	for _, b := range st.Brains {
 		last[b.ID] = b.Last
 	}
@@ -823,8 +578,8 @@ func TestBackupPruneKeepsVersionsByRunDate(t *testing.T) {
 		_ = os.MkdirAll(filepath.Dir(p), 0o700)
 		_ = os.WriteFile(p, []byte("older"), 0o600)
 	}
-	expired := versionName(time.Now().AddDate(0, 0, -40))
-	recent := versionName(time.Now().AddDate(0, 0, -10))
+	expired := backup.VersionName(time.Now().AddDate(0, 0, -40))
+	recent := backup.VersionName(time.Now().AddDate(0, 0, -10))
 	seed(expired)
 	seed(recent)
 	seed("not-a-version")
@@ -851,100 +606,6 @@ func TestBackupPruneKeepsVersionsByRunDate(t *testing.T) {
 			t.Errorf("version folder %s is older than 30 days and should be purged", name)
 		}
 	}
-}
-
-// TestPrunePurgesExpiredVersionFolders checks the rclone calls prune makes, for
-// machines without rclone: it purges the expired version folders by name and
-// never filters files by their age.
-func TestPrunePurgesExpiredVersionFolders(t *testing.T) {
-	tb := newTestBridge(t, `, "backup": {"keep_versions_days": 30}`)
-	expired := versionName(time.Now().AddDate(0, 0, -31))
-	recent := versionName(time.Now().AddDate(0, 0, -29))
-	var mu sync.Mutex
-	var calls [][]string
-	tb.backup.runner = func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
-		mu.Lock()
-		calls = append(calls, args)
-		mu.Unlock()
-		if args[0] != "lsjson" {
-			return nil, nil
-		}
-		if strings.HasSuffix(args[len(args)-1], "/_bridge/versions") {
-			fmt.Fprintln(stderr, "ERROR : : error listing: directory not found")
-			return nil, fmt.Errorf("exit status 3")
-		}
-		return []byte(`[{"Name":"` + expired + `"},{"Name":"` + recent + `"},{"Name":"keep-me"}]`), nil
-	}
-	notes := namedTestBrain(t, "notes")
-	tb.backup.prune(context.Background(), []*brainruntime.Brain{notes})
-	var purged []string
-	for _, c := range calls {
-		switch c[0] {
-		case "purge":
-			purged = append(purged, c[1])
-		case "lsjson":
-		default:
-			t.Errorf("unexpected rclone call %v", c)
-		}
-	}
-	want := []string{"brain-gdrive:" + config.DefaultBackupRoot + "/notes/versions/" + expired}
-	if fmt.Sprint(purged) != fmt.Sprint(want) {
-		t.Errorf("purged %v, want %v", purged, want)
-	}
-}
-
-// TestPruneKeepsItsConfigAndStopsWhenCancelled: the listings and purges of
-// one prune all use the config it started with, and a cancelled job stops
-// it at once instead of trying (and logging) every remaining id.
-func TestPruneKeepsItsConfigAndStopsWhenCancelled(t *testing.T) {
-	listing := []byte(`[{"Name":"` + versionName(time.Now().AddDate(0, 0, -31)) + `"},` +
-		`{"Name":"` + versionName(time.Now().AddDate(0, 0, -60)) + `"}]`)
-	brains := []*brainruntime.Brain{namedTestBrain(t, "notes"), namedTestBrain(t, "work")}
-
-	t.Run("backup.root changed mid-run", func(t *testing.T) {
-		tb := newTestBridge(t, `, "backup": {"keep_versions_days": 30}`)
-		var calls [][]string
-		tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
-			calls = append(calls, args)
-			if len(calls) == 1 {
-				if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.Backup.Root = "moved"; return nil }); err != nil {
-					t.Error(err)
-				}
-			}
-			if args[0] == "lsjson" {
-				return listing, nil
-			}
-			return nil, nil
-		}
-		tb.backup.prune(context.Background(), brains)
-		if len(calls) != 9 {
-			t.Errorf("%d rclone calls, want a listing and two purges for each of 3 ids: %v", len(calls), calls)
-		}
-		for _, c := range calls {
-			if p := c[len(c)-1]; !strings.HasPrefix(p, "brain-gdrive:"+config.DefaultBackupRoot+"/") {
-				t.Errorf("%s %s is not under the backup.root prune started with", c[0], p)
-			}
-		}
-	})
-
-	t.Run("cancelled", func(t *testing.T) {
-		tb := newTestBridge(t, `, "backup": {"keep_versions_days": 30}`)
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		var calls [][]string
-		tb.backup.runner = func(ctx context.Context, args []string, _ io.Writer) ([]byte, error) {
-			calls = append(calls, args)
-			if args[0] == "purge" {
-				cancel() // the job is cancelled while rclone purges
-				return nil, ctx.Err()
-			}
-			return listing, nil
-		}
-		tb.backup.prune(ctx, brains)
-		if len(calls) != 2 {
-			t.Errorf("prune went on after the cancel: %v", calls)
-		}
-	})
 }
 
 // deletionRunner plays rclone for the mass-deletion check: lsjson lists src
@@ -1004,234 +665,15 @@ func (d *deletionRunner) run(_ context.Context, args []string, stderr io.Writer)
 // notesBase is where the default config backs up the brain "notes".
 const notesBase = config.DefaultBackupRemote + ":" + config.DefaultBackupRoot + "/notes"
 
-// flagValue returns the value after an rclone flag, "" when it is not set.
-func flagValue(args []string, flag string) string {
-	for i, a := range args {
-		if a == flag && i+1 < len(args) {
-			return args[i+1]
-		}
-	}
-	return ""
-}
-
-// syncMaxDelete returns a sync's --max-delete value, "" for none.
-func syncMaxDelete(args []string) string { return flagValue(args, "--max-delete") }
-
-// TestBackupRefusesMassDeletion runs the check before a brain's sync: it
-// mirrors ordinary changes, and unless forced refuses an empty or missing
-// brain folder, one that lost more than half of its backed-up files, more
-// than a fifth once that is ten or more, or 250 or more, and one with a top
-// folder of five or more files that lost more than half of them, as a brain
-// that wiped its memories/ leaves it. The sync's --max-delete is the most
-// the counts allow. A folder rclone can only partly read is synced with no
-// deletion allowed.
-func TestBackupRefusesMassDeletion(t *testing.T) {
-	tb := newTestBridge(t, "")
-	dir := addBackupBrain(t, tb, "notes")
-	br := tb.brainMgr.Get("notes")
-	files := func(names ...string) []string { return append([]string{}, names...) }
-	// seq is n files, prefix0 to prefix<n-1>.
-	seq := func(prefix string, n int) []string {
-		out := make([]string, n)
-		for i := range out {
-			out[i] = prefix + strconv.Itoa(i)
-		}
-		return out
-	}
-	// A larger brain folder: 88 files of its own and a memories/ of 12.
-	notes, memories := seq("n", 88), seq("memories/m", 12)
-	large := append(slices.Clone(notes), memories...)
-	const unreadable = `ERROR : locked: failed to open directory "locked": open locked: permission denied`
-	cases := []struct {
-		name      string
-		src, cur  []string
-		missing   bool // the brain folder does not exist
-		srcErr    string
-		listErr   string
-		syncErr   string // the sync fails with this; refused and failed then expect it to have run
-		force     bool
-		refused   bool
-		says      string // a refusal's error says this
-		failed    string // the result's error contains this, no sync ran unless syncErr is set
-		maxDelete string // the sync's --max-delete, "" for none
-	}{
-		{name: "unchanged", src: files("a", "b", "c", "d"), cur: files("a", "b", "c", "d"), maxDelete: "2"},
-		{name: "first backup", src: files("a"), cur: nil, maxDelete: "0"},
-		{name: "empty folder, empty backup", src: files(), cur: files(), maxDelete: "0"},
-		{name: "half gone is allowed", src: files("a", "b"), cur: files("a", "b", "c", "d"), maxDelete: "2"},
-		{name: "more than half gone", src: files("a"), cur: files("a", "b", "c", "d"), refused: true, says: "3 of 4 backed-up files are gone"},
-		{name: "empty brain folder", src: files(), cur: files("a", "b"), refused: true},
-		{name: "missing brain folder", missing: true, cur: files("a"), refused: true},
-		{name: "new files do not offset deletions", src: files("v", "w", "x", "y", "z"), cur: files("a", "b", "c"), refused: true},
-		{name: "force mirrors anyway", src: files(), cur: files("a", "b"), force: true},
-		{name: "3 of 100 gone", src: seq("n", 97), cur: seq("n", 100), maxDelete: "20"},
-		{name: "a fifth gone", src: seq("n", 40), cur: seq("n", 50), maxDelete: "10"},
-		{name: "more than a fifth, fewer than ten gone", src: seq("n", 21), cur: seq("n", 30), maxDelete: "9"},
-		{name: "more than a fifth, ten or more gone", src: seq("n", 38), cur: seq("n", 50), refused: true, says: "12 of 50 backed-up files are gone"},
-		{name: "a few of a large folder gone", src: seq("n", 1990), cur: seq("n", 2000), maxDelete: "249"},
-		{name: "300 of 2000 gone", src: seq("n", 1700), cur: seq("n", 2000), refused: true, says: "300 of 2000 backed-up files are gone"},
-		{name: "a wiped memories/", src: notes, cur: large, refused: true, says: "12 of the 12 backed-up files in memories/ are gone"},
-		{name: "half of memories/ gone", src: append(slices.Clone(notes), memories[:6]...), cur: large, maxDelete: "20"},
-		{name: "a wiped top folder of four files", src: seq("n", 96), cur: append(seq("n", 96), seq("tmp/t", 4)...), maxDelete: "20"},
-		{name: "deeper folders count for their top folder", src: append(slices.Clone(notes), "memories/a/1", "memories/b/2"),
-			cur: append(slices.Clone(large), "memories/a/1", "memories/b/2"), refused: true, says: "12 of the 14 backed-up files in memories/"},
-		{name: "force mirrors a wiped memories/", src: notes, cur: large, force: true},
-		{name: "listing the backup fails", src: files("a"), listErr: "ERROR : couldn't connect", failed: "checking the backup before syncing failed"},
-		// The folder is there, so rclone failing to read it is no proof it
-		// is empty, and no reason to leave its readable files out either.
-		{name: "brain folder partly unreadable", srcErr: unreadable, cur: files("a"), syncErr: "not deleting files as there were IO errors",
-			failed: "parts of the brain folder could not be read, so the backup synced the rest and deleted nothing", maxDelete: "0"},
-		{name: "brain folder unreadable for a moment", srcErr: unreadable, cur: files("a"), maxDelete: "0"},
-		{name: "brain folder vanishes while listed", src: nil, cur: files("a"), maxDelete: "0"},
-		{name: "the sync of a partly read folder finds deletions", srcErr: unreadable, cur: files("a"),
-			syncErr: "Got fatal error on delete: --max-delete threshold reached", refused: true, maxDelete: "0"},
-		{name: "brain folder and backup unreadable", srcErr: unreadable, listErr: "ERROR : couldn't connect", failed: "checking the backup before syncing failed"},
-		// rclone sync treats differently normalized names as the same file.
-		{name: "decomposed names in the backup", src: files("Gr\u00fcsse.md", "M\u00e4rz.md"), cur: files("Gru\u0308sse.md", "Ma\u0308rz.md"), maxDelete: "1"},
-		{name: "decomposed names in the folder", src: files("Gru\u0308sse.md", "Ma\u0308rz.md"), cur: files("Gr\u00fcsse.md", "M\u00e4rz.md"), maxDelete: "1"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if err := os.MkdirAll(dir, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if c.missing {
-				if err := os.RemoveAll(dir); err != nil {
-					t.Fatal(err)
-				}
-			}
-			d := &deletionRunner{src: c.src, cur: c.cur, srcErr: c.srcErr, listErr: c.listErr, syncErr: c.syncErr}
-			tb.backup.runner = d.run
-			res := tb.backup.backupBrain(context.Background(), br, "manual", c.force)
-			synced := 0
-			if c.syncErr != "" {
-				synced = 1
-			}
-			switch {
-			case c.refused:
-				if res.OK || !res.Refused || !strings.HasPrefix(res.Error, massDeletionError) || !strings.Contains(res.Error, c.says) || len(d.syncs) != synced {
-					t.Errorf("want a refusal saying %q after %d syncs, got %+v, syncs %v", c.says, synced, res, d.syncs)
-				}
-				if res.Seconds != res.Finished.Sub(res.Started).Seconds() {
-					t.Errorf("seconds = %v, want the time the run took", res.Seconds)
-				}
-			case c.failed != "":
-				if res.OK || res.Refused || !strings.Contains(res.Error, c.failed) || len(d.syncs) != synced {
-					t.Errorf("want a failure %q after %d syncs, got %+v", c.failed, synced, res)
-				}
-			default:
-				if !res.OK || res.Refused || len(d.syncs) != 1 {
-					t.Fatalf("want one sync, got %+v, syncs %v", res, d.syncs)
-				}
-			}
-			if len(d.syncs) == 1 {
-				if got := syncMaxDelete(d.syncs[0]); got != c.maxDelete {
-					t.Errorf("--max-delete = %q, want %q", got, c.maxDelete)
-				}
-			}
-		})
-	}
-}
-
-// TestBackupBrainKeepsItsConfig: the check and the sync of one brain use
-// the config the brain's backup started with, so a backup.root changed in
-// between cannot count one folder in Drive and sync into another.
-func TestBackupBrainKeepsItsConfig(t *testing.T) {
-	tb := newTestBridge(t, "")
-	addBackupBrain(t, tb, "notes")
-	d := &deletionRunner{src: []string{"a"}, cur: []string{"a"}}
-	moved := false
-	tb.backup.runner = func(ctx context.Context, args []string, stderr io.Writer) ([]byte, error) {
-		if args[0] == "lsjson" && !moved {
-			moved = true
-			if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.Backup.Root = "moved"; return nil }); err != nil {
-				t.Error(err)
-			}
-		}
-		return d.run(ctx, args, stderr)
-	}
-	if res := tb.backup.backupBrain(context.Background(), tb.brainMgr.Get("notes"), "manual", false); !res.OK {
-		t.Fatalf("backup = %+v", res)
-	}
-	if len(d.syncs) != 1 {
-		t.Fatalf("want one sync, got %v", d.syncs)
-	}
-	for _, p := range []string{d.syncs[0][2], flagValue(d.syncs[0], "--backup-dir")} {
-		if !strings.HasPrefix(p, notesBase+"/") {
-			t.Errorf("the sync writes to %s, not under the backup.root the check counted", p)
-		}
-	}
-}
-
-// TestMassDeletionCheckListsLikeTheSync: the check lists both sides with the
-// sync's filter file and symlink handling. Without the brain's excludes,
-// files backed up before they were excluded, which the sync never deletes
-// from Drive, would count as gone on every run; without --links, a symlink
-// the sync backed up as .rclonelink would be missing from the brain folder.
-func TestMassDeletionCheckListsLikeTheSync(t *testing.T) {
-	tb := newTestBridge(t, "")
-	addBackupBrain(t, tb, "notes")
-	br := tb.brainMgr.Get("notes")
-	d := &deletionRunner{src: []string{"a"}, cur: []string{"a"}}
-	tb.backup.runner = d.run
-	if res := tb.backup.backupBrain(context.Background(), br, "manual", false); !res.OK {
-		t.Fatalf("backup = %+v", res)
-	}
-	filter := filepath.Join(tb.backup.dir(), "filters-notes.txt")
-	if len(d.syncs) != 1 || flagValue(d.syncs[0], "--filter-from") != filter || !slices.Contains(d.syncs[0], "--links") {
-		t.Fatalf("syncs = %v, want one with --filter-from %s and --links", d.syncs, filter)
-	}
-	for _, side := range []struct{ name, path string }{
-		{"brain folder", br.Dir() + "/"},
-		{"backup", notesBase + "/current"},
-	} {
-		t.Run(side.name, func(t *testing.T) {
-			var args []string
-			for _, l := range d.lists {
-				if slices.Contains(l, side.path) {
-					args = l
-				}
-			}
-			if args == nil {
-				t.Fatalf("no listing of %s in %v", side.path, d.lists)
-			}
-			if got := flagValue(args, "--filter-from"); got != filter {
-				t.Errorf("--filter-from = %q, want the sync's %s", got, filter)
-			}
-			if !slices.Contains(args, "--links") {
-				t.Errorf("listed without --links: %v", args)
-			}
-		})
-	}
-}
-
-// TestBackupBridgeHasNoDeletionLimit: the bridge's own settings are staged
-// by the bridge, so they get neither the check nor --max-delete; removing a
-// brain drops its manifest from them, and that must reach the backup.
-func TestBackupBridgeHasNoDeletionLimit(t *testing.T) {
-	tb := newTestBridge(t, "")
-	d := &deletionRunner{src: []string{}, cur: []string{"config.json", "brains/a.brain.json", "brains/b.brain.json"}}
-	tb.backup.runner = d.run
-	if res := tb.backup.backupBridge(context.Background(), "manual"); !res.OK {
-		t.Fatalf("bridge backup = %+v", res)
-	}
-	if len(d.lists) != 0 {
-		t.Errorf("the bridge backup listed files for a deletion check: %v", d.lists)
-	}
-	if len(d.syncs) != 1 || syncMaxDelete(d.syncs[0]) != "" {
-		t.Errorf("want one sync without --max-delete, got %v", d.syncs)
-	}
-}
-
 // TestBackupRunForceOverridesRefusal: the API's force field reaches the run,
 // and only for the brains it names.
 func TestBackupRunForceOverridesRefusal(t *testing.T) {
 	tb := newTestBridge(t, "")
-	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
-	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
+	_ = os.MkdirAll(filepath.Dir(tb.cfgs.Boot().RcloneConf()), 0o700)
+	_ = os.WriteFile(tb.cfgs.Boot().RcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
 	addBackupBrain(t, tb, "notes")
 	d := &deletionRunner{src: []string{}, cur: []string{"a", "b"}}
-	tb.backup.runner = d.run
+	installBackupRunner(t, tb, d.run)
 
 	// Forcing every brain at once is refused: force names its brains.
 	for _, body := range []map[string]any{{"force": true}, {"brains": []string{}, "force": true}} {
@@ -1269,41 +711,12 @@ func TestBackupRunForceOverridesRefusal(t *testing.T) {
 func scheduledBackupBridge(t *testing.T) (*testBridge, *deletionRunner) {
 	t.Helper()
 	tb := newTestBridge(t, `, "backup": {"enabled": true, "daily_at": "03:30", "include_bridge_config": false}`)
-	_ = os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700)
-	_ = os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
+	_ = os.MkdirAll(filepath.Dir(tb.cfgs.Boot().RcloneConf()), 0o700)
+	_ = os.WriteFile(tb.cfgs.Boot().RcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
 	addBackupBrain(t, tb, "notes")
 	d := &deletionRunner{src: []string{}, cur: []string{"a", "b"}}
-	tb.backup.runner = d.run
+	installBackupRunner(t, tb, d.run)
 	return tb, d
-}
-
-// scheduledRun lets the scheduler fire on the given day and waits for the
-// backup of "notes".
-func scheduledRun(t *testing.T, tb *testBridge, day int) *BackupResult {
-	t.Helper()
-	y, mo, d := time.Now().Date()
-	tb.backup.tick(time.Date(y, mo, d+day, 12, 0, 0, 0, time.Local))
-	return waitBackup(t, tb, "notes")
-}
-
-// TestScheduledBackupNeverForces: the nightly run keeps refusing a mass
-// deletion, so a wiped brain is never mirrored without the owner.
-func TestScheduledBackupNeverForces(t *testing.T) {
-	tb, d := scheduledBackupBridge(t)
-	now := time.Now()
-	res := scheduledRun(t, tb, 0)
-	d.mu.Lock()
-	syncs := len(d.syncs)
-	d.mu.Unlock()
-	if res.OK || !res.Refused || res.Trigger != "scheduled" || syncs != 0 {
-		t.Errorf("scheduled run = %+v with %d syncs, want a scheduled refusal and no sync", res, syncs)
-	}
-	tb.backup.mu.Lock()
-	last := tb.backup.state.LastScheduledDay
-	tb.backup.mu.Unlock()
-	if last != now.Format("2006-01-02") {
-		t.Errorf("last scheduled day = %q, want today", last)
-	}
 }
 
 // TestScheduledRefusalIsToldOnWhatsApp: a scheduled run that refuses tells
@@ -1311,7 +724,17 @@ func TestScheduledBackupNeverForces(t *testing.T) {
 // brain succeeds, manual refusals are never sent (the owner is looking at
 // the dashboard), and a notice that failed to send is tried next time.
 func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
-	tb, _ := scheduledBackupBridge(t)
+	tb, runner := scheduledBackupBridge(t)
+	var failNotice bool
+	installBackupRunner(t, tb, runner.run, func(opts *backup.Options) {
+		send := opts.Notify
+		opts.Notify = func(ctx context.Context, target backup.Target, text string) error {
+			if failNotice {
+				return fmt.Errorf("WhatsApp is not connected")
+			}
+			return send(ctx, target, text)
+		}
+	})
 	br := tb.brainMgr.Get("notes")
 	jid := tb.replyChatFor(br, tb.cfgs.Get())
 	if jid == "" {
@@ -1319,25 +742,23 @@ func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
 	}
 	sent := func() []devchat.Message { return tb.dev.Outbox() }
 	told := func() bool {
-		tb.backup.mu.Lock()
-		defer tb.backup.mu.Unlock()
-		_, ok := tb.backup.state.RefusalNotices["notes"]
+		_, ok := persistedBackupState(t, tb).RefusalNotices["notes"]
 		return ok
 	}
 
-	if res := scheduledRun(t, tb, 0); !res.Refused {
+	if res := startScheduledBackup(t, tb); !res.Refused {
 		t.Fatalf("first scheduled run = %+v, want a refusal", res)
 	}
 	out := sent()
-	if len(out) != 1 || out[0].JID != jid || !strings.Contains(out[0].Text, "Backup of notes: "+massDeletionError) ||
+	if len(out) != 1 || out[0].JID != jid || !strings.Contains(out[0].Text, "Backup of notes: "+"refusing to mirror a mass deletion") ||
 		!strings.Contains(out[0].Text, "2 of 2 backed-up files are gone") {
 		t.Fatalf("want one notice to %s, got %+v", jid, out)
 	}
-	if _, ok := NewBackupManager(tb.cfgs, tb.brainMgr).state.RefusalNotices["notes"]; !ok {
+	if _, ok := persistedBackupState(t, tb).RefusalNotices["notes"]; !ok {
 		t.Error("the notice is not saved, so a restart would send it again")
 	}
 
-	scheduledRun(t, tb, 1)
+	startScheduledBackup(t, tb)
 	if n := len(sent()); n != 1 {
 		t.Errorf("%d messages after a second scheduled refusal, want still 1", n)
 	}
@@ -1353,106 +774,15 @@ func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
 	if res := runBackup(t, tb, "notes"); !res.Refused || told() || len(sent()) != 1 {
 		t.Errorf("a manual refusal must not be sent: %+v, %d messages", res, len(sent()))
 	}
-	send := tb.backup.notify
-	tb.backup.notify = func(context.Context, *brainruntime.Brain, string) error {
-		return fmt.Errorf("WhatsApp is not connected")
-	}
-	scheduledRun(t, tb, 2)
+	failNotice = true
+	startScheduledBackup(t, tb)
 	if told() || len(sent()) != 1 {
 		t.Errorf("a notice that failed to send must not count as told")
 	}
-	tb.backup.notify = send
-	scheduledRun(t, tb, 3)
+	failNotice = false
+	startScheduledBackup(t, tb)
 	if out := sent(); len(out) != 2 || !told() {
 		t.Errorf("want the second streak told once it could be sent, got %+v", out)
-	}
-}
-
-// TestRefusalNoticeGivesUp: the notice is sent from inside the backup job,
-// so a send that hangs must not keep the job (and Back up now) busy. It
-// gives up after refusalNoticeTimeout and counts as not told.
-func TestRefusalNoticeGivesUp(t *testing.T) {
-	tb, _ := scheduledBackupBridge(t)
-	defer func(d time.Duration) { refusalNoticeTimeout = d }(refusalNoticeTimeout)
-	refusalNoticeTimeout = 50 * time.Millisecond
-	tb.backup.notify = func(ctx context.Context, _ *brainruntime.Brain, _ string) error {
-		<-ctx.Done()
-		return ctx.Err()
-	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		res := &BackupResult{Refused: true, Trigger: "scheduled", Error: massDeletionError}
-		tb.backup.noticeRefusal(context.Background(), tb.brainMgr.Get("notes"), res)
-	}()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("a send that hangs keeps the backup job busy")
-	}
-	tb.backup.mu.Lock()
-	_, told := tb.backup.state.RefusalNotices["notes"]
-	tb.backup.mu.Unlock()
-	if told {
-		t.Error("a notice that timed out must not count as told")
-	}
-}
-
-// TestRefusalNoticesForgetRemovedBrains: the saved notices drop brains that
-// are gone, so the list does not grow forever and a new brain that reuses an
-// id is still told about its first refusal.
-func TestRefusalNoticesForgetRemovedBrains(t *testing.T) {
-	tb, _ := scheduledBackupBridge(t)
-	tb.backup.mu.Lock()
-	tb.backup.state.RefusalNotices = map[string]time.Time{"removed": time.Now(), "notes": time.Now()}
-	tb.backup.mu.Unlock()
-	if res := scheduledRun(t, tb, 0); !res.Refused {
-		t.Fatalf("scheduled run = %+v, want a refusal", res)
-	}
-	saved := NewBackupManager(tb.cfgs, tb.brainMgr).state.RefusalNotices
-	if _, ok := saved["removed"]; ok {
-		t.Errorf("the notice of a removed brain is still saved: %v", saved)
-	}
-	if _, ok := saved["notes"]; !ok {
-		t.Errorf("the notice of a brain that is still refused was dropped: %v", saved)
-	}
-	if out := tb.dev.Outbox(); len(out) != 0 {
-		t.Errorf("a refusal already told was sent again: %+v", out)
-	}
-}
-
-// TestSyncDirReportsMaxDelete: rclone stopping at --max-delete is a refusal,
-// not an unexplained failure.
-func TestSyncDirReportsMaxDelete(t *testing.T) {
-	tb := newTestBridge(t, "")
-	tb.backup.runner = func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
-		fmt.Fprintln(stderr, `{"level":"error","msg":"Got fatal error on delete: --max-delete threshold reached","object":"a"}`)
-		fmt.Fprintln(stderr, `{"level":"error","msg":"Fatal error received - not attempting retries"}`)
-		return nil, fmt.Errorf("exit status 7")
-	}
-	cases := []struct {
-		name      string
-		maxDelete int
-		want      func(res *BackupResult) string
-	}{
-		// Unlike the check before the sync, this refusal comes after rclone
-		// moved up to the limit out of current/; the message must say where.
-		{"limit 1", 1, func(res *BackupResult) string {
-			return "up to that many files were already moved from current/ to versions/" + res.Version
-		}},
-		// A partly readable brain folder is synced with no deletion allowed.
-		{"limit 0", 0, func(*BackupResult) string { return "nothing was removed from current/" }},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			res := tb.backup.syncDir(context.Background(), t.TempDir(), notesBase, "", "manual", c.maxDelete)
-			if res.OK || !res.Refused || !strings.HasPrefix(res.Error, massDeletionError) {
-				t.Errorf("result = %+v", res)
-			}
-			if want := c.want(res); !strings.Contains(res.Error, want) {
-				t.Errorf("error = %q, want it to say %q", res.Error, want)
-			}
-		})
 	}
 }
 
@@ -1496,7 +826,7 @@ func TestBackupMassDeletionWithRealRclone(t *testing.T) {
 				}
 			}
 			res := runBackup(t, tb, "notes")
-			if res.OK || !res.Refused || !strings.HasPrefix(res.Error, massDeletionError) {
+			if res.OK || !res.Refused || !strings.HasPrefix(res.Error, "refusing to mirror a mass deletion") {
 				t.Errorf("result = %+v, want a refusal", res)
 			}
 			if wipe == "memories" && !strings.Contains(res.Error, "in memories/ are gone") {
@@ -1506,7 +836,7 @@ func TestBackupMassDeletionWithRealRclone(t *testing.T) {
 				t.Errorf("current/ has %d files after a refused run, want all %d", n, backedUp)
 			}
 			body := tb.do("GET", "/api/backup/status", nil).Body.String()
-			if !strings.Contains(body, massDeletionError) || !strings.Contains(body, `"refused":true`) {
+			if !strings.Contains(body, "refusing to mirror a mass deletion") || !strings.Contains(body, `"refused":true`) {
 				t.Errorf("the refusal is not on the Backup page's status: %s", body)
 			}
 		})
@@ -1567,37 +897,6 @@ func TestBackupExcludedThenDeletedWithRealRclone(t *testing.T) {
 	}
 }
 
-// TestSyncDirMaxDeleteWithRealRclone pins the rclone log line that marks a
-// sync stopped by --max-delete.
-func TestSyncDirMaxDeleteWithRealRclone(t *testing.T) {
-	tb, remoteDir := rcloneTestBridge(t, "")
-	src := t.TempDir()
-	for _, f := range []string{"a", "b", "c"} {
-		_ = os.WriteFile(filepath.Join(src, f), []byte(f), 0o600)
-	}
-	if res := tb.backup.syncDir(context.Background(), src, notesBase, "", "manual", -1); !res.OK {
-		t.Fatalf("first sync = %+v", res)
-	}
-	// Replacing files moves the old copies to versions/ too, but rclone does
-	// not count that as a deletion.
-	for _, f := range []string{"a", "b", "c"} {
-		_ = os.WriteFile(filepath.Join(src, f), []byte(f+" changed"), 0o600)
-	}
-	if res := tb.backup.syncDir(context.Background(), src, notesBase, "", "manual", 0); !res.OK {
-		t.Fatalf("overwriting every file with --max-delete 0 = %+v", res)
-	}
-	_ = os.Remove(filepath.Join(src, "a"))
-	_ = os.Remove(filepath.Join(src, "b"))
-	res := tb.backup.syncDir(context.Background(), src, notesBase, "", "manual", 1)
-	if res.OK || !res.Refused {
-		t.Errorf("result = %+v, want a refusal at the --max-delete limit", res)
-	}
-	entries, _ := os.ReadDir(filepath.Join(remoteDir, config.DefaultBackupRoot, "notes", "current"))
-	if len(entries) < 2 {
-		t.Errorf("current/ has %d files, rclone deleted more than the limit", len(entries))
-	}
-}
-
 // TestBackupPartlyReadableFolderWithRealRclone: a brain folder rclone can
 // only partly read is no wipe, and no reason to skip its backup either. The
 // readable new file reaches current/, nothing is deleted from it, and the
@@ -1643,91 +942,6 @@ func TestBackupPartlyReadableFolderWithRealRclone(t *testing.T) {
 	}
 }
 
-// TestRcloneIsInterruptedWhenCancelled: a cancelled rclone gets an
-// interrupt first, as from Ctrl-C, so that it can end its transfers and
-// remove its partial files, and is killed only if it does not exit.
-func TestRcloneIsInterruptedWhenCancelled(t *testing.T) {
-	bin := t.TempDir()
-	script := filepath.Join(bin, "rclone")
-	fake := "#!/bin/sh\ndir=$(dirname \"$0\")\ntrap 'echo interrupted > \"$dir/signal\"; exit 1' INT\n" +
-		"touch \"$dir/started\"\nwhile :; do sleep 0.05; done\n"
-	if err := os.WriteFile(script, []byte(fake), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	tb := newTestBridge(t, `, "backup": {"rclone_path": "`+script+`"}`)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() {
-		_, err := tb.backup.runRclone(ctx, []string{"copy", "x:", "y"}, nil)
-		done <- err
-	}()
-	testutil.WaitFor(t, 10*time.Second, "rclone to start", func() bool { return fsx.Exists(filepath.Join(bin, "started")) })
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(rcloneStopGrace + 5*time.Second):
-		t.Fatal("runRclone did not return after the cancel")
-	}
-	if data, err := os.ReadFile(filepath.Join(bin, "signal")); err != nil || strings.TrimSpace(string(data)) != "interrupted" {
-		t.Errorf("rclone was not interrupted (%v), so it could not clean up", err)
-	}
-}
-
-// TestBackupStopWaitsForTheRun: Stop cancels a running backup and waits
-// for it, so its result is saved before the bridge closes down, and nothing
-// starts after it.
-func TestBackupStopWaitsForTheRun(t *testing.T) {
-	tb := newTestBridge(t, "")
-	m := tb.backup
-	_ = os.MkdirAll(filepath.Dir(m.rcloneConf()), 0o700)
-	_ = os.WriteFile(m.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
-	addBackupBrain(t, tb, "notes")
-	syncing := make(chan struct{})
-	m.runner = func(ctx context.Context, args []string, stderr io.Writer) ([]byte, error) {
-		if args[0] != "sync" {
-			return []byte("[]"), nil
-		}
-		close(syncing)
-		<-ctx.Done()
-		time.Sleep(300 * time.Millisecond) // rclone winding down
-		return nil, ctx.Err()
-	}
-	if err := m.StartRun([]string{"notes"}, false, "manual", true); err != nil {
-		t.Fatal(err)
-	}
-	<-syncing
-	m.Stop()
-	m.mu.Lock()
-	res, job := m.state.Brains["notes"], m.job
-	m.mu.Unlock()
-	if res == nil || res.Error != "cancelled" || job != nil {
-		t.Errorf("after Stop: result %+v, job %+v; want the cancelled run recorded and done", res, job)
-	}
-	if err := m.StartRun([]string{"notes"}, false, "manual", true); !errors.Is(err, errBackupStopped) {
-		t.Errorf("StartRun after Stop = %v, want errBackupStopped", err)
-	}
-}
-
-// TestUnreadableBackupStateIsKept: a state file that cannot be parsed is
-// kept as state.json.corrupt rather than overwritten by the next save.
-func TestUnreadableBackupStateIsKept(t *testing.T) {
-	tb := newTestBridge(t, "")
-	path := tb.backup.statePath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte(`{"brains": {"notes": tru`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	m := NewBackupManager(tb.cfgs, tb.brainMgr)
-	if data, err := os.ReadFile(path + ".corrupt"); err != nil || string(data) != `{"brains": {"notes": tru` {
-		t.Errorf("state.json.corrupt = %q, %v; want the unreadable file", data, err)
-	}
-	if m.state.Brains == nil || len(m.state.Brains) != 0 {
-		t.Errorf("state = %+v, want an empty one", m.state)
-	}
-}
-
 // connectTestBridge is a bridge whose rclone_path is a script that does
 // nothing, so that Connect gets past its rclone check, and whose runner is
 // run.
@@ -1738,428 +952,21 @@ func connectTestBridge(t *testing.T, run func(ctx context.Context, args []string
 		t.Fatal(err)
 	}
 	tb := newTestBridge(t, `, "backup": {"rclone_path": "`+script+`"}`)
-	tb.backup.runner = run
-	if err := os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700); err != nil {
+	installBackupRunner(t, tb, run)
+	if err := os.MkdirAll(filepath.Dir(tb.cfgs.Boot().RcloneConf()), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return tb
-}
-
-// TestBackupConnectLeavesAWorkingLinkAlone: connecting starts by deleting
-// the remote, so Connect is refused while Drive is connected, and while a
-// backup or restore runs on it.
-func TestBackupConnectLeavesAWorkingLinkAlone(t *testing.T) {
-	cases := []struct {
-		name      string
-		connected bool
-		job       bool
-		want      string
-	}{
-		{"connected", true, false, "already connected"},
-		{"a backup runs", false, true, "is running"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var mu sync.Mutex
-			var calls [][]string
-			tb := connectTestBridge(t, func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
-				mu.Lock()
-				calls = append(calls, args)
-				mu.Unlock()
-				return nil, nil
-			})
-			m := tb.backup
-			conf := "[brain-gdrive]\ntype = drive\ntoken = \n"
-			if tc.connected {
-				conf = "[brain-gdrive]\ntype = drive\ntoken = {\"access_token\":\"x\"}\n"
-			}
-			_ = os.WriteFile(m.rcloneConf(), []byte(conf), 0o600)
-			if tc.job {
-				m.mu.Lock()
-				m.job = &backupJob{cancel: func() {}}
-				m.mu.Unlock()
-				t.Cleanup(func() { m.mu.Lock(); m.job = nil; m.mu.Unlock() })
-			}
-			w := tb.do("POST", "/api/backup/connect", nil)
-			if w.Code != 409 || !strings.Contains(w.Body.String(), tc.want) {
-				t.Errorf("connect = %d %s, want 409 with %q", w.Code, w.Body.String(), tc.want)
-			}
-			time.Sleep(50 * time.Millisecond) // a flow started anyway would have called rclone by now
-			mu.Lock()
-			defer mu.Unlock()
-			if len(calls) != 0 {
-				t.Errorf("rclone ran %v", calls)
-			}
-			if data, _ := os.ReadFile(m.rcloneConf()); string(data) != conf {
-				t.Errorf("rclone.conf changed to %q", data)
-			}
-		})
-	}
-}
-
-// TestConnectDriveChecksEveryAnswer: each of rclone's answers is checked,
-// the last one included, and a failure keeps what rclone said about it.
-func TestConnectDriveChecksEveryAnswer(t *testing.T) {
-	question := []byte(`{"State":"*again","Option":{"Name":"config_something","DefaultStr":"x"}}`)
-	cases := []struct {
-		name string
-		run  func(args []string, stderr io.Writer) ([]byte, error)
-		want string
-	}{
-		{"delete fails", func(args []string, _ io.Writer) ([]byte, error) {
-			if args[1] == "delete" {
-				return nil, errors.New("exit status 1")
-			}
-			return []byte(`{"State":""}`), nil
-		}, "removing the unfinished Drive link"},
-		{"the last answer fails", func(args []string, stderr io.Writer) ([]byte, error) {
-			if args[1] == "update" {
-				fmt.Fprintln(stderr, "ERROR : quota exceeded")
-				return nil, errors.New("exit status 1")
-			}
-			return question, nil
-		}, "quota exceeded"},
-		{"output is not a question", func(args []string, stderr io.Writer) ([]byte, error) {
-			if args[1] == "create" {
-				fmt.Fprintln(stderr, "NOTICE: Config file not found")
-				return []byte("Remote config\n"), nil
-			}
-			return nil, nil
-		}, "Config file not found"},
-		{"questions never end", func(args []string, _ io.Writer) ([]byte, error) {
-			if args[1] == "delete" {
-				return nil, nil
-			}
-			return question, nil
-		}, "more than 10 questions"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			tb := connectTestBridge(t, func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
-				return tc.run(args, stderr)
-			})
-			err := tb.backup.connectDrive(context.Background(), &connectJob{State: "running"})
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Errorf("connectDrive = %v, want an error with %q", err, tc.want)
-			}
-		})
-	}
-}
-
-// TestBackupDisconnectWaitsForTheSignIn: Disconnect cancels a sign-in that
-// is still running and waits for it before deleting the remote, so a token
-// rclone writes as it ends cannot leave Drive connected afterwards.
-func TestBackupDisconnectWaitsForTheSignIn(t *testing.T) {
-	var conf string
-	authorising := make(chan struct{})
-	tb := connectTestBridge(t, func(ctx context.Context, args []string, _ io.Writer) ([]byte, error) {
-		switch {
-		case args[1] == "delete":
-			return nil, os.WriteFile(conf, nil, 0o600)
-		case args[1] == "create":
-			close(authorising)
-			<-ctx.Done()
-			// rclone writes the token it got as it is interrupted.
-			time.Sleep(200 * time.Millisecond)
-			_ = os.WriteFile(conf, []byte("[brain-gdrive]\ntype = drive\ntoken = {\"access_token\":\"x\"}\n"), 0o600)
-			return nil, ctx.Err()
-		}
-		return nil, nil
-	})
-	conf = tb.backup.rcloneConf()
-	if w := tb.do("POST", "/api/backup/connect", nil); w.Code != 202 {
-		t.Fatalf("connect = %d %s", w.Code, w.Body.String())
-	}
-	<-authorising
-	tb.backup.mu.Lock()
-	job := tb.backup.connect
-	tb.backup.mu.Unlock()
-	if w := tb.do("POST", "/api/backup/disconnect", nil); w.Code != 200 {
-		t.Fatalf("disconnect = %d %s", w.Code, w.Body.String())
-	}
-	// Only once the sign-in has ended can its token have been written.
-	select {
-	case <-job.done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the sign-in never ended")
-	}
-	if tb.backup.connected() {
-		t.Error("Drive is connected after Disconnect: the sign-in's token came after the delete")
-	}
-}
-
-// TestBackupDisconnectReportsFailures: a delete that fails is an error, not
-// "disconnected", and Disconnect is refused while a backup runs.
-func TestBackupDisconnectReportsFailures(t *testing.T) {
-	tb := connectTestBridge(t, func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
-		if args[1] == "delete" {
-			return nil, errors.New("permission denied")
-		}
-		return nil, nil
-	})
-	if w := tb.do("POST", "/api/backup/disconnect", nil); w.Code != 500 || !strings.Contains(w.Body.String(), "permission denied") {
-		t.Errorf("disconnect = %d %s, want 500 with the error", w.Code, w.Body.String())
-	}
-	m := tb.backup
-	m.mu.Lock()
-	m.job = &backupJob{cancel: func() {}}
-	m.mu.Unlock()
-	t.Cleanup(func() { m.mu.Lock(); m.job = nil; m.mu.Unlock() })
-	if w := tb.do("POST", "/api/backup/disconnect", nil); w.Code != 409 {
-		t.Errorf("disconnect during a backup = %d %s, want 409", w.Code, w.Body.String())
-	}
-}
-
-// TestBackupDisconnectHoldsOffWhatWouldUseTheLink: while Disconnect
-// removes the Drive link, nothing starts that would use it: no backup,
-// which would fail on the deleted remote, no restore, no sign-in next to
-// the delete, and no second Disconnect. All of them can start again after.
-func TestBackupDisconnectHoldsOffWhatWouldUseTheLink(t *testing.T) {
-	const connected, abandoned = "[brain-gdrive]\ntype = drive\ntoken = {\"access_token\":\"x\"}\n", "[brain-gdrive]\ntype = drive\ntoken = \n"
-	cases := []struct {
-		name, conf, path string
-		body             any
-	}{
-		{"a backup", connected, "/api/backup/run", map[string]any{}},
-		{"a restore", connected, "/api/backup/restore", map[string]string{"brain": "notes", "target": "~/restored"}},
-		{"a sign-in", abandoned, "/api/backup/connect", nil},
-		{"another disconnect", connected, "/api/backup/disconnect", nil},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// The first delete, Disconnect's, waits for release.
-			deleting, release := make(chan struct{}), make(chan struct{})
-			var once sync.Once
-			tb := connectTestBridge(t, func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
-				if len(args) > 1 && args[1] == "delete" {
-					first := false
-					once.Do(func() { first = true; close(deleting) })
-					if first {
-						<-release
-					}
-				}
-				return nil, nil
-			})
-			if err := os.WriteFile(tb.backup.rcloneConf(), []byte(tc.conf), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			disconnected := make(chan int)
-			go func() { disconnected <- tb.do("POST", "/api/backup/disconnect", nil).Code }()
-			<-deleting
-			w := tb.do("POST", tc.path, tc.body)
-			close(release)
-			if w.Code != 409 || !strings.Contains(w.Body.String(), "being removed") {
-				t.Errorf("%s during the disconnect = %d %s, want 409", tc.path, w.Code, w.Body.String())
-			}
-			if code := <-disconnected; code != 200 {
-				t.Errorf("disconnect = %d", code)
-			}
-			if _, err := os.Stat(filepath.Join(tb.home, "restored")); !os.IsNotExist(err) {
-				t.Errorf("the refused restore made its folder (%v)", err)
-			}
-			m := tb.backup
-			m.mu.Lock()
-			defer m.mu.Unlock()
-			if m.job != nil || m.connect != nil || m.disconnecting {
-				t.Errorf("after the disconnect: job %+v, sign-in %+v, disconnecting %v; want none", m.job, m.connect, m.disconnecting)
-			}
-		})
-	}
-}
-
-// TestBackupDisconnectKeepsASignInThatDidNotStop: a sign-in that does not
-// end when Disconnect cancels it stays on the status page, and keeps
-// another from starting next to it.
-func TestBackupDisconnectKeepsASignInThatDidNotStop(t *testing.T) {
-	prev := backupStopWait
-	backupStopWait = 200 * time.Millisecond
-	t.Cleanup(func() { backupStopWait = prev })
-	authorising, stuck := make(chan struct{}), make(chan struct{})
-	var once sync.Once
-	tb := connectTestBridge(t, func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
-		if args[1] == "create" {
-			once.Do(func() { close(authorising) })
-			<-stuck // deaf to the cancel
-		}
-		return nil, nil
-	})
-	t.Cleanup(func() { close(stuck) })
-	if w := tb.do("POST", "/api/backup/connect", nil); w.Code != 202 {
-		t.Fatalf("connect = %d %s", w.Code, w.Body.String())
-	}
-	<-authorising
-	if w := tb.do("POST", "/api/backup/disconnect", nil); w.Code != 500 || !strings.Contains(w.Body.String(), "did not stop") {
-		t.Errorf("disconnect = %d %s, want 500", w.Code, w.Body.String())
-	}
-	var st struct {
-		Connect *connectJob `json:"connect"`
-	}
-	_ = json.Unmarshal(tb.do("GET", "/api/backup/status", nil).Body.Bytes(), &st)
-	if st.Connect == nil || st.Connect.State != "running" {
-		t.Errorf("status shows sign-in %+v, want the running one", st.Connect)
-	}
-	if w := tb.do("POST", "/api/backup/connect", nil); w.Code != 409 || !strings.Contains(w.Body.String(), "already connecting") {
-		t.Errorf("second connect = %d %s, want 409", w.Code, w.Body.String())
-	}
-}
-
-// TestDailyBackupWithoutDriveIsLogged: a daily backup with no Drive link
-// to run on says so in the log, once a day rather than every minute.
-func TestDailyBackupWithoutDriveIsLogged(t *testing.T) {
-	tb := newTestBridge(t, `, "backup": {"enabled": true}`)
-	logs := captureLog(t)
-	day := time.Date(2026, 10, 18, 4, 0, 0, 0, time.Local)
-	for i := range 3 {
-		tb.backup.tick(day.Add(time.Duration(i) * time.Minute))
-	}
-	tb.backup.tick(day.AddDate(0, 0, 1))
-	all := strings.Join(logs(), "\n")
-	if n := strings.Count(all, "Google Drive is not connected"); n != 2 {
-		t.Errorf("logged %d times over two days, want 2:\n%s", n, all)
-	}
-}
-
-// TestBackupSummarySaysWhatRuns: the overview tells a restore that runs
-// from a backup.
-func TestBackupSummarySaysWhatRuns(t *testing.T) {
-	cases := []struct {
-		name               string
-		job                *backupJob
-		running, restoring bool
-	}{
-		{"nothing", nil, false, false},
-		{"a backup", &backupJob{kind: jobBackup}, true, false},
-		{"a restore", &backupJob{kind: jobRestore}, true, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			m := newTestBridge(t, "").backup
-			m.mu.Lock()
-			m.job = tc.job
-			m.mu.Unlock()
-			t.Cleanup(func() { m.mu.Lock(); m.job = nil; m.mu.Unlock() })
-			if s := m.Summary(); s.Running != tc.running || s.Restoring != tc.restoring {
-				t.Errorf("running %v, restoring %v; want %v, %v", s.Running, s.Restoring, tc.running, tc.restoring)
-			}
-		})
-	}
-}
-
-// TestBackupSummaryShowsTheLatestFailure: with several brains failing, the
-// overview shows the latest failure and whose it is, the same on every
-// refresh, and a removed brain's failure neither shows nor stays saved.
-func TestBackupSummaryShowsTheLatestFailure(t *testing.T) {
-	tb := newTestBridge(t, `, "backup": {"include_bridge_config": false}`)
-	m := tb.backup
-	_ = os.MkdirAll(filepath.Dir(m.rcloneConf()), 0o700)
-	_ = os.WriteFile(m.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
-	addBackupBrain(t, tb, "a")
-	addBackupBrain(t, tb, "b")
-	at := time.Date(2026, 10, 18, 3, 30, 0, 0, time.Local)
-	failed := func(min int, msg string) *BackupResult {
-		return &BackupResult{Started: at, Finished: at.Add(time.Duration(min) * time.Minute), Error: msg}
-	}
-	m.mu.Lock()
-	m.state.Brains["a"] = failed(1, "a failed")
-	m.state.Brains["b"] = failed(2, "b failed")
-	m.state.Brains["gone"] = failed(3, "gone failed") // a brain removed since
-	m.state.Bridge = &BackupResult{OK: true, Finished: at.Add(4 * time.Minute)}
-	m.mu.Unlock()
-	for range 20 {
-		s := m.Summary()
-		if s.LastError != "b failed" || s.LastErrorBrain != "b" {
-			t.Fatalf("summary error = %q of %q, want b's, the latest of the configured brains", s.LastError, s.LastErrorBrain)
-		}
-	}
-
-	m.runner = (&deletionRunner{src: []string{"x"}, cur: []string{"x"}}).run
-	if res := runBackup(t, tb, "a"); !res.OK {
-		t.Fatalf("backup of a = %+v", res)
-	}
-	saved := NewBackupManager(tb.cfgs, tb.brainMgr).state.Brains
-	if _, ok := saved["gone"]; ok || saved["a"] == nil || saved["b"] == nil {
-		t.Errorf("saved results for %v, want a and b only", slices.Collect(maps.Keys(saved)))
-	}
-}
-
-// TestBackupBridgeRefusesAnIncompleteStage: the bridge's settings are
-// synced only when every file of them could be staged. A sync of what
-// could would move the good copies in Drive to versions/ and report OK.
-func TestBackupBridgeRefusesAnIncompleteStage(t *testing.T) {
-	cases := []struct {
-		name    string
-		failing string // the staged file whose write fails; "" for none
-	}{
-		// What the last run staged cannot be cleared: its brains folder
-		// became read-only.
-		{"the last stage stays", ""},
-		{"config.json", "config.json"},
-		{"a brain's manifest", "notes.brain.json"},
-		{"the README", "README.txt"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			tb := newTestBridge(t, "")
-			addBackupBrain(t, tb, "notes")
-			m := tb.backup
-			var mu sync.Mutex
-			var calls [][]string
-			m.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
-				mu.Lock()
-				calls = append(calls, args)
-				mu.Unlock()
-				return nil, nil
-			}
-			if tc.failing == "" {
-				if os.Geteuid() == 0 {
-					t.Skip("root writes to read-only folders")
-				}
-				brains := filepath.Join(m.dir(), "_staging", "brains")
-				if err := os.MkdirAll(brains, 0o700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(brains, "old.brain.json"), []byte("{}"), 0o600); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Chmod(brains, 0o500); err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() { _ = os.Chmod(brains, 0o700) })
-			} else {
-				prev := writeStaged
-				writeStaged = func(name string, data []byte, perm os.FileMode) error {
-					if filepath.Base(name) == tc.failing {
-						return errors.New("disk full")
-					}
-					return prev(name, data, perm)
-				}
-				t.Cleanup(func() { writeStaged = prev })
-			}
-
-			res := m.backupBridge(context.Background(), "manual")
-			if res.OK || !strings.Contains(res.Error, "staging the bridge's settings failed") {
-				t.Errorf("result = %+v, want a staging failure", res)
-			}
-			if tc.failing != "" && !strings.Contains(res.Error, "disk full") {
-				t.Errorf("result = %+v, want the write's error", res)
-			}
-			mu.Lock()
-			defer mu.Unlock()
-			if len(calls) != 0 {
-				t.Errorf("rclone ran %v", calls)
-			}
-		})
-	}
 }
 
 // connectAlias gives the bridge's rclone config a remote, so that the
 // bridge counts Drive as connected.
 func connectAlias(t *testing.T, tb *testBridge) {
 	t.Helper()
-	if err := os.MkdirAll(filepath.Dir(tb.backup.rcloneConf()), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(tb.cfgs.Boot().RcloneConf()), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(tb.backup.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600); err != nil {
+	if err := os.WriteFile(tb.cfgs.Boot().RcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -2175,12 +982,12 @@ func TestBackupRestoreChecksWhatItIsGiven(t *testing.T) {
 	addBackupBrain(t, tb, "notes")
 	var mu sync.Mutex
 	var calls [][]string
-	tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
+	installBackupRunner(t, tb, func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
 		mu.Lock()
 		calls = append(calls, args)
 		mu.Unlock()
 		return []byte("[]"), nil
-	}
+	})
 	full := filepath.Join(tb.home, "full")
 	_ = os.MkdirAll(full, 0o700)
 	_ = os.WriteFile(filepath.Join(full, "x"), nil, 0o600)
@@ -2308,7 +1115,7 @@ func TestBackupRestoreRecordsItsResult(t *testing.T) {
 			connectAlias(t, tb)
 			release := make(chan struct{})
 			var src string
-			tb.backup.runner = func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
+			installBackupRunner(t, tb, func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
 				src = args[1]
 				<-release
 				if tc.fail {
@@ -2317,7 +1124,7 @@ func TestBackupRestoreRecordsItsResult(t *testing.T) {
 				}
 				fmt.Fprintln(stderr, `{"level":"notice","msg":"stats","stats":{"bytes":2048,"transfers":3}}`)
 				return nil, nil
-			}
+			})
 			w := tb.do("POST", "/api/backup/restore", map[string]string{"brain": "notes", "version": tc.version, "target": "~/restored"})
 			if w.Code != 202 {
 				t.Fatalf("restore = %d %s", w.Code, w.Body.String())
@@ -2331,7 +1138,7 @@ func TestBackupRestoreRecordsItsResult(t *testing.T) {
 					Brain  string `json:"brain"`
 					Target string `json:"target"`
 				} `json:"job"`
-				LastRestore *RestoreResult `json:"last_restore"`
+				LastRestore *backup.RestoreResult `json:"last_restore"`
 			}
 			_ = json.Unmarshal(tb.do("GET", "/api/backup/status", nil).Body.Bytes(), &st)
 			if st.Job.Kind != "restore" || st.Job.Brain != "notes" || st.Job.Target != filepath.Join(tb.home, "restored") {
@@ -2339,9 +1146,7 @@ func TestBackupRestoreRecordsItsResult(t *testing.T) {
 			}
 			close(release)
 			testutil.WaitFor(t, 10*time.Second, "the restore", func() bool {
-				tb.backup.mu.Lock()
-				defer tb.backup.mu.Unlock()
-				return tb.backup.job == nil
+				return !tb.backup.Summary().Running
 			})
 			if src != tc.wantSrc {
 				t.Errorf("copied %s, want %s", src, tc.wantSrc)
@@ -2377,9 +1182,7 @@ func TestBackupRestoreFolderThatCannotBeMade(t *testing.T) {
 	if w.Code != 500 || !strings.Contains(w.Body.String(), "creating the restore folder") {
 		t.Errorf("restore = %d %s, want 500", w.Code, w.Body.String())
 	}
-	tb.backup.mu.Lock()
-	defer tb.backup.mu.Unlock()
-	if tb.backup.job != nil {
+	if tb.backup.Summary().Running {
 		t.Error("a restore started anyway")
 	}
 }
@@ -2394,14 +1197,14 @@ func TestBackupCancel(t *testing.T) {
 		t.Errorf("cancel with nothing running = %d, want 409", w.Code)
 	}
 	syncing := make(chan struct{})
-	tb.backup.runner = func(ctx context.Context, args []string, _ io.Writer) ([]byte, error) {
+	installBackupRunner(t, tb, func(ctx context.Context, args []string, _ io.Writer) ([]byte, error) {
 		if args[0] != "sync" {
 			return []byte("[]"), nil
 		}
 		close(syncing)
 		<-ctx.Done()
 		return nil, ctx.Err()
-	}
+	})
 	if w := tb.do("POST", "/api/backup/run", map[string]any{"brains": []string{"notes"}, "include_bridge": false, "force": true}); w.Code != 202 {
 		t.Fatalf("run = %d %s", w.Code, w.Body.String())
 	}
@@ -2432,9 +1235,9 @@ func TestBackupLeavesSecretsOut(t *testing.T) {
 		{"include_secret_files", []string{"*.log"}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			filter := brainFilter(tc.excludes, tc.includeSecrets)
+			filter := backup.BrainFilter(tc.excludes, tc.includeSecrets)
 			lines := strings.Split(strings.TrimSpace(filter), "\n")
-			for _, p := range backupSecretExcludes {
+			for _, p := range backup.SecretExcludes {
 				if got := slices.Contains(lines, "- "+p); got == tc.includeSecrets {
 					t.Errorf("filter has - %s: %v, want %v:\n%s", p, got, !tc.includeSecrets, filter)
 				}
@@ -2444,7 +1247,7 @@ func TestBackupLeavesSecretsOut(t *testing.T) {
 					t.Errorf("filter includes %q", l)
 				}
 			}
-			if !tc.includeSecrets && lines[0] != "- "+backupSecretExcludes[0] {
+			if !tc.includeSecrets && lines[0] != "- "+backup.SecretExcludes[0] {
 				t.Errorf("filter starts with %q, want the secret files first", lines[0])
 			}
 		})
@@ -2454,14 +1257,20 @@ func TestBackupLeavesSecretsOut(t *testing.T) {
 		tb := newTestBridge(t, "")
 		addBackupBrain(t, tb, "notes")
 		var filters []string
-		tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
+		installBackupRunner(t, tb, func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
 			if i := slices.Index(args, "--filter-from"); i >= 0 && args[0] == "sync" {
 				data, _ := os.ReadFile(args[i+1])
 				filters = append(filters, string(data))
 			}
 			return []byte("[]"), nil
+		})
+		connectAlias(t, tb)
+		if err := tb.backup.StartRun([]string{"notes"}, false, "manual", true); err != nil {
+			t.Fatal(err)
 		}
-		tb.backup.backupBrain(t.Context(), tb.brainMgr.Get("notes"), "manual", true)
+		if res := waitBackup(t, tb, "notes"); !res.OK {
+			t.Fatalf("backup = %+v", res)
+		}
 		if len(filters) != 1 || !strings.HasPrefix(filters[0], "- .env\n") {
 			t.Errorf("sync filters = %q, want one starting with the secret files", filters)
 		}
@@ -2475,38 +1284,10 @@ func TestBackupSecretExcludesAreDocumented(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range backupSecretExcludes {
+	for _, p := range backup.SecretExcludes {
 		if !strings.Contains(string(doc), "`"+p+"`") {
 			t.Errorf("docs/BACKUP.md does not name %s", p)
 		}
-	}
-}
-
-// TestSyncDirRetriesFilesThatChange: rclone fails a file whose size changes
-// while it copies it ("source file is being updated"), and a brain's
-// history gets a line whenever a message comes in. The sync asks rclone to
-// try again after a pause, and the log says when it had to.
-func TestSyncDirRetriesFilesThatChange(t *testing.T) {
-	tb := newTestBridge(t, "")
-	var got []string
-	tb.backup.runner = func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
-		got = args
-		fmt.Fprintln(stderr, `{"level":"error","msg":"conversation-history.jsonl: Failed to copy: can't copy - source file is being updated (size changed from 10 to 12)","object":"conversation-history.jsonl"}`)
-		fmt.Fprintln(stderr, `{"level":"error","msg":"Attempt 1/3 failed with 1 errors and: can't copy - source file is being updated"}`)
-		fmt.Fprintln(stderr, `{"level":"notice","msg":"Attempt 2/3 succeeded"}`)
-		return nil, nil
-	}
-	logged := captureLog(t)
-
-	res := tb.backup.syncDir(t.Context(), t.TempDir(), notesBase, "", "manual", -1)
-	if !res.OK {
-		t.Errorf("result = %+v, want OK", res)
-	}
-	if flagValue(got, "--retries") != "3" || flagValue(got, "--retries-sleep") != "10s" {
-		t.Errorf("sync args %q, want --retries 3 --retries-sleep 10s", got)
-	}
-	if all := strings.Join(logged(), "\n"); !strings.Contains(all, "rclone tried 1 more time(s)") {
-		t.Errorf("log = %q, want it to say rclone retried", all)
 	}
 }
 
@@ -2529,17 +1310,26 @@ func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
 			tb := newTestBridge(t, "")
 			addBackupBrain(t, tb, "notes")
 			br := tb.brainMgr.Get("notes")
-			tb.backup.idleWait = c.wait
 			running := func() bool {
 				return br.Snapshot().Running != nil
 			}
 			var syncedWhileRunning []bool
-			tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
+			installBackupRunner(t, tb, func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
 				if args[0] == "sync" {
 					syncedWhileRunning = append(syncedWhileRunning, running())
 				}
 				return []byte("[]"), nil
-			}
+			}, func(opts *backup.Options) {
+				targets := opts.Targets
+				opts.Targets = func() []backup.Target {
+					all := targets()
+					for i := range all {
+						wait := all[i].WaitIdle
+						all[i].WaitIdle = func(ctx context.Context, _ time.Duration) bool { return wait(ctx, c.wait) }
+					}
+					return all
+				}
+			})
 			logged := captureLog(t)
 
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "1500")
@@ -2547,7 +1337,13 @@ func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
 				t.Fatal(err)
 			}
 			testutil.WaitFor(t, 10*time.Second, "the run to start", running)
-			tb.backup.backupBrain(t.Context(), br, "manual", true)
+			connectAlias(t, tb)
+			if err := tb.backup.StartRun([]string{"notes"}, false, "manual", true); err != nil {
+				t.Fatal(err)
+			}
+			if res := waitBackup(t, tb, "notes"); !res.OK {
+				t.Fatalf("backup = %+v", res)
+			}
 			if !slices.Equal(syncedWhileRunning, []bool{c.wantRunning}) {
 				t.Errorf("synced while the brain ran: %v, want [%v]", syncedWhileRunning, c.wantRunning)
 			}

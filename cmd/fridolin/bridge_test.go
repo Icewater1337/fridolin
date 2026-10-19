@@ -14,6 +14,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/config"
 
@@ -776,7 +777,7 @@ func TestNamesReadOutsideGo(t *testing.T) {
 	}{
 		{"web/assets/components/brain.js", []string{"ok" + ": [", "error" + ": [", "interrupted" + ": [", "question" + ": ["}},
 		{"web/assets/pages/settings.js", []string{"def: '" + config.QueueModeQueue + "'", "['" + config.QueueModeQueue + "', ", "['" + config.QueueModeInterrupt + "', "}},
-		{"web/assets/lib/brain.js", []string{"export const BRIDGE_BACKUP_ID = '" + bridgeBackupID + "';", "[['" + manifest.ObserveHistory + "', ", "['" + manifest.ObserveRun + "', "}},
+		{"web/assets/lib/brain.js", []string{"export const BRIDGE_BACKUP_ID = '" + backup.BridgeID + "';", "[['" + manifest.ObserveHistory + "', ", "['" + manifest.ObserveRun + "', "}},
 		{"web/assets/pages/brain.js", []string{"m.observe || '" + manifest.ObserveHistory + "'"}},
 	}
 	for _, c := range cases {
@@ -807,9 +808,9 @@ func TestDashboardSpellsTheBridgesBackupIDOnce(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if strings.Contains(string(js), "'"+bridgeBackupID+"'") {
+		if strings.Contains(string(js), "'"+backup.BridgeID+"'") {
 			rel, _ := filepath.Rel(repoDir, path)
-			t.Errorf("%s spells out %q; import BRIDGE_BACKUP_ID from lib/brain.js", rel, bridgeBackupID)
+			t.Errorf("%s spells out %q; import BRIDGE_BACKUP_ID from lib/brain.js", rel, backup.BridgeID)
 		}
 		return nil
 	})
