@@ -16,12 +16,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/activity"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
+
 	"github.com/Icewater1337/fridolin/internal/config"
+
+	"github.com/Icewater1337/fridolin/internal/manifest"
+
+	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/logx"
-	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
@@ -904,10 +908,9 @@ func TestFailedAddRemovesTheScaffold(t *testing.T) {
 // button, with ?fresh=1, has the client ask WhatsApp again.
 func TestGroupsAskWhatsAppOnlyWhenFresh(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tw := newTestWhatsApp(t)
 	fl := &fakeLister{}
-	tw.lister = fl
-	tb.wa = tw.WhatsAppClient
+	tw := newTestWhatsApp(t, func(opts *whatsapp.Options) { opts.Groups = fl })
+	tb.wa = tw.Client
 	steps := []struct {
 		path    string
 		queries int32 // asked of WhatsApp so far

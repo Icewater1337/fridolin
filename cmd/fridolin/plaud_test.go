@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/devchat"
+
 	"github.com/Icewater1337/fridolin/internal/config"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -3583,7 +3585,7 @@ func TestPlaudPhoneFolder(t *testing.T) {
 		}
 	}
 	testutil.WaitFor(t, 5*time.Second, "brain replies", func() bool { return len(tb.dev.Outbox()) == 2 })
-	if out := tb.dev.Outbox(); !slices.ContainsFunc(out, func(m DevMessage) bool {
+	if out := tb.dev.Outbox(); !slices.ContainsFunc(out, func(m devchat.Message) bool {
 		return strings.Contains(m.Text, `[Plaud] New recording "Phone recording" (2026-10-18 10:00, 01:05)`)
 	}) {
 		t.Errorf("replies = %+v", out)

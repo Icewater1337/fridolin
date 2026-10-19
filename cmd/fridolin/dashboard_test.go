@@ -22,6 +22,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/devchat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+
 	"github.com/Icewater1337/fridolin/internal/config"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -375,7 +378,7 @@ func TestSendRefusesMissingJIDOrText(t *testing.T) {
 // stateMessenger is the dev messenger with a WhatsApp state of the test's
 // choosing.
 type stateMessenger struct {
-	*devMessenger
+	*devchat.Messenger
 	state chat.LinkState
 }
 
@@ -401,7 +404,7 @@ func TestReadyReportsWhetherMessagesCanGoOut(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb := newTestBridge(t, "")
 			if !c.dev {
-				tb.wa = stateMessenger{devMessenger: tb.dev, state: chat.LinkState{Mode: c.mode, OwnNumber: "15551234567"}}
+				tb.wa = stateMessenger{Messenger: tb.dev, state: chat.LinkState{Mode: c.mode, OwnNumber: "15551234567"}}
 				tb.dev = nil
 			}
 			r := httptest.NewRequest("GET", "http://127.0.0.1:8765/ready", nil)
@@ -1838,7 +1841,7 @@ func TestPrettyName(t *testing.T) {
 
 // qrMessenger is the dev messenger with a pairing code to show.
 type qrMessenger struct {
-	*devMessenger
+	*devchat.Messenger
 	code string
 }
 
@@ -1993,7 +1996,7 @@ func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 		texts = append(texts, m.Text)
 	}
 	slices.Sort(texts)
-	if len(texts) != 2 || !strings.Contains(texts[0], "Examplebank 2FA") || texts[1] != otpCaughtNotice {
+	if len(texts) != 2 || !strings.Contains(texts[0], "Examplebank 2FA") || texts[1] != outboundmsg.OtpCaughtNotice {
 		t.Errorf("sent %q — only the script's own request and the notice may be there; the brain must not run on a caught code", texts)
 	}
 }

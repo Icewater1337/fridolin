@@ -20,6 +20,8 @@ import (
 	"time"
 	_ "time/tzdata" // TestNextDue's time zone, on machines without one
 
+	"github.com/Icewater1337/fridolin/internal/devchat"
+
 	"github.com/Icewater1337/fridolin/internal/config"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -1314,7 +1316,7 @@ func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
 	if jid == "" {
 		t.Fatal("the test brain has no chat")
 	}
-	sent := func() []DevMessage { return tb.dev.Outbox() }
+	sent := func() []devchat.Message { return tb.dev.Outbox() }
 	told := func() bool {
 		tb.backup.mu.Lock()
 		defer tb.backup.mu.Unlock()
