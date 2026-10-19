@@ -3,6 +3,7 @@ package pipeline
 import (
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/brain"
@@ -61,26 +62,28 @@ func TestDebounceMergesBurstAndKeepsTrigger(t *testing.T) {
 }
 
 func TestDebounceMaxWaitCapsContinuousInput(t *testing.T) {
-	d, f := newTestDebouncer(50*time.Millisecond, 120*time.Millisecond)
-	start := time.Now()
-	stop := time.After(400 * time.Millisecond)
-loop:
-	for {
-		select {
-		case <-stop:
-			break loop
-		default:
-			d.Add(brain.Inbound{Inbound: chat.Inbound{JID: "c", Sender: "1", Text: "x"}})
-			time.Sleep(10 * time.Millisecond)
+	synctest.Test(t, func(t *testing.T) {
+		d, f := newTestDebouncer(50*time.Millisecond, 120*time.Millisecond)
+		start := time.Now()
+		stop := time.After(400 * time.Millisecond)
+	loop:
+		for {
+			select {
+			case <-stop:
+				break loop
+			default:
+				d.Add(brain.Inbound{Inbound: chat.Inbound{JID: "c", Sender: "1", Text: "x"}})
+				time.Sleep(10 * time.Millisecond)
+			}
 		}
-	}
-	testutil.WaitFor(t, time.Second, "flushes", func() bool { return f.n() >= 3 })
-	f.mu.Lock()
-	first := f.at[0].Sub(start)
-	f.mu.Unlock()
-	if first > 200*time.Millisecond {
-		t.Errorf("first flush after %v; max wait is 120ms", first)
-	}
+		testutil.WaitFor(t, time.Second, "flushes", func() bool { return f.n() >= 3 })
+		f.mu.Lock()
+		first := f.at[0].Sub(start)
+		f.mu.Unlock()
+		if first > 200*time.Millisecond {
+			t.Errorf("first flush after %v; max wait is 120ms", first)
+		}
+	})
 }
 
 // If intake gets the lock after a batch's maximum wait but before its timer
