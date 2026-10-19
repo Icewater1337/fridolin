@@ -747,19 +747,6 @@ type redactor struct {
 
 type redactedChat struct{ value, masked string }
 
-// jidExpr is a WhatsApp JID or LID: its user part, with a device or
-// creator suffix, then the server.
-const jidExpr = `([0-9]+)((?:[-.:][0-9]+)*)@(s\.whatsapp\.net|g\.us|lid)`
-
-// redactPattern finds a JID or LID, a number in international format, or
-// an email address.
-var redactPattern = regexp.MustCompile(jidExpr + `\b|\+[0-9]{7,15}\b|[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`)
-
-// trailingJID finds a JID at the end of what redactPattern took for an
-// email address: one right after a name, "brain-120363…@g.us" say, which
-// the address's pattern matches from the name's start.
-var trailingJID = regexp.MustCompile(jidExpr + `$`)
-
 // newRedactor redacts home, as given and with its symlinks resolved, in
 // each way a path is written: plain, in a regular expression, and quoted
 // in a sandbox profile.
@@ -828,9 +815,9 @@ func (r *redactor) add(groups bool, chats []string) {
 		if len(digits) < 6 {
 			continue
 		}
-		masked := maskPhone(digits)
+		masked := MaskPhone(digits)
 		if groups || server == "g.us" || server == "lid" {
-			masked = maskDigits(digits, 0)
+			masked = MaskDigits(digits, 0)
 		}
 		written := masked
 		if strings.HasPrefix(id, "+") {
@@ -843,23 +830,7 @@ func (r *redactor) add(groups bool, chats []string) {
 
 // text returns s redacted.
 func (r *redactor) text(s string) string {
-	s = redactPattern.ReplaceAllStringFunc(s, func(m string) string {
-		sub := redactPattern.FindStringSubmatch(m)
-		switch {
-		case sub[3] != "":
-			return maskJID(sub[1], sub[2], sub[3])
-		case strings.HasPrefix(m, "+"):
-			return "+" + maskPhone(m[1:])
-		case isWhatsAppServer(m[strings.LastIndex(m, "@")+1:]):
-			// No address: a JID after a name, or no JID either
-			// ("digits@g.us", say).
-			if j := trailingJID.FindStringSubmatch(m); j != nil {
-				return strings.TrimSuffix(m, j[0]) + maskJID(j[1], j[2], j[3])
-			}
-			return m
-		}
-		return google.MaskEmail(m)
-	})
+	s = RedactIdentifiers(s, google.MaskEmail)
 	for _, c := range r.chats {
 		s = strings.ReplaceAll(s, c.value, c.masked)
 	}
@@ -867,22 +838,6 @@ func (r *redactor) text(s string) string {
 		s = re.ReplaceAllString(s, "~$1")
 	}
 	return s
-}
-
-// maskJID masks a JID's user part and the suffix after it: a phone
-// number's down to its country code and last two digits, without the
-// device, a group's or a LID's down to the last two digits of the two
-// together, which hides the number of whoever made an old-style group.
-func maskJID(user, suffix, server string) string {
-	if server == "s.whatsapp.net" {
-		return maskPhone(user) + "@" + server
-	}
-	return maskDigits(user+suffix, 0) + "@" + server
-}
-
-// isWhatsAppServer reports whether domain is one of WhatsApp's JID servers.
-func isWhatsAppServer(domain string) bool {
-	return domain == "s.whatsapp.net" || domain == "g.us" || domain == "lid"
 }
 
 // err returns err redacted, or err itself without a redactor. The
@@ -917,46 +872,6 @@ func (rw redactingWriter) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	return len(p), nil
-}
-
-// maskPhone keeps a phone number's country code and its last two digits.
-func maskPhone(n string) string {
-	return maskDigits(n, countryCodeLen(n))
-}
-
-// maskDigits keeps the first keep and the last two characters of n, or
-// nothing when that would leave fewer than four of them masked.
-func maskDigits(n string, keep int) string {
-	if len(n) < keep+2+4 {
-		return "…"
-	}
-	return n[:keep] + "…" + n[len(n)-2:]
-}
-
-// countryCodeLen is how many leading digits of an international number
-// are its country calling code (ITU-T E.164): 1 and 7 stand alone, the
-// codes below take two digits, every other code three.
-func countryCodeLen(n string) int {
-	if n == "" {
-		return 0
-	}
-	if n[0] == '1' || n[0] == '7' {
-		return 1
-	}
-	if len(n) >= 2 && slices.Contains(twoDigitCountryCodes, n[:2]) {
-		return 2
-	}
-	return 3
-}
-
-var twoDigitCountryCodes = []string{
-	"20", "27",
-	"30", "31", "32", "33", "34", "36", "39",
-	"40", "41", "43", "44", "45", "46", "47", "48", "49",
-	"51", "52", "53", "54", "55", "56", "57", "58",
-	"60", "61", "62", "63", "64", "65", "66",
-	"81", "82", "84", "86",
-	"90", "91", "92", "93", "94", "95", "98",
 }
 
 // digitsOf is s without anything but its digits.

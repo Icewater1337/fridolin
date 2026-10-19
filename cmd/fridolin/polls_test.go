@@ -121,14 +121,14 @@ func TestPollVoteFailuresMaskTheVoter(t *testing.T) {
 		{"not decrypted", func(t *testing.T, _ *testBridge, wa *whatsapp.Client) {
 			// The bridge keeps another secret than the phone used.
 			wa.ProcessMessage(pollVoteEvent(t, []byte("0123456789abcdef0123456789abcdef"), voter, "3EB0POLL", "Tuesday 3pm"))
-		}, "ERROR Failed to decrypt poll vote from " + maskPhone(otherNumber) + "@s.whatsapp.net: "},
+		}, "ERROR Failed to decrypt poll vote from " + MaskPhone(otherNumber) + "@s.whatsapp.net: "},
 		{"not saved", func(t *testing.T, tb *testBridge, wa *whatsapp.Client) {
 			if _, err := testStoreSQL(t, tb.cfgs.Get().DBPath).Exec(`CREATE TRIGGER refuse_votes BEFORE INSERT ON poll_votes BEGIN SELECT RAISE(ABORT, 'the disk is full'); END`); err != nil {
 				t.Fatal(err)
 			}
 			hash := sha256.Sum256([]byte("Tuesday 3pm"))
 			wa.ProcessVote("3EB0POLL", voter, [][]byte{hash[:]})
-		}, "ERROR Failed to save poll vote from " + maskPhone(otherNumber) + "@s.whatsapp.net: "},
+		}, "ERROR Failed to save poll vote from " + MaskPhone(otherNumber) + "@s.whatsapp.net: "},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
