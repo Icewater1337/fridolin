@@ -1,4 +1,4 @@
-package main
+package chat
 
 // PrincipalKind says who called the script API.
 type PrincipalKind int
