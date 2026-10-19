@@ -572,7 +572,7 @@ func logDMAccess(prev, next *config.File) {
 
 // groupRulesFor is what addresses the bridge in the brain's groups.
 func groupRulesFor(r manifest.Routing) groupRules {
-	return groupRules{files: config.BoolOr(r.AnswerFiles, true), forwards: config.BoolOr(r.AnswerForwards, true)}
+	return groupRules{files: r.AnswerFiles == nil || *r.AnswerFiles, forwards: r.AnswerForwards == nil || *r.AnswerForwards}
 }
 
 // Configuration edits (from the dashboard) apply to the brains at once.

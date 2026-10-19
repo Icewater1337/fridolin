@@ -37,6 +37,9 @@ func TestSettingsPreserveEffectiveWire(t *testing.T) {
 			if settings.Live.AllowAnyDM != *old.AllowAnyDM || settings.Live.Dashboard.RequireToken != *old.Dashboard.RequireToken || settings.Live.Sandbox.Enabled != old.Sandbox.Enabled || settings.Live.DangerouslySkipPermissions != old.DangerouslySkipPermissions {
 				t.Fatal("security policy changed")
 			}
+			if settings.Live.Plaud.Interval <= 0 {
+				t.Fatal("unresolved poll interval")
+			}
 			if settings.Live.RunTimeout != time.Duration(*old.RunTimeoutMinutes)*time.Minute {
 				t.Fatal("timeout units changed")
 			}

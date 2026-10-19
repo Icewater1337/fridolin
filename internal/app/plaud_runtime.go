@@ -26,7 +26,7 @@ func plaudOptions(cfgs *config.Store, brains *BrainManager,
 	boot := cfgs.Boot()
 	return plaud.Options{
 		PlaudDir: boot.PlaudDir(), Home: boot.Home,
-		Settings:   func() *plaud.Snapshot { return plaudSnapshotOf(RuntimeConfig(cfgs)) },
+		Settings:   func() *plaud.Snapshot { return plaudSnapshotOf(RuntimeSettings(cfgs)) },
 		Target:     func(id string) *plaud.Target { return plaudTargetOf(brains, id, submit) },
 		HeldTarget: func() string { return brains.HeldFor("", false) },
 		Notify:     notify,
@@ -44,10 +44,11 @@ func plaudOptions(cfgs *config.Store, brains *BrainManager,
 }
 
 // plaudSnapshotOf projects one config snapshot; a poll retains it for its full pass.
-func plaudSnapshotOf(c *config.File) *plaud.Snapshot {
+func plaudSnapshotOf(c config.Settings) *plaud.Snapshot {
+	wire := config.EffectiveFile(&c)
 	return &plaud.Snapshot{
-		Plaud: plaud.Settings(c.Plaud), DataDir: c.DataDir, MediaDir: c.MediaDir,
-		QueueMaxPending: c.Queue.MaxPending, OwnerChat: ownerChat(c), Interval: c.Plaud.Interval(),
+		Plaud: plaud.Settings(wire.Plaud), DataDir: c.Boot.DataDir, MediaDir: c.Boot.MediaDir,
+		QueueMaxPending: c.Live.Queue.MaxPending, OwnerChat: ownerChatNumbers(c.Live.AllowedNumbers), Interval: c.Live.Plaud.Interval,
 	}
 }
 

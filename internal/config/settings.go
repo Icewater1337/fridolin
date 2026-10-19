@@ -92,15 +92,18 @@ type BackupSettings struct {
 	IncludeSecretFiles  bool
 }
 type PlaudSettings struct {
-	Enabled     bool
-	Brain       string
-	CLIPath     string
-	Interval    time.Duration
-	Polished    bool
-	Message     string
-	BrainAccess bool
-	PhoneDir    string
-	PhoneUpload bool
+	// intervalDefaulted preserves the legacy effective JSON omission while
+	// Interval always carries the actual polling duration.
+	intervalDefaulted bool
+	Enabled           bool
+	Brain             string
+	CLIPath           string
+	Interval          time.Duration
+	Polished          bool
+	Message           string
+	BrainAccess       bool
+	PhoneDir          string
+	PhoneUpload       bool
 }
 
 func settingsOf(c *File, paths Paths) *Settings {
@@ -182,16 +185,21 @@ func backupSettingsOf(c BackupConfig) BackupSettings {
 	}
 }
 func plaudSettingsOf(c PlaudConfig) PlaudSettings {
+	interval := time.Duration(c.IntervalSeconds) * time.Second
+	if interval == 0 {
+		interval = DefaultPlaudInterval
+	}
 	return PlaudSettings{
-		Enabled:     c.Enabled,
-		Brain:       c.Brain,
-		CLIPath:     c.CLIPath,
-		Interval:    time.Duration(c.IntervalSeconds) * time.Second,
-		Polished:    c.Polished,
-		Message:     c.Message,
-		BrainAccess: c.BrainAccess,
-		PhoneDir:    c.PhoneDir,
-		PhoneUpload: c.PhoneUpload,
+		intervalDefaulted: c.IntervalSeconds == 0,
+		Enabled:           c.Enabled,
+		Brain:             c.Brain,
+		CLIPath:           c.CLIPath,
+		Interval:          interval,
+		Polished:          c.Polished,
+		Message:           c.Message,
+		BrainAccess:       c.BrainAccess,
+		PhoneDir:          c.PhoneDir,
+		PhoneUpload:       c.PhoneUpload,
 	}
 }
 
@@ -281,11 +289,15 @@ func backupConfigOf(c BackupSettings) BackupConfig {
 	}
 }
 func plaudConfigOf(c PlaudSettings) PlaudConfig {
+	seconds := int(c.Interval / time.Second)
+	if c.intervalDefaulted && c.Interval == DefaultPlaudInterval {
+		seconds = 0
+	}
 	return PlaudConfig{
 		Enabled:         c.Enabled,
 		Brain:           c.Brain,
 		CLIPath:         c.CLIPath,
-		IntervalSeconds: int(c.Interval / time.Second),
+		IntervalSeconds: seconds,
 		Polished:        c.Polished,
 		Message:         c.Message,
 		BrainAccess:     c.BrainAccess,

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -466,8 +467,14 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 		t.Cleanup(mgr.Stop)
 		p := plaud.New(plaud.Options{
 			PlaudDir: filepath.Join(home, "data", "plaud"), Home: home,
-			Settings: func() *plaud.Snapshot { return plaudSnapshotOf(cfg) },
-			FindCLI:  findPlaudCLI, CLIVersion: plaudCLIVersion,
+			Settings: func() *plaud.Snapshot {
+				settings, err := config.Resolve(cfg, config.Paths{Home: home}, runtime.GOOS)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return plaudSnapshotOf(*settings)
+			},
+			FindCLI: findPlaudCLI, CLIVersion: plaudCLIVersion,
 			Target:     func(id string) *plaud.Target { return plaudTargetOf(mgr, id, nil) },
 			HeldTarget: func() string { return mgr.HeldFor("", false) },
 		})

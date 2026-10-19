@@ -156,7 +156,7 @@ func TestConfigDefaultsAndLoopbackOnly(t *testing.T) {
 	if cfg.HTTPListen != config.DefaultHTTPListen || !cfg.HTTPEnabled() {
 		t.Errorf("http_listen default = %q", cfg.HTTPListen)
 	}
-	if cfg.Queue.Mode != "queue" || cfg.DebounceQuietMS() != config.DefaultQuietMS || !cfg.QueueNotify() || !cfg.DashboardRequiresToken() {
+	if cfg.Queue.Mode != "queue" || *cfg.Debounce.QuietMS != config.DefaultQuietMS || !*cfg.Queue.Notify || !cfg.DashboardRequiresToken() {
 		t.Error("unexpected defaults")
 	}
 	if cfg.AllowsAnyDM() || cfg.AllowAnyDM == nil || *cfg.AllowAnyDM {

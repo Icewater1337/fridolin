@@ -6,10 +6,12 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 	"path/filepath"
+	"time"
 )
 
 // Defaults for optional settings.
 const (
+	DefaultPlaudInterval = time.Minute
 	DefaultHTTPListen    = "127.0.0.1:8765"
 	defaultQueueMax      = 10
 	DefaultQuietMS       = 2000

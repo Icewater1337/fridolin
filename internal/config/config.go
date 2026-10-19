@@ -491,13 +491,6 @@ func IntOr(p *int, def int) int {
 	return *p
 }
 
-// QueueNotify reports whether to tell the sender their message is queued.
-func (c *File) QueueNotify() bool { return BoolOr(c.Queue.Notify, true) }
-
-// DebounceQuietMS and DebounceMaxWaitMS return the debounce timings.
-func (c *File) DebounceQuietMS() int   { return IntOr(c.Debounce.QuietMS, DefaultQuietMS) }
-func (c *File) DebounceMaxWaitMS() int { return IntOr(c.Debounce.MaxWaitMS, defaultMaxWaitMS) }
-
 // DashboardRequiresToken reports whether API calls need the dashboard token.
 func (c *File) DashboardRequiresToken() bool { return BoolOr(c.Dashboard.RequireToken, true) }
 
