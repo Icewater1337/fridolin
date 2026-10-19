@@ -1,5 +1,7 @@
 package main
 
-func (b *Bridge) newConfigAPI() *ConfigAPI {
-	return &ConfigAPI{Store: func() ConfigStore { return b.cfgs }}
+import "github.com/Icewater1337/fridolin/internal/httpapi"
+
+func (b *Bridge) newConfigAPI() *httpapi.ConfigAPI {
+	return &httpapi.ConfigAPI{Store: func() httpapi.ConfigStore { return b.cfgs }}
 }

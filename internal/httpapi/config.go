@@ -1,10 +1,9 @@
-package main
+package httpapi
 
 import (
 	"encoding/json"
 	"errors"
 	"github.com/Icewater1337/fridolin/internal/config"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"net/http"
 )
 
@@ -24,7 +23,7 @@ func (a *ConfigAPI) Get(w http.ResponseWriter, r *http.Request) {
 	file.BrainDirs = nil
 	eff := config.MustClone(snap.Effective)
 	eff.BrainDirs = nil
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{
+	WriteJSON(w, http.StatusOK, map[string]any{
 		"etag":      snap.ETag,
 		"path":      a.Store().Path(),
 		"config":    file,
@@ -45,17 +44,17 @@ func (a *ConfigAPI) Put(w http.ResponseWriter, r *http.Request) {
 		ETag   string          `json:"etag"`
 		Config json.RawMessage `json:"config"`
 	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if req.ETag == "" {
-		httpapi.WriteErr(w, http.StatusPreconditionRequired, "etag required: send the etag GET /api/config returned along with the config")
+		WriteErr(w, http.StatusPreconditionRequired, "etag required: send the etag GET /api/config returned along with the config")
 		return
 	}
 	incoming, err := config.DecodeReplacement(req.Config)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	res, err := a.Store().UpdateTx(req.ETag, func(c *config.Config, _ *config.Tx) error {
@@ -65,18 +64,26 @@ func (a *ConfigAPI) Put(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case errors.Is(err, config.ErrConflict):
-		httpapi.WriteErr(w, http.StatusConflict, err.Error())
+		WriteErr(w, http.StatusConflict, err.Error())
 		return
 	case err != nil:
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	// The etag of what this save wrote, not ETag(), which may be a later
 	// save's: the page would take that write for the one it saved.
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"etag": res.ETag, "restart_required": nonNil(res.Restart)})
+	WriteJSON(w, http.StatusOK, map[string]any{"etag": res.ETag, "restart_required": nonNil(res.Restart)})
 }
 
 // apiRestart restarts the bridge in place (same binary, same arguments): it
 // answers, then asks whoever runs the bridge to stop it and run it again
 // (BridgeOptions.Restart). The stop is the one SIGTERM makes, in main, and
 // main runs the bridge again once it is over.
+
+// nonNil keeps response collections as arrays rather than null.
+func nonNil[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
+}
