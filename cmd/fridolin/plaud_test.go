@@ -34,61 +34,14 @@ const (
 	plaudNew  = "of_0000000000000000000003"
 )
 
-type fakePlaudFixture struct {
-	dir string
-	t   *testing.T
-}
-
-func newFakePlaud(t *testing.T) *fakePlaudFixture {
-	dir := t.TempDir()
+// newFakePlaud configures the command integration fixture's child processes.
+func newFakePlaud(t *testing.T) *testutil.PlaudFixture {
+	fp := testutil.NewPlaudFixture(t)
 	t.Setenv("FRIDOLIN_FAKE_PLAUD", "1")
-	t.Setenv("FRIDOLIN_FAKE_PLAUD_DIR", dir)
-	// Every CLI call is a run of this test binary. Under -race each one
-	// would wait a second on exit for late race reports, which adds up to
-	// minutes over the Plaud tests.
+	t.Setenv("FRIDOLIN_FAKE_PLAUD_DIR", fp.Dir)
+	// Every CLI call is a run of this test binary; avoid race-detector exit waits.
 	t.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
-	return &fakePlaudFixture{dir: dir, t: t}
-}
-
-func (f *fakePlaudFixture) write(name, body string) {
-	if err := os.WriteFile(filepath.Join(f.dir, name), []byte(body), 0o600); err != nil {
-		f.t.Fatal(err)
-	}
-}
-
-// files sets what `plaud files` lists, newest first.
-func (f *fakePlaudFixture) files(ids ...string) {
-	data, _ := json.Marshal(ids)
-	f.write("list.json", string(data))
-}
-
-// recording puts a recording named "Team sync" in Plaud, with Plaud's
-// summary, and with its transcript once transcriptReady.
-func (f *fakePlaudFixture) recording(id string, transcriptReady bool) {
-	f.put(f.teamSync(id, transcriptReady))
-}
-
-// teamSync is the recording that recording puts in Plaud, to change before
-// putting it there.
-func (f *fakePlaudFixture) teamSync(id string, transcriptReady bool) testutil.PlaudRecording {
-	start := "2026-10-16T18:00:00"
-	r := testutil.PlaudRecording{ID: id, Name: "Team sync", CreatedAt: start, StartAt: &start, Duration: 300000,
-		Notes: []testutil.PlaudBlock{{DataType: "auto_sum_note", Content: "Decided to ship on Friday.", TabName: "Summary"}}}
-	if transcriptReady {
-		r.Sources = []testutil.PlaudBlock{{DataType: "transaction", Content: testutil.PlaudTranscript(testutil.PlaudSegment{Start: 0, End: 4000, Speaker: "Speaker 1", Content: "Let's ship on Friday."})}}
-	}
-	return r
-}
-
-// put puts r in Plaud, or replaces it there.
-func (f *fakePlaudFixture) put(r testutil.PlaudRecording) {
-	data, _ := json.Marshal(r)
-	f.write("rec_"+r.ID+".json", string(data))
-}
-
-func (f *fakePlaudFixture) calls() string {
-	b, _ := os.ReadFile(filepath.Join(f.dir, "calls.log"))
-	return string(b)
+	return fp
 }
 
 // plaudDMBrain is brain p, which gets the DMs: the one brain of plaudBridge.
@@ -99,13 +52,13 @@ func plaudGroupBrain(id string) manifest.Manifest {
 	return manifest.Manifest{ID: id, Name: strings.ToUpper(id), Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}
 }
 
-func plaudBridge(t *testing.T, extra string) (*testBridge, *fakePlaudFixture) {
+func plaudBridge(t *testing.T, extra string) (*testBridge, *testutil.PlaudFixture) {
 	return plaudBridgeWith(t, "", extra, plaudDMBrain)
 }
 
 // plaudBridgeWith takes top-level settings (allowed numbers), extra plaud
 // settings and the folder brains to add once the bridge runs.
-func plaudBridgeWith(t *testing.T, top, plaud string, brains ...manifest.Manifest) (*testBridge, *fakePlaudFixture) {
+func plaudBridgeWith(t *testing.T, top, plaud string, brains ...manifest.Manifest) (*testBridge, *testutil.PlaudFixture) {
 	fp := newFakePlaud(t)
 	tb := newTestBridge(t, top+`, "plaud": {"enabled": true, "cli_path": "`+os.Args[0]+`"`+plaud+`}`)
 	for _, m := range brains {
@@ -117,27 +70,27 @@ func plaudBridgeWith(t *testing.T, top, plaud string, brains ...manifest.Manifes
 // plaudDeliver starts from a finished sign-in and first sync (written
 // directly; each fake CLI call is a process), then lets one finished
 // recording arrive and polls once.
-func plaudDeliver(t *testing.T, tb *testBridge, fp *fakePlaudFixture) error {
+func plaudDeliver(t *testing.T, tb *testBridge, fp *testutil.PlaudFixture) error {
 	t.Helper()
 	_ = os.MkdirAll(filepath.Dir(tb.plaud.tokenPath()), 0o700)
 	_ = os.WriteFile(tb.plaud.tokenPath(), []byte("{}"), 0o600)
 	if err := tb.plaud.saveState(plaudSeededState("", plaudOld1)); err != nil {
 		t.Fatal(err)
 	}
-	fp.files(plaudNew, plaudOld1)
-	fp.recording(plaudNew, true)
+	fp.Files(plaudNew, plaudOld1)
+	fp.Recording(plaudNew, true)
 	return tb.plaud.Poll(context.Background())
 }
 
 // plaudDeliverRecording is plaudDeliver for the recording r.
-func plaudDeliverRecording(t *testing.T, tb *testBridge, fp *fakePlaudFixture, r testutil.PlaudRecording) error {
+func plaudDeliverRecording(t *testing.T, tb *testBridge, fp *testutil.PlaudFixture, r testutil.PlaudRecording) error {
 	t.Helper()
 	plaudSignIn(t, tb)
 	if err := tb.plaud.saveState(plaudSeededState("", plaudOld1)); err != nil {
 		t.Fatal(err)
 	}
-	fp.files(r.ID, plaudOld1)
-	fp.put(r)
+	fp.Files(r.ID, plaudOld1)
+	fp.Put(r)
 	return tb.plaud.Poll(context.Background())
 }
 
@@ -343,7 +296,7 @@ func TestPlaudDeliveryErrorIsShown(t *testing.T) {
 	for _, fixture := range []string{"fail_file", "fail_transcript"} {
 		t.Run(fixture, func(t *testing.T) {
 			tb, fp := plaudBridge(t, "")
-			fp.write(fixture, "")
+			fp.Write(fixture, "")
 			err := plaudDeliver(t, tb, fp)
 			if err == nil || !strings.Contains(err.Error(), "recording "+plaudNew) {
 				t.Fatalf("poll error = %v, want the recording's error", err)
@@ -357,7 +310,7 @@ func TestPlaudDeliveryErrorIsShown(t *testing.T) {
 				t.Errorf("status last_error = %q, want the recording's error without the spinner", e)
 			}
 
-			_ = os.Remove(filepath.Join(fp.dir, fixture))
+			_ = os.Remove(filepath.Join(fp.Dir, fixture))
 			if err := tb.plaud.Poll(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -395,10 +348,10 @@ func TestPlaudFailingRecordingIsGivenUpInTime(t *testing.T) {
 			if err := tb.plaud.saveState(plaudWaiting(plaudSeededState("u_1", plaudOld1), plaudNew, first)); err != nil {
 				t.Fatal(err)
 			}
-			fp.files(plaudNew, plaudOld1)
-			fp.recording(plaudNew, c.ready)
+			fp.Files(plaudNew, plaudOld1)
+			fp.Recording(plaudNew, c.ready)
 			if c.fails {
-				fp.write("fail_file", "")
+				fp.Write("fail_file", "")
 			}
 			logs := captureLog(t)
 			err := tb.plaud.Poll(context.Background())
@@ -485,8 +438,8 @@ func TestPlaudRecordingIsSeenOnlyOnceItsRunEnds(t *testing.T) {
 			if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
 				t.Fatal(err)
 			}
-			fp.files(plaudNew, plaudOld1)
-			fp.recording(plaudNew, true)
+			fp.Files(plaudNew, plaudOld1)
+			fp.Recording(plaudNew, true)
 			ctx := context.Background()
 			for i, end := range c.ends {
 				if err := tb.plaud.update(func(st *plaudState) error {
@@ -547,8 +500,8 @@ func TestPlaudRecordingIsSeenOnlyOnceItsRunEnds(t *testing.T) {
 		if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
 			t.Fatal(err)
 		}
-		fp.files(plaudNew, plaudOld1)
-		fp.recording(plaudNew, true)
+		fp.Files(plaudNew, plaudOld1)
+		fp.Recording(plaudNew, true)
 		err := tb.plaud.Poll(context.Background())
 		if err == nil || !strings.Contains(err.Error(), "brain p did not take it: brain queue is full") || !strings.Contains(err.Error(), "will retry") {
 			t.Errorf("poll = %v, want the full queue named", err)
@@ -570,8 +523,8 @@ func TestPlaudRecordingIsSeenOnlyOnceItsRunEnds(t *testing.T) {
 		if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
 			t.Fatal(err)
 		}
-		fp.files(plaudNew, plaudOld1)
-		fp.recording(plaudNew, true)
+		fp.Files(plaudNew, plaudOld1)
+		fp.Recording(plaudNew, true)
 		if err := tb.plaud.Poll(context.Background()); err != nil {
 			t.Fatal(err)
 		}
@@ -596,8 +549,8 @@ func TestPlaudRecordingIsSeenOnlyOnceItsRunEnds(t *testing.T) {
 		if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
 			t.Fatal(err)
 		}
-		fp.files(plaudNew, plaudOld1)
-		fp.recording(plaudNew, true)
+		fp.Files(plaudNew, plaudOld1)
+		fp.Recording(plaudNew, true)
 		if err := tb.plaud.Poll(context.Background()); err != nil {
 			t.Fatal(err)
 		}
@@ -674,9 +627,9 @@ func TestPlaudBacksOffOnARecordingThatIsNotReady(t *testing.T) {
 	if err := tb.plaud.saveState(plaudWaiting(plaudSeededState("u_1", plaudOld1), plaudNew, time.Now())); err != nil {
 		t.Fatal(err)
 	}
-	fp.files(plaudNew, plaudOld1)
-	fp.recording(plaudNew, false)
-	asked := func() int { return strings.Count(fp.calls(), " file "+plaudNew+"\n") }
+	fp.Files(plaudNew, plaudOld1)
+	fp.Recording(plaudNew, false)
+	asked := func() int { return strings.Count(fp.Calls(), " file "+plaudNew+"\n") }
 	for i, want := range []int{1, 2, 2, 2} {
 		if err := tb.plaud.Poll(context.Background()); err != nil {
 			t.Fatal(err)
@@ -692,7 +645,7 @@ func TestPlaudBacksOffOnARecordingThatIsNotReady(t *testing.T) {
 	if err := tb.plaud.update(func(st *plaudState) error { st.Pending[plaudNew].NextTry = time.Now(); return nil }); err != nil {
 		t.Fatal(err)
 	}
-	fp.recording(plaudNew, true)
+	fp.Recording(plaudNew, true)
 	if err := tb.plaud.Poll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -708,16 +661,16 @@ func TestPlaudGivesUpVisibly(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		age     time.Duration
-		setup   func(fp *fakePlaudFixture)
+		setup   func(fp *testutil.PlaudFixture)
 		reason  string
 		notices int
 	}{
 		{"never transcribed", plaudPendingMaxAge + time.Hour,
-			func(fp *fakePlaudFixture) { fp.recording(plaudNew, false) }, "Plaud had no transcript for it after 3 days", 1},
+			func(fp *testutil.PlaudFixture) { fp.Recording(plaudNew, false) }, "Plaud had no transcript for it after 3 days", 1},
 		{"fetching keeps failing", plaudPendingMaxAge + time.Hour,
-			func(fp *fakePlaudFixture) { fp.recording(plaudNew, true); fp.write("fail_transcript", "") }, "fetching it from Plaud failed for 3 days", 1},
+			func(fp *testutil.PlaudFixture) { fp.Recording(plaudNew, true); fp.Write("fail_transcript", "") }, "fetching it from Plaud failed for 3 days", 1},
 		{"deleted in Plaud", time.Minute,
-			func(*fakePlaudFixture) {}, "it was deleted in Plaud", 0},
+			func(*testutil.PlaudFixture) {}, "it was deleted in Plaud", 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			tb, fp := plaudBridge(t, "")
@@ -725,7 +678,7 @@ func TestPlaudGivesUpVisibly(t *testing.T) {
 			if err := tb.plaud.saveState(plaudWaiting(plaudSeededState("u_1", plaudOld1), plaudNew, time.Now().Add(-c.age))); err != nil {
 				t.Fatal(err)
 			}
-			fp.files(plaudNew, plaudOld1)
+			fp.Files(plaudNew, plaudOld1)
 			c.setup(fp)
 			for range 2 {
 				_ = tb.plaud.Poll(context.Background())
@@ -758,7 +711,7 @@ func TestPlaudWithoutAPrivateChatIsQuietWhileNothingWaits(t *testing.T) {
 	if err := tb.plaud.saveState(plaudSeededState("", plaudOld1)); err != nil {
 		t.Fatal(err)
 	}
-	fp.files(plaudOld1)
+	fp.Files(plaudOld1)
 	if err := tb.plaud.Poll(context.Background()); err != nil {
 		t.Errorf("poll with nothing waiting = %v, want nil", err)
 	}
@@ -787,7 +740,7 @@ func TestPlaudExpiryNoticeStaysPrivate(t *testing.T) {
 			tb, fp := plaudBridgeWith(t, c.top, `, "brain": "g"`, plaudDMBrain, plaudGroupBrain("g"))
 			_ = os.MkdirAll(filepath.Dir(tb.plaud.tokenPath()), 0o700)
 			_ = os.WriteFile(tb.plaud.tokenPath(), []byte("{}"), 0o600)
-			fp.write("expired", "")
+			fp.Write("expired", "")
 			if err := tb.plaud.Poll(context.Background()); err != errPlaudAuth {
 				t.Fatalf("poll: err = %v", err)
 			}
@@ -841,7 +794,7 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 	testutil.WaitFor(t, 5*time.Second, "login", func() bool { return tb.plaud.connected() })
 
 	// The first sync only remembers what exists.
-	fp.files(plaudOld1, plaudOld2)
+	fp.Files(plaudOld1, plaudOld2)
 	if err := tb.plaud.Poll(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -851,8 +804,8 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 	}
 
 	// A new recording waits until Plaud has transcribed it.
-	fp.files(plaudNew, plaudOld1, plaudOld2)
-	fp.recording(plaudNew, false)
+	fp.Files(plaudNew, plaudOld1, plaudOld2)
+	fp.Recording(plaudNew, false)
 	if err := tb.plaud.Poll(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -860,7 +813,7 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 		t.Fatalf("pending = %v", st.Pending)
 	}
 
-	fp.recording(plaudNew, true)
+	fp.Recording(plaudNew, true)
 	if err := tb.plaud.Poll(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -895,8 +848,8 @@ func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
 	}
 
 	// The login is private to Fridolin, and the API never shows it.
-	if !strings.Contains(fp.calls(), "HOME="+filepath.Join(tb.cfgs.Get().DataDir, "plaud", "home")) {
-		t.Errorf("CLI not run with the private home:\n%s", fp.calls())
+	if !strings.Contains(fp.Calls(), "HOME="+filepath.Join(tb.cfgs.Get().DataDir, "plaud", "home")) {
+		t.Errorf("CLI not run with the private home:\n%s", fp.Calls())
 	}
 	token, err := os.ReadFile(tb.plaud.tokenPath())
 	if err != nil || !strings.Contains(string(token), "test-access") {
@@ -935,8 +888,8 @@ func TestPlaudManagerUsesOnlyWhatItIsGiven(t *testing.T) {
 	if err := p.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
 		t.Fatal(err)
 	}
-	fp.files(plaudNew, plaudOld1)
-	fp.recording(plaudNew, true)
+	fp.Files(plaudNew, plaudOld1)
+	fp.Recording(plaudNew, true)
 	if err := p.Poll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -1009,7 +962,7 @@ func TestPlaudExpiredLoginNotifiesOncePerDay(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			fp.write("expired", "")
+			fp.Write("expired", "")
 			for i := 0; i < 2; i++ {
 				if err := tb.plaud.Poll(context.Background()); err != errPlaudAuth {
 					t.Fatalf("poll %d: err = %v", i, err)
@@ -1055,7 +1008,7 @@ func TestPlaudStatusDoesNotRunTheCLI(t *testing.T) {
 				t.Fatalf("account = %q", got)
 			}
 		}
-		if n := strings.Count(fp.calls(), " me\n"); n != 1 {
+		if n := strings.Count(fp.Calls(), " me\n"); n != 1 {
 			t.Errorf("`plaud me` ran %d times, want once, after the sign-in", n)
 		}
 	})
@@ -1066,7 +1019,7 @@ func TestPlaudStatusDoesNotRunTheCLI(t *testing.T) {
 		for range 5 {
 			account(tb)
 		}
-		if n := strings.Count(fp.calls(), " me\n"); n != 1 {
+		if n := strings.Count(fp.Calls(), " me\n"); n != 1 {
 			t.Errorf("`plaud me` ran %d times, want once", n)
 		}
 	})
@@ -1089,8 +1042,8 @@ func TestPlaudExpiredLoginKeepsNotifying(t *testing.T) {
 	if err := tb.plaud.saveState(plaudRecordLogin(tb, plaudSeededState("u_1", plaudOld1))); err != nil {
 		t.Fatal(err)
 	}
-	fp.files(plaudOld1)
-	fp.write("expired", "")
+	fp.Files(plaudOld1)
+	fp.Write("expired", "")
 	ctx := context.Background()
 	past := time.Now().Add(-time.Second)
 	notices := func() int {
@@ -1106,7 +1059,7 @@ func TestPlaudExpiredLoginKeepsNotifying(t *testing.T) {
 	if s := tb.plaud.Status(); !s.Expired || s.Connected || notices() != 1 {
 		t.Fatalf("after the login lapsed: expired=%v connected=%v notices=%d, want expired and one notice", s.Expired, s.Connected, notices())
 	}
-	calls := fp.calls()
+	calls := fp.Calls()
 	tb.plaud.tick(ctx, past)
 	if notices() != 1 {
 		t.Errorf("notices = %d within a day, want 1", notices())
@@ -1118,8 +1071,8 @@ func TestPlaudExpiredLoginKeepsNotifying(t *testing.T) {
 	if notices() != 2 {
 		t.Errorf("notices = %d a day later, want 2", notices())
 	}
-	if fp.calls() != calls {
-		t.Errorf("the CLI ran while the login was gone:\n%s", strings.TrimPrefix(fp.calls(), calls))
+	if fp.Calls() != calls {
+		t.Errorf("the CLI ran while the login was gone:\n%s", strings.TrimPrefix(fp.Calls(), calls))
 	}
 
 	if w := tb.do("POST", "/api/plaud/disconnect", nil); w.Code != 200 {
@@ -1145,7 +1098,7 @@ func TestPlaudConnectingAfterADisconnectCountsAgain(t *testing.T) {
 			if err := tb.plaud.saveState(plaudRecordLogin(tb, plaudSeededState("u_1", plaudOld1))); err != nil {
 				t.Fatal(err)
 			}
-			fp.files(plaudOld1)
+			fp.Files(plaudOld1)
 			if err := tb.plaud.Disconnect(); err != nil {
 				t.Fatal(err)
 			}
@@ -1163,7 +1116,7 @@ func TestPlaudConnectingAfterADisconnectCountsAgain(t *testing.T) {
 				t.Errorf("connected=%v account=%q, want connected as you@example.com", s.Connected, s.Account)
 			}
 
-			fp.write("expired", "")
+			fp.Write("expired", "")
 			tb.plaud.tick(context.Background(), time.Now().Add(-time.Second))
 			n := 0
 			for _, m := range tb.dev.Outbox() {
@@ -1186,8 +1139,8 @@ func TestPlaudRefusedLoginShowsExpired(t *testing.T) {
 	if err := tb.plaud.saveState(plaudRecordLogin(tb, plaudSeededState("u_1", plaudOld1))); err != nil {
 		t.Fatal(err)
 	}
-	fp.files(plaudOld1)
-	fp.write("revoked", "")
+	fp.Files(plaudOld1)
+	fp.Write("revoked", "")
 	ctx := context.Background()
 	if err := tb.plaud.Poll(ctx); !errors.Is(err, errPlaudAuth) {
 		t.Fatalf("poll = %v, want the login refused", err)
@@ -1195,7 +1148,7 @@ func TestPlaudRefusedLoginShowsExpired(t *testing.T) {
 	if s := tb.plaud.Status(); !s.Expired || !s.Connected {
 		t.Errorf("expired=%v connected=%v, want both", s.Expired, s.Connected)
 	}
-	_ = os.Remove(filepath.Join(fp.dir, "revoked"))
+	_ = os.Remove(filepath.Join(fp.Dir, "revoked"))
 	if err := tb.plaud.Poll(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -1254,13 +1207,13 @@ func TestPlaudConnectAgainAfterARefusedLogin(t *testing.T) {
 				}
 			}
 			if tc.again {
-				fp.write("login_refused", "")
-				fp.write("revoked", "")
+				fp.Write("login_refused", "")
+				fp.Write("revoked", "")
 			}
 			if tc.keeps {
-				fp.write("logout_keeps", "")
+				fp.Write("logout_keeps", "")
 			}
-			before, told := fp.calls(), notices()
+			before, told := fp.Calls(), notices()
 			st, _ := tb.plaud.loadState()
 			var notified time.Time
 			if st != nil {
@@ -1284,7 +1237,7 @@ func TestPlaudConnectAgainAfterARefusedLogin(t *testing.T) {
 				t.Errorf("%d expiry notices after connecting, want %d", n, told)
 			}
 			var cmds []string
-			for _, line := range strings.Split(strings.TrimSpace(strings.TrimPrefix(fp.calls(), before)), "\n") {
+			for _, line := range strings.Split(strings.TrimSpace(strings.TrimPrefix(fp.Calls(), before)), "\n") {
 				if f := strings.Fields(line); len(f) > 2 {
 					cmds = append(cmds, f[2])
 				}
@@ -1330,7 +1283,7 @@ func TestPlaudConnectAgainAfterARefusedLogin(t *testing.T) {
 // plaudRefuseLogin signs in, as a login from an earlier check, and has
 // Plaud refuse it while its tokens.json stays (revoked on Plaud's side): a
 // check gets the refusal, and the chat its one expiry notice.
-func plaudRefuseLogin(t *testing.T, tb *testBridge, fp *fakePlaudFixture) {
+func plaudRefuseLogin(t *testing.T, tb *testBridge, fp *testutil.PlaudFixture) {
 	t.Helper()
 	plaudRevokeLogin(t, tb, fp)
 	if err := tb.plaud.Poll(context.Background()); !errors.Is(err, errPlaudAuth) {
@@ -1340,7 +1293,7 @@ func plaudRefuseLogin(t *testing.T, tb *testBridge, fp *fakePlaudFixture) {
 
 // plaudRevokeLogin is plaudRefuseLogin up to the check that gets the
 // refusal.
-func plaudRevokeLogin(t *testing.T, tb *testBridge, fp *fakePlaudFixture) {
+func plaudRevokeLogin(t *testing.T, tb *testBridge, fp *testutil.PlaudFixture) {
 	t.Helper()
 	plaudSignIn(t, tb)
 	st := plaudRecordLogin(tb, plaudSeededState("u_1", plaudOld1))
@@ -1350,8 +1303,8 @@ func plaudRevokeLogin(t *testing.T, tb *testBridge, fp *fakePlaudFixture) {
 	if err := tb.plaud.saveState(st); err != nil {
 		t.Fatal(err)
 	}
-	fp.files(plaudOld1)
-	fp.write("revoked", "")
+	fp.Files(plaudOld1)
+	fp.Write("revoked", "")
 }
 
 // Connect signs the refused login out in the CLI home it was refused in,
@@ -1369,7 +1322,7 @@ func TestPlaudConnectSignsOutTheRefusedLoginWhereItIs(t *testing.T) {
 	if err := os.WriteFile(terminal, []byte(yours), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	before := fp.calls()
+	before := fp.Calls()
 	// The sign-out waits for the CLI, which this holds, until brain_access
 	// is on.
 	tb.plaud.cliMu.Lock()
@@ -1387,7 +1340,7 @@ func TestPlaudConnectSignsOutTheRefusedLoginWhereItIs(t *testing.T) {
 		return tb.plaud.connect.State != "running"
 	})
 	var logouts []string
-	for _, line := range strings.Split(strings.TrimSpace(strings.TrimPrefix(fp.calls(), before)), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(strings.TrimPrefix(fp.Calls(), before)), "\n") {
 		if f := strings.Fields(line); len(f) > 2 && f[2] == "logout" {
 			logouts = append(logouts, strings.TrimPrefix(f[0], "HOME="))
 		}
@@ -1413,8 +1366,8 @@ func TestPlaudConnectGivesTheSignOutItsOwnTime(t *testing.T) {
 	old := plaudSignOutTimeout
 	plaudSignOutTimeout = 300 * time.Millisecond
 	t.Cleanup(func() { plaudSignOutTimeout = old })
-	fp.write("hang_logout", "")
-	before := fp.calls()
+	fp.Write("hang_logout", "")
+	before := fp.Calls()
 	if err := tb.plaud.Connect(); err != nil {
 		t.Fatal(err)
 	}
@@ -1427,7 +1380,7 @@ func TestPlaudConnectGivesTheSignOutItsOwnTime(t *testing.T) {
 		return job.State != "running"
 	})
 	var cmds []string
-	for _, line := range strings.Split(strings.TrimSpace(strings.TrimPrefix(fp.calls(), before)), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(strings.TrimPrefix(fp.Calls(), before)), "\n") {
 		if f := strings.Fields(line); len(f) > 2 {
 			cmds = append(cmds, f[2])
 		}
@@ -1470,8 +1423,8 @@ func TestPlaudSigningOutDuringACheckIsNoExpiry(t *testing.T) {
 			if err := tb.plaud.saveState(plaudRecordLogin(tb, st)); err != nil {
 				t.Fatal(err)
 			}
-			fp.files(plaudNew, plaudOld1)
-			fp.recording(plaudNew, true)
+			fp.Files(plaudNew, plaudOld1)
+			fp.Recording(plaudNew, true)
 			run := tb.plaud.run
 			var once sync.Once
 			act := func() {
@@ -1520,7 +1473,7 @@ func TestPlaudCheckEndsWhenItsLoginGoes(t *testing.T) {
 	const newer = "of_0000000000000000000004"
 	// Your terminal's login, of another account, which has none of these
 	// recordings, and brain_access turned on.
-	moveLogin := func(tb *testBridge, fp *fakePlaudFixture) error {
+	moveLogin := func(tb *testBridge, fp *testutil.PlaudFixture) error {
 		token := filepath.Join(tb.home, ".plaud", "tokens.json")
 		if err := os.MkdirAll(filepath.Dir(token), 0o700); err != nil {
 			return err
@@ -1528,9 +1481,9 @@ func TestPlaudCheckEndsWhenItsLoginGoes(t *testing.T) {
 		if err := os.WriteFile(token, []byte("{}"), 0o600); err != nil {
 			return err
 		}
-		fp.write("account", "u_2")
+		fp.Write("account", "u_2")
 		for _, id := range []string{plaudNew, newer} {
-			if err := os.Remove(filepath.Join(fp.dir, "rec_"+id+".json")); err != nil {
+			if err := os.Remove(filepath.Join(fp.Dir, "rec_"+id+".json")); err != nil {
 				return err
 			}
 		}
@@ -1538,14 +1491,14 @@ func TestPlaudCheckEndsWhenItsLoginGoes(t *testing.T) {
 		return err
 	}
 	// The same, and you connect that login, as a sign-in that finishes does.
-	moveAndConnect := func(tb *testBridge, fp *fakePlaudFixture) error {
+	moveAndConnect := func(tb *testBridge, fp *testutil.PlaudFixture) error {
 		if err := moveLogin(tb, fp); err != nil {
 			return err
 		}
 		return tb.plaud.update(func(st *plaudState) error { plaudRecordLogin(tb, st); return nil })
 	}
-	disconnectKeeping := func(tb *testBridge, fp *fakePlaudFixture) error {
-		fp.write("logout_keeps", "")
+	disconnectKeeping := func(tb *testBridge, fp *testutil.PlaudFixture) error {
+		fp.Write("logout_keeps", "")
 		if err := tb.plaud.Disconnect(); err == nil {
 			return errors.New("disconnect did not say the login is still there")
 		}
@@ -1556,7 +1509,7 @@ func TestPlaudCheckEndsWhenItsLoginGoes(t *testing.T) {
 		access bool   // brain_access before
 		cmd    string // the command before (or after) which it happens
 		after  bool
-		act    func(tb *testBridge, fp *fakePlaudFixture) error
+		act    func(tb *testBridge, fp *testutil.PlaudFixture) error
 		// later is how many of the check's commands ran after it happened:
 		// the one that was on its way then.
 		later   int
@@ -1575,9 +1528,9 @@ func TestPlaudCheckEndsWhenItsLoginGoes(t *testing.T) {
 			if err := tb.plaud.saveState(plaudRecordLogin(tb, plaudSeededState("u_1", plaudOld1))); err != nil {
 				t.Fatal(err)
 			}
-			fp.files(newer, plaudNew, plaudOld1)
-			fp.recording(plaudNew, true)
-			fp.recording(newer, true)
+			fp.Files(newer, plaudNew, plaudOld1)
+			fp.Recording(plaudNew, true)
+			fp.Recording(newer, true)
 			var once sync.Once
 			var acted bool
 			var later []string
@@ -1641,8 +1594,8 @@ func TestPlaudStateChangesDuringAPollStay(t *testing.T) {
 	if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
 		t.Fatal(err)
 	}
-	fp.files(plaudNew, plaudOld1)
-	fp.recording(plaudNew, true)
+	fp.Files(plaudNew, plaudOld1)
+	fp.Recording(plaudNew, true)
 	signedIn := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	run := tb.plaud.run
 	tb.plaud.run = func(ctx context.Context, args ...string) (string, error) {
@@ -1686,10 +1639,10 @@ func TestPlaudFailedFirstSyncForwardsNothingOld(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb, fp := plaudBridge(t, "")
 			plaudSignIn(t, tb)
-			fp.files(plaudOld1, plaudOld2)
-			fp.recording(plaudOld1, true)
-			fp.recording(plaudOld2, true)
-			fp.write(c.fixture, "")
+			fp.Files(plaudOld1, plaudOld2)
+			fp.Recording(plaudOld1, true)
+			fp.Recording(plaudOld2, true)
+			fp.Write(c.fixture, "")
 			err := tb.plaud.Poll(context.Background())
 			if err == nil || errors.Is(err, errPlaudAuth) != c.auth {
 				t.Fatalf("first poll: err = %v, want a failure (auth=%v)", err, c.auth)
@@ -1699,7 +1652,7 @@ func TestPlaudFailedFirstSyncForwardsNothingOld(t *testing.T) {
 			}
 
 			// Plaud's CLI deletes a login that expired: you sign in again.
-			_ = os.Remove(filepath.Join(fp.dir, c.fixture))
+			_ = os.Remove(filepath.Join(fp.Dir, c.fixture))
 			plaudSignIn(t, tb)
 			if err := tb.plaud.Poll(context.Background()); err != nil {
 				t.Fatal(err)
@@ -1713,8 +1666,8 @@ func TestPlaudFailedFirstSyncForwardsNothingOld(t *testing.T) {
 			if files, _ := filepath.Glob(filepath.Join(tb.cfgs.Get().MediaDir, "*", "plaud", "*")); len(files) != 0 {
 				t.Errorf("old recordings were written out: %v", files)
 			}
-			if strings.Contains(fp.calls(), " file ") {
-				t.Errorf("old recordings were fetched:\n%s", fp.calls())
+			if strings.Contains(fp.Calls(), " file ") {
+				t.Errorf("old recordings were fetched:\n%s", fp.Calls())
 			}
 			time.Sleep(100 * time.Millisecond)
 			for _, m := range tb.dev.Outbox() {
@@ -1756,9 +1709,9 @@ func TestPlaudStateBelongsToTheAccount(t *testing.T) {
 			if err := tb.plaud.saveState(&c.state); err != nil {
 				t.Fatal(err)
 			}
-			fp.write("account", c.account)
-			fp.files(plaudNew, plaudOld1)
-			fp.recording(plaudNew, true)
+			fp.Write("account", c.account)
+			fp.Files(plaudNew, plaudOld1)
+			fp.Recording(plaudNew, true)
 			if err := tb.plaud.Poll(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -1786,27 +1739,27 @@ func TestPlaudChecksTheAccountWhenTheLoginChanges(t *testing.T) {
 	if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
 		t.Fatal(err)
 	}
-	fp.files(plaudOld1)
+	fp.Files(plaudOld1)
 	for i := 0; i < 2; i++ {
 		if err := tb.plaud.Poll(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if n := strings.Count(fp.calls(), " me\n"); n != 1 {
+	if n := strings.Count(fp.Calls(), " me\n"); n != 1 {
 		t.Errorf("`plaud me` ran %d times in two polls, want once", n)
 	}
 
 	// Signed out, and in again with another account.
-	fp.write("account", "u_2")
+	fp.Write("account", "u_2")
 	plaudSignIn(t, tb)
 	later := time.Now().Add(time.Minute)
 	_ = os.Chtimes(tb.plaud.tokenPath(), later, later)
-	fp.files(plaudNew, plaudOld1)
-	fp.recording(plaudNew, true)
+	fp.Files(plaudNew, plaudOld1)
+	fp.Recording(plaudNew, true)
 	if err := tb.plaud.Poll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if n := strings.Count(fp.calls(), " me\n"); n != 2 {
+	if n := strings.Count(fp.Calls(), " me\n"); n != 2 {
 		t.Errorf("`plaud me` ran %d times, want again after the new login", n)
 	}
 	if tb.plaudForwarded() {
@@ -1840,17 +1793,17 @@ func TestPlaudLoginChangingDuringAPollSendsNothing(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			fp.files(plaudOld1)
+			fp.Files(plaudOld1)
 			for _, id := range []string{plaudOld2, plaudNew} {
-				fp.recording(id, true)
+				fp.Recording(id, true)
 			}
 			// u_2 signs in: `me` names it, Plaud lists its recordings, and
 			// the login file is rewritten.
 			switched := false
 			switchAccount := func() {
 				switched = true
-				fp.write("account", "u_2")
-				fp.files(plaudNew, plaudOld2)
+				fp.Write("account", "u_2")
+				fp.Files(plaudNew, plaudOld2)
 				if err := os.WriteFile(tb.plaud.tokenPath(), []byte(`{"user":"u_2"}`), 0o600); err != nil {
 					t.Fatal(err)
 				}
@@ -1978,7 +1931,7 @@ func TestPlaudForwardReadsWhatTheCLIPrints(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			tb, fp := plaudBridge(t, "")
-			r := fp.teamSync(plaudNew, true)
+			r := fp.TeamSync(plaudNew, true)
 			c.change(&r)
 			if err := plaudDeliverRecording(t, tb, fp, r); err != nil {
 				t.Fatal(err)
@@ -2024,7 +1977,7 @@ func TestPlaudPolishedFallsBackToTheRawTranscript(t *testing.T) {
 			if err := tb.plaud.saveState(plaudWaiting(plaudSeededState("u_1", plaudOld1), plaudNew, first)); err != nil {
 				t.Fatal(err)
 			}
-			r := fp.teamSync(plaudNew, true)
+			r := fp.TeamSync(plaudNew, true)
 			if c.polished != nil {
 				b := testutil.PlaudBlock{DataType: "transaction_polish"}
 				if *c.polished != "" {
@@ -2032,8 +1985,8 @@ func TestPlaudPolishedFallsBackToTheRawTranscript(t *testing.T) {
 				}
 				r.Sources = append(r.Sources, b)
 			}
-			fp.files(plaudNew, plaudOld1)
-			fp.put(r)
+			fp.Files(plaudNew, plaudOld1)
+			fp.Put(r)
 			logs := captureLog(t)
 			if err := tb.plaud.Poll(context.Background()); err != nil {
 				t.Fatal(err)
@@ -2086,14 +2039,14 @@ func TestPlaudPagesBackToTheLastKnownRecording(t *testing.T) {
 		t.Fatal(err)
 	}
 	backlog := plaudIDs("a", 120)
-	fp.files(append(slices.Clone(backlog), plaudOld1, plaudOld2)...)
+	fp.Files(append(slices.Clone(backlog), plaudOld1, plaudOld2)...)
 	for _, id := range backlog {
-		fp.recording(id, true)
+		fp.Recording(id, true)
 	}
 	if err := tb.plaud.Poll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if calls := fp.calls(); !strings.Contains(calls, "files --page 2 --page-size 100\n") || strings.Contains(calls, "--page 3") {
+	if calls := fp.Calls(); !strings.Contains(calls, "files --page 2 --page-size 100\n") || strings.Contains(calls, "--page 3") {
 		t.Errorf("listed:\n%s\nwant pages 1 and 2 of 100", calls)
 	}
 	oldest := slices.Clone(backlog)
@@ -2129,9 +2082,9 @@ func TestPlaudBacklogTricklesInAsRunsEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	backlog := plaudIDs("d", 12)
-	fp.files(append(slices.Clone(backlog), plaudOld1)...)
+	fp.Files(append(slices.Clone(backlog), plaudOld1)...)
 	for _, id := range backlog {
-		fp.recording(id, true)
+		fp.Recording(id, true)
 	}
 	oldest := slices.Clone(backlog)
 	slices.Reverse(oldest)
@@ -2168,9 +2121,9 @@ func TestPlaudBacklogLeavesRoomInTheBrainsQueue(t *testing.T) {
 		t.Fatal(err)
 	}
 	backlog := plaudIDs("c", 15)
-	fp.files(append(slices.Clone(backlog), plaudOld1)...)
+	fp.Files(append(slices.Clone(backlog), plaudOld1)...)
 	for _, id := range backlog {
-		fp.recording(id, true)
+		fp.Recording(id, true)
 	}
 	limit := plaudHandedLimit(tb.cfgs.Get().Queue.MaxPending)
 	for i := range 4 {
@@ -2192,7 +2145,7 @@ func TestPlaudFirstSyncReadsEveryPage(t *testing.T) {
 	tb, fp := plaudBridge(t, "")
 	plaudSignIn(t, tb)
 	existing := plaudIDs("b", 150)
-	fp.files(existing...)
+	fp.Files(existing...)
 	if err := tb.plaud.Poll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -2296,9 +2249,9 @@ func TestPlaudPendingGoesOldestFirst(t *testing.T) {
 	if err := tb.plaud.saveState(plaudWaiting(st, newer, time.Now().Add(-time.Hour))); err != nil {
 		t.Fatal(err)
 	}
-	fp.files(newer, older, plaudOld1)
-	fp.recording(older, true)
-	fp.recording(newer, true)
+	fp.Files(newer, older, plaudOld1)
+	fp.Recording(older, true)
+	fp.Recording(newer, true)
 	if err := tb.plaud.Poll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -2326,9 +2279,9 @@ func TestPlaudRetryRewritesTheSameTranscript(t *testing.T) {
 		return last != nil && last.ID == plaudNew && last.Status == plaudRunDone
 	})
 
-	renamed := fp.teamSync(plaudNew, true)
+	renamed := fp.TeamSync(plaudNew, true)
 	renamed.Name = "Weekly sync"
-	fp.put(renamed)
+	fp.Put(renamed)
 	if err := tb.plaud.saveState(plaudWaiting(plaudSeededState("", plaudOld1), plaudNew, time.Now())); err != nil {
 		t.Fatal(err)
 	}
@@ -2455,8 +2408,8 @@ func TestPlaudCheckNowNeedsSendingOn(t *testing.T) {
 	if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
 		t.Fatal(err)
 	}
-	fp.files(plaudNew, plaudOld1)
-	fp.recording(plaudNew, true)
+	fp.Files(plaudNew, plaudOld1)
+	fp.Recording(plaudNew, true)
 	if w := tb.do("PUT", "/api/plaud/settings", map[string]any{"enabled": false}); w.Code != 200 {
 		t.Fatalf("settings: %d %s", w.Code, w.Body.String())
 	}
@@ -2473,7 +2426,7 @@ func TestPlaudCheckNowNeedsSendingOn(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(200 * time.Millisecond)
-	if calls := fp.calls(); calls != "" || tb.plaudForwarded() {
+	if calls := fp.Calls(); calls != "" || tb.plaudForwarded() {
 		t.Fatalf("Plaud was checked with sending off:\n%s", calls)
 	}
 
@@ -2491,7 +2444,7 @@ func TestPlaudCheckNowNeedsSendingOn(t *testing.T) {
 func TestPlaudCheckNowWhileChecking(t *testing.T) {
 	tb, fp := plaudBridge(t, "")
 	plaudSignIn(t, tb)
-	fp.files(plaudOld1)
+	fp.Files(plaudOld1)
 	for _, c := range []struct {
 		busy bool
 		code int
@@ -2521,11 +2474,11 @@ func TestPlaudCheckNowWhileChecking(t *testing.T) {
 // waits for it: it would write to the data folder after Fridolin stopped.
 func TestPlaudStopEndsASignIn(t *testing.T) {
 	tb, fp := plaudBridge(t, "")
-	fp.write("login_wait", "")
+	fp.Write("login_wait", "")
 	if err := tb.plaud.Connect(); err != nil {
 		t.Fatal(err)
 	}
-	testutil.WaitFor(t, 5*time.Second, "the sign-in to start", func() bool { return strings.Contains(fp.calls(), " login") })
+	testutil.WaitFor(t, 5*time.Second, "the sign-in to start", func() bool { return strings.Contains(fp.Calls(), " login") })
 	tb.plaud.Stop()
 	if c := tb.plaud.Status().Connect; c == nil || c.State != "error" {
 		t.Errorf("sign-in after Stop = %+v, want it ended", c)
@@ -2582,8 +2535,8 @@ func TestPlaudStopWaitsForARunsEnd(t *testing.T) {
 	if err := tb.plaud.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
 		t.Fatal(err)
 	}
-	fp.files(plaudNew, plaudOld1)
-	fp.recording(plaudNew, true)
+	fp.Files(plaudNew, plaudOld1)
+	fp.Recording(plaudNew, true)
 	if err := tb.plaud.Poll(context.Background()); err != nil || rec.count() != 1 {
 		t.Fatalf("poll = %v, handed over %d times", err, rec.count())
 	}
@@ -2623,15 +2576,15 @@ func TestPlaudStopEndsCheckNow(t *testing.T) {
 	cases := []struct {
 		name string
 		// hold has the check wait in held until it is cancelled.
-		hold    func(t *testing.T, tb *testBridge, fp *fakePlaudFixture, held func(context.Context) error)
+		hold    func(t *testing.T, tb *testBridge, fp *testutil.PlaudFixture, held func(context.Context) error)
 		lastErr error // what the check then ends with
 	}{
-		{"in a command", func(t *testing.T, tb *testBridge, fp *fakePlaudFixture, held func(context.Context) error) {
+		{"in a command", func(t *testing.T, tb *testBridge, fp *testutil.PlaudFixture, held func(context.Context) error) {
 			plaudSignIn(t, tb)
-			fp.files(plaudOld1)
+			fp.Files(plaudOld1)
 			tb.plaud.run = func(ctx context.Context, args ...string) (string, error) { return "", held(ctx) }
 		}, context.Canceled},
-		{"sending the expiry notice", func(t *testing.T, tb *testBridge, fp *fakePlaudFixture, held func(context.Context) error) {
+		{"sending the expiry notice", func(t *testing.T, tb *testBridge, fp *testutil.PlaudFixture, held func(context.Context) error) {
 			plaudRevokeLogin(t, tb, fp)
 			tb.plaud.notify = func(ctx context.Context, _, _ string) error { return held(ctx) }
 		}, errPlaudAuth},
@@ -2726,9 +2679,9 @@ func TestPlaudBrainAccessNeedsConnectingAgain(t *testing.T) {
 	if err := os.WriteFile(shared, []byte("{}"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	fp.write("account", "u_2")
-	fp.files(plaudNew, plaudOld1)
-	fp.recording(plaudNew, true)
+	fp.Write("account", "u_2")
+	fp.Files(plaudNew, plaudOld1)
+	fp.Recording(plaudNew, true)
 
 	if w := tb.do("PUT", "/api/plaud/settings", map[string]any{"brain_access": true}); w.Code != 200 {
 		t.Fatalf("settings: %d %s", w.Code, w.Body.String())
@@ -2738,7 +2691,7 @@ func TestPlaudBrainAccessNeedsConnectingAgain(t *testing.T) {
 		t.Errorf("after turning brain_access on: connected=%v moved=%v expired=%v, want only moved", s.Connected, s.LoginMoved, s.Expired)
 	}
 	tb.plaud.tick(ctx, time.Now().Add(-time.Second))
-	if calls := fp.calls(); calls != "" {
+	if calls := fp.Calls(); calls != "" {
 		t.Fatalf("the CLI ran with a login Fridolin did not make:\n%s", calls)
 	}
 
@@ -2811,7 +2764,7 @@ func TestPlaudAccountLookUpLeavesAMovedLoginAlone(t *testing.T) {
 func TestPlaudDisconnectReportsALoginThatStays(t *testing.T) {
 	tb, fp := plaudBridge(t, `, "brain_access": true`)
 	plaudSignIn(t, tb)
-	fp.write("logout_keeps", "")
+	fp.Write("logout_keeps", "")
 	w := tb.do("POST", "/api/plaud/disconnect", nil)
 	if w.Code != http.StatusBadGateway || !strings.Contains(w.Body.String(), "still there") {
 		t.Errorf("disconnect = %d %s, want 502 saying the login is still there", w.Code, w.Body.String())
@@ -2819,7 +2772,7 @@ func TestPlaudDisconnectReportsALoginThatStays(t *testing.T) {
 	if s := tb.plaud.Status(); s.Connected || s.Expired {
 		t.Errorf("after disconnecting: connected=%v expired=%v, want neither: Fridolin signed out of it", s.Connected, s.Expired)
 	}
-	_ = os.Remove(filepath.Join(fp.dir, "logout_keeps"))
+	_ = os.Remove(filepath.Join(fp.Dir, "logout_keeps"))
 	if w := tb.do("POST", "/api/plaud/disconnect", nil); w.Code != 200 || tb.plaud.connected() {
 		t.Errorf("disconnect = %d %s, connected = %v", w.Code, w.Body.String(), tb.plaud.connected())
 	}
@@ -2876,7 +2829,7 @@ func TestPlaudDisconnectAfterTheLoginMoved(t *testing.T) {
 			if _, err := os.Stat(shared); err != nil {
 				t.Errorf("the login in ~/.plaud was signed out: %v", err)
 			}
-			if calls := fp.calls(); strings.Count(calls, " logout") != 1 || !strings.Contains(calls, "HOME="+tb.plaud.privateHome()+" ") {
+			if calls := fp.Calls(); strings.Count(calls, " logout") != 1 || !strings.Contains(calls, "HOME="+tb.plaud.privateHome()+" ") {
 				t.Errorf("calls:\n%s\nwant one logout, in the private home", calls)
 			}
 			if s := tb.plaud.Status(); s.Connected || s.Expired || s.LoginMoved {
@@ -2933,10 +2886,10 @@ func TestBrainsFindThePlaudCLIWhenTheyMayUseIt(t *testing.T) {
 
 func TestPlaudBrainAccessSharesTheLogin(t *testing.T) {
 	tb, fp := plaudBridge(t, `, "brain_access": true`)
-	fp.files()
+	fp.Files()
 	_, _ = tb.plaud.run(context.Background(), "files")
-	if !strings.Contains(fp.calls(), "HOME="+tb.home+" ") {
-		t.Errorf("with brain_access the CLI must use the real home:\n%s", fp.calls())
+	if !strings.Contains(fp.Calls(), "HOME="+tb.home+" ") {
+		t.Errorf("with brain_access the CLI must use the real home:\n%s", fp.Calls())
 	}
 	// Brains read the login, and save it when the CLI refreshes it, but
 	// cannot remove it or put anything else in its place.
@@ -2971,7 +2924,7 @@ func TestPlaudBrainAccessSharesTheLogin(t *testing.T) {
 // link.
 func TestPlaudRefusesALoginThatIsASymlink(t *testing.T) {
 	tb, fp := plaudBridge(t, `, "brain_access": true`)
-	fp.files()
+	fp.Files()
 	const rcText = "export PATH=/usr/bin\n"
 	rc := writeTestFile(t, filepath.Join(tb.home, ".zshrc"), rcText)
 	if err := os.MkdirAll(filepath.Dir(tb.plaud.tokenPath()), 0o700); err != nil {
@@ -2985,7 +2938,7 @@ func TestPlaudRefusesALoginThatIsASymlink(t *testing.T) {
 			t.Errorf("plaud %s: %v, want it refused", cmd, err)
 		}
 	}
-	if calls := fp.calls(); calls != "" {
+	if calls := fp.Calls(); calls != "" {
 		t.Errorf("the CLI ran:\n%s", calls)
 	}
 	if _, err := tb.plaud.runCLIOut(context.Background(), nil, "logout"); err != nil {
@@ -3053,7 +3006,7 @@ func TestPlaudRefusesALoginElsewhere(t *testing.T) {
 
 func TestPlaudConnectShowsTheSignInLinkWhileWaiting(t *testing.T) {
 	tb, fp := plaudBridge(t, "")
-	fp.write("login_wait", "")
+	fp.Write("login_wait", "")
 	if rec := tb.do("POST", "/api/plaud/connect", nil); rec.Code != 202 {
 		t.Fatalf("connect: %d %s", rec.Code, rec.Body)
 	}
@@ -3079,7 +3032,7 @@ func TestPlaudConnectShowsTheSignInLinkWhileWaiting(t *testing.T) {
 	waitStatus("the sign-in link", func(s status) bool {
 		return s.Connect.State == "running" && s.Connect.AuthURL == "https://web.plaud.ai/platform/oauth?client_id=x&state=y"
 	})
-	fp.write("login_go", "")
+	fp.Write("login_go", "")
 	waitStatus("the sign-in to finish", func(s status) bool { return s.Connect.State == "done" && s.Connected })
 }
 
@@ -3093,14 +3046,14 @@ func TestPlaudCLIRunsContained(t *testing.T) {
 		if _, err := tb.plaud.run(context.Background(), "logout"); err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(fp.calls(), "CWD="+tb.plaud.cliHome()+" logout") {
-			t.Errorf("the CLI did not run in %s:\n%s", tb.plaud.cliHome(), fp.calls())
+		if !strings.Contains(fp.Calls(), "CWD="+tb.plaud.cliHome()+" logout") {
+			t.Errorf("the CLI did not run in %s:\n%s", tb.plaud.cliHome(), fp.Calls())
 		}
 	})
 	t.Run("a cancel ends what it started", func(t *testing.T) {
 		tb, fp := plaudBridge(t, "")
 		plaudSignIn(t, tb)
-		fp.write("hang", "")
+		fp.Write("hang", "")
 		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 		defer cancel()
 		start := time.Now()
@@ -3110,7 +3063,7 @@ func TestPlaudCLIRunsContained(t *testing.T) {
 		if d := time.Since(start); d > 8*time.Second {
 			t.Errorf("the cancelled run took %v to end", d)
 		}
-		pid, _ := strconv.Atoi(strings.TrimSpace(func() string { b, _ := os.ReadFile(filepath.Join(fp.dir, "child.pid")); return string(b) }()))
+		pid, _ := strconv.Atoi(strings.TrimSpace(func() string { b, _ := os.ReadFile(filepath.Join(fp.Dir, "child.pid")); return string(b) }()))
 		if pid <= 0 {
 			t.Fatal("the fake started no child")
 		}
@@ -3119,7 +3072,7 @@ func TestPlaudCLIRunsContained(t *testing.T) {
 	t.Run("its output is capped", func(t *testing.T) {
 		tb, fp := plaudBridge(t, "")
 		plaudSignIn(t, tb)
-		fp.write("flood", "")
+		fp.Write("flood", "")
 		out, err := tb.plaud.run(context.Background(), "files")
 		if err != nil {
 			t.Fatal(err)
@@ -3137,8 +3090,8 @@ func TestPlaudCLIRunsContained(t *testing.T) {
 func TestPlaudRunsOneCommandAtATime(t *testing.T) {
 	tb, fp := plaudBridge(t, "")
 	plaudSignIn(t, tb)
-	fp.files(plaudOld1)
-	fp.write("slow", "")
+	fp.Files(plaudOld1)
+	fp.Write("slow", "")
 	done := make(chan struct{})
 	for _, cmd := range []string{"me", "files", "me", "file"} {
 		go func() {
@@ -3149,30 +3102,30 @@ func TestPlaudRunsOneCommandAtATime(t *testing.T) {
 	for range 4 {
 		<-done
 	}
-	if overlap, _ := os.ReadFile(filepath.Join(fp.dir, "overlap.log")); len(overlap) > 0 {
+	if overlap, _ := os.ReadFile(filepath.Join(fp.Dir, "overlap.log")); len(overlap) > 0 {
 		t.Errorf("commands ran at the same time:\n%s", overlap)
 	}
 
 	// A sign-in waiting for the browser holds nothing up.
 	_ = os.Remove(tb.plaud.tokenPath())
-	fp.write("login_wait", "")
+	fp.Write("login_wait", "")
 	if err := tb.plaud.Connect(); err != nil {
 		t.Fatal(err)
 	}
-	testutil.WaitFor(t, 5*time.Second, "the sign-in to start", func() bool { return strings.Contains(fp.calls(), " login") })
+	testutil.WaitFor(t, 5*time.Second, "the sign-in to start", func() bool { return strings.Contains(fp.Calls(), " login") })
 	start := time.Now()
 	_, _ = tb.plaud.run(context.Background(), "me")
 	if d := time.Since(start); d > 3*time.Second {
 		t.Errorf("a command waited %v for the sign-in", d)
 	}
-	fp.write("login_go", "")
+	fp.Write("login_go", "")
 	testutil.WaitFor(t, 10*time.Second, "the sign-in to end", func() bool { return tb.plaud.connected() })
 
 	gone, cancel := context.WithCancel(context.Background())
 	cancel()
 	w := tb.do("POST", "/api/plaud/disconnect", nil, func(r *http.Request) { *r = *r.WithContext(gone) })
-	if w.Code != 200 || !strings.Contains(fp.calls(), " logout\n") {
-		t.Errorf("disconnect = %d %s, calls:\n%s", w.Code, w.Body.String(), fp.calls())
+	if w.Code != 200 || !strings.Contains(fp.Calls(), " logout\n") {
+		t.Errorf("disconnect = %d %s, calls:\n%s", w.Code, w.Body.String(), fp.Calls())
 	}
 }
 
@@ -3188,7 +3141,7 @@ func TestPlaudSignInSaysWhyItFailed(t *testing.T) {
 	} {
 		t.Run(c.fixture, func(t *testing.T) {
 			tb, fp := plaudBridge(t, "")
-			fp.write(c.fixture, "")
+			fp.Write(c.fixture, "")
 			if err := tb.plaud.Connect(); err != nil {
 				t.Fatal(err)
 			}
@@ -3228,7 +3181,7 @@ func TestPlaudConnectJudgesTheSignInByTheLogin(t *testing.T) {
 				}
 			}
 			if c.fixture != "" {
-				fp.write(c.fixture, "")
+				fp.Write(c.fixture, "")
 			}
 			if rec := tb.do("POST", "/api/plaud/connect", nil); rec.Code != 202 {
 				t.Fatalf("connect: %d %s", rec.Code, rec.Body)
@@ -3508,7 +3461,7 @@ func TestPlaudCLIGetsTheAllowlistedEnvironment(t *testing.T) {
 			tc.run(t)
 			// The sign-in asks who signed in right after, which must not
 			// stand in for it.
-			data, err := os.ReadFile(filepath.Join(fp.dir, "env_"+tc.cmd+".log"))
+			data, err := os.ReadFile(filepath.Join(fp.Dir, "env_"+tc.cmd+".log"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -3595,7 +3548,7 @@ func TestPlaudPhoneFolder(t *testing.T) {
 	}) {
 		t.Errorf("replies = %+v", out)
 	}
-	if calls := fp.calls(); calls != "" {
+	if calls := fp.Calls(); calls != "" {
 		t.Errorf("the CLI ran:\n%s", calls)
 	}
 

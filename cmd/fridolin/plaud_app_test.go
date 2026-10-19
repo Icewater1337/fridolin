@@ -157,7 +157,7 @@ func TestPlaudPhoneUploadsThroughTheSite(t *testing.T) {
 	if out := tb.dev.Outbox()[0]; !strings.Contains(out.Text, `[Plaud] New recording "Phone recording" (2026-10-18 10:00, 02:10)`) {
 		t.Errorf("reply = %+v", out)
 	}
-	if calls := fp.calls(); calls != "" {
+	if calls := fp.Calls(); calls != "" {
 		t.Errorf("the CLI ran:\n%s", calls)
 	}
 	if st := tb.plaud.appStatus(); len(st.Devices) != 1 || st.Devices[0].LastUpload.IsZero() {
