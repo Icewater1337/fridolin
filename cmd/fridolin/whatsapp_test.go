@@ -122,8 +122,9 @@ func newTestWhatsApp(t *testing.T) *testWhatsApp {
 	t.Cleanup(cancel)
 	tw.handler = func(_ context.Context, m Inbound) { tw.inbound <- m }
 	tw.WhatsAppClient = &WhatsAppClient{
-		cfg:     whatsAppSettings(func() *Config { return tw.cfg() }),
-		chunks:  ChunkMessage,
+		cfg:      whatsAppSettings(func() *Config { return tw.cfg() }),
+		chunks:   ChunkMessage,
+		outbound: whatsAppOutbound(), text: whatsAppText(), inbox: mediaInboxAt,
 		log:     testWaLogger{tw},
 		ctx:     ctx,
 		cancel:  cancel,

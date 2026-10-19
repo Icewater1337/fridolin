@@ -54,5 +54,27 @@ func (s whatsAppPollStore) SentPoll(ctx context.Context, id string) (waSentPoll,
 func NewWhatsAppClient(cfg func() *Config, s *store.Store, handler InboundHandler, onIgnored IgnoredHandler) (*WhatsAppClient, error) {
 	// Keep the initial log-level read before loading the device.
 	logger := logx.NewWaLogger("WhatsApp", cfg().LogLevel)
-	return newWhatsAppClient(waOptions{Settings: whatsAppSettings(cfg), Container: s.Container, Polls: whatsAppPollStore{s}, OnInbound: whatsAppInboundHandler(handler), OnIgnored: onIgnored, Log: logger, Chunks: ChunkMessage})
+	return newWhatsAppClient(waOptions{Settings: whatsAppSettings(cfg), Container: s.Container, Polls: whatsAppPollStore{s}, OnInbound: whatsAppInboundHandler(handler), OnIgnored: onIgnored, Log: logger, Chunks: ChunkMessage, Outbound: whatsAppOutbound(), Text: whatsAppText(), Inbox: mediaInboxAt})
+}
+
+func whatsAppOutbound() waOutbound {
+	return waOutbound{Recipient: parseRecipient, Classify: classifySendErr, Chunks: func(ctx context.Context, chunks []string, send func(string) error) error {
+		return sendChunks(ctx, chunks, outboxPace, send)
+	}}
+}
+
+func whatsAppText() waText {
+	return waText{ViewOnce: viewOnceNotice, MediaFailed: mediaFailedNotice, MediaTooLarge: mediaTooLargeNotice,
+		MaskSender: func(number string, resolved bool, server string) string {
+			return (groupSender{Number: number, Resolved: resolved, Server: server}).masked()
+		},
+		MaskJID: func(user, server string) string { return maskJID(user, "", server) },
+		Redact:  func(text string) string { return (&redactor{}).text(text) },
+	}
+}
+
+// saveAttachment is the existing command test seam; the transport consumes
+// a supplied inbox directly, without reading process state itself.
+func saveAttachment(ctx context.Context, dl mediaDownloader, dir string, att attachment, maxBytes int64) (string, error) {
+	return saveAttachmentTo(ctx, dl, mediaInboxAt(dir), att, maxBytes)
 }

@@ -5,6 +5,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/access"
 	"github.com/Icewater1337/fridolin/internal/chat"
+	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	waLog "go.mau.fi/whatsmeow/util/log"
@@ -56,4 +57,25 @@ type waOptions struct {
 	GroupRules func(string) waGroupRules
 	Log        waLog.Logger
 	Chunks     func(string, int) []string
+	Outbound   waOutbound
+	Text       waText
+	Inbox      func(string) mediafiles.Inbox
+}
+
+// waOutbound preserves the shared recipient errors and partial-send contract
+// while their implementation remains with the command's outbound path.
+type waOutbound struct {
+	Recipient func(string) (types.JID, error)
+	Classify  func(error) error
+	Chunks    func(context.Context, []string, func(string) error) error
+}
+
+// waText supplies the message catalogue and privacy formatting. The transport
+// decides when a notice or log is emitted; formatting stays at composition.
+type waText struct {
+	ViewOnce, MediaFailed string
+	MediaTooLarge         func(int64) string
+	MaskSender            func(string, bool, string) string
+	MaskJID               func(string, string) string
+	Redact                func(string) string
 }

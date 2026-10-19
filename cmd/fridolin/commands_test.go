@@ -68,7 +68,7 @@ func newMainBridgeWith(t *testing.T, extra string, m BrainManifest) (*testBridge
 // through the test bridge.
 func (tb *testBridge) whatsApp() *WhatsAppClient {
 	ctx, cancel := context.WithCancel(context.Background())
-	wa := &WhatsAppClient{cfg: whatsAppSettings(tb.cfgs.Get), container: tb.store.Container, polls: whatsAppPollStore{tb.store}, chunks: ChunkMessage, log: waLog.Noop, handler: whatsAppInboundHandler(tb.handleInbound), onVote: whatsAppVoteHandler(tb.recordVote), onChange: tb.handleChange, groupRules: whatsAppGroupRules(tb.groupRules), ctx: ctx, cancel: cancel}
+	wa := &WhatsAppClient{cfg: whatsAppSettings(tb.cfgs.Get), container: tb.store.Container, polls: whatsAppPollStore{tb.store}, chunks: ChunkMessage, outbound: whatsAppOutbound(), text: whatsAppText(), inbox: mediaInboxAt, log: waLog.Noop, handler: whatsAppInboundHandler(tb.handleInbound), onVote: whatsAppVoteHandler(tb.recordVote), onChange: tb.handleChange, groupRules: whatsAppGroupRules(tb.groupRules), ctx: ctx, cancel: cancel}
 	wa.media = wa.client // nil: every download fails with ErrClientIsNil
 	wa.notify = func(jid, text string) { tb.dev.SendMessage(ctx, jid, text) }
 	return wa
