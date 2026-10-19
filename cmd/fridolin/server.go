@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"log"
 	"net"
 	"net/http"
@@ -141,9 +142,9 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 	if err := b.wa.SendChunked(r.Context(), jid, req.Text); err != nil {
 		log.Printf("HTTP send error to %s: %v", jid, err)
 		// What did go out is in the chat, so it goes in the history too.
-		var partial *partialSendError
+		var partial *outboundmsg.PartialSendError
 		if errors.As(err, &partial) {
-			b.appendHTTPMessageToHistory(who, jid, strings.Join(partial.sent, "\n"), "")
+			b.appendHTTPMessageToHistory(who, jid, strings.Join(partial.Sent, "\n"), "")
 		}
 		httpapi.WriteErr(w, sendErrStatus(err), "send failed: "+err.Error())
 		return
@@ -211,9 +212,9 @@ func allowedChat(jid string, cfg *Config) bool {
 // does not know, else 500.
 func sendErrStatus(err error) int {
 	switch {
-	case errors.Is(err, errOffline):
+	case errors.Is(err, outboundmsg.ErrOffline):
 		return http.StatusServiceUnavailable
-	case errors.Is(err, errBadRecipient), errors.Is(err, errRefusedRecipient):
+	case errors.Is(err, outboundmsg.ErrBadRecipient), errors.Is(err, outboundmsg.ErrRefusedRecipient):
 		return http.StatusBadRequest
 	}
 	return http.StatusInternalServerError

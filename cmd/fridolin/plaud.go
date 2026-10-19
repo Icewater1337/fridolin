@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"io"
 	"io/fs"
 	"log"
@@ -1728,7 +1729,7 @@ func (p *PlaudManager) poll(ctx context.Context) error {
 func (p *PlaudManager) noticeGivenUp(brain, jid, name, why string) {
 	ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
 	defer cancel()
-	if err := p.notify(ctx, jid, plaudGivenUpAlert(name, brain, why)); err != nil {
+	if err := p.notify(ctx, jid, outboundmsg.PlaudGivenUpAlert(name, brain, why)); err != nil {
 		log.Printf("plaud: could not send the notice about a recording given up: %v", err)
 	}
 }
@@ -1797,7 +1798,7 @@ func (p *PlaudManager) notifyAuthExpired() {
 	// the next start.
 	ctx, cancel := context.WithTimeout(p.lifetime(), 30*time.Second)
 	defer cancel()
-	if err := p.notify(ctx, jid, plaudExpiredAlert); err != nil {
+	if err := p.notify(ctx, jid, outboundmsg.PlaudExpiredAlert); err != nil {
 		log.Printf("plaud: could not send the expiry notice: %v", err)
 		return
 	}
