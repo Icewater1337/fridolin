@@ -480,7 +480,12 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 		log.Printf("DM: could not resolve %s to a phone number (using it as it is)", who)
 	}
 
-	if !wa.isAllowed(sender.User) {
+	// A LID is a separate identity namespace: its digits cannot match an
+	// allowed phone number until WhatsApp resolves it. Keep the deliberate
+	// open-empty-list mode, using one config snapshot for both decisions.
+	cfg := wa.cfg()
+	allowed := cfg.AnyoneCanDM() || (resolved && numberAllowed(cfg, sender.User))
+	if !allowed {
 		log.Printf("DM from %s: ignored (not in allowed_numbers)", who)
 		if wa.onIgnored != nil {
 			wa.onIgnored("dm", sender.String(), "", sender.User, msg.Info.PushName)
@@ -838,11 +843,6 @@ func saveAttachment(ctx context.Context, dl mediaDownloader, dir string, att att
 	return mediaInboxAt(dir).Save(ctx, att.kind, att.name, att.size, maxBytes, func(ctx context.Context, f mediafiles.File) error {
 		return dl.DownloadToFile(ctx, att.media, f)
 	})
-}
-
-// isAllowed reports whether the phone number may DM the bridge.
-func (wa *WhatsAppClient) isAllowed(number string) bool {
-	return numberAllowed(wa.cfg(), number)
 }
 
 // numberAllowed compares number and the list as phone numbers, digits

@@ -243,6 +243,10 @@ for compatibility.
 
 ### Fixed
 
+- A WhatsApp sender known only by an internal LID cannot match
+  `allowed_numbers` merely because its digits equal a listed phone number.
+  A resolved phone number is required for that check; an empty list with
+  `allow_any_dm: true` continues to admit everyone.
 - Manifest transactions keep their brain folder open through reads, writes
   and rollback, so a moved or replaced folder cannot redirect those operations.
   Rollback preserves a manifest replaced or edited by another writer.
