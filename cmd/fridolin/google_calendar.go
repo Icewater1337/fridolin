@@ -106,7 +106,7 @@ const calendarReconnectHint = "Ask the owner to connect the calendar again in th
 // on path with query, body as JSON when it is not nil, and the answer
 // decoded into out when it is not nil.
 func (g *GoogleAuth) calendarAPI(ctx context.Context, tok *googleToken, method, path string, query url.Values, body, out any) error {
-	u := googleAPIBase + "/calendar/v3" + path
+	u := g.options.Endpoints.APIBase + "/calendar/v3" + path
 	if len(query) > 0 {
 		u += "?" + query.Encode()
 	}
@@ -126,7 +126,7 @@ func (g *GoogleAuth) calendarAPI(ctx context.Context, tok *googleToken, method, 
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := googleHTTP.Do(req)
+	resp, err := g.options.HTTP.Do(req)
 	if err != nil {
 		return fmt.Errorf("could not reach Google Calendar (%w); this is usually temporary, try again in a minute", err)
 	}

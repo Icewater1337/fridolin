@@ -83,11 +83,21 @@ func fakeGoogle(t *testing.T) (*httptest.Server, *map[string]string) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	googleAPIBase, googleTokenEndpoint, googleRevokeEndpoint = srv.URL, srv.URL+"/token", srv.URL+"/revoke"
-	t.Cleanup(func() {
-		googleAPIBase, googleTokenEndpoint, googleRevokeEndpoint = "https://www.googleapis.com", "https://oauth2.googleapis.com/token", "https://oauth2.googleapis.com/revoke"
-	})
 	return srv, &got
+}
+
+// googleTestOptions supplies a private HTTP client and endpoints for a fake
+// service, keeping the real authorization URL unless a test overrides it.
+func googleTestOptions(options GoogleOptions, srv *httptest.Server) GoogleOptions {
+	options.Endpoints = GoogleEndpoints{Token: srv.URL + "/token", Revoke: srv.URL + "/revoke", APIBase: srv.URL}
+	client := *srv.Client()
+	client.Timeout = 20 * time.Second
+	options.HTTP = &client
+	return options
+}
+
+func useGoogleServer(tb *testBridge, srv *httptest.Server) {
+	tb.google = NewGoogleAuth(googleTestOptions(googleOptionsFor(tb.cfgs), srv))
 }
 
 func TestParseGoogleClient(t *testing.T) {
@@ -102,9 +112,10 @@ func TestParseGoogleClient(t *testing.T) {
 	}
 }
 
-func TestCalendarSignInFlow(t *testing.T) {
+func TestCalendarDashboardSignInFlow(t *testing.T) {
 	srv, got := fakeGoogle(t)
 	tb := newTestBridge(t, "")
+	useGoogleServer(tb, srv)
 	if w := tb.do("POST", "/api/brains", map[string]any{"path": "~/fam", "create_dir": true, "manifest": manifest.Manifest{ID: "fam", Name: "Fam"}}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
@@ -229,6 +240,7 @@ func TestCalendarSignInFlow(t *testing.T) {
 func TestCalendarSignInErrorsAreShown(t *testing.T) {
 	srv, _ := fakeGoogle(t)
 	tb := newTestBridge(t, "")
+	useGoogleServer(tb, srv)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "p", Name: "P"})
 	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 	start := func() string {
@@ -306,6 +318,7 @@ func TestCalendarTokenIsNotFollowed(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, got := fakeGoogle(t)
 			tb := newTestBridge(t, "")
+			useGoogleServer(tb, srv)
 			if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)}); w.Code != 200 {
 				t.Fatal(w.Body.String())
 			}
@@ -408,8 +421,9 @@ func TestCalendarTokenRequestsGoToGoogleWithYourClient(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, got := fakeGoogle(t)
+			srv, got := fakeGoogle(t)
 			tb := newTestBridge(t, "")
+			useGoogleServer(tb, srv)
 			// The pasted client names another token endpoint too.
 			if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, other.URL)}); w.Code != 200 {
 				t.Fatal(w.Body.String())
@@ -457,6 +471,7 @@ func TestCalendarTokenRequestsGoToGoogleWithYourClient(t *testing.T) {
 	t.Run("sign-in", func(t *testing.T) {
 		srv, got := fakeGoogle(t)
 		tb := newTestBridge(t, "")
+		useGoogleServer(tb, srv)
 		if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, other.URL)}); w.Code != 200 {
 			t.Fatal(w.Body.String())
 		}
@@ -490,6 +505,7 @@ func TestCalendarTokenRequestsGoToGoogleWithYourClient(t *testing.T) {
 func TestOversizedCalendarTokenIsRefused(t *testing.T) {
 	srv, got := fakeGoogle(t)
 	tb := newTestBridge(t, "")
+	useGoogleServer(tb, srv)
 	if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
@@ -558,11 +574,8 @@ func TestCalendarSignInScopes(t *testing.T) {
 				}
 			}))
 			defer google.Close()
-			prevAPI, prevToken := googleAPIBase, googleTokenEndpoint
-			googleAPIBase, googleTokenEndpoint = google.URL, google.URL+"/token"
-			defer func() { googleAPIBase, googleTokenEndpoint = prevAPI, prevToken }()
-
 			tb := newTestBridge(t, "")
+			useGoogleServer(tb, google)
 			tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 			if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, google.URL)}); w.Code != 200 {
 				t.Fatal(w.Body.String())
@@ -635,11 +648,8 @@ func TestCalendarRefreshRecordsGrantedScopes(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(answer)
 			}))
 			defer google.Close()
-			prev := googleTokenEndpoint
-			googleTokenEndpoint = google.URL + "/token"
-			defer func() { googleTokenEndpoint = prev }()
-
 			tb := newTestBridge(t, "")
+			useGoogleServer(tb, google)
 			tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 			if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, google.URL)}); w.Code != 200 {
 				t.Fatal(w.Body.String())
@@ -712,6 +722,7 @@ func TestCalendarDisconnectRevokesOnlyAnUnsharedGrant(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, got := fakeGoogle(t)
 			tb := newTestBridge(t, "")
+			useGoogleServer(tb, srv)
 			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 			tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 			if tc.otherBrain {
@@ -755,6 +766,7 @@ func TestCalendarDisconnectRevokesOnlyAnUnsharedGrant(t *testing.T) {
 func TestCalendarDisconnectWhenGoogleDoesNotRevoke(t *testing.T) {
 	srv, got := fakeGoogle(t)
 	tb := newTestBridge(t, "")
+	useGoogleServer(tb, srv)
 	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 	writeCalendarToken(t, tb, "a", "you@example.com", "FAIL-REVOKE")
@@ -826,6 +838,7 @@ func TestCalendarDisconnectEndsWhatTheBrainShows(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, _ := fakeGoogle(t)
 			tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds"}`)
+			useGoogleServer(tb, srv)
 			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 			dir := tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 			tb.google.mu.Lock()
@@ -867,6 +880,7 @@ func TestCalendarSwitchRevokesTheOldAccount(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, got := fakeGoogle(t)
 			tb := newTestBridge(t, "")
+			useGoogleServer(tb, srv)
 			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 			tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 			writeCalendarToken(t, tb, "a", tc.old, "RT-OLD")
@@ -917,6 +931,7 @@ func expiredCalendarToken(t *testing.T, tb *testBridge, refreshToken string) {
 func TestCalendarRefreshKeepsTheToken(t *testing.T) {
 	srv, got := fakeGoogle(t)
 	tb := newTestBridge(t, "")
+	useGoogleServer(tb, srv)
 	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 	expiredCalendarToken(t, tb, "A-REFRESH")
@@ -959,6 +974,7 @@ func TestCalendarRevokedSignInAsksToReconnect(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, _ := fakeGoogle(t)
 			tb := newTestBridge(t, "")
+			useGoogleServer(tb, srv)
 			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 			tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 			expiredCalendarToken(t, tb, tc.refreshToken)
@@ -982,6 +998,7 @@ func TestCalendarRefreshThatCannotBeSavedIsLogged(t *testing.T) {
 	}
 	srv, _ := fakeGoogle(t)
 	tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds"}`)
+	useGoogleServer(tb, srv)
 	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 	expiredCalendarToken(t, tb, "A-REFRESH")
@@ -1030,6 +1047,7 @@ func signInCallback(t *testing.T, tb *testBridge, id string, ctx context.Context
 func TestCalendarSignInSurvivesTheBrowserLeaving(t *testing.T) {
 	srv, _ := fakeGoogle(t)
 	tb := newTestBridge(t, "")
+	useGoogleServer(tb, srv)
 	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 	gone, cancel := context.WithCancel(context.Background())
@@ -1046,6 +1064,7 @@ func TestCalendarSignInSurvivesTheBrowserLeaving(t *testing.T) {
 func TestCalendarSignInForARemovedBrain(t *testing.T) {
 	srv, _ := fakeGoogle(t)
 	tb := newTestBridge(t, "")
+	useGoogleServer(tb, srv)
 	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 	signInCallback(t, tb, "a", context.Background(), func() {
@@ -1088,6 +1107,7 @@ func TestCalendarSignInThatCannotBeSaved(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, got := fakeGoogle(t)
 			tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds"}`)
+			useGoogleServer(tb, srv)
 			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 			dir := tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 			if err := os.MkdirAll(tb.google.credsDir(), 0o700); err != nil {
@@ -1125,6 +1145,7 @@ func TestCalendarSignInThatCannotBeSaved(t *testing.T) {
 func TestCalendarRedirectIsTheAddressServed(t *testing.T) {
 	srv, _ := fakeGoogle(t)
 	tb := newTestBridge(t, "")
+	useGoogleServer(tb, srv)
 	served := "http://" + tb.cfgs.Get().HTTPListen + "/"
 	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
@@ -1185,9 +1206,6 @@ func newGatedGoogle(t *testing.T) *gatedGoogle {
 	// Released first: Close waits for the requests it holds.
 	t.Cleanup(g.srv.Close)
 	t.Cleanup(g.release)
-	prev := [3]string{googleAPIBase, googleTokenEndpoint, googleRevokeEndpoint}
-	googleAPIBase, googleTokenEndpoint, googleRevokeEndpoint = g.srv.URL, g.srv.URL+"/token", g.srv.URL+"/revoke"
-	t.Cleanup(func() { googleAPIBase, googleTokenEndpoint, googleRevokeEndpoint = prev[0], prev[1], prev[2] })
 	return g
 }
 
@@ -1207,6 +1225,7 @@ func (g *gatedGoogle) waitEntered(t *testing.T) {
 func gatedCalendarBrain(t *testing.T, g *gatedGoogle, account string) *testBridge {
 	t.Helper()
 	tb := newTestBridge(t, "")
+	useGoogleServer(tb, g.srv)
 	if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, g.srv.URL)}); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
@@ -1517,6 +1536,7 @@ func TestLeftoverClientCopiesAreReported(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv, _ := fakeGoogle(t)
 			tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds"}`)
+			useGoogleServer(tb, srv)
 			_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 			tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 			writeCalendarToken(t, tb, "a", "you@example.com", "RT-A")

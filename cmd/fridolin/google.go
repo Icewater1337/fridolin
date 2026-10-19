@@ -78,16 +78,23 @@ func extraScopes(granted []string) []string {
 	return out
 }
 
-// Endpoints, variables so tests can point them at a fake server. Token
-// requests always go to googleTokenEndpoint, never to a token_uri from a
-// file: a brain the sandbox does not hold can write its token file.
-var (
-	googleAuthEndpoint   = "https://accounts.google.com/o/oauth2/v2/auth"
-	googleTokenEndpoint  = "https://oauth2.googleapis.com/token"
-	googleRevokeEndpoint = "https://oauth2.googleapis.com/revoke"
-	googleAPIBase        = "https://www.googleapis.com"
-	googleHTTP           = &http.Client{Timeout: 20 * time.Second}
-)
+// GoogleEndpoints names the service endpoints used by this instance. Token
+// requests never use token_uri from a file a brain may have changed.
+type GoogleEndpoints struct {
+	Auth    string
+	Token   string
+	Revoke  string
+	APIBase string
+}
+
+func defaultGoogleEndpoints() GoogleEndpoints {
+	return GoogleEndpoints{
+		Auth:    "https://accounts.google.com/o/oauth2/v2/auth",
+		Token:   "https://oauth2.googleapis.com/token",
+		Revoke:  "https://oauth2.googleapis.com/revoke",
+		APIBase: "https://www.googleapis.com",
+	}
+}
 
 // GoogleClient is an OAuth client from a Google Cloud project.
 type GoogleClient struct {
@@ -98,7 +105,7 @@ type GoogleClient struct {
 }
 
 // ParseGoogleClient reads the JSON Google Cloud Console offers for download.
-// Its token_uri is not used; see googleTokenEndpoint.
+// Its token_uri is not used; the instance supplies the token endpoint.
 func ParseGoogleClient(data []byte) (*GoogleClient, error) {
 	var f map[string]struct {
 		ClientID     string `json:"client_id"`
@@ -147,6 +154,8 @@ type oauthPending struct {
 // GoogleOptions supplies startup paths and the live configuration operations
 // consumed by Google sign-in. The command owns configuration and manifests.
 type GoogleOptions struct {
+	Endpoints      GoogleEndpoints
+	HTTP           *http.Client
 	ClientPath     string
 	RedirectURI    string
 	CredsDir       func() string
@@ -167,6 +176,23 @@ type GoogleAuth struct {
 // NewGoogleAuth creates the manager, and logs the files in the credentials
 // dir that look like the copies of the OAuth client older versions left.
 func NewGoogleAuth(options GoogleOptions) *GoogleAuth {
+	defaults := defaultGoogleEndpoints()
+	if options.Endpoints.Auth == "" {
+		options.Endpoints.Auth = defaults.Auth
+	}
+	if options.Endpoints.Token == "" {
+		options.Endpoints.Token = defaults.Token
+	}
+	if options.Endpoints.Revoke == "" {
+		options.Endpoints.Revoke = defaults.Revoke
+	}
+	if options.Endpoints.APIBase == "" {
+		options.Endpoints.APIBase = defaults.APIBase
+	}
+	if options.HTTP == nil {
+		options.HTTP = &http.Client{Timeout: 20 * time.Second}
+	}
+
 	g := &GoogleAuth{options: options, pending: map[string]oauthPending{}, lastError: map[string]string{}, tokenLocks: map[string]chan struct{}{}}
 	if copies := g.leftoverClientCopies(); len(copies) > 0 {
 		log.Printf("WARNING: the credentials folder holds files named like the copies of the Google OAuth client that older versions wrote for the calendar tool, "+
@@ -373,7 +399,7 @@ func (g *GoogleAuth) StartSignIn(brainID string) (string, error) {
 		"code_challenge":        {base64.RawURLEncoding.EncodeToString(sum[:])},
 		"code_challenge_method": {"S256"},
 	}
-	return googleAuthEndpoint + "?" + q.Encode(), nil
+	return g.options.Endpoints.Auth + "?" + q.Encode(), nil
 }
 
 // isOAuthCallback reports whether a request to / is Google returning.
@@ -534,12 +560,12 @@ func (e *oauthError) revoked() bool { return e.code == "invalid_grant" }
 func (g *GoogleAuth) postToken(ctx context.Context, c *GoogleClient, form url.Values) (*tokenResponse, error) {
 	form.Set("client_id", c.ClientID)
 	form.Set("client_secret", c.ClientSecret)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, googleTokenEndpoint, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.options.Endpoints.Token, strings.NewReader(form.Encode()))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := googleHTTP.Do(req)
+	resp, err := g.options.HTTP.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("could not reach Google (%w); this is usually temporary, try again in a minute", err)
 	}
@@ -574,7 +600,7 @@ func (g *GoogleAuth) exchange(ctx context.Context, p oauthPending, code string) 
 		return nil, err
 	}
 	return &googleToken{
-		Token: tr.AccessToken, RefreshToken: tr.RefreshToken, TokenURI: googleTokenEndpoint,
+		Token: tr.AccessToken, RefreshToken: tr.RefreshToken, TokenURI: g.options.Endpoints.Token,
 		ClientID: c.ClientID, ClientSecret: c.ClientSecret, Scopes: tr.grantedScopes(calendarScopes),
 		Expiry: time.Now().Add(tokenLifetime(tr.ExpiresIn)).UTC().Format("2006-01-02T15:04:05.000000Z"),
 	}, nil
@@ -689,7 +715,7 @@ func (e *signInError) Unwrap() error { return e.err }
 // it has expired. It holds the brain's token lock from reading the token
 // to writing it back (lockToken), so that calls which find it expired at
 // the same time refresh it once: the others then read what the first one
-// saved. The refresh is a single request, bounded by ctx and googleHTTP's
+// saved. The refresh is a single request, bounded by ctx and the instance HTTP client's
 // timeout, so a disconnect waiting for the lock waits that long at most.
 func (g *GoogleAuth) accessToken(ctx context.Context, brainID string) (*googleToken, error) {
 	unlock, err := g.lockToken(ctx, brainID)
@@ -897,12 +923,12 @@ func (g *GoogleAuth) Disconnect(ctx context.Context, brainID string, localOnly b
 // token Google calls invalid is revoked already.
 func (g *GoogleAuth) revoke(ctx context.Context, refreshToken string) error {
 	form := url.Values{"token": {refreshToken}}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, googleRevokeEndpoint, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.options.Endpoints.Revoke, strings.NewReader(form.Encode()))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	resp, err := googleHTTP.Do(req)
+	resp, err := g.options.HTTP.Do(req)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errNotRevoked, err)
 	}

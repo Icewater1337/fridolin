@@ -121,9 +121,6 @@ func newFakeCalendarAPI(t *testing.T) *fakeCalendarAPI {
 		}
 	}))
 	t.Cleanup(f.srv.Close)
-	prev := [3]string{googleAPIBase, googleTokenEndpoint, googleRevokeEndpoint}
-	googleAPIBase, googleTokenEndpoint, googleRevokeEndpoint = f.srv.URL, f.srv.URL+"/token", f.srv.URL+"/revoke"
-	t.Cleanup(func() { googleAPIBase, googleTokenEndpoint, googleRevokeEndpoint = prev[0], prev[1], prev[2] })
 	return f
 }
 
@@ -138,6 +135,7 @@ func (f *fakeCalendarAPI) touchedCalendars() []string {
 func calendarBrain(t *testing.T, f *fakeCalendarAPI, cals []string, def string, stale bool) (*testBridge, string, string) {
 	t.Helper()
 	tb, url := serveTestBridge(t, "")
+	useGoogleServer(tb, f.srv)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, f.srv.URL)}); w.Code != 200 {
 		t.Fatal(w.Body.String())
@@ -696,7 +694,9 @@ func TestCalendarSignInProblems(t *testing.T) {
 					fmt.Fprint(w, tc.body)
 				}))
 				defer google.Close()
-				googleTokenEndpoint = google.URL + "/token"
+				options := googleTestOptions(googleOptionsFor(tb.cfgs), f.srv)
+				options.Endpoints.Token = google.URL + "/token"
+				tb.google = NewGoogleAuth(options)
 			}
 			code, doc := brainTool(t, calendarCmd, url, token, "list")
 			msg, _ := doc["error"].(string)

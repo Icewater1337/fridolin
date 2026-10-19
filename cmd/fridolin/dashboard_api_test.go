@@ -1102,6 +1102,7 @@ func TestRunPickerTellsCancelFromFailure(t *testing.T) {
 func TestSignInKeepsItsClientAndRedirect(t *testing.T) {
 	srv, got := fakeGoogle(t)
 	tb := newTestBridge(t, "")
+	useGoogleServer(tb, srv)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "fam", Name: "Fam"})
 	if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)}); w.Code != 200 {
 		t.Fatal(w.Body.String())
