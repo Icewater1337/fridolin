@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -99,7 +100,7 @@ func TestSiteBuildChat(t *testing.T) {
 	m.workspaceInstall = func(ctx context.Context, _, dir string) error { return link(ctx, dir, false) }
 
 	ctx := context.Background()
-	if err := m.ConnectRepo(ctx, SiteRepo{URL: newBareRepo(t)}); err != nil {
+	if err := m.ConnectRepo(ctx, sitesvc.SiteRepo{URL: newBareRepo(t)}); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.AddStarter(ctx); err != nil {

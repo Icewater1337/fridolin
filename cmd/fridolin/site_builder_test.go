@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -69,7 +70,7 @@ func TestSiteBuilderFlow(t *testing.T) {
 	if err := m.SetBuilder(ctx, "web", true); err == nil {
 		t.Fatal("a builder was allowed before a repository was connected")
 	}
-	if err := m.ConnectRepo(ctx, SiteRepo{URL: remote}); err != nil {
+	if err := m.ConnectRepo(ctx, sitesvc.SiteRepo{URL: remote}); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.AddStarter(ctx); err != nil {

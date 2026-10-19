@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"io"
 	"net/http"
 	"os"
@@ -173,7 +174,7 @@ func TestSiteModuleDataAndIngest(t *testing.T) {
 	}
 
 	remote := newBareRepo(t)
-	if err := m.ConnectRepo(ctx, SiteRepo{URL: remote}); err != nil {
+	if err := m.ConnectRepo(ctx, sitesvc.SiteRepo{URL: remote}); err != nil {
 		t.Fatal(err)
 	}
 	if err := m.AddStarter(ctx); err != nil {
@@ -200,7 +201,7 @@ export default (ctx) => express.Router().get('/probe', async (_req, res) => {
 	gitT(t, work, "commit", "-q", "-m", "Add inbox")
 	gitT(t, work, "push", "-q", "origin", "main")
 
-	if _, err := m.AddUser(SiteUserInput{Kind: "password", Username: "sam", Password: "long enough pw", Role: "member"}); err != nil {
+	if _, err := m.AddUser(sitesvc.SiteUserInput{Kind: "password", Username: "sam", Password: "long enough pw", Role: "member"}); err != nil {
 		t.Fatal(err)
 	}
 	up, err := m.Fetch(ctx)
@@ -208,7 +209,7 @@ export default (ctx) => express.Router().get('/probe', async (_req, res) => {
 		t.Fatal(err)
 	}
 	listen := freePort(t)
-	if _, err := m.UpdateSettings(SiteSettingsUpdate{Listen: &listen}); err != nil {
+	if _, err := m.UpdateSettings(sitesvc.SiteSettingsUpdate{Listen: &listen}); err != nil {
 		t.Fatal(err)
 	}
 	m.Start(ctx)
@@ -218,7 +219,7 @@ export default (ctx) => express.Router().get('/probe', async (_req, res) => {
 	}
 	waitDeploy(t, m)
 	on := true
-	if _, err := m.UpdateSettings(SiteSettingsUpdate{Enabled: &on}); err != nil {
+	if _, err := m.UpdateSettings(sitesvc.SiteSettingsUpdate{Enabled: &on}); err != nil {
 		t.Fatal(err)
 	}
 	testutil.WaitFor(t, 60*time.Second, "the site to answer", func() bool { return siteHealthy(listen) })

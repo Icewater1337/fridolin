@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"io/fs"
 	"log"
 	"net/url"
@@ -209,7 +210,7 @@ func validRepoURL(u string) bool {
 
 // ConnectRepo clones the site repository. Changing to another repository
 // means disconnecting first.
-func (m *SiteManager) ConnectRepo(ctx context.Context, r SiteRepo) error {
+func (m *SiteManager) ConnectRepo(ctx context.Context, r sitesvc.SiteRepo) error {
 	r.URL, r.Branch = strings.TrimSpace(r.URL), strings.TrimSpace(r.Branch)
 	r.Subdir = strings.Trim(path.Clean("/"+strings.TrimSpace(r.Subdir)), "/")
 	if r.Branch == "" {
@@ -266,7 +267,7 @@ func (m *SiteManager) DisconnectRepo() error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.settings.Repo = SiteRepo{Branch: "main"}
+	m.settings.Repo = sitesvc.SiteRepo{Branch: "main"}
 	m.settings.Approved = ""
 	m.settings.History = nil
 	return m.saveSettingsLocked()
@@ -347,51 +348,17 @@ func copyEmbedded(fsys fs.FS, root, dst string) error {
 
 // ── what changed ────────────────────────────────────────────────────────────
 
-// SiteCommit is one commit on the branch.
-type SiteCommit struct {
-	Commit  string `json:"commit"`
-	Subject string `json:"subject"`
-	Author  string `json:"author"`
-	At      string `json:"at"`
-}
-
-// SiteUpdates is what the branch has beyond the approved commit.
-type SiteUpdates struct {
-	Head     string         `json:"head"`
-	Approved string         `json:"approved"`
-	Commits  []SiteCommit   `json:"commits"`
-	Changes  []ModuleChange `json:"changes"`
-}
-
-// ModuleChange is one module that differs between the approved commit and another one.
-type ModuleChange struct {
-	ID     string `json:"id"`
-	Status string `json:"status"` // added, removed, changed
-	// Review lists what an approver should look at: access, routes, server
-	// code, files, commands, secrets, public files.
-	Review []ReviewItem `json:"review"`
-	Files  []string     `json:"files"`
-}
-
-// ReviewItem is one security-relevant manifest field that changed.
-type ReviewItem struct {
-	Field string `json:"field"`
-	Old   any    `json:"old"`
-	New   any    `json:"new"`
-	Note  string `json:"note"`
-}
-
 // Fetch updates the clone and reports what the branch has beyond the approved commit.
-func (m *SiteManager) Fetch(ctx context.Context) (SiteUpdates, error) {
+func (m *SiteManager) Fetch(ctx context.Context) (sitesvc.SiteUpdates, error) {
 	s := m.Settings()
 	if !fsx.Exists(m.repoDir()) {
-		return SiteUpdates{}, errors.New("no repository connected")
+		return sitesvc.SiteUpdates{}, errors.New("no repository connected")
 	}
 	if _, err := m.git(ctx, m.repoDir(), "fetch", "--prune", "origin"); err != nil {
-		return SiteUpdates{}, err
+		return sitesvc.SiteUpdates{}, err
 	}
 	head, _ := m.git(ctx, m.repoDir(), "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+s.Repo.Branch)
-	up := SiteUpdates{Head: head, Approved: s.Approved, Commits: []SiteCommit{}, Changes: []ModuleChange{}}
+	up := sitesvc.SiteUpdates{Head: head, Approved: s.Approved, Commits: []sitesvc.SiteCommit{}, Changes: []sitesvc.ModuleChange{}}
 	if head == "" {
 		return up, nil // empty repository
 	}
@@ -405,7 +372,7 @@ func (m *SiteManager) Fetch(ctx context.Context) (SiteUpdates, error) {
 	}
 	for _, line := range strings.Split(out, "\n") {
 		if f := strings.Split(line, "\x1f"); len(f) == 4 {
-			up.Commits = append(up.Commits, SiteCommit{Commit: f[0], Subject: f[1], Author: f[2], At: f[3]})
+			up.Commits = append(up.Commits, sitesvc.SiteCommit{Commit: f[0], Subject: f[1], Author: f[2], At: f[3]})
 		}
 	}
 	if head != s.Approved {
@@ -415,7 +382,7 @@ func (m *SiteManager) Fetch(ctx context.Context) (SiteUpdates, error) {
 }
 
 // ModuleChanges compares the modules of two commits ("" = nothing approved yet).
-func (m *SiteManager) ModuleChanges(ctx context.Context, from, to string) ([]ModuleChange, error) {
+func (m *SiteManager) ModuleChanges(ctx context.Context, from, to string) ([]sitesvc.ModuleChange, error) {
 	prefix := m.Settings().Repo.Subdir
 	if prefix != "" {
 		prefix += "/"
@@ -435,7 +402,7 @@ func (m *SiteManager) ModuleChanges(ctx context.Context, from, to string) ([]Mod
 		}
 		files = strings.Fields(out)
 	}
-	byID := map[string]*ModuleChange{}
+	byID := map[string]*sitesvc.ModuleChange{}
 	var order []string
 	for _, f := range files {
 		rest := strings.TrimPrefix(f, prefix)
@@ -445,14 +412,14 @@ func (m *SiteManager) ModuleChanges(ctx context.Context, from, to string) ([]Mod
 		}
 		c := byID[id]
 		if c == nil {
-			c = &ModuleChange{ID: id, Review: []ReviewItem{}}
+			c = &sitesvc.ModuleChange{ID: id, Review: []sitesvc.ReviewItem{}}
 			byID[id] = c
 			order = append(order, id)
 		}
 		c.Files = append(c.Files, rest)
 	}
 	slices.Sort(order)
-	out := make([]ModuleChange, 0, len(order))
+	out := make([]sitesvc.ModuleChange, 0, len(order))
 	for _, id := range order {
 		c := byID[id]
 		oldM := m.manifestAt(ctx, from, prefix+id+"/module.json")
@@ -487,7 +454,7 @@ func (m *SiteManager) manifestAt(ctx context.Context, commit, file string) map[s
 }
 
 // reviewManifest lists the manifest fields an approver must look at.
-func reviewManifest(oldM, newM map[string]any) []ReviewItem {
+func reviewManifest(oldM, newM map[string]any) []sitesvc.ReviewItem {
 	fields := []struct{ path, note string }{
 		{"route", "where it is served"},
 		{"access", "who may open it"},
@@ -504,7 +471,7 @@ func reviewManifest(oldM, newM map[string]any) []ReviewItem {
 		{"app.build", "a command Fridolin runs when deploying"},
 		{"invalid", "the manifest does not parse"},
 	}
-	items := []ReviewItem{}
+	items := []sitesvc.ReviewItem{}
 	for _, f := range fields {
 		o, n := lookupPath(oldM, f.path), lookupPath(newM, f.path)
 		if f.path == "server" {
@@ -512,7 +479,7 @@ func reviewManifest(oldM, newM map[string]any) []ReviewItem {
 			o, n = boolOrNil(o != nil), boolOrNil(n != nil)
 		}
 		if !reflect.DeepEqual(o, n) {
-			items = append(items, ReviewItem{Field: f.path, Old: o, New: n, Note: f.note})
+			items = append(items, sitesvc.ReviewItem{Field: f.path, Old: o, New: n, Note: f.note})
 		}
 	}
 	return items
@@ -539,8 +506,8 @@ func lookupPath(m map[string]any, p string) any {
 
 // ── deploying ───────────────────────────────────────────────────────────────
 
-// siteJob is one deploy in progress (or the last one).
-type siteJob struct {
+// SiteJob is one deploy in progress (or the last one).
+type SiteJob struct {
 	mu       sync.Mutex
 	Commit   string   `json:"commit"`
 	State    string   `json:"state"` // running, done, error
@@ -551,24 +518,24 @@ type siteJob struct {
 	Finished string   `json:"finished,omitempty"`
 }
 
-func (j *siteJob) step(format string, args ...any) {
+func (j *SiteJob) step(format string, args ...any) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.Step = fmt.Sprintf(format, args...)
 	j.Log = append(j.Log, j.Step)
 }
 
-func (j *siteJob) snapshot() *siteJob {
+func (j *SiteJob) snapshot() *sitesvc.DeploySnapshot {
 	if j == nil {
 		return nil
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	return &siteJob{Commit: j.Commit, State: j.State, Step: j.Step, Error: j.Error, Log: slices.Clone(j.Log), Started: j.Started, Finished: j.Finished}
+	return &sitesvc.DeploySnapshot{Commit: j.Commit, State: j.State, Step: j.Step, Error: j.Error, Log: slices.Clone(j.Log), Started: j.Started, Finished: j.Finished}
 }
 
 // DeployStatus returns the running or last deploy.
-func (m *SiteManager) DeployStatus() *siteJob {
+func (m *SiteManager) DeployStatus() *sitesvc.DeploySnapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.deploy.snapshot()
@@ -587,7 +554,7 @@ func (m *SiteManager) Deploy(ctx context.Context, commit string) error {
 	if !fsx.Exists(m.repoDir()) {
 		return errors.New("no repository connected")
 	}
-	known := slices.ContainsFunc(s.History, func(d SiteDeploy) bool { return d.Commit == commit })
+	known := slices.ContainsFunc(s.History, func(d sitesvc.SiteDeploy) bool { return d.Commit == commit })
 	if !known {
 		// Only what is on the branch can be approved: not a stray commit or another branch.
 		if _, err := m.git(ctx, m.repoDir(), "merge-base", "--is-ancestor", commit, "refs/remotes/origin/"+s.Repo.Branch); err != nil {
@@ -599,7 +566,7 @@ func (m *SiteManager) Deploy(ctx context.Context, commit string) error {
 		m.mu.Unlock()
 		return errors.New("a deploy is already running")
 	}
-	job := &siteJob{Commit: commit, State: "running", Started: time.Now().UTC().Format(time.RFC3339), Log: []string{}}
+	job := &SiteJob{Commit: commit, State: "running", Started: time.Now().UTC().Format(time.RFC3339), Log: []string{}}
 	m.deploy = job
 	m.mu.Unlock()
 
@@ -618,7 +585,7 @@ func (m *SiteManager) Deploy(ctx context.Context, commit string) error {
 	return nil
 }
 
-func (m *SiteManager) runDeploy(ctx context.Context, job *siteJob, commit string) error {
+func (m *SiteManager) runDeploy(ctx context.Context, job *SiteJob, commit string) error {
 	dir := m.deployDir(commit)
 	if err := m.prepareCheckout(ctx, job, commit, dir); err != nil {
 		return err
@@ -626,8 +593,8 @@ func (m *SiteManager) runDeploy(ctx context.Context, job *siteJob, commit string
 	subject, _ := m.git(ctx, m.repoDir(), "log", "-1", "--format=%s", commit)
 	m.mu.Lock()
 	m.settings.Approved = commit
-	m.settings.History = slices.DeleteFunc(m.settings.History, func(d SiteDeploy) bool { return d.Commit == commit })
-	m.settings.History = append(m.settings.History, SiteDeploy{Commit: commit, Subject: subject, At: time.Now().UTC().Format(time.RFC3339)})
+	m.settings.History = slices.DeleteFunc(m.settings.History, func(d sitesvc.SiteDeploy) bool { return d.Commit == commit })
+	m.settings.History = append(m.settings.History, sitesvc.SiteDeploy{Commit: commit, Subject: subject, At: time.Now().UTC().Format(time.RFC3339)})
 	if len(m.settings.History) > 30 {
 		m.settings.History = m.settings.History[len(m.settings.History)-30:]
 	}
@@ -645,7 +612,7 @@ func (m *SiteManager) runDeploy(ctx context.Context, job *siteJob, commit string
 
 // prepareCheckout checks a commit out into dir, installs its dependencies and
 // builds its modules. A folder from an earlier deploy of the same commit is reused.
-func (m *SiteManager) prepareCheckout(ctx context.Context, job *siteJob, commit, dir string) error {
+func (m *SiteManager) prepareCheckout(ctx context.Context, job *SiteJob, commit, dir string) error {
 	ready := filepath.Join(dir, ".fridolin-ready")
 	if fsx.Exists(ready) {
 		job.step("Reusing the build of %s", commit[:12])
