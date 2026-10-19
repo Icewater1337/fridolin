@@ -1,4 +1,4 @@
-package main
+package site
 
 // Brains that build the site (docs/SITE.md, "Building with a brain").
 //
@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
 	"log"
 	"net"
 	"os"
@@ -35,16 +36,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/site"
 )
-
-// SiteProposal is a change a builder brain pushed for review.
-type SiteProposal struct {
-	Branch  string `json:"branch"` // builder/<brain>
-	Brain   string `json:"brain"`
-	Title   string `json:"title"`
-	Summary string `json:"summary"`
-	Commit  string `json:"commit"`
-	At      string `json:"at"`
-}
 
 func (m *SiteManager) builderBase(brainID string) string {
 	dir := ""
@@ -96,7 +87,7 @@ func (m *SiteManager) BuilderArgs(brainID string) []string {
 	if !m.IsBuilder(brainID) {
 		return nil
 	}
-	if err := m.ensureBuilder(m.baseContext(), brainID); err != nil {
+	if err := m.ensureBuilder(m.BaseContext(), brainID); err != nil {
 		log.Printf("[site] brain %s builds the site, but its workspace is not ready: %v", brainID, err)
 		return nil
 	}
@@ -114,7 +105,7 @@ func (m *SiteManager) CodexBuilder(brainID string) ([]string, []string, string, 
 	if m.hooks.Executable == nil || m.hooks.BridgeURL == nil {
 		return nil, nil, "", errors.New("site builder is missing its bridge connection")
 	}
-	if err := m.ensureBuilder(m.baseContext(), brainID); err != nil {
+	if err := m.ensureBuilder(m.BaseContext(), brainID); err != nil {
 		return nil, nil, "", err
 	}
 	exe, err := m.hooks.Executable()
@@ -205,12 +196,12 @@ func (m *SiteManager) builderToken(brainID string) string {
 			return tok
 		}
 	}
-	tok := randomToken(24)
+	tok := siteRandomToken(24)
 	m.tokens[tok] = brainID
 	return tok
 }
 
-func (m *SiteManager) brainForToken(tok string) string {
+func (m *SiteManager) BrainForToken(tok string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	id := m.tokens[tok]
@@ -386,19 +377,6 @@ func (m *SiteManager) BuilderContext(brainID string) map[string]any {
 	return ctx
 }
 
-// CheckResult is what site_check returns.
-type CheckResult struct {
-	Mounted []string       `json:"mounted"`
-	Broken  []BrokenModule `json:"broken"`
-	Review  []ModuleChange `json:"review"`
-}
-
-// BrokenModule is a module the site would skip, and why.
-type BrokenModule struct {
-	ID    string `json:"id"`
-	Error string `json:"error"`
-}
-
 // BuilderCheck loads the workspace's modules the way the site will — inside
 // the brain's sandbox — and lists what an approver will be asked to review.
 func (m *SiteManager) BuilderCheck(ctx context.Context, brainID string) (CheckResult, error) {
@@ -417,8 +395,8 @@ func (m *SiteManager) BuilderCheck(ctx context.Context, brainID string) (CheckRe
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &res); err != nil {
 		return res, fmt.Errorf("the check printed no report: %s", textx.Tail(out, 600))
 	}
-	res.Mounted = nonNil(res.Mounted)
-	res.Broken = nonNil(res.Broken)
+	res.Mounted = siteNonNil(res.Mounted)
+	res.Broken = siteNonNil(res.Broken)
 	res.Review = m.reviewWorkspace(ctx, brainID)
 	return res, nil
 }
@@ -569,7 +547,7 @@ func (m *SiteManager) MergeProposal(ctx context.Context, brainID string) error {
 	if _, err := m.git(ctx, m.repoDir(), "fetch", "--prune", "origin"); err != nil {
 		return err
 	}
-	work := m.dir("work", "merge-"+randomToken(6))
+	work := m.dir("work", "merge-"+siteRandomToken(6))
 	if _, err := m.git(ctx, m.repoDir(), "worktree", "add", "--detach", work, "refs/remotes/origin/"+s.Repo.Branch); err != nil {
 		return err
 	}
@@ -594,7 +572,7 @@ func (m *SiteManager) MergeProposal(ctx context.Context, brainID string) error {
 	if err != nil {
 		return err
 	}
-	return m.Deploy(m.baseContext(), head)
+	return m.Deploy(m.BaseContext(), head)
 }
 
 // DiscardProposal forgets a proposal. The branch stays in the repository.
@@ -640,7 +618,7 @@ func (m *SiteManager) BuilderPreview(ctx context.Context, brainID string) (map[s
 	}
 	listen := ln.Addr().String()
 	ln.Close()
-	p := &sitePreview{Branch: builderBranch(brainID), Listen: listen, Token: randomToken(24), proc: newSiteProc("preview " + brainID)}
+	p := &sitePreview{Branch: builderBranch(brainID), Listen: listen, Token: siteRandomToken(24), proc: newSiteProc("preview " + brainID)}
 	base := m.builderBase(brainID)
 	rt := map[string]any{
 		"listen": listen, "title": m.Settings().Title + " (preview)",
@@ -668,7 +646,7 @@ func (m *SiteManager) BuilderPreview(ctx context.Context, brainID string) (map[s
 		cmd.Env = append(m.host.Env(node, "FRIDOLIN_SITE_RUNTIME="+rtFile, "NODE_ENV=production"), sbEnv...)
 		return cmd, nil
 	}
-	p.proc.ensure(m.baseContext(), build)
+	p.proc.ensure(m.BaseContext(), build)
 	deadline := time.Now().Add(20 * time.Second)
 	for !siteHealthy(listen) {
 		if time.Now().After(deadline) {
@@ -709,4 +687,12 @@ func (m *SiteManager) writePreviewsFile() error {
 	m.mu.Unlock()
 	data, _ := json.MarshalIndent(list, "", "  ")
 	return fsx.WriteFileAtomic(m.dir("previews.json"), data, 0o600, false)
+}
+
+// PreviewURLs returns the active preview links, or nil when no preview exists.
+func (m *SiteManager) PreviewURLs(id string) map[string]string {
+	if p := m.previewOf(id); p != nil {
+		return m.previewURLs(id, p)
+	}
+	return nil
 }

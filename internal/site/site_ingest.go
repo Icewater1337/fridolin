@@ -1,4 +1,4 @@
-package main
+package site
 
 import (
 	"context"
@@ -151,7 +151,7 @@ func spoolAnswer(root *os.Root, entry string, err error, extra map[string]any) {
 		answer = map[string]any{"ok": false, "error": err.Error()}
 	}
 	data, _ := json.Marshal(answer)
-	part := path.Join(entry, "result.json."+randomToken(6))
+	part := path.Join(entry, "result.json."+siteRandomToken(6))
 	f, ferr := root.OpenFile(part, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if ferr == nil {
 		_, ferr = f.Write(data)

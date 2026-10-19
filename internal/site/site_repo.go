@@ -1,4 +1,4 @@
-package main
+package site
 
 // The site repository: connecting it, the starter files, what changed since
 // the approved commit, and deploying a commit.
@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
 	"io/fs"
 	"log"
 	"net/url"
@@ -63,7 +64,7 @@ func (m *SiteManager) git(ctx context.Context, dir string, args ...string) (stri
 	if key := m.dir("deploy_key"); fsx.Exists(key) {
 		cmd.Env = append(cmd.Env, "GIT_SSH_COMMAND="+fmt.Sprintf(
 			"ssh -i %s -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=%s",
-			shellQuote(key), shellQuote(m.dir("known_hosts"))))
+			siteShellQuote(key), siteShellQuote(m.dir("known_hosts"))))
 	}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
@@ -91,8 +92,6 @@ func gitEnv(env []string) []string {
 	}
 	return out
 }
-
-func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // ── deploy key ──────────────────────────────────────────────────────────────
 
@@ -288,7 +287,7 @@ func (m *SiteManager) AddStarter(ctx context.Context) error {
 	head, _ := m.git(ctx, m.repoDir(), "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+s.Repo.Branch)
 	var work string
 	if head != "" {
-		work = m.dir("work", "starter-"+randomToken(6))
+		work = m.dir("work", "starter-"+siteRandomToken(6))
 		if _, err := m.git(ctx, m.repoDir(), "worktree", "add", "--detach", work, head); err != nil {
 			return err
 		}
@@ -346,40 +345,6 @@ func copyEmbedded(fsys fs.FS, root, dst string) error {
 }
 
 // ── what changed ────────────────────────────────────────────────────────────
-
-// SiteCommit is one commit on the branch.
-type SiteCommit struct {
-	Commit  string `json:"commit"`
-	Subject string `json:"subject"`
-	Author  string `json:"author"`
-	At      string `json:"at"`
-}
-
-// SiteUpdates is what the branch has beyond the approved commit.
-type SiteUpdates struct {
-	Head     string         `json:"head"`
-	Approved string         `json:"approved"`
-	Commits  []SiteCommit   `json:"commits"`
-	Changes  []ModuleChange `json:"changes"`
-}
-
-// ModuleChange is one module that differs between the approved commit and another one.
-type ModuleChange struct {
-	ID     string `json:"id"`
-	Status string `json:"status"` // added, removed, changed
-	// Review lists what an approver should look at: access, routes, server
-	// code, files, commands, secrets, public files.
-	Review []ReviewItem `json:"review"`
-	Files  []string     `json:"files"`
-}
-
-// ReviewItem is one security-relevant manifest field that changed.
-type ReviewItem struct {
-	Field string `json:"field"`
-	Old   any    `json:"old"`
-	New   any    `json:"new"`
-	Note  string `json:"note"`
-}
 
 // Fetch updates the clone and reports what the branch has beyond the approved commit.
 func (m *SiteManager) Fetch(ctx context.Context) (SiteUpdates, error) {
@@ -539,8 +504,8 @@ func lookupPath(m map[string]any, p string) any {
 
 // ── deploying ───────────────────────────────────────────────────────────────
 
-// siteJob is one deploy in progress (or the last one).
-type siteJob struct {
+// SiteJob is one deploy in progress (or the last one).
+type SiteJob struct {
 	mu       sync.Mutex
 	Commit   string   `json:"commit"`
 	State    string   `json:"state"` // running, done, error
@@ -551,24 +516,24 @@ type siteJob struct {
 	Finished string   `json:"finished,omitempty"`
 }
 
-func (j *siteJob) step(format string, args ...any) {
+func (j *SiteJob) step(format string, args ...any) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.Step = fmt.Sprintf(format, args...)
 	j.Log = append(j.Log, j.Step)
 }
 
-func (j *siteJob) snapshot() *siteJob {
+func (j *SiteJob) snapshot() *DeploySnapshot {
 	if j == nil {
 		return nil
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	return &siteJob{Commit: j.Commit, State: j.State, Step: j.Step, Error: j.Error, Log: slices.Clone(j.Log), Started: j.Started, Finished: j.Finished}
+	return &DeploySnapshot{Commit: j.Commit, State: j.State, Step: j.Step, Error: j.Error, Log: slices.Clone(j.Log), Started: j.Started, Finished: j.Finished}
 }
 
 // DeployStatus returns the running or last deploy.
-func (m *SiteManager) DeployStatus() *siteJob {
+func (m *SiteManager) DeployStatus() *DeploySnapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.deploy.snapshot()
@@ -599,7 +564,7 @@ func (m *SiteManager) Deploy(ctx context.Context, commit string) error {
 		m.mu.Unlock()
 		return errors.New("a deploy is already running")
 	}
-	job := &siteJob{Commit: commit, State: "running", Started: time.Now().UTC().Format(time.RFC3339), Log: []string{}}
+	job := &SiteJob{Commit: commit, State: "running", Started: time.Now().UTC().Format(time.RFC3339), Log: []string{}}
 	m.deploy = job
 	m.mu.Unlock()
 
@@ -618,7 +583,7 @@ func (m *SiteManager) Deploy(ctx context.Context, commit string) error {
 	return nil
 }
 
-func (m *SiteManager) runDeploy(ctx context.Context, job *siteJob, commit string) error {
+func (m *SiteManager) runDeploy(ctx context.Context, job *SiteJob, commit string) error {
 	dir := m.deployDir(commit)
 	if err := m.prepareCheckout(ctx, job, commit, dir); err != nil {
 		return err
@@ -645,7 +610,7 @@ func (m *SiteManager) runDeploy(ctx context.Context, job *siteJob, commit string
 
 // prepareCheckout checks a commit out into dir, installs its dependencies and
 // builds its modules. A folder from an earlier deploy of the same commit is reused.
-func (m *SiteManager) prepareCheckout(ctx context.Context, job *siteJob, commit, dir string) error {
+func (m *SiteManager) prepareCheckout(ctx context.Context, job *SiteJob, commit, dir string) error {
 	ready := filepath.Join(dir, ".fridolin-ready")
 	if fsx.Exists(ready) {
 		job.step("Reusing the build of %s", commit[:12])

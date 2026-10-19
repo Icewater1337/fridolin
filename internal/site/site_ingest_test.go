@@ -1,9 +1,10 @@
-package main
+package site
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+
 	"io"
 	"net/http"
 	"os"

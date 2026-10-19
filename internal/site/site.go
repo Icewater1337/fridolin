@@ -1,4 +1,4 @@
-package main
+package site
 
 // The public website (docs/SITE.md): its settings, accounts, repository and
 // processes.
@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+
 	"io"
 	"io/fs"
 	"log"
@@ -49,54 +50,6 @@ const (
 	siteKeepDeploys   = 3
 )
 
-// SiteSettings is <data_dir>/site/settings.json, edited from the dashboard.
-type SiteSettings struct {
-	Enabled bool   `json:"enabled"`
-	Title   string `json:"title"`
-	// Listen is where the site process listens; a tunnel forwards the domain to it.
-	Listen string `json:"listen"`
-	// Domain is the public host name, e.g. "example.com" (https assumed).
-	Domain string   `json:"domain"`
-	Repo   SiteRepo `json:"repo"`
-	// Roles users can have. "admin" is always one of them.
-	Roles []string `json:"roles"`
-	// Approved is the commit the live site serves.
-	Approved string       `json:"approved"`
-	History  []SiteDeploy `json:"history"`
-	// Tunnel runs cloudflared with the saved tunnel token.
-	Tunnel bool `json:"tunnel"`
-	// Builders are the brains allowed to build the site (site_builder.go).
-	Builders  []string       `json:"builders"`
-	Proposals []SiteProposal `json:"proposals"`
-}
-
-// SiteRepo is the private repository that holds the site's modules.
-type SiteRepo struct {
-	URL    string `json:"url"`
-	Branch string `json:"branch"`
-	// Subdir is the folder inside the repository that holds modules/ ("" = the root).
-	Subdir string `json:"subdir"`
-}
-
-// SiteDeploy is one approved commit.
-type SiteDeploy struct {
-	Commit  string `json:"commit"`
-	Subject string `json:"subject"`
-	At      string `json:"at"`
-}
-
-// SiteUser is one account in users.json. The site process reads the same file.
-type SiteUser struct {
-	ID           string `json:"id"`
-	Kind         string `json:"kind"` // google | password
-	Email        string `json:"email,omitempty"`
-	Username     string `json:"username,omitempty"`
-	Name         string `json:"name,omitempty"`
-	Role         string `json:"role"`
-	PasswordHash string `json:"password_hash,omitempty"`
-	Created      string `json:"created"`
-}
-
 // SiteManager runs the site.
 type SiteManager struct {
 	dataDir      string
@@ -117,7 +70,7 @@ type SiteManager struct {
 	users    []SiteUser
 	site     *siteProc
 	tunnel   *siteProc
-	deploy   *siteJob
+	deploy   *SiteJob
 	previews map[string]*sitePreview
 	tokens   map[string]string // builder token → brain id
 	hooks    SiteBuilderHooks
@@ -130,7 +83,7 @@ type SiteManager struct {
 }
 
 // NewSiteManager loads the site's settings and accounts from opts.DataDir/site.
-func newSiteManager(opts SiteOptions) *SiteManager {
+func New(opts SiteOptions) *SiteManager {
 	m := &SiteManager{
 		dataDir:      opts.DataDir,
 		host:         opts.Host,
@@ -213,15 +166,6 @@ var (
 	siteEmailRE  = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 )
 
-// SiteSettingsUpdate is what the dashboard may change directly.
-type SiteSettingsUpdate struct {
-	Enabled *bool   `json:"enabled"`
-	Title   *string `json:"title"`
-	Listen  *string `json:"listen"`
-	Domain  *string `json:"domain"`
-	Tunnel  *bool   `json:"tunnel"`
-}
-
 // UpdateSettings validates and saves a change, then starts, restarts or
 // stops what the change affects.
 func (m *SiteManager) UpdateSettings(u SiteSettingsUpdate) (SiteSettings, error) {
@@ -292,7 +236,7 @@ func (m *SiteManager) SetRoles(roles []string) error {
 	}
 	for _, u := range m.users {
 		if !seen[u.Role] {
-			return fmt.Errorf("%s still has the role %q; change it first", u.display(), u.Role)
+			return fmt.Errorf("%s still has the role %q; change it first", u.Display(), u.Role)
 		}
 	}
 	m.settings.Roles = out
@@ -300,13 +244,6 @@ func (m *SiteManager) SetRoles(roles []string) error {
 }
 
 // ── accounts ────────────────────────────────────────────────────────────────
-
-func (u SiteUser) display() string {
-	if u.Kind == "google" {
-		return u.Email
-	}
-	return u.Username
-}
 
 func (m *SiteManager) loadUsers() []SiteUser {
 	var f struct {
@@ -339,20 +276,6 @@ func (m *SiteManager) Users() []SiteUser {
 	return out
 }
 
-// SiteUserInput adds or changes an account.
-type SiteUserInput struct {
-	Kind     string `json:"kind"`
-	Email    string `json:"email"`
-	Username string `json:"username"`
-	Name     string `json:"name"`
-	Role     string `json:"role"`
-	Password string `json:"password"`
-	// PasswordHash moves a password account over from another app with the
-	// password its owner had there: a bcrypt hash, which the site checks as
-	// it is. Only when adding an account, instead of Password.
-	PasswordHash string `json:"password_hash"`
-}
-
 func (m *SiteManager) checkRoleLocked(kind, role string) error {
 	if !slices.Contains(m.settings.Roles, role) {
 		return fmt.Errorf("unknown role %q (roles: %s)", role, strings.Join(m.settings.Roles, ", "))
@@ -368,7 +291,7 @@ func (m *SiteManager) checkRoleLocked(kind, role string) error {
 func (m *SiteManager) AddUser(in SiteUserInput) (SiteUser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	u := SiteUser{ID: "u_" + randomToken(9), Kind: in.Kind, Name: strings.TrimSpace(in.Name), Role: in.Role, Created: time.Now().UTC().Format(time.RFC3339)}
+	u := SiteUser{ID: "u_" + siteRandomToken(9), Kind: in.Kind, Name: strings.TrimSpace(in.Name), Role: in.Role, Created: time.Now().UTC().Format(time.RFC3339)}
 	switch in.Kind {
 	case "google":
 		u.Email = strings.ToLower(strings.TrimSpace(in.Email))
@@ -534,12 +457,6 @@ func checkBroughtHash(h string) (string, error) {
 	return h, nil
 }
 
-func randomToken(n int) string {
-	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return base64.RawURLEncoding.EncodeToString(b)
-}
-
 // ── the site process ────────────────────────────────────────────────────────
 
 // Start runs the site (and the tunnel) if they are turned on, and keeps them
@@ -588,9 +505,9 @@ func (m *SiteManager) reconcile(restart bool) {
 	}
 }
 
-// baseContext is the bridge's context once started; background work such as
+// BaseContext is the bridge's context once started; background work such as
 // a deploy outlives the request that began it.
-func (m *SiteManager) baseContext() context.Context {
+func (m *SiteManager) BaseContext() context.Context {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.ctx != nil {
@@ -906,15 +823,6 @@ func (m *SiteManager) runNpmInstall(ctx context.Context, dir string, prod bool) 
 		return fmt.Errorf("npm %s: %v\n%s", args[0], err, textx.Tail(string(out), 1500))
 	}
 	return nil
-}
-
-// SiteProcStatus is what the dashboard shows about one process.
-type SiteProcStatus struct {
-	State    string   `json:"state"` // stopped, starting, running, crashed
-	Since    string   `json:"since,omitempty"`
-	Error    string   `json:"error,omitempty"`
-	Restarts int      `json:"restarts"`
-	Log      []string `json:"log"`
 }
 
 // siteProc keeps one process running: it restarts it after a crash, waiting

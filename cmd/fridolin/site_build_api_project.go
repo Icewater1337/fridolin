@@ -20,20 +20,20 @@ func (b *Bridge) buildAPI(mux *http.ServeMux) {
 		},
 		View: b.buildChatView,
 		AppendUser: func(id, text string) (int, error) {
-			ch := b.site.chats.get(id)
-			return ch.Thread, b.site.chats.add(id, "user", text)
+			ch := b.site.BuildChat(id)
+			return ch.Thread, b.site.AppendBuildMessage(id, "user", text)
 		},
 		Submit: func(br *brain.Brain, thread int, text string) error {
 			m := brain.Inbound{Inbound: chat.Inbound{JID: buildChatJID(br.ID(), thread), Sender: "dashboard", Brain: br.ID(), Text: text, Source: "site-build", At: time.Now()}}
 			if _, _, _, err := b.brainMgr.Submit(m); err != nil {
-				_ = b.site.chats.add(br.ID(), "assistant", outboundmsg.BuildChatError(err))
+				_ = b.site.AppendBuildMessage(br.ID(), "assistant", outboundmsg.BuildChatError(err))
 				return err
 			}
 			return nil
 		},
-		NewThread: func(id string) error { return b.site.chats.newThread(id) },
+		NewThread: func(id string) error { return b.site.NewBuildThread(id) },
 		StopCurrent: func(br *brain.Brain) bool {
-			ch := b.site.chats.get(br.ID())
+			ch := b.site.BuildChat(br.ID())
 			rt := br.Snapshot()
 			if rt.Running == nil || rt.Running.Chat != buildChatJID(br.ID(), ch.Thread) {
 				return false
@@ -44,7 +44,7 @@ func (b *Bridge) buildAPI(mux *http.ServeMux) {
 	}).Register(mux)
 }
 func (b *Bridge) buildChatView(br *brain.Brain) map[string]any {
-	ch := b.site.chats.get(br.ID())
+	ch := b.site.BuildChat(br.ID())
 	jid := buildChatJID(br.ID(), ch.Thread)
 	rt := br.Snapshot()
 	running := rt.Running != nil && rt.Running.Chat == jid
@@ -58,8 +58,8 @@ func (b *Bridge) buildChatView(br *brain.Brain) map[string]any {
 	if running {
 		resp["activity"] = currentRunLog(br.StreamLogPath(), rt.Running.PID)
 	}
-	if p := b.site.previewOf(br.ID()); p != nil {
-		resp["preview"] = b.site.previewURLs(br.ID(), p)
+	if urls := b.site.PreviewURLs(br.ID()); urls != nil {
+		resp["preview"] = urls
 	}
 	for _, p := range b.site.Settings().Proposals {
 		if p.Brain == br.ID() {
