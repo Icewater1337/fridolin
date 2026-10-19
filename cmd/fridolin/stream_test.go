@@ -9,11 +9,12 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 )
 
 // readTestStream is what a run of br for m makes of the CLI output stream,
 // its activity log and questions included, without a CLI that writes it.
-func readTestStream(br *Brain, m Inbound, stream string) RunResult {
+func readTestStream(br *Brain, m Inbound, stream string) claudecli.Result {
 	return br.readStream(m, strings.NewReader(stream), "── Test run ──", nil)
 }
 
@@ -31,50 +32,50 @@ func TestParseStreamQuestions(t *testing.T) {
 		silent  bool
 		refused bool // the hook did not put the question on its way
 		sent    []string
-		want    RunResult
+		want    claudecli.Result
 		err     bool
 	}{
 		{
 			name:   "an answer of its own after asking",
 			stream: []string{ask, unanswered, `{"type":"assistant","message":{"content":[{"type":"text","text":"I booked Monday."}]}}`, `{"type":"result","result":"I booked Monday."}`},
 			sent:   []string{"❓ Day: Which day?\n1. Monday\n2. Tuesday"},
-			want:   RunResult{Text: "I booked Monday.", Asked: true},
+			want:   claudecli.Result{Text: "I booked Monday.", Asked: true},
 		},
 		{
 			name:   "only the question",
 			stream: []string{ask, unanswered, `{"type":"result","subtype":"success","result":""}`},
 			sent:   []string{"❓ Day: Which day?\n1. Monday\n2. Tuesday"},
-			want:   RunResult{Asked: true},
+			want:   claudecli.Result{Asked: true},
 		},
 		{
 			name:   "a question with nothing to ask",
 			stream: []string{`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{},{"question":" "}]}}]}}`, `{"type":"result","result":"Done."}`},
-			want:   RunResult{Text: "Done."},
+			want:   claudecli.Result{Text: "Done."},
 		},
 		{
 			name:   "an error after asking",
 			stream: []string{ask, `{"type":"result","is_error":true,"result":"quota"}`},
 			sent:   []string{"❓ Day: Which day?\n1. Monday\n2. Tuesday"},
-			want:   RunResult{Asked: true},
+			want:   claudecli.Result{Asked: true},
 			err:    true,
 		},
 		{
 			name:   "no question",
 			stream: []string{`{"type":"result","result":"Hello."}`},
-			want:   RunResult{Text: "Hello."},
+			want:   claudecli.Result{Text: "Hello."},
 		},
 		{
 			name:   "a silent run's question",
 			stream: []string{ask, unanswered, `{"type":"result","result":"I booked Monday."}`},
 			silent: true,
-			want:   RunResult{Text: "I booked Monday."},
+			want:   claudecli.Result{Text: "I booked Monday."},
 		},
 		{
 			// One bridge.db refused: it asked nobody.
 			name:    "a question the chat did not get",
 			stream:  []string{ask, unanswered, `{"type":"result","result":"I booked Monday."}`},
 			refused: true,
-			want:    RunResult{Text: "I booked Monday."},
+			want:    claudecli.Result{Text: "I booked Monday."},
 		},
 		{
 			name:    "only a question the chat did not get",

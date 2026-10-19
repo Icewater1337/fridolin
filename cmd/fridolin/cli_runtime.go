@@ -1,15 +1,19 @@
 package main
 
-import "path/filepath"
+import (
+	"path/filepath"
+
+	"github.com/Icewater1337/fridolin/internal/claudecli"
+)
 
 // cliOptionsOf projects only argument policy; paths are resolved before
 // they reach the provider package.
-func cliOptionsOf(s *brainSettings) cliOptions {
-	return cliOptions{InheritUser: s.inheritUser, Dangerously: s.dangerously,
+func cliOptionsOf(s *brainSettings) claudecli.Options {
+	return claudecli.Options{InheritUser: s.inheritUser, Dangerously: s.dangerously,
 		Model: s.model, Effort: s.effort, DisallowedTools: s.disallowedTools}
 }
 func claudeArgs(s *brainSettings, mcpConfig, settings string) []string {
-	return buildClaudeArgs(cliOptionsOf(s), mcpConfig, settings)
+	return claudecli.Args(cliOptionsOf(s), mcpConfig, settings)
 }
 func codexArgs(s *brainSettings, dir string, external bool) []string {
 	o := cliOptionsOf(s)
@@ -19,7 +23,7 @@ func codexArgs(s *brainSettings, dir string, external bool) []string {
 			o.MediaInbox = mediaInboxAt(s.mediaDir).Path(s.manifest.ID)
 		}
 	}
-	return buildCodexArgs(o, dir, external)
+	return claudecli.CodexArgs(o, dir, external)
 }
 
 // codexLoginHint points at this brain's isolated login, never the user's

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
 )
 
@@ -19,8 +20,8 @@ func TestConfigDefaultsMatchRuntimeContracts(t *testing.T) {
 	if cfg.AgentProvider != "claude" || cfg.ClaudePath != "claude" || cfg.CodexPath != "codex" {
 		t.Fatalf("provider defaults = %q, %q, %q", cfg.AgentProvider, cfg.ClaudePath, cfg.CodexPath)
 	}
-	if cfg.CodexModel != defaultCodexModel {
-		t.Fatalf("config model %q differs from provider fallback %q", cfg.CodexModel, defaultCodexModel)
+	if cfg.CodexModel != claudecli.DefaultCodexModel {
+		t.Fatalf("config model %q differs from provider fallback %q", cfg.CodexModel, claudecli.DefaultCodexModel)
 	}
 	if cfg.MaxChunkSize != defaultChunkSize {
 		t.Fatalf("config chunk default %d differs from chunker %d", cfg.MaxChunkSize, defaultChunkSize)

@@ -28,9 +28,11 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/platform"
+
 	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
@@ -147,7 +149,7 @@ type BrainHooks struct {
 	Question func(br *Brain, jid, text string) bool
 	// Deliver receives every finished run. It records the answer in the
 	// brain's history once it is sent.
-	Deliver func(br *Brain, m Inbound, res RunResult)
+	Deliver func(br *Brain, m Inbound, res claudecli.Result)
 	// Waiting gets, as the bridge stops, what br had waiting, which never
 	// ran, before its run in flight gets its grace (see shutdown). Nil
 	// drops it.
@@ -617,11 +619,11 @@ func (br *Brain) stopObservation() {
 // so that the run is finished and recorded like any failed one and the
 // worker goes on with the next message. Unrecovered, the panic would end
 // the whole bridge and leave every brain's running claude behind.
-func (br *Brain) invokeGuarded(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) (res RunResult) {
+func (br *Brain) invokeGuarded(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) (res claudecli.Result) {
 	defer func() {
 		if p := recover(); p != nil {
 			log.Printf("brain %s: the run for %s panicked: %v\n%s", br.id, m.JID, p, debug.Stack())
-			res = RunResult{Err: errRunPanicked}
+			res = claudecli.Result{Err: claudecli.ErrPanicked}
 		}
 	}()
 	return br.invoke(run, ctx, s, m)
@@ -630,7 +632,7 @@ func (br *Brain) invokeGuarded(run *brainRun, ctx context.Context, s *brainSetti
 // deliverGuarded hands a finished run to the bridge and then to whoever
 // waits for the message, each with a panic logged rather than ending the
 // worker, and the one waiting told even when the delivery panicked.
-func (br *Brain) deliverGuarded(m Inbound, res RunResult) {
+func (br *Brain) deliverGuarded(m Inbound, res claudecli.Result) {
 	guard := func(what string, fn func()) {
 		defer func() {
 			if p := recover(); p != nil {
@@ -697,10 +699,10 @@ func (br *Brain) waitIdle(ctx context.Context, max time.Duration) bool {
 	}
 }
 
-func (br *Brain) recordLast(m Inbound, res RunResult) {
+func (br *Brain) recordLast(m Inbound, res claudecli.Result) {
 	info := &RunInfo{Chat: m.JID, Finished: time.Now(), Seconds: res.Duration.Seconds(), Outcome: outcomeOK}
 	switch {
-	case errors.Is(res.Err, errBrainInterrupted):
+	case errors.Is(res.Err, claudecli.ErrInterrupted):
 		info.Outcome = outcomeInterrupted
 	case res.Err != nil:
 		info.Outcome, info.Error = outcomeError, res.Err.Error()
@@ -1281,7 +1283,7 @@ func jsonObject(data []byte) (map[string]json.RawMessage, error) {
 }
 
 // invoke runs the selected CLI once for m.
-func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) RunResult {
+func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m Inbound) claudecli.Result {
 	prompt := br.buildPrompt(s, m)
 
 	mcpConfig, settings := "", ""
@@ -1291,8 +1293,8 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	}
 	args := claudeArgs(s, mcpConfig, settings)
 	if s.provider == "codex" {
-		if err := validateCodexTools(s.disallowedTools); err != nil {
-			return RunResult{Err: err}
+		if err := claudecli.ValidateCodexTools(s.disallowedTools); err != nil {
+			return claudecli.Result{Err: err}
 		}
 		args = codexArgs(s, br.workDir, br.sandbox != nil && br.sandbox.Enabled())
 		prompt = strings.ReplaceAll(prompt, prompttext.AskUserQuestionNote, "If you need clarification, ask in your final reply and end the turn. The answer arrives as a new message.")
@@ -1301,7 +1303,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	if s.provider == "codex" && br.hooks != nil && br.hooks.CodexSetup != nil {
 		extra, env, instructions, err := br.hooks.CodexSetup(br.id)
 		if err != nil {
-			return RunResult{Err: err}
+			return claudecli.Result{Err: err}
 		}
 		args = withArgsBeforePrint(args, extra)
 		providerEnv = env
@@ -1361,7 +1363,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 		}
 		if err != nil {
 			log.Printf("brain %s: sandbox unavailable, refusing to run: %v", br.id, err)
-			return RunResult{Err: errSandboxUnavailable}
+			return claudecli.Result{Err: errSandboxUnavailable}
 		}
 		extraEnv = append(extraEnv, stateEnv...)
 		if s.provider == "codex" {
@@ -1383,11 +1385,11 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	// Only once the sandbox is settled: a refused run starts no process.
 	br.ensureViewer(s)
 
-	return superviseCLI(ctx, cliInvocation{
-		Run:      claudeRun{WaitDelay: runWaitDelay, Binary: binary, Args: finalArgs, Dir: br.workDir, Env: env, Prompt: prompt},
+	return claudecli.Run(ctx, claudecli.Invocation{
+		Run:      claudecli.Spawn{WaitDelay: runWaitDelay, Binary: binary, Args: finalArgs, Dir: br.workDir, Env: env, Prompt: prompt},
 		Provider: s.provider, ExitGrace: postResultGrace, NoticeAfter: workingNoticeAfter,
-		DeadlineError: runTimedOut(s.runTimeout),
-	}, cliCallbacks{
+		DeadlineError: claudecli.TimedOut(s.runTimeout),
+	}, claudecli.Callbacks{
 		Start: run.startProcess,
 		Started: func(pid int) func() {
 			br.setRunPID(run, pid)
@@ -1397,7 +1399,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 			return nil
 		},
 		Reaped: func() { br.setRunPID(run, 0) },
-		OpenStream: func(pid int, result func(RunResult)) (StreamSink, func()) {
+		OpenStream: func(pid int, result func(claudecli.Result)) (claudecli.StreamSink, func()) {
 			return br.openRunStream(m, runHeading(m, s, pid), result)
 		},
 		ReadPanic: func(p any, stack []byte) {
@@ -1409,7 +1411,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 			}
 		},
 		GraceExpired: func() {
-			log.Printf("brain %s: %s's output was still open %v after its result; stopping what is left of the run", br.id, agentName(s.provider), postResultGrace)
+			log.Printf("brain %s: %s's output was still open %v after its result; stopping what is left of the run", br.id, claudecli.AgentName(s.provider), postResultGrace)
 		},
 		SlowResponse: func(elapsed time.Duration) {
 			log.Printf("brain %s: response took %v for %s (slow response)", br.id, elapsed, m.JID)
@@ -1617,7 +1619,7 @@ type runSink struct {
 	br       *Brain
 	m        Inbound
 	log      *os.File // nil when it could not be opened
-	onResult func(RunResult)
+	onResult func(claudecli.Result)
 }
 
 func (s *runSink) Log(line string) {
@@ -1633,7 +1635,7 @@ func (s *runSink) Question(text string) bool {
 	return !s.m.Silent && h != nil && h.Question != nil && h.Question(s.br, s.m.JID, questionPrefix+text)
 }
 
-func (s *runSink) Result(res RunResult) {
+func (s *runSink) Result(res claudecli.Result) {
 	if s.onResult != nil {
 		s.onResult(res)
 	}
@@ -1642,17 +1644,17 @@ func (s *runSink) Result(res RunResult) {
 // readStream is parseStream for m's run, with heading as the run's first
 // line in the activity log, calling onResult, when set, as soon as the
 // result is in, while the stream may still go on.
-func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResult func(RunResult)) RunResult {
+func (br *Brain) readStream(m Inbound, reader io.Reader, heading string, onResult func(claudecli.Result)) claudecli.Result {
 	return br.readAgentStream(m, reader, heading, onResult, "claude")
 }
 
-func (br *Brain) readAgentStream(m Inbound, reader io.Reader, heading string, onResult func(RunResult), provider string) RunResult {
+func (br *Brain) readAgentStream(m Inbound, reader io.Reader, heading string, onResult func(claudecli.Result), provider string) claudecli.Result {
 	sink, closeStream := br.openRunStream(m, heading, onResult)
 	defer closeStream()
-	return parseAgentStream(reader, sink, provider)
+	return claudecli.ParseProvider(reader, sink, provider)
 }
 
-func (br *Brain) openRunStream(m Inbound, heading string, onResult func(RunResult)) (StreamSink, func()) {
+func (br *Brain) openRunStream(m Inbound, heading string, onResult func(claudecli.Result)) (claudecli.StreamSink, func()) {
 	br.rotateStreamLog()
 	// Through the folder, like the history: a brain can swap the log for a
 	// symlink to a file its sandbox denies it writing.
@@ -1697,13 +1699,13 @@ func (br *Brain) setRunPID(run *brainRun, pid int) {
 
 // startProcess publishes a started process before a force-stop can return.
 // Ordinary stops still use only context cancellation through os/exec.
-func (run *brainRun) startProcess(ctx context.Context, spec claudeRun) (*claudeProcess, error) {
+func (run *brainRun) startProcess(ctx context.Context, spec claudecli.Spawn) (*claudecli.Process, error) {
 	run.processMu.Lock()
 	defer run.processMu.Unlock()
 	if run.forceStopped {
 		return nil, context.Canceled
 	}
-	proc, err := startClaude(ctx, spec)
+	proc, err := claudecli.Start(ctx, spec)
 	if err == nil {
 		run.process = proc
 	}

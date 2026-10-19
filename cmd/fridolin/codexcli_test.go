@@ -9,11 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
-
-	"github.com/Icewater1337/fridolin/internal/manifest"
-
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
 func TestCodexDefaultsAndValidation(t *testing.T) {
@@ -33,7 +32,7 @@ func TestCodexDefaultsAndValidation(t *testing.T) {
 	sp := manifest.Spec{Manifest: manifest.Manifest{ID: "a", Model: "opus", Effort: "max"}}
 	cfg.AgentProvider = "codex"
 	s := settingsFor(cfg, sp)
-	if s.model != defaultCodexModel || s.effort != "high" {
+	if s.model != claudecli.DefaultCodexModel || s.effort != "high" {
 		t.Fatalf("Claude overrides reached Codex: %+v", s)
 	}
 	cfg.AgentProvider = "claude"
@@ -48,7 +47,7 @@ func TestCodexArgsPermissions(t *testing.T) {
 		for _, tools := range []bool{false, true} {
 			s := &brainSettings{dangerously: tools, dataDir: "/data", mediaDir: "/media", manifest: manifest.Manifest{ID: "a"}}
 			args := codexArgs(s, "/brain", external)
-			if args[len(args)-1] != "-" || !slices.Contains(args, defaultCodexModel) || !slices.Contains(args, `model_reasoning_effort="high"`) {
+			if args[len(args)-1] != "-" || !slices.Contains(args, claudecli.DefaultCodexModel) || !slices.Contains(args, `model_reasoning_effort="high"`) {
 				t.Fatalf("missing stdin/defaults: %q", args)
 			}
 			if slices.Contains(args, "--dangerously-bypass-approvals-and-sandbox") != (tools && external) {
@@ -99,7 +98,7 @@ func TestCodexStream(t *testing.T) {
 
 func TestCodexWebToolRestrictions(t *testing.T) {
 	for _, blocked := range [][]string{nil, {"WebFetch"}, {"WebSearch"}, {"WebFetch", "WebSearch"}} {
-		if err := validateCodexTools(blocked); err != nil {
+		if err := claudecli.ValidateCodexTools(blocked); err != nil {
 			t.Fatal(err)
 		}
 		args := codexArgs(&brainSettings{disallowedTools: blocked}, "/brain", false)
@@ -108,7 +107,7 @@ func TestCodexWebToolRestrictions(t *testing.T) {
 		}
 	}
 	for _, blocked := range [][]string{{"Bash"}, {"WebFetch", "Bash(rm *)"}, {"WebSearch(domain:example.com)"}} {
-		if err := validateCodexTools(blocked); err == nil {
+		if err := claudecli.ValidateCodexTools(blocked); err == nil {
 			t.Fatalf("accepted unsupported restrictions: %v", blocked)
 		}
 	}
@@ -218,7 +217,7 @@ func mustJSON(t *testing.T, v any) []byte {
 
 func TestCodexChatErrorsNameTheRightProvider(t *testing.T) {
 	for _, msg := range []string{"Not logged in", "401 Unauthorized", "quota exceeded", "something failed"} {
-		text := chatErrorText(&cliError{Message: msg, Provider: "codex"}, true)
+		text := chatErrorText(&claudecli.Error{Message: msg, Provider: "codex"}, true)
 		if !strings.Contains(text, "Codex") || strings.Contains(text, "Claude") {
 			t.Fatalf("%q -> %q", msg, text)
 		}

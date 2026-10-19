@@ -22,13 +22,12 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
-	"github.com/Icewater1337/fridolin/internal/registry"
-
-	"github.com/Icewater1337/fridolin/internal/manifest"
-
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/registry"
 )
 
 // TestMain lets the test binary stand in for the Claude CLI: with
@@ -327,7 +326,7 @@ func fakeClaude() {
 	args := os.Args[1:]
 	if len(args) == 1 && args[0] == "--version" {
 		// What the dashboard and `fridolin check` ask for.
-		fmt.Println(testedClaudeVersion + " (Claude Code)")
+		fmt.Println(claudecli.TestedClaudeVersion + " (Claude Code)")
 		return
 	}
 	// Like the CLI, it reads the prompt from stdin when -p comes last.

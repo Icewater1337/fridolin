@@ -77,6 +77,12 @@ behaviour unless its title says so. The steps so far:
   and history-window limits; `chat` owns shared phone/identity normalization.
   The command supplies message content and dashboard-chat context.
 
+- **R8, provider slice**: `claudecli` owns Claude/Codex argument policies,
+  stream parsers, version probing and process supervision. Callers supply
+  resolved paths/environment and runtime callbacks. The runtime keeps the
+  start/force-stop barrier; the process owner acknowledges group cancellation
+  independently of output hooks and delivery.
+
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
 that is not yet extracted is marked *(to come, Rn)* with the step that

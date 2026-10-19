@@ -19,6 +19,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 )
 
 // setsidChildren has the fake CLI start a grandchild that leaves the run's
@@ -134,7 +135,7 @@ func TestStopWhileOutputIsHeld(t *testing.T) {
 				t.Errorf("the stop took %v", el)
 			}
 			waitFor(t, 5*time.Second, "the stopped run", func() bool { return d.count() == 1 })
-			if res := d.all()[0].res; !errors.Is(res.Err, errBrainInterrupted) {
+			if res := d.all()[0].res; !errors.Is(res.Err, claudecli.ErrInterrupted) {
 				t.Errorf("result = %+v, want interrupted", res)
 			}
 		})
@@ -216,7 +217,7 @@ func TestStopBeforeTheCLIStartsIsAnInterruption(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, 5*time.Second, "the run", func() bool { return d.count() == 1 })
-	if res := d.all()[0].res; !errors.Is(res.Err, errBrainInterrupted) {
+	if res := d.all()[0].res; !errors.Is(res.Err, claudecli.ErrInterrupted) {
 		t.Errorf("result = %+v, want interrupted", res)
 	}
 	if last := br.Snapshot().Last; last == nil || last.Outcome != outcomeInterrupted || last.Error != "" {
@@ -283,10 +284,10 @@ func TestSiteSearchKeepsOnlyTheEndOfStderr(t *testing.T) {
 // output is still open. Keep both answers and the CLI's own error then.
 func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 	cases := []struct {
-		name     string
-		cliError string
-		timeout  bool
-		empty    bool
+		name      string
+		errorText string
+		timeout   bool
+		empty     bool
 	}{
 		{"stop after answer", "", false, false},
 		{"stop after empty result", "", false, true},
@@ -311,8 +312,8 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 					switch {
 					case tc.empty:
 						output = `{"type":"turn.completed"}`
-					case tc.cliError != "":
-						output = `{"type":"turn.failed","error":{"message":` + strconv.Quote(tc.cliError) + `}}`
+					case tc.errorText != "":
+						output = `{"type":"turn.failed","error":{"message":` + strconv.Quote(tc.errorText) + `}}`
 					default:
 						output = `{"type":"item.completed","item":{"type":"agent_message","text":` + strconv.Quote(answer) + `}}` + "\n" + `{"type":"turn.completed"}`
 					}
@@ -320,8 +321,8 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 					switch {
 					case tc.empty:
 						output = `{"type":"result","result":""}`
-					case tc.cliError != "":
-						output = `{"type":"result","is_error":true,"result":` + strconv.Quote(tc.cliError) + `}`
+					case tc.errorText != "":
+						output = `{"type":"result","is_error":true,"result":` + strconv.Quote(tc.errorText) + `}`
 					default:
 						output = `{"type":"result","result":` + strconv.Quote(answer) + `}`
 					}
@@ -335,7 +336,7 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 				defer cancel()
 				m := dm("answer before stopping")
 				run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m}
-				result := make(chan RunResult, 1)
+				result := make(chan claudecli.Result, 1)
 				go func() { result <- br.invokeGuarded(run, ctx, &settings, m) }()
 				waitFor(t, 5*time.Second, "the recorded result", func() bool {
 					data, _ := os.ReadFile(filepath.Join(br.workDir, streamLogName))
@@ -347,17 +348,17 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 				select {
 				case res := <-result:
 					if tc.empty {
-						if !errors.Is(res.Err, errNoResult) {
+						if !errors.Is(res.Err, claudecli.ErrNoResult) {
 							t.Errorf("result = %+v, want errNoResult", res)
 						}
-					} else if tc.cliError == "" {
+					} else if tc.errorText == "" {
 						if res.Err != nil || res.Text != answer {
 							t.Errorf("result = %+v, want the recorded answer", res)
 						}
 					} else {
-						var cliErr *cliError
-						if !errors.As(res.Err, &cliErr) || cliErr.Message != tc.cliError || cliErr.Provider != provider {
-							t.Errorf("result = %+v, want CLI error %q", res, tc.cliError)
+						var cliErr *claudecli.Error
+						if !errors.As(res.Err, &cliErr) || cliErr.Message != tc.errorText || cliErr.Provider != provider {
+							t.Errorf("result = %+v, want CLI error %q", res, tc.errorText)
 						}
 					}
 				case <-time.After(10 * time.Second):
@@ -435,7 +436,7 @@ func TestKillRunsPreventsALateProcess(t *testing.T) {
 	// An independent context deliberately tests the startup barrier,
 	// rather than relying on os/exec noticing the cancelled run context.
 	marker := filepath.Join(t.TempDir(), "started")
-	proc, err := run.startProcess(context.Background(), claudeRun{WaitDelay: runWaitDelay, Binary: "/bin/sh", Args: []string{"-c", `echo started > "$1"`, "sh", marker}})
+	proc, err := run.startProcess(context.Background(), claudecli.Spawn{WaitDelay: runWaitDelay, Binary: "/bin/sh", Args: []string{"-c", `echo started > "$1"`, "sh", marker}})
 	if proc != nil {
 		_ = proc.Wait()
 	}
@@ -457,7 +458,7 @@ func TestKillRunsAfterCLIExit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &brainRun{cancel: cancel, done: make(chan struct{})}
-	proc, err := run.startProcess(ctx, claudeRun{WaitDelay: runWaitDelay, Binary: "/bin/sh", Args: []string{"-c", "exit 0"}})
+	proc, err := run.startProcess(ctx, claudecli.Spawn{WaitDelay: runWaitDelay, Binary: "/bin/sh", Args: []string{"-c", "exit 0"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +505,7 @@ func TestKillRunsFreezesQueuedAndNewRuns(t *testing.T) {
 			var once sync.Once
 			releaseDelivery := sync.OnceFunc(func() { close(release) })
 			defer releaseDelivery()
-			mgr.SetHooks(BrainHooks{Deliver: func(br *Brain, m Inbound, res RunResult) {
+			mgr.SetHooks(BrainHooks{Deliver: func(br *Brain, m Inbound, res claudecli.Result) {
 				once.Do(func() { close(delivering) })
 				<-release
 				d.add(br, m, res)
@@ -597,7 +598,7 @@ func TestReloadTracksRetirementUntilDeliveryFinishes(t *testing.T) {
 	delivering, release := make(chan struct{}), make(chan struct{})
 	releaseDelivery := sync.OnceFunc(func() { close(release) })
 	defer releaseDelivery()
-	mgr.SetHooks(BrainHooks{Deliver: func(*Brain, Inbound, RunResult) {
+	mgr.SetHooks(BrainHooks{Deliver: func(*Brain, Inbound, claudecli.Result) {
 		close(delivering)
 		<-release
 	}})

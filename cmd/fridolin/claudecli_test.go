@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 )
 
 // versionCLI writes a stand-in for the Claude CLI that answers --version
@@ -65,7 +67,7 @@ func TestClaudeInfoNoticesANewRelease(t *testing.T) {
 		if st := claudeInfo(cli, nil); st.Found {
 			t.Fatalf("found before it exists: %+v", st)
 		}
-		versionCLI(t, cli, testedClaudeVersion+" (Claude Code)")
+		versionCLI(t, cli, claudecli.TestedClaudeVersion+" (Claude Code)")
 		if st := claudeInfo(cli, nil); !st.Found {
 			t.Errorf("still not found once installed: %+v", st)
 		}
@@ -78,8 +80,8 @@ func TestCheckShowsTheClaudeVersion(t *testing.T) {
 		missing       bool
 		want          string
 	}{
-		{"tested release", testedClaudeVersion + " (Claude Code)", false, "(" + testedClaudeVersion + " (Claude Code))"},
-		{"older release", "2.0.1 (Claude Code)", false, "older than " + testedClaudeVersion},
+		{"tested release", claudecli.TestedClaudeVersion + " (Claude Code)", false, "(" + claudecli.TestedClaudeVersion + " (Claude Code))"},
+		{"older release", "2.0.1 (Claude Code)", false, "older than " + claudecli.TestedClaudeVersion},
 		{"not installed", "", true, "not found, so brains cannot run"},
 	}
 	for _, c := range cases {
@@ -112,7 +114,7 @@ func TestStatusWarnsAboutAnOldClaude(t *testing.T) {
 		warn    bool
 	}{
 		{"2.0.1 (Claude Code)", true},
-		{testedClaudeVersion + " (Claude Code)", false},
+		{claudecli.TestedClaudeVersion + " (Claude Code)", false},
 	} {
 		t.Run(c.version, func(t *testing.T) {
 			cli := versionCLI(t, "", c.version)
@@ -124,7 +126,7 @@ func TestStatusWarnsAboutAnOldClaude(t *testing.T) {
 			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || w.Code != 200 {
 				t.Fatalf("status %d %v: %s", w.Code, err, w.Body.String())
 			}
-			got := strings.Contains(strings.Join(resp.Warnings, "\n"), "older than "+testedClaudeVersion)
+			got := strings.Contains(strings.Join(resp.Warnings, "\n"), "older than "+claudecli.TestedClaudeVersion)
 			if got != c.warn {
 				t.Errorf("warnings %q, want the old-CLI warning: %v", resp.Warnings, c.warn)
 			}
@@ -138,8 +140,8 @@ func TestStartupLogNamesTheClaudeCLI(t *testing.T) {
 		missing       bool
 		want          []string
 	}{
-		{"tested release", testedClaudeVersion + " (Claude Code)", false, []string{"Claude Code CLI: ", testedClaudeVersion}},
-		{"older release", "2.0.1 (Claude Code)", false, []string{"Claude Code CLI: ", "WARNING: ", "older than " + testedClaudeVersion}},
+		{"tested release", claudecli.TestedClaudeVersion + " (Claude Code)", false, []string{"Claude Code CLI: ", claudecli.TestedClaudeVersion}},
+		{"older release", "2.0.1 (Claude Code)", false, []string{"Claude Code CLI: ", "WARNING: ", "older than " + claudecli.TestedClaudeVersion}},
 		{"not installed", "", true, []string{"WARNING: the Claude Code CLI", "was not found"}},
 	}
 	for _, c := range cases {

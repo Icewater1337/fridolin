@@ -1,5 +1,25 @@
 package main
 
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+
+	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/textx"
+)
+
 // What the site hands to the bridge (docs/SITE.md, "Handing files to a
 // brain" and "Searching a brain's folder").
 //
@@ -20,26 +40,6 @@ package main
 // the site's to write. So the bridge reaches it only through an os.Root,
 // which refuses a symlink that leads out of the folder, trusts no name, and
 // creates what it writes with O_EXCL.
-
-import (
-	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"log"
-	"os"
-	"path"
-	"path/filepath"
-	"regexp"
-	"slices"
-	"strings"
-	"time"
-
-	"github.com/Icewater1337/fridolin/internal/config"
-
-	"github.com/Icewater1337/fridolin/internal/textx"
-)
 
 // spoolRequest is a module's request.json (ctx.ingest).
 type spoolRequest struct {
@@ -408,7 +408,7 @@ func (b *Bridge) runBrainSearch(ctx context.Context, brainID, prompt string, out
 	cfg := b.cfgs.Get()
 	// Only the brain folder's own setup, as for a brain's runs, and tools
 	// that only read.
-	args := claudeArgList(true, excludeInstructionsAbove(br.Dir()), "--tools", "Read,Grep,Glob")
+	args := claudecli.ArgList(true, excludeInstructionsAbove(br.Dir()), "--tools", "Read,Grep,Glob")
 	bin := cfg.ClaudePath
 	env := childEnv(claudeChild, cfg.ChildEnvPassthrough)
 	if sp := b.brainMgr.profiler; sp != nil && sp.Enabled() {
@@ -425,7 +425,7 @@ func (b *Bridge) runBrainSearch(ctx context.Context, brainID, prompt string, out
 		bin, args = sbBin, sbArgs
 		env = append(append(env, state...), "DISABLE_AUTOUPDATER=1")
 	}
-	proc, err := startClaude(ctx, claudeRun{WaitDelay: runWaitDelay, Binary: bin, Args: args, Dir: br.Dir(), Env: env, Prompt: prompt, Stdout: out})
+	proc, err := claudecli.Start(ctx, claudecli.Spawn{WaitDelay: runWaitDelay, Binary: bin, Args: args, Dir: br.Dir(), Env: env, Prompt: prompt, Stdout: out})
 	if err == nil {
 		err = proc.Wait()
 	}

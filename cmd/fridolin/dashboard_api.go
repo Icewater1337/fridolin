@@ -25,24 +25,19 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/Icewater1337/fridolin/internal/config"
-
-	"github.com/Icewater1337/fridolin/internal/registry"
-
-	"github.com/Icewater1337/fridolin/internal/route"
-
-	"github.com/Icewater1337/fridolin/internal/manifest"
-
-	"github.com/Icewater1337/fridolin/internal/httpapi"
-
-	"rsc.io/qr"
-
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/registry"
+	"github.com/Icewater1337/fridolin/internal/route"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/internal/version"
+	"rsc.io/qr"
 )
 
 func (b *Bridge) apiMux() http.Handler {
@@ -163,24 +158,24 @@ func etagListed(header, etag string) bool {
 // ── status ───────────────────────────────────────────────────────────────
 
 type statusResponse struct {
-	Version       string         `json:"version"`
-	StartedAt     time.Time      `json:"started_at"`
-	UptimeS       int64          `json:"uptime_s"`
-	ConfigPath    string         `json:"config_path"`
-	DataDir       string         `json:"data_dir"`
-	DevMode       bool           `json:"dev_mode"`
-	Platform      string         `json:"platform"`
-	WhatsApp      waStatus       `json:"whatsapp"`
-	Claude        claudeStatus   `json:"claude"`
-	AgentProvider string         `json:"agent_provider"`
-	Codex         *claudeStatus  `json:"codex,omitempty"`
-	Sandbox       sandboxStatus  `json:"sandbox"`
-	Brains        []BrainRuntime `json:"brains"`
-	Issues        []BrainIssue   `json:"issues"`
-	Warnings      []string       `json:"warnings"`
-	Backup        backupSummary  `json:"backup"`
-	Ingest        bool           `json:"ingest"`
-	Pending       int            `json:"debouncing"`
+	Version       string            `json:"version"`
+	StartedAt     time.Time         `json:"started_at"`
+	UptimeS       int64             `json:"uptime_s"`
+	ConfigPath    string            `json:"config_path"`
+	DataDir       string            `json:"data_dir"`
+	DevMode       bool              `json:"dev_mode"`
+	Platform      string            `json:"platform"`
+	WhatsApp      waStatus          `json:"whatsapp"`
+	Claude        claudecli.Status  `json:"claude"`
+	AgentProvider string            `json:"agent_provider"`
+	Codex         *claudecli.Status `json:"codex,omitempty"`
+	Sandbox       sandboxStatus     `json:"sandbox"`
+	Brains        []BrainRuntime    `json:"brains"`
+	Issues        []BrainIssue      `json:"issues"`
+	Warnings      []string          `json:"warnings"`
+	Backup        backupSummary     `json:"backup"`
+	Ingest        bool              `json:"ingest"`
+	Pending       int               `json:"debouncing"`
 	// Settings saved since the start that only apply after a restart. The
 	// dashboard shows its restart banner from this, in every tab.
 	RestartRequired []string `json:"restart_required"`
@@ -241,7 +236,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		resp.Warnings = append(resp.Warnings, "allowed_numbers is empty, so anyone who can message this WhatsApp account can use the assistant. Add your number under Chats → Allowed numbers.")
 	}
 	resp.Warnings = append(resp.Warnings, b.tokenWarnings(cfg, runtime.GOOS)...)
-	if w := claudeVersionWarning(resp.Claude); cfg.AgentProvider != "codex" && w != "" {
+	if w := claudecli.VersionWarning(resp.Claude); cfg.AgentProvider != "codex" && w != "" {
 		resp.Warnings = append(resp.Warnings, w)
 	}
 	if cfg.TokenlessSend() {

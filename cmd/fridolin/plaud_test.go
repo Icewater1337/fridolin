@@ -22,6 +22,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 )
 
 const (
@@ -458,7 +459,7 @@ func (r *plaudRecorder) count() int {
 // take it (its queue is full) leaves it waiting, with the reason on the
 // card. After a restart, one whose run never ended is handed over again.
 func TestPlaudRecordingIsSeenOnlyOnceItsRunEnds(t *testing.T) {
-	stop := []error{errBrainInterrupted, errBrainDropped}
+	stop := []error{claudecli.ErrInterrupted, errBrainDropped}
 	for _, c := range []struct {
 		name    string
 		ends    []error // the runs' outcomes, one per check
@@ -573,7 +574,7 @@ func TestPlaudRecordingIsSeenOnlyOnceItsRunEnds(t *testing.T) {
 		}
 		// Fridolin stops, which stops the run.
 		tb.plaud.Stop()
-		rec.end(plaudNew, errBrainInterrupted)
+		rec.end(plaudNew, claudecli.ErrInterrupted)
 		restarted := plaudAfterRestart(tb)
 		restarted.submit = rec.submit
 		if err := restarted.Poll(context.Background()); err != nil || rec.count() != 2 {
@@ -646,7 +647,7 @@ func TestPlaudHandOffThroughTheBridge(t *testing.T) {
 	}
 	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: "whatsapp"}})
 	waitFor(t, 10*time.Second, "both to end", func() bool { mu.Lock(); defer mu.Unlock(); return len(ended) == 2 })
-	if !errors.Is(ended["first"], errBrainInterrupted) || !errors.Is(ended["second"], errBrainDropped) {
+	if !errors.Is(ended["first"], claudecli.ErrInterrupted) || !errors.Is(ended["second"], errBrainDropped) {
 		t.Errorf("ended = %v, want the first stopped and the second dropped", ended)
 	}
 	for _, m := range tb.dev.Outbox() {

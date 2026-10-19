@@ -21,6 +21,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/logx"
@@ -35,10 +36,10 @@ type deliveries struct {
 type delivered struct {
 	brain string
 	msg   Inbound
-	res   RunResult
+	res   claudecli.Result
 }
 
-func (d *deliveries) add(br *Brain, m Inbound, res RunResult) {
+func (d *deliveries) add(br *Brain, m Inbound, res claudecli.Result) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.runs = append(d.runs, delivered{br.ID(), m, res})
@@ -287,7 +288,7 @@ func TestInterruptModeOnlyReplacesTheSendersOwnRun(t *testing.T) {
 				}
 				waitFor(t, 10*time.Second, "two deliveries", func() bool { return d.count() == 2 })
 				runs := d.all()
-				if !errors.Is(runs[0].res.Err, errBrainInterrupted) || runs[1].res.Err != nil || !strings.HasSuffix(runs[1].res.Text, "says: "+c.next.Text) {
+				if !errors.Is(runs[0].res.Err, claudecli.ErrInterrupted) || runs[1].res.Err != nil || !strings.HasSuffix(runs[1].res.Text, "says: "+c.next.Text) {
 					t.Errorf("runs = %+v, want the first interrupted and the second answered", runs)
 				}
 				return
@@ -355,7 +356,7 @@ func TestInterruptModeKeepsOthersWaiting(t *testing.T) {
 
 			waitFor(t, 10*time.Second, "three deliveries", func() bool { return d.count() == 3 })
 			runs := d.all()
-			if !errors.Is(runs[0].res.Err, errBrainInterrupted) {
+			if !errors.Is(runs[0].res.Err, claudecli.ErrInterrupted) {
 				t.Errorf("%s: %+v, want it interrupted", c.running.Text, runs[0].res)
 			}
 			for i, want := range c.want {
@@ -567,7 +568,7 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 			for _, r := range d.all() {
 				switch r.msg.Text {
 				case "first":
-					if !errors.Is(r.res.Err, errBrainInterrupted) {
+					if !errors.Is(r.res.Err, claudecli.ErrInterrupted) {
 						t.Errorf("first: %q %v, want its run stopped", r.res.Text, r.res.Err)
 					}
 				case "second":
@@ -1418,7 +1419,7 @@ func TestPanicsInARunAreContained(t *testing.T) {
 			}}
 		}},
 		{"while it is delivered", nil, 0, false, func(d *deliveries, first *sync.Once) BrainHooks {
-			return BrainHooks{Deliver: func(br *Brain, m Inbound, res RunResult) {
+			return BrainHooks{Deliver: func(br *Brain, m Inbound, res claudecli.Result) {
 				d.add(br, m, res)
 				first.Do(func() { panic("boom in Deliver") })
 			}}
@@ -1463,7 +1464,7 @@ func TestPanicsInARunAreContained(t *testing.T) {
 			if !strings.Contains(strings.Join(logs(), "\n"), "panicked: boom") {
 				t.Error("the panic was not logged")
 			}
-			if tc.panicked && (len(runs) == 0 || !errors.Is(runs[0].res.Err, errRunPanicked)) {
+			if tc.panicked && (len(runs) == 0 || !errors.Is(runs[0].res.Err, claudecli.ErrPanicked)) {
 				t.Errorf("runs = %+v, want the first to end with errRunPanicked", runs)
 			}
 			// Each run's process is gone, reaped too: a zombie still
@@ -1523,7 +1524,7 @@ func TestRunTimeoutStopsAStuckRun(t *testing.T) {
 			}
 			waitFor(t, 10*time.Second, "the run to be stopped", func() bool { return d.count() == 1 })
 			res := d.all()[0].res
-			if !errors.Is(res.Err, errRunTimedOut) || !strings.Contains(res.Err.Error(), "run_timeout_minutes") {
+			if !errors.Is(res.Err, claudecli.ErrTimedOut) || !strings.Contains(res.Err.Error(), "run_timeout_minutes") {
 				t.Errorf("result = %+v, want errRunTimedOut", res)
 			}
 			if el := time.Since(start); el > 5*time.Second {
@@ -1971,7 +1972,7 @@ func TestRequestStopsChatterInAnotherBrainForASlot(t *testing.T) {
 	for _, r := range d.all() {
 		got[r.msg.Text] = r.res.Err
 	}
-	if !errors.Is(got["chatter here"], errBrainInterrupted) || got["question"] != nil {
+	if !errors.Is(got["chatter here"], claudecli.ErrInterrupted) || got["question"] != nil {
 		t.Errorf("results %v, want the chatter's run stopped and the question answered", got)
 	}
 }
@@ -2030,7 +2031,7 @@ func TestRequestUpgradesAWaitForChatter(t *testing.T) {
 	for _, r := range d.all() {
 		got[r.msg.Text] = r.res.Err
 	}
-	if !errors.Is(got["chatter in b"], errBrainInterrupted) || got["question for c"] != nil {
+	if !errors.Is(got["chatter in b"], claudecli.ErrInterrupted) || got["question for c"] != nil {
 		t.Errorf("results %v, want b's chatter stopped and c's question answered", got)
 	}
 }
