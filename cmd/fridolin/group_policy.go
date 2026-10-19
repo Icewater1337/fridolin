@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/logx"
 	"slices"
 
 	"github.com/Icewater1337/fridolin/internal/access"
@@ -52,11 +53,11 @@ func groupSenderAllowed(cfg *config.Config, group string, s groupSender) bool {
 func (s groupSender) masked() string {
 	switch {
 	case s.Resolved:
-		return maskPhone(s.Number)
+		return logx.MaskPhone(s.Number)
 	case s.Server != "":
-		return maskDigits(s.Number, 0) + "@" + s.Server
+		return logx.MaskDigits(s.Number, 0) + "@" + s.Server
 	}
-	return maskDigits(s.Number, 0)
+	return logx.MaskDigits(s.Number, 0)
 }
 
 // groupHeardSummary says for fridolin check whose messages in the allowed
