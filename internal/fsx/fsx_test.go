@@ -1,9 +1,11 @@
 package fsx
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
 )
 
@@ -234,5 +236,72 @@ func TestExists(t *testing.T) {
 		if got := Exists(c.p); got != c.want {
 			t.Errorf("Exists(%q) = %v, want %v", c.p, got, c.want)
 		}
+	}
+}
+
+func TestAtomicBackupDoesNotFollowSymlink(t *testing.T) {
+	dir := t.TempDir()
+	path, victim := filepath.Join(dir, "config"), filepath.Join(dir, "other")
+	if err := os.WriteFile(path, []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(victim, []byte("untouched"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, path+".bak"); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFileAtomic(path, []byte("new"), 0600, true); err != nil {
+		t.Fatal(err)
+	}
+	for p, want := range map[string]string{path: "new", path + ".bak": "old", victim: "untouched"} {
+		got, err := os.ReadFile(p)
+		if err != nil || string(got) != want {
+			t.Fatalf("%s: %q %v", p, got, err)
+		}
+	}
+}
+
+func TestCreateFileAtomicHasOneWinner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	results := make(chan error, 16)
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Go(func() { results <- CreateFileAtomic(path, []byte("complete"), 0600) })
+	}
+	wg.Wait()
+	close(results)
+	winners := 0
+	for err := range results {
+		if err == nil {
+			winners++
+		} else if !errors.Is(err, os.ErrExist) {
+			t.Fatal(err)
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("%d creators won", winners)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "complete" {
+		t.Fatalf("%q %v", got, err)
+	}
+}
+
+func TestAtomicBackupFailureLeavesOriginal(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config")
+	if err := os.WriteFile(path, []byte("old"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path+".bak", 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteFileAtomic(path, []byte("new"), 0600, true); err == nil {
+		t.Fatal("backup failure ignored")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || string(got) != "old" {
+		t.Fatalf("%q %v", got, err)
 	}
 }
