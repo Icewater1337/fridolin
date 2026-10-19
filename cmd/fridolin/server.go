@@ -143,7 +143,7 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 		// What did go out is in the chat, so it goes in the history too.
 		var partial *partialSendError
 		if errors.As(err, &partial) {
-			b.appendHTTPMessageToHistory(who, jid, strings.Join(partial.sent, "\n"), "")
+			b.appendHTTPMessageToHistory(who, jid, strings.Join(partial.Sent, "\n"), "")
 		}
 		httpapi.WriteErr(w, sendErrStatus(err), "send failed: "+err.Error())
 		return

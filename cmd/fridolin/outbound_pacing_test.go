@@ -59,7 +59,7 @@ func TestSendChunksPacingAndCancellation(t *testing.T) {
 				if got := errors.As(err, &partial); got != tc.wantPartial {
 					t.Fatalf("partial=%v, want %v: %v", got, tc.wantPartial, err)
 				}
-				if partial != nil && (!reflect.DeepEqual(partial.sent, tc.wantSent) || partial.total != 3) {
+				if partial != nil && (!reflect.DeepEqual(partial.Sent, tc.wantSent) || partial.Total != 3) {
 					t.Fatalf("partial=%+v", partial)
 				}
 				switch {
