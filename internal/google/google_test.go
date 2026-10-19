@@ -1,4 +1,4 @@
-package main
+package google
 
 import (
 	"encoding/json"
@@ -19,28 +19,28 @@ import (
 )
 
 func TestParseGoogleClient(t *testing.T) {
-	c, err := ParseGoogleClient([]byte(fmt.Sprintf(testClientJSON, "https://oauth2.googleapis.com")))
+	c, err := ParseClient([]byte(fmt.Sprintf(testClientJSON, "https://oauth2.googleapis.com")))
 	if err != nil || c.Type != "installed" || c.ClientID == "" {
 		t.Fatalf("parse = %+v, %v", c, err)
 	}
 	for _, bad := range []string{`{}`, `{"installed":{}}`, `not json`, `{"service_account":{"x":1}}`} {
-		if _, err := ParseGoogleClient([]byte(bad)); err == nil {
+		if _, err := ParseClient([]byte(bad)); err == nil {
 			t.Errorf("%s should be rejected", bad)
 		}
 	}
 }
 
 // TestCalendarTokenBrain: the brain a token file is for is read back from
-// the name GoogleTokenFile gives it, and from no other file there.
+// the name TokenFile gives it, and from no other file there.
 func TestCalendarTokenBrain(t *testing.T) {
 	cases := []struct {
 		name, id string
 		ok       bool
 	}{
-		{filepath.Base(GoogleTokenFile("creds", "a")), "a", true},
-		{filepath.Base(GoogleTokenFile("creds", "work-2")), "work-2", true},
+		{filepath.Base(TokenFile("creds", "a")), "a", true},
+		{filepath.Base(TokenFile("creds", "work-2")), "work-2", true},
 		{"google_calendar_credentials_a.json", "", false}, // an older version's copy of the client
-		{filepath.Base(GoogleTokenFile("creds", "")), "", false},
+		{filepath.Base(TokenFile("creds", "")), "", false},
 		{"google_calendar_token_a.json.bak", "", false},
 		{"rclone.conf", "", false},
 	}
@@ -66,8 +66,8 @@ func TestCalendarEnv(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := GoogleCalendarEnv("a", manifest.Manifest{ID: "a", Calendar: tc.cal}, "/Users/you/creds"); !slices.Equal(got, tc.want) {
-				t.Errorf("GoogleCalendarEnv = %q, want %q", got, tc.want)
+			if got := CalendarEnv("a", manifest.Manifest{ID: "a", Calendar: tc.cal}, "/Users/you/creds"); !slices.Equal(got, tc.want) {
+				t.Errorf("CalendarEnv = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -75,7 +75,7 @@ func TestCalendarEnv(t *testing.T) {
 
 func TestCalendarTokenGoesToCredentialsDir(t *testing.T) {
 	root := t.TempDir()
-	g := NewGoogleAuth(GoogleOptions{ClientPath: filepath.Join(root, "client.json"), CredsDir: func() string { return filepath.Join(root, "creds") }})
+	g := New(Options{ClientPath: filepath.Join(root, "client.json"), CredsDir: func() string { return filepath.Join(root, "creds") }})
 	if got, want := g.TokenPath("x"), filepath.Join(root, "creds", "google_calendar_token_x.json"); got != want {
 		t.Errorf("token path = %s, want %s", got, want)
 	}
@@ -85,7 +85,7 @@ func TestCalendarTokenGoesToCredentialsDir(t *testing.T) {
 	keep := filepath.Join(root, "creds", "google_calendar_credentials_x.json")
 	_ = os.WriteFile(keep, []byte("original"), 0o600)
 	_, _ = g.SetClient([]byte(fmt.Sprintf(testClientJSON, "https://oauth2.googleapis.com")))
-	if err := g.saveToken("x", &GoogleToken{Token: "a", RefreshToken: "b"}); err != nil {
+	if err := g.saveToken("x", &Token{Token: "a", RefreshToken: "b"}); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(keep); string(data) != "original" {
@@ -117,7 +117,7 @@ func TestCalendarCallProblems(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			status, msg := GoogleCallProblem(tc.err)
+			status, msg := CallProblem(tc.err)
 			if status != tc.status || !strings.Contains(msg, tc.want) || strings.Contains(msg, calendarReconnectHint) != tc.reconnect {
 				t.Errorf("%d %q; want %d with %q, reconnect hint %v", status, msg, tc.status, tc.want, tc.reconnect)
 			}
@@ -134,7 +134,7 @@ func TestCalendarHintsNameTheDashboardsButtons(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, notConnected := GoogleCallProblem(fs.ErrNotExist)
+	_, notConnected := CallProblem(fs.ErrNotExist)
 	for _, label := range []string{"Sign in again", "Connect Google Calendar"} {
 		if !strings.Contains(calendarReconnectHint+notConnected, label) {
 			t.Errorf("no hint names %q", label)
@@ -161,7 +161,7 @@ func TestGoogleDecoderDiagnosticContracts(t *testing.T) {
 	dir := t.TempDir()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "false") }))
 	defer server.Close()
-	g := NewGoogleAuth(googleTestOptions(GoogleOptions{CredsDir: func() string { return dir }}, server))
+	g := New(googleTestOptions(Options{CredsDir: func() string { return dir }}, server))
 	if err := os.WriteFile(g.TokenPath("a"), []byte("false"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestGoogleDecoderDiagnosticContracts(t *testing.T) {
 	if !errors.As(err, &typed) {
 		t.Fatal("token decoder metadata lost")
 	}
-	_, err = g.EventsOf(t.Context(), &GoogleToken{Token: "ACCESS-1"}, []string{"primary"}, time.Now(), time.Now().Add(time.Hour), "", 100)
+	_, err = g.EventsOf(t.Context(), &Token{Token: "ACCESS-1"}, []string{"primary"}, time.Now(), time.Now().Add(time.Hour), "", 100)
 	want = "reading Google Calendar's answer: json: cannot unmarshal bool into Go value of type struct { Items []main.googleEvent \"json:\\\"items\\\"\"; NextPageToken string \"json:\\\"nextPageToken\\\"\" }"
 	if err == nil || err.Error() != want {
 		t.Fatalf("event diagnostic=%v; want %q", err, want)

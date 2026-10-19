@@ -459,10 +459,10 @@ func TestCalendarDelete(t *testing.T) {
 func TestCalendarFree(t *testing.T) {
 	f := newFakeCalendarAPI(t)
 	f.busy["you@example.com"] = []BusySlot{
-		{"2026-01-05T08:30:00Z", "2026-01-05T09:30:00Z"}, // 09:30-10:30 in Zurich
-		{"2026-01-05T18:00:00Z", "2026-01-05T19:00:00Z"}, // 19:00-20:00, outside the hours
+		{Start: "2026-01-05T08:30:00Z", End: "2026-01-05T09:30:00Z"}, // 09:30-10:30 in Zurich
+		{Start: "2026-01-05T18:00:00Z", End: "2026-01-05T19:00:00Z"}, // 19:00-20:00, outside the hours
 	}
-	f.busy["team@example.com"] = []BusySlot{{"2026-01-05T06:00:00Z", "2026-01-05T07:15:00Z"}} // 07:00-08:15, half outside
+	f.busy["team@example.com"] = []BusySlot{{Start: "2026-01-05T06:00:00Z", End: "2026-01-05T07:15:00Z"}} // 07:00-08:15, half outside
 	_, url, token := calendarBrain(t, f, []string{"you@example.com", "team@example.com"}, "team@example.com", false)
 
 	code, doc := brainTool(t, calendarCmd, url, token, "free", "--date", "2026-01-05", "--min-slot", "20")

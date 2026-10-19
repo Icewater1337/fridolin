@@ -1,4 +1,4 @@
-package main
+package google
 
 import (
 	"crypto/sha256"
@@ -33,7 +33,7 @@ func TestCalendarSignInFlow(t *testing.T) {
 			creds := filepath.Join(root, "before-sign-in")
 			current := manifest.Manifest{ID: "a"}
 			configuredCalls := 0
-			options := googleTestOptions(GoogleOptions{
+			options := googleTestOptions(Options{
 				ClientPath: filepath.Join(root, "client.json"), RedirectURI: "http://127.0.0.1:8765/",
 				CredsDir:   func() string { return creds },
 				Configured: func(id string) bool { configuredCalls++; return id == current.ID },
@@ -54,7 +54,7 @@ func TestCalendarSignInFlow(t *testing.T) {
 				requests.Add(1)
 				return transport.RoundTrip(r)
 			})
-			g := NewGoogleAuth(options)
+			g := New(options)
 			if _, err := g.StartSignIn("a"); err == nil {
 				t.Fatal("sign-in without client succeeded")
 			}
@@ -95,10 +95,10 @@ func TestCalendarSignInFlow(t *testing.T) {
 			if (*got)["code"] != "good-code" || base64.RawURLEncoding.EncodeToString(challenge[:]) != q.Get("code_challenge") {
 				t.Fatal("code exchange did not retain its PKCE verifier")
 			}
-			if _, err := os.Stat(GoogleTokenFile(creds, "a")); err != nil {
+			if _, err := os.Stat(TokenFile(creds, "a")); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := os.Stat(GoogleTokenFile(filepath.Join(root, "before-sign-in"), "a")); !os.IsNotExist(err) {
+			if _, err := os.Stat(TokenFile(filepath.Join(root, "before-sign-in"), "a")); !os.IsNotExist(err) {
 				t.Fatalf("token was written to the startup credentials path: %v", err)
 			}
 			if redirect, err := callback(q.Get("state")); redirect != "" || err == nil {

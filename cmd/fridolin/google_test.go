@@ -1534,3 +1534,13 @@ func TestLeftoverClientCopiesAreReported(t *testing.T) {
 // brain's own scripts, but no longer the credentials folder, where older
 // versions left copies of the OAuth client a brain the sandbox does not
 // hold can read.
+
+// Expected OAuth grants and guidance in the command integration contract.
+var calendarScopes = []string{
+	"https://www.googleapis.com/auth/calendar.events",                // list, create and delete events
+	"https://www.googleapis.com/auth/calendar.events.freebusy",       // free: the busy times of the brain's calendars
+	"https://www.googleapis.com/auth/calendar.calendarlist.readonly", // the account's calendars, for the brain's page and `calendars`
+}
+
+const calendarReconnectHint = "Ask the owner to connect the calendar again in the dashboard: Brains → this brain → Calendar → Sign in again."
+const calendarCheckHint = "If it stays so, ask the owner to check that the calendar still exists and is shared with the brain's Google account, and which calendars the brain has: Brains → this brain → Calendar."
