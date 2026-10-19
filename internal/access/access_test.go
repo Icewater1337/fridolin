@@ -1,4 +1,4 @@
-package main
+package access
 
 import (
 	"testing"
@@ -10,7 +10,7 @@ import (
 func TestAccessDecision(t *testing.T) {
 	const phone = "15551234567"
 	const group = "120363000000000000@g.us"
-	p := accessPolicy{AllowedNumbers: []string{phone}, AllowedGroups: []string{group}, Triggers: trigger.FromStrings([]string{"bot"}), Files: true, Forwards: true}
+	p := Policy{AllowedNumbers: []string{phone}, AllowedGroups: []string{group}, Triggers: trigger.FromStrings([]string{"bot"}), Files: true, Forwards: true}
 	dm := chat.Envelope{Sender: phone, SenderResolved: true, Text: " hello "}
 	grp := dm
 	grp.Chat, grp.Group = group, true
@@ -59,8 +59,8 @@ func TestAccessDecision(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := accessDecide(p, c.e)
-			want := accessDecision{Allowed: c.allowed, Ignore: c.ignore, Silent: c.silent, Text: c.text}
+			got := Decide(p, c.e)
+			want := Decision{Allowed: c.allowed, Ignore: c.ignore, Silent: c.silent, Text: c.text}
 			if got != want {
 				t.Errorf("Decide = %+v, want %+v", got, want)
 			}
@@ -90,7 +90,7 @@ func TestAccessDecision(t *testing.T) {
 				e = grp
 				policy.GroupMembers = map[string][]string{group: {}}
 			}
-			if got := accessDecide(policy, e).Allowed; got != want {
+			if got := Decide(policy, e).Allowed; got != want {
 				t.Errorf("Allowed = %v, want %v", got, want)
 			}
 		})
