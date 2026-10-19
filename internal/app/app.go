@@ -202,14 +202,14 @@ func New(opts Options) (_ *App, err error) {
 
 	b.pipeline = b.newMessagePipeline()
 	b.deb = pipeline.NewDebouncer(
-		func() time.Duration { return time.Duration(b.cfgs.Get().DebounceQuietMS()) * time.Millisecond },
-		func() time.Duration { return time.Duration(b.cfgs.Get().DebounceMaxWaitMS()) * time.Millisecond },
+		func() time.Duration { return b.cfgs.Get().Live.Debounce.Quiet },
+		func() time.Duration { return b.cfgs.Get().Live.Debounce.MaxWait },
 		b.pipeline.Dispatch,
 	)
 	b.pipeline.Debouncer = b.deb
 
 	if opts.NoWhatsApp {
-		b.dev = devchat.New(func(text string) []string { return outboundmsg.Chunk(text, cfgs.Get().MaxChunkSize) })
+		b.dev = devchat.New(func(text string) []string { return outboundmsg.Chunk(text, cfgs.Effective().MaxChunkSize) })
 		b.wa = b.dev
 	} else {
 		wa, err := whatsapp.New(b.whatsAppOptions())
@@ -391,7 +391,7 @@ func (b *App) resume(ctx context.Context) {
 		}
 		switch r.Kind {
 		case InboundInterrupted:
-			if err := b.outbox.Text(ctx, r.Chat, outboundmsg.RestartedNotice, b.cfgs.Get().MaxChunkSize); err != nil {
+			if err := b.outbox.Text(ctx, r.Chat, outboundmsg.RestartedNotice, b.cfgs.Effective().MaxChunkSize); err != nil {
 				log.Printf("brain %s: telling %s its run was cut short: %v", r.Brain, r.Chat, err)
 			}
 		case InboundQueued, InboundHeld:

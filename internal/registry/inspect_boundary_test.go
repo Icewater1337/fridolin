@@ -20,13 +20,13 @@ func TestInspectRejectsReplacedCanonicalComponents(t *testing.T) {
 				if err := os.MkdirAll(candidate, 0o700); err != nil {
 					t.Fatal(err)
 				}
-				abs, problems, _ := g.checkPath(candidate, g.store.Get(), nil)
+				abs, problems, _ := g.checkPath(candidate, g.store.Effective(), nil)
 				if len(problems) != 0 {
 					t.Fatalf("initial candidate rejected: %v", problems)
 				}
 				target := t.TempDir()
 				if destination == "protected-in-home" {
-					target = g.store.Get().DataDir
+					target = g.store.Effective().DataDir
 				}
 				entry := candidate
 				if replacement == "parent" {

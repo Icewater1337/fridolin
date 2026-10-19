@@ -64,7 +64,7 @@ func newTestBridge(t *testing.T, extra string) *testBridge {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireTestDataDir(t, cfgs.Get())
+	requireTestDataDir(t, cfgs.Effective())
 	b, err := New(Options{Config: cfgs, NoWhatsApp: true})
 	if err != nil {
 		t.Fatal(err)
@@ -493,7 +493,7 @@ func TestIngestKeepsOtherBrainsFiles(t *testing.T) {
 	tb.addFolderBrain(t, manifest.Manifest{ID: "team", Name: "Team", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "old", Name: "Old"})
 	left := tb.addFolderBrain(t, manifest.Manifest{ID: "left", Name: "Left"})
-	media := tb.cfgs.Get().MediaDir
+	media := tb.cfgs.Effective().MediaDir
 	for _, p := range []string{"old/dm.pdf", "left/dm.pdf"} {
 		writeTestFile(t, filepath.Join(media, p), "x")
 	}
@@ -503,7 +503,7 @@ func TestIngestKeepsOtherBrainsFiles(t *testing.T) {
 	if err := os.RemoveAll(left); err != nil {
 		t.Fatal(err)
 	}
-	if err := tb.brainMgr.Apply(tb.cfgs.Get()); err != nil {
+	if err := tb.brainMgr.Apply(tb.cfgs.Effective()); err != nil {
 		t.Fatal(err)
 	}
 	if tb.brainMgr.Get("old") != nil || tb.brainMgr.Get("left") != nil || tb.brainMgr.Get("team") == nil {
@@ -709,7 +709,7 @@ func TestIngestedCodeIsNotCaught(t *testing.T) {
 	if hist, _ := os.ReadFile(filepath.Join(upDir, "conversation-history.jsonl")); !strings.Contains(string(hist), `"text":"483920","type":"in"`) {
 		t.Errorf("up's history lacks the ingested text:\n%s", hist)
 	}
-	if _, err := os.Stat(filepath.Join(tb.cfgs.Get().DataDir, "otp", "up.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(tb.cfgs.Effective().DataDir, "otp", "up.json")); !os.IsNotExist(err) {
 		t.Errorf("the ingested text was handed over as a code (%v)", err)
 	}
 }
@@ -868,7 +868,7 @@ func TestReplyChatFor(t *testing.T) {
 			for _, m := range c.brains {
 				tb.addFolderBrain(t, m)
 			}
-			if got := tb.replyChatFor(tb.brainMgr.Get(c.brain), tb.cfgs.Get()); got != c.want {
+			if got := tb.replyChatFor(tb.brainMgr.Get(c.brain), tb.cfgs.Effective()); got != c.want {
 				t.Errorf("replyChatFor(%s) = %q, want %q", c.brain, got, c.want)
 			}
 		})

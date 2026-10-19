@@ -198,7 +198,7 @@ func TestLeftOutBrainShowsWhyOnItsPage(t *testing.T) {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := tb.brainMgr.Apply(tb.cfgs.Get()); err != nil {
+	if err := tb.brainMgr.Apply(tb.cfgs.Effective()); err != nil {
 		t.Fatal(err)
 	}
 	if v := view(); v.Status != "ok" || v.Runtime == nil || len(v.Issues) != 0 {

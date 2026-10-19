@@ -27,10 +27,10 @@ const (
 	maxConcurrentRuns        = 64
 )
 
-// Resolve derives the running configuration from the on-disk layer:
+// ResolveFile derives the compatible effective JSON representation:
 // defaults, ~ expansion and platform validation from explicit inputs. It reads
 // no environment or filesystem state and writes nothing, see EnsureDirs.
-func Resolve(file *File, paths Paths, goos string) (*File, error) {
+func ResolveFile(file *File, paths Paths, goos string) (*File, error) {
 	cfg, err := file.Clone()
 	if err != nil {
 		return nil, err
@@ -178,10 +178,10 @@ const (
 // defaultIncludeBridgeConfig is include_bridge_config's default.
 const defaultIncludeBridgeConfig = true
 
-// ResolveSettings derives runtime values without optional policy pointers.
+// Resolve derives runtime values without optional policy pointers.
 // The file projection remains available for persistence and dashboard responses.
-func ResolveSettings(file *File, paths Paths, goos string) (*Settings, error) {
-	c, err := Resolve(file, paths, goos)
+func Resolve(file *File, paths Paths, goos string) (*Settings, error) {
+	c, err := ResolveFile(file, paths, goos)
 	if err != nil {
 		return nil, err
 	}

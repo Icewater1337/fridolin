@@ -14,6 +14,20 @@ type Settings struct {
 
 // Live holds resolved global policy. BrainDirs are approval documents, whose
 // optional manifest fields describe per-brain inheritance rather than defaults.
+type Provider string
+
+const (
+	ProviderClaude Provider = "claude"
+	ProviderCodex  Provider = "codex"
+)
+
+type QueueMode string
+
+const (
+	QueueFIFO      QueueMode = "queue"
+	QueueInterrupt QueueMode = "interrupt"
+)
+
 type Live struct {
 	Comment                    string
 	Version                    int
@@ -23,7 +37,7 @@ type Live struct {
 	GroupMembers               map[string][]string
 	Triggers                   trigger.List
 	ClaudePath                 string
-	AgentProvider              string
+	AgentProvider              Provider
 	CodexPath                  string
 	CodexModel                 string
 	CodexEffort                string
@@ -52,7 +66,7 @@ type Live struct {
 	ScriptAPI                  ScriptAPISettings
 }
 type QueueSettings struct {
-	Mode       string
+	Mode       QueueMode
 	MaxPending int
 	Notify     bool
 }
@@ -102,7 +116,7 @@ func liveOf(c *File) Live {
 		GroupMembers:               c.GroupMembers,
 		Triggers:                   c.Triggers,
 		ClaudePath:                 c.ClaudePath,
-		AgentProvider:              c.AgentProvider,
+		AgentProvider:              Provider(c.AgentProvider),
 		CodexPath:                  c.CodexPath,
 		CodexModel:                 c.CodexModel,
 		CodexEffort:                c.CodexEffort,
@@ -133,7 +147,7 @@ func liveOf(c *File) Live {
 }
 func queueSettingsOf(c QueueConfig) QueueSettings {
 	return QueueSettings{
-		Mode:       c.Mode,
+		Mode:       QueueMode(c.Mode),
 		MaxPending: c.MaxPending,
 		Notify:     *c.Notify,
 	}
@@ -201,7 +215,7 @@ func fileOf(c Live) File {
 		GroupMembers:               c.GroupMembers,
 		Triggers:                   c.Triggers,
 		ClaudePath:                 c.ClaudePath,
-		AgentProvider:              c.AgentProvider,
+		AgentProvider:              string(c.AgentProvider),
 		CodexPath:                  c.CodexPath,
 		CodexModel:                 c.CodexModel,
 		CodexEffort:                c.CodexEffort,
@@ -232,7 +246,7 @@ func fileOf(c Live) File {
 }
 func queueConfigOf(c QueueSettings) QueueConfig {
 	return QueueConfig{
-		Mode:       c.Mode,
+		Mode:       string(c.Mode),
 		MaxPending: c.MaxPending,
 		Notify:     new(c.Notify),
 	}

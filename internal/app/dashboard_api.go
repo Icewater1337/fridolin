@@ -73,7 +73,7 @@ func (b *App) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 	if cfg.AnyoneCanDM() {
 		resp.Warnings = append(resp.Warnings, "allowed_numbers is empty, so anyone who can message this WhatsApp account can use the assistant. Add your number under Chats → Allowed numbers.")
 	}
-	resp.Warnings = append(resp.Warnings, b.tokenWarnings(b.cfgs.Get(), runtime.GOOS)...)
+	resp.Warnings = append(resp.Warnings, b.tokenWarnings(b.cfgs.Effective(), runtime.GOOS)...)
 	if w := claudecli.VersionWarning(resp.Claude); cfg.AgentProvider != "codex" && w != "" {
 		resp.Warnings = append(resp.Warnings, w)
 	}
@@ -219,7 +219,7 @@ func (b *App) brainIssues(cfg *config.File) []registry.Issue {
 }
 
 func (b *App) brainViews() []httpapi.BrainView {
-	cfg := b.cfgs.Get()
+	cfg := b.cfgs.Effective()
 	issues := b.brainIssues(cfg)
 	fallback := b.brainMgr.Fallback()
 	base := registry.Views(cfg, issues)
@@ -294,7 +294,7 @@ func textTail(s string, n int) string {
 func (b *App) submitDevInbound(req httpapi.DevInboundRequest) string {
 	// Apply the same allow lists, group_members and trigger handling as
 	// WhatsApp messages, on one config snapshot as handleGroupMessage does.
-	cfg := b.cfgs.Get()
+	cfg := b.cfgs.Effective()
 	m := brain.Inbound{Inbound: chat.Inbound{JID: req.JID, Brain: req.Brain, Sender: req.Sender, Text: req.Text, Media: req.Media, Silent: req.Silent, Source: chat.SourceDev, At: time.Now()}}
 	if m.IsGroup() {
 		if !isAllowedGroup(cfg, m.JID) {

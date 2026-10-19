@@ -15,7 +15,7 @@ func TestResolveUsesInjectedPathsAndPlatform(t *testing.T) {
 	paths := Paths{Home: home, DefaultDataDir: filepath.Join(home, LegacyDataDirName)}
 	file := &File{ClaudePath: "~/bin/claude", BrainDirs: []BrainRef{{Path: "~/brain"}}}
 	before, _ := json.Marshal(file)
-	first, err := Resolve(file, paths, "linux")
+	first, err := ResolveFile(file, paths, "linux")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestResolveUsesInjectedPathsAndPlatform(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(home, DataDirName), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	second, err := Resolve(file, paths, "linux")
+	second, err := ResolveFile(file, paths, "linux")
 	if err != nil || !reflect.DeepEqual(first, second) {
 		t.Fatalf("filesystem changes affected Resolve: %v", err)
 	}
@@ -40,13 +40,13 @@ func TestResolveUsesInjectedPathsAndPlatform(t *testing.T) {
 	if got := (BrainRef{Path: "~/brain"}).Dir(home); got != filepath.Join(home, "brain") {
 		t.Fatalf("BrainRef.Dir = %q", got)
 	}
-	if _, err := Resolve(&File{Sandbox: SandboxConfig{Enabled: true}}, paths, "linux"); err == nil {
+	if _, err := ResolveFile(&File{Sandbox: SandboxConfig{Enabled: true}}, paths, "linux"); err == nil {
 		t.Fatal("injected Linux platform allowed the macOS sandbox")
 	}
-	if _, err := Resolve(&File{Sandbox: SandboxConfig{Enabled: true}}, paths, "darwin"); err != nil {
+	if _, err := ResolveFile(&File{Sandbox: SandboxConfig{Enabled: true}}, paths, "darwin"); err != nil {
 		t.Fatalf("injected macOS platform: %v", err)
 	}
-	if _, err := Resolve(file, Paths{}, "linux"); err == nil || err.Error() != "getting home dir: $HOME is not set" {
+	if _, err := ResolveFile(file, Paths{}, "linux"); err == nil || err.Error() != "getting home dir: $HOME is not set" {
 		t.Fatalf("missing injected home: %v", err)
 	}
 }
@@ -71,8 +71,8 @@ func TestStoreRetainsInputsAndReadsOnlyRetiredEnvironmentKey(t *testing.T) {
 	if _, err := cs.Update("", func(c *File) error { c.Comment = "saved"; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if cs.Paths() != paths || cs.Get().DataDir != paths.DefaultDataDir || !reflect.DeepEqual(keys, []string{"BRAIN_MODE"}) {
-		t.Fatalf("inputs changed: %v %q %v", cs.Paths(), cs.Get().DataDir, keys)
+	if cs.Paths() != paths || cs.Effective().DataDir != paths.DefaultDataDir || !reflect.DeepEqual(keys, []string{"BRAIN_MODE"}) {
+		t.Fatalf("inputs changed: %v %q %v", cs.Paths(), cs.Effective().DataDir, keys)
 	}
 	if _, err := os.Stat(paths.DefaultDataDir); !os.IsNotExist(err) {
 		t.Fatalf("Open/Update created the runtime data directory: %v", err)

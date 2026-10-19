@@ -14,13 +14,13 @@ func (b *App) newScriptAPI() *httpapi.ScriptAPI {
 	return &httpapi.ScriptAPI{
 		Authorize:     func(r *http.Request) (chat.Principal, error) { return b.scriptAuth.authorize(r) },
 		Recipient:     b.scriptRecipient,
-		MaySend:       func(who chat.Principal, jid string) error { return b.maySend(who, jid, b.cfgs.Get()) },
+		MaySend:       func(who chat.Principal, jid string) error { return b.maySend(who, jid, b.cfgs.Effective()) },
 		TokenRequired: errTokenRequired,
 		SendExternal: func(ctx context.Context, who chat.Principal, jid, text string) (string, error) {
 			return b.pipeline.SendExternal(ctx, who, jid, text)
 		},
 		IngestPolicy: func() httpapi.IngestPolicy {
-			cfg := b.cfgs.Get()
+			cfg := b.cfgs.Effective()
 			return httpapi.IngestPolicy{Enabled: cfg.Ingest.Enabled, OwnerChat: ownerChat(cfg)}
 		},
 		Brain: func(id string) *brain.Brain { return b.brainMgr.Get(id) },

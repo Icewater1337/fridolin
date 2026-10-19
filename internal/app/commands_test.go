@@ -16,6 +16,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/toolcli"
@@ -81,7 +82,7 @@ func (c fixedDeviceContainer) NewDevice() *store.Device { return &store.Device{}
 
 func (tb *testBridge) whatsAppOffline(t *testing.T, dev *store.Device, configure ...func(*whatsapp.Options)) *whatsapp.Client {
 	t.Helper()
-	opts := whatsAppOptions(tb.cfgs.Get, tb.store, tb.handleInbound, nil)
+	opts := whatsAppOptions(func() config.Settings { return *tb.cfgs.Get() }, tb.store, tb.handleInbound, nil)
 	opts.Container = fixedDeviceContainer{dev}
 	opts.Log = waLog.Noop
 	opts.OnVote = whatsAppVoteHandler(tb.recordVote)
@@ -204,7 +205,7 @@ func TestOTPGuardDropsQuotedCode(t *testing.T) {
 
 	tb.whatsApp(t).ProcessMessage(replyEvent("483920", "🔐 Please send me the verification code"))
 
-	otpFile := filepath.Join(tb.cfgs.Get().DataDir, "otp", "main.json")
+	otpFile := filepath.Join(tb.cfgs.Effective().DataDir, "otp", "main.json")
 	testutil.WaitFor(t, 5*time.Second, "the code to be handed over", func() bool {
 		_, err := os.Stat(otpFile)
 		return err == nil
@@ -252,7 +253,7 @@ func TestOTPGuardIsScopedToTheChatAndTheWindow(t *testing.T) {
 			tb.handleInbound(context.Background(), c.m)
 
 			var handed struct{ Code, Typed, Chat string }
-			data, err := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "otp", "main.json"))
+			data, err := os.ReadFile(filepath.Join(tb.cfgs.Effective().DataDir, "otp", "main.json"))
 			if err == nil {
 				err = json.Unmarshal(data, &handed)
 			} else if os.IsNotExist(err) {

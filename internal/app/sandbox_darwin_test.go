@@ -1608,7 +1608,7 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map
 	}
 	// The bridge opens its database before the brains, and the checks need
 	// the real file.
-	cfg := cfgs.Get()
+	cfg := cfgs.Effective()
 	if err := cfgs.Boot().EnsureDirs(); err != nil {
 		t.Fatal(err)
 	}

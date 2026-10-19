@@ -613,7 +613,7 @@ func TestReloadRunsTheApprovedManifest(t *testing.T) {
 	if err := manifest.Write(dir, &grab, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := tb.brainMgr.Apply(tb.cfgs.Get()); err != nil {
+	if err := tb.brainMgr.Apply(tb.cfgs.Effective()); err != nil {
 		t.Fatal(err)
 	}
 	if br := tb.brainMgr.BrainFor(dmChat, false); br == nil || br.ID() != "a" {

@@ -58,7 +58,7 @@ func TestStoreChecksBrainsBeforeWriting(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, manifest.File)); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("refused transaction wrote manifest: %v", err)
 	}
-	if cs.Get().LogLevel != "info" {
+	if cs.Effective().LogLevel != "info" {
 		t.Error("refused transaction published a snapshot")
 	}
 	if _, err := cs.Update("", func(c *File) error { c.Comment = "after refusal"; return nil }); err != nil {

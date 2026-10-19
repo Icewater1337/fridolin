@@ -371,7 +371,7 @@ func TestTokenWarningsWithoutASandbox(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cfg := *tb.cfgs.Get()
+			cfg := *tb.cfgs.Effective()
 			cfg.DangerouslySkipPermissions, cfg.Sandbox.Enabled = c.skip, c.sandbox
 			got := tb.tokenWarnings(&cfg, c.goos)
 			if c.want == "" {
@@ -431,7 +431,7 @@ func TestPutConfigRefusesBlindAndPartialWrites(t *testing.T) {
 			}
 		})
 	}
-	cfg := tb.cfgs.Get()
+	cfg := tb.cfgs.Effective()
 	if !cfg.DangerouslySkipPermissions || !slices.Equal(cfg.AllowedNumbers, []string{"15551234567"}) {
 		t.Fatalf("settings changed: skip %v, allowed %v", cfg.DangerouslySkipPermissions, cfg.AllowedNumbers)
 	}
@@ -811,7 +811,7 @@ func TestAddBrainRechecksAgainstOtherWriters(t *testing.T) {
 	if w := <-added; w.Code != http.StatusUnprocessableEntity {
 		t.Fatalf("add: %d %s, want 422", w.Code, w.Body.String())
 	}
-	for _, ref := range tb.cfgs.Get().BrainDirs {
+	for _, ref := range tb.cfgs.Effective().BrainDirs {
 		if ref.Approved != nil && ref.Approved.ID == "a" && !slices.Contains(ref.Approved.Routing.Groups, group) {
 			t.Error("brain a lost the group")
 		}

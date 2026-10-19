@@ -243,7 +243,7 @@ func runCmd(args []string) int {
 		log.Printf("loading config: %v", err)
 		return 1
 	}
-	cfg := cfgs.Get()
+	cfg := cfgs.Effective()
 	logDataDir(cfgs)
 
 	// A signal and the dashboard's restart both end ctx, and serve stops
@@ -339,7 +339,7 @@ func runLogWithPaths(console io.Writer, configFlag string, paths config.Paths) (
 // config, which folders exist decides it.
 func logDataDir(cfgs *config.Store) {
 	home := cfgs.Paths().Home
-	dir := cfgs.Get().DataDir
+	dir := cfgs.Effective().DataDir
 	log.Printf("Data dir: %s (%s)", app.AbsPath(dir), config.DataDirSource(cfgs.FileCopy().DataDir, dir, home))
 }
 

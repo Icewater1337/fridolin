@@ -80,7 +80,7 @@ func TestSiteBuildChat(t *testing.T) {
 		return nil
 	}
 
-	m := NewSiteManager(sitesvc.SiteOptions{DataDir: tb.cfgs.Get().DataDir,
+	m := NewSiteManager(sitesvc.SiteOptions{DataDir: tb.cfgs.Effective().DataDir,
 		GoogleClient: tb.google.ClientPath, Builder: tb.siteBuilderHooks(), NPMInstall: link,
 		WorkspaceInstall: func(ctx context.Context, _, dir string) error { return link(ctx, dir, false) },
 	})

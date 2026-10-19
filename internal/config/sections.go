@@ -116,6 +116,9 @@ func (pc PlaudConfig) Validate() error {
 	if pc.IntervalSeconds != 0 && pc.IntervalSeconds < 30 {
 		return fmt.Errorf("plaud.interval_seconds must be at least 30")
 	}
+	if int64(pc.IntervalSeconds) > int64((1<<63-1)/time.Second) {
+		return fmt.Errorf("plaud.interval_seconds is too large to represent as a duration")
+	}
 	if pc.PhoneDir != "" && !filepath.IsAbs(pc.PhoneDir) {
 		return fmt.Errorf("plaud.phone_dir %q must be an absolute path or start with ~/", pc.PhoneDir)
 	}

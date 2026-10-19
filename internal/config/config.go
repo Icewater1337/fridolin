@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 
@@ -652,6 +653,17 @@ func (c *File) Validate(goos string) error {
 	for _, name := range c.ChildEnvPassthrough {
 		if !textx.ValidEnvName(name) {
 			return fmt.Errorf("child_env_passthrough: %q is not a variable name: use letters, digits and _, and do not start with a digit", name)
+		}
+	}
+	// Durations must remain representable after conversion to nanoseconds.
+	for _, field := range []struct {
+		name  string
+		value *int
+	}{
+		{"debounce.quiet_ms", c.Debounce.QuietMS}, {"debounce.max_wait_ms", c.Debounce.MaxWaitMS},
+	} {
+		if field.value != nil && (*field.value < 0 || int64(*field.value) > int64((1<<63-1)/time.Millisecond)) {
+			return fmt.Errorf("%s must be a non-negative duration representable in milliseconds", field.name)
 		}
 	}
 	if c.MaxChunkSize < configMinChunkSize {

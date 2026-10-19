@@ -15,7 +15,7 @@ func Load(cfgPath string, options Options) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return cs.Get(), nil
+	return cs.Effective(), nil
 }
 
 // LoadExisting is Load for a command about a bridge that is

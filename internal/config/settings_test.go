@@ -20,11 +20,11 @@ func TestSettingsPreserveEffectiveWire(t *testing.T) {
 	for name, file := range map[string]*File{"empty": {}, "fixture": &fixture, "explicit zero": {AllowAnyDM: new(true), RunTimeoutMinutes: new(0), MaxConcurrentRuns: new(0), Queue: QueueConfig{Notify: new(false)}, Dashboard: DashboardConfig{RequireToken: new(false)}, ScriptAPI: ScriptAPIConfig{TokenlessSend: new(false)}, Backup: BackupConfig{KeepVersionsDays: new(0), IncludeBridgeConfig: new(false)}, Debounce: DebounceConfig{QuietMS: new(0), MaxWaitMS: new(0)}}} {
 		t.Run(name, func(t *testing.T) {
 			paths := Paths{Home: t.TempDir()}
-			old, err := Resolve(file, paths, "darwin")
+			old, err := ResolveFile(file, paths, "darwin")
 			if err != nil {
 				t.Fatal(err)
 			}
-			settings, err := ResolveSettings(file, paths, "darwin")
+			settings, err := Resolve(file, paths, "darwin")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -75,7 +75,7 @@ func TestRuntimeSettingsPublishAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first := cs.Runtime()
+	first := cs.Get()
 	calls := 0
 	cs.SubscribeRuntime(func(old, next *Settings) {
 		calls++
@@ -83,7 +83,7 @@ func TestRuntimeSettingsPublishAtomically(t *testing.T) {
 			t.Fatal("subscriber policy does not match saved values")
 		}
 		snap := cs.Snapshot()
-		if snap.Settings != cs.Runtime() || snap.Settings.Live.AllowAnyDM != *snap.Effective.AllowAnyDM {
+		if snap.Settings != cs.Get() || snap.Settings.Live.AllowAnyDM != *snap.Effective.AllowAnyDM {
 			t.Fatal("runtime and effective snapshots diverged")
 		}
 	})
@@ -97,5 +97,19 @@ func TestRuntimeSettingsPublishAtomically(t *testing.T) {
 	_, err = cs.Update("", func(f *File) error { f.HTTPListen = "not an address"; return nil })
 	if err == nil || calls != 1 {
 		t.Fatal("invalid update was published")
+	}
+}
+
+func TestSettingsRejectUnrepresentableDurations(t *testing.T) {
+	for name, file := range map[string]*File{
+		"negative debounce": {Debounce: DebounceConfig{QuietMS: new(-1)}},
+		"overflow debounce": {Debounce: DebounceConfig{MaxWaitMS: new(int(^uint(0) >> 1))}},
+		"overflow poll":     {Plaud: PlaudConfig{IntervalSeconds: int(^uint(0) >> 1)}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Resolve(file, Paths{Home: t.TempDir()}, "linux"); err == nil {
+				t.Fatal("invalid duration accepted")
+			}
+		})
 	}
 }

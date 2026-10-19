@@ -59,7 +59,7 @@ func TestDashboardSignIn(t *testing.T) {
 	tb := newTestBridge(t, "")
 	now := time.Now
 	var err error
-	tb.sessions, err = httpapi.LoadDashboardSessions(tb.cfgs.Get().DataDir, func() time.Time { return now() })
+	tb.sessions, err = httpapi.LoadDashboardSessions(tb.cfgs.Effective().DataDir, func() time.Time { return now() })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestDashboardSessionsLastAndEnd(t *testing.T) {
 	if a == nil || b == nil {
 		t.Fatal("no sessions")
 	}
-	file := filepath.Join(tb.cfgs.Get().DataDir, "dashboard-sessions.json")
+	file := filepath.Join(tb.cfgs.Effective().DataDir, "dashboard-sessions.json")
 	data, err := os.ReadFile(file)
 	for _, secret := range []string{a.cookie.Value, a.binding, b.cookie.Value, b.binding} {
 		if err != nil || strings.Contains(string(data), secret) {
@@ -238,7 +238,7 @@ func TestDashboardSessionsLastAndEnd(t *testing.T) {
 	if st, _ := os.Stat(file); st.Mode().Perm() != 0o600 {
 		t.Errorf("sessions file mode %v", st.Mode().Perm())
 	}
-	again, err := httpapi.LoadDashboardSessions(tb.cfgs.Get().DataDir, time.Now)
+	again, err := httpapi.LoadDashboardSessions(tb.cfgs.Effective().DataDir, time.Now)
 	if err != nil || !again.Valid(a.cookie.Value, a.binding) || !again.Valid(b.cookie.Value, b.binding) {
 		t.Fatalf("after a restart the sessions are gone (%v)", err)
 	}
@@ -265,7 +265,7 @@ func TestDashboardSessionsLastAndEnd(t *testing.T) {
 	if tb.token.Value() == old {
 		t.Fatal("the token did not change")
 	}
-	if onDisk, _ := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "dashboard.token")); strings.TrimSpace(string(onDisk)) != tb.token.Value() {
+	if onDisk, _ := os.ReadFile(filepath.Join(tb.cfgs.Effective().DataDir, "dashboard.token")); strings.TrimSpace(string(onDisk)) != tb.token.Value() {
 		t.Error("the token file was not replaced")
 	}
 	for name, check := range map[string]struct {
@@ -296,7 +296,7 @@ func TestRotateForgetsLoginCodes(t *testing.T) {
 	if s := sessionOf(w); s != nil || strings.Contains(w.Body.String(), "binding") {
 		t.Errorf("rotating with the token started a session: %v %s", s, w.Body.String())
 	}
-	data, err := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "dashboard-sessions.json"))
+	data, err := os.ReadFile(filepath.Join(tb.cfgs.Effective().DataDir, "dashboard-sessions.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +466,7 @@ func TestDashboardLink(t *testing.T) {
 func TestRotateTokenCommand(t *testing.T) {
 	t.Run("through the bridge", func(t *testing.T) {
 		tb := newTestBridge(t, "")
-		cfg := *tb.cfgs.Get()
+		cfg := *tb.cfgs.Effective()
 		cfg.HTTPListen = serveBridge(t, tb)
 		old := tb.token.Value()
 		if err := controlcli.RotateToken(&cfg); err != nil {
@@ -478,7 +478,7 @@ func TestRotateTokenCommand(t *testing.T) {
 	})
 	t.Run("an older bridge", func(t *testing.T) {
 		tb := newTestBridge(t, "")
-		cfg := *tb.cfgs.Get()
+		cfg := *tb.cfgs.Effective()
 		cfg.HTTPListen = stubBridge(t, http.StatusNotFound, `{"error":"no such API endpoint"}`)
 		old := tb.token.Value()
 		if err := controlcli.RotateToken(&cfg); !errors.Is(err, controlcli.ErrOlderBridge) || !strings.Contains(err.Error(), "Restart it on this build") {
@@ -492,7 +492,7 @@ func TestRotateTokenCommand(t *testing.T) {
 	// mux's 404, which is no sign of an older build.
 	t.Run("a bridge with the dashboard off", func(t *testing.T) {
 		tb := newTestBridge(t, `, "dashboard": {"disabled": true}`)
-		cfg := *tb.cfgs.Get()
+		cfg := *tb.cfgs.Effective()
 		cfg.HTTPListen = serveBridge(t, tb)
 		old := tb.token.Value()
 		if err := controlcli.RotateToken(&cfg); err == nil || errors.Is(err, controlcli.ErrOlderBridge) || !strings.Contains(err.Error(), "dashboard is turned off") {
@@ -504,7 +504,7 @@ func TestRotateTokenCommand(t *testing.T) {
 	})
 	t.Run("a bridge that does not answer", func(t *testing.T) {
 		tb := newTestBridge(t, "")
-		cfg := *tb.cfgs.Get()
+		cfg := *tb.cfgs.Effective()
 		cfg.HTTPListen = closedPort(t)
 		old := tb.token.Value()
 		if err := controlcli.RotateToken(&cfg); err == nil || !strings.Contains(err.Error(), "does not answer") {

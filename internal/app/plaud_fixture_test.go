@@ -166,7 +166,7 @@ func (tb *testBridge) usePlaudRecorder(t *testing.T, rec *plaudRecorder) {
 // Fixture locations come from startup paths and current settings, without
 // asking Status (which may schedule an account refresh for a legacy login).
 func (tb *testBridge) plaudFixtureHome() string {
-	if tb.cfgs.Get().Plaud.BrainAccess {
+	if tb.cfgs.Effective().Plaud.BrainAccess {
 		return tb.cfgs.Boot().Home
 	}
 	return filepath.Join(tb.cfgs.Boot().PlaudDir(), "home")

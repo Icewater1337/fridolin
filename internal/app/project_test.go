@@ -19,7 +19,7 @@ func TestBackupSettingsProjectionPreservesStatusJSON(t *testing.T) {
 		if err := json.Unmarshal([]byte(raw), &file); err != nil {
 			t.Fatal(err)
 		}
-		cfg, err := config.ResolveSettings(&file, config.Paths{Home: t.TempDir()}, runtime.GOOS)
+		cfg, err := config.Resolve(&file, config.Paths{Home: t.TempDir()}, runtime.GOOS)
 		if err != nil {
 			t.Fatal(err)
 		}

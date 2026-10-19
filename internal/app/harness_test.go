@@ -112,7 +112,7 @@ func newHarness(t *testing.T, cfgJSON string) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireTestDataDir(t, cfgs.Get())
+	requireTestDataDir(t, cfgs.Effective())
 	b, err := New(Options{Config: cfgs, NoWhatsApp: true})
 	if err != nil {
 		t.Fatal(err)
@@ -272,7 +272,7 @@ func (h *harness) WhatsAppAndWait(ev *events.Message) {
 
 func (h *harness) whatsApp(ev *events.Message, handle InboundHandler) {
 	h.t.Helper()
-	opts := whatsAppOptions(func() *config.File { return RuntimeConfig(h.b.cfgs) }, h.b.store, handle, nil)
+	opts := whatsAppOptions(func() config.Settings { return RuntimeSettings(h.b.cfgs) }, h.b.store, handle, nil)
 	opts.Container = fixedDeviceContainer{&store.Device{}}
 	opts.Log = waLog.Noop
 	opts.OnChange = h.b.handleChange

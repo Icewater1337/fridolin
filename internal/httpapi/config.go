@@ -21,9 +21,9 @@ func (a *ConfigAPI) Get(w http.ResponseWriter, r *http.Request) {
 	snap := a.Store().Snapshot()
 	file := config.MustClone(snap.File)
 	file.BrainDirs = nil
-	eff := config.MustClone(snap.Effective)
+	eff := config.EffectiveFile(snap.Settings)
 	eff.BrainDirs = nil
-	WriteJSON(w, http.StatusOK, ConfigResponse{ETag: snap.ETag, Path: a.Store().Path(), Config: file, Effective: eff})
+	WriteJSON(w, http.StatusOK, ConfigResponse{ETag: snap.ETag, Path: a.Store().Path(), Config: file, Effective: &eff})
 }
 
 // apiPutConfig replaces the settings. Brains are managed through their own

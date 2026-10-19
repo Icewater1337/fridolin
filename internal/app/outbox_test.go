@@ -127,7 +127,7 @@ func (f *flakyMessenger) sent(jid string) []string {
 // the chat twice. The brain's history records it only then.
 func TestReplyIsRecordedOnceDelivered(t *testing.T) {
 	tb, br := newMainBridge(t, `, "max_chunk_size": 100`)
-	wa := newFlakyMessenger(tb.cfgs.Get, true)
+	wa := newFlakyMessenger(tb.cfgs.Effective, true)
 	wa.dropAfter = 1 // the first chunk goes out, then the connection drops
 	tb.wa = wa
 
@@ -181,7 +181,7 @@ func TestQueuedRunReadsTheAnswerBeforeIt(t *testing.T) {
 			prompts := filepath.Join(t.TempDir(), "prompts")
 			t.Setenv("FRIDOLIN_FAKE_PROMPT_LOG", prompts)
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "800")
-			wa := newFlakyMessenger(tb.cfgs.Get, c.online)
+			wa := newFlakyMessenger(tb.cfgs.Effective, c.online)
 			wa.delay = c.delay
 			tb.wa = wa
 			ask := func(text string) {
@@ -280,7 +280,7 @@ func TestOutboxSummaryOnlyReads(t *testing.T) {
 // the working notice goes out at once or not at all, whatever its text.
 func TestQuestionsWaitAndNoticesDoNot(t *testing.T) {
 	tb, br := newMainBridge(t, "")
-	tb.wa = newFlakyMessenger(tb.cfgs.Get, false)
+	tb.wa = newFlakyMessenger(tb.cfgs.Effective, false)
 	(brainHooksSink{tb.brainMgr.hooks}).Question(br, testDMChat, "Which day suits you?")
 	tb.brainMgr.hooks.Notice(testDMChat, "⏳ Still at it")
 	sum, err := tb.store.OutboxSummary(context.Background(), time.Now())
@@ -414,7 +414,7 @@ func TestOutboxKeepsAChatsOrder(t *testing.T) {
 // up on.
 func TestStatusWarnsAboutTheOutbox(t *testing.T) {
 	tb := newTestBridge(t, "")
-	tb.wa = newFlakyMessenger(tb.cfgs.Get, false)
+	tb.wa = newFlakyMessenger(tb.cfgs.Effective, false)
 	ctx := context.Background()
 	if _, err := tb.store.AddOutbox(ctx, store.OutboxRow{Chat: testDMChat, Parts: []store.OutboxPart{{Text: "late"}}, CreatedAt: time.Now().Add(-10 * time.Minute)}); err != nil {
 		t.Fatal(err)

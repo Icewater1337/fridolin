@@ -95,13 +95,13 @@ func TestRegistryWorkflowsKeepApprovalAndAllowlistingAtomic(t *testing.T) {
 	if err := g.Approve(second.ID, changed); err != nil {
 		t.Fatal(err)
 	}
-	if got := g.store.Get().BrainDirs[1].Approved.Name; got != changed.Name {
+	if got := g.store.Effective().BrainDirs[1].Approved.Name; got != changed.Name {
 		t.Fatalf("approved name: %q", got)
 	}
 	if err := g.UpdateBackup(second.ID, nil, []string{" *.tmp ", "", " cache/ "}); err != nil {
 		t.Fatal(err)
 	}
-	if got := g.store.Get().BrainDirs[1].Approved.Backup.Exclude; strings.Join(got, ",") != "*.tmp,cache/" {
+	if got := g.store.Effective().BrainDirs[1].Approved.Backup.Exclude; strings.Join(got, ",") != "*.tmp,cache/" {
 		t.Fatalf("backup exclusions: %v", got)
 	}
 	if err := g.Remove(first.ID); err != nil {

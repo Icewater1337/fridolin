@@ -81,7 +81,7 @@ func TestAddBrainRefusesEscapingScaffold(t *testing.T) {
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("add returned %d: %s", w.Code, w.Body.String())
 	}
-	if len(tb.cfgs.Get().BrainDirs) != 0 {
+	if len(tb.cfgs.Effective().BrainDirs) != 0 {
 		t.Fatal("the rejected folder was registered")
 	}
 	if entries, err := os.ReadDir(outside); err != nil || len(entries) != 0 {
@@ -100,7 +100,7 @@ func TestFSListKeepsMetadataInsideHome(t *testing.T) {
 	for link, target := range map[string]string{
 		"outside-link": outside,
 		"inside-link":  filepath.Join(tb.home, "inside"),
-		"data-link":    tb.cfgs.Get().DataDir,
+		"data-link":    tb.cfgs.Effective().DataDir,
 		"markers/.git": filepath.Join(outside, ".git"),
 	} {
 		if err := os.Symlink(target, filepath.Join(tb.home, link)); err != nil {

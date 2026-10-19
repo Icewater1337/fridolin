@@ -31,7 +31,7 @@ func TestBrainTakesItsFilesIntoItsInbox(t *testing.T) {
 	tb := newTestBridge(t, "")
 	dmDir := tb.addFolderBrain(t, manifest.Manifest{ID: "dm", Name: "DM", Routing: manifest.Routing{HandlesDMs: true}})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "g", Name: "Group", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}})
-	media := tb.cfgs.Get().MediaDir
+	media := tb.cfgs.Effective().MediaDir
 	p := writeTestFile(t, filepath.Join(media, mediafiles.IncomingDir, "voice.ogg"), "OggS")
 
 	tb.handleInbound(t.Context(), brain.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "listen", Media: []string{p}, Source: "whatsapp", At: time.Now()}})

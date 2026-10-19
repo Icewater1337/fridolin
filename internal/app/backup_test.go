@@ -736,7 +736,7 @@ func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
 		}
 	})
 	br := tb.brainMgr.Get("notes")
-	jid := tb.replyChatFor(br, tb.cfgs.Get())
+	jid := tb.replyChatFor(br, tb.cfgs.Effective())
 	if jid == "" {
 		t.Fatal("the test brain has no chat")
 	}

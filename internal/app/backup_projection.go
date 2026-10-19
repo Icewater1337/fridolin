@@ -13,7 +13,7 @@ import (
 
 func backupOptions(cfgs *config.Store, bm *BrainManager, notify func(context.Context, *brain.Brain, string) error) backup.Options {
 	boot := cfgs.Boot()
-	opts := backup.Options{BackupDir: boot.BackupDir(), RcloneConf: boot.RcloneConf(), Settings: func() backup.Settings { return BackupSettings(cfgs.Runtime()) },
+	opts := backup.Options{BackupDir: boot.BackupDir(), RcloneConf: boot.RcloneConf(), Settings: func() backup.Settings { return BackupSettings(cfgs.Get()) },
 		Targets: func() []backup.Target { return BackupTargets(bm.Brains(), notify) }, BridgeFiles: func() (backup.BridgeFiles, error) { return BackupFiles(cfgs) },
 		FindRclone: findRclone, Environ: func(ctx context.Context) []string {
 			return childEnv(helperScope(ctx), nil, "RCLONE_CONFIG="+boot.RcloneConf())
@@ -34,7 +34,7 @@ func newProjectedBackup(cfgs *config.Store, bm *BrainManager, notify func(contex
 
 // notifyBackup resolves the selected runtime's current reply destination.
 func (b *App) notifyBackup(ctx context.Context, br *brain.Brain, text string) error {
-	jid := b.replyChatFor(br, b.cfgs.Get())
+	jid := b.replyChatFor(br, b.cfgs.Effective())
 	if jid == "" {
 		return fmt.Errorf("brain %s has no chat to send it to — set its reply chat", br.ID())
 	}

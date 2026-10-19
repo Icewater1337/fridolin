@@ -21,7 +21,7 @@ import (
 )
 
 func TestCodexDefaultsAndValidation(t *testing.T) {
-	cfg, err := config.Resolve(&config.File{}, ConfigPaths(), runtime.GOOS)
+	cfg, err := config.ResolveFile(&config.File{}, ConfigPaths(), runtime.GOOS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestCodexDefaultsAndValidation(t *testing.T) {
 		t.Fatalf("wrong agent defaults: %s %s %s %s", cfg.AgentProvider, cfg.CodexPath, cfg.CodexModel, cfg.CodexEffort)
 	}
 	for _, c := range []*config.File{{AgentProvider: "other"}, {CodexEffort: "minimal"}} {
-		if _, err := config.Resolve(c, ConfigPaths(), runtime.GOOS); err == nil {
+		if _, err := config.ResolveFile(c, ConfigPaths(), runtime.GOOS); err == nil {
 			t.Fatal("accepted invalid configuration")
 		}
 	}

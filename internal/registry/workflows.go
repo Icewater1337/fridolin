@@ -287,7 +287,7 @@ func (g *Registry) Add(req AddInput) (AddResult, error) {
 	// which can be the brain.json or prompt the other one was added with.
 	g.addMu.Lock()
 	defer g.addMu.Unlock()
-	cfg := g.store.Get()
+	cfg := g.store.Effective()
 	abs, problems, _ := g.checkPath(req.Path, cfg, g.OtherDirs(cfg))
 	if len(problems) > 0 {
 		return AddResult{}, apperr.New(apperr.Invalid, strings.Join(problems, "; "))
@@ -349,7 +349,7 @@ func (g *Registry) Add(req AddInput) (AddResult, error) {
 		// apart, but not the other config writers: a brain saved or
 		// approved since the check above may claim the same group or the
 		// DMs, and the two must not both be registered.
-		eff, err := g.store.Resolve(c)
+		eff, err := g.store.ResolveFile(c)
 		if err != nil {
 			return err
 		}
@@ -430,7 +430,7 @@ type SuggestedBrain struct {
 }
 
 func (g *Registry) Inspect(path string) (Inspection, error) {
-	cfg := g.store.Get()
+	cfg := g.store.Effective()
 	abs, problems, warnings := g.checkPath(path, cfg, g.OtherDirs(cfg))
 	resp := Inspection{AbsPath: abs, Problems: nonNil(problems), Warnings: nonNil(warnings)}
 	if len(problems) > 0 {

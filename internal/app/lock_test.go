@@ -30,7 +30,7 @@ func TestNewBridgeTakesTheInstanceLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireTestDataDir(t, cfgs.Get())
+	requireTestDataDir(t, cfgs.Effective())
 
 	running, err := platform.AcquireLock(dataDir)
 	if err != nil {
@@ -122,7 +122,7 @@ func TestBridgeClosesTheStoreWhenItGivesUpTheLock(t *testing.T) {
 			if os.Geteuid() == 0 {
 				t.Skip("root can write a read-only file")
 			}
-			cfg := cfgs.Get()
+			cfg := cfgs.Effective()
 			if err := cfgs.Boot().EnsureDirs(); err != nil {
 				t.Fatal(err)
 			}
@@ -160,7 +160,7 @@ func TestBridgeClosesTheStoreWhenItGivesUpTheLock(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			requireTestDataDir(t, cfgs.Get())
+			requireTestDataDir(t, cfgs.Effective())
 			tc.run(t, cfgs, dataDir)
 			if open := openFilesUnder(t, dataDir); len(open) > 0 {
 				t.Errorf("the lock is released, but these are still open: %v", open)

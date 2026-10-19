@@ -125,7 +125,7 @@ func TestPollVoteFailuresMaskTheVoter(t *testing.T) {
 			wa.ProcessMessage(pollVoteEvent(t, []byte("0123456789abcdef0123456789abcdef"), voter, "3EB0POLL", "Tuesday 3pm"))
 		}, "ERROR Failed to decrypt poll vote from " + logx.MaskPhone(otherNumber) + "@s.whatsapp.net: "},
 		{"not saved", func(t *testing.T, tb *testBridge, wa *whatsapp.Client) {
-			if _, err := testStoreSQL(t, tb.cfgs.Get().DBPath).Exec(`CREATE TRIGGER refuse_votes BEFORE INSERT ON poll_votes BEGIN SELECT RAISE(ABORT, 'the disk is full'); END`); err != nil {
+			if _, err := testStoreSQL(t, tb.cfgs.Effective().DBPath).Exec(`CREATE TRIGGER refuse_votes BEFORE INSERT ON poll_votes BEGIN SELECT RAISE(ABORT, 'the disk is full'); END`); err != nil {
 				t.Fatal(err)
 			}
 			hash := sha256.Sum256([]byte("Tuesday 3pm"))

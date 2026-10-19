@@ -166,7 +166,7 @@ func TestBridgeReapsWhenItStarts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireTestDataDir(t, cfgs.Get())
+	requireTestDataDir(t, cfgs.Effective())
 	b, err := New(Options{Config: cfgs, NoWhatsApp: true})
 	if err != nil {
 		t.Fatal(err)

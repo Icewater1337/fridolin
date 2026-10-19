@@ -44,7 +44,7 @@ func (tb *testBridge) script(method, path, body, token string) *httptest.Respons
 func TestScriptAPIContract(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "personal", Name: "Personal", Routing: manifest.Routing{HandlesDMs: true}})
-	media := tb.cfgs.Get().MediaDir
+	media := tb.cfgs.Effective().MediaDir
 	inside := filepath.Join(media, "scan.pdf")
 	if err := os.WriteFile(inside, []byte("%PDF"), 0o600); err != nil {
 		t.Fatal(err)

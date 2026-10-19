@@ -19,10 +19,10 @@ import (
 // InboundHandler receives every allowed message at the command boundary.
 type InboundHandler func(context.Context, brain.Inbound)
 
-func whatsAppSettings(get func() *config.File) func() whatsapp.Settings {
+func whatsAppSettings(get func() config.Settings) func() whatsapp.Settings {
 	return func() whatsapp.Settings {
 		cfg := get()
-		return whatsapp.Settings{Policy: AccessPolicy(cfg), MediaDir: cfg.MediaDir, MaxMediaBytes: cfg.MaxMediaBytes(), MaxChunkSize: cfg.MaxChunkSize}
+		return whatsapp.Settings{Policy: accessPolicyOf(cfg.Live), MediaDir: cfg.Boot.MediaDir, MaxMediaBytes: int64(cfg.Live.MaxMediaMB) * 1024 * 1024, MaxChunkSize: cfg.Live.MaxChunkSize}
 	}
 }
 
@@ -61,13 +61,13 @@ func (s whatsAppPollStore) SentPoll(ctx context.Context, id string) (whatsapp.Se
 
 // NewWhatsAppClient supplies the command's config, store and runtime
 // projections. Creating it does not connect; Connect keeps that boundary.
-func NewWhatsAppClient(cfg func() *config.File, s *store.Store, handler InboundHandler, onIgnored whatsapp.IgnoredHandler) (*whatsapp.Client, error) {
+func NewWhatsAppClient(cfg func() config.Settings, s *store.Store, handler InboundHandler, onIgnored whatsapp.IgnoredHandler) (*whatsapp.Client, error) {
 	return whatsapp.New(whatsAppOptions(cfg, s, handler, onIgnored))
 }
 
-func whatsAppOptions(cfg func() *config.File, s *store.Store, handler InboundHandler, onIgnored whatsapp.IgnoredHandler) whatsapp.Options {
+func whatsAppOptions(cfg func() config.Settings, s *store.Store, handler InboundHandler, onIgnored whatsapp.IgnoredHandler) whatsapp.Options {
 	// Keep the initial log-level read before loading the device.
-	logger := logx.NewWaLogger("WhatsApp", cfg().LogLevel)
+	logger := logx.NewWaLogger("WhatsApp", cfg().Boot.LogLevel)
 	return whatsapp.Options{Settings: whatsAppSettings(cfg), Container: s.Container, Polls: whatsAppPollStore{s}, OnInbound: whatsAppInboundHandler(handler), OnIgnored: onIgnored, Log: logger, Chunks: outboundmsg.Chunk, Identity: whatsAppIdentity(), Outbound: whatsAppOutbound(), Text: whatsAppText(), Inbox: mediaInboxAt}
 }
 
@@ -95,7 +95,7 @@ func whatsAppIdentity() whatsapp.Identity {
 // whatsAppOptions is the production composition shared by construction and
 // integration tests. Startup paths come from Boot; policy and limits stay live.
 func (b *App) whatsAppOptions() whatsapp.Options {
-	opts := whatsAppOptions(func() *config.File { return RuntimeConfig(b.cfgs) }, b.store, b.handleInbound, b.recordIgnored)
+	opts := whatsAppOptions(func() config.Settings { return RuntimeSettings(b.cfgs) }, b.store, b.handleInbound, b.recordIgnored)
 	opts.OnVote = whatsAppVoteHandler(b.recordVote)
 	opts.OnChange = b.handleChange
 	opts.GroupRules = whatsAppGroupRules(b.groupRules)

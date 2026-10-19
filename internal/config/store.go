@@ -93,7 +93,7 @@ func Open(cfgPath string, options Options) (*Store, error) {
 		return nil, fmt.Errorf("reading config file %q: %w", cfgPath, err)
 	}
 
-	eff, err := Resolve(file, options.Paths, options.GOOS)
+	eff, err := ResolveFile(file, options.Paths, options.GOOS)
 	if err != nil {
 		return nil, err
 	}
@@ -138,13 +138,13 @@ func (cs *Store) Path() string { return cs.path }
 // what the settings that need a restart still are.
 func (cs *Store) Startup() *File { return cs.startup }
 
-// Get returns the effective configuration. Treat it as read-only: it is
+// Effective returns the compatibility file projection. Treat it as read-only: it is
 // shared by every goroutine until the next Update replaces it.
-func (cs *Store) Get() *File { return cs.snap.Load().Effective }
+func (cs *Store) Effective() *File { return cs.snap.Load().Effective }
 
-// Runtime returns the value settings from the same atomic snapshot as Get.
+// Get returns resolved runtime settings from the atomic configuration snapshot.
 // Treat it and its slices and maps as read-only.
-func (cs *Store) Runtime() *Settings { return cs.snap.Load().Settings }
+func (cs *Store) Get() *Settings { return cs.snap.Load().Settings }
 
 // ETag identifies the current file contents for optimistic concurrency.
 func (cs *Store) ETag() string { return cs.snap.Load().ETag }
@@ -292,7 +292,7 @@ func (cs *Store) commit(etag string, mutate func(*File, *Tx) error) (prev, next 
 	}
 	// What is written is this version's file, whatever the edit made of it.
 	file.Version = Version
-	eff, err := cs.Resolve(file)
+	eff, err := cs.ResolveFile(file)
 	if err != nil {
 		return prev, next, err
 	}
@@ -353,7 +353,7 @@ func (cs *Store) reread(cur *Snapshot) (*Snapshot, error) {
 	file, err := decodeConfigFile(cs.path, data)
 	if err == nil {
 		var eff *File
-		if eff, err = cs.Resolve(file); err == nil {
+		if eff, err = cs.ResolveFile(file); err == nil {
 			log.Printf("config: %s changed on disk since the bridge read it, and applies from now on", cs.path)
 			return &Snapshot{File: file, Effective: eff, Settings: settingsOf(eff, cs.paths), ETag: etag, Version: cur.Version + 1}, nil
 		}
@@ -521,7 +521,7 @@ func (tx *Tx) close() {
 // differ from the value the bridge started with, so they wait for a
 // restart. A setting changed and then changed back is not listed.
 func (cs *Store) RestartRequired() []string {
-	return restartRequired(cs.startup, cs.Get())
+	return restartRequired(cs.startup, cs.Effective())
 }
 
 func etagOf(data []byte) string {
@@ -698,7 +698,7 @@ func warnUnknownKeys(path string, data []byte) {
 func (cs *Store) Paths() Paths { return cs.paths }
 
 // Resolve derives values using this store's captured process inputs.
-func (cs *Store) Resolve(file *File) (*File, error) { return Resolve(file, cs.paths, cs.goos) }
+func (cs *Store) ResolveFile(file *File) (*File, error) { return ResolveFile(file, cs.paths, cs.goos) }
 
 // Boot returns the immutable process-start values.
 func (cs *Store) Boot() Boot { return cs.boot }

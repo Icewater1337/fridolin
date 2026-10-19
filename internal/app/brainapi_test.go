@@ -188,7 +188,7 @@ func TestRunsGetATokenForTheirRunOnly(t *testing.T) {
 		env[k] = v
 	}
 	file := env["FRIDOLIN_BRAIN_TOKEN_FILE"]
-	if env["FRIDOLIN_API"] != url || env["FRIDOLIN_BRAIN_ID"] != "a" || filepath.Dir(file) != runTokenDir(tb.cfgs.Get().DataDir, "a") {
+	if env["FRIDOLIN_API"] != url || env["FRIDOLIN_BRAIN_ID"] != "a" || filepath.Dir(file) != runTokenDir(tb.cfgs.Effective().DataDir, "a") {
 		t.Errorf("run env: FRIDOLIN_API=%q FRIDOLIN_BRAIN_ID=%q FRIDOLIN_BRAIN_TOKEN_FILE=%q", env["FRIDOLIN_API"], env["FRIDOLIN_BRAIN_ID"], file)
 	}
 	// Prompts and skills run "$FRIDOLIN_BIN" calendar, wherever the bridge
@@ -255,7 +255,7 @@ func TestBridgePrunesStaleRunTokens(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	requireTestDataDir(t, cfgs.Get())
+	requireTestDataDir(t, cfgs.Effective())
 	stale, err := writeRunToken(runTokenDir(data, "a"), "old-token")
 	if err != nil {
 		t.Fatal(err)

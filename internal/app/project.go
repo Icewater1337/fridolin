@@ -17,6 +17,10 @@ func AccessPolicy(cfg *config.File) access.Policy {
 	return access.Policy{AllowedNumbers: cfg.AllowedNumbers, AllowAnyDM: cfg.AllowsAnyDM(), AllowedGroups: cfg.AllowedGroups, GroupMembers: cfg.GroupMembers, Triggers: cfg.Triggers}
 }
 
+func accessPolicyOf(cfg config.Live) access.Policy {
+	return access.Policy{AllowedNumbers: cfg.AllowedNumbers, AllowAnyDM: cfg.AllowAnyDM, AllowedGroups: cfg.AllowedGroups, GroupMembers: cfg.GroupMembers, Triggers: cfg.Triggers}
+}
+
 func BackupSettings(settings *config.Settings) backup.Settings {
 	cfg := settings.Live
 	bc := cfg.Backup
@@ -86,7 +90,7 @@ func RuntimeConfig(cs *config.Store) *config.File {
 // RuntimeSettings pins startup resources and permits immediate tightening of
 // dashboard authentication. Disabling protection waits for the next start.
 func RuntimeSettings(cs *config.Store) config.Settings {
-	s := *cs.Runtime()
+	s := *cs.Get()
 	s.Boot = cs.Boot()
 	s.Live.Dashboard.Disabled = s.Boot.DashboardDisabled
 	s.Live.Dashboard.RequireToken = s.Boot.DashboardRequireToken || s.Live.Dashboard.RequireToken

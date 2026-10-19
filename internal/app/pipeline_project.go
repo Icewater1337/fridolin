@@ -29,7 +29,7 @@ func (b *App) newMessagePipeline() *pipeline.Workflow {
 			return b.outbox.Reply(ctx, id, jid, text, max)
 		},
 		Brains:      b.brainMgr.Manager,
-		Settings:    func() pipeline.Settings { return messageSettingsOf(b.cfgs.Runtime()) },
+		Settings:    func() pipeline.Settings { return messageSettingsOf(b.cfgs.Get()) },
 		Notice:      func(ctx context.Context, jid, text string) error { return b.wa.SendMessage(ctx, jid, text) },
 		SendChunked: func(ctx context.Context, jid, text string) error { return b.wa.SendChunked(ctx, jid, text) },
 		AppendSent:  b.appendHTTPMessageToHistory,

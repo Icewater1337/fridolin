@@ -108,7 +108,7 @@ func TestCalendarDashboardSignInFlow(t *testing.T) {
 	if (*got)["code_verifier"] == "" || (*got)["code"] != "good-code" || (*got)["client_secret"] != "TEST-CLIENT-SECRET" {
 		t.Errorf("token request = %v", *got)
 	}
-	tokPath := filepath.Join(tb.cfgs.Get().DataDir, "google_calendar_token_fam.json")
+	tokPath := filepath.Join(tb.cfgs.Effective().DataDir, "google_calendar_token_fam.json")
 	data, err := os.ReadFile(tokPath)
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestCalendarDashboardSignInFlow(t *testing.T) {
 	}
 	// Older versions copied the OAuth client, secret and all, next to the
 	// token for the calendar tool in the brain.
-	if _, err := os.Stat(filepath.Join(tb.cfgs.Get().DataDir, "google_calendar_credentials_fam.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(tb.cfgs.Effective().DataDir, "google_calendar_credentials_fam.json")); !os.IsNotExist(err) {
 		t.Errorf("a copy of the OAuth client was written next to the token (%v)", err)
 	}
 	// The state is single-use.
@@ -207,7 +207,7 @@ func TestCalendarSignInErrorsAreShown(t *testing.T) {
 }
 
 func portOf(tb *testBridge) string {
-	return strings.TrimPrefix(tb.cfgs.Get().HTTPListen, "127.0.0.1:")
+	return strings.TrimPrefix(tb.cfgs.Effective().HTTPListen, "127.0.0.1:")
 }
 
 // TestCalendarTokenIsNotFollowed: a brain the sandbox does not hold (on
@@ -1051,7 +1051,7 @@ func TestCalendarRedirectIsTheAddressServed(t *testing.T) {
 	srv, _ := fakeGoogle(t)
 	tb := newTestBridge(t, "")
 	useGoogleServer(tb, srv)
-	served := "http://" + tb.cfgs.Get().HTTPListen + "/"
+	served := "http://" + tb.cfgs.Effective().HTTPListen + "/"
 	_ = tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 	if _, err := tb.cfgs.Update("", func(c *config.File) error { c.HTTPListen = "127.0.0.1:1"; return nil }); err != nil {

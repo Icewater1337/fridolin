@@ -215,7 +215,7 @@ func TestConfigUpdateRefusesStrayGroupMembers(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not in allowed_groups") {
 		t.Fatalf("Update: %v, want the stray entry refused", err)
 	}
-	if got := cs.Get().AllowedGroups; !slices.Equal(got, []string{testGroup}) {
+	if got := cs.Effective().AllowedGroups; !slices.Equal(got, []string{testGroup}) {
 		t.Errorf("allowed_groups = %q after a refused edit", got)
 	}
 }
