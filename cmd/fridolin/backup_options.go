@@ -74,6 +74,6 @@ func (m *BackupManager) SettingsChanged(prev, next BackupSettings) {
 	}
 }
 
-// errRcloneMissing is findRclone's error when no rclone_path is set and no
+// ErrBackupRcloneMissing is findRclone's error when no rclone_path is set and no
 // rclone is found.
-var errRcloneMissing = errors.New("rclone is not installed")
+var ErrBackupRcloneMissing = errors.New("rclone is not installed")

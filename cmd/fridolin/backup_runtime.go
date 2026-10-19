@@ -47,7 +47,7 @@ func findRclone(p string) (string, error) {
 			return found, nil
 		}
 	}
-	return "", errRcloneMissing
+	return "", ErrBackupRcloneMissing
 }
 
 // rcloneFallbacks are where findRclone looks when rclone is not in the

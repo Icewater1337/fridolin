@@ -229,7 +229,7 @@ func (b *Bridge) apiBackupRestore(w http.ResponseWriter, r *http.Request) {
 		case apperr.Unavailable:
 			status = http.StatusServiceUnavailable
 		}
-		if errors.Is(err, errBackupRestoreRequest) {
+		if errors.Is(err, ErrBackupRestoreRequest) {
 			status = http.StatusBadRequest
 		}
 		httpapi.WriteErr(w, status, err.Error())

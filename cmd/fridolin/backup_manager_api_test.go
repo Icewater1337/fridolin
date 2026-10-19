@@ -15,7 +15,7 @@ func TestBackupRestoreRejectsInvalidDirectRequests(t *testing.T) {
 	} {
 		m := &BackupManager{}
 		target, err := m.Restore(req, func(string) (string, error) { t.Fatal("invalid request reached destination check"); return "", nil })
-		if target != "" || err == nil || err.Error() != "invalid brain or version" || !errors.Is(err, errBackupRestoreRequest) {
+		if target != "" || err == nil || err.Error() != "invalid brain or version" || !errors.Is(err, ErrBackupRestoreRequest) {
 			t.Errorf("Restore(%+v) = %q, %v", req, target, err)
 		}
 	}

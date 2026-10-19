@@ -762,7 +762,7 @@ func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
 		t.Fatalf("first scheduled run = %+v, want a refusal", res)
 	}
 	out := sent()
-	if len(out) != 1 || out[0].JID != jid || !strings.Contains(out[0].Text, "Backup of notes: "+massDeletionError) ||
+	if len(out) != 1 || out[0].JID != jid || !strings.Contains(out[0].Text, "Backup of notes: "+"refusing to mirror a mass deletion") ||
 		!strings.Contains(out[0].Text, "2 of 2 backed-up files are gone") {
 		t.Fatalf("want one notice to %s, got %+v", jid, out)
 	}
@@ -838,7 +838,7 @@ func TestBackupMassDeletionWithRealRclone(t *testing.T) {
 				}
 			}
 			res := runBackup(t, tb, "notes")
-			if res.OK || !res.Refused || !strings.HasPrefix(res.Error, massDeletionError) {
+			if res.OK || !res.Refused || !strings.HasPrefix(res.Error, "refusing to mirror a mass deletion") {
 				t.Errorf("result = %+v, want a refusal", res)
 			}
 			if wipe == "memories" && !strings.Contains(res.Error, "in memories/ are gone") {
@@ -848,7 +848,7 @@ func TestBackupMassDeletionWithRealRclone(t *testing.T) {
 				t.Errorf("current/ has %d files after a refused run, want all %d", n, backedUp)
 			}
 			body := tb.do("GET", "/api/backup/status", nil).Body.String()
-			if !strings.Contains(body, massDeletionError) || !strings.Contains(body, `"refused":true`) {
+			if !strings.Contains(body, "refusing to mirror a mass deletion") || !strings.Contains(body, `"refused":true`) {
 				t.Errorf("the refusal is not on the Backup page's status: %s", body)
 			}
 		})

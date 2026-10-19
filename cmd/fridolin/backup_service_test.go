@@ -39,7 +39,7 @@ func TestBackupSchedulerTicks(t *testing.T) {
 	fx.addTarget(t, "notes")
 	synctest.Test(t, func(t *testing.T) {
 		time.Sleep(start.Sub(bubble))
-		m := newBackupManager(fx.options)
+		m := NewBackupService(fx.options)
 		d := &backupDeletionRunner{src: []string{"a"}, cur: []string{"a"}}
 		fx.runner = d.run
 		m.Start(context.Background())
@@ -482,7 +482,7 @@ func TestUnreadableBackupStateIsKept(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"brains": {"notes": tru`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	m := newBackupManager(fx.options)
+	m := NewBackupService(fx.options)
 	if data, err := os.ReadFile(path + ".corrupt"); err != nil || string(data) != `{"brains": {"notes": tru` {
 		t.Errorf("state.json.corrupt = %q, %v; want the unreadable file", data, err)
 	}
@@ -564,7 +564,7 @@ func TestBackupSummaryShowsTheLatestFailure(t *testing.T) {
 	if res := fx.run(t, "a"); !res.OK {
 		t.Fatalf("backup of a = %+v", res)
 	}
-	saved := newBackupManager(fx.options).state.Brains
+	saved := NewBackupService(fx.options).state.Brains
 	if _, ok := saved["gone"]; ok || saved["a"] == nil || saved["b"] == nil {
 		t.Errorf("saved results for %v, want a and b only", slices.Collect(maps.Keys(saved)))
 	}
@@ -697,7 +697,7 @@ func TestBackupPublishedScheduleSurvivesRestart(t *testing.T) {
 	prev = next
 	next.DailyAt = "08:00"
 	m.SettingsChanged(prev, next)
-	if a := newBackupManager(fx.options).state.ArmedAt; !a.Equal(clock) {
+	if a := NewBackupService(fx.options).state.ArmedAt; !a.Equal(clock) {
 		t.Errorf("armed time after restart = %v, want %v", a, clock)
 	}
 }

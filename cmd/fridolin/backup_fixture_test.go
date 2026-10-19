@@ -58,7 +58,7 @@ func newBackupFixture(t *testing.T, configure func(*BackupSettings)) *backupFixt
 			}
 			return files, nil
 		},
-		FindRclone:     func(string) (string, error) { return "", errRcloneMissing },
+		FindRclone:     func(string) (string, error) { return "", ErrBackupRcloneMissing },
 		Environ:        func(context.Context) []string { return nil },
 		DesktopContext: func(ctx context.Context) context.Context { return ctx },
 		InstallHint:    func() string { return "install rclone" },
@@ -70,7 +70,7 @@ func newBackupFixture(t *testing.T, configure func(*BackupSettings)) *backupFixt
 			return f.runner(ctx, args, stderr)
 		},
 	}
-	f.manager = newBackupManager(f.options)
+	f.manager = NewBackupService(f.options)
 	t.Cleanup(f.manager.Stop)
 	return f
 }

@@ -37,7 +37,7 @@ func TestBackupOptionsReadSettingsAfterIdle(t *testing.T) {
 		settings.Root = "after"
 		return true
 	}}
-	m := newBackupManager(opts)
+	m := NewBackupService(opts)
 	if res := m.backupBrain(context.Background(), target, "manual", true); !res.OK {
 		t.Fatalf("backup = %+v", res)
 	}
@@ -58,7 +58,7 @@ func TestBackupOptionsStageOrderedFilesAndErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	marshalErr := errors.New("manifest encoding failed")
-	m := newBackupManager(BackupOptions{BackupDir: dir, BridgeFiles: func() (BackupBridgeFiles, error) {
+	m := NewBackupService(BackupOptions{BackupDir: dir, BridgeFiles: func() (BackupBridgeFiles, error) {
 		if _, err := os.Stat(filepath.Join(stage, "stale")); !os.IsNotExist(err) {
 			t.Fatalf("files read before old staging cleared: %v", err)
 		}

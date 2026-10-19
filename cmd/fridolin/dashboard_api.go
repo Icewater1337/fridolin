@@ -178,7 +178,7 @@ type statusResponse struct {
 	Brains        []BrainRuntime    `json:"brains"`
 	Issues        []registry.Issue  `json:"issues"`
 	Warnings      []string          `json:"warnings"`
-	Backup        backupSummary     `json:"backup"`
+	Backup        BackupSummary     `json:"backup"`
 	Ingest        bool              `json:"ingest"`
 	Pending       int               `json:"debouncing"`
 	// Settings saved since the start that only apply after a restart. The

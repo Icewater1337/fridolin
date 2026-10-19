@@ -73,14 +73,10 @@ func backupOptions(cfgs *config.Store, bm *BrainManager, notify func(context.Con
 }
 
 func newProjectedBackup(cfgs *config.Store, bm *BrainManager, notify func(context.Context, *Brain, string) error) *BackupManager {
-	m := newBackupManager(backupOptions(cfgs, bm, notify))
+	m := NewBackupService(backupOptions(cfgs, bm, notify))
 	// Publication succeeds before the schedule moves; failed saves never reach this callback.
 	cfgs.Subscribe(func(prev, next *config.Config) { m.SettingsChanged(backupSettings(prev), backupSettings(next)) })
 	return m
-}
-
-func NewBackupManager(cfgs *config.Store, bm *BrainManager) *BackupManager {
-	return newProjectedBackup(cfgs, bm, nil)
 }
 
 // notifyBackup resolves the selected runtime's current reply destination.

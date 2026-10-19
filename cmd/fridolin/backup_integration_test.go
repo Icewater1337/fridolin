@@ -20,7 +20,7 @@ func installBackupRunner(t *testing.T, tb *testBridge, runner BackupRunFunc, con
 	for _, apply := range configure {
 		apply(&opts)
 	}
-	tb.backup = newBackupManager(opts)
+	tb.backup = NewBackupService(opts)
 }
 
 // persistedBackupState reads the on-disk contract instead of service internals.

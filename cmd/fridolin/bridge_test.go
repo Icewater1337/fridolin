@@ -775,7 +775,7 @@ func TestNamesReadOutsideGo(t *testing.T) {
 	}{
 		{"web/assets/components/brain.js", []string{outcomeOK + ": [", outcomeError + ": [", outcomeInterrupted + ": [", outcomeQuestion + ": ["}},
 		{"web/assets/pages/settings.js", []string{"def: '" + config.QueueModeQueue + "'", "['" + config.QueueModeQueue + "', ", "['" + config.QueueModeInterrupt + "', "}},
-		{"web/assets/lib/brain.js", []string{"export const BRIDGE_BACKUP_ID = '" + bridgeBackupID + "';", "[['" + manifest.ObserveHistory + "', ", "['" + manifest.ObserveRun + "', "}},
+		{"web/assets/lib/brain.js", []string{"export const BRIDGE_BACKUP_ID = '" + BackupBridgeID + "';", "[['" + manifest.ObserveHistory + "', ", "['" + manifest.ObserveRun + "', "}},
 		{"web/assets/pages/brain.js", []string{"m.observe || '" + manifest.ObserveHistory + "'"}},
 	}
 	for _, c := range cases {
@@ -806,9 +806,9 @@ func TestDashboardSpellsTheBridgesBackupIDOnce(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if strings.Contains(string(js), "'"+bridgeBackupID+"'") {
+		if strings.Contains(string(js), "'"+BackupBridgeID+"'") {
 			rel, _ := filepath.Rel(repoDir, path)
-			t.Errorf("%s spells out %q; import BRIDGE_BACKUP_ID from lib/brain.js", rel, bridgeBackupID)
+			t.Errorf("%s spells out %q; import BRIDGE_BACKUP_ID from lib/brain.js", rel, BackupBridgeID)
 		}
 		return nil
 	})

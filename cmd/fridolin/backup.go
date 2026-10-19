@@ -46,13 +46,13 @@ import (
 // scheduled run that refuses tells the owner on WhatsApp (see
 // noticeRefusal).
 
-// bridgeBackupID stands for the bridge's own settings wherever backups
+// BackupBridgeID stands for the bridge's own settings wherever backups
 // list brains by id: in a job, in the backup state, and in Drive, where it
 // is the folder name above, so it must not change. The dashboard holds it
 // as BRIDGE_BACKUP_ID (web/assets/lib/brain.js) and shows it as "Bridge
 // settings". It cannot clash with a brain: brain ids start with a letter
 // or digit.
-const bridgeBackupID = "_bridge"
+const BackupBridgeID = "_bridge"
 
 // BackupResult is the outcome of backing up one brain (or the bridge config).
 type BackupResult struct {
@@ -126,7 +126,7 @@ type BackupManager struct {
 	mu      sync.Mutex
 	state   backupState
 	job     *backupJob
-	connect *connectJob
+	connect *backupConnectJob
 	// disconnecting is set while Disconnect removes the Drive link, so that
 	// no backup, restore or sign-in starts on a remote about to go.
 	disconnecting bool
@@ -167,11 +167,11 @@ const (
 // Back up now disabled.
 var refusalNoticeTimeout = 30 * time.Second
 
-// newBackupManager loads the saved backup state. A state file that cannot
+// NewBackupService loads the saved backup state. A state file that cannot
 // be read is kept as state.json.corrupt and the bridge starts with none: the
 // last results and the day of the last scheduled run are gone then, and the
 // log says so rather than leaving it to the next scheduled run to show.
-func newBackupManager(opts BackupOptions) *BackupManager {
+func NewBackupService(opts BackupOptions) *BackupManager {
 	m := &BackupManager{opts: opts, now: time.Now, idleWait: backupIdleWait, notify: opts.Notify}
 	m.runner = opts.Runner
 	if m.runner == nil {
@@ -238,7 +238,7 @@ func (m *BackupManager) rclonePath() (string, error) {
 // rcloneMissingHint says what to do about findRclone's error: install
 // rclone, or fix backup.rclone_path, whose error names the path.
 func (m *BackupManager) rcloneMissingHint(err error) string {
-	if errors.Is(err, errRcloneMissing) {
+	if errors.Is(err, ErrBackupRcloneMissing) {
 		return err.Error() + " — " + m.opts.InstallHint()
 	}
 	return err.Error()
@@ -302,7 +302,7 @@ func (m *BackupManager) connected() bool {
 
 // ── summary and status ───────────────────────────────────────────────────
 
-type backupSummary struct {
+type BackupSummary struct {
 	Connected bool       `json:"connected"`
 	Enabled   bool       `json:"enabled"`
 	Running   bool       `json:"running"`
@@ -319,14 +319,14 @@ type backupSummary struct {
 // brains that run and the bridge's settings, as the Backup page does, and
 // its error is the latest failure among them, whatever order the results
 // are stored in: with several, a refresh must not show another each time.
-func (m *BackupManager) Summary() backupSummary {
+func (m *BackupManager) Summary() BackupSummary {
 	cfg := m.opts.Settings()
 	brains := m.opts.Targets()
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	s := backupSummary{Connected: m.connected(), Enabled: cfg.Enabled, Running: m.job != nil}
+	s := BackupSummary{Connected: m.connected(), Enabled: cfg.Enabled, Running: m.job != nil}
 	s.Restoring = s.Running && m.job.kind == jobRestore
-	results := map[string]*BackupResult{bridgeBackupID: m.state.Bridge}
+	results := map[string]*BackupResult{BackupBridgeID: m.state.Bridge}
 	for _, br := range brains {
 		results[br.ID] = m.state.Brains[br.ID]
 	}
@@ -462,7 +462,7 @@ const connectSteps = 10
 // starts rclone's local OAuth listener and opens the browser, which is why
 // its runs get your desktop session's variables; that step blocks until you
 // approve access (or connectTimeout runs out).
-func (m *BackupManager) connectDrive(ctx context.Context, job *connectJob) error {
+func (m *BackupManager) connectDrive(ctx context.Context, job *backupConnectJob) error {
 	ctx = m.opts.DesktopContext(ctx)
 	remote := m.opts.Settings().Remote
 	// What is left of a remote that is not connected, one whose sign-in was
@@ -590,7 +590,7 @@ func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger strin
 		job.queue = append(job.queue, br.ID)
 	}
 	if includeBridge {
-		job.queue = append(job.queue, bridgeBackupID)
+		job.queue = append(job.queue, BackupBridgeID)
 	}
 	err := m.goLocked(func() {
 		defer cancel()
@@ -600,7 +600,7 @@ func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger strin
 			}
 		}
 		if includeBridge {
-			m.runOne(ctx, job, bridgeBackupID, func() *BackupResult { return m.backupBridge(ctx, trigger) })
+			m.runOne(ctx, job, BackupBridgeID, func() *BackupResult { return m.backupBridge(ctx, trigger) })
 		}
 		if ctx.Err() == nil {
 			m.prune(ctx, targets)
@@ -633,7 +633,7 @@ func (m *BackupManager) runOne(ctx context.Context, job *backupJob, id string, f
 	}
 	res := fn()
 	m.mu.Lock()
-	if id == bridgeBackupID {
+	if id == BackupBridgeID {
 		m.state.Bridge = res
 	} else {
 		m.state.Brains[id] = res
@@ -926,7 +926,7 @@ func (m *BackupManager) backupBridge(ctx context.Context, trigger string) *Backu
 	// No deletion limit: the bridge writes this folder itself, and removing
 	// a brain drops its manifest, a deletion the backup must mirror.
 	cfg := m.opts.Settings()
-	return m.syncDir(ctx, stage, backupPath(cfg, bridgeBackupID), "", trigger, -1)
+	return m.syncDir(ctx, stage, backupPath(cfg, BackupBridgeID), "", trigger, -1)
 }
 
 // writeStaged writes one file into the staging folder, a variable so tests
@@ -1098,7 +1098,7 @@ func (m *BackupManager) prune(ctx context.Context, targets []BackupTarget) {
 	if days <= 0 {
 		return
 	}
-	ids := []string{bridgeBackupID}
+	ids := []string{BackupBridgeID}
 	for _, br := range targets {
 		ids = append(ids, br.ID)
 	}

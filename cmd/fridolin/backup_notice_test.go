@@ -72,7 +72,7 @@ func TestRefusalNoticesForgetRemovedBrains(t *testing.T) {
 	if res := scheduledFixtureRun(t, fx, 0); !res.Refused {
 		t.Fatalf("scheduled run = %+v, want a refusal", res)
 	}
-	saved := newBackupManager(fx.options).state.RefusalNotices
+	saved := NewBackupService(fx.options).state.RefusalNotices
 	if _, ok := saved["removed"]; ok {
 		t.Errorf("the notice of a removed brain is still saved: %v", saved)
 	}

@@ -19,7 +19,7 @@ func (m *BackupManager) Status() map[string]any {
 	rc := map[string]any{"found": false, "install_hint": m.opts.InstallHint()}
 	if p, err := m.rclonePath(); err == nil {
 		rc["found"], rc["path"], rc["version"] = true, p, rcloneVersion(p, m.opts.Environ(context.Background()))
-	} else if !errors.Is(err, errRcloneMissing) {
+	} else if !errors.Is(err, ErrBackupRcloneMissing) {
 		rc["error"] = err.Error() // backup.rclone_path names one that does not work
 	}
 	// The response is built under the lock and written after it: a client
@@ -92,7 +92,7 @@ func (m *BackupManager) Connect() error {
 		return apperr.Wrap(apperr.Conflict, errDisconnecting)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
-	job := &connectJob{State: "running", cancel: cancel, done: make(chan struct{})}
+	job := &backupConnectJob{State: "running", cancel: cancel, done: make(chan struct{})}
 	err := m.goLocked(func() {
 		defer close(job.done)
 		defer cancel()
@@ -199,9 +199,9 @@ type BackupRestoreRequest struct {
 	Target  string
 }
 
-// errBackupRestoreRequest distinguishes malformed remote path components from a
+// ErrBackupRestoreRequest distinguishes malformed remote path components from a
 // rejected local destination. HTTP presents the former as 400 and the latter as 422.
-var errBackupRestoreRequest = errors.New("invalid brain or version")
+var ErrBackupRestoreRequest = errors.New("invalid brain or version")
 
 // Restore validates the remote path components and starts a background restore
 // after the supplied checker resolves and validates destination overlap.
@@ -210,7 +210,7 @@ func (m *BackupManager) Restore(req BackupRestoreRequest, overlapCheck func(stri
 		req.Version = "current"
 	}
 	if !backup.NameOK(req.Brain) || !backup.VersionOK(req.Version) {
-		return "", errBackupRestoreRequest
+		return "", ErrBackupRestoreRequest
 	}
 	if !m.connected() {
 		return "", apperr.New(apperr.Precondition, "Google Drive is not connected")

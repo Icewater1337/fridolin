@@ -56,12 +56,12 @@ func TestBackupJSONDiagnosticsReachVisibleBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	logs := captureBackupLog(t)
-	_ = newBackupManager(fx.options)
+	_ = NewBackupService(fx.options)
 	if got := strings.Join(logs(), "\n"); !strings.Contains(got, "json: cannot unmarshal array into Go value of type main.backupState") {
 		t.Fatalf("state warning: %s", got)
 	}
 	fx.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) { return []byte("[]"), nil }
-	err := fx.manager.connectDrive(t.Context(), &connectJob{State: "running"})
+	err := fx.manager.connectDrive(t.Context(), &backupConnectJob{State: "running"})
 	if err == nil || err.Error() != "unexpected rclone output: json: cannot unmarshal array into Go value of type main.rcloneQuestion " {
 		t.Fatalf("connection diagnostic = %v", err)
 	}
