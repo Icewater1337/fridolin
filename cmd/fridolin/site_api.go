@@ -5,132 +5,110 @@ package main
 // site itself.
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
-	"os"
 	"slices"
 	"strings"
 
-	"github.com/Icewater1337/fridolin/internal/fsx"
-	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
 
-func (b *Bridge) siteAPI(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/site", b.apiSiteStatus)
-	mux.HandleFunc("PUT /api/site/settings", b.apiSiteSettings)
-	mux.HandleFunc("POST /api/site/restart", b.apiSiteRestart)
-	mux.HandleFunc("POST /api/site/deploy-key", b.apiSiteDeployKey)
-	mux.HandleFunc("POST /api/site/deploy-key/github", b.apiSiteDeployKeyGH)
-	mux.HandleFunc("POST /api/site/github-repo", b.apiSiteCreateGitHubRepo)
-	mux.HandleFunc("PUT /api/site/repo", b.apiSiteConnect)
-	mux.HandleFunc("DELETE /api/site/repo", b.apiSiteDisconnect)
-	mux.HandleFunc("POST /api/site/repo/starter", b.apiSiteStarter)
-	mux.HandleFunc("POST /api/site/fetch", b.apiSiteFetch)
-	mux.HandleFunc("POST /api/site/deploy", b.apiSiteDeploy)
-	mux.HandleFunc("GET /api/site/users", b.apiSiteUsers)
-	mux.HandleFunc("POST /api/site/users", b.apiSiteAddUser)
-	mux.HandleFunc("PUT /api/site/users/{id}", b.apiSiteUpdateUser)
-	mux.HandleFunc("DELETE /api/site/users/{id}", b.apiSiteRemoveUser)
-	mux.HandleFunc("PUT /api/site/roles", b.apiSiteRoles)
-	mux.HandleFunc("PUT /api/site/tunnel", b.apiSiteTunnel)
-	mux.HandleFunc("PUT /api/site/google-client", b.apiSiteGoogleClient)
-	mux.HandleFunc("DELETE /api/site/google-client", b.apiSiteGoogleClientDelete)
-	mux.HandleFunc("GET /api/site/secrets", b.apiSiteSecrets)
-	mux.HandleFunc("PUT /api/site/secrets/{module}/{name}", b.apiSiteSetSecret)
-	mux.HandleFunc("DELETE /api/site/secrets/{module}/{name}", b.apiSiteRemoveSecret)
-
-	mux.HandleFunc("GET /api/site/builders", b.apiSiteBuilders)
-	mux.HandleFunc("PUT /api/site/builders/{id}", b.apiSiteSetBuilder)
-	mux.HandleFunc("GET /api/site/proposals", b.apiSiteProposals)
-	mux.HandleFunc("POST /api/site/proposals/{id}/merge", b.apiSiteMergeProposal)
-	mux.HandleFunc("DELETE /api/site/proposals/{id}", b.apiSiteDiscardProposal)
-	mux.HandleFunc("POST /api/site/previews/{id}", b.apiSiteStartPreview)
-	b.buildAPI(mux)
+type SiteService interface {
+	AddDeployKeyWithGH(ctx context.Context, addr string) (string, error)
+	AddStarter(ctx context.Context) error
+	AddUser(in SiteUserInput) (SiteUser, error)
+	BaseContext() context.Context
+	BuilderPreview(ctx context.Context, brainID string) (map[string]string, error)
+	ConnectRepo(ctx context.Context, r SiteRepo) error
+	CreateGitHubRepo(ctx context.Context, name string) (string, error)
+	Deploy(ctx context.Context, commit string) error
+	DeployKey(ctx context.Context) (string, error)
+	DeployStatus() *SiteJob
+	DiscardProposal(brainID string) error
+	DisconnectRepo() error
+	Fetch(ctx context.Context) (SiteUpdates, error)
+	IsBuilder(brainID string) bool
+	MergeProposal(ctx context.Context, brainID string) error
+	Proposals(ctx context.Context) []map[string]any
+	RemoveSecret(module, name string) error
+	RemoveUser(id string) error
+	Restart()
+	Secrets() ([]SiteModuleSecrets, error)
+	SetBuilder(ctx context.Context, brainID string, on bool) error
+	SetGoogleClient(data []byte) error
+	SetRoles(roles []string) error
+	SetSecret(module, name, value string) error
+	SetTunnelToken(token string) error
+	Settings() SiteSettings
+	UpdateSettings(u SiteSettingsUpdate) (SiteSettings, error)
+	UpdateUser(id string, in SiteUserInput) (SiteUser, error)
+	Users() []SiteUser
 }
 
-func (b *Bridge) apiSiteStatus(w http.ResponseWriter, r *http.Request) {
-	m := b.site
-	s := m.Settings()
-	resp := map[string]any{"settings": s}
-
-	node, nodeErr := findNode()
-	_, cfErr := findTool("cloudflared")
-	_, ghErr := findTool("gh")
-	rt := map[string]any{"node": node, "cloudflared": cfErr == nil, "gh": ghErr == nil}
-	if nodeErr != nil {
-		rt["node_error"] = nodeErr.Error()
-	}
-	resp["runtime"] = rt
-
-	site := m.site.status()
-	resp["site"] = map[string]any{
-		"process":   site,
-		"healthy":   site.State == "running" && siteHealthy(s.Listen),
-		"local_url": "http://" + s.Listen + "/",
-		"sandbox":   m.SandboxStatus(),
-	}
-	if s.Domain != "" {
-		resp["public_url"] = "https://" + s.Domain + "/"
-	}
-	resp["tunnel"] = map[string]any{"process": m.tunnel.status(), "token_saved": fsx.Exists(m.dir("tunnel.token"))}
-
-	repo := map[string]any{"connected": fsx.Exists(m.repoDir()), "github": githubRepo(s.Repo.URL)}
-	resp["repo"] = repo
-	if pub, err := os.ReadFile(m.dir("deploy_key.pub")); err == nil {
-		resp["deploy_key"] = strings.TrimSpace(string(pub))
-	}
-
-	googleStatus := map[string]any{"source": "none"}
-	if p := m.googleClientFile(); p != "" {
-		if data, err := os.ReadFile(p); err == nil {
-			if c, err := google.ParseClient(data); err == nil {
-				googleStatus["type"] = c.Type
-				googleStatus["source"] = "shared"
-				if p == m.dir("google_client.json") {
-					googleStatus["source"] = "site"
-				}
-			}
-		}
-	}
-	origin := "http://" + s.Listen
-	if s.Domain != "" {
-		origin = "https://" + s.Domain
-	}
-	googleStatus["redirect_uri"] = origin + "/auth/callback"
-	resp["google"] = googleStatus
-
-	users := m.Users()
-	admins := 0
-	for _, u := range users {
-		if u.Role == "admin" {
-			admins++
-		}
-	}
-	resp["accounts"] = map[string]int{"total": len(users), "admins": admins}
-	resp["deploy"] = m.DeployStatus()
-	httpapi.WriteJSON(w, http.StatusOK, resp)
+type SiteAPI struct {
+	Site         func() SiteService
+	StatusView   func() map[string]any
+	BuildersView func() []map[string]any
+	BuildRoutes  func(*http.ServeMux)
 }
 
-func (b *Bridge) apiSiteSettings(w http.ResponseWriter, r *http.Request) {
+func (a *SiteAPI) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/site", a.Status)
+	mux.HandleFunc("PUT /api/site/settings", a.Settings)
+	mux.HandleFunc("POST /api/site/restart", a.Restart)
+	mux.HandleFunc("POST /api/site/deploy-key", a.DeployKey)
+	mux.HandleFunc("POST /api/site/deploy-key/github", a.DeployKeyGH)
+	mux.HandleFunc("POST /api/site/github-repo", a.CreateGitHubRepo)
+	mux.HandleFunc("PUT /api/site/repo", a.Connect)
+	mux.HandleFunc("DELETE /api/site/repo", a.Disconnect)
+	mux.HandleFunc("POST /api/site/repo/starter", a.Starter)
+	mux.HandleFunc("POST /api/site/fetch", a.Fetch)
+	mux.HandleFunc("POST /api/site/deploy", a.Deploy)
+	mux.HandleFunc("GET /api/site/users", a.Users)
+	mux.HandleFunc("POST /api/site/users", a.AddUser)
+	mux.HandleFunc("PUT /api/site/users/{id}", a.UpdateUser)
+	mux.HandleFunc("DELETE /api/site/users/{id}", a.RemoveUser)
+	mux.HandleFunc("PUT /api/site/roles", a.Roles)
+	mux.HandleFunc("PUT /api/site/tunnel", a.Tunnel)
+	mux.HandleFunc("PUT /api/site/google-client", a.GoogleClient)
+	mux.HandleFunc("DELETE /api/site/google-client", a.GoogleClientDelete)
+	mux.HandleFunc("GET /api/site/secrets", a.Secrets)
+	mux.HandleFunc("PUT /api/site/secrets/{module}/{name}", a.SetSecret)
+	mux.HandleFunc("DELETE /api/site/secrets/{module}/{name}", a.RemoveSecret)
+
+	mux.HandleFunc("GET /api/site/builders", a.Builders)
+	mux.HandleFunc("PUT /api/site/builders/{id}", a.SetBuilder)
+	mux.HandleFunc("GET /api/site/proposals", a.Proposals)
+	mux.HandleFunc("POST /api/site/proposals/{id}/merge", a.MergeProposal)
+	mux.HandleFunc("DELETE /api/site/proposals/{id}", a.DiscardProposal)
+	mux.HandleFunc("POST /api/site/previews/{id}", a.StartPreview)
+	a.BuildRoutes(mux)
+}
+
+func (a *SiteAPI) Status(w http.ResponseWriter, r *http.Request) {
+	httpapi.WriteJSON(w, http.StatusOK, a.StatusView())
+}
+
+func (a *SiteAPI) Settings(w http.ResponseWriter, r *http.Request) {
 	var u SiteSettingsUpdate
 	if err := httpapi.DecodeJSON(r, &u); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if u.Enabled != nil && *u.Enabled {
-		users := b.site.Users()
+		users := a.Site().Users()
 		if !slices.ContainsFunc(users, func(x SiteUser) bool { return x.Role == "admin" }) {
 			httpapi.WriteErr(w, http.StatusBadRequest, "add an admin account (your Google address) before turning the site on")
 			return
 		}
-		if b.site.Settings().Approved == "" {
+		if a.Site().Settings().Approved == "" {
 			httpapi.WriteErr(w, http.StatusBadRequest, "deploy a commit of the site repository first")
 			return
 		}
 	}
-	s, err := b.site.UpdateSettings(u)
+	s, err := a.Site().UpdateSettings(u)
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -138,13 +116,13 @@ func (b *Bridge) apiSiteSettings(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, s)
 }
 
-func (b *Bridge) apiSiteRestart(w http.ResponseWriter, r *http.Request) {
-	go b.site.Restart()
+func (a *SiteAPI) Restart(w http.ResponseWriter, r *http.Request) {
+	go a.Site().Restart()
 	httpapi.WriteJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
 }
 
-func (b *Bridge) apiSiteDeployKey(w http.ResponseWriter, r *http.Request) {
-	pub, err := b.site.DeployKey(r.Context())
+func (a *SiteAPI) DeployKey(w http.ResponseWriter, r *http.Request) {
+	pub, err := a.Site().DeployKey(r.Context())
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -155,7 +133,7 @@ func (b *Bridge) apiSiteDeployKey(w http.ResponseWriter, r *http.Request) {
 // apiSiteDeployKeyGH adds the deploy key with gh. Before a repository is
 // connected the page sends the address typed for Connect as "url"; once one
 // is, it sends no body.
-func (b *Bridge) apiSiteDeployKeyGH(w http.ResponseWriter, r *http.Request) {
+func (a *SiteAPI) DeployKeyGH(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		URL string `json:"url"`
 	}
@@ -163,7 +141,7 @@ func (b *Bridge) apiSiteDeployKeyGH(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	repo, err := b.site.AddDeployKeyWithGH(r.Context(), req.URL)
+	repo, err := a.Site().AddDeployKeyWithGH(r.Context(), req.URL)
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -171,7 +149,7 @@ func (b *Bridge) apiSiteDeployKeyGH(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "repo": repo})
 }
 
-func (b *Bridge) apiSiteCreateGitHubRepo(w http.ResponseWriter, r *http.Request) {
+func (a *SiteAPI) CreateGitHubRepo(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -179,7 +157,7 @@ func (b *Bridge) apiSiteCreateGitHubRepo(w http.ResponseWriter, r *http.Request)
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	u, err := b.site.CreateGitHubRepo(r.Context(), strings.TrimSpace(req.Name))
+	u, err := a.Site().CreateGitHubRepo(r.Context(), strings.TrimSpace(req.Name))
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -187,37 +165,37 @@ func (b *Bridge) apiSiteCreateGitHubRepo(w http.ResponseWriter, r *http.Request)
 	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"url": u})
 }
 
-func (b *Bridge) apiSiteConnect(w http.ResponseWriter, r *http.Request) {
+func (a *SiteAPI) Connect(w http.ResponseWriter, r *http.Request) {
 	var req SiteRepo
 	if err := httpapi.DecodeJSON(r, &req); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := b.site.ConnectRepo(r.Context(), req); err != nil {
+	if err := a.Site().ConnectRepo(r.Context(), req); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, b.site.Settings())
+	httpapi.WriteJSON(w, http.StatusOK, a.Site().Settings())
 }
 
-func (b *Bridge) apiSiteDisconnect(w http.ResponseWriter, r *http.Request) {
-	if err := b.site.DisconnectRepo(); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-func (b *Bridge) apiSiteStarter(w http.ResponseWriter, r *http.Request) {
-	if err := b.site.AddStarter(r.Context()); err != nil {
+func (a *SiteAPI) Disconnect(w http.ResponseWriter, r *http.Request) {
+	if err := a.Site().DisconnectRepo(); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func (b *Bridge) apiSiteFetch(w http.ResponseWriter, r *http.Request) {
-	up, err := b.site.Fetch(r.Context())
+func (a *SiteAPI) Starter(w http.ResponseWriter, r *http.Request) {
+	if err := a.Site().AddStarter(r.Context()); err != nil {
+		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (a *SiteAPI) Fetch(w http.ResponseWriter, r *http.Request) {
+	up, err := a.Site().Fetch(r.Context())
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadGateway, err.Error())
 		return
@@ -225,7 +203,7 @@ func (b *Bridge) apiSiteFetch(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, up)
 }
 
-func (b *Bridge) apiSiteDeploy(w http.ResponseWriter, r *http.Request) {
+func (a *SiteAPI) Deploy(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Commit string `json:"commit"`
 	}
@@ -234,24 +212,24 @@ func (b *Bridge) apiSiteDeploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The deploy outlives this request.
-	if err := b.site.Deploy(b.site.baseContext(), req.Commit); err != nil {
+	if err := a.Site().Deploy(a.Site().BaseContext(), req.Commit); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusAccepted, b.site.DeployStatus())
+	httpapi.WriteJSON(w, http.StatusAccepted, a.Site().DeployStatus())
 }
 
-func (b *Bridge) apiSiteUsers(w http.ResponseWriter, r *http.Request) {
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"users": b.site.Users(), "roles": b.site.Settings().Roles})
+func (a *SiteAPI) Users(w http.ResponseWriter, r *http.Request) {
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"users": a.Site().Users(), "roles": a.Site().Settings().Roles})
 }
 
-func (b *Bridge) apiSiteAddUser(w http.ResponseWriter, r *http.Request) {
+func (a *SiteAPI) AddUser(w http.ResponseWriter, r *http.Request) {
 	var in SiteUserInput
 	if err := httpapi.DecodeJSON(r, &in); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	u, err := b.site.AddUser(in)
+	u, err := a.Site().AddUser(in)
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -259,13 +237,13 @@ func (b *Bridge) apiSiteAddUser(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, u)
 }
 
-func (b *Bridge) apiSiteUpdateUser(w http.ResponseWriter, r *http.Request) {
+func (a *SiteAPI) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	var in SiteUserInput
 	if err := httpapi.DecodeJSON(r, &in); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	u, err := b.site.UpdateUser(r.PathValue("id"), in)
+	u, err := a.Site().UpdateUser(r.PathValue("id"), in)
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -273,15 +251,15 @@ func (b *Bridge) apiSiteUpdateUser(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, u)
 }
 
-func (b *Bridge) apiSiteRemoveUser(w http.ResponseWriter, r *http.Request) {
-	if err := b.site.RemoveUser(r.PathValue("id")); err != nil {
+func (a *SiteAPI) RemoveUser(w http.ResponseWriter, r *http.Request) {
+	if err := a.Site().RemoveUser(r.PathValue("id")); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func (b *Bridge) apiSiteRoles(w http.ResponseWriter, r *http.Request) {
+func (a *SiteAPI) Roles(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Roles []string `json:"roles"`
 	}
@@ -289,14 +267,14 @@ func (b *Bridge) apiSiteRoles(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := b.site.SetRoles(req.Roles); err != nil {
+	if err := a.Site().SetRoles(req.Roles); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"roles": b.site.Settings().Roles})
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"roles": a.Site().Settings().Roles})
 }
 
-func (b *Bridge) apiSiteTunnel(w http.ResponseWriter, r *http.Request) {
+func (a *SiteAPI) Tunnel(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Token string `json:"token"`
 	}
@@ -304,7 +282,7 @@ func (b *Bridge) apiSiteTunnel(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := b.site.SetTunnelToken(req.Token); err != nil {
+	if err := a.Site().SetTunnelToken(req.Token); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -314,7 +292,7 @@ func (b *Bridge) apiSiteTunnel(w http.ResponseWriter, r *http.Request) {
 // apiSiteGoogleClient saves the site's own Google client and restarts the
 // site. Its runtime.json names the client file it reads, chosen when it
 // starts (googleClientFile): without a restart it keeps the shared client.
-func (b *Bridge) apiSiteGoogleClient(w http.ResponseWriter, r *http.Request) {
+func (a *SiteAPI) GoogleClient(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(io.LimitReader(r.Body, 64*1024))
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
@@ -327,38 +305,30 @@ func (b *Bridge) apiSiteGoogleClient(w http.ResponseWriter, r *http.Request) {
 	if json.Unmarshal(data, &wrapped) == nil && wrapped.JSON != "" {
 		data = []byte(wrapped.JSON)
 	}
-	if err := b.site.SetGoogleClient(data); err != nil {
+	if err := a.Site().SetGoogleClient(data); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	go b.site.Restart()
+	go a.Site().Restart()
 	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 // apiSiteGoogleClientDelete removes the site's own Google client and restarts
 // the site, which then uses Fridolin's shared one.
-func (b *Bridge) apiSiteGoogleClientDelete(w http.ResponseWriter, r *http.Request) {
-	if err := b.site.SetGoogleClient(nil); err != nil {
+func (a *SiteAPI) GoogleClientDelete(w http.ResponseWriter, r *http.Request) {
+	if err := a.Site().SetGoogleClient(nil); err != nil {
 		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	go b.site.Restart()
+	go a.Site().Restart()
 	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func (b *Bridge) apiSiteBuilders(w http.ResponseWriter, r *http.Request) {
-	out := []map[string]any{}
-	for _, br := range b.brainMgr.Brains() {
-		item := map[string]any{"id": br.ID(), "name": br.Name(), "builder": b.site.IsBuilder(br.ID())}
-		if p := b.site.previewOf(br.ID()); p != nil {
-			item["preview"] = b.site.previewURLs(br.ID(), p)
-		}
-		out = append(out, item)
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"brains": out})
+func (a *SiteAPI) Builders(w http.ResponseWriter, r *http.Request) {
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"brains": a.BuildersView()})
 }
 
-func (b *Bridge) apiSiteSetBuilder(w http.ResponseWriter, r *http.Request) {
+func (a *SiteAPI) SetBuilder(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		On bool `json:"on"`
 	}
@@ -367,40 +337,40 @@ func (b *Bridge) apiSiteSetBuilder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Setting up the workspace can take a while (npm install); it outlives the request.
-	if err := b.site.SetBuilder(b.site.baseContext(), r.PathValue("id"), req.On); err != nil {
+	if err := a.Site().SetBuilder(a.Site().BaseContext(), r.PathValue("id"), req.On); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func (b *Bridge) apiSiteProposals(w http.ResponseWriter, r *http.Request) {
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"proposals": b.site.Proposals(r.Context())})
+func (a *SiteAPI) Proposals(w http.ResponseWriter, r *http.Request) {
+	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"proposals": a.Site().Proposals(r.Context())})
 }
 
-func (b *Bridge) apiSiteMergeProposal(w http.ResponseWriter, r *http.Request) {
-	if err := b.site.MergeProposal(r.Context(), r.PathValue("id")); err != nil {
+func (a *SiteAPI) MergeProposal(w http.ResponseWriter, r *http.Request) {
+	if err := a.Site().MergeProposal(r.Context(), r.PathValue("id")); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusAccepted, b.site.DeployStatus())
+	httpapi.WriteJSON(w, http.StatusAccepted, a.Site().DeployStatus())
 }
 
-func (b *Bridge) apiSiteDiscardProposal(w http.ResponseWriter, r *http.Request) {
-	if err := b.site.DiscardProposal(r.PathValue("id")); err != nil {
+func (a *SiteAPI) DiscardProposal(w http.ResponseWriter, r *http.Request) {
+	if err := a.Site().DiscardProposal(r.PathValue("id")); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func (b *Bridge) apiSiteStartPreview(w http.ResponseWriter, r *http.Request) {
+func (a *SiteAPI) StartPreview(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if !b.site.IsBuilder(id) {
+	if !a.Site().IsBuilder(id) {
 		httpapi.WriteErr(w, http.StatusBadRequest, "that brain does not build the site")
 		return
 	}
-	urls, err := b.site.BuilderPreview(b.site.baseContext(), id)
+	urls, err := a.Site().BuilderPreview(a.Site().BaseContext(), id)
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -410,8 +380,8 @@ func (b *Bridge) apiSiteStartPreview(w http.ResponseWriter, r *http.Request) {
 
 // apiSiteSecrets lists the modules' secrets by name. Values never leave the
 // bridge except to the live site.
-func (b *Bridge) apiSiteSecrets(w http.ResponseWriter, r *http.Request) {
-	list, err := b.site.Secrets()
+func (a *SiteAPI) Secrets(w http.ResponseWriter, r *http.Request) {
+	list, err := a.Site().Secrets()
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
@@ -421,7 +391,7 @@ func (b *Bridge) apiSiteSecrets(w http.ResponseWriter, r *http.Request) {
 
 // apiSiteSetSecret saves a secret and restarts the site, which reads its
 // secrets only when it starts.
-func (b *Bridge) apiSiteSetSecret(w http.ResponseWriter, r *http.Request) {
+func (a *SiteAPI) SetSecret(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Value string `json:"value"`
 	}
@@ -429,19 +399,19 @@ func (b *Bridge) apiSiteSetSecret(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := b.site.SetSecret(r.PathValue("module"), r.PathValue("name"), req.Value); err != nil {
+	if err := a.Site().SetSecret(r.PathValue("module"), r.PathValue("name"), req.Value); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	go b.site.Restart()
+	go a.Site().Restart()
 	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func (b *Bridge) apiSiteRemoveSecret(w http.ResponseWriter, r *http.Request) {
-	if err := b.site.RemoveSecret(r.PathValue("module"), r.PathValue("name")); err != nil {
+func (a *SiteAPI) RemoveSecret(w http.ResponseWriter, r *http.Request) {
+	if err := a.Site().RemoveSecret(r.PathValue("module"), r.PathValue("name")); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	go b.site.Restart()
+	go a.Site().Restart()
 	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

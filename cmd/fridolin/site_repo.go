@@ -539,8 +539,8 @@ func lookupPath(m map[string]any, p string) any {
 
 // ── deploying ───────────────────────────────────────────────────────────────
 
-// siteJob is one deploy in progress (or the last one).
-type siteJob struct {
+// SiteJob is one deploy in progress (or the last one).
+type SiteJob struct {
 	mu       sync.Mutex
 	Commit   string   `json:"commit"`
 	State    string   `json:"state"` // running, done, error
@@ -551,24 +551,24 @@ type siteJob struct {
 	Finished string   `json:"finished,omitempty"`
 }
 
-func (j *siteJob) step(format string, args ...any) {
+func (j *SiteJob) step(format string, args ...any) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.Step = fmt.Sprintf(format, args...)
 	j.Log = append(j.Log, j.Step)
 }
 
-func (j *siteJob) snapshot() *siteJob {
+func (j *SiteJob) snapshot() *SiteJob {
 	if j == nil {
 		return nil
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	return &siteJob{Commit: j.Commit, State: j.State, Step: j.Step, Error: j.Error, Log: slices.Clone(j.Log), Started: j.Started, Finished: j.Finished}
+	return &SiteJob{Commit: j.Commit, State: j.State, Step: j.Step, Error: j.Error, Log: slices.Clone(j.Log), Started: j.Started, Finished: j.Finished}
 }
 
 // DeployStatus returns the running or last deploy.
-func (m *SiteManager) DeployStatus() *siteJob {
+func (m *SiteManager) DeployStatus() *SiteJob {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.deploy.snapshot()
@@ -599,7 +599,7 @@ func (m *SiteManager) Deploy(ctx context.Context, commit string) error {
 		m.mu.Unlock()
 		return errors.New("a deploy is already running")
 	}
-	job := &siteJob{Commit: commit, State: "running", Started: time.Now().UTC().Format(time.RFC3339), Log: []string{}}
+	job := &SiteJob{Commit: commit, State: "running", Started: time.Now().UTC().Format(time.RFC3339), Log: []string{}}
 	m.deploy = job
 	m.mu.Unlock()
 
@@ -618,7 +618,7 @@ func (m *SiteManager) Deploy(ctx context.Context, commit string) error {
 	return nil
 }
 
-func (m *SiteManager) runDeploy(ctx context.Context, job *siteJob, commit string) error {
+func (m *SiteManager) runDeploy(ctx context.Context, job *SiteJob, commit string) error {
 	dir := m.deployDir(commit)
 	if err := m.prepareCheckout(ctx, job, commit, dir); err != nil {
 		return err
@@ -645,7 +645,7 @@ func (m *SiteManager) runDeploy(ctx context.Context, job *siteJob, commit string
 
 // prepareCheckout checks a commit out into dir, installs its dependencies and
 // builds its modules. A folder from an earlier deploy of the same commit is reused.
-func (m *SiteManager) prepareCheckout(ctx context.Context, job *siteJob, commit, dir string) error {
+func (m *SiteManager) prepareCheckout(ctx context.Context, job *SiteJob, commit, dir string) error {
 	ready := filepath.Join(dir, ".fridolin-ready")
 	if fsx.Exists(ready) {
 		job.step("Reusing the build of %s", commit[:12])

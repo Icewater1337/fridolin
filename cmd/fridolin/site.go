@@ -117,7 +117,7 @@ type SiteManager struct {
 	users    []SiteUser
 	site     *siteProc
 	tunnel   *siteProc
-	deploy   *siteJob
+	deploy   *SiteJob
 	previews map[string]*sitePreview
 	tokens   map[string]string // builder token → brain id
 	hooks    SiteBuilderHooks
@@ -588,9 +588,9 @@ func (m *SiteManager) reconcile(restart bool) {
 	}
 }
 
-// baseContext is the bridge's context once started; background work such as
+// BaseContext is the bridge's context once started; background work such as
 // a deploy outlives the request that began it.
-func (m *SiteManager) baseContext() context.Context {
+func (m *SiteManager) BaseContext() context.Context {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.ctx != nil {

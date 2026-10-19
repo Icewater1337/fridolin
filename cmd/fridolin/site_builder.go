@@ -96,7 +96,7 @@ func (m *SiteManager) BuilderArgs(brainID string) []string {
 	if !m.IsBuilder(brainID) {
 		return nil
 	}
-	if err := m.ensureBuilder(m.baseContext(), brainID); err != nil {
+	if err := m.ensureBuilder(m.BaseContext(), brainID); err != nil {
 		log.Printf("[site] brain %s builds the site, but its workspace is not ready: %v", brainID, err)
 		return nil
 	}
@@ -114,7 +114,7 @@ func (m *SiteManager) CodexBuilder(brainID string) ([]string, []string, string, 
 	if m.hooks.Executable == nil || m.hooks.BridgeURL == nil {
 		return nil, nil, "", errors.New("site builder is missing its bridge connection")
 	}
-	if err := m.ensureBuilder(m.baseContext(), brainID); err != nil {
+	if err := m.ensureBuilder(m.BaseContext(), brainID); err != nil {
 		return nil, nil, "", err
 	}
 	exe, err := m.hooks.Executable()
@@ -594,7 +594,7 @@ func (m *SiteManager) MergeProposal(ctx context.Context, brainID string) error {
 	if err != nil {
 		return err
 	}
-	return m.Deploy(m.baseContext(), head)
+	return m.Deploy(m.BaseContext(), head)
 }
 
 // DiscardProposal forgets a proposal. The branch stays in the repository.
@@ -668,7 +668,7 @@ func (m *SiteManager) BuilderPreview(ctx context.Context, brainID string) (map[s
 		cmd.Env = append(m.host.Env(node, "FRIDOLIN_SITE_RUNTIME="+rtFile, "NODE_ENV=production"), sbEnv...)
 		return cmd, nil
 	}
-	p.proc.ensure(m.baseContext(), build)
+	p.proc.ensure(m.BaseContext(), build)
 	deadline := time.Now().Add(20 * time.Second)
 	for !siteHealthy(listen) {
 		if time.Now().After(deadline) {
