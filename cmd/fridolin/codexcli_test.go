@@ -5,20 +5,19 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
-
-	"github.com/Icewater1337/fridolin/internal/manifest"
-
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
 func TestCodexDefaultsAndValidation(t *testing.T) {
-	cfg, err := config.Resolve(&config.Config{})
+	cfg, err := config.Resolve(&config.Config{}, configPaths(), runtime.GOOS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +25,7 @@ func TestCodexDefaultsAndValidation(t *testing.T) {
 		t.Fatalf("wrong agent defaults: %s %s %s %s", cfg.AgentProvider, cfg.CodexPath, cfg.CodexModel, cfg.CodexEffort)
 	}
 	for _, c := range []*config.Config{{AgentProvider: "other"}, {CodexEffort: "minimal"}} {
-		if _, err := config.Resolve(c); err == nil {
+		if _, err := config.Resolve(c, configPaths(), runtime.GOOS); err == nil {
 			t.Fatal("accepted invalid configuration")
 		}
 	}

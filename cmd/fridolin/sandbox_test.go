@@ -349,7 +349,7 @@ func TestSandboxConfigRejectsUnusablePaths(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			_, err := config.Load(writeConfig(t, `{"sandbox": `+tc.sandbox+`}`))
+			_, err := loadConfig(writeConfig(t, `{"sandbox": `+tc.sandbox+`}`))
 			switch {
 			case tc.wantErr == "" && err != nil:
 				t.Fatalf("Load: %v", err)
@@ -455,7 +455,7 @@ func TestSandboxProfileCoversBrainFoldersBothWays(t *testing.T) {
 			deny("file-read*", "literal", root+"/volume/CLAUDE.md"), deny("file-read*", "subpath", root+"/volume/.claude")}, false},
 	}
 	for _, inherit := range []bool{false, true} {
-		cfg, err := config.Load(writeConfig(t, fmt.Sprintf(`{"data_dir": %q, "inherit_claude_user_config": %v%s}`, home+"/data", inherit, dirs)))
+		cfg, err := loadConfig(writeConfig(t, fmt.Sprintf(`{"data_dir": %q, "inherit_claude_user_config": %v%s}`, home+"/data", inherit, dirs)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -506,7 +506,7 @@ func TestSandboxProfileCoversTheFolderABrainRunsIn(t *testing.T) {
 		brainFolder(t, "~/assistant/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 		brainFolder(t, "~/b", manifest.Manifest{ID: "b"}),
 	)
-	cfg, err := config.Load(writeConfig(t, fmt.Sprintf(`{"data_dir": %q%s}`, home+"/data", dirs)))
+	cfg, err := loadConfig(writeConfig(t, fmt.Sprintf(`{"data_dir": %q%s}`, home+"/data", dirs)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1547,7 +1547,7 @@ func TestViewerClosesWithItsBrain(t *testing.T) {
 			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			calls := fakeTmux(t)
-			cfg, err := config.Load(writeConfig(t, `{
+			cfg, err := loadConfig(writeConfig(t, `{
 				"data_dir": "`+home+`/data",
 				"viewer": true`+brainDirsJSON(t,
 				brainFolder(t, home+"/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),

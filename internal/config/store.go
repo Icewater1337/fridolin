@@ -33,6 +33,8 @@ import (
 // the next message without a restart.
 type Store struct {
 	path        string
+	paths       Paths
+	goos        string
 	startup     *Config                       // the effective configuration the process started with
 	checkBrains func(old, next *Config) error // command-owned brain-set validation
 
@@ -66,14 +68,14 @@ var ErrConflict = errors.New("config changed since it was loaded — reload and 
 
 // Open loads cfgPath. A missing file is not an error: it means an empty
 // configuration with defaults, which is what a fresh install starts from.
-// checkBrains validates registry edits under the commit lock before any write.
+// Options.CheckBrains validates registry edits under the commit lock before any write.
 // A nil callback permits reads and settings updates, but refuses brain edits.
-func Open(cfgPath string, checkBrains func(old, next *Config) error) (*Store, error) {
+func Open(cfgPath string, options Options) (*Store, error) {
 	// BRAIN_MODE switched classic mode on as "brain_mode": false did, and
 	// is refused like it (see retiredBrainMode). It is no setting: the
 	// environment only gets this check, so a bridge that ran classic mode
 	// from it does not quietly start without a brain for its chats.
-	if v := os.Getenv("BRAIN_MODE"); v != "" && !IsTruthy(v) {
+	if v := options.getenv("BRAIN_MODE"); v != "" && !IsTruthy(v) {
 		return nil, ClassicModeRemoved("BRAIN_MODE="+v, "Unset BRAIN_MODE in the bridge's environment")
 	}
 	warnDotEnvNotRead(cfgPath)
@@ -89,15 +91,15 @@ func Open(cfgPath string, checkBrains func(old, next *Config) error) (*Store, er
 		return nil, fmt.Errorf("reading config file %q: %w", cfgPath, err)
 	}
 
-	eff, err := Resolve(file)
+	eff, err := Resolve(file, options.Paths, options.GOOS)
 	if err != nil {
 		return nil, err
 	}
 	if file.DataDir == "" {
-		warnLegacyDataDir(eff.DataDir)
+		warnLegacyDataDir(eff.DataDir, options.Paths.Home)
 	}
 	WarnGroupsWithoutMembers(nil, eff)
-	cs := &Store{path: cfgPath, startup: eff, checkBrains: checkBrains}
+	cs := &Store{path: cfgPath, startup: eff, paths: options.Paths, goos: options.GOOS, checkBrains: options.CheckBrains}
 	cs.snap.Store(&Snapshot{File: file, Effective: eff, ETag: etagOf(raw), Version: 1})
 	return cs, nil
 }
@@ -278,7 +280,7 @@ func (cs *Store) commit(etag string, mutate func(*Config, *Tx) error) (prev, nex
 	}
 	// What is written is this version's file, whatever the edit made of it.
 	file.Version = Version
-	eff, err := Resolve(file)
+	eff, err := cs.Resolve(file)
 	if err != nil {
 		return prev, next, err
 	}
@@ -339,7 +341,7 @@ func (cs *Store) reread(cur *Snapshot) (*Snapshot, error) {
 	file, err := decodeConfigFile(cs.path, data)
 	if err == nil {
 		var eff *Config
-		if eff, err = Resolve(file); err == nil {
+		if eff, err = cs.Resolve(file); err == nil {
 			log.Printf("config: %s changed on disk since the bridge read it, and applies from now on", cs.path)
 			return &Snapshot{File: file, Effective: eff, ETag: etag, Version: cur.Version + 1}, nil
 		}
@@ -565,8 +567,7 @@ func warnDotEnvNotRead(cfgPath string) {
 // warnLegacyDataDir says when the default data dir is the one from before
 // the rename, taken because ~/.fridolin does not exist, so that it can be
 // named in data_dir before the bridge stops looking for it.
-func warnLegacyDataDir(dataDir string) {
-	home := HomeDir()
+func warnLegacyDataDir(dataDir, home string) {
 	if home == "" || dataDir != filepath.Join(home, LegacyDataDirName) {
 		return
 	}
@@ -720,3 +721,9 @@ func RestartFieldNames() []string {
 	}
 	return names
 }
+
+// Paths returns the process inputs captured when the store opened.
+func (cs *Store) Paths() Paths { return cs.paths }
+
+// Resolve derives values using this store's captured process inputs.
+func (cs *Store) Resolve(file *Config) (*Config, error) { return Resolve(file, cs.paths, cs.goos) }

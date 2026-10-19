@@ -130,6 +130,10 @@ const (
 
 // configPathFrom is configPath, and says where the file came from.
 func configPathFrom(flagValue string) (path, source string) {
+	return configPathFromPaths(flagValue, configPaths())
+}
+
+func configPathFromPaths(flagValue string, paths config.Paths) (path, source string) {
 	if old := os.Getenv("CONFIG_FILE"); old != "" {
 		log.Printf("warning: CONFIG_FILE=%s is ignored: set FRIDOLIN_CONFIG instead, or pass --config", old)
 	}
@@ -139,7 +143,7 @@ func configPathFrom(flagValue string) (path, source string) {
 	if p := os.Getenv("FRIDOLIN_CONFIG"); p != "" {
 		return p, configFromEnv
 	}
-	return config.DefaultPath(), configFromDefault
+	return config.DefaultPath(paths), configFromDefault
 }
 
 // resolvedPaths are the config file and the data dir a command uses, both
@@ -154,11 +158,12 @@ type resolvedPaths struct {
 // resolvePaths finds the config file as configPath does and the data dir it
 // names, as loading it would, without creating either.
 func resolvePaths(configFlag string) (resolvedPaths, error) {
-	home := config.HomeDir()
+	home := homeDir()
 	if home == "" {
 		return resolvedPaths{}, errors.New("getting home dir: $HOME is not set")
 	}
-	path, source := configPathFrom(configFlag)
+	paths := configPathsFor(home)
+	path, source := configPathFromPaths(configFlag, paths)
 	// A missing file is a fresh install, which gets the default data dir.
 	var file struct {
 		DataDir string `json:"data_dir"`
@@ -170,7 +175,7 @@ func resolvePaths(configFlag string) (resolvedPaths, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return resolvedPaths{}, fmt.Errorf("reading config file %q: %w", path, err)
 	}
-	dir, dirSource := config.ResolveDataDir(file.DataDir, home)
+	dir, dirSource := config.ResolveDataDir(file.DataDir, paths)
 	return resolvedPaths{Config: absPath(path), ConfigSource: source, DataDir: absPath(dir), DataDirSource: dirSource}, nil
 }
 
@@ -252,15 +257,16 @@ func runCmd(args []string) {
 			console = lf
 		}
 	}
-	ring, path := runLog(console, opts.config)
+	inputs := configOptions()
+	ring, path := runLogWithPaths(console, opts.config, inputs.Paths)
 	if logErr != nil {
 		// Once the log reaches the dashboard too.
 		log.Printf("%v; logging to stderr without rotating it", logErr)
 	}
-	if err := config.EnsureFile(path); err != nil {
+	if err := config.EnsureFile(path, inputs.Paths, inputs.GOOS); err != nil {
 		log.Fatalf("creating config: %v", err)
 	}
-	cfgs, err := openConfigStore(path)
+	cfgs, err := config.Open(path, inputs)
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}
@@ -371,10 +377,14 @@ func stopOnSignals(cancel context.CancelCauseFunc, brains *BrainManager) func() 
 // to start (no config, one that does not load, another bridge on the data
 // dir).
 func runLog(console io.Writer, configFlag string) (*logx.Ring, string) {
+	return runLogWithPaths(console, configFlag, configPaths())
+}
+
+func runLogWithPaths(console io.Writer, configFlag string, paths config.Paths) (*logx.Ring, string) {
 	ring := logx.NewRing(logRingLines)
 	log.SetOutput(io.MultiWriter(console, ring))
 	log.Printf("Starting %s", version.Line())
-	path, source := configPathFrom(configFlag)
+	path, source := configPathFromPaths(configFlag, paths)
 	log.Printf("Config file: %s (%s)", absPath(path), source)
 	return ring, path
 }
@@ -383,7 +393,7 @@ func runLog(console io.Writer, configFlag string) (*logx.Ring, string) {
 // WhatsApp session, and where it came from: without data_dir in the
 // config, which folders exist decides it.
 func logDataDir(cfgs *config.Store) {
-	home := config.HomeDir()
+	home := cfgs.Paths().Home
 	dir := cfgs.Get().DataDir
 	log.Printf("Data dir: %s (%s)", absPath(dir), config.DataDirSource(cfgs.FileCopy().DataDir, dir, home))
 }
@@ -394,15 +404,16 @@ func initCmd(args []string) {
 	claudePath := fs.String("claude-path", "", "path to the Claude Code CLI")
 	dataDir := fs.String("data-dir", "", "data folder to write into the config (default ~/.fridolin, or the folder from before the rename when only that exists)")
 	_ = fs.Parse(args)
-	path := configPath(*cfgPath)
+	inputs := configOptions()
+	path, _ := configPathFromPaths(*cfgPath, inputs.Paths)
 	if fsx.Exists(path) {
 		fmt.Printf("%s already exists — leaving it alone.\n", path)
 		return
 	}
-	if err := config.WriteStarter(path, *claudePath, *dataDir); err != nil {
+	if err := config.WriteStarter(path, *claudePath, *dataDir, inputs.Paths, inputs.GOOS); err != nil {
 		log.Fatalf("writing %s: %v", path, err)
 	}
-	if _, err := config.Load(path); err != nil {
+	if _, err := config.Load(path, inputs); err != nil {
 		log.Fatalf("the starter config does not load: %v", err)
 	}
 }
@@ -412,9 +423,10 @@ func openCmd(args []string) {
 	cfgPath := fs.String("config", "", configFlagHelp)
 	printOnly := fs.Bool("print", false, "print the URL instead of opening it")
 	_ = fs.Parse(args)
-	path := configPath(*cfgPath)
+	inputs := configOptions()
+	path, _ := configPathFromPaths(*cfgPath, inputs.Paths)
 
-	cfg, err := config.LoadExisting(path)
+	cfg, err := config.LoadExisting(path, inputs)
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}
@@ -464,7 +476,7 @@ func rotateTokenCmd(args []string) {
 	fs := flag.NewFlagSet("rotate-token", flag.ExitOnError)
 	cfgPath := fs.String("config", "", configFlagHelp)
 	_ = fs.Parse(args)
-	cfg, err := config.LoadExisting(configPath(*cfgPath))
+	cfg, err := loadExistingConfig(configPath(*cfgPath))
 	if err != nil {
 		log.Fatalf("loading config: %v", err)
 	}
@@ -573,9 +585,10 @@ func leftOutBrains(issues []BrainIssue) []string {
 // is logged meanwhile and the error that ends it, if one does, are
 // redacted: the output then goes into a public bug report as it is.
 func writeCheck(w io.Writer, o checkOptions) error {
+	inputs := configOptions()
 	var red *redactor
 	if o.redact {
-		red = newRedactor(config.HomeDir())
+		red = newRedactor(inputs.Paths.Home)
 		red.addChats(o.routes...)
 		// The log entries of loading the config name paths, and the
 		// allowed chats it finds odd, as they are written.
@@ -583,11 +596,11 @@ func writeCheck(w io.Writer, o checkOptions) error {
 		log.SetOutput(redactingWriter{prev, red})
 		defer log.SetOutput(prev)
 	}
-	path := configPath(o.config)
+	path, _ := configPathFromPaths(o.config, inputs.Paths)
 	if red != nil {
 		red.addConfig(path)
 	}
-	cfg, err := config.LoadExisting(path)
+	cfg, err := config.LoadExisting(path, inputs)
 	if err != nil {
 		return red.err(fmt.Errorf("loading config: %w", err))
 	}

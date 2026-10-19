@@ -8,7 +8,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -605,14 +604,14 @@ const (
 
 // ResolveDataDir is the data dir a config file's data_dir value stands
 // for, and where it came from: the value itself, or for an empty one
-// DefaultDataDir's choice.
-func ResolveDataDir(value, home string) (dir, source string) {
+// the captured default choice in paths.
+func ResolveDataDir(value string, paths Paths) (dir, source string) {
 	dir = value
 	if dir == "" {
-		dir = DefaultDataDir(home)
+		dir = paths.DefaultDataDir
 	}
-	dir = fsx.ExpandHome(dir, home)
-	return dir, DataDirSource(value, dir, home)
+	dir = fsx.ExpandHome(dir, paths.Home)
+	return dir, DataDirSource(value, dir, paths.Home)
 }
 
 // DataDirSource says where dir, the data dir ResolveDataDir made of the
@@ -630,14 +629,15 @@ func DataDirSource(value, dir, home string) string {
 }
 
 // Resolve derives the running configuration from the on-disk layer:
-// defaults, ~ expansion, validation. It writes nothing, see EnsureDirs.
-func Resolve(file *Config) (*Config, error) {
+// defaults, ~ expansion and platform validation from explicit inputs. It reads
+// no environment or filesystem state and writes nothing, see EnsureDirs.
+func Resolve(file *Config, paths Paths, goos string) (*Config, error) {
 	cfg, err := file.Clone()
 	if err != nil {
 		return nil, err
 	}
 
-	home := HomeDir()
+	home := paths.Home
 	if home == "" {
 		return nil, errors.New("getting home dir: $HOME is not set")
 	}
@@ -659,7 +659,7 @@ func Resolve(file *Config) (*Config, error) {
 	if cfg.CodexEffort == "" {
 		cfg.CodexEffort = "high"
 	}
-	cfg.DataDir, _ = ResolveDataDir(cfg.DataDir, home)
+	cfg.DataDir, _ = ResolveDataDir(cfg.DataDir, paths)
 	if cfg.DBPath == "" {
 		cfg.DBPath = filepath.Join(cfg.DataDir, "bridge.db")
 	}
@@ -762,7 +762,7 @@ func Resolve(file *Config) (*Config, error) {
 		cfg.StartupChecks.RequiredFiles[i] = fsx.ExpandHome(cfg.StartupChecks.RequiredFiles[i], home)
 	}
 
-	if err := cfg.Validate(); err != nil {
+	if err := cfg.Validate(goos); err != nil {
 		return nil, err
 	}
 	return cfg, nil
@@ -808,7 +808,7 @@ var validGitConfigs = map[string]bool{"read": true, "deny": true}
 // when they are resolved (ResolveBrains), which leaves one that clashes with
 // another out instead of stopping them all. Zero brains is fine: a fresh
 // install adds its first brain from the dashboard.
-func (c *Config) Validate() error {
+func (c *Config) Validate(goos string) error {
 	if c.AgentProvider != "claude" && c.AgentProvider != "codex" {
 		return fmt.Errorf("agent_provider must be claude or codex, not %q", c.AgentProvider)
 	}
@@ -824,7 +824,7 @@ func (c *Config) Validate() error {
 	if !validGitConfigs[c.Sandbox.GitConfig] {
 		return fmt.Errorf("sandbox.git_config must be \"read\" or \"deny\", not %q", c.Sandbox.GitConfig)
 	}
-	if err := c.Sandbox.Validate(runtime.GOOS); err != nil {
+	if err := c.Sandbox.Validate(goos); err != nil {
 		return err
 	}
 	for _, name := range c.ChildEnvPassthrough {
@@ -889,14 +889,6 @@ func (sc SandboxConfig) Validate(goos string) error {
 		return check("sandbox.credentials_dir", sc.CredentialsDir)
 	}
 	return nil
-}
-
-// HomeDir is the user's home folder, $HOME on Unix, or "" when there is
-// none. Every part of the bridge looks it up here, so that ~ and the
-// defaults under it mean the same folder everywhere.
-func HomeDir() string {
-	home, _ := os.UserHomeDir()
-	return home
 }
 
 // IsTruthy reports whether v reads as true: true, 1, yes or on.

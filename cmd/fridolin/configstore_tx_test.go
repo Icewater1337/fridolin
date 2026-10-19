@@ -487,7 +487,7 @@ func TestTheConfigMakesNoFolders(t *testing.T) {
 		}
 	}
 
-	if _, err := config.Load(filepath.Join(root, "typo.json")); err != nil {
+	if _, err := loadConfig(filepath.Join(root, "typo.json")); err != nil {
 		t.Fatal(err)
 	}
 	noFolders("loading a config file that is not there")
