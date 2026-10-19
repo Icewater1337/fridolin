@@ -36,3 +36,21 @@ func (p *Workflow) Finished(br *brainruntime.Brain, m brainruntime.Inbound, res 
 		log.Printf("brain %s: %v", br.ID(), err)
 	}
 }
+
+// WorkingNotice sends an immediate working notification.
+func (p *Workflow) WorkingNotice(jid, text string) {
+	// At once or not at all: a notice that arrives after the
+	// answer would only confuse.
+	if err := p.Notice(context.Background(), jid, text); err != nil {
+		log.Printf("failed to send the working notice to %s: %v", jid, err)
+	}
+}
+
+// Question queues the sink adapter's formatted question and acknowledges admission.
+func (p *Workflow) Question(br *brainruntime.Brain, jid, text string) bool {
+	if err := p.SendQuestion(context.Background(), br.ID(), jid, text, p.Settings().MaxChunkSize); err != nil {
+		log.Printf("brain %s: question to %s: %v", br.ID(), jid, err)
+		return false
+	}
+	return true
+}

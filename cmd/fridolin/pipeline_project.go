@@ -20,6 +20,9 @@ func messageSettingsOf(cfg *config.Config) pipeline.Settings {
 // with the same immediate-send behavior as the original bridge methods.
 func (b *Bridge) newMessagePipeline() *pipeline.Workflow {
 	return &pipeline.Workflow{
+		SendQuestion: func(ctx context.Context, id, jid, text string, max int) error {
+			return b.outbox.Question(ctx, id, jid, text, max)
+		},
 		Reply: func(ctx context.Context, id, jid, text string, max int) error {
 			return b.outbox.Reply(ctx, id, jid, text, max)
 		},

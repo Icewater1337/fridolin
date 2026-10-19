@@ -25,6 +25,7 @@ type Settings struct {
 // Workflow owns message decisions independently of bridge lifecycle.
 // The command intake wrapper still owns admission and persistence on shutdown.
 type Workflow struct {
+	SendQuestion func(context.Context, string, string, string, int) error
 	Reply        func(context.Context, string, string, string, int) error
 	Brains       *brainruntime.Manager
 	Debouncer    *Debouncer

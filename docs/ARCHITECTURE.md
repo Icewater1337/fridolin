@@ -163,11 +163,13 @@ behaviour unless its title says so. The steps so far:
   debouncer, retaining `brain.Inbound` parts, timer generations and ordered
   shutdown draining. `chat.Principal` carries the existing anonymous, script
   or brain caller identity and history label. Token lookup, authorization
-  policy, intake persistence and delivery still live in the command.
+  policy and intake persistence still live in the command.
   `Workflow` owns commands, routing, OTP interception and queue notices. It
   consumes the real brain manager, operation-local policy and callbacks for
-  notices, OTP hand-off and reply selection. The pipeline depends on `brain`,
-  `chat` and `outbound`; its tests also use `testutil`. It imports no
+  notices, OTP hand-off and reply selection. It also resolves authorized ingest,
+  sends external messages and delivers completed runs through narrow media,
+  history and outbox callbacks. The pipeline depends on `brain`, `chat`,
+  `claudecli`, `otp` and `outbound`; its tests also use `testutil`. It imports no
   configuration, transport, database or HTTP package.
 
 - **R14, Google Calendar**: `google` owns OAuth clients and pending state,
@@ -473,9 +475,10 @@ responsibility and says what it must not do.
   retains each message's runtime parts through merging, edits and deletions;
   `Drain` waits for started flushes and returns pending batches oldest first
   for durable shutdown. New messages after draining flush immediately.
-  `Workflow` owns commands, routing, the OTP gate and dispatch. Delivery,
-  `Ingest`, `SendExternal` and durable intake remain command-owned and are
-  the remaining R12 slices.
+  `Workflow` owns commands, routing, the OTP gate, dispatch, ingest resolution,
+  external sending and delivery decisions. The sink adapter supplies formatted
+  working notices and questions; confirmed outbox delivery still records history
+  through the command adapter. Durable intake remains command-owned.
 - **`outbound`**: chunking, poll parsing, shared send errors, paced sends,
   minimal transport contracts and the catalogue of every chat-facing message.
   `Outbox` owns persisted replies, per-part progress, poll fallback, retries

@@ -208,20 +208,8 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 	}
 
 	b.brainMgr.SetHooks(BrainHooks{
-		Notice: func(jid, text string) {
-			// At once or not at all: a notice that arrives after the
-			// answer would only confuse.
-			if err := b.wa.SendMessage(context.Background(), jid, text); err != nil {
-				log.Printf("failed to send the working notice to %s: %v", jid, err)
-			}
-		},
-		Question: func(br *brainruntime.Brain, jid, text string) bool {
-			if err := b.outbox.Question(context.Background(), br.ID(), jid, text, b.cfgs.Get().MaxChunkSize); err != nil {
-				log.Printf("brain %s: question to %s: %v", br.ID(), jid, err)
-				return false
-			}
-			return true
-		},
+		Notice:      b.pipeline.WorkingNotice,
+		Question:    b.pipeline.Question,
 		Deliver:     b.pipeline.Finished,
 		Undelivered: b.undelivered,
 		Waiting:     b.keepWaiting,
