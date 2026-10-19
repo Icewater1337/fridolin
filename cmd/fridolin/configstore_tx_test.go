@@ -406,7 +406,7 @@ func TestHandEditThenSaveWithTheOldETagConflicts(t *testing.T) {
 func TestHandEditThenDeltaUpdateKeepsBoth(t *testing.T) {
 	tb := newTestBridge(t, "")
 	editByHand(t, tb.cfgs.Path(), func(c map[string]any) { c["max_chunk_size"] = 1234 })
-	if w := tb.do("POST", "/api/chats/allow", chatRequest{Kind: "dm", Number: "15559876543"}); w.Code != 200 {
+	if w := tb.do("POST", "/api/chats/allow", httpapi.ChatRequest{Kind: "dm", Number: "15559876543"}); w.Code != 200 {
 		t.Fatalf("allow: %d %s", w.Code, w.Body.String())
 	}
 	var file config.Config

@@ -21,7 +21,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/access"
 	"github.com/Icewater1337/fridolin/internal/brain"
 
-	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -37,18 +36,18 @@ import (
 func (b *Bridge) apiMux() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /api/status", b.apiStatus)
+	mux.HandleFunc("GET /api/status", httpapi.StatusAPI{Snapshot: b.statusSnapshot}.ServeHTTP)
 	mux.HandleFunc("GET /api/whatsapp/qr", b.newConnectionAPI().QR)
 	mux.HandleFunc("POST /api/whatsapp/pair", b.newConnectionAPI().Pair)
 	mux.HandleFunc("GET /api/whatsapp/groups", b.newConnectionAPI().Groups)
 	mux.HandleFunc("GET /api/activity", b.apiActivity)
 	mux.HandleFunc("GET /api/logs", b.apiLogs)
 
-	mux.HandleFunc("GET /api/chats/ignored", b.apiIgnored)
-	mux.HandleFunc("POST /api/chats/allow", b.apiAllowChat)
-	mux.HandleFunc("POST /api/chats/revoke", b.apiRevokeChat)
-	mux.HandleFunc("POST /api/chats/members", b.apiGroupMembers)
-	mux.HandleFunc("POST /api/chats/dismiss", b.apiDismissChat)
+	mux.HandleFunc("GET /api/chats/ignored", b.newChatsAPI().Ignored)
+	mux.HandleFunc("POST /api/chats/allow", b.newChatsAPI().Allow)
+	mux.HandleFunc("POST /api/chats/revoke", b.newChatsAPI().Revoke)
+	mux.HandleFunc("POST /api/chats/members", b.newChatsAPI().Members)
+	mux.HandleFunc("POST /api/chats/dismiss", b.newChatsAPI().Dismiss)
 
 	mux.HandleFunc("GET /api/config", b.newConfigAPI().Get)
 	mux.HandleFunc("PUT /api/config", b.newConfigAPI().Put)
@@ -116,44 +115,10 @@ func (b *Bridge) apiMux() http.Handler {
 
 // ── status ───────────────────────────────────────────────────────────────
 
-type statusResponse struct {
-	Version       string            `json:"version"`
-	StartedAt     time.Time         `json:"started_at"`
-	UptimeS       int64             `json:"uptime_s"`
-	ConfigPath    string            `json:"config_path"`
-	DataDir       string            `json:"data_dir"`
-	DevMode       bool              `json:"dev_mode"`
-	Platform      string            `json:"platform"`
-	WhatsApp      waStatus          `json:"whatsapp"`
-	Claude        claudecli.Status  `json:"claude"`
-	AgentProvider string            `json:"agent_provider"`
-	Codex         *claudecli.Status `json:"codex,omitempty"`
-	Sandbox       sandboxStatus     `json:"sandbox"`
-	Brains        []brain.Runtime   `json:"brains"`
-	Issues        []registry.Issue  `json:"issues"`
-	Warnings      []string          `json:"warnings"`
-	Backup        backup.Summary    `json:"backup"`
-	Ingest        bool              `json:"ingest"`
-	Pending       int               `json:"debouncing"`
-	// Settings saved since the start that only apply after a restart. The
-	// dashboard shows its restart banner from this, in every tab.
-	RestartRequired []string `json:"restart_required"`
-}
-
-type waStatus struct {
-	chat.LinkState
-	QRAvailable bool `json:"qr_available"`
-}
-
-type sandboxStatus struct {
-	Enabled   bool `json:"enabled"`
-	Supported bool `json:"supported"`
-}
-
-func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
+func (b *Bridge) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 	cfg := runtimeConfig(b.cfgs)
 	wa := b.wa.State()
-	resp := statusResponse{
+	resp := httpapi.StatusResponse{
 		Version:       version.String(),
 		StartedAt:     b.started,
 		UptimeS:       int64(time.Since(b.started).Seconds()),
@@ -161,10 +126,10 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		DataDir:       cfg.DataDir,
 		DevMode:       b.dev != nil,
 		Platform:      runtime.GOOS,
-		WhatsApp:      waStatus{LinkState: wa, QRAvailable: wa.QRCode != ""},
+		WhatsApp:      httpapi.WhatsAppStatus{LinkState: wa, QRAvailable: wa.QRCode != ""},
 		Claude:        claudeInfo(cfg.ClaudePath, cfg.ChildEnvPassthrough),
 		AgentProvider: cfg.AgentProvider,
-		Sandbox:       sandboxStatus{Enabled: cfg.Sandbox.Enabled, Supported: runtime.GOOS == "darwin"},
+		Sandbox:       httpapi.SandboxStatus{Enabled: cfg.Sandbox.Enabled, Supported: runtime.GOOS == "darwin"},
 		Issues:        nonNil(b.brainIssues(cfg)),
 		Warnings:      nonNil(b.Warnings()),
 		Backup:        b.backup.Summary(),
@@ -187,7 +152,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	resp.Warnings = append(resp.Warnings, b.outboxWarnings(r.Context())...)
+	resp.Warnings = append(resp.Warnings, b.outboxWarnings(ctx)...)
 	if bad := badAllowedNumbers(cfg.AllowedNumbers); len(bad) > 0 {
 		resp.Warnings = append(resp.Warnings, fmt.Sprintf("allowed_numbers holds %q, which lets nobody in: each entry must be a phone number, digits with the country code. Fix it under Chats → Allowed numbers.", bad))
 	}
@@ -221,7 +186,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		resp.Brains = append(resp.Brains, br.Snapshot())
 	}
 	resp.Brains = nonNil(resp.Brains)
-	httpapi.WriteJSON(w, http.StatusOK, resp)
+	return resp
 }
 
 // tokenWarnings says when the dashboard token does not keep brains out of
@@ -333,232 +298,6 @@ func (b *Bridge) apiLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── chats ────────────────────────────────────────────────────────────────
-
-func (b *Bridge) apiIgnored(w http.ResponseWriter, r *http.Request) {
-	chats, err := b.store.ListIgnored()
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, chats)
-}
-
-// chatRequest is what /api/chats/allow and /api/chats/revoke take.
-type chatRequest struct {
-	JID    string `json:"jid"`
-	Kind   string `json:"kind"`   // group or dm
-	Number string `json:"number"` // for dm; the JID's number when empty
-	Brain  string `json:"brain"`  // allow, group: brain to route it to ("" = default brain)
-}
-
-// sent is the entry as the request writes it, trimmed: the group JID, or
-// for a dm the number (the JID when there is none).
-func (req chatRequest) sent() string {
-	if req.Kind == "dm" && strings.TrimSpace(req.Number) != "" {
-		return strings.TrimSpace(req.Number)
-	}
-	return strings.TrimSpace(req.JID)
-}
-
-// listEntry checks the request and returns the allow list it is about and
-// the entry, in the form the list holds.
-func (req chatRequest) listEntry() (dm bool, entry string, err error) {
-	switch req.Kind {
-	case "group":
-		entry, err = config.AllowListGroup(req.sent())
-		return false, entry, err
-	case "dm":
-		entry, err = chat.PhoneNumber(req.sent())
-		return true, entry, err
-	default:
-		return false, "", errors.New("kind must be group or dm")
-	}
-}
-
-// apiAllowChat allows a group or number and, for a group, assigns it to a
-// brain — the dashboard version of copying a JID out of the log.
-func (b *Bridge) apiAllowChat(w http.ResponseWriter, r *http.Request) {
-	var req chatRequest
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	dm, entry, err := req.listEntry()
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	err = b.registry.AllowChat(dm, entry, req.Brain)
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	// The chat no longer waits for access, also when it was typed in.
-	waiting := entry
-	if dm {
-		waiting = req.JID
-		if waiting == "" {
-			waiting = chat.DMJID(entry)
-		}
-	}
-	_ = b.store.DismissIgnored(waiting, true)
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "allowed", "entry": entry})
-}
-
-// errNotListed means the entry to revoke is not on its allow list.
-var errNotListed = errors.New("not on the allow list")
-
-// apiRevokeChat takes a number off allowed_numbers or a group off
-// allowed_groups. A group keeps its place in a brain's routing, so allowing
-// it again sends it to the same brain. Nothing on the list to remove is a
-// 404, also for an entry the checks refuse, so the dashboard neither
-// reports a removal that did not happen nor an error for one that
-// happened elsewhere.
-func (b *Bridge) apiRevokeChat(w http.ResponseWriter, r *http.Request) {
-	var req chatRequest
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	// An entry the bridge would refuse may still be on the list as it is
-	// stored; only an unknown kind or no entry at all is refused at once.
-	dm, entry, invalid := req.listEntry()
-	if (req.Kind != "group" && req.Kind != "dm") || req.sent() == "" {
-		httpapi.WriteErr(w, http.StatusBadRequest, invalid.Error())
-		return
-	}
-	canon, name := config.AllowListGroup, "allowed_groups"
-	if dm {
-		canon, name = chat.PhoneNumber, "allowed_numbers"
-	}
-	var removed []string
-	_, err := b.cfgs.Update("", func(c *config.Config) error {
-		list := &c.AllowedGroups
-		if dm {
-			list = &c.AllowedNumbers
-		}
-		var kept []string
-		kept, removed = revokeEntry(*list, req.sent(), entry, invalid == nil, canon)
-		if len(removed) == 0 {
-			return errNotListed
-		}
-		*list = kept
-		// A group no longer allowed takes its group_members entry along:
-		// one left behind would be refused (validateGroupMembers).
-		if !dm {
-			for _, g := range removed {
-				delete(c.GroupMembers, g)
-			}
-		}
-		return nil
-	})
-	switch {
-	case errors.Is(err, errNotListed):
-		httpapi.WriteErr(w, http.StatusNotFound, fmt.Sprintf("%s is not in %s", req.sent(), name))
-	case err != nil:
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
-	default:
-		httpapi.WriteJSON(w, http.StatusOK, map[string]any{"status": "revoked", "removed": removed})
-	}
-}
-
-// apiGroupMembers sets who in an allowed group reaches its brain, its
-// group_members entry: ["*"] for every member, or the numbers given,
-// stored as digits like allowed_numbers. members null, or left out,
-// removes the entry, so that allowed_numbers decide again; an empty list
-// lets nobody in. The list is checked as the config checks it
-// (validateGroupMembers), and a group allowed_groups does not list is
-// refused.
-func (b *Bridge) apiGroupMembers(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		JID     string    `json:"jid"`
-		Members *[]string `json:"members"`
-	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	group, err := config.AllowListGroup(req.JID)
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	var members []string
-	if req.Members != nil {
-		entry := map[string][]string{group: *req.Members}
-		if err := config.ValidateGroupMembers(entry, []string{group}); err != nil {
-			httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		// A number typed twice, in two ways perhaps, is kept once.
-		members = []string{}
-		for _, n := range config.GroupMembersAsNumbers(entry)[group] {
-			if !slices.Contains(members, n) {
-				members = append(members, n)
-			}
-		}
-	}
-	_, err = b.cfgs.Update("", func(c *config.Config) error {
-		if req.Members == nil {
-			delete(c.GroupMembers, group)
-			return nil
-		}
-		if c.GroupMembers == nil {
-			c.GroupMembers = map[string][]string{}
-		}
-		c.GroupMembers[group] = members
-		return nil
-	})
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"status": "saved", "members": members})
-}
-
-// revokeEntry splits list into what stays and what revoking sent removes.
-// The entry as it is stored goes first: the dashboard sends what it shows,
-// which may be written by hand in a form the bridge does not take
-// ("+15551234567", a JID with a space). Otherwise every entry that means
-// entry (sent in the list's own form, when it is valid) goes.
-func revokeEntry(list []string, sent, entry string, valid bool, canon func(string) (string, error)) (kept, removed []string) {
-	exact := slices.ContainsFunc(list, func(x string) bool { return strings.TrimSpace(x) == sent })
-	kept = list[:0:0]
-	for _, x := range list {
-		var match bool
-		if exact {
-			match = strings.TrimSpace(x) == sent
-		} else if valid {
-			c, err := canon(x)
-			match = err == nil && c == entry
-		}
-		if match {
-			removed = append(removed, x)
-		} else {
-			kept = append(kept, x)
-		}
-	}
-	return kept, removed
-}
-
-func (b *Bridge) apiDismissChat(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		JID string `json:"jid"`
-	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if req.JID == "" {
-		httpapi.WriteErr(w, http.StatusBadRequest, "jid required")
-		return
-	}
-	if err := b.store.DismissIgnored(req.JID, false); err != nil {
-		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "dismissed"})
-}
 
 // ── config ───────────────────────────────────────────────────────────────
 
