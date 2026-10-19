@@ -988,11 +988,17 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 	resp["exists"] = err == nil
 	resp["is_dir"] = err == nil && st.IsDir()
 	if err == nil && st.IsDir() {
+		root, err := os.OpenRoot(canonicalDir(homeDir()))
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		defer root.Close()
 		entries, _ := os.ReadDir(abs)
 		resp["entries"] = len(entries)
-		resp["is_git"] = fileExists(filepath.Join(abs, ".git"))
-		resp["has_prompt"] = fileExists(filepath.Join(abs, defaultPromptFile))
-		resp["has_history"] = fileExists(filepath.Join(abs, historyFileName))
+		resp["is_git"] = fileExistsInRoot(root, filepath.Join(abs, ".git"))
+		resp["has_prompt"] = fileExistsInRoot(root, filepath.Join(abs, defaultPromptFile))
+		resp["has_history"] = fileExistsInRoot(root, filepath.Join(abs, historyFileName))
 		if m, err := ReadManifest(abs); err == nil {
 			resp["manifest"] = m
 		}
@@ -1508,7 +1514,24 @@ func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	showHidden := r.URL.Query().Get("hidden") == "1"
-	entries, err := os.ReadDir(p)
+	root, err := os.OpenRoot(home)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	defer root.Close()
+	rel, err := filepath.Rel(home, p)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	dir, err := root.Open(rel)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	entries, err := dir.ReadDir(-1)
+	dir.Close()
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -1529,13 +1552,21 @@ func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		full := filepath.Join(p, e.Name())
-		if st, err := os.Stat(full); err != nil || !st.IsDir() {
+		// Checking the parent is not enough: a child may be a symlink out
+		// of home. Resolve it before probing its type or marker files, then
+		// use the home root so a subsequent symlink swap cannot escape.
+		resolved := canonicalDir(full)
+		if !isWithin(resolved, home) || resolved == data {
 			continue
 		}
-		if canonicalDir(full) == data {
+		child, err := filepath.Rel(home, resolved)
+		if err != nil {
 			continue
 		}
-		out = append(out, entry{Name: e.Name(), Path: full, IsBrain: fileExists(filepath.Join(full, ManifestFile)), IsGit: fileExists(filepath.Join(full, ".git"))})
+		if st, err := root.Stat(child); err != nil || !st.IsDir() {
+			continue
+		}
+		out = append(out, entry{Name: e.Name(), Path: full, IsBrain: fileExistsInRoot(root, filepath.Join(resolved, ManifestFile)), IsGit: fileExistsInRoot(root, filepath.Join(resolved, ".git"))})
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
 	parent := filepath.Dir(p)
@@ -1543,6 +1574,18 @@ func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
 		parent = ""
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"path": p, "parent": parent, "home": home, "entries": out})
+}
+
+// fileExistsInRoot probes metadata only inside root. Resolve first so an
+// absolute symlink to another allowed location works too; Root.Stat keeps
+// a later symlink replacement from redirecting the probe outside the root.
+func fileExistsInRoot(root *os.Root, p string) bool {
+	rel, err := filepath.Rel(root.Name(), canonicalDir(p))
+	if err != nil || (rel != "." && !filepath.IsLocal(rel)) {
+		return false
+	}
+	_, err = root.Stat(rel)
+	return err == nil
 }
 
 // ── dev mode ─────────────────────────────────────────────────────────────

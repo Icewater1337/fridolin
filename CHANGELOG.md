@@ -208,6 +208,10 @@ for compatibility.
 
 ### Fixed
 
+- Adding a brain no longer creates starter files through directory symlinks
+  that leave its folder. The dashboard's folder browser and inspector keep
+  file metadata checks inside your home folder, including child symlinks
+  and symlinked marker files such as `.git`.
 - A build chat on the Site's Build page shows that Claude's usage limit is
   reached, that its message is queued, or that the queue is full. It left
   out every notice that starts with ⏳, to leave out "Working on it".
