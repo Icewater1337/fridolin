@@ -12,8 +12,7 @@ func TestStoredChangeDiagnosticSurvivesPackageMove(t *testing.T) {
 	if err == nil || err.Error() != "json: cannot unmarshal array into Go value of type main.storedChange" {
 		t.Fatalf("diagnostic: %v", err)
 	}
-	var typed *json.UnmarshalTypeError
-	if !errors.As(err, &typed) {
+	if _, ok := errors.AsType[*json.UnmarshalTypeError](err); !ok {
 		t.Fatalf("lost typed cause: %v", err)
 	}
 }

@@ -65,7 +65,6 @@ func TestResolveBrainsSkipsMissingAndClashing(t *testing.T) {
 	a, b := resolutionManifest("a"), resolutionManifest("b")
 	a.Routing.HandlesDMs, b.Routing.HandlesDMs = true, true
 	for _, m := range []manifest.Manifest{a, b} {
-		m := m
 		if _, err := scaffoldResolutionFixture(filepath.Join(home, m.ID), &m); err != nil {
 			t.Fatal(err)
 		}

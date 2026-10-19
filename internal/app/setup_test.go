@@ -141,8 +141,7 @@ func (h *setupHarness) run(t *testing.T, home string, args, env []string) (out s
 	cmd := exec.Command(h.bash, append([]string{filepath.Join(h.repo, "setup.sh")}, args...)...)
 	cmd.Env = append([]string{"HOME=" + home, "PATH=" + h.bin, "TMPDIR=" + tmp, "FAKE_LOG=" + log, "FAKE_BRIDGE=" + h.bridge}, env...)
 	b, err := cmd.CombinedOutput()
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
+	if ee, ok := errors.AsType[*exec.ExitError](err); ok {
 		exit = ee.ExitCode()
 	} else if err != nil {
 		t.Fatal(err)

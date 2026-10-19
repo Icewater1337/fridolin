@@ -114,8 +114,7 @@ func (a *BrainAPI) calendarCall(fn calendarHandler) func(w http.ResponseWriter, 
 		cals := google.CalendarsOf(br.Manifest())
 		out, err := fn(ctx, r, cals, func() (*google.Token, error) { return a.Google().AccessToken(ctx, br.ID()) })
 		if err != nil {
-			var ce *callError
-			if errors.As(err, &ce) {
+			if ce, ok := errors.AsType[*callError](err); ok {
 				WriteErr(w, ce.status, ce.msg)
 				return
 			}
