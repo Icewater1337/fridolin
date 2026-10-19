@@ -313,7 +313,10 @@ func fakeNewMessage(prompt string) string {
 		msg = strings.TrimSuffix(strings.TrimSpace(prompt[i+len("<new_message>\n"):]), "</new_message>")
 		msg = strings.TrimSpace(msg)
 	}
-	var m promptMessage
+	var m struct {
+		From string `json:"from"`
+		Text string `json:"text"`
+	}
 	if err := json.Unmarshal([]byte(msg), &m); err == nil {
 		return m.From + " says: " + m.Text
 	}

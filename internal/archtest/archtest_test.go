@@ -24,7 +24,7 @@ import (
 // edge is a change to this table, made and reviewed in the same pull
 // request. Imports from outside the module are not checked here.
 var imports = map[string][]string{
-	"cmd/fridolin":      {"examples", "internal/activity", "internal/chat", "internal/config", "internal/fsx", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/manifest", "internal/media", "internal/otp", "internal/platform", "internal/registry", "internal/route", "internal/store", "internal/textx", "internal/trigger", "internal/version", "site", "web"},
+	"cmd/fridolin":      {"examples", "internal/activity", "internal/chat", "internal/config", "internal/fsx", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/manifest", "internal/media", "internal/otp", "internal/platform", "internal/prompt", "internal/registry", "internal/route", "internal/store", "internal/textx", "internal/trigger", "internal/version", "site", "web"},
 	"examples":          nil,
 	"internal/activity": {"internal/history", "internal/textx"},
 	"internal/archtest": nil,
@@ -41,6 +41,7 @@ var imports = map[string][]string{
 	"internal/platform": nil,
 	"internal/registry": {"internal/manifest"},
 	"internal/route":    {"internal/fsx", "internal/manifest"},
+	"internal/prompt":   {"internal/chat", "internal/history"},
 	"internal/store":    {"internal/fsx", "internal/logx"},
 	"internal/textx":    nil,
 	"internal/trigger":  nil,

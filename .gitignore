@@ -45,3 +45,5 @@ venv/
 
 # ── personal data guard ──────────────────────────────────────────────────
 .personal-denylist
+
+!internal/prompt/

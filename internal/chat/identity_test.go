@@ -1,4 +1,4 @@
-package main
+package chat
 
 import (
 	"strings"
@@ -17,8 +17,8 @@ func TestIdentityKey(t *testing.T) {
 		"Alex":                           "Alex",
 	}
 	for in, want := range cases {
-		if got := identityKey(in); got != want {
-			t.Errorf("identityKey(%q) = %q, want %q", in, got, want)
+		if got := IdentityKey(in); got != want {
+			t.Errorf("IdentityKey(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -31,12 +31,12 @@ func FuzzPhoneNumber(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, in string) {
-		n, err := phoneNumber(in)
+		n, err := PhoneNumber(in)
 		if err != nil {
 			return
 		}
 		if !phoneNumberRE.MatchString(n) {
-			t.Fatalf("phoneNumber(%q) = %q, not 6 to 15 digits", in, n)
+			t.Fatalf("PhoneNumber(%q) = %q, not 6 to 15 digits", in, n)
 		}
 		digits := strings.Map(func(r rune) rune {
 			if '0' <= r && r <= '9' {
@@ -45,10 +45,12 @@ func FuzzPhoneNumber(f *testing.F) {
 			return -1
 		}, in)
 		if !strings.Contains(digits, n) {
-			t.Errorf("phoneNumber(%q) = %q, digits that are not in the input", in, n)
+			t.Errorf("PhoneNumber(%q) = %q, digits that are not in the input", in, n)
 		}
-		if again, err := phoneNumber(n); err != nil || again != n {
-			t.Errorf("phoneNumber(%q) = %q, %v; want it unchanged", n, again, err)
+		if again, err := PhoneNumber(n); err != nil || again != n {
+			t.Errorf("PhoneNumber(%q) = %q, %v; want it unchanged", n, again, err)
 		}
 	})
 }
+
+const bridgeLID = "424242"
