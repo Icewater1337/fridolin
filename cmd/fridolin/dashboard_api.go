@@ -54,8 +54,8 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("POST /api/chats/members", b.apiGroupMembers)
 	mux.HandleFunc("POST /api/chats/dismiss", b.apiDismissChat)
 
-	mux.HandleFunc("GET /api/config", b.apiGetConfig)
-	mux.HandleFunc("PUT /api/config", b.apiPutConfig)
+	mux.HandleFunc("GET /api/config", b.newConfigAPI().Get)
+	mux.HandleFunc("PUT /api/config", b.newConfigAPI().Put)
 	mux.HandleFunc("POST /api/restart", b.apiRestart)
 
 	mux.HandleFunc("POST /api/logout", b.apiLogout)
@@ -648,71 +648,6 @@ func (b *Bridge) apiDismissChat(w http.ResponseWriter, r *http.Request) {
 
 // ── config ───────────────────────────────────────────────────────────────
 
-func (b *Bridge) apiGetConfig(w http.ResponseWriter, r *http.Request) {
-	// One snapshot: the etag must be that of the config sent with it, or a
-	// save that comes back with it would pass the conflict check over a
-	// write the page never saw.
-	snap := b.cfgs.Snapshot()
-	file := config.MustClone(snap.File)
-	file.BrainDirs = nil
-	eff := config.MustClone(snap.Effective)
-	eff.BrainDirs = nil
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{
-		"etag":      snap.ETag,
-		"path":      b.cfgs.Path(),
-		"config":    file,
-		"effective": eff,
-	})
-}
-
-// apiPutConfig replaces the settings. Brains are managed through their own
-// endpoints and are carried over untouched.
-//
-// It replaces the whole file layer, so it takes only the whole of it, as
-// GET /api/config returned it (see DecodeReplacement), and only with
-// the etag it came with: a script that sends one setting, or a tab that
-// saves over a newer change, would otherwise reset the rest to defaults —
-// the sandbox off, nobody allowed, another data dir.
-func (b *Bridge) apiPutConfig(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ETag   string          `json:"etag"`
-		Config json.RawMessage `json:"config"`
-	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if req.ETag == "" {
-		httpapi.WriteErr(w, http.StatusPreconditionRequired, "etag required: send the etag GET /api/config returned along with the config")
-		return
-	}
-	incoming, err := config.DecodeReplacement(req.Config)
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	res, err := b.cfgs.UpdateTx(req.ETag, func(c *config.Config, _ *config.Tx) error {
-		incoming.BrainDirs = c.BrainDirs
-		*c = *incoming
-		return nil
-	})
-	switch {
-	case errors.Is(err, config.ErrConflict):
-		httpapi.WriteErr(w, http.StatusConflict, err.Error())
-		return
-	case err != nil:
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	// The etag of what this save wrote, not ETag(), which may be a later
-	// save's: the page would take that write for the one it saved.
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"etag": res.ETag, "restart_required": nonNil(res.Restart)})
-}
-
-// apiRestart restarts the bridge in place (same binary, same arguments): it
-// answers, then asks whoever runs the bridge to stop it and run it again
-// (BridgeOptions.Restart). The stop is the one SIGTERM makes, in main, and
-// main runs the bridge again once it is over.
 func (b *Bridge) apiRestart(w http.ResponseWriter, r *http.Request) {
 	if b.restart == nil {
 		httpapi.WriteErr(w, http.StatusServiceUnavailable, "this bridge cannot restart itself")
