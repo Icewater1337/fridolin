@@ -378,7 +378,7 @@ func TestKillRunsWaitsForProcessCancellation(t *testing.T) {
 	for range 2 {
 		ctx, cancel := context.WithCancel(context.Background())
 		t.Cleanup(cancel)
-		run := &brainRun{cancel: cancel, done: make(chan struct{}), process: &claudeProcess{stopped: make(chan struct{})}}
+		run := &brainRun{cancel: cancel, done: make(chan struct{}), process: &fakeProcessStop{stopped: make(chan struct{})}}
 		runs = append(runs, run)
 		contexts = append(contexts, ctx)
 		mgr.order = append(mgr.order, &Brain{current: run})
@@ -394,7 +394,7 @@ func TestKillRunsWaitsForProcessCancellation(t *testing.T) {
 	go func() { mgr.KillRuns(); close(finished) }()
 	defer func() {
 		for _, run := range runs {
-			run.process.acknowledgeStop()
+			run.process.(*fakeProcessStop).acknowledgeStop()
 		}
 		<-finished
 	}()
@@ -410,13 +410,13 @@ func TestKillRunsWaitsForProcessCancellation(t *testing.T) {
 		t.Fatal("force-exit returned before either supervisor acknowledged the kill")
 	case <-time.After(50 * time.Millisecond):
 	}
-	runs[0].process.acknowledgeStop()
+	runs[0].process.(*fakeProcessStop).acknowledgeStop()
 	select {
 	case <-finished:
 		t.Fatal("force-exit returned before the second supervisor acknowledged the kill")
 	case <-time.After(50 * time.Millisecond):
 	}
-	runs[1].process.acknowledgeStop()
+	runs[1].process.(*fakeProcessStop).acknowledgeStop()
 	select {
 	case <-finished:
 	case <-time.After(time.Second):
@@ -435,7 +435,7 @@ func TestKillRunsPreventsALateProcess(t *testing.T) {
 	// An independent context deliberately tests the startup barrier,
 	// rather than relying on os/exec noticing the cancelled run context.
 	marker := filepath.Join(t.TempDir(), "started")
-	proc, err := run.startProcess(context.Background(), claudeRun{binary: "/bin/sh", args: []string{"-c", `echo started > "$1"`, "sh", marker}})
+	proc, err := run.startProcess(context.Background(), claudeRun{waitDelay: runWaitDelay, binary: "/bin/sh", args: []string{"-c", `echo started > "$1"`, "sh", marker}})
 	if proc != nil {
 		_ = proc.wait()
 	}
@@ -457,7 +457,7 @@ func TestKillRunsAfterCLIExit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	run := &brainRun{cancel: cancel, done: make(chan struct{})}
-	proc, err := run.startProcess(ctx, claudeRun{binary: "/bin/sh", args: []string{"-c", "exit 0"}})
+	proc, err := run.startProcess(ctx, claudeRun{waitDelay: runWaitDelay, binary: "/bin/sh", args: []string{"-c", "exit 0"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -477,7 +477,7 @@ func TestKillRunsAfterCLIExit(t *testing.T) {
 func TestKillRunsIncludesRetiringBrains(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	proc := &claudeProcess{stopped: make(chan struct{})}
+	proc := &fakeProcessStop{stopped: make(chan struct{})}
 	proc.acknowledgeStop()
 	old := &Brain{current: &brainRun{cancel: cancel, process: proc}}
 	mgr := &BrainManager{retired: map[*Brain]struct{}{old: {}}}
@@ -632,3 +632,13 @@ func TestReloadTracksRetirementUntilDeliveryFinishes(t *testing.T) {
 		t.Error("completed retirement remained in the force-stop set")
 	}
 }
+
+// fakeProcessStop lets manager tests delay the supervisor acknowledgement
+// without exposing or mutating the real process owner's internal state.
+type fakeProcessStop struct {
+	stopped chan struct{}
+	once    sync.Once
+}
+
+func (p *fakeProcessStop) Stopped() <-chan struct{} { return p.stopped }
+func (p *fakeProcessStop) acknowledgeStop()         { p.once.Do(func() { close(p.stopped) }) }

@@ -6,13 +6,6 @@ import (
 	"strings"
 )
 
-// cliError is the error the CLI itself reported in its result event, as
-// opposed to a failure of the process or of the bridge. Its text is the
-// CLI's own short account, such as "Credit balance is too low".
-type cliError struct{ msg, provider string }
-
-func (e *cliError) Error() string { return agentName(e.provider) + " error: " + e.msg }
-
 // chatErrorText is what a chat is told about a run that failed with err,
 // one of the chatErr messages of messages.go, or "" for a run that was
 // stopped, which says nothing. inDM is true for a direct chat with an

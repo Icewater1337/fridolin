@@ -191,12 +191,6 @@ type waStatus struct {
 	QRAvailable bool `json:"qr_available"`
 }
 
-type claudeStatus struct {
-	Path    string `json:"path"`
-	Found   bool   `json:"found"`
-	Version string `json:"version,omitempty"`
-}
-
 type sandboxStatus struct {
 	Enabled   bool `json:"enabled"`
 	Supported bool `json:"supported"`
