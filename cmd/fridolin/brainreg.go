@@ -105,53 +105,6 @@ func ResolveBrains(cfg *Config) ([]manifest.Spec, []BrainIssue) {
 	return ok, issues
 }
 
-// ValidateBrainSet checks brains against each other: unique ids, every group
-// owned by one brain, at most one DM brain and one default, no two brains in
-// one folder and no brain folder inside another (sandbox profiles deny other
-// brains' folders, so a nested brain could not read itself).
-func ValidateBrainSet(specs []manifest.Spec) error {
-	ids := map[string]string{}
-	groups := map[string]string{}
-	dm, def := "", ""
-	for _, s := range specs {
-		m := s.Manifest
-		if other, ok := ids[m.ID]; ok {
-			return fmt.Errorf("two brains use the id %q (%s and %s)", m.ID, other, s.Dir)
-		}
-		ids[m.ID] = s.Dir
-		for _, g := range m.Routing.Groups {
-			if owner, ok := groups[g]; ok {
-				return fmt.Errorf("group %s is claimed by both %q and %q", g, owner, m.ID)
-			}
-			groups[g] = m.ID
-		}
-		if m.Routing.HandlesDMs {
-			if dm != "" {
-				return fmt.Errorf("brains %q and %q both handle DMs", dm, m.ID)
-			}
-			dm = m.ID
-		}
-		if m.Routing.Default {
-			if def != "" {
-				return fmt.Errorf("brains %q and %q are both marked default", def, m.ID)
-			}
-			def = m.ID
-		}
-	}
-	for i, a := range specs {
-		for j, b := range specs {
-			switch {
-			case i == j:
-			case a.Dir == b.Dir:
-				return fmt.Errorf("brains %q and %q use the same folder %s", a.Manifest.ID, b.Manifest.ID, a.Dir)
-			case fsx.Within(b.Dir, a.Dir):
-				return fmt.Errorf("brain folder %s is inside brain folder %s", b.Dir, a.Dir)
-			}
-		}
-	}
-	return nil
-}
-
 // CheckBrainPath vets a folder before it becomes a brain. Problems block it;
 // warnings are shown but allowed.
 func CheckBrainPath(path string, cfg *Config, otherDirs []string) (abs string, problems, warnings []string) {

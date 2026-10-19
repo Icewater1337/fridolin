@@ -344,11 +344,5 @@ func (b *Bridge) replyChatFor(br *Brain, cfg *Config) string {
 		return m.ReplyChat
 	}
 	getsDMs := m.Routing.HandlesDMs || b.brainMgr.DMBrain() == br
-	if owner := ownerChat(cfg); getsDMs && owner != "" {
-		return owner
-	}
-	if len(m.Routing.Groups) > 0 {
-		return m.Routing.Groups[0]
-	}
-	return ""
+	return replyChat(m, getsDMs, ownerChat(cfg))
 }
