@@ -53,7 +53,7 @@ type Bridge struct {
 	token    *httpapi.Token
 	// tokenAtStart is dashboard.require_token as the bridge started.
 	tokenAtStart bool
-	sessions     *DashboardSessions
+	sessions     *httpapi.DashboardSessions
 	// sessionCookie names the session cookie for the address served on.
 	sessionCookie string
 	scriptAuth    *scriptAuth
@@ -232,7 +232,7 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 	}
 	b.token = tok
 	b.tokenAtStart = cfg.DashboardRequiresToken()
-	if b.sessions, err = LoadDashboardSessions(cfg.DataDir, time.Now); err != nil {
+	if b.sessions, err = httpapi.LoadDashboardSessions(cfg.DataDir, time.Now); err != nil {
 		return nil, err
 	}
 	if b.scriptAuth, err = newScriptAuth(cfg.DataDir, b.runTokens.brainOf, func(id string) bool { return b.brainMgr.Get(id) != nil }); err != nil {

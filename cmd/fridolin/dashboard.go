@@ -47,7 +47,7 @@ func (b *Bridge) startSession(w http.ResponseWriter, r *http.Request) (string, e
 		return "", err
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name: b.sessionCookie, Value: id, Path: "/", Expires: exp, MaxAge: int(SessionLifetime / time.Second),
+		Name: b.sessionCookie, Value: id, Path: "/", Expires: exp, MaxAge: int(httpapi.SessionLifetime / time.Second),
 		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: secureCookie(r),
 	})
 	return binding, nil

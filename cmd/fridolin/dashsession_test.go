@@ -59,7 +59,7 @@ func TestDashboardSignIn(t *testing.T) {
 	tb := newTestBridge(t, "")
 	now := time.Now
 	var err error
-	tb.sessions, err = LoadDashboardSessions(tb.cfgs.Get().DataDir, func() time.Time { return now() })
+	tb.sessions, err = httpapi.LoadDashboardSessions(tb.cfgs.Get().DataDir, func() time.Time { return now() })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,12 +120,12 @@ func TestDashboardSignIn(t *testing.T) {
 
 	// A code that waited too long is refused.
 	late, _ := tb.sessions.NewCode()
-	now = func() time.Time { return time.Now().Add(LoginCodeLifetime + time.Second) }
+	now = func() time.Time { return time.Now().Add(httpapi.LoginCodeLifetime + time.Second) }
 	if w := tb.login(map[string]string{"code": late}); w.Code != 401 {
 		t.Errorf("an expired code: %d", w.Code)
 	}
 	// And so is a session past its lifetime.
-	now = func() time.Time { return time.Now().Add(SessionLifetime + time.Hour) }
+	now = func() time.Time { return time.Now().Add(httpapi.SessionLifetime + time.Hour) }
 	if w := tb.do("GET", "/api/status", nil, withSession(c)); w.Code != 401 {
 		t.Errorf("an ended session: %d", w.Code)
 	}
@@ -238,7 +238,7 @@ func TestDashboardSessionsLastAndEnd(t *testing.T) {
 	if st, _ := os.Stat(file); st.Mode().Perm() != 0o600 {
 		t.Errorf("sessions file mode %v", st.Mode().Perm())
 	}
-	again, err := LoadDashboardSessions(tb.cfgs.Get().DataDir, time.Now)
+	again, err := httpapi.LoadDashboardSessions(tb.cfgs.Get().DataDir, time.Now)
 	if err != nil || !again.Valid(a.cookie.Value, a.binding) || !again.Valid(b.cookie.Value, b.binding) {
 		t.Fatalf("after a restart the sessions are gone (%v)", err)
 	}
@@ -525,7 +525,7 @@ func TestRotateTokenCommand(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			sessions, _ := LoadDashboardSessions(dataDir, time.Now)
+			sessions, _ := httpapi.LoadDashboardSessions(dataDir, time.Now)
 			id, binding, _, _ := sessions.Create()
 			cfg := &config.Config{DataDir: dataDir, HTTPListen: closedPort(t)}
 			cfg.Dashboard.Disabled = c.off
@@ -536,7 +536,7 @@ func TestRotateTokenCommand(t *testing.T) {
 			if err != nil || after.Value() == tok.Value() {
 				t.Errorf("token %q → %q (%v)", tok.Value(), after.Value(), err)
 			}
-			if again, _ := LoadDashboardSessions(dataDir, time.Now); again.Valid(id, binding) {
+			if again, _ := httpapi.LoadDashboardSessions(dataDir, time.Now); again.Valid(id, binding) {
 				t.Error("a session survived the rotation")
 			}
 		})

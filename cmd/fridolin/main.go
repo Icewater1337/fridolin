@@ -525,7 +525,7 @@ func rotateToken(cfg *config.Config) error {
 	if err := tok.Rotate(); err != nil {
 		return fmt.Errorf("writing a new token: %w", err)
 	}
-	sessions, err := LoadDashboardSessions(cfg.DataDir, time.Now)
+	sessions, err := httpapi.LoadDashboardSessions(cfg.DataDir, time.Now)
 	if err != nil {
 		return err
 	}
