@@ -8,8 +8,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -17,7 +15,6 @@ import (
 	"go.mau.fi/whatsmeow/types"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/otp"
 	"github.com/Icewater1337/fridolin/internal/version"
@@ -299,54 +296,10 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	media := fsx.Canonical(cfg.MediaDir)
-	var paths []string
-	for _, p := range req.Paths {
-		// A brain writes no part of the media folder but its own inbox, so
-		// a file anywhere else, at its top too, was left there by someone
-		// else for some brain: by a script or the site, between its write
-		// and its /ingest, or for good after an /ingest that failed. A
-		// brain's own token takes only what is in its inbox already, and
-		// is told so in one answer for every file it may not hand in, so
-		// that the answer says nothing of whether a name it guessed is
-		// there. That holds for a symlink it put in its inbox too: one
-		// that leads out of the inbox is refused unfollowed (see
-		// ownInboxFile).
-		if who.kind == callerBrain {
-			f, err := ownInboxFile(cfg.MediaDir, br.ID(), p)
-			if err != nil {
-				writeErr(w, http.StatusBadRequest, fmt.Sprintf("brain %s hands in only files in its own inbox, %s", br.ID(), mediaInbox(cfg.MediaDir, br.ID())))
-				return
-			}
-			paths = append(paths, f)
-			continue
-		}
-		resolved, err := filepath.EvalSymlinks(p)
-		if !filepath.IsAbs(p) || err != nil || !fsx.Within(resolved, media) {
-			writeErr(w, http.StatusBadRequest, "every path must be an existing file inside the media directory")
-			return
-		}
-		if st, err := os.Stat(resolved); err != nil || !st.Mode().IsRegular() {
-			writeErr(w, http.StatusBadRequest, "not a regular file: "+filepath.Base(p))
-			return
-		}
-		// The brain takes the file into its inbox (see claimMedia), and a
-		// brain can ask /ingest for that itself, so only a file handed in
-		// for it may move: one at the top of the media folder, where
-		// scripts drop their files, or one already in its own inbox. Every
-		// folder below the media folder holds files for a brain, which
-		// would then read them: another brain's inbox, the inbox left by
-		// a brain that was removed or is left out (whose id may come
-		// back), .old/ with the folders older versions left there, every
-		// brain's Plaud transcripts among them (see retireLegacyMedia), and
-		// .incoming/ with attachments on their way to the brain of their
-		// chat.
-		rel, _ := mediaRel(media, resolved)
-		if owner := mediaOwner(rel); owner != "" && owner != br.ID() {
-			writeErr(w, http.StatusBadRequest, fmt.Sprintf("not a file for brain %s: %s is in %s/ in the media directory; /ingest takes files at its top or in the brain's own inbox", br.ID(), filepath.Base(p), owner))
-			return
-		}
-		paths = append(paths, resolved)
+	paths, err := mediaInboxAt(cfg.MediaDir).Resolve(br.ID(), req.Paths, who.kind == callerBrain)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
 	jid := b.replyChatFor(br, cfg)

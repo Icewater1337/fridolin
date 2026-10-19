@@ -16,10 +16,10 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -328,82 +328,6 @@ func TestStripMentions(t *testing.T) {
 	if got := stripMentions(" @15559876543 hi ", nil); got != "@15559876543 hi" {
 		t.Errorf("without accounts: %q, want the text trimmed and kept", got)
 	}
-}
-
-// Attachment names come from the sender. Whatever they send, the saved name
-// stays in the media directory, is not hidden, keeps to one line in the
-// prompt and the history, and is short enough to be saved at all.
-func TestSanitizeMediaName(t *testing.T) {
-	long := strings.Repeat("ä", 150) + ".pdf" // 304 bytes
-	cases := []struct {
-		name, in, want string
-	}{
-		{"plain", "scan.pdf", "scan.pdf"},
-		{"directories", "../../etc/passwd", "passwd"},
-		{"absolute", "/etc/passwd", "passwd"},
-		{"hidden", ".bashrc", "bashrc"},
-		{"dot dot", "..", "file"},
-		{"empty", "", "file"},
-		{"root", "/", "file"},
-		{"newline", "a\nb.pdf", "ab.pdf"},
-		{"carriage return and tab", "a\r\tb.pdf", "ab.pdf"},
-		{"NUL", "a\x00b.pdf", "ab.pdf"},
-		{"line separator", "a\u2028b\u2029c.pdf", "abc.pdf"},
-		{"only control characters", "\n\n", "file"},
-		{"unicode kept", "Rechnung März 🧾.pdf", "Rechnung März 🧾.pdf"},
-		{"too long", long, strings.Repeat("ä", 56) + "….pdf"},
-		{"too long, no real extension", strings.Repeat("x", 100) + "." + strings.Repeat("y", 100), strings.Repeat("x", 100) + "." + strings.Repeat("y", 16) + "…"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			got := sanitizeMediaName(c.in)
-			if got != c.want {
-				t.Errorf("sanitizeMediaName(%q) = %q, want %q", c.in, got, c.want)
-			}
-			if len(got) > maxMediaNameBytes {
-				t.Errorf("%d bytes, more than %d", len(got), maxMediaNameBytes)
-			}
-			if !utf8.ValidString(got) {
-				t.Errorf("%q is not valid UTF-8", got)
-			}
-		})
-	}
-}
-
-// FuzzSanitizeMediaName: whatever name the sender gives an attachment, the
-// file is saved in the media directory, under a name that is not hidden,
-// keeps to one line and is short enough to save; and so is every name
-// placeMedia falls back to when that one is taken.
-func FuzzSanitizeMediaName(f *testing.F) {
-	for _, s := range []string{
-		"scan.pdf", "../../etc/passwd", "/etc/passwd", ".bashrc", "..", "", "/", "a\nb.pdf", "a\r\tb.pdf",
-		"a\x00b.pdf", "a\u2028b\u2029c.pdf", "\n\n", "Rechnung März 🧾.pdf", "x/.", "./..", ".../...",
-		strings.Repeat("ä", 150) + ".pdf", strings.Repeat("x", 100) + "." + strings.Repeat("y", 100), "\xff\xfe.\xc3",
-	} {
-		f.Add(s)
-	}
-	const dir = "/media"
-	f.Fuzz(func(t *testing.T, name string) {
-		got := sanitizeMediaName(name)
-		if len(got) > maxMediaNameBytes {
-			t.Errorf("sanitizeMediaName(%q) = %q, %d bytes, more than %d", name, got, len(got), maxMediaNameBytes)
-		}
-		for _, i := range []int{1, 2, lastMediaCandidate - 1, lastMediaCandidate} {
-			c := mediaNameCandidate(got, i)
-			if filepath.Dir(filepath.Join(dir, c)) != dir || strings.HasPrefix(c, ".") {
-				t.Errorf("%q, from %q, is not a visible file in the media directory", c, name)
-			}
-			if strings.IndexFunc(c, func(r rune) bool { return unicode.IsControl(r) || r == '\u2028' || r == '\u2029' }) >= 0 {
-				t.Errorf("%q, from %q, has a control character or a line break", c, name)
-			}
-			if !utf8.ValidString(c) {
-				t.Errorf("%q, from %q, is not valid UTF-8", c, name)
-			}
-			if len(c) > 255 {
-				t.Errorf("%q, from %q, is longer than a file name may be", c, name)
-			}
-		}
-	})
 }
 
 // FuzzNumberAllowed: allowed_numbers lets a sender DM the bridge only when
@@ -747,7 +671,7 @@ func TestHandleMessageSavesAttachment(t *testing.T) {
 		start := time.Now()
 		tw.handle(t, docEvent())
 		m, ok := tw.next(2 * time.Second)
-		want := filepath.Join(tw.cfg().MediaDir, incomingMediaDir, "scan.pdf")
+		want := filepath.Join(tw.cfg().MediaDir, mediafiles.IncomingDir, "scan.pdf")
 		if !ok || m.Text != "file this" || len(m.Media) != 1 || m.Media[0] != want {
 			t.Fatalf("got %+v (delivered %v), want the caption and %s", m, ok, want)
 		}
@@ -777,7 +701,7 @@ func TestHandleMessageSavesAttachment(t *testing.T) {
 		if !ok || m.Text != "file this" || len(m.Media) != 0 {
 			t.Errorf("got %+v (delivered %v), want the caption without the file", m, ok)
 		}
-		if names := dirNames(t, filepath.Join(tw.cfg().MediaDir, incomingMediaDir)); len(names) != 0 {
+		if names := dirNames(t, filepath.Join(tw.cfg().MediaDir, mediafiles.IncomingDir)); len(names) != 0 {
 			t.Errorf("left behind %q", names)
 		}
 		select {
@@ -852,16 +776,16 @@ func TestSaveAttachmentSizeLimit(t *testing.T) {
 				t.Errorf("downloaded %d times, want %d", dl.callCount(), c.calls)
 			}
 			if !c.saved {
-				if !errors.Is(err, errMediaTooLarge) {
+				if !errors.Is(err, mediafiles.ErrTooLarge) {
 					t.Errorf("err = %v, want errMediaTooLarge", err)
 				}
 				if names := dirNames(t, dir); len(names) != 0 {
 					t.Errorf("left behind %q", names)
 				}
-				if dl.copied > limit+mediaCipherOverhead {
+				if dl.copied > limit+mediafiles.CipherOverhead {
 					t.Errorf("the file took %d bytes, more than the limit allows", dl.copied)
 				}
-				if dl.sent > limit+mediaCipherOverhead && !dl.stopped {
+				if dl.sent > limit+mediafiles.CipherOverhead && !dl.stopped {
 					t.Error("the download was not cancelled when the file passed the cap")
 				}
 				return
@@ -871,59 +795,6 @@ func TestSaveAttachmentSizeLimit(t *testing.T) {
 			}
 			if got, err := os.ReadFile(path); err != nil || string(got) != dl.body {
 				t.Errorf("saved %d bytes (%v), want the %d sent, unchanged", len(got), err, c.body)
-			}
-		})
-	}
-}
-
-// cappedFile refuses every way whatsmeow could grow the file past the cap,
-// and allows everything up to it. A refusal counts as a cancellation, which
-// whatsmeow does not retry on its next server.
-func TestCappedFile(t *testing.T) {
-	ops := []struct {
-		name string
-		op   func(f whatsmeow.File) error
-		over bool
-	}{
-		{"write up to the cap", func(f whatsmeow.File) error { _, err := f.Write(make([]byte, 10)); return err }, false},
-		{"write past the cap", func(f whatsmeow.File) error { _, err := f.Write(make([]byte, 11)); return err }, true},
-		{"write after a seek past the cap", func(f whatsmeow.File) error {
-			if _, err := f.Seek(8, io.SeekStart); err != nil {
-				return err
-			}
-			_, err := f.Write(make([]byte, 3))
-			return err
-		}, true},
-		{"write at the end of the cap", func(f whatsmeow.File) error { _, err := f.WriteAt(make([]byte, 2), 8); return err }, false},
-		{"write at past the cap", func(f whatsmeow.File) error { _, err := f.WriteAt(make([]byte, 3), 8); return err }, true},
-		{"truncate to the cap", func(f whatsmeow.File) error { return f.Truncate(10) }, false},
-		{"truncate past the cap", func(f whatsmeow.File) error { return f.Truncate(11) }, true},
-		{"copy past the cap", func(f whatsmeow.File) error {
-			_, err := io.Copy(f, io.TeeReader(strings.NewReader(strings.Repeat("x", 11)), io.Discard))
-			return err
-		}, true},
-	}
-	for _, c := range ops {
-		t.Run(c.name, func(t *testing.T) {
-			tmp, err := os.CreateTemp(t.TempDir(), "capped")
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer tmp.Close()
-			stopped := false
-			f := &cappedFile{f: tmp, limit: 10, stop: func() { stopped = true }}
-			err = c.op(f)
-			if c.over != errors.Is(err, errMediaTooLarge) || c.over != f.over || c.over != stopped {
-				t.Errorf("err %v, over %v, stopped %v; want refused = %v", err, f.over, stopped, c.over)
-			}
-			if c.over && !errors.Is(err, context.Canceled) {
-				t.Errorf("err %v, want it to count as context.Canceled", err)
-			}
-			if !c.over && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-			if st, _ := tmp.Stat(); st.Size() > 10 {
-				t.Errorf("the file grew to %d bytes", st.Size())
 			}
 		})
 	}

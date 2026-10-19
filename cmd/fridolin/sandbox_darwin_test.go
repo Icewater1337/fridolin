@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 )
 
 // These tests run generated profiles under the real sandbox-exec, so they
@@ -1117,7 +1118,7 @@ func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
 	t.Setenv("HOME", home)
 	// Ready for inboxes, as the bridge has it before any run, so that a's
 	// photo stays in a's inbox.
-	if err := retireLegacyMedia(filepath.Join(home, ".fridolin", "media")); err != nil {
+	if err := mediaInboxAt(filepath.Join(home, ".fridolin", "media")).RetireLegacy(); err != nil {
 		t.Fatal(err)
 	}
 	for _, f := range []string{".fridolin/dashboard.token", ".fridolin/bridge.db", ".fridolin/media/a/photo.jpg", "Documents/share/ok.txt", "a/notes.md", "team/b/diary.md", "Library/Keychains/login.keychain-db", "Library/Preferences/x.plist"} {
@@ -1437,7 +1438,7 @@ func TestSandboxKeepsAMediaFolderOutsideTheDataDir(t *testing.T) {
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
 	sp, own := sandboxFixture(t, home, "b", "clients", map[string]any{"media_dir": "~/media"})
-	for _, f := range []string{"media/a/photo.jpg", "media/b/dm.pdf", "media/" + incomingMediaDir + "/voice.ogg", "media/top.pdf"} {
+	for _, f := range []string{"media/a/photo.jpg", "media/b/dm.pdf", "media/" + mediafiles.IncomingDir + "/voice.ogg", "media/top.pdf"} {
 		writeTestFile(t, filepath.Join(home, f), "content of "+f)
 	}
 	t.Setenv("M", filepath.Join(home, "media"))
@@ -1449,7 +1450,7 @@ func TestSandboxKeepsAMediaFolderOutsideTheDataDir(t *testing.T) {
 		{"write its own inbox", `printf x > "$M/a/new.jpg"`, true},
 		{"read another brain's inbox", `cat "$M/b/dm.pdf"`, false},
 		{"write another brain's inbox", `printf x > "$M/b/planted.pdf"`, false},
-		{"read an attachment not yet routed", `cat "$M/` + incomingMediaDir + `/voice.ogg"`, false},
+		{"read an attachment not yet routed", `cat "$M/` + mediafiles.IncomingDir + `/voice.ogg"`, false},
 		{"read a file at the top", `cat "$M/top.pdf"`, false},
 		{"write at the top", `printf x > "$M/planted.pdf"`, false},
 		{"list the media folder", `ls "$M"`, false},
@@ -1611,7 +1612,7 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map
 	t.Cleanup(mgr.Stop)
 	// As the bridge does when it starts: the inboxes below are the
 	// brains' own, not what an older version left there.
-	if err := retireLegacyMedia(cfg.MediaDir); err != nil {
+	if err := mediaInboxAt(cfg.MediaDir).RetireLegacy(); err != nil {
 		t.Fatal(err)
 	}
 

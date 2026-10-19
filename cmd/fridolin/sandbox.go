@@ -137,7 +137,7 @@ func sandboxPolicyOf(cfg *Config) sandboxPolicy {
 		p.mediaDir = filepath.Join(p.dataDir, "media")
 	}
 	if media := p.mediaDir; media != "" {
-		p.inbox = func(id string) string { return mediaInbox(media, id) }
+		p.inbox = func(id string) string { return mediaInboxAt(media).Path(id) }
 	}
 	if data := p.dataDir; data != "" {
 		p.state = func(id string) brainState { return brainStateOf(data, id) }
