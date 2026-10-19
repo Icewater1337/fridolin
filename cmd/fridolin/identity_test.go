@@ -17,12 +17,10 @@ import (
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
-	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 
-	waLog "go.mau.fi/whatsmeow/util/log"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -125,45 +123,6 @@ func TestHTTPSendTakesANumber(t *testing.T) {
 	}
 }
 
-// personLID is the LID of the allowed number, 15551234567, in tests.
-const personLID = "171717"
-
-// personLIDs is whatsmeow's LID store as far as it knows the allowed
-// number: its LID and back.
-type personLIDs struct{ store.LIDStore }
-
-func (personLIDs) GetPNForLID(_ context.Context, lid types.JID) (types.JID, error) {
-	if lid.User == personLID {
-		return types.NewJID("15551234567", types.DefaultUserServer), nil
-	}
-	return types.EmptyJID, nil
-}
-
-func (personLIDs) GetLIDForPN(_ context.Context, pn types.JID) (types.JID, error) {
-	if pn.User == "15551234567" {
-		return types.NewJID(personLID, types.HiddenUserServer), nil
-	}
-	return types.EmptyJID, nil
-}
-
-// storedLIDs is personLIDs as whatsmeow's SQL store answers: a lookup
-// under a context that ended fails, as the query under it does.
-type storedLIDs struct{ personLIDs }
-
-func (s storedLIDs) GetPNForLID(ctx context.Context, lid types.JID) (types.JID, error) {
-	if err := ctx.Err(); err != nil {
-		return types.EmptyJID, err
-	}
-	return s.personLIDs.GetPNForLID(ctx, lid)
-}
-
-func (s storedLIDs) GetLIDForPN(ctx context.Context, pn types.JID) (types.JID, error) {
-	if err := ctx.Err(); err != nil {
-		return types.EmptyJID, err
-	}
-	return s.personLIDs.GetLIDForPN(ctx, pn)
-}
-
 // /send to a person's LID goes to, and is recorded under, their number,
 // the JID the chat's runs read its history by.
 func TestHTTPSendToALIDUsesTheNumber(t *testing.T) {
@@ -248,54 +207,6 @@ func TestOwnerChat(t *testing.T) {
 	}
 }
 
-// A DM is one chat under the sender's number, whether WhatsApp addressed it
-// by number or by LID, and it remembers the LID, under which older history
-// may be.
-func TestDMIsKeyedByNumber(t *testing.T) {
-	pn := types.NewJID("15551234567", types.DefaultUserServer)
-	lid := types.NewJID(personLID, types.HiddenUserServer)
-	cases := []struct {
-		name string
-		src  types.MessageSource
-		lids store.LIDStore
-	}{
-		{"by LID, the number along", types.MessageSource{Chat: lid, Sender: lid, SenderAlt: pn}, nil},
-		{"by LID, the number in the store", types.MessageSource{Chat: lid, Sender: lid}, personLIDs{}},
-		{"by number, the LID in the store", types.MessageSource{Chat: pn, Sender: pn}, personLIDs{}},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			tw := newTestWhatsApp(t)
-			if c.lids != nil {
-				tw.client = whatsmeow.NewClient(&store.Device{LIDs: c.lids}, waLog.Noop)
-			}
-			tw.handle(t, textEvent(c.src, "hello"))
-			m, ok := tw.next(2 * time.Second)
-			if !ok || m.JID != pn.String() || m.ChatAlt != lid.String() || m.Sender != "15551234567" {
-				t.Errorf("got %+v (delivered %v), want chat %s, alt %s, sender 15551234567", m, ok, pn, lid)
-			}
-		})
-	}
-}
-
-// A DM from a LID nothing maps to a number is checked and offered on the
-// dashboard as that LID, as before group senders were resolved by the same
-// helper.
-func TestDMFromAnUnknownLID(t *testing.T) {
-	unknown := types.NewJID("272727", types.HiddenUserServer)
-	tw := newTestWhatsApp(t)
-	tw.client = whatsmeow.NewClient(&store.Device{LIDs: personLIDs{}}, waLog.Noop)
-	tw.handle(t, textEvent(types.MessageSource{Chat: unknown, Sender: unknown}, "hello"))
-	if m, ok := tw.next(100 * time.Millisecond); ok {
-		t.Errorf("reached the brains: %+v", m)
-	}
-	tw.mu.Lock()
-	defer tw.mu.Unlock()
-	if len(tw.ignored) != 1 || tw.ignored[0] != unknown.String() {
-		t.Errorf("dashboard was offered %v, want the LID's chat", tw.ignored)
-	}
-}
-
 // A group member addressed by LID is known by their number, so the identity
 // map names them; so is the author of a message a reply quotes.
 func TestGroupSenderAndQuoteByNumber(t *testing.T) {
@@ -308,7 +219,7 @@ func TestGroupSenderAndQuoteByNumber(t *testing.T) {
 		t.Fatal(err)
 	}
 	own := types.JID{User: otherNumber, Device: 12, Server: types.DefaultUserServer}
-	wa := tb.whatsAppOffline(&store.Device{ID: &own, LIDs: personLIDs{}})
+	wa := tb.whatsAppOffline(t, &store.Device{ID: &own, LIDs: personLIDs{}})
 	lid := types.NewJID(personLID, types.HiddenUserServer)
 	evt := groupEvent(&waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
 		Text: proto.String("@claude and you?"),
@@ -320,7 +231,7 @@ func TestGroupSenderAndQuoteByNumber(t *testing.T) {
 	}})
 	evt.Info.Sender = lid
 	evt.Info.AddressingMode = types.AddressingModeLID
-	wa.handleMessage(evt)
+	wa.ProcessMessage(evt)
 	waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) > 0 })
 	// The new message names its sender from the map too.
 	if got := tb.sentTo(testGroup)[0]; !strings.Contains(got, `Alex (15551234567) says: [reply to 15551234567: "I'm in"]`) {

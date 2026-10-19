@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -164,7 +166,7 @@ func (s siteChatMessenger) toChat(brainID, text string) error {
 	// "Working on it" is what the page shows anyway while a run lasts. Only
 	// that notice: others start with the same ⏳, and a build chat must not
 	// miss that its message waits, or that Claude's usage limit is reached.
-	if text == workingNotice {
+	if text == outboundmsg.WorkingNotice {
 		return nil
 	}
 	return s.chats.add(brainID, "assistant", text)
@@ -246,7 +248,7 @@ func (b *Bridge) apiBuildSend(w http.ResponseWriter, r *http.Request) {
 		Text: text, Source: "site-build", At: time.Now()},
 	}
 	if _, _, _, err := b.brainMgr.Submit(m); err != nil {
-		_ = b.site.chats.add(br.ID(), "assistant", buildChatError(err))
+		_ = b.site.chats.add(br.ID(), "assistant", outboundmsg.BuildChatError(err))
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
