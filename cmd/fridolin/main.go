@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"syscall"
 
+	"github.com/Icewater1337/fridolin/internal/textx"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/logx"
 
@@ -807,7 +809,7 @@ func newRedactor(home string) *redactor {
 	}
 	var spellings []string
 	for _, h := range []string{home, fsx.Resolve(home)} {
-		spellings = append(spellings, h, sbplEscaper.Replace(h), regexp.QuoteMeta(h), sbplEscaper.Replace(regexp.QuoteMeta(h)))
+		spellings = append(spellings, h, textx.EscapeSBPL(h), regexp.QuoteMeta(h), textx.EscapeSBPL(regexp.QuoteMeta(h)))
 	}
 	// The longest first, since one may begin with another; equal ones next
 	// to each other, for Compact.

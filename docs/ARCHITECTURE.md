@@ -215,7 +215,10 @@ responsibility and says what it must not do.
   reports recursively sorted field paths while respecting custom decoders
   and case-insensitive JSON field matching.
 - **`textx`**: `Truncate` and `Tail`, which shorten text from its end or its
-  start to a byte limit without splitting a rune.
+  start to a byte limit without splitting a rune. `SBPLString` quotes profile
+  strings without changing UTF-8; `EscapeSBPL` applies the same escaping to
+  diagnostic redaction. `ValidEnvName` checks child environment variable names.
+  Configuration and sandbox code share these pure validators.
 - **`version`**: `String()`, which returns the `-ldflags -X` value, or
   `dev-<rev>[+dirty]` from the build info, and `Line()`, the build, Go
   release and platform for the first log line.

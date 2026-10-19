@@ -34,6 +34,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/textx"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -494,7 +496,7 @@ func usablePath(module, field, p string) bool {
 	if !filepath.IsAbs(p) {
 		return false
 	}
-	if _, err := sbplString(p); err != nil {
+	if _, err := textx.SBPLString(p); err != nil {
 		if module != "" {
 			log.Printf("[site] module %s: %s is left out of the sandbox: %v", module, field, err)
 		}

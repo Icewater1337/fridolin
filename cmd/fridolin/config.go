@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/textx"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -935,7 +937,7 @@ func (c *Config) validate() error {
 		return err
 	}
 	for _, name := range c.ChildEnvPassthrough {
-		if !validEnvName(name) {
+		if !textx.ValidEnvName(name) {
 			return fmt.Errorf("child_env_passthrough: %q is not a variable name: use letters, digits and _, and do not start with a digit", name)
 		}
 	}
@@ -977,7 +979,7 @@ func (sc SandboxConfig) validate(goos string) error {
 		if !filepath.IsAbs(p) {
 			return fmt.Errorf("%s: %q must be an absolute path or start with ~/", field, p)
 		}
-		if _, err := sbplString(p); err != nil {
+		if _, err := textx.SBPLString(p); err != nil {
 			return fmt.Errorf("%s: %w", field, err)
 		}
 		return nil
