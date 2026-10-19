@@ -49,9 +49,9 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("PUT /api/config", b.newConfigAPI().Put)
 	mux.HandleFunc("POST /api/restart", b.apiRestart)
 
-	mux.HandleFunc("POST /api/logout", b.apiLogout)
-	mux.HandleFunc("POST /api/login/code", b.apiLoginCode)
-	mux.HandleFunc("POST /api/token/rotate", b.apiRotateToken)
+	mux.HandleFunc("POST /api/logout", b.newDashboardAuth().Logout)
+	mux.HandleFunc("POST /api/login/code", b.newDashboardAuth().LoginCode)
+	mux.HandleFunc("POST /api/token/rotate", b.newDashboardAuth().RotateToken)
 
 	mux.HandleFunc("GET /api/brains", b.newBrainsAPI().List)
 	mux.HandleFunc("GET /api/brains/{id}", b.newBrainsAPI().Get)
