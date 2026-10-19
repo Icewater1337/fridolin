@@ -1,5 +1,7 @@
 package main
 
-func (b *Bridge) newPlaudAppAPI() *PlaudAppAPI {
-	return &PlaudAppAPI{Plaud: func() PlaudAppService { return b.plaud }}
+import "github.com/Icewater1337/fridolin/internal/httpapi"
+
+func (b *Bridge) newPlaudAppAPI() *httpapi.PlaudAppAPI {
+	return &httpapi.PlaudAppAPI{Plaud: func() httpapi.PlaudAppService { return b.plaud }}
 }
