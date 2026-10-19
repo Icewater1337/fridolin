@@ -80,8 +80,6 @@ type Bridge struct {
 	lids func() wastore.LIDStore
 
 	supervisor app.Supervisor
-	// stopOnce makes Stop run once, whoever calls it how often.
-	stopOnce sync.Once
 	// intake is what comes in from WhatsApp, which Stop closes first.
 	intake app.IntakeGate
 
@@ -287,42 +285,19 @@ func (b *Bridge) connectLoop(ctx context.Context) { whatsapp.RunConnectLoop(ctx,
 // Stop shuts everything down in dependency order, once: a restart and a
 // signal that come together, or a test and its cleanup, stop the bridge
 // one time between them.
-func (b *Bridge) Stop() { b.stopOnce.Do(b.stop) }
-
-func (b *Bridge) stop() {
-	// Intake first: what comes in from now on waits for the next start,
-	// while the brains finish and WhatsApp stays connected for their
-	// replies, and nothing that came in before is still on its way to the
-	// debouncer or a brain.
-	b.intake.Close()
-	b.stopHTTP()
-	b.backup.Stop()
-	b.plaud.Stop()
-	b.site.Stop()
-	// What no brain has started on is kept in bridge.db for the next
-	// start (resume): WhatsApp took it as delivered and would not send it
-	// again. What the debouncer holds first, then what the brains have
-	// waiting, at once, before their runs in flight get their grace.
-	for _, m := range b.deb.Drain() {
-		b.keep(app.InboundHeld, "", m)
-	}
-	b.brainMgr.Stop()
-	// After the brains, whose last runs may still reply; what does not go
-	// out stays in bridge.db for the next start.
-	b.outbox.Stop()
-	b.otp.Stop()
-	b.wa.Disconnect()
-	// The connect loop ends with Start's context, unless it is connecting
-	// still, which Disconnect cuts short.
-	if !b.supervisor.WaitConnections(connectStopWait) {
-		log.Printf("WhatsApp: still connecting %v after the disconnect; stopping without waiting for it", connectStopWait)
-	}
-	b.intake.End()
-	if err := b.store.Close(); err != nil {
-		log.Printf("closing store: %v", err)
-	}
-	b.lock.Release()
-	log.Println("Bridge stopped.")
+func (b *Bridge) Stop() {
+	b.supervisor.Stop(app.StopOptions{
+		CloseIntake: b.intake.Close, HTTPGrace: httpStopWait,
+		Background: []func(){b.backup.Stop, b.plaud.Stop, b.site.Stop},
+		KeepPending: func() {
+			for _, m := range b.deb.Drain() {
+				b.keep(app.InboundHeld, "", m)
+			}
+		},
+		Brains: b.brainMgr.Stop, Outbox: b.outbox.Stop, OTP: b.otp.Stop,
+		Disconnect: b.wa.Disconnect, ConnectionGrace: connectStopWait,
+		EndIntake: b.intake.End, CloseStore: b.store.Close, ReleaseLock: b.lock.Release,
+	})
 }
 
 // keepWaiting keeps what br had waiting as the bridge stops, which never
@@ -418,10 +393,6 @@ var httpStopWait = 5 * time.Second
 
 // connectStopWait is how long Stop waits for a WhatsApp connect under way.
 const connectStopWait = 5 * time.Second
-
-// stopHTTP stops the HTTP server, if Start began one: it takes no more
-// requests, and those in flight get httpStopWait to end.
-func (b *Bridge) stopHTTP() { b.supervisor.StopHTTP(httpStopWait) }
 
 // keepLate keeps m, which came in once the bridge had begun to stop, for
 // the next start, which handles it as if it came in then: nothing has
