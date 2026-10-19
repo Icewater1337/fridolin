@@ -315,8 +315,8 @@ func TestOutboxSummaryOnlyReads(t *testing.T) {
 func TestQuestionsWaitAndNoticesDoNot(t *testing.T) {
 	tb, br := newMainBridge(t, "")
 	tb.wa = newFlakyMessenger(tb.cfgs.Get, false)
-	br.hooks.Question(br, testDMChat, outboundmsg.QuestionPrefix+"Which day suits you?")
-	br.hooks.Notice(testDMChat, "⏳ Still at it")
+	br.sink.Question(br, testDMChat, "Which day suits you?")
+	tb.brainMgr.hooks.Notice(testDMChat, "⏳ Still at it")
 	sum, err := tb.store.OutboxSummary(context.Background(), time.Now())
 	if err != nil || sum.Waiting != 1 {
 		t.Errorf("outbox = %+v, %v; want the question alone waiting", sum, err)

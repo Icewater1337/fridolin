@@ -183,13 +183,13 @@ func TestHistoryBeforeAfterChanges(t *testing.T) {
 			// Written before the message came in, and still waiting; and
 			// one delivered while the prompt was read.
 			early := time.Now().Add(-time.Hour).Format(time.RFC3339)
-			br.hooks = &BrainHooks{Undelivered: func(string) []history.Entry {
+			br.sink = sinkForHooks(&BrainHooks{Undelivered: func(string) []history.Entry {
 				return []history.Entry{
 					{TS: early, From: br.ID(), Chat: testDMChat, Text: "waiting", Type: history.Out},
 					{TS: early, From: br.ID(), Chat: testDMChat, Text: "delivered", Type: history.Out},
 					{TS: early, From: br.ID(), Chat: testGroup, Text: "elsewhere", Type: history.Out},
 				}
-			}}
+			}})
 			m := br.logInbound(dm("two"))
 			br.appendHistory(testDMChat, br.ID(), "delivered", history.Out)
 			return m

@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
-
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -91,7 +89,7 @@ func TestParseStreamQuestions(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			br := bareBrain(t)
 			var sent []string
-			br.hooks = &BrainHooks{Question: func(_ *Brain, jid, text string) bool {
+			br.sink = sinkForHooks(&BrainHooks{Question: func(_ *Brain, jid, text string) bool {
 				if jid != "chat" || c.silent {
 					t.Errorf("question for %q from a run silent: %v, want only the run's chat, of an addressed run", jid, c.silent)
 				}
@@ -100,7 +98,7 @@ func TestParseStreamQuestions(t *testing.T) {
 				}
 				sent = append(sent, text)
 				return true
-			}}
+			}})
 			res := readTestStream(br, Inbound{Inbound: chat.Inbound{JID: "chat", Silent: c.silent}}, strings.Join(c.stream, "\n")+"\n")
 			if (res.Err != nil) != c.err {
 				t.Errorf("error = %v, want one: %v", res.Err, c.err)
@@ -128,7 +126,7 @@ func TestMidRunMessagesReachTheChatMarked(t *testing.T) {
 {"type":"result","result":"asked"}
 `
 	readTestStream(br, Inbound{Inbound: chat.Inbound{JID: dm}}, stream)
-	br.hooks.Notice(dm, outboundmsg.WorkingNotice)
+	br.sink.Working(dm)
 	// The question goes through the outbox, after the notice.
 	testutil.WaitFor(t, 5*time.Second, "both messages", func() bool { return len(tb.sentTo(dm)) == 2 })
 	sent := tb.sentTo(dm)

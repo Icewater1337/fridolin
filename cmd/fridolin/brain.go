@@ -21,8 +21,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
-
 	"github.com/Icewater1337/fridolin/internal/registry"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -66,7 +64,7 @@ type Brain struct {
 
 	settings atomic.Pointer[brainSettings]
 	runner   brainRunner
-	hooks    *BrainHooks
+	sink     *brainSinkRef
 	// slots are the run slots all brains share (max_concurrent_runs); nil
 	// for no limit.
 	slots *runSlots
@@ -139,46 +137,6 @@ type brainSettings struct {
 	// folder, which setBridgePATH took out of the bridge's: they go first
 	// on the PATH of this brain's runs, and of no one else's.
 	ownPATH []string
-}
-
-// BrainHooks connect brains to the rest of the bridge.
-type BrainHooks struct {
-	// Notice tells the chat jid, ready to send, that a run is working on
-	// its message: of use only now.
-	Notice func(jid, text string)
-	// Question sends the chat jid a question br asks mid-run, marked as
-	// one, and reports whether it is on its way, ahead of the run's final
-	// reply. br's history records it once it arrived, like an answer: the
-	// reply to it comes as a new message, whose run must see what it
-	// answers. A silent run asks nothing (see runSink.Question).
-	Question func(br *Brain, jid, text string) bool
-	// Deliver receives every finished run. It records the answer in the
-	// brain's history once it is sent.
-	Deliver func(br *Brain, m Inbound, res claudecli.Result)
-	// Waiting gets, as the bridge stops, what br had waiting, which never
-	// ran, before its run in flight gets its grace (see shutdown). Nil
-	// drops it.
-	Waiting func(br *Brain, ms []Inbound)
-	// Interrupted gets, as the bridge stops, the message whose run br
-	// stopped once its grace was over.
-	Interrupted func(br *Brain, m Inbound)
-	// Undelivered returns the brain's answers still on their way to
-	// WhatsApp, as its history will record them once they arrived. A
-	// chat gets them before anything a later run says there, so that run
-	// reads them as said (see undelivered).
-	Undelivered func(brainID string) []history.Entry
-	// OnHistory sees every line written to a brain's history.
-	OnHistory func(brainID string, e history.Entry)
-	// ExtraArgs adds CLI arguments to a brain's runs (the site builder's
-	// plugin and MCP server, for brains allowed to build the site).
-	ExtraArgs func(brainID string) []string
-	// CodexSetup supplies the site builder's instructions and MCP settings
-	// using Codex's format; credentials travel in the environment, not argv.
-	CodexSetup func(brainID string) (args, env []string, prompt string, err error)
-	// RunEnv adds variables to one run's environment (the brain API's
-	// address and a token for the run), and returns what to call once the
-	// run is over.
-	RunEnv func(brainID string) (env []string, done func())
 }
 
 // workingNoticeAfter is how long a run goes before the chat is told that
@@ -625,9 +583,7 @@ func (br *Brain) deliverGuarded(m Inbound, res claudecli.Result) {
 		}()
 		fn()
 	}
-	if br.hooks != nil && br.hooks.Deliver != nil {
-		guard("delivering", func() { br.hooks.Deliver(br, m, res) })
-	}
+	guard("delivering", func() { br.sink.Finished(br, m, res) })
 	if m.Done != nil {
 		guard("finishing", func() { m.Done(res.Err) })
 	}
@@ -809,11 +765,7 @@ var shutdownGrace = 15 * time.Second
 // stays, for the next start to replace.
 func (br *Brain) shutdown(grace time.Duration) {
 	waiting := br.closeQueue()
-	if br.hooks != nil && br.hooks.Waiting != nil {
-		br.hooks.Waiting(br, waiting)
-	} else {
-		dropped(waiting)
-	}
+	br.sink.Waiting(br, waiting)
 	idle := make(chan struct{})
 	go func() {
 		br.workers.Wait()
@@ -849,8 +801,8 @@ func (br *Brain) shutdown(grace time.Duration) {
 		}
 		br.mu.Unlock()
 	}
-	if cut != nil && br.hooks != nil && br.hooks.Interrupted != nil {
-		br.hooks.Interrupted(br, cut.msg)
+	if cut != nil {
+		br.sink.Interrupted(br, cut.msg)
 	}
 	// Done with the folder after every worker has released it.
 	br.root.Close()
@@ -1285,8 +1237,8 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 			log.Printf("brain %s: reading the output of the run for %s panicked: %v\n%s", br.id, m.JID, p, stack)
 		},
 		Notice: func() {
-			if !m.Silent && br.hooks != nil && br.hooks.Notice != nil {
-				br.hooks.Notice(m.JID, outboundmsg.WorkingNotice)
+			if !m.Silent {
+				br.sink.Working(m.JID)
 			}
 		},
 		GraceExpired: func() {
@@ -1510,8 +1462,7 @@ func (s *runSink) Log(line string) {
 // Question sends text to the run's chat. Untagged (silent) messages never
 // produce a visible reply, so they must not ask anything either.
 func (s *runSink) Question(text string) bool {
-	h := s.br.hooks
-	return !s.m.Silent && h != nil && h.Question != nil && h.Question(s.br, s.m.JID, outboundmsg.QuestionPrefix+text)
+	return !s.m.Silent && s.br.sink.Question(s.br, s.m.JID, text)
 }
 
 func (s *runSink) Result(res claudecli.Result) {
@@ -1664,22 +1615,20 @@ func (br *Brain) entryWritten(entry history.Entry, err error) {
 		log.Printf("brain %s: failed to open history file %s: %v", br.id, filepath.Join(br.workDir, history.FileName), err)
 		return
 	}
-	if br.hooks != nil && br.hooks.OnHistory != nil {
-		br.hooks.OnHistory(br.id, entry)
-	}
+	br.sink.History(br.id, entry)
 }
 
 // undelivered returns the brain's answers in the chat that goes by chats
-// which are still on their way (BrainHooks.Undelivered). It reads them
+// which are still on their way (brainSink.Undelivered). It reads them
 // under historyMu, which recordDelivered moves an answer from the outbox
 // into the history under: the history, read after, holds every answer
 // this did not return.
 func (br *Brain) undelivered(chats []string) []history.Entry {
-	if br.hooks == nil || br.hooks.Undelivered == nil {
+	if br.sink == nil || br.sink.target == nil {
 		return nil
 	}
 	br.historyMu.Lock()
-	all := br.hooks.Undelivered(br.id)
+	all := br.sink.Undelivered(br.id)
 	br.historyMu.Unlock()
 	var out []history.Entry
 	for _, e := range all {
@@ -1748,17 +1697,20 @@ type BrainManager struct {
 
 	profiler *SandboxProfiler
 	hooks    *BrainHooks
+	sink     *brainSinkRef
 	// slots bound the runs of every brain together, across reloads.
 	slots *runSlots
 }
 
 // NewBrainManager builds the configured brains.
 func NewBrainManager(cfg *config.Config) (*BrainManager, error) {
+	hooks := &BrainHooks{}
 	bm := &BrainManager{
 		brains:   map[string]*Brain{},
 		byGroup:  map[string]*Brain{},
 		profiler: NewSandboxProfiler(nil, cfg),
-		hooks:    &BrainHooks{},
+		hooks:    hooks,
+		sink:     sinkForHooks(hooks),
 		slots:    newRunSlots(cfg.RunLimit()),
 	}
 	if err := bm.Apply(cfg); err != nil {
@@ -1768,7 +1720,14 @@ func NewBrainManager(cfg *config.Config) (*BrainManager, error) {
 }
 
 // SetHooks wires the brains to the bridge. Call before the first message.
-func (bm *BrainManager) SetHooks(h BrainHooks) { *bm.hooks = h }
+func (bm *BrainManager) SetHooks(h BrainHooks) {
+	*bm.hooks = h
+	bm.SetSink(brainHooksSink{bm.hooks})
+}
+
+// SetSink wires runtime delivery before the first message. Every current and
+// future brain shares this reference, like the former hooks pointer.
+func (bm *BrainManager) SetSink(s brainSink) { bm.sink.target = s }
 
 // Apply makes the running brains match cfg. The bridge's PATH goes first,
 // before any brain folder is checked against it: the folders of it inside
@@ -1836,7 +1795,7 @@ func (bm *BrainManager) reload(specs []manifest.Spec, issues []registry.Issue, c
 				workDir: sp.Dir,
 				root:    root,
 				runner:  &commandRunner{sandbox: bm.profiler, hooks: bm.hooks},
-				hooks:   bm.hooks,
+				sink:    bm.sink,
 				slots:   bm.slots,
 			}
 			created = append(created, br)
@@ -1951,11 +1910,7 @@ func (bm *BrainManager) keepRetiredWaiting(from *Brain, ms []Inbound) bool {
 	if !stopped {
 		return false
 	}
-	if bm.hooks.Waiting != nil {
-		bm.hooks.Waiting(from, ms)
-	} else {
-		dropped(ms)
-	}
+	bm.sink.Waiting(from, ms)
 	return true
 }
 
@@ -2186,11 +2141,7 @@ func (bm *BrainManager) Stop() {
 	// Otherwise those workers could requeue a message into a live brain
 	// and start it while the rest of shutdown waited for retirement.
 	for i, br := range brains {
-		if bm.hooks.Waiting != nil {
-			bm.hooks.Waiting(br, waiting[i])
-		} else {
-			dropped(waiting[i])
-		}
+		bm.sink.Waiting(br, waiting[i])
 	}
 	bm.retiring.Wait()
 	var wg sync.WaitGroup
