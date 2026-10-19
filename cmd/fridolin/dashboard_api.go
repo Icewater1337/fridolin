@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,16 +34,15 @@ import (
 	"github.com/Icewater1337/fridolin/internal/registry"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/internal/version"
-	"rsc.io/qr"
 )
 
 func (b *Bridge) apiMux() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/status", b.apiStatus)
-	mux.HandleFunc("GET /api/whatsapp/qr", b.apiQR)
-	mux.HandleFunc("POST /api/whatsapp/pair", b.apiPair)
-	mux.HandleFunc("GET /api/whatsapp/groups", b.apiGroups)
+	mux.HandleFunc("GET /api/whatsapp/qr", b.newConnectionAPI().QR)
+	mux.HandleFunc("POST /api/whatsapp/pair", b.newConnectionAPI().Pair)
+	mux.HandleFunc("GET /api/whatsapp/groups", b.newConnectionAPI().Groups)
 	mux.HandleFunc("GET /api/activity", b.apiActivity)
 	mux.HandleFunc("GET /api/logs", b.apiLogs)
 
@@ -69,7 +67,7 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("PUT /api/brains/{id}", b.apiUpdateBrain)
 	mux.HandleFunc("POST /api/brains/{id}/approve", b.apiApproveBrain)
 	mux.HandleFunc("DELETE /api/brains/{id}", b.apiRemoveBrain)
-	mux.HandleFunc("POST /api/brains/{id}/stop", b.apiStopRun)
+	mux.HandleFunc("POST /api/brains/{id}/stop", b.newConnectionAPI().StopRun)
 	mux.HandleFunc("DELETE /api/brain-dirs", b.apiRemoveBrainDir)
 
 	mux.HandleFunc("GET /api/fs/capabilities", b.apiFSCaps)
@@ -328,90 +326,8 @@ func sandboxProfileWarning(bm *BrainManager) string {
 	return fmt.Sprintf("The sandbox profile cannot be built (%v), so brains %s refuse every message until that is fixed.", cause, strings.Join(failing, ", "))
 }
 
-func (b *Bridge) apiQR(w http.ResponseWriter, r *http.Request) {
-	st := b.wa.State()
-	if st.QRCode == "" {
-		httpapi.WriteErr(w, http.StatusNotFound, "no pairing code right now")
-		return
-	}
-	// rsc.io/qr is what qrterminal draws the terminal's code with. Its PNG
-	// is 8 pixels per module with the quiet zone included; the dashboard
-	// scales it.
-	code, err := qr.Encode(st.QRCode, qr.M)
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{
-		"data_url":   "data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG()),
-		"created_at": st.QRAt,
-	})
-}
-
-func (b *Bridge) apiPair(w http.ResponseWriter, r *http.Request) {
-	if err := b.wa.StartPairing(); err != nil {
-		httpapi.WriteErr(w, http.StatusConflict, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "pairing"})
-}
-
-// apiGroups answers GET /api/whatsapp/groups with the groups the account
-// is in, from the list the WhatsApp client keeps. With ?fresh=1, which the
-// Chats page's Refresh button sends, the client asks WhatsApp again first.
-func (b *Bridge) apiGroups(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
-	defer cancel()
-	if r.URL.Query().Get("fresh") == "1" {
-		if f, ok := b.wa.(interface{ ForgetGroups() }); ok {
-			f.ForgetGroups()
-		}
-	}
-	groups, err := b.wa.JoinedGroups(ctx)
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusServiceUnavailable, err.Error())
-		return
-	}
-	cfg := b.cfgs.Get()
-	type row struct {
-		chat.Group
-		Allowed bool   `json:"allowed"`
-		Brain   string `json:"brain"`
-	}
-	out := []row{}
-	allowed := map[string]bool{}
-	for _, g := range cfg.AllowedGroups {
-		allowed[g] = true
-	}
-	for _, g := range groups {
-		rw := row{Group: g, Allowed: allowed[g.JID]}
-		if br := b.brainMgr.BrainFor(g.JID, true); br != nil && rw.Allowed {
-			rw.Brain = br.ID()
-		}
-		out = append(out, rw)
-	}
-	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
-	httpapi.WriteJSON(w, http.StatusOK, out)
-}
-
 func (b *Bridge) apiActivity(w http.ResponseWriter, r *http.Request) {
 	httpapi.ActivityAPI{Reader: b.activity}.ServeHTTP(w, r)
-}
-
-func (b *Bridge) apiStopRun(w http.ResponseWriter, r *http.Request) {
-	br := b.brainMgr.Get(r.PathValue("id"))
-	if br == nil {
-		httpapi.WriteErr(w, http.StatusNotFound, "no such brain")
-		return
-	}
-	var req struct {
-		ClearQueue bool `json:"clear_queue"`
-	}
-	if err := httpapi.DecodeOptionalJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"stopped": br.StopCurrent(req.ClearQueue)})
 }
 
 func (b *Bridge) apiLogs(w http.ResponseWriter, r *http.Request) {
