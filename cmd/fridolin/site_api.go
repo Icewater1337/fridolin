@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"io"
 	"net/http"
 	"slices"
@@ -18,33 +19,33 @@ import (
 type SiteService interface {
 	AddDeployKeyWithGH(ctx context.Context, addr string) (string, error)
 	AddStarter(ctx context.Context) error
-	AddUser(in SiteUserInput) (SiteUser, error)
+	AddUser(in sitesvc.SiteUserInput) (sitesvc.SiteUser, error)
 	BaseContext() context.Context
 	BuilderPreview(ctx context.Context, brainID string) (map[string]string, error)
-	ConnectRepo(ctx context.Context, r SiteRepo) error
+	ConnectRepo(ctx context.Context, r sitesvc.SiteRepo) error
 	CreateGitHubRepo(ctx context.Context, name string) (string, error)
 	Deploy(ctx context.Context, commit string) error
 	DeployKey(ctx context.Context) (string, error)
 	DeployStatus() *SiteJob
 	DiscardProposal(brainID string) error
 	DisconnectRepo() error
-	Fetch(ctx context.Context) (SiteUpdates, error)
+	Fetch(ctx context.Context) (sitesvc.SiteUpdates, error)
 	IsBuilder(brainID string) bool
 	MergeProposal(ctx context.Context, brainID string) error
 	Proposals(ctx context.Context) []map[string]any
 	RemoveSecret(module, name string) error
 	RemoveUser(id string) error
 	Restart()
-	Secrets() ([]SiteModuleSecrets, error)
+	Secrets() ([]sitesvc.SiteModuleSecrets, error)
 	SetBuilder(ctx context.Context, brainID string, on bool) error
 	SetGoogleClient(data []byte) error
 	SetRoles(roles []string) error
 	SetSecret(module, name, value string) error
 	SetTunnelToken(token string) error
-	Settings() SiteSettings
-	UpdateSettings(u SiteSettingsUpdate) (SiteSettings, error)
-	UpdateUser(id string, in SiteUserInput) (SiteUser, error)
-	Users() []SiteUser
+	Settings() sitesvc.SiteSettings
+	UpdateSettings(u sitesvc.SiteSettingsUpdate) (sitesvc.SiteSettings, error)
+	UpdateUser(id string, in sitesvc.SiteUserInput) (sitesvc.SiteUser, error)
+	Users() []sitesvc.SiteUser
 }
 
 type SiteAPI struct {
@@ -92,14 +93,14 @@ func (a *SiteAPI) Status(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *SiteAPI) Settings(w http.ResponseWriter, r *http.Request) {
-	var u SiteSettingsUpdate
+	var u sitesvc.SiteSettingsUpdate
 	if err := httpapi.DecodeJSON(r, &u); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if u.Enabled != nil && *u.Enabled {
 		users := a.Site().Users()
-		if !slices.ContainsFunc(users, func(x SiteUser) bool { return x.Role == "admin" }) {
+		if !slices.ContainsFunc(users, func(x sitesvc.SiteUser) bool { return x.Role == "admin" }) {
 			httpapi.WriteErr(w, http.StatusBadRequest, "add an admin account (your Google address) before turning the site on")
 			return
 		}
@@ -166,7 +167,7 @@ func (a *SiteAPI) CreateGitHubRepo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *SiteAPI) Connect(w http.ResponseWriter, r *http.Request) {
-	var req SiteRepo
+	var req sitesvc.SiteRepo
 	if err := httpapi.DecodeJSON(r, &req); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -224,7 +225,7 @@ func (a *SiteAPI) Users(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *SiteAPI) AddUser(w http.ResponseWriter, r *http.Request) {
-	var in SiteUserInput
+	var in sitesvc.SiteUserInput
 	if err := httpapi.DecodeJSON(r, &in); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -238,7 +239,7 @@ func (a *SiteAPI) AddUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *SiteAPI) UpdateUser(w http.ResponseWriter, r *http.Request) {
-	var in SiteUserInput
+	var in sitesvc.SiteUserInput
 	if err := httpapi.DecodeJSON(r, &in); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return

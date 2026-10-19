@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"log"
 	"os"
 	"path/filepath"
@@ -104,11 +105,11 @@ func siteSandboxAvailable(execPath string) error {
 }
 
 // SandboxStatus says whether the live site runs sandboxed.
-func (m *SiteManager) SandboxStatus() SiteSandboxStatus {
+func (m *SiteManager) SandboxStatus() sitesvc.SiteSandboxStatus {
 	if err := siteSandboxAvailable(m.sandboxExec); err != nil {
-		return SiteSandboxStatus{Note: err.Error()}
+		return sitesvc.SiteSandboxStatus{Note: err.Error()}
 	}
-	return SiteSandboxStatus{On: true, Note: "module code reaches only the files, programs and secrets its module.json declares"}
+	return sitesvc.SiteSandboxStatus{On: true, Note: "module code reaches only the files, programs and secrets its module.json declares"}
 }
 
 // sandboxInput gathers what the live site's profile is built from.

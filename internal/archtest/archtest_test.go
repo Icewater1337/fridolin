@@ -24,7 +24,7 @@ import (
 // edge is a change to this table, made and reviewed in the same pull
 // request. Imports from outside the module are not checked here.
 var imports = map[string][]string{
-	"cmd/fridolin":       {"examples", "internal/access", "internal/activity", "internal/apperr", "internal/backup", "internal/brain", "internal/chat", "internal/claudecli", "internal/config", "internal/devchat", "internal/fsx", "internal/google", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/manifest", "internal/media", "internal/otp", "internal/outbound", "internal/pipeline", "internal/platform", "internal/plaud", "internal/prompt", "internal/registry", "internal/route", "internal/sandbox", "internal/store", "internal/testutil", "internal/textx", "internal/trigger", "internal/version", "internal/whatsapp", "site", "web"},
+	"cmd/fridolin":       {"internal/site", "examples", "internal/access", "internal/activity", "internal/apperr", "internal/backup", "internal/brain", "internal/chat", "internal/claudecli", "internal/config", "internal/devchat", "internal/fsx", "internal/google", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/manifest", "internal/media", "internal/otp", "internal/outbound", "internal/pipeline", "internal/platform", "internal/plaud", "internal/prompt", "internal/registry", "internal/route", "internal/sandbox", "internal/store", "internal/testutil", "internal/textx", "internal/trigger", "internal/version", "internal/whatsapp", "site", "web"},
 	"examples":           nil,
 	"internal/access":    {"internal/chat", "internal/trigger"},
 	"internal/activity":  {"internal/history", "internal/textx"},
@@ -59,6 +59,7 @@ var imports = map[string][]string{
 	"internal/trigger":   nil,
 	"internal/version":   nil,
 	"internal/whatsapp":  {"internal/access", "internal/chat", "internal/logx", "internal/media", "internal/platform", "internal/textx", "internal/trigger"},
+	"internal/site":      nil,
 	"site":               nil,
 	"web":                nil,
 }

@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"log"
 	"net"
 	"os"
@@ -378,8 +379,8 @@ func (m *SiteManager) BuilderContext(brainID string) map[string]any {
 
 // BuilderCheck loads the workspace's modules the way the site will — inside
 // the brain's sandbox — and lists what an approver will be asked to review.
-func (m *SiteManager) BuilderCheck(ctx context.Context, brainID string) (CheckResult, error) {
-	res := CheckResult{Mounted: []string{}, Broken: []BrokenModule{}, Review: []ModuleChange{}}
+func (m *SiteManager) BuilderCheck(ctx context.Context, brainID string) (sitesvc.CheckResult, error) {
+	res := sitesvc.CheckResult{Mounted: []string{}, Broken: []sitesvc.BrokenModule{}, Review: []sitesvc.ModuleChange{}}
 	node, err := m.host.Node()
 	if err != nil {
 		return res, err
@@ -401,7 +402,7 @@ func (m *SiteManager) BuilderCheck(ctx context.Context, brainID string) (CheckRe
 }
 
 // reviewWorkspace compares the workspace's manifests on disk with the live commit's.
-func (m *SiteManager) reviewWorkspace(ctx context.Context, brainID string) []ModuleChange {
+func (m *SiteManager) reviewWorkspace(ctx context.Context, brainID string) []sitesvc.ModuleChange {
 	s := m.Settings()
 	prefix := s.Repo.Subdir
 	if prefix != "" {
@@ -420,7 +421,7 @@ func (m *SiteManager) reviewWorkspace(ctx context.Context, brainID string) []Mod
 			ids[id] = true
 		}
 	}
-	out := []ModuleChange{}
+	out := []sitesvc.ModuleChange{}
 	for _, id := range slices.Sorted(func(yield func(string) bool) {
 		for id := range ids {
 			if !yield(id) {
@@ -435,7 +436,7 @@ func (m *SiteManager) reviewWorkspace(ctx context.Context, brainID string) []Mod
 				newM = map[string]any{"invalid": "module.json is not valid JSON"}
 			}
 		}
-		c := ModuleChange{ID: id, Review: reviewManifest(oldM, newM), Files: []string{}}
+		c := sitesvc.ModuleChange{ID: id, Review: reviewManifest(oldM, newM), Files: []string{}}
 		switch {
 		case oldM == nil && newM == nil:
 			continue
@@ -474,10 +475,10 @@ func (m *SiteManager) BuilderSync(ctx context.Context, brainID string) (string, 
 
 // BuilderPropose takes the workspace's committed work (through a bundle the
 // brain writes), pushes it as builder/<brain> and records the proposal.
-func (m *SiteManager) BuilderPropose(ctx context.Context, brainID, title, summary string) (SiteProposal, []ModuleChange, error) {
+func (m *SiteManager) BuilderPropose(ctx context.Context, brainID, title, summary string) (sitesvc.SiteProposal, []sitesvc.ModuleChange, error) {
 	title, summary = strings.TrimSpace(title), strings.TrimSpace(summary)
 	if title == "" || len(title) > 120 {
-		return SiteProposal{}, nil, errors.New("give the proposal a title of up to 120 characters")
+		return sitesvc.SiteProposal{}, nil, errors.New("give the proposal a title of up to 120 characters")
 	}
 	if len(summary) > 4000 {
 		summary = summary[:4000]
@@ -486,30 +487,30 @@ func (m *SiteManager) BuilderPropose(ctx context.Context, brainID, title, summar
 	bundle := filepath.Join(base, "proposal.bundle")
 	_ = os.Remove(bundle)
 	if _, err := m.sandboxed(ctx, brainID, m.workspace(brainID), time.Minute, m.host.GitPath(), "bundle", "create", bundle, "HEAD"); err != nil {
-		return SiteProposal{}, nil, err
+		return sitesvc.SiteProposal{}, nil, err
 	}
 	ref := "refs/builder/" + brainID
 	if _, err := m.git(ctx, m.repoDir(), "fetch", "--quiet", "--no-tags", bundle, "+HEAD:"+ref); err != nil {
-		return SiteProposal{}, nil, err
+		return sitesvc.SiteProposal{}, nil, err
 	}
 	commit, err := m.git(ctx, m.repoDir(), "rev-parse", ref)
 	if err != nil {
-		return SiteProposal{}, nil, err
+		return sitesvc.SiteProposal{}, nil, err
 	}
 	s := m.Settings()
 	if base, _ := m.git(ctx, m.repoDir(), "rev-parse", "refs/remotes/origin/"+s.Repo.Branch); base == commit {
-		return SiteProposal{}, nil, errors.New("the workspace has no commits beyond the branch: commit your work first")
+		return sitesvc.SiteProposal{}, nil, errors.New("the workspace has no commits beyond the branch: commit your work first")
 	}
 	if _, err := m.git(ctx, m.repoDir(), "push", "--force", "origin", ref+":refs/heads/"+builderBranch(brainID)); err != nil {
-		return SiteProposal{}, nil, err
+		return sitesvc.SiteProposal{}, nil, err
 	}
 	changes, err := m.ModuleChanges(ctx, s.Approved, commit)
 	if err != nil {
-		return SiteProposal{}, nil, err
+		return sitesvc.SiteProposal{}, nil, err
 	}
-	p := SiteProposal{Branch: builderBranch(brainID), Brain: brainID, Title: title, Summary: summary, Commit: commit, At: time.Now().UTC().Format(time.RFC3339)}
+	p := sitesvc.SiteProposal{Branch: builderBranch(brainID), Brain: brainID, Title: title, Summary: summary, Commit: commit, At: time.Now().UTC().Format(time.RFC3339)}
 	m.mu.Lock()
-	m.settings.Proposals = slices.DeleteFunc(m.settings.Proposals, func(x SiteProposal) bool { return x.Brain == brainID })
+	m.settings.Proposals = slices.DeleteFunc(m.settings.Proposals, func(x sitesvc.SiteProposal) bool { return x.Brain == brainID })
 	m.settings.Proposals = append(m.settings.Proposals, p)
 	err = m.saveSettingsLocked()
 	m.mu.Unlock()
@@ -538,7 +539,7 @@ func (m *SiteManager) Proposals(ctx context.Context) []map[string]any {
 // result. A conflict stops before anything is pushed.
 func (m *SiteManager) MergeProposal(ctx context.Context, brainID string) error {
 	s := m.Settings()
-	i := slices.IndexFunc(s.Proposals, func(p SiteProposal) bool { return p.Brain == brainID })
+	i := slices.IndexFunc(s.Proposals, func(p sitesvc.SiteProposal) bool { return p.Brain == brainID })
 	if i < 0 {
 		return errors.New("no such proposal")
 	}
@@ -565,7 +566,7 @@ func (m *SiteManager) MergeProposal(ctx context.Context, brainID string) error {
 		return err
 	}
 	m.mu.Lock()
-	m.settings.Proposals = slices.DeleteFunc(m.settings.Proposals, func(x SiteProposal) bool { return x.Brain == brainID })
+	m.settings.Proposals = slices.DeleteFunc(m.settings.Proposals, func(x sitesvc.SiteProposal) bool { return x.Brain == brainID })
 	err = m.saveSettingsLocked()
 	m.mu.Unlock()
 	if err != nil {
@@ -579,7 +580,7 @@ func (m *SiteManager) DiscardProposal(brainID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	n := len(m.settings.Proposals)
-	m.settings.Proposals = slices.DeleteFunc(m.settings.Proposals, func(x SiteProposal) bool { return x.Brain == brainID })
+	m.settings.Proposals = slices.DeleteFunc(m.settings.Proposals, func(x sitesvc.SiteProposal) bool { return x.Brain == brainID })
 	if len(m.settings.Proposals) == n {
 		return errors.New("no such proposal")
 	}

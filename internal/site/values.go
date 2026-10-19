@@ -1,4 +1,4 @@
-package main
+package site
 
 // SiteSettings is <data_dir>/site/settings.json, edited from the dashboard.
 type SiteSettings struct {
@@ -154,4 +154,11 @@ type SiteProcStatus struct {
 type SiteSandboxStatus struct {
 	On   bool   `json:"on"`
 	Note string `json:"note"`
+}
+
+func (u SiteUser) Display() string {
+	if u.Kind == "google" {
+		return u.Email
+	}
+	return u.Username
 }

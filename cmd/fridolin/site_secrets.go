@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	sitesvc "github.com/Icewater1337/fridolin/internal/site"
 	"io/fs"
 	"os"
 	"regexp"
@@ -126,12 +127,12 @@ func (m *SiteManager) RemoveSecret(module, name string) error {
 
 // Secrets lists the live modules that declare secrets, and every module
 // with a value saved.
-func (m *SiteManager) Secrets() ([]SiteModuleSecrets, error) {
-	byID := map[string]*SiteModuleSecrets{}
+func (m *SiteManager) Secrets() ([]sitesvc.SiteModuleSecrets, error) {
+	byID := map[string]*sitesvc.SiteModuleSecrets{}
 	if approved := m.Settings().Approved; approved != "" {
 		for _, c := range readModuleCaps(m.modulesDirOf(approved), m.host.Home()) {
 			if len(c.Secrets) > 0 {
-				byID[c.ID] = &SiteModuleSecrets{Module: c.ID, Title: c.Title, Live: true, Declared: slices.Clone(c.Secrets), Set: []string{}}
+				byID[c.ID] = &sitesvc.SiteModuleSecrets{Module: c.ID, Title: c.Title, Live: true, Declared: slices.Clone(c.Secrets), Set: []string{}}
 			}
 		}
 	}
@@ -152,7 +153,7 @@ func (m *SiteManager) Secrets() ([]SiteModuleSecrets, error) {
 		}
 		s := byID[id]
 		if s == nil {
-			s = &SiteModuleSecrets{Module: id, Title: id, Declared: []string{}, Set: []string{}}
+			s = &sitesvc.SiteModuleSecrets{Module: id, Title: id, Declared: []string{}, Set: []string{}}
 			byID[id] = s
 		}
 		for name := range v {
@@ -160,7 +161,7 @@ func (m *SiteManager) Secrets() ([]SiteModuleSecrets, error) {
 		}
 		sort.Strings(s.Set)
 	}
-	out := make([]SiteModuleSecrets, 0, len(byID))
+	out := make([]sitesvc.SiteModuleSecrets, 0, len(byID))
 	for _, s := range byID {
 		out = append(out, *s)
 	}
