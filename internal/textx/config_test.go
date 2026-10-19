@@ -1,17 +1,17 @@
-package main
+package textx
 
 import "testing"
 
 func TestValidEnvName(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"A", "a", "_", "PATH", "A_0", "a1B2"} {
-		if !validEnvName(name) {
-			t.Errorf("validEnvName(%q) = false", name)
+		if !ValidEnvName(name) {
+			t.Errorf("ValidEnvName(%q) = false", name)
 		}
 	}
 	for _, name := range []string{"", "0", "1A", "A=B", "A\x00B", "A B", "A-B", "A\n", "é", "变量"} {
-		if validEnvName(name) {
-			t.Errorf("validEnvName(%q) = true", name)
+		if ValidEnvName(name) {
+			t.Errorf("ValidEnvName(%q) = true", name)
 		}
 	}
 }
@@ -39,12 +39,12 @@ func TestSBPLString(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := sbplString(tc.in)
+			got, err := SBPLString(tc.in)
 			if (err != nil) != tc.wantErr {
-				t.Fatalf("sbplString(%q) error = %v, want error %v", tc.in, err, tc.wantErr)
+				t.Fatalf("SBPLString(%q) error = %v, want error %v", tc.in, err, tc.wantErr)
 			}
 			if got != tc.want {
-				t.Errorf("sbplString(%q) = %s, want %s", tc.in, got, tc.want)
+				t.Errorf("SBPLString(%q) = %s, want %s", tc.in, got, tc.want)
 			}
 		})
 	}
