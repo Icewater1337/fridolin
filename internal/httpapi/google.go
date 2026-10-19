@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/google"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
@@ -32,8 +31,8 @@ type GoogleAPI struct {
 	Brain  func(string) *brain.Brain
 }
 
-// isOAuthCallback reports whether a request to / is Google returning.
-func isOAuthCallback(r *http.Request) bool {
+// IsOAuthCallback reports whether a request to / is Google returning.
+func IsOAuthCallback(r *http.Request) bool {
 	q := r.URL.Query()
 	return q.Get("state") != "" && (q.Get("code") != "" || q.Get("error") != "")
 }
@@ -59,41 +58,41 @@ func (a *GoogleAPI) Client(w http.ResponseWriter, r *http.Request) {
 		}
 		resp["configured"], resp["type"], resp["client_id_hint"] = true, c.Type, hint
 	}
-	httpapi.WriteJSON(w, http.StatusOK, resp)
+	WriteJSON(w, http.StatusOK, resp)
 }
 
 func (a *GoogleAPI) SetClient(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		JSON string `json:"json"`
 	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	c, err := a.Google().SetClient([]byte(strings.TrimSpace(req.JSON)))
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	note := ""
 	if c.Type == "web" {
 		note = "This is a Web application client: add " + a.Google().RedirectURI() + " to its Authorized redirect URIs in Google Cloud Console, or create a Desktop app client instead."
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved", "type": c.Type, "note": note})
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "saved", "type": c.Type, "note": note})
 }
 
 func (a *GoogleAPI) DeleteClient(w http.ResponseWriter, r *http.Request) {
 	if err := a.Google().DeleteClient(); err != nil {
-		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
+		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
 func (a *GoogleAPI) calendarBrain(w http.ResponseWriter, r *http.Request) *brain.Brain {
 	br := a.Brain(r.PathValue("id"))
 	if br == nil {
-		httpapi.WriteErr(w, http.StatusNotFound, "no such brain")
+		WriteErr(w, http.StatusNotFound, "no such brain")
 	}
 	return br
 }
@@ -105,10 +104,10 @@ func (a *GoogleAPI) Connect(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := a.Google().StartSignIn(br.ID())
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusPreconditionFailed, err.Error())
+		WriteErr(w, http.StatusPreconditionFailed, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"auth_url": u})
+	WriteJSON(w, http.StatusOK, map[string]string{"auth_url": u})
 }
 
 func (a *GoogleAPI) Status(w http.ResponseWriter, r *http.Request) {
@@ -118,7 +117,7 @@ func (a *GoogleAPI) Status(w http.ResponseWriter, r *http.Request) {
 	}
 	m := br.Manifest()
 	resp := a.Google().CalendarStatus(r.Context(), br.ID(), m.Calendar, r.URL.Query().Get("list") != "0")
-	httpapi.WriteJSON(w, http.StatusOK, resp)
+	WriteJSON(w, http.StatusOK, resp)
 }
 
 func (a *GoogleAPI) Select(w http.ResponseWriter, r *http.Request) {
@@ -131,16 +130,16 @@ func (a *GoogleAPI) Select(w http.ResponseWriter, r *http.Request) {
 		Calendars []string `json:"calendars"`
 		Default   string   `json:"default"`
 	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	err := a.Google().Select(br.ID(), manifest.Calendar{Account: req.Account, Calendars: req.Calendars, Default: req.Default})
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
 // apiCalendarDisconnect ends a brain's calendar access. ?local_only=1
@@ -156,11 +155,11 @@ func (a *GoogleAPI) Disconnect(w http.ResponseWriter, r *http.Request) {
 	revoked, note, err := a.Google().Disconnect(ctx, br.ID(), r.URL.Query().Get("local_only") == "1")
 	switch {
 	case errors.Is(err, google.ErrNotRevoked):
-		httpapi.WriteErr(w, http.StatusBadGateway, err.Error()+"; the token was kept, so try again, or remove it here only")
+		WriteErr(w, http.StatusBadGateway, err.Error()+"; the token was kept, so try again, or remove it here only")
 		return
 	case err != nil:
-		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
+		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"status": "disconnected", "revoked": revoked, "note": note})
+	WriteJSON(w, http.StatusOK, map[string]any{"status": "disconnected", "revoked": revoked, "note": note})
 }

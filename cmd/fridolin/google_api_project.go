@@ -1,7 +1,10 @@
 package main
 
-import "github.com/Icewater1337/fridolin/internal/brain"
+import (
+	"github.com/Icewater1337/fridolin/internal/brain"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
+)
 
-func (b *Bridge) newGoogleAPI() *GoogleAPI {
-	return &GoogleAPI{Google: func() GoogleService { return b.google }, Brain: func(id string) *brain.Brain { return b.brainMgr.Get(id) }}
+func (b *Bridge) newGoogleAPI() *httpapi.GoogleAPI {
+	return &httpapi.GoogleAPI{Google: func() httpapi.GoogleService { return b.google }, Brain: func(id string) *brain.Brain { return b.brainMgr.Get(id) }}
 }
