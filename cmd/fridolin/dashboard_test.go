@@ -1300,7 +1300,7 @@ func TestAllowListEntries(t *testing.T) {
 	}
 	for _, c := range numbers {
 		t.Run("number "+c.in, func(t *testing.T) {
-			got, err := phoneNumber(c.in)
+			got, err := chat.PhoneNumber(c.in)
 			if c.want == "" {
 				if err == nil {
 					t.Errorf("phoneNumber(%q) = %q, want an error", c.in, got)
@@ -1349,11 +1349,11 @@ func FuzzPhoneNumber(f *testing.F) {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, in string) {
-		n, err := phoneNumber(in)
+		n, err := chat.PhoneNumber(in)
 		if err != nil {
 			return
 		}
-		if !phoneNumberRE.MatchString(n) {
+		if !chat.IsPhoneNumber(n) {
 			t.Fatalf("phoneNumber(%q) = %q, not 6 to 15 digits", in, n)
 		}
 		digits := strings.Map(func(r rune) rune {
@@ -1365,7 +1365,7 @@ func FuzzPhoneNumber(f *testing.F) {
 		if !strings.Contains(digits, n) {
 			t.Errorf("phoneNumber(%q) = %q, digits that are not in the input", in, n)
 		}
-		if again, err := phoneNumber(n); err != nil || again != n {
+		if again, err := chat.PhoneNumber(n); err != nil || again != n {
 			t.Errorf("phoneNumber(%q) = %q, %v; want it unchanged", n, again, err)
 		}
 	})

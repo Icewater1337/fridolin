@@ -53,6 +53,12 @@ behaviour unless its title says so. The steps so far:
   edit/delete updates. The command supplies history entries and the lazy
   seed reader, which still runs under the feed lock.
 
+- **R11, access slice**: `access` owns pure admission, group addressing,
+  silence and text decisions. Transports project facts into `chat.Envelope`;
+  the command projects one config snapshot. WhatsApp identity/group lookups,
+  FIFO workers, downloads and delivery stay in the adapter. Shared phone
+  normalization lives in the stdlib-only `chat` package.
+
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
 that is not yet extracted is marked *(to come, Rn)* with the step that
@@ -302,11 +308,14 @@ responsibility and says what it must not do.
   consumer interfaces cut it off from processes and transports. `Runner`
   does one run, and `Sink` receives the working notice, forwarded
   questions, finished runs and history lines.
-- **`access`** *(to come, R11; `addressing.go`, `group_policy.go`,
-  `whatsapp.go`)*: decides who may talk to the bridge, in a group who of
+- **`access`** (`internal/access`; transport projections remain in `addressing.go`, `group_policy.go`,
+  `whatsapp.go`): decides who may talk to the bridge, in a group who of
   its members (`group_members`), and whether a message addresses it.
-  `Decide(Policy, Envelope)` is one pure, table-tested function used by
-  WhatsApp, dev mode and `fridolin check --route`.
+  `Decide(Policy, chat.Envelope)` supplies WhatsApp and dev group decisions.
+  Admission is also exposed separately so edits and downloads are gated before
+  side effects. Dev DMs and `fridolin check --route` use `NumberAllowed`,
+  preserving their user-supplied number comparison; WhatsApp supplies explicit
+  resolved identity. Transport-specific ignored-chat notifications stay outside.
 - **`pipeline`** *(to come, R12; `bridge.go`, `debounce.go`)*: the single
   intake for every message source. It handles chat commands, the junk
   filter, choosing the brain, the OTP gate and debouncing. It dispatches to
@@ -426,7 +435,8 @@ leaves (standard library only): fsx, textx, version, apperr, trigger, chat,
 
 Today `cmd/fridolin` imports `web`, `examples`, `site`, `fsx`, `textx`,
 `version`, `trigger`, `platform`, `chat`, `history`, `logx`, `store`,
-`otp`, `media` and `activity`. History imports `fsx`; store imports `fsx`
+`otp`, `media`, `activity`, `httpapi` and `access`. Access imports only
+`chat` and `trigger`; HTTP helpers import `fsx`. History imports `fsx`; store imports `fsx`
 and `logx`; OTP imports `history` and `fsx`; media imports `fsx` and `textx`;
 activity imports `history` and `textx`. The other extracted packages import
 nothing of the module.

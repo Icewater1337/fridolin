@@ -62,7 +62,7 @@ func parseIdentityMap(data []byte) map[string]string {
 		}
 		// A cell like "+" or "@lid" holds no number to look up. A number
 		// is read however it was written: "+1 555 123 4567" is 15551234567.
-		number := identityKey(jid)
+		number := chat.IdentityKey(jid)
 		if number == "" {
 			continue
 		}

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"github.com/Icewater1337/fridolin/internal/access"
 	"slices"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
@@ -39,27 +41,32 @@ type groupAddressing struct {
 // forward do as rules say. Video captions do not count: they are the
 // video's metadata, and a video is a file.
 func addressGroup(msg *waE2E.Message, text string, triggers trigger.List, own []types.JID, rules groupRules) groupAddressing {
-	var a groupAddressing
-	_, a.file = attachmentOf(msg, "")
-	caption := ""
+	e := groupEnvelope(msg, text, own)
+	a := access.AddressGroup(access.Policy{Triggers: triggers, Files: rules.files, Forwards: rules.forwards}, e)
+	return groupAddressing{tagged: a.Tagged, mentioned: a.Mentioned, byCaption: a.ByCaption, file: a.File}
+}
+
+// groupEnvelope projects only message facts; authorization and addressing
+// remain pure, and downloads/name lookups stay on the chat worker.
+func groupEnvelope(msg *waE2E.Message, text string, own []types.JID) chat.Envelope {
+	e := chat.Envelope{Group: true, Text: text}
+	if att, ok := attachmentOf(msg, ""); ok {
+		e.HasFile, e.Caption = true, att.caption
+	}
 	if img := msg.GetImageMessage(); img != nil {
-		caption = img.GetCaption()
+		e.TriggerCaption = img.GetCaption()
 	} else if doc := msg.GetDocumentMessage(); doc != nil {
-		caption = doc.GetCaption()
+		e.TriggerCaption = doc.GetCaption()
 	}
-	textMatches := triggers.Matches(text)
-	a.byCaption = !textMatches && triggers.Matches(caption)
-
-	forwarded, repliesToBridge := false, false
 	for _, ci := range contextInfos(msg) {
-		forwarded = forwarded || ci.GetIsForwarded() || ci.GetForwardingScore() > 0
-		a.mentioned = a.mentioned || slices.ContainsFunc(ci.GetMentionedJID(), func(j string) bool { return isOwnJID(j, own) })
-		repliesToBridge = repliesToBridge || (ci.GetQuotedMessage() != nil && isOwnJID(ci.GetParticipant(), own))
+		e.Forwarded = e.Forwarded || ci.GetIsForwarded() || ci.GetForwardingScore() > 0
+		e.MentionsMe = e.MentionsMe || slices.ContainsFunc(ci.GetMentionedJID(), func(j string) bool { return isOwnJID(j, own) })
+		e.RepliesToMe = e.RepliesToMe || (ci.GetQuotedMessage() != nil && isOwnJID(ci.GetParticipant(), own))
 	}
-
-	a.tagged = textMatches || a.byCaption || a.mentioned || repliesToBridge ||
-		(rules.files && a.file) || (rules.forwards && forwarded)
-	return a
+	for _, jid := range own {
+		e.OwnMentions = append(e.OwnMentions, jid.User)
+	}
+	return e
 }
 
 // contextInfos returns the ContextInfo of each part of msg that can carry

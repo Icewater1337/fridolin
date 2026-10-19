@@ -360,7 +360,7 @@ func FuzzNumberAllowed(f *testing.F) {
 		}
 		// Digits only for what is a phone number, else as written.
 		canon := func(s string) string {
-			if p, err := phoneNumber(s); err == nil {
+			if p, err := chat.PhoneNumber(s); err == nil {
 				return p
 			}
 			return s
@@ -374,7 +374,7 @@ func FuzzNumberAllowed(f *testing.F) {
 			t.Errorf("allowed_numbers %q: allow_any_dm changes whether %q is allowed", allowed, number)
 		}
 		for _, a := range allowed {
-			p, err := phoneNumber(a)
+			p, err := chat.PhoneNumber(a)
 			if err != nil {
 				continue
 			}

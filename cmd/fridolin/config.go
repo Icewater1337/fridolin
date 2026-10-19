@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"io/fs"
 	"log"
 	"os"
@@ -555,7 +556,7 @@ func (c *Config) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.All
 func warnOddChats(path string, c *Config) {
 	var odd []string
 	for _, n := range c.AllowedNumbers {
-		if _, err := phoneNumber(n); err != nil {
+		if _, err := chat.PhoneNumber(n); err != nil {
 			odd = append(odd, fmt.Sprintf("allowed_numbers %q (digits with the country code)", n))
 		}
 	}
@@ -773,7 +774,7 @@ func effective(file *Config) (*Config, error) {
 
 	// Compared with senders as digits, however they were typed into the
 	// file. The dashboard writes them so; a hand edit may not have.
-	cfg.AllowedNumbers = allowedNumbersAsNumbers(cfg.AllowedNumbers)
+	cfg.AllowedNumbers = chat.NumbersAsNumbers(cfg.AllowedNumbers)
 	cfg.GroupMembers = groupMembersAsNumbers(cfg.GroupMembers)
 	for i := range cfg.BrainDirs {
 		cfg.BrainDirs[i].Path = fsx.ExpandHome(cfg.BrainDirs[i].Path, home)
