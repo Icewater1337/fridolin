@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"log"
 	"os"
 	"path/filepath"
@@ -174,9 +175,9 @@ func TestLeftOutBrainShowsWhyOnItsPage(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	view := func() brainView {
+	view := func() httpapi.BrainView {
 		t.Helper()
-		var views []brainView
+		var views []httpapi.BrainView
 		_ = json.Unmarshal(tb.do("GET", "/api/brains", nil).Body.Bytes(), &views)
 		if len(views) != 1 {
 			t.Fatalf("views = %+v, want brain b", views)

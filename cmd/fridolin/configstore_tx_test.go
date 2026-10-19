@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -258,7 +259,7 @@ func TestBrainsRunOnTheLatestConfig(t *testing.T) {
 			}()
 		}
 		wg.Wait()
-		var views []brainView
+		var views []httpapi.BrainView
 		if w := h.Do("GET", "/api/brains", nil); w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &views) != nil {
 			t.Fatalf("GET /api/brains: %d %s", w.Code, w.Body.String())
 		}
@@ -405,7 +406,7 @@ func TestHandEditThenSaveWithTheOldETagConflicts(t *testing.T) {
 func TestHandEditThenDeltaUpdateKeepsBoth(t *testing.T) {
 	tb := newTestBridge(t, "")
 	editByHand(t, tb.cfgs.Path(), func(c map[string]any) { c["max_chunk_size"] = 1234 })
-	if w := tb.do("POST", "/api/chats/allow", chatRequest{Kind: "dm", Number: "15559876543"}); w.Code != 200 {
+	if w := tb.do("POST", "/api/chats/allow", httpapi.ChatRequest{Kind: "dm", Number: "15559876543"}); w.Code != 200 {
 		t.Fatalf("allow: %d %s", w.Code, w.Body.String())
 	}
 	var file config.Config
