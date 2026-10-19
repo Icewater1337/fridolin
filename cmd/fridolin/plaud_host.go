@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/platform"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -162,7 +163,7 @@ func androidToolchain() (javaHome, sdk string, err error) {
 		}
 	}
 	for _, s := range sdks {
-		if s != "" && IsDir(filepath.Join(s, "platforms")) {
+		if s != "" && platform.IsDir(filepath.Join(s, "platforms")) {
 			sdk = s
 			break
 		}

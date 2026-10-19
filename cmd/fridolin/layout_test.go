@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/Icewater1337/fridolin/internal/platform"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,10 +16,10 @@ import (
 )
 
 // useLayout makes the bridge believe its own files are laid out as l.
-func useLayout(t *testing.T, l BridgeLayout) {
+func useLayout(t *testing.T, l platform.BridgeLayout) {
 	t.Helper()
 	prev := ownLayout
-	ownLayout = func() BridgeLayout { return l }
+	ownLayout = func() platform.BridgeLayout { return l }
 	t.Cleanup(func() { ownLayout = prev })
 }
 
@@ -62,20 +63,20 @@ func TestLayoutOf(t *testing.T) {
 	cases := []struct {
 		name string
 		exe  string
-		want BridgeLayout
+		want platform.BridgeLayout
 	}{
-		{"built in the checkout's root", src + "/fridolin", BridgeLayout{Dir: src, Tools: src + "/tools", Source: src}},
-		{"dev build in the checkout's bin/", src + "/bin/fridolin", BridgeLayout{Dir: src, Tools: src + "/tools", Source: src}},
-		{"tools next to the binary, no checkout", lib + "/fridolin", BridgeLayout{Dir: lib, Tools: lib + "/tools"}},
-		{"installed from a checkout", root + "/installed/fridolin", BridgeLayout{Dir: root + "/installed", Tools: root + "/installed/tools", Source: src}},
-		{"installed without tools", root + "/bare/fridolin", BridgeLayout{Dir: root + "/bare", Source: src}},
-		{"installed from a folder that is no checkout now", root + "/stale/fridolin", BridgeLayout{Dir: root + "/stale", Tools: root + "/stale/tools"}},
-		{"bin/ of a folder without tools", root + "/other/bin/fridolin", BridgeLayout{}},
-		{"a binary on its own", root + "/alone/fridolin", BridgeLayout{}},
+		{"built in the checkout's root", src + "/fridolin", platform.BridgeLayout{Dir: src, Tools: src + "/tools", Source: src}},
+		{"dev build in the checkout's bin/", src + "/bin/fridolin", platform.BridgeLayout{Dir: src, Tools: src + "/tools", Source: src}},
+		{"tools next to the binary, no checkout", lib + "/fridolin", platform.BridgeLayout{Dir: lib, Tools: lib + "/tools"}},
+		{"installed from a checkout", root + "/installed/fridolin", platform.BridgeLayout{Dir: root + "/installed", Tools: root + "/installed/tools", Source: src}},
+		{"installed without tools", root + "/bare/fridolin", platform.BridgeLayout{Dir: root + "/bare", Source: src}},
+		{"installed from a folder that is no checkout now", root + "/stale/fridolin", platform.BridgeLayout{Dir: root + "/stale", Tools: root + "/stale/tools"}},
+		{"bin/ of a folder without tools", root + "/other/bin/fridolin", platform.BridgeLayout{}},
+		{"a binary on its own", root + "/alone/fridolin", platform.BridgeLayout{}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := LayoutOf(c.exe); got != c.want {
+			if got := platform.LayoutOf(c.exe); got != c.want {
 				t.Errorf("layoutOf(%s) = %+v, want %+v", c.exe, got, c.want)
 			}
 		})
@@ -93,7 +94,7 @@ func TestBrainRunsKnowWhereTheToolsAre(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			useLayout(t, BridgeLayout{Tools: c.tools})
+			useLayout(t, platform.BridgeLayout{Tools: c.tools})
 			t.Setenv("FRIDOLIN_TOOLS_DIR", "")
 			os.Unsetenv("FRIDOLIN_TOOLS_DIR")
 			t.Setenv("FRIDOLIN_FAKE_ENV", "FRIDOLIN_TOOLS_DIR")
@@ -132,15 +133,15 @@ func TestCheckBrainPathRefusesTheBridgesOwnFolders(t *testing.T) {
 	)
 	cases := []struct {
 		name   string
-		layout BridgeLayout
+		layout platform.BridgeLayout
 		path   string
 		want   string // "" for neither problem
 	}{
-		{"in the checkout of a dev build", BridgeLayout{Dir: src, Tools: src + "/tools", Source: src}, src + "/brains/a", checkout},
-		{"in the checkout an install came from", BridgeLayout{Dir: lib, Tools: lib + "/tools", Source: src}, src + "/a", checkout},
-		{"in the install folder", BridgeLayout{Dir: lib, Tools: lib + "/tools", Source: src}, lib + "/a", install},
-		{"a folder of its own", BridgeLayout{Dir: lib, Tools: lib + "/tools", Source: src}, home + "/assistant/a", ""},
-		{"a binary on its own", BridgeLayout{}, home + "/assistant/a", ""},
+		{"in the checkout of a dev build", platform.BridgeLayout{Dir: src, Tools: src + "/tools", Source: src}, src + "/brains/a", checkout},
+		{"in the checkout an install came from", platform.BridgeLayout{Dir: lib, Tools: lib + "/tools", Source: src}, src + "/a", checkout},
+		{"in the install folder", platform.BridgeLayout{Dir: lib, Tools: lib + "/tools", Source: src}, lib + "/a", install},
+		{"a folder of its own", platform.BridgeLayout{Dir: lib, Tools: lib + "/tools", Source: src}, home + "/assistant/a", ""},
+		{"a binary on its own", platform.BridgeLayout{}, home + "/assistant/a", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

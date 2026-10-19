@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
+	"github.com/Icewater1337/fridolin/internal/platform"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -450,12 +451,12 @@ func TestServiceInstallRunsACopyOutsideTheCheckout(t *testing.T) {
 			if mode(t, filepath.Join(dir, "tools", "poll_results.py")) != 0o755 || mode(t, filepath.Join(dir, "tools", "requirements.txt")) != 0o644 {
 				t.Errorf("tool modes %v %v", mode(t, filepath.Join(dir, "tools", "poll_results.py")), mode(t, filepath.Join(dir, "tools", "requirements.txt")))
 			}
-			m, err := ReadInstallManifest(dir)
+			m, err := platform.ReadInstallManifest(dir)
 			if err != nil || m.Source != f.src || m.Version != version.String() || m.InstalledAt.IsZero() {
 				t.Errorf("install.json = %+v, %v", m, err)
 			}
 			// The installed binary finds its tools and the checkout.
-			if l := LayoutOf(bin); l != (BridgeLayout{Dir: dir, Tools: dir + "/tools", Source: f.src}) {
+			if l := platform.LayoutOf(bin); l != (platform.BridgeLayout{Dir: dir, Tools: dir + "/tools", Source: f.src}) {
 				t.Errorf("layoutOf(installed) = %+v", l)
 			}
 
@@ -535,7 +536,7 @@ func TestServiceInstallFromTheCheckoutsDevBuild(t *testing.T) {
 	if err := f.install(f.src+"/bin/fridolin", func(o *installOptions) { o.Source = "" }); err != nil {
 		t.Fatalf("%v\n%s", err, f.out)
 	}
-	if m, _ := ReadInstallManifest(f.dir()); m.Source != f.src || !pathExists(f.dir()+"/tools/poll_results.py") {
+	if m, _ := platform.ReadInstallManifest(f.dir()); m.Source != f.src || !pathExists(f.dir()+"/tools/poll_results.py") {
 		t.Errorf("install.json source %q, tools copied: %v", m.Source, pathExists(f.dir()+"/tools/poll_results.py"))
 	}
 }

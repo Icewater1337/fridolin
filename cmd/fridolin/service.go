@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
+	"github.com/Icewater1337/fridolin/internal/platform"
 	"io"
 	"net/http"
 	"os"
@@ -54,7 +55,7 @@ const (
 var installEntries = []string{
 	installedBinary, installedBinary + prevSuffix,
 	"tools", "tools" + prevSuffix,
-	InstallManifestFile, prevManifestFile,
+	platform.InstallManifestFile, prevManifestFile,
 }
 
 // defaultInstallDir is where `service install` puts the bridge.
@@ -71,7 +72,7 @@ func installDirFor(exe, home string) string {
 		if p, err := filepath.EvalSymlinks(exe); err == nil {
 			exe = p
 		}
-		if dir := filepath.Dir(exe); pathExists(filepath.Join(dir, InstallManifestFile)) {
+		if dir := filepath.Dir(exe); pathExists(filepath.Join(dir, platform.InstallManifestFile)) {
 			return dir
 		}
 	}
@@ -278,7 +279,7 @@ func servicePath(installer, installerBrain, home, goos string, owners []pathOwne
 	var out, brain []string
 	add := func(dir string, mustExist, inBrain bool) {
 		dir = filepath.Clean(dir)
-		if !filepath.IsAbs(dir) || (mustExist && !IsDir(dir)) {
+		if !filepath.IsAbs(dir) || (mustExist && !platform.IsDir(dir)) {
 			return
 		}
 		list := &out
@@ -645,7 +646,7 @@ type installOptions struct {
 
 // checkInstallDir refuses an install folder that the bridge cannot run
 // from safely, or that holds anything but an earlier install.
-func checkInstallDir(dir, home, dataDir string, l BridgeLayout) error {
+func checkInstallDir(dir, home, dataDir string, l platform.BridgeLayout) error {
 	if !filepath.IsAbs(dir) {
 		return fmt.Errorf("the install folder %q is not an absolute path", dir)
 	}
@@ -683,8 +684,8 @@ type installPlan struct {
 	cfg      *config.Config
 	unitPath string
 	dir      string
-	binary   string       // the installed binary
-	from     BridgeLayout // where the tools come from, and the checkout to record
+	binary   string                // the installed binary
+	from     platform.BridgeLayout // where the tools come from, and the checkout to record
 	data     unitData
 	kept     []string // the variables kept from the agent, by name
 	old      []byte   // the unit file as it is, or nil
@@ -746,7 +747,7 @@ func (h *serviceHost) install(o installOptions) error {
 	if err := h.installTools(p.from.Tools, dir, changed); err != nil {
 		return err
 	}
-	if changed || !pathExists(filepath.Join(dir, InstallManifestFile)) {
+	if changed || !pathExists(filepath.Join(dir, platform.InstallManifestFile)) {
 		if err := writeManifest(dir, p.from.Source, changed); err != nil {
 			return err
 		}
@@ -810,16 +811,16 @@ func (h *serviceHost) planInstall(o installOptions) (*installPlan, error) {
 	// Where the tools come from, and the checkout to record: the one
 	// named, else the binary's own (a build in the checkout, or a release
 	// archive with tools/ next to the binary).
-	p.from = LayoutOf(o.Exe)
+	p.from = platform.LayoutOf(o.Exe)
 	if o.Source != "" {
 		src, err := filepath.Abs(o.Source)
 		if err != nil {
 			return nil, err
 		}
-		if !IsCheckout(src) {
+		if !platform.IsCheckout(src) {
 			return nil, fmt.Errorf("%s is not a source checkout (no go.mod and tools/)", src)
 		}
-		p.from = BridgeLayout{Dir: src, Tools: filepath.Join(src, "tools"), Source: src}
+		p.from = platform.BridgeLayout{Dir: src, Tools: filepath.Join(src, "tools"), Source: src}
 	}
 	if err := checkInstallDir(p.dir, h.home, dataDir, p.from); err != nil {
 		return nil, err
@@ -990,7 +991,7 @@ func pathExists(p string) bool {
 // tools.prev, for a rollback.
 func (h *serviceHost) installTools(src, dir string, keepPrev bool) error {
 	dst := filepath.Join(dir, "tools")
-	if keepPrev && !IsDir(dst) {
+	if keepPrev && !platform.IsDir(dst) {
 		// The binary just replaced came without tools: a tools.prev left
 		// from an install before it would go back with the wrong build.
 		if err := os.RemoveAll(dst + prevSuffix); err != nil {
@@ -999,7 +1000,7 @@ func (h *serviceHost) installTools(src, dir string, keepPrev bool) error {
 	}
 	if src == "" {
 		h.printf("! no tools/ next to this binary: brains will not find the Python helpers (pass --source with the checkout)")
-		if keepPrev && IsDir(dst) {
+		if keepPrev && platform.IsDir(dst) {
 			// They came with the binary just replaced, and a rollback
 			// takes them back with it.
 			if err := os.RemoveAll(dst + prevSuffix); err != nil {
@@ -1048,7 +1049,7 @@ func (h *serviceHost) installTools(src, dir string, keepPrev bool) error {
 	if err := os.Chmod(tmp, 0o755); err != nil {
 		return err
 	}
-	if IsDir(dst) {
+	if platform.IsDir(dst) {
 		old := dst + prevSuffix
 		if !keepPrev {
 			old = filepath.Join(dir, installTempPrefix+"old-tools")
@@ -1073,13 +1074,13 @@ func (h *serviceHost) installTools(src, dir string, keepPrev bool) error {
 // writeManifest records the install. With keepPrev the record it replaces
 // is kept for a rollback.
 func writeManifest(dir, source string, keepPrev bool) error {
-	p := filepath.Join(dir, InstallManifestFile)
+	p := filepath.Join(dir, platform.InstallManifestFile)
 	if data, err := os.ReadFile(p); err == nil && keepPrev {
 		if err := fsx.WriteFileAtomic(filepath.Join(dir, prevManifestFile), data, 0o644, false); err != nil {
 			return err
 		}
 	}
-	data, err := json.MarshalIndent(InstallManifest{Version: version.String(), Source: source, InstalledAt: time.Now().UTC().Truncate(time.Second)}, "", "  ")
+	data, err := json.MarshalIndent(platform.InstallManifest{Version: version.String(), Source: source, InstalledAt: time.Now().UTC().Truncate(time.Second)}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -1248,7 +1249,7 @@ func (h *serviceHost) rollback(cfgPath, dir string) error {
 	if err != nil {
 		return fmt.Errorf("loading %s: %w", cfgPath, err)
 	}
-	if err := checkInstallDir(dir, h.home, cfg.DataDir, BridgeLayout{}); err != nil {
+	if err := checkInstallDir(dir, h.home, cfg.DataDir, platform.BridgeLayout{}); err != nil {
 		return err
 	}
 	// The binary is never missing: the current one is kept aside first,
@@ -1264,13 +1265,13 @@ func (h *serviceHost) rollback(cfgPath, dir string) error {
 	if err := os.Rename(swap, binary+prevSuffix); err != nil {
 		return err
 	}
-	for _, pair := range [][2]string{{"tools", "tools" + prevSuffix}, {InstallManifestFile, prevManifestFile}} {
+	for _, pair := range [][2]string{{"tools", "tools" + prevSuffix}, {platform.InstallManifestFile, prevManifestFile}} {
 		if err := swapPaths(filepath.Join(dir, pair[0]), filepath.Join(dir, pair[1])); err != nil {
 			return err
 		}
 	}
 	want, shown := "", "unknown version"
-	if m, err := ReadInstallManifest(dir); err == nil {
+	if m, err := platform.ReadInstallManifest(dir); err == nil {
 		want, shown = m.Version, m.Version
 	}
 	h.printf("swapped in the previous install (%s); `fridolin service rollback` again undoes it", shown)
@@ -1307,7 +1308,7 @@ func (h *serviceHost) status(cfgPath, dir string) error {
 		return err
 	}
 	binary := filepath.Join(dir, installedBinary)
-	if m, err := ReadInstallManifest(dir); err == nil && pathExists(binary) {
+	if m, err := platform.ReadInstallManifest(dir); err == nil && pathExists(binary) {
 		from := ""
 		if m.Source != "" {
 			from = ", from " + m.Source
@@ -1316,7 +1317,7 @@ func (h *serviceHost) status(cfgPath, dir string) error {
 		if pathExists(binary + prevSuffix) {
 			prev := "unknown version"
 			if data, err := os.ReadFile(filepath.Join(dir, prevManifestFile)); err == nil {
-				var pm InstallManifest
+				var pm platform.InstallManifest
 				if json.Unmarshal(data, &pm) == nil {
 					prev = pm.Version
 				}
@@ -1400,11 +1401,11 @@ func (h *serviceHost) uninstall(dir string, keepFiles bool) error {
 	if err != nil {
 		return err
 	}
-	removeFiles := !keepFiles && IsDir(dir)
+	removeFiles := !keepFiles && platform.IsDir(dir)
 	// Before the service stops: a folder that is no install refuses the
 	// whole uninstall, not only the part after it.
 	if removeFiles {
-		if err := checkInstallDir(dir, h.home, "", BridgeLayout{}); err != nil {
+		if err := checkInstallDir(dir, h.home, "", platform.BridgeLayout{}); err != nil {
 			return err
 		}
 	}
