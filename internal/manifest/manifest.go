@@ -195,8 +195,18 @@ func (m Manifest) Equal(o Manifest) bool {
 // it goes as fsx.ReadBrainFile reads: nothing outside the folder, no symlink,
 // only a regular file, so that a FIFO cannot hang a reload.
 func Read(dir string) (*Manifest, error) {
-	path := filepath.Join(dir, File)
-	data, err := fsx.ReadBrainFile(dir, File)
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", filepath.Join(dir, File), err)
+	}
+	defer root.Close()
+	return ReadRoot(root)
+}
+
+// ReadRoot keeps inspection and transaction reads on their pinned folder.
+func ReadRoot(root *os.Root) (*Manifest, error) {
+	path := filepath.Join(root.Name(), File)
+	data, err := fsx.ReadBrainFileRoot(root, File)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
