@@ -3,13 +3,15 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/Icewater1337/fridolin/internal/registry"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/registry"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
@@ -25,7 +27,7 @@ func testManifest(id string) manifest.Manifest {
 func TestCheckBrainPath(t *testing.T) {
 	home := fsx.Canonical(t.TempDir())
 	t.Setenv("HOME", home)
-	cfg := &Config{DataDir: filepath.Join(home, ".fridolin")}
+	cfg := &config.Config{DataDir: filepath.Join(home, ".fridolin")}
 	others := []string{filepath.Join(home, "brains", "medical")}
 
 	cases := []struct {
@@ -106,7 +108,7 @@ func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
 			other := brainFolder(t, "~/elsewhere/y", manifest.Manifest{ID: "y"})
 			// x second: the dashboard shows an issue on the entry it
 			// names, which was the first one for these.
-			cfg := &Config{DataDir: filepath.Join(home, "box", ".fridolin"), BrainDirs: []BrainRef{other, ref}}
+			cfg := &config.Config{DataDir: filepath.Join(home, "box", ".fridolin"), BrainDirs: []config.BrainRef{other, ref}}
 			for i := range cfg.BrainDirs {
 				cfg.BrainDirs[i].Path = fsx.ExpandHome(cfg.BrainDirs[i].Path, home)
 			}
@@ -225,10 +227,10 @@ func TestScaffoldedPromptSaysWhatItIs(t *testing.T) {
 	}
 }
 
-func folderBrainConfig(t *testing.T, home string, refs ...BrainRef) *Config {
+func folderBrainConfig(t *testing.T, home string, refs ...config.BrainRef) *config.Config {
 	t.Helper()
-	cfg := &Config{DataDir: filepath.Join(home, "data"), BrainDirs: refs}
-	eff, err := effective(cfg)
+	cfg := &config.Config{DataDir: filepath.Join(home, "data"), BrainDirs: refs}
+	eff, err := config.Resolve(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +246,7 @@ func TestResolveBrainsUsesApprovedManifestAndReportsDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	approved := m
-	cfg := folderBrainConfig(t, home, BrainRef{Path: dir, Approved: &approved})
+	cfg := folderBrainConfig(t, home, config.BrainRef{Path: dir, Approved: &approved})
 
 	specs, issues := ResolveBrains(cfg)
 	if len(specs) != 1 || len(issues) != 0 {
@@ -279,9 +281,9 @@ func TestResolveBrainsSkipsMissingAndClashing(t *testing.T) {
 	}
 	gone := testManifest("gone")
 	cfg := folderBrainConfig(t, home,
-		BrainRef{Path: filepath.Join(home, "a"), Approved: &a},
-		BrainRef{Path: filepath.Join(home, "b"), Approved: &b},
-		BrainRef{Path: filepath.Join(home, "gone"), Approved: &gone},
+		config.BrainRef{Path: filepath.Join(home, "a"), Approved: &a},
+		config.BrainRef{Path: filepath.Join(home, "b"), Approved: &b},
+		config.BrainRef{Path: filepath.Join(home, "gone"), Approved: &gone},
 	)
 	specs, issues := ResolveBrains(cfg)
 	if len(specs) != 1 || specs[0].Manifest.ID != "a" {
@@ -330,8 +332,8 @@ func TestResolveBrainsLeavesOutBadBrains(t *testing.T) {
 				}
 			}
 			cfg := folderBrainConfig(t, home,
-				BrainRef{Path: filepath.Join(home, "a"), Approved: &first},
-				BrainRef{Path: filepath.Join(home, tc.dir), Approved: tc.second},
+				config.BrainRef{Path: filepath.Join(home, "a"), Approved: &first},
+				config.BrainRef{Path: filepath.Join(home, tc.dir), Approved: tc.second},
 			)
 			specs, issues := ResolveBrains(cfg)
 			if len(specs) != 1 || specs[0].Manifest.ID != "a" {
@@ -536,32 +538,32 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 	const otherGroup = "120363000000000009@g.us"
 	cases := []struct {
 		name            string
-		brains          func(home string) []BrainRef
+		brains          func(home string) []config.BrainRef
 		dm, group, rest string // who takes a DM, testGroup and otherGroup; "!id" for held by brain id
 	}{
-		{"every brain runs", func(home string) []BrainRef {
-			return []BrainRef{
+		{"every brain runs", func(home string) []config.BrainRef {
+			return []config.BrainRef{
 				brainFolder(t, home+"/personal", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
 				brainFolder(t, home+"/team", manifest.Manifest{ID: "team", Routing: manifest.Routing{Groups: []string{testGroup}}}),
 				brainFolder(t, home+"/work", manifest.Manifest{ID: "work", Routing: manifest.Routing{Default: true}}),
 			}
 		}, "personal", "team", "work"},
-		{"the DM brain's folder cannot hold a brain", func(home string) []BrainRef {
-			return []BrainRef{
+		{"the DM brain's folder cannot hold a brain", func(home string) []config.BrainRef {
+			return []config.BrainRef{
 				brainFolder(t, home+"/data/personal", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
 				brainFolder(t, home+"/team", manifest.Manifest{ID: "team", Routing: manifest.Routing{Groups: []string{testGroup}}}),
 				brainFolder(t, home+"/work", manifest.Manifest{ID: "work", Routing: manifest.Routing{Default: true}}),
 			}
 		}, "!personal", "team", "work"},
-		{"a group brain's folder is gone", func(home string) []BrainRef {
-			return []BrainRef{
+		{"a group brain's folder is gone", func(home string) []config.BrainRef {
+			return []config.BrainRef{
 				brainFolder(t, home+"/personal", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
 				{Path: home + "/gone", Approved: &manifest.Manifest{ID: "team", Name: "team", Routing: manifest.Routing{Groups: []string{testGroup}}}},
 				brainFolder(t, home+"/work", manifest.Manifest{ID: "work", Routing: manifest.Routing{Default: true}}),
 			}
 		}, "personal", "!team", "work"},
-		{"the default brain's folder is gone", func(home string) []BrainRef {
-			return []BrainRef{
+		{"the default brain's folder is gone", func(home string) []config.BrainRef {
+			return []config.BrainRef{
 				brainFolder(t, home+"/team", manifest.Manifest{ID: "team", Routing: manifest.Routing{Groups: []string{testGroup}}}),
 				{Path: home + "/gone", Approved: &manifest.Manifest{ID: "work", Name: "work", Routing: manifest.Routing{Default: true}}},
 			}
@@ -605,7 +607,7 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 		home := fsx.Canonical(t.TempDir())
 		t.Setenv("HOME", home)
 		cfg, err := LoadConfig(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data", "allowed_numbers": ["15551234567"]`+brainDirsJSON(t,
-			BrainRef{Path: home + "/gone", Approved: &manifest.Manifest{ID: "personal", Name: "personal", Routing: manifest.Routing{HandlesDMs: true}}},
+			config.BrainRef{Path: home + "/gone", Approved: &manifest.Manifest{ID: "personal", Name: "personal", Routing: manifest.Routing{HandlesDMs: true}}},
 			brainFolder(t, home+"/work", manifest.Manifest{ID: "work", Routing: manifest.Routing{Default: true}}),
 		)+`}`))
 		if err != nil {
@@ -621,7 +623,7 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 	t.Run("the chat is told", func(t *testing.T) {
 		brains := fsx.Canonical(t.TempDir())
 		tb := newTestBridge(t, brainDirsJSON(t,
-			BrainRef{Path: brains + "/personal", Approved: &manifest.Manifest{ID: "personal", Name: "personal", Routing: manifest.Routing{HandlesDMs: true}}},
+			config.BrainRef{Path: brains + "/personal", Approved: &manifest.Manifest{ID: "personal", Name: "personal", Routing: manifest.Routing{HandlesDMs: true}}},
 			brainFolder(t, brains+"/work", manifest.Manifest{ID: "work", Routing: manifest.Routing{Default: true}}),
 		))
 		tb.handleInbound(t.Context(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", Source: chat.SourceWhatsApp}})

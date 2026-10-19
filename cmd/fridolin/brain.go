@@ -22,6 +22,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/route"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -563,7 +565,7 @@ func (br *Brain) queueOrderLocked() []int {
 // whether it interrupts its sender's own run, which only a request does in
 // interrupt mode, and which waiting or running messages it replaces.
 func supersedes(m Inbound, s *brainSettings) (interrupting bool, replaces func(Inbound) bool) {
-	interrupting = s.queueMode == queueModeInterrupt && !m.Silent && m.Source != chat.SourceIngest
+	interrupting = s.queueMode == config.QueueModeInterrupt && !m.Silent && m.Source != chat.SourceIngest
 	return interrupting, func(p Inbound) bool {
 		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != chat.SourceIngest))
 	}
@@ -1198,7 +1200,7 @@ func withArgsBeforePrint(args, extra []string) []string {
 // stop a brain from reading the files with its tools; that takes the
 // sandbox, which denies them all.
 func excludeInstructionsAbove(dir string) string {
-	data, err := json.Marshal(map[string][]string{"claudeMdExcludes": instructionsAbove(dir, homeDir())})
+	data, err := json.Marshal(map[string][]string{"claudeMdExcludes": instructionsAbove(dir, config.HomeDir())})
 	if err != nil {
 		return ""
 	}
@@ -2096,7 +2098,7 @@ type BrainManager struct {
 }
 
 // NewBrainManager builds the configured brains.
-func NewBrainManager(cfg *Config) (*BrainManager, error) {
+func NewBrainManager(cfg *config.Config) (*BrainManager, error) {
 	bm := &BrainManager{
 		brains:   map[string]*Brain{},
 		byGroup:  map[string]*Brain{},
@@ -2116,7 +2118,7 @@ func (bm *BrainManager) SetHooks(h BrainHooks) { *bm.hooks = h }
 // Apply makes the running brains match cfg. The bridge's PATH goes first,
 // before any brain folder is checked against it: the folders of it inside
 // a brain's folder leave it for that brain's runs (see setBridgePATH).
-func (bm *BrainManager) Apply(cfg *Config) error {
+func (bm *BrainManager) Apply(cfg *config.Config) error {
 	ownPATH := setBridgePATH(cfg)
 	specs, issues := ResolveBrains(cfg)
 	return bm.reload(specs, issues, cfg, ownPATH)
@@ -2124,7 +2126,7 @@ func (bm *BrainManager) Apply(cfg *Config) error {
 
 // reload runs the brains specs, with issues the problems ResolveBrains
 // found and ownPATH each brain's own PATH folders (see setBridgePATH).
-func (bm *BrainManager) reload(specs []manifest.Spec, issues []BrainIssue, cfg *Config, ownPATH map[string][]string) error {
+func (bm *BrainManager) reload(specs []manifest.Spec, issues []BrainIssue, cfg *config.Config, ownPATH map[string][]string) error {
 	bm.reloadMu.Lock()
 	defer bm.reloadMu.Unlock()
 
@@ -2303,7 +2305,7 @@ func (bm *BrainManager) keepRetiredWaiting(from *Brain, ms []Inbound) bool {
 }
 
 // settingsFor combines global settings with a brain's own.
-func settingsFor(cfg *Config, sp manifest.Spec) *brainSettings {
+func settingsFor(cfg *config.Config, sp manifest.Spec) *brainSettings {
 	m := sp.Manifest
 	model := m.Model
 	if model == "" {
@@ -2335,7 +2337,7 @@ func settingsFor(cfg *Config, sp manifest.Spec) *brainSettings {
 		otpGuard:        cfg.OTPGuard,
 		otpMarkers:      append([]string(nil), cfg.OTPMarkers...),
 		viewer:          cfg.Viewer,
-		runTimeout:      cfg.RunTimeout(),
+		runTimeout:      runTimeout(cfg),
 		queueMode:       cfg.Queue.Mode,
 		maxPending:      cfg.Queue.MaxPending,
 		observe:         m.Observe,
@@ -2360,7 +2362,7 @@ func dataEnv(s *brainSettings) []string {
 }
 
 // credentialsDirOf is where per-brain credential files live.
-func credentialsDirOf(cfg *Config) string {
+func credentialsDirOf(cfg *config.Config) string {
 	if cfg.Sandbox.CredentialsDir != "" {
 		return cfg.Sandbox.CredentialsDir
 	}

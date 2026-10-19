@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"syscall"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/textx"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -139,7 +141,7 @@ func configPathFrom(flagValue string) (path, source string) {
 	if p := os.Getenv("FRIDOLIN_CONFIG"); p != "" {
 		return p, configFromEnv
 	}
-	return filepath.Join(defaultDataDir(homeDir()), "config.json"), configFromDefault
+	return filepath.Join(config.DefaultDataDir(config.HomeDir()), "config.json"), configFromDefault
 }
 
 // resolvedPaths are the config file and the data dir a command uses, both
@@ -154,7 +156,7 @@ type resolvedPaths struct {
 // resolvePaths finds the config file as configPath does and the data dir it
 // names, as loading it would, without creating either.
 func resolvePaths(configFlag string) (resolvedPaths, error) {
-	home := homeDir()
+	home := config.HomeDir()
 	if home == "" {
 		return resolvedPaths{}, errors.New("getting home dir: $HOME is not set")
 	}
@@ -170,7 +172,7 @@ func resolvePaths(configFlag string) (resolvedPaths, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return resolvedPaths{}, fmt.Errorf("reading config file %q: %w", path, err)
 	}
-	dir, dirSource := resolveDataDir(file.DataDir, home)
+	dir, dirSource := config.ResolveDataDir(file.DataDir, home)
 	return resolvedPaths{Config: absPath(path), ConfigSource: source, DataDir: absPath(dir), DataDirSource: dirSource}, nil
 }
 
@@ -213,21 +215,21 @@ func pathsCmd(args []string, stdout, stderr io.Writer) int {
 
 // starterConfig is written on the very first run, so the bridge can start and
 // everything else can be set up in the dashboard.
-func starterConfig() *Config {
+func starterConfig() *config.Config {
 	f := false
-	return &Config{
+	return &config.Config{
 		Comment:                    "Edit this in the dashboard (fridolin open). Every option: docs/CONFIGURATION.md",
-		Version:                    currentConfigVersion,
+		Version:                    config.Version,
 		AllowedNumbers:             []string{},
 		AllowAnyDM:                 &f,
 		AllowedGroups:              []string{},
 		Triggers:                   trigger.FromStrings([]string{"@claude"}),
 		DangerouslySkipPermissions: true,
-		HTTPListen:                 defaultHTTPListen,
+		HTTPListen:                 config.DefaultHTTPListen,
 		OTPGuard:                   true,
-		Sandbox:                    SandboxConfig{Enabled: runtime.GOOS == "darwin", DenyPaths: []string{}, AllowPaths: []string{}},
+		Sandbox:                    config.SandboxConfig{Enabled: runtime.GOOS == "darwin", DenyPaths: []string{}, AllowPaths: []string{}},
 		// A new install has no scripts written before tokens.
-		ScriptAPI: ScriptAPIConfig{TokenlessSend: &f},
+		ScriptAPI: config.ScriptAPIConfig{TokenlessSend: &f},
 	}
 }
 
@@ -246,7 +248,7 @@ func writeStarterConfig(path, claudePath, dataDir string) error {
 	cfg.ClaudePath = claudePath
 	cfg.DataDir = dataDir
 	if dataDir == "" {
-		cfg.DataDir = starterDataDir(homeDir())
+		cfg.DataDir = starterDataDir(config.HomeDir())
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -260,10 +262,10 @@ func writeStarterConfig(path, claudePath, dataDir string) error {
 // folder the bridge would pick now, written with ~ so that the config
 // still holds when a backup of it is restored under another home folder.
 func starterDataDir(home string) string {
-	if _, source := resolveDataDir("", home); source == dataDirFromLegacy {
-		return "~/" + legacyDataDirName
+	if _, source := config.ResolveDataDir("", home); source == config.DataDirFromLegacy {
+		return "~/" + config.LegacyDataDirName
 	}
-	return "~/" + dataDirName
+	return "~/" + config.DataDirName
 }
 
 // runOptions are the run command's flags.
@@ -438,9 +440,9 @@ func runLog(console io.Writer, configFlag string) (*logx.Ring, string) {
 // WhatsApp session, and where it came from: without data_dir in the
 // config, which folders exist decides it.
 func logDataDir(cfgs *ConfigStore) {
-	home := homeDir()
+	home := config.HomeDir()
 	dir := cfgs.Get().DataDir
-	log.Printf("Data dir: %s (%s)", absPath(dir), dataDirSource(cfgs.FileCopy().DataDir, dir, home))
+	log.Printf("Data dir: %s (%s)", absPath(dir), config.DataDirSource(cfgs.FileCopy().DataDir, dir, home))
 }
 
 func initCmd(args []string) {
@@ -497,7 +499,7 @@ func openCmd(args []string) {
 // has no login codes, and its dashboard took the token in the link; there
 // is no falling back to that, since `fridolin open --print` is what an
 // agent runs and pastes into a chat.
-func dashboardLink(cfg *Config) (string, error) {
+func dashboardLink(cfg *config.Config) (string, error) {
 	tokenPath := filepath.Join(cfg.DataDir, "dashboard.token")
 	token, err := httpapi.ReadToken(cfg.DataDir)
 	if err != nil {
@@ -530,7 +532,7 @@ func rotateTokenCmd(args []string) {
 }
 
 // rotateToken does rotateTokenCmd's work for cfg.
-func rotateToken(cfg *Config) error {
+func rotateToken(cfg *config.Config) error {
 	token, err := httpapi.ReadToken(cfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("no dashboard token yet — start the bridge first (%w)", err)
@@ -630,7 +632,7 @@ func leftOutBrains(issues []BrainIssue) []string {
 func writeCheck(w io.Writer, o checkOptions) error {
 	var red *redactor
 	if o.redact {
-		red = newRedactor(homeDir())
+		red = newRedactor(config.HomeDir())
 		red.addChats(o.routes...)
 		// The log entries of loading the config name paths, and the
 		// allowed chats it finds odd, as they are written.
@@ -661,7 +663,7 @@ func writeCheck(w io.Writer, o checkOptions) error {
 }
 
 // checkReport writes what check says of cfg, the config loaded from path.
-func checkReport(w io.Writer, path string, cfg *Config, o checkOptions) error {
+func checkReport(w io.Writer, path string, cfg *config.Config, o checkOptions) error {
 	// Before even the version probe: it runs outside the sandbox, so a
 	// Claude planted in a brain's PATH folder must not be selected.
 	ownPATH := setBridgePATH(cfg)
@@ -762,7 +764,7 @@ func claudeSummary(path string, passthrough []string) string {
 
 // dmAllowSummary says who may DM the bridge. A bare empty list would read
 // as "nobody" even when allow_any_dm lets everyone in.
-func dmAllowSummary(cfg *Config) string {
+func dmAllowSummary(cfg *config.Config) string {
 	switch {
 	case cfg.AnyoneCanDM():
 		return "anyone (allow_any_dm is true and allowed_numbers is empty)"

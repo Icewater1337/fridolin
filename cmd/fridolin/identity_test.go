@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -219,7 +221,7 @@ func TestOwnerChat(t *testing.T) {
 		{[]string{"my phone"}, ""},
 	}
 	for _, c := range cases {
-		if got := ownerChat(&Config{AllowedNumbers: c.numbers}); got != c.want {
+		if got := ownerChat(&config.Config{AllowedNumbers: c.numbers}); got != c.want {
 			t.Errorf("ownerChat(%q) = %q, want %q", c.numbers, got, c.want)
 		}
 	}

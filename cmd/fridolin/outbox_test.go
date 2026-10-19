@@ -4,14 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/devchat"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/devchat"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
@@ -32,7 +34,7 @@ type flakyMessenger struct {
 	delay     time.Duration // how long each send takes
 }
 
-func newFlakyMessenger(cfg func() *Config, online bool) *flakyMessenger {
+func newFlakyMessenger(cfg func() *config.Config, online bool) *flakyMessenger {
 	f := &flakyMessenger{Messenger: devchat.New(func(text string) []string { return outboundmsg.Chunk(text, cfg().MaxChunkSize) }), online: make(chan struct{}), dropAfter: -1}
 	if online {
 		close(f.online)
@@ -299,7 +301,9 @@ func TestOutboxSummaryOnlyReads(t *testing.T) {
 	if n := rows(); n != 1 {
 		t.Fatalf("the summary removed rows: %d left, want 1", n)
 	}
-	o := outboundmsg.NewOutbox(s, func() outboundmsg.Link { return newFlakyMessenger(func() *Config { return &Config{} }, true) }, 0, nil)
+	o := outboundmsg.NewOutbox(s, func() outboundmsg.Link {
+		return newFlakyMessenger(func() *config.Config { return &config.Config{} }, true)
+	}, 0, nil)
 	defer o.Stop()
 	waitFor(t, 5*time.Second, "the outbox to forget it", func() bool { return rows() == 0 })
 }
@@ -332,7 +336,7 @@ func openOutboxStore(t *testing.T, dir string) *store.Store {
 // again, recorded in the history of the brain that wrote it.
 func TestOutboxSurvivesARestart(t *testing.T) {
 	dir := t.TempDir()
-	cfg := func() *Config { return &Config{MaxChunkSize: 4000} }
+	cfg := func() *config.Config { return &config.Config{MaxChunkSize: 4000} }
 	s := openOutboxStore(t, dir)
 	down := newFlakyMessenger(cfg, false)
 	first := outboundmsg.NewOutbox(s, func() outboundmsg.Link { return down }, 0, func(context.Context, store.OutboxRow) error {
@@ -382,7 +386,7 @@ func TestOutboxGivesUp(t *testing.T) {
 	dir := t.TempDir()
 	s := openOutboxStore(t, dir)
 	db := testStoreSQL(t, filepath.Join(dir, "bridge.db"))
-	m := newFlakyMessenger(func() *Config { return &Config{} }, true)
+	m := newFlakyMessenger(func() *config.Config { return &config.Config{} }, true)
 	o := outboundmsg.NewOutbox(s, func() outboundmsg.Link { return m }, 0, nil)
 	defer o.Stop()
 	if _, err := s.AddOutbox(context.Background(), store.OutboxRow{Chat: testDMChat, Brain: "main", History: "stale", Parts: []store.OutboxPart{{Text: "stale"}}, CreatedAt: time.Now().Add(-2 * outboundmsg.OutboxTTL)}); err != nil {
@@ -412,7 +416,7 @@ func TestOutboxGivesUp(t *testing.T) {
 // that failed. Another chat's go on.
 func TestOutboxKeepsAChatsOrder(t *testing.T) {
 	s := openOutboxStore(t, t.TempDir())
-	m := newFlakyMessenger(func() *Config { return &Config{} }, false)
+	m := newFlakyMessenger(func() *config.Config { return &config.Config{} }, false)
 	o := outboundmsg.NewOutbox(s, func() outboundmsg.Link { return m }, 0, nil)
 	defer o.Stop()
 	for _, text := range []string{"first", "second"} {

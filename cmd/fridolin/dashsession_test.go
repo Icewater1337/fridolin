@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
 
@@ -421,7 +423,7 @@ func TestDashboardLink(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			cfg := &Config{DataDir: t.TempDir(), HTTPListen: stubBridge(t, c.status, c.body)}
+			cfg := &config.Config{DataDir: t.TempDir(), HTTPListen: stubBridge(t, c.status, c.body)}
 			if err := os.WriteFile(filepath.Join(cfg.DataDir, "dashboard.token"), []byte(token+"\n"), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -509,7 +511,7 @@ func TestRotateTokenCommand(t *testing.T) {
 			}
 			sessions, _ := loadDashSessions(dataDir)
 			id, binding, _, _ := sessions.create()
-			cfg := &Config{DataDir: dataDir, HTTPListen: closedPort(t)}
+			cfg := &config.Config{DataDir: dataDir, HTTPListen: closedPort(t)}
 			cfg.Dashboard.Disabled = c.off
 			if err := rotateToken(cfg); err != nil {
 				t.Fatal(err)

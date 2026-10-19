@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -39,22 +41,22 @@ func TestSetBridgePATH(t *testing.T) {
 	}
 	personal := brainFolder(t, home+"/assistant/personal", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}})
 	q := brainFolder(t, home+"/q", manifest.Manifest{ID: "q"})
-	unapproved := BrainRef{Path: home + "/new"}
+	unapproved := config.BrainRef{Path: home + "/new"}
 	path := strings.Join([]string{home + "/assistant/personal/bin", "/usr/bin", home + "/real/q/bin", "relative", home + "/new/bin", home + "/assistant/personal/tools/", "/bin"}, ":")
 	cases := []struct {
 		name     string
-		refs     []BrainRef
+		refs     []config.BrainRef
 		brainVar string
 		want     string
 		wantOwn  map[string][]string
 		logged   []string
 	}{
 		{"no brain folder on PATH", nil, "", path, map[string][]string{}, nil},
-		{"brain folders on PATH", []BrainRef{personal, q, unapproved}, "",
+		{"brain folders on PATH", []config.BrainRef{personal, q, unapproved}, "",
 			"/usr/bin:relative:/bin",
 			map[string][]string{"personal": {home + "/assistant/personal/bin", home + "/assistant/personal/tools"}, "q": {home + "/real/q/bin"}},
 			[]string{home + "/assistant/personal/bin is in brain personal's folder", home + "/real/q/bin is in brain q's folder", home + "/new/bin is in the brain folder " + home + "/new"}},
-		{"what the service file keeps for brains", []BrainRef{personal}, home + "/assistant/personal/scripts:" + home + "/gone/bin", "/usr/bin:" + home + "/real/q/bin:relative:" + home + "/new/bin:/bin",
+		{"what the service file keeps for brains", []config.BrainRef{personal}, home + "/assistant/personal/scripts:" + home + "/gone/bin", "/usr/bin:" + home + "/real/q/bin:relative:" + home + "/new/bin:/bin",
 			map[string][]string{"personal": {home + "/assistant/personal/bin", home + "/assistant/personal/tools", home + "/assistant/personal/scripts"}},
 			[]string{home + "/assistant/personal/scripts, from " + brainPATHVar + ", goes to brain personal's runs only", home + "/gone/bin, from " + brainPATHVar + ", is in no approved brain's folder"}},
 	}
@@ -65,7 +67,7 @@ func TestSetBridgePATH(t *testing.T) {
 			var logs bytes.Buffer
 			log.SetOutput(&logs)
 			t.Cleanup(func() { log.SetOutput(os.Stderr) })
-			own := setBridgePATH(&Config{BrainDirs: c.refs})
+			own := setBridgePATH(&config.Config{BrainDirs: c.refs})
 			if got := os.Getenv("PATH"); got != c.want {
 				t.Errorf("PATH = %q, want %q", got, c.want)
 			}
@@ -91,7 +93,7 @@ func TestSetBridgePATH(t *testing.T) {
 		log.SetOutput(&logs)
 		t.Cleanup(func() { log.SetOutput(os.Stderr) })
 		for range 2 {
-			setBridgePATH(&Config{BrainDirs: []BrainRef{personal}})
+			setBridgePATH(&config.Config{BrainDirs: []config.BrainRef{personal}})
 		}
 		if n := strings.Count(logs.String(), "goes to brain personal's runs"); n != 1 {
 			t.Errorf("logged %d times, want once:\n%s", n, logs.String())
@@ -100,11 +102,11 @@ func TestSetBridgePATH(t *testing.T) {
 	t.Run("a removed brain's folder stays off the bridge's PATH", func(t *testing.T) {
 		t.Setenv("PATH", path)
 		t.Setenv(brainPATHVar, "")
-		setBridgePATH(&Config{BrainDirs: []BrainRef{personal}})
+		setBridgePATH(&config.Config{BrainDirs: []config.BrainRef{personal}})
 		var logs bytes.Buffer
 		log.SetOutput(&logs)
 		t.Cleanup(func() { log.SetOutput(os.Stderr) })
-		own := setBridgePATH(&Config{})
+		own := setBridgePATH(&config.Config{})
 		if got := os.Getenv("PATH"); strings.Contains(got, "/assistant/personal/") {
 			t.Errorf("PATH = %q after brain personal was removed, want its folders still out", got)
 		}

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/textx"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -115,7 +117,7 @@ type sandboxPolicy struct {
 }
 
 // sandboxPolicyOf takes the profiles' settings from cfg.
-func sandboxPolicyOf(cfg *Config) sandboxPolicy {
+func sandboxPolicyOf(cfg *config.Config) sandboxPolicy {
 	// These may be relative, and the bridge opens them relative to its
 	// working directory; the comparisons need them absolute.
 	p := sandboxPolicy{
@@ -153,7 +155,7 @@ func sandboxPolicyOf(cfg *Config) sandboxPolicy {
 }
 
 // NewSandboxProfiler builds a profiler for the configured brains.
-func NewSandboxProfiler(workDirs map[string][]string, cfg *Config) *SandboxProfiler {
+func NewSandboxProfiler(workDirs map[string][]string, cfg *config.Config) *SandboxProfiler {
 	sp := &SandboxProfiler{execPath: sandboxExecPath}
 	if exe, err := os.Executable(); err == nil {
 		sp.bridgeExe = exe
@@ -164,7 +166,7 @@ func NewSandboxProfiler(workDirs map[string][]string, cfg *Config) *SandboxProfi
 
 // Update replaces the brain set and settings. Profiles are built per run,
 // so the next run of every brain picks the change up.
-func (sp *SandboxProfiler) Update(workDirs map[string][]string, cfg *Config) {
+func (sp *SandboxProfiler) Update(workDirs map[string][]string, cfg *config.Config) {
 	wd := make(map[string][]string, len(workDirs))
 	for k, v := range workDirs {
 		// Made absolute, "" would be the bridge's working directory.
@@ -215,7 +217,7 @@ func (sp *SandboxProfiler) sitePaths() (deny, noWrite []string) {
 		}
 	}
 	if sp.configFile != "" {
-		deny = append(deny, sp.configFile, sp.configFile+".bak", dotEnvPath(sp.configFile))
+		deny = append(deny, sp.configFile, sp.configFile+".bak", config.DotEnvPath(sp.configFile))
 	}
 	if sp.credsDir != "" {
 		deny = append(deny, absPath(sp.credsDir))
@@ -425,7 +427,7 @@ var launchers = []string{"/bin/launchctl", "/usr/bin/open", "/usr/bin/osascript"
 func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
-	home := homeDir()
+	home := config.HomeDir()
 	if !filepath.IsAbs(home) {
 		// Every home-relative deny would silently become a relative path.
 		return "", fmt.Errorf("HOME %q is not an absolute path", home)
@@ -610,7 +612,7 @@ func (sp *SandboxProfiler) Profile(brainID string) (string, error) {
 	// working directory when there was none there. The bridge reads
 	// neither any more, but either may still hold settings and secrets.
 	if sp.configFile != "" {
-		for _, f := range []string{sp.configFile, sp.configFile + ".bak", dotEnvPath(sp.configFile), ".env"} {
+		for _, f := range []string{sp.configFile, sp.configFile + ".bak", config.DotEnvPath(sp.configFile), ".env"} {
 			if abs, err := filepath.Abs(f); err == nil && !withinAny(abs, dataDirs) {
 				b.deny("file-read*", "literal", abs)
 				b.deny("file-write*", "literal", abs)
@@ -916,7 +918,7 @@ func (sp *SandboxProfiler) userClaudeDirs(home string) []string {
 
 // dataDirs is the data dir and both names it has had in HOME.
 func (p sandboxPolicy) dataDirs(home string) []string {
-	dirs := []string{filepath.Join(home, dataDirName), filepath.Join(home, legacyDataDirName)}
+	dirs := []string{filepath.Join(home, config.DataDirName), filepath.Join(home, config.LegacyDataDirName)}
 	if p.dataDir != "" && !slices.Contains(dirs, filepath.Clean(p.dataDir)) {
 		dirs = append(dirs, p.dataDir)
 	}

@@ -1,20 +1,19 @@
-package main
+package config
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/chat"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
-	"io/fs"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
-	"syscall"
-	"time"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 
 	"github.com/Icewater1337/fridolin/internal/textx"
 
@@ -29,13 +28,13 @@ type Config struct {
 	Comment string `json:"_comment,omitempty"`
 
 	// Version is the version of config.json the file was written in, see
-	// currentConfigVersion. A file without it is version 1. Every save
-	// writes currentConfigVersion.
+	// Version. A file without it is version 1. Every save
+	// writes Version.
 	Version int `json:"version,omitempty"`
 
 	// AllowedNumbers lists phone numbers allowed to DM the bridge: digits
 	// with the country code. The running config has each in that form,
-	// however it was written in the file (see allowedNumbersAsNumbers).
+	// however it was written in the file (see chat.NumbersAsNumbers).
 	AllowedNumbers []string `json:"allowed_numbers"`
 
 	// AllowAnyDM decides what an empty allowed_numbers means. Unset or false:
@@ -84,7 +83,7 @@ type Config struct {
 	// MaxChunkSize is the most characters (runes) in one outgoing WhatsApp
 	// message, its "[1/3] " numbering included; longer replies are split
 	// and numbered. 0 means the default, 3900; anything else must be at
-	// least minChunkSize.
+	// least configMinChunkSize.
 	MaxChunkSize int `json:"max_chunk_size,omitempty"`
 
 	// MaxMediaMB is the largest attachment the bridge downloads, in MB.
@@ -203,30 +202,30 @@ func (*retiredBrainMode) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("brain_mode: %w", err)
 	}
 	if on != nil && !*on {
-		return classicModeRemoved(`"brain_mode": false`, `Set "brain_mode" to true in config.json (an older version you go back to needs it)`)
+		return ClassicModeRemoved(`"brain_mode": false`, `Set "brain_mode" to true in config.json (an older version you go back to needs it)`)
 	}
 	return nil
 }
 
-// migrateBuild is a commit of main that still has `fridolin migrate`, which
+// MigrateBuild is a commit of main that still has `fridolin migrate`, which
 // moves inline brains into their folders. It is the one their removal was
 // built on, so it reads the config.json this version reads and its
 // write-back drops no setting.
-const migrateBuild = "2592376"
+const MigrateBuild = "2592376"
 
-// currentConfigVersion is the version of config.json this bridge reads
+// Version is the version of config.json this bridge reads
 // and writes, in its "version" key. A file without the key is version 1,
 // as every config.json was before the key existed. The version goes up
 // when a key is renamed or removed or comes to mean something else, so
 // that a file written before needs a migration to keep its meaning; a key
 // that is only added needs none, as an older file simply lacks it.
-const currentConfigVersion = 2
+const Version = 2
 
 // configMigrations take config.json from one version to the next: the one
 // at index i reads version i+1 and makes it version i+2. Each works on the
 // file's top-level keys before they are decoded and returns a line for the
 // log about each key it changed. None writes the file: the next save
-// writes what it made, as currentConfigVersion.
+// writes what it made, as Version.
 //
 // compat: a version 1 config.json, from before the key existed, is read
 // with its retired keys folded in (foldRetiredKeys). Unlike the other
@@ -238,12 +237,12 @@ var configMigrations = []func(obj map[string]json.RawMessage) ([]string, error){
 	foldRetiredKeys,
 }
 
-// errConfigTooNew means a config.json, or a dashboard save, is of a version
+// ErrTooNew means a config.json, or a dashboard save, is of a version
 // newer than this bridge reads.
-var errConfigTooNew = errors.New("a newer Fridolin wrote it, and this one could drop the settings it does not know")
+var ErrTooNew = errors.New("a newer Fridolin wrote it, and this one could drop the settings it does not know")
 
 // migrateConfig brings obj, the top-level keys of a config.json, to
-// currentConfigVersion and returns the version it was written in and the
+// Version and returns the version it was written in and the
 // lines the migrations it applied logged. A version newer than this
 // bridge reads is refused: the file may have settings this one does not
 // know, which a save would drop, or keys that mean something else now.
@@ -251,28 +250,28 @@ func migrateConfig(obj map[string]json.RawMessage) (from int, notes []string, er
 	from = 1
 	if raw, ok := obj["version"]; ok {
 		if err := json.Unmarshal(raw, &from); err != nil || from < 1 {
-			return 0, nil, fmt.Errorf("version %s: must be a whole number from 1 to %d", raw, currentConfigVersion)
+			return 0, nil, fmt.Errorf("version %s: must be a whole number from 1 to %d", raw, Version)
 		}
 	}
-	if from > currentConfigVersion {
-		return from, nil, fmt.Errorf("version %d is newer than the version %d this build of Fridolin reads: %w", from, currentConfigVersion, errConfigTooNew)
+	if from > Version {
+		return from, nil, fmt.Errorf("version %d is newer than the version %d this build of Fridolin reads: %w", from, Version, ErrTooNew)
 	}
-	for v := from; v < currentConfigVersion; v++ {
+	for v := from; v < Version; v++ {
 		n, err := configMigrations[v-1](obj)
 		if err != nil {
 			return from, nil, err
 		}
 		notes = append(notes, n...)
 	}
-	obj["version"] = json.RawMessage(strconv.Itoa(currentConfigVersion))
+	obj["version"] = json.RawMessage(strconv.Itoa(Version))
 	return from, notes, nil
 }
 
-// migrateConfigJSON returns data, a config.json or a whole configuration
-// the dashboard saves, migrated to currentConfigVersion (see
+// MigrateJSON returns data, a config.json or a whole configuration
+// the dashboard saves, migrated to Version (see
 // migrateConfig), with the lines to log. Anything but a JSON object comes
 // back as it is, for the decoder to refuse; null is an empty file.
-func migrateConfigJSON(data []byte) (migrated []byte, notes []string, err error) {
+func MigrateJSON(data []byte) (migrated []byte, notes []string, err error) {
 	var obj map[string]json.RawMessage
 	if json.Unmarshal(data, &obj) != nil {
 		return data, nil, nil
@@ -342,7 +341,7 @@ func foldInlineBrains(_ map[string]json.RawMessage, value json.RawMessage) (stri
 		return "", fmt.Errorf("brains: %w", err)
 	}
 	if len(brains) > 0 {
-		return "", fmt.Errorf(`config.json lists brains inline under "brains", which this version no longer runs. Move them into their folders first: run "fridolin migrate" with a build from before this change (commit %s), then start this version again (see docs/BRAINS.md#configs-with-inline-brains)`, migrateBuild)
+		return "", fmt.Errorf(`config.json lists brains inline under "brains", which this version no longer runs. Move them into their folders first: run "fridolin migrate" with a build from before this change (commit %s), then start this version again (see docs/BRAINS.md#configs-with-inline-brains)`, MigrateBuild)
 	}
 	return "it listed no brains, and brains live in their folders (brain_dirs)", nil
 }
@@ -367,9 +366,9 @@ func foldRetiredKeys(obj map[string]json.RawMessage) ([]string, error) {
 	return notes, nil
 }
 
-// classicModeRemoved is the error for a setting that asks for classic mode:
+// ClassicModeRemoved is the error for a setting that asks for classic mode:
 // what names it, fix says what to change.
-func classicModeRemoved(what, fix string) error {
+func ClassicModeRemoved(what, fix string) error {
 	return fmt.Errorf("%s asks for classic mode, which was removed: every chat now goes to a brain. %s, start the bridge and add a brain in the dashboard under Brains → Add brain (see docs/BRAINS.md)", what, fix)
 }
 
@@ -405,7 +404,7 @@ type SandboxConfig struct {
 // QueueConfig decides what happens when a message arrives while the brain is
 // still busy with the previous one.
 type QueueConfig struct {
-	// Mode is queueModeQueue (default) or queueModeInterrupt.
+	// Mode is QueueModeQueue (default) or QueueModeInterrupt.
 	Mode string `json:"mode,omitempty"`
 	// MaxPending caps the queue per brain (default 10).
 	MaxPending int `json:"max_pending,omitempty"`
@@ -415,16 +414,16 @@ type QueueConfig struct {
 
 // The queue modes. The Settings page offers the same two values.
 const (
-	// queueModeQueue runs a brain's messages one after another.
-	queueModeQueue = "queue"
-	// queueModeInterrupt lets a newer request replace its sender's own in
+	// QueueModeQueue runs a brain's messages one after another.
+	QueueModeQueue = "queue"
+	// QueueModeInterrupt lets a newer request replace its sender's own in
 	// the same chat, waiting or running.
-	queueModeInterrupt = "interrupt"
+	QueueModeInterrupt = "interrupt"
 )
 
-// validQueueModes are the values queue.mode takes once effective() has
+// validQueueModes are the values queue.mode takes once Resolve() has
 // filled in the default.
-var validQueueModes = map[string]bool{queueModeQueue: true, queueModeInterrupt: true}
+var validQueueModes = map[string]bool{QueueModeQueue: true, QueueModeInterrupt: true}
 
 // DebounceConfig merges messages that arrive in quick succession from the
 // same person in the same chat (several photos, a file plus its question)
@@ -477,12 +476,12 @@ type ScriptAPIConfig struct {
 
 // Defaults for optional settings.
 const (
-	defaultHTTPListen    = "127.0.0.1:8765"
+	DefaultHTTPListen    = "127.0.0.1:8765"
 	defaultQueueMax      = 10
-	defaultQuietMS       = 2000
+	DefaultQuietMS       = 2000
 	defaultMaxWaitMS     = 10000
-	defaultBackupRemote  = "brain-gdrive"
-	defaultBackupRoot    = "fridolin-backup"
+	DefaultBackupRemote  = "brain-gdrive"
+	DefaultBackupRoot    = "fridolin-backup"
 	defaultBackupDailyAt = "03:30"
 	defaultKeepVersions  = 30
 	defaultMaxMediaMB    = 100
@@ -494,26 +493,17 @@ const (
 	maxConcurrentRuns        = 64
 )
 
-// runTimeoutUnit is what one of run_timeout_minutes is, a variable so that
-// tests need not wait a minute.
-var runTimeoutUnit = time.Minute
-
-// RunTimeout is how long a brain's run may take, 0 for no limit.
-func (c *Config) RunTimeout() time.Duration {
-	return time.Duration(intOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes)) * runTimeoutUnit
-}
-
 // RunLimit is how many Claude runs may go at once, 0 for no limit.
-func (c *Config) RunLimit() int { return intOr(c.MaxConcurrentRuns, defaultConcurrentRuns) }
+func (c *Config) RunLimit() int { return IntOr(c.MaxConcurrentRuns, defaultConcurrentRuns) }
 
-func boolOr(p *bool, def bool) bool {
+func BoolOr(p *bool, def bool) bool {
 	if p == nil {
 		return def
 	}
 	return *p
 }
 
-func intOr(p *int, def int) int {
+func IntOr(p *int, def int) int {
 	if p == nil {
 		return def
 	}
@@ -521,17 +511,17 @@ func intOr(p *int, def int) int {
 }
 
 // QueueNotify reports whether to tell the sender their message is queued.
-func (c *Config) QueueNotify() bool { return boolOr(c.Queue.Notify, true) }
+func (c *Config) QueueNotify() bool { return BoolOr(c.Queue.Notify, true) }
 
 // DebounceQuietMS and DebounceMaxWaitMS return the debounce timings.
-func (c *Config) DebounceQuietMS() int   { return intOr(c.Debounce.QuietMS, defaultQuietMS) }
-func (c *Config) DebounceMaxWaitMS() int { return intOr(c.Debounce.MaxWaitMS, defaultMaxWaitMS) }
+func (c *Config) DebounceQuietMS() int   { return IntOr(c.Debounce.QuietMS, DefaultQuietMS) }
+func (c *Config) DebounceMaxWaitMS() int { return IntOr(c.Debounce.MaxWaitMS, defaultMaxWaitMS) }
 
 // DashboardRequiresToken reports whether API calls need the dashboard token.
-func (c *Config) DashboardRequiresToken() bool { return boolOr(c.Dashboard.RequireToken, true) }
+func (c *Config) DashboardRequiresToken() bool { return BoolOr(c.Dashboard.RequireToken, true) }
 
 // TokenlessSend reports whether /send works without a token.
-func (c *Config) TokenlessSend() bool { return boolOr(c.ScriptAPI.TokenlessSend, true) }
+func (c *Config) TokenlessSend() bool { return BoolOr(c.ScriptAPI.TokenlessSend, true) }
 
 // MaxMediaBytes is the largest attachment to download, in bytes.
 func (c *Config) MaxMediaBytes() int64 {
@@ -547,18 +537,18 @@ func (c *Config) HTTPEnabled() bool { return c.HTTPListen != "" && c.HTTPListen 
 
 // AllowsAnyDM reports whether an empty allowed_numbers list means everyone.
 // It takes an explicit allow_any_dm: true.
-func (c *Config) AllowsAnyDM() bool { return boolOr(c.AllowAnyDM, false) }
+func (c *Config) AllowsAnyDM() bool { return BoolOr(c.AllowAnyDM, false) }
 
 // AnyoneCanDM reports whether every sender passes the DM allowlist.
 func (c *Config) AnyoneCanDM() bool { return len(c.AllowedNumbers) == 0 && c.AllowsAnyDM() }
 
-// warnOddChats logs entries of allowed_numbers and allowed_groups that can
+// WarnOddChats logs entries of allowed_numbers and allowed_groups that can
 // never match a chat: an entry that is no phone number, and a group the
 // bridge compares as it is written, with a typo or spaces. A number is
-// read however it was written (phoneNumber), so only one that is none is
+// read however it was written (chat.PhoneNumber), so only one that is none is
 // named. They are logged rather than refused, so a config that ran
 // before still starts.
-func warnOddChats(path string, c *Config) {
+func WarnOddChats(path string, c *Config) {
 	var odd []string
 	for _, n := range c.AllowedNumbers {
 		if _, err := chat.PhoneNumber(n); err != nil {
@@ -566,7 +556,7 @@ func warnOddChats(path string, c *Config) {
 		}
 	}
 	for _, g := range c.AllowedGroups {
-		switch want, err := allowListGroup(g); {
+		switch want, err := AllowListGroup(g); {
 		case err != nil:
 			odd = append(odd, fmt.Sprintf("allowed_groups %q (digits@g.us)", g))
 		case want != g:
@@ -578,48 +568,26 @@ func warnOddChats(path string, c *Config) {
 	}
 }
 
-// LoadConfig reads config.json and fills in the built-in defaults. The file
-// is the only source of settings: no environment variable or .env overrides
-// any of them.
-func LoadConfig(cfgPath string) (*Config, error) {
-	cs, err := OpenConfigStore(cfgPath)
-	if err != nil {
-		return nil, err
-	}
-	return cs.Get(), nil
-}
-
-// LoadExistingConfig is LoadConfig for a command about a bridge that is
-// set up: a config file that is not there is an error, not the defaults,
-// so that a mistyped --config is reported rather than checked, or used,
-// as an empty config.
-func LoadExistingConfig(cfgPath string) (*Config, error) {
-	if _, err := os.Stat(cfgPath); errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("no config file at %s (run fridolin init)", cfgPath)
-	}
-	return LoadConfig(cfgPath)
-}
-
-// dataDirName and legacyDataDirName are the home-relative names of the data
+// DataDirName and LegacyDataDirName are the home-relative names of the data
 // dir, now and before the project was renamed. compat: installs from before
-// the rename keep the old one, see defaultDataDir.
+// the rename keep the old one, see DefaultDataDir.
 const (
-	dataDirName       = ".fridolin"
-	legacyDataDirName = ".whatsapp-claude-bridge"
+	DataDirName       = ".fridolin"
+	LegacyDataDirName = ".whatsapp-claude-bridge"
 )
 
-// dotEnvPath is the .env next to the config, which older versions read
+// DotEnvPath is the .env next to the config, which older versions read
 // settings from. The bridge reads it no more, but it may still hold settings
 // and secrets, so the sandbox profile denies it to brains.
-func dotEnvPath(cfgPath string) string {
+func DotEnvPath(cfgPath string) string {
 	return filepath.Join(filepath.Dir(cfgPath), ".env")
 }
 
-// defaultDataDir is ~/.fridolin, or the folder installs used before the
+// DefaultDataDir is ~/.fridolin, or the folder installs used before the
 // project was renamed (~/.whatsapp-claude-bridge) when only that one exists.
-func defaultDataDir(home string) string {
-	current := filepath.Join(home, dataDirName)
-	legacy := filepath.Join(home, legacyDataDirName)
+func DefaultDataDir(home string) string {
+	current := filepath.Join(home, DataDirName)
+	legacy := filepath.Join(home, LegacyDataDirName)
 	if _, err := os.Stat(current); os.IsNotExist(err) {
 		if st, err := os.Stat(legacy); err == nil && st.IsDir() {
 			return legacy
@@ -630,46 +598,46 @@ func defaultDataDir(home string) string {
 
 // Where the data dir came from, as the log and `fridolin paths` name it.
 const (
-	dataDirFromConfig  = "config"  // data_dir in the config file
-	dataDirFromDefault = "default" // ~/.fridolin
-	dataDirFromLegacy  = "legacy"  // the folder from before the rename
+	DataDirFromConfig  = "config"  // data_dir in the config file
+	DataDirFromDefault = "default" // ~/.fridolin
+	DataDirFromLegacy  = "legacy"  // the folder from before the rename
 )
 
-// resolveDataDir is the data dir a config file's data_dir value stands
+// ResolveDataDir is the data dir a config file's data_dir value stands
 // for, and where it came from: the value itself, or for an empty one
-// defaultDataDir's choice.
-func resolveDataDir(value, home string) (dir, source string) {
+// DefaultDataDir's choice.
+func ResolveDataDir(value, home string) (dir, source string) {
 	dir = value
 	if dir == "" {
-		dir = defaultDataDir(home)
+		dir = DefaultDataDir(home)
 	}
 	dir = fsx.ExpandHome(dir, home)
-	return dir, dataDirSource(value, dir, home)
+	return dir, DataDirSource(value, dir, home)
 }
 
-// dataDirSource says where dir, the data dir resolveDataDir made of the
+// DataDirSource says where dir, the data dir ResolveDataDir made of the
 // config file's data_dir value, came from. It looks at no folder: once
-// the bridge has made the data dir, asking defaultDataDir again could
+// the bridge has made the data dir, asking DefaultDataDir again could
 // answer otherwise.
-func dataDirSource(value, dir, home string) string {
+func DataDirSource(value, dir, home string) string {
 	switch {
 	case value != "":
-		return dataDirFromConfig
-	case dir == filepath.Join(home, legacyDataDirName):
-		return dataDirFromLegacy
+		return DataDirFromConfig
+	case dir == filepath.Join(home, LegacyDataDirName):
+		return DataDirFromLegacy
 	}
-	return dataDirFromDefault
+	return DataDirFromDefault
 }
 
-// effective derives the running configuration from the on-disk layer:
+// Resolve derives the running configuration from the on-disk layer:
 // defaults, ~ expansion, validation. It writes nothing, see EnsureDirs.
-func effective(file *Config) (*Config, error) {
-	cfg, err := file.clone()
+func Resolve(file *Config) (*Config, error) {
+	cfg, err := file.Clone()
 	if err != nil {
 		return nil, err
 	}
 
-	home := homeDir()
+	home := HomeDir()
 	if home == "" {
 		return nil, errors.New("getting home dir: $HOME is not set")
 	}
@@ -686,12 +654,12 @@ func effective(file *Config) (*Config, error) {
 	}
 	cfg.CodexPath = fsx.ExpandHome(cfg.CodexPath, home)
 	if cfg.CodexModel == "" {
-		cfg.CodexModel = defaultCodexModel
+		cfg.CodexModel = configDefaultCodexModel
 	}
 	if cfg.CodexEffort == "" {
 		cfg.CodexEffort = "high"
 	}
-	cfg.DataDir, _ = resolveDataDir(cfg.DataDir, home)
+	cfg.DataDir, _ = ResolveDataDir(cfg.DataDir, home)
 	if cfg.DBPath == "" {
 		cfg.DBPath = filepath.Join(cfg.DataDir, "bridge.db")
 	}
@@ -701,7 +669,7 @@ func effective(file *Config) (*Config, error) {
 	cfg.DBPath = fsx.ExpandHome(cfg.DBPath, home)
 	cfg.MediaDir = fsx.ExpandHome(cfg.MediaDir, home)
 	if cfg.MaxChunkSize == 0 {
-		cfg.MaxChunkSize = outboundmsg.DefaultChunkSize
+		cfg.MaxChunkSize = configDefaultChunkSize
 	}
 	if cfg.MaxMediaMB == 0 {
 		cfg.MaxMediaMB = defaultMaxMediaMB
@@ -713,21 +681,21 @@ func effective(file *Config) (*Config, error) {
 		cfg.LogLevel = "info"
 	}
 	if cfg.HTTPListen == "" {
-		cfg.HTTPListen = defaultHTTPListen
+		cfg.HTTPListen = DefaultHTTPListen
 	}
 	if cfg.Queue.Mode == "" {
-		cfg.Queue.Mode = queueModeQueue
+		cfg.Queue.Mode = QueueModeQueue
 	}
 	if cfg.Queue.MaxPending <= 0 {
 		cfg.Queue.MaxPending = defaultQueueMax
 	}
-	// Fill optional settings so the effective config shows real values.
+	// Fill optional settings so the Resolve config shows real values.
 	t := true
 	if cfg.Queue.Notify == nil {
 		cfg.Queue.Notify = &t
 	}
 	if cfg.Debounce.QuietMS == nil {
-		q := defaultQuietMS
+		q := DefaultQuietMS
 		cfg.Debounce.QuietMS = &q
 	}
 	if cfg.Debounce.MaxWaitMS == nil {
@@ -762,10 +730,10 @@ func effective(file *Config) (*Config, error) {
 	}
 	cfg.Sandbox.CredentialsDir = fsx.ExpandHome(cfg.Sandbox.CredentialsDir, home)
 	if cfg.Backup.Remote == "" {
-		cfg.Backup.Remote = defaultBackupRemote
+		cfg.Backup.Remote = DefaultBackupRemote
 	}
 	if cfg.Backup.Root == "" {
-		cfg.Backup.Root = defaultBackupRoot
+		cfg.Backup.Root = DefaultBackupRoot
 	}
 	if cfg.Backup.DailyAt == "" {
 		cfg.Backup.DailyAt = defaultBackupDailyAt
@@ -780,7 +748,7 @@ func effective(file *Config) (*Config, error) {
 	// Compared with senders as digits, however they were typed into the
 	// file. The dashboard writes them so; a hand edit may not have.
 	cfg.AllowedNumbers = chat.NumbersAsNumbers(cfg.AllowedNumbers)
-	cfg.GroupMembers = groupMembersAsNumbers(cfg.GroupMembers)
+	cfg.GroupMembers = GroupMembersAsNumbers(cfg.GroupMembers)
 	for i := range cfg.BrainDirs {
 		cfg.BrainDirs[i].Path = fsx.ExpandHome(cfg.BrainDirs[i].Path, home)
 	}
@@ -794,14 +762,14 @@ func effective(file *Config) (*Config, error) {
 		cfg.StartupChecks.RequiredFiles[i] = fsx.ExpandHome(cfg.StartupChecks.RequiredFiles[i], home)
 	}
 
-	if err := cfg.validate(); err != nil {
+	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	return cfg, nil
 }
 
 // EnsureDirs creates the data dir and the folders of the database and the
-// media. effective does not: it runs for check and open too, which must
+// media. Resolve does not: it runs for check and open too, which must
 // not make a ~/.fridolin for a config file that is not there, and for
 // every dashboard save, which would make a folder typed into Settings
 // before the restart that uses it. The bridge calls EnsureDirs once, as it
@@ -819,85 +787,8 @@ func (c *Config) EnsureDirs() error {
 	return nil
 }
 
-// protectDataDir takes group and other access away from the data dir and
-// warns about folders it leaves open. MkdirAll gives a new data dir 0700 but
-// leaves the mode of an existing one alone, so a legacy folder or one made
-// by hand could stay open to every local account. It runs once at startup,
-// not in effective(): that also runs on every dashboard save, which would
-// change a folder typed into Settings before any restart and repeat the
-// warnings on every write.
-//
-// Three kinds of folder only get a warning: the home folder or one above it
-// (data_dir "~"), where other users and services may need access; a data
-// dir that belongs to another user, whose mode is theirs to set even when
-// the bridge runs as root; and the folder of a db_path outside the data
-// dir, which may be shared on purpose. bridge.db itself is 0600 either way.
-// A chmod that fails is logged, not fatal, so an upgrade cannot keep a
-// working bridge from starting.
-func protectDataDir(cfg *Config) {
-	// Compare absolute, resolved paths: a relative data_dir such as "."
-	// depends on the folder the bridge was started from, and fsx.Within
-	// cannot relate it to the home folder, so it would get past the home
-	// check.
-	dataDir := absPath(cfg.DataDir)
-	dbDir := absPath(filepath.Dir(cfg.DBPath))
-	home := homeDir()
-	homeOrAbove := func(dir string) bool {
-		return home != "" && fsx.Within(fsx.Canonical(home), fsx.Canonical(dir))
-	}
-
-	mode, open := openToOthers(dataDir)
-	switch {
-	case homeOrAbove(dataDir):
-		if open {
-			log.Printf("warning: data_dir %s is your home folder or one above it, so its mode %04o stays as it is; a folder of its own, such as ~/.fridolin, keeps the bridge's files private", dataDir, uint32(mode))
-		}
-	case ownedByOther(dataDir):
-		if open {
-			log.Printf("warning: data_dir %s belongs to another user, so its mode %04o stays as it is; a folder of your own, such as ~/.fridolin, keeps the bridge's files private", dataDir, uint32(mode))
-		}
-	default:
-		if err := fsx.RestrictToOwner(dataDir); err != nil {
-			log.Printf("warning: could not make %s private: %v", dataDir, err)
-		}
-	}
-
-	if !fsx.Within(fsx.Canonical(dbDir), fsx.Canonical(dataDir)) {
-		if mode, open := openToOthers(dbDir); open {
-			// Not for the home folder: making it 0700 is what the data dir
-			// rule above avoids.
-			advice := "; consider chmod 700"
-			if homeOrAbove(dbDir) {
-				advice = ""
-			}
-			log.Printf("warning: %s, the folder of db_path, is open to other users (mode %04o)%s", dbDir, uint32(mode), advice)
-		}
-	}
-}
-
-// ownedByOther reports whether path exists and belongs to a user other than
-// the one the bridge runs as.
-func ownedByOther(path string) bool {
-	st, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	sys, ok := st.Sys().(*syscall.Stat_t)
-	return ok && int(sys.Uid) != os.Geteuid()
-}
-
-// openToOthers returns the permission bits of dir and whether they give
-// group or other users any access.
-func openToOthers(dir string) (os.FileMode, bool) {
-	st, err := os.Stat(dir)
-	if err != nil {
-		return 0, false
-	}
-	return st.Mode().Perm(), st.Mode().Perm()&0o077 != 0
-}
-
-// clone deep-copies a Config through JSON.
-func (c *Config) clone() (*Config, error) {
+// Clone deep-copies a Config through JSON.
+func (c *Config) Clone() (*Config, error) {
 	data, err := json.Marshal(c)
 	if err != nil {
 		return nil, err
@@ -910,14 +801,14 @@ func (c *Config) clone() (*Config, error) {
 }
 
 // validGitConfigs are the values sandbox.git_config takes once
-// effective() has filled in the default, "read".
+// Resolve() has filled in the default, "read".
 var validGitConfigs = map[string]bool{"read": true, "deny": true}
 
 // validate rejects settings the bridge cannot run with. Brains are checked
 // when they are resolved (ResolveBrains), which leaves one that clashes with
 // another out instead of stopping them all. Zero brains is fine: a fresh
 // install adds its first brain from the dashboard.
-func (c *Config) validate() error {
+func (c *Config) Validate() error {
 	if c.AgentProvider != "claude" && c.AgentProvider != "codex" {
 		return fmt.Errorf("agent_provider must be claude or codex, not %q", c.AgentProvider)
 	}
@@ -928,12 +819,12 @@ func (c *Config) validate() error {
 		return fmt.Errorf("brain_effort %q must be one of low, medium, high, xhigh, max", c.BrainEffort)
 	}
 	if !validQueueModes[c.Queue.Mode] {
-		return fmt.Errorf("queue.mode must be %q or %q, not %q", queueModeQueue, queueModeInterrupt, c.Queue.Mode)
+		return fmt.Errorf("queue.mode must be %q or %q, not %q", QueueModeQueue, QueueModeInterrupt, c.Queue.Mode)
 	}
 	if !validGitConfigs[c.Sandbox.GitConfig] {
 		return fmt.Errorf("sandbox.git_config must be \"read\" or \"deny\", not %q", c.Sandbox.GitConfig)
 	}
-	if err := c.Sandbox.validate(runtime.GOOS); err != nil {
+	if err := c.Sandbox.Validate(runtime.GOOS); err != nil {
 		return err
 	}
 	for _, name := range c.ChildEnvPassthrough {
@@ -941,10 +832,10 @@ func (c *Config) validate() error {
 			return fmt.Errorf("child_env_passthrough: %q is not a variable name: use letters, digits and _, and do not start with a digit", name)
 		}
 	}
-	if c.MaxChunkSize < outboundmsg.MinChunkSize {
-		return fmt.Errorf("max_chunk_size %d is too small: use at least %d, or 0 for the default of %d", c.MaxChunkSize, outboundmsg.MinChunkSize, outboundmsg.DefaultChunkSize)
+	if c.MaxChunkSize < configMinChunkSize {
+		return fmt.Errorf("max_chunk_size %d is too small: use at least %d, or 0 for the default of %d", c.MaxChunkSize, configMinChunkSize, configDefaultChunkSize)
 	}
-	if n := intOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes); n < 0 || n > maxRunTimeoutMinutes {
+	if n := IntOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes); n < 0 || n > maxRunTimeoutMinutes {
 		return fmt.Errorf("run_timeout_minutes must be between 0 (no limit) and %d, not %d", maxRunTimeoutMinutes, n)
 	}
 	if n := c.RunLimit(); n < 0 || n > maxConcurrentRuns {
@@ -953,23 +844,23 @@ func (c *Config) validate() error {
 	if c.MaxMediaMB < 1 || c.MaxMediaMB > maxMaxMediaMB {
 		return fmt.Errorf("max_media_mb must be between 1 and %d, not %d", maxMaxMediaMB, c.MaxMediaMB)
 	}
-	if c.HTTPEnabled() && !isLoopbackAddr(c.HTTPListen) {
+	if c.HTTPEnabled() && !IsLoopbackAddr(c.HTTPListen) {
 		return fmt.Errorf("http_listen %q must be a loopback address such as 127.0.0.1:8765 — the API and dashboard are for this machine only", c.HTTPListen)
 	}
-	if err := validateGroupMembers(c.GroupMembers, c.AllowedGroups); err != nil {
+	if err := ValidateGroupMembers(c.GroupMembers, c.AllowedGroups); err != nil {
 		return err
 	}
-	if err := c.Backup.validate(); err != nil {
+	if err := c.Backup.Validate(); err != nil {
 		return err
 	}
-	return c.Plaud.validate()
+	return c.Plaud.Validate()
 }
 
 // validate rejects sandbox settings that goos cannot honour. Brain runs
 // refuse to start without their sandbox, so an enabled sandbox on a system
 // without sandbox-exec is a configuration error, not something to ignore.
 // It runs after ~ expansion.
-func (sc SandboxConfig) validate(goos string) error {
+func (sc SandboxConfig) Validate(goos string) error {
 	if sc.Enabled && goos != "darwin" {
 		return fmt.Errorf("sandbox.enabled needs macOS (sandbox-exec) and this is %s: set it to false and run the bridge as a dedicated user instead", goos)
 	}
@@ -1000,19 +891,45 @@ func (sc SandboxConfig) validate(goos string) error {
 	return nil
 }
 
-// homeDir is the user's home folder, $HOME on Unix, or "" when there is
+// HomeDir is the user's home folder, $HOME on Unix, or "" when there is
 // none. Every part of the bridge looks it up here, so that ~ and the
 // defaults under it mean the same folder everywhere.
-func homeDir() string {
+func HomeDir() string {
 	home, _ := os.UserHomeDir()
 	return home
 }
 
-// isTruthy reports whether v reads as true: true, 1, yes or on.
-func isTruthy(v string) bool {
+// IsTruthy reports whether v reads as true: true, 1, yes or on.
+func IsTruthy(v string) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "true", "1", "yes", "on":
 		return true
 	}
 	return false
+}
+
+// RunMinutes is the configured run limit in minutes, or its default.
+func (c *Config) RunMinutes() int { return IntOr(c.RunTimeoutMinutes, defaultRunTimeoutMinutes) }
+
+// These configuration defaults also belong to the direct provider/chunker
+// contracts. Composition tests keep the independent boundaries consistent.
+const (
+	configDefaultCodexModel = "gpt-6.1-sol"
+	configDefaultChunkSize  = 3900
+	configMinChunkSize      = 100
+)
+
+// QueueModes returns accepted queue modes in sorted order.
+func QueueModes() []string { return slices.Sorted(maps.Keys(validQueueModes)) }
+
+// GitConfigs returns accepted sandbox git policies in sorted order.
+func GitConfigs() []string { return slices.Sorted(maps.Keys(validGitConfigs)) }
+
+// RetiredKeyNames lists the version-one keys in migration order.
+func RetiredKeyNames() []string {
+	var names []string
+	for _, rk := range retiredKeys {
+		names = append(names, rk.name)
+	}
+	return names
 }

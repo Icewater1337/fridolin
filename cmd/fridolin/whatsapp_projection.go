@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+
+	"github.com/Icewater1337/fridolin/internal/config"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
@@ -13,7 +15,7 @@ import (
 // InboundHandler receives every allowed message at the command boundary.
 type InboundHandler func(context.Context, Inbound)
 
-func whatsAppSettings(get func() *Config) func() whatsapp.Settings {
+func whatsAppSettings(get func() *config.Config) func() whatsapp.Settings {
 	return func() whatsapp.Settings {
 		cfg := get()
 		return whatsapp.Settings{Policy: policyOf(cfg), MediaDir: cfg.MediaDir, MaxMediaBytes: cfg.MaxMediaBytes(), MaxChunkSize: cfg.MaxChunkSize}
@@ -55,11 +57,11 @@ func (s whatsAppPollStore) SentPoll(ctx context.Context, id string) (whatsapp.Se
 
 // NewWhatsAppClient supplies the command's config, store and runtime
 // projections. Creating it does not connect; Connect keeps that boundary.
-func NewWhatsAppClient(cfg func() *Config, s *store.Store, handler InboundHandler, onIgnored whatsapp.IgnoredHandler) (*whatsapp.Client, error) {
+func NewWhatsAppClient(cfg func() *config.Config, s *store.Store, handler InboundHandler, onIgnored whatsapp.IgnoredHandler) (*whatsapp.Client, error) {
 	return whatsapp.New(whatsAppOptions(cfg, s, handler, onIgnored))
 }
 
-func whatsAppOptions(cfg func() *Config, s *store.Store, handler InboundHandler, onIgnored whatsapp.IgnoredHandler) whatsapp.Options {
+func whatsAppOptions(cfg func() *config.Config, s *store.Store, handler InboundHandler, onIgnored whatsapp.IgnoredHandler) whatsapp.Options {
 	// Keep the initial log-level read before loading the device.
 	logger := logx.NewWaLogger("WhatsApp", cfg().LogLevel)
 	return whatsapp.Options{Settings: whatsAppSettings(cfg), Container: s.Container, Polls: whatsAppPollStore{s}, OnInbound: whatsAppInboundHandler(handler), OnIgnored: onIgnored, Log: logger, Chunks: outboundmsg.Chunk, Identity: whatsAppIdentity(), Outbound: whatsAppOutbound(), Text: whatsAppText(), Inbox: mediaInboxAt}

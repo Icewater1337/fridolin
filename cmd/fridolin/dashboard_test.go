@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -988,7 +990,7 @@ func TestAddBrainAllowChatAndRoute(t *testing.T) {
 	}
 	// config.json keeps the folder as typed.
 	var file struct {
-		BrainDirs []BrainRef `json:"brain_dirs"`
+		BrainDirs []config.BrainRef `json:"brain_dirs"`
 	}
 	if data, err := os.ReadFile(h.Config().Path); err != nil || json.Unmarshal(data, &file) != nil || len(file.BrainDirs) != 1 || file.BrainDirs[0].Path != "~/family" {
 		t.Errorf("brain_dirs = %+v (%v)", file.BrainDirs, err)
@@ -1331,7 +1333,7 @@ func TestAllowListEntries(t *testing.T) {
 	}
 	for _, c := range groups {
 		t.Run("group "+c.in, func(t *testing.T) {
-			got, err := allowListGroup(c.in)
+			got, err := config.AllowListGroup(c.in)
 			if c.want == "" {
 				if err == nil {
 					t.Errorf("allowListGroup(%q) = %q, want an error", c.in, got)
@@ -1671,7 +1673,7 @@ func TestGetConfigLocksNoSettings(t *testing.T) {
 	if want := []string{"config", "effective", "etag", "path"}; !slices.Equal(keys, want) {
 		t.Errorf("GET /api/config has %v, want %v", keys, want)
 	}
-	var eff Config
+	var eff config.Config
 	if err := json.Unmarshal(got["effective"], &eff); err != nil {
 		t.Fatal(err)
 	}
@@ -1695,7 +1697,7 @@ func TestPutConfigKeepsBrainsAndReportsRestart(t *testing.T) {
 	if len(h.Approved()) != 1 {
 		t.Error("saving settings must not drop brains")
 	}
-	var eff Config
+	var eff config.Config
 	if err := json.Unmarshal(h.Config().Effective, &eff); err != nil {
 		t.Fatal(err)
 	}
@@ -1764,15 +1766,15 @@ func TestStatusReportsSettingsWaitingForRestart(t *testing.T) {
 func TestPutConfigRefusesClassicMode(t *testing.T) {
 	h := newHarness(t, "")
 	got := h.Config()
-	var config map[string]any
-	if err := json.Unmarshal(got.Config, &config); err != nil {
+	var configValue map[string]any
+	if err := json.Unmarshal(got.Config, &configValue); err != nil {
 		t.Fatal(err)
 	}
-	if config["brain_mode"] != true {
-		t.Errorf("GET /api/config: brain_mode = %v, want true", config["brain_mode"])
+	if configValue["brain_mode"] != true {
+		t.Errorf("GET /api/config: brain_mode = %v, want true", configValue["brain_mode"])
 	}
-	config["brain_mode"] = false
-	w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": config})
+	configValue["brain_mode"] = false
+	w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": configValue})
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "classic mode, which was removed") {
 		t.Errorf("put brain_mode false: %d %s, want 400 saying classic mode was removed", w.Code, w.Body.String())
 	}
@@ -1798,19 +1800,19 @@ func TestPutConfigRefusesInlineBrains(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, "")
 			got := h.Config()
-			var config map[string]any
-			if err := json.Unmarshal(got.Config, &config); err != nil {
+			var configValue map[string]any
+			if err := json.Unmarshal(got.Config, &configValue); err != nil {
 				t.Fatal(err)
 			}
-			if _, ok := config["brains"]; ok {
-				t.Errorf("GET /api/config has a brains key: %v", config["brains"])
+			if _, ok := configValue["brains"]; ok {
+				t.Errorf("GET /api/config has a brains key: %v", configValue["brains"])
 			}
-			delete(config, "version")
+			delete(configValue, "version")
 			if tc.version != nil {
-				config["version"] = tc.version
+				configValue["version"] = tc.version
 			}
-			config["brains"] = []map[string]any{{"name": "a", "work_dir": "~/a"}}
-			w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": config})
+			configValue["brains"] = []map[string]any{{"name": "a", "work_dir": "~/a"}}
+			w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": configValue})
 			if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), tc.want) {
 				t.Errorf("put inline brains: %d %s, want 400 saying %s", w.Code, w.Body.String(), tc.want)
 			}
@@ -1910,25 +1912,25 @@ func TestQRCodeIsServedAsAPNG(t *testing.T) {
 func TestConfigPageFoldsTheRetiredModel(t *testing.T) {
 	h := newHarness(t, `{"model": "sonnet"}`)
 	got := h.Config()
-	var config map[string]any
-	if err := json.Unmarshal(got.Config, &config); err != nil {
+	var configValue map[string]any
+	if err := json.Unmarshal(got.Config, &configValue); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := config["model"]; ok {
-		t.Errorf("GET /api/config has a model key: %v", config["model"])
+	if _, ok := configValue["model"]; ok {
+		t.Errorf("GET /api/config has a model key: %v", configValue["model"])
 	}
-	if config["brain_model"] != "sonnet" {
-		t.Errorf("GET /api/config: brain_model %v, want sonnet", config["brain_model"])
+	if configValue["brain_model"] != "sonnet" {
+		t.Errorf("GET /api/config: brain_model %v, want sonnet", configValue["brain_model"])
 	}
 
 	// An old tab: brain_model as an older bridge served it, and model,
 	// with no version, which older bridges did not have.
-	config["brain_model"], config["model"] = "", "haiku"
-	delete(config, "version")
-	if w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": config}); w.Code != http.StatusOK {
+	configValue["brain_model"], configValue["model"] = "", "haiku"
+	delete(configValue, "version")
+	if w := h.Do("PUT", "/api/config", map[string]any{"etag": got.ETag, "config": configValue}); w.Code != http.StatusOK {
 		t.Fatalf("put: %d %s", w.Code, w.Body.String())
 	}
-	var eff Config
+	var eff config.Config
 	if err := json.Unmarshal(h.Config().Effective, &eff); err != nil {
 		t.Fatal(err)
 	}

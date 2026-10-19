@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/activity"
@@ -528,8 +530,8 @@ func TestBrainsMarkTheFallback(t *testing.T) {
 			if err := manifest.Write(copyDir, &m, false); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := tb.cfgs.Update("", func(c *Config) error {
-				c.BrainDirs = append(c.BrainDirs, BrainRef{Path: "~/copy", Approved: &m})
+			if _, err := tb.cfgs.Update("", func(c *config.Config) error {
+				c.BrainDirs = append(c.BrainDirs, config.BrainRef{Path: "~/copy", Approved: &m})
 				return nil
 			}); err != nil {
 				t.Fatal(err)
@@ -578,8 +580,8 @@ func TestAPIBrainIsItsEntryOfTheList(t *testing.T) {
 	if err := manifest.Write(copyDir, &m, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tb.cfgs.Update("", func(c *Config) error {
-		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: "~/copy", Approved: &m})
+	if _, err := tb.cfgs.Update("", func(c *config.Config) error {
+		c.BrainDirs = append(c.BrainDirs, config.BrainRef{Path: "~/copy", Approved: &m})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -645,8 +647,8 @@ func TestUnapprovedBrainEntries(t *testing.T) {
 	// A hand-edited duplicate of a brain's folder: the issue is the
 	// duplicate's, and the brain itself is fine.
 	tb.addFolderBrain(t, manifest.Manifest{ID: "notes", Name: "Notes"})
-	if _, err := tb.cfgs.Update("", func(c *Config) error {
-		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: "~/notes"})
+	if _, err := tb.cfgs.Update("", func(c *config.Config) error {
+		c.BrainDirs = append(c.BrainDirs, config.BrainRef{Path: "~/notes"})
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -766,7 +768,7 @@ func TestAddBrainRechecksAgainstOtherWriters(t *testing.T) {
 	// until the add has passed its first check, then gives a the group.
 	inside, release, saved := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 	go func() {
-		_, err := tb.cfgs.Update("", func(c *Config) error {
+		_, err := tb.cfgs.Update("", func(c *config.Config) error {
 			close(inside)
 			<-release
 			for _, ref := range c.BrainDirs {

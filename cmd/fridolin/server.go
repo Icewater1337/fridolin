@@ -7,11 +7,12 @@ import (
 	"fmt"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"log"
-	"net"
 	"net/http"
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/config"
 
 	"github.com/Icewater1337/fridolin/internal/route"
 
@@ -44,19 +45,6 @@ type ingestRequest struct {
 	// that still sends it is refused with the field to use instead, rather
 	// than failing on a brain it does not name.
 	Scope string `json:"scope"`
-}
-
-// isLoopbackAddr reports whether addr binds to a loopback interface.
-func isLoopbackAddr(addr string) bool {
-	host, _, err := net.SplitHostPort(addr)
-	if err != nil {
-		return false
-	}
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 // readyResponse is the body of GET /ready: whether messages can go out and
@@ -168,7 +156,7 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 // its own chats (see brainChat), a caller without a token only to the
 // allowed chats and only while script_api.tokenless_send is on. The
 // scripts token may send anywhere checkSendJID lets through.
-func (b *Bridge) maySend(who principal, jid string, cfg *Config) error {
+func (b *Bridge) maySend(who principal, jid string, cfg *config.Config) error {
 	switch who.kind {
 	case callerScript:
 		return nil
@@ -192,7 +180,7 @@ func (b *Bridge) maySend(who principal, jid string, cfg *Config) error {
 // (reply_chat, or the one replyChatFor derives), or an allowed chat that
 // routes to it: a group it claims, for the fallback brain an allowed group
 // no brain claims, or, for the brain that gets DMs, an allowed number's DM.
-func (b *Bridge) brainChat(br *Brain, jid string, cfg *Config) bool {
+func (b *Bridge) brainChat(br *Brain, jid string, cfg *config.Config) bool {
 	if jid == b.replyChatFor(br, cfg) {
 		return true
 	}
@@ -202,7 +190,7 @@ func (b *Bridge) brainChat(br *Brain, jid string, cfg *Config) bool {
 // allowedChat reports whether jid is a chat config allows by name: a group
 // in allowed_groups, or the chat of a number in allowed_numbers. allow_any_dm
 // does not count: it lets anyone write in, not the bridge write to anyone.
-func allowedChat(jid string, cfg *Config) bool {
+func allowedChat(jid string, cfg *config.Config) bool {
 	if chat.IsGroupJID(jid) {
 		return slices.Contains(cfg.AllowedGroups, jid)
 	}
@@ -341,7 +329,7 @@ func (b *Bridge) submitHandOff(br *Brain, jid, sender, text string, media []stri
 // none), else the brain's first group. The DM comes before any group: files
 // handed in privately must not land in a group because the brain also
 // serves one.
-func (b *Bridge) replyChatFor(br *Brain, cfg *Config) string {
+func (b *Bridge) replyChatFor(br *Brain, cfg *config.Config) string {
 	m := br.settings.Load().manifest
 	if m.ReplyChat != "" {
 		return m.ReplyChat

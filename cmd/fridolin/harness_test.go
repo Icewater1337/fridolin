@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -110,7 +112,7 @@ func newHarness(t *testing.T, cfgJSON string) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &harness{t: t, b: b, h: b.newHTTPHandler(defaultHTTPListen), root: root, home: home, cfg: path, stop: sync.OnceFunc(b.Stop)}
+	h := &harness{t: t, b: b, h: b.newHTTPHandler(config.DefaultHTTPListen), root: root, home: home, cfg: path, stop: sync.OnceFunc(b.Stop)}
 	t.Cleanup(h.stop)
 	return h
 }
@@ -142,7 +144,7 @@ func (h *harness) Reopen() {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	h.b, h.h, h.stop = b, b.newHTTPHandler(defaultHTTPListen), sync.OnceFunc(b.Stop)
+	h.b, h.h, h.stop = b, b.newHTTPHandler(config.DefaultHTTPListen), sync.OnceFunc(b.Stop)
 	h.t.Cleanup(h.stop)
 	b.resume(context.Background())
 }
@@ -159,7 +161,7 @@ func (h *harness) Do(method, path string, body any, mutate ...func(*http.Request
 		}
 		rd = bytes.NewReader(data)
 	}
-	r := httptest.NewRequest(method, "http://"+defaultHTTPListen+path, rd)
+	r := httptest.NewRequest(method, "http://"+config.DefaultHTTPListen+path, rd)
 	r.Header.Set("X-Bridge-Token", h.token())
 	if method != http.MethodGet && method != http.MethodHead {
 		r.Header.Set("X-Bridge-Dashboard", "1")
@@ -180,7 +182,7 @@ func (h *harness) Do(method, path string, body any, mutate ...func(*http.Request
 // adjusts it first.
 func (h *harness) Script(method, path, body string, mutate ...func(*http.Request)) *httptest.ResponseRecorder {
 	h.t.Helper()
-	r := httptest.NewRequest(method, "http://"+defaultHTTPListen+path, strings.NewReader(body))
+	r := httptest.NewRequest(method, "http://"+config.DefaultHTTPListen+path, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", "Bearer "+h.readToken("scripts.token"))
 	for _, m := range mutate {
@@ -327,7 +329,7 @@ func (h *harness) Answer(m inbound) string {
 func (h *harness) Approved() map[string]manifest.Manifest {
 	h.t.Helper()
 	var file struct {
-		BrainDirs []BrainRef `json:"brain_dirs"`
+		BrainDirs []config.BrainRef `json:"brain_dirs"`
 	}
 	data, err := os.ReadFile(h.cfg)
 	if err != nil || json.Unmarshal(data, &file) != nil {

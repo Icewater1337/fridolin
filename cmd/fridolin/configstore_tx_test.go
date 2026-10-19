@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/jsonx"
@@ -38,13 +40,13 @@ func openTxStore(t *testing.T, body string) *ConfigStore {
 func TestConfigUpdatePanicIsAnError(t *testing.T) {
 	cases := []struct {
 		name   string
-		mutate func(*Config) error
+		mutate func(*config.Config) error
 	}{
-		{"in mutate", func(c *Config) error {
+		{"in mutate", func(c *config.Config) error {
 			c.LogLevel = "debug"
 			panic("boom")
 		}},
-		{"out of range", func(c *Config) error {
+		{"out of range", func(c *config.Config) error {
 			c.LogLevel = c.AllowedNumbers[len(c.AllowedNumbers)]
 			return nil
 		}},
@@ -79,7 +81,7 @@ func TestConfigUpdatePanicIsAnError(t *testing.T) {
 
 			next := make(chan error, 1)
 			go func() {
-				_, err := cs.Update("", func(c *Config) error { c.LogLevel = "warn"; return nil })
+				_, err := cs.Update("", func(c *config.Config) error { c.LogLevel = "warn"; return nil })
 				next <- err
 			}()
 			select {
@@ -114,7 +116,7 @@ func TestGetConfigSendsTheETagOfItsConfig(t *testing.T) {
 		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &v) != nil {
 			return fmt.Errorf("GET /api/config: %d %s", w.Code, w.Body.String())
 		}
-		var c Config
+		var c config.Config
 		if err := json.Unmarshal(v.Config, &c); err != nil {
 			return err
 		}
@@ -127,7 +129,7 @@ func TestGetConfigSendsTheETagOfItsConfig(t *testing.T) {
 		}
 		return nil
 	}
-	if _, err := tb.cfgs.Update("", func(c *Config) error { c.Comment = "start"; return nil }); err != nil {
+	if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.Comment = "start"; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if err := check(); err != nil {
@@ -146,7 +148,7 @@ func TestGetConfigSendsTheETagOfItsConfig(t *testing.T) {
 					return
 				default:
 				}
-				if _, err := tb.cfgs.Update("", func(c *Config) error { c.Comment = fmt.Sprintf("w%d-%d", w, i); return nil }); err != nil {
+				if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.Comment = fmt.Sprintf("w%d-%d", w, i); return nil }); err != nil {
 					t.Error(err)
 					return
 				}
@@ -174,7 +176,7 @@ func TestConfigSubscribersHearUpdatesInOrder(t *testing.T) {
 	var heard []string
 	inA := make(chan struct{})
 	heardB := make(chan struct{})
-	cs.Subscribe(func(_, next *Config) {
+	cs.Subscribe(func(_, next *config.Config) {
 		if next.Comment == "a" {
 			close(inA)
 			// B commits meanwhile; its notification must wait for this one.
@@ -193,12 +195,12 @@ func TestConfigSubscribersHearUpdatesInOrder(t *testing.T) {
 	})
 	done := make(chan error, 2)
 	go func() {
-		_, err := cs.Update("", func(c *Config) error { c.Comment = "a"; return nil })
+		_, err := cs.Update("", func(c *config.Config) error { c.Comment = "a"; return nil })
 		done <- err
 	}()
 	<-inA
 	go func() {
-		_, err := cs.Update("", func(c *Config) error { c.Comment = "b"; return nil })
+		_, err := cs.Update("", func(c *config.Config) error { c.Comment = "b"; return nil })
 		done <- err
 	}()
 	for range 2 {
@@ -216,17 +218,17 @@ func TestConfigSubscribersHearUpdatesInOrder(t *testing.T) {
 func TestConfigSubscriberPanicIsLogged(t *testing.T) {
 	cs := openTxStore(t, `{}`)
 	logs := captureLog(t)
-	cs.Subscribe(func(_, next *Config) {
+	cs.Subscribe(func(_, next *config.Config) {
 		if next.Comment == "boom" {
 			panic("subscriber")
 		}
 	})
 	var heard []string
-	cs.Subscribe(func(_, next *Config) { heard = append(heard, next.Comment) })
-	if _, err := cs.Update("", func(c *Config) error { c.Comment = "boom"; return nil }); err != nil {
+	cs.Subscribe(func(_, next *config.Config) { heard = append(heard, next.Comment) })
+	if _, err := cs.Update("", func(c *config.Config) error { c.Comment = "boom"; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cs.Update("", func(c *Config) error { c.Comment = "next"; return nil }); err != nil {
+	if _, err := cs.Update("", func(c *config.Config) error { c.Comment = "next"; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Join(heard, ",") != "boom,next" || cs.Get().Comment != "next" {
@@ -304,7 +306,7 @@ func TestPutConfigSendsItsOwnETag(t *testing.T) {
 	var once sync.Once
 	var putETag string
 	later := make(chan error, 1)
-	tb.cfgs.Subscribe(func(_, next *Config) {
+	tb.cfgs.Subscribe(func(_, next *config.Config) {
 		if next.LogLevel != "debug" {
 			return
 		}
@@ -313,7 +315,7 @@ func TestPutConfigSendsItsOwnETag(t *testing.T) {
 		once.Do(func() {
 			putETag = tb.cfgs.ETag()
 			go func() {
-				_, err := tb.cfgs.Update("", func(c *Config) error { c.Comment = "later"; return nil })
+				_, err := tb.cfgs.Update("", func(c *config.Config) error { c.Comment = "later"; return nil })
 				later <- err
 			}()
 			waitFor(t, 5*time.Second, "the later update", func() bool { return tb.cfgs.Get().Comment == "later" })
@@ -410,7 +412,7 @@ func TestHandEditThenDeltaUpdateKeepsBoth(t *testing.T) {
 	if w := tb.do("POST", "/api/chats/allow", chatRequest{Kind: "dm", Number: "15559876543"}); w.Code != 200 {
 		t.Fatalf("allow: %d %s", w.Code, w.Body.String())
 	}
-	var file Config
+	var file config.Config
 	if err := json.Unmarshal([]byte(readFile(t, tb.cfgs.Path())), &file); err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +439,7 @@ func TestHandEditThatDoesNotLoadIsNotWrittenOver(t *testing.T) {
 			if err := os.WriteFile(cs.Path(), []byte(tc.body), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			_, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil })
+			_, err := cs.Update("", func(c *config.Config) error { c.LogLevel = "debug"; return nil })
 			if err == nil || !strings.Contains(err.Error(), "changed on disk and does not load") || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("save over an unloadable hand edit: %v", err)
 			}
@@ -458,10 +460,10 @@ func TestConfigFileGoneIsWrittenAgain(t *testing.T) {
 	if err := os.Remove(cs.Path()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
+	if _, err := cs.Update("", func(c *config.Config) error { c.LogLevel = "debug"; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	var file Config
+	var file config.Config
 	if err := json.Unmarshal([]byte(readFile(t, cs.Path())), &file); err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +505,7 @@ func TestTheConfigMakesNoFolders(t *testing.T) {
 		t.Fatal(err)
 	}
 	noFolders("loading a config")
-	if _, err := cs.Update("", func(c *Config) error { c.MediaDir = folders[4]; return nil }); err != nil {
+	if _, err := cs.Update("", func(c *config.Config) error { c.MediaDir = folders[4]; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	noFolders("saving a new media_dir")
@@ -624,17 +626,17 @@ func TestConfigExternalEditMigrationKeepsItsETag(t *testing.T) {
 		t.Fatal(err)
 	}
 	called := false
-	if _, err := cs.Update(old, func(c *Config) error { called = true; return nil }); !errors.Is(err, ErrConfigConflict) || called {
+	if _, err := cs.Update(old, func(c *config.Config) error { called = true; return nil }); !errors.Is(err, ErrConfigConflict) || called {
 		t.Fatalf("update = %v, mutation called %v; want conflict before mutation", err, called)
 	}
 	snap := cs.Snapshot()
-	if snap.File.Version != currentConfigVersion || snap.Effective.BrainModel != "opus" || snap.File.BrainModel != "opus" || snap.ETag != etagOf([]byte(external)) {
+	if snap.File.Version != config.Version || snap.Effective.BrainModel != "opus" || snap.File.BrainModel != "opus" || snap.ETag != etagOf([]byte(external)) {
 		t.Fatalf("hand edit was not migrated into a consistent snapshot: %+v", snap)
 	}
 	if data, err := os.ReadFile(cs.Path()); err != nil || string(data) != external {
 		t.Fatalf("conflict rewrote external file: %s (%v)", data, err)
 	}
-	if _, err := cs.Update(snap.ETag, func(c *Config) error { c.Version = 0; c.LogLevel = "info"; return nil }); err != nil {
+	if _, err := cs.Update(snap.ETag, func(c *config.Config) error { c.Version = 0; c.LogLevel = "info"; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	raw := readRawConfig(t, cs.Path())
@@ -662,7 +664,7 @@ func TestConfigUpdateRefusesANewerExternalVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	called := false
-	if _, err := cs.Update("", func(c *Config) error { called = true; return nil }); !errors.Is(err, errConfigTooNew) || called {
+	if _, err := cs.Update("", func(c *config.Config) error { called = true; return nil }); !errors.Is(err, config.ErrTooNew) || called {
 		t.Fatalf("update = %v, mutation called %v; want future-version refusal", err, called)
 	}
 	if after := cs.Snapshot(); after != before {

@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"go.mau.fi/whatsmeow/proto/waAdv"
@@ -85,7 +87,7 @@ func TestGoldenConfigFixtures(t *testing.T) {
 			assertGolden(t, "config/"+name+"-effective.golden", s.json(t, eff))
 			assertGolden(t, "config/"+name+"-log.golden", []byte(s.text(strings.Join(logs(), "\n"))+"\n"))
 
-			if _, err := cs.Update(cs.ETag(), func(*Config) error { return nil }); err != nil {
+			if _, err := cs.Update(cs.ETag(), func(*config.Config) error { return nil }); err != nil {
 				t.Fatal(err)
 			}
 			saved, err := os.ReadFile(path)
@@ -103,7 +105,7 @@ func TestGoldenConfigFixtures(t *testing.T) {
 // key it lacks: it is a version 1 file, from before the key, and what a
 // save makes of it (config-v1-saved.golden) has it.
 func TestConfigV1HasEverySetting(t *testing.T) {
-	for _, key := range unsetKeys(t, reflect.TypeFor[Config](), fixture(t, "config-v1.json")) {
+	for _, key := range unsetKeys(t, reflect.TypeFor[config.Config](), fixture(t, "config-v1.json")) {
 		if key != "version" {
 			t.Errorf("config-v1.json has no %q", key)
 		}

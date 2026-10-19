@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -243,7 +245,7 @@ func TestGoldenConfigWrites(t *testing.T) {
 		// From a newer bridge's dashboard, which this one would save without
 		// the settings it does not know.
 		{"put-config-newer-version", "PUT", "/api/config", func() any {
-			return map[string]any{"etag": h.Config().ETag, "config": with(map[string]any{"version": currentConfigVersion + 1})}
+			return map[string]any{"etag": h.Config().ETag, "config": with(map[string]any{"version": config.Version + 1})}
 		}},
 		{"put-brain-unknown", "PUT", "/api/brains/nope", func() any { return map[string]any{"manifest": map[string]string{"id": "nope", "name": "Nope"}} }},
 		{"put-brain-no-name", "PUT", "/api/brains/main", func() any { return map[string]any{"manifest": map[string]string{"id": "main"}} }},

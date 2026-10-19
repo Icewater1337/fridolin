@@ -15,7 +15,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"sort"
@@ -25,6 +24,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/Icewater1337/fridolin/internal/config"
 
 	"github.com/Icewater1337/fridolin/internal/access"
 	"github.com/Icewater1337/fridolin/internal/registry"
@@ -281,7 +282,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 // permissions run without a sandbox, which on any OS lets them read the
 // token (and the rest of the data dir) themselves. A sandbox that is on
 // but cannot run gets its own warning: brains then refuse every message.
-func (b *Bridge) tokenWarnings(cfg *Config, goos string) []string {
+func (b *Bridge) tokenWarnings(cfg *config.Config, goos string) []string {
 	var out []string
 	switch {
 	case !b.requiresToken():
@@ -489,20 +490,6 @@ func (b *Bridge) apiIgnored(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, http.StatusOK, chats)
 }
 
-// The form allowed_groups holds. Every edit of the allow lists goes
-// through phoneNumber and allowListGroup, so the dashboard's add boxes and
-// its Allow buttons agree on what they accept.
-var groupJIDRE = regexp.MustCompile(`^[0-9]+(-[0-9]+)?@g\.us$`)
-
-// allowListGroup is s as allowed_groups holds it: a group JID.
-func allowListGroup(s string) (string, error) {
-	g := strings.TrimSpace(s)
-	if !groupJIDRE.MatchString(g) {
-		return "", fmt.Errorf("%q is not a group JID: it looks like 120363000000000000@g.us", g)
-	}
-	return g, nil
-}
-
 // chatRequest is what /api/chats/allow and /api/chats/revoke take.
 type chatRequest struct {
 	JID    string `json:"jid"`
@@ -525,7 +512,7 @@ func (req chatRequest) sent() string {
 func (req chatRequest) listEntry() (dm bool, entry string, err error) {
 	switch req.Kind {
 	case "group":
-		entry, err = allowListGroup(req.sent())
+		entry, err = config.AllowListGroup(req.sent())
 		return false, entry, err
 	case "dm":
 		entry, err = chat.PhoneNumber(req.sent())
@@ -548,7 +535,7 @@ func (b *Bridge) apiAllowChat(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	_, err = b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
+	_, err = b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
 		if dm {
 			if !slices.Contains(c.AllowedNumbers, entry) {
 				c.AllowedNumbers = append(c.AllowedNumbers, entry)
@@ -601,12 +588,12 @@ func (b *Bridge) apiRevokeChat(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, invalid.Error())
 		return
 	}
-	canon, name := allowListGroup, "allowed_groups"
+	canon, name := config.AllowListGroup, "allowed_groups"
 	if dm {
 		canon, name = chat.PhoneNumber, "allowed_numbers"
 	}
 	var removed []string
-	_, err := b.cfgs.Update("", func(c *Config) error {
+	_, err := b.cfgs.Update("", func(c *config.Config) error {
 		list := &c.AllowedGroups
 		if dm {
 			list = &c.AllowedNumbers
@@ -652,7 +639,7 @@ func (b *Bridge) apiGroupMembers(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	group, err := allowListGroup(req.JID)
+	group, err := config.AllowListGroup(req.JID)
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -660,19 +647,19 @@ func (b *Bridge) apiGroupMembers(w http.ResponseWriter, r *http.Request) {
 	var members []string
 	if req.Members != nil {
 		entry := map[string][]string{group: *req.Members}
-		if err := validateGroupMembers(entry, []string{group}); err != nil {
+		if err := config.ValidateGroupMembers(entry, []string{group}); err != nil {
 			httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 			return
 		}
 		// A number typed twice, in two ways perhaps, is kept once.
 		members = []string{}
-		for _, n := range groupMembersAsNumbers(entry)[group] {
+		for _, n := range config.GroupMembersAsNumbers(entry)[group] {
 			if !slices.Contains(members, n) {
 				members = append(members, n)
 			}
 		}
 	}
-	_, err = b.cfgs.Update("", func(c *Config) error {
+	_, err = b.cfgs.Update("", func(c *config.Config) error {
 		if req.Members == nil {
 			delete(c.GroupMembers, group)
 			return nil
@@ -719,7 +706,7 @@ func revokeEntry(list []string, sent, entry string, valid bool, canon func(strin
 // in their manifests (brain.json, staged in tx, and the approved copy). The
 // chosen brain goes first, so that one that is not there is refused before
 // the others are looked at.
-func assignGroup(c *Config, tx *Tx, jid, brainID string) error {
+func assignGroup(c *config.Config, tx *Tx, jid, brainID string) error {
 	if err := updateManifestIn(c, tx, brainID, func(m *manifest.Manifest) error {
 		if !slices.Contains(m.Routing.Groups, jid) {
 			m.Routing.Groups = append(m.Routing.Groups, jid)
@@ -805,7 +792,7 @@ func (b *Bridge) apiPutConfig(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	res, err := b.cfgs.UpdateTx(req.ETag, func(c *Config, _ *Tx) error {
+	res, err := b.cfgs.UpdateTx(req.ETag, func(c *config.Config, _ *Tx) error {
 		incoming.BrainDirs = c.BrainDirs
 		*c = *incoming
 		return nil
@@ -859,7 +846,7 @@ type brainView struct {
 // drift shows as soon as a brain.json changes, plus the folders the brain
 // manager could not open when it last loaded the brains, which only it
 // knows of.
-func (b *Bridge) brainIssues(cfg *Config) []BrainIssue {
+func (b *Bridge) brainIssues(cfg *config.Config) []BrainIssue {
 	_, issues := ResolveBrains(cfg)
 	for _, is := range b.brainMgr.Issues() {
 		if is.atLoad {
@@ -934,7 +921,7 @@ func (b *Bridge) apiBrain(w http.ResponseWriter, r *http.Request) {
 // brainDirs lists every folder in c's brain_dirs, ~ expanded, approved or
 // not: a new brain, or a restore, must not land in, around or on any of
 // them, an entry still waiting for approval included.
-func brainDirs(c *Config) []string {
+func brainDirs(c *config.Config) []string {
 	var dirs []string
 	for _, ref := range c.BrainDirs {
 		dirs = append(dirs, ref.Dir())
@@ -959,7 +946,7 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteJSON(w, http.StatusOK, resp)
 		return
 	}
-	root, err := os.OpenRoot(fsx.Canonical(homeDir()))
+	root, err := os.OpenRoot(fsx.Canonical(config.HomeDir()))
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
@@ -1192,12 +1179,12 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 	defer scaffold.Close()
 	created := scaffold.Created()
 	writesManifest := false
-	if _, err := b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
+	if _, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
 		// Again, against the config this update changes. addMu keeps adds
 		// apart, but not the other config writers: a brain saved or
 		// approved since the check above may claim the same group or the
 		// DMs, and the two must not both be registered.
-		eff, err := effective(c)
+		eff, err := config.Resolve(c)
 		if err != nil {
 			return err
 		}
@@ -1213,7 +1200,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 			writesManifest = true
 		}
 		approved := m
-		c.BrainDirs = append(c.BrainDirs, BrainRef{Path: fsx.Tilde(abs, homeDir()), Approved: &approved})
+		c.BrainDirs = append(c.BrainDirs, config.BrainRef{Path: fsx.Tilde(abs, config.HomeDir()), Approved: &approved})
 		return nil
 	}); err != nil {
 		scaffold.Rollback()
@@ -1231,7 +1218,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 // checkNewBrain checks brain m, to go in folder abs, against the brains cfg
 // (an effective configuration) has: the folder must be none of theirs, in
 // or around one, and m must not clash with them.
-func checkNewBrain(cfg *Config, m manifest.Manifest, abs string) error {
+func checkNewBrain(cfg *config.Config, m manifest.Manifest, abs string) error {
 	if _, problems, _ := CheckBrainPath(abs, cfg, brainDirs(cfg)); len(problems) > 0 {
 		return errors.New(strings.Join(problems, "; "))
 	}
@@ -1260,7 +1247,7 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 	}
 	// The brain.json the update stages has it check the brain set with
 	// the edit before anything is written (see checkSet).
-	_, err := b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
+	_, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
 		return updateManifestIn(c, tx, id, func(cur *manifest.Manifest) error {
 			*cur = m
 			return nil
@@ -1280,7 +1267,7 @@ func (b *Bridge) apiUpdateBrain(w http.ResponseWriter, r *http.Request) {
 // hand edit broke say, is not the edit's doing, and does not keep the
 // other brains from being edited or approved. Issues are told apart by
 // brain, kind and detail.
-func checkSet(before, after *Config) error {
+func checkSet(before, after *config.Config) error {
 	_, was := ResolveBrains(before)
 	seen := map[string]bool{}
 	for _, is := range was {
@@ -1322,7 +1309,7 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, "manifest required: send the brain.json you reviewed")
 		return
 	}
-	_, err := b.cfgs.UpdateTx("", func(c *Config, tx *Tx) error {
+	_, err := b.cfgs.UpdateTx("", func(c *config.Config, tx *Tx) error {
 		for i := range c.BrainDirs {
 			ref := &c.BrainDirs[i]
 			if ref.Approved == nil || ref.Approved.ID != id {
@@ -1361,7 +1348,7 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 // apiRemoveBrain stops routing to a brain. Its folder is left exactly as it is.
 func (b *Bridge) apiRemoveBrain(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	_, err := b.cfgs.Update("", func(c *Config) error {
+	_, err := b.cfgs.Update("", func(c *config.Config) error {
 		for i, ref := range c.BrainDirs {
 			if ref.Approved != nil && ref.Approved.ID == id {
 				c.BrainDirs = slices.Delete(c.BrainDirs, i, i+1)
@@ -1387,8 +1374,8 @@ func (b *Bridge) apiRemoveBrainDir(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, "path required")
 		return
 	}
-	want := fsx.Canonical(fsx.ExpandHome(path, homeDir()))
-	_, err := b.cfgs.Update("", func(c *Config) error {
+	want := fsx.Canonical(fsx.ExpandHome(path, config.HomeDir()))
+	_, err := b.cfgs.Update("", func(c *config.Config) error {
 		for i, ref := range c.BrainDirs {
 			if ref.Approved == nil && fsx.Canonical(ref.Dir()) == want {
 				c.BrainDirs = slices.Delete(c.BrainDirs, i, i+1)
@@ -1409,7 +1396,7 @@ func (b *Bridge) apiRemoveBrainDir(w http.ResponseWriter, r *http.Request) {
 var pickMu sync.Mutex
 
 func (b *Bridge) apiFSCaps(w http.ResponseWriter, r *http.Request) {
-	home := homeDir()
+	home := config.HomeDir()
 	picker := ""
 	if p := platform.FolderPicker(home); p != nil {
 		picker = filepath.Base(p[0])
@@ -1418,7 +1405,7 @@ func (b *Bridge) apiFSCaps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Bridge) apiFSPick(w http.ResponseWriter, r *http.Request) {
-	argv := platform.FolderPicker(homeDir())
+	argv := platform.FolderPicker(config.HomeDir())
 	if argv == nil {
 		httpapi.WriteErr(w, http.StatusNotImplemented, "no native folder picker on this system — browse or type the path instead")
 		return
@@ -1497,7 +1484,7 @@ func textTail(s string, n int) string {
 // apiFSList lists folders inside your home folder, for the in-dashboard
 // folder browser. The bridge's data folder is hidden.
 func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
-	home := fsx.Canonical(homeDir())
+	home := fsx.Canonical(config.HomeDir())
 	p := r.URL.Query().Get("path")
 	if p == "" {
 		p = home

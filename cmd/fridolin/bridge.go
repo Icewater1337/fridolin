@@ -17,6 +17,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/httpapi"
@@ -251,7 +253,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	// The brains get the configuration as it is now rather than next, under
 	// a lock, so that whichever notification comes last, the brains end on
 	// the latest configuration and never on one an update has replaced.
-	cfgs.Subscribe(func(prev, next *Config) {
+	cfgs.Subscribe(func(prev, next *config.Config) {
 		b.applyMu.Lock()
 		err := b.brainMgr.Apply(b.cfgs.Get())
 		b.applyMu.Unlock()
@@ -757,7 +759,7 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 }
 
 // handleCommand runs !help, !reset and !stop. It reports whether text was one.
-func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *Config) bool {
+func (b *Bridge) handleCommand(ctx context.Context, m Inbound, cfg *config.Config) bool {
 	switch strings.ToLower(m.Text) {
 	case "!reset":
 		// A reset stops what !stop stops for the chat, hand-offs from other
@@ -937,7 +939,7 @@ func (b *Bridge) undelivered(brainID string) []history.Entry {
 // and again when an edit opens DMs to everyone. Allowed senders run Claude
 // with all its permissions, so an open allowlist must not go unnoticed, and
 // a closed one explains why DMs get no answer.
-func logDMAccess(prev, next *Config) {
+func logDMAccess(prev, next *config.Config) {
 	switch {
 	case next.AnyoneCanDM() && (prev == nil || !prev.AnyoneCanDM()):
 		log.Printf("WARNING: anyone who can message this WhatsApp account can use the assistant: allowed_numbers is empty and allow_any_dm is true. Add your number under Chats → Allowed numbers, or turn allow_any_dm off.")
@@ -948,5 +950,5 @@ func logDMAccess(prev, next *Config) {
 
 // groupRulesFor is what addresses the bridge in the brain's groups.
 func groupRulesFor(r manifest.Routing) groupRules {
-	return groupRules{files: boolOr(r.AnswerFiles, true), forwards: boolOr(r.AnswerForwards, true)}
+	return groupRules{files: config.BoolOr(r.AnswerFiles, true), forwards: config.BoolOr(r.AnswerForwards, true)}
 }

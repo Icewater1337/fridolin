@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -27,7 +29,7 @@ func TestConfigStoreUpdateWritesAtomicallyAndKeepsTilde(t *testing.T) {
 	}
 
 	etag := cs.ETag()
-	restart, err := cs.Update(etag, func(c *Config) error {
+	restart, err := cs.Update(etag, func(c *config.Config) error {
 		c.AllowedNumbers = append(c.AllowedNumbers, "15559876543")
 		c.LogLevel = "debug"
 		return nil
@@ -53,11 +55,11 @@ func TestConfigStoreUpdateWritesAtomicallyAndKeepsTilde(t *testing.T) {
 	}
 
 	// A stale etag is a conflict and changes nothing.
-	if _, err := cs.Update(etag, func(c *Config) error { c.BrainModel = "x"; return nil }); !errors.Is(err, ErrConfigConflict) {
+	if _, err := cs.Update(etag, func(c *config.Config) error { c.BrainModel = "x"; return nil }); !errors.Is(err, ErrConfigConflict) {
 		t.Errorf("stale etag: err = %v, want conflict", err)
 	}
 	// An invalid edit is rejected and changes nothing.
-	if _, err := cs.Update("", func(c *Config) error { c.BrainEffort = "extreme"; return nil }); err == nil {
+	if _, err := cs.Update("", func(c *config.Config) error { c.BrainEffort = "extreme"; return nil }); err == nil {
 		t.Error("invalid effort must be rejected")
 	}
 	if cs.Get().BrainEffort != "" {
@@ -150,16 +152,16 @@ func TestConfigDefaultsAndLoopbackOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.HTTPListen != defaultHTTPListen || !cfg.HTTPEnabled() {
+	if cfg.HTTPListen != config.DefaultHTTPListen || !cfg.HTTPEnabled() {
 		t.Errorf("http_listen default = %q", cfg.HTTPListen)
 	}
-	if cfg.Queue.Mode != "queue" || cfg.DebounceQuietMS() != defaultQuietMS || !cfg.QueueNotify() || !cfg.DashboardRequiresToken() {
+	if cfg.Queue.Mode != "queue" || cfg.DebounceQuietMS() != config.DefaultQuietMS || !cfg.QueueNotify() || !cfg.DashboardRequiresToken() {
 		t.Error("unexpected defaults")
 	}
 	if cfg.AllowsAnyDM() || cfg.AllowAnyDM == nil || *cfg.AllowAnyDM {
 		t.Error("an unset allow_any_dm must mean false, and the effective config must say so")
 	}
-	if (&Config{}).AllowsAnyDM() {
+	if (&config.Config{}).AllowsAnyDM() {
 		t.Error("a Config built without the defaults must not let anyone DM either")
 	}
 	cfg, err = LoadConfig(writeConfig(t, `{"http_listen":"off"}`))
@@ -260,7 +262,7 @@ func TestConfigSavesKeepBrainModeOn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
+	if _, err := cs.Update("", func(c *config.Config) error { c.LogLevel = "debug"; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if raw := readRawConfig(t, path); string(raw["brain_mode"]) != "true" {
@@ -296,7 +298,7 @@ func TestConfigRefusesInlineBrains(t *testing.T) {
 			}
 			if strings.Contains(c.want, "inline") {
 				for _, part := range []string{
-					`run "fridolin migrate" with a build from before this change (commit ` + migrateBuild + ")",
+					`run "fridolin migrate" with a build from before this change (commit ` + config.MigrateBuild + ")",
 					"see docs/BRAINS.md#configs-with-inline-brains",
 				} {
 					if !strings.Contains(err.Error(), part) {
@@ -362,13 +364,13 @@ func TestRetiredConfigKeys(t *testing.T) {
 				t.Errorf("logged retired keys %q, want %q (log %q)", logged, c.logged, logs())
 			}
 
-			if _, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
+			if _, err := cs.Update("", func(c *config.Config) error { c.LogLevel = "debug"; return nil }); err != nil {
 				t.Fatal(err)
 			}
 			raw := readRawConfig(t, path)
-			for _, rk := range retiredKeys {
-				if v, ok := raw[rk.name]; ok {
-					t.Errorf("a save wrote %q: %s", rk.name, v)
+			for _, name := range config.RetiredKeyNames() {
+				if v, ok := raw[name]; ok {
+					t.Errorf("a save wrote %q: %s", name, v)
 				}
 			}
 			var saved string
@@ -446,7 +448,7 @@ func TestConfigStoreRejectsTooSmallChunkSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cs.Update("", func(c *Config) error { c.MaxChunkSize = 50; return nil }); err == nil {
+	if _, err := cs.Update("", func(c *config.Config) error { c.MaxChunkSize = 50; return nil }); err == nil {
 		t.Fatal("max_chunk_size 50 must be rejected")
 	}
 	if got := cs.Get().MaxChunkSize; got != 3900 {
@@ -494,7 +496,7 @@ func TestRemovingTheLastNumberDoesNotOpenDMs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cs.Update("", func(c *Config) error { c.AllowedNumbers = []string{}; return nil }); err != nil {
+	if _, err := cs.Update("", func(c *config.Config) error { c.AllowedNumbers = []string{}; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if numberAllowed(cs.Get(), "15559876543") {
@@ -559,7 +561,7 @@ func TestDotEnvIsNotRead(t *testing.T) {
 				t.Errorf("BrainModel = %q, want the config's from-file", got)
 			}
 			// An edit re-derives the effective config from the file alone.
-			if _, err := cs.Update("", func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
+			if _, err := cs.Update("", func(c *config.Config) error { c.LogLevel = "debug"; return nil }); err != nil {
 				t.Fatal(err)
 			}
 			if got := cs.Get().BrainModel; got != "from-file" {
@@ -590,59 +592,6 @@ func TestDotEnvIsNotRead(t *testing.T) {
 	}
 }
 
-// config.json carries the version it was written in. A file without one is
-// version 1, which is migrated to the current version as it is read; a
-// newer version, or a version that is no number, is refused.
-func TestMigrateConfig(t *testing.T) {
-	cases := []struct {
-		name, config string
-		from         int
-		want         map[string]string // keys of the migrated file, as JSON; "" for a key it lacks
-		err          string            // part of the error, "" when it migrates
-	}{
-		{"no version", `{"log_level": "debug"}`, 1, map[string]string{"version": "2", "log_level": `"debug"`}, ""},
-		{"null", `{"version": null}`, 1, map[string]string{"version": "2"}, ""},
-		{"version 1 with retired keys", `{"version": 1, "model": "sonnet", "work_dir": "~/a", "brains": []}`, 1,
-			map[string]string{"version": "2", "brain_model": `"sonnet"`, "model": "", "work_dir": "", "brains": ""}, ""},
-		{"version 1 keeps its brain_model", `{"model": "sonnet", "brain_model": "opus"}`, 1, map[string]string{"brain_model": `"opus"`, "model": ""}, ""},
-		// The retired keys are version 1's: in a version 2 file they are
-		// unknown keys, which no migration touches.
-		{"version 2", `{"version": 2, "model": "sonnet"}`, 2, map[string]string{"version": "2", "model": `"sonnet"`, "brain_model": ""}, ""},
-		{"version 1 with inline brains", `{"brains": [{"name": "a"}]}`, 1, nil, `lists brains inline under "brains"`},
-		{"newer", `{"version": 3}`, 3, nil, "version 3 is newer than the version 2 this build of Fridolin reads"},
-		{"zero", `{"version": 0}`, 0, nil, "version 0: must be a whole number from 1 to 2"},
-		{"negative", `{"version": -1}`, 0, nil, "version -1: must be a whole number from 1 to 2"},
-		{"a string", `{"version": "2"}`, 0, nil, `version "2": must be a whole number`},
-		{"a fraction", `{"version": 1.5}`, 0, nil, "version 1.5: must be a whole number"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			var obj map[string]json.RawMessage
-			if err := json.Unmarshal([]byte(c.config), &obj); err != nil {
-				t.Fatal(err)
-			}
-			from, _, err := migrateConfig(obj)
-			switch {
-			case c.err != "" && (err == nil || !strings.Contains(err.Error(), c.err)):
-				t.Fatalf("err = %v, want one containing %q", err, c.err)
-			case c.err == "" && err != nil:
-				t.Fatalf("err = %v", err)
-			}
-			if from != c.from {
-				t.Errorf("from = %d, want %d", from, c.from)
-			}
-			for key, want := range c.want {
-				if got := string(obj[key]); got != want {
-					t.Errorf("%s = %s, want %s", key, got, want)
-				}
-			}
-		})
-	}
-	if len(configMigrations) != currentConfigVersion-1 {
-		t.Errorf("%d migrations for version %d: each version after 1 needs one", len(configMigrations), currentConfigVersion)
-	}
-}
-
 // The store migrates in memory only: starting writes nothing, and the next
 // save writes the current version. A file of a newer version stops the
 // bridge before it can save it without the settings it does not know, and
@@ -659,10 +608,10 @@ func TestConfigVersionOnDisk(t *testing.T) {
 		if data, _ := os.ReadFile(path); string(data) != body {
 			t.Errorf("starting rewrote the file:\n%s", data)
 		}
-		if v := cs.FileCopy().Version; v != currentConfigVersion {
-			t.Errorf("the file layer is version %d, want %d", v, currentConfigVersion)
+		if v := cs.FileCopy().Version; v != config.Version {
+			t.Errorf("the file layer is version %d, want %d", v, config.Version)
 		}
-		if _, err := cs.Update(cs.ETag(), func(c *Config) error { c.LogLevel = "debug"; return nil }); err != nil {
+		if _, err := cs.Update(cs.ETag(), func(c *config.Config) error { c.LogLevel = "debug"; return nil }); err != nil {
 			t.Fatal(err)
 		}
 		raw := readRawConfig(t, path)
@@ -681,7 +630,7 @@ func TestConfigVersionOnDisk(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := cs.Update(cs.ETag(), func(c *Config) error { c.Version = 0; return nil }); err != nil {
+		if _, err := cs.Update(cs.ETag(), func(c *config.Config) error { c.Version = 0; return nil }); err != nil {
 			t.Fatal(err)
 		}
 		if v := string(readRawConfig(t, path)["version"]); v != "2" {
@@ -710,7 +659,7 @@ func TestConfigVersionOnDisk(t *testing.T) {
 		const body = `{"version": 3, "allowed_numbers": ["15551234567"], "a_newer_setting": true}`
 		path := writeConfig(t, body)
 		_, err := OpenConfigStore(path)
-		if err == nil || !errors.Is(err, errConfigTooNew) {
+		if err == nil || !errors.Is(err, config.ErrTooNew) {
 			t.Fatalf("err = %v, want errConfigTooNew", err)
 		}
 		for _, part := range []string{"version 3 is newer than the version 2", "Run that newer version again", "docs/CONFIGURATION.md#version"} {
@@ -734,7 +683,7 @@ func TestConfigVersionOnDisk(t *testing.T) {
 			t.Fatal(err)
 		}
 		newer := strings.Replace(string(whole), `"version":2`, `"version":3`, 1)
-		if _, err := decodeConfigReplacement([]byte(newer)); !errors.Is(err, errConfigTooNew) {
+		if _, err := decodeConfigReplacement([]byte(newer)); !errors.Is(err, config.ErrTooNew) {
 			t.Errorf("a version 3 save: err = %v, want errConfigTooNew", err)
 		}
 		if _, err := decodeConfigReplacement(whole); err != nil {

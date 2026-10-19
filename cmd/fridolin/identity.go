@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"log"
 	"strings"
+
+	"github.com/Icewater1337/fridolin/internal/config"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
@@ -63,7 +65,7 @@ func chatJID(s string) (types.JID, error) {
 // what did not come from a chat (an /ingest, a Plaud recording, a startup
 // alert) go there when nothing else is set. "" when the list holds no
 // number.
-func ownerChat(cfg *Config) string {
+func ownerChat(cfg *config.Config) string {
 	for _, n := range cfg.AllowedNumbers {
 		if p, err := chat.PhoneNumber(n); err == nil {
 			return chat.DMJID(p)

@@ -2,11 +2,10 @@ package main
 
 import (
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/access"
-	"github.com/Icewater1337/fridolin/internal/chat"
-	"log"
 	"slices"
-	"sort"
+
+	"github.com/Icewater1337/fridolin/internal/access"
+	"github.com/Icewater1337/fridolin/internal/config"
 )
 
 // Who in an allowed group may reach its brain. allowed_groups lets a group
@@ -43,7 +42,7 @@ type groupSender struct {
 // one without admits whom allowed_numbers admits (numberAllowed): its
 // numbers, or anyone while it is empty and allow_any_dm is true. A sender
 // known only by a LID is admitted only where everyone is.
-func groupSenderAllowed(cfg *Config, group string, s groupSender) bool {
+func groupSenderAllowed(cfg *config.Config, group string, s groupSender) bool {
 	return access.GroupSenderAllowed(policyOf(cfg), group, s.Number, s.Resolved, s.FromMe)
 }
 
@@ -60,114 +59,10 @@ func (s groupSender) masked() string {
 	return maskDigits(s.Number, 0)
 }
 
-// validateGroupMembers rejects a group_members that cannot mean what it
-// says: an entry for a chat that is no group, or for a group allowed_groups
-// does not let in (its members would reach nothing), a number that is none,
-// and "*" next to numbers, which would let everyone in while it looks like
-// a list. It runs on the effective config, where every entry that is a
-// number is already digits.
-//
-// The error names a group by its JID, which check --redact masks, but
-// neither a key that is no group JID nor a number that is none: either may
-// be a phone number written so that nothing recognises it as one, and the
-// error goes into the bug report as it is.
-func validateGroupMembers(members map[string][]string, allowedGroups []string) error {
-	groups := make([]string, 0, len(members))
-	for g := range members {
-		groups = append(groups, g)
-	}
-	sort.Strings(groups)
-	for _, g := range groups {
-		if !groupJIDRE.MatchString(g) {
-			return fmt.Errorf("group_members: a key is not a group JID: each key is a group from allowed_groups, written like 120363000000000000@g.us")
-		}
-		if !slices.Contains(allowedGroups, g) {
-			return fmt.Errorf("group_members: %s is not in allowed_groups: allow the group too, or remove its entry", g)
-		}
-		list := members[g]
-		for i, n := range list {
-			if n == anyMember {
-				if len(list) > 1 {
-					return fmt.Errorf("group_members: %s lists %q with numbers: use [%q] alone to let every member in, or only numbers", g, anyMember, anyMember)
-				}
-				continue
-			}
-			if _, err := chat.PhoneNumber(n); err != nil {
-				return fmt.Errorf("group_members: %s: entry %d is not a phone number: use digits with the country code, e.g. 15551234567", g, i+1)
-			}
-		}
-	}
-	return nil
-}
-
-// groupMembersAsNumbers is group_members with each number in the form the
-// bridge compares, digits only, like allowed_numbers (allowedNumbersAsNumbers).
-func groupMembersAsNumbers(members map[string][]string) map[string][]string {
-	if members == nil {
-		return nil
-	}
-	out := make(map[string][]string, len(members))
-	for g, list := range members {
-		if slices.Equal(list, []string{anyMember}) {
-			out[g] = list
-			continue
-		}
-		out[g] = chat.NumbersAsNumbers(list)
-	}
-	return out
-}
-
-// onlyAllowedNumbers lists the groups of c in which only allowed_numbers
-// reach the brain: allowed and without a group_members entry, unless an
-// empty allowed_numbers with allow_any_dm lets everyone in anyway.
-func onlyAllowedNumbers(c *Config) []string {
-	if c == nil || c.AnyoneCanDM() {
-		return nil
-	}
-	var out []string
-	for _, g := range c.AllowedGroups {
-		if _, listed := c.GroupMembers[g]; !listed {
-			out = append(out, g)
-		}
-	}
-	return out
-}
-
-// warnGroupsWithoutMembers logs, once for each, the allowed groups of next
-// that admit only allowed_numbers and did not in prev (nil at startup), so
-// that an owner whose groups trusted every member before group_members
-// existed sees why the others go unheard, and how to change it.
-func warnGroupsWithoutMembers(prev, next *Config) {
-	before := onlyAllowedNumbers(prev)
-	for _, g := range onlyAllowedNumbers(next) {
-		if slices.Contains(before, g) {
-			continue
-		}
-		log.Printf("config: group %s has no group_members entry: only allowed_numbers can start runs there, and what other members write is not read; an entry of [%q] for it lets every member in, as before, or list their numbers", g, anyMember)
-	}
-}
-
-// groupMemberPairs is group_members as a sorted list of "group:number"
-// entries, and "group:" for one that lists nobody, so that
-// logSecurityChanges can say who was let in or out of which group.
-func groupMemberPairs(members map[string][]string) []string {
-	var out []string
-	for g, list := range members {
-		if len(list) == 0 {
-			out = append(out, g+":")
-		}
-		for _, n := range list {
-			out = append(out, g+":"+n)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
 // groupHeardSummary says for fridolin check whose messages in the allowed
 // group g reach its brain, as groupSenderAllowed decides, besides the
 // bridge's own account, which always does.
-func groupHeardSummary(cfg *Config, g string) string {
+func groupHeardSummary(cfg *config.Config, g string) string {
 	members, listed := cfg.GroupMembers[g]
 	switch {
 	case listed && slices.Equal(members, []string{anyMember}):
