@@ -694,9 +694,7 @@ func TestShutdownKeepsWhatComesInDuringTheStop(t *testing.T) {
 		close(stopped)
 	}()
 	h.WaitFor("the stop to begin", func() bool {
-		b.intake.mu.Lock()
-		defer b.intake.mu.Unlock()
-		return b.intake.closed
+		return b.intake.Closed()
 	})
 	h.WhatsApp(dmEvent("3EB0LATE", textMsg("late")))
 	h.WhatsApp(dmEvent("3EB0HELP", textMsg("!help")))

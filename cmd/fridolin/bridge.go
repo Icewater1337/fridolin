@@ -87,7 +87,7 @@ type Bridge struct {
 	// stopOnce makes Stop run once, whoever calls it how often.
 	stopOnce sync.Once
 	// intake is what comes in from WhatsApp, which Stop closes first.
-	intake intake
+	intake app.IntakeGate
 
 	// registry owns the brain workflows, including add serialization.
 	registry *registry.Registry
@@ -333,7 +333,7 @@ func (b *Bridge) stop() {
 	// while the brains finish and WhatsApp stays connected for their
 	// replies, and nothing that came in before is still on its way to the
 	// debouncer or a brain.
-	b.intake.close()
+	b.intake.Close()
 	b.stopHTTP()
 	b.backup.Stop()
 	b.plaud.Stop()
@@ -356,7 +356,7 @@ func (b *Bridge) stop() {
 	if !waitWithin(&b.loops, connectStopWait) {
 		log.Printf("WhatsApp: still connecting %v after the disconnect; stopping without waiting for it", connectStopWait)
 	}
-	b.intake.end()
+	b.intake.End()
 	if err := b.store.Close(); err != nil {
 		log.Printf("closing store: %v", err)
 	}
@@ -492,66 +492,12 @@ func waitWithin(wg *sync.WaitGroup, d time.Duration) bool {
 	}
 }
 
-// intake counts the calls of handleInbound and handleChange at work.
-// Stop closes it before anything else stops: from then on what comes in
-// is kept for the next start instead (keepLate), and close waits for the
-// calls at work, which may still hand a message to the debouncer or a
-// brain. What comes in once the store is about to close (end) is lost.
-type intake struct {
-	mu     sync.Mutex
-	closed bool
-	ended  bool
-	busy   sync.WaitGroup
-}
-
-// enter reports whether a call may act on what came in, and then counts
-// it until leave.
-func (in *intake) enter() bool {
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	if in.closed {
-		return false
-	}
-	in.busy.Add(1)
-	return true
-}
-
-func (in *intake) leave() { in.busy.Done() }
-
-// close makes what comes in from now on wait for the next start, and
-// waits for the calls acting on what came in before.
-func (in *intake) close() {
-	in.mu.Lock()
-	in.closed = true
-	in.mu.Unlock()
-	in.busy.Wait()
-}
-
-// keep runs fn, which keeps what came in once intake closed, unless the
-// store is closing (end), and reports whether it did.
-func (in *intake) keep(fn func()) bool {
-	in.mu.Lock()
-	defer in.mu.Unlock()
-	if in.ended {
-		return false
-	}
-	fn()
-	return true
-}
-
-// end is when the store closes: what comes in after is lost.
-func (in *intake) end() {
-	in.mu.Lock()
-	in.ended = true
-	in.mu.Unlock()
-}
-
 // keepLate keeps m, which came in once the bridge had begun to stop, for
 // the next start, which handles it as if it came in then: nothing has
 // looked at it yet, so no command ran, and the OTP guard is still to see
 // it (see resume).
 func (b *Bridge) keepLate(m brainruntime.Inbound) {
-	if !b.intake.keep(func() { b.keep(app.InboundLate, "", m) }) {
+	if !b.intake.Keep(func() { b.keep(app.InboundLate, "", m) }) {
 		log.Printf("dropping a message for %s: it came in as the bridge closed its store", m.JID)
 	}
 }
@@ -562,8 +508,8 @@ func (b *Bridge) keepLate(m brainruntime.Inbound) {
 // the bridge stops, it is kept for the next start instead, as messages
 // are (see intake).
 func (b *Bridge) handleChange(c chat.Change) {
-	if !b.intake.enter() {
-		kept := b.intake.keep(func() {
+	if !b.intake.Enter() {
+		kept := b.intake.Keep(func() {
 			if err := app.KeepChange(context.Background(), b.store, c, time.Now()); err != nil {
 				log.Printf("%v; it is lost", err)
 			}
@@ -573,7 +519,7 @@ func (b *Bridge) handleChange(c chat.Change) {
 		}
 		return
 	}
-	defer b.intake.leave()
+	defer b.intake.Leave()
 	br := b.brainMgr.BrainFor(c.Chat, chat.IsGroupJID(c.Chat))
 	// An edit to a one-time code is caught like the code itself
 	// (handleInbound), before anything else sees it: a sender who corrects
@@ -632,11 +578,11 @@ func (b *Bridge) recordIgnored(kind, jid, name, sender, pushName string) {
 // bridge stops, a message is kept for the next start instead: no command
 // runs and no notice goes out (see intake).
 func (b *Bridge) handleInbound(ctx context.Context, m brainruntime.Inbound) {
-	if !b.intake.enter() {
+	if !b.intake.Enter() {
 		b.keepLate(m)
 		return
 	}
-	defer b.intake.leave()
+	defer b.intake.Leave()
 	b.pipeline.Handle(ctx, m)
 }
 
