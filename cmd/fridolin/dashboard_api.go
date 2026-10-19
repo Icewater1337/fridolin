@@ -91,10 +91,10 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("PUT /api/plaud/settings", b.newPlaudAPI().Settings)
 	mux.HandleFunc("POST /api/plaud/sync", b.newPlaudAPI().Sync)
 	mux.HandleFunc("POST /api/plaud/resend", b.newPlaudAPI().Resend)
-	mux.HandleFunc("PUT /api/plaud/app/credentials", b.apiPlaudAppCredentials)
-	mux.HandleFunc("POST /api/plaud/app/build", b.apiPlaudAppBuild)
-	mux.HandleFunc("GET /api/plaud/app.apk", b.apiPlaudAppDownload)
-	mux.HandleFunc("DELETE /api/plaud/devices/{id}", b.apiPlaudRevokeDevice)
+	mux.HandleFunc("PUT /api/plaud/app/credentials", b.newPlaudAppAPI().Credentials)
+	mux.HandleFunc("POST /api/plaud/app/build", b.newPlaudAppAPI().Build)
+	mux.HandleFunc("GET /api/plaud/app.apk", b.newPlaudAppAPI().Download)
+	mux.HandleFunc("DELETE /api/plaud/devices/{id}", b.newPlaudAppAPI().RevokeDevice)
 
 	b.siteAPI(mux)
 

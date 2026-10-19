@@ -9,21 +9,29 @@ import (
 	"github.com/Icewater1337/fridolin/internal/plaud"
 )
 
-func (b *Bridge) apiPlaudAppCredentials(w http.ResponseWriter, r *http.Request) {
+type PlaudAppService interface {
+	SaveDeveloper(plaud.Developer) error
+	BuildApp() error
+	AppFile() string
+	RevokeDevice(string) error
+}
+type PlaudAppAPI struct{ Plaud func() PlaudAppService }
+
+func (a *PlaudAppAPI) Credentials(w http.ResponseWriter, r *http.Request) {
 	var d plaud.Developer
 	if err := httpapi.DecodeJSON(r, &d); err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, plaud.DecodeError(err).Error())
 		return
 	}
-	if err := b.plaud.SaveDeveloper(d); err != nil {
+	if err := a.Plaud().SaveDeveloper(d); err != nil {
 		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
-func (b *Bridge) apiPlaudAppBuild(w http.ResponseWriter, r *http.Request) {
-	switch err := b.plaud.BuildApp(); {
+func (a *PlaudAppAPI) Build(w http.ResponseWriter, r *http.Request) {
+	switch err := a.Plaud().BuildApp(); {
 	case errors.Is(err, plaud.ErrAppBuilding):
 		httpapi.WriteErr(w, http.StatusConflict, err.Error())
 	case err != nil:
@@ -33,18 +41,18 @@ func (b *Bridge) apiPlaudAppBuild(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (b *Bridge) apiPlaudAppDownload(w http.ResponseWriter, r *http.Request) {
-	if !fsx.Exists(b.plaud.AppFile()) {
+func (a *PlaudAppAPI) Download(w http.ResponseWriter, r *http.Request) {
+	if !fsx.Exists(a.Plaud().AppFile()) {
 		httpapi.WriteErr(w, http.StatusNotFound, "no phone app built yet")
 		return
 	}
 	w.Header().Set("Content-Type", "application/vnd.android.package-archive")
 	w.Header().Set("Content-Disposition", `attachment; filename="plaud-sync.apk"`)
-	http.ServeFile(w, r, b.plaud.AppFile())
+	http.ServeFile(w, r, a.Plaud().AppFile())
 }
 
-func (b *Bridge) apiPlaudRevokeDevice(w http.ResponseWriter, r *http.Request) {
-	switch err := b.plaud.RevokeDevice(r.PathValue("id")); {
+func (a *PlaudAppAPI) RevokeDevice(w http.ResponseWriter, r *http.Request) {
+	switch err := a.Plaud().RevokeDevice(r.PathValue("id")); {
 	case errors.Is(err, plaud.ErrUnknownDevice):
 		httpapi.WriteErr(w, http.StatusNotFound, err.Error())
 	case err != nil:
