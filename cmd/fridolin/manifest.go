@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -140,7 +141,7 @@ func (m *BrainManifest) Validate() error {
 		}
 	}
 	for _, g := range m.Routing.Groups {
-		if !isGroupJID(g) {
+		if !chat.IsGroupJID(g) {
 			return fmt.Errorf("brain %q: %q is not a group JID (…@g.us)", m.ID, g)
 		}
 	}

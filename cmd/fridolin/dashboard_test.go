@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -366,10 +367,10 @@ func TestSendRefusesMissingJIDOrText(t *testing.T) {
 // choosing.
 type stateMessenger struct {
 	*devMessenger
-	state WAState
+	state chat.LinkState
 }
 
-func (m stateMessenger) State() WAState { return m.state }
+func (m stateMessenger) State() chat.LinkState { return m.state }
 
 func TestReadyReportsWhetherMessagesCanGoOut(t *testing.T) {
 	// /health only says the process is up. /ready tells a script (or
@@ -391,7 +392,7 @@ func TestReadyReportsWhetherMessagesCanGoOut(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb := newTestBridge(t, "")
 			if !c.dev {
-				tb.wa = stateMessenger{devMessenger: tb.dev, state: WAState{Mode: c.mode, OwnNumber: "15551234567"}}
+				tb.wa = stateMessenger{devMessenger: tb.dev, state: chat.LinkState{Mode: c.mode, OwnNumber: "15551234567"}}
 				tb.dev = nil
 			}
 			r := httptest.NewRequest("GET", "http://127.0.0.1:8765/ready", nil)
@@ -773,7 +774,7 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	}
 	waitFor(t, 5*time.Second, "the second file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
 
-	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!reset", Source: sourceWhatsApp})
+	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
 	if !tb.sentPrefix(dm, "✅ Reset. I stopped what this chat had running or waiting") {
 		t.Errorf("!reset answered %q, want that it cleared the chat", tb.sentTo(dm))
 	}
@@ -785,7 +786,7 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	if !slices.ContainsFunc(readHistory(t, up), func(e history.Entry) bool { return e.Type == history.Reset && e.Chat == dm }) {
 		t.Errorf("up's history has no reset marker for the chat:\n%+v", readHistory(t, up))
 	}
-	if before, _ := up.historyBefore(Inbound{JID: dm, Brain: "up", Sender: "upload", Text: "next file", Source: sourceIngest}, dmHistoryWindow); len(before) != 0 {
+	if before, _ := up.historyBefore(Inbound{Inbound: chat.Inbound{JID: dm, Brain: "up", Sender: "upload", Text: "next file", Source: chat.SourceIngest}}, dmHistoryWindow); len(before) != 0 {
 		t.Errorf("up's next run in the chat would read %+v", before)
 	}
 }
@@ -804,7 +805,7 @@ func TestStopCountsWaitingHandOffs(t *testing.T) {
 	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	up := tb.brainMgr.Get("up")
 
-	if _, _, _, err := tb.brainMgr.Submit(Inbound{JID: group, Sender: "15551234567", Text: "group work", Source: sourceWhatsApp}); err != nil {
+	if _, _, _, err := tb.brainMgr.Submit(Inbound{Inbound: chat.Inbound{JID: group, Sender: "15551234567", Text: "group work", Source: chat.SourceWhatsApp}}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, 5*time.Second, "up's group run", func() bool { r := up.Snapshot().Running; return r != nil && r.PID > 0 })
@@ -813,7 +814,7 @@ func TestStopCountsWaitingHandOffs(t *testing.T) {
 	}
 	waitFor(t, 5*time.Second, "the file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
 
-	tb.handleInbound(context.Background(), Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: sourceWhatsApp})
+	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: chat.SourceWhatsApp}})
 	if !tb.sentPrefix(dm, "🛑 Nothing was running for this chat; cleared") {
 		t.Errorf("!stop answered %q, want that it cleared the waiting file", tb.sentTo(dm))
 	}
@@ -1167,7 +1168,7 @@ func TestUpdateBrain(t *testing.T) {
 	if approved, ok := h.Approved()["a"]; !ok || !approved.Equal(*disk) {
 		t.Errorf("approved = %+v, want what brain.json has", approved)
 	}
-	if got := h.Answer(inbound{JID: harnessGroup, Sender: normalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+dir+":") {
+	if got := h.Answer(inbound{JID: harnessGroup, Sender: chat.NormalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+dir+":") {
 		t.Errorf("the group got %q, want the answer of the edited brain a", got)
 	}
 	var views []struct{ ID, Name string }
@@ -1266,7 +1267,7 @@ func TestAssignGroup(t *testing.T) {
 					t.Errorf("%s's approved groups are %q, want %q", id, approved.Routing.Groups, want)
 				}
 			}
-			if got := h.Answer(inbound{JID: harnessGroup, Sender: normalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+dirs[c.to]+":") {
+			if got := h.Answer(inbound{JID: harnessGroup, Sender: chat.NormalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+dirs[c.to]+":") {
 				t.Errorf("the group got %q, want the answer of %s", got, c.to)
 			}
 			if issues := h.Issues(); len(issues) != 0 {
@@ -1541,7 +1542,7 @@ func TestRevokedGroupKeepsItsBrain(t *testing.T) {
 	if w := h.Do("POST", "/api/chats/allow", map[string]string{"kind": "group", "jid": harnessGroup}); w.Code != 200 {
 		t.Fatalf("allow: %d %s", w.Code, w.Body)
 	}
-	if got := h.Answer(inbound{JID: harnessGroup, Sender: normalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+dir+":") {
+	if got := h.Answer(inbound{JID: harnessGroup, Sender: chat.NormalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+dir+":") {
 		t.Errorf("allowed again, the group got %q, want family's answer", got)
 	}
 }
@@ -1620,7 +1621,7 @@ func TestEmptyingTheAllowlistWarnsOnlyWithAllowAnyDM(t *testing.T) {
 			defer log.SetOutput(log.Writer())
 			log.SetOutput(&logs)
 			// Removing the last number on the Chats page.
-			if w := h.Do("POST", "/api/chats/revoke", map[string]string{"kind": "dm", "number": normalizeJID(harnessDM)}); w.Code != http.StatusOK {
+			if w := h.Do("POST", "/api/chats/revoke", map[string]string{"kind": "dm", "number": chat.NormalizeJID(harnessDM)}); w.Code != http.StatusOK {
 				t.Fatalf("revoke: %d %s", w.Code, w.Body.String())
 			}
 			if got := strings.Contains(logs.String(), "WARNING: anyone"); got != tc.open {
@@ -1831,10 +1832,10 @@ func TestAllowGroupMovesItBetweenBrains(t *testing.T) {
 	if to, _ := ReadManifest(toDir); !slices.Equal(to.Routing.Groups, []string{moved}) {
 		t.Errorf("to has groups %q, want %q", to.Routing.Groups, moved)
 	}
-	if got := h.Answer(inbound{JID: moved, Sender: normalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+toDir+":") {
+	if got := h.Answer(inbound{JID: moved, Sender: chat.NormalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+toDir+":") {
 		t.Errorf("the group got %q, want to's answer", got)
 	}
-	if got := h.Answer(inbound{JID: kept, Sender: normalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+fromDir+":") {
+	if got := h.Answer(inbound{JID: kept, Sender: chat.NormalizeJID(harnessDM), Text: "@claude hello"}); !strings.Contains(got, "echo:"+fromDir+":") {
 		t.Errorf("the other group got %q, want from's answer", got)
 	}
 }
@@ -1862,7 +1863,7 @@ type qrMessenger struct {
 	code string
 }
 
-func (q qrMessenger) State() WAState { return WAState{Mode: "pairing", QRCode: q.code} }
+func (q qrMessenger) State() chat.LinkState { return chat.LinkState{Mode: "pairing", QRCode: q.code} }
 
 // The pairing code is served as a PNG, square and big enough to scan once
 // the dashboard scales it, and only while there is a code.

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -111,18 +112,18 @@ func TestSiteBuildChat(t *testing.T) {
 	if w := tb.do("POST", "/api/site/build/web", map[string]string{"text": "add a page for the team"}); w.Code != 202 {
 		t.Fatalf("send: %d %s", w.Code, w.Body.String())
 	}
-	var chat struct {
+	var chatJID struct {
 		Messages []BuildMessage `json:"messages"`
 		Thread   int            `json:"thread"`
 		Running  bool           `json:"running"`
 	}
 	waitFor(t, 20*time.Second, "the brain's answer", func() bool {
 		w := tb.do("GET", "/api/site/build/web", nil)
-		json.Unmarshal(w.Body.Bytes(), &chat)
-		return len(chat.Messages) == 2 && !chat.Running
+		json.Unmarshal(w.Body.Bytes(), &chatJID)
+		return len(chatJID.Messages) == 2 && !chatJID.Running
 	})
-	if chat.Messages[0].Role != "user" || chat.Messages[1].Role != "assistant" || !strings.Contains(chat.Messages[1].Text, "add a page for the team") {
-		t.Fatalf("chat = %+v", chat.Messages)
+	if chatJID.Messages[0].Role != "user" || chatJID.Messages[1].Role != "assistant" || !strings.Contains(chatJID.Messages[1].Text, "add a page for the team") {
+		t.Fatalf("chat = %+v", chatJID.Messages)
 	}
 	for _, msg := range tb.dev.Outbox() {
 		if strings.Contains(msg.Text, "add a page for the team") {
@@ -139,9 +140,9 @@ func TestSiteBuildChat(t *testing.T) {
 		t.Fatalf("new: %d", w.Code)
 	}
 	w := tb.do("GET", "/api/site/build/web", nil)
-	json.Unmarshal(w.Body.Bytes(), &chat)
-	if chat.Thread != 2 || len(chat.Messages) != 0 {
-		t.Errorf("after a new conversation: %+v", chat)
+	json.Unmarshal(w.Body.Bytes(), &chatJID)
+	if chatJID.Thread != 2 || len(chatJID.Messages) != 0 {
+		t.Errorf("after a new conversation: %+v", chatJID)
 	}
 	if w := tb.do("POST", "/api/site/build/web/stop", map[string]any{}); w.Code != 409 {
 		t.Errorf("stopping an idle chat: %d", w.Code)
@@ -164,28 +165,28 @@ func TestLongBuildChatAnswerStaysWhole(t *testing.T) {
 	long := strings.Repeat("This is one sentence of a long answer. ", 24)
 	cases := []struct {
 		name  string
-		send  func(o *Outbox, chat string) error
+		send  func(o *Outbox, chatJID string) error
 		build bool // to a build chat
 		want  int  // messages
 	}{
-		{"a reply to a build chat", func(o *Outbox, chat string) error { return o.Reply(t.Context(), "web", chat, long, 200) }, true, 1},
-		{"a question in a build chat", func(o *Outbox, chat string) error { return o.Text(t.Context(), chat, long, 200) }, true, 1},
-		{"a reply to WhatsApp", func(o *Outbox, chat string) error { return o.Reply(t.Context(), "web", chat, long, 200) }, false, 5},
+		{"a reply to a build chat", func(o *Outbox, chatJID string) error { return o.Reply(t.Context(), "web", chatJID, long, 200) }, true, 1},
+		{"a question in a build chat", func(o *Outbox, chatJID string) error { return o.Text(t.Context(), chatJID, long, 200) }, true, 1},
+		{"a reply to WhatsApp", func(o *Outbox, chatJID string) error { return o.Reply(t.Context(), "web", chatJID, long, 200) }, false, 5},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tb := newTestBridge(t, `, "max_chunk_size": 200`)
 			tb.addFolderBrain(t, BrainManifest{ID: "web", Name: "Web"})
-			chat := testDMChat
+			chatJID := testDMChat
 			if c.build {
-				chat = buildChatJID("web", 1)
+				chatJID = buildChatJID("web", 1)
 			}
-			if err := c.send(tb.outbox, chat); err != nil {
+			if err := c.send(tb.outbox, chatJID); err != nil {
 				t.Fatal(err)
 			}
 			received := func() []string {
 				if !c.build {
-					return tb.sentTo(chat)
+					return tb.sentTo(chatJID)
 				}
 				var out []string
 				for _, m := range tb.site.chats.get("web").Messages {
@@ -212,9 +213,9 @@ func TestLongBuildChatAnswerStaysWhole(t *testing.T) {
 // The Build page shows the log of the run in flight: from the heading that
 // names its pid to the next run's, never the lines of the runs before it.
 func TestCurrentRunLogIsTheRunsOwn(t *testing.T) {
-	chat := Inbound{JID: buildChatJID("web", 1), Sender: "dashboard"}
+	chatJID := Inbound{Inbound: chat.Inbound{JID: buildChatJID("web", 1), Sender: "dashboard"}}
 	s := &brainSettings{model: "sonnet"}
-	heading := func(pid int) string { return "[10:00:00] " + runHeading(chat, s, pid) }
+	heading := func(pid int) string { return "[10:00:00] " + runHeading(chatJID, s, pid) }
 	twoRuns := []string{
 		heading(101),
 		"[10:00:01] 🔧 Tool: Read",

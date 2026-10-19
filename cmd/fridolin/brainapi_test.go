@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/platform"
 )
@@ -59,9 +60,9 @@ func brainTool(t *testing.T, cmd func([]string, toolIO) int, url, token string, 
 	return code, doc
 }
 
-func savePoll(t *testing.T, tb *testBridge, id, chat, question string, options []string, votes map[string][]string) {
+func savePoll(t *testing.T, tb *testBridge, id, chatJID, question string, options []string, votes map[string][]string) {
 	t.Helper()
-	if err := tb.store.SavePoll(id, chat, "", question, options); err != nil {
+	if err := tb.store.SavePoll(id, chatJID, "", question, options); err != nil {
 		t.Fatal(err)
 	}
 	for voter, chosen := range votes {
@@ -166,7 +167,7 @@ func TestRunsGetATokenForTheirRunOnly(t *testing.T) {
 	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
 	t.Setenv("FRIDOLIN_FAKE_POLLS", "1")
 
-	tb.handleInbound(context.Background(), Inbound{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"})
+	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"}})
 	waitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(apiTestDM)) > 0 })
 	reply := tb.sentTo(apiTestDM)[0]
 	if !strings.Contains(reply, `polls=0 { "count": 1, "polls": [`) || !strings.Contains(reply, `"question": "Lunch?"`) {

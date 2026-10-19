@@ -7,6 +7,8 @@ import (
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
 func TestClassify(t *testing.T) {
@@ -75,26 +77,26 @@ func TestExtractTextOfLocationsAndContacts(t *testing.T) {
 }
 
 func TestApplyChange(t *testing.T) {
-	const chat = "120363000000000000@g.us"
-	a := Inbound{JID: chat, Sender: "15551234567", Text: "book Tuesday", ID: "A", Media: []string{"/m/a.jpg"}}
-	b := Inbound{JID: chat, Sender: "15551234567", Text: "for four", ID: "B"}
+	const chatJID = "120363000000000000@g.us"
+	a := Inbound{Inbound: chat.Inbound{JID: chatJID, Sender: "15551234567", Text: "book Tuesday", ID: "A", Media: []string{"/m/a.jpg"}}}
+	b := Inbound{Inbound: chat.Inbound{JID: chatJID, Sender: "15551234567", Text: "for four", ID: "B"}}
 	merged := a.merge(b)
 	cases := []struct {
 		name         string
 		m            Inbound
-		c            messageChange
+		c            chat.Change
 		found, keep  bool
 		text         string
 		media        []string
 		changesFound bool
 	}{
-		{"delete the only part", a, messageChange{Kind: changeRevoke, Chat: chat, Sender: "15551234567", Target: "A"}, true, false, "", nil, true},
-		{"delete one part of two", merged, messageChange{Kind: changeRevoke, Chat: chat, Sender: "15551234567", Target: "A"}, true, true, "for four", nil, true},
-		{"edit one part of two", merged, messageChange{Kind: changeEdit, Chat: chat, Sender: "15551234567", Target: "A", Text: "book Wednesday"}, true, true, "book Wednesday\n\nfor four", []string{"/m/a.jpg"}, true},
-		{"another sender's", merged, messageChange{Kind: changeRevoke, Chat: chat, Sender: "15559876543", Target: "A"}, false, true, "book Tuesday\n\nfor four", []string{"/m/a.jpg"}, false},
-		{"another chat's", merged, messageChange{Kind: changeRevoke, Chat: "15551234567@s.whatsapp.net", Sender: "15551234567", Target: "A"}, false, true, "book Tuesday\n\nfor four", []string{"/m/a.jpg"}, false},
-		{"another message", merged, messageChange{Kind: changeRevoke, Chat: chat, Sender: "15551234567", Target: "C"}, false, true, "book Tuesday\n\nfor four", []string{"/m/a.jpg"}, false},
-		{"no ID", Inbound{JID: chat, Sender: "15551234567", Text: "from /ingest"}, messageChange{Kind: changeRevoke, Chat: chat, Sender: "15551234567"}, false, true, "from /ingest", nil, false},
+		{"delete the only part", a, chat.Change{Kind: chat.ChangeRevoke, Chat: chatJID, Sender: "15551234567", Target: "A"}, true, false, "", nil, true},
+		{"delete one part of two", merged, chat.Change{Kind: chat.ChangeRevoke, Chat: chatJID, Sender: "15551234567", Target: "A"}, true, true, "for four", nil, true},
+		{"edit one part of two", merged, chat.Change{Kind: chat.ChangeEdit, Chat: chatJID, Sender: "15551234567", Target: "A", Text: "book Wednesday"}, true, true, "book Wednesday\n\nfor four", []string{"/m/a.jpg"}, true},
+		{"another sender's", merged, chat.Change{Kind: chat.ChangeRevoke, Chat: chatJID, Sender: "15559876543", Target: "A"}, false, true, "book Tuesday\n\nfor four", []string{"/m/a.jpg"}, false},
+		{"another chat's", merged, chat.Change{Kind: chat.ChangeRevoke, Chat: "15551234567@s.whatsapp.net", Sender: "15551234567", Target: "A"}, false, true, "book Tuesday\n\nfor four", []string{"/m/a.jpg"}, false},
+		{"another message", merged, chat.Change{Kind: chat.ChangeRevoke, Chat: chatJID, Sender: "15551234567", Target: "C"}, false, true, "book Tuesday\n\nfor four", []string{"/m/a.jpg"}, false},
+		{"no ID", Inbound{Inbound: chat.Inbound{JID: chatJID, Sender: "15551234567", Text: "from /ingest"}}, chat.Change{Kind: chat.ChangeRevoke, Chat: chatJID, Sender: "15551234567"}, false, true, "from /ingest", nil, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
 // setsidChildren has the fake CLI start a grandchild that leaves the run's
@@ -87,7 +89,7 @@ func TestDetachedChildDoesNotHoldTheBrain(t *testing.T) {
 			if err := os.Unsetenv("FRIDOLIN_FAKE_SETSID_CHILD"); err != nil {
 				t.Fatal(err)
 			}
-			next := Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "next"}
+			next := Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "next"}}
 			if _, _, _, err := mgr.Submit(next); err != nil {
 				t.Fatal(err)
 			}

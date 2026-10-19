@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 )
 
@@ -207,7 +208,7 @@ func TestSendHistoryShowsWhoSentIt(t *testing.T) {
 		}
 	}
 	br := tb.brainMgr.Get("a")
-	preface := br.buildPrompt(br.settings.Load(), Inbound{JID: tokenTestDM, Sender: "15551234567", Text: "next"})
+	preface := br.buildPrompt(br.settings.Load(), Inbound{Inbound: chat.Inbound{JID: tokenTestDM, Sender: "15551234567", Text: "next"}})
 	for _, line := range []string{
 		`"from":"Script (via /send)","text":"from a script"`,
 		`"from":"Script without a token (via /send)","text":"from nobody"`,

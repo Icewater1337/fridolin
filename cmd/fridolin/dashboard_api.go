@@ -29,6 +29,7 @@ import (
 
 	"rsc.io/qr"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/platform"
@@ -221,7 +222,7 @@ type statusResponse struct {
 }
 
 type waStatus struct {
-	WAState
+	chat.LinkState
 	QRAvailable bool `json:"qr_available"`
 }
 
@@ -247,7 +248,7 @@ func (b *Bridge) apiStatus(w http.ResponseWriter, r *http.Request) {
 		DataDir:       cfg.DataDir,
 		DevMode:       b.dev != nil,
 		Platform:      runtime.GOOS,
-		WhatsApp:      waStatus{WAState: wa, QRAvailable: wa.QRCode != ""},
+		WhatsApp:      waStatus{LinkState: wa, QRAvailable: wa.QRCode != ""},
 		Claude:        claudeInfo(cfg.ClaudePath, cfg.ChildEnvPassthrough),
 		AgentProvider: cfg.AgentProvider,
 		Sandbox:       sandboxStatus{Enabled: cfg.Sandbox.Enabled, Supported: runtime.GOOS == "darwin"},
@@ -456,7 +457,7 @@ func (b *Bridge) apiGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	cfg := b.cfgs.Get()
 	type row struct {
-		GroupInfo
+		chat.Group
 		Allowed bool   `json:"allowed"`
 		Brain   string `json:"brain"`
 	}
@@ -466,7 +467,7 @@ func (b *Bridge) apiGroups(w http.ResponseWriter, r *http.Request) {
 		allowed[g] = true
 	}
 	for _, g := range groups {
-		rw := row{GroupInfo: g, Allowed: allowed[g.JID]}
+		rw := row{Group: g, Allowed: allowed[g.JID]}
 		if br := b.brainMgr.BrainFor(g.JID, true); br != nil && rw.Allowed {
 			rw.Brain = br.ID()
 		}
@@ -606,7 +607,7 @@ func (b *Bridge) apiAllowChat(w http.ResponseWriter, r *http.Request) {
 	if dm {
 		waiting = req.JID
 		if waiting == "" {
-			waiting = userJID(entry)
+			waiting = chat.DMJID(entry)
 		}
 	}
 	_ = b.store.DismissIgnored(waiting, true)
@@ -1566,12 +1567,12 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Sender == "" {
-		req.Sender = normalizeJID(req.JID)
+		req.Sender = chat.NormalizeJID(req.JID)
 	}
 	// Apply the same allow lists, group_members and trigger handling as
 	// WhatsApp messages, on one config snapshot as handleGroupMessage does.
 	cfg := b.cfgs.Get()
-	m := Inbound{JID: req.JID, Brain: req.Brain, Sender: req.Sender, Text: req.Text, Media: req.Media, Silent: req.Silent, Source: sourceDev, At: time.Now()}
+	m := Inbound{Inbound: chat.Inbound{JID: req.JID, Brain: req.Brain, Sender: req.Sender, Text: req.Text, Media: req.Media, Silent: req.Silent, Source: chat.SourceDev, At: time.Now()}}
 	if m.IsGroup() {
 		if !isAllowedGroup(cfg, m.JID) {
 			b.recordIgnored("group", m.JID, "", m.Sender, "")
@@ -1612,7 +1613,7 @@ func devGroupSender(sender string) groupSender {
 		return groupSender{Number: n, Resolved: true}
 	}
 	user, server, _ := strings.Cut(strings.TrimSpace(sender), "@")
-	return groupSender{Number: normalizeJID(user), Server: server}
+	return groupSender{Number: chat.NormalizeJID(user), Server: server}
 }
 
 func (b *Bridge) apiDevOutbox(w http.ResponseWriter, r *http.Request) {

@@ -17,6 +17,7 @@ import (
 	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/platform"
@@ -457,7 +458,7 @@ func (b *Bridge) keepWaiting(br *Brain, ms []Inbound) {
 // send again. Whoever handed in another hears that it was dropped
 // (Inbound.Done), and can hand it in again.
 func (b *Bridge) keep(kind, brain string, m Inbound) {
-	if m.Source != sourceWhatsApp {
+	if m.Source != chat.SourceWhatsApp {
 		log.Printf("dropping a message for %s from %s as the bridge stops", m.JID, m.Source)
 		dropped([]Inbound{m})
 		return
@@ -472,7 +473,7 @@ func (b *Bridge) keep(kind, brain string, m Inbound) {
 // Not for an untagged message, whose run answers nobody, nor for a
 // hand-off, whose sender heard through Done.
 func (b *Bridge) keepInterrupted(br *Brain, m Inbound) {
-	if m.Source != sourceWhatsApp || m.Silent {
+	if m.Source != chat.SourceWhatsApp || m.Silent {
 		return
 	}
 	if err := keepInterrupted(context.Background(), b.store, br.ID(), m); err != nil {
@@ -641,7 +642,7 @@ func (b *Bridge) keepLate(m Inbound) {
 // changed, or else to the brain's queue, its run and its history. Once
 // the bridge stops, it is kept for the next start instead, as messages
 // are (see intake).
-func (b *Bridge) handleChange(c messageChange) {
+func (b *Bridge) handleChange(c chat.Change) {
 	if !b.intake.enter() {
 		kept := b.intake.keep(func() {
 			if err := keepChange(context.Background(), b.store, c, time.Now()); err != nil {
@@ -654,13 +655,13 @@ func (b *Bridge) handleChange(c messageChange) {
 		return
 	}
 	defer b.intake.leave()
-	br := b.brainMgr.BrainFor(c.Chat, isGroupJID(c.Chat))
+	br := b.brainMgr.BrainFor(c.Chat, chat.IsGroupJID(c.Chat))
 	// An edit to a one-time code is caught like the code itself
 	// (handleInbound), before anything else sees it: a sender who corrects
 	// a code hands the new one to the script that asked for it, and the
 	// message edited stays as it was.
-	if c.Kind == changeEdit && br != nil {
-		edited := Inbound{JID: c.Chat, ChatAlt: c.ChatAlt, Sender: c.Sender, Text: c.Text, Source: sourceWhatsApp}
+	if c.Kind == chat.ChangeEdit && br != nil {
+		edited := Inbound{Inbound: chat.Inbound{JID: c.Chat, ChatAlt: c.ChatAlt, Sender: c.Sender, Text: c.Text, Source: chat.SourceWhatsApp}}
 		if code, ok := br.catchesCode(edited, time.Now()); ok {
 			log.Printf("brain %s: kept an edited one-time code out of the conversation (OTP guard)", br.ID())
 			b.handOffCode(br, edited, code)
@@ -679,7 +680,7 @@ func (b *Bridge) handleChange(c messageChange) {
 	// must not linger there either.
 	text := ""
 	if edited != nil {
-		text = historyTextWithMedia(edited.textWithQuote(), edited.Media)
+		text = chat.HistoryText(edited.TextWithQuote(), edited.Media)
 	}
 	b.activity.Change(br.ID(), c, text)
 }
@@ -722,7 +723,7 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 	// A command must also be addressed to the bridge. In a group, an untagged
 	// "!stop" is someone talking to the others: it must not stop anything,
 	// and the bridge must not answer it.
-	if m.Source != sourceIngest && m.Brain == "" && !m.Silent && b.handleCommand(ctx, m, cfg) {
+	if m.Source != chat.SourceIngest && m.Brain == "" && !m.Silent && b.handleCommand(ctx, m, cfg) {
 		return
 	}
 	if m.Text == "" && len(m.Media) == 0 && m.Quoted == nil {
@@ -746,7 +747,7 @@ func (b *Bridge) handleInbound(ctx context.Context, m Inbound) {
 		} else {
 			log.Printf("No brain configured for %s — add one in the dashboard", m.JID)
 		}
-		if !m.Silent && m.Source != sourceIngest {
+		if !m.Silent && m.Source != chat.SourceIngest {
 			_ = b.wa.SendMessage(ctx, m.JID, reply)
 		}
 		return
@@ -852,7 +853,7 @@ func chatJIDs(m Inbound) []string {
 	if m.IsGroup() {
 		return jids
 	}
-	for _, jid := range []string{m.ChatAlt, userJID(m.Sender)} {
+	for _, jid := range []string{m.ChatAlt, chat.DMJID(m.Sender)} {
 		if jid != "@"+types.DefaultUserServer && jid != "" && !slices.Contains(jids, jid) {
 			jids = append(jids, jid)
 		}

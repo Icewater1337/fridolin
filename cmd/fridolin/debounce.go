@@ -4,6 +4,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
 // Debouncer merges messages that one person sends in quick succession in one
@@ -112,7 +114,7 @@ func (d *Debouncer) fire(key string, b *pendingBatch, gen uint64) {
 // Change applies an edit or a deletion to the open batch that holds the
 // message it changes, and reports whether one did. A batch left empty by
 // a deletion is dropped: nothing of it reaches a brain.
-func (d *Debouncer) Change(c messageChange) bool {
+func (d *Debouncer) Change(c chat.Change) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for k, b := range d.batches {

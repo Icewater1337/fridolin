@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/store"
 	"github.com/Icewater1337/fridolin/internal/textx"
@@ -132,7 +133,7 @@ func TestReplyIsRecordedOnceDelivered(t *testing.T) {
 	wa.dropAfter = 1 // the first chunk goes out, then the connection drops
 	tb.wa = wa
 
-	tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: strings.Repeat("a long question ", 12), Source: sourceWhatsApp})
+	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: strings.Repeat("a long question ", 12), Source: chat.SourceWhatsApp}})
 	waitFor(t, 10*time.Second, "a failed attempt", func() bool {
 		wa.mu.Lock()
 		defer wa.mu.Unlock()
@@ -186,7 +187,7 @@ func TestQueuedRunReadsTheAnswerBeforeIt(t *testing.T) {
 			wa.delay = c.delay
 			tb.wa = wa
 			ask := func(text string) {
-				tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: text, Source: sourceWhatsApp})
+				tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: text, Source: chat.SourceWhatsApp}})
 			}
 			ask("first question")
 			waitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
@@ -251,7 +252,7 @@ func TestReplyIsRecordedOnceWhenItsRowStays(t *testing.T) {
 	if _, err := db.Exec(`CREATE TRIGGER keep_outbox BEFORE DELETE ON outbox BEGIN SELECT RAISE(FAIL, 'disk I/O error'); END`); err != nil {
 		t.Fatal(err)
 	}
-	tb.handleInbound(context.Background(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "hello", Source: sourceWhatsApp})
+	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hello", Source: chat.SourceWhatsApp}})
 	waitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
 	waitFor(t, 5*time.Second, "the row, all of it sent", func() bool {
 		var left int

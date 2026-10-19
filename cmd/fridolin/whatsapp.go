@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/store"
 	"io"
@@ -37,32 +38,12 @@ type Messenger interface {
 	SendMessage(ctx context.Context, jid, text string) error
 	SendChunked(ctx context.Context, jid, text string) error
 	SendPoll(ctx context.Context, jid, question string, options []string, maxSelectable int) (string, error)
-	State() WAState
+	State() chat.LinkState
 	// Connected returns a channel that is closed while the messenger can
 	// send: at once when it is connected, else when it next connects.
 	Connected() <-chan struct{}
 	StartPairing() error
-	JoinedGroups(ctx context.Context) ([]GroupInfo, error)
-}
-
-// WAState is the connection state shown on the dashboard.
-type WAState struct {
-	// Mode: disabled (dev mode) or one of the mode constants in
-	// waconn.go: connecting, pairing, qr-expired, connected,
-	// disconnected, logged-out, replaced, outdated, banned, failed.
-	Mode      string    `json:"mode"`
-	OwnNumber string    `json:"own_number,omitempty"`
-	Detail    string    `json:"detail,omitempty"`
-	Since     time.Time `json:"since"`
-	QRCode    string    `json:"-"` // current pairing code; served as an image, never as text
-	QRAt      time.Time `json:"-"`
-}
-
-// GroupInfo is a group the bridge account belongs to.
-type GroupInfo struct {
-	JID          string `json:"jid"`
-	Name         string `json:"name"`
-	Participants int    `json:"participants"`
+	JoinedGroups(ctx context.Context) ([]chat.Group, error)
 }
 
 // InboundHandler receives every allowed message.
@@ -78,8 +59,8 @@ type WhatsAppClient struct {
 	store     *store.Store
 	handler   InboundHandler
 	onIgnored IgnoredHandler
-	onVote    func(pollVote)      // a vote was recorded; may be nil
-	onChange  func(messageChange) // an edit or a deletion; may be nil
+	onVote    func(pollVote)    // a vote was recorded; may be nil
+	onChange  func(chat.Change) // an edit or a deletion; may be nil
 	// groupRules is what addresses the bridge in a group, by its brain's
 	// routing; nil means defaultGroupRules.
 	groupRules func(groupJID string) groupRules
@@ -112,7 +93,7 @@ type WhatsAppClient struct {
 	// client is replaced when WhatsApp logged the device out (see
 	// newSession), so it is read with cl.
 	client *whatsmeow.Client
-	state  WAState
+	state  chat.LinkState
 	// own and ownLID are the bridge account's JIDs, as whatsmeow reported
 	// them when it connected or paired; empty while unpaired.
 	own, ownLID types.JID
@@ -147,7 +128,7 @@ func NewWhatsAppClient(cfg func() *Config, store *store.Store, handler InboundHa
 		log:       logger,
 		ctx:       ctx,
 		cancel:    cancel,
-		state:     WAState{Mode: "connecting", Since: time.Now()},
+		state:     chat.LinkState{Mode: "connecting", Since: time.Now()},
 		// Nothing runs yet, so the device's own JIDs can be read here.
 		own:    deviceStore.GetJID().ToNonAD(),
 		ownLID: deviceStore.GetLID().ToNonAD(),
@@ -312,19 +293,19 @@ func (wa *WhatsAppClient) SendPoll(ctx context.Context, jid string, question str
 
 // JoinedGroups lists the groups the bridge account is in, as WhatsApp
 // said last: kept until an event changes them or groupsTTL passes.
-func (wa *WhatsAppClient) JoinedGroups(ctx context.Context) ([]GroupInfo, error) {
+func (wa *WhatsAppClient) JoinedGroups(ctx context.Context) ([]chat.Group, error) {
 	cli := wa.groupsFrom()
 	if !cli.IsLoggedIn() {
 		return nil, fmt.Errorf("not connected to WhatsApp")
 	}
-	return wa.groups.get(ctx, func(ctx context.Context) ([]GroupInfo, error) {
+	return wa.groups.get(ctx, func(ctx context.Context) ([]chat.Group, error) {
 		groups, err := cli.GetJoinedGroups(ctx)
 		if err != nil {
 			return nil, err
 		}
-		out := make([]GroupInfo, 0, len(groups))
+		out := make([]chat.Group, 0, len(groups))
 		for _, g := range groups {
-			out = append(out, GroupInfo{JID: g.JID.String(), Name: g.Name, Participants: len(g.Participants)})
+			out = append(out, chat.Group{JID: g.JID.String(), Name: g.Name, Participants: len(g.Participants)})
 		}
 		return out, nil
 	})
@@ -347,12 +328,12 @@ func (wa *WhatsAppClient) eventHandler(rawEvt interface{}) {
 // enqueue puts evt on its chat's queue. One in no chat the bridge handles
 // (see incomingChat) is dropped at once, which costs nothing.
 func (wa *WhatsAppClient) enqueue(evt *events.Message) {
-	chat, ok := wa.queueChat(evt.Info.MessageSource)
+	chatJID, ok := wa.queueChat(evt.Info.MessageSource)
 	if !ok {
 		wa.handleMessage(evt)
 		return
 	}
-	if err := wa.intake.add(chat, func() { wa.handleEvent(evt) }); errors.Is(err, errIntakeClosed) {
+	if err := wa.intake.add(chatJID, func() { wa.handleEvent(evt) }); errors.Is(err, errIntakeClosed) {
 		wa.log.Debugf("Dropped message %s: the client is disconnecting", evt.Info.ID)
 	}
 }
@@ -365,19 +346,19 @@ func (wa *WhatsAppClient) enqueue(evt *events.Message) {
 // downloads and group queries stay on the workers. ok is false for a
 // message in no chat the bridge handles.
 func (wa *WhatsAppClient) queueChat(src types.MessageSource) (string, bool) {
-	chat, ok := incomingChat(src)
+	chatJID, ok := incomingChat(src)
 	if !ok {
 		return "", false
 	}
-	chat = chat.ToNonAD()
-	if chat.Server == types.HiddenUserServer {
+	chatJID = chatJID.ToNonAD()
+	if chatJID.Server == types.HiddenUserServer {
 		alt := types.EmptyJID
-		if !src.IsFromMe && (src.Sender.IsEmpty() || src.Sender.ToNonAD() == chat) {
+		if !src.IsFromMe && (src.Sender.IsEmpty() || src.Sender.ToNonAD() == chatJID) {
 			alt = src.SenderAlt
 		}
-		chat = canonicalUser(wa.storeCtx(), wa.lidStore(), chat, alt)
+		chatJID = canonicalUser(wa.storeCtx(), wa.lidStore(), chatJID, alt)
 	}
-	return chat.String(), true
+	return chatJID.String(), true
 }
 
 // handleEvent handles a message event, on its chat's worker.
@@ -443,7 +424,7 @@ func (wa *WhatsAppClient) recordVote(pollMsgID string, voter types.JID, hashes [
 // handled as a DM from the sender. The list itself is never a chat to
 // answer in. Our own broadcast-list messages echoing back are dropped, like
 // any message this account sent.
-func incomingChat(src types.MessageSource) (chat types.JID, ok bool) {
+func incomingChat(src types.MessageSource) (chatJID types.JID, ok bool) {
 	if src.Chat.Server == types.NewsletterServer || src.Chat.ToNonAD() == types.StatusBroadcastJID {
 		return types.JID{}, false
 	}
@@ -457,16 +438,16 @@ func incomingChat(src types.MessageSource) (chat types.JID, ok bool) {
 }
 
 func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
-	chat, ok := incomingChat(msg.Info.MessageSource)
+	chatJID, ok := incomingChat(msg.Info.MessageSource)
 	if !ok {
 		wa.log.Debugf("Ignoring message %s in %s (Status updates, channels and own broadcasts are not handled)", msg.Info.ID, msg.Info.Chat)
 		return
 	}
-	if chat != msg.Info.Chat {
+	if chatJID != msg.Info.Chat {
 		// A broadcast-list message, now a DM. Work on a copy: the event
 		// belongs to whatsmeow.
 		dm := *msg
-		dm.Info.Chat, dm.Info.IsGroup = chat, false
+		dm.Info.Chat, dm.Info.IsGroup = chatJID, false
 		msg = &dm
 	}
 
@@ -529,12 +510,12 @@ func (wa *WhatsAppClient) handleMessage(msg *events.Message) {
 // change hands an edit or a deletion of the message target, by sender,
 // in chat (with its other JID alt, for a DM), to the bridge (onChange).
 // text is an edit's new text, as the message's own path would read it.
-func (wa *WhatsAppClient) change(kind msgKind, target, chat, alt, sender, text string) {
-	c := messageChange{Kind: changeRevoke, Chat: chat, ChatAlt: alt, Target: target, Sender: sender, Text: text}
+func (wa *WhatsAppClient) change(kind msgKind, target, chatJID, alt, sender, text string) {
+	c := chat.Change{Kind: chat.ChangeRevoke, Chat: chatJID, ChatAlt: alt, Target: target, Sender: sender, Text: text}
 	if kind == kindEdit {
-		c.Kind = changeEdit
+		c.Kind = chat.ChangeEdit
 	}
-	log.Printf("%s of message %s in %s by %s", c.Kind, target, chat, sender)
+	log.Printf("%s of message %s in %s by %s", c.Kind, target, chatJID, sender)
 	if wa.onChange != nil && target != "" {
 		wa.onChange(c)
 	}
@@ -570,9 +551,8 @@ func (wa *WhatsAppClient) handleDMMessage(msg *events.Message, sender types.JID)
 		return
 	}
 
-	m := Inbound{
-		JID: chatJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
-		Quoted: quoted, Source: sourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID),
+	m := Inbound{Inbound: chat.Inbound{JID: chatJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
+		Quoted: quoted, Source: chat.SourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID)},
 	}
 	if !alt.IsEmpty() {
 		m.ChatAlt = alt.String()
@@ -706,9 +686,8 @@ func (wa *WhatsAppClient) handleGroupMessage(msg *events.Message) {
 	}
 
 	log.Printf("Group message from %s by %s: processing (silent=%v)", groupLabel(groupJID, groupName), senderNumber, silent)
-	wa.handler(wa.ctx, Inbound{
-		JID: groupJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
-		Quoted: quoted, Silent: silent, Source: sourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID),
+	wa.handler(wa.ctx, Inbound{Inbound: chat.Inbound{JID: groupJID, Sender: senderNumber, Text: text, Media: mediaList(mediaPath),
+		Quoted: quoted, Silent: silent, Source: chat.SourceWhatsApp, At: msg.Info.Timestamp, ID: string(msg.Info.ID)},
 	})
 }
 
@@ -1173,7 +1152,7 @@ func (wa *WhatsAppClient) lidStore() wastore.LIDStore {
 
 // quoteOf is quoteOf with the quoted message's author by number when the
 // reply names them by LID, so the identity map finds them.
-func (wa *WhatsAppClient) quoteOf(msg *waE2E.Message) *Quote {
+func (wa *WhatsAppClient) quoteOf(msg *waE2E.Message) *chat.Quote {
 	q := quoteOf(msg)
 	if q == nil {
 		return nil
@@ -1186,7 +1165,7 @@ func (wa *WhatsAppClient) quoteOf(msg *waE2E.Message) *Quote {
 }
 
 // quoteOf returns the message a text reply quotes, or nil.
-func quoteOf(msg *waE2E.Message) *Quote {
+func quoteOf(msg *waE2E.Message) *chat.Quote {
 	if ext := msg.GetExtendedTextMessage(); ext != nil {
 		return extractQuote(ext.GetContextInfo())
 	}
@@ -1196,7 +1175,7 @@ func quoteOf(msg *waE2E.Message) *Quote {
 // extractQuote returns the quoted message of a reply, shortened, so the model
 // can see what a reply is replying to. It is nil when nothing with text was
 // quoted.
-func extractQuote(contextInfo *waE2E.ContextInfo) *Quote {
+func extractQuote(contextInfo *waE2E.ContextInfo) *chat.Quote {
 	if contextInfo == nil {
 		return nil
 	}
@@ -1206,7 +1185,7 @@ func extractQuote(contextInfo *waE2E.ContextInfo) *Quote {
 		return nil
 	}
 
-	senderJID := normalizeJID(contextInfo.GetParticipant())
+	senderJID := chat.NormalizeJID(contextInfo.GetParticipant())
 	if senderJID == "" {
 		return nil
 	}
@@ -1216,7 +1195,7 @@ func extractQuote(contextInfo *waE2E.ContextInfo) *Quote {
 		quotedText = textx.Truncate(quotedText, maxQuoteLen)
 	}
 
-	return &Quote{From: senderJID, Text: quotedText}
+	return &chat.Quote{From: senderJID, Text: quotedText}
 }
 
 // extractText returns the plain text content of a message. A shared
@@ -1279,13 +1258,13 @@ var devConnected = func() chan struct{} { c := make(chan struct{}); close(c); re
 func (d *devMessenger) Connected() <-chan struct{} { return devConnected }
 func (d *devMessenger) Connect() error             { return nil }
 func (d *devMessenger) Disconnect()                {}
-func (d *devMessenger) State() WAState {
-	return WAState{Mode: "disabled", Detail: "Dev mode (--no-whatsapp): messages are simulated"}
+func (d *devMessenger) State() chat.LinkState {
+	return chat.LinkState{Mode: "disabled", Detail: "Dev mode (--no-whatsapp): messages are simulated"}
 }
 func (d *devMessenger) StartPairing() error {
 	return fmt.Errorf("WhatsApp is disabled in dev mode")
 }
-func (d *devMessenger) JoinedGroups(context.Context) ([]GroupInfo, error) { return nil, nil }
+func (d *devMessenger) JoinedGroups(context.Context) ([]chat.Group, error) { return nil, nil }
 
 func (d *devMessenger) record(m DevMessage) {
 	m.TS = time.Now()

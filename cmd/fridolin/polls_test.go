@@ -19,6 +19,7 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/store"
 )
@@ -366,7 +367,7 @@ func TestPollVoteBecomesAHistoryEvent(t *testing.T) {
 				if len(h) != 1 || h[0].From != want.From || h[0].Chat != want.Chat || h[0].Type != want.Type || h[0].Text != want.Text {
 					t.Fatalf("brain %s history = %+v, want [%+v]", br.ID(), h, want)
 				}
-				preface := br.buildPrompt(br.settings.Load(), Inbound{JID: testGroup, Sender: "15559876543", Text: "next"})
+				preface := br.buildPrompt(br.settings.Load(), Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15559876543", Text: "next"}})
 				if !strings.Contains(preface, `"from":"15551234567","did":"voted \"Tuesday 3pm\" in the poll \"When should we meet?\""`) {
 					t.Errorf("preface = %q, want the vote", preface)
 				}

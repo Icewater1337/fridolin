@@ -16,6 +16,7 @@ import (
 
 	"go.mau.fi/whatsmeow/types"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/version"
@@ -162,7 +163,7 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 	// hand-off of the code that answers it repeats (see handOffCode).
 	resp := map[string]string{"status": "sent"}
 	request := ""
-	if br := b.brainMgr.BrainFor(jid, isGroupJID(jid)); br != nil && br.asksForCode(req.Text) {
+	if br := b.brainMgr.BrainFor(jid, chat.IsGroupJID(jid)); br != nil && br.asksForCode(req.Text) {
 		request = newOTPRequestID()
 		resp["otp_request"] = request
 	}
@@ -202,17 +203,17 @@ func (b *Bridge) brainChat(br *Brain, jid string, cfg *Config) bool {
 	if jid == b.replyChatFor(br, cfg) {
 		return true
 	}
-	return allowedChat(jid, cfg) && b.brainMgr.BrainFor(jid, isGroupJID(jid)) == br
+	return allowedChat(jid, cfg) && b.brainMgr.BrainFor(jid, chat.IsGroupJID(jid)) == br
 }
 
 // allowedChat reports whether jid is a chat config allows by name: a group
 // in allowed_groups, or the chat of a number in allowed_numbers. allow_any_dm
 // does not count: it lets anyone write in, not the bridge write to anyone.
 func allowedChat(jid string, cfg *Config) bool {
-	if isGroupJID(jid) {
+	if chat.IsGroupJID(jid) {
 		return slices.Contains(cfg.AllowedGroups, jid)
 	}
-	return strings.HasSuffix(jid, "@"+types.DefaultUserServer) && slices.Contains(cfg.AllowedNumbers, normalizeJID(jid))
+	return strings.HasSuffix(jid, "@"+types.DefaultUserServer) && slices.Contains(cfg.AllowedNumbers, chat.NormalizeJID(jid))
 }
 
 // sendErrStatus is the status for a send that failed with err: 503 while
@@ -233,7 +234,7 @@ func sendErrStatus(err error) int {
 // in: the brain must not take a line a script or another brain sent for its
 // own words. request is the id of the code request it makes, "" for none.
 func (b *Bridge) appendHTTPMessageToHistory(who principal, jid, text, request string) {
-	br := b.brainMgr.BrainFor(jid, isGroupJID(jid))
+	br := b.brainMgr.BrainFor(jid, chat.IsGroupJID(jid))
 	if br == nil {
 		return
 	}
@@ -369,7 +370,7 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 // so it runs there even when jid, the chat that gets the answer, belongs to
 // another brain.
 func (b *Bridge) handOff(br *Brain, jid, sender, text string, media []string) {
-	m := Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: media, Source: sourceIngest, At: time.Now()}
+	m := Inbound{Inbound: chat.Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: media, Source: chat.SourceIngest, At: time.Now()}}
 	b.handleInbound(context.Background(), m)
 }
 
@@ -380,7 +381,7 @@ func (b *Bridge) handOff(br *Brain, jid, sender, text string, media []string) {
 // not take it (its queue is full, or it is gone). done then hears how the
 // run ended, see Inbound.Done.
 func (b *Bridge) submitHandOff(br *Brain, jid, sender, text string, media []string, done func(error)) error {
-	m := Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: media, Source: sourceIngest, At: time.Now(), Done: done}
+	m := Inbound{Inbound: chat.Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: media, Source: chat.SourceIngest, At: time.Now(), Done: done}}
 	_, _, _, err := b.brainMgr.Submit(m)
 	return err
 }

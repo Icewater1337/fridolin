@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/store"
 )
@@ -51,7 +52,7 @@ type keptInbound struct {
 	// Msg is the message of a queued, held or late row, Change the change
 	// of a change row.
 	Msg    Inbound
-	Change messageChange
+	Change chat.Change
 }
 
 // storedInbound is an Inbound as the inbound queue keeps it: all of it
@@ -63,7 +64,7 @@ type storedInbound struct {
 	Text    string          `json:"text,omitempty"`
 	Media   []string        `json:"media,omitempty"`
 	Brain   string          `json:"brain,omitempty"`
-	Quoted  *Quote          `json:"quoted,omitempty"`
+	Quoted  *chat.Quote     `json:"quoted,omitempty"`
 	Silent  bool            `json:"silent,omitempty"`
 	Source  string          `json:"source"`
 	At      time.Time       `json:"at"`
@@ -88,9 +89,8 @@ func storeInbound(m Inbound) storedInbound {
 }
 
 func (s storedInbound) inbound() Inbound {
-	m := Inbound{
-		JID: s.JID, ChatAlt: s.ChatAlt, Sender: s.Sender, Text: s.Text, Media: s.Media, Brain: s.Brain,
-		Quoted: s.Quoted, Silent: s.Silent, Source: s.Source, At: s.At, ID: s.ID,
+	m := Inbound{Inbound: chat.Inbound{JID: s.JID, ChatAlt: s.ChatAlt, Sender: s.Sender, Text: s.Text, Media: s.Media, Brain: s.Brain,
+		Quoted: s.Quoted, Silent: s.Silent, Source: s.Source, At: s.At, ID: s.ID},
 	}
 	if s.Logged != nil {
 		m.logged = *s.Logged
@@ -123,7 +123,7 @@ func keepInbound(ctx context.Context, s *store.Store, kind, brain string, m Inbo
 
 // keepChange keeps c, an edit or a deletion that came in at at, for the
 // next start.
-func keepChange(ctx context.Context, s *store.Store, c messageChange, at time.Time) error {
+func keepChange(ctx context.Context, s *store.Store, c chat.Change, at time.Time) error {
 	body, err := json.Marshal(storedChange(c))
 	if err != nil {
 		return err
@@ -159,7 +159,7 @@ func takeInbound(ctx context.Context, s *store.Store) ([]keptInbound, error) {
 				bad = append(bad, fmt.Errorf("row %d: %w", k.ID, err))
 				return
 			}
-			k.Change = messageChange(c)
+			k.Change = chat.Change(c)
 		case inboundInterrupted:
 		default:
 			bad = append(bad, fmt.Errorf("row %d: unknown kind %q", k.ID, k.Kind))

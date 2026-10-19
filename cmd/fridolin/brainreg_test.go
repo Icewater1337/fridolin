@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
@@ -609,7 +610,7 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 			var report bytes.Buffer
 			_ = checkReport(&report, path, cfg, checkOptions{routes: []string{testDMChat, testGroup, otherGroup}})
 			for jid, want := range map[string]string{testDMChat: c.dm, testGroup: c.group, otherGroup: c.rest} {
-				isGroup := isGroupJID(jid)
+				isGroup := chat.IsGroupJID(jid)
 				got := ""
 				if br := mgr.BrainFor(jid, isGroup); br != nil {
 					got = br.ID()
@@ -652,7 +653,7 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 			BrainRef{Path: brains + "/personal", Approved: &BrainManifest{ID: "personal", Name: "personal", Routing: BrainRouting{HandlesDMs: true}}},
 			brainFolder(t, brains+"/work", BrainManifest{ID: "work", Routing: BrainRouting{Default: true}}),
 		))
-		tb.handleInbound(t.Context(), Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", Source: sourceWhatsApp})
+		tb.handleInbound(t.Context(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", Source: chat.SourceWhatsApp}})
 		sent := tb.sentTo(testDMChat)
 		if len(sent) != 1 || !strings.Contains(sent[0], "cannot run right now") {
 			t.Errorf("the chat got %q, want to hear its brain cannot run", sent)
