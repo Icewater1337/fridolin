@@ -1,4 +1,4 @@
-package main
+package manifest
 
 import (
 	"errors"
@@ -26,7 +26,7 @@ func TestManifestDefaultsAndEnumListsAreOwned(t *testing.T) {
 	if !slices.Equal(ObserveModes(), []string{"", "history", "run"}) {
 		t.Fatal("observe modes share writable state")
 	}
-	m := BrainManifest{}
+	m := Manifest{}
 	n := m.Normalized()
 	if n.Routing.Groups == nil || n.Backup.Exclude == nil || m.Routing.Groups != nil || m.Backup.Exclude != nil {
 		t.Fatal("normalization changed nil/empty copy behavior")
@@ -41,24 +41,24 @@ func TestManifestDefaultsAndEnumListsAreOwned(t *testing.T) {
 func TestManifestPublicationKeepsTheExistingContracts(t *testing.T) {
 	dir := t.TempDir()
 	m := leafTestManifest("work")
-	if err := WriteManifest(dir, &m, false); err != nil {
+	if err := Write(dir, &m, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := WriteManifest(dir, &m, false); !errors.Is(err, errManifestExists) {
+	if err := Write(dir, &m, false); !errors.Is(err, ErrExists) {
 		t.Fatalf("exclusive creation: %v", err)
 	}
-	if got, err := ReadManifest(dir); err != nil || !m.Equal(*got) {
+	if got, err := Read(dir); err != nil || !m.Equal(*got) {
 		t.Fatalf("round trip: %+v, %v", got, err)
 	}
-	path := filepath.Join(dir, ManifestFile)
+	path := filepath.Join(dir, File)
 	future := []byte(`{"version": 99, "id": "work", "name": "Future"}`)
 	if err := os.WriteFile(path, future, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReadManifest(dir); !errors.Is(err, errManifestTooNew) {
+	if _, err := Read(dir); !errors.Is(err, ErrTooNew) {
 		t.Fatalf("future read: %v", err)
 	}
-	if err := WriteManifest(dir, &m, true); !errors.Is(err, errManifestTooNew) {
+	if err := Write(dir, &m, true); !errors.Is(err, ErrTooNew) {
 		t.Fatalf("future overwrite: %v", err)
 	}
 	if got, err := os.ReadFile(path); err != nil || string(got) != string(future) {
@@ -66,8 +66,8 @@ func TestManifestPublicationKeepsTheExistingContracts(t *testing.T) {
 	}
 }
 
-func leafTestManifest(id string) BrainManifest {
-	return BrainManifest{ID: id, Name: strings.ToUpper(id[:1]) + id[1:], Backup: BrainBackup{Enabled: true, Exclude: DefaultBackupExcludes()}}
+func leafTestManifest(id string) Manifest {
+	return Manifest{ID: id, Name: strings.ToUpper(id[:1]) + id[1:], Backup: Backup{Enabled: true, Exclude: DefaultBackupExcludes()}}
 }
 
 func TestManifestValidate(t *testing.T) {
@@ -75,15 +75,15 @@ func TestManifestValidate(t *testing.T) {
 	if err := good.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	bad := map[string]func(m *BrainManifest){
-		"uppercase id":       func(m *BrainManifest) { m.ID = "Work" },
-		"empty name":         func(m *BrainManifest) { m.Name = " " },
-		"absolute prompt":    func(m *BrainManifest) { m.PromptFile = "/etc/passwd" },
-		"escaping prompt":    func(m *BrainManifest) { m.PromptFile = "../other/brain-prompt.md" },
-		"bad effort":         func(m *BrainManifest) { m.Effort = "huge" },
-		"group not a group":  func(m *BrainManifest) { m.Routing.Groups = []string{"15551234567@s.whatsapp.net"} },
-		"filter injection":   func(m *BrainManifest) { m.Backup.Exclude = []string{"+ /secret"} },
-		"newline in exclude": func(m *BrainManifest) { m.Backup.Exclude = []string{"a\n+ b"} },
+	bad := map[string]func(m *Manifest){
+		"uppercase id":       func(m *Manifest) { m.ID = "Work" },
+		"empty name":         func(m *Manifest) { m.Name = " " },
+		"absolute prompt":    func(m *Manifest) { m.PromptFile = "/etc/passwd" },
+		"escaping prompt":    func(m *Manifest) { m.PromptFile = "../other/brain-prompt.md" },
+		"bad effort":         func(m *Manifest) { m.Effort = "huge" },
+		"group not a group":  func(m *Manifest) { m.Routing.Groups = []string{"15551234567@s.whatsapp.net"} },
+		"filter injection":   func(m *Manifest) { m.Backup.Exclude = []string{"+ /secret"} },
+		"newline in exclude": func(m *Manifest) { m.Backup.Exclude = []string{"a\n+ b"} },
 	}
 	for name, mutate := range bad {
 		m := leafTestManifest("work")
@@ -95,7 +95,7 @@ func TestManifestValidate(t *testing.T) {
 }
 
 func TestReadManifestMissing(t *testing.T) {
-	if _, err := ReadManifest(t.TempDir()); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := Read(t.TempDir()); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("err = %v, want not-exist", err)
 	}
 }
@@ -105,15 +105,15 @@ func TestManifestObserve(t *testing.T) {
 		observe, normalized string
 		ok                  bool
 	}{
-		{"", observeHistory, true},
-		{observeHistory, observeHistory, true},
-		{observeRun, observeRun, true},
+		{"", ObserveHistory, true},
+		{ObserveHistory, ObserveHistory, true},
+		{ObserveRun, ObserveRun, true},
 		{"always", "", false},
 		{"Run", "", false},
 	}
 	for _, c := range cases {
 		t.Run(c.observe, func(t *testing.T) {
-			m := BrainManifest{ID: "g", Name: "G", Observe: c.observe}
+			m := Manifest{ID: "g", Name: "G", Observe: c.observe}
 			if err := m.Validate(); (err == nil) != c.ok {
 				t.Fatalf("Validate() = %v, want ok %v", err, c.ok)
 			}
@@ -124,7 +124,7 @@ func TestManifestObserve(t *testing.T) {
 	}
 	// A brain.json written before the setting existed is the same brain as
 	// its approved copy that has the default spelt out: no drift.
-	if !(BrainManifest{ID: "g", Name: "G"}).Equal(BrainManifest{ID: "g", Name: "G", Observe: observeHistory}) {
+	if !(Manifest{ID: "g", Name: "G"}).Equal(Manifest{ID: "g", Name: "G", Observe: ObserveHistory}) {
 		t.Error("a manifest without observe differs from one with the default")
 	}
 }
