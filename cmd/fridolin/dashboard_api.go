@@ -100,8 +100,8 @@ func (b *Bridge) apiMux() http.Handler {
 
 	// Only in dev mode: outside it they are not there at all (404).
 	if b.dev != nil {
-		mux.HandleFunc("POST /api/dev/inbound", b.apiDevInbound)
-		mux.HandleFunc("GET /api/dev/outbox", b.apiDevOutbox)
+		mux.HandleFunc("POST /api/dev/inbound", b.newDevAPI().Inbound)
+		mux.HandleFunc("GET /api/dev/outbox", b.newDevAPI().Outbox)
 	}
 
 	// No catch-all: the mux answers an unknown path with 404 and a known
@@ -401,33 +401,7 @@ func textTail(s string, n int) string {
 
 // ── dev mode ─────────────────────────────────────────────────────────────
 
-func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		JID    string   `json:"jid"`
-		Sender string   `json:"sender"`
-		Text   string   `json:"text"`
-		Media  []string `json:"media"`
-		Silent bool     `json:"silent"`
-		// Brain runs the message in that brain instead of the chat's own,
-		// the way /ingest and Plaud hand files to a brain.
-		Brain string `json:"brain"`
-	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if req.JID == "" {
-		httpapi.WriteErr(w, http.StatusBadRequest, "jid required")
-		return
-	}
-	req.Brain = strings.ToLower(strings.TrimSpace(req.Brain))
-	if req.Brain != "" && b.brainMgr.Get(req.Brain) == nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, fmt.Sprintf("unknown brain %q", req.Brain))
-		return
-	}
-	if req.Sender == "" {
-		req.Sender = chat.NormalizeJID(req.JID)
-	}
+func (b *Bridge) submitDevInbound(req httpapi.DevInboundRequest) string {
 	// Apply the same allow lists, group_members and trigger handling as
 	// WhatsApp messages, on one config snapshot as handleGroupMessage does.
 	cfg := b.cfgs.Get()
@@ -435,15 +409,13 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 	if m.IsGroup() {
 		if !isAllowedGroup(cfg, m.JID) {
 			b.recordIgnored("group", m.JID, "", m.Sender, "")
-			httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "group not allowed"})
-			return
+			return "group not allowed"
 		}
 		// A member group_members does not admit is not read at all, and
 		// the group, which is allowed, is not offered on the dashboard.
 		if who := devGroupSender(m.Sender); !groupSenderAllowed(cfg, m.JID, who) {
 			log.Printf("Dev group message in %s by %s: ignored (not admitted by group_members)", m.JID, who.masked())
-			httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "sender not admitted by group_members"})
-			return
+			return "sender not admitted by group_members"
 		}
 		policy := policyOf(cfg)
 		policy.Files = b.groupRules(m.JID).files
@@ -457,11 +429,10 @@ func (b *Bridge) apiDevInbound(w http.ResponseWriter, r *http.Request) {
 		m.Text = decision.Text
 	} else if !numberAllowed(cfg, m.Sender) {
 		b.recordIgnored("dm", m.JID, "", m.Sender, "")
-		httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "ignored", "reason": "number not allowed"})
-		return
+		return "number not allowed"
 	}
 	go b.handleInbound(context.Background(), m)
-	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "accepted"})
+	return ""
 }
 
 // devGroupSender is the member a dev message to a group comes from, as
@@ -475,10 +446,6 @@ func devGroupSender(sender string) groupSender {
 	}
 	user, server, _ := strings.Cut(strings.TrimSpace(sender), "@")
 	return groupSender{Number: chat.NormalizeJID(user), Server: server}
-}
-
-func (b *Bridge) apiDevOutbox(w http.ResponseWriter, r *http.Request) {
-	httpapi.WriteJSON(w, http.StatusOK, b.dev.Outbox())
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────
