@@ -10,6 +10,7 @@ import (
 // version 1, which is migrated to the current version as it is read; a
 // newer version, or a version that is no number, is refused.
 func TestMigrateConfig(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, config string
 		from         int
@@ -60,6 +61,7 @@ func TestMigrateConfig(t *testing.T) {
 }
 
 func TestBackupConfigValidate(t *testing.T) {
+	t.Parallel()
 	for _, bad := range []BackupConfig{{DailyAt: "25:00"}, {Remote: "my remote"}, {Root: "../x"}, {Root: "/abs"}, {Root: "a:b"}} {
 		if bad.Validate() == nil {
 			t.Errorf("%+v should be rejected", bad)
@@ -68,6 +70,7 @@ func TestBackupConfigValidate(t *testing.T) {
 }
 
 func TestIsLoopbackAddr(t *testing.T) {
+	t.Parallel()
 	loopback := []string{"127.0.0.1:8765", "localhost:8765", "[::1]:8765"}
 	for _, a := range loopback {
 		if !IsLoopbackAddr(a) {

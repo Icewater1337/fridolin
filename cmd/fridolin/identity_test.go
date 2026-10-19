@@ -64,7 +64,7 @@ func TestChatJID(t *testing.T) {
 func TestLoadConfigNormalisesAllowedNumbers(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_numbers": ["+1 555 123-4567", "15559876543", "call me"]}`))
+	cfg, err := loadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_numbers": ["+1 555 123-4567", "15559876543", "call me"]}`))
 	if err != nil {
 		t.Fatal(err)
 	}

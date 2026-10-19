@@ -303,7 +303,7 @@ func (st *plaudState) forwardOf(id string) *PlaudForward {
 // rest of the bridge only through the configuration, the brains and two
 // functions, like the backup manager, so it can be tested without a bridge.
 type PlaudManager struct {
-	cfgs   *ConfigStore
+	cfgs   *config.Store
 	brains *BrainManager
 	// submit gives a recording's transcript to br, whose answer goes to
 	// jid. An error means br did not take it; done then hears how its run
@@ -369,7 +369,7 @@ type PlaudManager struct {
 }
 
 // NewPlaudManager creates the manager. The caller sets submit and notify.
-func NewPlaudManager(cfgs *ConfigStore, brains *BrainManager) *PlaudManager {
+func NewPlaudManager(cfgs *config.Store, brains *BrainManager) *PlaudManager {
 	p := &PlaudManager{cfgs: cfgs, brains: brains, inFlight: map[string]bool{}}
 	p.life, p.stop = context.WithCancel(context.Background())
 	p.run = p.runCLI
@@ -383,7 +383,7 @@ func (p *PlaudManager) dir() string { return filepath.Join(p.cfg().DataDir, "pla
 // cliHome is the HOME the CLI runs with, which decides where its login lives.
 func (p *PlaudManager) cliHome() string {
 	if p.cfg().Plaud.BrainAccess {
-		return config.HomeDir()
+		return homeDir()
 	}
 	return p.privateHome()
 }
@@ -489,7 +489,7 @@ func findPlaudCLI(c string) (string, error) {
 	if found := lookPathIn("plaud", helperPath()); found != "" {
 		return found, nil
 	}
-	candidates, _ := filepath.Glob(filepath.Join(config.HomeDir(), nvmNodeVersions, "*/bin/plaud"))
+	candidates, _ := filepath.Glob(filepath.Join(homeDir(), nvmNodeVersions, "*/bin/plaud"))
 	// The newest node first: by version, not by name, which would put
 	// v20.9.0 before v20.10.0, and v9 before v24.
 	slices.SortStableFunc(candidates, func(a, b string) int {

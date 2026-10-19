@@ -1,12 +1,10 @@
 package main
 
 import (
-	"errors"
-	"fmt"
-	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -22,28 +20,6 @@ var runTimeoutUnit = time.Minute
 // runTimeout is how long a brain's run may take, 0 for no limit.
 func runTimeout(c *config.Config) time.Duration {
 	return time.Duration(c.RunMinutes()) * runTimeoutUnit
-}
-
-// LoadConfig reads config.json and fills in the built-in defaults. The file
-// is the only source of settings: no environment variable or .env overrides
-// any of them.
-func LoadConfig(cfgPath string) (*config.Config, error) {
-	cs, err := OpenConfigStore(cfgPath)
-	if err != nil {
-		return nil, err
-	}
-	return cs.Get(), nil
-}
-
-// LoadExistingConfig is LoadConfig for a command about a bridge that is
-// set up: a config file that is not there is an error, not the defaults,
-// so that a mistyped --config is reported rather than checked, or used,
-// as an empty config.
-func LoadExistingConfig(cfgPath string) (*config.Config, error) {
-	if _, err := os.Stat(cfgPath); errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("no config file at %s (run fridolin init)", cfgPath)
-	}
-	return LoadConfig(cfgPath)
 }
 
 // protectDataDir takes group and other access away from the data dir and
@@ -68,7 +44,7 @@ func protectDataDir(cfg *config.Config) {
 	// check.
 	dataDir := absPath(cfg.DataDir)
 	dbDir := absPath(filepath.Dir(cfg.DBPath))
-	home := config.HomeDir()
+	home := homeDir()
 	homeOrAbove := func(dir string) bool {
 		return home != "" && fsx.Within(fsx.Canonical(home), fsx.Canonical(dir))
 	}
@@ -122,3 +98,22 @@ func openToOthers(dir string) (os.FileMode, bool) {
 	}
 	return st.Mode().Perm(), st.Mode().Perm()&0o077 != 0
 }
+
+// openConfigStore wires registry validation into each writing store.
+func openConfigStore(path string) (*config.Store, error) { return config.Open(path, configOptions()) }
+
+// homeDir is the ambient home lookup at the command composition boundary.
+func homeDir() string { home, _ := os.UserHomeDir(); return home }
+
+func configPathsFor(home string) config.Paths {
+	return config.Paths{Home: home, DefaultDataDir: config.DefaultDataDir(home)}
+}
+func configPaths() config.Paths { return configPathsFor(homeDir()) }
+func configOptions() config.Options {
+	return config.Options{Paths: configPaths(), GOOS: runtime.GOOS, Getenv: os.Getenv, CheckBrains: checkSet}
+}
+func loadConfig(path string) (*config.Config, error) { return config.Load(path, configOptions()) }
+func loadExistingConfig(path string) (*config.Config, error) {
+	return config.LoadExisting(path, configOptions())
+}
+func ensureConfigFile(path string) error { return config.EnsureFile(path, configPaths(), runtime.GOOS) }

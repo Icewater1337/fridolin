@@ -98,7 +98,7 @@ type serviceHost struct {
 }
 
 func newServiceHost() *serviceHost {
-	home := config.HomeDir()
+	home := homeDir()
 	client := &http.Client{Timeout: 2 * time.Second}
 	return &serviceHost{
 		goos:      runtime.GOOS,
@@ -796,7 +796,7 @@ func (h *serviceHost) planInstall(o installOptions) (*installPlan, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := LoadConfig(cfgPath)
+	cfg, err := loadConfig(cfgPath)
 	if err != nil {
 		return nil, fmt.Errorf("loading %s: %w", cfgPath, err)
 	}
@@ -1222,7 +1222,7 @@ func (h *serviceHost) restartCmd(cfgPath string) error {
 	if !pathExists(unitPath) {
 		return fmt.Errorf("no service installed (%s is missing); run: fridolin service install", unitPath)
 	}
-	cfg, err := LoadConfig(cfgPath)
+	cfg, err := loadConfig(cfgPath)
 	if err != nil {
 		return fmt.Errorf("loading %s: %w", cfgPath, err)
 	}
@@ -1243,7 +1243,7 @@ func (h *serviceHost) rollback(cfgPath, dir string) error {
 	if !pathExists(binary + prevSuffix) {
 		return fmt.Errorf("there is no previous install to go back to (%s is missing)", binary+prevSuffix)
 	}
-	cfg, err := LoadConfig(cfgPath)
+	cfg, err := loadConfig(cfgPath)
 	if err != nil {
 		return fmt.Errorf("loading %s: %w", cfgPath, err)
 	}
@@ -1341,7 +1341,7 @@ func (h *serviceHost) status(cfgPath, dir string) error {
 		}
 	}
 
-	cfg, err := LoadConfig(cfgPath)
+	cfg, err := loadConfig(cfgPath)
 	if err != nil {
 		return fmt.Errorf("loading %s: %w", cfgPath, err)
 	}

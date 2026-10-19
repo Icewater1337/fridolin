@@ -317,7 +317,7 @@ func TestRunLogsTheDataDir(t *testing.T) {
 				}
 			}
 			logs := captureLog(t)
-			cfgs, err := OpenConfigStore(writeConfig(t, strings.ReplaceAll(tc.config, "HOME", home)))
+			cfgs, err := openConfigStore(writeConfig(t, strings.ReplaceAll(tc.config, "HOME", home)))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -547,7 +547,7 @@ func TestNewConfigsHoldTheirDataDir(t *testing.T) {
 			if err := json.Unmarshal(readRawConfig(t, path)["data_dir"], &raw); err != nil || raw != expand(c.raw) {
 				t.Errorf("data_dir written as %q (%v), want %q", raw, err, expand(c.raw))
 			}
-			cfg, err := LoadConfig(path)
+			cfg, err := loadConfig(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -717,7 +717,7 @@ func TestPathsAgreesWithTheLoadedConfig(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			cfg, err := LoadConfig(path)
+			cfg, err := loadConfig(path)
 			if err != nil {
 				t.Fatal(err)
 			}

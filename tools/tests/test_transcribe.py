@@ -581,9 +581,9 @@ class ScriptMetadataTest(unittest.TestCase):
 
     def test_a_drifted_block_is_seen(self):
         text = (support.TOOLS_DIR / "transcribe.py").read_text(encoding="utf-8")
-        drifted = text.replace('"transformers>=4.57.0,<5"', '"transformers>=4.57.0,<6"', 1)
+        drifted = text.replace('"transformers>=4.57.0,<6"', '"transformers>=4.57.0,<7"', 1)
         self.assertNotEqual(drifted, text)
-        self.assertIn("transformers>=4.57.0,<6", self.script_metadata(drifted)["dependencies"])
+        self.assertIn("transformers>=4.57.0,<7", self.script_metadata(drifted)["dependencies"])
 
 
 class SkillTest(unittest.TestCase):

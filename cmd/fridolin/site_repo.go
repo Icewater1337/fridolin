@@ -29,8 +29,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/config"
-
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/site"
@@ -700,7 +698,7 @@ func (m *SiteManager) prepareCheckout(ctx context.Context, job *siteJob, commit,
 // is the home folder, a relative path is inside the module folder).
 func (m *SiteManager) runBuild(ctx context.Context, moduleDir, cwd string, run []string) error {
 	dir := moduleDir
-	switch cwd = fsx.ExpandHome(cwd, config.HomeDir()); {
+	switch cwd = fsx.ExpandHome(cwd, homeDir()); {
 	case filepath.IsAbs(cwd):
 		dir = cwd
 	case cwd != "":

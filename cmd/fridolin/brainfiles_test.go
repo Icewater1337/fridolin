@@ -83,7 +83,7 @@ func brainASetup(t *testing.T) (*config.Config, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := loadConfig(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+fakeClaudeEnv(t, 0)+`",
@@ -192,7 +192,7 @@ func TestBrainWhoseFolderCannotBeOpenedIsLeftOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := loadConfig(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+fakeClaudeEnv(t, 0)+`"`+dirs+`

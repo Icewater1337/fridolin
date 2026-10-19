@@ -30,7 +30,7 @@ func TestBridgeStartRemovesExpiredOTPHandoffs(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cfgs, err := OpenConfigStore(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data"}`))
+	cfgs, err := openConfigStore(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
 )
@@ -121,7 +120,7 @@ func (m *SiteManager) SandboxStatus() SiteSandboxStatus {
 // sandboxInput gathers what the live site's profile is built from.
 func (m *SiteManager) sandboxInput(node, deploy, root, rtFile string, mods []sandbox.SiteModule) sandbox.SitePolicy {
 	in := sandbox.SitePolicy{
-		Home:    config.HomeDir(),
+		Home:    homeDir(),
 		DataDir: m.dataDir,
 		Shell:   m.dir("shell"),
 		Deploy:  deploy,

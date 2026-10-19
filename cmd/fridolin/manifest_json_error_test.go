@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/Icewater1337/fridolin/internal/config"
 )
 
 // Expected strings preserve request/config shapes before extraction on both
@@ -54,7 +56,7 @@ func TestManifestJSONDiagnosticContracts(t *testing.T) {
 					t.Errorf("%s: %d %q; want %q", endpoint.name, rec.Code, response.Error, "invalid JSON: "+tc.request)
 				}
 			}
-			_, err := decodeConfigReplacement([]byte(`{"brain_dirs":[{"path":"/x","approved":` + tc.input + `}]}`))
+			_, err := config.DecodeReplacement([]byte(`{"brain_dirs":[{"path":"/x","approved":` + tc.input + `}]}`))
 			if err == nil || err.Error() != "invalid config: "+tc.approved {
 				t.Errorf("config: %v; want %q", err, "invalid config: "+tc.approved)
 			}
