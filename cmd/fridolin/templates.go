@@ -3,44 +3,37 @@ package main
 import (
 	"fmt"
 	"io/fs"
-
-	"github.com/Icewater1337/fridolin/examples"
 )
 
-// The templates are read once, at startup. go:embed fails the build when a
-// pattern in examples/embed.go matches nothing, so a read can only fail
-// when a name here drifted from its pattern: a programming error, which
-// stops the bridge rather than scaffold every new brain with less than it
-// should.
-var (
-	examplePrompt   = string(mustReadExample("brain-prompt.example.md"))
-	exampleSkillSet = readExampleSkills()
-)
+// Templates holds the read-only inputs used to scaffold a brain folder.
+// The caller supplies the assets and the identity-map path used by its runtime.
+type Templates struct {
+	Prompt          string
+	Skills          []TemplateSkill
+	IdentityMapPath string
+}
 
-func examplePromptTemplate() string { return examplePrompt }
+// TemplateSkill is one named starter skill, before the brain name is rendered.
+type TemplateSkill struct{ Name, Content string }
 
-type exampleSkill struct{ name, content string }
-
-// exampleSkills are the starter skills, in file name order.
-func exampleSkills() []exampleSkill { return exampleSkillSet }
-
-func readExampleSkills() []exampleSkill {
-	entries, err := fs.ReadDir(examples.FS, "skills")
+// TemplatesFrom reads the starter assets in file-name order. Missing embedded
+// assets are a programming error, so startup fails with the existing panic.
+func TemplatesFrom(source fs.FS, identityMapPath string) Templates {
+	read := func(name string) []byte {
+		data, err := fs.ReadFile(source, name)
+		if err != nil {
+			panic(fmt.Errorf("embedded template %s: %w", name, err))
+		}
+		return data
+	}
+	prompt := string(read("brain-prompt.example.md"))
+	entries, err := fs.ReadDir(source, "skills")
 	if err != nil {
 		panic(fmt.Errorf("embedded skills: %w", err))
 	}
-	// ReadDir sorts by name.
-	out := make([]exampleSkill, 0, len(entries))
+	skills := make([]TemplateSkill, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, exampleSkill{e.Name(), string(mustReadExample("skills/" + e.Name()))})
+		skills = append(skills, TemplateSkill{e.Name(), string(read("skills/" + e.Name()))})
 	}
-	return out
-}
-
-func mustReadExample(name string) []byte {
-	data, err := examples.FS.ReadFile(name)
-	if err != nil {
-		panic(fmt.Errorf("embedded template %s: %w", name, err))
-	}
-	return data
+	return Templates{Prompt: prompt, Skills: skills, IdentityMapPath: identityMapPath}
 }

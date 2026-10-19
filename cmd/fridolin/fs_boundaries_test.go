@@ -24,7 +24,7 @@ func TestScaffoldRefusesEscapingParentSymlinks(t *testing.T) {
 			if sub == "prompts" {
 				m.PromptFile = "prompts/new/prompt.md"
 			}
-			if _, err := ScaffoldBrain(dir, &m); err == nil {
+			if _, err := Scaffold(dir, &m, brainTemplates); err == nil {
 				t.Error("scaffolding through an escaping directory symlink succeeded")
 			}
 			entries, err := os.ReadDir(outside)
@@ -51,7 +51,7 @@ func TestScaffoldKeepsInternalParentSymlinks(t *testing.T) {
 	m := testManifest("example")
 	m.PromptFile = "prompts/custom.md"
 	for i := range 2 {
-		created, err := ScaffoldBrain(dir, &m)
+		created, err := Scaffold(dir, &m, brainTemplates)
 		if err != nil {
 			t.Fatal(err)
 		}

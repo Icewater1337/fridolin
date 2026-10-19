@@ -331,7 +331,7 @@ func brainRunEnv(t *testing.T, env map[string]string, config string) (map[string
 
 	m := testManifest("a")
 	m.Routing.HandlesDMs = true
-	if _, err := ScaffoldBrain(filepath.Join(home, "a"), &m); err != nil {
+	if _, err := Scaffold(filepath.Join(home, "a"), &m, brainTemplates); err != nil {
 		t.Fatal(err)
 	}
 	approved, err := json.Marshal(m.Normalized())
