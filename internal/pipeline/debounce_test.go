@@ -1,4 +1,4 @@
-package main
+package pipeline
 
 import (
 	"github.com/Icewater1337/fridolin/internal/testutil"
@@ -84,6 +84,32 @@ func TestDebounceMaxWaitCapsContinuousInput(t *testing.T) {
 			t.Errorf("first flush after %v; max wait is 120ms", first)
 		}
 	})
+}
+
+// If intake gets the lock after a batch's maximum wait but before its timer
+// can flush, Add must flush both messages immediately. Set the recorded start
+// in the past so this case does not depend on which goroutine the scheduler
+// runs first; the timer itself stays an hour away.
+func TestDebounceExpiredBatchFlushesOnAdd(t *testing.T) {
+	d, f := newTestDebouncer(time.Hour, time.Hour)
+	t.Cleanup(func() { d.Drain() })
+	first := brain.Inbound{Inbound: chat.Inbound{JID: "c", Sender: "1", Text: "first"}}
+	d.Add(first)
+	d.mu.Lock()
+	d.batches[batchKey(first)].started = time.Now().Add(-2 * time.Hour)
+	d.mu.Unlock()
+	second := first
+	second.Text = "second"
+	d.Add(second)
+	if n := f.n(); n != 1 {
+		t.Fatalf("%d flushes, want the expired batch flushed before Add returns", n)
+	}
+	if got := f.got[0].Text; got != "first\n\nsecond" {
+		t.Errorf("flushed %q, want both messages", got)
+	}
+	if n := d.Pending(); n != 0 {
+		t.Errorf("%d pending batches, want the flushed batch removed", n)
+	}
 }
 
 func TestDebounceSeparatesSendersAndChats(t *testing.T) {
@@ -192,5 +218,33 @@ func TestDebounceDrain(t *testing.T) {
 	d.Add(brain.Inbound{Inbound: chat.Inbound{JID: "c", Sender: "4", Text: "after"}})
 	if f.n() != 2 {
 		t.Error("a message added after Drain did not flush at once")
+	}
+}
+
+// A deletion or an edit of a message the debouncer still holds reaches
+// the brain with the batch: the deleted part is gone, the edited one has
+// its new text.
+func TestDebouncerAppliesChanges(t *testing.T) {
+	d, f := newTestDebouncer(80*time.Millisecond, time.Second)
+	base := brain.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567"}}
+	only := base
+	only.Text, only.ID = "a secret", "A"
+	d.Add(only)
+	if !d.Change(chat.Change{Kind: chat.ChangeRevoke, Chat: "15551234567@s.whatsapp.net", Sender: "15551234567", Target: "A"}) {
+		t.Fatal("the deletion did not find the message")
+	}
+	if d.Pending() != 0 {
+		t.Errorf("%d batches wait, want the emptied one dropped", d.Pending())
+	}
+
+	first, second := base, base
+	first.Text, first.ID = "book Tuesday", "B"
+	second.Text, second.ID = "for four", "C"
+	d.Add(first)
+	d.Add(second)
+	d.Change(chat.Change{Kind: chat.ChangeEdit, Chat: "15551234567@s.whatsapp.net", Sender: "15551234567", Target: "B", Text: "book Wednesday"})
+	testutil.WaitFor(t, 2*time.Second, "the flush", func() bool { return f.n() == 1 })
+	if got := f.got[0]; got.Text != "book Wednesday\n\nfor four" {
+		t.Errorf("flushed %q, want the edited batch", got.Text)
 	}
 }

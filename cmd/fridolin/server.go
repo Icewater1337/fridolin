@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"slices"
 	"strings"
@@ -24,7 +23,6 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
-	"github.com/Icewater1337/fridolin/internal/otp"
 	"github.com/Icewater1337/fridolin/internal/version"
 )
 
@@ -129,28 +127,15 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Under the chat's JID as inbound messages have it, whatever form the
-	// request used, so the brain's next run sees it in the chat's history.
-	if err := b.wa.SendChunked(r.Context(), jid, req.Text); err != nil {
-		log.Printf("HTTP send error to %s: %v", jid, err)
-		// What did go out is in the chat, so it goes in the history too.
-		var partial *outboundmsg.PartialSendError
-		if errors.As(err, &partial) {
-			b.appendHTTPMessageToHistory(who, jid, strings.Join(partial.Sent, "\n"), "")
-		}
+	request, err := b.pipeline.SendExternal(r.Context(), who, jid, req.Text)
+	if err != nil {
 		httpapi.WriteErr(w, sendErrStatus(err), "send failed: "+err.Error())
 		return
 	}
-
-	// A message that asks for a one-time code gets an id, which the
-	// hand-off of the code that answers it repeats (see handOffCode).
 	resp := map[string]string{"status": "sent"}
-	request := ""
-	if br := b.brainMgr.BrainFor(jid, chat.IsGroupJID(jid)); br != nil && br.AsksForCode(req.Text) {
-		request = otp.NewRequestID()
+	if request != "" {
 		resp["otp_request"] = request
 	}
-	b.appendHTTPMessageToHistory(who, jid, req.Text, request)
 	httpapi.WriteJSON(w, http.StatusOK, resp)
 }
 
@@ -158,14 +143,14 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 // its own chats (see brainChat), a caller without a token only to the
 // allowed chats and only while script_api.tokenless_send is on. The
 // scripts token may send anywhere checkSendJID lets through.
-func (b *Bridge) maySend(who principal, jid string, cfg *config.Config) error {
-	switch who.kind {
-	case callerScript:
+func (b *Bridge) maySend(who chat.Principal, jid string, cfg *config.Config) error {
+	switch who.Kind {
+	case chat.CallerScript:
 		return nil
-	case callerBrain:
-		br := b.brainMgr.Get(who.brain)
+	case chat.CallerBrain:
+		br := b.brainMgr.Get(who.Brain)
 		if br == nil || !b.brainChat(br, jid, cfg) {
-			return fmt.Errorf("brain %s may send only to its own chats, and %s is not one of them", who.brain, jid)
+			return fmt.Errorf("brain %s may send only to its own chats, and %s is not one of them", who.Brain, jid)
 		}
 		return nil
 	}
@@ -216,16 +201,16 @@ func sendErrStatus(err error) int {
 // history of whichever brain owns the target chat, marked with how it came
 // in: the brain must not take a line a script or another brain sent for its
 // own words. request is the id of the code request it makes, "" for none.
-func (b *Bridge) appendHTTPMessageToHistory(who principal, jid, text, request string) {
+func (b *Bridge) appendHTTPMessageToHistory(who chat.Principal, jid, text, request string) {
 	br := b.brainMgr.BrainFor(jid, chat.IsGroupJID(jid))
 	if br == nil {
 		return
 	}
 	from := "script"
-	if who.kind == callerBrain {
-		from = who.brain
+	if who.Kind == chat.CallerBrain {
+		from = who.Brain
 	}
-	br.AppendEntry(history.Entry{From: from, Chat: jid, Text: text, Type: history.Out, Via: who.via(), OTPRequest: request})
+	br.AppendEntry(history.Entry{From: from, Chat: jid, Text: text, Type: history.Out, Via: who.Via(), OTPRequest: request})
 }
 
 // httpIngest handles POST /ingest. It feeds files that arrived outside
@@ -245,7 +230,7 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	who, err := b.scriptAuth.authorize(r)
-	if err == nil && who.kind == callerAnonymous {
+	if err == nil && who.Kind == chat.CallerAnonymous {
 		err = errTokenRequired
 	}
 	if err != nil {
@@ -266,12 +251,12 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := strings.ToLower(strings.TrimSpace(req.Brain))
-	if who.kind == callerBrain {
+	if who.Kind == chat.CallerBrain {
 		if id == "" {
-			id = who.brain
+			id = who.Brain
 		}
-		if id != who.brain {
-			httpapi.WriteErr(w, http.StatusForbidden, fmt.Sprintf("brain %s may hand files only to itself, not to %q", who.brain, id))
+		if id != who.Brain {
+			httpapi.WriteErr(w, http.StatusForbidden, fmt.Sprintf("brain %s may hand files only to itself, not to %q", who.Brain, id))
 			return
 		}
 	}
@@ -281,26 +266,11 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	paths, err := mediaInboxAt(b.cfgs.Boot().MediaDir).Resolve(br.ID(), req.Paths, who.kind == callerBrain)
+	jid, err := b.pipeline.Ingest(who, br, req.Paths, req.Sender, req.Text, ownerChat(cfg))
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	jid := b.replyChatFor(br, cfg)
-	if jid == "" {
-		httpapi.WriteErr(w, http.StatusBadRequest, "brain "+br.ID()+" has no chat to reply in — set reply_chat in its settings")
-		return
-	}
-	sender := req.Sender
-	if sender == "" {
-		sender = "upload"
-	}
-	text := req.Text
-	if text == "" {
-		text = "New files were uploaded."
-	}
-	go b.handOff(br, jid, sender, text, paths)
 	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "jid": jid})
 }
 
@@ -332,10 +302,16 @@ func (b *Bridge) submitHandOff(br *brain.Brain, jid, sender, text string, media 
 // handed in privately must not land in a group because the brain also
 // serves one.
 func (b *Bridge) replyChatFor(br *brain.Brain, cfg *config.Config) string {
+	return replyChatForBrain(b.brainMgr.Manager, br, ownerChat(cfg))
+}
+
+// replyChatForBrain keeps runtime identity in reply selection, including a
+// retained brain whose ID has since been reused by a different runtime.
+func replyChatForBrain(mgr *brain.Manager, br *brain.Brain, ownerDM string) string {
 	m := br.Manifest()
 	if m.ReplyChat != "" {
 		return m.ReplyChat
 	}
-	getsDMs := m.Routing.HandlesDMs || b.brainMgr.DMBrain() == br
-	return route.ReplyChat(m, getsDMs, ownerChat(cfg))
+	getsDMs := m.Routing.HandlesDMs || mgr.DMBrain() == br
+	return route.ReplyChat(m, getsDMs, ownerDM)
 }

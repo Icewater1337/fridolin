@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"github.com/Icewater1337/fridolin/internal/google"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/google"
 	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 )
 

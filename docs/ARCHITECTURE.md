@@ -159,6 +159,19 @@ behaviour unless its title says so. The steps so far:
   join. Command composition supplies the live transport and confirmed-delivery
   history callback; pipeline extraction follows R10.
 
+- **R12, pipeline primitives**: `pipeline` owns the junk filter and the
+  debouncer, retaining `brain.Inbound` parts, timer generations and ordered
+  shutdown draining. `chat.Principal` carries the existing anonymous, script
+  or brain caller identity and history label. Token lookup, authorization
+  policy and intake persistence still live in the command.
+  `Workflow` owns commands, routing, OTP interception and queue notices. It
+  consumes the real brain manager, operation-local policy and callbacks for
+  notices, OTP hand-off and reply selection. It also resolves authorized ingest,
+  sends external messages and delivers completed runs through narrow media,
+  history and outbox callbacks. The pipeline depends on `brain`, `chat`,
+  `claudecli`, `otp` and `outbound`; its tests also use `testutil`. It imports no
+  configuration, transport, database or HTTP package.
+
 - **R14, Google Calendar**: `google` owns OAuth clients and pending state,
   token locking/refresh/revocation, calendar operations, credential naming and
   legacy environment variables. Constructor options provide fixed startup paths,
@@ -167,6 +180,11 @@ behaviour unless its title says so. The steps so far:
   Service tests run in the package; bridge-dependent sign-in, concurrency and
   API/profile golden tests remain in the command. A narrow `jsonx` edge preserves
   existing decoder diagnostics when DTOs move.
+
+- **R16, HTTP response support**: `httpapi` owns conditional JSON responses
+  and static filesystem serving. Both preserve existing body bytes, ETags,
+  weak comparisons, directory rejection and redirect headers. Command wiring
+  still supplies the embedded dashboard filesystem and all resource handlers.
 
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
@@ -315,8 +333,10 @@ responsibility and says what it must not do.
   deletions, with `Names` checking chat, sender and message ID. `LinkState`
   and `Group` retain the dashboard JSON tags; `NormalizeJID`, `IsGroupJID`
   and `DMJID` share the JID rules. Source and change-kind constants keep
-  their existing string values. Transport envelopes and script principals
-  remain in the command until the adapter and pipeline extractions.
+  their existing string values. `Envelope` holds transport facts for access
+  decisions. `Principal` carries the authenticated script or brain identity,
+  with an anonymous zero value; `Via` keeps the persisted history labels.
+  Token parsing and scope decisions stay outside this shared vocabulary.
 - **`platform`**: OS integration behind build tags. It provides the instance
   `Lock` (`AcquireLock`, `Release`; a value, not a global, which `NewBridge`
   takes today and `main` will own), process isolation (a session and
@@ -451,11 +471,14 @@ responsibility and says what it must not do.
   side effects. Dev DMs and `fridolin check --route` use `NumberAllowed`,
   preserving their user-supplied number comparison; WhatsApp supplies explicit
   resolved identity. Transport-specific ignored-chat notifications stay outside.
-- **`pipeline`** *(to come, R12; `bridge.go`, `debounce.go`)*: the single
-  intake for every message source. It handles chat commands, the junk
-  filter, choosing the brain, the OTP gate and debouncing. It dispatches to
-  `brain.Manager`, turns finished runs into deliveries, and provides `Ingest`
-  and `SendExternal` for `/ingest`, `/send`, Plaud and the site.
+- **`pipeline`**: the pure junk filter and message debouncer. `Debouncer`
+  retains each message's runtime parts through merging, edits and deletions;
+  `Drain` waits for started flushes and returns pending batches oldest first
+  for durable shutdown. New messages after draining flush immediately.
+  `Workflow` owns commands, routing, the OTP gate, dispatch, ingest resolution,
+  external sending and delivery decisions. The sink adapter supplies formatted
+  working notices and questions; confirmed outbox delivery still records history
+  through the command adapter. Durable intake remains command-owned.
 - **`outbound`**: chunking, poll parsing, shared send errors, paced sends,
   minimal transport contracts and the catalogue of every chat-facing message.
   `Outbox` owns persisted replies, per-part progress, poll fallback, retries

@@ -1,4 +1,4 @@
-package main
+package pipeline
 
 import (
 	"context"
@@ -11,12 +11,12 @@ import (
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 )
 
-// chatErrorText is what a chat is told about a run that failed with err,
+// ChatErrorText is what a chat is told about a run that failed with err,
 // one of the chatErr messages of messages.go, or "" for a run that was
 // stopped, which says nothing. inDM is true for a direct chat with an
 // allowed number: there alone the CLI's own error text may show, since
 // only the person who asked reads it.
-func chatErrorText(err error, inDM bool) string {
+func ChatErrorText(err error, inDM bool) string {
 	if err == nil || errors.Is(err, claudecli.ErrInterrupted) || errors.Is(err, context.Canceled) {
 		return ""
 	}

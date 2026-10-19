@@ -785,7 +785,8 @@ API; the page is plain HTML/CSS/JS compiled into the binary. In `web/assets`,
 including edits and deletions. The bridge supplies each brain's history tail
 when the feed is seeded.
 
-**`backup.go`** — Google Drive backups through rclone.
+**`internal/backup`** — Google Drive backups through rclone, with command adapters
+in `backup_projection.go` and `backup_api.go`.
 
 **`internal/plaud`** — recorder polling, transcript handoffs and phone uploads.
 The command supplies host policy and runtime callbacks; HTTP adapters stay in

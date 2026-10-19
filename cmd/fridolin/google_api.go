@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"errors"
-	"github.com/Icewater1337/fridolin/internal/brain"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/manifest"

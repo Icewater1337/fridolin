@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"io"
 	"net/http"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -540,7 +540,7 @@ func TestPlaudHandOffThroughTheBridge(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := tb.submitHandOff(br, dm, "plaud", "third", nil, done("third")); !errors.Is(err, brainruntime.ErrQueueFull) {
-		t.Errorf("a hand-off to a full queue = %v, want brainruntime.ErrQueueFull", err)
+		t.Errorf("a hand-off to a full queue = %v, want errQueueFull", err)
 	}
 	tb.handleInbound(context.Background(), brainruntime.Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: "whatsapp"}})
 	testutil.WaitFor(t, 10*time.Second, "both to end", func() bool { mu.Lock(); defer mu.Unlock(); return len(ended) == 2 })

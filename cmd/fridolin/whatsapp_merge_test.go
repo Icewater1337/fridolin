@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/Icewater1337/fridolin/internal/brain"
+	"github.com/Icewater1337/fridolin/internal/pipeline"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
 	"testing"
@@ -18,7 +19,7 @@ func TestPhotoThenQuestionMergePhotoFirst(t *testing.T) {
 	dl := &fakeDownloader{body: "JPEG", hold: make(chan struct{})}
 	tw := newTestWhatsApp(t, func(opts *whatsapp.Options) { opts.Downloader = dl })
 	merged := make(chan brain.Inbound, 1)
-	deb := NewDebouncer(func() time.Duration { return 200 * time.Millisecond }, func() time.Duration { return 0 }, func(m brain.Inbound) { merged <- m })
+	deb := pipeline.NewDebouncer(func() time.Duration { return 200 * time.Millisecond }, func() time.Duration { return 0 }, func(m brain.Inbound) { merged <- m })
 	tw.handler = func(_ context.Context, m brain.Inbound) {
 		if m.ID == "3EB0PHOTO" {
 			time.Sleep(50 * time.Millisecond)

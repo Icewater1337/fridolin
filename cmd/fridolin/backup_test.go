@@ -18,8 +18,8 @@ import (
 	_ "time/tzdata" // TestNextDue's time zone, on machines without one
 
 	"github.com/Icewater1337/fridolin/internal/backup"
-
 	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
+
 	"github.com/Icewater1337/fridolin/internal/devchat"
 
 	"github.com/Icewater1337/fridolin/internal/config"

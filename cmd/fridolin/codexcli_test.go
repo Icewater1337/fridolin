@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/Icewater1337/fridolin/internal/pipeline"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -192,7 +193,7 @@ func mustJSON(t *testing.T, v any) []byte {
 
 func TestCodexChatErrorsNameTheRightProvider(t *testing.T) {
 	for _, msg := range []string{"Not logged in", "401 Unauthorized", "quota exceeded", "something failed"} {
-		text := chatErrorText(&claudecli.Error{Message: msg, Provider: "codex"}, true)
+		text := pipeline.ChatErrorText(&claudecli.Error{Message: msg, Provider: "codex"}, true)
 		if !strings.Contains(text, "Codex") || strings.Contains(text, "Claude") {
 			t.Fatalf("%q -> %q", msg, text)
 		}

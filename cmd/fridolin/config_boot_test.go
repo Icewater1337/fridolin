@@ -243,6 +243,49 @@ func checkPlaudPhonePaths(t *testing.T, tb *testBridge, inbox string) {
 	}
 }
 
+// bootSettingsRunner observes the run's actual immutable settings at the
+// process boundary, after the command's config reload has applied them.
+type bootSettingsRunner struct{ settings chan brain.Settings }
+
+func (r bootSettingsRunner) Run(_ context.Context, spec brain.RunSpec, _ claudecli.Callbacks) claudecli.Result {
+	r.settings <- *spec.Settings
+	return claudecli.Result{}
+}
+
+func captureBootRunSettings(t *testing.T, tb *testBridge) func() brain.Settings {
+	t.Helper()
+	runner := bootSettingsRunner{settings: make(chan brain.Settings, 1)}
+	mgr := tb.brainMgr
+	mgr.Manager.Stop()
+	mgr.Manager = brain.NewManager(brain.Options{
+		Runner: runner, Sink: brainHooksSink{mgr.hooks},
+		Input: commandBrainInputRules(), ClaimMedia: claimBrainMedia,
+		ShutdownGrace: func() time.Duration { return 0 },
+	})
+	if err := mgr.Apply(runtimeConfig(tb.cfgs)); err != nil {
+		t.Fatal(err)
+	}
+	return func() brain.Settings {
+		t.Helper()
+		br, _, _, err := mgr.Submit(brain.Inbound{Inbound: chat.Inbound{
+			JID: harnessDM, Brain: "main", Text: "capture settings", Source: chat.SourceIngest,
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var settings brain.Settings
+		select {
+		case settings = <-runner.settings:
+		case <-time.After(10 * time.Second):
+			t.Fatal("run did not reach the injected runner")
+		}
+		if !br.WaitIdle(t.Context(), 10*time.Second) {
+			t.Fatal("captured run did not finish")
+		}
+		return settings
+	}
+}
+
 // Exercise the options used by NewBridge with only I/O consumers replaced.
 // A settings callback accidentally wired to Get would fail this.
 func TestWhatsAppAttachmentKeepsBootMediaAfterAPISave(t *testing.T) {
@@ -395,49 +438,3 @@ func TestRestoreKeepsRunningPathsProtectedAfterAPISave(t *testing.T) {
 		t.Fatalf("ordinary restore destination refused: %v", err)
 	}
 }
-
-// bootSettingsRunner observes the run's actual immutable settings at the
-// process boundary, after the command's config reload has applied them.
-type bootSettingsRunner struct{ settings chan brain.Settings }
-
-func (r bootSettingsRunner) Run(_ context.Context, spec brain.RunSpec, _ claudecli.Callbacks) claudecli.Result {
-	r.settings <- *spec.Settings
-	return claudecli.Result{}
-}
-
-func captureBootRunSettings(t *testing.T, tb *testBridge) func() brain.Settings {
-	t.Helper()
-	runner := bootSettingsRunner{settings: make(chan brain.Settings, 1)}
-	mgr := tb.brainMgr
-	mgr.Manager.Stop()
-	mgr.Manager = brain.NewManager(brain.Options{
-		Runner: runner, Sink: brainHooksSink{mgr.hooks},
-		Input: commandBrainInputRules(), ClaimMedia: claimBrainMedia,
-		ShutdownGrace: func() time.Duration { return 0 },
-	})
-	if err := mgr.Apply(runtimeConfig(tb.cfgs)); err != nil {
-		t.Fatal(err)
-	}
-	return func() brain.Settings {
-		t.Helper()
-		br, _, _, err := mgr.Submit(brain.Inbound{Inbound: chat.Inbound{
-			JID: harnessDM, Brain: "main", Text: "capture settings", Source: chat.SourceIngest,
-		}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		var settings brain.Settings
-		select {
-		case settings = <-runner.settings:
-		case <-time.After(10 * time.Second):
-			t.Fatal("run did not reach the injected runner")
-		}
-		if !br.WaitIdle(t.Context(), 10*time.Second) {
-			t.Fatal("captured run did not finish")
-		}
-		return settings
-	}
-}
-
-// Exercise the options used by NewBridge with only I/O consumers replaced.
-// A settings callback accidentally wired to Get would fail this.
