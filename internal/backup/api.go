@@ -11,55 +11,83 @@ import (
 	"github.com/Icewater1337/fridolin/internal/apperr"
 )
 
+// StatusSnapshot is an owned view of the backup state. Optional pointers keep
+// absent keys distinct from present empty values in the dashboard contract.
+type StatusSnapshot struct {
+	Brains              []BrainStatus  `json:"brains"`
+	Bridge              *Result        `json:"bridge"`
+	Connect             *connectJob    `json:"connect"`
+	Connected           bool           `json:"connected"`
+	IncludeBridgeConfig bool           `json:"include_bridge_config"`
+	Job                 *JobStatus     `json:"job"`
+	LastRestore         *RestoreResult `json:"last_restore"`
+	NextRun             *time.Time     `json:"next_run,omitempty"`
+	Rclone              RcloneStatus   `json:"rclone"`
+	SecretExcludes      []string       `json:"secret_excludes"`
+	Settings            Settings       `json:"settings"`
+}
+type RcloneStatus struct {
+	Error       *string `json:"error,omitempty"`
+	Found       bool    `json:"found"`
+	InstallHint string  `json:"install_hint"`
+	Path        *string `json:"path,omitempty"`
+	Version     *string `json:"version,omitempty"`
+}
+type BrainStatus struct {
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Dir     string   `json:"dir"`
+	Enabled bool     `json:"enabled"`
+	Exclude []string `json:"exclude"`
+	Last    *Result  `json:"last"`
+}
+type JobStatus struct {
+	Brain   *string   `json:"brain,omitempty"`
+	Current string    `json:"current"`
+	Done    []string  `json:"done"`
+	Kind    string    `json:"kind"`
+	Queue   []string  `json:"queue"`
+	Started time.Time `json:"started"`
+	Target  *string   `json:"target,omitempty"`
+}
+
 // Status snapshots job state under the lock and returns it for encoding after unlock.
-func (m *Manager) Status() map[string]any {
+func (m *Manager) Status() StatusSnapshot {
 	cfg := m.opts.Settings()
-	rc := map[string]any{"found": false, "install_hint": m.opts.InstallHint()}
+	rc := RcloneStatus{Found: false, InstallHint: m.opts.InstallHint()}
 	if p, err := m.rclonePath(); err == nil {
-		rc["found"], rc["path"], rc["version"] = true, p, rcloneVersion(p, m.opts.Environ(context.Background()))
+		version := rcloneVersion(p, m.opts.Environ(context.Background()))
+		rc.Found, rc.Path, rc.Version = true, &p, &version
 	} else if !errors.Is(err, ErrRcloneMissing) {
-		rc["error"] = err.Error() // backup.rclone_path names one that does not work
+		message := err.Error()
+		rc.Error = &message
 	}
-	// The response is built under the lock and written after it: a client
-	// that reads slowly must not hold up the backup job.
+	// Snapshot under the lock; slow HTTP clients must not hold up a job.
 	m.mu.Lock()
-	type brainRow struct {
-		ID      string   `json:"id"`
-		Name    string   `json:"name"`
-		Dir     string   `json:"dir"`
-		Enabled bool     `json:"enabled"`
-		Exclude []string `json:"exclude"`
-		Last    *Result  `json:"last"`
-	}
-	rows := []brainRow{}
+	rows := []BrainStatus{}
 	for _, br := range m.opts.Targets() {
 		s := br.Settings()
-		rows = append(rows, brainRow{ID: br.ID, Name: s.Name, Dir: br.Dir, Enabled: s.Enabled,
+		rows = append(rows, BrainStatus{ID: br.ID, Name: s.Name, Dir: br.Dir, Enabled: s.Enabled,
 			Exclude: append([]string{}, s.Exclude...), Last: copyOf(m.state.Brains[br.ID])})
 	}
-	var job map[string]any
+	var job *JobStatus
 	if j := m.job; j != nil {
-		job = map[string]any{"kind": j.kind, "started": j.started, "current": j.current,
-			"queue": slices.Clone(j.queue), "done": slices.Clone(j.done)}
+		job = &JobStatus{Kind: j.kind, Started: j.started, Current: j.current,
+			Queue: slices.Clone(j.queue), Done: slices.Clone(j.done)}
 		if j.kind == jobRestore {
-			job["brain"], job["target"] = j.brain, j.target
+			brain, target := j.brain, j.target
+			job.Brain, job.Target = &brain, &target
 		}
 	}
 	connected := m.connected()
-	resp := map[string]any{
-		"rclone":                rc,
-		"connected":             connected,
-		"connect":               copyOf(m.connect),
-		"settings":              cfg,
-		"include_bridge_config": cfg.IncludeBridgeConfig,
-		"secret_excludes":       SecretExcludes,
-		"brains":                rows,
-		"bridge":                copyOf(m.state.Bridge),
-		"job":                   job,
-		"last_restore":          copyOf(m.state.LastRestore),
+	resp := StatusSnapshot{
+		Rclone: rc, Connected: connected, Connect: copyOf(m.connect), Settings: cfg,
+		IncludeBridgeConfig: cfg.IncludeBridgeConfig, SecretExcludes: SecretExcludes,
+		Brains: rows, Bridge: copyOf(m.state.Bridge), Job: job, LastRestore: copyOf(m.state.LastRestore),
 	}
 	if next := m.nextRunLocked(cfg, connected); next != nil {
-		resp["next_run"] = *next
+		value := *next
+		resp.NextRun = &value
 	}
 	m.mu.Unlock()
 	return resp
