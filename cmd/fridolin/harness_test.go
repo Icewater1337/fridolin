@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"io"
 	"maps"
 	"net/http"
@@ -40,7 +41,7 @@ import (
 // use must change them too: newHarness and Reopen build the bridge with
 // NewBridge and newHTTPHandler, Reopen takes up what the last stop kept
 // with Bridge.resume, as Start does, and WhatsApp hands an event to a
-// WhatsAppClient built from its unexported fields, with the bridge's
+// WhatsApp client built through its normal constructor, with the bridge's
 // handleInbound and dev transport.
 type harness struct {
 	t *testing.T
@@ -239,7 +240,7 @@ func (h *harness) WhatsApp(ev *events.Message) {
 	opts.OnChange = h.b.handleChange
 	opts.Downloader = (*whatsmeow.Client)(nil)
 	opts.Notify = func(jid, text string) { _ = h.b.dev.SendMessage(context.Background(), jid, text) }
-	wa, err := newWhatsAppClient(opts)
+	wa, err := whatsapp.New(opts)
 	if err != nil {
 		h.t.Fatal(err)
 	}

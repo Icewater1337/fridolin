@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"slices"
 	"testing"
 	"time"
@@ -35,7 +36,7 @@ func TestGroupFilesAndForwardsCanBeChatter(t *testing.T) {
 	br := tb.brainMgr.Get("family")
 	own := types.JID{User: otherNumber, Device: 12, Server: types.DefaultUserServer}
 	dl := &fakeDownloader{body: "jpeg"}
-	wa := tb.whatsAppOffline(t, &store.Device{ID: &own, LIDs: bridgeLIDs{}}, func(opts *waOptions) { opts.Downloader = dl })
+	wa := tb.whatsAppOffline(t, &store.Device{ID: &own, LIDs: bridgeLIDs{}}, func(opts *whatsapp.Options) { opts.Downloader = dl })
 
 	wa.ProcessMessage(groupEvent(&waE2E.Message{ImageMessage: &waE2E.ImageMessage{}}))
 	wa.ProcessMessage(groupEvent(&waE2E.Message{ImageMessage: &waE2E.ImageMessage{Caption: proto.String("the view from the hut")}}))

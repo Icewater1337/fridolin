@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"reflect"
 	"regexp"
 	"slices"
@@ -363,7 +364,7 @@ func TestPollVoteIsLoggedAtDebug(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := &testWhatsApp{}
-	wa := tb.whatsAppOffline(t, &wastore.Device{}, func(opts *waOptions) { opts.Log = testWaLogger{rec} })
+	wa := tb.whatsAppOffline(t, &wastore.Device{}, func(opts *whatsapp.Options) { opts.Log = testWaLogger{rec} })
 	wa.ProcessVote("3EB0POLL", types.NewJID(otherNumber, types.DefaultUserServer), [][]byte{hash("Tuesday 3pm")})
 	if got := strings.Join(logged(), "\n"); strings.Contains(got, otherNumber) || strings.Contains(got, "Tuesday 3pm") {
 		t.Errorf("main log %q names the voter or the choice", got)
@@ -383,14 +384,14 @@ func TestPollVoteFailuresMaskTheVoter(t *testing.T) {
 	voter := types.NewJID(otherNumber, types.DefaultUserServer)
 	cases := []struct {
 		name string
-		vote func(t *testing.T, tb *testBridge, wa *WhatsAppClient)
+		vote func(t *testing.T, tb *testBridge, wa *whatsapp.Client)
 		want string
 	}{
-		{"not decrypted", func(t *testing.T, _ *testBridge, wa *WhatsAppClient) {
+		{"not decrypted", func(t *testing.T, _ *testBridge, wa *whatsapp.Client) {
 			// The bridge keeps another secret than the phone used.
 			wa.ProcessMessage(pollVoteEvent(t, []byte("0123456789abcdef0123456789abcdef"), voter, "3EB0POLL", "Tuesday 3pm"))
 		}, "ERROR Failed to decrypt poll vote from " + maskPhone(otherNumber) + "@s.whatsapp.net: "},
-		{"not saved", func(t *testing.T, tb *testBridge, wa *WhatsAppClient) {
+		{"not saved", func(t *testing.T, tb *testBridge, wa *whatsapp.Client) {
 			if _, err := testStoreSQL(t, tb.cfgs.Get().DBPath).Exec(`CREATE TRIGGER refuse_votes BEFORE INSERT ON poll_votes BEGIN SELECT RAISE(ABORT, 'the disk is full'); END`); err != nil {
 				t.Fatal(err)
 			}
@@ -406,7 +407,7 @@ func TestPollVoteFailuresMaskTheVoter(t *testing.T) {
 				t.Fatal(err)
 			}
 			rec := &testWhatsApp{}
-			wa := tb.whatsAppOffline(t, &wastore.Device{MsgSecrets: pollSecrets{key: make([]byte, 32)}}, func(opts *waOptions) { opts.Log = testWaLogger{rec} })
+			wa := tb.whatsAppOffline(t, &wastore.Device{MsgSecrets: pollSecrets{key: make([]byte, 32)}}, func(opts *whatsapp.Options) { opts.Log = testWaLogger{rec} })
 			c.vote(t, tb, wa)
 			// The debug log may name the voter; nothing else may.
 			got := logged()

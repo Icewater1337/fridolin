@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/logx"
@@ -11,10 +12,10 @@ import (
 // InboundHandler receives every allowed message at the command boundary.
 type InboundHandler func(context.Context, Inbound)
 
-func whatsAppSettings(get func() *Config) func() waSettings {
-	return func() waSettings {
+func whatsAppSettings(get func() *Config) func() whatsapp.Settings {
+	return func() whatsapp.Settings {
 		cfg := get()
-		return waSettings{Policy: policyOf(cfg), MediaDir: cfg.MediaDir, MaxMediaBytes: cfg.MaxMediaBytes(), MaxChunkSize: cfg.MaxChunkSize}
+		return whatsapp.Settings{Policy: policyOf(cfg), MediaDir: cfg.MediaDir, MaxMediaBytes: cfg.MaxMediaBytes(), MaxChunkSize: cfg.MaxChunkSize}
 	}
 }
 
@@ -25,50 +26,52 @@ func whatsAppInboundHandler(handler InboundHandler) func(context.Context, chat.I
 	return func(ctx context.Context, m chat.Inbound) { handler(ctx, Inbound{Inbound: m}) }
 }
 
-func whatsAppVoteHandler(handler func(pollVote)) func(waVote) {
+func whatsAppVoteHandler(handler func(pollVote)) func(whatsapp.Vote) {
 	if handler == nil {
 		return nil
 	}
-	return func(v waVote) { handler(pollVote{Poll: store.SentPoll(v.Poll), Voter: v.Voter, Selected: v.Selected}) }
+	return func(v whatsapp.Vote) {
+		handler(pollVote{Poll: store.SentPoll(v.Poll), Voter: v.Voter, Selected: v.Selected})
+	}
 }
 
-func whatsAppGroupRules(rules func(string) groupRules) func(string) waGroupRules {
+func whatsAppGroupRules(rules func(string) groupRules) func(string) whatsapp.GroupRules {
 	if rules == nil {
 		return nil
 	}
-	return func(group string) waGroupRules {
+	return func(group string) whatsapp.GroupRules {
 		r := rules(group)
-		return waGroupRules{Files: r.files, Forwards: r.forwards}
+		return whatsapp.GroupRules{Files: r.files, Forwards: r.forwards}
 	}
 }
 
 type whatsAppPollStore struct{ *store.Store }
 
-func (s whatsAppPollStore) SentPoll(ctx context.Context, id string) (waSentPoll, error) {
+func (s whatsAppPollStore) SentPoll(ctx context.Context, id string) (whatsapp.SentPoll, error) {
 	p, err := s.Store.SentPoll(ctx, id)
-	return waSentPoll(p), err
+	return whatsapp.SentPoll(p), err
 }
 
 // NewWhatsAppClient supplies the command's config, store and runtime
 // projections. Creating it does not connect; Connect keeps that boundary.
-func NewWhatsAppClient(cfg func() *Config, s *store.Store, handler InboundHandler, onIgnored IgnoredHandler) (*WhatsAppClient, error) {
-	return newWhatsAppClient(whatsAppOptions(cfg, s, handler, onIgnored))
+func NewWhatsAppClient(cfg func() *Config, s *store.Store, handler InboundHandler, onIgnored whatsapp.IgnoredHandler) (*whatsapp.Client, error) {
+	return whatsapp.New(whatsAppOptions(cfg, s, handler, onIgnored))
 }
 
-func whatsAppOptions(cfg func() *Config, s *store.Store, handler InboundHandler, onIgnored IgnoredHandler) waOptions {
+func whatsAppOptions(cfg func() *Config, s *store.Store, handler InboundHandler, onIgnored whatsapp.IgnoredHandler) whatsapp.Options {
 	// Keep the initial log-level read before loading the device.
 	logger := logx.NewWaLogger("WhatsApp", cfg().LogLevel)
-	return waOptions{Settings: whatsAppSettings(cfg), Container: s.Container, Polls: whatsAppPollStore{s}, OnInbound: whatsAppInboundHandler(handler), OnIgnored: onIgnored, Log: logger, Chunks: ChunkMessage, Identity: whatsAppIdentity(), Outbound: whatsAppOutbound(), Text: whatsAppText(), Inbox: mediaInboxAt}
+	return whatsapp.Options{Settings: whatsAppSettings(cfg), Container: s.Container, Polls: whatsAppPollStore{s}, OnInbound: whatsAppInboundHandler(handler), OnIgnored: onIgnored, Log: logger, Chunks: ChunkMessage, Identity: whatsAppIdentity(), Outbound: whatsAppOutbound(), Text: whatsAppText(), Inbox: mediaInboxAt}
 }
 
-func whatsAppOutbound() waOutbound {
-	return waOutbound{Recipient: parseRecipient, Classify: classifySendErr, Chunks: func(ctx context.Context, chunks []string, send func(string) error) error {
+func whatsAppOutbound() whatsapp.Outbound {
+	return whatsapp.Outbound{Recipient: parseRecipient, Classify: classifySendErr, Chunks: func(ctx context.Context, chunks []string, send func(string) error) error {
 		return sendChunks(ctx, chunks, outboxPace, send)
 	}}
 }
 
-func whatsAppText() waText {
-	return waText{ViewOnce: viewOnceNotice, MediaFailed: mediaFailedNotice, MediaTooLarge: mediaTooLargeNotice,
+func whatsAppText() whatsapp.Text {
+	return whatsapp.Text{ViewOnce: viewOnceNotice, MediaFailed: mediaFailedNotice, MediaTooLarge: mediaTooLargeNotice,
 		MaskSender: func(number string, resolved bool, server string) string {
 			return (groupSender{Number: number, Resolved: resolved, Server: server}).masked()
 		},
@@ -78,6 +81,6 @@ func whatsAppText() waText {
 	}
 }
 
-func whatsAppIdentity() waIdentity {
-	return waIdentity{Canonical: canonicalUser, LID: lidOf}
+func whatsAppIdentity() whatsapp.Identity {
+	return whatsapp.Identity{Canonical: canonicalUser, LID: lidOf}
 }

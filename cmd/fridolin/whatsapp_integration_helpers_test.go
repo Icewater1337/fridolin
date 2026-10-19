@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"sync"
 	"testing"
 
@@ -15,7 +16,7 @@ import (
 // Command integration uses only normal construction and the production
 // processor/event callbacks; transport internals stay in package tests.
 type testWhatsApp struct {
-	*WhatsAppClient
+	*whatsapp.Client
 	handler InboundHandler
 	inbound chan Inbound
 	notices chan string
@@ -34,21 +35,21 @@ func (l testWaLogger) Infof(msg string, args ...interface{})  { l.add("INFO", ms
 func (l testWaLogger) Warnf(msg string, args ...interface{})  { l.add("WARN", msg, args...) }
 func (l testWaLogger) Errorf(msg string, args ...interface{}) { l.add("ERROR", msg, args...) }
 func (l testWaLogger) Sub(string) waLog.Logger                { return l }
-func newTestWhatsApp(t *testing.T, configure ...func(*waOptions)) *testWhatsApp {
+func newTestWhatsApp(t *testing.T, configure ...func(*whatsapp.Options)) *testWhatsApp {
 	t.Helper()
 	cfg := &Config{AllowedNumbers: []string{"15551234567"}, MediaDir: t.TempDir(), MaxChunkSize: 4000}
 	tw := &testWhatsApp{inbound: make(chan Inbound, 4), notices: make(chan string, 4)}
 	tw.handler = func(_ context.Context, m Inbound) { tw.inbound <- m }
-	opts := waOptions{Settings: whatsAppSettings(func() *Config { return cfg }), Container: fixedDeviceContainer{&store.Device{}}, Chunks: ChunkMessage, Identity: whatsAppIdentity(), Outbound: whatsAppOutbound(), Text: whatsAppText(), Inbox: mediaInboxAt, Log: testWaLogger{tw},
+	opts := whatsapp.Options{Settings: whatsAppSettings(func() *Config { return cfg }), Container: fixedDeviceContainer{&store.Device{}}, Chunks: ChunkMessage, Identity: whatsAppIdentity(), Outbound: whatsAppOutbound(), Text: whatsAppText(), Inbox: mediaInboxAt, Log: testWaLogger{tw},
 		OnInbound: func(ctx context.Context, m chat.Inbound) { tw.handler(ctx, Inbound{Inbound: m}) }, Notify: func(jid, text string) { tw.notices <- jid + ": " + text }}
 	for _, apply := range configure {
 		apply(&opts)
 	}
-	wa, err := newWhatsAppClient(opts)
+	wa, err := whatsapp.New(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tw.WhatsAppClient = wa
+	tw.Client = wa
 	t.Cleanup(wa.Disconnect)
 	return tw
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
 	"testing"
 
@@ -13,7 +14,7 @@ import (
 // first.
 func TestPhotoThenQuestionMergePhotoFirst(t *testing.T) {
 	dl := &fakeDownloader{body: "JPEG", hold: make(chan struct{})}
-	tw := newTestWhatsApp(t, func(opts *waOptions) { opts.Downloader = dl })
+	tw := newTestWhatsApp(t, func(opts *whatsapp.Options) { opts.Downloader = dl })
 	merged := make(chan Inbound, 1)
 	deb := NewDebouncer(func() time.Duration { return 200 * time.Millisecond }, func() time.Duration { return 0 }, func(m Inbound) { merged <- m })
 	tw.handler = func(_ context.Context, m Inbound) {

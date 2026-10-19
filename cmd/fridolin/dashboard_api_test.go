@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -902,8 +903,8 @@ func TestFailedAddRemovesTheScaffold(t *testing.T) {
 func TestGroupsAskWhatsAppOnlyWhenFresh(t *testing.T) {
 	tb := newTestBridge(t, "")
 	fl := &fakeLister{}
-	tw := newTestWhatsApp(t, func(opts *waOptions) { opts.Groups = fl })
-	tb.wa = tw.WhatsAppClient
+	tw := newTestWhatsApp(t, func(opts *whatsapp.Options) { opts.Groups = fl })
+	tb.wa = tw.Client
 	steps := []struct {
 		path    string
 		queries int32 // asked of WhatsApp so far

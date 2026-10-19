@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -16,7 +17,7 @@ func TestWhatsAppProjectionReadBoundaries(t *testing.T) {
 	get := func() *Config { reads++; return cfg }
 	s := openTestStore(t, filepath.Join(t.TempDir(), "bridge.db"))
 	opts := whatsAppOptions(get, s, nil, nil)
-	wa, err := newWhatsAppClient(opts)
+	wa, err := whatsapp.New(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,9 +54,9 @@ func TestWhatsAppCallbackProjections(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("inbound calls = %d", calls)
 	}
-	vote := waVote{Poll: waSentPoll{Chat: testDMChat, Brain: "main", Question: "when", Options: []string{"today", "tomorrow"}}, Voter: types.NewJID("15551234567", types.DefaultUserServer), Selected: []string{"today"}}
+	vote := whatsapp.Vote{Poll: whatsapp.SentPoll{Chat: testDMChat, Brain: "main", Question: "when", Options: []string{"today", "tomorrow"}}, Voter: types.NewJID("15551234567", types.DefaultUserServer), Selected: []string{"today"}}
 	whatsAppVoteHandler(func(got pollVote) {
-		if !reflect.DeepEqual(waSentPoll(got.Poll), vote.Poll) || got.Voter != vote.Voter || !reflect.DeepEqual(got.Selected, vote.Selected) {
+		if !reflect.DeepEqual(whatsapp.SentPoll(got.Poll), vote.Poll) || got.Voter != vote.Voter || !reflect.DeepEqual(got.Selected, vote.Selected) {
 			t.Fatalf("vote projection = %+v", got)
 		}
 	})(vote)

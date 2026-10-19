@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"io"
 	"maps"
 	"os"
@@ -58,8 +59,8 @@ func newMainBridgeWith(t *testing.T, extra string, m BrainManifest) (*testBridge
 // messages and poll votes to the test bridge, like the real one. It
 // cannot download an attachment, and sends what it tells a chat about one
 // through the test bridge.
-func (tb *testBridge) whatsApp(t *testing.T) *WhatsAppClient {
-	return tb.whatsAppOffline(t, &store.Device{}, func(opts *waOptions) { opts.Downloader = (*whatsmeow.Client)(nil) })
+func (tb *testBridge) whatsApp(t *testing.T) *whatsapp.Client {
+	return tb.whatsAppOffline(t, &store.Device{}, func(opts *whatsapp.Options) { opts.Downloader = (*whatsmeow.Client)(nil) })
 }
 
 // fixedDeviceContainer makes an offline transport use the supplied device.
@@ -72,7 +73,7 @@ func (c fixedDeviceContainer) GetFirstDevice(context.Context) (*store.Device, er
 
 func (c fixedDeviceContainer) NewDevice() *store.Device { return &store.Device{} }
 
-func (tb *testBridge) whatsAppOffline(t *testing.T, dev *store.Device, configure ...func(*waOptions)) *WhatsAppClient {
+func (tb *testBridge) whatsAppOffline(t *testing.T, dev *store.Device, configure ...func(*whatsapp.Options)) *whatsapp.Client {
 	t.Helper()
 	opts := whatsAppOptions(tb.cfgs.Get, tb.store, tb.handleInbound, nil)
 	opts.Container = fixedDeviceContainer{dev}
@@ -84,7 +85,7 @@ func (tb *testBridge) whatsAppOffline(t *testing.T, dev *store.Device, configure
 	for _, apply := range configure {
 		apply(&opts)
 	}
-	wa, err := newWhatsAppClient(opts)
+	wa, err := whatsapp.New(opts)
 	if err != nil {
 		t.Fatal(err)
 	}
