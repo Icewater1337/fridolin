@@ -52,11 +52,11 @@ func groupSenderAllowed(cfg *config.Config, group string, s groupSender) bool {
 func (s groupSender) masked() string {
 	switch {
 	case s.Resolved:
-		return maskPhone(s.Number)
+		return MaskPhone(s.Number)
 	case s.Server != "":
-		return maskDigits(s.Number, 0) + "@" + s.Server
+		return MaskDigits(s.Number, 0) + "@" + s.Server
 	}
-	return maskDigits(s.Number, 0)
+	return MaskDigits(s.Number, 0)
 }
 
 // groupHeardSummary says for fridolin check whose messages in the allowed

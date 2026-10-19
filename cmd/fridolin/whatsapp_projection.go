@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/Icewater1337/fridolin/internal/google"
 
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -80,9 +81,9 @@ func whatsAppText() whatsapp.Text {
 		MaskSender: func(number string, resolved bool, server string) string {
 			return (groupSender{Number: number, Resolved: resolved, Server: server}).masked()
 		},
-		MaskJID:  func(user, server string) string { return maskJID(user, "", server) },
+		MaskJID:  func(user, server string) string { return MaskJID(user, "", server) },
 		MaskChat: maskChatJID,
-		Redact:   func(text string) string { return (&redactor{}).text(text) },
+		Redact:   func(text string) string { return RedactIdentifiers(text, google.MaskEmail) },
 	}
 }
 

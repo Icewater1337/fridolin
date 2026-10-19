@@ -8,9 +8,9 @@ func maskChatJID(chat string) string {
 	jid, err := types.ParseJID(chat)
 	switch {
 	case err != nil:
-		return maskDigits(chat, 0)
+		return MaskDigits(chat, 0)
 	case jid.Server == types.GroupServer:
 		return chat
 	}
-	return maskJID(jid.User, "", jid.Server)
+	return MaskJID(jid.User, "", jid.Server)
 }
