@@ -190,8 +190,19 @@ behaviour unless its title says so. The steps so far:
   services. `BackupAPI` owns backup HTTP decoding and status mapping, with
   live service/configuration callbacks and command-owned restore-path checks.
   `GoogleAPI` owns client, calendar and OAuth callback responses through a
-  narrow Google service and live brain lookup. Other resource handlers remain
-  in the command.
+  narrow Google service and live brain lookup. `PlaudAPI` preserves recorder
+  workflow responses through a live service getter. `ConfigAPI` uses one store
+  snapshot for reads and preserves transactional ETag checks for replacement.
+  `ConnectionAPI` owns pairing, group refresh and run-stop responses through
+  transport and brain capabilities. `BrainsAPI` owns manifest decoding and
+  registry response mapping, consuming the command's typed `BrainView` projection.
+  `ScriptAPI` owns send/ingest decoding and response mapping through live
+  authentication, recipient and pipeline capabilities. `StatusAPI` serializes
+  a command-projected status snapshot. `ChatsAPI` owns allow, revoke, member
+  and ignored-chat responses through live registry, store and config callbacks.
+  `FilesystemAPI` preserves home-confined browsing and picker responses; the
+  command supplies picker execution, its shared lock and home/boot paths.
+  Remaining resource handlers and the guarded router are still in the command.
 
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package
