@@ -228,3 +228,91 @@ func TestWhatsAppAttachmentKeepsBootMediaAfterAPISave(t *testing.T) {
 		t.Errorf("live media size limit not applied: %q %q", path, notice)
 	}
 }
+
+// A direct request must not turn the still-active private data folder into a
+// writable brain just because Settings now names the next process's folder.
+func TestRegistryKeepsRunningPathsProtectedAfterAPISave(t *testing.T) {
+	// Use a non-default data path: the default home folders are always denied,
+	// which would hide a regression in retaining this process's custom path.
+	tb := newTestBridge(t, "")
+	active := tb.cfgs.Boot().DataDir
+	next := filepath.Join(tb.home, "next-start")
+	if w := tb.editConfig(t, func(c map[string]any) { c["data_dir"] = next }); w.Code != http.StatusOK {
+		t.Fatal(w.Body.String())
+	}
+	// The current and requested directories are independently protected. A raw
+	// Add request bypasses the folder picker and its hidden-directory filtering.
+	for _, dir := range []string{active, next} {
+		w := tb.do("POST", "/api/brains", map[string]any{"path": dir, "create_dir": true, "manifest": manifest.Manifest{ID: "private", Name: "Private"}})
+		if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), "keeps from brains") {
+			t.Errorf("adding %s: %d %s", dir, w.Code, w.Body.String())
+		}
+		if _, err := os.Stat(filepath.Join(dir, manifest.File)); !os.IsNotExist(err) {
+			t.Errorf("refused folder %s was scaffolded: %v", dir, err)
+		}
+	}
+	if len(tb.cfgs.FileCopy().BrainDirs) != 0 {
+		t.Error("refused folder was approved")
+	}
+}
+
+// A file edit can bypass the Add workflow. Runtime resolution must independently
+// apply startup path protection when reconciling the saved brain set.
+func TestRuntimeResolutionKeepsRunningPathsProtectedAfterFileEdit(t *testing.T) {
+	tb := newTestBridge(t, "")
+	active := tb.cfgs.Boot().DataDir
+	next := filepath.Join(tb.home, "next-start")
+	if w := tb.editConfig(t, func(c map[string]any) { c["data_dir"] = next }); w.Code != http.StatusOK {
+		t.Fatal(w.Body.String())
+	}
+	m := manifest.Manifest{Version: manifest.Version, ID: "private", Name: "Private"}
+	if err := manifest.Write(active, &m, false); err != nil {
+		t.Fatal(err)
+	}
+	// This mirrors a hand edit: no registry workflow approved the new folder.
+	file := tb.cfgs.FileCopy()
+	file.BrainDirs = append(file.BrainDirs, config.BrainRef{Path: active, Approved: &m})
+	data, err := json.Marshal(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(tb.cfgs.Path(), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A regular settings save reads the external edit, publishes, and reconciles.
+	if _, err := tb.cfgs.Update("", func(c *config.Config) error { c.Comment = "reload the external edit"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if tb.brainMgr.Get("private") != nil {
+		t.Fatal("runtime started a brain in the active private data directory")
+	}
+	var refused bool
+	for _, issue := range tb.brainMgr.Issues() {
+		if issue.ID == "private" && strings.Contains(issue.Detail, "keeps from brains") {
+			refused = true
+		}
+	}
+	if !refused {
+		t.Fatalf("runtime did not report private-path refusal: %v", tb.brainMgr.Issues())
+	}
+}
+
+func TestRestoreKeepsRunningPathsProtectedAfterAPISave(t *testing.T) {
+	tb := newTestBridge(t, "")
+	active := tb.cfgs.Boot().DataDir
+	next := filepath.Join(tb.home, "next-start")
+	if w := tb.editConfig(t, func(c map[string]any) { c["data_dir"] = next }); w.Code != http.StatusOK {
+		t.Fatal(w.Body.String())
+	}
+	for _, dir := range []string{filepath.Join(active, "restored"), filepath.Join(next, "restored")} {
+		if _, err := tb.restoreTarget(dir); err == nil || !strings.Contains(err.Error(), "keeps from brains") {
+			t.Errorf("restore accepted protected target %s: %v", dir, err)
+		}
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Errorf("refused restore created target: %v", err)
+		}
+	}
+	if _, err := tb.restoreTarget(filepath.Join(tb.home, "restored")); err != nil {
+		t.Fatalf("ordinary restore destination refused: %v", err)
+	}
+}
