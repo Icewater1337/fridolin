@@ -36,7 +36,7 @@ import (
 func (b *Bridge) apiMux() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /api/status", StatusAPI{Snapshot: b.statusSnapshot}.ServeHTTP)
+	mux.HandleFunc("GET /api/status", httpapi.StatusAPI{Snapshot: b.statusSnapshot}.ServeHTTP)
 	mux.HandleFunc("GET /api/whatsapp/qr", b.newConnectionAPI().QR)
 	mux.HandleFunc("POST /api/whatsapp/pair", b.newConnectionAPI().Pair)
 	mux.HandleFunc("GET /api/whatsapp/groups", b.newConnectionAPI().Groups)
@@ -115,10 +115,10 @@ func (b *Bridge) apiMux() http.Handler {
 
 // ── status ───────────────────────────────────────────────────────────────
 
-func (b *Bridge) statusSnapshot(ctx context.Context) StatusResponse {
+func (b *Bridge) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 	cfg := runtimeConfig(b.cfgs)
 	wa := b.wa.State()
-	resp := StatusResponse{
+	resp := httpapi.StatusResponse{
 		Version:       version.String(),
 		StartedAt:     b.started,
 		UptimeS:       int64(time.Since(b.started).Seconds()),
@@ -126,10 +126,10 @@ func (b *Bridge) statusSnapshot(ctx context.Context) StatusResponse {
 		DataDir:       cfg.DataDir,
 		DevMode:       b.dev != nil,
 		Platform:      runtime.GOOS,
-		WhatsApp:      WhatsAppStatus{LinkState: wa, QRAvailable: wa.QRCode != ""},
+		WhatsApp:      httpapi.WhatsAppStatus{LinkState: wa, QRAvailable: wa.QRCode != ""},
 		Claude:        claudeInfo(cfg.ClaudePath, cfg.ChildEnvPassthrough),
 		AgentProvider: cfg.AgentProvider,
-		Sandbox:       SandboxStatus{Enabled: cfg.Sandbox.Enabled, Supported: runtime.GOOS == "darwin"},
+		Sandbox:       httpapi.SandboxStatus{Enabled: cfg.Sandbox.Enabled, Supported: runtime.GOOS == "darwin"},
 		Issues:        nonNil(b.brainIssues(cfg)),
 		Warnings:      nonNil(b.Warnings()),
 		Backup:        b.backup.Summary(),

@@ -1,4 +1,4 @@
-package main
+package httpapi
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/registry"
 	"net/http"
 	"time"
@@ -51,5 +50,5 @@ type StatusAPI struct {
 }
 
 func (a StatusAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	httpapi.WriteJSON(w, http.StatusOK, a.Snapshot(r.Context()))
+	WriteJSON(w, http.StatusOK, a.Snapshot(r.Context()))
 }
