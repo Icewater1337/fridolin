@@ -58,7 +58,7 @@ var imports = map[string][]string{
 	"internal/textx":     nil,
 	"internal/trigger":   nil,
 	"internal/version":   nil,
-	"internal/whatsapp":  {"internal/access", "internal/chat", "internal/logx", "internal/media", "internal/platform", "internal/textx", "internal/trigger"},
+	"internal/whatsapp":  {"internal/testutil", "internal/access", "internal/chat", "internal/logx", "internal/media", "internal/platform", "internal/textx", "internal/trigger"},
 	"internal/site":      nil,
 	"site":               nil,
 	"web":                nil,
