@@ -17,8 +17,7 @@ import (
 	"testing"
 )
 
-// imports is the table of allowed imports (docs/ARCHITECTURE.md, section
-// 4): for every package of the module, by its path below the module, the
+// imports is the table of allowed imports (docs/ARCHITECTURE.md): for every package of the module, by its path below the module, the
 // module's packages it may import. A package without a row fails
 // TestImportRules, and so does an import its row does not list: a new
 // edge is a change to this table, made and reviewed in the same pull

@@ -100,7 +100,11 @@ func CheckReport(w io.Writer, path string, cfg *config.Settings, o CheckOptions)
 		fmt.Fprintf(w, "  claude:    %s\n", claudeSummary(cfg.ClaudePath, cfg.ChildEnvPassthrough))
 	}
 	fmt.Fprintf(w, "  data dir:  %s\n", cfg.DataDir)
-	fmt.Fprintf(w, "  dashboard: http://%s/\n", cfg.HTTPListen)
+	if !cfg.HTTPEnabled || cfg.Dashboard.Disabled {
+		fmt.Fprintln(w, "  dashboard: disabled")
+	} else {
+		fmt.Fprintf(w, "  dashboard: http://%s/\n", cfg.HTTPListen)
+	}
 	fmt.Fprintf(w, "  DM allow:  %s\n", dmAllowSummary(cfg))
 	fmt.Fprintf(w, "  groups:    %v\n", cfg.AllowedGroups)
 	for _, g := range cfg.AllowedGroups {
@@ -111,7 +115,9 @@ func CheckReport(w io.Writer, path string, cfg *config.Settings, o CheckOptions)
 	// With the same PATH as startup, the brains and profiles match what
 	// the bridge would run.
 	specs, issues := ResolveBrains(cfg)
-	if len(specs) == 0 {
+	if len(specs) == 0 && len(issues) > 0 {
+		fmt.Fprintln(w, "  brains:    none available — see the issues below")
+	} else if len(specs) == 0 {
 		fmt.Fprintln(w, "  brains:    none yet — add one in the dashboard")
 	}
 	for _, s := range specs {
@@ -147,6 +153,9 @@ func CheckReport(w io.Writer, path string, cfg *config.Settings, o CheckOptions)
 		}
 	}
 	if o.SandboxFor != "" {
+		if _, ok := workDirs[o.SandboxFor]; !ok {
+			return fmt.Errorf("sandbox profile: unknown or unavailable brain %q", o.SandboxFor)
+		}
 		profiler := NewSandboxProfiler(workDirs, cfg)
 		profiler.SetConfigFile(path)
 		profile, err := profiler.Profile(o.SandboxFor)

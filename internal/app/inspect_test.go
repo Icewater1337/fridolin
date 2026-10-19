@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -246,5 +247,30 @@ func TestRedactorText(t *testing.T) {
 	}
 	if got := newRedactor("/").text("/usr/bin"); got != "/usr/bin" {
 		t.Errorf("a home of / redacted %q", got)
+	}
+}
+
+func TestCheckDisabledDashboardAndUnknownSandboxBrain(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := writeConfig(t, `{"http_listen":"off","claude_path":"`+fakeClaudeEnv(t, 0)+`","data_dir":"`+home+`/data"}`)
+	var out bytes.Buffer
+	err := WriteCheck(&out, CheckOptions{Config: path, SandboxFor: "missing"})
+	if err == nil || !strings.Contains(err.Error(), "unknown or unavailable brain") {
+		t.Fatalf("unknown brain: %v", err)
+	}
+	if !strings.Contains(out.String(), "dashboard: disabled") || strings.Contains(out.String(), "http://off") {
+		t.Fatalf("report: %s", out.String())
+	}
+}
+
+func TestCheckUnavailableBrainsDoesNotSuggestEmptySetup(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfg := resolvedSettings(t, &config.File{ClaudePath: fakeClaudeEnv(t, 0), DataDir: filepath.Join(home, "data"), BrainDirs: []config.BrainRef{{Path: filepath.Join(home, "missing")}}})
+	var out bytes.Buffer
+	_ = CheckReport(&out, "config.json", cfg, CheckOptions{})
+	if !strings.Contains(out.String(), "none available") || strings.Contains(out.String(), "none yet") {
+		t.Fatalf("report: %s", out.String())
 	}
 }

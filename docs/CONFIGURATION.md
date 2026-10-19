@@ -1414,7 +1414,8 @@ included. Characters are Unicode code points, so most emoji count as one but
 one with a skin tone or a family emoji counts as several. 0 or unset means the
 default, 3900, which stays under the 4096 characters commonly given as
 WhatsApp's limit. Anything else must be at least 100, so the numbering always
-leaves room for text; the bridge refuses to start with a smaller value.
+leaves room for text. The bridge accepts at most 65536 characters per chunk
+to bound individual messages, and refuses values outside that range.
 
 Longer replies are split and numbered `[1/3]`, `[2/3]`, … They are cut at
 paragraphs first, then lines, sentence ends and spaces, each finer level only
