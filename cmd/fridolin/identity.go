@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/logx"
 	"log"
 	"strings"
 
@@ -101,7 +102,7 @@ func canonicalUser(ctx context.Context, lids store.LIDStore, jid, alt types.JID)
 		}
 		if err != nil {
 			// Masked: the log goes along with bug reports.
-			log.Printf("could not look up the number of %s: %v", MaskJID(jid.User, "", jid.Server), err)
+			log.Printf("could not look up the number of %s: %v", logx.MaskJID(jid.User, "", jid.Server), err)
 		}
 	}
 	return jid

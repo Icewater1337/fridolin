@@ -815,9 +815,9 @@ func (r *redactor) add(groups bool, chats []string) {
 		if len(digits) < 6 {
 			continue
 		}
-		masked := MaskPhone(digits)
+		masked := logx.MaskPhone(digits)
 		if groups || server == "g.us" || server == "lid" {
-			masked = MaskDigits(digits, 0)
+			masked = logx.MaskDigits(digits, 0)
 		}
 		written := masked
 		if strings.HasPrefix(id, "+") {
@@ -830,7 +830,7 @@ func (r *redactor) add(groups bool, chats []string) {
 
 // text returns s redacted.
 func (r *redactor) text(s string) string {
-	s = RedactIdentifiers(s, google.MaskEmail)
+	s = logx.RedactIdentifiers(s, google.MaskEmail)
 	for _, c := range r.chats {
 		s = strings.ReplaceAll(s, c.value, c.masked)
 	}

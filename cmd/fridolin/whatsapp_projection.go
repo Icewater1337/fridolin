@@ -81,9 +81,9 @@ func whatsAppText() whatsapp.Text {
 		MaskSender: func(number string, resolved bool, server string) string {
 			return (groupSender{Number: number, Resolved: resolved, Server: server}).masked()
 		},
-		MaskJID:  func(user, server string) string { return MaskJID(user, "", server) },
+		MaskJID:  func(user, server string) string { return logx.MaskJID(user, "", server) },
 		MaskChat: maskChatJID,
-		Redact:   func(text string) string { return RedactIdentifiers(text, google.MaskEmail) },
+		Redact:   func(text string) string { return logx.RedactIdentifiers(text, google.MaskEmail) },
 	}
 }
 
