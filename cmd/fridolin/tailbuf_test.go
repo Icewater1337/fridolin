@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
@@ -28,7 +29,7 @@ func TestRunStderrIsBounded(t *testing.T) {
 	if len(res.Err.Error()) > 1000 {
 		t.Errorf("the error holds %d bytes of stderr, want a short tail", len(res.Err.Error()))
 	}
-	data, err := os.ReadFile(filepath.Join(mgr.Get("a").Dir(), streamLogName))
+	data, err := os.ReadFile(filepath.Join(mgr.Get("a").Dir(), brain.StreamLogName))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +40,7 @@ func TestRunStderrIsBounded(t *testing.T) {
 	if !strings.Contains(string(data), ":\n…") || !strings.Contains(string(data), "fatal: the last thing the CLI said") {
 		t.Errorf("activity log = %q, want the end of stderr", textx.Tail(string(data), 300))
 	}
-	if len(data) > 2*stderrLogBytes {
-		t.Errorf("activity log holds %d bytes, want at most the last %d of stderr", len(data), stderrLogBytes)
+	if len(data) > 2*4000 {
+		t.Errorf("activity log holds %d bytes, want at most the last %d of stderr", len(data), 4000)
 	}
 }

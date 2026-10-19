@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -170,7 +171,7 @@ func TestRunsGetATokenForTheirRunOnly(t *testing.T) {
 	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
 	t.Setenv("FRIDOLIN_FAKE_POLLS", "1")
 
-	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"}})
+	tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"}})
 	testutil.WaitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(apiTestDM)) > 0 })
 	reply := tb.sentTo(apiTestDM)[0]
 	if !strings.Contains(reply, `polls=0 { "count": 1, "polls": [`) || !strings.Contains(reply, `"question": "Lunch?"`) {

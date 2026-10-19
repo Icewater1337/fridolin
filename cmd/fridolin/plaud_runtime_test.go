@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
@@ -12,11 +13,19 @@ import (
 func TestPlaudTargetRetainsRuntimeAcrossReplacement(t *testing.T) {
 	const first = "15551234567@s.whatsapp.net"
 	const second = "15559876543@s.whatsapp.net"
-	old := &Brain{id: "a"}
-	old.settings.Store(&brainSettings{manifest: manifest.Manifest{ReplyChat: first}})
-	mgr := &BrainManager{brains: map[string]*Brain{"a": old}, dmBrain: old}
-	var submitted *Brain
-	target := plaudTargetOf(mgr, "a", func(br *Brain, _, _, _ string, _ []string, done func(error)) error {
+	mgr := &BrainManager{Manager: brain.NewManager(brain.Options{})}
+	t.Cleanup(mgr.Stop)
+	sp := manifest.Spec{Dir: t.TempDir(), Manifest: manifest.Manifest{ID: "a", ReplyChat: first, Routing: manifest.Routing{HandlesDMs: true}}}
+	apply := func() {
+		t.Helper()
+		if failures, err := mgr.Manager.Apply([]manifest.Spec{sp}, brain.Globals{}, brain.ApplyOptions{}); err != nil || len(failures) != 0 {
+			t.Fatalf("apply: %v %v", failures, err)
+		}
+	}
+	apply()
+	old := mgr.Get("a")
+	var submitted *brain.Brain
+	target := plaudTargetOf(mgr, "a", func(br *brain.Brain, _, _, _ string, _ []string, done func(error)) error {
 		submitted = br
 		done(nil)
 		return nil
@@ -24,15 +33,20 @@ func TestPlaudTargetRetainsRuntimeAcrossReplacement(t *testing.T) {
 	if target == nil || target.ID() != "a" || target.ReplyChat() != first || target.OtherOwner(first) != "" {
 		t.Fatal("selected runtime lost its routing or reply settings")
 	}
-	old.settings.Store(&brainSettings{manifest: manifest.Manifest{ReplyChat: second}})
+	sp.Manifest.ReplyChat = second
+	apply()
+	if mgr.Get("a") != old {
+		t.Fatal("settings reload replaced the runtime")
+	}
 	if target.ReplyChat() != second {
 		t.Fatal("a retained target froze settings that must remain live")
 	}
-	current := &Brain{id: "a"}
-	current.settings.Store(&brainSettings{manifest: manifest.Manifest{ReplyChat: first}})
-	mgr.mu.Lock()
-	mgr.brains["a"], mgr.dmBrain = current, current
-	mgr.mu.Unlock()
+	sp.Dir = t.TempDir()
+	sp.Manifest.ReplyChat = first
+	apply()
+	if mgr.Get("a") == old {
+		t.Fatal("folder replacement retained the old runtime")
+	}
 	if target.ReplyChat() != second || target.OtherOwner(second) != "a" {
 		t.Fatal("replacement with the same ID was mistaken for the selected runtime")
 	}

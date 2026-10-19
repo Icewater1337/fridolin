@@ -1,4 +1,4 @@
-package main
+package brain
 
 import (
 	"testing"
@@ -10,7 +10,7 @@ func TestApplyChange(t *testing.T) {
 	const chatJID = "120363000000000000@g.us"
 	a := Inbound{Inbound: chat.Inbound{JID: chatJID, Sender: "15551234567", Text: "book Tuesday", ID: "A", Media: []string{"/m/a.jpg"}}}
 	b := Inbound{Inbound: chat.Inbound{JID: chatJID, Sender: "15551234567", Text: "for four", ID: "B"}}
-	merged := a.merge(b)
+	merged := a.Merge(b)
 	cases := []struct {
 		name         string
 		m            Inbound
@@ -30,10 +30,10 @@ func TestApplyChange(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := c.m.changes(c.c); got != c.changesFound {
+			if got := c.m.Changes(c.c); got != c.changesFound {
 				t.Errorf("changes = %v, want %v", got, c.changesFound)
 			}
-			out, found, keep := c.m.applyChange(c.c)
+			out, found, keep := c.m.ApplyChange(c.c)
 			if found != c.found || keep != c.keep {
 				t.Fatalf("applyChange found %v, keep %v; want %v, %v", found, keep, c.found, c.keep)
 			}

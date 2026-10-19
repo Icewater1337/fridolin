@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/plaud"
@@ -13,14 +14,14 @@ import (
 
 // NewPlaudManager supplies settings and the paths captured for this bridge start.
 func NewPlaudManager(cfgs *config.Store, brains *BrainManager,
-	submit func(*Brain, string, string, string, []string, func(error)) error,
+	submit func(*brain.Brain, string, string, string, []string, func(error)) error,
 	notify func(context.Context, string, string) error, siteURL func() string) *plaud.Manager {
 	return plaud.New(plaudOptions(cfgs, brains, submit, notify, siteURL))
 }
 
 // plaudOptions projects command policy and host dependencies into the service.
 func plaudOptions(cfgs *config.Store, brains *BrainManager,
-	submit func(*Brain, string, string, string, []string, func(error)) error,
+	submit func(*brain.Brain, string, string, string, []string, func(error)) error,
 	notify func(context.Context, string, string) error, siteURL func() string) plaud.Options {
 	boot := cfgs.Boot()
 	return plaud.Options{
@@ -33,7 +34,7 @@ func plaudOptions(cfgs *config.Store, brains *BrainManager,
 		Environ: plaudEnvironment, DesktopContext: withDesktop,
 		Inbox: mediaInboxAt,
 		RunInterrupted: func(err error) bool {
-			return errors.Is(err, claudecli.ErrInterrupted) || errors.Is(err, errBrainDropped) || errors.Is(err, context.Canceled)
+			return errors.Is(err, claudecli.ErrInterrupted) || errors.Is(err, brain.ErrDropped) || errors.Is(err, context.Canceled)
 		},
 		SiteURL: siteURL, AppSource: plaudAppSource, AndroidToolchain: androidToolchain,
 		AppEnviron: func(ctx context.Context, javaHome, sdk string) []string {
@@ -78,8 +79,8 @@ func brainPlaudPATH(cfg *config.Config) string {
 
 // plaudTargetOf captures the selected runtime, rather than looking it up again
 // by ID when the transcript is finally submitted after filesystem work.
-func plaudTargetOf(brains *BrainManager, id string, submit func(*Brain, string, string, string, []string, func(error)) error) *plaud.Target {
-	var br *Brain
+func plaudTargetOf(brains *BrainManager, id string, submit func(*brain.Brain, string, string, string, []string, func(error)) error) *plaud.Target {
+	var br *brain.Brain
 	if id != "" {
 		br = brains.Get(id)
 	} else {
@@ -90,7 +91,7 @@ func plaudTargetOf(brains *BrainManager, id string, submit func(*Brain, string, 
 	}
 	return &plaud.Target{
 		BrainID:   br.ID(),
-		ReplyChat: func() string { return br.settings.Load().manifest.ReplyChat },
+		ReplyChat: func() string { return br.Manifest().ReplyChat },
 		OtherOwner: func(jid string) string {
 			if owner := brains.BrainFor(jid, false); owner != nil && owner != br {
 				return owner.ID()

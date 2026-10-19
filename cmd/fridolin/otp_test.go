@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
@@ -53,8 +54,8 @@ func TestBridgeStartRemovesExpiredOTPHandoffs(t *testing.T) {
 func TestHandOffOfACodeTheBrainAskedFor(t *testing.T) {
 	tb, br := newMainBridge(t, "")
 	asked := time.Now().Add(-2 * time.Minute).Truncate(time.Second)
-	br.appendEntry(history.Entry{TS: asked.Format(time.RFC3339), Chat: testDMChat, From: "main", Text: "🔐 Please send me the verification code", Type: history.Out})
-	tb.handleInbound(t.Context(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "483920", Source: chat.SourceWhatsApp}})
+	br.AppendEntry(history.Entry{TS: asked.Format(time.RFC3339), Chat: testDMChat, From: "main", Text: "🔐 Please send me the verification code", Type: history.Out})
+	tb.handleInbound(t.Context(), brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "483920", Source: chat.SourceWhatsApp}})
 	var h otp.Record
 	data, err := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "otp", "main.json"))
 	if err == nil {

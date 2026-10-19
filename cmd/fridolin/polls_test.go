@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
 	"slices"
@@ -60,7 +61,7 @@ func TestPollVoteBecomesAHistoryEvent(t *testing.T) {
 			}
 			tb.whatsApp(t).ProcessVote("3EB0POLL", voter, [][]byte{hash("Tuesday 3pm")})
 
-			for _, br := range []*Brain{mainBrain, tb.brainMgr.Get("files")} {
+			for _, br := range []*brain.Brain{mainBrain, tb.brainMgr.Get("files")} {
 				h := readHistory(t, br)
 				if br.ID() != c.want {
 					if len(h) != 0 {
@@ -72,7 +73,7 @@ func TestPollVoteBecomesAHistoryEvent(t *testing.T) {
 				if len(h) != 1 || h[0].From != want.From || h[0].Chat != want.Chat || h[0].Type != want.Type || h[0].Text != want.Text {
 					t.Fatalf("brain %s history = %+v, want [%+v]", br.ID(), h, want)
 				}
-				preface := br.buildPrompt(br.settings.Load(), Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15559876543", Text: "next"}})
+				preface := capturedPrompt(t, br, brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15559876543", Text: "next"}})
 				if !strings.Contains(preface, `"from":"15551234567","did":"voted \"Tuesday 3pm\" in the poll \"When should we meet?\""`) {
 					t.Errorf("preface = %q, want the vote", preface)
 				}

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -37,7 +38,7 @@ func TestChatErrorText(t *testing.T) {
 		{"run_timeout_minutes", claudecli.TimedOut(30 * time.Minute), false, outboundmsg.ChatErrTimeout},
 		// By the error, not by a word its text happens to hold.
 		{"run timeout in other words", fmt.Errorf("%w after 90s", claudecli.ErrTimedOut), true, outboundmsg.ChatErrTimeout},
-		{"sandbox", errSandboxUnavailable, false, "❌ The sandbox could not be set up, so this message was not run (details in the bridge log)."},
+		{"sandbox", brain.ErrSandboxUnavailable, false, "❌ The sandbox could not be set up, so this message was not run (details in the bridge log)."},
 		{"the CLI's own words in a DM", &claudecli.Error{Message: "Credit balance is too low"}, true, "❌ Claude: Credit balance is too low"},
 		{"but not in a group", &claudecli.Error{Message: "Credit balance is too low"}, false, outboundmsg.ChatErrGeneric},
 		{"no result", claudecli.ErrNoResult, true, outboundmsg.ChatErrGeneric},
@@ -58,7 +59,7 @@ func TestFailedRunPostsNoRawError(t *testing.T) {
 		t.Run(chatJID, func(t *testing.T) {
 			tb, br := newMainBridge(t, "")
 			t.Setenv("FRIDOLIN_FAKE_STDERR_BYTES", "10")
-			tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: chatJID, Sender: "15551234567", Text: "@claude fail", Source: chat.SourceWhatsApp}})
+			tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: chatJID, Sender: "15551234567", Text: "@claude fail", Source: chat.SourceWhatsApp}})
 			testutil.WaitFor(t, 10*time.Second, "the error notice", func() bool { return len(tb.sentTo(chatJID)) > 0 })
 			sent := tb.sentTo(chatJID)
 			if len(sent) != 1 || sent[0] != outboundmsg.ChatErrGeneric {

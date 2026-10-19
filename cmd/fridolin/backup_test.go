@@ -20,6 +20,7 @@ import (
 	"time"
 	_ "time/tzdata" // TestNextDue's time zone, on machines without one
 
+	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/devchat"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -874,8 +875,8 @@ func TestPrunePurgesExpiredVersionFolders(t *testing.T) {
 		}
 		return []byte(`[{"Name":"` + expired + `"},{"Name":"` + recent + `"},{"Name":"keep-me"}]`), nil
 	}
-	notes := &Brain{id: "notes"}
-	tb.backup.prune(context.Background(), []*Brain{notes})
+	notes := namedTestBrain(t, "notes")
+	tb.backup.prune(context.Background(), []*brainruntime.Brain{notes})
 	var purged []string
 	for _, c := range calls {
 		switch c[0] {
@@ -898,7 +899,7 @@ func TestPrunePurgesExpiredVersionFolders(t *testing.T) {
 func TestPruneKeepsItsConfigAndStopsWhenCancelled(t *testing.T) {
 	listing := []byte(`[{"Name":"` + versionName(time.Now().AddDate(0, 0, -31)) + `"},` +
 		`{"Name":"` + versionName(time.Now().AddDate(0, 0, -60)) + `"}]`)
-	brains := []*Brain{{id: "notes"}, {id: "work"}}
+	brains := []*brainruntime.Brain{namedTestBrain(t, "notes"), namedTestBrain(t, "work")}
 
 	t.Run("backup.root changed mid-run", func(t *testing.T) {
 		tb := newTestBridge(t, `, "backup": {"keep_versions_days": 30}`)
@@ -1353,7 +1354,9 @@ func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
 		t.Errorf("a manual refusal must not be sent: %+v, %d messages", res, len(sent()))
 	}
 	send := tb.backup.notify
-	tb.backup.notify = func(context.Context, *Brain, string) error { return fmt.Errorf("WhatsApp is not connected") }
+	tb.backup.notify = func(context.Context, *brainruntime.Brain, string) error {
+		return fmt.Errorf("WhatsApp is not connected")
+	}
 	scheduledRun(t, tb, 2)
 	if told() || len(sent()) != 1 {
 		t.Errorf("a notice that failed to send must not count as told")
@@ -1372,7 +1375,7 @@ func TestRefusalNoticeGivesUp(t *testing.T) {
 	tb, _ := scheduledBackupBridge(t)
 	defer func(d time.Duration) { refusalNoticeTimeout = d }(refusalNoticeTimeout)
 	refusalNoticeTimeout = 50 * time.Millisecond
-	tb.backup.notify = func(ctx context.Context, _ *Brain, _ string) error {
+	tb.backup.notify = func(ctx context.Context, _ *brainruntime.Brain, _ string) error {
 		<-ctx.Done()
 		return ctx.Err()
 	}
@@ -2528,9 +2531,7 @@ func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
 			br := tb.brainMgr.Get("notes")
 			tb.backup.idleWait = c.wait
 			running := func() bool {
-				br.mu.Lock()
-				defer br.mu.Unlock()
-				return br.current != nil
+				return br.Snapshot().Running != nil
 			}
 			var syncedWhileRunning []bool
 			tb.backup.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
@@ -2542,7 +2543,7 @@ func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
 			logged := captureLog(t)
 
 			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "1500")
-			if _, _, err := br.Submit(Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp", At: time.Now()}}); err != nil {
+			if _, _, err := br.Submit(brainruntime.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp", At: time.Now()}}); err != nil {
 				t.Fatal(err)
 			}
 			testutil.WaitFor(t, 10*time.Second, "the run to start", running)

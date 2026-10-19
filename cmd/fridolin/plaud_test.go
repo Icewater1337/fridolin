@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"io"
 	"net/http"
 	"os"
@@ -355,7 +356,7 @@ func (r *plaudRecorder) count() int {
 // take it (its queue is full) leaves it waiting, with the reason on the
 // card. After a restart, one whose run never ended is handed over again.
 func TestPlaudRecordingIsSeenOnlyOnceItsRunEnds(t *testing.T) {
-	stop := []error{claudecli.ErrInterrupted, errBrainDropped}
+	stop := []error{claudecli.ErrInterrupted, brainruntime.ErrDropped}
 	for _, c := range []struct {
 		name    string
 		ends    []error // the runs' outcomes, one per check
@@ -434,7 +435,7 @@ func TestPlaudRecordingIsSeenOnlyOnceItsRunEnds(t *testing.T) {
 	}
 	t.Run("not taken", func(t *testing.T) {
 		tb, fp := plaudBridge(t, "")
-		rec := &plaudRecorder{refuse: errQueueFull}
+		rec := &plaudRecorder{refuse: brainruntime.ErrQueueFull}
 		tb.usePlaudRecorder(t, rec)
 		plaudSignIn(t, tb)
 		if err := tb.writePlaudState(plaudSeededState("u_1", plaudOld1)); err != nil {
@@ -538,12 +539,12 @@ func TestPlaudHandOffThroughTheBridge(t *testing.T) {
 	if err := tb.submitHandOff(br, dm, "plaud", "second", nil, done("second")); err != nil {
 		t.Fatal(err)
 	}
-	if err := tb.submitHandOff(br, dm, "plaud", "third", nil, done("third")); !errors.Is(err, errQueueFull) {
-		t.Errorf("a hand-off to a full queue = %v, want errQueueFull", err)
+	if err := tb.submitHandOff(br, dm, "plaud", "third", nil, done("third")); !errors.Is(err, brainruntime.ErrQueueFull) {
+		t.Errorf("a hand-off to a full queue = %v, want brainruntime.ErrQueueFull", err)
 	}
-	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: "whatsapp"}})
+	tb.handleInbound(context.Background(), brainruntime.Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: "whatsapp"}})
 	testutil.WaitFor(t, 10*time.Second, "both to end", func() bool { mu.Lock(); defer mu.Unlock(); return len(ended) == 2 })
-	if !errors.Is(ended["first"], claudecli.ErrInterrupted) || !errors.Is(ended["second"], errBrainDropped) {
+	if !errors.Is(ended["first"], claudecli.ErrInterrupted) || !errors.Is(ended["second"], brainruntime.ErrDropped) {
 		t.Errorf("ended = %v, want the first stopped and the second dropped", ended)
 	}
 	for _, m := range tb.dev.Outbox() {
@@ -974,7 +975,7 @@ func TestPlaudBacklogLeavesRoomInTheBrainsQueue(t *testing.T) {
 			t.Fatalf("check %d: %d with the brain and %d waiting, want %d and %d", i+1, *s.Handed, *s.Pending, limit, len(backlog)-limit)
 		}
 	}
-	if _, _, _, err := tb.brainMgr.Submit(Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}}); err != nil {
+	if _, _, _, err := tb.brainMgr.Submit(brainruntime.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}}); err != nil {
 		t.Errorf("your own message to the brain = %v, want it taken", err)
 	}
 }
@@ -1388,7 +1389,7 @@ func TestBrainRunsKeepPlaudTelemetryOff(t *testing.T) {
 	tb, _ := plaudBridge(t, "")
 	envLog := filepath.Join(t.TempDir(), "brain.env")
 	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
-	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
+	tb.handleInbound(context.Background(), brainruntime.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
 	testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return len(tb.dev.Outbox()) > 0 })
 	logged, err := os.ReadFile(envLog)
 	if err != nil {
@@ -1410,7 +1411,7 @@ func TestBrainsFindThePlaudCLIWhenTheyMayUseIt(t *testing.T) {
 			tb, _ := plaudBridge(t, fmt.Sprintf(`, "brain_access": %v`, access))
 			envLog := filepath.Join(t.TempDir(), "brain.env")
 			t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
-			tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
+			tb.handleInbound(context.Background(), brainruntime.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
 			testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return len(tb.dev.Outbox()) > 0 })
 			logged, _ := os.ReadFile(envLog)
 			var path string
