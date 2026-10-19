@@ -189,9 +189,9 @@ export default (ctx) => express.Router().get('/probe', async (_req, res) => {
   const upload = join(ctx.dataDir, 'Rechnung.pdf')
   res.json({
     data: await attempt(() => (writeFileSync(join(ctx.dataDir, 'state.json'), 'kept'), readFileSync(join(ctx.dataDir, 'state.json'), 'utf8'))),
-    Ingest: await attempt(async () => { writeFileSync(upload, 'pdf'); return (await ctx.ingest({ brain: 'web', files: [upload], text: 'file it', sender: 'sam' })).status }),
+    ingest: await attempt(async () => { writeFileSync(upload, 'pdf'); return (await ctx.ingest({ brain: 'web', files: [upload], text: 'file it', sender: 'sam' })).status }),
     otherBrain: await attempt(() => ctx.ingest({ brain: 'private', files: [], text: 'x' })),
-    Search: await attempt(async () => { let s = ''; for await (const e of ctx.search({ brain: 'web', prompt: 'wo ist der Brief?' })) s += e.message.content[0].text; return s }),
+    search: await attempt(async () => { let s = ''; for await (const e of ctx.search({ brain: 'web', prompt: 'wo ist der Brief?' })) s += e.message.content[0].text; return s }),
     media: await attempt(() => readdirSync(`+jsString(media)+`).length),
   })
 })

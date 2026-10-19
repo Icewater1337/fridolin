@@ -25,7 +25,7 @@ type SiteOptions struct {
 type SiteBuilderHooks struct {
 	// BrainDir returns a brain's folder, or "" for no such brain.
 	BrainDir func(id string) string
-	// Sandbox wraps bin+args to run under the brain's Sandbox profile (or
+	// Sandbox wraps bin+args to run under the brain's sandbox profile (or
 	// returns them unchanged when sandboxing is off), with the variables
 	// that point the command at the brain's own TMPDIR and caches, the only
 	// places outside its folder it may write.
@@ -34,12 +34,12 @@ type SiteBuilderHooks struct {
 	BridgeURL func() string
 	// Executable is the fridolin binary the MCP server runs from.
 	Executable func() (string, error)
-	// SiteLimits is what the live site's Sandbox keeps from module code
+	// SiteLimits is what the live site's sandbox keeps from module code
 	// beyond its own list: the bridge's files (SandboxProfiler.sitePaths)
 	// and its HTTP port.
 	SiteLimits func() sandbox.SiteLimits
 	// Ingest hands files (already in the media folder) to a brain, as
-	// /Ingest does; MediaDir is that folder (site_ingest.go).
+	// /ingest does; MediaDir is that folder (site_ingest.go).
 	Ingest   func(brainID, sender, text string, files []string) error
 	MediaDir func() string
 	// Search runs a read-only Claude agent in a brain's folder, its
