@@ -62,7 +62,7 @@ func TestBuildChatPathNeedsABrainID(t *testing.T) {
 // limit.
 func TestBuildChatLeavesOutOnlyTheWorkingNotice(t *testing.T) {
 	c := &siteChats{m: newTestSite(t)}
-	s := siteChatMessenger{chats: c}
+	s := siteChatMessenger{appendMessage: c.add}
 	for _, tc := range []struct {
 		text  string
 		shown bool
@@ -200,7 +200,7 @@ func TestLongBuildChatAnswerStaysWhole(t *testing.T) {
 					return tb.sentTo(chatJID)
 				}
 				var out []string
-				for _, m := range tb.site.chats.get("web").Messages {
+				for _, m := range tb.site.BuildChat("web").Messages {
 					out = append(out, m.Text)
 				}
 				return out

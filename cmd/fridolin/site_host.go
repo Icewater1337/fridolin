@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/google"
+	"github.com/Icewater1337/fridolin/internal/sandbox"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -130,4 +132,10 @@ func NewSiteManager(opts SiteOptions) *SiteManager {
 		}
 	}
 	return newSiteManager(opts)
+}
+
+func siteSandboxProfile(in sandbox.SitePolicy) (string, error) {
+	in.WorkingDir, in.WorkingDirErr = os.Getwd()
+	in.Logf = log.Printf
+	return sandbox.SiteProfile(in)
 }

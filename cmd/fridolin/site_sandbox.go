@@ -167,9 +167,3 @@ func prepareDeclaredFolders(mods []sandbox.SiteModule, closed func(string) bool)
 		}
 	}
 }
-
-func siteSandboxProfile(in sandbox.SitePolicy) (string, error) {
-	in.WorkingDir, in.WorkingDirErr = os.Getwd()
-	in.Logf = log.Printf
-	return sandbox.SiteProfile(in)
-}

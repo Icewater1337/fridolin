@@ -127,7 +127,7 @@ func (b *Bridge) runBrainSearch(ctx context.Context, brainID, prompt string, out
 // everything else on as before.
 type siteChatMessenger struct {
 	Messenger
-	chats *siteChats
+	appendMessage func(string, string, string) error
 }
 
 func (s siteChatMessenger) SendMessage(ctx context.Context, jid, text string) error {
@@ -162,5 +162,5 @@ func (s siteChatMessenger) toChat(brainID, text string) error {
 	if text == outboundmsg.WorkingNotice {
 		return nil
 	}
-	return s.chats.add(brainID, "assistant", text)
+	return s.appendMessage(brainID, "assistant", text)
 }

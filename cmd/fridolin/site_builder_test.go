@@ -112,7 +112,7 @@ func TestSiteBuilderFlow(t *testing.T) {
 	json.Unmarshal(data, &mcp)
 	srv := mcp.MCPServers["fridolin-site"]
 	token := srv.Env["FRIDOLIN_BUILDER_TOKEN"]
-	if srv.Args[0] != "mcp-site" || token == "" || m.brainForToken(token) != "web" || m.brainForToken("wrong") != "" {
+	if srv.Args[0] != "mcp-site" || token == "" || m.BrainForToken(token) != "web" || m.BrainForToken("wrong") != "" {
 		t.Fatalf("mcp.json = %s", data)
 	}
 	codexArgs, codexEnv, codexPrompt, err := m.CodexBuilder("web")
@@ -264,7 +264,7 @@ export default (ctx) => express.Router().get('/note', (_req, res) => res.json({ 
 	if err := m.SetBuilder(ctx, "web", false); err != nil {
 		t.Fatal(err)
 	}
-	if m.brainForToken(token) != "" || m.BuilderArgs("web") != nil || m.previewOf("web") != nil {
+	if m.BrainForToken(token) != "" || m.BuilderArgs("web") != nil || m.previewOf("web") != nil {
 		t.Error("a former builder still has access")
 	}
 	if !fsx.Exists(filepath.Join(ws, "modules", "team")) {
