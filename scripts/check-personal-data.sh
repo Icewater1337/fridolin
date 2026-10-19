@@ -152,7 +152,13 @@ awk -F'\t' '{ t = $0; sub(/^[^\t]*\t/, "", t) }
 # their authors by email address. The email pattern skips it; every other
 # pattern and the denylist still read it.
 paste "$work/loc.txt" "$work/text.txt" |
-  awk -F'\t' '$1 ~ /(^|:)THIRD_PARTY_NOTICES(:|$)/ { print ""; next } { t = $0; sub(/^[^\t]*\t/, "", t); print t }' >"$work/text-emails.txt"
+  awk -F'\t' '
+    { t = $0; sub(/^[^\t]*\t/, "", t) }
+    $1 ~ /(^|:)THIRD_PARTY_NOTICES(:|$)/ { print ""; next }
+    # Dependabot signs commits with GitHub public support, not a personal address.
+    $1 ~ /:\(message\)$/ && t == "Signed-off-by: dependabot[bot] <support" "@github.com>" { print ""; next }
+    { print t }
+  ' >"$work/text-emails.txt"
 
 # generic ERE [ALLOW-ERE [TEXT]] — prints "location<TAB>match" for matches
 # not allowed, in TEXT (default: every scanned line but those blanked above).
