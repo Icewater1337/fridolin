@@ -82,6 +82,15 @@ behaviour unless its title says so. The steps so far:
   resolved paths/environment and runtime callbacks. The runtime keeps the
   start/force-stop barrier; the process owner acknowledges group cancellation
   independently of output hooks and delivery.
+- **R8, sandbox slice**: `sandbox` owns the brain and live-site rule builders,
+  shared precedence and path pinning. Explicit policy snapshots carry home,
+  working directory, temporary paths, provider/tool resolution and install
+  layout. The command adapter retains the profiler lock and refreshes host
+  discovery at each profile request. This preserves live runtime inputs;
+  the builder itself performs filesystem inspection but reads no ambient
+  environment. The site supplies its diagnostic logger explicitly. Shared
+  SBPL quoting lives in `textx`, also used by configuration validation.
+
 
 Everything else is still `package main` in `cmd/fridolin`, one file per
 subject (section 3 names the file each package will come from). A package

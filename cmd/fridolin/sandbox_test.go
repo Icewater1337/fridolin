@@ -16,6 +16,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/sandbox"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
@@ -686,7 +687,7 @@ func browserProfileRules(home string, both func(filter, p string) []string) []st
 		out = append(out, both("subpath", home+"/Library/Application Support/"+b)...)
 	}
 	// The profile's strings escape a backslash, as the regex's \. needs.
-	prefixes := strings.ReplaceAll("^"+regexp.QuoteMeta(home+"/Library/Application Support")+browserProfilePattern(), `\`, `\\`)
+	prefixes := strings.ReplaceAll("^"+regexp.QuoteMeta(home+"/Library/Application Support")+sandbox.BrowserProfilePattern(), `\`, `\\`)
 	out = append(out, both("regex", prefixes)...)
 	return append(out, both("subpath", home+"/Library/Safari")...)
 }
@@ -696,9 +697,9 @@ func browserProfileRules(home string, both func(filter, p string) []string) []st
 // with Go's; TestSandboxDeniesBrowserProfiles checks the real sandbox.
 func TestBrowserProfilesDenyEveryChannel(t *testing.T) {
 	const home = "/Users/you"
-	prefixes := regexp.MustCompile("^" + regexp.QuoteMeta(home+"/Library/Application Support") + browserProfilePattern())
+	prefixes := regexp.MustCompile("^" + regexp.QuoteMeta(home+"/Library/Application Support") + sandbox.BrowserProfilePattern())
 	denied := func(p string) bool {
-		for _, sub := range sandboxHomeReadDenies() {
+		for _, sub := range sandbox.HomeReadDenies() {
 			if d := home + "/" + sub; p == d || strings.HasPrefix(p, d+"/") {
 				return true
 			}

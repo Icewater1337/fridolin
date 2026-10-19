@@ -13,6 +13,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/sandbox"
 )
 
 // The live site's sandbox (docs/SITE.md, "What a module can reach").
@@ -39,9 +40,9 @@ import (
 // readModuleCaps reads every modules/<id>/module.json in modulesDir. A
 // manifest that does not parse, or whose id is not its folder's name, is
 // left out: the site skips that module too.
-func readModuleCaps(modulesDir, home string) []siteModuleCaps {
+func readModuleCaps(modulesDir, home string) []sandbox.SiteModule {
 	entries, _ := os.ReadDir(modulesDir)
-	var out []siteModuleCaps
+	var out []sandbox.SiteModule
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
@@ -71,16 +72,16 @@ func readModuleCaps(modulesDir, home string) []siteModuleCaps {
 		if json.Unmarshal(data, &mf) != nil || mf.ID != e.Name() {
 			continue
 		}
-		c := siteModuleCaps{ID: mf.ID, Title: mf.Title, Dir: dir, Commands: mf.Capabilities.Commands, Secrets: mf.Capabilities.Secrets, Ingest: mf.Capabilities.Ingest, Search: mf.Capabilities.Search}
+		c := sandbox.SiteModule{ID: mf.ID, Title: mf.Title, Dir: dir, Commands: mf.Capabilities.Commands, Secrets: mf.Capabilities.Secrets, Ingest: mf.Capabilities.Ingest, Search: mf.Capabilities.Search}
 		if mf.App != nil && mf.App.Dist != "" {
-			c.Dist = resolveModulePath(mf.App.Dist, dir, home)
+			c.Dist = sandbox.ResolveModulePath(mf.App.Dist, dir, home)
 		}
 		for name, f := range mf.Capabilities.Files {
 			if f.Path == "" || (f.Access != "read" && f.Access != "write") {
 				continue // the site refuses the module (validateManifest)
 			}
-			p := resolveModulePath(f.Path, dir, home)
-			c.Files = append(c.Files, siteFileCap{Name: name, Path: p, Access: f.Access, Folder: strings.HasSuffix(f.Path, "/") || isDir(p)})
+			p := sandbox.ResolveModulePath(f.Path, dir, home)
+			c.Files = append(c.Files, sandbox.FileCapability{Name: name, Path: p, Access: f.Access, Folder: strings.HasSuffix(f.Path, "/") || isDir(p)})
 		}
 		sort.Slice(c.Files, func(i, j int) bool { return c.Files[i].Name < c.Files[j].Name })
 		out = append(out, c)
@@ -118,8 +119,8 @@ func (m *SiteManager) SandboxStatus() SiteSandboxStatus {
 }
 
 // sandboxInput gathers what the live site's profile is built from.
-func (m *SiteManager) sandboxInput(node, deploy, root, rtFile string, mods []siteModuleCaps) siteProfileInput {
-	in := siteProfileInput{
+func (m *SiteManager) sandboxInput(node, deploy, root, rtFile string, mods []sandbox.SiteModule) sandbox.SitePolicy {
+	in := sandbox.SitePolicy{
 		Home:    config.HomeDir(),
 		DataDir: m.dataDir,
 		Shell:   m.dir("shell"),
@@ -151,7 +152,7 @@ func (m *SiteManager) sandboxInput(node, deploy, root, rtFile string, mods []sit
 // module itself could not, since the profile lets it write only below them.
 // Not where the profile would deny the module anyway (closed): a declared
 // ~/.aws/credentials leaves a missing ~/.aws missing.
-func prepareDeclaredFolders(mods []siteModuleCaps, closed func(string) bool) {
+func prepareDeclaredFolders(mods []sandbox.SiteModule, closed func(string) bool) {
 	for _, mod := range mods {
 		for _, f := range mod.Files {
 			if f.Access != "write" || !filepath.IsAbs(f.Path) {
@@ -173,8 +174,8 @@ func prepareDeclaredFolders(mods []siteModuleCaps, closed func(string) bool) {
 	}
 }
 
-func siteSandboxProfile(in siteProfileInput) (string, error) {
+func siteSandboxProfile(in sandbox.SitePolicy) (string, error) {
 	in.WorkingDir, in.WorkingDirErr = os.Getwd()
 	in.Logf = log.Printf
-	return buildSiteSandboxProfile(in)
+	return sandbox.SiteProfile(in)
 }

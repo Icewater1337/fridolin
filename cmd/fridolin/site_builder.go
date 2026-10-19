@@ -35,6 +35,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/sandbox"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/site"
 )
@@ -65,7 +66,7 @@ type builderHooks struct {
 	// siteLimits is what the live site's sandbox keeps from module code
 	// beyond its own list: the bridge's files (SandboxProfiler.sitePaths)
 	// and its HTTP port.
-	siteLimits func() siteBridgeLimits
+	siteLimits func() sandbox.SiteLimits
 	// ingest hands files (already in the media folder) to a brain, as
 	// /ingest does; mediaDir is that folder (site_ingest.go).
 	ingest   func(brainID, sender, text string, files []string) error
@@ -827,8 +828,8 @@ func (b *Bridge) siteBuilderHooks() builderHooks {
 			}
 			return filepath.EvalSymlinks(exe)
 		},
-		siteLimits: func() siteBridgeLimits {
-			var l siteBridgeLimits
+		siteLimits: func() sandbox.SiteLimits {
+			var l sandbox.SiteLimits
 			if sp := b.brainMgr.profiler; sp != nil {
 				l.Deny, l.NoWrite = sp.sitePaths()
 			}

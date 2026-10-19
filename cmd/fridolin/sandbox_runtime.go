@@ -13,6 +13,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/sandbox"
 )
 
 // SandboxProfiler generates a macOS sandbox-exec profile per brain.
@@ -58,7 +59,7 @@ type SandboxProfiler struct {
 func sandboxPolicyOf(cfg *config.Config) sandboxConfig {
 	// These may be relative, and the bridge opens them relative to its
 	// working directory; the comparisons need them absolute.
-	p := sandboxConfig{sandboxPolicy: sandboxPolicy{
+	p := sandboxConfig{Settings: sandbox.Settings{
 		DataDir:     absPath(cfg.DataDir),
 		DBPath:      absPath(cfg.DBPath),
 		MediaDir:    absPath(cfg.MediaDir),
@@ -76,9 +77,9 @@ func sandboxPolicyOf(cfg *config.Config) sandboxConfig {
 		p.Inbox = func(id string) string { return mediaInboxAt(media).Path(id) }
 	}
 	if data := p.DataDir; data != "" {
-		p.State = func(id string) sandboxStatePaths {
+		p.State = func(id string) sandbox.StatePaths {
 			s := brainStateOf(data, id)
-			return sandboxStatePaths{s.dir, s.folders()}
+			return sandbox.StatePaths{s.dir, s.folders()}
 		}
 		p.Tokens = func(id string) string { return runTokenDir(data, id) }
 	}
@@ -93,7 +94,7 @@ func sandboxPolicyOf(cfg *config.Config) sandboxConfig {
 
 // NewSandboxProfiler builds a profiler for the configured brains.
 func NewSandboxProfiler(workDirs map[string][]string, cfg *config.Config) *SandboxProfiler {
-	sp := &SandboxProfiler{execPath: sandboxExecPath}
+	sp := &SandboxProfiler{execPath: sandbox.ExecPath}
 	if exe, err := os.Executable(); err == nil {
 		sp.bridgeExe = exe
 	}
@@ -175,7 +176,7 @@ func (sp *SandboxProfiler) sitePaths() (deny, noWrite []string) {
 }
 
 // bridgeProgramsOf finds the bridge's programs as it would find them now.
-func (p sandboxConfig) bridgeProgramsOf(home string) bridgePrograms {
+func (p sandboxConfig) bridgeProgramsOf(home string) sandbox.Programs {
 	var found []string
 	if c, err := exec.LookPath(cmp.Or(p.claudePath, "claude")); err == nil {
 		found = append(found, c)
@@ -195,7 +196,7 @@ func (p sandboxConfig) bridgeProgramsOf(home string) bridgePrograms {
 			found = append(found, t)
 		}
 	}
-	var out bridgePrograms
+	var out sandbox.Programs
 	var path []string
 	path = append(path, filepath.SplitList(os.Getenv("PATH"))...)
 	if plaudErr == nil {
@@ -305,7 +306,7 @@ func (sp *SandboxProfiler) Command(brainID, prog string, args []string) (string,
 }
 
 type sandboxConfig struct {
-	sandboxPolicy
+	sandbox.Settings
 	// claudePath, rclonePath, plaudCLIPath and viewer name the programs the
 	// bridge itself runs outside the sandbox; see bridgeProgramsOf.
 	claudePath, codexPath, rclonePath, plaudCLIPath string
@@ -317,28 +318,28 @@ type sandboxConfig struct {
 	brainDirs []string
 }
 
-func sandboxContextNow(home string) sandboxContext {
+func sandboxContextNow(home string) sandbox.Context {
 	cwd, err := os.Getwd()
-	return sandboxContext{Home: home, WorkingDir: cwd, WorkingDirErr: err, TempDir: os.TempDir(), TmuxSocket: filepath.Join(cmp.Or(os.Getenv("TMUX_TMPDIR"), "/tmp"), fmt.Sprintf("tmux-%d", os.Getuid()))}
+	return sandbox.Context{Home: home, WorkingDir: cwd, WorkingDirErr: err, TempDir: os.TempDir(), TmuxSocket: filepath.Join(cmp.Or(os.Getenv("TMUX_TMPDIR"), "/tmp"), fmt.Sprintf("tmux-%d", os.Getuid()))}
 }
-func sandboxInstallLayoutOf(l bridgeLayout) sandboxInstallLayout {
-	return sandboxInstallLayout{Dir: l.Dir, Source: l.Source}
+func sandboxInstallLayoutOf(l bridgeLayout) sandbox.InstallLayout {
+	return sandbox.InstallLayout{Dir: l.Dir, Source: l.Source}
 }
 func (sp *SandboxProfiler) Profile(id string) (string, error) {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
 	ctx := sandboxContextNow(config.HomeDir())
-	var layout sandboxInstallLayout
+	var layout sandbox.InstallLayout
 	if sp.bridgeExe != "" {
 		layout = sandboxInstallLayoutOf(layoutOf(sp.bridgeExe))
 	}
-	return buildBrainSandboxProfile(sandboxProfile{Settings: sp.sandboxPolicy, Context: ctx, WorkDirs: sp.workDirs, ConfigFile: sp.configFile, ConfigEnvFile: config.DotEnvPath(sp.configFile), BridgeExe: sp.bridgeExe, Layout: layout, Programs: sp.bridgeProgramsOf(ctx.Home)}, id)
+	return sandbox.Profile(sandbox.Policy{Settings: sp.Settings, Context: ctx, WorkDirs: sp.workDirs, ConfigFile: sp.configFile, ConfigEnvFile: config.DotEnvPath(sp.configFile), BridgeExe: sp.bridgeExe, Layout: layout, Programs: sp.bridgeProgramsOf(ctx.Home)}, id)
 }
-func (p sandboxConfig) protected(home string, l bridgeLayout) []protectedPath {
-	return p.sandboxPolicy.Protected(sandboxContextNow(home), sandboxInstallLayoutOf(l), p.bridgeProgramsOf(home))
+func (p sandboxConfig) protected(home string, l bridgeLayout) []sandbox.ProtectedPath {
+	return p.Settings.Protected(sandboxContextNow(home), sandboxInstallLayoutOf(l), p.bridgeProgramsOf(home))
 }
-func protectedIn(dir string, paths []protectedPath) (string, bool) {
-	return protectedPathIn(sandboxContextNow(""), dir, paths)
+func protectedIn(dir string, paths []sandbox.ProtectedPath) (string, bool) {
+	return sandbox.ProtectedIn(sandboxContextNow(""), dir, paths)
 }
 
 // nodePackage returns the npm package folder that holds the file p

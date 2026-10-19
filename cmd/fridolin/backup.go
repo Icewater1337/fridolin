@@ -24,11 +24,10 @@ import (
 	"unicode"
 
 	"github.com/Icewater1337/fridolin/internal/config"
-
-	"github.com/Icewater1337/fridolin/internal/manifest"
-
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
+	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/sandbox"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"golang.org/x/text/unicode/norm"
 )
@@ -1742,15 +1741,15 @@ func resolveExisting(p string) string {
 // exception, ~/Documents and the rest of sandboxUserFileFolders(): brains live
 // there, and so may a restored one, as CheckBrainPath lets a new one.
 func checkRestoreTarget(target string, cfg *config.Config, home string) error {
-	var denied []protectedPath
+	var denied []sandbox.ProtectedPath
 	for _, p := range sandboxPolicyOf(cfg).protected(home, ownLayout()) {
-		if !slices.ContainsFunc(sandboxUserFileFolders(), func(sub string) bool { return p.Path == filepath.Join(home, sub) }) {
+		if !slices.ContainsFunc(sandbox.UserFileFolders(), func(sub string) bool { return p.Path == filepath.Join(home, sub) }) {
 			p.Inside = true
 		}
 		denied = append(denied, p)
 	}
 	for _, p := range cfg.Sandbox.DenyPaths {
-		denied = append(denied, protectedPath{fsx.ExpandHome(p, home), true, "the deny_paths entry " + p})
+		denied = append(denied, sandbox.ProtectedPath{fsx.ExpandHome(p, home), true, "the deny_paths entry " + p})
 	}
 	if what, ok := protectedIn(target, denied); ok {
 		return fmt.Errorf("%s, which the sandbox keeps from brains", what)

@@ -18,10 +18,9 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
-
-	"github.com/Icewater1337/fridolin/internal/textx"
-
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/sandbox"
+	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 // requireSiteRuntime skips a test that runs the live site without what it
@@ -37,8 +36,8 @@ func requireSiteRuntime(t *testing.T) {
 		t.Skip("run npm install in site/ first")
 	}
 	if runtime.GOOS == "darwin" {
-		if out, err := exec.Command(sandboxExecPath, "-p", "(version 1)(allow default)", "/usr/bin/true").CombinedOutput(); err != nil {
-			t.Skipf("%s cannot apply a profile here: %v: %s", sandboxExecPath, err, out)
+		if out, err := exec.Command(sandbox.ExecPath, "-p", "(version 1)(allow default)", "/usr/bin/true").CombinedOutput(); err != nil {
+			t.Skipf("%s cannot apply a profile here: %v: %s", sandbox.ExecPath, err, out)
 		}
 	}
 }
@@ -361,7 +360,7 @@ func TestSiteProfileClosesBrowserProfiles(t *testing.T) {
 	q := func(p string) string { s, _ := textx.SBPLString(p); return s }
 	// The prefix rule, as the profile writes it; its strings escape a
 	// backslash, as the regex's \. needs.
-	prefixRule := strings.ReplaceAll("^"+regexp.QuoteMeta(appSupport)+browserProfilePattern(), `\`, `\\`)
+	prefixRule := strings.ReplaceAll("^"+regexp.QuoteMeta(appSupport)+sandbox.BrowserProfilePattern(), `\`, `\\`)
 	for _, c := range []struct {
 		folder string
 		closed bool
@@ -377,11 +376,11 @@ func TestSiteProfileClosesBrowserProfiles(t *testing.T) {
 	} {
 		t.Run(c.folder, func(t *testing.T) {
 			dir := filepath.Join(appSupport, c.folder, "Default")
-			in := siteProfileInput{
+			in := sandbox.SitePolicy{
 				Home: home, DataDir: data,
 				Shell: filepath.Join(data, "site", "shell"), Deploy: filepath.Join(data, "site", "deploys", "abc"),
 				Tmp: filepath.Join(data, "site", "tmp"),
-				Modules: []siteModuleCaps{{ID: "m", Dir: filepath.Join(data, "site", "deploys", "abc", "modules", "m"), Files: []siteFileCap{
+				Modules: []sandbox.SiteModule{{ID: "m", Dir: filepath.Join(data, "site", "deploys", "abc", "modules", "m"), Files: []sandbox.FileCapability{
 					{Name: "profile", Path: dir, Access: "write", Folder: true},
 				}}},
 			}

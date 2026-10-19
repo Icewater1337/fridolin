@@ -17,6 +17,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/sandbox"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
@@ -170,17 +171,17 @@ func spoolAnswer(root *os.Root, entry string, err error, extra map[string]any) {
 }
 
 // liveCaps is the live commit's capabilities of a module, or false.
-func (m *SiteManager) liveCaps(module string) (siteModuleCaps, error) {
+func (m *SiteManager) liveCaps(module string) (sandbox.SiteModule, error) {
 	s := m.Settings()
 	if s.Approved == "" {
-		return siteModuleCaps{}, errors.New("no commit of the site is live")
+		return sandbox.SiteModule{}, errors.New("no commit of the site is live")
 	}
 	for _, mod := range readModuleCaps(m.modulesDirOf(s.Approved), config.HomeDir()) {
 		if mod.ID == module {
 			return mod, nil
 		}
 	}
-	return siteModuleCaps{}, fmt.Errorf("module %q is not live", module)
+	return sandbox.SiteModule{}, fmt.Errorf("module %q is not live", module)
 }
 
 // ── ctx.ingest ────────────────────────────────────────────────────────────
