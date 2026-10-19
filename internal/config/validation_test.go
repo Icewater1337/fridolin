@@ -86,3 +86,14 @@ func TestStoreRefusesUncheckedBrainUpdates(t *testing.T) {
 		t.Errorf("unchecked update wrote config: %v", err)
 	}
 }
+
+func TestLogLevelValidation(t *testing.T) {
+	for _, level := range []string{"debug", "info", "warn", "error", "DEBUG"} {
+		if _, err := Resolve(&File{LogLevel: level}, Paths{Home: t.TempDir()}, "linux"); err != nil {
+			t.Errorf("%q: %v", level, err)
+		}
+	}
+	if _, err := Resolve(&File{LogLevel: "verbose"}, Paths{Home: t.TempDir()}, "linux"); err == nil {
+		t.Fatal("unknown log level accepted")
+	}
+}

@@ -1,10 +1,12 @@
 package app
 
 import (
+	"github.com/Icewater1337/fridolin/internal/logx"
+
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"sync"
@@ -16,6 +18,7 @@ import (
 // RunOptions describes the layers started after a successful listener bind.
 // The owning application stops services and closes storage in dependency order.
 type RunOptions struct {
+	Logger           *slog.Logger
 	Address          string
 	Listen           func(string, string) (net.Listener, error)
 	Handler          func() http.Handler
@@ -29,6 +32,7 @@ type RunOptions struct {
 // Supervisor owns the HTTP server and connection/watch goroutines. Its zero
 // value starts nothing; Run begins them, and the owner then tears down services.
 type Supervisor struct {
+	logger      *slog.Logger
 	server      *http.Server
 	connections sync.WaitGroup
 	stopOnce    sync.Once
@@ -37,6 +41,7 @@ type Supervisor struct {
 // Run binds before starting intake and propagates unexpected server failures.
 // Parent cancellation remains a normal stop; its cause is retained by the caller.
 func (s *Supervisor) Run(ctx context.Context, o RunOptions) error {
+	s.logger = o.Logger
 	run, fail := context.WithCancelCause(ctx)
 	defer fail(nil)
 	if o.Address != "" {
@@ -52,7 +57,7 @@ func (s *Supervisor) Run(ctx context.Context, o RunOptions) error {
 			}
 		}()
 		if o.DashboardEnabled {
-			log.Printf("Dashboard: http://%s/  (open it with: fridolin open)", o.Address)
+			logx.Printf(s.logger, "Dashboard: http://%s/  (open it with: fridolin open)", o.Address)
 		}
 	}
 	o.Resume(run)
@@ -62,7 +67,7 @@ func (s *Supervisor) Run(ctx context.Context, o RunOptions) error {
 	for _, start := range o.Background {
 		start(run)
 	}
-	log.Println("Bridge started. Waiting for messages…")
+	logx.Printf(s.logger, "Bridge started. Waiting for messages…")
 	<-run.Done()
 	watchers.Wait()
 	if ctx.Err() == nil {
@@ -87,7 +92,7 @@ func (s *Supervisor) StopHTTP(grace time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), grace)
 	defer cancel()
 	if err := s.server.Shutdown(ctx); err != nil {
-		log.Printf("HTTP server: requests still running %v after the stop began (%v); cutting them off", grace, err)
+		logx.Printf(s.logger, "HTTP server: requests still running %v after the stop began (%v); cutting them off", grace, err)
 		_ = s.server.Close()
 	}
 }

@@ -114,3 +114,28 @@ func TestActivityFeedConcurrentSeedAndWrites(t *testing.T) {
 		t.Fatalf("fallback timestamp = %v", got[0].TS)
 	}
 }
+
+func TestActivityWrapEditRevokeAndSeedOrder(t *testing.T) {
+	t.Parallel()
+	feed := New(3)
+	add := func(id string) {
+		feed.Add("a", history.Entry{TS: "2026-01-01T00:00:00Z", ID: id, Type: history.In, Chat: "chat", From: "sender", Text: id})
+	}
+	for _, id := range []string{"one", "two", "three", "four", "five"} {
+		add(id)
+	}
+	feed.Change("a", Change{Target: "four", Sender: "sender", Chat: "chat"}, "edited")
+	feed.Change("a", Change{Target: "three", Sender: "sender", Chat: "chat", Revoke: true}, "")
+	add("six")
+	got := feed.Recent(10, "")
+	if len(got) != 3 || got[0].Text != "six" || got[1].Text != "five" || got[2].Text != "edited" {
+		t.Fatalf("wrapped edit/revoke: %+v", got)
+	}
+	feed.Seed("b", func() []history.Entry {
+		return []history.Entry{{TS: "2026-01-01T00:00:01Z", Type: history.In, Text: "seed"}}
+	})
+	got = feed.Recent(10, "")
+	if len(got) != 3 || got[0].Text != "seed" || got[1].Text != "six" || got[2].Text != "five" {
+		t.Fatalf("wrapped seed: %+v", got)
+	}
+}

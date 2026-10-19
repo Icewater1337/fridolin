@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -252,7 +253,7 @@ func runCmd(args []string) int {
 	defer cancel(nil)
 	// NewBridge takes the data dir's instance lock, so dev mode with the live
 	// data dir is refused next to the running bridge too.
-	bridge, err := app.New(app.Options{Config: cfgs, NoWhatsApp: opts.noWhatsApp, Logs: ring})
+	bridge, err := app.New(app.Options{Logger: slog.Default(), Config: cfgs, NoWhatsApp: opts.noWhatsApp, Logs: ring})
 	if err != nil {
 		log.Printf("creating bridge: %v", err)
 		return 1
@@ -327,7 +328,7 @@ func runLog(console io.Writer, configFlag string) (*logx.Ring, string) {
 
 func runLogWithPaths(console io.Writer, configFlag string, paths config.Paths) (*logx.Ring, string) {
 	ring := logx.NewRing(app.LogRingLines)
-	log.SetOutput(io.MultiWriter(console, ring))
+	slog.SetDefault(logx.NewLogger(io.MultiWriter(console, ring)))
 	log.Printf("Starting %s", version.Line())
 	path, source := app.ConfigPathFromPaths(configFlag, paths)
 	log.Printf("Config file: %s (%s)", app.AbsPath(path), source)

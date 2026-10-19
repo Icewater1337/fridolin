@@ -1,7 +1,9 @@
 package app
 
 import (
-	"log"
+	"github.com/Icewater1337/fridolin/internal/logx"
+
+	"log/slog"
 	"time"
 )
 
@@ -10,6 +12,7 @@ import (
 // work is persisted while storage is open, and brains finish before transport
 // and storage close. Callbacks are required, except Background may be empty.
 type StopOptions struct {
+	Logger          *slog.Logger
 	CloseIntake     func()
 	HTTPGrace       time.Duration
 	Background      []func()
@@ -39,13 +42,13 @@ func (s *Supervisor) Stop(o StopOptions) {
 		o.OTP()
 		o.Disconnect()
 		if !s.WaitConnections(o.ConnectionGrace) {
-			log.Printf("WhatsApp: still connecting %v after the disconnect; stopping without waiting for it", o.ConnectionGrace)
+			logx.Printf(o.Logger, "WhatsApp: still connecting %v after the disconnect; stopping without waiting for it", o.ConnectionGrace)
 		}
 		o.EndIntake()
 		if err := o.CloseStore(); err != nil {
-			log.Printf("closing store: %v", err)
+			logx.Printf(o.Logger, "closing store: %v", err)
 		}
 		o.ReleaseLock()
-		log.Println("Bridge stopped.")
+		logx.Printf(o.Logger, "Bridge stopped.")
 	})
 }
