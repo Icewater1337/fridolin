@@ -30,7 +30,7 @@ func (b *Bridge) googleCallback(w http.ResponseWriter, r *http.Request) {
 
 func (b *Bridge) apiGoogleClient(w http.ResponseWriter, r *http.Request) {
 	g := b.google
-	resp := map[string]any{"configured": false, "redirect_uri": g.redirectURI()}
+	resp := map[string]any{"configured": false, "redirect_uri": g.RedirectURI()}
 	if c := g.Client(); c != nil {
 		hint := c.ClientID
 		if i := strings.Index(hint, "-"); i > 0 {
@@ -56,7 +56,7 @@ func (b *Bridge) apiSetGoogleClient(w http.ResponseWriter, r *http.Request) {
 	}
 	note := ""
 	if c.Type == "web" {
-		note = "This is a Web application client: add " + b.google.redirectURI() + " to its Authorized redirect URIs in Google Cloud Console, or create a Desktop app client instead."
+		note = "This is a Web application client: add " + b.google.RedirectURI() + " to its Authorized redirect URIs in Google Cloud Console, or create a Desktop app client instead."
 	}
 	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved", "type": c.Type, "note": note})
 }
@@ -134,7 +134,7 @@ func (b *Bridge) apiCalendarDisconnect(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	revoked, note, err := b.google.Disconnect(ctx, br.ID(), r.URL.Query().Get("local_only") == "1")
 	switch {
-	case errors.Is(err, errNotRevoked):
+	case errors.Is(err, ErrGoogleNotRevoked):
 		httpapi.WriteErr(w, http.StatusBadGateway, err.Error()+"; the token was kept, so try again, or remove it here only")
 		return
 	case err != nil:

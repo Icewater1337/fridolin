@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/jsonx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
@@ -127,8 +129,8 @@ func ParseGoogleClient(data []byte) (*GoogleClient, error) {
 	return nil, errors.New(`expected a Google OAuth client file with an "installed" (Desktop app) or "web" section`)
 }
 
-// googleToken is the "authorized user" file the Google libraries read.
-type googleToken struct {
+// GoogleToken is the "authorized user" file the Google libraries read.
+type GoogleToken struct {
 	Token        string   `json:"token"`
 	RefreshToken string   `json:"refresh_token"`
 	TokenURI     string   `json:"token_uri"`
@@ -207,7 +209,7 @@ func NewGoogleAuth(options GoogleOptions) *GoogleAuth {
 // Without it a refresh that read the token before a disconnect removed it
 // would write it back once Google answered: the brain would show as
 // connected again, and with no calendars chosen any more it may use its
-// primary one (calendarsOf). The lock is a channel of one, so that waiting
+// primary one (GoogleCalendarsOf). The lock is a channel of one, so that waiting
 // for it ends with ctx; unlock releases it.
 func (g *GoogleAuth) lockToken(ctx context.Context, brainID string) (unlock func(), err error) {
 	g.mu.Lock()
@@ -225,26 +227,34 @@ func (g *GoogleAuth) lockToken(ctx context.Context, brainID string) (unlock func
 	}
 }
 
-func (g *GoogleAuth) clientPath() string {
+// ClientPath returns the startup OAuth client file.
+func (g *GoogleAuth) ClientPath() string {
 	return g.options.ClientPath
 }
 
-// credsDir is where per-brain calendar files live.
-func (g *GoogleAuth) credsDir() string { return g.options.CredsDir() }
+// CredsDir is where per-brain calendar files live.
+func (g *GoogleAuth) CredsDir() string { return g.options.CredsDir() }
 
-func (g *GoogleAuth) tokenPath(brainID string) string {
-	return calendarTokenFile(g.credsDir(), brainID)
+// TokenPath resolves the brain token using the current credentials directory.
+func (g *GoogleAuth) TokenPath(brainID string) string {
+	return GoogleTokenFile(g.CredsDir(), brainID)
 }
 
-// calendarTokenFile is a brain's calendar token in dir, the credentials
+// GoogleTokenFile is a brain's calendar token in dir, the credentials
 // dir. Only the bridge reads and writes it; the sandbox denies brains the
 // folder.
-func calendarTokenFile(dir, brainID string) string {
+func GoogleTokenFile(dir, brainID string) string {
 	return filepath.Join(dir, calendarTokenPrefix+brainID+calendarTokenSuffix)
 }
 
+// GoogleCredentialsFile names the client copy older calendar tools used.
+// The bridge no longer creates these files; it only reports leftover copies.
+func GoogleCredentialsFile(dir, brainID string) string {
+	return filepath.Join(dir, calendarClientCopyPrefix+brainID+".json")
+}
+
 // calendarTokenPrefix and calendarTokenSuffix make up a token file's name
-// around the brain id, for calendarTokenFile and calendarTokenBrain alike.
+// around the brain id, for GoogleTokenFile and calendarTokenBrain alike.
 const calendarTokenPrefix, calendarTokenSuffix = "google_calendar_token_", ".json"
 
 // calendarClientCopyPrefix starts the name of the copy of the OAuth client
@@ -264,7 +274,7 @@ const calendarClientCopyPrefix = "google_calendar_credentials_"
 // the secret all the same. A symlink is not followed, so one is not
 // reported. The names are returned without the folder.
 func (g *GoogleAuth) leftoverClientCopies() []string {
-	dir := g.credsDir()
+	dir := g.CredsDir()
 	entries, _ := os.ReadDir(dir) // sorted by name
 	var out []string
 	for _, e := range entries {
@@ -305,7 +315,7 @@ func holdsClientSecret(data []byte) bool {
 }
 
 // calendarTokenBrain turns the name of a token file back into its brain's
-// id, the inverse of calendarTokenFile; ok is false for any other name.
+// id, the inverse of GoogleTokenFile; ok is false for any other name.
 func calendarTokenBrain(name string) (brainID string, ok bool) {
 	id, ok := strings.CutPrefix(name, calendarTokenPrefix)
 	if ok {
@@ -319,7 +329,7 @@ func calendarTokenBrain(name string) (brainID string, ok bool) {
 
 // Client returns the configured OAuth client, or nil.
 func (g *GoogleAuth) Client() *GoogleClient {
-	data, err := os.ReadFile(g.clientPath())
+	data, err := os.ReadFile(g.ClientPath())
 	if err != nil {
 		return nil
 	}
@@ -336,16 +346,16 @@ func (g *GoogleAuth) SetClient(data []byte) (*GoogleClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := fsx.WriteFileAtomic(g.clientPath(), data, 0o600, false); err != nil {
+	if err := fsx.WriteFileAtomic(g.ClientPath(), data, 0o600, false); err != nil {
 		return nil, err
 	}
 	return c, nil
 }
 
-// redirectURI is where Google sends the browser back: the dashboard
+// RedirectURI is where Google sends the browser back: the dashboard
 // itself, at the address it was started on. http_listen changes only with a
 // restart, and a sign-in started before it must come back here.
-func (g *GoogleAuth) redirectURI() string {
+func (g *GoogleAuth) RedirectURI() string {
 	return g.options.RedirectURI
 }
 
@@ -365,11 +375,14 @@ func randomString(n int) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
+// ErrGoogleNoClient means sign-in needs the owner's OAuth client first.
+var ErrGoogleNoClient = errors.New("add your Google OAuth client first (Settings → Google sign-in)")
+
 // StartSignIn returns the Google URL that signs a brain in.
 func (g *GoogleAuth) StartSignIn(brainID string) (string, error) {
 	c := g.Client()
 	if c == nil {
-		return "", errors.New("add your Google OAuth client first (Settings → Google sign-in)")
+		return "", ErrGoogleNoClient
 	}
 	verifier := randomString(48)
 	sum := sha256.Sum256([]byte(verifier))
@@ -381,7 +394,7 @@ func (g *GoogleAuth) StartSignIn(brainID string) (string, error) {
 			delete(g.pending, s)
 		}
 	}
-	redirect := g.redirectURI()
+	redirect := g.RedirectURI()
 	g.pending[state] = oauthPending{brainID: brainID, verifier: verifier, created: time.Now(), client: c, redirectURI: redirect}
 	delete(g.lastError, brainID)
 	g.mu.Unlock()
@@ -469,7 +482,7 @@ func (g *GoogleAuth) Callback(ctx context.Context, q url.Values) (string, error)
 	// the new one with it. The old token is read now, before the new one
 	// replaces it, and revoked last, once the new one is saved.
 	var revokeOld string
-	oldData, oldErr := readCredentialFile(g.tokenPath(p.brainID))
+	oldData, oldErr := readCredentialFile(g.TokenPath(p.brainID))
 	if old, err := g.loadToken(p.brainID); err == nil && old.RefreshToken != "" && old.Account != "" &&
 		!strings.EqualFold(old.Account, account) && g.sharingGrant(p.brainID, old) == "" {
 		revokeOld = old.RefreshToken
@@ -486,13 +499,13 @@ func (g *GoogleAuth) Callback(ctx context.Context, q url.Values) (string, error)
 		// The brain went in the meantime, say: take back what this sign-in
 		// wrote, and only that. The token it replaced goes back.
 		if oldErr == nil {
-			_ = fsx.WriteFileAtomic(g.tokenPath(p.brainID), oldData, 0o600, false)
+			_ = fsx.WriteFileAtomic(g.TokenPath(p.brainID), oldData, 0o600, false)
 		} else {
-			_ = os.Remove(g.tokenPath(p.brainID))
+			_ = os.Remove(g.TokenPath(p.brainID))
 		}
 		return fail("saving the brain's calendar settings failed: " + err.Error())
 	}
-	log.Printf("brain %s: Google Calendar connected (%s)", p.brainID, maskEmail(account))
+	log.Printf("brain %s: Google Calendar connected (%s)", p.brainID, GoogleMaskEmail(account))
 	// Only now: a sign-in that failed above leaves the brain with the old
 	// token, which must still work.
 	if revokeOld != "" {
@@ -503,7 +516,8 @@ func (g *GoogleAuth) Callback(ctx context.Context, q url.Values) (string, error)
 	return back, nil
 }
 
-func maskEmail(e string) string {
+// GoogleMaskEmail masks an account address for diagnostic output.
+func GoogleMaskEmail(e string) string {
 	at := strings.Index(e, "@")
 	if at <= 1 {
 		return "…"
@@ -572,7 +586,7 @@ func (g *GoogleAuth) postToken(ctx context.Context, c *GoogleClient, form url.Va
 
 // exchange trades the code Google returned for sign-in p for a token, with
 // the client and redirect URI p started with.
-func (g *GoogleAuth) exchange(ctx context.Context, p oauthPending, code string) (*googleToken, error) {
+func (g *GoogleAuth) exchange(ctx context.Context, p oauthPending, code string) (*GoogleToken, error) {
 	c := p.client
 	tr, err := g.postToken(ctx, c, url.Values{
 		"grant_type":    {"authorization_code"},
@@ -583,7 +597,7 @@ func (g *GoogleAuth) exchange(ctx context.Context, p oauthPending, code string) 
 	if err != nil {
 		return nil, err
 	}
-	return &googleToken{
+	return &GoogleToken{
 		Token: tr.AccessToken, RefreshToken: tr.RefreshToken, TokenURI: g.options.Endpoints.Token,
 		ClientID: c.ClientID, ClientSecret: c.ClientSecret, Scopes: tr.grantedScopes(calendarScopes),
 		Expiry: time.Now().Add(tokenLifetime(tr.ExpiresIn)).UTC().Format("2006-01-02T15:04:05.000000Z"),
@@ -605,12 +619,12 @@ func (tr *tokenResponse) grantedScopes(asked []string) []string {
 // and all, next to it as google_calendar_credentials_<brain>.json, for the
 // calendar tool in the brain; nothing reads that copy any more. The caller
 // holds the brain's token lock (lockToken).
-func (g *GoogleAuth) saveToken(brainID string, tok *googleToken) error {
+func (g *GoogleAuth) saveToken(brainID string, tok *GoogleToken) error {
 	data, err := json.MarshalIndent(tok, "", "  ")
 	if err != nil {
 		return err
 	}
-	return fsx.WriteFileAtomic(g.tokenPath(brainID), data, 0o600, false)
+	return fsx.WriteFileAtomic(g.TokenPath(brainID), data, 0o600, false)
 }
 
 // configured reports whether brainID is one of the configured brains.
@@ -660,24 +674,24 @@ func readRegularFile(path string, singleLink bool) ([]byte, error) {
 	return data, nil
 }
 
-func (g *GoogleAuth) loadToken(brainID string) (*googleToken, error) {
+func (g *GoogleAuth) loadToken(brainID string) (*GoogleToken, error) {
 	t, _, err := g.loadTokenFields(brainID)
 	return t, err
 }
 
 // loadTokenFields is loadToken with every field of the file as it is, for
 // writing the file back: the Google library that older versions' calendar
-// tool used added fields of its own (universe_domain), which googleToken
+// tool used added fields of its own (universe_domain), which GoogleToken
 // does not know.
-func (g *GoogleAuth) loadTokenFields(brainID string) (*googleToken, map[string]json.RawMessage, error) {
-	data, err := readCredentialFile(g.tokenPath(brainID))
+func (g *GoogleAuth) loadTokenFields(brainID string) (*GoogleToken, map[string]json.RawMessage, error) {
+	data, err := readCredentialFile(g.TokenPath(brainID))
 	if err != nil {
 		return nil, nil, err
 	}
-	var t googleToken
+	var t GoogleToken
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(data, &t); err != nil {
-		return nil, nil, fmt.Errorf("unreadable token file: %w", err)
+		return nil, nil, fmt.Errorf("unreadable token file: %w", GoogleDecodeError(err))
 	}
 	if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
 		return nil, nil, fmt.Errorf("unreadable token file: not a JSON object")
@@ -689,19 +703,19 @@ func (g *GoogleAuth) loadTokenFields(brainID string) (*googleToken, map[string]j
 // before Google is asked: a token file it cannot read or trust, one with
 // no refresh token or from another OAuth client, or no client to refresh
 // it with. Connecting the brain again writes a new token, so a brain is
-// told to ask for that (calendarCallProblem); other errors are not this.
+// told to ask for that (GoogleCallProblem); other errors are not this.
 type signInError struct{ err error }
 
 func (e *signInError) Error() string { return e.err.Error() }
 func (e *signInError) Unwrap() error { return e.err }
 
-// accessToken returns a valid access token, refreshing (and saving) it when
+// AccessToken returns a valid access token, refreshing (and saving) it when
 // it has expired. It holds the brain's token lock from reading the token
 // to writing it back (lockToken), so that calls which find it expired at
 // the same time refresh it once: the others then read what the first one
 // saved. The refresh is a single request, bounded by ctx and the instance HTTP client's
 // timeout, so a disconnect waiting for the lock waits that long at most.
-func (g *GoogleAuth) accessToken(ctx context.Context, brainID string) (*googleToken, error) {
+func (g *GoogleAuth) AccessToken(ctx context.Context, brainID string) (*GoogleToken, error) {
 	unlock, err := g.lockToken(ctx, brainID)
 	if err != nil {
 		return nil, err
@@ -746,7 +760,7 @@ func (g *GoogleAuth) accessToken(ctx context.Context, brainID string) (*googleTo
 	}
 	// The access token is good for this call either way; a token not saved
 	// is only refreshed again next time.
-	if err := writeTokenFields(g.tokenPath(brainID), fields, t); err != nil {
+	if err := writeTokenFields(g.TokenPath(brainID), fields, t); err != nil {
 		log.Printf("brain %s: saving the refreshed calendar token failed: %v", brainID, err)
 	}
 	return t, nil
@@ -755,7 +769,7 @@ func (g *GoogleAuth) accessToken(ctx context.Context, brainID string) (*googleTo
 // writeTokenFields writes t's refreshed fields over fields, the token file
 // as it was read, so that what an older calendar tool's library added
 // stays.
-func writeTokenFields(path string, fields map[string]json.RawMessage, t *googleToken) error {
+func writeTokenFields(path string, fields map[string]json.RawMessage, t *GoogleToken) error {
 	for k, v := range map[string]any{"token": t.Token, "refresh_token": t.RefreshToken, "expiry": t.Expiry, "scopes": t.Scopes} {
 		raw, err := json.Marshal(v)
 		if err != nil {
@@ -780,10 +794,10 @@ type CalendarEntry struct {
 	Color      string `json:"color,omitempty"`
 }
 
-// calendarList returns the account's calendars, primary first. An account
+// CalendarList returns the account's calendars, primary first. An account
 // can have more than fit in one page, and a calendar on the second would
 // look as if it did not exist.
-func (g *GoogleAuth) calendarList(ctx context.Context, tok *googleToken) ([]CalendarEntry, error) {
+func (g *GoogleAuth) CalendarList(ctx context.Context, tok *GoogleToken) ([]CalendarEntry, error) {
 	q := url.Values{"maxResults": {"250"}} // the API's largest page
 	var out []CalendarEntry
 	for range maxGooglePages {
@@ -822,8 +836,8 @@ func (g *GoogleAuth) calendarList(ctx context.Context, tok *googleToken) ([]Cale
 	return out, nil
 }
 
-func (g *GoogleAuth) primaryAccount(ctx context.Context, tok *googleToken) (string, error) {
-	cals, err := g.calendarList(ctx, tok)
+func (g *GoogleAuth) primaryAccount(ctx context.Context, tok *GoogleToken) (string, error) {
+	cals, err := g.CalendarList(ctx, tok)
 	if err != nil {
 		return "", err
 	}
@@ -835,10 +849,10 @@ func (g *GoogleAuth) primaryAccount(ctx context.Context, tok *googleToken) (stri
 	return "", errors.New("the account has no primary calendar")
 }
 
-// errNotRevoked is Disconnect's error when Google did not confirm that it
+// ErrGoogleNotRevoked is Disconnect's error when Google did not confirm that it
 // revoked the access. The token stays, so that Disconnect can be tried
 // again, or told to remove it here only.
-var errNotRevoked = errors.New("the revocation was not confirmed by Google")
+var ErrGoogleNotRevoked = errors.New("the revocation was not confirmed by Google")
 
 // Disconnect ends a brain's calendar access, deletes its token file and
 // clears its chosen calendars. It revokes the refresh token at Google
@@ -847,7 +861,7 @@ var errNotRevoked = errors.New("the revocation was not confirmed by Google")
 // whole grant for the account, so every brain signed in to it would lose
 // its access too. note then says why it did not revoke. When Google does
 // not confirm the revocation, the token stays and the error wraps
-// errNotRevoked, unless localOnly asks to delete it anyway.
+// ErrGoogleNotRevoked, unless localOnly asks to delete it anyway.
 //
 // A token file that is a symlink is not read, so nothing is revoked
 // through it, and the remove takes the symlink away, not what it points to.
@@ -859,7 +873,7 @@ var errNotRevoked = errors.New("the revocation was not confirmed by Google")
 // after it, they could undo the choice of a sign-in that was waiting for
 // the lock and saved its token in between, which would leave the brain
 // signed in with no calendars chosen, so on its primary one
-// (calendarsOf).
+// (GoogleCalendarsOf).
 func (g *GoogleAuth) Disconnect(ctx context.Context, brainID string, localOnly bool) (revoked bool, note string, err error) {
 	unlock, err := g.lockToken(ctx, brainID)
 	if err != nil {
@@ -882,7 +896,7 @@ func (g *GoogleAuth) Disconnect(ctx context.Context, brainID string, localOnly b
 				note = fmt.Sprintf("the access was not revoked at Google, since the credentials folder holds a token for %s, "+
 					"which is not a configured brain, from the same client for the same Google account (%s); "+
 					"if nothing uses that file, delete it and remove the access at myaccount.google.com/permissions",
-					other, filepath.Base(g.tokenPath(other)))
+					other, filepath.Base(g.TokenPath(other)))
 			}
 			break
 		}
@@ -891,7 +905,7 @@ func (g *GoogleAuth) Disconnect(ctx context.Context, brainID string, localOnly b
 		}
 		revoked = true
 	}
-	if err := os.Remove(g.tokenPath(brainID)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.Remove(g.TokenPath(brainID)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return revoked, note, err
 	}
 	g.mu.Lock()
@@ -914,7 +928,7 @@ func (g *GoogleAuth) revoke(ctx context.Context, refreshToken string) error {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := g.options.HTTP.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %w", errNotRevoked, err)
+		return fmt.Errorf("%w: %w", ErrGoogleNotRevoked, err)
 	}
 	defer resp.Body.Close()
 	var body struct {
@@ -927,9 +941,9 @@ func (g *GoogleAuth) revoke(ctx context.Context, refreshToken string) error {
 	case resp.StatusCode == http.StatusBadRequest && body.Error == "invalid_token":
 		return nil
 	case body.Error != "":
-		return fmt.Errorf("%w: %s (%s)", errNotRevoked, body.Error, resp.Status)
+		return fmt.Errorf("%w: %s (%s)", ErrGoogleNotRevoked, body.Error, resp.Status)
 	}
-	return fmt.Errorf("%w: %s", errNotRevoked, resp.Status)
+	return fmt.Errorf("%w: %s", ErrGoogleNotRevoked, resp.Status)
 }
 
 // sharingGrant names another holder of the grant t belongs to: a token in
@@ -938,18 +952,18 @@ func (g *GoogleAuth) revoke(ctx context.Context, refreshToken string) error {
 // counts the other token as sharing it. It returns "" for none, else the
 // brain that token is for, which need not be a configured one: a token
 // file outlives a brain removed without a disconnect.
-func (g *GoogleAuth) sharingGrant(brainID string, t *googleToken) string {
-	entries, _ := os.ReadDir(g.credsDir()) // sorted by name
+func (g *GoogleAuth) sharingGrant(brainID string, t *GoogleToken) string {
+	entries, _ := os.ReadDir(g.CredsDir()) // sorted by name
 	for _, e := range entries {
 		other, ok := calendarTokenBrain(e.Name())
 		if !ok || other == brainID {
 			continue
 		}
-		data, err := readCredentialFile(filepath.Join(g.credsDir(), e.Name()))
+		data, err := readCredentialFile(filepath.Join(g.CredsDir(), e.Name()))
 		if err != nil {
 			continue
 		}
-		var o googleToken
+		var o GoogleToken
 		if json.Unmarshal(data, &o) != nil || o.RefreshToken == "" || o.ClientID != t.ClientID {
 			continue
 		}
@@ -962,7 +976,7 @@ func (g *GoogleAuth) sharingGrant(brainID string, t *googleToken) string {
 
 // DeleteClient removes the shared OAuth client, leaving existing tokens alone.
 func (g *GoogleAuth) DeleteClient() error {
-	if err := os.Remove(g.clientPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := os.Remove(g.ClientPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return nil
@@ -974,15 +988,15 @@ func (g *GoogleAuth) CalendarStatus(ctx context.Context, brainID string, cal *ma
 	resp := map[string]any{
 		"client_configured": g.Client() != nil,
 		"connected":         false,
-		"token_path":        g.tokenPath(brainID),
+		"token_path":        g.TokenPath(brainID),
 		"calendars":         []CalendarEntry{},
 		"selected":          []string{},
 		// Of every brain, not only this one: any brain the sandbox does not
 		// hold can read them.
-		"leftover_client_copies": nonNil(g.leftoverClientCopies()),
+		"leftover_client_copies": googleNonNil(g.leftoverClientCopies()),
 	}
 	if cal != nil {
-		resp["account"], resp["selected"], resp["default"] = cal.Account, nonNil(cal.Calendars), cal.Default
+		resp["account"], resp["selected"], resp["default"] = cal.Account, googleNonNil(cal.Calendars), cal.Default
 	}
 	g.mu.Lock()
 	if e := g.lastError[brainID]; e != "" {
@@ -991,7 +1005,7 @@ func (g *GoogleAuth) CalendarStatus(ctx context.Context, brainID string, cal *ma
 	g.mu.Unlock()
 	// Lstat: a symlink there shows as connected, with the reason it is not
 	// used in list_error.
-	if _, err := os.Lstat(g.tokenPath(brainID)); err != nil {
+	if _, err := os.Lstat(g.TokenPath(brainID)); err != nil {
 		return resp
 	}
 	resp["connected"] = true
@@ -1005,10 +1019,10 @@ func (g *GoogleAuth) CalendarStatus(ctx context.Context, brainID string, cal *ma
 	if list {
 		ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
-		tok, err := g.accessToken(ctx, brainID)
+		tok, err := g.AccessToken(ctx, brainID)
 		if err == nil {
 			var cals []CalendarEntry
-			if cals, err = g.calendarList(ctx, tok); err == nil {
+			if cals, err = g.CalendarList(ctx, tok); err == nil {
 				resp["calendars"] = cals
 				if cal == nil {
 					for _, c := range cals {
@@ -1046,7 +1060,7 @@ func (g *GoogleAuth) Select(brainID string, cal manifest.Calendar) error {
 	})
 }
 
-// calendarEnv tells a run which brain it is and which calendars it may use.
+// GoogleCalendarEnv tells a run which brain it is and which calendars it may use.
 //
 // compat: calendar_tool.py read these to find the brain's token and keep to
 // its calendars; nothing in tools/ reads them now that the bridge makes the
@@ -1056,10 +1070,51 @@ func (g *GoogleAuth) Select(brainID string, cal manifest.Calendar) error {
 // (leftoverClientCopies), which a brain the sandbox does not hold can
 // read. The last argument, that folder, is not used any more; it stays
 // until the caller in brain.go stops passing it.
-func calendarEnv(id string, m manifest.Manifest, _ string) []string {
+func GoogleCalendarEnv(id string, m manifest.Manifest, _ string) []string {
 	env := []string{"BRIDGE_BRAIN_ID=" + id}
 	if m.Calendar != nil && len(m.Calendar.Calendars) > 0 {
 		env = append(env, "BRIDGE_CALENDARS="+strings.Join(m.Calendar.Calendars, ","), "BRIDGE_CALENDAR_DEFAULT="+m.Calendar.Default)
 	}
 	return env
+}
+
+// googleNonNil keeps empty lists encoded as [] in calendar status responses.
+func googleNonNil[T any](s []T) []T {
+	if s == nil {
+		return []T{}
+	}
+	return s
+}
+
+// GoogleDecodeError preserves the existing JSON diagnostic names across the
+// package boundary, including named fields inside anonymous response structs.
+// It changes only decoder text; errors.As retains the original type metadata.
+func GoogleDecodeError(err error) error {
+	types := map[reflect.Type]string{
+		reflect.TypeFor[GoogleToken]():     "googleToken",
+		reflect.TypeFor[googleEvent]():     "googleEvent",
+		reflect.TypeFor[CalendarEntry]():   "CalendarEntry",
+		reflect.TypeFor[CalendarEvent]():   "CalendarEvent",
+		reflect.TypeFor[CalendarListing](): "CalendarListing",
+		reflect.TypeFor[NewEvent]():        "NewEvent",
+		reflect.TypeFor[Reminder]():        "Reminder",
+		reflect.TypeFor[BusySlot]():        "BusySlot",
+	}
+	return jsonx.RenameTypeError(err, func(t reflect.Type) string {
+		name := t.String()
+		for typ, legacy := range types {
+			name = strings.ReplaceAll(name, typ.String(), "main."+legacy)
+		}
+		if name != t.String() {
+			return name
+		}
+		return ""
+	}, func(name string) string {
+		for typ, legacy := range types {
+			if name == typ.Name() {
+				return legacy
+			}
+		}
+		return ""
+	})
 }

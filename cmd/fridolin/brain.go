@@ -1333,7 +1333,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *brainSettings, m 
 	finalArgs := args
 	extraEnv := append([]string{"FRIDOLIN_BRAIN_ID=" + br.id}, dataEnv(s)...)
 	extraEnv = append(extraEnv, providerEnv...)
-	extraEnv = append(extraEnv, calendarEnv(br.id, s.manifest, s.credsDir)...)
+	extraEnv = append(extraEnv, GoogleCalendarEnv(br.id, s.manifest, s.credsDir)...)
 	extraEnv = append(extraEnv, plaudOptOut...)
 	if s.toolsDir != "" {
 		// Prompts and skills run the helpers as $FRIDOLIN_TOOLS_DIR/<tool>,

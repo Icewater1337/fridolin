@@ -250,7 +250,7 @@ func FuzzDecodeManifest(f *testing.F) {
 			}
 		}
 		if c := m.Calendar; c != nil && len(c.Calendars) > 0 {
-			for _, kv := range calendarEnv(m.ID, *m, "/creds") {
+			for _, kv := range GoogleCalendarEnv(m.ID, *m, "/creds") {
 				if v, ok := strings.CutPrefix(kv, "BRIDGE_CALENDARS="); ok && !reflect.DeepEqual(strings.Split(v, ","), c.Calendars) {
 					t.Errorf("calendars %q reach the tool as %q", c.Calendars, v)
 				}

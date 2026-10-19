@@ -95,10 +95,10 @@ func TestCalendarSignInFlow(t *testing.T) {
 			if (*got)["code"] != "good-code" || base64.RawURLEncoding.EncodeToString(challenge[:]) != q.Get("code_challenge") {
 				t.Fatal("code exchange did not retain its PKCE verifier")
 			}
-			if _, err := os.Stat(calendarTokenFile(creds, "a")); err != nil {
+			if _, err := os.Stat(GoogleTokenFile(creds, "a")); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := os.Stat(calendarTokenFile(filepath.Join(root, "before-sign-in"), "a")); !os.IsNotExist(err) {
+			if _, err := os.Stat(GoogleTokenFile(filepath.Join(root, "before-sign-in"), "a")); !os.IsNotExist(err) {
 				t.Fatalf("token was written to the startup credentials path: %v", err)
 			}
 			if redirect, err := callback(q.Get("state")); redirect != "" || err == nil {

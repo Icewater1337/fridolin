@@ -732,7 +732,7 @@ func dmAllowSummary(cfg *config.Config) string {
 
 // redactor masks what check --redact must not show: phone numbers down to
 // the country code and the last two digits, group JIDs and LIDs down to
-// their last two digits, email addresses as maskEmail does, and the home
+// their last two digits, email addresses as GoogleMaskEmail does, and the home
 // folder, written as ~ in every path. Two numbers or groups still tell
 // apart, and paths still say where under the home folder they are.
 type redactor struct {
@@ -855,7 +855,7 @@ func (r *redactor) text(s string) string {
 			}
 			return m
 		}
-		return maskEmail(m)
+		return GoogleMaskEmail(m)
 	})
 	for _, c := range r.chats {
 		s = strings.ReplaceAll(s, c.value, c.masked)

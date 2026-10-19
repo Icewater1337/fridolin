@@ -1148,14 +1148,3 @@ func TestSignInKeepsItsClientAndRedirect(t *testing.T) {
 		t.Fatalf("exchange sent redirect_uri %q and client %q", (*got)["redirect_uri"], (*got)["client_id"])
 	}
 }
-
-func TestTokenLifetime(t *testing.T) {
-	for _, c := range []struct {
-		in   int
-		want time.Duration
-	}{{3599, 3599 * time.Second}, {0, time.Hour}, {-5, time.Hour}} {
-		if got := tokenLifetime(c.in); got != c.want {
-			t.Errorf("tokenLifetime(%d) = %v, want %v", c.in, got, c.want)
-		}
-	}
-}

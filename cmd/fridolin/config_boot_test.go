@@ -137,8 +137,8 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 	for label, pair := range map[string][2]string{
 		"rclone":                      {tb.backup.rcloneConf(), boot.RcloneConf()},
 		"backup":                      {tb.backup.dir(), boot.BackupDir()},
-		"Google credentials fallback": {tb.google.credsDir(), boot.DataDir},
-		"Google redirect":             {tb.google.redirectURI(), "http://" + boot.HTTPListen + "/"},
+		"Google credentials fallback": {tb.google.CredsDir(), boot.DataDir},
+		"Google redirect":             {tb.google.RedirectURI(), "http://" + boot.HTTPListen + "/"},
 		"Plaud state":                 {tb.plaud.dir(), boot.PlaudDir()},
 		"Plaud private HOME":          {tb.plaud.cliHome(), filepath.Join(boot.PlaudDir(), "home")},
 		"Plaud phone inbox":           {tb.plaud.phoneDir(), filepath.Join(boot.PlaudDir(), "inbox")},
@@ -172,7 +172,7 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatal(w.Body.String())
 	}
-	if tb.google.credsDir() != explicitCreds || tb.plaud.phoneDir() != explicitPhone || tb.plaud.cliHome() != boot.Home || tb.brainMgr.Get("main").settings.Load().credsDir != explicitCreds {
+	if tb.google.CredsDir() != explicitCreds || tb.plaud.phoneDir() != explicitPhone || tb.plaud.cliHome() != boot.Home || tb.brainMgr.Get("main").settings.Load().credsDir != explicitCreds {
 		t.Error("explicit credential/phone paths or Plaud access stopped applying live")
 	}
 

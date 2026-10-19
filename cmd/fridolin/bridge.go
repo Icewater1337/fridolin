@@ -279,7 +279,7 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 	b.plaud = NewPlaudManager(cfgs, b.brainMgr)
 	b.plaud.submit = b.submitHandOff
 	b.plaud.notify = b.wa.SendMessage
-	b.site = NewSiteManager(cfg.DataDir, b.google.clientPath)
+	b.site = NewSiteManager(cfg.DataDir, b.google.ClientPath)
 	b.plaud.siteURL = func() string {
 		if d := b.site.Settings().Domain; d != "" {
 			return "https://" + d
