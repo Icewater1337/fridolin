@@ -31,7 +31,7 @@ var imports = map[string][]string{
 	"internal/archtest":  nil,
 	"internal/chat":      nil,
 	"internal/claudecli": {"internal/platform", "internal/textx"},
-	"internal/config":    {"internal/chat", "internal/fsx", "internal/manifest", "internal/textx", "internal/trigger"},
+	"internal/config":    {"internal/chat", "internal/fsx", "internal/jsonx", "internal/manifest", "internal/textx", "internal/trigger"},
 	"internal/devchat":   {"internal/chat", "internal/textx"},
 	"internal/fsx":       nil,
 	"internal/history":   {"internal/fsx"},
