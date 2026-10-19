@@ -41,7 +41,7 @@ func TestAdmitPreservesQueueBoundaries(t *testing.T) {
 		{"interrupt stays within sender and chat", "interrupt", []Inbound{own, other, elsewhere, chatter, ingest}, request, 5, []string{"other", "elsewhere", "upload", "new"}, []string{"own", "chatter"}, true, false},
 		{"upload is not a correction", "interrupt", []Inbound{own, chatter}, ingest, 5, []string{"own", "upload"}, []string{"chatter"}, false, false},
 		{"chatter does not interrupt requests", "interrupt", []Inbound{own, chatter, elsewhere}, chatter, 5, []string{"own", "elsewhere", "chatter"}, []string{"chatter"}, false, false},
-		{"oldest other chatter yields capacity", "queue", []Inbound{own, otherChatter, elsewhere}, request, 3, []string{"own", "elsewhere", "new"}, []string{}, false, false},
+		{"oldest other chatter yields capacity", "queue", []Inbound{own, otherChatter, elsewhere}, request, 3, []string{"own", "elsewhere", "new"}, []string{"other-chatter"}, false, false},
 		{"full requests are unchanged", "queue", []Inbound{own, other, elsewhere}, request, 3, []string{"own", "other", "elsewhere"}, []string{}, false, true},
 		{"replacement creates room", "interrupt", []Inbound{own, other, elsewhere}, request, 3, []string{"other", "elsewhere", "new"}, []string{"own"}, true, false},
 		{"refusal still removes superseded chatter", "queue", []Inbound{chatter, other, elsewhere}, request, 2, []string{"other", "elsewhere"}, []string{"chatter"}, false, true},
