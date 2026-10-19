@@ -50,13 +50,14 @@ func (a *GoogleAPI) Callback(w http.ResponseWriter, r *http.Request) {
 
 func (a *GoogleAPI) Client(w http.ResponseWriter, r *http.Request) {
 	g := a.Google()
-	resp := map[string]any{"configured": false, "redirect_uri": g.RedirectURI()}
+	resp := GoogleClientResponse{Configured: false, RedirectURI: g.RedirectURI()}
 	if c := g.Client(); c != nil {
 		hint := c.ClientID
 		if i := strings.Index(hint, "-"); i > 0 {
 			hint = hint[:i] + "-…"
 		}
-		resp["configured"], resp["type"], resp["client_id_hint"] = true, c.Type, hint
+		clientType := c.Type
+		resp.Configured, resp.Type, resp.ClientIDHint = true, &clientType, &hint
 	}
 	WriteJSON(w, http.StatusOK, resp)
 }

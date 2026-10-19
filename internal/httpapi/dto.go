@@ -200,3 +200,19 @@ type SiteUsersResponse struct {
 	Roles []string        `json:"roles"`
 	Users []site.SiteUser `json:"users"`
 }
+
+// Optional fields preserve whether the former response map contained a key.
+type SendResponse struct {
+	OTPRequest string `json:"otp_request,omitempty"`
+	Status     string `json:"status"`
+}
+type RotateTokenResponse struct {
+	Binding *string `json:"binding,omitempty"`
+	Status  string  `json:"status"`
+}
+type GoogleClientResponse struct {
+	ClientIDHint *string `json:"client_id_hint,omitempty"`
+	Configured   bool    `json:"configured"`
+	RedirectURI  string  `json:"redirect_uri"`
+	Type         *string `json:"type,omitempty"`
+}

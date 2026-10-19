@@ -106,3 +106,32 @@ func TestResponseDTOsKeepMapWireEncoding(t *testing.T) {
 		})
 	}
 }
+
+func TestOptionalResponseFieldsKeepPresence(t *testing.T) {
+	empty, value := "", "value"
+	cases := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{"send", SendResponse{Status: "sent"}, `{"status":"sent"}`},
+		{"send OTP", SendResponse{OTPRequest: value, Status: "sent"}, `{"otp_request":"value","status":"sent"}`},
+		{"rotate", RotateTokenResponse{Status: "rotated"}, `{"status":"rotated"}`},
+		{"rotate empty binding", RotateTokenResponse{Binding: &empty, Status: "rotated"}, `{"binding":"","status":"rotated"}`},
+		{"rotate binding", RotateTokenResponse{Binding: &value, Status: "rotated"}, `{"binding":"value","status":"rotated"}`},
+		{"Google absent", GoogleClientResponse{RedirectURI: "callback"}, `{"configured":false,"redirect_uri":"callback"}`},
+		{"Google empty", GoogleClientResponse{ClientIDHint: &empty, Configured: true, RedirectURI: "callback", Type: &empty}, `{"client_id_hint":"","configured":true,"redirect_uri":"callback","type":""}`},
+		{"Google configured", GoogleClientResponse{ClientIDHint: &value, Configured: true, RedirectURI: "callback", Type: &value}, `{"client_id_hint":"value","configured":true,"redirect_uri":"callback","type":"value"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := json.Marshal(tc.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tc.want {
+				t.Fatalf("got %s; want %s", got, tc.want)
+			}
+		})
+	}
+}

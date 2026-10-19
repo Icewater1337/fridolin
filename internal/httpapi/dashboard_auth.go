@@ -131,14 +131,14 @@ func (a *DashboardAuth) RotateToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("dashboard token rotated: every dashboard was signed out, and scripts with the old token are refused")
-	resp := map[string]string{"status": "rotated"}
+	resp := RotateTokenResponse{Status: "rotated"}
 	if resign {
 		binding, err := a.StartSession(w, r)
 		if err != nil {
 			WriteErr(w, http.StatusInternalServerError, "signing in again: "+err.Error())
 			return
 		}
-		resp["binding"] = binding
+		resp.Binding = &binding
 	}
 	WriteJSON(w, http.StatusOK, resp)
 }
