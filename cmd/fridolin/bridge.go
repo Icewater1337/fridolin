@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/Icewater1337/fridolin/internal/backup"
 	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/devchat"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
@@ -34,6 +35,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/otp"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/store"
+
 	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 )
@@ -73,7 +75,7 @@ type Bridge struct {
 	// sessionCookie names the session cookie for the address served on.
 	sessionCookie string
 	scriptAuth    *scriptAuth
-	backup        *BackupManager
+	backup        *backup.Manager
 	google        *GoogleAuth
 	plaud         *PlaudManager
 	site          *SiteManager
@@ -267,16 +269,9 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 	if !b.tokenAtStart {
 		log.Printf("warning: dashboard.require_token is off: any program on this computer, brains included, can change every setting through the dashboard API")
 	}
-	b.backup = NewBackupManager(cfgs, b.brainMgr)
 	// A refused scheduled backup goes to the brain's chat, like Plaud's
 	// expired-login notice: the owner may not open the dashboard for weeks.
-	b.backup.notify = func(ctx context.Context, br *brainruntime.Brain, text string) error {
-		jid := b.replyChatFor(br, b.cfgs.Get())
-		if jid == "" {
-			return fmt.Errorf("brain %s has no chat to send it to — set its reply chat", br.ID())
-		}
-		return b.wa.SendMessage(ctx, jid, text)
-	}
+	b.backup = newProjectedBackup(cfgs, b.brainMgr, b.notifyBackup)
 	b.google = NewGoogleAuth(cfgs)
 	b.plaud = NewPlaudManager(cfgs, b.brainMgr)
 	b.plaud.submit = b.submitHandOff

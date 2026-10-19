@@ -235,18 +235,22 @@ func TestIsolationHeadersAndOAuthCallback(t *testing.T) {
 	}
 }
 
-// lockProbe is a ResponseWriter that, as the body is written, checks
-// whether mu is free.
+// lockProbe asks for a public snapshot while the HTTP body is written. A slow
+// client must not prevent another operation from acquiring the service lock.
 type lockProbe struct {
 	*httptest.ResponseRecorder
-	mu   *sync.Mutex
-	free bool
+	probe func()
+	free  bool
+	done  chan struct{}
 }
 
 func (p *lockProbe) Write(b []byte) (int, error) {
-	if p.mu.TryLock() {
+	p.done = make(chan struct{})
+	go func() { p.probe(); close(p.done) }()
+	select {
+	case <-p.done:
 		p.free = true
-		p.mu.Unlock()
+	case <-time.After(2 * time.Second):
 	}
 	return p.ResponseRecorder.Write(b)
 }
@@ -262,8 +266,15 @@ func TestBackupStatusWritesWithoutTheLock(t *testing.T) {
 		{"GET", "/api/backup/status", tb.apiBackupStatus},
 		{"POST", "/api/backup/cancel", tb.apiBackupCancel},
 	} {
-		w := &lockProbe{ResponseRecorder: httptest.NewRecorder(), mu: &tb.backup.mu}
+		w := &lockProbe{ResponseRecorder: httptest.NewRecorder(), probe: func() { _ = tb.backup.Summary() }}
 		c.h(w, httptest.NewRequest(c.method, c.path, nil))
+		if w.done != nil {
+			select {
+			case <-w.done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("snapshot still blocked after the response")
+			}
+		}
 		if !w.free {
 			t.Errorf("%s %s wrote its response holding the lock (%d)", c.method, c.path, w.Code)
 		}

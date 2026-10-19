@@ -465,11 +465,18 @@ responsibility and says what it must not do.
 
 ### Integrations
 
-- **`backup`** *(to come, R13; `backup.go`, `connectjob.go`)*: Google Drive
-  backups through an isolated rclone (its own `--config`, `RCLONE_*`
-  stripped from the environment, stdout never logged). It covers connect,
-  run, the daily schedule, prune, versions and restore, and has no HTTP
-  code.
+- **`backup`** (`internal/backup`, R13): `Manager` owns Google Drive backups
+  through an isolated rclone (its own `--config`, `RCLONE_*` stripped from the
+  environment, stdout never logged). It covers connect, run, daily scheduling,
+  prune, versions, restore, state persistence and exclusion filters. Its
+  stateful fixtures use owned settings, retained target callbacks, ordered
+  bridge-file snapshots and explicit process adapters. The command supplies
+  current config projections, runtime targets, host discovery and restore
+  target validation; the package imports neither config nor runtime brains
+  and has no HTTP code. Bridge-file serialization completes from one immutable
+  snapshot before staging writes, preserving snapshot, write and error order.
+  `jsonx` preserves the existing visible decoder type names without changing
+  typed error identity, offsets or stored bytes.
 - **`google`** *(to come, R14; `google.go`, `google_calendar.go`)*: the
   OAuth client and per-brain calendar sign-in with PKCE. It handles tokens,
   the calendar list and the calendar calls the brain API makes for runs,
@@ -545,7 +552,7 @@ sandbox   ─► fsx
 otp       ─► history, fsx
 route     ─► manifest, chat, fsx
 
-backup ─► fsx, textx, apperr
+backup ─► fsx, textx, apperr, jsonx
 google ─► manifest, fsx, apperr
 plaud  ─► media, platform, chat, fsx, textx, apperr
 
