@@ -243,9 +243,12 @@ responsibility and says what it must not do.
   (remove group/other access while preserving owner access and special bits).
   `OpenInFolder` opens a regular file through an `*os.Root`, refusing
   symlinks, special files and a file replaced during the open.
-- **`jsonx`**: standard-library-only JSON field inspection. `UnknownKeys`
-  reports recursively sorted field paths while respecting custom decoders
-  and case-insensitive JSON field matching.
+- **`jsonx`**: standard-library-only JSON field inspection and diagnostic
+  formatting. `UnknownKeys` reports recursively sorted field paths while
+  respecting custom decoders and case-insensitive JSON field matching.
+  `RenameTypeError` lets the owning package retain pre-extraction type names
+  in decoder messages; the original error, offsets and field context remain
+  available through `errors.As`. Config and manifest select their own names.
 - **`textx`**: `Truncate` and `Tail`, which shorten text from its end or its
   start to a byte limit without splitting a rune. `SBPLString` quotes profile
   strings without changing UTF-8; `EscapeSBPL` applies the same escaping to
