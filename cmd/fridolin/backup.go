@@ -186,7 +186,7 @@ func newBackupManager(opts BackupOptions) *BackupManager {
 			if werr := fsx.WriteFileAtomic(kept, data, 0o600, false); werr != nil {
 				kept = "not kept: " + werr.Error()
 			}
-			log.Printf("backup: %s is unreadable (%v); starting without the last results and schedule (the old file: %s)", m.statePath(), jerr, kept)
+			log.Printf("backup: %s is unreadable (%v); starting without the last results and schedule (the old file: %s)", m.statePath(), backupJSONError(jerr), kept)
 		}
 	case !errors.Is(err, fs.ErrNotExist):
 		log.Printf("backup: reading %s: %v; starting without the last results and schedule", m.statePath(), err)
@@ -491,7 +491,7 @@ func (m *BackupManager) connectDrive(ctx context.Context, job *connectJob) error
 		}
 		var q rcloneQuestion
 		if err := json.Unmarshal(out, &q); err != nil {
-			return fmt.Errorf("unexpected rclone output: %w %s", err, stderr.tail())
+			return fmt.Errorf("unexpected rclone output: %w %s", backupJSONError(err), stderr.tail())
 		}
 		if q.Error != "" {
 			return errors.New(q.Error)
