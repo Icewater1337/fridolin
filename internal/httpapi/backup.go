@@ -47,7 +47,7 @@ func (a *BackupAPI) Connect(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, status, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
+	WriteJSON(w, http.StatusAccepted, OperationResponse{Status: "connecting"})
 }
 
 func (a *BackupAPI) Disconnect(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +59,7 @@ func (a *BackupAPI) Disconnect(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, status, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "disconnected"})
 }
 
 func (a *BackupAPI) Settings(w http.ResponseWriter, r *http.Request) {
@@ -96,7 +96,7 @@ func (a *BackupAPI) Settings(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "saved"})
 }
 
 // apiBrainBackup changes one brain's backup settings, which live in its
@@ -114,7 +114,7 @@ func (a *BackupAPI) BrainSettings(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "saved"})
 }
 
 func (a *BackupAPI) Run(w http.ResponseWriter, r *http.Request) {
@@ -140,7 +140,7 @@ func (a *BackupAPI) Run(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusConflict, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+	WriteJSON(w, http.StatusAccepted, OperationResponse{Status: "started"})
 }
 
 func (a *BackupAPI) Cancel(w http.ResponseWriter, r *http.Request) {
@@ -148,7 +148,7 @@ func (a *BackupAPI) Cancel(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusConflict, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "cancelling"})
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "cancelling"})
 }
 
 func (a *BackupAPI) Versions(w http.ResponseWriter, r *http.Request) {
@@ -165,7 +165,7 @@ func (a *BackupAPI) Versions(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, status, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"brain": id, "versions": versions})
+	WriteJSON(w, http.StatusOK, BackupVersionsResponse{Brain: id, Versions: versions})
 }
 
 // apiBackupRestore copies a backup into a new, empty folder. It never writes
@@ -201,5 +201,5 @@ func (a *BackupAPI) Restore(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, status, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusAccepted, map[string]string{"status": "restoring", "target": target})
+	WriteJSON(w, http.StatusAccepted, RestoreStartedResponse{Status: "restoring", Target: target})
 }

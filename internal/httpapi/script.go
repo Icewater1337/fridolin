@@ -171,5 +171,5 @@ func (a *ScriptAPI) Ingest(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "jid": jid})
+	WriteJSON(w, http.StatusAccepted, IngestAcceptedResponse{Status: "accepted", JID: jid})
 }

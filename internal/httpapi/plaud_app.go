@@ -26,7 +26,7 @@ func (a *PlaudAppAPI) Credentials(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "saved"})
 }
 
 func (a *PlaudAppAPI) Build(w http.ResponseWriter, r *http.Request) {
@@ -36,7 +36,7 @@ func (a *PlaudAppAPI) Build(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		WriteErr(w, http.StatusPreconditionFailed, err.Error())
 	default:
-		WriteJSON(w, http.StatusAccepted, map[string]string{"status": "building"})
+		WriteJSON(w, http.StatusAccepted, OperationResponse{Status: "building"})
 	}
 }
 
@@ -57,6 +57,6 @@ func (a *PlaudAppAPI) RevokeDevice(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		WriteErr(w, http.StatusInternalServerError, err.Error())
 	default:
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "unpaired"})
+		WriteJSON(w, http.StatusOK, OperationResponse{Status: "unpaired"})
 	}
 }

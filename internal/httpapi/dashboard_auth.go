@@ -94,7 +94,7 @@ func (a *DashboardAuth) Login(w http.ResponseWriter, r *http.Request) {
 			log.Printf("dashboard sign-in: ending the session it replaces: %v", err)
 		}
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "signed in", "binding": binding})
+	WriteJSON(w, http.StatusOK, SignInResponse{Status: "signed in", Binding: binding})
 }
 
 // apiLogout ends this browser's session.
@@ -106,14 +106,14 @@ func (a *DashboardAuth) Logout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	http.SetCookie(w, &http.Cookie{Name: a.CookieName(), Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: secureCookie(r)})
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "signed out"})
 }
 
 // apiLoginCode makes a login code, for `fridolin open`, which calls it with
 // the token from the data dir.
 func (a *DashboardAuth) LoginCode(w http.ResponseWriter, r *http.Request) {
 	code, exp := a.Sessions().NewCode()
-	WriteJSON(w, http.StatusOK, map[string]any{"code": code, "expires_at": exp})
+	WriteJSON(w, http.StatusOK, LoginCodeResponse{Code: code, ExpiresAt: exp})
 }
 
 // apiRotateToken replaces the dashboard token and ends every session: sign

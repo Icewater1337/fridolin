@@ -62,7 +62,7 @@ func (a *BuildChatAPI) Send(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusAccepted, OKResponse{Ok: true})
 }
 
 func (a *BuildChatAPI) New(w http.ResponseWriter, r *http.Request) {
@@ -74,7 +74,7 @@ func (a *BuildChatAPI) New(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{Ok: true})
 }
 
 func (a *BuildChatAPI) Stop(w http.ResponseWriter, r *http.Request) {
@@ -86,5 +86,5 @@ func (a *BuildChatAPI) Stop(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusConflict, "nothing is running in this chat")
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{Ok: true})
 }

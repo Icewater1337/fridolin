@@ -16,6 +16,6 @@ func (a *RestartAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("Restarting on request from the dashboard…")
-	WriteJSON(w, http.StatusAccepted, map[string]string{"status": "restarting"})
+	WriteJSON(w, http.StatusAccepted, OperationResponse{Status: "restarting"})
 	a.Restart()
 }

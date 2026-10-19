@@ -84,7 +84,7 @@ func (a *SiteAPI) Settings(w http.ResponseWriter, r *http.Request) {
 
 func (a *SiteAPI) Restart(w http.ResponseWriter, r *http.Request) {
 	go a.Site().Restart()
-	WriteJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusAccepted, OKResponse{Ok: true})
 }
 
 func (a *SiteAPI) DeployKey(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +93,7 @@ func (a *SiteAPI) DeployKey(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"deploy_key": pub})
+	WriteJSON(w, http.StatusOK, DeployKeyResponse{DeployKey: pub})
 }
 
 // apiSiteDeployKeyGH adds the deploy key with gh. Before a repository is
@@ -112,7 +112,7 @@ func (a *SiteAPI) DeployKeyGH(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "repo": repo})
+	WriteJSON(w, http.StatusOK, DeployKeyAddedResponse{Ok: true, Repo: repo})
 }
 
 func (a *SiteAPI) CreateGitHubRepo(w http.ResponseWriter, r *http.Request) {
@@ -128,7 +128,7 @@ func (a *SiteAPI) CreateGitHubRepo(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"url": u})
+	WriteJSON(w, http.StatusOK, RepositoryCreatedResponse{URL: u})
 }
 
 func (a *SiteAPI) Connect(w http.ResponseWriter, r *http.Request) {
@@ -149,7 +149,7 @@ func (a *SiteAPI) Disconnect(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{Ok: true})
 }
 
 func (a *SiteAPI) Starter(w http.ResponseWriter, r *http.Request) {
@@ -157,7 +157,7 @@ func (a *SiteAPI) Starter(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{Ok: true})
 }
 
 func (a *SiteAPI) Fetch(w http.ResponseWriter, r *http.Request) {
@@ -186,7 +186,7 @@ func (a *SiteAPI) Deploy(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *SiteAPI) Users(w http.ResponseWriter, r *http.Request) {
-	WriteJSON(w, http.StatusOK, map[string]any{"users": a.Site().Users(), "roles": a.Site().Settings().Roles})
+	WriteJSON(w, http.StatusOK, SiteUsersResponse{Users: a.Site().Users(), Roles: a.Site().Settings().Roles})
 }
 
 func (a *SiteAPI) AddUser(w http.ResponseWriter, r *http.Request) {
@@ -222,7 +222,7 @@ func (a *SiteAPI) RemoveUser(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{Ok: true})
 }
 
 func (a *SiteAPI) Roles(w http.ResponseWriter, r *http.Request) {
@@ -237,7 +237,7 @@ func (a *SiteAPI) Roles(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"roles": a.Site().Settings().Roles})
+	WriteJSON(w, http.StatusOK, SiteRolesResponse{Roles: a.Site().Settings().Roles})
 }
 
 func (a *SiteAPI) Tunnel(w http.ResponseWriter, r *http.Request) {
@@ -252,7 +252,7 @@ func (a *SiteAPI) Tunnel(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{Ok: true})
 }
 
 // apiSiteGoogleClient saves the site's own Google client and restarts the
@@ -276,7 +276,7 @@ func (a *SiteAPI) GoogleClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	go a.Site().Restart()
-	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{Ok: true})
 }
 
 // apiSiteGoogleClientDelete removes the site's own Google client and restarts
@@ -287,11 +287,11 @@ func (a *SiteAPI) GoogleClientDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	go a.Site().Restart()
-	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{Ok: true})
 }
 
 func (a *SiteAPI) Builders(w http.ResponseWriter, r *http.Request) {
-	WriteJSON(w, http.StatusOK, map[string]any{"brains": a.BuildersView()})
+	WriteJSON(w, http.StatusOK, BuildersResponse{Brains: a.BuildersView()})
 }
 
 func (a *SiteAPI) SetBuilder(w http.ResponseWriter, r *http.Request) {
@@ -307,11 +307,11 @@ func (a *SiteAPI) SetBuilder(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{Ok: true})
 }
 
 func (a *SiteAPI) Proposals(w http.ResponseWriter, r *http.Request) {
-	WriteJSON(w, http.StatusOK, map[string]any{"proposals": a.Site().Proposals(r.Context())})
+	WriteJSON(w, http.StatusOK, SiteProposalsResponse{Proposals: a.Site().Proposals(r.Context())})
 }
 
 func (a *SiteAPI) MergeProposal(w http.ResponseWriter, r *http.Request) {
@@ -327,7 +327,7 @@ func (a *SiteAPI) DiscardProposal(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{Ok: true})
 }
 
 func (a *SiteAPI) StartPreview(w http.ResponseWriter, r *http.Request) {
@@ -352,7 +352,7 @@ func (a *SiteAPI) Secrets(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"modules": list})
+	WriteJSON(w, http.StatusOK, SiteSecretsResponse{Modules: list})
 }
 
 // apiSiteSetSecret saves a secret and restarts the site, which reads its
@@ -370,7 +370,7 @@ func (a *SiteAPI) SetSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	go a.Site().Restart()
-	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{Ok: true})
 }
 
 func (a *SiteAPI) RemoveSecret(w http.ResponseWriter, r *http.Request) {
@@ -379,5 +379,5 @@ func (a *SiteAPI) RemoveSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	go a.Site().Restart()
-	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{Ok: true})
 }

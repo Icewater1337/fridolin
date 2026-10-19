@@ -251,7 +251,7 @@ func (a *BuilderAPI) Handler() http.Handler {
 	}))
 	mux.HandleFunc("POST /builder/sync", call(func(r *http.Request, id string) (any, error) {
 		out, err := a.Sync(r.Context(), id)
-		return map[string]string{"result": out}, err
+		return BuilderSyncResponse{Result: out}, err
 	}))
 	mux.HandleFunc("POST /builder/propose", call(func(r *http.Request, id string) (any, error) {
 		var req struct{ Title, Summary string }
@@ -259,7 +259,7 @@ func (a *BuilderAPI) Handler() http.Handler {
 			return nil, err
 		}
 		p, changes, err := a.Propose(r.Context(), id, req.Title, req.Summary)
-		return map[string]any{"proposal": p, "changes": changes}, err
+		return BuilderProposalResponse{Proposal: p, Changes: changes}, err
 	}))
 	return mux
 }
