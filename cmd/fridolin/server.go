@@ -280,7 +280,7 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	paths, err := mediaInboxAt(cfg.MediaDir).Resolve(br.ID(), req.Paths, who.kind == callerBrain)
+	paths, err := mediaInboxAt(b.cfgs.Boot().MediaDir).Resolve(br.ID(), req.Paths, who.kind == callerBrain)
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return

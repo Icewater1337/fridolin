@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/registry"
+	"github.com/Icewater1337/fridolin/internal/whatsapp"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -15,8 +17,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
 	"github.com/Icewater1337/fridolin/internal/config"
 
@@ -695,7 +695,7 @@ func TestStatusAndBrainsShareTheIssues(t *testing.T) {
 	if err := manifest.Write(dir, &manifest.Manifest{ID: "notes", Name: "Changed"}, true); err != nil {
 		t.Fatal(err)
 	}
-	var st struct{ Issues []BrainIssue }
+	var st struct{ Issues []registry.Issue }
 	_ = json.Unmarshal(tb.do("GET", "/api/status", nil).Body.Bytes(), &st)
 	if len(st.Issues) != 1 || st.Issues[0].Kind != "drift" {
 		t.Fatalf("status issues = %+v", st.Issues)

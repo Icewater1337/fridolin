@@ -768,25 +768,6 @@ func Resolve(file *Config, paths Paths, goos string) (*Config, error) {
 	return cfg, nil
 }
 
-// EnsureDirs creates the data dir and the folders of the database and the
-// media. Resolve does not: it runs for check and open too, which must
-// not make a ~/.fridolin for a config file that is not there, and for
-// every dashboard save, which would make a folder typed into Settings
-// before the restart that uses it. The bridge calls EnsureDirs once, as it
-// starts.
-func (c *Config) EnsureDirs() error {
-	if err := os.MkdirAll(c.DataDir, 0o700); err != nil {
-		return fmt.Errorf("creating data directory: %w", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(c.DBPath), 0o700); err != nil {
-		return fmt.Errorf("creating db directory: %w", err)
-	}
-	if err := os.MkdirAll(c.MediaDir, 0o700); err != nil {
-		return fmt.Errorf("creating media directory: %w", err)
-	}
-	return nil
-}
-
 // Clone deep-copies a Config through JSON.
 func (c *Config) Clone() (*Config, error) {
 	data, err := json.Marshal(c)

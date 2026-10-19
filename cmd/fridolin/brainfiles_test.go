@@ -661,7 +661,7 @@ func TestManifestIsNotFollowedOutOfTheFolder(t *testing.T) {
 
 			type resolved struct {
 				specs  []manifest.Spec
-				issues []BrainIssue
+				issues []registry.Issue
 				err    error
 			}
 			done := make(chan resolved, 1)

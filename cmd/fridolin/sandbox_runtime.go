@@ -47,6 +47,7 @@ type SandboxProfiler struct {
 
 	// configFile is the config.json the bridge runs with; see SetConfigFile.
 	configFile string
+	home       string // captured at startup; retained across runtime policy updates
 
 	// execPath is sandboxExecPath; tests point it at a missing file.
 	execPath string
@@ -94,7 +95,7 @@ func sandboxPolicyOf(cfg *config.Config) sandboxConfig {
 
 // NewSandboxProfiler builds a profiler for the configured brains.
 func NewSandboxProfiler(workDirs map[string][]string, cfg *config.Config) *SandboxProfiler {
-	sp := &SandboxProfiler{execPath: sandbox.ExecPath}
+	sp := &SandboxProfiler{execPath: sandbox.ExecPath, home: homeDir()}
 	if exe, err := os.Executable(); err == nil {
 		sp.bridgeExe = exe
 	}
@@ -328,7 +329,7 @@ func sandboxInstallLayoutOf(l bridgeLayout) sandbox.InstallLayout {
 func (sp *SandboxProfiler) Profile(id string) (string, error) {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
-	ctx := sandboxContextNow(homeDir())
+	ctx := sandboxContextNow(sp.home)
 	var layout sandbox.InstallLayout
 	if sp.bridgeExe != "" {
 		layout = sandboxInstallLayoutOf(layoutOf(sp.bridgeExe))

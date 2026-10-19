@@ -87,3 +87,13 @@ func whatsAppText() whatsapp.Text {
 func whatsAppIdentity() whatsapp.Identity {
 	return whatsapp.Identity{Canonical: canonicalUser, LID: lidOf}
 }
+
+// whatsAppOptions is the production composition shared by construction and
+// integration tests. Startup paths come from Boot; policy and limits stay live.
+func (b *Bridge) whatsAppOptions() whatsapp.Options {
+	opts := whatsAppOptions(func() *config.Config { return runtimeConfig(b.cfgs) }, b.store, b.handleInbound, b.recordIgnored)
+	opts.OnVote = whatsAppVoteHandler(b.recordVote)
+	opts.OnChange = b.handleChange
+	opts.GroupRules = whatsAppGroupRules(b.groupRules)
+	return opts
+}
