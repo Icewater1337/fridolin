@@ -1,9 +1,11 @@
 package main
 
-func (b *Bridge) newDashboardAuth() *DashboardAuth {
-	return &DashboardAuth{
-		Sessions:   func() DashboardSessionStore { return b.sessions },
-		Token:      func() DashboardAuthToken { return b.token },
+import "github.com/Icewater1337/fridolin/internal/httpapi"
+
+func (b *Bridge) newDashboardAuth() *httpapi.DashboardAuth {
+	return &httpapi.DashboardAuth{
+		Sessions:   func() httpapi.DashboardSessionStore { return b.sessions },
+		Token:      func() httpapi.DashboardAuthToken { return b.token },
 		CookieName: func() string { return b.sessionCookie },
 	}
 }

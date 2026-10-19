@@ -1,7 +1,6 @@
-package main
+package httpapi
 
 import (
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"log"
 	"net/http"
 	"time"
@@ -25,27 +24,27 @@ type DashboardAuth struct {
 	CookieName func() string
 }
 
-// sessionHeader carries a session's binding, which the page keeps in its
+// SessionHeader carries a session's binding, which the page keeps in its
 // own storage. Without it the cookie signs nothing in (see dashsession.go).
-const sessionHeader = "X-Bridge-Session"
+const SessionHeader = "X-Bridge-Session"
 
 // signedIn reports whether r carries a dashboard session that has not
 // ended, in its cookie, together with that session's binding.
 func (a *DashboardAuth) SignedIn(r *http.Request) bool {
 	c, err := r.Cookie(a.CookieName())
-	return err == nil && a.Sessions().Valid(c.Value, r.Header.Get(sessionHeader))
+	return err == nil && a.Sessions().Valid(c.Value, r.Header.Get(SessionHeader))
 }
 
 // startSession signs the browser in: a new session, in a cookie scripts on
 // the page cannot read and other sites do not get sent. It returns the
-// session's binding, for the page to keep and send in sessionHeader.
+// session's binding, for the page to keep and send in SessionHeader.
 func (a *DashboardAuth) StartSession(w http.ResponseWriter, r *http.Request) (string, error) {
 	id, binding, exp, err := a.Sessions().Create()
 	if err != nil {
 		return "", err
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name: a.CookieName(), Value: id, Path: "/", Expires: exp, MaxAge: int(httpapi.SessionLifetime / time.Second),
+		Name: a.CookieName(), Value: id, Path: "/", Expires: exp, MaxAge: int(SessionLifetime / time.Second),
 		HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: secureCookie(r),
 	})
 	return binding, nil
@@ -63,15 +62,15 @@ func secureCookie(r *http.Request) bool { return r.TLS != nil }
 // that needs neither, so it sits outside apiGuard, with its write checks.
 func (a *DashboardAuth) Login(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if !httpapi.CheckWrite(w, r) {
+	if !CheckWrite(w, r) {
 		return
 	}
 	var req struct {
 		Code  string `json:"code"`
 		Token string `json:"token"`
 	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// The token first: a request with both does not use up a code it
@@ -79,12 +78,12 @@ func (a *DashboardAuth) Login(w http.ResponseWriter, r *http.Request) {
 	ok := req.Token != "" && a.Token().Matches(req.Token)
 	ok = ok || req.Code != "" && a.Sessions().UseCode(req.Code)
 	if !ok {
-		httpapi.WriteErr(w, http.StatusUnauthorized, "that link was already used or has expired, or the token is wrong — run fridolin open for a new link")
+		WriteErr(w, http.StatusUnauthorized, "that link was already used or has expired, or the token is wrong — run fridolin open for a new link")
 		return
 	}
 	binding, err := a.StartSession(w, r)
 	if err != nil {
-		httpapi.WriteErr(w, http.StatusInternalServerError, "signing in: "+err.Error())
+		WriteErr(w, http.StatusInternalServerError, "signing in: "+err.Error())
 		return
 	}
 	// The new session replaces the one this browser's cookie named, which
@@ -95,26 +94,26 @@ func (a *DashboardAuth) Login(w http.ResponseWriter, r *http.Request) {
 			log.Printf("dashboard sign-in: ending the session it replaces: %v", err)
 		}
 	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "signed in", "binding": binding})
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "signed in", "binding": binding})
 }
 
 // apiLogout ends this browser's session.
 func (a *DashboardAuth) Logout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(a.CookieName()); err == nil {
 		if err := a.Sessions().Drop(c.Value); err != nil {
-			httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
+			WriteErr(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
 	http.SetCookie(w, &http.Cookie{Name: a.CookieName(), Value: "", Path: "/", MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: secureCookie(r)})
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
+	WriteJSON(w, http.StatusOK, map[string]string{"status": "signed out"})
 }
 
 // apiLoginCode makes a login code, for `fridolin open`, which calls it with
 // the token from the data dir.
 func (a *DashboardAuth) LoginCode(w http.ResponseWriter, r *http.Request) {
 	code, exp := a.Sessions().NewCode()
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"code": code, "expires_at": exp})
+	WriteJSON(w, http.StatusOK, map[string]any{"code": code, "expires_at": exp})
 }
 
 // apiRotateToken replaces the dashboard token and ends every session: sign
@@ -124,11 +123,11 @@ func (a *DashboardAuth) LoginCode(w http.ResponseWriter, r *http.Request) {
 func (a *DashboardAuth) RotateToken(w http.ResponseWriter, r *http.Request) {
 	resign := a.SignedIn(r)
 	if err := a.Token().Rotate(); err != nil {
-		httpapi.WriteErr(w, http.StatusInternalServerError, "writing a new token: "+err.Error())
+		WriteErr(w, http.StatusInternalServerError, "writing a new token: "+err.Error())
 		return
 	}
 	if err := a.Sessions().DropAll(); err != nil {
-		httpapi.WriteErr(w, http.StatusInternalServerError, "ending the sessions: "+err.Error())
+		WriteErr(w, http.StatusInternalServerError, "ending the sessions: "+err.Error())
 		return
 	}
 	log.Printf("dashboard token rotated: every dashboard was signed out, and scripts with the old token are refused")
@@ -136,10 +135,10 @@ func (a *DashboardAuth) RotateToken(w http.ResponseWriter, r *http.Request) {
 	if resign {
 		binding, err := a.StartSession(w, r)
 		if err != nil {
-			httpapi.WriteErr(w, http.StatusInternalServerError, "signing in again: "+err.Error())
+			WriteErr(w, http.StatusInternalServerError, "signing in again: "+err.Error())
 			return
 		}
 		resp["binding"] = binding
 	}
-	httpapi.WriteJSON(w, http.StatusOK, resp)
+	WriteJSON(w, http.StatusOK, resp)
 }

@@ -49,7 +49,7 @@ func withSession(s *signIn) func(*http.Request) {
 	return func(r *http.Request) {
 		r.Header.Del("X-Bridge-Token")
 		r.AddCookie(s.cookie)
-		r.Header.Set(sessionHeader, s.binding)
+		r.Header.Set(httpapi.SessionHeader, s.binding)
 	}
 }
 
@@ -208,7 +208,7 @@ func TestSessionNeedsCookieAndBinding(t *testing.T) {
 						r.AddCookie(c.cookie)
 					}
 					if c.binding != "" {
-						r.Header.Set(sessionHeader, c.binding)
+						r.Header.Set(httpapi.SessionHeader, c.binding)
 					}
 				})
 				if w.Code != c.want {
