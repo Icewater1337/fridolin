@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/testutil"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
@@ -19,7 +20,7 @@ func TestRunStderrIsBounded(t *testing.T) {
 	if _, _, _, err := mgr.Submit(dm("fail loudly")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "the failed run", func() bool { return d.count() == 1 })
+	testutil.WaitFor(t, 10*time.Second, "the failed run", func() bool { return d.count() == 1 })
 	res := d.all()[0].res
 	if res.Err == nil || !strings.Contains(res.Err.Error(), "fatal: the last thing the CLI said") {
 		t.Fatalf("err = %v, want the end of stderr", res.Err)

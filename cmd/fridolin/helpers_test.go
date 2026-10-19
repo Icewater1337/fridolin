@@ -25,6 +25,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/registry"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // testChildEnv is what the programs the bridge starts get in tests on top
@@ -113,7 +114,7 @@ func loggedPrompts(t *testing.T, path string) map[string]string {
 	out := map[string]string{}
 	for _, p := range fakePromptsIn(t, path) {
 		p = strings.TrimSuffix(p, "\n")
-		out[fakeNewMessage(p)] = p
+		out[testutil.NewMessage(p)] = p
 	}
 	return out
 }
@@ -224,7 +225,7 @@ func fakePromptsIn(t *testing.T, path string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return strings.Split(string(data), fakePromptMark+"\n")[1:]
+	return strings.Split(string(data), testutil.PromptMark+"\n")[1:]
 }
 
 func fakeClaudeEnv(t *testing.T, sleepMS int) string {
@@ -391,12 +392,12 @@ func permOf(t *testing.T, path string) os.FileMode {
 }
 
 func TestMain(m *testing.M) {
-	sharedTestMain(m, sharedMainOptions{
+	testutil.Main(m, testutil.MainOptions{
 		Version:        claudecli.TestedClaudeVersion,
 		RunMain:        main,
 		BeforeChildren: func() { childEnvAllowlist = append(childEnvAllowlist, testChildEnv...) },
 		BeforeTests:    func() { shutdownGrace = 0 },
-		Ready: func(p sharedTestPaths) {
+		Ready: func(p testutil.Paths) {
 			testHome, goToolHome, pkgDir, repoDir = p.Home, p.OriginalHome, p.PackageDir, p.RepoDir
 		},
 		Polls: func(w io.Writer) int {

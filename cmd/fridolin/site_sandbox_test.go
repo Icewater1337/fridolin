@@ -20,6 +20,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
@@ -169,7 +170,7 @@ func TestSiteModuleCapabilities(t *testing.T) {
 	if _, err := m.UpdateSettings(SiteSettingsUpdate{Enabled: &on}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 60*time.Second, "the site to answer", func() bool { return siteHealthy(listen) })
+	testutil.WaitFor(t, 60*time.Second, "the site to answer", func() bool { return siteHealthy(listen) })
 
 	body, _ := json.Marshal(map[string]string{"username": "sam", "password": "long enough pw"})
 	resp, err := http.Post("http://"+listen+"/auth/login", "application/json", bytes.NewReader(body))

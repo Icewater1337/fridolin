@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // groupOf starts script under sh in a process group of its own, as a run's
@@ -202,10 +203,10 @@ func TestRunsAreRecordedWhileTheyRun(t *testing.T) {
 	if _, _, _, err := mgr.Submit(dm("long")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "the run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+	testutil.WaitFor(t, 5*time.Second, "the run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 	pid := br.Snapshot().Running.PID
 	var rec runRecord
-	waitFor(t, 5*time.Second, "the record", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "the record", func() bool {
 		data, err := os.ReadFile(filepath.Join(runsDir(filepath.Join(home, "data")), strconv.Itoa(pid)+".json"))
 		return err == nil && json.Unmarshal(data, &rec) == nil
 	})
@@ -213,7 +214,7 @@ func TestRunsAreRecordedWhileTheyRun(t *testing.T) {
 		t.Errorf("record = %+v", rec)
 	}
 	br.StopCurrent(true)
-	waitFor(t, 5*time.Second, "the run to end", func() bool { return d.count() == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the run to end", func() bool { return d.count() == 1 })
 	if entries, err := os.ReadDir(runsDir(filepath.Join(home, "data"))); err != nil || len(entries) != 0 {
 		t.Errorf("records after the run: %v, %v", entries, err)
 	}

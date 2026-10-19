@@ -26,6 +26,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
@@ -242,7 +243,7 @@ func TestBrainV1Fixture(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(out, data) {
-		t.Errorf("brain-v1.json written again (-fixture +written):\n%s", lineDiff(string(data), string(out)))
+		t.Errorf("brain-v1.json written again (-fixture +written):\n%s", testutil.LineDiff(string(data), string(out)))
 	}
 	// Every field is set, so a new one shows up here.
 	for _, key := range unsetKeys(t, reflect.TypeFor[manifest.Manifest](), data) {

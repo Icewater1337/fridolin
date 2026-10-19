@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 	"github.com/Icewater1337/fridolin/internal/version"
 )
 
@@ -435,5 +436,5 @@ func TestScrubberWithLeavesTheOriginal(t *testing.T) {
 
 func assertGolden(t testing.TB, name string, got []byte) {
 	t.Helper()
-	sharedAssertGolden(t, filepath.Join(pkgDir, goldenDir), name, got, *update)
+	testutil.AssertGolden(t, filepath.Join(pkgDir, goldenDir), name, got, *update)
 }

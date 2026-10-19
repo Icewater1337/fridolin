@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 func TestCodexSandboxKeepsPersonalStateAndOtherBrainsOut(t *testing.T) {
@@ -42,7 +43,7 @@ echo safe > "$PWD/own-note"
 	if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "sandboxed Codex", func() bool { return d.count() == 1 })
+	testutil.WaitFor(t, 10*time.Second, "sandboxed Codex", func() bool { return d.count() == 1 })
 	if res := d.all()[0].res; res.Err != nil || res.Text != "Codex reply" {
 		t.Fatalf("got %+v", res)
 	}

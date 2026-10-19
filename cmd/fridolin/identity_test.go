@@ -17,6 +17,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
@@ -321,7 +322,7 @@ func TestGroupSenderAndQuoteByNumber(t *testing.T) {
 	evt.Info.Sender = lid
 	evt.Info.AddressingMode = types.AddressingModeLID
 	wa.handleMessage(evt)
-	waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) > 0 })
+	testutil.WaitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) > 0 })
 	// The new message names its sender from the map too.
 	if got := tb.sentTo(testGroup)[0]; !strings.Contains(got, `Alex (15551234567) says: [reply to 15551234567: "I'm in"]`) {
 		t.Errorf("answered %q, want the sender and the quote's author by number", got)

@@ -16,6 +16,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 const (
@@ -46,7 +47,7 @@ func TestBrainRunsAreNotToldTheScriptsToken(t *testing.T) {
 	if w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": tokenTestDM, "text": "hi"}); w.Code != 202 {
 		t.Fatalf("inbound: %d %s", w.Code, w.Body.String())
 	}
-	waitFor(t, 5*time.Second, "the run's environment", func() bool { _, err := os.Stat(envLog); return err == nil })
+	testutil.WaitFor(t, 5*time.Second, "the run's environment", func() bool { _, err := os.Stat(envLog); return err == nil })
 	data, _ := os.ReadFile(envLog)
 	if strings.Contains(string(data), tb.scriptAuth.scripts.Value()) || strings.Contains(string(data), tb.token.Value()) {
 		t.Error("the run was told the scripts or the dashboard token")

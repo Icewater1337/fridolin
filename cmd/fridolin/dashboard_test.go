@@ -30,6 +30,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
 	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 	"github.com/Icewater1337/fridolin/internal/otp"
@@ -702,7 +703,7 @@ func TestIngestedCodeIsNotCaught(t *testing.T) {
 	if w := tb.ingest(`{"brain":"up","text":"483920"}`); w.Code != 202 {
 		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
 	}
-	waitFor(t, 5*time.Second, "up's answer", func() bool { return tb.sentPrefix(dm, "echo:") })
+	testutil.WaitFor(t, 5*time.Second, "up's answer", func() bool { return tb.sentPrefix(dm, "echo:") })
 	if hist, _ := os.ReadFile(filepath.Join(upDir, "conversation-history.jsonl")); !strings.Contains(string(hist), `"text":"483920","type":"in"`) {
 		t.Errorf("up's history lacks the ingested text:\n%s", hist)
 	}
@@ -734,11 +735,11 @@ func TestStopReachesAHandOffInItsReplyChat(t *testing.T) {
 			if w := tb.ingest(`{"brain":"up","text":"file this"}`); w.Code != 202 {
 				t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
 			}
-			waitFor(t, 5*time.Second, "up's run", func() bool { r := up.Snapshot().Running; return r != nil && r.PID > 0 })
+			testutil.WaitFor(t, 5*time.Second, "up's run", func() bool { r := up.Snapshot().Running; return r != nil && r.PID > 0 })
 			if w := tb.ingest(`{"brain":"up","text":"and this"}`); w.Code != 202 {
 				t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
 			}
-			waitFor(t, 5*time.Second, "the second file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
+			testutil.WaitFor(t, 5*time.Second, "the second file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
 
 			if w := tb.do("POST", "/api/dev/inbound", c.stop); w.Code != 202 || !strings.Contains(w.Body.String(), "accepted") {
 				t.Fatalf("!stop: %d %s", w.Code, w.Body.String())
@@ -751,7 +752,7 @@ func TestStopReachesAHandOffInItsReplyChat(t *testing.T) {
 				}
 				return ""
 			}
-			waitFor(t, 15*time.Second, "the answer to !stop", func() bool { return answer() != "" })
+			testutil.WaitFor(t, 15*time.Second, "the answer to !stop", func() bool { return answer() != "" })
 			if got := answer(); !strings.HasPrefix(got, "🛑 Stopped") {
 				t.Errorf("!stop answered %q, want that it stopped up's run", got)
 			}
@@ -776,11 +777,11 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 	if w := tb.ingest(`{"brain":"up","text":"file this"}`); w.Code != 202 {
 		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
 	}
-	waitFor(t, 5*time.Second, "up's run", func() bool { r := up.Snapshot().Running; return r != nil && r.PID > 0 })
+	testutil.WaitFor(t, 5*time.Second, "up's run", func() bool { r := up.Snapshot().Running; return r != nil && r.PID > 0 })
 	if w := tb.ingest(`{"brain":"up","text":"and this"}`); w.Code != 202 {
 		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
 	}
-	waitFor(t, 5*time.Second, "the second file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the second file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
 
 	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
 	if !tb.sentPrefix(dm, "✅ Reset. I stopped what this chat had running or waiting") {
@@ -816,11 +817,11 @@ func TestStopCountsWaitingHandOffs(t *testing.T) {
 	if _, _, _, err := tb.brainMgr.Submit(Inbound{Inbound: chat.Inbound{JID: group, Sender: "15551234567", Text: "group work", Source: chat.SourceWhatsApp}}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "up's group run", func() bool { r := up.Snapshot().Running; return r != nil && r.PID > 0 })
+	testutil.WaitFor(t, 5*time.Second, "up's group run", func() bool { r := up.Snapshot().Running; return r != nil && r.PID > 0 })
 	if w := tb.ingest(`{"brain":"up","text":"file this"}`); w.Code != 202 {
 		t.Fatalf("ingest: %d %s", w.Code, w.Body.String())
 	}
-	waitFor(t, 5*time.Second, "the file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the file to wait", func() bool { return len(up.Snapshot().Queue) == 1 })
 
 	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: dm, Sender: "15551234567", Text: "!stop", Source: chat.SourceWhatsApp}})
 	if !tb.sentPrefix(dm, "🛑 Nothing was running for this chat; cleared") {
@@ -1957,7 +1958,7 @@ func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	otpPath := filepath.Join(h.DataDir(), "otp", "p.json")
-	waitFor(t, 3*time.Second, "otp file", func() bool { _, err := os.Stat(otpPath); return err == nil })
+	testutil.WaitFor(t, 3*time.Second, "otp file", func() bool { _, err := os.Stat(otpPath); return err == nil })
 	data, _ := os.ReadFile(otpPath)
 	var got otp.Record
 	_ = json.Unmarshal(data, &got)

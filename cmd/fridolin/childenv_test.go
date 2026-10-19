@@ -14,6 +14,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/registry"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 func TestChildGets(t *testing.T) {
@@ -356,7 +357,7 @@ func brainRunEnv(t *testing.T, env map[string]string, config string) (map[string
 	if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
+	testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
 	if err := d.all()[0].res.Err; err != nil {
 		t.Fatal(err)
 	}

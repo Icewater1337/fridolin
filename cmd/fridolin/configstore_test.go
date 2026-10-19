@@ -14,6 +14,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 func TestConfigStoreUpdateWritesAtomicallyAndKeepsTilde(t *testing.T) {
@@ -113,7 +114,7 @@ func TestEnvironmentDoesNotOverrideTheConfig(t *testing.T) {
 		"viewer": false
 	}`)
 	for _, v := range vars {
-		clearEnv(t, v.name)
+		testutil.ClearEnv(t, v.name)
 	}
 	want := effectiveJSON(t, path)
 	for _, v := range vars {
@@ -229,7 +230,7 @@ func TestConfigRefusesClassicMode(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			clearEnv(t, "BRAIN_MODE")
+			testutil.ClearEnv(t, "BRAIN_MODE")
 			if c.env != "" {
 				t.Setenv("BRAIN_MODE", c.env)
 			}
@@ -528,7 +529,7 @@ func TestDotEnvIsNotRead(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			clearEnv(t, "MODEL", "FRIDOLIN_TEST_DOTENV_ONLY")
+			testutil.ClearEnv(t, "MODEL", "FRIDOLIN_TEST_DOTENV_ONLY")
 			path := writeConfig(t, `{"brain_model":"from-file"}`)
 			dotenv := filepath.Join(filepath.Dir(path), ".env")
 			var err error

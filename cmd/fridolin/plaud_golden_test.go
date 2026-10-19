@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/httpapi"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // What @plaud-ai/cli prints, recorded from the real CLI against a stand-in
@@ -83,32 +84,32 @@ const plaudGoldenSummary = "## Team sync\n\nDecisions: ship Friday.\nFetching th
 
 // plaudGoldenRecordings returns what `plaud files` lists, newest first,
 // and every recording.
-func plaudGoldenRecordings() ([]string, []fakePlaudRecording) {
-	tr := fakePlaudBlock{DataType: "transaction", Content: fakePlaudTranscript(
-		fakePlaudSegment{0, 4000, "Speaker 1", "Let's ship on Friday."},
-		fakePlaudSegment{4000, 9500, "Speaker 2", "Fetching the release notes is Anna's job."})}
-	pol := fakePlaudBlock{DataType: "transaction_polish", Content: fakePlaudTranscript(
-		fakePlaudSegment{0, 4000, "Speaker 1", "Let us ship on Friday."})}
-	sum := fakePlaudBlock{DataType: "auto_sum_note", Content: plaudGoldenSummary, TabName: "Summary", Title: "Team sync"}
+func plaudGoldenRecordings() ([]string, []testutil.PlaudRecording) {
+	tr := testutil.PlaudBlock{DataType: "transaction", Content: testutil.PlaudTranscript(
+		testutil.PlaudSegment{0, 4000, "Speaker 1", "Let's ship on Friday."},
+		testutil.PlaudSegment{4000, 9500, "Speaker 2", "Fetching the release notes is Anna's job."})}
+	pol := testutil.PlaudBlock{DataType: "transaction_polish", Content: testutil.PlaudTranscript(
+		testutil.PlaudSegment{0, 4000, "Speaker 1", "Let us ship on Friday."})}
+	sum := testutil.PlaudBlock{DataType: "auto_sum_note", Content: plaudGoldenSummary, TabName: "Summary", Title: "Team sync"}
 	at := func(s string) *string { return &s }
-	rec := func(id, name string, start *string, sources, notes []fakePlaudBlock) fakePlaudRecording {
-		return fakePlaudRecording{ID: id, Name: name, CreatedAt: "2026-10-16T18:00:00", StartAt: start, Duration: 300000, Sources: sources, Notes: notes}
+	rec := func(id, name string, start *string, sources, notes []testutil.PlaudBlock) testutil.PlaudRecording {
+		return testutil.PlaudRecording{ID: id, Name: name, CreatedAt: "2026-10-16T18:00:00", StartAt: start, Duration: 300000, Sources: sources, Notes: notes}
 	}
 	day := at("2026-10-15T07:30:00")
-	return []string{plaudGoldTeam, plaudGoldDoctor, plaudGoldOld}, []fakePlaudRecording{
-		rec(plaudGoldTeam, "Team sync", nil, []fakePlaudBlock{tr}, []fakePlaudBlock{sum}),
-		rec(plaudGoldDoctor, "Doctor: Fetching results", day, []fakePlaudBlock{tr, pol}, []fakePlaudBlock{sum}),
-		rec(plaudGoldOld, "Old one", at("2026-10-14T09:00:00"), []fakePlaudBlock{tr}, nil),
-		rec(plaudGoldNoPolish, "No polish", day, []fakePlaudBlock{tr}, []fakePlaudBlock{sum}),
-		rec(plaudGoldEmptyPol, "Empty polish", day, []fakePlaudBlock{tr, {DataType: "transaction_polish"}}, []fakePlaudBlock{sum}),
-		rec(plaudGoldNoNotes, "No notes", day, []fakePlaudBlock{tr}, nil),
-		rec(plaudGoldEmptySum, "Empty summary", day, []fakePlaudBlock{tr}, []fakePlaudBlock{{DataType: "auto_sum_note"}}),
+	return []string{plaudGoldTeam, plaudGoldDoctor, plaudGoldOld}, []testutil.PlaudRecording{
+		rec(plaudGoldTeam, "Team sync", nil, []testutil.PlaudBlock{tr}, []testutil.PlaudBlock{sum}),
+		rec(plaudGoldDoctor, "Doctor: Fetching results", day, []testutil.PlaudBlock{tr, pol}, []testutil.PlaudBlock{sum}),
+		rec(plaudGoldOld, "Old one", at("2026-10-14T09:00:00"), []testutil.PlaudBlock{tr}, nil),
+		rec(plaudGoldNoPolish, "No polish", day, []testutil.PlaudBlock{tr}, []testutil.PlaudBlock{sum}),
+		rec(plaudGoldEmptyPol, "Empty polish", day, []testutil.PlaudBlock{tr, {DataType: "transaction_polish"}}, []testutil.PlaudBlock{sum}),
+		rec(plaudGoldNoNotes, "No notes", day, []testutil.PlaudBlock{tr}, nil),
+		rec(plaudGoldEmptySum, "Empty summary", day, []testutil.PlaudBlock{tr}, []testutil.PlaudBlock{{DataType: "auto_sum_note"}}),
 		rec(plaudGoldNoTrans, "Still transcribing", day, nil, nil),
 	}
 }
 
 // writeFakePlaudRecordings gives the fake CLI in dir what to list and show.
-func writeFakePlaudRecordings(t *testing.T, dir string, list []string, recs []fakePlaudRecording) {
+func writeFakePlaudRecordings(t *testing.T, dir string, list []string, recs []testutil.PlaudRecording) {
 	t.Helper()
 	data, _ := json.Marshal(list)
 	if err := os.WriteFile(filepath.Join(dir, "list.json"), data, 0o600); err != nil {
@@ -228,8 +229,8 @@ func TestFakePlaudPrintsWhatTheRealCLIPrints(t *testing.T) {
 // plaudStubAPI stands in for Plaud's API, serving list and recs to a
 // client with the access token "test-access". Refreshing a token is
 // always refused.
-func plaudStubAPI(list []string, recs []fakePlaudRecording) http.Handler {
-	byID := map[string]fakePlaudRecording{}
+func plaudStubAPI(list []string, recs []testutil.PlaudRecording) http.Handler {
+	byID := map[string]testutil.PlaudRecording{}
 	for _, r := range recs {
 		byID[r.ID] = r
 	}

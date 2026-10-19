@@ -10,6 +10,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // readTestStream is what a run of br for m makes of the CLI output stream,
@@ -127,7 +128,7 @@ func TestMidRunMessagesReachTheChatMarked(t *testing.T) {
 	readTestStream(br, Inbound{Inbound: chat.Inbound{JID: dm}}, stream)
 	br.hooks.Notice(dm, workingNotice)
 	// The question goes through the outbox, after the notice.
-	waitFor(t, 5*time.Second, "both messages", func() bool { return len(tb.sentTo(dm)) == 2 })
+	testutil.WaitFor(t, 5*time.Second, "both messages", func() bool { return len(tb.sentTo(dm)) == 2 })
 	sent := tb.sentTo(dm)
 	slices.Sort(sent)
 	if want := []string{"⏳ Working on it...", "❓ ⏳ Wait for the delivery?"}; !slices.Equal(sent, want) {

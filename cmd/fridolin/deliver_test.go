@@ -12,6 +12,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // pollRefuser is the dev messenger in front of a WhatsApp that is
@@ -71,9 +72,9 @@ func TestRepliesAreRecordedAsSent(t *testing.T) {
 			}
 			tb.deliver(br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hi", Silent: c.silent}}, c.res)
 			if len(c.want) > 0 {
-				waitFor(t, 5*time.Second, "the reply in the history", func() bool { return len(outbound(t, br)[testDMChat]) > 0 })
+				testutil.WaitFor(t, 5*time.Second, "the reply in the history", func() bool { return len(outbound(t, br)[testDMChat]) > 0 })
 			} else if f, ok := tb.wa.(*flakyMessenger); ok {
-				waitFor(t, 5*time.Second, "a failed attempt", func() bool {
+				testutil.WaitFor(t, 5*time.Second, "a failed attempt", func() bool {
 					f.mu.Lock()
 					defer f.mu.Unlock()
 					return f.tries > 0
@@ -96,14 +97,14 @@ func TestSilentRunLeavesNoReplyInTheHistory(t *testing.T) {
 	// The silent run ends with an answer before the DM comes in, so that
 	// it is not stopped for the DM, and is delivered before the DM's run
 	// starts: one worker runs the brain's messages in turn.
-	waitFor(t, 10*time.Second, "the silent run", func() bool { return br.Snapshot().Last != nil })
+	testutil.WaitFor(t, 10*time.Second, "the silent run", func() bool { return br.Snapshot().Last != nil })
 	if last := br.Snapshot().Last; last.Chat != testGroup || last.Outcome != outcomeOK {
 		t.Fatalf("the silent run ended %+v, want it answered", last)
 	}
 	tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hello", Source: chat.SourceWhatsApp}})
-	waitFor(t, 10*time.Second, "the DM's answer", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
+	testutil.WaitFor(t, 10*time.Second, "the DM's answer", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
 	// It goes into the history just after it was sent.
-	waitFor(t, 5*time.Second, "the DM's answer in the history", func() bool { return len(outbound(t, br)[testDMChat]) > 0 })
+	testutil.WaitFor(t, 5*time.Second, "the DM's answer in the history", func() bool { return len(outbound(t, br)[testDMChat]) > 0 })
 
 	out := outbound(t, br)
 	if len(out[testGroup]) != 0 {
@@ -160,9 +161,9 @@ func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
 				chatJID = func() []string { return wa.sent(c.m.JID) }
 			}
 			tb.handleInbound(context.Background(), c.m)
-			waitFor(t, 10*time.Second, "the run", func() bool { return br.Snapshot().Last != nil })
+			testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return br.Snapshot().Last != nil })
 			if c.sent {
-				waitFor(t, 5*time.Second, "the question in the history", func() bool { return len(outbound(t, br)[c.m.JID]) > 0 })
+				testutil.WaitFor(t, 5*time.Second, "the question in the history", func() bool { return len(outbound(t, br)[c.m.JID]) > 0 })
 			}
 			if c.offline {
 				if sum, err := tb.store.OutboxSummary(context.Background(), time.Now()); err != nil || sum.Waiting == 0 {
@@ -192,8 +193,8 @@ func TestQuestionAndFinalReplyBothReachTheChat(t *testing.T) {
 	tb, br := newMainBridge(t, "")
 	t.Setenv("FRIDOLIN_FAKE_ASK", `{"questions":[{"header":"Day","question":"Which day?","options":[{"label":"Monday"},{"label":"Tuesday"}]}]}`)
 	tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "book a table", Source: chat.SourceWhatsApp}})
-	waitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(testDMChat)) == 2 })
-	waitFor(t, 5*time.Second, "the reply in the history", func() bool { return len(outbound(t, br)[testDMChat]) == 2 })
+	testutil.WaitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(testDMChat)) == 2 })
+	testutil.WaitFor(t, 5*time.Second, "the reply in the history", func() bool { return len(outbound(t, br)[testDMChat]) == 2 })
 
 	sent := tb.sentTo(testDMChat)
 	if sent[0] != "❓ Day: Which day?\n1. Monday\n2. Tuesday" || !strings.HasSuffix(sent[1], "says: book a table") {
@@ -235,10 +236,10 @@ func TestQueuedRunSeesWhatWasSentWhileItWaited(t *testing.T) {
 			ctx := context.Background()
 			tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: c.first, Source: chat.SourceWhatsApp}})
 			if c.asked == "" {
-				waitFor(t, 10*time.Second, "the first run", func() bool { return br.Snapshot().Running != nil })
+				testutil.WaitFor(t, 10*time.Second, "the first run", func() bool { return br.Snapshot().Running != nil })
 			} else {
 				// In the history, as the chat has it before anyone answers.
-				waitFor(t, 10*time.Second, "the question", func() bool { return slices.Contains(outbound(t, br)[testDMChat], c.asked) })
+				testutil.WaitFor(t, 10*time.Second, "the question", func() bool { return slices.Contains(outbound(t, br)[testDMChat], c.asked) })
 			}
 			tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: c.second, Source: chat.SourceWhatsApp}})
 			replies := func() []string {
@@ -250,7 +251,7 @@ func TestQueuedRunSeesWhatWasSentWhileItWaited(t *testing.T) {
 				}
 				return out
 			}
-			waitFor(t, 10*time.Second, "both replies", func() bool { return len(replies()) == 2 })
+			testutil.WaitFor(t, 10*time.Second, "both replies", func() bool { return len(replies()) == 2 })
 
 			first := replies()[0]
 			if !strings.HasSuffix(first, "says: "+c.first) {

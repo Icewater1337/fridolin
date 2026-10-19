@@ -13,6 +13,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 func TestCodexDefaultsAndValidation(t *testing.T) {
@@ -197,7 +198,7 @@ func TestCodexRefusesBlockedTools(t *testing.T) {
 	if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 5*time.Second, "refusal", func() bool { return d.count() == 1 })
+	testutil.WaitFor(t, 5*time.Second, "refusal", func() bool { return d.count() == 1 })
 	if err := d.all()[0].res.Err; err == nil || !strings.Contains(err.Error(), "blocked tools") {
 		t.Fatalf("got %v", err)
 	}

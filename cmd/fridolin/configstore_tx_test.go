@@ -16,11 +16,9 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
-
-	"github.com/Icewater1337/fridolin/internal/manifest"
-
 	"github.com/Icewater1337/fridolin/internal/jsonx"
-
+	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 )
 
@@ -183,7 +181,7 @@ func TestConfigSubscribersHearUpdatesInOrder(t *testing.T) {
 		if next.Comment == "a" {
 			close(inA)
 			// B commits meanwhile; its notification must wait for this one.
-			waitFor(t, 5*time.Second, "update b to commit", func() bool { return cs.Get().Comment == "b" })
+			testutil.WaitFor(t, 5*time.Second, "update b to commit", func() bool { return cs.Get().Comment == "b" })
 			select {
 			case <-heardB:
 			case <-time.After(200 * time.Millisecond):
@@ -321,7 +319,7 @@ func TestPutConfigSendsItsOwnETag(t *testing.T) {
 				_, err := tb.cfgs.Update("", func(c *config.Config) error { c.Comment = "later"; return nil })
 				later <- err
 			}()
-			waitFor(t, 5*time.Second, "the later update", func() bool { return tb.cfgs.Get().Comment == "later" })
+			testutil.WaitFor(t, 5*time.Second, "the later update", func() bool { return tb.cfgs.Get().Comment == "later" })
 		})
 	})
 	w := tb.editConfig(t, func(c map[string]any) { c["log_level"] = "debug" })

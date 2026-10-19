@@ -18,6 +18,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // dmEvent is a DM from the allowed number, with the message ID id.
@@ -65,7 +66,7 @@ func TestDeletedMessageIsNotAnsweredAndLeavesTheHistory(t *testing.T) {
 		startLongRun(t, tb, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "a long report", Source: chat.SourceWhatsApp}})
 		wa := tb.whatsApp()
 		wa.handleMessage(dmEvent("3EB0WAIT", textMsg("my card number is 4111")))
-		waitFor(t, 5*time.Second, "the message to wait", func() bool { return len(br.Snapshot().Queue) == 1 })
+		testutil.WaitFor(t, 5*time.Second, "the message to wait", func() bool { return len(br.Snapshot().Queue) == 1 })
 		wa.handleMessage(dmEvent("3EB0DEL", revokeMsg("3EB0WAIT")))
 		if q := br.Snapshot().Queue; len(q) != 0 {
 			t.Errorf("queue = %+v, want the deleted message gone", q)
@@ -83,9 +84,9 @@ func TestDeletedMessageIsNotAnsweredAndLeavesTheHistory(t *testing.T) {
 		t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
 		wa := tb.whatsApp()
 		wa.handleMessage(dmEvent("3EB0RUN", textMsg("write it all down")))
-		waitFor(t, 5*time.Second, "the run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
+		testutil.WaitFor(t, 5*time.Second, "the run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 		wa.handleMessage(dmEvent("3EB0DEL", revokeMsg("3EB0RUN")))
-		waitFor(t, 10*time.Second, "the run to stop", func() bool { return br.Snapshot().Running == nil })
+		testutil.WaitFor(t, 10*time.Second, "the run to stop", func() bool { return br.Snapshot().Running == nil })
 		time.Sleep(200 * time.Millisecond)
 		if sent := tb.sentTo(testDMChat); len(sent) != 0 {
 			t.Errorf("sent %q for a deleted message", sent)
@@ -102,8 +103,8 @@ func TestDeletedMessageIsNotAnsweredAndLeavesTheHistory(t *testing.T) {
 		tb, br := newMainBridge(t, "")
 		wa := tb.whatsApp()
 		wa.handleMessage(dmEvent("3EB0DONE", textMsg("what is my PIN again")))
-		waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
-		waitFor(t, 5*time.Second, "the answer in the history", func() bool { return len(historyTexts(t, br, history.Out)) == 1 })
+		testutil.WaitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
+		testutil.WaitFor(t, 5*time.Second, "the answer in the history", func() bool { return len(historyTexts(t, br, history.Out)) == 1 })
 		wa.handleMessage(dmEvent("3EB0DEL", revokeMsg("3EB0DONE")))
 		if got := historyTexts(t, br, history.In); len(got) != 0 {
 			t.Errorf("history holds %q, want the deleted message out", got)
@@ -139,7 +140,7 @@ func TestEditedMessage(t *testing.T) {
 		startLongRun(t, tb, br, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "a long report", Source: chat.SourceWhatsApp}})
 		wa := tb.whatsApp()
 		wa.handleMessage(dmEvent("3EB0WAIT", textMsg("book Tuesday")))
-		waitFor(t, 5*time.Second, "the message to wait", func() bool { return len(br.Snapshot().Queue) == 1 })
+		testutil.WaitFor(t, 5*time.Second, "the message to wait", func() bool { return len(br.Snapshot().Queue) == 1 })
 		wa.handleMessage(dmEvent("3EB0EDIT", editMsg("3EB0WAIT", "book Wednesday")))
 		if q := br.Snapshot().Queue; len(q) != 1 || q[0].Preview != "book Wednesday" {
 			t.Errorf("queue = %+v, want the edited text waiting", q)
@@ -149,7 +150,7 @@ func TestEditedMessage(t *testing.T) {
 		}
 		t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
 		br.StopCurrent(false)
-		waitFor(t, 10*time.Second, "the edited message's answer", func() bool { return tb.sentPrefix(testDMChat, "echo:") })
+		testutil.WaitFor(t, 10*time.Second, "the edited message's answer", func() bool { return tb.sentPrefix(testDMChat, "echo:") })
 		if got := tb.sentTo(testDMChat); !strings.HasSuffix(got[len(got)-1], "15551234567 says: book Wednesday") {
 			t.Errorf("answered %q, want the edited text", got)
 		}
@@ -159,7 +160,7 @@ func TestEditedMessage(t *testing.T) {
 		tb, br := newMainBridge(t, "")
 		wa := tb.whatsApp()
 		wa.handleMessage(dmEvent("3EB0DONE", textMsg("book Tuesday")))
-		waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
+		testutil.WaitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
 		wa.handleMessage(dmEvent("3EB0EDIT", editMsg("3EB0DONE", "book Wednesday")))
 		time.Sleep(300 * time.Millisecond)
 		if sent := tb.sentTo(testDMChat); len(sent) != 1 {
@@ -260,7 +261,7 @@ func TestDebouncerAppliesChanges(t *testing.T) {
 	d.Add(first)
 	d.Add(second)
 	d.Change(chat.Change{Kind: chat.ChangeEdit, Chat: testDMChat, Sender: "15551234567", Target: "B", Text: "book Wednesday"})
-	waitFor(t, 2*time.Second, "the flush", func() bool { return f.n() == 1 })
+	testutil.WaitFor(t, 2*time.Second, "the flush", func() bool { return f.n() == 1 })
 	if got := f.got[0]; got.Text != "book Wednesday\n\nfor four" {
 		t.Errorf("flushed %q, want the edited batch", got.Text)
 	}
@@ -310,7 +311,7 @@ func TestActivityFollowsChanges(t *testing.T) {
 	wa := tb.whatsApp()
 	wa.handleMessage(dmEvent("3EB0A", textMsg("my card number is 4111")))
 	wa.handleMessage(dmEvent("3EB0B", textMsg("book Tuesday")))
-	waitFor(t, 5*time.Second, "both to wait", func() bool { return len(br.Snapshot().Queue) == 2 })
+	testutil.WaitFor(t, 5*time.Second, "both to wait", func() bool { return len(br.Snapshot().Queue) == 2 })
 	wa.handleMessage(dmEvent("3EB0DEL", revokeMsg("3EB0A")))
 	wa.handleMessage(dmEvent("3EB0EDIT", editMsg("3EB0B", "book Wednesday")))
 	var texts []string

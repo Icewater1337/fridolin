@@ -12,6 +12,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 func TestObserveRuns(t *testing.T) {
@@ -59,14 +60,14 @@ func TestUntaggedChatterRunsOnlyWhenObserved(t *testing.T) {
 			t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
 			ctx := context.Background()
 			tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "we meet at noon", Silent: true, Source: chat.SourceWhatsApp}})
-			waitFor(t, 5*time.Second, "the chatter in the history", func() bool { return len(readHistory(t, br)) == 1 })
+			testutil.WaitFor(t, 5*time.Second, "the chatter in the history", func() bool { return len(readHistory(t, br)) == 1 })
 			if c.runs > 1 {
 				// The DM would stop the observe-only run, see
 				// TestAddressedWorkGoesAheadOfObserveRuns.
-				waitFor(t, 5*time.Second, "the observe-only run", func() bool { return br.Snapshot().Last != nil })
+				testutil.WaitFor(t, 5*time.Second, "the observe-only run", func() bool { return br.Snapshot().Last != nil })
 			}
 			tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hello", Source: chat.SourceWhatsApp}})
-			waitFor(t, 10*time.Second, "the DM's answer", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
+			testutil.WaitFor(t, 10*time.Second, "the DM's answer", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
 
 			data, _ := os.ReadFile(argsLog)
 			if runs := strings.Count(string(data), "\n"); runs != c.runs {
@@ -98,7 +99,7 @@ func TestAddressedWorkGoesAheadOfObserveRuns(t *testing.T) {
 		t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
 		tb.handleInbound(context.Background(), Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hello", Source: chat.SourceWhatsApp}})
 		// The observe-only run would sleep for 30 seconds.
-		waitFor(t, 10*time.Second, "the DM's answer", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
+		testutil.WaitFor(t, 10*time.Second, "the DM's answer", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
 		if sent := tb.sentTo(testGroup); len(sent) > 0 {
 			t.Errorf("sent %q to the group", sent)
 		}
@@ -138,9 +139,9 @@ func TestObserveRunsAreToldSo(t *testing.T) {
 	t.Setenv("FRIDOLIN_FAKE_PROMPT_LOG", promptLog)
 	ctx := context.Background()
 	tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "CHATTER", Silent: true, Source: chat.SourceWhatsApp}})
-	waitFor(t, 5*time.Second, "the observe-only run", func() bool { return br.Snapshot().Last != nil })
+	testutil.WaitFor(t, 5*time.Second, "the observe-only run", func() bool { return br.Snapshot().Last != nil })
 	tb.handleInbound(ctx, Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "REQUEST", Source: chat.SourceWhatsApp}})
-	waitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) == 1 })
+	testutil.WaitFor(t, 10*time.Second, "the answer", func() bool { return len(tb.sentTo(testGroup)) == 1 })
 
 	prompts := loggedPrompts(t, promptLog)
 	cases := []struct {
