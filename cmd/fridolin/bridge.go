@@ -265,16 +265,15 @@ func NewBridge(cfgs *config.Store, opts BridgeOptions) (_ *Bridge, err error) {
 	if !b.tokenAtStart {
 		log.Printf("warning: dashboard.require_token is off: any program on this computer, brains included, can change every setting through the dashboard API")
 	}
-	b.backup = NewBackupManager(cfgs, b.brainMgr)
 	// A refused scheduled backup goes to the brain's chat, like Plaud's
 	// expired-login notice: the owner may not open the dashboard for weeks.
-	b.backup.notify = func(ctx context.Context, br *Brain, text string) error {
+	b.backup = newProjectedBackup(cfgs, b.brainMgr, func(ctx context.Context, br *Brain, text string) error {
 		jid := b.replyChatFor(br, b.cfgs.Get())
 		if jid == "" {
 			return fmt.Errorf("brain %s has no chat to send it to — set its reply chat", br.ID())
 		}
 		return b.wa.SendMessage(ctx, jid, text)
-	}
+	})
 	b.google = NewGoogleAuth(cfgs)
 	b.plaud = NewPlaudManager(cfgs, b.brainMgr)
 	b.plaud.submit = b.submitHandOff

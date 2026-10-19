@@ -13,10 +13,10 @@ import (
 
 // Status snapshots job state under the lock and returns it for encoding after unlock.
 func (m *BackupManager) Status() map[string]any {
-	cfg := m.cfgs.Get()
-	rc := map[string]any{"found": false, "install_hint": rcloneInstallHint()}
+	cfg := m.opts.Settings()
+	rc := map[string]any{"found": false, "install_hint": m.opts.InstallHint()}
 	if p, err := m.rclonePath(); err == nil {
-		rc["found"], rc["path"], rc["version"] = true, p, rcloneVersion(p, m.rcloneEnv(anyChild))
+		rc["found"], rc["path"], rc["version"] = true, p, rcloneVersion(p, m.opts.Environ(context.Background()))
 	} else if !errors.Is(err, errRcloneMissing) {
 		rc["error"] = err.Error() // backup.rclone_path names one that does not work
 	}
@@ -32,10 +32,10 @@ func (m *BackupManager) Status() map[string]any {
 		Last    *BackupResult `json:"last"`
 	}
 	rows := []brainRow{}
-	for _, br := range m.bm.Brains() {
-		s := br.settings.Load()
-		rows = append(rows, brainRow{ID: br.ID(), Name: s.name, Dir: br.Dir(), Enabled: s.manifest.Backup.Enabled,
-			Exclude: nonNil(s.manifest.Backup.Exclude), Last: copyOf(m.state.Brains[br.ID()])})
+	for _, br := range m.opts.Targets() {
+		s := br.Settings()
+		rows = append(rows, brainRow{ID: br.ID, Name: s.Name, Dir: br.Dir, Enabled: s.Enabled,
+			Exclude: append([]string{}, s.Exclude...), Last: copyOf(m.state.Brains[br.ID])})
 	}
 	var job map[string]any
 	if j := m.job; j != nil {
@@ -50,8 +50,8 @@ func (m *BackupManager) Status() map[string]any {
 		"rclone":                rc,
 		"connected":             connected,
 		"connect":               copyOf(m.connect),
-		"settings":              cfg.Backup,
-		"include_bridge_config": cfg.Backup.IncludeBridge(),
+		"settings":              cfg,
+		"include_bridge_config": cfg.IncludeBridgeConfig,
 		"secret_excludes":       backupSecretExcludes,
 		"brains":                rows,
 		"bridge":                copyOf(m.state.Bridge),
@@ -68,7 +68,7 @@ func (m *BackupManager) Status() map[string]any {
 // Connect begins a Drive sign-in while preserving the current job admission order.
 func (m *BackupManager) Connect() error {
 	if _, err := m.rclonePath(); err != nil {
-		return apperr.New(apperr.Precondition, rcloneMissingHint(err))
+		return apperr.New(apperr.Precondition, m.rcloneMissingHint(err))
 	}
 	// Connecting starts by deleting the remote, so it would throw away a
 	// working link, for good if the new sign-in is then abandoned, and a
@@ -152,7 +152,7 @@ func (m *BackupManager) Disconnect(ctx context.Context) error {
 		m.connect = nil
 	}
 	m.mu.Unlock()
-	if _, err := m.runner(ctx, []string{"config", "delete", m.cfgs.Get().Backup.Remote}, nil); err != nil {
+	if _, err := m.runner(ctx, []string{"config", "delete", m.opts.Settings().Remote}, nil); err != nil {
 		return apperr.New(apperr.Unknown, "removing the Google Drive link failed: "+err.Error())
 	}
 	return nil
@@ -182,7 +182,7 @@ func (m *BackupManager) Versions(ctx context.Context, id string) ([]string, erro
 	}
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	versions, err := m.listVersions(ctx, backupPath(m.cfgs.Get().Backup, id, "versions"))
+	versions, err := m.listVersions(ctx, backupPath(m.opts.Settings(), id, "versions"))
 	if err != nil {
 		return nil, apperr.New(apperr.Unknown, "listing versions failed: "+err.Error())
 	}
@@ -217,9 +217,9 @@ func (m *BackupManager) Restore(req BackupRestoreRequest, overlapCheck func(stri
 	if err != nil {
 		return "", apperr.Wrap(apperr.Invalid, err)
 	}
-	src := backupPath(m.cfgs.Get().Backup, req.Brain, "current")
+	src := backupPath(m.opts.Settings(), req.Brain, "current")
 	if req.Version != "current" {
-		src = backupPath(m.cfgs.Get().Backup, req.Brain, "versions", req.Version)
+		src = backupPath(m.opts.Settings(), req.Brain, "versions", req.Version)
 	}
 	m.mu.Lock()
 	if m.job != nil {

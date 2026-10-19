@@ -875,7 +875,7 @@ func TestPrunePurgesExpiredVersionFolders(t *testing.T) {
 		return []byte(`[{"Name":"` + expired + `"},{"Name":"` + recent + `"},{"Name":"keep-me"}]`), nil
 	}
 	notes := &Brain{id: "notes"}
-	tb.backup.prune(context.Background(), []*Brain{notes})
+	tb.backup.prune(context.Background(), backupTargets([]*Brain{notes}, nil))
 	var purged []string
 	for _, c := range calls {
 		switch c[0] {
@@ -915,7 +915,7 @@ func TestPruneKeepsItsConfigAndStopsWhenCancelled(t *testing.T) {
 			}
 			return nil, nil
 		}
-		tb.backup.prune(context.Background(), brains)
+		tb.backup.prune(context.Background(), backupTargets(brains, nil))
 		if len(calls) != 9 {
 			t.Errorf("%d rclone calls, want a listing and two purges for each of 3 ids: %v", len(calls), calls)
 		}
@@ -939,7 +939,7 @@ func TestPruneKeepsItsConfigAndStopsWhenCancelled(t *testing.T) {
 			}
 			return listing, nil
 		}
-		tb.backup.prune(ctx, brains)
+		tb.backup.prune(ctx, backupTargets(brains, nil))
 		if len(calls) != 2 {
 			t.Errorf("prune went on after the cancel: %v", calls)
 		}
@@ -1101,7 +1101,7 @@ func TestBackupRefusesMassDeletion(t *testing.T) {
 			}
 			d := &deletionRunner{src: c.src, cur: c.cur, srcErr: c.srcErr, listErr: c.listErr, syncErr: c.syncErr}
 			tb.backup.runner = d.run
-			res := tb.backup.backupBrain(context.Background(), br, "manual", c.force)
+			res := tb.backup.backupBrain(context.Background(), backupTarget(br, nil), "manual", c.force)
 			synced := 0
 			if c.syncErr != "" {
 				synced = 1
@@ -1149,7 +1149,7 @@ func TestBackupBrainKeepsItsConfig(t *testing.T) {
 		}
 		return d.run(ctx, args, stderr)
 	}
-	if res := tb.backup.backupBrain(context.Background(), tb.brainMgr.Get("notes"), "manual", false); !res.OK {
+	if res := tb.backup.backupBrain(context.Background(), backupTarget(tb.brainMgr.Get("notes"), nil), "manual", false); !res.OK {
 		t.Fatalf("backup = %+v", res)
 	}
 	if len(d.syncs) != 1 {
@@ -1173,7 +1173,7 @@ func TestMassDeletionCheckListsLikeTheSync(t *testing.T) {
 	br := tb.brainMgr.Get("notes")
 	d := &deletionRunner{src: []string{"a"}, cur: []string{"a"}}
 	tb.backup.runner = d.run
-	if res := tb.backup.backupBrain(context.Background(), br, "manual", false); !res.OK {
+	if res := tb.backup.backupBrain(context.Background(), backupTarget(br, nil), "manual", false); !res.OK {
 		t.Fatalf("backup = %+v", res)
 	}
 	filter := filepath.Join(tb.backup.dir(), "filters-notes.txt")
@@ -1353,7 +1353,7 @@ func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
 		t.Errorf("a manual refusal must not be sent: %+v, %d messages", res, len(sent()))
 	}
 	send := tb.backup.notify
-	tb.backup.notify = func(context.Context, *Brain, string) error { return fmt.Errorf("WhatsApp is not connected") }
+	tb.backup.notify = func(context.Context, BackupTarget, string) error { return fmt.Errorf("WhatsApp is not connected") }
 	scheduledRun(t, tb, 2)
 	if told() || len(sent()) != 1 {
 		t.Errorf("a notice that failed to send must not count as told")
@@ -1372,7 +1372,7 @@ func TestRefusalNoticeGivesUp(t *testing.T) {
 	tb, _ := scheduledBackupBridge(t)
 	defer func(d time.Duration) { refusalNoticeTimeout = d }(refusalNoticeTimeout)
 	refusalNoticeTimeout = 50 * time.Millisecond
-	tb.backup.notify = func(ctx context.Context, _ *Brain, _ string) error {
+	tb.backup.notify = func(ctx context.Context, _ BackupTarget, _ string) error {
 		<-ctx.Done()
 		return ctx.Err()
 	}
@@ -1380,7 +1380,7 @@ func TestRefusalNoticeGivesUp(t *testing.T) {
 	go func() {
 		defer close(done)
 		res := &BackupResult{Refused: true, Trigger: "scheduled", Error: massDeletionError}
-		tb.backup.noticeRefusal(context.Background(), tb.brainMgr.Get("notes"), res)
+		tb.backup.noticeRefusal(context.Background(), backupTarget(tb.brainMgr.Get("notes"), nil), res)
 	}()
 	select {
 	case <-done:
@@ -2458,7 +2458,7 @@ func TestBackupLeavesSecretsOut(t *testing.T) {
 			}
 			return []byte("[]"), nil
 		}
-		tb.backup.backupBrain(t.Context(), tb.brainMgr.Get("notes"), "manual", true)
+		tb.backup.backupBrain(t.Context(), backupTarget(tb.brainMgr.Get("notes"), nil), "manual", true)
 		if len(filters) != 1 || !strings.HasPrefix(filters[0], "- .env\n") {
 			t.Errorf("sync filters = %q, want one starting with the secret files", filters)
 		}
@@ -2546,7 +2546,7 @@ func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
 				t.Fatal(err)
 			}
 			testutil.WaitFor(t, 10*time.Second, "the run to start", running)
-			tb.backup.backupBrain(t.Context(), br, "manual", true)
+			tb.backup.backupBrain(t.Context(), backupTarget(br, nil), "manual", true)
 			if !slices.Equal(syncedWhileRunning, []bool{c.wantRunning}) {
 				t.Errorf("synced while the brain ran: %v, want [%v]", syncedWhileRunning, c.wantRunning)
 			}
