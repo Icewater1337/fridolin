@@ -308,7 +308,7 @@ func TestOutboxSummaryOnlyReads(t *testing.T) {
 	if n := rows(); n != 1 {
 		t.Fatalf("the summary removed rows: %d left, want 1", n)
 	}
-	o := newOutbox(s, func() Messenger { return newFlakyMessenger(func() *Config { return &Config{} }, true) }, 0, nil)
+	o := newOutbox(s, func() outboundmsg.Link { return newFlakyMessenger(func() *Config { return &Config{} }, true) }, 0, nil)
 	defer o.Stop()
 	waitFor(t, 5*time.Second, "the outbox to forget it", func() bool { return rows() == 0 })
 }
@@ -344,7 +344,7 @@ func TestOutboxSurvivesARestart(t *testing.T) {
 	cfg := func() *Config { return &Config{MaxChunkSize: 4000} }
 	s := openOutboxStore(t, dir)
 	down := newFlakyMessenger(cfg, false)
-	first := newOutbox(s, func() Messenger { return down }, 0, func(context.Context, store.OutboxRow) error {
+	first := newOutbox(s, func() outboundmsg.Link { return down }, 0, func(context.Context, store.OutboxRow) error {
 		t.Error("delivered while offline")
 		return nil
 	})
@@ -362,7 +362,7 @@ func TestOutboxSurvivesARestart(t *testing.T) {
 	s = openOutboxStore(t, dir)
 	up := newFlakyMessenger(cfg, true)
 	got := make(chan store.OutboxRow, 1)
-	second := newOutbox(s, func() Messenger { return up }, 0, func(ctx context.Context, r store.OutboxRow) error {
+	second := newOutbox(s, func() outboundmsg.Link { return up }, 0, func(ctx context.Context, r store.OutboxRow) error {
 		got <- r
 		return s.OutboxDelivered(ctx, r.ID)
 	})
@@ -392,7 +392,7 @@ func TestOutboxGivesUp(t *testing.T) {
 	s := openOutboxStore(t, dir)
 	db := testStoreSQL(t, filepath.Join(dir, "bridge.db"))
 	m := newFlakyMessenger(func() *Config { return &Config{} }, true)
-	o := newOutbox(s, func() Messenger { return m }, 0, nil)
+	o := newOutbox(s, func() outboundmsg.Link { return m }, 0, nil)
 	defer o.Stop()
 	if _, err := s.AddOutbox(context.Background(), store.OutboxRow{Chat: testDMChat, Brain: "main", History: "stale", Parts: []store.OutboxPart{{Text: "stale"}}, CreatedAt: time.Now().Add(-2 * outboxTTL)}); err != nil {
 		t.Fatal(err)
@@ -422,7 +422,7 @@ func TestOutboxGivesUp(t *testing.T) {
 func TestOutboxKeepsAChatsOrder(t *testing.T) {
 	s := openOutboxStore(t, t.TempDir())
 	m := newFlakyMessenger(func() *Config { return &Config{} }, false)
-	o := newOutbox(s, func() Messenger { return m }, 0, nil)
+	o := newOutbox(s, func() outboundmsg.Link { return m }, 0, nil)
 	defer o.Stop()
 	for _, text := range []string{"first", "second"} {
 		if err := o.Text(context.Background(), testDMChat, text, 0); err != nil {

@@ -57,3 +57,6 @@ func SendChunks(ctx context.Context, chunks []string, pause time.Duration, send 
 // ErrRefusedRecipient marks a send the bridge refuses because of where it
 // would go.
 var ErrRefusedRecipient = errors.New("refusing to send to a Status, broadcast list or channel")
+
+// ErrNotAChat is why a chat a script named cannot be sent to.
+var ErrNotAChat = errors.New("not a chat JID: use one such as 15551234567@s.whatsapp.net, a …@lid or 120363000000000000@g.us, or a phone number with the country code")

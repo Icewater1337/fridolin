@@ -306,7 +306,7 @@ func NewBridge(cfgs *ConfigStore, opts BridgeOptions) (_ *Bridge, err error) {
 	if opts.NoWhatsApp {
 		pace = 0
 	}
-	b.outbox = newOutbox(store, func() Messenger { return b.wa }, pace, b.delivered)
+	b.outbox = newOutbox(store, func() outboundmsg.Link { return b.wa }, pace, b.delivered)
 	return b, nil
 }
 

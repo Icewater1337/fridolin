@@ -29,7 +29,7 @@ type Outbox struct {
 	store *store.Store
 	// messenger is the bridge's, read at each reply and each send: the
 	// bridge wraps it after the outbox is made.
-	messenger func() Messenger
+	messenger func() outboundmsg.Link
 	// pace is the pause between the messages of a reply, so that they
 	// arrive in order; 0 in dev mode.
 	pace time.Duration
@@ -59,7 +59,7 @@ const (
 
 // newOutbox makes an outbox and starts delivering, the replies a
 // previous run of the bridge left first. Stop ends it.
-func newOutbox(store *store.Store, messenger func() Messenger, pace time.Duration, delivered func(context.Context, store.OutboxRow) error) *Outbox {
+func newOutbox(store *store.Store, messenger func() outboundmsg.Link, pace time.Duration, delivered func(context.Context, store.OutboxRow) error) *Outbox {
 	ctx, cancel := context.WithCancel(context.Background())
 	o := &Outbox{
 		store: store, messenger: messenger, pace: pace, delivered: delivered, now: time.Now,

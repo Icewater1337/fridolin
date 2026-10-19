@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"log"
 	"strings"
 
@@ -26,8 +26,8 @@ func badAllowedNumbers(list []string) []string {
 	return bad
 }
 
-// errNotAChat is why a chat a script named cannot be sent to.
-var errNotAChat = errors.New("not a chat JID: use one such as 15551234567@s.whatsapp.net, a …@lid or 120363000000000000@g.us, or a phone number with the country code")
+// errNotAChat preserves the shared permanent-recipient error identity.
+var errNotAChat = outboundmsg.ErrNotAChat
 
 // chatJID parses the chat a script names, for /send: a WhatsApp JID, or a
 // phone number written any way phoneNumber takes, for the direct chat with
