@@ -6,17 +6,16 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/Icewater1337/fridolin/internal/config"
-	"github.com/Icewater1337/fridolin/internal/registry"
-
-	"github.com/Icewater1337/fridolin/internal/manifest"
-
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/registry"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
@@ -230,7 +229,7 @@ func TestScaffoldedPromptSaysWhatItIs(t *testing.T) {
 func folderBrainConfig(t *testing.T, home string, refs ...config.BrainRef) *config.Config {
 	t.Helper()
 	cfg := &config.Config{DataDir: filepath.Join(home, "data"), BrainDirs: refs}
-	eff, err := config.Resolve(cfg)
+	eff, err := config.Resolve(cfg, configPaths(), runtime.GOOS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -574,7 +573,7 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 			home := fsx.Canonical(t.TempDir())
 			t.Setenv("HOME", home)
 			path := writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data", "claude_path": "`+home+`/no-claude", "allowed_groups": ["`+testGroup+`", "`+otherGroup+`"]`+brainDirsJSON(t, c.brains(home)...)+`}`)
-			cfg, err := config.Load(path)
+			cfg, err := loadConfig(path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -606,7 +605,7 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 	t.Run("Plaud recordings wait", func(t *testing.T) {
 		home := fsx.Canonical(t.TempDir())
 		t.Setenv("HOME", home)
-		cfg, err := config.Load(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data", "allowed_numbers": ["15551234567"]`+brainDirsJSON(t,
+		cfg, err := loadConfig(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data", "allowed_numbers": ["15551234567"]`+brainDirsJSON(t,
 			config.BrainRef{Path: home + "/gone", Approved: &manifest.Manifest{ID: "personal", Name: "personal", Routing: manifest.Routing{HandlesDMs: true}}},
 			brainFolder(t, home+"/work", manifest.Manifest{ID: "work", Routing: manifest.Routing{Default: true}}),
 		)+`}`))

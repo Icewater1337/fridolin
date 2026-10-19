@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
@@ -557,7 +556,7 @@ func TestKillRunsFreezesQueuedAndNewRuns(t *testing.T) {
 
 func TestKillRunsRejectsReloadAlreadyInProgress(t *testing.T) {
 	mgr, _, home := queueTestManager(t, 0, "")
-	cfg, err := config.Load(writeConfig(t, `{"data_dir": "`+home+`/data", "claude_path": "`+os.Args[0]+`"}`))
+	cfg, err := loadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", "claude_path": "`+os.Args[0]+`"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -609,7 +608,7 @@ func TestReloadTracksRetirementUntilDeliveryFinishes(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("run did not reach delivery")
 	}
-	cfg, err := config.Load(writeConfig(t, `{"data_dir": "`+home+`/data", "claude_path": "`+os.Args[0]+`"}`))
+	cfg, err := loadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", "claude_path": "`+os.Args[0]+`"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

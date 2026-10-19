@@ -13,8 +13,7 @@ import (
 // can refuse the whole transaction before either manifest or config is written.
 func TestStoreChecksBrainsBeforeWriting(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("BRAIN_MODE", "")
+	t.Parallel()
 	path := filepath.Join(home, "config.json")
 	before := []byte(`{"log_level":"info"}`)
 	if err := os.WriteFile(path, before, 0o600); err != nil {
@@ -42,7 +41,7 @@ func TestStoreChecksBrainsBeforeWriting(t *testing.T) {
 		return refused
 	}
 	var err error
-	cs, err = Open(path, check)
+	cs, err = Open(path, Options{Paths: Paths{Home: home, DefaultDataDir: filepath.Join(home, DataDirName)}, GOOS: "linux", CheckBrains: check})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,10 +67,10 @@ func TestStoreChecksBrainsBeforeWriting(t *testing.T) {
 }
 
 func TestStoreRefusesUncheckedBrainUpdates(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("BRAIN_MODE", "")
+	t.Parallel()
+	home := t.TempDir()
 	path := filepath.Join(t.TempDir(), "config.json")
-	cs, err := Open(path, nil)
+	cs, err := Open(path, Options{Paths: Paths{Home: home, DefaultDataDir: filepath.Join(home, DataDirName)}, GOOS: "linux"})
 	if err != nil {
 		t.Fatal(err)
 	}

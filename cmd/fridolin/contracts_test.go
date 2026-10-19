@@ -387,7 +387,7 @@ func TestConfigFilesFollowTheSchema(t *testing.T) {
 	t.Run("starter", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		path := filepath.Join(t.TempDir(), "config.json")
-		if err := config.EnsureFile(path); err != nil {
+		if err := ensureConfigFile(path); err != nil {
 			t.Fatal(err)
 		}
 		data, err := os.ReadFile(path)
@@ -455,7 +455,7 @@ func TestConfigSchemaRefusesWhatTheBridgeRefuses(t *testing.T) {
 	} {
 		t.Run(configValue, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
-			if _, err := config.Load(writeConfig(t, configValue)); err == nil {
+			if _, err := loadConfig(writeConfig(t, configValue)); err == nil {
 				t.Fatal("the bridge loads it")
 			}
 			if len(set.ValidateJSON("config.schema.json", []byte(configValue))) == 0 {
@@ -494,7 +494,7 @@ func TestConfigSchemaTakesWhatTheBridgeTakes(t *testing.T) {
 		{`{"http_listen": "127.0.0.1:"}`, true},
 	} {
 		t.Run(tc.config, func(t *testing.T) {
-			if _, err := config.Load(writeConfig(t, tc.config)); err != nil {
+			if _, err := loadConfig(writeConfig(t, tc.config)); err != nil {
 				t.Fatalf("the bridge refuses it: %v", err)
 			}
 			if problems := set.ValidateJSON("config.schema.json", []byte(tc.config)); len(problems) > 0 != tc.refused {
@@ -564,7 +564,7 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 						err = m.Validate()
 					}
 				} else {
-					_, err = config.Load(writeConfig(t, doc))
+					_, err = loadConfig(writeConfig(t, doc))
 				}
 				if err != nil {
 					t.Errorf("the bridge refuses %s: %v", doc, err)

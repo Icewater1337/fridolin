@@ -381,7 +381,7 @@ func (p *PlaudManager) dir() string { return filepath.Join(p.cfg().DataDir, "pla
 // cliHome is the HOME the CLI runs with, which decides where its login lives.
 func (p *PlaudManager) cliHome() string {
 	if p.cfg().Plaud.BrainAccess {
-		return config.HomeDir()
+		return homeDir()
 	}
 	return p.privateHome()
 }
@@ -487,7 +487,7 @@ func findPlaudCLI(c string) (string, error) {
 	if found := lookPathIn("plaud", helperPath()); found != "" {
 		return found, nil
 	}
-	candidates, _ := filepath.Glob(filepath.Join(config.HomeDir(), nvmNodeVersions, "*/bin/plaud"))
+	candidates, _ := filepath.Glob(filepath.Join(homeDir(), nvmNodeVersions, "*/bin/plaud"))
 	// The newest node first: by version, not by name, which would put
 	// v20.9.0 before v20.10.0, and v9 before v24.
 	slices.SortStableFunc(candidates, func(a, b string) int {

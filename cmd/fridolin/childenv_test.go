@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/registry"
 )
@@ -254,7 +253,7 @@ func TestChildEnvPassthroughNames(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
 			names, _ := json.Marshal([]string{tc.name})
-			_, err := config.Load(writeConfig(t, `{"data_dir": "`+home+`/data", "child_env_passthrough": `+string(names)+`}`))
+			_, err := loadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", "child_env_passthrough": `+string(names)+`}`))
 			if tc.ok && err != nil {
 				t.Fatalf("Load: %v", err)
 			}
@@ -340,7 +339,7 @@ func brainRunEnv(t *testing.T, env map[string]string, configValue string) (map[s
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.Load(writeConfig(t, `{
+	cfg, err := loadConfig(writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+os.Args[0]+`",

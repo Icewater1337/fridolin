@@ -24,7 +24,7 @@ import (
 // needed: this is the profile, under the real sandbox-exec.
 func TestSiteSandboxEnforcesDeclarations(t *testing.T) {
 	requireSandboxExec(t)
-	home := config.HomeDir()
+	home := homeDir()
 	data := filepath.Join(home, config.DataDirName)
 	site := filepath.Join(data, "site")
 	files := t.TempDir()

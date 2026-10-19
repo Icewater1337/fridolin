@@ -559,7 +559,7 @@ func (m *SiteManager) SandboxStatus() SiteSandboxStatus {
 // sandboxInput gathers what the live site's profile is built from.
 func (m *SiteManager) sandboxInput(node, deploy, root, rtFile string, mods []siteModuleCaps) siteProfileInput {
 	in := siteProfileInput{
-		home:    config.HomeDir(),
+		home:    homeDir(),
 		dataDir: m.dataDir,
 		shell:   m.dir("shell"),
 		deploy:  deploy,

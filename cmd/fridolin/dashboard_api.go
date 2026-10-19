@@ -923,7 +923,7 @@ func (b *Bridge) apiBrain(w http.ResponseWriter, r *http.Request) {
 func brainDirs(c *config.Config) []string {
 	var dirs []string
 	for _, ref := range c.BrainDirs {
-		dirs = append(dirs, ref.Dir())
+		dirs = append(dirs, ref.Dir(homeDir()))
 	}
 	return dirs
 }
@@ -949,7 +949,7 @@ func (b *Bridge) apiInspectFolder(w http.ResponseWriter, r *http.Request) {
 	resp["exists"] = err == nil
 	resp["is_dir"] = err == nil && st.IsDir()
 	if err == nil && st.IsDir() {
-		root, err := os.OpenRoot(fsx.Canonical(config.HomeDir()))
+		root, err := os.OpenRoot(fsx.Canonical(homeDir()))
 		if err != nil {
 			httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 			return
@@ -1107,7 +1107,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 		// apart, but not the other config writers: a brain saved or
 		// approved since the check above may claim the same group or the
 		// DMs, and the two must not both be registered.
-		eff, err := config.Resolve(c)
+		eff, err := b.cfgs.Resolve(c)
 		if err != nil {
 			return err
 		}
@@ -1123,7 +1123,7 @@ func (b *Bridge) apiAddBrain(w http.ResponseWriter, r *http.Request) {
 			writesManifest = true
 		}
 		approved := m
-		c.BrainDirs = append(c.BrainDirs, config.BrainRef{Path: fsx.Tilde(abs, config.HomeDir()), Approved: &approved})
+		c.BrainDirs = append(c.BrainDirs, config.BrainRef{Path: fsx.Tilde(abs, homeDir()), Approved: &approved})
 		return nil
 	}); err != nil {
 		scaffold.Rollback()
@@ -1238,7 +1238,7 @@ func (b *Bridge) apiApproveBrain(w http.ResponseWriter, r *http.Request) {
 			if ref.Approved == nil || ref.Approved.ID != id {
 				continue
 			}
-			disk, err := manifest.Read(ref.Dir())
+			disk, err := manifest.Read(ref.Dir(homeDir()))
 			if err != nil {
 				return err
 			}
@@ -1297,10 +1297,10 @@ func (b *Bridge) apiRemoveBrainDir(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteErr(w, http.StatusBadRequest, "path required")
 		return
 	}
-	want := fsx.Canonical(fsx.ExpandHome(path, config.HomeDir()))
+	want := fsx.Canonical(fsx.ExpandHome(path, homeDir()))
 	_, err := b.cfgs.Update("", func(c *config.Config) error {
 		for i, ref := range c.BrainDirs {
-			if ref.Approved == nil && fsx.Canonical(ref.Dir()) == want {
+			if ref.Approved == nil && fsx.Canonical(ref.Dir(homeDir())) == want {
 				c.BrainDirs = slices.Delete(c.BrainDirs, i, i+1)
 				return nil
 			}
@@ -1319,7 +1319,7 @@ func (b *Bridge) apiRemoveBrainDir(w http.ResponseWriter, r *http.Request) {
 var pickMu sync.Mutex
 
 func (b *Bridge) apiFSCaps(w http.ResponseWriter, r *http.Request) {
-	home := config.HomeDir()
+	home := homeDir()
 	picker := ""
 	if p := platform.FolderPicker(home); p != nil {
 		picker = filepath.Base(p[0])
@@ -1328,7 +1328,7 @@ func (b *Bridge) apiFSCaps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Bridge) apiFSPick(w http.ResponseWriter, r *http.Request) {
-	argv := platform.FolderPicker(config.HomeDir())
+	argv := platform.FolderPicker(homeDir())
 	if argv == nil {
 		httpapi.WriteErr(w, http.StatusNotImplemented, "no native folder picker on this system — browse or type the path instead")
 		return
@@ -1407,7 +1407,7 @@ func textTail(s string, n int) string {
 // apiFSList lists folders inside your home folder, for the in-dashboard
 // folder browser. The bridge's data folder is hidden.
 func (b *Bridge) apiFSList(w http.ResponseWriter, r *http.Request) {
-	home := fsx.Canonical(config.HomeDir())
+	home := fsx.Canonical(homeDir())
 	p := r.URL.Query().Get("path")
 	if p == "" {
 		p = home

@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"runtime"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/trigger"
@@ -13,7 +12,7 @@ import (
 
 // Starter is written on the very first run, so the bridge can start and
 // everything else can be set up in the dashboard.
-func Starter() *Config {
+func Starter(goos string) *Config {
 	f := false
 	return &Config{
 		Comment:                    "Edit this in the dashboard (fridolin open). Every option: docs/CONFIGURATION.md",
@@ -25,28 +24,28 @@ func Starter() *Config {
 		DangerouslySkipPermissions: true,
 		HTTPListen:                 DefaultHTTPListen,
 		OTPGuard:                   true,
-		Sandbox:                    SandboxConfig{Enabled: runtime.GOOS == "darwin", DenyPaths: []string{}, AllowPaths: []string{}},
+		Sandbox:                    SandboxConfig{Enabled: goos == "darwin", DenyPaths: []string{}, AllowPaths: []string{}},
 		// A new install has no scripts written before tokens.
 		ScriptAPI: ScriptAPIConfig{TokenlessSend: &f},
 	}
 }
 
-func EnsureFile(path string) error {
-	return WriteStarter(path, "", "")
+func EnsureFile(path string, paths Paths, goos string) error {
+	return WriteStarter(path, "", "", paths, goos)
 }
 
 // WriteStarter writes the starter config to path unless there is a
 // file there. Its data_dir is dataDir, else StarterDataDir's: without one
 // every start would pick the data dir again, by which folders exist.
-func WriteStarter(path, claudePath, dataDir string) error {
+func WriteStarter(path, claudePath, dataDir string, paths Paths, goos string) error {
 	if _, err := os.Stat(path); err == nil || !os.IsNotExist(err) {
 		return err
 	}
-	cfg := Starter()
+	cfg := Starter(goos)
 	cfg.ClaudePath = claudePath
 	cfg.DataDir = dataDir
 	if dataDir == "" {
-		cfg.DataDir = StarterDataDir(HomeDir())
+		cfg.DataDir = StarterDataDir(paths)
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -59,14 +58,14 @@ func WriteStarter(path, claudePath, dataDir string) error {
 // StarterDataDir is the data dir a new config gets when none is given: the
 // folder the bridge would pick now, written with ~ so that the config
 // still holds when a backup of it is restored under another home folder.
-func StarterDataDir(home string) string {
-	if _, source := ResolveDataDir("", home); source == DataDirFromLegacy {
+func StarterDataDir(paths Paths) string {
+	if _, source := ResolveDataDir("", paths); source == DataDirFromLegacy {
 		return "~/" + LegacyDataDirName
 	}
 	return "~/" + DataDirName
 }
 
 // DefaultPath is the default config file path for the current home.
-func DefaultPath() string {
-	return filepath.Join(DefaultDataDir(HomeDir()), "config.json")
+func DefaultPath(paths Paths) string {
+	return filepath.Join(paths.DefaultDataDir, "config.json")
 }

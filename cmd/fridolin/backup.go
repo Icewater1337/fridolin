@@ -311,7 +311,7 @@ var errRcloneMissing = errors.New("rclone is not installed")
 // folders of PATH it looks in first, a variable so tests can point it at
 // their own files.
 var rcloneFallbacks = func() []string {
-	return []string{"/opt/homebrew/bin/rclone", "/usr/local/bin/rclone", filepath.Join(config.HomeDir(), ".local/bin/rclone")}
+	return []string{"/opt/homebrew/bin/rclone", "/usr/local/bin/rclone", filepath.Join(homeDir(), ".local/bin/rclone")}
 }
 
 // rcloneMissingHint says what to do about findRclone's error: install
@@ -1764,12 +1764,12 @@ func checkRestoreTarget(target string, cfg *config.Config, home string) error {
 // It returns the folder, resolved.
 func (b *Bridge) restoreTarget(p string) (string, error) {
 	cfg := b.cfgs.Get()
-	target, problems, _ := CheckBrainPath(resolveExisting(fsx.ExpandHome(strings.TrimSpace(p), config.HomeDir())), cfg, brainDirs(cfg))
+	target, problems, _ := CheckBrainPath(resolveExisting(fsx.ExpandHome(strings.TrimSpace(p), homeDir())), cfg, brainDirs(cfg))
 	if creds := fsx.Canonical(cfg.Sandbox.CredentialsDir); len(problems) == 0 && creds != "" && (fsx.Within(target, creds) || fsx.Within(creds, target)) {
 		problems = append(problems, "the credentials folder cannot be (or contain) the restore folder")
 	}
 	if len(problems) == 0 {
-		if err := checkRestoreTarget(target, cfg, config.HomeDir()); err != nil {
+		if err := checkRestoreTarget(target, cfg, homeDir()); err != nil {
 			problems = append(problems, "the restore folder "+err.Error()+" — pick a new folder")
 		}
 	}
@@ -1780,7 +1780,7 @@ func (b *Bridge) restoreTarget(p string) (string, error) {
 	// on it. Build what is listed, made and copied into from your home
 	// folder and a part of it that stays inside, so that it is there by
 	// construction and not only by that report.
-	home := fsx.Canonical(config.HomeDir())
+	home := fsx.Canonical(homeDir())
 	rel, err := filepath.Rel(home, target)
 	if err != nil || rel == "." || !filepath.IsLocal(rel) {
 		return "", errors.New("restore into a new folder inside your home folder")

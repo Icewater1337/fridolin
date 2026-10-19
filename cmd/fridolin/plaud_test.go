@@ -3447,7 +3447,7 @@ func writeExecutables(t *testing.T, paths ...string) {
 func TestPlaudConfigValidation(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	for _, bad := range []string{`{"plaud":{"brain":"Not A Slug"}}`, `{"plaud":{"interval_seconds":5}}`} {
-		if _, err := config.Load(writeConfig(t, bad)); err == nil {
+		if _, err := loadConfig(writeConfig(t, bad)); err == nil {
 			t.Errorf("%s should be rejected", bad)
 		}
 	}
