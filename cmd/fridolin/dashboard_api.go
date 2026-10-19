@@ -395,7 +395,7 @@ func (b *Bridge) apiGroups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Bridge) apiActivity(w http.ResponseWriter, r *http.Request) {
-	ActivityAPI{Reader: b.activity}.ServeHTTP(w, r)
+	httpapi.ActivityAPI{Reader: b.activity}.ServeHTTP(w, r)
 }
 
 func (b *Bridge) apiStopRun(w http.ResponseWriter, r *http.Request) {
@@ -415,7 +415,7 @@ func (b *Bridge) apiStopRun(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Bridge) apiLogs(w http.ResponseWriter, r *http.Request) {
-	LogsAPI{Reader: b.logs, StartedAt: b.started, MaxLines: logRingLines}.ServeHTTP(w, r)
+	httpapi.LogsAPI{Reader: b.logs, StartedAt: b.started, MaxLines: logRingLines}.ServeHTTP(w, r)
 }
 
 // ── chats ────────────────────────────────────────────────────────────────

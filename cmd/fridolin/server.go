@@ -50,7 +50,7 @@ type ingestRequest struct {
 }
 
 func (b *Bridge) httpReady(w http.ResponseWriter, r *http.Request) {
-	ReadyAPI{Connection: b.wa, DevMode: b.dev != nil, Version: version.String, StartedAt: b.started}.ServeHTTP(w, r)
+	httpapi.ReadyAPI{Connection: b.wa, DevMode: b.dev != nil, Version: version.String, StartedAt: b.started}.ServeHTTP(w, r)
 }
 
 // httpSend handles POST /send {"jid":"…","text":"…"} for local scripts.

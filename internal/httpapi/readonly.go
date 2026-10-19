@@ -1,9 +1,8 @@
-package main
+package httpapi
 
 import (
 	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/logx"
 	"net/http"
 	"strconv"
@@ -54,7 +53,7 @@ func (a ActivityAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		limit = 100
 	}
 	limit = min(limit, 500)
-	httpapi.WriteJSONIfChanged(w, r, a.Reader.Recent(limit, r.URL.Query().Get("brain")))
+	WriteJSONIfChanged(w, r, a.Reader.Recent(limit, r.URL.Query().Get("brain")))
 }
 
 func (a LogsAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -68,12 +67,12 @@ func (a LogsAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if lines == nil {
 		lines = []logx.Line{}
 	}
-	httpapi.WriteJSON(w, http.StatusOK, logsResponse{Boot: a.StartedAt.Unix(), Lines: lines, Next: next})
+	WriteJSON(w, http.StatusOK, logsResponse{Boot: a.StartedAt.Unix(), Lines: lines, Next: next})
 }
 
-// readyResponse is the body of GET /ready: whether messages can go out and
+// ReadyResponse is the body of GET /ready: whether messages can go out and
 // which build answers. Nothing in it identifies the account.
-type readyResponse struct {
+type ReadyResponse struct {
 	Ready     bool      `json:"ready"`
 	WhatsApp  string    `json:"whatsapp"` // WAState.Mode
 	Version   string    `json:"version"`
@@ -87,7 +86,7 @@ type readyResponse struct {
 // is up but not paired, and waiting for ready there would never end.
 func (a ReadyAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	mode := a.Connection.State().Mode
-	resp := readyResponse{
+	resp := ReadyResponse{
 		Ready:     mode == "connected" || a.DevMode,
 		WhatsApp:  mode,
 		Version:   a.Version(),
@@ -98,5 +97,5 @@ func (a ReadyAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusServiceUnavailable
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	httpapi.WriteJSON(w, status, resp)
+	WriteJSON(w, status, resp)
 }
