@@ -187,15 +187,16 @@ func Scaffold(dir string, m *manifest.Manifest, templates Templates) ([]string, 
 }
 
 // scaffoldFolder is Scaffold without brain.json, which the dashboard
-// writes with the update that adds the brain (see apiAddBrain).
+// writes with the update that adds the brain (in the registration transaction).
 func scaffoldFolder(dir string, m *manifest.Manifest, templates Templates) ([]string, error) {
 	s, err := ScaffoldFolder(dir, m, templates)
-	defer s.Close()
+	// ScaffoldFolder always returns its transaction, including partial failure.
+	s.Close()
 	return s.created, err
 }
 
 // ScaffoldFolder writes templates while retaining ownership for a later rollback.
-// The caller closes the transaction even when preparation fails.
+// The transaction is always non-nil; the caller closes it even on failure.
 func ScaffoldFolder(dir string, m *manifest.Manifest, templates Templates) (*ScaffoldTx, error) {
 	s, err := newScaffold(dir)
 	if err != nil {
@@ -234,7 +235,7 @@ with the country code, any way you like: +1 555 123-4567 works.
 // renderTemplate fills a brain template, the starter prompt or an example
 // skill, for the new brain m. The templates name the bridge's commands by
 // $FRIDOLIN_BIN and its helpers by $FRIDOLIN_TOOLS_DIR, which every run
-// sets (see brainRunEnv), and never by a path: a brain folder keeps
+// sets, and never by a path: a brain folder keeps
 // working when it or the bridge moves.
 func renderTemplate(tpl string, m *manifest.Manifest) string {
 	return strings.NewReplacer("{{BRAIN_NAME}}", m.Name).Replace(tpl)

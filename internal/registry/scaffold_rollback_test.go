@@ -16,7 +16,7 @@ func TestScaffoldRollbackKeepsSelectedSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	s, err := ScaffoldFolder(selected, &manifest.Manifest{ID: "a", Name: "A"}, scaffoldTestTemplates())
-	defer s.Close()
+	t.Cleanup(s.Close)
 	if err != nil {
 		t.Fatal(err)
 	}

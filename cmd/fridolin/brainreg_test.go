@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/Icewater1337/fridolin/internal/registry"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -170,7 +171,7 @@ func TestScaffoldBrainNeverOverwrites(t *testing.T) {
 	_ = os.MkdirAll(dir, 0o700)
 	_ = os.WriteFile(filepath.Join(dir, "brain-prompt.md"), []byte("mine"), 0o600)
 	m := testManifest("fam")
-	created, err := Scaffold(dir, &m, brainTemplates)
+	created, err := registry.Scaffold(dir, &m, brainTemplates)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +185,7 @@ func TestScaffoldBrainNeverOverwrites(t *testing.T) {
 		t.Error("brain-prompt.md reported as created although it existed")
 	}
 	// A second scaffold creates nothing and keeps the manifest.
-	again, err := Scaffold(dir, &m, brainTemplates)
+	again, err := registry.Scaffold(dir, &m, brainTemplates)
 	if err != nil || len(again) != 0 {
 		t.Errorf("second scaffold created %v (err %v)", again, err)
 	}
@@ -197,7 +198,7 @@ func TestScaffoldBrainNeverOverwrites(t *testing.T) {
 func TestScaffoldedPromptSaysWhatItIs(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "brain")
 	m := testManifest("fam")
-	if _, err := Scaffold(dir, &m, brainTemplates); err != nil {
+	if _, err := registry.Scaffold(dir, &m, brainTemplates); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(dir, "brain-prompt.md"))
@@ -239,7 +240,7 @@ func TestResolveBrainsUsesApprovedManifestAndReportsDrift(t *testing.T) {
 	t.Setenv("HOME", home)
 	dir := filepath.Join(home, "fam")
 	m := testManifest("fam")
-	if _, err := Scaffold(dir, &m, brainTemplates); err != nil {
+	if _, err := registry.Scaffold(dir, &m, brainTemplates); err != nil {
 		t.Fatal(err)
 	}
 	approved := m
@@ -272,7 +273,7 @@ func TestResolveBrainsSkipsMissingAndClashing(t *testing.T) {
 	a.Routing.HandlesDMs, b.Routing.HandlesDMs = true, true
 	for _, m := range []manifest.Manifest{a, b} {
 		m := m
-		if _, err := Scaffold(filepath.Join(home, m.ID), &m, brainTemplates); err != nil {
+		if _, err := registry.Scaffold(filepath.Join(home, m.ID), &m, brainTemplates); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -514,7 +515,7 @@ func TestBrainTemplatesNameNoPaths(t *testing.T) {
 
 	// ScaffoldBrain writes them so.
 	dir := t.TempDir()
-	if _, err := Scaffold(dir, &m, brainTemplates); err != nil {
+	if _, err := registry.Scaffold(dir, &m, brainTemplates); err != nil {
 		t.Fatal(err)
 	}
 	for name, want := range files {

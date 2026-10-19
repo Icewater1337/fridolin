@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"github.com/Icewater1337/fridolin/internal/registry"
 	"log"
 	"os"
 	"path/filepath"
@@ -66,7 +67,7 @@ func brainASetup(t *testing.T) (*Config, string) {
 	t.Setenv("HOME", home)
 	m := testManifest("a")
 	m.Routing.HandlesDMs = true
-	if _, err := Scaffold(filepath.Join(home, "a"), &m, brainTemplates); err != nil {
+	if _, err := registry.Scaffold(filepath.Join(home, "a"), &m, brainTemplates); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
@@ -231,7 +232,7 @@ func TestLeftOutBrainShowsWhyOnItsPage(t *testing.T) {
 	tb := newTestBridge(t, "")
 	dir := filepath.Join(tb.home, "b")
 	m := testManifest("b")
-	if _, err := Scaffold(dir, &m, brainTemplates); err != nil {
+	if _, err := registry.Scaffold(dir, &m, brainTemplates); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chmod(dir, 0); err != nil {
