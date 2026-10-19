@@ -14,9 +14,10 @@ import (
 	"testing"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/store"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/platform"
-	"github.com/Icewater1337/fridolin/internal/store"
 )
 
 func TestNewBridgeTakesTheInstanceLock(t *testing.T) {

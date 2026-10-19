@@ -1,4 +1,4 @@
-package main
+package brain
 
 import (
 	"slices"
@@ -23,7 +23,7 @@ type Inbound struct {
 
 // merge folds a later message into m. The batch is tagged if any part was:
 // a file followed by "@claude what is this?" must get an answer.
-func (m Inbound) merge(next Inbound) Inbound {
+func (m Inbound) Merge(next Inbound) Inbound {
 	parts := append(m.ownParts(), next.ownParts()...)
 	m.Inbound = m.Inbound.Merge(next.Inbound)
 	m.parts = parts
@@ -65,7 +65,7 @@ func (m Inbound) withMediaMoved(moved map[string]string) Inbound {
 // in an edit or a deletion, and one group member must not rewrite or
 // cancel what another asked for; so a group admin's deletion of someone
 // else's message changes nothing here either.
-func (m Inbound) changes(c chat.Change) bool {
+func (m Inbound) Changes(c chat.Change) bool {
 	return slices.ContainsFunc(m.ownParts(), func(p Inbound) bool { return c.Names(p.Inbound) })
 }
 
@@ -73,7 +73,7 @@ func (m Inbound) changes(c chat.Change) bool {
 func remerge(parts []Inbound) Inbound {
 	m := parts[0]
 	for _, p := range parts[1:] {
-		m = m.merge(p)
+		m = m.Merge(p)
 	}
 	return m
 }
@@ -81,7 +81,7 @@ func remerge(parts []Inbound) Inbound {
 // applyChange applies c to m: the part c names is deleted, or gets its
 // new text. It reports whether m holds that part, and keep is false when
 // nothing is left of m.
-func (m Inbound) applyChange(c chat.Change) (out Inbound, found, keep bool) {
+func (m Inbound) ApplyChange(c chat.Change) (out Inbound, found, keep bool) {
 	parts := m.ownParts()
 	i := slices.IndexFunc(parts, func(p Inbound) bool { return c.Names(p.Inbound) })
 	if i < 0 {

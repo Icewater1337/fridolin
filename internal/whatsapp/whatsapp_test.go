@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 
 	"github.com/Icewater1337/fridolin/internal/access"
 
@@ -21,7 +22,6 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
-	"github.com/Icewater1337/fridolin/internal/testutil"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -1145,7 +1145,7 @@ func TestHangingGroupLookupDoesNotDelayADM(t *testing.T) {
 	tw.feed(groupMessage(stranger, types.EmptyJID, groupChatter()))
 	testutil.WaitFor(t, time.Second, "the group lookup to start", func() bool { return fl.infoCalls.Load() == 1 })
 	start := time.Now()
-	tw.feed(dmEvent("3EB0DM", textMsg("hello")))
+	tw.feed(groupMessage(stranger, types.EmptyJID, groupChatter()), dmEvent("3EB0DM", textMsg("hello")))
 	testutil.WaitFor(t, time.Second, "the DM", func() bool { return slices.Contains(a.list(), "3EB0DM") })
 	if waited := time.Since(start); waited >= groupNameTimeout {
 		t.Errorf("the DM took %v, as long as the lookup", waited)

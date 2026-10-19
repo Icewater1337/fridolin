@@ -1,4 +1,4 @@
-package main
+package brain
 
 import (
 	"log"
@@ -27,11 +27,11 @@ func (br *Brain) Change(c chat.Change) (waiting bool, edited *Inbound) {
 	br.mu.Lock()
 	var gone []Inbound
 	for i, p := range br.pending {
-		if !p.changes(c) {
+		if !p.Changes(c) {
 			continue
 		}
 		waiting = true
-		if next, _, keep := p.applyChange(c); keep {
+		if next, _, keep := p.ApplyChange(c); keep {
 			br.pending[i] = next
 			if c.Kind == chat.ChangeEdit {
 				if j := slices.IndexFunc(next.ownParts(), func(p Inbound) bool { return c.Names(p.Inbound) }); j >= 0 {
@@ -46,15 +46,15 @@ func (br *Brain) Change(c chat.Change) (waiting bool, edited *Inbound) {
 		break
 	}
 	var stop *brainRun
-	if cur := br.current; !waiting && cur != nil && cur.msg.changes(c) {
+	if cur := br.current; !waiting && cur != nil && cur.msg.Changes(c) {
 		// A run cannot take back what it read; one whose whole message
 		// was deleted is stopped. Part of an album deleted, it goes on.
-		if _, _, keep := cur.msg.applyChange(c); c.Kind == chat.ChangeRevoke && !keep {
+		if _, _, keep := cur.msg.ApplyChange(c); c.Kind == chat.ChangeRevoke && !keep {
 			stop = cur
 		}
 	}
 	br.mu.Unlock()
-	dropped(gone)
+	Dropped(gone)
 	if stop != nil {
 		// Not waiting for it to end: this runs on whatsmeow's event
 		// goroutine, and a stopped run sends nothing anyway.
@@ -64,14 +64,14 @@ func (br *Brain) Change(c chat.Change) (waiting bool, edited *Inbound) {
 	return waiting, edited
 }
 
-// recordChange writes c into the brain's history. A deletion takes the
+// RecordChange writes c into the brain's history. A deletion takes the
 // message's line out. An edit of a message still waiting, edited, replaces
 // its line, since that is what the run will read; after a run read it,
 // the edit is added as an event instead, after the line the run acted on,
 // so only when the history holds that line.
 // A message deleted after a run read it (not waiting) leaves an event too,
 // so the next run knows why it no longer sees what it answered.
-func (br *Brain) recordChange(c chat.Change, waiting bool, edited *Inbound) {
+func (br *Brain) RecordChange(c chat.Change, waiting bool, edited *Inbound) {
 	is := func(e history.Entry) bool {
 		return e.ID == c.Target && e.Type == history.In && e.From == c.Sender &&
 			(e.Chat == c.Chat || (c.ChatAlt != "" && e.Chat == c.ChatAlt))
@@ -96,7 +96,7 @@ func (br *Brain) recordChange(c chat.Change, waiting bool, edited *Inbound) {
 			log.Printf("brain %s: could not look for the edited message in %s in the history: %v", br.id, c.Chat, err)
 		}
 		if held {
-			br.appendHistory(c.Chat, c.Sender, "edited a message to: "+strconv.Quote(c.Text), history.Event)
+			br.AppendHistory(c.Chat, c.Sender, "edited a message to: "+strconv.Quote(c.Text), history.Event)
 		}
 		return
 	}
@@ -105,7 +105,7 @@ func (br *Brain) recordChange(c chat.Change, waiting bool, edited *Inbound) {
 		return
 	}
 	if c.Kind == chat.ChangeRevoke && n > 0 && !waiting {
-		br.appendHistory(c.Chat, c.Sender, "deleted a message they had sent", history.Event)
+		br.AppendHistory(c.Chat, c.Sender, "deleted a message they had sent", history.Event)
 	}
 }
 

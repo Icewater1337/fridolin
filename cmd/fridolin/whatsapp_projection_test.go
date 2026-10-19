@@ -6,7 +6,9 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/config"
+
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -46,9 +48,9 @@ func TestWhatsAppCallbackProjections(t *testing.T) {
 	defer cancel()
 	in := chat.Inbound{JID: testDMChat, ChatAlt: personLID + "@lid", Sender: "15551234567", Text: "hello", Media: []string{"file"}, Quoted: &chat.Quote{From: "15559876543", Text: "earlier"}, Source: chat.SourceWhatsApp, ID: "message", Silent: true}
 	calls := 0
-	handler := whatsAppInboundHandler(func(gotCtx context.Context, m Inbound) {
+	handler := whatsAppInboundHandler(func(gotCtx context.Context, m brain.Inbound) {
 		calls++
-		if gotCtx != ctx || !reflect.DeepEqual(m.Inbound, in) || !reflect.ValueOf(m.logged).IsZero() || len(m.parts) != 0 {
+		if gotCtx != ctx || !reflect.DeepEqual(m.Inbound, in) || m.Save().Logged != nil || len(m.Save().Parts) != 0 {
 			t.Fatalf("inbound projection = %+v", m)
 		}
 	})

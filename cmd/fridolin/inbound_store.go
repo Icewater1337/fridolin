@@ -5,10 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"time"
 
+	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
+	"github.com/Icewater1337/fridolin/internal/jsonx"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
-	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/store"
 )
 
@@ -51,54 +54,8 @@ type keptInbound struct {
 	SentAt time.Time
 	// Msg is the message of a queued, held or late row, Change the change
 	// of a change row.
-	Msg    Inbound
+	Msg    brainruntime.Inbound
 	Change chat.Change
-}
-
-// storedInbound is an Inbound as the inbound queue keeps it: all of it
-// but Done, which a message from WhatsApp does not have.
-type storedInbound struct {
-	JID     string          `json:"jid"`
-	ChatAlt string          `json:"chat_alt,omitempty"`
-	Sender  string          `json:"sender"`
-	Text    string          `json:"text,omitempty"`
-	Media   []string        `json:"media,omitempty"`
-	Brain   string          `json:"brain,omitempty"`
-	Quoted  *chat.Quote     `json:"quoted,omitempty"`
-	Silent  bool            `json:"silent,omitempty"`
-	Source  string          `json:"source"`
-	At      time.Time       `json:"at"`
-	ID      string          `json:"id,omitempty"`
-	Logged  *history.Entry  `json:"logged,omitempty"`
-	Parts   []storedInbound `json:"parts,omitempty"`
-}
-
-func storeInbound(m Inbound) storedInbound {
-	s := storedInbound{
-		JID: m.JID, ChatAlt: m.ChatAlt, Sender: m.Sender, Text: m.Text, Media: m.Media, Brain: m.Brain,
-		Quoted: m.Quoted, Silent: m.Silent, Source: m.Source, At: m.At, ID: m.ID,
-	}
-	if m.logged != (history.Entry{}) {
-		logged := m.logged
-		s.Logged = &logged
-	}
-	for _, p := range m.parts {
-		s.Parts = append(s.Parts, storeInbound(p))
-	}
-	return s
-}
-
-func (s storedInbound) inbound() Inbound {
-	m := Inbound{Inbound: chat.Inbound{JID: s.JID, ChatAlt: s.ChatAlt, Sender: s.Sender, Text: s.Text, Media: s.Media, Brain: s.Brain,
-		Quoted: s.Quoted, Silent: s.Silent, Source: s.Source, At: s.At, ID: s.ID},
-	}
-	if s.Logged != nil {
-		m.logged = *s.Logged
-	}
-	for _, p := range s.Parts {
-		m.parts = append(m.parts, p.inbound())
-	}
-	return m
 }
 
 // storedChange is a messageChange as the inbound queue keeps it.
@@ -113,8 +70,8 @@ type storedChange struct {
 
 // keepInbound keeps m, a message of kind inboundQueued, inboundHeld or
 // inboundLate that brain had ("" for none), for the next start.
-func keepInbound(ctx context.Context, s *store.Store, kind, brain string, m Inbound) error {
-	body, err := json.Marshal(storeInbound(m))
+func keepInbound(ctx context.Context, s *store.Store, kind, brain string, m brainruntime.Inbound) error {
+	body, err := json.Marshal(m.Save())
 	if err != nil {
 		return err
 	}
@@ -132,7 +89,7 @@ func keepChange(ctx context.Context, s *store.Store, c chat.Change, at time.Time
 }
 
 // keepInterrupted keeps that the stop cut short brain's run for m.
-func keepInterrupted(ctx context.Context, s *store.Store, brain string, m Inbound) error {
+func keepInterrupted(ctx context.Context, s *store.Store, brain string, m brainruntime.Inbound) error {
 	return s.KeepInbound(ctx, store.InboundRow{Kind: inboundInterrupted, Chat: m.JID, Brain: brain, MsgID: m.ID, SentAt: m.At})
 }
 
@@ -147,12 +104,12 @@ func takeInbound(ctx context.Context, s *store.Store) ([]keptInbound, error) {
 
 		switch k.Kind {
 		case inboundQueued, inboundHeld, inboundLate:
-			var m storedInbound
-			if err := json.Unmarshal([]byte(body), &m); err != nil {
+			var m brainruntime.SavedInbound
+			if err := decodeSavedInbound([]byte(body), &m); err != nil {
 				bad = append(bad, fmt.Errorf("row %d: %w", k.ID, err))
 				return
 			}
-			k.Msg = m.inbound()
+			k.Msg = m.Restore()
 		case inboundChange:
 			var c storedChange
 			if err := json.Unmarshal([]byte(body), &c); err != nil {
@@ -171,4 +128,21 @@ func takeInbound(ctx context.Context, s *store.Store) ([]keptInbound, error) {
 		return nil, err
 	}
 	return out, errors.Join(bad...)
+}
+
+// decodeSavedInbound preserves the persisted queue's decoder diagnostics when
+// its representation moves to the runtime package. The underlying typed error
+// remains available to callers through errors.As.
+func decodeSavedInbound(body []byte, out *brainruntime.SavedInbound) error {
+	return jsonx.RenameTypeError(json.Unmarshal(body, out), func(t reflect.Type) string {
+		if t == reflect.TypeFor[brainruntime.SavedInbound]() {
+			return "main.storedInbound"
+		}
+		return ""
+	}, func(name string) string {
+		if name == "SavedInbound" {
+			return "storedInbound"
+		}
+		return ""
+	})
 }

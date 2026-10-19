@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"slices"

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/Icewater1337/fridolin/internal/registry"
 	"io"
 	"log"
 	"os"
@@ -18,6 +17,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+
+	"github.com/Icewater1337/fridolin/internal/registry"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
@@ -621,7 +622,7 @@ func writeCheck(w io.Writer, o checkOptions) error {
 func checkReport(w io.Writer, path string, cfg *config.Config, o checkOptions) error {
 	// Before even the version probe: it runs outside the sandbox, so a
 	// Claude planted in a brain's PATH folder must not be selected.
-	ownPATH := setBridgePATH(cfg)
+	setBridgePATH(cfg)
 	fmt.Fprintf(w, "Config OK: %s\n", path)
 	if cfg.AgentProvider == "codex" {
 		st := codexInfo(cfg.CodexPath, cfg.ChildEnvPassthrough)
@@ -655,9 +656,8 @@ func checkReport(w io.Writer, path string, cfg *config.Config, o checkOptions) e
 	if len(o.routes) == 0 && o.sandboxFor == "" {
 		return leftOutError(issues)
 	}
-	mgr := &BrainManager{brains: map[string]*Brain{}, byGroup: map[string]*Brain{}, profiler: NewSandboxProfiler(nil, cfg), hooks: &BrainHooks{}}
-	mgr.profiler.SetConfigFile(path)
-	if err := mgr.reload(specs, issues, cfg, ownPATH); err != nil {
+	routes, workDirs, err := checkRoutes(specs, issues)
+	if err != nil {
 		return err
 	}
 	for _, jid := range o.routes {
@@ -669,16 +669,18 @@ func checkReport(w io.Writer, path string, cfg *config.Config, o checkOptions) e
 		if !isGroup && !numberAllowed(cfg, chat.NormalizeJID(jid)) {
 			allowed = " (not in allowed_numbers: ignored)"
 		}
-		if br := mgr.BrainFor(jid, isGroup); br != nil {
-			fmt.Fprintf(w, "  route %s → %s%s\n", jid, br.ID(), allowed)
-		} else if id := mgr.HeldFor(jid, isGroup); id != "" {
+		if id := routes.For(jid, isGroup); id != "" {
+			fmt.Fprintf(w, "  route %s → %s%s\n", jid, id, allowed)
+		} else if id := routes.HeldFor(jid, isGroup); id != "" {
 			fmt.Fprintf(w, "  route %s → no brain: %s handles it but cannot run%s\n", jid, id, allowed)
 		} else {
 			fmt.Fprintf(w, "  route %s → no brain%s\n", jid, allowed)
 		}
 	}
 	if o.sandboxFor != "" {
-		profile, err := mgr.profiler.Profile(o.sandboxFor)
+		profiler := NewSandboxProfiler(workDirs, cfg)
+		profiler.SetConfigFile(path)
+		profile, err := profiler.Profile(o.sandboxFor)
 		if err != nil {
 			return fmt.Errorf("sandbox profile: %w", err)
 		}

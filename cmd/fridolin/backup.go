@@ -23,6 +23,7 @@ import (
 	"time"
 	"unicode"
 
+	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -169,7 +170,7 @@ type BackupManager struct {
 	now func() time.Time
 	// notify sends a WhatsApp message about a brain to its owner. The bridge
 	// sets it; nil sends nothing.
-	notify func(ctx context.Context, br *Brain, text string) error
+	notify func(ctx context.Context, br *brainruntime.Brain, text string) error
 	// idleWait is how long a brain's backup waits for the brain to finish
 	// what it is running; see backupBrain.
 	idleWait time.Duration
@@ -548,9 +549,9 @@ func (b *Bridge) apiBackupStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	rows := []brainRow{}
 	for _, br := range b.brainMgr.Brains() {
-		s := br.settings.Load()
-		rows = append(rows, brainRow{ID: br.ID(), Name: s.name, Dir: br.Dir(), Enabled: s.manifest.Backup.Enabled,
-			Exclude: nonNil(s.manifest.Backup.Exclude), Last: copyOf(m.state.Brains[br.ID()])})
+		manifest := br.Manifest()
+		rows = append(rows, brainRow{ID: br.ID(), Name: manifest.Name, Dir: br.Dir(), Enabled: manifest.Backup.Enabled,
+			Exclude: nonNil(manifest.Backup.Exclude), Last: copyOf(m.state.Brains[br.ID()])})
 	}
 	var job map[string]any
 	if j := m.job; j != nil {
@@ -967,10 +968,10 @@ func (m *BackupManager) StartRun(ids []string, includeBridge bool, trigger strin
 	if !m.connected() {
 		return errors.New("not connected to Google Drive")
 	}
-	var targets []*Brain
+	var targets []*brainruntime.Brain
 	for _, br := range m.bm.Brains() {
-		s := br.settings.Load()
-		if len(ids) == 0 && !s.manifest.Backup.Enabled {
+		manifest := br.Manifest()
+		if len(ids) == 0 && !manifest.Backup.Enabled {
 			continue
 		}
 		if len(ids) > 0 && !slices.Contains(ids, br.ID()) {
@@ -1060,7 +1061,7 @@ func (m *BackupManager) runOne(ctx context.Context, job *backupJob, id string, f
 // files in versions/ get closer to expiring. It is told once per streak:
 // later refusals stay quiet until a backup of the brain succeeds. A notice
 // that could not be sent is tried again with the next scheduled refusal.
-func (m *BackupManager) noticeRefusal(ctx context.Context, br *Brain, res *BackupResult) {
+func (m *BackupManager) noticeRefusal(ctx context.Context, br *brainruntime.Brain, res *BackupResult) {
 	id := br.ID()
 	live := map[string]bool{}
 	for _, b := range m.bm.Brains() {
@@ -1089,7 +1090,7 @@ func (m *BackupManager) noticeRefusal(ctx context.Context, br *Brain, res *Backu
 	if !send {
 		return
 	}
-	name := br.settings.Load().name
+	name := br.Name()
 	if name == "" {
 		name = id
 	}
@@ -1136,7 +1137,7 @@ func brainFilter(excludes []string, includeSecrets bool) string {
 	return filterLines(backupSecretExcludes) + filterLines(excludes)
 }
 
-func (m *BackupManager) backupBrain(ctx context.Context, br *Brain, trigger string, force bool) *BackupResult {
+func (m *BackupManager) backupBrain(ctx context.Context, br *brainruntime.Brain, trigger string, force bool) *BackupResult {
 	started := time.Now()
 	fail := func(msg string) *BackupResult {
 		now := time.Now()
@@ -1149,16 +1150,16 @@ func (m *BackupManager) backupBrain(ctx context.Context, br *Brain, trigger stri
 	// finish, but not for ever: a brain busy for hours must still be backed
 	// up, and an append that comes in during the sync is what rclone's
 	// retries are for (see syncDir).
-	if !br.waitIdle(ctx, m.idleWait) && ctx.Err() == nil {
+	if !br.WaitIdle(ctx, m.idleWait) && ctx.Err() == nil {
 		log.Printf("backup %s: the brain is still running after %v, so its folder is copied while it changes", br.ID(), m.idleWait)
 	}
-	s := br.settings.Load()
+	manifest := br.Manifest()
 	// One config snapshot for the filter, the check and the sync, so a
 	// backup.root changed mid-run cannot count one folder and sync into
 	// another.
 	cfg := m.cfgs.Get()
 	filter := filepath.Join(m.dir(), "filters-"+br.ID()+".txt")
-	if err := fsx.WriteFileAtomic(filter, []byte(brainFilter(s.manifest.Backup.Exclude, cfg.Backup.IncludeSecretFiles)), 0o600, false); err != nil {
+	if err := fsx.WriteFileAtomic(filter, []byte(brainFilter(manifest.Backup.Exclude, cfg.Backup.IncludeSecretFiles)), 0o600, false); err != nil {
 		return fail(err.Error())
 	}
 	base := backupPath(cfg.Backup, br.ID())
@@ -1539,7 +1540,7 @@ func (j *jsonStats) lastError() string {
 // file times: a file moved into versions/ keeps its own modification time,
 // so filtering on that (rclone delete --min-age) would throw away the only
 // copy of a long-unchanged file in the very run that replaced or deleted it.
-func (m *BackupManager) prune(ctx context.Context, targets []*Brain) {
+func (m *BackupManager) prune(ctx context.Context, targets []*brainruntime.Brain) {
 	cfg := m.cfgs.Get()
 	days := cfg.Backup.KeepVersions()
 	if days <= 0 {

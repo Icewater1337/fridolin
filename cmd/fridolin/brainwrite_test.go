@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"github.com/Icewater1337/fridolin/internal/registry"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -13,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/registry"
 
 	"github.com/Icewater1337/fridolin/internal/config"
 

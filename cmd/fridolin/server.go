@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -145,7 +146,7 @@ func (b *Bridge) httpSend(w http.ResponseWriter, r *http.Request) {
 	// hand-off of the code that answers it repeats (see handOffCode).
 	resp := map[string]string{"status": "sent"}
 	request := ""
-	if br := b.brainMgr.BrainFor(jid, chat.IsGroupJID(jid)); br != nil && br.asksForCode(req.Text) {
+	if br := b.brainMgr.BrainFor(jid, chat.IsGroupJID(jid)); br != nil && br.AsksForCode(req.Text) {
 		request = otp.NewRequestID()
 		resp["otp_request"] = request
 	}
@@ -181,7 +182,7 @@ func (b *Bridge) maySend(who principal, jid string, cfg *config.Config) error {
 // (reply_chat, or the one replyChatFor derives), or an allowed chat that
 // routes to it: a group it claims, for the fallback brain an allowed group
 // no brain claims, or, for the brain that gets DMs, an allowed number's DM.
-func (b *Bridge) brainChat(br *Brain, jid string, cfg *config.Config) bool {
+func (b *Bridge) brainChat(br *brain.Brain, jid string, cfg *config.Config) bool {
 	if jid == b.replyChatFor(br, cfg) {
 		return true
 	}
@@ -224,7 +225,7 @@ func (b *Bridge) appendHTTPMessageToHistory(who principal, jid, text, request st
 	if who.kind == callerBrain {
 		from = who.brain
 	}
-	br.appendEntry(history.Entry{From: from, Chat: jid, Text: text, Type: history.Out, Via: who.via(), OTPRequest: request})
+	br.AppendEntry(history.Entry{From: from, Chat: jid, Text: text, Type: history.Out, Via: who.via(), OTPRequest: request})
 }
 
 // httpIngest handles POST /ingest. It feeds files that arrived outside
@@ -307,8 +308,8 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 // them, for /ingest and the Plaud integration. The message names the brain,
 // so it runs there even when jid, the chat that gets the answer, belongs to
 // another brain.
-func (b *Bridge) handOff(br *Brain, jid, sender, text string, media []string) {
-	m := Inbound{Inbound: chat.Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: media, Source: chat.SourceIngest, At: time.Now()}}
+func (b *Bridge) handOff(br *brain.Brain, jid, sender, text string, media []string) {
+	m := brain.Inbound{Inbound: chat.Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: media, Source: chat.SourceIngest, At: time.Now()}}
 	b.handleInbound(context.Background(), m)
 }
 
@@ -318,8 +319,8 @@ func (b *Bridge) handOff(br *Brain, jid, sender, text string, media []string) {
 // memory, and queues the message at once: an error means the brain did
 // not take it (its queue is full, or it is gone). done then hears how the
 // run ended, see Inbound.Done.
-func (b *Bridge) submitHandOff(br *Brain, jid, sender, text string, media []string, done func(error)) error {
-	m := Inbound{Inbound: chat.Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: media, Source: chat.SourceIngest, At: time.Now(), Done: done}}
+func (b *Bridge) submitHandOff(br *brain.Brain, jid, sender, text string, media []string, done func(error)) error {
+	m := brain.Inbound{Inbound: chat.Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: media, Source: chat.SourceIngest, At: time.Now(), Done: done}}
 	_, _, _, err := b.brainMgr.Submit(m)
 	return err
 }
@@ -330,8 +331,8 @@ func (b *Bridge) submitHandOff(br *Brain, jid, sender, text string, media []stri
 // none), else the brain's first group. The DM comes before any group: files
 // handed in privately must not land in a group because the brain also
 // serves one.
-func (b *Bridge) replyChatFor(br *Brain, cfg *config.Config) string {
-	m := br.settings.Load().manifest
+func (b *Bridge) replyChatFor(br *brain.Brain, cfg *config.Config) string {
+	m := br.Manifest()
 	if m.ReplyChat != "" {
 		return m.ReplyChat
 	}

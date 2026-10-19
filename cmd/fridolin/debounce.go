@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
@@ -15,7 +16,7 @@ import (
 type Debouncer struct {
 	quiet   func() time.Duration
 	maxWait func() time.Duration
-	flush   func(Inbound)
+	flush   func(brain.Inbound)
 
 	mu      sync.Mutex
 	batches map[string]*pendingBatch
@@ -28,7 +29,7 @@ type Debouncer struct {
 }
 
 type pendingBatch struct {
-	msg     Inbound
+	msg     brain.Inbound
 	started time.Time
 	timer   *time.Timer
 	// gen counts the messages merged into the batch, and each timer knows
@@ -41,16 +42,16 @@ type pendingBatch struct {
 
 // NewDebouncer creates a debouncer. quiet and maxWait are read for every
 // message, so configuration changes apply immediately.
-func NewDebouncer(quiet, maxWait func() time.Duration, flush func(Inbound)) *Debouncer {
+func NewDebouncer(quiet, maxWait func() time.Duration, flush func(brain.Inbound)) *Debouncer {
 	return &Debouncer{quiet: quiet, maxWait: maxWait, flush: flush, batches: map[string]*pendingBatch{}}
 }
 
 // batchKey includes the target brain: two hand-offs for different brains that
 // answer in the same chat must not merge into one run in one brain.
-func batchKey(m Inbound) string { return m.Brain + "|" + m.JID + "|" + m.Sender }
+func batchKey(m brain.Inbound) string { return m.Brain + "|" + m.JID + "|" + m.Sender }
 
 // Add queues m, merging it into the sender's open batch for the chat.
-func (d *Debouncer) Add(m Inbound) {
+func (d *Debouncer) Add(m brain.Inbound) {
 	quiet := d.quiet()
 	d.mu.Lock()
 	if quiet <= 0 || d.drained {
@@ -69,11 +70,11 @@ func (d *Debouncer) Add(m Inbound) {
 // from now, or takes the batch out when its max wait is over: it returns
 // the batch's message then, for Add to flush once d.mu is free. d.mu is
 // held.
-func (d *Debouncer) addLocked(m Inbound, quiet time.Duration, now time.Time) (Inbound, bool) {
+func (d *Debouncer) addLocked(m brain.Inbound, quiet time.Duration, now time.Time) (brain.Inbound, bool) {
 	key := batchKey(m)
 	b, ok := d.batches[key]
 	if ok {
-		b.msg = b.msg.merge(m)
+		b.msg = b.msg.Merge(m)
 		b.timer.Stop()
 	} else {
 		b = &pendingBatch{msg: m, started: now}
@@ -92,7 +93,7 @@ func (d *Debouncer) addLocked(m Inbound, quiet time.Duration, now time.Time) (In
 	}
 	gen := b.gen
 	b.timer = time.AfterFunc(wait, func() { d.fire(key, b, gen) })
-	return Inbound{}, false
+	return brain.Inbound{}, false
 }
 
 // fire flushes the batch b whose timer for its gen-th message went off,
@@ -118,10 +119,10 @@ func (d *Debouncer) Change(c chat.Change) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for k, b := range d.batches {
-		if !b.msg.changes(c) {
+		if !b.msg.Changes(c) {
 			continue
 		}
-		msg, _, keep := b.msg.applyChange(c)
+		msg, _, keep := b.msg.ApplyChange(c)
 		if !keep {
 			b.timer.Stop()
 			delete(d.batches, k)
@@ -149,7 +150,7 @@ func (d *Debouncer) Drop(jid string) {
 // batch first, for the bridge's stop to keep (Bridge.Stop). It waits for
 // a flush a timer has begun: that message is in a brain's queue once Drain
 // returns. From then on, Add flushes each message at once.
-func (d *Debouncer) Drain() []Inbound {
+func (d *Debouncer) Drain() []brain.Inbound {
 	d.mu.Lock()
 	d.drained = true
 	batches := make([]*pendingBatch, 0, len(d.batches))
@@ -161,7 +162,7 @@ func (d *Debouncer) Drain() []Inbound {
 	d.mu.Unlock()
 	d.flushing.Wait()
 	slices.SortFunc(batches, func(a, b *pendingBatch) int { return a.started.Compare(b.started) })
-	out := make([]Inbound, len(batches))
+	out := make([]brain.Inbound, len(batches))
 	for i, b := range batches {
 		out[i] = b.msg
 	}

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/config"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -157,7 +158,7 @@ func TestBrainRunsGetTheirOwnPATHFolders(t *testing.T) {
 	if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
 		t.Fatal(err)
 	}
-	group := Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567@s.whatsapp.net", Text: "@claude hi"}}
+	group := brainruntime.Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567@s.whatsapp.net", Text: "@claude hi"}}
 	if _, _, _, err := mgr.Submit(group); err != nil {
 		t.Fatal(err)
 	}

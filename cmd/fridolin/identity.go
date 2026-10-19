@@ -6,14 +6,20 @@ import (
 	"log"
 	"strings"
 
-	"github.com/Icewater1337/fridolin/internal/config"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+
+	"github.com/Icewater1337/fridolin/internal/config"
 
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 )
+
+// Phone numbers and chats as people write them, and the one form the
+// bridge compares: a number someone typed into config.json, the identity
+// map or a /send request must match the sender WhatsApp reports however
+// it was written.
 
 // badAllowedNumbers lists the entries of allowed_numbers that are no phone
 // number. config.json may be edited by hand, and such an entry silently
