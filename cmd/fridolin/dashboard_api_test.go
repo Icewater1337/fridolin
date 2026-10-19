@@ -263,8 +263,8 @@ func TestBackupStatusWritesWithoutTheLock(t *testing.T) {
 		method, path string
 		h            http.HandlerFunc
 	}{
-		{"GET", "/api/backup/status", tb.apiBackupStatus},
-		{"POST", "/api/backup/cancel", tb.apiBackupCancel},
+		{"GET", "/api/backup/status", tb.newBackupAPI().Status},
+		{"POST", "/api/backup/cancel", tb.newBackupAPI().Cancel},
 	} {
 		w := &lockProbe{ResponseRecorder: httptest.NewRecorder(), probe: func() { _ = tb.backup.Summary() }}
 		c.h(w, httptest.NewRequest(c.method, c.path, nil))

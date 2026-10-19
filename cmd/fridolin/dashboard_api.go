@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,16 +34,15 @@ import (
 	"github.com/Icewater1337/fridolin/internal/registry"
 	"github.com/Icewater1337/fridolin/internal/textx"
 	"github.com/Icewater1337/fridolin/internal/version"
-	"rsc.io/qr"
 )
 
 func (b *Bridge) apiMux() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/status", b.apiStatus)
-	mux.HandleFunc("GET /api/whatsapp/qr", b.apiQR)
-	mux.HandleFunc("POST /api/whatsapp/pair", b.apiPair)
-	mux.HandleFunc("GET /api/whatsapp/groups", b.apiGroups)
+	mux.HandleFunc("GET /api/whatsapp/qr", b.newConnectionAPI().QR)
+	mux.HandleFunc("POST /api/whatsapp/pair", b.newConnectionAPI().Pair)
+	mux.HandleFunc("GET /api/whatsapp/groups", b.newConnectionAPI().Groups)
 	mux.HandleFunc("GET /api/activity", b.apiActivity)
 	mux.HandleFunc("GET /api/logs", b.apiLogs)
 
@@ -54,8 +52,8 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("POST /api/chats/members", b.apiGroupMembers)
 	mux.HandleFunc("POST /api/chats/dismiss", b.apiDismissChat)
 
-	mux.HandleFunc("GET /api/config", b.apiGetConfig)
-	mux.HandleFunc("PUT /api/config", b.apiPutConfig)
+	mux.HandleFunc("GET /api/config", b.newConfigAPI().Get)
+	mux.HandleFunc("PUT /api/config", b.newConfigAPI().Put)
 	mux.HandleFunc("POST /api/restart", b.apiRestart)
 
 	mux.HandleFunc("POST /api/logout", b.apiLogout)
@@ -69,37 +67,37 @@ func (b *Bridge) apiMux() http.Handler {
 	mux.HandleFunc("PUT /api/brains/{id}", b.apiUpdateBrain)
 	mux.HandleFunc("POST /api/brains/{id}/approve", b.apiApproveBrain)
 	mux.HandleFunc("DELETE /api/brains/{id}", b.apiRemoveBrain)
-	mux.HandleFunc("POST /api/brains/{id}/stop", b.apiStopRun)
+	mux.HandleFunc("POST /api/brains/{id}/stop", b.newConnectionAPI().StopRun)
 	mux.HandleFunc("DELETE /api/brain-dirs", b.apiRemoveBrainDir)
 
 	mux.HandleFunc("GET /api/fs/capabilities", b.apiFSCaps)
 	mux.HandleFunc("POST /api/fs/pick", b.apiFSPick)
 	mux.HandleFunc("GET /api/fs/list", b.apiFSList)
 
-	mux.HandleFunc("GET /api/backup/status", b.apiBackupStatus)
-	mux.HandleFunc("POST /api/backup/connect", b.apiBackupConnect)
-	mux.HandleFunc("POST /api/backup/disconnect", b.apiBackupDisconnect)
-	mux.HandleFunc("PUT /api/backup/settings", b.apiBackupSettings)
-	mux.HandleFunc("POST /api/backup/run", b.apiBackupRun)
-	mux.HandleFunc("POST /api/backup/cancel", b.apiBackupCancel)
-	mux.HandleFunc("POST /api/backup/restore", b.apiBackupRestore)
-	mux.HandleFunc("PUT /api/brains/{id}/backup", b.apiBrainBackup)
-	mux.HandleFunc("GET /api/brains/{id}/backup/versions", b.apiBackupVersions)
+	mux.HandleFunc("GET /api/backup/status", b.newBackupAPI().Status)
+	mux.HandleFunc("POST /api/backup/connect", b.newBackupAPI().Connect)
+	mux.HandleFunc("POST /api/backup/disconnect", b.newBackupAPI().Disconnect)
+	mux.HandleFunc("PUT /api/backup/settings", b.newBackupAPI().Settings)
+	mux.HandleFunc("POST /api/backup/run", b.newBackupAPI().Run)
+	mux.HandleFunc("POST /api/backup/cancel", b.newBackupAPI().Cancel)
+	mux.HandleFunc("POST /api/backup/restore", b.newBackupAPI().Restore)
+	mux.HandleFunc("PUT /api/brains/{id}/backup", b.newBackupAPI().BrainSettings)
+	mux.HandleFunc("GET /api/brains/{id}/backup/versions", b.newBackupAPI().Versions)
 
-	mux.HandleFunc("GET /api/google/client", b.apiGoogleClient)
-	mux.HandleFunc("PUT /api/google/client", b.apiSetGoogleClient)
-	mux.HandleFunc("DELETE /api/google/client", b.apiDeleteGoogleClient)
-	mux.HandleFunc("GET /api/brains/{id}/calendar", b.apiCalendarStatus)
-	mux.HandleFunc("POST /api/brains/{id}/calendar/connect", b.apiCalendarConnect)
-	mux.HandleFunc("PUT /api/brains/{id}/calendar", b.apiCalendarSelect)
-	mux.HandleFunc("DELETE /api/brains/{id}/calendar", b.apiCalendarDisconnect)
+	mux.HandleFunc("GET /api/google/client", b.newGoogleAPI().Client)
+	mux.HandleFunc("PUT /api/google/client", b.newGoogleAPI().SetClient)
+	mux.HandleFunc("DELETE /api/google/client", b.newGoogleAPI().DeleteClient)
+	mux.HandleFunc("GET /api/brains/{id}/calendar", b.newGoogleAPI().Status)
+	mux.HandleFunc("POST /api/brains/{id}/calendar/connect", b.newGoogleAPI().Connect)
+	mux.HandleFunc("PUT /api/brains/{id}/calendar", b.newGoogleAPI().Select)
+	mux.HandleFunc("DELETE /api/brains/{id}/calendar", b.newGoogleAPI().Disconnect)
 
-	mux.HandleFunc("GET /api/plaud/status", b.apiPlaudStatus)
-	mux.HandleFunc("POST /api/plaud/connect", b.apiPlaudConnect)
-	mux.HandleFunc("POST /api/plaud/disconnect", b.apiPlaudDisconnect)
-	mux.HandleFunc("PUT /api/plaud/settings", b.apiPlaudSettings)
-	mux.HandleFunc("POST /api/plaud/sync", b.apiPlaudSync)
-	mux.HandleFunc("POST /api/plaud/resend", b.apiPlaudResend)
+	mux.HandleFunc("GET /api/plaud/status", b.newPlaudAPI().Status)
+	mux.HandleFunc("POST /api/plaud/connect", b.newPlaudAPI().Connect)
+	mux.HandleFunc("POST /api/plaud/disconnect", b.newPlaudAPI().Disconnect)
+	mux.HandleFunc("PUT /api/plaud/settings", b.newPlaudAPI().Settings)
+	mux.HandleFunc("POST /api/plaud/sync", b.newPlaudAPI().Sync)
+	mux.HandleFunc("POST /api/plaud/resend", b.newPlaudAPI().Resend)
 	mux.HandleFunc("PUT /api/plaud/app/credentials", b.apiPlaudAppCredentials)
 	mux.HandleFunc("POST /api/plaud/app/build", b.apiPlaudAppBuild)
 	mux.HandleFunc("GET /api/plaud/app.apk", b.apiPlaudAppDownload)
@@ -328,90 +326,8 @@ func sandboxProfileWarning(bm *BrainManager) string {
 	return fmt.Sprintf("The sandbox profile cannot be built (%v), so brains %s refuse every message until that is fixed.", cause, strings.Join(failing, ", "))
 }
 
-func (b *Bridge) apiQR(w http.ResponseWriter, r *http.Request) {
-	st := b.wa.State()
-	if st.QRCode == "" {
-		httpapi.WriteErr(w, http.StatusNotFound, "no pairing code right now")
-		return
-	}
-	// rsc.io/qr is what qrterminal draws the terminal's code with. Its PNG
-	// is 8 pixels per module with the quiet zone included; the dashboard
-	// scales it.
-	code, err := qr.Encode(st.QRCode, qr.M)
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{
-		"data_url":   "data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG()),
-		"created_at": st.QRAt,
-	})
-}
-
-func (b *Bridge) apiPair(w http.ResponseWriter, r *http.Request) {
-	if err := b.wa.StartPairing(); err != nil {
-		httpapi.WriteErr(w, http.StatusConflict, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]string{"status": "pairing"})
-}
-
-// apiGroups answers GET /api/whatsapp/groups with the groups the account
-// is in, from the list the WhatsApp client keeps. With ?fresh=1, which the
-// Chats page's Refresh button sends, the client asks WhatsApp again first.
-func (b *Bridge) apiGroups(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
-	defer cancel()
-	if r.URL.Query().Get("fresh") == "1" {
-		if f, ok := b.wa.(interface{ ForgetGroups() }); ok {
-			f.ForgetGroups()
-		}
-	}
-	groups, err := b.wa.JoinedGroups(ctx)
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusServiceUnavailable, err.Error())
-		return
-	}
-	cfg := b.cfgs.Get()
-	type row struct {
-		chat.Group
-		Allowed bool   `json:"allowed"`
-		Brain   string `json:"brain"`
-	}
-	out := []row{}
-	allowed := map[string]bool{}
-	for _, g := range cfg.AllowedGroups {
-		allowed[g] = true
-	}
-	for _, g := range groups {
-		rw := row{Group: g, Allowed: allowed[g.JID]}
-		if br := b.brainMgr.BrainFor(g.JID, true); br != nil && rw.Allowed {
-			rw.Brain = br.ID()
-		}
-		out = append(out, rw)
-	}
-	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
-	httpapi.WriteJSON(w, http.StatusOK, out)
-}
-
 func (b *Bridge) apiActivity(w http.ResponseWriter, r *http.Request) {
 	httpapi.ActivityAPI{Reader: b.activity}.ServeHTTP(w, r)
-}
-
-func (b *Bridge) apiStopRun(w http.ResponseWriter, r *http.Request) {
-	br := b.brainMgr.Get(r.PathValue("id"))
-	if br == nil {
-		httpapi.WriteErr(w, http.StatusNotFound, "no such brain")
-		return
-	}
-	var req struct {
-		ClearQueue bool `json:"clear_queue"`
-	}
-	if err := httpapi.DecodeOptionalJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, map[string]bool{"stopped": br.StopCurrent(req.ClearQueue)})
 }
 
 func (b *Bridge) apiLogs(w http.ResponseWriter, r *http.Request) {
@@ -648,71 +564,6 @@ func (b *Bridge) apiDismissChat(w http.ResponseWriter, r *http.Request) {
 
 // ── config ───────────────────────────────────────────────────────────────
 
-func (b *Bridge) apiGetConfig(w http.ResponseWriter, r *http.Request) {
-	// One snapshot: the etag must be that of the config sent with it, or a
-	// save that comes back with it would pass the conflict check over a
-	// write the page never saw.
-	snap := b.cfgs.Snapshot()
-	file := config.MustClone(snap.File)
-	file.BrainDirs = nil
-	eff := config.MustClone(snap.Effective)
-	eff.BrainDirs = nil
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{
-		"etag":      snap.ETag,
-		"path":      b.cfgs.Path(),
-		"config":    file,
-		"effective": eff,
-	})
-}
-
-// apiPutConfig replaces the settings. Brains are managed through their own
-// endpoints and are carried over untouched.
-//
-// It replaces the whole file layer, so it takes only the whole of it, as
-// GET /api/config returned it (see DecodeReplacement), and only with
-// the etag it came with: a script that sends one setting, or a tab that
-// saves over a newer change, would otherwise reset the rest to defaults —
-// the sandbox off, nobody allowed, another data dir.
-func (b *Bridge) apiPutConfig(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ETag   string          `json:"etag"`
-		Config json.RawMessage `json:"config"`
-	}
-	if err := httpapi.DecodeJSON(r, &req); err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if req.ETag == "" {
-		httpapi.WriteErr(w, http.StatusPreconditionRequired, "etag required: send the etag GET /api/config returned along with the config")
-		return
-	}
-	incoming, err := config.DecodeReplacement(req.Config)
-	if err != nil {
-		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	res, err := b.cfgs.UpdateTx(req.ETag, func(c *config.Config, _ *config.Tx) error {
-		incoming.BrainDirs = c.BrainDirs
-		*c = *incoming
-		return nil
-	})
-	switch {
-	case errors.Is(err, config.ErrConflict):
-		httpapi.WriteErr(w, http.StatusConflict, err.Error())
-		return
-	case err != nil:
-		httpapi.WriteErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
-	}
-	// The etag of what this save wrote, not ETag(), which may be a later
-	// save's: the page would take that write for the one it saved.
-	httpapi.WriteJSON(w, http.StatusOK, map[string]any{"etag": res.ETag, "restart_required": nonNil(res.Restart)})
-}
-
-// apiRestart restarts the bridge in place (same binary, same arguments): it
-// answers, then asks whoever runs the bridge to stop it and run it again
-// (BridgeOptions.Restart). The stop is the one SIGTERM makes, in main, and
-// main runs the bridge again once it is over.
 func (b *Bridge) apiRestart(w http.ResponseWriter, r *http.Request) {
 	if b.restart == nil {
 		httpapi.WriteErr(w, http.StatusServiceUnavailable, "this bridge cannot restart itself")

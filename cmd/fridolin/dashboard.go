@@ -184,8 +184,8 @@ func (b *Bridge) newHTTPHandler(listen string) http.Handler {
 			// started, so it needs no token. Google sends the browser back
 			// with a GET; a HEAD, say from a link prefetcher, must not use
 			// up the state.
-			if r.Method == http.MethodGet && r.URL.Path == "/" && isOAuthCallback(r) {
-				b.googleCallback(w, r)
+			if r.Method == http.MethodGet && r.URL.Path == "/" && httpapi.IsOAuthCallback(r) {
+				b.newGoogleAPI().Callback(w, r)
 				return
 			}
 			static.ServeHTTP(w, r)
