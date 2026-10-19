@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/textx"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -373,7 +375,7 @@ func TestSiteSandboxProfileOrder(t *testing.T) {
 		}
 		return i
 	}
-	q := func(p string) string { s, _ := sbplString(p); return s }
+	q := func(p string) string { s, _ := textx.SBPLString(p); return s }
 	sshAllow := at(`(allow file-read* (subpath ` + q(filepath.Join(home, ".ssh")) + `))`)
 	sshDeny := at(`(deny file-read* (subpath ` + q(filepath.Join(home, ".ssh")) + `))`)
 	secretsAllow := at(`(allow file-read* (subpath ` + q(filepath.Join(data, "site", "secrets")) + `))`)
@@ -399,7 +401,7 @@ func TestSiteProfileClosesBrowserProfiles(t *testing.T) {
 	home := t.TempDir()
 	data := filepath.Join(home, dataDirName)
 	appSupport := filepath.Join(home, "Library", "Application Support")
-	q := func(p string) string { s, _ := sbplString(p); return s }
+	q := func(p string) string { s, _ := textx.SBPLString(p); return s }
 	// The prefix rule, as the profile writes it; its strings escape a
 	// backslash, as the regex's \. needs.
 	prefixRule := strings.ReplaceAll("^"+regexp.QuoteMeta(appSupport)+browserProfilePattern(), `\`, `\\`)

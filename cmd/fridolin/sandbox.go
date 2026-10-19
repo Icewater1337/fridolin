@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Icewater1337/fridolin/internal/textx"
+
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -1513,7 +1515,7 @@ func (b *profileBuilder) emitSocket(action, dir string) {
 
 // quote returns value as an SBPL string, or fails the profile.
 func (b *profileBuilder) quote(value string) (string, bool) {
-	q, err := sbplString(value)
+	q, err := textx.SBPLString(value)
 	if err != nil {
 		b.fail(err)
 		return "", false
