@@ -10,7 +10,7 @@ import (
 
 // bridgeLayout is where the bridge's own files are, found from the path of
 // its binary.
-type bridgeLayout struct {
+type BridgeLayout struct {
 	// Dir is the folder the binary came with: the install folder `fridolin
 	// service install` made (it holds install.json, and tools/ unless the
 	// binary was installed without them), the root of the source checkout
@@ -28,17 +28,17 @@ type bridgeLayout struct {
 
 // installManifestFile, in the install folder, records what was installed
 // and from where.
-const installManifestFile = "install.json"
+const InstallManifestFile = "install.json"
 
-type installManifest struct {
+type InstallManifest struct {
 	Version     string    `json:"version"`
 	Source      string    `json:"source,omitempty"`
 	InstalledAt time.Time `json:"installed_at"`
 }
 
-func readInstallManifest(dir string) (installManifest, error) {
-	var m installManifest
-	data, err := os.ReadFile(filepath.Join(dir, installManifestFile))
+func ReadInstallManifest(dir string) (InstallManifest, error) {
+	var m InstallManifest
+	data, err := os.ReadFile(filepath.Join(dir, InstallManifestFile))
 	if err != nil {
 		return m, err
 	}
@@ -48,46 +48,46 @@ func readInstallManifest(dir string) (installManifest, error) {
 // layoutOf finds the layout around the binary exe: an install or tools/
 // next to it, or the checkout above its bin/ (a dev build). It is empty
 // for a binary on its own.
-func layoutOf(exe string) bridgeLayout {
+func LayoutOf(exe string) BridgeLayout {
 	dir := filepath.Dir(exe)
 	switch {
 	// install.json as well: a binary installed without tools leaves the
 	// install folder with no tools/, and the sandbox must still keep
 	// brains from writing in it.
-	case isDir(filepath.Join(dir, "tools")), pathExists(filepath.Join(dir, installManifestFile)):
-	case filepath.Base(dir) == "bin" && isCheckout(filepath.Dir(dir)):
+	case IsDir(filepath.Join(dir, "tools")), pathExists(filepath.Join(dir, InstallManifestFile)):
+	case filepath.Base(dir) == "bin" && IsCheckout(filepath.Dir(dir)):
 		dir = filepath.Dir(dir)
 	default:
-		return bridgeLayout{}
+		return BridgeLayout{}
 	}
-	l := bridgeLayout{Dir: dir}
-	if isDir(filepath.Join(dir, "tools")) {
+	l := BridgeLayout{Dir: dir}
+	if IsDir(filepath.Join(dir, "tools")) {
 		l.Tools = filepath.Join(dir, "tools")
 	}
-	if isCheckout(dir) {
+	if IsCheckout(dir) {
 		l.Source = dir
-	} else if m, err := readInstallManifest(dir); err == nil && filepath.IsAbs(m.Source) && isCheckout(m.Source) {
+	} else if m, err := ReadInstallManifest(dir); err == nil && filepath.IsAbs(m.Source) && IsCheckout(m.Source) {
 		l.Source = filepath.Clean(m.Source)
 	}
 	return l
 }
 
 // isCheckout reports whether dir is the root of a source checkout.
-func isCheckout(dir string) bool {
+func IsCheckout(dir string) bool {
 	st, err := os.Stat(filepath.Join(dir, "go.mod"))
-	return err == nil && st.Mode().IsRegular() && isDir(filepath.Join(dir, "tools"))
+	return err == nil && st.Mode().IsRegular() && IsDir(filepath.Join(dir, "tools"))
 }
 
-func isDir(p string) bool {
+func IsDir(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && st.IsDir()
 }
 
 // ownLayout is the running bridge's layout; tests replace it.
-var ownLayout = sync.OnceValue(func() bridgeLayout {
+var ownLayout = sync.OnceValue(func() BridgeLayout {
 	exe, err := os.Executable()
 	if err != nil {
-		return bridgeLayout{}
+		return BridgeLayout{}
 	}
-	return layoutOf(exe)
+	return LayoutOf(exe)
 })
