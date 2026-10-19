@@ -266,26 +266,11 @@ func (b *Bridge) httpIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	paths, err := mediaInboxAt(b.cfgs.Boot().MediaDir).Resolve(br.ID(), req.Paths, who.Kind == chat.CallerBrain)
+	jid, err := b.ingestTarget(who, br, req.Paths, req.Sender, req.Text, ownerChat(cfg))
 	if err != nil {
 		httpapi.WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	jid := b.replyChatFor(br, cfg)
-	if jid == "" {
-		httpapi.WriteErr(w, http.StatusBadRequest, "brain "+br.ID()+" has no chat to reply in — set reply_chat in its settings")
-		return
-	}
-	sender := req.Sender
-	if sender == "" {
-		sender = "upload"
-	}
-	text := req.Text
-	if text == "" {
-		text = "New files were uploaded."
-	}
-	go b.handOff(br, jid, sender, text, paths)
 	httpapi.WriteJSON(w, http.StatusAccepted, map[string]string{"status": "accepted", "jid": jid})
 }
 
