@@ -82,18 +82,6 @@ func plaudDeliver(t *testing.T, tb *testBridge, fp *testutil.PlaudFixture) error
 	return tb.plaud.Poll(context.Background())
 }
 
-// plaudDeliverRecording is plaudDeliver for the recording r.
-func plaudDeliverRecording(t *testing.T, tb *testBridge, fp *testutil.PlaudFixture, r testutil.PlaudRecording) error {
-	t.Helper()
-	plaudSignIn(t, tb)
-	if err := tb.plaud.saveState(plaudSeededState("", plaudOld1)); err != nil {
-		t.Fatal(err)
-	}
-	fp.Files(r.ID, plaudOld1)
-	fp.Put(r)
-	return tb.plaud.Poll(context.Background())
-}
-
 // The recording runs in the brain picked for Plaud, even when that brain
 // answers in the DM, which belongs to the DM brain.
 func TestPlaudRunsInThePickedBrain(t *testing.T) {
@@ -735,45 +723,6 @@ func plaudAfterRestart(tb *testBridge) *PlaudManager {
 	return p
 }
 
-// The manager needs only the configuration, the brains and the two
-// functions it is given: it hands each recording to submit and says
-// nothing else to the bridge.
-func TestPlaudManagerUsesOnlyWhatItIsGiven(t *testing.T) {
-	tb, fp := plaudBridge(t, "")
-	type handed struct {
-		brain, jid, sender, text string
-		media                    []string
-	}
-	var got []handed
-	p := NewPlaudManager(tb.cfgs, tb.brainMgr, tb.submitHandOff, tb.wa.SendMessage, nil)
-	p.submit = func(br *PlaudTarget, jid, sender, text string, media []string, done func(error)) error {
-		got = append(got, handed{br.ID(), jid, sender, text, media})
-		return nil
-	}
-	p.notify = func(context.Context, string, string) error { t.Error("notify called"); return nil }
-	plaudSignIn(t, tb)
-	if err := p.saveState(plaudSeededState("u_1", plaudOld1)); err != nil {
-		t.Fatal(err)
-	}
-	fp.Files(plaudNew, plaudOld1)
-	fp.Recording(plaudNew, true)
-	if err := p.Poll(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("handed over %d times, want once: %+v", len(got), got)
-	}
-	h := got[0]
-	if h.brain != "p" || h.jid != "15551234567@s.whatsapp.net" || h.sender != "plaud" || !strings.HasPrefix(h.text, "[Plaud] New recording") ||
-		len(h.media) != 1 || !strings.HasSuffix(h.media[0], " - "+plaudNew+".txt") {
-		t.Errorf("handed %+v", h)
-	}
-	time.Sleep(100 * time.Millisecond)
-	if out := tb.dev.Outbox(); len(out) != 0 {
-		t.Errorf("the bridge sent %+v, want nothing: only submit was to be used", out)
-	}
-}
-
 // plaudSignIn leaves a login in place, as a finished sign-in does.
 func plaudSignIn(t *testing.T, tb *testBridge) {
 	t.Helper()
@@ -959,155 +908,6 @@ func TestPlaudConnectingAfterADisconnectCountsAgain(t *testing.T) {
 	}
 }
 
-// A login Plaud refuses while its tokens.json stays (revoked on Plaud's
-// side) also shows as expired, until a check works again.
-func TestPlaudRefusedLoginShowsExpired(t *testing.T) {
-	tb, fp := plaudBridge(t, "")
-	plaudSignIn(t, tb)
-	if err := tb.plaud.saveState(plaudRecordLogin(tb, plaudSeededState("u_1", plaudOld1))); err != nil {
-		t.Fatal(err)
-	}
-	fp.Files(plaudOld1)
-	fp.Write("revoked", "")
-	ctx := context.Background()
-	if err := tb.plaud.Poll(ctx); !errors.Is(err, errPlaudAuth) {
-		t.Fatalf("poll = %v, want the login refused", err)
-	}
-	if s := tb.plaud.Status(); !s.Expired || !s.Connected {
-		t.Errorf("expired=%v connected=%v, want both", s.Expired, s.Connected)
-	}
-	_ = os.Remove(filepath.Join(fp.Dir, "revoked"))
-	if err := tb.plaud.Poll(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if s := tb.plaud.Status(); s.Expired {
-		t.Error("still expired after a check that worked")
-	}
-}
-
-// Connect again after Plaud refused a login whose tokens.json stays: with
-// a login in place `plaud login` only says "Already logged in", so Connect
-// signs the refused login out first, as Disconnect does, then signs in
-// afresh, and the card shows the new login connected. A sign-in that keeps
-// the refused login, because the sign-out could not remove it, fails, and
-// so does one whose new login Plaud refuses as well; the card then shows
-// the login expired, and the chat, told once already, is not told again.
-// A first sign-in signs nothing out; one whose login Plaud refuses right
-// away shows it expired too, and the check after it tells the chat once.
-func TestPlaudConnectAgainAfterARefusedLogin(t *testing.T) {
-	cases := []struct {
-		name    string
-		access  bool     // plaud.brain_access
-		refused bool     // Plaud refuses the login when Connect starts
-		keeps   bool     // `plaud logout` leaves the login (logout_keeps)
-		again   bool     // Plaud refuses the sign-in's new login too (login_refused)
-		cmds    []string // the CLI commands the sign-in runs, in order
-		want    string   // how the sign-in ends
-		says    string   // what its error says
-	}{
-		{"refused login", false, true, false, false, []string{"logout", "login", "me"}, "done", ""},
-		{"refused login shared with brains", true, true, false, false, []string{"logout", "login", "me"}, "done", ""},
-		// Fridolin's private copy goes even when the CLI keeps it.
-		{"refused login the sign-out leaves", false, true, true, false, []string{"logout", "login", "me"}, "done", ""},
-		{"refused login the sign-out leaves, shared with brains", true, true, true, false, []string{"logout", "login"}, "error", "could not be signed out"},
-		{"refused again right after the sign-in", false, true, false, true, []string{"logout", "login", "me"}, "error", "Plaud refuses the login it left"},
-		{"refused again right after the sign-in, shared with brains", true, true, false, true, []string{"logout", "login", "me"}, "error", "Plaud refuses the login it left"},
-		{"first sign-in", false, false, false, false, []string{"login", "me"}, "done", ""},
-		{"first sign-in Plaud refuses right away", false, false, false, true, []string{"login", "me"}, "error", "Plaud refuses the login it left"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			tb, fp := plaudBridge(t, fmt.Sprintf(`, "brain_access": %v`, tc.access))
-			ctx := context.Background()
-			notices := func() int {
-				n := 0
-				for _, m := range tb.dev.Outbox() {
-					if strings.Contains(m.Text, "Plaud: the login expired") {
-						n++
-					}
-				}
-				return n
-			}
-			if tc.refused {
-				plaudRefuseLogin(t, tb, fp)
-				if s := tb.plaud.Status(); !s.Expired || !s.Connected || notices() != 1 {
-					t.Fatalf("before connecting: expired=%v connected=%v notices=%d, want expired, connected and one notice", s.Expired, s.Connected, notices())
-				}
-			}
-			if tc.again {
-				fp.Write("login_refused", "")
-				fp.Write("revoked", "")
-			}
-			if tc.keeps {
-				fp.Write("logout_keeps", "")
-			}
-			before, told := fp.Calls(), notices()
-			st, _ := tb.plaud.loadState()
-			var notified time.Time
-			if st != nil {
-				notified = st.AuthNotified
-			}
-
-			if err := tb.plaud.Connect(); err != nil {
-				t.Fatal(err)
-			}
-			var job PlaudConnect
-			var refused bool
-			// Not through Status: once the sign-in ended, that may ask who
-			// is signed in, a command of its own.
-			testutil.WaitFor(t, 10*time.Second, "the sign-in to end", func() bool {
-				tb.plaud.mu.Lock()
-				defer tb.plaud.mu.Unlock()
-				job, refused = *tb.plaud.connect, tb.plaud.refused
-				return job.State != "running"
-			})
-			if n := notices(); n != told {
-				t.Errorf("%d expiry notices after connecting, want %d", n, told)
-			}
-			var cmds []string
-			for _, line := range strings.Split(strings.TrimSpace(strings.TrimPrefix(fp.Calls(), before)), "\n") {
-				if f := strings.Fields(line); len(f) > 2 {
-					cmds = append(cmds, f[2])
-				}
-			}
-			if !slices.Equal(cmds, tc.cmds) {
-				t.Errorf("the sign-in ran %q, want %q", cmds, tc.cmds)
-			}
-			if job.State != tc.want {
-				t.Fatalf("sign-in %s (%s), want %s", job.State, job.Error, tc.want)
-			}
-			st, _ = tb.plaud.loadState()
-			s := tb.plaud.Status()
-			if tc.want == "done" {
-				if refused || !s.Connected || s.Expired || s.Account != "you@example.com" || !st.AuthNotified.IsZero() {
-					t.Errorf("after the sign-in: refused=%v connected=%v expired=%v account=%q notified=%v; want connected as you@example.com, the notice armed again",
-						refused, s.Connected, s.Expired, s.Account, st.AuthNotified)
-				}
-				if err := tb.plaud.Poll(ctx); err != nil {
-					t.Errorf("the check after the sign-in: %v", err)
-				}
-			} else {
-				if !strings.Contains(job.Error, tc.says) || !refused || !s.Expired || !st.AuthNotified.Equal(notified) {
-					t.Errorf("after the sign-in: error %q, refused=%v expired=%v notified=%v (was %v); want it to say so, refused and expired, notified as before",
-						job.Error, refused, s.Expired, st.AuthNotified, notified)
-				}
-				if err := tb.plaud.Poll(ctx); !errors.Is(err, errPlaudAuth) {
-					t.Errorf("the check after the sign-in = %v, want the login still refused", err)
-				}
-			}
-			// After a sign-in Plaud refused, the chat has heard of it once:
-			// before the sign-in, or from the check after a first one.
-			want := told
-			if tc.want == "error" {
-				want = max(told, 1)
-			}
-			if n := notices(); n != want {
-				t.Errorf("%d expiry notices after the check, want %d", n, want)
-			}
-		})
-	}
-}
-
 // plaudRefuseLogin signs in, as a login from an earlier check, and has
 // Plaud refuse it while its tokens.json stays (revoked on Plaud's side): a
 // check gets the refusal, and the chat its one expiry notice.
@@ -1180,41 +980,6 @@ func TestPlaudConnectSignsOutTheRefusedLoginWhereItIs(t *testing.T) {
 	// any Connect after brain_access changed does, but not replace it.
 	if got, _ := os.ReadFile(terminal); string(got) != yours {
 		t.Errorf("the login in ~/.plaud is now %q, want yours, which the sign-out must not have removed", got)
-	}
-}
-
-// The sign-out before the sign-in gets as long as Disconnect gives one,
-// not the sign-in's ten minutes: a Plaud that hangs on it must not keep
-// the card running for that long before `plaud login` prints its link.
-// Fridolin's private copy of the login goes all the same, so the sign-in
-// after it signs in afresh.
-func TestPlaudConnectGivesTheSignOutItsOwnTime(t *testing.T) {
-	tb, fp := plaudBridge(t, "")
-	plaudRefuseLogin(t, tb, fp)
-	old := plaudSignOutTimeout
-	plaudSignOutTimeout = 300 * time.Millisecond
-	t.Cleanup(func() { plaudSignOutTimeout = old })
-	fp.Write("hang_logout", "")
-	before := fp.Calls()
-	if err := tb.plaud.Connect(); err != nil {
-		t.Fatal(err)
-	}
-	// Well below the 30 s the fake's logout hangs for.
-	var job PlaudConnect
-	testutil.WaitFor(t, 10*time.Second, "the sign-in to end", func() bool {
-		tb.plaud.mu.Lock()
-		defer tb.plaud.mu.Unlock()
-		job = *tb.plaud.connect
-		return job.State != "running"
-	})
-	var cmds []string
-	for _, line := range strings.Split(strings.TrimSpace(strings.TrimPrefix(fp.Calls(), before)), "\n") {
-		if f := strings.Fields(line); len(f) > 2 {
-			cmds = append(cmds, f[2])
-		}
-	}
-	if want := []string{"logout", "login", "me"}; !slices.Equal(cmds, want) || job.State != "done" {
-		t.Errorf("the sign-in ran %q and ended %s (%s), want %q and done", cmds, job.State, job.Error, want)
 	}
 }
 
@@ -1535,118 +1300,6 @@ func (tb *testBridge) plaudDelivered(t *testing.T, id string) string {
 	return filepath.Base(files[0]) + "\n" + string(data)
 }
 
-// The transcript file holds what Plaud has, read the way the real CLI
-// prints it: the summary whole and without the "Summary: <name>" header,
-// even when a line of it starts like the spinner; the transcript without
-// its header; the recording's own date even when Plaud has no start time;
-// and no summary for an empty note.
-func TestPlaudForwardReadsWhatTheCLIPrints(t *testing.T) {
-	created := time.Date(2026, 10, 15, 7, 30, 0, 0, time.UTC).Local()
-	for _, c := range []struct {
-		name    string
-		change  func(r *testutil.PlaudRecording)
-		want    []string // in the file, which starts with its name
-		notWant []string
-	}{
-		{name: "a summary line that starts like the spinner",
-			change:  func(r *testutil.PlaudRecording) { r.Notes[0].Content = plaudGoldenSummary },
-			want:    []string{"=== Plaud AI summary ===\n" + plaudGoldenSummary + "\n\n=== Transcript ===\n"},
-			notWant: []string{"Team sync\n## Team sync"}},
-		{name: "the transcript without its header",
-			change:  func(*testutil.PlaudRecording) {},
-			want:    []string{"=== Transcript ===\n[00:00 - 00:04] Speaker 1: Let's ship on Friday.\n"},
-			notWant: []string{"Transcript: Team sync"}},
-		{name: "no start time: the day it reached Plaud",
-			change:  func(r *testutil.PlaudRecording) { r.StartAt, r.CreatedAt = nil, "2026-10-15T07:30:00" },
-			want:    []string{created.Format("2006-01-02") + " - Team sync - ", "Recorded: " + created.Format("2006-01-02 15:04") + "\n"},
-			notWant: []string{"Recorded: -"}},
-		{name: "an empty summary note",
-			change:  func(r *testutil.PlaudRecording) { r.Notes[0].Content = "" },
-			want:    nil,
-			notWant: []string{"=== Plaud AI summary ===", "no content yet"}},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			tb, fp := plaudBridge(t, "")
-			r := fp.TeamSync(plaudNew, true)
-			c.change(&r)
-			if err := plaudDeliverRecording(t, tb, fp, r); err != nil {
-				t.Fatal(err)
-			}
-			got := tb.plaudDelivered(t, plaudNew)
-			for _, w := range c.want {
-				if !strings.Contains(got, w) {
-					t.Errorf("the file lacks %q:\n%s", w, got)
-				}
-			}
-			for _, w := range c.notWant {
-				if strings.Contains(got, w) {
-					t.Errorf("the file has %q:\n%s", w, got)
-				}
-			}
-		})
-	}
-}
-
-// With plaud.polished the cleaned-up transcript is sent when Plaud has
-// one. Plaud makes the raw transcript first and may never make the other,
-// so after plaudPolishedWait the raw one goes instead, with a note that
-// says so; before that the recording waits.
-func TestPlaudPolishedFallsBackToTheRawTranscript(t *testing.T) {
-	raw := "[00:00 - 00:04] Speaker 1: Let's ship on Friday."
-	for _, c := range []struct {
-		name     string
-		polished *string // the polished block's segment, nil for none
-		age      time.Duration
-		want     string // the transcript sent, "" for none yet
-		note     bool
-	}{
-		{"cleaned up", ptr("Let us ship on Friday."), time.Minute, "[00:00 - 00:04] Speaker 1: Let us ship on Friday.", false},
-		{"none yet", nil, time.Minute, "", false},
-		{"an empty one yet", ptr(""), time.Minute, "", false},
-		{"none after the wait", nil, plaudPolishedWait + time.Minute, raw, true},
-		{"an empty one after the wait", ptr(""), plaudPolishedWait + time.Minute, raw, true},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			tb, fp := plaudBridge(t, `, "polished": true`)
-			plaudSignIn(t, tb)
-			first := time.Now().Add(-c.age)
-			if err := tb.plaud.saveState(plaudWaiting(plaudSeededState("u_1", plaudOld1), plaudNew, first)); err != nil {
-				t.Fatal(err)
-			}
-			r := fp.TeamSync(plaudNew, true)
-			if c.polished != nil {
-				b := testutil.PlaudBlock{DataType: "transaction_polish"}
-				if *c.polished != "" {
-					b.Content = testutil.PlaudTranscript(testutil.PlaudSegment{Start: 0, End: 4000, Speaker: "Speaker 1", Content: *c.polished})
-				}
-				r.Sources = append(r.Sources, b)
-			}
-			fp.Files(plaudNew, plaudOld1)
-			fp.Put(r)
-			logs := captureLog(t)
-			if err := tb.plaud.Poll(context.Background()); err != nil {
-				t.Fatal(err)
-			}
-			if c.want == "" {
-				if tb.plaudForwarded() {
-					t.Fatal("handed over before the cleaned-up transcript was there or the wait was up")
-				}
-				if st, _ := tb.plaud.loadState(); st.Pending[plaudNew] == nil {
-					t.Errorf("state = %+v, want the recording still waiting", st)
-				}
-				return
-			}
-			got := tb.plaudDelivered(t, plaudNew)
-			if !strings.Contains(got, "=== Transcript ===\n"+c.want+"\n") {
-				t.Errorf("the file lacks the transcript %q:\n%s", c.want, got)
-			}
-			if strings.Contains(got, "this is the raw one") != c.note || logContains(logs, "sending the raw one") != c.note {
-				t.Errorf("note about the raw transcript in the file or the log, want %v:\n%s\n%q", c.note, got, logs())
-			}
-		})
-	}
-}
-
 func ptr[T any](v T) *T { return &v }
 
 // plaudIDs returns n recording ids, newest first, that start with prefix
@@ -1813,36 +1466,6 @@ func TestPlaudTranscriptStaysInTheInbox(t *testing.T) {
 			}
 			if names := dirNames(t, target); len(names) != 0 {
 				t.Errorf("written through the link: %q", names)
-			}
-		})
-	}
-}
-
-// The earlier transcript is found whatever characters the media folder's
-// path holds, and only the file of that very recording.
-func TestPlaudTranscriptPathFindsTheEarlierFile(t *testing.T) {
-	const id = "of_00000000000000000000aa"
-	for _, folder := range []string{"media", "media [1]", "media[", "media *?"} {
-		t.Run(folder, func(t *testing.T) {
-			dir := filepath.Join(t.TempDir(), folder)
-			if err := os.MkdirAll(dir, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			fresh := filepath.Join(dir, "17.10.2026 - Weekly sync - "+id+".txt")
-			if got := plaudTranscriptPath(dir, "17.10.2026", "Weekly sync", id); got != fresh {
-				t.Errorf("with no earlier file: %s, want %s", got, fresh)
-			}
-			for _, other := range []string{"16.10.2026 - Team sync - " + id + "b.txt", "16.10.2026 - Team sync - x" + id + ".txt"} {
-				if err := os.WriteFile(filepath.Join(dir, other), nil, 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			earlier := filepath.Join(dir, "16.10.2026 - Team sync - "+id+".txt")
-			if err := os.WriteFile(earlier, nil, 0o600); err != nil {
-				t.Fatal(err)
-			}
-			if got := plaudTranscriptPath(dir, "17.10.2026", "Weekly sync", id); got != earlier {
-				t.Errorf("with an earlier file: %s, want %s", got, earlier)
 			}
 		})
 	}
@@ -2246,93 +1869,6 @@ func TestPlaudBrainAccessSharesTheLogin(t *testing.T) {
 	}
 }
 
-// A shared login that is a symlink, which an older version's sandbox let a
-// brain put in its place, is not used: the CLI, which runs outside the
-// sandbox, would write your next sign-in through it (into ~/.zshrc, say),
-// and chmod what it points to. A sign-out still runs, and removes only the
-// link.
-func TestPlaudRefusesALoginThatIsASymlink(t *testing.T) {
-	tb, fp := plaudBridge(t, `, "brain_access": true`)
-	fp.Files()
-	const rcText = "export PATH=/usr/bin\n"
-	rc := writeTestFile(t, filepath.Join(tb.home, ".zshrc"), rcText)
-	if err := os.MkdirAll(filepath.Dir(tb.plaud.tokenPath()), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(rc, tb.plaud.tokenPath()); err != nil {
-		t.Fatal(err)
-	}
-	for _, cmd := range []string{"files", "login"} {
-		if _, err := tb.plaud.runCLIOut(context.Background(), nil, cmd); err == nil || !strings.Contains(err.Error(), "is a symlink") {
-			t.Errorf("plaud %s: %v, want it refused", cmd, err)
-		}
-	}
-	if calls := fp.Calls(); calls != "" {
-		t.Errorf("the CLI ran:\n%s", calls)
-	}
-	if _, err := tb.plaud.runCLIOut(context.Background(), nil, "logout"); err != nil {
-		t.Errorf("plaud logout: %v", err)
-	}
-	if _, err := os.Lstat(tb.plaud.tokenPath()); !os.IsNotExist(err) {
-		t.Errorf("the link is still there: %v", err)
-	}
-	if data, _ := os.ReadFile(rc); string(data) != rcText {
-		t.Errorf("~/.zshrc = %q, want it untouched", data)
-	}
-}
-
-// TestPlaudRefusesALoginElsewhere: only a symlinked tokens.json was
-// refused, but a brain under an older sandbox could also have swapped
-// ~/.plaud itself for a symlink, or left a hard link to the login, which
-// the bridge's CLI, outside the sandbox, then wrote through. Both are
-// refused now as the symlink is; a login of its own is not.
-func TestPlaudRefusesALoginElsewhere(t *testing.T) {
-	cases := []struct {
-		name  string
-		setup func(t *testing.T, home, elsewhere string)
-		says  string // "" for a login that is fine
-	}{
-		{"a login of its own", func(t *testing.T, home, _ string) {
-			writeTestFile(t, filepath.Join(home, ".plaud", "tokens.json"), "{}")
-		}, ""},
-		{"no login yet", func(t *testing.T, home, _ string) {}, ""},
-		{"a symlinked folder", func(t *testing.T, home, elsewhere string) {
-			writeTestFile(t, filepath.Join(elsewhere, "tokens.json"), "{}")
-			if err := os.Symlink(elsewhere, filepath.Join(home, ".plaud")); err != nil {
-				t.Fatal(err)
-			}
-		}, ".plaud is a symlink"},
-		{"a file where the folder goes", func(t *testing.T, home, _ string) {
-			writeTestFile(t, filepath.Join(home, ".plaud"), "x")
-		}, ".plaud is not a folder"},
-		{"a hard link", func(t *testing.T, home, elsewhere string) {
-			other := writeTestFile(t, filepath.Join(elsewhere, "zshrc"), "x")
-			if err := os.MkdirAll(filepath.Join(home, ".plaud"), 0o700); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Link(other, filepath.Join(home, ".plaud", "tokens.json")); err != nil {
-				t.Fatal(err)
-			}
-		}, "tokens.json is a file with another name too"},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			home, elsewhere := t.TempDir(), t.TempDir()
-			c.setup(t, home, elsewhere)
-			err := checkPlaudLogin(home)
-			if c.says == "" {
-				if err != nil {
-					t.Errorf("checkPlaudLogin = %v, want nil", err)
-				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), c.says) {
-				t.Errorf("checkPlaudLogin = %v, want it saying %q", err, c.says)
-			}
-		})
-	}
-}
-
 func TestPlaudConnectShowsTheSignInLinkWhileWaiting(t *testing.T) {
 	tb, fp := plaudBridge(t, "")
 	fp.Write("login_wait", "")
@@ -2494,32 +2030,6 @@ func TestPlaudConnectJudgesTheSignInByTheLogin(t *testing.T) {
 			})
 			if job.State != c.want {
 				t.Errorf("sign-in %s (%s), want %s", job.State, job.Error, c.want)
-			}
-		})
-	}
-}
-
-// The card offers the sign-in link the CLI prints when it cannot open a
-// browser, and no other: not a link from a line before it, not one that is
-// not https (or http to this machine), and not one still arriving.
-func TestPlaudSignInURL(t *testing.T) {
-	const link = "https://web.plaud.ai/platform/oauth?client_id=x&state=y"
-	for _, c := range []struct {
-		name, out, want string
-	}{
-		{"as the CLI prints it", "\nOpening browser for authentication...\n\nCould not open browser. Open this URL manually:\n  " + link + "\n", link},
-		{"on the same line", "Could not open browser. Open this URL manually: " + link + "\n", link},
-		{"after another link", "See https://docs.example.com/help first.\nCould not open browser. Open this URL manually:\n  " + link + "\n", link},
-		{"another link only", "See https://docs.example.com/help first.\n", ""},
-		{"plain http elsewhere", "Open this URL manually:\n  http://web.plaud.ai/platform/oauth\n", ""},
-		{"http to this machine", "Open this URL manually:\n  http://127.0.0.1:8199/auth/callback?code=1\n", "http://127.0.0.1:8199/auth/callback?code=1"},
-		{"not a web link", "Open this URL manually:\n  javascript:alert(1)\n", ""},
-		{"still arriving", "Open this URL manually:\n  " + link, ""},
-		{"in colour", "\x1b[33mCould not open browser. Open this URL manually:\n  " + link + "\x1b[39m\n", link},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			if got := plaudSignInURL(c.out); got != c.want {
-				t.Errorf("plaudSignInURL(%q) = %q, want %q", c.out, got, c.want)
 			}
 		})
 	}

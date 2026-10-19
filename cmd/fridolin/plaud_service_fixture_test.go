@@ -69,7 +69,7 @@ func plaudService(t *testing.T, extra string) (*plaudServiceFixture, *testutil.P
 	}
 	f.settings.Store(&PlaudSnapshot{Plaud: settings, DataDir: filepath.Join(root, "data"), MediaDir: filepath.Join(root, "media"), QueueMaxPending: 10, OwnerChat: "15551234567@s.whatsapp.net", Interval: time.Duration(interval) * time.Second})
 	migration := &mediafiles.Migration{Started: time.Now()}
-	target := &PlaudTarget{BrainID: "p", ReplyChat: func() string { return "" }, OtherOwner: func(string) string { return "p" }, Submit: func(_, _, _ string, _ []string, done func(error)) error { done(nil); return nil }}
+	target := &PlaudTarget{BrainID: "p", ReplyChat: func() string { return "" }, OtherOwner: func(string) string { return "" }, Submit: func(_, _, _ string, _ []string, done func(error)) error { done(nil); return nil }}
 	f.options = PlaudOptions{
 		PlaudDir: filepath.Join(root, "data", "plaud"), Home: f.home, Settings: f.settings.Load,
 		Target: func(id string) *PlaudTarget {
@@ -201,4 +201,58 @@ func plaudServiceIDs(prefix string, n int) []string {
 		ids[i] = fmt.Sprintf("of_%s%021x", prefix, n-i)
 	}
 	return ids
+}
+
+const servicePlaudGoldenSummary = "## Team sync\n\nDecisions: ship Friday.\nFetching the release notes is Anna's job.\nBudget: 10k approved."
+
+func plaudServicePtr[T any](v T) *T { return &v }
+func plaudServiceRecordLogin(f *plaudServiceFixture, st *plaudState) *plaudState {
+	st.Login = &plaudLogin{Dir: f.plaud.cliHome(), Since: time.Now()}
+	return st
+}
+func plaudServiceRefuseLogin(t *testing.T, f *plaudServiceFixture, fp *testutil.PlaudFixture) {
+	t.Helper()
+	plaudServiceSignIn(t, f)
+	st := plaudServiceRecordLogin(f, plaudServiceSeededState("u_1", servicePlaudOld1))
+	st.Login.Checked = time.Now()
+	if err := f.plaud.saveState(st); err != nil {
+		t.Fatal(err)
+	}
+	fp.Files(servicePlaudOld1)
+	fp.Write("revoked", "")
+	if err := f.plaud.Poll(context.Background()); !errors.Is(err, errPlaudAuth) {
+		t.Fatalf("poll = %v, want the login refused", err)
+	}
+}
+func plaudServiceDeliverRecording(t *testing.T, f *plaudServiceFixture, fp *testutil.PlaudFixture, r testutil.PlaudRecording) error {
+	t.Helper()
+	plaudServiceSignIn(t, f)
+	if err := f.plaud.saveState(plaudServiceSeededState("", servicePlaudOld1)); err != nil {
+		t.Fatal(err)
+	}
+	fp.Files(r.ID, servicePlaudOld1)
+	fp.Put(r)
+	return f.plaud.Poll(context.Background())
+}
+func (f *plaudServiceFixture) plaudDelivered(t *testing.T, id string) string {
+	t.Helper()
+	files, _ := filepath.Glob(filepath.Join(f.settings.Load().MediaDir, "*", "plaud", "* - "+id+".txt"))
+	if len(files) != 1 {
+		t.Fatalf("transcript files for %s = %v, want one", id, files)
+	}
+	data, err := os.ReadFile(files[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Base(files[0]) + "\n" + string(data)
+}
+func plaudServiceWriteFile(t *testing.T, p, content string) string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
