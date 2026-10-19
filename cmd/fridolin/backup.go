@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"io"
 	"io/fs"
 	"log"
@@ -1090,7 +1091,7 @@ func (m *BackupManager) noticeRefusal(ctx context.Context, br *Brain, res *Backu
 		name = id
 	}
 	sctx, cancel := context.WithTimeout(ctx, refusalNoticeTimeout)
-	err := m.notify(sctx, br, backupRefusedAlert(name, res.Error))
+	err := m.notify(sctx, br, outboundmsg.BackupRefusedAlert(name, res.Error))
 	cancel()
 	if err != nil {
 		log.Printf("backup %s: could not send the refusal notice: %v", id, err)

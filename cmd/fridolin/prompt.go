@@ -201,7 +201,7 @@ func (in promptInput) from(e history.Entry) string {
 // name is sender with the name the identity map gives them, then the raw
 // identifier in parentheses, or that alone.
 func (in promptInput) name(sender string) string {
-	if name, ok := in.Names[identityKey(sender)]; ok {
+	if name, ok := in.Names[chat.IdentityKey(sender)]; ok {
 		return fmt.Sprintf("%s (%s)", name, sender)
 	}
 	return sender

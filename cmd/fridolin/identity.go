@@ -2,13 +2,12 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
-	"regexp"
 	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
@@ -16,49 +15,18 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
-// Phone numbers and chats as people write them, and the one form the
-// bridge compares: a number someone typed into config.json, the identity
-// map or a /send request must match the sender WhatsApp reports however
-// it was written.
-
-// phoneNumberRE is a phone number as allowed_numbers holds it.
-var phoneNumberRE = regexp.MustCompile(`^[0-9]{6,15}$`)
-
-// phoneNumber is s as allowed_numbers holds it: digits with the country
-// code. It takes the ways people write a number (a +, spaces, dashes,
-// dots, brackets, a WhatsApp JID) and refuses anything else, a @lid JID
-// too: its digits are WhatsApp's internal id for the sender, not a number.
-func phoneNumber(s string) (string, error) { return chat.PhoneNumber(s) }
-
-// identityKey is the form a person is looked up by in a brain's identity
-// map: the phone number for anything phoneNumber takes, so that a row
-// written "+1 555 123 4567" names the sender 15551234567, and otherwise s
-// normalised (a LID, say). The user part of a JID phoneNumber refuses is
-// read as a number too when it is one: "0 00000@lid" would otherwise be
-// the key "0 00000", which itself keys as 000000, so no sender's key
-// could ever match it.
-func identityKey(s string) string { return chat.IdentityKey(s) }
-
-// allowedNumbersAsNumbers is allowed_numbers with each entry in the form
-// the bridge compares, digits only. An entry that is no phone number stays
-// as written: it lets nobody in, and badAllowedNumbers names it.
-func allowedNumbersAsNumbers(list []string) []string { return chat.NumbersAsNumbers(list) }
-
 // badAllowedNumbers lists the entries of allowed_numbers that are no phone
 // number. config.json may be edited by hand, and such an entry silently
 // lets nobody in.
 func badAllowedNumbers(list []string) []string {
 	var bad []string
 	for _, s := range list {
-		if _, err := phoneNumber(s); err != nil {
+		if _, err := chat.PhoneNumber(s); err != nil {
 			bad = append(bad, s)
 		}
 	}
 	return bad
 }
-
-// errNotAChat is why a chat a script named cannot be sent to.
-var errNotAChat = errors.New("not a chat JID: use one such as 15551234567@s.whatsapp.net, a …@lid or 120363000000000000@g.us, or a phone number with the country code")
 
 // chatJID parses the chat a script names, for /send: a WhatsApp JID, or a
 // phone number written any way phoneNumber takes, for the direct chat with
@@ -68,26 +36,26 @@ var errNotAChat = errors.New("not a chat JID: use one such as 15551234567@s.what
 func chatJID(s string) (types.JID, error) {
 	s = strings.TrimSpace(s)
 	if !strings.Contains(s, "@") {
-		n, err := phoneNumber(s)
+		n, err := chat.PhoneNumber(s)
 		if err != nil {
-			return types.JID{}, fmt.Errorf("%q is %w", s, errNotAChat)
+			return types.JID{}, fmt.Errorf("%q is %w", s, outboundmsg.ErrNotAChat)
 		}
 		return types.NewJID(n, types.DefaultUserServer), nil
 	}
 	jid, err := types.ParseJID(s)
 	if err != nil || jid.User == "" {
-		return types.JID{}, fmt.Errorf("%q is %w", s, errNotAChat)
+		return types.JID{}, fmt.Errorf("%q is %w", s, outboundmsg.ErrNotAChat)
 	}
 	switch jid.Server {
 	case types.DefaultUserServer:
-		if !phoneNumberRE.MatchString(jid.User) {
-			return types.JID{}, fmt.Errorf("%q is %w", s, errNotAChat)
+		if !chat.IsPhoneNumber(jid.User) {
+			return types.JID{}, fmt.Errorf("%q is %w", s, outboundmsg.ErrNotAChat)
 		}
 	case types.GroupServer, types.HiddenUserServer, types.BroadcastServer, types.NewsletterServer:
 		// Broadcast lists and channels are chats, which checkRecipient
 		// refuses to send to.
 	default:
-		return types.JID{}, fmt.Errorf("%q is %w", s, errNotAChat)
+		return types.JID{}, fmt.Errorf("%q is %w", s, outboundmsg.ErrNotAChat)
 	}
 	return jid.ToNonAD(), nil
 }
@@ -99,7 +67,7 @@ func chatJID(s string) (types.JID, error) {
 // number.
 func ownerChat(cfg *config.Config) string {
 	for _, n := range cfg.AllowedNumbers {
-		if p, err := phoneNumber(n); err == nil {
+		if p, err := chat.PhoneNumber(n); err == nil {
 			return chat.DMJID(p)
 		}
 	}
