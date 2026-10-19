@@ -1,4 +1,4 @@
-package main
+package backup
 
 import (
 	"context"
@@ -108,7 +108,7 @@ func processBackupFixture(t *testing.T, bin string) *backupFixture {
 	opts.Environ = func(context.Context) []string {
 		return []string{"PATH=/usr/bin:/bin", "HOME=" + home, "RCLONE_CONFIG=" + opts.RcloneConf}
 	}
-	f.manager = NewBackupService(opts)
+	f.manager = New(opts)
 	t.Cleanup(f.manager.Stop)
 	return f
 }

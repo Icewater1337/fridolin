@@ -1,4 +1,4 @@
-package main
+package backup
 
 import (
 	"context"
@@ -15,10 +15,10 @@ import (
 // The current target filter and backup destination are read after waiting idle.
 func TestBackupOptionsReadSettingsAfterIdle(t *testing.T) {
 	dir := t.TempDir()
-	settings := BackupSettings{Remote: "remote", Root: "before"}
-	targetSettings := BackupTargetSettings{Name: "Before", Enabled: true, Exclude: []string{"before"}}
+	settings := Settings{Remote: "remote", Root: "before"}
+	targetSettings := TargetSettings{Name: "Before", Enabled: true, Exclude: []string{"before"}}
 	var sources, destinations, filters []string
-	opts := BackupOptions{BackupDir: dir, RcloneConf: filepath.Join(dir, "rclone.conf"), Settings: func() BackupSettings { return settings }, Runner: func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
+	opts := Options{BackupDir: dir, RcloneConf: filepath.Join(dir, "rclone.conf"), Settings: func() Settings { return settings }, Runner: func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
 		sources = append(sources, args[1])
 		destinations = append(destinations, args[2])
 		for i, a := range args {
@@ -32,12 +32,12 @@ func TestBackupOptionsReadSettingsAfterIdle(t *testing.T) {
 		}
 		return nil, nil
 	}}
-	target := BackupTarget{ID: "notes", Dir: filepath.Join(dir, "selected"), Settings: func() BackupTargetSettings { return targetSettings }, WaitIdle: func(context.Context, time.Duration) bool {
+	target := Target{ID: "notes", Dir: filepath.Join(dir, "selected"), Settings: func() TargetSettings { return targetSettings }, WaitIdle: func(context.Context, time.Duration) bool {
 		targetSettings.Exclude = []string{"after"}
 		settings.Root = "after"
 		return true
 	}}
-	m := NewBackupService(opts)
+	m := New(opts)
 	if res := m.backupBrain(context.Background(), target, "manual", true); !res.OK {
 		t.Fatalf("backup = %+v", res)
 	}
@@ -58,11 +58,11 @@ func TestBackupOptionsStageOrderedFilesAndErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	marshalErr := errors.New("manifest encoding failed")
-	m := NewBackupService(BackupOptions{BackupDir: dir, BridgeFiles: func() (BackupBridgeFiles, error) {
+	m := New(Options{BackupDir: dir, BridgeFiles: func() (BridgeFiles, error) {
 		if _, err := os.Stat(filepath.Join(stage, "stale")); !os.IsNotExist(err) {
 			t.Fatalf("files read before old staging cleared: %v", err)
 		}
-		return BackupBridgeFiles{Config: []byte("{}"), Manifests: []BackupManifestFile{{ID: "first", Data: []byte("first")}, {ID: "second", Err: marshalErr}, {ID: "third", Data: []byte("third")}}}, nil
+		return BridgeFiles{Config: []byte("{}"), Manifests: []ManifestFile{{ID: "first", Data: []byte("first")}, {ID: "second", Err: marshalErr}, {ID: "third", Data: []byte("third")}}}, nil
 	}})
 	old := writeStaged
 	t.Cleanup(func() { writeStaged = old })

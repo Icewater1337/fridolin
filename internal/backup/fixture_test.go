@@ -1,4 +1,4 @@
-package main
+package backup
 
 import (
 	"bytes"
@@ -19,46 +19,46 @@ import (
 // backupFixture supplies only the backup service's owned inputs. It creates no
 // bridge, runtime, HTTP server, config store, process, or ambient home lookup.
 type backupFixture struct {
-	manager *BackupManager
-	options BackupOptions
-	runner  BackupRunFunc // assigned before starting a job
+	manager *Manager
+	options Options
+	runner  RunFunc // assigned before starting a job
 
 	mu       sync.Mutex
-	settings BackupSettings
-	targets  []BackupTarget
+	settings Settings
+	targets  []Target
 }
 
-func newBackupFixture(t *testing.T, configure func(*BackupSettings)) *backupFixture {
+func newBackupFixture(t *testing.T, configure func(*Settings)) *backupFixture {
 	t.Helper()
-	f := &backupFixture{settings: BackupSettings{Remote: "brain-gdrive", Root: "fridolin-backup", DailyAt: "03:30", KeepVersionsDays: 30, IncludeBridgeConfig: true}}
+	f := &backupFixture{settings: Settings{Remote: "brain-gdrive", Root: "fridolin-backup", DailyAt: "03:30", KeepVersionsDays: 30, IncludeBridgeConfig: true}}
 	if configure != nil {
 		configure(&f.settings)
 	}
 	dir := t.TempDir()
-	f.options = BackupOptions{
+	f.options = Options{
 		BackupDir: filepath.Join(dir, "backup"), RcloneConf: filepath.Join(dir, "rclone", "rclone.conf"),
-		Settings: func() BackupSettings {
+		Settings: func() Settings {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			s := f.settings
 			s.ConfiguredIDs = slices.Clone(s.ConfiguredIDs)
 			return s
 		},
-		Targets: func() []BackupTarget {
+		Targets: func() []Target {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 			return slices.Clone(f.targets)
 		},
-		BridgeFiles: func() (BackupBridgeFiles, error) {
+		BridgeFiles: func() (BridgeFiles, error) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
-			files := BackupBridgeFiles{Config: []byte("{}\n")}
+			files := BridgeFiles{Config: []byte("{}\n")}
 			for _, target := range f.targets {
-				files.Manifests = append(files.Manifests, BackupManifestFile{ID: target.ID, Data: []byte("{}\n")})
+				files.Manifests = append(files.Manifests, ManifestFile{ID: target.ID, Data: []byte("{}\n")})
 			}
 			return files, nil
 		},
-		FindRclone:     func(string) (string, error) { return "", ErrBackupRcloneMissing },
+		FindRclone:     func(string) (string, error) { return "", ErrRcloneMissing },
 		Environ:        func(context.Context) []string { return nil },
 		DesktopContext: func(ctx context.Context) context.Context { return ctx },
 		InstallHint:    func() string { return "install rclone" },
@@ -70,20 +70,20 @@ func newBackupFixture(t *testing.T, configure func(*BackupSettings)) *backupFixt
 			return f.runner(ctx, args, stderr)
 		},
 	}
-	f.manager = NewBackupService(f.options)
+	f.manager = New(f.options)
 	t.Cleanup(f.manager.Stop)
 	return f
 }
 
-func (f *backupFixture) update(fn func(*BackupSettings)) {
+func (f *backupFixture) update(fn func(*Settings)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	fn(&f.settings)
 }
 
-func (f *backupFixture) addTarget(t *testing.T, id string) BackupTarget {
+func (f *backupFixture) addTarget(t *testing.T, id string) Target {
 	t.Helper()
-	target := BackupTarget{ID: id, Dir: t.TempDir(), Settings: func() BackupTargetSettings { return BackupTargetSettings{Name: id, Enabled: true} }, WaitIdle: func(context.Context, time.Duration) bool { return true }}
+	target := Target{ID: id, Dir: t.TempDir(), Settings: func() TargetSettings { return TargetSettings{Name: id, Enabled: true} }, WaitIdle: func(context.Context, time.Duration) bool { return true }}
 	f.mu.Lock()
 	f.targets = append(f.targets, target)
 	f.settings.ConfiguredIDs = append(f.settings.ConfiguredIDs, id)
@@ -91,7 +91,7 @@ func (f *backupFixture) addTarget(t *testing.T, id string) BackupTarget {
 	return target
 }
 
-func (f *backupFixture) target(id string) BackupTarget {
+func (f *backupFixture) target(id string) Target {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, target := range f.targets {
@@ -102,7 +102,7 @@ func (f *backupFixture) target(id string) BackupTarget {
 	panic("missing test target " + id)
 }
 
-func (f *backupFixture) run(t *testing.T, id string) *BackupResult {
+func (f *backupFixture) run(t *testing.T, id string) *Result {
 	t.Helper()
 	if err := f.manager.StartRun([]string{id}, false, "manual", false); err != nil {
 		t.Fatal(err)
@@ -110,7 +110,7 @@ func (f *backupFixture) run(t *testing.T, id string) *BackupResult {
 	return f.wait(t, id)
 }
 
-func (f *backupFixture) wait(t *testing.T, id string) *BackupResult {
+func (f *backupFixture) wait(t *testing.T, id string) *Result {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
@@ -230,7 +230,7 @@ func backupFlagValue(args []string, flag string) string {
 func backupMaxDelete(args []string) string { return backupFlagValue(args, "--max-delete") }
 
 // connectBackupFixture supplies discovery without starting an executable.
-func connectBackupFixture(t *testing.T, run BackupRunFunc) *backupFixture {
+func connectBackupFixture(t *testing.T, run RunFunc) *backupFixture {
 	t.Helper()
 	f := newBackupFixture(t, nil)
 	f.runner = run
@@ -244,7 +244,7 @@ func connectBackupFixture(t *testing.T, run BackupRunFunc) *backupFixture {
 
 func scheduledBackupFixture(t *testing.T) (*backupFixture, *backupDeletionRunner) {
 	t.Helper()
-	f := newBackupFixture(t, func(s *BackupSettings) { s.Enabled = true; s.IncludeBridgeConfig = false })
+	f := newBackupFixture(t, func(s *Settings) { s.Enabled = true; s.IncludeBridgeConfig = false })
 	if err := os.MkdirAll(filepath.Dir(f.options.RcloneConf), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +257,7 @@ func scheduledBackupFixture(t *testing.T) (*backupFixture, *backupDeletionRunner
 	return f, runner
 }
 
-func scheduledFixtureRun(t *testing.T, f *backupFixture, day int) *BackupResult {
+func scheduledFixtureRun(t *testing.T, f *backupFixture, day int) *Result {
 	t.Helper()
 	y, mo, d := time.Now().Date()
 	f.manager.tick(time.Date(y, mo, d+day, 12, 0, 0, 0, time.Local))

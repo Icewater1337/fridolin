@@ -1,4 +1,4 @@
-package main
+package backup
 
 import (
 	"context"
@@ -16,8 +16,6 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
-
-	"github.com/Icewater1337/fridolin/internal/backup"
 )
 
 // TestBackupSchedulerTicks: Start looks at the schedule every minute, runs
@@ -33,13 +31,13 @@ func TestBackupSchedulerTicks(t *testing.T) {
 		start = time.Date(due.Year(), due.Month(), due.Day(), 0, 0, 0, 0, time.Local)
 	}
 	dailyAt := start.Add(90 * time.Minute).Format("15:04")
-	fx := newBackupFixture(t, func(s *BackupSettings) { s.Enabled = true; s.IncludeBridgeConfig = false; s.DailyAt = dailyAt })
+	fx := newBackupFixture(t, func(s *Settings) { s.Enabled = true; s.IncludeBridgeConfig = false; s.DailyAt = dailyAt })
 	_ = os.MkdirAll(filepath.Dir(fx.manager.rcloneConf()), 0o700)
 	_ = os.WriteFile(fx.manager.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
 	fx.addTarget(t, "notes")
 	synctest.Test(t, func(t *testing.T) {
 		time.Sleep(start.Sub(bubble))
-		m := NewBackupService(fx.options)
+		m := New(fx.options)
 		d := &backupDeletionRunner{src: []string{"a"}, cur: []string{"a"}}
 		fx.runner = d.run
 		m.Start(context.Background())
@@ -64,8 +62,8 @@ func TestBackupSchedulerTicks(t *testing.T) {
 		m.mu.Lock()
 		res, last := m.state.Brains["notes"], m.state.LastScheduledDay
 		m.mu.Unlock()
-		if res == nil || !res.OK || res.Trigger != "scheduled" || last != start.Format(backup.DayLayout) {
-			t.Errorf("result %+v, last scheduled day %q; want a scheduled run on %s", res, last, start.Format(backup.DayLayout))
+		if res == nil || !res.OK || res.Trigger != "scheduled" || last != start.Format(DayLayout) {
+			t.Errorf("result %+v, last scheduled day %q; want a scheduled run on %s", res, last, start.Format(DayLayout))
 		}
 		m.Stop()
 	})
@@ -75,7 +73,7 @@ func TestBackupSchedulerTicks(t *testing.T) {
 // once today's ran, now for one that is due, and none while Drive is not
 // connected.
 func TestBackupNextRun(t *testing.T) {
-	fx := newBackupFixture(t, func(s *BackupSettings) { s.Enabled = true })
+	fx := newBackupFixture(t, func(s *Settings) { s.Enabled = true })
 	m := fx.manager
 	clock := time.Date(2026, 10, 18, 9, 0, 0, 0, time.Local)
 	m.now = func() time.Time { return clock }
@@ -98,7 +96,7 @@ func TestBackupNextRun(t *testing.T) {
 		t.Errorf("next run = %v, want now (today's is due)", n)
 	}
 	m.mu.Lock()
-	m.state.LastScheduledDay = clock.Format(backup.DayLayout)
+	m.state.LastScheduledDay = clock.Format(DayLayout)
 	m.mu.Unlock()
 	if n, want := next(), time.Date(2026, 10, 19, 3, 30, 0, 0, time.Local); n == nil || !n.Equal(want) {
 		t.Errorf("next run = %v, want %v", n, want)
@@ -110,8 +108,8 @@ func TestBackupNextRun(t *testing.T) {
 // never filters files by their age.
 func TestPrunePurgesExpiredVersionFolders(t *testing.T) {
 	fx := newBackupFixture(t, nil)
-	expired := backup.VersionName(time.Now().AddDate(0, 0, -31))
-	recent := backup.VersionName(time.Now().AddDate(0, 0, -29))
+	expired := VersionName(time.Now().AddDate(0, 0, -31))
+	recent := VersionName(time.Now().AddDate(0, 0, -29))
 	var mu sync.Mutex
 	var calls [][]string
 	fx.runner = func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
@@ -127,8 +125,8 @@ func TestPrunePurgesExpiredVersionFolders(t *testing.T) {
 		}
 		return []byte(`[{"Name":"` + expired + `"},{"Name":"` + recent + `"},{"Name":"keep-me"}]`), nil
 	}
-	notes := BackupTarget{ID: "notes"}
-	fx.manager.prune(context.Background(), []BackupTarget{notes})
+	notes := Target{ID: "notes"}
+	fx.manager.prune(context.Background(), []Target{notes})
 	var purged []string
 	for _, c := range calls {
 		switch c[0] {
@@ -149,9 +147,9 @@ func TestPrunePurgesExpiredVersionFolders(t *testing.T) {
 // one prune all use the config it started with, and a cancelled job stops
 // it at once instead of trying (and logging) every remaining id.
 func TestPruneKeepsItsConfigAndStopsWhenCancelled(t *testing.T) {
-	listing := []byte(`[{"Name":"` + backup.VersionName(time.Now().AddDate(0, 0, -31)) + `"},` +
-		`{"Name":"` + backup.VersionName(time.Now().AddDate(0, 0, -60)) + `"}]`)
-	brains := []BackupTarget{{ID: "notes"}, {ID: "work"}}
+	listing := []byte(`[{"Name":"` + VersionName(time.Now().AddDate(0, 0, -31)) + `"},` +
+		`{"Name":"` + VersionName(time.Now().AddDate(0, 0, -60)) + `"}]`)
+	brains := []Target{{ID: "notes"}, {ID: "work"}}
 
 	t.Run("backup.root changed mid-run", func(t *testing.T) {
 		fx := newBackupFixture(t, nil)
@@ -159,7 +157,7 @@ func TestPruneKeepsItsConfigAndStopsWhenCancelled(t *testing.T) {
 		fx.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
 			calls = append(calls, args)
 			if len(calls) == 1 {
-				fx.update(func(s *BackupSettings) { s.Root = "moved" })
+				fx.update(func(s *Settings) { s.Root = "moved" })
 			}
 			if args[0] == "lsjson" {
 				return listing, nil
@@ -324,7 +322,7 @@ func TestBackupBrainKeepsItsConfig(t *testing.T) {
 	fx.runner = func(ctx context.Context, args []string, stderr io.Writer) ([]byte, error) {
 		if args[0] == "lsjson" && !moved {
 			moved = true
-			fx.update(func(s *BackupSettings) { s.Root = "moved" })
+			fx.update(func(s *Settings) { s.Root = "moved" })
 		}
 		return d.run(ctx, args, stderr)
 	}
@@ -413,15 +411,15 @@ func TestSyncDirReportsMaxDelete(t *testing.T) {
 	cases := []struct {
 		name      string
 		maxDelete int
-		want      func(res *BackupResult) string
+		want      func(res *Result) string
 	}{
 		// Unlike the check before the sync, this refusal comes after rclone
 		// moved up to the limit out of current/; the message must say where.
-		{"limit 1", 1, func(res *BackupResult) string {
+		{"limit 1", 1, func(res *Result) string {
 			return "up to that many files were already moved from current/ to versions/" + res.Version
 		}},
 		// A partly readable brain folder is synced with no deletion allowed.
-		{"limit 0", 0, func(*BackupResult) string { return "nothing was removed from current/" }},
+		{"limit 0", 0, func(*Result) string { return "nothing was removed from current/" }},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -482,7 +480,7 @@ func TestUnreadableBackupStateIsKept(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{"brains": {"notes": tru`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	m := NewBackupService(fx.options)
+	m := New(fx.options)
 	if data, err := os.ReadFile(path + ".corrupt"); err != nil || string(data) != `{"brains": {"notes": tru` {
 		t.Errorf("state.json.corrupt = %q, %v; want the unreadable file", data, err)
 	}
@@ -494,7 +492,7 @@ func TestUnreadableBackupStateIsKept(t *testing.T) {
 // TestDailyBackupWithoutDriveIsLogged: a daily backup with no Drive link
 // to run on says so in the log, once a day rather than every minute.
 func TestDailyBackupWithoutDriveIsLogged(t *testing.T) {
-	fx := newBackupFixture(t, func(s *BackupSettings) { s.Enabled = true })
+	fx := newBackupFixture(t, func(s *Settings) { s.Enabled = true })
 	logs := captureBackupLog(t)
 	day := time.Date(2026, 10, 18, 4, 0, 0, 0, time.Local)
 	for i := range 3 {
@@ -537,21 +535,21 @@ func TestBackupSummarySaysWhatRuns(t *testing.T) {
 // overview shows the latest failure and whose it is, the same on every
 // refresh, and a removed brain's failure neither shows nor stays saved.
 func TestBackupSummaryShowsTheLatestFailure(t *testing.T) {
-	fx := newBackupFixture(t, func(s *BackupSettings) { s.IncludeBridgeConfig = false })
+	fx := newBackupFixture(t, func(s *Settings) { s.IncludeBridgeConfig = false })
 	m := fx.manager
 	_ = os.MkdirAll(filepath.Dir(m.rcloneConf()), 0o700)
 	_ = os.WriteFile(m.rcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
 	fx.addTarget(t, "a")
 	fx.addTarget(t, "b")
 	at := time.Date(2026, 10, 18, 3, 30, 0, 0, time.Local)
-	failed := func(min int, msg string) *BackupResult {
-		return &BackupResult{Started: at, Finished: at.Add(time.Duration(min) * time.Minute), Error: msg}
+	failed := func(min int, msg string) *Result {
+		return &Result{Started: at, Finished: at.Add(time.Duration(min) * time.Minute), Error: msg}
 	}
 	m.mu.Lock()
 	m.state.Brains["a"] = failed(1, "a failed")
 	m.state.Brains["b"] = failed(2, "b failed")
 	m.state.Brains["gone"] = failed(3, "gone failed") // a brain removed since
-	m.state.Bridge = &BackupResult{OK: true, Finished: at.Add(4 * time.Minute)}
+	m.state.Bridge = &Result{OK: true, Finished: at.Add(4 * time.Minute)}
 	m.mu.Unlock()
 	for range 20 {
 		s := m.Summary()
@@ -564,7 +562,7 @@ func TestBackupSummaryShowsTheLatestFailure(t *testing.T) {
 	if res := fx.run(t, "a"); !res.OK {
 		t.Fatalf("backup of a = %+v", res)
 	}
-	saved := NewBackupService(fx.options).state.Brains
+	saved := New(fx.options).state.Brains
 	if _, ok := saved["gone"]; ok || saved["a"] == nil || saved["b"] == nil {
 		t.Errorf("saved results for %v, want a and b only", slices.Collect(maps.Keys(saved)))
 	}
@@ -683,7 +681,7 @@ func TestBackupPublishedScheduleSurvivesRestart(t *testing.T) {
 	if !m.state.ArmedAt.Equal(clock) {
 		t.Fatalf("armed at %v, want %v", m.state.ArmedAt, clock)
 	}
-	if _, runNow := backup.Due(clock.Add(time.Minute), next.DailyAt, "", m.state.ArmedAt); runNow {
+	if _, runNow := Due(clock.Add(time.Minute), next.DailyAt, "", m.state.ArmedAt); runNow {
 		t.Error("enabling after today's time starts a backup at once")
 	}
 	first := clock
@@ -697,7 +695,7 @@ func TestBackupPublishedScheduleSurvivesRestart(t *testing.T) {
 	prev = next
 	next.DailyAt = "08:00"
 	m.SettingsChanged(prev, next)
-	if a := NewBackupService(fx.options).state.ArmedAt; !a.Equal(clock) {
+	if a := New(fx.options).state.ArmedAt; !a.Equal(clock) {
 		t.Errorf("armed time after restart = %v, want %v", a, clock)
 	}
 }

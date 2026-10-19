@@ -1,4 +1,4 @@
-package main
+package backup
 
 import (
 	"context"
@@ -8,30 +8,28 @@ import (
 	"slices"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/backup"
-
 	"github.com/Icewater1337/fridolin/internal/apperr"
 )
 
 // Status snapshots job state under the lock and returns it for encoding after unlock.
-func (m *BackupManager) Status() map[string]any {
+func (m *Manager) Status() map[string]any {
 	cfg := m.opts.Settings()
 	rc := map[string]any{"found": false, "install_hint": m.opts.InstallHint()}
 	if p, err := m.rclonePath(); err == nil {
 		rc["found"], rc["path"], rc["version"] = true, p, rcloneVersion(p, m.opts.Environ(context.Background()))
-	} else if !errors.Is(err, ErrBackupRcloneMissing) {
+	} else if !errors.Is(err, ErrRcloneMissing) {
 		rc["error"] = err.Error() // backup.rclone_path names one that does not work
 	}
 	// The response is built under the lock and written after it: a client
 	// that reads slowly must not hold up the backup job.
 	m.mu.Lock()
 	type brainRow struct {
-		ID      string        `json:"id"`
-		Name    string        `json:"name"`
-		Dir     string        `json:"dir"`
-		Enabled bool          `json:"enabled"`
-		Exclude []string      `json:"exclude"`
-		Last    *BackupResult `json:"last"`
+		ID      string   `json:"id"`
+		Name    string   `json:"name"`
+		Dir     string   `json:"dir"`
+		Enabled bool     `json:"enabled"`
+		Exclude []string `json:"exclude"`
+		Last    *Result  `json:"last"`
 	}
 	rows := []brainRow{}
 	for _, br := range m.opts.Targets() {
@@ -54,7 +52,7 @@ func (m *BackupManager) Status() map[string]any {
 		"connect":               copyOf(m.connect),
 		"settings":              cfg,
 		"include_bridge_config": cfg.IncludeBridgeConfig,
-		"secret_excludes":       backup.SecretExcludes,
+		"secret_excludes":       SecretExcludes,
 		"brains":                rows,
 		"bridge":                copyOf(m.state.Bridge),
 		"job":                   job,
@@ -68,7 +66,7 @@ func (m *BackupManager) Status() map[string]any {
 }
 
 // Connect begins a Drive sign-in while preserving the current job admission order.
-func (m *BackupManager) Connect() error {
+func (m *Manager) Connect() error {
 	if _, err := m.rclonePath(); err != nil {
 		return apperr.New(apperr.Precondition, m.rcloneMissingHint(err))
 	}
@@ -92,7 +90,7 @@ func (m *BackupManager) Connect() error {
 		return apperr.Wrap(apperr.Conflict, errDisconnecting)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
-	job := &backupConnectJob{State: "running", cancel: cancel, done: make(chan struct{})}
+	job := &connectJob{State: "running", cancel: cancel, done: make(chan struct{})}
 	err := m.goLocked(func() {
 		defer close(job.done)
 		defer cancel()
@@ -118,7 +116,7 @@ func (m *BackupManager) Connect() error {
 }
 
 // Disconnect joins a pending sign-in before removing the Drive link.
-func (m *BackupManager) Disconnect(ctx context.Context) error {
+func (m *Manager) Disconnect(ctx context.Context) error {
 	m.mu.Lock()
 	switch {
 	case m.job != nil:
@@ -161,7 +159,7 @@ func (m *BackupManager) Disconnect(ctx context.Context) error {
 }
 
 // Cancel requests cancellation of the current backup or restore.
-func (m *BackupManager) Cancel() error {
+func (m *Manager) Cancel() error {
 	m.mu.Lock()
 	job := m.job
 	if job != nil {
@@ -175,8 +173,8 @@ func (m *BackupManager) Cancel() error {
 }
 
 // Versions lists a brain's saved versions in the dashboard's existing order.
-func (m *BackupManager) Versions(ctx context.Context, id string) ([]string, error) {
-	if !backup.NameOK(id) {
+func (m *Manager) Versions(ctx context.Context, id string) ([]string, error) {
+	if !NameOK(id) {
 		return nil, apperr.New(apperr.Invalid, "invalid brain")
 	}
 	if !m.connected() {
@@ -188,12 +186,12 @@ func (m *BackupManager) Versions(ctx context.Context, id string) ([]string, erro
 	if err != nil {
 		return nil, apperr.New(apperr.Unknown, "listing versions failed: "+err.Error())
 	}
-	backup.SortVersions(versions)
+	SortVersions(versions)
 	return versions, nil
 }
 
 // BackupRestoreRequest identifies the snapshot and destination of a restore.
-type BackupRestoreRequest struct {
+type RestoreRequest struct {
 	Brain   string
 	Version string
 	Target  string
@@ -201,16 +199,16 @@ type BackupRestoreRequest struct {
 
 // ErrBackupRestoreRequest distinguishes malformed remote path components from a
 // rejected local destination. HTTP presents the former as 400 and the latter as 422.
-var ErrBackupRestoreRequest = errors.New("invalid brain or version")
+var ErrRestoreRequest = errors.New("invalid brain or version")
 
 // Restore validates the remote path components and starts a background restore
 // after the supplied checker resolves and validates destination overlap.
-func (m *BackupManager) Restore(req BackupRestoreRequest, overlapCheck func(string) (string, error)) (string, error) {
+func (m *Manager) Restore(req RestoreRequest, overlapCheck func(string) (string, error)) (string, error) {
 	if req.Version == "" {
 		req.Version = "current"
 	}
-	if !backup.NameOK(req.Brain) || !backup.VersionOK(req.Version) {
-		return "", ErrBackupRestoreRequest
+	if !NameOK(req.Brain) || !VersionOK(req.Version) {
+		return "", ErrRestoreRequest
 	}
 	if !m.connected() {
 		return "", apperr.New(apperr.Precondition, "Google Drive is not connected")

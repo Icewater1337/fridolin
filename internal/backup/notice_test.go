@@ -1,4 +1,4 @@
-package main
+package backup
 
 import (
 	"context"
@@ -33,14 +33,14 @@ func TestRefusalNoticeGivesUp(t *testing.T) {
 	fx, _ := scheduledBackupFixture(t)
 	defer func(d time.Duration) { refusalNoticeTimeout = d }(refusalNoticeTimeout)
 	refusalNoticeTimeout = 50 * time.Millisecond
-	fx.manager.notify = func(ctx context.Context, _ BackupTarget, _ string) error {
+	fx.manager.notify = func(ctx context.Context, _ Target, _ string) error {
 		<-ctx.Done()
 		return ctx.Err()
 	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		res := &BackupResult{Refused: true, Trigger: "scheduled", Error: massDeletionError}
+		res := &Result{Refused: true, Trigger: "scheduled", Error: massDeletionError}
 		fx.manager.noticeRefusal(context.Background(), fx.target("notes"), res)
 	}()
 	select {
@@ -62,7 +62,7 @@ func TestRefusalNoticeGivesUp(t *testing.T) {
 func TestRefusalNoticesForgetRemovedBrains(t *testing.T) {
 	fx, _ := scheduledBackupFixture(t)
 	var notices []string
-	fx.manager.notify = func(_ context.Context, target BackupTarget, _ string) error {
+	fx.manager.notify = func(_ context.Context, target Target, _ string) error {
 		notices = append(notices, target.ID)
 		return nil
 	}
@@ -72,7 +72,7 @@ func TestRefusalNoticesForgetRemovedBrains(t *testing.T) {
 	if res := scheduledFixtureRun(t, fx, 0); !res.Refused {
 		t.Fatalf("scheduled run = %+v, want a refusal", res)
 	}
-	saved := NewBackupService(fx.options).state.RefusalNotices
+	saved := New(fx.options).state.RefusalNotices
 	if _, ok := saved["removed"]; ok {
 		t.Errorf("the notice of a removed brain is still saved: %v", saved)
 	}

@@ -1,4 +1,4 @@
-package main
+package backup
 
 import (
 	"reflect"
@@ -13,7 +13,7 @@ func backupJSONError(err error) error {
 		switch t {
 		case reflect.TypeFor[backupState]():
 			return "main.backupState"
-		case reflect.TypeFor[BackupResult]():
+		case reflect.TypeFor[Result]():
 			return "main.BackupResult"
 		case reflect.TypeFor[RestoreResult]():
 			return "main.RestoreResult"

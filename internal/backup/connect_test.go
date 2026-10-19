@@ -1,4 +1,4 @@
-package main
+package backup
 
 import (
 	"context"
@@ -109,7 +109,7 @@ func TestConnectDriveChecksEveryAnswer(t *testing.T) {
 			fx := connectBackupFixture(t, func(_ context.Context, args []string, stderr io.Writer) ([]byte, error) {
 				return tc.run(args, stderr)
 			})
-			err := fx.manager.connectDrive(context.Background(), &backupConnectJob{State: "running"})
+			err := fx.manager.connectDrive(context.Background(), &connectJob{State: "running"})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("connectDrive = %v, want an error with %q", err, tc.want)
 			}
@@ -217,7 +217,7 @@ func TestBackupDisconnectHoldsOffWhatWouldUseTheLink(t *testing.T) {
 			case "a backup":
 				err = fx.manager.StartRun(nil, false, "manual", false)
 			case "a restore":
-				_, err = fx.manager.Restore(BackupRestoreRequest{Brain: "notes", Target: target}, func(s string) (string, error) { return s, nil })
+				_, err = fx.manager.Restore(RestoreRequest{Brain: "notes", Target: target}, func(s string) (string, error) { return s, nil })
 			case "a sign-in":
 				err = fx.manager.Connect()
 			case "another disconnect":
@@ -268,7 +268,7 @@ func TestBackupDisconnectKeepsASignInThatDidNotStop(t *testing.T) {
 		t.Errorf("disconnect = %v, want sign-in timeout", err)
 	}
 	var st struct {
-		Connect *backupConnectJob `json:"connect"`
+		Connect *connectJob `json:"connect"`
 	}
 	_ = json.Unmarshal(mustBackupJSON(t, fx.manager.Status()), &st)
 	if st.Connect == nil || st.Connect.State != "running" {
