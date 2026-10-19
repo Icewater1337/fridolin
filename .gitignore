@@ -49,3 +49,5 @@ venv/
 !internal/prompt/
 
 !internal/claudecli/
+
+!internal/sandbox/

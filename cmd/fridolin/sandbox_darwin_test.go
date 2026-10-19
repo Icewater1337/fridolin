@@ -16,13 +16,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/config"
-
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/sandbox"
 	"github.com/Icewater1337/fridolin/internal/store"
 
-	"github.com/Icewater1337/fridolin/internal/fsx"
 	mediafiles "github.com/Icewater1337/fridolin/internal/media"
 )
 
@@ -31,15 +31,15 @@ import (
 
 func requireSandboxExec(t *testing.T) {
 	t.Helper()
-	if _, err := os.Stat(sandboxExecPath); err != nil {
-		t.Skipf("%s not available: %v", sandboxExecPath, err)
+	if _, err := os.Stat(sandbox.ExecPath); err != nil {
+		t.Skipf("%s not available: %v", sandbox.ExecPath, err)
 	}
 	// Inside another sandbox (go test run from a sandboxed tool) sandbox-exec
 	// cannot apply any profile and fails with "Operation not permitted", the
 	// same words as a denied access: a test that only expects denials would
 	// pass without testing anything.
-	if out, err := exec.Command(sandboxExecPath, "-p", "(version 1)(allow default)", "/usr/bin/true").CombinedOutput(); err != nil {
-		t.Skipf("%s cannot apply a profile here: %v: %s", sandboxExecPath, err, out)
+	if out, err := exec.Command(sandbox.ExecPath, "-p", "(version 1)(allow default)", "/usr/bin/true").CombinedOutput(); err != nil {
+		t.Skipf("%s cannot apply a profile here: %v: %s", sandbox.ExecPath, err, out)
 	}
 }
 
@@ -1700,7 +1700,7 @@ func sandboxStateEnv(t *testing.T, sp *SandboxProfiler, id string) []string {
 // sandboxState is prepareBrainState for brain id with sp's settings.
 func sandboxState(sp *SandboxProfiler, id string) ([]string, error) {
 	sp.mu.RLock()
-	data, media, inherit := sp.dataDir, sp.mediaDir, sp.inheritUser
+	data, media, inherit := sp.DataDir, sp.MediaDir, sp.InheritUser
 	sp.mu.RUnlock()
 	return prepareBrainState(data, media, id, inherit)
 }

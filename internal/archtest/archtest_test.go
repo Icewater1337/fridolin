@@ -24,7 +24,7 @@ import (
 // edge is a change to this table, made and reviewed in the same pull
 // request. Imports from outside the module are not checked here.
 var imports = map[string][]string{
-	"cmd/fridolin":       {"examples", "internal/claudecli", "internal/prompt", "internal/apperr", "internal/access", "internal/activity", "internal/chat", "internal/config", "internal/devchat", "internal/fsx", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/manifest", "internal/media", "internal/otp", "internal/outbound", "internal/platform", "internal/registry", "internal/route", "internal/store", "internal/textx", "internal/trigger", "internal/version", "internal/whatsapp", "site", "web"},
+	"cmd/fridolin":       {"examples", "internal/apperr", "internal/access", "internal/activity", "internal/chat", "internal/claudecli", "internal/config", "internal/devchat", "internal/fsx", "internal/history", "internal/httpapi", "internal/jsonx", "internal/logx", "internal/manifest", "internal/media", "internal/otp", "internal/outbound", "internal/platform", "internal/prompt", "internal/registry", "internal/route", "internal/sandbox", "internal/store", "internal/textx", "internal/trigger", "internal/version", "internal/whatsapp", "site", "web"},
 	"examples":           nil,
 	"internal/access":    {"internal/chat", "internal/trigger"},
 	"internal/activity":  {"internal/history", "internal/textx"},
@@ -45,6 +45,7 @@ var imports = map[string][]string{
 	"internal/registry":  {"internal/apperr", "internal/config", "internal/fsx", "internal/manifest", "internal/route"},
 	"internal/outbound":  {"internal/store", "internal/textx"},
 	"internal/route":     {"internal/fsx", "internal/manifest"},
+	"internal/sandbox":   {"internal/fsx", "internal/textx"},
 	"internal/store":     {"internal/fsx", "internal/logx"},
 	"internal/textx":     nil,
 	"internal/trigger":   nil,

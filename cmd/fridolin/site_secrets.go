@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/sandbox"
 )
 
 var (
@@ -182,7 +183,7 @@ func (m *SiteManager) Secrets() ([]SiteModuleSecrets, error) {
 
 // secretsFor is what the live site is handed when it starts: for each module,
 // the values of the secrets its module.json declares and that are set.
-func (m *SiteManager) secretsFor(mods []siteModuleCaps) ([]byte, error) {
+func (m *SiteManager) secretsFor(mods []sandbox.SiteModule) ([]byte, error) {
 	m.secretsMu.Lock()
 	defer m.secretsMu.Unlock()
 	out := map[string]map[string]string{}

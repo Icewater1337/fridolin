@@ -16,6 +16,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/sandbox"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
@@ -33,7 +34,7 @@ func TestSandboxFailsClosed(t *testing.T) {
 			sp.execPath = filepath.Join(home, "no-sandbox-exec")
 		}},
 		{"path that cannot be quoted", func(sp *SandboxProfiler, home string) {
-			sp.extraDeny = append(sp.extraDeny, filepath.Join(home, "two\nlines"))
+			sp.ExtraDeny = append(sp.ExtraDeny, filepath.Join(home, "two\nlines"))
 		}},
 	}
 	for _, tc := range cases {
@@ -686,7 +687,7 @@ func browserProfileRules(home string, both func(filter, p string) []string) []st
 		out = append(out, both("subpath", home+"/Library/Application Support/"+b)...)
 	}
 	// The profile's strings escape a backslash, as the regex's \. needs.
-	prefixes := strings.ReplaceAll("^"+regexp.QuoteMeta(home+"/Library/Application Support")+browserProfilePattern(), `\`, `\\`)
+	prefixes := strings.ReplaceAll("^"+regexp.QuoteMeta(home+"/Library/Application Support")+sandbox.BrowserProfilePattern(), `\`, `\\`)
 	out = append(out, both("regex", prefixes)...)
 	return append(out, both("subpath", home+"/Library/Safari")...)
 }
@@ -696,9 +697,9 @@ func browserProfileRules(home string, both func(filter, p string) []string) []st
 // with Go's; TestSandboxDeniesBrowserProfiles checks the real sandbox.
 func TestBrowserProfilesDenyEveryChannel(t *testing.T) {
 	const home = "/Users/you"
-	prefixes := regexp.MustCompile("^" + regexp.QuoteMeta(home+"/Library/Application Support") + browserProfilePattern())
+	prefixes := regexp.MustCompile("^" + regexp.QuoteMeta(home+"/Library/Application Support") + sandbox.BrowserProfilePattern())
 	denied := func(p string) bool {
-		for _, sub := range defaultDenySubpaths {
+		for _, sub := range sandbox.HomeReadDenies() {
 			if d := home + "/" + sub; p == d || strings.HasPrefix(p, d+"/") {
 				return true
 			}
@@ -879,75 +880,6 @@ func TestBridgeTellsTheSandboxItsConfigFile(t *testing.T) {
 	rule := `(deny file-read* (literal "` + tb.cfgs.Path() + `"))`
 	if profile := mustProfile(t, tb.brainMgr.profiler, "a"); !strings.Contains(profile, rule) {
 		t.Errorf("profile lacks %s", rule)
-	}
-}
-
-// TestGitConfigChain: every file of your git configuration is protected, so
-// the profile must find all of them. It used to read ~/.gitconfig only,
-// follow includes one level deep, resolve a relative include against HOME
-// rather than the including file's folder, and keep an inline comment in
-// the path ("path = extra ; comment" named the file "extra ; comment"), so
-// the real file was neither protected nor hidden. ~/.config/git/config
-// counts as well.
-func TestGitConfigChain(t *testing.T) {
-	home := fsx.Canonical(t.TempDir())
-	files := map[string]string{
-		".gitconfig": "[user]\n\tname = You\n" +
-			"[include]\n\tpath = .gitconfig-extra ; a comment\n" +
-			"[includeIf \"gitdir:~/work/\"]\n\tPath = \"~/work/git config\" # quoted, with a space\n" +
-			"[include] path = conf.d/inline\n" +
-			"[alias]\n\tpath = not-an-include\n",
-		".gitconfig-extra":   "[include]\n\tpath = nested/one\n",
-		"nested/one":         "[include]\n\tpath = two ; relative to nested/\n",
-		"nested/two":         "[include]\n\tpath = ../.gitconfig\n", // a cycle back to the start
-		"work/git config":    "",
-		"conf.d/inline":      "",
-		".config/git/config": "[include]\n\tpath = ~/xdg-extra\n",
-		"xdg-extra":          "",
-		"not-an-include":     "",
-	}
-	for name, content := range files {
-		writeTestFile(t, filepath.Join(home, name), content)
-	}
-	got := gitConfigChain(home)
-	want := []string{".gitconfig", ".gitconfig-extra", "nested/one", "nested/two", "work/git config", "conf.d/inline", ".config/git/config", "xdg-extra"}
-	for i, w := range want {
-		want[i] = filepath.Join(home, w)
-	}
-	if !slices.Equal(got, want) {
-		t.Errorf("gitConfigChain:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
-	}
-
-	t.Run("depth", func(t *testing.T) {
-		home := fsx.Canonical(t.TempDir())
-		writeTestFile(t, filepath.Join(home, ".gitconfig"), "[include]\npath = c1\n")
-		for i := 1; i <= maxGitIncludeDepth+3; i++ {
-			writeTestFile(t, filepath.Join(home, fmt.Sprintf("c%d", i)), fmt.Sprintf("[include]\npath = c%d\n", i+1))
-		}
-		if got := gitConfigChain(home); !slices.Contains(got, filepath.Join(home, fmt.Sprintf("c%d", maxGitIncludeDepth))) ||
-			slices.Contains(got, filepath.Join(home, fmt.Sprintf("c%d", maxGitIncludeDepth+2))) {
-			t.Errorf("gitConfigChain = %q, want includes followed %d levels deep", got, maxGitIncludeDepth)
-		}
-	})
-}
-
-// TestGitConfigValue reads values as git does.
-func TestGitConfigValue(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{" extra", "extra"},
-		{" extra ; comment", "extra"},
-		{" extra# comment", "extra"},
-		{` "with ; inside" ; comment`, "with ; inside"},
-		{` "~/a b"`, "~/a b"},
-		{` "  padded  "`, "  padded  "},
-		{` a\"b`, `a"b`},
-		{` a\\b`, `a\b`},
-		{" ;only a comment", ""},
-	}
-	for _, c := range cases {
-		if got := gitConfigValue(c.in); got != c.want {
-			t.Errorf("gitConfigValue(%q) = %q, want %q", c.in, got, c.want)
-		}
 	}
 }
 
@@ -1154,7 +1086,7 @@ func TestSandboxProfileWritesOnlyItsOwnPlaces(t *testing.T) {
 	for _, tc := range []struct{ inherit, plaud bool }{{false, false}, {true, false}, {false, true}} {
 		t.Run(fmt.Sprintf("inherit_claude_user_config=%v,plaud.brain_access=%v", tc.inherit, tc.plaud), func(t *testing.T) {
 			sp, home, own := precedenceFixture(t, tc.inherit)
-			sp.plaudShared = tc.plaud
+			sp.PlaudShared = tc.plaud
 			q := func(filter, p string) string { return `(allow file-write* (` + filter + ` "` + p + `"))` }
 			want := []string{
 				q("literal", "/dev/null"), q("literal", "/dev/zero"), q("literal", "/dev/dtracehelper"), q("subpath", "/dev/fd"),
