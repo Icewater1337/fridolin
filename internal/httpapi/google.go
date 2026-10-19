@@ -50,13 +50,14 @@ func (a *GoogleAPI) Callback(w http.ResponseWriter, r *http.Request) {
 
 func (a *GoogleAPI) Client(w http.ResponseWriter, r *http.Request) {
 	g := a.Google()
-	resp := map[string]any{"configured": false, "redirect_uri": g.RedirectURI()}
+	resp := GoogleClientResponse{Configured: false, RedirectURI: g.RedirectURI()}
 	if c := g.Client(); c != nil {
 		hint := c.ClientID
 		if i := strings.Index(hint, "-"); i > 0 {
 			hint = hint[:i] + "-…"
 		}
-		resp["configured"], resp["type"], resp["client_id_hint"] = true, c.Type, hint
+		clientType := c.Type
+		resp.Configured, resp.Type, resp.ClientIDHint = true, &clientType, &hint
 	}
 	WriteJSON(w, http.StatusOK, resp)
 }
@@ -78,7 +79,7 @@ func (a *GoogleAPI) SetClient(w http.ResponseWriter, r *http.Request) {
 	if c.Type == "web" {
 		note = "This is a Web application client: add " + a.Google().RedirectURI() + " to its Authorized redirect URIs in Google Cloud Console, or create a Desktop app client instead."
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "saved", "type": c.Type, "note": note})
+	WriteJSON(w, http.StatusOK, GoogleClientSavedResponse{Status: "saved", Type: c.Type, Note: note})
 }
 
 func (a *GoogleAPI) DeleteClient(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +87,7 @@ func (a *GoogleAPI) DeleteClient(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "removed"})
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "removed"})
 }
 
 func (a *GoogleAPI) calendarBrain(w http.ResponseWriter, r *http.Request) *brain.Brain {
@@ -107,7 +108,7 @@ func (a *GoogleAPI) Connect(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusPreconditionFailed, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"auth_url": u})
+	WriteJSON(w, http.StatusOK, AuthURLResponse{AuthURL: u})
 }
 
 func (a *GoogleAPI) Status(w http.ResponseWriter, r *http.Request) {
@@ -139,7 +140,7 @@ func (a *GoogleAPI) Select(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "saved"})
 }
 
 // apiCalendarDisconnect ends a brain's calendar access. ?local_only=1
@@ -161,5 +162,5 @@ func (a *GoogleAPI) Disconnect(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"status": "disconnected", "revoked": revoked, "note": note})
+	WriteJSON(w, http.StatusOK, CalendarDisconnectedResponse{Status: "disconnected", Revoked: revoked, Note: note})
 }

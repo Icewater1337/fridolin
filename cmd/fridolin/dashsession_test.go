@@ -49,7 +49,7 @@ func withSession(s *signIn) func(*http.Request) {
 	return func(r *http.Request) {
 		r.Header.Del("X-Bridge-Token")
 		r.AddCookie(s.cookie)
-		r.Header.Set(sessionHeader, s.binding)
+		r.Header.Set(httpapi.SessionHeader, s.binding)
 	}
 }
 
@@ -57,7 +57,13 @@ func withSession(s *signIn) func(*http.Request) {
 // cookie that scripts on the page cannot read; the code works once.
 func TestDashboardSignIn(t *testing.T) {
 	tb := newTestBridge(t, "")
-	code, _ := tb.sessions.newCode()
+	now := time.Now
+	var err error
+	tb.sessions, err = httpapi.LoadDashboardSessions(tb.cfgs.Get().DataDir, func() time.Time { return now() })
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _ := tb.sessions.NewCode()
 
 	w := tb.login(map[string]string{"code": code})
 	c := sessionOf(w)
@@ -104,7 +110,7 @@ func TestDashboardSignIn(t *testing.T) {
 
 	// A request with the token and a code signs in with the token and
 	// leaves the code for the link it came from.
-	spare, _ := tb.sessions.newCode()
+	spare, _ := tb.sessions.NewCode()
 	if w := tb.login(map[string]string{"token": tb.token.Value(), "code": spare}); w.Code != 200 {
 		t.Fatalf("the token and a code: %d %s", w.Code, w.Body.String())
 	}
@@ -113,13 +119,13 @@ func TestDashboardSignIn(t *testing.T) {
 	}
 
 	// A code that waited too long is refused.
-	late, _ := tb.sessions.newCode()
-	tb.sessions.now = func() time.Time { return time.Now().Add(loginCodeLifetime + time.Second) }
+	late, _ := tb.sessions.NewCode()
+	now = func() time.Time { return time.Now().Add(httpapi.LoginCodeLifetime + time.Second) }
 	if w := tb.login(map[string]string{"code": late}); w.Code != 401 {
 		t.Errorf("an expired code: %d", w.Code)
 	}
 	// And so is a session past its lifetime.
-	tb.sessions.now = func() time.Time { return time.Now().Add(sessionLifetime + time.Hour) }
+	now = func() time.Time { return time.Now().Add(httpapi.SessionLifetime + time.Hour) }
 	if w := tb.do("GET", "/api/status", nil, withSession(c)); w.Code != 401 {
 		t.Errorf("an ended session: %d", w.Code)
 	}
@@ -142,7 +148,7 @@ func TestSignInAgainReplacesTheSession(t *testing.T) {
 	if w := tb.do("GET", "/api/status", nil, withSession(first)); w.Code != 200 {
 		t.Fatalf("a refused sign-in ended the session: %d", w.Code)
 	}
-	code, _ := tb.sessions.newCode()
+	code, _ := tb.sessions.NewCode()
 	second := sessionOf(tb.login(map[string]string{"code": code}, withCookie(first)))
 	if second == nil {
 		t.Fatal("no new session")
@@ -202,7 +208,7 @@ func TestSessionNeedsCookieAndBinding(t *testing.T) {
 						r.AddCookie(c.cookie)
 					}
 					if c.binding != "" {
-						r.Header.Set(sessionHeader, c.binding)
+						r.Header.Set(httpapi.SessionHeader, c.binding)
 					}
 				})
 				if w.Code != c.want {
@@ -232,11 +238,11 @@ func TestDashboardSessionsLastAndEnd(t *testing.T) {
 	if st, _ := os.Stat(file); st.Mode().Perm() != 0o600 {
 		t.Errorf("sessions file mode %v", st.Mode().Perm())
 	}
-	again, err := loadDashSessions(tb.cfgs.Get().DataDir)
-	if err != nil || !again.valid(a.cookie.Value, a.binding) || !again.valid(b.cookie.Value, b.binding) {
+	again, err := httpapi.LoadDashboardSessions(tb.cfgs.Get().DataDir, time.Now)
+	if err != nil || !again.Valid(a.cookie.Value, a.binding) || !again.Valid(b.cookie.Value, b.binding) {
 		t.Fatalf("after a restart the sessions are gone (%v)", err)
 	}
-	if again.valid(a.cookie.Value, "") || again.valid(a.cookie.Value, b.binding) {
+	if again.Valid(a.cookie.Value, "") || again.Valid(a.cookie.Value, b.binding) {
 		t.Fatal("after a restart a session signs in without its binding")
 	}
 
@@ -282,7 +288,7 @@ func TestDashboardSessionsLastAndEnd(t *testing.T) {
 // session, which would only sit in the sessions file for a month.
 func TestRotateForgetsLoginCodes(t *testing.T) {
 	tb := newTestBridge(t, "")
-	code, _ := tb.sessions.newCode()
+	code, _ := tb.sessions.NewCode()
 	w := tb.do("POST", "/api/token/rotate", nil)
 	if w.Code != 200 {
 		t.Fatalf("rotate: %d", w.Code)
@@ -290,7 +296,17 @@ func TestRotateForgetsLoginCodes(t *testing.T) {
 	if s := sessionOf(w); s != nil || strings.Contains(w.Body.String(), "binding") {
 		t.Errorf("rotating with the token started a session: %v %s", s, w.Body.String())
 	}
-	if n := len(tb.sessions.sessions); n != 0 {
+	data, err := os.ReadFile(filepath.Join(tb.cfgs.Get().DataDir, "dashboard-sessions.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var persisted struct {
+		Sessions []json.RawMessage `json:"sessions"`
+	}
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(persisted.Sessions); n != 0 {
 		t.Errorf("%d sessions after rotating with the token, want 0", n)
 	}
 	if w := tb.login(map[string]string{"code": code}); w.Code != 401 {
@@ -381,7 +397,7 @@ func TestOpenAsksForALoginCode(t *testing.T) {
 	if url := httpapi.LoginURL(listen, code); strings.Contains(url, tb.token.Value()) || !strings.HasSuffix(url, "/#login="+code) {
 		t.Errorf("url %q", url)
 	}
-	if !tb.sessions.useCode(code) {
+	if !tb.sessions.UseCode(code) {
 		t.Error("the code does not sign in")
 	}
 	if _, err := askLoginCode(listen, "wrong"); err == nil || !strings.Contains(err.Error(), "refused") {
@@ -509,8 +525,8 @@ func TestRotateTokenCommand(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			sessions, _ := loadDashSessions(dataDir)
-			id, binding, _, _ := sessions.create()
+			sessions, _ := httpapi.LoadDashboardSessions(dataDir, time.Now)
+			id, binding, _, _ := sessions.Create()
 			cfg := &config.Config{DataDir: dataDir, HTTPListen: closedPort(t)}
 			cfg.Dashboard.Disabled = c.off
 			if err := rotateToken(cfg); err != nil {
@@ -520,7 +536,7 @@ func TestRotateTokenCommand(t *testing.T) {
 			if err != nil || after.Value() == tok.Value() {
 				t.Errorf("token %q → %q (%v)", tok.Value(), after.Value(), err)
 			}
-			if again, _ := loadDashSessions(dataDir); again.valid(id, binding) {
+			if again, _ := httpapi.LoadDashboardSessions(dataDir, time.Now); again.Valid(id, binding) {
 				t.Error("a session survived the rotation")
 			}
 		})

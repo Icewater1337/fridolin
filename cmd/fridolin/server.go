@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"net/http"
+
 	"slices"
 	"strings"
 	"time"
@@ -14,18 +14,11 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/route"
 
-	"github.com/Icewater1337/fridolin/internal/httpapi"
-
 	"go.mau.fi/whatsmeow/types"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
-	"github.com/Icewater1337/fridolin/internal/version"
 )
-
-func (b *Bridge) httpReady(w http.ResponseWriter, r *http.Request) {
-	httpapi.ReadyAPI{Connection: b.wa, DevMode: b.dev != nil, Version: version.String, StartedAt: b.started}.ServeHTTP(w, r)
-}
 
 // maySend refuses a /send that who may not make: a brain may send only to
 // its own chats (see brainChat), a caller without a token only to the

@@ -16,13 +16,6 @@ type BuildChatAPI struct {
 	StopCurrent func(*brain.Brain) bool
 }
 
-func (a *BuildChatAPI) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /api/site/build/{id}", a.Chat)
-	mux.HandleFunc("POST /api/site/build/{id}", a.Send)
-	mux.HandleFunc("POST /api/site/build/{id}/new", a.New)
-	mux.HandleFunc("POST /api/site/build/{id}/stop", a.Stop)
-}
-
 // buildBrain returns the builder brain a build request names.
 func (a *BuildChatAPI) buildBrain(w http.ResponseWriter, r *http.Request) *brain.Brain {
 	id := r.PathValue("id")
@@ -69,7 +62,7 @@ func (a *BuildChatAPI) Send(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusAccepted, OKResponse{Ok: true})
 }
 
 func (a *BuildChatAPI) New(w http.ResponseWriter, r *http.Request) {
@@ -81,7 +74,7 @@ func (a *BuildChatAPI) New(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{Ok: true})
 }
 
 func (a *BuildChatAPI) Stop(w http.ResponseWriter, r *http.Request) {
@@ -93,5 +86,5 @@ func (a *BuildChatAPI) Stop(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusConflict, "nothing is running in this chat")
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	WriteJSON(w, http.StatusOK, OKResponse{Ok: true})
 }

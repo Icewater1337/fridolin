@@ -41,7 +41,7 @@ func (a *PlaudAPI) Resend(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		WriteErr(w, http.StatusInternalServerError, err.Error())
 	default:
-		WriteJSON(w, http.StatusAccepted, map[string]string{"status": "waiting"})
+		WriteJSON(w, http.StatusAccepted, OperationResponse{Status: "waiting"})
 	}
 }
 
@@ -58,7 +58,7 @@ func (a *PlaudAPI) Connect(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		WriteErr(w, http.StatusInternalServerError, err.Error())
 	default:
-		WriteJSON(w, http.StatusAccepted, map[string]string{"status": "connecting"})
+		WriteJSON(w, http.StatusAccepted, OperationResponse{Status: "connecting"})
 	}
 }
 
@@ -67,7 +67,7 @@ func (a *PlaudAPI) Disconnect(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "disconnected"})
 }
 
 func (a *PlaudAPI) Settings(w http.ResponseWriter, r *http.Request) {
@@ -114,7 +114,7 @@ func (a *PlaudAPI) Settings(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "saved"})
 }
 
 func (a *PlaudAPI) Sync(w http.ResponseWriter, r *http.Request) {
@@ -131,8 +131,8 @@ func (a *PlaudAPI) Sync(w http.ResponseWriter, r *http.Request) {
 	case !started:
 		// A check that is already running covers this one; say so rather
 		// than claim to start one.
-		WriteJSON(w, http.StatusOK, map[string]string{"status": "already checking"})
+		WriteJSON(w, http.StatusOK, OperationResponse{Status: "already checking"})
 	default:
-		WriteJSON(w, http.StatusAccepted, map[string]string{"status": "syncing"})
+		WriteJSON(w, http.StatusAccepted, OperationResponse{Status: "syncing"})
 	}
 }

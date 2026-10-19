@@ -10,7 +10,6 @@ import (
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 
 	"github.com/Icewater1337/fridolin/internal/claudecli"
-
 	"github.com/Icewater1337/fridolin/internal/config"
 )
 

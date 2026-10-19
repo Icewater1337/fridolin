@@ -32,7 +32,7 @@ func (a *FilesystemAPI) Caps(w http.ResponseWriter, r *http.Request) {
 	if p := a.FolderPicker(home); p != nil {
 		picker = filepath.Base(p[0])
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"picker": picker, "home": home})
+	WriteJSON(w, http.StatusOK, PickerCapabilitiesResponse{Picker: picker, Home: home})
 }
 
 func (a *FilesystemAPI) Pick(w http.ResponseWriter, r *http.Request) {
@@ -51,11 +51,11 @@ func (a *FilesystemAPI) Pick(w http.ResponseWriter, r *http.Request) {
 	p, err := a.RunPicker(ctx, argv)
 	switch {
 	case errors.Is(err, a.PickerCancelled):
-		WriteJSON(w, http.StatusOK, map[string]any{"cancelled": true})
+		WriteJSON(w, http.StatusOK, PickerCancelledResponse{Cancelled: true})
 	case err != nil:
 		WriteErr(w, http.StatusInternalServerError, fmt.Sprintf("the folder dialog failed (%v) — browse or type the path instead", err))
 	default:
-		WriteJSON(w, http.StatusOK, map[string]any{"path": p})
+		WriteJSON(w, http.StatusOK, PickerPathResponse{Path: p})
 	}
 }
 
@@ -96,13 +96,8 @@ func (a *FilesystemAPI) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := fsx.Canonical(a.DataDir())
-	type entry struct {
-		Name    string `json:"name"`
-		Path    string `json:"path"`
-		IsBrain bool   `json:"is_brain"`
-		IsGit   bool   `json:"is_git"`
-	}
-	out := []entry{}
+
+	out := []DirectoryEntry{}
 	for _, e := range entries {
 		if !e.IsDir() && e.Type()&fs.ModeSymlink == 0 {
 			continue
@@ -125,14 +120,14 @@ func (a *FilesystemAPI) List(w http.ResponseWriter, r *http.Request) {
 		if st, err := root.Stat(child); err != nil || !st.IsDir() {
 			continue
 		}
-		out = append(out, entry{Name: e.Name(), Path: full, IsBrain: fileExistsInRoot(root, filepath.Join(resolved, manifest.File)), IsGit: fileExistsInRoot(root, filepath.Join(resolved, ".git"))})
+		out = append(out, DirectoryEntry{Name: e.Name(), Path: full, IsBrain: fileExistsInRoot(root, filepath.Join(resolved, manifest.File)), IsGit: fileExistsInRoot(root, filepath.Join(resolved, ".git"))})
 	}
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
 	parent := filepath.Dir(p)
 	if p == home {
 		parent = ""
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"path": p, "parent": parent, "home": home, "entries": out})
+	WriteJSON(w, http.StatusOK, DirectoryResponse{Path: p, Parent: parent, Home: home, Entries: out})
 }
 
 // fileExistsInRoot probes metadata only inside root. Resolve first so an

@@ -96,7 +96,7 @@ func (a *ChatsAPI) Allow(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_ = a.DismissIgnored(waiting, true)
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "allowed", "entry": entry})
+	WriteJSON(w, http.StatusOK, ChatAllowedResponse{Status: "allowed", Entry: entry})
 }
 
 // errNotListed means the entry to revoke is not on its allow list.
@@ -152,7 +152,7 @@ func (a *ChatsAPI) Revoke(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 	default:
-		WriteJSON(w, http.StatusOK, map[string]any{"status": "revoked", "removed": removed})
+		WriteJSON(w, http.StatusOK, ChatRevokedResponse{Status: "revoked", Removed: removed})
 	}
 }
 
@@ -207,7 +207,7 @@ func (a *ChatsAPI) Members(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"status": "saved", "members": members})
+	WriteJSON(w, http.StatusOK, ChatMembersResponse{Status: "saved", Members: members})
 }
 
 // revokeEntry splits list into what stays and what revoking sent removes.
@@ -251,5 +251,5 @@ func (a *ChatsAPI) Dismiss(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "dismissed"})
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "dismissed"})
 }

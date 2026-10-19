@@ -38,10 +38,7 @@ func (a *ConnectionAPI) QR(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"data_url":   "data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG()),
-		"created_at": st.QRAt,
-	})
+	WriteJSON(w, http.StatusOK, QRCodeResponse{DataURL: "data:image/png;base64," + base64.StdEncoding.EncodeToString(code.PNG()), CreatedAt: st.QRAt})
 }
 
 func (a *ConnectionAPI) Pair(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +46,7 @@ func (a *ConnectionAPI) Pair(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusConflict, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]string{"status": "pairing"})
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "pairing"})
 }
 
 // apiGroups answers GET /api/whatsapp/groups with the groups the account
@@ -103,5 +100,5 @@ func (a *ConnectionAPI) StopRun(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]bool{"stopped": br.StopCurrent(req.ClearQueue)})
+	WriteJSON(w, http.StatusOK, RunStoppedResponse{Stopped: br.StopCurrent(req.ClearQueue)})
 }
