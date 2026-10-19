@@ -31,6 +31,8 @@
 #
 # A line containing "personal-data:ignore" is exempt from the generic patterns
 # (never from the denylist). Use it for documented placeholders only.
+# THIRD_PARTY_NOTICES at the top of the repository is exempt from the email
+# pattern alone: the licence texts it quotes name their authors by address.
 #
 # Exit status: 0 clean, 1 findings, 2 usage or git error.
 
@@ -145,9 +147,17 @@ awk -F'\t' '{ t = $0; sub(/^[^\t]*\t/, "", t) }
              $1 ~ /go\.sum(:|$)/ || t ~ /personal-data:ignore/ { print ""; next }
              { print t }' "$scan" >"$work/text.txt"
 
-# generic ERE [ALLOW-ERE] — prints "location<TAB>match" for matches not allowed.
+# THIRD_PARTY_NOTICES holds the licences of the modules the binary links,
+# word for word (scripts/third-party-notices.sh), and some of them name
+# their authors by email address. The email pattern skips it; every other
+# pattern and the denylist still read it.
+paste "$work/loc.txt" "$work/text.txt" |
+  awk -F'\t' '$1 ~ /(^|:)THIRD_PARTY_NOTICES(:|$)/ { print ""; next } { t = $0; sub(/^[^\t]*\t/, "", t); print t }' >"$work/text-emails.txt"
+
+# generic ERE [ALLOW-ERE [TEXT]] — prints "location<TAB>match" for matches
+# not allowed, in TEXT (default: every scanned line but those blanked above).
 generic() {
-  { grep -noE -- "$1" "$work/text.txt" || true; } |
+  { grep -noE -- "$1" "${3:-$work/text.txt}" || true; } |
   ALLOW="${2:-}" awk -F: 'BEGIN { allow = ENVIRON["ALLOW"] } NR == FNR { loc[FNR] = $0; next }
        { n = $1; m = substr($0, length(n) + 2); if (allow != "" && m ~ allow) next; print loc[n] "\t" m }' \
       "$work/loc.txt" - | sort -u
@@ -166,7 +176,7 @@ show 'WhatsApp JIDs' < <(generic '[0-9]{6,}(-[0-9]+)?@(g\.us|s\.whatsapp\.net|li
 # Phone numbers: international format, or a long digit run in a JSON string.
 show 'Phone numbers' < <(generic '(\+[1-9][0-9 ]{9,16}[0-9]|"[1-9][0-9]{10,14}")' '^"?\+?1[ -]?555[ -]?(123[ -]?4567|987[ -]?6543)"?$')
 show 'Email addresses' < <(generic '[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}' \
-        '(@example\.(com|org|net)$|@users\.noreply\.github\.com$|^noreply@anthropic\.com$|^git@github\.com$|@(g\.us|s\.whatsapp\.net|lid)$)')
+        '(@example\.(com|org|net)$|@users\.noreply\.github\.com$|^noreply@anthropic\.com$|^git@github\.com$|@(g\.us|s\.whatsapp\.net|lid)$)' "$work/text-emails.txt")
 show 'Home-directory paths' < <(generic '/(Users|home)/[^/[:space:]"'"'"'`)]+' '^/(Users|home)/(you|user|USERNAME|runner|<[^>]*>|\$USER|\$\{USER\})$')
 show 'Tokens and keys' < <(generic '(sk-ant-[A-Za-z0-9_-]{8,}|glpat-[A-Za-z0-9_.-]{8,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AIza[0-9A-Za-z_-]{30,}|ya29\.[0-9A-Za-z_-]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[0-9A-Za-z-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|"refresh_token" *: *"[^"]{8,})')
 

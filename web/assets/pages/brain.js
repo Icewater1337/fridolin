@@ -10,7 +10,7 @@ import { calendarCard } from '../components/calendar.js';
 import { h, mount, paint } from '../lib/dom.js';
 import { fmtDuration, plural, prettyJSON } from '../lib/format.js';
 import { phoneish, isGroupJid } from '../lib/jid.js';
-import { OBSERVE, issueLabel } from '../lib/brain.js';
+import { OBSERVE, issueLabel, brainLabel, takeover } from '../lib/brain.js';
 import { sortKeys, fieldDiff, lineDiff } from '../lib/diff.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
@@ -329,6 +329,25 @@ export default {
       return { el: form, value, bar };
     }
 
+    // Which brain answers this brain's chats once it is gone (see
+    // takeover), from the list as the page has it when the dialog opens.
+    // Removing the DM brain, or a fallback brain that answers the DMs no
+    // brain handles, hands your direct messages to that brain: it warns.
+    function removalNotes() {
+      const stops = 'The bridge stops sending messages to this brain. ';
+      if (!brains) return h('p', stops, 'Its chats go to the fallback brain, if another brain is left.');
+      const { brain: next, dms, copy } = takeover(brains, id);
+      if (copy) return h('p', stops, 'Another folder with this id stays in the list, ', mono(next.path), ': it takes this brain’s place, for the chats its own brain.json names.');
+      if (!next) return h('p', stops, 'No other brain takes its chats over, so they go unanswered until you add one.');
+      const name = h('strong', brainLabel(next));
+      return [
+        brains.some((b) => b.id === id && b.fallback)
+          ? h('p', stops, 'It is the fallback brain, so its chats and those no other brain claims go to ', name, ', which becomes the fallback.')
+          : h('p', stops, 'Its chats go to the fallback brain, ', name, '.'),
+        dms ? callout('warn', null, `${brainLabel(next)} will also answer your direct messages, since no other brain handles them. To give them to another brain, turn on “Handles direct messages” there first.`) : null,
+      ];
+    }
+
     function renderDanger() {
       return h('section.section.danger-zone',
         h('h2.section-title', 'Remove'),
@@ -340,7 +359,7 @@ export default {
               const ok = await confirmDialog({
                 title: `Remove ${brain ? brain.name || id : id}?`,
                 message: h('div',
-                  h('p', 'The bridge stops sending messages to this brain. Its chats fall back to the default brain, if there is one.'),
+                  removalNotes(),
                   h('p', h('strong', 'Nothing is deleted: '), 'the folder ', mono(brain ? brain.path : ''), ' and its files, memory and history stay where they are.')),
                 confirm: 'Remove brain',
                 danger: true,

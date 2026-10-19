@@ -141,6 +141,7 @@ stage() {
   cases=$((cases + 1))
   staged="$work/staged-$cases"
   new_repo "$staged"
+  mkdir -p "$(dirname "$staged/$1")"
   printf '%s\n' "$2" >"$staged/$1"
   git -C "$staged" add "$1"
 }
@@ -180,6 +181,25 @@ for planted in \
     *) printf 'ok    --staged does not print %s whole\n' "$name" ;;
   esac
 done
+
+# THIRD_PARTY_NOTICES quotes the licences of the modules the binary links
+# word for word, and some name their authors by email address: the email
+# pattern alone skips that file, at the top of the repository only.
+author="$(printf '%s' "Jane Doe <jane.doe#@company.test>" | tr -d '#')"
+stage THIRD_PARTY_NOTICES "Copyright (c) 2016 $author"
+expect "--staged lets THIRD_PARTY_NOTICES name a licence's author" 0 "$staged" --staged
+stage THIRD_PARTY_NOTICES "$(printf '%s' "built in /Use#rs/jane" | tr -d '#')"
+expect "--staged still catches a home path in THIRD_PARTY_NOTICES" 1 "$staged" --staged
+stage THIRD_PARTY_NOTICES "call $secret tomorrow"
+expect "--staged still reads THIRD_PARTY_NOTICES for the denylist" 1 "$staged" --staged
+stage docs/THIRD_PARTY_NOTICES "Copyright (c) 2016 $author"
+expect "--staged catches an address in a THIRD_PARTY_NOTICES elsewhere" 1 "$staged" --staged
+stage NOTICES.txt "Copyright (c) 2016 $author"
+expect "--staged catches an address in another notices file" 1 "$staged" --staged
+notices_repo="$work/notices-repo"
+new_repo "$notices_repo"
+commit "$notices_repo" THIRD_PARTY_NOTICES "Copyright (c) 2016 $author" >/dev/null
+expect "--all-history lets THIRD_PARTY_NOTICES name a licence's author" 0 "$notices_repo" --all-history
 
 # The denylist's place from before the rename is still read, and named.
 old_place="$HOME/.config/whatsapp-claude-bridge/personal-denylist"

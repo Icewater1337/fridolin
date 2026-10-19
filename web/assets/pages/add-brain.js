@@ -5,7 +5,7 @@ import { folderBrowser } from '../components/folder-browser.js';
 import { routingEditor } from '../components/routing-editor.js';
 import { h, mount } from '../lib/dom.js';
 import { prettyJSON } from '../lib/format.js';
-import { routingSummary, slugify, BRAIN_ID_RE, DEFAULT_BACKUP_EXCLUDES } from '../lib/brain.js';
+import { routingSummary, hasDMBrain, slugify, BRAIN_ID_RE, DEFAULT_BACKUP_EXCLUDES } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { toast, toastError } from '../components/toast.js';
 import { btn, runBusy } from '../components/buttons.js';
@@ -293,15 +293,28 @@ export default {
       configure = null;
       paintStepper();
       const m = useExisting ? r.manifest : manifest;
-      const quiet = m && m.routing && !m.routing.handles_dms && !m.routing.default && !(m.routing.groups || []).length;
+      const name = (m && m.name) || res.id;
+      // The first brain, or one added while no other runs, is the fallback
+      // brain whatever its brain.json says: it gets the chats no brain
+      // claims. Only the bridge knows (/api/brains marks it), and without
+      // its answer the page says neither that nor that no chat comes.
+      const brains = await get('/api/brains').catch(() => null);
+      const fallback = Array.isArray(brains) && brains.some((b) => b.fallback && b.id === res.id);
+      const quiet = Array.isArray(brains) && !fallback && m && m.routing && !m.routing.handles_dms && !m.routing.default && !(m.routing.groups || []).length;
+      const isDefault = !!(m && m.routing && m.routing.default);
       mount(body, h('div.card.wizard-card.done-card',
         h('div.done-icon', icon('check')),
-        h('h2', `${(m && m.name) || res.id} is ready`),
+        h('h2', `${name} is ready`),
         h('p', 'The brain is registered and will answer from ', mono(res.path), '.'),
         (res.created || []).length ? h('div',
           h('p.muted', 'Created:'),
           h('ul.created-list', res.created.map((c) => h('li', mono(c))))) : h('p.muted', 'No files were created — the folder already had everything.'),
         quiet ? callout('warn', 'No chats yet', 'This brain does not answer any chat yet. Give it direct messages or groups on its page.') : null,
+        fallback ? callout('info', 'The fallback brain',
+          `${name} answers the allowed groups no other brain claims`,
+          hasDMBrain(brains) ? '. ' : ', and your direct messages too, since no brain handles them. ',
+          isDefault ? '' : 'To hand them to another brain, turn on “Default for unassigned chats” there. ',
+          'See The fallback brain in docs/BRAINS.md.') : null,
         callout('info', 'Next: tell it who it is', 'Edit ', h('code.mono', (m && m.prompt_file) || 'brain-prompt.md'), ' in the folder. It is the brain’s instructions — who it works for, what it does, how it should answer.'),
         h('div.actions',
           btn('Open the brain', { kind: 'primary', href: `#/brains/${encodeURIComponent(res.id)}`, icon: 'right' }),

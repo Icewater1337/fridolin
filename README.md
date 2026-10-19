@@ -160,7 +160,10 @@ Then, in the dashboard:
    pairing is stored, so this is a one-time step.
 2. **Add a brain.** Choose a folder (an empty one, or one you already keep
    notes in). The bridge writes a `brain.json` and a starter prompt into it and
-   never overwrites existing files. Decide whether it answers your DMs.
+   never overwrites existing files. Decide whether it answers your DMs. The
+   first brain is also the [fallback brain](docs/BRAINS.md#the-fallback-brain)
+   until you mark another one default: it answers the groups no other brain
+   claims, and your DMs as well while no brain handles them.
 3. **Allow your number** under *Chats → Allowed numbers*, then DM the bridge.
 4. **Optional:** *Backup → Connect Google Drive*.
 
@@ -428,7 +431,7 @@ and Debian's Python refuse a plain `pip install` (PEP 668). Keep it out of
 
 ```bash
 python3 -m venv ~/.local/share/fridolin/venv
-~/.local/share/fridolin/venv/bin/pip install -r tools/requirements-transcription.txt   # local: private, ~1.5 GB model
+~/.local/share/fridolin/venv/bin/pip install -r tools/requirements-transcription.txt   # local, ~1.5 GB model
 ~/.local/share/fridolin/venv/bin/pip install groq && export GROQ_API_KEY=...           # API: light, needs a key
 ```
 
@@ -438,8 +441,11 @@ script's own metadata lists them, into uv's cache.
 
 Brains get `GROQ_API_KEY` from the bridge's process environment, and only
 when [`child_env_passthrough`](docs/CONFIGURATION.md#child_env_passthrough)
-names it: `"child_env_passthrough": ["GROQ_API_KEY"]`. The bridge reads no
-`.env` file. [Environment
+names it: `"child_env_passthrough": ["GROQ_API_KEY"]`. The local engine
+keeps the audio on your computer, but once a brain has the key, the
+default engine (`--engine auto`) sends it to Groq whenever the local model
+is not installed or fails ([PRIVACY.md](PRIVACY.md#who-else-gets-data)).
+The bridge reads no `.env` file. [Environment
 variables](docs/CONFIGURATION.md#environment-variables) says where to keep it
 so that the next install does not drop it.
 
@@ -554,8 +560,10 @@ Linux, `journalctl --user -u fridolin -f`.
 
 Each version tag (`v1.2.3`) builds archives for macOS (arm64, amd64) and Linux
 (amd64, arm64) on the project's GitHub releases page, with a `SHA256SUMS`
-file. To run one without building it yourself, download the archive for your
-machine and `SHA256SUMS`, then:
+file. Each holds the binary, `tools/`, `README.md`, `LICENSE` and
+`THIRD_PARTY_NOTICES` (see [License](#license)). To run one without
+building it yourself, download the archive for your machine and
+`SHA256SUMS`, then:
 
 ```bash
 shasum -a 256 -c SHA256SUMS --ignore-missing     # Linux: sha256sum -c --ignore-missing SHA256SUMS
@@ -577,9 +585,14 @@ releases by pushing a tag: `git tag v1.2.3 && git push origin v1.2.3`.
 
 ## Security
 
-The bridge runs Claude Code with `--dangerously-skip-permissions`, because
-nobody is at the keyboard to approve tool calls. The assistant can read and
-write files and run commands without asking.
+The bridge runs Claude Code with `--dangerously-skip-permissions`
+(`dangerously_skip_permissions`, on in new configs), because nobody is at
+the keyboard to approve tool calls. The assistant can read and write files
+and run commands without asking. Turned off, Claude Code refuses every tool
+that would need approval, so a brain can still read and search its files
+and answer, but cannot run a command, change a file or fetch a web page
+([details](docs/CONFIGURATION.md#dangerously_skip_permissions)). The macOS
+sandbox below limits what a run can reach either way.
 
 That means **anyone who can message the bridge can influence what it does on
 your machine**, and so can text inside any file they send it. Treat it that way.
@@ -588,14 +601,20 @@ What the bridge does about it:
 
 - **DM allowlist.** Only numbers in `allowed_numbers` are answered; an empty
   list answers nobody unless you set `allow_any_dm` to `true`.
-- **Group allowlist, per member.** Groups are deny-by-default: unlisted
-  groups are ignored entirely. In an allowed group only the members
-  `group_members` admits are read: the numbers it lists for that group, or
-  everyone for `["*"]`, and without an entry whoever may DM the bridge
-  (`allowed_numbers`). Anyone else can neither start a run nor stop one, and
-  what they write is not read, not even into the brain's history, unless an
-  admitted member quotes or forwards it. A member WhatsApp names only by an
-  internal ID, without their number, gets in only where everyone does
+- **Group allowlist, per member.** Groups are deny-by-default: what an
+  unlisted group says reaches no brain and is not kept. The bridge does
+  note the chat for *Chats → Waiting for access*, as it does a number that
+  is not allowed: the chat's JID and, for a group, its name, the sender's
+  number and WhatsApp name, and how many messages came when. That stays in
+  its database until you allow the chat on the Chats page (*Dismiss* only
+  hides it), and its log names the chat, a group's name and the sender's
+  number. In an allowed group only the members `group_members` admits are
+  read: the numbers it lists for that group, or everyone for `["*"]`, and
+  without an entry whoever may DM the bridge (`allowed_numbers`). Anyone
+  else can neither start a run nor stop one, and what they write is not
+  read, not even into the brain's history, unless an admitted member
+  quotes or forwards it. A member WhatsApp names only by an internal ID,
+  without their number, gets in only where everyone does
   ([details](docs/CONFIGURATION.md#group_members)).
 - **No Status or channels.** WhatsApp Status updates and channels are ignored,
   and the bridge refuses to send to Status, broadcast lists or channels, so
@@ -865,10 +884,11 @@ Overview shows it too, with the brains it affects.
 
 ## Contributing
 
-Issues and pull requests welcome. Please don't include real phone numbers,
-group JIDs, or chat content in bug reports — redact them. The issue forms ask
-for `fridolin version`, your OS and a redacted `fridolin check`, and the pull
-request template has a short checklist.
+Issues and pull requests welcome; a security problem goes privately
+through [SECURITY.md](SECURITY.md) instead. Please don't include real
+phone numbers, group JIDs, or chat content in bug reports — redact them.
+The issue forms ask for `fridolin version`, your OS and a redacted
+`fridolin check`, and the pull request template has a short checklist.
 
 Run `scripts/install-hooks.sh` once: it blocks commits and pushes that contain
 phone numbers, WhatsApp JIDs, email addresses, home-directory paths or tokens,
@@ -879,8 +899,9 @@ your name, your numbers, your company). CI runs the same check.
 `make check` runs what CI's build, lint and test jobs run: gofmt, `go vet`,
 `go mod tidy -diff`, the race tests, staticcheck, shellcheck, ruff,
 actionlint, a check that every workflow action is pinned to a commit SHA,
-ESLint on the dashboard, the Python, dashboard, personal-data-check,
-action-pin-check and Makefile tests, and a smoke test that starts a
+a check that `THIRD_PARTY_NOTICES` is current, ESLint on the dashboard,
+the Python, dashboard, personal-data-check, action-pin-check, notices,
+release-archive and Makefile tests, and a smoke test that starts a
 race-enabled build in dev mode on a scratch config (`make help` lists every
 target). staticcheck and actionlint run through `go run` at pinned
 versions, and ESLint through `npx` at a pinned version, which it fetches
@@ -908,7 +929,23 @@ messages, model output, files a brain writes) for 20 seconds each;
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Privacy: [PRIVACY.md](PRIVACY.md).
+Fridolin's source code is MIT — see [LICENSE](LICENSE). A binary built
+from it also contains the Go modules it links, among them whatsmeow and
+go.mau.fi/util under MPL-2.0 and go.mau.fi/libsignal under GPL-3.0, so a
+binary, such as the one in a release archive, may be distributed only
+under the terms of GPL-3.0 as a whole; the source stays MIT, which both
+allow combining with. [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) lists
+every module the binary links with its licence, and their licence texts;
+each release archive carries it next to LICENSE. The Corresponding Source
+of a release binary is that release's tag of this repository, which its
+release page also offers as *Source code*, with the module versions the
+notices list, which `go mod download` fetches from the Go module proxy or
+from the modules' own repositories. After changing dependencies, `make
+notices` writes the file again: `make check` and CI fail while it is out
+of date, and so does the release workflow.
+
+Privacy: [PRIVACY.md](PRIVACY.md). Security reports:
+[SECURITY.md](SECURITY.md).
 
 Built on [whatsmeow](https://github.com/tulir/whatsmeow). Not affiliated with
 or endorsed by WhatsApp or Meta. Automating a WhatsApp account may conflict

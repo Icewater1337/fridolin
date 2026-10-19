@@ -876,6 +876,10 @@ type brainView struct {
 	Disk     *BrainManifest `json:"disk_manifest,omitempty"`
 	Issues   []BrainIssue   `json:"issues"`
 	Runtime  *BrainRuntime  `json:"runtime,omitempty"`
+	// Fallback marks the brain that takes the chats no other brain
+	// claims (BrainManager.Fallback). Without a default brain that is the
+	// first one, which no brain.json says, so the dashboard names it.
+	Fallback bool `json:"fallback"`
 }
 
 // brainIssues is what is wrong with the configured brains, the one list
@@ -904,6 +908,7 @@ func (b *Bridge) brainViews() []brainView {
 		}
 		byEntry[is.entry] = append(byEntry[is.entry], is)
 	}
+	fallback := b.brainMgr.Fallback()
 	var out []brainView
 	for _, ref := range cfg.BrainDirs {
 		v := brainView{Path: ref.Path, Status: "ok", Manifest: ref.Approved}
@@ -925,6 +930,7 @@ func (b *Bridge) brainViews() []brainView {
 		if br := b.brainMgr.Get(out[i].ID); br != nil && canonicalDir(br.Dir()) == canonicalDir(out[i].Path) {
 			rt := br.Snapshot()
 			out[i].Runtime = &rt
+			out[i].Fallback = br == fallback
 		}
 	}
 	return nonNil(out)

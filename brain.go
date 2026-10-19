@@ -2677,6 +2677,16 @@ func (bm *BrainManager) HeldFor(jid string, isGroup bool) string {
 // handles_dms, else the fallback brain, or nil.
 func (bm *BrainManager) DMBrain() *Brain { return bm.BrainFor("", false) }
 
+// Fallback returns the brain BrainFor falls back to, for the allowed groups
+// no brain claims and, while no brain has handles_dms, for direct
+// messages: the one marked default, else the first brain; nil when there
+// is none.
+func (bm *BrainManager) Fallback() *Brain {
+	bm.mu.RLock()
+	defer bm.mu.RUnlock()
+	return bm.fallback
+}
+
 // Get returns a brain by id.
 func (bm *BrainManager) Get(id string) *Brain {
 	bm.mu.RLock()

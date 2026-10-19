@@ -52,6 +52,7 @@ FUZZTIME ?= 10s
 
 .DEFAULT_GOAL := build
 .PHONY: help build install test race race-shard vet fmt fmt-check tidy-check \
+	notices notices-check \
 	lint lint-go lint-sh lint-py lint-actions lint-web \
 	test-py test-web test-sh smoke fuzz-short check clean
 
@@ -87,6 +88,15 @@ fmt-check: ## fail if a Go file needs gofmt
 
 tidy-check: ## fail if go.mod or go.sum is not tidy
 	$(GO) mod tidy -diff
+
+# THIRD_PARTY_NOTICES lists the modules the binary links and their
+# licences, which release archives ship next to LICENSE. Run notices after
+# changing dependencies: notices-check fails while the file is out of date.
+notices: ## write THIRD_PARTY_NOTICES from the modules the binary links
+	GO="$(GO)" scripts/third-party-notices.sh
+
+notices-check: ## fail if THIRD_PARTY_NOTICES is out of date
+	GO="$(GO)" scripts/third-party-notices.sh --check
 
 lint: lint-go lint-sh lint-py lint-actions lint-web ## every linter
 
@@ -130,9 +140,11 @@ ESLINT ?= $(NPX) --yes eslint@$(ESLINT_VERSION)
 lint-web: ## ESLint on the dashboard's JS (npx fetches it)
 	cd web && NPM_CONFIG_IGNORE_SCRIPTS=true $(ESLINT) .
 
-test-sh: ## tests for the personal-data and action-pin checks and the Makefile
+test-sh: ## tests for the personal-data, action-pin, notices and release scripts and the Makefile
 	scripts/test-check-personal-data.sh
 	scripts/test-check-action-pins.sh
+	scripts/test-third-party-notices.sh
+	scripts/test-build-release.sh
 	scripts/test-makefile.sh
 
 # A temp dir, not the binary: a check must not replace a build in use.
@@ -159,7 +171,7 @@ fuzz-short: ## run every fuzz target for FUZZTIME (default 10s)
 
 # No build: smoke compiles the binary into a temp dir, and bin/fridolin stays
 # as it was.
-check: fmt-check vet tidy-check race lint test-py test-web test-sh smoke ## what CI's build, lint and test jobs run
+check: fmt-check vet tidy-check notices-check race lint test-py test-web test-sh smoke ## what CI's build, lint and test jobs run
 
 clean: ## remove the binary
 	rm -f "$(BINARY)"

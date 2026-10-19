@@ -10,7 +10,7 @@ import { store, loadGroups, rememberName } from '../app/store.js';
 import { brainsResource, configResource, ignoredResource } from '../app/resources.js';
 import { h, mount, paint, reconcile, syncOptions } from '../lib/dom.js';
 import { plural } from '../lib/format.js';
-import { brainLabel } from '../lib/brain.js';
+import { brainLabel, defaultBrainOption } from '../lib/brain.js';
 import { phone, phoneDigits, shortJid } from '../lib/jid.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
@@ -78,14 +78,12 @@ export default {
     // its own.
     const refreshAll = () => Promise.all([ignoredResource.refresh(), brainsResource.refresh(), configResource.refresh()]);
 
-    const defaultBrain = () => (brains || []).find((b) => b.manifest && b.manifest.routing && b.manifest.routing.default);
-    const brainOptions = (withDefault) => {
-      const d = defaultBrain();
-      return [
-        ...(withDefault ? [['', d ? `Default brain (${d.name || d.id})` : 'Default brain']] : []),
-        ...(brains || []).filter((b) => b.id).map((b) => [b.id, brainLabel(b)]),
-      ];
-    };
+    // A group that names no brain goes to the fallback brain, which is
+    // the default brain or else the first: the option names it either way.
+    const brainOptions = (withDefault) => [
+      ...(withDefault ? [['', defaultBrainOption(brains)]] : []),
+      ...(brains || []).filter((b) => b.id).map((b) => [b.id, brainLabel(b)]),
+    ];
     const explicitOwner = (jid) => {
       const b = (brains || []).find((x) => x.manifest && x.manifest.routing && (x.manifest.routing.groups || []).includes(jid));
       return b ? b.id : '';

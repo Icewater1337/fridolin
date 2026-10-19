@@ -3,6 +3,7 @@ GET /api/brains/main
 Content-Type: application/json
 
 {
+  "fallback": true,
   "id": "main",
   "issues": [],
   "manifest": {

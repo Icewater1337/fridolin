@@ -378,11 +378,25 @@ Tools brains may not use, passed as `--disallowed-tools`, e.g.
 
 ### `dangerously_skip_permissions`
 
-Passes `--dangerously-skip-permissions`, so Claude uses tools without asking.
+In Claude mode, passes `--dangerously-skip-permissions`, so Claude uses
+tools without asking. New configs turn it on. In Codex mode, this selects
+writable execution instead of the CLI's read-only sandbox, always without
+interactive approvals; see [AI mode](#agent_provider).
 
-Effectively required: nobody is at the keyboard to approve a prompt, so
-without it every tool call hangs. Set to `false` only if you want a
-conversation-only assistant with no tool access.
+Without it, nobody is there to approve a tool: a run is `claude -p`, which
+asks no one, so Claude Code refuses every tool that needs approval, such
+as running a command, editing or writing a file, or fetching a web page,
+and the run goes on without it. Tools that need no approval still work:
+reading and searching the files in the brain's folder, and whatever a
+`permissions.allow` rule in the brain folder's `.claude/settings.json`
+allows (or one in your own settings, with
+[`inherit_claude_user_config`](#inherit_claude_user_config)). A brain then
+answers and reads its files, but cannot write its memories, run its
+skills' scripts or look anything up on the web.
+
+The [sandbox](#sandbox-macos) does not depend on this setting: it limits
+what every run can read and write either way. With this on, it is what
+keeps a brain out of the rest of your computer.
 
 Read [Security](../README.md#security) before running with this on. Without
 a sandbox in effect (on Linux, or with `sandbox.enabled` off) the dashboard
