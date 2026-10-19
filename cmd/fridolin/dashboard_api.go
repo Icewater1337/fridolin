@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/apperr"
 	"io/fs"
 	"log"
 	"net/http"
@@ -25,8 +26,6 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/access"
 	"github.com/Icewater1337/fridolin/internal/brain"
-
-	"github.com/Icewater1337/fridolin/internal/apperr"
 
 	"github.com/Icewater1337/fridolin/internal/config"
 
