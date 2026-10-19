@@ -1,9 +1,11 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -263,46 +265,109 @@ func WriteManifest(dir string, m *BrainManifest, overwrite bool) error {
 // WriteManifest does. It refuses to replace a brain.json of a newer
 // version, whose fields this bridge would drop.
 func writeManifestData(dir string, data []byte, overwrite bool) error {
-	path := filepath.Join(dir, ManifestFile)
-	if prev, err := readBrainFile(dir, ManifestFile); overwrite && err == nil {
+	root, err := openManifestRoot(dir, overwrite)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	file, _, err := writeManifestDataRoot(root, data, overwrite)
+	if file != nil {
+		file.Close()
+	}
+	return err
+}
+
+// Overwriting historically creates a missing folder; exclusive creation
+// requires the caller to have created it. Preserve that choice before pinning.
+func openManifestRoot(dir string, overwrite bool) (*os.Root, error) {
+	if overwrite {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, err
+		}
+	}
+	return os.OpenRoot(dir)
+}
+
+// writeManifestDataRoot reads and publishes through one pinned folder handle.
+// The returned file retains the published inode until commit or rollback, so
+// removing and replacing it cannot recycle its identity while we own it.
+func writeManifestDataRoot(root *os.Root, data []byte, overwrite bool) (*os.File, fs.FileInfo, error) {
+	path := filepath.Join(root.Name(), ManifestFile)
+	if prev, err := readBrainFileRoot(root, ManifestFile); overwrite && err == nil {
 		var v struct {
 			Version int `json:"version"`
 		}
 		if json.Unmarshal(prev, &v) == nil {
 			if err := checkManifestVersion(v.Version); err != nil {
-				return fmt.Errorf("%s: %w, so it is left as it is", path, err)
+				return nil, nil, fmt.Errorf("%s: %w, so it is left as it is", path, err)
 			}
 		}
 	}
-	if !overwrite {
-		// Publish only a complete file. A direct O_EXCL write could leave
-		// a truncated brain.json when the write or close failed, before
-		// the config transaction knew it had anything to roll back.
-		f, err := os.CreateTemp(dir, ".brain.json.*.tmp")
+	var f *os.File
+	var name string
+	for {
+		name = ".brain.json." + rand.Text() + ".tmp"
+		var err error
+		f, err = root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
-		defer os.Remove(f.Name())
-		if _, err := f.Write(data); err != nil {
-			f.Close()
-			return err
+		break
+	}
+	defer root.Remove(name)
+	defer f.Close()
+	if _, err := f.Write(data); err != nil {
+		return nil, nil, err
+	}
+	if err := f.Chmod(0o600); err != nil {
+		return nil, nil, err
+	}
+	if err := f.Sync(); err != nil {
+		return nil, nil, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return nil, nil, err
+	}
+	// Keep a read handle before closing the writer. A failed write/sync/close
+	// must leave no partial manifest at the published name.
+	retained, err := openInFolder(root, name, os.O_RDONLY, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	published := false
+	defer func() {
+		if !published {
+			retained.Close()
 		}
-		if err := f.Sync(); err != nil {
-			f.Close()
-			return err
-		}
-		if err := f.Close(); err != nil {
-			return err
-		}
-		// Link publishes atomically and refuses to replace a manifest
-		// another writer created while the temp file was being written.
-		if err := os.Link(f.Name(), path); errors.Is(err, os.ErrExist) {
-			return errManifestExists
-		} else {
-			return err
+	}()
+	retainedInfo, err := retained.Stat()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !os.SameFile(info, retainedInfo) {
+		return nil, nil, fmt.Errorf("%s changed while being written", path)
+	}
+	if err := f.Close(); err != nil {
+		return nil, nil, err
+	}
+	if overwrite {
+		err = root.Rename(name, ManifestFile)
+	} else {
+		// Link publishes a complete file without replacing a raced-in one.
+		err = root.Link(name, ManifestFile)
+		if errors.Is(err, fs.ErrExist) {
+			err = errManifestExists
 		}
 	}
-	return writeFileAtomic(path, data, 0o600, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	published = true
+	return retained, info, nil
 }
 
 // slugify turns a folder or display name into a brain id candidate.

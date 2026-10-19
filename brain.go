@@ -1511,6 +1511,11 @@ func readBrainFile(dir, name string) ([]byte, error) {
 		return nil, err
 	}
 	defer root.Close()
+	return readBrainFileRoot(root, name)
+}
+
+// readBrainFileRoot keeps a transaction's reads on its already pinned folder.
+func readBrainFileRoot(root *os.Root, name string) ([]byte, error) {
 	f, err := openInFolder(root, name, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, err
