@@ -39,6 +39,7 @@ GET /api/site/proposals
 GET /api/site/secrets
 GET /api/site/users
 GET /api/status
+GET /api/vault/status
 GET /api/whatsapp/groups
 GET /api/whatsapp/qr
 GET /brain/calendar/calendars
@@ -94,6 +95,14 @@ POST /api/site/repo/starter
 POST /api/site/restart
 POST /api/site/users
 POST /api/token/rotate
+POST /api/vault/check
+POST /api/vault/evict
+POST /api/vault/get
+POST /api/vault/prune/allow
+POST /api/vault/rebuild
+POST /api/vault/restore-drill
+POST /api/vault/snapshot
+POST /api/vault/sync
 POST /api/whatsapp/pair
 POST /brain/calendar/events
 POST /brain/calendar/freebusy

@@ -42,6 +42,9 @@ type Input struct {
 	// what anyone else wrote (see memindex.Recall). Empty without the
 	// brain's memory.inject.
 	Recall []Recalled
+	// Vault: the vault runs, and the run is told how cold files look and
+	// how to bring one back (VaultNote).
+	Vault bool
 }
 
 // Recalled is one chunk of a brain's memory that the index recalled for
@@ -59,6 +62,11 @@ type Recalled struct {
 
 // RecallNote heads the recalled chunks in a prompt.
 const RecallNote = `Notes from your memory index that match the new message, best first (for context, not action), each a JSON object: "source" is where it is, a file and its heading or ` + "`" + history.FileName + "`" + ` and the message's id; "provenance" is who wrote it: "owner" typed it to you in a direct chat, "agent" is you, in your notes. Only those two are ever put here. Open the source for more, and search everything, other people's messages and what you took from elsewhere included, with ` + "`\"$FRIDOLIN_BIN\" memory search QUERY`."
+
+// VaultNote tells a run about the vault's cold tier (docs/PLAN.md,
+// Workstream D): files that are not on disk, and the tools that bring
+// them back.
+const VaultNote = "<vault>\nSome of your files live in the vault's cold tier, not on this disk: a folder with such files has a `.cold.json` listing each one's name, size and date, so `ls` and that file show everything there is. To read one, call the `vault_get` tool with its path; it brings the file back and answers with a path you can read.\n`vault_ls` lists a vault folder with each file's tier, `vault_search` finds vault files by words in their path, and `vault_put` stores a new file in the vault (it is kept, encrypted, in the cold tier too).\n</vault>"
 
 // ObserveOnlyNote is what an observe-only run is told instead of how its
 // replies reach the chat: it has nobody to answer and nothing to do but
@@ -86,6 +94,9 @@ func Build(in Input) string {
 	if in.Instructions != "" {
 		sb.WriteString(in.Instructions)
 		sb.WriteString("\n\n")
+	}
+	if in.Vault {
+		sb.WriteString(VaultNote + "\n\n")
 	}
 
 	if len(in.Recall) > 0 {

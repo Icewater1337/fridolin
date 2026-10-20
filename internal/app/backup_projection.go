@@ -25,8 +25,10 @@ func backupOptions(cfgs *config.Store, bm *BrainManager, notify func(context.Con
 	return opts
 }
 
-func newProjectedBackup(cfgs *config.Store, bm *BrainManager, notify func(context.Context, *brain.Brain, string) error) *backup.Manager {
-	m := backup.New(backupOptions(cfgs, bm, notify))
+func newProjectedBackup(cfgs *config.Store, bm *BrainManager, notify func(context.Context, *brain.Brain, string) error, superseded func() bool) *backup.Manager {
+	opts := backupOptions(cfgs, bm, notify)
+	opts.Superseded = superseded
+	m := backup.New(opts)
 	// Publication succeeds before the schedule moves; failed saves never reach this callback.
 	cfgs.Subscribe(func(prev, next *config.Settings) { m.SettingsChanged(BackupSettings(prev), BackupSettings(next)) })
 	return m

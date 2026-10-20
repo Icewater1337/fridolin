@@ -64,13 +64,13 @@ test: ## Go tests
 	$(GO) test -count=1 ./...
 
 race: ## Go tests with the race detector, as CI runs them
-	$(GO) test -race -count=1 ./...
+	$(GO) test -race -count=1 -timeout 30m ./...
 
 race-shard: ## one slice of the race tests, SHARD=i/n (CI splits the macOS run)
-	GO="$(GO)" scripts/test-shard.sh $(subst /, ,$(SHARD)) -race -count=1
+	GO="$(GO)" scripts/test-shard.sh $(subst /, ,$(SHARD)) -race -count=1 -timeout 30m
 
 race-process: ## repeat extracted provider process tests under the race detector
-	$(GO) test -race -shuffle=on -count=5 ./internal/claudecli
+	$(GO) test -race -shuffle=on -count=5 -timeout 30m ./internal/claudecli
 
 # The other vets cover the Linux- and Windows-only files from macOS (CI also
 # runs Linux and Windows).

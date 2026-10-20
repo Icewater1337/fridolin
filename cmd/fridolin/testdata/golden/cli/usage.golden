@@ -33,6 +33,9 @@ Usage:
   fridolin node join CODE --core HOST:PORT | run | install|start|stop|status|uninstall
                                            run this machine as a node of a core;
                                            fridolin node help for more
+  fridolin vault status|sync|evict|get PATH|rebuild|restore-drill
+                                           the tiered store and its snapshots;
+                                           fridolin vault --help for more
   fridolin version
 
 Run by brains, inside a run (each prints JSON; -h shows its flags):

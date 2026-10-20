@@ -34,22 +34,23 @@ jobs:
         # still accept a release without security fixes.
         go: [oldstable, stable]
         # The slowest job is what a pull request waits for, so the race
-        # tests run in slices, one job each (scripts/test-shard.sh): three
+        # tests run in slices, one job each (scripts/test-shard.sh): four
         # on macOS, where they take about twice as long, two on Linux. The
         # checks that run once per system and release go with the last
         # slice, which has the fewest tests (SHARDS below).
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
         exclude:
           - {os: ubuntu-latest, shard: 3}
-    name: go (${{ matrix.os }}, ${{ matrix.go }}, ${{ matrix.shard }}/${{ matrix.os == 'macos-latest' && 3 || 2 }})
+          - {os: ubuntu-latest, shard: 4}
+    name: go (${{ matrix.os }}, ${{ matrix.go }}, ${{ matrix.shard }}/${{ matrix.os == 'macos-latest' && 4 || 2 }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       # Test the release setup-go installed. With the default (auto), a go
       # directive newer than it would quietly download a newer toolchain.
       GOTOOLCHAIN: local
       # How many slices this system's race tests run in; see shard above.
-      SHARDS: ${{ matrix.os == 'macos-latest' && 3 || 2 }}
+      SHARDS: ${{ matrix.os == 'macos-latest' && 4 || 2 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

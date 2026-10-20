@@ -311,6 +311,9 @@ type Summary struct {
 	// bridgeBackupID for the bridge's settings.
 	LastErrorBrain string     `json:"last_error_brain,omitempty"`
 	NextRun        *time.Time `json:"next_run,omitempty"`
+	// Superseded: the vault's snapshots on Drive took the daily run's
+	// place (Options.Superseded).
+	Superseded bool `json:"superseded,omitempty"`
 }
 
 // Summary is the short version shown on the overview. It looks at the
@@ -347,6 +350,9 @@ func (m *Manager) Summary() Summary {
 		s.LastError = failed.Error
 	}
 	s.NextRun = m.nextRunLocked(cfg, s.Connected)
+	if m.superseded() {
+		s.Superseded, s.NextRun = true, nil
+	}
 	return s
 }
 
@@ -1213,7 +1219,7 @@ func (m *Manager) Start(ctx context.Context) {
 
 func (m *Manager) tick(now time.Time) {
 	cfg := m.opts.Settings()
-	if !cfg.Enabled {
+	if !cfg.Enabled || m.superseded() {
 		return
 	}
 	if !m.connected() {
@@ -1235,6 +1241,12 @@ func (m *Manager) tick(now time.Time) {
 	m.state.LastScheduledDay = now.Format(DayLayout)
 	m.saveStateLocked()
 	m.mu.Unlock()
+}
+
+// superseded reports whether the vault's restic copy on Drive replaces
+// the scheduled Drive sync (Options.Superseded).
+func (m *Manager) superseded() bool {
+	return m.opts.Superseded != nil && m.opts.Superseded()
 }
 
 // warnNotConnected logs, once a day, that the daily backup is on but has no

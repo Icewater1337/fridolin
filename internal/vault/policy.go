@@ -186,7 +186,8 @@ func days(n int) time.Duration { return time.Duration(n) * 24 * time.Hour }
 //  2. referenced by an open thread, or hydrated within HydratedHoldDays:
 //     active;
 //  3. media originals with a companion, run logs unused for RunLogDays,
-//     audit/ of earlier months and workspaces/ archives: cold-eligible,
+//     audit/ of earlier months and workspaces/ archives (at the hot root,
+//     or under vault/ when the hot root is the data dir): cold-eligible,
 //     even inside the activity window;
 //  4. read or written within ActivityDays: active;
 //  5. markdown-first: a binary without a companion unused for less than
@@ -215,7 +216,7 @@ func (p Policy) Classify(f Facts, now time.Time) Decision {
 		return Decision{Class: ClassColdEligible, Reason: ReasonOldRunLog}
 	case isAudit:
 		return Decision{Class: ClassColdEligible, Reason: ReasonAuditPast}
-	case strings.HasPrefix(f.Path, "workspaces/"):
+	case strings.HasPrefix(f.Path, "workspaces/") || strings.HasPrefix(f.Path, "vault/workspaces/"):
 		return Decision{Class: ClassColdEligible, Reason: ReasonWorkspace}
 	}
 	if idle < days(p.ActivityDays) {

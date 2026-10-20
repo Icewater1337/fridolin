@@ -1531,7 +1531,9 @@ A value of `0` or `""`, like leaving the key out, means the default.
 
 A bucket name is 6 to 63 lower-case letters, digits and `-`, starting and
 ending with a letter or digit and not with `b2-`. The keys to the buckets
-are never in `config.json`: they live in the host's secrets.
+are never in `config.json`: they live in the host's secrets. A change to
+the `vault` section starts the vault again with it. What the vault does
+with these is in [VAULT.md](VAULT.md).
 
 ### `nodes`
 
@@ -1574,6 +1576,13 @@ The bridge itself reads two variables:
 | -------- | ------------ |
 | `FRIDOLIN_CONFIG` | the config file when `--config` is not given; `setup.sh` sets the service up with it |
 | `BRAIN_MODE` | set to anything but `true`, `1`, `yes` or `on`, the bridge refuses to start, see [`brain_mode`](#brain_mode) |
+
+With `vault.enabled`, the bridge reads the vault's keys and passwords
+from its environment, `B2_VAULT_KEY_ID`, `B2_VAULT_KEY`,
+`FRIDOLIN_VAULT_CRYPT_PASSWORD`, `FRIDOLIN_VAULT_CRYPT_PASSWORD2`,
+`B2_SNAPSHOTS_KEY_ID`, `B2_SNAPSHOTS_KEY` and `RESTIC_PASSWORD`, else (on
+a native install) from the host's secrets; and `FRIDOLIN_VAULT_LOCAL`, a
+folder that stands in for Backblaze in dev mode ([VAULT.md](VAULT.md)).
 
 The `fridolin core` commands ([CORE.md](CORE.md)) also read
 `FRIDOLIN_HOME`, the data dir they work on (the image sets it to its

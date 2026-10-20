@@ -39,6 +39,14 @@ func promptCases() map[string]Input {
 			Names:   names,
 			Message: chat.Inbound{JID: alex + "@s.whatsapp.net", Sender: alex, Text: "Tuesday at 3?", At: now.Add(-time.Minute)},
 		},
+		"dm-vault": {
+			Now:          now,
+			Instructions: "You are Main, Alex's assistant.",
+			BrainID:      "main",
+			Names:        names,
+			Vault:        true,
+			Message:      chat.Inbound{JID: alex + "@s.whatsapp.net", Sender: alex, Text: "Play yesterday's recording", At: now.Add(-time.Minute)},
+		},
 		"group-files-quote": {
 			Now:          now,
 			Instructions: "You are Team.",

@@ -67,7 +67,7 @@ func (b *App) newMCPTools() *mcp.Registry[mcpCaller] {
 		Name:      "list_brains",
 		Available: func(c mcpCaller) bool { return c.core() && len(c.manifest.GrantedTo("")) > 0 },
 		Describe: func(mcpCaller) mcp.Tool {
-			return mcp.Tool{Description: "List the other brains you may use, with their names and what you may do with each: delegate (hand it a task with the delegate tool), read (read its notes with read_memory), files (its vault files, later). A brain that is not running cannot be used until it runs again."}
+			return mcp.Tool{Description: "List the other brains you may use, with their names and what you may do with each: delegate (hand it a task with the delegate tool), read (read its notes with read_memory), files (its vault files, with vault_ls, vault_get and vault_search). A brain that is not running cannot be used until it runs again."}
 		},
 		Call: b.callListBrains,
 	})
@@ -76,6 +76,7 @@ func (b *App) newMCPTools() *mcp.Registry[mcpCaller] {
 		Describe: describeReadMemory,
 		Call:     b.callReadMemory,
 	})
+	b.registerVaultTools(r)
 	r.Register(mcp.Entry[mcpCaller]{
 		Name: "ask_user",
 		Describe: func(mcpCaller) mcp.Tool {

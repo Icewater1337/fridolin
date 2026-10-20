@@ -1,6 +1,8 @@
 package brain
 
 import (
+	"context"
+
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -21,6 +23,9 @@ type InputRules struct {
 	// into its run's prompt, given its manifest and the history the
 	// prompt shows already; nil for nothing.
 	Recall func(r RecallRequest) []prompt.Recalled
+	// Hydrate brings the files of a run's message back from the vault's
+	// cold tier before the run's prompt is built; nil without a vault.
+	Hydrate func(ctx context.Context, brainID string, paths []string)
 }
 
 // RecallRequest is what Recall is asked for one run.

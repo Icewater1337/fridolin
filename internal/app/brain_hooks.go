@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/history"
@@ -49,6 +51,9 @@ type BrainHooks struct {
 	// Recall returns what a brain's memory index recalls for a run's
 	// prompt (memindex.Recall), nil for nothing.
 	Recall func(brain.RecallRequest) []prompttext.Recalled
+	// Hydrate brings the files of a run's message back from the vault's
+	// cold tier before the run starts.
+	Hydrate func(ctx context.Context, brainID string, paths []string)
 }
 
 // brainHooksSink keeps command callbacks compatible while runtime users move

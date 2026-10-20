@@ -68,6 +68,7 @@ type App struct {
 	sessionCookie string
 	scriptAuth    *scriptAuth
 	backup        *backup.Manager
+	vault         *vaultService
 	google        *google.Auth
 	plaud         *plaud.Manager
 	site          *sitesvc.SiteManager
@@ -127,6 +128,10 @@ type Options struct {
 	// Restart overrides restart handling for an embedding owner. When nil,
 	// Run handles a dashboard restart and returns ErrRestart after teardown.
 	Restart func()
+	// Container: the bridge runs in the fridolin-core image, whose secrets
+	// come only from its environment (the vault never reads or makes host
+	// secrets there).
+	Container bool
 }
 
 // New creates and wires up all components. It holds the data
@@ -272,6 +277,7 @@ func New(opts Options) (_ *App, err error) {
 		CodexSetup: func(id string) ([]string, []string, string, error) { return b.site.CodexBuilder(id) },
 		RunEnv:     b.brainRunEnv,
 		Recall:     b.recall,
+		Hydrate:    func(ctx context.Context, id string, paths []string) { b.vault.hydrate(ctx, id, paths) },
 	})
 	for _, br := range b.brainMgr.Brains() {
 		seedActivity(b.activity, br)
@@ -294,7 +300,8 @@ func New(opts Options) (_ *App, err error) {
 	}
 	// A refused scheduled backup goes to the brain's chat, like Plaud's
 	// expired-login notice: the owner may not open the dashboard for weeks.
-	b.backup = newProjectedBackup(cfgs, b.brainMgr, b.notifyBackup)
+	b.vault = newVaultService(cfgs, opts.Container, b.logger, b.vaultBrains, b.openMedia)
+	b.backup = newProjectedBackup(cfgs, b.brainMgr, b.notifyBackup, b.vault.driveSuperseded)
 	b.google = google.New(googleOptionsFor(cfgs))
 	b.plaud = NewPlaudManager(cfgs, b.brainMgr, b.submitHandOff, b.wa.SendMessage, func() string {
 		if d := b.site.Settings().Domain; d != "" {
@@ -335,7 +342,7 @@ func (b *App) Start(ctx context.Context) error {
 		DashboardEnabled: !cfg.Dashboard.Disabled,
 		Resume:           func(ctx context.Context) { b.outbox.Start(); b.resume(ctx) }, Connect: b.connectLoop,
 		Watch:      func(ctx context.Context) { b.watchRequiredFiles(ctx, requiredFilesEvery) },
-		Background: []func(context.Context){b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start},
+		Background: []func(context.Context){b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start, b.vault.Start},
 	})
 }
 
@@ -365,7 +372,7 @@ func (b *App) Stop() {
 func (b *App) stopResources() {
 	b.supervisor.Stop(StopOptions{Logger: b.logger,
 		CloseIntake: b.intake.Close, HTTPGrace: httpStopWait,
-		Background: []func(){b.sched.Stop, b.backup.Stop, b.plaud.Stop, b.site.Stop, b.nodes.Stop},
+		Background: []func(){b.sched.Stop, b.backup.Stop, b.plaud.Stop, b.site.Stop, b.nodes.Stop, b.vault.Stop},
 		KeepPending: func() {
 			for _, m := range b.deb.Drain() {
 				b.keep(InboundHeld, "", m)
@@ -646,6 +653,7 @@ func (b *App) configChanged(prev, next *config.Settings) {
 	}
 	logDMAccess(prev, next)
 	config.LogSecurityChanges(prev, next)
+	b.vault.Apply(next)
 	for _, br := range b.brainMgr.Brains() {
 		seedActivity(b.activity, br)
 	}

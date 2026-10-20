@@ -185,6 +185,30 @@ blockquote.preview {
 .version-opt > span { display: flex; flex-direction: column; }
 .version-list { display: flex; flex-direction: column; gap: 6px; max-height: 280px; overflow: auto; }
 
+/* ── vault ──────────────────────────────────────────────────────────────── */
+
+.vault-job { color: var(--info); }
+.vault-usage { display: flex; flex-direction: column; gap: 6px; }
+/* A native <meter>: green up to the eviction target, red above it. The
+   mark on it is the target, placed by the page. */
+.vault-meter-wrap { position: relative; }
+.vault-meter { appearance: none; display: block; width: 100%; height: 10px; border: 0; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.vault-meter::-webkit-meter-bar { background: var(--surface-3); border: 0; border-radius: 999px; height: 10px; }
+.vault-meter::-webkit-meter-optimum-value { background: var(--accent); border-radius: 999px; }
+.vault-meter::-webkit-meter-suboptimum-value { background: var(--warn); border-radius: 999px; }
+.vault-meter::-webkit-meter-even-less-good-value { background: var(--bad); border-radius: 999px; }
+.vault-meter::-moz-meter-bar { background: var(--accent); border-radius: 999px; }
+.vault-meter:-moz-meter-sub-optimum::-moz-meter-bar { background: var(--warn); }
+.vault-meter:-moz-meter-sub-sub-optimum::-moz-meter-bar { background: var(--bad); }
+.vault-target { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--text-2); border-radius: 1px; }
+.vault-dbs { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.vault-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.vault-checks li { display: flex; gap: 8px; align-items: flex-start; }
+.vault-checks li .icon { flex: none; width: 15px; height: 15px; margin-top: 2px; }
+.vault-checks li.ok .icon { color: var(--ok); }
+.vault-checks li.bad .icon { color: var(--bad); }
+.vault-table td:first-child { overflow-wrap: anywhere; }
+
 /* ── site ───────────────────────────────────────────────────────────────── */
 
 .site-block { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }

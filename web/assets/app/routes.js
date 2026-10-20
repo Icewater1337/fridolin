@@ -12,6 +12,7 @@ export const ROUTES = [
   { id: 'settings', path: 'settings/:section?', nav: { label: 'Settings', icon: 'settings' }, load: () => import('../pages/settings.js') },
   { id: 'nodes', path: 'nodes', nav: { label: 'Nodes', icon: 'server' }, load: () => import('../pages/nodes.js') },
   { id: 'backup', path: 'backup', nav: { label: 'Backup', icon: 'backup' }, load: () => import('../pages/backup.js') },
+  { id: 'vault', path: 'vault', nav: { label: 'Vault', icon: 'lock' }, load: () => import('../pages/vault.js') },
   { id: 'integrations', path: 'integrations', nav: { label: 'Integrations', icon: 'inbox' }, load: () => import('../pages/integrations.js') },
   { id: 'site', path: 'site', nav: { label: 'Site', icon: 'external' }, load: () => import('../pages/site.js') },
   { id: 'build', path: 'build', nav: { label: 'Build', icon: 'sparkle' }, load: () => import('../pages/build.js') },

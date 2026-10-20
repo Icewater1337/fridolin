@@ -198,6 +198,27 @@ A `delegate` call waits for the sub-brain's answer, up to its
 These two are not a contract for scripts: they serve `fridolin mcp`, and
 change with it.
 
+With the [vault](VAULT.md) running, every run also gets `vault_ls`,
+`vault_get`, `vault_put` and `vault_search`, scoped to its brain's vault
+paths and, for a core run, those of the brains it is granted `files`; a
+path outside them is answered as a failed call the model reads, not with
+an HTTP error.
+
+## The vault's dashboard routes
+
+`fridolin vault` and the dashboard's Vault page use these, with the
+dashboard token or session like the rest of `/api/` (not a contract
+either):
+
+| Route | Does |
+| --- | --- |
+| `GET /api/vault/status` | the vault's state, numbers, last upload, snapshots, checks, Drive copy, Litestream, last restore drill and the latest 50 evictions; ETag-cached |
+| `POST /api/vault/sync`, `/evict`, `/rebuild`, `/restore-drill` | start that job: `202 {"status": "started"}`, or `409` while another job runs and `412` while the vault is off or not running |
+| `POST /api/vault/snapshot` | a snapshot now, `{"kind": "nightly"}` (default) or `"hourly"`; `202` |
+| `POST /api/vault/check` | `restic check` now, `{"read_data_subset": "5%"}` to read data too; `202` |
+| `POST /api/vault/prune/allow` | lift a deletion hold: pruning goes on; `200` |
+| `POST /api/vault/get` | `{"path": "<vault path>", "allow_over_budget": false}`: bring the file back and answer `{"path": "<absolute path>"}`; `404` for a path the vault does not hold, `412` when it would take the hot tier over its budget |
+
 ## Limits
 
 A request body may be 1 MiB at most; a larger one is refused with `400`.
