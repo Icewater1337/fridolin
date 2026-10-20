@@ -1095,6 +1095,15 @@ runs listed there, with the commands they started, before any brain runs.
 It checks that each group's leader is still the process that ran, by its
 start time, so a process that got the same PID since is left alone.
 
+The [core, vault and nodes](#core-vault-and-nodes) keep their state in
+folders of their own in the data dir: `secrets/` (age-encrypted files),
+`audit/` (the audit log, JSONL), `vault.db` (the vault's index), `vault/`
+(with `documents/` and `workspaces/`), `nodes/` (the node registry and
+keys), `tsnet/` (the tailnet node's state) and `core/` (the lease's state
+and exports being staged). Each is made, with mode 0700, by the feature
+that uses it when it runs; the bridge does not make them as it starts, so
+a data dir with all of these features off has none of them.
+
 The lock that keeps a second bridge off the same WhatsApp session is
 `bridge.lock` in `data_dir`. It does not cover a `db_path` outside
 `data_dir`, so never point `db_path` at another bridge's `bridge.db`: a
@@ -1469,6 +1478,63 @@ your own.
 `debug`, `info`, `warn`, or `error` (case-insensitive). Unknown values are
 rejected. `debug` is very verbose — it includes the
 whatsmeow protocol chatter.
+
+---
+
+## Core, vault and nodes
+
+The settings of the containerized core, the tiered vault in Backblaze B2,
+nodes and the approval policy, which [PLAN.md](PLAN.md) describes. They
+are all off by default, so a `config.json` without them runs as before;
+this version reads and checks them, and the parts that use them follow.
+A value of `0` or `""`, like leaving the key out, means the default.
+
+### `core`
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `tailnet.enabled` | `false` | join the tailnet as a device of its own (tsnet), with the auth key from the host's secrets |
+| `tailnet.hostname` | `"fridolin-core"` | the core's name on the tailnet: one DNS label, lower-case letters, digits and `-` |
+| `lease.enabled` | `false` | take and renew the core lease, `core/lease.json` in the vault bucket, so two copies of the core never run one WhatsApp session |
+| `lease.renew_seconds` | `60` | how often the holder renews the lease, 1 to 86400 |
+| `lease.stale_seconds` | `300` | how long after its last renewal another host may take the lease over, 1 to 86400; must be more than `renew_seconds` |
+| `memory_limit_gb` | `8` | the memory the core's container may use, in GB |
+
+### `vault`
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | run the vault service |
+| `hot_budget_gb` | `50` | the most the hot tier on this host may hold, in GB |
+| `activity_days` | `60` | a file stays hot this many days after it was last used |
+| `cold_after_days` | `90` | a binary goes cold after this many days even without a markdown companion |
+| `headroom_percent` | `10` | share of the budget eviction keeps free, 1 to 90 |
+| `bucket` | `"fridolin-vault"` | the B2 bucket of the cold tier, the core's exports and the lease |
+| `snapshots_bucket` | `"fridolin-snapshots"` | the B2 bucket of the restic and Litestream snapshots |
+| `endpoint` | `"s3.eu-central-003.backblazeb2.com"` | the buckets' S3 endpoint: a host name, without `https://` or a path |
+
+A bucket name is 6 to 63 lower-case letters, digits and `-`, starting and
+ending with a letter or digit and not with `b2-`. The keys to the buckets
+are never in `config.json`: they live in the host's secrets.
+
+### `nodes`
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | accept connections from nodes |
+| `listen` | `":8766"` | the node port, `host:port`; an empty host is every interface, otherwise an IP address or a host name |
+
+### `policy`
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `max_runs_per_hour` | `20` | the most runs one brain starts in an hour |
+| `max_pending_irreversible` | `3` | the most irreversible actions waiting for approval at once |
+| `approval_timeout_hours` | `24` | how long an approval poll waits before it counts as no |
+
+A negative number stops the bridge, as does one above the maximum
+[the schema](schemas/config.schema.json) gives it (a day of seconds for the
+lease, 90 for `headroom_percent`, 30 days for `approval_timeout_hours`).
 
 ---
 

@@ -25,7 +25,7 @@ func plaudOptions(cfgs *config.Store, brains *BrainManager,
 	notify func(context.Context, string, string) error, siteURL func() string) plaud.Options {
 	boot := cfgs.Boot()
 	return plaud.Options{
-		PlaudDir: boot.PlaudDir(), Home: boot.Home,
+		PlaudDir: boot.PlaudDir(), SiteDevices: boot.Layout().SiteDevices(), Home: boot.Home,
 		Settings:   func() *plaud.Snapshot { return plaudSnapshotOf(RuntimeSettings(cfgs)) },
 		Target:     func(id string) *plaud.Target { return plaudTargetOf(brains, id, submit) },
 		HeldTarget: func() string { return brains.HeldFor("", false) },

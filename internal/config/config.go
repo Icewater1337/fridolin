@@ -184,6 +184,14 @@ type File struct {
 	Plaud         PlaudConfig         `json:"plaud"`
 	Dashboard     DashboardConfig     `json:"dashboard"`
 	ScriptAPI     ScriptAPIConfig     `json:"script_api"`
+
+	// Core, Vault, Nodes and Policy are the settings of the containerized
+	// core, the tiered vault, nodes and approvals (see fleet.go). All are
+	// off by default.
+	Core   CoreConfig   `json:"core"`
+	Vault  VaultConfig  `json:"vault"`
+	Nodes  NodesConfig  `json:"nodes"`
+	Policy PolicyConfig `json:"policy"`
 }
 
 // retiredBrainMode is the brain_mode key. A missing key, null and true all
@@ -647,6 +655,9 @@ func (c *File) Validate(goos string) error {
 		return err
 	}
 	if err := c.Backup.Validate(); err != nil {
+		return err
+	}
+	if err := c.validateFleet(); err != nil {
 		return err
 	}
 	return c.Plaud.Validate()

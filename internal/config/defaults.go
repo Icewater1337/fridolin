@@ -145,6 +145,7 @@ func resolveFile(file *File, paths Paths, goos string) (*File, error) {
 	}
 	cfg.Backup.RclonePath = fsx.ExpandHome(cfg.Backup.RclonePath, home)
 	cfg.Plaud.PhoneDir = fsx.ExpandHome(cfg.Plaud.PhoneDir, home)
+	fillFleetDefaults(cfg)
 
 	// Compared with senders as digits, however they were typed into the
 	// file. The dashboard writes them so; a hand edit may not have.

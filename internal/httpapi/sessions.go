@@ -9,10 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"io/fs"
 	"log"
 	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -95,7 +95,7 @@ type sessionRecord struct {
 // means signing in again.
 func LoadDashboardSessions(dataDir string, now func() time.Time) (*DashboardSessions, error) {
 	s := &DashboardSessions{
-		path:     filepath.Join(dataDir, "dashboard-sessions.json"),
+		path:     config.Layout{Root: dataDir}.DashboardSessions(),
 		now:      now,
 		sessions: map[string]session{},
 		codes:    map[string]time.Time{},

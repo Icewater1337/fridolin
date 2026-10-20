@@ -125,7 +125,7 @@ func New(opts Options) (_ *App, err error) {
 	// Taken before the store opens: a second bridge on the same data dir, dev
 	// mode or a test included, must not open the live WhatsApp session's
 	// database, let alone run whatsmeow's migrations on it.
-	lock, err := platform.AcquireLock(cfg.DataDir)
+	lock, err := platform.AcquireLock(cfgs.Boot().Layout().Lock())
 	if err != nil {
 		return nil, err
 	}
