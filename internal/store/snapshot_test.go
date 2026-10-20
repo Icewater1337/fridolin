@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -25,7 +26,8 @@ func TestVacuumIntoAndIntegrityCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, err := os.Stat(dst)
-	if err != nil || st.Mode().Perm() != 0o600 {
+	// Windows has no Unix mode bits; the data dir's ACL protects the copy.
+	if err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0o600) {
 		t.Fatalf("copy: %v, %v", st, err)
 	}
 	if err := IntegrityCheck(context.Background(), dst); err != nil {
