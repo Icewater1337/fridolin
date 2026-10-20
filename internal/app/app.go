@@ -81,9 +81,11 @@ type App struct {
 	nodes        *nodes.Service
 	nodesEnabled bool
 	nodesListen  string
-	outbox       *outboundmsg.Outbox
-	otp          otp.Handoff
-	started      time.Time
+	// fride is the core's side of FrIDE on the nodes (fride_runtime.go).
+	fride   *frideRuntime
+	outbox  *outboundmsg.Outbox
+	otp     otp.Handoff
+	started time.Time
 	// restart is the optional embedding owner callback.
 	restart func()
 
@@ -244,7 +246,8 @@ func New(opts Options) (_ *App, err error) {
 	b.audit = newAuditLog(cfg.DataDir)
 	b.loadPolicy()
 	b.mcpTools = b.newMCPTools()
-	if b.nodes, err = newNodes(cfgs); err != nil {
+	b.fride = newFrideRuntime(b)
+	if b.nodes, err = newNodes(cfgs, b.fride); err != nil {
 		return nil, err
 	}
 	b.nodesEnabled, b.nodesListen = cfgs.Boot().NodesEnabled, cfgs.Boot().NodesListen
@@ -275,6 +278,9 @@ func New(opts Options) (_ *App, err error) {
 	logDMAccess(nil, cfg)
 
 	b.pipeline = b.newMessagePipeline()
+	if b.nodesEnabled {
+		b.pipeline.Move = b.fride.moveCommand
+	}
 	b.deb = pipeline.NewDebouncer(
 		func() time.Duration { return b.cfgs.Get().Live.Debounce.Quiet },
 		func() time.Duration { return b.cfgs.Get().Live.Debounce.MaxWait },
@@ -423,7 +429,7 @@ func (b *App) Stop() {
 func (b *App) stopResources() {
 	b.supervisor.Stop(StopOptions{Logger: b.logger,
 		CloseIntake: b.intake.Close, HTTPGrace: httpStopWait,
-		Background: []func(){b.sched.Stop, b.backup.Stop, b.plaud.Stop, b.site.Stop, b.nodes.Stop, b.vault.Stop, b.stopTailnet},
+		Background: []func(){b.sched.Stop, b.backup.Stop, b.plaud.Stop, b.site.Stop, b.nodes.Stop, b.fride.Stop, b.vault.Stop, b.stopTailnet},
 		KeepPending: func() {
 			for _, m := range b.deb.Drain() {
 				b.keep(InboundHeld, "", m)

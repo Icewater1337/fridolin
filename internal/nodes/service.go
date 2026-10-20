@@ -41,12 +41,21 @@ type Options struct {
 	Now func() time.Time
 	// Logf logs; nil logs with the standard logger.
 	Logf func(format string, args ...any)
+	// OnEvent hears the news nodes report (nodeproto.TypeEvent), in the
+	// order each node sent it; nil drops it. It must not block for long:
+	// the node's connection waits for it.
+	OnEvent func(nodeID string, ev nodeproto.Event)
+	// OnDeclare hears that a node's declaration changed while it was
+	// connected, after the registry recorded it; nil for nothing.
+	OnDeclare func(n *Node)
 }
 
 // Service is the node port and the registry behind it.
 type Service struct {
-	reg  *Registry
-	logf func(string, ...any)
+	reg       *Registry
+	logf      func(string, ...any)
+	onEvent   func(string, nodeproto.Event)
+	onDeclare func(*Node)
 
 	// ctx ends with Stop, and with it every connection.
 	ctx    context.Context
@@ -72,7 +81,7 @@ func New(opts Options) (*Service, error) {
 		logf = log.Printf
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Service{reg: reg, logf: logf, ctx: ctx, cancel: cancel, sessions: map[string]*session{}}, nil
+	return &Service{reg: reg, logf: logf, onEvent: opts.OnEvent, onDeclare: opts.OnDeclare, ctx: ctx, cancel: cancel, sessions: map[string]*session{}}, nil
 }
 
 // Registry is the service's registry.
@@ -351,6 +360,40 @@ func (s *Service) readLoop(ss *session) {
 			if ch != nil {
 				ch <- resp
 			}
+		case nodeproto.TypeDeclare:
+			d, err := nodeproto.DecodeBody[nodeproto.Declare](env)
+			if err == nil {
+				err = d.Capabilities.Check()
+			}
+			if err != nil {
+				ss.close(nodeproto.CloseProtocol, err.Error())
+				return
+			}
+			n, err := s.reg.Declare(ss.id, d.Capabilities)
+			if err != nil {
+				s.logf("nodes: recording what %s offers now: %v", ss.id, err)
+				continue
+			}
+			s.logf("nodes: %s (%s) offers now: %s; commands %s", n.Name, n.ID, n.Declared.Summary(), n.Commands())
+			s.pushState(n)
+			if s.onDeclare != nil {
+				s.onDeclare(n)
+			}
+		case nodeproto.TypeEvent:
+			ev, err := nodeproto.DecodeBody[nodeproto.Event](env)
+			if err != nil {
+				ss.close(nodeproto.CloseProtocol, err.Error())
+				return
+			}
+			// Only news a node may serve counts: FrIDE's needs fride
+			// approved, so a pending node has nothing to report.
+			if n, err := s.reg.Get(ss.id); err != nil || !n.Effective().Allows(eventMethod(ev.Kind)) {
+				s.logf("nodes: dropped a %q event of %s, which may not serve it", ev.Kind, ss.id)
+				continue
+			}
+			if s.onEvent != nil {
+				s.onEvent(ss.id, ev)
+			}
 		case nodeproto.TypeClose:
 			return
 		default:
@@ -358,6 +401,16 @@ func (s *Service) readLoop(ss *session) {
 			return
 		}
 	}
+}
+
+// eventMethod is the method whose approval lets a node report events of
+// kind: FrIDE's news needs fride approved. Other kinds need what nothing
+// grants.
+func eventMethod(kind string) string {
+	if kind == nodeproto.EventFride {
+		return nodeproto.MethodFrideStatus
+	}
+	return ""
 }
 
 // pushState sends the node its state after an approval changed it.
@@ -441,6 +494,9 @@ func (s *Service) Call(ctx context.Context, id, method string, params, out any) 
 		return err
 	}
 	timeout := callTimeout
+	if t, ok := slowCalls[method]; ok {
+		timeout = t
+	}
 	if method == nodeproto.MethodExec {
 		var p nodeproto.ExecParams
 		if err := json.Unmarshal(raw, &p); err != nil {

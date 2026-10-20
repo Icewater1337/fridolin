@@ -73,6 +73,18 @@ func catalogue() []struct{ name, text string } {
 		{"lockdownOwnerOnly", outboundmsg.LockdownOwnerOnly},
 		{"lockdownRefusedNotice", outboundmsg.LockdownRefusedNotice},
 		{"rateLimitedNotice(20)", outboundmsg.RateLimitedNotice(20)},
+		{"frideNewsMessage(started)", outboundmsg.FrideNewsMessage(outboundmsg.FrideNews{Thread: 3, Node: "laptop", Kind: "started", Text: "FrIDE inbox #1 · following · health\nStarting health.\n• create task health [api] on feat/health", Task: "health", Branch: "feat/health"})},
+		{"frideNewsMessage(question)", outboundmsg.FrideNewsMessage(outboundmsg.FrideNews{Thread: 3, Node: "laptop", Kind: "question", Text: "FrIDE inbox #1 · needs your reply\nWhich empty state, the no-results one or the error one?"})},
+		{"frideNewsMessage(update)", outboundmsg.FrideNewsMessage(outboundmsg.FrideNews{Thread: 3, Node: "laptop", Kind: "update", Text: "FrIDE inbox #1 · active · health\n→ health: the tests pass"})},
+		{"frideNewsMessage(done)", outboundmsg.FrideNewsMessage(outboundmsg.FrideNews{Thread: 3, Node: "laptop", Kind: "done", Text: "FrIDE inbox #1 · done\n• Inbox #1 is done: health — task health is closed.", Task: "health", Branch: "feat/health", Rationale: "/Users/you/fride-workspaces/health/api/docs/rationale/health.md"})},
+		{"frideNewsMessage(failed)", outboundmsg.FrideNewsMessage(outboundmsg.FrideNews{Thread: 3, Node: "laptop", Kind: "failed", Text: "FrIDE inbox #1 · failed\nthe message could not be read"})},
+		{"frideQueuedNotice", outboundmsg.FrideQueuedNotice(3, "laptop: not enough memory for another stack")},
+		{"fridePlacedNotice", outboundmsg.FridePlacedNotice(3, "laptop")},
+		{"frideMoveUsage", outboundmsg.FrideMoveUsage},
+		{"frideMoveGroupNotice", outboundmsg.FrideMoveGroupNotice},
+		{"frideMovingNotice", outboundmsg.FrideMovingNotice(3, "laptop")},
+		{"frideMovedNotice", outboundmsg.FrideMovedNotice(3, "mini", "laptop", "health")},
+		{"frideMoveFailedNotice", outboundmsg.FrideMoveFailedNotice(3, "laptop is offline")},
 	}
 }
 

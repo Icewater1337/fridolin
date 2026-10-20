@@ -58,7 +58,8 @@ Usage:
                                            the core's fleet of nodes, through the running
                                            bridge; fridolin nodes help for more
   fridolin node join CODE --core HOST:PORT | run | install|start|stop|status|uninstall
-                                           run this machine as a node of a core;
+                                           run this machine as a node of a core, and
+                                           pair FrIDE on it (fride pair --url URL);
                                            fridolin node help for more
   fridolin vault status|sync|evict|get PATH|rebuild|restore-drill
                                            the tiered store and its snapshots;

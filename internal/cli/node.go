@@ -29,6 +29,9 @@ Usage:
   fridolin node install|start|stop|status|uninstall
                        the service: a launchd user agent on macOS, a systemd user
                        unit on Linux, a Windows Service on Windows
+  fridolin node fride pair --url http://127.0.0.1:PORT | status
+                       FrIDE on this machine, offered to the core while it runs;
+                       fridolin node fride help for more
 
 Join flags:
   --name NAME          how the core shows this node (default: the host name)
@@ -54,6 +57,9 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	sub, args := args[0], args[1:]
+	if sub == "fride" {
+		return nodeFrideCmd(args, stdout, stderr)
+	}
 	fs := flag.NewFlagSet("node "+sub, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { fmt.Fprint(stderr, nodeUsage) }

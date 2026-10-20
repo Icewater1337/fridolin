@@ -33,7 +33,8 @@ func brainGlobalsOf(cfg *config.Settings) brain.Globals {
 			// Absolute: brains run in their own folder, where a relative data_dir
 			// would name another one. R6 supplies these startup paths through Boot.
 			DataDir: AbsPath(cfg.DataDir), DBPath: AbsPath(cfg.DBPath), PlaudPATH: brainPlaudPATH(cfg),
-			Vault: cfg.Vault.Enabled,
+			Vault:      cfg.Vault.Enabled,
+			FrideTools: cfg.NodesEnabled,
 		},
 	}
 }

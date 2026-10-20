@@ -70,29 +70,85 @@ func checkNodesPortOnTailnet(env *DoctorEnv, listen string) DoctorResult {
 	return DoctorResult{Status: DoctorOK, Detail: "the node port listens on the tailnet at " + net.JoinHostPort(strings.TrimSuffix(st.DNSName, "."), port)}
 }
 
-// checkNodesSeen warns about approved nodes the core has not heard from
-// for nodeStaleAfter.
-func checkNodesSeen(_ context.Context, env *DoctorEnv) DoctorResult {
+// doctorNode is a node as doctor reads it from nodes.json.
+type doctorNode struct {
+	ID       string     `json:"id"`
+	Name     string     `json:"name"`
+	Device   string     `json:"device"`
+	LastSeen *time.Time `json:"last_seen"`
+	Declared struct {
+		Fride *nodeproto.FrideCap `json:"fride"`
+	} `json:"declared"`
+	Approved struct {
+		Fride *nodeproto.FrideCap `json:"fride"`
+	} `json:"approved"`
+}
+
+// readNodes reads the registry for a check; a result is what to report
+// when there is nothing to read.
+func readNodes(env *DoctorEnv) ([]doctorNode, *DoctorResult) {
 	path := filepath.Join(env.Config.Layout().Nodes(), nodes.RegistryFile)
 	data, err := env.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return DoctorResult{Status: DoctorOK, Detail: "no nodes yet"}
+		return nil, &DoctorResult{Status: DoctorOK, Detail: "no nodes yet"}
 	}
 	if err != nil {
-		return DoctorResult{Status: DoctorWarn, Detail: err.Error(), Fix: "check the permissions of " + path}
+		return nil, &DoctorResult{Status: DoctorWarn, Detail: err.Error(), Fix: "check the permissions of " + path}
 	}
 	var file struct {
-		Nodes []struct {
-			ID       string     `json:"id"`
-			Name     string     `json:"name"`
-			Device   string     `json:"device"`
-			LastSeen *time.Time `json:"last_seen"`
-		} `json:"nodes"`
+		Nodes []doctorNode `json:"nodes"`
 	}
 	if err := json.Unmarshal(data, &file); err != nil {
-		return DoctorResult{Status: DoctorWarn, Detail: fmt.Sprintf("%s does not read: %v", path, err), Fix: "fix the JSON by hand, or restore it from a backup"}
+		return nil, &DoctorResult{Status: DoctorWarn, Detail: fmt.Sprintf("%s does not read: %v", path, err), Fix: "fix the JSON by hand, or restore it from a backup"}
 	}
-	now := env.Now()
+	return file.Nodes, nil
+}
+
+// checkNodesFride is M6's gate on the core: every node whose FrIDE the
+// owner approved offers it now, which its agent does only while FrIDE
+// answers there, and was heard from lately.
+func checkNodesFride(_ context.Context, env *DoctorEnv) DoctorResult {
+	list, res := readNodes(env)
+	if res != nil {
+		return *res
+	}
+	now := env.now()
+	var ok, down []string
+	for _, n := range list {
+		if n.Device != nodeproto.DeviceApproved || n.Approved.Fride == nil {
+			continue
+		}
+		switch {
+		case n.LastSeen == nil || now.Sub(*n.LastSeen) > nodeStaleAfter:
+			down = append(down, n.Name+" ("+n.ID+", not heard from)")
+		case n.Declared.Fride == nil:
+			down = append(down, n.Name+" ("+n.ID+", FrIDE does not answer)")
+		default:
+			ok = append(ok, n.Name+" ("+n.Declared.Fride.URL+")")
+		}
+	}
+	if len(ok)+len(down) == 0 {
+		return DoctorResult{Status: DoctorOK, Detail: "no node offers FrIDE yet; coding work waits until one does"}
+	}
+	if len(down) > 0 {
+		slices.Sort(down)
+		return DoctorResult{Status: DoctorWarn,
+			Detail: fmt.Sprintf("%d of %d nodes with FrIDE cannot take work: %s", len(down), len(ok)+len(down), strings.Join(down, "; ")),
+			Fix:    "on each, start FrIDE with fride serve --under-fridolin, and check fridolin node fride status and fridolin node status"}
+	}
+	slices.Sort(ok)
+	return DoctorResult{Status: DoctorOK, Detail: "FrIDE answers on " + strings.Join(ok, ", ")}
+}
+
+// checkNodesSeen warns about approved nodes the core has not heard from
+// for nodeStaleAfter.
+func checkNodesSeen(_ context.Context, env *DoctorEnv) DoctorResult {
+	list, res := readNodes(env)
+	if res != nil {
+		return *res
+	}
+	file := struct{ Nodes []doctorNode }{list}
+	now := env.now()
 	approved := 0
 	var stale []string
 	for _, n := range file.Nodes {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // setUmask sets the process umask for one test. The mode SQLite gives a new
@@ -220,6 +221,66 @@ func TestStoreMigratesAnUnversionedDatabase(t *testing.T) {
 		p, err := s.SentPoll(t.Context(), "old")
 		if err != nil || p.Brain != "" || p.Question != "Lunch?" || len(p.Options) != 2 {
 			t.Errorf("open %d: the old poll is %+v, %v", i+1, p, err)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// Each schema version a bridge.db can be at, a fresh one included, ends
+// at the newest with every table: M5's policy tables (migration 5) and
+// M6's fride_threads (migration 6) on a database that had neither, one
+// that had only the policy's, and a new one.
+func TestStoreMigratesFromEachVersion(t *testing.T) {
+	for from := 0; from <= len(appMigrations); from++ {
+		dbPath := filepath.Join(t.TempDir(), "bridge.db")
+		if from > 0 {
+			db, err := sql.Open("sqlite", "file:"+dbPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, stmt := range []string{`CREATE TABLE fridolin_version (version INTEGER NOT NULL)`, `INSERT INTO fridolin_version (version) VALUES (0)`} {
+				if _, err := db.Exec(stmt); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for v := 0; v < from; v++ {
+				tx, err := db.Begin()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := appMigrations[v](tx); err != nil {
+					t.Fatalf("from %d: migration %d: %v", from, v+1, err)
+				}
+				if _, err := tx.Exec(`UPDATE fridolin_version SET version = ?`, v+1); err != nil {
+					t.Fatal(err)
+				}
+				if err := tx.Commit(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			db.Close()
+		}
+		s, err := Open(dbPath, "error")
+		if err != nil {
+			t.Fatalf("from %d: %v", from, err)
+		}
+		var version int
+		if err := s.db.QueryRow(`SELECT version FROM fridolin_version`).Scan(&version); err != nil || version != len(appMigrations) {
+			t.Errorf("from %d: version %d, %v; want %d", from, version, err, len(appMigrations))
+		}
+		for _, table := range []string{"polls", "approvals", "skill_approvals", "policy_state", "fride_threads"} {
+			var n int
+			if err := s.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&n); err != nil || n != 1 {
+				t.Errorf("from %d: table %s: %d %v", from, table, n, err)
+			}
+		}
+		if _, err := s.AddFrideThread(t.Context(), FrideThread{Chat: "15551234567@s.whatsapp.net", Message: "x"}); err != nil {
+			t.Errorf("from %d: fride_threads: %v", from, err)
+		}
+		if err := s.SetPolicyState(t.Context(), "lockdown", "", time.Now()); err != nil {
+			t.Errorf("from %d: policy_state: %v", from, err)
 		}
 		if err := s.Close(); err != nil {
 			t.Fatal(err)

@@ -87,6 +87,18 @@ for compatibility.
   container; `compose.yaml` drops every capability and adds a seccomp
   profile. `fridolin doctor` checks the tailnet, the lease and the
   sandbox there.
+- FrIDE through nodes (docs/NODES.md, FrIDE): `fridolin node fride pair
+  --url http://127.0.0.1:PORT` pairs a node with FrIDE running as `fride
+  serve --under-fridolin`, and the node offers the capability `fride`
+  while FrIDE answers. With nodes on, the core brain hands every change to
+  code to FrIDE (`fride_task`, `fride_status`, `fride_reply`,
+  `fride_move`, `fride_close`; its prompt says so), placed on a node by
+  name or tag and FrIDE's memory check, or waiting until one can take it.
+  FrIDE's questions and news arrive in the chat that asked; `!move
+  <thread> <node>` moves a task through the vault; closing one archives
+  its workspace into the vault as `vault/workspaces/<task>.fride.tar.gz`. The
+  Nodes page shows each node's FrIDE, and `fridolin doctor` warns about a
+  node whose FrIDE does not answer. `!help` lists `!move`.
 
 - Settings → AI mode switches new brain runs between Claude (default) and
   Codex. Codex defaults to `gpt-6.1-sol` with high reasoning effort, with

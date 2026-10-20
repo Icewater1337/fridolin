@@ -93,6 +93,16 @@ test('a heartbeat refreshes the figures and keeps the card and its buttons', asy
   assert.equal(button(root, 'Revoke'), revoke);
 });
 
+test('a node whose FrIDE answers links its UI', async (t) => {
+  const fride = { url: 'http://127.0.0.1:7777', repos: ['api', 'web'] };
+  const { root } = await openPage(t, [node({ device: 'approved', commands: 'approved', declared: { ...declared, fride }, approved: { ...declared, fride }, effective: { ...declared, fride } })]);
+  assert.match(root.textContent, /May runexec \(hostname, git, go\), fs \(2 roots, 1 writable\), host, fride/);
+  const link = root.querySelectorAll('a').find((a) => a.textContent === 'http://127.0.0.1:7777');
+  assert.ok(link, 'a link to FrIDE');
+  assert.equal(link.getAttribute('href'), 'http://127.0.0.1:7777');
+  assert.match(root.textContent, /FrIDE: http:\/\/127\.0\.0\.1:7777 · api, web/);
+});
+
 test('the join code dialog shows the line to paste', async (t) => {
   const { root, calls } = await openPage(t, []);
   assert.match(root.textContent, /No nodes yet/);
@@ -137,6 +147,7 @@ test('nodes off says so and makes no codes', async (t) => {
 
 test('the capability words match the bridge\'s', () => {
   assert.equal(capSummary(declared), 'exec (hostname, git, go), fs (2 roots, 1 writable), host');
+  assert.equal(capSummary({ host: true, fride: { url: 'http://127.0.0.1:7777' } }), 'host, fride');
   assert.equal(capSummary({}), 'nothing');
   assert.equal(capSummary(null), 'nothing');
   assert.equal(ruleText({ name: 'git', args: ['status', 'log'] }), 'git status | log');

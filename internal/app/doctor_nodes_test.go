@@ -39,6 +39,9 @@ func TestDoctorNodeChecks(t *testing.T) {
 		{"fresh", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"approved","last_seen":"2026-10-20T11:58:00Z"},{"id":"r","name":"R","device":"revoked","last_seen":"2026-01-01T00:00:00Z"}]}`, "nodes-seen", DoctorOK, "1 approved nodes, each heard from", true},
 		{"stale", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"approved","last_seen":"2026-10-20T11:00:00Z"},{"id":"b","name":"B","device":"approved"},{"id":"c","name":"C","device":"approved","last_seen":"2026-10-20T11:59:00Z"}]}`, "nodes-seen", DoctorWarn, "2 of 3 approved nodes not heard from in 5m0s: A (a, 1h0m0s ago); B (b, never)", true},
 		{"broken registry", ":8766", "127.0.0.1:8766", `{`, "nodes-seen", DoctorWarn, "does not read", true},
+		{"no FrIDE", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"approved","last_seen":"2026-10-20T11:59:00Z"}]}`, "nodes-fride", DoctorOK, "no node offers FrIDE yet", true},
+		{"FrIDE answers", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"approved","last_seen":"2026-10-20T11:59:00Z","declared":{"fride":{"url":"http://127.0.0.1:7777"}},"approved":{"fride":{"url":"http://127.0.0.1:7777"}}}]}`, "nodes-fride", DoctorOK, "FrIDE answers on A (http://127.0.0.1:7777)", true},
+		{"FrIDE down", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"approved","last_seen":"2026-10-20T11:59:00Z","approved":{"fride":{"url":"http://127.0.0.1:7777"}}},{"id":"b","name":"B","device":"approved","last_seen":"2026-10-20T10:00:00Z","declared":{"fride":{"url":"http://127.0.0.1:7777"}},"approved":{"fride":{"url":"http://127.0.0.1:7777"}}}]}`, "nodes-fride", DoctorWarn, "2 of 2 nodes with FrIDE cannot take work: A (a, FrIDE does not answer); B (b, not heard from)", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

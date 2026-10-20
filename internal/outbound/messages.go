@@ -55,6 +55,7 @@ func HelpReply(groupTrigger string) string {
 		"• `!stop` — stop what I'm doing for this chat and drop its queued messages\n" +
 		"• `!reset` — like `!stop`, and the next message starts without this chat's earlier messages\n" +
 		"• `!fleet` — the machines connected to me as nodes (direct chats only)\n" +
+		"• `!move <thread> <node>` — move FrIDE's coding work to another node (direct chats only)\n" +
 		"• `!lockdown` — owner only: pause all work but reading until `!unlock`"
 	if groupTrigger != "" {
 		help += "\n\nIn this group, start your message with `" + groupTrigger + "` or reply to one of mine to address me, commands included."
@@ -260,4 +261,76 @@ const LockdownRefusedNotice = "🔒 The bridge is in lockdown, so this was not r
 // hour, the most policy.max_runs_per_hour allows.
 func RateLimitedNotice(max int) string {
 	return fmt.Sprintf("⏳ This chat started %d runs in the last hour, the most allowed. Try again later.", max)
+}
+
+// FrideNewsMessage says FrIDE's news in the chat.
+func FrideNewsMessage(n FrideNews) string {
+	body := frideBody(n.Text)
+	head := fmt.Sprintf("*FrIDE #%d*", n.Thread)
+	work := ""
+	if n.Task != "" {
+		work = ": task " + n.Task
+		if n.Branch != "" {
+			work += ", branch " + n.Branch
+		}
+	}
+	var b strings.Builder
+	switch n.Kind {
+	case "question":
+		fmt.Fprintf(&b, "❓ %s asks (on %s):\n\n%s\n\nAnswer here, and I'll pass it on.", head, n.Node, body)
+		return b.String()
+	case "started":
+		fmt.Fprintf(&b, "🛠️ %s started on %s%s.", head, n.Node, work)
+	case "done":
+		fmt.Fprintf(&b, "✅ %s is done on %s%s.", head, n.Node, work)
+		if n.Rationale != "" {
+			b.WriteString("\nRationale: " + n.Rationale)
+		}
+	case "failed":
+		fmt.Fprintf(&b, "⚠️ %s failed on %s.", head, n.Node)
+		if body != "" {
+			b.WriteString("\n" + body)
+		}
+		b.WriteString("\nAnswer here to make it try again.")
+		return b.String()
+	default:
+		fmt.Fprintf(&b, "🛠️ %s on %s:", head, n.Node)
+	}
+	if body != "" {
+		b.WriteString("\n" + body)
+	}
+	return b.String()
+}
+
+// FrideQueuedNotice says a thread waits for a node whose FrIDE can take
+// it, and why none can now.
+func FrideQueuedNotice(thread int64, why string) string {
+	return fmt.Sprintf("⏳ *FrIDE #%d* waits: no node with FrIDE can take it now (%s). It starts as soon as one can, and I'll say so here.", thread, why)
+}
+
+// FridePlacedNotice says a waiting thread went to node.
+func FridePlacedNotice(thread int64, node string) string {
+	return fmt.Sprintf("🛠️ *FrIDE #%d* went to %s now.", thread, node)
+}
+
+// FrideMoveUsage answers a !move that names no thread and node.
+const FrideMoveUsage = "🚚 Use `!move <thread> <node>` to move FrIDE's work to another node, e.g. `!move 3 laptop`."
+
+// FrideMoveGroupNotice answers !move in a group: the fleet is the owner's
+// business.
+const FrideMoveGroupNotice = "🚚 !move answers only in a direct chat."
+
+// FrideMovingNotice says a move began: it may take a while.
+func FrideMovingNotice(thread int64, node string) string {
+	return fmt.Sprintf("🚚 Moving *FrIDE #%d* to %s…", thread, node)
+}
+
+// FrideMovedNotice says a move is done.
+func FrideMovedNotice(thread int64, from, to, task string) string {
+	return fmt.Sprintf("🚚 *FrIDE #%d* moved from %s to %s: task %s continues there.", thread, from, to, task)
+}
+
+// FrideMoveFailedNotice says a move did not happen, and why.
+func FrideMoveFailedNotice(thread int64, why string) string {
+	return fmt.Sprintf("⚠️ *FrIDE #%d* did not move: %s", thread, why)
 }

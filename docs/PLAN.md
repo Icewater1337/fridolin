@@ -303,9 +303,9 @@ M6 — FrIDE through nodes:
 
 - [ ] FrIDE: `--under-fridolin` mode: fleet mode off, pairing token for the node agent, webhook on thread news; standalone behaviour untouched and covered by its existing tests
 - [ ] FrIDE: `fride task export | import` as a file bundle (branches, uncommitted changes, decision log, agent conversation)
-- [ ] fridolin: node capability `fride`: proxy to FrIDE's loopback API with the pairing token; advertised only while `fride serve` answers
-- [ ] fridolin: MCP tools `fride_task`, `fride_status`, `fride_reply`, `fride_move`, `fride_close` on the core brain; placement by tags and FrIDE's memory check; the "code goes to FrIDE" prompt rule
-- [ ] `!move <thread> <node>` through the vault; `fride_close` archives the workspace cold
+- [x] fridolin: node capability `fride`: proxy to FrIDE's loopback API with the pairing token; advertised only while `fride serve` answers
+- [x] fridolin: MCP tools `fride_task`, `fride_status`, `fride_reply`, `fride_move`, `fride_close` on the core brain; placement by tags and FrIDE's memory check; the "code goes to FrIDE" prompt rule
+- [x] `!move <thread> <node>` through the vault; `fride_close` archives the workspace cold
 - [ ] Gate: a task started from WhatsApp runs on the laptop, asks one question in the chat, reports done with the branch name; closing it leaves `workspaces/<task>.tar.zst` in the cold tier; FrIDE on the laptop still works standalone with the mode off
 
 M7 — Memory index and provenance:
