@@ -29,6 +29,11 @@ for compatibility.
   [Core, vault and nodes](docs/CONFIGURATION.md#core-vault-and-nodes).
   The config version stays 2.
 
+- Groundwork for the tiered vault (docs/PLAN.md, M3): the index, placement
+  policy, upload, eviction, hydration and rebuild, against B2 through
+  `rclone crypt` configured by environment variables only. Not active yet:
+  nothing changes for a running bridge until the vault settings arrive.
+
 ### Changed
 
 - Fridolin now builds for Windows (amd64 and arm64, without cgo). It is

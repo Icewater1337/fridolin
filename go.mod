@@ -3,6 +3,7 @@ module github.com/Icewater1337/fridolin
 go 1.26.0
 
 require (
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/mdp/qrterminal/v3 v3.2.1
 	go.mau.fi/whatsmeow v0.0.0-20260730092514-662ad1dc6900
 	golang.org/x/sys v0.49.0
