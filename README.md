@@ -564,6 +564,14 @@ macOS log is `~/Library/Logs/fridolin/stderr.log` (`tail -F` it), private to
 you; past 10 MB it moves to `stderr.log.1`, replacing the one before. On
 Linux, `journalctl --user -u fridolin -f`.
 
+### Running the core in a container
+
+The core can also run as the `fridolin-core` image with all of its state in
+one Docker volume, which is what moves between machines: `fridolin core
+start | stop | update` on the host, `fridolin core export | import |
+promote | status` to move it and to see which machine holds the core lease.
+See [docs/CORE.md](docs/CORE.md).
+
 ### Releases
 
 Each version tag (`v1.2.3`) builds archives for macOS (arm64, amd64) and Linux

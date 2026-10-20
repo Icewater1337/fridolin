@@ -1,0 +1,31 @@
+fridolin core — run, move and inspect the containerized core (docs/CORE.md)
+
+On the host that runs Docker:
+  fridolin core start [--compose PATH] [--image NAME] [--tag TAG]
+                       start the core container with the secrets from the
+                       keychain; makes the age identity when there is none
+  fridolin core stop   stop it (the volume stays)
+  fridolin core update pull the image of this version and recreate the container
+  fridolin core run [--] COMMAND...
+                       run a fridolin command in a one-off container on the
+                       volume, with the secrets: core import while the core
+                       is stopped, say (fridolin core run core import --latest)
+
+In the core (docker exec fridolin-core fridolin core ...):
+  fridolin core export           encrypt the data dir to the vault bucket
+  fridolin core import --latest [--force]
+                                 fetch, decrypt and check the latest export,
+                                 then put it in place of an empty data dir
+                                 (--force moves what is there to core/replaced-*)
+  fridolin core promote          take the core lease for this data dir
+  fridolin core status           who holds the core lease, and this device's id
+
+Flags of export, import, promote and status:
+  --config PATH     config file (default: $FRIDOLIN_CONFIG, else ~/.fridolin/config.json)
+  --data-dir DIR    the data dir (default: $FRIDOLIN_HOME, else the config's)
+  --store LOC       a folder, or an rclone remote:bucket (default:
+                    $FRIDOLIN_CORE_STORE, else the B2 bucket with the key in
+                    B2_VAULT_KEY_ID and B2_VAULT_KEY)
+  --bucket NAME     the vault bucket (default fridolin-vault)
+
+The age identity comes from FRIDOLIN_AGE_IDENTITY, which core start sets.

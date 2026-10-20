@@ -3,6 +3,7 @@ module github.com/Icewater1337/fridolin
 go 1.26.0
 
 require (
+	filippo.io/age v1.3.1
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/mdp/qrterminal/v3 v3.2.1
 	go.mau.fi/whatsmeow v0.0.0-20260730092514-662ad1dc6900
@@ -15,6 +16,7 @@ require (
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
+	filippo.io/hpke v0.4.0 // indirect
 	github.com/BurntSushi/toml v1.4.1-0.20240526193622-a339e1f7089c // indirect
 	github.com/beeper/argo-go v1.1.2 // indirect
 	github.com/coder/websocket v1.8.15 // indirect

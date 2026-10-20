@@ -1,0 +1,46 @@
+# The fridolin core: one container and one named volume (docs/CORE.md).
+#
+# `fridolin core start` runs this file with the secrets from the host's
+# keychain in the environment of `docker compose` only; the names below
+# without a value take theirs from there. Run by hand, the same works with
+# the variables exported in your shell:
+#
+#     docker compose -f container/compose.yaml up -d
+#
+# The volume holds the WhatsApp session: never run a second core on it,
+# and never remove it (docker compose down -v) without an export.
+name: fridolin
+
+services:
+  core:
+    image: ${FRIDOLIN_IMAGE:-fridolin-core}:${FRIDOLIN_VERSION:-latest}
+    container_name: fridolin-core
+    hostname: fridolin-core
+    restart: unless-stopped
+    init: false # tini is the image's PID 1
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN
+      - FRIDOLIN_AGE_IDENTITY
+      - TS_AUTHKEY
+      - B2_VAULT_KEY_ID
+      - B2_VAULT_KEY
+      - B2_SNAPSHOTS_KEY_ID
+      - B2_SNAPSHOTS_KEY
+      - FRIDOLIN_VAULT_CRYPT_PASSWORD
+      - FRIDOLIN_VAULT_CRYPT_PASSWORD2
+      - RESTIC_PASSWORD
+      - TZ=${FRIDOLIN_TZ:-UTC}
+    volumes:
+      - fridolin-data:/data
+    mem_limit: ${FRIDOLIN_MEMORY_LIMIT:-8g}
+    # The dashboard and local APIs on this machine only. The tailnet
+    # (tsnet, `core.tailnet`) is the way in from anywhere else; delete
+    # this mapping to leave that the only one. Both sides are http_listen's
+    # port: the dashboard accepts only requests addressed to it.
+    ports:
+      - "127.0.0.1:8765:8765"
+    stop_grace_period: 30s
+
+volumes:
+  fridolin-data:
+    name: ${FRIDOLIN_VOLUME:-fridolin-data}
