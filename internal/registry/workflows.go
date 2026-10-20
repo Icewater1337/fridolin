@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -208,16 +209,35 @@ func (g *Registry) Approve(id string, reviewed manifest.Manifest) error {
 }
 
 func (g *Registry) Remove(id string) error {
-	_, err := g.store.Update("", func(c *config.File) error {
+	_, err := g.store.UpdateTx("", func(c *config.File, tx *config.Tx) error {
 		for i, ref := range c.BrainDirs {
 			if ref.Approved != nil && ref.Approved.ID == id {
 				c.BrainDirs = slices.Delete(c.BrainDirs, i, i+1)
-				return nil
+				return g.dropGrantsOn(c, tx, id)
 			}
 		}
 		return apperr.New(apperr.NotFound, fmt.Sprintf("no brain %q", id))
 	})
 	return err
+}
+
+// dropGrantsOn takes brain id, which is being removed, out of the core
+// brain's grants, in its brain.json and the approved copy: a grant on a
+// brain that is not configured would leave the core brain unable to run.
+func (g *Registry) dropGrantsOn(c *config.File, tx *config.Tx, id string) error {
+	for _, ref := range c.BrainDirs {
+		if a := ref.Approved; a != nil && len(a.Grants[id]) > 0 {
+			if err := g.updateManifestIn(c, tx, a.ID, func(m *manifest.Manifest) error {
+				grants := maps.Clone(m.Grants)
+				delete(grants, id)
+				m.Grants = grants
+				return nil
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (g *Registry) RemoveDir(path string) error {

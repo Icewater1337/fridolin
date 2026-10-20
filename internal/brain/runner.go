@@ -17,6 +17,10 @@ type Runner interface {
 // before the process is spawned. It must not be called for a refused run.
 type RunSpec struct {
 	ID, Dir, Prompt string
-	Settings        *Settings
-	BeforeStart     func()
+	// Chat and Source are the JID and source of the message the run
+	// answers: what the run may do through the bridge's tools depends on
+	// them (a delegated task's run gets no delegate tool).
+	Chat, Source string
+	Settings     *Settings
+	BeforeStart  func()
 }

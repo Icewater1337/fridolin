@@ -42,9 +42,9 @@ type BrainHooks struct {
 	// using Codex's format; credentials travel in the environment, not argv.
 	CodexSetup func(brainID string) (args, env []string, prompt string, err error)
 	// RunEnv adds variables to one run's environment (the brain API's
-	// address and a token for the run), and returns what to call once the
-	// run is over.
-	RunEnv func(brainID string) (env []string, done func())
+	// address and a token for the run) and the MCP server with the
+	// bridge's tools, and says what to call once the run is over (Done).
+	RunEnv func(run runInfo) runAccess
 }
 
 // brainHooksSink keeps command callbacks compatible while runtime users move

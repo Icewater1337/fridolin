@@ -49,6 +49,10 @@ const ObserveOnlyNote = "<observe_only>\nNobody addressed the new message to you
 // extractAskQuestion), and its final reply follows it there.
 const AskUserQuestionNote = "Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question."
 
+// DelegatedNote tells a sub-brain's run for a delegated task where its
+// answer goes.
+const DelegatedNote = "Your final reply goes back to the core brain, which waits for it, and to nobody else: no chat sees it, and nobody can answer a question while you work. Do the task with what you have, and put the result, or what is missing, in your final reply."
+
 // Build writes the -p prompt: the brain's instructions, the chat's
 // recent history, what the brain sent since the new message came in, what
 // the run is about, then the new message. Everything in it that someone
@@ -99,12 +103,19 @@ func Build(in Input) string {
 	switch {
 	case in.BuildChat:
 		where = "the site-building chat on the dashboard's Build page, not a WhatsApp chat"
+	case m.Source == chat.SourceDelegate:
+		where = "a task the core brain delegated to you, not a WhatsApp chat"
 	case m.IsGroup():
 		where = "the WhatsApp group " + promptJSON(m.JID)
 	}
 	fmt.Fprintf(&sb, "It is now %s. This chat is %s.", in.Now.Format(promptNowLayout), where)
-	if m.Source == chat.SourceIngest {
+	switch m.Source {
+	case chat.SourceIngest:
 		sb.WriteString(" The new message did not come from it: its files were handed to you outside WhatsApp, and your reply is sent to this chat.")
+	case chat.SourceDelegate:
+		sb.WriteString(" " + DelegatedNote)
+	case chat.SourceDelegateResult:
+		sb.WriteString(" The new message did not come from it: it is the result of a task you delegated to another brain, which came after you stopped waiting for it. Your reply is sent to this chat.")
 	}
 	sb.WriteString("\n\n")
 
@@ -118,9 +129,13 @@ func Build(in Input) string {
 	}
 	sb.WriteString("\n\n")
 
-	if in.ObserveOnly {
+	switch {
+	case in.ObserveOnly:
 		sb.WriteString(ObserveOnlyNote + "\n\n")
-	} else {
+	case m.Source == chat.SourceDelegate:
+		// Nobody can answer a question mid-run: the core brain waits for
+		// the final reply only.
+	default:
 		sb.WriteString(AskUserQuestionNote + "\n\n")
 	}
 	msg := promptMessage{From: in.name(m.Sender), Text: m.TextWithQuote(), Files: m.Media}

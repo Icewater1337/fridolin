@@ -220,3 +220,54 @@ test('the settings say what untagged group messages get, and save it', async (t)
   const saved = calls.filter((c) => c.method === 'PUT').map((c) => [c.path, c.body.manifest.observe]);
   assert.deepEqual(saved, [['/api/brains/work', 'run']]);
 });
+
+const other = (id, name, extra = {}) => ({ id, name, path: `/Users/you/${id}`, status: 'ok', issues: [], manifest: { version: 1, id, name, routing: { handles_dms: false, default: false, groups: [] }, ...extra } });
+const save = async (root, calls) => {
+  root.querySelector('.brain-form').dispatchEvent(new Event('submit', { cancelable: true }));
+  await settle();
+  return calls.filter((c) => c.method === 'PUT' && c.path === '/api/brains/work').map((c) => c.body.manifest);
+};
+
+test('the core brain’s grants are edited per brain and saved in its brain.json', async (t) => {
+  const core = { ...view('Work'), manifest: { ...manifest('Work'), role: 'core', grants: { family: ['read'] } } };
+  const { root, calls } = await openPage(t, { brains: [core, other('family', 'Family'), other('taxes', 'Taxes')] });
+  const set = fieldset(root, 'Other brains');
+  assert.ok(set, 'the form has the core brain’s section');
+  const coreSw = set.querySelector('input[role=switch]');
+  assert.equal(coreSw.checked, true);
+  const box = (label) => set.querySelectorAll('input[type=checkbox]').find((i) => i.getAttribute('aria-label') === label);
+  assert.equal(box('Read notes: Family').checked, true);
+  assert.equal(box('Delegate: Family').checked, false);
+  assert.equal(box('Delegate: Taxes').checked, false);
+
+  box('Delegate: Family').checked = true;
+  box('Delegate: Family').dispatchEvent(new Event('change', { bubbles: true }));
+  box('Files: Taxes').checked = true;
+  box('Files: Taxes').dispatchEvent(new Event('change', { bubbles: true }));
+  const [saved] = await save(root, calls);
+  assert.equal(saved.role, 'core');
+  assert.deepEqual(saved.grants, { family: ['delegate', 'read'], taxes: ['files'] }, 'kinds sorted, as brain.json keeps them');
+});
+
+test('turning the core brain off saves neither role nor grants', async (t) => {
+  const core = { ...view('Work'), manifest: { ...manifest('Work'), role: 'core', grants: { family: ['delegate'] } } };
+  const { root, calls } = await openPage(t, { brains: [core, other('family', 'Family')] });
+  const coreSw = fieldset(root, 'Other brains').querySelector('input[role=switch]');
+  coreSw.checked = false;
+  coreSw.dispatchEvent(new Event('change', { bubbles: true }));
+  const [saved] = await save(root, calls);
+  assert.equal('role' in saved, false);
+  assert.equal('grants' in saved, false);
+});
+
+test('a sub-brain shows no grants, and cannot become a second core', async (t) => {
+  const { root, calls } = await openPage(t, { brains: [view('Work'), other('main', 'Main', { role: 'core' })] });
+  const set = fieldset(root, 'Other brains');
+  const coreSw = set.querySelector('input[role=switch]');
+  assert.equal(coreSw.checked, false);
+  assert.equal(coreSw.disabled, true, 'Main is the core brain');
+  assert.match(set.textContent, /Main is the core brain, and there is one/);
+  assert.equal(set.querySelector('.grants-editor').parentNode.parentNode.hidden, true, 'no grants on a sub-brain');
+  const [saved] = await save(root, calls);
+  assert.equal('role' in saved || 'grants' in saved, false);
+});

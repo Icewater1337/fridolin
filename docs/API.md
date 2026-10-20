@@ -165,6 +165,39 @@ brain. The request returns at once; the run happens afterwards.
 | `403` | `{"error": …}` | A brain named another brain. |
 | `404` | `{"error": …}` | `ingest.enabled` is off. |
 
+## The run's MCP server: `GET /brain/mcp/tools`, `POST /brain/mcp/call`
+
+Every run of Claude Code (and of Codex) is started with an MCP server of
+the bridge's own, `fridolin mcp --run <run id>`, which the CLI runs over
+stdio from the run's `--mcp-config` file in `run-tokens/<brain>/` (Codex:
+`-c mcp_servers.fridolin.*`). That server knows no tools itself: it asks
+the bridge on these two routes, with the run's token from
+`FRIDOLIN_BRAIN_TOKEN_FILE` and the run id in an `X-Fridolin-Run` header,
+which must be the token's run. The bridge decides from the token which
+brain, run and chat is asking, and from that brain's approved
+`brain.json` which tools the run gets ([BRAINS.md](BRAINS.md#the-core-brain-and-its-grants)):
+nothing the model sends can change that. The scripts token is refused
+here, since it is no run's.
+
+`GET /brain/mcp/tools` answers `{"tools": [...]}`, each as MCP's
+`tools/list` has it (`name`, `description`, `inputSchema`).
+`POST /brain/mcp/call` takes `{"name": "<tool>", "arguments": {…}}` and
+answers as MCP's `tools/call` does: `{"content": [{"type": "text",
+"text": …}], "isError": …}`, `isError` for a tool that ran and failed.
+A `delegate` call waits for the sub-brain's answer, up to its
+`timeout_seconds`.
+
+| Status | When |
+| --- | --- |
+| `200` | The tools, or the call's result (which can be a failure the model reads). |
+| `400` | The body is not `{"name": …, "arguments": …}`. |
+| `401` | No token, or not a token of a run in progress. |
+| `404` | The run has no tool of that name: one it is not granted is as absent as one that does not exist. |
+| `412` | `X-Fridolin-Run` names another run than the token's. |
+
+These two are not a contract for scripts: they serve `fridolin mcp`, and
+change with it.
+
 ## Limits
 
 A request body may be 1 MiB at most; a larger one is refused with `400`.

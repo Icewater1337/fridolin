@@ -39,6 +39,19 @@ for compatibility.
   values, and the dashboard's Settings keeps them when it saves. See
   [Core, vault and nodes](docs/CONFIGURATION.md#core-vault-and-nodes).
   The config version stays 2.
+- A core brain and grants: `brain.json` takes `"role": "core"` on one
+  brain and, on it only, `grants` per other brain (`delegate`, `read`,
+  `files`), edited on the core brain's page under *Other brains*. Every
+  run now starts Fridolin's own MCP server (`fridolin mcp --run <id>`,
+  passed with a second `--mcp-config`, or Codex's `mcp_servers.fridolin`),
+  which serves the tools the bridge gives that run: `delegate` and
+  `list_brains` for the granted brains on core runs, `read_memory`, and
+  `ask_user` / `request_approval`, which say they are not available yet.
+  A delegated task runs in the sub-brain's own queue and sandbox, its
+  answer goes back to the core only, and each delegation is a line in
+  `<data_dir>/audit/YYYY-MM.jsonl`. See
+  [the core brain](docs/BRAINS.md#the-core-brain-and-its-grants). Without
+  a core brain nothing changes but the tools every run is offered.
 
 - Groundwork for the tiered vault (docs/PLAN.md, M3): the index, placement
   policy, upload, eviction, hydration and rebuild, against B2 through

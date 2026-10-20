@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"maps"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -64,6 +65,10 @@ type harness struct {
 	stop func()
 	// sentBefore is what the bridges before a Reopen sent, oldest first.
 	sentBefore []sent
+	// listen is the address the bridge answers at: config.DefaultHTTPListen,
+	// on which nothing listens, or for newServedHarness a real one, where
+	// the programs its runs start reach it.
+	listen string
 }
 
 // harnessGroup is the group the harness's config allows, and harnessDM the
@@ -79,6 +84,24 @@ const (
 // of the base config, which allows harnessDM and harnessGroup and turns
 // the debounce off; "" or "{}" keeps the base config.
 func newHarness(t *testing.T, cfgJSON string) *harness {
+	t.Helper()
+	return startHarness(t, cfgJSON, nil)
+}
+
+// newServedHarness is newHarness with the HTTP API served on a port of
+// loopback, as the running bridge serves it: the tools a run starts, such
+// as its MCP server (fridolin mcp), reach the bridge there. The harness
+// still never calls App.Start.
+func newServedHarness(t *testing.T, cfgJSON string) *harness {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return startHarness(t, cfgJSON, ln)
+}
+
+func startHarness(t *testing.T, cfgJSON string, ln net.Listener) *harness {
 	t.Helper()
 	root := fsx.Canonical(t.TempDir())
 	home := filepath.Join(root, "home")
@@ -100,6 +123,11 @@ func newHarness(t *testing.T, cfgJSON string) *harness {
 		}
 		maps.Copy(cfg, extra)
 	}
+	listen := config.DefaultHTTPListen
+	if ln != nil {
+		listen = ln.Addr().String()
+		cfg["http_listen"] = listen
+	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		t.Fatal(err)
@@ -118,8 +146,15 @@ func newHarness(t *testing.T, cfgJSON string) *harness {
 		t.Fatal(err)
 	}
 	b.outbox.Start()
-	h := &harness{t: t, b: b, h: b.newHTTPHandler(config.DefaultHTTPListen), root: root, home: home, cfg: path, stop: sync.OnceFunc(b.Stop)}
+	h := &harness{t: t, b: b, h: b.newHTTPHandler(listen), root: root, home: home, cfg: path, stop: sync.OnceFunc(b.Stop), listen: listen}
 	t.Cleanup(h.stop)
+	if ln != nil {
+		// Through the harness's own handler, so that a Reopen serves the
+		// new bridge at the same address.
+		srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { h.h.ServeHTTP(w, r) }), ReadHeaderTimeout: 5 * time.Second}
+		go func() { _ = srv.Serve(ln) }()
+		t.Cleanup(func() { srv.Close() })
+	}
 	return h
 }
 
@@ -151,7 +186,7 @@ func (h *harness) Reopen() {
 		h.t.Fatal(err)
 	}
 	b.outbox.Start()
-	h.b, h.h, h.stop = b, b.newHTTPHandler(config.DefaultHTTPListen), sync.OnceFunc(b.Stop)
+	h.b, h.h, h.stop = b, b.newHTTPHandler(h.listen), sync.OnceFunc(b.Stop)
 	h.t.Cleanup(h.stop)
 	b.resume(context.Background())
 }
@@ -168,7 +203,7 @@ func (h *harness) Do(method, path string, body any, mutate ...func(*http.Request
 		}
 		rd = bytes.NewReader(data)
 	}
-	r := httptest.NewRequest(method, "http://"+config.DefaultHTTPListen+path, rd)
+	r := httptest.NewRequest(method, "http://"+h.listen+path, rd)
 	r.Header.Set("X-Bridge-Token", h.token())
 	if method != http.MethodGet && method != http.MethodHead {
 		r.Header.Set("X-Bridge-Dashboard", "1")
@@ -189,7 +224,7 @@ func (h *harness) Do(method, path string, body any, mutate ...func(*http.Request
 // adjusts it first.
 func (h *harness) Script(method, path, body string, mutate ...func(*http.Request)) *httptest.ResponseRecorder {
 	h.t.Helper()
-	r := httptest.NewRequest(method, "http://"+config.DefaultHTTPListen+path, strings.NewReader(body))
+	r := httptest.NewRequest(method, "http://"+h.listen+path, strings.NewReader(body))
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Authorization", "Bearer "+h.readToken("scripts.token"))
 	for _, m := range mutate {

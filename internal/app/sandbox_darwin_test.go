@@ -979,7 +979,8 @@ func TestSandboxKeepsRunTokensToTheirBrain(t *testing.T) {
 		"g": tb.addFolderBrain(t, manifest.Manifest{ID: "g", Name: "G", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}),
 	}
 	tokenFile := func(brain string) string {
-		env, done := tb.brainRunEnv(brain)
+		access := tb.brainRunEnv(runInfo{Brain: brain})
+		env, done := access.Env, access.Done
 		t.Cleanup(done)
 		for _, kv := range env {
 			if v, ok := strings.CutPrefix(kv, "FRIDOLIN_BRAIN_TOKEN_FILE="); ok {
@@ -1035,6 +1036,23 @@ func TestSandboxedRunReachesTheBrainAPI(t *testing.T) {
 	testutil.WaitFor(t, 20*time.Second, "the reply", func() bool { return len(tb.sentTo(apiTestDM)) > 0 })
 	if reply := tb.sentTo(apiTestDM)[0]; !strings.Contains(reply, `polls=0 {`) || !strings.Contains(reply, `"question": "Lunch?"`) {
 		t.Errorf("the sandboxed run's fridolin polls answered:\n%s", reply)
+	}
+}
+
+// TestSandboxedRunStartsItsMCPServer: under the real sandbox-exec, the
+// CLI reads the run's --mcp-config and starts `fridolin mcp`, which reads
+// the run's token and asks the bridge for the run's tools; a delegated
+// task runs in the sub-brain's own sandbox and comes back.
+func TestSandboxedRunStartsItsMCPServer(t *testing.T) {
+	requireSandboxExec(t)
+	t.Setenv("FRIDOLIN_FAKE_MCP", `[{"tool":""},{"brain":"core","tool":"delegate","args":{"brain":"family","task":"ping"}}]`)
+	h := newServedHarness(t, `{"sandbox": {"enabled": true}}`)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	h.AddBrain(manifest.Manifest{ID: "family", Name: "Family", Routing: manifest.Routing{Groups: []string{harnessGroup}}})
+	h.grant(map[string][]string{"family": {"delegate"}})
+	reply := h.Answer(inbound{JID: harnessDM, Text: "hi #mcp"})
+	if !strings.Contains(reply, "[core:list] delegate,list_brains,read_memory") || !strings.Contains(reply, "[core:delegate] echo:"+filepath.Join(h.Home(), "family")+":core says: ping") {
+		t.Errorf("the sandboxed core run's tools:\n%s", reply)
 	}
 }
 

@@ -16,5 +16,7 @@
   "high",
   "--disallowed-tools",
   "WebFetch",
+  "--mcp-config",
+  "<HOME>/.fridolin/run-tokens/main/run-<RUN>.mcp.json",
   "-p"
 ]

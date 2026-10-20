@@ -82,6 +82,8 @@ var routeInventory = []httpRoute{
 	{"POST", "/brain/calendar/events", classBrainRun, ""},
 	{"DELETE", "/brain/calendar/events/{id}", classBrainRun, "/brain/calendar/events/e1"},
 	{"POST", "/brain/calendar/freebusy", classBrainRun, ""},
+	{"GET", "/brain/mcp/tools", classBrainRun, ""},
+	{"POST", "/brain/mcp/call", classBrainRun, ""},
 
 	// Outside the API's guard, on the outer mux.
 	{"POST", "/api/login", classLogin, ""},

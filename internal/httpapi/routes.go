@@ -215,6 +215,8 @@ func (a *BrainAPI) Handler() http.Handler {
 	mux.HandleFunc("POST /brain/calendar/events", a.brainCall(a.calendarCall(a.brainCalendarCreate)))
 	mux.HandleFunc("DELETE /brain/calendar/events/{id}", a.brainCall(a.calendarCall(a.brainCalendarDelete)))
 	mux.HandleFunc("POST /brain/calendar/freebusy", a.brainCall(a.calendarCall(a.brainCalendarBusy)))
+	mux.HandleFunc("GET /brain/mcp/tools", a.brainCall(a.brainMCPTools))
+	mux.HandleFunc("POST /brain/mcp/call", a.brainCall(a.brainMCPCall))
 	mux.HandleFunc("/brain/", func(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusNotFound, "no such brain API call: "+r.Method+" "+r.URL.Path)
 	})

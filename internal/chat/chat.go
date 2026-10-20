@@ -56,7 +56,34 @@ const (
 	SourceIngest = "ingest"
 	// SourceDev is the dashboard's dev page (--no-whatsapp).
 	SourceDev = "dev"
+	// SourceDelegate is a task the core brain delegated to a sub-brain, on
+	// a chat of its own (DelegateChatPrefix): what the run answers goes
+	// back to the core brain's waiting run, never to a WhatsApp chat.
+	SourceDelegate = "delegate"
+	// SourceDelegateResult is the result of a delegated task that came
+	// after the core brain stopped waiting for it, handed to the core
+	// brain in the chat its run was for: its answer goes to that chat.
+	SourceDelegateResult = "delegate-result"
 )
+
+// DelegateChatPrefix starts the JID of a delegated task's chat,
+// "delegate:<run id of the core brain's run>": no WhatsApp chat has one.
+const DelegateChatPrefix = "delegate:"
+
+// IsDelegateChat reports whether jid is a delegated task's chat.
+func IsDelegateChat(jid string) bool { return strings.HasPrefix(jid, DelegateChatPrefix) }
+
+// HandedIn reports whether a program handed m to a brain rather than
+// someone writing it in a chat: files through /ingest or Plaud, a task
+// the core brain delegated or its late result. Such a message is never a
+// command, and neither interrupts a run nor is replaced by a later one.
+func (m Inbound) HandedIn() bool {
+	switch m.Source {
+	case SourceIngest, SourceDelegate, SourceDelegateResult:
+		return true
+	}
+	return false
+}
 
 // Quote is the message a reply quotes.
 type Quote struct {

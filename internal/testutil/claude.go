@@ -98,7 +98,7 @@ func runFakeClaude(version string, polls func(io.Writer) int) {
 			}
 		}
 	}
-	if path := os.Getenv("FRIDOLIN_FAKE_WAIT_FILE"); path != "" {
+	if path := os.Getenv("FRIDOLIN_FAKE_WAIT_FILE"); path != "" && (os.Getenv("FRIDOLIN_FAKE_WAIT_BRAIN") == "" || os.Getenv("FRIDOLIN_FAKE_WAIT_BRAIN") == os.Getenv("FRIDOLIN_BRAIN_ID")) {
 		for {
 			if _, err := os.Stat(path); err == nil {
 				break
@@ -152,6 +152,9 @@ func runFakeClaude(version string, polls func(io.Writer) int) {
 	msg := NewMessage(prompt)
 	wd, _ := os.Getwd()
 	out := fmt.Sprintf("echo:%s:%s", wd, msg)
+	if steps := os.Getenv("FRIDOLIN_FAKE_MCP"); steps != "" && strings.Contains(msg, FakeMCPTrigger) {
+		out += fakeMCP(args, steps)
+	}
 	if p := os.Getenv("FRIDOLIN_FAKE_READ"); p != "" {
 		switch _, err := os.ReadFile(p); {
 		case err == nil:

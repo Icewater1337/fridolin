@@ -40,6 +40,7 @@ GET /api/whatsapp/groups
 GET /api/whatsapp/qr
 GET /brain/calendar/calendars
 GET /brain/calendar/events
+GET /brain/mcp/tools
 GET /brain/polls
 GET /builder/context
 GET /health
@@ -86,6 +87,7 @@ POST /api/token/rotate
 POST /api/whatsapp/pair
 POST /brain/calendar/events
 POST /brain/calendar/freebusy
+POST /brain/mcp/call
 POST /builder/check
 POST /builder/preview
 POST /builder/propose

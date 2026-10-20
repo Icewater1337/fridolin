@@ -57,6 +57,8 @@ Run by brains, inside a run (each prints JSON; -h shows its flags):
   fridolin polls             the results of the polls the brain sent
   fridolin calendar COMMAND  the brain's Google Calendar: calendars, list,
                              create, free, delete
+  fridolin mcp --run ID      the MCP server with Fridolin's tools for the run
+                             (the bridge has each run start it)
 
 Common flags:
   --config PATH     config file (default: $FRIDOLIN_CONFIG, else
@@ -94,6 +96,8 @@ func Main() {
 		initCmd(args)
 	case "paths":
 		os.Exit(pathsCmd(args, os.Stdout, os.Stderr))
+	case "mcp":
+		os.Exit(mcpCmd(args))
 	case "mcp-site":
 		mcpSiteCmd()
 	case "service":
