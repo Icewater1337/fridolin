@@ -9,16 +9,20 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"maps"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/memindex"
 	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
@@ -91,6 +95,11 @@ type DoctorEnv struct {
 	// Dial opens a TCP connection to address and closes it again.
 	Dial func(ctx context.Context, address string) error
 	Now  func() time.Time
+	// MemorySelfTest runs the memory index's provenance gate on a
+	// scratch brain (memindex.SelfTest); MemoryStale lists what a brain's
+	// index does not hold as it is on disk (memindex.Stale).
+	MemorySelfTest func(ctx context.Context) error
+	MemoryStale    func(ctx context.Context, b memindex.Brain) ([]string, error)
 }
 
 // DoctorRegistry is every check, in the order doctor prints them. Later
@@ -113,6 +122,7 @@ var DoctorRegistry = []DoctorCheck{
 	toolCheck("age", "M1", []string{"--version"}, "age", "age"),
 	{ID: "nodes-port", Title: "node port", Required: true, Applies: nodesOn, Run: checkNodesPort},
 	{ID: "nodes-seen", Title: "approved nodes heard from", Applies: nodesOn, Run: checkNodesSeen},
+	{ID: "memory-index", Title: "memory index and its provenance gate", Required: true, Applies: memoryEnabled, Run: checkMemoryIndex},
 }
 
 // The host secrets doctor looks for (docs/PLAN.md, M1 and M3). It asks
@@ -278,6 +288,15 @@ func SystemDoctorEnv(configFlag string) *DoctorEnv {
 		ReadFile:  os.ReadFile,
 		Glob:      filepath.Glob,
 		FreeBytes: platform.FreeBytes,
+		MemorySelfTest: func(ctx context.Context) error {
+			dir, err := os.MkdirTemp("", "fridolin-doctor-memory-*")
+			if err != nil {
+				return err
+			}
+			defer os.RemoveAll(dir)
+			return memindex.SelfTest(ctx, dir)
+		},
+		MemoryStale: memindex.Stale,
 		WriteProbe: func(dir string) error {
 			f, err := os.CreateTemp(dir, ".fridolin-doctor-*")
 			if err != nil {
@@ -695,4 +714,57 @@ func (env *DoctorEnv) addSecretFix(missing []string) string {
 		}
 	}
 	return strings.Join(cmds, "; ")
+}
+
+// memoryBrains are the brains whose approved brain.json uses the memory
+// index (memory.inject or memory.consolidate), by id, with their folders.
+func memoryBrains(env *DoctorEnv) map[string]string {
+	out := map[string]string{}
+	if env.Config == nil {
+		return out
+	}
+	for _, ref := range env.Config.BrainDirs {
+		if ref.Approved == nil {
+			continue
+		}
+		if mem := manifest.MemoryOf(*ref.Approved); mem.Inject || mem.Consolidate != "" {
+			out[ref.Approved.ID] = ref.Dir(env.Home)
+		}
+	}
+	return out
+}
+
+func memoryEnabled(env *DoctorEnv) bool { return len(memoryBrains(env)) > 0 }
+
+// checkMemoryIndex is M7's gate: the provenance rule holds on this build
+// (an untrusted fact is never recalled, the owner's is, with its anchor),
+// and each brain that uses the index has one that holds its files as they
+// are. The bridge syncs it before every run that recalls and every 30
+// seconds, so a stale one means the bridge is not running or cannot read
+// the folder.
+func checkMemoryIndex(ctx context.Context, env *DoctorEnv) DoctorResult {
+	if env.MemorySelfTest != nil {
+		if err := env.MemorySelfTest(ctx); err != nil {
+			return DoctorResult{Status: DoctorFail, Detail: "the provenance gate failed on this build: " + err.Error(), Fix: "report it: untrusted notes could reach a prompt; turn memory.inject off meanwhile"}
+		}
+	}
+	brains := memoryBrains(env)
+	ids := slices.Sorted(maps.Keys(brains))
+	var notes []string
+	status, fix := DoctorOK, ""
+	for _, id := range ids {
+		b := memoryBrain(env.Config.Layout(), env.Config, id, brains[id])
+		stale, err := env.MemoryStale(ctx, b)
+		switch {
+		case err != nil:
+			status, fix = DoctorWarn, "fridolin memory reindex --brain "+id
+			notes = append(notes, id+": no index yet")
+		case len(stale) > 0:
+			status, fix = DoctorWarn, "fridolin memory reindex --brain "+id+" (or start the bridge, which keeps it up to date)"
+			notes = append(notes, fmt.Sprintf("%s: %d files changed since it was indexed", id, len(stale)))
+		default:
+			notes = append(notes, id+": up to date")
+		}
+	}
+	return DoctorResult{Status: status, Detail: "gate ok; " + strings.Join(notes, "; "), Fix: fix}
 }

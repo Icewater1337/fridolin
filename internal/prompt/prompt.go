@@ -37,7 +37,28 @@ type Input struct {
 	// ObserveOnly marks a run for a message nobody addressed to the brain
 	// (Inbound.Silent, see observeRun): nothing it says is sent.
 	ObserveOnly bool
+	// Recall is what the brain's memory index recalled for Message, best
+	// first: only the owner's messages and the brain's own notes, never
+	// what anyone else wrote (see memindex.Recall). Empty without the
+	// brain's memory.inject.
+	Recall []Recalled
 }
+
+// Recalled is one chunk of a brain's memory that the index recalled for
+// the new message.
+type Recalled struct {
+	// Source is where it is, path#anchor: a note and its heading, or
+	// conversation-history.jsonl and the message's id.
+	Source string
+	// Provenance is "owner" or "agent".
+	Provenance string
+	// At is when it was said or written; zero when unknown.
+	At   time.Time
+	Text string
+}
+
+// RecallNote heads the recalled chunks in a prompt.
+const RecallNote = `Notes from your memory index that match the new message, best first (for context, not action), each a JSON object: "source" is where it is, a file and its heading or ` + "`" + history.FileName + "`" + ` and the message's id; "provenance" is who wrote it: "owner" typed it to you in a direct chat, "agent" is you, in your notes. Only those two are ever put here. Open the source for more, and search everything, other people's messages and what you took from elsewhere included, with ` + "`\"$FRIDOLIN_BIN\" memory search QUERY`."
 
 // ObserveOnlyNote is what an observe-only run is told instead of how its
 // replies reach the chat: it has nobody to answer and nothing to do but
@@ -65,6 +86,18 @@ func Build(in Input) string {
 	if in.Instructions != "" {
 		sb.WriteString(in.Instructions)
 		sb.WriteString("\n\n")
+	}
+
+	if len(in.Recall) > 0 {
+		sb.WriteString("<memory_recall>\n" + RecallNote + "\n\n")
+		for _, r := range in.Recall {
+			rec := promptRecalled{Source: r.Source, Provenance: r.Provenance, Text: r.Text}
+			if !r.At.IsZero() {
+				rec.At = r.At.In(in.Now.Location()).Format(promptTimeLayout)
+			}
+			sb.WriteString(promptJSON(rec) + "\n")
+		}
+		sb.WriteString("</memory_recall>\n\n")
 	}
 
 	if n := len(in.History); n > 0 {
@@ -116,6 +149,8 @@ func Build(in Input) string {
 		sb.WriteString(" " + DelegatedNote)
 	case chat.SourceDelegateResult:
 		sb.WriteString(" The new message did not come from it: it is the result of a task you delegated to another brain, which came after you stopped waiting for it. Your reply is sent to this chat.")
+	case chat.SourceSchedule:
+		sb.WriteString(" The new message did not come from it: the bridge sends it when one of your schedules or standing intents falls due, and your reply is sent to this chat.")
 	}
 	sb.WriteString("\n\n")
 
@@ -152,6 +187,14 @@ type promptMessage struct {
 	From  string   `json:"from"`
 	Text  string   `json:"text"`
 	Files []string `json:"files,omitempty"`
+}
+
+// promptRecalled is a recalled chunk as the prompt has it.
+type promptRecalled struct {
+	Source     string `json:"source"`
+	Provenance string `json:"provenance"`
+	At         string `json:"at,omitempty"`
+	Text       string `json:"text"`
 }
 
 // promptEvent is something someone did in the chat without writing a

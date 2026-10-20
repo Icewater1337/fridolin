@@ -15,6 +15,8 @@ const (
 	Unavailable
 	TooLarge
 	BadJSON
+	// Forbidden is a caller that may not do what it asked.
+	Forbidden
 )
 
 type Error struct {

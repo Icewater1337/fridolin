@@ -25,7 +25,8 @@ has no Go package; build with `go build -o bin/fridolin ./cmd/fridolin`.
 | `httpapi` | HTTP route handlers, authentication, guards, response types and error mapping. |
 | `store`, `history`, `activity` | SQLite persistence, append-only conversation history and bounded activity feed. |
 | `vault`, `cloud` | Tiered storage (not wired into the bridge yet): the vault.db index, placement policy, upload, eviction, hydration, rebuild and brain scopes; the object-store interface with its rclone implementation (remotes from environment variables only) and a folder fake. |
-| `fsx`, `platform`, `jsonx`, `textx`, `chat`, `trigger` | Filesystem/process boundaries and shared value operations. |
+| `memindex`, `intent` | A brain's derived memory index (SQLite FTS5 with provenance) and its standing intents and scheduled jobs. |
+| `fsx`, `platform`, `jsonx`, `textx`, `chat`, `trigger` | Filesystem/process boundaries and shared value operations; `trigger` holds keyword triggers and schedules. |
 | `logx`, `version`, `apperr`, `testutil`, `archtest` | Logging, build identity, domain errors, test helpers and dependency checks. |
 | `web`, `examples`, `site`, `container` at the repository root | Embedded dashboard, starter files, site runtime assets, and the core image's build files with the compose file `fridolin core start` runs. |
 

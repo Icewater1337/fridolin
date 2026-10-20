@@ -118,6 +118,7 @@ func NewAPIMux(d APIDeps) http.Handler {
 	mux.HandleFunc("PUT /api/brains/{id}", d.Brains().Update)
 	mux.HandleFunc("POST /api/brains/{id}/approve", d.Brains().Approve)
 	mux.HandleFunc("DELETE /api/brains/{id}", d.Brains().Remove)
+	mux.HandleFunc("DELETE /api/brains/{id}/intents/{intent}", d.Brains().RemoveIntentOf)
 	mux.HandleFunc("POST /api/brains/{id}/stop", d.Connection().StopRun)
 	mux.HandleFunc("DELETE /api/brain-dirs", d.Brains().RemoveDir)
 
@@ -226,6 +227,10 @@ func (a *BrainAPI) Handler() http.Handler {
 	mux.HandleFunc("POST /brain/calendar/freebusy", a.brainCall(a.calendarCall(a.brainCalendarBusy)))
 	mux.HandleFunc("GET /brain/mcp/tools", a.brainCall(a.brainMCPTools))
 	mux.HandleFunc("POST /brain/mcp/call", a.brainCall(a.brainMCPCall))
+	mux.HandleFunc("GET /brain/memory/search", a.brainCall(a.brainMemorySearch))
+	mux.HandleFunc("GET /brain/intents", a.brainCall(a.brainIntents))
+	mux.HandleFunc("POST /brain/intents", a.brainCall(a.brainAddIntent))
+	mux.HandleFunc("DELETE /brain/intents/{id}", a.brainCall(a.brainRemoveIntent))
 	mux.HandleFunc("/brain/", func(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusNotFound, "no such brain API call: "+r.Method+" "+r.URL.Path)
 	})

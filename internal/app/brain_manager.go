@@ -33,7 +33,7 @@ func newCommandBrainManager(cfg *config.Settings) *BrainManager {
 		profiler: profiler, hooks: hooks,
 		Manager: brain.NewManager(brain.Options{
 			Runner: &commandRunner{sandbox: profiler, hooks: hooks},
-			Sink:   brainHooksSink{hooks}, Input: commandBrainInputRules(),
+			Sink:   brainHooksSink{hooks}, Input: commandBrainInputRules(hooks),
 			ViewerStart: startBrainViewer, ClaimMedia: claimBrainMedia,
 			ShutdownGrace: func() time.Duration { return shutdownGrace },
 		}),

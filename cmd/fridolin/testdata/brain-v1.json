@@ -47,5 +47,11 @@
       "files",
       "read"
     ]
+  },
+  "memory": {
+    "inject": true,
+    "top_k": 5,
+    "max_chars": 3000,
+    "consolidate": "weekly sun 18:00"
   }
 }

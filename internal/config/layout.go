@@ -86,6 +86,18 @@ func (l Layout) Tsnet() string { return l.join("tsnet") }
 // Core holds the core lease's state and the staging of exports.
 func (l Layout) Core() string { return l.join("core") }
 
+// The memory index and standing intents (M7).
+
+// MemoryIndex is brain id's memory index, derived from its folder and
+// rebuilt from it when lost. It is here, not in the brain's state folder
+// brains/<id>/, which the sandbox lets the brain write: the index holds
+// the provenance of each note, which the brain must not set.
+func (l Layout) MemoryIndex(id string) string { return l.join("memory", id+".db") }
+
+// Intents holds brain id's standing intents and the state of its
+// schedules, which only the bridge writes.
+func (l Layout) Intents(id string) string { return l.join("intents", id+".json") }
+
 // EnsureDir creates dir and its parents with mode 0700 if it is missing
 // and returns it. A folder that exists keeps its mode.
 func EnsureDir(dir string) (string, error) {

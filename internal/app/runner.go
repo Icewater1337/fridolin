@@ -56,7 +56,7 @@ func (r *commandRunner) Run(ctx context.Context, spec brain.RunSpec, callbacks c
 	}
 	var runEnv []string
 	if r.hooks != nil && r.hooks.RunEnv != nil {
-		access := r.hooks.RunEnv(runInfo{Brain: spec.ID, Chat: spec.Chat, Source: spec.Source})
+		access := r.hooks.RunEnv(runInfoFor(spec.ID, spec.Message))
 		// After Wait: the tools the run started have exited by then, or
 		// are left behind and lose the brain API with the run.
 		defer access.Done()

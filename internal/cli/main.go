@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/app"
@@ -42,6 +43,9 @@ Usage:
                                            write a starter config (if there is none)
   fridolin paths [--json]                  the config file and data dir in use, and
                                            where each came from
+  fridolin memory reindex|status|search [--brain ID]
+                                           the brains' memory indexes: rebuild them,
+                                           see what they lack, search one
   fridolin service install|rollback|restart|status|uninstall
                                            run the bridge in the background (launchd or
                                            systemd) from a copy outside the checkout;
@@ -65,6 +69,10 @@ Run by brains, inside a run (each prints JSON; -h shows its flags):
                              create, free, delete
   fridolin mcp --run ID      the MCP server with Fridolin's tools for the run
                              (the bridge has each run start it)
+  fridolin memory search QUERY
+                             search the brain's memory index, labelled by provenance
+  fridolin intent list|add|remove
+                             the brain's standing intents ("remind me when …")
 
 Common flags:
   --config PATH     config file (default: $FRIDOLIN_CONFIG, else
@@ -120,6 +128,10 @@ func Main() {
 		os.Exit(toolcli.Polls(args, processToolIO()))
 	case "calendar":
 		os.Exit(toolcli.Calendar(args, processToolIO()))
+	case "memory":
+		os.Exit(memoryCmd(args))
+	case "intent":
+		os.Exit(toolcli.Intent(args, processToolIO()))
 	case "version":
 		fmt.Println(version.String())
 	case "help":
@@ -128,6 +140,31 @@ func Main() {
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", cmd, usage)
 		os.Exit(2)
 	}
+}
+
+// memoryCmd is fridolin memory: search inside a brain's run goes through
+// the brain API, which knows the run's brain; everything else, and a
+// search with --brain or --config, reads the config and the indexes.
+func memoryCmd(args []string) int {
+	if len(args) > 0 && args[0] == "search" && os.Getenv("FRIDOLIN_BRAIN_TOKEN_FILE") != "" && !hasFlag(args[1:], "brain", "config") {
+		return toolcli.MemorySearch(args[1:], processToolIO())
+	}
+	return app.MemoryCommand(args, os.Stdout, os.Stderr)
+}
+
+// hasFlag reports whether args give one of the flags names, as -name,
+// --name or either with =value.
+func hasFlag(args []string, names ...string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		name, _, _ := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		if strings.HasPrefix(a, "-") && slices.Contains(names, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // configFlagHelp describes --config for every command's flag set.

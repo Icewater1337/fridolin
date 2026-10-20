@@ -38,7 +38,7 @@ its chats to the first one. The chat is told that its brain cannot run. Then it 
 ├── memories/
 │   ├── README.md
 │   └── people/whatsapp-identity-map.md
-└── skills/                          two example skills
+└── skills/                          example skills, memory consolidation among them
 ```
 
 Existing files are never overwritten, so you can turn a notes folder you
@@ -86,6 +86,7 @@ restart.
 | `calendar` | The Google account this brain signed in with and the calendars it may use; set by *Connect Google Calendar*, see [CALENDAR.md](CALENDAR.md). |
 | `role` | `core` for the [core brain](#the-core-brain-and-its-grants), the one brain that may reach others; left out for every other brain. At most one brain is the core. |
 | `grants` | Only on the core brain: what it may do with each other brain, by that brain's id, from `delegate`, `read` and `files` (`{"family": ["delegate", "read"]}`). See [below](#the-core-brain-and-its-grants). |
+| `memory` | The [memory index](#memory): `inject` (default `false`) puts the owner's messages and the brain's own notes that match a new message into its prompt; `top_k` (default 5, at most 20) and `max_chars` (default 2000, at most 20000) bound how much; `consolidate` (`"weekly sun 18:00"`, `"daily 07:00"`; default none) runs `skills/memory-consolidation.md` on that schedule. Left out, nothing changes for the brain. |
 
 [`schemas/brain.schema.json`](schemas/brain.schema.json) is a JSON Schema
 of the file, version 1.
@@ -260,6 +261,105 @@ lines this version writes, and refuses any other field or type, which
 keeps it to the code: a reader that checks lines against it should let
 unknown fields and types through, since later versions add them.
 
+## Memory
+
+A brain's memory is its files: `memories/` (curated notes such as
+`memories/core.md`, and daily notes `memories/YYYY-MM-DD.md`), its
+`conversation-history.jsonl` and its `transcripts/`. The bridge keeps a
+search index over them, `memory/<brain id>.db` in its data folder: a
+SQLite FTS5 index, one row per section of a note (by its markdown
+heading), per history line and per paragraph of a transcript. It is
+derived from the files and kept up to date by size and time (the history,
+which only grows, from where it stopped): before each run that recalls,
+before each search, and every 30 seconds while `memory` is set. `fridolin
+memory reindex [--brain ID]` builds it afresh; deleting the file loses
+nothing.
+
+Each row carries where its text came from, its provenance, which the
+bridge sets from the file and the line, never from what the text says:
+
+| Provenance | What |
+| --- | --- |
+| `owner` | A message an allowed number (`allowed_numbers`) typed in a direct chat with the bridge, on WhatsApp (its history line has a WhatsApp `id`; what `/ingest`, `/send` and the bridge's schedules write has none). A note whose `source` anchors all point at such messages. |
+| `agent` | A note the brain wrote in `memories/`. |
+| `untrusted` | Everyone else: group members (the owner in a group too), files and messages handed in, transcripts, and notes whose `source` is a URL, `web`, `untrusted`, `forwarded`, `attachment`, a transcript or a history line that is not the owner's. |
+| `system` | What went out to a chat: the brain's own replies (which may repeat anything it read, a web page included), and what scripts and other brains sent through `/send`; and what the bridge's schedules hand the brain. |
+
+The index lives in the data folder, which the sandbox keeps from brains:
+a brain can change what its notes say, and lower their class by citing
+where they came from, but cannot set the class itself.
+
+With `memory.inject`, a run's prompt starts, after the brain's prompt
+file, with a `<memory_recall>` block: the `owner` and `agent` rows that
+match the new message best (BM25; a note's trigger phrases weigh four
+times its text, its importance raises it), never `untrusted` or `system`
+ones, each a line of JSON with its source anchor (`memories/core.md#health`,
+`conversation-history.jsonl#3EB0C4F2`), when it was said and its text,
+without what the chat history in the prompt shows anyway. Without it the
+prompt is as it was.
+
+A brain searches everything, labelled, with `"$FRIDOLIN_BIN" memory search
+QUERY` (through the bridge, with its run's token; the index is not in its
+sandbox). From a shell, `fridolin memory search --brain ID QUERY` does the
+same, and `fridolin memory status` says what each index does not hold yet.
+`fridolin doctor` checks, for brains that use the index, that the
+provenance rule holds on the build and that each index is up to date.
+
+### Notes comments
+
+A note's section may end with a comment saying what should bring it to
+mind, how much it matters and where it came from:
+
+```
+## Dentist
+Appointment moved to Friday 10:00.
+<!-- triggers: dentist, tooth; importance: 4; source: conversation-history.jsonl#3EB0C4F2 -->
+```
+
+`triggers` are phrases, comma-separated; `importance` is 0 to 5; `source`
+lists anchors: `conversation-history.jsonl#ID` (or `history#ID`), a
+transcript, a URL or `web`. A comment before a note's first heading applies
+to the whole file. The starter prompt and `skills/memory-consolidation.md`
+tell the brain to write them, and the consolidation promotes durable facts
+from the daily notes into `memories/core.md` with their anchors.
+
+### Standing intents
+
+"Remind me on Friday at 9", "tell me when Sam mentions the boat": a brain
+makes such a request a standing intent, which the bridge keeps and fires,
+instead of a line in its notes.
+
+```bash
+"$FRIDOLIN_BIN" intent add --when 2026-01-09T09:00 "Remind the owner to call the dentist"
+"$FRIDOLIN_BIN" intent add --when "weekly mon 08:00" "Send the owner the week's plan"
+"$FRIDOLIN_BIN" intent add --match boat [--match harbour] [--repeat] "Tell the owner about the boat"
+"$FRIDOLIN_BIN" intent list
+"$FRIDOLIN_BIN" intent remove ID
+```
+
+`--when` is a time (once), `daily HH:MM` or `weekly DAY HH:MM`, in the
+bridge's time zone; `--match` keywords fire on a message in any of the
+brain's chats that holds one as a whole word (not on the owner's own
+messages in the chat the intent was set in), once, or with `--repeat` at
+most every 10 minutes. When one fires, the brain gets a message from
+`intent`, in the direct chat the intent was set in, saying which and why;
+the message that fired a keyword intent is quoted in it as someone's
+words, not instructions. A brain has at most 50.
+
+Only a run that answers the owner's own direct message (an allowed number,
+in a direct chat, on WhatsApp or the dashboard's dev page) may add or
+remove one: a group member, a file handed in or an intent that fired
+cannot, and the command says so. The intents are kept in
+`intents/<brain id>.json` in the data folder, out of the brain's reach.
+The Brain page in the dashboard lists them and removes one; so does
+`DELETE /api/brains/{id}/intents/{intent}`.
+
+`memory.consolidate` is the same mechanism for the brain's own weekly job:
+on its schedule, the brain gets a message from `schedule` asking it to
+follow `skills/memory-consolidation.md`, answered in its reply chat. The
+first time the bridge sees the setting it starts counting from then, so
+switching it on does not run the job at once.
+
 ## Moving a brain
 
 Brain folders are portable. To move one to another machine: copy the folder
@@ -292,9 +392,11 @@ So are the brain's media inbox (`<brain id>/` in the media folder, which is
 `media/` in the data folder unless `media_dir` puts it elsewhere) and its
 state in the data folder (`brains/<brain id>/`: its Claude Code config
 folder with the CLI's transcripts, todos and `.claude.json`, its `TMPDIR`
-and its caches). A brain added later under the same id, from any folder,
-takes both over and can read what is in them, the old brain's transcripts
-and files included. To start such a brain afresh, move `brains/<brain id>/`
+and its caches), with its memory index (`memory/<brain id>.db`) and
+standing intents (`intents/<brain id>.json`). A brain added later under
+the same id, from any folder, takes them over and can read what is in
+them, the old brain's transcripts and files included; its intents fire
+for it, and its index is built afresh from the new folder. To start such a brain afresh, move `brains/<brain id>/`
 out of the data folder and `<brain id>/` out of the media folder while the
 bridge is stopped, or give it another id.
 
@@ -360,8 +462,9 @@ skills, agents, commands and rules in `.claude/`, and the MCP servers in
 Every run gets the bridge's environment (see [what reaches
 brains](CONFIGURATION.md#what-reaches-brains)) plus variables of its own:
 `FRIDOLIN_BIN`, the bridge's binary, which the brain runs as
-`"$FRIDOLIN_BIN" history`, `"$FRIDOLIN_BIN" polls` and
-`"$FRIDOLIN_BIN" calendar`; `FRIDOLIN_TOOLS_DIR`, the folder with the Python
+`"$FRIDOLIN_BIN" history`, `"$FRIDOLIN_BIN" polls`,
+`"$FRIDOLIN_BIN" calendar`, `"$FRIDOLIN_BIN" memory search` and
+`"$FRIDOLIN_BIN" intent`; `FRIDOLIN_TOOLS_DIR`, the folder with the Python
 helpers such as `transcribe.py`, which the bridge finds in `tools/` next to
 its binary, or in the checkout above `bin/` for a development build
 (without one, the log says so and the variable is not set);

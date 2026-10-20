@@ -26,5 +26,6 @@ func (b *App) brainAPIHandler() http.Handler {
 		Google:   func() httpapi.BrainCalendarService { return b.google },
 		MCPTools: b.mcpToolsFor,
 		MCPCall:  b.mcpCall,
+		Memory:   brainMemory{b},
 	}).Handler()
 }

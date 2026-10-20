@@ -27,8 +27,17 @@ type runInfo struct {
 	// a task it delegates is named after it (delegateChat).
 	ID string
 	// Chat and Source are the JID and source of the message the run
-	// answers.
+	// answers (Message's, for a run the bridge started).
 	Chat, Source string
+	// Message is the message the run answers, which tells the brain API
+	// who asked (see ownerAsked); the zero value for a token minted
+	// without one.
+	Message chat.Inbound
+}
+
+// runInfoFor is the run of brain that answers m.
+func runInfoFor(brain string, m chat.Inbound) runInfo {
+	return runInfo{Brain: brain, Chat: m.JID, Source: m.Source, Message: m}
 }
 
 // delegated reports whether the run does a task the core brain delegated:
@@ -55,6 +64,7 @@ func (rt *runTokens) mint(brain string) (string, func()) {
 func (rt *runTokens) mintRun(run runInfo) (string, func()) {
 	tok := randomToken(24)
 	sum := sha256.Sum256([]byte(tok))
+	run.Message.Done = nil
 	rt.mu.Lock()
 	if rt.brains == nil {
 		rt.brains = map[[sha256.Size]byte]runInfo{}
@@ -75,6 +85,11 @@ func (rt *runTokens) mintRun(run runInfo) (string, func()) {
 func (rt *runTokens) brainOf(tok string) string {
 	run, _ := rt.runOf(tok)
 	return run.Brain
+}
+
+// mintFor is mint for a run that answers m.
+func (rt *runTokens) mintFor(brain string, m chat.Inbound) (string, func()) {
+	return rt.mintRun(runInfoFor(brain, m))
 }
 
 // runOf returns the run a token was minted for.

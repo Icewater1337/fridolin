@@ -22,6 +22,7 @@ async function openPage(t, opts = {}) {
     if (path === '/api/brains/work/approve' && init.method === 'POST') return opts.approve;
     if (path.startsWith('/api/brains/work/calendar')) return { client_configured: false, connected: false };
     if (path === '/api/brains/work' && init.method === 'PUT') return { ok: true };
+    if (path.startsWith('/api/brains/work/intents/') && init.method === 'DELETE') return { status: 'removed' };
     if (path === '/api/brains/work') {
       const b = bridge.brains.find((x) => x.id === 'work');
       return b ? { status: 200, body: b } : { status: 404, body: { error: 'no such brain' } };
@@ -105,7 +106,7 @@ test('edits whose form left the page are not unsaved changes', async (t) => {
 test('a brain that does not exist shows only that', async (t) => {
   const { root, poll } = await openPage(t);
   const shown = () => root.querySelectorAll('section.section').filter((s) => !s.hidden).map((s) => s.querySelector('h2').textContent);
-  const all = ['Now', 'Settings', 'Calendar', 'Recent messages', 'Remove'];
+  const all = ['Now', 'Settings', 'Calendar', 'Standing intents', 'Recent messages', 'Remove'];
   assert.deepEqual(shown(), all);
   await poll([]);
   assert.match(root.textContent, /No such brain/);
@@ -270,4 +271,29 @@ test('a sub-brain shows no grants, and cannot become a second core', async (t) =
   assert.equal(set.querySelector('.grants-editor').parentNode.parentNode.hidden, true, 'no grants on a sub-brain');
   const [saved] = await save(root, calls);
   assert.equal('role' in saved || 'grants' in saved, false);
+});
+
+test('standing intents are listed, and one is removed after a confirmation', async (t) => {
+  const intents = [
+    { id: 'i1a2b3c', text: 'Remind the owner to call the dentist', schedule: { kind: 'weekly', day: 'sun', time: '18:00' }, chat: '15551234567@s.whatsapp.net', created_by: '15551234567', created: '2026-10-18T10:00:00Z' },
+    { id: 'i4d5e6f', text: 'Tell the owner about the boat', match: ['boat', { text: 'harbour', match: 'word' }], chat: '15551234567@s.whatsapp.net', created_by: '15551234567', created: '2026-10-18T10:00:00Z' },
+  ];
+  const { root, calls } = await openPage(t, { brains: [{ ...view('Work'), intents }] });
+  const items = root.querySelectorAll('.intent-list li');
+  assert.equal(items.length, 2);
+  assert.match(items[0].textContent, /call the dentist.*every sun at 18:00/);
+  assert.match(items[1].textContent, /when a message mentions boat or harbour, once/);
+  items[0].querySelectorAll('button').find((b) => b.textContent.includes('Remove')).click();
+  await settle();
+  const dialog = document.querySelector('dialog');
+  assert.ok(dialog, 'a confirm dialog');
+  dialog.querySelectorAll('button').find((b) => b.textContent === 'Remove').click();
+  await settle();
+  assert.ok(calls.some((c) => c.method === 'DELETE' && c.path === '/api/brains/work/intents/i1a2b3c'), 'the intent was removed');
+});
+
+test('a brain without standing intents says how one is set', async (t) => {
+  const { root } = await openPage(t);
+  const section = root.querySelectorAll('section.section').find((s) => s.querySelector('h2').textContent === 'Standing intents');
+  assert.match(section.textContent, /remind you/);
 });

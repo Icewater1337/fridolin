@@ -34,7 +34,7 @@ type Inbound struct {
 	// to keep up with the conversation, gives it an observe-only run only
 	// when it observes with runs (observeRuns), and sends nothing back.
 	Silent bool
-	Source string // SourceWhatsApp, SourceIngest or SourceDev
+	Source string // SourceWhatsApp, SourceIngest, SourceDev or SourceSchedule
 	At     time.Time
 	// ID is the WhatsApp message's ID, "" for one from elsewhere. An edit
 	// or a deletion on WhatsApp names the message it changes by it.
@@ -64,6 +64,10 @@ const (
 	// after the core brain stopped waiting for it, handed to the core
 	// brain in the chat its run was for: its answer goes to that chat.
 	SourceDelegateResult = "delegate-result"
+	// SourceSchedule is a message the bridge hands a brain when one of
+	// its schedules or standing intents falls due. Like SourceIngest it
+	// is never a command and never interrupts a request.
+	SourceSchedule = "schedule"
 )
 
 // DelegateChatPrefix starts the JID of a delegated task's chat,
@@ -75,11 +79,12 @@ func IsDelegateChat(jid string) bool { return strings.HasPrefix(jid, DelegateCha
 
 // HandedIn reports whether a program handed m to a brain rather than
 // someone writing it in a chat: files through /ingest or Plaud, a task
-// the core brain delegated or its late result. Such a message is never a
+// the core brain delegated or its late result, a schedule or standing
+// intent that fell due. Such a message is never a
 // command, and neither interrupts a run nor is replaced by a later one.
 func (m Inbound) HandedIn() bool {
 	switch m.Source {
-	case SourceIngest, SourceDelegate, SourceDelegateResult:
+	case SourceIngest, SourceDelegate, SourceDelegateResult, SourceSchedule:
 		return true
 	}
 	return false

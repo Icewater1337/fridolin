@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/Icewater1337/fridolin/internal/apperr"
 	"github.com/Icewater1337/fridolin/internal/brain"
+	"github.com/Icewater1337/fridolin/internal/intent"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/registry"
 	"net/http"
@@ -18,6 +19,9 @@ type BrainView struct {
 	// claims (BrainManager.Fallback). Without a default brain that is the
 	// first one, which no brain.json says, so the dashboard names it.
 	Fallback bool `json:"fallback"`
+	// Intents are the brain's standing intents (docs/BRAINS.md), none
+	// left out.
+	Intents []intent.Intent `json:"intents,omitempty"`
 }
 
 type BrainRegistry interface {
@@ -31,6 +35,17 @@ type BrainRegistry interface {
 type BrainsAPI struct {
 	Registry func() BrainRegistry
 	Views    func() []BrainView
+	// RemoveIntent removes a brain's standing intent.
+	RemoveIntent func(brain, id string) error
+}
+
+// RemoveIntentOf answers DELETE /api/brains/{id}/intents/{intent}.
+func (a *BrainsAPI) RemoveIntentOf(w http.ResponseWriter, r *http.Request) {
+	if err := a.RemoveIntent(r.PathValue("id"), r.PathValue("intent")); err != nil {
+		writeKindErr(w, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "removed"})
 }
 
 func (a *BrainsAPI) List(w http.ResponseWriter, r *http.Request) {

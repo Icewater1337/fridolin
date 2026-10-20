@@ -264,7 +264,7 @@ func captureBootRunSettings(t *testing.T, tb *testBridge) func() brain.Settings 
 	mgr.Manager.Stop()
 	mgr.Manager = brain.NewManager(brain.Options{
 		Runner: runner, Sink: brainHooksSink{mgr.hooks},
-		Input: commandBrainInputRules(), ClaimMedia: claimBrainMedia,
+		Input: commandBrainInputRules(nil), ClaimMedia: claimBrainMedia,
 		ShutdownGrace: func() time.Duration { return 0 },
 	})
 	if err := mgr.Apply(RuntimeConfig(tb.cfgs)); err != nil {

@@ -84,6 +84,10 @@ var routeInventory = []httpRoute{
 	{"POST", "/brain/calendar/freebusy", classBrainRun, ""},
 	{"GET", "/brain/mcp/tools", classBrainRun, ""},
 	{"POST", "/brain/mcp/call", classBrainRun, ""},
+	{"GET", "/brain/memory/search", classBrainRun, ""},
+	{"GET", "/brain/intents", classBrainRun, ""},
+	{"POST", "/brain/intents", classBrainRun, ""},
+	{"DELETE", "/brain/intents/{id}", classBrainRun, "/brain/intents/i1"},
 
 	// Outside the API's guard, on the outer mux.
 	{"POST", "/api/login", classLogin, ""},
@@ -112,6 +116,7 @@ var routeInventory = []httpRoute{
 	{"PUT", "/api/brains/{id}", classAPI, "/api/brains/main"},
 	{"POST", "/api/brains/{id}/approve", classAPI, "/api/brains/main/approve"},
 	{"DELETE", "/api/brains/{id}", classAPI, "/api/brains/main"},
+	{"DELETE", "/api/brains/{id}/intents/{intent}", classAPI, "/api/brains/main/intents/i1"},
 	{"POST", "/api/brains/{id}/stop", classAPI, "/api/brains/main/stop"},
 	{"DELETE", "/api/brain-dirs", classAPI, ""},
 	{"GET", "/api/fs/capabilities", classAPI, ""},

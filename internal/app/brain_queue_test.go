@@ -78,7 +78,7 @@ func queueTestManager(t *testing.T, sleepMS int, extra string, modify ...func(*b
 	mgr := newTestManager(t, cfg)
 	if len(modify) > 0 {
 		mgr.Manager.Stop()
-		opts := brainruntime.Options{Runner: &commandRunner{sandbox: mgr.profiler, hooks: mgr.hooks}, Sink: brainHooksSink{mgr.hooks}, Input: commandBrainInputRules(), ViewerStart: startBrainViewer, ClaimMedia: claimBrainMedia, ShutdownGrace: func() time.Duration { return shutdownGrace }}
+		opts := brainruntime.Options{Runner: &commandRunner{sandbox: mgr.profiler, hooks: mgr.hooks}, Sink: brainHooksSink{mgr.hooks}, Input: commandBrainInputRules(nil), ViewerStart: startBrainViewer, ClaimMedia: claimBrainMedia, ShutdownGrace: func() time.Duration { return shutdownGrace }}
 		for _, f := range modify {
 			f(&opts)
 		}

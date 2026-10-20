@@ -30,6 +30,25 @@ for compatibility.
   a Nodes page, `!fleet` lists the nodes in a direct chat, and `fridolin
   doctor` checks the node port and how recently each node was heard from.
   `nodes.enabled` and `nodes.listen` now wait for a restart.
+- A memory index per brain (`memory/<id>.db` in the data folder): SQLite
+  full-text search over `memories/`, `conversation-history.jsonl` and
+  `transcripts/`, each piece labelled by where it came from (owner, agent,
+  untrusted, system). `memory.inject` in a brain's `brain.json` (off by
+  default) puts the owner's messages and the brain's own notes that match
+  a new message into its prompt, with their sources; never what anyone
+  else wrote. Brains search all of it with `fridolin memory search`, and
+  `fridolin memory reindex|status|search` work on the indexes from a
+  shell. `fridolin doctor` checks the index for brains that use it. See
+  [Memory](docs/BRAINS.md#memory).
+- Standing intents: a brain turns "remind me on Friday at 9" or "tell me
+  when Sam mentions the boat" into `fridolin intent add`, which the bridge
+  fires; only the owner's own direct messages may set one. The Brain page
+  lists them. See [Standing intents](docs/BRAINS.md#standing-intents).
+- New brains get daily notes and `memories/core.md` in their starter
+  prompt, notes comments for trigger phrases, importance and sources, and
+  `skills/memory-consolidation.md`, which `memory.consolidate` (for
+  example `"weekly sun 18:00"`) runs on a schedule. Existing brains keep
+  their files; copy the skill from `examples/skills/` to use it.
 
 - Settings → AI mode switches new brain runs between Claude (default) and
   Codex. Codex defaults to `gpt-6.1-sol` with high reasoning effort, with
