@@ -68,6 +68,10 @@ type Brain struct {
 	// append must not land in a copy that a rewrite then drops (see
 	// rewriteHistory).
 	historyMu sync.Mutex
+	// folderClosed is set, under historyMu, once root is closed (see
+	// closeFolder): RecordDelivered then leaves a reply in the outbox
+	// rather than take it out with nowhere to record it.
+	folderClosed bool
 
 	mu      sync.Mutex
 	current *brainRun
@@ -794,7 +798,7 @@ func (br *Brain) shutdown(grace time.Duration) {
 		br.sink.Interrupted(br, cut.msg)
 	}
 	// Done with the folder after every worker has released it.
-	br.root.Close()
+	br.closeFolder()
 }
 
 // closeQueue stops the brain taking messages and starting runs, and
@@ -835,6 +839,19 @@ func (br *Brain) retire(closeViewer bool) {
 		br.closeViewer()
 	}
 	// Every worker has finished with the folder.
+	br.closeFolder()
+}
+
+// closeFolder closes the brain's folder once its workers are done with it.
+// The outbox may still deliver a reply the last run handed it, and records
+// it through RecordDelivered, which leaves it in the outbox from now on:
+// the history it belongs in can no longer be written, and the next start
+// (or the brain that replaces this one) records it without sending it
+// again.
+func (br *Brain) closeFolder() {
+	br.historyMu.Lock()
+	defer br.historyMu.Unlock()
+	br.folderClosed = true
 	br.root.Close()
 }
 
@@ -1364,14 +1381,24 @@ func (br *Brain) AppendEntry(entry history.Entry) history.Entry {
 	return entry
 }
 
+// ErrFolderClosed is RecordDelivered's answer once the brain has stopped
+// and closed its folder.
+var ErrFolderClosed = errors.New("the brain has stopped and closed its folder")
+
 // RecordDelivered writes the brain's answer text to chat into its
 // history once it reached WhatsApp, after remove took it out of the
-// outbox; when remove fails, it writes nothing and returns the error, and
-// the outbox tries again later, so the answer is recorded once. Both
-// happen under historyMu, which undelivered reads the outbox under: a run
-// finds the answer in the outbox or in the history, never in neither.
+// outbox; when remove fails, or the brain has closed its folder, it
+// writes nothing and returns the error, and the outbox tries again later
+// (after the next start, when the bridge is stopping), so the answer is
+// recorded once. Both happen under historyMu, which undelivered reads the
+// outbox under: a run finds the answer in the outbox or in the history,
+// never in neither.
 func (br *Brain) RecordDelivered(chatJID, text string, remove func() error) error {
 	br.historyMu.Lock()
+	if br.folderClosed {
+		br.historyMu.Unlock()
+		return ErrFolderClosed
+	}
 	if err := remove(); err != nil {
 		br.historyMu.Unlock()
 		return err

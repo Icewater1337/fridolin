@@ -350,6 +350,10 @@ for compatibility.
 
 ### Fixed
 
+- A reply that went out just as the bridge began to stop is no longer
+  sent again after the next start, nor left out of the brain's history:
+  the outbox now records what went out before the stop closes
+  `bridge.db`, however the stop interrupts it.
 - An upgrade with `./setup.sh` no longer ends with the first-time steps
   (pair WhatsApp, add a brain, allow your number), nor tells you to pair a
   bridge that is still connecting: the install waits up to ten seconds for

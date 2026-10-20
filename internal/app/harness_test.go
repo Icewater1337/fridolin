@@ -429,10 +429,27 @@ func (h *harness) Issues() []registry.Issue {
 // /api/status says.
 func (h *harness) Running(id string) bool {
 	h.t.Helper()
+	return h.run(id) != nil
+}
+
+// RunStarted reports whether brain id's run has started its CLI, as GET
+// /api/status says by the process's PID. A run is Running before that,
+// while it sets the process up: a test that changes what the fake CLI
+// does (FRIDOLIN_FAKE_SLEEP_MS) for the runs after it waits for this, since
+// the process reads its environment only as it starts.
+func (h *harness) RunStarted(id string) bool {
+	h.t.Helper()
+	run := h.run(id)
+	return run != nil && run.PID > 0
+}
+
+// run is brain id's run in flight, as GET /api/status lists it, or nil.
+func (h *harness) run(id string) *brain.RunView {
+	h.t.Helper()
 	var st struct {
 		Brains []struct {
-			ID      string          `json:"id"`
-			Running json.RawMessage `json:"running"`
+			ID      string         `json:"id"`
+			Running *brain.RunView `json:"running"`
 		} `json:"brains"`
 	}
 	if w := h.Do("GET", "/api/status", nil); w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &st) != nil {
@@ -440,11 +457,11 @@ func (h *harness) Running(id string) bool {
 	}
 	for _, b := range st.Brains {
 		if b.ID == id {
-			return len(b.Running) > 0 && string(b.Running) != "null"
+			return b.Running
 		}
 	}
 	h.t.Fatalf("GET /api/status lists no brain %q", id)
-	return false
+	return nil
 }
 
 // WaitFor polls cond until it holds, for up to ten seconds.

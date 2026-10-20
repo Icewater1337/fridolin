@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -342,6 +343,63 @@ func TestOutboxSurvivesARestart(t *testing.T) {
 	polls, err := s.RecentPolls(context.Background(), "", 10, func(string) bool { return true })
 	if err != nil || len(polls) != 1 {
 		t.Errorf("polls = %+v, %v; want the poll kept for its votes", polls, err)
+	}
+}
+
+// stopsDuringTheSend is a messenger on a connection that is up, where the
+// bridge begins to stop while a message is on its way: the message goes
+// out, and the send returns once the stop has cancelled the outbox.
+type stopsDuringTheSend struct {
+	*flakyMessenger
+	stop func()
+}
+
+func (m *stopsDuringTheSend) SendMessage(ctx context.Context, jid, text string) error {
+	go m.stop()
+	<-ctx.Done()
+	return m.flakyMessenger.SendMessage(context.WithoutCancel(ctx), jid, text)
+}
+
+// A reply that went out as the bridge began to stop is taken out of the
+// outbox and recorded before the stop returns and the store closes, so the
+// next start does not send it again.
+func TestOutboxRecordsWhatWentOutAsItStops(t *testing.T) {
+	dir := t.TempDir()
+	cfg := func() int { return 4000 }
+	s := openOutboxStore(t, dir)
+	var recorded atomic.Int32
+	delivered := func(ctx context.Context, r store.OutboxRow) error {
+		if err := s.OutboxDelivered(ctx, r.ID); err != nil {
+			return err
+		}
+		recorded.Add(1)
+		return nil
+	}
+	m := &stopsDuringTheSend{flakyMessenger: newFlakyMessenger(cfg, true)}
+	first := outboundmsg.NewPausedOutbox(s, func() outboundmsg.Link { return m }, 0, delivered)
+	m.stop = first.Stop
+	if err := first.Reply(context.Background(), "main", testDMChat, "hello", 0); err != nil {
+		t.Fatal(err)
+	}
+	first.Start()
+	testutil.WaitFor(t, 5*time.Second, "the send", func() bool { return len(m.sent(testDMChat)) == 1 })
+	first.Stop()
+	if rows, err := s.PendingOutbox(context.Background()); err != nil || len(rows) != 0 {
+		t.Errorf("after the stop the outbox holds %+v, %v; want nothing", rows, err)
+	}
+	if n := recorded.Load(); n != 1 {
+		t.Errorf("the stop recorded the reply %d times, want once", n)
+	}
+
+	up := newFlakyMessenger(cfg, true)
+	second := outboundmsg.NewOutbox(s, func() outboundmsg.Link { return up }, 0, delivered)
+	time.Sleep(300 * time.Millisecond)
+	second.Stop()
+	if sent := up.sent(testDMChat); len(sent) != 0 {
+		t.Errorf("the next start sent %q again", sent)
+	}
+	if n := recorded.Load(); n != 1 {
+		t.Errorf("the reply was recorded %d times, want once", n)
 	}
 }
 
