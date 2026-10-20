@@ -133,8 +133,11 @@ func (a *Agent) exec(ctx context.Context, eff nodeproto.Capabilities, p nodeprot
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	// exec.Command looks a bare name up in the PATH, and refuses one
-	// found relative to the working directory.
+	// Running what the core asks is this capability's purpose: PermitsExec
+	// above holds argv to the allowlist the owner approved (exact program
+	// names, per-argument patterns, never a shell). exec.Command looks a
+	// bare name up in the PATH, and refuses one found relative to the
+	// working directory.
 	cmd := exec.CommandContext(ctx, p.Argv[0], p.Argv[1:]...)
 	cmd.Dir = p.Dir
 	stdout := &cappedBuffer{max: eff.Exec.OutputCap()}
