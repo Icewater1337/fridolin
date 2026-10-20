@@ -1540,6 +1540,11 @@ are never in `config.json`: they live in the host's secrets.
 | `enabled` | `false` | accept connections from nodes |
 | `listen` | `":8766"` | the node port, `host:port`; an empty host is every interface, otherwise an IP address or a host name |
 
+`nodes.enabled` and `nodes.listen` wait for a restart: the bridge opens the
+node port as it starts, on the address it had then. The registry of nodes,
+their approvals and the join codes are in `nodes/nodes.json` in the data
+dir; [NODES.md](NODES.md) says how a machine joins and what it may do.
+
 ### `policy`
 
 | Field | Default | Meaning |

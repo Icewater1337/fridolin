@@ -51,7 +51,12 @@ type fakeSystem struct {
 	freeErr  error
 	writeErr error
 	ran      []string
+	// listening are the addresses Dial reaches.
+	listening map[string]bool
 }
+
+// doctorNow is the time of every doctor test.
+var doctorNow = time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 
 type fakeRun struct {
 	out string
@@ -96,6 +101,13 @@ func (s *fakeSystem) doctorEnv(cfg *config.Settings, cfgErr error) *DoctorEnv {
 		Glob:       func(string) ([]string, error) { return nil, nil },
 		FreeBytes:  func(string) (uint64, error) { return s.free, s.freeErr },
 		WriteProbe: func(string) error { return s.writeErr },
+		Dial: func(_ context.Context, addr string) error {
+			if s.listening[addr] {
+				return nil
+			}
+			return errors.New("connection refused")
+		},
+		Now: func() time.Time { return doctorNow },
 	}
 }
 

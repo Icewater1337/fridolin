@@ -29,6 +29,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/mcp"
+	"github.com/Icewater1337/fridolin/internal/nodes"
 	"github.com/Icewater1337/fridolin/internal/otp"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/platform"
@@ -69,9 +70,15 @@ type App struct {
 	google        *google.Auth
 	plaud         *plaud.Manager
 	site          *sitesvc.SiteManager
-	outbox        *outboundmsg.Outbox
-	otp           otp.Handoff
-	started       time.Time
+	// nodes is the fleet's registry and node port; nodesEnabled and
+	// nodesListen are nodes.enabled and nodes.listen as the bridge
+	// started, which wait for a restart.
+	nodes        *nodes.Service
+	nodesEnabled bool
+	nodesListen  string
+	outbox       *outboundmsg.Outbox
+	otp          otp.Handoff
+	started      time.Time
 	// restart is the optional embedding owner callback.
 	restart func()
 
@@ -193,6 +200,10 @@ func New(opts Options) (_ *App, err error) {
 	b.exe = bridgeBinary()
 	b.audit = &auditLog{dir: filepath.Join(AbsPath(cfg.DataDir), auditDirName)}
 	b.mcpTools = b.newMCPTools()
+	if b.nodes, err = newNodes(cfgs); err != nil {
+		return nil, err
+	}
+	b.nodesEnabled, b.nodesListen = cfgs.Boot().NodesEnabled, cfgs.Boot().NodesListen
 	if b.logs == nil {
 		b.logs = logx.NewRing(LogRingLines)
 		var sink slog.Handler = logx.StandardHandler()
@@ -313,7 +324,7 @@ func (b *App) Start(ctx context.Context) error {
 		DashboardEnabled: !cfg.Dashboard.Disabled,
 		Resume:           func(ctx context.Context) { b.outbox.Start(); b.resume(ctx) }, Connect: b.connectLoop,
 		Watch:      func(ctx context.Context) { b.watchRequiredFiles(ctx, requiredFilesEvery) },
-		Background: []func(context.Context){b.backup.Start, b.plaud.Start, b.site.Start},
+		Background: []func(context.Context){b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes},
 	})
 }
 
@@ -343,7 +354,7 @@ func (b *App) Stop() {
 func (b *App) stopResources() {
 	b.supervisor.Stop(StopOptions{Logger: b.logger,
 		CloseIntake: b.intake.Close, HTTPGrace: httpStopWait,
-		Background: []func(){b.backup.Stop, b.plaud.Stop, b.site.Stop},
+		Background: []func(){b.backup.Stop, b.plaud.Stop, b.site.Stop, b.nodes.Stop},
 		KeepPending: func() {
 			for _, m := range b.deb.Drain() {
 				b.keep(InboundHeld, "", m)

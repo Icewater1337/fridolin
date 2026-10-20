@@ -84,6 +84,7 @@ type APIDeps struct {
 	PlaudApp   func() *PlaudAppAPI
 	Auth       func() *DashboardAuth
 	Dev        func() *DevAPI
+	Nodes      func() *NodesAPI
 }
 
 func NewAPIMux(d APIDeps) http.Handler {
@@ -152,6 +153,14 @@ func NewAPIMux(d APIDeps) http.Handler {
 	mux.HandleFunc("POST /api/plaud/app/build", d.PlaudApp().Build)
 	mux.HandleFunc("GET /api/plaud/app.apk", d.PlaudApp().Download)
 	mux.HandleFunc("DELETE /api/plaud/devices/{id}", d.PlaudApp().RevokeDevice)
+
+	mux.HandleFunc("GET /api/nodes", d.Nodes().List)
+	mux.HandleFunc("POST /api/nodes/join-code", d.Nodes().JoinCode)
+	mux.HandleFunc("POST /api/nodes/{id}/approve", d.Nodes().ApproveDevice)
+	mux.HandleFunc("POST /api/nodes/{id}/approve-commands", d.Nodes().ApproveCommands)
+	mux.HandleFunc("POST /api/nodes/{id}/revoke", d.Nodes().Revoke)
+	mux.HandleFunc("PUT /api/nodes/{id}/tags", d.Nodes().Tags)
+	mux.HandleFunc("POST /api/nodes/{id}/call", d.Nodes().Call)
 
 	d.Site(mux)
 

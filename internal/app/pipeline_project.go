@@ -37,6 +37,7 @@ func (b *App) newMessagePipeline() *pipeline.Workflow {
 			return mediaInboxAt(b.cfgs.Boot().MediaDir).Resolve(id, paths, scoped)
 		},
 		HandOff:     b.handOff,
+		Fleet:       b.fleetText,
 		HandOffCode: b.handOffCode,
 		Chats:       chatJIDs,
 		ReplyChat: func(br *brain.Brain, ownerDM string) string {

@@ -50,6 +50,12 @@ Usage:
                                            run the core in a container, move it
                                            between machines, show the core lease;
                                            fridolin core --help for more
+  fridolin nodes [list|join-code|approve ID [--commands]|revoke ID|tags ID TAGS|call ID METHOD JSON]
+                                           the core's fleet of nodes, through the running
+                                           bridge; fridolin nodes help for more
+  fridolin node join CODE --core HOST:PORT | run | install|start|stop|status|uninstall
+                                           run this machine as a node of a core;
+                                           fridolin node help for more
   fridolin version
 
 Run by brains, inside a run (each prints JSON; -h shows its flags):
@@ -104,6 +110,10 @@ func Main() {
 		serviceCmd(args)
 	case "core":
 		os.Exit(coreCmd(args))
+	case "nodes":
+		os.Exit(nodesCmd(args, os.Stdout, os.Stderr))
+	case "node":
+		os.Exit(nodeCmd(args, os.Stdout, os.Stderr))
 	case "history":
 		os.Exit(toolcli.History(args, processToolIO()))
 	case "polls":

@@ -162,8 +162,9 @@ jobs:
         env:
           WINDOWS_PACKAGES: >-
             access activity apperr archtest chat devchat google history
-            jsonx logx otp outbound pipeline platform prompt route store
-            testutil textx toolcli trigger version
+            jsonx logx nodeagent nodeproto nodes otp outbound pipeline
+            platform prompt route store testutil textx toolcli trigger
+            version
         run: |
           pkgs=""
           for p in $WINDOWS_PACKAGES; do pkgs="$pkgs ./internal/$p"; done

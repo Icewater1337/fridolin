@@ -203,3 +203,25 @@ change with it.
 A request body may be 1 MiB at most; a larger one is refused with `400`.
 Reading a request (headers and body) may take 30 seconds, and an idle
 connection is closed after two minutes.
+
+## Nodes
+
+The fleet's routes are part of the dashboard's API, not this contract,
+and are guarded like the rest of it: the dashboard token (`X-Bridge-Token`)
+or a signed-in session, and on writes the `X-Bridge-Dashboard: 1` header
+and a JSON body. `fridolin nodes` calls them with the token from the data
+dir. [NODES.md](NODES.md) describes nodes, pairing and the protocol the
+nodes speak on their own port.
+
+| Route | Does |
+| --- | --- |
+| `GET /api/nodes` | `{"enabled", "listen", "nodes": [...]}`: every node of `nodes/nodes.json` with `device`, `commands`, `declared`, `approved`, `effective`, `online`, `last_seen`, `resources`, `tags` |
+| `POST /api/nodes/join-code` | `{"code", "expires_at", "command"}`: a single-use code for 10 minutes and the line to paste on the new machine; `409` while `nodes.enabled` is off |
+| `POST /api/nodes/{id}/approve` | approves the device (first stage) |
+| `POST /api/nodes/{id}/approve-commands` | approves what the node declares now (second stage); `409` before the device is approved |
+| `POST /api/nodes/{id}/revoke` | revokes it and closes its connection |
+| `PUT /api/nodes/{id}/tags` | `{"tags": [...]}` replaces its tags; `422` for a tag that is not lower-case letters, digits and `._:-` |
+| `POST /api/nodes/{id}/call` | `{"method", "params"}` calls a capability (`exec`, `fs.list`, `fs.read`, `fs.write`, `host.info`, `notify`) and answers `{"result": …}`; a refusal is `{"error", "code"}` with `403` (`denied`, `outside-root`), `404`, `400`, `503` (not connected) or `504` |
+
+An unknown node is `404`; one that was revoked cannot be approved again
+(`409`).

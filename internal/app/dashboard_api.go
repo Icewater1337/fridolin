@@ -365,5 +365,6 @@ func (b *App) apiMux() http.Handler {
 		PlaudApp:   b.newPlaudAppAPI,
 		Auth:       b.newDashboardAuth,
 		Dev:        b.newDevAPI,
+		Nodes:      b.newNodesAPI,
 	})
 }

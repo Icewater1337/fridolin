@@ -38,6 +38,8 @@ type Workflow struct {
 	AppendSent   func(chat.Principal, string, string, string)
 	ResolveMedia func(string, []string, bool) ([]string, error)
 	HandOff      func(*brainruntime.Brain, string, string, string, []string)
+	// Fleet is the answer to !fleet; nil leaves !fleet to the brain.
+	Fleet func() string
 }
 
 // handleInbound is the entry point for every allowed message. Access control
@@ -103,7 +105,8 @@ func (p *Workflow) Handle(ctx context.Context, m brainruntime.Inbound) {
 	p.Debouncer.Add(m)
 }
 
-// handleCommand runs !help, !reset and !stop. It reports whether text was one.
+// handleCommand runs !help, !reset, !stop and !fleet. It reports whether
+// text was one.
 func (p *Workflow) handleCommand(ctx context.Context, m brainruntime.Inbound, settings Settings) bool {
 	switch strings.ToLower(m.Text) {
 	case "!reset":
@@ -119,6 +122,18 @@ func (p *Workflow) handleCommand(ctx context.Context, m brainruntime.Inbound, se
 
 	case "!stop":
 		_ = p.Notice(ctx, m.JID, outboundmsg.StopReply(p.stopChat(m)))
+		return true
+
+	case "!fleet":
+		if p.Fleet == nil {
+			return false
+		}
+		// The fleet is the owner's: its machines, and what each may run.
+		if m.IsGroup() {
+			_ = p.Notice(ctx, m.JID, outboundmsg.FleetGroupNotice)
+			return true
+		}
+		_ = p.Notice(ctx, m.JID, p.Fleet())
 		return true
 
 	case "!help":

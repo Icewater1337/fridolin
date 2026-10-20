@@ -1,0 +1,338 @@
+package nodeagent
+
+import (
+	"context"
+	"crypto/ed25519"
+	"errors"
+	"fmt"
+	"log"
+	"math/rand/v2"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/coder/websocket"
+
+	"github.com/Icewater1337/fridolin/internal/nodeproto"
+)
+
+// Agent is one node's connection to the core.
+type Agent struct {
+	// Dir is the node's state dir: its config, key and the disk it reports.
+	Dir     string
+	Config  Config
+	Key     ed25519.PrivateKey
+	Version string
+	// Logf logs; nil logs with the standard logger.
+	Logf func(format string, args ...any)
+	// Notifier shows a notification; nil shows it the OS's way.
+	Notifier func(ctx context.Context, title, message string) (nodeproto.NotifyResult, error)
+	// MinBackoff and MaxBackoff bound the wait between reconnects (1s
+	// and 1m when zero); HeartbeatEvery is the report interval (20s).
+	MinBackoff, MaxBackoff time.Duration
+	HeartbeatEvery         time.Duration
+	// OnState hears every state the core sends, for tests and the CLI.
+	OnState func(nodeproto.State)
+
+	mu        sync.Mutex
+	state     nodeproto.State
+	connected bool
+}
+
+// Load makes the agent of the node in dir.
+func Load(dir, version string) (*Agent, error) {
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		return nil, err
+	}
+	key, err := LoadKey(dir)
+	if err != nil {
+		return nil, fmt.Errorf("the device key: %w", err)
+	}
+	return &Agent{Dir: dir, Config: cfg, Key: key, Version: version}, nil
+}
+
+// ID is the node's device ID.
+func (a *Agent) ID() string { return DeviceID(a.Key) }
+
+// State is what the core last said the node may do.
+func (a *Agent) State() nodeproto.State {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.state
+}
+
+// Connected reports whether the agent holds a connection to the core.
+func (a *Agent) Connected() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.connected
+}
+
+func (a *Agent) logf(format string, args ...any) {
+	if a.Logf != nil {
+		a.Logf(format, args...)
+		return
+	}
+	log.Printf(format, args...)
+}
+
+func (a *Agent) setState(st nodeproto.State) {
+	a.mu.Lock()
+	a.state = st
+	a.mu.Unlock()
+	if a.OnState != nil {
+		a.OnState(st)
+	}
+}
+
+func (a *Agent) setConnected(v bool) {
+	a.mu.Lock()
+	a.connected = v
+	a.mu.Unlock()
+}
+
+// CloseError is the core closing the connection with a reason.
+type CloseError struct {
+	Reason, Message string
+}
+
+func (e *CloseError) Error() string {
+	if e.Message != "" {
+		return "the core closed the connection (" + e.Reason + "): " + e.Message
+	}
+	return "the core closed the connection (" + e.Reason + ")"
+}
+
+// Final reports whether the agent should stop reconnecting.
+func (e *CloseError) Final() bool { return nodeproto.Final(e.Reason) }
+
+// coreURL is the WebSocket address of the core.
+func coreURL(core string) string {
+	core = strings.TrimSpace(core)
+	if strings.HasPrefix(core, "ws://") || strings.HasPrefix(core, "wss://") {
+		rest := core[strings.Index(core, "://")+3:]
+		if !strings.Contains(rest, "/") {
+			return core + nodeproto.Path
+		}
+		return core
+	}
+	return "ws://" + core + nodeproto.Path
+}
+
+// conn is an authenticated connection.
+type conn struct {
+	ws *websocket.Conn
+}
+
+func (c *conn) send(ctx context.Context, typ, id string, body any) error {
+	data, err := nodeproto.Encode(typ, id, body)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	return c.ws.Write(ctx, websocket.MessageText, data)
+}
+
+func (c *conn) read(ctx context.Context) (nodeproto.Envelope, error) {
+	typ, data, err := c.ws.Read(ctx)
+	if err != nil {
+		return nodeproto.Envelope{}, err
+	}
+	if typ != websocket.MessageText {
+		return nodeproto.Envelope{}, errors.New("a binary message")
+	}
+	return nodeproto.Decode(data)
+}
+
+// closeErr turns a close message into a *CloseError.
+func closeErr(env nodeproto.Envelope) error {
+	c, err := nodeproto.DecodeBody[nodeproto.Close](env)
+	if err != nil {
+		return err
+	}
+	return &CloseError{Reason: c.Reason, Message: c.Message}
+}
+
+// connect dials the core and goes through hello, challenge and auth, with
+// joinCode for a device the core does not know yet. It returns the
+// connection and the state of the welcome.
+func (a *Agent) connect(ctx context.Context, joinCode string) (*conn, nodeproto.State, error) {
+	hctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	ws, _, err := websocket.Dial(hctx, coreURL(a.Config.Core), &websocket.DialOptions{Subprotocols: []string{nodeproto.Subprotocol}})
+	if err != nil {
+		return nil, nodeproto.State{}, fmt.Errorf("connecting to the core at %s: %w", a.Config.Core, err)
+	}
+	ws.SetReadLimit(nodeproto.MaxMessageBytes)
+	c := &conn{ws: ws}
+	fail := func(err error) (*conn, nodeproto.State, error) {
+		_ = ws.CloseNow()
+		return nil, nodeproto.State{}, err
+	}
+	pub := a.Key.Public().(ed25519.PublicKey)
+	hello := nodeproto.Hello{
+		DeviceID: nodeproto.DeviceIDFor(pub), PublicKey: pub, Name: a.Config.Name,
+		OS: runtime.GOOS, Arch: runtime.GOARCH, Version: a.Version,
+		Capabilities: a.Config.Capabilities, JoinCode: joinCode,
+	}
+	if err := c.send(hctx, nodeproto.TypeHello, "", hello); err != nil {
+		return fail(err)
+	}
+	var st nodeproto.State
+	for done := false; !done; {
+		env, err := c.read(hctx)
+		if err != nil {
+			return fail(fmt.Errorf("the core's answer: %w", err))
+		}
+		switch env.Type {
+		case nodeproto.TypeChallenge:
+			ch, err := nodeproto.DecodeBody[nodeproto.Challenge](env)
+			if err != nil {
+				return fail(err)
+			}
+			sig := nodeproto.Sign(a.Key, hello.DeviceID, ch.Nonce)
+			if err := c.send(hctx, nodeproto.TypeAuth, "", nodeproto.Auth{Signature: sig}); err != nil {
+				return fail(err)
+			}
+		case nodeproto.TypeWelcome:
+			if st, err = nodeproto.DecodeBody[nodeproto.State](env); err != nil {
+				return fail(err)
+			}
+			done = true
+		case nodeproto.TypeClose:
+			return fail(closeErr(env))
+		default:
+			return fail(fmt.Errorf("unexpected %s during the handshake", env.Type))
+		}
+	}
+	return c, st, nil
+}
+
+// Run connects to the core and serves it until ctx ends, reconnecting
+// with exponential backoff and jitter. It returns nil when ctx ends, and
+// a *CloseError when the core revoked the node or does not know it, after
+// which reconnecting is pointless.
+func (a *Agent) Run(ctx context.Context) error {
+	minB, maxB := a.MinBackoff, a.MaxBackoff
+	if minB <= 0 {
+		minB = time.Second
+	}
+	if maxB <= 0 {
+		maxB = time.Minute
+	}
+	backoff := minB
+	for {
+		start := time.Now()
+		err := a.session(ctx)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if ce, ok := errors.AsType[*CloseError](err); ok && ce.Final() {
+			a.logf("node: %v; not reconnecting", ce)
+			return ce
+		}
+		if time.Since(start) > 2*maxB {
+			backoff = minB
+		}
+		// Full jitter between half the backoff and all of it, so that
+		// nodes cut off together do not come back together.
+		wait := backoff/2 + rand.N(backoff/2+1)
+		a.logf("node: %v; reconnecting in %v", err, wait.Round(time.Millisecond))
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(wait):
+		}
+		backoff = min(backoff*2, maxB)
+	}
+}
+
+// session is one connection: the handshake, then heartbeats and requests
+// until it ends.
+func (a *Agent) session(ctx context.Context) error {
+	c, st, err := a.connect(ctx, "")
+	if err != nil {
+		return err
+	}
+	defer c.ws.CloseNow()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	a.setState(st)
+	a.setConnected(true)
+	defer a.setConnected(false)
+	a.logf("node: connected to the core at %s as %s (%s); device %s, commands %s%s", a.Config.Core, a.Config.Name, a.ID(), st.Device, st.Commands, messageSuffix(st))
+
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	defer cancel()
+	every := a.HeartbeatEvery
+	if every <= 0 {
+		every = 20 * time.Second
+	}
+	wg.Go(func() {
+		t := time.NewTicker(every)
+		defer t.Stop()
+		for {
+			if err := c.send(ctx, nodeproto.TypeHeartbeat, "", nodeproto.Heartbeat{Stats: a.stats()}); err != nil {
+				cancel()
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+		}
+	})
+	// At most this many calls at once; more wait their turn.
+	slots := make(chan struct{}, 8)
+	for {
+		env, err := c.read(ctx)
+		if err != nil {
+			return fmt.Errorf("the connection ended: %w", err)
+		}
+		switch env.Type {
+		case nodeproto.TypeState:
+			st, err := nodeproto.DecodeBody[nodeproto.State](env)
+			if err != nil {
+				return err
+			}
+			a.setState(st)
+			a.logf("node: the core says: device %s, commands %s, may serve %s%s", st.Device, st.Commands, st.Approved.Summary(), messageSuffix(st))
+		case nodeproto.TypeRequest:
+			req, err := nodeproto.DecodeBody[nodeproto.Request](env)
+			id := env.ID
+			select {
+			case slots <- struct{}{}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			wg.Go(func() {
+				defer func() { <-slots }()
+				var resp nodeproto.Response
+				if err != nil {
+					resp.Error = nodeproto.Errorf(nodeproto.CodeBadRequest, "%v", err)
+				} else {
+					resp = a.handle(ctx, req)
+				}
+				if err := c.send(ctx, nodeproto.TypeResponse, id, resp); err != nil {
+					cancel()
+				}
+			})
+		case nodeproto.TypeClose:
+			return closeErr(env)
+		default:
+			return fmt.Errorf("unexpected %s from the core", env.Type)
+		}
+	}
+}
+
+func messageSuffix(st nodeproto.State) string {
+	if st.Message == "" {
+		return ""
+	}
+	return " — " + st.Message
+}

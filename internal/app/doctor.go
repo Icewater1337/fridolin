@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -87,6 +88,9 @@ type DoctorEnv struct {
 	FreeBytes func(path string) (uint64, error)
 	// WriteProbe creates a file in dir and removes it again.
 	WriteProbe func(dir string) error
+	// Dial opens a TCP connection to address and closes it again.
+	Dial func(ctx context.Context, address string) error
+	Now  func() time.Time
 }
 
 // DoctorRegistry is every check, in the order doctor prints them. Later
@@ -107,6 +111,8 @@ var DoctorRegistry = []DoctorCheck{
 	toolCheck("ffmpeg", "", []string{"-version"}, "ffmpeg", "ffmpeg"),
 	toolCheck("litestream", "M3", []string{"version"}, "benbjohnson/litestream/litestream", ""),
 	toolCheck("age", "M1", []string{"--version"}, "age", "age"),
+	{ID: "nodes-port", Title: "node port", Required: true, Applies: nodesOn, Run: checkNodesPort},
+	{ID: "nodes-seen", Title: "approved nodes heard from", Applies: nodesOn, Run: checkNodesSeen},
 }
 
 // The host secrets doctor looks for (docs/PLAN.md, M1 and M3). It asks
@@ -284,6 +290,14 @@ func SystemDoctorEnv(configFlag string) *DoctorEnv {
 			}
 			return cerr
 		},
+		Dial: func(ctx context.Context, address string) error {
+			c, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
+			if err != nil {
+				return err
+			}
+			return c.Close()
+		},
+		Now: time.Now,
 	}
 }
 
