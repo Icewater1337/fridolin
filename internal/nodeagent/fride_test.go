@@ -91,10 +91,14 @@ func TestFrideCapability(t *testing.T) {
 		}
 		return n
 	}
-	if n := node(); n.Declared.Fride == nil || n.Declared.Fride.URL != ff.URL || strings.Join(n.Declared.Fride.Repos, ",") != "api,web" {
+	// The first hello declares FrIDE when the first probe answered in
+	// time; on a loaded machine a later check does.
+	waitFor(t, "fride declared", func() bool { return node().Declared.Fride != nil })
+	if n := node(); n.Declared.Fride.URL != ff.URL || strings.Join(n.Declared.Fride.Repos, ",") != "api,web" {
 		t.Fatalf("declared: %+v", n.Declared)
 	}
-	// Pending: nothing is served, and no news is relayed.
+	// Pending: nothing is served, and no news is relayed. The webhook
+	// drops it at once, so the approval that follows cannot let it through.
 	if _, err := c.svc.FrideMem(ctx, a.ID()); !isCode(err, nodeproto.CodeDenied) {
 		t.Fatalf("fride.mem before approval: %v", err)
 	}

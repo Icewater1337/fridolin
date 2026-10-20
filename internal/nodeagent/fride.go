@@ -371,7 +371,7 @@ func SignFride(token string, body []byte) string {
 }
 
 // frideWebhook hears FrIDE's thread news: a POST from this machine, signed
-// with the token, which goes on to the core.
+// with the token, which goes on to the core while fride is approved.
 func (a *Agent) frideWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -400,6 +400,16 @@ func (a *Agent) frideWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ev.Text = clean(ev.Text, 16<<10)
+	// News is FrIDE's to report only while the core lets this node serve
+	// fride: what happens before the approval, or after it is withdrawn,
+	// is dropped here rather than queued, so that it cannot reach the core
+	// once an approval arrives behind it. FrIDE gets its 204 all the same:
+	// a refusal would only make it retry into the approval.
+	if st := a.State(); st.Device != nodeproto.DeviceApproved || !st.Approved.Allows(nodeproto.MethodFrideStatus) {
+		a.logf("node: dropped FrIDE's %s of thread %d: fride is not approved on this node", ev.Event, ev.ThreadID)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	a.fride.init()
 	select {
 	case a.fride.events <- ev:
