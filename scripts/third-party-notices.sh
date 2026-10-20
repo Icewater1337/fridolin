@@ -25,7 +25,7 @@ set -euo pipefail
 
 # The platforms of the build matrix in .github/workflows/release.yml;
 # scripts/test-third-party-notices.sh fails when the two differ.
-targets="darwin/amd64 darwin/arm64 linux/amd64 linux/arm64"
+targets="darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64"
 
 usage="usage: $0 [--check] [FILE] | --targets"
 die() { local code="$1"; shift; printf 'third-party-notices: %s\n' "$*" >&2; exit "$code"; }

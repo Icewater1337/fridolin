@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# Builds one release archive, OUTDIR/fridolin_<version>_<os>_<arch>.tar.gz,
+# Builds one release archive, OUTDIR/fridolin_<version>_<os>_<arch>.tar.gz
+# (.zip with fridolin.exe for Windows),
 # holding the binary, the Python tools, README.md, LICENSE and
 # THIRD_PARTY_NOTICES, the licences of the modules the binary links, which
 # whoever passes the binary on must pass on with it. Unpacked,
@@ -26,13 +27,21 @@ name="fridolin_${version}_${goos}_${goarch}"
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/$name/tools" "$out"
+exe=""
+[ "$goos" = windows ] && exe=".exe"
 
 ( cd "$repo" && CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
-    go build -trimpath -ldflags "-s -w -X github.com/Icewater1337/fridolin/internal/version.version=$version" -o "$stage/$name/fridolin" "$pkg" )
+    go build -trimpath -ldflags "-s -w -X github.com/Icewater1337/fridolin/internal/version.version=$version" -o "$stage/$name/fridolin$exe" "$pkg" )
 # What `fridolin service install` copies from tools/: the helpers and their
 # requirements, not their tests.
 cp "$repo"/tools/*.py "$repo"/tools/requirements*.txt "$stage/$name/tools/"
 cp "$repo/README.md" "$repo/LICENSE" "$repo/THIRD_PARTY_NOTICES" "$stage/$name/"
 
-tar -C "$stage" -czf "$out/$name.tar.gz" "$name"
-echo "$out/$name.tar.gz"
+if [ "$goos" = windows ]; then
+  out_abs="$(cd "$out" && pwd)"
+  ( cd "$stage" && zip -qr "$out_abs/$name.zip" "$name" )
+  echo "$out/$name.zip"
+else
+  tar -C "$stage" -czf "$out/$name.tar.gz" "$name"
+  echo "$out/$name.tar.gz"
+fi
