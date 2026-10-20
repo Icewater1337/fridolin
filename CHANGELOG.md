@@ -16,8 +16,32 @@ for compatibility.
   the existing sandbox and cancellation, and Fridolin site-builder tools.
   See [AI mode](docs/CONFIGURATION.md#ai-mode) for sign-in and the
   Claude-specific settings that do not transfer.
+- `fridolin doctor` checks this machine: config, data dir and free disk,
+  the Claude CLI and the login sandboxed brains need, and what the coming
+  milestones need (Tailscale and its auth key, B2 keys, Docker, restic,
+  rclone, ffmpeg, litestream, age), each line with a fix; `--json` for
+  scripts. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
+- config.json takes the sections `core`, `vault`, `nodes` and `policy`
+  for the containerized core, the B2 vault, nodes and approvals. All are
+  off by default and nothing uses them yet; the bridge checks their
+  values, and the dashboard's Settings keeps them when it saves. See
+  [Core, vault and nodes](docs/CONFIGURATION.md#core-vault-and-nodes).
+  The config version stays 2.
 
 ### Changed
+
+- Fridolin now builds for Windows (amd64 and arm64, without cgo). It is
+  not supported there yet: there is no service and no sandbox
+  (`sandbox.enabled` is refused, as on Linux), and a crash leaves runs
+  going; docs/DECISIONS.md lists what else does less. macOS and Linux
+  behave as before.
+
+- SQLite is now the pure-Go `modernc.org/sqlite`, so building Fridolin no
+  longer needs a C compiler (`make check`'s race tests still do). An
+  existing `bridge.db` opens as it is: the WhatsApp pairing, polls and
+  queued messages carry over, times are written in the format the old
+  driver wrote, and a locked database is still waited on for 5 seconds.
 
 - Configuration rejects unknown log levels and chunks larger than 65536
   characters. `check` identifies disabled dashboards and unavailable brains.

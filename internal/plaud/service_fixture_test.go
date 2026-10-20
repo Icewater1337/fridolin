@@ -74,7 +74,7 @@ func plaudService(t *testing.T, extra string) (*plaudServiceFixture, *testutil.P
 	migration := &mediafiles.Migration{Started: time.Now()}
 	target := &Target{BrainID: "p", ReplyChat: func() string { return "" }, OtherOwner: func(string) string { return "" }, Submit: func(_, _, _ string, _ []string, done func(error)) error { done(nil); return nil }}
 	f.options = Options{
-		PlaudDir: filepath.Join(root, "data", "plaud"), Home: f.home, Settings: f.settings.Load,
+		PlaudDir: filepath.Join(root, "data", "plaud"), SiteDevices: filepath.Join(root, "data", "site", "devices.json"), Home: f.home, Settings: f.settings.Load,
 		Target: func(id string) *Target {
 			if id == "" || id == "p" {
 				return target

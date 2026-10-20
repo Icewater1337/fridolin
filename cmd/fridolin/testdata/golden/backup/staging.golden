@@ -37,7 +37,7 @@ brains/main.brain.json -rw------- e3f60208265f5cbf
 	    "default": "you@example.com"
 	  }
 	}
-config.json -rw------- 88f2d08dd60506b2
+config.json -rw------- 666ae19ce3d94d4a
 	{
 	  "version": 2,
 	  "allowed_numbers": [
@@ -112,5 +112,20 @@ config.json -rw------- 88f2d08dd60506b2
 	    "cli_path": "<TEST_BINARY>"
 	  },
 	  "dashboard": {},
-	  "script_api": {}
+	  "script_api": {},
+	  "core": {
+	    "tailnet": {
+	      "enabled": false
+	    },
+	    "lease": {
+	      "enabled": false
+	    }
+	  },
+	  "vault": {
+	    "enabled": false
+	  },
+	  "nodes": {
+	    "enabled": false
+	  },
+	  "policy": {}
 	}

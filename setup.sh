@@ -11,7 +11,7 @@ usage() {
 Usage: ./setup.sh [--yes] [--no-service] [--skip-tests]
 
 Sets up Fridolin on this machine, or upgrades it after `git pull`:
-  1. checks the prerequisites (Go, a C compiler, make, the Claude CLI;
+  1. checks the prerequisites (Go, make, the Claude CLI;
      rclone, python3 and ffmpeg optional)
   2. builds the bridge from this checkout and runs the tests on the build
      (make build, make test)
@@ -126,17 +126,13 @@ if [ "${GO_MINOR:-0}" -lt "${GO_MIN#1.}" ]; then
 fi
 ok "Go $GO_VERSION"
 
+# The build and the tests are the Makefile's, as in CI. SQLite is pure Go, so
+# neither needs a C compiler. On macOS make comes with the Command Line
+# Tools; /usr/bin/make exists without them too, but only offers to install
+# them.
 if [ "$OS" = Darwin ]; then
-  # /usr/bin/cc exists without the Command Line Tools too: it only offers
-  # to install them, and the cgo build fails later.
-  xcode-select -p >/dev/null 2>&1 || fail "No C compiler (needed for SQLite). Run: xcode-select --install"
-elif ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
-  fail "No C compiler (needed for SQLite). Install build-essential (Debian/Ubuntu) or gcc."
+  xcode-select -p >/dev/null 2>&1 || fail "make is not installed. Run: xcode-select --install"
 fi
-ok "C compiler"
-
-# The build and the tests are the Makefile's, as in CI. The Command Line
-# Tools above bring make on macOS.
 command -v make >/dev/null 2>&1 || fail "make is not installed. Install build-essential (Debian/Ubuntu) or make, then re-run."
 
 CLAUDE_BIN="$(command -v claude 2>/dev/null || true)"

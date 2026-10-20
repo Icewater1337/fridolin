@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -13,12 +14,12 @@ import (
 
 func TestLockContentionPreservesCauseAndNamesOwner(t *testing.T) {
 	dir := t.TempDir()
-	owner, err := AcquireLock(dir)
+	owner, err := AcquireLock(filepath.Join(dir, "bridge.lock"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer owner.Release()
-	_, err = AcquireLock(dir)
+	_, err = AcquireLock(filepath.Join(dir, "bridge.lock"))
 	if !errors.Is(err, syscall.EWOULDBLOCK) {
 		t.Fatalf("lost contention cause: %v", err)
 	}

@@ -16,6 +16,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/platform"
@@ -265,7 +266,7 @@ func TestBridgePrunesStaleRunTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	running, err := platform.AcquireLock(data)
+	running, err := platform.AcquireLock(config.Layout{Root: data}.Lock())
 	if err != nil {
 		t.Fatal(err)
 	}

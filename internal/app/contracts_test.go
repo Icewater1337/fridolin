@@ -455,6 +455,16 @@ func TestConfigSchemaRefusesWhatTheBridgeRefuses(t *testing.T) {
 		`{"plaud": {"brain": "Not An Id"}}`,
 		`{"plaud": {"interval_seconds": 10}}`,
 		`{"plaud": {"phone_dir": "PlaudSync"}}`,
+		`{"core": {"tailnet": {"hostname": "Fridolin-Core"}}}`,
+		`{"core": {"lease": {"renew_seconds": -1}}}`,
+		`{"core": {"memory_limit_gb": 5000}}`,
+		`{"vault": {"bucket": "b2-vault"}}`,
+		`{"vault": {"snapshots_bucket": "Snapshots"}}`,
+		`{"vault": {"endpoint": "https://s3.example.com"}}`,
+		`{"vault": {"headroom_percent": 91}}`,
+		`{"nodes": {"listen": "8766"}}`,
+		`{"nodes": {"listen": ":65536"}}`,
+		`{"policy": {"approval_timeout_hours": -1}}`,
 	} {
 		t.Run(configValue, func(t *testing.T) {
 			t.Setenv("HOME", t.TempDir())
@@ -488,6 +498,8 @@ func TestConfigSchemaTakesWhatTheBridgeTakes(t *testing.T) {
 		{`{"http_listen": "[::1]:8765"}`, false},
 		{`{"http_listen": "127.0.0.2:9000"}`, false},
 		{`{"http_listen": "off"}`, false},
+		{`{"core": {"tailnet": {"enabled": true}, "lease": {"enabled": true}}, "vault": {"enabled": true}, "nodes": {"enabled": true, "listen": "[::1]:8766"}, "policy": {}}`, false},
+		{`{"nodes": {"listen": "fridolin-core:8766"}, "vault": {"endpoint": "localhost"}}`, false},
 		{`{"triggers": ["@claude", {"text": "@c", "match": "start"}]}`, false},
 		{`{"not_a_setting": true}`, true},
 		{`{"version": 2, "model": "sonnet"}`, true},

@@ -26,6 +26,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/history"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 )
@@ -455,7 +456,7 @@ func quoteIdent(s string) string { return `"` + strings.ReplaceAll(s, `"`, `""`)
 // loadSQL makes the database at dbPath from a dump of dumpSQL.
 func loadSQL(t testing.TB, dbPath string, dump []byte) {
 	t.Helper()
-	db, err := sql.Open("sqlite3", "file:"+dbPath)
+	db, err := sql.Open("sqlite", store.DSN(dbPath))
 	if err != nil {
 		t.Fatal(err)
 	}

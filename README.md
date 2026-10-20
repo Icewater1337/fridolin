@@ -108,11 +108,13 @@ See [docs/SITE.md](docs/SITE.md).
 ## Requirements
 
 - **macOS or Linux.** The sandbox layer is macOS-only; everything else is portable.
+  Windows builds, but is not supported yet (no service, no sandbox).
 - **[Claude Code](https://claude.com/claude-code)** 2.1.302 or newer, installed
   and logged in. With the sandbox (macOS), brains log in with a token in the
   bridge's environment instead: `claude setup-token` prints one (see
   [where to set it](docs/CONFIGURATION.md#where-to-set-them)).
-- **Go 1.26+** and a C compiler to build (`xcode-select --install` on macOS).
+- **Go 1.26+** and make to build (`xcode-select --install` on macOS). The
+  race tests (`make check`) also need a C compiler; the build does not.
 - **Python 3.9+** for the helper tools.
 - **A current browser** for the dashboard: Chrome or Edge 123+, Firefox 120+
   or Safari 17.5+.
@@ -321,6 +323,7 @@ too. Every option is documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md
 ```bash
 fridolin check                           # validate; show who is heard, and the routing
 fridolin check --route 15551234567@s.whatsapp.net
+fridolin doctor                          # what this machine has and lacks, each with a fix
 ```
 
 ### Trying it without WhatsApp

@@ -42,7 +42,7 @@ func TestNewStoreCreatesPrivateDB(t *testing.T) {
 		{"write-ahead log", "WAL", []string{"-wal", "-shm"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			db, err := sql.Open("sqlite3", "file:"+dbPath+"?_journal_mode="+tc.journalMode)
+			db, err := sql.Open("sqlite", "file:"+dbPath+"?_pragma=journal_mode("+tc.journalMode+")")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -193,7 +193,7 @@ func modeOf(t *testing.T, path string, extra os.FileMode) os.FileMode {
 // ones, and what it held stays: a poll it kept still counts its votes.
 func TestStoreMigratesAnUnversionedDatabase(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "bridge.db")
-	db, err := sql.Open("sqlite3", "file:"+dbPath)
+	db, err := sql.Open("sqlite", "file:"+dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}

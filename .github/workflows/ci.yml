@@ -131,6 +131,45 @@ jobs:
         if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest' && matrix.shard == fromJSON(env.SHARDS)
         run: make lint-actions
 
+  # Windows builds everything and vets it, and runs the tests of the
+  # packages the native Windows binary uses: the bridge (the core) runs
+  # there in the Linux container (docs/CORE.md), so only the node agent and
+  # the libraries under it run natively (docs/DECISIONS.md). A package joins
+  # WINDOWS_PACKAGES once its tests pass on Windows. No race detector (it
+  # needs cgo there) and none of the POSIX-shell targets.
+  go-windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      GOTOOLCHAIN: local
+      CGO_ENABLED: "0"
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache: true
+      - name: go vet
+        run: go vet ./...
+      - name: build
+        run: go build -o bin/fridolin.exe ./cmd/fridolin
+      - name: test
+        env:
+          WINDOWS_PACKAGES: >-
+            access activity apperr archtest chat devchat google history
+            jsonx logx otp outbound pipeline platform prompt route store
+            testutil textx toolcli trigger version
+        run: |
+          pkgs=""
+          for p in $WINDOWS_PACKAGES; do pkgs="$pkgs ./internal/$p"; done
+          # shellcheck disable=SC2086
+          go test -count=1 -short $pkgs
+
   fuzz:
     # After a merge only: twenty seconds a target would hold up every pull
     # request, and the failing inputs committed under testdata/fuzz already

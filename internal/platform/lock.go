@@ -1,16 +1,12 @@
-//go:build unix
-
 package platform
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 )
 
 // Lock is held by the bridge that uses a data directory.
@@ -19,22 +15,25 @@ type Lock struct {
 	f  *os.File
 }
 
-// AcquireLock makes sure only one bridge uses a data directory. Two
-// bridges on one WhatsApp session knock each other offline and can get the
-// device logged out. The flock belongs to the open file, so a second bridge
-// in the same process is refused too, and the kernel drops it when the
-// process dies.
-func AcquireLock(dataDir string) (*Lock, error) {
+// AcquireLock makes sure only one bridge uses a data directory, by locking
+// path, its bridge.lock (config.Layout.Lock). Two bridges on one WhatsApp
+// session knock each other offline and can get the device logged out. The
+// flock belongs to the open file, so a second bridge in the same process
+// is refused too, and the kernel drops it when the process dies.
+// lock_unix.go and lock_windows.go take it: flock, and LockFileEx on
+// Windows.
+func AcquireLock(path string) (*Lock, error) {
+	dataDir := filepath.Dir(path)
 	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(filepath.Join(dataDir, "bridge.lock"), os.O_RDWR|os.O_CREATE, 0o600)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := lockFile(f); err != nil {
 		var owner string
-		if errors.Is(err, syscall.EWOULDBLOCK) {
+		if lockHeld(err) {
 			var buf [32]byte
 			n, _ := f.ReadAt(buf[:], 0)
 			if pid, parseErr := strconv.Atoi(strings.TrimSpace(string(buf[:n]))); parseErr == nil && pid > 0 {
@@ -63,7 +62,7 @@ func (l *Lock) Release() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.f != nil {
-		_ = syscall.Flock(int(l.f.Fd()), syscall.LOCK_UN)
+		unlockFile(l.f)
 		l.f.Close()
 		l.f = nil
 	}

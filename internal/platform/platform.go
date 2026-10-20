@@ -1,11 +1,10 @@
-//go:build unix
-
 // Package platform is what the bridge asks of the operating system beyond
 // files: the instance lock, process groups, replacing its own process on
 // a restart, opening a browser, telling a terminal, a folder dialog and
 // the optional tmux activity viewer.
-// It builds on macOS and Linux only (unsupported.go), and it is the one
-// package below internal/ that may read the process's environment.
+// It builds on macOS, Linux and Windows, where some of it does less (each
+// _windows.go file says what), and it is the one package below internal/
+// that may read the process's environment.
 package platform
 
 import (
@@ -13,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"syscall"
 )
 
 // OpenBrowser opens url in the user's browser.
@@ -23,6 +21,9 @@ func OpenBrowser(url string) error {
 		return exec.Command("open", url).Run()
 	case "linux":
 		return exec.Command("xdg-open", url).Run()
+	case "windows":
+		// Not cmd /c start, which takes an & in url for its own.
+		return exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", url).Run()
 	}
 	return fmt.Errorf("don't know how to open a browser on %s", runtime.GOOS)
 }
@@ -35,8 +36,9 @@ func IsTerminal(f *os.File) bool {
 }
 
 // FolderPicker returns the command that shows a native folder chooser,
-// or nil when the system has none. kdialog starts in home, the user's
-// home folder.
+// or nil when the system has none, as on Windows for now, where the
+// dashboard takes a typed path. kdialog starts in home, the user's home
+// folder.
 func FolderPicker(home string) []string {
 	switch runtime.GOOS {
 	case "darwin":
@@ -53,10 +55,4 @@ func FolderPicker(home string) []string {
 		}
 	}
 	return nil
-}
-
-// Exec replaces the running process with argv0, run with argv and
-// envv. It returns only when that fails.
-func Exec(argv0 string, argv, envv []string) error {
-	return syscall.Exec(argv0, argv, envv)
 }

@@ -54,6 +54,18 @@
   "codex_effort": "high",
   "codex_model": "gpt-6.1-sol",
   "codex_path": "codex",
+  "core": {
+    "lease": {
+      "enabled": true,
+      "renew_seconds": 30,
+      "stale_seconds": 180
+    },
+    "memory_limit_gb": 6,
+    "tailnet": {
+      "enabled": true,
+      "hostname": "fridolin-test-core"
+    }
+  },
   "dangerously_skip_permissions": true,
   "dashboard": {
     "require_token": true
@@ -82,6 +94,10 @@
   "max_concurrent_runs": 3,
   "max_media_mb": 50,
   "media_dir": "<HOME>/.fridolin/media",
+  "nodes": {
+    "enabled": true,
+    "listen": "127.0.0.1:9766"
+  },
   "otp_guard": true,
   "otp_markers": [
     "verification code"
@@ -96,6 +112,11 @@
     "phone_dir": "<HOME>/PlaudSync",
     "phone_upload": true,
     "polished": true
+  },
+  "policy": {
+    "approval_timeout_hours": 12,
+    "max_pending_irreversible": 2,
+    "max_runs_per_hour": 30
   },
   "queue": {
     "max_pending": 5,
@@ -136,6 +157,16 @@
       "text": "assistant"
     }
   ],
+  "vault": {
+    "activity_days": 45,
+    "bucket": "example-vault",
+    "cold_after_days": 120,
+    "enabled": true,
+    "endpoint": "s3.example-region.backblazeb2.com",
+    "headroom_percent": 15,
+    "hot_budget_gb": 40,
+    "snapshots_bucket": "example-snapshots"
+  },
   "version": 2,
   "viewer": false
 }

@@ -53,7 +53,7 @@ func TestStopRunsOnce(t *testing.T) {
 	if n := strings.Count(logs.String(), "Bridge stopped."); n != 1 {
 		t.Errorf("the bridge stopped %d times, want once:\n%s", n, logs.String())
 	}
-	lock, err := platform.AcquireLock(tb.cfgs.Get().DataDir)
+	lock, err := platform.AcquireLock(config.Layout{Root: tb.cfgs.Get().DataDir}.Lock())
 	if err != nil {
 		t.Fatalf("the data dir is still locked after Stop: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestServe(t *testing.T) {
 			execSelf = func(argv0 string, argv, env []string) error {
 				execs = append(execs, argv0)
 				// What the new process's New takes first.
-				lock, err := platform.AcquireLock(dataDir)
+				lock, err := platform.AcquireLock(config.Layout{Root: dataDir}.Lock())
 				if lockErr = err; err == nil {
 					lock.Release()
 				}
@@ -314,7 +314,7 @@ func secondSignalStopsAtOnce(t *testing.T, provider string) {
 	}
 	testutil.WaitFor(t, 20*time.Second, "the bridge to serve", func() bool { code, _ := call("GET", "/health", "", ""); return code == 200 })
 	// While it runs, the data dir is its own, for this process too.
-	if lock, err := platform.AcquireLock(filepath.Join(home, ".fridolin")); err == nil {
+	if lock, err := platform.AcquireLock(config.Layout{Root: filepath.Join(home, ".fridolin")}.Lock()); err == nil {
 		lock.Release()
 		t.Error("a bridge in another process got the instance lock of the one running")
 	}
@@ -374,8 +374,8 @@ func secondSignalStopsAtOnce(t *testing.T, provider string) {
 	}
 	t.Logf("exited %v after the second signal", time.Since(sent).Round(time.Millisecond))
 	// The run's process group is gone, though its 60 seconds are not.
-	testutil.WaitFor(t, 5*time.Second, "the run to be killed", func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH })
-	testutil.WaitFor(t, 5*time.Second, "the run's child to be killed", func() bool { return syscall.Kill(childPID, 0) == syscall.ESRCH })
+	testutil.WaitFor(t, 5*time.Second, "the run to be killed", func() bool { return !testutil.PIDAlive(pid) })
+	testutil.WaitFor(t, 5*time.Second, "the run's child to be killed", func() bool { return !testutil.PIDAlive(childPID) })
 }
 
 // setShutdownGrace gives the runs in flight d to finish when the test's

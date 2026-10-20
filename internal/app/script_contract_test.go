@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"testing"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -176,9 +175,7 @@ func TestGoldenIngestContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	fifo := filepath.Join(inbox, "pipe")
-	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mkfifo(t, fifo)
 	sub := filepath.Join(inbox, "folder")
 	if err := os.Mkdir(sub, 0o700); err != nil {
 		t.Fatal(err)

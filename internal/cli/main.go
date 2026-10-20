@@ -33,6 +33,10 @@ Usage:
                                            validate the configuration and show routing;
                                            --redact masks numbers, JIDs, emails and home paths;
                                            exits 3 when a configured brain cannot run
+  fridolin doctor [--json] [--redact]      check what the bridge and the coming parts
+                                           need on this machine (CLIs, Tailscale,
+                                           Docker, host secrets, disk), each with a
+                                           fix; exits 1 when a required check fails
   fridolin init [--claude-path PATH] [--data-dir DIR]
                                            write a starter config (if there is none)
   fridolin paths [--json]                  the config file and data dir in use, and
@@ -72,6 +76,8 @@ func Main() {
 		os.Exit(runCmd(args))
 	case "check":
 		checkCmd(args)
+	case "doctor":
+		os.Exit(doctorCmd(args, os.Stdout))
 	case "open":
 		openCmd(args)
 	case "rotate-token":
@@ -427,6 +433,34 @@ func checkCmd(args []string) {
 		}
 		log.Fatal(err)
 	}
+}
+
+// doctorCmd runs `fridolin doctor` and returns its exit status: 0 when
+// every required check passes, 1 when one fails or the report cannot be
+// written, 2 for a bad flag.
+func doctorCmd(args []string, stdout io.Writer) int {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	var o app.DoctorOptions
+	fs.StringVar(&o.Config, "config", "", configFlagHelp)
+	fs.BoolVar(&o.JSON, "json", false, "print the checks as JSON")
+	fs.BoolVar(&o.Redact, "redact", false, "mask phone numbers, JIDs and email addresses, and write ~ for the home folder, to paste the output into a bug report")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(fs.Output(), "doctor takes no arguments, got %q\n", fs.Args())
+		return 2
+	}
+	if err := app.WriteDoctor(stdout, o); err != nil {
+		if !errors.Is(err, app.ErrDoctorFailed) {
+			log.Print(err)
+		}
+		return 1
+	}
+	return 0
 }
 
 // checkBrainsLeftOut is check's exit status when the config loads but a

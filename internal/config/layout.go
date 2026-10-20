@@ -1,0 +1,96 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+// Layout names the files and folders in the data dir (FRIDOLIN_HOME,
+// ~/.fridolin by default), so that no package joins a name onto the data
+// dir on its own. It only names paths: whoever uses a folder creates it,
+// with EnsureDir, when its feature runs, never the bridge as it starts.
+//
+// bridge.db and media/ are not here: db_path and media_dir can put them
+// elsewhere, so they are Boot.DBPath and Boot.MediaDir.
+type Layout struct {
+	// Root is the data dir.
+	Root string
+}
+
+// Layout is the data dir's layout.
+func (b Boot) Layout() Layout { return Layout{Root: b.DataDir} }
+
+func (l Layout) join(elem ...string) string {
+	return filepath.Join(append([]string{l.Root}, elem...)...)
+}
+
+// The files and folders the bridge has today.
+
+// Lock is bridge.lock, which one bridge holds while it uses the data dir.
+func (l Layout) Lock() string { return l.join("bridge.lock") }
+
+// DashboardToken is the dashboard's token.
+func (l Layout) DashboardToken() string { return l.join("dashboard.token") }
+
+// DashboardSessions holds the dashboard's signed-in browsers.
+func (l Layout) DashboardSessions() string { return l.join("dashboard-sessions.json") }
+
+// ScriptsToken is the token scripts send to /send and /ingest.
+func (l Layout) ScriptsToken() string { return l.join("scripts.token") }
+
+// Backup is the Drive backup's state.
+func (l Layout) Backup() string { return l.join("backup") }
+
+// RcloneConf is the bridge's own rclone config, with the Drive remote.
+func (l Layout) RcloneConf() string { return l.join("rclone", "rclone.conf") }
+
+// GoogleClient is the Google OAuth client pasted into Settings.
+func (l Layout) GoogleClient() string { return l.join("google", "oauth_client.json") }
+
+// Plaud is the Plaud integration's state.
+func (l Layout) Plaud() string { return l.join("plaud") }
+
+// OTP holds the one-time-code hand-off files, one per brain.
+func (l Layout) OTP() string { return l.join("otp") }
+
+// SiteDevices lists the paired phone apps' keys for the site process.
+func (l Layout) SiteDevices() string { return l.join("site", "devices.json") }
+
+// The folders of the core, the vault and nodes (docs/PLAN.md).
+
+// Secrets holds age-encrypted secret files.
+func (l Layout) Secrets() string { return l.join("secrets") }
+
+// Audit holds the audit log, JSONL files.
+func (l Layout) Audit() string { return l.join("audit") }
+
+// VaultDB is the vault's index, one row per file.
+func (l Layout) VaultDB() string { return l.join("vault.db") }
+
+// Vault is the root of the hot tier's vault-managed files.
+func (l Layout) Vault() string { return l.join("vault") }
+
+// VaultDocuments holds filed documents.
+func (l Layout) VaultDocuments() string { return l.join("vault", "documents") }
+
+// VaultWorkspaces holds archived FrIDE workspaces, <task>.tar.zst.
+func (l Layout) VaultWorkspaces() string { return l.join("vault", "workspaces") }
+
+// Nodes holds the node registry and the nodes' keys.
+func (l Layout) Nodes() string { return l.join("nodes") }
+
+// Tsnet is the embedded Tailscale node's state.
+func (l Layout) Tsnet() string { return l.join("tsnet") }
+
+// Core holds the core lease's state and the staging of exports.
+func (l Layout) Core() string { return l.join("core") }
+
+// EnsureDir creates dir and its parents with mode 0700 if it is missing
+// and returns it. A folder that exists keeps its mode.
+func EnsureDir(dir string) (string, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("creating %s: %w", dir, err)
+	}
+	return dir, nil
+}

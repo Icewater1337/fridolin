@@ -20,7 +20,6 @@ import (
 	"runtime"
 
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -134,19 +133,6 @@ func requireSiteRuntime(t *testing.T) {
 			t.Skipf("%s cannot apply a profile here: %v: %s", sandbox.ExecPath, err, out)
 		}
 	}
-}
-
-// fakeSession prints the process's pid and the session it is in: a process
-// that leads a session of its own prints the same number twice.
-func fakeSession() int {
-	// syscall has no Getsid on Linux.
-	sid, _, errno := syscall.Syscall(syscall.SYS_GETSID, 0, 0, 0)
-	if errno != 0 {
-		fmt.Println("getsid:", errno)
-		return 1
-	}
-	fmt.Printf("pid=%d sid=%d\n", os.Getpid(), sid)
-	return 0
 }
 
 // permOf returns the permission bits of path.

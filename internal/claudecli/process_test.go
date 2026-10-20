@@ -6,9 +6,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -33,7 +33,7 @@ func TestRunCancelsProviderAndGrandchild(t *testing.T) {
 			// cancellation. No parser or delivery callback participates in the kill.
 			testutil.WaitFor(t, 10*time.Second, "provider and grandchild", func() bool { return readPID(pidFile) > 0 && readPID(childFile) > 0 })
 			pid, child := readPID(pidFile), readPID(childFile)
-			t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL); _ = syscall.Kill(child, syscall.SIGKILL) })
+			t.Cleanup(func() { testutil.KillPID(pid); testutil.KillPID(child) })
 			cancel()
 			select {
 			case result := <-done:
@@ -51,8 +51,11 @@ func TestRunCancelsProviderAndGrandchild(t *testing.T) {
 // An orphaned zombie no longer runs or holds any pipe, even if its adopter
 // has not reaped it yet (common with container PID 1 on Linux).
 func processAlive(pid int) bool {
-	if syscall.Kill(pid, 0) != nil {
+	if !testutil.PIDAlive(pid) {
 		return false
+	}
+	if runtime.GOOS == "windows" {
+		return true // PIDAlive sees no ended process there
 	}
 	out, err := exec.Command("ps", "-o", "stat=", "-p", strconv.Itoa(pid)).Output()
 	return err == nil && !strings.HasPrefix(strings.TrimSpace(string(out)), "Z")

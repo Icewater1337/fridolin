@@ -72,10 +72,12 @@ race-shard: ## one slice of the race tests, SHARD=i/n (CI splits the macOS run)
 race-process: ## repeat extracted provider process tests under the race detector
 	$(GO) test -race -shuffle=on -count=5 ./internal/claudecli
 
-# The second vet covers the Linux-only files from macOS (CI also runs Linux).
-vet: ## go vet, natively and for Linux without cgo
+# The other vets cover the Linux- and Windows-only files from macOS (CI also
+# runs Linux and Windows).
+vet: ## go vet, natively and for Linux and Windows without cgo
 	$(GO) vet ./...
 	CGO_ENABLED=0 GOOS=linux $(GO) vet ./...
+	CGO_ENABLED=0 GOOS=windows $(GO) vet ./...
 
 fmt: ## gofmt every Go file in place
 	gofmt -l -w .

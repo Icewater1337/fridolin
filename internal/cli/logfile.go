@@ -66,7 +66,7 @@ func (r *rotatingLog) rotate() error {
 }
 
 func (r *rotatingLog) Write(p []byte) (int, error) {
-	if r.size > 0 && r.size+int64(len(p)) > r.max {
+	if logRotates && r.size > 0 && r.size+int64(len(p)) > r.max {
 		if err := r.rotate(); err != nil {
 			// Keep logging to the old file rather than lose the line.
 			fmt.Fprintf(r.f, "rotating the log: %v\n", err)

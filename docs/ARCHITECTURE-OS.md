@@ -14,7 +14,7 @@ fridolin becomes the OS: one Go binary is the kernel, and wherever it runs is th
 | Execution | FrIDE as the coding and fleet subsystem | Tasks, worktrees, fleet mode and the inbox already exist |
 | Backups | restic to Backblaze B2 (EU), second repo on Google Drive | Cheapest under about 1.5 TB, most durable, both providers see only ciphertext |
 | Network | Tailscale only, nothing public | Phone and every node on one tailnet |
-| Irreversible actions | Model drafts, Mathias confirms on WhatsApp | Prompt injection is the main threat |
+| Irreversible actions | Model drafts, the owner confirms on WhatsApp | Prompt injection is the main threat |
 | Containers | Decide later; keep it possible | WhatsApp session and CLI logins make containers awkward today |
 | OpenClaw | Study later for channel adapters and skill format | Separate task |
 

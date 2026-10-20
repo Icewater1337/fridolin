@@ -3,10 +3,10 @@ package app
 import (
 	"errors"
 	"net/http"
-	"path/filepath"
 	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
 
@@ -29,7 +29,7 @@ type scriptAuth struct {
 // names the brain of a run's token; exists reports whether that brain is
 // still configured, so a removed brain's run cannot call.
 func newScriptAuth(dataDir string, brainOf func(tok string) string, exists func(id string) bool) (*scriptAuth, error) {
-	tok, err := httpapi.LoadToken(filepath.Join(dataDir, "scripts.token"))
+	tok, err := httpapi.LoadToken(config.Layout{Root: dataDir}.ScriptsToken())
 	if err != nil {
 		return nil, err
 	}

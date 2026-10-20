@@ -40,8 +40,10 @@ func TestResolveUsesInjectedPathsAndPlatform(t *testing.T) {
 	if got := (BrainRef{Path: "~/brain"}).Dir(home); got != filepath.Join(home, "brain") {
 		t.Fatalf("BrainRef.Dir = %q", got)
 	}
-	if _, err := resolveFile(&File{Sandbox: SandboxConfig{Enabled: true}}, paths, "linux"); err == nil {
-		t.Fatal("injected Linux platform allowed the macOS sandbox")
+	for _, goos := range []string{"linux", "windows"} {
+		if _, err := resolveFile(&File{Sandbox: SandboxConfig{Enabled: true}}, paths, goos); err == nil {
+			t.Fatalf("injected %s platform allowed the macOS sandbox", goos)
+		}
 	}
 	if _, err := resolveFile(&File{Sandbox: SandboxConfig{Enabled: true}}, paths, "darwin"); err != nil {
 		t.Fatalf("injected macOS platform: %v", err)
@@ -95,7 +97,7 @@ func TestStarterUsesInjectedPathsAndPlatform(t *testing.T) {
 	if got := DefaultPath(paths); got != filepath.Join(paths.DefaultDataDir, "config.json") {
 		t.Fatalf("DefaultPath = %q", got)
 	}
-	if !Starter("darwin").Sandbox.Enabled || Starter("linux").Sandbox.Enabled {
+	if !Starter("darwin").Sandbox.Enabled || Starter("linux").Sandbox.Enabled || Starter("windows").Sandbox.Enabled {
 		t.Fatal("starter did not use the injected platform")
 	}
 	path := filepath.Join(home, "requested", "config.json")

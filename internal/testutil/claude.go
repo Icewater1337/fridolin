@@ -13,7 +13,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -85,7 +84,7 @@ func runFakeClaude(version string, polls func(io.Writer) int) {
 		// "stdout,stderr": no kill of the group reaches it. Its PID goes
 		// to FRIDOLIN_FAKE_PID_LOG after the CLI's own.
 		child := exec.Command("sleep", "30")
-		child.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+		child.SysProcAttr = newSessionAttr()
 		child.Stdout = os.Stdout
 		if strings.Contains(holds, "stderr") {
 			child.Stderr = os.Stderr

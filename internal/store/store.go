@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"go.mau.fi/whatsmeow/store/sqlstore"
+	_ "modernc.org/sqlite"
 )
 
 // Store manages both the whatsmeow device store and the bridge's own tables.
@@ -34,15 +34,16 @@ func Open(dbPath, logLevel string) (*Store, error) {
 	if err := makePrivateDB(dbPath); err != nil {
 		return nil, fmt.Errorf("creating database file: %w", err)
 	}
-	dbURL := "file:" + dbPath + "?_foreign_keys=on"
+	dbURL := DSN(dbPath)
 
 	logger := logx.NewWaLogger("Store", logLevel)
 
-	db, err := sql.Open("sqlite3", dbURL)
+	db, err := sql.Open("sqlite", dbURL)
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite db: %w", err)
 	}
 	// The device container and application tables share one pool and owner.
+	// "sqlite3" names whatsmeow's SQL dialect, not the driver.
 	container := sqlstore.NewWithDB(db, "sqlite3", logger)
 	if err := container.Upgrade(context.Background()); err != nil {
 		return nil, errors.Join(fmt.Errorf("creating sqlstore container: failed to upgrade database: %w", err), container.Close())
@@ -53,6 +54,17 @@ func Open(dbPath, logLevel string) (*Store, error) {
 		return nil, errors.Join(fmt.Errorf("migrating store: %w", err), s.Close())
 	}
 	return s, nil
+}
+
+// DSN is the data source name, for the "sqlite" driver, of the database at
+// path, with the settings every connection to bridge.db needs. The pure-Go
+// driver applies them per connection, as the cgo driver this replaced did with
+// its own parameters; busy_timeout keeps the five seconds that driver waited
+// for a lock by default, and _time_format=sqlite writes times in the format
+// that driver wrote, so rows from before the switch compare and sort as new
+// ones do.
+func DSN(path string) string {
+	return "file:" + path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_time_format=sqlite"
 }
 
 // sqliteSidecars are the suffixes of the files SQLite keeps next to a

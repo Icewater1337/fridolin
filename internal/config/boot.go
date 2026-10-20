@@ -29,15 +29,14 @@ func bootOf(c *File, paths Paths) Boot {
 	}
 }
 
-func (b Boot) TokenPath() string  { return filepath.Join(b.DataDir, "dashboard.token") }
-func (b Boot) LockPath() string   { return filepath.Join(b.DataDir, "bridge.lock") }
-func (b Boot) BackupDir() string  { return filepath.Join(b.DataDir, "backup") }
-func (b Boot) RcloneConf() string { return filepath.Join(b.DataDir, "rclone", "rclone.conf") }
-func (b Boot) GoogleClientPath() string {
-	return filepath.Join(b.DataDir, "google", "oauth_client.json")
-}
-func (b Boot) PlaudDir() string { return filepath.Join(b.DataDir, "plaud") }
-func (b Boot) OTPDir() string   { return filepath.Join(b.DataDir, "otp") }
+// Shorthands for paths of Layout.
+func (b Boot) TokenPath() string        { return b.Layout().DashboardToken() }
+func (b Boot) LockPath() string         { return b.Layout().Lock() }
+func (b Boot) BackupDir() string        { return b.Layout().Backup() }
+func (b Boot) RcloneConf() string       { return b.Layout().RcloneConf() }
+func (b Boot) GoogleClientPath() string { return b.Layout().GoogleClient() }
+func (b Boot) PlaudDir() string         { return b.Layout().Plaud() }
+func (b Boot) OTPDir() string           { return b.Layout().OTP() }
 
 // EnsureDirs creates the data dir and the folders of the database and the
 // media. Resolve does not: it runs for check and open too, which must

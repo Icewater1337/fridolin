@@ -4,11 +4,10 @@ package platform
 
 import (
 	"fmt"
-	"go/build"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -38,17 +37,17 @@ func runAgain(t *testing.T, test string, env ...string) string {
 
 func TestInstanceLockRefusesASecondHolder(t *testing.T) {
 	dir := t.TempDir()
-	first, err := AcquireLock(dir)
+	first, err := AcquireLock(filepath.Join(dir, "bridge.lock"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second, err := AcquireLock(dir); err == nil {
+	if second, err := AcquireLock(filepath.Join(dir, "bridge.lock")); err == nil {
 		second.Release()
 		t.Fatal("a second lock on the same data dir must fail")
 	} else if !strings.Contains(err.Error(), "another bridge is already running") {
 		t.Errorf("err = %v", err)
 	}
-	other, err := AcquireLock(t.TempDir())
+	other, err := AcquireLock(filepath.Join(t.TempDir(), "bridge.lock"))
 	if err != nil {
 		t.Fatalf("another data dir must still lock: %v", err)
 	}
@@ -56,7 +55,7 @@ func TestInstanceLockRefusesASecondHolder(t *testing.T) {
 
 	first.Release()
 	first.Release() // a second release is harmless
-	again, err := AcquireLock(dir)
+	again, err := AcquireLock(filepath.Join(dir, "bridge.lock"))
 	if err != nil {
 		t.Fatalf("after release the lock must be free: %v", err)
 	}
@@ -69,7 +68,7 @@ func TestInstanceLockRefusesASecondHolder(t *testing.T) {
 // go.
 func TestInstanceLockRefusesAnotherProcess(t *testing.T) {
 	if dir := os.Getenv(lockChildVar); dir != "" {
-		l, err := AcquireLock(dir)
+		l, err := AcquireLock(filepath.Join(dir, "bridge.lock"))
 		if err != nil {
 			fmt.Println("refused:", err)
 			return
@@ -79,7 +78,7 @@ func TestInstanceLockRefusesAnotherProcess(t *testing.T) {
 		return
 	}
 	dir := t.TempDir()
-	l, err := AcquireLock(dir)
+	l, err := AcquireLock(filepath.Join(dir, "bridge.lock"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +90,7 @@ func TestInstanceLockRefusesAnotherProcess(t *testing.T) {
 	if out := runAgain(t, "TestInstanceLockRefusesAnotherProcess", lockChildVar+"="+dir); !strings.Contains(out, "acquired") {
 		t.Errorf("after release another process must get the lock:\n%s", out)
 	}
-	again, err := AcquireLock(dir)
+	again, err := AcquireLock(filepath.Join(dir, "bridge.lock"))
 	if err != nil {
 		t.Fatalf("after the other process the lock must be free: %v", err)
 	}
@@ -208,30 +207,6 @@ func TestFolderPicker(t *testing.T) {
 		t.Setenv("WAYLAND_DISPLAY", "")
 		if argv := FolderPicker("/Users/you"); argv != nil {
 			t.Errorf("FolderPicker() = %q without a display, want none", argv)
-		}
-	}
-}
-
-// On a system that is not Unix the package builds from unsupported.go
-// alone, whose undefined name stops the build with a message, and on
-// macOS and Linux it leaves that file out.
-func TestOnlyUnixBuildsThePackage(t *testing.T) {
-	for _, c := range []struct {
-		goos        string
-		unsupported bool
-	}{{"darwin", false}, {"linux", false}, {"windows", true}, {"plan9", true}} {
-		ctx := build.Default
-		ctx.GOOS = c.goos
-		pkg, err := ctx.ImportDir(".", 0)
-		if err != nil {
-			t.Fatalf("%s: %v", c.goos, err)
-		}
-		if c.unsupported {
-			if !slices.Equal(pkg.GoFiles, []string{"unsupported.go"}) {
-				t.Errorf("%s builds %v, want unsupported.go alone", c.goos, pkg.GoFiles)
-			}
-		} else if slices.Contains(pkg.GoFiles, "unsupported.go") {
-			t.Errorf("%s builds %v, unsupported.go among them", c.goos, pkg.GoFiles)
 		}
 	}
 }

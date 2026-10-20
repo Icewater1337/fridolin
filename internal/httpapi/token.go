@@ -6,9 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 
@@ -29,7 +29,7 @@ const minTokenLen = 32
 // LoadDashboardToken reads <dataDir>/dashboard.token, creating it on first
 // run (see LoadToken).
 func LoadDashboardToken(dataDir string) (*Token, error) {
-	return LoadToken(filepath.Join(dataDir, "dashboard.token"))
+	return LoadToken(config.Layout{Root: dataDir}.DashboardToken())
 }
 
 // LoadToken reads the token in path, creating the file when there is
@@ -82,6 +82,6 @@ func (t *Token) Matches(s string) bool {
 
 // ReadToken reads the existing dashboard token without creating it.
 func ReadToken(dataDir string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(dataDir, "dashboard.token"))
+	data, err := os.ReadFile(config.Layout{Root: dataDir}.DashboardToken())
 	return strings.TrimSpace(string(data)), err
 }

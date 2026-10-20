@@ -58,7 +58,7 @@ func RotateToken(cfg *config.Settings) error {
 	// No bridge answers. The instance lock says whether one runs anyway
 	// (with its server off, say); only without one are the files changed
 	// here, since a running bridge keeps the token in memory.
-	lock, err := platform.AcquireLock(cfg.DataDir)
+	lock, err := platform.AcquireLock(cfg.Layout().Lock())
 	if err != nil {
 		return fmt.Errorf("the bridge runs but does not answer, so the token was not replaced: %w", err)
 	}

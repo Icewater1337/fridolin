@@ -649,7 +649,7 @@ func readCredentialFile(path string) ([]byte, error) { return readRegularFile(pa
 // with more than one link, which matters only for a file the bridge acts
 // on, not for one it only reports.
 func readRegularFile(path string, singleLink bool) ([]byte, error) {
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	f, err := openNoFollow(path)
 	if errors.Is(err, syscall.ELOOP) {
 		return nil, fmt.Errorf("%s: %w", path, fsx.ErrSymlink)
 	}
@@ -664,7 +664,7 @@ func readRegularFile(path string, singleLink bool) ([]byte, error) {
 	if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("%s: not a regular file", path)
 	}
-	if st, ok := fi.Sys().(*syscall.Stat_t); ok && singleLink && st.Nlink != 1 {
+	if n, ok := fsx.LinkCount(path, fi); ok && singleLink && n != 1 {
 		return nil, fmt.Errorf("%s: it has more than one link, which the bridge does not trust", path)
 	}
 	data, err := fsx.ReadAtMost(f)

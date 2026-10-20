@@ -210,7 +210,10 @@ func (p *Manager) updateDevices(fn func(st *plaudDevices) error) error {
 	for _, d := range st.Devices {
 		site.Devices = append(site.Devices, siteDevice{d.ID, d.Key})
 	}
-	sitePath := filepath.Join(p.cfg().DataDir, "site", "devices.json")
+	sitePath := p.options.SiteDevices
+	if sitePath == "" {
+		return errors.New("plaud: no path for the site's copy of the paired devices")
+	}
 	if err := os.MkdirAll(filepath.Dir(sitePath), 0o700); err != nil {
 		return err
 	}
