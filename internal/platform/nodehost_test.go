@@ -3,6 +3,7 @@ package platform
 import (
 	"errors"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -24,6 +25,11 @@ func TestNodeStateDir(t *testing.T) {
 		{"windows", map[string]string{"LOCALAPPDATA": filepath.FromSlash("/appdata")}, noHome, "/appdata/fridolin-node"},
 		{"windows", nil, home, "/home/you/AppData/Local/fridolin-node"},
 	} {
+		// Paths follow the host's rules (filepath), so a case for the
+		// other family of systems cannot hold here.
+		if (c.goos == "windows") != (runtime.GOOS == "windows") {
+			continue
+		}
 		env = c.env
 		got, err := nodeStateDir(c.goos, getenv, c.home)
 		if err != nil {
