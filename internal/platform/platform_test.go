@@ -4,11 +4,9 @@ package platform
 
 import (
 	"fmt"
-	"go/build"
 	"os"
 	"os/exec"
 	"runtime"
-	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -208,30 +206,6 @@ func TestFolderPicker(t *testing.T) {
 		t.Setenv("WAYLAND_DISPLAY", "")
 		if argv := FolderPicker("/Users/you"); argv != nil {
 			t.Errorf("FolderPicker() = %q without a display, want none", argv)
-		}
-	}
-}
-
-// On a system that is not Unix the package builds from unsupported.go
-// alone, whose undefined name stops the build with a message, and on
-// macOS and Linux it leaves that file out.
-func TestOnlyUnixBuildsThePackage(t *testing.T) {
-	for _, c := range []struct {
-		goos        string
-		unsupported bool
-	}{{"darwin", false}, {"linux", false}, {"windows", true}, {"plan9", true}} {
-		ctx := build.Default
-		ctx.GOOS = c.goos
-		pkg, err := ctx.ImportDir(".", 0)
-		if err != nil {
-			t.Fatalf("%s: %v", c.goos, err)
-		}
-		if c.unsupported {
-			if !slices.Equal(pkg.GoFiles, []string{"unsupported.go"}) {
-				t.Errorf("%s builds %v, want unsupported.go alone", c.goos, pkg.GoFiles)
-			}
-		} else if slices.Contains(pkg.GoFiles, "unsupported.go") {
-			t.Errorf("%s builds %v, unsupported.go among them", c.goos, pkg.GoFiles)
 		}
 	}
 }

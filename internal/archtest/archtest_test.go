@@ -177,9 +177,9 @@ func TestImportRules(t *testing.T) {
 			t.Errorf("%s has no row in the import table: add one, listing the module's packages it may import", dir)
 			continue
 		}
-		for _, goos := range []string{"darwin", "linux"} {
+		for _, goos := range []string{"darwin", "linux", "windows"} {
 			ctx := build.Default
-			ctx.GOOS, ctx.CgoEnabled = goos, true
+			ctx.GOOS, ctx.CgoEnabled = goos, goos != "windows"
 			pkg, err := ctx.ImportDir(filepath.Join(root, filepath.FromSlash(dir)), 0)
 			if _, ok := errors.AsType[*build.NoGoError](err); ok {
 				continue
@@ -317,7 +317,6 @@ func TestPublicModulePath(t *testing.T) {
 }
 
 // TestPlatformHasNoMutableGlobals keeps process state on the owning value.
-// The unsupported-platform file only declares an intentional build error.
 func TestPlatformHasNoMutableGlobals(t *testing.T) {
 	root := moduleRoot(t)
 	files, err := filepath.Glob(filepath.Join(root, "internal", "platform", "*.go"))
@@ -325,7 +324,7 @@ func TestPlatformHasNoMutableGlobals(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, file := range files {
-		if strings.HasSuffix(file, "_test.go") || filepath.Base(file) == "unsupported.go" {
+		if strings.HasSuffix(file, "_test.go") {
 			continue
 		}
 		fset := token.NewFileSet()

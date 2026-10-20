@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -984,9 +983,7 @@ func TestMCPConfigOf(t *testing.T) {
 		}, false, "not a regular file"},
 		// Opening it to read would block until something writes to it.
 		{"FIFO", func(t *testing.T, p string) {
-			if err := syscall.Mkfifo(p, 0o600); err != nil {
-				t.Fatal(err)
-			}
+			mkfifo(t, p)
 		}, false, "not a regular file"},
 		{"huge", write(`{"mcpServers": {}, "pad": "` + strings.Repeat("x", fsx.MaxBrainFile) + `"}`), false, "larger than"},
 	}
@@ -1456,8 +1453,8 @@ func TestPanicsInARunAreContained(t *testing.T) {
 			data, _ := os.ReadFile(pidLog)
 			for _, line := range strings.Fields(string(data)) {
 				pid, _ := strconv.Atoi(line)
-				if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
-					t.Errorf("process %d of a run is still there (%v)", pid, err)
+				if testutil.PIDAlive(pid) {
+					t.Errorf("process %d of a run is still there", pid)
 				}
 			}
 		})

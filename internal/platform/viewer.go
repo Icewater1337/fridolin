@@ -1,5 +1,3 @@
-//go:build unix
-
 package platform
 
 import (
@@ -68,6 +66,10 @@ const viewerScript = `printf '\033[1m=== %s — Claude activity ===\033[0m\n\n' 
 // Start creates the session and opens its optional terminal window.
 func (tv *Viewer) Start() error {
 	tmux := tv.TmuxPath
+	if runtime.GOOS == "windows" {
+		// The session runs sh and tail, and tmux is no Windows program.
+		return fmt.Errorf("creating tmux viewer %s: the viewer is not available on Windows", tv.Name)
+	}
 
 	// Replace a stale session of the same name, and only that one.
 	_ = tv.run(tmux, "kill-session", "-t", tv.target())

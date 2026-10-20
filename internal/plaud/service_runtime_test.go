@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -154,7 +153,7 @@ func TestPlaudCLIRunsContained(t *testing.T) {
 		case <-time.After(8 * time.Second):
 			t.Fatal("the cancelled run did not end")
 		}
-		testutil.WaitFor(t, 5*time.Second, "the child to end", func() bool { return syscall.Kill(pid, 0) != nil })
+		testutil.WaitFor(t, 5*time.Second, "the child to end", func() bool { return !testutil.PIDAlive(pid) })
 	})
 	t.Run("its output is capped", func(t *testing.T) {
 		tb, fp := plaudService(t, "")

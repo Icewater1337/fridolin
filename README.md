@@ -108,6 +108,7 @@ See [docs/SITE.md](docs/SITE.md).
 ## Requirements
 
 - **macOS or Linux.** The sandbox layer is macOS-only; everything else is portable.
+  Windows builds, but is not supported yet (no service, no sandbox).
 - **[Claude Code](https://claude.com/claude-code)** 2.1.302 or newer, installed
   and logged in. With the sandbox (macOS), brains log in with a token in the
   bridge's environment instead: `claude setup-token` prints one (see

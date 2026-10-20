@@ -14,7 +14,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -231,9 +230,7 @@ func TestCalendarTokenIsNotFollowed(t *testing.T) {
 			}
 		}, "more than one link"},
 		{"FIFO", func(t *testing.T, own, _ string) {
-			if err := syscall.Mkfifo(own, 0o600); err != nil {
-				t.Fatal(err)
-			}
+			mkfifo(t, own)
 		}, "not a regular file"},
 	}
 	for _, tc := range cases {
@@ -1451,7 +1448,7 @@ func TestLeftoverClientCopiesAreReported(t *testing.T) {
 				var err error
 				switch {
 				case content == fifo:
-					err = syscall.Mkfifo(path, 0o600)
+					mkfifo(t, path)
 				case strings.HasPrefix(content, hardLink), strings.HasPrefix(content, symlink):
 					elsewhere := filepath.Join(t.TempDir(), name)
 					if err := os.WriteFile(elsewhere, []byte(linkedContent(content)), 0o600); err != nil {

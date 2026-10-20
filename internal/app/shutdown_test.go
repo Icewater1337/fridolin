@@ -374,8 +374,8 @@ func secondSignalStopsAtOnce(t *testing.T, provider string) {
 	}
 	t.Logf("exited %v after the second signal", time.Since(sent).Round(time.Millisecond))
 	// The run's process group is gone, though its 60 seconds are not.
-	testutil.WaitFor(t, 5*time.Second, "the run to be killed", func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH })
-	testutil.WaitFor(t, 5*time.Second, "the run's child to be killed", func() bool { return syscall.Kill(childPID, 0) == syscall.ESRCH })
+	testutil.WaitFor(t, 5*time.Second, "the run to be killed", func() bool { return !testutil.PIDAlive(pid) })
+	testutil.WaitFor(t, 5*time.Second, "the run's child to be killed", func() bool { return !testutil.PIDAlive(childPID) })
 }
 
 // setShutdownGrace gives the runs in flight d to finish when the test's

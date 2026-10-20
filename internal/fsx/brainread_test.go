@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 )
 
@@ -36,9 +35,7 @@ func TestReadBrainFileRefusesNonRegularAndEscapingEntries(t *testing.T) {
 	if err := os.Symlink("regular", filepath.Join(dir, "link")); err != nil {
 		t.Fatal(err)
 	}
-	if err := syscall.Mkfifo(filepath.Join(dir, "pipe"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	mkfifo(t, filepath.Join(dir, "pipe"))
 	if got, err := ReadBrainFile(dir, "regular"); err != nil || string(got) != "inside" {
 		t.Fatalf("regular file: %q, %v", got, err)
 	}

@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -35,7 +34,7 @@ func setsidChildren(t *testing.T, home, holds string) {
 		// Each run logs the CLI's PID, then its grandchild's.
 		for i, line := range strings.Fields(string(data)) {
 			if pid, err := strconv.Atoi(line); err == nil && i%2 == 1 {
-				_ = syscall.Kill(pid, syscall.SIGKILL)
+				testutil.KillPID(pid)
 			}
 		}
 	})

@@ -19,6 +19,12 @@ for compatibility.
 
 ### Changed
 
+- Fridolin now builds for Windows (amd64 and arm64, without cgo). It is
+  not supported there yet: there is no service and no sandbox
+  (`sandbox.enabled` is refused, as on Linux), and a crash leaves runs
+  going; docs/DECISIONS.md lists what else does less. macOS and Linux
+  behave as before.
+
 - SQLite is now the pure-Go `modernc.org/sqlite`, so building Fridolin no
   longer needs a C compiler (`make check`'s race tests still do). An
   existing `bridge.db` opens as it is: the WhatsApp pairing, polls and

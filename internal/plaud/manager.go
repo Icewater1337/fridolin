@@ -20,7 +20,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -583,7 +582,7 @@ func checkPlaudLogin(home string) error {
 	if !fi.Mode().IsRegular() {
 		return plaudLoginRefused(p, fi, "not a regular file")
 	}
-	if st, ok := fi.Sys().(*syscall.Stat_t); ok && st.Nlink != 1 {
+	if n, ok := fsx.LinkCount(p, fi); ok && n != 1 {
 		return plaudLoginRefused(p, fi, "a file with another name too (a hard link)")
 	}
 	return nil

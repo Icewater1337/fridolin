@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -228,9 +227,7 @@ func TestManifestIsNotFollowedOutOfTheFolder(t *testing.T) {
 			if err := os.Remove(p); err != nil {
 				t.Fatal(err)
 			}
-			if err := syscall.Mkfifo(p, 0o600); err != nil {
-				t.Fatal(err)
-			}
+			mkfifo(t, p)
 		}, "not a regular file"},
 	}
 	for _, tc := range cases {
