@@ -282,7 +282,17 @@ func outboxDelay(attempts int) time.Duration {
 }
 
 // deliver sends what is left of r, saving its progress after each part.
+//
+// What records a part that went out, and the reply once all of it did,
+// runs on record, which Stop does not cancel: a send cannot be taken back,
+// so a stop that begins during it must not keep the record from bridge.db,
+// or the next start would send the part again. Worse, SQLite may commit a
+// write and still report it canceled (modernc.org/sqlite checks the context
+// again after the statement ran), which would take the reply out of the
+// outbox without recording it in the history. Stop waits for this, and the
+// store closes only after, so the record still lands; busy_timeout bounds it.
 func (o *Outbox) deliver(ctx context.Context, r *store.OutboxRow) error {
+	record := context.WithoutCancel(ctx)
 	m := o.messenger()
 	for i := r.NextPart; i < len(r.Parts); i++ {
 		if i > r.NextPart && o.pace > 0 {
@@ -296,13 +306,13 @@ func (o *Outbox) deliver(ctx context.Context, r *store.OutboxRow) error {
 			return err
 		}
 		r.NextPart = i + 1
-		if err := o.store.OutboxSent(ctx, r.ID, r.NextPart); err != nil {
+		if err := o.store.OutboxSent(record, r.ID, r.NextPart); err != nil {
 			// Sent, but a retry would send it again: better than losing
 			// the rest, which giving up would.
 			log.Printf("outbox: recording a sent message to %s: %v", r.Chat, err)
 		}
 	}
-	if err := o.finish(ctx, *r); err != nil {
+	if err := o.finish(record, *r); err != nil {
 		return fmt.Errorf("%w: a reply to %s: %w", errNotRecorded, r.Chat, err)
 	}
 	return nil
