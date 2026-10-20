@@ -131,9 +131,12 @@ jobs:
         if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest' && matrix.shard == fromJSON(env.SHARDS)
         run: make lint-actions
 
-  # Windows builds and runs the Go tests natively. No race detector (it
-  # needs cgo there) and none of the POSIX-shell targets (smoke, scripts):
-  # those run on macOS and Linux above.
+  # Windows builds everything and vets it, and runs the tests of the
+  # packages the native Windows binary uses: the bridge (the core) runs
+  # there in the Linux container (docs/CORE.md), so only the node agent and
+  # the libraries under it run natively (docs/DECISIONS.md). A package joins
+  # WINDOWS_PACKAGES once its tests pass on Windows. No race detector (it
+  # needs cgo there) and none of the POSIX-shell targets.
   go-windows:
     runs-on: windows-latest
     timeout-minutes: 30
@@ -156,7 +159,16 @@ jobs:
       - name: build
         run: go build -o bin/fridolin.exe ./cmd/fridolin
       - name: test
-        run: go test -count=1 -short ./...
+        env:
+          WINDOWS_PACKAGES: >-
+            access activity apperr archtest chat devchat google history
+            jsonx logx otp outbound pipeline platform prompt route store
+            testutil textx toolcli trigger version
+        run: |
+          pkgs=""
+          for p in $WINDOWS_PACKAGES; do pkgs="$pkgs ./internal/$p"; done
+          # shellcheck disable=SC2086
+          go test -count=1 -short $pkgs
 
   fuzz:
     # After a merge only: twenty seconds a target would hold up every pull
