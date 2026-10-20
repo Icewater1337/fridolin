@@ -465,7 +465,6 @@ func (h *harness) run(id string) *brain.RunView {
 	return nil
 }
 
-
 // WaitFor polls cond until it holds, for up to ten seconds.
 func (h *harness) WaitFor(what string, cond func() bool) {
 	h.t.Helper()
