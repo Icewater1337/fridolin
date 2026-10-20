@@ -34,6 +34,10 @@ type flakyMessenger struct {
 	dropAfter int           // -1: never
 	tries     int           // sends tried, failed ones included
 	delay     time.Duration // how long each send takes
+	// upOnFail brings the connection up as a send fails for want of it,
+	// before the send returns: the outbox sees it down before the send
+	// and up after.
+	upOnFail bool
 }
 
 func newFlakyMessenger(chunkSize func() int, online bool) *flakyMessenger {
@@ -78,6 +82,10 @@ func (f *flakyMessenger) try() error {
 	select {
 	case <-f.online:
 	default:
+		if f.upOnFail {
+			f.upOnFail = false
+			f.setOnlineLocked(true)
+		}
 		return outboundmsg.ErrOffline
 	}
 	if f.dropAfter == 0 {
@@ -464,6 +472,22 @@ func TestOutboxKeepsAChatsOrder(t *testing.T) {
 	if got := m.sent(testDMChat); !slices.Equal(got, []string{"first", "second"}) {
 		t.Errorf("sent %q, want them in order", got)
 	}
+}
+
+// A connection that comes up while a send fails for want of it makes the
+// retry due at once, not after outboxFirstRetry: TestOutboxKeepsAChatsOrder
+// timed out on CI when its setOnline landed in that window.
+func TestOutboxRetriesAtOnceWhenTheLinkCameUpDuringTheSend(t *testing.T) {
+	s := openOutboxStore(t, t.TempDir())
+	m := newFlakyMessenger(func() int { return 0 }, false)
+	m.upOnFail = true
+	o := outboundmsg.NewOutbox(s, func() outboundmsg.Link { return m }, 0, nil)
+	defer o.Stop()
+	if err := o.Text(context.Background(), testDMChat, "hello", 0); err != nil {
+		t.Fatal(err)
+	}
+	// Well under the first retry's 5 seconds.
+	testutil.WaitFor(t, 2*time.Second, "the retry", func() bool { return len(m.sent(testDMChat)) == 1 })
 }
 
 // The Overview says when replies wait for long, and when some were given

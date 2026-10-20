@@ -249,6 +249,10 @@ func (o *Outbox) flush(ctx context.Context, force bool) (wait time.Duration, wai
 			wait = min(wait, r.NextTryAt.Sub(now))
 			continue
 		}
+		// Whether it could send before the attempt, not only after: a
+		// connection that comes up while a send fails for want of it
+		// makes the retry due at once, not after the backoff.
+		wasConnected := isConnected(o.messenger())
 		err := o.deliver(ctx, &r)
 		switch {
 		case err == nil:
@@ -267,7 +271,7 @@ func (o *Outbox) flush(ctx context.Context, force bool) (wait time.Duration, wai
 			continue
 		}
 		blocked[r.Chat], waiting = true, true
-		offline = offline || !isConnected(o.messenger())
+		offline = offline || !wasConnected || !isConnected(o.messenger())
 		r.Attempts++
 		delay := outboxDelay(r.Attempts)
 		log.Printf("outbox: sending to %s failed (attempt %d), trying again in %v: %v", r.Chat, r.Attempts, delay, err)
