@@ -107,7 +107,19 @@ export default {
       const roots = (declared.fs && declared.fs.roots) || [];
       return h('div.node-offers',
         rules.length ? h('div', h('strong', 'Commands: '), rules.map((r) => mono(ruleText(r))).flatMap((el, i) => (i ? [', ', el] : [el]))) : null,
-        roots.length ? h('div', h('strong', 'Folders: '), roots.map((r) => mono(`${r.path}${r.write ? ' (read and write)' : ' (read only)'}`)).flatMap((el, i) => (i ? [', ', el] : [el]))) : null);
+        roots.length ? h('div', h('strong', 'Folders: '), roots.map((r) => mono(`${r.path}${r.write ? ' (read and write)' : ' (read only)'}`)).flatMap((el, i) => (i ? [', ', el] : [el]))) : null,
+        frideLine(declared.fride));
+    }
+
+    // FrIDE answers on the node. Its UI is on the node's own loopback,
+    // which the node agent is to publish over the tailnet; until then the
+    // page shows the address the node reports.
+    function frideLine(f) {
+      if (!f) return null;
+      const repos = f.repos || [];
+      return h('div.node-fride', h('strong', 'FrIDE: '),
+        h('a', { href: f.url, target: '_blank', rel: 'noopener noreferrer' }, f.url),
+        repos.length ? h('span.muted', ` · ${repos.join(', ')}`) : null);
     }
 
     // What changes with every heartbeat: whether it is online and its

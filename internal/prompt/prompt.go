@@ -45,6 +45,9 @@ type Input struct {
 	// Vault: the vault runs, and the run is told how cold files look and
 	// how to bring one back (VaultNote).
 	Vault bool
+	// CodeToFride marks a core brain run that has FrIDE's tools: it is
+	// told FrideRule.
+	CodeToFride bool
 }
 
 // Recalled is one chunk of a brain's memory that the index recalled for
@@ -67,6 +70,10 @@ const RecallNote = `Notes from your memory index that match the new message, bes
 // Workstream D): files that are not on disk, and the tools that bring
 // them back.
 const VaultNote = "<vault>\nSome of your files live in the vault's cold tier, not on this disk: a folder with such files has a `.cold.json` listing each one's name, size and date, so `ls` and that file show everything there is. To read one, call the `vault_get` tool with its path; it brings the file back and answers with a path you can read.\n`vault_ls` lists a vault folder with each file's tier, `vault_search` finds vault files by words in their path, and `vault_put` stores a new file in the vault (it is kept, encrypted, in the cold tier too).\n</vault>"
+
+// FrideRule is the core brain's one rule about code (docs/PLAN.md,
+// Workstream E): FrIDE does every change to a repository.
+const FrideRule = "<code_rule>\nAnything that changes code goes to FrIDE: hand it over with the fride_task tool, and never edit a repository yourself. You may answer questions about code. FrIDE's questions and news about its work arrive in this chat as messages from FrIDE, each naming its thread (FrIDE #3); when the person answers one of FrIDE's questions, pass the answer on with fride_reply on that thread.\n</code_rule>"
 
 // ObserveOnlyNote is what an observe-only run is told instead of how its
 // replies reach the chat: it has nobody to answer and nothing to do but
@@ -101,6 +108,10 @@ func Build(in Input) string {
 	}
 	if in.Vault {
 		sb.WriteString(VaultNote + "\n\n")
+	}
+
+	if in.CodeToFride && m.Source != chat.SourceDelegate {
+		sb.WriteString(FrideRule + "\n\n")
 	}
 
 	if len(in.Recall) > 0 {
@@ -301,6 +312,8 @@ func OutboundSender(id string, entry history.Entry) string {
 		return fmt.Sprintf("Brain %s (via /send)", entry.From)
 	case entry.Via == "script":
 		return "Script (via /send)"
+	case entry.Via == "fride":
+		return "FrIDE (its news, relayed by the bridge)"
 	}
 	return "Script without a token (via /send)"
 }

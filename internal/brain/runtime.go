@@ -134,6 +134,9 @@ type Settings struct {
 	DBPath          string // the bridge's DB, absolute
 	PlaudPATH       string // the PATH to run with when brains may use Plaud's CLI
 	Vault           bool   // the vault runs: the prompt explains .cold.json and the vault tools
+	// FrideTools says the core brain has FrIDE.s tools (nodes are on): its
+	// runs are told prompt.FrideRule.
+	FrideTools bool
 	// ownPATH are the folders of the bridge's PATH inside this brain's
 	// folder, which setBridgePATH took out of the bridge's: they go first
 	// on the PATH of this brain's runs, and of no one else's.
@@ -1191,7 +1194,7 @@ func (br *Brain) identities() map[string]string {
 // prompt file, the chat's recent history and the identity map. renderPrompt
 // puts it into words.
 func (br *Brain) buildPrompt(s *Settings, m Inbound) string {
-	in := prompttext.Input{Now: time.Now(), BrainID: br.id, Message: m.Inbound, BuildChat: br.input.BuildChat != nil && br.input.BuildChat(m.JID), ObserveOnly: m.Silent, Vault: s.Vault}
+	in := prompttext.Input{Now: time.Now(), BrainID: br.id, Message: m.Inbound, BuildChat: br.input.BuildChat != nil && br.input.BuildChat(m.JID), ObserveOnly: m.Silent, Vault: s.Vault, CodeToFride: s.FrideTools && s.Manifest.IsCore()}
 	if name := s.PromptFile; name != "" {
 		if data, err := br.readFile(name); err != nil {
 			log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)

@@ -37,7 +37,11 @@ type Config struct {
 	Core string `json:"core"`
 	Name string `json:"name"`
 	// Capabilities is what the node declares; the core approves it.
+	// FrIDE is not among them: the agent declares it while FrIDE answers.
 	Capabilities nodeproto.Capabilities `json:"capabilities"`
+	// Fride is FrIDE on this machine, paired with `fridolin node fride
+	// pair`; nil for none.
+	Fride *FrideConfig `json:"fride,omitempty"`
 }
 
 // DefaultCapabilities is what a node offers when its owner says nothing
@@ -59,7 +63,13 @@ func (c Config) Check() error {
 	if err := nodeproto.CheckName(c.Name); err != nil {
 		return err
 	}
+	if c.Capabilities.Fride != nil {
+		return errors.New("capabilities.fride: the agent declares FrIDE while it answers; pair it with fridolin node fride pair instead")
+	}
 	if err := c.Capabilities.Check(); err != nil {
+		return err
+	}
+	if err := c.Fride.Check(); err != nil {
 		return err
 	}
 	if fs := c.Capabilities.FS; fs != nil {

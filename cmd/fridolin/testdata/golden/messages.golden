@@ -24,6 +24,7 @@ helpReply("")
 	• `!stop` — stop what I'm doing for this chat and drop its queued messages
 	• `!reset` — like `!stop`, and the next message starts without this chat's earlier messages
 	• `!fleet` — the machines connected to me as nodes (direct chats only)
+	• `!move <thread> <node>` — move FrIDE's coding work to another node (direct chats only)
 	• `!lockdown` — owner only: pause all work but reading until `!unlock`
 helpReply("@claude")
 	🤖 *Fridolin*
@@ -35,6 +36,7 @@ helpReply("@claude")
 	• `!stop` — stop what I'm doing for this chat and drop its queued messages
 	• `!reset` — like `!stop`, and the next message starts without this chat's earlier messages
 	• `!fleet` — the machines connected to me as nodes (direct chats only)
+	• `!move <thread> <node>` — move FrIDE's coding work to another node (direct chats only)
 	• `!lockdown` — owner only: pause all work but reading until `!unlock`
 
 	In this group, start your message with `@claude` or reply to one of mine to address me, commands included.
@@ -142,3 +144,38 @@ lockdownRefusedNotice
 	🔒 The bridge is in lockdown, so this was not run: it needs more than reading. Unlock it in the dashboard or with !unlock, then send it again.
 rateLimitedNotice(20)
 	⏳ This chat started 20 runs in the last hour, the most allowed. Try again later.
+frideNewsMessage(started)
+	🛠️ *FrIDE #3* started on laptop: task health, branch feat/health.
+	Starting health.
+	• create task health [api] on feat/health
+frideNewsMessage(question)
+	❓ *FrIDE #3* asks (on laptop):
+
+	Which empty state, the no-results one or the error one?
+
+	Answer here, and I'll pass it on.
+frideNewsMessage(update)
+	🛠️ *FrIDE #3* on laptop:
+	→ health: the tests pass
+frideNewsMessage(done)
+	✅ *FrIDE #3* is done on laptop: task health, branch feat/health.
+	Rationale: /Users/you/fride-workspaces/health/api/docs/rationale/health.md
+	• Inbox #1 is done: health — task health is closed.
+frideNewsMessage(failed)
+	⚠️ *FrIDE #3* failed on laptop.
+	the message could not be read
+	Answer here to make it try again.
+frideQueuedNotice
+	⏳ *FrIDE #3* waits: no node with FrIDE can take it now (laptop: not enough memory for another stack). It starts as soon as one can, and I'll say so here.
+fridePlacedNotice
+	🛠️ *FrIDE #3* went to laptop now.
+frideMoveUsage
+	🚚 Use `!move <thread> <node>` to move FrIDE's work to another node, e.g. `!move 3 laptop`.
+frideMoveGroupNotice
+	🚚 !move answers only in a direct chat.
+frideMovingNotice
+	🚚 Moving *FrIDE #3* to laptop…
+frideMovedNotice
+	🚚 *FrIDE #3* moved from mini to laptop: task health continues there.
+frideMoveFailedNotice
+	⚠️ *FrIDE #3* did not move: laptop is offline

@@ -1,0 +1,139 @@
+package nodes
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"time"
+
+	"github.com/Icewater1337/fridolin/internal/nodeproto"
+)
+
+// slowCalls are methods that may take longer than callTimeout: an export
+// stops a task's agents and stack and writes its bundle, an import checks
+// it out again, a close writes the rationale and stops the stack.
+var slowCalls = map[string]time.Duration{
+	nodeproto.MethodFrideExport: 15 * time.Minute,
+	nodeproto.MethodFrideImport: 15 * time.Minute,
+	nodeproto.MethodFrideClose:  5 * time.Minute,
+	nodeproto.MethodFrideDelete: 5 * time.Minute,
+}
+
+// FrideTask hands the FrIDE of node id a message.
+func (s *Service) FrideTask(ctx context.Context, id string, p nodeproto.FrideTaskParams) (nodeproto.FrideThread, error) {
+	var out nodeproto.FrideThread
+	return out, s.Call(ctx, id, nodeproto.MethodFrideTask, p, &out)
+}
+
+// FrideStatus reads a thread of node id's FrIDE, with its task.
+func (s *Service) FrideStatus(ctx context.Context, id string, thread int) (nodeproto.FrideStatus, error) {
+	var out nodeproto.FrideStatus
+	return out, s.Call(ctx, id, nodeproto.MethodFrideStatus, nodeproto.FrideStatusParams{ThreadID: thread}, &out)
+}
+
+// FrideReply answers a thread of node id's FrIDE.
+func (s *Service) FrideReply(ctx context.Context, id string, thread int, text string) (nodeproto.FrideThread, error) {
+	var out nodeproto.FrideThread
+	return out, s.Call(ctx, id, nodeproto.MethodFrideReply, nodeproto.FrideReplyParams{ThreadID: thread, Text: text}, &out)
+}
+
+// FrideTaskInfo reads a task of node id's FrIDE.
+func (s *Service) FrideTaskInfo(ctx context.Context, id, task string) (nodeproto.FrideTask, error) {
+	var out nodeproto.FrideTask
+	return out, s.Call(ctx, id, nodeproto.MethodFrideTaskInfo, nodeproto.FrideTaskRef{TaskID: task}, &out)
+}
+
+// FrideClose closes a task of node id's FrIDE.
+func (s *Service) FrideClose(ctx context.Context, id, task string) (nodeproto.FrideTask, error) {
+	var out nodeproto.FrideTask
+	return out, s.Call(ctx, id, nodeproto.MethodFrideClose, nodeproto.FrideTaskRef{TaskID: task}, &out)
+}
+
+// FrideMem asks node id's FrIDE whether a stack may start now.
+func (s *Service) FrideMem(ctx context.Context, id string) (nodeproto.FrideMem, error) {
+	var out nodeproto.FrideMem
+	return out, s.Call(ctx, id, nodeproto.MethodFrideMem, struct{}{}, &out)
+}
+
+// FrideDelete removes a task's workspace on node id; force drops what is not
+// committed, for a task an archive holds.
+func (s *Service) FrideDelete(ctx context.Context, id, task string, force bool) error {
+	return s.Call(ctx, id, nodeproto.MethodFrideDelete, nodeproto.FrideDeleteParams{TaskID: task, Force: force}, nil)
+}
+
+// ErrTransfer is a bundle that did not arrive whole.
+var ErrTransfer = errors.New("the bundle did not arrive whole")
+
+// FrideExport exports a task of node id's FrIDE into w, chunk by chunk, and
+// returns its size and SHA-256, which it checks against the node's. The
+// node's staged copy is removed after.
+func (s *Service) FrideExport(ctx context.Context, id string, p nodeproto.FrideExportParams, w io.Writer) (int64, string, error) {
+	var tr nodeproto.FrideTransfer
+	if err := s.Call(ctx, id, nodeproto.MethodFrideExport, p, &tr); err != nil {
+		return 0, "", err
+	}
+	defer func() {
+		// A context of its own: the export's may be what ended.
+		dctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+		defer cancel()
+		_ = s.Call(dctx, id, nodeproto.MethodFrideDrop, nodeproto.FrideChunkParams{ID: tr.ID}, nil)
+	}()
+	h := sha256.New()
+	var n int64
+	for {
+		var c nodeproto.FrideChunk
+		if err := s.Call(ctx, id, nodeproto.MethodFrideRead, nodeproto.FrideChunkParams{ID: tr.ID, Offset: n}, &c); err != nil {
+			return n, "", err
+		}
+		if len(c.Data) > 0 {
+			if _, err := w.Write(c.Data); err != nil {
+				return n, "", err
+			}
+			h.Write(c.Data)
+			n += int64(len(c.Data))
+		}
+		if c.EOF {
+			break
+		}
+		if len(c.Data) == 0 {
+			return n, "", fmt.Errorf("%w: node %s sent an empty chunk at %d of %d bytes", ErrTransfer, id, n, tr.Size)
+		}
+	}
+	sum := hex.EncodeToString(h.Sum(nil))
+	if n != tr.Size || tr.SHA256 != "" && sum != tr.SHA256 {
+		return n, sum, fmt.Errorf("%w: %d bytes with SHA-256 %s, node %s staged %d with %s", ErrTransfer, n, sum, id, tr.Size, tr.SHA256)
+	}
+	return n, sum, nil
+}
+
+// FrideImport sends r to node id chunk by chunk and imports it there as a
+// task. The node's staged copy is removed after.
+func (s *Service) FrideImport(ctx context.Context, id string, r io.Reader, as string, startAgent bool) (nodeproto.FrideTask, error) {
+	var tr nodeproto.FrideTransfer
+	buf := make([]byte, nodeproto.FrideChunkBytes)
+	for {
+		k, rerr := io.ReadFull(r, buf)
+		if k > 0 || tr.ID == "" {
+			if err := s.Call(ctx, id, nodeproto.MethodFrideWrite, nodeproto.FrideChunkParams{ID: tr.ID, Offset: tr.Size, Data: buf[:k]}, &tr); err != nil {
+				return nodeproto.FrideTask{}, err
+			}
+		}
+		if rerr == io.EOF || rerr == io.ErrUnexpectedEOF {
+			break
+		}
+		if rerr != nil {
+			return nodeproto.FrideTask{}, rerr
+		}
+	}
+	defer func() {
+		dctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+		defer cancel()
+		_ = s.Call(dctx, id, nodeproto.MethodFrideDrop, nodeproto.FrideChunkParams{ID: tr.ID}, nil)
+	}()
+	var out nodeproto.FrideTask
+	err := s.Call(ctx, id, nodeproto.MethodFrideImport, nodeproto.FrideImportParams{ID: tr.ID, As: as, StartAgent: startAgent}, &out)
+	return out, err
+}

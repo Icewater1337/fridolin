@@ -45,6 +45,10 @@ type Workflow struct {
 	// Answer takes m as the answer to a question a run waits for in its
 	// chat (ask_user), and reports whether it did: m then goes no further.
 	Answer func(m brainruntime.Inbound) bool
+	// Move moves FrIDE thread to node for !move in the direct chat jid,
+	// and tells the chat itself, when and how it ended; nil leaves !move
+	// to the brain.
+	Move func(ctx context.Context, jid, thread, node string)
 }
 
 // handleInbound is the entry point for every allowed message. Access control
@@ -113,9 +117,21 @@ func (p *Workflow) Handle(ctx context.Context, m brainruntime.Inbound) {
 	p.Debouncer.Add(m)
 }
 
-// handleCommand runs !help, !reset, !stop, !fleet, !lockdown and
+// handleCommand runs !help, !reset, !stop, !fleet, !move, !lockdown and
 // !unlock. It reports whether text was one.
 func (p *Workflow) handleCommand(ctx context.Context, m brainruntime.Inbound, settings Settings) bool {
+	if f := strings.Fields(m.Text); len(f) > 0 && strings.EqualFold(f[0], "!move") && p.Move != nil {
+		// Like the fleet, FrIDE's work is the owner's.
+		switch {
+		case m.IsGroup():
+			_ = p.Notice(ctx, m.JID, outboundmsg.FrideMoveGroupNotice)
+		case len(f) != 3:
+			_ = p.Notice(ctx, m.JID, outboundmsg.FrideMoveUsage)
+		default:
+			p.Move(ctx, m.JID, strings.TrimPrefix(f[1], "#"), f[2])
+		}
+		return true
+	}
 	switch strings.ToLower(m.Text) {
 	case "!lockdown", "!unlock":
 		if p.Lockdown == nil {

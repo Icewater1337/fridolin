@@ -265,7 +265,7 @@ nodes speak on their own port.
 | `POST /api/nodes/{id}/approve-commands` | approves what the node declares now (second stage); `409` before the device is approved |
 | `POST /api/nodes/{id}/revoke` | revokes it and closes its connection |
 | `PUT /api/nodes/{id}/tags` | `{"tags": [...]}` replaces its tags; `422` for a tag that is not lower-case letters, digits and `._:-` |
-| `POST /api/nodes/{id}/call` | `{"method", "params"}` calls a capability (`exec`, `fs.list`, `fs.read`, `fs.write`, `host.info`, `notify`) and answers `{"result": …}`; a refusal is `{"error", "code"}` with `403` (`denied`, `outside-root`), `404`, `400`, `503` (not connected) or `504` |
+| `POST /api/nodes/{id}/call` | `{"method", "params"}` calls a capability (`exec`, `fs.list`, `fs.read`, `fs.write`, `host.info`, `notify`, and the `fride.*` methods of [NODES.md](NODES.md#fride)) and answers `{"result": …}`; a refusal is `{"error", "code"}` with `403` (`denied`, `outside-root`), `404`, `400`, `503` (not connected) or `504` |
 
 An unknown node is `404`; one that was revoked cannot be approved again
 (`409`).

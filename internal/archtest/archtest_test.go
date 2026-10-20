@@ -36,7 +36,7 @@ var imports = map[string][]string{
 	"internal/app":         {"internal/app/apptest", "examples", "internal/access", "internal/activity", "internal/apperr", "internal/backup", "internal/brain", "internal/chat", "internal/claudecli", "internal/cli", "internal/cloud", "internal/config", "internal/controlcli", "internal/devchat", "internal/fsx", "internal/google", "internal/history", "internal/hostsecrets", "internal/httpapi", "internal/intent", "internal/jsonx", "internal/logx", "internal/manifest", "internal/mcp", "internal/media", "internal/memindex", "internal/nodeagent", "internal/nodeproto", "internal/nodes", "internal/otp", "internal/outbound", "internal/pipeline", "internal/platform", "internal/plaud", "internal/prompt", "internal/registry", "internal/route", "internal/sandbox", "internal/site", "internal/snapshot", "internal/store", "internal/testutil", "internal/textx", "internal/toolcli", "internal/trigger", "internal/vault", "internal/version", "internal/whatsapp", "web", "internal/lease", "internal/tailnet", "internal/audit", "internal/skill"},
 	"internal/nodeproto":   nil,
 	"internal/nodes":       {"internal/fsx", "internal/nodeproto"},
-	"internal/nodeagent":   {"internal/nodeproto", "internal/nodes", "internal/platform"},
+	"internal/nodeagent":   {"internal/nodeproto", "internal/nodes", "internal/platform", "internal/testutil"},
 	"internal/tailnet":     nil,
 	"internal/access":      {"internal/chat", "internal/trigger"},
 	"internal/activity":    {"internal/history", "internal/textx"},

@@ -19,8 +19,8 @@ import (
 // port opens in Start, and only with nodes.enabled; the registry is there
 // either way, so the dashboard and the CLI can show and revoke nodes while
 // the port is closed.
-func newNodes(cfgs *config.Store) (*nodes.Service, error) {
-	return nodes.New(nodes.Options{Dir: cfgs.Boot().Layout().Nodes()})
+func newNodes(cfgs *config.Store, f *frideRuntime) (*nodes.Service, error) {
+	return nodes.New(nodes.Options{Dir: cfgs.Boot().Layout().Nodes(), OnEvent: f.onEvent, OnDeclare: f.onDeclare})
 }
 
 // startNodes opens the node port when nodes.enabled was on at startup

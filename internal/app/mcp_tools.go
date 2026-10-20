@@ -99,6 +99,7 @@ func (b *App) newMCPTools() *mcp.Registry[mcpCaller] {
 		Describe:  describeCheckApproval,
 		Call:      b.callCheckApproval,
 	})
+	b.registerFrideTools(r)
 	return r
 }
 

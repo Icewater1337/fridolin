@@ -57,11 +57,18 @@ const (
 	TypeError = "error"
 	// TypeClose says why the sender closes the connection.
 	TypeClose = "close"
+	// TypeEvent is news the node reports on its own (an Event), such as
+	// FrIDE's thread news.
+	TypeEvent = "event"
+	// TypeDeclare is the node's new declaration (a Declare), when what it
+	// offers changed without a new connection.
+	TypeDeclare = "declare"
 )
 
 var knownTypes = map[string]bool{
 	TypeHello: true, TypeChallenge: true, TypeAuth: true, TypeWelcome: true, TypeState: true,
 	TypeHeartbeat: true, TypeRequest: true, TypeResponse: true, TypeError: true, TypeClose: true,
+	TypeEvent: true, TypeDeclare: true,
 }
 
 // Limits on what a message may hold.
@@ -369,7 +376,7 @@ const (
 )
 
 // Methods lists every method.
-var Methods = []string{MethodExec, MethodFSList, MethodFSRead, MethodFSWrite, MethodHostInfo, MethodNotify}
+var Methods = append([]string{MethodExec, MethodFSList, MethodFSRead, MethodFSWrite, MethodHostInfo, MethodNotify}, FrideMethods...)
 
 // ExecParams runs argv on the node.
 type ExecParams struct {

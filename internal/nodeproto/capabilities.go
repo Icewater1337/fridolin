@@ -15,6 +15,8 @@ type Capabilities struct {
 	FS     *FSCap   `json:"fs,omitempty"`
 	Host   bool     `json:"host,omitempty"`
 	Notify bool     `json:"notify,omitempty"`
+	// Fride is FrIDE on the node, declared while it answers.
+	Fride *FrideCap `json:"fride,omitempty"`
 }
 
 // ExecCap runs allowlisted commands.
@@ -152,7 +154,7 @@ func (c Capabilities) Check() error {
 			}
 		}
 	}
-	return nil
+	return c.Fride.Check()
 }
 
 // Check reports what is wrong with the rule.
@@ -246,20 +248,24 @@ func (c Capabilities) Allows(method string) bool {
 	case MethodNotify:
 		return c.Notify
 	}
+	if slices.Contains(FrideMethods, method) {
+		return c.Fride != nil
+	}
 	return false
 }
 
 // Empty reports whether nothing is offered.
 func (c Capabilities) Empty() bool {
-	return (c.Exec == nil || len(c.Exec.Allow) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify
+	return (c.Exec == nil || len(c.Exec.Allow) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil
 }
 
 // Covers reports whether approved covers every part of declared: each
 // exec rule as it is, each root with no more access, limits no higher, and
 // host and notify. A declaration that grows past what was approved needs
-// approval again.
+// approval again. FrIDE is covered by having been approved at all: its
+// address and repositories are only what it reports.
 func Covers(approved, declared Capabilities) bool {
-	if declared.Host && !approved.Host || declared.Notify && !approved.Notify {
+	if declared.Host && !approved.Host || declared.Notify && !approved.Notify || declared.Fride != nil && approved.Fride == nil {
 		return false
 	}
 	if d := declared.Exec; d != nil && len(d.Allow) > 0 {
@@ -289,6 +295,11 @@ func Intersect(declared, approved Capabilities) Capabilities {
 	var out Capabilities
 	out.Host = declared.Host && approved.Host
 	out.Notify = declared.Notify && approved.Notify
+	if declared.Fride != nil && approved.Fride != nil {
+		f := *declared.Fride
+		f.Repos = slices.Clone(f.Repos)
+		out.Fride = &f
+	}
 	if d, a := declared.Exec, approved.Exec; d != nil && a != nil {
 		e := &ExecCap{TimeoutSeconds: min(d.Timeout(), a.Timeout()), MaxOutputBytes: min(d.OutputCap(), a.OutputCap())}
 		for _, r := range d.Allow {
@@ -316,7 +327,8 @@ func Intersect(declared, approved Capabilities) Capabilities {
 }
 
 // Summary describes the capabilities in a few words, for the CLI, the
-// dashboard and !fleet: "exec (3 commands), fs (1 root, 1 writable), host".
+// dashboard and !fleet: "exec (3 commands), fs (1 root, 1 writable), host,
+// fride".
 func (c Capabilities) Summary() string {
 	var parts []string
 	if c.Exec != nil && len(c.Exec.Allow) > 0 {
@@ -347,6 +359,9 @@ func (c Capabilities) Summary() string {
 	}
 	if c.Notify {
 		parts = append(parts, "notify")
+	}
+	if c.Fride != nil {
+		parts = append(parts, "fride")
 	}
 	if len(parts) == 0 {
 		return "nothing"

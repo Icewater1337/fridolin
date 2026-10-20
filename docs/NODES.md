@@ -96,6 +96,7 @@ another. `fridolin node status` shows it.
 | `fs` | `fs.list`, `fs.read`, `fs.write` | lists, reads (up to 16 MiB) and, under a root with `write`, writes files below the granted roots |
 | `host` | `host.info` | host name, OS, architecture, CPUs, memory, disk free and, on Linux, the battery |
 | `notify` | `notify` | a desktop notification: `osascript` on macOS, `notify-send` on Linux; on Windows it is only logged for now |
+| `fride` | `fride.*` | FrIDE on the node, while it answers: see [FrIDE](#fride) below |
 
 **exec rules.** `name` is `argv[0]` exactly: a bare program name, which
 the node looks up in its `PATH`, or an absolute path. `args` `null` allows
@@ -123,6 +124,131 @@ Both sides check every call: the core against the approvals before it
 sends anything, the node against its own `node.json` and the approvals the
 core sent it, so a core that approved more than the node declares cannot
 make it serve more.
+
+## FrIDE
+
+FrIDE is the coding IDE; under fridolin it is where every change to code
+goes (PLAN.md, Workstream E, milestone M6). FrIDE runs on the node in
+companion mode, and the node agent is its companion: it holds FrIDE's
+token, calls FrIDE's loopback API for the core, and relays FrIDE's thread
+news. FrIDE's own docs/COMPANION.md describes its side.
+
+On the node, after `fridolin node join`:
+
+```bash
+fride serve --under-fridolin            # FrIDE's API stays on 127.0.0.1
+fridolin node fride pair --url http://127.0.0.1:7777
+```
+
+`pair` runs `fride pair-companion --json` for a code (`--code` gives one
+instead; `--fride PATH` and `--fride-home DIR` say which FrIDE), trades it
+for FrIDE's token, which it keeps in the state dir as `fride.token`
+(0600), and gives FrIDE a webhook on a loopback port of the agent's own,
+which `node.json` keeps with FrIDE's address:
+
+```json
+"fride": {"url": "http://127.0.0.1:7777", "webhook": "127.0.0.1:53817"}
+```
+
+A running agent reads both again every 30 seconds; no restart is needed.
+`fridolin node fride status` says whether FrIDE answers.
+
+The node declares the capability `fride` only while FrIDE answers
+`/api/companion/info` with the token: it asks every 30 seconds and sends
+the core a `declare` when that changes, so `fride` appears in the
+registry when `fride serve` starts and goes when it stops. The owner
+approves it once (`fridolin nodes approve <id> --commands`); the
+approval covers it every time it comes back, whatever port or
+repositories FrIDE reports. `capabilities.fride` in `node.json` is
+refused: FrIDE is never declared by hand.
+
+| Method | FrIDE's API | |
+| --- | --- | --- |
+| `fride.task` | `POST /api/companion/tasks` | hand FrIDE's inbox a message |
+| `fride.status` | `GET /api/companion/threads/<n>`, and the task's | a thread, with its task |
+| `fride.reply` | `POST /api/companion/threads/<n>/reply` | answer a thread |
+| `fride.task.info`, `fride.close` | `GET /api/companion/tasks/<t>`, `POST …/close` | a task; close it (rationale, agents and stack stopped) |
+| `fride.mem` | `GET /api/companion/mem` | may a stack start now |
+| `fride.export`, `fride.read` | `GET /api/companion/tasks/<t>/export` | stage the task's bundle on the node, then read it in 8 MiB chunks |
+| `fride.write`, `fride.import` | `POST /api/companion/tasks/import` | write a bundle to the node in chunks, then import it |
+| `fride.drop` | | remove a staged bundle |
+| `fride.delete` | `DELETE /api/tasks/<t>` | remove a task's workspace |
+
+A bundle travels in chunks inside protocol messages, staged under
+`fride-transfers/` in the state dir and checked by size and SHA-256 on
+the core; staged bundles older than a day are removed.
+
+FrIDE's webhook reaches the agent at `http://<webhook>/fride`. The agent
+takes a POST from this machine without an `Origin`, whose
+`X-Fride-Signature` is `sha256=` and the HMAC-SHA256 of the body keyed
+with the SHA-256 of the token; anything else is refused. It sends the
+event to the core as an `event` message (kind `fride`), up to 256 waiting
+while the core is away (FrIDE retries what is refused while they wait).
+The core takes a node's events only while its `fride` is approved.
+
+### On the core
+
+With `nodes.enabled`, the core brain (`role: core`) gets five tools, and
+its prompt one rule: anything that changes code goes to FrIDE through
+`fride_task`; it never edits a repository itself.
+
+| Tool | |
+| --- | --- |
+| `fride_task(message, repos?, node?)` | hands the work to FrIDE and returns fridolin's thread number (FrIDE #3) |
+| `fride_status(thread?)` | a thread as FrIDE has it now; without a thread, every thread |
+| `fride_reply(thread, text)` | passes the owner's answer on |
+| `fride_move(thread, node)` | as `!move` |
+| `fride_close(thread)` | closes the task and archives its workspace |
+
+**Placement.** `node` is a node's id, name or one of its tags; without it
+any node will do. The core takes the online nodes whose `fride` is
+approved and offered, that match, and whose FrIDE knows the repositories
+asked for, asks each FrIDE's memory check (`fride.mem`) and hands the
+work to one that may start a stack, the one with the most free memory
+first. When none can, the work waits, the chat is told why, and it is
+offered again every 30 seconds and whenever a node's FrIDE comes up; the
+chat hears when it found a node.
+
+**News.** `bridge.db` (`fride_threads`) keeps each thread: the chat and
+brain that started it, the node, FrIDE's thread there, the task and its
+branch. FrIDE's news arrives in that chat: a question with the question
+(the owner answers there, and the core brain passes the answer on with
+`fride_reply`), `started` and `done` with the task and branch, `done`
+with the rationale's path, `failed`, and everything else as an update.
+The lines go into the core brain's history as FrIDE's, so its next run
+sees what FrIDE asked. FrIDE says `done` at its next look at a closed
+task, every 15 seconds.
+
+**Moving.** `!move <thread> <node>` in a direct chat, or `fride_move`:
+the task is exported from the node it is on with its agents stopped,
+kept in the vault as `vault/workspaces/moves/<task>.bundle`, imported on the
+target (as `<task>-moved` when the id is taken there; its agent is
+reopened if it was running) and removed from the source. The thread
+keeps its number. A moved task has no FrIDE thread on its new node
+until the next `fride_reply`, which starts one there naming the task;
+news of the source's old thread is dropped.
+
+**Closing.** `fride_close` closes the task in FrIDE (the rationale is
+written, agents and stack stop), exports it into the vault as
+`vault/workspaces/<task>.fride.tar.gz` (the vault's path, which `fridolin
+vault get` takes), where the vault's policy lets it go cold at once and,
+with the vault running, it is uploaded to the cold tier right away; checks
+that the archive is a whole gzip'd tar, and only then removes the
+workspace on the node with `DELETE /api/tasks/<task>?force=1` (force:
+the rationale and any uncommitted work are in the archive). The branch
+stays in the repositories.
+
+**Policy.** `fride_task`, `fride_reply`, `fride_move` and `fride_close`
+are write actions of M5's policy (`App.guarded`): a lockdown refuses them,
+as it refuses `!move`, and so does a run whose risk budget is read;
+`fride_status` only reads. Every call is a `tool_call` line in the audit
+log.
+
+**Not yet.** The
+dashboard shows the FrIDE address each node reports and links it; FrIDE's
+UI is on the node's loopback, so the link works on the node itself until
+the node agent publishes it over the tailnet. `fridolin doctor`'s
+`nodes-fride` warns about nodes whose approved FrIDE does not answer.
 
 ## The service
 
@@ -166,6 +292,9 @@ another version is refused.
    `response` with the same `id`: a `result`, or an `error` with a code
    (`denied`, `outside-root`, `not-found`, `bad-request`, `timeout`,
    `failed`, `unavailable`, `unsupported`).
+   The node may also send, on its own, `event` (news, such as FrIDE's,
+   with a `kind`) and `declare` (what it offers now, when FrIDE comes or
+   goes); the core answers a `declare` with `state`.
 6. Either side may send `close` with a reason (`revoked`,
    `unknown-device`, `bad-auth`, `replaced`, `shutdown`, `protocol`,
    `idle`) before closing. After `revoked` or `unknown-device` the agent
@@ -181,5 +310,7 @@ The dashboard API (`/api/nodes…`, see [API.md](API.md#nodes)) lists the
 nodes, makes join codes, approves, revokes, edits tags and calls a
 capability; `fridolin nodes` uses it with the dashboard token. Inside the
 bridge, `nodes.Service` has `Call(ctx, id, method, params, out)` and typed
-helpers (`Exec`, `List`, `ReadFile`, `WriteFile`, `HostInfo`, `Notify`)
-for the parts that will place work on nodes.
+helpers (`Exec`, `List`, `ReadFile`, `WriteFile`, `HostInfo`, `Notify`,
+and `Fride…` for FrIDE, with `FrideExport` and `FrideImport` streaming a
+bundle in chunks) for the parts that place work on nodes; `Options.OnEvent`
+and `OnDeclare` hear what nodes report.

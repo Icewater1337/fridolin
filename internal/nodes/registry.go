@@ -338,6 +338,18 @@ func (r *Registry) Hello(h nodeproto.Hello, address string) (*Node, error) {
 	return out, err
 }
 
+// Declare records what a connected node offers now. Offering more than was
+// approved makes its commands pending again, as at a new connection.
+func (r *Registry) Declare(id string, caps nodeproto.Capabilities) (*Node, error) {
+	return r.change(id, func(n *Node, _ time.Time) error {
+		if n.Device == nodeproto.DeviceRevoked {
+			return ErrRevoked
+		}
+		n.Declared = caps
+		return nil
+	})
+}
+
 // Seen records a heartbeat: when, and the host's resources. It writes the
 // file only when the last write is older than a minute, or persist says to.
 func (r *Registry) Seen(id string, stats nodeproto.HostStats, persist bool) error {

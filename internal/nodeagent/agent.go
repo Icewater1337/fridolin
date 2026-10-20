@@ -3,6 +3,7 @@ package nodeagent
 import (
 	"context"
 	"crypto/ed25519"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -34,10 +35,17 @@ type Agent struct {
 	HeartbeatEvery         time.Duration
 	// OnState hears every state the core sends, for tests and the CLI.
 	OnState func(nodeproto.State)
+	// FrideCheckEvery is how often the agent asks whether FrIDE answers
+	// (DefaultFrideCheckEvery when zero). FrideToken is the companion
+	// token of an agent without a state dir; one with a state dir reads
+	// it, and node.json's fride section, from there at every check.
+	FrideCheckEvery time.Duration
+	FrideToken      string
 
 	mu        sync.Mutex
 	state     nodeproto.State
 	connected bool
+	fride     fride
 }
 
 // Load makes the agent of the node in dir.
@@ -176,7 +184,7 @@ func (a *Agent) connect(ctx context.Context, joinCode string) (*conn, nodeproto.
 	hello := nodeproto.Hello{
 		DeviceID: nodeproto.DeviceIDFor(pub), PublicKey: pub, Name: a.Config.Name,
 		OS: runtime.GOOS, Arch: runtime.GOARCH, Version: a.Version,
-		Capabilities: a.Config.Capabilities, JoinCode: joinCode,
+		Capabilities: a.declared(), JoinCode: joinCode,
 	}
 	if err := c.send(hctx, nodeproto.TypeHello, "", hello); err != nil {
 		return fail(err)
@@ -224,6 +232,13 @@ func (a *Agent) Run(ctx context.Context) error {
 		maxB = time.Minute
 	}
 	backoff := minB
+	// FrIDE first, so that the first hello declares it when it answers.
+	a.frideCheck(ctx)
+	fctx, stopFride := context.WithCancel(ctx)
+	var fwg sync.WaitGroup
+	fwg.Go(func() { a.frideLoop(fctx) })
+	defer fwg.Wait()
+	defer stopFride()
 	for {
 		start := time.Now()
 		err := a.session(ctx)
@@ -284,6 +299,28 @@ func (a *Agent) session(ctx context.Context) error {
 			case <-ctx.Done():
 				return
 			case <-t.C:
+			}
+		}
+	})
+	// FrIDE's news, and what the node offers when FrIDE comes or goes.
+	a.fride.init()
+	wg.Go(func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-a.fride.changed:
+				if err := c.send(ctx, nodeproto.TypeDeclare, "", nodeproto.Declare{Capabilities: a.declared()}); err != nil {
+					cancel()
+					return
+				}
+			case ev := <-a.fride.events:
+				data, _ := json.Marshal(ev)
+				if err := c.send(ctx, nodeproto.TypeEvent, "", nodeproto.Event{Kind: nodeproto.EventFride, Data: data}); err != nil {
+					a.logf("node: FrIDE's %s of thread %d did not reach the core: %v", ev.Event, ev.ThreadID, err)
+					cancel()
+					return
+				}
 			}
 		}
 	})

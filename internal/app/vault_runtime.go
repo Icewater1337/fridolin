@@ -469,6 +469,27 @@ func (s *vaultService) syncAll(ctx context.Context, v *vault.Vault) {
 	s.recordSync(ctx, v, rep, err)
 }
 
+// track takes the file at abs, which the bridge itself just wrote into
+// the hot root (a FrIDE workspace archive, say), into the vault at once:
+// indexed and uploaded to the cold tier, where the policy may then evict
+// it, instead of at the next full sync. Without a running vault it stays
+// a file on disk, which that sync takes up later.
+func (s *vaultService) track(ctx context.Context, abs string) {
+	if s == nil {
+		return
+	}
+	v, _, err := s.vault()
+	if err != nil {
+		return
+	}
+	rel, ok := s.currentLayout().rel(abs)
+	if !ok || rel == "" {
+		return
+	}
+	rep, err := v.SyncPaths(ctx, []string{rel})
+	s.recordSync(ctx, v, rep, err)
+}
+
 func (s *vaultService) recordSync(ctx context.Context, v *vault.Vault, rep vault.SyncReport, err error) {
 	if ctx.Err() != nil {
 		return

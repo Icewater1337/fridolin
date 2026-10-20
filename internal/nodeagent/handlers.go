@@ -28,7 +28,7 @@ func (a *Agent) effective() (nodeproto.Capabilities, *nodeproto.Error) {
 	if st.Device != nodeproto.DeviceApproved {
 		return nodeproto.Capabilities{}, nodeproto.Errorf(nodeproto.CodeDenied, "this device is not approved (%s)", st.Device)
 	}
-	return nodeproto.Intersect(a.Config.Capabilities, st.Approved), nil
+	return nodeproto.Intersect(a.declared(), st.Approved), nil
 }
 
 // handle serves one request.
@@ -55,6 +55,9 @@ func (a *Agent) call(ctx context.Context, req nodeproto.Request) (any, *nodeprot
 	}
 	if !eff.Allows(req.Method) {
 		return nil, nodeproto.Errorf(nodeproto.CodeDenied, "%s is not approved on this node", req.Method)
+	}
+	if slices.Contains(nodeproto.FrideMethods, req.Method) {
+		return a.frideCall(ctx, req.Method, req.Params)
 	}
 	decode := func(v any) *nodeproto.Error {
 		if len(req.Params) == 0 {
