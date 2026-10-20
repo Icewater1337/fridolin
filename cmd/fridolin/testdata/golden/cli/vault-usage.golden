@@ -1,0 +1,22 @@
+fridolin vault — the tiered store and its snapshots (docs/PLAN.md, M3)
+
+Usage:
+  fridolin vault status [--json]      hot usage against the budget, cold size, the last
+                                      upload, snapshot, check and restore drill, Litestream
+  fridolin vault sync                 upload what changed to the cold tier now
+  fridolin vault evict                send what the policy lets go cold now
+  fridolin vault get [--allow-over-budget] PATH
+                                      bring PATH (relative to the data dir) back from the
+                                      cold tier and print where it is
+  fridolin vault rebuild              rebuild vault.db from the cold tier and the disk, then
+                                      bring back every pinned file that is only cold
+  fridolin vault restore-drill        restore the latest snapshot into an empty folder and
+                                      check a brain folder and the database copies
+
+Each asks the running bridge; sync, evict, rebuild and restore-drill start a
+job and return, and status shows how it went. status reads what the bridge
+last wrote when none runs.
+
+Flags:
+  --config PATH     config file (default: $FRIDOLIN_CONFIG, else
+                    ~/.fridolin/config.json)

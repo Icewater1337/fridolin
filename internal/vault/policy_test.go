@@ -55,6 +55,7 @@ func TestClassify(t *testing.T) {
 		{"young run log", Facts{Path: "runs/abc.log", LastAccess: ago(10)}, ClassActive, ReasonRecent},
 		{"old run log", Facts{Path: "runs/abc.log", LastAccess: ago(15)}, ClassColdEligible, ReasonOldRunLog},
 		{"workspace", Facts{Path: "workspaces/t1.tar.zst", LastAccess: ago(0)}, ClassColdEligible, ReasonWorkspace},
+		{"workspace in the data dir", Facts{Path: "vault/workspaces/t1.tar.zst", LastAccess: ago(0)}, ClassColdEligible, ReasonWorkspace},
 		{"recent document", Facts{Path: "documents/a.pdf", LastAccess: ago(59)}, ClassActive, ReasonRecent},
 		{"markdown-first holds a binary", Facts{Path: "documents/a.pdf", LastAccess: ago(70)}, ClassActive, ReasonMarkdownFirst},
 		{"markdown-first ends at 90 days", Facts{Path: "documents/a.pdf", LastAccess: ago(90)}, ClassColdEligible, ReasonInactive},

@@ -1,0 +1,30 @@
+GET /api/vault/status
+200 OK
+Content-Type: application/json
+
+{
+  "budget_bytes": 0,
+  "cold_bytes": 0,
+  "enabled": false,
+  "evictions": [],
+  "files": {
+    "both": 0,
+    "cold": 0,
+    "hot": 0
+  },
+  "hot_bytes": 0,
+  "litestream": {
+    "enabled": false,
+    "restarts": 0,
+    "running": false
+  },
+  "snapshots": {
+    "drive": {
+      "completed_once": false,
+      "enabled": false
+    },
+    "enabled": false
+  },
+  "state": "off",
+  "target_bytes": 0
+}

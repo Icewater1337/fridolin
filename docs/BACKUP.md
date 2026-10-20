@@ -1,5 +1,13 @@
 # Google Drive backups
 
+With the [vault](VAULT.md) on, the snapshots it takes with restic are
+copied to a restic repository on this same Drive connection every week,
+`<backup.remote>:fridolin-restic`. Once that copy has completed once, the
+daily run of the sync described here stops (its overview says
+`superseded`); *Back up now* and restores keep working, and the copy in
+`fridolin-backup/` stays where it is. Until then, and with the vault off,
+everything below runs as before.
+
 Brains are ordinary folders on your machine. Backups copy them to your Google
 Drive so a lost or broken machine does not take your assistant's memory with
 it — without putting any of it in a git repository.

@@ -132,7 +132,7 @@ that the core can reach across, and nothing else can.
 | --- | --- |
 | `delegate` | hand that brain a bounded task and get its answer |
 | `read` | read that brain's `memories/**/*.md` and `skills/**` |
-| `files` | fetch files from that brain's vault paths (once there is a vault; the grant can be set now) |
+| `files` | fetch files from that brain's vault paths with `vault_ls`, `vault_get` and `vault_search` ([VAULT.md](VAULT.md#brains-and-the-vault)) |
 
 The bridge checks them whenever it loads the brains, and refuses an edit
 or approval that breaks a rule: at most one core brain; grants only on the

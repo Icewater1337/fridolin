@@ -79,6 +79,7 @@ type APIDeps struct {
 	Brains     func() *BrainsAPI
 	Filesystem func() *FilesystemAPI
 	Backup     func() *BackupAPI
+	Vault      func() *VaultAPI
 	Google     func() *GoogleAPI
 	Plaud      func() *PlaudAPI
 	PlaudApp   func() *PlaudAppAPI
@@ -135,6 +136,16 @@ func NewAPIMux(d APIDeps) http.Handler {
 	mux.HandleFunc("POST /api/backup/restore", d.Backup().Restore)
 	mux.HandleFunc("PUT /api/brains/{id}/backup", d.Backup().BrainSettings)
 	mux.HandleFunc("GET /api/brains/{id}/backup/versions", d.Backup().Versions)
+
+	mux.HandleFunc("GET /api/vault/status", d.Vault().Status)
+	mux.HandleFunc("POST /api/vault/sync", d.Vault().Sync)
+	mux.HandleFunc("POST /api/vault/evict", d.Vault().Evict)
+	mux.HandleFunc("POST /api/vault/rebuild", d.Vault().Rebuild)
+	mux.HandleFunc("POST /api/vault/get", d.Vault().Get)
+	mux.HandleFunc("POST /api/vault/snapshot", d.Vault().Snapshot)
+	mux.HandleFunc("POST /api/vault/check", d.Vault().Check)
+	mux.HandleFunc("POST /api/vault/restore-drill", d.Vault().RestoreDrill)
+	mux.HandleFunc("POST /api/vault/prune/allow", d.Vault().AllowPrune)
 
 	mux.HandleFunc("GET /api/google/client", d.Google().Client)
 	mux.HandleFunc("PUT /api/google/client", d.Google().SetClient)

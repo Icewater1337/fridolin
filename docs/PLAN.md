@@ -276,14 +276,14 @@ M2 — Nodes:
 
 M3 — Vault:
 
-- [ ] `vault.db` schema and the vault service: `fsnotify` watcher, continuous `rclone crypt` upload to `fridolin-vault`, hash verification
-- [ ] Placement policy engine with the three classes, budget, LRU eviction, `.cold.json` per directory
-- [ ] Hydration: `vault_get` and automatic hydration for paths referenced by an open thread
-- [ ] MCP tools `vault_ls`, `vault_get`, `vault_put`, `vault_search` scoped per brain
-- [ ] `restic` snapshots of the hot tier to `fridolin-snapshots` (nightly, hourly for brains and audit) with retention; Litestream for `bridge.db` and `vault.db`
-- [ ] Replace `backup.go`'s Drive sync with a second restic repository on Drive through rclone and a weekly `restic copy`
-- [ ] Dashboard: vault page with hot usage, cold size, last upload, last snapshot, eviction log; restore drill command
-- [ ] Gate: a 2 GB recording goes cold after transcription while its transcript stays hot; `vault_get` brings it back; a fresh core on another node rebuilds its hot tier from cold within the budget and answers correctly
+- [x] `vault.db` schema and the vault service: `fsnotify` watcher, continuous `rclone crypt` upload to `fridolin-vault`, hash verification
+- [x] Placement policy engine with the three classes, budget, LRU eviction, `.cold.json` per directory
+- [x] Hydration: `vault_get` and automatic hydration for paths referenced by an open thread
+- [x] MCP tools `vault_ls`, `vault_get`, `vault_put`, `vault_search` scoped per brain
+- [x] `restic` snapshots of the hot tier to `fridolin-snapshots` (nightly, hourly for brains and audit) with retention; Litestream for `bridge.db` and `vault.db`
+- [x] Replace `backup.go`'s Drive sync with a second restic repository on Drive through rclone and a weekly `restic copy`
+- [x] Dashboard: vault page with hot usage, cold size, last upload, last snapshot, eviction log; restore drill command
+- [x] Gate: a 2 GB recording goes cold after transcription while its transcript stays hot; `vault_get` brings it back; a fresh core on another node rebuilds its hot tier from cold within the budget and answers correctly (`TestVaultGate`: 64 MB in CI, 2 GB by hand with `FRIDOLIN_GATE_RECORDING_MB=2048`; the fresh core is a fresh data dir on the same machine)
 
 M4 — Core brain, grants, MCP server:
 

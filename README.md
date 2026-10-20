@@ -540,6 +540,17 @@ what you can rebuild. The WhatsApp session and tokens are never uploaded,
 nor `.env` files and private keys in brain folders. Restores go into a new folder and never overwrite a brain. Details:
 [docs/BACKUP.md](docs/BACKUP.md).
 
+### The vault
+
+With `vault.enabled`, every file the bridge keeps (attachments,
+recordings, documents, the audit log) is also kept, encrypted, in
+Backblaze B2, and only a working set stays on this machine: a recording
+goes cold once its transcript exists, and a brain brings it back with
+`vault_get`. restic snapshots the data dir and the brain folders to B2
+(hourly and nightly), with a weekly copy to Google Drive, and Litestream
+replicates the databases. `fridolin vault status` and the dashboard's
+Vault page show it. See [docs/VAULT.md](docs/VAULT.md).
+
 ### Running in the background
 
 `setup.sh` runs `fridolin service install`, which you can also run yourself.

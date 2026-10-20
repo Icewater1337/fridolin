@@ -129,6 +129,7 @@ type Settings struct {
 	DataDir         string // the data dir, absolute
 	DBPath          string // the bridge's DB, absolute
 	PlaudPATH       string // the PATH to run with when brains may use Plaud's CLI
+	Vault           bool   // the vault runs: the prompt explains .cold.json and the vault tools
 	// ownPATH are the folders of the bridge's PATH inside this brain's
 	// folder, which setBridgePATH took out of the bridge's: they go first
 	// on the PATH of this brain's runs, and of no one else's.
@@ -922,6 +923,21 @@ func (br *Brain) Snapshot() Runtime {
 	return rt
 }
 
+// OpenMedia lists the files of the messages the brain is working on or has
+// waiting: the vault keeps them hot (they are an open thread's files).
+func (br *Brain) OpenMedia() []string {
+	br.mu.Lock()
+	defer br.mu.Unlock()
+	var out []string
+	if cur := br.current; cur != nil {
+		out = append(out, cur.msg.Media...)
+	}
+	for _, p := range br.pending {
+		out = append(out, p.Media...)
+	}
+	return out
+}
+
 // ensureViewer starts the tmux activity viewer if enabled and not running.
 // It does so in the background, one start at a time: tmux and osascript,
 // which can wait on an Automation consent prompt under launchd, must not
@@ -998,6 +1014,12 @@ func (br *Brain) StreamLogPath() string {
 
 // invoke runs the selected CLI once for m.
 func (br *Brain) invoke(run *brainRun, ctx context.Context, s *Settings, m Inbound) claudecli.Result {
+	// The message's files come back from the vault's cold tier first, so
+	// that the prompt, built next with what the memory index recalls,
+	// names files the run can read.
+	if br.input.Hydrate != nil && len(m.Media) > 0 {
+		br.input.Hydrate(ctx, br.id, append([]string(nil), m.Media...))
+	}
 	return br.runner.Run(ctx, RunSpec{
 		ID: br.id, Dir: br.workDir, Settings: s, Prompt: br.buildPrompt(s, m), Message: m.Inbound,
 		BeforeStart: func() { br.ensureViewer(s) },
@@ -1152,7 +1174,7 @@ func (br *Brain) identities() map[string]string {
 // prompt file, the chat's recent history and the identity map. renderPrompt
 // puts it into words.
 func (br *Brain) buildPrompt(s *Settings, m Inbound) string {
-	in := prompttext.Input{Now: time.Now(), BrainID: br.id, Message: m.Inbound, BuildChat: br.input.BuildChat != nil && br.input.BuildChat(m.JID), ObserveOnly: m.Silent}
+	in := prompttext.Input{Now: time.Now(), BrainID: br.id, Message: m.Inbound, BuildChat: br.input.BuildChat != nil && br.input.BuildChat(m.JID), ObserveOnly: m.Silent, Vault: s.Vault}
 	if name := s.PromptFile; name != "" {
 		if data, err := br.readFile(name); err != nil {
 			log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)

@@ -62,6 +62,12 @@ type Options struct {
 	RefusalText           func(string, string) string
 	Notify                func(context.Context, Target, string) error
 	Runner                RunFunc
+	// Superseded reports whether the vault's restic repository on Drive
+	// has taken this backup's place: it has completed a copy once. Then
+	// the daily scheduled run no longer runs; Back up now and restores
+	// still work. compat: until then the Drive sync keeps running, so a
+	// bridge that turns the vault on is never without a backup on Drive.
+	Superseded func() bool
 }
 
 // SettingsChanged runs only after a successful configuration publication.

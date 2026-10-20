@@ -24,7 +24,7 @@ has no Go package; build with `go build -o bin/fridolin ./cmd/fridolin`.
 | `nodes`, `nodeproto`, `nodeagent` | The fleet ([NODES.md](NODES.md)): the core's node registry, pairing and node port; the versioned protocol both sides speak, pure; the `fridolin node` agent and its service, which also runs natively on Windows. |
 | `httpapi` | HTTP route handlers, authentication, guards, response types and error mapping. |
 | `store`, `history`, `activity` | SQLite persistence, append-only conversation history and bounded activity feed. |
-| `vault`, `cloud` | Tiered storage (not wired into the bridge yet): the vault.db index, placement policy, upload, eviction, hydration, rebuild and brain scopes; the object-store interface with its rclone implementation (remotes from environment variables only) and a folder fake. |
+| `vault`, `cloud`, `snapshot` | Tiered storage (docs/VAULT.md): the vault.db index, placement policy, upload, eviction, hydration, rebuild and brain scopes; the object-store interface with its rclone implementation (remotes from environment variables only) and a folder fake; restic and a supervised Litestream, each run with an environment of its own. `internal/app` runs them as the vault service. |
 | `memindex`, `intent` | A brain's derived memory index (SQLite FTS5 with provenance) and its standing intents and scheduled jobs. |
 | `fsx`, `platform`, `jsonx`, `textx`, `chat`, `trigger` | Filesystem/process boundaries and shared value operations; `trigger` holds keyword triggers and schedules. |
 | `logx`, `version`, `apperr`, `testutil`, `archtest` | Logging, build identity, domain errors, test helpers and dependency checks. |

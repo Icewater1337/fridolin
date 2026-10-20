@@ -82,12 +82,31 @@ for compatibility.
   [the core brain](docs/BRAINS.md#the-core-brain-and-its-grants). Without
   a core brain nothing changes but the tools every run is offered.
 
-- Groundwork for the tiered vault (docs/PLAN.md, M3): the index, placement
-  policy, upload, eviction, hydration and rebuild, against B2 through
-  `rclone crypt` configured by environment variables only. Not active yet:
-  nothing changes for a running bridge until the vault settings arrive.
+- The tiered vault (docs/PLAN.md, M3), with `vault.enabled`: the data
+  dir's files (attachments, recordings, documents, `secrets/`, `audit/`)
+  are uploaded, encrypted with `rclone crypt`, to the B2 bucket
+  `fridolin-vault` and evicted from this machine by policy and budget (a
+  recording once its transcript exists); folders with cold files carry a
+  `.cold.json`; runs get the tools `vault_ls`, `vault_get`, `vault_put`
+  and `vault_search` and two prompt lines about them. restic snapshots the
+  hot tier to `fridolin-snapshots` (nightly, hourly for brain folders and
+  `audit/`, kept 24 hourly / 14 daily / 8 weekly / 12 monthly, checked
+  weekly and 5% of the data monthly), Litestream replicates `bridge.db`
+  and `vault.db` (which puts them in WAL mode), and a weekly `restic copy`
+  goes to a second repository on Google Drive. New: the dashboard's Vault
+  page, `fridolin vault status|sync|evict|get|rebuild|restore-drill`, and
+  four `fridolin doctor` checks that apply with the vault on. A native
+  install makes the vault's crypt passwords and restic's password in the
+  keychain when they are missing and the bucket is still empty, and says
+  to put them on the recovery sheet. See [docs/VAULT.md](docs/VAULT.md).
+  Off by default: without `vault.enabled` nothing changes.
 
 ### Changed
+
+- compat: with the vault on, the Drive backup's daily sync stops once the
+  vault's weekly `restic copy` to Drive (`<remote>:fridolin-restic`) has
+  completed once; until then, and with the vault off, it runs as before.
+  *Back up now* and restores from `fridolin-backup/` keep working.
 
 - Fridolin now builds for Windows (amd64 and arm64, without cgo). It is
   not supported there yet: there is no service and no sandbox

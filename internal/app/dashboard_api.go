@@ -361,6 +361,7 @@ func (b *App) apiMux() http.Handler {
 		Brains:     b.newBrainsAPI,
 		Filesystem: b.newFilesystemAPI,
 		Backup:     b.newBackupAPI,
+		Vault:      b.newVaultAPI,
 		Google:     b.newGoogleAPI,
 		Plaud:      b.newPlaudAPI,
 		PlaudApp:   b.newPlaudAppAPI,

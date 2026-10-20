@@ -60,6 +60,9 @@ Usage:
   fridolin node join CODE --core HOST:PORT | run | install|start|stop|status|uninstall
                                            run this machine as a node of a core;
                                            fridolin node help for more
+  fridolin vault status|sync|evict|get PATH|rebuild|restore-drill
+                                           the tiered store and its snapshots;
+                                           fridolin vault --help for more
   fridolin version
 
 Run by brains, inside a run (each prints JSON; -h shows its flags):
@@ -122,6 +125,8 @@ func Main() {
 		os.Exit(nodesCmd(args, os.Stdout, os.Stderr))
 	case "node":
 		os.Exit(nodeCmd(args, os.Stdout, os.Stderr))
+	case "vault":
+		os.Exit(vaultCmd(args, os.Stdout, os.Stderr))
 	case "history":
 		os.Exit(toolcli.History(args, processToolIO()))
 	case "polls":
@@ -322,7 +327,7 @@ func runCmd(args []string) int {
 	defer cancel(nil)
 	// NewBridge takes the data dir's instance lock, so dev mode with the live
 	// data dir is refused next to the running bridge too.
-	appOpts := app.Options{Logger: slog.Default(), Config: cfgs, NoWhatsApp: opts.noWhatsApp, Logs: ring}
+	appOpts := app.Options{Logger: slog.Default(), Config: cfgs, NoWhatsApp: opts.noWhatsApp, Logs: ring, Container: opts.container}
 	if opts.container {
 		appOpts.Listen = containerListen
 	}

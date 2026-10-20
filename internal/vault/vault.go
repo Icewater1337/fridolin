@@ -442,3 +442,43 @@ func randomSuffix() string {
 	_, _ = io.ReadFull(randReader, b[:])
 	return hex.EncodeToString(b[:])
 }
+
+// Stats are the index's totals, for a status page.
+type Stats struct {
+	HotBytes  int64 `json:"hot_bytes"`  // files on disk (tiers hot and both)
+	ColdBytes int64 `json:"cold_bytes"` // files in the cold tier (tiers cold and both)
+	Hot       int   `json:"hot"`        // on disk only
+	Cold      int   `json:"cold"`       // in the cold tier only
+	Both      int   `json:"both"`       // on disk and in the cold tier
+	// LastUpload is when a file last reached the cold tier; zero for never.
+	LastUpload time.Time `json:"last_upload,omitzero"`
+}
+
+// Stats sums the index up.
+func (v *Vault) Stats(ctx context.Context) (Stats, error) {
+	var s Stats
+	var last int64
+	err := v.db.QueryRowContext(ctx, `SELECT
+		COALESCE(SUM(CASE WHEN tier IN ('hot', 'both') THEN size END), 0),
+		COALESCE(SUM(CASE WHEN tier IN ('cold', 'both') THEN size END), 0),
+		COUNT(CASE WHEN tier = 'hot' THEN 1 END),
+		COUNT(CASE WHEN tier = 'cold' THEN 1 END),
+		COUNT(CASE WHEN tier = 'both' THEN 1 END),
+		COALESCE(MAX(uploaded_at), 0)
+		FROM files`).Scan(&s.HotBytes, &s.ColdBytes, &s.Hot, &s.Cold, &s.Both, &last)
+	if last > 0 {
+		s.LastUpload = fromMS(last)
+	}
+	return s, err
+}
+
+// Ping asks the cold tier for the manifest's object, which says the store
+// answers and the credentials work; a store without a manifest yet is
+// reachable too.
+func (v *Vault) Ping(ctx context.Context) error {
+	_, err := v.opts.Store.Stat(ctx, manifestKey)
+	if errors.Is(err, cloud.ErrNotFound) {
+		return nil
+	}
+	return err
+}

@@ -99,8 +99,8 @@ after the service.
 | `fridolin.tailscale.authkey` | `TS_AUTHKEY` | |
 | `fridolin.b2.vault.keyid`, `.key` | `B2_VAULT_KEY_ID`, `B2_VAULT_KEY` | the `fridolin-vault` bucket |
 | `fridolin.b2.snapshots.keyid`, `.key` | `B2_SNAPSHOTS_KEY_ID`, `B2_SNAPSHOTS_KEY` | the `fridolin-snapshots` bucket |
-| `fridolin.vault.crypt.password`, `.password2` | `FRIDOLIN_VAULT_CRYPT_PASSWORD`, `..._PASSWORD2` | M3 |
-| `fridolin.restic.password` | `RESTIC_PASSWORD` | M3 |
+| `fridolin.vault.crypt.password`, `.password2` | `FRIDOLIN_VAULT_CRYPT_PASSWORD`, `..._PASSWORD2` | made by a native bridge with the vault on, while the cold tier is empty ([VAULT.md](VAULT.md#keys-and-passwords)) |
+| `fridolin.restic.password` | `RESTIC_PASSWORD` | the same, while the restic repository does not exist |
 
 A secret that is missing is named and left out. To store one by hand:
 
@@ -217,8 +217,9 @@ key in rclone's environment only) and `--bucket` (default
 - **The old machine is gone.** On the new one: import the latest export,
   wait until `fridolin core status` shows the lease stale (5 minutes after
   the old core last renewed), promote, start. What happened after the
-  latest export is lost until M3's Litestream replication covers
-  `bridge.db`; export before planned moves.
+  latest export is lost, except what Litestream replicated of `bridge.db`
+  and `vault.db` to the snapshots bucket with the vault on
+  ([VAULT.md](VAULT.md#snapshots)); export before planned moves.
 - **The old machine comes back.** Its core finds another device's lease and
   stops its channels, or refuses to take it at start.
 - **An import went wrong.** The data dir's previous content is in
