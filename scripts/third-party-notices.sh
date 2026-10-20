@@ -127,6 +127,7 @@ licence_of() {
     *"Redistribution and use in source and binary forms"*"may be used to endorse or promote"*) echo BSD-3-Clause ;;
     *"Redistribution and use in source and binary forms"*) echo BSD-2-Clause ;;
     *"SQLite Is Public Domain"*) echo blessing ;;
+    *"Permission is granted to anyone to use this software for any purpose, including commercial applications, and to alter it and redistribute it freely"*) echo Zlib ;;
   esac
 }
 

@@ -19,6 +19,8 @@ type Boot struct {
 	LogLevel              string `config:"log_level"`
 	DashboardDisabled     bool   `config:"dashboard.disabled"`
 	DashboardRequireToken bool   `config:"dashboard.require_token"`
+	NodesEnabled          bool   `config:"nodes.enabled"`
+	NodesListen           string `config:"nodes.listen"`
 }
 
 func bootOf(c *File, paths Paths) Boot {
@@ -26,6 +28,7 @@ func bootOf(c *File, paths Paths) Boot {
 		HTTPEnabled: c.HTTPListen != "" && c.HTTPListen != "off", Home: paths.Home, HTTPListen: c.HTTPListen, DataDir: c.DataDir,
 		DBPath: c.DBPath, MediaDir: c.MediaDir, LogLevel: c.LogLevel,
 		DashboardDisabled: c.Dashboard.Disabled, DashboardRequireToken: *c.Dashboard.RequireToken,
+		NodesEnabled: c.Nodes.Enabled, NodesListen: c.Nodes.Listen,
 	}
 }
 

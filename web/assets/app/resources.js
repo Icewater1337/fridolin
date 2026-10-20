@@ -126,3 +126,4 @@ export const statusResource = resource('/api/status');
 export const brainsResource = resource('/api/brains');
 export const configResource = resource('/api/config');
 export const ignoredResource = resource('/api/chats/ignored');
+export const nodesResource = resource('/api/nodes');

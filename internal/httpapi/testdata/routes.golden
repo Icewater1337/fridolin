@@ -27,6 +27,7 @@ GET /api/fs/capabilities
 GET /api/fs/list
 GET /api/google/client
 GET /api/logs
+GET /api/nodes
 GET /api/plaud/app.apk
 GET /api/plaud/status
 GET /api/site
@@ -64,6 +65,11 @@ POST /api/fs/pick
 POST /api/login
 POST /api/login/code
 POST /api/logout
+POST /api/nodes/join-code
+POST /api/nodes/{id}/approve
+POST /api/nodes/{id}/approve-commands
+POST /api/nodes/{id}/call
+POST /api/nodes/{id}/revoke
 POST /api/plaud/app/build
 POST /api/plaud/connect
 POST /api/plaud/disconnect
@@ -100,6 +106,7 @@ PUT /api/brains/{id}/backup
 PUT /api/brains/{id}/calendar
 PUT /api/config
 PUT /api/google/client
+PUT /api/nodes/{id}/tags
 PUT /api/plaud/app/credentials
 PUT /api/plaud/settings
 PUT /api/site/builders/{id}

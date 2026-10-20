@@ -20,6 +20,16 @@ for compatibility.
   machines through an age-encrypted export in the vault bucket and the
   core lease. `fridolin run --container` binds the dashboard's port for
   Docker's port mapping. See [docs/CORE.md](docs/CORE.md).
+- Nodes (docs/NODES.md): other machines join the core with
+  `fridolin nodes join-code` and `fridolin node join <code> --core
+  host:port`, and serve what you approve, in two stages (`fridolin nodes
+  approve <id>`, then `--commands`): allowlisted commands without a shell,
+  files under granted folders, host facts and notifications. The node
+  agent runs on macOS, Linux and Windows and installs itself as a service
+  (`fridolin node install|start|stop|status|uninstall`). The dashboard has
+  a Nodes page, `!fleet` lists the nodes in a direct chat, and `fridolin
+  doctor` checks the node port and how recently each node was heard from.
+  `nodes.enabled` and `nodes.listen` now wait for a restart.
 
 - Settings → AI mode switches new brain runs between Claude (default) and
   Codex. Codex defaults to `gpt-6.1-sol` with high reasoning effort, with

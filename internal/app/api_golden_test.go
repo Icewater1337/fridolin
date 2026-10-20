@@ -180,6 +180,7 @@ func TestGoldenGETEndpoints(t *testing.T) {
 		{"site-secrets", "/api/site/secrets", nil},
 		{"site-build", "/api/site/build/main", nil},
 		{"dev-outbox", "/api/dev/outbox", nil},
+		{"nodes", "/api/nodes", nil},
 		{"unknown-endpoint", "/api/nope", nil},
 	}
 	for _, tc := range tests {

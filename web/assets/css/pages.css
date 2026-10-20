@@ -157,6 +157,15 @@ blockquote.preview {
 .bool-field > .field-tag { margin-top: 2px; }
 .trigger-row { display: grid; grid-template-columns: minmax(80px, 1fr) minmax(120px, 1fr) auto; gap: 6px; align-items: center; }
 
+/* ── nodes ──────────────────────────────────────────────────────────────── */
+
+.node-list { display: flex; flex-direction: column; gap: 14px; }
+.node-card .card-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.node-state { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.node-offers { display: flex; flex-direction: column; gap: 4px; font-size: 13px; overflow-wrap: anywhere; }
+.tag-list { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.join-command { margin: 10px 0; overflow-wrap: anywhere; }
+
 /* ── backup ─────────────────────────────────────────────────────────────── */
 
 .job-card { border-color: var(--info-border); }

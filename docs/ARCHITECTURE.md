@@ -21,6 +21,7 @@ has no Go package; build with `go build -o bin/fridolin ./cmd/fridolin`.
 | `outbound`, `otp`, `media` | Reply delivery, one-time-code handoff and attachment storage. |
 | `backup`, `google`, `plaud`, `site` | Integration services, each with injected host capabilities. |
 | `lease`, `coreexport`, `hostsecrets` | The core lease in the vault bucket, the core's encrypted export and import, and the host's secret store (docs/CORE.md). |
+| `nodes`, `nodeproto`, `nodeagent` | The fleet ([NODES.md](NODES.md)): the core's node registry, pairing and node port; the versioned protocol both sides speak, pure; the `fridolin node` agent and its service, which also runs natively on Windows. |
 | `httpapi` | HTTP route handlers, authentication, guards, response types and error mapping. |
 | `store`, `history`, `activity` | SQLite persistence, append-only conversation history and bounded activity feed. |
 | `vault`, `cloud` | Tiered storage (not wired into the bridge yet): the vault.db index, placement policy, upload, eviction, hydration, rebuild and brain scopes; the object-store interface with its rclone implementation (remotes from environment variables only) and a folder fake. |

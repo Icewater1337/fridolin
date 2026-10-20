@@ -29,6 +29,8 @@ func TestStoreBootSurvivesSavesAndIsAValueCopy(t *testing.T) {
 		c.LogLevel = "debug"
 		c.Dashboard.Disabled = true
 		c.Dashboard.RequireToken = new(false)
+		c.Nodes.Enabled = true
+		c.Nodes.Listen = "127.0.0.1:8799"
 		c.AgentProvider = "codex"
 		c.CodexModel = "live-model"
 		return nil

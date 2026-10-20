@@ -3,6 +3,7 @@ package outbound
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
@@ -52,7 +53,8 @@ func HelpReply(groupTrigger string) string {
 		"*Commands:*\n" +
 		"• `!help` — show this help\n" +
 		"• `!stop` — stop what I'm doing for this chat and drop its queued messages\n" +
-		"• `!reset` — like `!stop`, and the next message starts without this chat's earlier messages"
+		"• `!reset` — like `!stop`, and the next message starts without this chat's earlier messages\n" +
+		"• `!fleet` — the machines connected to me as nodes (direct chats only)"
 	if groupTrigger != "" {
 		help += "\n\nIn this group, start your message with `" + groupTrigger + "` or reply to one of mine to address me, commands included."
 	}
@@ -161,3 +163,45 @@ const (
 	// a message sent, and would do it twice.
 	RestartedNotice = "🔄 I restarted while I was working on your message. Send it again if you still need an answer."
 )
+
+// FleetGroupNotice answers !fleet in a group: the fleet is the owner's
+// business.
+const FleetGroupNotice = "🖥️ !fleet answers only in a direct chat."
+
+// FleetReply answers !fleet: the nodes of the core's fleet, whether each
+// is online and what it may do. enabled is nodes.enabled.
+func FleetReply(enabled bool, nodes []FleetNode, now time.Time) string {
+	if !enabled {
+		return "🖥️ Nodes are off. Turn on nodes.enabled in the config and restart the bridge to connect other machines (docs/NODES.md)."
+	}
+	if len(nodes) == 0 {
+		return "🖥️ No nodes yet. On the core, run `fridolin nodes join-code` and paste the line it prints on the new machine."
+	}
+	online := 0
+	for _, n := range nodes {
+		if n.Online {
+			online++
+		}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "🖥️ *Fleet* — %s, %d online\n", countNodes(len(nodes)), online)
+	for _, n := range nodes {
+		fmt.Fprintf(&b, "\n• *%s* (%s) — %s", n.Name, osLabel(n.OS), seen(n, now))
+		switch {
+		case n.Device == "revoked":
+			b.WriteString(" · revoked")
+		case n.Device == "pending":
+			b.WriteString(" · waiting for approval: `fridolin nodes approve " + n.ID + "`")
+		case n.Commands == "pending":
+			b.WriteString(" · offers more than approved: `fridolin nodes approve " + n.ID + " --commands`")
+		}
+		if n.Device == "approved" {
+			b.WriteString("\n  may run: " + n.Offers)
+		}
+		b.WriteString("\n  id " + n.ID)
+		if len(n.Tags) > 0 {
+			b.WriteString(" · " + strings.Join(n.Tags, ", "))
+		}
+	}
+	return b.String()
+}

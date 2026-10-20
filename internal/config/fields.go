@@ -24,6 +24,10 @@ var fields = []fieldSpec{
 	{Field: Field{Name: "log_level", Boot: true}, get: func(c *Settings) string { return c.LogLevel }},
 	{Field: Field{Name: "dashboard.disabled", Boot: true}, get: func(c *Settings) string { return fmt.Sprint(c.Dashboard.Disabled) }},
 	{Field: Field{Name: "dashboard.require_token", Boot: true}, waits: func(start, now *Settings) bool { return start.Dashboard.RequireToken && !now.Dashboard.RequireToken }},
+	// The node port opens at startup (internal/nodes), on the address it
+	// had then.
+	{Field: Field{Name: "nodes.enabled", Boot: true}, get: func(c *Settings) string { return fmt.Sprint(c.Nodes.Enabled) }},
+	{Field: Field{Name: "nodes.listen", Boot: true}, get: func(c *Settings) string { return c.Nodes.Listen }},
 	{Field: Field{Name: "_comment"}},
 	{Field: Field{Name: "version"}},
 	{Field: Field{Name: "allowed_numbers"}},
@@ -98,8 +102,6 @@ var fields = []fieldSpec{
 	{Field: Field{Name: "vault.bucket"}},
 	{Field: Field{Name: "vault.snapshots_bucket"}},
 	{Field: Field{Name: "vault.endpoint"}},
-	{Field: Field{Name: "nodes.enabled"}},
-	{Field: Field{Name: "nodes.listen"}},
 	{Field: Field{Name: "policy.max_runs_per_hour"}},
 	{Field: Field{Name: "policy.max_pending_irreversible"}},
 	{Field: Field{Name: "policy.approval_timeout_hours"}},

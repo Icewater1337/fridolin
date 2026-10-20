@@ -1,0 +1,9 @@
+GET /api/nodes
+200 OK
+Content-Type: application/json
+
+{
+  "enabled": false,
+  "listen": "",
+  "nodes": []
+}

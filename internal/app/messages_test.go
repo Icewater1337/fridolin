@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
@@ -54,8 +55,24 @@ func catalogue() []struct{ name, text string } {
 		{"backupRefusedAlert", outboundmsg.BackupRefusedAlert("Notes", "it would delete 12 of 40 files")},
 		{"plaudGivenUpAlert", outboundmsg.PlaudGivenUpAlert("Team sync", "notes", "brain notes is not configured")},
 		{"plaudExpiredAlert", outboundmsg.PlaudExpiredAlert},
+		{"fleetGroupNotice", outboundmsg.FleetGroupNotice},
+		{"fleetReply(false)", outboundmsg.FleetReply(false, nil, fleetNow)},
+		{"fleetReply(true, none)", outboundmsg.FleetReply(true, nil, fleetNow)},
+		{"fleetReply(true, nodes)", outboundmsg.FleetReply(true, fleetNodes, fleetNow)},
 	}
 }
+
+// fleetNow and fleetNodes are the fleet !fleet lists in the catalogue:
+// one node of each state.
+var (
+	fleetNow   = time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	fleetNodes = []outboundmsg.FleetNode{
+		{ID: "8233270f8a24", Name: "laptop", OS: "windows", Online: true, Device: "approved", Commands: "approved", Tags: []string{"gpu", "windows"}, Offers: "exec (hostname, whoami), fs (1 root), host"},
+		{ID: "4f1e2d3c4b5a", Name: "mini", OS: "darwin", LastSeen: fleetNow.Add(-3 * time.Hour), Device: "approved", Commands: "pending", Tags: []string{"macos"}, Offers: "host"},
+		{ID: "0a1b2c3d4e5f", Name: "pi", OS: "linux", LastSeen: fleetNow.Add(-90 * time.Second), Device: "pending", Commands: "pending"},
+		{ID: "ffeeddccbbaa", Name: "old", OS: "linux", Device: "revoked", Commands: "none"},
+	}
+)
 
 // TestGoldenMessages pins every message the bridge sends into chats, so a
 // change to one shows in review, and holds the catalogue to its rules:
