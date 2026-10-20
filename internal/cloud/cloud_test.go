@@ -192,7 +192,7 @@ func TestObscureMatchesRclone(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.Command(bin, "--config", "", "reveal", mine)
+		cmd := exec.Command(bin, "--config", "", "reveal", "--", mine)
 		cmd.Env = env
 		out, err := cmd.Output()
 		if err != nil {
@@ -201,7 +201,7 @@ func TestObscureMatchesRclone(t *testing.T) {
 		if got := strings.TrimRight(string(out), "\n"); got != secret {
 			t.Fatalf("rclone reveal(Obscure(%q)) = %q", secret, got)
 		}
-		cmd = exec.Command(bin, "--config", "", "obscure", secret)
+		cmd = exec.Command(bin, "--config", "", "obscure", "--", secret)
 		cmd.Env = env
 		out, err = cmd.Output()
 		if err != nil {
