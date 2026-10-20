@@ -31,6 +31,9 @@ type SentPoll struct {
 	Brain    string
 	Question string
 	Options  []string
+	// Ref names what the bridge sent the poll for, an approval say; ""
+	// for a brain's own poll.
+	Ref string
 }
 
 type PollStore interface {

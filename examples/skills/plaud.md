@@ -1,3 +1,15 @@
+---
+name: plaud
+description: Handle a recording that arrives from the Plaud recorder, already transcribed, and answer questions about Plaud recordings with the plaud command.
+requires:
+  bins: [plaud]
+metadata:
+  fridolin:
+    risk: write
+    vault: []
+    approve: []
+    triggers: ["[Plaud] New recording", plaud]
+---
 # Plaud recordings
 
 When to use: a message from **plaud** that starts with `[Plaud] New recording`

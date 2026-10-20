@@ -40,6 +40,11 @@ type Workflow struct {
 	HandOff      func(*brainruntime.Brain, string, string, string, []string)
 	// Fleet is the answer to !fleet; nil leaves !fleet to the brain.
 	Fleet func() string
+	// Lockdown answers !lockdown (true) and !unlock (false) from m.
+	Lockdown func(m brainruntime.Inbound, on bool) string
+	// Answer takes m as the answer to a question a run waits for in its
+	// chat (ask_user), and reports whether it did: m then goes no further.
+	Answer func(m brainruntime.Inbound) bool
 }
 
 // handleInbound is the entry point for every allowed message. Access control
@@ -63,6 +68,9 @@ func (p *Workflow) Handle(ctx context.Context, m brainruntime.Inbound) {
 		return
 	}
 	if m.Text == "" && len(m.Media) == 0 && m.Quoted == nil {
+		return
+	}
+	if p.Answer != nil && m.Brain == "" && p.Answer(m) {
 		return
 	}
 
@@ -105,10 +113,17 @@ func (p *Workflow) Handle(ctx context.Context, m brainruntime.Inbound) {
 	p.Debouncer.Add(m)
 }
 
-// handleCommand runs !help, !reset, !stop and !fleet. It reports whether
-// text was one.
+// handleCommand runs !help, !reset, !stop, !fleet, !lockdown and
+// !unlock. It reports whether text was one.
 func (p *Workflow) handleCommand(ctx context.Context, m brainruntime.Inbound, settings Settings) bool {
 	switch strings.ToLower(m.Text) {
+	case "!lockdown", "!unlock":
+		if p.Lockdown == nil {
+			return false
+		}
+		_ = p.Notice(ctx, m.JID, p.Lockdown(m, strings.EqualFold(m.Text, "!lockdown")))
+		return true
+
 	case "!reset":
 		// A reset stops what !stop stops for the chat, hand-offs from other
 		// brains included, and starts the chat afresh: a brain run never

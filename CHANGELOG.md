@@ -10,6 +10,28 @@ for compatibility.
 
 ### Added
 
+- Policy and approvals (M5). Skills take a frontmatter in the portable
+  Agent Skills format (`skills/<name>.md` or `skills/<name>/SKILL.md`),
+  with `risk`, `approve`, `vault` and `triggers` under
+  `metadata.fridolin`; the starter skills have one. What applies is the
+  policy you approve on the brain page's new *Skills* section: a skill a
+  brain writes or changes counts as read-only until you do.
+  `request_approval` now asks you with a WhatsApp poll (Yes / No / Show me
+  the draft) that only your own numbers can answer, no answer within
+  `policy.approval_timeout_hours` counting as no; `ask_user` asks a
+  question; `check_approval` waits again. Claude runs get
+  `--allowed-tools mcp__fridolin`, so these tools work without
+  `dangerously_skip_permissions` too. Every run's prompt now says to
+  ask before any irreversible step. `!lockdown` and `!unlock` (owner
+  only, and on the dashboard) pause all but read-only work. A chat starts
+  at most `policy.max_runs_per_hour` runs an hour (20), which applies to
+  existing setups too. The audit log (`audit/YYYY-MM.jsonl`) has one
+  schema for runs, tool calls, approvals, votes, delegations and
+  lockdowns; the dashboard shows it on new Threads, Approvals and Audit
+  pages. `fridolin doctor` warns about approvals waiting over an hour and
+  shows a lockdown. See
+  [Skills, risk and approvals](docs/BRAINS.md#skills-risk-and-approvals).
+
 - The core runs in a container: `container/Dockerfile` builds the
   `fridolin-core` image (the bridge, the Claude CLI, Python, ffmpeg,
   restic, rclone, Litestream, bubblewrap; tini as PID 1; user `fridolin`),

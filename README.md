@@ -362,6 +362,8 @@ writes there is not read.
 | `!stop`  | Stop the run for this chat and drop its queued messages, including files or recordings another brain is answering here |
 | `!reset` | Like `!stop`, and the chat starts afresh: the next message's run sees none of the chat's earlier messages. The history file keeps them, and what the assistant wrote in its memory files stays |
 | `!fleet` | The machines connected as [nodes](docs/NODES.md): online or when last seen, waiting approvals, and what each may run. Direct chats only |
+| `!lockdown` | Owner only (a number in `allowed_numbers`): pause all work but reading, everywhere, until `!unlock` or the dashboard's *Unlock* ([BRAINS.md](docs/BRAINS.md#skills-risk-and-approvals)) |
+| `!unlock` | Owner only: end a lockdown |
 
 A command also works when sent as a reply to a message.
 In a group, address the bridge as for any request (`@claude !stop`, or

@@ -1,3 +1,15 @@
+---
+name: transcription
+description: Turn audio and video whose words matter (voice notes, calls, meetings, interviews) into a transcript in transcripts/, next to the original, with the transcribe tool.
+requires:
+  bins: [ffmpeg, python3]
+metadata:
+  fridolin:
+    risk: write
+    vault: []
+    approve: []
+    triggers: [transcribe, transcript, voice note]
+---
 # Skill: Transcription
 
 ## When to use

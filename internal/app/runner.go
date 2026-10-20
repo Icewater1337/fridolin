@@ -25,6 +25,22 @@ type commandRunner struct {
 }
 
 func (r *commandRunner) Run(ctx context.Context, spec brain.RunSpec, callbacks claudecli.Callbacks) claudecli.Result {
+	var pol *runPolicy
+	if r.hooks != nil && r.hooks.Admit != nil {
+		p, err := r.hooks.Admit(spec)
+		if err != nil {
+			return claudecli.Result{Err: err}
+		}
+		pol = p
+	}
+	res := r.run(ctx, spec, callbacks, pol)
+	if r.hooks != nil && r.hooks.Ended != nil {
+		r.hooks.Ended(pol, res)
+	}
+	return res
+}
+
+func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks claudecli.Callbacks, pol *runPolicy) claudecli.Result {
 	s, prompt := spec.Settings, spec.Prompt
 
 	mcpConfig, settings := "", ""
@@ -56,7 +72,9 @@ func (r *commandRunner) Run(ctx context.Context, spec brain.RunSpec, callbacks c
 	}
 	var runEnv []string
 	if r.hooks != nil && r.hooks.RunEnv != nil {
-		access := r.hooks.RunEnv(runInfoFor(spec.ID, spec.Message))
+		run := runInfoFor(spec.ID, spec.Message)
+		run.Policy = pol
+		access := r.hooks.RunEnv(run)
 		// After Wait: the tools the run started have exited by then, or
 		// are left behind and lose the brain API with the run.
 		defer access.Done()
@@ -178,5 +196,10 @@ func runMCPArgs(provider string, access runAccess) []string {
 	if access.MCPConfig == "" {
 		return nil
 	}
-	return []string{"--mcp-config", access.MCPConfig}
+	// The bridge's own tools need no permission of the CLI: the bridge
+	// decides by the run's token which a run has. Without
+	// dangerously_skip_permissions, `claude -p` would refuse them, and
+	// with them request_approval, the step that asks before an
+	// irreversible one.
+	return []string{"--mcp-config", access.MCPConfig, "--allowed-tools", "mcp__" + mcpServerName}
 }

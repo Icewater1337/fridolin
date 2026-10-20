@@ -328,6 +328,7 @@ type sent struct {
 	JID  string    `json:"jid"`
 	Text string    `json:"text"`
 	Poll []string  `json:"poll"`
+	ID   string    `json:"id"`
 }
 
 // Outbox returns what the bridge has sent, oldest first, after what the

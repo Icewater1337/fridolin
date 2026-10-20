@@ -22,6 +22,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/plaud"
 
 	"github.com/Icewater1337/fridolin/internal/activity"
+	"github.com/Icewater1337/fridolin/internal/audit"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -97,11 +98,15 @@ type App struct {
 	// ended, and audit the log they are written to.
 	mcpTools    *mcp.Registry[mcpCaller]
 	delegations delegations
-	audit       *auditLog
+	audit       *audit.Log
 	// intents are the brains' standing intents and scheduled jobs, which
 	// sched fires.
 	intents *intent.Store
 	sched   *scheduler
+	// policy is the lockdown and the runs' rate, waiters the tool calls
+	// that wait for the owner's answer (approvals.go).
+	policy  policyState
+	waiters approvalWaiters
 	// lids is whatsmeow's map between LIDs and phone numbers, nil in dev
 	// mode, for what knows a person by LID outside an event: a /send to
 	// one.
@@ -236,7 +241,8 @@ func New(opts Options) (_ *App, err error) {
 		b.listen = cfg.HTTPListen
 	}
 	b.exe = bridgeBinary()
-	b.audit = &auditLog{dir: filepath.Join(AbsPath(cfg.DataDir), auditDirName)}
+	b.audit = newAuditLog(cfg.DataDir)
+	b.loadPolicy()
 	b.mcpTools = b.newMCPTools()
 	if b.nodes, err = newNodes(cfgs); err != nil {
 		return nil, err
@@ -309,6 +315,8 @@ func New(opts Options) (_ *App, err error) {
 		RunEnv:     b.brainRunEnv,
 		Recall:     b.recall,
 		Hydrate:    func(ctx context.Context, id string, paths []string) { b.vault.hydrate(ctx, id, paths) },
+		Admit:      b.admitRun,
+		Ended:      b.runEnded,
 	})
 	for _, br := range b.brainMgr.Brains() {
 		seedActivity(b.activity, br)
@@ -374,7 +382,7 @@ func (b *App) Start(ctx context.Context) error {
 		Resume:           func(ctx context.Context) { b.outbox.Start(); b.resume(ctx) }, Connect: b.connectLoop,
 		Watch: func(ctx context.Context) { b.watchRequiredFiles(ctx, requiredFilesEvery) },
 		// The tailnet first: the node port listens on it.
-		Background: []func(context.Context){b.startTailnet, b.runLease, b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start, b.vault.Start},
+		Background: []func(context.Context){b.startTailnet, b.runLease, b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start, b.vault.Start, b.watchApprovals},
 	})
 }
 

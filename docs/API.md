@@ -185,7 +185,10 @@ here, since it is no run's.
 answers as MCP's `tools/call` does: `{"content": [{"type": "text",
 "text": …}], "isError": …}`, `isError` for a tool that ran and failed.
 A `delegate` call waits for the sub-brain's answer, up to its
-`timeout_seconds`.
+`timeout_seconds`; `request_approval`, `ask_user` and `check_approval`
+wait for the owner's answer up to their `wait_seconds` (at most 600), then
+answer `pending` with the approval's id. Every call is a `tool_call` line
+of the audit log, its arguments left out.
 
 | Status | When |
 | --- | --- |
@@ -218,6 +221,26 @@ either):
 | `POST /api/vault/check` | `restic check` now, `{"read_data_subset": "5%"}` to read data too; `202` |
 | `POST /api/vault/prune/allow` | lift a deletion hold: pruning goes on; `200` |
 | `POST /api/vault/get` | `{"path": "<vault path>", "allow_over_budget": false}`: bring the file back and answer `{"path": "<absolute path>"}`; `404` for a path the vault does not hold, `412` when it would take the hot tier over its budget |
+
+## The policy's dashboard routes
+
+Like the rest of `/api/`, these serve the dashboard (its token or session,
+and for writes its header and JSON) and are not a contract; they are
+listed here because they decide what runs may do
+([BRAINS.md](BRAINS.md#skills-risk-and-approvals)).
+
+| Route | What |
+| --- | --- |
+| `GET /api/policy` | the lockdown (`lockdown`, `lockdown_by`, `lockdown_since`), the limits, and how many approvals and questions wait |
+| `POST /api/policy/lockdown` | `{"on": true}` locks down, `{"on": false}` unlocks, as the dashboard |
+| `GET /api/approvals` | `{"pending": [...], "history": [...]}`: what runs asked, waiting oldest first, decided newest first (100) |
+| `POST /api/approvals/{id}` | `{"decision": "approve" \| "deny"}`, which counts as the owner's vote; `409` once it is decided |
+| `GET /api/threads?limit=` | the runs of the audit log grouped by thread, newest first |
+| `GET /api/audit?kind=&brain=&thread=&run=&id=&q=&limit=&months=` | the audit log's lines, newest first, of the last `months` (2) monthly files |
+| `GET /api/brains/{id}/skills` | the brain's skills, each with its frontmatter, `status`, the `hash` of its declared policy and the policy that applies (`effective`) |
+| `POST /api/brains/{id}/skills/approve` | `{"path", "hash"}` approves the declared policy if it is still the one with that hash (`409` otherwise) |
+| `PUT /api/brains/{id}/skills/policy` | `{"path", "risk", "approve", "vault", "triggers"}` writes them into the file and approves them |
+| `POST /api/dev/vote` | dev mode only: `{"poll", "voter", "options"}` votes in a poll the dev chat shows, as a vote from WhatsApp arrives |
 
 ## Limits
 

@@ -1,0 +1,7 @@
+GET /api/brains/nope/skills
+404 Not Found
+Content-Type: application/json
+
+{
+  "error": "brain \"nope\" is not running"
+}

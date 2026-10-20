@@ -26,6 +26,10 @@ type pollVote struct {
 // for what, without anyone asking it to look. Polls from before the
 // bridge kept their brain go to the brain that owns their chat.
 func (b *App) recordVote(v pollVote) {
+	if id, ok := strings.CutPrefix(v.Poll.Ref, approvalRefPrefix); ok {
+		b.approvalVote(id, v)
+		return
+	}
 	br := b.brainMgr.Get(v.Poll.Brain)
 	if br == nil {
 		br = b.brainMgr.BrainFor(v.Poll.Chat, chat.IsGroupJID(v.Poll.Chat))

@@ -39,6 +39,8 @@ func (b *App) newMessagePipeline() *pipeline.Workflow {
 		HandOff:     b.handOff,
 		Fleet:       b.fleetText,
 		HandOffCode: b.handOffCode,
+		Lockdown:    b.lockdownCommand,
+		Answer:      b.answerText,
 		Chats:       chatJIDs,
 		ReplyChat: func(br *brain.Brain, ownerDM string) string {
 			return replyChatForBrain(b.brainMgr.Manager, br, ownerDM)

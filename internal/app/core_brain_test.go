@@ -41,10 +41,22 @@ func (h *harness) grant(grants map[string][]string) {
 	}
 }
 
+// auditOf is the audit log's lines of kind, oldest first.
+func (h *harness) auditOf(kind string) []map[string]any {
+	h.t.Helper()
+	var out []map[string]any
+	for _, l := range h.auditLines() {
+		if l["kind"] == kind {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
 // auditLines reads the data dir's audit log of this month.
 func (h *harness) auditLines() []map[string]any {
 	h.t.Helper()
-	f, err := os.Open(filepath.Join(h.DataDir(), auditDirName, time.Now().Format("2006-01")+".jsonl"))
+	f, err := os.Open(filepath.Join(h.DataDir(), auditDirName, time.Now().UTC().Format("2006-01")+".jsonl"))
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -80,7 +92,7 @@ func TestCoreDelegatesOnlyWhenGranted(t *testing.T) {
 	// Without a grant the core has no delegate tool, and calling it is
 	// calling a tool that does not exist.
 	reply := h.Answer(inbound{JID: harnessDM, Text: "What did the family talk about? #mcp"})
-	if !strings.Contains(reply, "[core:list] read_memory,ask_user,request_approval") {
+	if !strings.Contains(reply, "[core:list] read_memory,ask_user,request_approval,check_approval") {
 		t.Errorf("the core's tools without a grant:\n%s", reply)
 	}
 	if !strings.Contains(reply, "[core:delegate] error -32602 unknown tool: delegate") {
@@ -92,13 +104,13 @@ func TestCoreDelegatesOnlyWhenGranted(t *testing.T) {
 
 	// A sub-brain's own run: no delegate, no list_brains.
 	reply = h.Answer(inbound{JID: harnessGroup, Sender: "15551234567", Text: "@claude anything new? #mcp"})
-	if !strings.Contains(reply, "[family:list] read_memory,ask_user,request_approval") || !strings.Contains(reply, "[family:delegate] error -32602 unknown tool: delegate") {
+	if !strings.Contains(reply, "[family:list] read_memory,ask_user,request_approval,check_approval") || !strings.Contains(reply, "[family:delegate] error -32602 unknown tool: delegate") {
 		t.Errorf("family's tools in its own run:\n%s", reply)
 	}
 
 	h.grant(map[string][]string{"family": {"delegate", "read"}})
 	reply = h.Answer(inbound{JID: harnessDM, Text: "What did the family talk about? #mcp"})
-	if !strings.Contains(reply, "[core:list] delegate,list_brains,read_memory,ask_user,request_approval") {
+	if !strings.Contains(reply, "[core:list] delegate,list_brains,read_memory,ask_user,request_approval,check_approval") {
 		t.Errorf("the core's tools with the grant:\n%s", reply)
 	}
 	// family ran the task in its own folder, saw it come from core, and
@@ -106,7 +118,7 @@ func TestCoreDelegatesOnlyWhenGranted(t *testing.T) {
 	familyDir := filepath.Join(h.Home(), "family")
 	for _, want := range []string{
 		"[core:delegate] echo:" + familyDir + ":core says: Summarise last week's family chat. #mcp",
-		"[family:list] read_memory,ask_user,request_approval",
+		"[family:list] read_memory,ask_user,request_approval,check_approval",
 		"[family:delegate] error -32602 unknown tool: delegate",
 		"[core:read_memory] # ",
 	} {
@@ -127,15 +139,25 @@ func TestCoreDelegatesOnlyWhenGranted(t *testing.T) {
 		t.Errorf("the family group got %d messages, want its own answer only: %q", len(got), got)
 	}
 
-	audit := h.auditLines()
-	if len(audit) != 1 || audit[0]["kind"] != "delegate" || audit[0]["from"] != "core" || audit[0]["to"] != "family" || audit[0]["outcome"] != "ok" || !strings.HasPrefix(audit[0]["task"].(string), "Summarise last week") || audit[0]["ts"] == "" {
+	audit := h.auditOf("delegation")
+	if len(audit) != 1 || audit[0]["brain"] != "core" || audit[0]["thread"] != harnessDM || audit[0]["outcome"] != "ok" || !strings.HasPrefix(audit[0]["detail"].(string), "to family: Summarise last week") || audit[0]["ts"] == "" {
 		t.Errorf("audit log: %v", audit)
+	}
+	// The delegated run is in the core run's thread, with its risk.
+	var delegatedRun map[string]any
+	for _, l := range h.auditOf("run_start") {
+		if l["brain"] == "family" && strings.HasPrefix(l["chat"].(string), "delegate:") {
+			delegatedRun = l
+		}
+	}
+	if delegatedRun == nil || delegatedRun["thread"] != harnessDM || delegatedRun["risk"] != "write" || !strings.HasPrefix(delegatedRun["detail"].(string), "delegated by run ") {
+		t.Errorf("the delegated run's line: %v", delegatedRun)
 	}
 
 	// Taking the grant away takes the tool away again.
 	h.grant(nil)
 	reply = h.Answer(inbound{JID: harnessDM, Text: "and now? #mcp"})
-	if !strings.Contains(reply, "[core:list] read_memory,ask_user,request_approval") {
+	if !strings.Contains(reply, "[core:list] read_memory,ask_user,request_approval,check_approval") {
 		t.Errorf("the core's tools after the grant was taken away:\n%s", reply)
 	}
 }
@@ -163,8 +185,8 @@ func TestLateDelegationAnswerComesToTheCoresChat(t *testing.T) {
 	if !strings.Contains(late, "echo:"+filepath.Join(h.Home(), "core")+":family says: The answer of brain family to the task you delegated to it") || !strings.Contains(late, "core says: Find the photos") {
 		t.Errorf("the core's answer to the late result:\n%s", late)
 	}
-	h.WaitFor("the audit line", func() bool { return len(h.auditLines()) == 1 })
-	if a := h.auditLines()[0]; a["outcome"] != "ok, after the wait" {
+	h.WaitFor("the audit line", func() bool { return len(h.auditOf("delegation")) == 1 })
+	if a := h.auditOf("delegation")[0]; a["outcome"] != "ok, after the wait" {
 		t.Errorf("audit: %v", a)
 	}
 }
@@ -199,7 +221,7 @@ func TestMCPAPIKnowsTheRunByItsToken(t *testing.T) {
 	if code, body := call("POST", "/brain/mcp/call", `{"name":"delegate","arguments":{"brain":"core","task":"x"}}`, "r1", tok); code != 200 || !strings.Contains(body, `"isError":true`) || !strings.Contains(body, `you may not delegate to \"core\"`) {
 		t.Errorf("delegating to a brain not granted: %d %s", code, body)
 	}
-	if code, body := call("POST", "/brain/mcp/call", `{"name":"ask_user","arguments":{"question":"?"}}`, "r1", tok); code != 200 || !strings.Contains(body, "not available yet") {
+	if code, body := call("POST", "/brain/mcp/call", `{"name":"ask_user","arguments":{"question":"?","wait_seconds":1}}`, "r1", tok); code != 200 || !strings.Contains(body, "pending: no answer yet after 1s") {
 		t.Errorf("ask_user: %d %s", code, body)
 	}
 
@@ -254,7 +276,7 @@ func TestGrantsWrittenByABrainWaitForApproval(t *testing.T) {
 // leading to the bridge, and a wait long enough for a delegated task.
 func TestRunMCPArgsForEachProvider(t *testing.T) {
 	access := runAccess{MCPConfig: "/data/run-tokens/core/run-r1.mcp.json", MCPCommand: []string{"/opt/fridolin", "mcp", "--run", "r1"}}
-	if got := strings.Join(runMCPArgs("claude", access), " "); got != "--mcp-config /data/run-tokens/core/run-r1.mcp.json" {
+	if got := strings.Join(runMCPArgs("claude", access), " "); got != "--mcp-config /data/run-tokens/core/run-r1.mcp.json --allowed-tools mcp__fridolin" {
 		t.Errorf("claude: %s", got)
 	}
 	want := `-c mcp_servers.fridolin.command="/opt/fridolin" -c mcp_servers.fridolin.args=["mcp","--run","r1"] -c mcp_servers.fridolin.env_vars=["FRIDOLIN_API","FRIDOLIN_BRAIN_TOKEN_FILE"] -c mcp_servers.fridolin.tool_timeout_sec=660`

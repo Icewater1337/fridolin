@@ -1,3 +1,13 @@
+---
+name: memory-consolidation
+description: Once a week, or when asked, promote what holds from the daily notes into memories/core.md and tidy the notes; it writes only this brain's own memory files.
+metadata:
+  fridolin:
+    risk: write
+    vault: []
+    approve: []
+    triggers: ["scheduled memory consolidation", "consolidate your notes"]
+---
 # Skill: Memory consolidation
 
 ## When to use

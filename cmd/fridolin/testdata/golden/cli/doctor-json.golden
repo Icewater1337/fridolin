@@ -113,6 +113,20 @@
       "needed": "M1",
       "status": "ok",
       "detail": "/opt/homebrew/bin/age (v1.2.1)"
+    },
+    {
+      "id": "approvals",
+      "title": "approvals waiting",
+      "required": false,
+      "status": "ok",
+      "detail": "none waiting"
+    },
+    {
+      "id": "lockdown",
+      "title": "lockdown",
+      "required": false,
+      "status": "ok",
+      "detail": "off"
     }
   ]
 }

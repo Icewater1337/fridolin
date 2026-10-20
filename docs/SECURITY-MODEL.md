@@ -29,6 +29,16 @@ On the tailnet (`core.tailnet`) the dashboard always requires its token or a
 session; the caller's tailnet identity is logged and audited but is not
 authentication by itself.
 
+Irreversible steps (submitting, sending to third parties, paying, deleting,
+publishing) are asked for with a WhatsApp poll that only the numbers in
+`allowed_numbers` can answer, and every run's prompt requires it. The
+bridge enforces what goes through its own tools (risk levels from the
+skills the owner approved, approval ids on irreversible tools, lockdown,
+rate limits) and records it in an audit log without tool arguments; it
+cannot stop a brain's shell from acting without asking, which is the
+sandbox's and the prompt's part. See
+[Skills, risk and approvals](BRAINS.md#skills-risk-and-approvals).
+
 Provider approval and OS sandboxing are separate controls. Without the provider's
 skip-permissions option, tools requiring approval are denied in noninteractive
 runs while permitted tools can still run. See the exact settings and defaults in

@@ -14,5 +14,7 @@
   "low",
   "--mcp-config",
   "<HOME>/.fridolin/run-tokens/family/run-<RUN>.mcp.json",
+  "--allowed-tools",
+  "mcp__fridolin",
   "-p"
 ]

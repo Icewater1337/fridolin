@@ -26,3 +26,11 @@ type RunSpec struct {
 	// and source (a delegated task's run gets no delegate tool).
 	Message chat.Inbound
 }
+
+// RunRefused is a run the bridge's policy did not start (a lockdown, a
+// rate limit): Notice is what the chat is told, Reason what the log says.
+type RunRefused struct {
+	Reason, Notice string
+}
+
+func (e *RunRefused) Error() string { return "refused by the policy: " + e.Reason }

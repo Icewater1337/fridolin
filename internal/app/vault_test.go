@@ -295,6 +295,15 @@ func TestVaultToolsScope(t *testing.T) {
 	if !strings.Contains(reply, "[core:vault_get failed] vault: path outside this brain's vault paths: secrets/calendar.age") {
 		t.Errorf("a files grant opened the secrets:\n%s", reply)
 	}
+
+	// vault_put writes (M5): a lockdown refuses it, reading goes on.
+	if _, err := h.b.setLockdown(context.Background(), true, "dashboard"); err != nil {
+		t.Fatal(err)
+	}
+	reply = h.Answer(inbound{JID: harnessDM, Text: "the school letter? #mcp"})
+	if !strings.Contains(reply, "[core:vault_put failed] the bridge is in lockdown") || !strings.Contains(reply, copyPath) {
+		t.Errorf("in a lockdown:\n%s", reply)
+	}
 }
 
 // TestVaultSnapshotsDrillAndDrive runs the snapshots with the real restic

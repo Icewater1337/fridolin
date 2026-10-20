@@ -24,6 +24,7 @@ helpReply("")
 	• `!stop` — stop what I'm doing for this chat and drop its queued messages
 	• `!reset` — like `!stop`, and the next message starts without this chat's earlier messages
 	• `!fleet` — the machines connected to me as nodes (direct chats only)
+	• `!lockdown` — owner only: pause all work but reading until `!unlock`
 helpReply("@claude")
 	🤖 *Fridolin*
 
@@ -34,6 +35,7 @@ helpReply("@claude")
 	• `!stop` — stop what I'm doing for this chat and drop its queued messages
 	• `!reset` — like `!stop`, and the next message starts without this chat's earlier messages
 	• `!fleet` — the machines connected to me as nodes (direct chats only)
+	• `!lockdown` — owner only: pause all work but reading until `!unlock`
 
 	In this group, start your message with `@claude` or reply to one of mine to address me, commands included.
 queuedNotice(2)
@@ -105,3 +107,38 @@ fleetReply(true, nodes)
 	  id 0a1b2c3d4e5f
 	• *old* (Linux) — never seen · revoked
 	  id ffeeddccbbaa
+approvalYes
+	✅ Yes
+approvalNo
+	❌ No
+approvalDraft
+	📝 Show me the draft
+approvalQuestion
+	🔐 Approve? Submit the 2025 tax return through ELSTER
+askQuestion
+	❓ Which account should the refund go to?
+approvalDraftReply("Send the email", "")
+	📝 There is no draft for “Send the email” beyond what the poll says.
+approvalDraftReply("Send the email", draft)
+	📝 The draft for “Send the email”:
+
+	To: you@example.com
+	Subject: Offer
+
+	Hello …
+
+	Vote Yes or No in the poll above.
+lockdownReply(true, false)
+	🔒 Lockdown: only read-only work runs now. Nothing that writes, sends or submits goes ahead, and no approval is asked. Send !unlock, or unlock it in the dashboard, to end it.
+lockdownReply(true, true)
+	🔒 The bridge is in lockdown already. Send !unlock, or unlock it in the dashboard, to end it.
+lockdownReply(false, false)
+	🔓 Unlocked: the brains work as before.
+lockdownReply(false, true)
+	🔓 The bridge is not in lockdown.
+lockdownOwnerOnly
+	🔒 Only the owner can lock the bridge down or unlock it.
+lockdownRefusedNotice
+	🔒 The bridge is in lockdown, so this was not run: it needs more than reading. Unlock it in the dashboard or with !unlock, then send it again.
+rateLimitedNotice(20)
+	⏳ This chat started 20 runs in the last hour, the most allowed. Try again later.

@@ -17,11 +17,14 @@ DELETE /api/site/users/{id}
 DELETE /brain/calendar/events/{id}
 DELETE /brain/intents/{id}
 GET /api/activity
+GET /api/approvals
+GET /api/audit
 GET /api/backup/status
 GET /api/brains
 GET /api/brains/{id}
 GET /api/brains/{id}/backup/versions
 GET /api/brains/{id}/calendar
+GET /api/brains/{id}/skills
 GET /api/chats/ignored
 GET /api/config
 GET /api/dev/outbox
@@ -32,6 +35,7 @@ GET /api/logs
 GET /api/nodes
 GET /api/plaud/app.apk
 GET /api/plaud/status
+GET /api/policy
 GET /api/site
 GET /api/site/build/{id}
 GET /api/site/builders
@@ -39,6 +43,7 @@ GET /api/site/proposals
 GET /api/site/secrets
 GET /api/site/users
 GET /api/status
+GET /api/threads
 GET /api/vault/status
 GET /api/whatsapp/groups
 GET /api/whatsapp/qr
@@ -51,6 +56,7 @@ GET /brain/polls
 GET /builder/context
 GET /health
 GET /ready
+POST /api/approvals/{id}
 POST /api/backup/cancel
 POST /api/backup/connect
 POST /api/backup/disconnect
@@ -60,12 +66,14 @@ POST /api/brains
 POST /api/brains/inspect
 POST /api/brains/{id}/approve
 POST /api/brains/{id}/calendar/connect
+POST /api/brains/{id}/skills/approve
 POST /api/brains/{id}/stop
 POST /api/chats/allow
 POST /api/chats/dismiss
 POST /api/chats/members
 POST /api/chats/revoke
 POST /api/dev/inbound
+POST /api/dev/vote
 POST /api/fs/pick
 POST /api/login
 POST /api/login/code
@@ -80,6 +88,7 @@ POST /api/plaud/connect
 POST /api/plaud/disconnect
 POST /api/plaud/resend
 POST /api/plaud/sync
+POST /api/policy/lockdown
 POST /api/restart
 POST /api/site/build/{id}
 POST /api/site/build/{id}/new
@@ -118,6 +127,7 @@ PUT /api/backup/settings
 PUT /api/brains/{id}
 PUT /api/brains/{id}/backup
 PUT /api/brains/{id}/calendar
+PUT /api/brains/{id}/skills/policy
 PUT /api/config
 PUT /api/google/client
 PUT /api/nodes/{id}/tags

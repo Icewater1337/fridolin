@@ -59,6 +59,20 @@ func catalogue() []struct{ name, text string } {
 		{"fleetReply(false)", outboundmsg.FleetReply(false, nil, fleetNow)},
 		{"fleetReply(true, none)", outboundmsg.FleetReply(true, nil, fleetNow)},
 		{"fleetReply(true, nodes)", outboundmsg.FleetReply(true, fleetNodes, fleetNow)},
+		{"approvalYes", outboundmsg.ApprovalYes},
+		{"approvalNo", outboundmsg.ApprovalNo},
+		{"approvalDraft", outboundmsg.ApprovalDraft},
+		{"approvalQuestion", outboundmsg.ApprovalQuestion("Submit the 2025 tax return through ELSTER")},
+		{"askQuestion", outboundmsg.AskQuestion("Which account should the refund go to?")},
+		{`approvalDraftReply("Send the email", "")`, outboundmsg.ApprovalDraftReply("Send the email", "")},
+		{`approvalDraftReply("Send the email", draft)`, outboundmsg.ApprovalDraftReply("Send the email", "To: you@example.com\nSubject: Offer\n\nHello …")},
+		{"lockdownReply(true, false)", outboundmsg.LockdownReply(true, false)},
+		{"lockdownReply(true, true)", outboundmsg.LockdownReply(true, true)},
+		{"lockdownReply(false, false)", outboundmsg.LockdownReply(false, false)},
+		{"lockdownReply(false, true)", outboundmsg.LockdownReply(false, true)},
+		{"lockdownOwnerOnly", outboundmsg.LockdownOwnerOnly},
+		{"lockdownRefusedNotice", outboundmsg.LockdownRefusedNotice},
+		{"rateLimitedNotice(20)", outboundmsg.RateLimitedNotice(20)},
 	}
 }
 

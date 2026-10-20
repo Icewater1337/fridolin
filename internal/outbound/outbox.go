@@ -126,6 +126,14 @@ func (o *Outbox) Question(ctx context.Context, brain, chat, text string, maxChun
 	return o.add(ctx, store.OutboxRow{Chat: chat, Brain: brain, History: text, Parts: o.textParts(chat, text, maxChunk)})
 }
 
+// Poll puts a poll of the bridge's own into the outbox, for ref (an
+// approval, "approval:<id>"), whose votes go there: single choice,
+// recorded in no history. WhatsApp refusing it as a poll sends it as a
+// numbered list, whose answers then come as messages.
+func (o *Outbox) Poll(ctx context.Context, chat, question string, options []string, ref string) error {
+	return o.add(ctx, store.OutboxRow{Chat: chat, Parts: []store.OutboxPart{{Question: question, Options: options, Max: 1, Ref: ref}}})
+}
+
 // textParts is text as the messages it goes to chat as.
 func (o *Outbox) textParts(chat, text string, maxChunk int) []store.OutboxPart {
 	var parts []store.OutboxPart
@@ -351,7 +359,7 @@ func (o *Outbox) send(ctx context.Context, m Link, r *store.OutboxRow, p store.O
 	}
 	// Kept so the votes can be matched back to its options and reach the
 	// brain that sent it.
-	if err := o.store.SavePoll(msgID, r.Chat, r.Brain, p.Question, p.Options); err != nil {
+	if err := o.store.SavePollRef(msgID, r.Chat, r.Brain, p.Question, p.Options, p.Ref); err != nil {
 		log.Printf("failed to save poll %s to DB: %v", msgID, err)
 	}
 	return nil

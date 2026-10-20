@@ -16,6 +16,7 @@ has no Go package; build with `go build -o bin/fridolin ./cmd/fridolin`.
 | `app`, `app/apptest` | Runtime composition, policy projections, host adapters and an external application test harness. |
 | `config`, `manifest`, `registry`, `route` | Configuration transactions, brain documents and discovery, and pure routing. |
 | `brain`, `claudecli`, `prompt`, `sandbox` | Queues and runs, provider process protocol, prompt construction and sandbox policy. |
+| `skill`, `audit` | Skill files: the frontmatter parser (a YAML subset, with a fuzz target), validation and the policy under `metadata.fridolin`; the audit log's one schema, appender and filtered reader. |
 | `mcp` | The MCP server protocol (JSON-RPC 2.0 over stdio) and the tool registry with a per-caller availability predicate; `fridolin mcp --run` serves a run's tools with it. |
 | `whatsapp`, `access`, `pipeline` | Transport events, authorization/classification and inbound delivery. |
 | `outbound`, `otp`, `media` | Reply delivery, one-time-code handoff and attachment storage. |

@@ -38,6 +38,9 @@ type OutboxPart struct {
 	Question string   `json:"question,omitempty"`
 	Options  []string `json:"options,omitempty"`
 	Max      int      `json:"max,omitempty"`
+	// Ref names what the bridge sends the poll for (an approval); its
+	// votes go there (SavePollRef).
+	Ref string `json:"ref,omitempty"`
 }
 
 // IsPoll reports whether this part carries a poll rather than text.

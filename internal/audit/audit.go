@@ -1,0 +1,262 @@
+// Package audit is the bridge's append-only audit log: one JSON object a
+// line in <data_dir>/audit/YYYY-MM.jsonl, a file a month. Every line has
+// one schema (Entry), whatever wrote it: runs, the tools they called,
+// approvals and votes, delegations, lockdowns. A line names its thread
+// (the chat a run serves, which a task delegated from it shares), so the
+// log reads per thread. No secret value is ever written: tool arguments
+// stay out, and texts are shortened and scrubbed of what looks like a
+// token (Scrub).
+package audit
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"log"
+	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
+)
+
+// The kinds of lines.
+const (
+	RunStart          = "run_start"
+	RunEnd            = "run_end"
+	RunRefused        = "run_refused"
+	ToolCall          = "tool_call"
+	ApprovalRequested = "approval_requested"
+	ApprovalVote      = "approval_vote"
+	ApprovalDecided   = "approval_decided"
+	QuestionAsked     = "question_asked"
+	QuestionAnswered  = "question_answered"
+	Delegation        = "delegation"
+	Lockdown          = "lockdown"
+	Unlock            = "unlock"
+	SkillApproved     = "skill_approved"
+	// Tailnet is a request that changed something through the core's
+	// tailnet listener (M1): By is the caller's tailnet login, ID its
+	// device, Detail the method and path, Outcome the HTTP status.
+	Tailnet = "tailnet"
+)
+
+// Entry is one line. Fields are added, never renamed; a reader ignores
+// the ones it does not know.
+type Entry struct {
+	TS   string `json:"ts"`
+	Kind string `json:"kind"`
+	// Thread is the chat a run serves; a delegated task's run is in the
+	// thread of the core run that delegated it.
+	Thread string `json:"thread,omitempty"`
+	// Chat is where it happened: the run's own chat, or where a poll went.
+	Chat  string `json:"chat,omitempty"`
+	Brain string `json:"brain,omitempty"`
+	Run   string `json:"run,omitempty"`
+	// ID is the approval's, question's or delegation's id.
+	ID string `json:"id,omitempty"`
+	// Skill and Risk are a run's skill and risk budget, or an approval's.
+	Skill string `json:"skill,omitempty"`
+	Risk  string `json:"risk,omitempty"`
+	// By is who acted: a voter's number, "dashboard", a brain.
+	By         string `json:"by,omitempty"`
+	Detail     string `json:"detail,omitempty"`
+	Outcome    string `json:"outcome,omitempty"`
+	DurationMS int64  `json:"duration_ms,omitempty"`
+}
+
+// DirName is the data dir's folder of audit logs.
+const DirName = "audit"
+
+// maxDetail bounds a line's detail.
+const maxDetail = 300
+
+// tokenRe matches what looks like a credential: a long run of letters,
+// digits and -_/+= without spaces, or a key=value of a secret-sounding
+// key.
+var (
+	tokenRe  = regexp.MustCompile(`[A-Za-z0-9_\-+/=]{32,}`)
+	secretRe = regexp.MustCompile(`(?i)\b(password|passwd|secret|token|api[_-]?key|pin)\s*[:=]\s*\S+`)
+)
+
+// Scrub shortens s for a line and masks what looks like a secret in it.
+func Scrub(s string) string {
+	s = secretRe.ReplaceAllString(s, "$1=[redacted]")
+	s = tokenRe.ReplaceAllString(s, "[redacted]")
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > maxDetail {
+		n := maxDetail
+		for n > 0 && !utf8.RuneStart(s[n]) {
+			n--
+		}
+		s = s[:n] + "…"
+	}
+	return s
+}
+
+// Log appends to the files in Dir.
+type Log struct {
+	mu  sync.Mutex
+	Dir string
+	Now func() time.Time
+}
+
+func (l *Log) now() time.Time {
+	if l.Now != nil {
+		return l.Now()
+	}
+	return time.Now()
+}
+
+// Append writes e with its time, its texts scrubbed. A log that cannot be
+// written is logged, not fatal: the work it records has happened.
+func (l *Log) Append(e Entry) {
+	if l == nil || l.Dir == "" {
+		return
+	}
+	t := l.now()
+	e.TS = t.UTC().Format(time.RFC3339Nano)
+	e.Detail = Scrub(e.Detail)
+	e.Outcome = Scrub(e.Outcome)
+	line, err := json.Marshal(e)
+	if err != nil {
+		log.Printf("audit: %v", err)
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := os.MkdirAll(l.Dir, 0o700); err != nil {
+		log.Printf("audit: %v", err)
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(l.Dir, t.UTC().Format("2006-01")+".jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		log.Printf("audit: %v", err)
+		return
+	}
+	defer f.Close()
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		log.Printf("audit: %v", err)
+	}
+}
+
+// Filter picks lines; an empty field picks every value.
+type Filter struct {
+	Thread, Kind, Brain, Run, ID string
+	// Kinds, when set, picks lines of these kinds only.
+	Kinds []string
+	// Query is a case-insensitive substring of the detail, outcome or by.
+	Query string
+	// Months is how many monthly files to read, newest first (default 2).
+	Months int
+	// Limit caps the lines returned (default 500).
+	Limit int
+}
+
+func (f Filter) keep(e Entry) bool {
+	switch {
+	case f.Thread != "" && e.Thread != f.Thread,
+		f.Kind != "" && e.Kind != f.Kind,
+		len(f.Kinds) > 0 && !slices.Contains(f.Kinds, e.Kind),
+		f.Brain != "" && e.Brain != f.Brain,
+		f.Run != "" && e.Run != f.Run,
+		f.ID != "" && e.ID != f.ID:
+		return false
+	}
+	if q := strings.ToLower(f.Query); q != "" {
+		return strings.Contains(strings.ToLower(e.Detail+" "+e.Outcome+" "+e.By+" "+e.Chat), q)
+	}
+	return true
+}
+
+// maxLine is the longest line Read takes; longer ones are skipped.
+const maxLine = 64 << 10
+
+// Read returns the lines f picks, newest first, from the newest monthly
+// files in dir. A missing folder is no lines.
+func Read(dir string, f Filter) ([]Entry, error) {
+	months := f.Months
+	if months <= 0 {
+		months = 2
+	}
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 500
+	}
+	names, err := files(dir)
+	if err != nil {
+		return nil, err
+	}
+	out := []Entry{}
+	for i := len(names) - 1; i >= 0 && len(names)-i <= months; i-- {
+		got, err := readFile(filepath.Join(dir, names[i]), f)
+		if err != nil {
+			return nil, err
+		}
+		// Newest first: the file's lines are oldest first.
+		for j := len(got) - 1; j >= 0; j-- {
+			out = append(out, got[j])
+			if len(out) >= limit {
+				return out, nil
+			}
+		}
+	}
+	return out, nil
+}
+
+// files lists dir's monthly files, oldest first.
+func files(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, e := range entries {
+		n := e.Name()
+		if e.Type().IsRegular() && strings.HasSuffix(n, ".jsonl") {
+			if _, err := time.Parse("2006-01", strings.TrimSuffix(n, ".jsonl")); err == nil {
+				names = append(names, n)
+			}
+		}
+	}
+	slices.Sort(names)
+	return names, nil
+}
+
+func readFile(path string, f Filter) ([]Entry, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("audit: %w", err)
+	}
+	defer file.Close()
+	var out []Entry
+	r := bufio.NewReaderSize(file, 64<<10)
+	for {
+		line, err := r.ReadSlice('\n')
+		if errors.Is(err, bufio.ErrBufferFull) {
+			// Too long for a line the bridge writes: skip the rest of it.
+			for errors.Is(err, bufio.ErrBufferFull) {
+				_, err = r.ReadSlice('\n')
+			}
+			continue
+		}
+		if len(line) > 0 && len(line) <= maxLine {
+			var e Entry
+			if json.Unmarshal(line, &e) == nil && e.Kind != "" && f.keep(e) {
+				out = append(out, e)
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	return out, nil
+}

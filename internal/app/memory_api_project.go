@@ -2,12 +2,15 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/apperr"
 	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/intent"
 	"github.com/Icewater1337/fridolin/internal/memindex"
+	"github.com/Icewater1337/fridolin/internal/skill"
 )
 
 // brainMemory is httpapi.BrainMemoryService: the memory index and the
@@ -32,6 +35,14 @@ func (m brainMemory) owner(tok string, br *brainruntime.Brain) (runInfo, error) 
 	c, ok := m.b.runTokens.runOf(tok)
 	if !ok || c.Brain != br.ID() || !ownerAsked(c, m.b.cfgs.Get()) {
 		return c, intent.ErrNotOwner
+	}
+	// Setting or removing an intent writes (M5's policy): not in a
+	// lockdown, nor in a run whose budget is read.
+	if m.b.locked() {
+		return c, apperr.New(apperr.Forbidden, "the bridge is in lockdown: only reading goes ahead, so no standing intent can be set or removed. Say so in your reply")
+	}
+	if c.Policy != nil && c.Policy.Risk.Rank() < skill.RiskWrite.Rank() {
+		return c, apperr.New(apperr.Forbidden, fmt.Sprintf("this run's risk level is %s, which does not allow setting or removing a standing intent", c.Policy.Risk))
 	}
 	return c, nil
 }

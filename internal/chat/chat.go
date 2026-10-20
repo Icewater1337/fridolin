@@ -68,6 +68,11 @@ const (
 	// its schedules or standing intents falls due. Like SourceIngest it
 	// is never a command and never interrupts a request.
 	SourceSchedule = "schedule"
+	// SourceApprovalResult is the owner's answer to a run's
+	// request_approval or ask_user that came after the run stopped
+	// waiting for it (or its expiry), handed to the brain in the chat it
+	// was asked in.
+	SourceApprovalResult = "approval-result"
 )
 
 // DelegateChatPrefix starts the JID of a delegated task's chat,
@@ -84,7 +89,7 @@ func IsDelegateChat(jid string) bool { return strings.HasPrefix(jid, DelegateCha
 // command, and neither interrupts a run nor is replaced by a later one.
 func (m Inbound) HandedIn() bool {
 	switch m.Source {
-	case SourceIngest, SourceDelegate, SourceDelegateResult, SourceSchedule:
+	case SourceIngest, SourceDelegate, SourceDelegateResult, SourceSchedule, SourceApprovalResult:
 		return true
 	}
 	return false

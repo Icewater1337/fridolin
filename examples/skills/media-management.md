@@ -1,3 +1,13 @@
+---
+name: media-management
+description: Give media kept as they are — photos, screenshots, clips, voice memos — a permanent home under media/; not for documents, nor for audio or video whose words matter (that is the transcription skill).
+metadata:
+  fridolin:
+    risk: write
+    vault: []
+    approve: []
+    triggers: []
+---
 # Skill: Media Management
 
 ## Purpose

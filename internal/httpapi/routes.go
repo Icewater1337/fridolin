@@ -105,6 +105,7 @@ type APIDeps struct {
 	Auth       func() *DashboardAuth
 	Dev        func() *DevAPI
 	Nodes      func() *NodesAPI
+	Policy     func() *PolicyAPI
 }
 
 func NewAPIMux(d APIDeps) http.Handler {
@@ -194,11 +195,13 @@ func NewAPIMux(d APIDeps) http.Handler {
 	mux.HandleFunc("POST /api/nodes/{id}/call", d.Nodes().Call)
 
 	d.Site(mux)
+	d.Policy().Register(mux)
 
 	// Only in dev mode: outside it they are not there at all (404).
 	if d.DevMode {
 		mux.HandleFunc("POST /api/dev/inbound", d.Dev().Inbound)
 		mux.HandleFunc("GET /api/dev/outbox", d.Dev().Outbox)
+		mux.HandleFunc("POST /api/dev/vote", d.Dev().VoteHandler)
 	}
 
 	// No catch-all: the mux answers an unknown path with 404 and a known
@@ -237,6 +240,23 @@ func (a *SiteAPI) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/site/proposals/{id}", a.DiscardProposal)
 	mux.HandleFunc("POST /api/site/previews/{id}", a.StartPreview)
 	a.BuildRoutes(mux)
+}
+
+// Register adds the policy's routes: threads, approvals, the audit log,
+// the lockdown and the skills' policies.
+func (a *PolicyAPI) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/policy", a.get(func(r *http.Request) (any, error) { return a.Status(r.Context()) }))
+	mux.HandleFunc("POST /api/policy/lockdown", a.LockdownHandler)
+	mux.HandleFunc("GET /api/threads", a.get(func(r *http.Request) (any, error) {
+		limit := queryInt(r, "limit")
+		return a.Threads(r.Context(), min(max(limit, 0), 500))
+	}))
+	mux.HandleFunc("GET /api/audit", a.get(a.Audit))
+	mux.HandleFunc("GET /api/approvals", a.get(func(r *http.Request) (any, error) { return a.Approvals(r.Context()) }))
+	mux.HandleFunc("POST /api/approvals/{id}", a.DecideHandler)
+	mux.HandleFunc("GET /api/brains/{id}/skills", a.get(func(r *http.Request) (any, error) { return a.Skills(r.Context(), r.PathValue("id")) }))
+	mux.HandleFunc("POST /api/brains/{id}/skills/approve", a.ApproveSkillHandler)
+	mux.HandleFunc("PUT /api/brains/{id}/skills/policy", a.SkillPolicyHandler)
 }
 
 func (a *BuildChatAPI) Register(mux *http.ServeMux) {

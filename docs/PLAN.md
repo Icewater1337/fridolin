@@ -295,9 +295,9 @@ M4 — Core brain, grants, MCP server:
 
 M5 — Policy and approval (from the architecture doc):
 
-- [ ] Risk levels in skill frontmatter under `metadata.fridolin`; `request_approval` MCP tool; WhatsApp poll with 24 h timeout as no; rate limits; `!lockdown`
-- [ ] Audit log JSONL per thread; dashboard threads, approvals and audit views
-- [ ] Gate: an irreversible skill step stops, the poll arrives, a no vote ends the run and is in the audit log
+- [x] Risk levels in skill frontmatter under `metadata.fridolin`; `request_approval` MCP tool; WhatsApp poll with 24 h timeout as no; rate limits; `!lockdown`
+- [x] Audit log JSONL per thread; dashboard threads, approvals and audit views
+- [x] Gate: an irreversible skill step stops, the poll arrives, a no vote ends the run and is in the audit log (TestIrreversibleStepWaitsForApproval)
 
 M6 — FrIDE through nodes:
 

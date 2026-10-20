@@ -1,0 +1,146 @@
+GET /api/brains/main/skills
+200 OK
+Content-Type: application/json
+
+{
+  "risks": [
+    "read",
+    "write",
+    "irreversible"
+  ],
+  "skills": [
+    {
+      "approved": null,
+      "description": "Give media kept as they are — photos, screenshots, clips, voice memos — a permanent home under media/; not for documents, nor for audio or video whose words matter (that is the transcription skill).",
+      "effective": {
+        "approve": [],
+        "risk": "write",
+        "triggers": [],
+        "vault": []
+      },
+      "fridolin": {
+        "approve": [],
+        "risk": "write",
+        "triggers": [],
+        "vault": []
+      },
+      "frontmatter": true,
+      "hash": "b57c21aa454e0de4c429807a00b62030c391d6deb659b5238be733acfe064888",
+      "install": [],
+      "name": "media-management",
+      "os": [],
+      "path": "skills/media-management.md",
+      "requires": {
+        "bins": [],
+        "env": []
+      },
+      "status": "starter"
+    },
+    {
+      "approved": null,
+      "description": "Once a week, or when asked, promote what holds from the daily notes into memories/core.md and tidy the notes; it writes only this brain's own memory files.",
+      "effective": {
+        "approve": [],
+        "risk": "write",
+        "triggers": [
+          "scheduled memory consolidation",
+          "consolidate your notes"
+        ],
+        "vault": []
+      },
+      "fridolin": {
+        "approve": [],
+        "risk": "write",
+        "triggers": [
+          "scheduled memory consolidation",
+          "consolidate your notes"
+        ],
+        "vault": []
+      },
+      "frontmatter": true,
+      "hash": "b9e0fb4bc0327a648473518ce48bbaac3a0bb2adb441ec9ff807a0a1f38e92c1",
+      "install": [],
+      "name": "memory-consolidation",
+      "os": [],
+      "path": "skills/memory-consolidation.md",
+      "requires": {
+        "bins": [],
+        "env": []
+      },
+      "status": "starter"
+    },
+    {
+      "approved": null,
+      "description": "Handle a recording that arrives from the Plaud recorder, already transcribed, and answer questions about Plaud recordings with the plaud command.",
+      "effective": {
+        "approve": [],
+        "risk": "write",
+        "triggers": [
+          "[Plaud] New recording",
+          "plaud"
+        ],
+        "vault": []
+      },
+      "fridolin": {
+        "approve": [],
+        "risk": "write",
+        "triggers": [
+          "[Plaud] New recording",
+          "plaud"
+        ],
+        "vault": []
+      },
+      "frontmatter": true,
+      "hash": "f3bff434079920d2389b7a64f64a3fbec1bcbe9e30e455f8e3a95833049ae1d0",
+      "install": [],
+      "name": "plaud",
+      "os": [],
+      "path": "skills/plaud.md",
+      "requires": {
+        "bins": [
+          "plaud"
+        ],
+        "env": []
+      },
+      "status": "starter"
+    },
+    {
+      "approved": null,
+      "description": "Turn audio and video whose words matter (voice notes, calls, meetings, interviews) into a transcript in transcripts/, next to the original, with the transcribe tool.",
+      "effective": {
+        "approve": [],
+        "risk": "write",
+        "triggers": [
+          "transcribe",
+          "transcript",
+          "voice note"
+        ],
+        "vault": []
+      },
+      "fridolin": {
+        "approve": [],
+        "risk": "write",
+        "triggers": [
+          "transcribe",
+          "transcript",
+          "voice note"
+        ],
+        "vault": []
+      },
+      "frontmatter": true,
+      "hash": "2df42a89e028038ded713f9ab42074fd6c5e6af41254eb4b7a5c13bcd8b665a9",
+      "install": [],
+      "name": "transcription",
+      "os": [],
+      "path": "skills/transcription.md",
+      "requires": {
+        "bins": [
+          "ffmpeg",
+          "python3"
+        ],
+        "env": []
+      },
+      "status": "starter"
+    }
+  ]
+}
