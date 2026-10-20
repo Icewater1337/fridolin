@@ -19,12 +19,13 @@ has no Go package; build with `go build -o bin/fridolin ./cmd/fridolin`.
 | `whatsapp`, `access`, `pipeline` | Transport events, authorization/classification and inbound delivery. |
 | `outbound`, `otp`, `media` | Reply delivery, one-time-code handoff and attachment storage. |
 | `backup`, `google`, `plaud`, `site` | Integration services, each with injected host capabilities. |
+| `lease`, `coreexport`, `hostsecrets` | The core lease in the vault bucket, the core's encrypted export and import, and the host's secret store (docs/CORE.md). |
 | `httpapi` | HTTP route handlers, authentication, guards, response types and error mapping. |
 | `store`, `history`, `activity` | SQLite persistence, append-only conversation history and bounded activity feed. |
 | `vault`, `cloud` | Tiered storage (not wired into the bridge yet): the vault.db index, placement policy, upload, eviction, hydration, rebuild and brain scopes; the object-store interface with its rclone implementation (remotes from environment variables only) and a folder fake. |
 | `fsx`, `platform`, `jsonx`, `textx`, `chat`, `trigger` | Filesystem/process boundaries and shared value operations. |
 | `logx`, `version`, `apperr`, `testutil`, `archtest` | Logging, build identity, domain errors, test helpers and dependency checks. |
-| `web`, `examples`, `site` at the repository root | Embedded dashboard, starter files and site runtime assets. |
+| `web`, `examples`, `site`, `container` at the repository root | Embedded dashboard, starter files, site runtime assets, and the core image's build files with the compose file `fridolin core start` runs. |
 
 The package import allowlist lives in `internal/archtest/archtest_test.go`.
 Changing a dependency requires updating that table in the same review. Runtime

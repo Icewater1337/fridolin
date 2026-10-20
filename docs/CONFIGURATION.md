@@ -1570,6 +1570,14 @@ The bridge itself reads two variables:
 | `FRIDOLIN_CONFIG` | the config file when `--config` is not given; `setup.sh` sets the service up with it |
 | `BRAIN_MODE` | set to anything but `true`, `1`, `yes` or `on`, the bridge refuses to start, see [`brain_mode`](#brain_mode) |
 
+The `fridolin core` commands ([CORE.md](CORE.md)) also read
+`FRIDOLIN_HOME`, the data dir they work on (the image sets it to its
+volume, `/data`), `FRIDOLIN_AGE_IDENTITY`, the key exports are encrypted
+to, `FRIDOLIN_CORE_STORE`, a folder or rclone `remote:bucket` in place of
+the vault bucket, and `B2_VAULT_KEY_ID` and `B2_VAULT_KEY`, the vault
+bucket's key, which only the rclone they start gets. `fridolin core start`
+passes them into the container from the keychain.
+
 `CONFIG_FILE`, the old name of `FRIDOLIN_CONFIG`, is ignored: the bridge
 logs a warning when it is set, and `setup.sh` stops rather than set the
 service up with another config. If it points at Fridolin's config, re-run

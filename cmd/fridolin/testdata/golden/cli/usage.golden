@@ -1,0 +1,46 @@
+fridolin — talk to Claude Code over WhatsApp
+
+Usage:
+  fridolin [run] [flags]     start the bridge (default)
+  fridolin open              open the dashboard in your browser
+  fridolin rotate-token      replace the dashboard token and sign out every browser
+  fridolin check [--route JID ...] [--redact]
+                                           validate the configuration and show routing;
+                                           --redact masks numbers, JIDs, emails and home paths;
+                                           exits 3 when a configured brain cannot run
+  fridolin doctor [--json] [--redact]      check what the bridge and the coming parts
+                                           need on this machine (CLIs, Tailscale,
+                                           Docker, host secrets, disk), each with a
+                                           fix; exits 1 when a required check fails
+  fridolin init [--claude-path PATH] [--data-dir DIR]
+                                           write a starter config (if there is none)
+  fridolin paths [--json]                  the config file and data dir in use, and
+                                           where each came from
+  fridolin service install|rollback|restart|status|uninstall
+                                           run the bridge in the background (launchd or
+                                           systemd) from a copy outside the checkout;
+                                           fridolin service --help for more
+  fridolin core start|stop|update|run|export|import|promote|status
+                                           run the core in a container, move it
+                                           between machines, show the core lease;
+                                           fridolin core --help for more
+  fridolin version
+
+Run by brains, inside a run (each prints JSON; -h shows its flags):
+  fridolin history QUERY     search the brain's conversation history
+  fridolin polls             the results of the polls the brain sent
+  fridolin calendar COMMAND  the brain's Google Calendar: calendars, list,
+                             create, free, delete
+
+Common flags:
+  --config PATH     config file (default: $FRIDOLIN_CONFIG, else
+                    ~/.fridolin/config.json)
+
+Run flags:
+  --no-whatsapp     dev mode: dashboard and brains without a WhatsApp connection
+  --open            open the dashboard once the bridge is up
+  --log-file PATH   the file stderr goes to, kept under 10 MiB (PATH.1 holds the
+                    one before); the launchd agent passes it
+  --container       inside the fridolin-core image: bind the dashboard's port on
+                    the container's interfaces (Docker publishes it on the
+                    host's 127.0.0.1 only); the image passes it

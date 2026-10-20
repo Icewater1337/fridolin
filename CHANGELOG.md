@@ -10,6 +10,17 @@ for compatibility.
 
 ### Added
 
+- The core runs in a container: `container/Dockerfile` builds the
+  `fridolin-core` image (the bridge, the Claude CLI, Python, ffmpeg,
+  restic, rclone, Litestream, bubblewrap; tini as PID 1; user `fridolin`),
+  `container/compose.yaml` runs it on the named volume `fridolin-data`.
+  `fridolin core start | stop | update | run` drive it from the host with
+  the secrets from the macOS Keychain (0600 files on Linux);
+  `fridolin core export | import | promote | status` move it between
+  machines through an age-encrypted export in the vault bucket and the
+  core lease. `fridolin run --container` binds the dashboard's port for
+  Docker's port mapping. See [docs/CORE.md](docs/CORE.md).
+
 - Settings → AI mode switches new brain runs between Claude (default) and
   Codex. Codex defaults to `gpt-6.1-sol` with high reasoning effort, with
   separate model settings, isolated per-brain sign-in, streamed activity,

@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"net"
 	"os"
 	"strings"
 
@@ -45,6 +46,10 @@ Usage:
                                            run the bridge in the background (launchd or
                                            systemd) from a copy outside the checkout;
                                            fridolin service --help for more
+  fridolin core start|stop|update|run|export|import|promote|status
+                                           run the core in a container, move it
+                                           between machines, show the core lease;
+                                           fridolin core --help for more
   fridolin version
 
 Run by brains, inside a run (each prints JSON; -h shows its flags):
@@ -62,6 +67,9 @@ Run flags:
   --open            open the dashboard once the bridge is up
   --log-file PATH   the file stderr goes to, kept under 10 MiB (PATH.1 holds the
                     one before); the launchd agent passes it
+  --container       inside the fridolin-core image: bind the dashboard's port on
+                    the container's interfaces (Docker publishes it on the
+                    host's 127.0.0.1 only); the image passes it
 `
 
 func Main() {
@@ -90,6 +98,8 @@ func Main() {
 		mcpSiteCmd()
 	case "service":
 		serviceCmd(args)
+	case "core":
+		os.Exit(coreCmd(args))
 	case "history":
 		os.Exit(toolcli.History(args, processToolIO()))
 	case "polls":
@@ -200,6 +210,7 @@ type runOptions struct {
 	noWhatsApp bool
 	open       bool
 	logFile    string
+	container  bool
 }
 
 // parseRunFlags reads the run command's flags, which are also what
@@ -214,6 +225,7 @@ func parseRunFlags(args []string, output io.Writer) (runOptions, error) {
 	fs.BoolVar(&o.noWhatsApp, "no-whatsapp", false, "dev mode: run without connecting to WhatsApp")
 	fs.BoolVar(&o.open, "open", false, "open the dashboard in the browser once started")
 	fs.StringVar(&o.logFile, "log-file", "", "the file stderr goes to, rotated at 10 MiB (the launchd agent passes it)")
+	fs.BoolVar(&o.container, "container", false, "inside the fridolin-core container: bind the dashboard's port on the container's interfaces, which Docker publishes on the host's loopback only")
 	return o, fs.Parse(args)
 }
 
@@ -259,7 +271,11 @@ func runCmd(args []string) int {
 	defer cancel(nil)
 	// NewBridge takes the data dir's instance lock, so dev mode with the live
 	// data dir is refused next to the running bridge too.
-	bridge, err := app.New(app.Options{Logger: slog.Default(), Config: cfgs, NoWhatsApp: opts.noWhatsApp, Logs: ring})
+	appOpts := app.Options{Logger: slog.Default(), Config: cfgs, NoWhatsApp: opts.noWhatsApp, Logs: ring}
+	if opts.container {
+		appOpts.Listen = containerListen
+	}
+	bridge, err := app.New(appOpts)
 	if err != nil {
 		log.Printf("creating bridge: %v", err)
 		return 1
@@ -285,6 +301,20 @@ func runCmd(args []string) int {
 	}
 
 	return Serve(ctx, bridge, signalled, execSelf)
+}
+
+// containerListen binds the port of http_listen, which stays a loopback
+// address, on every interface of the container: Docker forwards a
+// published port to the container's own address, not to its loopback.
+// compose.yaml publishes it on the host's 127.0.0.1 only, and the Host
+// guard still wants 127.0.0.1 or localhost, so what reaches the dashboard
+// is what reached it before: this machine, now through Docker.
+func containerListen(network, addr string) (net.Listener, error) {
+	_, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	return net.Listen(network, net.JoinHostPort("", port))
 }
 
 // execSelf replaces this process with the program at argv0, a variable so

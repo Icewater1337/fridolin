@@ -1,0 +1,18 @@
+# The build context of container/Dockerfile is the repository. Only what the
+# image builds from goes in: never a config, database, token or brain folder
+# that happens to lie in the checkout.
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+!examples/
+!web/
+!site/
+!tools/*.py
+!container/
+**/testdata/
+**/*_test.go
+site/node_modules/
+web/test/
+web/node_modules/

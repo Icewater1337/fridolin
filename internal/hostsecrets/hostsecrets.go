@@ -1,0 +1,231 @@
+// Package hostsecrets keeps the secrets the host hands the core container
+// at start: the age identity, the Claude token, the Tailscale auth key and
+// the Backblaze keys (docs/CORE.md). On macOS they are generic passwords in
+// the login keychain, account "fridolin", one service per secret; on Linux
+// files of mode 0600 under $XDG_CONFIG_HOME/fridolin/secrets/.
+//
+// Values never go on a command line: the keychain is read with `security
+// find-generic-password -w`, whose output is the value, and written through
+// `security -i` with the command on its standard input, where no process
+// list shows it.
+package hostsecrets
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+// Names of the secrets, which are the keychain's service names.
+const (
+	AgeIdentity        = "fridolin.age.identity"
+	ClaudeOAuthToken   = "fridolin.claude.oauth.token"
+	TailscaleAuthKey   = "fridolin.tailscale.authkey"
+	B2VaultKeyID       = "fridolin.b2.vault.keyid"
+	B2VaultKey         = "fridolin.b2.vault.key"
+	B2SnapshotsKeyID   = "fridolin.b2.snapshots.keyid"
+	B2SnapshotsKey     = "fridolin.b2.snapshots.key"
+	VaultCryptPassword = "fridolin.vault.crypt.password"
+	VaultCryptSalt     = "fridolin.vault.crypt.password2"
+	ResticPassword     = "fridolin.restic.password"
+)
+
+// Account is the keychain account every secret is stored under.
+const Account = "fridolin"
+
+// ErrNotFound is Get's error for a secret the store does not have.
+var ErrNotFound = errors.New("secret not found")
+
+// Store holds the host's secrets by name.
+type Store interface {
+	Get(name string) (string, error)
+	Set(name, value string) error
+	Has(name string) (bool, error)
+}
+
+var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+
+func checkName(name string) error {
+	if !validName.MatchString(name) {
+		return fmt.Errorf("%q is not a secret name", name)
+	}
+	return nil
+}
+
+// Keychain is the macOS login keychain, through /usr/bin/security.
+type Keychain struct {
+	// Security is the security tool's path; default /usr/bin/security.
+	Security string
+	// File is the keychain file to use; default the user's search list
+	// (the login keychain).
+	File string
+	// Run runs it with stdin and returns its stdout; default exec. Tests
+	// replace it.
+	Run func(ctx context.Context, path string, args []string, stdin io.Reader) ([]byte, error)
+}
+
+func (k Keychain) run(args []string, stdin io.Reader) ([]byte, error) {
+	path := k.Security
+	if path == "" {
+		path = "/usr/bin/security"
+	}
+	run := k.Run
+	if run == nil {
+		run = execRun
+	}
+	return run(context.Background(), path, args, stdin)
+}
+
+func execRun(ctx context.Context, path string, args []string, stdin io.Reader) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Stdin = stdin
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return out, &ExitError{Code: ee.ExitCode(), Stderr: strings.TrimSpace(stderr.String())}
+		}
+		return out, err
+	}
+	return out, nil
+}
+
+// ExitError is a security run that failed.
+type ExitError struct {
+	Code   int
+	Stderr string
+}
+
+func (e *ExitError) Error() string { return fmt.Sprintf("security exited %d: %s", e.Code, e.Stderr) }
+
+// errSecItemNotFound is security's exit status for a missing item.
+const errSecItemNotFound = 44
+
+func (k Keychain) Get(name string) (string, error) {
+	if err := checkName(name); err != nil {
+		return "", err
+	}
+	args := []string{"find-generic-password", "-a", Account, "-s", name, "-w"}
+	if k.File != "" {
+		args = append(args, k.File)
+	}
+	out, err := k.run(args, nil)
+	if ee, ok := errors.AsType[*ExitError](err); ok && ee.Code == errSecItemNotFound {
+		return "", fmt.Errorf("%s: %w", name, ErrNotFound)
+	}
+	if err != nil {
+		return "", fmt.Errorf("reading %s from the keychain: %w", name, err)
+	}
+	return strings.TrimRight(string(out), "\n"), nil
+}
+
+func (k Keychain) Has(name string) (bool, error) {
+	_, err := k.Get(name)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// keychainSafe are the characters a value may have to go through `security
+// -i`'s quoting unchanged: tokens, keys and age identities are all of them.
+var keychainSafe = regexp.MustCompile(`^[A-Za-z0-9+/=._:@-]+$`)
+
+func (k Keychain) Set(name, value string) error {
+	if err := checkName(name); err != nil {
+		return err
+	}
+	if !keychainSafe.MatchString(value) {
+		return fmt.Errorf("the value for %s has characters the keychain helper does not pass on; store it with Keychain Access", name)
+	}
+	// -U updates an existing item. The command goes on stdin, not argv.
+	cmd := fmt.Sprintf("add-generic-password -U -a %s -s %s -l %s -w \"%s\"", Account, name, name, value)
+	if k.File != "" {
+		if !keychainSafe.MatchString(k.File) {
+			return fmt.Errorf("keychain path %q has characters the keychain helper does not pass on", k.File)
+		}
+		cmd += " " + k.File
+	}
+	cmd += "\n"
+	if _, err := k.run([]string{"-i"}, strings.NewReader(cmd)); err != nil {
+		return fmt.Errorf("writing %s to the keychain: %w", name, err)
+	}
+	return nil
+}
+
+// Files keeps each secret in a file of mode 0600 named after it, in Dir
+// (mode 0700): Linux's store, $XDG_CONFIG_HOME/fridolin/secrets.
+type Files struct{ Dir string }
+
+func (f Files) path(name string) (string, error) {
+	if err := checkName(name); err != nil {
+		return "", err
+	}
+	return filepath.Join(f.Dir, name), nil
+}
+
+func (f Files) Get(name string) (string, error) {
+	p, err := f.path(name)
+	if err != nil {
+		return "", err
+	}
+	st, err := os.Stat(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("%s: %w", name, ErrNotFound)
+	}
+	if err != nil {
+		return "", err
+	}
+	if st.Mode().Perm()&0o077 != 0 {
+		return "", fmt.Errorf("%s has mode %v: other users may read it; chmod 600 it first", p, st.Mode().Perm())
+	}
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(string(data), "\n"), nil
+}
+
+func (f Files) Has(name string) (bool, error) {
+	_, err := f.Get(name)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (f Files) Set(name, value string) error {
+	p, err := f.path(name)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(f.Dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(f.Dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(f.Dir, "."+name+".*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(value + "\n"); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), p)
+}
