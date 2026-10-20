@@ -233,6 +233,8 @@ step "Configuration"
 # it) and another user's folder alone, which a chmod here would not.
 mkdir -p "$(dirname "$DATA_DIR")"
 [ -d "$DATA_DIR" ] || mkdir -m 700 "$DATA_DIR"
+# Whether this is a first setup, which the closing steps are for.
+NEW_CONFIG=false
 if [ -f "$CONFIG" ]; then
   ok "using $CONFIG"
   if [ -n "$DATA_DIR_GIVEN" ] && ! [ "$DATA_DIR_GIVEN" -ef "$DATA_DIR" ]; then
@@ -241,6 +243,7 @@ if [ -f "$CONFIG" ]; then
 else
   # Seed the CLI path so brains work under launchd/systemd's minimal PATH.
   "$NEW" init --config "$CONFIG" ${CLAUDE_BIN:+--claude-path "$CLAUDE_BIN"} ${DATA_DIR_GIVEN:+--data-dir "$DATA_DIR_GIVEN"}
+  NEW_CONFIG=true
   ok "wrote a starter config to $CONFIG"
 fi
 # A config this build does not load (inline brains, say) stops here,
@@ -367,7 +370,10 @@ elif [ "$BRIDGE" = unknown ]; then
 else
   echo " Start the bridge:   ${BOLD}$REPO_DIR/bin/fridolin --open${RESET}"
 fi
-cat <<EOS
+# An upgrade keeps its pairing, brains and chats, so it gets what an
+# upgrade may ask of you instead of the first steps.
+if $NEW_CONFIG; then
+  cat <<EOS
 
  In the dashboard:
    1. ${BOLD}Pair WhatsApp${RESET} — scan the QR code with the phone that holds the bridge's
@@ -378,6 +384,14 @@ cat <<EOS
    4. Optional: ${BOLD}Backup${RESET} → Connect Google Drive.
 
 EOS
+else
+  cat <<EOS
+
+ What changed is in CHANGELOG.md; what an upgrade from an older version asks
+ of you, in README.md, "Upgrading and rolling back".
+
+EOS
+fi
 if $INSTALLED; then
   cat <<EOS
  Upgrade later with ${BOLD}git pull && ./setup.sh${RESET}; go back to the previous build

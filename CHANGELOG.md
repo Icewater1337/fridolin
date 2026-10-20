@@ -268,6 +268,11 @@ for compatibility.
 
 ### Fixed
 
+- An upgrade with `./setup.sh` no longer ends with the first-time steps
+  (pair WhatsApp, add a brain, allow your number), nor tells you to pair a
+  bridge that is still connecting: the install waits up to ten seconds for
+  a paired WhatsApp to connect, and an upgrade points to the upgrade notes
+  instead.
 - In Codex mode the log names the Codex CLI on one readable line at
   startup, as it does the Claude CLI, and warns when it is not found.
 
