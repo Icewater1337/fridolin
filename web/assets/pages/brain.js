@@ -23,6 +23,7 @@ import { chatEl, chatName } from '../components/chat.js';
 import { outcomePill, brainStatusPill } from '../components/brain.js';
 import { saveBar } from '../components/save-bar.js';
 import { liveForm } from '../components/live-form.js';
+import { grantsEditor } from '../components/grants-editor.js';
 
 export default {
   title: (params) => `Brain ${params.id}`,
@@ -151,12 +152,12 @@ export default {
       }
       const a = manifest || {};
       const rows = fieldDiff(a, disk);
-      const sensitive = rows.some((r) => /^(routing|disallowed_tools|prompt_file|reply_chat)/.test(r.path));
+      const sensitive = rows.some((r) => /^(routing|disallowed_tools|prompt_file|reply_chat|role|grants)/.test(r.path));
       const approveBtn = btn('Approve changes', {
         kind: 'primary', icon: 'check',
         onClick: async () => {
           if (sensitive) {
-            const ok = await confirmDialog({ title: 'Approve these changes?', message: 'They change which chats reach this brain or what it may do. Only approve changes you or someone you trust made.', confirm: 'Approve', danger: false });
+            const ok = await confirmDialog({ title: 'Approve these changes?', message: 'They change which chats reach this brain, what it may do or which other brains it may reach. Only approve changes you or someone you trust made.', confirm: 'Approve', danger: false });
             if (!ok) return;
           }
           // The bridge approves only the brain.json shown here: if the brain
@@ -181,7 +182,7 @@ export default {
         sensitive ? callout('warn', 'Check routing and tool changes carefully', 'A brain can edit its own brain.json. Changes to routing decide which chats reach it; changes to tools decide what it may do.') : null,
         rows.length ? h('div.table-wrap', h('table.table.diff-table',
           h('thead', h('tr', h('th', 'Setting'), h('th', 'Approved'), h('th', 'On disk'))),
-          h('tbody', rows.map((r) => h(`tr${/^(routing|disallowed_tools)/.test(r.path) ? '.sensitive' : ''}`,
+          h('tbody', rows.map((r) => h(`tr${/^(routing|disallowed_tools|role|grants)/.test(r.path) ? '.sensitive' : ''}`,
             h('td', h('code.mono', r.path)),
             h('td.diff-old', h('code.mono', r.a)),
             h('td.diff-new', h('code.mono', r.b))))))) : h('p.muted', 'Only formatting differs.'),
@@ -261,7 +262,7 @@ export default {
         drift: brain.status === 'drift',
         eff: { brain_model: eff.brain_model || '', brain_effort: eff.brain_effort || '', disallowed_tools: eff.disallowed_tools || [] },
         allowedGroups: (cfg && cfg.config && cfg.config.allowed_groups) || eff.allowed_groups || [],
-        others: brains.filter((b) => b.id && b.id !== id && b.manifest).map((b) => ({ id: b.id, name: b.name, manifest: { routing: b.manifest.routing } })),
+        others: brains.filter((b) => b.id && b.id !== id && b.manifest).map((b) => ({ id: b.id, name: b.name, manifest: { routing: b.manifest.routing, role: b.manifest.role || '' } })),
       });
     }
 
@@ -280,6 +281,18 @@ export default {
       });
       const promptIn = textInput({ value: m.prompt_file || '', class: 'mono', placeholder: 'brain-prompt.md' });
       const replyIn = textInput({ value: m.reply_chat || '', class: 'mono', placeholder: 'derived from routing' });
+      // The core brain and its grants: the one brain that may reach others.
+      const isCore = m.role === 'core';
+      const otherCore = others.find((b) => b.manifest.role === 'core');
+      const grants = grantsEditor({ grants: m.grants || {}, brains: others, onChange: changed });
+      const grantsBox = h('div', { hidden: !isCore },
+        field({ label: 'Grants', control: grants, help: 'What this brain may do with each other brain. A delegated task runs in that brain, with its own instructions, memory and sandbox, and its answer comes back here only; that brain cannot reach this one or any other.' }));
+      const coreSw = toggle({
+        checked: isCore,
+        disabled: !isCore && !!otherCore,
+        label: 'Core brain',
+        onChange: (v) => { grantsBox.hidden = !v; },
+      });
 
       // The manifest a save would write.
       const value = () => {
@@ -294,6 +307,13 @@ export default {
         };
         if (toolsSw.input.checked) manifest.disallowed_tools = toolsIn.value.split(',').map((t) => t.trim()).filter(Boolean);
         else delete manifest.disallowed_tools;
+        delete manifest.role;
+        delete manifest.grants;
+        if (coreSw.input.checked) {
+          manifest.role = 'core';
+          const g = grants.getValue();
+          if (Object.keys(g).length) manifest.grants = g;
+        }
         return manifest;
       };
 
@@ -314,6 +334,11 @@ export default {
           h('div.form-grid',
             field({ label: 'Prompt file', control: promptIn, help: 'The brain’s instructions, relative to its folder.' }),
             field({ label: 'Reply chat', control: replyIn, help: 'Where replies go for files handed in through /ingest. This brain handles the files even when that chat belongs to another brain. Default: your first allowed number for the brain that gets DMs (the DM brain, or the fallback brain when none handles DMs), else its first group.' }))),
+        h('fieldset.fieldset.grants', h('legend', 'Other brains'),
+          h('div.field', coreSw, h('div.help', otherCore && !isCore
+            ? `${otherCore.name || otherCore.id} is the core brain, and there is one. To make this one the core, turn it off there first.`
+            : 'The core brain may hand tasks to the other brains and read their notes, as far as you grant it below. Other brains cannot reach any brain.')),
+          grantsBox),
         h('fieldset.fieldset', h('legend', 'Backup'), fields.backup),
         bar);
       form.addEventListener('submit', (e) => {

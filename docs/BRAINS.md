@@ -84,6 +84,8 @@ restart.
 | `observe` | What the brain does with untagged group messages, the ones nobody addressed to it (see [triggers](CONFIGURATION.md#triggers)). `history`, the default, keeps them in its history, where its next run in that group reads them; they cost nothing. `run` also gives each one a run of its own (a bare "ok" or emoji excepted), for a brain that keeps notes as the conversation goes: its prompt marks it `<observe_only>`, nothing it writes is sent, and a message addressed to the brain stops it and goes first, but each costs a full Claude run, with tools, on whatever any member the group's `group_members` admits writes (see [group_members](CONFIGURATION.md#group_members)). Set in the dashboard under *Untagged group messages*. |
 | `backup` | Google Drive backup for this folder; see [BACKUP.md](BACKUP.md). |
 | `calendar` | The Google account this brain signed in with and the calendars it may use; set by *Connect Google Calendar*, see [CALENDAR.md](CALENDAR.md). |
+| `role` | `core` for the [core brain](#the-core-brain-and-its-grants), the one brain that may reach others; left out for every other brain. At most one brain is the core. |
+| `grants` | Only on the core brain: what it may do with each other brain, by that brain's id, from `delegate`, `read` and `files` (`{"family": ["delegate", "read"]}`). See [below](#the-core-brain-and-its-grants). |
 
 [`schemas/brain.schema.json`](schemas/brain.schema.json) is a JSON Schema
 of the file, version 1.
@@ -105,6 +107,75 @@ default brain left out leaves no fallback brain at all. The dashboard
 names the fallback brain on the Overview, the Brains page ("Fallback for
 other chats") and the Chats page (a group's *Default brain*), and *Add
 brain* says so when the brain it adds becomes it.
+
+### The core brain and its grants
+
+One brain may be the *core brain* (`"role": "core"`): the one the outside
+world talks to, which answers itself or hands work to the other brains,
+the sub-brains (family, work, taxes), as far as you grant it. Routing
+stays as it is: a chat goes to the brain it is bound to. What changes is
+that the core can reach across, and nothing else can.
+
+```json
+{
+  "id": "core",
+  "role": "core",
+  "grants": {
+    "family": ["delegate", "read"],
+    "taxes":  ["delegate", "read", "files"]
+  }
+}
+```
+
+| Grant | The core may |
+| --- | --- |
+| `delegate` | hand that brain a bounded task and get its answer |
+| `read` | read that brain's `memories/**/*.md` and `skills/**` |
+| `files` | fetch files from that brain's vault paths (once there is a vault; the grant can be set now) |
+
+The bridge checks them whenever it loads the brains, and refuses an edit
+or approval that breaks a rule: at most one core brain; grants only on the
+core brain (a sub-brain with a `grants` field is left out, with an issue
+that says so); a grant names a configured brain, never the core itself;
+only the three kinds above, each once. Removing a brain takes it out of
+the core's grants too. You edit them on the Brains page, on the core
+brain's settings (*Other brains*), and like every change to `brain.json`
+a change a brain makes itself waits for your approval there.
+
+Every run, of every brain, starts the bridge's own MCP server
+(`fridolin mcp --run <id>`, see [API.md](API.md#the-runs-mcp-server-get-brainmcptools-post-brainmcpcall)),
+whose tools the bridge picks for that run from the run's token, never from
+what the model says:
+
+| Tool | Core run | Sub-brain run |
+| --- | --- | --- |
+| `delegate(brain, task, timeout_seconds)` | the brains granted `delegate` | absent |
+| `list_brains()` | the brains with any grant, their names and grants | absent |
+| `read_memory(brain, path)` | its own, and the brains granted `read` | its own only |
+| `ask_user(question)`, `request_approval(action)` | listed, answer "not available yet" | the same |
+
+A tool a run is not granted is absent, not refused: it is not in the
+run's list, and a call of it is a call of a tool there is none of.
+
+`delegate` puts the task into the sub-brain's queue as a message from the
+core brain, in a chat of its own (`delegate:<run id>`, one per run of the
+core), and the sub-brain's worker runs it like any message: with its own
+prompt, memory, history and sandbox. Its answer goes back to the core's
+waiting run, never to a WhatsApp chat; neither its working notice nor a
+question it asks goes anywhere. The call waits up to `timeout_seconds`
+(120 by default, at most 600); an answer that comes later is handed to
+the core brain as a new message in the chat its run was for, and the
+core answers it there. A delegated run never gets `delegate`, whatever
+its brain, so delegation goes one level deep, and a sub-brain cannot
+reach the core or a sibling. Each delegation is one line in
+`<data_dir>/audit/YYYY-MM.jsonl`: when, which run of which brain, to
+whom, the task (shortened), the outcome and how long it took.
+
+`read_memory` reads one file, or lists a folder, of `memories/` (only
+its `.md` files) or `skills/`. The bridge reads it outside the sandbox,
+so it follows no symlink on the way, not even one inside the folder.
+What the core learns about a sub-brain goes into its own notes, never the
+sub-brain's files.
 
 ## Approval
 
