@@ -39,7 +39,17 @@ if [ -f "$D/code" ]; then read -r code < "$D/code"; fi
 exit "$code"
 `
 	bin := filepath.Join(dir, "restic")
-	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+	// cp writes the executable, not this process: a write handle here could
+	// be inherited by a parallel test's fork until its exec, and exec of a
+	// file open for writing fails with ETXTBSY ("text file busy") on Linux.
+	src := filepath.Join(dir, "restic.src")
+	if err := os.WriteFile(src, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("cp", src, bin).CombinedOutput(); err != nil {
+		t.Fatalf("cp: %v %s", err, out)
+	}
+	if err := os.Chmod(bin, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return &fakeRestic{t: t, dir: dir, bin: bin}
