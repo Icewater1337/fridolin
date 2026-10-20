@@ -317,7 +317,7 @@ M7 — Memory index and provenance:
 
 M8 — Later: Telegram channel, Plaud Developer Platform API, MentraOS channel, per-brain sibling containers.
 
-## Open questions for Mathias
+## Open questions for the owner
 
 All eight were decided on 20 Oct; nothing blocks the start.
 
@@ -334,12 +334,12 @@ All eight were decided on 20 Oct; nothing blocks the start.
 
 Start by reading, not building: the current fridolin tree, FrIDE's `docs/FLEET.md` and `docs/INBOX.md`, this plan, and the 17 Oct architecture doc; then reconcile M0 with what the code looks like today and say what differs before writing code.
 
-- Repositories: `github.com/Icewater1337/fridolin` (core, node agent, vault, MCP server) and `github.com/Icewater1337/fride` (task export and import, webhook). Everything else in this plan lives in fridolin.
+- Repositories: the `fridolin` repository (core, node agent, vault, MCP server) and the `fride` repository (task export and import, webhook). Everything else in this plan lives in fridolin.
 - Conventions already in the repository, all to keep: Go 1.26; `make check` before every push; the package rules `internal/archtest` enforces; golden files under `cmd/fridolin/testdata/golden` rewritten with `-update` only when a change is meant to change them, with the reason in the pull request; a new setting goes into `config-v1.json` and the JSON schemas; a renamed or removed setting raises `currentConfigVersion` with a migration; a new route into `routeInventory`; the commit hooks that block phone numbers, JIDs, emails, home paths and tokens; AGENTS.md and CLAUDE.md as entry points.
 - Never delete or recreate `bridge.db`, and never run two bridges on one data directory or WhatsApp session; until the core lease exists, experiment only in dev mode on a scratch config.
 - Work one milestone at a time, one checkbox per session, on a branch per milestone; one pull request per milestone with the gate's evidence (command output, screenshots) in the description.
 - Record decisions as you go in `docs/DECISIONS.md`, one dated line each, so the next session does not re-decide them.
-- Ask Mathias before anything irreversible: changing the WhatsApp pairing, deleting data, buying anything, touching the B2 buckets' lifecycle rules, rotating tokens, or any step that would log him out of Claude or Codex.
+- Ask the owner before anything irreversible: changing the WhatsApp pairing, deleting data, buying anything, touching the B2 buckets' lifecycle rules, rotating tokens, or any step that would log him out of Claude or Codex.
 - Prefer the Plan B interfaces when a container feature is unclear: write the `Sandbox` and `Service` interfaces first, the container implementation second.
 - Every gate is also a `fridolin doctor` check; add the check in the same pull request as the feature.
 - Report back in the chat thread with WhatsApp-sized messages: what shipped, what the gate showed, what is blocked.
