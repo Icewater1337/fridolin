@@ -112,7 +112,8 @@ See [docs/SITE.md](docs/SITE.md).
   and logged in. With the sandbox (macOS), brains log in with a token in the
   bridge's environment instead: `claude setup-token` prints one (see
   [where to set it](docs/CONFIGURATION.md#where-to-set-them)).
-- **Go 1.26+** and a C compiler to build (`xcode-select --install` on macOS).
+- **Go 1.26+** and make to build (`xcode-select --install` on macOS). The
+  race tests (`make check`) also need a C compiler; the build does not.
 - **Python 3.9+** for the helper tools.
 - **A current browser** for the dashboard: Chrome or Edge 123+, Firefox 120+
   or Safari 17.5+.

@@ -15,11 +15,10 @@ jobs:
   build:
     strategy:
       matrix:
-        # SQLite needs cgo, so each OS builds on its own runner: macOS for
-        # both architectures, Linux natively on each. test is false where
-        # the runner cannot run the binaries it builds. The Linux builds
-        # link against the runner's glibc and need that release or newer,
-        # so they use the oldest Ubuntu runners there are (glibc 2.35).
+        # The binaries are pure Go (cgo off) and link no libc, so any
+        # runner could build them; each OS builds on its own to run the
+        # tests there. test is false where the runner cannot run the
+        # binaries it builds.
         include:
           - { runner: macos-latest, goos: darwin, goarch: arm64, test: true }
           - { runner: macos-latest, goos: darwin, goarch: amd64, test: false }

@@ -19,6 +19,12 @@ for compatibility.
 
 ### Changed
 
+- SQLite is now the pure-Go `modernc.org/sqlite`, so building Fridolin no
+  longer needs a C compiler (`make check`'s race tests still do). An
+  existing `bridge.db` opens as it is: the WhatsApp pairing, polls and
+  queued messages carry over, times are written in the format the old
+  driver wrote, and a locked database is still waited on for 5 seconds.
+
 - Configuration rejects unknown log levels and chunks larger than 65536
   characters. `check` identifies disabled dashboards and unavailable brains.
   Config backups are published atomically without following backup symlinks;

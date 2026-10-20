@@ -13,7 +13,7 @@
 #
 # A FILE after the option writes or checks that file instead. The modules
 # are what `go list -deps` finds for each platform the release workflow
-# builds, with cgo on as there; the texts come from the module cache, and
+# builds, with cgo off as there; the texts come from the module cache, and
 # go list fetches a module missing there. A licence it cannot name stops
 # it, so that a new dependency's licence gets a look before a release ships
 # it. GO names the go command (default: go).
@@ -57,7 +57,7 @@ export LC_ALL=C # one sort order everywhere, or the check fails on another machi
 tmpl='{{with .Module}}{{if not .Main}}{{.Path}}{{"\t"}}{{.Version}}{{with .Replace}} => {{.Path}} {{.Version}}{{end}}{{"\t"}}{{if .Replace}}{{.Replace.Dir}}{{else}}{{.Dir}}{{end}}{{"\t"}}{{$.Dir}}{{end}}{{end}}'
 : >"$work/pkgs"
 for t in $targets; do
-  if ! (cd "$repo" && CGO_ENABLED=1 GOOS="${t%/*}" GOARCH="${t#*/}" "$go" list -deps -f "$tmpl" "$pkg") >>"$work/pkgs"; then
+  if ! (cd "$repo" && CGO_ENABLED=0 GOOS="${t%/*}" GOARCH="${t#*/}" "$go" list -deps -f "$tmpl" "$pkg") >>"$work/pkgs"; then
     die 2 "go list failed for $t"
   fi
 done
@@ -73,8 +73,10 @@ done
 # licence_files DIR — the licence files right in DIR. A source file named
 # so (license.go, licence_test.go) is code, not a licence text.
 licence_files() {
+  # A LICENSE-LOGO credits an image (modernc.org's modules have one) that
+  # is no part of the binary.
   find "$1" -maxdepth 1 -type f \( -iname 'LICENSE*' -o -iname 'LICENCE*' -o -iname 'COPYING*' \) | sort |
-    { grep -viE '\.(go|s|c|h|cc|cpp|m|py|js|mjs|ts|sh|json|ya?ml|toml|proto|html|css|tmpl|mod|sum)$' || true; }
+    { grep -viE '\.(go|s|c|h|cc|cpp|m|py|js|mjs|ts|sh|json|ya?ml|toml|proto|html|css|tmpl|mod|sum)$|/LICEN[CS]E-LOGO$' || true; }
 }
 
 # A package's licence is the one nearest it: in its own folder, else in the
@@ -124,6 +126,7 @@ licence_of() {
     *"Redistribution and use in source and binary forms"*"Neither the name"*) echo BSD-3-Clause ;;
     *"Redistribution and use in source and binary forms"*"may be used to endorse or promote"*) echo BSD-3-Clause ;;
     *"Redistribution and use in source and binary forms"*) echo BSD-2-Clause ;;
+    *"SQLite Is Public Domain"*) echo blessing ;;
   esac
 }
 
@@ -133,7 +136,10 @@ licence_of() {
 cut -f1-3 "$work/files" | sort -u | while IFS=$'\t' read -r mpath mversion mdir; do
   ids=""
   while IFS=$'\t' read -r _ _ _ rel; do
-    case "${rel##*/}" in [Nn][Oo][Tt][Ii][Cc][Ee]*) continue ;; esac
+    # A NOTICE, or an account of a module's third-party parts such as
+    # modernc.org/sqlite's LICENSE-3RD-PARTY.md, goes with the licences
+    # without being one.
+    case "${rel##*/}" in [Nn][Oo][Tt][Ii][Cc][Ee]* | LICENSE-3RD-PARTY*) continue ;; esac
     id="$(licence_of "$mdir/$rel")"
     [ -n "$id" ] || die 1 "cannot name the licence in $rel of $mpath $mversion; read it, and add it to licence_of in $0 once you know what it means for the binary"
     ids="$ids"$'\n'"$id"

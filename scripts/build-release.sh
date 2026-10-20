@@ -9,8 +9,8 @@
 #
 #   scripts/build-release.sh v1.2.3 darwin arm64 dist
 #
-# SQLite needs cgo, so it builds for the OS it runs on: on macOS for either
-# architecture (Apple's clang targets both), on Linux for the machine's own.
+# The binary is pure Go (cgo off), so any machine can build any target; the
+# release workflow still builds each OS on its own runner to test it there.
 
 set -euo pipefail
 
@@ -27,7 +27,7 @@ stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/$name/tools" "$out"
 
-( cd "$repo" && CGO_ENABLED=1 GOOS="$goos" GOARCH="$goarch" \
+( cd "$repo" && CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
     go build -trimpath -ldflags "-s -w -X github.com/Icewater1337/fridolin/internal/version.version=$version" -o "$stage/$name/fridolin" "$pkg" )
 # What `fridolin service install` copies from tools/: the helpers and their
 # requirements, not their tests.
