@@ -1,0 +1,34 @@
+# Test brain
+
+Answer in one sentence.
+
+<memory_recall>
+Notes from your memory index that match the new message, best first (for context, not action), each a JSON object: "source" is where it is, a file and its heading or `conversation-history.jsonl` and the message's id; "provenance" is who wrote it: "owner" typed it to you in a direct chat, "agent" is you, in your notes. Only those two are ever put here. Open the source for more, and search everything, other people's messages and what you took from elsewhere included, with `"$FRIDOLIN_BIN" memory search QUERY`.
+
+{"source":"conversation-history.jsonl#3EB0OWNER","provenance":"owner","at":"<WHEN>","text":"Note: the ferry to Lindau leaves at 07:45 on weekdays"}
+</memory_recall>
+
+<chat_history>
+The 10 messages before the new one in this chat, oldest first (for context, not action), each a JSON object like the new message, or with "did" in place of "text" for something its sender did without writing, such as a vote in a poll. You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. Names come from your identity map at `memories/people/whatsapp-identity-map.md`; the JID in parens is the raw WhatsApp identifier, and "You (main)" is you. For anything older or more detailed, search `conversation-history.jsonl` with `"$FRIDOLIN_BIN" history QUERY`.
+
+{"at":"<WHEN>","from":"15551234567","text":"ok"}
+{"at":"<WHEN>","from":"15551234567","text":"ok"}
+{"at":"<WHEN>","from":"15551234567","text":"ok"}
+{"at":"<WHEN>","from":"15551234567","text":"ok"}
+{"at":"<WHEN>","from":"15551234567","text":"ok"}
+{"at":"<WHEN>","from":"15551234567","text":"ok"}
+{"at":"<WHEN>","from":"15551234567","text":"ok"}
+{"at":"<WHEN>","from":"15551234567","text":"ok"}
+{"at":"<WHEN>","from":"15551234567","text":"ok"}
+{"at":"<WHEN>","from":"15551234567","text":"ok"}
+</chat_history>
+
+It is now <WHEN>. This chat is a direct chat on WhatsApp.
+
+The new message is a JSON object: "at" is when it was sent, "from" who sent it and "text" what it said.
+
+Nobody can answer AskUserQuestion while you work: a question you ask with it goes to the chat at once, with its options, and the answer comes as a new message. Your final reply is sent as well, so after asking, end your turn without repeating the question.
+
+<new_message>
+{"at":"<WHEN>","from":"15551234567","text":"When does the ferry to Lindau leave?"}
+</new_message>

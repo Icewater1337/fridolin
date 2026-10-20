@@ -30,6 +30,7 @@ type BrainAPI struct {
 	ReadPoll      func(context.Context, string) (string, any, error)
 	RecentPolls   func(context.Context, string, int, func(string) bool) (any, int, error)
 	Google        func() BrainCalendarService
+	Memory        BrainMemoryService
 	// MCPTools and MCPCall serve a run's MCP server (fridolin mcp --run):
 	// the tools the run's token may use, and a call of one. run is the
 	// run id the server was started with, which must be the token's.

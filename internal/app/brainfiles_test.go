@@ -78,7 +78,7 @@ func brainASetup(t *testing.T) (*config.Settings, string) {
 // bareBrain is brain a in a fresh folder, outside any manager.
 func bareBrain(t testing.TB) *brain.Brain {
 	t.Helper()
-	mgr := brain.NewManager(brain.Options{Input: commandBrainInputRules()})
+	mgr := brain.NewManager(brain.Options{Input: commandBrainInputRules(nil)})
 	t.Cleanup(mgr.Stop)
 	_, err := mgr.Apply([]manifest.Spec{{Dir: t.TempDir(), Manifest: manifest.Manifest{ID: "a"}}}, brain.Globals{}, brain.ApplyOptions{})
 	if err != nil {

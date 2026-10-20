@@ -5,6 +5,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/history"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 )
 
 // BrainHooks connect brains to the rest of the bridge.
@@ -45,6 +46,9 @@ type BrainHooks struct {
 	// address and a token for the run) and the MCP server with the
 	// bridge's tools, and says what to call once the run is over (Done).
 	RunEnv func(run runInfo) runAccess
+	// Recall returns what a brain's memory index recalls for a run's
+	// prompt (memindex.Recall), nil for nothing.
+	Recall func(brain.RecallRequest) []prompttext.Recalled
 }
 
 // brainHooksSink keeps command callbacks compatible while runtime users move

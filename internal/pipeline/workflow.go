@@ -59,7 +59,7 @@ func (p *Workflow) Handle(ctx context.Context, m brainruntime.Inbound) {
 	// A command must also be addressed to the bridge. In a group, an untagged
 	// "!stop" is someone talking to the others: it must not stop anything,
 	// and the bridge must not answer it.
-	if m.Source != chat.SourceIngest && m.Brain == "" && !m.Silent && p.handleCommand(ctx, m, settings) {
+	if !m.HandedIn() && m.Brain == "" && !m.Silent && p.handleCommand(ctx, m, settings) {
 		return
 	}
 	if m.Text == "" && len(m.Media) == 0 && m.Quoted == nil {
@@ -83,7 +83,7 @@ func (p *Workflow) Handle(ctx context.Context, m brainruntime.Inbound) {
 		} else {
 			log.Printf("No brain configured for %s — add one in the dashboard", m.JID)
 		}
-		if !m.Silent && m.Source != chat.SourceIngest {
+		if !m.Silent && !m.HandedIn() {
 			_ = p.Notice(ctx, m.JID, reply)
 		}
 		return

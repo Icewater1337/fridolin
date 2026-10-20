@@ -21,6 +21,8 @@ func statusFor(kind apperr.Kind) int {
 		return http.StatusServiceUnavailable
 	case apperr.TooLarge:
 		return http.StatusRequestEntityTooLarge
+	case apperr.Forbidden:
+		return http.StatusForbidden
 	case apperr.BadJSON:
 		return http.StatusBadRequest
 	default:

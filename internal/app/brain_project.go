@@ -6,6 +6,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 )
 
 // settingsFor is the current composition boundary. The manager's later Apply
@@ -51,11 +52,17 @@ func startBrainViewer(name, streamLog, cwd string, passthrough []string) (*platf
 
 func isBuildChat(jid string) bool { return brainOfBuildJID(jid) != "" }
 
-func commandBrainInputRules() brain.InputRules {
+func commandBrainInputRules(hooks *BrainHooks) brain.InputRules {
 	return brain.InputRules{
 		Chats:     func(m chat.Inbound) []string { return chatJIDs(brain.Inbound{Inbound: m}) },
 		Observe:   func(mode string, m chat.Inbound) bool { return observeRuns(mode, brain.Inbound{Inbound: m}) },
 		BuildChat: isBuildChat,
+		Recall: func(r brain.RecallRequest) []prompttext.Recalled {
+			if hooks == nil || hooks.Recall == nil {
+				return nil
+			}
+			return hooks.Recall(r)
+		},
 	}
 }
 

@@ -41,6 +41,7 @@ export default {
     const liveBox = h('div');
     const formBox = h('div', h('div.card', loading('Loading settings…')));
     const actBox = h('div.activity-list.compact');
+    const intentsBox = h('div');
     const dangerBox = h('div');
 
     // The brain's own sections, which a brain that does not exist lacks.
@@ -48,6 +49,7 @@ export default {
       h('section.section', h('h2.section-title', 'Now'), liveBox),
       h('section.section', h('h2.section-title', 'Settings'), formBox),
       h('section.section', h('h2.section-title', 'Calendar'), calendarCard(id, { signal: ctx.signal })),
+      h('section.section', h('h2.section-title', 'Standing intents'), intentsBox),
       h('section.section',
         h('div.section-head', h('h2.section-title', 'Recent messages'), btn('All of this brain’s activity', { href: `#/activity/${encodeURIComponent(id)}`, small: true, kind: 'ghost', icon: 'right' })),
         actBox),
@@ -99,6 +101,7 @@ export default {
       paintDrift();
       paintLive();
       paintForm();
+      paint(intentsBox, brain.intents || [], renderIntents);
       paint(dangerBox, 'shown', renderDanger);
     }
 
@@ -371,6 +374,38 @@ export default {
           : h('p', stops, 'Its chats go to the fallback brain, ', name, '.'),
         dms ? callout('warn', null, `${brainLabel(next)} will also answer your direct messages, since no other brain handles them. To give them to another brain, turn on “Handles direct messages” there first.`) : null,
       ];
+    }
+
+    // ── standing intents ──
+    // What the brain was asked to remember to do, which the bridge fires:
+    // at a time, or on a message that mentions a keyword (docs/BRAINS.md).
+    function renderIntents(list) {
+      if (!list.length) {
+        return h('div.card', h('p.muted', 'None. When you ask this brain in your direct chat to remind you of something, or to tell you when something comes up, it sets one here.'));
+      }
+      return h('div.card', h('ul.plain-list.intent-list', list.map((it) => h('li',
+        h('div',
+          h('div', it.text),
+          h('div.muted.small',
+            it.schedule ? scheduleLabel(it.schedule) : `when a message mentions ${(it.match || []).map((m) => (typeof m === 'string' ? m : m.text)).join(' or ')}${it.repeat ? ', every time' : ', once'}`,
+            ' · set ', timeAgo(it.created),
+            it.last_fired ? h('span', ' · fired ', timeAgo(it.last_fired)) : null)),
+        btn('Remove', {
+          small: true, kind: 'ghost', icon: 'trash',
+          onClick: async () => {
+            const ok = await confirmDialog({ title: 'Remove this standing intent?', message: it.text, confirm: 'Remove', danger: true });
+            if (!ok) return;
+            await del(`/api/brains/${encodeURIComponent(id)}/intents/${encodeURIComponent(it.id)}`);
+            toast('Removed', 'ok');
+            await refresh();
+          },
+        })))));
+    }
+
+    function scheduleLabel(s) {
+      if (s.kind === 'once') return `once, ${new Date(s.at).toLocaleString()}`;
+      if (s.kind === 'daily') return `every day at ${s.time}`;
+      return `every ${s.day} at ${s.time}`;
     }
 
     function renderDanger() {

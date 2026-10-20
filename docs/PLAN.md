@@ -310,10 +310,10 @@ M6 — FrIDE through nodes:
 
 M7 — Memory index and provenance:
 
-- [ ] FTS5 index over `memories/`, `conversation-history.jsonl`, transcripts; provenance column set by the kernel; only `owner` and `agent` auto-inject
-- [ ] Daily notes `memories/YYYY-MM-DD.md`; a weekly consolidation skill that promotes into `memories/core.md` with source anchors; trigger phrases and importance as trailing comments
-- [ ] Standing intents: "remind me when" compiled into `trigger.go` entries instead of prose
-- [ ] Gate: a fact learned on Monday from a web page never auto-injects; the same fact typed by you does, with its source anchor visible in the note
+- [x] FTS5 index over `memories/`, `conversation-history.jsonl`, transcripts; provenance column set by the kernel; only `owner` and `agent` auto-inject
+- [x] Daily notes `memories/YYYY-MM-DD.md`; a weekly consolidation skill that promotes into `memories/core.md` with source anchors; trigger phrases and importance as trailing comments
+- [x] Standing intents: "remind me when" compiled into `trigger.go` entries instead of prose
+- [x] Gate: a fact learned on Monday from a web page never auto-injects; the same fact typed by you does, with its source anchor visible in the note
 
 M8 — Later: Telegram channel, Plaud Developer Platform API, MentraOS channel, per-brain sibling containers.
 

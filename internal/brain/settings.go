@@ -2,7 +2,9 @@ package brain
 
 import (
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/prompt"
 )
 
 // brainQueueInterrupt is the runtime protocol value. Composition pins it to
@@ -15,6 +17,20 @@ type InputRules struct {
 	Chats     func(chat.Inbound) []string
 	Observe   func(string, chat.Inbound) bool
 	BuildChat func(string) bool
+	// Recall returns what the brain's memory index recalls for m, to go
+	// into its run's prompt, given its manifest and the history the
+	// prompt shows already; nil for nothing.
+	Recall func(r RecallRequest) []prompt.Recalled
+}
+
+// RecallRequest is what Recall is asked for one run.
+type RecallRequest struct {
+	ID, Dir  string
+	Manifest manifest.Manifest
+	Message  chat.Inbound
+	// Shown is the history the prompt shows: the chat's recent messages
+	// and what went out since.
+	Shown []history.Entry
 }
 
 // brainGlobals is the runtime-owned snapshot projected by the command. Its

@@ -999,7 +999,7 @@ func (br *Brain) StreamLogPath() string {
 // invoke runs the selected CLI once for m.
 func (br *Brain) invoke(run *brainRun, ctx context.Context, s *Settings, m Inbound) claudecli.Result {
 	return br.runner.Run(ctx, RunSpec{
-		ID: br.id, Dir: br.workDir, Settings: s, Prompt: br.buildPrompt(s, m), Chat: m.JID, Source: m.Source,
+		ID: br.id, Dir: br.workDir, Settings: s, Prompt: br.buildPrompt(s, m), Message: m.Inbound,
 		BeforeStart: func() { br.ensureViewer(s) },
 	}, claudecli.Callbacks{
 		Start: run.startProcess,
@@ -1163,6 +1163,9 @@ func (br *Brain) buildPrompt(s *Settings, m Inbound) string {
 	limit := prompttext.HistoryLimit(m.IsGroup())
 	in.History, in.Since = br.historyBefore(m, limit)
 	in.Names = br.identities()
+	if br.input.Recall != nil && !m.Silent {
+		in.Recall = br.input.Recall(RecallRequest{ID: br.id, Dir: br.workDir, Manifest: s.Manifest, Message: m.Inbound, Shown: slices.Concat(in.History, in.Since)})
+	}
 	return prompttext.Build(in)
 }
 

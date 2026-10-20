@@ -26,6 +26,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
+	"github.com/Icewater1337/fridolin/internal/intent"
 	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/mcp"
@@ -94,6 +95,10 @@ type App struct {
 	mcpTools    *mcp.Registry[mcpCaller]
 	delegations delegations
 	audit       *auditLog
+	// intents are the brains' standing intents and scheduled jobs, which
+	// sched fires.
+	intents *intent.Store
+	sched   *scheduler
 	// lids is whatsmeow's map between LIDs and phone numbers, nil in dev
 	// mode, for what knows a person by LID outside an event: a /send to
 	// one.
@@ -250,6 +255,8 @@ func New(opts Options) (_ *App, err error) {
 		b.lids = wa.LIDStore
 	}
 
+	b.intents = intent.NewStore(cfgs.Boot().Layout().Intents)
+	b.sched = &scheduler{b: b, every: schedulerEvery}
 	b.brainMgr.SetHooks(BrainHooks{
 		Notice:      b.workingNotice,
 		Question:    b.askQuestion,
@@ -257,10 +264,14 @@ func New(opts Options) (_ *App, err error) {
 		Undelivered: b.undelivered,
 		Waiting:     b.keepWaiting,
 		Interrupted: b.keepInterrupted,
-		OnHistory:   b.activity.Add,
-		ExtraArgs:   func(id string) []string { return b.site.BuilderArgs(id) },
-		CodexSetup:  func(id string) ([]string, []string, string, error) { return b.site.CodexBuilder(id) },
-		RunEnv:      b.brainRunEnv,
+		OnHistory: func(id string, e history.Entry) {
+			b.activity.Add(id, e)
+			b.observeIntents(id, e)
+		},
+		ExtraArgs:  func(id string) []string { return b.site.BuilderArgs(id) },
+		CodexSetup: func(id string) ([]string, []string, string, error) { return b.site.CodexBuilder(id) },
+		RunEnv:     b.brainRunEnv,
+		Recall:     b.recall,
 	})
 	for _, br := range b.brainMgr.Brains() {
 		seedActivity(b.activity, br)
@@ -324,7 +335,7 @@ func (b *App) Start(ctx context.Context) error {
 		DashboardEnabled: !cfg.Dashboard.Disabled,
 		Resume:           func(ctx context.Context) { b.outbox.Start(); b.resume(ctx) }, Connect: b.connectLoop,
 		Watch:      func(ctx context.Context) { b.watchRequiredFiles(ctx, requiredFilesEvery) },
-		Background: []func(context.Context){b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes},
+		Background: []func(context.Context){b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start},
 	})
 }
 
@@ -354,7 +365,7 @@ func (b *App) Stop() {
 func (b *App) stopResources() {
 	b.supervisor.Stop(StopOptions{Logger: b.logger,
 		CloseIntake: b.intake.Close, HTTPGrace: httpStopWait,
-		Background: []func(){b.backup.Stop, b.plaud.Stop, b.site.Stop, b.nodes.Stop},
+		Background: []func(){b.sched.Stop, b.backup.Stop, b.plaud.Stop, b.site.Stop, b.nodes.Stop},
 		KeepPending: func() {
 			for _, m := range b.deb.Drain() {
 				b.keep(InboundHeld, "", m)

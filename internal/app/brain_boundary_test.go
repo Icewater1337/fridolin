@@ -47,7 +47,7 @@ func capturedPrompt(t *testing.T, br *brain.Brain, m brain.Inbound) string {
 		}
 	}
 	ready := make(chan string, 1)
-	mgr := brain.NewManager(brain.Options{Input: commandBrainInputRules(), ClaimMedia: func(string, string, []string) map[string]string { return nil }, Runner: testRunnerFunc(func(_ context.Context, s brain.RunSpec, _ claudecli.Callbacks) claudecli.Result {
+	mgr := brain.NewManager(brain.Options{Input: commandBrainInputRules(nil), ClaimMedia: func(string, string, []string) map[string]string { return nil }, Runner: testRunnerFunc(func(_ context.Context, s brain.RunSpec, _ claudecli.Callbacks) claudecli.Result {
 		ready <- s.Prompt
 		return claudecli.Result{}
 	}), ShutdownGrace: func() time.Duration { return 0 }})

@@ -207,7 +207,7 @@ func ScaffoldFolder(dir string, m *manifest.Manifest, templates Templates) (*Sca
 	files := []struct{ rel, content string }{
 		{m.Normalized().PromptFile, prompt},
 		{templates.IdentityMapPath, identityMapTemplate},
-		{"memories/README.md", "# Memories\n\nOne markdown file per topic. The brain reads and updates these between conversations.\n"},
+		{"memories/README.md", "# Memories\n\nOne markdown file per topic. The brain reads and updates these between conversations.\n\n- `core.md`: the curated facts that hold, each with its source.\n- `YYYY-MM-DD.md`: daily notes, what happened that day; `skills/memory-consolidation.md` promotes what lasts into `core.md`.\n\nA notes comment at the end of a section, `<!-- triggers: a, b; importance: 3; source: conversation-history.jsonl#ID -->`, says what should bring it to mind, how much it matters and where it came from.\n"},
 		{"skills/README.md", "# Skills\n\nReusable how-tos and scripts this brain has written for itself.\n"},
 	}
 	for _, sk := range templates.Skills {

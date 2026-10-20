@@ -15,11 +15,13 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/jsonx"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
 // File is the file that turns a folder into a brain.
@@ -69,6 +71,10 @@ type Manifest struct {
 	// Grants are, on the core brain only, what it may do with each other
 	// brain, by that brain's id: GrantDelegate, GrantRead, GrantFiles.
 	Grants map[string][]string `json:"grants,omitempty"`
+	// Memory is how the brain's memory index serves its runs; nil leaves
+	// it as it was before there was one: nothing recalled, no
+	// consolidation.
+	Memory *Memory `json:"memory,omitempty"`
 }
 
 // RoleCore marks the core brain (Manifest.Role).
@@ -157,6 +163,37 @@ func (m *Manifest) validateGrants() error {
 	return nil
 }
 
+// Memory is a brain's memory index settings (docs/BRAINS.md, Memory).
+type Memory struct {
+	// Inject puts the owner's messages and the brain's own notes that
+	// match a new message into its run's prompt, with their sources.
+	// Never what anyone else wrote.
+	Inject bool `json:"inject,omitempty"`
+	// TopK is the most chunks one prompt gets (default 5, at most 20).
+	TopK int `json:"top_k,omitempty"`
+	// MaxChars is the most characters of them in all (default 2000, at
+	// most 20000).
+	MaxChars int `json:"max_chars,omitempty"`
+	// Consolidate is when the brain runs skills/memory-consolidation.md,
+	// "weekly sun 18:00" or "daily 07:00" in the bridge's time zone; ""
+	// never.
+	Consolidate string `json:"consolidate,omitempty"`
+}
+
+// Bounds of Memory's numbers.
+const (
+	MaxMemoryTopK     = 20
+	MaxMemoryMaxChars = 20000
+)
+
+// MemoryOf is m's memory settings, the zero value for none.
+func MemoryOf(m Manifest) Memory {
+	if m.Memory == nil {
+		return Memory{}
+	}
+	return *m.Memory
+}
+
 // Calendar is a brain's Google Calendar access. Google grants access to
 // a whole account; the calendar tool keeps the brain to the calendars listed
 // here.
@@ -243,6 +280,23 @@ func (m *Manifest) Validate() error {
 		for _, id := range append(append([]string{}, c.Calendars...), c.Account, c.Default) {
 			if strings.ContainsAny(id, "\r\n,") {
 				return fmt.Errorf("brain %q: calendar id %q is not valid", m.ID, id)
+			}
+		}
+	}
+	if mem := m.Memory; mem != nil {
+		if mem.TopK < 0 || mem.TopK > MaxMemoryTopK {
+			return fmt.Errorf("brain %q: memory.top_k must be between 1 and %d, or 0 for the default, not %d", m.ID, MaxMemoryTopK, mem.TopK)
+		}
+		if mem.MaxChars < 0 || mem.MaxChars > MaxMemoryMaxChars {
+			return fmt.Errorf("brain %q: memory.max_chars must be between 1 and %d, or 0 for the default, not %d", m.ID, MaxMemoryMaxChars, mem.MaxChars)
+		}
+		if mem.Consolidate != "" {
+			sc, err := trigger.ParseSchedule(mem.Consolidate, time.UTC)
+			if err == nil && sc.Kind == trigger.ScheduleOnce {
+				err = errors.New("it must repeat")
+			}
+			if err != nil {
+				return fmt.Errorf("brain %q: memory.consolidate %q must be \"weekly DAY HH:MM\" or \"daily HH:MM\": %v", m.ID, mem.Consolidate, err)
 			}
 		}
 	}

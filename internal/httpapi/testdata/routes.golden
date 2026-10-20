@@ -6,6 +6,7 @@
 DELETE /api/brain-dirs
 DELETE /api/brains/{id}
 DELETE /api/brains/{id}/calendar
+DELETE /api/brains/{id}/intents/{intent}
 DELETE /api/google/client
 DELETE /api/plaud/devices/{id}
 DELETE /api/site/google-client
@@ -14,6 +15,7 @@ DELETE /api/site/repo
 DELETE /api/site/secrets/{module}/{name}
 DELETE /api/site/users/{id}
 DELETE /brain/calendar/events/{id}
+DELETE /brain/intents/{id}
 GET /api/activity
 GET /api/backup/status
 GET /api/brains
@@ -41,7 +43,9 @@ GET /api/whatsapp/groups
 GET /api/whatsapp/qr
 GET /brain/calendar/calendars
 GET /brain/calendar/events
+GET /brain/intents
 GET /brain/mcp/tools
+GET /brain/memory/search
 GET /brain/polls
 GET /builder/context
 GET /health
@@ -93,6 +97,7 @@ POST /api/token/rotate
 POST /api/whatsapp/pair
 POST /brain/calendar/events
 POST /brain/calendar/freebusy
+POST /brain/intents
 POST /brain/mcp/call
 POST /builder/check
 POST /builder/preview

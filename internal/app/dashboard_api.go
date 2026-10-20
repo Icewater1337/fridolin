@@ -231,6 +231,7 @@ func (b *App) brainViews() []httpapi.BrainView {
 			rt := br.Snapshot()
 			out[i].Runtime = &rt
 			out[i].Fallback = br == fallback
+			out[i].Intents, _ = b.intents.List(br.ID())
 		}
 	}
 	return nonNil(out)

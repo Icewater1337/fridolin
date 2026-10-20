@@ -16,6 +16,9 @@ Usage:
                                            write a starter config (if there is none)
   fridolin paths [--json]                  the config file and data dir in use, and
                                            where each came from
+  fridolin memory reindex|status|search [--brain ID]
+                                           the brains' memory indexes: rebuild them,
+                                           see what they lack, search one
   fridolin service install|rollback|restart|status|uninstall
                                            run the bridge in the background (launchd or
                                            systemd) from a copy outside the checkout;
@@ -39,6 +42,10 @@ Run by brains, inside a run (each prints JSON; -h shows its flags):
                              create, free, delete
   fridolin mcp --run ID      the MCP server with Fridolin's tools for the run
                              (the bridge has each run start it)
+  fridolin memory search QUERY
+                             search the brain's memory index, labelled by provenance
+  fridolin intent list|add|remove
+                             the brain's standing intents ("remind me when …")
 
 Common flags:
   --config PATH     config file (default: $FRIDOLIN_CONFIG, else
