@@ -53,6 +53,10 @@ type SandboxProfiler struct {
 	// configFile is the config.json the bridge runs with; see SetConfigFile.
 	configFile string
 	home       string // captured at startup; retained across runtime policy updates
+	// hostHome is ContainerHostHome: in the container, the home folder of
+	// the machine whose folders are bound at their own paths, which brain
+	// runs get as an empty HOME of their own; "" elsewhere.
+	hostHome string
 
 	// execPath is sandboxExecPath; tests point it at a missing file.
 	execPath string
@@ -134,7 +138,7 @@ func sandboxPolicyOf(cfg *config.Settings) sandboxConfig {
 // NewSandboxProfiler builds a profiler for the configured brains.
 func NewSandboxProfiler(workDirs map[string][]string, cfg *config.Settings) *SandboxProfiler {
 	sp := &SandboxProfiler{execPath: sandbox.ExecPath, home: HomeDir(), backend: sandboxBackend(ConfigGOOS()),
-		bwrapPath: sandbox.BwrapPath, kind: pathKind}
+		bwrapPath: sandbox.BwrapPath, kind: pathKind, hostHome: ContainerHostHome()}
 	sp.probe = sync.OnceValue(func() error { return probeBwrap(sp.bwrapPath) })
 	if exe, err := os.Executable(); err == nil {
 		sp.bridgeExe = exe
@@ -410,6 +414,26 @@ func (sp *SandboxProfiler) bwrapPolicy(id string) (sandbox.BwrapPolicy, error) {
 	for _, a := range sp.ExtraAllow {
 		p.Read = append(p.Read, AbsPath(a))
 	}
+	if sp.hostHome != "" {
+		p.HostHome = sp.hostHome
+		// What a brain read in your home folder on the Mac and needs here:
+		// your git identity (unless sandbox.git_config is "deny"), never
+		// git's stored credentials.
+		if sp.GitConfig != "deny" {
+			p.Read = append(p.Read, filepath.Join(sp.hostHome, ".gitconfig"), filepath.Join(sp.hostHome, ".config", "git"))
+		}
+		p.Mask = append(p.Mask, filepath.Join(sp.hostHome, ".git-credentials"), filepath.Join(sp.hostHome, ".config", "git", "credentials"))
+	}
+	if sp.PlaudShared {
+		// plaud.brain_access: the login in ~/.plaud, read-only but for
+		// tokens.json, which a brain's plaud rewrites in place when it
+		// refreshes the login (as on macOS: it cannot replace the file).
+		plaudDir := filepath.Join(ctx.Home, ".plaud")
+		p.Read = append(p.Read, plaudDir)
+		if tokens := filepath.Join(plaudDir, "tokens.json"); sp.kind(tokens) == "file" {
+			p.Write = append(p.Write, tokens)
+		}
+	}
 	// The data dir is not bound, but a folder bound above it would show
 	// its secrets: they are masked then.
 	l := config.Layout{Root: sp.DataDir}
@@ -476,7 +500,7 @@ func (sp *SandboxProfiler) bwrapCommand(id, prog string, args []string) (string,
 	if err := os.MkdirAll(filepath.Dir(p.Passwd), 0o700); err != nil {
 		return "", nil, err
 	}
-	for path, data := range map[string]string{p.Passwd: sandbox.BrainPasswd(id, p.Home), p.Group: sandbox.BrainGroup(id)} {
+	for path, data := range map[string]string{p.Passwd: sandbox.BrainPasswd(id, p.RunHome()), p.Group: sandbox.BrainGroup(id)} {
 		if err := fsx.WriteFileAtomic(path, []byte(data), 0o644, false); err != nil {
 			return "", nil, err
 		}

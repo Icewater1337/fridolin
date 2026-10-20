@@ -6,6 +6,12 @@ On the host that runs Docker:
                        keychain; makes the age identity when there is none
   fridolin core stop   stop it (the volume stays)
   fridolin core update pull the image of this version and recreate the container
+  fridolin core migrate --from-native [--dry-run] [--local] [--mount PATH]...
+                       move this machine's native install into the core's
+                       volume, its brain folders bound in at their own paths
+                       (--rehearse: on a copy, beside the running native bridge)
+  fridolin core migrate --to-native [--dry-run] [--local]
+                       bring the volume back into the native data dir
   fridolin core run [--] COMMAND...
                        run a fridolin command in a one-off container on the
                        volume, with the secrets: core import while the core

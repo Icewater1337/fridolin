@@ -72,7 +72,15 @@ RUN set -eu; \
 FROM ${NODE_IMAGE} AS node
 # At least the version internal/claudecli tests against (TestedClaudeVersion).
 ARG CLAUDE_CODE_VERSION=2.1.303
+# Codex (agent_provider "codex"), at least the version the bridge is tested
+# against; its package installs the native build for the image's platform.
+# Each brain signs in to it with a file of its own (brains/<id>/codex/
+# auth.json in the data dir), so a sign-in moves with an export.
+ARG CODEX_VERSION=0.163.0
+# The Plaud CLI (plaud.enabled), as docs/PLAUD.md installs it.
+ARG PLAUD_CLI_VERSION=0.3.15
 RUN npm install -g --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+      "@openai/codex@${CODEX_VERSION}" "@plaud-ai/cli@${PLAUD_CLI_VERSION}" \
  && npm cache clean --force
 
 # ── the runtime ───────────────────────────────────────────────────────────
@@ -84,7 +92,7 @@ LABEL org.opencontainers.image.title="fridolin-core" \
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      ca-certificates tzdata tini bubblewrap ffmpeg python3 git curl \
+      ca-certificates tzdata tini bubblewrap ffmpeg python3 git curl jq sqlite3 age \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=tools /usr/local/bin/restic /usr/local/bin/rclone /usr/local/bin/litestream /usr/local/bin/
@@ -93,7 +101,9 @@ COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
  && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
  && ln -s ../lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe /usr/local/bin/claude \
- && claude --version
+ && ln -s ../lib/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex \
+ && ln -s ../lib/node_modules/@plaud-ai/cli/dist/index.js /usr/local/bin/plaud \
+ && claude --version && codex --version && plaud --help >/dev/null
 
 # The binary with tools/ next to it, as `fridolin service install` lays
 # out an install: brains get them as $FRIDOLIN_BIN and $FRIDOLIN_TOOLS_DIR.

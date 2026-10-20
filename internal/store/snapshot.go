@@ -38,7 +38,10 @@ func VacuumInto(ctx context.Context, src, dst string) (err error) {
 	if err := f.Close(); err != nil {
 		return err
 	}
-	db, err := sql.Open("sqlite", snapshotDSN(src))
+	// Read-only: VACUUM INTO only reads its source, and a snapshot of a
+	// data dir that must stay as it is (a native install's, exported while
+	// it moves into the container) must not write to it either.
+	db, err := sql.Open("sqlite", snapshotDSN(src)+"&mode=ro")
 	if err != nil {
 		return err
 	}

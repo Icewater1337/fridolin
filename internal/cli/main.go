@@ -529,6 +529,7 @@ func checkCmd(args []string) {
 	fs.StringVar(&o.Config, "config", "", configFlagHelp)
 	fs.Var(&routes, "route", "show which brain handles this chat JID (repeatable)")
 	fs.StringVar(&o.SandboxFor, "print-sandbox", "", "print the sandbox profile for this brain id")
+	fs.StringVar(&o.TrySandbox, "try-sandbox", "", "run a shell in this brain's sandbox that says what it can see")
 	fs.BoolVar(&o.Redact, "redact", false, "mask phone numbers, JIDs and email addresses, and write ~ for the home folder, to paste the output into a bug report")
 	_ = fs.Parse(args)
 	o.Routes = routes

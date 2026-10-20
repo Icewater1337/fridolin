@@ -105,6 +105,23 @@ func EnsureConfigFile(path string) error { return config.EnsureFile(path, Config
 // whose Dockerfile sets FRIDOLIN_CONTAINER=1 (docs/CORE.md).
 func InContainer() bool { return runtime.GOOS == "linux" && os.Getenv("FRIDOLIN_CONTAINER") == "1" }
 
+// HostHomeVar names, in the container, the home folder of the machine
+// whose folders are bound into it at their own paths: a native install
+// moved into the container (`fridolin core migrate --from-native`, whose
+// compose override sets it, and HOME, to the Mac's home folder, docs/CORE.md).
+const HostHomeVar = "FRIDOLIN_HOST_HOME"
+
+// ContainerHostHome is $FRIDOLIN_HOST_HOME in the container when it is an
+// absolute path and the bridge's HOME, so that ~ means the same folder in
+// the config, in the bridge and in a brain's run; "" otherwise.
+func ContainerHostHome() string {
+	h := os.Getenv(HostHomeVar)
+	if !InContainer() || h == "" || !filepath.IsAbs(h) || filepath.Clean(h) != filepath.Clean(HomeDir()) {
+		return ""
+	}
+	return filepath.Clean(h)
+}
+
 // ConfigGOOS is the platform configs are resolved for here: Linux in the
 // container is config.ContainerGOOS, where brains are sandboxed with
 // bubblewrap.

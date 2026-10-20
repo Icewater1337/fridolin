@@ -1,0 +1,51 @@
+# Written by `fridolin core migrate --from-native` from <CONFIG>.
+#
+# The host's folders the core needs, bound into the container at their own
+# paths, with HOME the host's home folder, so that ~ means the same in
+# config.json, in the bridge and in a brain's run (docs/CORE.md, "Moving a
+# native install into the container"). fridolin core start, stop, update
+# and run add this file to compose.yaml while it exists.
+services:
+  core:
+    environment:
+      - "HOME=<HOME>"
+      - "FRIDOLIN_HOST_HOME=<HOME>"
+      - "FRIDOLIN_BRAIN_PATH=<HOME>/Personal/bin"
+    tmpfs:
+      - "<HOME>:uid=10001,gid=10001,mode=0700"
+    volumes:
+      # brain personal's folder
+      - type: bind
+        source: "<HOME>/Personal"
+        target: "<HOME>/Personal"
+        read_only: false
+        bind:
+          create_host_path: false
+      # sandbox.credentials_dir
+      - type: bind
+        source: "<HOME>/.secrets"
+        target: "<HOME>/.secrets"
+        read_only: true
+        bind:
+          create_host_path: false
+      # the Plaud CLI's login (plaud.brain_access)
+      - type: bind
+        source: "<HOME>/.plaud"
+        target: "<HOME>/.plaud"
+        read_only: false
+        bind:
+          create_host_path: false
+      # your git identity (sandbox.git_config)
+      - type: bind
+        source: "<HOME>/.gitconfig"
+        target: "<HOME>/.gitconfig"
+        read_only: true
+        bind:
+          create_host_path: false
+      # --mount
+      - type: bind
+        source: "<HOME>/private"
+        target: "<HOME>/private"
+        read_only: true
+        bind:
+          create_host_path: false

@@ -231,26 +231,50 @@ var ErrTargetInUse = errors.New("the data dir is not empty")
 // one rename, so staged must be on target's disk (Import's default staging
 // folder is in target's core/).
 func Activate(staged, target string, force bool, now time.Time, lock func(string) (func(), error)) error {
-	unlock, err := lock(target)
+	return ActivateWith(staged, target, ActivateOptions{Force: force, Now: now, Lock: lock})
+}
+
+// ActivateOptions are ActivateWith's settings.
+type ActivateOptions struct {
+	Force bool
+	Now   time.Time
+	Lock  func(string) (func(), error)
+	// Aside is where target's entries go with Force; default
+	// core/replaced-<time>/ in target. It must be on target's disk.
+	Aside string
+	// Keep are more entries of target that stay where they are and are
+	// not counted as data, besides core/ and bridge.lock: a native data
+	// dir's migration/ folder, say, which holds Aside.
+	Keep []string
+}
+
+// ActivateWith is Activate with the aside folder and the entries that stay
+// of opts.
+func ActivateWith(staged, target string, opts ActivateOptions) error {
+	unlock, err := opts.Lock(target)
 	if err != nil {
 		return fmt.Errorf("activate: %w (stop the core first: a running bridge holds the data dir)", err)
 	}
 	defer unlock()
+	stay := append(slices.Clone(keep), opts.Keep...)
 	existing, err := os.ReadDir(target)
 	if err != nil {
 		return err
 	}
 	var data []string
 	for _, e := range existing {
-		if !slices.Contains(keep, e.Name()) {
+		if !slices.Contains(stay, e.Name()) {
 			data = append(data, e.Name())
 		}
 	}
 	if len(data) > 0 {
-		if !force {
-			return fmt.Errorf("activate: %w: %s holds %s; pass --force to move them to core/replaced-<time>/ first", ErrTargetInUse, target, strings.Join(data, ", "))
+		aside := opts.Aside
+		if aside == "" {
+			aside = filepath.Join(target, "core", "replaced-"+opts.Now.UTC().Format("20060102T150405Z"))
 		}
-		aside := filepath.Join(target, "core", "replaced-"+now.UTC().Format("20060102T150405Z"))
+		if !opts.Force {
+			return fmt.Errorf("activate: %w: %s holds %s; pass --force to move them to %s first", ErrTargetInUse, target, strings.Join(data, ", "), aside)
+		}
 		if err := os.MkdirAll(aside, 0o700); err != nil {
 			return err
 		}
@@ -265,7 +289,7 @@ func Activate(staged, target string, force bool, now time.Time, lock func(string
 		return err
 	}
 	for _, e := range entries {
-		if slices.Contains(keep, e.Name()) {
+		if slices.Contains(stay, e.Name()) {
 			continue
 		}
 		if err := os.Rename(filepath.Join(staged, e.Name()), filepath.Join(target, e.Name())); err != nil {
@@ -283,8 +307,9 @@ func Activate(staged, target string, force bool, now time.Time, lock func(string
 // otherwise start on a folder that is not the volume. Other keys keep
 // their values; db_path, media_dir and brain_dirs that point outside
 // dataDir are returned as warnings, since only the person knows where
-// those went.
-func FixDataDir(dataDir string) (warnings []string, err error) {
+// those went; a brain folder that is there (bound into the container at
+// its own path) is not, with home the folder a leading ~/ means.
+func FixDataDir(dataDir, home string) (warnings []string, err error) {
 	path := filepath.Join(dataDir, "config.json")
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -305,12 +330,33 @@ func FixDataDir(dataDir string) (warnings []string, err error) {
 			warnings = append(warnings, fmt.Sprintf("%s is %s, outside the data dir: check it before the first start", k, v))
 		}
 	}
+	// Each entry is a path, or an object with one ({"path": ..., "approved": ...}).
+	var entries []json.RawMessage
 	var dirs []string
-	if json.Unmarshal(cfg["brain_dirs"], &dirs) == nil {
-		for _, d := range dirs {
-			if !within(dataDir, d) {
-				warnings = append(warnings, fmt.Sprintf("brain folder %s is outside the data dir: bring it over, or change brain_dirs", d))
-			}
+	_ = json.Unmarshal(cfg["brain_dirs"], &entries)
+	for _, e := range entries {
+		var ref struct {
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(e, &ref.Path) != nil {
+			_ = json.Unmarshal(e, &ref)
+		}
+		if ref.Path != "" {
+			dirs = append(dirs, ref.Path)
+		}
+	}
+	for _, d := range dirs {
+		// A folder that is there (bound into the container at its own path
+		// from the machine it came from) needs nothing.
+		p := d
+		if rest, ok := strings.CutPrefix(d, "~/"); ok && home != "" {
+			p = filepath.Join(home, rest)
+		}
+		if st, err := os.Stat(p); err == nil && st.IsDir() {
+			continue
+		}
+		if !within(dataDir, d) {
+			warnings = append(warnings, fmt.Sprintf("brain folder %s is outside the data dir: bring it over, or change brain_dirs", d))
 		}
 	}
 	if old == dataDir {
