@@ -19,6 +19,7 @@ import (
 	"filippo.io/age"
 	"github.com/Icewater1337/fridolin/container"
 	"github.com/Icewater1337/fridolin/internal/app"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/coreexport"
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/lease"
@@ -247,7 +248,7 @@ func coreImport(ctx context.Context, f insideFlags, env coreEnv) error {
 		return err
 	}
 	lock := func(dir string) (func(), error) {
-		l, err := platform.AcquireLock(dir)
+		l, err := platform.AcquireLock(config.Layout{Root: dir}.Lock())
 		if err != nil {
 			return nil, err
 		}

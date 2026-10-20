@@ -8,6 +8,10 @@ Usage:
                                            validate the configuration and show routing;
                                            --redact masks numbers, JIDs, emails and home paths;
                                            exits 3 when a configured brain cannot run
+  fridolin doctor [--json] [--redact]      check what the bridge and the coming parts
+                                           need on this machine (CLIs, Tailscale,
+                                           Docker, host secrets, disk), each with a
+                                           fix; exits 1 when a required check fails
   fridolin init [--claude-path PATH] [--data-dir DIR]
                                            write a starter config (if there is none)
   fridolin paths [--json]                  the config file and data dir in use, and
