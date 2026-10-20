@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/otp"
 )
 
@@ -41,7 +40,7 @@ func (br *Brain) CatchesCode(m Inbound, now time.Time) (OTPCatch, bool) {
 // fromChat reports whether m came from a chat, from WhatsApp or the dev
 // page, rather than being handed to a brain by a program (/ingest, Plaud,
 // a dev message that names a brain).
-func fromChat(m Inbound) bool { return m.Source != chat.SourceIngest && m.Brain == "" }
+func fromChat(m Inbound) bool { return !m.HandedIn() && m.Brain == "" }
 
 // AsksForCode reports whether text, going out to one of the brain's chats,
 // asks for a one-time code that the guard would catch: the guard is on and

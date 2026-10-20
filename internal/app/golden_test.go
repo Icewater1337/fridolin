@@ -120,7 +120,11 @@ var stampRE = regexp.MustCompile(`\b\d{8}-\d{6}Z?\b`)
 // every line.
 var logTimeRE = regexp.MustCompile(`\d{4}/\d\d/\d\d \d\d:\d\d:\d\d`)
 
-// text masks the paths and times in s.
+// runIDRE matches a run's id where it names the run's files, such as its
+// --mcp-config (brainRunEnv).
+var runIDRE = regexp.MustCompile(`run-r[A-Za-z0-9_-]{12}(\.mcp\.json)`)
+
+// text masks the paths, times and run ids in s.
 func (s *scrubber) text(in string) string {
 	for _, m := range s.paths {
 		in = strings.ReplaceAll(in, m.path, m.placeholder)
@@ -128,6 +132,7 @@ func (s *scrubber) text(in string) string {
 	in = s.scrubAbove(in)
 	in = timeRE.ReplaceAllString(in, "<TIME>")
 	in = logTimeRE.ReplaceAllString(in, "<TIME>")
+	in = runIDRE.ReplaceAllString(in, "run-<RUN>$1")
 	return stampRE.ReplaceAllString(in, "<STAMP>")
 }
 

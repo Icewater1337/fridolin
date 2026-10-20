@@ -215,7 +215,8 @@ func TestRunsGetATokenForTheirRunOnly(t *testing.T) {
 func TestRunTokenStaysOutOfTheEnvironment(t *testing.T) {
 	tb, _ := serveTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
-	env, done := tb.brainRunEnv("a")
+	access := tb.brainRunEnv(runInfo{Brain: "a"})
+	env, done := access.Env, access.Done
 	var file string
 	for _, kv := range env {
 		if v, ok := strings.CutPrefix(kv, "FRIDOLIN_BRAIN_TOKEN_FILE="); ok {
@@ -238,9 +239,18 @@ func TestRunTokenStaysOutOfTheEnvironment(t *testing.T) {
 	if fi, err := os.Stat(file); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Errorf("the token file is %v (%v), want readable by its owner only", fi.Mode(), err)
 	}
+	// The run's MCP server is started from a file next to the token's,
+	// which names the token's file, never the token.
+	cfg, err := os.ReadFile(access.MCPConfig)
+	if err != nil || filepath.Dir(access.MCPConfig) != filepath.Dir(file) || strings.Contains(string(cfg), tok) || !strings.Contains(string(cfg), file) {
+		t.Errorf("the run's --mcp-config %s (%v):\n%s", access.MCPConfig, err, cfg)
+	}
 	done()
 	if _, err := os.Stat(file); !errors.Is(err, fs.ErrNotExist) || tb.runTokens.brainOf(tok) != "" {
 		t.Errorf("after the run the file is still there (%v) or the token still works", err)
+	}
+	if _, err := os.Stat(access.MCPConfig); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("after the run its --mcp-config is still there (%v)", err)
 	}
 }
 

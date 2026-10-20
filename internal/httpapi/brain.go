@@ -3,8 +3,10 @@ package httpapi
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Icewater1337/fridolin/internal/apperr"
 	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/google"
 	"net/http"
@@ -28,6 +30,49 @@ type BrainAPI struct {
 	ReadPoll      func(context.Context, string) (string, any, error)
 	RecentPolls   func(context.Context, string, int, func(string) bool) (any, int, error)
 	Google        func() BrainCalendarService
+	// MCPTools and MCPCall serve a run's MCP server (fridolin mcp --run):
+	// the tools the run's token may use, and a call of one. run is the
+	// run id the server was started with, which must be the token's.
+	MCPTools func(ctx context.Context, token, run string) (any, error)
+	MCPCall  func(ctx context.Context, token, run string, call MCPCallRequest) (any, error)
+}
+
+// MCPCallRequest is the body of POST /brain/mcp/call.
+type MCPCallRequest struct {
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
+}
+
+// RunHeader carries, on the MCP calls, the run id fridolin mcp was
+// started with.
+const RunHeader = "X-Fridolin-Run"
+
+// brainMCPTools answers GET /brain/mcp/tools: {"tools": [...]}.
+func (a *BrainAPI) brainMCPTools(w http.ResponseWriter, r *http.Request, _ *brainruntime.Brain) {
+	tok, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	out, err := a.MCPTools(r.Context(), tok, r.Header.Get(RunHeader))
+	if err != nil {
+		WriteErr(w, statusFor(apperr.KindOf(err)), err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, out)
+}
+
+// brainMCPCall answers POST /brain/mcp/call with the tool's result, as
+// MCP's tools/call has it: {"content": [...], "isError": …}.
+func (a *BrainAPI) brainMCPCall(w http.ResponseWriter, r *http.Request, _ *brainruntime.Brain) {
+	var req MCPCallRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		WriteErr(w, http.StatusBadRequest, `the body is {"name": "<tool>", "arguments": {…}}`)
+		return
+	}
+	tok, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	out, err := a.MCPCall(r.Context(), tok, r.Header.Get(RunHeader), req)
+	if err != nil {
+		WriteErr(w, statusFor(apperr.KindOf(err)), err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, out)
 }
 
 // brainCall authenticates a brain API call by the run's token and hands

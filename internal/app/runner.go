@@ -2,11 +2,14 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
@@ -51,6 +54,17 @@ func (r *commandRunner) Run(ctx context.Context, spec brain.RunSpec, callbacks c
 		extra := r.hooks.ExtraArgs(spec.ID)
 		args = withArgsBeforePrint(args, extra)
 	}
+	var runEnv []string
+	if r.hooks != nil && r.hooks.RunEnv != nil {
+		access := r.hooks.RunEnv(runInfo{Brain: spec.ID, Chat: spec.Chat, Source: spec.Source})
+		// After Wait: the tools the run started have exited by then, or
+		// are left behind and lose the brain API with the run.
+		defer access.Done()
+		runEnv = access.Env
+		// The bridge's own tools, for every run: which of them a run
+		// gets, the bridge decides by the run's token (mcpTools).
+		args = withArgsBeforePrint(args, runMCPArgs(s.Provider, access))
+	}
 
 	// Wrap the spawn in sandbox-exec so prompt injection in an incoming message
 	// cannot reach another brain's tree or cross-session Claude state. The brain
@@ -80,13 +94,7 @@ func (r *commandRunner) Run(ctx context.Context, spec brain.RunSpec, callbacks c
 		dirs := append(slices.Clone(s.OwnPATH), filepath.SplitList(path)...)
 		extraEnv = append(extraEnv, "PATH="+strings.Join(dirs, string(filepath.ListSeparator))) // replaces the bridge's
 	}
-	if r.hooks != nil && r.hooks.RunEnv != nil {
-		env, done := r.hooks.RunEnv(spec.ID)
-		// After Wait: the tools the run started have exited by then, or
-		// are left behind and lose the brain API with the run.
-		defer done()
-		extraEnv = append(extraEnv, env...)
-	}
+	extraEnv = append(extraEnv, runEnv...)
 	if s.Provider == "codex" || (r.sandbox != nil && r.sandbox.Enabled()) {
 		// The brain's own Claude Code config dir, TMPDIR and caches, the
 		// only places outside its folder and inbox the profile lets it
@@ -144,4 +152,31 @@ func (r *commandRunner) Run(ctx context.Context, spec brain.RunSpec, callbacks c
 		Provider: s.Provider, ExitGrace: postResultGrace, NoticeAfter: workingNoticeAfter,
 		DeadlineError: claudecli.TimedOut(s.RunTimeout),
 	}, callbacks)
+}
+
+// runMCPArgs are the CLI arguments that start a run's MCP server, the one
+// with the bridge's tools (see brainRunEnv), or none when the run has
+// none. Claude Code takes its --mcp-config file, beside the brain's own
+// .mcp.json; Codex takes the same command line as -c settings, and passes
+// the server the two variables that lead it to the bridge.
+func runMCPArgs(provider string, access runAccess) []string {
+	if provider == "codex" {
+		if len(access.MCPCommand) == 0 {
+			return nil
+		}
+		args, _ := json.Marshal(access.MCPCommand[1:])
+		key := "mcp_servers." + mcpServerName
+		return []string{
+			"-c", key + ".command=" + strconv.Quote(access.MCPCommand[0]),
+			"-c", key + ".args=" + string(args),
+			"-c", key + `.env_vars=["FRIDOLIN_API","FRIDOLIN_BRAIN_TOKEN_FILE"]`,
+			// A delegated task can take minutes; Codex gives a tool 60
+			// seconds unless told otherwise.
+			"-c", key + ".tool_timeout_sec=" + strconv.Itoa(int(maxDelegateWait/time.Second)+60),
+		}
+	}
+	if access.MCPConfig == "" {
+		return nil
+	}
+	return []string{"--mcp-config", access.MCPConfig}
 }

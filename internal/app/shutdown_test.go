@@ -538,9 +538,9 @@ func TestResumeAppliesChangesBeforeStartingQueuedRuns(t *testing.T) {
 	tb := newTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	var started atomic.Int32
-	tb.brainMgr.SetHooks(BrainHooks{RunEnv: func(string) ([]string, func()) {
+	tb.brainMgr.SetHooks(BrainHooks{RunEnv: func(runInfo) runAccess {
 		started.Add(1)
-		return nil, func() {}
+		return runAccess{Done: func() {}}
 	}})
 	m := brain.Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "must not run", Source: chat.SourceWhatsApp, At: time.Now(), ID: "3EB0DELETED"}}
 	if err := KeepInbound(t.Context(), tb.store, InboundQueued, "a", m); err != nil {

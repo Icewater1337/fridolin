@@ -435,9 +435,9 @@ func (br *Brain) queueOrderLocked() []int {
 // whether it interrupts its sender's own run, which only a request does in
 // interrupt mode, and which waiting or running messages it replaces.
 func supersedes(m Inbound, mode string) (interrupting bool, replaces func(Inbound) bool) {
-	interrupting = mode == QueueInterrupt && !m.Silent && m.Source != chat.SourceIngest
+	interrupting = mode == QueueInterrupt && !m.Silent && !m.HandedIn()
 	return interrupting, func(p Inbound) bool {
-		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && p.Source != chat.SourceIngest))
+		return p.JID == m.JID && (p.Silent || (interrupting && p.Sender == m.Sender && !p.HandedIn()))
 	}
 }
 
@@ -999,7 +999,7 @@ func (br *Brain) StreamLogPath() string {
 // invoke runs the selected CLI once for m.
 func (br *Brain) invoke(run *brainRun, ctx context.Context, s *Settings, m Inbound) claudecli.Result {
 	return br.runner.Run(ctx, RunSpec{
-		ID: br.id, Dir: br.workDir, Settings: s, Prompt: br.buildPrompt(s, m),
+		ID: br.id, Dir: br.workDir, Settings: s, Prompt: br.buildPrompt(s, m), Chat: m.JID, Source: m.Source,
 		BeforeStart: func() { br.ensureViewer(s) },
 	}, claudecli.Callbacks{
 		Start: run.startProcess,

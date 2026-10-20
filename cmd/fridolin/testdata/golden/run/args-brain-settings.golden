@@ -12,5 +12,7 @@
   "opus",
   "--effort",
   "low",
+  "--mcp-config",
+  "<HOME>/.fridolin/run-tokens/family/run-<RUN>.mcp.json",
   "-p"
 ]

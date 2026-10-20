@@ -28,6 +28,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/mcp"
 	"github.com/Icewater1337/fridolin/internal/otp"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/platform"
@@ -80,6 +81,12 @@ type App struct {
 	runTokens runTokens
 	// exe is the binary brains run (see brainRunEnv).
 	exe string
+	// mcpTools are the tools runs reach through fridolin mcp (mcpTools),
+	// delegations the tasks core runs handed to sub-brains that have not
+	// ended, and audit the log they are written to.
+	mcpTools    *mcp.Registry[mcpCaller]
+	delegations delegations
+	audit       *auditLog
 	// lids is whatsmeow's map between LIDs and phone numbers, nil in dev
 	// mode, for what knows a person by LID outside an event: a /send to
 	// one.
@@ -184,6 +191,8 @@ func New(opts Options) (_ *App, err error) {
 		b.listen = cfg.HTTPListen
 	}
 	b.exe = bridgeBinary()
+	b.audit = &auditLog{dir: filepath.Join(AbsPath(cfg.DataDir), auditDirName)}
+	b.mcpTools = b.newMCPTools()
 	if b.logs == nil {
 		b.logs = logx.NewRing(LogRingLines)
 		var sink slog.Handler = logx.StandardHandler()
@@ -231,9 +240,9 @@ func New(opts Options) (_ *App, err error) {
 	}
 
 	b.brainMgr.SetHooks(BrainHooks{
-		Notice:      b.pipeline.WorkingNotice,
-		Question:    b.pipeline.Question,
-		Deliver:     b.pipeline.Finished,
+		Notice:      b.workingNotice,
+		Question:    b.askQuestion,
+		Deliver:     b.deliverRun,
 		Undelivered: b.undelivered,
 		Waiting:     b.keepWaiting,
 		Interrupted: b.keepInterrupted,

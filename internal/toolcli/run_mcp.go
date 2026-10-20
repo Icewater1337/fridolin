@@ -110,19 +110,19 @@ func (r runTools) do(ctx context.Context, method, path string, body, out any) (i
 	}
 	resp, err := r.client.http.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("Fridolin is not reachable at %s: %w", r.client.base, err)
+		return 0, fmt.Errorf("the bridge is not reachable at %s: %w", r.client.base, err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, mcp.MaxLine))
 	if err != nil {
-		return resp.StatusCode, fmt.Errorf("reading Fridolin's answer: %w", err)
+		return resp.StatusCode, fmt.Errorf("reading the bridge's answer: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		var e struct {
 			Error string `json:"error"`
 		}
 		if json.Unmarshal(data, &e) != nil || e.Error == "" {
-			e.Error = "Fridolin answered " + resp.Status
+			e.Error = "the bridge answered " + resp.Status
 		}
 		return resp.StatusCode, errors.New(e.Error)
 	}
