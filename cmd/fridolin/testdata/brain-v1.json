@@ -36,5 +36,16 @@
       "family@example.com"
     ],
     "default": "family@example.com"
+  },
+  "role": "core",
+  "grants": {
+    "coding": [
+      "delegate"
+    ],
+    "taxes": [
+      "delegate",
+      "files",
+      "read"
+    ]
   }
 }

@@ -42,6 +42,13 @@
         "calendars": {"type": ["array", "null"], "items": {"$ref": "#/$defs/calendar_id"}},
         "default": {"$ref": "#/$defs/calendar_id"}
       }
+    },
+    "role": {"enum": ["", "core"], "description": "\"core\" for the one brain that may reach the others through its grants; left out for a sub-brain."},
+    "grants": {
+      "type": ["object", "null"],
+      "description": "Only on the core brain: what it may do with each other brain, by that brain's id. The brain must be configured and not the core brain itself.",
+      "propertyNames": {"pattern": "^[a-z0-9][a-z0-9_-]{0,39}$"},
+      "additionalProperties": {"type": ["array", "null"], "items": {"enum": ["delegate", "files", "read"]}}
     }
   },
   "$defs": {

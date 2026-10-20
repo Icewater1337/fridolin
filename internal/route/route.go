@@ -10,17 +10,24 @@ import (
 // Validate checks brains against each other: unique ids, every group
 // owned by one brain, at most one DM brain and one default, no two brains in
 // one folder and no brain folder inside another (sandbox profiles deny other
-// brains' folders, so a nested brain could not read itself).
+// brains' folders, so a nested brain could not read itself), and at most
+// one core brain.
 func Validate(specs []manifest.Spec) error {
 	ids := map[string]string{}
 	groups := map[string]string{}
-	dm, def := "", ""
+	dm, def, core := "", "", ""
 	for _, s := range specs {
 		m := s.Manifest
 		if other, ok := ids[m.ID]; ok {
 			return fmt.Errorf("two brains use the id %q (%s and %s)", m.ID, other, s.Dir)
 		}
 		ids[m.ID] = s.Dir
+		if m.IsCore() {
+			if core != "" {
+				return fmt.Errorf("brains %q and %q are both the core brain (role %q), and there is only one", core, m.ID, manifest.RoleCore)
+			}
+			core = m.ID
+		}
 		for _, g := range m.Routing.Groups {
 			if owner, ok := groups[g]; ok {
 				return fmt.Errorf("group %s is claimed by both %q and %q", g, owner, m.ID)

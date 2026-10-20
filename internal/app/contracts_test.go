@@ -549,6 +549,7 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 		{"log_level", "config.schema.json#/properties/log_level", levels, `{"log_level": %s}`},
 		{"brain.json effort", "brain.schema.json#/properties/effort", manifest.Efforts(), `{"id": "a", "name": "A", "effort": %s}`},
 		{"brain.json observe", "brain.schema.json#/properties/observe", manifest.ObserveModes(), `{"id": "a", "name": "A", "observe": %s}`},
+		{"brain.json role", "brain.schema.json#/properties/role", manifest.Roles(), `{"id": "a", "name": "A", "role": %s}`},
 	}
 	set := newSchemaSet(t)
 	t.Setenv("HOME", t.TempDir())

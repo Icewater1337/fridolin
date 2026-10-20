@@ -62,6 +62,99 @@ type Manifest struct {
 	// Calendar is the Google account this brain signed in with and the
 	// calendars it may use. Set by "Connect Google Calendar" in the dashboard.
 	Calendar *Calendar `json:"calendar,omitempty"`
+
+	// Role is RoleCore for the one brain that may reach the others
+	// through its grants, "" for every other brain (a sub-brain).
+	Role string `json:"role,omitempty"`
+	// Grants are, on the core brain only, what it may do with each other
+	// brain, by that brain's id: GrantDelegate, GrantRead, GrantFiles.
+	Grants map[string][]string `json:"grants,omitempty"`
+}
+
+// RoleCore marks the core brain (Manifest.Role).
+const RoleCore = "core"
+
+// What the core brain may do with a sub-brain (Manifest.Grants).
+const (
+	// GrantDelegate lets the core hand the sub-brain a bounded task and
+	// receive its result.
+	GrantDelegate = "delegate"
+	// GrantRead lets the core read the sub-brain's memories/**/*.md and
+	// skills/**.
+	GrantRead = "read"
+	// GrantFiles lets the core fetch files from the sub-brain's vault
+	// paths, once there is a vault.
+	GrantFiles = "files"
+)
+
+// validRoles and validGrants are the values brain.json may give role and
+// a grant (TestSchemaEnumsAreTheBridgesValues).
+var (
+	validRoles  = map[string]bool{"": true, RoleCore: true}
+	validGrants = map[string]bool{GrantDelegate: true, GrantRead: true, GrantFiles: true}
+)
+
+// ValidRole reports whether role is a role brain.json may name.
+func ValidRole(role string) bool { return validRoles[role] }
+
+// Roles returns the accepted roles, the unset one included.
+func Roles() []string { return slices.Sorted(maps.Keys(validRoles)) }
+
+// GrantKinds returns what a grant may hold, in order.
+func GrantKinds() []string { return slices.Sorted(maps.Keys(validGrants)) }
+
+// IsCore reports whether the manifest is the core brain's.
+func (m Manifest) IsCore() bool { return m.Role == RoleCore }
+
+// Granted reports whether the manifest grants kind on brain id. Only a
+// core brain's grants count; Validate refuses them elsewhere.
+func (m Manifest) Granted(id, kind string) bool {
+	return m.IsCore() && slices.Contains(m.Grants[id], kind)
+}
+
+// GrantedTo lists, sorted, the brains the manifest grants kind on, or
+// every brain it grants anything on for kind "".
+func (m Manifest) GrantedTo(kind string) []string {
+	var out []string
+	for id, kinds := range m.Grants {
+		if m.IsCore() && (kind == "" && len(kinds) > 0 || m.Granted(id, kind)) {
+			out = append(out, id)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// validateGrants checks role and grants on their own: grants only on the
+// core brain, never on itself, of known kinds and each kind once. Whether
+// the brains they name exist is the registry's to check, against the
+// other brains.
+func (m *Manifest) validateGrants() error {
+	if !ValidRole(m.Role) {
+		return fmt.Errorf("brain %q: role %q must be %q or left out", m.ID, m.Role, RoleCore)
+	}
+	if len(m.Grants) > 0 && !m.IsCore() {
+		return fmt.Errorf("brain %q: only the core brain (role %q) may have grants; a sub-brain cannot reach other brains", m.ID, RoleCore)
+	}
+	for _, id := range slices.Sorted(maps.Keys(m.Grants)) {
+		if !ValidID(id) {
+			return fmt.Errorf("brain %q: grant for %q, which is not a brain id", m.ID, id)
+		}
+		if id == m.ID {
+			return fmt.Errorf("brain %q: the core brain cannot grant itself anything", m.ID)
+		}
+		seen := map[string]bool{}
+		for _, kind := range m.Grants[id] {
+			if !validGrants[kind] {
+				return fmt.Errorf("brain %q: grant %q for %q must be one of %s", m.ID, kind, id, strings.Join(GrantKinds(), ", "))
+			}
+			if seen[kind] {
+				return fmt.Errorf("brain %q: grant %q for %q is listed twice", m.ID, kind, id)
+			}
+			seen[kind] = true
+		}
+	}
+	return nil
 }
 
 // Calendar is a brain's Google Calendar access. Google grants access to
@@ -158,7 +251,7 @@ func (m *Manifest) Validate() error {
 			return fmt.Errorf("brain %q: backup exclude %q is not a valid pattern", m.ID, x)
 		}
 	}
-	return nil
+	return m.validateGrants()
 }
 
 // Normalized returns a copy with defaults filled in, so two manifests that
@@ -179,6 +272,18 @@ func (m Manifest) Normalized() Manifest {
 	if m.Backup.Exclude == nil {
 		m.Backup.Exclude = []string{}
 	}
+	// Sorted, so that the same grants in another order compare equal; a
+	// brain granted nothing is left out. A copy: m shares the map.
+	var grants map[string][]string
+	for id, kinds := range m.Grants {
+		if len(kinds) > 0 {
+			if grants == nil {
+				grants = map[string][]string{}
+			}
+			grants[id] = slices.Sorted(slices.Values(kinds))
+		}
+	}
+	m.Grants = grants
 	return m
 }
 

@@ -2,6 +2,7 @@ package registry
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -98,16 +99,41 @@ func Resolve(refs []config.BrainRef, checkDir func(dir, configured string) error
 		specs = append(specs, manifest.Spec{Manifest: m, Dir: dir, Path: filepath.Clean(ref.Path), PromptFile: m.PromptFile, Entry: i})
 	}
 
+	// A core brain's grants name brains configured here, whether or not
+	// they run right now: a sub-brain whose folder went missing must not
+	// take the core, and with it your DMs, down too.
+	configured := map[string]bool{}
+	for _, ref := range refs {
+		if ref.Approved != nil {
+			configured[ref.Approved.ID] = true
+		}
+	}
+
 	// Drop brains that clash with an earlier one rather than refusing to run.
 	var ok []manifest.Spec
 	for _, s := range specs {
-		if err := route.Validate(append(append([]manifest.Spec{}, ok...), s)); err != nil {
+		err := grantTargets(s.Manifest, configured)
+		if err == nil {
+			err = route.Validate(append(append([]manifest.Spec{}, ok...), s))
+		}
+		if err != nil {
 			issues = append(issues, Issue{ID: s.Manifest.ID, Path: s.Dir, Kind: IssueInvalid, Detail: err.Error(), Entry: s.Entry, Routing: s.Manifest.Routing})
 			continue
 		}
 		ok = append(ok, s)
 	}
 	return ok, issues
+}
+
+// grantTargets refuses grants on a brain that is not configured.
+// manifest.Validate has already kept them to the core brain and off itself.
+func grantTargets(m manifest.Manifest, configured map[string]bool) error {
+	for _, id := range m.GrantedTo("") {
+		if !configured[id] {
+			return fmt.Errorf("brain %q grants access to brain %q, which is not configured", m.ID, id)
+		}
+	}
+	return nil
 }
 
 // CheckPath vets a folder before it becomes a brain. Problems block it;
