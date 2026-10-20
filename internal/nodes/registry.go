@@ -59,10 +59,11 @@ type Node struct {
 	Resources *nodeproto.HostStats `json:"resources,omitempty"`
 }
 
-// Commands is the state of the node's second approval stage.
+// Commands is the state of the node's second approval stage; a revoked
+// node has none.
 func (n *Node) Commands() string {
 	switch {
-	case n.Declared.Empty():
+	case n.Declared.Empty() || n.Device == nodeproto.DeviceRevoked:
 		return nodeproto.CommandsNone
 	case n.CommandsApprovedAt != nil && nodeproto.Covers(n.Approved, n.Declared):
 		return nodeproto.CommandsApproved

@@ -79,10 +79,10 @@ export default {
     }
 
     function statePills(n) {
-      const out = [n.online ? pill('online', 'ok', { pulse: true }) : pill('offline', 'neutral')];
+      const out = [];
       if (n.device === 'pending') out.push(badge('device waiting', 'warn'));
       else if (n.device === 'revoked') out.push(badge('revoked', 'bad'));
-      else if (n.commands === 'pending') out.push(badge('offers more than approved', 'warn'));
+      else if (n.commands === 'pending') out.push(badge(n.commands_approved_at ? 'offers more than approved' : 'commands waiting', 'warn'));
       else out.push(badge('approved', 'ok'));
       return out;
     }
@@ -110,29 +110,50 @@ export default {
         roots.length ? h('div', h('strong', 'Folders: '), roots.map((r) => mono(`${r.path}${r.write ? ' (read and write)' : ' (read only)'}`)).flatMap((el, i) => (i ? [', ', el] : [el]))) : null);
     }
 
-    function card(n) {
-      const res = n.resources || {};
+    // What changes with every heartbeat: whether it is online and its
+    // free resources. It is painted into the card on its own, so the card
+    // and its buttons stay while a node reports (see paintAll).
+    const liveOf = (n) => ({ online: !!n.online, last_seen: n.last_seen || null, resources: n.resources || {}, address: n.address || null });
+    const stableOf = (n) => ({ ...n, online: undefined, last_seen: undefined, resources: undefined, address: undefined });
+    const liveRegions = new Map(); // node id → its live region
+
+    function live(l) {
+      const res = l.resources;
       const memory = res.mem_total ? `${gb(res.mem_available)} free of ${gb(res.mem_total)}` : null;
+      return [
+        h('div.node-online', l.online ? pill('online', 'ok', { pulse: true }) : pill('offline', 'neutral'),
+          l.online ? null : h('span.muted.small', 'last seen ', timeAgo(l.last_seen))),
+        kv([
+          ['CPUs', res.cpus ? String(res.cpus) : null],
+          ['Memory', memory],
+          ['Disk free', res.disk_free ? gb(res.disk_free) : null],
+          ['Battery', typeof res.battery === 'number' ? `${res.battery}%` : null],
+          ['Address', l.address],
+        ]),
+      ];
+    }
+
+    function card(n) {
+      const region = h('div.node-live');
+      liveRegions.set(n.id, region);
       return h('section.card.node-card',
         h('div.card-head',
           h('div.card-title', h('h2', n.name), h('span.muted', osName(n.os), n.arch ? ` · ${n.arch}` : '')),
           h('div.node-state', statePills(n))),
         n.device === 'pending' ? callout('warn', 'Waiting for approval', `Approve this device if you just joined ${n.name} yourself. What it offers is approved in a second step.`) : null,
-        n.device === 'approved' && n.commands === 'pending'
+        n.device === 'approved' && n.commands === 'pending' && !n.commands_approved_at
+          ? callout('warn', 'Waiting for you to approve what it offers', `It offers ${capSummary(n.declared)}, listed below. It serves nothing until you approve.`)
+          : null,
+        n.device === 'approved' && n.commands === 'pending' && n.commands_approved_at
           ? callout('warn', 'It offers more than you approved', `Approved so far: ${capSummary(n.approved)}. It now offers: ${capSummary(n.declared)}. Until you approve, it serves only what both include.`)
           : null,
+        region,
         kv([
           ['ID', mono(n.id, { copy: true })],
-          ['Last seen', n.online ? 'now' : timeAgo(n.last_seen)],
           ['May run', capSummary(n.effective)],
           ['Offers', capSummary(n.declared)],
           ['Tags', (n.tags || []).length ? h('span.tag-list', n.tags.map((t) => badge(t))) : h('span.muted', 'none')],
-          ['CPUs', res.cpus ? String(res.cpus) : null],
-          ['Memory', memory],
-          ['Disk free', res.disk_free ? gb(res.disk_free) : null],
-          ['Battery', typeof res.battery === 'number' ? `${res.battery}%` : null],
           ['Version', n.version || null],
-          ['Address', n.address || null],
         ]),
         offers(n),
         h('div.actions', actions(n)));
@@ -151,7 +172,11 @@ export default {
         return;
       }
       paint(list, 'nodes', () => null);
-      reconcile(list, nodes, (n) => n.id, card);
+      reconcile(list, nodes.map(stableOf), (n) => n.id, card);
+      for (const n of nodes) {
+        const region = liveRegions.get(n.id);
+        if (region && region.isConnected) paint(region, liveOf(n), live);
+      }
     }
 
     ctx.follow(nodesResource, (d) => {

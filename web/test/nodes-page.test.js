@@ -60,7 +60,8 @@ test('a node goes through both approvals and can be revoked', async (t) => {
   button(root, 'Approve device').click();
   await settle();
   assert.ok(calls.some((c) => c.method === 'POST' && c.path === '/api/nodes/8233270f8a24/approve'));
-  assert.match(root.textContent, /offers more than approved/);
+  assert.match(root.textContent, /commands waiting/);
+  assert.match(root.textContent, /Waiting for you to approve what it offers/);
   button(root, 'Approve what it offers').click();
   await settle();
   assert.ok(calls.some((c) => c.method === 'POST' && c.path === '/api/nodes/8233270f8a24/approve-commands'));
@@ -73,6 +74,23 @@ test('a node goes through both approvals and can be revoked', async (t) => {
   assert.ok(calls.some((c) => c.method === 'POST' && c.path === '/api/nodes/8233270f8a24/revoke'));
   assert.match(root.textContent, /revoked/);
   assert.equal(button(root, 'Revoke'), undefined, 'a revoked node has nothing left to do');
+});
+
+test('a heartbeat refreshes the figures and keeps the card and its buttons', async (t) => {
+  const { root, bridge } = await openPage(t, [node({ device: 'approved', commands: 'approved' })]);
+  const revoke = button(root, 'Revoke');
+  assert.match(root.textContent, /4\.0 GB free of 16 GB/);
+  bridge.nodes = [node({ device: 'approved', commands: 'approved', resources: { cpus: 8, mem_total: 16 * 2 ** 30, mem_available: 6 * 2 ** 30 } })];
+  const { nodesResource } = await import('../assets/app/resources.js');
+  await nodesResource.refresh();
+  await settle();
+  assert.match(root.textContent, /6\.0 GB free of 16 GB/, 'the figures follow');
+  assert.equal(button(root, 'Revoke'), revoke, 'the button is the same node');
+  bridge.nodes = [node({ device: 'approved', commands: 'approved', online: false, last_seen: '2026-10-20T09:00:00Z' })];
+  await nodesResource.refresh();
+  await settle();
+  assert.match(root.textContent, /offline/);
+  assert.equal(button(root, 'Revoke'), revoke);
 });
 
 test('the join code dialog shows the line to paste', async (t) => {
