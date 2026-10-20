@@ -331,7 +331,26 @@ func runCmd(args []string) int {
 	if opts.container {
 		appOpts.Listen = containerListen
 	}
+	boot := cfgs.Boot()
+	if boot.TailnetEnabled {
+		// fridolin core start passes it from the keychain; tsnet needs it
+		// only until its state folder holds the node's key.
+		appOpts.TailnetAuthKey = os.Getenv("TS_AUTHKEY")
+	}
+	if boot.LeaseEnabled {
+		st, where, err := coreStoreFrom("", boot.VaultBucket, os.Environ())
+		if err != nil {
+			log.Printf("core.lease is on, but: %v", err)
+			return 1
+		}
+		log.Printf("Core lease: in %s", where)
+		appOpts.LeaseStore = st
+	}
 	bridge, err := app.New(appOpts)
+	if errors.Is(err, app.ErrLeaseHeld) {
+		log.Printf("not starting: %v", err)
+		return 3
+	}
 	if err != nil {
 		log.Printf("creating bridge: %v", err)
 		return 1

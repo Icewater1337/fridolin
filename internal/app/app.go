@@ -23,6 +23,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
@@ -36,6 +37,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/registry"
 	"github.com/Icewater1337/fridolin/internal/store"
+	"github.com/Icewater1337/fridolin/internal/tailnet"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
 
 	wastore "go.mau.fi/whatsmeow/store"
@@ -109,6 +111,9 @@ type App struct {
 	// intake is what comes in from WhatsApp, which Stop closes first.
 	intake IntakeGate
 
+	// core is the tailnet node and the core lease (core_runtime.go).
+	core coreRuntime
+
 	// registry owns the brain workflows, including add serialization.
 	registry *registry.Registry
 	// applyMu keeps reading the configuration and applying it to the
@@ -132,6 +137,17 @@ type Options struct {
 	// come only from its environment (the vault never reads or makes host
 	// secrets there).
 	Container bool
+	// Tailnet makes the core's tailnet node when core.tailnet.enabled; nil
+	// uses tsnet (tailnet.New). Tests pass a fake.
+	Tailnet tailnet.Factory
+	// TailnetAuthKey joins the tailnet the first time (TS_AUTHKEY).
+	TailnetAuthKey string
+	// LeaseStore is the vault bucket that holds the core lease; New
+	// refuses core.lease.enabled without one.
+	LeaseStore cloud.ObjectStore
+	// LeaseSettle is how long taking the lease waits before it reads its
+	// write back (default 3 s; tests shorten it).
+	LeaseSettle time.Duration
 }
 
 // New creates and wires up all components. It holds the data
@@ -201,7 +217,19 @@ func New(opts Options) (_ *App, err error) {
 		activity: activity.New(500),
 		started:  time.Now(),
 		restart:  opts.Restart,
+		core: coreRuntime{tailnetFactory: opts.Tailnet, tailnetAuthKey: opts.TailnetAuthKey,
+			leaseStore: opts.LeaseStore, leaseSettle: opts.LeaseSettle},
 	}
+	// The lease before any channel exists: a copy of the core that another
+	// device runs must not even connect.
+	if err := b.acquireLease(); err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			b.releaseLease()
+		}
+	}()
 	if cfg.HTTPEnabled {
 		// A change to http_listen waits for a restart: until then the
 		// server listens, and runs are told, where it started.
@@ -258,6 +286,9 @@ func New(opts Options) (_ *App, err error) {
 		}
 		b.wa = wa
 		b.lids = wa.LIDStore
+	}
+	if b.core.lease != nil {
+		b.wa = leaseGate{Messenger: b.wa, lost: b.core.lost.Load}
 	}
 
 	b.intents = intent.NewStore(cfgs.Boot().Layout().Intents)
@@ -341,13 +372,25 @@ func (b *App) Start(ctx context.Context) error {
 		Handler:          func() http.Handler { return b.newHTTPHandler(b.listen) },
 		DashboardEnabled: !cfg.Dashboard.Disabled,
 		Resume:           func(ctx context.Context) { b.outbox.Start(); b.resume(ctx) }, Connect: b.connectLoop,
-		Watch:      func(ctx context.Context) { b.watchRequiredFiles(ctx, requiredFilesEvery) },
-		Background: []func(context.Context){b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start, b.vault.Start},
+		Watch: func(ctx context.Context) { b.watchRequiredFiles(ctx, requiredFilesEvery) },
+		// The tailnet first: the node port listens on it.
+		Background: []func(context.Context){b.startTailnet, b.runLease, b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start, b.vault.Start},
 	})
 }
 
 // connectLoop retains the bridge's ownership of the connection goroutine.
-func (b *App) connectLoop(ctx context.Context) { whatsapp.RunConnectLoop(ctx, b.wa.Connect) }
+// A lost core lease ends it (leaseLost).
+func (b *App) connectLoop(ctx context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	b.core.mu.Lock()
+	b.core.stopConnect = cancel
+	b.core.mu.Unlock()
+	if b.core.lost.Load() {
+		return
+	}
+	whatsapp.RunConnectLoop(ctx, b.wa.Connect)
+}
 
 // Stop shuts everything down in dependency order, once: a restart and a
 // signal that come together, or a test and its cleanup, stop the bridge
@@ -372,7 +415,7 @@ func (b *App) Stop() {
 func (b *App) stopResources() {
 	b.supervisor.Stop(StopOptions{Logger: b.logger,
 		CloseIntake: b.intake.Close, HTTPGrace: httpStopWait,
-		Background: []func(){b.sched.Stop, b.backup.Stop, b.plaud.Stop, b.site.Stop, b.nodes.Stop, b.vault.Stop},
+		Background: []func(){b.sched.Stop, b.backup.Stop, b.plaud.Stop, b.site.Stop, b.nodes.Stop, b.vault.Stop, b.stopTailnet},
 		KeepPending: func() {
 			for _, m := range b.deb.Drain() {
 				b.keep(InboundHeld, "", m)
@@ -380,7 +423,10 @@ func (b *App) stopResources() {
 		},
 		Brains: b.brainMgr.Stop, Outbox: b.outbox.Stop, OTP: b.otp.Stop,
 		Disconnect: b.wa.Disconnect, ConnectionGrace: connectStopWait,
-		EndIntake: b.intake.End, CloseStore: b.store.Close, ReleaseLock: b.lock.Release,
+		EndIntake: b.intake.End, CloseStore: b.store.Close,
+		// The lease goes free once nothing here sends any more, and before
+		// the data dir's lock: the next core may start right after.
+		ReleaseLock: func() { b.releaseLease(); b.lock.Release() },
 	})
 }
 

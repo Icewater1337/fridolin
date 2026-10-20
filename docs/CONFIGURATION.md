@@ -1010,10 +1010,12 @@ Linux or with the sandbox off, where brains can read this folder.
 
 This is containment, not a jail — it raises the cost of a prompt injection
 rather than eliminating it. Linux has no `sandbox-exec`: the bridge refuses a
-config with `sandbox.enabled` on there (the Linux default is off). Running
-the bridge as a dedicated user keeps brains out of your own files, but not
-out of the bridge's data dir: brains run as that user too, so they can read
-the dashboard token and change any setting.
+config with `sandbox.enabled` on there (the Linux default is off), except in
+the `fridolin-core` container, where brains run under bubblewrap instead
+(on by default there; see [The brains' sandbox in the container](CORE.md#the-brains-sandbox-in-the-container)).
+Running the bridge as a dedicated user keeps brains out of your own files,
+but not out of the bridge's data dir: brains run as that user too, so they
+can read the dashboard token and change any setting.
 
 ### What the sandbox does not cover
 
@@ -1509,12 +1511,21 @@ A value of `0` or `""`, like leaving the key out, means the default.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `tailnet.enabled` | `false` | join the tailnet as a device of its own (tsnet), with the auth key from the host's secrets |
-| `tailnet.hostname` | `"fridolin-core"` | the core's name on the tailnet: one DNS label, lower-case letters, digits and `-` |
-| `lease.enabled` | `false` | take and renew the core lease, `core/lease.json` in the vault bucket, so two copies of the core never run one WhatsApp session |
-| `lease.renew_seconds` | `60` | how often the holder renews the lease, 1 to 86400 |
-| `lease.stale_seconds` | `300` | how long after its last renewal another host may take the lease over, 1 to 86400; must be more than `renew_seconds` |
+| `tailnet.enabled` *(restart)* | `false` | join the tailnet as a device of its own (tsnet), with the auth key from the host's secrets, and serve the dashboard and the node port there |
+| `tailnet.hostname` *(restart)* | `"fridolin-core"` | the core's name on the tailnet: one DNS label, lower-case letters, digits and `-` |
+| `lease.enabled` *(restart)* | `false` | take and renew the core lease, `core/lease.json` in the vault bucket, so two copies of the core never run one WhatsApp session |
+| `lease.renew_seconds` *(restart)* | `60` | how often the holder renews the lease, 1 to 86400 |
+| `lease.stale_seconds` *(restart)* | `300` | how long after its last renewal another host may take the lease over, 1 to 86400; must be more than `renew_seconds` |
 | `memory_limit_gb` | `8` | the memory the core's container may use, in GB |
+
+`core.tailnet.enabled`, `core.tailnet.hostname`, `core.lease.enabled`,
+`core.lease.renew_seconds` and `core.lease.stale_seconds` need a restart:
+the tailnet node joins and the lease is taken as the bridge starts.
+
+[docs/CORE.md](CORE.md) says what the tailnet node and the lease do. With
+`lease.enabled` the bridge finds the vault bucket as `fridolin core`
+does: `$FRIDOLIN_CORE_STORE`, else `vault.bucket` *(restart)* with
+`B2_VAULT_KEY_ID` and `B2_VAULT_KEY`; it does not start without one.
 
 ### `vault`
 

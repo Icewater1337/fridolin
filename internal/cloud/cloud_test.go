@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +15,22 @@ import (
 	"testing"
 	"time"
 )
+
+// A missing object matches both this package's sentinel and io/fs's, which
+// the lease and the core export test for.
+func TestNotFoundIsNotExist(t *testing.T) {
+	d, err := NewDir(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = d.Get(context.Background(), "core/lease.json")
+	if !errors.Is(err, ErrNotFound) || !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("Get of a missing key = %v, want ErrNotFound and fs.ErrNotExist", err)
+	}
+	if errors.Is(errors.New("other"), ErrNotFound) || errors.Is(fmt.Errorf("w: %w", fs.ErrPermission), ErrNotFound) {
+		t.Fatal("ErrNotFound matched another error")
+	}
+}
 
 func TestValidKey(t *testing.T) {
 	for _, k := range []string{"a", "a/b.txt", ".fridolin-vault/manifest.json", "x y/z"} {

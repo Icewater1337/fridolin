@@ -25,7 +25,7 @@ func Starter(goos string) *File {
 		DangerouslySkipPermissions: true,
 		HTTPListen:                 DefaultHTTPListen,
 		OTPGuard:                   true,
-		Sandbox:                    SandboxConfig{Enabled: goos == "darwin", DenyPaths: []string{}, AllowPaths: []string{}},
+		Sandbox:                    SandboxConfig{Enabled: SandboxSupported(goos), DenyPaths: []string{}, AllowPaths: []string{}},
 		// A new install has no scripts written before tokens.
 		ScriptAPI: ScriptAPIConfig{TokenlessSend: &f},
 	}

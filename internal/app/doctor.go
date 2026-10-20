@@ -72,8 +72,11 @@ type DoctorCheck struct {
 // DoctorEnv is what checks ask of the system, as functions so that tests
 // fake every one of them: no check calls exec, os or syscall itself.
 type DoctorEnv struct {
-	GOOS string
-	Home string
+	// ConfigGOOS is the platform configs are resolved for (ConfigGOOS):
+	// config.ContainerGOOS in the fridolin-core image.
+	ConfigGOOS string
+	GOOS       string
+	Home       string
 	// ConfigPath is the config file; Config is it loaded, or nil with
 	// ConfigErr saying why it did not load.
 	ConfigPath string
@@ -94,7 +97,8 @@ type DoctorEnv struct {
 	WriteProbe func(dir string) error
 	// Dial opens a TCP connection to address and closes it again.
 	Dial func(ctx context.Context, address string) error
-	Now  func() time.Time
+	// Now is the time the checks judge ages by; nil is time.Now.
+	Now func() time.Time
 	// MemorySelfTest runs the memory index's provenance gate on a
 	// scratch brain (memindex.SelfTest); MemoryStale lists what a brain's
 	// index does not hold as it is on disk (memindex.Stale).
@@ -111,10 +115,10 @@ var DoctorRegistry = []DoctorCheck{
 	{ID: "claude", Title: "Claude CLI", Required: true, Applies: claudeMode, Run: checkClaudeCLI},
 	{ID: "claude-login", Title: "Claude login for sandboxed brains", Required: true, Applies: claudeMode, Run: checkClaudeLogin},
 	{ID: "codex", Title: "Codex CLI", Required: true, Applies: codexMode, Run: checkCodexCLI},
-	{ID: "tailscale", Title: "Tailscale", Needed: "M1", Run: checkTailscale},
-	{ID: "tailscale-authkey", Title: "Tailscale auth key in host secrets", Needed: "M1", Run: checkSecrets(tailscaleAuthKeySecret)},
-	{ID: "b2-keys", Title: "Backblaze B2 keys in host secrets", Needed: "M3", Run: checkSecrets(b2Secrets...)},
-	{ID: "docker", Title: "Docker", Needed: "M1", Run: checkDocker},
+	{ID: "tailscale", Title: "Tailscale", Needed: "M1", Applies: onHost, Run: checkTailscale},
+	{ID: "tailscale-authkey", Title: "Tailscale auth key in host secrets", Needed: "M1", Applies: onHost, Run: checkSecrets(tailscaleAuthKeySecret)},
+	{ID: "b2-keys", Title: "Backblaze B2 keys in host secrets", Needed: "M3", Applies: onHost, Run: checkSecrets(b2Secrets...)},
+	{ID: "docker", Title: "Docker", Needed: "M1", Applies: onHost, Run: checkDocker},
 	toolCheck("restic", "M3", []string{"version"}, "restic", "restic"),
 	toolCheck("rclone", "M3", []string{"version"}, "rclone", "rclone"),
 	toolCheck("ffmpeg", "", []string{"-version"}, "ffmpeg", "ffmpeg"),
@@ -275,6 +279,7 @@ func SystemDoctorEnv(configFlag string) *DoctorEnv {
 	path, _ := ConfigPathFromPaths(configFlag, inputs.Paths)
 	return &DoctorEnv{
 		GOOS:       runtime.GOOS,
+		ConfigGOOS: ConfigGOOS(),
 		Home:       inputs.Paths.Home,
 		ConfigPath: path,
 		Getenv:     os.Getenv,

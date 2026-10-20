@@ -30,15 +30,14 @@ import (
 	"time"
 
 	"filippo.io/age"
+
+	"github.com/Icewater1337/fridolin/internal/cloud"
 )
 
-// Store is what export and import need of the object store: the subset of
-// cloud.ObjectStore they use. Get of a missing key returns an error that
-// matches fs.ErrNotExist.
-type Store interface {
-	Get(ctx context.Context, key string) (io.ReadCloser, error)
-	Put(ctx context.Context, key string, r io.Reader) error
-}
+// Store is the vault bucket exports go to. Export and import use Get and
+// Put; Get of a missing key returns an error that matches fs.ErrNotExist,
+// as cloud.ErrNotFound does.
+type Store = cloud.ObjectStore
 
 // Keys in the vault bucket.
 const (

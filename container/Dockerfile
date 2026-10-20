@@ -110,10 +110,14 @@ RUN groupadd --gid 10001 fridolin \
  && install -d -o fridolin -g fridolin -m 0700 /data
 
 USER fridolin:fridolin
+# FRIDOLIN_CONTAINER=1 tells the bridge it runs here: brains' runs are
+# sandboxed with bubblewrap (sandbox.enabled is allowed and on by default),
+# and doctor leaves out the host's checks.
 ENV HOME=/var/lib/fridolin \
     FRIDOLIN_HOME=/data \
     FRIDOLIN_CONFIG=/data/config.json \
     TZ=UTC \
+    FRIDOLIN_CONTAINER=1 \
     LANG=C.UTF-8
 WORKDIR /data
 VOLUME ["/data"]

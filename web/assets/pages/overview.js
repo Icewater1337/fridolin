@@ -25,6 +25,7 @@ export default {
     const waCard = h('div.card.wa-card');
     const claudeCard = h('div.card');
     const sandboxCard = h('div.card');
+    const coreBox = h('div');
     const backupCard = h('div.card');
     const brainsBox = h('div');
     const brainList = h('div.brain-list');
@@ -35,6 +36,7 @@ export default {
       cta,
       alerts,
       waCard,
+      coreBox,
       h('div.grid.three', claudeCard, sandboxCard, backupCard),
       h('section.section',
         h('div.section-head', h('h2.section-title', 'Brains'), btn('Manage', { href: '#/brains', small: true, kind: 'ghost', icon: 'right' })),
@@ -147,11 +149,33 @@ export default {
     const renderSandbox = (s) => paint(sandboxCard, s.sandbox || {}, (sb) => {
       let p;
       let text;
-      if (!sb.supported) { p = pill('Not available', 'neutral'); text = 'The sandbox uses macOS sandbox-exec. Here brains can read everything the bridge’s user can, the dashboard token included. A separate user for the bridge keeps them out of your own files, not out of the bridge’s.'; } else if (sb.enabled) { p = pill('On', 'ok'); text = 'Brains write only their own folders, and cannot read other brains’ folders, your keys, keychains, mail or documents.'; } else { p = pill('Off', 'warn'); text = 'Brains can read everything your user account can. Turn the sandbox on in Settings.'; }
+      if (!sb.supported) { p = pill('Not available', 'neutral'); text = 'The sandbox uses macOS sandbox-exec, or bubblewrap in the fridolin-core container. Here brains can read everything the bridge’s user can, the dashboard token included. A separate user for the bridge keeps them out of your own files, not out of the bridge’s.'; } else if (sb.enabled) { p = pill('On', 'ok'); text = 'Brains write only their own folders, and cannot read other brains’ folders, your keys, keychains, mail or documents.'; } else { p = pill('Off', 'warn'); text = 'Brains can read everything your user account can. Turn the sandbox on in Settings.'; }
       return [
         h('div.card-head', h('div.card-title', icon('shield'), h('h2', 'Sandbox')), p),
         h('div.card-body', h('p.muted', text), sb.supported ? h('a.small', { href: '#/settings/sandbox' }, 'Sandbox settings') : null),
       ];
+    });
+
+    // The containerized core: its tailnet name and its lease, when either
+    // is on. A lost lease means this copy no longer sends anything.
+    const renderCore = (s) => paint(coreBox, s.core || null, (c) => {
+      if (!c) return [];
+      const tn = c.tailnet;
+      const ls = c.lease;
+      let p = pill('Core', 'neutral');
+      if (ls && ls.state === 'lost') p = pill('Lease lost', 'bad');
+      else if (tn && tn.state === 'error') p = pill('Tailnet failed', 'bad');
+      else if (ls && ls.state === 'held') p = pill('Holds the lease', 'ok');
+      else if (tn && tn.state === 'up') p = pill('On the tailnet', 'ok');
+      return h('div.card',
+        h('div.card-head', h('div.card-title', icon('lock'), h('h2', 'Core')), p),
+        h('div.card-body',
+          tn ? h('p', 'Tailnet: ', tn.state === 'up' && tn.url ? mono(tn.url, { copy: true }) : h('span.muted', tn.state === 'starting' ? `joining as ${tn.hostname}…` : tn.state)) : null,
+          tn && tn.error ? h('p.error-text.small', tn.error) : null,
+          ls && ls.state === 'lost'
+            ? h('p.error-text.small', `The core lease was lost${ls.holder ? ` to ${ls.holder}` : ''}: WhatsApp and outbound sending are stopped on this machine.`)
+            : null,
+          ls && ls.state !== 'lost' ? h('p.muted', 'Lease: device ', mono(ls.device_id || ''), ls.renewed_at ? [', renewed ', timeAgo(ls.renewed_at)] : null) : null));
     });
 
     // Whose backup failed: the bridge's settings, or a brain by its name.
@@ -214,6 +238,7 @@ export default {
       renderWA(s);
       renderClaude(s);
       renderSandbox(s);
+      renderCore(s);
       renderBackup(s);
       renderBrains(s);
     };

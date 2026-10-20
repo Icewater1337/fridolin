@@ -258,11 +258,11 @@ M0 — Foundations (fridolin):
 M1 — Containerized core with `tsnet` and the lease:
 
 - [ ] `Dockerfile` and `compose.yaml` for `fridolin-core`; named volume `fridolin-data`; image build in CI for amd64 and arm64
-- [ ] `tsnet` listener in the core; dashboard and node port served on the tailnet only; MagicDNS name `fridolin-core`
+- [x] `tsnet` listener in the core; dashboard and node port served on the tailnet only; MagicDNS name `fridolin-core`
 - [ ] `fridolin core start | stop | update | status` host wrapper; age identity and `CLAUDE_CODE_OAUTH_TOKEN` from the host keychain into the container environment
-- [ ] `fridolin core export`, `import --latest`, `promote`; core lease object in B2 with heartbeat and refusal logic
-- [ ] Per-brain Unix users inside the container mapped onto the existing `brains/<id>/` state folders; `sandbox.deny_paths` mapped to mount denials; `bwrap` when available; the Linux refusal of `sandbox.enabled` lifted for the container sandbox
-- [ ] Golden files for the container's CLI arguments and sandbox profile; `fridolin service` keeps working for native installs
+- [x] `fridolin core export`, `import --latest`, `promote`; core lease object in B2 with heartbeat and refusal logic
+- [x] Per-brain Unix users inside the container mapped onto the existing `brains/<id>/` state folders; `sandbox.deny_paths` mapped to mount denials; `bwrap` when available; the Linux refusal of `sandbox.enabled` lifted for the container sandbox
+- [x] Golden files for the container's CLI arguments and sandbox profile; `fridolin service` keeps working for native installs
 - [ ] Gate: the core runs in a container on the Mac mini and answers WhatsApp; `export`, `import`, `promote` moves it to a Linux VM and then to the Windows machine, each in under an hour; the previous copy refuses to start as core afterwards
 
 M2 — Nodes:

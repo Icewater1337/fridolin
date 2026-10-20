@@ -98,6 +98,11 @@ func (l Layout) MemoryIndex(id string) string { return l.join("memory", id+".db"
 // schedules, which only the bridge writes.
 func (l Layout) Intents(id string) string { return l.join("intents", id+".json") }
 
+// BrainFolders holds the brains' folders in the core's container, so that
+// they move with the volume and its exports (docs/CORE.md). There it is
+// where new brain folders go, as the home folder is elsewhere.
+func (l Layout) BrainFolders() string { return l.join("brains-folders") }
+
 // EnsureDir creates dir and its parents with mode 0700 if it is missing
 // and returns it. A folder that exists keeps its mode.
 func EnsureDir(dir string) (string, error) {

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -19,8 +20,10 @@ import (
 	"filippo.io/age"
 	"github.com/Icewater1337/fridolin/container"
 	"github.com/Icewater1337/fridolin/internal/app"
+	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/coreexport"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/lease"
 	"github.com/Icewater1337/fridolin/internal/platform"
@@ -269,14 +272,31 @@ func coreImport(ctx context.Context, f insideFlags, env coreEnv) error {
 }
 
 // leaseOptions are the lease's settings for this data dir.
-func leaseOptions(st objectStore, dataDir string, env coreEnv) (lease.Options, error) {
+func leaseOptions(st cloud.ObjectStore, dataDir string, f insideFlags, env coreEnv) (lease.Options, error) {
 	id, err := lease.DeviceID(dataDir)
 	if err != nil {
 		return lease.Options{}, err
 	}
 	host, _ := os.Hostname()
+	renew, stale := leaseTimings(f)
 	return lease.Options{Store: st, DeviceID: id, Hostname: host, PID: os.Getpid(), Version: version.String(),
+		Renew: renew, Stale: stale,
 		Logf: func(format string, a ...any) { fmt.Fprintf(env.stderr, format+"\n", a...) }}, nil
+}
+
+// leaseTimings are core.lease.renew_seconds and stale_seconds of the
+// config, so that promote and status judge a lease as the cores do; the
+// defaults when there is no config yet (a fresh volume before import).
+func leaseTimings(f insideFlags) (renew, stale time.Duration) {
+	path := configPath(f.config)
+	if _, err := os.Stat(path); err != nil {
+		return lease.DefaultRenew, lease.DefaultStale
+	}
+	cfg, err := app.LoadExistingConfig(path)
+	if err != nil {
+		return lease.DefaultRenew, lease.DefaultStale
+	}
+	return cfg.Core.Lease.Renew(), cfg.Core.Lease.Stale()
 }
 
 func corePromote(ctx context.Context, f insideFlags, env coreEnv) error {
@@ -288,7 +308,7 @@ func corePromote(ctx context.Context, f insideFlags, env coreEnv) error {
 	if err != nil {
 		return err
 	}
-	opts, err := leaseOptions(st, dataDir, env)
+	opts, err := leaseOptions(st, dataDir, f, env)
 	if err != nil {
 		return err
 	}
@@ -296,9 +316,15 @@ func corePromote(ctx context.Context, f insideFlags, env coreEnv) error {
 	if err != nil {
 		return err
 	}
+	// A copy that was taken over may run as the core again.
+	if err := os.Remove(filepath.Join(config.Layout{Root: dataDir}.Core(), app.SupersededFile)); err == nil {
+		fmt.Fprintln(env.stderr, "This data dir had been taken over by another device; it may run as the core again.")
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	r := l.Record()
 	fmt.Fprintf(env.stdout, "This device (%s, %s) holds the core lease in %s. A core on this data dir with core.lease on renews it; unrenewed it goes stale after %s.\n",
-		r.DeviceID, r.Hostname, where, lease.DefaultStale)
+		r.DeviceID, r.Hostname, where, opts.Stale)
 	return nil
 }
 
@@ -311,6 +337,9 @@ func coreStatus(ctx context.Context, f insideFlags, env coreEnv) error {
 		fmt.Fprintf(env.stdout, "this device: %s (data dir %s)\n", id, dataDir)
 	} else {
 		return err
+	}
+	if by, err := os.ReadFile(filepath.Join(config.Layout{Root: dataDir}.Core(), app.SupersededFile)); err == nil {
+		fmt.Fprintf(env.stdout, "taken over by device %s: this copy does not start as the core until fridolin core promote\n", strings.TrimSpace(string(by)))
 	}
 	st, where, err := coreStoreFrom(f.store, f.bucket, env.environ)
 	if err != nil {
@@ -325,11 +354,12 @@ func coreStatus(ctx context.Context, f insideFlags, env coreEnv) error {
 		return nil
 	}
 	now := time.Now()
+	_, stale := leaseTimings(f)
 	state := "live"
 	switch {
 	case r.Released:
 		state = "released"
-	case !r.Live(now, lease.DefaultStale):
+	case !r.Live(now, stale):
 		state = "stale"
 	}
 	fmt.Fprintf(env.stdout, "lease: %s — device %s (%s, pid %d, version %s), started %s, renewed %s ago\n",
@@ -517,23 +547,17 @@ func coreHost(ctx context.Context, sub string, args []string, env coreEnv, d hos
 	return 0
 }
 
-// writeCompose writes the compose file built into this binary to path, so
-// the container is always the one this version expects.
+// writeCompose writes the compose file built into this binary to path, and
+// the seccomp profile it names beside it, so the container is always the
+// one this version expects.
 func writeCompose(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".compose-*.yaml")
-	if err != nil {
-		return err
+	for dst, data := range map[string][]byte{path: container.Compose, filepath.Join(filepath.Dir(path), "seccomp.json"): container.Seccomp} {
+		if err := fsx.WriteFileAtomic(dst, data, 0o600, false); err != nil {
+			return err
+		}
 	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(container.Compose); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return nil
 }

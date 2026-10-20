@@ -42,12 +42,32 @@ func localAddress(listen string) string {
 // checkNodesPort is M2's gate on this machine: the node port answers.
 func checkNodesPort(ctx context.Context, env *DoctorEnv) DoctorResult {
 	listen := env.Config.Nodes.Listen
+	if env.Config.Core.Tailnet.Enabled {
+		return checkNodesPortOnTailnet(env, listen)
+	}
 	addr := localAddress(listen)
 	if err := env.Dial(ctx, addr); err != nil {
 		return DoctorResult{Status: DoctorFail, Detail: fmt.Sprintf("nothing answers on %s (nodes.listen %s): %v", addr, listen, err),
 			Fix: "start the bridge (fridolin service status); its log says why the node port did not open, such as another program on the port"}
 	}
 	return DoctorResult{Status: DoctorOK, Detail: "the node port answers on " + addr}
+}
+
+// checkNodesPortOnTailnet: with core.tailnet on, the node port listens
+// on the core's tailnet node only (App.NodeListener), which doctor does
+// not reach from here; it answers once that node is up.
+func checkNodesPortOnTailnet(env *DoctorEnv, listen string) DoctorResult {
+	var st tailnetStateRecord
+	ok, err := env.readCoreState(tailnetStateFile, &st)
+	switch {
+	case err != nil:
+		return DoctorResult{Status: DoctorFail, Detail: "reading the core's tailnet state: " + err.Error()}
+	case !ok || st.State != "up":
+		return DoctorResult{Status: DoctorFail, Detail: fmt.Sprintf("the node port (nodes.listen %s) listens on the tailnet, and the core's tailnet node is not up", listen),
+			Fix: "see the tailnet check; nodes connect once the core is on the tailnet"}
+	}
+	_, port, _ := net.SplitHostPort(listen)
+	return DoctorResult{Status: DoctorOK, Detail: "the node port listens on the tailnet at " + net.JoinHostPort(strings.TrimSuffix(st.DNSName, "."), port)}
 }
 
 // checkNodesSeen warns about approved nodes the core has not heard from

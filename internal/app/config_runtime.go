@@ -90,7 +90,7 @@ func ConfigPathsFor(home string) config.Paths {
 func ConfigPaths() config.Paths { return ConfigPathsFor(HomeDir()) }
 
 func ConfigOptions() config.Options {
-	return config.Options{Paths: ConfigPaths(), GOOS: runtime.GOOS, Getenv: os.Getenv, CheckBrains: CheckSet}
+	return config.Options{Paths: ConfigPaths(), GOOS: ConfigGOOS(), Getenv: os.Getenv, CheckBrains: CheckSet}
 }
 
 func LoadConfig(path string) (*config.Settings, error) { return config.Load(path, ConfigOptions()) }
@@ -99,4 +99,18 @@ func LoadExistingConfig(path string) (*config.Settings, error) {
 	return config.LoadExisting(path, ConfigOptions())
 }
 
-func EnsureConfigFile(path string) error { return config.EnsureFile(path, ConfigPaths(), runtime.GOOS) }
+func EnsureConfigFile(path string) error { return config.EnsureFile(path, ConfigPaths(), ConfigGOOS()) }
+
+// InContainer reports whether this process runs in the fridolin-core image,
+// whose Dockerfile sets FRIDOLIN_CONTAINER=1 (docs/CORE.md).
+func InContainer() bool { return runtime.GOOS == "linux" && os.Getenv("FRIDOLIN_CONTAINER") == "1" }
+
+// ConfigGOOS is the platform configs are resolved for here: Linux in the
+// container is config.ContainerGOOS, where brains are sandboxed with
+// bubblewrap.
+func ConfigGOOS() string {
+	if InContainer() {
+		return config.ContainerGOOS
+	}
+	return runtime.GOOS
+}

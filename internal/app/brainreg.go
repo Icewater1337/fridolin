@@ -79,9 +79,26 @@ func updateManifest(cs *config.Store, id string, mutate func(m *manifest.Manifes
 func registryFor(cs *config.Store) *registry.Registry {
 	options := registry.Options{Home: HomeDir, CheckDir: brainDirCheck(cs), Templates: brainTemplates, HistoryFile: history.FileName}
 	if cs != nil {
-		options.Home = func() string { return cs.Boot().Home }
+		options.Home = func() string {
+			// In the container the home folder is not kept: brain folders
+			// go in the volume, where ~/ in a new brain's path leads.
+			if root := containerBrainsRoot(cs.Boot()); root != "" {
+				return root
+			}
+			return cs.Boot().Home
+		}
+		options.ConfigHome = func() string { return cs.Boot().Home }
 	}
 	return registry.New(cs, options)
+}
+
+// containerBrainsRoot is, in the core's container, the folder of the data
+// dir that holds the brains' folders; "" elsewhere.
+func containerBrainsRoot(boot config.Boot) string {
+	if !InContainer() || boot.DataDir == "" {
+		return ""
+	}
+	return config.Layout{Root: AbsPath(boot.DataDir)}.BrainFolders()
 }
 
 // brainDirCheck keeps requested validation first and additionally protects the

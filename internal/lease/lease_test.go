@@ -13,15 +13,18 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/cloud"
 )
 
 // memStore is an object store in memory; failGet and failPut make its
 // calls fail.
 type memStore struct {
-	mu               sync.Mutex
-	objs             map[string][]byte
-	failGet, failPut error
-	puts             int
+	cloud.ObjectStore // Stat, List and Delete, which the lease never calls
+	mu                sync.Mutex
+	objs              map[string][]byte
+	failGet, failPut  error
+	puts              int
 }
 
 func newMemStore() *memStore { return &memStore{objs: map[string][]byte{}} }

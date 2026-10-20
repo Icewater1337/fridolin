@@ -45,6 +45,9 @@ type ReadyAPI struct {
 	DevMode    bool
 	Version    func() string
 	StartedAt  time.Time
+	// Lease, when the core lease is on, is its state: a lost lease means
+	// the channels are stopped, so the bridge is not ready.
+	Lease func() *LeaseStatus
 }
 
 func (a ActivityAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -77,6 +80,9 @@ type ReadyResponse struct {
 	WhatsApp  string    `json:"whatsapp"` // WAState.Mode
 	Version   string    `json:"version"`
 	StartedAt time.Time `json:"started_at"`
+	// Lease is the core lease, when it is on: who holds it, not whose
+	// account this is.
+	Lease *LeaseStatus `json:"lease,omitempty"`
 }
 
 // httpReady handles GET /ready: 200 when /send can deliver (WhatsApp is
@@ -91,6 +97,11 @@ func (a ReadyAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		WhatsApp:  mode,
 		Version:   a.Version(),
 		StartedAt: a.StartedAt,
+	}
+	if a.Lease != nil {
+		if resp.Lease = a.Lease(); resp.Lease != nil && resp.Lease.State != "held" {
+			resp.Ready = false
+		}
 	}
 	status := http.StatusOK
 	if !resp.Ready {

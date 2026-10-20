@@ -20,14 +20,26 @@ func (b *App) requiresToken() bool {
 
 func (b *App) newHTTPHandler(listen string) http.Handler {
 	b.sessionCookie = httpapi.SessionCookieName(listen)
-	return httpapi.New(httpapi.Deps{
+	return httpapi.New(b.httpDeps(listen, nil))
+}
+
+// httpDeps is the HTTP surface for listen; with tailnetHosts, the one the
+// tailnet listener serves (httpapi.Deps.Remote), which shares the session
+// cookie's name with the local one.
+func (b *App) httpDeps(listen string, tailnetHosts map[string]bool) httpapi.Deps {
+	var lease func() *httpapi.LeaseStatus
+	if b.cfgs.Boot().LeaseEnabled {
+		lease = b.leaseStatus
+	}
+	return httpapi.Deps{
 		Listen: listen, Ready: func(w http.ResponseWriter, r *http.Request) {
-			httpapi.ReadyAPI{Connection: b.wa, DevMode: b.dev != nil, Version: version.String, StartedAt: b.started}.ServeHTTP(w, r)
+			httpapi.ReadyAPI{Connection: b.wa, DevMode: b.dev != nil, Version: version.String, StartedAt: b.started, Lease: lease}.ServeHTTP(w, r)
 		}, Send: b.newScriptAPI().Send, Ingest: b.newScriptAPI().Ingest,
 		Builder: b.builderHandler, Brain: b.brainAPIHandler,
 		DashboardDisabled: func() bool { return b.cfgs.Get().Dashboard.Disabled }, Static: web.FS,
 		GoogleCallback: func(w http.ResponseWriter, r *http.Request) { b.newGoogleAPI().Callback(w, r) },
 		Login:          b.newDashboardAuth().Login, Token: b.token, RequiresToken: b.requiresToken,
 		SignedIn: b.newDashboardAuth().SignedIn, API: b.apiMux,
-	})
+		Remote: tailnetHosts != nil, Hosts: tailnetHosts,
+	}
 }

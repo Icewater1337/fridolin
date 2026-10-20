@@ -35,7 +35,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/cloud"
 )
 
 // Key is the lease object's key in the vault bucket.
@@ -48,13 +51,10 @@ const (
 	DefaultSettle = 3 * time.Second
 )
 
-// Store is what the lease needs of the object store: the subset of
-// cloud.ObjectStore it uses. Get of a key that does not exist returns an
-// error that matches fs.ErrNotExist.
-type Store interface {
-	Get(ctx context.Context, key string) (io.ReadCloser, error)
-	Put(ctx context.Context, key string, r io.Reader) error
-}
+// Store is the vault bucket the lease lives in. The lease uses Get and Put;
+// Get of a key that does not exist returns an error that matches
+// fs.ErrNotExist, as cloud.ErrNotFound does.
+type Store = cloud.ObjectStore
 
 // Clock is the time the lease reads and waits on; tests use a fake one.
 type Clock interface {
@@ -131,7 +131,10 @@ type Options struct {
 	// failed for too long, or another device took it. The app stops its
 	// channels there.
 	OnLost func(error)
-	Logf   func(format string, args ...any)
+	// OnRenew, when set, is called after each renewal that
+	// wrote, with the record written: the app shows and records it.
+	OnRenew func(Record)
+	Logf    func(format string, args ...any)
 }
 
 func (o *Options) defaults() error {
@@ -164,6 +167,7 @@ func (o *Options) defaults() error {
 
 // Lease is a held core lease.
 type Lease struct {
+	mu     sync.Mutex // record, for Record from other goroutines
 	opts   Options
 	record Record
 	lastOK time.Time
@@ -249,7 +253,11 @@ func Acquire(ctx context.Context, opts Options) (*Lease, error) {
 }
 
 // Record returns the record this lease last wrote.
-func (l *Lease) Record() Record { return l.record }
+func (l *Lease) Record() Record {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.record
+}
 
 // lostAfter is how long renewal may fail before the holder gives the lease
 // up: one renew interval short of the staleness window, so the channels
@@ -268,7 +276,12 @@ func (l *Lease) Renew(ctx context.Context) error {
 		next := l.record
 		next.RenewedAt = now.UTC()
 		if err = write(ctx, l.opts.Store, next); err == nil {
+			l.mu.Lock()
 			l.record, l.lastOK = next, now
+			l.mu.Unlock()
+			if l.opts.OnRenew != nil {
+				l.opts.OnRenew(next)
+			}
 			return nil
 		}
 	}

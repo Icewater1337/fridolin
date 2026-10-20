@@ -31,6 +31,9 @@ func TestStoreBootSurvivesSavesAndIsAValueCopy(t *testing.T) {
 		c.Dashboard.RequireToken = new(false)
 		c.Nodes.Enabled = true
 		c.Nodes.Listen = "127.0.0.1:8799"
+		c.Core.Tailnet = TailnetConfig{Enabled: true, Hostname: "other-core"}
+		c.Core.Lease = LeaseConfig{Enabled: true, RenewSeconds: 10, StaleSeconds: 40}
+		c.Vault.Bucket = "other-vault"
 		c.AgentProvider = "codex"
 		c.CodexModel = "live-model"
 		return nil
