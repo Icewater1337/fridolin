@@ -16,6 +16,11 @@ for compatibility.
   the existing sandbox and cancellation, and Fridolin site-builder tools.
   See [AI mode](docs/CONFIGURATION.md#ai-mode) for sign-in and the
   Claude-specific settings that do not transfer.
+- `fridolin doctor` checks this machine: config, data dir and free disk,
+  the Claude CLI and the login sandboxed brains need, and what the coming
+  milestones need (Tailscale and its auth key, B2 keys, Docker, restic,
+  rclone, ffmpeg, litestream, age), each line with a fix; `--json` for
+  scripts. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ### Changed
 

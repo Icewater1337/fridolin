@@ -321,6 +321,7 @@ too. Every option is documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md
 ```bash
 fridolin check                           # validate; show who is heard, and the routing
 fridolin check --route 15551234567@s.whatsapp.net
+fridolin doctor                          # what this machine has and lacks, each with a fix
 ```
 
 ### Trying it without WhatsApp

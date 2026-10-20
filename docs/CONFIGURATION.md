@@ -47,6 +47,22 @@ For a bug report, `fridolin check --redact` prints the same with phone
 numbers, group JIDs, LIDs and email addresses masked and `~` for your home
 folder, its log lines and any `--print-sandbox` profile included.
 
+`fridolin doctor` looks at the machine rather than the routing: the config
+loads, the data dir is writable and has room (a warning under 20 GB free,
+a failure under 2 GB), the Claude CLI is there and recent enough (the
+Codex CLI in Codex mode), and sandboxed brains have a login
+(`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` in your shell or the
+service's environment). It also checks what the coming parts of
+[the plan](PLAN.md) need — Tailscale running, its auth key and the four
+Backblaze B2 keys in the host secrets (the Keychain, account `fridolin`,
+on macOS; 0600 files under `$XDG_CONFIG_HOME/fridolin/secrets/` on Linux),
+Docker with its daemon up, and `restic`, `rclone`, `ffmpeg`, `litestream`
+and `age` — and reports those as `missing` or `warn` without failing. It
+asks whether each secret is there and never reads one. Every line that is
+not `ok` has the command that fixes it. It exits with status 1 when a
+required check fails, 0 otherwise; `--json` prints the checks for scripts
+and `--redact` masks the output as check's does.
+
 `fridolin paths` prints the config file and the data dir the other
 commands use, and where each came from (`--json` for a program to read).
 The bridge's log names both, and where each came from, at every start.

@@ -780,3 +780,20 @@ func TestCheckExitsWhenABrainCannotRun(t *testing.T) {
 		})
 	}
 }
+
+// doctor is in the usage text, and refuses an unknown flag or an argument
+// with exit status 2 before it looks at anything.
+func TestDoctorCommandLine(t *testing.T) {
+	if !strings.Contains(usage, "fridolin doctor [--json] [--redact]") {
+		t.Error("the usage text does not list doctor")
+	}
+	for _, args := range [][]string{{"--nope"}, {"extra"}} {
+		var out bytes.Buffer
+		if code := doctorCmd(args, &out); code != 2 {
+			t.Errorf("doctor %v exited %d, want 2", args, code)
+		}
+		if out.Len() != 0 {
+			t.Errorf("doctor %v printed a report: %q", args, out.String())
+		}
+	}
+}

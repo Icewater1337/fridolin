@@ -214,7 +214,8 @@ func TestFolderPicker(t *testing.T) {
 
 // On a system that is not Unix the package builds from unsupported.go
 // alone, whose undefined name stops the build with a message, and on
-// macOS and Linux it leaves that file out.
+// macOS and Linux it leaves that file out. The Windows files written ahead
+// of the port (diskfree_windows.go) build beside it there.
 func TestOnlyUnixBuildsThePackage(t *testing.T) {
 	for _, c := range []struct {
 		goos        string
@@ -227,7 +228,8 @@ func TestOnlyUnixBuildsThePackage(t *testing.T) {
 			t.Fatalf("%s: %v", c.goos, err)
 		}
 		if c.unsupported {
-			if !slices.Equal(pkg.GoFiles, []string{"unsupported.go"}) {
+			files := slices.DeleteFunc(slices.Clone(pkg.GoFiles), func(f string) bool { return strings.HasSuffix(f, "_"+c.goos+".go") })
+			if !slices.Equal(files, []string{"unsupported.go"}) {
 				t.Errorf("%s builds %v, want unsupported.go alone", c.goos, pkg.GoFiles)
 			}
 		} else if slices.Contains(pkg.GoFiles, "unsupported.go") {
