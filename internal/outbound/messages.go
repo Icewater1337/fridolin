@@ -54,7 +54,8 @@ func HelpReply(groupTrigger string) string {
 		"• `!help` — show this help\n" +
 		"• `!stop` — stop what I'm doing for this chat and drop its queued messages\n" +
 		"• `!reset` — like `!stop`, and the next message starts without this chat's earlier messages\n" +
-		"• `!fleet` — the machines connected to me as nodes (direct chats only)"
+		"• `!fleet` — the machines connected to me as nodes (direct chats only)\n" +
+		"• `!lockdown` — owner only: pause all work but reading until `!unlock`"
 	if groupTrigger != "" {
 		help += "\n\nIn this group, start your message with `" + groupTrigger + "` or reply to one of mine to address me, commands included."
 	}
@@ -204,4 +205,59 @@ func FleetReply(enabled bool, nodes []FleetNode, now time.Time) string {
 		}
 	}
 	return b.String()
+}
+
+// The approval poll: a run's request_approval asks the owner with
+// ApprovalQuestion(action) and these options, of which "Show me the
+// draft" sends ApprovalDraftReply and leaves the poll open.
+const (
+	ApprovalYes   = "✅ Yes"
+	ApprovalNo    = "❌ No"
+	ApprovalDraft = "📝 Show me the draft"
+)
+
+// ApprovalQuestion is the question of an approval poll.
+func ApprovalQuestion(action string) string {
+	return "🔐 Approve? " + textx.Truncate(action, 200)
+}
+
+// AskQuestion is the question of an ask_user poll, or the message that
+// asks it without options.
+func AskQuestion(question string) string { return QuestionPrefix + textx.Truncate(question, 1000) }
+
+// ApprovalDraftReply answers a "Show me the draft" vote with what the run
+// gave as its draft.
+func ApprovalDraftReply(action, details string) string {
+	if strings.TrimSpace(details) == "" {
+		return "📝 There is no draft for “" + textx.Truncate(action, 200) + "” beyond what the poll says."
+	}
+	return "📝 The draft for “" + textx.Truncate(action, 200) + "”:\n\n" + details + "\n\nVote Yes or No in the poll above."
+}
+
+// LockdownReply answers !lockdown (on) and !unlock (off); already says
+// the bridge was in that state.
+func LockdownReply(on, already bool) string {
+	switch {
+	case on && already:
+		return "🔒 The bridge is in lockdown already. Send !unlock, or unlock it in the dashboard, to end it."
+	case on:
+		return "🔒 Lockdown: only read-only work runs now. Nothing that writes, sends or submits goes ahead, and no approval is asked. Send !unlock, or unlock it in the dashboard, to end it."
+	case already:
+		return "🔓 The bridge is not in lockdown."
+	}
+	return "🔓 Unlocked: the brains work as before."
+}
+
+// LockdownOwnerOnly answers !lockdown or !unlock from someone who is not
+// the owner (a number in allowed_numbers).
+const LockdownOwnerOnly = "🔒 Only the owner can lock the bridge down or unlock it."
+
+// LockdownRefusedNotice tells a chat that the lockdown kept its request,
+// one of a skill that writes or submits, from running.
+const LockdownRefusedNotice = "🔒 The bridge is in lockdown, so this was not run: it needs more than reading. Unlock it in the dashboard or with !unlock, then send it again."
+
+// RateLimitedNotice tells a chat that it started max runs in the last
+// hour, the most policy.max_runs_per_hour allows.
+func RateLimitedNotice(max int) string {
+	return fmt.Sprintf("⏳ This chat started %d runs in the last hour, the most allowed. Try again later.", max)
 }

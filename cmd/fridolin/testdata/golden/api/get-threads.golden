@@ -1,0 +1,27 @@
+GET /api/threads
+200 OK
+Content-Type: application/json
+
+[
+  {
+    "brains": [
+      "main"
+    ],
+    "count": 1,
+    "last": "<TIME>",
+    "runs": [
+      {
+        "brain": "main",
+        "chat": "15551234567@s.whatsapp.net",
+        "detail": "",
+        "duration_ms": "<DURATION_MS>",
+        "outcome": "ok",
+        "risk": "write",
+        "run": "<RUN>",
+        "skill": "",
+        "started": "<TIME>"
+      }
+    ],
+    "thread": "15551234567@s.whatsapp.net"
+  }
+]

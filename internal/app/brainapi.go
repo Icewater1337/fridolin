@@ -33,6 +33,9 @@ type runInfo struct {
 	// who asked (see ownerAsked); the zero value for a token minted
 	// without one.
 	Message chat.Inbound
+	// Policy is the run's standing with the policy (admitRun); nil for a
+	// run the policy did not see, a test's say.
+	Policy *runPolicy
 }
 
 // runInfoFor is the run of brain that answers m.
@@ -139,6 +142,9 @@ func (b *App) brainRunEnv(run runInfo) runAccess {
 		return access
 	}
 	run.ID = "r" + randomToken(9)
+	if run.Policy != nil {
+		run.ID = run.Policy.ID
+	}
 	tok, revoke := b.runTokens.mintRun(run)
 	dir := runTokenDir(b.cfgs.Boot().DataDir, brain)
 	path, err := writeRunToken(dir, tok)

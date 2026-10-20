@@ -24,6 +24,7 @@ import { outcomePill, brainStatusPill } from '../components/brain.js';
 import { saveBar } from '../components/save-bar.js';
 import { liveForm } from '../components/live-form.js';
 import { grantsEditor } from '../components/grants-editor.js';
+import { skillsCard } from '../components/skills-card.js';
 
 export default {
   title: (params) => `Brain ${params.id}`,
@@ -50,6 +51,7 @@ export default {
       h('section.section', h('h2.section-title', 'Settings'), formBox),
       h('section.section', h('h2.section-title', 'Calendar'), calendarCard(id, { signal: ctx.signal })),
       h('section.section', h('h2.section-title', 'Standing intents'), intentsBox),
+      h('section.section', h('h2.section-title', 'Skills'), skillsCard(id, { signal: ctx.signal })),
       h('section.section',
         h('div.section-head', h('h2.section-title', 'Recent messages'), btn('All of this brain’s activity', { href: `#/activity/${encodeURIComponent(id)}`, small: true, kind: 'ghost', icon: 'right' })),
         actBox),

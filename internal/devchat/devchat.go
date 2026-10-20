@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -20,6 +21,7 @@ type Messenger struct {
 	chunk  func(string) []string
 	mu     sync.Mutex
 	outbox []Message
+	polls  atomic.Int64
 }
 
 // New takes the current chunking policy. Each SendChunked call
@@ -32,6 +34,8 @@ type Message struct {
 	JID  string    `json:"jid"`
 	Text string    `json:"text"`
 	Poll []string  `json:"poll,omitempty"`
+	// ID is a poll's message id, which a vote names (POST /api/dev/vote).
+	ID string `json:"id,omitempty"`
 }
 
 // devConnected is always closed: dev mode can always send.
@@ -72,8 +76,9 @@ func (d *Messenger) SendChunked(ctx context.Context, jid, text string) error {
 }
 
 func (d *Messenger) SendPoll(_ context.Context, jid, q string, opts []string, _ int) (string, error) {
-	d.record(Message{JID: jid, Text: q, Poll: opts})
-	return fmt.Sprintf("dev-poll-%d", time.Now().UnixNano()), nil
+	id := fmt.Sprintf("dev-poll-%d-%d", time.Now().UnixNano(), d.polls.Add(1))
+	d.record(Message{JID: jid, Text: q, Poll: opts, ID: id})
+	return id, nil
 }
 
 // Outbox returns the recorded messages, newest first.

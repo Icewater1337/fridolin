@@ -127,6 +127,8 @@ var DoctorRegistry = []DoctorCheck{
 	{ID: "nodes-port", Title: "node port", Required: true, Applies: nodesOn, Run: checkNodesPort},
 	{ID: "nodes-seen", Title: "approved nodes heard from", Applies: nodesOn, Run: checkNodesSeen},
 	{ID: "memory-index", Title: "memory index and its provenance gate", Required: true, Applies: memoryEnabled, Run: checkMemoryIndex},
+	{ID: "approvals", Title: "approvals waiting", Run: checkPendingApprovals},
+	{ID: "lockdown", Title: "lockdown", Run: checkLockdown},
 }
 
 // The host secrets doctor looks for (docs/PLAN.md, M1 and M3). It asks

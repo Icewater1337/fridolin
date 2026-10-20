@@ -153,7 +153,7 @@ what the model says:
 | `delegate(brain, task, timeout_seconds)` | the brains granted `delegate` | absent |
 | `list_brains()` | the brains with any grant, their names and grants | absent |
 | `read_memory(brain, path)` | its own, and the brains granted `read` | its own only |
-| `ask_user(question)`, `request_approval(action)` | listed, answer "not available yet" | the same |
+| `request_approval(action, details, risk, step)`, `ask_user(question, options)`, `check_approval(id)` | ask you in WhatsApp and wait for the answer, see [Skills, risk and approvals](#skills-risk-and-approvals) | the same, in the core run's chat; not in an observe-only run |
 
 A tool a run is not granted is absent, not refused: it is not in the
 run's list, and a call of it is a call of a tool there is none of.
@@ -168,15 +168,146 @@ question it asks goes anywhere. The call waits up to `timeout_seconds`
 the core brain as a new message in the chat its run was for, and the
 core answers it there. A delegated run never gets `delegate`, whatever
 its brain, so delegation goes one level deep, and a sub-brain cannot
-reach the core or a sibling. Each delegation is one line in
-`<data_dir>/audit/YYYY-MM.jsonl`: when, which run of which brain, to
-whom, the task (shortened), the outcome and how long it took.
+reach the core or a sibling. Each delegation is one line of kind
+`delegation` in the [audit log](#the-audit-log): which run of which brain,
+to whom and the task (shortened) as its detail, the outcome and how long
+it took. The delegated run is in its core run's thread, with its risk
+level.
 
 `read_memory` reads one file, or lists a folder, of `memories/` (only
 its `.md` files) or `skills/`. The bridge reads it outside the sandbox,
 so it follows no symlink on the way, not even one inside the folder.
 What the core learns about a sub-brain goes into its own notes, never the
 sub-brain's files.
+
+## Skills, risk and approvals
+
+A skill is a markdown file in the brain's `skills/` folder, either
+`skills/<name>.md` or a folder `skills/<name>/SKILL.md` with what else it
+needs beside it. Its frontmatter is the portable
+[Agent Skills](https://agentskills.io) format, with Fridolin's own fields
+under `metadata.fridolin`:
+
+```markdown
+---
+name: taxes-de
+description: File the German tax return through ELSTER, from the documents in the vault.
+requires:
+  env: [ELSTER_CERT]
+  bins: [python3]
+os: [darwin, linux]
+install:
+  - kind: brew
+    formula: python
+metadata:
+  fridolin:
+    risk: irreversible          # read | write | irreversible
+    vault: ["documents/taxes/**"]
+    approve: [submit]           # steps that stop for your yes
+    triggers: [steuer, taxes, elster]
+---
+# Taxes
+...
+```
+
+| Field | |
+| --- | --- |
+| `name` | lower-case letters, digits and single hyphens, at most 64; a `SKILL.md`'s is its folder's name |
+| `description` | what it does and when to use it, at most 1024 bytes |
+| `requires.env`, `requires.bins` | the variables and programs it needs |
+| `os` | `darwin`, `linux`, `windows` (`win32` reads as `windows`) |
+| `install` | the steps that install what it needs: commands, or mappings such as `{kind: brew, formula: python}` |
+| `metadata.fridolin.risk` | the highest risk of any of its steps: `read` (search, summarise), `write` (files, a calendar event; undone by a revert) or `irreversible` (submit, send to someone else, pay, delete, publish); `read` when left out |
+| `metadata.fridolin.approve` | the steps that stop for your yes |
+| `metadata.fridolin.vault` | the vault paths it uses, relative, globs allowed |
+| `metadata.fridolin.triggers` | words or phrases that make a message a run of this skill |
+
+A file without a frontmatter, from before, is a skill too, read-only and
+without triggers. The bridge reads these files itself, through the
+folder and following no symlink, like `brain.json`.
+
+**What applies is what you approved.** A brain writes its skills, and a
+skill it wrote, or a frontmatter it changed, must not give its runs more
+than you agreed to. So, as with `brain.json`, the bridge keeps the policy
+you approved (in `bridge.db`), and the brain page's *Skills* section shows
+each skill with what applies:
+
+| Status | What applies |
+| --- | --- |
+| approved | the policy in the file, which you approved |
+| starter | the policy of a starter skill the bridge wrote into the new brain, as long as it is unchanged |
+| not approved | `read`, and its triggers count for nothing, until you approve it |
+| changed | the policy you approved before; the new one waits for you |
+| no frontmatter, invalid | `read`, no triggers (or what you approved before) |
+
+*Approve as declared* accepts the file's policy, provided it is still the
+one you looked at; *Edit policy* writes your risk, steps, vault paths and
+triggers into the file's `metadata.fridolin` and approves them (comments
+in the frontmatter go).
+
+**Every run has a risk level.** Before a run starts, the bridge looks for
+the triggers of the brain's skills in the message: the run is one of the
+riskiest skill that matches, with that skill's risk as its level, and of
+none, `write`. A delegated task's run has its core run's level and is in
+its thread. The level shows in the audit log and the Threads page; the
+bridge's own tools that write need `write`, and those that take an
+irreversible step (none today; the vault's later) need an approval.
+
+**Irreversible steps ask first.** Every run's prompt says: before any
+irreversible step, and before each step a skill lists under `approve`,
+call `request_approval` and go on only when it answers approved. That
+sends a WhatsApp poll, *🔐 Approve? &lt;action&gt;* with *✅ Yes*, *❌ No* and
+*📝 Show me the draft*, to the chat the run is for, or, for a run in no
+WhatsApp chat (a delegated task whose core run was not in one), to your
+DM, the first number in `allowed_numbers`. Only votes from the numbers in
+`allowed_numbers` count; anyone else's is ignored and logged. *Show me
+the draft* sends what the run gave as `details` and leaves the poll open.
+The dashboard's Approvals page shows what waits, with *Approve* and
+*Deny*, which count as yours. No answer within
+`policy.approval_timeout_hours` (24) counts as no.
+
+The call waits for your vote up to `wait_seconds` (5 minutes by default,
+10 at most): a run cannot wait a day, and the bridge gives a tool call
+of Codex no more. Unanswered by then, it answers *pending* with the
+approval's id, which `check_approval` waits on again; once no call
+waits, your answer comes to the brain as a new message in that chat,
+which it answers there. Pending approvals live in `bridge.db`, so a
+restart keeps them. At most `policy.max_pending_irreversible` (3)
+irreversible ones wait at once. A tool the bridge marks irreversible takes
+the id of an approved request as `approval_id`, once.
+
+`ask_user(question, options)` asks you a question: with options as a
+poll whose vote is the answer, without as a message whose answer is the
+next message you send in that chat.
+
+**Lockdown.** `!lockdown` from your number (or *Lock down* on the
+Approvals page) pauses everything but reading: a run of a skill that
+writes or submits is refused, every other run runs at `read`, no approval
+is asked and no write or irreversible tool goes ahead, until `!unlock` or
+*Unlock*. The bridge enforces this for its own tools; what a brain does
+with its shell is up to its sandbox and its instructions. It survives a
+restart.
+
+**Rate limit.** One chat starts at most `policy.max_runs_per_hour` (20)
+runs in an hour; the next is refused with a notice. Files handed in,
+delegated tasks and untagged group chatter do not count.
+
+### The audit log
+
+`<data_dir>/audit/YYYY-MM.jsonl` is one JSON object a line, a file a month,
+appended: `ts`, `kind`, `thread` (the chat a run serves; a delegated task
+is in its core run's thread), `chat`, `brain`, `run`, and as they apply
+`id` (the approval's or delegation's), `skill`, `risk`, `by` (a voter's
+number, `dashboard`, `timeout`), `detail`, `outcome` and `duration_ms`.
+The kinds: `run_start`, `run_end`, `run_refused`, `tool_call` (the tool's
+name and how it ended, never its arguments), `approval_requested`,
+`approval_vote`, `approval_decided`, `question_asked`,
+`question_answered`, `delegation`, `lockdown`, `unlock` and
+`skill_approved`. Texts are shortened, and what looks like a password or
+token is masked. The dashboard's Threads page groups the runs by thread,
+and its Audit page filters the lines. `fridolin doctor` warns about an
+approval that has waited more than an hour, and says when the bridge is
+in lockdown.
 
 ## Approval
 

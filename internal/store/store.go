@@ -117,6 +117,7 @@ var appMigrations = []func(*sql.Tx) error{
 	migrateV2,
 	migrateV3,
 	migrateV4,
+	migrateV5,
 }
 
 // migrate brings the bridge's tables to the newest version, one
@@ -220,13 +221,19 @@ func migrateV2(tx *sql.Tx) error {
 // SavePoll stores a poll brain sent, so votes can be matched back to
 // option names and reach that brain.
 func (s *Store) SavePoll(msgID, chatJID, brain, question string, options []string) error {
+	return s.SavePollRef(msgID, chatJID, brain, question, options, "")
+}
+
+// SavePollRef is SavePoll for a poll the bridge sent for ref, an
+// approval say ("approval:<id>"), whose votes go there.
+func (s *Store) SavePollRef(msgID, chatJID, brain, question string, options []string, ref string) error {
 	optJSON, err := json.Marshal(options)
 	if err != nil {
 		return err
 	}
 	_, err = s.db.Exec(
-		`INSERT OR REPLACE INTO polls (msg_id, chat_jid, brain, question, options, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		msgID, chatJID, brain, question, string(optJSON), time.Now().UTC(),
+		`INSERT OR REPLACE INTO polls (msg_id, chat_jid, brain, question, options, created_at, ref) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		msgID, chatJID, brain, question, string(optJSON), time.Now().UTC(), ref,
 	)
 	return err
 }
@@ -237,14 +244,16 @@ type SentPoll struct {
 	Brain    string // "" for a poll from before polls recorded it
 	Question string
 	Options  []string
+	// Ref names what the bridge sent the poll for (SavePollRef).
+	Ref string
 }
 
 // SentPoll returns the poll sent as message msgID, or sql.ErrNoRows.
 func (s *Store) SentPoll(ctx context.Context, msgID string) (SentPoll, error) {
 	var p SentPoll
 	var optJSON string
-	err := s.db.QueryRowContext(ctx, `SELECT chat_jid, brain, question, options FROM polls WHERE msg_id = ?`, msgID).
-		Scan(&p.Chat, &p.Brain, &p.Question, &optJSON)
+	err := s.db.QueryRowContext(ctx, `SELECT chat_jid, brain, question, options, ref FROM polls WHERE msg_id = ?`, msgID).
+		Scan(&p.Chat, &p.Brain, &p.Question, &optJSON, &p.Ref)
 	if err != nil {
 		return SentPoll{}, err
 	}

@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"fmt"
+
+	"github.com/Icewater1337/fridolin/internal/apperr"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"net/http"
 	"strings"
@@ -13,11 +15,16 @@ type DevMessage struct {
 	JID  string    `json:"jid"`
 	Text string    `json:"text"`
 	Poll []string  `json:"poll,omitempty"`
+	// ID is a poll's message id, which a vote names.
+	ID string `json:"id,omitempty"`
 }
 type DevAPI struct {
 	HasBrain func(string) bool
 	Submit   func(DevInboundRequest) string
 	Messages func() []DevMessage
+	// Vote records a vote in a poll the dev chat shows, as one from
+	// WhatsApp is recorded.
+	Vote func(DevVoteRequest) error
 }
 type DevInboundRequest struct {
 	JID    string   `json:"jid"`
@@ -50,6 +57,24 @@ func (a *DevAPI) Inbound(w http.ResponseWriter, r *http.Request) {
 	}
 	if reason := a.Submit(req); reason != "" {
 		WriteJSON(w, http.StatusAccepted, DevIgnoredResponse{Status: "ignored", Reason: reason})
+		return
+	}
+	WriteJSON(w, http.StatusAccepted, OperationResponse{Status: "accepted"})
+}
+
+// VoteHandler is POST /api/dev/vote.
+func (a *DevAPI) VoteHandler(w http.ResponseWriter, r *http.Request) {
+	var req DevVoteRequest
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Poll == "" || req.Voter == "" {
+		WriteErr(w, http.StatusBadRequest, "poll and voter required")
+		return
+	}
+	if err := a.Vote(req); err != nil {
+		WriteErr(w, statusFor(apperr.KindOf(err)), err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusAccepted, OperationResponse{Status: "accepted"})

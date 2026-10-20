@@ -1,0 +1,26 @@
+GET /api/audit
+200 OK
+Content-Type: application/json
+
+[
+  {
+    "brain": "main",
+    "chat": "15551234567@s.whatsapp.net",
+    "duration_ms": "<DURATION_MS>",
+    "kind": "run_end",
+    "outcome": "ok",
+    "risk": "write",
+    "run": "<RUN>",
+    "thread": "15551234567@s.whatsapp.net",
+    "ts": "<TIME>"
+  },
+  {
+    "brain": "main",
+    "chat": "15551234567@s.whatsapp.net",
+    "kind": "run_start",
+    "risk": "write",
+    "run": "<RUN>",
+    "thread": "15551234567@s.whatsapp.net",
+    "ts": "<TIME>"
+  }
+]

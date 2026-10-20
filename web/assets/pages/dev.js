@@ -84,7 +84,19 @@ export default {
       reconcile(sent, items.map((m) => ({ ...m, chat_name: chatName(m.jid) })), (m) => `${m.ts}|${m.jid}|${(m.text || '').length}`, (m) => h('article.card.outbox-item',
         h('div.act-meta', h('span.act-who', m.poll ? 'Poll' : 'Message'), h('span.act-sep', 'to'), chatEl(m.jid), h('span.act-time', timeAgo(m.ts))),
         longText(m.text, { limit: 600, lines: 10 }),
-        m.poll ? h('ul.poll-options', m.poll.map((o) => h('li', o))) : null));
+        m.poll ? h('ul.poll-options', m.poll.map((o) => h('li', o, m.id ? h('button.chip', { type: 'button', title: `Vote as ${voterOf()}`, onclick: () => vote(m, o) }, 'Vote') : null))) : null));
+    };
+    // A vote in a poll, as the number in Sender (else the DM's), arrives
+    // as one from WhatsApp would: an approval's poll counts it only from
+    // an allowed number.
+    const voterOf = () => senderIn.value.trim() || jidIn.value.trim().split('@')[0];
+    const vote = async (m, option) => {
+      try {
+        await post('/api/dev/vote', { poll: m.id, voter: voterOf(), options: [option] });
+        toast(`Voted “${option}” as ${voterOf()}`, 'ok', { timeout: 2000 });
+      } catch (e) {
+        toast(e.message || String(e), 'error');
+      }
     };
     const outboxPoll = ctx.poll(async (signal) => {
       try {

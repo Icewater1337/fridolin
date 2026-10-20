@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/audit"
 	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -512,7 +513,7 @@ func (b *App) tailnetIdentity(node tailnet.Node, next http.Handler) http.Handler
 		start := time.Now()
 		next.ServeHTTP(rec, r)
 		log.Printf("tailnet: %s %s by %s: %d", r.Method, r.URL.Path, id, rec.status)
-		b.audit.append(auditEntry{Kind: "tailnet", From: id.LoginName, To: r.Method + " " + r.URL.Path, ID: id.Node,
+		b.audit.Append(audit.Entry{Kind: audit.Tailnet, By: id.LoginName, Detail: r.Method + " " + r.URL.Path, ID: id.Node,
 			Outcome: strconv.Itoa(rec.status), DurationMS: time.Since(start).Milliseconds()})
 	})
 }

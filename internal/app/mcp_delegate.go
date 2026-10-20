@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/audit"
 	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
@@ -56,6 +57,13 @@ func (ds *delegations) add(d *delegation) {
 		ds.pending = map[string]*delegation{}
 	}
 	ds.pending[d.id] = d
+}
+
+// get returns delegation id while it is pending, or nil.
+func (ds *delegations) get(id string) *delegation {
+	ds.mu.Lock()
+	defer ds.mu.Unlock()
+	return ds.pending[id]
 }
 
 // end takes delegation id out, once: the second end of the same task (the
@@ -211,11 +219,15 @@ func (b *App) deliverLate(d *delegation, r delegationResult) {
 
 // auditDelegation writes the one audit line of a delegated task.
 func (b *App) auditDelegation(d *delegation, outcome string) {
-	b.audit.append(auditEntry{
-		Kind: "delegate", From: d.from.Brain, To: d.to, Run: d.from.ID, ID: d.id,
-		Task: textx.Truncate(d.task, 200), Outcome: outcome,
+	e := audit.Entry{
+		Kind: audit.Delegation, Thread: d.from.Chat, Chat: d.from.Chat, Brain: d.from.Brain, Run: d.from.ID, ID: d.id,
+		Detail: "to " + d.to + ": " + textx.Truncate(d.task, 200), Outcome: outcome,
 		DurationMS: time.Since(d.started).Milliseconds(),
-	})
+	}
+	if p := d.from.Policy; p != nil {
+		e.Thread, e.Skill, e.Risk = p.Thread, p.Skill, string(p.Risk)
+	}
+	b.audit.Append(e)
 }
 
 // deliverRun delivers a finished run: to its chat, through the pipeline,

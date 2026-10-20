@@ -1,0 +1,14 @@
+GET /api/policy
+200 OK
+Content-Type: application/json
+
+{
+  "approval_timeout_hours": 24,
+  "lockdown": false,
+  "lockdown_by": "",
+  "lockdown_since": null,
+  "max_pending_irreversible": 3,
+  "max_runs_per_hour": 20,
+  "pending_approvals": 0,
+  "pending_questions": 0
+}

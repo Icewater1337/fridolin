@@ -20,6 +20,9 @@ func ChatErrorText(err error, inDM bool) string {
 	if err == nil || errors.Is(err, claudecli.ErrInterrupted) || errors.Is(err, context.Canceled) {
 		return ""
 	}
+	if refused, ok := errors.AsType[*brain.RunRefused](err); ok {
+		return refused.Notice
+	}
 	if errors.Is(err, brain.ErrSandboxUnavailable) {
 		return outboundmsg.ChatErrSandbox(brain.ErrSandboxUnavailable)
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/mcp"
+	"github.com/Icewater1337/fridolin/internal/skill"
 	"github.com/Icewater1337/fridolin/internal/vault"
 )
 
@@ -73,7 +74,9 @@ func (b *App) registerVaultTools(r *mcp.Registry[mcpCaller]) {
 					"from": strProp("A file to copy instead: an absolute path in your folder, your media inbox or your temp folder."),
 				}, "path")}
 		},
-		Call: b.callVaultPut,
+		// Writing, behind the policy: not in a lockdown, nor in a run whose
+		// budget is read (M5).
+		Call: b.guarded(skill.RiskWrite, b.callVaultPut),
 	})
 	r.Register(mcp.Entry[mcpCaller]{
 		Name: "vault_search", Available: available,

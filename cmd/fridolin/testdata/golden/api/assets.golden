@@ -26,8 +26,10 @@
 /assets/components/grants-editor.js 200 text/javascript; charset=utf-8
 /assets/components/icons.js 200 text/javascript; charset=utf-8
 /assets/components/live-form.js 200 text/javascript; charset=utf-8
+/assets/components/policy.js 200 text/javascript; charset=utf-8
 /assets/components/routing-editor.js 200 text/javascript; charset=utf-8
 /assets/components/save-bar.js 200 text/javascript; charset=utf-8
+/assets/components/skills-card.js 200 text/javascript; charset=utf-8
 /assets/components/tabs.js 200 text/javascript; charset=utf-8
 /assets/components/toast.js 200 text/javascript; charset=utf-8
 /assets/css/base.css 200 text/css; charset=utf-8
@@ -47,6 +49,8 @@
 /assets/logo-mark.webp 200 image/webp
 /assets/pages/activity.js 200 text/javascript; charset=utf-8
 /assets/pages/add-brain.js 200 text/javascript; charset=utf-8
+/assets/pages/approvals.js 200 text/javascript; charset=utf-8
+/assets/pages/audit.js 200 text/javascript; charset=utf-8
 /assets/pages/backup.js 200 text/javascript; charset=utf-8
 /assets/pages/brain.js 200 text/javascript; charset=utf-8
 /assets/pages/brains.js 200 text/javascript; charset=utf-8
@@ -59,6 +63,7 @@
 /assets/pages/overview.js 200 text/javascript; charset=utf-8
 /assets/pages/settings.js 200 text/javascript; charset=utf-8
 /assets/pages/site.js 200 text/javascript; charset=utf-8
+/assets/pages/threads.js 200 text/javascript; charset=utf-8
 /assets/pages/vault.js 200 text/javascript; charset=utf-8
 /assets/theme.js 200 text/javascript; charset=utf-8
 /favicon.svg 200 image/svg+xml

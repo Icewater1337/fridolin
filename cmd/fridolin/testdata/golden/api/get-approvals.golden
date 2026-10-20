@@ -1,0 +1,8 @@
+GET /api/approvals
+200 OK
+Content-Type: application/json
+
+{
+  "history": [],
+  "pending": []
+}

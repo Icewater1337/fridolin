@@ -328,6 +328,7 @@ type sent struct {
 	JID  string    `json:"jid"`
 	Text string    `json:"text"`
 	Poll []string  `json:"poll"`
+	ID   string    `json:"id"`
 }
 
 // Outbox returns what the bridge has sent, oldest first, after what the
@@ -463,6 +464,7 @@ func (h *harness) run(id string) *brain.RunView {
 	h.t.Fatalf("GET /api/status lists no brain %q", id)
 	return nil
 }
+
 
 // WaitFor polls cond until it holds, for up to ten seconds.
 func (h *harness) WaitFor(what string, cond func() bool) {

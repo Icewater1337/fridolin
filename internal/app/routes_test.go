@@ -196,8 +196,18 @@ var routeInventory = []httpRoute{
 	{"POST", "/api/nodes/{id}/revoke", classAPI, "/api/nodes/n1/revoke"},
 	{"PUT", "/api/nodes/{id}/tags", classAPI, "/api/nodes/n1/tags"},
 	{"POST", "/api/nodes/{id}/call", classAPI, "/api/nodes/n1/call"},
+	{"GET", "/api/policy", classAPI, ""},
+	{"POST", "/api/policy/lockdown", classAPI, ""},
+	{"GET", "/api/threads", classAPI, ""},
+	{"GET", "/api/audit", classAPI, ""},
+	{"GET", "/api/approvals", classAPI, ""},
+	{"POST", "/api/approvals/{id}", classAPI, "/api/approvals/a1"},
+	{"GET", "/api/brains/{id}/skills", classAPI, "/api/brains/main/skills"},
+	{"POST", "/api/brains/{id}/skills/approve", classAPI, "/api/brains/main/skills/approve"},
+	{"PUT", "/api/brains/{id}/skills/policy", classAPI, "/api/brains/main/skills/policy"},
 	{"POST", "/api/dev/inbound", classAPI, ""},
 	{"GET", "/api/dev/outbox", classAPI, ""},
+	{"POST", "/api/dev/vote", classAPI, ""},
 	// The mount: an unknown /api/ path is the API mux's 404, not the page.
 	{"", "/api/", classAPIMount, "/api/nope"},
 }

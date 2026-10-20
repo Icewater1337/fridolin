@@ -134,7 +134,7 @@ func TestTailnetServesTheDashboardWithTheToken(t *testing.T) {
 		}
 	}
 	audit := readFile(t, filepath.Join(c.home, "data", "audit", time.Now().Format("2006-01")+".jsonl"))
-	if !strings.Contains(audit, `"kind":"tailnet","from":"you@example.com","to":"POST /api/logout","id":"laptop","outcome":"200"`) {
+	if !strings.Contains(audit, `"kind":"tailnet","id":"laptop","by":"you@example.com","detail":"POST /api/logout","outcome":"200"`) {
 		t.Errorf("audit log:\n%s", audit)
 	}
 	var state tailnetStateRecord

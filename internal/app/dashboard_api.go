@@ -370,5 +370,6 @@ func (b *App) apiMux() http.Handler {
 		Auth:       b.newDashboardAuth,
 		Dev:        b.newDevAPI,
 		Nodes:      b.newNodesAPI,
+		Policy:     b.newPolicyAPI,
 	})
 }

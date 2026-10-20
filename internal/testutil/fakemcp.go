@@ -19,6 +19,12 @@ type FakeMCPStep struct {
 	Brain string          `json:"brain,omitempty"`
 	Tool  string          `json:"tool,omitempty"`
 	Args  json.RawMessage `json:"args,omitempty"`
+	// When, if set, plays the step only if what the step before got back
+	// starts with it, as a model goes on only once a tool said so.
+	When string `json:"when,omitempty"`
+	// Write, instead of a tool call, writes the file of that name in the
+	// run's folder: the step a skill takes, which the test then finds.
+	Write string `json:"write,omitempty"`
 }
 
 // FakeMCPTrigger in the new message makes the fake CLI play its
@@ -74,7 +80,20 @@ func fakeMCP(args []string, steps string) string {
 	}
 	c.notify("notifications/initialized")
 	var out strings.Builder
+	last := ""
 	for _, s := range plan {
+		if s.When != "" && !strings.HasPrefix(last, s.When) {
+			fmt.Fprintf(&out, " [%s:skipped %s%s]", brain, s.Tool, s.Write)
+			continue
+		}
+		if s.Write != "" {
+			if err := os.WriteFile(s.Write, []byte("done\n"), 0o600); err != nil {
+				fmt.Fprintf(&out, " [%s:write] error %v", brain, err)
+				continue
+			}
+			fmt.Fprintf(&out, " [%s:write] %s", brain, s.Write)
+			continue
+		}
 		label := brain + ":" + s.Tool
 		if s.Tool == "" {
 			label = brain + ":list"
@@ -119,7 +138,8 @@ func fakeMCP(args []string, steps string) string {
 		if call.IsError {
 			label += " failed"
 		}
-		fmt.Fprintf(&out, " [%s] %s", label, strings.Join(text, " "))
+		last = strings.Join(text, " ")
+		fmt.Fprintf(&out, " [%s] %s", label, last)
 	}
 	return out.String()
 }

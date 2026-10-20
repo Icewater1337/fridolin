@@ -1502,9 +1502,10 @@ whatsmeow protocol chatter.
 ## Core, vault and nodes
 
 The settings of the containerized core, the tiered vault in Backblaze B2,
-nodes and the approval policy, which [PLAN.md](PLAN.md) describes. They
-are all off by default, so a `config.json` without them runs as before;
-this version reads and checks them, and the parts that use them follow.
+nodes and the approval policy, which [PLAN.md](PLAN.md) describes. The
+first three are off by default, so a `config.json` without them runs as
+before; this version reads and checks them, and the parts that use them
+follow. The policy applies with its defaults.
 A value of `0` or `""`, like leaving the key out, means the default.
 
 ### `core`
@@ -1562,9 +1563,12 @@ dir; [NODES.md](NODES.md) says how a machine joins and what it may do.
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `max_runs_per_hour` | `20` | the most runs one brain starts in an hour |
-| `max_pending_irreversible` | `3` | the most irreversible actions waiting for approval at once |
+| `max_runs_per_hour` | `20` | the most runs one chat starts in an hour; the next is refused with a notice (files handed in, delegated tasks and untagged group chatter do not count) |
+| `max_pending_irreversible` | `3` | the most irreversible actions waiting for approval at once; a run's `request_approval` beyond it is refused |
 | `approval_timeout_hours` | `24` | how long an approval poll waits before it counts as no |
+
+The policy applies from this version on; see
+[Skills, risk and approvals](BRAINS.md#skills-risk-and-approvals).
 
 A negative number stops the bridge, as does one above the maximum
 [the schema](schemas/config.schema.json) gives it (a day of seconds for the

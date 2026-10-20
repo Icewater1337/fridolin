@@ -5,10 +5,12 @@ import (
 	"log"
 	"net"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
+	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/nodes"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 )
@@ -74,11 +76,30 @@ func (b *App) joinCommand(code string) string {
 
 func (b *App) newNodesAPI() *httpapi.NodesAPI {
 	return &httpapi.NodesAPI{
-		Nodes:       func() httpapi.NodesService { return b.nodes },
+		Nodes:       func() httpapi.NodesService { return lockdownNodes{Service: b.nodes, locked: b.locked} },
 		Enabled:     b.nodesEnabled,
 		Listen:      b.nodes.Addr,
 		JoinCommand: b.joinCommand,
 	}
+}
+
+// lockdownNodes is the node registry as the core's callers reach it: in
+// a lockdown (M5) it refuses the calls that act on a node, exec and
+// fs.write, as the policy refuses a run's writing tools; reading a node
+// (host facts, a granted folder) and a notification still go.
+type lockdownNodes struct {
+	*nodes.Service
+	locked func() bool
+}
+
+// nodeWrites are the methods a lockdown refuses.
+var nodeWrites = []string{nodeproto.MethodExec, nodeproto.MethodFSWrite}
+
+func (n lockdownNodes) Call(ctx context.Context, id, method string, params, out any) error {
+	if n.locked() && slices.Contains(nodeWrites, method) {
+		return &nodeproto.Error{Code: nodeproto.CodeDenied, Message: "the bridge is in lockdown: only reading goes ahead; unlock it in the dashboard or with !unlock"}
+	}
+	return n.Service.Call(ctx, id, method, params, out)
 }
 
 // fleetText answers !fleet.

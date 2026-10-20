@@ -54,6 +54,11 @@ type BrainHooks struct {
 	// Hydrate brings the files of a run's message back from the vault's
 	// cold tier before the run starts.
 	Hydrate func(ctx context.Context, brainID string, paths []string)
+	// Admit decides, before a run starts, whether the policy lets it
+	// (admitRun); an error refuses it. Ended hears how an admitted run
+	// ended.
+	Admit func(spec brain.RunSpec) (*runPolicy, error)
+	Ended func(p *runPolicy, res claudecli.Result)
 }
 
 // brainHooksSink keeps command callbacks compatible while runtime users move

@@ -8,10 +8,14 @@ import (
 	"strings"
 	"time"
 
+	"slices"
+
 	"github.com/Icewater1337/fridolin/internal/apperr"
+	"github.com/Icewater1337/fridolin/internal/audit"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/mcp"
+	"github.com/Icewater1337/fridolin/internal/skill"
 )
 
 // mcpCaller is the run a tool call comes from, as the bridge knows it: the
@@ -78,27 +82,59 @@ func (b *App) newMCPTools() *mcp.Registry[mcpCaller] {
 	})
 	b.registerVaultTools(r)
 	r.Register(mcp.Entry[mcpCaller]{
-		Name: "ask_user",
-		Describe: func(mcpCaller) mcp.Tool {
-			return mcp.Tool{Description: "Ask the person you work for a question and wait for the answer. Not available yet: ask in your reply instead.", InputSchema: schema(map[string]any{"question": strProp("The question.")}, "question")}
-		},
-		Call: notYet("ask_user", "ask in your final reply instead; the answer comes as a new message"),
+		Name:      "ask_user",
+		Available: mcpCaller.canAsk,
+		Describe:  b.describeAskUser,
+		Call:      b.callAskUser,
 	})
 	r.Register(mcp.Entry[mcpCaller]{
-		Name: "request_approval",
-		Describe: func(mcpCaller) mcp.Tool {
-			return mcp.Tool{Description: "Ask the person you work for to approve an action before you take it. Not available yet: do not take irreversible actions; describe them in your reply instead.", InputSchema: schema(map[string]any{"action": strProp("What you want to do, in one or two sentences.")}, "action")}
-		},
-		Call: notYet("request_approval", "do not take the action; describe it in your reply and let the person decide"),
+		Name:      "request_approval",
+		Available: mcpCaller.canAsk,
+		Describe:  b.describeRequestApproval,
+		Call:      b.callRequestApproval,
+	})
+	r.Register(mcp.Entry[mcpCaller]{
+		Name:      "check_approval",
+		Available: mcpCaller.canAsk,
+		Describe:  describeCheckApproval,
+		Call:      b.callCheckApproval,
 	})
 	return r
 }
 
-// notYet is a tool that is listed but not there yet (ask_user and
-// request_approval, which the policy step fills in).
-func notYet(name, instead string) func(context.Context, mcpCaller, json.RawMessage) (*mcp.CallResult, error) {
-	return func(context.Context, mcpCaller, json.RawMessage) (*mcp.CallResult, error) {
-		return mcp.ErrorResult(name + " is not available yet: " + instead + "."), nil
+// mcpCall is a tool's function.
+type mcpCall = func(context.Context, mcpCaller, json.RawMessage) (*mcp.CallResult, error)
+
+// guarded is call behind the policy for a tool of risk: a write tool
+// needs a run whose budget allows writing and no lockdown; an
+// irreversible one, in addition, an approval_id argument naming an
+// approved request_approval of the same brain, which the call uses up.
+// Tools that act on the world register through it (the vault's
+// vault_put); the other tools only read.
+func (b *App) guarded(risk skill.Risk, call mcpCall) mcpCall {
+	return func(ctx context.Context, c mcpCaller, raw json.RawMessage) (*mcp.CallResult, error) {
+		if risk.Rank() <= skill.RiskRead.Rank() {
+			return call(ctx, c, raw)
+		}
+		if b.locked() {
+			return mcp.ErrorResult("the bridge is in lockdown: only reading goes ahead. Do not try another way; say so in your reply."), nil
+		}
+		if risk == skill.RiskWrite && c.risk().Rank() < skill.RiskWrite.Rank() {
+			return mcp.ErrorResult(fmt.Sprintf("this run's risk level is %s, which does not allow writing", c.risk())), nil
+		}
+		if risk == skill.RiskIrreversible {
+			var args struct {
+				ApprovalID string `json:"approval_id"`
+			}
+			_ = json.Unmarshal(raw, &args)
+			if args.ApprovalID == "" {
+				return mcp.ErrorResult("this tool takes an irreversible step: call request_approval first, and pass the approval_id it answers approved with"), nil
+			}
+			if err := b.useApproval(ctx, c, args.ApprovalID); err != nil {
+				return mcp.ErrorResult(err.Error() + ". Do not take the step."), nil
+			}
+		}
+		return call(ctx, c, raw)
 	}
 }
 
@@ -224,6 +260,7 @@ func (b *App) mcpCall(ctx context.Context, token, run string, req httpapi.MCPCal
 		args = json.RawMessage("{}")
 	}
 	res, err := b.mcpTools.Call(ctx, c, req.Name, args)
+	b.auditToolCall(c, req.Name, res, err)
 	if err != nil {
 		if errors.Is(err, mcp.ErrUnknownTool) {
 			return nil, apperr.New(apperr.NotFound, "this run has no tool "+req.Name)
@@ -231,4 +268,30 @@ func (b *App) mcpCall(ctx context.Context, token, run string, req httpapi.MCPCal
 		return nil, err
 	}
 	return res, nil
+}
+
+// auditToolCall writes a tool call's line: which tool, and how it ended.
+// Its arguments stay out of the log: they may hold what is not the log's.
+func (b *App) auditToolCall(c mcpCaller, name string, res *mcp.CallResult, err error) {
+	outcome := "ok"
+	switch {
+	case errors.Is(err, mcp.ErrUnknownTool):
+		outcome = "refused: not this run's tool"
+	case err != nil:
+		outcome = "failed"
+	case res != nil && res.IsError:
+		outcome = "error"
+		if len(res.Content) > 0 {
+			outcome += ": " + res.Content[0].Text
+		}
+	case res != nil && len(res.Content) > 0:
+		if word, _, _ := strings.Cut(res.Content[0].Text, ":"); slices.Contains([]string{"approved", "denied", "pending", "answered", "expired"}, word) {
+			outcome = word
+		}
+	}
+	e := audit.Entry{Kind: audit.ToolCall, Brain: c.run.Brain, Run: c.run.ID, Chat: c.run.Chat, Thread: c.run.Chat, Detail: name, Outcome: outcome}
+	if p := c.run.Policy; p != nil {
+		e.Thread, e.Skill, e.Risk = p.Thread, p.Skill, string(p.Risk)
+	}
+	b.audit.Append(e)
 }
