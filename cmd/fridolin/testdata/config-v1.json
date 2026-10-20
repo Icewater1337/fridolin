@@ -138,5 +138,36 @@
   },
   "script_api": {
     "tokenless_send": false
+  },
+  "core": {
+    "tailnet": {
+      "enabled": true,
+      "hostname": "fridolin-test-core"
+    },
+    "lease": {
+      "enabled": true,
+      "renew_seconds": 30,
+      "stale_seconds": 180
+    },
+    "memory_limit_gb": 6
+  },
+  "vault": {
+    "enabled": true,
+    "hot_budget_gb": 40,
+    "activity_days": 45,
+    "cold_after_days": 120,
+    "headroom_percent": 15,
+    "bucket": "example-vault",
+    "snapshots_bucket": "example-snapshots",
+    "endpoint": "s3.example-region.backblazeb2.com"
+  },
+  "nodes": {
+    "enabled": true,
+    "listen": "127.0.0.1:9766"
+  },
+  "policy": {
+    "max_runs_per_hour": 30,
+    "max_pending_irreversible": 2,
+    "approval_timeout_hours": 12
   }
 }

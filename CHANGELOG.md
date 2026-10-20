@@ -17,6 +17,13 @@ for compatibility.
   See [AI mode](docs/CONFIGURATION.md#ai-mode) for sign-in and the
   Claude-specific settings that do not transfer.
 
+- config.json takes the sections `core`, `vault`, `nodes` and `policy`
+  for the containerized core, the B2 vault, nodes and approvals. All are
+  off by default and nothing uses them yet; the bridge checks their
+  values, and the dashboard's Settings keeps them when it saves. See
+  [Core, vault and nodes](docs/CONFIGURATION.md#core-vault-and-nodes).
+  The config version stays 2.
+
 ### Changed
 
 - Fridolin now builds for Windows (amd64 and arm64, without cgo). It is

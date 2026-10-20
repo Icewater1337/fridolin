@@ -9,6 +9,14 @@
   "brain_mode": true,
   "brain_model": "",
   "claude_path": "/opt/claude/bin/claude",
+  "core": {
+    "lease": {
+      "enabled": false
+    },
+    "tailnet": {
+      "enabled": false
+    }
+  },
   "dangerously_skip_permissions": true,
   "dashboard": {},
   "data_dir": "~/.fridolin",
@@ -17,10 +25,14 @@
   "ingest": {
     "enabled": false
   },
+  "nodes": {
+    "enabled": false
+  },
   "otp_guard": true,
   "plaud": {
     "enabled": false
   },
+  "policy": {},
   "queue": {},
   "sandbox": {
     "allow_paths": [],
@@ -34,6 +46,9 @@
   "triggers": [
     "@claude"
   ],
+  "vault": {
+    "enabled": false
+  },
   "version": 2,
   "viewer": false
 }

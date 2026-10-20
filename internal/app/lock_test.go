@@ -32,7 +32,7 @@ func TestNewBridgeTakesTheInstanceLock(t *testing.T) {
 	}
 	requireTestDataDir(t, cfgs.Get())
 
-	running, err := platform.AcquireLock(dataDir)
+	running, err := platform.AcquireLock(config.Layout{Root: dataDir}.Lock())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,12 +49,12 @@ func TestNewBridgeTakesTheInstanceLock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if l, err := platform.AcquireLock(dataDir); err == nil {
+	if l, err := platform.AcquireLock(config.Layout{Root: dataDir}.Lock()); err == nil {
 		l.Release()
 		t.Error("a bridge must hold the lock until Stop")
 	}
 	b.Stop()
-	l, err := platform.AcquireLock(dataDir)
+	l, err := platform.AcquireLock(config.Layout{Root: dataDir}.Lock())
 	if err != nil {
 		t.Fatalf("Stop must release the lock: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestNewBridgeTakesTheInstanceLock(t *testing.T) {
 		b.Stop()
 		t.Fatal("NewBridge must fail without a usable dashboard token")
 	}
-	l, err = platform.AcquireLock(dataDir)
+	l, err = platform.AcquireLock(config.Layout{Root: dataDir}.Lock())
 	if err != nil {
 		t.Fatalf("a failed NewBridge must release the lock: %v", err)
 	}

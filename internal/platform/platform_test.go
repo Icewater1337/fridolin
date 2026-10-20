@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -36,17 +37,17 @@ func runAgain(t *testing.T, test string, env ...string) string {
 
 func TestInstanceLockRefusesASecondHolder(t *testing.T) {
 	dir := t.TempDir()
-	first, err := AcquireLock(dir)
+	first, err := AcquireLock(filepath.Join(dir, "bridge.lock"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second, err := AcquireLock(dir); err == nil {
+	if second, err := AcquireLock(filepath.Join(dir, "bridge.lock")); err == nil {
 		second.Release()
 		t.Fatal("a second lock on the same data dir must fail")
 	} else if !strings.Contains(err.Error(), "another bridge is already running") {
 		t.Errorf("err = %v", err)
 	}
-	other, err := AcquireLock(t.TempDir())
+	other, err := AcquireLock(filepath.Join(t.TempDir(), "bridge.lock"))
 	if err != nil {
 		t.Fatalf("another data dir must still lock: %v", err)
 	}
@@ -54,7 +55,7 @@ func TestInstanceLockRefusesASecondHolder(t *testing.T) {
 
 	first.Release()
 	first.Release() // a second release is harmless
-	again, err := AcquireLock(dir)
+	again, err := AcquireLock(filepath.Join(dir, "bridge.lock"))
 	if err != nil {
 		t.Fatalf("after release the lock must be free: %v", err)
 	}
@@ -67,7 +68,7 @@ func TestInstanceLockRefusesASecondHolder(t *testing.T) {
 // go.
 func TestInstanceLockRefusesAnotherProcess(t *testing.T) {
 	if dir := os.Getenv(lockChildVar); dir != "" {
-		l, err := AcquireLock(dir)
+		l, err := AcquireLock(filepath.Join(dir, "bridge.lock"))
 		if err != nil {
 			fmt.Println("refused:", err)
 			return
@@ -77,7 +78,7 @@ func TestInstanceLockRefusesAnotherProcess(t *testing.T) {
 		return
 	}
 	dir := t.TempDir()
-	l, err := AcquireLock(dir)
+	l, err := AcquireLock(filepath.Join(dir, "bridge.lock"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +90,7 @@ func TestInstanceLockRefusesAnotherProcess(t *testing.T) {
 	if out := runAgain(t, "TestInstanceLockRefusesAnotherProcess", lockChildVar+"="+dir); !strings.Contains(out, "acquired") {
 		t.Errorf("after release another process must get the lock:\n%s", out)
 	}
-	again, err := AcquireLock(dir)
+	again, err := AcquireLock(filepath.Join(dir, "bridge.lock"))
 	if err != nil {
 		t.Fatalf("after the other process the lock must be free: %v", err)
 	}

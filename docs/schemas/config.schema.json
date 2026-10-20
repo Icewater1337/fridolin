@@ -177,11 +177,71 @@
         "tokenless_send": {"type": "boolean"}
       }
     },
+    "core": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The containerized core. Off by default.",
+      "properties": {
+        "tailnet": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean", "description": "Joins the tailnet as its own device (tsnet). Default false."},
+            "hostname": {"type": "string", "pattern": "^$|^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$", "description": "The core's name on the tailnet, one DNS label. Default fridolin-core."}
+          }
+        },
+        "lease": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean", "description": "Takes and renews the core lease in the vault bucket. Default false."},
+            "renew_seconds": {"type": "integer", "minimum": 0, "maximum": 86400, "description": "Default 60."},
+            "stale_seconds": {"type": "integer", "minimum": 0, "maximum": 86400, "description": "Default 300; must be more than renew_seconds."}
+          }
+        },
+        "memory_limit_gb": {"type": "integer", "minimum": 0, "maximum": 4096, "description": "Default 8."}
+      }
+    },
+    "vault": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The tiered vault in Backblaze B2. Off by default.",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "hot_budget_gb": {"type": "integer", "minimum": 0, "maximum": 1048576, "description": "Default 50."},
+        "activity_days": {"type": "integer", "minimum": 0, "maximum": 36500, "description": "Default 60."},
+        "cold_after_days": {"type": "integer", "minimum": 0, "maximum": 36500, "description": "Default 90."},
+        "headroom_percent": {"type": "integer", "minimum": 0, "maximum": 90, "description": "Default 10."},
+        "bucket": {"$ref": "#/$defs/bucket", "description": "Default fridolin-vault."},
+        "snapshots_bucket": {"$ref": "#/$defs/bucket", "description": "Default fridolin-snapshots."},
+        "endpoint": {"type": "string", "pattern": "^$|^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$", "description": "The S3 endpoint's host name. Default s3.eu-central-003.backblazeb2.com."}
+      }
+    },
+    "nodes": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The port nodes connect to. Off by default.",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "listen": {"type": "string", "pattern": "^$|^([a-z0-9.-]*|\\[[0-9A-Fa-f:.]+\\]):([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$", "description": "host:port. Default :8766."}
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Limits on what brains do without asking.",
+      "properties": {
+        "max_runs_per_hour": {"type": "integer", "minimum": 0, "maximum": 10000, "description": "Default 20."},
+        "max_pending_irreversible": {"type": "integer", "minimum": 0, "maximum": 1000, "description": "Default 3."},
+        "approval_timeout_hours": {"type": "integer", "minimum": 0, "maximum": 720, "description": "Default 24."}
+      }
+    },
     "model": {"type": "string", "deprecated": true, "description": "Retired in version 2: version 1's model, which becomes brain_model while that is empty."},
     "work_dir": {"type": "string", "deprecated": true, "description": "Retired in version 2: the folder classic mode ran in."},
     "brains": {"type": ["array", "null"], "maxItems": 0, "deprecated": true, "description": "Retired in version 2: inline brains, refused unless the list is empty."}
   },
   "$defs": {
+    "bucket": {"type": "string", "pattern": "^$|^[a-z0-9][a-z0-9-]{4,61}[a-z0-9]$", "not": {"pattern": "^b2-"}, "description": "A B2 bucket name: 6 to 63 lower-case letters, digits and -, not starting with b2-."},
     "absolute_path": {"type": "string", "pattern": "^(/|~/|~$)", "description": "An absolute path, or one that starts with ~/."},
     "phone_number": {
       "type": "string",

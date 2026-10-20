@@ -33,7 +33,10 @@ type Snapshot struct {
 
 // Options supplies startup paths and current settings without a config store.
 type Options struct {
-	PlaudDir, Home   string
+	PlaudDir, Home string
+	// SiteDevices is where the site process reads the paired apps' keys
+	// (<data_dir>/site/devices.json, config.Layout.SiteDevices).
+	SiteDevices      string
 	Settings         func() *Snapshot
 	Target           func(id string) *Target
 	HeldTarget       func() string

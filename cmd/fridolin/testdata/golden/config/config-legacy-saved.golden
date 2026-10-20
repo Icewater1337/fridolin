@@ -34,5 +34,20 @@
     "enabled": false
   },
   "dashboard": {},
-  "script_api": {}
+  "script_api": {},
+  "core": {
+    "tailnet": {
+      "enabled": false
+    },
+    "lease": {
+      "enabled": false
+    }
+  },
+  "vault": {
+    "enabled": false
+  },
+  "nodes": {
+    "enabled": false
+  },
+  "policy": {}
 }

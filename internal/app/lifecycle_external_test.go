@@ -28,7 +28,7 @@ func TestApplicationRestartStopsAndReleasesInstanceLock(t *testing.T) {
 	if !errors.Is(h.Err(), app.ErrRestart) {
 		t.Fatalf("restart cause: %v", h.Err())
 	}
-	lock, err := platform.AcquireLock(h.Config.Boot().DataDir)
+	lock, err := platform.AcquireLock(config.Layout{Root: h.Config.Boot().DataDir}.Lock())
 	if err != nil {
 		t.Fatalf("restart retained instance lock: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestApplicationStopOwnsRunShutdown(t *testing.T) {
 	if err := <-runDone; err != nil {
 		t.Fatalf("Run after Stop: %v", err)
 	}
-	lock, err := platform.AcquireLock(cfg.Boot().DataDir)
+	lock, err := platform.AcquireLock(config.Layout{Root: cfg.Boot().DataDir}.Lock())
 	if err != nil {
 		t.Fatalf("Stop retained instance lock: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestApplicationStopBeforeRunReleasesConstruction(t *testing.T) {
 	if err := a.Run(context.Background()); err == nil {
 		t.Fatal("application started after resources closed")
 	}
-	lock, err := platform.AcquireLock(cfg.Boot().DataDir)
+	lock, err := platform.AcquireLock(config.Layout{Root: cfg.Boot().DataDir}.Lock())
 	if err != nil {
 		t.Fatalf("Stop retained instance lock: %v", err)
 	}

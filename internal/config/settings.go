@@ -64,6 +64,10 @@ type Live struct {
 	Plaud                      PlaudSettings
 	Dashboard                  DashboardSettings
 	ScriptAPI                  ScriptAPISettings
+	Core                       CoreConfig
+	Vault                      VaultConfig
+	Nodes                      NodesConfig
+	Policy                     PolicyConfig
 }
 type QueueSettings struct {
 	Mode       QueueMode
@@ -146,6 +150,10 @@ func liveOf(c *File) Live {
 		Plaud:                      plaudSettingsOf(c.Plaud),
 		Dashboard:                  dashboardSettingsOf(c.Dashboard),
 		ScriptAPI:                  scriptAPISettingsOf(c.ScriptAPI),
+		Core:                       c.Core,
+		Vault:                      c.Vault,
+		Nodes:                      c.Nodes,
+		Policy:                     c.Policy,
 	}
 }
 func queueSettingsOf(c QueueConfig) QueueSettings {
@@ -250,6 +258,10 @@ func fileOf(c Live) File {
 		Plaud:                      plaudConfigOf(c.Plaud),
 		Dashboard:                  dashboardConfigOf(c.Dashboard),
 		ScriptAPI:                  scriptAPIConfigOf(c.ScriptAPI),
+		Core:                       c.Core,
+		Vault:                      c.Vault,
+		Nodes:                      c.Nodes,
+		Policy:                     c.Policy,
 	}
 }
 func queueConfigOf(c QueueSettings) QueueConfig {
