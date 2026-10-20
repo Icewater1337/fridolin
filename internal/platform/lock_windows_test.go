@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -14,11 +15,11 @@ import (
 // and the lock covers no byte of the PID, which a second bridge reads.
 func TestLockContentionNamesOwnerOnWindows(t *testing.T) {
 	dir := t.TempDir()
-	owner, err := AcquireLock(dir)
+	owner, err := AcquireLock(filepath.Join(dir, "bridge.lock"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = AcquireLock(dir)
+	_, err = AcquireLock(filepath.Join(dir, "bridge.lock"))
 	if !errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
 		t.Fatalf("lost contention cause: %v", err)
 	}
@@ -27,7 +28,7 @@ func TestLockContentionNamesOwnerOnWindows(t *testing.T) {
 	}
 	owner.Release()
 	owner.Release()
-	again, err := AcquireLock(dir)
+	again, err := AcquireLock(filepath.Join(dir, "bridge.lock"))
 	if err != nil {
 		t.Fatalf("after Release: %v", err)
 	}
