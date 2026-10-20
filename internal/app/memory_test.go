@@ -61,6 +61,13 @@ func TestMemoryGate(t *testing.T) {
 	if p := ask(); strings.Contains(p, "<memory_recall>\n") {
 		t.Fatalf("untrusted notes reached the prompt:\n%s", p)
 	}
+	// The run's reply goes into the history after the run; wait for it, so
+	// that the lines written below come after it and the prompt pinned
+	// next is the same on every run.
+	h.WaitFor("the first reply in the history", func() bool {
+		data, _ := os.ReadFile(filepath.Join(dir, "conversation-history.jsonl"))
+		return strings.Contains(string(data), `"type":"out"`)
+	})
 
 	// The owner typed it, a month ago, in their DM on WhatsApp; ten
 	// messages since keep it out of the chat history the prompt shows.
