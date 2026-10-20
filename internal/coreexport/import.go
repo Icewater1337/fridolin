@@ -162,7 +162,12 @@ func extract(ctx context.Context, tr *tar.Reader, staging string) (Manifest, err
 			return m, fmt.Errorf("%s is in the archive twice", rel)
 		}
 		seen[rel] = true
+		// cleanMember already refuses ".." parts, absolute names and
+		// backslashes; the containment check says so where the write happens.
 		dst := filepath.Join(staging, filepath.FromSlash(rel))
+		if !strings.HasPrefix(dst, filepath.Clean(staging)+string(filepath.Separator)) {
+			return m, fmt.Errorf("unsafe member %q in the archive", hdr.Name)
+		}
 		// Owner bits only: the data dir is this user's alone.
 		mode := fs.FileMode(hdr.Mode).Perm() & 0o700
 		switch hdr.Typeflag {
