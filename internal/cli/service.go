@@ -45,6 +45,9 @@ const (
 	prevManifestFile   = "install.prev.json"
 	installTempPrefix  = ".fridolin-"
 	serviceWaitDefault = 30 * time.Second
+	// whatsappConnectWait is how long an install waits, once the new
+	// bridge answers, for a paired WhatsApp to connect.
+	whatsappConnectWait = 10 * time.Second
 )
 
 var installEntries = []string{
@@ -1190,15 +1193,31 @@ func (h *serviceHost) waitForBridge(cfg *config.Settings, since time.Time, want 
 		return fmt.Errorf("the bridge on %s runs version %s, not %s that was installed; see the log: %s", base, r.Version, want, h.logHint())
 	}
 	h.printf("the bridge is running (%s)", r.Version)
+	// A paired bridge is "connecting" for a moment after it starts. Saying
+	// so then told everyone who upgraded to pair it, so give it that
+	// moment first.
+	connectBy := h.now().Add(whatsappConnectWait)
+	for r.WhatsApp == "connecting" && h.now().Before(connectBy) {
+		h.sleep(every)
+		a := h.askBridge(base)
+		if !a.up || a.readErr != nil {
+			break
+		}
+		r = a.r
+	}
 	switch r.WhatsApp {
 	case "connected":
 		h.printf("WhatsApp is connected")
 	case "disabled":
 		h.printf("WhatsApp is off: the bridge runs in dev mode (--no-whatsapp)")
+	case "pairing", "qr-expired":
+		h.printf("WhatsApp is not paired yet: pair it in the dashboard (fridolin open)")
+	case "connecting":
+		h.printf("WhatsApp is still connecting; if it does not, the log says why: %s", h.logHint())
 	case "logged-out", "replaced":
 		h.printf("! WhatsApp is %s: pair again in the dashboard (fridolin open)", r.WhatsApp)
 	default:
-		h.printf("WhatsApp is not connected yet (%s): pair it in the dashboard (fridolin open) if you have not", r.WhatsApp)
+		h.printf("! WhatsApp is %s: the dashboard says why (fridolin open)", r.WhatsApp)
 	}
 	return nil
 }

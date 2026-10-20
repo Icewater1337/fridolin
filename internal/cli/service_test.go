@@ -890,6 +890,23 @@ func TestServiceInstallChecksTheNewBridgeAnswers(t *testing.T) {
 		{"logged out", 200, func() (int, []byte) {
 			return ready(httpapi.ReadyResponse{WhatsApp: "logged-out", Version: version.String(), StartedAt: time.Now()})()
 		}, "", "", "pair again"},
+		// A paired bridge says "connecting" for a moment after it starts,
+		// and the install used to tell everyone who upgraded to pair it.
+		{"paired, connecting for a moment", 200, func() func() (int, []byte) {
+			calls := 0
+			return func() (int, []byte) {
+				if calls++; calls < 3 {
+					return ready(httpapi.ReadyResponse{WhatsApp: "connecting", Version: version.String(), StartedAt: time.Now()})()
+				}
+				return ready(httpapi.ReadyResponse{Ready: true, WhatsApp: "connected", Version: version.String(), StartedAt: time.Now()})()
+			}
+		}(), "", "", "WhatsApp is connected"},
+		{"connecting for longer than the install waits", 200, func() (int, []byte) {
+			return ready(httpapi.ReadyResponse{WhatsApp: "connecting", Version: version.String(), StartedAt: time.Now()})()
+		}, "", "", "WhatsApp is still connecting; if it does not, the log says why: tail -F ~/Library/Logs/fridolin/stderr.log"},
+		{"not paired", 200, func() (int, []byte) {
+			return ready(httpapi.ReadyResponse{WhatsApp: "pairing", Version: version.String(), StartedAt: time.Now()})()
+		}, "", "", "WhatsApp is not paired yet: pair it in the dashboard"},
 		{"the old bridge still answers", 200, ready(httpapi.ReadyResponse{WhatsApp: "connected", Version: version.String(), StartedAt: time.Now().Add(-time.Hour)}), "", "is still the one started", ""},
 		{"the old bridge answers while it shuts down", 200, func() func() (int, []byte) {
 			calls := 0

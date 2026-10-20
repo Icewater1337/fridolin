@@ -237,6 +237,33 @@ func TestSetupSaysWhatHappened(t *testing.T) {
 	}
 }
 
+func TestSetupShowsTheFirstStepsOnlyToANewSetup(t *testing.T) {
+	// Every upgrade ended with "Pair WhatsApp", "Add a brain" and "Allow
+	// your number", which a config already set up has done.
+	h := newSetupHarness(t)
+	firstSteps := []string{"Pair WhatsApp", "Add a brain", "Allow your number"}
+	upgradeNote := `README.md, "Upgrading and rolling back"`
+	for _, existing := range []bool{false, true} {
+		home := fsx.Canonical(t.TempDir())
+		makeFiles(t, home, ".local/lib/fridolin/fridolin")
+		if existing {
+			makeFiles(t, home, ".fridolin/config.json")
+		}
+		out, exit, _ := h.run(t, home, nil, nil)
+		if exit != 0 {
+			t.Fatalf("existing config %v: setup.sh exited %d:\n%s", existing, exit, out)
+		}
+		for _, w := range firstSteps {
+			if got := strings.Contains(out, w); got == existing {
+				t.Errorf("existing config %v: says %q: %v:\n%s", existing, w, got, out)
+			}
+		}
+		if got := strings.Contains(out, upgradeNote); got != existing {
+			t.Errorf("existing config %v: points to the upgrade notes: %v:\n%s", existing, got, out)
+		}
+	}
+}
+
 func TestSetupBuildsAndTestsWithTheMakefile(t *testing.T) {
 	// setup.sh had a go build and a go test of its own, which could drift
 	// from the Makefile's that CI runs. It runs make build, stamped with
