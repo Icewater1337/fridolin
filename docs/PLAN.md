@@ -251,7 +251,7 @@ M0 — Foundations (fridolin):
 - [ ] Replace the cgo SQLite driver with `modernc.org/sqlite` so the binary builds without a C compiler on all three platforms; keep the whatsmeow store and every existing test green
 - [ ] `internal/platform` for Windows: `platform_windows.go` with `LockFileEx` for the bridge lock, a Job Object for process groups, and the brain command run through `cmd /C` or PowerShell (`procstart_other.go` and `logfile_unix.go` get Windows counterparts); delete the deliberate build stop in `unsupported.go` once the three are in
 - [ ] Extend `make check` and the `ci.yml` matrix to windows-latest (goos windows, amd64 and arm64, tests on); add both to the release archives
-- [ ] `fridolin doctor` beside `fridolin check`: Claude CLI or token, tailscale auth key, Docker, `restic`, `rclone`, `ffmpeg`, disk; prints fixes
+- [x] `fridolin doctor` beside `fridolin check`: Claude CLI or token, tailscale auth key, Docker, `restic`, `rclone`, `ffmpeg`, disk; prints fixes
 - [ ] Data layout from Workstream D through a `configMigrations` step that raises `currentConfigVersion`; schemas, golden files and `config-v1.json` updated
 - [ ] Gate: `make check` green on macOS, Linux and Windows; `fridolin doctor` on the Mac mini reports only the expected missing pieces
 

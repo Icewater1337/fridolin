@@ -1,0 +1,118 @@
+{
+  "config": "/home/you/.fridolin/config.json",
+  "ok": false,
+  "checks": [
+    {
+      "id": "config",
+      "title": "config loads",
+      "required": true,
+      "status": "ok",
+      "detail": "/home/you/.fridolin/config.json"
+    },
+    {
+      "id": "data-dir",
+      "title": "data dir writable",
+      "required": true,
+      "status": "ok",
+      "detail": "/home/you/.fridolin"
+    },
+    {
+      "id": "disk",
+      "title": "free disk in the data dir",
+      "required": true,
+      "status": "warn",
+      "detail": "12.0 GB free at /home/you/.fridolin, under 20.0 GB",
+      "fix": "free up space on that disk, or move data_dir to a larger one"
+    },
+    {
+      "id": "claude",
+      "title": "Claude CLI",
+      "required": true,
+      "status": "ok",
+      "detail": "/usr/local/bin/claude (2.1.302 (Claude Code))"
+    },
+    {
+      "id": "claude-login",
+      "title": "Claude login for sandboxed brains",
+      "required": true,
+      "status": "fail",
+      "detail": "the sandbox is on, and neither this shell nor the service sets CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY: brains fail with \"Not logged in\"",
+      "fix": "claude setup-token, then set CLAUDE_CODE_OAUTH_TOKEN in the service's environment (docs/CONFIGURATION.md, \"Where to set them\")"
+    },
+    {
+      "id": "tailscale",
+      "title": "Tailscale",
+      "required": false,
+      "needed": "M1",
+      "status": "warn",
+      "detail": "/usr/local/bin/tailscale is installed, but its state is NeedsLogin",
+      "fix": "tailscale up"
+    },
+    {
+      "id": "tailscale-authkey",
+      "title": "Tailscale auth key in host secrets",
+      "required": false,
+      "needed": "M1",
+      "status": "ok",
+      "detail": "fridolin.tailscale.authkey in the Keychain"
+    },
+    {
+      "id": "b2-keys",
+      "title": "Backblaze B2 keys in host secrets",
+      "required": false,
+      "needed": "M3",
+      "status": "missing",
+      "detail": "not in the Keychain: fridolin.b2.snapshots.keyid, fridolin.b2.snapshots.key",
+      "fix": "security add-generic-password -a fridolin -s fridolin.b2.snapshots.keyid -w; security add-generic-password -a fridolin -s fridolin.b2.snapshots.key -w"
+    },
+    {
+      "id": "docker",
+      "title": "Docker",
+      "required": false,
+      "needed": "M1",
+      "status": "missing",
+      "detail": "the docker CLI is not installed",
+      "fix": "brew install --cask orbstack"
+    },
+    {
+      "id": "restic",
+      "title": "restic",
+      "required": false,
+      "needed": "M3",
+      "status": "ok",
+      "detail": "/opt/homebrew/bin/restic (restic 0.18.0 compiled with go1.24)"
+    },
+    {
+      "id": "rclone",
+      "title": "rclone",
+      "required": false,
+      "needed": "M3",
+      "status": "ok",
+      "detail": "/opt/homebrew/bin/rclone (rclone v1.70.0)"
+    },
+    {
+      "id": "ffmpeg",
+      "title": "ffmpeg",
+      "required": false,
+      "status": "ok",
+      "detail": "/opt/homebrew/bin/ffmpeg (ffmpeg version 7.1)"
+    },
+    {
+      "id": "litestream",
+      "title": "litestream",
+      "required": false,
+      "needed": "M3",
+      "status": "missing",
+      "detail": "litestream is not installed",
+      "fix": "brew install benbjohnson/litestream/litestream"
+    },
+    {
+      "id": "age",
+      "title": "age",
+      "required": false,
+      "needed": "M1",
+      "status": "ok",
+      "detail": "/opt/homebrew/bin/age (v1.2.1)"
+    }
+  ]
+}
