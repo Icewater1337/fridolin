@@ -130,3 +130,24 @@ func TestStartupLogNamesTheClaudeCLI(t *testing.T) {
 		})
 	}
 }
+
+func TestStartupLogNamesTheCodexCLI(t *testing.T) {
+	// In Codex mode the line was the Status struct printed with %+v,
+	// and a missing CLI got no warning.
+	cli := versionCLI(t, filepath.Join(t.TempDir(), "codex"), "codex-cli 0.163.0")
+	logged := captureLog(t)
+	LogCodexCLI(cli, nil)
+	if out, want := strings.Join(logged(), "\n"), "Codex CLI: "+cli+", codex-cli 0.163.0"; !strings.Contains(out, want) || strings.Contains(out, "WARNING") {
+		t.Errorf("log %q, want %q in it and no warning", out, want)
+	}
+
+	missing := filepath.Join(t.TempDir(), "codex")
+	logged = captureLog(t)
+	LogCodexCLI(missing, nil)
+	out := strings.Join(logged(), "\n")
+	for _, w := range []string{"WARNING: the Codex CLI (" + missing + ") was not found", "Settings → AI mode"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("log %q, want %q in it", out, w)
+		}
+	}
+}

@@ -259,7 +259,7 @@ func runCmd(args []string) int {
 		return 1
 	}
 	if cfg.AgentProvider == "codex" {
-		go func() { log.Printf("Codex CLI: %+v", app.CodexInfo(cfg.CodexPath, cfg.ChildEnvPassthrough)) }()
+		go app.LogCodexCLI(cfg.CodexPath, cfg.ChildEnvPassthrough)
 	} else {
 		go app.LogClaudeCLI(cfg.ClaudePath, cfg.ChildEnvPassthrough)
 	}

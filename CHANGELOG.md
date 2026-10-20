@@ -268,6 +268,9 @@ for compatibility.
 
 ### Fixed
 
+- In Codex mode the log names the Codex CLI on one readable line at
+  startup, as it does the Claude CLI, and warns when it is not found.
+
 - A message displaced from a full brain queue now completes with a dropped
   error, so callers waiting for it do not wait forever. Its history remains
   available to later runs, and the queue keeps the same ordering rules.
