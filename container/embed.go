@@ -9,3 +9,10 @@ import _ "embed"
 //
 //go:embed compose.yaml
 var Compose []byte
+
+// Seccomp is seccomp.json, the container's seccomp profile, which compose
+// reads from beside the compose file: Docker's default with the namespaces
+// bubblewrap makes for each brain's run allowed (docs/CORE.md).
+//
+//go:embed seccomp.json
+var Seccomp []byte

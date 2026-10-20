@@ -33,6 +33,20 @@ services:
     volumes:
       - fridolin-data:/data
     mem_limit: ${FRIDOLIN_MEMORY_LIMIT:-8g}
+    # Least privilege for the bridge, which runs as uid 10001 and needs no
+    # capability. Each brain's run is sandboxed with bubblewrap in user,
+    # mount and PID namespaces of its own: seccomp.json (beside this file)
+    # is Docker's default profile with those namespaces allowed, and
+    # systempaths=unconfined lets bubblewrap mount a fresh /proc for the
+    # run, which Docker's masked /proc paths forbid. On a host with
+    # AppArmor (Ubuntu), Docker's docker-default profile also forbids the
+    # mounts: add apparmor=unconfined here (docs/CORE.md).
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=${FRIDOLIN_SECCOMP:-./seccomp.json}
+      - systempaths=unconfined
     # The dashboard and local APIs on this machine only. The tailnet
     # (tsnet, `core.tailnet`) is the way in from anywhere else; delete
     # this mapping to leave that the only one. Both sides are http_listen's

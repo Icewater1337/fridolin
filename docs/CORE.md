@@ -44,9 +44,17 @@ a published port to the container's own address. `http_listen` stays
 `127.0.0.1:8765`, the host guard still only answers requests addressed to
 `127.0.0.1:8765` or `localhost:8765`, and compose publishes the port on the
 host's `127.0.0.1` only. So the dashboard is reachable from this machine,
-as before, and from nowhere else until the tailnet listener (`core.tailnet`)
-comes. Keep the host side of the mapping at the same port as
-`http_listen`: a request to another port is refused as misdirected.
+as before, and from elsewhere only through the core's own tailnet node
+when `core.tailnet` is on (below). Keep the host side of the mapping at
+the same port as `http_listen`: a request to another port is refused as
+misdirected.
+
+The image sets `FRIDOLIN_CONTAINER=1`. Configs are then resolved for the
+container: brains' runs are sandboxed with bubblewrap (`sandbox.enabled`
+is allowed, and on in a new config), new brain folders go in
+`/data/brains-folders/` (a brain path `~/name` means
+`/data/brains-folders/name` there), and `fridolin doctor` leaves out the
+host's checks (Docker, the host's Tailscale, the keychain).
 
 A health check asks `/health` every 30 s; `docker ps` shows the result.
 
@@ -118,13 +126,97 @@ on a second machine does not replace the first; exports made before stay
 encrypted to the old one.
 
 What this does not protect against: `docker inspect fridolin-core` shows
-the container's environment to anyone who may use Docker on the host, and
-inside the container brains run as the same user as the bridge for now, so
-a brain that goes looking can read the bridge's environment
-(`/proc/<pid>/environ`), as on a native Linux install. Per-brain users in
-the container are a later M1 step. `child_env_passthrough` still decides
-what brains are handed; `CLAUDE_CODE_OAUTH_TOKEN` is among the variables
-they always get.
+the container's environment to anyone who may use Docker on the host.
+Inside the container a sandboxed brain's run has its own PID namespace,
+so it cannot read the bridge's environment (`/proc/<pid>/environ`); with
+`sandbox.enabled` off it can, as on a native Linux install.
+`child_env_passthrough` still decides what brains are handed;
+`CLAUDE_CODE_OAUTH_TOKEN` is among the variables they always get.
+
+## The brains' sandbox in the container
+
+Each brain's run (`claude -p`, `codex exec`, the site builder's) runs under
+bubblewrap, as a Unix user of its own, `brain-<id>`, whose home is the
+brain's state folder `/data/brains/<id>/` (mode 0700). The run gets:
+
+- user, PID, IPC and cgroup namespaces of its own: inside, it is
+  `brain-<id>` with a uid from 20000 to 59999 derived from the id, and it
+  sees only its own processes; it has no capabilities, no terminal, and
+  ends with the bridge's supervision of it (`--die-with-parent`);
+- the system read-only: `/usr`, `/etc` (with an `/etc/passwd` and
+  `/etc/group` naming its user, written to `/data/core/sandbox/<id>/`),
+  `/bin`, `/lib`, the bridge's install `/opt/fridolin`, and the folders of
+  the programs the bridge runs;
+- read-write only its own places: its folder (as configured and its real
+  path), its state folder (HOME, `CLAUDE_CONFIG_DIR`, `TMPDIR`, caches),
+  its media inbox, and a private `/tmp`;
+- read-only its run's token folder `/data/run-tokens/<id>/` and the
+  `sandbox.allow_paths` entries;
+- nothing else of `/data`: not the other brains' folders and state,
+  `bridge.db`, `config.json`, `secrets/`, the tokens, `tsnet/` or the
+  audit log. They are not mounted, so they do not exist for the run;
+- `sandbox.deny_paths`, and the other brains' folders, the database, the
+  config file and the credentials folder wherever a bind above would show
+  them, masked: an empty read-only folder over a folder, `/dev/null` over a
+  file. A deny path that does not exist when the run starts is not masked;
+- the container's network: Claude needs it, and the brain API is on the
+  container's loopback.
+
+The user exists only in the run's user namespace, which bubblewrap maps
+onto the bridge's own user (uid 10001). So no privilege is needed to start
+a run, the bridge keeps owning every file a brain writes, and an export
+moves no ownership; what keeps brains apart is the mount and PID
+namespaces, not file modes. `fridolin check --print-sandbox <id>` prints
+the command line, one argument per line.
+
+Docker's defaults forbid what bubblewrap needs, so `compose.yaml` runs the
+container with `cap_drop: [ALL]`, `no-new-privileges`, the seccomp profile
+`seccomp.json` (written beside the compose file; Docker's default list of
+refused calls, with `unshare`, `clone`'s namespace flags, `mount`,
+`pivot_root` and `setns` allowed) and `systempaths=unconfined` (Docker
+masks parts of `/proc`, which keeps a new `/proc` from being mounted). On
+a host with AppArmor (Ubuntu, Debian with AppArmor on), Docker's
+`docker-default` profile also forbids the mounts: add
+`apparmor=unconfined` to `security_opt` in a compose override there.
+`fridolin doctor` in the container (`docker exec fridolin-core fridolin
+doctor`) tries it; a brain whose sandbox cannot start refuses every
+message rather than run without it.
+
+## The tailnet
+
+With `core.tailnet.enabled` (a restart setting) the bridge joins the
+tailnet as a device of its own through tsnet, Tailscale in the process
+with a userspace network stack, so it needs neither the host's Tailscale
+nor a TUN device. It is named `core.tailnet.hostname` (`fridolin-core`),
+keeps its node key in `/data/tsnet/` (exported with the rest, so a moved
+core is the same device), and joins the first time with `TS_AUTHKEY`,
+which `fridolin core start` passes from `fridolin.tailscale.authkey`.
+Without a key and without a node key it waits, and its log shows a
+sign-in link.
+
+On the tailnet it serves the dashboard and the API: with TLS on port 443,
+the certificate of its MagicDNS name from Tailscale, when the tailnet has
+MagicDNS and HTTPS on (and a redirect on 80); else plain HTTP on port 80,
+inside WireGuard. The loopback listener stays as it was. On the tailnet:
+
+- the dashboard API always wants the dashboard token or a session, even
+  with `dashboard.require_token` off; `/send` and `/ingest` want a token;
+  the brain and site-builder APIs, which only local runs call, are not
+  served;
+- only the node's MagicDNS names and Tailscale addresses are accepted as
+  `Host`, and every request's sender is asked of Tailscale (WhoIs): one it
+  cannot name is refused, each user and device is logged the first time,
+  and every request that changes something is logged and written to the
+  audit log (`kind: tailnet`, the login, the device, method and path, the
+  status). The identity is recorded, not trusted on its own.
+
+The node port (`nodes.listen`) listens on the tailnet at its port, never on
+the container's interfaces, when the tailnet is on.
+
+The Overview's Core card and `/data/core/tailnet.json` show the state and
+the dashboard's address there; `fridolin doctor` checks it. tsnet sends
+its own diagnostics to Tailscale's log service, as every Tailscale client
+does.
 
 ## Moving the core
 
@@ -197,6 +289,27 @@ WhatsApp session fight over it.
   before another device may take over. It stops at once when it finds
   another device's record. A clean shutdown releases the lease.
 
+In the bridge (`core.lease.enabled`, a restart setting): the lease is
+taken before any channel exists. A device that holds it live makes the
+bridge exit with status 3 ("not starting: another device holds the core
+lease"). The store is the one `fridolin core` uses (`$FRIDOLIN_CORE_STORE`,
+else `vault.bucket` with `B2_VAULT_KEY_ID` and `B2_VAULT_KEY`); without one
+the bridge does not start. When the lease is lost, the bridge disconnects
+WhatsApp and does not reconnect, stops the outbox, and refuses every send
+from then on; the dashboard stays up, its Overview and `/ready` (503,
+`"lease": {"state": "lost", ...}`) say so, and replies the brains still
+make wait in the outbox. A clean stop releases the lease after the
+channels have stopped. `/data/core/lease-state.json` records each renewal
+for `fridolin doctor`.
+
+A copy that another device took the lease from (found at start, or while
+running) writes `/data/core/superseded` and refuses to start from then on,
+even after that device releases the lease (to update, say): its
+`bridge.db` is older than the one that ran since. Docker's restart policy
+keeps restarting it, and each start exits with status 3 at once without
+reaching the bucket; stop it with `fridolin core stop`. `fridolin core
+promote` there removes the mark, after you imported a newer export.
+
 B2 has no conditional write, so taking the lease is write, wait three
 seconds, read back: the device whose record is not the one read back gives
 up. Two devices that both take a free lease within those seconds could
@@ -210,7 +323,9 @@ The flags of `export`, `import`, `promote` and `status`: `--data-dir`
 rclone `remote:bucket`; default `$FRIDOLIN_CORE_STORE`, else the B2 bucket
 with `B2_VAULT_KEY_ID` and `B2_VAULT_KEY`, reached through rclone with the
 key in rclone's environment only) and `--bucket` (default
-`fridolin-vault`).
+`fridolin-vault`). `promote` and `status` judge the lease with the
+config's `core.lease` timings when there is a config, so they agree with
+the cores.
 
 ## Recovery
 
@@ -230,3 +345,54 @@ key in rclone's environment only) and `--bucket` (default
 - **WhatsApp asks to pair again** after a move: the export was older than
   the session's last key update or `bridge.db` did not come along. Never
   delete `bridge.db` to fix it; import again or pair again.
+
+## The M1 gate on real machines
+
+Rehearsed on one Mac with two containers (dev mode, a folder as the
+bucket, renew 2 s and stale 8 s; see the pull request), the gate still has
+to run on the machines. On each, `fridolin doctor` first; every step's
+output goes into the pull request.
+
+Mac mini (core A):
+
+- [ ] `fridolin.tailscale.authkey`, `fridolin.claude.oauth.token`,
+      `fridolin.b2.vault.keyid` and `.key` in the keychain; the age
+      identity copied to a password manager.
+- [ ] `config.json`: `core.tailnet.enabled` and `core.lease.enabled` on,
+      `sandbox.enabled` on; `fridolin core run core promote`, then
+      `fridolin core start`.
+- [ ] `docker exec fridolin-core fridolin doctor`: tailnet up with its
+      MagicDNS name, lease renewed, bubblewrap ok.
+- [ ] From another tailnet device: `https://fridolin-core.<tailnet>.ts.net/`
+      asks for the token; a setting saved there is in `audit/` with your
+      login.
+- [ ] A WhatsApp message gets an answer; a brain's run cannot list
+      another brain's folder (ask it to).
+- [ ] `docker exec fridolin-core fridolin core export`; note the time.
+
+Linux VM (core B), Docker Engine:
+
+- [ ] Install Docker and fridolin; secrets as 0600 files in
+      `$XDG_CONFIG_HOME/fridolin/secrets/` (the age identity the same as
+      A's).
+- [ ] With AppArmor on (`aa-status`), a compose override with
+      `security_opt: [apparmor=unconfined]`, or doctor's bubblewrap check
+      fails; on Ubuntu 24.04 also check
+      `sysctl kernel.apparmor_restrict_unprivileged_userns`.
+- [ ] `fridolin core stop` on A; on B `fridolin core run core import
+      --latest`, `fridolin core run core promote`, `fridolin core start`.
+      Under an hour from A's stop to B's first answer.
+- [ ] B answers on WhatsApp without a new pairing, under the same tailnet
+      name (A's node key moved with the export); A's tailnet device is
+      gone or offline.
+- [ ] `fridolin core start` on A again: it exits with status 3 (another
+      device holds the lease); `fridolin core status` on A says so.
+
+Windows (core C), Docker Desktop on WSL2:
+
+- [ ] The same as on the Linux VM, with the secrets in the Windows
+      Credential Manager once `hostsecrets` has it (until then: the
+      variables of `container/compose.yaml` set by hand in the shell that
+      runs `docker compose`).
+- [ ] B stopped; C imports, promotes, starts and answers; B refuses to
+      start afterwards.

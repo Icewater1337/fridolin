@@ -65,7 +65,7 @@ func TestFieldsCoverEveryJSONLeafAndBootValue(t *testing.T) {
 	// Callers cannot change the inventory or the restart reporting order.
 	owned := Fields()
 	owned[0].Name = "changed"
-	want := []string{"http_listen", "data_dir", "db_path", "media_dir", "log_level", "dashboard.disabled", "dashboard.require_token", "nodes.enabled", "nodes.listen"}
+	want := []string{"http_listen", "data_dir", "db_path", "media_dir", "log_level", "dashboard.disabled", "dashboard.require_token", "nodes.enabled", "nodes.listen", "core.tailnet.enabled", "core.tailnet.hostname", "core.lease.enabled", "core.lease.renew_seconds", "core.lease.stale_seconds", "vault.bucket"}
 	if !slices.Equal(RestartFieldNames(), want) {
 		t.Fatalf("restart field order = %v, want %v", RestartFieldNames(), want)
 	}
@@ -73,8 +73,8 @@ func TestFieldsCoverEveryJSONLeafAndBootValue(t *testing.T) {
 
 func TestRestartRequiredOrderAndTokenTransitions(t *testing.T) {
 	t.Parallel()
-	old := &Settings{Boot: Boot{HTTPListen: "old", DataDir: "old", DBPath: "old", MediaDir: "old", LogLevel: "info"}, Live: Live{Dashboard: DashboardSettings{RequireToken: true}, Nodes: NodesConfig{Listen: ":8766"}}}
-	next := &Settings{Boot: Boot{HTTPListen: "new", DataDir: "new", DBPath: "new", MediaDir: "new", LogLevel: "debug"}, Live: Live{Dashboard: DashboardSettings{Disabled: true, RequireToken: false}, Nodes: NodesConfig{Enabled: true, Listen: "127.0.0.1:8766"}}}
+	old := &Settings{Boot: Boot{HTTPListen: "old", DataDir: "old", DBPath: "old", MediaDir: "old", LogLevel: "info"}, Live: Live{Dashboard: DashboardSettings{RequireToken: true}, Nodes: NodesConfig{Listen: ":8766"}, Core: CoreConfig{Tailnet: TailnetConfig{Hostname: "a"}, Lease: LeaseConfig{RenewSeconds: 60, StaleSeconds: 300}}, Vault: VaultConfig{Bucket: "a"}}}
+	next := &Settings{Boot: Boot{HTTPListen: "new", DataDir: "new", DBPath: "new", MediaDir: "new", LogLevel: "debug"}, Live: Live{Dashboard: DashboardSettings{Disabled: true, RequireToken: false}, Nodes: NodesConfig{Enabled: true, Listen: "127.0.0.1:8766"}, Core: CoreConfig{Tailnet: TailnetConfig{Enabled: true, Hostname: "b"}, Lease: LeaseConfig{Enabled: true, RenewSeconds: 30, StaleSeconds: 200}}, Vault: VaultConfig{Bucket: "b"}}}
 	if got := restartRequired(old, next); !slices.Equal(got, RestartFieldNames()) {
 		t.Fatalf("restart = %v", got)
 	}

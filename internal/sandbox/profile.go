@@ -60,6 +60,11 @@ type Settings struct {
 	// extraDeny and extraAllow come from config.
 	ExtraDeny  []string
 	ExtraAllow []string
+
+	// BrainsRoot is, in the core's container, the folder of the data dir
+	// that holds the brains' folders (config.Layout.BrainFolders), which
+	// the data dir's protection leaves to them; "" elsewhere.
+	BrainsRoot string
 }
 
 // defaultDenySubpaths are home-relative directories no brain may read.
@@ -276,7 +281,7 @@ func (sp Policy) profile(brainID string) (string, error) {
 	for id, dirs := range sp.WorkDirs {
 		if id != brainID {
 			for _, dir := range dirs {
-				protected = append(protected, ProtectedPath{dir, true, "brain " + id + "'s folder"})
+				protected = append(protected, ProtectedPath{Path: dir, Inside: true, What: "brain " + id + "'s folder"})
 			}
 		}
 	}
@@ -796,6 +801,9 @@ type ProtectedPath struct {
 	Path   string
 	Inside bool
 	What   string // what it is, for the error
+	// Except is a folder inside Path where brain folders may lie: the
+	// container's brains-folders in its data dir (Settings.BrainsRoot).
+	Except string
 }
 
 // protected lists the protected paths for brain folders in HOME home, with
@@ -805,7 +813,7 @@ func (p Settings) Protected(ctx Context, l InstallLayout, progs Programs) []Prot
 	var out []ProtectedPath
 	add := func(path string, inside bool, what string) {
 		if path != "" {
-			out = append(out, ProtectedPath{filepath.Clean(ctx.absPath(path)), inside, what})
+			out = append(out, ProtectedPath{Path: filepath.Clean(ctx.absPath(path)), Inside: inside, What: what})
 		}
 	}
 	for _, sub := range defaultDenySubpaths {
@@ -826,6 +834,9 @@ func (p Settings) Protected(ctx Context, l InstallLayout, progs Programs) []Prot
 	add(filepath.Join(home, "Library", "LaunchAgents"), true, "~/Library/LaunchAgents")
 	for _, dir := range p.dataDirs(home) {
 		add(dir, true, "the bridge's data folder")
+		if p.BrainsRoot != "" && fsx.Within(p.BrainsRoot, dir) {
+			out[len(out)-1].Except = filepath.Clean(p.BrainsRoot)
+		}
 	}
 	add(p.MediaDir, true, "the media folder")
 	add(p.CredsDir, true, "the credentials folder")
@@ -882,7 +893,7 @@ func ProtectedIn(ctx Context, dir string, protected []ProtectedPath) (string, bo
 					return "is " + pp.What, true
 				case fsx.Within(p, d):
 					return "holds " + pp.What, true
-				case pp.Inside && fsx.Within(d, p):
+				case pp.Inside && fsx.Within(d, p) && (pp.Except == "" || d == pp.Except || !fsx.Within(d, pp.Except)):
 					return "is inside " + pp.What, true
 				}
 			}

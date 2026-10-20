@@ -21,6 +21,21 @@ type Boot struct {
 	DashboardRequireToken bool   `config:"dashboard.require_token"`
 	NodesEnabled          bool   `config:"nodes.enabled"`
 	NodesListen           string `config:"nodes.listen"`
+	// The tailnet node and the core lease start with the bridge (tsnet's
+	// state, the lease's first write), so they wait for a restart.
+	TailnetEnabled    bool   `config:"core.tailnet.enabled"`
+	TailnetHostname   string `config:"core.tailnet.hostname"`
+	LeaseEnabled      bool   `config:"core.lease.enabled"`
+	LeaseRenewSeconds int    `config:"core.lease.renew_seconds"`
+	LeaseStaleSeconds int    `config:"core.lease.stale_seconds"`
+	// VaultBucket holds the lease (vault.bucket), read as the lease is
+	// taken.
+	VaultBucket string `config:"vault.bucket"`
+}
+
+// Lease returns the lease settings the bridge started with.
+func (b Boot) Lease() LeaseConfig {
+	return LeaseConfig{Enabled: b.LeaseEnabled, RenewSeconds: b.LeaseRenewSeconds, StaleSeconds: b.LeaseStaleSeconds}
 }
 
 func bootOf(c *File, paths Paths) Boot {
@@ -29,6 +44,9 @@ func bootOf(c *File, paths Paths) Boot {
 		DBPath: c.DBPath, MediaDir: c.MediaDir, LogLevel: c.LogLevel,
 		DashboardDisabled: c.Dashboard.Disabled, DashboardRequireToken: *c.Dashboard.RequireToken,
 		NodesEnabled: c.Nodes.Enabled, NodesListen: c.Nodes.Listen,
+		TailnetEnabled: c.Core.Tailnet.Enabled, TailnetHostname: c.Core.Tailnet.Hostname,
+		LeaseEnabled: c.Core.Lease.Enabled, LeaseRenewSeconds: c.Core.Lease.RenewSeconds, LeaseStaleSeconds: c.Core.Lease.StaleSeconds,
+		VaultBucket: c.Vault.Bucket,
 	}
 }
 

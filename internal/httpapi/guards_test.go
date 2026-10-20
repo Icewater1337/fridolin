@@ -29,6 +29,38 @@ func TestHTTPHostGuard(t *testing.T) {
 	}
 }
 
+// On the tailnet the dashboard may be served with TLS: an https origin of
+// an allowed host passes there, and only there; a request without a token
+// to /send is refused before the handler.
+func TestRemoteGuards(t *testing.T) {
+	hosts := map[string]bool{"fridolin-core.example.ts.net": true}
+	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })
+	for _, tc := range []struct {
+		origin string
+		want   int
+	}{{"https://fridolin-core.example.ts.net", 204}, {"http://fridolin-core.example.ts.net", 204}, {"https://evil.example", 403}} {
+		r := httptest.NewRequest("POST", "/", nil)
+		r.Header.Set("Origin", tc.origin)
+		w := httptest.NewRecorder()
+		originGuard(hosts, []string{"http://", "https://"}, ok).ServeHTTP(w, r)
+		if w.Code != tc.want {
+			t.Errorf("origin %s: %d, want %d", tc.origin, w.Code, tc.want)
+		}
+	}
+	w := httptest.NewRecorder()
+	RequireAuthorization(ok)(w, httptest.NewRequest("POST", "/send", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("/send without a token: %d", w.Code)
+	}
+	r := httptest.NewRequest("POST", "/send", nil)
+	r.Header.Set("Authorization", "Bearer x")
+	w = httptest.NewRecorder()
+	RequireAuthorization(ok)(w, r)
+	if w.Code != 204 {
+		t.Errorf("/send with a token: %d", w.Code)
+	}
+}
+
 func TestHTTPOriginGuard(t *testing.T) {
 	for _, tc := range []struct {
 		name, method, origin, site string

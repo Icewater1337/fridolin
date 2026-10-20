@@ -10,13 +10,23 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"strings"
 	"time"
 )
 
 // ErrNotFound is returned (wrapped) by Get and Stat for a key the store
-// does not hold.
-var ErrNotFound = errors.New("cloud: object not found")
+// does not hold. It also matches fs.ErrNotExist, so code that knows only
+// the io/fs convention (the lease, the core export) tells a missing object
+// from a failed read without this package's sentinel.
+var ErrNotFound error = notFoundError{}
+
+type notFoundError struct{}
+
+func (notFoundError) Error() string { return "cloud: object not found" }
+
+// Is makes errors.Is(err, fs.ErrNotExist) hold for a missing object.
+func (notFoundError) Is(target error) bool { return target == fs.ErrNotExist }
 
 // ObjectInfo describes one stored object. Key is the object's key as passed
 // to Put: a slash-separated relative path.

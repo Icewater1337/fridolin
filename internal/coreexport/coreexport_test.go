@@ -19,12 +19,14 @@ import (
 	"time"
 
 	"filippo.io/age"
+	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/store"
 )
 
 type memStore struct {
-	mu   sync.Mutex
-	objs map[string][]byte
+	cloud.ObjectStore // Stat, List and Delete, which export and import never call
+	mu                sync.Mutex
+	objs              map[string][]byte
 }
 
 func newMemStore() *memStore { return &memStore{objs: map[string][]byte{}} }

@@ -29,11 +29,9 @@ func (b *App) startNodes(context.Context) {
 	if !b.nodesEnabled {
 		return
 	}
-	bind := b.bind
-	if bind == nil {
-		bind = net.Listen
-	}
-	if err := b.nodes.ListenAndServe(b.nodesListen, bind); err != nil {
+	// On the tailnet when core.tailnet is on (M1), else as the HTTP
+	// server binds.
+	if err := b.nodes.ListenAndServe(b.nodesListen, b.NodeListener); err != nil {
 		log.Printf("nodes: the node port did not open, so nodes cannot connect: %v", err)
 	}
 }

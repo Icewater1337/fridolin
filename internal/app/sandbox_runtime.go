@@ -2,6 +2,8 @@ package app
 
 import (
 	"cmp"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/platform"
 
@@ -56,6 +59,38 @@ type SandboxProfiler struct {
 
 	// bridgeExe is the running bridge binary; tests point it elsewhere.
 	bridgeExe string
+
+	// backend is what sandboxes runs here: sandboxExec on macOS, bwrap
+	// in the fridolin-core container, "" where there is none.
+	backend string
+	// bwrapPath is bubblewrap; probe says whether it can make the
+	// namespaces it needs here (the container's seccomp profile and
+	// /proc decide), asked once.
+	bwrapPath string
+	probe     func() error
+	// kind says what a path is ("dir", "file" or ""), for the masks.
+	kind func(string) string
+	// programs finds the bridge's programs (bridgeProgramsOf); tests fix
+	// them.
+	programs func(p sandboxConfig, home string) sandbox.Programs
+}
+
+// The sandbox backends.
+const (
+	backendSandboxExec = "sandbox-exec"
+	backendBwrap       = "bwrap"
+)
+
+// sandboxBackend is the backend for the platform configs are resolved
+// for (ConfigGOOS).
+func sandboxBackend(goos string) string {
+	switch goos {
+	case "darwin":
+		return backendSandboxExec
+	case config.ContainerGOOS:
+		return backendBwrap
+	}
+	return ""
 }
 
 // sandboxPolicyOf takes the profiles' settings from cfg.
@@ -72,6 +107,7 @@ func sandboxPolicyOf(cfg *config.Settings) sandboxConfig {
 		InheritUser: cfg.InheritClaudeUserConfig,
 		ExtraDeny:   append([]string(nil), cfg.Sandbox.DenyPaths...),
 		ExtraAllow:  append([]string(nil), cfg.Sandbox.AllowPaths...),
+		BrainsRoot:  containerBrainsRoot(cfg.Boot),
 	}, claudePath: cfg.ClaudePath, codexPath: cfg.CodexPath, rclonePath: cfg.Backup.RclonePath, plaudCLIPath: cfg.Plaud.CLIPath, viewer: cfg.Viewer}
 	if p.MediaDir == "" && p.DataDir != "" {
 		p.MediaDir = filepath.Join(p.DataDir, "media")
@@ -97,7 +133,9 @@ func sandboxPolicyOf(cfg *config.Settings) sandboxConfig {
 
 // NewSandboxProfiler builds a profiler for the configured brains.
 func NewSandboxProfiler(workDirs map[string][]string, cfg *config.Settings) *SandboxProfiler {
-	sp := &SandboxProfiler{execPath: sandbox.ExecPath, home: HomeDir()}
+	sp := &SandboxProfiler{execPath: sandbox.ExecPath, home: HomeDir(), backend: sandboxBackend(ConfigGOOS()),
+		bwrapPath: sandbox.BwrapPath, kind: pathKind}
+	sp.probe = sync.OnceValue(func() error { return probeBwrap(sp.bwrapPath) })
 	if exe, err := os.Executable(); err == nil {
 		sp.bridgeExe = exe
 	}
@@ -282,13 +320,172 @@ func AbsPath(p string) string {
 // Available reports why brain runs cannot be sandboxed on this machine, or
 // nil when they can.
 func (sp *SandboxProfiler) Available() error {
-	if runtime.GOOS != "darwin" {
-		return fmt.Errorf("sandbox-exec is macOS-only, got %s", runtime.GOOS)
+	switch sp.backend {
+	case backendSandboxExec:
+		if _, err := os.Stat(sp.execPath); err != nil {
+			return fmt.Errorf("%s not available: %w", sp.execPath, err)
+		}
+		return nil
+	case backendBwrap:
+		if _, err := os.Stat(sp.bwrapPath); err != nil {
+			return fmt.Errorf("%s not available: %w", sp.bwrapPath, err)
+		}
+		return sp.probe()
 	}
-	if _, err := os.Stat(sp.execPath); err != nil {
-		return fmt.Errorf("%s not available: %w", sp.execPath, err)
+	return fmt.Errorf("brains are sandboxed with sandbox-exec on macOS or bubblewrap in the fridolin-core container, and this is %s outside it", runtime.GOOS)
+}
+
+// probeBwrap runs bubblewrap once with the namespaces a brain's run gets.
+// Docker's default seccomp profile refuses them, and its masked /proc
+// keeps a new one from being mounted: compose.yaml's security_opt allows
+// both (docs/CORE.md).
+func probeBwrap(bwrap string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bwrap, "--unshare-user", "--unshare-pid", "--unshare-ipc",
+		"--ro-bind", "/", "/", "--proc", "/proc", "--dev", "/dev", "--die-with-parent", "--", "/bin/true")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("bubblewrap cannot make a brain's namespaces here (%v: %s); the container needs compose.yaml's security_opt (docs/CORE.md)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// pathKind is what path is, following symlinks: "dir", "file", or "" when
+// it does not exist.
+func pathKind(path string) string {
+	fi, err := os.Stat(path)
+	switch {
+	case err != nil:
+		return ""
+	case fi.IsDir():
+		return "dir"
+	}
+	return "file"
+}
+
+// bwrapPolicy is brain id's bubblewrap policy; the caller holds sp.mu.
+func (sp *SandboxProfiler) bwrapPolicy(id string) (sandbox.BwrapPolicy, error) {
+	if sp.DataDir == "" || sp.State == nil {
+		return sandbox.BwrapPolicy{}, errors.New("the sandbox needs the data folder, which holds each brain's own state")
+	}
+	own, ok := sp.workDirs[id]
+	if !ok || len(own) == 0 {
+		return sandbox.BwrapPolicy{}, fmt.Errorf("brain %q has no folder", id)
+	}
+	ctx := sandboxContextNow(sp.home)
+	state := sp.State(id)
+	files := filepath.Join(config.Layout{Root: sp.DataDir}.Core(), "sandbox", id)
+	p := sandbox.BwrapPolicy{
+		Brain: id, Home: state.Dir,
+		Passwd: filepath.Join(files, "passwd"), Group: filepath.Join(files, "group"),
+		System: []string{"/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"},
+		Kind:   sp.kind,
+	}
+	if sp.bridgeExe != "" {
+		if dir := platform.LayoutOf(sp.bridgeExe).Dir; dir != "" {
+			p.System = append(p.System, dir)
+		} else {
+			p.System = append(p.System, filepath.Dir(sp.bridgeExe))
+		}
+	}
+	programs := sandboxConfig.bridgeProgramsOf
+	if sp.programs != nil {
+		programs = sp.programs
+	}
+	for _, f := range programs(sp.sandboxConfig, ctx.Home).Files {
+		// The folders of the programs there are; the bridge also lists
+		// places it would look (Homebrew, ~/.local/bin) that may not exist.
+		if d := filepath.Dir(f); sp.kind(f) != "" && !fsx.Within(d, sp.DataDir) && !withinAny(d, sp.brainDirs) {
+			p.System = append(p.System, d)
+		}
+	}
+	p.Write = append(p.Write, own...)
+	p.Write = append(p.Write, state.Dir)
+	if sp.Inbox != nil {
+		p.Write = append(p.Write, sp.Inbox(id))
+	}
+	if sp.Tokens != nil {
+		p.Read = append(p.Read, sp.Tokens(id))
+	}
+	for _, a := range sp.ExtraAllow {
+		p.Read = append(p.Read, AbsPath(a))
+	}
+	// The data dir is not bound, but a folder bound above it would show
+	// its secrets: they are masked then.
+	l := config.Layout{Root: sp.DataDir}
+	p.Mask = append(p.Mask, l.Secrets(), l.Tsnet(), l.Core(), l.DashboardToken(), l.DashboardSessions(),
+		l.ScriptsToken(), filepath.Dir(l.RcloneConf()), filepath.Dir(l.GoogleClient()), l.Nodes(),
+		// The vault's index and documents, the audit log, the memory
+		// indexes and standing intents: brains reach them through the
+		// brain API and their MCP tools only.
+		l.Audit(), l.Vault(), filepath.Dir(l.MemoryIndex(id)), filepath.Dir(l.Intents(id)))
+	for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+		p.Mask = append(p.Mask, l.VaultDB()+suffix)
+	}
+	for other, dirs := range sp.workDirs {
+		if other != id {
+			p.Mask = append(p.Mask, dirs...)
+		}
+	}
+	if sp.DBPath != "" {
+		for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
+			p.Mask = append(p.Mask, sp.DBPath+suffix)
+		}
+	}
+	if sp.configFile != "" {
+		p.Mask = append(p.Mask, sp.configFile, sp.configFile+".bak", config.DotEnvPath(sp.configFile))
+	}
+	if sp.CredsDir != "" {
+		p.Mask = append(p.Mask, AbsPath(sp.CredsDir))
+	}
+	for _, d := range sp.ExtraDeny {
+		p.Mask = append(p.Mask, AbsPath(d))
+	}
+	return p, nil
+}
+
+// bwrapProfile renders brain id's bubblewrap command line; the caller
+// holds sp.mu.
+func (sp *SandboxProfiler) bwrapProfile(id string) (string, error) {
+	p, err := sp.bwrapPolicy(id)
+	if err != nil {
+		return "", err
+	}
+	agent := cmp.Or(sp.claudePath, "claude")
+	if found, err := exec.LookPath(agent); err == nil {
+		agent = AbsPath(found)
+	} else if !filepath.IsAbs(agent) {
+		agent = "/usr/local/bin/claude"
+	}
+	argv, err := sandbox.BwrapArgs(p, agent, []string{"..."})
+	if err != nil {
+		return "", err
+	}
+	return sp.bwrapPath + "\n" + strings.Join(argv, "\n") + "\n", nil
+}
+
+// bwrapCommand writes brain id's passwd and group and returns bubblewrap's
+// command line for prog with args.
+func (sp *SandboxProfiler) bwrapCommand(id, prog string, args []string) (string, []string, error) {
+	sp.mu.RLock()
+	defer sp.mu.RUnlock()
+	p, err := sp.bwrapPolicy(id)
+	if err != nil {
+		return "", nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(p.Passwd), 0o700); err != nil {
+		return "", nil, err
+	}
+	for path, data := range map[string]string{p.Passwd: sandbox.BrainPasswd(id, p.Home), p.Group: sandbox.BrainGroup(id)} {
+		if err := fsx.WriteFileAtomic(path, []byte(data), 0o644, false); err != nil {
+			return "", nil, err
+		}
+	}
+	argv, err := sandbox.BwrapArgs(p, prog, args)
+	if err != nil {
+		return "", nil, err
+	}
+	return sp.bwrapPath, argv, nil
 }
 
 // Command returns the program and arguments that run prog with args as
@@ -300,6 +497,9 @@ func (sp *SandboxProfiler) Available() error {
 func (sp *SandboxProfiler) Command(brainID, prog string, args []string) (string, []string, error) {
 	if err := sp.Available(); err != nil {
 		return "", nil, err
+	}
+	if sp.backend == backendBwrap {
+		return sp.bwrapCommand(brainID, prog, args)
 	}
 	profile, err := sp.Profile(brainID)
 	if err != nil {
@@ -330,9 +530,15 @@ func sandboxInstallLayoutOf(l platform.BridgeLayout) sandbox.InstallLayout {
 	return sandbox.InstallLayout{Dir: l.Dir, Source: l.Source}
 }
 
+// Profile is brain id's sandbox as text: the sandbox-exec profile, or in
+// the container bubblewrap's command line, one argument per line, for the
+// agent's binary (what `fridolin check --print-sandbox` prints).
 func (sp *SandboxProfiler) Profile(id string) (string, error) {
 	sp.mu.RLock()
 	defer sp.mu.RUnlock()
+	if sp.backend == backendBwrap {
+		return sp.bwrapProfile(id)
+	}
 	ctx := sandboxContextNow(sp.home)
 	var layout sandbox.InstallLayout
 	if sp.bridgeExe != "" {

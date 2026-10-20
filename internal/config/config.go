@@ -663,13 +663,23 @@ func (c *File) Validate(goos string) error {
 	return c.Plaud.Validate()
 }
 
+// ContainerGOOS is the platform a config is resolved for inside the
+// fridolin-core image (FRIDOLIN_CONTAINER=1 on Linux): there brain runs
+// are sandboxed with bubblewrap, so sandbox.enabled is allowed and on by
+// default, while a bare Linux install keeps refusing it.
+const ContainerGOOS = "linux/container"
+
+// SandboxSupported reports whether brain runs can be sandboxed on goos:
+// with sandbox-exec on macOS, with bubblewrap in the container.
+func SandboxSupported(goos string) bool { return goos == "darwin" || goos == ContainerGOOS }
+
 // validate rejects sandbox settings that goos cannot honour. Brain runs
 // refuse to start without their sandbox, so an enabled sandbox on a system
 // without sandbox-exec is a configuration error, not something to ignore.
 // It runs after ~ expansion.
 func (sc SandboxConfig) Validate(goos string) error {
-	if sc.Enabled && goos != "darwin" {
-		return fmt.Errorf("sandbox.enabled needs macOS (sandbox-exec) and this is %s: set it to false and run the bridge as a dedicated user instead", goos)
+	if sc.Enabled && !SandboxSupported(goos) {
+		return fmt.Errorf("sandbox.enabled needs macOS (sandbox-exec) or the fridolin-core container (bubblewrap), and this is %s: set it to false and run the bridge as a dedicated user instead, or run the core in its container (docs/CORE.md)", goos)
 	}
 	// A relative path is relative to whatever folder a brain runs in, so as
 	// a rule it would protect (or open) nothing anyone meant.

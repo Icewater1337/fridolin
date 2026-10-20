@@ -49,6 +49,22 @@ for compatibility.
   `skills/memory-consolidation.md`, which `memory.consolidate` (for
   example `"weekly sun 18:00"`) runs on a schedule. Existing brains keep
   their files; copy the skill from `examples/skills/` to use it.
+- The core joins your tailnet as a device of its own with
+  `core.tailnet.enabled` (embedded Tailscale, no Tailscale on the host)
+  and serves the dashboard there under its MagicDNS name, HTTPS when the
+  tailnet issues certificates. The dashboard token is always required
+  there, and the caller's tailnet identity is logged and audited.
+- With `core.lease.enabled` the bridge takes the core lease before it
+  starts its channels and exits with status 3 when another device holds
+  it; a core that loses the lease stops WhatsApp and outbound sending and
+  says so on the Overview and in `/ready`; a copy that was taken over
+  stays down until `fridolin core promote`.
+- In the container each brain's run is sandboxed with bubblewrap as a user
+  of its own: only its folder, state and inbox are there, nothing else of
+  the volume. `sandbox.enabled` is allowed (and on by default) in the
+  container; `compose.yaml` drops every capability and adds a seccomp
+  profile. `fridolin doctor` checks the tailnet, the lease and the
+  sandbox there.
 
 - Settings → AI mode switches new brain runs between Claude (default) and
   Codex. Codex defaults to `gpt-6.1-sol` with high reasoning effort, with
@@ -107,6 +123,10 @@ for compatibility.
   vault's weekly `restic copy` to Drive (`<remote>:fridolin-restic`) has
   completed once; until then, and with the vault off, it runs as before.
   *Back up now* and restores from `fridolin-backup/` keep working.
+- `fridolin core start` also writes `seccomp.json` beside the compose
+  file, which the container now needs; a compose file of your own
+  (`--compose`) needs one beside it too. Building Fridolin needs Go
+  1.26.6 or newer (tsnet).
 
 - Fridolin now builds for Windows (amd64 and arm64, without cgo). It is
   not supported there yet: there is no service and no sandbox

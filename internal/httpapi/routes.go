@@ -23,11 +23,24 @@ type Deps struct {
 	RequiresToken     func() bool
 	SignedIn          func(*http.Request) bool
 	API               func() http.Handler
+	// Remote serves the surface on the tailnet instead of this machine's
+	// loopback: Hosts are the Host values it answers to (the node's
+	// MagicDNS names), the dashboard API always wants the token or a
+	// session whatever dashboard.require_token says, /send and /ingest
+	// want a token, and the brain and builder APIs, which only local runs
+	// call, are not served.
+	Remote bool
+	Hosts  map[string]bool
 }
 
 // newHTTPHandler builds the whole HTTP surface.
 func New(d Deps) http.Handler {
 	hosts := AllowedHosts(d.Listen)
+	if d.Remote {
+		hosts = d.Hosts
+		d.RequiresToken = func() bool { return true }
+		d.Send, d.Ingest = RequireAuthorization(d.Send), RequireAuthorization(d.Ingest)
+	}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -36,10 +49,12 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("GET /ready", d.Ready)
 	mux.HandleFunc("POST /send", d.Send)
 	mux.HandleFunc("POST /ingest", d.Ingest)
-	// The site builder's MCP servers; each brain's own token (site_builder.go).
-	mux.Handle("/builder/", d.Builder())
-	// The tools brains run; each run's own token (brainapi.go).
-	mux.Handle("/brain/", d.Brain())
+	if !d.Remote {
+		// The site builder's MCP servers; each brain's own token (site_builder.go).
+		mux.Handle("/builder/", d.Builder())
+		// The tools brains run; each run's own token (brainapi.go).
+		mux.Handle("/brain/", d.Brain())
+	}
 
 	if !d.DashboardDisabled() {
 		static := StaticHandler(d.Static)
@@ -63,7 +78,11 @@ func New(d Deps) http.Handler {
 		mux.Handle("/api/", APIGuard(d.Token, d.RequiresToken, d.SignedIn, d.API()))
 	}
 
-	return SecurityHeaders(HostGuard(hosts, OriginGuard(hosts, mux)))
+	schemes := []string{"http://"}
+	if d.Remote {
+		schemes = append(schemes, "https://")
+	}
+	return SecurityHeaders(HostGuard(hosts, originGuard(hosts, schemes, mux)))
 }
 
 type APIDeps struct {

@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,6 +15,7 @@ import (
 
 	"filippo.io/age"
 	"github.com/Icewater1337/fridolin/container"
+	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/lease"
 )
@@ -144,6 +147,49 @@ func TestCoreRun(t *testing.T) {
 	}
 }
 
+// TestGoldenCoreHostCommands pins what each host command runs: docker's
+// arguments, and the environment compose gets, with the secrets' values
+// masked (they must be there by name, never on the command line). A
+// change here changes how the container is started on every machine.
+func TestGoldenCoreHostCommands(t *testing.T) {
+	secrets := mapSecrets{}
+	for _, s := range containerSecrets {
+		secrets[s.secret] = "value-of-" + s.secret
+	}
+	d, ran := hostFixture(t, secrets)
+	env := coreEnv{stdout: io.Discard, stderr: io.Discard}
+	var out strings.Builder
+	for _, args := range [][]string{
+		{"start"}, {"stop"}, {"update"}, {"start", "--image", "registry.example/fridolin-core", "--tag", "v2"},
+		{"run", "--", "core", "import", "--latest"}, {"run", "core", "promote"},
+	} {
+		*ran = nil
+		if code := coreHost(context.Background(), args[0], args[1:], env, d); code != 0 {
+			t.Fatalf("%q: exit %d", args, code)
+		}
+		fmt.Fprintf(&out, "$ fridolin core %s\n", strings.Join(args, " "))
+		for _, c := range *ran {
+			cmd := strings.ReplaceAll(strings.Join(append([]string{c.name}, c.args...), " "), d.composePath, "<COMPOSE>")
+			fmt.Fprintf(&out, "  %s\n", cmd)
+			for _, kv := range c.env {
+				name, value, _ := strings.Cut(kv, "=")
+				if strings.HasPrefix(value, "value-of-") {
+					value = "<" + strings.TrimPrefix(value, "value-of-") + ">"
+				}
+				fmt.Fprintf(&out, "    %s=%s\n", name, value)
+			}
+		}
+	}
+	assertGolden(t, "cli/core-host-commands.golden", []byte(out.String()))
+	seccomp, err := os.ReadFile(filepath.Join(filepath.Dir(d.composePath), "seccomp.json"))
+	if err != nil || !bytes.Equal(seccomp, container.Seccomp) {
+		t.Errorf("seccomp.json beside the compose file: %v", err)
+	}
+	if !bytes.Contains(container.Compose, []byte("seccomp=${FRIDOLIN_SECCOMP:-./seccomp.json}")) {
+		t.Error("compose.yaml does not name seccomp.json")
+	}
+}
+
 func TestCoreHostWithoutDocker(t *testing.T) {
 	d, _ := hostFixture(t, mapSecrets{})
 	d.docker = ""
@@ -254,11 +300,22 @@ func TestCoreStoreFrom(t *testing.T) {
 		t.Errorf("no store: %v", err)
 	}
 	st, where, err := coreStoreFrom("", "", []string{"FRIDOLIN_CORE_STORE=/tmp/x"})
-	if err != nil || st.(dirStore).dir != "/tmp/x" || where != "folder /tmp/x" {
+	if d, ok := st.(*cloud.Dir); err != nil || !ok || d.Root != "/tmp/x" || where != "folder /tmp/x" {
 		t.Errorf("FRIDOLIN_CORE_STORE: %v %q %v", st, where, err)
 	}
-	ds := dirStore{dir: t.TempDir()}
+	ds := &cloud.Dir{Root: t.TempDir()}
 	if err := ds.Put(context.Background(), "../escape", strings.NewReader("x")); err == nil {
-		t.Error("dirStore wrote outside its folder")
+		t.Error("the folder store wrote outside its folder")
+	}
+	if _, err := exec.LookPath("rclone"); err != nil {
+		return
+	}
+	st, where, err = coreStoreFrom("", "fridolin-vault", []string{"PATH=/usr/bin", "B2_VAULT_KEY_ID=id", "B2_VAULT_KEY=k", "SECRET=x"})
+	r, ok := st.(*cloud.Rclone)
+	if err != nil || !ok || r.Remote != "fridolinvault:fridolin-vault" || where != "b2 bucket fridolin-vault" {
+		t.Fatalf("B2: %v %q %v", st, where, err)
+	}
+	if slices.Contains(r.Env, "SECRET=x") || !slices.Contains(r.Env, "RCLONE_CONFIG_FRIDOLINVAULT_ACCOUNT=id") {
+		t.Errorf("rclone's environment = %q", r.Env)
 	}
 }

@@ -43,7 +43,7 @@ func (b *App) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 		WhatsApp:      httpapi.WhatsAppStatus{LinkState: wa, QRAvailable: wa.QRCode != ""},
 		Claude:        ClaudeInfo(cfg.ClaudePath, cfg.ChildEnvPassthrough),
 		AgentProvider: string(cfg.AgentProvider),
-		Sandbox:       httpapi.SandboxStatus{Enabled: cfg.Sandbox.Enabled, Supported: runtime.GOOS == "darwin"},
+		Sandbox:       httpapi.SandboxStatus{Enabled: cfg.Sandbox.Enabled, Supported: config.SandboxSupported(ConfigGOOS())},
 		Issues:        nonNil(b.brainIssues(cfg)),
 		Warnings:      nonNil(b.Warnings()),
 		Backup:        b.backup.Summary(),
@@ -51,6 +51,7 @@ func (b *App) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 		Pending:       b.deb.Pending(),
 
 		RestartRequired: nonNil(b.cfgs.RestartRequired()),
+		Core:            b.coreStatus(),
 	}
 	if cfg.AgentProvider == "codex" {
 		st := CodexInfo(cfg.CodexPath, cfg.ChildEnvPassthrough)
@@ -66,6 +67,7 @@ func (b *App) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 			}
 		}
 	}
+	resp.Warnings = append(resp.Warnings, b.coreWarnings()...)
 	resp.Warnings = append(resp.Warnings, b.outboxWarnings(ctx)...)
 	if bad := badAllowedNumbers(cfg.AllowedNumbers); len(bad) > 0 {
 		resp.Warnings = append(resp.Warnings, fmt.Sprintf("allowed_numbers holds %q, which lets nobody in: each entry must be a phone number, digits with the country code. Fix it under Chats → Allowed numbers.", bad))
@@ -73,7 +75,7 @@ func (b *App) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 	if cfg.AnyoneCanDM() {
 		resp.Warnings = append(resp.Warnings, "allowed_numbers is empty, so anyone who can message this WhatsApp account can use the assistant. Add your number under Chats → Allowed numbers.")
 	}
-	resp.Warnings = append(resp.Warnings, b.tokenWarnings(b.cfgs.Get(), runtime.GOOS)...)
+	resp.Warnings = append(resp.Warnings, b.tokenWarnings(b.cfgs.Get(), ConfigGOOS())...)
 	if w := claudecli.VersionWarning(resp.Claude); cfg.AgentProvider != "codex" && w != "" {
 		resp.Warnings = append(resp.Warnings, w)
 	}
@@ -118,7 +120,7 @@ func (b *App) tokenWarnings(cfg *config.Settings, goos string) []string {
 	}
 	if cfg.DangerouslySkipPermissions && !cfg.Sandbox.Enabled {
 		const risk = "so they can read and change the bridge's own data — the dashboard token, config.json and the WhatsApp session — and with them every setting."
-		if goos == "darwin" {
+		if config.SandboxSupported(goos) {
 			out = append(out, "Brains run with all permissions and the sandbox is off, "+risk+" Turn the sandbox on under Settings → Sandbox.")
 		} else {
 			out = append(out, "Brains run with all permissions and there is no sandbox on "+goos+", "+risk+" Let only people you trust message the bridge.")

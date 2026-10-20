@@ -49,10 +49,23 @@ func HostGuard(allowed map[string]bool, next http.Handler) http.Handler {
 // OriginGuard rejects state-changing requests that a browser sent on behalf
 // of another site. Scripts (curl, Python, Node) send no Origin and pass.
 func OriginGuard(allowed map[string]bool, next http.Handler) http.Handler {
+	return originGuard(allowed, []string{"http://"}, next)
+}
+
+// originGuard is OriginGuard for origins of the given schemes: the
+// tailnet listener also takes https://, since it serves the dashboard with
+// TLS when the tailnet issues certificates.
+func originGuard(allowed map[string]bool, schemes []string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			if o := strings.ToLower(r.Header.Get("Origin")); o != "" {
-				host, ok := strings.CutPrefix(o, "http://")
+				var host string
+				ok := false
+				for _, scheme := range schemes {
+					if host, ok = strings.CutPrefix(o, scheme); ok {
+						break
+					}
+				}
 				if !ok || !allowed[host] {
 					http.Error(w, "cross-site request refused", http.StatusForbidden)
 					return
@@ -67,6 +80,20 @@ func OriginGuard(allowed map[string]bool, next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// RequireAuthorization refuses a request without an Authorization header
+// before next sees it: on the tailnet /send and /ingest want the scripts
+// token (or a run's), even where script_api.tokenless_send would let a
+// caller on this machine in without one.
+func RequireAuthorization(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if strings.TrimSpace(r.Header.Get("Authorization")) == "" {
+			WriteErr(w, http.StatusUnauthorized, "a token is required on the tailnet: send Authorization: Bearer <scripts.token>")
+			return
+		}
+		next(w, r)
+	}
 }
 
 // APIGuard requires the dashboard token or a dashboard session on every API

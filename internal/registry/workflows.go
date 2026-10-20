@@ -32,10 +32,21 @@ type Registry struct {
 }
 
 type Options struct {
-	Home        func() string
+	Home func() string
+	// ConfigHome is the home folder config.json's ~/ means, when it is
+	// not Home (in the core's container, where Home is the folder brain
+	// folders go in); nil is Home.
+	ConfigHome  func() string
 	CheckDir    func(dir, configured string, cfg *config.Settings, home string) error
 	Templates   Templates
 	HistoryFile string
+}
+
+func (g *Registry) configHome() string {
+	if g.options.ConfigHome != nil {
+		return g.options.ConfigHome()
+	}
+	return g.options.Home()
 }
 
 func New(store *config.Store, options Options) *Registry {
@@ -385,7 +396,7 @@ func (g *Registry) Add(req AddInput) (AddResult, error) {
 			writesManifest = true
 		}
 		approved := m
-		c.BrainDirs = append(c.BrainDirs, config.BrainRef{Path: fsx.Tilde(abs, g.options.Home()), Approved: &approved})
+		c.BrainDirs = append(c.BrainDirs, config.BrainRef{Path: fsx.Tilde(abs, g.configHome()), Approved: &approved})
 		return nil
 	}); err != nil {
 		scaffold.Rollback()
