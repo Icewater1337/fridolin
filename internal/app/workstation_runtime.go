@@ -52,6 +52,9 @@ type workAgent struct {
 	// Approval is the poll pending for its irreversible step.
 	Approval string
 	Ended    bool
+	// Seen is the sequence number of the last event node_agent_status
+	// showed.
+	Seen int
 }
 
 // workTerm is a terminal the core opened.
@@ -65,6 +68,8 @@ type workTerm struct {
 	line   []rune
 	escape bool
 	Ended  bool
+	// ReadAt is where node_terminal_read goes on.
+	ReadAt int64
 }
 
 func newWorkRuntime(b *App) *workRuntime {
@@ -351,4 +356,25 @@ func (w *workRuntime) decided(ap store.Approval) {
 	if _, err := w.b.nodes.AgentReply(ctx, a.Node, nodeproto.AgentReplyParams{ID: a.ID, Text: text, Allow: allow}); err != nil {
 		log.Printf("workstation: passing the answer to Agent #%d on: %v", a.N, err)
 	}
+}
+
+// agentList lists the sessions the core started, newest first.
+func (w *workRuntime) agentList() []map[string]any {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := []map[string]any{}
+	for n := w.next; n > 0; n-- {
+		a := w.agents[n]
+		if a == nil {
+			continue
+		}
+		state := "running"
+		if a.Ended {
+			state = "ended"
+		} else if a.Approval != "" {
+			state = "waiting for the approval poll"
+		}
+		out = append(out, map[string]any{"session": a.N, "node": a.Node, "folder": a.Folder, "provider": a.Provider, "state": state, "started": a.Started})
+	}
+	return out
 }
