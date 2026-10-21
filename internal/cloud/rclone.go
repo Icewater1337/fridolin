@@ -183,6 +183,7 @@ func (r *Rclone) run(ctx context.Context, op, key string, args ...string) ([]byt
 	if err := cmd.Run(); err != nil {
 		return nil, r.runError(ctx, op, key, err, stderr.String())
 	}
+	r.Usage.NoteOK()
 	return stdout.Bytes(), nil
 }
 
@@ -234,6 +235,7 @@ func (r *Rclone) Put(ctx context.Context, key string, body io.Reader) error {
 	if err := <-copied; err != nil {
 		return fmt.Errorf("cloud: rclone rcat %s: reading the body: %w", key, err)
 	}
+	r.Usage.NoteOK()
 	return nil
 }
 
@@ -287,6 +289,8 @@ func (c *catReader) wait() error {
 	c.once.Do(func() {
 		if err := c.cmd.Wait(); err != nil {
 			c.waitErr = c.r.runError(c.ctx, "cat", c.key, err, c.stderr.String())
+		} else {
+			c.r.Usage.NoteOK()
 		}
 		c.cancel()
 		c.mu.Lock()

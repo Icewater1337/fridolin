@@ -390,7 +390,18 @@ func (r *RcloneRC) call(ctx context.Context, op string, cost Cost, method string
 	if err != nil {
 		return err
 	}
-	return p.call(ctx, method, in, out)
+	if err := p.call(ctx, method, in, out); err != nil {
+		return err
+	}
+	r.noteOK()
+	return nil
+}
+
+// noteOK records a call to the remote that succeeded.
+func (r *RcloneRC) noteOK() {
+	if u := r.d.Usage; u != nil {
+		u.NoteOK()
+	}
 }
 
 type rcItem struct {
@@ -451,6 +462,7 @@ func (r *RcloneRC) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 		return nil, r.fail("get", key, err)
 	}
 	if resp.StatusCode == http.StatusOK {
+		r.noteOK()
 		return resp.Body, nil
 	}
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
@@ -555,6 +567,7 @@ func (r *RcloneRC) Put(ctx context.Context, key string, body io.Reader) error {
 		}
 		return r.fail("put", key, err)
 	}
+	r.noteOK()
 	return nil
 }
 
@@ -581,6 +594,7 @@ func (r *RcloneRC) List(ctx context.Context, prefix string) ([]ObjectInfo, error
 		}
 		return nil, err
 	}
+	r.noteOK()
 	list := make([]ObjectInfo, 0, len(out.List))
 	for _, e := range out.List {
 		key := e.Path

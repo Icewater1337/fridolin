@@ -191,7 +191,9 @@ for compatibility.
   values). The day's transactions per class are on the Vault page, in
   `fridolin vault status` and in `fridolin doctor` (`b2-transactions`),
   which warns past 70% of the new `vault.b2_daily_budget` (default 2000)
-  and fails when B2 refused a call for a cap. See
+  and fails when B2 refused a call for a cap. A refusal that a successful
+  B2 call came after (the caps were raised since) only warns, so doctor
+  passes again as soon as the calls do. See
   [docs/VAULT.md](docs/VAULT.md#b2-transactions).
 - The core lease no longer stops WhatsApp when its store does not
   answer (a used-up B2 cap, the network, a 5xx): it is *unverified*,

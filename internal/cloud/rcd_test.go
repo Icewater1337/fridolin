@@ -201,6 +201,9 @@ func TestRcloneDaemonCountsUsage(t *testing.T) {
 	if day.Ops["C vault:authorize"] != 1 || day.Ops["B vault:stat"] != 10 {
 		t.Fatalf("ops = %v", day.Ops)
 	}
+	if day.LastOK.IsZero() {
+		t.Fatal("the daemon's calls that succeeded left no LastOK")
+	}
 
 	// The same through one rclone process per operation pays the log-in
 	// each time.
@@ -218,6 +221,9 @@ func TestRcloneDaemonCountsUsage(t *testing.T) {
 	day, _ = ue.Today()
 	if day.Count(ClassC) != 11 {
 		t.Fatalf("exec usage = %v", day.Classes)
+	}
+	if day.LastOK.IsZero() {
+		t.Fatal("the rclone runs that succeeded left no LastOK")
 	}
 }
 
@@ -257,6 +263,17 @@ func TestUsageRollsOverAndRestores(t *testing.T) {
 	if today.Count(ClassC) != 2 || prev == nil || prev.Count(ClassC) != 5 {
 		t.Fatalf("restored today %+v prev %+v", today, prev)
 	}
+	// The last success and refusal are kept too, the later of each.
+	v.NoteOK()
+	ok := now
+	w := NewUsageAt(func() time.Time { return now.Add(-time.Minute) })
+	w.NoteOK()
+	vt, _ := v.Today()
+	w.Restore(vt, nil)
+	if d, _ := w.Today(); !d.LastOK.Equal(ok) {
+		t.Fatalf("restored LastOK %v, want %v", d.LastOK, ok)
+	}
 	var nilUsage *Usage
 	nilUsage.Add(ClassB, "x", 1) // counts nothing, does not panic
+	nilUsage.NoteOK()
 }

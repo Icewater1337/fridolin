@@ -90,7 +90,7 @@ func (b *App) runB2Usage(ctx context.Context) {
 }
 
 func usageChanged(a, b cloud.UsageDay) bool {
-	if a.Day != b.Day || !a.CapExceeded.Equal(b.CapExceeded) || len(a.Ops) != len(b.Ops) {
+	if a.Day != b.Day || !a.CapExceeded.Equal(b.CapExceeded) || !a.LastOK.Equal(b.LastOK) || len(a.Ops) != len(b.Ops) {
 		return true
 	}
 	for k, v := range b.Ops {
