@@ -34,9 +34,10 @@ This is the runbook a coding agent follows when the owner clones the
 repository on a new machine and says "set this machine up as a node of my
 fridolin core" (AGENTS.md, path B). The agent does every step itself
 except the three only the owner can do: signing in to Tailscale,
-signing in to the core's dashboard (or using the Mac), and approving the
-node. Each of those is opened for the owner in the browser, then the agent
-waits and checks. `fridolin setup-machine --node` says at any point what
+getting a join code from the core (`!join` in their WhatsApp chat with
+the bridge), and approving the node (`!approve <id>` there, or the Nodes
+page). None of them needs the dashboard token on the new machine. The
+agent opens what needs a browser for the owner, then waits and checks. `fridolin setup-machine --node` says at any point what
 is done and what to do next; it only looks and may be run again and again.
 
 The core must have `nodes.enabled` and `core.tailnet.enabled` on (the
@@ -119,21 +120,42 @@ which the user service runs.
 
 ### 4. A join code from the core
 
-The default needs nothing of the Mac: open the core's dashboard on the
-tailnet for the owner, at its Nodes page:
+The default needs nothing of the core machine and no token: ask the
+owner to send `!join` to Fridolin in their own WhatsApp chat with it, and
+to paste the code it replies with (or the whole line for this OS) here.
+The reply has the code, the lines to paste for sh and for PowerShell,
+and the core's node address. The code is single-use, expires in 10
+minutes and grants nothing until the owner approves the node, so it may
+go through the chat.
+
+`!join` (like `!dashboard`, `!approve` and `!revoke`) answers only the
+owner — a number in `allowed_numbers` — and only in their direct chat,
+never in a group; each of `!join` and `!dashboard` answers 5 times an
+hour, and every request, refused or not, goes into the audit log (kinds
+`node_join_code`, `dashboard_link`, `node_approved`, `node_revoked`)
+without the code.
+
+Second choice, the dashboard from this machine: the owner sends
+`!dashboard`, and opens the tailnet link it replies with here (or the
+agent opens it for them):
 
 ```powershell
-Start-Process "https://$core/#/nodes"     # http:// when the tailnet has no HTTPS certificates
+Start-Process "http://fridolin-core.<tailnet>.ts.net/#login=…"   # the link from !dashboard
 ```
 
-(`open` / `xdg-open` elsewhere.) A browser that never signed in there
-shows the sign-in page: the owner pastes the dashboard token from their
-password manager into it, never into the chat. Ask them to click **New
-join code** and paste the Windows line it shows into the chat or this
-terminal. The code is single-use, expires in 10 minutes and grants
-nothing until the owner approves the node, so it may go through the chat.
+(`open` / `xdg-open` elsewhere.) The link works once, within 10 minutes,
+and signs this browser in for 30 days; then **Nodes → New join code**.
+On the core machine, `fridolin open --print --tailnet` prints the same
+kind of link (`docker exec fridolin-core fridolin open --print
+--tailnet` for the container core). The core serves its dashboard on the
+tailnet with HTTPS on 443 when the tailnet issues certificates, else plain
+HTTP on 80 (inside WireGuard), and the link says which; the session
+cookie is HttpOnly and SameSite=Strict, and Secure only over HTTPS, so
+that a browser keeps it over plain HTTP. A browser that opens the
+dashboard without a link gets the sign-in page, which asks for the
+token: don't go there, send `!dashboard` instead.
 
-The alternative, on the Mac mini (or by an agent there):
+The last choice, on the Mac mini (or by an agent there):
 
 ```sh
 docker exec fridolin-core fridolin nodes join-code
@@ -178,9 +200,12 @@ fridolin node join fj-… --core fridolin-core.<tailnet>.ts.net:8766 --no-exec -
 
 ### 6. Approve on the core
 
-On the Nodes page the owner already has open: **Approve device**, then
-**Approve commands** (the second approves what the node offers: the
-folder, host facts, notifications). Or on the Mac:
+When the node joins, the core tells the owner in their WhatsApp chat:
+"*laptop* (Windows) wants to join as a node — approve it on the Nodes
+page or reply `!approve <id>`". `!approve <id>` approves the device and
+what it offers (the folder, host facts, notifications) in one go, and is
+audited; `!revoke <id>` shuts it out instead. On the Nodes page the same
+is **Approve device**, then **Approve commands**. Or on the Mac:
 
 ```sh
 docker exec fridolin-core fridolin nodes approve <id>
@@ -201,7 +226,8 @@ lists it.
 
 ### Rollback
 
-On the core: `fridolin nodes revoke <id>` (or **Revoke**). On the machine:
+On the core: `!revoke <id>` in the owner's chat, `fridolin nodes revoke
+<id>` or **Revoke**. On the machine:
 `fridolin node stop`, `fridolin node uninstall` (Windows: elevated, with
 `--state-dir`), then delete the state dir; uninstall Tailscale if the
 owner wants. Joining again later makes a new device with a new code.
@@ -217,8 +243,9 @@ owner wants. Joining again later makes a new device with a new code.
 
 ## Join a machine, in short
 
-1. On the core: `fridolin nodes join-code` (or **Nodes → New join code**
-   in the dashboard). It prints a single-use code, valid for 10 minutes,
+1. Send `!join` to the bridge in your WhatsApp chat, or on the core run
+   `fridolin nodes join-code` (or **Nodes → New join code** in the
+   dashboard). It gives a single-use code, valid for 10 minutes,
    and the lines to paste (sh and PowerShell):
 
    ```
@@ -236,6 +263,9 @@ owner wants. Joining again later makes a new device with a new code.
    `fridolin nodes approve <id>` (or **Approve device** on the Nodes page).
 4. Then approve what it offers, separately:
    `fridolin nodes approve <id> --commands`.
+
+   Or both at once: reply `!approve <id>` to the message the bridge sends
+   you when the node joins.
 
 Until step 3 a node serves nothing; until step 4 it serves nothing either.
 If the node later offers more (you edited its `node.json`, or joined with

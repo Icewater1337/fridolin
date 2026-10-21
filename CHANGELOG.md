@@ -10,6 +10,18 @@ for compatibility.
 
 ### Added
 
+- Joining a node needs no dashboard token on the new machine. New chat
+  commands, for the owner (a number in `allowed_numbers`) in their direct
+  chat only, audited: `!join` replies with a single-use join code (10
+  minutes) and the lines to paste for sh and PowerShell; `!dashboard`
+  with a sign-in link that works once within 10 minutes, at the core's
+  tailnet address and on the core machine; `!approve <id>` approves a
+  node's device and what it offers in one go, and `!revoke <id>` shuts it
+  out. `!join` and `!dashboard` answer 5 times an hour each. When a
+  machine joins, the bridge tells the owner in their chat.
+  `fridolin open --print --tailnet` prints the tailnet sign-in link
+  (`POST /api/login/code?tailnet=1`). `!fleet` now suggests `!approve`
+  (docs/NODES.md, "Joining a machine").
 - Google Drive backups use your own Google OAuth client instead of
   rclone's shared one, which Google retires during 2026. Backup →
   Connect Google Drive signs in through the bridge (also in the core's

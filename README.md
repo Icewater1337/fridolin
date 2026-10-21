@@ -363,6 +363,9 @@ writes there is not read.
 | `!stop`  | Stop the run for this chat and drop its queued messages, including files or recordings another brain is answering here |
 | `!reset` | Like `!stop`, and the chat starts afresh: the next message's run sees none of the chat's earlier messages. The history file keeps them, and what the assistant wrote in its memory files stays |
 | `!fleet` | The machines connected as [nodes](docs/NODES.md): online or when last seen, waiting approvals, and what each may run. Direct chats only |
+| `!join` | Owner only, direct chat: a single-use join code for a new [node](docs/NODES.md#joining-a-machine) (10 minutes) and the lines to paste on it. 5 an hour, audited |
+| `!dashboard` | Owner only, direct chat: a dashboard sign-in link that works once within 10 minutes, at the core's tailnet address and on the core machine, so another device signs in without the token. 5 an hour, audited |
+| `!approve <id>`, `!revoke <id>` | Owner only, direct chat: approve a node's device and what it offers in one go, or revoke it. The bridge tells you in your chat when a node joins. Audited |
 | `!lockdown` | Owner only (a number in `allowed_numbers`): pause all work but reading, everywhere, until `!unlock` or the dashboard's *Unlock* ([BRAINS.md](docs/BRAINS.md#skills-risk-and-approvals)) |
 | `!unlock` | Owner only: end a lockdown |
 
