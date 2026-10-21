@@ -117,6 +117,10 @@ func (p sandboxPlan) darwinProfile() string {
 			fmt.Fprintf(&b, "(allow file-write* (regex #\"^%s/\\.claude\\.json[^/]*$\"))\n", regexp.QuoteMeta(h))
 		}
 	}
+	// Claude Code's Bash tool tracks the shell's folder in a file of its
+	// own in /tmp, whatever TMPDIR says (found in the first real try on a
+	// Mac, #159): only those files, by their name.
+	b.WriteString("(allow file-write* (regex #\"^/private/tmp/claude-[0-9a-f]+-cwd$\"))\n")
 	for _, d := range p.denied {
 		for _, f := range pathForms(d) {
 			fmt.Fprintf(&b, "(deny file-read* file-write* (subpath %s))\n", sbQuote(f))

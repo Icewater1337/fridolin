@@ -2,6 +2,7 @@ package nodeagent
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -371,5 +372,18 @@ func TestSandboxKeepsWritesInTheFolder(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(outside, "out.txt")); err == nil {
 		t.Fatal("out.txt was written")
+	}
+	if sb == nodeproto.SandboxExec {
+		// Claude Code's Bash tool keeps its folder in /tmp/claude-<hex>-cwd.
+		cwd := fmt.Sprintf("/tmp/claude-%x-cwd", time.Now().UnixNano())
+		t.Cleanup(func() { _ = os.Remove(cwd) })
+		if err := run(cwd); err != nil {
+			t.Errorf("writing Claude Code's cwd file: %v", err)
+		}
+		other := fmt.Sprintf("/tmp/claude-%x-other", time.Now().UnixNano())
+		if err := run(other); err == nil {
+			_ = os.Remove(other)
+			t.Error("the sandbox let another write into /tmp through")
+		}
 	}
 }

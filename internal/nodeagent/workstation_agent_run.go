@@ -92,7 +92,7 @@ func (s *agentSession) runTurn(ctx context.Context, text string) {
 	// one, keeps its writes there.
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = s.folder
-	env := append(filteredEnv(), "TMPDIR="+s.tmp, "FRIDOLIN_NODE_AGENT=1")
+	env := append(filteredEnv(), "TMPDIR="+s.tmp, "CLAUDE_CODE_TMPDIR="+s.tmp, "FRIDOLIN_NODE_AGENT=1")
 	s.mu.Lock()
 	if s.coreToken != "" {
 		env = append(env, "CLAUDE_CODE_OAUTH_TOKEN="+s.coreToken)
