@@ -19,7 +19,7 @@ The hot tier is the data dir, of which these parts are vault files:
 | `vault/documents/<brain>/` | documents filed for a brain |
 | `vault/workspaces/` | archived FrIDE workspaces |
 | `media/<brain>/` | each brain's media inbox, when `media_dir` lies in the data dir (the default) |
-| brain folders in the data dir | in the container, `/data/brains-folders/<name>/` |
+| brain folders in the data dir | in the container, `/data/brains-folders/<name>/`, less what their backup settings leave out ([below](#brain-folders-and-their-backup-settings)) |
 
 Never vault files: `bridge.db` and `vault.db` with their `-wal`, `-shm`
 and `-journal` files and Litestream's `.<db>-litestream/` folders (a file
@@ -86,7 +86,7 @@ restic, to the repository `b2:<snapshots_bucket>:restic`:
 
 - every night after 03:00 local time, the whole data dir (less what is
   rebuilt: run tokens, the brains' `tmp/` and `cache/`), every brain folder
-  outside it, and `VACUUM INTO` copies of `bridge.db` and `vault.db` in
+  outside it (each as its backup settings say, below), and `VACUUM INTO` copies of `bridge.db` and `vault.db` in
   `core/snapshot-staging/`; never the live database files;
 - every hour, the brain folders and `audit/`;
 - after the nightly one, `restic forget --prune` keeps 24 hourly, 14 daily,
@@ -99,6 +99,41 @@ restic, to the repository `b2:<snapshots_bucket>:restic`:
   the [Backup page](BACKUP.md). Once that copy has completed once, the old
   Drive sync's daily run stops (Back up now and restores still work there);
   until then it goes on, so turning the vault on never leaves a gap.
+
+### Brain folders and their backup settings
+
+Each brain folder goes to the cloud as its `brain.json`'s `backup` says,
+in the snapshots (nightly and hourly, and with them the copy on Drive) as
+in the Drive backup ([BACKUP.md](BACKUP.md#excluding-things)), and in the
+cold tier for a folder in the data dir:
+
+- `backup.enabled: false` leaves the folder out whole;
+- `backup.exclude` leaves out what it names, with the same meaning as in
+  the Drive backup: `/work/` is the `work` folder at the top of the brain
+  only, `*.log` and `node_modules/` match at any depth in that brain;
+- the secret files the Drive backup never uploads (`.env`, `*.pem`, …)
+  stay out too, unless `backup.include_secret_files` is on.
+
+The patterns become restic `--exclude` values under the brain's own
+folder, so one brain's patterns never leave out another brain's files.
+Where restic cannot say exactly what rclone does, they leave out more,
+never less: `secret` (no trailing `/`) also leaves out a folder of that
+name, and a pattern that cannot be translated (rclone's `{{regexp}}`, a
+broken `[`) leaves out the whole folder. The settings of the `brain.json`
+on disk and of the copy the bridge runs the brain with both count: if
+either has the backup off or an exclude, it holds.
+
+A brain folder whose `brain.json` cannot be read (broken JSON, a newer
+version, gone) is left out whole: the vault does not upload what might be
+excluded. The log says so once, the Vault status lists it under
+`skipped_brains`, and `fridolin doctor` warns (`vault-brain-backup`)
+until it is fixed.
+
+Leaving out a folder that was in the snapshots before makes the next
+snapshot lose those files, which may set off the mass-deletion guard
+(below); allow the pruning once the change was meant. The snapshots taken
+before keep the files until they are pruned or deleted by hand (`restic
+forget <id> && restic prune`).
 
 The mass-deletion guard of the Drive backup carries over: a snapshot that
 lost more of the files of the one before than the Drive backup lets go (more
@@ -197,7 +232,8 @@ vault status`. `fridolin doctor` checks, with the vault on, that the cold
 tier answered within 45 minutes (the vault's own uploads and downloads
 show it; it probes only after 30 quiet minutes), that no file has waited
 more than an hour for its upload, that a snapshot is less than 26 hours
-old, that Litestream runs, and that the day's B2 transactions stay within
+old, that Litestream runs, that no brain folder is left out for a
+brain.json it cannot read, and that the day's B2 transactions stay within
 the budget.
 
 ## A new core

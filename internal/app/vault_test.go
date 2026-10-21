@@ -391,7 +391,9 @@ func TestVaultLayout(t *testing.T) {
 	cfg := &config.Settings{}
 	cfg.DataDir = "/data"
 	cfg.MediaDir = "/data/media"
-	l := vaultLayoutOf(cfg, map[string]string{"main": "/data/brains-folders/main", "work": "/Users/you/brains/work", "bad": "/data/brains/bad"})
+	backed := func(id, dir string) brainBackup { return brainBackup{ID: id, Dir: dir} }
+	l := vaultLayoutOf(cfg, map[string]string{"main": "/data/brains-folders/main", "work": "/Users/you/brains/work", "bad": "/data/brains/bad"},
+		map[string]brainBackup{"/data/brains-folders/main": backed("main", "/data/brains-folders/main"), "/Users/you/brains/work": backed("work", "/Users/you/brains/work"), "/data/brains/bad": backed("bad", "/data/brains/bad")})
 	for rel, ignored := range map[string]bool{
 		"config.json": false, "secrets": false, "secrets/a.age": false, "audit/2026-10.jsonl": false,
 		"vault/documents/main/x.pdf": false, "media/main/rec.m4a": false,

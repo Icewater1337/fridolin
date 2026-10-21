@@ -101,6 +101,10 @@ New brains exclude `node_modules/`, `*.log`, `.DS_Store`, `.venv/` and
 should not leave the machine (for example source code that belongs to an
 employer).
 
+The same patterns, the secret files above and a brain's `backup.enabled`
+also hold for the vault's restic snapshots and their copy on Drive
+([VAULT.md](VAULT.md#brain-folders-and-their-backup-settings)).
+
 ## Schedule
 
 Turn on the daily backup and pick a time (default 03:30). If the machine was

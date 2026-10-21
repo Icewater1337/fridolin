@@ -56,6 +56,13 @@ func TestDoctorVaultChecks(t *testing.T) {
 		{name: "deletion hold", mut: func(s *vaultStatus) {
 			s.Snapshots.DeletionHold = &deletionHold{Since: now, Snapshot: "beef0001", PrevFiles: 900, Files: 4}
 		}, id: "vault-snapshot", status: DoctorWarn, detail: "pruning is held"},
+		{name: "every brain.json read", id: "vault-brain-backup", status: DoctorOK, detail: "every brain.json read"},
+		{name: "a brain's backup off", mut: func(s *vaultStatus) {
+			s.Snapshots.SkippedBrains = []brainBackup{{ID: "family", Dir: "/home/you/family", Skip: "its backup is off (backup.enabled)"}}
+		}, id: "vault-brain-backup", status: DoctorOK, detail: "backup is off: family"},
+		{name: "an unreadable brain.json", mut: func(s *vaultStatus) {
+			s.Snapshots.SkippedBrains = []brainBackup{{ID: "work", Dir: "/home/you/work", Skip: "its brain.json cannot be read: bad JSON", Unreadable: true}}
+		}, id: "vault-brain-backup", status: DoctorWarn, detail: "work (/home/you/work): its brain.json cannot be read"},
 		{name: "litestream running", id: "vault-litestream", status: DoctorOK, detail: "pid 42"},
 		{name: "litestream down", mut: func(s *vaultStatus) {
 			s.Litestream.Running, s.Litestream.Restarts, s.Litestream.LastError = false, 3, "exit status 1"

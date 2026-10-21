@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -98,6 +99,10 @@ type snapshotsStatus struct {
 	LastPrune    *vaultRecord    `json:"last_prune,omitempty"`
 	DeletionHold *deletionHold   `json:"deletion_hold,omitempty"`
 	Drive        driveStatus     `json:"drive"`
+	// SkippedBrains are the brain folders the snapshots and the cold tier
+	// leave out whole, and why: backup.enabled off, or a brain.json that
+	// cannot be read (brainBackup).
+	SkippedBrains []brainBackup `json:"skipped_brains,omitempty"`
 }
 
 type litestreamView struct {
@@ -262,11 +267,21 @@ func (vs *vaultSnapshots) stage(ctx context.Context) error {
 	return nil
 }
 
-// paths are what a snapshot of kind holds, and what it leaves out.
+// paths are what a snapshot of kind holds, and what it leaves out. Each
+// brain folder goes by its backup settings (brainBackup), as the Drive
+// backup does: one whose backup is off or whose brain.json cannot be read
+// is left out whole, of the others what their backup.exclude names. The
+// excludes are absolute, so one brain's patterns never touch another's
+// files, and they hold for the folders in the data dir as well, which the
+// nightly snapshot takes with it.
 func (vs *vaultSnapshots) paths(kind string) (paths, excludes []string) {
 	l := vs.s.currentLayout()
 	data := l.root
 	var outside []string
+	dirs := slices.Sorted(maps.Keys(l.backups))
+	for _, dir := range dirs {
+		excludes = append(excludes, l.backups[dir].resticExcludes()...)
+	}
 	ids := make([]string, 0, len(l.absBrainDirs))
 	for id := range l.absBrainDirs {
 		ids = append(ids, id)
@@ -274,6 +289,9 @@ func (vs *vaultSnapshots) paths(kind string) (paths, excludes []string) {
 	slices.Sort(ids)
 	for _, id := range ids {
 		dir := l.absBrainDirs[id]
+		if b, ok := l.backups[dir]; !ok || b.Skip != "" {
+			continue
+		}
 		if _, err := os.Stat(dir); err != nil {
 			continue
 		}
@@ -376,6 +394,7 @@ func (vs *vaultSnapshots) snapshotLocked(ctx context.Context, kind string) {
 		err = vs.stage(ctx)
 	}
 	var sum snapshot.BackupSummary
+	vs.s.refreshLayout() // a brain.json may have changed since the tick
 	paths, excludes := vs.paths(kind)
 	if err == nil && len(paths) == 0 {
 		err = errors.New("nothing to snapshot yet: no brain folder and no audit/")

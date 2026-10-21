@@ -1,6 +1,7 @@
 package app
 
 import (
+	"maps"
 	"path"
 	"path/filepath"
 	"slices"
@@ -18,7 +19,9 @@ import (
 //     documents and archived workspaces),
 //   - the media folder, when media_dir lies in the data dir, and
 //   - the brain folders that lie in the data dir (the container's
-//     brains-folders/<name>/).
+//     brains-folders/<name>/), less what their backup settings leave out
+//     (brainBackup): all of a folder whose backup is off or whose
+//     brain.json cannot be read.
 //
 // Never part of it: bridge.db and vault.db with their sidecars (Litestream
 // replicates them, and restic gets VACUUM INTO copies; a live SQLite file
@@ -52,12 +55,23 @@ type vaultLayout struct {
 	brainDirs map[string]string
 	// absBrainDirs maps a brain's id to its folder, absolute, wherever it is.
 	absBrainDirs map[string]string
+	// backups are the backup settings of every brain folder, loaded or
+	// not, by its absolute path (vaultBrainBackups); backupRels those of
+	// the folders in the hot root, by vault path.
+	backups    map[string]brainBackup
+	backupRels map[string]brainBackup
 }
 
-// vaultLayoutOf works the hot root out of the settings and the brains
-// (id → folder).
-func vaultLayoutOf(cfg *config.Settings, brains map[string]string) vaultLayout {
-	l := vaultLayout{root: filepath.Clean(AbsPath(cfg.DataDir)), files: []string{"config.json"}, brainDirs: map[string]string{}, absBrainDirs: map[string]string{}}
+// vaultLayoutOf works the hot root out of the settings, the brains (id →
+// folder) and the backup settings of the brain folders (folder →
+// settings). A loaded brain without backup settings there is left out
+// whole: the vault never uploads what might be excluded.
+func vaultLayoutOf(cfg *config.Settings, brains map[string]string, backups map[string]brainBackup) vaultLayout {
+	l := vaultLayout{root: filepath.Clean(AbsPath(cfg.DataDir)), files: []string{"config.json"}, brainDirs: map[string]string{}, absBrainDirs: map[string]string{},
+		backups: maps.Clone(backups), backupRels: map[string]brainBackup{}}
+	if l.backups == nil {
+		l.backups = map[string]brainBackup{}
+	}
 	l.prefixes = append(l.prefixes, vaultTopParts...)
 	if rel, ok := l.rel(AbsPath(cfg.MediaDir)); ok && rel != "" {
 		l.media = rel
@@ -69,6 +83,14 @@ func vaultLayoutOf(cfg *config.Settings, brains map[string]string) vaultLayout {
 		if rel, ok := l.rel(abs); ok && rel != "" && !l.reserved(rel) {
 			l.brainDirs[id] = rel
 			l.prefixes = append(l.prefixes, rel)
+		}
+		if _, ok := l.backups[abs]; !ok {
+			l.backups[abs] = brainBackup{ID: id, Dir: abs, Skip: "its backup settings were not read", Unreadable: true}
+		}
+	}
+	for dir, b := range l.backups {
+		if rel, ok := l.rel(dir); ok && rel != "" {
+			l.backupRels[rel] = b
 		}
 	}
 	slices.Sort(l.prefixes)
@@ -109,6 +131,9 @@ func (l vaultLayout) ignore(rel string) bool {
 	if slices.Contains(l.files, rel) {
 		return false
 	}
+	if l.backupExcluded(rel) {
+		return true
+	}
 	for _, p := range l.prefixes {
 		switch {
 		case rel == p:
@@ -125,6 +150,21 @@ func (l vaultLayout) ignore(rel string) bool {
 		}
 	}
 	return true
+}
+
+// backupExcluded reports whether rel lies in a brain folder whose backup
+// settings leave it out (brainBackup).
+func (l vaultLayout) backupExcluded(rel string) bool {
+	for dir, b := range l.backupRels {
+		if rel == dir {
+			if b.Skip != "" {
+				return true
+			}
+		} else if inside, ok := strings.CutPrefix(rel, dir+"/"); ok && b.excluded(inside) {
+			return true
+		}
+	}
+	return false
 }
 
 // brainPrefixes are the vault paths brain id owns (docs/DECISIONS.md, M3

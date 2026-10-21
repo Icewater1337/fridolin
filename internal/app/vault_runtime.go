@@ -18,6 +18,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/snapshot"
 	"github.com/Icewater1337/fridolin/internal/vault"
@@ -151,6 +152,9 @@ var vaultBackendsFor = defaultVaultBackends
 // vaultBrain is what the vault knows of a brain.
 type vaultBrain struct {
 	ID, Dir string
+	// Manifest is the one the bridge runs the brain with; its backup
+	// settings count beside those of the brain.json on disk.
+	Manifest manifest.Manifest
 }
 
 // vaultService runs the vault while vault.enabled is on.
@@ -234,9 +238,10 @@ func newVaultService(cfgs *config.Store, container bool, logger *slog.Logger, br
 		logger = slog.Default()
 	}
 	s := &vaultService{cfgs: cfgs, container: container, log: logger, brains: brains, openMedia: openMedia}
-	s.refreshLayout()
 	s.status = s.loadStatus()
 	s.status.Enabled = cfgs.Get().Vault.Enabled
+	s.status.Snapshots.SkippedBrains = nil
+	s.refreshLayout()
 	s.status.State = vaultOff
 	if s.status.Enabled {
 		s.status.State = vaultStarting
@@ -277,16 +282,55 @@ func (s *vaultService) saveLocked() {
 	}
 }
 
-// refreshLayout works the hot root out again (a brain was added or moved).
+// refreshLayout works the hot root out again (a brain was added or
+// moved), and reads the brains' backup settings again (a brain.json
+// changed); the vault does it each tick, and before each snapshot.
 func (s *vaultService) refreshLayout() {
+	cfg := s.cfgs.Get()
 	brains := map[string]string{}
+	var loaded []vaultBrain
 	if s.brains != nil {
-		for _, b := range s.brains() {
+		loaded = s.brains()
+		for _, b := range loaded {
 			brains[b.ID] = b.Dir
 		}
 	}
-	l := vaultLayoutOf(s.cfgs.Get(), brains)
-	s.layout.Store(&l)
+	refs := make([]vaultBrainRef, 0, len(cfg.BrainDirs))
+	for _, r := range cfg.BrainDirs {
+		refs = append(refs, vaultBrainRef{Dir: r.Path, Approved: r.Approved})
+	}
+	l := vaultLayoutOf(cfg, brains, vaultBrainBackups(loaded, refs, cfg.Backup.IncludeSecretFiles))
+	prev := s.layout.Swap(&l)
+	s.noteSkipped(prev, l)
+}
+
+// noteSkipped logs the brain folders that newly stay out of the cloud
+// because their brain.json cannot be read, and keeps the list of skipped
+// folders in the status, for the Vault page and fridolin doctor.
+func (s *vaultService) noteSkipped(prev *vaultLayout, l vaultLayout) {
+	var skipped []brainBackup
+	for _, b := range l.backups {
+		if b.Skip == "" {
+			continue
+		}
+		skipped = append(skipped, b)
+		if b.Unreadable && (prev == nil || !prev.backups[b.Dir].Unreadable) {
+			s.log.Warn("vault: leaving a brain folder out of the snapshots and the cold tier: its backup settings cannot be read",
+				"brain", b.ID, "dir", b.Dir, "why", b.Skip)
+		}
+	}
+	slices.SortFunc(skipped, func(a, b brainBackup) int { return strings.Compare(a.Dir, b.Dir) })
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if slices.EqualFunc(skipped, s.status.Snapshots.SkippedBrains, func(a, b brainBackup) bool {
+		return a.ID == b.ID && a.Dir == b.Dir && a.Skip == b.Skip && a.Unreadable == b.Unreadable
+	}) {
+		return
+	}
+	s.status.Snapshots.SkippedBrains = skipped
+	if s.status.Enabled {
+		s.saveLocked()
+	}
 }
 
 func (s *vaultService) currentLayout() vaultLayout { return *s.layout.Load() }
@@ -478,6 +522,7 @@ func (s *vaultService) serve(ctx context.Context, run *vaultRun, cfg *config.Set
 				lastEvict = now
 				s.evict(ctx, v)
 			}
+			s.refreshLayout()
 			run.snaps.tick(ctx, now)
 			s.heartbeat(ctx, run, true)
 		}
@@ -939,7 +984,7 @@ func (b *App) vaultBrains() []vaultBrain {
 	}
 	var out []vaultBrain
 	for _, br := range b.brainMgr.Brains() {
-		out = append(out, vaultBrain{ID: br.ID(), Dir: br.Dir()})
+		out = append(out, vaultBrain{ID: br.ID(), Dir: br.Dir(), Manifest: br.Manifest()})
 	}
 	return out
 }
