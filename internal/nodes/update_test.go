@@ -85,3 +85,20 @@ func TestUpdateTarget(t *testing.T) {
 		t.Fatalf("a newer node: %q %q", to, why)
 	}
 }
+
+// The core remembers the versions it ran: auto updates take a node only
+// from one of them, whatever its name.
+func TestCoreVersionsAreRemembered(t *testing.T) {
+	dir := t.TempDir()
+	for _, v := range []string{"abc123", "def456", "abc123"} {
+		svc, _ := New(Options{Dir: dir, Version: v, Logf: t.Logf})
+		svc.noteVersion()
+	}
+	svc, _ := New(Options{Dir: dir, Version: "0789ff", Logf: t.Logf})
+	svc.noteVersion()
+	for v, want := range map[string]bool{"abc123": true, "def456": true, "0789ff": false, "fff000": false} {
+		if got := svc.ranBefore(v); got != want {
+			t.Errorf("ranBefore(%q) = %v", v, got)
+		}
+	}
+}
