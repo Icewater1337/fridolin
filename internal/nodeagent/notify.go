@@ -26,6 +26,9 @@ func toastScript(title, msg string, show bool) string {
 	}
 	return strings.Join([]string{
 		`$ErrorActionPreference = 'Stop'`,
+		// Module loading writes progress records, which PowerShell sends as
+		// CLIXML on stderr when it is not attached to a console.
+		`$ProgressPreference = 'SilentlyContinue'`,
 		`function D([string]$b) { [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($b)) }`,
 		`$title = D '` + enc(title) + `'`,
 		`$text = D '` + enc(msg) + `'`,

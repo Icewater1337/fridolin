@@ -24,9 +24,14 @@ func TestToastXMLOnWindows(t *testing.T) {
 	title, msg := clean(hostileText, 128), clean(hostileText, 1024)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, ps, powershellArgs(toastScript(title, msg, false))...).CombinedOutput()
+	// Only stdout carries the result; stderr may hold CLIXML progress or
+	// warnings from PowerShell itself.
+	var stderr strings.Builder
+	cmd := exec.CommandContext(ctx, ps, powershellArgs(toastScript(title, msg, false))...)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("powershell: %v\n%s", err, out)
+		t.Fatalf("powershell: %v\n%s\n%s", err, out, stderr.String())
 	}
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(string(out)))
 	if err != nil {
