@@ -76,9 +76,12 @@ func readProc(pid int, boot time.Time, page uint64) (Proc, error) {
 		return Proc{}, fmt.Errorf("%s/stat: too few fields", dir)
 	}
 	num := func(i int) int64 { n, _ := strconv.ParseInt(f[i], 10, 64); return n }
+	// Process, group and session ids are 32-bit in the kernel; parsing them
+	// as such keeps the conversion to int exact on every platform.
+	id := func(i int) int { n, _ := strconv.ParseInt(f[i], 10, 32); return int(n) }
 	// f[0] is field 3 (state); field n is f[n-3].
 	p := Proc{
-		PID: pid, PPID: int(num(1)), PGID: int(num(2)), SID: int(num(3)), UID: -1,
+		PID: pid, PPID: id(1), PGID: id(2), SID: id(3), UID: -1,
 		Name:   string(data[open+1 : end]),
 		Zombie: f[0] == "Z",
 		CPU:    time.Duration(num(11)+num(12)) * time.Second / clockTicks,
