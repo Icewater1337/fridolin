@@ -218,3 +218,87 @@ func TestBrokenRegistryFile(t *testing.T) {
 		t.Fatal("a broken nodes.json opens")
 	}
 }
+
+// fileLastSeen reads the node's last_seen as nodes.json holds it, as
+// another process (fridolin doctor) does.
+func fileLastSeen(t *testing.T, r *Registry, id string) time.Time {
+	t.Helper()
+	data, err := os.ReadFile(r.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f registryFile
+	if err := json.Unmarshal(data, &f); err != nil {
+		t.Fatal(err)
+	}
+	n := f.find(id)
+	if n == nil || n.LastSeen == nil {
+		t.Fatalf("no last_seen of %s in the file", id)
+	}
+	return *n.LastSeen
+}
+
+// Heartbeats every 20 seconds, as agents send them, reach the file at
+// least once a minute: the file must not keep the time of the connect.
+func TestSeenReachesTheFileWithFrequentHeartbeats(t *testing.T) {
+	clk := &clock{time.Date(2026, 10, 20, 10, 9, 0, 0, time.UTC)}
+	r, err := OpenRegistry(t.TempDir(), clk.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _, _ := r.NewJoinCode()
+	h := hello(t, code, nodeproto.Capabilities{})
+	if _, err := r.Hello(h, ""); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 * 60 / 20 {
+		clk.t = clk.t.Add(20 * time.Second)
+		if err := r.Seen(h.DeviceID, nodeproto.HostStats{CPUs: 8, MemAvailable: 1 << 30}, false); err != nil {
+			t.Fatal(err)
+		}
+		if got := fileLastSeen(t, r, h.DeviceID); clk.t.Sub(got) >= SeenWriteEvery {
+			t.Fatalf("at %v the file says last seen %v", clk.t, got)
+		}
+	}
+	data, _ := os.ReadFile(r.Path())
+	if !strings.Contains(string(data), `"resources"`) {
+		t.Errorf("the file has no resources: %s", data)
+	}
+}
+
+// Flush writes the last heartbeat kept in memory, and only that.
+func TestFlushWritesWhatSeenKept(t *testing.T) {
+	clk := &clock{time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)}
+	r, err := OpenRegistry(t.TempDir(), clk.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _, _ := r.NewJoinCode()
+	h := hello(t, code, nodeproto.Capabilities{})
+	if _, err := r.Hello(h, ""); err != nil {
+		t.Fatal(err)
+	}
+	clk.t = clk.t.Add(20 * time.Second)
+	if err := r.Seen(h.DeviceID, nodeproto.HostStats{CPUs: 8}, false); err != nil {
+		t.Fatal(err)
+	}
+	if got := fileLastSeen(t, r, h.DeviceID); got.Equal(clk.t) {
+		t.Fatal("a heartbeat 20s after the connect wrote the file")
+	}
+	if err := r.Flush(h.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+	if got := fileLastSeen(t, r, h.DeviceID); !got.Equal(clk.t) {
+		t.Fatalf("after Flush the file says %v, want %v", got, clk.t)
+	}
+	st, _ := os.Stat(r.Path())
+	if err := r.Flush(h.DeviceID); err != nil {
+		t.Fatal(err)
+	}
+	if st2, _ := os.Stat(r.Path()); !st2.ModTime().Equal(st.ModTime()) || st2.Size() != st.Size() {
+		t.Error("a second Flush with nothing new wrote the file")
+	}
+	if err := r.Flush("no-such-node"); err != nil {
+		t.Errorf("Flush of an unknown node: %v", err)
+	}
+}

@@ -125,6 +125,9 @@ type Registry struct {
 	mu    sync.Mutex
 	file  registryFile
 	stamp fileStamp
+	// written is each node's last_seen as the file holds it, so that Seen
+	// writes once a minute however often heartbeats come.
+	written map[string]time.Time
 }
 
 type fileStamp struct {
@@ -156,6 +159,7 @@ func (r *Registry) reloadLocked() error {
 	if errors.Is(err, os.ErrNotExist) {
 		if r.stamp.ok {
 			r.file = registryFile{}
+			r.written = nil
 		}
 		r.stamp = fileStamp{}
 		return nil
@@ -183,7 +187,19 @@ func (r *Registry) reloadLocked() error {
 	}
 	f.Nodes = slices.DeleteFunc(f.Nodes, func(n *Node) bool { return n == nil })
 	r.file, r.stamp = f, stamp
+	r.noteWrittenLocked()
 	return nil
+}
+
+// noteWrittenLocked records each node's last_seen as the file now holds
+// it.
+func (r *Registry) noteWrittenLocked() {
+	r.written = make(map[string]time.Time, len(r.file.Nodes))
+	for _, n := range r.file.Nodes {
+		if n.LastSeen != nil {
+			r.written[n.ID] = *n.LastSeen
+		}
+	}
 }
 
 // load reads the file again if it changed; an unreadable file keeps what
@@ -205,6 +221,7 @@ func (r *Registry) saveLocked() error {
 	if err := fsx.WriteFileAtomic(r.path, append(data, '\n'), 0o600, false); err != nil {
 		return err
 	}
+	r.noteWrittenLocked()
 	if st, err := os.Stat(r.path); err == nil {
 		r.stamp = fileStamp{mod: st.ModTime(), size: st.Size(), ok: true}
 	}
@@ -350,8 +367,14 @@ func (r *Registry) Declare(id string, caps nodeproto.Capabilities) (*Node, error
 	})
 }
 
+// SeenWriteEvery is how often Seen writes a connected node's last_seen
+// and resources to the file: other processes (fridolin doctor, a restarted
+// bridge) read them there.
+const SeenWriteEvery = time.Minute
+
 // Seen records a heartbeat: when, and the host's resources. It writes the
-// file only when the last write is older than a minute, or persist says to.
+// file when what the file holds for the node is SeenWriteEvery old, or
+// persist says to; in between it keeps them in memory.
 func (r *Registry) Seen(id string, stats nodeproto.HostStats, persist bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -361,14 +384,30 @@ func (r *Registry) Seen(id string, stats nodeproto.HostStats, persist bool) erro
 		return fmt.Errorf("%w %q", ErrUnknownNode, id)
 	}
 	now := r.now().UTC().Truncate(time.Second)
-	old := n.LastSeen
 	n.LastSeen, n.Resources = &now, &stats
-	if persist || old == nil || now.Sub(*old) >= time.Minute {
+	if w, ok := r.written[id]; persist || !ok || now.Sub(w) >= SeenWriteEvery {
 		return r.saveLocked()
 	}
 	// Kept in memory until the next write: the file's stamp stays, so the
 	// next load does not throw it away.
 	return nil
+}
+
+// Flush writes what Seen kept in memory for node id, when the file does
+// not hold it yet: when the node disconnects, so the file says when it
+// was last heard from.
+func (r *Registry) Flush(id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_ = r.load()
+	n := r.file.find(id)
+	if n == nil || n.LastSeen == nil {
+		return nil
+	}
+	if w, ok := r.written[id]; ok && w.Equal(*n.LastSeen) {
+		return nil
+	}
+	return r.saveLocked()
 }
 
 // ApproveDevice approves the first stage.

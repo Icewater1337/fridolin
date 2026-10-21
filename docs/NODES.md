@@ -23,7 +23,10 @@ On the core, in `config.json`:
 
 Both settings wait for a restart. `fridolin doctor` then checks that the
 node port answers (required while nodes are on) and warns about approved
-nodes the core has not heard from for five minutes.
+nodes the core has not heard from for five minutes. It asks the running
+bridge which nodes are connected; when the bridge does not answer it
+reads `nodes/nodes.json`, where the core writes each node's `last_seen`
+and resources at least once a minute and when the node disconnects.
 
 ## Joining a machine
 

@@ -108,6 +108,10 @@ type DoctorEnv struct {
 	// HasHostSecret asks the Windows Credential Manager whether it holds
 	// a secret (macOS and Linux are asked through Run and Stat).
 	HasHostSecret func(name string) (bool, error)
+	// LiveNodes asks the running bridge for its nodes as it knows them
+	// now (GET /api/nodes); an error when it does not answer, and the
+	// node checks read nodes.json instead. nil never asks.
+	LiveNodes func(ctx context.Context, cfg *config.Settings) ([]byte, error)
 }
 
 // DoctorRegistry is every check, in the order doctor prints them. Later
@@ -330,7 +334,8 @@ func SystemDoctorEnv(configFlag string) *DoctorEnv {
 			}
 			return c.Close()
 		},
-		Now: time.Now,
+		Now:       time.Now,
+		LiveNodes: askBridgeNodes,
 	}
 }
 
