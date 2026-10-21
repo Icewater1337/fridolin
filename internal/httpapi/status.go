@@ -58,8 +58,10 @@ type TailnetStatus struct {
 }
 
 // LeaseStatus is the core lease as this bridge sees it: State is held
-// (this device renews it) or lost (the channels are stopped); Holder is
-// the device that took it, when another did.
+// (this device renews it), unverified (the lease store could not be read
+// or written since; the channels keep running and Error says why) or lost
+// (another device took it, the channels are stopped); Holder is the
+// device that took it.
 type LeaseStatus struct {
 	State     string     `json:"state"`
 	DeviceID  string     `json:"device_id"`

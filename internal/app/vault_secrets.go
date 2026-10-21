@@ -169,24 +169,29 @@ const vaultRemoteName = "fridolinvault"
 // vaultColdPath is the cold tier's folder in the vault bucket.
 const vaultColdPath = "vault"
 
-// b2ColdStore is the cold tier on B2: crypt over <bucket>/vault.
-func b2ColdStore(rclone string, base []string, c vaultCreds, bucket string) (*cloud.Rclone, error) {
+// b2RawStore is the vault bucket's cold folder without encryption, which
+// only says whether anything is there, on its own rclone daemon (the
+// crypt passwords may not exist yet).
+func b2RawStore(rclone string, base []string, c vaultCreds, bucket string, usage *cloud.Usage) (*cloud.RcloneRC, error) {
+	env, err := cloud.B2Env(vaultRemoteName, c.VaultKeyID, c.VaultKey)
+	if err != nil {
+		return nil, err
+	}
+	d := &cloud.RcloneDaemon{Binary: rclone, Env: append(append([]string{}, base...), env...), Secrets: c.secrets(), Usage: usage, Op: "vault"}
+	return d.Store(vaultRemoteName + ":" + bucket + "/" + vaultColdPath), nil
+}
+
+// b2ColdStore is the cold tier on B2: crypt over <bucket>/vault, on one
+// long-lived rclone daemon (cloud.RcloneDaemon), which logs in to B2 once
+// a day instead of once per operation. The vault closes it when it stops.
+func b2ColdStore(rclone string, base []string, c vaultCreds, bucket string, usage *cloud.Usage) (*cloud.RcloneRC, error) {
 	env, remote, err := cloud.VaultRemote{Name: vaultRemoteName, KeyID: c.VaultKeyID, Key: c.VaultKey, Bucket: bucket, Path: vaultColdPath,
 		Password: c.CryptPassword, Password2: c.CryptSalt}.Env()
 	if err != nil {
 		return nil, err
 	}
-	return &cloud.Rclone{Binary: rclone, Remote: remote, Env: append(append([]string{}, base...), env...), Secrets: c.secrets()}, nil
-}
-
-// b2RawStore is the vault bucket's cold folder without encryption, which
-// only says whether anything is there.
-func b2RawStore(rclone string, base []string, c vaultCreds, bucket string) (*cloud.Rclone, error) {
-	env, err := cloud.B2Env(vaultRemoteName, c.VaultKeyID, c.VaultKey)
-	if err != nil {
-		return nil, err
-	}
-	return &cloud.Rclone{Binary: rclone, Remote: vaultRemoteName + ":" + bucket + "/" + vaultColdPath, Env: append(append([]string{}, base...), env...), Secrets: c.secrets()}, nil
+	d := &cloud.RcloneDaemon{Binary: rclone, Env: append(append([]string{}, base...), env...), Secrets: c.secrets(), Usage: usage, Op: "vault"}
+	return d.Store(remote), nil
 }
 
 // storeEmpty reports whether st holds no object at all.

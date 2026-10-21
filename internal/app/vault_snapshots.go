@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/snapshot"
 	"github.com/Icewater1337/fridolin/internal/store"
@@ -212,10 +213,12 @@ func (vs *vaultSnapshots) ensureRepo(ctx context.Context) error {
 		return nil
 	}
 	ok, err := vs.restic().Exists(ctx)
+	vs.charge("exists")
 	if err != nil {
 		return err
 	}
 	if !ok {
+		vs.charge("init")
 		if err := vs.restic().Init(ctx, nil); err != nil {
 			return err
 		}
@@ -379,6 +382,7 @@ func (vs *vaultSnapshots) snapshotLocked(ctx context.Context, kind string) {
 	}
 	if err == nil {
 		sum, err = vs.restic().Backup(ctx, snapshot.BackupOptions{Paths: paths, Excludes: excludes, Tags: []string{snapshotTag, kind}, Host: snapshotHost})
+		vs.charge("backup")
 		if errors.Is(err, snapshot.ErrIncomplete) && sum.SnapshotID != "" {
 			rec.Error = err.Error()
 			err = nil
@@ -417,6 +421,7 @@ func (vs *vaultSnapshots) snapshotLocked(ctx context.Context, kind string) {
 		return
 	}
 	prune := &vaultRecord{At: time.Now().UTC()}
+	vs.charge("forget-prune")
 	if err := vs.restic().Forget(ctx, snapshotRetention, []string{snapshotTag}, true); err != nil {
 		if ctx.Err() != nil {
 			return
@@ -425,6 +430,29 @@ func (vs *vaultSnapshots) snapshotLocked(ctx context.Context, kind string) {
 		vs.s.log.Warn("vault: pruning snapshots failed", "err", err)
 	}
 	vs.update(func(st *snapshotsStatus) { st.LastPrune = prune })
+}
+
+// resticCosts are what restic's runs spend on B2, measured against a
+// counting S3 proxy with restic 0.19 on a small repository and its cache,
+// plus the two calls (b2_authorize_account, b2_list_buckets) its native B2
+// backend makes first (docs/VAULT.md, "B2 transactions"). A check that
+// reads data, a copy and a restore download packs too, which grows with
+// the repository; the numbers are a floor for those.
+var resticCosts = map[string]cloud.Cost{
+	"exists":          {B: 3, C: 6},
+	"init":            {A: 2, B: 1, C: 6},
+	"backup":          {A: 6, B: 3, C: 8},
+	"forget-prune":    {A: 11, B: 3, C: 10},
+	"check":           {A: 2, B: 9, C: 9},
+	"check-read-data": {B: 50},
+	"copy":            {B: 20, C: 10},
+	"snapshots":       {B: 3, C: 6},
+	"restore":         {B: 50, C: 8},
+}
+
+// charge counts one restic run of op.
+func (vs *vaultSnapshots) charge(op string) {
+	vs.s.chargeB2(vs.run, "restic:"+op, resticCosts[op])
 }
 
 func shortID(id string) string {
@@ -440,6 +468,10 @@ func (vs *vaultSnapshots) checkLocked(ctx context.Context, subset string) {
 	err := vs.ensureRepo(ctx)
 	if err == nil {
 		err = vs.restic().Check(ctx, subset)
+		vs.charge("check")
+		if subset != "" {
+			vs.charge("check-read-data")
+		}
 	}
 	if ctx.Err() != nil {
 		return
@@ -473,6 +505,7 @@ func (vs *vaultSnapshots) copyDriveLocked(ctx context.Context) {
 	}
 	if err == nil {
 		err = drive.Copy(ctx, vs.restic())
+		vs.charge("copy")
 	}
 	if ctx.Err() != nil {
 		return
@@ -519,6 +552,7 @@ func (vs *vaultSnapshots) drillLocked(ctx context.Context) {
 		fail("%v", err)
 		return
 	}
+	vs.charge("snapshots")
 	snaps, err := vs.restic().Snapshots(ctx, []string{snapshotTag, snapshotNightly})
 	if err == nil && len(snaps) == 0 {
 		snaps, err = vs.restic().Snapshots(ctx, []string{snapshotTag})
@@ -544,6 +578,7 @@ func (vs *vaultSnapshots) drillLocked(ctx context.Context) {
 		fail("%v", err)
 		return
 	}
+	vs.charge("restore")
 	if err := vs.restic().Restore(ctx, latest.ID, target); err != nil {
 		fail("restoring snapshot %s: %v", latest.ShortID, err)
 		return
@@ -594,6 +629,7 @@ func (vs *vaultSnapshots) drillLocked(ctx context.Context) {
 			name := filepath.Base(db.Path)
 			c := drillCheck{Name: "litestream " + name}
 			out := filepath.Join(tmp, "litestream-"+name)
+			vs.s.chargeB2(vs.run, "litestream:restore", cloud.Cost{B: 10, C: 10})
 			if err := lite.Restore(ctx, db.Path, out); err != nil {
 				c.Detail = err.Error()
 			} else if err := store.IntegrityCheck(ctx, out); err != nil {

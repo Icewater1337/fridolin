@@ -34,6 +34,30 @@ type Rclone struct {
 	// WaitDelay bounds how long a cancelled rclone may take to exit after
 	// it is killed before its pipes are closed (default 5s).
 	WaitDelay time.Duration
+	// Usage, when set, counts the B2 transactions of every run; Op is
+	// prefixed to the operation names ("" is "rclone").
+	Usage *Usage
+	Op    string
+}
+
+// rcloneRunCost is what every rclone process pays on B2 before its
+// operation: b2_authorize_account (Class C) and the check whether the
+// path it was given is a file (a HEAD, Class B). RcloneDaemon pays it once.
+var rcloneRunCost = Cost{B: 1, C: 1}
+
+// SetUsage makes r count its transactions in u.
+func (r *Rclone) SetUsage(u *Usage, op string) { r.Usage, r.Op = u, op }
+
+// charge counts one rclone run of op.
+func (r *Rclone) charge(op string, cost Cost) {
+	r.Usage.AddCost(r.opName(op), rcloneRunCost.Plus(cost))
+}
+
+func (r *Rclone) opName(op string) string {
+	if r.Op == "" {
+		return "rclone:" + op
+	}
+	return r.Op + ":" + op
 }
 
 // rcloneExitDirNotFound and rcloneExitFileNotFound are rclone's exit codes
@@ -129,7 +153,7 @@ func (r *Rclone) redact(s string) string {
 	return s
 }
 
-func (r *Rclone) runError(ctx context.Context, op, key string, err error, stderr string) *RcloneError {
+func (r *Rclone) runError(ctx context.Context, op, key string, err error, stderr string) error {
 	e := &RcloneError{Op: op, Key: key, ExitCode: -1, Stderr: r.redact(stderr), Err: err}
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
@@ -137,6 +161,11 @@ func (r *Rclone) runError(ctx context.Context, op, key string, err error, stderr
 	}
 	if ctx.Err() != nil {
 		e.Err = errors.Join(ctx.Err(), err)
+	}
+	if IsCapExceeded(e) {
+		ce := &CapError{Err: e}
+		r.Usage.NoteError(ce)
+		return ce
 	}
 	return e
 }
@@ -167,6 +196,7 @@ func (r *Rclone) Put(ctx context.Context, key string, body io.Reader) error {
 	}
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	r.charge("put", Cost{A: 1})
 	cmd, err := r.command(runCtx, "rcat", r.target(key))
 	if err != nil {
 		return err
@@ -214,6 +244,8 @@ func (r *Rclone) Get(ctx context.Context, key string) (io.ReadCloser, error) {
 		return nil, err
 	}
 	runCtx, cancel := context.WithCancel(ctx)
+	// cat lists the object's folder to find it, then reads it.
+	r.charge("get", Cost{B: 2, C: 1})
 	cmd, err := r.command(runCtx, "cat", r.target(key))
 	if err != nil {
 		cancel()
@@ -301,10 +333,14 @@ func (r *Rclone) Stat(ctx context.Context, key string) (ObjectInfo, error) {
 	if err := ValidKey(key); err != nil {
 		return ObjectInfo{}, err
 	}
+	r.charge("stat", Cost{B: 1})
 	out, err := r.run(ctx, "lsjson", key, "--stat", "--no-mimetype", r.target(key))
 	if err != nil {
 		var re *RcloneError
 		if errors.As(err, &re) && re.notFound() {
+			// Not an object: lsjson --stat lists the parent folder for a
+			// directory of that name.
+			r.Usage.Add(ClassC, r.opName("stat"), 1)
 			return ObjectInfo{}, fmt.Errorf("cloud: stat %s: %w", key, ErrNotFound)
 		}
 		return ObjectInfo{}, err
@@ -336,6 +372,7 @@ func (r *Rclone) List(ctx context.Context, prefix string) ([]ObjectInfo, error) 
 	if err := json.Unmarshal(out, &entries); err != nil {
 		return nil, fmt.Errorf("cloud: rclone lsjson %s: %w", prefix, err)
 	}
+	r.charge("list", Cost{B: 1, C: float64(max(1, (len(entries)+999)/1000))})
 	list := make([]ObjectInfo, 0, len(entries))
 	for _, e := range entries {
 		key := e.Path
@@ -353,6 +390,7 @@ func (r *Rclone) Delete(ctx context.Context, key string) error {
 	if err := ValidKey(key); err != nil {
 		return err
 	}
+	r.charge("delete", Cost{A: 1, B: 1})
 	_, err := r.run(ctx, "deletefile", key, r.target(key))
 	var re *RcloneError
 	if errors.As(err, &re) && re.notFound() {

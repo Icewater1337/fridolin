@@ -37,7 +37,9 @@ it.
 
 Every file is uploaded within a minute or so of being written (the
 service watches the hot tier, and walks all of it every six hours), so the
-cold tier always holds everything. Files then leave the hot tier by the
+cold tier always holds everything. The cold manifest, which lists every
+cold file with its hash for a rebuild, goes up at most every ten minutes
+and when the vault stops. Files then leave the hot tier by the
 policy of PLAN.md: pinned files (`config.json`, `secrets/`, every
 `brain.json`, `brain-prompt.md`, `skills/`, `memories/**/*.md`,
 `conversation-history.jsonl`, this month's `audit/`) never; a recording or
@@ -104,12 +106,54 @@ than half; more than a fifth once that is ten files or more; 250 or more)
 holds pruning, so the snapshots that still have them are not thinned out.
 The Vault page shows the hold; *Allow pruning…* lifts it.
 
-Litestream replicates `bridge.db` and `vault.db` continuously to
-`<snapshots_bucket>/litestream/bridge.db` and `.../vault.db`, as a child
-process the bridge restarts when it ends. Its config file is generated in
+Litestream replicates `bridge.db` and `vault.db` to
+`<snapshots_bucket>/litestream/bridge.db` and `.../vault.db`, uploading
+what changed each minute, as a child process the bridge restarts when it
+ends. It compacts the uploads every hour and every day and takes a
+snapshot daily, which keep its calls to B2 within the free caps (below). Its config file is generated in
 `core/` with mode 0600 and holds no key: the snapshots key reaches it as
 `LITESTREAM_ACCESS_KEY_ID` and `LITESTREAM_SECRET_ACCESS_KEY` in its
 environment only. Litestream switches both databases to WAL mode.
+
+## B2 transactions
+
+Backblaze B2 bills its API calls by class, and a free account caps two of
+them at 2,500 a day each, reset at midnight UTC: **Class B** (downloads,
+HEAD) and **Class C** (logging in, every listing). **Class A** (uploads,
+deletes) is free. Past a cap, B2 refuses every call of that class with
+`403 transaction_cap_exceeded`, logging in too, until the reset. On
+2026-10-21 that took the core down for seven minutes: it could not read
+the lease (see [CORE.md](CORE.md#the-core-lease), which now keeps
+running instead).
+
+What the bridge spends, for an idle core with the default settings (the
+vault and the lease on), by measurement: each operation counted against
+a counting S3 proxy in front of a local `rclone serve s3`, plus the
+B2-only log-in of each process:
+
+| | before (per day) | now (per day) |
+| --- | ---: | ---: |
+| the lease: every 60 s three rclone processes (stat, cat, rcat), each logging in; now every 300 s on one `rclone rcd` | 5,760 C, 7,200 B | ~1 C, 577 B |
+| the cold tier's reachability probe: every 10 minutes, an rclone process; now only after 30 quiet minutes | 144 C, 288 B | ~1 C, ≤ 49 B |
+| Litestream at its defaults (the L0 retention check every 15 s and compaction every 30 s list the replica for both databases); now hourly and daily compaction, six-hourly retention check | ~34,500 C | ~210 C (+34 per start), ~50 B |
+| restic: hourly backup (about 8 C, 3 B each), nightly backup and prune, weekly check | ~210 C, ~80 B | ~210 C, ~80 B |
+| **total** | **~40,600 C, ~7,600 B** | **~460 C, ~760 B** |
+
+Uploading a changed file costs nothing capped but the size check after
+it (one Class B); bringing one back two Class B. The rclone daemon
+(`rclone rcd`, one for the cold tier and one for the lease, each on a
+unix socket in a new 0700 folder with a user and password made for each
+start, in its environment only) logs in once a day instead of once per
+call, which is most of the difference.
+
+The bridge counts these per UTC day, from what each call costs (the
+stores count their own calls; restic's and Litestream's are counted at
+their measured cost per run and per hour), in `core/b2-usage.json`. The
+Vault page's *B2 transactions*, `fridolin vault status` and `fridolin
+doctor` (`b2-transactions`) show them against `vault.b2_daily_budget`
+(default 2,000 of each class) and warn past 70%; a refusal for a cap is a
+doctor failure with the fix: raise the caps under B2 → *Caps & Alerts*, or
+lower the vault's activity.
 
 ## Keys and passwords
 
@@ -150,8 +194,11 @@ folder and checks that each brain folder in it has its `brain.json`, that
 the database copies pass SQLite's `integrity_check`, and that Litestream
 restores both databases; the result is on the Vault page and in `fridolin
 vault status`. `fridolin doctor` checks, with the vault on, that the cold
-tier answers, that no file has waited more than an hour for its upload,
-that a snapshot is less than 26 hours old and that Litestream runs.
+tier answered within 45 minutes (the vault's own uploads and downloads
+show it; it probes only after 30 quiet minutes), that no file has waited
+more than an hour for its upload, that a snapshot is less than 26 hours
+old, that Litestream runs, and that the day's B2 transactions stay within
+the budget.
 
 ## A new core
 

@@ -83,6 +83,7 @@ export default {
       regions.hot = h('div');
       regions.snapshots = h('div');
       regions.litestream = h('div');
+      regions.b2 = h('div');
       regions.drill = h('div');
       regions.evictions = h('div');
       regions.evictionRows = h('tbody');
@@ -91,6 +92,7 @@ export default {
         h('section.section', h('h2.section-title', 'Hot tier'), regions.hot),
         h('section.section', h('h2.section-title', 'Snapshots'), regions.snapshots),
         h('section.section', h('h2.section-title', 'Litestream'), regions.litestream),
+        h('section.section', h('h2.section-title', 'B2 transactions'), regions.b2),
         h('section.section', h('h2.section-title', 'Restore drill'), regions.drill),
         h('section.section', h('h2.section-title', 'Evictions'), regions.evictions));
     }
@@ -110,6 +112,7 @@ export default {
       }, renderHot);
       paint(regions.snapshots, { snap: s.snapshots || null, job }, renderSnapshots);
       paint(regions.litestream, s.litestream || null, renderLitestream);
+      paint(regions.b2, s.b2 || null, renderB2);
       paint(regions.drill, { drill: s.last_drill || null, job }, renderDrill);
       paintEvictions(s.evictions || []);
     }
@@ -266,6 +269,32 @@ export default {
             ['Databases', (l.dbs || []).length ? h('span.vault-dbs', (l.dbs || []).map((d) => mono(d))) : h('span.muted', 'none')],
             ['Last error', l.last_error ? h('span.error-text', l.last_error) : h('span.muted', 'none')],
           ])));
+    }
+
+    // ── B2 transactions ──
+    // What the bridge spent today (UTC) of Backblaze's capped classes: the
+    // free tier refuses every call of a class past 2,500 a day.
+    function renderB2(u) {
+      if (!u) return h('div.card', h('div.card-body', h('p.muted', 'No B2 transactions counted today.')));
+      const cls = u.classes || {};
+      const pct = u.percent || {};
+      const level = (c) => {
+        const p = pct[c] || 0;
+        const kind = p >= 100 ? 'bad' : p >= 70 ? 'warn' : 'ok';
+        return h('span', pill(`${p}%`, kind), ` ${cls[c] || 0} of ${u.budget || 0}`);
+      };
+      const y = u.yesterday;
+      return h('div.card',
+        h('div.card-body',
+          (u.warnings || []).map((w) => callout(u.cap_exceeded ? 'bad' : 'warn', null, w)),
+          kv([
+            ['Day (UTC)', u.day || ''],
+            ['Class B (downloads, HEAD)', level('B')],
+            ['Class C (log-ins, listings)', level('C')],
+            ['Class A (uploads, free)', String(cls.A || 0)],
+            ['The day before', y ? `class B ${y.B || 0}, class C ${y.C || 0}` : h('span.muted', 'not seen')],
+          ]),
+          h('p.muted.small', 'Estimated from what each call costs; vault.b2_daily_budget sets the budget, and doctor warns at 70%.')));
     }
 
     // ── restore drill ──

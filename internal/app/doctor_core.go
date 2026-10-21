@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/lease"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
 )
 
@@ -99,6 +101,15 @@ func checkLeaseFresh(_ context.Context, env *DoctorEnv) DoctorResult {
 	case "released":
 		return DoctorResult{Status: DoctorWarn, Detail: "released by a clean stop; the core is not running here",
 			Fix: "fridolin core start"}
+	case lease.StateUnverified:
+		detail := "unverified: the lease store did not answer (" + st.Error + "). The channels keep running, because this device held the lease last"
+		if st.RenewedAt != nil {
+			detail += fmt.Sprintf("; last renewed %s ago", env.now().Sub(*st.RenewedAt).Round(time.Second))
+		}
+		if cloud.IsCapExceeded(errors.New(st.Error)) {
+			return DoctorResult{Status: DoctorFail, Detail: detail, Fix: cloud.CapFix}
+		}
+		return DoctorResult{Status: DoctorWarn, Detail: detail, Fix: "check the core's log and its connection to the vault bucket; it keeps retrying"}
 	}
 	if st.RenewedAt == nil {
 		return DoctorResult{Status: DoctorFail, Detail: "the lease state has no renewal time"}

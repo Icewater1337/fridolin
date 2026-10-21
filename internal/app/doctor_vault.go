@@ -23,7 +23,7 @@ const (
 	vaultStatusFresh  = 5 * time.Minute  // the running vault writes its status each minute
 	vaultUploadWithin = time.Hour        // a file waits at most this long for its upload
 	vaultSnapWithin   = 26 * time.Hour   // a nightly snapshot, with two hours to spare
-	vaultReachWithin  = 30 * time.Minute // the vault pings the cold tier every 10 minutes
+	vaultReachWithin  = 45 * time.Minute // the vault shows the cold tier answering at least every 30 minutes
 )
 
 func vaultOn(env *DoctorEnv) bool { return env.Config != nil && env.Config.Vault.Enabled }

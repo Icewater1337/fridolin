@@ -120,6 +120,10 @@ type App struct {
 
 	// core is the tailnet node and the core lease (core_runtime.go).
 	core coreRuntime
+	// b2 counts the Backblaze B2 transactions of the lease and the vault
+	// per UTC day (b2usage.go); b2Warned the warnings logged today.
+	b2       *cloud.Usage
+	b2Warned map[string]bool
 
 	// registry owns the brain workflows, including add serialization.
 	registry *registry.Registry
@@ -155,6 +159,9 @@ type Options struct {
 	// LeaseSettle is how long taking the lease waits before it reads its
 	// write back (default 3 s; tests shorten it).
 	LeaseSettle time.Duration
+	// LeaseRetry is the first wait before a lease renewal that failed on
+	// the store is tried again (default 30 s; tests shorten it).
+	LeaseRetry time.Duration
 }
 
 // New creates and wires up all components. It holds the data
@@ -225,7 +232,11 @@ func New(opts Options) (_ *App, err error) {
 		started:  time.Now(),
 		restart:  opts.Restart,
 		core: coreRuntime{tailnetFactory: opts.Tailnet, tailnetAuthKey: opts.TailnetAuthKey,
-			leaseStore: opts.LeaseStore, leaseSettle: opts.LeaseSettle},
+			leaseStore: opts.LeaseStore, leaseSettle: opts.LeaseSettle, leaseRetry: opts.LeaseRetry},
+		b2: loadB2Usage(cfgs.Boot()),
+	}
+	if st, ok := opts.LeaseStore.(interface{ SetUsage(*cloud.Usage, string) }); ok {
+		st.SetUsage(b.b2, "lease")
 	}
 	// The lease before any channel exists: a copy of the core that another
 	// device runs must not even connect.
@@ -235,6 +246,7 @@ func New(opts Options) (_ *App, err error) {
 	defer func() {
 		if err != nil {
 			b.releaseLease()
+			b.closeLeaseStore()
 		}
 	}()
 	if cfg.HTTPEnabled {
@@ -346,6 +358,7 @@ func New(opts Options) (_ *App, err error) {
 	// A refused scheduled backup goes to the brain's chat, like Plaud's
 	// expired-login notice: the owner may not open the dashboard for weeks.
 	b.vault = newVaultService(cfgs, opts.Container, b.logger, b.vaultBrains, b.openMedia)
+	b.vault.usage = b.b2
 	b.backup = newProjectedBackup(cfgs, b.brainMgr, b.notifyBackup, b.vault.driveSuperseded)
 	b.google = google.New(googleOptionsFor(cfgs))
 	b.plaud = NewPlaudManager(cfgs, b.brainMgr, b.submitHandOff, b.wa.SendMessage, func() string {
@@ -388,7 +401,7 @@ func (b *App) Start(ctx context.Context) error {
 		Resume:           func(ctx context.Context) { b.outbox.Start(); b.resume(ctx) }, Connect: b.connectLoop,
 		Watch: func(ctx context.Context) { b.watchRequiredFiles(ctx, requiredFilesEvery) },
 		// The tailnet first: the node port listens on it.
-		Background: []func(context.Context){b.startTailnet, b.runLease, b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start, b.vault.Start, b.watchApprovals},
+		Background: []func(context.Context){b.startTailnet, b.runLease, b.runB2Usage, b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start, b.vault.Start, b.watchApprovals},
 	})
 }
 
@@ -440,7 +453,7 @@ func (b *App) stopResources() {
 		EndIntake: b.intake.End, CloseStore: b.store.Close,
 		// The lease goes free once nothing here sends any more, and before
 		// the data dir's lock: the next core may start right after.
-		ReleaseLock: func() { b.releaseLease(); b.lock.Release() },
+		ReleaseLock: func() { b.releaseLease(); b.closeLeaseStore(); b.saveB2Usage(); b.lock.Release() },
 	})
 }
 

@@ -297,15 +297,37 @@ WhatsApp session fight over it.
 
 - `fridolin core promote` takes it for this data dir: it is refused, exit
   status 3, while another device holds it and renewed it within the
-  staleness window (default 5 minutes), with the holder's id, host,
+  staleness window (default 20 minutes), with the holder's id, host,
   version and age in the message.
 - `fridolin core status` shows this data dir's device id, who holds the
   lease (live, stale or released) and the latest export.
-- A core with `core.lease.enabled` takes the lease at start, renews it
-  every `renew_seconds` (default 60), and stops its channels when it has
-  not renewed for `stale_seconds` minus one renew interval, so it is quiet
-  before another device may take over. It stops at once when it finds
-  another device's record. A clean shutdown releases the lease.
+- A core with `core.lease.enabled` takes the lease at start and renews it
+  every `renew_seconds` (default 300). It stops its channels when, and
+  only when, it finds another device's record: a takeover. A clean
+  shutdown releases the lease.
+- A lease store that does not answer is not a takeover. When Backblaze
+  refuses (a daily transaction cap used up: `403
+  transaction_cap_exceeded`), the network is down or B2 answers 5xx, the
+  core keeps its channels and calls the lease *unverified*: `/ready`
+  (still 200 while WhatsApp is connected), the Overview, `fridolin
+  doctor` and the log say so, and it retries after 30 seconds, then
+  twice as long each time up to the renew interval. It stops only if the
+  store, once it answers, shows another device holding the lease.
+- A core that starts while the store cannot be read starts too,
+  unverified, when its own records say this device was the last holder:
+  `core/lease-state.json` names this device id with the lease held,
+  unverified or released by it, and no `superseded` mark says another
+  device took over. A device that never held the lease refuses to start
+  without seeing it, so an outage never puts two bridges on one WhatsApp
+  session. With the store answering, a start takes the lease as before
+  (a stale or released lease, or none) or refuses (another live holder).
+
+A renewal is one read and one write of the lease object. The core keeps
+one `rclone rcd` (rclone's remote control daemon) for it, which logs in
+to B2 once a day: a renewal costs two Class B transactions (a HEAD and a
+download) and an upload, which is free, so the default five-minute
+renewal spends 576 of the free tier's 2,500 Class B a day and no Class C
+([VAULT.md](VAULT.md#b2-transactions)).
 
 In the bridge (`core.lease.enabled`, a restart setting): the lease is
 taken before any channel exists. A device that holds it live makes the
@@ -334,7 +356,14 @@ up. Two devices that both take a free lease within those seconds could
 both believe they won. That needs two cores started on two machines at the
 same moment, which moving the core (export, import, promote, start, one
 machine at a time) never does; and taking a held lease needs it stale
-first, five minutes in which the old core has written nothing.
+first, twenty minutes in which the old core has written nothing.
+
+A core that cannot reach the store for longer than the staleness window
+keeps running (above), so a device that takes the stale lease meanwhile
+runs next to it until the old core reaches the store again, finds the
+new record and stops. That needs the store unreachable from the old core
+but reachable from the new one, and a person promoting the new one: the
+price of not taking WhatsApp down whenever Backblaze has a bad hour.
 
 The flags of `export`, `import`, `promote` and `status`: `--data-dir`
 (default `$FRIDOLIN_HOME`, else the config's), `--store` (a folder, or an
@@ -525,8 +554,8 @@ which copy the new one back). In a brain's run the bridge sets
 ## Recovery
 
 - **The old machine is gone.** On the new one: import the latest export,
-  wait until `fridolin core status` shows the lease stale (5 minutes after
-  the old core last renewed), promote, start. What happened after the
+  wait until `fridolin core status` shows the lease stale (20 minutes
+  after the old core last renewed), promote, start. What happened after the
   latest export is lost, except what Litestream replicated of `bridge.db`
   and `vault.db` to the snapshots bucket with the vault on
   ([VAULT.md](VAULT.md#snapshots)); export before planned moves.

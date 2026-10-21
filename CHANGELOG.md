@@ -178,6 +178,28 @@ for compatibility.
 
 ### Changed
 
+- The vault and the core lease spend a fraction of Backblaze B2's capped
+  transactions: an idle core went from about 40,600 Class C and 7,600
+  Class B a day (the free tier caps each at 2,500) to about 460 and 760.
+  The cold tier and the lease each talk to one long-lived `rclone rcd`,
+  which logs in to B2 once a day instead of once per call; Litestream
+  compacts hourly and daily and syncs each minute instead of listing its
+  replica every few seconds; the cold tier is probed only when nothing
+  else showed it answering for 30 minutes, and the manifest goes up at
+  most every 10 minutes. `core.lease.renew_seconds` and `stale_seconds`
+  now default to 300 and 1200 (a config that sets them keeps its
+  values). The day's transactions per class are on the Vault page, in
+  `fridolin vault status` and in `fridolin doctor` (`b2-transactions`),
+  which warns past 70% of the new `vault.b2_daily_budget` (default 2000)
+  and fails when B2 refused a call for a cap. See
+  [docs/VAULT.md](docs/VAULT.md#b2-transactions).
+- The core lease no longer stops WhatsApp when its store does not
+  answer (a used-up B2 cap, the network, a 5xx): it is *unverified*,
+  shown on the Overview, `/ready` (still ready) and doctor, retried in
+  the background, and the channels stop only when the store shows
+  another device holding the lease. A core that held the lease last also
+  starts while the store cannot be read; one that never held it still
+  refuses. See [docs/CORE.md](docs/CORE.md#the-core-lease).
 - compat: with the vault on, the Drive backup's daily sync stops once the
   vault's weekly `restic copy` to Drive (`<remote>:fridolin-restic`) has
   completed once; until then, and with the vault off, it runs as before.

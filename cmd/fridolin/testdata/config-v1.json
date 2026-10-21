@@ -159,7 +159,8 @@
     "headroom_percent": 15,
     "bucket": "example-vault",
     "snapshots_bucket": "example-snapshots",
-    "endpoint": "s3.example-region.backblazeb2.com"
+    "endpoint": "s3.example-region.backblazeb2.com",
+    "b2_daily_budget": 1500
   },
   "nodes": {
     "enabled": true,

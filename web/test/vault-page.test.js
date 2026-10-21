@@ -55,7 +55,7 @@ const button = (root, label) => root.querySelectorAll('button').find((b) => b.te
 test('a running vault shows every section', async (t) => {
   const { root } = await open(t, (path) => (path.startsWith('/api/vault/status') ? running() : {}));
   const titles = root.querySelectorAll('h2.section-title').map((e) => e.textContent);
-  assert.deepEqual(titles, ['Hot tier', 'Snapshots', 'Litestream', 'Restore drill', 'Evictions']);
+  assert.deepEqual(titles, ['Hot tier', 'Snapshots', 'Litestream', 'B2 transactions', 'Restore drill', 'Evictions']);
   const text = root.textContent;
   assert.ok(text.includes('Running'), 'the state pill');
   assert.ok(text.includes('/data'), 'the hot tier folder');
@@ -72,6 +72,28 @@ test('a running vault shows every section', async (t) => {
   const rows = root.querySelectorAll('.vault-table tbody tr');
   assert.equal(rows.length, 2);
   assert.ok(rows[0].textContent.includes('media/main/rec.m4a') && rows[0].textContent.includes('transcribed-media'), 'newest first');
+});
+
+test('a vault that made no B2 transactions today says so', async (t) => {
+  const { root } = await open(t, (path) => (path.startsWith('/api/vault/status') ? running() : {}));
+  assert.ok(root.textContent.includes('No B2 transactions counted today'), root.textContent);
+});
+
+test('the B2 transactions show against the budget, with its warnings', async (t) => {
+  const busy = () => ({
+    ...running(),
+    b2: {
+      day: '2026-10-20', budget: 2000, classes: { A: 40, B: 1500, C: 300 }, percent: { B: 75, C: 15 },
+      yesterday: { A: 1, B: 600, C: 200 },
+      warnings: ['1500 B2 Class B transactions today (UTC), 75% of the daily budget of 2000'],
+    },
+  });
+  const { root } = await open(t, (path) => (path.startsWith('/api/vault/status') ? busy() : {}));
+  const text = root.textContent;
+  assert.ok(text.includes('75%') && text.includes('1500 of 2000'), text);
+  assert.ok(text.includes('300 of 2000'), 'class C');
+  assert.ok(text.includes('1500 B2 Class B transactions today'), 'the warning');
+  assert.ok(text.includes('class B 600, class C 200'), 'the day before');
 });
 
 test('the meter shows the hot tier against the budget, with the target marked', async (t) => {

@@ -346,7 +346,7 @@ func runCmd(args []string) int {
 			return 1
 		}
 		log.Printf("Core lease: in %s", where)
-		appOpts.LeaseStore = st
+		appOpts.LeaseStore = longLived(st)
 	}
 	bridge, err := app.New(appOpts)
 	if errors.Is(err, app.ErrLeaseHeld) {

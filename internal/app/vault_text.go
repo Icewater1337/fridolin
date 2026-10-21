@@ -128,6 +128,16 @@ func VaultStatusText(data []byte, now time.Time) (string, error) {
 			line("litestream: NOT running, %d restarts; %s", l.Restarts, l.LastError)
 		}
 	}
+	if u := st.B2; u != nil {
+		line("B2 transactions today (%s UTC): class B %d, class C %d of a daily budget of %d each (%d%%, %d%%); class A (free) %d",
+			u.Day, u.Classes["B"], u.Classes["C"], u.Budget, u.Percent["B"], u.Percent["C"], u.Classes["A"])
+		if y := u.Yesterday; y != nil {
+			line("  the day before: class B %d, class C %d", y["B"], y["C"])
+		}
+		for _, w := range u.Warnings {
+			line("  WARNING: %s", w)
+		}
+	}
 	if d := st.LastDrill; d != nil {
 		state := "ok"
 		if !d.OK {

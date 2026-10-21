@@ -64,6 +64,20 @@ func coreStoreFrom(flagValue, bucket string, environ []string) (cloud.ObjectStor
 	return &cloud.Rclone{Binary: path, Remote: vaultRemote + ":" + bucket, Env: append(baseEnv, remote...)}, "b2 bucket " + bucket, nil
 }
 
+// longLived turns an rclone store into one on a long-lived rclone daemon,
+// for the bridge, which keeps the lease for as long as it runs: one rclone
+// process per operation logs in to B2 each time (a capped Class C
+// transaction), the daemon once a day (cloud.RcloneDaemon). A folder
+// stays a folder. The bridge closes the daemon when it stops.
+func longLived(st cloud.ObjectStore) cloud.ObjectStore {
+	r, ok := st.(*cloud.Rclone)
+	if !ok {
+		return st
+	}
+	d := &cloud.RcloneDaemon{Binary: r.Binary, Env: r.Env, Secrets: r.Secrets, Op: "lease"}
+	return d.Store(r.Remote)
+}
+
 // envLookup returns a getenv over environ, a list of NAME=value.
 func envLookup(environ []string) func(string) string {
 	return func(name string) string {
