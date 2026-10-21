@@ -62,7 +62,7 @@ func (b *App) callTerminalRead(ctx context.Context, c mcpCaller, raw json.RawMes
 	b.work.mu.Lock()
 	at := t.ReadAt
 	b.work.mu.Unlock()
-	o, err := b.nodes.TerminalRead(ctx, t.Node, nodeproto.TerminalReadParams{ID: t.ID, Offset: at, WaitMS: wait * 1000})
+	o, err := b.readSettled(ctx, t, at, wait*1000)
 	if err != nil {
 		return mcp.ErrorResult(err.Error()), nil
 	}
@@ -123,4 +123,26 @@ func plainTerminal(data []byte) string {
 		sb.WriteRune(r)
 	}
 	return sb.String()
+}
+
+// readSettled reads a terminal's output from at, waiting up to waitMS
+// for the first of it, then on while more comes within settleMS, so that
+// a command's echo and its output come back together; at most
+// nodeproto.MaxTerminalRead bytes.
+func (b *App) readSettled(ctx context.Context, t *workTerm, at int64, waitMS int) (nodeproto.TerminalOutput, error) {
+	const settleMS = 400
+	o, err := b.nodes.TerminalRead(ctx, t.Node, nodeproto.TerminalReadParams{ID: t.ID, Offset: at, WaitMS: waitMS})
+	if err != nil || len(o.Data) == 0 {
+		return o, err
+	}
+	for !o.Closed && len(o.Data) < nodeproto.MaxTerminalRead {
+		more, err := b.nodes.TerminalRead(ctx, t.Node, nodeproto.TerminalReadParams{ID: t.ID, Offset: o.Next, WaitMS: settleMS})
+		if err != nil || len(more.Data) == 0 {
+			o.Closed, o.ExitCode = more.Closed, more.ExitCode
+			break
+		}
+		o.Data = append(o.Data, more.Data...)
+		o.Next, o.Closed, o.ExitCode = more.Next, more.Closed, more.ExitCode
+	}
+	return o, nil
 }
