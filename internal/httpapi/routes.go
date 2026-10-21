@@ -86,26 +86,27 @@ func New(d Deps) http.Handler {
 }
 
 type APIDeps struct {
-	Status     http.HandlerFunc
-	Activity   http.HandlerFunc
-	Logs       http.HandlerFunc
-	Restart    http.HandlerFunc
-	Site       func(*http.ServeMux)
-	DevMode    bool
-	Connection func() *ConnectionAPI
-	Chats      func() *ChatsAPI
-	Config     func() *ConfigAPI
-	Brains     func() *BrainsAPI
-	Filesystem func() *FilesystemAPI
-	Backup     func() *BackupAPI
-	Vault      func() *VaultAPI
-	Google     func() *GoogleAPI
-	Plaud      func() *PlaudAPI
-	PlaudApp   func() *PlaudAppAPI
-	Auth       func() *DashboardAuth
-	Dev        func() *DevAPI
-	Nodes      func() *NodesAPI
-	Policy     func() *PolicyAPI
+	Status       http.HandlerFunc
+	Activity     http.HandlerFunc
+	Logs         http.HandlerFunc
+	Restart      http.HandlerFunc
+	Site         func(*http.ServeMux)
+	DevMode      bool
+	Connection   func() *ConnectionAPI
+	Chats        func() *ChatsAPI
+	Config       func() *ConfigAPI
+	Brains       func() *BrainsAPI
+	Filesystem   func() *FilesystemAPI
+	Backup       func() *BackupAPI
+	Vault        func() *VaultAPI
+	Google       func() *GoogleAPI
+	Plaud        func() *PlaudAPI
+	PlaudApp     func() *PlaudAppAPI
+	Auth         func() *DashboardAuth
+	Dev          func() *DevAPI
+	Nodes        func() *NodesAPI
+	Policy       func() *PolicyAPI
+	Housekeeping func() *HousekeepingAPI
 }
 
 func NewAPIMux(d APIDeps) http.Handler {
@@ -198,6 +199,7 @@ func NewAPIMux(d APIDeps) http.Handler {
 
 	d.Site(mux)
 	d.Policy().Register(mux)
+	d.Housekeeping().Register(mux)
 
 	// Only in dev mode: outside it they are not there at all (404).
 	if d.DevMode {

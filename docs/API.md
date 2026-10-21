@@ -241,6 +241,8 @@ listed here because they decide what runs may do
 | `POST /api/brains/{id}/skills/approve` | `{"path", "hash"}` approves the declared policy if it is still the one with that hash (`409` otherwise) |
 | `PUT /api/brains/{id}/skills/policy` | `{"path", "risk", "approve", "vault", "triggers"}` writes them into the file and approves them |
 | `POST /api/dev/vote` | dev mode only: `{"poll", "voter", "options"}` votes in a poll the dev chat shows, as a vote from WhatsApp arrives |
+| `GET /api/housekeeping` | the housekeeping job ([CONFIGURATION.md](CONFIGURATION.md#housekeeping)): its settings, `next_run`, `running`, the `last` report with its `findings`, `counts` and `summary`, and the processes `asked` about that wait for the owner; ETag-cached |
+| `POST /api/housekeeping/run` | runs the job now and answers with its report once it is over; `{"dry_run": true}` only reports whatever `housekeeping.dry_run` says; `409` while a run is under way |
 
 ## Limits
 

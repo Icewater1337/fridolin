@@ -67,3 +67,41 @@ func (l *Lock) Release() {
 		l.f = nil
 	}
 }
+
+// ClearStaleLock looks at the lock file path of a bridge that is not
+// running: when nobody holds the lock and the PID it names is not
+// running, it is a stale record (the kernel dropped the lock with the
+// process; only the number is left), and with clear the file is emptied
+// while this process holds the lock. It is never removed: a bridge that
+// starts meanwhile opens the same file, and a new file would let a
+// second one lock beside it. A lock that is held, or names a running
+// process, is not stale. A missing file is not stale either.
+func ClearStaleLock(path string, clear bool) (pid int, stale bool, err error) {
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	defer f.Close()
+	var buf [32]byte
+	n, _ := f.ReadAt(buf[:], 0)
+	pid, _ = strconv.Atoi(strings.TrimSpace(string(buf[:n])))
+	if err := lockFile(f); err != nil {
+		if lockHeld(err) {
+			return pid, false, nil
+		}
+		return pid, false, err
+	}
+	defer unlockFile(f)
+	if pid <= 0 || ProcessAlive(pid) {
+		return pid, false, nil
+	}
+	if clear {
+		if err := f.Truncate(0); err != nil {
+			return pid, true, err
+		}
+	}
+	return pid, true, nil
+}

@@ -467,6 +467,36 @@ var resticCosts = map[string]cloud.Cost{
 	"copy":            {B: 20, C: 10},
 	"snapshots":       {B: 3, C: 6},
 	"restore":         {B: 50, C: 8},
+	// The housekeeping job's look at the locks: a listing, then one
+	// restic run per lock, and unlock, each logging in like "exists".
+	"list-locks": {B: 3, C: 7},
+	"cat-lock":   {B: 3, C: 6},
+	"unlock":     {B: 3, C: 7},
+}
+
+// withRestic runs fn with the snapshot repositories (b2, and drive when
+// Google Drive is connected) while no restic job of the vault runs, which
+// it keeps from starting meanwhile; charge counts a restic run of fn's on
+// B2. It reports false, without running fn, when the vault runs no
+// snapshots, and an error when a restic job runs now.
+func (s *vaultService) withRestic(fn func(repos map[string]*snapshot.Restic, charge func(op string))) (bool, error) {
+	_, run, err := s.vault()
+	if err != nil || run.snaps == nil || run.snaps.restic() == nil {
+		return false, nil
+	}
+	vs := run.snaps
+	if !vs.mu.TryLock() {
+		return false, errors.New("a restic job of the vault runs; its locks are looked at next time")
+	}
+	defer vs.mu.Unlock()
+	repos := map[string]*snapshot.Restic{"b2": vs.restic()}
+	if run.b.drive != nil {
+		if d, err := run.b.drive(); err == nil {
+			repos["drive"] = d
+		}
+	}
+	fn(repos, vs.charge)
+	return true, nil
 }
 
 // charge counts one restic run of op.

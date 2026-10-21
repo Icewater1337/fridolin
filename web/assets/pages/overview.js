@@ -5,7 +5,7 @@ import { get, post, qs } from '../app/api.js';
 import { store } from '../app/store.js';
 import { brainsResource, resource } from '../app/resources.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
-import { fmtDuration, plural, parseTs } from '../lib/format.js';
+import { fmtDuration, fmtBytes, plural, parseTs } from '../lib/format.js';
 import { phone } from '../lib/jid.js';
 import { waKind, waLabel } from '../lib/whatsapp.js';
 import { routingSummary, hasDMBrain, issueLabel, backupOwner } from '../lib/brain.js';
@@ -27,6 +27,7 @@ export default {
     const sandboxCard = h('div.card');
     const coreBox = h('div');
     const backupCard = h('div.card');
+    const housekeepingCard = h('div.card');
     const brainsBox = h('div');
     const brainList = h('div.brain-list');
     const activityBox = h('div.activity-list.compact');
@@ -38,6 +39,7 @@ export default {
       waCard,
       coreBox,
       h('div.grid.three', claudeCard, sandboxCard, backupCard),
+      housekeepingCard,
       h('section.section',
         h('div.section-head', h('h2.section-title', 'Brains'), btn('Manage', { href: '#/brains', small: true, kind: 'ghost', icon: 'right' })),
         brainsBox),
@@ -208,6 +210,63 @@ export default {
           h('a.small', { href: '#/backup' }, b.connected || stranded ? 'Backup settings' : 'Set up backups')),
       ];
     });
+
+    // The housekeeping job: its last report, what it would stop or did,
+    // and a dry run on demand.
+    const hkResource = resource('/api/housekeeping');
+    let hkBusy = false;
+    const findingLine = (f) => h('li.small',
+      h('strong', f.kind), ' ',
+      f.pid ? mono(`PID ${f.pid}`) : (f.target ? mono(f.target) : null), ' ',
+      f.name ? h('span', f.name, ' ') : null,
+      f.members && f.members.length > 1 ? h('span.muted', `+${f.members.length - 1} `) : null,
+      (f.cpu_percent || f.rss) ? h('span.muted', `${Math.round(f.cpu_percent || 0)}% CPU, ${fmtBytes(f.rss || 0)} `) : null,
+      f.age_seconds ? h('span.muted', `up ${fmtDuration(f.age_seconds)} `) : null,
+      f.owner ? h('span.muted', `(${f.owner}) `) : null,
+      h('span', '— ', f.reason),
+      f.outcome ? [' ', badge(f.outcome, f.problem ? 'bad' : (f.outcome === 'stopped' || f.outcome === 'removed' ? 'ok' : 'neutral'))] : null);
+    const renderHousekeeping = (v) => paint(housekeepingCard, { ...(v || {}), busy: hkBusy }, (x) => {
+      const last = x.last;
+      const c = x.counts || {};
+      let p;
+      if (x.busy || x.running) p = pill('Running…', 'info', { pulse: true });
+      else if (last && c.problems) p = pill(plural(c.problems, 'problem'), 'bad');
+      else if (!x.enabled) p = pill('Off', 'neutral');
+      else if (x.dry_run) p = pill('Dry run', 'warn', { title: 'housekeeping.dry_run: it reports, and stops nothing' });
+      else p = pill(`Every ${x.every_hours} h`, 'ok');
+      const findings = last ? last.findings || [] : [];
+      const runNow = btn('Check now', {
+        small: true, kind: 'ghost', icon: 'refresh', disabled: x.busy || x.running,
+        onClick: async () => {
+          hkBusy = true;
+          renderHousekeeping(hkResource.data());
+          try {
+            await post('/api/housekeeping/run', { dry_run: true }, { timeout: 300000 });
+            toast('Housekeeping checked (dry run)', 'info');
+          } finally {
+            hkBusy = false;
+            await hkResource.refresh();
+            renderHousekeeping(hkResource.data());
+          }
+        },
+      });
+      return [
+        h('div.card-head', h('div.card-title', icon('shield'), h('h2', 'Housekeeping')), p),
+        h('div.card-body',
+          last
+            ? h('p', 'Last run ', timeAgo(last.started), ` (${last.trigger}${last.dry_run ? ', dry run' : ''}): `, x.summary || '')
+            : h('p.muted', 'No run yet. It looks for processes the bridge and its runs left behind, and for stale locks.'),
+          last && last.note ? h('p.muted.small', last.note) : null,
+          findings.length ? h('ul.plain-list', findings.slice(0, 8).map(findingLine)) : null,
+          findings.length > 8 ? h('p.muted.small', `and ${findings.length - 8} more: fridolin housekeeping status lists them all`) : null,
+          last && (last.errors || []).length ? last.errors.map((e) => h('p.error-text.small', e)) : null,
+          (x.asked || []).length ? h('p.small', plural(x.asked.length, 'process'), ' waiting for your answer on the ', h('a', { href: '#/approvals' }, 'Approvals'), ' page') : null,
+          x.enabled && x.next_run ? h('p.muted.small', 'Next run ', timeAgo(x.next_run)) : null,
+          x.dry_run ? h('p.muted.small', 'Dry run: set housekeeping.dry_run to false in config.json once the reports look right.') : null,
+          h('div.actions', runNow)),
+      ];
+    });
+    ctx.follow(hkResource, renderHousekeeping, 60000);
 
     // Which brain is the fallback, and whether a brain handles DMs, is in
     // /api/brains rather than the status, and seldom changes.

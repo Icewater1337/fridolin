@@ -192,6 +192,9 @@ type File struct {
 	Vault  VaultConfig  `json:"vault"`
 	Nodes  NodesConfig  `json:"nodes"`
 	Policy PolicyConfig `json:"policy"`
+	// Housekeeping is the job that stops what the bridge left running
+	// (housekeeping.go).
+	Housekeeping HousekeepingConfig `json:"housekeeping"`
 }
 
 // retiredBrainMode is the brain_mode key. A missing key, null and true all

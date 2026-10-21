@@ -156,6 +156,7 @@ func fillFleetDefaults(c *File) {
 	def(&c.Policy.MaxRunsPerHour, DefaultMaxRunsPerHour)
 	def(&c.Policy.MaxPendingIrreversible, DefaultMaxPendingIrreversible)
 	def(&c.Policy.ApprovalTimeoutHours, DefaultApprovalTimeoutHours)
+	fillHousekeepingDefaults(&c.Housekeeping)
 }
 
 var (
@@ -254,5 +255,5 @@ func (c *File) validateFleet() error {
 	if !ValidListenAddr(c.Nodes.Listen) {
 		return fmt.Errorf("nodes.listen %q must be host:port, such as %s for every interface", c.Nodes.Listen, DefaultNodesListen)
 	}
-	return nil
+	return c.Housekeeping.validate()
 }

@@ -536,6 +536,10 @@ func (b *App) decide(ctx context.Context, id, status, answer, by string, late la
 // deliverAnswer hands the brain an answer no call waited for, as a new
 // message in the chat it was asked in.
 func (b *App) deliverAnswer(a store.Approval) {
+	if a.Notify == housekeepingNotify {
+		b.housekeepingDecided(a)
+		return
+	}
 	br := b.brainMgr.Get(a.Notify)
 	if br == nil || a.Chat == "" {
 		log.Printf("approval %s: the answer came once its run was over, and brain %s is not there to hear it", a.ID, a.Notify)

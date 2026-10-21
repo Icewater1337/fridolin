@@ -839,6 +839,19 @@ copy Mac-built virtualenvs or `node_modules` (What does not move).
   the session's last key update or `bridge.db` did not come along. Never
   delete `bridge.db` to fix it; import again or pair again.
 
+## Housekeeping
+
+The housekeeping job ([CONFIGURATION.md](CONFIGURATION.md#housekeeping))
+runs in the core every 48 hours. In the container every process is the
+core's, so besides the bridge's own leftovers (runs that are over, MCP
+servers, `rclone rcd`, Litestream and restic without the bridge as their
+parent) it lists processes over `housekeeping.cpu_percent` or `rss_mb`
+that the bridge did not start, such as a forgotten `docker exec` shell,
+and asks the owner in an approval poll before it stops one. It starts in
+dry run: let it report for a week (`docker exec fridolin-core fridolin
+housekeeping status`, or the Overview page), then set `housekeeping.dry_run` to
+`false`.
+
 ## The M1 gate on real machines
 
 Rehearsed on one Mac with two containers (dev mode, a folder as the

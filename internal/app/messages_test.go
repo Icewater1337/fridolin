@@ -85,6 +85,12 @@ func catalogue() []struct{ name, text string } {
 		{"frideMovingNotice", outboundmsg.FrideMovingNotice(3, "laptop")},
 		{"frideMovedNotice", outboundmsg.FrideMovedNotice(3, "mini", "laptop", "health")},
 		{"frideMoveFailedNotice", outboundmsg.FrideMoveFailedNotice(3, "laptop is offline")},
+		{"housekeepingSummary", outboundmsg.HousekeepingSummary(
+			[]string{"run-orphan PID 4242 (claude) with 2 more, 0% CPU, 312 MB, up 26h0m0s: left running by a run of brain main that is over"},
+			[]string{"zombie PID 4300 (sh): an ended child of the bridge that the bridge has not collected"})},
+		{"housekeepingSummary(problems only)", outboundmsg.HousekeepingSummary(nil, []string{"restic-lock b2 1a2b3c4d: failed: restic unlock: the repository is locked"})},
+		{"housekeepingStopResult", outboundmsg.HousekeepingStopResult("PID 812 (python3)", "")},
+		{"housekeepingStopResult(failed)", outboundmsg.HousekeepingStopResult("PID 812 (python3)", "it is not the process it was any more")},
 	}
 }
 

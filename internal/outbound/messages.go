@@ -334,3 +334,38 @@ func FrideMovedNotice(thread int64, from, to, task string) string {
 func FrideMoveFailedNotice(thread int64, why string) string {
 	return fmt.Sprintf("⚠️ *FrIDE #%d* did not move: %s", thread, why)
 }
+
+// HousekeepingSummary tells the owner what the housekeeping job did
+// (done: what it stopped or removed) and what it found but could not fix
+// (problems), a line each. It is sent only when either has something.
+func HousekeepingSummary(done, problems []string) string {
+	var b strings.Builder
+	b.WriteString("🧹 Housekeeping")
+	if len(done) > 0 {
+		fmt.Fprintf(&b, " stopped or removed %d:", len(done))
+		for _, l := range done {
+			b.WriteString("\n• " + textx.Truncate(l, 200))
+		}
+	} else {
+		b.WriteString(" found what it cannot fix:")
+	}
+	if len(problems) > 0 {
+		if len(done) > 0 {
+			b.WriteString("\n\nIt could not fix:")
+		}
+		for _, l := range problems {
+			b.WriteString("\n• " + textx.Truncate(l, 200))
+		}
+	}
+	b.WriteString("\n\nThe Overview page of the dashboard has the whole report.")
+	return b.String()
+}
+
+// HousekeepingStopResult tells the owner how stopping what they approved
+// went.
+func HousekeepingStopResult(what, failure string) string {
+	if failure != "" {
+		return "⚠️ Housekeeping could not stop " + textx.Truncate(what, 200) + ": " + failure
+	}
+	return "🧹 Housekeeping stopped " + textx.Truncate(what, 200) + "."
+}

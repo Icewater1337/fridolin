@@ -19,8 +19,14 @@ import (
 // into out (raw JSON when out is a *json.RawMessage). timeout bounds the
 // whole call: bringing a large file back from the cold tier takes long.
 func VaultCall(cfg *config.Settings, method, path string, body, out any, timeout time.Duration) error {
+	return DashboardCall(cfg, "fridolin vault", method, path, body, out, timeout)
+}
+
+// DashboardCall sends one request of command (such as fridolin
+// housekeeping) to the running bridge's dashboard API, as VaultCall does.
+func DashboardCall(cfg *config.Settings, command, method, path string, body, out any, timeout time.Duration) error {
 	if !cfg.HTTPEnabled || cfg.Dashboard.Disabled {
-		return errors.New("the bridge serves no dashboard API (http_listen is off or dashboard.disabled), which fridolin vault talks to")
+		return errors.New("the bridge serves no dashboard API (http_listen is off or dashboard.disabled), which " + command + " talks to")
 	}
 	token, err := httpapi.ReadToken(cfg.DataDir)
 	if err != nil {

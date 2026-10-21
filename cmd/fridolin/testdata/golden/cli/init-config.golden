@@ -21,6 +21,7 @@
   "dashboard": {},
   "data_dir": "~/.fridolin",
   "debounce": {},
+  "housekeeping": {},
   "http_listen": "127.0.0.1:8765",
   "ingest": {
     "enabled": false

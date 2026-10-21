@@ -141,6 +141,13 @@
       "required": false,
       "status": "ok",
       "detail": "Google Drive is not connected"
+    },
+    {
+      "id": "housekeeping",
+      "title": "housekeeping ran",
+      "required": false,
+      "status": "ok",
+      "detail": "off (housekeeping.enabled), and never run here"
     }
   ]
 }

@@ -1,0 +1,17 @@
+GET /api/housekeeping
+200 OK
+Content-Type: application/json
+
+{
+  "asked": [],
+  "container": false,
+  "cpu_percent": 80,
+  "dry_run": true,
+  "enabled": true,
+  "every_hours": 48,
+  "last": null,
+  "min_age_minutes": 60,
+  "next_run": "<TIME>",
+  "rss_mb": 2048,
+  "running": false
+}
