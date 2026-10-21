@@ -506,6 +506,15 @@ for compatibility.
 
 ### Fixed
 
+- `fridolin doctor` no longer warns that a connected node was not heard
+  from (`nodes-seen`) or cannot take FrIDE work (`nodes-fride`) while
+  `fridolin nodes` shows it online. The core kept each heartbeat's time
+  only in memory, so `nodes/nodes.json` held the time the node
+  connected; it now writes `last_seen` and the node's resources there at
+  least once a minute and when the node disconnects, and doctor asks the
+  running bridge for its nodes first, reading the file only when the
+  bridge does not answer.
+
 - Privacy: the vault's restic snapshots (nightly and hourly, to B2, and
   the weekly copy to the restic repository on Drive) now follow each
   brain's backup settings, as the Google Drive backup always did. Before,

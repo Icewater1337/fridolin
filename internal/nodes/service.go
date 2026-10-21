@@ -242,6 +242,9 @@ func (s *Service) accept(w http.ResponseWriter, r *http.Request) {
 		}
 		s.mu.Unlock()
 		ss.fail()
+		if err := s.reg.Flush(node.ID); err != nil {
+			s.logf("nodes: recording when %s was last heard from: %v", node.ID, err)
+		}
 	}()
 	// A revocation between the handshake and here closes it now.
 	if cur, err := s.reg.Get(node.ID); err == nil && cur.Device == nodeproto.DeviceRevoked {

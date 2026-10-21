@@ -5,13 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
+	"net/http"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/nodes"
 )
@@ -70,12 +74,14 @@ func checkNodesPortOnTailnet(env *DoctorEnv, listen string) DoctorResult {
 	return DoctorResult{Status: DoctorOK, Detail: "the node port listens on the tailnet at " + net.JoinHostPort(strings.TrimSuffix(st.DNSName, "."), port)}
 }
 
-// doctorNode is a node as doctor reads it from nodes.json.
+// doctorNode is a node as doctor reads it from the running bridge or
+// from nodes.json, which has no online.
 type doctorNode struct {
 	ID       string     `json:"id"`
 	Name     string     `json:"name"`
 	Device   string     `json:"device"`
 	LastSeen *time.Time `json:"last_seen"`
+	Online   bool       `json:"online"`
 	Declared struct {
 		Fride *nodeproto.FrideCap `json:"fride"`
 	} `json:"declared"`
@@ -84,9 +90,57 @@ type doctorNode struct {
 	} `json:"approved"`
 }
 
-// readNodes reads the registry for a check; a result is what to report
+// stale reports whether the core has not heard from n for nodeStaleAfter
+// at now: never while it is connected.
+func (n doctorNode) stale(now time.Time) bool {
+	return !n.Online && (n.LastSeen == nil || now.Sub(*n.LastSeen) > nodeStaleAfter)
+}
+
+// liveNodesTimeout bounds asking the running bridge for its nodes.
+const liveNodesTimeout = 5 * time.Second
+
+// askBridgeNodes is DoctorEnv.LiveNodes on the real system: GET /api/nodes
+// of the bridge on cfg's http_listen, with the dashboard token, as
+// `fridolin nodes` asks it.
+func askBridgeNodes(ctx context.Context, cfg *config.Settings) ([]byte, error) {
+	if !cfg.HTTPEnabled || cfg.HTTPListen == "" {
+		return nil, errors.New("the bridge's HTTP server is off")
+	}
+	token, err := httpapi.ReadToken(cfg.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, liveNodesTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+localAddress(cfg.HTTPListen)+"/api/nodes", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Bridge-Token", token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("the bridge answered %s", resp.Status)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+}
+
+// readNodes reads the nodes for a check: from the running bridge, which
+// knows which are connected now, and else from the registry file, whose
+// last_seen the bridge writes once a minute. A result is what to report
 // when there is nothing to read.
-func readNodes(env *DoctorEnv) ([]doctorNode, *DoctorResult) {
+func readNodes(ctx context.Context, env *DoctorEnv) ([]doctorNode, *DoctorResult) {
+	var live struct {
+		Nodes []doctorNode `json:"nodes"`
+	}
+	if env.LiveNodes != nil {
+		if data, err := env.LiveNodes(ctx, env.Config); err == nil && json.Unmarshal(data, &live) == nil {
+			return live.Nodes, nil
+		}
+	}
 	path := filepath.Join(env.Config.Layout().Nodes(), nodes.RegistryFile)
 	data, err := env.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -101,14 +155,18 @@ func readNodes(env *DoctorEnv) ([]doctorNode, *DoctorResult) {
 	if err := json.Unmarshal(data, &file); err != nil {
 		return nil, &DoctorResult{Status: DoctorWarn, Detail: fmt.Sprintf("%s does not read: %v", path, err), Fix: "fix the JSON by hand, or restore it from a backup"}
 	}
+	for i := range file.Nodes {
+		// Only the bridge knows which are connected.
+		file.Nodes[i].Online = false
+	}
 	return file.Nodes, nil
 }
 
 // checkNodesFride is M6's gate on the core: every node whose FrIDE the
 // owner approved offers it now, which its agent does only while FrIDE
 // answers there, and was heard from lately.
-func checkNodesFride(_ context.Context, env *DoctorEnv) DoctorResult {
-	list, res := readNodes(env)
+func checkNodesFride(ctx context.Context, env *DoctorEnv) DoctorResult {
+	list, res := readNodes(ctx, env)
 	if res != nil {
 		return *res
 	}
@@ -119,7 +177,7 @@ func checkNodesFride(_ context.Context, env *DoctorEnv) DoctorResult {
 			continue
 		}
 		switch {
-		case n.LastSeen == nil || now.Sub(*n.LastSeen) > nodeStaleAfter:
+		case n.stale(now):
 			down = append(down, n.Name+" ("+n.ID+", not heard from)")
 		case n.Declared.Fride == nil:
 			down = append(down, n.Name+" ("+n.ID+", FrIDE does not answer)")
@@ -142,8 +200,8 @@ func checkNodesFride(_ context.Context, env *DoctorEnv) DoctorResult {
 
 // checkNodesSeen warns about approved nodes the core has not heard from
 // for nodeStaleAfter.
-func checkNodesSeen(_ context.Context, env *DoctorEnv) DoctorResult {
-	list, res := readNodes(env)
+func checkNodesSeen(ctx context.Context, env *DoctorEnv) DoctorResult {
+	list, res := readNodes(ctx, env)
 	if res != nil {
 		return *res
 	}
@@ -157,9 +215,10 @@ func checkNodesSeen(_ context.Context, env *DoctorEnv) DoctorResult {
 		}
 		approved++
 		switch {
+		case !n.stale(now):
 		case n.LastSeen == nil:
 			stale = append(stale, n.Name+" ("+n.ID+", never)")
-		case now.Sub(*n.LastSeen) > nodeStaleAfter:
+		default:
 			stale = append(stale, fmt.Sprintf("%s (%s, %v ago)", n.Name, n.ID, now.Sub(*n.LastSeen).Round(time.Minute)))
 		}
 	}
