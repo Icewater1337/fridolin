@@ -317,7 +317,7 @@ another. `fridolin node status` shows it.
 | `exec` | `exec` | runs an allowlisted program with arguments, no shell, with a timeout (default 60 s, at most 3600) and stdout and stderr each cut at `max_output_bytes` (default 1 MiB) |
 | `fs` | `fs.list`, `fs.read`, `fs.write` | lists, reads (up to 16 MiB) and, under a root with `write`, writes files below the granted roots |
 | `host` | `host.info` | host name, OS, architecture, CPUs, memory, disk free and, on Linux, the battery |
-| `notify` | `notify` | a desktop notification: `osascript` on macOS, `notify-send` on Linux; on Windows it is only logged for now |
+| `notify` | `notify` | a desktop notification: `osascript` on macOS, `notify-send` on Linux, a toast on Windows (see below) |
 | `fride` | `fride.*` | FrIDE on the node, while it answers: see [FrIDE](#fride) below |
 | `android-build` (`android_build`) | `android.build`, `android.read`, `android.drop` | builds an Android app with Gradle, while the node has a JDK 17+ and the Android SDK: see [android-build](#android-build) below |
 | `backup` | `fs.roots`, `fs.browse`, `backup.*` | keeps the core's restic repositories in folders the owner picks: see [Backups](#backups) below |
@@ -334,6 +334,19 @@ run anything; allow one only with argument patterns that pin what it runs.
 Without `--allow` or `--no-exec`, a node offers its OS's report-only
 commands: `uname`, `uptime`, `df` (and `sw_vers` on macOS), or `hostname`,
 `whoami`, `systeminfo` on Windows.
+
+**Notifications on Windows.** The node shows a toast (a `ToastGeneric`
+toast through Windows PowerShell 5.1's `ToastNotificationManager`, listed
+under Windows PowerShell in Windows' notification settings). The title
+and text never go into the script as text: they travel as base64 inside
+an `-EncodedCommand` and become XML text nodes. The node service runs as
+LocalSystem in session 0, which has no desktop, so the agent starts
+PowerShell as the signed-in user in their session (the console's session
+first, else the first active one, a Remote Desktop session say). When
+nobody is signed in it only logs the notification and answers
+`{"shown": false, "method": "log", "reason": "nobody is signed in to Windows"}`.
+Focus assist (Do not disturb) and turning off PowerShell's notifications
+in Settings → System → Notifications hide toasts, without an error.
 
 **fs roots.** A path in a call is absolute. It must lie under a granted
 root, as written or as the root's symlinks resolve, and is then opened
@@ -404,7 +417,9 @@ companion mode, and the node agent is its companion: it holds FrIDE's
 token, calls FrIDE's loopback API for the core, and relays FrIDE's thread
 news. FrIDE's own docs/COMPANION.md describes its side.
 
-On the node, after `fridolin node join`:
+On the node, after `fridolin node join` (the full setup, with a FrIDE of
+its own for fridolin, a service and Windows through WSL2, is
+[Setting up FrIDE on a node](#setting-up-fride-on-a-node)):
 
 ```bash
 fride serve --under-fridolin            # FrIDE's API stays on 127.0.0.1
@@ -553,6 +568,331 @@ dashboard shows the FrIDE address each node reports and links it; FrIDE's
 UI is on the node's loopback, so the link works on the node itself until
 the node agent publishes it over the tailnet. `fridolin doctor`'s
 `nodes-fride` warns about nodes whose approved FrIDE does not answer.
+
+## Setting up FrIDE on a node
+
+This is the runbook a coding agent follows on a node machine when the
+owner says "set up FrIDE on this node" (AGENTS.md, path D). The machine
+is a node already (path B: `fridolin node status` says the service runs,
+and the core approved it). The agent does every step itself except the
+ones only the owner can do: creating the Linux user in WSL, signing in
+to Claude Code (and, optionally, GitHub), trusting the workspace folder
+in Claude Code, and approving `fride` on the core. The agent opens each
+of those for the owner, waits, and then checks.
+
+The layout is the same on every OS, and the same as on the Mac mini:
+one companion FrIDE for fridolin, separate from any FrIDE the owner runs
+himself (`~/.fride`, port 7777, fleet mode). That one stays untouched.
+
+| | |
+| --- | --- |
+| `~/fride-companion/src/fride` | FrIDE's source, which it is built from |
+| `~/fride-companion/bin/fride` | the FrIDE binary |
+| `~/fride-companion/home` | its `FRIDE_HOME`: `config.json`, the hash of the companion token, `serve.log` |
+| `~/fride-companion/repos` | its only base folder; it starts with `fridolin` and `fride` |
+| `~/fride-companion/workspaces` | its `workspaceRoot` |
+| `http://127.0.0.1:17840` | its API and UI, on loopback only |
+
+Below, `<fridolin-url>` is the clone URL of this repository
+(`git remote get-url origin` in this checkout) and `<fride-url>` is
+FrIDE's. Take FrIDE's from the owner, or from `git remote get-url origin`
+in a FrIDE checkout they already have.
+
+### Windows: FrIDE runs in WSL2
+
+FrIDE does not build for Windows today: it locks files with
+`unix.Flock` and runs agents in a Unix PTY. The backlog issue "FrIDE:
+native Windows support" lists what is missing. So on Windows FrIDE runs
+in WSL2 (Ubuntu), and the node agent stays the native Windows service it
+already is. They meet on `127.0.0.1`. Windows reaches FrIDE in WSL
+through WSL's localhost forwarding. FrIDE's webhook reaches the agent on
+Windows only with WSL's *mirrored* networking (Windows 11 22H2 or
+newer). Without mirrored networking everything works except the news: a
+`fride_task` starts and `fride_status` reads it, but FrIDE's questions
+and its `done` never reach the chat by themselves.
+
+Every Linux command below runs from the agent's shell as
+`wsl -d Ubuntu --exec bash -lc '…'`. Commands that need root add
+`-u root`: WSL lets the Windows user be root in their own distribution
+without a password, so the owner never types the Linux password for the
+agent. Keep double quotes out of these commands, because Windows
+PowerShell 5.1 passes them to native programs garbled. If the agent's
+shell is Git Bash (Claude Code's shell on Windows), also set
+`MSYS_NO_PATHCONV=1` so that Linux paths in arguments stay as written. Write
+files (the config, the start script) with your own file tools through
+`\\wsl.localhost\Ubuntu` followed by the Linux home folder (which
+`wsl -d Ubuntu --exec bash -lc 'echo $HOME'` prints), with LF line
+endings, rather than through `wsl` and echo.
+
+1. **WSL and Ubuntu.** If WSL and Ubuntu are installed, `wsl -l -v`
+   lists `Ubuntu` with VERSION 2. If not, run this in an elevated
+   PowerShell (UAC prompt):
+   `Start-Process wsl -Verb RunAs -Wait -ArgumentList '--install','-d','Ubuntu'`.
+   If it asks for a restart, tell the owner; they restart and you
+   resume afterwards. On its first start, Ubuntu opens a window that
+   asks for a UNIX user name and password. **The owner** types them
+   there, never in the chat. Wait until `wsl -d Ubuntu --exec whoami`
+   prints the user. If `wsl -l -v` shows version 1, run
+   `wsl --set-default-version 2`; if WSL says it is out of date, run
+   `wsl --update`.
+
+2. **Mirrored networking.** Ask first, because it changes how all of
+   the owner's WSL distributions reach the network. On Windows 11
+   22H2+, add the following to `%UserProfile%\.wslconfig` (create the
+   file if it is missing, and keep what is already there):
+
+   ```ini
+   [wsl2]
+   networkingMode=mirrored
+   ```
+
+   Then run `wsl --shutdown` and start Ubuntu again. On Windows 10,
+   skip this step and tell the owner that FrIDE's news will not reach
+   the chat (see above).
+
+3. **Tools in Ubuntu.** Install the packages, clone FrIDE, install the
+   Go version FrIDE's `go.mod` names from go.dev into `/usr/local/go`
+   (Ubuntu's own Go is too old), and install Claude Code for the user
+   rather than for root:
+
+   ```powershell
+   wsl -d Ubuntu -u root --exec bash -lc 'apt-get update && apt-get install -y git curl ca-certificates build-essential lsof nodejs npm wslu'
+   wsl -d Ubuntu --exec bash -lc 'git clone <fride-url> ~/fride-companion/src/fride'
+   wsl -d Ubuntu -u root --exec bash -lc 'v=$(sed -n s/^go.//p $(getent passwd 1000 | cut -d: -f6)/fride-companion/src/fride/go.mod); a=$(dpkg --print-architecture); rm -rf /usr/local/go; curl -fsSL https://go.dev/dl/go$v.linux-$a.tar.gz | tar -C /usr/local -xz && ln -sf /usr/local/go/bin/go /usr/local/bin/go && go version'
+   wsl -d Ubuntu --exec bash -lc 'npm config set prefix ~/.local && npm i -g @anthropic-ai/claude-code && ~/.local/bin/claude --version'
+   ```
+
+   User 1000 is the one created in step 1. `node --version` must be
+   18 or newer. If Ubuntu's Node is older, install Node from NodeSource
+   or nvm and tell the owner which one you used. Ubuntu's `~/.profile`
+   puts `~/.local/bin` on a login shell's PATH.
+
+4. **Claude Code login.** Run `wsl -d Ubuntu` to open an Ubuntu window
+   for the owner. Ask them to type `claude` there and follow the login.
+   Claude opens the sign-in page in the Windows browser through
+   `wslview` (from wslu). If no browser opens, Claude prints a URL: open
+   it for the owner with `Start-Process URL`. Wait, then check with
+   `wsl -d Ubuntu --exec bash -lc 'claude -p hi'`. Optionally, do the
+   same for GitHub so FrIDE's agents can push branches and open pull
+   requests: install `gh` with `apt-get install -y gh` as root, then the
+   owner runs `gh auth login` in the Ubuntu window.
+
+5. **Build FrIDE**:
+
+   ```powershell
+   wsl -d Ubuntu --exec bash -lc 'mkdir -p ~/fride-companion/bin ~/fride-companion/home ~/fride-companion/repos ~/fride-companion/workspaces && cd ~/fride-companion/src/fride && go build -o ~/fride-companion/bin/fride . && ~/fride-companion/bin/fride version'
+   ```
+
+6. **Starter repositories.** Clone them into the base folder, in the
+   WSL file system. Never put them under `/mnt/c`: Windows drives are
+   slow from WSL and lose Unix permissions.
+
+   ```powershell
+   wsl -d Ubuntu --exec bash -lc 'cd ~/fride-companion/repos && git clone <fridolin-url> && git clone <fride-url>'
+   ```
+
+7. **Config.** Write `config.json` in `~/fride-companion/home` (see "The
+   config" below), then check it:
+
+   ```powershell
+   wsl -d Ubuntu --exec bash -lc 'export FRIDE_HOME=~/fride-companion/home; ~/fride-companion/bin/fride config check && ~/fride-companion/bin/fride doctor'
+   ```
+
+   `config check` must report no errors. `doctor` names anything that
+   is missing. Its check *Claude Code trusts the workspaces* fails
+   until the next step is done.
+
+8. **Trust the workspace folder.** FrIDE's agents start in
+   `~/fride-companion/workspaces`. Claude Code asks once whether it
+   trusts a folder, and an agent stopped at that question does nothing.
+   Ask the owner to run `cd ~/fride-companion/workspaces && claude` in
+   the Ubuntu window, choose **Yes, I trust this folder**, and quit.
+   `fride doctor` then passes that check.
+
+9. **Run it at logon.** WSL stops a distribution a few seconds after
+   the last `wsl.exe` using it ends, even if systemd services are
+   running. A systemd unit alone would therefore not keep FrIDE up. A
+   Scheduled Task covers both needs: at the owner's logon it starts
+   `wsl.exe`, which runs `fride serve` and keeps Ubuntu up while it
+   runs, and it restarts FrIDE when it ends. First write the start
+   script `~/fride-companion/bin/fride-serve`, then make it executable
+   with `wsl -d Ubuntu --exec bash -lc 'chmod +x ~/fride-companion/bin/fride-serve'`:
+
+   ```sh
+   #!/bin/sh
+   export FRIDE_HOME="$HOME/fride-companion/home" SHELL=/bin/bash PATH="$HOME/.local/bin:/usr/local/go/bin:$HOME/go/bin:/usr/local/bin:/usr/bin:/bin"
+   cd "$FRIDE_HOME" || exit 1
+   exec "$HOME/fride-companion/bin/fride" serve --under-fridolin --port 17840 >>"$FRIDE_HOME/serve.log" 2>&1
+   ```
+
+   Then register the task as the owner. No elevation is needed for a
+   task of their own. `conhost.exe --headless` runs `wsl.exe` without a
+   console window:
+
+   ```powershell
+   $h = wsl -d Ubuntu --exec bash -lc 'echo $HOME'
+   $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\conhost.exe" `
+     -Argument "--headless $env:SystemRoot\System32\wsl.exe -d Ubuntu --exec $h/fride-companion/bin/fride-serve"
+   $trigger = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+   $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 `
+     -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+   Register-ScheduledTask -TaskName 'FrIDE companion (WSL)' -Action $action -Trigger $trigger -Settings $settings `
+     -Description 'FrIDE in companion mode for the fridolin node, http://127.0.0.1:17840' -Force
+   Start-ScheduledTask -TaskName 'FrIDE companion (WSL)'
+   ```
+
+   Check that `(Invoke-WebRequest http://127.0.0.1:17840/ -UseBasicParsing).StatusCode`
+   is 200 and that no window stayed open. If a console window does
+   appear (an older Windows without `conhost --headless`), tell the
+   owner it may be minimised but must not be closed. FrIDE runs only
+   while the owner is signed in, so the node offers `fride` only then.
+
+10. **Pair the node with FrIDE**, from the owner's normal PowerShell.
+    `fride` is not on Windows' PATH, so the code comes from WSL and goes
+    straight into `pair` without ever being printed:
+
+    ```powershell
+    $code = (wsl -d Ubuntu --exec bash -lc 'FRIDE_HOME=~/fride-companion/home ~/fride-companion/bin/fride pair-companion --json' | ConvertFrom-Json).code
+    fridolin node fride pair --url http://127.0.0.1:17840 --code $code
+    Remove-Variable code
+    ```
+
+    If the service was installed with a state dir other than the default
+    (`$env:LOCALAPPDATA\fridolin-node`), pass the same `--state-dir`.
+    Do **not** pass `--base`. FrIDE's base folder is a Linux path that
+    the agent on Windows cannot reach, so `fride_repo_add` does not
+    work on a Windows node yet. Add repositories in Ubuntu instead:
+    `git clone` into `~/fride-companion/repos`, then **Re-check** in
+    FrIDE's Settings (or restart the task). FrIDE and `fride_task` see
+    them at once.
+
+Then continue with "Approve and verify" below.
+
+### macOS and Linux: FrIDE natively
+
+This is the same setup as on the Mac mini, next to the owner's own FrIDE.
+
+1. **Tools**: git, Go (the version FrIDE's `go.mod` names or a newer
+   one; an older `go` fetches it), Node 18+ and Claude Code
+   (`npm i -g @anthropic-ai/claude-code`), and lsof. On macOS:
+   `brew install go git node`. On Linux: the packages from WSL's
+   step 3, with `sudo`.
+2. **Claude Code login**: the owner runs `claude` once and signs in;
+   check with `claude -p hi`.
+3. **Build**: run `git clone <fride-url>
+   ~/fride-companion/src/fride` and
+   `mkdir -p ~/fride-companion/{bin,home,repos,workspaces}`, then
+   `go build -o ~/fride-companion/bin/fride .` in the clone.
+4. **Starter repositories**: clone `fridolin` and `fride` into
+   `~/fride-companion/repos`, as in WSL's step 6.
+5. **Config**: write it as below, then run
+   `FRIDE_HOME=~/fride-companion/home ~/fride-companion/bin/fride config check`
+   and `fride doctor` the same way.
+6. **Trust**: the owner runs `claude` in `~/fride-companion/workspaces`
+   and chooses **Yes, I trust this folder**.
+7. **Service.**
+   - macOS: a launchd agent `~/Library/LaunchAgents/ai.fride.companion.plist`
+     that runs `~/fride-companion/bin/fride serve --under-fridolin --port 17840`.
+     It needs `RunAtLoad` and `KeepAlive`; `WorkingDirectory` and
+     `FRIDE_HOME` set to `~/fride-companion/home`; `HOME`, `SHELL`, and a
+     `PATH` that has `go`, `node` and `claude` (launchd's own PATH has
+     none of them); and its log, `serve.log`, in `~/fride-companion/home`.
+     Load it with
+     `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.fride.companion.plist`.
+   - Linux: a systemd user unit
+     `~/.config/systemd/user/fride-companion.service` with the same
+     command, `Environment=FRIDE_HOME=…` and `PATH=…`, and
+     `Restart=always`. Start it with
+     `systemctl --user enable --now fride-companion`. For it to run
+     without a login, run `loginctl enable-linger` (ask first).
+8. **Pair**:
+
+   ```bash
+   fridolin node fride pair --url http://127.0.0.1:17840 \
+     --fride ~/fride-companion/bin/fride --fride-home ~/fride-companion/home \
+     --base ~/fride-companion/repos
+   ```
+
+### The config
+
+`config.json` in `~/fride-companion/home` is the same on every OS. It has one
+profile, for FrIDE's `stack up`, which builds fridolin from the task's
+worktree and runs it in dev mode: no WhatsApp, with a scratch data dir
+and `HOME` under the workspace. FrIDE needs at least one profile; add
+more with the owner later (see FrIDE's SETUP.md).
+
+```json
+{
+  "version": 1,
+  "name": "fridolin companion",
+  "workspaceRoot": "~/fride-companion/workspaces",
+  "baseFolders": ["~/fride-companion/repos"],
+  "coreRepos": ["fridolin"],
+  "maxSlots": 2,
+  "requirements": [
+    { "name": "go", "command": "go version", "why": "fridolin and fride are Go programs" }
+  ],
+  "defaultProfile": "dev",
+  "profiles": {
+    "dev": {
+      "description": "fridolin from the task's worktree in dev mode: no WhatsApp, scratch data dir and HOME under the workspace",
+      "entry": "bridge",
+      "services": {
+        "bridge": {
+          "repo": "fridolin",
+          "run": "mkdir -p {{workspace}}/.dev/bridge/home && printf '{\"data_dir\":\"%s\",\"http_listen\":\"127.0.0.1:%s\",\"allowed_numbers\":[],\"allow_any_dm\":false,\"sandbox\":{\"enabled\":false}}' {{workspace}}/.dev/bridge {{port}} > {{workspace}}/.dev/bridge/config.json && go build -o {{workspace}}/.dev/bin/fridolin ./cmd/fridolin && exec {{workspace}}/.dev/bin/fridolin --no-whatsapp --config {{workspace}}/.dev/bridge/config.json",
+          "port": 18810,
+          "env": {
+            "HOME": "{{workspace}}/.dev/bridge/home",
+            "GOPATH": "{{home}}/go",
+            "GOCACHE": "{{home}}/.cache/fride-go-build",
+            "FRIDOLIN_CONFIG": "{{workspace}}/.dev/bridge/config.json",
+            "BROWSER": "none"
+          },
+          "health": "http://127.0.0.1:{{port}}/health",
+          "startTimeout": 600
+        }
+      }
+    }
+  },
+  "companion": { "enabled": true }
+}
+```
+
+### Approve and verify
+
+1. **Approve on the core.** Within 30 seconds of FrIDE answering and
+   the node being paired, `fride` appears in what the node offers. It
+   then waits for the owner, who approves it with **Approve commands**
+   on the core's Nodes page (open
+   `https://fridolin-core.<tailnet>.ts.net/#/nodes` for them) or with
+   `fridolin nodes approve <id> --commands` on the core. Where the core
+   has a chat command for approving, such as `!approve`, that works too.
+2. **Verify**, one check at a time:
+   - `fride doctor` (in WSL, with `FRIDE_HOME=~/fride-companion/home`)
+     shows no failed check;
+   - `fridolin node fride status` says FrIDE answers, and lists
+     `fridolin` and `fride` among its repositories;
+   - the core lists the node with `fride` (in `fridolin nodes`, on the
+     Nodes page, or with `!fleet` in a direct chat);
+   - a tiny task from the core works. The owner writes to fridolin in
+     a direct chat, for example: "ask FrIDE on <node> to add a line
+     'Set up by FrIDE on <node>' to the fride repository's README on a
+     branch, without pushing". FrIDE #n should come back with
+     `started`, then with `done` and the branch. On Windows without
+     mirrored networking, ask for `fride_status` instead. Then have the
+     core close the task (`fride_close`), so the test leaves no
+     workspace behind.
+
+**Rollback.**
+- Windows: `Unregister-ScheduledTask -TaskName 'FrIDE companion (WSL)'`,
+  then `wsl -d Ubuntu --exec pkill -f fride-companion/bin/fride`.
+- macOS: `launchctl bootout gui/$(id -u)/ai.fride.companion`.
+- Linux: `systemctl --user disable --now fride-companion`.
+
+The node stops offering `fride` within 30 seconds. `fride.token` and
+the `fride` entry in `node.json` can stay. Removing `~/fride-companion`
+deletes the workspaces and any uncommitted work in them, so ask first.
 
 ## Backups
 

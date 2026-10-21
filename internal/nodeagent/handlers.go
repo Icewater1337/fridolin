@@ -402,7 +402,8 @@ func (a *Agent) notify(ctx context.Context, p nodeproto.NotifyParams) (any, *nod
 }
 
 // systemNotify shows a notification the OS's way: osascript on macOS,
-// notify-send on Linux; Windows only logs it for now.
+// notify-send on Linux, a toast through Windows PowerShell on Windows
+// (notify_windows.go).
 func systemNotify(logf func(string, ...any)) func(context.Context, string, string) (nodeproto.NotifyResult, error) {
 	return func(ctx context.Context, title, msg string) (nodeproto.NotifyResult, error) {
 		switch runtime.GOOS {
@@ -416,9 +417,11 @@ func systemNotify(logf func(string, ...any)) func(context.Context, string, strin
 			err := exec.CommandContext(ctx, "notify-send", "--", title, msg).Run()
 			if errors.Is(err, exec.ErrNotFound) {
 				logf("node: notification (notify-send is not installed): %s: %s", title, msg)
-				return nodeproto.NotifyResult{Method: "log"}, nil
+				return nodeproto.NotifyResult{Method: "log", Reason: "notify-send is not installed"}, nil
 			}
 			return nodeproto.NotifyResult{Shown: err == nil, Method: "notify-send"}, err
+		case "windows":
+			return windowsToast(ctx, title, msg, logf)
 		}
 		logf("node: notification: %s: %s", title, msg)
 		return nodeproto.NotifyResult{Method: "log"}, nil

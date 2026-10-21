@@ -29,6 +29,7 @@ Ask, unless the request already says it:
 | "install fridolin", "get it running", "set it up" (no core yet) | [A. Install a new fridolin](#a-install-a-new-fridolin) |
 | "set this machine up as a node of my fridolin core" | [B. Join this machine as a node](#b-join-this-machine-as-a-node) |
 | "move the core to this machine", "test a takeover" | [C. Make this machine the core](#c-make-this-machine-the-core) |
+| "set up FrIDE on this node", "let fridolin code on this machine" | [D. Set up FrIDE on this node](#d-set-up-fride-on-this-node) |
 
 ### How you work on every path
 
@@ -219,6 +220,58 @@ Windows it runs in Docker Desktop with WSL2. In short:
 Brain folders bound in from the Mac's home do not move to another machine
 (docs/CORE.md says what to do for a test). The WhatsApp session moves in
 `bridge.db`: never run the old and the new core at once.
+
+## D. Set up FrIDE on this node
+
+FrIDE is where fridolin's code changes happen (docs/NODES.md, "FrIDE").
+This path gives a node its own companion FrIDE. The full runbook, with
+every command, is docs/NODES.md, "Setting up FrIDE on a node". The
+machine must already be a node (path B). In short:
+
+1. **Where FrIDE runs.** On macOS and Linux it runs natively. On
+   Windows it runs in WSL2 (Ubuntu), because FrIDE does not build for
+   Windows yet (`unix.Flock`, a Unix PTY). To get WSL2, run
+   `wsl --install -d Ubuntu` elevated and restart if asked; the owner
+   then creates the Linux user in the Ubuntu window. On Windows 11, ask
+   to set `networkingMode=mirrored` in `%UserProfile%\.wslconfig` (then
+   `wsl --shutdown`), so FrIDE's news reaches the node agent on
+   `127.0.0.1`. Run Linux commands as
+   `wsl -d Ubuntu --exec bash -lc '…'`, adding `-u root` for apt and Go.
+2. **Tools**: git, the Go version FrIDE's `go.mod` names (from go.dev),
+   Node 18+, and Claude Code (`npm i -g @anthropic-ai/claude-code`).
+   The owner signs in to `claude` in the browser; in WSL the browser
+   opens through `wslview`, otherwise open the printed URL with
+   `Start-Process`.
+3. **Build and lay out**: clone FrIDE's repository (ask the owner for its URL)
+   into `~/fride-companion/src/fride` and build
+   `~/fride-companion/bin/fride`. Clone `fridolin` and `fride` into
+   `~/fride-companion/repos` (in WSL's file system, never `/mnt/c`).
+   Write the config from NODES.md into `~/fride-companion/home`
+   (`FRIDE_HOME`), and run `fride config check` and `fride doctor`.
+   Keep it separate from any FrIDE the owner runs himself.
+4. **Trust**: the owner runs `claude` once in
+   `~/fride-companion/workspaces` and chooses "Yes, I trust this folder".
+5. **Service**: `fride serve --under-fridolin --port 17840`, run by a
+   launchd agent `ai.fride.companion` (macOS), a systemd user unit
+   (Linux), or, on Windows, a Scheduled Task at logon that runs it
+   through `conhost --headless wsl.exe`. A systemd unit inside WSL is
+   not enough on Windows, because WSL stops the distribution once no
+   `wsl.exe` holds it.
+6. **Pair**:
+   - macOS/Linux: `fridolin node fride pair --url http://127.0.0.1:17840
+     --fride ~/fride-companion/bin/fride --fride-home ~/fride-companion/home
+     --base ~/fride-companion/repos`.
+   - Windows: take the code from `fride pair-companion --json` in WSL
+     straight into `--code` without printing it, and leave out `--base`.
+     The agent cannot reach a Linux path, so `fride_repo_add` does not
+     work there yet; clone further repositories in WSL.
+7. **Approve**: the owner clicks **Approve commands** on the core's
+   Nodes page (or runs `fridolin nodes approve ID --commands` on the
+   core, or uses a chat command such as `!approve` where one exists).
+8. **Verify**: `fride doctor` passes; `fridolin node fride status` says
+   FrIDE answers; the core lists the node with `fride`; and a tiny test
+   task from the core comes back `done` with a branch, after which the
+   core closes it.
 
 ## Rules
 
