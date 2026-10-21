@@ -237,6 +237,13 @@ func (s *Service) setUpdate(id string, fn func(u *UpdateStatus, now time.Time)) 
 	}
 }
 
+// Updating reports whether an update runs on node id.
+func (s *Service) Updating(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.updating[id]
+}
+
 // ErrUpdate is an update that cannot start.
 var ErrUpdate = errors.New("cannot update")
 

@@ -204,6 +204,8 @@ func NewAPIMux(d APIDeps) http.Handler {
 	mux.HandleFunc("POST /api/nodes/{id}/revoke", d.Nodes().Revoke)
 	mux.HandleFunc("PUT /api/nodes/{id}/tags", d.Nodes().Tags)
 	mux.HandleFunc("POST /api/nodes/{id}/call", d.Nodes().Call)
+	mux.HandleFunc("POST /api/nodes/{id}/update", d.Nodes().Update)
+	mux.HandleFunc("PUT /api/nodes/{id}/update-policy", d.Nodes().UpdatePolicy)
 
 	d.Site(mux)
 	d.Policy().Register(mux)

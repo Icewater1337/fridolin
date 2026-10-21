@@ -93,10 +93,7 @@ func (a *Agent) updateOffered() bool { return a.Config.Update == nil || *a.Confi
 func (a *Agent) executable() (string, error) {
 	exe := a.Executable
 	if exe == "" {
-		var err error
-		if exe, err = os.Executable(); err != nil {
-			return "", err
-		}
+		return "", errors.New("the agent was not told where its binary is")
 	}
 	if real, err := filepath.EvalSymlinks(exe); err == nil {
 		exe = real
@@ -346,7 +343,7 @@ func (a *Agent) restart() {
 		exe, err := a.executable()
 		if err == nil {
 			a.logf("node: restarting into %s", exe)
-			err = reexec(exe)
+			err = reexec(exe, a.Args, a.Environ)
 		}
 		a.logf("node: restarting in place failed (%v); start it again yourself", err)
 		os.Exit(ExitRestart)

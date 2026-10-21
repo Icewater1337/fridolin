@@ -28,7 +28,9 @@ import (
 
 // fakeBinary is what a test's "fridolin" of version v holds: the update
 // tests never run it, CheckBinary reads it.
-func fakeBinary(v string) []byte { return []byte("#!fake fridolin\nversion " + v + "\n" + strings.Repeat("x", 1000)) }
+func fakeBinary(v string) []byte {
+	return []byte("#!fake fridolin\nversion " + v + "\n" + strings.Repeat("x", 1000))
+}
 
 // checkFake is CheckBinary for fake binaries.
 func checkFake(_ context.Context, path, version string) error {

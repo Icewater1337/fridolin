@@ -138,6 +138,7 @@ var DoctorRegistry = []DoctorCheck{
 	toolCheck("age", "M1", []string{"--version"}, "age", "age"),
 	{ID: "nodes-port", Title: "node port", Required: true, Applies: nodesOn, Run: checkNodesPort},
 	{ID: "nodes-seen", Title: "approved nodes heard from", Applies: nodesOn, Run: checkNodesSeen},
+	{ID: "nodes-version", Title: "nodes run the core's version", Applies: nodesOn, Run: checkNodesVersion},
 	{ID: "memory-index", Title: "memory index and its provenance gate", Required: true, Applies: memoryEnabled, Run: checkMemoryIndex},
 	{ID: "approvals", Title: "approvals waiting", Run: checkPendingApprovals},
 	{ID: "lockdown", Title: "lockdown", Run: checkLockdown},

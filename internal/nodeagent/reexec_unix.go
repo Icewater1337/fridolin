@@ -2,13 +2,10 @@
 
 package nodeagent
 
-import (
-	"os"
-	"syscall"
-)
+import "syscall"
 
 // reexec replaces this process with exe and the same arguments: an agent
 // run from a terminal restarts in place after an update.
-func reexec(exe string) error {
-	return syscall.Exec(exe, append([]string{exe}, os.Args[1:]...), os.Environ())
+func reexec(exe string, args, env []string) error {
+	return syscall.Exec(exe, append([]string{exe}, args...), env)
 }

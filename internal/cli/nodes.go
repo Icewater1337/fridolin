@@ -31,6 +31,12 @@ Usage:
   fridolin nodes tags ID [TAG,...]         replace its tags ("" clears them)
   fridolin nodes call ID METHOD [JSON]     call a capability: exec, fs.list, fs.read,
                                            fs.write, host.info, notify
+  fridolin nodes update ID|--all [--force] [--no-wait]
+                                           update a node's fridolin to the core's version
+                                           (--all: every node that runs an older one);
+                                           waits until it runs it or went back
+  fridolin nodes auto-update ID on|off     update it by itself whenever it runs an
+                                           older version than the core
 
 Each asks the running bridge, with the dashboard token. Flags:
   --config PATH     config file (default: $FRIDOLIN_CONFIG, else
@@ -52,6 +58,9 @@ func nodesCmd(args []string, stdout, stderr io.Writer) int {
 	cfgPath := fs.String("config", "", configFlagHelp)
 	asJSON := fs.Bool("json", false, "print JSON")
 	commands := fs.Bool("commands", false, "approve what the node offers (the second stage)")
+	all := fs.Bool("all", false, "update every node that runs an older version")
+	force := fs.Bool("force", false, "update a busy node, or one newer than the core")
+	noWait := fs.Bool("no-wait", false, "start the update and return")
 	fs.Usage = func() { fmt.Fprint(stderr, nodesUsage) }
 	pos, err := parseInterspersed(fs, args)
 	if errors.Is(err, flag.ErrHelp) {
@@ -60,7 +69,7 @@ func nodesCmd(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 2
 	}
-	want := map[string][2]int{"list": {0, 0}, "join-code": {0, 0}, "approve": {1, 1}, "revoke": {1, 1}, "tags": {1, 2}, "call": {2, 3}}
+	want := map[string][2]int{"list": {0, 0}, "join-code": {0, 0}, "approve": {1, 1}, "revoke": {1, 1}, "tags": {1, 2}, "call": {2, 3}, "update": {0, 1}, "auto-update": {2, 2}}
 	n, ok := want[sub]
 	if !ok {
 		fmt.Fprintf(stderr, "unknown nodes command %q\n\n%s", sub, nodesUsage)
@@ -72,6 +81,18 @@ func nodesCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	if *commands && sub != "approve" {
 		fmt.Fprintln(stderr, "--commands goes with approve")
+		return 2
+	}
+	if (*all || *force || *noWait) && sub != "update" {
+		fmt.Fprintln(stderr, "--all, --force and --no-wait go with update")
+		return 2
+	}
+	if sub == "update" && *all == (len(pos) == 1) {
+		fmt.Fprintln(stderr, "fridolin nodes update takes a node's id, or --all")
+		return 2
+	}
+	if sub == "auto-update" && pos[1] != "on" && pos[1] != "off" {
+		fmt.Fprintln(stderr, "fridolin nodes auto-update takes on or off")
 		return 2
 	}
 	cfg, err := app.LoadExistingConfig(configPath(*cfgPath))
@@ -162,6 +183,96 @@ func nodesCmd(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		printJSON(resp.Result)
+	case "auto-update":
+		var resp httpapi.NodeResponse
+		if !call(http.MethodPut, "/api/nodes/"+url.PathEscape(pos[0])+"/update-policy", map[string]any{"auto": pos[1] == "on"}, &resp) {
+			return 1
+		}
+		fmt.Fprintf(stdout, "Auto updates of %s (%s): %s\n", resp.Node.Name, resp.Node.ID, pos[1])
+	case "update":
+		return nodesUpdate(pos, *all, *force, *noWait, call, stdout, stderr)
+	}
+	return 0
+}
+
+// nodeUpdatePoll and nodeUpdateWait pace `fridolin nodes update`'s wait.
+var (
+	nodeUpdatePoll = 2 * time.Second
+	nodeUpdateWait = 12 * time.Minute
+)
+
+// nodesUpdate starts the updates and, unless noWait, waits for each to
+// end, printing how it went.
+func nodesUpdate(pos []string, all, force, noWait bool, call func(method, path string, body, out any) bool, stdout, stderr io.Writer) int {
+	var ids []string
+	if all {
+		var resp httpapi.NodesResponse
+		if !call(http.MethodGet, "/api/nodes", nil, &resp) {
+			return 1
+		}
+		for _, n := range resp.Nodes {
+			switch {
+			case n.UpdateTo != "" && n.Online:
+				ids = append(ids, n.ID)
+			case n.UpdateNote != "":
+				fmt.Fprintf(stdout, "%s (%s, %s): %s\n", n.Name, n.ID, n.Version, n.UpdateNote)
+			case n.UpdateTo != "":
+				fmt.Fprintf(stdout, "%s (%s, %s): offline; it is updated once it connects, with auto-update on\n", n.Name, n.ID, n.Version)
+			}
+		}
+		if len(ids) == 0 {
+			fmt.Fprintf(stdout, "No connected node to update to %s.\n", resp.Version)
+			return 0
+		}
+	} else {
+		ids = pos[:1]
+	}
+	started := map[string]string{}
+	failed := false
+	for _, id := range ids {
+		var resp httpapi.NodeUpdateResponse
+		if !call(http.MethodPost, "/api/nodes/"+url.PathEscape(id)+"/update", map[string]any{"force": force}, &resp) {
+			failed = true
+			continue
+		}
+		started[id] = resp.To
+		fmt.Fprintf(stdout, "Updating %s to %s…\n", id, resp.To)
+	}
+	if noWait || len(started) == 0 {
+		if failed {
+			return 1
+		}
+		return 0
+	}
+	deadline := time.Now().Add(nodeUpdateWait)
+	for len(started) > 0 && time.Now().Before(deadline) {
+		time.Sleep(nodeUpdatePoll)
+		var resp httpapi.NodesResponse
+		if !call(http.MethodGet, "/api/nodes", nil, &resp) {
+			return 1
+		}
+		for _, n := range resp.Nodes {
+			to, ok := started[n.ID]
+			if !ok || n.Update == nil || n.Update.To != to {
+				continue
+			}
+			switch n.Update.State {
+			case "ok": // nodes.UpdateOK
+				fmt.Fprintf(stdout, "%s (%s) runs %s now.\n", n.Name, n.ID, to)
+				delete(started, n.ID)
+			case "failed": // nodes.UpdateFailed
+				fmt.Fprintf(stderr, "%s (%s): the update to %s failed: %s\n", n.Name, n.ID, to, n.Update.Error)
+				delete(started, n.ID)
+				failed = true
+			}
+		}
+	}
+	for id := range started {
+		fmt.Fprintf(stderr, "%s: still updating after %v; fridolin nodes shows how it ends\n", id, nodeUpdateWait)
+		failed = true
+	}
+	if failed {
+		return 1
 	}
 	return 0
 }

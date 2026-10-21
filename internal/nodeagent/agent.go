@@ -49,9 +49,11 @@ type Agent struct {
 	// AndroidToolchain finds the JDK and the Android SDK android-build
 	// needs; nil looks where platform.FindAndroidToolchain does.
 	AndroidToolchain func() (platform.AndroidToolchain, error)
-	// Executable is the binary an update from the core replaces; "" for
-	// the running one (update.go).
-	Executable string
+	// Executable is the running binary, which an update from the core
+	// replaces (update.go); Args (without the program) and Environ are
+	// what it restarts with from a terminal. Updates fail without it.
+	Executable    string
+	Args, Environ []string
 	// Restart starts the agent again after an update or a rollback; nil
 	// restarts it the way it runs: in place from a terminal, by exiting
 	// with ExitRestart under a service manager. Tests hand in their own.

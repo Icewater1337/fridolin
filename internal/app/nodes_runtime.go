@@ -14,6 +14,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/nodes"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+	"github.com/Icewater1337/fridolin/internal/version"
 )
 
 // newNodes opens the node registry in the data dir's nodes folder. The
@@ -22,7 +23,12 @@ import (
 // the port is closed.
 // A machine that joins is announced to the owner (nodeJoined).
 func newNodes(b *App) (*nodes.Service, error) {
-	return nodes.New(nodes.Options{Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: b.fride.onEvent, OnDeclare: b.fride.onDeclare, OnJoin: b.nodeJoined})
+	return nodes.New(nodes.Options{
+		Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: b.fride.onEvent, OnDeclare: b.fride.onDeclare, OnJoin: b.nodeJoined,
+		// Updates: the core's own version, its builds for the nodes, and
+		// what keeps a node from being updated now (nodes_update.go).
+		Version: version.String(), BinariesDir: nodeBinariesDir(b.exe), Busy: b.nodeBusy, Hold: b.nodeHold,
+	})
 }
 
 // startNodes opens the node port when nodes.enabled was on at startup
@@ -88,6 +94,7 @@ func (b *App) joinCore() string {
 func (b *App) newNodesAPI() *httpapi.NodesAPI {
 	return &httpapi.NodesAPI{
 		Nodes:       func() httpapi.NodesService { return lockdownNodes{Service: b.nodes, locked: b.locked} },
+		Version:     b.nodes.Version(),
 		Enabled:     b.nodesEnabled,
 		Listen:      b.nodes.Addr,
 		CoreAddress: b.joinCore,

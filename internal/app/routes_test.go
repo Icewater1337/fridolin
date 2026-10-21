@@ -206,6 +206,8 @@ var routeInventory = []httpRoute{
 	{"POST", "/api/nodes/{id}/revoke", classAPI, "/api/nodes/n1/revoke"},
 	{"PUT", "/api/nodes/{id}/tags", classAPI, "/api/nodes/n1/tags"},
 	{"POST", "/api/nodes/{id}/call", classAPI, "/api/nodes/n1/call"},
+	{"POST", "/api/nodes/{id}/update", classAPI, "/api/nodes/n1/update"},
+	{"PUT", "/api/nodes/{id}/update-policy", classAPI, "/api/nodes/n1/update-policy"},
 	{"GET", "/api/policy", classAPI, ""},
 	{"POST", "/api/policy/lockdown", classAPI, ""},
 	{"GET", "/api/threads", classAPI, ""},
