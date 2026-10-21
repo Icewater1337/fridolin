@@ -115,6 +115,7 @@ var DoctorRegistry = []DoctorCheck{
 	{ID: "claude", Title: "Claude CLI", Required: true, Applies: claudeMode, Run: checkClaudeCLI},
 	{ID: "claude-login", Title: "Claude login for sandboxed brains", Required: true, Applies: claudeMode, Run: checkClaudeLogin},
 	{ID: "codex", Title: "Codex CLI", Required: true, Applies: codexMode, Run: checkCodexCLI},
+	{ID: "agent-path", Title: "agent CLI by absolute path", Required: true, Run: checkAgentPath},
 	{ID: "tailscale", Title: "Tailscale", Needed: "M1", Applies: onHost, Run: checkTailscale},
 	{ID: "tailscale-authkey", Title: "Tailscale auth key in host secrets", Needed: "M1", Applies: onHost, Run: checkSecrets(tailscaleAuthKeySecret)},
 	{ID: "b2-keys", Title: "Backblaze B2 keys in host secrets", Needed: "M3", Applies: onHost, Run: checkSecrets(b2Secrets...)},
@@ -539,6 +540,32 @@ func checkCodexCLI(ctx context.Context, env *DoctorEnv) DoctorResult {
 		return DoctorResult{Status: DoctorWarn, Detail: fmt.Sprintf("%s (%s), older than %s", resolved, version, minCodexVersion), Fix: "npm install -g @openai/codex"}
 	}
 	return DoctorResult{Status: DoctorOK, Detail: fmt.Sprintf("%s (%s)", resolved, version)}
+}
+
+// checkAgentPath checks that the AI mode's CLI setting resolves, on PATH,
+// to the absolute path of an executable, which is what a run starts
+// (resolveAgentBinary) and what the sandboxes need: bubblewrap refuses a
+// bare name. exec.LookPath finds executables only.
+func checkAgentPath(_ context.Context, env *DoctorEnv) DoctorResult {
+	key, path := "claude_path", "claude"
+	if env.Config != nil {
+		path = env.Config.ClaudePath
+		if codexMode(env) {
+			key, path = "codex_path", env.Config.CodexPath
+		}
+	}
+	fix := "set " + key + " in " + env.ConfigPath + " to the CLI's absolute path"
+	resolved, err := env.LookPath(path)
+	if err != nil {
+		return DoctorResult{Status: DoctorFail, Detail: fmt.Sprintf("%s %q is no executable on PATH, so every run is refused", key, path), Fix: fix}
+	}
+	if !filepath.IsAbs(resolved) {
+		return DoctorResult{Status: DoctorFail, Detail: fmt.Sprintf("%s %q resolves to %s, not an absolute path, which the sandbox refuses", key, path, resolved), Fix: fix}
+	}
+	if resolved == path {
+		return DoctorResult{Status: DoctorOK, Detail: fmt.Sprintf("%s %s", key, resolved)}
+	}
+	return DoctorResult{Status: DoctorOK, Detail: fmt.Sprintf("%s %q runs as %s", key, path, resolved)}
 }
 
 func versionLess(a, b [3]int) bool {

@@ -448,6 +448,16 @@ for compatibility.
 
 ### Fixed
 
+- A brain run with `claude_path` or `codex_path` left at its bare name
+  (`"claude"`, `"codex"`, the default) is no longer refused in the
+  container with `bwrap policy ...: "codex" is not an absolute path`:
+  the bridge looks the CLI up on its own PATH and starts it by its
+  absolute path, in both sandboxes and without one, and a CLI it cannot
+  find fails the run with a message that says which setting to change.
+  The startup log names that absolute path, and `fridolin doctor` checks
+  it. `core migrate --from-native` now sets the Mac's `claude_path` and
+  `codex_path` to the image's `/usr/local/bin/claude` and
+  `/usr/local/bin/codex` instead of removing them.
 - A reply that went out just as the bridge began to stop is no longer
   sent again after the next start, nor left out of the brain's history:
   the outbox now records what went out before the stop closes

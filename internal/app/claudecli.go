@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"os/exec"
 	"time"
 
@@ -29,7 +30,31 @@ func cliInfo(path string, passthrough []string, scope childScope) claudecli.Stat
 	if err != nil {
 		return claudecli.Status{Path: path}
 	}
-	return cliVersions.Info(path, resolved, childEnv(scope, passthrough))
+	// Absolute, as runs start it (resolveAgentBinary): a PATH entry may be
+	// relative.
+	return cliVersions.Info(path, AbsPath(resolved), childEnv(scope, passthrough))
+}
+
+// resolveAgentBinary is the absolute path of the agent CLI a run starts,
+// found from the configured path on the bridge's own PATH (not the
+// brain's, which a brain may change). The sandboxes need it absolute:
+// bubblewrap binds and runs the program by its path, and sandbox-exec's
+// profile allows it by path. A config that names the CLI bare ("claude",
+// "codex") is the default, and what a native install moved into the
+// container keeps once its Mac-only paths are dropped.
+func resolveAgentBinary(provider, path string) (string, error) {
+	name, setting := "claude", "claude_path"
+	if provider == "codex" {
+		name, setting = "codex", "codex_path"
+	}
+	if path == "" {
+		path = name
+	}
+	found, err := exec.LookPath(path)
+	if err != nil {
+		return "", fmt.Errorf("the %s CLI %q was not found on the bridge's PATH; install it or set %s to its absolute path: %w", name, path, setting, err)
+	}
+	return AbsPath(found), nil
 }
 
 // runWaitDelay is how long Wait waits, once the CLI has exited, for the
