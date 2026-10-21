@@ -313,6 +313,10 @@ func (s *Service) prepareUpdate(id string, o UpdateOptions) (*Node, Binary, stri
 		return nil, Binary{}, "", fmt.Errorf("%w %s: the core's update key: %v", ErrUpdate, n.Name, err)
 	}
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return nil, Binary{}, "", fmt.Errorf("%w %s: the core is stopping", ErrUpdate, n.Name)
+	}
 	if s.updating[id] {
 		s.mu.Unlock()
 		return nil, Binary{}, "", fmt.Errorf("%w %s: an update is under way", ErrUpdate, n.Name)

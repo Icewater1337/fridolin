@@ -430,6 +430,9 @@ func (a *Agent) updateApply(ctx context.Context, p nodeproto.UpdateApplyParams) 
 	if p.Version == a.Version {
 		return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "this node runs %s already", p.Version)
 	}
+	if m, err := a.readMarker(); err == nil && m != nil && m.Phase == phaseTrial {
+		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "the update to %s is still on trial; try again once it connected", m.To)
+	}
 	a.upd.mu.Lock()
 	if a.upd.applying {
 		a.upd.mu.Unlock()
@@ -445,9 +448,6 @@ func (a *Agent) updateApply(ctx context.Context, p nodeproto.UpdateApplyParams) 
 			a.upd.mu.Unlock()
 		}
 	}()
-	if m, err := a.readMarker(); err == nil && m != nil && m.Phase == phaseTrial {
-		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "the update to %s is still on trial; try again once it connected", m.To)
-	}
 	// Not in the middle of an Android build: the restart would cut it off.
 	if !a.android.building.TryLock() {
 		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "this node is building an app; update it when the build is done")
