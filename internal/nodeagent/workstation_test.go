@@ -223,8 +223,9 @@ func TestWorkstationGrowthWaitsForApproval(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The owner adds a folder: the new one waits, the old one serves.
-	a.Config.Capabilities.Terminal = &nodeproto.WorkstationCap{Roots: []string{root, more}}
-	n, err := c.svc.Registry().Declare(a.ID(), a.declared())
+	decl := a.declared()
+	decl.Terminal = &nodeproto.WorkstationCap{Roots: []string{root, more}, Sandbox: nodeproto.SandboxNone}
+	n, err := c.svc.Registry().Declare(a.ID(), decl)
 	if err != nil {
 		t.Fatal(err)
 	}
