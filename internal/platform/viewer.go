@@ -2,11 +2,13 @@ package platform
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os/exec"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -133,3 +135,56 @@ func (tv *Viewer) osascript() string {
 }
 
 func viewerShellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// ViewerSession is one tmux session of the viewer's tmux server.
+type ViewerSession struct {
+	Name     string
+	Attached int // clients attached: someone watches
+	Created  time.Time
+}
+
+// Sessions lists the sessions of the tmux server the viewer's calls
+// reach (TmuxPath, Env). No server running is no session.
+func (tv *Viewer) Sessions() ([]ViewerSession, error) {
+	if tv.TmuxPath == "" || runtime.GOOS == "windows" {
+		return nil, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), tv.timeout())
+	defer cancel()
+	cmd := exec.CommandContext(ctx, tv.TmuxPath, "list-sessions", "-F", "#{session_name}\t#{session_attached}\t#{session_created}")
+	cmd.Env = tv.Env
+	env := slices.DeleteFunc(cmd.Environ(), func(kv string) bool { return strings.HasPrefix(kv, "PATH=") })
+	cmd.Env = append(env, "PATH="+SystemPATH)
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	if err != nil {
+		// tmux says "no server running" (or that its socket is missing)
+		// and exits 1 when there is no session at all.
+		if _, ok := errors.AsType[*exec.ExitError](err); ok {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var list []ViewerSession
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		f := strings.Split(line, "\t")
+		if len(f) != 3 {
+			continue
+		}
+		s := ViewerSession{Name: f[0]}
+		s.Attached, _ = strconv.Atoi(f[1])
+		if sec, err := strconv.ParseInt(f[2], 10, 64); err == nil {
+			s.Created = time.Unix(sec, 0)
+		}
+		list = append(list, s)
+	}
+	return list, nil
+}
+
+// KillSession ends the session called exactly name.
+func (tv *Viewer) KillSession(name string) error {
+	if tv.TmuxPath == "" {
+		return errors.New("no tmux")
+	}
+	return tv.run(tv.TmuxPath, "kill-session", "-t", "="+name)
+}

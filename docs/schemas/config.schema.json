@@ -237,6 +237,19 @@
         "approval_timeout_hours": {"type": "integer", "minimum": 0, "maximum": 720, "description": "Default 24."}
       }
     },
+    "housekeeping": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The job that finds what the bridge and its children left running and stops what is the bridge's own.",
+      "properties": {
+        "enabled": {"type": "boolean", "description": "Run on the schedule. Default true."},
+        "every_hours": {"type": "integer", "minimum": 0, "maximum": 8760, "description": "How often it runs. Default 48."},
+        "dry_run": {"type": "boolean", "description": "Only report what it would stop or remove. Default true."},
+        "cpu_percent": {"type": "integer", "minimum": 0, "maximum": 102400, "description": "CPU, in percent of one core, that makes a process heavy. Default 80."},
+        "rss_mb": {"type": "integer", "minimum": 0, "maximum": 16777216, "description": "Resident memory in MB that makes a process heavy. Default 2048."},
+        "min_age_minutes": {"type": "integer", "minimum": 0, "maximum": 10080, "description": "Processes younger than this are left alone. Default 60."}
+      }
+    },
     "model": {"type": "string", "deprecated": true, "description": "Retired in version 2: version 1's model, which becomes brain_model while that is empty."},
     "work_dir": {"type": "string", "deprecated": true, "description": "Retired in version 2: the folder classic mode ran in."},
     "brains": {"type": ["array", "null"], "maxItems": 0, "deprecated": true, "description": "Retired in version 2: inline brains, refused unless the list is empty."}

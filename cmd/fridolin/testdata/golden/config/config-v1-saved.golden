@@ -169,5 +169,13 @@
     "max_runs_per_hour": 30,
     "max_pending_irreversible": 2,
     "approval_timeout_hours": 12
+  },
+  "housekeeping": {
+    "enabled": true,
+    "every_hours": 24,
+    "dry_run": false,
+    "cpu_percent": 90,
+    "rss_mb": 4096,
+    "min_age_minutes": 30
   }
 }

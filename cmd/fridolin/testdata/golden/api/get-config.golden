@@ -31,6 +31,7 @@ Content-Type: application/json
     "debounce": {
       "quiet_ms": 0
     },
+    "housekeeping": {},
     "http_listen": "",
     "ingest": {
       "enabled": true
@@ -104,6 +105,14 @@ Content-Type: application/json
     "debounce": {
       "max_wait_ms": 10000,
       "quiet_ms": 0
+    },
+    "housekeeping": {
+      "cpu_percent": 80,
+      "dry_run": true,
+      "enabled": true,
+      "every_hours": 48,
+      "min_age_minutes": 60,
+      "rss_mb": 2048
     },
     "http_listen": "127.0.0.1:8765",
     "ingest": {

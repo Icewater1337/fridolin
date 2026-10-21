@@ -85,6 +85,14 @@
       "15559876543"
     ]
   },
+  "housekeeping": {
+    "cpu_percent": 90,
+    "dry_run": false,
+    "enabled": true,
+    "every_hours": 24,
+    "min_age_minutes": 30,
+    "rss_mb": 4096
+  },
   "http_listen": "127.0.0.1:8765",
   "ingest": {
     "enabled": true

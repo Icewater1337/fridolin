@@ -108,6 +108,12 @@ var fields = []fieldSpec{
 	{Field: Field{Name: "policy.max_runs_per_hour"}},
 	{Field: Field{Name: "policy.max_pending_irreversible"}},
 	{Field: Field{Name: "policy.approval_timeout_hours"}},
+	{Field: Field{Name: "housekeeping.enabled"}},
+	{Field: Field{Name: "housekeeping.every_hours"}},
+	{Field: Field{Name: "housekeeping.dry_run"}},
+	{Field: Field{Name: "housekeeping.cpu_percent"}},
+	{Field: Field{Name: "housekeeping.rss_mb"}},
+	{Field: Field{Name: "housekeeping.min_age_minutes"}},
 }
 
 // Fields returns an owned copy of the complete configuration field inventory.

@@ -207,6 +207,8 @@ var routeInventory = []httpRoute{
 	{"GET", "/api/brains/{id}/skills", classAPI, "/api/brains/main/skills"},
 	{"POST", "/api/brains/{id}/skills/approve", classAPI, "/api/brains/main/skills/approve"},
 	{"PUT", "/api/brains/{id}/skills/policy", classAPI, "/api/brains/main/skills/policy"},
+	{"GET", "/api/housekeeping", classAPI, ""},
+	{"POST", "/api/housekeeping/run", classAPI, ""},
 	{"POST", "/api/dev/inbound", classAPI, ""},
 	{"GET", "/api/dev/outbox", classAPI, ""},
 	{"POST", "/api/dev/vote", classAPI, ""},

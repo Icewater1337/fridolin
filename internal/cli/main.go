@@ -72,6 +72,9 @@ Usage:
   fridolin vault status|sync|evict|get PATH|rebuild|restore-drill
                                            the tiered store and its snapshots;
                                            fridolin vault --help for more
+  fridolin housekeeping run [--dry-run] | status
+                                           find and stop what the bridge left
+                                           running; fridolin housekeeping --help
   fridolin version
 
 Run by brains, inside a run (each prints JSON; -h shows its flags):
@@ -138,6 +141,8 @@ func Main() {
 		os.Exit(nodeCmd(args, os.Stdout, os.Stderr))
 	case "vault":
 		os.Exit(vaultCmd(args, os.Stdout, os.Stderr))
+	case "housekeeping":
+		os.Exit(housekeepingCmd(args, os.Stdout, os.Stderr))
 	case "history":
 		os.Exit(toolcli.History(args, processToolIO()))
 	case "polls":

@@ -1576,6 +1576,46 @@ A negative number stops the bridge, as does one above the maximum
 [the schema](schemas/config.schema.json) gives it (a day of seconds for the
 lease, 90 for `headroom_percent`, 30 days for `approval_timeout_hours`).
 
+### `housekeeping`
+
+A job that keeps the machine the bridge runs on clean: every
+`every_hours` it looks for what the bridge and its children left
+running — processes of brain runs that are over, run MCP servers
+(`fridolin mcp --run`) whose run is over, the vault's `rclone rcd`,
+Litestream and restic without a bridge as their parent, activity viewer
+tmux sessions nobody watches, zombies — and for stale locks: restic locks
+of a process of this host that is gone (removed with `restic unlock`,
+which leaves the locks of runs still going), `bridge.lock` naming a dead
+process, and run records whose process group is gone.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` | run on the schedule; `fridolin housekeeping run` and the dashboard run it either way |
+| `every_hours` | `48` | how often it runs |
+| `dry_run` | `true` | only report what it would stop or remove; set it to `false` once its reports look right |
+| `cpu_percent` | `80` | CPU, in percent of one core, that makes a process heavy |
+| `rss_mb` | `2048` | resident memory in MB that makes a process heavy |
+| `min_age_minutes` | `60` | processes younger than this are left alone: a run that just ended may still be winding down |
+
+It stops only what it can tell is the bridge's own: a run's processes
+carry `FRIDOLIN_BRAIN_TOKEN_FILE`, naming a file in the data dir's
+`run-tokens/` that exists exactly while the run lasts; the vault's
+children run with the data dir's own paths. Each stop is SIGTERM, then
+SIGKILL after five seconds, for the process and what it started, after
+checking that each PID is still the process it saw. On a native install
+and on a node, other processes are never touched and not even listed. In
+the core's container, where everything is the core's, a process that is
+not the bridge's and over a threshold is put to the owner as an approval
+poll (no answer counts as no), and stopped only after a yes. Live
+processes of the bridge over a threshold are reported. In a lockdown it
+reports only.
+
+Each action is a line of kind `housekeeping` in the audit log; the owner
+gets a WhatsApp message only when the job stopped or removed something or
+found a problem it cannot fix, never in a dry run. The Overview page shows
+its last report, `fridolin housekeeping status` too, and `fridolin doctor`
+checks that it ran.
+
 ---
 
 ## Environment variables

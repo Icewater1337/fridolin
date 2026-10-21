@@ -460,6 +460,58 @@ func (r *Restic) Copy(ctx context.Context, from *Restic) error {
 	return err
 }
 
+// Lock is one lock in a restic repository: which restic run on which
+// host holds it, and since when (restic refreshes the time of a lock
+// every few minutes while its run lasts).
+type Lock struct {
+	ID        string    `json:"id"`
+	Time      time.Time `json:"time"`
+	Exclusive bool      `json:"exclusive"`
+	Hostname  string    `json:"hostname"`
+	Username  string    `json:"username,omitempty"`
+	PID       int       `json:"pid"`
+}
+
+// Locks lists the repository's locks, without taking one itself.
+func (r *Restic) Locks(ctx context.Context) ([]Lock, error) {
+	out, err := r.exec(ctx, r.newRun("list", "locks", "--no-lock"), nil)
+	if err != nil {
+		return nil, err
+	}
+	var locks []Lock
+	for id := range strings.FieldsSeq(string(out)) {
+		data, err := r.exec(ctx, r.newRun("cat", "lock", id, "--no-lock"), nil)
+		if err != nil {
+			// Removed between the listing and now: its run ended.
+			if strings.Contains(err.Error(), "not exist") || strings.Contains(err.Error(), "not found") {
+				continue
+			}
+			return nil, err
+		}
+		l := Lock{ID: id}
+		if err := json.Unmarshal(data, &l); err != nil {
+			return nil, fmt.Errorf("snapshot: restic lock %s: %w", id, err)
+		}
+		l.ID = id
+		locks = append(locks, l)
+	}
+	return locks, nil
+}
+
+// DeadLocks picks, of locks, those that a restic run on host left behind
+// whose process is gone (alive says no): what Unlock may remove without
+// asking anybody. The locks of other hosts are not judged here: their
+// processes cannot be seen from this one.
+func DeadLocks(locks []Lock, host string, alive func(pid int) bool) []Lock {
+	var out []Lock
+	for _, l := range locks {
+		if host != "" && l.Hostname == host && l.PID > 0 && !alive(l.PID) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
 // Unlock removes stale locks, those of restic runs that ended without
 // removing theirs. It leaves the locks of runs that are still going.
 func (r *Restic) Unlock(ctx context.Context) error {

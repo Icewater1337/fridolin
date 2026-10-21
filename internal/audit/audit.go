@@ -44,6 +44,9 @@ const (
 	// tailnet listener (M1): By is the caller's tailnet login, ID its
 	// device, Detail the method and path, Outcome the HTTP status.
 	Tailnet = "tailnet"
+	// Housekeeping is the housekeeping job: a run (Detail its summary) and
+	// each thing it stopped, removed or asked about (ID the approval).
+	Housekeeping = "housekeeping"
 )
 
 // Entry is one line. Fields are added, never renamed; a reader ignores

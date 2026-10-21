@@ -28,6 +28,18 @@ for compatibility.
   the `auth_url` to send the browser to and takes `{"reconnect": true}`;
   `PUT`/`DELETE /api/backup/drive-client` keep or forget the Drive client.
 
+- A housekeeping job (`housekeeping` in config.json, docs/CONFIGURATION.md)
+  looks every 48 hours for what the bridge and its children left running:
+  processes of brain runs that are over, run MCP servers, the vault's
+  `rclone rcd`, Litestream and restic without a bridge, activity viewer
+  sessions nobody watches, zombies, restic locks of dead processes of
+  this host, stale run records. It stops only the bridge's own; in the
+  core's container a heavy process that is not the bridge's is put to
+  the owner as an approval poll. It starts in dry run
+  (`housekeeping.dry_run: true`, also on existing installs): it reports on
+  the Overview page, in `fridolin housekeeping status` and `fridolin
+  doctor`, and stops nothing until that is set to false. `fridolin
+  housekeeping run [--dry-run]` runs it now.
 - The core brain's `fride_repo_add` adds a repository to FrIDE on a node:
   it clones one, or makes a new one with an initial commit and, by
   default, a private GitHub repository through the node's `gh`. The node

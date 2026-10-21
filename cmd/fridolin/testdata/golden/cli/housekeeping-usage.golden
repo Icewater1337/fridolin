@@ -1,0 +1,17 @@
+fridolin housekeeping — find and stop what the bridge left running
+
+Usage:
+  fridolin housekeeping run [--dry-run] [--json]
+                              run the job now in the running bridge and print its
+                              report; --dry-run only reports, whatever
+                              housekeeping.dry_run says
+  fridolin housekeeping status [--json]
+                              the last report and when the next run is due
+
+With no bridge running, run only looks at bridge.lock: a lock nobody holds
+that names a process which is gone is emptied (not with --dry-run), and
+status prints what the bridge last wrote.
+
+Flags:
+  --config PATH     config file (default: $FRIDOLIN_CONFIG, else
+                    ~/.fridolin/config.json)

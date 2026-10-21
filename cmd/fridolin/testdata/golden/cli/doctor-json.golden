@@ -136,11 +136,11 @@
       "detail": "off"
     },
     {
-      "id": "drive-client",
-      "title": "Google Drive link uses your own Google client",
+      "id": "housekeeping",
+      "title": "housekeeping ran",
       "required": false,
       "status": "ok",
-      "detail": "Google Drive is not connected"
+      "detail": "off (housekeeping.enabled), and never run here"
     }
   ]
 }

@@ -37,7 +37,7 @@ brains/main.brain.json -rw------- e3f60208265f5cbf
 	    "default": "you@example.com"
 	  }
 	}
-config.json -rw------- 666ae19ce3d94d4a
+config.json -rw------- fdbfca3c557d4923
 	{
 	  "version": 2,
 	  "allowed_numbers": [
@@ -127,5 +127,6 @@ config.json -rw------- 666ae19ce3d94d4a
 	  "nodes": {
 	    "enabled": false
 	  },
-	  "policy": {}
+	  "policy": {},
+	  "housekeeping": {}
 	}

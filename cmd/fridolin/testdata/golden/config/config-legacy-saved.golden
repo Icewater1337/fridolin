@@ -49,5 +49,6 @@
   "nodes": {
     "enabled": false
   },
-  "policy": {}
+  "policy": {},
+  "housekeeping": {}
 }

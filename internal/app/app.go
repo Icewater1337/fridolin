@@ -72,9 +72,12 @@ type App struct {
 	scriptAuth    *scriptAuth
 	backup        *backup.Manager
 	vault         *vaultService
-	google        *google.Auth
-	plaud         *plaud.Manager
-	site          *sitesvc.SiteManager
+	// housekeeping is the job that stops what the bridge left running
+	// (housekeeping_runtime.go).
+	housekeeping *housekeepingService
+	google       *google.Auth
+	plaud        *plaud.Manager
+	site         *sitesvc.SiteManager
 	// nodes is the fleet's registry and node port; nodesEnabled and
 	// nodesListen are nodes.enabled and nodes.listen as the bridge
 	// started, which wait for a restart.
@@ -358,6 +361,7 @@ func New(opts Options) (_ *App, err error) {
 	// A refused scheduled backup goes to the brain's chat, like Plaud's
 	// expired-login notice: the owner may not open the dashboard for weeks.
 	b.vault = newVaultService(cfgs, opts.Container, b.logger, b.vaultBrains, b.openMedia)
+	b.housekeeping = newHousekeeping(b, opts.Container)
 	b.vault.usage = b.b2
 	b.google = google.New(googleOptionsFor(cfgs))
 	b.backup = newProjectedBackup(cfgs, b.brainMgr, b.notifyBackup, b.vault.driveSuperseded, b.google)
@@ -401,7 +405,7 @@ func (b *App) Start(ctx context.Context) error {
 		Resume:           func(ctx context.Context) { b.outbox.Start(); b.resume(ctx) }, Connect: b.connectLoop,
 		Watch: func(ctx context.Context) { b.watchRequiredFiles(ctx, requiredFilesEvery) },
 		// The tailnet first: the node port listens on it.
-		Background: []func(context.Context){b.startTailnet, b.runLease, b.runB2Usage, b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start, b.vault.Start, b.watchApprovals},
+		Background: []func(context.Context){b.startTailnet, b.runLease, b.runB2Usage, b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start, b.vault.Start, b.watchApprovals, b.housekeeping.Start},
 	})
 }
 
