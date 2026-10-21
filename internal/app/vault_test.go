@@ -160,9 +160,13 @@ func TestVaultGate(t *testing.T) {
 	if st.Files.Hot != 0 {
 		t.Errorf("files still waiting for their upload: %+v", st.Files)
 	}
-	cold, err := os.ReadDir(filepath.Join(local, "cold"))
+	// The cold tier is the sealed one (docs/VAULT.md, "Encryption").
+	cold, err := os.ReadDir(filepath.Join(local, "cold-sealed"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(local, "cold-sealed", "vault", "documents", "main", "lease.pdf")); err != nil || !strings.HasPrefix(string(raw), "FRDSEAL1") {
+		t.Errorf("the cold copy is not sealed: %v %.20q", err, raw)
 	}
 	var top []string
 	for _, e := range cold {

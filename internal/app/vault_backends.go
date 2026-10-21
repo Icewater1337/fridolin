@@ -105,11 +105,18 @@ func defaultVaultBackends(ctx context.Context, s *vaultService, cfg *config.Sett
 	if err != nil {
 		return b, err
 	}
-	cold, err := b2ColdStore(rclone, base, c, cfg.Vault.Bucket, s.usage)
+	if err := src.ensureLayers(&c); err != nil {
+		return b, err
+	}
+	encState, err := readEncryptionState(cfg.Boot.Layout().Core())
 	if err != nil {
 		return b, err
 	}
-	b.cold, b.closers, b.b2 = cold, append(b.closers, cold.Close), true
+	cold, closeCold, err := b2ColdStore(rclone, base, c, cfg.Vault.Bucket, s.usage, encState)
+	if err != nil {
+		return b, err
+	}
+	b.cold, b.closers, b.b2 = cold, append(b.closers, closeCold), true
 	b.bridgeDB = AbsPath(cfg.DBPath)
 
 	restic := findVaultTool("restic")
@@ -198,29 +205,31 @@ func localVaultBackends(s *vaultService, cfg *config.Settings, dir string) (vaul
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return b, err
 	}
-	cold, err := cloud.NewDir(filepath.Join(dir, "cold"))
+	encState, err := readEncryptionState(cfg.Boot.Layout().Core())
 	if err != nil {
 		return b, err
 	}
-	b.cold = cold
+	oldCold, err := cloud.NewDir(filepath.Join(dir, "cold"))
+	if err != nil {
+		return b, err
+	}
+	sealKey, err := localSecret(dir, "vault-seal-key", "FRIDOLIN_VAULT_SEAL_KEY")
+	if err != nil {
+		return b, err
+	}
+	newCold, err := cloud.NewDir(filepath.Join(dir, "cold-sealed"))
+	if err != nil {
+		return b, err
+	}
+	sealed, err := cloud.NewSealed(newCold, sealKey)
+	if err != nil {
+		return b, err
+	}
+	b.cold = layeredCold(sealed, oldCold, encState)
 	b.bridgeDB = AbsPath(cfg.DBPath)
-	pwFile := filepath.Join(dir, "restic-password")
-	pw := os.Getenv("RESTIC_PASSWORD")
-	if pw == "" {
-		data, err := os.ReadFile(pwFile)
-		switch {
-		case err == nil:
-			pw = strings.TrimSpace(string(data))
-		case errors.Is(err, os.ErrNotExist):
-			if pw, err = newVaultPassword(); err != nil {
-				return b, err
-			}
-			if err := os.WriteFile(pwFile, []byte(pw+"\n"), 0o600); err != nil {
-				return b, err
-			}
-		default:
-			return b, err
-		}
+	pw, err := localSecret(dir, "restic-password", "RESTIC_PASSWORD")
+	if err != nil {
+		return b, err
 	}
 	base := vaultBaseEnv()
 	if restic := findVaultTool("restic"); restic != "" {
@@ -243,6 +252,27 @@ func localVaultBackends(s *vaultService, cfg *config.Settings, dir string) (vaul
 			}}
 	}
 	return b, nil
+}
+
+// localSecret is the dev stand-ins' secret: from the environment, else
+// from the file name in dir, made there when missing.
+func localSecret(dir, name, env string) (string, error) {
+	if v := os.Getenv(env); v != "" {
+		return v, nil
+	}
+	file := filepath.Join(dir, name)
+	data, err := os.ReadFile(file)
+	switch {
+	case err == nil:
+		return strings.TrimSpace(string(data)), nil
+	case !errors.Is(err, os.ErrNotExist):
+		return "", err
+	}
+	v, err := newVaultPassword()
+	if err != nil {
+		return "", err
+	}
+	return v, os.WriteFile(file, []byte(v+"\n"), 0o600)
 }
 
 // quietLogger drops what l would log below info: Litestream's own chatter
