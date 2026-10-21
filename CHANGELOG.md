@@ -22,6 +22,16 @@ for compatibility.
   `fridolin open --print --tailnet` prints the tailnet sign-in link
   (`POST /api/login/code?tailnet=1`). `!fleet` now suggests `!approve`
   (docs/NODES.md, "Joining a machine").
+- Notifications on Windows nodes are real toasts now instead of a log
+  line. The node service, which runs in session 0, shows the toast in
+  the signed-in user's session. When nobody is signed in it logs the
+  notification and answers `shown: false` with a `reason`, a new field
+  of `notify`'s answer (docs/NODES.md, "Notifications on Windows").
+- AGENTS.md path D and docs/NODES.md, "Setting up FrIDE on a node":
+  a runbook for giving a node its own companion FrIDE. It runs natively
+  on macOS and Linux, and in WSL2 on Windows, started by a Scheduled
+  Task.
+
 - Google Drive backups use your own Google OAuth client instead of
   rclone's shared one, which Google retires during 2026. Backup →
   Connect Google Drive signs in through the bridge (also in the core's

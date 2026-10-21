@@ -463,8 +463,9 @@ type NotifyParams struct {
 
 // NotifyResult says how the notification was shown.
 type NotifyResult struct {
-	// Shown is false where the node only logged it (Windows, or no
-	// notifier installed).
+	// Shown is false where the node only logged it (no notifier
+	// installed, or nobody signed in to Windows); Reason then says why.
 	Shown  bool   `json:"shown"`
 	Method string `json:"method"`
+	Reason string `json:"reason,omitempty"`
 }
