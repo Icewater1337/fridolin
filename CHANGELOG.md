@@ -458,6 +458,14 @@ for compatibility.
   it. `core migrate --from-native` now sets the Mac's `claude_path` and
   `codex_path` to the image's `/usr/local/bin/claude` and
   `/usr/local/bin/codex` instead of removing them.
+- An approval or an answer to `ask_user` now reaches the brain once.
+  When the vote came just as the waiting `request_approval` call looked
+  at it, or just as its wait ended, or before a `check_approval`, the
+  call got the answer and the brain was also sent it as a new message,
+  which started a second run told to take the approved step again. Now
+  it goes to the waiting call, or, when none waits, as that one message;
+  a call that comes too late answers pending and says the answer comes
+  as a new message.
 - A vote on a poll the bridge sent, an approval's included, is no longer
   dropped as one for an unknown poll when it arrives before WhatsApp has
   acknowledged the poll: the bridge now chooses the poll's message id
