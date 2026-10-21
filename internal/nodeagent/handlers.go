@@ -65,6 +65,9 @@ func (a *Agent) call(ctx context.Context, req nodeproto.Request) (any, *nodeprot
 	if slices.Contains(nodeproto.BackupMethods, req.Method) {
 		return a.backupCall(eff, req.Method, req.Params)
 	}
+	if slices.Contains(nodeproto.UpdateMethods, req.Method) {
+		return a.updateCall(ctx, req.Method, req.Params)
+	}
 	decode := func(v any) *nodeproto.Error {
 		if len(req.Params) == 0 {
 			return nil

@@ -328,6 +328,10 @@ func (a *Agent) frideLoop(ctx context.Context) {
 func (a *Agent) declared() nodeproto.Capabilities {
 	c := a.Config.Capabilities
 	c.AndroidBuild = a.androidDeclared()
+	c.Update = nil
+	if a.updateOffered() {
+		c.Update = &nodeproto.UpdateCap{}
+	}
 	a.fride.mu.Lock()
 	if a.fride.cap != nil {
 		f := *a.fride.cap
@@ -717,8 +721,18 @@ func (a *Agent) frideChunk(method string, p nodeproto.FrideChunkParams) (any, *n
 		return readChunk(path, p)
 	}
 	// fride.write
+	tr, e := appendChunk(path, p)
+	if e != nil {
+		return nil, e
+	}
+	return tr, nil
+}
+
+// appendChunk appends p's chunk to the staged file at path, making it at
+// offset 0.
+func appendChunk(path string, p nodeproto.FrideChunkParams) (nodeproto.FrideTransfer, *nodeproto.Error) {
 	if len(p.Data) > nodeproto.FrideChunkBytes {
-		return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "a chunk holds at most %d bytes", nodeproto.FrideChunkBytes)
+		return nodeproto.FrideTransfer{}, nodeproto.Errorf(nodeproto.CodeBadRequest, "a chunk holds at most %d bytes", nodeproto.FrideChunkBytes)
 	}
 	flags := os.O_WRONLY | os.O_APPEND
 	if p.Offset == 0 {
@@ -726,18 +740,18 @@ func (a *Agent) frideChunk(method string, p nodeproto.FrideChunkParams) (any, *n
 	}
 	f, err := os.OpenFile(path, flags, 0o600)
 	if err != nil {
-		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
+		return nodeproto.FrideTransfer{}, nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
 	}
 	defer f.Close()
 	st, err := f.Stat()
 	if err != nil {
-		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
+		return nodeproto.FrideTransfer{}, nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
 	}
 	if st.Size() != p.Offset {
-		return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "transfer %s holds %d bytes, not %d", p.ID, st.Size(), p.Offset)
+		return nodeproto.FrideTransfer{}, nodeproto.Errorf(nodeproto.CodeBadRequest, "transfer %s holds %d bytes, not %d", p.ID, st.Size(), p.Offset)
 	}
 	if _, err := f.Write(p.Data); err != nil {
-		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
+		return nodeproto.FrideTransfer{}, nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
 	}
 	return nodeproto.FrideTransfer{ID: p.ID, Size: p.Offset + int64(len(p.Data))}, nil
 }

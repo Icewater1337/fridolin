@@ -2,6 +2,7 @@ package nodeagent
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"os"
@@ -59,6 +60,13 @@ func Join(ctx context.Context, o JoinOptions) (Joined, error) {
 	c, st, err := a.connect(ctx, o.Code)
 	if err != nil {
 		return Joined{ID: a.ID()}, err
+	}
+	// The core's update key, which signs the binaries it updates this
+	// node to: trusted from now on, as the core joined here.
+	if len(st.CoreKey) == ed25519.PublicKeySize {
+		if err := writeCoreKey(o.Dir, st.CoreKey); err != nil {
+			a.logf("node: keeping the core's update key: %v", err)
+		}
 	}
 	_ = c.send(ctx, nodeproto.TypeClose, "", nodeproto.Close{Reason: nodeproto.CloseShutdown, Message: "joined"})
 	_ = c.ws.CloseNow()

@@ -2,6 +2,7 @@ package nodes
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -52,6 +53,17 @@ type Options struct {
 	// and waits for approval, once, after the registry recorded it; nil
 	// for nothing. It must not block for long.
 	OnJoin func(n *Node)
+	// Version is the core's own version, which nodes are updated to, and
+	// BinariesDir the folder with its builds for each platform
+	// (BinariesManifest); "" for none (update.go).
+	Version     string
+	BinariesDir string
+	// Busy says why node id should not be updated now (a FrIDE task, a
+	// backup running on it), "" when it may be; nil for never busy.
+	Busy func(id string) string
+	// Hold says why no node may be updated now (a lockdown), "" when they
+	// may; nil for never.
+	Hold func() string
 }
 
 // Service is the node port and the registry behind it.
@@ -61,6 +73,13 @@ type Service struct {
 	onEvent   func(string, nodeproto.Event)
 	onDeclare func(*Node)
 	onJoin    func(*Node)
+
+	// Updates (update.go).
+	dir, version, binDir string
+	busy                 func(string) string
+	hold                 func() string
+	keyMu                sync.Mutex
+	key                  ed25519.PrivateKey
 
 	// ctx ends with Stop, and with it every connection.
 	ctx    context.Context
@@ -73,6 +92,10 @@ type Service struct {
 	closed   bool
 	wg       sync.WaitGroup
 	nextID   atomic.Uint64
+	// updating are the nodes an update runs on, reports the failures
+	// they reported meanwhile.
+	updating map[string]bool
+	reports  map[string]nodeproto.UpdateReport
 }
 
 // New opens the registry in opts.Dir.
@@ -86,8 +109,15 @@ func New(opts Options) (*Service, error) {
 		logf = log.Printf
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Service{reg: reg, logf: logf, onEvent: opts.OnEvent, onDeclare: opts.OnDeclare, onJoin: opts.OnJoin, ctx: ctx, cancel: cancel, sessions: map[string]*session{}}, nil
+	return &Service{
+		reg: reg, logf: logf, onEvent: opts.OnEvent, onDeclare: opts.OnDeclare, onJoin: opts.OnJoin, ctx: ctx, cancel: cancel, sessions: map[string]*session{},
+		dir: opts.Dir, version: opts.Version, binDir: opts.BinariesDir, busy: opts.Busy, hold: opts.Hold,
+		updating: map[string]bool{}, reports: map[string]nodeproto.UpdateReport{},
+	}, nil
 }
+
+// Version is the core's version, which nodes are updated to.
+func (s *Service) Version() string { return s.version }
 
 // Registry is the service's registry.
 func (s *Service) Registry() *Registry { return s.reg }
@@ -122,6 +152,7 @@ func (s *Service) Serve(ln net.Listener) error {
 			s.logf("nodes: the node port %s stopped: %v", ln.Addr(), err)
 		}
 	})
+	s.wg.Go(s.autoLoop)
 	s.logf("nodes: listening for node agents on %s", s.addr)
 	return nil
 }
@@ -257,9 +288,13 @@ func (s *Service) accept(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.logf("nodes: %s (%s, %s) connected from %s, device %s, commands %s", node.Name, node.ID, node.OS, r.RemoteAddr, node.Device, node.Commands())
-	if err := ss.send(nodeproto.TypeWelcome, "", node.State()); err != nil {
+	if err := ss.send(nodeproto.TypeWelcome, "", s.stateOf(node)); err != nil {
 		return
 	}
+	// A node that runs an older version than the core, with auto updates
+	// on, is updated now: after the core itself was updated, every node
+	// connects again.
+	s.wg.Go(func() { s.maybeAuto(node.ID) })
 	s.readLoop(ss)
 	s.logf("nodes: %s (%s) disconnected", node.Name, node.ID)
 }
@@ -402,6 +437,10 @@ func (s *Service) readLoop(ss *session) {
 				s.logf("nodes: dropped a %q event of %s, which may not serve it", ev.Kind, ss.id)
 				continue
 			}
+			if ev.Kind == nodeproto.EventUpdate {
+				s.onUpdateReport(ss.id, ev)
+				continue
+			}
 			if s.onEvent != nil {
 				s.onEvent(ss.id, ev)
 			}
@@ -416,10 +455,13 @@ func (s *Service) readLoop(ss *session) {
 
 // eventMethod is the method whose approval lets a node report events of
 // kind: FrIDE's news needs fride approved. Other kinds need what nothing
-// grants.
+// grants. An update's report needs update approved.
 func eventMethod(kind string) string {
-	if kind == nodeproto.EventFride {
+	switch kind {
+	case nodeproto.EventFride:
 		return nodeproto.MethodFrideStatus
+	case nodeproto.EventUpdate:
+		return nodeproto.MethodUpdateApply
 	}
 	return ""
 }
@@ -440,7 +482,7 @@ func (s *Service) pushState(n *Node) {
 		ss.close(nodeproto.CloseRevoked, "this node was revoked")
 		return
 	}
-	if err := ss.send(nodeproto.TypeState, "", n.State()); err != nil {
+	if err := ss.send(nodeproto.TypeState, "", s.stateOf(n)); err != nil {
 		s.logf("nodes: telling %s its new state: %v", n.ID, err)
 	}
 }
@@ -602,6 +644,10 @@ type View struct {
 	Commands  string                 `json:"commands"`
 	Effective nodeproto.Capabilities `json:"effective"`
 	Online    bool                   `json:"online"`
+	// UpdateTo is the core's version when the node runs an older one and
+	// the core can update it; UpdateNote says why it cannot.
+	UpdateTo   string `json:"update_to,omitempty"`
+	UpdateNote string `json:"update_note,omitempty"`
 }
 
 // Views lists every node with whether it is connected.
@@ -609,7 +655,9 @@ func (s *Service) Views() ([]View, error) {
 	list, err := s.reg.List()
 	out := make([]View, 0, len(list))
 	for _, n := range list {
-		out = append(out, View{Node: n, Commands: n.Commands(), Effective: n.Effective(), Online: s.Online(n.ID)})
+		v := View{Node: n, Commands: n.Commands(), Effective: n.Effective(), Online: s.Online(n.ID)}
+		v.UpdateTo, v.UpdateNote = s.UpdateTarget(n)
+		out = append(out, v)
 	}
 	return out, err
 }

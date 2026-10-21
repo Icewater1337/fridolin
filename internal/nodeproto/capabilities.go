@@ -22,6 +22,9 @@ type Capabilities struct {
 	AndroidBuild *AndroidBuildCap `json:"android_build,omitempty"`
 	// Backup keeps restic repositories in folders on the node (backup.go).
 	Backup *BackupCap `json:"backup,omitempty"`
+	// Update lets the core replace the node's fridolin with its own
+	// version's build (update.go).
+	Update *UpdateCap `json:"update,omitempty"`
 }
 
 // ExecCap runs allowlisted commands.
@@ -268,12 +271,15 @@ func (c Capabilities) Allows(method string) bool {
 	if slices.Contains(BackupMethods, method) {
 		return c.Backup != nil
 	}
+	if slices.Contains(UpdateMethods, method) {
+		return c.Update != nil
+	}
 	return false
 }
 
 // Empty reports whether nothing is offered.
 func (c Capabilities) Empty() bool {
-	return (c.Exec == nil || len(c.Exec.Allow) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil && c.AndroidBuild == nil && c.Backup == nil
+	return (c.Exec == nil || len(c.Exec.Allow) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil && c.AndroidBuild == nil && c.Backup == nil && c.Update == nil
 }
 
 // Covers reports whether approved covers every part of declared: each
@@ -281,14 +287,14 @@ func (c Capabilities) Empty() bool {
 // host and notify. A declaration that grows past what was approved needs
 // approval again. FrIDE and android-build are covered by having been
 // approved at all: FrIDE's address and repositories, and the JDK and
-// platforms, are only what the node reports. Backup is covered for the
+// platforms, are only what the node reports; so is update. Backup is covered for the
 // places the approval lends (coversBackup); its folders are the
 // approval's own.
 func Covers(approved, declared Capabilities) bool {
 	if declared.Host && !approved.Host || declared.Notify && !approved.Notify || declared.Fride != nil && approved.Fride == nil {
 		return false
 	}
-	if declared.AndroidBuild != nil && approved.AndroidBuild == nil {
+	if declared.AndroidBuild != nil && approved.AndroidBuild == nil || declared.Update != nil && approved.Update == nil {
 		return false
 	}
 	if !coversBackup(approved.Backup, declared.Backup) {
@@ -322,6 +328,9 @@ func Intersect(declared, approved Capabilities) Capabilities {
 	out.Host = declared.Host && approved.Host
 	out.Notify = declared.Notify && approved.Notify
 	out.Backup = intersectBackup(declared.Backup, approved.Backup)
+	if declared.Update != nil && approved.Update != nil {
+		out.Update = &UpdateCap{}
+	}
 	if declared.Fride != nil && approved.Fride != nil {
 		f := *declared.Fride
 		f.Repos = slices.Clone(f.Repos)
@@ -407,6 +416,9 @@ func (c Capabilities) Summary() string {
 		default:
 			parts = append(parts, fmt.Sprintf("backup (%d folders)", n))
 		}
+	}
+	if c.Update != nil {
+		parts = append(parts, "update")
 	}
 	if len(parts) == 0 {
 		return "nothing"
