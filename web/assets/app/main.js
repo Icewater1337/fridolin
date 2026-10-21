@@ -62,7 +62,7 @@ async function signInFromHash() {
     signInProblem = '';
     return true;
   } catch (e) {
-    signInProblem = e.status === 401 ? 'That link was already used or has expired. Run fridolin open for a new one.' : e.message;
+    signInProblem = e.status === 401 ? 'That link was already used or has expired. Run fridolin open, or send !dashboard in your WhatsApp chat, for a new one.' : e.message;
     return false;
   }
 }
