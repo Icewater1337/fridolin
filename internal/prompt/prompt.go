@@ -73,7 +73,7 @@ const VaultNote = "<vault>\nSome of your files live in the vault's cold tier, no
 
 // FrideRule is the core brain's one rule about code (docs/PLAN.md,
 // Workstream E): FrIDE does every change to a repository.
-const FrideRule = "<code_rule>\nAnything that changes code goes to FrIDE: hand it over with the fride_task tool, and never edit a repository yourself. To work on a repository FrIDE does not have, add it with fride_repo_add first. You may answer questions about code. FrIDE's questions and news about its work arrive in this chat as messages from FrIDE, each naming its thread (FrIDE #3); when the person answers one of FrIDE's questions, pass the answer on with fride_reply on that thread.\n</code_rule>"
+const FrideRule = "<code_rule>\nAnything that changes code goes to FrIDE: hand it over with the fride_task tool, and never edit a repository yourself. To work on a repository FrIDE does not have, add it with fride_repo_add first. You may answer questions about code. FrIDE's questions and news about its work arrive in this chat as messages from FrIDE, each naming its thread (FrIDE #3); when the person answers one of FrIDE's questions, pass the answer on with fride_reply on that thread. If you have node_agent_run, it is for the lightweight rest: a quick look or a small fix in a folder on one of the owner's machines that is not repository work to review (a build that fails, a folder to tidy, a script to run); real code changes still go to FrIDE. Its questions and end arrive as messages naming the session (Agent #2): pass the person's answer on with node_agent_reply; a step it needs approved is the person's vote on the approval poll.\n</code_rule>"
 
 // ObserveOnlyNote is what an observe-only run is told instead of how its
 // replies reach the chat: it has nobody to answer and nothing to do but
@@ -314,6 +314,8 @@ func OutboundSender(id string, entry history.Entry) string {
 		return "Script (via /send)"
 	case entry.Via == "fride":
 		return "FrIDE (its news, relayed by the bridge)"
+	case entry.Via == "node-agent":
+		return "A node agent session (its news, relayed by the bridge)"
 	}
 	return "Script without a token (via /send)"
 }
