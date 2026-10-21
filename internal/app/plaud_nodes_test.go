@@ -92,7 +92,12 @@ func TestPlaudFleetBuildsOnANode(t *testing.T) {
 	}
 	locked := false
 	fleet := newPlaudFleet(svc, func() bool { return locked })
-	wait("the node to connect", func() bool { return svc.Online(j.ID) })
+	// The agent's own declaration, android-build in it, not the smaller one
+	// of Join's connection, which may still count as online.
+	wait("the node to declare android-build", func() bool {
+		n, err := svc.Registry().Get(j.ID)
+		return err == nil && svc.Online(j.ID) && n.Declared.AndroidBuild != nil
+	})
 	if b := fleet.builders(); len(b) != 0 {
 		t.Fatalf("an unapproved node builds: %v", b)
 	}

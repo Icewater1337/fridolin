@@ -64,7 +64,7 @@ func TestFindAndroidToolchain(t *testing.T) {
 	j17 := fakeJDK(t, root, "17", "17.0.9")
 	sdk := filepath.Join(root, "sdk")
 	env := map[string]string{"JAVA_HOME": j17}
-	lookup := AndroidLookup{Getenv: func(k string) string { return env[k] }, Home: filepath.Join(root, "home"), GOOS: "linux"}
+	lookup := AndroidLookup{Getenv: func(k string) string { return env[k] }, Home: filepath.Join(root, "home"), GOOS: runtime.GOOS}
 	env["ANDROID_HOME"] = sdk
 	if err := os.MkdirAll(filepath.Join(sdk, "platforms"), 0o755); err != nil {
 		t.Fatal(err)

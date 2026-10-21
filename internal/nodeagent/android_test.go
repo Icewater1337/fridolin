@@ -72,9 +72,20 @@ func fakeToolchain(t *testing.T) platform.AndroidToolchain {
 	return platform.AndroidToolchain{JavaHome: filepath.Join(root, "jdk"), JavaMajor: 21, SDK: filepath.Join(root, "sdk"), Platforms: []string{"android-35"}}
 }
 
+// approveAll approves the device and what the running agent declares.
+// It waits for the registry to hold that declaration first: Join's own
+// connection, which declared less (no toolchain then), may still count as
+// online, and an approval of that smaller declaration would leave the
+// agent's grown one pending.
 func approveAll(t *testing.T, c *core, a *Agent) {
 	t.Helper()
-	waitFor(t, "the agent to connect", func() bool { return c.svc.Online(a.ID()) })
+	waitFor(t, "the agent's declaration to reach the core", func() bool {
+		if !a.Connected() {
+			return false
+		}
+		n, err := c.svc.Registry().Get(a.ID())
+		return err == nil && c.svc.Online(a.ID()) && n.Declared.Summary() == a.declared().Summary()
+	})
 	if _, err := c.svc.ApproveDevice(a.ID()); err != nil {
 		t.Fatal(err)
 	}

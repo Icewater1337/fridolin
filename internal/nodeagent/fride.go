@@ -756,7 +756,8 @@ func readChunk(path string, p nodeproto.FrideChunkParams) (any, *nodeproto.Error
 	if n <= 0 || n > nodeproto.FrideChunkBytes {
 		n = nodeproto.FrideChunkBytes
 	}
-	buf := make([]byte, n)
+	// A buffer of the fixed chunk size, of which a smaller Max reads a part.
+	buf := make([]byte, nodeproto.FrideChunkBytes)[:n]
 	k, err := f.ReadAt(buf, p.Offset)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
