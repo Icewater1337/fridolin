@@ -86,7 +86,7 @@ type App struct {
 	nodesEnabled bool
 	nodesListen  string
 	// fride is the core's side of FrIDE on the nodes (fride_runtime.go).
-	fride   *frideRuntime
+	fride *frideRuntime
 	// work is the core's side of the workstation mode: agent sessions
 	// and terminals on nodes (workstation_runtime.go).
 	work    *workRuntime
