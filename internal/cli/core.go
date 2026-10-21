@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/lease"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/secretxfer"
 	"github.com/Icewater1337/fridolin/internal/store"
 	"github.com/Icewater1337/fridolin/internal/version"
 )
@@ -38,6 +40,8 @@ On the host that runs Docker:
                        start the core container with the secrets from the
                        keychain; makes the age identity when there is none
   fridolin core stop   stop it (the volume stays)
+  fridolin core build [--repo DIR]
+                       build the image of this version from a checkout (default .)
   fridolin core update pull the image of this version and recreate the container
   fridolin core migrate --from-native [--dry-run] [--local] [--mount PATH]...
                        move this machine's native install into the core's
@@ -45,6 +49,17 @@ On the host that runs Docker:
                        (--rehearse: on a copy, beside the running native bridge)
   fridolin core migrate --to-native [--dry-run] [--local]
                        bring the volume back into the native data dir
+  fridolin core secrets [list]
+                       which secrets the host holds for the core (never their values)
+  fridolin core secrets set NAME [--replace]
+                       store one, typed without echo (or from stdin): age.identity,
+                       claude.oauth.token, b2.vault.keyid, … (core secrets lists them)
+  fridolin core receive
+                       on the machine that takes over: wait, on the tailnet, for
+                       the secrets of the current core's host (10 minutes, once)
+  fridolin core send --to HOST [--code CODE]
+                       on the current core's host: send its secrets to the machine
+                       running core receive, after both show the same four words
   fridolin core run [--] COMMAND...
                        run a fridolin command in a one-off container on the
                        volume, with the secrets: core import while the core
@@ -74,13 +89,15 @@ The age identity comes from FRIDOLIN_AGE_IDENTITY, which core start sets.
 // so tests pass their own.
 type coreEnv struct {
 	environ        []string
+	stdin          io.Reader
 	stdout, stderr io.Writer
+	term           terminalIO
 }
 
 func (e coreEnv) getenv(name string) string { return envLookup(e.environ)(name) }
 
 func coreCmd(args []string) int {
-	return runCore(args, coreEnv{environ: os.Environ(), stdout: os.Stdout, stderr: os.Stderr})
+	return runCore(args, coreEnv{environ: os.Environ(), stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr, term: stdinTerminal()})
 }
 
 func runCore(args []string, env coreEnv) int {
@@ -97,10 +114,14 @@ func runCore(args []string, env coreEnv) int {
 	switch sub {
 	case "export", "import", "promote", "status":
 		return coreInside(ctx, sub, args, env)
-	case "start", "stop", "update", "run":
+	case "start", "stop", "update", "run", "build":
 		return coreHost(ctx, sub, args, env, defaultHostDeps(env))
 	case "migrate":
 		return coreMigrate(ctx, args, env, defaultHostDeps(env))
+	case "secrets":
+		return coreSecrets(args, env, defaultHostDeps(env))
+	case "send", "receive":
+		return coreTransfer(ctx, sub, args, env, defaultHostDeps(env))
 	default:
 		fmt.Fprintf(env.stderr, "fridolin core: unknown command %q\n\n%s", sub, coreUsage)
 		return 2
@@ -425,6 +446,11 @@ func coreStatus(ctx context.Context, f insideFlags, env coreEnv) error {
 // see what would run without Docker or a keychain.
 type hostDeps struct {
 	secrets hostsecrets.Store
+	// secretsPlace names where secrets keeps them, for messages.
+	secretsPlace string
+	// tailnet is this machine's Tailscale, for core send and receive;
+	// nil is its LocalAPI.
+	tailnet secretxfer.Tailnet
 	// run runs a program with exactly env as its environment.
 	run func(ctx context.Context, name string, args, env []string, stdout, stderr io.Writer) error
 	// docker is the docker CLI's path.
@@ -453,11 +479,7 @@ func defaultHostDeps(env coreEnv) hostDeps {
 		return id.String(), nil
 	}}
 	d.docker, _ = exec.LookPath("docker")
-	cfgDir, err := os.UserConfigDir()
-	if err != nil {
-		cfgDir = filepath.Join(app.HomeDir(), ".config")
-	}
-	d.composePath = filepath.Join(cfgDir, "fridolin", "compose.yaml")
+	d.composePath = composePathFor(runtime.GOOS)
 	d.home, d.goos, d.uid, d.now, d.sleep = app.HomeDir(), runtime.GOOS, os.Getuid(), time.Now, time.Sleep
 	if c, err := os.UserCacheDir(); err == nil {
 		d.cacheDir = filepath.Join(c, "fridolin")
@@ -469,24 +491,58 @@ func defaultHostDeps(env coreEnv) hostDeps {
 	case "linux":
 		d.unitPath = filepath.Join(d.home, ".config", "systemd", "user", systemdUnitName)
 	}
-	if runtime.GOOS == "darwin" {
-		d.secrets = hostsecrets.Keychain{}
-	} else {
-		xdg := env.getenv("XDG_CONFIG_HOME")
-		if xdg == "" {
-			xdg = filepath.Join(app.HomeDir(), ".config")
-		}
-		d.secrets = hostsecrets.Files{Dir: filepath.Join(xdg, "fridolin", "secrets")}
+	d.secrets = hostsecrets.ForHost(d.goos, env.getenv, d.home)
+	d.secretsPlace = hostsecrets.Place(d.goos, env.getenv, d.home)
+	d.baseEnv = composeBaseEnv(d.goos, env.environ)
+	return d
+}
+
+// composePathFor is where the host commands write the compose file:
+// <user config dir>/fridolin/compose.yaml (on macOS ~/Library/Application
+// Support/fridolin), and on Windows %LOCALAPPDATA%\fridolin, which stays
+// on this machine (the config dir, %APPDATA%, roams with the profile).
+func composePathFor(goos string) string {
+	dir, err := os.UserConfigDir()
+	if goos == "windows" {
+		dir, err = os.UserCacheDir() // %LOCALAPPDATA%
 	}
-	for _, kv := range env.environ {
+	if err != nil {
+		dir = filepath.Join(app.HomeDir(), ".config")
+	}
+	return filepath.Join(dir, "fridolin", "compose.yaml")
+}
+
+// windowsComposeEnv are the variables the docker CLI needs on Windows to
+// find its config (USERPROFILE), Docker Desktop's pipe and its helpers.
+var windowsComposeEnv = []string{
+	"PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "SYSTEMDRIVE", "COMSPEC", "USERPROFILE", "USERNAME", "USERDOMAIN",
+	"HOMEDRIVE", "HOMEPATH", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA", "PROGRAMFILES", "PROGRAMFILES(X86)",
+	"PROGRAMW6432", "COMMONPROGRAMFILES", "TEMP", "TMP", "COMPUTERNAME", "OS", "PROCESSOR_ARCHITECTURE",
+	"NUMBER_OF_PROCESSORS",
+}
+
+// composeBaseEnv is the part of the host's environment docker compose
+// gets: PATH, HOME and Docker's own settings, not the rest of the shell's
+// (on Windows, where names are case-insensitive, what Windows programs
+// need to run at all).
+func composeBaseEnv(goos string, environ []string) []string {
+	var out []string
+	for _, kv := range environ {
 		name, _, _ := strings.Cut(kv, "=")
+		if goos == "windows" {
+			name = strings.ToUpper(name)
+			if slices.Contains(windowsComposeEnv, name) || strings.HasPrefix(name, "DOCKER_") || strings.HasPrefix(name, "COMPOSE_") {
+				out = append(out, kv)
+			}
+			continue
+		}
 		switch {
 		case name == "PATH", name == "HOME", name == "USER", name == "TMPDIR", name == "XDG_RUNTIME_DIR",
 			strings.HasPrefix(name, "DOCKER_"), strings.HasPrefix(name, "COMPOSE_"):
-			d.baseEnv = append(d.baseEnv, kv)
+			out = append(out, kv)
 		}
 	}
-	return d
+	return out
 }
 
 func runProgram(ctx context.Context, name string, args, env []string, stdout, stderr io.Writer) error {
@@ -511,6 +567,14 @@ var containerSecrets = []struct {
 	{"FRIDOLIN_VAULT_CRYPT_PASSWORD", hostsecrets.VaultCryptPassword, false},
 	{"FRIDOLIN_VAULT_CRYPT_PASSWORD2", hostsecrets.VaultCryptSalt, false},
 	{"RESTIC_PASSWORD", hostsecrets.ResticPassword, false},
+}
+
+// place names where the host secrets are.
+func (d hostDeps) place() string {
+	if d.secretsPlace == "" {
+		return "the host's secrets"
+	}
+	return d.secretsPlace
 }
 
 // imageTag is the image tag of a fridolin version: Docker tags take
@@ -542,7 +606,7 @@ func secretEnv(d hostDeps, stderr io.Writer) ([]string, error) {
 		env = append(env, s.env+"="+v)
 	}
 	if len(missing) > 0 {
-		fmt.Fprintf(stderr, "Not in the keychain, so not passed to the core: %s\n", strings.Join(missing, ", "))
+		fmt.Fprintf(stderr, "Not in %s, so not passed to the core: %s (store one with: fridolin core secrets set NAME)\n", d.place(), strings.Join(missing, ", "))
 	}
 	return env, nil
 }
@@ -553,6 +617,10 @@ func coreHost(ctx context.Context, sub string, args []string, env coreEnv, d hos
 	compose := fs.String("compose", "", "the compose file (default: the one built into fridolin, written to "+d.composePath+")")
 	image := fs.String("image", "fridolin-core", "the image's name")
 	tag := fs.String("tag", imageTag(d.version), "the image's tag (default: this fridolin's version)")
+	repo := "."
+	if sub == "build" {
+		fs.StringVar(&repo, "repo", ".", "the fridolin checkout to build the image from")
+	}
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
 		return 0
@@ -566,8 +634,11 @@ func coreHost(ctx context.Context, sub string, args []string, env coreEnv, d hos
 		return 2
 	}
 	if d.docker == "" {
-		fmt.Fprintln(env.stderr, "fridolin core: docker is not installed or not on PATH (Docker Desktop or OrbStack on macOS)")
+		fmt.Fprintln(env.stderr, dockerMissing)
 		return 1
+	}
+	if sub == "build" {
+		return coreBuild(ctx, repo, *image+":"+*tag, env, d)
 	}
 	path := *compose
 	if path == "" {
@@ -620,6 +691,27 @@ func coreHost(ctx context.Context, sub string, args []string, env coreEnv, d hos
 	}
 	return 0
 }
+
+// coreBuild builds the core's image from a checkout, tagged as core start
+// expects it: the image of this fridolin's version, with no secrets in
+// the environment.
+func coreBuild(ctx context.Context, repo, ref string, env coreEnv, d hostDeps) int {
+	dockerfile := filepath.Join(repo, "container", "Dockerfile")
+	if pathKindOf(dockerfile) != "file" {
+		fmt.Fprintf(env.stderr, "fridolin core build: %s is not a fridolin checkout (no container/Dockerfile); pass --repo DIR\n", repo)
+		return 2
+	}
+	args := []string{"build", "-f", dockerfile, "--build-arg", "VERSION=" + d.version, "-t", ref, repo}
+	if err := d.run(ctx, d.docker, args, d.baseEnv, env.stdout, env.stderr); err != nil {
+		fmt.Fprintf(env.stderr, "fridolin core build: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(env.stdout, "Built %s; fridolin core start runs it.\n", ref)
+	return 0
+}
+
+// dockerMissing is what the host commands say without a docker CLI.
+const dockerMissing = "fridolin core: docker is not installed or not on PATH (Docker Desktop or OrbStack on macOS, Docker Desktop with WSL2 on Windows, Docker Engine on Linux)"
 
 // writeCompose writes the compose file built into this binary to path, and
 // the seccomp profile it names beside it, so the container is always the

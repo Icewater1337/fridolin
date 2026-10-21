@@ -244,15 +244,18 @@ func TestNodeCoreAddress(t *testing.T) {
 	for _, c := range []struct {
 		listen  string
 		tailnet config.TailnetConfig
+		dnsName string
 		want    string
 	}{
-		{":8766", config.TailnetConfig{}, "mini:8766"},
-		{"0.0.0.0:8766", config.TailnetConfig{}, "mini:8766"},
-		{"[::]:8766", config.TailnetConfig{}, "mini:8766"},
-		{"100.64.0.1:9000", config.TailnetConfig{}, "100.64.0.1:9000"},
-		{":8766", config.TailnetConfig{Enabled: true, Hostname: "fridolin-core"}, "fridolin-core:8766"},
+		{":8766", config.TailnetConfig{}, "", "mini:8766"},
+		{"0.0.0.0:8766", config.TailnetConfig{}, "", "mini:8766"},
+		{"[::]:8766", config.TailnetConfig{}, "", "mini:8766"},
+		{"100.64.0.1:9000", config.TailnetConfig{}, "", "100.64.0.1:9000"},
+		{":8766", config.TailnetConfig{Enabled: true, Hostname: "fridolin-core"}, "", "fridolin-core:8766"},
+		{":8766", config.TailnetConfig{Enabled: true, Hostname: "fridolin-core"}, "fridolin-core.example.ts.net.", "fridolin-core.example.ts.net:8766"},
+		{":8766", config.TailnetConfig{}, "fridolin-core.example.ts.net", "mini:8766"},
 	} {
-		if got := nodeCoreAddress(c.listen, c.tailnet, "mini"); got != c.want {
+		if got := nodeCoreAddress(c.listen, c.tailnet, c.dnsName, "mini"); got != c.want {
 			t.Errorf("%s %+v: %s, want %s", c.listen, c.tailnet, got, c.want)
 		}
 	}

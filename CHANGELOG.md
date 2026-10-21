@@ -18,6 +18,32 @@ for compatibility.
   and `fride.repo_new`, which the `fride` approval covers, and FrIDE
   rescans at once. Update the node agents along with the core.
 
+- Setting up another machine is now a runbook a coding agent follows
+  (AGENTS.md: install a new fridolin, join this machine as a node, or
+  make this machine the core), with the details in docs/NODES.md
+  ("Joining a machine") and docs/CORE.md ("Moving the core to another
+  machine"). `fridolin setup-machine --node|--core` shows what a machine
+  still needs and the next step, and `fridolin doctor --node` (the
+  default on a machine that joined a core and has no bridge config)
+  checks Tailscale, the core's node port and the node service.
+- On Windows the core's host secrets live in the Windows Credential
+  Manager, and `fridolin core start|stop|update|run` work there with
+  Docker Desktop (the compose file in `%LOCALAPPDATA%\fridolin`).
+  `fridolin core secrets` lists the host secrets and `fridolin core
+  secrets set NAME` stores one, typed without echo, on every system.
+  `fridolin core build` builds the core's image from a checkout, tagged
+  as `core start` expects it.
+- `fridolin core receive` and `fridolin core send --to ADDRESS` move the
+  host secrets to the machine that takes the core over, directly over the
+  tailnet: both ends must be devices of the same Tailscale login, the
+  sender proves a one-time code, and the person compares four words on
+  both screens before anything is sent, encrypted to a key that exists
+  only for that transfer.
+- `fridolin nodes join-code` (and the dashboard's join dialog) prints the
+  line to paste for PowerShell too, and names the core by its full
+  MagicDNS name once it is on the tailnet
+  (`fridolin-core.<tailnet>.ts.net:8766`); `POST /api/nodes/join-code`
+  answers with `core` and `command_powershell` as well.
 - `fridolin core migrate --from-native` moves a native install into the
   core's container: the brain folders, the calendar credentials and what
   else of your home folder the config names stay on the Mac and are bound

@@ -37,7 +37,12 @@ export default {
         wide: true,
         body: [
           h('p', `On the new machine, with fridolin installed, run this line. The code works once, until ${absTime(r.expires_at)}.`),
+          h('p.muted.small', 'macOS, Linux:'),
           h('div.join-command', mono(r.command, { copy: true })),
+          ...(r.command_powershell ? [
+            h('p.muted.small', 'Windows, in PowerShell:'),
+            h('div.join-command', mono(r.command_powershell, { copy: true })),
+          ] : []),
           h('p.muted.small', 'It joins and installs the node service. The node then shows up here, waiting for you to approve it.'),
         ],
       });

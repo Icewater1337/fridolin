@@ -112,7 +112,7 @@ func nodesCmd(args []string, stdout, stderr io.Writer) int {
 			printJSON(resp)
 			return 0
 		}
-		fmt.Fprintf(stdout, "Join code %s, valid once until %s.\nOn the new machine, run:\n\n  %s\n\nThen approve it here: fridolin nodes approve <id>\n", resp.Code, resp.ExpiresAt.Local().Format("15:04"), resp.Command)
+		writeJoinCode(stdout, resp)
 	case "approve", "revoke":
 		path := "/api/nodes/" + url.PathEscape(pos[0]) + "/" + sub
 		if *commands {
@@ -164,6 +164,22 @@ func nodesCmd(args []string, stdout, stderr io.Writer) int {
 		printJSON(resp.Result)
 	}
 	return 0
+}
+
+// writeJoinCode prints a join code with the lines to paste on the new
+// machine, for sh (macOS, Linux) and for PowerShell (Windows).
+func writeJoinCode(w io.Writer, resp httpapi.JoinCodeResponse) {
+	sh, ps := resp.Command, resp.CommandPowerShell
+	if resp.Core != "" && ps == "" {
+		// A core older than this fridolin sends only the sh line.
+		sh, ps = httpapi.JoinCommands(resp.Code, resp.Core)
+	}
+	fmt.Fprintf(w, "Join code %s, valid once until %s (core %s).\nOn the new machine, paste one line:\n\n", resp.Code, resp.ExpiresAt.Local().Format("15:04"), resp.Core)
+	fmt.Fprintf(w, "  macOS, Linux (sh):\n    %s\n", sh)
+	if ps != "" {
+		fmt.Fprintf(w, "  Windows (PowerShell):\n    %s\n", ps)
+	}
+	fmt.Fprintln(w, "\nAdd --root PATH[:rw] to share a folder, --no-exec to allow no commands (docs/NODES.md).\nThen approve it here: fridolin nodes approve <id>, and fridolin nodes approve <id> --commands")
 }
 
 // parseInterspersed parses fs from args with flags before, between and

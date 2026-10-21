@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -76,6 +77,11 @@ func TestKeychain(t *testing.T) {
 }
 
 func TestFiles(t *testing.T) {
+	// The 0600 files are the Linux store; Windows keeps its secrets in the
+	// Credential Manager and has no Unix modes to check.
+	if runtime.GOOS == "windows" {
+		t.Skip("the file store is for Linux; Windows uses the Credential Manager")
+	}
 	dir := filepath.Join(t.TempDir(), "secrets")
 	f := Files{Dir: dir}
 	if ok, err := f.Has(TailscaleAuthKey); ok || err != nil {
@@ -86,6 +92,12 @@ func TestFiles(t *testing.T) {
 	}
 	if got, err := f.Get(TailscaleAuthKey); err != nil || got != "tskey-auth-xyz" {
 		t.Fatalf("Get %q %v", got, err)
+	}
+	if err := f.Set("../escape", "x"); err == nil {
+		t.Error("wrote outside the folder")
+	}
+	if runtime.GOOS == "windows" {
+		return // no Unix modes; Windows keeps its secrets in the Credential Manager
 	}
 	st, _ := os.Stat(filepath.Join(dir, TailscaleAuthKey))
 	dst, _ := os.Stat(dir)
@@ -98,12 +110,12 @@ func TestFiles(t *testing.T) {
 	if _, err := f.Get(TailscaleAuthKey); err == nil {
 		t.Error("read a secret others may read")
 	}
-	if err := f.Set("../escape", "x"); err == nil {
-		t.Error("wrote outside the folder")
-	}
 }
 
 func TestExecRunReportsTheExitCode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no /bin/sh; the keychain helper is macOS's")
+	}
 	_, err := execRun(context.Background(), "/bin/sh", []string{"-c", "echo nope >&2; exit 44"}, nil)
 	ee, ok := errors.AsType[*ExitError](err)
 	if !ok || ee.Code != 44 || ee.Stderr != "nope" {

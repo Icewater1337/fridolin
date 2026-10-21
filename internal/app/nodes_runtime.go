@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -39,15 +40,19 @@ func (b *App) startNodes(context.Context) {
 }
 
 // nodeCoreAddress is the address a new node reaches the core's node port
-// at: the tailnet name when the core is on the tailnet, else the host the
-// port is bound to, or this machine's name when it is bound to every
+// at: on the tailnet, the core's full MagicDNS name once it joined
+// (dnsName, fridolin-core.example.ts.net), which resolves on every device
+// of the tailnet, else its short name; off the tailnet, the host the port
+// is bound to, or this machine's name when it is bound to every
 // interface.
-func nodeCoreAddress(listen string, tailnet config.TailnetConfig, hostname string) string {
+func nodeCoreAddress(listen string, tailnet config.TailnetConfig, dnsName, hostname string) string {
 	host, port, err := net.SplitHostPort(listen)
 	if err != nil {
 		return listen
 	}
 	switch {
+	case tailnet.Enabled && dnsName != "":
+		host = strings.TrimSuffix(dnsName, ".")
 	case tailnet.Enabled && tailnet.Hostname != "":
 		host = tailnet.Hostname
 	case host == "" || host == "0.0.0.0" || host == "::":
@@ -56,8 +61,9 @@ func nodeCoreAddress(listen string, tailnet config.TailnetConfig, hostname strin
 	return net.JoinHostPort(host, port)
 }
 
-// joinCommand is the line `fridolin nodes join-code` prints for code.
-func (b *App) joinCommand(code string) string {
+// joinCore is the core's node address a joining machine is given
+// (`fridolin nodes join-code`).
+func (b *App) joinCore() string {
 	listen := b.nodesListen
 	if addr := b.nodes.Addr(); addr != "" {
 		// The port actually bound, for a listen address with port 0.
@@ -71,7 +77,11 @@ func (b *App) joinCommand(code string) string {
 	if hostname == "" {
 		hostname = "<this-machine>"
 	}
-	return "fridolin node join " + code + " --core " + nodeCoreAddress(listen, b.cfgs.Get().Core.Tailnet, hostname)
+	dnsName := ""
+	if st := b.tailnetStatus(); st != nil && st.State == "up" {
+		dnsName = st.DNSName
+	}
+	return nodeCoreAddress(listen, b.cfgs.Get().Core.Tailnet, dnsName, hostname)
 }
 
 func (b *App) newNodesAPI() *httpapi.NodesAPI {
@@ -79,7 +89,7 @@ func (b *App) newNodesAPI() *httpapi.NodesAPI {
 		Nodes:       func() httpapi.NodesService { return lockdownNodes{Service: b.nodes, locked: b.locked} },
 		Enabled:     b.nodesEnabled,
 		Listen:      b.nodes.Addr,
-		JoinCommand: b.joinCommand,
+		CoreAddress: b.joinCore,
 	}
 }
 

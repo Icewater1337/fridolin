@@ -5,6 +5,8 @@ On the host that runs Docker:
                        start the core container with the secrets from the
                        keychain; makes the age identity when there is none
   fridolin core stop   stop it (the volume stays)
+  fridolin core build [--repo DIR]
+                       build the image of this version from a checkout (default .)
   fridolin core update pull the image of this version and recreate the container
   fridolin core migrate --from-native [--dry-run] [--local] [--mount PATH]...
                        move this machine's native install into the core's
@@ -12,6 +14,17 @@ On the host that runs Docker:
                        (--rehearse: on a copy, beside the running native bridge)
   fridolin core migrate --to-native [--dry-run] [--local]
                        bring the volume back into the native data dir
+  fridolin core secrets [list]
+                       which secrets the host holds for the core (never their values)
+  fridolin core secrets set NAME [--replace]
+                       store one, typed without echo (or from stdin): age.identity,
+                       claude.oauth.token, b2.vault.keyid, … (core secrets lists them)
+  fridolin core receive
+                       on the machine that takes over: wait, on the tailnet, for
+                       the secrets of the current core's host (10 minutes, once)
+  fridolin core send --to HOST [--code CODE]
+                       on the current core's host: send its secrets to the machine
+                       running core receive, after both show the same four words
   fridolin core run [--] COMMAND...
                        run a fridolin command in a one-off container on the
                        volume, with the secrets: core import while the core

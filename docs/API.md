@@ -260,7 +260,7 @@ nodes speak on their own port.
 | Route | Does |
 | --- | --- |
 | `GET /api/nodes` | `{"enabled", "listen", "nodes": [...]}`: every node of `nodes/nodes.json` with `device`, `commands`, `declared`, `approved`, `effective`, `online`, `last_seen`, `resources`, `tags` |
-| `POST /api/nodes/join-code` | `{"code", "expires_at", "command"}`: a single-use code for 10 minutes and the line to paste on the new machine; `409` while `nodes.enabled` is off |
+| `POST /api/nodes/join-code` | `{"code", "expires_at", "core", "command", "command_powershell"}`: a single-use code for 10 minutes, the core's node address (its MagicDNS name on the tailnet) and the line to paste on the new machine, for sh and for PowerShell; `409` while `nodes.enabled` is off |
 | `POST /api/nodes/{id}/approve` | approves the device (first stage) |
 | `POST /api/nodes/{id}/approve-commands` | approves what the node declares now (second stage); `409` before the device is approved |
 | `POST /api/nodes/{id}/revoke` | revokes it and closes its connection |

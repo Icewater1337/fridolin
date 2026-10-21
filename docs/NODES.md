@@ -25,17 +25,206 @@ Both settings wait for a restart. `fridolin doctor` then checks that the
 node port answers (required while nodes are on) and warns about approved
 nodes the core has not heard from for five minutes.
 
-## Join a machine
+## Joining a machine
+
+This is the runbook a coding agent follows when the owner clones the
+repository on a new machine and says "set this machine up as a node of my
+fridolin core" (AGENTS.md, path B). The agent does every step itself
+except the three only the owner can do: signing in to Tailscale,
+signing in to the core's dashboard (or using the Mac), and approving the
+node. Each of those is opened for the owner in the browser, then the agent
+waits and checks. `fridolin setup-machine --node` says at any point what
+is done and what to do next; it only looks and may be run again and again.
+
+The core must have `nodes.enabled` and `core.tailnet.enabled` on (the
+owner's container core on the Mac mini has both): the node reaches it on
+the tailnet at `fridolin-core.<tailnet>.ts.net:8766`.
+
+### 1. Tools
+
+Ask once, naming them, then install what is missing.
+
+Windows (PowerShell; winget comes with Windows 11 and current Windows 10):
+
+```powershell
+winget install --id Git.Git -e --accept-source-agreements --accept-package-agreements
+winget install --id GoLang.Go -e --accept-source-agreements --accept-package-agreements
+winget install --id Tailscale.Tailscale -e --accept-source-agreements --accept-package-agreements
+# the new PATH, without opening a new shell:
+$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+go version; git --version; tailscale version
+```
+
+Where winget is missing, Chocolatey works too, from an administrator
+PowerShell: `choco install -y git golang tailscale`. Each installer may
+show a UAC prompt: tell the owner to accept it.
+
+macOS: `brew install go git` and `brew install --cask tailscale` (install
+Homebrew first if `brew` is missing:
+`/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`).
+Linux: `sudo apt install -y golang git` (or `sudo dnf install -y golang
+git`; Go must be 1.26 or newer, else the tarball from go.dev/dl) and
+`curl -fsSL https://tailscale.com/install.sh | sh`.
+
+### 2. Tailscale
+
+The machine must be on the owner's tailnet, logged in as the same account
+as the core. Run `tailscale up` (Linux: `sudo tailscale up`); it prints a
+login link and waits. Open the link for the owner (`Start-Process URL` on
+Windows, `open URL` on macOS, `xdg-open URL` on Linux; the Windows and
+macOS apps may open it themselves), ask them to sign in with the account
+the core's tailnet belongs to, and wait. Then:
+
+```sh
+tailscale status            # lists fridolin-core among the devices
+tailscale status --json     # MagicDNSSuffix is <tailnet>.ts.net
+```
+
+In PowerShell, the core's address:
+
+```powershell
+$tailnet = (tailscale status --json | ConvertFrom-Json).MagicDNSSuffix
+$core = "fridolin-core.$tailnet"
+Test-NetConnection $core -Port 8766   # TcpTestSucceeded: True
+```
+
+### 3. Build fridolin
+
+In the clone (no C compiler needed):
+
+```powershell
+$env:CGO_ENABLED = "0"
+go build -o bin\fridolin.exe .\cmd\fridolin
+```
+
+```sh
+CGO_ENABLED=0 go build -o bin/fridolin ./cmd/fridolin
+```
+
+On Windows the node service runs as LocalSystem, so its binary must lie
+where only administrators can change it. Copy it to Program Files, in one
+elevated step (the owner accepts the UAC prompt):
+
+```powershell
+Start-Process powershell -Verb RunAs -Wait -ArgumentList '-NoProfile','-Command',"New-Item -ItemType Directory -Force '$env:ProgramFiles\fridolin' | Out-Null; Copy-Item '$PWD\bin\fridolin.exe' '$env:ProgramFiles\fridolin\fridolin.exe' -Force"
+$fridolin = "$env:ProgramFiles\fridolin\fridolin.exe"
+& $fridolin version
+```
+
+On macOS and Linux, `make install` copies it to `~/.local/bin` (on PATH),
+which the user service runs.
+
+### 4. A join code from the core
+
+The default needs nothing of the Mac: open the core's dashboard on the
+tailnet for the owner, at its Nodes page:
+
+```powershell
+Start-Process "https://$core/#/nodes"     # http:// when the tailnet has no HTTPS certificates
+```
+
+(`open` / `xdg-open` elsewhere.) A browser that never signed in there
+shows the sign-in page: the owner pastes the dashboard token from their
+password manager into it, never into the chat. Ask them to click **New
+join code** and paste the Windows line it shows into the chat or this
+terminal. The code is single-use, expires in 10 minutes and grants
+nothing until the owner approves the node, so it may go through the chat.
+
+The alternative, on the Mac mini (or by an agent there):
+
+```sh
+docker exec fridolin-core fridolin nodes join-code
+```
+
+A native core: `fridolin nodes join-code`. Both print the line for sh and
+for PowerShell, with the core's tailnet address.
+
+### 5. Join
+
+Ask the owner which folder the core may use on this machine (default
+`Fridolin` in their home folder), create it, and decide the commands:
+on a Windows PC none (`--no-exec`), unless the owner names programs to
+allow (`--allow PROG=PATTERN,…`; never a shell). Host facts and
+notifications stay on.
+
+Windows, in the owner's normal PowerShell (the state dir is then theirs,
+`%LOCALAPPDATA%\fridolin-node`), joining without the service first:
+
+```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE\Fridolin" | Out-Null
+& $fridolin node join fj-… --core "${core}:8766" --no-service --no-exec --root "$env:USERPROFILE\Fridolin:rw"
+```
+
+then the service, in one elevated step, with the state dir named (an
+administrator account may have another profile):
+
+```powershell
+$state = "$env:LOCALAPPDATA\fridolin-node"
+Start-Process $fridolin -Verb RunAs -Wait -ArgumentList 'node','install','--state-dir',"`"$state`""
+Start-Process $fridolin -Verb RunAs -Wait -ArgumentList 'node','start','--state-dir',"`"$state`""
+```
+
+macOS and Linux, in one line (it installs and starts the user service):
+
+```sh
+mkdir -p ~/Fridolin
+fridolin node join fj-… --core fridolin-core.<tailnet>.ts.net:8766 --no-exec --root ~/Fridolin:rw
+```
+
+`join` prints the node's id.
+
+### 6. Approve on the core
+
+On the Nodes page the owner already has open: **Approve device**, then
+**Approve commands** (the second approves what the node offers: the
+folder, host facts, notifications). Or on the Mac:
+
+```sh
+docker exec fridolin-core fridolin nodes approve <id>
+docker exec fridolin-core fridolin nodes approve <id> --commands
+```
+
+### 7. Verify
+
+```powershell
+& $fridolin node status --state-dir $state     # Service fridolin-node: running
+& $fridolin doctor --node --state-dir $state   # Tailscale, joined, core reachable, service
+& $fridolin setup-machine --node --state-dir $state
+```
+
+On the core, `fridolin nodes` (or the Nodes page) shows the node online,
+device and commands approved. In a direct chat with the bridge, `!fleet`
+lists it.
+
+### Rollback
+
+On the core: `fridolin nodes revoke <id>` (or **Revoke**). On the machine:
+`fridolin node stop`, `fridolin node uninstall` (Windows: elevated, with
+`--state-dir`), then delete the state dir; uninstall Tailscale if the
+owner wants. Joining again later makes a new device with a new code.
+
+### Never
+
+- print `node.key`, the dashboard token or a Tailscale auth key, or ask
+  the owner to type a secret into the chat;
+- allow a shell or `powershell`/`cmd` with `--allow` (the node refuses
+  it anyway) or allow programs the owner did not name;
+- run a second core, or touch the core's `bridge.db`: joining a node
+  changes nothing on the core but its node registry.
+
+## Join a machine, in short
 
 1. On the core: `fridolin nodes join-code` (or **Nodes → New join code**
    in the dashboard). It prints a single-use code, valid for 10 minutes,
-   and the line to paste:
+   and the lines to paste (sh and PowerShell):
 
    ```
-   fridolin node join fj-abcd… --core fridolin-core:8766
+   fridolin node join fj-abcd… --core fridolin-core.example.ts.net:8766
    ```
 
-   The core keeps only the code's SHA-256 in `nodes/nodes.json`.
+   On the tailnet the address is the core's MagicDNS name once it joined,
+   so it resolves on every device of the tailnet. The core keeps only the
+   code's SHA-256 in `nodes/nodes.json`.
 2. On the new machine, with fridolin installed, paste that line. It makes
    the node's device key, writes `node.json`, connects once with the code,
    and installs and starts the node service. `--no-service` only joins;
@@ -295,7 +484,14 @@ node service through [kardianos/service](https://github.com/kardianos/service):
 | Windows | Windows Service `fridolin-node`, started at boot, restarted after a failure |
 
 The service runs `fridolin node run --state-dir <dir>` with the binary that
-installed it, so install from where the binary stays. A revoked node's
+installed it, so install from where the binary stays. On Windows the
+service runs as LocalSystem: `install`, `start`, `stop` and `uninstall`
+need an elevated PowerShell (`Start-Process … -Verb RunAs`), and the
+binary belongs in `%ProgramFiles%\fridolin\`, where only administrators
+may replace it ([Joining a machine](#joining-a-machine)). On a machine
+that joined a core and has no bridge config, `fridolin doctor` checks the
+node: Tailscale, `node.json` and the device key, the core's node port,
+the service (`--node` and `--state-dir` say so explicitly). A revoked node's
 agent stays up without reconnecting until it is stopped, so the service
 manager does not restart it into the same refusal.
 

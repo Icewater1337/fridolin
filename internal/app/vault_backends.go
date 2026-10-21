@@ -43,20 +43,14 @@ func vaultBaseEnv() []string {
 }
 
 // hostSecretStore is the host's secret store of a native install: the
-// macOS keychain, or 0600 files on Linux. Inside the core container there
-// is none: its secrets come only from its environment.
+// macOS keychain, the Windows Credential Manager, or 0600 files on Linux.
+// Inside the core container there is none: its secrets come only from
+// its environment.
 func hostSecretStore(container bool) hostsecrets.Store {
 	if container {
 		return nil
 	}
-	if runtime.GOOS == "darwin" {
-		return hostsecrets.Keychain{}
-	}
-	xdg := os.Getenv("XDG_CONFIG_HOME")
-	if xdg == "" {
-		xdg = filepath.Join(HomeDir(), ".config")
-	}
-	return hostsecrets.Files{Dir: filepath.Join(xdg, "fridolin", "secrets")}
+	return hostsecrets.ForHost(runtime.GOOS, os.Getenv, HomeDir())
 }
 
 // findVaultTool finds restic or Litestream where the bridge finds its

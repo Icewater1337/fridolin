@@ -302,11 +302,15 @@ func coreMigrate(ctx context.Context, args []string, env coreEnv, d hostDeps) in
 		fmt.Fprintln(env.stderr, "fridolin core migrate: --rehearse and --mount go with --from-native")
 		return 2
 	}
+	if d.goos == "windows" {
+		fmt.Fprintln(env.stderr, "fridolin core migrate: Windows has no native bridge to move; bring the core here with fridolin core run core import --latest (docs/CORE.md, Moving the core to another machine)")
+		return 2
+	}
 	if f.rehearse {
 		f.local = true
 	}
 	if d.docker == "" {
-		fmt.Fprintln(env.stderr, "fridolin core: docker is not installed or not on PATH (Docker Desktop or OrbStack on macOS)")
+		fmt.Fprintln(env.stderr, dockerMissing)
 		return 1
 	}
 	m := &migration{f: f, env: env, d: d, ctx: ctx, out: env.stdout}
