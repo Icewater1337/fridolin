@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -32,6 +33,9 @@ var deniedHome = []string{
 	".git-credentials", ".netrc",
 }
 
+// secretName is a hidden folder's name that says it holds secrets.
+var secretName = regexp.MustCompile(`secret|credential|token|keyring|vault`)
+
 // systemRoots are folders no workstation root may be or lie in.
 func systemRoots() []string {
 	if runtime.GOOS == "windows" {
@@ -56,6 +60,15 @@ func deniedPaths(stateDir string) []string {
 	if home, err := homeDir(); err == nil && home != "" {
 		for _, d := range deniedHome {
 			out = append(out, filepath.Clean(filepath.Join(home, filepath.FromSlash(d))))
+		}
+		// And every hidden folder of the home folder named for secrets,
+		// credentials or tokens.
+		if ents, err := os.ReadDir(home); err == nil {
+			for _, e := range ents {
+				if n := strings.ToLower(e.Name()); strings.HasPrefix(n, ".") && secretName.MatchString(n) {
+					out = append(out, filepath.Join(home, e.Name()))
+				}
+			}
 		}
 	}
 	if stateDir != "" {
