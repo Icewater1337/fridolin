@@ -24,7 +24,7 @@ func TestResponseDTOsKeepMapWireEncoding(t *testing.T) {
 		{"CalendarListResponse", CalendarListResponse{}, []string{"Calendars=calendars", "Restricted=restricted"}},
 		{"PickerCancelledResponse", PickerCancelledResponse{}, []string{"Cancelled=cancelled"}},
 		{"BuilderProposalResponse", BuilderProposalResponse{}, []string{"Changes=changes", "Proposal=proposal"}},
-		{"LoginCodeResponse", LoginCodeResponse{}, []string{"Code=code", "ExpiresAt=expires_at"}},
+		{"LoginCodeResponse", LoginCodeResponse{}, []string{"Code=code", "ExpiresAt=expires_at", "URL=url"}},
 		{"ConfigResponse", ConfigResponse{}, []string{"Config=config", "Effective=effective", "ETag=etag", "Path=path"}},
 		{"PollsResponse", PollsResponse{}, []string{"Count=count", "Polls=polls"}},
 		{"CalendarCreatedResponse", CalendarCreatedResponse{}, []string{"Created=created"}},

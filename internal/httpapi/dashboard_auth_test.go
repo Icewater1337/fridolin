@@ -88,7 +88,7 @@ func TestLoginCodeForTheTailnet(t *testing.T) {
 		a.LoginCode(w, httptest.NewRequest("POST", path, nil))
 		return w
 	}
-	if w := ask("/api/login/code"); w.Code != 200 || !strings.Contains(w.Body.String(), `"code":"code"`) || strings.Contains(w.Body.String(), "url") {
+	if w := ask("/api/login/code"); w.Code != 200 || !strings.Contains(w.Body.String(), `"code":"code"`) || !strings.Contains(w.Body.String(), `"url":""`) {
 		t.Errorf("a local code: %d %s", w.Code, w.Body.String())
 	}
 	if w := ask("/api/login/code?tailnet=1"); w.Code != http.StatusConflict {
