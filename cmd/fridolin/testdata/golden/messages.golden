@@ -26,6 +26,9 @@ helpReply("")
 	• `!fleet` — the machines connected to me as nodes (direct chats only)
 	• `!move <thread> <node>` — move FrIDE's coding work to another node (direct chats only)
 	• `!lockdown` — owner only: pause all work but reading until `!unlock`
+	• `!join` — owner only, direct chat: a join code for a new node
+	• `!dashboard` — owner only, direct chat: a sign-in link for the dashboard
+	• `!approve <id>`, `!revoke <id>` — owner only, direct chat: let a node in, or shut it out
 helpReply("@claude")
 	🤖 *Fridolin*
 
@@ -38,6 +41,9 @@ helpReply("@claude")
 	• `!fleet` — the machines connected to me as nodes (direct chats only)
 	• `!move <thread> <node>` — move FrIDE's coding work to another node (direct chats only)
 	• `!lockdown` — owner only: pause all work but reading until `!unlock`
+	• `!join` — owner only, direct chat: a join code for a new node
+	• `!dashboard` — owner only, direct chat: a sign-in link for the dashboard
+	• `!approve <id>`, `!revoke <id>` — owner only, direct chat: let a node in, or shut it out
 
 	In this group, start your message with `@claude` or reply to one of mine to address me, commands included.
 queuedNotice(2)
@@ -95,20 +101,74 @@ fleetGroupNotice
 fleetReply(false)
 	🖥️ Nodes are off. Turn on nodes.enabled in the config and restart the bridge to connect other machines (docs/NODES.md).
 fleetReply(true, none)
-	🖥️ No nodes yet. On the core, run `fridolin nodes join-code` and paste the line it prints on the new machine.
+	🖥️ No nodes yet. Send `!join` here for a join code, and paste the line it sends on the new machine.
 fleetReply(true, nodes)
 	🖥️ *Fleet* — 4 nodes, 1 online
 
 	• *laptop* (Windows) — online
 	  may run: exec (hostname, whoami), fs (1 root), host
 	  id 8233270f8a24 · gpu, windows
-	• *mini* (macOS) — last seen 3h ago · offers more than approved: `fridolin nodes approve 4f1e2d3c4b5a --commands`
+	• *mini* (macOS) — last seen 3h ago · offers more than approved: `!approve 4f1e2d3c4b5a`
 	  may run: host
 	  id 4f1e2d3c4b5a · macos
-	• *pi* (Linux) — last seen 1m ago · waiting for approval: `fridolin nodes approve 0a1b2c3d4e5f`
+	• *pi* (Linux) — last seen 1m ago · waiting for approval: `!approve 0a1b2c3d4e5f`
 	  id 0a1b2c3d4e5f
 	• *old* (Linux) — never seen · revoked
 	  id ffeeddccbbaa
+nodesOffNotice
+	🖥️ Nodes are off. Turn on nodes.enabled in the config and restart the bridge to connect other machines (docs/NODES.md).
+ownerCommandGroupNotice
+	🔒 !join, !dashboard, !approve and !revoke answer only in the owner's direct chat.
+ownerCommandOwnerOnly
+	🔒 Only the owner can ask for join codes and sign-in links, or approve and revoke nodes.
+ownerCommandRateLimited
+	⏳ !join answered 5 times in the last hour, the most allowed. Try again later, or use the dashboard.
+nodeCommandUsage
+	🖥️ Send `!approve <id>` or `!revoke <id>` with a node's id; `!fleet` lists them.
+joinCodeReply
+	🔑 Join code for a new node, single-use, valid 10 minutes:
+
+	fj-abcdefghijklmnopqrstuvwx
+
+	On the new machine, paste one line.
+
+	*macOS, Linux (sh):*
+	```fridolin node join fj-abcdefghijklmnopqrstuvwx --core fridolin-core.example.ts.net:8766```
+
+	*Windows (PowerShell):*
+	```& "$env:ProgramFiles\fridolin\fridolin.exe" node join fj-abcdefghijklmnopqrstuvwx --core fridolin-core.example.ts.net:8766```
+
+	Core: fridolin-core.example.ts.net:8766. Add `--root PATH:rw` to share a folder, `--no-exec` to allow no commands (docs/NODES.md). Once it connects I'll tell you here, and `!approve <id>` lets it in.
+dashboardOffNotice
+	🔗 The dashboard is turned off (dashboard.disabled or http_enabled), so there is nothing to sign in to.
+dashboardLinkReply(tailnet)
+	🔗 Dashboard sign-in link, works once within 10 minutes:
+
+	*From any device on your tailnet:*
+	http://fridolin-core.example.ts.net/#login=CODE
+
+	*On the core machine:*
+	http://127.0.0.1:8765/#login=CODE
+
+	It signs that browser in for 30 days; send `!dashboard` again for another link. Do not forward it.
+dashboardLinkReply(local)
+	🔗 Dashboard sign-in link, works once within 10 minutes:
+
+	http://127.0.0.1:8765/#login=CODE
+
+	The core is not on the tailnet, so it works only on the core machine.
+
+	It signs that browser in for 30 days; send `!dashboard` again for another link. Do not forward it.
+nodeJoinedAlert
+	🖥️ *laptop* (Windows) wants to join as a node — approve it on the Nodes page or reply `!approve 8233270f8a24`. Not yours? `!revoke 8233270f8a24` shuts it out.
+nodeApprovedReply
+	✅ *laptop* (8233270f8a24) is approved: it may serve fs (1 root, 1 writable), host, notify. `!fleet` lists it; `!revoke 8233270f8a24` shuts it out again.
+nodeRevokedReply
+	🚫 *laptop* (8233270f8a24) is revoked: it is disconnected and refused from now on. To bring it back, it joins again with a new code (`!join`).
+nodeIsRevokedReply
+	🚫 *laptop* (8233270f8a24) was revoked, so it cannot be approved. It joins again with a new code (`!join`), as a new node.
+nodeUnknownReply
+	❓ No node has the id nope. `!fleet` lists them.
 approvalYes
 	✅ Yes
 approvalNo
