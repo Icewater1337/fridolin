@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"io"
 	"os"
-	"path/filepath"
+	"path"
 	"runtime"
 	"slices"
 	"strconv"
@@ -75,7 +75,7 @@ func volumes(goos, home string, mounts io.Reader, readDir func(string) ([]os.Dir
 				if e.Type()&os.ModeSymlink != 0 || !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 					continue
 				}
-				add(Volume{Path: filepath.Join("/Volumes", e.Name()), Label: e.Name(), Removable: true})
+				add(Volume{Path: path.Join("/Volumes", e.Name()), Label: e.Name(), Removable: true})
 			}
 		}
 	default:
@@ -96,7 +96,7 @@ func volumes(goos, home string, mounts io.Reader, readDir func(string) ([]os.Dir
 			}
 			removable := strings.HasPrefix(p, "/media/") || strings.HasPrefix(p, "/run/media/") || strings.HasPrefix(p, "/mnt/") ||
 				strings.HasPrefix(f[2], "nfs") || f[2] == "cifs" || f[2] == "smb3"
-			add(Volume{Path: p, Label: filepath.Base(p), Removable: removable})
+			add(Volume{Path: p, Label: path.Base(p), Removable: removable})
 		}
 	}
 	return out
