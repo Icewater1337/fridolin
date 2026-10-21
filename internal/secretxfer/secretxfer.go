@@ -4,8 +4,9 @@
 // takes it over, directly over the tailnet (docs/CORE.md, "Moving the
 // core to another machine").
 //
-// The receiver (`fridolin core receive`) makes an ephemeral age X25519
-// key, listens once on its Tailscale address, and shows a one-time code.
+// The receiver (`fridolin core receive`) makes an ephemeral post-quantum
+// age key (ML-KEM-768 + X25519; the sender's own key, X25519, only
+// proves the code and feeds the words), listens once on its Tailscale address, and shows a one-time code.
 // The sender (`fridolin core send`) connects, and both check with
 // Tailscale (WhoIs) that the other is a device of the same owner. The
 // sender proves it knows the code without sending it (an HMAC over both
