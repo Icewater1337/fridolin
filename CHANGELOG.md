@@ -640,6 +640,29 @@ for compatibility.
 
 ### Fixed
 
+- A Windows node joined by a coding agent in the Claude desktop app no
+  longer ends with a node service that fails to start with only error
+  1053. The app runs as an MSIX package, and Windows keeps what any
+  process it starts writes under AppData, elevated ones too, in the
+  package's own copy (`%LOCALAPPDATA%\Packages\<family>\LocalCache`),
+  which the LocalSystem service never sees: `node.json` and `node.key`
+  went there, and the service, registered with the real
+  `%LOCALAPPDATA%\fridolin-node`, stopped before it could answer
+  Windows. Now `fridolin node join` (and `node backup`, `node
+  workstation`, `node fride pair`) refuses a state dir whose writes
+  Windows would redirect, before
+  it spends the join code, and `node install` one whose `node.json` it
+  sees as a package's copy; both say to run in a PowerShell started from
+  the Start menu or to pass a state dir outside AppData, such as
+  `--state-dir "$env:USERPROFILE\.fridolin-node"`. `fridolin doctor
+  --node`, `setup-machine --node`, `node status` and a failed `node
+  start` read the state dir the service was installed with and say when
+  it has no `node.json`, and where a package's copy of it lies
+  (docs/NODES.md, "Inside an app package", also says how to recover a
+  node that already hit it). `fridolin node status` and `doctor --node`
+  on Windows also tell the service's state without an administrator
+  instead of "cannot tell: Access is denied".
+
 - `fridolin doctor` no longer warns that a connected node was not heard
   from (`nodes-seen`) or cannot take FrIDE work (`nodes-fride`) while
   `fridolin nodes` shows it online. The core kept each heartbeat's time

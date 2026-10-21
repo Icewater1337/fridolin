@@ -90,6 +90,10 @@ func nodeFrideCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "fridolin node fride pair: --url is missing: FrIDE's address on this machine, such as http://127.0.0.1:7777\n")
 			return 2
 		}
+		if err := thisAppPackage().writeError(dir); err != nil {
+			fmt.Fprintf(stderr, "fridolin node fride pair: %v\n", err)
+			return 1
+		}
 		c := *code
 		if c == "" {
 			if c, err = frideCode(ctx, *bin, *home); err != nil {

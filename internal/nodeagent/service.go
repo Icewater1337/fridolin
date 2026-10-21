@@ -3,7 +3,7 @@ package nodeagent
 import (
 	"context"
 	"errors"
-	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -115,24 +115,29 @@ func ControlService(cfg *service.Config, action string) error {
 	return service.Control(s, action)
 }
 
-// ServiceStatus says whether the service is installed and running.
+// ServiceStatus says whether the service is installed and running. On
+// Windows it needs no administrator.
 func ServiceStatus(cfg *service.Config) (string, error) {
-	s, err := service.New(&program{}, cfg)
-	if err != nil {
-		return "", err
+	return serviceStatus(cfg)
+}
+
+// ServiceStateDir is the state dir the installed service runs with, read
+// back from the Windows Service's command line: "" for a service that is
+// not installed, and on macOS and Linux.
+func ServiceStateDir(cfg *service.Config) (string, error) {
+	return serviceStateDir(cfg)
+}
+
+// stateDirArg is the --state-dir of the service's command line, "" for
+// none.
+func stateDirArg(args []string) string {
+	for i, a := range args {
+		if v, ok := strings.CutPrefix(a, "--state-dir="); ok {
+			return v
+		}
+		if a == "--state-dir" && i+1 < len(args) {
+			return args[i+1]
+		}
 	}
-	st, err := s.Status()
-	if errors.Is(err, service.ErrNotInstalled) {
-		return "not installed", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	switch st {
-	case service.StatusRunning:
-		return "running", nil
-	case service.StatusStopped:
-		return "installed, stopped", nil
-	}
-	return fmt.Sprintf("unknown (%d)", st), nil
+	return ""
 }

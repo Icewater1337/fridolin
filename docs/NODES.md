@@ -172,19 +172,33 @@ on a Windows PC none (`--no-exec`), unless the owner names programs to
 allow (`--allow PROG=PATTERN,…`; never a shell). Host facts and
 notifications stay on.
 
-Windows, in the owner's normal PowerShell (the state dir is then theirs,
-`%LOCALAPPDATA%\fridolin-node`), joining without the service first:
+Windows, joining without the service first, with the state dir named
+in every command (an administrator account may have another profile).
+Which one depends on where the commands run:
+
+```powershell
+# In the owner's PowerShell, started from the Start menu: the default.
+$state = "$env:LOCALAPPDATA\fridolin-node"
+# Inside the Claude desktop app (an agent's commands there), or any other
+# app installed from the Microsoft Store or as an MSIX package: outside AppData.
+$state = "$env:USERPROFILE\.fridolin-node"
+```
+
+Inside such an app, Windows keeps what the commands write under AppData
+in the app's own copy, which the service never sees ([Inside an app
+package](#inside-an-app-package)); `join` refuses a state dir it would
+write there, before it spends the code, and names the one to use. The
+home folder, like AppData in it, is readable only by the owner, SYSTEM
+and the administrators.
 
 ```powershell
 New-Item -ItemType Directory -Force "$env:USERPROFILE\Fridolin" | Out-Null
-& $fridolin node join fj-… --core "${core}:8766" --no-service --no-exec --root "$env:USERPROFILE\Fridolin:rw"
+& $fridolin node join fj-… --core "${core}:8766" --no-service --no-exec --root "$env:USERPROFILE\Fridolin:rw" --state-dir $state
 ```
 
-then the service, in one elevated step, with the state dir named (an
-administrator account may have another profile):
+then the service, in one elevated step:
 
 ```powershell
-$state = "$env:LOCALAPPDATA\fridolin-node"
 Start-Process $fridolin -Verb RunAs -Wait -ArgumentList 'node','install','--state-dir',"`"$state`""
 Start-Process $fridolin -Verb RunAs -Wait -ArgumentList 'node','start','--state-dir',"`"$state`""
 ```
@@ -222,7 +236,82 @@ docker exec fridolin-core fridolin nodes approve <id> --commands
 
 On the core, `fridolin nodes` (or the Nodes page) shows the node online,
 device and commands approved. In a direct chat with the bridge, `!fleet`
-lists it.
+lists it. None of these needs an administrator. When the service does
+not start, Windows says only error 1053 ("did not respond to the start
+or control request in a timely fashion", event 7009 in the System log);
+`doctor --node` says why, from the state dir the service was installed
+with.
+
+### Inside an app package
+
+The Claude desktop app is an MSIX package, as are apps from the Microsoft
+Store. Windows keeps what a process of such an app creates under the
+user's AppData, `%LOCALAPPDATA%` and `%APPDATA%`, in the package's own
+copy, `%LOCALAPPDATA%\Packages\<family>\LocalCache\Local` (and
+`\Roaming`), and shows the app's processes that copy in place of the real
+folder. That holds for every process the app starts, elevated ones too,
+and whether or not it carries the package's identity: the shells of the
+Claude desktop app's Code tab do not, and are redirected all the same.
+Every other process, the node service among them, sees the real folder.
+
+So a `fridolin node join` run there with the default state dir puts
+`node.json` and `node.key` into
+`%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\fridolin-node`,
+where `fridolin node status` in the app finds them, while the service,
+installed with `--state-dir %LOCALAPPDATA%\fridolin-node`, finds an
+empty folder. The agent then exits before it reaches the service
+manager, so it can log nothing, and Windows reports error 1053 within a
+second.
+
+fridolin checks for it:
+
+- `node join`, `node backup`, `node workstation` and `node fride pair`
+  create and remove a file in the state dir to see where it lands, and
+  refuse a state dir
+  whose writes end up in a package's copy, before anything is written
+  (join spends no code);
+- `node install` refuses a state dir whose `node.json` is, as it sees
+  it, a package's copy;
+- `doctor --node`, `setup-machine --node`, `node status` and a failed
+  `node start` read the state dir from the service's command line and
+  say when it has no `node.json`, and in which package's copy one lies.
+
+Use a state dir outside AppData from inside such an app:
+`$env:USERPROFILE\.fridolin-node`, in the home folder, which only the
+owner, SYSTEM and the administrators may read, and name it with
+`--state-dir` in every `fridolin node` command, the elevated ones too.
+Or run the commands in a PowerShell the owner starts from the Start
+menu, which keeps the default.
+
+A node that already hit it keeps its device and approval when its two
+files move. From a PowerShell started from the Start menu, copy them to
+where the service looks, then start it:
+
+```powershell
+$fridolin = "$env:ProgramFiles\fridolin\fridolin.exe"
+$copy = "$env:LOCALAPPDATA\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\fridolin-node"   # doctor --node names it
+$state = "$env:LOCALAPPDATA\fridolin-node"
+New-Item -ItemType Directory -Force $state | Out-Null
+Copy-Item "$copy\node.json", "$copy\node.key" $state
+Start-Process $fridolin -Verb RunAs -Wait -ArgumentList 'node','start','--state-dir',"`"$state`""
+```
+
+Or, from inside the app, copy them out of AppData and install the
+service with that state dir:
+
+```powershell
+$copy = "$env:LOCALAPPDATA\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Local\fridolin-node"
+$state = "$env:USERPROFILE\.fridolin-node"
+New-Item -ItemType Directory -Force $state | Out-Null
+Copy-Item "$copy\node.json", "$copy\node.key" $state
+Start-Process $fridolin -Verb RunAs -Wait -ArgumentList 'node','uninstall'
+Start-Process $fridolin -Verb RunAs -Wait -ArgumentList 'node','install','--state-dir',"`"$state`""
+Start-Process $fridolin -Verb RunAs -Wait -ArgumentList 'node','start','--state-dir',"`"$state`""
+```
+
+Once the service runs, the package's copy is only a stale view of the
+node for the app's processes; the owner may delete it (`Remove-Item
+-Recurse $copy`), after which they see the real state dir.
 
 ### Rollback
 
@@ -1120,10 +1209,17 @@ installed it, so install from where the binary stays. On Windows the
 service runs as LocalSystem: `install`, `start`, `stop` and `uninstall`
 need an elevated PowerShell (`Start-Process … -Verb RunAs`), and the
 binary belongs in `%ProgramFiles%\fridolin\`, where only administrators
-may replace it ([Joining a machine](#joining-a-machine)). On a machine
+may replace it ([Joining a machine](#joining-a-machine)). `status` needs
+no administrator: it asks the service manager only for the service's
+state and command line, which every user may read, and shows the state
+dir the service runs with where it is not the one asked about. The
+service reads its state dir as LocalSystem, outside any app package, so
+it must not lie in an app's copy of AppData ([Inside an app
+package](#inside-an-app-package)). On a machine
 that joined a core and has no bridge config, `fridolin doctor` checks the
 node: Tailscale, `node.json` and the device key, the core's node port,
-the service (`--node` and `--state-dir` say so explicitly). A revoked node's
+the service, and on Windows whether the state dir it was installed with
+holds `node.json` (`--node` and `--state-dir` say so explicitly). A revoked node's
 agent stays up without reconnecting until it is stopped, so the service
 manager does not restart it into the same refusal.
 

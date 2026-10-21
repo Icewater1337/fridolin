@@ -279,7 +279,7 @@ func doctorEnvFor(reachable string, docker map[string]string) *app.DoctorEnv {
 func TestNodeChecks(t *testing.T) {
 	dir := t.TempDir()
 	running := func() (string, error) { return "running", nil }
-	rep := app.RunDoctor(context.Background(), doctorEnvFor("", nil), nodeChecks(dir, running))
+	rep := app.RunDoctor(context.Background(), doctorEnvFor("", nil), nodeChecks(dir, nodeService{status: running}))
 	if rep.OK || rep.Checks[1].ID != "node-joined" || rep.Checks[1].Status != app.DoctorFail || !strings.Contains(rep.Checks[1].Fix, "join-code") {
 		t.Fatalf("not joined: %+v", rep)
 	}
@@ -289,12 +289,12 @@ func TestNodeChecks(t *testing.T) {
 	if err := nodeagent.SaveConfig(dir, nodeagent.Config{Core: "ws://fridolin-core.example.ts.net:8766", Name: "winbox", Capabilities: nodeproto.Capabilities{Host: true}}); err != nil {
 		t.Fatal(err)
 	}
-	rep = app.RunDoctor(context.Background(), doctorEnvFor("fridolin-core.example.ts.net:8766", nil), nodeChecks(dir, running))
+	rep = app.RunDoctor(context.Background(), doctorEnvFor("fridolin-core.example.ts.net:8766", nil), nodeChecks(dir, nodeService{status: running}))
 	if !rep.OK {
 		t.Errorf("joined, reachable, running: %+v", rep)
 	}
 	stopped := func() (string, error) { return "installed, stopped", nil }
-	rep = app.RunDoctor(context.Background(), doctorEnvFor("", nil), nodeChecks(dir, stopped))
+	rep = app.RunDoctor(context.Background(), doctorEnvFor("", nil), nodeChecks(dir, nodeService{status: stopped}))
 	var failed []string
 	for _, c := range rep.Checks {
 		if c.Status == app.DoctorFail {

@@ -120,11 +120,11 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "fridolin node join takes the join code\n\n%s", nodeUsage)
 			return 2
 		}
-		return nodeJoin(pos[0], dir, o, stdout, stderr)
+		return nodeJoin(pos[0], dir, o, thisAppPackage(), stdout, stderr)
 	case "backup":
-		return nodeBackup(pos, backupRoots, dir, stdout, stderr)
+		return nodeBackup(pos, backupRoots, dir, thisAppPackage(), stdout, stderr)
 	case "workstation":
-		return nodeWorkstation(pos, ws, dir, stdout, stderr)
+		return nodeWorkstation(pos, ws, dir, thisAppPackage(), stdout, stderr)
 	case "run", "install", "start", "stop", "status", "uninstall", "rollback":
 		if len(pos) != 0 {
 			fmt.Fprintf(stderr, "fridolin node %s takes no arguments\n", sub)
@@ -179,6 +179,16 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 			st = "unknown: " + err.Error()
 		}
 		fmt.Fprintf(stdout, "Service %s: %s\n", svc.Name, st)
+		if sd, _ := nodeagent.ServiceStateDir(svc); sd != "" {
+			if !samePath(sd, dir) {
+				fmt.Fprintf(stdout, "The service runs with --state-dir %s\n", sd)
+			}
+			if st != "running" {
+				if detail, fix := thisAppPackage().serviceDirProblem(sd); detail != "" {
+					fmt.Fprintf(stdout, "Problem: %s\nFix: %s\n", detail, fix)
+				}
+			}
+		}
 	case "rollback":
 		if err := nodeagent.Rollback(exe); err != nil {
 			fmt.Fprintf(stderr, "fridolin node rollback: %v\n", err)
@@ -191,9 +201,17 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "fridolin node install: %v\n", err)
 				return 1
 			}
+			if err := thisAppPackage().serviceError(dir); err != nil {
+				fmt.Fprintf(stderr, "fridolin node install: %v\n", err)
+				return 1
+			}
 		}
 		if err := nodeagent.ControlService(svc, sub); err != nil {
 			fmt.Fprintf(stderr, "fridolin node %s: %v\n", sub, err)
+			if sub == "start" {
+				sd, _ := nodeagent.ServiceStateDir(svc)
+				whyNotStarted(stderr, sd)
+			}
 			return 1
 		}
 		fmt.Fprintf(stdout, "fridolin node %s: done (service %s)\n", sub, svc.Name)
@@ -302,7 +320,7 @@ func backupCap(roots []string) (*nodeproto.BackupCap, error) {
 }
 
 // nodeBackup turns the backup capability on or off in node.json.
-func nodeBackup(pos []string, roots multiFlag, dir string, stdout, stderr io.Writer) int {
+func nodeBackup(pos []string, roots multiFlag, dir string, pkg appPackage, stdout, stderr io.Writer) int {
 	if len(pos) != 1 || pos[0] != "on" && pos[0] != "off" {
 		fmt.Fprintln(stderr, "fridolin node backup takes on or off")
 		return 2
@@ -319,6 +337,10 @@ func nodeBackup(pos []string, roots multiFlag, dir string, stdout, stderr io.Wri
 			fmt.Fprintf(stderr, "fridolin node backup: %v\n", err)
 			return 2
 		}
+	}
+	if err := pkg.writeError(dir); err != nil {
+		fmt.Fprintf(stderr, "fridolin node backup: %v\n", err)
+		return 1
 	}
 	if err := nodeagent.SaveConfig(dir, cfg); err != nil {
 		fmt.Fprintf(stderr, "fridolin node backup: %v\n", err)
@@ -347,7 +369,7 @@ func parseAllow(s string) nodeproto.ExecRule {
 	return r
 }
 
-func nodeJoin(code, dir string, o joinFlags, stdout, stderr io.Writer) int {
+func nodeJoin(code, dir string, o joinFlags, pkg appPackage, stdout, stderr io.Writer) int {
 	if o.core == "" {
 		fmt.Fprintln(stderr, "fridolin node join: --core HOST:PORT is missing (the line fridolin nodes join-code printed has it)")
 		return 2
@@ -363,6 +385,11 @@ func nodeJoin(code, dir string, o joinFlags, stdout, stderr io.Writer) int {
 		if i := strings.IndexByte(name, '.'); i > 0 {
 			name = name[:i]
 		}
+	}
+	// Before the code is spent: a join the service cannot use needs a new one.
+	if err := pkg.writeError(dir); err != nil {
+		fmt.Fprintf(stderr, "fridolin node join: %v\n", err)
+		return 1
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -386,7 +413,12 @@ func nodeJoin(code, dir string, o joinFlags, stdout, stderr io.Writer) int {
 	svc := nodeagent.ServiceConfig(runtime.GOOS, exe, dir)
 	for _, action := range []string{"install", "start"} {
 		if err := nodeagent.ControlService(svc, action); err != nil {
-			fmt.Fprintf(stderr, "fridolin node join: %s the service: %v\nRun the agent yourself with: fridolin node run --state-dir %q\n", action, err, dir)
+			fmt.Fprintf(stderr, "fridolin node join: %s the service: %v\n", action, err)
+			if action == "start" {
+				sd, _ := nodeagent.ServiceStateDir(svc)
+				whyNotStarted(stderr, sd)
+			}
+			fmt.Fprintf(stderr, "Run the agent yourself with: fridolin node run --state-dir %q\n", dir)
 			return 1
 		}
 	}
@@ -424,7 +456,7 @@ func workstationCap(roots []string, allowHome bool) (*nodeproto.WorkstationCap, 
 }
 
 // nodeWorkstation turns the workstation mode on or off in node.json.
-func nodeWorkstation(pos []string, o workstationFlags, dir string, stdout, stderr io.Writer) int {
+func nodeWorkstation(pos []string, o workstationFlags, dir string, pkg appPackage, stdout, stderr io.Writer) int {
 	if len(pos) != 1 || pos[0] != "on" && pos[0] != "off" {
 		fmt.Fprintln(stderr, "fridolin node workstation takes on or off")
 		return 2
@@ -452,6 +484,10 @@ func nodeWorkstation(pos []string, o workstationFlags, dir string, stdout, stder
 			cfg.Capabilities.Terminal = w
 		}
 	}
+	if err := pkg.writeError(dir); err != nil {
+		fmt.Fprintf(stderr, "fridolin node workstation: %v\n", err)
+		return 1
+	}
 	if err := nodeagent.SaveConfig(dir, cfg); err != nil {
 		fmt.Fprintf(stderr, "fridolin node workstation: %v\n", err)
 		return 1
@@ -462,4 +498,13 @@ func nodeWorkstation(pos []string, o workstationFlags, dir string, stdout, stder
 	}
 	fmt.Fprintln(stdout, ".")
 	return 0
+}
+
+// whyNotStarted says what keeps the service from the state dir it runs
+// with (nodeagent.ServiceStateDir), if that is why Windows could not start
+// it, which says only error 1053 then.
+func whyNotStarted(w io.Writer, serviceDir string) {
+	if detail, fix := thisAppPackage().serviceDirProblem(serviceDir); detail != "" {
+		fmt.Fprintf(w, "Why: %s\nFix: %s\n", detail, fix)
+	}
 }

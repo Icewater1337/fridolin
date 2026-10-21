@@ -173,9 +173,15 @@ machine". In short:
    --root PATH:rw`. Add `--workstation` only when the person wants the
    core to run Claude Code sessions and a terminal in those folders
    (docs/NODES.md, "Workstation"); never with their home folder as a
-   root. On Windows add `--no-service` in their normal
-   PowerShell, then `node install` and `node start` elevated, each with
-   `--state-dir "$env:LOCALAPPDATA\fridolin-node"`.
+   root. On Windows add `--no-service`, then `node install` and `node
+   start` elevated, all three with one `--state-dir`:
+   `"$env:LOCALAPPDATA\fridolin-node"` in a PowerShell the person started
+   from the Start menu, but `"$env:USERPROFILE\.fridolin-node"` when you
+   run inside the Claude desktop app or another MSIX-packaged app. There
+   Windows keeps what you write under AppData, elevated too, in the app's
+   own copy, which the LocalSystem service never sees, and the service
+   then fails with only error 1053; `join` refuses such a state dir and
+   names the one to use (docs/NODES.md, "Inside an app package").
 6. **Approve**: once the node joined, Fridolin tells the person in their
    WhatsApp chat; they reply `!approve ID` (device and what it offers in
    one go), or click **Approve device** and **Approve commands** on the
