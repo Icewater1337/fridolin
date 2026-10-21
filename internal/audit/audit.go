@@ -55,6 +55,13 @@ const (
 	DashboardLink = "dashboard_link"
 	NodeApproved  = "node_approved"
 	NodeRevoked   = "node_revoked"
+	// NodeSession is a workstation session on a node (#159) starting or
+	// ending: Detail says which (agent or terminal, the node, the folder),
+	// Outcome how it ended.
+	NodeSession = "node_session"
+	// NodeCommand is a command line typed into a node's terminal, its
+	// secrets masked (Scrub).
+	NodeCommand = "node_command"
 )
 
 // Entry is one line. Fields are added, never renamed; a reader ignores
@@ -93,11 +100,15 @@ const maxDetail = 300
 var (
 	tokenRe  = regexp.MustCompile(`[A-Za-z0-9_\-+/=]{32,}`)
 	secretRe = regexp.MustCompile(`(?i)\b(password|passwd|secret|token|api[_-]?key|pin)\s*[:=]\s*\S+`)
+	// prefixRe matches credentials by their known prefixes, shorter than
+	// tokenRe's run, and secret flags and headers on a command line.
+	prefixRe = regexp.MustCompile(`(?i)\b(sk-[a-z0-9_-]{8,}|gh[pousr]_[a-z0-9]{8,}|github_pat_[a-z0-9_]{8,}|xox[abprs]-[a-z0-9-]{8,}|AKIA[0-9A-Z]{12,}|glpat-[a-z0-9_-]{8,})|(--?(password|passwd|token|secret|api-key|apikey|auth)[= ]\S+)|((bearer|basic)\s+\S+)`)
 )
 
 // Scrub shortens s for a line and masks what looks like a secret in it.
 func Scrub(s string) string {
 	s = secretRe.ReplaceAllString(s, "$1=[redacted]")
+	s = prefixRe.ReplaceAllString(s, "[redacted]")
 	s = tokenRe.ReplaceAllString(s, "[redacted]")
 	s = strings.Join(strings.Fields(s), " ")
 	if len(s) > maxDetail {

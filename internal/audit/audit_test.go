@@ -55,3 +55,20 @@ func TestAppendAndRead(t *testing.T) {
 		t.Errorf("a missing folder: %v %v", got, err)
 	}
 }
+
+func TestScrubCommandLines(t *testing.T) {
+	for in, leak := range map[string]string{
+		"curl -H 'Authorization: Bearer abcdef123456' https://x": "abcdef123456",
+		"export OPENAI_KEY=sk-proj-abcdefgh1234":                 "sk-proj-abcdefgh1234",
+		"gh auth login --with-token ghp_abcdefgh1234":            "ghp_abcdefgh1234",
+		"mysql --password=hunter2hunter -u root":                 "hunter2hunter",
+		"TOKEN=abc123 ./deploy.sh":                               "abc123",
+	} {
+		if out := Scrub(in); strings.Contains(out, leak) {
+			t.Errorf("Scrub(%q) = %q, still has %q", in, out, leak)
+		}
+	}
+	if got := Scrub("git status && ls -la"); got != "git status && ls -la" {
+		t.Errorf("an ordinary command changed: %q", got)
+	}
+}
