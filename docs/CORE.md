@@ -128,13 +128,20 @@ after the service.
 
 | Keychain service | Container variable | |
 | --- | --- | --- |
-| `fridolin.age.identity` | `FRIDOLIN_AGE_IDENTITY` | made by `core start` when missing |
+| `fridolin.age.identity.pq` | `FRIDOLIN_AGE_IDENTITY_PQ` | post-quantum (ML-KEM-768 + X25519); made by `core start` when missing |
+| `fridolin.age.identity` | `FRIDOLIN_AGE_IDENTITY` | the X25519 identity of before #158: passed on while stored, only to read old exports and node-target passwords |
+| `fridolin.export.key` | `FRIDOLIN_EXPORT_KEY` | the exports' inner layer; made by `core start` when missing |
 | `fridolin.claude.oauth.token` | `CLAUDE_CODE_OAUTH_TOKEN` | from `claude setup-token` |
 | `fridolin.tailscale.authkey` | `TS_AUTHKEY` | |
 | `fridolin.b2.vault.keyid`, `.key` | `B2_VAULT_KEY_ID`, `B2_VAULT_KEY` | the `fridolin-vault` bucket |
 | `fridolin.b2.snapshots.keyid`, `.key` | `B2_SNAPSHOTS_KEY_ID`, `B2_SNAPSHOTS_KEY` | the `fridolin-snapshots` bucket |
 | `fridolin.vault.crypt.password`, `.password2` | `FRIDOLIN_VAULT_CRYPT_PASSWORD`, `..._PASSWORD2` | made by a native bridge with the vault on, while the cold tier is empty ([VAULT.md](VAULT.md#keys-and-passwords)) |
 | `fridolin.restic.password` | `RESTIC_PASSWORD` | the same, while the restic repository does not exist |
+| `fridolin.vault.seal.key` | `FRIDOLIN_VAULT_SEAL_KEY` | the cold tier's inner layer; made by `core start` when missing |
+| `fridolin.snapshots.crypt.password` | `FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD` | the outer layer of the restic repositories and Litestream; made by `core start` when missing |
+| `fridolin.litestream.seal.key` | `FRIDOLIN_LITESTREAM_SEAL_KEY` | Litestream's inner layer; made by `core start` when missing |
+
+Which store each key opens, and the recovery sheet to keep: [VAULT.md](VAULT.md#encryption).
 
 A secret that is missing is named and left out. `fridolin core secrets`
 lists which are stored (never their values); to store one, on any system:
@@ -144,7 +151,7 @@ fridolin core secrets set claude.oauth.token     # or the full name, fridolin.cl
 ```
 
 It reads the value from the terminal without echo (or from stdin when
-that is no terminal), checks that an age identity is one, and refuses to
+that is no terminal), checks that an age identity or a key has the right form, and refuses to
 replace a stored value without `--replace`. On macOS `security
 add-generic-password -a fridolin -s fridolin.claude.oauth.token -w` works
 too (`-w` last makes it prompt), on Windows `cmdkey
@@ -159,7 +166,7 @@ on the hosts, never in the container (the container has no host
 secrets).
 
 1. The receiver asks Tailscale's LocalAPI for this device, makes an
-   ephemeral age X25519 key and a one-time code (eight characters),
+   ephemeral post-quantum age key (ML-KEM-768 + X25519) and a one-time code (eight characters),
    listens once on its Tailscale IPv4 address on a free port, and prints
    the address and the code. It waits ten minutes (`--timeout`).
 2. The sender connects. Each side asks Tailscale who the other is
@@ -183,8 +190,10 @@ secrets).
    write replaced. Nothing goes to disk in clear, and no value is
    printed.
 
-The secrets sent are the age identity, the Claude token, both B2 key
-pairs, the vault's crypt passwords and the restic password; the Tailscale
+The secrets sent are the age identities (post-quantum and, while stored,
+X25519), the export key, the Claude token, both B2 key pairs, the vault's
+crypt passwords and seal key, the restic password, the snapshots' crypt
+password and the Litestream seal key; the Tailscale
 auth key only with `--with-tailscale-key` (the new machine logs in to the
 tailnet itself, and the core's own node key moves in the export). Codex
 sign-ins are files in the volume and move with the export. Each side
@@ -193,11 +202,13 @@ time, the direction, the other device and its login, the names stored or
 unchanged, the result, never a value.
 
 
-The age identity encrypts every export. `core start` makes one the first
-time and says so: copy it into the keychain of every machine that may run
-the core, or the exports made with it cannot be read there. A new identity
-on a second machine does not replace the first; exports made before stay
-encrypted to the old one.
+The post-quantum age identity and the export key encrypt every export.
+`core start` makes them the first time and says so: copy them into the
+keychain of every machine that may run the core (`core send` does), or
+the exports made with them cannot be read there. A new identity on a
+second machine does not replace the first; exports made before stay
+encrypted to the old one. Exports made before #158 (age X25519, one
+layer) still import while `fridolin.age.identity` is stored.
 
 What this does not protect against: `docker inspect fridolin-core` shows
 the container's environment to anyone who may use Docker on the host.
@@ -301,7 +312,8 @@ machine to the next. Inside the core:
 docker exec fridolin-core fridolin core export
 ```
 
-writes `core/exports/<UTC time>.tar.gz.age`, encrypted to the age identity,
+writes `core/exports/<UTC time>.tar.gz.age`, sealed under the export key
+and then encrypted with age to the post-quantum identity,
 and points `core/exports/latest` at it. It holds the data dir: `config.json`,
 `bridge.db` and `vault.db` (each copied with SQLite's `VACUUM INTO`, so a
 running bridge is exported consistently; so are the `*.sqlite` databases
