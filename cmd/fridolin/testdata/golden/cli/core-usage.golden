@@ -47,4 +47,7 @@ Flags of export, import, promote and status:
                     B2_VAULT_KEY_ID and B2_VAULT_KEY)
   --bucket NAME     the vault bucket (default fridolin-vault)
 
-The age identity comes from FRIDOLIN_AGE_IDENTITY, which core start sets.
+Exports are sealed under FRIDOLIN_EXPORT_KEY, then encrypted with age to the
+post-quantum identity in FRIDOLIN_AGE_IDENTITY_PQ; import also reads exports
+made for the X25519 identity of before (FRIDOLIN_AGE_IDENTITY). core start
+sets them.

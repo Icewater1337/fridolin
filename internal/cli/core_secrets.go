@@ -16,6 +16,7 @@ import (
 
 	"filippo.io/age"
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
+	"github.com/Icewater1337/fridolin/internal/seal"
 	"github.com/Icewater1337/fridolin/internal/secretxfer"
 	"golang.org/x/term"
 )
@@ -59,9 +60,10 @@ func stdinTerminal() terminalIO {
 // machine logs in to the tailnet itself and the core's own node key moves
 // in the export (--with-tailscale-key adds it).
 var transferSecrets = []string{
-	hostsecrets.AgeIdentity, hostsecrets.ClaudeOAuthToken,
+	hostsecrets.AgeIdentityPQ, hostsecrets.AgeIdentity, hostsecrets.ExportKey, hostsecrets.ClaudeOAuthToken,
 	hostsecrets.B2VaultKeyID, hostsecrets.B2VaultKey, hostsecrets.B2SnapshotsKeyID, hostsecrets.B2SnapshotsKey,
-	hostsecrets.VaultCryptPassword, hostsecrets.VaultCryptSalt, hostsecrets.ResticPassword,
+	hostsecrets.VaultCryptPassword, hostsecrets.VaultCryptSalt, hostsecrets.VaultSealKey,
+	hostsecrets.ResticPassword, hostsecrets.SnapshotsCryptPassword, hostsecrets.LitestreamSealKey,
 }
 
 // secretFullName takes a secret's name with or without "fridolin.", and
@@ -166,11 +168,9 @@ func coreSecrets(args []string, env coreEnv, d hostDeps) int {
 		fmt.Fprintln(env.stderr, "fridolin core secrets set: the value has spaces or line breaks; paste the one line from the password manager")
 		return 1
 	}
-	if name == hostsecrets.AgeIdentity {
-		if _, err := age.ParseX25519Identity(value); err != nil {
-			fmt.Fprintln(env.stderr, "fridolin core secrets set: that is not an age identity (AGE-SECRET-KEY-1…); nothing was stored")
-			return 1
-		}
+	if msg := checkSecretValue(name, value); msg != "" {
+		fmt.Fprintf(env.stderr, "fridolin core secrets set: %s; nothing was stored\n", msg)
+		return 1
 	}
 	if err := d.secrets.Set(name, value); err != nil {
 		fmt.Fprintf(env.stderr, "fridolin core secrets set: %v\n", err)
@@ -334,4 +334,29 @@ func transferAudit(d hostDeps, direction string, res secretxfer.Result, err erro
 	}
 	defer f.Close()
 	_, _ = f.Write(append(b, '\n'))
+}
+
+// checkSecretValue says what is wrong with value as the secret name, or
+// "" when it fits: an age identity of the right kind, a seal key.
+func checkSecretValue(name, value string) string {
+	for _, s := range containerSecrets {
+		if s.secret != name {
+			continue
+		}
+		switch {
+		case name == hostsecrets.AgeIdentity:
+			if _, err := age.ParseX25519Identity(value); err != nil {
+				return "that is not an age identity (AGE-SECRET-KEY-1…)"
+			}
+		case s.made == madeIdentity:
+			if _, err := age.ParseHybridIdentity(value); err != nil {
+				return "that is not a post-quantum age identity (AGE-SECRET-KEY-PQ-1…)"
+			}
+		case s.made == madeKey:
+			if _, err := seal.ParseKey(value); err != nil {
+				return "that is not a key of 32 bytes in base64"
+			}
+		}
+	}
+	return ""
 }

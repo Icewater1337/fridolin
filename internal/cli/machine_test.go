@@ -311,7 +311,7 @@ func TestNodeChecks(t *testing.T) {
 }
 
 func TestCoreMachineChecks(t *testing.T) {
-	d, _ := hostFixture(t, mapSecrets{hostsecrets.AgeIdentity: "a", hostsecrets.B2VaultKeyID: "b", hostsecrets.B2VaultKey: "c"})
+	d, _ := hostFixture(t, mapSecrets{hostsecrets.AgeIdentityPQ: "a", hostsecrets.ExportKey: "k", hostsecrets.B2VaultKeyID: "b", hostsecrets.B2VaultKey: "c"})
 	docker := map[string]string{"info": "29.0.0"}
 	rep := app.RunDoctor(context.Background(), doctorEnvFor("", docker), coreMachineChecks(d))
 	var out bytes.Buffer

@@ -203,7 +203,7 @@ func TestCoreMigrateFromAndToNative(t *testing.T) {
 	if code := coreMigrate(context.Background(), []string{"--from-native", "--local", "--config", cfgPath, "--mount", "~/private"}, env, d); code != 0 {
 		t.Fatalf("migrate: %d\n%s\n%s", code, stdout.String(), stderr.String())
 	}
-	if secrets[hostsecrets.ClaudeOAuthToken] != "test-oauth-from-plist" || secrets[hostsecrets.AgeIdentity] == "" {
+	if secrets[hostsecrets.ClaudeOAuthToken] != "test-oauth-from-plist" || secrets[hostsecrets.AgeIdentityPQ] == "" || secrets[hostsecrets.ExportKey] == "" {
 		t.Errorf("secrets not stored: %v", secrets)
 	}
 	if strings.Contains(stdout.String()+stderr.String(), "test-oauth") {

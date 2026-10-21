@@ -149,11 +149,12 @@ func coreMachineChecks(d hostDeps) []app.DoctorCheck {
 	return []app.DoctorCheck{
 		app.DockerCheck(),
 		app.TailscaleCheck(true),
-		secretCheck("secrets-age", "age identity (decrypts the exports)", true, receive, hostsecrets.AgeIdentity),
+		secretCheck("secrets-age", "post-quantum age identity and export key (decrypt the exports)", true, receive, hostsecrets.AgeIdentityPQ, hostsecrets.ExportKey),
 		secretCheck("secrets-b2", "Backblaze B2 vault key (fetches the exports, holds the lease)", true, receive, hostsecrets.B2VaultKeyID, hostsecrets.B2VaultKey),
 		secretCheck("secrets-claude", "Claude token", false, receive, hostsecrets.ClaudeOAuthToken),
 		secretCheck("secrets-vault", "vault and snapshot secrets", false, receive,
-			hostsecrets.B2SnapshotsKeyID, hostsecrets.B2SnapshotsKey, hostsecrets.VaultCryptPassword, hostsecrets.VaultCryptSalt, hostsecrets.ResticPassword),
+			hostsecrets.B2SnapshotsKeyID, hostsecrets.B2SnapshotsKey, hostsecrets.VaultCryptPassword, hostsecrets.VaultCryptSalt, hostsecrets.VaultSealKey,
+			hostsecrets.ResticPassword, hostsecrets.SnapshotsCryptPassword, hostsecrets.LitestreamSealKey),
 		{ID: "image", Title: "core image " + image, Required: true, Run: func(ctx context.Context, env *app.DoctorEnv) app.DoctorResult {
 			if _, err := docker(ctx, env, "image", "inspect", "--format", "{{.Id}}", image); err != nil {
 				return app.DoctorResult{Status: app.DoctorFail, Detail: "not built here",

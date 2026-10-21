@@ -48,7 +48,8 @@ func hostFixture(t *testing.T, secrets mapSecrets) (hostDeps, *[]ranCmd) {
 		secrets: secrets, docker: "/usr/local/bin/docker", version: "v1.4.0+dirty",
 		composePath: filepath.Join(t.TempDir(), "fridolin", "compose.yaml"),
 		baseEnv:     []string{"PATH=/usr/bin:/bin", "HOME=/Users/you"},
-		newIdentity: func() (string, error) { return "AGE-SECRET-KEY-1NEW", nil },
+		newIdentity: func() (string, error) { return "AGE-SECRET-KEY-PQ-1NEW", nil },
+		newKey:      func() (string, error) { return testLayerKey, nil },
 		run: func(_ context.Context, name string, args, env []string, _, _ io.Writer) error {
 			ran = append(ran, ranCmd{name, args, env})
 			return nil
@@ -75,22 +76,27 @@ func TestCoreStartPassesSecretsOnlyThroughTheEnvironment(t *testing.T) {
 	if want := []string{"compose", "-f", d.composePath, "up", "-d"}; !slices.Equal(cmd.args, want) {
 		t.Errorf("args %q, want %q", cmd.args, want)
 	}
-	for _, secret := range []string{"oauth-token-value", "tskey-auth-key", "b2-secret-key", "AGE-SECRET-KEY-1NEW"} {
+	for _, secret := range []string{"oauth-token-value", "tskey-auth-key", "b2-secret-key", "AGE-SECRET-KEY-PQ-1NEW", testLayerKey} {
 		if slices.ContainsFunc(cmd.args, func(a string) bool { return strings.Contains(a, secret) }) {
 			t.Errorf("%s is on the command line", secret)
 		}
 	}
 	for _, kv := range []string{"CLAUDE_CODE_OAUTH_TOKEN=oauth-token-value", "TS_AUTHKEY=tskey-auth-key", "B2_VAULT_KEY_ID=keyid",
-		"B2_VAULT_KEY=b2-secret-key", "FRIDOLIN_AGE_IDENTITY=AGE-SECRET-KEY-1NEW", "FRIDOLIN_VERSION=v1.4.0-dirty",
+		"B2_VAULT_KEY=b2-secret-key", "FRIDOLIN_AGE_IDENTITY_PQ=AGE-SECRET-KEY-PQ-1NEW", "FRIDOLIN_EXPORT_KEY="+testLayerKey,
+		"FRIDOLIN_VAULT_SEAL_KEY="+testLayerKey, "FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD="+testLayerKey, "FRIDOLIN_LITESTREAM_SEAL_KEY="+testLayerKey,
+		"FRIDOLIN_VERSION=v1.4.0-dirty",
 		"FRIDOLIN_IMAGE=fridolin-core", "PATH=/usr/bin:/bin"} {
 		if !slices.Contains(cmd.env, kv) {
 			t.Errorf("environment lacks %s: %q", kv, cmd.env)
 		}
 	}
-	if secrets[hostsecrets.AgeIdentity] != "AGE-SECRET-KEY-1NEW" {
-		t.Error("the new age identity was not stored")
+	if secrets[hostsecrets.AgeIdentityPQ] != "AGE-SECRET-KEY-PQ-1NEW" || secrets[hostsecrets.ExportKey] != testLayerKey {
+		t.Error("the new age identity and keys were not stored")
 	}
-	if !strings.Contains(stderr.String(), "Made a new age identity") || !strings.Contains(stderr.String(), hostsecrets.ResticPassword) {
+	if _, made := secrets[hostsecrets.AgeIdentity]; made {
+		t.Error("core start made an X25519 identity")
+	}
+	if !strings.Contains(stderr.String(), "Made "+hostsecrets.AgeIdentityPQ) || !strings.Contains(stderr.String(), hostsecrets.ResticPassword) {
 		t.Errorf("stderr %q", stderr.String())
 	}
 	got, err := os.ReadFile(d.composePath)
@@ -220,7 +226,7 @@ func TestImageTag(t *testing.T) {
 // The data-dir commands, end to end on a folder store: export one data
 // dir, import it into another, promote both, status.
 func TestCoreExportImportPromoteStatus(t *testing.T) {
-	id, err := age.GenerateX25519Identity()
+	id, err := age.GenerateHybridIdentity()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +236,7 @@ func TestCoreExportImportPromoteStatus(t *testing.T) {
 	cfg := writeConfig(t, `{"data_dir": "`+src+`"}`)
 	run := func(dataDir string, args ...string) (int, string, string) {
 		var stdout, stderr bytes.Buffer
-		env := coreEnv{environ: []string{"FRIDOLIN_AGE_IDENTITY=" + id.String(), "FRIDOLIN_HOME=" + dataDir}, stdout: &stdout, stderr: &stderr}
+		env := coreEnv{environ: []string{"FRIDOLIN_AGE_IDENTITY_PQ=" + id.String(), "FRIDOLIN_EXPORT_KEY=" + testLayerKey, "FRIDOLIN_HOME=" + dataDir}, stdout: &stdout, stderr: &stderr}
 		code := runCore(append(args, "--store", storeDir, "--config", cfg), env)
 		return code, stdout.String(), stderr.String()
 	}
@@ -274,10 +280,27 @@ func TestCoreExportImportPromoteStatus(t *testing.T) {
 func TestCoreNeedsTheIdentity(t *testing.T) {
 	var stderr bytes.Buffer
 	code := runCore([]string{"export", "--store", t.TempDir()}, coreEnv{stdout: io.Discard, stderr: &stderr})
-	if code != 1 || !strings.Contains(stderr.String(), "FRIDOLIN_AGE_IDENTITY is not set") {
+	if code != 1 || !strings.Contains(stderr.String(), "FRIDOLIN_AGE_IDENTITY_PQ is not set") {
 		t.Errorf("exit %d: %s", code, stderr.String())
 	}
+	id, err := age.GenerateHybridIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr.Reset()
+	code = runCore([]string{"export", "--store", t.TempDir()}, coreEnv{environ: []string{"FRIDOLIN_AGE_IDENTITY_PQ=" + id.String()}, stdout: io.Discard, stderr: &stderr})
+	if code != 1 || !strings.Contains(stderr.String(), "FRIDOLIN_EXPORT_KEY is not set") {
+		t.Errorf("without the export key: exit %d: %s", code, stderr.String())
+	}
+	stderr.Reset()
+	code = runCore([]string{"import", "--latest", "--store", t.TempDir()}, coreEnv{stdout: io.Discard, stderr: &stderr})
+	if code != 1 || !strings.Contains(stderr.String(), "neither FRIDOLIN_AGE_IDENTITY_PQ nor FRIDOLIN_AGE_IDENTITY") {
+		t.Errorf("import: exit %d: %s", code, stderr.String())
+	}
 }
+
+// testLayerKey is a second layer's key as core start makes one.
+const testLayerKey = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
 
 func TestCoreUsage(t *testing.T) {
 	var out bytes.Buffer
