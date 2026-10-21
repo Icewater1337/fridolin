@@ -152,6 +152,39 @@ func (g *Registry) UpdateBackup(id string, enabled *bool, exclude []string) erro
 	return err
 }
 
+// UpdateBackupTargets sets which backup targets get brain id's folder
+// (nil leaves them), and its node_only paths (nil leaves them).
+func (g *Registry) UpdateBackupTargets(id string, targets map[string]bool, nodeOnly *[]string) error {
+	_, err := g.store.UpdateTx("", func(c *config.File, tx *config.Tx) error {
+		return g.updateManifestIn(c, tx, id, func(m *manifest.Manifest) error {
+			if targets != nil {
+				m.Backup.Targets = map[string]bool{}
+				for k, v := range targets {
+					// Only what differs from the default is kept.
+					if k == manifest.TargetCloud && v || k != manifest.TargetCloud && !v {
+						continue
+					}
+					m.Backup.Targets[k] = v
+				}
+				if len(m.Backup.Targets) == 0 {
+					m.Backup.Targets = nil
+				}
+			}
+			if nodeOnly != nil {
+				var clean []string
+				for _, x := range *nodeOnly {
+					if x = strings.TrimSpace(x); x != "" && !slices.Contains(clean, x) {
+						clean = append(clean, x)
+					}
+				}
+				m.Backup.NodeOnly = clean
+			}
+			return m.Validate()
+		})
+	})
+	return err
+}
+
 func (g *Registry) AllowChat(dm bool, entry, brainID string) error {
 	_, err := g.store.UpdateTx("", func(c *config.File, tx *config.Tx) error {
 		if dm {

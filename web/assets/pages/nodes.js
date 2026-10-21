@@ -113,7 +113,19 @@ export default {
       return h('div.node-offers',
         rules.length ? h('div', h('strong', 'Commands: '), rules.map((r) => mono(ruleText(r))).flatMap((el, i) => (i ? [', ', el] : [el]))) : null,
         roots.length ? h('div', h('strong', 'Folders: '), roots.map((r) => mono(`${r.path}${r.write ? ' (read and write)' : ' (read only)'}`)).flatMap((el, i) => (i ? [', ', el] : [el]))) : null,
-        frideLine(declared.fride));
+        frideLine(declared.fride),
+        backupLine(declared.backup, n.approved && n.approved.backup));
+    }
+
+    // Backups: the places the node lends, and the folders the owner
+    // picked for the Vault page's targets.
+    function backupLine(b, approved) {
+      if (!b) return null;
+      const roots = b.roots || [];
+      const folders = (approved && approved.folders) || [];
+      return h('div', h('strong', 'Backups: '),
+        roots.length ? roots.map((r) => mono(r)).flatMap((el, i) => (i ? [', ', el] : [el])) : 'any of its drives',
+        folders.length ? h('span.muted', ` · targets in ${folders.join(', ')}`) : h('span.muted', ' · pick a folder on the Vault page'));
     }
 
     // FrIDE answers on the node. Its UI is on the node's own loopback,

@@ -75,6 +75,7 @@ type App struct {
 	// housekeeping is the job that stops what the bridge left running
 	// (housekeeping_runtime.go).
 	housekeeping *housekeepingService
+	targets      *targetService
 	google       *google.Auth
 	plaud        *plaud.Manager
 	site         *sitesvc.SiteManager
@@ -363,6 +364,8 @@ func New(opts Options) (_ *App, err error) {
 	b.vault = newVaultService(cfgs, opts.Container, b.logger, b.vaultBrains, b.openMedia)
 	b.housekeeping = newHousekeeping(b, opts.Container)
 	b.vault.usage = b.b2
+	b.targets = newTargetService(cfgs, b.vault, b.nodes, opts.Container, b.logger)
+	b.vault.targets = b.targets
 	b.google = google.New(googleOptionsFor(cfgs))
 	b.backup = newProjectedBackup(cfgs, b.brainMgr, b.notifyBackup, b.vault.driveSuperseded, b.google)
 	b.plaud = NewPlaudManager(cfgs, b.brainMgr, b.submitHandOff, b.wa.SendMessage, func() string {
@@ -405,7 +408,7 @@ func (b *App) Start(ctx context.Context) error {
 		Resume:           func(ctx context.Context) { b.outbox.Start(); b.resume(ctx) }, Connect: b.connectLoop,
 		Watch: func(ctx context.Context) { b.watchRequiredFiles(ctx, requiredFilesEvery) },
 		// The tailnet first: the node port listens on it.
-		Background: []func(context.Context){b.startTailnet, b.runLease, b.runB2Usage, b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start, b.vault.Start, b.watchApprovals, b.housekeeping.Start},
+		Background: []func(context.Context){b.startTailnet, b.runLease, b.runB2Usage, b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start, b.vault.Start, b.targets.Start, b.watchApprovals, b.housekeeping.Start},
 	})
 }
 
@@ -446,7 +449,7 @@ func (b *App) Stop() {
 func (b *App) stopResources() {
 	b.supervisor.Stop(StopOptions{Logger: b.logger,
 		CloseIntake: b.intake.Close, HTTPGrace: httpStopWait,
-		Background: []func(){b.sched.Stop, b.backup.Stop, b.plaud.Stop, b.site.Stop, b.nodes.Stop, b.fride.Stop, b.vault.Stop, b.stopTailnet},
+		Background: []func(){b.sched.Stop, b.backup.Stop, b.plaud.Stop, b.site.Stop, b.nodes.Stop, b.fride.Stop, b.vault.Stop, b.targets.Stop, b.stopTailnet},
 		KeepPending: func() {
 			for _, m := range b.deb.Drain() {
 				b.keep(InboundHeld, "", m)

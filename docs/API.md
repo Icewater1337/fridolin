@@ -215,11 +215,16 @@ either):
 
 | Route | Does |
 | --- | --- |
-| `GET /api/vault/status` | the vault's state, numbers, last upload, snapshots, checks, Drive copy, Litestream, last restore drill and the latest 50 evictions; ETag-cached |
+| `GET /api/vault/status` | the vault's state, numbers, last upload, snapshots, checks, Drive copy, Litestream, last restore drill and the latest 50 evictions, and `targets`, the node targets (left out while there are none); ETag-cached |
 | `POST /api/vault/sync`, `/evict`, `/rebuild`, `/restore-drill` | start that job: `202 {"status": "started"}`, or `409` while another job runs and `412` while the vault is off or not running |
 | `POST /api/vault/snapshot` | a snapshot now, `{"kind": "nightly"}` (default) or `"hourly"`; `202` |
 | `POST /api/vault/check` | `restic check` now, `{"read_data_subset": "5%"}` to read data too; `202` |
 | `POST /api/vault/prune/allow` | lift a deletion hold: pruning goes on; `200` |
+| `POST /api/vault/targets` | add a node target, `{"name", "node", "folder", "nightly_at", "hourly", "include_data_dir", "retention", "check_days", "read_data_days", "window_hours"}` as in [`vault.targets`](CONFIGURATION.md#vault): the node must be online with backups approved; the folder is approved on it and made; answers `{"target": …}` as the status lists it |
+| `PUT /api/vault/targets/{name}` | change a target's schedule, retention and data-dir setting (its node and folder stay) |
+| `DELETE /api/vault/targets/{name}` | remove it and withdraw its folder on the node; the repository stays there |
+| `POST /api/vault/targets/{name}/snapshot`, `/check`, `/restore-drill` | start that job on the target (bodies as for the vault's own); `202`, `409` while the target runs another |
+| `POST /api/vault/targets/{name}/prune/allow` | lift the target's deletion hold |
 | `POST /api/vault/get` | `{"path": "<vault path>", "allow_over_budget": false}`: bring the file back and answer `{"path": "<absolute path>"}`; `404` for a path the vault does not hold, `412` when it would take the hot tier over its budget |
 
 ## The policy's dashboard routes

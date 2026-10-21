@@ -215,7 +215,40 @@
         "bucket": {"$ref": "#/$defs/bucket", "description": "Default fridolin-vault. Needs a restart."},
         "snapshots_bucket": {"$ref": "#/$defs/bucket", "description": "Default fridolin-snapshots."},
         "endpoint": {"type": "string", "pattern": "^$|^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$", "description": "The S3 endpoint's host name. Default s3.eu-central-003.backblazeb2.com."},
-        "b2_daily_budget": {"type": "integer", "minimum": 0, "maximum": 10000000, "description": "Class B and Class C transactions a day each that doctor and the dashboard measure B2 use against, warning at 70%. Default 2000."}
+        "b2_daily_budget": {"type": "integer", "minimum": 0, "maximum": 10000000, "description": "Class B and Class C transactions a day each that doctor and the dashboard measure B2 use against, warning at 70%. Default 2000."},
+        "targets": {
+          "type": ["array", "null"],
+          "maxItems": 16,
+          "description": "Backup targets besides the cloud: restic repositories in folders on nodes (docs/VAULT.md, Node targets). They run whether or not the vault is on.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "kind", "node", "folder"],
+            "properties": {
+              "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$", "description": "brain.json names it as node:<name>."},
+              "kind": {"type": "string", "enum": ["node"]},
+              "node": {"type": "string", "pattern": "^[0-9a-f]{12}$", "description": "The node's id (fridolin nodes)."},
+              "folder": {"type": "string", "description": "An absolute path on the node, in its own spelling."},
+              "nightly_at": {"type": "string", "pattern": "^$|^([01][0-9]|2[0-3]):[0-5][0-9]$", "description": "HH:MM local time. Default 03:00."},
+              "hourly": {"type": "boolean", "description": "A snapshot each hour besides the nightly one."},
+              "include_data_dir": {"type": "boolean", "description": "The nightly snapshot takes the data dir too, less the brain folders that do not choose the target."},
+              "retention": {
+                "type": ["object", "null"],
+                "additionalProperties": false,
+                "description": "Default 24 hourly, 14 daily, 8 weekly, 12 monthly.",
+                "properties": {
+                  "hourly": {"type": "integer", "minimum": 0, "maximum": 100000},
+                  "daily": {"type": "integer", "minimum": 0, "maximum": 100000},
+                  "weekly": {"type": "integer", "minimum": 0, "maximum": 100000},
+                  "monthly": {"type": "integer", "minimum": 0, "maximum": 100000}
+                }
+              },
+              "check_days": {"type": "integer", "minimum": 0, "maximum": 36500, "description": "Default 7."},
+              "read_data_days": {"type": "integer", "minimum": 0, "maximum": 36500, "description": "Default 30."},
+              "window_hours": {"type": "integer", "minimum": 0, "maximum": 876000, "description": "How old the last snapshot may be before doctor warns. Default 26."}
+            }
+          }
+        }
       }
     },
     "nodes": {

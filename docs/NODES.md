@@ -290,6 +290,7 @@ another. `fridolin node status` shows it.
 | `notify` | `notify` | a desktop notification: `osascript` on macOS, `notify-send` on Linux; on Windows it is only logged for now |
 | `fride` | `fride.*` | FrIDE on the node, while it answers: see [FrIDE](#fride) below |
 | `android-build` (`android_build`) | `android.build`, `android.read`, `android.drop` | builds an Android app with Gradle, while the node has a JDK 17+ and the Android SDK: see [android-build](#android-build) below |
+| `backup` | `fs.roots`, `fs.browse`, `backup.*` | keeps the core's restic repositories in folders the owner picks: see [Backups](#backups) below |
 
 **exec rules.** `name` is `argv[0]` exactly: a bare program name, which
 the node looks up in its `PATH`, or an absolute path. `args` `null` allows
@@ -311,7 +312,7 @@ symlinks included.
 
 `fridolin node join` flags set these: `--allow PROG`, `--allow PROG=`,
 `--allow PROG=RE,RE`, `--no-exec`, `--root PATH`, `--root PATH:rw`,
-`--no-host`, `--no-notify`, `--name`.
+`--backup`, `--backup-root PATH`, `--no-host`, `--no-notify`, `--name`.
 
 Both sides check every call: the core against the approvals before it
 sends anything, the node against its own `node.json` and the approvals the
@@ -523,6 +524,42 @@ UI is on the node's loopback, so the link works on the node itself until
 the node agent publishes it over the tailnet. `fridolin doctor`'s
 `nodes-fride` warns about nodes whose approved FrIDE does not answer.
 
+## Backups
+
+A node with the capability `backup` lends its disks to the core's
+[node targets](VAULT.md#node-targets): restic repositories the core keeps
+in folders on it. In `node.json`:
+
+```json
+"backup": {"roots": ["D:\\"]}
+```
+
+`roots` are the drives or folders it lends; none (`"backup": {}`) is every
+local drive and volume. `fridolin node backup on [--root PATH]…` and
+`fridolin node backup off` edit it (restart the agent after), as `node
+join --backup [--backup-root PATH]…` does when joining. The owner
+approves it like `exec` and `fs`, with the second approval; lending more
+roots later waits for that approval again, and the node keeps serving
+what was approved meanwhile.
+
+The folders are not in `node.json`: the owner picks one for each target
+on the Vault page, and the core adds it to the node's approval
+(`approved.backup.folders`, kept across later approvals, removed with the
+target, gone with a revocation). A folder must lie under a lent root.
+
+| Method | |
+| --- | --- |
+| `fs.roots` | the drives and volumes, with their free space: Windows' drive letters, macOS's `/` and `/Volumes/*`, Linux's `/` and the mounts of disks (`/media`, `/run/media`, `/mnt`, network shares); the home folder first; or the lent roots |
+| `fs.browse` | the names of the folders in a folder under a lent root (hidden ones on request), and whether it holds a restic repository; never a file, never content |
+| `backup.info` | whether a backup folder exists and holds a repository, its size and the space left |
+| `backup.create` | make a backup folder and restic's subfolders |
+| `backup.stat`, `backup.list`, `backup.read`, `backup.write`, `backup.delete` | restic's files in an approved folder, by restic's own names only (`config`, or `data`, `keys`, `locks`, `snapshots`, `index` with a 64-digit hex name), in chunks of up to 8 MiB; a write lands in `.fridolin-uploads/` and appears under its name only after its size and SHA-256 check out, never replacing a file with other content; `config` is never deleted |
+
+The node never runs restic and never sees a repository's password: the
+core runs restic and sends restic's encrypted files. The repository
+methods are the core's backups' own; the dashboard's generic node call
+refuses them. Both sides check each call against the approved folders.
+
 ## The service
 
 `fridolin node install | start | stop | status | uninstall` manage the
@@ -591,6 +628,7 @@ nodes, makes join codes, approves, revokes, edits tags and calls a
 capability; `fridolin nodes` uses it with the dashboard token. Inside the
 bridge, `nodes.Service` has `Call(ctx, id, method, params, out)` and typed
 helpers (`Exec`, `List`, `ReadFile`, `WriteFile`, `HostInfo`, `Notify`,
+`Roots`, `Browse`, `BackupInfo`, `ApproveBackupFolder`,
 and `Fride…` for FrIDE, with `FrideExport` and `FrideImport` streaming a
 bundle in chunks) for the parts that place work on nodes; `Options.OnEvent`
 and `OnDeclare` hear what nodes report.

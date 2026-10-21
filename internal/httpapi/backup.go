@@ -29,6 +29,9 @@ type BackupAPI struct {
 	UpdateConfig  func(func(*config.File) error) error
 	IncludeBridge func() bool
 	UpdateBrain   func(string, *bool, []string) error
+	// UpdateTargets sets brain.json's backup.targets and backup.node_only
+	// (nil leaves each as it is).
+	UpdateTargets func(id string, targets map[string]bool, nodeOnly *[]string) error
 	RestoreTarget func(string) (string, error)
 	// RedirectURI is the bridge's Google sign-in redirect, for the note
 	// on a pasted Web application client.
@@ -144,14 +147,25 @@ func (a *BackupAPI) BrainSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Enabled *bool    `json:"enabled"`
 		Exclude []string `json:"exclude"`
+		// Targets and NodeOnly are backup.targets and backup.node_only.
+		Targets  map[string]bool `json:"targets"`
+		NodeOnly *[]string       `json:"node_only"`
 	}
 	if err := DecodeJSON(r, &req); err != nil {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := a.UpdateBrain(r.PathValue("id"), req.Enabled, req.Exclude); err != nil {
-		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
-		return
+	if req.Enabled != nil || req.Exclude != nil || req.Targets == nil && req.NodeOnly == nil {
+		if err := a.UpdateBrain(r.PathValue("id"), req.Enabled, req.Exclude); err != nil {
+			WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+	}
+	if (req.Targets != nil || req.NodeOnly != nil) && a.UpdateTargets != nil {
+		if err := a.UpdateTargets(r.PathValue("id"), req.Targets, req.NodeOnly); err != nil {
+			WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
 	}
 	WriteJSON(w, http.StatusOK, OperationResponse{Status: "saved"})
 }

@@ -20,6 +20,8 @@ type Capabilities struct {
 	// AndroidBuild (android-build) is Gradle with a JDK and the Android
 	// SDK on the node, declared while the agent finds them.
 	AndroidBuild *AndroidBuildCap `json:"android_build,omitempty"`
+	// Backup keeps restic repositories in folders on the node (backup.go).
+	Backup *BackupCap `json:"backup,omitempty"`
 }
 
 // ExecCap runs allowlisted commands.
@@ -160,6 +162,9 @@ func (c Capabilities) Check() error {
 	if err := c.AndroidBuild.Check(); err != nil {
 		return err
 	}
+	if err := c.Backup.Check(); err != nil {
+		return err
+	}
 	return c.Fride.Check()
 }
 
@@ -260,12 +265,15 @@ func (c Capabilities) Allows(method string) bool {
 	if slices.Contains(AndroidMethods, method) {
 		return c.AndroidBuild != nil
 	}
+	if slices.Contains(BackupMethods, method) {
+		return c.Backup != nil
+	}
 	return false
 }
 
 // Empty reports whether nothing is offered.
 func (c Capabilities) Empty() bool {
-	return (c.Exec == nil || len(c.Exec.Allow) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil && c.AndroidBuild == nil
+	return (c.Exec == nil || len(c.Exec.Allow) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil && c.AndroidBuild == nil && c.Backup == nil
 }
 
 // Covers reports whether approved covers every part of declared: each
@@ -273,12 +281,17 @@ func (c Capabilities) Empty() bool {
 // host and notify. A declaration that grows past what was approved needs
 // approval again. FrIDE and android-build are covered by having been
 // approved at all: FrIDE's address and repositories, and the JDK and
-// platforms, are only what the node reports.
+// platforms, are only what the node reports. Backup is covered for the
+// places the approval lends (coversBackup); its folders are the
+// approval's own.
 func Covers(approved, declared Capabilities) bool {
 	if declared.Host && !approved.Host || declared.Notify && !approved.Notify || declared.Fride != nil && approved.Fride == nil {
 		return false
 	}
 	if declared.AndroidBuild != nil && approved.AndroidBuild == nil {
+		return false
+	}
+	if !coversBackup(approved.Backup, declared.Backup) {
 		return false
 	}
 	if d := declared.Exec; d != nil && len(d.Allow) > 0 {
@@ -308,6 +321,7 @@ func Intersect(declared, approved Capabilities) Capabilities {
 	var out Capabilities
 	out.Host = declared.Host && approved.Host
 	out.Notify = declared.Notify && approved.Notify
+	out.Backup = intersectBackup(declared.Backup, approved.Backup)
 	if declared.Fride != nil && approved.Fride != nil {
 		f := *declared.Fride
 		f.Repos = slices.Clone(f.Repos)
@@ -383,6 +397,16 @@ func (c Capabilities) Summary() string {
 	}
 	if c.AndroidBuild != nil {
 		parts = append(parts, "android-build")
+	}
+	if b := c.Backup; b != nil {
+		switch n := len(b.Folders); n {
+		case 0:
+			parts = append(parts, "backup")
+		case 1:
+			parts = append(parts, "backup (1 folder)")
+		default:
+			parts = append(parts, fmt.Sprintf("backup (%d folders)", n))
+		}
 	}
 	if len(parts) == 0 {
 		return "nothing"

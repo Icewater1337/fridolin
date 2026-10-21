@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -23,8 +24,12 @@ type brainBackup struct {
 	// Unreadable is set when it is left out because its brain.json could
 	// not be read: the vault does not upload what might be excluded.
 	Unreadable bool `json:"unreadable,omitempty"`
-	// patterns are backup.ExcludePatterns, relative to Dir.
+	// patterns are backup.ExcludePatterns, relative to Dir: what stays
+	// out of the cloud.
 	patterns []string
+	// nodes are the node targets the folder goes to, by name, each with
+	// the patterns that stay out of it (brainBackupNodes).
+	nodes map[string][]string
 }
 
 // brainBackupOf reads the backup settings of the brain in dir: those of
@@ -47,12 +52,51 @@ func brainBackupOf(id, dir string, approved *manifest.Manifest, includeSecrets b
 		b.Skip = "its backup is off (backup.enabled)"
 		return b
 	}
-	excludes := slices.Clone(disk.Backup.Exclude)
+	b.nodes = brainBackupNodes(disk, approved, includeSecrets)
+	if !disk.Backup.Cloud() || (approved != nil && !approved.Backup.Cloud()) {
+		b.Skip = "it does not go to the cloud (backup.targets.cloud)"
+		return b
+	}
+	excludes := disk.Backup.CloudExcludes()
 	if approved != nil {
-		excludes = append(excludes, approved.Backup.Exclude...)
+		excludes = append(excludes, approved.Backup.CloudExcludes()...)
 	}
 	b.patterns = backup.ExcludePatterns(excludes, includeSecrets)
 	return b
+}
+
+// brainBackupNodes are the node targets the folder goes to, each with
+// what stays out of it. A node target gets the folder only when both the
+// brain.json on disk and the manifest the bridge runs the brain with
+// choose it: a brain that edits its own brain.json cannot send more to a
+// node that way. Out stays what either excludes, less the paths both list
+// in node_only, which go to the node targets and never to the cloud.
+func brainBackupNodes(disk, approved *manifest.Manifest, includeSecrets bool) map[string][]string {
+	if approved == nil {
+		return nil
+	}
+	out := map[string][]string{}
+	for key := range disk.Backup.Targets {
+		name, ok := strings.CutPrefix(key, manifest.TargetNodePrefix)
+		if !ok || !disk.Backup.Node(name) || !approved.Backup.Node(name) {
+			continue
+		}
+		var excludes []string
+		for _, x := range append(slices.Clone(disk.Backup.Exclude), approved.Backup.Exclude...) {
+			if !slices.Contains(disk.Backup.NodeOnly, x) || !slices.Contains(approved.Backup.NodeOnly, x) {
+				excludes = append(excludes, x)
+			}
+		}
+		out[name] = backup.ExcludePatterns(excludes, includeSecrets)
+	}
+	return out
+}
+
+// toNode reports whether the folder goes to node target name, and the
+// patterns that stay out of it.
+func (b brainBackup) toNode(name string) ([]string, bool) {
+	p, ok := b.nodes[name]
+	return p, ok && !b.Unreadable
 }
 
 // resticExcludes are restic's --exclude values for this brain: its

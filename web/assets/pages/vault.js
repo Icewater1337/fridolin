@@ -3,14 +3,16 @@
 // shows GET /api/vault/status and starts the manual jobs; a rebuild of the
 // index is left to the command line.
 
-import { post } from '../app/api.js';
+import { get, post, put, del } from '../app/api.js';
 import { resource } from '../app/resources.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { fmtBytes, plural } from '../lib/format.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn } from '../components/buttons.js';
-import { confirmDialog } from '../components/dialog.js';
+import { confirmDialog, openDialog } from '../components/dialog.js';
+import { field, select, textInput, toggle } from '../components/fields.js';
+import { nodeFolderPicker } from '../components/node-folder-picker.js';
 import { pill, callout, timeAgo, mono, empty, pageHeader, spinner, loading, kv } from '../components/common.js';
 
 // What each job the status names is called on the page.
@@ -74,9 +76,11 @@ export default {
 
     function layout() {
       for (const k of Object.keys(regions)) delete regions[k];
+      regions.targets = h('div');
+      const targets = h('section.section', h('h2.section-title', 'Backup targets'), regions.targets);
       if (mode === 'off') {
         regions.off = h('div');
-        mount(main, regions.off);
+        mount(main, regions.off, targets);
         return;
       }
       regions.head = h('div');
@@ -94,11 +98,13 @@ export default {
         h('section.section', h('h2.section-title', 'Litestream'), regions.litestream),
         h('section.section', h('h2.section-title', 'B2 transactions'), regions.b2),
         h('section.section', h('h2.section-title', 'Restore drill'), regions.drill),
-        h('section.section', h('h2.section-title', 'Evictions'), regions.evictions));
+        h('section.section', h('h2.section-title', 'Evictions'), regions.evictions),
+        targets);
     }
 
     function paintAll() {
       const s = status;
+      paint(regions.targets, s.targets || [], renderTargets);
       if (mode === 'off') {
         paint(regions.off, null, renderOff);
         return;
@@ -315,6 +321,169 @@ export default {
           (d.checks || []).length ? h('ul.vault-checks', d.checks.map((c) => h(`li.${c.ok ? 'ok' : 'bad'}`,
             icon(c.ok ? 'check' : 'x'), h('span', h('strong', c.name), c.detail ? h('span.muted', ` — ${c.detail}`) : null)))) : null,
           h('div.actions', run)));
+    }
+
+    // ── node targets ──
+    // restic repositories in folders on nodes, besides the cloud: each
+    // brain.json says which get its folder (backup.targets), and which of
+    // its paths go only there (backup.node_only).
+    function renderTargets(list) {
+      const add = btn('Add target…', { icon: 'plus', kind: list.length ? '' : 'primary', onClick: addTarget });
+      if (!list.length) {
+        return h('div.card', h('div.card-body',
+          h('p.muted', 'No backup targets on your nodes yet. A target is a folder on a drive of another machine of yours, where the core keeps an encrypted restic repository: the data goes there over the node connection, never through the cloud.'),
+          h('div.actions', add)));
+      }
+      return h('div.page-stack', list.map(targetCard), h('div.actions', add));
+    }
+
+    function targetCard(t) {
+      const running = !!t.job;
+      const job = (text, iconName, path, body) => btn(text, {
+        icon: iconName, small: true, disabled: running || !t.ready,
+        onClick: () => start(`/api/vault/targets/${encodeURIComponent(t.name)}/${path}`, body, `${text} (${t.name})`),
+      });
+      const [label, kind] = t.ready ? (t.online ? ['Ready', 'ok'] : ['Offline', 'warn']) : [t.online ? 'Not ready' : 'Offline', 'warn'];
+      const keep = t.retention || {};
+      const drill = t.last_drill;
+      const check = t.last_check;
+      return h('div.card',
+        h('div.card-head',
+          h('div.card-title', icon('backup'), h('h2', t.name)),
+          pill(label, kind)),
+        h('div.card-body',
+          t.problem ? callout('warn', null, t.problem) : null,
+          running ? h('div.loading-row.vault-job', spinner(), h('span', `${jobName(t.job)} running…`)) : null,
+          t.deletion_hold ? callout('warn', 'Pruning is on hold',
+            h('p', 'Snapshot ', mono(t.deletion_hold.snapshot || ''), ` holds ${plural(t.deletion_hold.files || 0, 'file')}, down from ${t.deletion_hold.prev_files || 0}.`),
+            h('div.actions', btn('Allow pruning', { small: true, icon: 'trash', onClick: async () => { await post(`/api/vault/targets/${encodeURIComponent(t.name)}/prune/allow`, {}); await refresh(); } }))) : null,
+          kv([
+            ['Node', h('span', t.node_name || t.node, ' ', mono(t.node))],
+            ['Folder', mono(t.folder, { copy: true })],
+            ['Brains', (t.brains || []).length ? (t.brains || []).join(', ') : h('span.muted', 'none yet — choose this target in a brain\'s backup settings')],
+            ['Schedule', `nightly at ${t.nightly_at}${t.hourly ? ', and hourly' : ''}${t.include_data_dir ? '; with the data dir' : ''}`],
+            ['Keeps', `${keep.hourly || 0} hourly, ${keep.daily || 0} daily, ${keep.weekly || 0} weekly, ${keep.monthly || 0} monthly`],
+            ['Last nightly', snapLine(t.last_nightly)],
+            t.hourly ? ['Last hourly', snapLine(t.last_hourly)] : null,
+            ['Size', t.size_at ? `${fmtBytes(t.size)} in ${plural(t.files || 0, 'file')} · ${fmtBytes(t.free)} free on its disk` : h('span.muted', 'not measured yet')],
+            ['Last check', check && check.at ? h('span', check.ok ? pill('OK', 'ok') : pill('Failed', 'bad'), ' ', timeAgo(check.at), errorLine(check.error)) : h('span.muted', 'never')],
+            ['Restore drill', drill && drill.at ? h('span', drill.ok ? pill('Passed', 'ok') : pill('Failed', 'bad'), ' ', timeAgo(drill.at), drill.detail ? h('div.muted.small', drill.detail) : null) : h('span.muted', 'never')],
+          ].filter(Boolean)),
+          h('div.actions',
+            job('Back up now', 'backup', 'snapshot', { kind: 'nightly' }),
+            job('Check', 'shield', 'check', {}),
+            job('Restore drill', 'play', 'restore-drill', {}),
+            btn('Brains…', { small: true, icon: 'edit', onClick: () => chooseBrains(t) }),
+            btn('Remove…', { small: true, kind: 'danger', icon: 'x', disabled: running, onClick: () => removeTarget(t) }))));
+    }
+
+    // Which brains go to the target, and which of their paths go only to
+    // node targets (brain.json backup.targets and backup.node_only).
+    async function chooseBrains(t) {
+      const brains = await get('/api/brains');
+      const key = `node:${t.name}`;
+      const rows = (brains || []).map((b) => {
+        const bk = (b.manifest && b.manifest.backup) || {};
+        const row = { id: b.id, targets: { ...(bk.targets || {}) }, chosen: !!(bk.targets || {})[key], nodeOnly: (bk.node_only || []).join(', ') };
+        row.was = { chosen: row.chosen, nodeOnly: row.nodeOnly };
+        row.input = textInput({ value: row.nodeOnly, placeholder: '/work/, /clients/', 'aria-label': `Paths of ${b.id} only for node targets` });
+        return row;
+      });
+      const body = h('div.stack',
+        h('p.muted', 'A brain\'s folder goes here once you tick it. Paths listed beside it never go to the cloud, only to the node targets the brain goes to; its exclude list still keeps the rest out of both.'),
+        rows.map((r) => h('div.stack',
+          toggle({ label: r.id, checked: r.chosen, onChange: (v) => { r.chosen = v; } }),
+          field({ label: 'Only to node targets', control: r.input }))));
+      await openDialog({
+        title: `Brains backed up to ${t.name}`,
+        wide: true,
+        body,
+        actions: [
+          { label: 'Cancel', value: null },
+          {
+            label: 'Save', kind: 'primary',
+            onClick: async () => {
+              for (const r of rows) {
+                const nodeOnly = r.input.value.split(',').map((x) => x.trim()).filter(Boolean);
+                if (r.chosen === r.was.chosen && nodeOnly.join(', ') === r.was.nodeOnly) continue;
+                await put(`/api/brains/${encodeURIComponent(r.id)}/backup`, { targets: { ...r.targets, [key]: r.chosen }, node_only: nodeOnly });
+              }
+              toast('Saved', 'ok');
+              await refresh();
+              return true;
+            },
+          },
+        ],
+      });
+    }
+
+    async function removeTarget(t) {
+      const ok = await confirmDialog({
+        title: `Remove the target ${t.name}?`,
+        message: h('div',
+          h('p', 'No more snapshots go to ', mono(t.folder), ' on ', t.node_name || t.node, '. The repository stays there, with its snapshots, and its password stays in the host\'s secrets.'),
+          h('p', 'Brains that chose this target keep the setting, which then means nothing.')),
+        confirm: 'Remove', danger: true,
+      });
+      if (!ok) return;
+      await del(`/api/vault/targets/${encodeURIComponent(t.name)}`);
+      toast(`Removed the target ${t.name}`, 'ok');
+      await refresh();
+    }
+
+    // The wizard: a node that offers backups, a folder on one of its
+    // drives, a name and a schedule.
+    async function addTarget() {
+      const resp = await get('/api/nodes');
+      const ready = (resp.nodes || []).filter((n) => n.device === 'approved' && n.effective && n.effective.backup);
+      if (!ready.length) {
+        await openDialog({
+          title: 'No node offers backups yet',
+          body: h('div',
+            h('p', 'On the machine with the backup disk, turn backups on for its node:'),
+            h('p', mono('fridolin node backup on', { copy: true }), ' (or ', mono('--root D:\\'), ' to lend one drive only), then restart its agent.'),
+            h('p', 'Then approve what it offers on the Nodes page, and come back here.')),
+        });
+        return;
+      }
+      const state = { node: ready[0].id, folder: '' };
+      const name = textInput({ value: 'nas', 'aria-label': 'Target name', pattern: '[a-z0-9][a-z0-9-]{0,31}' });
+      const nightly = textInput({ value: '03:00', 'aria-label': 'Nightly at', pattern: '[0-2][0-9]:[0-5][0-9]' });
+      let hourly = false;
+      let dataDir = false;
+      const chosen = h('code.mono', 'none yet');
+      const pickerWrap = h('div');
+      const showPicker = () => mount(pickerWrap, nodeFolderPicker({ node: state.node, onPick: (p) => { state.folder = p; chosen.textContent = p; } }));
+      const nodeSel = select(ready.map((n) => [n.id, `${n.name} (${n.id}${n.online ? '' : ', offline'})`]), state.node, { 'aria-label': 'Node' });
+      nodeSel.addEventListener('change', () => { state.node = nodeSel.value; state.folder = ''; chosen.textContent = 'none yet'; showPicker(); });
+      showPicker();
+      await openDialog({
+        title: 'Add a backup target',
+        wide: true,
+        body: h('div.stack',
+          field({ label: 'Node', control: nodeSel }),
+          field({ label: 'Folder on the node', help: 'Pick a drive, then a folder, or name a new one. The repository goes in it.', control: h('div', pickerWrap, h('p.small', 'Chosen: ', chosen)) }),
+          field({ label: 'Name', help: 'Lower-case letters, digits and -. Brains choose it as node:<name>.', control: name }),
+          field({ label: 'Nightly snapshot at', control: nightly }),
+          toggle({ label: 'Also a snapshot every hour', onChange: (v) => { hourly = v; } }),
+          toggle({ label: 'Include the data dir in the nightly snapshot', onChange: (v) => { dataDir = v; } })),
+        actions: [
+          { label: 'Cancel', value: null },
+          {
+            label: 'Add target', kind: 'primary',
+            onClick: async () => {
+              if (!state.folder) { toast('Pick a folder on the node first', 'warn'); return false; }
+              await post('/api/vault/targets', {
+                name: name.value.trim(), kind: 'node', node: state.node, folder: state.folder,
+                nightly_at: nightly.value.trim(), hourly, include_data_dir: dataDir,
+              });
+              toast('Target added', 'ok');
+              await refresh();
+              return true;
+            },
+          },
+        ],
+      });
     }
 
     // ── eviction log ──

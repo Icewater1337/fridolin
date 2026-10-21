@@ -29,6 +29,9 @@ Usage:
   fridolin node install|start|stop|status|uninstall
                        the service: a launchd user agent on macOS, a systemd user
                        unit on Linux, a Windows Service on Windows
+  fridolin node backup on [--root PATH]… | off
+                       lend this machine's disks to the core's backups (or stop);
+                       restart the service after (fridolin node stop, start)
   fridolin node fride pair --url http://127.0.0.1:PORT | status
                        FrIDE on this machine, offered to the core while it runs;
                        fridolin node fride help for more
@@ -41,6 +44,9 @@ Join flags:
                        commands). Shells are never allowed.
   --no-exec            allow no commands at all
   --root PATH[:rw]     grant a folder for reading, :rw for writing too; repeat it
+  --backup             lend this machine's disks to the core's backups: the owner
+                       picks a folder for each backup target on the core
+  --backup-root PATH   lend only PATH (a drive or folder) for backups; repeat it
   --no-host            do not report host facts
   --no-notify          do not show notifications
   --no-service         join only; start the agent yourself (fridolin node run)
@@ -65,8 +71,12 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() { fmt.Fprint(stderr, nodeUsage) }
 	stateDir := fs.String("state-dir", "", "the node's state folder")
 	var o joinFlags
-	if sub == "join" {
+	var backupRoots multiFlag
+	switch sub {
+	case "join":
 		o.register(fs)
+	case "backup":
+		fs.Var(&backupRoots, "root", "lend only this drive or folder (repeatable)")
 	}
 	pos, err := parseInterspersed(fs, args)
 	if errors.Is(err, flag.ErrHelp) {
@@ -93,6 +103,8 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		return nodeJoin(pos[0], dir, o, stdout, stderr)
+	case "backup":
+		return nodeBackup(pos, backupRoots, dir, stdout, stderr)
 	case "run", "install", "start", "stop", "status", "uninstall":
 		if len(pos) != 0 {
 			fmt.Fprintf(stderr, "fridolin node %s takes no arguments\n", sub)
@@ -154,8 +166,9 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 // joinFlags are join's flags.
 type joinFlags struct {
 	core, name                      string
-	allow, roots                    multiFlag
+	allow, roots, backupRoots       multiFlag
 	noExec, noHost, noNotify, noSvc bool
+	backup                          bool
 }
 
 func (o *joinFlags) register(fs *flag.FlagSet) {
@@ -164,6 +177,8 @@ func (o *joinFlags) register(fs *flag.FlagSet) {
 	fs.Var(&o.allow, "allow", "allow a program (repeatable)")
 	fs.Var(&o.roots, "root", "grant a folder, PATH or PATH:rw (repeatable)")
 	fs.BoolVar(&o.noExec, "no-exec", false, "allow no commands")
+	fs.BoolVar(&o.backup, "backup", false, "lend this machine's disks to the core's backups")
+	fs.Var(&o.backupRoots, "backup-root", "lend only this drive or folder for backups (repeatable)")
 	fs.BoolVar(&o.noHost, "no-host", false, "do not report host facts")
 	fs.BoolVar(&o.noNotify, "no-notify", false, "do not show notifications")
 	fs.BoolVar(&o.noSvc, "no-service", false, "join only, without installing the service")
@@ -202,7 +217,61 @@ func (o joinFlags) capabilities(goos string) (nodeproto.Capabilities, error) {
 		}
 		c.FS.Roots = append(c.FS.Roots, root)
 	}
+	if o.backup || len(o.backupRoots) > 0 {
+		b, err := backupCap(o.backupRoots)
+		if err != nil {
+			return c, err
+		}
+		c.Backup = b
+	}
 	return c, c.Check()
+}
+
+// backupCap is the backup capability lending roots, every drive for none.
+func backupCap(roots []string) (*nodeproto.BackupCap, error) {
+	b := &nodeproto.BackupCap{}
+	for _, r := range roots {
+		abs, err := filepath.Abs(r)
+		if err != nil {
+			return nil, err
+		}
+		if st, err := os.Stat(abs); err != nil || !st.IsDir() {
+			return nil, fmt.Errorf("--backup-root %s: not a folder", r)
+		}
+		b.Roots = append(b.Roots, abs)
+	}
+	return b, nil
+}
+
+// nodeBackup turns the backup capability on or off in node.json.
+func nodeBackup(pos []string, roots multiFlag, dir string, stdout, stderr io.Writer) int {
+	if len(pos) != 1 || pos[0] != "on" && pos[0] != "off" {
+		fmt.Fprintln(stderr, "fridolin node backup takes on or off")
+		return 2
+	}
+	cfg, err := nodeagent.LoadConfig(dir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fridolin node backup: %v\n", err)
+		return 1
+	}
+	if pos[0] == "off" {
+		cfg.Capabilities.Backup = nil
+	} else {
+		if cfg.Capabilities.Backup, err = backupCap(roots); err != nil {
+			fmt.Fprintf(stderr, "fridolin node backup: %v\n", err)
+			return 2
+		}
+	}
+	if err := nodeagent.SaveConfig(dir, cfg); err != nil {
+		fmt.Fprintf(stderr, "fridolin node backup: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "This node offers: %s\nRestart the agent (fridolin node stop, then fridolin node start) so the core hears it", cfg.Capabilities.Summary())
+	if pos[0] == "on" {
+		fmt.Fprint(stdout, "; then approve it on the core: fridolin nodes approve <id> --commands")
+	}
+	fmt.Fprintln(stdout, ".")
+	return 0
 }
 
 // parseAllow reads PROG, PROG= or PROG=RE,RE.

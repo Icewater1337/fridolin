@@ -35,6 +35,9 @@ type Agent struct {
 	// and 1m when zero); HeartbeatEvery is the report interval (20s).
 	MinBackoff, MaxBackoff time.Duration
 	HeartbeatEvery         time.Duration
+	// Volumes lists the machine's drives for fs.roots; nil asks the OS
+	// (platform.Volumes). Tests hand in their own.
+	Volumes func() []platform.Volume
 	// OnState hears every state the core sends, for tests and the CLI.
 	OnState func(nodeproto.State)
 	// FrideCheckEvery is how often the agent asks whether FrIDE answers

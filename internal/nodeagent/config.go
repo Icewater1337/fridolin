@@ -72,11 +72,21 @@ func (c Config) Check() error {
 	if c.Capabilities.AndroidBuild != nil {
 		return errors.New(`capabilities.android_build: the agent declares it while it finds a JDK and the Android SDK; "android_build": false turns it off`)
 	}
+	if b := c.Capabilities.Backup; b != nil && len(b.Folders) > 0 {
+		return errors.New("capabilities.backup.folders: the owner picks the backup folders on the core; node.json names only the roots it lends (capabilities.backup.roots)")
+	}
 	if err := c.Capabilities.Check(); err != nil {
 		return err
 	}
 	if err := c.Fride.Check(); err != nil {
 		return err
+	}
+	if b := c.Capabilities.Backup; b != nil {
+		for _, r := range b.Roots {
+			if !filepath.IsAbs(r) {
+				return fmt.Errorf("backup: root %q is not an absolute path on this system", r)
+			}
+		}
 	}
 	if fs := c.Capabilities.FS; fs != nil {
 		for _, r := range fs.Roots {

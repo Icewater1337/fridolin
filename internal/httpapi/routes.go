@@ -169,6 +169,13 @@ func NewAPIMux(d APIDeps) http.Handler {
 	mux.HandleFunc("POST /api/vault/check", d.Vault().Check)
 	mux.HandleFunc("POST /api/vault/restore-drill", d.Vault().RestoreDrill)
 	mux.HandleFunc("POST /api/vault/prune/allow", d.Vault().AllowPrune)
+	mux.HandleFunc("POST /api/vault/targets", d.Vault().Targets.Add)
+	mux.HandleFunc("PUT /api/vault/targets/{name}", d.Vault().Targets.Change)
+	mux.HandleFunc("DELETE /api/vault/targets/{name}", d.Vault().Targets.Remove)
+	mux.HandleFunc("POST /api/vault/targets/{name}/snapshot", d.Vault().Targets.Snapshot)
+	mux.HandleFunc("POST /api/vault/targets/{name}/check", d.Vault().Targets.Check)
+	mux.HandleFunc("POST /api/vault/targets/{name}/restore-drill", d.Vault().Targets.RestoreDrill)
+	mux.HandleFunc("POST /api/vault/targets/{name}/prune/allow", d.Vault().Targets.AllowPrune)
 
 	mux.HandleFunc("GET /api/google/client", d.Google().Client)
 	mux.HandleFunc("PUT /api/google/client", d.Google().SetClient)
