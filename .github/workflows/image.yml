@@ -1,0 +1,58 @@
+name: Image
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - container/**
+      - cmd/**
+      - internal/**
+      - web/**
+      - tools/**
+      - go.mod
+      - go.sum
+      - .dockerignore
+      - .github/workflows/image.yml
+
+# The job only reads the repository and builds; it publishes nothing.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+# Builds the core's image (container/Dockerfile) for both architectures the
+# core runs on, so a change that breaks the image fails here rather than at
+# `fridolin core update`. Nothing is pushed: the image is built locally on
+# the machine that runs the core (docs/CORE.md).
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: linux/amd64, runner: ubuntu-latest }
+          - { platform: linux/arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: container/Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: VERSION=${{ github.sha }}
+          push: false
+          load: true
+          tags: fridolin-core:ci
+      - name: the binary and the tools answer
+        run: |
+          docker run --rm --entrypoint /usr/local/bin/fridolin fridolin-core:ci version
+          docker run --rm --entrypoint sh fridolin-core:ci -c 'claude --version && codex --version && restic version && rclone version | head -1 && litestream version && bwrap --version'
