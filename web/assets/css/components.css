@@ -662,7 +662,7 @@ dialog.dialog::backdrop { background: var(--backdrop); }
 .term { display: flex; flex-direction: column; gap: 8px; }
 .term-out {
   margin: 0;
-  height: min(60vh, 480px);
+  height: min(60dvh, 480px);
   overflow: auto;
   padding: 10px 12px;
   background: var(--surface-2);

@@ -239,6 +239,29 @@ frideMovedNotice
 	🚚 *FrIDE #3* moved from mini to laptop: task health continues there.
 frideMoveFailedNotice
 	⚠️ *FrIDE #3* did not move: laptop is offline
+nodeAgentNewsMessage(question)
+	❓ *Agent #2* asks (on laptop, in /home/you/Projects/foo):
+
+	Which test runner, jest or vitest?
+
+	Answer here, and I'll pass it on.
+nodeAgentNewsMessage(irreversible)
+	✋ *Agent #2* (on laptop, in /home/you/Projects/foo) wants to take a step: git push origin main
+	I've asked for your approval in a poll.
+nodeAgentNewsMessage(done)
+	✅ *Agent #2* is done on laptop, in /home/you/Projects/foo.
+
+	The build works again: a missing import in main.go.
+
+	Changed:
+	M main.go
+	?? notes.txt
+nodeAgentNewsMessage(failed)
+	⚠️ *Agent #2* failed on laptop, in /home/you/Projects/foo.
+
+	claude ended: exit status 1
+nodeSessionsStoppedNotice
+	🔒 The lockdown stopped 2 session(s) on nodes (agents and terminals).
 housekeepingSummary
 	🧹 Housekeeping stopped or removed 1:
 	• run-orphan PID 4242 (claude) with 2 more, 0% CPU, 312 MB, up 26h0m0s: left running by a run of brain main that is over
