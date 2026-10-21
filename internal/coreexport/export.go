@@ -4,7 +4,8 @@
 // Activate puts a staged copy in place of a data dir that no bridge runs on
 // (docs/CORE.md).
 //
-// The archive is a gzip-compressed tar: manifest.json first, then the data
+// The archive is a gzip-compressed tar, sealed (internal/seal) under the
+// export key and then encrypted with age to the core's identity: manifest.json first, then the data
 // dir's files under data/. SQLite databases are copied with VACUUM INTO,
 // never as files, so a live bridge's bridge.db is exported consistently.
 // What any machine rebuilds or the cold tier holds completely is left out:
@@ -33,7 +34,13 @@ import (
 	"filippo.io/age"
 
 	"github.com/Icewater1337/fridolin/internal/cloud"
+	"github.com/Icewater1337/fridolin/internal/seal"
 )
+
+// nopCloser leaves closing to the layer below.
+type nopCloser struct{ io.Writer }
+
+func (nopCloser) Close() error { return nil }
 
 // Store is the vault bucket exports go to. Export and import use Get and
 // Put; Get of a missing key returns an error that matches fs.ErrNotExist,
@@ -99,8 +106,12 @@ type ExportOptions struct {
 	// its vault holds it: a native install without the vault has the only
 	// copy of its inboxes and recordings there.
 	IncludeMedia bool
-	Now          func() time.Time
-	Logf         func(format string, args ...any)
+	// SealKey, when set, seals the archive (internal/seal) under it before
+	// age encrypts it: two layers with independent keys, the outer one
+	// post-quantum when the recipients are (docs/CORE.md, "Encryption").
+	SealKey []byte
+	Now     func() time.Time
+	Logf    func(format string, args ...any)
 }
 
 // ExportResult is what Export wrote.
@@ -259,7 +270,13 @@ func Export(ctx context.Context, dataDir string, recipients []age.Recipient, sto
 			if err != nil {
 				return err
 			}
-			gz := gzip.NewWriter(enc)
+			var inner io.WriteCloser = nopCloser{enc}
+			if opts.SealKey != nil {
+				if inner, err = seal.Encrypt(enc, opts.SealKey); err != nil {
+					return err
+				}
+			}
+			gz := gzip.NewWriter(inner)
 			tw := tar.NewWriter(gz)
 			mdata, err := json.MarshalIndent(m, "", "  ")
 			if err != nil {
@@ -279,7 +296,7 @@ func Export(ctx context.Context, dataDir string, recipients []age.Recipient, sto
 					return err
 				}
 			}
-			return errors.Join(tw.Close(), gz.Close(), enc.Close())
+			return errors.Join(tw.Close(), gz.Close(), inner.Close(), enc.Close())
 		}())
 	}()
 	if err := store.Put(ctx, key, pr); err != nil {

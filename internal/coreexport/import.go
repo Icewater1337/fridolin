@@ -2,6 +2,7 @@ package coreexport
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -17,6 +18,8 @@ import (
 	"time"
 
 	"filippo.io/age"
+
+	"github.com/Icewater1337/fridolin/internal/seal"
 )
 
 // ImportOptions are Import's settings besides the store, identities and
@@ -24,9 +27,12 @@ import (
 type ImportOptions struct {
 	// Key is the export to fetch; "" fetches the one core/exports/latest
 	// names.
-	Key  string
-	DB   DB
-	Logf func(format string, args ...any)
+	Key string
+	// SealKey opens the inner layer of an export that has one. An export
+	// made before it (age alone) imports without it.
+	SealKey []byte
+	DB      DB
+	Logf    func(format string, args ...any)
 }
 
 // ImportResult is what Import staged.
@@ -99,7 +105,14 @@ func Import(ctx context.Context, store Store, identities []age.Identity, staging
 	if err != nil {
 		return ImportResult{}, fmt.Errorf("import: decrypting %s: %w (is FRIDOLIN_AGE_IDENTITY the identity the export was made for?)", key, err)
 	}
-	gz, err := gzip.NewReader(dec)
+	plain, sealed, err := openInner(dec, opts.SealKey)
+	if err != nil {
+		return ImportResult{}, fmt.Errorf("import: %s: %w", key, err)
+	}
+	if !sealed {
+		opts.Logf("note: %s has one layer of encryption (age), from before exports were sealed as well", key)
+	}
+	gz, err := gzip.NewReader(plain)
 	if err != nil {
 		return ImportResult{}, fmt.Errorf("import: %s: %w", key, err)
 	}
@@ -377,3 +390,27 @@ func FixDataDir(dataDir, home string) (warnings []string, err error) {
 	}
 	return append(warnings, fmt.Sprintf("data_dir in config.json was %q; it is now %q", old, dataDir)), nil
 }
+
+// openInner opens the seal layer under age when the archive has one
+// (the header FRDSEAL1), and passes an older archive's gzip stream on.
+func openInner(r io.Reader, key []byte) (io.Reader, bool, error) {
+	br := bufio.NewReader(r)
+	head, err := br.Peek(len(sealMagic))
+	if err != nil {
+		return nil, false, fmt.Errorf("reading the archive: %w", err)
+	}
+	if string(head) != sealMagic {
+		return br, false, nil
+	}
+	if key == nil {
+		return nil, true, fmt.Errorf("the export is sealed and needs the export key (%s)", "FRIDOLIN_EXPORT_KEY")
+	}
+	pr, err := seal.Decrypt(br, key)
+	if err != nil {
+		return nil, true, err
+	}
+	return pr, true, nil
+}
+
+// sealMagic starts every sealed stream.
+const sealMagic = "FRDSEAL1"
