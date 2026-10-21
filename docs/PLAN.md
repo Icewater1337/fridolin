@@ -248,31 +248,33 @@ M0 to M3 are infrastructure and can be verified without touching a brain; M4 to 
 
 M0 — Foundations (fridolin):
 
-- [ ] Replace the cgo SQLite driver with `modernc.org/sqlite` so the binary builds without a C compiler on all three platforms; keep the whatsmeow store and every existing test green
-- [ ] `internal/platform` for Windows: `platform_windows.go` with `LockFileEx` for the bridge lock, a Job Object for process groups, and the brain command run through `cmd /C` or PowerShell (`procstart_other.go` and `logfile_unix.go` get Windows counterparts); delete the deliberate build stop in `unsupported.go` once the three are in
-- [ ] Extend `make check` and the `ci.yml` matrix to windows-latest (goos windows, amd64 and arm64, tests on); add both to the release archives
+- [x] Replace the cgo SQLite driver with `modernc.org/sqlite` so the binary builds without a C compiler on all three platforms; keep the whatsmeow store and every existing test green
+- [x] `internal/platform` for Windows: `platform_windows.go` with `LockFileEx` for the bridge lock, a Job Object for process groups, and the brain command run through `cmd /C` or PowerShell (`procstart_other.go` and `logfile_unix.go` get Windows counterparts); delete the deliberate build stop in `unsupported.go` once the three are in
+- [x] Extend `make check` and the `ci.yml` matrix to windows-latest (goos windows, amd64 and arm64, tests on); add both to the release archives
 - [x] `fridolin doctor` beside `fridolin check`: Claude CLI or token, tailscale auth key, Docker, `restic`, `rclone`, `ffmpeg`, disk; prints fixes
-- [ ] Data layout from Workstream D through a `configMigrations` step that raises `currentConfigVersion`; schemas, golden files and `config-v1.json` updated
-- [ ] Gate: `make check` green on macOS, Linux and Windows; `fridolin doctor` on the Mac mini reports only the expected missing pieces
+- [x] Data layout from Workstream D through a `configMigrations` step that raises `currentConfigVersion`; schemas, golden files and `config-v1.json` updated
+- [x] Gate: `make check` green on macOS, Linux and Windows; `fridolin doctor` on the Mac mini reports only the expected missing pieces
 
 M1 — Containerized core with `tsnet` and the lease:
 
-- [ ] `Dockerfile` and `compose.yaml` for `fridolin-core`; named volume `fridolin-data`; image build in CI for amd64 and arm64
+- [x] `Dockerfile` and `compose.yaml` for `fridolin-core`; named volume `fridolin-data`; image build in CI for amd64 and arm64
 - [x] `tsnet` listener in the core; dashboard and node port served on the tailnet only; MagicDNS name `fridolin-core`
-- [ ] `fridolin core start | stop | update | status` host wrapper; age identity and `CLAUDE_CODE_OAUTH_TOKEN` from the host keychain into the container environment
+- [x] `fridolin core start | stop | update | status` host wrapper; age identity and `CLAUDE_CODE_OAUTH_TOKEN` from the host keychain into the container environment
 - [x] `fridolin core export`, `import --latest`, `promote`; core lease object in B2 with heartbeat and refusal logic
 - [x] Per-brain Unix users inside the container mapped onto the existing `brains/<id>/` state folders; `sandbox.deny_paths` mapped to mount denials; `bwrap` when available; the Linux refusal of `sandbox.enabled` lifted for the container sandbox
 - [x] Golden files for the container's CLI arguments and sandbox profile; `fridolin service` keeps working for native installs
 - [ ] Gate: the core runs in a container on the Mac mini and answers WhatsApp; `export`, `import`, `promote` moves it to a Linux VM and then to the Windows machine, each in under an hour; the previous copy refuses to start as core afterwards
+  Status 21 Oct: the first half holds — the live core runs in the container on the Mac mini since 21 Oct, answers WhatsApp, holds the lease, and the vault and snapshots run. The moves to a Linux VM and to Windows need those machines; the move was rehearsed between two containers (docs/CORE.md, checklist).
 
 M2 — Nodes:
 
-- [ ] `fridolin node` agent: outbound WebSocket to `fridolin-core`, signed device identity, reconnect with backoff
-- [ ] Two-stage pairing with `fridolin nodes join-code`, `fridolin node join <code>`, `fridolin nodes approve`, and a Nodes page in the dashboard
-- [ ] Capabilities `exec` (allowlist, platform defaults), `fs` (granted roots), `host`, `notify`; capability declarations and approvals persisted
-- [ ] Service install on all three OSes through one service library; `node install | start | stop | status | uninstall`
-- [ ] Registry with tags from `nodes.json`, free resources, last seen; `!fleet` command in the chat
+- [x] `fridolin node` agent: outbound WebSocket to `fridolin-core`, signed device identity, reconnect with backoff
+- [x] Two-stage pairing with `fridolin nodes join-code`, `fridolin node join <code>`, `fridolin nodes approve`, and a Nodes page in the dashboard
+- [x] Capabilities `exec` (allowlist, platform defaults), `fs` (granted roots), `host`, `notify`; capability declarations and approvals persisted
+- [x] Service install on all three OSes through one service library; `node install | start | stop | status | uninstall`
+- [x] Registry with tags from `nodes.json`, free resources, last seen; `!fleet` command in the chat
 - [ ] Gate: a Windows laptop joins with one pasted command; the core runs an allowlisted command on it and reads a granted folder; revoking it in the dashboard disconnects it within a minute
+  Status 21 Oct: proven on macOS (TestNodesGate and a real join on the Mac mini) and the node packages' tests pass on windows-latest in CI; the Windows laptop itself is still to do.
 
 M3 — Vault:
 
@@ -287,11 +289,11 @@ M3 — Vault:
 
 M4 — Core brain, grants, MCP server:
 
-- [ ] `role` and `grants` in `brain.json` with validation (one core, no grants on sub-brains, depth one)
-- [ ] `fridolin mcp --run <id>` stdio server; `claude -p` launched with it for every run; tool set computed from brain and grants
-- [ ] `delegate` through the sub-brain's queue as a synthetic chat; result or timeout back into the core thread; audit lines
-- [ ] `read_memory`, `list_brains`; dashboard Grants editor with the existing approval flow
-- [ ] Gate: the core delegates a summary of last week's family chat to `family` only when granted; without the grant the tool is absent; a sub-brain run has no `delegate` tool, verified by a test that lists its tools
+- [x] `role` and `grants` in `brain.json` with validation (one core, no grants on sub-brains, depth one)
+- [x] `fridolin mcp --run <id>` stdio server; `claude -p` launched with it for every run; tool set computed from brain and grants
+- [x] `delegate` through the sub-brain's queue as a synthetic chat; result or timeout back into the core thread; audit lines
+- [x] `read_memory`, `list_brains`; dashboard Grants editor with the existing approval flow
+- [x] Gate: the core delegates a summary of last week's family chat to `family` only when granted; without the grant the tool is absent; a sub-brain run has no `delegate` tool, verified by a test that lists its tools
 
 M5 — Policy and approval (from the architecture doc):
 
@@ -301,12 +303,13 @@ M5 — Policy and approval (from the architecture doc):
 
 M6 — FrIDE through nodes:
 
-- [ ] FrIDE: `--under-fridolin` mode: fleet mode off, pairing token for the node agent, webhook on thread news; standalone behaviour untouched and covered by its existing tests
-- [ ] FrIDE: `fride task export | import` as a file bundle (branches, uncommitted changes, decision log, agent conversation)
+- [x] FrIDE: `--under-fridolin` mode: fleet mode off, pairing token for the node agent, webhook on thread news; standalone behaviour untouched and covered by its existing tests
+- [x] FrIDE: `fride task export | import` as a file bundle (branches, uncommitted changes, decision log, agent conversation)
 - [x] fridolin: node capability `fride`: proxy to FrIDE's loopback API with the pairing token; advertised only while `fride serve` answers
 - [x] fridolin: MCP tools `fride_task`, `fride_status`, `fride_reply`, `fride_move`, `fride_close` on the core brain; placement by tags and FrIDE's memory check; the "code goes to FrIDE" prompt rule
 - [x] `!move <thread> <node>` through the vault; `fride_close` archives the workspace cold
 - [ ] Gate: a task started from WhatsApp runs on the laptop, asks one question in the chat, reports done with the branch name; closing it leaves `workspaces/<task>.tar.zst` in the cold tier; FrIDE on the laptop still works standalone with the mode off
+  Status 21 Oct: TestFrideGate runs it against two real FrIDE binaries with a scripted orchestrator (question, reply, started, move through the vault, done, archive); a run with FrIDE's real coding agent on the laptop is still to do — the laptop's FrIDE must run `fride serve --under-fridolin` and its node agent join the core.
 
 M7 — Memory index and provenance:
 
