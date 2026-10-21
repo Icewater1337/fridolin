@@ -39,9 +39,15 @@ const (
 )
 
 // The vault's rhythm: how often it pings the cold tier, evicts, walks the
-// whole hot tier, and looks whether a snapshot is due.
+// whole hot tier, writes the cold manifest, and looks whether a snapshot is
+// due. Every call to B2 counts against its daily caps (docs/VAULT.md, "B2
+// transactions"), so the cold tier is probed only when the vault's own
+// uploads and downloads have not shown for vaultPingEvery that it answers,
+// and again after vaultPingRetry while it does not.
 var (
-	vaultPingEvery     = 10 * time.Minute
+	vaultPingEvery     = 30 * time.Minute
+	vaultPingRetry     = 10 * time.Minute
+	vaultManifestEvery = 10 * time.Minute
 	vaultEvictEvery    = 15 * time.Minute
 	vaultFullSyncEvery = 6 * time.Hour
 	vaultTickEvery     = time.Minute
@@ -106,6 +112,9 @@ type vaultStatus struct {
 	Snapshots   snapshotsStatus   `json:"snapshots"`
 	Litestream  litestreamView    `json:"litestream"`
 	LastDrill   *drillRecord      `json:"last_drill,omitempty"`
+	// B2 is the bridge's Backblaze B2 transactions today (b2usage.go),
+	// omitted while it made none.
+	B2 *b2UsageView `json:"b2,omitempty"`
 	// UpdatedAt is when the running service last wrote the file: doctor
 	// takes an old one for a bridge that does not run.
 	UpdatedAt time.Time `json:"updated_at,omitzero"`
@@ -127,6 +136,12 @@ type vaultBackends struct {
 	// bridgeDB is the bridge.db Litestream replicates and the snapshots
 	// copy; "" for none.
 	bridgeDB string
+	// closers end what the backends keep running (the cold tier's rclone
+	// daemon) when the vault stops.
+	closers []func() error
+	// b2 is set when the buckets are Backblaze's (not the local stand-ins
+	// of FRIDOLIN_VAULT_LOCAL): restic's and Litestream's calls count then.
+	b2 bool
 }
 
 // vaultBackendsFor builds the backends, a variable so tests hand in local
@@ -147,8 +162,16 @@ type vaultService struct {
 	// they run or have waiting (absolute paths).
 	brains    func() []vaultBrain
 	openMedia func() []string
+	// usage counts the B2 transactions of the cold tier, restic and
+	// Litestream; nil counts nothing.
+	usage *cloud.Usage
 
 	layout atomic.Pointer[vaultLayout]
+
+	// reach is the cold tier's last answer, from a probe or from any of
+	// the vault's own calls (reachStore).
+	reachMu sync.Mutex
+	reach   vaultReach
 
 	mu       sync.Mutex
 	ctx      context.Context // Start's; nil before and after
@@ -167,6 +190,43 @@ type vaultRun struct {
 	done   chan struct{}
 	// liteErr is why Litestream's supervisor gave up, if it did.
 	liteErr string
+	// liteCounted is when Litestream's steady cost was last counted, and
+	// liteStarts the starts counted (litestreamUsage).
+	liteCounted time.Time
+	liteStarts  int
+}
+
+// chargeB2 counts what op cost on B2, when the run's buckets are B2's.
+func (s *vaultService) chargeB2(run *vaultRun, op string, cost cloud.Cost) {
+	if run == nil || !run.b.b2 {
+		return
+	}
+	s.usage.AddCost(op, cost)
+}
+
+// litestreamUsage counts Litestream's B2 calls, which it makes itself:
+// its measured cost per start, and its steady daily cost for the time it
+// ran since the last count (snapshot.LitestreamDailyCost).
+func (s *vaultService) litestreamUsage(run *vaultRun, st snapshot.LitestreamStatus, now time.Time) {
+	if run.b.lite == nil || !run.b.b2 {
+		return
+	}
+	n := len(run.b.lite.DBs)
+	starts := st.Restarts
+	if st.Running || !st.Since.IsZero() {
+		starts++
+	}
+	if starts > run.liteStarts {
+		b, c := snapshot.LitestreamStartCost(n)
+		s.usage.AddCost("litestream:start", cloud.Cost{B: b * float64(starts-run.liteStarts), C: c * float64(starts-run.liteStarts)})
+		run.liteStarts = starts
+	}
+	if st.Running && !run.liteCounted.IsZero() {
+		day := now.Sub(run.liteCounted).Hours() / 24
+		b, c := snapshot.LitestreamDailyCost(n)
+		s.usage.AddCost("litestream:replicate", cloud.Cost{B: b * day, C: c * day})
+	}
+	run.liteCounted = now
 }
 
 func newVaultService(cfgs *config.Store, container bool, logger *slog.Logger, brains func() []vaultBrain, openMedia func() []string) *vaultService {
@@ -255,7 +315,7 @@ func (s *vaultService) Apply(cfg *config.Settings) {
 	s.refreshLayout()
 	s.mu.Lock()
 	ctx := s.ctx
-	same := s.running != nil && s.settings == cfg.Vault
+	same := s.running != nil && restartKey(s.settings) == restartKey(cfg.Vault)
 	s.mu.Unlock()
 	if ctx == nil || same {
 		return
@@ -320,12 +380,18 @@ func (s *vaultService) serve(ctx context.Context, run *vaultRun, cfg *config.Set
 		}
 		return
 	}
+	defer func() {
+		for _, closeFn := range b.closers {
+			_ = closeFn()
+		}
+	}()
 	layout := s.currentLayout()
 	policy := vault.DefaultPolicy()
 	policy.ActivityDays, policy.ColdAfterDays = cfg.Vault.ActivityDays, cfg.Vault.ColdAfterDays
 	v, err := vault.New(vault.Options{
-		Root: layout.root, DBPath: cfg.Boot.Layout().VaultDB(), Store: b.cold, Policy: &policy,
-		BudgetBytes: int64(cfg.Vault.HotBudgetGB) << 30, HeadroomPercent: cfg.Vault.HeadroomPercent,
+		Root: layout.root, DBPath: cfg.Boot.Layout().VaultDB(), Store: reachStore{b.cold, s.noteReach}, Policy: &policy,
+		ManifestEvery: vaultManifestEvery,
+		BudgetBytes:   int64(cfg.Vault.HotBudgetGB) << 30, HeadroomPercent: cfg.Vault.HeadroomPercent,
 		OpenThreadPaths: s.openThreadPaths,
 		FreeSpace: func(dir string) (int64, error) {
 			n, err := platform.FreeBytes(dir)
@@ -343,6 +409,12 @@ func (s *vaultService) serve(ctx context.Context, run *vaultRun, cfg *config.Set
 		if err := v.Close(); err != nil {
 			s.log.Warn("vault: closing vault.db", "err", err)
 		}
+	}()
+	defer func() {
+		// The manifest a change still waits for goes up before the stop.
+		fctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		_ = v.FlushManifest(fctx, true)
 	}()
 	s.mu.Lock()
 	run.v, run.b = v, b
@@ -385,7 +457,7 @@ func (s *vaultService) serve(ctx context.Context, run *vaultRun, cfg *config.Set
 			s.log.Warn("vault: watching the hot tier stopped; the full sync every few hours still uploads", "err", err)
 		}
 	})
-	lastPing, lastEvict, lastFull := time.Now(), time.Now(), time.Now()
+	lastEvict, lastFull := time.Now(), time.Now()
 	tick := time.NewTicker(vaultTickEvery)
 	defer tick.Stop()
 	s.heartbeat(ctx, run, true)
@@ -394,10 +466,10 @@ func (s *vaultService) serve(ctx context.Context, run *vaultRun, cfg *config.Set
 		case <-ctx.Done():
 			return
 		case now := <-tick.C:
-			if now.Sub(lastPing) >= vaultPingEvery {
-				lastPing = now
+			if s.pingDue(now) {
 				s.ping(ctx, v)
 			}
+			_ = v.FlushManifest(ctx, false)
 			if now.Sub(lastFull) >= vaultFullSyncEvery {
 				lastFull = now
 				s.syncAll(ctx, v)
@@ -428,8 +500,13 @@ func (s *vaultService) heartbeat(ctx context.Context, run *vaultRun, save bool) 
 		s.status.LastUpload = st.LastUpload
 	}
 	s.status.Evictions = ev
+	s.status.B2 = s.b2View()
+	if r := s.reachNow(); r != nil {
+		s.status.Reachable = r
+	}
 	if run.b.lite != nil {
 		s.status.Litestream.LitestreamStatus = run.b.lite.Status()
+		s.litestreamUsage(run, s.status.Litestream.LitestreamStatus, time.Now())
 		if s.status.Litestream.LastError == "" {
 			s.status.Litestream.LastError = run.liteErr
 		}
@@ -448,20 +525,109 @@ func litestreamNames(l *snapshot.Litestream) []string {
 	return out
 }
 
+// ping probes the cold tier (one Class B transaction).
 func (s *vaultService) ping(ctx context.Context, v *vault.Vault) {
 	err := v.Ping(ctx)
 	if ctx.Err() != nil {
 		return
 	}
-	r := &vaultReach{At: time.Now().UTC(), OK: err == nil}
 	if err != nil {
-		r.Error = err.Error()
 		s.log.Warn("vault: the cold tier does not answer", "err", err)
 	}
+	s.setReach(err)
 	s.mu.Lock()
-	s.status.Reachable = r
+	s.status.Reachable = s.reachNow()
 	s.saveLocked()
 	s.mu.Unlock()
+}
+
+// pingDue reports whether the cold tier needs a probe at now: nothing
+// showed it answering for vaultPingEvery, or it did not answer the last
+// time, vaultPingRetry ago.
+func (s *vaultService) pingDue(now time.Time) bool {
+	r := s.reachNow()
+	switch {
+	case r == nil:
+		return true
+	case r.OK:
+		return now.Sub(r.At) >= vaultPingEvery
+	}
+	return now.Sub(r.At) >= vaultPingRetry
+}
+
+func (s *vaultService) setReach(err error) {
+	r := vaultReach{At: time.Now().UTC(), OK: err == nil}
+	if err != nil {
+		r.Error = err.Error()
+	}
+	s.reachMu.Lock()
+	s.reach = r
+	s.reachMu.Unlock()
+}
+
+// reachNow is the cold tier's last answer, nil before any.
+func (s *vaultService) reachNow() *vaultReach {
+	s.reachMu.Lock()
+	defer s.reachMu.Unlock()
+	if s.reach.At.IsZero() {
+		return nil
+	}
+	r := s.reach
+	return &r
+}
+
+// noteReach takes an answer of one of the vault's own calls to the cold
+// tier: a success (or "no such object") shows it answers; a failure of the
+// store itself (rclone's error, B2 refusing) shows it does not. Errors of
+// the caller's side (a body that could not be read, a cancelled call) say
+// nothing about it.
+func (s *vaultService) noteReach(err error) {
+	if err == nil || errors.Is(err, cloud.ErrNotFound) {
+		s.setReach(nil)
+		return
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return
+	}
+	if _, ok := errors.AsType[*cloud.RcloneError](err); ok || cloud.IsCapExceeded(err) {
+		s.setReach(err)
+	}
+}
+
+// reachStore is the cold tier with each answer noted (noteReach).
+type reachStore struct {
+	cloud.ObjectStore
+	note func(error)
+}
+
+func (r reachStore) Put(ctx context.Context, key string, body io.Reader) error {
+	err := r.ObjectStore.Put(ctx, key, body)
+	r.note(err)
+	return err
+}
+
+func (r reachStore) Get(ctx context.Context, key string) (io.ReadCloser, error) {
+	rc, err := r.ObjectStore.Get(ctx, key)
+	r.note(err)
+	return rc, err
+}
+
+func (r reachStore) Stat(ctx context.Context, key string) (cloud.ObjectInfo, error) {
+	info, err := r.ObjectStore.Stat(ctx, key)
+	r.note(err)
+	return info, err
+}
+
+func (r reachStore) List(ctx context.Context, prefix string) ([]cloud.ObjectInfo, error) {
+	list, err := r.ObjectStore.List(ctx, prefix)
+	r.note(err)
+	return list, err
+}
+
+func (r reachStore) Delete(ctx context.Context, key string) error {
+	err := r.ObjectStore.Delete(ctx, key)
+	r.note(err)
+	return err
 }
 
 func (s *vaultService) syncAll(ctx context.Context, v *vault.Vault) {

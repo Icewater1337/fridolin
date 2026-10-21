@@ -39,10 +39,10 @@ type LeaseConfig struct {
 	// Enabled takes and renews the lease, and refuses to run as core
 	// without it.
 	Enabled bool `json:"enabled"`
-	// RenewSeconds is how often the holder renews it (default 60).
+	// RenewSeconds is how often the holder renews it (default 300).
 	RenewSeconds int `json:"renew_seconds,omitempty"`
 	// StaleSeconds is how long after its last renewal another host may take
-	// it over (default 300). It must be more than RenewSeconds.
+	// it over (default 1200). It must be more than RenewSeconds.
 	StaleSeconds int `json:"stale_seconds,omitempty"`
 }
 
@@ -76,6 +76,10 @@ type VaultConfig struct {
 	// Endpoint is the B2 S3 endpoint's host name (default
 	// s3.eu-central-003.backblazeb2.com).
 	Endpoint string `json:"endpoint,omitempty"`
+	// B2DailyBudget is how many Class B and how many Class C transactions
+	// a day the bridge may spend on B2 before doctor and the dashboard warn
+	// (at 70%; default 2000, under the free tier's 2,500 caps).
+	B2DailyBudget int `json:"b2_daily_budget,omitempty"`
 }
 
 // NodesConfig is the port nodes connect to.
@@ -107,8 +111,8 @@ func (p PolicyConfig) ApprovalTimeout() time.Duration {
 // Defaults of the sections above.
 const (
 	DefaultTailnetHostname        = "fridolin-core"
-	DefaultLeaseRenewSeconds      = 60
-	DefaultLeaseStaleSeconds      = 300
+	DefaultLeaseRenewSeconds      = 300
+	DefaultLeaseStaleSeconds      = 1200
 	DefaultCoreMemoryLimitGB      = 8
 	DefaultVaultHotBudgetGB       = 50
 	DefaultVaultActivityDays      = 60
@@ -117,6 +121,7 @@ const (
 	DefaultVaultBucket            = "fridolin-vault"
 	DefaultSnapshotsBucket        = "fridolin-snapshots"
 	DefaultVaultEndpoint          = "s3.eu-central-003.backblazeb2.com"
+	DefaultB2DailyBudget          = 2000
 	DefaultNodesListen            = ":8766"
 	DefaultMaxRunsPerHour         = 20
 	DefaultMaxPendingIrreversible = 3
@@ -146,6 +151,7 @@ func fillFleetDefaults(c *File) {
 	defStr(&c.Vault.Bucket, DefaultVaultBucket)
 	defStr(&c.Vault.SnapshotsBucket, DefaultSnapshotsBucket)
 	defStr(&c.Vault.Endpoint, DefaultVaultEndpoint)
+	def(&c.Vault.B2DailyBudget, DefaultB2DailyBudget)
 	defStr(&c.Nodes.Listen, DefaultNodesListen)
 	def(&c.Policy.MaxRunsPerHour, DefaultMaxRunsPerHour)
 	def(&c.Policy.MaxPendingIrreversible, DefaultMaxPendingIrreversible)
@@ -204,6 +210,7 @@ const (
 	maxRunsPerHour          = 10000
 	maxPendingIrreversible  = 1000
 	maxApprovalTimeoutHours = 30 * 24
+	maxB2DailyBudget        = 10_000_000
 )
 
 // validateFleet checks the sections once their defaults are filled in.
@@ -220,6 +227,7 @@ func (c *File) validateFleet() error {
 		{"vault.activity_days", c.Vault.ActivityDays, maxDays},
 		{"vault.cold_after_days", c.Vault.ColdAfterDays, maxDays},
 		{"vault.headroom_percent", c.Vault.HeadroomPercent, maxHeadroomPercent},
+		{"vault.b2_daily_budget", c.Vault.B2DailyBudget, maxB2DailyBudget},
 		{"policy.max_runs_per_hour", c.Policy.MaxRunsPerHour, maxRunsPerHour},
 		{"policy.max_pending_irreversible", c.Policy.MaxPendingIrreversible, maxPendingIrreversible},
 		{"policy.approval_timeout_hours", c.Policy.ApprovalTimeoutHours, maxApprovalTimeoutHours},

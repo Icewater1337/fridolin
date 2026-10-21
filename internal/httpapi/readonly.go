@@ -46,7 +46,8 @@ type ReadyAPI struct {
 	Version    func() string
 	StartedAt  time.Time
 	// Lease, when the core lease is on, is its state: a lost lease means
-	// the channels are stopped, so the bridge is not ready.
+	// the channels are stopped, so the bridge is not ready; an unverified
+	// one (the store does not answer) keeps them running.
 	Lease func() *LeaseStatus
 }
 
@@ -99,7 +100,9 @@ func (a ReadyAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		StartedAt: a.StartedAt,
 	}
 	if a.Lease != nil {
-		if resp.Lease = a.Lease(); resp.Lease != nil && resp.Lease.State != "held" {
+		// Unverified (the lease store does not answer) keeps the channels
+		// running: only a lost lease stops them.
+		if resp.Lease = a.Lease(); resp.Lease != nil && resp.Lease.State != "held" && resp.Lease.State != "unverified" {
 			resp.Ready = false
 		}
 	}

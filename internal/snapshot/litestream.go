@@ -92,6 +92,48 @@ func yamlString(s string) string {
 	return strings.TrimSuffix(b.String(), "\n")
 }
 
+// litestreamEconomy is the global part of the configuration: how often
+// Litestream lists and compacts its replica. Its defaults (L0 retention
+// checked every 15 seconds, compaction every 30 seconds, 5 minutes and an
+// hour) list the replica about 24 times a minute for two databases even
+// while nothing is written: measured against a counting S3 proxy, some
+// 34,000 LIST calls a day, each a Class C transaction on B2, whose free
+// tier caps them at 2,500. Uploads (PUT, Class A) are free, so the sync
+// interval does not count against a cap; listings do, and a listing is
+// one call per thousand files, so syncing each minute rather than each
+// second also keeps the level-0 folder short. With these settings the
+// steady state lists nothing between the hourly compaction and the
+// six-hourly retention check: about 2 LISTs each per database, some 200
+// Class C a day for both, plus about 34 at each start (docs/VAULT.md, "B2
+// transactions").
+const litestreamEconomy = `l0-retention: 1h
+l0-retention-check-interval: 6h
+levels:
+  - interval: 1h
+  - interval: 24h
+snapshot:
+  interval: 24h
+`
+
+// litestreamSyncInterval is how often each replica uploads what changed:
+// the most of the databases a disaster loses.
+const litestreamSyncInterval = "1m"
+
+// LitestreamDailyCost is what one running Litestream with n databases
+// spends on B2 a day in its steady state, by the measurement above: per
+// database 24 compactions and 4 retention checks of about 2 listings each,
+// a daily compaction and snapshot, and the downloads of the daily
+// compaction (Class B).
+func LitestreamDailyCost(n int) (classB, classC float64) {
+	return 25 * float64(n), 105 * float64(n)
+}
+
+// LitestreamStartCost is what one start of Litestream with n databases
+// spends: it lists every level of each database and compacts them.
+func LitestreamStartCost(n int) (classB, classC float64) {
+	return 1 * float64(n), 17 * float64(n)
+}
+
 // ConfigYAML is the configuration litestream 0.5 reads for dbs. It holds
 // no credentials: litestream reads those from its environment.
 func ConfigYAML(dbs []LitestreamDB) ([]byte, error) {
@@ -99,6 +141,7 @@ func ConfigYAML(dbs []LitestreamDB) ([]byte, error) {
 		return nil, errors.New("snapshot: no databases to replicate")
 	}
 	var b strings.Builder
+	b.WriteString(litestreamEconomy)
 	b.WriteString("dbs:\n")
 	seen := map[string]bool{}
 	for _, db := range dbs {
@@ -118,6 +161,7 @@ func ConfigYAML(dbs []LitestreamDB) ([]byte, error) {
 				return nil, fmt.Errorf("snapshot: the s3 replica of %s has no bucket", clean)
 			}
 			b.WriteString("      type: s3\n")
+			b.WriteString("      sync-interval: " + litestreamSyncInterval + "\n")
 			fmt.Fprintf(&b, "      bucket: %s\n", yamlString(r.Bucket))
 			if r.Path != "" {
 				fmt.Fprintf(&b, "      path: %s\n", yamlString(r.Path))
@@ -136,6 +180,7 @@ func ConfigYAML(dbs []LitestreamDB) ([]byte, error) {
 				return nil, fmt.Errorf("snapshot: the file replica of %s needs an absolute folder, not %q", clean, r.Dir)
 			}
 			b.WriteString("      type: file\n")
+			b.WriteString("      sync-interval: " + litestreamSyncInterval + "\n")
 			fmt.Fprintf(&b, "      path: %s\n", yamlString(filepath.Clean(r.Dir)))
 		default:
 			return nil, fmt.Errorf("snapshot: unknown replica type %q for %s", r.Type, clean)

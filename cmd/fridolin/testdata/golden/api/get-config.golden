@@ -86,8 +86,8 @@ Content-Type: application/json
     "core": {
       "lease": {
         "enabled": false,
-        "renew_seconds": 60,
-        "stale_seconds": 300
+        "renew_seconds": 300,
+        "stale_seconds": 1200
       },
       "memory_limit_gb": 8,
       "tailnet": {
@@ -149,6 +149,7 @@ Content-Type: application/json
     ],
     "vault": {
       "activity_days": 60,
+      "b2_daily_budget": 2000,
       "bucket": "fridolin-vault",
       "cold_after_days": 90,
       "enabled": false,

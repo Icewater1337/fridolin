@@ -173,9 +173,11 @@ func (v *Vault) syncLocked(ctx context.Context, paths []string, prov map[string]
 		}
 	}
 	if rep.changed() {
-		if err := v.writeManifest(ctx); err != nil {
+		v.manifestDue = true
+	}
+	if v.manifestDue && v.now().Sub(v.manifestAt) >= v.opts.ManifestEvery {
+		if err := v.flushManifestLocked(ctx); err != nil {
 			rep.ManifestError = err.Error()
-			v.log.Warn("vault: writing the cold manifest failed", "err", err)
 		}
 	}
 	return rep, nil
@@ -392,6 +394,33 @@ type manifestEntry struct {
 	MtimeNS    int64      `json:"mtime_ns"`
 	SHA256     string     `json:"sha256"`
 	Provenance Provenance `json:"provenance"`
+}
+
+// FlushManifest writes the cold manifest when a change waits for it and
+// ManifestEvery has passed since the last write, or at once with force
+// (the vault is stopping). It does nothing while a job runs, unless
+// force, which waits for it.
+func (v *Vault) FlushManifest(ctx context.Context, force bool) error {
+	if force {
+		v.jobMu.Lock()
+	} else if !v.jobMu.TryLock() {
+		return nil
+	}
+	defer v.jobMu.Unlock()
+	if !v.manifestDue || (!force && v.now().Sub(v.manifestAt) < v.opts.ManifestEvery) {
+		return nil
+	}
+	return v.flushManifestLocked(ctx)
+}
+
+// flushManifestLocked writes the manifest; the caller holds jobMu.
+func (v *Vault) flushManifestLocked(ctx context.Context) error {
+	if err := v.writeManifest(ctx); err != nil {
+		v.log.Warn("vault: writing the cold manifest failed", "err", err)
+		return err
+	}
+	v.manifestAt, v.manifestDue = v.now(), false
+	return nil
 }
 
 func (v *Vault) writeManifest(ctx context.Context) error {

@@ -1515,8 +1515,8 @@ A value of `0` or `""`, like leaving the key out, means the default.
 | `tailnet.enabled` *(restart)* | `false` | join the tailnet as a device of its own (tsnet), with the auth key from the host's secrets, and serve the dashboard and the node port there |
 | `tailnet.hostname` *(restart)* | `"fridolin-core"` | the core's name on the tailnet: one DNS label, lower-case letters, digits and `-` |
 | `lease.enabled` *(restart)* | `false` | take and renew the core lease, `core/lease.json` in the vault bucket, so two copies of the core never run one WhatsApp session |
-| `lease.renew_seconds` *(restart)* | `60` | how often the holder renews the lease, 1 to 86400 |
-| `lease.stale_seconds` *(restart)* | `300` | how long after its last renewal another host may take the lease over, 1 to 86400; must be more than `renew_seconds` |
+| `lease.renew_seconds` *(restart)* | `300` | how often the holder renews the lease, 1 to 86400 |
+| `lease.stale_seconds` *(restart)* | `1200` | how long after its last renewal another host may take the lease over, 1 to 86400; must be more than `renew_seconds` |
 | `memory_limit_gb` | `8` | the memory the core's container may use, in GB |
 
 `core.tailnet.enabled`, `core.tailnet.hostname`, `core.lease.enabled`,
@@ -1540,11 +1540,13 @@ does: `$FRIDOLIN_CORE_STORE`, else `vault.bucket` *(restart)* with
 | `bucket` | `"fridolin-vault"` | the B2 bucket of the cold tier, the core's exports and the lease |
 | `snapshots_bucket` | `"fridolin-snapshots"` | the B2 bucket of the restic and Litestream snapshots |
 | `endpoint` | `"s3.eu-central-003.backblazeb2.com"` | the buckets' S3 endpoint: a host name, without `https://` or a path |
+| `b2_daily_budget` | `2000` | Class B and Class C transactions a day each that `fridolin doctor` and the dashboard measure the bridge's B2 use against: they warn at 70%. B2's free tier caps each class at 2,500 a day ([VAULT.md](VAULT.md#b2-transactions)) |
 
 A bucket name is 6 to 63 lower-case letters, digits and `-`, starting and
 ending with a letter or digit and not with `b2-`. The keys to the buckets
 are never in `config.json`: they live in the host's secrets. A change to
-the `vault` section starts the vault again with it. What the vault does
+the `vault` section starts the vault again with it, except
+`b2_daily_budget`, which only changes what is warned about. What the vault does
 with these is in [VAULT.md](VAULT.md).
 
 ### `nodes`

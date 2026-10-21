@@ -34,10 +34,11 @@ func TestConfigYAML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `dbs:
+	want := litestreamEconomy + `dbs:
   - path: "/x/bridge.db"
     replica:
       type: s3
+      sync-interval: 1m
       bucket: "fridolin-snapshots"
       path: "litestream/bridge.db"
       endpoint: "https://s3.eu-central-003.backblazeb2.com"
@@ -46,10 +47,12 @@ func TestConfigYAML(t *testing.T) {
   - path: "/y/core.db"
     replica:
       type: file
+      sync-interval: 1m
       path: "/backup/core"
   - path: "/x/aws.db"
     replica:
       type: s3
+      sync-interval: 1m
       bucket: "b"
 `
 	if string(got) != want {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -51,6 +52,7 @@ type coreRuntime struct {
 	tailnetAuthKey string
 	leaseStore     cloud.ObjectStore
 	leaseSettle    time.Duration
+	leaseRetry     time.Duration
 
 	mu         sync.Mutex
 	node       tailnet.Node
@@ -144,23 +146,84 @@ func (b *App) acquireLease() error {
 	l := boot.Lease()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
+	resume := b.lastLeaseHolder(id)
 	held, err := lease.Acquire(ctx, lease.Options{
 		Store: b.core.leaseStore, DeviceID: id, Hostname: host, PID: os.Getpid(), Version: version.String(),
-		Renew: l.Renew(), Stale: l.Stale(), Settle: b.core.leaseSettle,
-		OnLost:  b.leaseLost,
-		OnRenew: func(r lease.Record) { b.setLeaseState(leaseHeld(r)) },
-		Logf:    log.Printf,
+		Renew: l.Renew(), Stale: l.Stale(), Settle: b.core.leaseSettle, Retry: b.core.leaseRetry,
+		Resume:       resume,
+		OnLost:       b.leaseLost,
+		OnRenew:      func(r lease.Record) { b.setLeaseState(leaseHeld(r)) },
+		OnUnverified: func(err error) { b.setLeaseState(b.leaseUnverified(err)) },
+		Logf:         log.Printf,
 	})
 	if held, ok := errors.AsType[*lease.HeldError](err); ok {
 		b.markSuperseded(held.Holder)
 		return fmt.Errorf("%w: %v", ErrLeaseHeld, held)
 	}
 	if err != nil {
+		if cloud.IsCapExceeded(err) {
+			err = fmt.Errorf("%w. %s", err, cloud.CapFix)
+		}
+		if _, ok := errors.AsType[*lease.StoreError](err); ok && !resume {
+			err = fmt.Errorf("%w (this device never held the lease, so it does not start without seeing it: two bridges must never run one WhatsApp session)", err)
+		}
 		return fmt.Errorf("taking the core lease: %w", err)
 	}
 	b.core.lease = held
+	if held.State() == lease.StateUnverified {
+		log.Printf("CORE LEASE UNVERIFIED: the lease store could not be read (%v). Starting anyway, because this device held the lease last; "+
+			"the channels stop only if the store, once it answers, shows another device holding it. Retrying in the background.", held.Err())
+		b.setLeaseState(b.leaseUnverifiedFrom(held.Record(), held.Err()))
+		return nil
+	}
 	b.setLeaseState(leaseHeld(held.Record()))
 	return nil
+}
+
+// lastLeaseHolder reports whether this data dir's own records say device
+// id held the core lease last: lease-state.json names it, held, renewed
+// unverified or released by it, and no other device took it over (that
+// writes superseded, which acquireLease checks first). Such a device
+// starts when the lease store cannot be read; any other refuses.
+func (b *App) lastLeaseHolder(id string) bool {
+	data, err := os.ReadFile(filepath.Join(b.cfgs.Boot().Layout().Core(), leaseStateFile))
+	if err != nil {
+		return false
+	}
+	var rec leaseStateRecord
+	if json.Unmarshal(data, &rec) != nil || rec.DeviceID != id {
+		return false
+	}
+	switch rec.State {
+	case lease.StateHeld, lease.StateUnverified, "released":
+		return true
+	}
+	return false
+}
+
+// leaseUnverified is the lease's status after a renewal failed on the
+// store, err why.
+func (b *App) leaseUnverified(err error) httpapi.LeaseStatus {
+	rec := lease.Record{}
+	if b.core.lease != nil {
+		rec = b.core.lease.Record()
+	}
+	st := b.leaseUnverifiedFrom(rec, err)
+	if cur := b.leaseStatus(); cur != nil && cur.RenewedAt != nil {
+		st.RenewedAt = cur.RenewedAt // the last renewal that reached the store
+	}
+	return st
+}
+
+func (b *App) leaseUnverifiedFrom(r lease.Record, err error) httpapi.LeaseStatus {
+	st := httpapi.LeaseStatus{State: lease.StateUnverified, DeviceID: r.DeviceID, Hostname: r.Hostname}
+	if err != nil {
+		st.Error = err.Error()
+		if cloud.IsCapExceeded(err) {
+			st.Error += ". " + cloud.CapFix
+		}
+	}
+	return st
 }
 
 // SupersededFile, in <data>/core, says this copy of the core was taken
@@ -192,9 +255,10 @@ func (b *App) runLease(ctx context.Context) {
 	b.core.leaseRun.Go(func() { _ = b.core.lease.Run(ctx) })
 }
 
-// leaseLost stops the channels: WhatsApp disconnects and does not
-// reconnect, the outbox stops sending, and every send is refused from now
-// on (leaseGate). The dashboard stays up and says so; replies the brains
+// leaseLost stops the channels, once another device took the lease (a
+// store that does not answer never does): WhatsApp disconnects and does
+// not reconnect, the outbox stops sending, and every send is refused from
+// now on (leaseGate). The dashboard stays up and says so; replies the brains
 // still make wait in the outbox. A restart takes the lease again only once
 // it is free or stale.
 func (b *App) leaseLost(err error) {
@@ -206,6 +270,7 @@ func (b *App) leaseLost(err error) {
 		st.DeviceID, st.Hostname, st.RenewedAt = cur.DeviceID, cur.Hostname, cur.RenewedAt
 	}
 	if lost, ok := errors.AsType[*lease.LostError](err); ok && lost.Holder.DeviceID != "" {
+		// A takeover: that device runs the core now.
 		st.Holder = lost.Holder.DeviceID + " (" + lost.Holder.Hostname + ")"
 		b.markSuperseded(lost.Holder)
 	}
@@ -219,6 +284,16 @@ func (b *App) leaseLost(err error) {
 	}
 	b.wa.Disconnect()
 	b.outbox.Stop()
+}
+
+// closeLeaseStore stops the lease store's rclone daemon, when it has one,
+// after the lease was released.
+func (b *App) closeLeaseStore() {
+	if c, ok := b.core.leaseStore.(io.Closer); ok {
+		if err := c.Close(); err != nil {
+			log.Printf("core lease: closing its store: %v", err)
+		}
+	}
 }
 
 // releaseLease frees the lease on a clean stop, after the channels have
@@ -545,6 +620,10 @@ func (b *App) coreStatus() *httpapi.CoreStatus {
 // coreWarnings say on the Overview what keeps the core from working.
 func (b *App) coreWarnings() []string {
 	var out []string
+	if ls := b.leaseStatus(); ls != nil && ls.State == lease.StateUnverified {
+		out = append(out, "The core lease could not be checked ("+ls.Error+"). WhatsApp keeps running, because this device held the lease last; "+
+			"it stops only if the lease store, once it answers, shows another device holding it.")
+	}
 	if ls := b.leaseStatus(); ls != nil && ls.State == "lost" {
 		msg := "The core lease was lost (" + ls.Error + "): WhatsApp and outbound sending are stopped on this machine."
 		if ls.Holder != "" {
@@ -554,6 +633,10 @@ func (b *App) coreWarnings() []string {
 	}
 	if tn := b.tailnetStatus(); tn != nil && tn.Error != "" {
 		out = append(out, "Tailnet: "+tn.Error)
+	}
+	if b.b2 != nil {
+		today, _ := b.b2.Today()
+		out = append(out, b2Warnings(today, b.cfgs.Get().Vault.B2DailyBudget)...)
 	}
 	return out
 }

@@ -64,6 +64,11 @@ type Options struct {
 	// hash before it deletes the hot one, instead of trusting the hash
 	// recorded at upload together with the object's size.
 	VerifyByDownload bool
+	// ManifestEvery is the least time between two uploads of the cold
+	// manifest: a sync that changed something within it marks the
+	// manifest due, and the next sync after it, or FlushManifest, writes
+	// it. 0 writes it after every sync that changed something.
+	ManifestEvery time.Duration
 	// Logger gets the vault's log lines (default slog.Default()).
 	Logger *slog.Logger
 }
@@ -84,6 +89,10 @@ type Vault struct {
 	// hydrating holds the paths Get is downloading, so a second caller
 	// waits for the first instead of downloading again.
 	hydrating map[string]chan struct{}
+	// manifestAt is when the manifest was last written, manifestDue
+	// whether a change waits for it (ManifestEvery); both under jobMu.
+	manifestAt  time.Time
+	manifestDue bool
 }
 
 // manifestKey is the cold-tier object that lists every cold file with its

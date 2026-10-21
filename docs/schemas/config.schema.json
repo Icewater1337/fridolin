@@ -195,8 +195,8 @@
           "additionalProperties": false,
           "properties": {
             "enabled": {"type": "boolean", "description": "Takes and renews the core lease in the vault bucket. Default false. Needs a restart."},
-            "renew_seconds": {"type": "integer", "minimum": 0, "maximum": 86400, "description": "Default 60. Needs a restart."},
-            "stale_seconds": {"type": "integer", "minimum": 0, "maximum": 86400, "description": "Default 300; must be more than renew_seconds. Needs a restart."}
+            "renew_seconds": {"type": "integer", "minimum": 0, "maximum": 86400, "description": "Default 300. Needs a restart."},
+            "stale_seconds": {"type": "integer", "minimum": 0, "maximum": 86400, "description": "Default 1200; must be more than renew_seconds. Needs a restart."}
           }
         },
         "memory_limit_gb": {"type": "integer", "minimum": 0, "maximum": 4096, "description": "Default 8."}
@@ -214,7 +214,8 @@
         "headroom_percent": {"type": "integer", "minimum": 0, "maximum": 90, "description": "Default 10."},
         "bucket": {"$ref": "#/$defs/bucket", "description": "Default fridolin-vault. Needs a restart."},
         "snapshots_bucket": {"$ref": "#/$defs/bucket", "description": "Default fridolin-snapshots."},
-        "endpoint": {"type": "string", "pattern": "^$|^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$", "description": "The S3 endpoint's host name. Default s3.eu-central-003.backblazeb2.com."}
+        "endpoint": {"type": "string", "pattern": "^$|^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$", "description": "The S3 endpoint's host name. Default s3.eu-central-003.backblazeb2.com."},
+        "b2_daily_budget": {"type": "integer", "minimum": 0, "maximum": 10000000, "description": "Class B and Class C transactions a day each that doctor and the dashboard measure B2 use against, warning at 70%. Default 2000."}
       }
     },
     "nodes": {

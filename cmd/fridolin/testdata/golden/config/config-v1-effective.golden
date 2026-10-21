@@ -159,6 +159,7 @@
   ],
   "vault": {
     "activity_days": 45,
+    "b2_daily_budget": 1500,
     "bucket": "example-vault",
     "cold_after_days": 120,
     "enabled": true,

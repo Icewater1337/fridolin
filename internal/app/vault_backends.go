@@ -102,16 +102,20 @@ func defaultVaultBackends(ctx context.Context, s *vaultService, cfg *config.Sett
 	if c.VaultKeyID == "" || c.VaultKey == "" {
 		return b, errNoVaultKeys
 	}
-	raw, err := b2RawStore(rclone, base, c, cfg.Vault.Bucket)
+	raw, err := b2RawStore(rclone, base, c, cfg.Vault.Bucket, s.usage)
 	if err != nil {
 		return b, err
 	}
-	if err := src.ensureCrypt(ctx, &c, func(ctx context.Context) (bool, error) { return storeEmpty(ctx, raw) }); err != nil {
+	err = src.ensureCrypt(ctx, &c, func(ctx context.Context) (bool, error) { return storeEmpty(ctx, raw) })
+	_ = raw.Close()
+	if err != nil {
 		return b, err
 	}
-	if b.cold, err = b2ColdStore(rclone, base, c, cfg.Vault.Bucket); err != nil {
+	cold, err := b2ColdStore(rclone, base, c, cfg.Vault.Bucket, s.usage)
+	if err != nil {
 		return b, err
 	}
+	b.cold, b.closers, b.b2 = cold, append(b.closers, cold.Close), true
 	b.bridgeDB = AbsPath(cfg.DBPath)
 
 	restic := findVaultTool("restic")

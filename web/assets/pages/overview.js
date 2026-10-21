@@ -164,6 +164,7 @@ export default {
       const ls = c.lease;
       let p = pill('Core', 'neutral');
       if (ls && ls.state === 'lost') p = pill('Lease lost', 'bad');
+      else if (ls && ls.state === 'unverified') p = pill('Lease unverified', 'warn');
       else if (tn && tn.state === 'error') p = pill('Tailnet failed', 'bad');
       else if (ls && ls.state === 'held') p = pill('Holds the lease', 'ok');
       else if (tn && tn.state === 'up') p = pill('On the tailnet', 'ok');
@@ -174,6 +175,9 @@ export default {
           tn && tn.error ? h('p.error-text.small', tn.error) : null,
           ls && ls.state === 'lost'
             ? h('p.error-text.small', `The core lease was lost${ls.holder ? ` to ${ls.holder}` : ''}: WhatsApp and outbound sending are stopped on this machine.`)
+            : null,
+          ls && ls.state === 'unverified'
+            ? h('p.error-text.small', `The lease store does not answer${ls.error ? ` (${ls.error})` : ''}. WhatsApp keeps running: this device held the lease last, and it stops only if another device holds it.`)
             : null,
           ls && ls.state !== 'lost' ? h('p.muted', 'Lease: device ', mono(ls.device_id || ''), ls.renewed_at ? [', renewed ', timeAgo(ls.renewed_at)] : null) : null));
     });

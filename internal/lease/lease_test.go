@@ -199,7 +199,55 @@ func TestRunRenews(t *testing.T) {
 	}
 }
 
-func TestRunStopsWhenRenewalKeepsFailing(t *testing.T) {
+// errCapExceeded is what B2 answers once a daily cap is used up.
+var errCapExceeded = errors.New("cloud: rclone rcd: failed to authorize account: Transaction cap exceeded (403 transaction_cap_exceeded)")
+
+// A store that keeps failing never stops the channels: the lease is
+// unverified, renewals are retried with a backoff up to the renew
+// interval, and it is held again once the store answers.
+func TestRunKeepsRunningWhileTheStoreFails(t *testing.T) {
+	store, clock := newMemStore(), &fakeClock{now: t0}
+	opts := options(store, clock, "aaaa")
+	opts.Retry = 10 * time.Second
+	var unverified []error
+	opts.OnLost = func(err error) { t.Errorf("lost: %v", err) }
+	opts.OnUnverified = func(err error) { unverified = append(unverified, err) }
+	l, err := Acquire(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.failPut = errCapExceeded
+	ctx, cancel := context.WithCancel(context.Background())
+	var waits []time.Duration
+	clock.onSleep = func(d time.Duration) {
+		waits = append(waits, d)
+		switch {
+		case clock.now.Sub(t0) > 2*opts.Stale && store.failPut != nil:
+			store.failPut = nil // long past the staleness window
+		case store.failPut == nil && l.State() == StateHeld:
+			cancel()
+		}
+	}
+	if err := l.Run(ctx); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(unverified) < 5 || !errors.Is(unverified[0], errCapExceeded) {
+		t.Fatalf("OnUnverified got %v", unverified)
+	}
+	// One renew interval, then retries after 10s, 20s, 40s, 60s, 60s...
+	if waits[0] != time.Minute || waits[1] != 10*time.Second || waits[2] != 20*time.Second || waits[3] != 40*time.Second || waits[4] != time.Minute {
+		t.Errorf("waits %v", waits[:5])
+	}
+	if l.State() != StateHeld || l.Err() != nil {
+		t.Errorf("state %s, err %v after the store came back", l.State(), l.Err())
+	}
+	if got := store.record(t); !got.RenewedAt.Equal(clock.now) && got.RenewedAt.Before(t0.Add(opts.Stale)) {
+		t.Errorf("not renewed after the outage: %+v", got)
+	}
+}
+
+// A takeover during an outage is found once the store answers again.
+func TestTakeoverDuringAnOutageStops(t *testing.T) {
 	store, clock := newMemStore(), &fakeClock{now: t0}
 	opts := options(store, clock, "aaaa")
 	var lost []error
@@ -208,22 +256,20 @@ func TestRunStopsWhenRenewalKeepsFailing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store.failPut = errors.New("b2: 503")
+	store.failGet = errCapExceeded
+	n := 0
+	clock.onSleep = func(time.Duration) {
+		if n++; n == 20 {
+			// Another device took the stale lease (and stopped since):
+			// still a takeover for the device that held it.
+			store.failGet = nil
+			store.set(t, Record{DeviceID: "bbbb", Hostname: "vm", RenewedAt: clock.now.Add(-time.Hour), Released: true})
+		}
+	}
 	err = l.Run(context.Background())
 	le, ok := errors.AsType[*LostError](err)
-	if !ok || len(lost) != 1 {
-		t.Fatalf("Run returned %v, OnLost called %d times", err, len(lost))
-	}
-	// Stopped one renew interval before the window, so another device
-	// that takes the lease once it is stale finds this one quiet.
-	if le.Since < 4*time.Minute || le.Since >= 5*time.Minute || le.Holder.DeviceID != "" {
-		t.Errorf("lost %+v", le)
-	}
-	if age := clock.now.Sub(store.record(t).RenewedAt); age >= opts.Stale {
-		t.Errorf("stopped only when the lease was %s old, past the staleness window", age)
-	}
-	if !strings.Contains(err.Error(), "b2: 503") {
-		t.Errorf("error %q does not name the cause", err)
+	if !ok || le.Holder.DeviceID != "bbbb" || len(lost) != 1 {
+		t.Fatalf("Run returned %v, OnLost %v", err, lost)
 	}
 }
 
@@ -345,6 +391,87 @@ func TestReadErrors(t *testing.T) {
 	store.failGet = errors.New("offline")
 	if _, err := Acquire(context.Background(), options(store, &fakeClock{now: t0}, "aaaa")); err == nil || !strings.Contains(err.Error(), "offline") {
 		t.Errorf("error %v", err)
+	}
+	// A broken record is not the store failing: Resume does not start on it.
+	store.failGet = nil
+	opts := options(store, &fakeClock{now: t0}, "aaaa")
+	opts.Resume = true
+	if _, err := Acquire(context.Background(), opts); err == nil {
+		t.Error("resumed on a broken record")
+	}
+}
+
+// The store refusing at start (B2's cap used up): a device that held the
+// lease last starts unverified; one that did not refuses.
+func TestAcquireWhileTheStoreRefuses(t *testing.T) {
+	for _, fail := range []string{"get", "put"} {
+		store, clock := newMemStore(), &fakeClock{now: t0}
+		store.set(t, Record{DeviceID: "aaaa", Hostname: "host-aaaa", PID: 7, StartedAt: t0.Add(-time.Hour), RenewedAt: t0.Add(-time.Minute)})
+		if fail == "get" {
+			store.failGet = errCapExceeded
+		} else {
+			store.failPut = errCapExceeded
+		}
+		opts := options(store, clock, "aaaa")
+		if _, err := Acquire(context.Background(), opts); !errors.Is(err, errCapExceeded) {
+			t.Fatalf("%s: never-resumed Acquire = %v, want the store's error", fail, err)
+		}
+		opts.Resume = true
+		l, err := Acquire(context.Background(), opts)
+		if err != nil {
+			t.Fatalf("%s: resumed Acquire = %v", fail, err)
+		}
+		if l.State() != StateUnverified || !errors.Is(l.Err(), errCapExceeded) {
+			t.Fatalf("%s: state %s err %v", fail, l.State(), l.Err())
+		}
+		// The store answers again and shows this device's earlier record:
+		// the lease is verified and the record is this run's.
+		store.failGet, store.failPut = nil, nil
+		if err := l.Renew(context.Background()); err != nil {
+			t.Fatalf("%s: Renew after the store came back: %v", fail, err)
+		}
+		if got := store.record(t); l.State() != StateHeld || got.PID != 42 || !got.StartedAt.Equal(t0) {
+			t.Errorf("%s: state %s, record %+v", fail, l.State(), got)
+		}
+	}
+}
+
+// A device that started unverified stops when the store then shows
+// another device holding the lease, and takes a stale one.
+func TestUnverifiedStartMeetsAnotherDevice(t *testing.T) {
+	store, clock := newMemStore(), &fakeClock{now: t0}
+	store.failGet = errCapExceeded
+	opts := options(store, clock, "aaaa")
+	opts.Resume = true
+	l, err := Acquire(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.failGet = nil
+	store.set(t, Record{DeviceID: "bbbb", Hostname: "vm", RenewedAt: t0.Add(-time.Minute)})
+	if _, ok := errors.AsType[*LostError](l.Renew(context.Background())); !ok {
+		t.Fatal("an unverified start renewed over a live holder")
+	}
+	if got := store.record(t); got.DeviceID != "bbbb" {
+		t.Fatalf("wrote over the live holder: %+v", got)
+	}
+
+	// A stale record of another device is free, as for Acquire.
+	store2, clock2 := newMemStore(), &fakeClock{now: t0}
+	store2.failGet = errCapExceeded
+	opts2 := options(store2, clock2, "aaaa")
+	opts2.Resume = true
+	l2, err := Acquire(context.Background(), opts2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store2.failGet = nil
+	store2.set(t, Record{DeviceID: "bbbb", Hostname: "vm", RenewedAt: t0.Add(-time.Hour)})
+	if err := l2.Renew(context.Background()); err != nil || l2.State() != StateHeld {
+		t.Fatalf("Renew = %v, state %s", err, l2.State())
+	}
+	if got := store2.record(t); got.DeviceID != "aaaa" {
+		t.Fatalf("record %+v", got)
 	}
 }
 
