@@ -16,15 +16,21 @@ import (
 type StatusSnapshot struct {
 	Brains              []BrainStatus  `json:"brains"`
 	Bridge              *Result        `json:"bridge"`
+	Client              *ClientStatus  `json:"client"`
 	Connect             *connectJob    `json:"connect"`
 	Connected           bool           `json:"connected"`
+	DriveFolder         string         `json:"drive_folder,omitempty"`
 	IncludeBridgeConfig bool           `json:"include_bridge_config"`
 	Job                 *JobStatus     `json:"job"`
 	LastRestore         *RestoreResult `json:"last_restore"`
 	NextRun             *time.Time     `json:"next_run,omitempty"`
 	Rclone              RcloneStatus   `json:"rclone"`
+	RedirectURI         string         `json:"redirect_uri"`
 	SecretExcludes      []string       `json:"secret_excludes"`
 	Settings            Settings       `json:"settings"`
+	// SharedClient says the link uses rclone's shared Google client, which
+	// Google retires during 2026: the page offers the switch.
+	SharedClient bool `json:"shared_client"`
 }
 type RcloneStatus struct {
 	Error       *string `json:"error,omitempty"`
@@ -80,10 +86,22 @@ func (m *Manager) Status() StatusSnapshot {
 		}
 	}
 	connected := m.connected()
+	var section map[string]string
+	if data, err := os.ReadFile(m.rcloneConf()); err == nil {
+		section = RcloneSection(string(data), cfg.Remote)
+	}
+	redirect := ""
+	if m.opts.OAuth.RedirectURI != nil {
+		redirect = m.opts.OAuth.RedirectURI()
+	}
 	resp := StatusSnapshot{
 		Rclone: rc, Connected: connected, Connect: copyOf(m.connect), Settings: cfg,
+		Client: m.clientStatus(), RedirectURI: redirect, SharedClient: connected && usesSharedClient(section),
 		IncludeBridgeConfig: cfg.IncludeBridgeConfig, SecretExcludes: SecretExcludes,
 		Brains: rows, Bridge: copyOf(m.state.Bridge), Job: job, LastRestore: copyOf(m.state.LastRestore),
+	}
+	if connected && section["type"] == "drive" && section["client_id"] != "" && section["root_folder_id"] != "" {
+		resp.DriveFolder = DriveFolder
 	}
 	if next := m.nextRunLocked(cfg, connected); next != nil {
 		value := *next
@@ -93,53 +111,92 @@ func (m *Manager) Status() StatusSnapshot {
 	return resp
 }
 
-// Connect begins a Drive sign-in while preserving the current job admission order.
-func (m *Manager) Connect() error {
+// Connect begins a Drive sign-in with the owner's own client and returns
+// Google's consent page, for the dashboard to send the browser to. With
+// reconnect it may replace a working link (one through rclone's shared
+// client, say): that link stays and keeps backing up until the new one is
+// in place, and stays for good if the sign-in is abandoned or fails. A
+// sign-in still waiting for Google is replaced by the new one.
+func (m *Manager) Connect(reconnect bool) (string, error) {
 	if _, err := m.rclonePath(); err != nil {
-		return apperr.New(apperr.Precondition, m.rcloneMissingHint(err))
+		return "", apperr.New(apperr.Precondition, m.rcloneMissingHint(err))
 	}
-	// Connecting starts by deleting the remote, so it would throw away a
-	// working link, for good if the new sign-in is then abandoned, and a
-	// backup running on it would fail half-way. Disconnect comes first.
-	if m.connected() {
-		return apperr.New(apperr.Conflict, "Google Drive is already connected — disconnect it first to connect another account")
+	if m.opts.OAuth.Start == nil {
+		return "", apperr.New(apperr.Unavailable, "Google sign-in is not available in this bridge")
+	}
+	c, _ := m.driveClient()
+	if c == nil {
+		return "", apperr.New(apperr.Precondition, "add your Google OAuth client first: under Settings → Google sign-in, or for Drive alone on this page (docs/BACKUP.md, Use your own Google client)")
+	}
+	// Without reconnect a working link is never touched: replacing one is
+	// a step the owner takes on purpose.
+	if m.connected() && !reconnect {
+		return "", apperr.New(apperr.Conflict, "Google Drive is already connected — disconnect it first to connect another account")
+	}
+	if err := m.connectAdmissible(); err != nil {
+		return "", err
+	}
+	signedIn := make(chan driveSignIn, 1)
+	authURL, err := m.opts.OAuth.Start(*c, []string{DriveScope}, func(tok *OAuthToken, err error) {
+		select {
+		case signedIn <- driveSignIn{tok, err}:
+		default:
+		}
+	})
+	if err != nil {
+		return "", apperr.New(apperr.Precondition, err.Error())
 	}
 	m.mu.Lock()
-	if m.connect != nil && m.connect.State == "running" {
-		m.mu.Unlock()
-		return apperr.New(apperr.Conflict, "already connecting — finish in the browser tab rclone opened")
+	defer m.mu.Unlock()
+	if err := m.connectAdmissibleLocked(); err != nil {
+		return "", err
 	}
-	if m.job != nil {
-		m.mu.Unlock()
-		return apperr.New(apperr.Conflict, "a backup or restore is running — wait for it or cancel it first")
-	}
-	if m.disconnecting {
-		m.mu.Unlock()
-		return apperr.Wrap(apperr.Conflict, errDisconnecting)
+	// Only waiting for the browser: the new sign-in takes its place.
+	if old := m.connect; old != nil && old.State == "running" {
+		old.cancel()
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
-	job := &connectJob{State: "running", cancel: cancel, done: make(chan struct{})}
-	err := m.goLocked(func() {
+	job := &connectJob{State: "running", Step: stepSignIn, AuthURL: authURL, Reconnect: reconnect && m.connected(), cancel: cancel, done: make(chan struct{})}
+	err = m.goLocked(func() {
 		defer close(job.done)
 		defer cancel()
-		err := m.connectDrive(ctx, job)
+		err := m.connectDrive(ctx, job, *c, signedIn)
 		m.mu.Lock()
 		defer m.mu.Unlock()
 		if err != nil {
-			job.State, job.Error = "error", err.Error()
-			log.Printf("backup: connecting Google Drive failed: %v", err)
+			job.State, job.Step, job.AuthURL, job.Error = "error", "", "", err.Error()
+			if m.connect == job {
+				log.Printf("backup: connecting Google Drive failed: %v", err)
+			}
 			return
 		}
-		job.State, job.AuthURL = "done", ""
-		log.Printf("backup: Google Drive connected")
+		job.State, job.Step, job.AuthURL = "done", "", ""
+		log.Printf("backup: Google Drive connected with your own Google client (folder %s)", DriveFolder)
 	})
 	if err != nil {
-		m.mu.Unlock()
 		cancel()
-		return apperr.Wrap(apperr.Unavailable, err)
+		return "", apperr.Wrap(apperr.Unavailable, err)
 	}
 	m.connect = job
-	m.mu.Unlock()
+	return authURL, nil
+}
+
+// connectAdmissible says why a sign-in may not start now, or nil.
+func (m *Manager) connectAdmissible() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.connectAdmissibleLocked()
+}
+
+func (m *Manager) connectAdmissibleLocked() error {
+	switch {
+	case m.connect != nil && m.connect.State == "running" && m.connect.Step != stepSignIn:
+		return apperr.New(apperr.Conflict, "already connecting — Google Drive is being set up, wait a moment")
+	case m.job != nil:
+		return apperr.New(apperr.Conflict, "a backup or restore is running — wait for it or cancel it first")
+	case m.disconnecting:
+		return apperr.Wrap(apperr.Conflict, errDisconnecting)
+	}
 	return nil
 }
 

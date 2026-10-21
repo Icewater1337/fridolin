@@ -57,11 +57,15 @@ type Options struct {
 	BridgeFiles           func() (BridgeFiles, error)
 	FindRclone            func(string) (string, error)
 	Environ               func(context.Context) []string
-	DesktopContext        func(context.Context) context.Context
 	InstallHint           func() string
 	RefusalText           func(string, string) string
 	Notify                func(context.Context, Target, string) error
 	Runner                RunFunc
+	// DriveClientPath is where an OAuth client pasted for Drive alone is
+	// kept; without one the Drive link uses OAuth's SignInClient.
+	DriveClientPath string
+	// OAuth is Google sign-in as the bridge runs it (internal/google).
+	OAuth OAuth
 	// Superseded reports whether the vault's restic repository on Drive
 	// has taken this backup's place: it has completed a copy once. Then
 	// the daily scheduled run no longer runs; Back up now and restores

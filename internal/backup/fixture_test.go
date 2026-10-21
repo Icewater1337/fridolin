@@ -22,6 +22,7 @@ type backupFixture struct {
 	manager *Manager
 	options Options
 	runner  RunFunc // assigned before starting a job
+	oauth   *fakeOAuth
 
 	mu       sync.Mutex
 	settings Settings
@@ -58,11 +59,10 @@ func newBackupFixture(t *testing.T, configure func(*Settings)) *backupFixture {
 			}
 			return files, nil
 		},
-		FindRclone:     func(string) (string, error) { return "", ErrRcloneMissing },
-		Environ:        func(context.Context) []string { return nil },
-		DesktopContext: func(ctx context.Context) context.Context { return ctx },
-		InstallHint:    func() string { return "install rclone" },
-		RefusalText:    func(name, reason string) string { return name + ": " + reason },
+		FindRclone:  func(string) (string, error) { return "", ErrRcloneMissing },
+		Environ:     func(context.Context) []string { return nil },
+		InstallHint: func() string { return "install rclone" },
+		RefusalText: func(name, reason string) string { return name + ": " + reason },
 		Runner: func(ctx context.Context, args []string, stderr io.Writer) ([]byte, error) {
 			if f.runner == nil {
 				return nil, fmt.Errorf("unexpected rclone call: %v", args)
@@ -236,6 +236,7 @@ func connectBackupFixture(t *testing.T, run RunFunc) *backupFixture {
 	f.runner = run
 	missing := filepath.Join(t.TempDir(), "missing-rclone")
 	f.manager.opts.FindRclone = func(string) (string, error) { return missing, nil }
+	f.oauth = newFakeOAuth(t, f.manager)
 	if err := os.MkdirAll(filepath.Dir(f.options.RcloneConf), 0700); err != nil {
 		t.Fatal(err)
 	}

@@ -1697,9 +1697,8 @@ only:
 
 rclone and the Plaud CLI never get those names, which are for brains.
 
-While rclone connects Google Drive, and while the Plaud CLI signs you in,
-they open your browser, so they also get the variables of your desktop
-session that Linux needs to open one (macOS needs none of them):
+While the Plaud CLI signs you in, it opens your browser, so it also gets
+the variables of your desktop session that Linux needs to open one (macOS needs none of them):
 `DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY`, `XDG_RUNTIME_DIR`,
 `DBUS_SESSION_BUS_ADDRESS`, `XDG_CURRENT_DESKTOP`, `KDE_SESSION_VERSION`,
 `XDG_DATA_DIRS` (where snap and Flatpak browsers are found),

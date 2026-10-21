@@ -113,7 +113,10 @@ Ask, unless the request already says it:
      whether it handles direct messages.
    - **Allow their own number** (Chats → Allowed numbers): with the
      country code; a `+`, spaces and dashes are fine.
-   - Optional: **Backup → Connect Google Drive**.
+   - Optional: **Backup → Connect Google Drive**. Needs the same Google
+     OAuth client as the calendar, with the Google Drive API enabled and
+     the `drive.file` scope on its consent screen (docs/BACKUP.md, "Use
+     your own Google client").
    - Optional: **Google Calendar** per brain. Needs a one-time Google OAuth
      client (docs/CALENDAR.md walks through it); the person creates it in
      Google Cloud Console and pastes it under Settings → Google sign-in.

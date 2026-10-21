@@ -528,9 +528,12 @@ your site; the Plaud card builds and pairs it. See [docs/PLAUD.md](docs/PLAUD.md
 ### Backups
 
 *Backup → Connect Google Drive* links a Drive account through
-[rclone](https://rclone.org). The bridge keeps its own rclone configuration
-(your personal rclone setup is untouched) and asks only for the `drive.file`
-permission, so it can see nothing in your Drive except the files it creates.
+[rclone](https://rclone.org), signed in with your own Google OAuth client
+(the one under Settings → Google sign-in, with the Drive API enabled; see
+[docs/BACKUP.md](docs/BACKUP.md#use-your-own-google-client)). The bridge
+keeps its own rclone configuration (your personal rclone setup is
+untouched) and asks only for the `drive.file` permission, so it can see
+nothing in your Drive except the files it creates, in a folder `Fridolin`.
 
 Every night (or when you click *Back up now*) each brain folder is synced
 incrementally to `fridolin-backup/<brain>/current/`; files that changed or

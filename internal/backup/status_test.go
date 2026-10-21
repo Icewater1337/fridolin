@@ -20,9 +20,13 @@ func TestStatusSnapshotPreservesMapEncoding(t *testing.T) {
 			job = map[string]any{"brain": "", "current": "", "done": []string{}, "kind": jobRestore, "queue": []string(nil), "started": now, "target": ""}
 			v.NextRun = &now
 		}
-		old := map[string]any{"brains": v.Brains, "bridge": v.Bridge, "connect": v.Connect, "connected": v.Connected, "include_bridge_config": v.IncludeBridgeConfig, "job": job, "last_restore": v.LastRestore, "rclone": rc, "secret_excludes": v.SecretExcludes, "settings": v.Settings}
+		old := map[string]any{"brains": v.Brains, "bridge": v.Bridge, "connect": v.Connect, "connected": v.Connected, "include_bridge_config": v.IncludeBridgeConfig, "job": job, "last_restore": v.LastRestore, "rclone": rc, "secret_excludes": v.SecretExcludes, "settings": v.Settings,
+			"client": v.Client, "redirect_uri": v.RedirectURI, "shared_client": v.SharedClient}
 		if populated {
 			old["next_run"] = now
+			v.Client = &ClientStatus{Source: "google", Type: "web", ClientIDHint: "1-…"}
+			v.DriveFolder, v.RedirectURI, v.SharedClient = DriveFolder, "http://127.0.0.1:8765/", true
+			old["client"], old["drive_folder"], old["redirect_uri"], old["shared_client"] = v.Client, DriveFolder, v.RedirectURI, true
 		}
 		got, err := json.Marshal(v)
 		if err != nil {

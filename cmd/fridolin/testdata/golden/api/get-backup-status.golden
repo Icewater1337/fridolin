@@ -36,6 +36,11 @@ Content-Type: application/json
     "trigger": "manual",
     "version": "<STAMP>"
   },
+  "client": {
+    "client_id_hint": "123-…",
+    "source": "google",
+    "type": "installed"
+  },
   "connect": null,
   "connected": true,
   "include_bridge_config": true,
@@ -48,6 +53,7 @@ Content-Type: application/json
     "path": "<FAKES>/rclone",
     "version": "rclone v1.70.3"
   },
+  "redirect_uri": "http://127.0.0.1:8765/",
   "secret_excludes": [
     ".env",
     ".env.*",
@@ -67,5 +73,6 @@ Content-Type: application/json
     "rclone_path": "<FAKES>/rclone",
     "remote": "brain-gdrive",
     "root": "fridolin-backup"
-  }
+  },
+  "shared_client": false
 }

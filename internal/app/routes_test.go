@@ -125,6 +125,8 @@ var routeInventory = []httpRoute{
 	{"GET", "/api/backup/status", classAPI, ""},
 	{"POST", "/api/backup/connect", classAPI, ""},
 	{"POST", "/api/backup/disconnect", classAPI, ""},
+	{"PUT", "/api/backup/drive-client", classAPI, ""},
+	{"DELETE", "/api/backup/drive-client", classAPI, ""},
 	{"PUT", "/api/backup/settings", classAPI, ""},
 	{"POST", "/api/backup/run", classAPI, ""},
 	{"POST", "/api/backup/cancel", classAPI, ""},

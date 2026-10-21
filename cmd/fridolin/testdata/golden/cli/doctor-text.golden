@@ -21,5 +21,6 @@ missing  litestream (needed from M3): litestream is not installed
 ok       age: /opt/homebrew/bin/age (v1.2.1)
 ok       approvals waiting: none waiting
 ok       lockdown: off
+ok       Google Drive link uses your own Google client: Google Drive is not connected
 
-11 ok, 2 warn, 3 missing, 1 fail; a required check fails
+12 ok, 2 warn, 3 missing, 1 fail; a required check fails

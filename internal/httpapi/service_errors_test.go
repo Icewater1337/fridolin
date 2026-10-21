@@ -17,11 +17,34 @@ import (
 // the named service operation, even when it reports a failure.
 type backupConnectFake struct {
 	BackupService
-	err   error
-	calls int
+	err       error
+	calls     int
+	reconnect bool
 }
 
-func (f *backupConnectFake) Connect() error { f.calls++; return f.err }
+func (f *backupConnectFake) Connect(reconnect bool) (string, error) {
+	f.calls++
+	f.reconnect = reconnect
+	return "https://accounts.example.com/auth", f.err
+}
+
+// TestBackupConnectTakesReconnect: the body may be left out; one that
+// says reconnect asks for the switch of a working link, and the answer
+// carries Google's consent page.
+func TestBackupConnectTakesReconnect(t *testing.T) {
+	f := &backupConnectFake{}
+	a := BackupAPI{Backup: func() BackupService { return f }}
+	w := httptest.NewRecorder()
+	a.Connect(w, httptest.NewRequest("POST", "/connect", strings.NewReader(`{"reconnect":true}`)))
+	if w.Code != 202 || !f.reconnect || !strings.Contains(w.Body.String(), `"auth_url":"https://accounts.example.com/auth"`) {
+		t.Fatalf("%d %s reconnect=%v", w.Code, w.Body.String(), f.reconnect)
+	}
+	w = httptest.NewRecorder()
+	a.Connect(w, httptest.NewRequest("POST", "/connect", strings.NewReader(`{"reconnect":1}`)))
+	if w.Code != 400 {
+		t.Errorf("a bad body = %d", w.Code)
+	}
+}
 func TestBackupConnectClassifiesServiceFailures(t *testing.T) {
 	for _, tc := range []struct {
 		err    error

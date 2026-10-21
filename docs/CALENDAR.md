@@ -35,6 +35,11 @@ for sign-ins only after the restart that moves the dashboard there.
 The client file is stored in `~/.fridolin/google/`, which brains
 cannot read.
 
+The same client also connects the [Drive backup](BACKUP.md#use-your-own-google-client):
+enable the Google Drive API in its project and add the `drive.file` scope
+to its consent screen. A brain's calendar sign-in never asks for Drive,
+nor the Drive sign-in for calendars.
+
 ## Connecting a brain
 
 Dashboard → **Brains → *brain* → Calendar → Connect Google Calendar**. Google's

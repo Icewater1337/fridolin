@@ -12,9 +12,14 @@ import { pill, callout, mono, loading } from './common.js';
 
 const CONSOLE = 'https://console.cloud.google.com/apis/credentials';
 const ENABLE_API = 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com';
+const ENABLE_DRIVE_API = 'https://console.cloud.google.com/apis/library/drive.googleapis.com';
 
-/** Steps and a paste box for the Google OAuth client. onSaved() runs (and is awaited) after a successful save. */
-export function googleClientSetup({ redirectUri, onSaved, compact = false } = {}) {
+/**
+ * Steps and a paste box for a Google OAuth client. onSaved() runs (and is awaited) after a successful save.
+ * drive: the client is for the Drive backup alone (saved to /api/backup/drive-client, steps name the Drive API).
+ */
+export function googleClientSetup({ redirectUri, onSaved, compact = false, drive = false } = {}) {
+  const endpoint = drive ? '/api/backup/drive-client' : '/api/google/client';
   const area = h('textarea.mono', {
     id: nextId('gclient'), rows: compact ? 4 : 6, spellcheck: 'false', autocomplete: 'off',
     placeholder: '{"installed":{"client_id":"….apps.googleusercontent.com","client_secret":"…", …}}',
@@ -29,7 +34,7 @@ export function googleClientSetup({ redirectUri, onSaved, compact = false } = {}
     onClick: async () => {
       const text = area.value.trim();
       if (!text) { toast('Paste the JSON file first'); return; }
-      const r = await put('/api/google/client', { json: text });
+      const r = await put(endpoint, { json: text });
       area.value = '';
       toast('Google client saved', 'ok');
       if (r && r.note) toast(r.note, 'warn', { timeout: 15000 });
@@ -38,7 +43,7 @@ export function googleClientSetup({ redirectUri, onSaved, compact = false } = {}
   });
   return h('div.stack',
     h('ol.steps-list',
-      h('li', 'In ', h('a', { href: ENABLE_API, target: '_blank', rel: 'noopener noreferrer' }, 'Google Cloud Console'), ', pick or create a project and ', h('strong', 'enable the Google Calendar API'), '.'),
+      h('li', 'In ', h('a', { href: drive ? ENABLE_DRIVE_API : ENABLE_API, target: '_blank', rel: 'noopener noreferrer' }, 'Google Cloud Console'), ', pick or create a project and ', h('strong', drive ? 'enable the Google Drive API' : 'enable the Google Calendar API'), '.'),
       h('li', 'Under ', h('a', { href: CONSOLE, target: '_blank', rel: 'noopener noreferrer' }, 'APIs & Services → Credentials'), ' choose ', h('strong', 'Create credentials → OAuth client ID → Desktop app'), '. (If asked, set up the consent screen first: External, add your own address as a test user, or publish it so sign-ins do not expire after 7 days.)'),
       h('li', 'Download the JSON and paste it here, or pick the file.')),
     h('div.field',
