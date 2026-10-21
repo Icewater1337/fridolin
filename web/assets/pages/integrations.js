@@ -184,7 +184,7 @@ export default {
       appBox.hidden = !app;
       if (app) {
         paint(keysBox, { saved: !!app.credentials }, renderKeys);
-        paint(buildBox, { site: app.site_url || '', saved: !!app.credentials, build: app.build || null, built: app.built || '' }, renderBuild);
+        paint(buildBox, { site: app.site_url || '', saved: !!app.credentials, build: app.build || null, built: app.built || '', buildsOn: app.builds_on || '', noBuilder: app.no_builder || '' }, renderBuild);
         paint(phonesBox, app.devices || [], renderPhones);
       }
     }
@@ -234,16 +234,24 @@ export default {
       ];
     }
 
-    function renderBuild({ site, saved, build, built }) {
+    // Where the app is built: here, where this computer has a JDK and the
+    // Android SDK, else on a node that builds Android apps (android-build).
+    function renderBuild({ site, saved, build, built, buildsOn, noBuilder }) {
       const running = !!(build && build.state === 'running');
       const expires = build && build.pairing_expires ? ` Its pairing code works once, until ${new Date(build.pairing_expires).toLocaleString()}.` : '';
+      const where = build && build.node ? ` on ${build.node}` : '';
       return [
         site ? null : callout('warn', 'The site has no domain yet', 'The app uploads through your site: give it a domain on the Site page first.'),
-        build && build.state === 'error' ? callout('bad', 'Building the app failed', h('div', build.error), build.log ? h('pre.small', build.log) : null) : null,
-        built ? h('p', 'Built ', timeAgo(built), '.', expires) : null,
+        !running && noBuilder ? callout('warn', 'Nothing here can build the app',
+          h('div', 'This computer has no JDK 17+ and Android SDK, and no node that builds Android apps is online. Join a machine that has them as a node (Nodes → New join code), then approve what it offers there: android-build among it.'),
+          h('div.muted.small', noBuilder)) : null,
+        build && build.state === 'error' ? callout('bad', `Building the app${where} failed`, h('div', build.error), build.log ? h('pre.small', build.log) : null) : null,
+        running && build.stage ? h('p', icon('refresh'), ' ', build.stage, '…') : null,
+        built && !running ? h('p', 'Built ', timeAgo(built), where && build.state === 'done' ? where : '', '.', expires) : null,
+        !running && buildsOn && buildsOn !== 'this computer' ? h('p.muted.small', 'This computer has no JDK and Android SDK: the node ', h('strong', buildsOn), ' builds the app and sends it back.') : null,
         h('div.actions',
           btn(running ? 'Building… (a few minutes)' : built ? 'Build again' : 'Build phone app', {
-            kind: built ? undefined : 'primary', icon: 'phone', disabled: running || !site || !saved,
+            kind: built ? undefined : 'primary', icon: 'phone', disabled: running || !site || !saved || !!noBuilder,
             onClick: async () => {
               await post('/api/plaud/app/build');
               toast('Building the phone app…', 'info');

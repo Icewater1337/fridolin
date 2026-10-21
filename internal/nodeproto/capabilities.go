@@ -17,6 +17,9 @@ type Capabilities struct {
 	Notify bool     `json:"notify,omitempty"`
 	// Fride is FrIDE on the node, declared while it answers.
 	Fride *FrideCap `json:"fride,omitempty"`
+	// AndroidBuild (android-build) is Gradle with a JDK and the Android
+	// SDK on the node, declared while the agent finds them.
+	AndroidBuild *AndroidBuildCap `json:"android_build,omitempty"`
 }
 
 // ExecCap runs allowlisted commands.
@@ -154,6 +157,9 @@ func (c Capabilities) Check() error {
 			}
 		}
 	}
+	if err := c.AndroidBuild.Check(); err != nil {
+		return err
+	}
 	return c.Fride.Check()
 }
 
@@ -251,21 +257,28 @@ func (c Capabilities) Allows(method string) bool {
 	if slices.Contains(FrideMethods, method) {
 		return c.Fride != nil
 	}
+	if slices.Contains(AndroidMethods, method) {
+		return c.AndroidBuild != nil
+	}
 	return false
 }
 
 // Empty reports whether nothing is offered.
 func (c Capabilities) Empty() bool {
-	return (c.Exec == nil || len(c.Exec.Allow) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil
+	return (c.Exec == nil || len(c.Exec.Allow) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil && c.AndroidBuild == nil
 }
 
 // Covers reports whether approved covers every part of declared: each
 // exec rule as it is, each root with no more access, limits no higher, and
 // host and notify. A declaration that grows past what was approved needs
-// approval again. FrIDE is covered by having been approved at all: its
-// address and repositories are only what it reports.
+// approval again. FrIDE and android-build are covered by having been
+// approved at all: FrIDE's address and repositories, and the JDK and
+// platforms, are only what the node reports.
 func Covers(approved, declared Capabilities) bool {
 	if declared.Host && !approved.Host || declared.Notify && !approved.Notify || declared.Fride != nil && approved.Fride == nil {
+		return false
+	}
+	if declared.AndroidBuild != nil && approved.AndroidBuild == nil {
 		return false
 	}
 	if d := declared.Exec; d != nil && len(d.Allow) > 0 {
@@ -299,6 +312,11 @@ func Intersect(declared, approved Capabilities) Capabilities {
 		f := *declared.Fride
 		f.Repos = slices.Clone(f.Repos)
 		out.Fride = &f
+	}
+	if declared.AndroidBuild != nil && approved.AndroidBuild != nil {
+		ab := *declared.AndroidBuild
+		ab.Platforms = slices.Clone(ab.Platforms)
+		out.AndroidBuild = &ab
 	}
 	if d, a := declared.Exec, approved.Exec; d != nil && a != nil {
 		e := &ExecCap{TimeoutSeconds: min(d.Timeout(), a.Timeout()), MaxOutputBytes: min(d.OutputCap(), a.OutputCap())}
@@ -362,6 +380,9 @@ func (c Capabilities) Summary() string {
 	}
 	if c.Fride != nil {
 		parts = append(parts, "fride")
+	}
+	if c.AndroidBuild != nil {
+		parts = append(parts, "android-build")
 	}
 	if len(parts) == 0 {
 		return "nothing"

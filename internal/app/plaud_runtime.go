@@ -15,14 +15,14 @@ import (
 // NewPlaudManager supplies settings and the paths captured for this bridge start.
 func NewPlaudManager(cfgs *config.Store, brains *BrainManager,
 	submit func(*brain.Brain, string, string, string, []string, func(error)) error,
-	notify func(context.Context, string, string) error, siteURL func() string) *plaud.Manager {
-	return plaud.New(plaudOptions(cfgs, brains, submit, notify, siteURL))
+	notify func(context.Context, string, string) error, siteURL func() string, fleet plaudFleet) *plaud.Manager {
+	return plaud.New(plaudOptions(cfgs, brains, submit, notify, siteURL, fleet))
 }
 
 // plaudOptions projects command policy and host dependencies into the service.
 func plaudOptions(cfgs *config.Store, brains *BrainManager,
 	submit func(*brain.Brain, string, string, string, []string, func(error)) error,
-	notify func(context.Context, string, string) error, siteURL func() string) plaud.Options {
+	notify func(context.Context, string, string) error, siteURL func() string, fleet plaudFleet) plaud.Options {
 	boot := cfgs.Boot()
 	return plaud.Options{
 		PlaudDir: boot.PlaudDir(), SiteDevices: boot.Layout().SiteDevices(), Home: boot.Home,
@@ -40,6 +40,7 @@ func plaudOptions(cfgs *config.Store, brains *BrainManager,
 		AppEnviron: func(ctx context.Context, javaHome, sdk string) []string {
 			return childEnv(helperScope(ctx), nil, "JAVA_HOME="+javaHome, "ANDROID_HOME="+sdk)
 		},
+		AppBuilders: fleet.builders, BuildOnNode: fleet.build,
 	}
 }
 

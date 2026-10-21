@@ -5,9 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -135,53 +133,31 @@ func plaudPATH(bin string) string {
 	return strings.Join(dirs, string(filepath.ListSeparator))
 }
 
-// androidToolchain finds a JDK and the Android SDK to build the app with:
-// JAVA_HOME and ANDROID_HOME (or ANDROID_SDK_ROOT) of the bridge's
-// environment, else where macOS, Homebrew and Android Studio put them.
+// androidToolchain finds a JDK and the Android SDK to build the app with
+// on this machine (platform.FindAndroidToolchain): JAVA_HOME and
+// ANDROID_HOME (or ANDROID_SDK_ROOT) of the bridge's environment, else
+// where macOS, Homebrew and Android Studio put them.
 func androidToolchain() (javaHome, sdk string, err error) {
-	home := HomeDir()
-	javas := []string{os.Getenv("JAVA_HOME")}
-	sdks := []string{os.Getenv("ANDROID_HOME"), os.Getenv("ANDROID_SDK_ROOT"), filepath.Join(home, "Library", "Android", "sdk"), filepath.Join(home, "Android", "Sdk")}
-	if runtime.GOOS == "darwin" {
-		if out, err := exec.Command("/usr/libexec/java_home").Output(); err == nil {
-			javas = append(javas, strings.TrimSpace(string(out)))
-		}
+	tc, err := platform.FindAndroidToolchain(platform.AndroidLookup{Home: HomeDir()})
+	if err != nil {
+		return "", "", err
 	}
-	for _, prefix := range []string{"/opt/homebrew", "/usr/local", filepath.Join(home, "homebrew")} {
-		for _, jdk := range []string{"openjdk", "openjdk@21", "openjdk@17"} {
-			javas = append(javas, filepath.Join(prefix, "opt", jdk, "libexec", "openjdk.jdk", "Contents", "Home"))
-		}
-		sdks = append(sdks, filepath.Join(prefix, "share", "android-commandlinetools"))
-	}
-	javas = append(javas, "/Applications/Android Studio.app/Contents/jbr/Contents/Home")
-	if jvms, _ := filepath.Glob("/usr/lib/jvm/*"); len(jvms) > 0 {
-		javas = append(javas, jvms...)
-	}
-	for _, j := range javas {
-		if j != "" && fsx.Exists(filepath.Join(j, "bin", "java")) {
-			javaHome = j
-			break
-		}
-	}
-	for _, s := range sdks {
-		if s != "" && platform.IsDir(filepath.Join(s, "platforms")) {
-			sdk = s
-			break
-		}
-	}
-	switch {
-	case javaHome == "":
-		return "", "", errors.New("no JDK found to build the app with: install one (brew install openjdk@17), or set JAVA_HOME in the service's environment")
-	case sdk == "":
-		return "", "", errors.New(`no Android SDK found to build the app with: brew install --cask android-commandlinetools, then sdkmanager "platforms;android-35" "build-tools;35.0.0"; or set ANDROID_HOME in the service's environment`)
-	}
-	return javaHome, sdk, nil
+	return tc.JavaHome, tc.SDK, nil
 }
 
+// plaudAppSource is plaud-android/ of the checkout the bridge was built in
+// or installed from, else the one beside the binary: the fridolin-core
+// image keeps it in /opt/fridolin/plaud-android, to send it to a node that
+// builds it (docs/PLAUD.md).
 func plaudAppSource() (string, error) {
-	src := filepath.Join(ownLayout().Source, "plaud-android")
-	if ownLayout().Source == "" || !fsx.Exists(filepath.Join(src, "gradlew")) {
-		return "", errors.New("the app's source is not here: Fridolin builds it from plaud-android/ in the checkout it was installed from")
+	l := ownLayout()
+	for _, dir := range []string{l.Source, l.Dir} {
+		if dir == "" {
+			continue
+		}
+		if src := filepath.Join(dir, "plaud-android"); fsx.Exists(filepath.Join(src, "gradlew")) {
+			return src, nil
+		}
 	}
-	return src, nil
+	return "", errors.New("the app's source is not here: Fridolin builds it from plaud-android/ in the checkout it was installed from")
 }

@@ -83,10 +83,12 @@ type doctorNode struct {
 	LastSeen *time.Time `json:"last_seen"`
 	Online   bool       `json:"online"`
 	Declared struct {
-		Fride *nodeproto.FrideCap `json:"fride"`
+		Fride        *nodeproto.FrideCap        `json:"fride"`
+		AndroidBuild *nodeproto.AndroidBuildCap `json:"android_build"`
 	} `json:"declared"`
 	Approved struct {
-		Fride *nodeproto.FrideCap `json:"fride"`
+		Fride        *nodeproto.FrideCap        `json:"fride"`
+		AndroidBuild *nodeproto.AndroidBuildCap `json:"android_build"`
 	} `json:"approved"`
 }
 

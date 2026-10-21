@@ -22,6 +22,9 @@ package plaud
 // a phone.
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -33,6 +36,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"log"
 	"math/big"
 	"os"
@@ -421,6 +426,10 @@ type plaudAppJob struct {
 	Log string `json:"log,omitempty"`
 	// PairingExpires is when the built app's pairing code stops working.
 	PairingExpires time.Time `json:"pairing_expires,omitzero"`
+	// Node is the node that builds it, "" for this machine; Stage says
+	// what the build is doing while it runs.
+	Node  string `json:"node,omitempty"`
+	Stage string `json:"stage,omitempty"`
 }
 
 var ErrAppBuilding = errors.New("the phone app is being built already")
@@ -430,7 +439,9 @@ func (p *Manager) AppFile() string { return filepath.Join(p.appDir(), "plaud-syn
 
 // BuildApp starts building the phone app in the background, with the
 // site's address and a new pairing code: Gradle, in plaud-android/ of the
-// checkout Fridolin was installed from.
+// checkout Fridolin was installed from, on this machine where it has a
+// JDK and the Android SDK, else on a node that builds Android apps
+// (android-build).
 func (p *Manager) BuildApp() error {
 	select {
 	case <-p.lifetime().Done():
@@ -455,9 +466,14 @@ func (p *Manager) BuildApp() error {
 	if err != nil {
 		return err
 	}
-	javaHome, sdk, err := p.options.AndroidToolchain()
-	if err != nil {
-		return err
+	javaHome, sdk, localErr := p.options.AndroidToolchain()
+	var node *AppBuilder
+	if localErr != nil {
+		builders := p.appBuilders()
+		if len(builders) == 0 {
+			return noBuilderError(localErr)
+		}
+		node = &builders[0]
 	}
 	p.mu.Lock()
 	if p.stopping {
@@ -468,24 +484,155 @@ func (p *Manager) BuildApp() error {
 		p.mu.Unlock()
 		return ErrAppBuilding
 	}
-	job := &plaudAppJob{State: "running", Started: time.Now()}
+	job := &plaudAppJob{State: "running", Started: time.Now(), Stage: "Building on this computer"}
+	if node != nil {
+		job.Node, job.Stage = node.Name, "Packing the app's source for "+node.Name
+	}
 	p.appJob = job
 	p.bg.Add(1)
 	p.mu.Unlock()
+	stage := func(s string) {
+		p.mu.Lock()
+		job.Stage = s
+		p.mu.Unlock()
+	}
 	go func() {
 		defer p.bg.Done()
-		exp, out, err := p.buildApp(p.lifetime(), src, javaHome, sdk, site, dev)
+		var exp time.Time
+		var out string
+		var err error
+		if node != nil {
+			exp, out, err = p.buildAppOnNode(p.lifetime(), *node, src, site, dev, stage)
+		} else {
+			exp, out, err = p.buildApp(p.lifetime(), src, javaHome, sdk, site, dev)
+		}
 		p.mu.Lock()
 		defer p.mu.Unlock()
-		job.Finished, job.PairingExpires, job.State = time.Now(), exp, "done"
+		job.Finished, job.PairingExpires, job.State, job.Stage = time.Now(), exp, "done", ""
+		where := ""
+		if node != nil {
+			where = " on node " + node.Name
+		}
 		if err != nil {
 			job.State, job.Error, job.Log = "error", err.Error(), out
-			log.Printf("plaud: building the phone app failed: %v", err)
+			log.Printf("plaud: building the phone app%s failed: %v", where, err)
 		} else {
-			log.Printf("plaud: built the phone app")
+			log.Printf("plaud: built the phone app%s", where)
 		}
 	}()
 	return nil
+}
+
+// noBuilderHint says how to get the app built when this machine cannot
+// build it and no node can.
+const noBuilderHint = "join a node that has a JDK 17 or newer and the Android SDK (fridolin node join), and approve what it offers, android-build among it (docs/NODES.md, android-build)"
+
+func noBuilderError(local error) error {
+	return fmt.Errorf("this computer cannot build the app (%v), and no node that builds Android apps is online: %s", local, noBuilderHint)
+}
+
+func (p *Manager) appBuilders() []AppBuilder {
+	if p.options.AppBuilders == nil || p.options.BuildOnNode == nil {
+		return nil
+	}
+	return p.options.AppBuilders()
+}
+
+// appProperties is what the app is built with: Plaud's developer keys,
+// the site to upload to and the pairing code.
+func appProperties(dev Developer, site, code string) map[string]string {
+	return map[string]string{"client_id": dev.ClientID, "client_secret": dev.ClientSecret, "api_key": dev.APIKey, "site_url": site, "pairing_code": code}
+}
+
+// buildAppOnNode has node build the app and saves it to AppFile. On
+// failure it returns the end of Gradle's output.
+func (p *Manager) buildAppOnNode(ctx context.Context, node AppBuilder, src, site string, dev Developer, stage func(string)) (time.Time, string, error) {
+	archive, err := AppSourceArchive(src)
+	if err != nil {
+		return time.Time{}, "", fmt.Errorf("packing the app's source: %w", err)
+	}
+	if err := os.MkdirAll(p.appDir(), 0o700); err != nil {
+		return time.Time{}, "", err
+	}
+	code, exp, err := p.newPairing()
+	if err != nil {
+		return time.Time{}, "", err
+	}
+	stage("Building on " + node.Name + " (a few minutes)")
+	var apk bytes.Buffer
+	out, err := p.options.BuildOnNode(ctx, node.ID, archive, appProperties(dev, site, code), &apk)
+	if err != nil {
+		return time.Time{}, out, fmt.Errorf("on node %s: %w", node.Name, err)
+	}
+	if apk.Len() == 0 {
+		return time.Time{}, "", fmt.Errorf("node %s sent no app", node.Name)
+	}
+	stage("Saving the app")
+	return exp, "", fsx.WriteFileAtomic(p.AppFile(), apk.Bytes(), 0o600, false)
+}
+
+// appSourceSkips are what AppSourceArchive leaves out of plaud-android/:
+// what its .gitignore names, Gradle's and the build's own files.
+var appSourceSkips = []string{".gradle", "build", "app/build", "app/libs", "local.properties", ".idea"}
+
+// AppSourceArchive packs the app's source in dir as a gzip'd tar for a
+// node to build, without what a build there left (appSourceSkips, APKs)
+// and without symlinks.
+func AppSourceArchive(dir string) ([]byte, error) {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(zw)
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil || rel == "." {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if slices.Contains(appSourceSkips, rel) || strings.HasSuffix(rel, ".apk") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && !info.Mode().IsRegular() {
+			return nil
+		}
+		h, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		h.Name, h.Uname, h.Gname, h.Uid, h.Gid = rel, "", "", 0, 0
+		if d.IsDir() {
+			h.Name += "/"
+		}
+		if err := tw.WriteHeader(h); err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = io.Copy(tw, f)
+		return err
+	})
+	if err == nil {
+		err = tw.Close()
+	}
+	if err == nil {
+		err = zw.Close()
+	}
+	return buf.Bytes(), err
 }
 
 // buildApp runs the build and copies the app to AppFile. On failure it
@@ -502,7 +649,10 @@ func (p *Manager) buildApp(ctx context.Context, src, javaHome, sdk, site string,
 	// What the app is built with; the build reads it, then it goes. The
 	// build itself stays in the data folder, which brains cannot read.
 	props := filepath.Join(dir, "build.properties")
-	content := fmt.Sprintf("client_id=%s\nclient_secret=%s\napi_key=%s\nsite_url=%s\npairing_code=%s\n", dev.ClientID, dev.ClientSecret, dev.APIKey, site, code)
+	content := ""
+	for _, k := range []string{"client_id", "client_secret", "api_key", "site_url", "pairing_code"} {
+		content += k + "=" + appProperties(dev, site, code)[k] + "\n"
+	}
 	if err := fsx.WriteFileAtomic(props, []byte(content), 0o600, false); err != nil {
 		return time.Time{}, "", err
 	}
@@ -539,6 +689,11 @@ type AppStatus struct {
 	Built   *time.Time   `json:"built,omitempty"`
 	Build   *plaudAppJob `json:"build,omitempty"`
 	Devices []PhoneRow   `json:"devices"`
+	// BuildsOn is where the next build runs: "this computer", or the name
+	// of the node that builds it; "" when nothing can, and NoBuilder then
+	// says why and what to do.
+	BuildsOn  string `json:"builds_on,omitempty"`
+	NoBuilder string `json:"no_builder,omitempty"`
 }
 
 // PhoneRow is a paired phone on the card.
@@ -552,6 +707,13 @@ func (p *Manager) appStatus() *AppStatus {
 	s := &AppStatus{Credentials: p.loadDeveloper().complete(), Devices: []PhoneRow{}}
 	if p.options.SiteURL != nil {
 		s.SiteURL = p.options.SiteURL()
+	}
+	if err := p.localToolchain(); err == nil {
+		s.BuildsOn = "this computer"
+	} else if b := p.appBuilders(); len(b) > 0 {
+		s.BuildsOn = b[0].Name
+	} else {
+		s.NoBuilder = noBuilderError(err).Error()
 	}
 	if st, err := os.Stat(p.AppFile()); err == nil {
 		t := st.ModTime()
@@ -569,6 +731,31 @@ func (p *Manager) appStatus() *AppStatus {
 		}
 	}
 	return s
+}
+
+// localToolchainTTL is how long the card trusts what it last found of the
+// toolchain on this machine: the card asks every few seconds while a
+// build runs, and finding the JDK may run a program.
+const localToolchainTTL = time.Minute
+
+// localToolchain is whether this machine has a toolchain to build the app
+// with, looked up at most once per localToolchainTTL.
+func (p *Manager) localToolchain() error {
+	if p.options.AndroidToolchain == nil {
+		return errors.New("no JDK and Android SDK here")
+	}
+	p.mu.Lock()
+	if !p.toolchainAt.IsZero() && time.Since(p.toolchainAt) < localToolchainTTL {
+		err := p.toolchainErr
+		p.mu.Unlock()
+		return err
+	}
+	p.mu.Unlock()
+	_, _, err := p.options.AndroidToolchain()
+	p.mu.Lock()
+	p.toolchainAt, p.toolchainErr = time.Now(), err
+	p.mu.Unlock()
+	return err
 }
 
 // plaudRandomToken creates a private pairing token with the same encoding as the site.

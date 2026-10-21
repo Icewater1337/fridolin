@@ -15,6 +15,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/nodes"
+	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
 // TestMain lets the test binary stand in for an allowlisted program:
@@ -35,6 +36,11 @@ func TestMain(m *testing.M) {
 			fmt.Print(strings.Repeat("x", 4096))
 			os.Exit(0)
 		}
+	}
+	// The machine's JDK and Android SDK stay out of the tests' nodes,
+	// unless a test gives one a toolchain (android_test.go).
+	findAndroidToolchain = func() (platform.AndroidToolchain, error) {
+		return platform.AndroidToolchain{}, errors.New("no toolchain in the tests")
 	}
 	os.Exit(m.Run())
 }

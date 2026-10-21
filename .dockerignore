@@ -11,8 +11,15 @@
 !site/
 !tools/*.py
 !container/
+!plaud-android/
 **/testdata/
 **/*_test.go
 site/node_modules/
 web/test/
 web/node_modules/
+plaud-android/.gradle/
+plaud-android/build/
+plaud-android/app/build/
+plaud-android/app/libs/
+plaud-android/local.properties
+**/*.apk

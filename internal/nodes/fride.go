@@ -24,6 +24,8 @@ var slowCalls = map[string]time.Duration{
 	// to GitHub.
 	nodeproto.MethodFrideRepoClone: 15 * time.Minute,
 	nodeproto.MethodFrideRepoNew:   5 * time.Minute,
+	// A Gradle build: the node's own timeout, and time to stage the APK.
+	nodeproto.MethodAndroidBuild: time.Duration(nodeproto.AndroidBuildTimeoutSeconds)*time.Second + 2*time.Minute,
 }
 
 // FrideTask hands the FrIDE of node id a message.

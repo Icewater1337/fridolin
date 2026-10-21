@@ -19,6 +19,11 @@ type JoinOptions struct {
 	Code         string
 	Name         string
 	Capabilities nodeproto.Capabilities
+	// AndroidBuild is node.json's android_build: false keeps the node from
+	// offering android-build where it finds a JDK and the Android SDK
+	// (tests whose nodes must not depend on the machine's tools); nil
+	// offers it then.
+	AndroidBuild *bool
 	Version      string
 	Logf         func(string, ...any)
 }
@@ -36,7 +41,7 @@ func Join(ctx context.Context, o JoinOptions) (Joined, error) {
 	if o.Code == "" {
 		return Joined{}, errors.New("the join code is missing: run fridolin nodes join-code on the core")
 	}
-	cfg := Config{Core: o.Core, Name: o.Name, Capabilities: o.Capabilities}
+	cfg := Config{Core: o.Core, Name: o.Name, Capabilities: o.Capabilities, AndroidBuild: o.AndroidBuild}
 	if err := cfg.Check(); err != nil {
 		return Joined{}, err
 	}

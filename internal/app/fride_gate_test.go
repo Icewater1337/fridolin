@@ -221,7 +221,7 @@ func (h *harness) frideNode(name, addr string, fs *frideServer) (id, stateDir st
 		t.Fatalf("join-code: %d %s", w.Code, w.Body.String())
 	}
 	stateDir = t.TempDir()
-	j, err := nodeagent.Join(context.Background(), nodeagent.JoinOptions{Dir: stateDir, Core: addr, Code: jc.Code, Name: name, Capabilities: nodeproto.Capabilities{Host: true}, Version: "test", Logf: t.Logf})
+	j, err := nodeagent.Join(context.Background(), nodeagent.JoinOptions{Dir: stateDir, Core: addr, Code: jc.Code, Name: name, Capabilities: nodeproto.Capabilities{Host: true}, AndroidBuild: noAndroidBuild, Version: "test", Logf: t.Logf})
 	if err != nil {
 		t.Fatal(err)
 	}

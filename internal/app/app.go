@@ -370,7 +370,7 @@ func New(opts Options) (_ *App, err error) {
 			return "https://" + d
 		}
 		return ""
-	})
+	}, newPlaudFleet(b.nodes, b.locked))
 	b.site = NewSiteManager(sitesvc.SiteOptions{DataDir: cfg.DataDir, GoogleClient: b.google.ClientPath, Builder: b.siteBuilderHooks()})
 	// What builder brains say in the Build page's chats goes there, not to WhatsApp.
 	b.wa = siteChatMessenger{Messenger: b.wa, appendMessage: b.site.AppendBuildMessage}

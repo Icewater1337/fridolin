@@ -241,3 +241,35 @@ test('without a site domain or keys, the app cannot be built', async (t) => {
   assert.equal(button(root, 'Build phone app').disabled, true);
   assert.equal(button(root, 'Download app (APK)'), undefined);
 });
+
+test('where nothing can build the app, the card says how to add a node that can', async (t) => {
+  const s = status('2026-10-18T10:00:00Z');
+  const app = { credentials: true, site_url: 'https://example.com', devices: [], no_builder: 'this computer cannot build the app (no JDK)' };
+  const { root, poll } = await openPage(t, { ...s, settings: { ...s.settings, phone_upload: true }, app });
+  assert.match(root.textContent, /Nothing here can build the app/);
+  assert.match(root.textContent, /android-build/);
+  assert.equal(button(root, 'Build phone app').disabled, true);
+
+  await poll({ ...s, settings: { ...s.settings, phone_upload: true }, app: { ...app, no_builder: undefined, builds_on: 'mac-mini' } });
+  assert.doesNotMatch(root.textContent, /Nothing here can build the app/);
+  assert.match(root.textContent, /the node mac-mini builds the app/);
+  assert.equal(button(root, 'Build phone app').disabled, false);
+});
+
+test('a build on a node shows its progress, then its failure with the log', async (t) => {
+  const s = status('2026-10-18T10:00:00Z');
+  const app = { credentials: true, site_url: 'https://example.com', devices: [], builds_on: 'mac-mini' };
+  const { root, poll } = await openPage(t, {
+    ...s, settings: { ...s.settings, phone_upload: true },
+    app: { ...app, build: { state: 'running', started: '2026-10-18T09:58:00Z', node: 'mac-mini', stage: 'Building on mac-mini (a few minutes)' } },
+  });
+  assert.match(root.textContent, /Building on mac-mini \(a few minutes\)…/);
+  assert.equal(button(root, 'Building… (a few minutes)').disabled, true);
+
+  await poll({
+    ...s, settings: { ...s.settings, phone_upload: true },
+    app: { ...app, build: { state: 'error', started: '2026-10-18T09:58:00Z', node: 'mac-mini', error: 'the build failed: exit status 1', log: 'FAILURE: Build failed' } },
+  });
+  assert.match(root.textContent, /Building the app on mac-mini failed/);
+  assert.match(root.textContent, /FAILURE: Build failed/);
+});

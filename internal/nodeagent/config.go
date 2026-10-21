@@ -42,6 +42,9 @@ type Config struct {
 	// Fride is FrIDE on this machine, paired with `fridolin node fride
 	// pair`; nil for none.
 	Fride *FrideConfig `json:"fride,omitempty"`
+	// AndroidBuild false keeps the node from offering android-build where
+	// it finds a JDK and the Android SDK; unset or true offers it then.
+	AndroidBuild *bool `json:"android_build,omitempty"`
 }
 
 // DefaultCapabilities is what a node offers when its owner says nothing
@@ -65,6 +68,9 @@ func (c Config) Check() error {
 	}
 	if c.Capabilities.Fride != nil {
 		return errors.New("capabilities.fride: the agent declares FrIDE while it answers; pair it with fridolin node fride pair instead")
+	}
+	if c.Capabilities.AndroidBuild != nil {
+		return errors.New(`capabilities.android_build: the agent declares it while it finds a JDK and the Android SDK; "android_build": false turns it off`)
 	}
 	if err := c.Capabilities.Check(); err != nil {
 		return err

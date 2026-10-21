@@ -147,6 +147,10 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 # out an install: brains get them as $FRIDOLIN_BIN and $FRIDOLIN_TOOLS_DIR.
 COPY --from=build /out/fridolin /opt/fridolin/fridolin
 COPY tools/*.py /opt/fridolin/tools/
+# The Plaud Sync phone app's source: the image has no JDK or Android SDK,
+# so the dashboard sends it to a node that builds Android apps
+# (android-build, docs/PLAUD.md).
+COPY plaud-android /opt/fridolin/plaud-android
 COPY container/entrypoint.sh /opt/fridolin/entrypoint.sh
 RUN ln -s /opt/fridolin/fridolin /usr/local/bin/fridolin
 

@@ -306,11 +306,15 @@ func (a *Agent) frideLoop(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		if a.frideCheck(ctx) {
+		fc := a.frideCheck(ctx)
+		if ac := a.androidCheck(false); fc || ac {
 			select {
 			case a.fride.changed <- struct{}{}:
 			default:
 			}
+		}
+		if a.Dir != "" {
+			pruneAndroid(filepath.Join(a.Dir, androidTransfers), time.Now(), androidTransferTTL)
 		}
 		if time.Since(pruned) > time.Hour && a.Dir != "" {
 			pruneTransfers(filepath.Join(a.Dir, frideTransfers), time.Now())
@@ -319,10 +323,11 @@ func (a *Agent) frideLoop(ctx context.Context) {
 	}
 }
 
-// declared is what the node offers now: node.json's capabilities, and
-// FrIDE while it answers.
+// declared is what the node offers now: node.json's capabilities, FrIDE
+// while it answers, and android-build while the toolchain is there.
 func (a *Agent) declared() nodeproto.Capabilities {
 	c := a.Config.Capabilities
+	c.AndroidBuild = a.androidDeclared()
 	a.fride.mu.Lock()
 	if a.fride.cap != nil {
 		f := *a.fride.cap
@@ -709,25 +714,7 @@ func (a *Agent) frideChunk(method string, p nodeproto.FrideChunkParams) (any, *n
 		}
 		return struct{}{}, nil
 	case nodeproto.MethodFrideRead:
-		f, err := os.Open(path)
-		if err != nil {
-			return nil, nodeproto.Errorf(nodeproto.CodeNotFound, "no transfer %s", p.ID)
-		}
-		defer f.Close()
-		n := p.Max
-		if n <= 0 || n > nodeproto.FrideChunkBytes {
-			n = nodeproto.FrideChunkBytes
-		}
-		buf := make([]byte, n)
-		k, err := f.ReadAt(buf, p.Offset)
-		if err != nil && !errors.Is(err, io.EOF) {
-			return nil, nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
-		}
-		st, serr := f.Stat()
-		if serr != nil {
-			return nil, nodeproto.Errorf(nodeproto.CodeFailed, "%v", serr)
-		}
-		return nodeproto.FrideChunk{Data: buf[:k], EOF: p.Offset+int64(k) >= st.Size()}, nil
+		return readChunk(path, p)
 	}
 	// fride.write
 	if len(p.Data) > nodeproto.FrideChunkBytes {
@@ -753,6 +740,33 @@ func (a *Agent) frideChunk(method string, p nodeproto.FrideChunkParams) (any, *n
 		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
 	}
 	return nodeproto.FrideTransfer{ID: p.ID, Size: p.Offset + int64(len(p.Data))}, nil
+}
+
+// readChunk reads the chunk of the staged file at path that p names.
+func readChunk(path string, p nodeproto.FrideChunkParams) (any, *nodeproto.Error) {
+	if p.Offset < 0 {
+		return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "offset %d", p.Offset)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nodeproto.Errorf(nodeproto.CodeNotFound, "no transfer %s", p.ID)
+	}
+	defer f.Close()
+	n := p.Max
+	if n <= 0 || n > nodeproto.FrideChunkBytes {
+		n = nodeproto.FrideChunkBytes
+	}
+	// A buffer of the fixed chunk size, of which a smaller Max reads a part.
+	buf := make([]byte, nodeproto.FrideChunkBytes)[:n]
+	k, err := f.ReadAt(buf, p.Offset)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
+	}
+	st, serr := f.Stat()
+	if serr != nil {
+		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "%v", serr)
+	}
+	return nodeproto.FrideChunk{Data: buf[:k], EOF: p.Offset+int64(k) >= st.Size()}, nil
 }
 
 // pruneTransfers removes staged bundles older than frideTransferTTL: what

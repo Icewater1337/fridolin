@@ -51,7 +51,20 @@ type Options struct {
 	AppSource        func() (string, error)
 	AndroidToolchain func() (string, string, error)
 	AppEnviron       func(context.Context, string, string) []string
-	Runner           RunFunc
+	// AppBuilders lists the nodes that may build the app now (online,
+	// android-build approved), the best first, for when this machine has
+	// no toolchain; nil for none.
+	AppBuilders func() []AppBuilder
+	// BuildOnNode has node id build the app: source is plaud-android/ as
+	// a gzip'd tar, props what the build is given; the APK goes to apk.
+	// A failed build returns the end of Gradle's output with its error.
+	BuildOnNode func(ctx context.Context, id string, source []byte, props map[string]string, apk io.Writer) (log string, err error)
+	Runner      RunFunc
+}
+
+// AppBuilder is a node that builds the phone app (android-build).
+type AppBuilder struct {
+	ID, Name string
 }
 
 // Target retains the selected runtime for a handoff. Its callbacks read
