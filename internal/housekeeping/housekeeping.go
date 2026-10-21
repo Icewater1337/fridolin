@@ -39,18 +39,19 @@ import (
 
 // The kinds of findings.
 const (
-	KindRunOrphan  = "run-orphan"  // a process of a brain run that is over
-	KindMCPOrphan  = "mcp-orphan"  // a run's MCP server whose run is over
-	KindRcloneRcd  = "rclone-rcd"  // the vault's rclone daemon, no bridge its parent
-	KindLitestream = "litestream"  // the vault's Litestream, no bridge its parent
-	KindRestic     = "restic"      // a vault restic run, no bridge its parent
-	KindViewer     = "tmux-viewer" // an activity viewer's tmux session nobody needs
-	KindZombie     = "zombie"      // an ended process nobody collected
-	KindHeavy      = "heavy"       // a live process of the bridge above a threshold
-	KindForeign    = "foreign"     // in the container: not the bridge's, above a threshold
-	KindResticLock = "restic-lock" // a restic lock of a dead process of this host
-	KindBridgeLock = "bridge-lock" // bridge.lock naming a dead process
-	KindRunRecord  = "run-record"  // a run record whose process group is gone
+	KindRunOrphan   = "run-orphan"   // a process of a brain run that is over
+	KindMCPOrphan   = "mcp-orphan"   // a run's MCP server whose run is over
+	KindRcloneRcd   = "rclone-rcd"   // the vault's rclone daemon, no bridge its parent
+	KindLitestream  = "litestream"   // the vault's Litestream, no bridge its parent
+	KindRestic      = "restic"       // a vault restic run, no bridge its parent
+	KindViewer      = "tmux-viewer"  // an activity viewer's tmux session nobody needs
+	KindZombie      = "zombie"       // an ended process nobody collected
+	KindHeavy       = "heavy"        // a live process of the bridge above a threshold
+	KindForeign     = "foreign"      // in the container: not the bridge's, above a threshold
+	KindResticLock  = "restic-lock"  // a restic lock of a dead process of this host
+	KindBridgeLock  = "bridge-lock"  // bridge.lock naming a dead process
+	KindRunRecord   = "run-record"   // a run record whose process group is gone
+	KindNodeSession = "node-session" // an agent session or terminal on a node the core has no record of
 )
 
 // The actions a finding asks for.

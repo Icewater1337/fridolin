@@ -175,6 +175,25 @@ func TestWorkstationThroughNodes(t *testing.T) {
 		t.Errorf("session audit, want agent start and end, terminal open and end: %+v %v", sessions, err)
 	}
 
+	// A restart forgets the sessions: housekeeping stops what then runs
+	// on the node with nobody following it.
+	saved := nodeSessionMinAge
+	nodeSessionMinAge = 0
+	t.Cleanup(func() { nodeSessionMinAge = saved })
+	if reply := h.coreSays("shell", step("node_terminal_open", `{}`)); !strings.Contains(reply, "Opened terminal #3") {
+		t.Fatalf("terminal #3:\n%s", reply)
+	}
+	h.b.work.mu.Lock()
+	h.b.work.terms = map[int64]*workTerm{}
+	h.b.work.mu.Unlock()
+	found, errs := h.b.housekeeping.nodeSessionFindings(context.Background(), false, 0)
+	if len(errs) > 0 || len(found) != 1 || found[0].Outcome != "stopped" || !strings.HasPrefix(found[0].Target, "terminal ") {
+		t.Fatalf("orphans: %+v %v", found, errs)
+	}
+	if again, _ := h.b.housekeeping.nodeSessionFindings(context.Background(), false, 0); len(again) != 0 {
+		t.Errorf("still orphaned after the stop: %+v", again)
+	}
+
 	// A lockdown refuses starting and typing; reading goes on.
 	if _, err := h.b.setLockdown(context.Background(), true, "dashboard"); err != nil {
 		t.Fatal(err)
