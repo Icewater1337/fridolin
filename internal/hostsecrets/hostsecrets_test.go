@@ -77,6 +77,11 @@ func TestKeychain(t *testing.T) {
 }
 
 func TestFiles(t *testing.T) {
+	// The 0600 files are the Linux store; Windows keeps its secrets in the
+	// Credential Manager and has no Unix modes to check.
+	if runtime.GOOS == "windows" {
+		t.Skip("the file store is for Linux; Windows uses the Credential Manager")
+	}
 	dir := filepath.Join(t.TempDir(), "secrets")
 	f := Files{Dir: dir}
 	if ok, err := f.Has(TailscaleAuthKey); ok || err != nil {
