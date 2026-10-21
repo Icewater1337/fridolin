@@ -112,6 +112,9 @@ type DoctorEnv struct {
 	// now (GET /api/nodes); an error when it does not answer, and the
 	// node checks read nodes.json instead. nil never asks.
 	LiveNodes func(ctx context.Context, cfg *config.Settings) ([]byte, error)
+	// AndroidToolchain says why this machine cannot build the Plaud phone
+	// app (no JDK 17+ or Android SDK), nil when it can.
+	AndroidToolchain func() error
 }
 
 // DoctorRegistry is every check, in the order doctor prints them. Later
@@ -315,6 +318,10 @@ func SystemDoctorEnv(configFlag string) *DoctorEnv {
 		},
 		MemoryStale:   memindex.Stale,
 		HasHostSecret: hostsecrets.WinCred{}.Has,
+		AndroidToolchain: func() error {
+			_, _, err := androidToolchain()
+			return err
+		},
 		WriteProbe: func(dir string) error {
 			f, err := os.CreateTemp(dir, ".fridolin-doctor-*")
 			if err != nil {

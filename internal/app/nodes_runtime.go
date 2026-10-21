@@ -102,8 +102,9 @@ type lockdownNodes struct {
 	locked func() bool
 }
 
-// nodeWrites are the methods a lockdown refuses.
-var nodeWrites = []string{nodeproto.MethodExec, nodeproto.MethodFSWrite}
+// nodeWrites are the methods a lockdown refuses: a build runs the build
+// scripts it is sent.
+var nodeWrites = []string{nodeproto.MethodExec, nodeproto.MethodFSWrite, nodeproto.MethodAndroidBuild}
 
 func (n lockdownNodes) Call(ctx context.Context, id, method string, params, out any) error {
 	if n.locked() && slices.Contains(nodeWrites, method) {

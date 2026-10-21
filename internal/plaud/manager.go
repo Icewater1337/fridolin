@@ -335,6 +335,10 @@ type Manager struct {
 	accountTried time.Time
 	// bg is the background work Stop waits for.
 	bg sync.WaitGroup
+	// toolchainAt and toolchainErr are when the card last looked for the
+	// JDK and Android SDK here, and what it found (localToolchain).
+	toolchainAt  time.Time
+	toolchainErr error
 	// life is the context the poller and every check run on, the ones
 	// started from the dashboard too, also before Start. stop ends it:
 	// Stop does, and so does the end of the context Start is given.

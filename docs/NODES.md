@@ -289,6 +289,7 @@ another. `fridolin node status` shows it.
 | `host` | `host.info` | host name, OS, architecture, CPUs, memory, disk free and, on Linux, the battery |
 | `notify` | `notify` | a desktop notification: `osascript` on macOS, `notify-send` on Linux; on Windows it is only logged for now |
 | `fride` | `fride.*` | FrIDE on the node, while it answers: see [FrIDE](#fride) below |
+| `android-build` (`android_build`) | `android.build`, `android.read`, `android.drop` | builds an Android app with Gradle, while the node has a JDK 17+ and the Android SDK: see [android-build](#android-build) below |
 
 **exec rules.** `name` is `argv[0]` exactly: a bare program name, which
 the node looks up in its `PATH`, or an absolute path. `args` `null` allows
@@ -316,6 +317,53 @@ Both sides check every call: the core against the approvals before it
 sends anything, the node against its own `node.json` and the approvals the
 core sent it, so a core that approved more than the node declares cannot
 make it serve more.
+
+## android-build
+
+A node with a JDK 17 or newer and the Android SDK builds the Plaud Sync
+phone app for a core that has neither, such as the fridolin-core
+container ([PLAUD.md](PLAUD.md#through-your-site)). The agent looks for
+them as the bridge does: `JAVA_HOME` and `ANDROID_HOME` (or
+`ANDROID_SDK_ROOT`) of its environment, else where macOS, Homebrew,
+Android Studio and Linux distributions put them, taking the newest JDK
+the app's Gradle runs on (17 to 23 before newer ones). It declares
+`android_build` (with the JDK's version and the SDK's platforms) while it
+finds them, looks again every five minutes and before each build, and
+sends the core a `declare` when that changes, as it does for FrIDE. The
+owner approves it once with `fridolin nodes approve <id> --commands`;
+the approval covers it every time it comes back. `"android_build": false`
+in `node.json` keeps a node from offering it; `capabilities.android_build`
+is refused, since it is never declared by hand. Nodes on Windows do not
+offer it: the app's source has no `gradlew.bat`.
+
+**What approving it means.** `android.build` takes a gzip'd tar of an
+Android project (at most 16 MiB, 64 MiB and 4096 files unpacked; regular
+files and folders only, none outside the project) and up to 32 build
+properties (`name=value`, no control characters, backslashes or quotes).
+The node unpacks it into a new temp folder, writes the properties to a
+file there (0600) and runs `gradlew --no-daemon assembleDebug` with
+`-PfridolinConfig` naming that file, the build directory and Gradle's
+project cache in the same folder, and no Kotlin daemon, with a timeout of
+20 minutes. Gradle runs the project's build scripts, which are code: the
+core can have the node run what it sends, unsandboxed, as the agent's
+user, with the agent's Gradle home (`~/.gradle`) for downloads. Approve
+it on nodes of a core you trust as much as the node itself.
+
+When the build ends the node copies `app/outputs/apk/debug/app-debug.apk`
+into `android-transfers/` in its state dir (0600) and deletes the temp
+folder, the properties with it: the Plaud developer keys and the pairing
+code never stay in a build on the node, and are never logged. The core
+reads the APK with `android.read` in 8 MiB chunks, checks its size and
+SHA-256, and removes it with `android.drop`; an APK nobody fetched is
+removed after an hour, and all of them when the agent starts. A build
+that fails answers with Gradle's error and the last 40 lines of its
+output. One build runs at a time on a node.
+
+**Placement.** The Plaud card builds on this machine when it has the
+toolchain. Else it takes the online nodes with `android-build` approved
+and offered: those tagged `android` or `android-build` first
+(`fridolin nodes tags <id> android`), then the one with the most free
+memory. A lockdown refuses the build, as it refuses `exec`.
 
 ## FrIDE
 

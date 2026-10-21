@@ -67,12 +67,23 @@ for you:
    `<data_dir>/plaud/developer.json` and never shows them again.
 3. **Build phone app**. Fridolin builds `plaud-android/` of the checkout it
    was installed from with Gradle, which needs a JDK 17 or newer and the
-   Android SDK on this computer (`brew install openjdk@17`, `brew install
+   Android SDK on this computer (`brew install openjdk@21`, `brew install
    --cask android-commandlinetools`, then `sdkmanager "platforms;android-35"
    "build-tools;35.0.0"`). It finds them through `JAVA_HOME` and
    `ANDROID_HOME` in the service's environment, else where Homebrew and
-   Android Studio put them. The first build downloads Gradle and Plaud's
-   SDK and takes a few minutes.
+   Android Studio put them; of several JDKs it takes the newest that the
+   app's Gradle runs on (up to 23). The first build downloads Gradle and
+   Plaud's SDK and takes a few minutes.
+
+   Where this computer has neither, as the fridolin-core container
+   ([CORE.md](CORE.md)) has not, a [node](NODES.md#android-build) that
+   has them builds it: the card sends it the app's source (the image keeps
+   it in `/opt/fridolin/plaud-android`), the site's address, a new pairing
+   code and the developer keys, and gets the APK back. The card says which
+   node builds it, shows the build's progress, and, when no node can, how
+   to add one. `fridolin doctor` checks that something can build the app
+   (`plaud-app-build`) while `phone_upload` is on; the app already on a
+   phone keeps working either way.
 4. **Download app (APK)**, copy it to the phone and install it. Remove the
    NotePin from Plaud's app, then tap **Pair NotePin** in Plaud Sync.
 

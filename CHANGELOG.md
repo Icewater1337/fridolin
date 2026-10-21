@@ -40,6 +40,21 @@ for compatibility.
   the Overview page, in `fridolin housekeeping status` and `fridolin
   doctor`, and stops nothing until that is set to false. `fridolin
   housekeeping run [--dry-run]` runs it now.
+- Dashboard → Integrations → Plaud → **Build phone app** works where the
+  bridge has no JDK and Android SDK, as in the fridolin-core container:
+  it sends `plaud-android/` (now in the image, at
+  `/opt/fridolin/plaud-android`) and the build's settings to a node that
+  builds Android apps, which builds it with Gradle in a temp folder,
+  sends the APK back and deletes the folder, the developer keys with it.
+  A node agent offers the new capability `android-build` (`android_build`)
+  while it finds a JDK 17+ and the Android SDK (macOS and Linux;
+  `"android_build": false` in `node.json` turns it off); it waits for
+  `fridolin nodes approve <id> --commands` like any capability that
+  grows. A bridge with its own toolchain keeps building on its own. The
+  card says where the app is built, and how to add such a node when
+  nothing can; `fridolin doctor` checks it (`plaud-app-build`). Update the
+  node agents along with the core.
+
 - The core brain's `fride_repo_add` adds a repository to FrIDE on a node:
   it clones one, or makes a new one with an initial commit and, by
   default, a private GitHub repository through the node's `gh`. The node

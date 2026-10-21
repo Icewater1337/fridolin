@@ -376,7 +376,7 @@ const (
 )
 
 // Methods lists every method.
-var Methods = append([]string{MethodExec, MethodFSList, MethodFSRead, MethodFSWrite, MethodHostInfo, MethodNotify}, FrideMethods...)
+var Methods = append(append([]string{MethodExec, MethodFSList, MethodFSRead, MethodFSWrite, MethodHostInfo, MethodNotify}, FrideMethods...), AndroidMethods...)
 
 // ExecParams runs argv on the node.
 type ExecParams struct {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand/v2"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"github.com/coder/websocket"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
 // Agent is one node's connection to the core.
@@ -41,11 +43,15 @@ type Agent struct {
 	// it, and node.json's fride section, from there at every check.
 	FrideCheckEvery time.Duration
 	FrideToken      string
+	// AndroidToolchain finds the JDK and the Android SDK android-build
+	// needs; nil looks where platform.FindAndroidToolchain does.
+	AndroidToolchain func() (platform.AndroidToolchain, error)
 
 	mu        sync.Mutex
 	state     nodeproto.State
 	connected bool
 	fride     fride
+	android   android
 }
 
 // Load makes the agent of the node in dir.
@@ -232,8 +238,13 @@ func (a *Agent) Run(ctx context.Context) error {
 		maxB = time.Minute
 	}
 	backoff := minB
-	// FrIDE first, so that the first hello declares it when it answers.
+	// FrIDE and the Android toolchain first, so that the first hello
+	// declares them when they are there.
 	a.frideCheck(ctx)
+	a.androidCheck(true)
+	if a.Dir != "" {
+		pruneAndroid(filepath.Join(a.Dir, androidTransfers), time.Now(), 0)
+	}
 	fctx, stopFride := context.WithCancel(ctx)
 	var fwg sync.WaitGroup
 	fwg.Go(func() { a.frideLoop(fctx) })

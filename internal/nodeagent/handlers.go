@@ -59,6 +59,9 @@ func (a *Agent) call(ctx context.Context, req nodeproto.Request) (any, *nodeprot
 	if slices.Contains(nodeproto.FrideMethods, req.Method) {
 		return a.frideCall(ctx, req.Method, req.Params)
 	}
+	if slices.Contains(nodeproto.AndroidMethods, req.Method) {
+		return a.androidCall(ctx, req.Method, req.Params)
+	}
 	decode := func(v any) *nodeproto.Error {
 		if len(req.Params) == 0 {
 			return nil
