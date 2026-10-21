@@ -29,8 +29,10 @@ import (
 // (fridolin.restic.node.<name>: the keychain, the Windows Credential
 // Manager, 0600 files on Linux), and inside the core container, which has
 // no such store, from secrets/restic-node-<name>.age in the data dir,
-// encrypted to the core's age identity (FRIDOLIN_AGE_IDENTITY, which
-// every core has and which is on the recovery sheet already).
+// encrypted to the core's post-quantum age identity
+// (FRIDOLIN_AGE_IDENTITY_PQ, which every core has and which is on the
+// recovery sheet already); files made for the X25519 identity of before
+// (FRIDOLIN_AGE_IDENTITY) still open.
 
 // targetSecretName is the host secret of target name's password.
 func targetSecretName(name string) string { return "fridolin.restic.node." + name }
@@ -55,17 +57,29 @@ func (s targetSecrets) ageFile(name string) string {
 	return filepath.Join(s.secretsDir, "restic-node-"+name+".age")
 }
 
-func (s targetSecrets) identity() (*age.X25519Identity, error) {
-	raw := strings.TrimSpace(s.getenv("FRIDOLIN_AGE_IDENTITY"))
-	if raw == "" {
-		return nil, nil
+// identities are the core's age identities: the post-quantum one
+// (FRIDOLIN_AGE_IDENTITY_PQ), which new files are encrypted to, and the
+// X25519 one of before (FRIDOLIN_AGE_IDENTITY), which still reads the
+// files made for it. recipient is nil without the post-quantum one.
+func (s targetSecrets) identities() (ids []age.Identity, recipient age.Recipient, err error) {
+	if raw := strings.TrimSpace(s.getenv("FRIDOLIN_AGE_IDENTITY_PQ")); raw != "" {
+		id, err := age.ParseHybridIdentity(raw)
+		if err != nil {
+			return nil, nil, errors.New("FRIDOLIN_AGE_IDENTITY_PQ holds no post-quantum age identity")
+		}
+		ids, recipient = append(ids, id), id.Recipient()
 	}
+	raw := strings.TrimSpace(s.getenv("FRIDOLIN_AGE_IDENTITY"))
 	for line := range strings.SplitSeq(raw, "\n") {
-		if line = strings.TrimSpace(line); strings.HasPrefix(line, "AGE-SECRET-KEY-") {
-			return age.ParseX25519Identity(line)
+		if line = strings.TrimSpace(line); strings.HasPrefix(line, "AGE-SECRET-KEY-1") {
+			id, err := age.ParseX25519Identity(line)
+			if err != nil {
+				return nil, nil, err
+			}
+			ids = append(ids, id)
 		}
 	}
-	return nil, errors.New("FRIDOLIN_AGE_IDENTITY holds no age identity")
+	return ids, recipient, nil
 }
 
 // get returns target name's password, "" when there is none yet.
@@ -90,11 +104,11 @@ func (s targetSecrets) get(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	id, err := s.identity()
-	if err != nil || id == nil {
-		return "", fmt.Errorf("%s needs the core's age identity (FRIDOLIN_AGE_IDENTITY) to be read: %v", s.ageFile(name), err)
+	ids, _, err := s.identities()
+	if err != nil || len(ids) == 0 {
+		return "", fmt.Errorf("%s needs the core's age identity (FRIDOLIN_AGE_IDENTITY_PQ) to be read: %v", s.ageFile(name), err)
 	}
-	r, err := age.Decrypt(bytes.NewReader(data), id)
+	r, err := age.Decrypt(bytes.NewReader(data), ids...)
 	if err != nil {
 		return "", fmt.Errorf("decrypting %s: %w", s.ageFile(name), err)
 	}
@@ -107,15 +121,15 @@ func (s targetSecrets) set(name, pw string) (string, error) {
 	if s.store != nil {
 		return targetSecretName(name), s.store.Set(targetSecretName(name), pw)
 	}
-	id, err := s.identity()
+	_, recipient, err := s.identities()
 	if err != nil {
 		return "", err
 	}
-	if id == nil {
-		return "", fmt.Errorf("there is no host secret store here and no age identity (FRIDOLIN_AGE_IDENTITY) to keep a new password with; set %s", targetSecretEnv(name))
+	if recipient == nil {
+		return "", fmt.Errorf("there is no host secret store here and no post-quantum age identity (FRIDOLIN_AGE_IDENTITY_PQ) to keep a new password with; set %s", targetSecretEnv(name))
 	}
 	var buf bytes.Buffer
-	w, err := age.Encrypt(&buf, id.Recipient())
+	w, err := age.Encrypt(&buf, recipient)
 	if err != nil {
 		return "", err
 	}

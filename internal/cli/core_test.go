@@ -82,8 +82,8 @@ func TestCoreStartPassesSecretsOnlyThroughTheEnvironment(t *testing.T) {
 		}
 	}
 	for _, kv := range []string{"CLAUDE_CODE_OAUTH_TOKEN=oauth-token-value", "TS_AUTHKEY=tskey-auth-key", "B2_VAULT_KEY_ID=keyid",
-		"B2_VAULT_KEY=b2-secret-key", "FRIDOLIN_AGE_IDENTITY_PQ=AGE-SECRET-KEY-PQ-1NEW", "FRIDOLIN_EXPORT_KEY="+testLayerKey,
-		"FRIDOLIN_VAULT_SEAL_KEY="+testLayerKey, "FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD="+testLayerKey, "FRIDOLIN_LITESTREAM_SEAL_KEY="+testLayerKey,
+		"B2_VAULT_KEY=b2-secret-key", "FRIDOLIN_AGE_IDENTITY_PQ=AGE-SECRET-KEY-PQ-1NEW", "FRIDOLIN_EXPORT_KEY=" + testLayerKey,
+		"FRIDOLIN_VAULT_SEAL_KEY=" + testLayerKey, "FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD=" + testLayerKey, "FRIDOLIN_LITESTREAM_SEAL_KEY=" + testLayerKey,
 		"FRIDOLIN_VERSION=v1.4.0-dirty",
 		"FRIDOLIN_IMAGE=fridolin-core", "PATH=/usr/bin:/bin"} {
 		if !slices.Contains(cmd.env, kv) {
