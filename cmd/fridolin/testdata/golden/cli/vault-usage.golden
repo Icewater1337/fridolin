@@ -18,6 +18,11 @@ Usage:
                                       take a snapshot now (to node target NAME)
   fridolin vault check [--target NAME]
                                       check the snapshots' repository (of node target NAME)
+  fridolin vault migrate-encryption --dry-run | --run [--delete-old]
+                                      move what has one layer of encryption to the
+                                      stores with two (docs/VAULT.md, "Encryption"):
+                                      --dry-run counts, --run copies and verifies,
+                                      --delete-old then deletes the single-layer copies
 
 Node targets (vault.targets, docs/VAULT.md "Node targets") are restic
 repositories in folders on nodes; status lists them, and the Vault page adds

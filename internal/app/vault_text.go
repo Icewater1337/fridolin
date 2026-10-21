@@ -243,5 +243,6 @@ func VaultStatusText(data []byte, now time.Time) (string, error) {
 		}
 	}
 	targetsText(st.Targets, now, line)
+	encryptionText(st, line)
 	return b.String(), nil
 }
