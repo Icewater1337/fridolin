@@ -121,24 +121,46 @@ func editConfig(dataDir string, edit func(c config) ([]string, error)) ([]string
 	return notes, nil
 }
 
-// ResetProgramPaths removes the program settings (ProgramKeys) of
-// dataDir's config.json that name a file by its path, so that the bridge
-// finds the image's own programs on PATH: a native install's paths point
-// at the Mac's builds (a wrapper around the Claude app, codex under nvm),
-// which do not run in the container even where a bound folder shows them.
-// A bare name ("codex") is looked up on PATH and stays.
+// ImagePrograms are where the container image (container/Dockerfile)
+// installs the agent CLIs, which ResetProgramPaths sets in place of the
+// Mac's: the sandbox runs a brain's CLI by its absolute path.
+var ImagePrograms = map[string]string{
+	"claude_path": "/usr/local/bin/claude",
+	"codex_path":  "/usr/local/bin/codex",
+}
+
+// ResetProgramPaths replaces the program settings (ProgramKeys) of
+// dataDir's config.json that name a file by its path: a native install's
+// paths point at the Mac's builds (a wrapper around the Claude app, codex
+// under nvm), which do not run in the container even where a bound folder
+// shows them. The agent CLIs get the image's own absolute paths
+// (ImagePrograms); the other settings are removed, so that the bridge
+// finds the image's programs on its PATH. A bare name ("codex") is looked
+// up on PATH and stays.
 func ResetProgramPaths(dataDir string) ([]string, error) {
 	return editConfig(dataDir, func(c config) ([]string, error) {
 		var notes []string
 		for _, key := range ProgramKeys {
 			v := c.str(key)
-			if !strings.ContainsRune(v, '/') {
+			image := ImagePrograms[key]
+			if !strings.ContainsRune(v, '/') || v == image {
 				continue
 			}
-			if err := c.set(key, nil); err != nil {
+			if image == "" {
+				if err := c.set(key, nil); err != nil {
+					return nil, err
+				}
+				notes = append(notes, fmt.Sprintf("%s was %s, a program of the Mac: removed, so the bridge runs the image's own from its PATH", key, v))
+				continue
+			}
+			raw, err := json.Marshal(image)
+			if err != nil {
 				return nil, err
 			}
-			notes = append(notes, fmt.Sprintf("%s was %s, a program of the Mac: removed, so the bridge runs the image's own from its PATH", key, v))
+			if err := c.set(key, raw); err != nil {
+				return nil, err
+			}
+			notes = append(notes, fmt.Sprintf("%s was %s, a program of the Mac: now %s, the image's own", key, v, image))
 		}
 		return notes, nil
 	})

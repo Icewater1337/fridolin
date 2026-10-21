@@ -94,7 +94,10 @@ func (b *App) runBrainSearch(ctx context.Context, brainID, prompt string, out io
 	// Only the brain folder's own setup, as for a brain's runs, and tools
 	// that only read.
 	args := claudecli.ArgList(true, excludeInstructionsAbove(br.Dir()), "--tools", "Read,Grep,Glob")
-	bin := cfg.ClaudePath
+	bin, err := resolveAgentBinary("claude", cfg.ClaudePath)
+	if err != nil {
+		return err
+	}
 	env := childEnv(claudeChild, cfg.ChildEnvPassthrough)
 	if sp := b.brainMgr.profiler; sp != nil && sp.Enabled() {
 		// The brain's own Claude Code config dir, TMPDIR and caches, as for
@@ -150,11 +153,11 @@ func (s siteChatMessenger) SendChunked(ctx context.Context, jid, text string) er
 // SendChunked sends it: the Build page has no limit to split for.
 func (s siteChatMessenger) TakesWhole(jid string) bool { return brainOfBuildJID(jid) != "" }
 
-func (s siteChatMessenger) SendPoll(ctx context.Context, jid, q string, opts []string, max int) (string, error) {
+func (s siteChatMessenger) SendPoll(ctx context.Context, jid, q string, opts []string, max int, sending func(string)) (string, error) {
 	if id := brainOfBuildJID(jid); id != "" {
 		return "", s.toChat(id, q+"\n"+"• "+strings.Join(opts, "\n• "))
 	}
-	return s.Messenger.SendPoll(ctx, jid, q, opts, max)
+	return s.Messenger.SendPoll(ctx, jid, q, opts, max, sending)
 }
 
 func (s siteChatMessenger) toChat(brainID, text string) error {

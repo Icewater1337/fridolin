@@ -421,9 +421,11 @@ dir's lock), the command:
    `--local-dir`), else to the vault bucket;
 4. imports it into `fridolin-data` in a one-off container with the
    bindings (`core import --from-native`): `data_dir` becomes `/data`,
-   program paths of the Mac's (`claude_path`, `codex_path`,
-   `backup.rclone_path`, `plaud.cli_path` naming a file) are dropped so the
-   image's own run, and the `--mount` folders go into
+   program paths of the Mac's (settings naming a file) are replaced:
+   `claude_path` and `codex_path` become the image's
+   `/usr/local/bin/claude` and `/usr/local/bin/codex`, and
+   `backup.rclone_path` and `plaud.cli_path` are dropped so the image's
+   own on PATH run; the `--mount` folders go into
    `sandbox.allow_paths`. `brain_dirs` keep their `~/` paths. A volume with
    data is refused without `--force`;
 5. takes the lease when `core.lease.enabled`;

@@ -44,7 +44,7 @@ func TestFixupsOfAMoveFromANativeInstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(notes) != 2 {
+	if len(notes) != 2 || !strings.Contains(notes[0], "claude_path was ~/private/claude-wrapper.sh, a program of the Mac: now /usr/local/bin/claude") {
 		t.Errorf("notes %q", notes)
 	}
 	notes, err = AddAllowPaths(dir, []string{"~/private", "~/shared"})
@@ -52,8 +52,8 @@ func TestFixupsOfAMoveFromANativeInstall(t *testing.T) {
 		t.Fatalf("allow paths: %q %v", notes, err)
 	}
 	c := readJSON(t, filepath.Join(dir, "config.json"))
-	if _, ok := c["claude_path"]; ok {
-		t.Error("claude_path stayed")
+	if c["claude_path"] != "/usr/local/bin/claude" {
+		t.Errorf("claude_path %v, want the image's", c["claude_path"])
 	}
 	if c["codex_path"] != "codex" {
 		t.Error("a bare program name was removed")
@@ -92,6 +92,45 @@ func TestFixupsOfAMoveFromANativeInstall(t *testing.T) {
 	}
 	if got := c["sandbox"].(map[string]any)["allow_paths"].([]any); len(got) != 1 {
 		t.Errorf("allow_paths %v", got)
+	}
+}
+
+// The live bug: the Mac's codex_path was removed, and the sandbox was
+// handed the bare "codex", which bubblewrap refuses. The agent CLIs now
+// get the image's absolute paths, as container/Dockerfile installs them.
+func TestResetProgramPathsGivesTheAgentsTheImagesPaths(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "config.json", `{"claude_path": "/Users/you/bin/claude", "codex_path": "/Users/you/.nvm/versions/node/v24/bin/codex", "backup": {"rclone_path": "/opt/homebrew/bin/rclone"}}`, 0o600)
+	notes, err := ResetProgramPaths(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"claude_path was /Users/you/bin/claude, a program of the Mac: now /usr/local/bin/claude, the image's own",
+		"codex_path was /Users/you/.nvm/versions/node/v24/bin/codex, a program of the Mac: now /usr/local/bin/codex, the image's own",
+		"backup.rclone_path was /opt/homebrew/bin/rclone, a program of the Mac: removed, so the bridge runs the image's own from its PATH",
+	}
+	if strings.Join(notes, "\n") != strings.Join(want, "\n") {
+		t.Errorf("notes\n%s\nwant\n%s", strings.Join(notes, "\n"), strings.Join(want, "\n"))
+	}
+	c := readJSON(t, filepath.Join(dir, "config.json"))
+	if c["claude_path"] != "/usr/local/bin/claude" || c["codex_path"] != "/usr/local/bin/codex" {
+		t.Errorf("agents %v %v", c["claude_path"], c["codex_path"])
+	}
+	if _, ok := c["backup"].(map[string]any)["rclone_path"]; ok {
+		t.Error("rclone_path stayed")
+	}
+	if notes, _ := ResetProgramPaths(dir); len(notes) != 0 {
+		t.Errorf("second run: %q", notes)
+	}
+	dockerfile, err := os.ReadFile(filepath.Join("..", "..", "container", "Dockerfile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range ImagePrograms {
+		if !strings.Contains(string(dockerfile), " "+p+" ") && !strings.Contains(string(dockerfile), " "+p+"\n") {
+			t.Errorf("container/Dockerfile does not install %s", p)
+		}
 	}
 }
 

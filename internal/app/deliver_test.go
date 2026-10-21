@@ -23,7 +23,7 @@ import (
 // connected but refuses every poll, so that the outbox sends each as text.
 type pollRefuser struct{ *devchat.Messenger }
 
-func (pollRefuser) SendPoll(context.Context, string, string, []string, int) (string, error) {
+func (pollRefuser) SendPoll(context.Context, string, string, []string, int, func(string)) (string, error) {
 	return "", errors.New("polls are refused")
 }
 

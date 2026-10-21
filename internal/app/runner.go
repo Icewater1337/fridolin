@@ -94,6 +94,14 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 	if s.Provider == "codex" {
 		binary = s.CodexPath
 	}
+	// Absolute, as the sandboxes need it: a bare "claude" or "codex" is
+	// looked up on the bridge's PATH here, not left to bubblewrap.
+	resolved, err := resolveAgentBinary(s.Provider, binary)
+	if err != nil {
+		log.Printf("brain %s: %v", spec.ID, err)
+		return claudecli.Result{Err: err}
+	}
+	binary = resolved
 	agentBinary := binary
 	finalArgs := args
 	extraEnv := append([]string{"FRIDOLIN_BRAIN_ID=" + spec.ID}, dataEnv(s)...)

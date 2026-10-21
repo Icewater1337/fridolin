@@ -27,7 +27,7 @@ func TestSendRefusesStatusBroadcastAndChannels(t *testing.T) {
 		"SendMessage": func(jid string) error { return tw.SendMessage(ctx, jid, "hello") },
 		"SendChunked": func(jid string) error { return tw.SendChunked(ctx, jid, strings.Repeat("hello ", 2000)) },
 		"SendPoll": func(jid string) error {
-			_, err := tw.SendPoll(ctx, jid, "Lunch?", []string{"Yes", "No"}, 1)
+			_, err := tw.SendPoll(ctx, jid, "Lunch?", []string{"Yes", "No"}, 1, func(string) { t.Error("kept a poll that does not go out") })
 			return err
 		},
 	}

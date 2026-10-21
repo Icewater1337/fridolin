@@ -40,6 +40,13 @@
       "fix": "claude setup-token, then set CLAUDE_CODE_OAUTH_TOKEN in the service's environment (docs/CONFIGURATION.md, \"Where to set them\")"
     },
     {
+      "id": "agent-path",
+      "title": "agent CLI by absolute path",
+      "required": true,
+      "status": "ok",
+      "detail": "claude_path \"claude\" runs as /usr/local/bin/claude"
+    },
+    {
       "id": "tailscale",
       "title": "Tailscale",
       "required": false,

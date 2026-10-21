@@ -111,11 +111,11 @@ func (f *flakyMessenger) SendMessage(ctx context.Context, jid, text string) erro
 	return f.Messenger.SendMessage(ctx, jid, text)
 }
 
-func (f *flakyMessenger) SendPoll(ctx context.Context, jid, q string, opts []string, max int) (string, error) {
+func (f *flakyMessenger) SendPoll(ctx context.Context, jid, q string, opts []string, max int, sending func(string)) (string, error) {
 	if err := f.try(); err != nil {
 		return "", err
 	}
-	return f.Messenger.SendPoll(ctx, jid, q, opts, max)
+	return f.Messenger.SendPoll(ctx, jid, q, opts, max, sending)
 }
 
 func (f *flakyMessenger) sent(jid string) []string {
@@ -553,5 +553,76 @@ func TestOutboxSummaryIsOneMoment(t *testing.T) {
 		if sum.Waiting+sum.Failed != 1 {
 			t.Fatalf("summary %d = %+v, want the one reply once", i, sum)
 		}
+	}
+}
+
+// earlyVoter is a messenger on which a poll can be voted on before
+// SendPoll returns, as on WhatsApp, where the phone may show the poll
+// before the server's acknowledgement is back; with fail set the send
+// then fails anyway.
+type earlyVoter struct {
+	*devchat.Messenger
+	store *store.Store
+	fail  bool
+
+	mu   sync.Mutex
+	seen map[string]bool // poll id: whether it was kept when voted on
+}
+
+func (e *earlyVoter) SendPoll(ctx context.Context, jid, q string, opts []string, max int, sending func(string)) (string, error) {
+	id, err := e.Messenger.SendPoll(ctx, jid, q, opts, max, sending)
+	_, kept := e.store.SentPoll(ctx, id)
+	e.mu.Lock()
+	e.seen[id] = kept == nil
+	e.mu.Unlock()
+	if e.fail {
+		return "", errors.New("the acknowledgement never came")
+	}
+	return id, err
+}
+
+// A poll is kept before it goes out, so that a vote that arrives before
+// the send returns finds it; one that fails after all is not kept.
+func TestPollIsKeptBeforeItCanBeVotedOn(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprint("fail=", fail), func(t *testing.T) {
+			s := openOutboxStore(t, t.TempDir())
+			m := &earlyVoter{Messenger: devchat.New(func(text string) []string { return []string{text} }), store: s, fail: fail, seen: map[string]bool{}}
+			o := outboundmsg.NewOutbox(s, func() outboundmsg.Link { return m }, 0, nil)
+			defer o.Stop()
+			if err := o.Poll(context.Background(), testDMChat, "Lunch?", []string{"Yes", "No"}, "approval:1"); err != nil {
+				t.Fatal(err)
+			}
+			var id string
+			testutil.WaitFor(t, 5*time.Second, "the poll", func() bool {
+				for _, msg := range m.Outbox() {
+					if msg.ID != "" {
+						id = msg.ID
+						return true
+					}
+				}
+				return false
+			})
+			// The text it falls back to marks the end of a failed send.
+			testutil.WaitFor(t, 5*time.Second, "the send to end", func() bool {
+				m.mu.Lock()
+				defer m.mu.Unlock()
+				_, ok := m.seen[id]
+				return ok && (!fail || len(m.Outbox()) == 2)
+			})
+			m.mu.Lock()
+			kept := m.seen[id]
+			m.mu.Unlock()
+			if !kept {
+				t.Errorf("poll %s was not kept when it could be voted on", id)
+			}
+			p, err := s.SentPoll(context.Background(), id)
+			switch {
+			case fail && err == nil:
+				t.Errorf("a poll that did not go out is kept: %+v", p)
+			case !fail && (err != nil || p.Ref != "approval:1" || p.Chat != testDMChat):
+				t.Errorf("kept %+v, %v", p, err)
+			}
+		})
 	}
 }
