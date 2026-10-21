@@ -227,7 +227,15 @@ func (vs *vaultSnapshots) ensureRepo(ctx context.Context) error {
 	}
 	if !ok {
 		vs.charge("init")
-		if err := vs.restic().Init(ctx, nil); err != nil {
+		// A repository that takes over from a single-layer one shares its
+		// chunker, so that migrate-encryption's copy deduplicates.
+		var from *snapshot.Restic
+		if old := vs.run.b.resticOld; old != nil {
+			if found, err := old.Exists(ctx); err == nil && found {
+				from = old
+			}
+		}
+		if err := vs.restic().Init(ctx, from); err != nil {
 			return err
 		}
 		vs.s.log.Info("vault: made the restic repository", "repo", vs.restic().Repo)

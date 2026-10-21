@@ -24,6 +24,18 @@ import (
 // vaultConfig turns the vault on with a small budget.
 const vaultConfig = `{"vault": {"enabled": true, "hot_budget_gb": 3}}`
 
+// vaultConfigRclone is vaultConfig with the rclone of this machine, which
+// the tests' empty HOME hides from the helper path: with it the dev
+// stand-ins put the restic repositories behind rclone crypt, as on B2.
+// "" when there is none.
+func vaultConfigRclone(t *testing.T) string {
+	p, err := exec.LookPath("rclone")
+	if err != nil {
+		return ""
+	}
+	return `{"vault": {"enabled": true, "hot_budget_gb": 3}, "backup": {"rclone_path": "` + filepath.ToSlash(p) + `"}}`
+}
+
 // startVault starts the harness's vault, as App.Start does, with the cold
 // tier, the restic repositories and Litestream in local folders under
 // local (FRIDOLIN_VAULT_LOCAL), and waits until it runs.
@@ -328,7 +340,11 @@ func TestVaultSnapshotsDrillAndDrive(t *testing.T) {
 	oldTick := vaultTickEvery
 	vaultTickEvery = 100 * time.Millisecond
 	t.Cleanup(func() { vaultTickEvery = oldTick })
-	h := newHarness(t, vaultConfig)
+	cfg := vaultConfigRclone(t)
+	if cfg == "" {
+		cfg = vaultConfig
+	}
+	h := newHarness(t, cfg)
 	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	brainDir := filepath.Join(h.Home(), "main")
 	for i := range 40 {
@@ -356,7 +372,7 @@ func TestVaultSnapshotsDrillAndDrive(t *testing.T) {
 	}
 	// With rclone, both repositories are behind rclone crypt: restic's
 	// own files are not there by name (docs/VAULT.md, "Encryption").
-	if _, err := findRclone(""); err == nil {
+	if cfg != vaultConfig {
 		for _, repo := range []string{"restic-crypt", "drive-restic-crypt"} {
 			if _, err := os.Stat(filepath.Join(local, repo, "config")); err == nil {
 				t.Errorf("%s holds restic's config in the clear", repo)

@@ -151,3 +151,110 @@ func (s *vaultService) runLiteMirror(ctx context.Context, m *cloud.Mirror) {
 		}
 	}
 }
+
+// storeLayers is one off-machine store's encryption, for the status and
+// doctor: its layers from the outside in, the host secret of each key,
+// and the state of its single-layer copy of before.
+type storeLayers struct {
+	Store  string   `json:"store"`
+	Where  string   `json:"where"`
+	Layers []string `json:"layers"`
+	Keys   []string `json:"keys"`
+	// PQ is set where a layer is asymmetric and its key exchange is
+	// post-quantum (ML-KEM-768 + X25519); the other layers are symmetric
+	// 256-bit ciphers.
+	PQ bool `json:"pq,omitempty"`
+	// Old is "copying" while the single-layer copy of before is still
+	// there (fridolin vault migrate-encryption), "retired" once deleted.
+	Old string `json:"old,omitempty"`
+}
+
+// The layers' names.
+const (
+	layerCrypt  = "rclone crypt (XSalsa20-Poly1305, names too)"
+	layerSeal   = "seal (XChaCha20-Poly1305)"
+	layerRestic = "restic (AES-256-CTR + Poly1305)"
+	layerAgePQ  = "age (ML-KEM-768 + X25519)"
+	layerNone   = "none of fridolin's (TLS to B2, B2's own encryption at rest)"
+)
+
+func oldState(st encryptionState, store string, copying bool) string {
+	switch {
+	case st.retired(store):
+		return "retired"
+	case copying:
+		return "copying"
+	}
+	return ""
+}
+
+// describeLayers says what each store of b has, from the keys in c.
+func describeLayers(b vaultBackends, c vaultCreds, st encryptionState, exportsTwo bool) []storeLayers {
+	var out []storeLayers
+	cold := storeLayers{Store: "cold", Where: "vault bucket, " + vaultColdPath + "/", Layers: []string{layerCrypt}, Keys: []string{hostsecrets.VaultCryptPassword, hostsecrets.VaultCryptSalt}}
+	if _, migrating := b.cold.(*cloud.Migrating); migrating || c.VaultSealKey != "" {
+		cold.Where = "vault bucket, " + vaultSealedPath + "/"
+		cold.Layers = append(cold.Layers, layerSeal)
+		cold.Keys = append(cold.Keys, hostsecrets.VaultSealKey)
+		cold.Old = oldState(st, "cold", migrating)
+	}
+	out = append(out, cold)
+	if b.restic != nil {
+		for _, id := range []string{"restic", "drive"} {
+			l := storeLayers{Store: id, Where: "snapshots bucket, restic/", Layers: []string{layerRestic}, Keys: []string{hostsecrets.ResticPassword}}
+			if id == "drive" {
+				l.Where = "Google Drive, " + driveResticPath + "/"
+			}
+			if c.SnapCryptPassword != "" {
+				l.Where = "snapshots bucket, " + resticCryptPath + "/"
+				if id == "drive" {
+					l.Where = "Google Drive, " + driveResticPath + "-crypt/"
+				}
+				l.Layers = []string{layerCrypt, layerRestic}
+				l.Keys = []string{hostsecrets.SnapshotsCryptPassword, hostsecrets.ResticPassword}
+				copying := b.resticOld != nil
+				if id == "drive" {
+					copying = b.driveOld != nil
+				}
+				l.Old = oldState(st, id, copying)
+			}
+			out = append(out, l)
+		}
+	}
+	if b.lite != nil {
+		l := storeLayers{Store: "litestream", Where: "snapshots bucket, litestream/", Layers: []string{layerNone}}
+		if b.liteMirror != nil {
+			l.Where = "snapshots bucket, " + liteSealedPath + "/"
+			l.Layers = []string{layerCrypt, layerSeal}
+			l.Keys = []string{hostsecrets.SnapshotsCryptPassword, hostsecrets.LitestreamSealKey}
+			l.Old = oldState(st, "litestream", true)
+		}
+		out = append(out, l)
+	}
+	ex := storeLayers{Store: "exports", Where: "vault bucket, core/exports/", Layers: []string{layerAgePQ, layerSeal},
+		Keys: []string{hostsecrets.AgeIdentityPQ, hostsecrets.ExportKey}, PQ: true}
+	if !exportsTwo {
+		ex.Layers, ex.PQ = []string{"age (X25519)"}, false
+		ex.Keys = []string{hostsecrets.AgeIdentity}
+	}
+	out = append(out, ex)
+	return out
+}
+
+// exportKeysHere reports whether the post-quantum identity and the export
+// key are here (environment or host secrets), so that exports made here
+// have both layers.
+func (s vaultSecretSource) exportKeysHere() bool {
+	for _, n := range []struct{ env, secret string }{{"FRIDOLIN_AGE_IDENTITY_PQ", hostsecrets.AgeIdentityPQ}, {"FRIDOLIN_EXPORT_KEY", hostsecrets.ExportKey}} {
+		if s.getenv(n.env) != "" {
+			continue
+		}
+		if s.store == nil {
+			return false
+		}
+		if ok, err := s.store.Has(n.secret); err != nil || !ok {
+			return false
+		}
+	}
+	return true
+}
