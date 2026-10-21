@@ -20,8 +20,9 @@ import (
 // port opens in Start, and only with nodes.enabled; the registry is there
 // either way, so the dashboard and the CLI can show and revoke nodes while
 // the port is closed.
-func newNodes(cfgs *config.Store, f *frideRuntime) (*nodes.Service, error) {
-	return nodes.New(nodes.Options{Dir: cfgs.Boot().Layout().Nodes(), OnEvent: f.onEvent, OnDeclare: f.onDeclare})
+// A machine that joins is announced to the owner (nodeJoined).
+func newNodes(b *App) (*nodes.Service, error) {
+	return nodes.New(nodes.Options{Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: b.fride.onEvent, OnDeclare: b.fride.onDeclare, OnJoin: b.nodeJoined})
 }
 
 // startNodes opens the node port when nodes.enabled was on at startup

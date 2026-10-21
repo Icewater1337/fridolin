@@ -23,6 +23,9 @@ func (s *authSessionsFake) Valid(string, string) bool    { return s.valid }
 func (s *authSessionsFake) UseCode(string) bool          { *s.calls = append(*s.calls, "code"); return true }
 func (s *authSessionsFake) Drop(string) error            { *s.calls = append(*s.calls, "drop"); return nil }
 func (s *authSessionsFake) NewCode() (string, time.Time) { return "code", time.Unix(2000000000, 0) }
+func (s *authSessionsFake) NewCodeFor(ttl time.Duration) (string, time.Time) {
+	return "code-" + ttl.String(), time.Unix(2000000000, 0)
+}
 func (s *authSessionsFake) DropAll() error {
 	*s.calls = append(*s.calls, "drop-all")
 	return s.dropAllErr
@@ -70,6 +73,49 @@ func TestDashboardLoginPrefersTokenAndReplacesSessionAfterCreation(t *testing.T)
 		if len(cookies) != 1 || !cookies[0].Secure || !cookies[0].HttpOnly || cookies[0].SameSite != http.SameSiteStrictMode {
 			t.Fatalf("cookie safeguards: %+v", cookies)
 		}
+	}
+}
+
+// ?tailnet=1 makes a code for another device, with the link at the
+// tailnet address, and refuses while the dashboard is not on the tailnet.
+func TestLoginCodeForTheTailnet(t *testing.T) {
+	calls := []string{}
+	s := &authSessionsFake{calls: &calls}
+	url := ""
+	a := DashboardAuth{Sessions: func() DashboardSessionStore { return s }, TailnetURL: func() string { return url }}
+	ask := func(path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		a.LoginCode(w, httptest.NewRequest("POST", path, nil))
+		return w
+	}
+	if w := ask("/api/login/code"); w.Code != 200 || !strings.Contains(w.Body.String(), `"code":"code"`) || !strings.Contains(w.Body.String(), `"url":""`) {
+		t.Errorf("a local code: %d %s", w.Code, w.Body.String())
+	}
+	if w := ask("/api/login/code?tailnet=1"); w.Code != http.StatusConflict {
+		t.Errorf("off the tailnet: %d %s", w.Code, w.Body.String())
+	}
+	url = "http://fridolin-core.example.ts.net/"
+	if w := ask("/api/login/code?tailnet=1"); w.Code != 200 || !strings.Contains(w.Body.String(), `"url":"http://fridolin-core.example.ts.net/#login=code-10m0s"`) {
+		t.Errorf("a tailnet code: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// A code for another device lasts RemoteLoginCodeLifetime, once.
+func TestRemoteLoginCodeLifetime(t *testing.T) {
+	now := time.Now()
+	s, err := LoadDashboardSessions(t.TempDir(), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	early, _ := s.NewCodeFor(RemoteLoginCodeLifetime)
+	late, _ := s.NewCodeFor(RemoteLoginCodeLifetime)
+	now = now.Add(RemoteLoginCodeLifetime - time.Second)
+	if !s.UseCode(early) || s.UseCode(early) {
+		t.Error("a code within its lifetime works once")
+	}
+	now = now.Add(2 * time.Second)
+	if s.UseCode(late) {
+		t.Error("an expired code signed in")
 	}
 }
 

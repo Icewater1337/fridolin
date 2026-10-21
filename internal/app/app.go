@@ -113,6 +113,8 @@ type App struct {
 	// that wait for the owner's answer (approvals.go).
 	policy  policyState
 	waiters approvalWaiters
+	// ownerAsks counts the owner's !join and !dashboard (owner_commands.go).
+	ownerAsks ownerCommandRate
 	// lids is whatsmeow's map between LIDs and phone numbers, nil in dev
 	// mode, for what knows a person by LID outside an event: a /send to
 	// one.
@@ -263,7 +265,7 @@ func New(opts Options) (_ *App, err error) {
 	b.loadPolicy()
 	b.mcpTools = b.newMCPTools()
 	b.fride = newFrideRuntime(b)
-	if b.nodes, err = newNodes(cfgs, b.fride); err != nil {
+	if b.nodes, err = newNodes(b); err != nil {
 		return nil, err
 	}
 	b.nodesEnabled, b.nodesListen = cfgs.Boot().NodesEnabled, cfgs.Boot().NodesListen

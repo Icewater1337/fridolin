@@ -41,6 +41,7 @@ export function connectScreen(el, { reason, onConnected }) {
     reason ? h('div.callout.warn', icon('alert', 'callout-icon'), h('div.callout-body', reason)) : null,
     h('ol.steps-list',
       h('li', h('div', 'In a terminal on this computer, run'), h('div.code-line', h('code.mono', cmd), copyButton(cmd)), h('div.muted.small', 'It opens this dashboard and signs you in, with a link that works once.')),
+      h('li', h('div', 'On another computer or phone, send ', h('code.mono', '!dashboard'), ' to Fridolin in your WhatsApp chat (or run ', h('code.mono', 'fridolin open --print --tailnet'), ' on the core) and open the link it sends.'), h('div.muted.small', 'The link works once, within 10 minutes; no token needed.')),
       h('li', h('div', 'Or paste the token from ', h('code.mono', '~/.fridolin/dashboard.token'), ' (in your data folder, if you moved it):'), form, errorEl)),
     h('div.connect-foot.muted.small', 'The token keeps programs on this computer — including your brains — from changing the bridge’s settings. It never leaves this machine, and this browser keeps only a sign-in for 30 days, not the token.')));
   setTimeout(() => input.focus(), 50);

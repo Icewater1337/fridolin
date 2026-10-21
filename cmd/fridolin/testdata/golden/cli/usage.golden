@@ -3,6 +3,10 @@ fridolin — talk to Claude Code over WhatsApp
 Usage:
   fridolin [run] [flags]     start the bridge (default)
   fridolin open              open the dashboard in your browser
+  fridolin open --print [--tailnet]
+                                           print a sign-in link that works once; with
+                                           --tailnet, at the core's tailnet address,
+                                           for another device (10 minutes)
   fridolin rotate-token      replace the dashboard token and sign out every browser
   fridolin check [--route JID ...] [--redact]
                                            validate the configuration and show routing;

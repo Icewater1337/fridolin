@@ -337,8 +337,10 @@ number, `dashboard`, `timeout`), `detail`, `outcome` and `duration_ms`.
 The kinds: `run_start`, `run_end`, `run_refused`, `tool_call` (the tool's
 name and how it ended, never its arguments), `approval_requested`,
 `approval_vote`, `approval_decided`, `question_asked`,
-`question_answered`, `delegation`, `lockdown`, `unlock` and
-`skill_approved`. Texts are shortened, and what looks like a password or
+`question_answered`, `delegation`, `lockdown`, `unlock`,
+`skill_approved`, and the owner's node commands `node_join_code`
+(`!join`), `dashboard_link` (`!dashboard`), `node_approved` (`!approve`)
+and `node_revoked` (`!revoke`), never with the code or link. Texts are shortened, and what looks like a password or
 token is masked. The dashboard's Threads page groups the runs by thread,
 and its Audit page filters the lines. `fridolin doctor` warns about an
 approval that has waited more than an hour, and says when the bridge is

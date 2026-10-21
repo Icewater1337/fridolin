@@ -59,6 +59,10 @@ import (
 const (
 	SessionLifetime   = 30 * 24 * time.Hour
 	LoginCodeLifetime = time.Minute
+	// RemoteLoginCodeLifetime is a login code's for another machine (`fridolin
+	// open --tailnet`, the !dashboard chat command): long enough to move it
+	// there and open it.
+	RemoteLoginCodeLifetime = 10 * time.Minute
 	// maxSessions caps the sign-ins kept; the oldest goes first.
 	maxSessions = 32
 )
@@ -126,8 +130,11 @@ func hashSecret(secret string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// newCode makes a login code that works once, until it expires.
-func (s *DashboardSessions) NewCode() (string, time.Time) {
+// NewCode makes a login code that works once, within LoginCodeLifetime.
+func (s *DashboardSessions) NewCode() (string, time.Time) { return s.NewCodeFor(LoginCodeLifetime) }
+
+// NewCodeFor makes a login code that works once, within ttl.
+func (s *DashboardSessions) NewCodeFor(ttl time.Duration) (string, time.Time) {
 	code := dashboardRandomToken(24)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -137,7 +144,7 @@ func (s *DashboardSessions) NewCode() (string, time.Time) {
 			delete(s.codes, h)
 		}
 	}
-	exp := now.Add(LoginCodeLifetime)
+	exp := now.Add(ttl)
 	s.codes[hashSecret(code)] = exp
 	return code, exp
 }

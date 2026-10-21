@@ -47,6 +47,14 @@ const (
 	// Housekeeping is the housekeeping job: a run (Detail its summary) and
 	// each thing it stopped, removed or asked about (ID the approval).
 	Housekeeping = "housekeeping"
+	// The owner's chat commands: a join code (!join), a dashboard sign-in
+	// link (!dashboard), a node approved (!approve) or revoked (!revoke).
+	// By is the sender, Chat where they asked, ID the node; Outcome is ok,
+	// or why it was refused. The code or link itself is never written.
+	NodeJoinCode  = "node_join_code"
+	DashboardLink = "dashboard_link"
+	NodeApproved  = "node_approved"
+	NodeRevoked   = "node_revoked"
 )
 
 // Entry is one line. Fields are added, never renamed; a reader ignores

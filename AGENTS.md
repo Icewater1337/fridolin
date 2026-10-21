@@ -157,25 +157,31 @@ machine". In short:
    `bin\fridolin.exe`; set `CGO_ENABLED=0`). On Windows copy it,
    elevated, to `%ProgramFiles%\fridolin\fridolin.exe`: the service runs
    as LocalSystem from there.
-4. **Join code** (default, no access to the core machine needed): open
-   `https://fridolin-core.<tailnet>.ts.net/#/nodes` for the person; they
-   sign in with the dashboard token from their password manager if asked,
-   click **New join code**, and paste the line for this OS. Alternative,
-   on the core machine: `docker exec fridolin-core fridolin nodes
-   join-code` (native core: `fridolin nodes join-code`).
+4. **Join code** (default, nothing on the core machine and no token
+   needed): ask the person to send `!join` to Fridolin in their own
+   WhatsApp chat with it and paste the code (or the line for this OS) it
+   replies with here. The code is single-use, valid 10 minutes, and
+   grants nothing until they approve. Alternatives: they send
+   `!dashboard`, open the sign-in link it sends on this machine (it works
+   once, within 10 minutes, at the core's tailnet address), and click
+   **Nodes → New join code**; or on the core machine `docker exec
+   fridolin-core fridolin nodes join-code` (native core: `fridolin nodes
+   join-code`). Never ask for the dashboard token.
 5. **Join** with the folder the person chooses and no commands unless
    they name some: `fridolin node join CODE --core HOST:8766 --no-exec
    --root PATH:rw`. On Windows add `--no-service` in their normal
    PowerShell, then `node install` and `node start` elevated, each with
    `--state-dir "$env:LOCALAPPDATA\fridolin-node"`.
-6. **Approve** on the core: the person clicks **Approve device** and
-   **Approve commands** on the Nodes page (or `fridolin nodes approve ID`
-   and `fridolin nodes approve ID --commands` on the core).
+6. **Approve**: once the node joined, Fridolin tells the person in their
+   WhatsApp chat; they reply `!approve ID` (device and what it offers in
+   one go), or click **Approve device** and **Approve commands** on the
+   Nodes page (or `fridolin nodes approve ID` and `fridolin nodes approve
+   ID --commands` on the core).
 7. **Verify**: `fridolin node status` (service running), `fridolin doctor
    --node`, `fridolin setup-machine --node` (exit 0); the core's Nodes page
    shows the node online and approved.
 
-Rollback: `fridolin nodes revoke ID` on the core; `fridolin node stop` and
+Rollback: `!revoke ID` in the person's chat, or `fridolin nodes revoke ID` on the core; `fridolin node stop` and
 `fridolin node uninstall` here (elevated on Windows), then remove the state
 dir.
 

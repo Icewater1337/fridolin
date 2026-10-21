@@ -48,6 +48,10 @@ type Options struct {
 	// OnDeclare hears that a node's declaration changed while it was
 	// connected, after the registry recorded it; nil for nothing.
 	OnDeclare func(n *Node)
+	// OnJoin hears that a device it did not know joined with a join code
+	// and waits for approval, once, after the registry recorded it; nil
+	// for nothing. It must not block for long.
+	OnJoin func(n *Node)
 }
 
 // Service is the node port and the registry behind it.
@@ -56,6 +60,7 @@ type Service struct {
 	logf      func(string, ...any)
 	onEvent   func(string, nodeproto.Event)
 	onDeclare func(*Node)
+	onJoin    func(*Node)
 
 	// ctx ends with Stop, and with it every connection.
 	ctx    context.Context
@@ -81,7 +86,7 @@ func New(opts Options) (*Service, error) {
 		logf = log.Printf
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Service{reg: reg, logf: logf, onEvent: opts.OnEvent, onDeclare: opts.OnDeclare, ctx: ctx, cancel: cancel, sessions: map[string]*session{}}, nil
+	return &Service{reg: reg, logf: logf, onEvent: opts.OnEvent, onDeclare: opts.OnDeclare, onJoin: opts.OnJoin, ctx: ctx, cancel: cancel, sessions: map[string]*session{}}, nil
 }
 
 // Registry is the service's registry.
@@ -296,7 +301,7 @@ func (s *Service) handshake(ss *session, remote string) (*Node, error) {
 		ss.close(nodeproto.CloseBadAuth, "the signature does not verify")
 		return nil, errors.New("bad signature")
 	}
-	node, err := s.reg.Hello(hello, remote)
+	node, joined, err := s.reg.hello(hello, remote)
 	switch {
 	case errors.Is(err, ErrRevoked):
 		s.logf("nodes: refused %s (%s) from %s: it is revoked", hello.Name, hello.DeviceID, remote)
@@ -304,15 +309,18 @@ func (s *Service) handshake(ss *session, remote string) (*Node, error) {
 		return nil, err
 	case errors.Is(err, ErrBadJoinCode):
 		s.logf("nodes: refused %s (%s) from %s: an unknown device without a valid join code", hello.Name, hello.DeviceID, remote)
-		ss.close(nodeproto.CloseUnknownDevice, "this core does not know this device, and the join code is unknown, used or expired: run fridolin nodes join-code on the core")
+		ss.close(nodeproto.CloseUnknownDevice, "this core does not know this device, and the join code is unknown, used or expired: send !join to the bridge in your WhatsApp chat, or run fridolin nodes join-code on the core")
 		return nil, err
 	case err != nil:
 		s.logf("nodes: refused %s from %s: %v", hello.DeviceID, remote, err)
 		ss.close(nodeproto.CloseProtocol, "the core could not record this node")
 		return nil, err
 	}
-	if hello.JoinCode != "" && node.Device == nodeproto.DevicePending {
+	if joined {
 		s.logf("nodes: %s (%s) joined; approve it with: fridolin nodes approve %s", node.Name, node.ID, node.ID)
+		if s.onJoin != nil {
+			s.onJoin(clone(node))
+		}
 	}
 	return node, nil
 }
