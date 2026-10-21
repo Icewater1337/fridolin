@@ -4,14 +4,14 @@
 // any time; each step goes through the bridge (/api/nodes/...), which the
 // node hears at once.
 
-import { post, put } from '../app/api.js';
+import { ApiError, post, put } from '../app/api.js';
 import { nodesResource } from '../app/resources.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { absTime } from '../lib/format.js';
-import { capSummary, gb, osName, parseTags, ruleText } from '../lib/nodes.js';
+import { capSummary, gb, osName, parseTags, ruleText, updateText } from '../lib/nodes.js';
 import { btn } from '../components/buttons.js';
 import { confirmDialog, openDialog } from '../components/dialog.js';
-import { textInput } from '../components/fields.js';
+import { textInput, toggle } from '../components/fields.js';
 import { toast } from '../components/toast.js';
 import { badge, callout, empty, kv, mono, pageHeader, pill, spinner, timeAgo } from '../components/common.js';
 
@@ -52,6 +52,34 @@ export default {
     async function act(n, path, done) {
       await post(`/api/nodes/${encodeURIComponent(n.id)}/${path}`, {});
       toast(done, 'ok');
+      await refresh();
+    }
+
+    // Updates: the core sends the node the build of its own version; the
+    // node swaps it in and restarts, and goes back by itself when the new
+    // one does not connect. A busy node (a FrIDE task, a backup) is
+    // updated only when the owner says so.
+    async function update(n) {
+      const path = `/api/nodes/${encodeURIComponent(n.id)}/update`;
+      try {
+        await post(path, {});
+      } catch (err) {
+        if (!(err instanceof ApiError) || err.status !== 409 || !/force/.test(err.message)) throw err;
+        const ok = await confirmDialog({
+          title: `Update ${n.name} now?`,
+          message: `${err.message}. Updating restarts its agent, which may cut that off.`,
+          confirm: 'Update anyway', danger: true,
+        });
+        if (!ok) return;
+        await post(path, { force: true });
+      }
+      toast(`Updating ${n.name} to ${n.update_to}`, 'ok');
+      await refresh();
+    }
+
+    async function setAuto(n, auto) {
+      await put(`/api/nodes/${encodeURIComponent(n.id)}/update-policy`, { auto });
+      toast(auto ? `${n.name} updates by itself from now on` : `${n.name} waits for you to update it`, 'ok');
       await refresh();
     }
 
@@ -98,6 +126,11 @@ export default {
         out.push(btn('Approve device', { kind: 'primary', small: true, icon: 'check', onClick: () => act(n, 'approve', `Approved the device ${n.name}`) }));
       } else if (n.device === 'approved' && n.commands === 'pending') {
         out.push(btn('Approve what it offers', { kind: 'primary', small: true, icon: 'check', onClick: () => act(n, 'approve-commands', `Approved what ${n.name} offers`) }));
+      }
+      const updating = n.update && (n.update.state === 'sending' || n.update.state === 'restarting');
+      // Offline nodes are refused by the bridge, which says so.
+      if (n.update_to && !updating) {
+        out.push(btn(`Update to ${n.update_to}`, { kind: 'primary', small: true, icon: 'refresh', onClick: () => update(n) }));
       }
       if (n.device !== 'revoked') {
         out.push(btn('Tags', { small: true, kind: 'ghost', icon: 'edit', onClick: () => editTags(n) }));
@@ -183,7 +216,11 @@ export default {
           ['Offers', capSummary(n.declared)],
           ['Tags', (n.tags || []).length ? h('span.tag-list', n.tags.map((t) => badge(t))) : h('span.muted', 'none')],
           ['Version', n.version || null],
+          ['Update', updateText(n.update) || n.update_note || null],
         ]),
+        n.device === 'approved' && n.effective && n.effective.update
+          ? h('div.node-auto-update', toggle({ checked: !!(n.update && n.update.auto), label: 'Update by itself when the core runs a newer version', onChange: (v) => setAuto(n, v) }))
+          : null,
         offers(n),
         h('div.actions', actions(n)));
     }
