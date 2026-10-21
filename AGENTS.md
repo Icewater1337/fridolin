@@ -1,9 +1,9 @@
 # Instructions for coding assistants
 
-You are probably here because someone cloned this repository and asked you to
-"set it up" or "get it running". This file says exactly how. Follow it in
-order, explain each step to the person in a sentence, and stop to ask them
-whenever a step needs their decision or their phone.
+You are probably here because someone cloned this repository and asked you
+to set this machine up. This file says exactly how. Explain each step to
+the person in a sentence, do the work yourself, and stop only where a step
+needs their decision, their account or their phone.
 
 ## What this is
 
@@ -15,9 +15,52 @@ installation — pairing WhatsApp, adding brains, allowing chats, Google Drive
 backups — is done in a local web dashboard.
 
 The person's data lives in brain folders they choose and in
-`~/.fridolin/`, never in this repository.
+`~/.fridolin/`, never in this repository. A fridolin can grow into a
+*core* (the bridge, usually in a container: docs/CORE.md) and *nodes*
+(other machines of the owner's that lend it files and devices:
+docs/NODES.md), all on the owner's tailnet.
 
-## Setup steps
+## What do you want to do?
+
+Ask, unless the request already says it:
+
+| The person says | Path |
+| --- | --- |
+| "install fridolin", "get it running", "set it up" (no core yet) | [A. Install a new fridolin](#a-install-a-new-fridolin) |
+| "set this machine up as a node of my fridolin core" | [B. Join this machine as a node](#b-join-this-machine-as-a-node) |
+| "move the core to this machine", "test a takeover" | [C. Make this machine the core](#c-make-this-machine-the-core) |
+
+### How you work on every path
+
+- **Install the tools yourself.** List what is missing and the commands,
+  ask once, then run them: Windows `winget` (Chocolatey where winget is
+  missing), macOS Homebrew (install it first when `brew` is missing),
+  Linux `apt`/`dnf` and Tailscale's install script. After winget, reload
+  PATH in the same PowerShell:
+  `$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')`.
+  Say when a restart is due (WSL, Docker Desktop) and resume after it.
+- **Open the pages the person must act on**, then ask them to finish and
+  wait: `Start-Process URL` (Windows), `open URL` (macOS), `xdg-open URL`
+  (Linux). Tailscale's login link (`tailscale up` prints it), Docker
+  Desktop's first run, the core dashboard's Nodes page
+  (`https://fridolin-core.<tailnet>.ts.net/#/nodes`). Afterwards check it
+  yourself (`tailscale status`, `docker info`, `fridolin nodes`).
+- **Never ask for a secret in chat**, and never print one. Secrets are
+  typed by the person into a prompt without echo (`fridolin core secrets
+  set NAME`), or move machine to machine (`fridolin core receive` /
+  `send`). A dashboard sign-in takes the token in the browser's sign-in
+  page, from the person's password manager.
+- **Elevation.** Say when an administrator PowerShell (UAC prompt) is
+  needed — installing the node service, WSL, copying into Program Files —
+  and run that one step elevated: `Start-Process PROGRAM -Verb RunAs -Wait
+  -ArgumentList …`. Everything else runs as the person.
+- **`fridolin setup-machine --node|--core`** shows what is done and the
+  next step; it only looks and is safe to run again. `fridolin doctor`
+  (`--node` on a node machine) explains each check.
+- **End with a report**: what you installed and changed, the checklist of
+  the path with each item's result, and what is left for the person.
+
+## A. Install a new fridolin
 
 1. **Prerequisites.** Check, and install what is missing with the person's OK:
    - Go 1.26+ (`go version`); macOS: `brew install go`.
@@ -41,6 +84,9 @@ The person's data lives in brain folders they choose and in
      https://rclone.org/install/).
    - Optional, for transcribing voice notes: python3 and ffmpeg (`brew
      install ffmpeg`); the engine is set up later (README, Transcription).
+
+   A native bridge runs on macOS and Linux. On Windows the bridge runs
+   only as the container core (path C with a fresh volume, docs/CORE.md).
 
 2. **Build, test, install the service, open the dashboard:**
 
@@ -89,13 +135,90 @@ the version you came from (scripts and brains that call `/send` or
 the allowed groups). To go back to the version before: `fridolin service
 rollback`.
 
+## B. Join this machine as a node
+
+The full runbook, with every command per OS, is docs/NODES.md, "Joining a
+machine". In short:
+
+1. **Tools**: Git, Go, Tailscale. Windows:
+   `winget install --id Git.Git -e`, `winget install --id GoLang.Go -e`,
+   `winget install --id Tailscale.Tailscale -e` (each with
+   `--accept-source-agreements --accept-package-agreements`). macOS:
+   `brew install go git && brew install --cask tailscale`. Linux: `apt`/`dnf`
+   `golang git`, `curl -fsSL https://tailscale.com/install.sh | sh`.
+2. **Tailscale**: `tailscale up`, open its login link for the person, who
+   signs in with the account of the core's tailnet; wait; then
+   `tailscale status` lists `fridolin-core`. The core's address is
+   `fridolin-core.<MagicDNSSuffix of tailscale status --json>:8766`.
+3. **Build**: `go build -o bin/fridolin ./cmd/fridolin` (Windows
+   `bin\fridolin.exe`; set `CGO_ENABLED=0`). On Windows copy it,
+   elevated, to `%ProgramFiles%\fridolin\fridolin.exe`: the service runs
+   as LocalSystem from there.
+4. **Join code** (default, no access to the core machine needed): open
+   `https://fridolin-core.<tailnet>.ts.net/#/nodes` for the person; they
+   sign in with the dashboard token from their password manager if asked,
+   click **New join code**, and paste the line for this OS. Alternative,
+   on the core machine: `docker exec fridolin-core fridolin nodes
+   join-code` (native core: `fridolin nodes join-code`).
+5. **Join** with the folder the person chooses and no commands unless
+   they name some: `fridolin node join CODE --core HOST:8766 --no-exec
+   --root PATH:rw`. On Windows add `--no-service` in their normal
+   PowerShell, then `node install` and `node start` elevated, each with
+   `--state-dir "$env:LOCALAPPDATA\fridolin-node"`.
+6. **Approve** on the core: the person clicks **Approve device** and
+   **Approve commands** on the Nodes page (or `fridolin nodes approve ID`
+   and `fridolin nodes approve ID --commands` on the core).
+7. **Verify**: `fridolin node status` (service running), `fridolin doctor
+   --node`, `fridolin setup-machine --node` (exit 0); the core's Nodes page
+   shows the node online and approved.
+
+Rollback: `fridolin nodes revoke ID` on the core; `fridolin node stop` and
+`fridolin node uninstall` here (elevated on Windows), then remove the state
+dir.
+
+## C. Make this machine the core
+
+The full runbook is docs/CORE.md, "Moving the core to another machine".
+The core is the container image plus the `fridolin-data` volume; on
+Windows it runs in Docker Desktop with WSL2. In short:
+
+1. **Tools**: Git, Go, Tailscale (as in B), and Docker. Windows:
+   `wsl --install --no-distribution` elevated, restart, then `winget
+   install --id Docker.DockerDesktop -e`; open Docker Desktop for its
+   first run and let the person accept its terms; `docker info` must
+   answer. macOS: `brew install --cask orbstack`; Linux: Docker Engine.
+2. **Build** fridolin as in B, then the image of the same version:
+   `fridolin core build` in the clone.
+3. **Secrets**, machine to machine: here `fridolin core receive` (the
+   person's normal shell); on the current core's host, in a terminal the
+   person sees, `fridolin core send --to ADDRESS --code CODE` as receive
+   printed it. The person compares the four words on both screens and
+   types `yes` there. Fallback: the person types each with `fridolin core
+   secrets set NAME`. Check with `fridolin core secrets`.
+4. **Move**, in this order: on the old host `fridolin core stop`, then
+   `fridolin core run core export`; here `fridolin core run core import
+   --latest`, `fridolin core run core promote`, `fridolin core start`.
+5. **Verify**: `curl -s http://127.0.0.1:8765/ready` (WhatsApp connected,
+   lease held), `docker exec fridolin-core fridolin doctor`, `fridolin core
+   run core status`, `fridolin setup-machine --core` (exit 0); the person
+   sends a WhatsApp message and gets an answer. `fridolin core start` on
+   the old host now exits with status 3.
+6. **Way back**: the same in reverse: stop and export here; on the old
+   host `fridolin core run core import --latest --force`, `core run core
+   promote`, `core start`.
+
+Brain folders bound in from the Mac's home do not move to another machine
+(docs/CORE.md says what to do for a test). The WhatsApp session moves in
+`bridge.db`: never run the old and the new core at once.
+
 ## Rules
 
 - **Never delete or recreate `~/.fridolin/bridge.db`.** It holds
   the WhatsApp pairing; losing it means re-pairing and losing poll history
   and the replies still waiting to go out.
   If a repair seems to need it, stop and ask; move it aside rather than delete.
-- **Never run two bridges on one data directory or WhatsApp session.** The
+- **Never run two cores, or two bridges on one data directory or WhatsApp
+  session.** Moving the core stops the old one first (path C). The
   binary refuses (lock file + port), but do not try to work around it. To
   experiment, use dev mode with a scratch config:
   `bin/fridolin --no-whatsapp --config /tmp/try/config.json`
@@ -109,6 +232,11 @@ rollback`.
   `~/.fridolin/rclone/`, or anything that looks like a credential into
   chat or logs. `fridolin open` signs the browser in with a link that
   works once, so the token never goes into a URL.
+- **Host secrets** (the age identity, B2 keys, vault and restic passwords,
+  the Claude token, a node's `node.key`) are never read out, printed or
+  typed by you: the person types them into `fridolin core secrets set`, or
+  they move with `core send`/`core receive`, whose four words the person
+  compares on both screens; never answer that prompt for them.
 - Do not commit the person's data. `config.json`, brain folders, databases,
   media and tokens are not part of this repository.
 - Do not weaken security defaults (sandbox, dashboard token, allowlists)

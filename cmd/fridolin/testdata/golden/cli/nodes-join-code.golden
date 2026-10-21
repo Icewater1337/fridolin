@@ -1,0 +1,10 @@
+Join code fj-abcd1234, valid once until 14:05 (core fridolin-core.example.ts.net:8766).
+On the new machine, paste one line:
+
+  macOS, Linux (sh):
+    fridolin node join fj-abcd1234 --core fridolin-core.example.ts.net:8766
+  Windows (PowerShell):
+    & "$env:ProgramFiles\fridolin\fridolin.exe" node join fj-abcd1234 --core fridolin-core.example.ts.net:8766
+
+Add --root PATH[:rw] to share a folder, --no-exec to allow no commands (docs/NODES.md).
+Then approve it here: fridolin nodes approve <id>, and fridolin nodes approve <id> --commands

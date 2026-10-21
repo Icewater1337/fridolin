@@ -40,6 +40,13 @@ Usage:
                                            need on this machine (CLIs, Tailscale,
                                            Docker, host secrets, disk), each with a
                                            fix; exits 1 when a required check fails
+  fridolin doctor --node [--state-dir DIR] the checks of a node machine: Tailscale,
+                                           the core reachable, the node service (the
+                                           default on a machine that joined a core
+                                           and has no bridge config)
+  fridolin setup-machine --node|--core     what this machine still needs to be a node,
+                                           or to take the core over, and the next step
+                                           (AGENTS.md); only looks, safe to rerun
   fridolin init [--claude-path PATH] [--data-dir DIR]
                                            write a starter config (if there is none)
   fridolin paths [--json]                  the config file and data dir in use, and
@@ -51,10 +58,10 @@ Usage:
                                            run the bridge in the background (launchd or
                                            systemd) from a copy outside the checkout;
                                            fridolin service --help for more
-  fridolin core start|stop|update|run|export|import|promote|status
-                                           run the core in a container, move it
-                                           between machines, show the core lease;
-                                           fridolin core --help for more
+  fridolin core start|stop|update|build|run|export|import|promote|status|secrets|send|receive
+                                           run the core in a container, move it and
+                                           its host secrets between machines, show
+                                           the core lease; fridolin core --help for more
   fridolin nodes [list|join-code|approve ID [--commands]|revoke ID|tags ID TAGS|call ID METHOD JSON]
                                            the core's fleet of nodes, through the running
                                            bridge; fridolin nodes help for more
@@ -107,6 +114,8 @@ func Main() {
 		checkCmd(args)
 	case "doctor":
 		os.Exit(doctorCmd(args, os.Stdout))
+	case "setup-machine":
+		os.Exit(setupMachineCmd(args, os.Stdout, os.Stderr))
 	case "open":
 		openCmd(args)
 	case "rotate-token":
@@ -562,6 +571,8 @@ func doctorCmd(args []string, stdout io.Writer) int {
 	fs.StringVar(&o.Config, "config", "", configFlagHelp)
 	fs.BoolVar(&o.JSON, "json", false, "print the checks as JSON")
 	fs.BoolVar(&o.Redact, "redact", false, "mask phone numbers, JIDs and email addresses, and write ~ for the home folder, to paste the output into a bug report")
+	node := fs.Bool("node", false, "check this machine as a node of a core")
+	stateDir := fs.String("state-dir", "", "the node's state folder, with --node")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -571,6 +582,9 @@ func doctorCmd(args []string, stdout io.Writer) int {
 	if fs.NArg() > 0 {
 		fmt.Fprintf(fs.Output(), "doctor takes no arguments, got %q\n", fs.Args())
 		return 2
+	}
+	if *node || *stateDir != "" || isNodeMachine(o.Config) {
+		return nodeDoctor(*stateDir, o.JSON, stdout)
 	}
 	if err := app.WriteDoctor(stdout, o); err != nil {
 		if !errors.Is(err, app.ErrDoctorFailed) {

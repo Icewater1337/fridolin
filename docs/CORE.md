@@ -99,7 +99,14 @@ it always matches the version that runs it.
 fridolin core start    # docker compose up -d, with the image of this version
 fridolin core update   # docker compose pull, then up -d --force-recreate
 fridolin core stop     # docker compose down; the volume stays
+fridolin core build    # docker build of container/Dockerfile in this checkout, tagged for core start
 ```
+
+On Windows the compose file goes to `%LOCALAPPDATA%\fridolin\compose.yaml`
+(it stays on the machine; `%APPDATA%` roams), and compose gets the
+variables Windows programs need (`SystemRoot`, `USERPROFILE`,
+`LOCALAPPDATA`, …) besides `PATH` and Docker's own. `core migrate` is
+refused there: Windows has no native bridge to move.
 
 `--image` and `--tag` pick another image (default `fridolin-core` and this
 binary's version); `--compose PATH` runs a compose file of your own.
@@ -113,7 +120,9 @@ WhatsApp pairing.
 in the environment of the `docker compose` process only: not on a command
 line, not in a file. Compose passes them on to the container by name. On
 macOS they are generic passwords in the login keychain, account
-`fridolin`; on Linux files of mode 0600 in
+`fridolin`; on Windows generic credentials in the Windows Credential
+Manager, target name the secret's name, user `fridolin`, kept for this
+user on this machine; on Linux files of mode 0600 in
 `$XDG_CONFIG_HOME/fridolin/secrets/` (default `~/.config/...`), named
 after the service.
 
@@ -127,14 +136,62 @@ after the service.
 | `fridolin.vault.crypt.password`, `.password2` | `FRIDOLIN_VAULT_CRYPT_PASSWORD`, `..._PASSWORD2` | made by a native bridge with the vault on, while the cold tier is empty ([VAULT.md](VAULT.md#keys-and-passwords)) |
 | `fridolin.restic.password` | `RESTIC_PASSWORD` | the same, while the restic repository does not exist |
 
-A secret that is missing is named and left out. To store one by hand:
+A secret that is missing is named and left out. `fridolin core secrets`
+lists which are stored (never their values); to store one, on any system:
 
 ```bash
-security add-generic-password -a fridolin -s fridolin.claude.oauth.token -w
+fridolin core secrets set claude.oauth.token     # or the full name, fridolin.claude.oauth.token
 ```
 
-(`-w` last makes `security` prompt for the value, so it is not on the
-command line.)
+It reads the value from the terminal without echo (or from stdin when
+that is no terminal), checks that an age identity is one, and refuses to
+replace a stored value without `--replace`. On macOS `security
+add-generic-password -a fridolin -s fridolin.claude.oauth.token -w` works
+too (`-w` last makes it prompt), on Windows `cmdkey
+/generic:fridolin.claude.oauth.token /user:fridolin /pass` (it prompts).
+
+### Moving the host secrets
+
+`fridolin core receive` on the machine that takes over and `fridolin core
+send --to ADDRESS` on the host of the current core carry the secrets
+across directly, over the tailnet, so nobody types them again. Both run
+on the hosts, never in the container (the container has no host
+secrets).
+
+1. The receiver asks Tailscale's LocalAPI for this device, makes an
+   ephemeral age X25519 key and a one-time code (eight characters),
+   listens once on its Tailscale IPv4 address on a free port, and prints
+   the address and the code. It waits ten minutes (`--timeout`).
+2. The sender connects. Each side asks Tailscale who the other is
+   (WhoIs) and refuses a device of another login (tagged devices: one
+   without a tag in common).
+3. The receiver sends its public key; the sender sends an ephemeral
+   public key of its own and an HMAC-SHA256, keyed with the code, over
+   both keys: it proves the code without sending it. A wrong code ends
+   the receiver; it takes one connection only.
+4. Both show four words, the SHA-256 of both public keys mapped onto a
+   list of 256 words. A party in the middle would have to swap the keys,
+   and the words would differ. The sender's person types `yes` only when
+   both screens show the same words; `core send` refuses to run without a
+   terminal for that.
+5. The sender encrypts the secrets (JSON, names and values) to the
+   receiver's key with age and sends them. The receiver decrypts them in
+   memory, refuses names it does not take and values that are not one
+   printable line, and refuses the whole transfer when a value differs
+   from one it already holds, unless `--replace`. It then writes each into
+   its host store; when one write fails, it puts back what each earlier
+   write replaced. Nothing goes to disk in clear, and no value is
+   printed.
+
+The secrets sent are the age identity, the Claude token, both B2 key
+pairs, the vault's crypt passwords and the restic password; the Tailscale
+auth key only with `--with-tailscale-key` (the new machine logs in to the
+tailnet itself, and the core's own node key moves in the export). Codex
+sign-ins are files in the volume and move with the export. Each side
+appends a line to `secrets-transfer.log` beside its compose file: the
+time, the direction, the other device and its login, the names stored or
+unchanged, the result, never a value.
+
 
 The age identity encrypts every export. `core start` makes one the first
 time and says so: copy it into the keychain of every machine that may run
@@ -269,6 +326,9 @@ fridolin core run core import --latest
 fridolin core run core promote
 fridolin core start
 ```
+
+The whole sequence, with the host secrets and the way back, is in
+[Moving the core to another machine](#moving-the-core-to-another-machine).
 
 `fridolin core run COMMAND...` runs a fridolin command in a one-off
 container on the volume (`docker compose run --rm`, no published ports)
@@ -551,6 +611,215 @@ copies into the volume unchanged (until you rotate it in the core, after
 which copy the new one back). In a brain's run the bridge sets
 `FRIDOLIN_API` and `FRIDOLIN_BRAIN_TOKEN_FILE` as before.
 
+## Moving the core to another machine
+
+The runbook a coding agent follows when the owner clones the repository on
+another machine and says "move the core to this machine" (AGENTS.md, path
+C), to test a takeover or for good. The new machine runs the same
+container image with Docker; on Windows that is Docker Desktop on WSL2.
+`fridolin setup-machine --core` says at any point what is done and what
+is next; it only looks.
+
+What moves, and how:
+
+| What | How |
+| --- | --- |
+| The data dir: `bridge.db` (the WhatsApp session), brains' state, memory, audit, the core's tailnet node key, nodes, Codex sign-ins | `fridolin core export` on the old machine, `core import --latest` on the new one, through the vault bucket |
+| The host secrets: the age identity, the B2 keys, the vault and restic passwords, the Claude token | `fridolin core send` → `fridolin core receive`, directly over the tailnet ([Moving the host secrets](#moving-the-host-secrets)) |
+| The core lease | released by `fridolin core stop` on the old machine, taken by `core promote` on the new one |
+| Brain folders in the volume (`/data/brains-folders/`) | with the export |
+| Brain folders bound in from the Mac's home (`compose.host.yaml`, a migrated native install) | not at all: see [Brain folders on another machine](#brain-folders-on-another-machine) |
+
+**WhatsApp continuity.** The WhatsApp session is `bridge.db`, and it moves
+whole: the new core answers as the same linked device, without a new QR
+code, as long as the old core stopped before the export and never runs
+again on its old copy. Two cores on one session fight over it; the lease
+refuses a second start, and `fridolin core stop` removes the old
+container, so Docker's restart policy does not bring it back. Never delete
+`bridge.db` or the `fridolin-data` volume to "fix" anything.
+
+### 1. Tools on the new machine
+
+Ask once, naming them, then install.
+
+Windows (PowerShell):
+
+```powershell
+winget install --id Git.Git -e --accept-source-agreements --accept-package-agreements
+winget install --id GoLang.Go -e --accept-source-agreements --accept-package-agreements
+winget install --id Tailscale.Tailscale -e --accept-source-agreements --accept-package-agreements
+# WSL2, once, as administrator; Windows asks for a restart afterwards:
+Start-Process wsl -Verb RunAs -Wait -ArgumentList '--install','--no-distribution'
+winget install --id Docker.DockerDesktop -e --accept-source-agreements --accept-package-agreements
+$env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+```
+
+Tell the owner when a restart is due (after `wsl --install`, and Docker
+Desktop may want one), and continue after it. Start Docker Desktop for its
+first run (`Start-Process "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe"`):
+the owner accepts its terms and keeps the WSL 2 engine (Settings →
+General → "Use the WSL 2 based engine"). Then `docker info` must answer.
+For a test, also turn off sleep while on power, or the core sleeps with
+the PC.
+
+macOS: `brew install go git` and `brew install --cask tailscale orbstack`
+(or Docker Desktop). Linux: Docker Engine (`curl -fsSL
+https://get.docker.com | sh`, then `sudo usermod -aG docker $USER` and a
+new login), `golang`, `git`, and Tailscale's install script; with AppArmor
+see [the sandbox](#the-brains-sandbox-in-the-container).
+
+Tailscale: `tailscale up`, open the link it prints for the owner, who
+signs in with the account of the core's tailnet; `tailscale status` then
+lists the old core's machine and `fridolin-core`.
+
+### 2. Build fridolin and the image
+
+In the clone:
+
+```powershell
+$env:CGO_ENABLED = "0"
+go build -o bin\fridolin.exe .\cmd\fridolin
+$fridolin = "$PWD\bin\fridolin.exe"
+& $fridolin core build          # docker build of container/Dockerfile, tagged fridolin-core:<this version>
+```
+
+(`CGO_ENABLED=0 go build -o bin/fridolin ./cmd/fridolin` and `bin/fridolin
+core build` elsewhere.) Build the same commit the old core runs, or newer:
+`fridolin core start` runs the image of the binary's own version.
+On Windows `fridolin core` keeps its compose file in
+`%LOCALAPPDATA%\fridolin\`.
+
+### 3. The host secrets, machine to machine
+
+On the new machine, in the owner's normal (not elevated) shell, since the
+Windows Credential Manager and the keychain are per user:
+
+```powershell
+& $fridolin core receive
+```
+
+It prints its tailnet address and a one-time code, and waits ten
+minutes. On the old core's host (the Mac mini), in a terminal there: the
+owner runs, or an agent on the Mac runs in a terminal the owner sees,
+
+```sh
+fridolin core send --to 100.x.y.z:PORT --code abcd-efgh
+```
+
+Both machines then show four words. The owner compares them and types
+`yes` on the Mac only if they are the same; the secrets go across and
+the receiver prints which it stored (names only). Windows Defender
+Firewall may ask whether `fridolin.exe` may accept connections: the owner
+allows it, or the sender cannot connect. Check with `fridolin core
+secrets` (stored or missing, never the values).
+
+Without the old machine (it is gone), the owner enters each from their
+password manager on the new machine, typed without echo:
+
+```powershell
+& $fridolin core secrets set age.identity
+& $fridolin core secrets set b2.vault.keyid
+& $fridolin core secrets set b2.vault.key
+& $fridolin core secrets set claude.oauth.token
+# and, with the vault on: b2.snapshots.keyid, b2.snapshots.key,
+# vault.crypt.password, vault.crypt.password2, restic.password
+```
+
+The owner types the values into that terminal, never into the chat.
+
+### 4. The move
+
+```sh
+# old machine (Mac mini)
+fridolin core stop                       # releases the lease; WhatsApp is off from here
+fridolin core run core export            # the final export, of the stopped volume
+```
+
+```powershell
+# new machine
+& $fridolin core run core import --latest     # --force when the volume has data; it moves that aside
+& $fridolin core run core promote             # takes the lease
+& $fridolin core start
+```
+
+Stopping first is what keeps WhatsApp whole: an export taken while the old
+core runs misses what arrives until it stops. `promote` is refused (exit
+status 3) while the old core holds the lease: stop it, or, when it is
+gone, wait until `fridolin core run core status` says the lease is stale
+(20 minutes after its last renewal).
+
+### 5. Verify
+
+```powershell
+curl.exe -s http://127.0.0.1:8765/health                 # ok
+curl.exe -s http://127.0.0.1:8765/ready                  # "whatsapp":"connected", lease held
+docker exec fridolin-core fridolin doctor
+docker exec fridolin-core fridolin check
+& $fridolin core run core status                          # lease: live, this device
+& $fridolin setup-machine --core
+```
+
+Ask the owner to send the bridge a WhatsApp message and confirm the
+answer. On the tailnet the core is the same device, `fridolin-core`, and
+nodes reconnect to it by themselves (`fridolin nodes` shows them online).
+On the old machine `fridolin core start` must now exit with status 3.
+
+### 6. The way back
+
+The same in reverse; the Mac already has the secrets, unless one changed
+on the new machine (then `core send` from there and `core receive
+--replace` on the Mac):
+
+```powershell
+# the machine that runs the core now
+& $fridolin core stop
+& $fridolin core run core export
+```
+
+```sh
+# the Mac mini
+fridolin core run core import --latest --force   # its old volume goes to core/replaced-<time>/
+fridolin core run core promote                   # also clears the superseded mark
+fridolin core start
+```
+
+`compose.host.yaml` is still on the Mac, so the brain folders are bound in
+again as before; `--to-native` is not needed, since the Mac's core is the
+container.
+
+### Brain folders on another machine
+
+A brain folder that lies in the volume moves with the export. A folder
+bound in from the Mac's home (a migrated native install) stays on the
+Mac: the new core starts without it, and `fridolin check` names each
+brain it leaves out; their messages go unanswered until the core is back,
+which is acceptable for a test takeover. Settings that name Mac paths
+(`sandbox.credentials_dir`, `allow_paths`) are missing there too, so
+Google Calendar sign-ins do not work on the new machine.
+
+To take a folder along, copy it into the volume, where a brain path `~/name`
+points when no `compose.host.yaml` binds the Mac's home: on the Mac
+`tar czf brains.tgz -C ~ name1 name2`, carry it over (`tailscale file cp
+brains.tgz <new-machine>:` and `tailscale file get .` there), then
+
+```powershell
+docker run --rm -v fridolin-data:/data -v "${PWD}:/in" --entrypoint sh fridolin-core:<tag> -c "mkdir -p /data/brains-folders && tar xzf /in/brains.tgz -C /data/brains-folders"
+```
+
+before `core start`. These are copies: what a brain writes there does not
+reach the Mac's folders, and the way back does not bring it home. Never
+copy Mac-built virtualenvs or `node_modules` (What does not move).
+
+### Never
+
+- print or paste a secret, the dashboard token or `scripts.token`, or
+  ask the owner to type one into the chat;
+- start the new core while the old one runs, `force` a promote, or remove
+  `/data/core/superseded`;
+- delete `bridge.db` or `docker volume rm fridolin-data`;
+- confirm the four words for the owner: they compare what both screens
+  show.
+
 ## Recovery
 
 - **The old machine is gone.** On the new one: import the latest export,
@@ -612,11 +881,11 @@ Linux VM (core B), Docker Engine:
 - [ ] `fridolin core start` on A again: it exits with status 3 (another
       device holds the lease); `fridolin core status` on A says so.
 
-Windows (core C), Docker Desktop on WSL2:
+Windows (core C), Docker Desktop on WSL2 ([Moving the core to another
+machine](#moving-the-core-to-another-machine)):
 
 - [ ] The same as on the Linux VM, with the secrets in the Windows
-      Credential Manager once `hostsecrets` has it (until then: the
-      variables of `container/compose.yaml` set by hand in the shell that
-      runs `docker compose`).
+      Credential Manager: `fridolin core receive` there, `fridolin core
+      send` on B; `fridolin core secrets` lists them.
 - [ ] B stopped; C imports, promotes, starts and answers; B refuses to
       start afterwards.

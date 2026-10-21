@@ -1,0 +1,327 @@
+package cli
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"net"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"filippo.io/age"
+	"github.com/Icewater1337/fridolin/internal/app"
+	"github.com/Icewater1337/fridolin/internal/hostsecrets"
+	"github.com/Icewater1337/fridolin/internal/httpapi"
+	"github.com/Icewater1337/fridolin/internal/nodeagent"
+	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/secretxfer"
+)
+
+func TestGoldenJoinCode(t *testing.T) {
+	var out bytes.Buffer
+	sh, ps := httpapi.JoinCommands("fj-abcd1234", "fridolin-core.example.ts.net:8766")
+	writeJoinCode(&out, httpapi.JoinCodeResponse{
+		Code: "fj-abcd1234", ExpiresAt: time.Date(2026, 10, 21, 14, 5, 0, 0, time.Local),
+		Core: "fridolin-core.example.ts.net:8766", Command: sh, CommandPowerShell: ps,
+	})
+	assertGolden(t, "cli/nodes-join-code.golden", out.Bytes())
+	// A core from before the PowerShell line: built from its address.
+	var old bytes.Buffer
+	writeJoinCode(&old, httpapi.JoinCodeResponse{Code: "fj-x", Core: "mini:8766", Command: "fridolin node join fj-x --core mini:8766"})
+	if !strings.Contains(old.String(), `& "$env:ProgramFiles\fridolin\fridolin.exe" node join fj-x --core mini:8766`) {
+		t.Errorf("%s", old.String())
+	}
+}
+
+func TestComposeBaseEnv(t *testing.T) {
+	environ := []string{"Path=C:\\Windows", "SystemRoot=C:\\Windows", "USERPROFILE=C:\\Users\\you", "LOCALAPPDATA=x",
+		"DOCKER_HOST=npipe:////./pipe/docker", "SECRET=x", "B2_VAULT_KEY=k", "HOME=/h", "PATH=/usr/bin"}
+	win := composeBaseEnv("windows", environ)
+	for _, kv := range []string{"Path=C:\\Windows", "SystemRoot=C:\\Windows", "USERPROFILE=C:\\Users\\you", "LOCALAPPDATA=x", "DOCKER_HOST=npipe:////./pipe/docker", "PATH=/usr/bin"} {
+		if !slices.Contains(win, kv) {
+			t.Errorf("windows: lacks %s: %q", kv, win)
+		}
+	}
+	for _, kv := range []string{"SECRET=x", "B2_VAULT_KEY=k", "HOME=/h"} {
+		if slices.Contains(win, kv) {
+			t.Errorf("windows: passes %s", kv)
+		}
+	}
+	unix := composeBaseEnv("darwin", environ)
+	if !slices.Equal(unix, []string{"DOCKER_HOST=npipe:////./pipe/docker", "HOME=/h", "PATH=/usr/bin"}) {
+		t.Errorf("darwin: %q", unix)
+	}
+	if p := composePathFor("windows"); !strings.HasSuffix(p, filepath.Join("fridolin", "compose.yaml")) {
+		t.Errorf("windows compose path %s", p)
+	}
+}
+
+func TestCoreMigrateRefusedOnWindows(t *testing.T) {
+	d, _ := hostFixture(t, mapSecrets{})
+	d.goos = "windows"
+	var stderr bytes.Buffer
+	if code := coreMigrate(context.Background(), []string{"--from-native"}, coreEnv{stdout: io.Discard, stderr: &stderr}, d); code != 2 || !strings.Contains(stderr.String(), "core import --latest") {
+		t.Errorf("exit %d: %s", code, stderr.String())
+	}
+}
+
+func TestCoreBuild(t *testing.T) {
+	d, ran := hostFixture(t, mapSecrets{hostsecrets.AgeIdentity: "AGE-SECRET-KEY-1OLD"})
+	repo := t.TempDir()
+	env := coreEnv{stdout: io.Discard, stderr: io.Discard}
+	if code := coreHost(context.Background(), "build", []string{"--repo", repo}, env, d); code != 2 {
+		t.Errorf("a folder without container/Dockerfile: exit %d", code)
+	}
+	makeFiles(t, repo, "container/Dockerfile")
+	if code := coreHost(context.Background(), "build", []string{"--repo", repo}, env, d); code != 0 {
+		t.Fatal(code)
+	}
+	got := (*ran)[0]
+	want := []string{"build", "-f", filepath.Join(repo, "container", "Dockerfile"), "--build-arg", "VERSION=v1.4.0+dirty", "-t", "fridolin-core:v1.4.0-dirty", repo}
+	if !slices.Equal(got.args, want) || slices.ContainsFunc(got.env, func(kv string) bool { return strings.HasPrefix(kv, "FRIDOLIN_AGE_IDENTITY=") }) {
+		t.Errorf("ran %q with %q", got.args, got.env)
+	}
+}
+
+func TestCoreSecrets(t *testing.T) {
+	secrets := mapSecrets{hostsecrets.AgeIdentity: "AGE-SECRET-KEY-1OLD"}
+	d, _ := hostFixture(t, secrets)
+	d.secretsPlace = "the test store"
+	run := func(stdin string, term terminalIO, args ...string) (int, string, string) {
+		var out, errb bytes.Buffer
+		code := coreSecrets(args, coreEnv{stdin: strings.NewReader(stdin), stdout: &out, stderr: &errb, term: term}, d)
+		return code, out.String(), errb.String()
+	}
+	code, out, _ := run("", terminalIO{})
+	if code != 0 || !strings.Contains(out, "stored   fridolin.age.identity") || !strings.Contains(out, "missing  fridolin.b2.vault.key ") || strings.Contains(out, "AGE-SECRET-KEY-1OLD") {
+		t.Errorf("list: %d %s", code, out)
+	}
+	// From stdin, by its short name.
+	if code, out, errOut := run("K001secret\n", terminalIO{}, "set", "b2.vault.key"); code != 0 || secrets[hostsecrets.B2VaultKey] != "K001secret" || strings.Contains(out, "K001secret") {
+		t.Errorf("set from stdin: %d %s %s", code, out, errOut)
+	}
+	// From the terminal, without echo.
+	hidden := terminalIO{readHidden: func(p string) (string, error) { return "claude-token-x", nil }}
+	if code, _, errOut := run("", hidden, "set", "fridolin.claude.oauth.token"); code != 0 || secrets[hostsecrets.ClaudeOAuthToken] != "claude-token-x" {
+		t.Errorf("set from the terminal: %d %s", code, errOut)
+	}
+	for name, c := range map[string]struct {
+		stdin string
+		args  []string
+		want  string
+	}{
+		"already there":    {"AGE-SECRET-KEY-1NEW", []string{"set", "age.identity"}, "--replace"},
+		"not an identity":  {"nope", []string{"set", "age.identity", "--replace"}, "not an age identity"},
+		"unknown name":     {"x", []string{"set", "github.token"}, "not a secret the core uses"},
+		"empty":            {"\n", []string{"set", "restic.password"}, "empty"},
+		"a space":          {"a b", []string{"set", "restic.password"}, "spaces"},
+		"too many":         {"", []string{"set", "a", "b"}, "usage"},
+		"in the container": {"", []string{"list"}, "not in the container"},
+	} {
+		env := coreEnv{stdin: strings.NewReader(c.stdin), stdout: io.Discard}
+		var errb bytes.Buffer
+		env.stderr = &errb
+		if name == "in the container" {
+			env.environ = []string{"FRIDOLIN_CONTAINER=1"}
+		}
+		if code := coreSecrets(c.args, env, d); code == 0 || !strings.Contains(errb.String(), c.want) {
+			t.Errorf("%s: exit %d: %s", name, code, errb.String())
+		}
+	}
+	if secrets[hostsecrets.AgeIdentity] != "AGE-SECRET-KEY-1OLD" {
+		t.Error("the age identity was replaced")
+	}
+	id, _ := age.GenerateX25519Identity()
+	if code, _, errOut := run(id.String(), terminalIO{}, "set", "age.identity", "--replace"); code != 0 || secrets[hostsecrets.AgeIdentity] != id.String() {
+		t.Errorf("--replace: %s", errOut)
+	}
+}
+
+// loopNet is a tailnet on loopback whose devices all belong to one owner.
+type loopNet struct{ self string }
+
+func (l loopNet) Self(context.Context) (secretxfer.Peer, error) {
+	return secretxfer.Peer{Login: "you@example.com", Node: l.self}, nil
+}
+func (loopNet) Listen(ctx context.Context) (net.Listener, string, error) {
+	ln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, "", err
+	}
+	return ln, ln.Addr().String(), nil
+}
+func (loopNet) Dial(ctx context.Context, addr string) (net.Conn, error) {
+	return (&net.Dialer{}).DialContext(ctx, "tcp", addr)
+}
+func (l loopNet) WhoIs(context.Context, string) (secretxfer.Peer, error) {
+	return secretxfer.Peer{Login: "you@example.com", Node: "peer.example.ts.net"}, nil
+}
+
+// syncBuffer is a bytes.Buffer two goroutines may use.
+type syncBuffer struct {
+	ch chan string
+	bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.ch <- string(p)
+	return len(p), nil
+}
+
+func TestCoreSendReceive(t *testing.T) {
+	src := mapSecrets{
+		hostsecrets.AgeIdentity:  "AGE-SECRET-KEY-1QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ",
+		hostsecrets.B2VaultKeyID: "0012345", hostsecrets.B2VaultKey: "K001secret",
+		hostsecrets.TailscaleAuthKey: "tskey-auth-x",
+	}
+	dst := mapSecrets{}
+	sd, _ := hostFixture(t, src)
+	sd.tailnet = loopNet{"mini.example.ts.net"}
+	rd, _ := hostFixture(t, dst)
+	rd.tailnet = loopNet{"winbox.example.ts.net"}
+	out := &syncBuffer{ch: make(chan string, 16)}
+	done := make(chan int, 1)
+	go func() {
+		done <- coreTransfer(context.Background(), "receive", []string{"--timeout", "20s"}, coreEnv{stdout: out, stderr: io.Discard}, rd)
+	}()
+	var printed string
+	for !strings.Contains(printed, "--code ") {
+		printed += <-out.ch
+	}
+	var addr, code string
+	for line := range strings.SplitSeq(printed, "\n") {
+		if f := strings.Fields(line); len(f) == 7 && f[2] == "send" {
+			addr, code = f[4], f[6]
+		}
+	}
+	go func() {
+		for s := range out.ch {
+			printed += s
+		}
+	}()
+	var words string
+	term := terminalIO{readLine: func(p string) (string, error) {
+		if strings.Contains(p, "same four words") {
+			words = p
+			return "yes", nil
+		}
+		return "", errors.New("unexpected prompt " + p)
+	}}
+	var sendOut, sendErr bytes.Buffer
+	if c := coreTransfer(context.Background(), "send", []string{"--to", addr, "--code", code}, coreEnv{stdout: &sendOut, stderr: &sendErr, term: term}, sd); c != 0 {
+		t.Fatalf("send: exit %d: %s %s", c, sendOut.String(), sendErr.String())
+	}
+	if c := <-done; c != 0 {
+		t.Fatalf("receive: exit %d", c)
+	}
+	if words == "" || !strings.Contains(sendErr.String(), "Not in") {
+		t.Errorf("prompt %q; stderr %s", words, sendErr.String())
+	}
+	for _, n := range []string{hostsecrets.AgeIdentity, hostsecrets.B2VaultKeyID, hostsecrets.B2VaultKey} {
+		if dst[n] != src[n] {
+			t.Errorf("%s = %q", n, dst[n])
+		}
+	}
+	if _, ok := dst[hostsecrets.TailscaleAuthKey]; ok {
+		t.Error("the Tailscale auth key moved without --with-tailscale-key")
+	}
+	for _, v := range src {
+		if strings.Contains(sendOut.String()+sendErr.String(), v) {
+			t.Errorf("a value was printed: %s", v)
+		}
+	}
+	log, err := os.ReadFile(filepath.Join(filepath.Dir(rd.composePath), "secrets-transfer.log"))
+	if err != nil || !strings.Contains(string(log), `"direction":"received"`) || strings.Contains(string(log), "K001secret") {
+		t.Errorf("the receiver's log: %s %v", log, err)
+	}
+	// send needs a terminal.
+	var e bytes.Buffer
+	if c := coreTransfer(context.Background(), "send", []string{"--to", addr}, coreEnv{stdout: io.Discard, stderr: &e}, sd); c != 2 || !strings.Contains(e.String(), "terminal") {
+		t.Errorf("send without a terminal: %d %s", c, e.String())
+	}
+}
+
+// doctorEnvFor is a DoctorEnv whose dial reaches only reachable, and
+// whose docker answers from docker.
+func doctorEnvFor(reachable string, docker map[string]string) *app.DoctorEnv {
+	return &app.DoctorEnv{
+		GOOS: "linux", Getenv: func(string) string { return "" },
+		LookPath: func(f string) (string, error) { return "/usr/bin/" + f, nil },
+		Stat:     func(string) (fs.FileInfo, error) { return nil, fs.ErrNotExist },
+		Run: func(_ context.Context, name string, args ...string) ([]byte, error) {
+			if strings.HasSuffix(name, "tailscale") {
+				return []byte(`{"BackendState":"Running"}`), nil
+			}
+			key := strings.Join(args, " ")
+			for k, v := range docker {
+				if strings.HasPrefix(key, k) {
+					return []byte(v), nil
+				}
+			}
+			return nil, errors.New("exit status 1")
+		},
+		Dial: func(_ context.Context, addr string) error {
+			if addr == reachable {
+				return nil
+			}
+			return fmt.Errorf("dial %s: refused", addr)
+		},
+	}
+}
+
+func TestNodeChecks(t *testing.T) {
+	dir := t.TempDir()
+	running := func() (string, error) { return "running", nil }
+	rep := app.RunDoctor(context.Background(), doctorEnvFor("", nil), nodeChecks(dir, running))
+	if rep.OK || rep.Checks[1].ID != "node-joined" || rep.Checks[1].Status != app.DoctorFail || !strings.Contains(rep.Checks[1].Fix, "join-code") {
+		t.Fatalf("not joined: %+v", rep)
+	}
+	if _, err := nodeagent.NewKey(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := nodeagent.SaveConfig(dir, nodeagent.Config{Core: "ws://fridolin-core.example.ts.net:8766", Name: "winbox", Capabilities: nodeproto.Capabilities{Host: true}}); err != nil {
+		t.Fatal(err)
+	}
+	rep = app.RunDoctor(context.Background(), doctorEnvFor("fridolin-core.example.ts.net:8766", nil), nodeChecks(dir, running))
+	if !rep.OK {
+		t.Errorf("joined, reachable, running: %+v", rep)
+	}
+	stopped := func() (string, error) { return "installed, stopped", nil }
+	rep = app.RunDoctor(context.Background(), doctorEnvFor("", nil), nodeChecks(dir, stopped))
+	var failed []string
+	for _, c := range rep.Checks {
+		if c.Status == app.DoctorFail {
+			failed = append(failed, c.ID)
+		}
+	}
+	if rep.OK || !slices.Equal(failed, []string{"node-core", "node-service"}) {
+		t.Errorf("unreachable and stopped: %q", failed)
+	}
+	var out bytes.Buffer
+	if code := writeMachineReport(&out, rep, dir, false); code != 1 || !strings.Contains(out.String(), "Next: tailscale status") {
+		t.Errorf("next step: %d %s", code, out.String())
+	}
+}
+
+func TestCoreMachineChecks(t *testing.T) {
+	d, _ := hostFixture(t, mapSecrets{hostsecrets.AgeIdentity: "a", hostsecrets.B2VaultKeyID: "b", hostsecrets.B2VaultKey: "c"})
+	docker := map[string]string{"info": "29.0.0"}
+	rep := app.RunDoctor(context.Background(), doctorEnvFor("", docker), coreMachineChecks(d))
+	var out bytes.Buffer
+	if code := writeMachineReport(&out, rep, "x", false); code != 1 || !strings.Contains(out.String(), "Next: in the repository's folder: fridolin core build") {
+		t.Errorf("no image: %s", out.String())
+	}
+	docker["image inspect"], docker["volume inspect"], docker["ps"] = "sha256:x", "fridolin-data", "Up 3 minutes (healthy)"
+	rep = app.RunDoctor(context.Background(), doctorEnvFor("", docker), coreMachineChecks(d))
+	out.Reset()
+	if code := writeMachineReport(&out, rep, "x", false); code != 0 || !strings.Contains(out.String(), "Next: fridolin core receive") {
+		t.Errorf("all there but the optional secrets: %d %s", code, out.String())
+	}
+}

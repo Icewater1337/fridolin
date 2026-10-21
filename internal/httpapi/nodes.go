@@ -31,8 +31,9 @@ type NodesAPI struct {
 	// port it serves ("" while it is not open).
 	Enabled bool
 	Listen  func() string
-	// JoinCommand is the line to paste on a new machine for code.
-	JoinCommand func(code string) string
+	// CoreAddress is the core's node address a new machine joins
+	// (host:port).
+	CoreAddress func() string
 }
 
 // NodesResponse is GET /api/nodes.
@@ -46,7 +47,20 @@ type NodesResponse struct {
 type JoinCodeResponse struct {
 	Code      string    `json:"code"`
 	ExpiresAt time.Time `json:"expires_at"`
-	Command   string    `json:"command"`
+	// Core is the core's node address, host:port.
+	Core string `json:"core"`
+	// Command is the line to paste on a macOS or Linux machine,
+	// CommandPowerShell the one for PowerShell on Windows, where the
+	// runbook installs fridolin.exe in Program Files (AGENTS.md).
+	Command           string `json:"command"`
+	CommandPowerShell string `json:"command_powershell"`
+}
+
+// JoinCommands are the lines to paste on a new machine for code: for sh,
+// and for PowerShell.
+func JoinCommands(code, core string) (sh, powershell string) {
+	args := " node join " + code + " --core " + core
+	return "fridolin" + args, `& "$env:ProgramFiles\fridolin\fridolin.exe"` + args
 }
 
 // NodeResponse is a node after a change.
@@ -80,7 +94,9 @@ func (a *NodesAPI) JoinCode(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, JoinCodeResponse{Code: code, ExpiresAt: exp, Command: a.JoinCommand(code)})
+	core := a.CoreAddress()
+	sh, ps := JoinCommands(code, core)
+	WriteJSON(w, http.StatusOK, JoinCodeResponse{Code: code, ExpiresAt: exp, Core: core, Command: sh, CommandPowerShell: ps})
 }
 
 func (a *NodesAPI) change(w http.ResponseWriter, r *http.Request, fn func(string) (*nodes.Node, error)) {

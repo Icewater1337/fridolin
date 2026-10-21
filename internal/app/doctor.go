@@ -21,6 +21,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/memindex"
 	"github.com/Icewater1337/fridolin/internal/platform"
@@ -104,6 +105,9 @@ type DoctorEnv struct {
 	// index does not hold as it is on disk (memindex.Stale).
 	MemorySelfTest func(ctx context.Context) error
 	MemoryStale    func(ctx context.Context, b memindex.Brain) ([]string, error)
+	// HasHostSecret asks the Windows Credential Manager whether it holds
+	// a secret (macOS and Linux are asked through Run and Stat).
+	HasHostSecret func(name string) (bool, error)
 }
 
 // DoctorRegistry is every check, in the order doctor prints them. Later
@@ -305,7 +309,8 @@ func SystemDoctorEnv(configFlag string) *DoctorEnv {
 			defer os.RemoveAll(dir)
 			return memindex.SelfTest(ctx, dir)
 		},
-		MemoryStale: memindex.Stale,
+		MemoryStale:   memindex.Stale,
+		HasHostSecret: hostsecrets.WinCred{}.Has,
 		WriteProbe: func(dir string) error {
 			f, err := os.CreateTemp(dir, ".fridolin-doctor-*")
 			if err != nil {
@@ -581,17 +586,40 @@ func versionLess(a, b [3]int) bool {
 // Tailscale apps, which do not put one on PATH.
 const tailscaleAppCLI = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
 
+// tailscaleWindowsCLI is where Tailscale's installer puts its CLI on
+// Windows, for a PATH that does not have it yet (a shell opened before).
+const tailscaleWindowsCLI = `C:\Program Files\Tailscale\tailscale.exe`
+
+// TailscaleCheck is the check of the host's Tailscale, for other roles
+// of a machine than the bridge's (`fridolin doctor --node`).
+func TailscaleCheck(required bool) DoctorCheck {
+	return DoctorCheck{ID: "tailscale", Title: "Tailscale", Required: required, Run: checkTailscale}
+}
+
+// DockerCheck is the check of Docker, for `fridolin setup-machine --core`.
+func DockerCheck() DoctorCheck {
+	return DoctorCheck{ID: "docker", Title: "Docker", Required: true, Run: checkDocker}
+}
+
 func checkTailscale(ctx context.Context, env *DoctorEnv) DoctorResult {
 	cli, err := env.LookPath("tailscale")
-	if err != nil && env.GOOS == "darwin" {
-		if _, serr := env.Stat(tailscaleAppCLI); serr == nil {
-			cli, err = tailscaleAppCLI, nil
+	if err != nil {
+		for goos, p := range map[string]string{"darwin": tailscaleAppCLI, "windows": tailscaleWindowsCLI} {
+			if env.GOOS != goos {
+				continue
+			}
+			if _, serr := env.Stat(p); serr == nil {
+				cli, err = p, nil
+			}
 		}
 	}
 	if err != nil {
 		fix := installFix(env.GOOS, "--cask tailscale", "")
-		if env.GOOS == "linux" {
+		switch env.GOOS {
+		case "linux":
 			fix = "curl -fsSL https://tailscale.com/install.sh | sh"
+		case "windows":
+			fix = "winget install --id Tailscale.Tailscale -e"
 		}
 		return DoctorResult{Status: DoctorMissing, Detail: "the tailscale CLI is not installed", Fix: fix}
 	}
@@ -615,14 +643,20 @@ func checkDocker(ctx context.Context, env *DoctorEnv) DoctorResult {
 	cli, err := env.LookPath("docker")
 	if err != nil {
 		fix := installFix(env.GOOS, "--cask orbstack", "docker.io")
+		if env.GOOS == "windows" {
+			fix = "wsl --install (as administrator, then restart), then: winget install --id Docker.DockerDesktop -e"
+		}
 		return DoctorResult{Status: DoctorMissing, Detail: "the docker CLI is not installed", Fix: fix}
 	}
 	out, err := env.Run(ctx, cli, "info", "--format", "{{.ServerVersion}}")
 	version := firstLine(out)
 	if err != nil || version == "" {
 		fix := "start Docker Desktop or OrbStack (open -a OrbStack)"
-		if env.GOOS == "linux" {
+		switch env.GOOS {
+		case "linux":
 			fix = "sudo systemctl start docker"
+		case "windows":
+			fix = `start Docker Desktop (Start-Process "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe") and finish its first run`
 		}
 		return DoctorResult{Status: DoctorWarn, Detail: cli + " is installed, but the daemon does not answer", Fix: fix}
 	}
@@ -666,7 +700,7 @@ func checkSecrets(names ...string) func(context.Context, *DoctorEnv) DoctorResul
 				return DoctorResult{Status: DoctorWarn, Detail: fmt.Sprintf("cannot look for %s: %v", name, err), Fix: env.secretsAccessFix()}
 			case !ok:
 				missing = append(missing, name)
-			case env.GOOS != "darwin":
+			case env.GOOS != "darwin" && env.GOOS != "windows":
 				if st, err := env.Stat(env.secretFile(name)); err == nil && st.Mode().Perm()&0o077 != 0 {
 					loose = append(loose, env.secretFile(name))
 				}
@@ -683,8 +717,11 @@ func checkSecrets(names ...string) func(context.Context, *DoctorEnv) DoctorResul
 }
 
 func (env *DoctorEnv) secretsPlace() string {
-	if env.GOOS == "darwin" {
+	switch env.GOOS {
+	case "darwin":
 		return "the Keychain"
+	case "windows":
+		return "the Windows Credential Manager"
 	}
 	return env.secretsDir()
 }
@@ -717,7 +754,10 @@ func (env *DoctorEnv) hasSecret(ctx context.Context, name string) (bool, error) 
 		}
 		return false, err
 	case "windows":
-		return false, errors.New("the Windows Credential Manager is not supported yet")
+		if env.HasHostSecret == nil {
+			return false, errors.New("no access to the Windows Credential Manager")
+		}
+		return env.HasHostSecret(name)
 	}
 	_, err := env.Stat(env.secretFile(name))
 	if errors.Is(err, fs.ErrNotExist) {
@@ -732,7 +772,7 @@ func (env *DoctorEnv) secretsAccessFix() string {
 	case "darwin":
 		return "security unlock-keychain, in a terminal of the user the bridge runs as"
 	case "windows":
-		return "none yet: host secrets on Windows come with the Credential Manager support"
+		return "run fridolin core secrets in a PowerShell of the user the core runs as"
 	}
 	return "ls -ld " + env.secretsDir()
 }
@@ -742,9 +782,12 @@ func (env *DoctorEnv) secretsAccessFix() string {
 func (env *DoctorEnv) addSecretFix(missing []string) string {
 	var cmds []string
 	for _, name := range missing {
-		if env.GOOS == "darwin" {
+		switch env.GOOS {
+		case "darwin":
 			cmds = append(cmds, "security add-generic-password -a "+hostSecretAccount+" -s "+name+" -w")
-		} else {
+		case "windows":
+			cmds = append(cmds, "fridolin core secrets set "+name)
+		default:
 			cmds = append(cmds, "(umask 077; mkdir -p "+env.secretsDir()+" && cat > "+env.secretFile(name)+")")
 		}
 	}
