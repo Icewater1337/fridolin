@@ -143,6 +143,32 @@ func defaultVaultBackends(ctx context.Context, s *vaultService, cfg *config.Sett
 		repo.Secrets = c.secrets()
 		b.restic = repo
 		b.drive = driveRepo(cfg, rclone, restic, base, c.ResticPassword, c.secrets())
+		if c.SnapCryptPassword == "" {
+			break
+		}
+		// Two layers: the repository behind rclone crypt, the one of
+		// before kept to copy from until it is retired.
+		snapEnv, err := cloud.B2Env(snapRemoteName, c.SnapKeyID, c.SnapKey)
+		if err != nil {
+			b.snapErr = err.Error()
+			break
+		}
+		crypted, err := resticCrypt{restic: restic, rclone: rclone, base: base, backend: snapEnv,
+			target: snapRemoteName + ":" + cfg.Vault.SnapshotsBucket + "/" + resticCryptPath, name: snapRemoteName + "crypt",
+			password: c.ResticPassword, cryptPassword: c.SnapCryptPassword, cacheDir: repo.CacheDir, secrets: c.secrets()}.repo()
+		if err != nil {
+			b.snapErr = err.Error()
+			break
+		}
+		if !encState.retired("restic") {
+			b.resticOld = repo
+		}
+		b.restic = crypted
+		oldDrive := b.drive
+		b.drive = driveCryptRepo(cfg, rclone, restic, base, c)
+		if !encState.retired("drive") {
+			b.driveOld = oldDrive
+		}
 	}
 	if lite := findVaultTool("litestream"); lite != "" && c.SnapKeyID != "" && c.SnapKey != "" {
 		replica := func(name string) snapshot.Replica {
@@ -178,6 +204,29 @@ func driveRepo(cfg *config.Settings, rclone, restic string, base []string, passw
 		env := append(append([]string{}, base...), "RCLONE_CONFIG="+conf, "RESTIC_PASSWORD="+password)
 		return &snapshot.Restic{Binary: restic, Repo: "rclone:" + remote + ":" + driveResticPath, Env: env,
 			Options: []string{"rclone.program=" + rclone}, CacheDir: filepath.Join(cfg.Boot.Layout().Core(), "restic-cache"), Secrets: secrets}, nil
+	}
+}
+
+// snapRemoteName is the rclone remote of the snapshots bucket, under
+// the crypt remote of the restic repository.
+const snapRemoteName = "fridolinsnap"
+
+// driveCryptRepo is the Drive repository behind rclone crypt, in
+// fridolin-restic-crypt beside the single-layer fridolin-restic.
+func driveCryptRepo(cfg *config.Settings, rclone, restic string, base []string, c vaultCreds) func() (*snapshot.Restic, error) {
+	return func() (*snapshot.Restic, error) {
+		conf := cfg.Boot.Layout().RcloneConf()
+		remote := cfg.Backup.Remote
+		if remote == "" {
+			remote = "brain-gdrive"
+		}
+		if !rcloneHasRemote(conf, remote) {
+			return nil, errDriveNotConnected
+		}
+		return resticCrypt{restic: restic, rclone: rclone, base: base, backend: []string{"RCLONE_CONFIG=" + conf},
+			target: remote + ":" + driveResticPath + "-crypt", name: "fridolindrivecrypt",
+			password: c.ResticPassword, cryptPassword: c.SnapCryptPassword,
+			cacheDir: filepath.Join(cfg.Boot.Layout().Core(), "restic-cache"), secrets: c.secrets()}.repo()
 	}
 }
 
@@ -237,6 +286,30 @@ func localVaultBackends(s *vaultService, cfg *config.Settings, dir string) (vaul
 		b.restic = &snapshot.Restic{Binary: restic, Repo: filepath.Join(dir, "restic"), Env: env, Secrets: []string{pw}}
 		b.drive = func() (*snapshot.Restic, error) {
 			return &snapshot.Restic{Binary: restic, Repo: filepath.Join(dir, "drive-restic"), Env: env, Secrets: []string{pw}}, nil
+		}
+		// With rclone, the repositories get their outer layer as on B2:
+		// rclone crypt over a folder.
+		if rclone, err := findRclone(cfg.Backup.RclonePath); err == nil {
+			cryptPW, err := localSecret(dir, "snapshots-crypt-password", "FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD")
+			if err != nil {
+				return b, err
+			}
+			crypted := func(folder, name string) (*snapshot.Restic, error) {
+				return resticCrypt{restic: restic, rclone: rclone, base: base, target: localCryptTarget(filepath.Join(dir, folder)),
+					name: name, password: pw, cryptPassword: cryptPW}.repo()
+			}
+			repo, err := crypted("restic-crypt", "fridolinsnapcrypt")
+			if err != nil {
+				return b, err
+			}
+			if !encState.retired("restic") {
+				b.resticOld = b.restic
+			}
+			if !encState.retired("drive") {
+				b.driveOld = b.drive
+			}
+			b.restic = repo
+			b.drive = func() (*snapshot.Restic, error) { return crypted("drive-restic-crypt", "fridolindrivecrypt") }
 		}
 	} else {
 		b.snapErr = "restic is not installed"

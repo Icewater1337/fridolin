@@ -354,6 +354,18 @@ func TestVaultSnapshotsDrillAndDrive(t *testing.T) {
 	if !h.b.backup.Summary().Superseded {
 		t.Error("the old Drive backup's daily run goes on after the restic copy completed")
 	}
+	// With rclone, both repositories are behind rclone crypt: restic's
+	// own files are not there by name (docs/VAULT.md, "Encryption").
+	if _, err := findRclone(""); err == nil {
+		for _, repo := range []string{"restic-crypt", "drive-restic-crypt"} {
+			if _, err := os.Stat(filepath.Join(local, repo, "config")); err == nil {
+				t.Errorf("%s holds restic's config in the clear", repo)
+			}
+			if entries, err := os.ReadDir(filepath.Join(local, repo)); err != nil || len(entries) == 0 {
+				t.Errorf("%s is empty: %v", repo, err)
+			}
+		}
+	}
 
 	// Most of the brain's notes go: the next nightly snapshot holds
 	// pruning until it is allowed.

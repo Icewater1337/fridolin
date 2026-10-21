@@ -135,6 +135,11 @@ type vaultBackends struct {
 	// drive is the second repository, on Google Drive, made when the
 	// weekly copy runs (Drive may be connected later); nil means none.
 	drive func() (*snapshot.Restic, error)
+	// resticOld and driveOld are the single-layer repositories of before
+	// that fridolin vault migrate-encryption copies from; nil once retired
+	// or where restic is the only layer still.
+	resticOld *snapshot.Restic
+	driveOld  func() (*snapshot.Restic, error)
 	// lite replicates bridge.db and vault.db; nil means none.
 	lite *snapshot.Litestream
 	// bridgeDB is the bridge.db Litestream replicates and the snapshots
