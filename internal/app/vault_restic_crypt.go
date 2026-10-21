@@ -2,6 +2,8 @@ package app
 
 import (
 	"path/filepath"
+	"slices"
+	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/snapshot"
@@ -26,6 +28,10 @@ type resticCrypt struct {
 	password, cryptPassword string
 	cacheDir                string
 	secrets                 []string
+	// plainNames reads a folder whose names are not encrypted (rclone
+	// crypt with filename_encryption off and suffix none): the format the
+	// core writes to a node target (internal/noderepo).
+	plainNames bool
 }
 
 // repo returns the repository.
@@ -33,6 +39,13 @@ func (c resticCrypt) repo() (*snapshot.Restic, error) {
 	crypt, err := cloud.CryptEnv(c.name, c.target, c.cryptPassword, "")
 	if err != nil {
 		return nil, err
+	}
+	if c.plainNames {
+		prefix := "RCLONE_CONFIG_" + strings.ToUpper(c.name) + "_"
+		crypt = slices.DeleteFunc(crypt, func(kv string) bool {
+			return strings.HasPrefix(kv, prefix+"FILENAME_ENCRYPTION=") || strings.HasPrefix(kv, prefix+"DIRECTORY_NAME_ENCRYPTION=")
+		})
+		crypt = append(crypt, prefix+"FILENAME_ENCRYPTION=off", prefix+"DIRECTORY_NAME_ENCRYPTION=false", prefix+"SUFFIX=none")
 	}
 	env := append(append(append([]string{}, c.base...), c.backend...), crypt...)
 	env = append(env, "RESTIC_PASSWORD="+c.password)

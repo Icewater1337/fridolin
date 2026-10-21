@@ -172,3 +172,20 @@ func (s targetSecrets) ensure(ctx context.Context, name string, exists func(ctx 
 		". Write it on the recovery sheet now (docs/VAULT.md, \"Node targets\", says how to read it): without it nobody can restore from that target.")
 	return pw, nil
 }
+
+// cryptPassword is the snapshots' crypt password, the outer layer of the
+// node targets' repositories: from the environment, else the host's
+// secrets; "" when there is none.
+func (s targetSecrets) cryptPassword() (string, error) {
+	if v := strings.TrimSpace(s.getenv("FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD")); v != "" {
+		return v, nil
+	}
+	if s.store == nil {
+		return "", nil
+	}
+	v, err := s.store.Get(hostsecrets.SnapshotsCryptPassword)
+	if errors.Is(err, hostsecrets.ErrNotFound) {
+		return "", nil
+	}
+	return v, err
+}

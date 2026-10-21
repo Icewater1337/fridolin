@@ -17,9 +17,11 @@ import (
 	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/noderepo"
 	"github.com/Icewater1337/fridolin/internal/nodes"
+	"github.com/Icewater1337/fridolin/internal/rcrypt"
 	"github.com/Icewater1337/fridolin/internal/snapshot"
 	"github.com/Icewater1337/fridolin/internal/store"
 )
@@ -63,6 +65,10 @@ type targetStatus struct {
 	Files  int       `json:"files,omitempty"`
 	Free   uint64    `json:"free,omitempty"`
 	SizeAt time.Time `json:"size_at,omitzero"`
+	// Layers is what the folder held when it was last opened: "restic"
+	// (one layer, from before) or "restic+crypt" (docs/VAULT.md,
+	// "Encryption").
+	Layers string `json:"layers,omitempty"`
 }
 
 // targetView is a target as the status shows it: its settings, its
@@ -335,6 +341,12 @@ func (t *targetService) open(ctx context.Context, tg config.VaultTarget) (*targe
 	if err != nil {
 		return nil, err
 	}
+	layers, err := t.outerLayer(ctx, srv)
+	if err != nil {
+		_ = srv.Close()
+		return nil, err
+	}
+	t.update(tg.Name, func(st *targetStatus) { st.Layers = string(layers) })
 	base := append(vaultBaseEnv(), srv.Env()...)
 	cache := filepath.Join(t.cfgs.Boot().Layout().Core(), "restic-cache-"+tg.Name)
 	mk := func(pw string) *snapshot.Restic {
@@ -358,6 +370,33 @@ func (t *targetService) open(ctx context.Context, tg config.VaultTarget) (*targe
 		return nil, err
 	}
 	return r, nil
+}
+
+// outerLayer gives the bridge to the node its rclone-crypt layer, under
+// the snapshots' crypt password, unless the folder holds a repository of
+// restic's layer alone from before: that one stays as it is (a new folder
+// for the target gets both; docs/VAULT.md, "Encryption").
+func (t *targetService) outerLayer(ctx context.Context, srv *noderepo.Server) (noderepo.Layers, error) {
+	layers, err := srv.Detect(ctx)
+	if err != nil || layers == noderepo.LayersRestic {
+		return layers, err
+	}
+	pw, err := t.secrets.cryptPassword()
+	if err != nil {
+		return "", err
+	}
+	if pw == "" {
+		if layers == noderepo.LayersCrypt {
+			return "", fmt.Errorf("the folder's repository is behind rclone crypt, but %s is not here: restore it from the recovery sheet", hostsecrets.SnapshotsCryptPassword)
+		}
+		return noderepo.LayersRestic, nil
+	}
+	c, err := rcrypt.New(pw, "")
+	if err != nil {
+		return "", err
+	}
+	srv.SetCipher(c)
+	return noderepo.LayersCrypt, nil
 }
 
 // problem says why the target cannot run now, "" when it can.
