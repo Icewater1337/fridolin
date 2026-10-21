@@ -115,7 +115,7 @@ export default {
     // A shell in a folder the node granted for terminal; it ends with
     // the dialog.
     async function openTerminal(n) {
-      const roots = n.effective.terminal.roots;
+      const { roots } = n;
       const pick = select(roots, roots[0], { 'aria-label': 'Folder' });
       const holder = h('div.term-holder');
       let term = null;
@@ -159,10 +159,6 @@ export default {
       // Offline nodes are refused by the bridge, which says so.
       if (n.update_to && !updating) {
         out.push(btn(`Update to ${n.update_to}`, { kind: 'primary', small: true, icon: 'refresh', onClick: () => update(n) }));
-      }
-      const term = n.effective && n.effective.terminal;
-      if (n.online && term && (term.roots || []).length) {
-        out.push(btn('Terminal', { small: true, icon: 'terminal', onClick: () => openTerminal(n) }));
       }
       if (n.device !== 'revoked') {
         out.push(btn('Tags', { small: true, kind: 'ghost', icon: 'edit', onClick: () => editTags(n) }));
@@ -219,7 +215,11 @@ export default {
     // What changes with every heartbeat: whether it is online and its
     // free resources. It is painted into the card on its own, so the card
     // and its buttons stay while a node reports (see paintAll).
-    const liveOf = (n) => ({ online: !!n.online, last_seen: n.last_seen || null, resources: n.resources || {}, address: n.address || null });
+    const termOf = (n) => {
+      const roots = (n.effective && n.effective.terminal && n.effective.terminal.roots) || [];
+      return n.online && roots.length ? { id: n.id, name: n.name, roots } : null;
+    };
+    const liveOf = (n) => ({ online: !!n.online, last_seen: n.last_seen || null, resources: n.resources || {}, address: n.address || null, term: termOf(n) });
     const stableOf = (n) => ({ ...n, online: undefined, last_seen: undefined, resources: undefined, address: undefined });
     const liveRegions = new Map(); // node id → its live region
 
@@ -228,7 +228,8 @@ export default {
       const memory = res.mem_total ? `${gb(res.mem_available)} free of ${gb(res.mem_total)}` : null;
       return [
         h('div.node-online', l.online ? pill('online', 'ok', { pulse: true }) : pill('offline', 'neutral'),
-          l.online ? null : h('span.muted.small', 'last seen ', timeAgo(l.last_seen))),
+          l.online ? null : h('span.muted.small', 'last seen ', timeAgo(l.last_seen)),
+          l.term ? btn('Terminal', { small: true, icon: 'terminal', onClick: () => openTerminal(l.term) }) : null),
         kv([
           ['CPUs', res.cpus ? String(res.cpus) : null],
           ['Memory', memory],

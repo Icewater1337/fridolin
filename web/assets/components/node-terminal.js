@@ -63,7 +63,8 @@ export function nodeTerminal({ node, folder, onEnd }) {
   });
 
   async function readLoop() {
-    while (!ended) {
+    for (;;) {
+      if (ended) return;
       let o;
       try {
         o = await nodeCall(node, 'terminal.read', { id, offset, wait_ms: 15000 });
