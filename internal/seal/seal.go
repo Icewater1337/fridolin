@@ -137,8 +137,10 @@ func PlainSize(n int64) (int64, error) {
 
 // writer seals what is written to it.
 type writer struct {
-	dst    io.Writer
-	aead   interface{ Seal(dst, nonce, plaintext, ad []byte) []byte }
+	dst  io.Writer
+	aead interface {
+		Seal(dst, nonce, plaintext, ad []byte) []byte
+	}
 	header []byte
 	buf    []byte // up to ChunkSize bytes not yet sealed
 	out    []byte
@@ -222,8 +224,10 @@ func (w *writer) Close() error {
 
 // reader opens a sealed stream.
 type reader struct {
-	src    *bufio.Reader
-	aead   interface{ Open(dst, nonce, ciphertext, ad []byte) ([]byte, error) }
+	src  *bufio.Reader
+	aead interface {
+		Open(dst, nonce, ciphertext, ad []byte) ([]byte, error)
+	}
 	header []byte
 	in     []byte
 	buf    []byte

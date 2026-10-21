@@ -36,6 +36,14 @@ const (
 	VaultCryptPassword = "fridolin.vault.crypt.password"
 	VaultCryptSalt     = "fridolin.vault.crypt.password2"
 	ResticPassword     = "fridolin.restic.password"
+
+	// The second layers and the post-quantum identity (docs/VAULT.md,
+	// "Encryption"): each a key of its own.
+	AgeIdentityPQ          = "fridolin.age.identity.pq"
+	ExportKey              = "fridolin.export.key"
+	VaultSealKey           = "fridolin.vault.seal.key"
+	SnapshotsCryptPassword = "fridolin.snapshots.crypt.password"
+	LitestreamSealKey      = "fridolin.litestream.seal.key"
 )
 
 // Account is the keychain account every secret is stored under.
