@@ -152,6 +152,7 @@ func (s *Service) Serve(ln net.Listener) error {
 			s.logf("nodes: the node port %s stopped: %v", ln.Addr(), err)
 		}
 	})
+	s.noteVersion()
 	s.wg.Go(s.autoLoop)
 	s.logf("nodes: listening for node agents on %s", s.addr)
 	return nil

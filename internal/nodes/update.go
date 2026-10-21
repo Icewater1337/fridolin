@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -533,11 +534,63 @@ func (s *Service) maybeAuto(id string) {
 	if to, _ := s.UpdateTarget(n); to == "" {
 		return
 	}
+	// Only a version known to be older: by its number, or as one this
+	// core ran before. A build of another commit may be newer, and only
+	// the owner updates that one.
+	if _, ok := nodeproto.CompareVersions(n.Version, s.version); !ok && !s.ranBefore(n.Version) {
+		return
+	}
 	if _, err := s.StartUpdate(id, UpdateOptions{Auto: true}); err != nil && !errors.Is(err, ErrUpdate) {
 		s.logf("nodes: auto update of %s: %v", id, err)
 	} else if err != nil {
 		s.logf("nodes: auto update of %s waits: %v", id, err)
 	}
+}
+
+// VersionsFile lists the versions the core ran, oldest first: a node that
+// runs one of them is older than the core, whatever the versions' names.
+const VersionsFile = "core-versions.json"
+
+// maxVersions bounds the list.
+const maxVersions = 200
+
+// noteVersion adds the core's version to VersionsFile.
+func (s *Service) noteVersion() {
+	if s.version == "" {
+		return
+	}
+	path := filepath.Join(s.dir, VersionsFile)
+	var list []string
+	if data, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(data, &list)
+	}
+	if len(list) > 0 && list[len(list)-1] == s.version {
+		return
+	}
+	list = append(slices.DeleteFunc(list, func(v string) bool { return v == s.version }), s.version)
+	if len(list) > maxVersions {
+		list = list[len(list)-maxVersions:]
+	}
+	data, _ := json.MarshalIndent(list, "", "  ")
+	if err := os.MkdirAll(s.dir, 0o700); err == nil {
+		err = fsx.WriteFileAtomic(path, append(data, '\n'), 0o600, false)
+		if err != nil {
+			s.logf("nodes: recording the core's version: %v", err)
+		}
+	}
+}
+
+// ranBefore reports whether the core ran version v before its own.
+func (s *Service) ranBefore(v string) bool {
+	data, err := os.ReadFile(filepath.Join(s.dir, VersionsFile))
+	if err != nil {
+		return false
+	}
+	var list []string
+	if json.Unmarshal(data, &list) != nil {
+		return false
+	}
+	return v != s.version && slices.Contains(list, v)
 }
 
 // autoLoop looks for nodes to auto-update every AutoEvery.

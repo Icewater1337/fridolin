@@ -153,7 +153,7 @@ func TestDoctorNodesVersion(t *testing.T) {
 		name, live, status, detail string
 	}{
 		{"current", `{"version":"v1.2.0","nodes":[{"id":"a","name":"A","device":"approved","version":"v1.2.0"},{"id":"p","name":"P","device":"pending","version":"v0.1.0"}]}`, DoctorOK, "1 approved nodes run v1.2.0"},
-		{"older", `{"version":"v1.2.0","nodes":[{"id":"a","name":"A","device":"approved","version":"v1.1.0"},{"id":"b","name":"B","device":"approved","version":"v1.3.0"}]}`, DoctorWarn, "1 of 2 approved nodes run an older fridolin than the core's v1.2.0: A (a, v1.1.0)"},
+		{"older", `{"version":"v1.2.0","nodes":[{"id":"a","name":"A","device":"approved","version":"v1.1.0"},{"id":"b","name":"B","device":"approved","version":"v1.3.0"}]}`, DoctorWarn, "1 of 2 approved nodes run an older or other fridolin than the core's v1.2.0: A (a, v1.1.0)"},
 		{"failed", `{"version":"v1.2.0","nodes":[{"id":"a","name":"A","device":"approved","version":"v1.2.0","update":{"state":"failed","to":"v1.2.0","error":"no luck"}}]}`, DoctorWarn, "the last update failed on A (a, to v1.2.0: no luck)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

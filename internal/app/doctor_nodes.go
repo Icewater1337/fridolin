@@ -287,7 +287,7 @@ func checkNodesVersion(ctx context.Context, env *DoctorEnv) DoctorResult {
 	slices.Sort(failed)
 	var parts []string
 	if len(older) > 0 {
-		parts = append(parts, fmt.Sprintf("%d of %d approved nodes run an older fridolin than the core's %s: %s", len(older), approved, core, strings.Join(older, "; ")))
+		parts = append(parts, fmt.Sprintf("%d of %d approved nodes run an older or other fridolin than the core's %s: %s", len(older), approved, core, strings.Join(older, "; ")))
 	}
 	if len(failed) > 0 {
 		parts = append(parts, "the last update failed on "+strings.Join(failed, "; "))
