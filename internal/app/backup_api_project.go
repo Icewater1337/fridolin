@@ -13,6 +13,9 @@ func (b *App) newBackupAPI() *httpapi.BackupAPI {
 		UpdateBrain: func(id string, enabled *bool, exclude []string) error {
 			return b.registry.UpdateBackup(id, enabled, exclude)
 		},
+		UpdateTargets: func(id string, targets map[string]bool, nodeOnly *[]string) error {
+			return b.registry.UpdateBackupTargets(id, targets, nodeOnly)
+		},
 		RestoreTarget: b.restoreTarget,
 		RedirectURI:   b.google.RedirectURI,
 	}

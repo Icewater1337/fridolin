@@ -148,6 +148,8 @@ test('nodes off says so and makes no codes', async (t) => {
 test('the capability words match the bridge\'s', () => {
   assert.equal(capSummary(declared), 'exec (hostname, git, go), fs (2 roots, 1 writable), host');
   assert.equal(capSummary({ host: true, fride: { url: 'http://127.0.0.1:7777' } }), 'host, fride');
+  assert.equal(capSummary({ backup: {} }), 'backup');
+  assert.equal(capSummary({ backup: { folders: ['D:\\B'] } }), 'backup (1 folder)');
   assert.equal(capSummary({}), 'nothing');
   assert.equal(capSummary(null), 'nothing');
   assert.equal(ruleText({ name: 'git', args: ['status', 'log'] }), 'git status | log');

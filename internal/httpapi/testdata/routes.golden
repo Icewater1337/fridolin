@@ -15,6 +15,7 @@ DELETE /api/site/proposals/{id}
 DELETE /api/site/repo
 DELETE /api/site/secrets/{module}/{name}
 DELETE /api/site/users/{id}
+DELETE /api/vault/targets/{name}
 DELETE /brain/calendar/events/{id}
 DELETE /brain/intents/{id}
 GET /api/activity
@@ -113,6 +114,11 @@ POST /api/vault/rebuild
 POST /api/vault/restore-drill
 POST /api/vault/snapshot
 POST /api/vault/sync
+POST /api/vault/targets
+POST /api/vault/targets/{name}/check
+POST /api/vault/targets/{name}/prune/allow
+POST /api/vault/targets/{name}/restore-drill
+POST /api/vault/targets/{name}/snapshot
 POST /api/whatsapp/pair
 POST /brain/calendar/events
 POST /brain/calendar/freebusy
@@ -143,3 +149,4 @@ PUT /api/site/secrets/{module}/{name}
 PUT /api/site/settings
 PUT /api/site/tunnel
 PUT /api/site/users/{id}
+PUT /api/vault/targets/{name}

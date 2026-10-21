@@ -82,7 +82,7 @@ restart.
 | `prompt_file` | The prompt sent ahead of every message, relative to the folder. It must stay inside the folder, and be a file rather than a symlink (see [Files the bridge reads and writes](#files-the-bridge-reads-and-writes)). |
 | `reply_chat` | Where answers go for files handed in through `/ingest`. The files are handled by this brain even when the chat belongs to another one, so a brain without chats can answer in your DM. `!stop` and `!reset` in that chat also stop this brain's work on them, and `!reset` starts the chat afresh for this brain too. Default: the first allowed number for the brain that gets DMs (the DM brain, or the fallback brain when none handles DMs), else the brain's first group. |
 | `observe` | What the brain does with untagged group messages, the ones nobody addressed to it (see [triggers](CONFIGURATION.md#triggers)). `history`, the default, keeps them in its history, where its next run in that group reads them; they cost nothing. `run` also gives each one a run of its own (a bare "ok" or emoji excepted), for a brain that keeps notes as the conversation goes: its prompt marks it `<observe_only>`, nothing it writes is sent, and a message addressed to the brain stops it and goes first, but each costs a full Claude run, with tools, on whatever any member the group's `group_members` admits writes (see [group_members](CONFIGURATION.md#group_members)). Set in the dashboard under *Untagged group messages*. |
-| `backup` | What of this folder goes to the cloud; see [BACKUP.md](BACKUP.md). `backup.exclude` applies to the Google Drive backup and to the vault's snapshots (and its cold tier, for a folder in the data dir); `backup.enabled: false` keeps the folder out of both ([VAULT.md](VAULT.md#brain-folders-and-their-backup-settings)). |
+| `backup` | Where this folder is backed up; see [BACKUP.md](BACKUP.md) and [below](#backups-cloud-and-node-targets). `backup.exclude` applies to the Google Drive backup and to the vault's snapshots (and its cold tier, for a folder in the data dir), and to the node targets; `backup.enabled: false` keeps the folder out of every backup ([VAULT.md](VAULT.md#brain-folders-and-their-backup-settings)). `backup.targets` and `backup.node_only` send it, or parts of it, to [node targets](VAULT.md#node-targets). |
 | `calendar` | The Google account this brain signed in with and the calendars it may use; set by *Connect Google Calendar*, see [CALENDAR.md](CALENDAR.md). |
 | `role` | `core` for the [core brain](#the-core-brain-and-its-grants), the one brain that may reach others; left out for every other brain. At most one brain is the core. |
 | `grants` | Only on the core brain: what it may do with each other brain, by that brain's id, from `delegate`, `read` and `files` (`{"family": ["delegate", "read"]}`). See [below](#the-core-brain-and-its-grants). |
@@ -90,6 +90,41 @@ restart.
 
 [`schemas/brain.schema.json`](schemas/brain.schema.json) is a JSON Schema
 of the file, version 1.
+
+### Backups: cloud and node targets
+
+```json
+"backup": {
+  "enabled": true,
+  "exclude": ["node_modules/", "*.log", "/work/"],
+  "targets": {"cloud": true, "node:nas": true},
+  "node_only": ["/work/"]
+}
+```
+
+- `targets` says which targets get the folder: `"cloud"` (the Google Drive
+  backup, the vault's snapshots and its cold tier) and `"node:<name>"` for
+  each target of [`vault.targets`](CONFIGURATION.md#vault). Left out, the
+  cloud gets the folder and no node target does: a `brain.json` without it
+  means what it always meant. `"cloud": false` keeps the whole folder out
+  of the cloud.
+- `exclude` stays out of the cloud and out of the node targets.
+- `node_only` lists paths, in `exclude`'s syntax, that never go to the
+  cloud but do go to the node targets the brain chooses. A path in both
+  `exclude` and `node_only` goes to the node targets: keep `/work/` in
+  `exclude` too, and it stays out of the cloud even if `node_only` is
+  removed later. A `node_only` path with no node target chosen goes
+  nowhere.
+- `enabled: false` keeps the folder out of every target.
+
+A brain may edit its own `brain.json`, and the edit waits for approval
+([Approval](#approval)): until then the bridge runs it with the approved
+copy. For the cloud, whichever of the two leaves out more holds; a node
+target gets the folder only when both choose it, and a `node_only` path
+goes there only when both list it. So a brain cannot send more anywhere by
+editing its file. The Vault page sets `targets` for the brains of each
+target (`PUT /api/brains/{id}/backup` with `targets` and `node_only`), an
+edit by the owner that needs no approval.
 
 A field the bridge does not know, a typo such as `routing.handles_dm` or
 one a newer version added, is logged by its path when the bridge reads the

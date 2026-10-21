@@ -1,7 +1,7 @@
 // What the Nodes page says about a node's capabilities, as the bridge's
 // Capabilities.Summary says it in the CLI and !fleet.
 
-/** "exec (uname, df), fs (2 roots, 1 writable), host, notify, fride", or "nothing". */
+/** "exec (uname, df), fs (2 roots, 1 writable), host, notify, fride, backup (1 folder)", or "nothing". */
 export function capSummary(c) {
   const parts = [];
   if (c && c.exec && (c.exec.allow || []).length) {
@@ -15,6 +15,10 @@ export function capSummary(c) {
   if (c && c.host) parts.push('host');
   if (c && c.notify) parts.push('notify');
   if (c && c.fride) parts.push('fride');
+  if (c && c.backup) {
+    const n = (c.backup.folders || []).length;
+    parts.push(n ? `backup (${n} folder${n === 1 ? '' : 's'})` : 'backup');
+  }
   return parts.length ? parts.join(', ') : 'nothing';
 }
 

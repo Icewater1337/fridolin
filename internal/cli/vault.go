@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -26,12 +27,22 @@ Usage:
                                       cold tier and print where it is
   fridolin vault rebuild              rebuild vault.db from the cold tier and the disk, then
                                       bring back every pinned file that is only cold
-  fridolin vault restore-drill        restore the latest snapshot into an empty folder and
-                                      check a brain folder and the database copies
+  fridolin vault restore-drill [--target NAME]
+                                      restore the latest snapshot (of node target NAME)
+                                      into an empty folder and check a brain folder and
+                                      the database copies
+  fridolin vault snapshot [--target NAME] [--hourly]
+                                      take a snapshot now (to node target NAME)
+  fridolin vault check [--target NAME]
+                                      check the snapshots' repository (of node target NAME)
 
-Each asks the running bridge; sync, evict, rebuild and restore-drill start a
-job and return, and status shows how it went. status reads what the bridge
-last wrote when none runs.
+Node targets (vault.targets, docs/VAULT.md "Node targets") are restic
+repositories in folders on nodes; status lists them, and the Vault page adds
+them.
+
+Each asks the running bridge; sync, evict, rebuild, restore-drill, snapshot
+and check start a job and return, and status shows how it went. status reads
+what the bridge last wrote when none runs.
 
 Flags:
   --config PATH     config file (default: $FRIDOLIN_CONFIG, else
@@ -41,6 +52,7 @@ Flags:
 // vaultJobs are the subcommands that start a job, by their route.
 var vaultJobs = map[string]string{
 	"sync": "/api/vault/sync", "evict": "/api/vault/evict", "rebuild": "/api/vault/rebuild", "restore-drill": "/api/vault/restore-drill",
+	"snapshot": "/api/vault/snapshot", "check": "/api/vault/check",
 }
 
 func vaultCmd(args []string, stdout, stderr io.Writer) int {
@@ -57,6 +69,8 @@ func vaultCmd(args []string, stdout, stderr io.Writer) int {
 	cfgPath := fs.String("config", "", configFlagHelp)
 	asJSON := fs.Bool("json", false, "status: print the status as JSON")
 	overBudget := fs.Bool("allow-over-budget", false, "get: bring the file back even when the hot tier goes over its budget")
+	target := fs.String("target", "", "restore-drill, snapshot, check: the node target (vault.targets) to act on")
+	hourly := fs.Bool("hourly", false, "snapshot: an hourly snapshot instead of a nightly one")
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
 		return 0
@@ -73,7 +87,7 @@ func vaultCmd(args []string, stdout, stderr io.Writer) int {
 		var raw json.RawMessage
 		err := controlcli.VaultCall(cfg, http.MethodGet, "/api/vault/status", nil, &raw, 30*time.Second)
 		if errors.Is(err, controlcli.ErrBridgeDown) {
-			data, ferr := app.ReadVaultStatusFile(cfg.DataDir, os.ReadFile)
+			data, ferr := app.ReadVaultStatusWithTargets(cfg.DataDir, os.ReadFile)
 			if ferr != nil {
 				fmt.Fprintf(stderr, "%v, and %v\n", err, ferr)
 				return 1
@@ -119,8 +133,24 @@ func vaultCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "fridolin vault %s takes no arguments, got %q\n", sub, fs.Args())
 		return 2
 	}
+	var body any
+	if sub == "snapshot" {
+		kind := "nightly"
+		if *hourly {
+			kind = "hourly"
+		}
+		body = map[string]string{"kind": kind}
+	}
+	if *target != "" {
+		if sub != "restore-drill" && sub != "snapshot" && sub != "check" {
+			fmt.Fprintf(stderr, "fridolin vault %s takes no --target\n", sub)
+			return 2
+		}
+		route = "/api/vault/targets/" + url.PathEscape(*target) + "/" + sub
+		sub += " of target " + *target
+	}
 	var resp struct{ Status string }
-	if err := controlcli.VaultCall(cfg, http.MethodPost, route, nil, &resp, 30*time.Second); err != nil {
+	if err := controlcli.VaultCall(cfg, http.MethodPost, route, body, &resp, 30*time.Second); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}

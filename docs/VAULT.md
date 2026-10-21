@@ -114,6 +114,9 @@ cold tier for a folder in the data dir:
   only, `*.log` and `node_modules/` match at any depth in that brain;
 - the secret files the Drive backup never uploads (`.env`, `*.pem`, …)
   stay out too, unless `backup.include_secret_files` is on.
+- `backup.targets: {"cloud": false}` leaves the folder out of the cloud
+  whole, and `backup.node_only` leaves out what it names, both going to the
+  [node targets](#node-targets) the brain chooses instead.
 
 The patterns become restic `--exclude` values under the brain's own
 folder, so one brain's patterns never leave out another brain's files.
@@ -227,6 +230,9 @@ fridolin vault evict             # evict now
 fridolin vault get media/main/recording.m4a   # bring one back, print where
 fridolin vault rebuild           # rebuild vault.db from the cold tier, bring back the pinned files
 fridolin vault restore-drill     # restore the latest snapshot into an empty folder and check it
+fridolin vault restore-drill --target nas   # the same for a node target
+fridolin vault snapshot [--target nas] [--hourly]
+fridolin vault check [--target nas]
 ```
 
 The restore drill restores the latest nightly snapshot into a new temp
@@ -240,6 +246,124 @@ more than an hour for its upload, that a snapshot is less than 26 hours
 old, that Litestream runs, that no brain folder is left out for a
 brain.json it cannot read, and that the day's B2 transactions stay within
 the budget.
+
+## Node targets
+
+Besides the cloud, the snapshots can go to folders on your nodes: a
+restic repository on an external disk of a Windows PC at home, on a NAS a
+Linux node mounts, on a second Mac. What goes there is chosen per brain
+and per path, so a work folder that must never reach the cloud can still
+be backed up, to a disk in the house.
+
+**Setting one up.**
+
+1. On the machine with the disk, lend its drives to the core's backups:
+   `fridolin node backup on` (or `--root D:\` / `--root
+   /Volumes/Backup` to lend one drive or folder only; `fridolin node join
+   … --backup` does it when joining), then restart the agent
+   (`fridolin node stop`, `fridolin node start`). The node now declares
+   the capability `backup` ([NODES.md](NODES.md#backups)).
+2. On the core, approve what it offers (Nodes → *Approve what it offers*,
+   or `fridolin nodes approve <id> --commands`). Lending more drives
+   later needs this approval again.
+3. Vault → Backup targets → *Add target…*: pick the node, browse its
+   drives and folders (the node lists folder names only, never a file),
+   pick a folder or name a new one, give the target a name and a
+   schedule. The node must be online: the core approves the folder on the
+   node (the node may then write restic's files there and nowhere else)
+   and makes it.
+4. Choose the brains that go there: *Brains…* on the target's card, or
+   in `brain.json` ([BRAINS.md](BRAINS.md#backups-cloud-and-node-targets)):
+
+   ```json
+   "backup": {"enabled": true, "exclude": ["node_modules/", "*.log", "/work/"],
+              "targets": {"node:nas": true}, "node_only": ["/work/"]}
+   ```
+
+   Here `/work/` never goes to the cloud (it is in `exclude`, and
+   `node_only` keeps it out of the cloud whatever `exclude` says), and goes
+   to `nas`; `*.log` goes nowhere. Without `targets` a brain goes to the
+   cloud only, as before.
+
+**How the data travels.** restic runs on the core, as for the cloud, and
+encrypts there. Its repository is a REST backend on the core's loopback,
+for the length of one run, with a user and password made for that run
+(in restic's environment only), whose requests go over the node's
+connection to the core as the node's `backup.*` calls: the node writes
+restic's files, by restic's own names (`config`, `data/ab/ab12…`,
+`keys/…`, …), into the folder, checking each upload's size and SHA-256
+before it appears. The data never passes through the cloud; on the
+tailnet WireGuard encrypts the connection, and what lands on the node is
+restic's ciphertext. The node needs no restic, and never sees the
+password. A folder already holding a repository (the picker marks it)
+is opened with the password the core keeps for that target.
+
+**The password.** Each target has its own, 32 random bytes made on the
+core when its repository is made, never sent to the node. It is read from
+`FRIDOLIN_RESTIC_NODE_<NAME>` (the name upper-cased, `-` as `_`), else the
+host's secrets as `fridolin.restic.node.<name>` (the keychain, the Windows
+Credential Manager, or 0600 files on Linux); inside the core container,
+which has no keychain, from `secrets/restic-node-<name>.age` in the data
+dir, encrypted to the core's age identity (`FRIDOLIN_AGE_IDENTITY`, which
+is on the recovery sheet already, and which the vault and exports carry
+the file with). The log says when it made one: **write it on the
+recovery sheet** (`security find-generic-password -a fridolin -s
+fridolin.restic.node.<name> -w` on macOS; in the container, `age -d -i
+<identity file> secrets/restic-node-<name>.age`). A folder that holds a
+repository without its password is refused rather than given a new one.
+
+**Schedule and retention**, per target (`vault.targets`,
+[CONFIGURATION.md](CONFIGURATION.md#vault)): a nightly snapshot at
+`nightly_at` (default 03:00) and, with `hourly`, one each hour, of the
+folders of the brains that choose the target (each less its `exclude`,
+the secret files, and what is in `node_only` excepted); with
+`include_data_dir` the nightly snapshot takes the data dir too, less the
+live databases (their `VACUUM INTO` copies go instead) and less the
+brain folders in it that do not choose the target. After each nightly
+snapshot `restic forget --prune` keeps `retention` (default as the
+cloud's: 24 hourly, 14 daily, 8 weekly, 12 monthly), with the same
+mass-deletion hold; `restic check` every `check_days` (7) and with 5% of
+the data read every `read_data_days` (30). Every snapshot has the host
+`fridolin-core` and the tags `fridolin` and its kind. They run whether or
+not the vault itself is on, while the node is online; a snapshot that
+failed (the node went away, the disk was unplugged) is tried again after
+an hour, and every minute the core looks whether one is due.
+
+**Status.** `fridolin vault status` lists each target: its node and
+folder, the brains that go there, the last nightly and hourly snapshot,
+the repository's size and the space left on its disk, the last check and
+restore drill, a hold. The Vault page shows a card per target with
+*Back up now*, *Check*, *Restore drill*, *Brains…* and *Remove…*.
+`fridolin doctor` (`vault-targets`) warns about a target without a
+snapshot within `window_hours` (default 26), with the last error.
+`core/vault-targets.json` keeps it all.
+
+**Restore drill.** `fridolin vault restore-drill --target nas` (or the
+card's button) restores the target's latest snapshot through the node
+into an empty folder on the core and checks that every brain folder in
+it has its `brain.json`, and, for a snapshot with the data dir, that the
+database copies pass SQLite's `integrity_check`. `fridolin vault
+snapshot --target nas` and `fridolin vault check --target nas` take a
+snapshot and check now.
+
+### Restoring from a node target
+
+The folder is an ordinary local restic repository: any machine that can
+read it, with restic and the target's password, restores from it,
+without fridolin and without the core:
+
+```sh
+export RESTIC_PASSWORD='…'               # from the recovery sheet
+restic -r /Volumes/Backup/fridolin snapshots
+restic -r /Volumes/Backup/fridolin restore latest --target ~/restore
+```
+
+On Windows, `restic -r D:\Backups\fridolin restore latest --target
+C:\restore` (restic for Windows: `winget install restic.restic`); the
+paths of the core's files come back below the target folder as they
+were on the core. To restore on another machine, plug the disk in there,
+or copy the folder, or point restic at it over a share. Removing a
+target leaves the repository on the node.
 
 ## A new core
 

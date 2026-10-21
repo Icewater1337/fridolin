@@ -218,12 +218,61 @@ type Routing struct {
 	AnswerForwards *bool `json:"answer_forwards,omitempty"`
 }
 
-// Backup controls this brain's Google Drive backup.
+// Backup controls where this brain's folder is backed up: the cloud (the
+// Google Drive backup, the vault's snapshots and its cold tier) and the
+// node targets of vault.targets (docs/BRAINS.md, "Backups").
 type Backup struct {
+	// Enabled off leaves the folder out of every backup.
 	Enabled bool `json:"enabled"`
 	// Exclude lists rclone filter globs, relative to the brain folder:
-	// "node_modules/", "*.log", "/big-folder/".
+	// "node_modules/", "*.log", "/big-folder/". What they name stays out
+	// of the cloud and out of the node targets.
 	Exclude []string `json:"exclude"`
+	// Targets says which targets get the folder, by "cloud" and
+	// "node:<target>". Unset, the cloud gets it and no node target does:
+	// what a brain.json without it always meant.
+	Targets map[string]bool `json:"targets,omitempty"`
+	// NodeOnly lists paths, in Exclude's syntax, that never go to the
+	// cloud but do go to the node targets the brain chooses: "/work/".
+	// One also listed in Exclude goes to the node targets all the same.
+	NodeOnly []string `json:"node_only,omitempty"`
+}
+
+// TargetCloud is the cloud's key in Backup.Targets; a node target's is
+// TargetNodePrefix and its name.
+const (
+	TargetCloud      = "cloud"
+	TargetNodePrefix = "node:"
+)
+
+var targetNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
+
+// ValidTargetKey reports whether key may be a key of Backup.Targets.
+func ValidTargetKey(key string) bool {
+	name, ok := strings.CutPrefix(key, TargetNodePrefix)
+	return key == TargetCloud || ok && targetNameRe.MatchString(name)
+}
+
+// Cloud reports whether the cloud gets the folder at all.
+func (b Backup) Cloud() bool {
+	on, set := b.Targets[TargetCloud]
+	return b.Enabled && (!set || on)
+}
+
+// Node reports whether the node target named name gets the folder.
+func (b Backup) Node(name string) bool {
+	return b.Enabled && b.Targets[TargetNodePrefix+name]
+}
+
+// CloudExcludes are what stays out of the cloud: Exclude and NodeOnly.
+func (b Backup) CloudExcludes() []string {
+	return append(slices.Clone(b.Exclude), b.NodeOnly...)
+}
+
+// NodeExcludes are what stays out of a node target: Exclude, less what
+// NodeOnly lists too.
+func (b Backup) NodeExcludes() []string {
+	return slices.DeleteFunc(slices.Clone(b.Exclude), func(x string) bool { return slices.Contains(b.NodeOnly, x) })
 }
 
 // DefaultBackupExcludes returns a fresh list for each new brain: rebuildable
@@ -305,6 +354,16 @@ func (m *Manifest) Validate() error {
 			return fmt.Errorf("brain %q: backup exclude %q is not a valid pattern", m.ID, x)
 		}
 	}
+	for _, x := range m.Backup.NodeOnly {
+		if strings.TrimSpace(x) == "" || strings.ContainsAny(x, "\r\n") || strings.HasPrefix(strings.TrimSpace(x), "+") {
+			return fmt.Errorf("brain %q: backup node_only %q is not a valid pattern", m.ID, x)
+		}
+	}
+	for key := range m.Backup.Targets {
+		if !ValidTargetKey(key) {
+			return fmt.Errorf("brain %q: backup target %q must be %q or \"node:<target>\", a target of vault.targets", m.ID, key, TargetCloud)
+		}
+	}
 	return m.validateGrants()
 }
 
@@ -325,6 +384,14 @@ func (m Manifest) Normalized() Manifest {
 	}
 	if m.Backup.Exclude == nil {
 		m.Backup.Exclude = []string{}
+	}
+	if len(m.Backup.Targets) == 0 {
+		m.Backup.Targets = nil
+	} else {
+		m.Backup.Targets = maps.Clone(m.Backup.Targets)
+	}
+	if len(m.Backup.NodeOnly) == 0 {
+		m.Backup.NodeOnly = nil
 	}
 	// Sorted, so that the same grants in another order compare equal; a
 	// brain granted nothing is left out. A copy: m shares the map.

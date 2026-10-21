@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -31,7 +32,7 @@ func TestFleetSectionsDefaultOff(t *testing.T) {
 		Nodes:  NodesConfig{Listen: ":8766"},
 		Policy: PolicyConfig{MaxRunsPerHour: 20, MaxPendingIrreversible: 3, ApprovalTimeoutHours: 24},
 	}
-	if s.Core != want.Core || s.Vault != want.Vault || s.Nodes != want.Nodes || s.Policy != want.Policy {
+	if s.Core != want.Core || !reflect.DeepEqual(s.Vault, want.Vault) || s.Nodes != want.Nodes || s.Policy != want.Policy {
 		t.Fatalf("defaults:\n got %+v %+v %+v %+v\nwant %+v %+v %+v %+v", s.Core, s.Vault, s.Nodes, s.Policy, want.Core, want.Vault, want.Nodes, want.Policy)
 	}
 	if s.Core.Lease.Renew() != 5*time.Minute || s.Core.Lease.Stale() != 20*time.Minute || s.Policy.ApprovalTimeout() != 24*time.Hour {
@@ -56,11 +57,11 @@ func TestFleetSectionsKeepWhatIsSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Core != want.Core || s.Vault != want.Vault || s.Nodes != want.Nodes || s.Policy != want.Policy {
+	if s.Core != want.Core || !reflect.DeepEqual(s.Vault, want.Vault) || s.Nodes != want.Nodes || s.Policy != want.Policy {
 		t.Fatalf("got %+v %+v %+v %+v", s.Core, s.Vault, s.Nodes, s.Policy)
 	}
 	eff := EffectiveFile(s)
-	if eff.Core != want.Core || eff.Vault != want.Vault || eff.Nodes != want.Nodes || eff.Policy != want.Policy {
+	if eff.Core != want.Core || !reflect.DeepEqual(eff.Vault, want.Vault) || eff.Nodes != want.Nodes || eff.Policy != want.Policy {
 		t.Fatal("the effective file lost a setting")
 	}
 }

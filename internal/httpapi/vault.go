@@ -27,6 +27,8 @@ type VaultService interface {
 // says how it went.
 type VaultAPI struct {
 	Vault func() VaultService
+	// Targets serves the node targets, /api/vault/targets.
+	Targets *VaultTargetsAPI
 }
 
 // VaultGetResponse is POST /api/vault/get's answer.

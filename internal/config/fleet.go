@@ -80,6 +80,182 @@ type VaultConfig struct {
 	// a day the bridge may spend on B2 before doctor and the dashboard warn
 	// (at 70%; default 2000, under the free tier's 2,500 caps).
 	B2DailyBudget int `json:"b2_daily_budget,omitempty"`
+	// Targets are further places the snapshots go: restic repositories in
+	// folders on nodes (docs/VAULT.md, "Node targets"). They run whether
+	// or not the vault itself is on; each brain's brain.json says which of
+	// them get its folder.
+	Targets []VaultTarget `json:"targets,omitempty"`
+}
+
+// VaultTarget is one backup target besides the cloud.
+type VaultTarget struct {
+	// Name names it: in brain.json ("node:<name>"), on the Vault page, in
+	// its password's host secret (fridolin.restic.node.<name>).
+	Name string `json:"name"`
+	// Kind is TargetNode, the only kind yet.
+	Kind string `json:"kind"`
+	// Node is the node's id, Folder the folder on it, in its own
+	// spelling (D:\Backups\fridolin, /Volumes/Backup/fridolin).
+	Node   string `json:"node"`
+	Folder string `json:"folder"`
+	// NightlyAt is when the nightly snapshot runs, HH:MM local time
+	// (default 03:00); Hourly adds one each hour.
+	NightlyAt string `json:"nightly_at,omitempty"`
+	Hourly    bool   `json:"hourly,omitempty"`
+	// IncludeDataDir puts the data dir in the nightly snapshot too, less
+	// the brain folders in it that do not choose this target.
+	IncludeDataDir bool `json:"include_data_dir,omitempty"`
+	// Retention is what pruning keeps (default 24 hourly, 14 daily, 8
+	// weekly, 12 monthly, as the cloud's).
+	Retention *TargetRetention `json:"retention,omitempty"`
+	// CheckDays is how often restic check runs (default 7); ReadDataDays
+	// how often a check also reads 5% of the data back (default 30).
+	CheckDays    int `json:"check_days,omitempty"`
+	ReadDataDays int `json:"read_data_days,omitempty"`
+	// WindowHours is how old the last snapshot may be before doctor
+	// warns: the node is off, or its disk unplugged (default 26).
+	WindowHours int `json:"window_hours,omitempty"`
+}
+
+// TargetRetention is how many snapshots of each span a target keeps.
+type TargetRetention struct {
+	Hourly  int `json:"hourly"`
+	Daily   int `json:"daily"`
+	Weekly  int `json:"weekly"`
+	Monthly int `json:"monthly"`
+}
+
+// TargetNode is the kind of a target in a folder on a node.
+const TargetNode = "node"
+
+// TargetKinds are the kinds a target may be: config.schema.json lists the same.
+func TargetKinds() []string { return []string{TargetNode} }
+
+// Defaults of a target.
+const (
+	DefaultTargetNightlyAt    = "03:00"
+	DefaultTargetCheckDays    = 7
+	DefaultTargetReadDataDays = 30
+	DefaultTargetWindowHours  = 26
+)
+
+// DefaultTargetRetention is the cloud snapshots' retention.
+var DefaultTargetRetention = TargetRetention{Hourly: 24, Daily: 14, Weekly: 8, Monthly: 12}
+
+// Night is NightlyAt with its default.
+func (t VaultTarget) Night() string {
+	if t.NightlyAt == "" {
+		return DefaultTargetNightlyAt
+	}
+	return t.NightlyAt
+}
+
+// Keep is Retention with its default.
+func (t VaultTarget) Keep() TargetRetention {
+	if t.Retention == nil {
+		return DefaultTargetRetention
+	}
+	return *t.Retention
+}
+
+func orDefault(v, def int) int {
+	if v == 0 {
+		return def
+	}
+	return v
+}
+
+// CheckEvery, ReadDataEvery and Window are the target's intervals.
+func (t VaultTarget) CheckEvery() time.Duration {
+	return time.Duration(orDefault(t.CheckDays, DefaultTargetCheckDays)) * 24 * time.Hour
+}
+func (t VaultTarget) ReadDataEvery() time.Duration {
+	return time.Duration(orDefault(t.ReadDataDays, DefaultTargetReadDataDays)) * 24 * time.Hour
+}
+func (t VaultTarget) Window() time.Duration {
+	return time.Duration(orDefault(t.WindowHours, DefaultTargetWindowHours)) * time.Hour
+}
+
+// TargetKey is how brain.json's backup.targets names the target.
+func (t VaultTarget) TargetKey() string { return "node:" + t.Name }
+
+// Target returns the target named name.
+func (v VaultConfig) Target(name string) (VaultTarget, bool) {
+	for _, t := range v.Targets {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	return VaultTarget{}, false
+}
+
+var (
+	targetNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
+	nodeIDRe     = regexp.MustCompile(`^[0-9a-f]{12}$`)
+	hhmmRe       = regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`)
+)
+
+// ValidTargetName reports whether name may name a target.
+func ValidTargetName(name string) bool { return targetNameRe.MatchString(name) }
+
+// absPathAnyOS reports whether p is absolute in Unix or Windows spelling.
+func absPathAnyOS(p string) bool {
+	if strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\\`) {
+		return true
+	}
+	return len(p) >= 3 && (p[0]|0x20) >= 'a' && (p[0]|0x20) <= 'z' && p[1] == ':' && (p[2] == '\\' || p[2] == '/')
+}
+
+// maxTargets bounds vault.targets.
+const maxTargets = 16
+
+// Check reports what is wrong with the target.
+func (t VaultTarget) Check() error {
+	switch {
+	case !ValidTargetName(t.Name):
+		return fmt.Errorf("vault.targets: name %q must be 1 to 32 lower-case letters, digits and -", t.Name)
+	case t.Kind != TargetNode:
+		return fmt.Errorf("vault.targets %s: kind %q must be %q", t.Name, t.Kind, TargetNode)
+	case !nodeIDRe.MatchString(t.Node):
+		return fmt.Errorf("vault.targets %s: node %q must be a node's id, 12 hex digits (fridolin nodes lists them)", t.Name, t.Node)
+	case t.Folder == "" || len(t.Folder) > 4096 || strings.ContainsRune(t.Folder, 0) || !absPathAnyOS(t.Folder):
+		return fmt.Errorf("vault.targets %s: folder %q must be an absolute path on the node", t.Name, t.Folder)
+	case t.NightlyAt != "" && !hhmmRe.MatchString(t.NightlyAt):
+		return fmt.Errorf("vault.targets %s: nightly_at %q must be HH:MM", t.Name, t.NightlyAt)
+	case t.CheckDays < 0 || t.CheckDays > maxDays, t.ReadDataDays < 0 || t.ReadDataDays > maxDays:
+		return fmt.Errorf("vault.targets %s: check_days and read_data_days must be between 1 and %d, or 0 for the default", t.Name, maxDays)
+	case t.WindowHours < 0 || t.WindowHours > 24*maxDays:
+		return fmt.Errorf("vault.targets %s: window_hours must be between 1 and %d, or 0 for the default", t.Name, 24*maxDays)
+	}
+	if r := t.Retention; r != nil {
+		for _, n := range []int{r.Hourly, r.Daily, r.Weekly, r.Monthly} {
+			if n < 0 || n > 100000 {
+				return fmt.Errorf("vault.targets %s: retention counts must be between 0 and 100000", t.Name)
+			}
+		}
+		if *r == (TargetRetention{}) {
+			return fmt.Errorf("vault.targets %s: a retention that keeps no snapshot would delete them all; leave retention out for the default", t.Name)
+		}
+	}
+	return nil
+}
+
+// checkTargets checks every target and that names do not repeat.
+func checkTargets(ts []VaultTarget) error {
+	if len(ts) > maxTargets {
+		return fmt.Errorf("vault.targets: at most %d", maxTargets)
+	}
+	seen := map[string]bool{}
+	for _, t := range ts {
+		if err := t.Check(); err != nil {
+			return err
+		}
+		if seen[t.Name] {
+			return fmt.Errorf("vault.targets: two targets are named %q", t.Name)
+		}
+		seen[t.Name] = true
+	}
+	return nil
 }
 
 // NodesConfig is the port nodes connect to.
@@ -251,6 +427,9 @@ func (c *File) validateFleet() error {
 	}
 	if !ValidHostname(c.Vault.Endpoint) {
 		return fmt.Errorf("vault.endpoint %q must be a host name such as %s, without https:// or a path", c.Vault.Endpoint, DefaultVaultEndpoint)
+	}
+	if err := checkTargets(c.Vault.Targets); err != nil {
+		return err
 	}
 	if !ValidListenAddr(c.Nodes.Listen) {
 		return fmt.Errorf("nodes.listen %q must be host:port, such as %s for every interface", c.Nodes.Listen, DefaultNodesListen)

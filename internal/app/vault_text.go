@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -19,6 +21,84 @@ func ReadVaultStatusFile(dataDir string, read func(string) ([]byte, error)) ([]b
 		return nil, errors.New("the vault has written no status yet: it has not run on this data dir")
 	}
 	return data, err
+}
+
+// ReadVaultStatusWithTargets is ReadVaultStatusFile with the node targets'
+// status (core/vault-targets.json), as far as that file has it, for
+// fridolin vault status while no bridge answers.
+func ReadVaultStatusWithTargets(dataDir string, read func(string) ([]byte, error)) ([]byte, error) {
+	data, err := read(filepath.Join(dataDir, "core", vaultStatusFile))
+	tf := readTargetsFile(filepath.Join(dataDir, "core"), read)
+	if errors.Is(err, fs.ErrNotExist) {
+		if len(tf.Targets) == 0 {
+			return nil, errors.New("the vault has written no status yet: it has not run on this data dir")
+		}
+		data, err = []byte(`{"state":"`+vaultOff+`"}`), nil
+	}
+	if err != nil || len(tf.Targets) == 0 {
+		return data, err
+	}
+	var st map[string]any
+	if json.Unmarshal(data, &st) != nil {
+		return data, nil
+	}
+	var views []targetView
+	for _, name := range slices.Sorted(maps.Keys(tf.Targets)) {
+		views = append(views, targetView{Name: name, Brains: []string{}, targetStatus: *tf.Targets[name]})
+	}
+	st["targets"] = views
+	return json.Marshal(st)
+}
+
+// targetsText is fridolin vault status's lines for the node targets.
+func targetsText(ts []targetView, now time.Time, line func(string, ...any)) {
+	for _, t := range ts {
+		where := t.Folder
+		if t.NodeName != "" || t.Node != "" {
+			where = fmt.Sprintf("%s on %s (%s)", t.Folder, t.NodeName, t.Node)
+		}
+		state := ""
+		switch {
+		case t.Problem != "":
+			state = " — " + t.Problem
+		case t.Job != "":
+			state = " — running now: " + t.Job
+		}
+		line("target %s: %s%s", t.Name, strings.TrimSpace(where), state)
+		if len(t.Brains) > 0 {
+			line("  brains: %s", strings.Join(t.Brains, ", "))
+		}
+		for _, r := range []*snapshotRecord{t.LastNightly, t.LastHourly} {
+			if r == nil {
+				continue
+			}
+			if r.Error != "" && r.ID == "" {
+				line("  last %s: failed %s: %s", r.Kind, ago(r.At, now), r.Error)
+				continue
+			}
+			line("  last %s: %s %s, %d files, %s added", r.Kind, r.ID, ago(r.At, now), r.Files, gib(r.BytesAdded))
+		}
+		if !t.SizeAt.IsZero() {
+			line("  size: %s in %d files, %s free on its disk (%s)", gib(t.Size), t.Files, gib(int64(min(t.Free, 1<<62))), ago(t.SizeAt, now))
+		}
+		if r := t.LastCheck; r != nil {
+			if r.OK {
+				line("  last check: ok %s", ago(r.At, now))
+			} else {
+				line("  last check: FAILED %s: %s", ago(r.At, now), r.Error)
+			}
+		}
+		if h := t.DeletionHold; h != nil {
+			line("  pruning held since %s: snapshot %s has %d files, the one before %d", ago(h.Since, now), h.Snapshot, h.Files, h.PrevFiles)
+		}
+		if d := t.LastDrill; d != nil {
+			state := "ok"
+			if !d.OK {
+				state = "FAILED"
+			}
+			line("  last restore drill: %s %s — %s", state, ago(d.At, now), d.Detail)
+		}
+	}
 }
 
 func parseVaultStatus(data []byte) (vaultStatus, error) {
@@ -63,6 +143,7 @@ func VaultStatusText(data []byte, now time.Time) (string, error) {
 	}
 	if st.State == vaultOff {
 		line("  set vault.enabled in config.json to turn it on")
+		targetsText(st.Targets, now, line)
 		return b.String(), nil
 	}
 	if st.Job != "" {
@@ -161,5 +242,6 @@ func VaultStatusText(data []byte, now time.Time) (string, error) {
 			line("  %s  %-9s %s (%s)", e.At.Local().Format("2006-01-02 15:04"), gib(e.Size), e.Path, e.Reason)
 		}
 	}
+	targetsText(st.Targets, now, line)
 	return b.String(), nil
 }

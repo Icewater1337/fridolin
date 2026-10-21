@@ -55,7 +55,7 @@ const button = (root, label) => root.querySelectorAll('button').find((b) => b.te
 test('a running vault shows every section', async (t) => {
   const { root } = await open(t, (path) => (path.startsWith('/api/vault/status') ? running() : {}));
   const titles = root.querySelectorAll('h2.section-title').map((e) => e.textContent);
-  assert.deepEqual(titles, ['Hot tier', 'Snapshots', 'Litestream', 'B2 transactions', 'Restore drill', 'Evictions']);
+  assert.deepEqual(titles, ['Hot tier', 'Snapshots', 'Litestream', 'B2 transactions', 'Restore drill', 'Evictions', 'Backup targets']);
   const text = root.textContent;
   assert.ok(text.includes('Running'), 'the state pill');
   assert.ok(text.includes('/data'), 'the hot tier folder');
@@ -109,13 +109,13 @@ test('the meter shows the hot tier against the budget, with the target marked', 
   assert.ok(root.textContent.includes('45.0 GB'), 'the target in the legend');
 });
 
-test('an off vault shows only how to turn it on', async (t) => {
+test('an off vault shows how to turn it on, and the node targets, which run without it', async (t) => {
   const { root } = await open(t, (path) => (path.startsWith('/api/vault/status') ? { enabled: false, state: 'off' } : {}));
   const text = root.textContent;
   assert.ok(text.includes('The vault is off'), text);
   assert.ok(text.includes('vault.enabled'), text);
-  assert.equal(root.querySelectorAll('h2.section-title').length, 0, 'no sections');
-  assert.equal(root.querySelectorAll('button').length, 0, 'no actions');
+  assert.deepEqual(root.querySelectorAll('h2.section-title').map((e) => e.textContent), ['Backup targets'], 'only the targets');
+  assert.deepEqual(root.querySelectorAll('button').map((b) => b.textContent), ['Add target…'], 'no vault actions');
 });
 
 test('a vault in error says why', async (t) => {
@@ -203,4 +203,88 @@ test('a refresh keeps what did not change', async (t) => {
   assert.ok(now[0].textContent.includes('new.m4a'), 'the new eviction comes first');
   assert.equal(now[1], rows[0], 'the rows already shown stay');
   assert.equal(now[2], rows[1]);
+});
+
+test('node targets show as cards with their jobs, and an off vault shows them too', async (t) => {
+  const target = {
+    name: 'nas', kind: 'node', node: 'a1b2c3d4e5f6', node_name: 'windows-pc', folder: 'D:\\Backups\\fridolin',
+    nightly_at: '03:00', hourly: false, include_data_dir: false, retention: { hourly: 24, daily: 14, weekly: 8, monthly: 12 },
+    window_hours: 26, online: true, ready: true, brains: ['personal'],
+    last_nightly: { at: '2026-10-20T03:00:00Z', kind: 'nightly', id: 'cafe1234', files: 42, bytes_added: 1000 },
+    size: 5 * GB, files: 300, free: 900 * GB, size_at: '2026-10-20T03:05:00Z',
+  };
+  const { root, calls } = await open(t, (path, init) => {
+    if (path.startsWith('/api/vault/status')) return { enabled: false, state: 'off', targets: [target] };
+    if (init.method === 'POST') return { status: 'started' };
+    return {};
+  });
+  const text = root.textContent;
+  assert.ok(text.includes('The vault is off'), 'the off hero');
+  assert.ok(text.includes('nas') && text.includes('windows-pc') && text.includes('personal'), text);
+  assert.ok(text.includes('cafe1234'), 'the last snapshot');
+  assert.ok(text.includes('Ready'), 'the state');
+  button(root, 'Back up now').click();
+  await settle();
+  assert.ok(calls.some((c) => c.method === 'POST' && c.path === '/api/vault/targets/nas/snapshot'), 'the job of the target');
+  button(root, 'Restore drill').click();
+  await settle();
+  assert.ok(calls.some((c) => c.method === 'POST' && c.path === '/api/vault/targets/nas/restore-drill'));
+});
+
+test('a target\'s brains are chosen in brain.json, with their node-only paths', async (t) => {
+  const target = { name: 'nas', kind: 'node', node: 'a1b2c3d4e5f6', folder: '/Volumes/B/f', nightly_at: '03:00', retention: {}, online: true, ready: true, brains: [] };
+  const brains = [
+    { id: 'personal', manifest: { backup: { enabled: true, exclude: ['/work/'] } } },
+    { id: 'family', manifest: { backup: { enabled: true, exclude: [], targets: { cloud: false } } } },
+  ];
+  const { root, calls } = await open(t, (path) => {
+    if (path.startsWith('/api/vault/status')) return { enabled: false, state: 'off', targets: [target] };
+    if (path === '/api/brains') return brains;
+    return { status: 'saved' };
+  });
+  button(root, 'Brains…').click();
+  await settle();
+  const dlg = document.querySelector('dialog');
+  const boxes = dlg.querySelectorAll('input[type=checkbox]');
+  boxes[0].checked = true;
+  boxes[0].dispatchEvent(new Event('change'));
+  const paths = dlg.querySelectorAll('input').filter((i) => i.getAttribute('type') !== 'checkbox');
+  paths[0].value = '/work/, /clients/';
+  dlg.querySelectorAll('button').find((b) => b.textContent === 'Save').click();
+  await settle();
+  const puts = calls.filter((c) => c.method === 'PUT');
+  assert.equal(puts.length, 1, 'only the brain that changed');
+  assert.equal(puts[0].path, '/api/brains/personal/backup');
+  assert.deepEqual(puts[0].body, { targets: { 'node:nas': true }, node_only: ['/work/', '/clients/'] });
+});
+
+test('the wizard adds a target in a folder picked on the node', async (t) => {
+  const node = { id: 'a1b2c3d4e5f6', name: 'windows-pc', device: 'approved', online: true, effective: { backup: { roots: ['D:\\'] } } };
+  const { root, calls } = await open(t, (path, init) => {
+    if (path.startsWith('/api/vault/status')) return { enabled: false, state: 'off' };
+    if (path === '/api/nodes') return { enabled: true, nodes: [node, { id: 'ffffffffffff', name: 'other', device: 'approved', effective: {} }] };
+    if (path.endsWith('/call')) {
+      const body = JSON.parse(init.body);
+      if (body.method === 'fs.roots') return { result: { sep: '\\', roots: [{ path: 'D:\\', label: 'D:' }] } };
+      return { result: { path: body.params.path, folders: [] } };
+    }
+    return { target: {} };
+  });
+  button(root, 'Add target…').click();
+  await settle();
+  const dlg = document.querySelector('dialog');
+  assert.ok(dlg.textContent.includes('windows-pc') && !dlg.textContent.includes('other ('), 'only nodes whose backups are approved');
+  dlg.querySelectorAll('button.fb-item')[0].click();
+  await settle();
+  const newName = dlg.querySelectorAll('input').find((i) => i.getAttribute('aria-label') === 'New folder name');
+  newName.value = 'fridolin';
+  dlg.querySelectorAll('button').find((b) => b.textContent === 'Use new folder').click();
+  dlg.querySelectorAll('button').find((b) => b.textContent === 'Add target').click();
+  await settle();
+  const add = calls.find((c) => c.method === 'POST' && c.path === '/api/vault/targets');
+  assert.ok(add, 'posted');
+  assert.equal(add.body.node, 'a1b2c3d4e5f6');
+  assert.equal(add.body.folder, 'D:\\fridolin');
+  assert.equal(add.body.name, 'nas');
+  assert.equal(add.body.nightly_at, '03:00');
 });

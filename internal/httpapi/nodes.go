@@ -177,7 +177,13 @@ func (a *NodesAPI) Call(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !slices.Contains(nodeproto.Methods, req.Method) {
-		WriteErr(w, http.StatusBadRequest, "method must be one of exec, fs.list, fs.read, fs.write, host.info, notify")
+		WriteErr(w, http.StatusBadRequest, "method must be one of exec, fs.list, fs.read, fs.write, fs.roots, fs.browse, host.info, notify")
+		return
+	}
+	// A backup repository's files are restic's, written by the core's
+	// backups only (vault targets), never by hand.
+	if slices.Contains(nodeproto.BackupRepoMethods, req.Method) {
+		WriteErr(w, http.StatusBadRequest, req.Method+" is the core's backups' own; the Vault page's targets use it")
 		return
 	}
 	params := req.Params

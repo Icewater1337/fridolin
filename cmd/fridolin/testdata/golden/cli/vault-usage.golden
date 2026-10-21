@@ -10,12 +10,22 @@ Usage:
                                       cold tier and print where it is
   fridolin vault rebuild              rebuild vault.db from the cold tier and the disk, then
                                       bring back every pinned file that is only cold
-  fridolin vault restore-drill        restore the latest snapshot into an empty folder and
-                                      check a brain folder and the database copies
+  fridolin vault restore-drill [--target NAME]
+                                      restore the latest snapshot (of node target NAME)
+                                      into an empty folder and check a brain folder and
+                                      the database copies
+  fridolin vault snapshot [--target NAME] [--hourly]
+                                      take a snapshot now (to node target NAME)
+  fridolin vault check [--target NAME]
+                                      check the snapshots' repository (of node target NAME)
 
-Each asks the running bridge; sync, evict, rebuild and restore-drill start a
-job and return, and status shows how it went. status reads what the bridge
-last wrote when none runs.
+Node targets (vault.targets, docs/VAULT.md "Node targets") are restic
+repositories in folders on nodes; status lists them, and the Vault page adds
+them.
+
+Each asks the running bridge; sync, evict, rebuild, restore-drill, snapshot
+and check start a job and return, and status shows how it went. status reads
+what the bridge last wrote when none runs.
 
 Flags:
   --config PATH     config file (default: $FRIDOLIN_CONFIG, else

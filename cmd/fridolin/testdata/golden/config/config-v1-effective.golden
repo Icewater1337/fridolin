@@ -174,7 +174,27 @@
     "endpoint": "s3.example-region.backblazeb2.com",
     "headroom_percent": 15,
     "hot_budget_gb": 40,
-    "snapshots_bucket": "example-snapshots"
+    "snapshots_bucket": "example-snapshots",
+    "targets": [
+      {
+        "check_days": 3,
+        "folder": "/Volumes/Backup/fridolin",
+        "hourly": true,
+        "include_data_dir": true,
+        "kind": "node",
+        "name": "nas",
+        "nightly_at": "02:30",
+        "node": "0123456789ab",
+        "read_data_days": 14,
+        "retention": {
+          "daily": 7,
+          "hourly": 12,
+          "monthly": 6,
+          "weekly": 4
+        },
+        "window_hours": 30
+      }
+    ]
   },
   "version": 2,
   "viewer": false

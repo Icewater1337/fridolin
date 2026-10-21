@@ -432,7 +432,16 @@ func (r *Registry) ApproveCommands(id string) (*Node, error) {
 		case nodeproto.DevicePending:
 			return ErrNotApproved
 		}
+		// The backup folders are the owner's picks, not part of what the
+		// node declares: approving again keeps them.
+		var folders []string
+		if n.Approved.Backup != nil {
+			folders = n.Approved.Backup.Folders
+		}
 		n.Approved, n.CommandsApprovedAt = n.Declared, &now
+		if b := n.Declared.Backup; b != nil {
+			n.Approved.Backup = &nodeproto.BackupCap{Roots: slices.Clone(b.Roots), Folders: folders}
+		}
 		return nil
 	})
 }

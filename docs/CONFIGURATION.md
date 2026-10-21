@@ -1541,13 +1541,39 @@ does: `$FRIDOLIN_CORE_STORE`, else `vault.bucket` *(restart)* with
 | `snapshots_bucket` | `"fridolin-snapshots"` | the B2 bucket of the restic and Litestream snapshots |
 | `endpoint` | `"s3.eu-central-003.backblazeb2.com"` | the buckets' S3 endpoint: a host name, without `https://` or a path |
 | `b2_daily_budget` | `2000` | Class B and Class C transactions a day each that `fridolin doctor` and the dashboard measure the bridge's B2 use against: they warn at 70%. B2's free tier caps each class at 2,500 a day ([VAULT.md](VAULT.md#b2-transactions)) |
+| `targets` | `[]` | backup targets besides the cloud: restic repositories in folders on nodes, below ([VAULT.md](VAULT.md#node-targets)) |
 
 A bucket name is 6 to 63 lower-case letters, digits and `-`, starting and
 ending with a letter or digit and not with `b2-`. The keys to the buckets
 are never in `config.json`: they live in the host's secrets. A change to
 the `vault` section starts the vault again with it, except
-`b2_daily_budget`, which only changes what is warned about. What the vault does
-with these is in [VAULT.md](VAULT.md).
+`b2_daily_budget`, which only changes what is warned about, and `targets`,
+which run on their own. What the vault does with these is in
+[VAULT.md](VAULT.md).
+
+Each of `vault.targets` (the Vault page's *Add target…* writes them; up to
+16) is:
+
+```json
+{"name": "nas", "kind": "node", "node": "a1b2c3d4e5f6", "folder": "D:\\Backups\\fridolin",
+ "nightly_at": "03:00", "hourly": false, "include_data_dir": false,
+ "retention": {"hourly": 24, "daily": 14, "weekly": 8, "monthly": 12},
+ "check_days": 7, "read_data_days": 30, "window_hours": 26}
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `name` | | 1 to 32 lower-case letters, digits and `-`; a brain chooses the target as `"node:<name>"` in its `backup.targets` |
+| `kind` | | `"node"`, the only kind |
+| `node` | | the node's id (`fridolin nodes`) |
+| `folder` | | an absolute path on the node, in its own spelling |
+| `nightly_at` | `"03:00"` | when the nightly snapshot runs, `HH:MM` local time |
+| `hourly` | `false` | a snapshot each hour besides |
+| `include_data_dir` | `false` | the nightly snapshot takes the data dir too, less the brain folders that do not choose the target |
+| `retention` | 24, 14, 8, 12 | what pruning keeps: hourly, daily, weekly, monthly; one that keeps nothing is refused |
+| `check_days` | `7` | how often `restic check` runs |
+| `read_data_days` | `30` | how often a check reads 5% of the data back |
+| `window_hours` | `26` | how old the last snapshot may grow before `fridolin doctor` warns |
 
 ### `nodes`
 

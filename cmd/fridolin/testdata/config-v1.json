@@ -160,7 +160,22 @@
     "bucket": "example-vault",
     "snapshots_bucket": "example-snapshots",
     "endpoint": "s3.example-region.backblazeb2.com",
-    "b2_daily_budget": 1500
+    "b2_daily_budget": 1500,
+    "targets": [
+      {
+        "name": "nas",
+        "kind": "node",
+        "node": "0123456789ab",
+        "folder": "/Volumes/Backup/fridolin",
+        "nightly_at": "02:30",
+        "hourly": true,
+        "include_data_dir": true,
+        "retention": {"hourly": 12, "daily": 7, "weekly": 4, "monthly": 6},
+        "check_days": 3,
+        "read_data_days": 14,
+        "window_hours": 30
+      }
+    ]
   },
   "nodes": {
     "enabled": true,

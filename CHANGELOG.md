@@ -55,6 +55,19 @@ for compatibility.
   nothing can; `fridolin doctor` checks it (`plaud-app-build`). Update the
   node agents along with the core.
 
+- Backups to folders on your nodes (#143): a node lends its disks with
+  `fridolin node backup on` (or `node join --backup`), the owner approves
+  it (`fridolin nodes approve <id> --commands`), and the Vault page's
+  *Add target…* picks a folder on one of its drives. The core keeps an
+  encrypted restic repository there, sent over the node connection and
+  never through the cloud, on its own schedule and retention
+  (`vault.targets`). Each `brain.json` chooses its targets with
+  `backup.targets` and keeps paths out of the cloud but on the node
+  targets with `backup.node_only`; without them nothing changes. `fridolin
+  vault status`, `restore-drill --target`, `snapshot --target`, `check
+  --target` and doctor's `vault-targets` cover them. Update the node
+  agents along with the core to use it.
+
 - The core brain's `fride_repo_add` adds a repository to FrIDE on a node:
   it clones one, or makes a new one with an initial commit and, by
   default, a private GitHub repository through the node's `gh`. The node

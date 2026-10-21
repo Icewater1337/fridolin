@@ -232,10 +232,12 @@ func (s *vaultService) b2View() *b2UsageView {
 }
 
 // restartKey is the vault's settings that start it again when they
-// change: all but the budget, which only changes what is warned about.
-func restartKey(v config.VaultConfig) config.VaultConfig {
-	v.B2DailyBudget = 0
-	return v
+// change: all but the budget, which only changes what is warned about,
+// and the node targets, which run on their own (vault_targets.go).
+func restartKey(v config.VaultConfig) string {
+	v.B2DailyBudget, v.Targets = 0, nil
+	data, _ := json.Marshal(v)
+	return string(data)
 }
 
 // ReadB2UsageFile reads core/b2-usage.json in dataDir, for doctor.

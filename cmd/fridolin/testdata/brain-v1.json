@@ -27,6 +27,13 @@
       "node_modules/",
       "*.log",
       "/big-folder/"
+    ],
+    "targets": {
+      "cloud": true,
+      "node:nas": true
+    },
+    "node_only": [
+      "/work/"
     ]
   },
   "calendar": {

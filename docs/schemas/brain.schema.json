@@ -31,7 +31,9 @@
       "additionalProperties": false,
       "properties": {
         "enabled": {"type": "boolean"},
-        "exclude": {"type": ["array", "null"], "items": {"type": "string", "not": {"pattern": "[\\r\\n]|^\\s*\\+"}}}
+        "exclude": {"type": ["array", "null"], "items": {"type": "string", "not": {"pattern": "[\\r\\n]|^\\s*\\+"}}},
+        "targets": {"type": ["object", "null"], "description": "Which backup targets get the folder: \"cloud\" (unset: true) and \"node:<target>\" of vault.targets (unset: false).", "propertyNames": {"pattern": "^(cloud|node:[a-z0-9][a-z0-9-]{0,31})$"}, "additionalProperties": {"type": "boolean"}},
+        "node_only": {"type": ["array", "null"], "description": "Paths, in exclude's syntax, that never go to the cloud but go to the node targets the brain chooses.", "items": {"type": "string", "pattern": "\\S", "not": {"pattern": "[\\r\\n]|^\\s*\\+"}}}
       }
     },
     "calendar": {

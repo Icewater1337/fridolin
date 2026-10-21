@@ -249,14 +249,19 @@ func (vs *vaultSnapshots) databases() map[string]string {
 
 // stage makes fresh copies of the databases in the staging folder.
 func (vs *vaultSnapshots) stage(ctx context.Context) error {
-	dir := vs.stagingDir()
+	return stageDatabases(ctx, vs.stagingDir(), vs.databases())
+}
+
+// stageDatabases makes fresh VACUUM INTO copies of dbs (name → live file)
+// in dir.
+func stageDatabases(ctx context.Context, dir string, dbs map[string]string) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
 	if _, err := config.EnsureDir(dir); err != nil {
 		return err
 	}
-	for name, src := range vs.databases() {
+	for name, src := range dbs {
 		if _, err := os.Stat(src); errors.Is(err, os.ErrNotExist) {
 			continue
 		}
@@ -308,23 +313,32 @@ func (vs *vaultSnapshots) paths(kind string) (paths, excludes []string) {
 	} else {
 		paths = append(append(paths, data), outside...)
 	}
-	// Live databases never: their copies are in the staging folder.
-	for _, db := range vs.databases() {
+	return paths, append(excludes, dataDirExcludes(data, vs.databases())...)
+}
+
+// dataDirExcludes are what no snapshot of the data dir takes: the live
+// databases (their copies are in a staging folder), lock files,
+// Litestream's folders, and what is rebuilt.
+func dataDirExcludes(data string, dbs map[string]string) []string {
+	var excludes []string
+	for _, db := range dbs {
 		for _, suffix := range []string{"", "-wal", "-shm", "-journal"} {
 			excludes = append(excludes, db+suffix)
 		}
 	}
-	excludes = append(excludes,
+	slices.Sort(excludes)
+	return append(excludes,
 		"*.lock", ".*-litestream", "node_modules", ".DS_Store",
 		filepath.Join(data, runTokensDirName),
 		filepath.Join(data, brainStatesDirName, "*", "tmp"),
 		filepath.Join(data, brainStatesDirName, "*", "cache"),
 		filepath.Join(data, "core", "restic-cache"),
+		filepath.Join(data, "core", "restic-cache-*"),
+		filepath.Join(data, "core", "target-staging"),
 		filepath.Join(data, "core", "import"),
 		filepath.Join(data, "core", "replaced-*"),
 		filepath.Join(data, "core", "drill-*"),
 	)
-	return paths, excludes
 }
 
 func exists(p string) bool {

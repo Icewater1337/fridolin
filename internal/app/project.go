@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"slices"
 
 	"github.com/Icewater1337/fridolin/internal/access"
 	"github.com/Icewater1337/fridolin/internal/backup"
@@ -37,7 +36,9 @@ func BackupSettings(settings *config.Settings) backup.Settings {
 func BackupTarget(br *brain.Brain, notify func(context.Context, *brain.Brain, string) error) backup.Target {
 	t := backup.Target{ID: br.ID(), Dir: br.Dir(), WaitIdle: br.WaitIdle, Settings: func() backup.TargetSettings {
 		m := br.Manifest()
-		return backup.TargetSettings{Name: m.Name, Enabled: m.Backup.Enabled, Exclude: slices.Clone(m.Backup.Exclude)}
+		// The Drive backup is the cloud: a folder that does not go there,
+		// and node_only paths, stay out of it.
+		return backup.TargetSettings{Name: m.Name, Enabled: m.Backup.Cloud(), Exclude: m.Backup.CloudExcludes()}
 	}}
 	if notify != nil {
 		t.Notify = func(ctx context.Context, text string) error { return notify(ctx, br, text) }

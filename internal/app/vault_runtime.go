@@ -116,6 +116,9 @@ type vaultStatus struct {
 	// B2 is the bridge's Backblaze B2 transactions today (b2usage.go),
 	// omitted while it made none.
 	B2 *b2UsageView `json:"b2,omitempty"`
+	// Targets are the node targets (vault_targets.go), which run whether
+	// or not the vault does; omitted while there are none.
+	Targets []targetView `json:"targets,omitempty"`
 	// UpdatedAt is when the running service last wrote the file: doctor
 	// takes an old one for a bridge that does not run.
 	UpdatedAt time.Time `json:"updated_at,omitzero"`
@@ -169,6 +172,9 @@ type vaultService struct {
 	// usage counts the B2 transactions of the cold tier, restic and
 	// Litestream; nil counts nothing.
 	usage *cloud.Usage
+	// targets are the node targets, whose state Status shows too; nil
+	// for none.
+	targets *targetService
 
 	layout atomic.Pointer[vaultLayout]
 
@@ -792,6 +798,9 @@ func (s *vaultService) Status(ctx context.Context) vaultStatus {
 	st.Evictions = slices.Clone(st.Evictions)
 	if st.Evictions == nil {
 		st.Evictions = []vault.Eviction{}
+	}
+	if s.targets != nil {
+		st.Targets = s.targets.Views()
 	}
 	return st
 }
