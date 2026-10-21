@@ -480,6 +480,21 @@ for compatibility.
 
 ### Fixed
 
+- Privacy: the vault's restic snapshots (nightly and hourly, to B2, and
+  the weekly copy to the restic repository on Drive) now follow each
+  brain's backup settings, as the Google Drive backup always did. Before,
+  they took every brain folder whole, with what `backup.exclude` names
+  (such as a `/work/` folder) and the secret files (`.env`, `*.pem`, …).
+  Now a folder with `backup.enabled: false` is left out, `backup.exclude`
+  leaves out the same files in both, each brain's patterns only in its
+  own folder, and the secret files stay out unless
+  `backup.include_secret_files` is on; the cold tier does the same for a
+  brain folder in the data dir. A folder whose `brain.json` cannot be
+  read is left out whole, with a warning in the log and from `fridolin
+  doctor`. Snapshots taken before still hold those files: delete them
+  with `restic forget` and `restic prune`. The first snapshot after the
+  upgrade may hold pruning (the mass-deletion guard) when it leaves out
+  many files; allow it on the Vault page.
 - A brain run with `claude_path` or `codex_path` left at its bare name
   (`"claude"`, `"codex"`, the default) is no longer refused in the
   container with `bwrap policy ...: "codex" is not an absolute path`:

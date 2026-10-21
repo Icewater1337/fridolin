@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -13,6 +14,7 @@ var vaultDoctorChecks = []DoctorCheck{
 	{ID: "vault", Title: "vault reachable", Required: true, Applies: vaultOn, Run: checkVaultReachable},
 	{ID: "vault-upload", Title: "vault uploads within the hour", Required: true, Applies: vaultOn, Run: checkVaultUpload},
 	{ID: "vault-snapshot", Title: "snapshot within 26 hours", Required: true, Applies: vaultOn, Run: checkVaultSnapshot},
+	{ID: "vault-brain-backup", Title: "brain folders follow their backup settings", Required: true, Applies: vaultOn, Run: checkVaultBrainBackup},
 	{ID: "vault-litestream", Title: "Litestream replicating bridge.db and vault.db", Required: true, Applies: vaultOn, Run: checkVaultLitestream},
 }
 
@@ -138,4 +140,32 @@ func checkVaultLitestream(_ context.Context, env *DoctorEnv) DoctorResult {
 		return DoctorResult{Status: DoctorFail, Detail: fmt.Sprintf("Litestream is not running (%d restarts): %s", l.Restarts, l.LastError), Fix: "the bridge's log says why; it restarts Litestream by itself"}
 	}
 	return DoctorResult{Status: DoctorOK, Detail: fmt.Sprintf("pid %d, %d restarts", l.PID, l.Restarts)}
+}
+
+// checkVaultBrainBackup warns about the brain folders the snapshots and
+// the cold tier leave out because their brain.json cannot be read: the
+// vault fails closed rather than upload what they might exclude, so
+// nothing of those folders reaches the cloud until it is fixed. A folder
+// whose backup is off is left out as asked, and counts as fine.
+func checkVaultBrainBackup(_ context.Context, env *DoctorEnv) DoctorResult {
+	st, bad := env.vaultStatus()
+	if bad != nil {
+		return *bad
+	}
+	var unreadable, off []string
+	for _, b := range st.Snapshots.SkippedBrains {
+		if b.Unreadable {
+			unreadable = append(unreadable, fmt.Sprintf("%s (%s): %s", b.ID, b.Dir, b.Skip))
+		} else {
+			off = append(off, b.ID)
+		}
+	}
+	if len(unreadable) > 0 {
+		return DoctorResult{Status: DoctorWarn, Detail: "left out of the snapshots and the cold tier: " + strings.Join(unreadable, "; "),
+			Fix: "fix the brain.json (fridolin check says what is wrong with it); the next snapshot takes the folder again"}
+	}
+	if len(off) > 0 {
+		return DoctorResult{Status: DoctorOK, Detail: "every brain.json read; left out as their backup is off: " + strings.Join(off, ", ")}
+	}
+	return DoctorResult{Status: DoctorOK, Detail: "every brain.json read"}
 }
