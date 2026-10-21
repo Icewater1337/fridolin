@@ -29,6 +29,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
@@ -49,7 +50,7 @@ type Server struct {
 	srv          *http.Server
 	// cipher is the outer layer (crypt.go); nil stores restic's files as
 	// they are.
-	cipher *rcrypt.Cipher
+	cipher atomic.Pointer[rcrypt.Cipher]
 }
 
 // Start listens on a loopback port of its own, with a user and password
@@ -147,13 +148,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 		w.WriteHeader(http.StatusOK)
 	case http.MethodGet:
-		if s.cipher != nil {
+		if s.cipher.Load() != nil {
 			s.readCrypt(w, r, file)
 			return
 		}
 		s.read(w, r, file)
 	case http.MethodPost:
-		if s.cipher != nil {
+		if s.cipher.Load() != nil {
 			if err := s.encryptBody(r); err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return

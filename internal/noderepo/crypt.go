@@ -20,8 +20,10 @@ import (
 // rclone's crypt remote over it (filename_encryption off, suffix none)
 // and restic's rclone backend. Sizes restic sees are the plaintext's.
 
-// SetCipher turns the outer layer on for this server's requests.
-func (s *Server) SetCipher(c *rcrypt.Cipher) { s.cipher = c }
+// SetCipher turns the outer layer on for this server's requests. Call it
+// before restic runs; it is atomic because the requests come from restic,
+// which the race detector does not see as ordered after the call.
+func (s *Server) SetCipher(c *rcrypt.Cipher) { s.cipher.Store(c) }
 
 // Layers says what the folder holds: LayersNone (no repository yet),
 // LayersRestic (a repository of restic's encryption alone, from before)
@@ -53,7 +55,7 @@ func (s *Server) Detect(ctx context.Context) (Layers, error) {
 
 // plainSize is the size restic sees of a stored file of n bytes.
 func (s *Server) plainSize(n int64) (int64, error) {
-	if s.cipher == nil {
+	if s.cipher.Load() == nil {
 		return n, nil
 	}
 	return rcrypt.DecryptedSize(n)
@@ -106,7 +108,7 @@ func (s *Server) readCrypt(w http.ResponseWriter, r *http.Request, file nodeprot
 	}
 	// The first piece before the status, so that a wrong key or a
 	// damaged file is an error and not a cut body.
-	first, err := s.cipher.DecryptRange(readAt, st.Size, start, min(cryptChunk, stop-start))
+	first, err := s.cipher.Load().DecryptRange(readAt, st.Size, start, min(cryptChunk, stop-start))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("%s/%s: %v", file.Type, file.Name, err), http.StatusInternalServerError)
 		return
@@ -128,7 +130,7 @@ func (s *Server) readCrypt(w http.ResponseWriter, r *http.Request, file nodeprot
 		if off >= stop || len(data) == 0 {
 			return
 		}
-		if data, err = s.cipher.DecryptRange(readAt, st.Size, off, min(cryptChunk, stop-off)); err != nil {
+		if data, err = s.cipher.Load().DecryptRange(readAt, st.Size, off, min(cryptChunk, stop-off)); err != nil {
 			panic(http.ErrAbortHandler)
 		}
 	}
@@ -136,7 +138,7 @@ func (s *Server) readCrypt(w http.ResponseWriter, r *http.Request, file nodeprot
 
 // encryptBody replaces the upload's body with its encrypted form.
 func (s *Server) encryptBody(r *http.Request) error {
-	enc, err := s.cipher.EncryptReader(r.Body)
+	enc, err := s.cipher.Load().EncryptReader(r.Body)
 	if err != nil {
 		return err
 	}
