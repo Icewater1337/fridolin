@@ -45,9 +45,16 @@ func TestDevMessenger(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("chunk callback calls = %d", calls)
 	}
-	id, err := d.SendPoll(ctx, "chat", "when", []string{"today", "tomorrow"}, 1)
-	if err != nil || !strings.HasPrefix(id, "dev-poll-") {
-		t.Fatalf("poll = %q, %v", id, err)
+	// The poll's id comes before the poll shows, where it can be voted on.
+	var kept string
+	id, err := d.SendPoll(ctx, "chat", "when", []string{"today", "tomorrow"}, 1, func(id string) {
+		kept = id
+		if len(d.Outbox()) != 3 {
+			t.Errorf("the poll showed before it was kept: %+v", d.Outbox())
+		}
+	})
+	if err != nil || !strings.HasPrefix(id, "dev-poll-") || kept != id {
+		t.Fatalf("poll = %q, kept %q, %v", id, kept, err)
 	}
 	box := d.Outbox()
 	if len(box) != 4 {

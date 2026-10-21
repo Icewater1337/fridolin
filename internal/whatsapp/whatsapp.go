@@ -181,14 +181,21 @@ func (wa *Client) SendChunked(ctx context.Context, jid string, text string) erro
 
 // SendPoll sends a WhatsApp poll and returns the message ID.
 // maxSelectable is the max options a voter can pick (1 = single choice, 0 = unlimited).
-func (wa *Client) SendPoll(ctx context.Context, jid string, question string, options []string, maxSelectable int) (string, error) {
+// The ID is chosen here and given to sending before the poll goes out:
+// a vote can arrive before SendMessage returns, and ProcessVote drops a
+// vote for a poll that is not kept yet.
+func (wa *Client) SendPoll(ctx context.Context, jid string, question string, options []string, maxSelectable int, sending func(id string)) (string, error) {
 	recipient, err := wa.outbound.Recipient(jid)
 	if err != nil {
 		return "", err
 	}
 	cli := wa.cl()
 	msg := cli.BuildPollCreation(question, options, maxSelectable)
-	resp, err := cli.SendMessage(ctx, recipient, msg)
+	id := cli.GenerateMessageID()
+	if sending != nil {
+		sending(string(id))
+	}
+	resp, err := cli.SendMessage(ctx, recipient, msg, whatsmeow.SendRequestExtra{ID: id})
 	if err != nil {
 		return "", err
 	}

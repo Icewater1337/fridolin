@@ -75,8 +75,13 @@ func (d *Messenger) SendChunked(ctx context.Context, jid, text string) error {
 	return nil
 }
 
-func (d *Messenger) SendPoll(_ context.Context, jid, q string, opts []string, _ int) (string, error) {
+// SendPoll shows the poll in the dev chat, where it can be voted on at
+// once: sending has its id first.
+func (d *Messenger) SendPoll(_ context.Context, jid, q string, opts []string, _ int, sending func(id string)) (string, error) {
 	id := fmt.Sprintf("dev-poll-%d-%d", time.Now().UnixNano(), d.polls.Add(1))
+	if sending != nil {
+		sending(id)
+	}
 	d.record(Message{JID: jid, Text: q, Poll: opts, ID: id})
 	return id, nil
 }

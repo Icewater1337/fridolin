@@ -239,6 +239,13 @@ func (s *Store) SavePollRef(msgID, chatJID, brain, question string, options []st
 	return err
 }
 
+// DeletePoll forgets the poll kept as msgID, one that did not go out
+// after all (SavePollRef is called before a poll is sent).
+func (s *Store) DeletePoll(msgID string) error {
+	_, err := s.db.Exec(`DELETE FROM polls WHERE msg_id = ?`, msgID)
+	return err
+}
+
 // SentPoll is what the bridge keeps of a poll it sent, for its votes.
 type SentPoll struct {
 	Chat     string

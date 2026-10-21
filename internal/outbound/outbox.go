@@ -353,18 +353,28 @@ func (o *Outbox) send(ctx context.Context, m Link, r *store.OutboxRow, p store.O
 	}
 	poll := Poll{Question: p.Question, Options: p.Options, MaxSelectable: p.Max}
 	log.Printf("Sending poll to %s: %q (%d options)", r.Chat, p.Question, len(p.Options))
-	msgID, err := m.SendPoll(ctx, r.Chat, p.Question, p.Options, p.Max)
+	// Kept, before it goes out, so that the votes can be matched back to
+	// its options and reach the brain that sent it: a vote that arrived
+	// before the poll was kept would be lost.
+	kept := ""
+	_, err := m.SendPoll(ctx, r.Chat, p.Question, p.Options, p.Max, func(id string) {
+		if err := o.store.SavePollRef(id, r.Chat, r.Brain, p.Question, p.Options, p.Ref); err != nil {
+			log.Printf("failed to save poll %s to DB: %v", id, err)
+			return
+		}
+		kept = id
+	})
 	if err != nil {
+		if kept != "" {
+			if err := o.store.DeletePoll(kept); err != nil {
+				log.Printf("failed to drop poll %s that did not go out: %v", kept, err)
+			}
+		}
 		if !isConnected(m) || ctx.Err() != nil || errors.Is(err, ErrRefusedRecipient) {
 			return err
 		}
 		log.Printf("failed to send poll to %s: %v — falling back to text", r.Chat, err)
 		return m.SendMessage(ctx, r.Chat, PollAsText(poll))
-	}
-	// Kept so the votes can be matched back to its options and reach the
-	// brain that sent it.
-	if err := o.store.SavePollRef(msgID, r.Chat, r.Brain, p.Question, p.Options, p.Ref); err != nil {
-		log.Printf("failed to save poll %s to DB: %v", msgID, err)
 	}
 	return nil
 }

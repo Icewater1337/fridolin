@@ -279,11 +279,11 @@ func (g leaseGate) SendChunked(ctx context.Context, jid, text string) error {
 	return g.Messenger.SendChunked(ctx, jid, text)
 }
 
-func (g leaseGate) SendPoll(ctx context.Context, jid, q string, opts []string, max int) (string, error) {
+func (g leaseGate) SendPoll(ctx context.Context, jid, q string, opts []string, max int, sending func(string)) (string, error) {
 	if g.lost() {
 		return "", errLeaseLost
 	}
-	return g.Messenger.SendPoll(ctx, jid, q, opts, max)
+	return g.Messenger.SendPoll(ctx, jid, q, opts, max, sending)
 }
 
 // ── the tailnet ───────────────────────────────────────────────────────────

@@ -458,6 +458,11 @@ for compatibility.
   it. `core migrate --from-native` now sets the Mac's `claude_path` and
   `codex_path` to the image's `/usr/local/bin/claude` and
   `/usr/local/bin/codex` instead of removing them.
+- A vote on a poll the bridge sent, an approval's included, is no longer
+  dropped as one for an unknown poll when it arrives before WhatsApp has
+  acknowledged the poll: the bridge now chooses the poll's message id
+  and keeps the poll before sending it, and forgets it again if the send
+  fails.
 - A reply that went out just as the bridge began to stop is no longer
   sent again after the next start, nor left out of the brain's history:
   the outbox now records what went out before the stop closes
