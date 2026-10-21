@@ -359,8 +359,8 @@ func New(opts Options) (_ *App, err error) {
 	// expired-login notice: the owner may not open the dashboard for weeks.
 	b.vault = newVaultService(cfgs, opts.Container, b.logger, b.vaultBrains, b.openMedia)
 	b.vault.usage = b.b2
-	b.backup = newProjectedBackup(cfgs, b.brainMgr, b.notifyBackup, b.vault.driveSuperseded)
 	b.google = google.New(googleOptionsFor(cfgs))
+	b.backup = newProjectedBackup(cfgs, b.brainMgr, b.notifyBackup, b.vault.driveSuperseded, b.google)
 	b.plaud = NewPlaudManager(cfgs, b.brainMgr, b.submitHandOff, b.wa.SendMessage, func() string {
 		if d := b.site.Settings().Domain; d != "" {
 			return "https://" + d

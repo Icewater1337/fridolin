@@ -17,8 +17,6 @@ func backupJSONError(err error) error {
 			return "main.BackupResult"
 		case reflect.TypeFor[RestoreResult]():
 			return "main.RestoreResult"
-		case reflect.TypeFor[rcloneQuestion]():
-			return "main.rcloneQuestion"
 		}
 		return ""
 	}, func(name string) string {

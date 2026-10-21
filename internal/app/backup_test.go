@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"os/exec"
@@ -65,87 +66,100 @@ func TestBackupScheduleIsArmedOnlyBySavedChanges(t *testing.T) {
 	}
 }
 
-// fakeRunner scripts rclone's answers for the connect flow.
-type fakeRunner struct {
-	mu        sync.Mutex
-	calls     [][]string
-	scopes    []childScope // each call's helperScope
-	conf      string
-	authReady chan struct{}
-	release   <-chan struct{}
+// fakeDrive is rclone on a Drive for the connect flow: it records the
+// calls, and DriveFolder exists once a mkdir made it.
+type fakeDrive struct {
+	mu     sync.Mutex
+	calls  [][]string
+	folder bool
 }
 
-func (f *fakeRunner) run(ctx context.Context, args []string, stderr io.Writer) ([]byte, error) {
+func (f *fakeDrive) run(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, args)
-	f.scopes = append(f.scopes, helperScope(ctx))
-	f.mu.Unlock()
-	switch {
-	case len(args) > 1 && args[0] == "config" && args[1] == "create":
-		return []byte(`{"State":"*oauth-islocal,teamdrive,,","Option":{"Name":"config_is_local","DefaultStr":"true"}}`), nil
-	case len(args) > 1 && args[0] == "config" && args[1] == "update" && slices.Contains(args, "*oauth-islocal,teamdrive,,"):
-		if stderr != nil {
-			fmt.Fprintln(stderr, "NOTICE: Please go to the following link: http://127.0.0.1:53682/auth?state=abc123")
+	switch args[0] {
+	case "lsjson":
+		if f.folder {
+			return []byte(`[{"Name":"` + backup.DriveFolder + `","ID":"FOLDER-1","IsDir":true}]`), nil
 		}
-		if f.authReady != nil {
-			close(f.authReady)
-			<-f.release
+		return []byte(`[]`), nil
+	case "mkdir":
+		if strings.HasSuffix(args[1], ":"+backup.DriveFolder) {
+			f.folder = true
 		}
-		// rclone writes the token into the config file — and prints it.
-		_ = os.WriteFile(f.conf, []byte("[brain-gdrive]\ntype = drive\nscope = drive.file\ntoken = {\"access_token\":\"SECRET-TOKEN\"}\n"), 0o600)
-		return []byte(`{"State":"*teamdrive","Option":{"Name":"config_change_team_drive","DefaultStr":"false"},"Result":"SECRET-TOKEN"}`), nil
-	case len(args) > 1 && args[0] == "config" && args[1] == "update":
-		if !slices.Contains(args, "false") {
-			return nil, fmt.Errorf("team drive question must be answered false: %v", args)
-		}
-		return []byte(`{"State":""}`), nil
 	}
 	return nil, nil
 }
 
-func TestConnectDriveWalksQuestionsAndHidesToken(t *testing.T) {
-	release := make(chan struct{})
-	f := &fakeRunner{authReady: make(chan struct{}), release: release}
-	tb := connectTestBridge(t, f.run)
-	f.conf = tb.cfgs.Boot().RcloneConf()
-	var once sync.Once
-	t.Cleanup(func() { once.Do(func() { close(release) }) })
-	if w := tb.do("POST", "/api/backup/connect", nil); w.Code != 202 {
-		t.Fatalf("connect = %d %s", w.Code, w.Body.String())
-	}
-	select {
-	case <-f.authReady:
-	case <-time.After(10 * time.Second):
-		t.Fatal("sign-in did not reach browser approval")
-	}
-	var st struct {
-		Connect struct {
-			AuthURL string `json:"auth_url"`
-		} `json:"connect"`
-	}
-	if err := json.Unmarshal(tb.do("GET", "/api/backup/status", nil).Body.Bytes(), &st); err != nil {
+// TestConnectDriveThroughTheDashboard: Backup → Connect Google Drive
+// signs in with the client under Settings → Google sign-in, for
+// drive.file only, through the bridge's own redirect, which sends the
+// browser back to the Backup page; the token lands in the rclone remote
+// with the client, inside a folder of its own, and never in the API.
+func TestConnectDriveThroughTheDashboard(t *testing.T) {
+	srv, got := fakeGoogle(t)
+	script := filepath.Join(t.TempDir(), "rclone")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if st.Connect.AuthURL != "http://127.0.0.1:53682/auth?state=abc123" {
-		t.Errorf("auth url = %q", st.Connect.AuthURL)
+	tb := newTestBridge(t, `, "backup": {"rclone_path": "`+script+`"}`)
+	useGoogleServer(tb, srv)
+	drive := &fakeDrive{}
+	installBackupRunner(t, tb, drive.run)
+
+	if w := tb.do("POST", "/api/backup/connect", nil); w.Code != 412 || !strings.Contains(w.Body.String(), "Google OAuth client") {
+		t.Errorf("connect without a client = %d %s", w.Code, w.Body.String())
 	}
-	once.Do(func() { close(release) })
+	if w := tb.do("PUT", "/api/google/client", map[string]string{"json": fmt.Sprintf(testClientJSON, srv.URL)}); w.Code != 200 {
+		t.Fatal(w.Body.String())
+	}
+	w := tb.do("POST", "/api/backup/connect", nil)
+	var start struct {
+		AuthURL string `json:"auth_url"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &start)
+	u, err := url.Parse(start.AuthURL)
+	if w.Code != 202 || err != nil || u.Host != "accounts.google.com" {
+		t.Fatalf("connect = %d %s", w.Code, w.Body.String())
+	}
+	q := u.Query()
+	if q.Get("scope") != backup.DriveScope || q.Get("redirect_uri") != "http://127.0.0.1:"+portOf(tb)+"/" || q.Get("client_id") != "123-abc.apps.googleusercontent.com" {
+		t.Errorf("auth params = %v", q)
+	}
+	r := httptest.NewRequest("GET", "http://127.0.0.1:8765/?state="+url.QueryEscape(q.Get("state"))+"&code=good-code", nil)
+	r.Host = "127.0.0.1:8765"
+	r.Header.Set("Sec-Fetch-Site", "cross-site")
+	cb := httptest.NewRecorder()
+	tb.h.ServeHTTP(cb, r)
+	if cb.Code != 302 || cb.Header().Get("Location") != "/#/backup" {
+		t.Fatalf("callback: %d %s", cb.Code, cb.Header().Get("Location"))
+	}
+	if (*got)["code"] != "good-code" || (*got)["client_secret"] != "TEST-CLIENT-SECRET" {
+		t.Errorf("token request = %v", *got)
+	}
 	waitBackupConnect(t, tb)
-	if !connectedBackup(tb) {
-		t.Error("not connected after the flow")
+	conf, _ := os.ReadFile(tb.cfgs.Boot().RcloneConf())
+	sec := backup.RcloneSection(string(conf), "brain-gdrive")
+	if sec["client_id"] != "123-abc.apps.googleusercontent.com" || sec["client_secret"] != "TEST-CLIENT-SECRET" || sec["scope"] != "drive.file" ||
+		sec["root_folder_id"] != "FOLDER-1" || !strings.Contains(sec["token"], `"refresh_token":"RT-1"`) {
+		t.Errorf("remote = %v", sec)
 	}
-	last := f.calls[len(f.calls)-1]
-	if last[0] != "mkdir" || last[1] != "brain-gdrive:"+config.DefaultBackupRoot {
+	if fi, err := os.Stat(tb.cfgs.Boot().RcloneConf()); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("rclone.conf mode %v (%v)", fi, err)
+	}
+	last := drive.calls[len(drive.calls)-1]
+	if last[0] != "mkdir" || last[1] != "brain-gdrive-connecting:"+config.DefaultBackupRoot {
 		t.Errorf("last call = %v, want mkdir of backup root", last)
 	}
-	for i, scope := range f.scopes {
-		if scope != desktopChild {
-			t.Errorf("call %v ran as scope %d, want desktopChild", f.calls[i], scope)
+	body := tb.do("GET", "/api/backup/status", nil).Body.String()
+	for _, secret := range []string{"ACCESS-1", "RT-1", "TEST-CLIENT-SECRET"} {
+		if strings.Contains(body, secret) {
+			t.Errorf("status shows %s", secret)
 		}
 	}
-	body := tb.do("GET", "/api/backup/status", nil).Body.String()
-	if strings.Contains(body, "SECRET-TOKEN") {
-		t.Error("Drive token leaked into API")
+	if !strings.Contains(body, `"drive_folder":"Fridolin"`) || !strings.Contains(body, `"shared_client":false`) {
+		t.Errorf("status = %s", body)
 	}
 }
 
@@ -262,12 +276,12 @@ func TestBackupStatusNamesABrokenRclonePath(t *testing.T) {
 	}
 }
 
-// TestRcloneGetsTheAllowlistedEnvironment: rclone, for a backup, for the
-// version the dashboard shows and while it connects Google Drive, gets what
-// childEnv gives a helper program: no RCLONE_* setting of yours, not the
-// Claude CLI's login, and not the names in child_env_passthrough, which are
-// for brains. Only the connect run, which opens your browser, gets your
-// desktop session's variables.
+// TestRcloneGetsTheAllowlistedEnvironment: rclone, for a backup and for
+// the version the dashboard shows, gets what childEnv gives a helper
+// program: no RCLONE_* setting of yours, not the Claude CLI's login, and
+// not the names in child_env_passthrough, which are for brains. Nor your
+// desktop session's variables: the bridge, not rclone, opens Google's
+// sign-in now.
 func TestRcloneGetsTheAllowlistedEnvironment(t *testing.T) {
 	bin := t.TempDir()
 	script := filepath.Join(bin, "rclone")
@@ -303,16 +317,6 @@ func TestRcloneGetsTheAllowlistedEnvironment(t *testing.T) {
 			}
 			return nil
 		}, false},
-		{"connect", "env.config", func(t *testing.T) error {
-			if err := os.Remove(tb.cfgs.Boot().RcloneConf()); err != nil {
-				return err
-			}
-			if err := tb.backup.Connect(); err != nil {
-				return err
-			}
-			waitBackupConnect(t, tb)
-			return nil
-		}, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -940,23 +944,6 @@ func TestBackupPartlyReadableFolderWithRealRclone(t *testing.T) {
 			t.Errorf("current/%s: %v; %s", rel, err, why)
 		}
 	}
-}
-
-// connectTestBridge is a bridge whose rclone_path is a script that does
-// nothing, so that Connect gets past its rclone check, and whose runner is
-// run.
-func connectTestBridge(t *testing.T, run func(ctx context.Context, args []string, stderr io.Writer) ([]byte, error)) *testBridge {
-	t.Helper()
-	script := filepath.Join(t.TempDir(), "rclone")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	tb := newTestBridge(t, `, "backup": {"rclone_path": "`+script+`"}`)
-	installBackupRunner(t, tb, run)
-	if err := os.MkdirAll(filepath.Dir(tb.cfgs.Boot().RcloneConf()), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	return tb
 }
 
 // connectAlias gives the bridge's rclone config a remote, so that the

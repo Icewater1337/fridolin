@@ -240,3 +240,59 @@ test('the Disconnect dialog says where to take away rclone\'s access at Google',
   assert.ok(dialog, 'a confirm dialog');
   assert.ok(dialog.textContent.includes('myaccount.google.com/permissions'), dialog.textContent);
 });
+
+// Renders the page against status, with window.location.assign recorded.
+async function renderWith(t, status) {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  installDom();
+  noConsoleErrors(t);
+  const assigned = [];
+  globalThis.window = { scrollTo() {}, location: { assign: (u) => assigned.push(u) } };
+  t.after(() => { delete globalThis.window; });
+  const calls = serve(t, (path) => {
+    if (path.startsWith('/api/backup/status')) return status;
+    if (path === '/api/backup/connect') return { status: 202, body: { status: 'connecting', auth_url: 'https://accounts.google.com/o/oauth2/v2/auth?state=s' } };
+    return {};
+  });
+  const root = h('div');
+  document.body.append(root);
+  const ctx = createPage();
+  t.after(() => ctx.destroy());
+  page.render(root, ctx);
+  await settle();
+  return { root, calls, assigned };
+}
+
+test('without a Google client, connecting asks for one first', async (t) => {
+  const { root } = await renderWith(t, { ...disconnected(), client: null, redirect_uri: 'http://127.0.0.1:8765/' });
+  const connect = root.querySelectorAll('button').find((b) => b.textContent === 'Connect Google Drive');
+  assert.ok(connect && connect.disabled, 'Connect waits for a client');
+  assert.ok(root.textContent.includes('enable the Google Drive API'), root.textContent);
+  assert.ok(root.querySelector('textarea'), 'a box to paste a client for Drive');
+});
+
+test('Connect Google Drive sends the browser to Google with your own client', async (t) => {
+  const { root, calls, assigned } = await renderWith(t, { ...disconnected(), client: { source: 'google', type: 'installed', client_id_hint: '1234-…' } });
+  assert.ok(root.textContent.includes('your client under Settings → Google sign-in'), root.textContent);
+  root.querySelectorAll('button').find((b) => b.textContent === 'Connect Google Drive').click();
+  await settle();
+  assert.deepEqual(calls.filter((c) => c.method === 'POST').map((c) => [c.path, c.body]), [['/api/backup/connect', undefined]]);
+  assert.deepEqual(assigned, ['https://accounts.google.com/o/oauth2/v2/auth?state=s']);
+});
+
+test('a link through rclone\'s shared client offers the switch, which keeps it until the new one works', async (t) => {
+  const status = { ...connected(), shared_client: true, client: { source: 'google', type: 'web', client_id_hint: '1234-…' }, redirect_uri: 'http://127.0.0.1:8765/' };
+  const { root, calls, assigned } = await renderWith(t, status);
+  assert.ok(root.textContent.includes('rclone’s shared Google client'), root.textContent);
+  assert.ok(root.textContent.includes('http://127.0.0.1:8765/'), 'a Web client names the redirect to add');
+  root.querySelectorAll('button').find((b) => b.textContent === 'Switch to your own Google client').click();
+  await settle();
+  assert.deepEqual(calls.filter((c) => c.method === 'POST').map((c) => [c.path, c.body]), [['/api/backup/connect', { reconnect: true }]]);
+  assert.equal(assigned.length, 1);
+});
+
+test('a link with your own client shows its folder and no switch', async (t) => {
+  const { root } = await renderWith(t, { ...connected(), shared_client: false, drive_folder: 'Fridolin', client: { source: 'google', type: 'installed', client_id_hint: '1234-…' } });
+  assert.ok(root.textContent.includes('Fridolin/fridolin-backup'), root.textContent);
+  assert.ok(!root.textContent.includes('shared Google client'));
+});

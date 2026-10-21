@@ -150,6 +150,8 @@ func NewAPIMux(d APIDeps) http.Handler {
 	mux.HandleFunc("GET /api/backup/status", d.Backup().Status)
 	mux.HandleFunc("POST /api/backup/connect", d.Backup().Connect)
 	mux.HandleFunc("POST /api/backup/disconnect", d.Backup().Disconnect)
+	mux.HandleFunc("PUT /api/backup/drive-client", d.Backup().SetDriveClient)
+	mux.HandleFunc("DELETE /api/backup/drive-client", d.Backup().DeleteDriveClient)
 	mux.HandleFunc("PUT /api/backup/settings", d.Backup().Settings)
 	mux.HandleFunc("POST /api/backup/run", d.Backup().Run)
 	mux.HandleFunc("POST /api/backup/cancel", d.Backup().Cancel)

@@ -25,7 +25,7 @@ const (
 	// runs, which inherit the CLI's environment.
 	claudeChild
 	// desktopChild is a helper that opens your browser for a sign-in:
-	// rclone connecting Google Drive, `plaud login` (see withDesktop).
+	// `plaud login` (see withDesktop).
 	desktopChild
 	codexChild
 )

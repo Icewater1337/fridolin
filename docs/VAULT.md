@@ -96,7 +96,8 @@ restic, to the repository `b2:<snapshots_bucket>:restic`:
   every month;
 - every week, `restic copy` to a second repository on Google Drive,
   `rclone:<backup.remote>:fridolin-restic`, through the Drive connection of
-  the [Backup page](BACKUP.md). Once that copy has completed once, the old
+  the [Backup page](BACKUP.md) (with your own Google client, inside the
+  `Fridolin` folder: [BACKUP.md](BACKUP.md#use-your-own-google-client)). Once that copy has completed once, the old
   Drive sync's daily run stops (Back up now and restores still work there);
   until then it goes on, so turning the vault on never leaves a gap.
 

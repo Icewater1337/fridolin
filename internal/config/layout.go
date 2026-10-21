@@ -48,6 +48,10 @@ func (l Layout) RcloneConf() string { return l.join("rclone", "rclone.conf") }
 // GoogleClient is the Google OAuth client pasted into Settings.
 func (l Layout) GoogleClient() string { return l.join("google", "oauth_client.json") }
 
+// DriveClient is a Google OAuth client pasted on the Backup page for the
+// Drive link alone; without one the link uses GoogleClient.
+func (l Layout) DriveClient() string { return l.join("google", "drive_oauth_client.json") }
+
 // Plaud is the Plaud integration's state.
 func (l Layout) Plaud() string { return l.join("plaud") }
 

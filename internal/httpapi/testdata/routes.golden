@@ -3,6 +3,7 @@
 /brain/
 /brain/
 /builder/
+DELETE /api/backup/drive-client
 DELETE /api/brain-dirs
 DELETE /api/brains/{id}
 DELETE /api/brains/{id}/calendar
@@ -123,6 +124,7 @@ POST /builder/propose
 POST /builder/sync
 POST /ingest
 POST /send
+PUT /api/backup/drive-client
 PUT /api/backup/settings
 PUT /api/brains/{id}
 PUT /api/brains/{id}/backup

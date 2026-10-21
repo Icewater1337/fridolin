@@ -20,16 +20,9 @@ func TestBackupJSONDiagnosticsKeepLegacyNames(t *testing.T) {
 		{"STATE", "{\"last_restore\":[]}", "json: cannot unmarshal array into Go struct field backupState.last_restore of type main.RestoreResult", "json: cannot unmarshal array into Go struct field backupState.last_restore of type main.RestoreResult"},
 		{"STATE", "{\"brains\":{\"notes\":{\"ok\":[]}}}", "json: cannot unmarshal array into Go struct field backupState.brains.notes.ok of type bool", "json: cannot unmarshal array into Go struct field BackupResult.brains.ok of type bool"},
 		{"STATE", "{\"last_restore\":{\"ok\":[]}}", "json: cannot unmarshal array into Go struct field backupState.last_restore.ok of type bool", "json: cannot unmarshal array into Go struct field RestoreResult.last_restore.ok of type bool"},
-		{"QUESTION", "[]", "json: cannot unmarshal array into Go value of type main.rcloneQuestion", "json: cannot unmarshal array into Go value of type main.rcloneQuestion"},
-		{"QUESTION", "{\"State\":[]}", "json: cannot unmarshal array into Go struct field rcloneQuestion.State of type string", "json: cannot unmarshal array into Go struct field rcloneQuestion.State of type string"},
-		{"QUESTION", "{\"Option\":[]}", "json: cannot unmarshal array into Go struct field rcloneQuestion.Option of type struct { Name string \"json:\\\"Name\\\"\"; DefaultStr string \"json:\\\"DefaultStr\\\"\" }", "json: cannot unmarshal array into Go struct field rcloneQuestion.Option of type struct { Name string \"json:\\\"Name\\\"\"; DefaultStr string \"json:\\\"DefaultStr\\\"\" }"},
-		{"QUESTION", "{\"Option\":{\"Name\":[]}}", "json: cannot unmarshal array into Go struct field rcloneQuestion.Option.Name of type string", "json: cannot unmarshal array into Go struct field .Option.Name of type string"},
 	} {
 		t.Run(tc.kind+tc.body, func(t *testing.T) {
 			var target any = &backupState{}
-			if tc.kind == "QUESTION" {
-				target = &rcloneQuestion{}
-			}
 			raw := json.Unmarshal([]byte(tc.body), target)
 			err := backupJSONError(raw)
 			want := tc.outer
@@ -60,9 +53,9 @@ func TestBackupJSONDiagnosticsReachVisibleBoundaries(t *testing.T) {
 	if got := strings.Join(logs(), "\n"); !strings.Contains(got, "json: cannot unmarshal array into Go value of type main.backupState") {
 		t.Fatalf("state warning: %s", got)
 	}
-	fx.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) { return []byte("[]"), nil }
-	err := fx.manager.connectDrive(t.Context(), &connectJob{State: "running"})
-	if err == nil || err.Error() != "unexpected rclone output: json: cannot unmarshal array into Go value of type main.rcloneQuestion " {
+	fx.runner = func(_ context.Context, args []string, _ io.Writer) ([]byte, error) { return []byte("{}"), nil }
+	_, err := fx.manager.driveFolderID(t.Context(), "brain-gdrive-connecting")
+	if err == nil || !strings.HasPrefix(err.Error(), "listing Google Drive: json: cannot unmarshal object into Go value of type") {
 		t.Fatalf("connection diagnostic = %v", err)
 	}
 }

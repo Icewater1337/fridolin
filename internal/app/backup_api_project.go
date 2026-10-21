@@ -14,5 +14,6 @@ func (b *App) newBackupAPI() *httpapi.BackupAPI {
 			return b.registry.UpdateBackup(id, enabled, exclude)
 		},
 		RestoreTarget: b.restoreTarget,
+		RedirectURI:   b.google.RedirectURI,
 	}
 }

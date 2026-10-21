@@ -151,6 +151,13 @@ type oauthPending struct {
 	created     time.Time
 	client      *Client
 	redirectURI string
+	// scopes are what the sign-in asked for: calendarScopes for a brain's
+	// calendar, another set for a sign-in started with StartSignInFor.
+	scopes []string
+	// back and done are set for a sign-in started with StartSignInFor:
+	// where the browser goes afterwards, and what gets the token.
+	back string
+	done func(*Token, error)
 }
 
 // Options supplies startup paths and the live configuration operations
@@ -395,24 +402,93 @@ func (g *Auth) StartSignIn(brainID string) (string, error) {
 		}
 	}
 	redirect := g.RedirectURI()
-	g.pending[state] = oauthPending{brainID: brainID, verifier: verifier, created: time.Now(), client: c, redirectURI: redirect}
+	g.pending[state] = oauthPending{brainID: brainID, verifier: verifier, created: time.Now(), client: c, redirectURI: redirect, scopes: calendarScopes}
 	delete(g.lastError, brainID)
 	g.mu.Unlock()
+	return g.authURL(c, redirect, calendarScopes, state, sum), nil
+}
 
-	// No include_granted_scopes: it would fold whatever else this client
-	// was ever granted into the brain's token.
+// authURL is Google's consent page for a sign-in. No
+// include_granted_scopes: it would fold whatever else this client was
+// ever granted into the token.
+func (g *Auth) authURL(c *Client, redirect string, scopes []string, state string, challenge [32]byte) string {
 	q := url.Values{
 		"client_id":             {c.ClientID},
 		"redirect_uri":          {redirect},
 		"response_type":         {"code"},
-		"scope":                 {strings.Join(calendarScopes, " ")},
+		"scope":                 {strings.Join(scopes, " ")},
 		"access_type":           {"offline"},
 		"prompt":                {"consent select_account"},
 		"state":                 {state},
-		"code_challenge":        {base64.RawURLEncoding.EncodeToString(sum[:])},
+		"code_challenge":        {base64.RawURLEncoding.EncodeToString(challenge[:])},
 		"code_challenge_method": {"S256"},
 	}
-	return g.options.Endpoints.Auth + "?" + q.Encode(), nil
+	return g.options.Endpoints.Auth + "?" + q.Encode()
+}
+
+// signInFor tells sign-ins started with StartSignInFor apart from a
+// brain's in the pending map, whose brain id is never empty.
+const signInFor = ""
+
+// StartSignInFor returns the Google URL of a sign-in for something other
+// than a brain's calendar — the Drive backup's link — with client c and
+// scopes. It comes back through the bridge's own redirect, as a brain's
+// does. Once Google has answered, done gets the token, or why there is
+// none (cancelled, a scope left unticked, no refresh token), and the
+// browser goes to back. done runs at most once, in the callback's
+// request; a sign-in never finished in 15 minutes never calls it.
+func (g *Auth) StartSignInFor(c *Client, scopes []string, back string, done func(*Token, error)) (string, error) {
+	if c == nil || c.ClientID == "" || c.ClientSecret == "" {
+		return "", ErrNoClient
+	}
+	verifier := randomString(48)
+	sum := sha256.Sum256([]byte(verifier))
+	state := randomString(24)
+	redirect := g.RedirectURI()
+	g.mu.Lock()
+	for s, p := range g.pending {
+		if time.Since(p.created) > 15*time.Minute {
+			delete(g.pending, s)
+		}
+	}
+	g.pending[state] = oauthPending{brainID: signInFor, verifier: verifier, created: time.Now(), client: c,
+		redirectURI: redirect, scopes: slices.Clone(scopes), back: back, done: done}
+	g.mu.Unlock()
+	return g.authURL(c, redirect, scopes, state, sum), nil
+}
+
+// finishSignInFor ends a sign-in started with StartSignInFor.
+func (g *Auth) finishSignInFor(ctx context.Context, p oauthPending, q url.Values) string {
+	if e := q.Get("error"); e != "" {
+		if e == "access_denied" {
+			p.done(nil, errors.New("the Google sign-in was cancelled"))
+		} else {
+			p.done(nil, errors.New("the Google sign-in failed: "+e))
+		}
+		return p.back
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	tok, err := g.exchange(ctx, p, q.Get("code"))
+	switch {
+	case err != nil:
+		p.done(nil, err)
+	case tok.RefreshToken == "":
+		p.done(nil, errors.New("no refresh token came back from Google — remove the access at myaccount.google.com/permissions and connect again"))
+	default:
+		var missing []string
+		for _, s := range p.scopes {
+			if !slices.Contains(tok.Scopes, s) {
+				missing = append(missing, s)
+			}
+		}
+		if len(missing) > 0 {
+			p.done(nil, errors.New("the sign-in granted only part of the access asked for (missing "+strings.Join(missing, ", ")+") — connect again and leave every box ticked"))
+		} else {
+			p.done(tok, nil)
+		}
+	}
+	return p.back
 }
 
 // Callback finishes a sign-in and returns the brain's page. An invalid or
@@ -425,6 +501,9 @@ func (g *Auth) Callback(ctx context.Context, q url.Values) (string, error) {
 	if !ok || time.Since(p.created) > 15*time.Minute {
 		//lint:ignore ST1005 Preserve the existing dashboard HTTP response text.
 		return "", errors.New("This sign-in link expired or was already used. Start again from the dashboard.")
+	}
+	if p.done != nil {
+		return g.finishSignInFor(ctx, p, q), nil
 	}
 	back := "/#/brains/" + url.PathEscape(p.brainID)
 	fail := func(msg string) (string, error) {
@@ -599,7 +678,7 @@ func (g *Auth) exchange(ctx context.Context, p oauthPending, code string) (*Toke
 	}
 	return &Token{
 		Token: tr.AccessToken, RefreshToken: tr.RefreshToken, TokenURI: g.options.Endpoints.Token,
-		ClientID: c.ClientID, ClientSecret: c.ClientSecret, Scopes: tr.grantedScopes(calendarScopes),
+		ClientID: c.ClientID, ClientSecret: c.ClientSecret, Scopes: tr.grantedScopes(p.scopes),
 		Expiry: time.Now().Add(tokenLifetime(tr.ExpiresIn)).UTC().Format("2006-01-02T15:04:05.000000Z"),
 	}, nil
 }

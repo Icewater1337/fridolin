@@ -10,6 +10,24 @@ for compatibility.
 
 ### Added
 
+- Google Drive backups use your own Google OAuth client instead of
+  rclone's shared one, which Google retires during 2026. Backup →
+  Connect Google Drive signs in through the bridge (also in the core's
+  container) with the client under Settings → Google sign-in, or one
+  pasted on the Backup page for Drive alone; enable the Google Drive API
+  and add the `drive.file` scope in its project, and add
+  `http://127.0.0.1:8765/` to a Web application client's redirect URIs
+  (docs/BACKUP.md, "Use your own Google client"). The link lives in a new
+  folder, `Fridolin`, in your Drive, which holds `fridolin-backup/` and the
+  vault's `fridolin-restic/` from then on. compat: a link made before keeps
+  working until Google retires the shared client; the Backup page and
+  `fridolin doctor` (`drive-client`) say so, and **Switch to your own Google
+  client** replaces it, keeping the old link until the new one works. The
+  folders the old link made stay in Drive until you delete them; Restore
+  lists only the new folder. `POST /api/backup/connect` now answers with
+  the `auth_url` to send the browser to and takes `{"reconnect": true}`;
+  `PUT`/`DELETE /api/backup/drive-client` keep or forget the Drive client.
+
 - The core brain's `fride_repo_add` adds a repository to FrIDE on a node:
   it clones one, or makes a new one with an initial commit and, by
   default, a private GitHub repository through the node's `gh`. The node
@@ -659,6 +677,12 @@ for compatibility.
 
 What is still read or sent under an older name or in an older format,
 each marked `compat:` in the code.
+
+- A Google Drive link that an older version made through rclone's shared
+  Google client (a Drive remote without `client_id`) keeps backing up as
+  it is, until Google retires that client during 2026. The Backup page
+  and `fridolin doctor` warn about it until you switch it to your own
+  client (docs/BACKUP.md, "Switching an existing link").
 
 From before the project was renamed (whatsapp-claude-bridge), kept
 because they are on disk or because scripts rely on them:

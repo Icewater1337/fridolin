@@ -1,7 +1,7 @@
 // Backup: Google Drive via rclone — connect, schedule, per-brain settings,
 // run now, progress, and restore into a new folder.
 
-import { get, post, put } from '../app/api.js';
+import { get, post, put, del } from '../app/api.js';
 import { resource } from '../app/resources.js';
 import { folderBrowser } from '../components/folder-browser.js';
 import { liveForm } from '../components/live-form.js';
@@ -14,6 +14,7 @@ import { btn, copyButton, runBusy } from '../components/buttons.js';
 import { openDialog, confirmDialog } from '../components/dialog.js';
 import { field, textInput, toggle, select, linesArea, linesOf, nextId } from '../components/fields.js';
 import { pill, callout, timeAgo, mono, empty, pageHeader, spinner, loading } from '../components/common.js';
+import { googleClientSetup } from '../components/calendar.js';
 
 // A version folder is named after its run's time: in UTC with a Z, or in
 // the bridge's local time for folders made before.
@@ -84,10 +85,11 @@ export default {
     function paintMode() {
       const st = backupStatus;
       if (mode === 'norclone') paint(regions.rclone, st.rclone || {}, renderRclone);
-      else if (mode === 'connect') paint(regions.connect, st.connect || null, renderConnect);
+      else if (mode === 'connect') paint(regions.connect, { connect: st.connect || null, client: st.client || null, redirect: st.redirect_uri || '' }, renderConnect);
       else {
         paint(regions.status, {
           settings: st.settings || {}, next: st.next_run || '', rclone: st.rclone, running: !!st.job,
+          shared: !!st.shared_client, folder: st.drive_folder || '', connect: st.connect || null, client: st.client || null, redirect: st.redirect_uri || '',
           brains: (st.brains || []).map((b) => ({ enabled: b.enabled, last: b.last || null })), bridge: st.bridge || null,
         }, renderStatus);
         paint(regions.job, st.job ? { job: st.job, names: (st.brains || []).map((b) => [b.id, b.name]) } : null, renderJob);
@@ -123,17 +125,55 @@ export default {
     }
 
     // ── connecting ──
-    function renderConnect(c) {
+    // The bridge signs in to Google itself, with your own OAuth client, and
+    // Google sends the browser back to this page.
+    async function startConnect(reconnect) {
+      const r = await post('/api/backup/connect', reconnect ? { reconnect: true } : undefined);
+      if (r && r.auth_url) window.location.assign(r.auth_url);
+      else await refresh();
+    }
+
+    // Which Google client the sign-in uses, or the steps to add one.
+    function clientBlock(client, redirect) {
+      if (!client) {
+        return h('div.stack',
+          callout('info', 'Your own Google client first', 'Google Drive signs in with an OAuth client from your own Google Cloud project. Add it under ',
+            h('a', { href: '#/settings/google' }, 'Settings → Google sign-in'), ' (brains use it for their calendars too), or paste one here for Drive alone. Enable the Google Drive API in its project.'),
+          googleClientSetup({ redirectUri: redirect, onSaved: () => refresh(), compact: true, drive: true }));
+      }
+      const what = client.source === 'drive' ? 'the client added here for Drive' : 'your client under Settings → Google sign-in';
+      const box = h('div');
+      let pasting = false;
+      return h('div.stack',
+        h('p.small', 'Signs in with ', what, ' ', mono(client.client_id_hint || ''), client.type === 'web' ? ' (Web application)' : ' (Desktop app)', '. Its project needs the Google Drive API enabled.'),
+        client.type === 'web' && redirect ? callout('warn', null, 'Make sure ', mono(redirect, { copy: true }), ' is one of its authorised redirect URIs, or sign-in fails with “redirect_uri_mismatch”.') : null,
+        h('div.actions',
+          client.source === 'drive'
+            ? btn('Use the Settings client instead', { small: true, icon: 'x', onClick: async () => { await del('/api/backup/drive-client'); await refresh(); } })
+            : btn('Use a separate client for Drive…', { small: true, icon: 'edit', onClick: () => { pasting = !pasting; mount(box, pasting ? googleClientSetup({ redirectUri: redirect, onSaved: () => refresh(), compact: true, drive: true }) : null); } })),
+        box);
+    }
+
+    // A sign-in on its way: waiting for Google, or setting up the folder.
+    function renderSignIn(c) {
+      if (c.step === 'folder') {
+        return h('div.stack', h('p', spinner(), ' Setting up the folder ', h('strong', 'Fridolin'), ' in your Google Drive…'));
+      }
+      return h('div.stack',
+        h('p', spinner(), ' Waiting for you to approve access at Google. This page notices by itself when you are done.'),
+        c.auth_url ? h('p', h('a', { href: c.auth_url }, 'Open Google’s sign-in', icon('external'))) : null);
+    }
+
+    function renderConnect({ connect: c, client, redirect }) {
       const privacy = h('ul.facts',
-        h('li', icon('shield'), h('span', 'The bridge asks only for access to files it creates (Google’s “drive.file” permission). It cannot see anything else in your Drive.')),
+        h('li', icon('shield'), h('span', 'The bridge asks only for access to files it creates (Google’s “drive.file” permission), with your own Google client. It cannot see anything else in your Drive.')),
         h('li', icon('lock'), h('span', 'Your WhatsApp session and the bridge’s tokens are never uploaded, nor .env files, private keys and tokens in brain folders.')),
-        h('li', icon('backup'), h('span', 'Each brain folder is copied to a folder in your Drive. Older versions of changed files are kept for 30 days by default.')));
+        h('li', icon('backup'), h('span', 'Each brain folder is copied to a folder in your Drive, inside Fridolin/. Older versions of changed files are kept for 30 days by default.')));
       if (c && c.state === 'running') {
         return h('div.card.wizard-card.waiting',
           spinner('large'),
-          h('h2', 'Approve access in the browser tab that just opened'),
-          h('p.muted', 'Sign in to Google and allow access. This page notices by itself when you are done.'),
-          c.auth_url ? h('p', 'If no tab opened, ', h('a', { href: c.auth_url, target: '_blank', rel: 'noopener noreferrer' }, 'open this link', icon('external')), ' on the computer running the bridge.') : h('p.muted.small', 'Starting rclone…'),
+          h('h2', c.step === 'folder' ? 'Setting up Google Drive' : 'Approve access at Google'),
+          renderSignIn(c),
           privacy);
       }
       return h('div.card.hero',
@@ -142,18 +182,36 @@ export default {
           h('h2', 'Connect Google Drive'),
           h('p', 'Back up every brain folder — prompts, memories, history and files — once a day.'),
           c && c.state === 'error' ? callout('bad', 'Connecting failed', c.error || 'Unknown error') : null,
+          clientBlock(client, redirect),
           privacy,
           h('div.actions', btn(c && c.state === 'error' ? 'Try again' : 'Connect Google Drive', {
-            kind: 'primary', icon: 'external',
-            onClick: async () => {
-              await post('/api/backup/connect');
-              await refresh();
-            },
+            kind: 'primary', icon: 'external', disabled: !client,
+            onClick: () => startConnect(false),
           }))));
     }
 
     // ── connected: status ──
-    function renderStatus({ settings: s, next, rclone, running, brains, bridge }) {
+    // The link through rclone's shared client, which Google retires during
+    // 2026: the switch to your own client, and how it goes.
+    function renderSwitch({ shared, connect: c, client, redirect, running }) {
+      const switching = c && c.reconnect;
+      if (switching && c.state === 'running') return callout('info', 'Switching to your own Google client', renderSignIn(c));
+      if (switching && c.state === 'done') return callout('ok', 'Switched to your own Google client', 'Backups and the vault’s weekly copy now go to the folder Fridolin in your Drive. The folders the old link made stay at the top of your Drive until you delete them there.');
+      const failed = switching && c.state === 'error' ? callout('bad', 'Switching failed — the old link still works', c.error || 'Unknown error') : null;
+      if (!shared) return failed;
+      return h('div.stack',
+        failed,
+        callout('warn', 'This link uses rclone’s shared Google client',
+          'Google retires it during 2026, and backups to Drive stop then. Switch to your own Google client: this link keeps backing up until the new one is in place. ',
+          'The new link cannot see what the old one made, so backups and the vault’s weekly copy start afresh in a new folder, Fridolin, in your Drive; the old folders stay until you delete them there.'),
+        clientBlock(client, redirect),
+        h('div.actions', btn('Switch to your own Google client', {
+          kind: 'primary', icon: 'external', disabled: !client || running,
+          onClick: () => startConnect(true),
+        })));
+    }
+
+    function renderStatus({ settings: s, next, rclone, running, brains, bridge, shared, folder, connect, client, redirect }) {
       const anyEnabled = brains.some((b) => b.enabled);
       const results = [...brains.map((b) => b.last), bridge].filter(Boolean);
       const lastOK = results.filter((r) => r.ok).sort((a, b) => new Date(b.finished) - new Date(a.finished))[0];
@@ -162,7 +220,8 @@ export default {
           h('div.card-title', icon('backup'), h('h2', 'Google Drive')),
           pill('Connected', 'ok')),
         h('div.card-body',
-          h('p', 'Backups go to the folder ', h('strong', s.root || 'fridolin-backup'), ' in your Google Drive.'),
+          h('p', 'Backups go to the folder ', h('strong', (folder ? `${folder}/` : '') + (s.root || 'fridolin-backup')), ' in your Google Drive.'),
+          renderSwitch({ shared, connect, client, redirect, running }),
           h('dl.kv',
             h('dt', 'Schedule'), h('dd', s.enabled ? `Every day at ${s.daily_at || '03:30'}` : 'Off — only when you click “Back up now”'),
             next ? [h('dt', 'Next run'), h('dd', timeAgo(next))] : null,
@@ -179,7 +238,7 @@ export default {
               onClick: async () => {
                 const ok = await confirmDialog({
                   title: 'Disconnect Google Drive?',
-                  message: 'Backups stop until you connect again. Everything already in your Drive stays there. The bridge removes only its own link: rclone keeps its access to your Google account until you remove it at myaccount.google.com/permissions.',
+                  message: 'Backups stop until you connect again. Everything already in your Drive stays there. The bridge removes only its own link: your Google client keeps its access to your Google account until you remove it at myaccount.google.com/permissions.',
                   confirm: 'Disconnect', danger: true,
                 });
                 if (!ok) return;

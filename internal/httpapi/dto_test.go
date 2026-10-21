@@ -17,6 +17,7 @@ func TestResponseDTOsKeepMapWireEncoding(t *testing.T) {
 	}{
 		{"AuthURLResponse", AuthURLResponse{}, []string{"AuthURL=auth_url"}},
 		{"SignInResponse", SignInResponse{}, []string{"Binding=binding", "Status=status"}},
+		{"BackupConnectResponse", BackupConnectResponse{}, []string{"AuthURL=auth_url", "Status=status"}},
 		{"BackupVersionsResponse", BackupVersionsResponse{}, []string{"Brain=brain", "Versions=versions"}},
 		{"BuildersResponse", BuildersResponse{}, []string{"Brains=brains"}},
 		{"CalendarBusyResponse", CalendarBusyResponse{}, []string{"Busy=busy", "Calendars=calendars"}},

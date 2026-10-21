@@ -19,6 +19,13 @@ type AuthURLResponse struct {
 	AuthURL string `json:"auth_url"`
 }
 
+// BackupConnectResponse starts a Drive sign-in: the dashboard sends the
+// browser to AuthURL, Google's consent page.
+type BackupConnectResponse struct {
+	AuthURL string `json:"auth_url"`
+	Status  string `json:"status"`
+}
+
 type BackupVersionsResponse struct {
 	Brain    string   `json:"brain"`
 	Versions []string `json:"versions"`

@@ -13,7 +13,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -29,7 +28,8 @@ import (
 // Backups go to Google Drive through rclone (https://rclone.org), driven by
 // the bridge with its own rclone config file in <data_dir>/rclone/ — your
 // personal rclone setup is never read or changed. The Drive link uses the
-// drive.file scope, so rclone can only see the files it created.
+// owner's own Google OAuth client and the drive.file scope, so rclone can
+// only see the files that client created (drive_oauth.go).
 //
 // Layout in Drive, under backup.root:
 //
@@ -426,124 +426,7 @@ func rcloneVersion(p string, env []string) string {
 	return v
 }
 
-// ── connecting Google Drive ──────────────────────────────────────────────
-
-var authURLRe = regexp.MustCompile(`http://127\.0\.0\.1:\d+/auth\?state=[A-Za-z0-9_-]+`)
-
-// rcloneQuestion is one step of rclone's non-interactive config flow.
-type rcloneQuestion struct {
-	State  string `json:"State"`
-	Option *struct {
-		Name       string `json:"Name"`
-		DefaultStr string `json:"DefaultStr"`
-	} `json:"Option"`
-	Error string `json:"Error"`
-}
-
-// answerFor decides how to answer each question rclone asks while creating
-// the Drive remote: authorise in the browser on this machine, no shared drive.
-func answerFor(q rcloneQuestion) string {
-	if q.Option == nil {
-		return ""
-	}
-	switch q.Option.Name {
-	case "config_is_local":
-		return "true"
-	case "config_change_team_drive", "config_team_drive", "team_drive":
-		return "false"
-	}
-	return q.Option.DefaultStr
-}
-
-// connectTimeout is how long a Drive sign-in waits for you to approve it.
-const connectTimeout = 10 * time.Minute
-
-// connectSteps bounds rclone's config questions: a Drive remote takes a
-// handful, so more means rclone asks something answerFor does not know.
-const connectSteps = 10
-
-// connectDrive walks rclone's config questions. Answering config_is_local
-// starts rclone's local OAuth listener and opens the browser, which is why
-// its runs get your desktop session's variables; that step blocks until you
-// approve access (or connectTimeout runs out).
-func (m *Manager) connectDrive(ctx context.Context, job *connectJob) error {
-	ctx = m.opts.DesktopContext(ctx)
-	remote := m.opts.Settings().Remote
-	// What is left of a remote that is not connected, one whose sign-in was
-	// abandoned say, would make config create fail. apiBackupConnect keeps
-	// a connected one from getting here.
-	if _, err := m.runner(ctx, []string{"config", "delete", remote}, nil); err != nil {
-		return fmt.Errorf("removing the unfinished Drive link: %w", err)
-	}
-
-	stderr := &authURLWatcher{onURL: func(u string) {
-		m.mu.Lock()
-		job.AuthURL = u
-		m.mu.Unlock()
-	}}
-	args := []string{"config", "create", remote, "drive", "scope=drive.file", "--non-interactive"}
-	for step := 1; ; step++ {
-		out, err := m.runner(ctx, args, stderr)
-		if err != nil {
-			switch {
-			case errors.Is(ctx.Err(), context.DeadlineExceeded):
-				return fmt.Errorf("access was not approved within %v — try again", connectTimeout)
-			case ctx.Err() != nil:
-				return errors.New("connecting was cancelled")
-			}
-			return fmt.Errorf("rclone: %w %s", err, stderr.tail())
-		}
-		var q rcloneQuestion
-		if err := json.Unmarshal(out, &q); err != nil {
-			return fmt.Errorf("unexpected rclone output: %w %s", backupJSONError(err), stderr.tail())
-		}
-		if q.Error != "" {
-			return errors.New(q.Error)
-		}
-		if q.State == "" {
-			break
-		}
-		if step >= connectSteps {
-			return fmt.Errorf("rclone asked more than %d questions; set the remote up by hand (docs/BACKUP.md, Other storage)", connectSteps)
-		}
-		args = []string{"config", "update", remote, "--continue", "--state", q.State, "--result", answerFor(q), "--non-interactive"}
-	}
-	if !m.connected() {
-		return errors.New("access to Google Drive was not authorised")
-	}
-	// Prove the link works and create the backup folder.
-	if _, err := m.runner(ctx, []string{"mkdir", remote + ":" + m.opts.Settings().Root}, nil); err != nil {
-		return fmt.Errorf("connected, but creating the backup folder failed: %v", err)
-	}
-	return nil
-}
-
-// authURLWatcher scans rclone's stderr for the browser link.
-type authURLWatcher struct {
-	mu    sync.Mutex
-	buf   bytes.Buffer
-	onURL func(string)
-	seen  bool
-}
-
-func (a *authURLWatcher) Write(p []byte) (int, error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.buf.Write(p)
-	if !a.seen {
-		if u := authURLRe.FindString(a.buf.String()); u != "" {
-			a.seen = true
-			a.onURL(u)
-		}
-	}
-	return len(p), nil
-}
-
-func (a *authURLWatcher) tail() string {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return textx.Tail(a.buf.String(), 400)
-}
+// ── connecting Google Drive: drive_oauth.go ──────────────────────────────
 
 // errDisconnecting refuses what would start on the Drive link while
 // Disconnect removes it.

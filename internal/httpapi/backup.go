@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/apperr"
 	"github.com/Icewater1337/fridolin/internal/backup"
@@ -13,7 +14,9 @@ import (
 // BackupService is the backup job surface used by the HTTP adapter.
 type BackupService interface {
 	Status() backup.StatusSnapshot
-	Connect() error
+	Connect(reconnect bool) (string, error)
+	SetDriveClient([]byte) (*backup.OAuthClient, error)
+	DeleteDriveClient() error
 	Disconnect(context.Context) error
 	StartRun([]string, bool, string, bool) error
 	Cancel() error
@@ -27,19 +30,66 @@ type BackupAPI struct {
 	IncludeBridge func() bool
 	UpdateBrain   func(string, *bool, []string) error
 	RestoreTarget func(string) (string, error)
+	// RedirectURI is the bridge's Google sign-in redirect, for the note
+	// on a pasted Web application client.
+	RedirectURI func() string
 }
 
 func (a *BackupAPI) Status(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, a.Backup().Status())
 }
 
+// Connect starts a Drive sign-in with the owner's own Google client. The
+// body may be left out; {"reconnect": true} replaces a working link (one
+// through rclone's shared client), which keeps working until the new one
+// is in place.
 func (a *BackupAPI) Connect(w http.ResponseWriter, r *http.Request) {
-	if err := a.Backup().Connect(); err != nil {
+	var req struct {
+		Reconnect bool `json:"reconnect"`
+	}
+	if err := DecodeOptionalJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	authURL, err := a.Backup().Connect(req.Reconnect)
+	if err != nil {
 		status := statusFor(apperr.KindOf(err))
 		WriteErr(w, status, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusAccepted, OperationResponse{Status: "connecting"})
+	WriteJSON(w, http.StatusAccepted, BackupConnectResponse{Status: "connecting", AuthURL: authURL})
+}
+
+// SetDriveClient keeps a Google OAuth client for the Drive link alone,
+// pasted as the JSON Google Cloud Console offers.
+func (a *BackupAPI) SetDriveClient(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		JSON string `json:"json"`
+	}
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	c, err := a.Backup().SetDriveClient([]byte(strings.TrimSpace(req.JSON)))
+	if err != nil {
+		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	note := ""
+	if c.Type == "web" && a.RedirectURI != nil {
+		note = "This is a Web application client: add " + a.RedirectURI() + " to its Authorized redirect URIs in Google Cloud Console, or create a Desktop app client instead."
+	}
+	WriteJSON(w, http.StatusOK, GoogleClientSavedResponse{Status: "saved", Type: c.Type, Note: note})
+}
+
+// DeleteDriveClient forgets the Drive client; sign-ins use the one under
+// Settings → Google sign-in again.
+func (a *BackupAPI) DeleteDriveClient(w http.ResponseWriter, r *http.Request) {
+	if err := a.Backup().DeleteDriveClient(); err != nil {
+		WriteErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "removed"})
 }
 
 func (a *BackupAPI) Disconnect(w http.ResponseWriter, r *http.Request) {

@@ -16,7 +16,7 @@ import (
 func installBackupRunner(t *testing.T, tb *testBridge, runner backup.RunFunc, configure ...func(*backup.Options)) {
 	t.Helper()
 	tb.backup.Stop()
-	opts := backupOptions(tb.cfgs, tb.brainMgr, tb.notifyBackup)
+	opts := backupOptions(tb.cfgs, tb.brainMgr, tb.notifyBackup, tb.google)
 	opts.Runner = runner
 	for _, apply := range configure {
 		apply(&opts)

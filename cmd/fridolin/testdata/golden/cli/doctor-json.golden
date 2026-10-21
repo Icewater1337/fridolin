@@ -134,6 +134,13 @@
       "required": false,
       "status": "ok",
       "detail": "off"
+    },
+    {
+      "id": "drive-client",
+      "title": "Google Drive link uses your own Google client",
+      "required": false,
+      "status": "ok",
+      "detail": "Google Drive is not connected"
     }
   ]
 }
