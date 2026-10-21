@@ -99,6 +99,10 @@ func (b *App) setLockdown(ctx context.Context, on bool, by string) (already bool
 	}
 	b.audit.Append(audit.Entry{Kind: kind, By: by, Outcome: "ok"})
 	log.Printf("policy: %s by %s", kind, by)
+	if on && b.work != nil {
+		// Stopping a session asks its node; the lock is not held for it.
+		go b.work.lockdown()
+	}
 	return false, nil
 }
 

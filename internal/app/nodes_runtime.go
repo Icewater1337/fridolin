@@ -21,10 +21,15 @@ import (
 // port opens in Start, and only with nodes.enabled; the registry is there
 // either way, so the dashboard and the CLI can show and revoke nodes while
 // the port is closed.
-// A machine that joins is announced to the owner (nodeJoined).
+// A machine that joins is announced to the owner (nodeJoined); the news
+// of FrIDE and of agent sessions goes to their runtimes.
 func newNodes(b *App) (*nodes.Service, error) {
+	onEvent := func(node string, ev nodeproto.Event) {
+		b.fride.onEvent(node, ev)
+		b.work.onEvent(node, ev)
+	}
 	return nodes.New(nodes.Options{
-		Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: b.fride.onEvent, OnDeclare: b.fride.onDeclare, OnJoin: b.nodeJoined,
+		Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: onEvent, OnDeclare: b.fride.onDeclare, OnJoin: b.nodeJoined,
 		// Updates: the core's own version, its builds for the nodes, and
 		// what keeps a node from being updated now (nodes_update.go).
 		Version: version.String(), BinariesDir: nodeBinariesDir(b.exe), Busy: b.nodeBusy, Hold: b.nodeHold,
@@ -93,7 +98,7 @@ func (b *App) joinCore() string {
 
 func (b *App) newNodesAPI() *httpapi.NodesAPI {
 	return &httpapi.NodesAPI{
-		Nodes:       func() httpapi.NodesService { return lockdownNodes{Service: b.nodes, locked: b.locked} },
+		Nodes:       func() httpapi.NodesService { return lockdownNodes{Service: b.nodes, locked: b.locked, work: b.work} },
 		Version:     b.nodes.Version(),
 		Enabled:     b.nodesEnabled,
 		Listen:      b.nodes.Addr,
@@ -108,15 +113,22 @@ func (b *App) newNodesAPI() *httpapi.NodesAPI {
 type lockdownNodes struct {
 	*nodes.Service
 	locked func() bool
+	work   *workRuntime
 }
 
 // nodeWrites are the methods a lockdown refuses: a build runs the build
 // scripts it is sent.
-var nodeWrites = []string{nodeproto.MethodExec, nodeproto.MethodFSWrite, nodeproto.MethodAndroidBuild}
+// Starting an agent or a terminal, or acting in one, is writing too.
+var nodeWrites = append([]string{nodeproto.MethodExec, nodeproto.MethodFSWrite, nodeproto.MethodAndroidBuild}, nodeproto.WorkstationStarts...)
 
 func (n lockdownNodes) Call(ctx context.Context, id, method string, params, out any) error {
 	if n.locked() && slices.Contains(nodeWrites, method) {
-		return &nodeproto.Error{Code: nodeproto.CodeDenied, Message: "the bridge is in lockdown: only reading goes ahead; unlock it in the dashboard or with !unlock"}
+		return errLockedNode
+	}
+	if n.work != nil {
+		if handled, err := n.work.dashboardCall(ctx, id, method, params, out); handled {
+			return err
+		}
 	}
 	return n.Service.Call(ctx, id, method, params, out)
 }

@@ -87,6 +87,9 @@ type App struct {
 	nodesListen  string
 	// fride is the core's side of FrIDE on the nodes (fride_runtime.go).
 	fride   *frideRuntime
+	// work is the core's side of the workstation mode: agent sessions
+	// and terminals on nodes (workstation_runtime.go).
+	work    *workRuntime
 	outbox  *outboundmsg.Outbox
 	otp     otp.Handoff
 	started time.Time
@@ -265,6 +268,7 @@ func New(opts Options) (_ *App, err error) {
 	b.loadPolicy()
 	b.mcpTools = b.newMCPTools()
 	b.fride = newFrideRuntime(b)
+	b.work = newWorkRuntime(b)
 	if b.nodes, err = newNodes(b); err != nil {
 		return nil, err
 	}
