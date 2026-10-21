@@ -381,14 +381,10 @@ func (m *migration) serviceCommands() (stop, start []string) {
 	switch m.d.goos {
 	case "darwin":
 		target := fmt.Sprintf("gui/%d/%s", m.d.uid, serviceLabel)
-		return []string{
-			// disable first: a booted-out agent comes back at the next login.
-			"launchctl disable " + target,
-			"launchctl bootout " + target,
-		}, []string{
-			"launchctl enable " + target,
-			"launchctl bootstrap gui/" + fmt.Sprint(m.d.uid) + " " + m.d.unitPath,
-		}
+		// disable first: a booted-out agent comes back at the next login.
+		stop := []string{"launchctl disable " + target, "launchctl bootout " + target}
+		start := []string{"launchctl enable " + target, "launchctl bootstrap gui/" + fmt.Sprint(m.d.uid) + " " + m.d.unitPath}
+		return stop, start
 	case "linux":
 		return []string{"systemctl --user disable --now " + systemdUnitName},
 			[]string{"systemctl --user enable --now " + systemdUnitName}
