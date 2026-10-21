@@ -308,8 +308,8 @@ M6 — FrIDE through nodes:
 - [x] fridolin: node capability `fride`: proxy to FrIDE's loopback API with the pairing token; advertised only while `fride serve` answers
 - [x] fridolin: MCP tools `fride_task`, `fride_status`, `fride_reply`, `fride_move`, `fride_close` on the core brain; placement by tags and FrIDE's memory check; the "code goes to FrIDE" prompt rule
 - [x] `!move <thread> <node>` through the vault; `fride_close` archives the workspace cold
-- [ ] Gate: a task started from WhatsApp runs on the laptop, asks one question in the chat, reports done with the branch name; closing it leaves `workspaces/<task>.tar.zst` in the cold tier; FrIDE on the laptop still works standalone with the mode off
-  Status 21 Oct: TestFrideGate runs it against two real FrIDE binaries with a scripted orchestrator (question, reply, started, move through the vault, done, archive); a run with FrIDE's real coding agent on the laptop is still to do — the laptop's FrIDE must run `fride serve --under-fridolin` and its node agent join the core.
+- [x] Gate: a task started from WhatsApp runs on the laptop, asks one question in the chat, reports done with the branch name; closing it leaves `workspaces/<task>.fride.tar.gz` in the cold tier; FrIDE on the laptop still works standalone with the mode off
+  Done 21 Oct with real models on the Mac mini (a second machine is not needed for the logic): a chat message reached the core brain, `fride_task` started FrIDE's real orchestrator, its question came to the chat and the answer went back through `fride_reply`, `done` reported the branch with CONTRIBUTING.md, `fride_close` archived the workspace into the vault, and `!move` between two nodes worked. Two FrIDE bugs it found are fixed (FrIDE #3). The live setup runs a separate companion FrIDE (`~/fride-companion`, launchd `ai.fride.companion`) next to the owner's fleet FrIDE.
 
 M7 — Memory index and provenance:
 
@@ -318,7 +318,7 @@ M7 — Memory index and provenance:
 - [x] Standing intents: "remind me when" compiled into `trigger.go` entries instead of prose
 - [x] Gate: a fact learned on Monday from a web page never auto-injects; the same fact typed by you does, with its source anchor visible in the note
 
-M8 — Later: Telegram channel, Plaud Developer Platform API, MentraOS channel, per-brain sibling containers.
+M8 — Later: ~~Telegram channel~~ (dropped 21 Oct, not needed); Plaud Developer Platform API (already in use through the Plaud Sync phone app and the owner's developer app); MentraOS channel (issue #148); per-brain isolation, possibly with Docker Sandboxes (issue #149). The open hardware gates of M1 and M2 are tracked in issue #145.
 
 ## Open questions for the owner
 
