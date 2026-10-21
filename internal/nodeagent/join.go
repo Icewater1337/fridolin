@@ -39,7 +39,7 @@ type Joined struct {
 // for the owner's approval on the core, which the agent (Run) hears.
 func Join(ctx context.Context, o JoinOptions) (Joined, error) {
 	if o.Code == "" {
-		return Joined{}, errors.New("the join code is missing: run fridolin nodes join-code on the core")
+		return Joined{}, errors.New("the join code is missing: send !join to the bridge in your WhatsApp chat, or run fridolin nodes join-code on the core")
 	}
 	cfg := Config{Core: o.Core, Name: o.Name, Capabilities: o.Capabilities, AndroidBuild: o.AndroidBuild}
 	if err := cfg.Check(); err != nil {

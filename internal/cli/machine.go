@@ -55,7 +55,7 @@ func nodeChecks(dir string, serviceStatus func() (string, error)) []app.DoctorCh
 			c, err := loaded()
 			if err != nil {
 				return app.DoctorResult{Status: app.DoctorFail, Detail: err.Error(),
-					Fix: "on the core: fridolin nodes join-code (or Nodes → New join code in its dashboard), then paste the line it prints here"}
+					Fix: "send !join to the bridge in your WhatsApp chat (or on the core: fridolin nodes join-code), then paste the line it gives here"}
 			}
 			return app.DoctorResult{Status: app.DoctorOK, Detail: fmt.Sprintf("%s, core %s, offers %s (%s)", c.Name, c.Core, c.Capabilities.Summary(), dir)}
 		}},
