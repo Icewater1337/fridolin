@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 )
@@ -116,4 +118,36 @@ func (s vaultSecretSource) ensureLayers(c *vaultCreds) error {
 			". Write it on the recovery sheet now (docs/VAULT.md, \"Recovery sheet\"): without it nobody can read what it encrypts.")
 	}
 	return nil
+}
+
+// liteMirrorEvery is how often the mirror uploads what Litestream wrote:
+// with Litestream's own sync each minute, the most of the databases a
+// disaster loses.
+var liteMirrorEvery = time.Minute
+
+// runLiteMirror uploads the local replicas until ctx ends, and once more
+// as it ends so that a clean stop leaves the cloud current.
+func (s *vaultService) runLiteMirror(ctx context.Context, m *cloud.Mirror) {
+	t := time.NewTicker(liteMirrorEvery)
+	defer t.Stop()
+	failing := false
+	for {
+		select {
+		case <-ctx.Done():
+			final, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			_, _ = m.Sync(final, time.Now())
+			cancel()
+			return
+		case <-t.C:
+		}
+		_, err := m.Sync(ctx, time.Now())
+		switch {
+		case err != nil && !failing && ctx.Err() == nil:
+			s.log.Warn("vault: uploading Litestream's replicas failed; retrying each minute", "err", err)
+			failing = true
+		case err == nil && failing:
+			s.log.Info("vault: Litestream's replicas upload again")
+			failing = false
+		}
+	}
 }

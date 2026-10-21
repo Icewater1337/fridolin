@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -170,7 +171,17 @@ func defaultVaultBackends(ctx context.Context, s *vaultService, cfg *config.Sett
 			b.driveOld = oldDrive
 		}
 	}
-	if lite := findVaultTool("litestream"); lite != "" && c.SnapKeyID != "" && c.SnapKey != "" {
+	if lite := findVaultTool("litestream"); lite != "" && c.SnapKeyID != "" && c.SnapKey != "" && c.LiteSealKey != "" && c.SnapCryptPassword != "" {
+		// Two layers: Litestream replicates into a local folder, which the
+		// mirror uploads sealed (its own key) through rclone crypt (the
+		// snapshots' crypt password).
+		mirror, closeMirror, err := liteMirrorStore(rclone, base, c, cfg.Vault.SnapshotsBucket, s.usage)
+		if err != nil {
+			return b, err
+		}
+		b.closers = append(b.closers, closeMirror)
+		b.lite, b.liteMirror = mirroredLitestream(lite, cfg, s.log, base, b.bridgeDB, mirror)
+	} else if lite != "" && c.SnapKeyID != "" && c.SnapKey != "" {
 		replica := func(name string) snapshot.Replica {
 			return snapshot.Replica{Type: "s3", Bucket: cfg.Vault.SnapshotsBucket, Path: "litestream/" + name,
 				Endpoint: "https://" + cfg.Vault.Endpoint, Region: b2Region(cfg.Vault.Endpoint), ForcePathStyle: true}
@@ -183,6 +194,52 @@ func defaultVaultBackends(ctx context.Context, s *vaultService, cfg *config.Sett
 			}}
 	}
 	return b, nil
+}
+
+// liteReplicaDir is the local folder Litestream replicates into when the
+// mirror carries the replicas to B2.
+func liteReplicaDir(cfg *config.Settings) string {
+	return filepath.Join(cfg.Boot.Layout().Core(), "litestream-replica")
+}
+
+// mirroredLitestream replicates bridge.db and vault.db into
+// core/litestream-replica, which the mirror uploads to store.
+func mirroredLitestream(bin string, cfg *config.Settings, log *slog.Logger, base []string, bridgeDB string, store cloud.ObjectStore) (*snapshot.Litestream, *cloud.Mirror) {
+	dir := liteReplicaDir(cfg)
+	replica := func(name string) snapshot.Replica {
+		return snapshot.Replica{Type: "file", Dir: filepath.Join(dir, name)}
+	}
+	lite := &snapshot.Litestream{Binary: bin, TempDir: cfg.Boot.Layout().Core(), Logger: quietLogger(log), Env: base,
+		DBs: []snapshot.LitestreamDB{
+			{Path: bridgeDB, Replica: replica("bridge.db")},
+			{Path: cfg.Boot.Layout().VaultDB(), Replica: replica("vault.db")},
+		}}
+	return lite, &cloud.Mirror{Dir: dir, Store: store, DeleteEvery: liteDeleteEvery}
+}
+
+// liteDeleteEvery spaces the mirror's batches of deletes, each a listing
+// (one Class C on B2): Litestream drops level-0 files hourly.
+const liteDeleteEvery = 6 * time.Hour
+
+// liteMirrorStore is <snapshots bucket>/litestream-sealed through rclone
+// crypt, sealed inside, on a daemon of its own.
+func liteMirrorStore(rclone string, base []string, c vaultCreds, bucket string, usage *cloud.Usage) (*cloud.Sealed, func() error, error) {
+	env, err := cloud.B2Env(snapRemoteName, c.SnapKeyID, c.SnapKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	crypt, err := cloud.CryptEnv("fridolinlitecrypt", snapRemoteName+":"+bucket+"/"+liteSealedPath, c.SnapCryptPassword, "")
+	if err != nil {
+		return nil, nil, err
+	}
+	d := &cloud.RcloneDaemon{Binary: rclone, Env: append(append(append([]string{}, base...), env...), crypt...), Secrets: c.secrets(),
+		Usage: usage, Op: "litestream", FastList: true}
+	sealed, err := cloud.NewSealed(d.Store("fridolinlitecrypt:"), c.LiteSealKey)
+	if err != nil {
+		_ = d.Close()
+		return nil, nil, fmt.Errorf("%s: %w", hostsecrets.LitestreamSealKey, err)
+	}
+	return sealed, d.Close, nil
 }
 
 // errDriveNotConnected: the weekly copy has no Drive to go to.
@@ -315,14 +372,20 @@ func localVaultBackends(s *vaultService, cfg *config.Settings, dir string) (vaul
 		b.snapErr = "restic is not installed"
 	}
 	if lite := findVaultTool("litestream"); lite != "" {
-		replica := func(name string) snapshot.Replica {
-			return snapshot.Replica{Type: "file", Dir: filepath.Join(dir, "litestream", name)}
+		// As on B2: replicas in core/, mirrored sealed into the stand-in.
+		key, err := localSecret(dir, "litestream-seal-key", "FRIDOLIN_LITESTREAM_SEAL_KEY")
+		if err != nil {
+			return b, err
 		}
-		b.lite = &snapshot.Litestream{Binary: lite, TempDir: cfg.Boot.Layout().Core(), Logger: quietLogger(s.log), Env: base,
-			DBs: []snapshot.LitestreamDB{
-				{Path: b.bridgeDB, Replica: replica("bridge.db")},
-				{Path: cfg.Boot.Layout().VaultDB(), Replica: replica("vault.db")},
-			}}
+		folder, err := cloud.NewDir(filepath.Join(dir, "litestream-sealed"))
+		if err != nil {
+			return b, err
+		}
+		sealed, err := cloud.NewSealed(folder, key)
+		if err != nil {
+			return b, err
+		}
+		b.lite, b.liteMirror = mirroredLitestream(lite, cfg, s.log, base, b.bridgeDB, sealed)
 	}
 	return b, nil
 }

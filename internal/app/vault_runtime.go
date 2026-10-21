@@ -142,6 +142,10 @@ type vaultBackends struct {
 	driveOld  func() (*snapshot.Restic, error)
 	// lite replicates bridge.db and vault.db; nil means none.
 	lite *snapshot.Litestream
+	// liteMirror carries lite's local replicas to the cloud with two
+	// layers; nil when lite replicates to B2 itself (one layer, TLS and
+	// the bucket's own encryption only).
+	liteMirror *cloud.Mirror
 	// bridgeDB is the bridge.db Litestream replicates and the snapshots
 	// copy; "" for none.
 	bridgeDB string
@@ -223,8 +227,8 @@ func (s *vaultService) chargeB2(run *vaultRun, op string, cost cloud.Cost) {
 // its measured cost per start, and its steady daily cost for the time it
 // ran since the last count (snapshot.LitestreamDailyCost).
 func (s *vaultService) litestreamUsage(run *vaultRun, st snapshot.LitestreamStatus, now time.Time) {
-	if run.b.lite == nil || !run.b.b2 {
-		return
+	if run.b.lite == nil || !run.b.b2 || run.b.liteMirror != nil {
+		return // the mirror's rclone counts its own calls
 	}
 	n := len(run.b.lite.DBs)
 	starts := st.Restarts
@@ -503,6 +507,9 @@ func (s *vaultService) serve(ctx context.Context, run *vaultRun, cfg *config.Set
 			}
 		})
 	}
+	if m := b.liteMirror; m != nil {
+		wg.Go(func() { s.runLiteMirror(ctx, m) })
+	}
 	s.ping(ctx, v)
 	s.syncAll(ctx, v)
 	s.evict(ctx, v)
@@ -567,6 +574,10 @@ func (s *vaultService) heartbeat(ctx context.Context, run *vaultRun, save bool) 
 			s.status.Litestream.LastError = run.liteErr
 		}
 		s.status.Litestream.DBs = litestreamNames(run.b.lite)
+		if m := run.b.liteMirror; m != nil {
+			ms := m.Status()
+			s.status.Litestream.Mirror = &ms
+		}
 	}
 	if save {
 		s.saveLocked()

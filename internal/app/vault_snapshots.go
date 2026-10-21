@@ -109,6 +109,9 @@ type litestreamView struct {
 	Enabled bool `json:"enabled"`
 	snapshot.LitestreamStatus
 	DBs []string `json:"dbs,omitempty"`
+	// Mirror is the last upload of the local replicas, when they reach the
+	// cloud through the mirror (two layers).
+	Mirror *cloud.MirrorStatus `json:"mirror,omitempty"`
 }
 
 type drillCheck struct {
@@ -688,6 +691,21 @@ func (vs *vaultSnapshots) drillLocked(ctx context.Context) {
 		}
 	}
 	if lite := vs.run.b.lite; lite != nil {
+		if m := vs.run.b.liteMirror; m != nil {
+			// From the cloud's copy, through both layers, as a new
+			// machine would.
+			fetched := filepath.Join(tmp, "litestream-fetched")
+			fc := drillCheck{Name: "litestream copy in the cloud"}
+			if _, err := m.Sync(ctx, time.Now()); err != nil {
+				fc.Detail = "uploading the replicas first: " + err.Error()
+			} else if n, err := cloud.Fetch(ctx, m.Store, fetched); err != nil {
+				fc.Detail = err.Error()
+			} else {
+				fc.OK, fc.Detail = true, fmt.Sprintf("fetched %d files through both layers", n)
+			}
+			rec.Checks = append(rec.Checks, fc)
+			lite = liteFrom(lite, m.Dir, fetched)
+		}
 		for _, db := range lite.DBs {
 			name := filepath.Base(db.Path)
 			c := drillCheck{Name: "litestream " + name}
@@ -711,4 +729,17 @@ func (vs *vaultSnapshots) drillLocked(ctx context.Context) {
 	if !rec.OK {
 		vs.s.log.Warn("vault: the restore drill found a problem", "snapshot", latest.ShortID)
 	}
+}
+
+// liteFrom is lite with its file replicas under from moved under to: the
+// same databases, restored from another copy of the replicas.
+func liteFrom(lite *snapshot.Litestream, from, to string) *snapshot.Litestream {
+	out := &snapshot.Litestream{Binary: lite.Binary, TempDir: lite.TempDir, Logger: lite.Logger, Env: lite.Env}
+	for _, db := range lite.DBs {
+		if rel, err := filepath.Rel(from, db.Replica.Dir); err == nil && db.Replica.Type == "file" {
+			db.Replica.Dir = filepath.Join(to, rel)
+		}
+		out.DBs = append(out.DBs, db)
+	}
+	return out
 }

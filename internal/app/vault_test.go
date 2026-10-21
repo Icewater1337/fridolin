@@ -388,7 +388,7 @@ func TestVaultSnapshotsDrillAndDrive(t *testing.T) {
 	if d == nil || !d.OK {
 		data, _ := json.MarshalIndent(st.Litestream, "", "  ")
 		t.Logf("litestream: %s", data)
-		_ = filepath.Walk(filepath.Join(local, "litestream"), func(p string, fi os.FileInfo, err error) error { t.Log(p); return nil })
+		_ = filepath.Walk(filepath.Join(local, "litestream-sealed"), func(p string, fi os.FileInfo, err error) error { t.Log(p); return nil })
 		data, _ = json.MarshalIndent(d, "", "  ")
 		t.Fatalf("restore drill:\n%s", data)
 	}
@@ -396,7 +396,7 @@ func TestVaultSnapshotsDrillAndDrive(t *testing.T) {
 	for _, c := range d.Checks {
 		names[c.Name] = true
 	}
-	for _, want := range []string{"brain folder main", "database copy bridge.db", "database copy vault.db"} {
+	for _, want := range []string{"brain folder main", "database copy bridge.db", "database copy vault.db", "litestream copy in the cloud", "litestream bridge.db"} {
 		if !names[want] {
 			t.Errorf("the drill did not check %s: %+v", want, d.Checks)
 		}
