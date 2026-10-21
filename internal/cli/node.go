@@ -35,6 +35,10 @@ Usage:
   fridolin node backup on [--root PATH]… | off
                        lend this machine's disks to the core's backups (or stop);
                        restart the service after (fridolin node stop, start)
+  fridolin node workstation on --root PATH… [--allow-home] [--no-agent|--no-terminal] | off
+                       let the core run Claude Code or Codex sessions and a terminal
+                       in these folders (docs/NODES.md, Workstation); restart the
+                       service after, then approve it on the core
   fridolin node fride pair --url http://127.0.0.1:PORT | status
                        FrIDE on this machine, offered to the core while it runs;
                        fridolin node fride help for more
@@ -50,6 +54,11 @@ Join flags:
   --backup             lend this machine's disks to the core's backups: the owner
                        picks a folder for each backup target on the core
   --backup-root PATH   lend only PATH (a drive or folder) for backups; repeat it
+  --workstation        offer agent and terminal (the workstation mode) in the
+                       --workstation-root folders, else in the --root folders
+  --workstation-root PATH
+                       a folder for the workstation mode; repeat it
+  --allow-home         let a workstation root be the home folder itself
   --no-host            do not report host facts
   --no-notify          do not show notifications
   --no-service         join only; start the agent yourself (fridolin node run)
@@ -75,7 +84,13 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 	stateDir := fs.String("state-dir", "", "the node's state folder")
 	var o joinFlags
 	var backupRoots multiFlag
+	var ws workstationFlags
 	switch sub {
+	case "workstation":
+		fs.Var(&ws.roots, "root", "a folder for agent and terminal (repeatable)")
+		fs.BoolVar(&ws.allowHome, "allow-home", false, "let a root be the home folder itself")
+		fs.BoolVar(&ws.noAgent, "no-agent", false, "offer the terminal only")
+		fs.BoolVar(&ws.noTerminal, "no-terminal", false, "offer agent sessions only")
 	case "join":
 		o.register(fs)
 	case "backup":
@@ -108,6 +123,8 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 		return nodeJoin(pos[0], dir, o, stdout, stderr)
 	case "backup":
 		return nodeBackup(pos, backupRoots, dir, stdout, stderr)
+	case "workstation":
+		return nodeWorkstation(pos, ws, dir, stdout, stderr)
 	case "run", "install", "start", "stop", "status", "uninstall", "rollback":
 		if len(pos) != 0 {
 			fmt.Fprintf(stderr, "fridolin node %s takes no arguments\n", sub)
@@ -190,6 +207,8 @@ type joinFlags struct {
 	allow, roots, backupRoots       multiFlag
 	noExec, noHost, noNotify, noSvc bool
 	backup                          bool
+	workstation, allowHome          bool
+	workRoots                       multiFlag
 }
 
 func (o *joinFlags) register(fs *flag.FlagSet) {
@@ -200,6 +219,9 @@ func (o *joinFlags) register(fs *flag.FlagSet) {
 	fs.BoolVar(&o.noExec, "no-exec", false, "allow no commands")
 	fs.BoolVar(&o.backup, "backup", false, "lend this machine's disks to the core's backups")
 	fs.Var(&o.backupRoots, "backup-root", "lend only this drive or folder for backups (repeatable)")
+	fs.BoolVar(&o.workstation, "workstation", false, "offer agent and terminal in the workstation roots")
+	fs.Var(&o.workRoots, "workstation-root", "a folder for the workstation mode (repeatable)")
+	fs.BoolVar(&o.allowHome, "allow-home", false, "let a workstation root be the home folder itself")
 	fs.BoolVar(&o.noHost, "no-host", false, "do not report host facts")
 	fs.BoolVar(&o.noNotify, "no-notify", false, "do not show notifications")
 	fs.BoolVar(&o.noSvc, "no-service", false, "join only, without installing the service")
@@ -244,6 +266,21 @@ func (o joinFlags) capabilities(goos string) (nodeproto.Capabilities, error) {
 			return c, err
 		}
 		c.Backup = b
+	}
+	if o.workstation || len(o.workRoots) > 0 {
+		roots := o.workRoots
+		if len(roots) == 0 {
+			for _, r := range o.roots {
+				r, _ = strings.CutSuffix(r, ":rw")
+				r, _ = strings.CutSuffix(r, ":ro")
+				roots = append(roots, r)
+			}
+		}
+		w, err := workstationCap(roots, o.allowHome)
+		if err != nil {
+			return c, err
+		}
+		c.Agent, c.Terminal = w, w
 	}
 	return c, c.Check()
 }
@@ -354,5 +391,75 @@ func nodeJoin(code, dir string, o joinFlags, stdout, stderr io.Writer) int {
 		}
 	}
 	fmt.Fprintf(stdout, "The service %s runs the agent from %s.\n", svc.Name, exe)
+	return 0
+}
+
+// workstationFlags are `node workstation on`'s flags.
+type workstationFlags struct {
+	roots                          multiFlag
+	allowHome, noAgent, noTerminal bool
+}
+
+// workstationCap is the workstation capability in roots, each an existing
+// folder a node may grant (nodeagent.CheckWorkRoot).
+func workstationCap(roots []string, allowHome bool) (*nodeproto.WorkstationCap, error) {
+	if len(roots) == 0 {
+		return nil, errors.New("the workstation mode needs at least one folder: --workstation-root PATH (or --root PATH)")
+	}
+	w := &nodeproto.WorkstationCap{AllowHome: allowHome}
+	for _, r := range roots {
+		abs, err := filepath.Abs(r)
+		if err != nil {
+			return nil, err
+		}
+		if st, err := os.Stat(abs); err != nil || !st.IsDir() {
+			return nil, fmt.Errorf("workstation root %s: not a folder", r)
+		}
+		if err := nodeagent.CheckWorkRoot(abs, allowHome, ""); err != nil {
+			return nil, fmt.Errorf("workstation root %w", err)
+		}
+		w.Roots = append(w.Roots, abs)
+	}
+	return w, nil
+}
+
+// nodeWorkstation turns the workstation mode on or off in node.json.
+func nodeWorkstation(pos []string, o workstationFlags, dir string, stdout, stderr io.Writer) int {
+	if len(pos) != 1 || pos[0] != "on" && pos[0] != "off" {
+		fmt.Fprintln(stderr, "fridolin node workstation takes on or off")
+		return 2
+	}
+	cfg, err := nodeagent.LoadConfig(dir)
+	if err != nil {
+		fmt.Fprintf(stderr, "fridolin node workstation: %v\n", err)
+		return 1
+	}
+	cfg.Capabilities.Agent, cfg.Capabilities.Terminal = nil, nil
+	if pos[0] == "on" {
+		if o.noAgent && o.noTerminal {
+			fmt.Fprintln(stderr, "fridolin node workstation: --no-agent and --no-terminal leave nothing to offer; use off")
+			return 2
+		}
+		w, err := workstationCap(o.roots, o.allowHome)
+		if err != nil {
+			fmt.Fprintf(stderr, "fridolin node workstation: %v\n", err)
+			return 2
+		}
+		if !o.noAgent {
+			cfg.Capabilities.Agent = w
+		}
+		if !o.noTerminal {
+			cfg.Capabilities.Terminal = w
+		}
+	}
+	if err := nodeagent.SaveConfig(dir, cfg); err != nil {
+		fmt.Fprintf(stderr, "fridolin node workstation: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "This node offers: %s\nRestart the agent (fridolin node stop, then fridolin node start) so the core hears it", cfg.Capabilities.Summary())
+	if pos[0] == "on" {
+		fmt.Fprint(stdout, "; then approve it on the core: fridolin nodes approve <id> --commands")
+	}
+	fmt.Fprintln(stdout, ".")
 	return 0
 }

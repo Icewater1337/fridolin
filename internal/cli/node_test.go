@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -95,5 +96,41 @@ func TestStatusOfANodeThatHasNotJoined(t *testing.T) {
 	nodeCmd([]string{"status", "--state-dir", dir}, &out, &errOut)
 	if !strings.Contains(out.String(), "State dir: "+dir) || !strings.Contains(out.String(), "Not joined") {
 		t.Errorf("status: %s %s", out.String(), errOut.String())
+	}
+}
+
+func TestWorkstationFlags(t *testing.T) {
+	dir := t.TempDir()
+	c, err := joinFlags{workstation: true, roots: multiFlag{dir + ":rw"}}.capabilities("linux")
+	if err != nil || c.Agent == nil || c.Terminal == nil || len(c.Agent.Roots) != 1 || c.Agent.Roots[0] != dir {
+		t.Fatalf("--workstation --root: %+v, %v", c, err)
+	}
+	other := t.TempDir()
+	c, err = joinFlags{workRoots: multiFlag{other}, roots: multiFlag{dir}}.capabilities("linux")
+	if err != nil || c.Agent.Roots[0] != other {
+		t.Fatalf("--workstation-root: %+v, %v", c.Agent, err)
+	}
+	if _, err := (joinFlags{workstation: true}).capabilities("linux"); err == nil {
+		t.Error("--workstation without a folder")
+	}
+	if _, err := (joinFlags{workRoots: multiFlag{"/"}}).capabilities("linux"); err == nil {
+		t.Error("a whole drive as a workstation root")
+	}
+
+	state := t.TempDir()
+	cfg := `{"core": "c:1", "name": "n", "capabilities": {"host": true}}`
+	if err := os.WriteFile(filepath.Join(state, "node.json"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := nodeCmd([]string{"workstation", "on", "--root", dir, "--no-terminal", "--state-dir", state}, &out, &errOut); code != 0 {
+		t.Fatalf("workstation on: %d %s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "agent (1 folder)") || strings.Contains(out.String(), "terminal") {
+		t.Fatalf("workstation on says %q", out.String())
+	}
+	out.Reset()
+	if code := nodeCmd([]string{"workstation", "off", "--state-dir", state}, &out, &errOut); code != 0 || !strings.Contains(out.String(), "offers: host\n") {
+		t.Fatalf("workstation off: %d %q", code, out.String())
 	}
 }
