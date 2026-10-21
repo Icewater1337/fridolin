@@ -39,6 +39,17 @@ import (
 // the call answers "pending" with the id, which check_approval waits on
 // again; an answer that comes once no call waits goes to the brain as a
 // new message (SourceApprovalResult) in the chat it was asked in.
+//
+// An answer reaches the brain once: in the call that waits for it, or,
+// when none does, as that new message, which starts a run of its own.
+// decide holds approvalWaiters.settle from its update of bridge.db until
+// it has handed the answer on, and a call reads the approval under it
+// too. So a call never finds an answer in bridge.db that decide has yet
+// to hand on: it would take it, and decide, finding no waiter, would
+// send it as a message as well. A call that finds the answer went as a
+// message (its wait ended just as the vote came, or check_approval came
+// after it) answers pending and says so: two runs told to take the step
+// would take it twice.
 
 // The kinds of approval rows.
 const (
@@ -54,6 +65,16 @@ var (
 	maxApprovalWait     = 10 * time.Minute
 )
 
+// approvalWaitEnded, when set, runs as a call's wait for approval id
+// ends unanswered, once the call stopped waiting: tests decide the
+// approval at that moment.
+var approvalWaitEnded func(id string)
+
+// approvalDecided, when set, runs in decide once bridge.db has the
+// answer to approval id and before decide hands it on: tests start a
+// call at that moment.
+var approvalDecided func(id string)
+
 // approvalTimeout is how long an approval waits for its answer. A
 // variable, so tests need not wait an hour.
 var approvalTimeout = func(b *App) time.Duration { return b.cfgs.Get().Live.Policy.ApprovalTimeout() }
@@ -61,10 +82,20 @@ var approvalTimeout = func(b *App) time.Duration { return b.cfgs.Get().Live.Poli
 // approvalWaiters are the tool calls waiting for an answer, by approval
 // id, and the free-text questions a call waits on, by chat.
 type approvalWaiters struct {
-	mu   sync.Mutex
-	wait map[string]chan store.Approval
-	text map[string]string // chat → id of the question asked there without options
+	// settle is held by decide from its update of bridge.db until the
+	// answer is handed on, and by a call while it reads the approval.
+	settle sync.Mutex
+	mu     sync.Mutex
+	wait   map[string]chan store.Approval
+	text   map[string]string // chat → id of the question asked there without options
+	// late are the approvals decided while no call waited, whose answer
+	// went to the brain as a message, with when; kept lateMemory.
+	late map[string]time.Time
 }
+
+// lateMemory is how long the bridge remembers that an answer went to the
+// brain as a message, longer than any run that could ask about it again.
+const lateMemory = 24 * time.Hour
 
 // add registers a waiter for id, or returns the one registered already
 // (ask registers it before the poll goes out).
@@ -91,11 +122,38 @@ func (w *approvalWaiters) take(id string) chan store.Approval {
 	return ch
 }
 
-// waiting reports whether a call waits for id.
-func (w *approvalWaiters) waiting(id string) bool {
+// hand removes id's waiter and returns its channel, which the answer
+// goes into. With no call waiting, it returns nil and, with goesOn,
+// marks the answer as one that goes to the brain as a message: in one
+// step, so that no call can start or stop waiting in between.
+func (w *approvalWaiters) hand(id string, goesOn bool) chan store.Approval {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.wait[id] != nil
+	if ch := w.wait[id]; ch != nil {
+		delete(w.wait, id)
+		return ch
+	}
+	if goesOn {
+		now := time.Now()
+		if w.late == nil {
+			w.late = map[string]time.Time{}
+		}
+		for k, at := range w.late {
+			if now.Sub(at) > lateMemory {
+				delete(w.late, k)
+			}
+		}
+		w.late[id] = now
+	}
+	return nil
+}
+
+// wentLate reports whether id's answer went to the brain as a message.
+func (w *approvalWaiters) wentLate(id string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_, ok := w.late[id]
+	return ok
 }
 
 // forget drops id's free-text question, once it is decided.
@@ -343,14 +401,14 @@ func (b *App) ask(ctx context.Context, c mcpCaller, a store.Approval) (store.App
 
 // awaitAnswer waits up to wait for a's answer, and says what it is.
 func (b *App) awaitAnswer(ctx context.Context, a store.Approval, wait time.Duration) *mcp.CallResult {
-	if a.Status != "" && a.Status != store.ApprovalPending {
-		return answerResult(a)
-	}
 	ch := b.waiters.add(a.ID)
-	// Decided since it was read, by a vote that found no waiter.
-	if cur, err := b.store.ApprovalByID(ctx, a.ID); err == nil && cur.Status != store.ApprovalPending {
-		b.waiters.take(a.ID)
-		return answerResult(cur)
+	// Decided already: by an answer that found this waiter, and is in the
+	// channel, or by one that found none, and went on to the brain.
+	if cur, late, err := b.settledApproval(ctx, a.ID); err == nil && cur.Status != store.ApprovalPending {
+		if b.waiters.take(a.ID) == nil {
+			return answerResult(<-ch)
+		}
+		return decidedResult(cur, late)
 	}
 	deadline := wait
 	if left := time.Until(a.ExpiresAt); left < deadline {
@@ -368,16 +426,40 @@ func (b *App) awaitAnswer(ctx context.Context, a store.Approval, wait time.Durat
 		// Taken by an answer as the wait ended: it is in the channel.
 		return answerResult(<-ch)
 	}
+	if approvalWaitEnded != nil {
+		approvalWaitEnded(a.ID)
+	}
+	// No call waits any more: an answer from here on goes on to the brain
+	// as a message, which decidedResult does not hand over a second time.
 	if !time.Now().Before(a.ExpiresAt) {
-		if got, ok := b.decide(context.WithoutCancel(ctx), a.ID, store.ApprovalExpired, "", "timeout", false); ok {
+		if got, ok := b.decide(context.WithoutCancel(ctx), a.ID, store.ApprovalExpired, "", "timeout", callerAnswers); ok {
 			return answerResult(got)
 		}
 	}
-	cur, err := b.store.ApprovalByID(context.WithoutCancel(ctx), a.ID)
+	cur, late, err := b.settledApproval(context.WithoutCancel(ctx), a.ID)
 	if err == nil && cur.Status != store.ApprovalPending {
-		return answerResult(cur)
+		return decidedResult(cur, late)
 	}
 	return mcp.TextResult(fmt.Sprintf("pending: no answer yet after %s (approval_id %s). Call check_approval with this id to wait again, or end your turn: the answer comes to you as a new message in this chat. Until it is approved, do not take the action.", wait.Round(time.Second), a.ID))
+}
+
+// settledApproval reads approval id once no decide is under way, and
+// whether its answer went on to the brain as a message.
+func (b *App) settledApproval(ctx context.Context, id string) (store.Approval, bool, error) {
+	b.waiters.settle.Lock()
+	defer b.waiters.settle.Unlock()
+	a, err := b.store.ApprovalByID(ctx, id)
+	return a, b.waiters.wentLate(id), err
+}
+
+// decidedResult is the tool result for decided a, which no waiting call
+// took: pending, for an answer that went on to the brain as a message
+// (late), where the brain acts on it.
+func decidedResult(a store.Approval, late bool) *mcp.CallResult {
+	if !late {
+		return answerResult(a)
+	}
+	return mcp.TextResult(fmt.Sprintf("pending: the answer came once you had stopped waiting, and comes to you as a new message in this chat (approval_id %s). Do not act on it in this run: end your turn, and act on that message.", a.ID))
 }
 
 // answerResult is the tool result for a decided approval or question.
@@ -398,18 +480,39 @@ func answerResult(a store.Approval) *mcp.CallResult {
 	return mcp.TextResult("pending (approval_id " + a.ID + ")")
 }
 
+// lateAnswer is what decide does with an answer no call waits for.
+type lateAnswer int
+
+const (
+	// callerAnswers: the caller, a call whose wait ended, answers with it.
+	callerAnswers lateAnswer = iota
+	// answerAsMessage: it goes to the brain as a new message (deliverAnswer).
+	answerAsMessage
+	// messageGoesOn: the owner's message that answered goes on to the
+	// brain itself (answerText).
+	messageGoesOn
+)
+
 // decide ends pending approval id with status, once: it hands the answer
-// to the call that waits for it, or, with late, to the brain as a new
-// message. It reports false for an approval no longer pending.
-func (b *App) decide(ctx context.Context, id, status, answer, by string, late bool) (store.Approval, bool) {
+// to the call that waits for it, or, as late says, on to the brain. It
+// reports false for an approval no longer pending.
+func (b *App) decide(ctx context.Context, id, status, answer, by string, late lateAnswer) (store.Approval, bool) {
+	b.waiters.settle.Lock()
 	a, err := b.store.DecideApproval(ctx, id, status, answer, by, time.Now())
 	if errors.Is(err, store.ErrNotPending) {
+		b.waiters.settle.Unlock()
 		return a, false
 	}
 	if err != nil {
+		b.waiters.settle.Unlock()
 		log.Printf("approval %s: %v", id, err)
 		return a, false
 	}
+	if approvalDecided != nil {
+		approvalDecided(id)
+	}
+	ch := b.waiters.hand(id, late != callerAnswers)
+	b.waiters.settle.Unlock()
 	kind := audit.ApprovalDecided
 	if a.Kind == questionKind {
 		kind = audit.QuestionAnswered
@@ -420,11 +523,11 @@ func (b *App) decide(ctx context.Context, id, status, answer, by string, late bo
 	}
 	b.audit.Append(audit.Entry{Kind: kind, Thread: a.Thread, Chat: a.Chat, Brain: a.Brain, Run: a.Run, ID: a.ID, Risk: a.Risk, By: by, Detail: detail, Outcome: status})
 	b.waiters.forget(id)
-	if ch := b.waiters.take(id); ch != nil {
+	if ch != nil {
 		ch <- a
 		return a, true
 	}
-	if late {
+	if late == answerAsMessage {
 		b.deliverAnswer(a)
 	}
 	return a, true
@@ -489,7 +592,7 @@ func (b *App) approvalVote(id string, v pollVote) {
 	if a.Kind == questionKind {
 		entry.Outcome = "answered"
 		b.audit.Append(entry)
-		b.decide(ctx, a.ID, store.ApprovalAnswered, choice, voter, true)
+		b.decide(ctx, a.ID, store.ApprovalAnswered, choice, voter, answerAsMessage)
 		return
 	}
 	switch {
@@ -502,11 +605,11 @@ func (b *App) approvalVote(id string, v pollVote) {
 	case choice == outboundmsg.ApprovalYes:
 		entry.Outcome = store.ApprovalApproved
 		b.audit.Append(entry)
-		b.decide(ctx, a.ID, store.ApprovalApproved, choice, voter, true)
+		b.decide(ctx, a.ID, store.ApprovalApproved, choice, voter, answerAsMessage)
 	case choice == outboundmsg.ApprovalNo:
 		entry.Outcome = store.ApprovalDenied
 		b.audit.Append(entry)
-		b.decide(ctx, a.ID, store.ApprovalDenied, choice, voter, true)
+		b.decide(ctx, a.ID, store.ApprovalDenied, choice, voter, answerAsMessage)
 	default:
 		entry.Outcome = "ignored: not an option"
 		b.audit.Append(entry)
@@ -525,11 +628,10 @@ func (b *App) answerText(m brainruntime.Inbound) bool {
 	if id == "" || !b.isOwner(m.Sender) {
 		return false
 	}
-	waited := b.waiters.waiting(id)
 	n, _ := chat.PhoneNumber(m.Sender)
-	a, ok := b.decide(context.Background(), id, store.ApprovalAnswered, m.Text, n, false)
-	if !ok || !waited {
-		return false
+	a, ok := b.decide(context.Background(), id, store.ApprovalAnswered, m.Text, n, messageGoesOn)
+	if !ok || b.waiters.wentLate(id) {
+		return false // no call waited: m goes on to the brain
 	}
 	if br := b.brainMgr.Get(a.Notify); br != nil {
 		br.AppendHistory(m.JID, m.Sender, m.Text, history.In)
@@ -546,7 +648,7 @@ func (b *App) sweepApprovals(ctx context.Context) {
 		return
 	}
 	for _, a := range expired {
-		b.decide(ctx, a.ID, store.ApprovalExpired, "", "timeout", true)
+		b.decide(ctx, a.ID, store.ApprovalExpired, "", "timeout", answerAsMessage)
 	}
 }
 
@@ -593,7 +695,7 @@ func (b *App) dashboardDecide(ctx context.Context, id string, approve bool) (any
 		status = store.ApprovalApproved
 	}
 	b.audit.Append(audit.Entry{Kind: audit.ApprovalVote, Thread: a.Thread, Chat: a.Chat, Brain: a.Brain, Run: a.Run, ID: a.ID, Risk: a.Risk, By: "dashboard", Outcome: status})
-	got, ok := b.decide(ctx, id, status, "", "dashboard", true)
+	got, ok := b.decide(ctx, id, status, "", "dashboard", answerAsMessage)
 	if !ok {
 		return nil, apperr.New(apperr.Conflict, "that approval is "+got.Status+" already")
 	}
