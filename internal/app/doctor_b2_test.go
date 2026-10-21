@@ -32,6 +32,9 @@ func TestDoctorB2Transactions(t *testing.T) {
 		}
 		return s + `}}`
 	}
+	withLastOK := func(rec, at string) string {
+		return strings.Replace(rec, `"ops":`, `"last_ok":"`+at+`","ops":`, 1)
+	}
 	for _, tc := range []struct {
 		name     string
 		files    map[string]string
@@ -46,6 +49,27 @@ func TestDoctorB2Transactions(t *testing.T) {
 		{"capped", map[string]string{"/data/core/b2-usage.json": usage("2026-10-21", 2500, 2500, "2026-10-21T09:30:00Z")}, DoctorFail, "refused a call at 09:30 UTC", "Caps & Alerts"},
 		{"the lease says so", map[string]string{"/data/core/lease-state.json": `{"state":"unverified","device_id":"d1","error":"reading the core lease: 403 transaction_cap_exceeded"}`},
 			DoctorFail, "transaction_cap_exceeded", "Caps & Alerts"},
+		// The owner raised the caps at 06:00: calls since succeed, and the
+		// refusal of 03:00 only warns.
+		{"capped, then calls succeed", map[string]string{"/data/core/b2-usage.json": withLastOK(usage("2026-10-21", 2500, 2500, "2026-10-21T03:00:00Z"), "2026-10-21T06:01:00Z")},
+			DoctorWarn, "refused a call at 03:00 UTC (failed to authorize account: Transaction cap exceeded); calls since succeed (the last at 06:01 UTC)", "Caps & Alerts"},
+		{"a failed nightly snapshot, then the lease and the hourly one succeed", map[string]string{
+			"/data/core/b2-usage.json":    usage("2026-10-21", 2500, 2500, "2026-10-21T03:00:00Z"),
+			"/data/core/lease-state.json": `{"state":"held","device_id":"d1","renewed_at":"2026-10-21T06:01:00Z","updated_at":"2026-10-21T06:01:00Z"}`,
+			"/data/core/vault-status.json": `{"state":"running","reachable":{"at":"2026-10-21T06:01:30Z","ok":true},` +
+				`"snapshots":{"last_nightly":{"at":"2026-10-21T03:00:00Z","kind":"nightly","error":"restic: 403 transaction_cap_exceeded"},` +
+				`"last_hourly":{"at":"2026-10-21T06:02:00Z","kind":"hourly"}}}`},
+			DoctorWarn, "calls since succeed (the last at 06:02 UTC)", "Caps & Alerts"},
+		{"a refusal after the last success", map[string]string{"/data/core/b2-usage.json": withLastOK(usage("2026-10-21", 2500, 2500, "2026-10-21T09:30:00Z"), "2026-10-21T09:00:00Z")},
+			DoctorFail, "refused a call at 09:30 UTC", "Caps & Alerts"},
+		{"the nightly snapshot refused, nothing since", map[string]string{"/data/core/vault-status.json": `{"state":"running",` +
+			`"snapshots":{"last_nightly":{"at":"2026-10-21T03:00:00Z","kind":"nightly","error":"restic: 403 transaction_cap_exceeded"},` +
+			`"last_hourly":{"at":"2026-10-21T02:00:00Z","kind":"hourly"}}}`},
+			DoctorFail, "Backblaze B2 refused a call: restic: 403 transaction_cap_exceeded", "Caps & Alerts"},
+		{"a refusal of yesterday, calls since", map[string]string{"/data/core/vault-status.json": `{"state":"running",` +
+			`"snapshots":{"last_nightly":{"at":"2026-10-20T03:00:00Z","kind":"nightly","error":"restic: 403 transaction_cap_exceeded"},` +
+			`"last_hourly":{"at":"2026-10-21T11:00:00Z","kind":"hourly"}}}`},
+			DoctorOK, "no B2 transactions counted today", ""},
 	} {
 		got := checkB2Transactions(context.Background(), env(tc.files))
 		if got.Status != tc.status || !strings.Contains(got.Detail, tc.detail) || !strings.Contains(got.Fix, tc.fixMatch) {

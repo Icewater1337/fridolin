@@ -153,7 +153,11 @@ Vault page's *B2 transactions*, `fridolin vault status` and `fridolin
 doctor` (`b2-transactions`) show them against `vault.b2_daily_budget`
 (default 2,000 of each class) and warn past 70%; a refusal for a cap is a
 doctor failure with the fix: raise the caps under B2 → *Caps & Alerts*, or
-lower the vault's activity.
+lower the vault's activity. Once a B2 call succeeded after the refusal
+(the stores note their last success in the counts; the lease's renewal,
+the cold tier's probe, a sync and a snapshot that went well count too),
+the caps were raised since: doctor then only warns about it until
+midnight UTC.
 
 ## Keys and passwords
 

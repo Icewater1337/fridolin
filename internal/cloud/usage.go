@@ -65,6 +65,10 @@ type UsageDay struct {
 	// and CapError what it said.
 	CapExceeded time.Time `json:"cap_exceeded,omitzero"`
 	CapError    string    `json:"cap_error,omitempty"`
+	// LastOK is the last time this day a counted store's call to B2
+	// succeeded: a refusal before it was a cap since lifted (the owner
+	// raised it), one after it still holds.
+	LastOK time.Time `json:"last_ok,omitzero"`
 }
 
 // Count is the rounded count of class c.
@@ -133,6 +137,17 @@ func (u *Usage) NoteError(err error) {
 	u.day.CapError = msg
 }
 
+// NoteOK records that a call to B2 succeeded now.
+func (u *Usage) NoteOK() {
+	if u == nil {
+		return
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.rollLocked()
+	u.day.LastOK = u.now().UTC()
+}
+
 // Today returns a copy of today's counts, and of the day before when this
 // process counted one.
 func (u *Usage) Today() (today UsageDay, prev *UsageDay) {
@@ -183,6 +198,9 @@ func (u *Usage) Restore(today UsageDay, prev *UsageDay) {
 			}
 			if d.CapExceeded.After(u.day.CapExceeded) {
 				u.day.CapExceeded, u.day.CapError = d.CapExceeded, d.CapError
+			}
+			if d.LastOK.After(u.day.LastOK) {
+				u.day.LastOK = d.LastOK
 			}
 		case d.Day < u.day.Day && (u.prev == nil || d.Day >= u.prev.Day):
 			p := copyDay(*d)
