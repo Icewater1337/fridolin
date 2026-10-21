@@ -182,12 +182,6 @@ func (n *updNode) restart() {
 	n.start()
 }
 
-func (n *updNode) agent() *Agent {
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	return n.cur.agent
-}
-
 func approveUpd(t *testing.T, c *core, id string) {
 	t.Helper()
 	if _, err := c.svc.ApproveDevice(id); err != nil {
