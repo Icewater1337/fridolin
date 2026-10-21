@@ -24,9 +24,9 @@ func threadProp() map[string]any {
 }
 
 // registerFrideTools registers them behind M5's policy (App.guarded):
-// fride_task, fride_reply, fride_move and fride_close change work on a
-// node and so are write, refused in a lockdown and to a read budget;
-// fride_status only reads.
+// fride_task, fride_reply, fride_move, fride_close and fride_repo_add
+// change work or files on a node and so are write, refused in a lockdown
+// and to a read budget; fride_status only reads.
 func (b *App) registerFrideTools(r *mcp.Registry[mcpCaller]) {
 	r.Register(mcp.Entry[mcpCaller]{
 		Name:      "fride_task",
@@ -86,6 +86,24 @@ func (b *App) registerFrideTools(r *mcp.Registry[mcpCaller]) {
 			}
 		},
 		Call: b.guarded(skill.RiskWrite, b.callFrideClose),
+	})
+	r.Register(mcp.Entry[mcpCaller]{
+		Name:      "fride_repo_add",
+		Available: b.frideTools,
+		Describe: func(mcpCaller) mcp.Tool {
+			return mcp.Tool{
+				Description: "Add a repository to FrIDE on a machine, so fride_task can work in it: clone it from url, or with new make an empty one (an initial commit, and by default a private GitHub repository the owner's gh account creates and pushes to). FrIDE knows it at once. Use it when the person wants work in a repository FrIDE does not have, or asks for a new one.",
+				InputSchema: schema(map[string]any{
+					"name":    strProp("The repository's folder name on the machine, and for new its name on GitHub: letters, digits, '.', '_' and '-'."),
+					"url":     strProp("The repository to clone: an https:// or ssh:// URL, or git@host:owner/repo.git. Leave it out with new."),
+					"new":     map[string]any{"type": "boolean", "description": "Make a new, empty repository instead of cloning one."},
+					"github":  map[string]any{"type": "boolean", "description": "With new: also create it on GitHub and push (default true); false keeps it on the machine only."},
+					"private": map[string]any{"type": "boolean", "description": "With new on GitHub: private (default true); false only when the person asked for a public repository."},
+					"node":    strProp("The machine: a node's name, id or tag, when the person asked for one; leave it out to let fridolin pick."),
+				}, "name"),
+			}
+		},
+		Call: b.guarded(skill.RiskWrite, b.callFrideRepoAdd),
 	})
 }
 
@@ -169,6 +187,36 @@ func (b *App) callFrideStatus(ctx context.Context, _ mcpCaller, raw json.RawMess
 	}
 	data, _ := json.MarshalIndent(out, "", "  ")
 	return mcp.TextResult(string(data)), nil
+}
+
+// repoAddArgs reads fride_repo_add's arguments; GitHub and Private are
+// true unless given.
+type repoAddArgs struct {
+	Name    string `json:"name"`
+	URL     string `json:"url"`
+	New     bool   `json:"new"`
+	GitHub  *bool  `json:"github"`
+	Private *bool  `json:"private"`
+	Node    string `json:"node"`
+}
+
+func (b *App) callFrideRepoAdd(ctx context.Context, _ mcpCaller, raw json.RawMessage) (*mcp.CallResult, error) {
+	var a repoAddArgs
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return mcp.ErrorResult("unreadable arguments: " + err.Error()), nil
+	}
+	a.Name, a.URL, a.Node = strings.TrimSpace(a.Name), strings.TrimSpace(a.URL), strings.TrimSpace(a.Node)
+	switch {
+	case a.Name == "":
+		return mcp.ErrorResult("name is missing: the repository's folder name"), nil
+	case a.New == (a.URL != ""):
+		return mcp.ErrorResult("give either url, to clone a repository, or new, to make one"), nil
+	}
+	text, err := b.fride.addRepo(ctx, a)
+	if err != nil {
+		return mcp.ErrorResult(err.Error()), nil
+	}
+	return mcp.TextResult(text), nil
 }
 
 func truncateRunes(s string, n int) string {

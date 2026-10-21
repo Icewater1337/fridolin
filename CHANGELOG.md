@@ -10,6 +10,14 @@ for compatibility.
 
 ### Added
 
+- The core brain's `fride_repo_add` adds a repository to FrIDE on a node:
+  it clones one, or makes a new one with an initial commit and, by
+  default, a private GitHub repository through the node's `gh`. The node
+  does it in FrIDE's base folder (`fridolin node fride pair --base DIR`,
+  else FrIDE's only base folder) with the new methods `fride.repo_clone`
+  and `fride.repo_new`, which the `fride` approval covers, and FrIDE
+  rescans at once. Update the node agents along with the core.
+
 - `fridolin core migrate --from-native` moves a native install into the
   core's container: the brain folders, the calendar credentials and what
   else of your home folder the config names stay on the Mac and are bound

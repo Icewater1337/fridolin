@@ -4,7 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -163,4 +167,76 @@ func TestFrideThroughNodes(t *testing.T) {
 	}
 	h.Inject(inbound{JID: harnessDM, Text: "!move 2 laptop"})
 	h.WaitSent(harnessDM, outboundmsg.LockdownRefusedNotice)
+}
+
+// fride_repo_add through a node: a clone and a new repository land in the
+// fake FrIDE's base folder, which then knows them; a repository it has is
+// not added twice; the arguments are checked first.
+func TestFrideRepoAddTool(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake gh is a shell script")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	tmp, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(tmp, "src")
+	repos := filepath.Join(tmp, "repos")
+	bin := filepath.Join(tmp, "bin")
+	for _, d := range []string{src, repos, bin} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitcfg := filepath.Join(tmp, "gitconfig")
+	cfg := "[user]\n\tname = Test\n\temail = you@example.com\n[init]\n\tdefaultBranch = main\n[url \"" + src + "\"]\n\tinsteadOf = https://example.com/acme/api.git\n"
+	if err := os.WriteFile(gitcfg, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", gitcfg)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	runGit(t, src, "init", "--quiet")
+	runGit(t, src, "commit", "--quiet", "--allow-empty", "-m", "first")
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\necho \"https://github.com/you/$3\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	t.Setenv("FRIDOLIN_FAKE_MCP", "[]")
+	ff := testutil.StartFakeFride(t, "web")
+	ff.SetBaseFolders(repos)
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	addr := h.StartNodes()
+	id, _ := h.fakeFrideNode("mini", addr, ff)
+
+	reply := h.coreSays("work on api", step("fride_repo_add", `{"name":"api","url":"https://example.com/acme/api.git"}`), step("fride_repo_add", `{"name":"web","url":"https://example.com/acme/web.git"}`), step("fride_repo_add", `{"name":"x"}`))
+	if !strings.Contains(reply, "Cloned https://example.com/acme/api.git into "+filepath.Join(repos, "api")+" on mini. FrIDE knows it now: fride_task can work in api.") ||
+		!strings.Contains(reply, "FrIDE on mini has web already") ||
+		!strings.Contains(reply, "[core:fride_repo_add failed] give either url, to clone a repository, or new, to make one") {
+		t.Fatalf("fride_repo_add:\n%s", reply)
+	}
+	h.WaitFor("api offered", func() bool {
+		n, err := h.b.nodes.Registry().Get(id)
+		return err == nil && n.Declared.Fride != nil && slices.Contains(n.Declared.Fride.Repos, "api")
+	})
+	reply = h.coreSays("a new tool", step("fride_repo_add", `{"name":"tool","new":true}`), step("fride_repo_add", `{"name":"api","url":"https://example.com/acme/api.git","node":"gpu"}`))
+	if !strings.Contains(reply, "Made the repository tool in "+filepath.Join(repos, "tool")+" on mini, with an initial commit. On GitHub: https://github.com/you/tool.") ||
+		!strings.Contains(reply, `[core:fride_repo_add failed] no online node offers FrIDE that is or is tagged "gpu"`) {
+		t.Fatalf("fride_repo_add new:\n%s", reply)
+	}
+	if _, err := os.Stat(filepath.Join(repos, "tool", ".git")); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := h.b.setLockdown(context.Background(), true, "dashboard"); err != nil {
+		t.Fatal(err)
+	}
+	reply = h.coreSays("another", step("fride_repo_add", `{"name":"more","new":true}`))
+	if !strings.Contains(reply, "[core:fride_repo_add failed] the bridge is in lockdown") {
+		t.Fatalf("fride_repo_add in a lockdown:\n%s", reply)
+	}
 }

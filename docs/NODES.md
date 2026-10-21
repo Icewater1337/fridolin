@@ -147,8 +147,13 @@ for FrIDE's token, which it keeps in the state dir as `fride.token`
 which `node.json` keeps with FrIDE's address:
 
 ```json
-"fride": {"url": "http://127.0.0.1:7777", "webhook": "127.0.0.1:53817"}
+"fride": {"url": "http://127.0.0.1:7777", "webhook": "127.0.0.1:53817", "base": "/Users/you/repos"}
 ```
+
+`base` (`pair --base DIR`) is the folder the core's `fride_repo_add`
+clones into or makes new repositories in. It must be one of FrIDE's
+`baseFolders`; without it the node takes FrIDE's only base folder, read
+from FrIDE's settings at each call, and refuses while FrIDE has several.
 
 A running agent reads both again every 30 seconds; no restart is needed.
 `fridolin node fride status` says whether FrIDE answers.
@@ -173,6 +178,27 @@ refused: FrIDE is never declared by hand.
 | `fride.write`, `fride.import` | `POST /api/companion/tasks/import` | write a bundle to the node in chunks, then import it |
 | `fride.drop` | | remove a staged bundle |
 | `fride.delete` | `DELETE /api/tasks/<t>` | remove a task's workspace |
+| `fride.repo_clone` | `git clone`, then `POST /api/config` | clone a repository into the base folder |
+| `fride.repo_new` | `git init`, a commit, `gh repo create`, then `POST /api/config` | make a new repository in the base folder |
+
+**Repositories.** `fride.repo_clone` and `fride.repo_new` stay inside
+the base folder (`fride.base`, see above): the name is one folder name
+(letters, digits, `.`, `_`, `-`, not starting with `.` or `-`), the
+folder must not exist yet, and one that a failed clone or `git init`
+leaves is removed again. A clone takes an `https://` or `ssh://` URL or
+`user@host:path`, never a local path, another transport or a URL with
+credentials; the node's own git credentials are used. A new repository
+gets `git init --initial-branch=main` and a README as its initial
+commit and, when asked, `gh repo create <name> --private` (or
+`--public`) `--source . --remote origin --push`; if gh fails, the
+repository stays on the node and the answer says why. git and gh are
+found by absolute path (the PATH, else `/opt/homebrew/bin`,
+`/usr/local/bin`, `/usr/bin`), run without a shell and without
+prompts, each step with a timeout (a clone 10 minutes, gh 3, the rest
+one) and its output cut at 16 KiB. Then the node asks FrIDE to read its
+config and base folders again (`POST /api/config`, what **Re-check**
+in its Settings does), so FrIDE knows the repository at once, and
+sends the core its new declaration.
 
 A bundle travels in chunks inside protocol messages, staged under
 `fride-transfers/` in the state dir and checked by size and SHA-256 on
@@ -190,7 +216,8 @@ The core takes a node's events only while its `fride` is approved.
 
 With `nodes.enabled`, the core brain (`role: core`) gets five tools, and
 its prompt one rule: anything that changes code goes to FrIDE through
-`fride_task`; it never edits a repository itself.
+`fride_task`; it never edits a repository itself, and adds a repository
+FrIDE does not have with `fride_repo_add` first.
 
 | Tool | |
 | --- | --- |
@@ -199,6 +226,7 @@ its prompt one rule: anything that changes code goes to FrIDE through
 | `fride_reply(thread, text)` | passes the owner's answer on |
 | `fride_move(thread, node)` | as `!move` |
 | `fride_close(thread)` | closes the task and archives its workspace |
+| `fride_repo_add(name, url?, new?, github?, private?, node?)` | clones `url`, or with `new` makes the repository (on GitHub, private, unless `github` or `private` is false), on a node with FrIDE |
 
 **Placement.** `node` is a node's id, name or one of its tags; without it
 any node will do. The core takes the online nodes whose `fride` is
@@ -238,8 +266,13 @@ workspace on the node with `DELETE /api/tasks/<task>?force=1` (force:
 the rationale and any uncommitted work are in the archive). The branch
 stays in the repositories.
 
-**Policy.** `fride_task`, `fride_reply`, `fride_move` and `fride_close`
-are write actions of M5's policy (`App.guarded`): a lockdown refuses them,
+**Adding a repository.** `fride_repo_add` takes the online nodes with
+`fride` approved that match `node`; when one's FrIDE lists the
+repository already it says so and does nothing, else it calls
+`fride.repo_clone` or `fride.repo_new` on the first.
+
+**Policy.** `fride_task`, `fride_reply`, `fride_move`, `fride_close`
+and `fride_repo_add` are write actions of M5's policy (`App.guarded`): a lockdown refuses them,
 as it refuses `!move`, and so does a run whose risk budget is read;
 `fride_status` only reads. Every call is a `tool_call` line in the audit
 log.

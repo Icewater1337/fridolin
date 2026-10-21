@@ -12,6 +12,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,8 +23,9 @@ import (
 
 // FakeFride is a stand-in for FrIDE in companion mode
 // (its docs/COMPANION.md): its
-// loopback API under /api/companion/, the DELETE /api/tasks/<task> of its
-// UI's API, and its signed webhook. Tests drive what FrIDE's orchestrator
+// loopback API under /api/companion/, the DELETE /api/tasks/<task>,
+// GET /api/settings and POST /api/config of its UI's API, and its signed
+// webhook. Tests drive what FrIDE's orchestrator
 // would do with Emit, Ask, Start and Finish.
 type FakeFride struct {
 	t   testing.TB
@@ -35,6 +39,8 @@ type FakeFride struct {
 	paired    bool
 	webhook   string
 	repos     []string
+	static    []string
+	bases     []string
 	canStart  bool
 	threads   map[int]*fakeThread
 	tasks     map[string]*fakeTask
@@ -72,7 +78,7 @@ func StartFakeFride(t testing.TB, repos ...string) *FakeFride {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &FakeFride{t: t, ln: ln, URL: "http://" + ln.Addr().String(), repos: repos, canStart: true,
+	f := &FakeFride{t: t, ln: ln, URL: "http://" + ln.Addr().String(), repos: repos, static: repos, canStart: true,
 		threads: map[int]*fakeThread{}, tasks: map[string]*fakeTask{}}
 	f.srv = &http.Server{Handler: http.HandlerFunc(f.serve)}
 	go func() { _ = f.srv.Serve(ln) }()
@@ -89,6 +95,31 @@ func (f *FakeFride) NewCode() string {
 	defer f.mu.Unlock()
 	f.code = fmt.Sprintf("FAKE-%04d", len(f.calls))
 	return f.code
+}
+
+// SetBaseFolders sets the base folders GET /api/settings answers, as
+// FrIDE's config.json has them. POST /api/config then scans them, one
+// level deep, for git repositories, which it knows besides the ones it
+// started with, as FrIDE does when its config is read again.
+func (f *FakeFride) SetBaseFolders(dirs ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.bases = dirs
+}
+
+// rescan is what FrIDE's reload does to the repositories; called with mu
+// held.
+func (f *FakeFride) rescan() {
+	repos := append([]string(nil), f.static...)
+	for _, b := range f.bases {
+		entries, _ := os.ReadDir(b)
+		for _, e := range entries {
+			if _, err := os.Stat(filepath.Join(b, e.Name(), ".git")); err == nil && e.IsDir() && !slices.Contains(repos, e.Name()) {
+				repos = append(repos, e.Name())
+			}
+		}
+	}
+	f.repos = repos
 }
 
 // SetCanStart sets what /api/companion/mem answers.
@@ -215,6 +246,15 @@ func (f *FakeFride) serve(w http.ResponseWriter, r *http.Request) {
 			t.Exists = false
 		}
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if path == "/api/settings" && r.Method == http.MethodGet {
+		reply(http.StatusOK, map[string]any{"baseFolders": f.bases, "projects": []any{}})
+		return
+	}
+	if path == "/api/config" && r.Method == http.MethodPost {
+		f.rescan()
+		reply(http.StatusOK, map[string]any{"configured": true})
 		return
 	}
 	if !strings.HasPrefix(path, "/api/companion/") {

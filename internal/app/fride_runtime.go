@@ -314,6 +314,56 @@ func (f *frideRuntime) place(ctx context.Context, t *store.FrideThread) (placed 
 	return false, strings.Join(reasons, "; ")
 }
 
+// addRepo adds a repository to the FrIDE of a node that matches a.Node:
+// the first, in the registry's order, unless one has it already.
+func (f *frideRuntime) addRepo(ctx context.Context, a repoAddArgs) (string, error) {
+	cands := f.frideNodes(a.Node, nil)
+	if len(cands) == 0 {
+		return "", errors.New(noFrideNode(a.Node, nil))
+	}
+	for _, v := range cands {
+		if slices.Contains(v.Effective.Fride.Repos, a.Name) {
+			return fmt.Sprintf("FrIDE on %s has %s already: fride_task can work in it.", v.Name, a.Name), nil
+		}
+	}
+	v := cands[0]
+	p := nodeproto.FrideRepoParams{Name: a.Name, URL: a.URL}
+	var repo nodeproto.FrideRepo
+	var err error
+	if a.URL != "" {
+		repo, err = f.b.nodes.FrideRepoClone(ctx, v.ID, p)
+	} else {
+		p.GitHub = a.GitHub == nil || *a.GitHub
+		p.Public = a.Private != nil && !*a.Private
+		repo, err = f.b.nodes.FrideRepoNew(ctx, v.ID, p)
+	}
+	if err != nil {
+		return "", fmt.Errorf("adding %s to FrIDE on %s: %w", a.Name, v.Name, err)
+	}
+	log.Printf("fride: added the repository %s to FrIDE on %s (%s) at %s", a.Name, v.Name, v.ID, repo.Path)
+	var sb strings.Builder
+	if a.URL != "" {
+		fmt.Fprintf(&sb, "Cloned %s into %s on %s.", a.URL, repo.Path, v.Name)
+	} else {
+		fmt.Fprintf(&sb, "Made the repository %s in %s on %s, with an initial commit.", a.Name, repo.Path, v.Name)
+		if repo.GitHubURL != "" {
+			fmt.Fprintf(&sb, " On GitHub: %s.", repo.GitHubURL)
+		}
+	}
+	if repo.Warning != "" {
+		sb.WriteString(" " + repo.Warning + ".")
+	}
+	switch {
+	case repo.Rescanned && slices.Contains(repo.Repos, a.Name):
+		fmt.Fprintf(&sb, " FrIDE knows it now: fride_task can work in %s.", a.Name)
+	case repo.Rescanned:
+		fmt.Fprintf(&sb, " FrIDE read its folders again but does not list %s.", a.Name)
+	default:
+		sb.WriteString(" FrIDE could not be asked to read its folders again; it knows the repository after its next re-check or restart.")
+	}
+	return sb.String(), nil
+}
+
 func orDefault(s, def string) string {
 	if strings.TrimSpace(s) == "" {
 		return def

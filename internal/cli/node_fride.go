@@ -34,6 +34,9 @@ Flags:
   --fride-home DIR     FrIDE's home, FRIDE_HOME, for pair-companion (default: FrIDE's)
   --webhook HOST:PORT  the loopback address to hear FrIDE's webhook on
                        (default: the one paired before, else a free port)
+  --base DIR           the folder the core's fride_repo_add clones into or
+                       makes new repositories in: one of FrIDE's baseFolders
+                       (default: the one set before, else FrIDE's only one)
   --state-dir DIR      the node's state folder
 
 The node offers fride to the core while FrIDE answers; the owner approves
@@ -56,6 +59,7 @@ func nodeFrideCmd(args []string, stdout, stderr io.Writer) int {
 	bin := fs.String("fride", "fride", "the fride program")
 	home := fs.String("fride-home", "", "FrIDE's home")
 	webhook := fs.String("webhook", "", "the loopback host:port for FrIDE's webhook")
+	base := fs.String("base", "", "the folder new repositories go to")
 	pos, err := parseInterspersed(fs, args)
 	if errors.Is(err, flag.ErrHelp) {
 		return 0
@@ -93,18 +97,21 @@ func nodeFrideCmd(args []string, stdout, stderr io.Writer) int {
 				return 1
 			}
 		}
-		info, err := nodeagent.PairFride(ctx, nodeagent.FridePairOptions{Dir: dir, URL: *url, Code: c, Webhook: *webhook})
+		info, err := nodeagent.PairFride(ctx, nodeagent.FridePairOptions{Dir: dir, URL: *url, Code: c, Webhook: *webhook, Base: *base})
 		if err != nil {
 			fmt.Fprintf(stderr, "fridolin node fride pair: %v\n", err)
 			return 1
 		}
 		cfg, _ := nodeagent.LoadConfig(dir)
-		hook := ""
+		hook, newBase := "", "FrIDE's only base folder"
 		if cfg.Fride != nil {
 			hook = cfg.Fride.Webhook
+			if cfg.Fride.Base != "" {
+				newBase = cfg.Fride.Base
+			}
 		}
-		fmt.Fprintf(stdout, "Paired with FrIDE at %s (repositories: %s).\nIts news comes to %s; the token is in %s.\nThe node offers fride to the core within half a minute, while FrIDE runs. On the core, approve it once:\n\n  fridolin nodes approve %s --commands\n\n",
-			*url, orNone(info.Repos), hook, filepath.Join(dir, nodeagent.FrideTokenFile), nodeID(dir))
+		fmt.Fprintf(stdout, "Paired with FrIDE at %s (repositories: %s).\nIts news comes to %s; the token is in %s.\nRepositories the core adds go to %s.\nThe node offers fride to the core within half a minute, while FrIDE runs. On the core, approve it once:\n\n  fridolin nodes approve %s --commands\n\n",
+			*url, orNone(info.Repos), hook, filepath.Join(dir, nodeagent.FrideTokenFile), newBase, nodeID(dir))
 	case "status":
 		cfg, err := nodeagent.LoadConfig(dir)
 		if err != nil {
@@ -116,6 +123,9 @@ func nodeFrideCmd(args []string, stdout, stderr io.Writer) int {
 			return 0
 		}
 		fmt.Fprintf(stdout, "FrIDE: %s, webhook %s\n", cfg.Fride.URL, cfg.Fride.Webhook)
+		if cfg.Fride.Base != "" {
+			fmt.Fprintf(stdout, "New repositories: %s\n", cfg.Fride.Base)
+		}
 		tok, err := os.ReadFile(filepath.Join(dir, nodeagent.FrideTokenFile))
 		if err != nil {
 			fmt.Fprintf(stdout, "Token: missing (%v): pair again\n", err)
