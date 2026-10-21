@@ -63,4 +63,23 @@ func AskLoginCode(listen, token string) (string, error) {
 	return resp.Code, nil
 }
 
+// AskTailnetLoginLink asks the bridge at listen for a sign-in link at the
+// dashboard's tailnet address, with the token: a code that works once,
+// within httpapi.RemoteLoginCodeLifetime, from another device of the
+// tailnet.
+func AskTailnetLoginLink(listen, token string) (string, error) {
+	var resp struct{ Code, URL string }
+	if err := callBridge(listen, token, "/api/login/code?tailnet=1", &resp); err != nil {
+		if errors.Is(err, ErrBridgeDown) {
+			return "", fmt.Errorf("%w — start it first", err)
+		}
+		return "", err
+	}
+	if resp.URL == "" {
+		// A bridge older than this binary ignores ?tailnet=1.
+		return "", fmt.Errorf("the bridge at http://%s %w (it sent no tailnet link)", listen, ErrOlderBridge)
+	}
+	return resp.URL, nil
+}
+
 var ErrBridgeDown = errors.New("the bridge does not answer")

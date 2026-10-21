@@ -49,7 +49,16 @@ type Workflow struct {
 	// and tells the chat itself, when and how it ended; nil leaves !move
 	// to the brain.
 	Move func(ctx context.Context, jid, thread, node string)
+	// Owner answers the owner's commands, OwnerCommands, from m: the
+	// command in lower case and the words after it. It decides itself
+	// who may send them, and where; nil leaves them to the brain.
+	Owner func(m brainruntime.Inbound, command string, args []string) string
 }
+
+// OwnerCommands are the commands only the owner may send, in their
+// direct chat (Workflow.Owner): a join code for a new node, a dashboard
+// sign-in link, and approving or revoking a node.
+var OwnerCommands = []string{"!join", "!dashboard", "!approve", "!revoke"}
 
 // handleInbound is the entry point for every allowed message. Access control
 // already happened, for WhatsApp and dev messages alike: groups against
@@ -117,9 +126,13 @@ func (p *Workflow) Handle(ctx context.Context, m brainruntime.Inbound) {
 	p.Debouncer.Add(m)
 }
 
-// handleCommand runs !help, !reset, !stop, !fleet, !move, !lockdown and
-// !unlock. It reports whether text was one.
+// handleCommand runs !help, !reset, !stop, !fleet, !move, !lockdown,
+// !unlock and the OwnerCommands. It reports whether text was one.
 func (p *Workflow) handleCommand(ctx context.Context, m brainruntime.Inbound, settings Settings) bool {
+	if f := strings.Fields(m.Text); len(f) > 0 && p.Owner != nil && slices.Contains(OwnerCommands, strings.ToLower(f[0])) {
+		_ = p.Notice(ctx, m.JID, p.Owner(m, strings.ToLower(f[0]), f[1:]))
+		return true
+	}
 	if f := strings.Fields(m.Text); len(f) > 0 && strings.EqualFold(f[0], "!move") && p.Move != nil {
 		// Like the fleet, FrIDE's work is the owner's.
 		switch {

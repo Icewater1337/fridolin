@@ -33,6 +33,22 @@ func DashboardLink(cfg *config.Settings) (string, error) {
 	return httpapi.LoginURL(cfg.HTTPListen, code), nil
 }
 
+// TailnetDashboardLink is `fridolin open --tailnet`'s address: the
+// dashboard at the core's tailnet address, with a code that works once,
+// within ten minutes, so that another device of the tailnet signs in
+// without the token. The core must be on the tailnet (core.tailnet).
+func TailnetDashboardLink(cfg *config.Settings) (string, error) {
+	token, err := httpapi.ReadToken(cfg.DataDir)
+	if err != nil {
+		return "", fmt.Errorf("no dashboard token yet — start the bridge first (%w)", err)
+	}
+	link, err := AskTailnetLoginLink(cfg.HTTPListen, token)
+	if errors.Is(err, ErrOlderBridge) {
+		return "", fmt.Errorf("%w. Restart it on this build (./setup.sh installs it and restarts the bridge), or send !dashboard to it in your WhatsApp chat", err)
+	}
+	return link, err
+}
+
 // RotateToken does rotateTokenCmd's work for cfg.
 func RotateToken(cfg *config.Settings) error {
 	token, err := httpapi.ReadToken(cfg.DataDir)

@@ -31,6 +31,10 @@ const usage = `fridolin — talk to Claude Code over WhatsApp
 Usage:
   fridolin [run] [flags]     start the bridge (default)
   fridolin open              open the dashboard in your browser
+  fridolin open --print [--tailnet]
+                                           print a sign-in link that works once; with
+                                           --tailnet, at the core's tailnet address,
+                                           for another device (10 minutes)
   fridolin rotate-token      replace the dashboard token and sign out every browser
   fridolin check [--route JID ...] [--redact]
                                            validate the configuration and show routing;
@@ -495,6 +499,7 @@ func openCmd(args []string) {
 	fs := flag.NewFlagSet("open", flag.ExitOnError)
 	cfgPath := fs.String("config", "", configFlagHelp)
 	printOnly := fs.Bool("print", false, "print the URL instead of opening it")
+	tailnet := fs.Bool("tailnet", false, "the link at the core's tailnet address, for another device of the tailnet; it works once, within 10 minutes")
 	_ = fs.Parse(args)
 	inputs := app.ConfigOptions()
 	path, _ := app.ConfigPathFromPaths(*cfgPath, inputs.Paths)
@@ -506,7 +511,11 @@ func openCmd(args []string) {
 	if !cfg.HTTPEnabled || cfg.Dashboard.Disabled {
 		log.Fatalf("the dashboard is turned off in %s", path)
 	}
-	url, err := controlcli.DashboardLink(cfg)
+	link := controlcli.DashboardLink
+	if *tailnet {
+		link = controlcli.TailnetDashboardLink
+	}
+	url, err := link(cfg)
 	if err != nil {
 		log.Fatal(err)
 	}

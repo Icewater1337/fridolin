@@ -19,6 +19,8 @@ const KINDS = [
   ['approval_requested', 'Approval asked'], ['approval_vote', 'Vote'], ['approval_decided', 'Approval decided'],
   ['question_asked', 'Question asked'], ['question_answered', 'Question answered'],
   ['lockdown', 'Lockdown'], ['unlock', 'Unlock'], ['skill_approved', 'Skill approved'],
+  ['node_join_code', 'Join code (!join)'], ['dashboard_link', 'Sign-in link (!dashboard)'],
+  ['node_approved', 'Node approved (!approve)'], ['node_revoked', 'Node revoked (!revoke)'],
 ];
 const KIND_LABEL = Object.fromEntries(KINDS);
 

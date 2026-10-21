@@ -140,6 +140,9 @@ type IngestAcceptedResponse struct {
 type LoginCodeResponse struct {
 	Code      string    `json:"code"`
 	ExpiresAt time.Time `json:"expires_at"`
+	// URL is the sign-in link on the tailnet, for a code asked with
+	// ?tailnet=1.
+	URL string `json:"url,omitempty"`
 }
 
 type OKResponse struct {

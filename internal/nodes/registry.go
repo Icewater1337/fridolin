@@ -322,8 +322,14 @@ func (f *registryFile) pruneCodes(now time.Time) {
 // revoked one is refused with ErrRevoked. It returns the node as now
 // recorded.
 func (r *Registry) Hello(h nodeproto.Hello, address string) (*Node, error) {
-	var out *Node
-	err := r.update(func(f *registryFile) error {
+	n, _, err := r.hello(h, address)
+	return n, err
+}
+
+// hello is Hello, and reports whether the device joined just now, with
+// its join code.
+func (r *Registry) hello(h nodeproto.Hello, address string) (out *Node, joined bool, err error) {
+	err = r.update(func(f *registryFile) error {
 		now := r.now().UTC().Truncate(time.Second)
 		n := f.find(h.DeviceID)
 		if n == nil {
@@ -339,6 +345,7 @@ func (r *Registry) Hello(h nodeproto.Hello, address string) (*Node, error) {
 			f.JoinCodes = slices.Delete(f.JoinCodes, i, i+1)
 			n = &Node{ID: h.DeviceID, PublicKey: h.PublicKey, Device: nodeproto.DevicePending, JoinedAt: now, Tags: osTags(h.OS)}
 			f.Nodes = append(f.Nodes, n)
+			joined = true
 		}
 		if n.Device == nodeproto.DeviceRevoked {
 			return ErrRevoked
@@ -352,7 +359,7 @@ func (r *Registry) Hello(h nodeproto.Hello, address string) (*Node, error) {
 		out = clone(n)
 		return nil
 	})
-	return out, err
+	return out, joined && err == nil, err
 }
 
 // Declare records what a connected node offers now. Offering more than was

@@ -23,6 +23,9 @@ func (s *authSessionsFake) Valid(string, string) bool    { return s.valid }
 func (s *authSessionsFake) UseCode(string) bool          { *s.calls = append(*s.calls, "code"); return true }
 func (s *authSessionsFake) Drop(string) error            { *s.calls = append(*s.calls, "drop"); return nil }
 func (s *authSessionsFake) NewCode() (string, time.Time) { return "code", time.Unix(2000000000, 0) }
+func (s *authSessionsFake) NewCodeFor(ttl time.Duration) (string, time.Time) {
+	return "code-" + ttl.String(), time.Unix(2000000000, 0)
+}
 func (s *authSessionsFake) DropAll() error {
 	*s.calls = append(*s.calls, "drop-all")
 	return s.dropAllErr

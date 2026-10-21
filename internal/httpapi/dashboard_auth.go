@@ -3,6 +3,7 @@ package httpapi
 import (
 	"log"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -12,6 +13,7 @@ type DashboardSessionStore interface {
 	UseCode(string) bool
 	Drop(string) error
 	NewCode() (string, time.Time)
+	NewCodeFor(time.Duration) (string, time.Time)
 	DropAll() error
 }
 type DashboardAuthToken interface {
@@ -22,6 +24,10 @@ type DashboardAuth struct {
 	Sessions   func() DashboardSessionStore
 	Token      func() DashboardAuthToken
 	CookieName func() string
+	// TailnetURL is where the dashboard answers on the tailnet, such as
+	// http://fridolin-core.example.ts.net/, or "" while it does not; nil
+	// for never.
+	TailnetURL func() string
 }
 
 // SessionHeader carries a session's binding, which the page keeps in its
@@ -110,10 +116,33 @@ func (a *DashboardAuth) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 // apiLoginCode makes a login code, for `fridolin open`, which calls it with
-// the token from the data dir.
+// the token from the data dir. With ?tailnet=1 (`fridolin open --tailnet`)
+// the code is for another device of the tailnet: it lasts
+// RemoteLoginCodeLifetime, and the answer has the link at the
+// dashboard's tailnet address, which the dashboard must have.
 func (a *DashboardAuth) LoginCode(w http.ResponseWriter, r *http.Request) {
-	code, exp := a.Sessions().NewCode()
-	WriteJSON(w, http.StatusOK, LoginCodeResponse{Code: code, ExpiresAt: exp})
+	if r.URL.Query().Get("tailnet") == "" {
+		code, exp := a.Sessions().NewCode()
+		WriteJSON(w, http.StatusOK, LoginCodeResponse{Code: code, ExpiresAt: exp})
+		return
+	}
+	base := ""
+	if a.TailnetURL != nil {
+		base = a.TailnetURL()
+	}
+	if base == "" {
+		WriteErr(w, http.StatusConflict, "the dashboard is not on the tailnet: core.tailnet is off, or the core has not joined the tailnet yet (fridolin core status)")
+		return
+	}
+	code, exp := a.Sessions().NewCodeFor(RemoteLoginCodeLifetime)
+	WriteJSON(w, http.StatusOK, LoginCodeResponse{Code: code, ExpiresAt: exp, URL: TailnetLoginURL(base, code)})
+}
+
+// TailnetLoginURL is the sign-in link for code at the dashboard's tailnet
+// address base: http://fridolin-core.example.ts.net/, or https:// when
+// the tailnet issues certificates.
+func TailnetLoginURL(base, code string) string {
+	return strings.TrimSuffix(base, "/") + "/#login=" + code
 }
 
 // apiRotateToken replaces the dashboard token and ends every session: sign

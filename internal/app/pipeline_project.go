@@ -40,6 +40,7 @@ func (b *App) newMessagePipeline() *pipeline.Workflow {
 		Fleet:       b.fleetText,
 		HandOffCode: b.handOffCode,
 		Lockdown:    b.lockdownCommand,
+		Owner:       b.ownerCommand,
 		Answer:      b.answerText,
 		Chats:       chatJIDs,
 		ReplyChat: func(br *brain.Brain, ownerDM string) string {

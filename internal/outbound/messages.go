@@ -56,7 +56,10 @@ func HelpReply(groupTrigger string) string {
 		"• `!reset` — like `!stop`, and the next message starts without this chat's earlier messages\n" +
 		"• `!fleet` — the machines connected to me as nodes (direct chats only)\n" +
 		"• `!move <thread> <node>` — move FrIDE's coding work to another node (direct chats only)\n" +
-		"• `!lockdown` — owner only: pause all work but reading until `!unlock`"
+		"• `!lockdown` — owner only: pause all work but reading until `!unlock`\n" +
+		"• `!join` — owner only, direct chat: a join code for a new node\n" +
+		"• `!dashboard` — owner only, direct chat: a sign-in link for the dashboard\n" +
+		"• `!approve <id>`, `!revoke <id>` — owner only, direct chat: let a node in, or shut it out"
 	if groupTrigger != "" {
 		help += "\n\nIn this group, start your message with `" + groupTrigger + "` or reply to one of mine to address me, commands included."
 	}
@@ -174,10 +177,10 @@ const FleetGroupNotice = "🖥️ !fleet answers only in a direct chat."
 // is online and what it may do. enabled is nodes.enabled.
 func FleetReply(enabled bool, nodes []FleetNode, now time.Time) string {
 	if !enabled {
-		return "🖥️ Nodes are off. Turn on nodes.enabled in the config and restart the bridge to connect other machines (docs/NODES.md)."
+		return NodesOffNotice
 	}
 	if len(nodes) == 0 {
-		return "🖥️ No nodes yet. On the core, run `fridolin nodes join-code` and paste the line it prints on the new machine."
+		return "🖥️ No nodes yet. Send `!join` here for a join code, and paste the line it sends on the new machine."
 	}
 	online := 0
 	for _, n := range nodes {
@@ -193,9 +196,9 @@ func FleetReply(enabled bool, nodes []FleetNode, now time.Time) string {
 		case n.Device == "revoked":
 			b.WriteString(" · revoked")
 		case n.Device == "pending":
-			b.WriteString(" · waiting for approval: `fridolin nodes approve " + n.ID + "`")
+			b.WriteString(" · waiting for approval: `!approve " + n.ID + "`")
 		case n.Commands == "pending":
-			b.WriteString(" · offers more than approved: `fridolin nodes approve " + n.ID + " --commands`")
+			b.WriteString(" · offers more than approved: `!approve " + n.ID + "`")
 		}
 		if n.Device == "approved" {
 			b.WriteString("\n  may run: " + n.Offers)
@@ -206,6 +209,83 @@ func FleetReply(enabled bool, nodes []FleetNode, now time.Time) string {
 		}
 	}
 	return b.String()
+}
+
+// NodesOffNotice answers !fleet and !join while nodes.enabled is off.
+const NodesOffNotice = "🖥️ Nodes are off. Turn on nodes.enabled in the config and restart the bridge to connect other machines (docs/NODES.md)."
+
+// OwnerCommandGroupNotice answers !join, !dashboard, !approve or !revoke
+// in a group: what they hand out or change is the owner's alone.
+const OwnerCommandGroupNotice = "🔒 !join, !dashboard, !approve and !revoke answer only in the owner's direct chat."
+
+// OwnerCommandOwnerOnly answers !join, !dashboard, !approve or !revoke
+// from someone who is not the owner (a number in allowed_numbers).
+const OwnerCommandOwnerOnly = "🔒 Only the owner can ask for join codes and sign-in links, or approve and revoke nodes."
+
+// OwnerCommandRateLimited answers !join or !dashboard asked for more than
+// max times in the last hour.
+func OwnerCommandRateLimited(command string, max int) string {
+	return fmt.Sprintf("⏳ %s answered %d times in the last hour, the most allowed. Try again later, or use the dashboard.", command, max)
+}
+
+// NodeCommandUsage answers !approve or !revoke without one node id.
+const NodeCommandUsage = "🖥️ Send `!approve <id>` or `!revoke <id>` with a node's id; `!fleet` lists them."
+
+// JoinCodeReply answers !join: a single-use join code, valid for minutes,
+// the lines to paste on the new machine for sh and PowerShell, and the
+// core's node address.
+func JoinCodeReply(code, core, sh, powershell string, minutes int) string {
+	return fmt.Sprintf("🔑 Join code for a new node, single-use, valid %d minutes:\n\n%s\n\n"+
+		"On the new machine, paste one line.\n\n*macOS, Linux (sh):*\n```%s```\n\n*Windows (PowerShell):*\n```%s```\n\n"+
+		"Core: %s. Add `--root PATH:rw` to share a folder, `--no-exec` to allow no commands (docs/NODES.md). "+
+		"Once it connects I'll tell you here, and `!approve <id>` lets it in.", minutes, code, sh, powershell, core)
+}
+
+// DashboardOffNotice answers !dashboard while the dashboard is off.
+const DashboardOffNotice = "🔗 The dashboard is turned off (dashboard.disabled or http_enabled), so there is nothing to sign in to."
+
+// DashboardLinkReply answers !dashboard: the sign-in link at the core's
+// tailnet address (tailnet, "" when the core is not on the tailnet) and
+// on the core machine itself (local). Both carry one code, which signs
+// one browser in, once, within minutes.
+func DashboardLinkReply(tailnet, local string, minutes int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "🔗 Dashboard sign-in link, works once within %d minutes:\n\n", minutes)
+	if tailnet != "" {
+		b.WriteString("*From any device on your tailnet:*\n" + tailnet + "\n\n*On the core machine:*\n" + local)
+	} else {
+		b.WriteString(local + "\n\nThe core is not on the tailnet, so it works only on the core machine.")
+	}
+	b.WriteString("\n\nIt signs that browser in for 30 days; send `!dashboard` again for another link. Do not forward it.")
+	return b.String()
+}
+
+// NodeJoinedAlert tells the owner that a machine joined with a join code
+// and waits for approval.
+func NodeJoinedAlert(name, goos, id string) string {
+	return fmt.Sprintf("🖥️ *%s* (%s) wants to join as a node — approve it on the Nodes page or reply `!approve %s`. "+
+		"Not yours? `!revoke %s` shuts it out.", name, osLabel(goos), id, id)
+}
+
+// NodeApprovedReply answers !approve: the device, and what it offers
+// (offers), are approved.
+func NodeApprovedReply(name, id, offers string) string {
+	return fmt.Sprintf("✅ *%s* (%s) is approved: it may serve %s. `!fleet` lists it; `!revoke %s` shuts it out again.", name, id, offers, id)
+}
+
+// NodeRevokedReply answers !revoke.
+func NodeRevokedReply(name, id string) string {
+	return fmt.Sprintf("🚫 *%s* (%s) is revoked: it is disconnected and refused from now on. To bring it back, it joins again with a new code (`!join`).", name, id)
+}
+
+// NodeIsRevokedReply answers !approve for a node that was revoked.
+func NodeIsRevokedReply(name, id string) string {
+	return fmt.Sprintf("🚫 *%s* (%s) was revoked, so it cannot be approved. It joins again with a new code (`!join`), as a new node.", name, id)
+}
+
+// NodeUnknownReply answers !approve or !revoke with an id no node has.
+func NodeUnknownReply(id string) string {
+	return "❓ No node has the id " + textx.Truncate(id, 40) + ". `!fleet` lists them."
 }
 
 // The approval poll: a run's request_approval asks the owner with
