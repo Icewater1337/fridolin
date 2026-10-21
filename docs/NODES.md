@@ -930,6 +930,66 @@ core runs restic and sends restic's encrypted files. The repository
 methods are the core's backups' own; the dashboard's generic node call
 refuses them. Both sides check each call against the approved folders.
 
+## Updates
+
+Once a node is connected, the core updates its fridolin to the core's own
+version: from the dashboard (Nodes → **Update to <version>** on the
+node's card), with `fridolin nodes update <id>` (or `--all` for every
+connected node that runs an older version), or through the core brain's
+`node_update(node)` tool (write risk, refused in a lockdown).
+
+**The capability.** A node agent of this version offers `update`
+(`"update": false` in `node.json` turns it off). Like every capability it
+waits for the owner's approval: Approve what it offers on the card, or
+`fridolin nodes approve <id> --commands`. A node whose fridolin predates
+updates does not offer it; update it by hand once (build or copy the new
+fridolin onto it as under [Build fridolin](#3-build-fridolin), then
+`fridolin node stop` and `fridolin node start`), approve `update` when it
+connects, and the core updates it from then on.
+
+**The builds.** The core sends the build of its own version for the
+node's OS and architecture: darwin, linux and windows on amd64 and
+arm64, gzip'd, with a `manifest.json` of their SHA-256 and size. The core
+image carries them in `/opt/fridolin/node-binaries/`; a native install
+builds them with `make node-binaries` (into `bin/node-binaries`; the
+core looks for `node-binaries` beside its own binary, so for the service
+`make node-binaries NODE_BINARIES=~/.local/lib/fridolin/node-binaries`,
+or name the folder in `$FRIDOLIN_NODE_BINARIES`). Builds of another version than the core's are
+not sent.
+
+**What the node checks.** The core streams the binary in chunks of up to
+8 MiB and signs `(version, os, arch, sha256)` with its update key
+(`nodes/update.key` on the core, an ed25519 key made the first time a
+node connects). The node pins the core's public key when it joins
+(`core.pub` in its state folder); a node that joined before keeps the key
+of the core it is connected to at its first approved update. It refuses a
+binary whose signature, platform, size or SHA-256 do not match, and one
+signed by another key than the pinned one.
+
+**The swap.** The node unpacks the binary beside its own, moves its
+running fridolin to `<binary>.prev` (on Windows it renames the running
+exe aside, which Windows allows) and the new one into place, writes
+`update.json` and restarts its service. The new version is on trial for
+5 minutes: if it does not connect to the core in that time, or dies three
+times before it does, the node puts `.prev` back and restarts into it,
+and the core records the update as failed. `fridolin node rollback` puts
+`.prev` back by hand.
+
+**When not.** The core does not update a node that runs a FrIDE task of
+the core's or a backup to a folder on it (`--force`, or the dashboard's
+confirmation, does it anyway), one that is offline, or one that runs a
+newer version than the core (`--force` goes back).
+
+**Auto updates** are off by default. `fridolin nodes auto-update <id> on`,
+or the switch on the node's card, updates the node by itself when the
+core runs a newer version than the node's: when it connects, and while it
+is connected, never while it is busy. It only moves a node from a version
+known to be older (by its number, or one the core itself ran before, in
+`nodes/core-versions.json`), and leaves a version that failed alone until
+the owner turns auto on again. `fridolin doctor` warns about approved
+nodes that run an older version than the core, and about a last update
+that failed.
+
 ## The service
 
 `fridolin node install | start | stop | status | uninstall` manage the
