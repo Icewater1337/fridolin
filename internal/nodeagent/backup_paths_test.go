@@ -83,7 +83,7 @@ func TestBackupPathTraversal(t *testing.T) {
 		"upload with ..":           {folder, "keys", hexName, "../../" + upload},
 		"upload absolute":          {folder, "keys", hexName, filepath.Join(outside, upload)},
 		"upload not hex":           {folder, "keys", hexName, "ghijklmnopqrstuv"},
-		"folder in other spelling": {folder + "​", "keys", hexName, upload},
+		"folder in other spelling": {folder + "\u200b", "keys", hexName, upload},
 	} {
 		if perr := write(c.folder, c.typ, c.name, c.upload); perr == nil {
 			t.Errorf("%s: written", name)
