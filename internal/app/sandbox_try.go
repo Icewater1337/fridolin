@@ -19,7 +19,7 @@ import (
 // the run and whether that is what want ("visible" or "hidden") says.
 const trySandboxScript = `echo "user: $(id -un 2>/dev/null || id -u) ($(id -u))"
 echo "HOME: $HOME"
-for t in claude codex plaud git python3 node; do
+for t in claude codex plaud git python3 node gh cloudflared ffmpeg; do
 	if command -v "$t" >/dev/null 2>&1; then echo "  tool $t: $(command -v "$t")"; else echo "  tool $t: not on PATH"; fi
 done
 bad=0
@@ -80,6 +80,11 @@ func TrySandbox(w io.Writer, sp *SandboxProfiler, cfg *config.Settings, workDirs
 	}
 	sp.mu.RLock()
 	add("hidden", sp.configFile)
+	if sp.hostHome != "" {
+		// The links the image's entry point makes for scripts that name
+		// ~/.local/bin/<tool> (container/entrypoint.sh).
+		add("visible", filepath.Join(sp.hostHome, ".local", "bin"))
+	}
 	sp.mu.RUnlock()
 	slices.Sort(checks)
 	prog, args, err := sp.Command(id, "/bin/sh", append([]string{"-c", trySandboxScript, "sh"}, checks...))
@@ -98,4 +103,44 @@ func TrySandbox(w io.Writer, sp *SandboxProfiler, cfg *config.Settings, workDirs
 		return fmt.Errorf("brain %s's sandbox: %w", id, runErr)
 	}
 	return nil
+}
+
+// TrySandboxCommand runs prog with args as brain id in its sandbox, with
+// the environment a run of the brain has besides its tokens: its PATH (the
+// brain's own folders first), its TMPDIR and caches, FRIDOLIN_TOOLS_DIR,
+// and the bridge's TZ and LANG. What it writes goes to w; a program that fails returns its
+// *exec.ExitError. It is how a tool a brain runs (a transcription, a
+// calendar script) is tried where the brain runs it.
+func TrySandboxCommand(w io.Writer, sp *SandboxProfiler, cfg *config.Settings, id string, command []string) error {
+	if !sp.Enabled() {
+		return fmt.Errorf("sandbox.enabled is off: brain %s runs unsandboxed", id)
+	}
+	stateEnv, err := prepareBrainState(AbsPath(cfg.DataDir), AbsPath(cfg.MediaDir), id, cfg.InheritClaudeUserConfig)
+	if err != nil {
+		return err
+	}
+	dirs := append(slices.Clone(SetBridgePATH(cfg)[id]), filepath.SplitList(os.Getenv("PATH"))...)
+	path := strings.Join(dirs, string(filepath.ListSeparator))
+	prog := command[0]
+	if !filepath.IsAbs(prog) {
+		if prog = lookPathIn(command[0], path); prog == "" {
+			return fmt.Errorf("%s is not on brain %s's PATH (%s)", command[0], id, path)
+		}
+	}
+	bin, args, err := sp.Command(id, prog, command[1:])
+	if err != nil {
+		return fmt.Errorf("sandbox of brain %s: %w", id, err)
+	}
+	cmd := exec.Command(bin, args...)
+	cmd.Env = append([]string{"PATH=" + path, "FRIDOLIN_BRAIN_ID=" + id}, stateEnv...)
+	if tools := ownLayout().Tools; tools != "" {
+		cmd.Env = append(cmd.Env, "FRIDOLIN_TOOLS_DIR="+tools)
+	}
+	for _, name := range []string{"TZ", "LANG"} {
+		if v, ok := os.LookupEnv(name); ok {
+			cmd.Env = append(cmd.Env, name+"="+v)
+		}
+	}
+	cmd.Stdout, cmd.Stderr = w, w
+	return cmd.Run()
 }

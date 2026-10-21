@@ -9,7 +9,8 @@ import (
 // TestGoldenBwrapHostHome pins a brain's run in the container of a native
 // install moved there (core migrate --from-native): its folder bound at
 // the Mac's path on top of an empty HOME at the Mac's home folder, the
-// credentials folder never bound, ~/.gitconfig read-only, the Plaud login
+// credentials folder never bound, ~/.gitconfig read-only, the container's
+// own ~/.local/bin (the image's tool links) read-only, the Plaud login
 // with plaud.brain_access read-only but for tokens.json, and git's stored
 // credentials masked.
 func TestGoldenBwrapHostHome(t *testing.T) {

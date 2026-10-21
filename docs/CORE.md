@@ -19,10 +19,26 @@ It holds the `fridolin` binary with the Python helpers next to it
 (`/opt/fridolin/fridolin`, `/opt/fridolin/tools/`), python3, Node 22 and
 the Claude CLI (a pinned version, at least the one the bridge is tested
 against), the Codex CLI and the Plaud CLI (pinned too), ffmpeg, restic,
-rclone, Litestream, age, bubblewrap, git, curl, jq, sqlite3,
-ca-certificates and tzdata. restic, rclone and Litestream come from their
-releases, pinned and checked against the SHA-256 each release publishes;
-the base images are pinned to version tags. tini is PID 1, so `docker stop`
+rclone, Litestream, GitHub's `gh`, `cloudflared`, age, bubblewrap, git,
+curl, jq, sqlite3, ca-certificates and tzdata. restic, rclone, Litestream,
+gh and cloudflared come from their releases, pinned and checked against
+the SHA-256 each release publishes; the base images are pinned to version
+tags.
+
+A Python venv at `/opt/fridolin/venv`, first on `PATH`, so that `python3`
+and `#!/usr/bin/env python3` are it, holds what brains' tools import:
+torch (CPU only) and transformers for local transcription with
+`tools/transcribe.py` (and scripts like it), groq, Google's API client
+and sign-in libraries for calendar scripts that talk to Google
+themselves, youtube-transcript-api and yt-dlp. `container/python/requirements.in`
+lists them and `requirements.lock` pins every package with its hashes,
+the same for arm64 and amd64 (`make container-python-lock` makes it
+again, from releases at least two weeks old); torch comes from PyTorch's
+CPU index. Transcription runs on the CPU (the image has no GPU; the Mac's
+own scripts ran Whisper on the CPU too, since MPS gave garbage). A model
+is downloaded on a brain's first transcription into its cache in the
+volume (`XDG_CACHE_HOME`, `/data/brains/<id>/cache/huggingface`, about
+1.6 GB for large-v3-turbo), once per brain, and kept. tini is PID 1, so `docker stop`
 reaches the bridge as SIGTERM and it shuts down in order (15 s for a reply
 in progress, as on a native install), and the brains' orphaned processes
 are reaped.
@@ -348,7 +364,7 @@ config:
 | Host path | How | Why |
 | --- | --- | --- |
 | each brain folder outside the data dir | read-write | the brain's own folder |
-| `sandbox.credentials_dir` | read-only | the calendar tokens the bridge reads; a refreshed token it cannot save is only refreshed again next time (logged), and a new Google sign-in needs it read-write |
+| `sandbox.credentials_dir` | read-write | the calendar tokens: the bridge saves a refreshed token or a new Google sign-in there, as natively. Brains never see the folder |
 | `sandbox.allow_paths`, `startup_checks.required_files` | read-only | |
 | `~/.plaud` with `plaud.brain_access` | read-write | the Plaud CLI's login, which it refreshes there |
 | `plaud.phone_dir` | read-write | |
@@ -374,8 +390,21 @@ in the volume as before, `~/.gitconfig` read-only, `~/.plaud` read-only
 but for `tokens.json` with `plaud.brain_access`, and the `allow_paths`.
 What a run writes elsewhere in `~` goes with the run. The credentials
 folder, the other brains' folders and the rest of the home folder are not
-there. `fridolin check --try-sandbox ID` runs a shell in a brain's
-sandbox that says which of these it sees.
+there. `~/.local/bin` is the container's own, read-only for runs: the
+entry point fills it at start with links to the image's tools named in
+`FRIDOLIN_HOME_BIN` (default `claude cloudflared gh node npm npx`; set it
+in `compose.host.yaml`'s environment for others), for scripts and skills
+that call `~/.local/bin/gh` and the like. `fridolin check --try-sandbox
+ID` runs a shell in a brain's sandbox that says which of these it sees;
+`fridolin check --try-sandbox ID -- PROGRAM ARGS...` runs a program there
+instead, with the environment a run of the brain has (its PATH with the
+brain's own folders first, TMPDIR, caches, `FRIDOLIN_TOOLS_DIR`), which is
+how a tool is tried where the brain runs it:
+
+```bash
+docker exec fridolin-core fridolin check --try-sandbox personal -- \
+  python3 ~/fridolin-private/tools/transcribe.py /data/brains/personal/tmp/note.ogg /data/brains/personal/tmp/out
+```
 
 Without `--dry-run`, with the native bridge stopped (it takes the data
 dir's lock), the command:
@@ -456,20 +485,40 @@ imported config gets `/usr/bin/false` as its agents, so no run spends
 tokens or refreshes a login under the native bridge, and Plaud, the
 backup, the lease, the tailnet, nodes and the vault off. It then checks
 `/health`, `/ready`, `fridolin check` (the brains at their host paths),
-`fridolin doctor`, the credentials folder as the bridge sees it, and
-`fridolin check --try-sandbox` for each brain, and removes the container,
-the volume and the temporary export (`--keep` leaves them running).
+`fridolin doctor`, the credentials folder as the bridge sees it, the
+image's tools (gh, cloudflared, ffmpeg and the venv's packages),
+`fridolin check --try-sandbox` for each brain, and a transcription of
+three seconds of a tone with `tools/transcribe.py` and Whisper's smallest
+model in the first brain's sandbox (the model is downloaded into the
+rehearsal's volume), and removes the container, the volume and the
+temporary export (`--keep` leaves them running).
 
 ### What does not move
 
 The container is Linux. Programs built for macOS do not run there: Mach-O
-binaries, Python virtualenvs and `node_modules` made on the Mac (run
-`npm ci` or make the venv again in the container), anything that calls
-`launchctl`, `osascript`, `open` or Homebrew's `/opt/homebrew`, and
-launchd jobs of yours that call the bridge (they keep reaching it at
-`127.0.0.1:8765` with `~/.fridolin/scripts.token`, which the move keeps
-the same until you rotate it in the core). Transcription on the Mac's GPU
-(MPS) does not either.
+binaries, and Python virtualenvs and `node_modules` made on the Mac in a
+brain's folder. Do not make those again in place: the folder is the Mac's
+too, and a Linux venv there breaks the Mac's copy (and the rollback). A
+brain that needs one in the container makes it elsewhere, in its cache
+(`python3 -m venv "$XDG_CACHE_HOME/venvs/NAME"`, kept in the volume) and
+points the tool at it; packages that need a browser shown on screen
+(Playwright with `HEADED=1`) do not work in the container at all.
+
+Anything that calls `launchctl`, `osascript`, `open` or Homebrew's
+`/opt/homebrew` fails in the container. Scripts that schedule launchd jobs
+for later (a `wa schedule-once`) are run on the Mac instead, where they
+reach the core like any other script; a watchdog that restarts the native
+bridge is not needed, since Docker restarts the core (`restart:
+unless-stopped`) and its health check shows a stuck one. Scripts that read
+the native data dir's files (`~/.fridolin/bridge.db`) read a stale copy
+after the move: in the container the data dir is `/data`.
+
+launchd jobs of yours that call the bridge keep working: compose
+publishes the core at `127.0.0.1:8765` on the Mac as the native bridge
+listened, and they keep using `~/.fridolin/scripts.token`, which the move
+copies into the volume unchanged (until you rotate it in the core, after
+which copy the new one back). In a brain's run the bridge sets
+`FRIDOLIN_API` and `FRIDOLIN_BRAIN_TOKEN_FILE` as before.
 
 ## Recovery
 

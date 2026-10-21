@@ -31,6 +31,9 @@ type CheckOptions struct {
 	// TrySandbox runs a shell in this brain's sandbox, which says what it
 	// sees (TrySandbox in sandbox_try.go).
 	TrySandbox string
+	// TryCommand, with TrySandbox, is a program and its arguments to run
+	// there instead, with the environment a brain's run has.
+	TryCommand []string
 	Redact     bool
 }
 
@@ -174,6 +177,9 @@ func CheckReport(w io.Writer, path string, cfg *config.Settings, o CheckOptions)
 		}
 		profiler := NewSandboxProfiler(workDirs, cfg)
 		profiler.SetConfigFile(path)
+		if len(o.TryCommand) > 0 {
+			return TrySandboxCommand(w, profiler, cfg, o.TrySandbox, o.TryCommand)
+		}
 		if err := TrySandbox(w, profiler, cfg, workDirs, o.TrySandbox); err != nil {
 			return err
 		}

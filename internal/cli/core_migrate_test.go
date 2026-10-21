@@ -70,7 +70,7 @@ func TestNativeMountsAndOverride(t *testing.T) {
 	for _, m := range mounts {
 		got = append(got, strings.TrimPrefix(m.Path, home)+map[bool]string{true: ":ro", false: ":rw"}[m.ReadOnly])
 	}
-	want := []string{"/Personal:rw", "/.secrets:ro", "/.plaud:rw", "/.gitconfig:ro", "/private:ro"}
+	want := []string{"/Personal:rw", "/.secrets:rw", "/.plaud:rw", "/.gitconfig:ro", "/private:ro"}
 	if !slices.Equal(got, want) {
 		t.Errorf("mounts %q, want %q (notes %q)", got, want, notes)
 	}

@@ -41,6 +41,10 @@ ARG TARGETARCH
 ARG RESTIC_VERSION=0.19.1
 ARG RCLONE_VERSION=1.75.1
 ARG LITESTREAM_VERSION=0.5.17
+# What brains' skills run besides: GitHub's CLI and Cloudflare's tunnel
+# (quick tunnels to a dev server).
+ARG GH_VERSION=2.102.0
+ARG CLOUDFLARED_VERSION=2026.10.0
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl bzip2 unzip \
  && rm -rf /var/lib/apt/lists/*
@@ -49,10 +53,14 @@ RUN set -eu; \
     case "${TARGETARCH}" in \
       amd64) restic_sha=f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c; \
              rclone_sha=982b5aa772841168f8e380f139e9e787b2a105403e32b94da8676a0e1c0a13ab; \
-             ls_arch=x86_64; ls_sha=cfb371176d164437ae869f8351cfde49bd1804ae71c61923f75c9cba9c9c006d ;; \
+             ls_arch=x86_64; ls_sha=cfb371176d164437ae869f8351cfde49bd1804ae71c61923f75c9cba9c9c006d; \
+             gh_sha=bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386; \
+             cf_sha=d33ff2d14475178d2012c2c56beba87389ac5ded27649519f198a7d3134a99db ;; \
       arm64) restic_sha=a5f64aaab53d51e311fa3829124c5b703f2d14cf187d8640b6be3b2b49376465; \
              rclone_sha=03f2504174034b6d004152ed7369251c9a9ec1f7e0836eda420f5c7a5ec0dff9; \
-             ls_arch=arm64; ls_sha=f8ca4a050095c1efbda2c4365172e61bf9d955ea0d9ac42f448b52e51819baa5 ;; \
+             ls_arch=arm64; ls_sha=f8ca4a050095c1efbda2c4365172e61bf9d955ea0d9ac42f448b52e51819baa5; \
+             gh_sha=7862c86c72f43df3a2d93ddde6f473285b4e2af61b494849846827e513ef6484; \
+             cf_sha=e6422b9d4f72d3194bc5a38676f13667c06666523217b842a877d72a80b5ac08 ;; \
       *) echo "unsupported architecture ${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     curl -fsSLo restic.bz2 "https://github.com/restic/restic/releases/download/v${RESTIC_VERSION}/restic_${RESTIC_VERSION}_linux_${TARGETARCH}.bz2"; \
@@ -63,7 +71,34 @@ RUN set -eu; \
     unzip -q rclone.zip; install -m 0755 "rclone-v${RCLONE_VERSION}-linux-${TARGETARCH}/rclone" /usr/local/bin/rclone; \
     curl -fsSLo litestream.tar.gz "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-${LITESTREAM_VERSION}-linux-${ls_arch}.tar.gz"; \
     echo "${ls_sha}  litestream.tar.gz" | sha256sum -c -; \
-    tar -xzf litestream.tar.gz litestream; install -m 0755 litestream /usr/local/bin/litestream
+    tar -xzf litestream.tar.gz litestream; install -m 0755 litestream /usr/local/bin/litestream; \
+    curl -fsSLo gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.tar.gz"; \
+    echo "${gh_sha}  gh.tar.gz" | sha256sum -c -; \
+    tar -xzf gh.tar.gz "gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh"; install -m 0755 "gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh" /usr/local/bin/gh; \
+    curl -fsSLo cloudflared "https://github.com/cloudflare/cloudflared/releases/download/${CLOUDFLARED_VERSION}/cloudflared-linux-${TARGETARCH}"; \
+    echo "${cf_sha}  cloudflared" | sha256sum -c -; \
+    install -m 0755 cloudflared /usr/local/bin/cloudflared
+
+# ── the Python brains' tools run ──────────────────────────────────────────
+# A venv at /opt/fridolin/venv, first on PATH, so `python3 script.py` and
+# `#!/usr/bin/env python3` get it: local transcription (torch, CPU only,
+# and transformers, as tools/transcribe.py uses them), Google's API
+# client for calendar scripts, and yt-dlp. Every package is pinned with
+# its hashes in container/python/requirements.lock (make
+# container-python-lock). The runtime stage has the same Debian, so the
+# venv's python3 is the runtime's.
+FROM ${RUNTIME_IMAGE} AS python
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates python3 python3-venv \
+ && rm -rf /var/lib/apt/lists/*
+COPY container/python/requirements.lock /tmp/requirements.lock
+RUN python3 -m venv /opt/fridolin/venv \
+ && /opt/fridolin/venv/bin/pip install --no-cache-dir --disable-pip-version-check \
+      --require-hashes --no-deps --only-binary=:all: \
+      --index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cpu \
+      -r /tmp/requirements.lock \
+ && find /opt/fridolin/venv -name __pycache__ -prune -exec rm -rf {} + \
+ && /opt/fridolin/venv/bin/python -c "import torch, transformers, googleapiclient, google_auth_oauthlib, groq, yt_dlp"
 
 # ── Node and the Claude CLI ───────────────────────────────────────────────
 # The CLI's package installs the native build for the image's platform
@@ -95,7 +130,9 @@ RUN apt-get update \
       ca-certificates tzdata tini bubblewrap ffmpeg python3 git curl jq sqlite3 age \
  && rm -rf /var/lib/apt/lists/*
 
-COPY --from=tools /usr/local/bin/restic /usr/local/bin/rclone /usr/local/bin/litestream /usr/local/bin/
+COPY --from=tools /usr/local/bin/restic /usr/local/bin/rclone /usr/local/bin/litestream \
+     /usr/local/bin/gh /usr/local/bin/cloudflared /usr/local/bin/
+COPY --from=python /opt/fridolin/venv /opt/fridolin/venv
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
 COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
 RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
@@ -103,7 +140,8 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
  && ln -s ../lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe /usr/local/bin/claude \
  && ln -s ../lib/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex \
  && ln -s ../lib/node_modules/@plaud-ai/cli/dist/index.js /usr/local/bin/plaud \
- && claude --version && codex --version && plaud --help >/dev/null
+ && claude --version && codex --version && plaud --help >/dev/null \
+ && gh --version && cloudflared --version && /opt/fridolin/venv/bin/yt-dlp --version
 
 # The binary with tools/ next to it, as `fridolin service install` lays
 # out an install: brains get them as $FRIDOLIN_BIN and $FRIDOLIN_TOOLS_DIR.
@@ -123,7 +161,9 @@ USER fridolin:fridolin
 # FRIDOLIN_CONTAINER=1 tells the bridge it runs here: brains' runs are
 # sandboxed with bubblewrap (sandbox.enabled is allowed and on by default),
 # and doctor leaves out the host's checks.
+# PATH puts the image's Python first (see the python stage).
 ENV HOME=/var/lib/fridolin \
+    PATH=/opt/fridolin/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     FRIDOLIN_HOME=/data \
     FRIDOLIN_CONFIG=/data/config.json \
     TZ=UTC \

@@ -53,6 +53,9 @@ ALL
 /Users/you/.gitconfig
 /Users/you/.gitconfig
 --ro-bind-try
+/Users/you/.local/bin
+/Users/you/.local/bin
+--ro-bind-try
 /Users/you/.plaud
 /Users/you/.plaud
 --ro-bind-try

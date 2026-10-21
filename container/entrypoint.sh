@@ -15,6 +15,21 @@ set -eu
 : "${FRIDOLIN_CONFIG:=$FRIDOLIN_HOME/config.json}"
 export FRIDOLIN_HOME FRIDOLIN_CONFIG
 
+# A native install moved into the container (docs/CORE.md) has HOME at
+# the Mac's home folder, an empty tmpfs under the bound folders. Scripts
+# from the Mac that name ~/.local/bin/<tool> find the image's tool there:
+# a link for each of FRIDOLIN_HOME_BIN that is on PATH. Brains' runs see
+# the folder read-only.
+if [ -n "${FRIDOLIN_HOST_HOME:-}" ] && [ "$FRIDOLIN_HOST_HOME" = "${HOME:-}" ] && [ -w "$HOME" ]; then
+	mkdir -p "$HOME/.local/bin"
+	for tool in ${FRIDOLIN_HOME_BIN-claude cloudflared gh node npm npx}; do
+		case "$tool" in */* | .*) continue ;; esac
+		if target=$(command -v "$tool" 2>/dev/null) && [ "${target#/}" != "$target" ]; then
+			ln -sfn "$target" "$HOME/.local/bin/$tool"
+		fi
+	done
+fi
+
 if [ "${1:-run}" = run ] && [ ! -e "$FRIDOLIN_CONFIG" ]; then
 	/opt/fridolin/fridolin init --config "$FRIDOLIN_CONFIG" --data-dir "$FRIDOLIN_HOME" \
 		--claude-path /usr/local/bin/claude

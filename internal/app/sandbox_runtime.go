@@ -423,6 +423,11 @@ func (sp *SandboxProfiler) bwrapPolicy(id string) (sandbox.BwrapPolicy, error) {
 			p.Read = append(p.Read, filepath.Join(sp.hostHome, ".gitconfig"), filepath.Join(sp.hostHome, ".config", "git"))
 		}
 		p.Mask = append(p.Mask, filepath.Join(sp.hostHome, ".git-credentials"), filepath.Join(sp.hostHome, ".config", "git", "credentials"))
+		// ~/.local/bin in the container's own HOME, which the image's entry
+		// point fills with links to its tools for the scripts that name
+		// ~/.local/bin/gh and the like (container/entrypoint.sh); nothing
+		// of the Mac's.
+		p.Read = append(p.Read, filepath.Join(sp.hostHome, ".local", "bin"))
 	}
 	if sp.PlaudShared {
 		// plaud.brain_access: the login in ~/.plaud, read-only but for

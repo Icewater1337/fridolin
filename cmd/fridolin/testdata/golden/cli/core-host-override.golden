@@ -25,7 +25,7 @@ services:
       - type: bind
         source: "<HOME>/.secrets"
         target: "<HOME>/.secrets"
-        read_only: true
+        read_only: false
         bind:
           create_host_path: false
       # the Plaud CLI's login (plaud.brain_access)

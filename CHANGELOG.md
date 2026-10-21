@@ -22,8 +22,13 @@ for compatibility.
   beside the running bridge, and `--to-native` brings the core's state
   back into `~/.fridolin` (what was there moves to
   `~/.fridolin/migration/<time>/`). `fridolin check --try-sandbox ID`
-  shows what a brain's sandbox sees. The image now has the Codex CLI, the
-  Plaud CLI, age, jq and sqlite3. See
+  shows what a brain's sandbox sees, and `fridolin check --try-sandbox ID
+  -- PROGRAM ARGS...` runs a program there. The image now has the Codex
+  CLI, the Plaud CLI, gh, cloudflared, age, jq and sqlite3, and a pinned
+  Python venv first on PATH with local transcription (torch on the CPU,
+  transformers), Google's API client and yt-dlp; scripts that call
+  `~/.local/bin/gh` and the like find the image's tools there
+  (`FRIDOLIN_HOME_BIN`). See
   [Moving a native install into the container](docs/CORE.md#moving-a-native-install-into-the-container).
 
 - Policy and approvals (M5). Skills take a frontmatter in the portable

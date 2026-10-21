@@ -75,9 +75,9 @@ type mountInputs struct {
 
 // nativeMounts are the host paths a native install's config needs in the
 // container: each brain folder outside the data dir (read-write), the
-// calendar credentials (sandbox.credentials_dir, read-only: the bridge
-// reads the tokens there, and a refreshed token it cannot save is only
-// refreshed again next time), sandbox.allow_paths and
+// calendar credentials (sandbox.credentials_dir, read-write as natively:
+// the bridge saves a refreshed or new sign-in's token there, by renaming
+// a new file over the old one; brains never see the folder), sandbox.allow_paths and
 // startup_checks.required_files (read-only), plaud.phone_dir, the Plaud
 // CLI's login in ~/.plaud with plaud.brain_access (read-write: the login
 // is refreshed there), ~/.gitconfig unless sandbox.git_config is "deny",
@@ -127,7 +127,7 @@ func nativeMounts(cfg *config.Settings, in mountInputs) ([]hostMount, []string, 
 			return nil, nil, err
 		}
 	}
-	if err := add(cfg.Sandbox.CredentialsDir, true, "sandbox.credentials_dir", false, false); err != nil {
+	if err := add(cfg.Sandbox.CredentialsDir, false, "sandbox.credentials_dir", false, false); err != nil {
 		return nil, nil, err
 	}
 	for _, p := range cfg.Sandbox.AllowPaths {
@@ -776,10 +776,18 @@ func (m *migration) rehearse(env, compose []string, cfg *config.Settings) (err e
 	if cfg.Sandbox.CredentialsDir != "" {
 		step("the calendar credentials, as the bridge", "ls", "-l", fsx.ExpandHome(cfg.Sandbox.CredentialsDir, m.d.home))
 	}
+	step("the image's tools", "sh", "-c", rehearsalToolsScript)
+	first := ""
 	for _, b := range cfg.BrainDirs {
 		if b.Approved != nil {
 			step("a sandboxed run of brain "+b.Approved.ID, "fridolin", "check", "--try-sandbox", b.Approved.ID)
+			if first == "" {
+				first = b.Approved.ID
+			}
 		}
+	}
+	if first != "" {
+		step("a transcription in brain "+first+"'s sandbox", "fridolin", "check", "--try-sandbox", first, "--", "sh", "-c", rehearsalTranscribeScript)
 	}
 	if len(failed) > 0 {
 		return fmt.Errorf("the rehearsal failed: %s", strings.Join(failed, ", "))
@@ -787,6 +795,37 @@ func (m *migration) rehearse(env, compose []string, cfg *config.Settings) (err e
 	m.say("\nThe rehearsal passed.")
 	return nil
 }
+
+// rehearsalToolsScript prints the versions of what brains' skills run
+// besides the agents, and imports the Python packages of the image's venv.
+const rehearsalToolsScript = `set -e
+gh --version | head -n 1
+cloudflared --version
+ffmpeg -version | head -n 1
+command -v python3
+python3 -c 'import torch, transformers, groq, googleapiclient, google_auth_oauthlib, google.oauth2.credentials, yt_dlp; print("python: torch", torch.__version__, "transformers", transformers.__version__)'
+ls -l "$HOME/.local/bin" 2>/dev/null || true`
+
+// rehearsalTranscribeScript runs tools/transcribe.py on three seconds of
+// a tone with Whisper's smallest model, in a brain's sandbox with its
+// caches and TMPDIR, as a brain transcribes a voice note: ffmpeg, the
+// venv's torch and transformers, the model's download into the brain's
+// cache and the inference. A tone may come out as no text at all, which
+// the tool reports as an error after the model ran; that passes too.
+const rehearsalTranscribeScript = `set -e
+cd "$TMPDIR"
+ffmpeg -loglevel error -y -f lavfi -i sine=frequency=440:duration=3 -ar 16000 -ac 1 rehearsal.wav
+set +e
+out=$(python3 "$FRIDOLIN_TOOLS_DIR/transcribe.py" rehearsal.wav --engine local --model openai/whisper-tiny \
+	--output-dir "$TMPDIR/rehearsal-transcripts" --no-keep-original 2>"$TMPDIR/rehearsal-transcribe.log")
+status=$?
+rm -rf rehearsal.wav "$TMPDIR/rehearsal-transcripts"
+echo "$out"
+case "$out" in
+*'"transcript"'* | *'produced no text'*) exit 0 ;;
+esac
+tail -n 20 "$TMPDIR/rehearsal-transcribe.log"
+exit "$status"`
 
 func (m *migration) toNative() error {
 	cfg, cfgPath, err := m.native()
