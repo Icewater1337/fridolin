@@ -31,7 +31,7 @@ func (h *harness) fakeFrideNode(name, addr string, ff *testutil.FakeFride) (stri
 		t.Fatalf("join-code: %d %s", w.Code, w.Body.String())
 	}
 	dir := t.TempDir()
-	j, err := nodeagent.Join(context.Background(), nodeagent.JoinOptions{Dir: dir, Core: addr, Code: jc.Code, Name: name, Capabilities: nodeproto.Capabilities{Host: true}, Version: "test", Logf: t.Logf})
+	j, err := nodeagent.Join(context.Background(), nodeagent.JoinOptions{Dir: dir, Core: addr, Code: jc.Code, Name: name, Capabilities: nodeproto.Capabilities{Host: true}, AndroidBuild: noAndroidBuild, Version: "test", Logf: t.Logf})
 	if err != nil {
 		t.Fatal(err)
 	}

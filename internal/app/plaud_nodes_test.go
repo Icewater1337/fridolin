@@ -19,6 +19,12 @@ import (
 	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
+// noAndroidBuild keeps a test's node agent from offering android-build,
+// whatever JDK and Android SDK the machine running the tests has (CI's
+// runners have both): a declaration that grows after the join would leave
+// the approval the test makes pending.
+var noAndroidBuild = new(bool)
+
 func TestAppBuildersPickByTagThenMemory(t *testing.T) {
 	ab := &nodeproto.AndroidBuildCap{Java: "21"}
 	view := func(id string, online bool, tags []string, free uint64, build bool) nodes.View {

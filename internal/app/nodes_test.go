@@ -108,7 +108,7 @@ func TestNodesGate(t *testing.T) {
 		FS:   &nodeproto.FSCap{Roots: []nodeproto.FSRoot{{Path: root}}},
 		Host: true,
 	}
-	j, err := nodeagent.Join(context.Background(), nodeagent.JoinOptions{Dir: stateDir, Core: addr, Code: jc.Code, Name: "laptop", Capabilities: caps, Version: "test", Logf: t.Logf})
+	j, err := nodeagent.Join(context.Background(), nodeagent.JoinOptions{Dir: stateDir, Core: addr, Code: jc.Code, Name: "laptop", Capabilities: caps, AndroidBuild: noAndroidBuild, Version: "test", Logf: t.Logf})
 	if err != nil {
 		t.Fatal(err)
 	}
