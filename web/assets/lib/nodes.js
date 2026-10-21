@@ -20,6 +20,10 @@ export function capSummary(c) {
     parts.push(n ? `backup (${n} folder${n === 1 ? '' : 's'})` : 'backup');
   }
   if (c && c.update) parts.push('update');
+  for (const k of ['agent', 'terminal']) {
+    const n = (c && c[k] && c[k].roots) ? c[k].roots.length : 0;
+    if (n) parts.push(`${k} (${n} folder${n === 1 ? '' : 's'})`);
+  }
   return parts.length ? parts.join(', ') : 'nothing';
 }
 
@@ -56,4 +60,42 @@ export function gb(n) {
 /** Tags typed into one box, as the bridge takes them. */
 export function parseTags(text) {
   return [...new Set(String(text || '').split(/[\s,]+/).map((t) => t.trim().toLowerCase()).filter(Boolean))];
+}
+
+// The escape sequences a shell prints for colours, cursor moves and window
+// titles, which a plain text view leaves out.
+const ANSI = /\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(\x07|\x1b\\)|[()][0-9A-Za-z]|[=>78MDEc])/g;
+
+/**
+ * termText appends a terminal's output to the text shown so far, as a
+ * line-oriented view: escape sequences out, a carriage return starts its
+ * line over, a backspace takes back a character, other control characters
+ * out. It keeps at most max characters (the end).
+ */
+export function termText(shown, chunk, max = 200000) {
+  let out = shown || '';
+  const s = String(chunk || '').replace(ANSI, '').replace(/\r\n/g, '\n');
+  for (const ch of s) {
+    if (ch === '\r') {
+      out = out.slice(0, out.lastIndexOf('\n') + 1);
+    } else if (ch === '\b') {
+      if (out && !out.endsWith('\n')) out = out.slice(0, -1);
+    } else if (ch === '\n' || ch === '\t' || ch >= ' ') {
+      if (ch !== '\x7f') out += ch;
+    }
+  }
+  return out.length > max ? out.slice(out.length - max) : out;
+}
+
+/**
+ * base64 → UTF-8 text (Go's []byte arrives as base64). Pass the same
+ * decoder for every chunk of one stream, so a character split between two
+ * chunks comes out whole.
+ */
+export function fromBase64(b64, decoder = new TextDecoder()) {
+  if (!b64) return '';
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return decoder.decode(bytes, { stream: true });
 }
