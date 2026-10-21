@@ -51,6 +51,10 @@ type RcloneDaemon struct {
 	// Op is prefixed to the operation names Usage counts ("vault",
 	// "lease"); "" is "rclone".
 	Op string
+	// FastList lists a folder and all below it in as few calls as the
+	// backend allows (rclone's --fast-list: on B2 one Class C per
+	// thousand names, not one per folder).
+	FastList bool
 
 	mu     sync.Mutex
 	proc   *rcProc
@@ -147,10 +151,14 @@ func (d *RcloneDaemon) start(ctx context.Context) (*rcProc, error) {
 	// a download streams. Remotes stay cached (and logged in) for as long
 	// as the daemon runs, not rclone's default five idle minutes. The
 	// server timeouts let a long upload or download finish.
-	cmd := exec.Command(d.Binary, "rcd", "--config", "", "-q",
-		"--rc-addr", "unix://"+filepath.ToSlash(p.sock), "--rc-serve",
+	args := []string{"rcd", "--config", "", "-q",
+		"--rc-addr", "unix://" + filepath.ToSlash(p.sock), "--rc-serve",
 		"--fs-cache-expire-duration", "87600h",
-		"--rc-server-read-timeout", "24h", "--rc-server-write-timeout", "24h")
+		"--rc-server-read-timeout", "24h", "--rc-server-write-timeout", "24h"}
+	if d.FastList {
+		args = append(args, "--fast-list")
+	}
+	cmd := exec.Command(d.Binary, args...)
 	cmd.Env = append(append([]string{}, d.Env...), "RCLONE_RC_USER="+p.user, "RCLONE_RC_PASS="+p.pass)
 	cmd.Stderr = p.stderr
 	setDaemonAttrs(cmd)
