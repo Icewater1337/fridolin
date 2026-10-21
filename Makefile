@@ -48,7 +48,7 @@ FUZZTIME ?= 10s
 .PHONY: help build install test race race-shard race-process vet fmt fmt-check tidy-check root-check \
 	notices notices-check \
 	lint lint-go lint-sh lint-py lint-actions lint-web \
-	test-py test-web test-sh smoke fuzz-short check clean
+	test-py test-web test-sh smoke fuzz-short check clean container-python-lock
 
 help: ## list the targets
 	@awk -F':.*## ' '/^[a-z-]+:.*## / { printf "  %-14s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -178,6 +178,21 @@ fuzz-short: ## run every fuzz target for FUZZTIME (default 10s)
 	    $(GO) test -run '^$$' -fuzz "^$$fn$$" -fuzztime $(FUZZTIME) "$$pkg"; \
 	  done; \
 	done
+
+# The image's Python packages (container/python), pinned with hashes for
+# linux/arm64 and linux/amd64 alike: torch from the PyTorch CPU index, and
+# nothing newer than PYLOCK_BEFORE (releases at least two weeks old).
+UV ?= uv
+PYLOCK_BEFORE ?= $(shell date -u -v-14d +%Y-%m-%d 2>/dev/null || date -u -d '14 days ago' +%Y-%m-%d)
+PYLOCK_ARGS = requirements.in --python-version 3.11 --generate-hashes --no-header --no-annotate -q \
+	--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cpu \
+	--index-strategy unsafe-best-match --exclude-newer $(PYLOCK_BEFORE)
+container-python-lock: ## pin container/python/requirements.in into requirements.lock (needs uv and the network)
+	@set -e; cd container/python; tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
+	$(UV) pip compile $(PYLOCK_ARGS) --python-platform aarch64-manylinux_2_28 >"$$tmp/arm64"; \
+	$(UV) pip compile $(PYLOCK_ARGS) --python-platform x86_64-manylinux_2_28 >"$$tmp/amd64"; \
+	cmp -s "$$tmp/arm64" "$$tmp/amd64" || { echo "arm64 and amd64 resolve differently" >&2; exit 1; }; \
+	mv "$$tmp/arm64" requirements.lock
 
 # No build: smoke compiles the binary into a temp dir, and bin/fridolin stays
 # as it was.

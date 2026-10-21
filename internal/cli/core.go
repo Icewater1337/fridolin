@@ -39,6 +39,12 @@ On the host that runs Docker:
                        keychain; makes the age identity when there is none
   fridolin core stop   stop it (the volume stays)
   fridolin core update pull the image of this version and recreate the container
+  fridolin core migrate --from-native [--dry-run] [--local] [--mount PATH]...
+                       move this machine's native install into the core's
+                       volume, its brain folders bound in at their own paths
+                       (--rehearse: on a copy, beside the running native bridge)
+  fridolin core migrate --to-native [--dry-run] [--local]
+                       bring the volume back into the native data dir
   fridolin core run [--] COMMAND...
                        run a fridolin command in a one-off container on the
                        volume, with the secrets: core import while the core
@@ -93,6 +99,8 @@ func runCore(args []string, env coreEnv) int {
 		return coreInside(ctx, sub, args, env)
 	case "start", "stop", "update", "run":
 		return coreHost(ctx, sub, args, env, defaultHostDeps(env))
+	case "migrate":
+		return coreMigrate(ctx, args, env, defaultHostDeps(env))
 	default:
 		fmt.Fprintf(env.stderr, "fridolin core: unknown command %q\n\n%s", sub, coreUsage)
 		return 2
@@ -103,6 +111,9 @@ func runCore(args []string, env coreEnv) int {
 type insideFlags struct {
 	config, dataDir, store, bucket, key string
 	latest, force                       bool
+	// import's moves from a native install (core migrate --from-native).
+	fromNative, rehearsal bool
+	allowPaths            multiFlag
 }
 
 func coreInside(ctx context.Context, sub string, args []string, env coreEnv) int {
@@ -117,6 +128,9 @@ func coreInside(ctx context.Context, sub string, args []string, env coreEnv) int
 		fs.BoolVar(&f.latest, "latest", false, "import the export core/exports/latest names")
 		fs.StringVar(&f.key, "key", "", "import this export (core/exports/<time>.tar.gz.age) instead")
 		fs.BoolVar(&f.force, "force", false, "replace a data dir that has data in it, moving that to core/replaced-<time>/")
+		fs.BoolVar(&f.fromNative, "from-native", false, "the export is a native install's (core migrate --from-native): drop its program paths")
+		fs.Var(&f.allowPaths, "allow-path", "add this to sandbox.allow_paths (repeatable; core migrate --from-native)")
+		fs.BoolVar(&f.rehearsal, "rehearsal", false, "turn off what would reach past a rehearsal (core migrate --rehearse)")
 	}
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
@@ -246,7 +260,7 @@ func coreImport(ctx context.Context, f insideFlags, env coreEnv) error {
 	now := time.Now()
 	staging := filepath.Join(dataDir, "core", "import", now.UTC().Format("20060102T150405Z"))
 	logf := func(format string, a ...any) { fmt.Fprintf(env.stderr, format+"\n", a...) }
-	res, err := coreexport.Import(ctx, st, []age.Identity{id}, staging, coreexport.ImportOptions{Key: f.key, DB: sqliteDB{}, Logf: logf})
+	res, err := coreexport.Import(ctx, st, []age.Identity{id}, staging, coreexport.ImportOptions{Key: f.key, DB: sqliteDB{}, Logf: importLog(f, logf)})
 	if err != nil {
 		return err
 	}
@@ -260,15 +274,50 @@ func coreImport(ctx context.Context, f insideFlags, env coreEnv) error {
 	if err := coreexport.Activate(staging, dataDir, f.force, now, lock); err != nil {
 		return fmt.Errorf("%w (the checked copy stays in %s)", err, staging)
 	}
-	warnings, err := coreexport.FixDataDir(dataDir)
+	warnings, err := coreexport.FixDataDir(dataDir, app.HomeDir())
 	if err != nil {
 		return err
+	}
+	if f.fromNative {
+		more, err := coreexport.ResetProgramPaths(dataDir)
+		if err != nil {
+			return err
+		}
+		warnings = append(warnings, more...)
+	}
+	if len(f.allowPaths) > 0 {
+		more, err := coreexport.AddAllowPaths(dataDir, f.allowPaths)
+		if err != nil {
+			return err
+		}
+		warnings = append(warnings, more...)
+	}
+	if f.rehearsal {
+		more, err := coreexport.ForRehearsal(dataDir)
+		if err != nil {
+			return err
+		}
+		warnings = append(warnings, more...)
 	}
 	for _, w := range warnings {
 		logf("note: %s", w)
 	}
 	fmt.Fprintf(env.stdout, "Imported %s from %s into %s. Next: fridolin core promote, then start the core.\n", res.Key, where, dataDir)
 	return nil
+}
+
+// importLog is import's log: from a native install whose brain folders
+// are bound into the container at their own paths, the warnings about
+// folders outside the export are left out.
+func importLog(f insideFlags, logf func(string, ...any)) func(string, ...any) {
+	if !f.fromNative {
+		return logf
+	}
+	return func(format string, a ...any) {
+		if !strings.Contains(format, "outside the exported data dir") {
+			logf(format, a...)
+		}
+	}
 }
 
 // leaseOptions are the lease's settings for this data dir.
@@ -386,6 +435,13 @@ type hostDeps struct {
 	baseEnv     []string
 	version     string
 	newIdentity func() (string, error)
+	// For core migrate: the host's home folder, user id and system, the
+	// native service's unit file, a cache folder for temporary exports,
+	// and the clock.
+	home, goos, unitPath, cacheDir string
+	uid                            int
+	now                            func() time.Time
+	sleep                          func(time.Duration)
 }
 
 func defaultHostDeps(env coreEnv) hostDeps {
@@ -402,6 +458,17 @@ func defaultHostDeps(env coreEnv) hostDeps {
 		cfgDir = filepath.Join(app.HomeDir(), ".config")
 	}
 	d.composePath = filepath.Join(cfgDir, "fridolin", "compose.yaml")
+	d.home, d.goos, d.uid, d.now, d.sleep = app.HomeDir(), runtime.GOOS, os.Getuid(), time.Now, time.Sleep
+	if c, err := os.UserCacheDir(); err == nil {
+		d.cacheDir = filepath.Join(c, "fridolin")
+		_ = os.MkdirAll(d.cacheDir, 0o700)
+	}
+	switch d.goos {
+	case "darwin":
+		d.unitPath = filepath.Join(d.home, "Library", "LaunchAgents", serviceLabel+".plist")
+	case "linux":
+		d.unitPath = filepath.Join(d.home, ".config", "systemd", "user", systemdUnitName)
+	}
 	if runtime.GOOS == "darwin" {
 		d.secrets = hostsecrets.Keychain{}
 	} else {
@@ -519,8 +586,15 @@ func coreHost(ctx context.Context, sub string, args []string, env coreEnv, d hos
 		}
 		childEnv = append(childEnv, secrets...)
 	}
+	// The host's folders a moved native install needs (core migrate).
+	override := ""
+	if *compose == "" {
+		if p := filepath.Join(filepath.Dir(path), hostOverrideName); pathKindOf(p) == "file" {
+			override = p
+		}
+	}
 	compose1 := func(args ...string) error {
-		return d.run(ctx, d.docker, append([]string{"compose", "-f", path}, args...), childEnv, env.stdout, env.stderr)
+		return d.run(ctx, d.docker, append(composeArgs(path, override), args...), childEnv, env.stdout, env.stderr)
 	}
 	var err error
 	switch sub {

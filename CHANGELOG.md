@@ -10,6 +10,27 @@ for compatibility.
 
 ### Added
 
+- `fridolin core migrate --from-native` moves a native install into the
+  core's container: the brain folders, the calendar credentials and what
+  else of your home folder the config names stay on the Mac and are bound
+  into the container at their own paths (`compose.host.yaml`), with
+  `HOME` the Mac's home folder, so every path keeps working; it copies the
+  launchd agent's Claude token into the keychain, exports the data dir
+  read-only (`--local` through a local folder instead of the vault
+  bucket), imports it and prints the cutover and the rollback.
+  `--dry-run` changes nothing, `--rehearse` runs the whole move on a copy
+  beside the running bridge, and `--to-native` brings the core's state
+  back into `~/.fridolin` (what was there moves to
+  `~/.fridolin/migration/<time>/`). `fridolin check --try-sandbox ID`
+  shows what a brain's sandbox sees, and `fridolin check --try-sandbox ID
+  -- PROGRAM ARGS...` runs a program there. The image now has the Codex
+  CLI, the Plaud CLI, gh, cloudflared, age, jq and sqlite3, and a pinned
+  Python venv first on PATH with local transcription (torch on the CPU,
+  transformers), Google's API client and yt-dlp; scripts that call
+  `~/.local/bin/gh` and the like find the image's tools there
+  (`FRIDOLIN_HOME_BIN`). See
+  [Moving a native install into the container](docs/CORE.md#moving-a-native-install-into-the-container).
+
 - Policy and approvals (M5). Skills take a frontmatter in the portable
   Agent Skills format (`skills/<name>.md` or `skills/<name>/SKILL.md`),
   with `risk`, `approve`, `vault` and `triggers` under
@@ -31,6 +52,10 @@ for compatibility.
   pages. `fridolin doctor` warns about approvals waiting over an hour and
   shows a lockdown. See
   [Skills, risk and approvals](docs/BRAINS.md#skills-risk-and-approvals).
+
+- Exports (`fridolin core export`) copy a brain's Codex `*.sqlite`
+  databases with `VACUUM INTO` like the bridge's, and leave a native data
+  dir's `migration/` folder out.
 
 - The core runs in a container: `container/Dockerfile` builds the
   `fridolin-core` image (the bridge, the Claude CLI, Python, ffmpeg,

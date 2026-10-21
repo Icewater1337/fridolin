@@ -28,6 +28,12 @@ type CheckOptions struct {
 	Config     string
 	Routes     []string
 	SandboxFor string
+	// TrySandbox runs a shell in this brain's sandbox, which says what it
+	// sees (TrySandbox in sandbox_try.go).
+	TrySandbox string
+	// TryCommand, with TrySandbox, is a program and its arguments to run
+	// there instead, with the environment a brain's run has.
+	TryCommand []string
 	Redact     bool
 }
 
@@ -128,7 +134,7 @@ func CheckReport(w io.Writer, path string, cfg *config.Settings, o CheckOptions)
 		fmt.Fprintf(w, "  ! %s %s: %s\n", is.Kind, is.Path, is.Detail)
 	}
 
-	if len(o.Routes) == 0 && o.SandboxFor == "" {
+	if len(o.Routes) == 0 && o.SandboxFor == "" && o.TrySandbox == "" {
 		return leftOutError(issues)
 	}
 	routes, workDirs, err := checkRoutes(specs, issues)
@@ -164,6 +170,19 @@ func CheckReport(w io.Writer, path string, cfg *config.Settings, o CheckOptions)
 		}
 		fmt.Fprintln(w)
 		fmt.Fprint(w, profile)
+	}
+	if o.TrySandbox != "" {
+		if _, ok := workDirs[o.TrySandbox]; !ok {
+			return fmt.Errorf("sandbox: unknown or unavailable brain %q", o.TrySandbox)
+		}
+		profiler := NewSandboxProfiler(workDirs, cfg)
+		profiler.SetConfigFile(path)
+		if len(o.TryCommand) > 0 {
+			return TrySandboxCommand(w, profiler, cfg, o.TrySandbox, o.TryCommand)
+		}
+		if err := TrySandbox(w, profiler, cfg, workDirs, o.TrySandbox); err != nil {
+			return err
+		}
 	}
 	return leftOutError(issues)
 }

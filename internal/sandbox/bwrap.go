@@ -76,8 +76,25 @@ type BwrapPolicy struct {
 	// Home is the brain's home, its state folder; Passwd and Group are the
 	// files bound over /etc/passwd and /etc/group (BrainPasswd, BrainGroup).
 	Home, Passwd, Group string
+	// HostHome, when set, is the home folder of the machine the brain
+	// folders come from: a native install moved into the container, whose
+	// folders are bound at their own paths (docs/CORE.md). The run gets an
+	// empty, private folder there as its HOME, mounted before the binds,
+	// which then lie on top of it: a brain's folder at ~/Personal is
+	// ~/Personal for the brain too, as its prompts and scripts say. What a
+	// run writes there outside a bound folder ends with the run.
+	HostHome string
 	// Kind says what a path is: "dir", "file" or "" when it does not exist.
 	Kind func(path string) string
+}
+
+// RunHome is the HOME of the policy's runs: HostHome when set, else the
+// brain's state folder.
+func (p BwrapPolicy) RunHome() string {
+	if p.HostHome != "" {
+		return filepath.Clean(p.HostHome)
+	}
+	return p.Home
 }
 
 // BwrapArgs returns bubblewrap's arguments that run prog with args as the
@@ -87,7 +104,11 @@ func BwrapArgs(p BwrapPolicy, prog string, args []string) ([]string, error) {
 	if p.Brain == "" || p.Home == "" || p.Passwd == "" || p.Group == "" || p.Kind == nil {
 		return nil, fmt.Errorf("bwrap policy for %q is incomplete", p.Brain)
 	}
-	for _, list := range [][]string{p.System, p.Write, p.Read, p.Mask, {p.Home, p.Passwd, p.Group, prog}} {
+	paths := [][]string{p.System, p.Write, p.Read, p.Mask, {p.Home, p.Passwd, p.Group, prog}}
+	if p.HostHome != "" {
+		paths = append(paths, []string{p.HostHome})
+	}
+	for _, list := range paths {
 		for _, path := range list {
 			if !filepath.IsAbs(path) {
 				return nil, fmt.Errorf("bwrap policy for %q: %q is not an absolute path", p.Brain, path)
@@ -115,6 +136,10 @@ func BwrapArgs(p BwrapPolicy, prog string, args []string) ([]string, error) {
 		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
 		"--ro-bind", p.Passwd, "/etc/passwd", "--ro-bind", p.Group, "/etc/group",
 	)
+	home := p.RunHome()
+	if p.HostHome != "" {
+		a = append(a, "--tmpfs", home)
+	}
 	for _, d := range clean(p.Read) {
 		a = append(a, "--ro-bind-try", d, d)
 	}
@@ -135,7 +160,7 @@ func BwrapArgs(p BwrapPolicy, prog string, args []string) ([]string, error) {
 		}
 	}
 	a = append(a,
-		"--setenv", "HOME", p.Home,
+		"--setenv", "HOME", home,
 		"--setenv", "USER", BrainUser(p.Brain), "--setenv", "LOGNAME", BrainUser(p.Brain),
 		"--", prog)
 	return append(a, args...), nil

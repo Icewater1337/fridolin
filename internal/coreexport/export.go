@@ -8,8 +8,9 @@
 // dir's files under data/. SQLite databases are copied with VACUUM INTO,
 // never as files, so a live bridge's bridge.db is exported consistently.
 // What any machine rebuilds or the cold tier holds completely is left out:
-// runs/, run-tokens/, media/, vault/, core/ (the lease's device id and the
-// export's own staging), lock files, SQLite's sidecars, the brains' tmp/ and
+// runs/, run-tokens/, media/ (unless asked for), vault/, core/ (the lease's
+// device id and the export's own staging), migration/ (a native install's
+// own snapshots from earlier moves), lock files, SQLite's sidecars, the brains' tmp/ and
 // cache/ folders, node_modules/ and *.tmp files.
 package coreexport
 
@@ -90,10 +91,16 @@ type ExportOptions struct {
 	// the manifest and warned about.
 	BrainFolders []string
 	// TempDir holds the database snapshots while the archive is written;
-	// default <dataDir>/core/export-tmp, on the same disk as the data.
+	// default <dataDir>/core/export-tmp, on the same disk as the data. An
+	// export of a data dir that must stay as it is (a native install's,
+	// read while it moves into the container) names a folder elsewhere.
 	TempDir string
-	Now     func() time.Time
-	Logf    func(format string, args ...any)
+	// IncludeMedia exports media/ as well, which a core leaves out because
+	// its vault holds it: a native install without the vault has the only
+	// copy of its inboxes and recordings there.
+	IncludeMedia bool
+	Now          func() time.Time
+	Logf         func(format string, args ...any)
 }
 
 // ExportResult is what Export wrote.
@@ -108,7 +115,7 @@ func excluded(rel string, dir bool) bool {
 	parts := strings.Split(rel, "/")
 	base := parts[len(parts)-1]
 	if dir {
-		if len(parts) == 1 && slices.Contains([]string{"runs", "run-tokens", "media", "vault", "core"}, base) {
+		if len(parts) == 1 && slices.Contains([]string{"runs", "run-tokens", "media", "vault", "core", "migration"}, base) {
 			return true
 		}
 		// A brain's TMPDIR and caches (brains/<id>/tmp, brains/<id>/cache).
@@ -126,7 +133,11 @@ func excluded(rel string, dir bool) bool {
 }
 
 // isDatabase reports whether a file is copied as a SQLite database.
-func isDatabase(rel string) bool { return strings.HasSuffix(rel, ".db") }
+// The bridge's are *.db; a brain's Codex state (brains/<id>/codex) keeps
+// *.sqlite, whose -wal the export leaves out and VACUUM INTO takes in.
+func isDatabase(rel string) bool {
+	return strings.HasSuffix(rel, ".db") || strings.HasSuffix(rel, ".sqlite")
+}
 
 // ExportKey is the key of an export made at t.
 func ExportKey(t time.Time) string {
@@ -198,7 +209,7 @@ func Export(ctx context.Context, dataDir string, recipients []age.Recipient, sto
 			return err
 		}
 		rel = filepath.ToSlash(rel)
-		if excluded(rel, d.IsDir()) {
+		if excluded(rel, d.IsDir()) && !(opts.IncludeMedia && rel == "media") {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}

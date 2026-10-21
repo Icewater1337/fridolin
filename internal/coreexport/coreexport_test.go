@@ -230,7 +230,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	if !slices.Contains(got, "bridge.db") || !slices.Contains(got, "brains-folders/family/CLAUDE.md") {
 		t.Errorf("activated %v", got)
 	}
-	warnings, err := FixDataDir(target)
+	warnings, err := FixDataDir(target, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,10 +18,27 @@ docker build -f container/Dockerfile --build-arg VERSION=$(git describe --tags -
 It holds the `fridolin` binary with the Python helpers next to it
 (`/opt/fridolin/fridolin`, `/opt/fridolin/tools/`), python3, Node 22 and
 the Claude CLI (a pinned version, at least the one the bridge is tested
-against), ffmpeg, restic, rclone, Litestream, bubblewrap, git, curl,
-ca-certificates and tzdata. restic, rclone and Litestream come from their
-releases, pinned and checked against the SHA-256 each release publishes;
-the base images are pinned to version tags. tini is PID 1, so `docker stop`
+against), the Codex CLI and the Plaud CLI (pinned too), ffmpeg, restic,
+rclone, Litestream, GitHub's `gh`, `cloudflared`, age, bubblewrap, git,
+curl, jq, sqlite3, ca-certificates and tzdata. restic, rclone, Litestream,
+gh and cloudflared come from their releases, pinned and checked against
+the SHA-256 each release publishes; the base images are pinned to version
+tags.
+
+A Python venv at `/opt/fridolin/venv`, first on `PATH`, so that `python3`
+and `#!/usr/bin/env python3` are it, holds what brains' tools import:
+torch (CPU only) and transformers for local transcription with
+`tools/transcribe.py` (and scripts like it), groq, Google's API client
+and sign-in libraries for calendar scripts that talk to Google
+themselves, youtube-transcript-api and yt-dlp. `container/python/requirements.in`
+lists them and `requirements.lock` pins every package with its hashes,
+the same for arm64 and amd64 (`make container-python-lock` makes it
+again, from releases at least two weeks old); torch comes from PyTorch's
+CPU index. Transcription runs on the CPU (the image has no GPU; the Mac's
+own scripts ran Whisper on the CPU too, since MPS gave garbage). A model
+is downloaded on a brain's first transcription into its cache in the
+volume (`XDG_CACHE_HOME`, `/data/brains/<id>/cache/huggingface`, about
+1.6 GB for large-v3-turbo), once per brain, and kept. tini is PID 1, so `docker stop`
 reaches the bridge as SIGTERM and it shuts down in order (15 s for a reply
 in progress, as on a native install), and the brains' orphaned processes
 are reaped.
@@ -230,12 +247,13 @@ docker exec fridolin-core fridolin core export
 writes `core/exports/<UTC time>.tar.gz.age`, encrypted to the age identity,
 and points `core/exports/latest` at it. It holds the data dir: `config.json`,
 `bridge.db` and `vault.db` (each copied with SQLite's `VACUUM INTO`, so a
-running bridge is exported consistently), `secrets/`, `audit/`, `brains/`
+running bridge is exported consistently; so are the `*.sqlite` databases
+of a brain's Codex state), `secrets/`, `audit/`, `brains/`
 (the per-brain state), `nodes/`, `tsnet/`, the dashboard's token and
 sessions, `google/`, `plaud/`, `otp/`, `rclone/`, and brain folders that lie
 in the data dir. It leaves out what the next machine rebuilds or the cold
 tier already holds completely: `runs/`, `run-tokens/`, `media/`, `vault/`,
-`core/`, lock files, SQLite's `-wal`, `-shm` and `-journal` files, the
+`core/`, `migration/` (a native install's own snapshots), lock files, SQLite's `-wal`, `-shm` and `-journal` files, the
 brains' `tmp/` and `cache/`, `node_modules/` and `*.tmp` files. Symbolic
 links are left out and named.
 
@@ -326,6 +344,181 @@ key in rclone's environment only) and `--bucket` (default
 `fridolin-vault`). `promote` and `status` judge the lease with the
 config's `core.lease` timings when there is a config, so they agree with
 the cores.
+
+## Moving a native install into the container
+
+A native install (`fridolin service install`, data dir `~/.fridolin`)
+moves into the core with one command. Its brain folders stay where they
+are on the Mac, and so does everything else of your home folder the config
+names: the container binds each at its own path, so `brain_dirs`, every
+path in a brain's prompt, CLAUDE.md and scripts, and `~` mean the same
+files there.
+
+```bash
+fridolin core migrate --from-native --dry-run --local --mount ~/fridolin-private
+```
+
+prints the plan and changes nothing. What it binds, from the native
+config:
+
+| Host path | How | Why |
+| --- | --- | --- |
+| each brain folder outside the data dir | read-write | the brain's own folder |
+| `sandbox.credentials_dir` | read-write | the calendar tokens: the bridge saves a refreshed token or a new Google sign-in there, as natively. Brains never see the folder |
+| `sandbox.allow_paths`, `startup_checks.required_files` | read-only | |
+| `~/.plaud` with `plaud.brain_access` | read-write | the Plaud CLI's login, which it refreshes there |
+| `plaud.phone_dir` | read-write | |
+| `~/.gitconfig` unless `sandbox.git_config` is `"deny"` | read-only | your git identity |
+| each `--mount PATH` | read-only, and added to `sandbox.allow_paths` | what brains read on the Mac outside their folders (tools, shared skills) |
+
+It refuses the home folder itself, the native data dir or a folder that
+holds it (the WhatsApp session is for one bridge only), `~/.ssh`,
+`~/.claude` and the like, and paths outside the home folder (Docker
+Desktop shares `/Users` by default). The bindings go into
+`compose.host.yaml` beside the compose file (on macOS
+`~/Library/Application Support/fridolin/`), which `core start`, `stop`,
+`update` and `run` add while it exists. It also sets `HOME` and
+`FRIDOLIN_HOST_HOME` to the Mac's home folder, which is an empty tmpfs of
+the container's user (the image's own HOME was not kept either), and
+passes the native service's `FRIDOLIN_BRAIN_PATH` on for the folders in
+brain folders.
+
+Brains' runs: with `FRIDOLIN_HOST_HOME` set, a run's `HOME` is the Mac's
+home folder too, an empty, private tmpfs under its binds: the brain's own
+folder at its path, its state (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, caches)
+in the volume as before, `~/.gitconfig` read-only, `~/.plaud` read-only
+but for `tokens.json` with `plaud.brain_access`, and the `allow_paths`.
+What a run writes elsewhere in `~` goes with the run. The credentials
+folder, the other brains' folders and the rest of the home folder are not
+there. `~/.local/bin` is the container's own, read-only for runs: the
+entry point fills it at start with links to the image's tools named in
+`FRIDOLIN_HOME_BIN` (default `claude cloudflared gh node npm npx`; set it
+in `compose.host.yaml`'s environment for others), for scripts and skills
+that call `~/.local/bin/gh` and the like. `fridolin check --try-sandbox
+ID` runs a shell in a brain's sandbox that says which of these it sees;
+`fridolin check --try-sandbox ID -- PROGRAM ARGS...` runs a program there
+instead, with the environment a run of the brain has (its PATH with the
+brain's own folders first, TMPDIR, caches, `FRIDOLIN_TOOLS_DIR`), which is
+how a tool is tried where the brain runs it:
+
+```bash
+docker exec fridolin-core fridolin check --try-sandbox personal -- \
+  python3 ~/fridolin-private/tools/transcribe.py /data/brains/personal/tmp/note.ogg /data/brains/personal/tmp/out
+```
+
+Without `--dry-run`, with the native bridge stopped (it takes the data
+dir's lock), the command:
+
+1. writes `compose.host.yaml`;
+2. makes the age identity if the keychain has none, and copies the native
+   service's `CLAUDE_CODE_OAUTH_TOKEN` (the launchd agent's environment)
+   into the keychain as `fridolin.claude.oauth.token` when that is
+   missing, on `security`'s stdin, never printed;
+3. exports the native data dir, read-only (databases with `VACUUM INTO`
+   from a read-only connection, temporary files elsewhere), with `media/`,
+   which a native install without the vault has the only copy of; with
+   `--local` into a new folder of the user cache folder (or
+   `--local-dir`), else to the vault bucket;
+4. imports it into `fridolin-data` in a one-off container with the
+   bindings (`core import --from-native`): `data_dir` becomes `/data`,
+   program paths of the Mac's (`claude_path`, `codex_path`,
+   `backup.rclone_path`, `plaud.cli_path` naming a file) are dropped so the
+   image's own run, and the `--mount` folders go into
+   `sandbox.allow_paths`. `brain_dirs` keep their `~/` paths. A volume with
+   data is refused without `--force`;
+5. takes the lease when `core.lease.enabled`;
+6. prints the cutover and the rollback.
+
+Codex sign-ins are files (`brains/<id>/codex/auth.json`) and move with
+the export; Claude logs in with the token from the keychain.
+
+The cutover (macOS):
+
+```bash
+fridolin core migrate --from-native --dry-run --local --mount ~/fridolin-private
+launchctl disable gui/$(id -u)/ai.fridolin.bridge   # or it comes back at the next login
+launchctl bootout gui/$(id -u)/ai.fridolin.bridge
+fridolin core migrate --from-native --local --mount ~/fridolin-private
+fridolin core start
+curl -s http://127.0.0.1:8765/health
+curl -s http://127.0.0.1:8765/ready
+docker exec fridolin-core fridolin check
+docker exec fridolin-core fridolin doctor
+```
+
+`fridolin core start` runs the image whose tag is the binary's version:
+build it first (The image, above) with that tag (`fridolin version`), or
+pass `--tag`, to `migrate` as well.
+
+The rollback:
+
+```bash
+fridolin core stop
+fridolin core migrate --to-native --local
+launchctl enable gui/$(id -u)/ai.fridolin.bridge
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.fridolin.bridge.plist
+```
+
+Once the core has connected to WhatsApp, the native `bridge.db` holds a
+stale session. `--to-native` exports the volume (in a one-off container,
+the core stopped), checks the export into
+`~/.fridolin/migration/<time>/staged/`, moves what the native data dir
+holds to `~/.fridolin/migration/<time>/replaced/` and the checked copy
+into its place (nothing is deleted; `migration/` itself stays), and takes
+`data_dir`, the program paths and `sandbox.allow_paths` from the native
+config it replaced. The volume stays; never start the core and the
+native bridge together.
+
+### A rehearsal
+
+```bash
+fridolin core migrate --from-native --rehearse --mount ~/fridolin-private
+```
+
+runs the move on a copy while the native bridge goes on running: it
+exports the native data dir read-only into a temporary folder (encrypted
+to a temporary identity unless the keychain has one), imports it into the
+volume `fridolin-rehearsal` (never `fridolin-data`) and starts the
+container `fridolin-rehearsal` in dev mode (`--no-whatsapp`), with no
+published port and every binding read-only, and without `~/.plaud`. The
+imported config gets `/usr/bin/false` as its agents, so no run spends
+tokens or refreshes a login under the native bridge, and Plaud, the
+backup, the lease, the tailnet, nodes and the vault off. It then checks
+`/health`, `/ready`, `fridolin check` (the brains at their host paths),
+`fridolin doctor`, the credentials folder as the bridge sees it, the
+image's tools (gh, cloudflared, ffmpeg and the venv's packages),
+`fridolin check --try-sandbox` for each brain, and a transcription of
+three seconds of a tone with `tools/transcribe.py` and Whisper's smallest
+model in the first brain's sandbox (the model is downloaded into the
+rehearsal's volume), and removes the container, the volume and the
+temporary export (`--keep` leaves them running).
+
+### What does not move
+
+The container is Linux. Programs built for macOS do not run there: Mach-O
+binaries, and Python virtualenvs and `node_modules` made on the Mac in a
+brain's folder. Do not make those again in place: the folder is the Mac's
+too, and a Linux venv there breaks the Mac's copy (and the rollback). A
+brain that needs one in the container makes it elsewhere, in its cache
+(`python3 -m venv "$XDG_CACHE_HOME/venvs/NAME"`, kept in the volume) and
+points the tool at it; packages that need a browser shown on screen
+(Playwright with `HEADED=1`) do not work in the container at all.
+
+Anything that calls `launchctl`, `osascript`, `open` or Homebrew's
+`/opt/homebrew` fails in the container. Scripts that schedule launchd jobs
+for later (a `wa schedule-once`) are run on the Mac instead, where they
+reach the core like any other script; a watchdog that restarts the native
+bridge is not needed, since Docker restarts the core (`restart:
+unless-stopped`) and its health check shows a stuck one. Scripts that read
+the native data dir's files (`~/.fridolin/bridge.db`) read a stale copy
+after the move: in the container the data dir is `/data`.
+
+launchd jobs of yours that call the bridge keep working: compose
+publishes the core at `127.0.0.1:8765` on the Mac as the native bridge
+listened, and they keep using `~/.fridolin/scripts.token`, which the move
+copies into the volume unchanged (until you rotate it in the core, after
+which copy the new one back). In a brain's run the bridge sets
+`FRIDOLIN_API` and `FRIDOLIN_BRAIN_TOKEN_FILE` as before.
 
 ## Recovery
 
