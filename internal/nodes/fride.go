@@ -20,6 +20,10 @@ var slowCalls = map[string]time.Duration{
 	nodeproto.MethodFrideImport: 15 * time.Minute,
 	nodeproto.MethodFrideClose:  5 * time.Minute,
 	nodeproto.MethodFrideDelete: 5 * time.Minute,
+	// A clone fetches the whole history; a new repository may be pushed
+	// to GitHub.
+	nodeproto.MethodFrideRepoClone: 15 * time.Minute,
+	nodeproto.MethodFrideRepoNew:   5 * time.Minute,
 }
 
 // FrideTask hands the FrIDE of node id a message.
@@ -62,6 +66,20 @@ func (s *Service) FrideMem(ctx context.Context, id string) (nodeproto.FrideMem, 
 // committed, for a task an archive holds.
 func (s *Service) FrideDelete(ctx context.Context, id, task string, force bool) error {
 	return s.Call(ctx, id, nodeproto.MethodFrideDelete, nodeproto.FrideDeleteParams{TaskID: task, Force: force}, nil)
+}
+
+// FrideRepoClone clones p.URL as p.Name into the base folder of node id's
+// FrIDE.
+func (s *Service) FrideRepoClone(ctx context.Context, id string, p nodeproto.FrideRepoParams) (nodeproto.FrideRepo, error) {
+	var out nodeproto.FrideRepo
+	return out, s.Call(ctx, id, nodeproto.MethodFrideRepoClone, p, &out)
+}
+
+// FrideRepoNew makes the repository p.Name in the base folder of node id's
+// FrIDE.
+func (s *Service) FrideRepoNew(ctx context.Context, id string, p nodeproto.FrideRepoParams) (nodeproto.FrideRepo, error) {
+	var out nodeproto.FrideRepo
+	return out, s.Call(ctx, id, nodeproto.MethodFrideRepoNew, p, &out)
 }
 
 // ErrTransfer is a bundle that did not arrive whole.

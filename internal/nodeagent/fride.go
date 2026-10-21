@@ -48,6 +48,11 @@ type FrideConfig struct {
 	// Webhook is the loopback host:port the agent hears FrIDE's webhook
 	// on; FrIDE was given http://<Webhook>/fride when it was paired.
 	Webhook string `json:"webhook"`
+	// Base is the folder fride.repo_clone and fride.repo_new add
+	// repositories to: one of FrIDE's base folders, as an absolute path.
+	// Empty: FrIDE's only base folder, read from its settings at each
+	// call (with several, the call is refused until Base names one).
+	Base string `json:"base,omitempty"`
 }
 
 // Check reports what is wrong with the section.
@@ -60,6 +65,9 @@ func (f *FrideConfig) Check() error {
 	}
 	if err := nodeproto.CheckLoopbackURL(webhookURL(f.Webhook)); err != nil {
 		return fmt.Errorf("fride.webhook: %w", err)
+	}
+	if f.Base != "" && !filepath.IsAbs(f.Base) {
+		return fmt.Errorf("fride.base: %q is not an absolute path", f.Base)
 	}
 	return nil
 }
@@ -461,6 +469,13 @@ func (a *Agent) frideCall(ctx context.Context, method string, raw json.RawMessag
 		}
 		return nil
 	}
+	if method == nodeproto.MethodFrideRepoClone || method == nodeproto.MethodFrideRepoNew {
+		var p nodeproto.FrideRepoParams
+		if e := decode(&p); e != nil {
+			return nil, e
+		}
+		return a.frideRepo(ctx, method, cfg, token, p)
+	}
 	timeout := frideCallTimeout
 	if method == nodeproto.MethodFrideExport || method == nodeproto.MethodFrideImport || method == nodeproto.MethodFrideClose || method == nodeproto.MethodFrideDelete {
 		timeout = frideSlowTimeout
@@ -765,6 +780,9 @@ type FridePairOptions struct {
 	// Webhook is the loopback host:port to hear FrIDE's webhook on; ""
 	// keeps the one paired before, or picks a free port.
 	Webhook string
+	// Base is the folder new repositories go to (FrideConfig.Base); ""
+	// keeps the one set before.
+	Base string
 }
 
 // PairFride trades the code for FrIDE's companion token, gives FrIDE the
@@ -794,7 +812,15 @@ func PairFride(ctx context.Context, o FridePairOptions) (FrideInfo, error) {
 		webhook = ln.Addr().String()
 		_ = ln.Close()
 	}
-	fc := &FrideConfig{URL: strings.TrimRight(o.URL, "/"), Webhook: webhook}
+	base := o.Base
+	if base == "" && cfg.Fride != nil {
+		base = cfg.Fride.Base
+	} else if base != "" {
+		if base, err = checkBaseDir(base); err != nil {
+			return FrideInfo{}, fmt.Errorf("--base: %w", err)
+		}
+	}
+	fc := &FrideConfig{URL: strings.TrimRight(o.URL, "/"), Webhook: webhook, Base: base}
 	if err := fc.Check(); err != nil {
 		return FrideInfo{}, err
 	}

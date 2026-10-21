@@ -110,12 +110,21 @@ const (
 	// MethodFrideDelete removes a task's workspace (FrideDeleteParams →
 	// nothing), with FrIDE's DELETE /api/tasks/<task>.
 	MethodFrideDelete = "fride.delete"
+	// MethodFrideRepoClone clones a repository into FrIDE's base folder on
+	// the node and has FrIDE rescan it (FrideRepoParams with URL →
+	// FrideRepo).
+	MethodFrideRepoClone = "fride.repo_clone"
+	// MethodFrideRepoNew makes a new repository in FrIDE's base folder on
+	// the node, with an initial commit and, when asked, on GitHub with gh
+	// (FrideRepoParams → FrideRepo).
+	MethodFrideRepoNew = "fride.repo_new"
 )
 
 // FrideMethods lists the fride methods.
 var FrideMethods = []string{
 	MethodFrideTask, MethodFrideStatus, MethodFrideReply, MethodFrideTaskInfo, MethodFrideClose, MethodFrideMem,
 	MethodFrideExport, MethodFrideRead, MethodFrideWrite, MethodFrideImport, MethodFrideDrop, MethodFrideDelete,
+	MethodFrideRepoClone, MethodFrideRepoNew,
 }
 
 // FrideChunkBytes is the most one fride.read returns and one fride.write
@@ -199,6 +208,33 @@ type FrideTask struct {
 	Rationale     string            `json:"rationale,omitempty"`
 	SourceTaskID  string            `json:"source_task_id,omitempty"`
 	Notes         []string          `json:"notes,omitempty"`
+}
+
+// FrideRepoParams adds a repository to FrIDE on the node: fride.repo_clone
+// clones URL as Name, fride.repo_new makes Name with an initial commit and,
+// with GitHub, creates it on GitHub with gh (private unless Public) and
+// pushes it.
+type FrideRepoParams struct {
+	Name   string `json:"name"`
+	URL    string `json:"url,omitempty"`
+	GitHub bool   `json:"github,omitempty"`
+	Public bool   `json:"public,omitempty"`
+}
+
+// FrideRepo is a repository added to FrIDE on the node.
+type FrideRepo struct {
+	Name string `json:"name"`
+	// Path is its folder on the node, in FrIDE's base folder.
+	Path string `json:"path"`
+	// GitHubURL is the repository gh created, for fride.repo_new.
+	GitHubURL string `json:"github_url,omitempty"`
+	// Warning says what did not work after the repository was made, such
+	// as gh failing: the repository is there without it.
+	Warning string `json:"warning,omitempty"`
+	// Rescanned says FrIDE read its base folders again, and Repos are the
+	// repositories it knows since.
+	Rescanned bool     `json:"rescanned"`
+	Repos     []string `json:"repos,omitempty"`
 }
 
 // FrideMem says whether the node's FrIDE may start a stack now.

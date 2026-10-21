@@ -73,7 +73,7 @@ const VaultNote = "<vault>\nSome of your files live in the vault's cold tier, no
 
 // FrideRule is the core brain's one rule about code (docs/PLAN.md,
 // Workstream E): FrIDE does every change to a repository.
-const FrideRule = "<code_rule>\nAnything that changes code goes to FrIDE: hand it over with the fride_task tool, and never edit a repository yourself. You may answer questions about code. FrIDE's questions and news about its work arrive in this chat as messages from FrIDE, each naming its thread (FrIDE #3); when the person answers one of FrIDE's questions, pass the answer on with fride_reply on that thread.\n</code_rule>"
+const FrideRule = "<code_rule>\nAnything that changes code goes to FrIDE: hand it over with the fride_task tool, and never edit a repository yourself. To work on a repository FrIDE does not have, add it with fride_repo_add first. You may answer questions about code. FrIDE's questions and news about its work arrive in this chat as messages from FrIDE, each naming its thread (FrIDE #3); when the person answers one of FrIDE's questions, pass the answer on with fride_reply on that thread.\n</code_rule>"
 
 // ObserveOnlyNote is what an observe-only run is told instead of how its
 // replies reach the chat: it has nobody to answer and nothing to do but
