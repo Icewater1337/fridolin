@@ -356,7 +356,8 @@ symlinks included.
 
 `fridolin node join` flags set these: `--allow PROG`, `--allow PROG=`,
 `--allow PROG=RE,RE`, `--no-exec`, `--root PATH`, `--root PATH:rw`,
-`--backup`, `--backup-root PATH`, `--no-host`, `--no-notify`, `--name`.
+`--backup`, `--backup-root PATH`, `--workstation`, `--workstation-root
+PATH`, `--allow-home`, `--no-host`, `--no-notify`, `--name`.
 
 Both sides check every call: the core against the approvals before it
 sends anything, the node against its own `node.json` and the approvals the
