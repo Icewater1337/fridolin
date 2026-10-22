@@ -33,12 +33,13 @@ func (s *agentSession) startTurn(text string) {
 	}()
 }
 
-// turnArgs is the CLI's argv for a turn; the prompt goes in on stdin.
+// turnArgs are the CLI's arguments for a turn (s.cli is the program);
+// the prompt goes in on stdin.
 func (s *agentSession) turnArgs() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.provider == nodeproto.ProviderCodex {
-		args := []string{s.cli, "exec", "--json", "--skip-git-repo-check", "-C", s.folder}
+		args := []string{"exec", "--json", "--skip-git-repo-check", "-C", s.folder}
 		if s.model != "" {
 			args = append(args, "-m", s.model)
 		}
@@ -53,7 +54,7 @@ func (s *agentSession) turnArgs() []string {
 		}
 		return append(args, "-")
 	}
-	args := []string{s.cli, "-p", "--output-format", "stream-json", "--verbose"}
+	args := []string{"-p", "--output-format", "stream-json", "--verbose"}
 	if s.model != "" {
 		args = append(args, "--model", s.model)
 	}
@@ -86,7 +87,9 @@ type turnResult struct {
 
 func (s *agentSession) runTurn(ctx context.Context, text string) {
 	plan := newSandboxPlan(s.folder, s.tmp, s.a.Dir, s.provider)
-	argv, err := plan.wrap(s.sandbox, s.turnArgs())
+	// s.cli is the provider's CLI as the node resolved it (agentPath) for
+	// a provider the node knows; the request's text goes in on stdin.
+	prog, args, err := plan.wrap(s.sandbox, s.cli, s.turnArgs())
 	if err != nil {
 		s.endTurn(turnResult{errMsg: err.Error()})
 		return
@@ -94,7 +97,7 @@ func (s *agentSession) runTurn(ctx context.Context, text string) {
 	// Running the provider's CLI is this capability's purpose; its folder
 	// was confined (confinedWorkFolder) and the sandbox, where there is
 	// one, keeps its writes there.
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd := exec.CommandContext(ctx, prog, args...)
 	cmd.Dir = s.folder
 	env := append(filteredEnv(), "TMPDIR="+s.tmp, "CLAUDE_CODE_TMPDIR="+s.tmp, "FRIDOLIN_NODE_AGENT=1")
 	s.mu.Lock()
@@ -347,7 +350,13 @@ func (s *agentSession) endTurn(res turnResult) {
 		return
 	}
 	if res.resume != "" {
-		s.resume = res.resume
+		if resumeID.MatchString(res.resume) {
+			s.resume = res.resume
+		} else if res.errMsg == "" {
+			// It becomes an argument of the next turn (codex: a positional
+			// one, where "-x" would be a flag): only an ID's characters.
+			res.errMsg = fmt.Sprintf("%s reported a session ID the node does not take: %q", s.provider, res.resume)
+		}
 	}
 	ask, what := lastMarker(res.text)
 	switch {
@@ -399,12 +408,14 @@ func (s *agentSession) git1(args ...string) (string, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	full := append([]string{git, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=" + nullDevice(), "--no-pager"}, args...)
-	argv, err := newSandboxPlan(s.folder, s.tmp, s.a.Dir, "").wrap(s.sandbox, full)
+	// args are this file's own git subcommands (status, diff), never a
+	// request's.
+	full := append([]string{"-c", "core.fsmonitor=false", "-c", "core.hooksPath=" + nullDevice(), "--no-pager"}, args...)
+	prog, pargs, err := newSandboxPlan(s.folder, s.tmp, s.a.Dir, "").wrap(s.sandbox, git, full)
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	cmd := exec.CommandContext(ctx, prog, pargs...)
 	cmd.Dir = s.folder
 	cmd.Env = append(filteredEnv(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
 	out := &cappedBuffer{max: 64 << 10}
@@ -491,3 +502,6 @@ func snapshotTree(dir string) map[string]time.Time {
 	})
 	return out
 }
+
+// resumeID is what a provider's session or thread ID may look like.
+var resumeID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)

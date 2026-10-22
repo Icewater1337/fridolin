@@ -41,10 +41,14 @@ func defaultShell() []string {
 		if p, err := platform.LookTool("powershell.exe"); err == nil {
 			return []string{p, "-NoLogo"}
 		}
-		if c := envValue("COMSPEC"); c != "" {
+		if c := envValue("COMSPEC"); c != "" && filepath.IsAbs(c) {
 			return []string{c}
 		}
-		return []string{"cmd.exe"}
+		win := envValue("SystemRoot")
+		if win == "" {
+			win = `C:\Windows`
+		}
+		return []string{filepath.Join(win, "System32", "cmd.exe")}
 	}
 	if sh := envValue("SHELL"); sh != "" && filepath.IsAbs(sh) {
 		return []string{sh, "-i"}
@@ -93,7 +97,10 @@ func (a *Agent) terminalOpen(eff nodeproto.Capabilities, p nodeproto.TerminalOpe
 	}
 	sb, _ := a.probeWork()
 	plan := newSandboxPlan(folder, tmp, a.Dir, "")
-	argv, err := plan.wrap(sb, shell)
+	// The shell comes from the node's own settings or its user's login
+	// shell, never from the request; what is typed reaches it only
+	// through the PTY once it runs (terminal.send).
+	prog, args, err := plan.wrap(sb, shell[0], shell[1:])
 	if err != nil {
 		_ = os.RemoveAll(tmp)
 		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
@@ -101,7 +108,7 @@ func (a *Agent) terminalOpen(eff nodeproto.Capabilities, p nodeproto.TerminalOpe
 	// The shell is the owner's, in the granted folder: what this
 	// capability is for. The sandbox around it, where there is one, keeps
 	// its writes in that folder and its temp folder.
-	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd := exec.Command(prog, args...)
 	cmd.Dir = folder
 	cmd.Env = append(filteredEnv(), "TERM=xterm-256color", "TMPDIR="+tmp, "HISTFILE="+filepath.Join(tmp, "history"), "FRIDOLIN_NODE_TERMINAL=1")
 	proc, err := startPTY(cmd, cols, rows)

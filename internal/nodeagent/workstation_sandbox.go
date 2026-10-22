@@ -137,7 +137,11 @@ func (p sandboxPlan) darwinProfile() string {
 // system read-only, its places writable, the denied ones hidden.
 func (p sandboxPlan) bwrapArgs() []string {
 	args := []string{"--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--die-with-parent", "--new-session"}
-	for _, w := range append([]string{p.folder, p.tmp}, p.writable...) {
+	// The folder (confinedWorkFolder checked it is a folder under its
+	// root) and the session's temp folder exist; the provider's state
+	// places, all below the home folder, are bound where they exist.
+	args = append(args, "--bind", p.folder, p.folder, "--bind", p.tmp, p.tmp)
+	for _, w := range p.writable {
 		if _, err := os.Stat(w); err == nil {
 			args = append(args, "--bind", w, w)
 		}
@@ -154,21 +158,28 @@ func (p sandboxPlan) bwrapArgs() []string {
 	return append(args, "--chdir", p.folder, "--")
 }
 
-// wrap is argv run in the sandbox. A sandbox it cannot start is an
-// error, never argv unconfined: a session in one runs without the
+// wrap is prog with args run in the sandbox: the program to start and
+// its arguments. prog is always a program the node resolved itself (the
+// provider's CLI, git, the shell), never a name from a request; what a
+// request brings (the folder, a model) only ever lands in args, as whole
+// arguments, never in a shell string. A sandbox it cannot start is an
+// error, never prog unconfined: a session in one runs without the
 // provider's own permission checks.
-func (p sandboxPlan) wrap(sandbox string, argv []string) ([]string, error) {
+func (p sandboxPlan) wrap(sandbox, prog string, args []string) (string, []string, error) {
+	if !filepath.IsAbs(prog) {
+		return "", nil, fmt.Errorf("%q is not a program the node resolved", prog)
+	}
 	switch sandbox {
 	case nodeproto.SandboxExec:
-		return append([]string{sandboxExecPath, "-p", p.darwinProfile()}, argv...), nil
+		return sandboxExecPath, append([]string{"-p", p.darwinProfile(), prog}, args...), nil
 	case nodeproto.SandboxBwrap:
 		bw, err := platform.LookTool("bwrap")
 		if err != nil {
-			return nil, fmt.Errorf("the sandbox (bwrap) is gone: %w", err)
+			return "", nil, fmt.Errorf("the sandbox (bwrap) is gone: %w", err)
 		}
-		return append(append([]string{bw}, p.bwrapArgs()...), argv...), nil
+		return bw, append(append(p.bwrapArgs(), prog), args...), nil
 	case nodeproto.SandboxNone:
-		return argv, nil
+		return prog, args, nil
 	}
-	return nil, fmt.Errorf("no sandbox %q", sandbox)
+	return "", nil, fmt.Errorf("no sandbox %q", sandbox)
 }

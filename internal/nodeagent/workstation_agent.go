@@ -72,12 +72,22 @@ func (a *Agent) agentStart(eff nodeproto.Capabilities, p nodeproto.AgentStartPar
 		return nil, perr
 	}
 	sb, providers := a.probeWork()
-	provider := p.Provider
-	if provider == "" {
+	// The provider is one of the node's two constants, never the
+	// request's string: its CLI is what the node resolved for it
+	// (agentPath), an absolute path.
+	var provider string
+	switch p.Provider {
+	case nodeproto.ProviderClaude:
+		provider = nodeproto.ProviderClaude
+	case nodeproto.ProviderCodex:
+		provider = nodeproto.ProviderCodex
+	case "":
 		if len(providers) == 0 {
 			return nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "neither claude nor codex is installed on this node")
 		}
 		provider = providers[0]
+	default:
+		return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "no provider %q", p.Provider)
 	}
 	cli, err := a.agentPath(provider)
 	if err != nil {

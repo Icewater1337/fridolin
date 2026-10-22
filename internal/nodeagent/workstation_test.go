@@ -350,15 +350,18 @@ func TestWrapFailsClosed(t *testing.T) {
 	plan := newSandboxPlan(t.TempDir(), t.TempDir(), "", "")
 	t.Setenv("PATH", t.TempDir())
 	if runtime.GOOS == "linux" {
-		if _, err := plan.wrap(nodeproto.SandboxBwrap, []string{"/bin/true"}); err == nil && !bwrapInToolDirs() {
+		if _, _, err := plan.wrap(nodeproto.SandboxBwrap, "/bin/true", nil); err == nil && !bwrapInToolDirs() {
 			t.Error("bwrap is not there, and wrap ran without it")
 		}
 	}
-	if _, err := plan.wrap("chroot", []string{"/bin/true"}); err == nil {
+	if _, _, err := plan.wrap("chroot", "/bin/true", nil); err == nil {
 		t.Error("an unknown sandbox was accepted")
 	}
-	if argv, err := plan.wrap(nodeproto.SandboxNone, []string{"/bin/true"}); err != nil || len(argv) != 1 {
-		t.Errorf("none: %v %v", argv, err)
+	if prog, args, err := plan.wrap(nodeproto.SandboxNone, "/bin/true", []string{"x"}); err != nil || prog != "/bin/true" || len(args) != 1 {
+		t.Errorf("none: %v %v %v", prog, args, err)
+	}
+	if _, _, err := plan.wrap(nodeproto.SandboxNone, "true", nil); err == nil {
+		t.Error("a program the node did not resolve was accepted")
 	}
 }
 
@@ -386,11 +389,11 @@ func TestSandboxKeepsWritesInTheFolder(t *testing.T) {
 	}
 	plan := newSandboxPlan(folder, tmp, "", "")
 	run := func(file string) error {
-		argv, err := plan.wrap(sb, []string{"/bin/sh", "-c", "echo x > \"$1\"", "sh", file})
+		prog, args, err := plan.wrap(sb, "/bin/sh", []string{"-c", "echo x > \"$1\"", "sh", file})
 		if err != nil {
 			t.Fatal(err)
 		}
-		cmd := exec.Command(argv[0], argv[1:]...)
+		cmd := exec.Command(prog, args...)
 		cmd.Dir = folder
 		return cmd.Run()
 	}
@@ -414,6 +417,19 @@ func TestSandboxKeepsWritesInTheFolder(t *testing.T) {
 		if err := run(other); err == nil {
 			_ = os.Remove(other)
 			t.Error("the sandbox let another write into /tmp through")
+		}
+	}
+}
+
+// A provider's session ID becomes an argument of the next turn: only an
+// ID's characters, never something that reads as a flag.
+func TestResumeIDs(t *testing.T) {
+	for id, ok := range map[string]bool{
+		"0b5d6a52-6c1e-4f43-9d0e-0a1b2c3d4e5f": true, "fake-1": true, "thread_01:abc": true,
+		"-c": false, "--dangerously-skip-permissions": false, "a b": false, "": false, "a;rm": false,
+	} {
+		if resumeID.MatchString(id) != ok {
+			t.Errorf("%q: got %v, want %v", id, !ok, ok)
 		}
 	}
 }

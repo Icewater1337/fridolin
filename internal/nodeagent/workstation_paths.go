@@ -185,12 +185,23 @@ func (a *Agent) confinedWorkFolder(eff nodeproto.Capabilities, kind, requested s
 			return "", nodeproto.Errorf(nodeproto.CodeDenied, "%s lies in %s, which a node never grants", clean, d)
 		}
 	}
-	st, err := os.Stat(real)
+	// Once more, right where the folder is opened: the folder is the
+	// approved root (symlinks resolved) joined with a relative part that
+	// climbs nowhere.
+	rel, err := filepath.Rel(realRoot, real)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", nodeproto.Errorf(nodeproto.CodeOutsideRoot, "%s leads out of %s", clean, root)
+	}
+	target := filepath.Join(realRoot, rel)
+	if target != realRoot && !strings.HasPrefix(target, realRoot+string(filepath.Separator)) {
+		return "", nodeproto.Errorf(nodeproto.CodeOutsideRoot, "%s leads out of %s", clean, root)
+	}
+	st, err := os.Stat(target)
 	if err != nil {
 		return "", fsError(err, clean)
 	}
 	if !st.IsDir() {
 		return "", nodeproto.Errorf(nodeproto.CodeBadRequest, "%s is not a folder", clean)
 	}
-	return real, nil
+	return target, nil
 }
