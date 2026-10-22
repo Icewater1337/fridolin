@@ -64,6 +64,17 @@ type Agent struct {
 	// CheckBinary runs a new binary to see that it is version; nil runs
 	// `<binary> version`.
 	CheckBinary func(ctx context.Context, path, version string) error
+	// WorkSandbox is the sandbox of workstation sessions ("" finds the
+	// platform's; nodeproto.SandboxNone runs them without one).
+	// AgentPaths, when set, are the agent CLIs by provider instead of the
+	// PATH's; TerminalShell the shell's argv instead of the user's.
+	// TerminalIdle and AgentMaxRuntime are the workstation's limits
+	// (DefaultTerminalIdle, DefaultAgentMaxRuntime when zero).
+	WorkSandbox     string
+	AgentPaths      map[string]string
+	TerminalShell   []string
+	TerminalIdle    time.Duration
+	AgentMaxRuntime time.Duration
 
 	upd       updater
 	mu        sync.Mutex
@@ -71,6 +82,7 @@ type Agent struct {
 	connected bool
 	fride     fride
 	android   android
+	work      workstation
 }
 
 // Load makes the agent of the node in dir.
@@ -115,6 +127,11 @@ func (a *Agent) setState(st nodeproto.State) {
 	a.mu.Lock()
 	a.state = st
 	a.mu.Unlock()
+	if st.Device != nodeproto.DeviceApproved {
+		a.stopUnapproved(nodeproto.Capabilities{}, true)
+	} else {
+		a.stopUnapproved(nodeproto.Intersect(a.declared(), st.Approved), false)
+	}
 	if a.OnState != nil {
 		a.OnState(st)
 	}
@@ -271,6 +288,8 @@ func (a *Agent) Run(ctx context.Context) error {
 	defer stopFride()
 	// A new binary on trial after an update from the core.
 	a.updateStartup(fctx, &fwg)
+	// A stopping agent leaves no session behind.
+	defer a.stopUnapproved(nodeproto.Capabilities{}, true)
 	for {
 		start := time.Now()
 		err := a.session(ctx)
@@ -345,6 +364,7 @@ func (a *Agent) session(ctx context.Context) error {
 	})
 	// FrIDE's news, and what the node offers when FrIDE comes or goes.
 	a.fride.init()
+	a.work.init()
 	wg.Go(func() {
 		for {
 			select {
@@ -352,6 +372,13 @@ func (a *Agent) session(ctx context.Context) error {
 				return
 			case <-a.fride.changed:
 				if err := c.send(ctx, nodeproto.TypeDeclare, "", nodeproto.Declare{Capabilities: a.declared()}); err != nil {
+					cancel()
+					return
+				}
+			case news := <-a.work.news:
+				data, _ := json.Marshal(news)
+				if err := c.send(ctx, nodeproto.TypeEvent, "", nodeproto.Event{Kind: nodeproto.EventAgent, Data: data}); err != nil {
+					a.logf("node: agent session %s's news did not reach the core: %v", news.ID, err)
 					cancel()
 					return
 				}

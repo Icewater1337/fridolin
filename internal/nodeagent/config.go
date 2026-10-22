@@ -94,6 +94,19 @@ func (c Config) Check() error {
 			}
 		}
 	}
+	for kind, w := range map[string]*nodeproto.WorkstationCap{"agent": c.Capabilities.Agent, "terminal": c.Capabilities.Terminal} {
+		if w == nil {
+			continue
+		}
+		if len(w.Providers) > 0 || w.Sandbox != "" {
+			return fmt.Errorf("capabilities.%s: providers and sandbox are what the agent finds; node.json names only roots and allow_home", kind)
+		}
+		for _, r := range w.Roots {
+			if err := CheckWorkRoot(r, w.AllowHome, ""); err != nil {
+				return fmt.Errorf("%s: root %w", kind, err)
+			}
+		}
+	}
 	if fs := c.Capabilities.FS; fs != nil {
 		for _, r := range fs.Roots {
 			if !filepath.IsAbs(r.Path) {

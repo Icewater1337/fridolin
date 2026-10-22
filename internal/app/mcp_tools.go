@@ -101,6 +101,7 @@ func (b *App) newMCPTools() *mcp.Registry[mcpCaller] {
 	})
 	b.registerFrideTools(r)
 	b.registerNodeTools(r)
+	b.registerWorkstationTools(r)
 	return r
 }
 

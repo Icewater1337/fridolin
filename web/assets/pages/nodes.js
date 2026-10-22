@@ -11,7 +11,8 @@ import { absTime } from '../lib/format.js';
 import { capSummary, gb, osName, parseTags, ruleText, updateText } from '../lib/nodes.js';
 import { btn } from '../components/buttons.js';
 import { confirmDialog, openDialog } from '../components/dialog.js';
-import { textInput, toggle } from '../components/fields.js';
+import { select, textInput, toggle } from '../components/fields.js';
+import { nodeTerminal } from '../components/node-terminal.js';
 import { toast } from '../components/toast.js';
 import { badge, callout, empty, kv, mono, pageHeader, pill, spinner, timeAgo } from '../components/common.js';
 
@@ -111,6 +112,33 @@ export default {
       });
     }
 
+    // A shell in a folder the node granted for terminal; it ends with
+    // the dialog.
+    async function openTerminal(n) {
+      const { roots } = n;
+      const pick = select(roots, roots[0], { 'aria-label': 'Folder' });
+      const holder = h('div.term-holder');
+      let term = null;
+      await openDialog({
+        title: `Terminal on ${n.name}`,
+        wide: true,
+        body: [h('p.muted.small', 'A shell on the node, in a folder it granted. Every command line you type is in the audit log; a lockdown closes it.'), pick, holder],
+        actions: [
+          { label: 'Close', value: null },
+          {
+            label: 'Open', kind: 'primary',
+            onClick: async () => {
+              if (term) await term.close();
+              term = nodeTerminal({ node: n.id, folder: pick.value });
+              holder.replaceChildren(term.el);
+              return false;
+            },
+          },
+        ],
+      });
+      if (term) await term.close();
+    }
+
     function statePills(n) {
       const out = [];
       if (n.device === 'pending') out.push(badge('device waiting', 'warn'));
@@ -147,7 +175,19 @@ export default {
         rules.length ? h('div', h('strong', 'Commands: '), rules.map((r) => mono(ruleText(r))).flatMap((el, i) => (i ? [', ', el] : [el]))) : null,
         roots.length ? h('div', h('strong', 'Folders: '), roots.map((r) => mono(`${r.path}${r.write ? ' (read and write)' : ' (read only)'}`)).flatMap((el, i) => (i ? [', ', el] : [el]))) : null,
         frideLine(declared.fride),
-        backupLine(declared.backup, n.approved && n.approved.backup));
+        backupLine(declared.backup, n.approved && n.approved.backup),
+        workLine('Agent sessions', declared.agent),
+        workLine('Terminal', declared.terminal));
+    }
+
+    // Workstation: the folders an agent session or a terminal may run in,
+    // the providers the node found and how it confines them.
+    function workLine(label, w) {
+      if (!w) return null;
+      const extra = [w.providers && w.providers.length ? w.providers.join(', ') : null, w.sandbox ? `sandbox ${w.sandbox}` : null].filter(Boolean);
+      return h('div', h('strong', `${label}: `),
+        (w.roots || []).map((r) => mono(r)).flatMap((el, i) => (i ? [', ', el] : [el])),
+        extra.length ? h('span.muted', ` · ${extra.join(' · ')}`) : null);
     }
 
     // Backups: the places the node lends, and the folders the owner
@@ -175,7 +215,11 @@ export default {
     // What changes with every heartbeat: whether it is online and its
     // free resources. It is painted into the card on its own, so the card
     // and its buttons stay while a node reports (see paintAll).
-    const liveOf = (n) => ({ online: !!n.online, last_seen: n.last_seen || null, resources: n.resources || {}, address: n.address || null });
+    const termOf = (n) => {
+      const roots = (n.effective && n.effective.terminal && n.effective.terminal.roots) || [];
+      return n.online && roots.length ? { id: n.id, name: n.name, roots } : null;
+    };
+    const liveOf = (n) => ({ online: !!n.online, last_seen: n.last_seen || null, resources: n.resources || {}, address: n.address || null, term: termOf(n) });
     const stableOf = (n) => ({ ...n, online: undefined, last_seen: undefined, resources: undefined, address: undefined });
     const liveRegions = new Map(); // node id → its live region
 
@@ -184,7 +228,8 @@ export default {
       const memory = res.mem_total ? `${gb(res.mem_available)} free of ${gb(res.mem_total)}` : null;
       return [
         h('div.node-online', l.online ? pill('online', 'ok', { pulse: true }) : pill('offline', 'neutral'),
-          l.online ? null : h('span.muted.small', 'last seen ', timeAgo(l.last_seen))),
+          l.online ? null : h('span.muted.small', 'last seen ', timeAgo(l.last_seen)),
+          l.term ? btn('Terminal', { small: true, icon: 'terminal', onClick: () => openTerminal(l.term) }) : null),
         kv([
           ['CPUs', res.cpus ? String(res.cpus) : null],
           ['Memory', memory],

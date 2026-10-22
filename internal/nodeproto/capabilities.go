@@ -25,6 +25,10 @@ type Capabilities struct {
 	// Update lets the core replace the node's fridolin with its own
 	// version's build (update.go).
 	Update *UpdateCap `json:"update,omitempty"`
+	// Agent runs Claude Code or Codex sessions, and Terminal shells, in
+	// granted folders: the workstation mode (workstation.go).
+	Agent    *WorkstationCap `json:"agent,omitempty"`
+	Terminal *WorkstationCap `json:"terminal,omitempty"`
 }
 
 // ExecCap runs allowlisted commands.
@@ -168,6 +172,12 @@ func (c Capabilities) Check() error {
 	if err := c.Backup.Check(); err != nil {
 		return err
 	}
+	if err := c.Agent.Check("agent"); err != nil {
+		return err
+	}
+	if err := c.Terminal.Check("terminal"); err != nil {
+		return err
+	}
 	return c.Fride.Check()
 }
 
@@ -274,12 +284,18 @@ func (c Capabilities) Allows(method string) bool {
 	if slices.Contains(UpdateMethods, method) {
 		return c.Update != nil
 	}
+	if slices.Contains(AgentMethods, method) {
+		return c.Agent != nil && len(c.Agent.Roots) > 0
+	}
+	if slices.Contains(TerminalMethods, method) {
+		return c.Terminal != nil && len(c.Terminal.Roots) > 0
+	}
 	return false
 }
 
 // Empty reports whether nothing is offered.
 func (c Capabilities) Empty() bool {
-	return (c.Exec == nil || len(c.Exec.Allow) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil && c.AndroidBuild == nil && c.Backup == nil && c.Update == nil
+	return (c.Exec == nil || len(c.Exec.Allow) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil && c.AndroidBuild == nil && c.Backup == nil && c.Update == nil && c.Agent == nil && c.Terminal == nil
 }
 
 // Covers reports whether approved covers every part of declared: each
@@ -298,6 +314,9 @@ func Covers(approved, declared Capabilities) bool {
 		return false
 	}
 	if !coversBackup(approved.Backup, declared.Backup) {
+		return false
+	}
+	if !coversWork(approved.Agent, declared.Agent) || !coversWork(approved.Terminal, declared.Terminal) {
 		return false
 	}
 	if d := declared.Exec; d != nil && len(d.Allow) > 0 {
@@ -331,6 +350,8 @@ func Intersect(declared, approved Capabilities) Capabilities {
 	if declared.Update != nil && approved.Update != nil {
 		out.Update = &UpdateCap{}
 	}
+	out.Agent = intersectWork(declared.Agent, approved.Agent)
+	out.Terminal = intersectWork(declared.Terminal, approved.Terminal)
 	if declared.Fride != nil && approved.Fride != nil {
 		f := *declared.Fride
 		f.Repos = slices.Clone(f.Repos)
@@ -419,6 +440,12 @@ func (c Capabilities) Summary() string {
 	}
 	if c.Update != nil {
 		parts = append(parts, "update")
+	}
+	if c.Agent != nil {
+		parts = append(parts, c.Agent.summary("agent"))
+	}
+	if c.Terminal != nil {
+		parts = append(parts, c.Terminal.summary("terminal"))
 	}
 	if len(parts) == 0 {
 		return "nothing"

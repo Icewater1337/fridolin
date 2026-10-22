@@ -227,6 +227,9 @@ func (h *housekeepingService) Run(ctx context.Context, trigger string, forceDry 
 	locks, errs := h.resticLockFindings(ctx, rep.DryRun)
 	findings = append(findings, locks...)
 	rep.Errors = append(rep.Errors, errs...)
+	sessions, errs := h.nodeSessionFindings(ctx, rep.DryRun, set.MinAge)
+	findings = append(findings, sessions...)
+	rep.Errors = append(rep.Errors, errs...)
 	rep.Findings = findings
 	if rep.Findings == nil {
 		rep.Findings = []housekeeping.Finding{}

@@ -193,3 +193,20 @@ test('a node that cannot be updated says why', async (t) => {
   assert.match(root.textContent, /update it by hand once/);
   assert.equal(root.querySelectorAll('button').find((b) => b.textContent.startsWith('Update to')), undefined);
 });
+
+test('a node with terminal approved and online has a Terminal button', async (t) => {
+  const work = { roots: ['/Users/you/Projects'], providers: ['claude'], sandbox: 'sandbox-exec' };
+  const ws = { ...declared, agent: work, terminal: work };
+  const { root, bridge } = await openPage(t, [node({ device: 'approved', commands: 'approved', declared: ws, approved: ws, effective: ws })]);
+  const { nodesResource } = await import('../assets/app/resources.js');
+  await nodesResource.refresh();
+  await settle();
+  assert.match(root.textContent, /Agent sessions: \/Users\/you\/Projects · claude · sandbox sandbox-exec/);
+  assert.match(root.textContent, /agent \(1 folder\), terminal \(1 folder\)/);
+  assert.ok(button(root, 'Terminal'), 'the Terminal button is there');
+
+  bridge.nodes = [node({ device: 'approved', commands: 'approved', declared: ws, approved: ws, effective: ws, online: false })];
+  await nodesResource.refresh();
+  await settle();
+  assert.equal(button(root, 'Terminal'), undefined, 'not while it is offline');
+});

@@ -71,6 +71,21 @@ for compatibility.
   connect within 5 minutes (`fridolin node rollback` by hand). Auto
   updates per node are off by default (`fridolin nodes auto-update <id>
   on`); `fridolin doctor` warns about nodes older than the core.
+- Workstation mode for nodes (docs/NODES.md, "Workstation"): with
+  `fridolin node workstation on --root PATH` (or `fridolin node join
+  --workstation`) a node offers `agent`, a Claude Code or Codex session in
+  a granted folder, and `terminal`, a shell there; approve it on the core
+  like any capability. The core brain gets `node_agent_run`,
+  `node_agent_status`, `node_agent_reply`, `node_agent_stop` and
+  `node_terminal_open`, `_send`, `_read`, `_close`: a session's questions
+  arrive in the chat, a step it says cannot be undone is an approval poll,
+  and its end says what changed. The Nodes page has a **Terminal** button.
+  Sessions run in `sandbox-exec` on macOS and bubblewrap on Linux, with
+  Claude Code's own permission checks on Windows, and use the node's own
+  login (the core's only with `use_core_login`, per session). Every session
+  and every typed command line is in the audit log (`node_session`,
+  `node_command`); a lockdown stops them; housekeeping stops the ones a
+  restart of the core forgot. Off unless a node turns it on.
 - Google Drive backups use your own Google OAuth client instead of
   rclone's shared one, which Google retires during 2026. Backup →
   Connect Google Drive signs in through the bridge (also in the core's

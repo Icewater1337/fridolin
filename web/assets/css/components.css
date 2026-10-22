@@ -658,6 +658,24 @@ dialog.dialog::backdrop { background: var(--backdrop); }
 .fb-item > .icon { color: var(--muted); }
 .fb-item > .icon:first-child { color: var(--accent); }
 .fb-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A terminal on a node (node-terminal.js): its output, and a line to type. */
+.term { display: flex; flex-direction: column; gap: 8px; }
+.term-out {
+  margin: 0;
+  height: min(60dvh, 480px);
+  overflow: auto;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.term-input { display: flex; gap: 6px; align-items: center; }
+.term-input > input { flex: 1; min-width: 0; font-family: var(--mono); }
 .fb-chevron { width: 16px; height: 16px; }
 .fb-loading, .fb-empty { padding: 18px 14px; display: flex; align-items: center; gap: 8px; }
 .fb-footer { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; border-top: 1px solid var(--border); background: var(--surface-2); }

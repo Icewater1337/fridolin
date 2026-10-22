@@ -101,6 +101,11 @@ func catalogue() []struct{ name, text string } {
 		{"frideMovingNotice", outboundmsg.FrideMovingNotice(3, "laptop")},
 		{"frideMovedNotice", outboundmsg.FrideMovedNotice(3, "mini", "laptop", "health")},
 		{"frideMoveFailedNotice", outboundmsg.FrideMoveFailedNotice(3, "laptop is offline")},
+		{"nodeAgentNewsMessage(question)", outboundmsg.NodeAgentNewsMessage(outboundmsg.NodeAgentNews{Session: 2, Node: "laptop", Folder: "/home/you/Projects/foo", Kind: "question", Text: "Which test runner, jest or vitest?"})},
+		{"nodeAgentNewsMessage(irreversible)", outboundmsg.NodeAgentNewsMessage(outboundmsg.NodeAgentNews{Session: 2, Node: "laptop", Folder: "/home/you/Projects/foo", Kind: "irreversible", Text: "git push origin main"})},
+		{"nodeAgentNewsMessage(done)", outboundmsg.NodeAgentNewsMessage(outboundmsg.NodeAgentNews{Session: 2, Node: "laptop", Folder: "/home/you/Projects/foo", Kind: "done", Text: "The build works again: a missing import in main.go.", Changed: []string{"M main.go", "?? notes.txt"}})},
+		{"nodeAgentNewsMessage(failed)", outboundmsg.NodeAgentNewsMessage(outboundmsg.NodeAgentNews{Session: 2, Node: "laptop", Folder: "/home/you/Projects/foo", Kind: "failed", Text: "claude ended: exit status 1"})},
+		{"nodeSessionsStoppedNotice", outboundmsg.NodeSessionsStoppedNotice(2)},
 		{"housekeepingSummary", outboundmsg.HousekeepingSummary(
 			[]string{"run-orphan PID 4242 (claude) with 2 more, 0% CPU, 312 MB, up 26h0m0s: left running by a run of brain main that is over"},
 			[]string{"zombie PID 4300 (sh): an ended child of the bridge that the bridge has not collected"})},

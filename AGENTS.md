@@ -170,7 +170,10 @@ machine". In short:
    join-code`). Never ask for the dashboard token.
 5. **Join** with the folder the person chooses and no commands unless
    they name some: `fridolin node join CODE --core HOST:8766 --no-exec
-   --root PATH:rw`. On Windows add `--no-service` in their normal
+   --root PATH:rw`. Add `--workstation` only when the person wants the
+   core to run Claude Code sessions and a terminal in those folders
+   (docs/NODES.md, "Workstation"); never with their home folder as a
+   root. On Windows add `--no-service` in their normal
    PowerShell, then `node install` and `node start` elevated, each with
    `--state-dir "$env:LOCALAPPDATA\fridolin-node"`.
 6. **Approve**: once the node joined, Fridolin tells the person in their

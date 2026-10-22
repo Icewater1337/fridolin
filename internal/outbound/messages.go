@@ -449,3 +449,58 @@ func HousekeepingStopResult(what, failure string) string {
 	}
 	return "🧹 Housekeeping stopped " + textx.Truncate(what, 200) + "."
 }
+
+// NodeAgentNews is a node agent session's news for the chat that started
+// it (docs/NODES.md, "Workstation").
+type NodeAgentNews struct {
+	// Session is the core's number for it (Agent #2), Node the node's name.
+	Session int64
+	Node    string
+	Folder  string
+	// Kind is question, irreversible, permission, done, failed or stopped.
+	Kind    string
+	Text    string
+	Changed []string
+}
+
+// NodeAgentNewsMessage says a node agent session's news in the chat.
+func NodeAgentNewsMessage(n NodeAgentNews) string {
+	head := fmt.Sprintf("*Agent #%d*", n.Session)
+	body := strings.TrimSpace(n.Text)
+	if r := []rune(body); len(r) > 1500 {
+		body = string(r[:1500]) + "…"
+	}
+	var b strings.Builder
+	switch n.Kind {
+	case "question":
+		fmt.Fprintf(&b, "❓ %s asks (on %s, in %s):\n\n%s\n\nAnswer here, and I'll pass it on.", head, n.Node, n.Folder, body)
+		return b.String()
+	case "irreversible", "permission":
+		fmt.Fprintf(&b, "✋ %s (on %s, in %s) wants to take a step: %s\nI've asked for your approval in a poll.", head, n.Node, n.Folder, body)
+		return b.String()
+	case "done":
+		fmt.Fprintf(&b, "✅ %s is done on %s, in %s.", head, n.Node, n.Folder)
+	case "failed":
+		fmt.Fprintf(&b, "⚠️ %s failed on %s, in %s.", head, n.Node, n.Folder)
+	default:
+		fmt.Fprintf(&b, "⏹️ %s stopped on %s, in %s.", head, n.Node, n.Folder)
+	}
+	if body != "" {
+		b.WriteString("\n\n" + body)
+	}
+	if len(n.Changed) > 0 {
+		list := n.Changed
+		more := ""
+		if len(list) > 15 {
+			list, more = list[:15], fmt.Sprintf("\n… and %d more", len(n.Changed)-15)
+		}
+		b.WriteString("\n\nChanged:\n" + strings.Join(list, "\n") + more)
+	}
+	return b.String()
+}
+
+// NodeSessionsStoppedNotice tells the owner a lockdown stopped the node
+// sessions that ran.
+func NodeSessionsStoppedNotice(n int) string {
+	return fmt.Sprintf("🔒 The lockdown stopped %d session(s) on nodes (agents and terminals).", n)
+}

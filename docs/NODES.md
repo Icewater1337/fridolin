@@ -321,6 +321,7 @@ another. `fridolin node status` shows it.
 | `fride` | `fride.*` | FrIDE on the node, while it answers: see [FrIDE](#fride) below |
 | `android-build` (`android_build`) | `android.build`, `android.read`, `android.drop` | builds an Android app with Gradle, while the node has a JDK 17+ and the Android SDK: see [android-build](#android-build) below |
 | `backup` | `fs.roots`, `fs.browse`, `backup.*` | keeps the core's restic repositories in folders the owner picks: see [Backups](#backups) below |
+| `agent`, `terminal` | `agent.*`, `terminal.*` | a Claude Code or Codex session, and a shell, in folders the owner granted: see [Workstation](#workstation) below |
 
 **exec rules.** `name` is `argv[0]` exactly: a bare program name, which
 the node looks up in its `PATH`, or an absolute path. `args` `null` allows
@@ -355,7 +356,8 @@ symlinks included.
 
 `fridolin node join` flags set these: `--allow PROG`, `--allow PROG=`,
 `--allow PROG=RE,RE`, `--no-exec`, `--root PATH`, `--root PATH:rw`,
-`--backup`, `--backup-root PATH`, `--no-host`, `--no-notify`, `--name`.
+`--backup`, `--backup-root PATH`, `--workstation`, `--workstation-root
+PATH`, `--allow-home`, `--no-host`, `--no-notify`, `--name`.
 
 Both sides check every call: the core against the approvals before it
 sends anything, the node against its own `node.json` and the approvals the
@@ -989,6 +991,118 @@ known to be older (by its number, or one the core itself ran before, in
 the owner turns auto on again. `fridolin doctor` warns about approved
 nodes that run an older version than the core, and about a last update
 that failed.
+
+## Workstation
+
+A node in the workstation mode lets the core run a **Claude Code or Codex
+session** (capability `agent`) and a **terminal** (capability `terminal`)
+in folders its owner granted, so the core brain can say "look into
+~/Projects/foo on the laptop and fix the build" and a session does it
+there. It is the lightweight path: [FrIDE](#fride) stays the one for real
+coding work (tasks, worktrees, branches to review), and the core brain's
+prompt says when to use which.
+
+Turn it on, on the node, then approve it on the core:
+
+```bash
+fridolin node workstation on --root ~/Projects --root ~/Scratch   # both capabilities
+fridolin node workstation on --root ~/Projects --no-terminal      # agent sessions only
+fridolin node workstation off
+fridolin node stop && fridolin node start                         # the core hears it
+fridolin nodes approve <id> --commands                            # on the core
+```
+
+or join with it: `fridolin node join … --workstation` (in the `--root`
+folders) or `--workstation-root PATH` (repeat it). In `node.json` it is
+
+```json
+"agent":    {"roots": ["/Users/you/Projects"]},
+"terminal": {"roots": ["/Users/you/Projects"]}
+```
+
+**Folders.** A session's folder must lie under a granted root, as written
+and with its symlinks resolved; both the core and the node check it. A
+root is never the node's home folder or a folder above it, unless
+`--allow-home` (`allow_home`), which grants the home folder itself and
+never one above. Nor is a root a whole drive, a system folder (`/usr`,
+`/etc`, `/System`, `C:\Windows`, …) or a place that holds keys and
+credentials (`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`,
+`~/.git-credentials`, `~/.fridolin`, the node's state dir, every hidden
+home folder named for secrets or tokens), or lies in one; a sandboxed
+session may not read those either. The approval is two-stage like every other
+capability, and a node that adds a folder waits for the owner again.
+
+| Capability | Methods | What it does |
+| --- | --- | --- |
+| `agent` | `agent.start`, `agent.status`, `agent.reply`, `agent.stop`, `agent.list` | a Claude Code (`claude -p`) or Codex (`codex exec`) session in a folder, its events streamed back, its questions answered, stopped |
+| `terminal` | `terminal.open`, `terminal.send`, `terminal.read`, `terminal.resize`, `terminal.close`, `terminal.list` | a shell in a folder on a pseudo-terminal (a PTY on macOS and Linux, ConPTY on Windows), its output kept (1 MiB) to be read from an offset |
+
+At most 8 sessions of each kind run on a node; a terminal nobody used for
+30 minutes is closed, and a session that ran for 2 hours is stopped.
+
+### Agent sessions
+
+The core brain starts one with `node_agent_run(prompt, node?, folder?,
+provider?, model?)` and follows it with `node_agent_status`,
+`node_agent_reply` and `node_agent_stop`; those tools exist only on the
+core brain, and only while some node has `agent` approved (the terminal
+tools likewise). The core numbers sessions (Agent #2). Each turn is one
+run of the CLI; a turn that ends with a question (AskUserQuestion, or a
+last line `QUESTION: …`) waits, the question reaches the chat that started
+the session, and the person's answer goes back with `node_agent_reply`,
+which resumes the provider's own session. When the session ends, the
+chat hears its summary and what changed in the folder (`git status` in a
+repository, else the files modified since it started).
+
+**Irreversible steps.** A turn that says a step cannot be undone (a last
+line `IRREVERSIBLE: …`: a push, a deploy, a delete outside the folder) or,
+without a sandbox, a tool Claude Code's permission rules refused, waits
+for an M5 approval poll in the chat. Only the owner's vote answers it:
+the brain cannot (`node_agent_reply` refuses while the poll is open), and a
+yes in a lockdown is a no.
+
+**Sandbox, per OS.** Recorded in DECISIONS.md:
+
+| OS | A session runs | Its permissions |
+| --- | --- | --- |
+| macOS | under `sandbox-exec` with a profile of its own: writes only in its folder, its temp folder and the provider's own state; the denied places above unreadable | `claude --dangerously-skip-permissions` (Codex: its own sandbox off), since the sandbox holds it |
+| Linux | under bubblewrap (`bwrap`), the same confinement, where `bwrap` runs | as on macOS; without a working `bwrap`, as on Windows |
+| Windows | without a sandbox | Claude Code's own permission checks (`--permission-mode acceptEdits`: edits in the folder), and what they refuse goes to the owner as an approval poll; Codex with `--sandbox workspace-write` |
+
+The node reports which it uses (`sandbox` on the Nodes page and in each
+session); a terminal runs in the same sandbox, or as an ordinary shell of
+the node's user on Windows.
+
+**Credentials.** A session uses the node's own Claude or Codex login: the
+node owner's machine, logged in as they are. The core sends its own
+`CLAUDE_CODE_OAUTH_TOKEN` only when the core brain passes `use_core_login`
+for that one session, which it does only when the person asked for it;
+the node puts it in that session's environment, never stores or logs it,
+and forgets it when the session ends. Terminals never get a login token:
+the node strips `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY` and every
+`FRIDOLIN_` variable from a shell's environment.
+
+### Terminals
+
+The core brain opens one with `node_terminal_open(node?, folder?)`, types
+with `node_terminal_send` (Enter added unless `enter` is false), reads
+with `node_terminal_read` (escape sequences left out) and closes it with
+`node_terminal_close`. The dashboard's Nodes page has a **Terminal**
+button on an online node that has `terminal` approved: it opens a shell in
+a granted folder in a dialog and closes it with the dialog. The view is
+line-oriented (output, a line to type, Ctrl-C, Tab); full-screen programs
+such as an editor do not draw there.
+
+### Audit, lockdown, housekeeping
+
+Every session's start and end is a `node_session` line of the audit log
+(node, folder, sandbox, who started it, how it ended, how many files
+changed), and every command line typed into a terminal a `node_command`
+line, with token-like strings masked. A lockdown refuses starting a
+session, answering one and typing, and stops every session and terminal
+that runs (the owner hears how many); reading goes on. Housekeeping stops
+sessions and terminals that run on a node and that the core has no record
+of, such as those a restart of the core forgot (`node-session` findings).
 
 ## The service
 

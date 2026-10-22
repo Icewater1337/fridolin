@@ -456,13 +456,16 @@ func (s *Service) readLoop(ss *session) {
 
 // eventMethod is the method whose approval lets a node report events of
 // kind: FrIDE's news needs fride approved. Other kinds need what nothing
-// grants. An update's report needs update approved.
+// grants. An update's report needs update approved, a session's news
+// agent.
 func eventMethod(kind string) string {
 	switch kind {
 	case nodeproto.EventFride:
 		return nodeproto.MethodFrideStatus
 	case nodeproto.EventUpdate:
 		return nodeproto.MethodUpdateApply
+	case nodeproto.EventAgent:
+		return nodeproto.MethodAgentStatus
 	}
 	return ""
 }

@@ -341,6 +341,7 @@ func (a *Agent) declared() nodeproto.Capabilities {
 		c.Fride = nil
 	}
 	a.fride.mu.Unlock()
+	a.declareWork(&c)
 	return c
 }
 
