@@ -98,8 +98,42 @@ func nodeChecks(dir string, serviceStatus func() (string, error)) []app.DoctorCh
 			}
 			return app.DoctorResult{Status: app.DoctorOK, Detail: st}
 		}},
+		{ID: "node-boot", Title: "node service starts at boot (systemd)", Required: true, Applies: onLinux, Run: func(_ context.Context, env *app.DoctorEnv) app.DoctorResult {
+			if _, err := loaded(); err != nil {
+				return notJoined
+			}
+			if _, err := env.Stat(nodeagent.LinuxUnitPath(env.Home)); err != nil {
+				return app.DoctorResult{Status: app.DoctorFail, Detail: "no systemd user unit " + nodeagent.ServiceName + ".service", Fix: "fridolin node install, then fridolin node start"}
+			}
+			want := nodeagent.LinuxWantsLink(env.Home, nodeagent.LinuxBootTarget)
+			if _, err := env.Stat(want); err == nil {
+				return app.DoctorResult{Status: app.DoctorOK, Detail: "enabled in " + filepath.Base(filepath.Dir(want))}
+			}
+			if _, err := env.Stat(nodeagent.LinuxWantsLink(env.Home, "multi-user.target")); err == nil {
+				return app.DoctorResult{Status: app.DoctorFail, Detail: "enabled in multi-user.target.wants, which a user's systemd never starts: the node stays off after a reboot",
+					Fix: "fridolin node start (moves it to " + nodeagent.LinuxBootTarget + ")"}
+			}
+			return app.DoctorResult{Status: app.DoctorFail, Detail: "not enabled: the node stays off after a reboot", Fix: "systemctl --user enable " + nodeagent.ServiceName}
+		}},
+		{ID: "node-linger", Title: "systemd keeps your services without a login (linger)", Applies: onLinux, Run: func(ctx context.Context, env *app.DoctorEnv) app.DoctorResult {
+			user := env.Getenv("USER")
+			if user == "" {
+				return app.DoctorResult{Status: app.DoctorWarn, Detail: "cannot tell: USER is not set", Fix: "loginctl show-user $USER -p Linger"}
+			}
+			fix := "sudo loginctl enable-linger " + user
+			out, err := env.Run(ctx, "loginctl", "show-user", user, "-p", "Linger")
+			if err != nil {
+				return app.DoctorResult{Status: app.DoctorWarn, Detail: "cannot tell: " + err.Error(), Fix: fix}
+			}
+			if v := strings.TrimSpace(string(out)); v != "Linger=yes" {
+				return app.DoctorResult{Status: app.DoctorWarn, Detail: v + ": the node starts only once " + user + " logs in, and stops at logout", Fix: fix}
+			}
+			return app.DoctorResult{Status: app.DoctorOK, Detail: "on for " + user}
+		}},
 	}
 }
+
+func onLinux(env *app.DoctorEnv) bool { return env.GOOS == "linux" }
 
 // nodeDialAddress is node.json's core as host:port, without a ws:// or
 // wss:// in front.

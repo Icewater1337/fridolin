@@ -1,0 +1,14 @@
+[Unit]
+Description=Connects this machine to the Fridolin core and serves what its owner approved.
+ConditionFileIsExecutable=/home/you/.local/bin/fridolin
+
+[Service]
+StartLimitInterval=5
+StartLimitBurst=10
+ExecStart=/home/you/.local/bin/fridolin "node" "run" "--state-dir" "/home/you/.local/state/fridolin-node"
+Restart=always
+RestartSec=120
+EnvironmentFile=-/etc/sysconfig/fridolin-node
+
+[Install]
+WantedBy=default.target

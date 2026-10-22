@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -149,6 +151,7 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		// What updates from the core replace, and restart with.
 		a.Executable, a.Args, a.Environ = exe, os.Args[1:], os.Environ()
+		repairNodeBootTarget(stderr)
 		if err := nodeagent.RunService(a, svc); err != nil {
 			fmt.Fprintf(stderr, "fridolin node run: %v\n", err)
 			return 1
@@ -191,6 +194,9 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 				fmt.Fprintf(stderr, "fridolin node install: %v\n", err)
 				return 1
 			}
+		}
+		if sub == "install" || sub == "start" {
+			repairNodeBootTarget(stdout)
 		}
 		if err := nodeagent.ControlService(svc, sub); err != nil {
 			fmt.Fprintf(stderr, "fridolin node %s: %v\n", sub, err)
@@ -384,6 +390,7 @@ func nodeJoin(code, dir string, o joinFlags, stdout, stderr io.Writer) int {
 		return 1
 	}
 	svc := nodeagent.ServiceConfig(runtime.GOOS, exe, dir)
+	repairNodeBootTarget(stdout)
 	for _, action := range []string{"install", "start"} {
 		if err := nodeagent.ControlService(svc, action); err != nil {
 			fmt.Fprintf(stderr, "fridolin node join: %s the service: %v\nRun the agent yourself with: fridolin node run --state-dir %q\n", action, err, dir)
@@ -462,4 +469,32 @@ func nodeWorkstation(pos []string, o workstationFlags, dir string, stdout, stder
 	}
 	fmt.Fprintln(stdout, ".")
 	return 0
+}
+
+// repairNodeBootTarget moves a Linux node's systemd user unit written
+// before issue #171 was fixed to default.target, so that it starts after a
+// reboot, and says so in w.
+//
+// compat: see nodeagent.RepairBootTarget.
+func repairNodeBootTarget(w io.Writer) {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	moved, err := nodeagent.RepairBootTarget(home, func(args ...string) error {
+		out, err := exec.Command("systemctl", args...).CombinedOutput()
+		if err != nil && len(bytes.TrimSpace(out)) > 0 {
+			return fmt.Errorf("%w: %s", err, bytes.TrimSpace(out))
+		}
+		return err
+	})
+	switch {
+	case err != nil:
+		fmt.Fprintf(w, "fridolin node: the service still starts with multi-user.target, which a user's systemd never reaches after a reboot: %v\n", err)
+	case moved:
+		fmt.Fprintf(w, "fridolin node: the service now starts with %s, so it comes back after a reboot (it was linked to multi-user.target)\n", nodeagent.LinuxBootTarget)
+	}
 }
