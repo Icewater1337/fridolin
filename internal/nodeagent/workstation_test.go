@@ -349,16 +349,21 @@ func TestLastMarker(t *testing.T) {
 func TestWrapFailsClosed(t *testing.T) {
 	plan := newSandboxPlan(t.TempDir(), t.TempDir(), "", "")
 	t.Setenv("PATH", t.TempDir())
+	// An absolute program path on this system: wrap only takes those.
+	prog := "/bin/true"
+	if runtime.GOOS == "windows" {
+		prog = `C:\Windows\System32\whoami.exe`
+	}
 	if runtime.GOOS == "linux" {
-		if _, _, err := plan.wrap(nodeproto.SandboxBwrap, "/bin/true", nil); err == nil && !bwrapInToolDirs() {
+		if _, _, err := plan.wrap(nodeproto.SandboxBwrap, prog, nil); err == nil && !bwrapInToolDirs() {
 			t.Error("bwrap is not there, and wrap ran without it")
 		}
 	}
-	if _, _, err := plan.wrap("chroot", "/bin/true", nil); err == nil {
+	if _, _, err := plan.wrap("chroot", prog, nil); err == nil {
 		t.Error("an unknown sandbox was accepted")
 	}
-	if prog, args, err := plan.wrap(nodeproto.SandboxNone, "/bin/true", []string{"x"}); err != nil || prog != "/bin/true" || len(args) != 1 {
-		t.Errorf("none: %v %v %v", prog, args, err)
+	if got, args, err := plan.wrap(nodeproto.SandboxNone, prog, []string{"x"}); err != nil || got != prog || len(args) != 1 {
+		t.Errorf("none: %v %v %v", got, args, err)
 	}
 	if _, _, err := plan.wrap(nodeproto.SandboxNone, "true", nil); err == nil {
 		t.Error("a program the node did not resolve was accepted")
