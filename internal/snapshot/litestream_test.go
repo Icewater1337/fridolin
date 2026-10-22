@@ -205,6 +205,11 @@ func rowCount(t *testing.T, path string) int {
 	return n
 }
 
+// realLitestreamWait bounds each wait on the real litestream. The waits end
+// as soon as their condition holds; the bound only matters on a loaded
+// machine (parallel race runs, CI), where 30 seconds made the test flaky.
+const realLitestreamWait = 3 * time.Minute
+
 func TestLitestreamReal(t *testing.T) {
 	t.Parallel()
 	bin := realLitestream(t)
@@ -249,7 +254,7 @@ func TestLitestreamReal(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- l.Run(ctx) }()
 
-	waitFor(t, 10*time.Second, "litestream to start", func() bool { return l.Status().Running })
+	waitFor(t, realLitestreamWait, "litestream to start", func() bool { return l.Status().Running })
 	first := l.Status()
 	if first.PID == 0 || first.Since.IsZero() || first.Restarts != 0 {
 		t.Errorf("status after start = %+v", first)
@@ -277,7 +282,7 @@ func TestLitestreamReal(t *testing.T) {
 		}
 		return rowCount(t, target)
 	}
-	waitFor(t, 30*time.Second, "the first rows in the replica", func() bool { return restoredRows() == 50 })
+	waitFor(t, realLitestreamWait, "the first rows in the replica", func() bool { return restoredRows() == 50 })
 
 	// Killed from outside, litestream is started again.
 	proc, err := os.FindProcess(first.PID)
@@ -287,7 +292,7 @@ func TestLitestreamReal(t *testing.T) {
 	if err := proc.Kill(); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 10*time.Second, "a restart", func() bool {
+	waitFor(t, realLitestreamWait, "a restart", func() bool {
 		st := l.Status()
 		return st.Running && st.Restarts == 1 && st.PID != first.PID
 	})
@@ -296,7 +301,7 @@ func TestLitestreamReal(t *testing.T) {
 	}
 
 	insert(50, 80)
-	waitFor(t, 30*time.Second, "the later rows in the replica", func() bool { return restoredRows() == 80 })
+	waitFor(t, realLitestreamWait, "the later rows in the replica", func() bool { return restoredRows() == 80 })
 
 	cancel()
 	select {
