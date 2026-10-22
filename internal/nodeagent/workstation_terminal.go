@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
 // terminal is a shell on a pseudo-terminal, started in a granted folder.
@@ -37,15 +38,15 @@ type terminal struct {
 // Linux, PowerShell (else cmd) on Windows.
 func defaultShell() []string {
 	if runtime.GOOS == "windows" {
-		if p, err := exec.LookPath("powershell.exe"); err == nil {
+		if p, err := platform.LookTool("powershell.exe"); err == nil {
 			return []string{p, "-NoLogo"}
 		}
-		if c := os.Getenv("COMSPEC"); c != "" {
+		if c := envValue("COMSPEC"); c != "" {
 			return []string{c}
 		}
 		return []string{"cmd.exe"}
 	}
-	if sh := os.Getenv("SHELL"); sh != "" && filepath.IsAbs(sh) {
+	if sh := envValue("SHELL"); sh != "" && filepath.IsAbs(sh) {
 		return []string{sh, "-i"}
 	}
 	for _, sh := range []string{"/bin/zsh", "/bin/bash", "/bin/sh"} {
@@ -132,7 +133,7 @@ func (a *Agent) terminalIdle() time.Duration {
 // filteredEnv is the agent's environment without what a session must not
 // inherit: the core's login token, the agent's own settings.
 func filteredEnv() []string {
-	return slices.DeleteFunc(os.Environ(), func(kv string) bool {
+	return slices.DeleteFunc(platform.EnvWith(), func(kv string) bool {
 		k, _, _ := strings.Cut(kv, "=")
 		k = strings.ToUpper(k)
 		return k == "CLAUDE_CODE_OAUTH_TOKEN" || k == "ANTHROPIC_API_KEY" || strings.HasPrefix(k, "FRIDOLIN_")
@@ -348,4 +349,16 @@ func (a *Agent) pruneWorkLocked(now time.Time) {
 			delete(a.work.agents, id)
 		}
 	}
+}
+
+// envValue is the agent's environment variable name ("" when unset), as
+// platform.EnvWith has it; Windows names ignore case.
+func envValue(name string) string {
+	for _, kv := range platform.EnvWith() {
+		k, v, _ := strings.Cut(kv, "=")
+		if k == name || runtime.GOOS == "windows" && strings.EqualFold(k, name) {
+			return v
+		}
+	}
+	return ""
 }

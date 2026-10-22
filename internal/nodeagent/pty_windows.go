@@ -88,7 +88,7 @@ func (p *winPTY) spawn(cmd *exec.Cmd) error {
 	}
 	env := cmd.Env
 	if env == nil {
-		env = os.Environ()
+		env = platform.EnvWith()
 	}
 	block := envBlock(env)
 	var pi windows.ProcessInformation

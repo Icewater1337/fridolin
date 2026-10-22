@@ -1,6 +1,7 @@
 package nodeagent
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
 // The folders of the workstation family (agent, terminal) are confined
@@ -21,7 +23,12 @@ import (
 // one (workstation_sandbox.go), which keeps its writes in that folder.
 
 // homeDir is the user's home folder; a variable for the tests.
-var homeDir = os.UserHomeDir
+var homeDir = func() (string, error) {
+	if h := platform.ExpandHome("~"); h != "~" {
+		return h, nil
+	}
+	return "", errors.New("no home folder")
+}
 
 // deniedHome are home-relative folders no workstation root may be or lie
 // in, and which a sandboxed session may not read: keys, credentials, the
@@ -39,13 +46,13 @@ var secretName = regexp.MustCompile(`secret|credential|token|keyring|vault`)
 // systemRoots are folders no workstation root may be or lie in.
 func systemRoots() []string {
 	if runtime.GOOS == "windows" {
-		win := os.Getenv("SystemRoot")
+		win := envValue("SystemRoot")
 		if win == "" {
 			win = `C:\Windows`
 		}
 		out := []string{win}
 		for _, v := range []string{"ProgramFiles", "ProgramFiles(x86)", "ProgramData"} {
-			if p := os.Getenv(v); p != "" {
+			if p := envValue(v); p != "" {
 				out = append(out, p)
 			}
 		}

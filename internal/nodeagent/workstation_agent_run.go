@@ -393,7 +393,7 @@ func (s *agentSession) isGitRepo() bool {
 // git config is the session's to write, and a filter or hook it names
 // must not run outside.
 func (s *agentSession) git1(args ...string) (string, error) {
-	git, err := exec.LookPath("git")
+	git, err := platform.LookTool("git")
 	if err != nil {
 		return "", err
 	}

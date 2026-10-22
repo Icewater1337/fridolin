@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
 // The workstation mode (docs/NODES.md, "Workstation"): the capabilities
@@ -64,7 +65,7 @@ func newSessionID() string {
 }
 
 // lookAgent finds a provider's CLI; tests replace it.
-var lookAgent = exec.LookPath
+var lookAgent = platform.LookTool
 
 // probeWork finds, once, the sandbox and the agent CLIs of this machine.
 func (a *Agent) probeWork() (string, []string) {

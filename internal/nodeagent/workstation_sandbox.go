@@ -35,7 +35,7 @@ func detectSandbox() string {
 			return nodeproto.SandboxExec
 		}
 	case "linux":
-		if p, err := exec.LookPath("bwrap"); err == nil {
+		if p, err := platform.LookTool("bwrap"); err == nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			if exec.CommandContext(ctx, p, "--ro-bind", "/", "/", "--dev", "/dev", "--", "true").Run() == nil {
