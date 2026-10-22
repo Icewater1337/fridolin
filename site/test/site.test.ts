@@ -228,3 +228,16 @@ test('signed values and redirects', () => {
   assert.equal(safeNext('/team/'), '/team/')
   for (const bad of ['//evil.example', 'https://evil.example', '/\\evil.example', '', undefined]) assert.equal(safeNext(bad), '/')
 })
+
+test('only the live site is told it runs in the container', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'fridolin-site-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  const read = (rt: object) => {
+    writeFileSync(join(dir, 'runtime.json'), JSON.stringify({ listen: '127.0.0.1:8780', modules_dir: dir, users_file: 'u', session_key_file: 'k', ...rt }))
+    return readRuntime(join(dir, 'runtime.json')).container
+  }
+  assert.equal(read({}), undefined)
+  assert.equal(read({ container: true }), true)
+  assert.equal(read({ container: 'yes' }), undefined)
+  assert.equal(read({ container: true, preview_token: 'tok' }), undefined)
+})

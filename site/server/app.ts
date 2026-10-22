@@ -48,8 +48,9 @@ export async function createSite(rt: Runtime, opts: SiteOptions = {}): Promise<e
 
   const app = express()
   // Behind cloudflared (or another proxy on this machine): trust its forwarded
-  // client address and scheme, nobody else's.
-  app.set('trust proxy', 'loopback')
+  // client address and scheme, nobody else's. In the container, cloudflared's
+  // requests arrive through Docker's port forwarding, from a private address.
+  app.set('trust proxy', rt.container ? ['loopback', 'uniquelocal'] : 'loopback')
   app.disable('x-powered-by')
   app.use((_req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff')

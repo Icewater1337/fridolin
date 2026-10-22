@@ -2,10 +2,13 @@ package site
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/Icewater1337/fridolin/internal/sandbox"
 )
 
 // Instances can prepare their embedded process concurrently with independent
@@ -109,5 +112,48 @@ func TestSiteHostCapabilitiesStayLiveAndLocal(t *testing.T) {
 	}
 	if _, err := os.Stat(m.dir("google_client.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("rejected client was written: %v", err)
+	}
+}
+
+// In the fridolin-core container the live site is told to bind its port on
+// the container's interfaces (Docker forwards the published port there);
+// outside it, and in a preview, it is not.
+func TestSiteRuntimeContainer(t *testing.T) {
+	for _, container := range []bool{false, true} {
+		root := t.TempDir()
+		m := NewSiteManager(SiteOptions{
+			DataDir:    root,
+			Container:  container,
+			NPMInstall: func(context.Context, string, bool) error { return nil },
+			Host: SiteHost{
+				Node:    func() (string, error) { return "node", nil },
+				Profile: func(sandbox.SitePolicy) (string, error) { return "(version 1)", nil },
+			},
+		})
+		m.settings.Approved = "0123456789abcdef"
+		read := func(name, label string) bool {
+			t.Helper()
+			if _, err := m.processCommand(t.Context(), name, defaultSiteListen, filepath.Join(root, "modules"), label); err != nil {
+				t.Fatal(err)
+			}
+			var rt siteRuntime
+			data, err := os.ReadFile(m.dir(name + ".runtime.json"))
+			if err == nil {
+				err = json.Unmarshal(data, &rt)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rt.Listen != defaultSiteListen {
+				t.Errorf("listen = %q, want %q", rt.Listen, defaultSiteListen)
+			}
+			return rt.Container
+		}
+		if got := read("site", ""); got != container {
+			t.Errorf("Container %v: the live site's runtime says container=%v", container, got)
+		}
+		if read("preview", "branch") {
+			t.Errorf("Container %v: a preview is told it runs in the container", container)
+		}
 	}
 }

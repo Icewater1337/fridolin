@@ -62,6 +62,8 @@ type SiteManager struct {
 	workspaceInstall func(ctx context.Context, brainID, dir string) error
 	// sandboxExec runs the live site under its profile (site_sandbox.go).
 	sandboxExec string
+	// container: the live site listens on the container's interfaces.
+	container bool
 
 	secretsMu sync.Mutex // site_secrets.go
 
@@ -89,6 +91,7 @@ func New(opts SiteOptions) *SiteManager {
 		host:         opts.Host,
 		googleClient: opts.GoogleClient,
 		hooks:        opts.Builder,
+		container:    opts.Container,
 		previews:     map[string]*sitePreview{},
 		site:         newSiteProc("site"),
 		tunnel:       newSiteProc("tunnel"),
@@ -543,6 +546,12 @@ type siteRuntime struct {
 	// DevicesFile lists the paired phones' public keys, so the live site
 	// turns away an upload no paired phone signed (plaud_app.go).
 	DevicesFile string `json:"devices_file,omitempty"`
+	// Container: the live site binds listen's port on every interface of
+	// the fridolin-core container, since Docker forwards a published port
+	// to the container's own address, not to its loopback; and it trusts
+	// the client address Docker's private addresses forward, as it trusts
+	// cloudflared's on the loopback.
+	Container bool `json:"container,omitempty"`
 }
 
 // googleClientFile is the site's own Google client if one is saved, else
@@ -603,6 +612,7 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 		mods = readModuleCaps(modulesDir, m.host.Home())
 		rt.SecretsFD = 3
 		rt.DataDir, rt.SpoolDir, rt.DevicesFile = m.dir("data"), m.spoolDir(), m.dir("devices.json")
+		rt.Container = m.container
 		for _, d := range []string{rt.SpoolDir, rt.DataDir} {
 			if err := os.MkdirAll(d, 0o700); err != nil {
 				return nil, err

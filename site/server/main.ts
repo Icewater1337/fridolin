@@ -14,7 +14,9 @@ const rt = readRuntime(runtimePath)
 const app = await createSite(rt)
 
 const i = rt.listen.lastIndexOf(':')
-const host = rt.listen.slice(0, i) || '127.0.0.1'
+// In the container the port is published on the host's loopback by Docker,
+// which forwards it to the container's own address, not to its loopback.
+const host = rt.container ? '0.0.0.0' : rt.listen.slice(0, i) || '127.0.0.1'
 const port = Number(rt.listen.slice(i + 1))
 const server = app.listen(port, host, () => {
   console.log(`[site] ${rt.preview_label ? `preview of ${rt.preview_label}` : rt.title} on http://${rt.listen}/`)

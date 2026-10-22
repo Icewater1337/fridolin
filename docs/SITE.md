@@ -55,7 +55,8 @@ Dashboard → **Site**. In order:
    into its own folder, runs `npm install` and every module's build, and only
    then switches the site to it.
 6. **Turn the site on.** It listens on `127.0.0.1:8780` by default — on
-   this machine only.
+   this machine only. A core in a container publishes that port on the
+   host's loopback ([CORE.md](CORE.md#the-site)).
 7. **Domain.** Enter the host name (e.g. `example.com`); the site is then
    served as `https://example.com`. To reach it from the internet without
    opening a port, use a [Cloudflare

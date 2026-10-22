@@ -20,6 +20,11 @@ type SiteOptions struct {
 	WorkspaceInstall func(context.Context, string, string) error
 	// Empty uses the platform's normal sandbox-exec path.
 	SandboxExec string
+	// Container: the bridge runs in the fridolin-core image (run
+	// --container). The live site then binds its port on the container's
+	// interfaces, which compose publishes on the host's loopback, so the
+	// host's tunnel reaches it as before (docs/CORE.md, "The site").
+	Container bool
 }
 
 // SiteBuilderHooks connect the site to the brains. Supplied at construction.

@@ -56,8 +56,13 @@ services:
     # (tsnet, `core.tailnet`) is the way in from anywhere else; delete
     # this mapping to leave that the only one. Both sides are http_listen's
     # port: the dashboard accepts only requests addressed to it.
+    # The site (docs/SITE.md) is published the same way, at the port of its
+    # default listen address: a Cloudflare tunnel on the host points its
+    # public host name at http://127.0.0.1:8780. Keep the site's listen port
+    # and this mapping the same (docs/CORE.md, "The site").
     ports:
       - "127.0.0.1:8765:8765"
+      - "127.0.0.1:8780:8780"
     stop_grace_period: 30s
 
 volumes:
