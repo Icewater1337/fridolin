@@ -92,7 +92,11 @@ func (a *Agent) terminalOpen(eff nodeproto.Capabilities, p nodeproto.TerminalOpe
 	}
 	sb, _ := a.probeWork()
 	plan := newSandboxPlan(folder, tmp, a.Dir, "")
-	argv := plan.wrap(sb, shell)
+	argv, err := plan.wrap(sb, shell)
+	if err != nil {
+		_ = os.RemoveAll(tmp)
+		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
+	}
 	// The shell is the owner's, in the granted folder: what this
 	// capability is for. The sandbox around it, where there is one, keeps
 	// its writes in that folder and its temp folder.

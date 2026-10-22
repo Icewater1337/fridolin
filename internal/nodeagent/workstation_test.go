@@ -345,6 +345,33 @@ func TestLastMarker(t *testing.T) {
 	}
 }
 
+// A sandbox that cannot start is refused, never skipped.
+func TestWrapFailsClosed(t *testing.T) {
+	plan := newSandboxPlan(t.TempDir(), t.TempDir(), "", "")
+	t.Setenv("PATH", t.TempDir())
+	if runtime.GOOS == "linux" {
+		if _, err := plan.wrap(nodeproto.SandboxBwrap, []string{"/bin/true"}); err == nil && !bwrapInToolDirs() {
+			t.Error("bwrap is not there, and wrap ran without it")
+		}
+	}
+	if _, err := plan.wrap("chroot", []string{"/bin/true"}); err == nil {
+		t.Error("an unknown sandbox was accepted")
+	}
+	if argv, err := plan.wrap(nodeproto.SandboxNone, []string{"/bin/true"}); err != nil || len(argv) != 1 {
+		t.Errorf("none: %v %v", argv, err)
+	}
+}
+
+// bwrapInToolDirs reports whether LookTool finds bwrap outside the PATH.
+func bwrapInToolDirs() bool {
+	for _, d := range []string{"/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"} {
+		if _, err := os.Stat(filepath.Join(d, "bwrap")); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func TestSandboxKeepsWritesInTheFolder(t *testing.T) {
 	sb := detectSandbox()
 	if sb == nodeproto.SandboxNone {
@@ -359,7 +386,10 @@ func TestSandboxKeepsWritesInTheFolder(t *testing.T) {
 	}
 	plan := newSandboxPlan(folder, tmp, "", "")
 	run := func(file string) error {
-		argv := plan.wrap(sb, []string{"/bin/sh", "-c", "echo x > \"$1\"", "sh", file})
+		argv, err := plan.wrap(sb, []string{"/bin/sh", "-c", "echo x > \"$1\"", "sh", file})
+		if err != nil {
+			t.Fatal(err)
+		}
 		cmd := exec.Command(argv[0], argv[1:]...)
 		cmd.Dir = folder
 		return cmd.Run()

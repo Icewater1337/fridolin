@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
 // A workstation session (agent or terminal) runs inside the platform's
@@ -153,17 +154,21 @@ func (p sandboxPlan) bwrapArgs() []string {
 	return append(args, "--chdir", p.folder, "--")
 }
 
-// wrap is argv run in the sandbox, and whether it is.
-func (p sandboxPlan) wrap(sandbox string, argv []string) []string {
+// wrap is argv run in the sandbox. A sandbox it cannot start is an
+// error, never argv unconfined: a session in one runs without the
+// provider's own permission checks.
+func (p sandboxPlan) wrap(sandbox string, argv []string) ([]string, error) {
 	switch sandbox {
 	case nodeproto.SandboxExec:
-		return append([]string{sandboxExecPath, "-p", p.darwinProfile()}, argv...)
+		return append([]string{sandboxExecPath, "-p", p.darwinProfile()}, argv...), nil
 	case nodeproto.SandboxBwrap:
-		bw, err := exec.LookPath("bwrap")
+		bw, err := platform.LookTool("bwrap")
 		if err != nil {
-			return argv
+			return nil, fmt.Errorf("the sandbox (bwrap) is gone: %w", err)
 		}
-		return append(append([]string{bw}, p.bwrapArgs()...), argv...)
+		return append(append([]string{bw}, p.bwrapArgs()...), argv...), nil
+	case nodeproto.SandboxNone:
+		return argv, nil
 	}
-	return argv
+	return nil, fmt.Errorf("no sandbox %q", sandbox)
 }

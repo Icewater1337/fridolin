@@ -86,7 +86,11 @@ type turnResult struct {
 
 func (s *agentSession) runTurn(ctx context.Context, text string) {
 	plan := newSandboxPlan(s.folder, s.tmp, s.a.Dir, s.provider)
-	argv := plan.wrap(s.sandbox, s.turnArgs())
+	argv, err := plan.wrap(s.sandbox, s.turnArgs())
+	if err != nil {
+		s.endTurn(turnResult{errMsg: err.Error()})
+		return
+	}
 	// Running the provider's CLI is this capability's purpose; its folder
 	// was confined (confinedWorkFolder) and the sandbox, where there is
 	// one, keeps its writes there.
@@ -396,7 +400,10 @@ func (s *agentSession) git1(args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	full := append([]string{git, "-c", "core.fsmonitor=false", "-c", "core.hooksPath=" + nullDevice(), "--no-pager"}, args...)
-	argv := newSandboxPlan(s.folder, s.tmp, s.a.Dir, "").wrap(s.sandbox, full)
+	argv, err := newSandboxPlan(s.folder, s.tmp, s.a.Dir, "").wrap(s.sandbox, full)
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = s.folder
 	cmd.Env = append(filteredEnv(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
