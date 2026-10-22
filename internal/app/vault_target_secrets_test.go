@@ -16,11 +16,11 @@ import (
 // host's store, or, in the container, an age file in secrets/; it is made
 // only while the repository does not exist.
 func TestTargetSecrets(t *testing.T) {
-	id, err := age.GenerateX25519Identity()
+	id, err := age.GenerateHybridIdentity()
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := map[string]string{"FRIDOLIN_AGE_IDENTITY": id.String()}
+	env := map[string]string{"FRIDOLIN_AGE_IDENTITY_PQ": id.String()}
 	dir := t.TempDir()
 	s := targetSecrets{getenv: func(k string) string { return env[k] }, secretsDir: dir,
 		random: func() (string, error) { return "new-password-0123456789abcdef", nil }, log: slog.New(slog.DiscardHandler)}
@@ -35,6 +35,25 @@ func TestTargetSecrets(t *testing.T) {
 	}
 	if got, err := s.get("nas"); err != nil || got != pw {
 		t.Fatalf("read back: %q %v", got, err)
+	}
+	if !strings.Contains(string(data), "mlkem768x25519") {
+		t.Error("the age file is not encrypted to the post-quantum identity")
+	}
+	// A file made for the X25519 identity of before still opens.
+	old, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf strings.Builder
+	w, _ := age.Encrypt(&buf, old.Recipient())
+	_, _ = w.Write([]byte("old-password\n"))
+	_ = w.Close()
+	if err := os.WriteFile(s.ageFile("old"), []byte(buf.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	env["FRIDOLIN_AGE_IDENTITY"] = old.String()
+	if got, err := s.get("old"); err != nil || got != "old-password" {
+		t.Fatalf("an X25519 file: %q %v", got, err)
 	}
 	env["FRIDOLIN_RESTIC_NODE_MY_NAS"] = "from-env"
 	if got, _ := s.get("my-nas"); got != "from-env" {

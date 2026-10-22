@@ -29,9 +29,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/rcrypt"
 )
 
 // Caller makes a call on a node: nodes.Service.Call.
@@ -46,6 +48,9 @@ type Server struct {
 	user, pass   string
 	ln           net.Listener
 	srv          *http.Server
+	// cipher is the outer layer (crypt.go); nil stores restic's files as
+	// they are.
+	cipher atomic.Pointer[rcrypt.Cipher]
 }
 
 // Start listens on a loopback port of its own, with a user and password
@@ -135,11 +140,26 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, err)
 			return
 		}
-		w.Header().Set("Content-Length", strconv.FormatInt(st.Size, 10))
+		size, err := s.plainSize(st.Size)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 		w.WriteHeader(http.StatusOK)
 	case http.MethodGet:
+		if s.cipher.Load() != nil {
+			s.readCrypt(w, r, file)
+			return
+		}
 		s.read(w, r, file)
 	case http.MethodPost:
+		if s.cipher.Load() != nil {
+			if err := s.encryptBody(r); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
 		s.write(w, r, file)
 	case http.MethodDelete:
 		s.fail(w, s.caller.Call(ctx, s.node, nodeproto.MethodBackupDelete, file, nil))
@@ -176,6 +196,14 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request, typ string) {
 	if err := s.caller.Call(r.Context(), s.node, nodeproto.MethodBackupList, nodeproto.BackupFileParams{Folder: s.folder, Type: typ}, &res); err != nil {
 		s.fail(w, err)
 		return
+	}
+	for i := range res.Files {
+		size, err := s.plainSize(res.Files[i].Size)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("%s/%s: %v", typ, res.Files[i].Name, err), http.StatusInternalServerError)
+			return
+		}
+		res.Files[i].Size = size
 	}
 	if strings.Contains(r.Header.Get("Accept"), v2) {
 		w.Header().Set("Content-Type", v2)

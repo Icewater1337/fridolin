@@ -250,7 +250,7 @@ func mitm(t *testing.T, up, down net.Conn, code string, got chan<- string) {
 		}
 		return m
 	}
-	k1, _ := age.GenerateX25519Identity()
+	k1, _ := age.GenerateHybridIdentity()
 	k2, _ := age.GenerateX25519Identity()
 	recvHello := read(ur)
 	write(down, message{Type: msgHello, Pub: k1.Recipient().String()})

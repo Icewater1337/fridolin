@@ -23,11 +23,16 @@ type vaultCreds struct {
 	CryptPassword, CryptSalt string // FRIDOLIN_VAULT_CRYPT_PASSWORD, ..._PASSWORD2
 	SnapKeyID, SnapKey       string // B2_SNAPSHOTS_KEY_ID, B2_SNAPSHOTS_KEY
 	ResticPassword           string // RESTIC_PASSWORD
+	// The second layers' keys (docs/VAULT.md, "Encryption").
+	VaultSealKey      string // FRIDOLIN_VAULT_SEAL_KEY: the cold tier's inner layer
+	SnapCryptPassword string // FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD: the restic repositories' outer layer
+	LiteSealKey       string // FRIDOLIN_LITESTREAM_SEAL_KEY: the Litestream replicas' inner layer
 }
 
 // secrets lists every value, to blank them out of errors.
 func (c vaultCreds) secrets() []string {
-	return []string{c.VaultKeyID, c.VaultKey, c.CryptPassword, c.CryptSalt, c.SnapKeyID, c.SnapKey, c.ResticPassword}
+	return []string{c.VaultKeyID, c.VaultKey, c.CryptPassword, c.CryptSalt, c.SnapKeyID, c.SnapKey, c.ResticPassword,
+		c.VaultSealKey, c.SnapCryptPassword, c.LiteSealKey}
 }
 
 // vaultSecretNames maps each environment variable to its host secret.
@@ -42,6 +47,9 @@ var vaultSecretNames = []struct {
 	{"B2_SNAPSHOTS_KEY_ID", hostsecrets.B2SnapshotsKeyID, func(c *vaultCreds) *string { return &c.SnapKeyID }},
 	{"B2_SNAPSHOTS_KEY", hostsecrets.B2SnapshotsKey, func(c *vaultCreds) *string { return &c.SnapKey }},
 	{"RESTIC_PASSWORD", hostsecrets.ResticPassword, func(c *vaultCreds) *string { return &c.ResticPassword }},
+	{"FRIDOLIN_VAULT_SEAL_KEY", hostsecrets.VaultSealKey, func(c *vaultCreds) *string { return &c.VaultSealKey }},
+	{"FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD", hostsecrets.SnapshotsCryptPassword, func(c *vaultCreds) *string { return &c.SnapCryptPassword }},
+	{"FRIDOLIN_LITESTREAM_SEAL_KEY", hostsecrets.LitestreamSealKey, func(c *vaultCreds) *string { return &c.LiteSealKey }},
 }
 
 // vaultSecretSource reads the credentials. store is nil inside the core
@@ -183,15 +191,46 @@ func b2RawStore(rclone string, base []string, c vaultCreds, bucket string, usage
 
 // b2ColdStore is the cold tier on B2: crypt over <bucket>/vault, on one
 // long-lived rclone daemon (cloud.RcloneDaemon), which logs in to B2 once
-// a day instead of once per operation. The vault closes it when it stops.
-func b2ColdStore(rclone string, base []string, c vaultCreds, bucket string, usage *cloud.Usage) (*cloud.RcloneRC, error) {
+// a day instead of once per operation. With the seal key it is two
+// layers: seal inside, crypt over <bucket>/vault-sealed outside, reading
+// what is not copied over yet from the single-layer folder until that is
+// retired (docs/VAULT.md, "Encryption"). The vault closes it when it
+// stops.
+func b2ColdStore(rclone string, base []string, c vaultCreds, bucket string, usage *cloud.Usage, st encryptionState) (cloud.ObjectStore, func() error, error) {
 	env, remote, err := cloud.VaultRemote{Name: vaultRemoteName, KeyID: c.VaultKeyID, Key: c.VaultKey, Bucket: bucket, Path: vaultColdPath,
 		Password: c.CryptPassword, Password2: c.CryptSalt}.Env()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	d := &cloud.RcloneDaemon{Binary: rclone, Env: append(append([]string{}, base...), env...), Secrets: c.secrets(), Usage: usage, Op: "vault"}
-	return d.Store(remote), nil
+	var sealedRemote string
+	if c.VaultSealKey != "" {
+		sealedRemote = vaultRemoteName + "sealedcrypt"
+		more, err := cloud.CryptEnv(sealedRemote, vaultRemoteName+":"+bucket+"/"+vaultSealedPath, c.CryptPassword, c.CryptSalt)
+		if err != nil {
+			return nil, nil, err
+		}
+		env = append(env, more...)
+	}
+	d := &cloud.RcloneDaemon{Binary: rclone, Env: append(append([]string{}, base...), env...), Secrets: c.secrets(), Usage: usage, Op: "vault", FastList: true}
+	old := d.Store(remote)
+	if sealedRemote == "" {
+		return old, d.Close, nil
+	}
+	sealed, err := cloud.NewSealed(d.Store(sealedRemote+":"), c.VaultSealKey)
+	if err != nil {
+		_ = d.Close()
+		return nil, nil, fmt.Errorf("%s: %w", hostsecrets.VaultSealKey, err)
+	}
+	return layeredCold(sealed, old, st), d.Close, nil
+}
+
+// layeredCold is the two-layer cold tier, with the old one behind it
+// until it is retired.
+func layeredCold(sealed *cloud.Sealed, old cloud.ObjectStore, st encryptionState) cloud.ObjectStore {
+	if st.retired("cold") {
+		return sealed
+	}
+	return &cloud.Migrating{New: sealed, Old: old}
 }
 
 // storeEmpty reports whether st holds no object at all.

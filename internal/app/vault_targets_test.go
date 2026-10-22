@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -19,7 +20,9 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/nodeagent"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/noderepo"
 	"github.com/Icewater1337/fridolin/internal/nodes"
+	"github.com/Icewater1337/fridolin/internal/rcrypt"
 	"github.com/Icewater1337/fridolin/internal/snapshot"
 )
 
@@ -220,7 +223,7 @@ func TestNodeTargetEndToEnd(t *testing.T) {
 	waitLong(t, "backup approved", func() bool { return agent.State().Approved.Backup != nil })
 
 	ts := newTargetService(cfgs, v, svc, false, logger)
-	secrets := &lockedSecrets{m: map[string]string{}}
+	secrets := &lockedSecrets{m: map[string]string{hostsecrets.SnapshotsCryptPassword: "outer-layer-password"}}
 	ts.secrets.store, ts.secrets.getenv = secrets, func(string) string { return "" }
 	ts.restic = func() string { return bin }
 	ctx, cancel := context.WithCancel(context.Background())
@@ -273,10 +276,38 @@ func TestNodeTargetEndToEnd(t *testing.T) {
 		t.Fatalf("check: %+v", c)
 	}
 
-	// The folder alone, opened as a local repository: what another machine
-	// restores from.
+	// Two layers: restic's inside rclone crypt's.
+	if l := ts.state("nas").Layers; l != "restic+crypt" {
+		t.Errorf("the target's layers: %q", l)
+	}
+	if cfg, err := os.ReadFile(filepath.Join(folder, "config")); err != nil || !strings.HasPrefix(string(cfg), "RCLONE\x00\x00") {
+		t.Errorf("the folder's config is not behind rclone crypt: %v", err)
+	}
+	// The folder alone, opened through rclone's crypt remote and restic's
+	// rclone backend: what another machine restores from.
 	pw, _ := secrets.Get(targetSecretName("nas"))
-	local := &snapshot.Restic{Binary: bin, Repo: folder, Env: []string{"RESTIC_PASSWORD=" + pw, "HOME=" + home, "PATH=/usr/bin:/bin"}}
+	var local *snapshot.Restic
+	if rclone, err := exec.LookPath("rclone"); err == nil {
+		local, err = resticCrypt{restic: bin, rclone: rclone, base: []string{"HOME=" + home, "PATH=/usr/bin:/bin"},
+			target: localCryptTarget(folder), name: "nodecrypt", password: pw, cryptPassword: "outer-layer-password", plainNames: true}.repo()
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		// Without rclone, through the core's own bridge to the node.
+		t.Log("rclone is not installed: restoring through the node instead")
+		srv, err := noderepo.Start(svc, agent.ID(), folder)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer srv.Close()
+		c, err := rcrypt.New("outer-layer-password", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv.SetCipher(c)
+		local = &snapshot.Restic{Binary: bin, Repo: srv.Repo(), Env: append([]string{"RESTIC_PASSWORD=" + pw, "HOME=" + home, "PATH=/usr/bin:/bin"}, srv.Env()...)}
+	}
 	target := t.TempDir()
 	if err := local.Restore(ctx, "latest", target); err != nil {
 		t.Fatal(err)

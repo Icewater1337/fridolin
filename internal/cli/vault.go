@@ -35,6 +35,11 @@ Usage:
                                       take a snapshot now (to node target NAME)
   fridolin vault check [--target NAME]
                                       check the snapshots' repository (of node target NAME)
+  fridolin vault migrate-encryption --dry-run | --run [--delete-old]
+                                      move what has one layer of encryption to the
+                                      stores with two (docs/VAULT.md, "Encryption"):
+                                      --dry-run counts, --run copies and verifies,
+                                      --delete-old then deletes the single-layer copies
 
 Node targets (vault.targets, docs/VAULT.md "Node targets") are restic
 repositories in folders on nodes; status lists them, and the Vault page adds
@@ -71,6 +76,9 @@ func vaultCmd(args []string, stdout, stderr io.Writer) int {
 	overBudget := fs.Bool("allow-over-budget", false, "get: bring the file back even when the hot tier goes over its budget")
 	target := fs.String("target", "", "restore-drill, snapshot, check: the node target (vault.targets) to act on")
 	hourly := fs.Bool("hourly", false, "snapshot: an hourly snapshot instead of a nightly one")
+	dryRun := fs.Bool("dry-run", false, "migrate-encryption: say what would be copied, change nothing")
+	runIt := fs.Bool("run", false, "migrate-encryption: copy and verify")
+	deleteOld := fs.Bool("delete-old", false, "migrate-encryption --run: delete the single-layer copies once verified")
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
 		return 0
@@ -123,6 +131,9 @@ func vaultCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintln(stdout, resp.Path)
 		return 0
+	}
+	if sub == "migrate-encryption" {
+		return vaultMigrate(cfg, fs.Args(), *dryRun, *runIt, *deleteOld, stdout, stderr)
 	}
 	route, ok := vaultJobs[sub]
 	if !ok {

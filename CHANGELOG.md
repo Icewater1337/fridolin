@@ -31,6 +31,31 @@ for compatibility.
   a runbook for giving a node its own companion FrIDE. It runs natively
   on macOS and Linux, and in WSL2 on Windows, started by a Scheduled
   Task.
+- Everything stored off the machine is encrypted twice, with independent
+  keys, and the exports' asymmetric layer is post-quantum (age with
+  ML-KEM-768 + X25519; docs/VAULT.md, "Encryption"): the cold tier is
+  sealed per file (XChaCha20-Poly1305) inside rclone crypt, in
+  `vault-sealed/`; the restic repositories on B2 and Drive sit behind
+  rclone crypt (`restic-crypt/`, `fridolin-restic-crypt/`); a node
+  target's new folder holds its repository in rclone crypt's format;
+  Litestream replicates into `core/litestream-replica/`, which is uploaded
+  sealed through rclone crypt (`litestream-sealed/`, far fewer B2 Class C
+  calls than Litestream's own S3 replica); exports are sealed under a new
+  export key, then encrypted to a new post-quantum identity; `core send`
+  encrypts to a one-time post-quantum key. **New secrets, made by
+  `fridolin core start` when missing — put them on your recovery sheet:**
+  `fridolin.age.identity.pq`, `fridolin.export.key`,
+  `fridolin.vault.seal.key`, `fridolin.snapshots.crypt.password`,
+  `fridolin.litestream.seal.key`. `fridolin vault migrate-encryption
+  --dry-run | --run [--delete-old]` copies what has one layer into the new
+  stores, verifies it and, with `--delete-old`, deletes the old folders;
+  until then the vault still reads them. `fridolin doctor`
+  (`vault-encryption`) and `fridolin vault status` show each store's
+  layers. compat: `fridolin.age.identity` (X25519) is no longer made, but
+  while it is stored `core start` passes it on, and exports and node-target
+  passwords made for it still open; a node target whose folder holds a
+  repository from before keeps one layer until it gets a new, empty folder.
+  `core send` and `core receive` must both run this version.
 
 - Google Drive backups use your own Google OAuth client instead of
   rclone's shared one, which Google retires during 2026. Backup →

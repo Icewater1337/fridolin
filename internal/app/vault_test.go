@@ -24,6 +24,18 @@ import (
 // vaultConfig turns the vault on with a small budget.
 const vaultConfig = `{"vault": {"enabled": true, "hot_budget_gb": 3}}`
 
+// vaultConfigRclone is vaultConfig with the rclone of this machine, which
+// the tests' empty HOME hides from the helper path: with it the dev
+// stand-ins put the restic repositories behind rclone crypt, as on B2.
+// "" when there is none.
+func vaultConfigRclone(t *testing.T) string {
+	p, err := exec.LookPath("rclone")
+	if err != nil {
+		return ""
+	}
+	return `{"vault": {"enabled": true, "hot_budget_gb": 3}, "backup": {"rclone_path": "` + filepath.ToSlash(p) + `"}}`
+}
+
 // startVault starts the harness's vault, as App.Start does, with the cold
 // tier, the restic repositories and Litestream in local folders under
 // local (FRIDOLIN_VAULT_LOCAL), and waits until it runs.
@@ -160,9 +172,13 @@ func TestVaultGate(t *testing.T) {
 	if st.Files.Hot != 0 {
 		t.Errorf("files still waiting for their upload: %+v", st.Files)
 	}
-	cold, err := os.ReadDir(filepath.Join(local, "cold"))
+	// The cold tier is the sealed one (docs/VAULT.md, "Encryption").
+	cold, err := os.ReadDir(filepath.Join(local, "cold-sealed"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(local, "cold-sealed", "vault", "documents", "main", "lease.pdf")); err != nil || !strings.HasPrefix(string(raw), "FRDSEAL1") {
+		t.Errorf("the cold copy is not sealed: %v %.20q", err, raw)
 	}
 	var top []string
 	for _, e := range cold {
@@ -324,7 +340,11 @@ func TestVaultSnapshotsDrillAndDrive(t *testing.T) {
 	oldTick := vaultTickEvery
 	vaultTickEvery = 100 * time.Millisecond
 	t.Cleanup(func() { vaultTickEvery = oldTick })
-	h := newHarness(t, vaultConfig)
+	cfg := vaultConfigRclone(t)
+	if cfg == "" {
+		cfg = vaultConfig
+	}
+	h := newHarness(t, cfg)
 	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	brainDir := filepath.Join(h.Home(), "main")
 	for i := range 40 {
@@ -350,6 +370,18 @@ func TestVaultSnapshotsDrillAndDrive(t *testing.T) {
 	if !h.b.backup.Summary().Superseded {
 		t.Error("the old Drive backup's daily run goes on after the restic copy completed")
 	}
+	// With rclone, both repositories are behind rclone crypt: restic's
+	// own files are not there by name (docs/VAULT.md, "Encryption").
+	if cfg != vaultConfig {
+		for _, repo := range []string{"restic-crypt", "drive-restic-crypt"} {
+			if _, err := os.Stat(filepath.Join(local, repo, "config")); err == nil {
+				t.Errorf("%s holds restic's config in the clear", repo)
+			}
+			if entries, err := os.ReadDir(filepath.Join(local, repo)); err != nil || len(entries) == 0 {
+				t.Errorf("%s is empty: %v", repo, err)
+			}
+		}
+	}
 
 	// Most of the brain's notes go: the next nightly snapshot holds
 	// pruning until it is allowed.
@@ -372,7 +404,7 @@ func TestVaultSnapshotsDrillAndDrive(t *testing.T) {
 	if d == nil || !d.OK {
 		data, _ := json.MarshalIndent(st.Litestream, "", "  ")
 		t.Logf("litestream: %s", data)
-		_ = filepath.Walk(filepath.Join(local, "litestream"), func(p string, fi os.FileInfo, err error) error { t.Log(p); return nil })
+		_ = filepath.Walk(filepath.Join(local, "litestream-sealed"), func(p string, fi os.FileInfo, err error) error { t.Log(p); return nil })
 		data, _ = json.MarshalIndent(d, "", "  ")
 		t.Fatalf("restore drill:\n%s", data)
 	}
@@ -380,7 +412,7 @@ func TestVaultSnapshotsDrillAndDrive(t *testing.T) {
 	for _, c := range d.Checks {
 		names[c.Name] = true
 	}
-	for _, want := range []string{"brain folder main", "database copy bridge.db", "database copy vault.db"} {
+	for _, want := range []string{"brain folder main", "database copy bridge.db", "database copy vault.db", "litestream copy in the cloud", "litestream bridge.db"} {
 		if !names[want] {
 			t.Errorf("the drill did not check %s: %+v", want, d.Checks)
 		}

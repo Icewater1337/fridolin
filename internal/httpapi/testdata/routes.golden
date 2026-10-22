@@ -109,6 +109,7 @@ POST /api/token/rotate
 POST /api/vault/check
 POST /api/vault/evict
 POST /api/vault/get
+POST /api/vault/migrate-encryption
 POST /api/vault/prune/allow
 POST /api/vault/rebuild
 POST /api/vault/restore-drill

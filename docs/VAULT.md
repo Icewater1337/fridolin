@@ -198,6 +198,88 @@ the cold tier's probe, a sync and a snapshot that went well count too),
 the caps were raised since: doctor then only warns about it until
 midnight UTC.
 
+## Encryption
+
+Everything fridolin puts outside the machine is encrypted **twice, with
+independent keys**, and the one asymmetric layer (the exports' age) uses a
+**post-quantum** key exchange, ML-KEM-768 + X25519, so that a copy taken
+today cannot be opened later by a quantum computer. The symmetric layers
+are 256-bit ciphers, which a quantum computer does not break (Grover's
+search leaves about 128 bits).
+
+| Store | Where | Outer layer (key) | Inner layer (key) |
+|---|---|---|---|
+| Cold tier | vault bucket, `vault-sealed/` | rclone crypt, XSalsa20-Poly1305, names too (`fridolin.vault.crypt.password`, `.password2`) | seal, XChaCha20-Poly1305 per file (`fridolin.vault.seal.key`) |
+| Snapshots (restic) | snapshots bucket, `restic-crypt/` | rclone crypt (`fridolin.snapshots.crypt.password`) | restic, AES-256-CTR + Poly1305 (`fridolin.restic.password`) |
+| Weekly copy on Drive | Drive, `fridolin-restic-crypt/` | rclone crypt (`fridolin.snapshots.crypt.password`) | restic (`fridolin.restic.password`) |
+| Node targets | the target's folder on the node | rclone crypt's format, written by the core, names in the clear (`fridolin.snapshots.crypt.password`) | restic (`fridolin.restic.node.<name>`) |
+| Litestream (bridge.db, vault.db) | snapshots bucket, `litestream-sealed/` | rclone crypt (`fridolin.snapshots.crypt.password`) | seal (`fridolin.litestream.seal.key`) |
+| Core exports | vault bucket, `core/exports/` | age, ML-KEM-768 + X25519 (`fridolin.age.identity.pq`) | seal (`fridolin.export.key`) |
+| Secret transfer (`core send`) | the tailnet | WireGuard | age to a one-time ML-KEM-768 + X25519 key |
+
+*seal* is fridolin's own symmetric layer (`internal/seal`): a stream in
+64 KiB chunks, each sealed with XChaCha20-Poly1305 under a key derived per
+file (HKDF-SHA256 with a random salt), the STREAM construction, so that a
+file cut short, reordered or spliced fails to open; a key id in the header
+tells a wrong key from damage. Litestream 0.5 does not encrypt at all, so
+it now replicates into `core/litestream-replica/`, and the vault uploads
+that folder each minute through both layers (one listing at start, deletes
+in a batch every six hours: about 5 Class C a day instead of about 210).
+
+The keys of the second layers are made by `fridolin core start` (and by a
+native vault) when missing, and printed by name, never by value. New keys
+always go with new folders (`vault-sealed/`, `restic-crypt/`,
+`litestream-sealed/`), so a new key never hides data under a lost one.
+
+`fridolin doctor` (check `vault-encryption`) and `fridolin vault status`
+list each store with its layers; a store with one layer, or a
+single-layer copy still waiting to be retired, is a warning.
+
+### Moving existing data: migrate-encryption
+
+A vault from before keeps working: what is not copied yet is read from the
+single-layer folders, everything new goes to the double-encrypted ones.
+
+```sh
+fridolin vault migrate-encryption --dry-run        # counts what it would copy
+fridolin vault migrate-encryption --run            # copies, then checks each copy
+fridolin vault migrate-encryption --run --delete-old
+```
+
+`--run` copies the cold tier's files into the sealed folder (each checked
+by size), the snapshots into the repositories behind rclone crypt
+(`restic copy`, every snapshot checked by time, host and paths) and makes
+sure the Litestream mirror is current. `--delete-old`, once a store's copy
+is verified, deletes its single-layer folder (on B2 a delete hides the
+files, and the bucket's lifecycle rules remove them) and records it as
+retired in `core/encryption.json`; the vault then stops reading it.
+A node target with a repository from before stays as it is, since its
+folder cannot hold both: add the target again with a new, empty folder
+(it gets both layers), take a snapshot, then remove the old target.
+Exports: run `fridolin core export` in the core once; older exports stay
+readable as long as you keep the X25519 identity (`fridolin.age.identity`).
+
+### Recovery sheet
+
+Keep these in your password manager; with them alone, a fresh machine
+restores everything (`fridolin core secrets set NAME` stores each one):
+
+| Secret | Opens |
+|---|---|
+| `fridolin.age.identity.pq` (AGE-SECRET-KEY-PQ-1…) | **new**: the exports' outer layer |
+| `fridolin.export.key` | **new**: the exports' inner layer |
+| `fridolin.vault.crypt.password`, `fridolin.vault.crypt.password2` | the cold tier's outer layer |
+| `fridolin.vault.seal.key` | **new**: the cold tier's inner layer |
+| `fridolin.restic.password` | the snapshots' inner layer |
+| `fridolin.snapshots.crypt.password` | **new**: the outer layer of the snapshots, the Drive copy, the node targets and Litestream |
+| `fridolin.litestream.seal.key` | **new**: Litestream's inner layer |
+| `fridolin.restic.node.<name>` | a node target's inner layer |
+| `fridolin.age.identity` (AGE-SECRET-KEY-1…) | only exports made before; keep it until you no longer need them |
+| `fridolin.b2.vault.keyid`/`.key`, `fridolin.b2.snapshots.keyid`/`.key` | access to the buckets (not encryption) |
+
+Read one back on macOS with `security find-generic-password -a fridolin
+-s NAME -w`.
+
 ## Keys and passwords
 
 The bridge reads them from its environment, as the core container gets
@@ -348,14 +430,22 @@ snapshot and check now.
 
 ### Restoring from a node target
 
-The folder is an ordinary local restic repository: any machine that can
-read it, with restic and the target's password, restores from it,
-without fridolin and without the core:
+The folder is a restic repository inside rclone crypt's format (a target
+made before #158: a plain restic repository, opened with `restic -r
+<folder>` alone). Any machine with restic, rclone, the target's password
+and the snapshots' crypt password restores from it, without fridolin and
+without the core:
 
 ```sh
-export RESTIC_PASSWORD='…'               # from the recovery sheet
-restic -r /Volumes/Backup/fridolin snapshots
-restic -r /Volumes/Backup/fridolin restore latest --target ~/restore
+export RESTIC_PASSWORD='…'               # fridolin.restic.node.<name>
+export RCLONE_CONFIG_NODECRYPT_TYPE=crypt
+export RCLONE_CONFIG_NODECRYPT_REMOTE=/Volumes/Backup/fridolin
+export RCLONE_CONFIG_NODECRYPT_FILENAME_ENCRYPTION=off
+export RCLONE_CONFIG_NODECRYPT_DIRECTORY_NAME_ENCRYPTION=false
+export RCLONE_CONFIG_NODECRYPT_SUFFIX=none
+export RCLONE_CONFIG_NODECRYPT_PASSWORD="$(rclone obscure '…')"   # fridolin.snapshots.crypt.password
+restic -r rclone:nodecrypt: snapshots
+restic -r rclone:nodecrypt: restore latest --target ~/restore
 ```
 
 On Windows, `restic -r D:\Backups\fridolin restore latest --target

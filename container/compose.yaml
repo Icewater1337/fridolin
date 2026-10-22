@@ -20,7 +20,9 @@ services:
     init: false # tini is the image's PID 1
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN
+      - FRIDOLIN_AGE_IDENTITY_PQ
       - FRIDOLIN_AGE_IDENTITY
+      - FRIDOLIN_EXPORT_KEY
       - TS_AUTHKEY
       - B2_VAULT_KEY_ID
       - B2_VAULT_KEY
@@ -28,7 +30,10 @@ services:
       - B2_SNAPSHOTS_KEY
       - FRIDOLIN_VAULT_CRYPT_PASSWORD
       - FRIDOLIN_VAULT_CRYPT_PASSWORD2
+      - FRIDOLIN_VAULT_SEAL_KEY
       - RESTIC_PASSWORD
+      - FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD
+      - FRIDOLIN_LITESTREAM_SEAL_KEY
       - TZ=${FRIDOLIN_TZ:-UTC}
     volumes:
       - fridolin-data:/data

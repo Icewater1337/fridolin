@@ -113,6 +113,11 @@ type vaultStatus struct {
 	Snapshots   snapshotsStatus   `json:"snapshots"`
 	Litestream  litestreamView    `json:"litestream"`
 	LastDrill   *drillRecord      `json:"last_drill,omitempty"`
+	// Encryption is each off-machine store's layers (vault_encryption.go).
+	Encryption []storeLayers `json:"encryption,omitempty"`
+	// EncryptionMigration is what fridolin vault migrate-encryption last
+	// did or would do.
+	EncryptionMigration *encryptionMigration `json:"encryption_migration,omitempty"`
 	// B2 is the bridge's Backblaze B2 transactions today (b2usage.go),
 	// omitted while it made none.
 	B2 *b2UsageView `json:"b2,omitempty"`
@@ -135,8 +140,23 @@ type vaultBackends struct {
 	// drive is the second repository, on Google Drive, made when the
 	// weekly copy runs (Drive may be connected later); nil means none.
 	drive func() (*snapshot.Restic, error)
+	// resticOld and driveOld are the single-layer repositories of before
+	// that fridolin vault migrate-encryption copies from; nil once retired
+	// or where restic is the only layer still.
+	resticOld *snapshot.Restic
+	driveOld  func() (*snapshot.Restic, error)
+	// oldPurge empty the folders of the single-layer stores of before, by
+	// store id ("restic", "drive", "litestream"), for migrate-encryption
+	// --delete-old.
+	oldPurge map[string]func(context.Context) error
+	// encryption is each store's layers, for the status and doctor.
+	encryption []storeLayers
 	// lite replicates bridge.db and vault.db; nil means none.
 	lite *snapshot.Litestream
+	// liteMirror carries lite's local replicas to the cloud with two
+	// layers; nil when lite replicates to B2 itself (one layer, TLS and
+	// the bucket's own encryption only).
+	liteMirror *cloud.Mirror
 	// bridgeDB is the bridge.db Litestream replicates and the snapshots
 	// copy; "" for none.
 	bridgeDB string
@@ -218,8 +238,8 @@ func (s *vaultService) chargeB2(run *vaultRun, op string, cost cloud.Cost) {
 // its measured cost per start, and its steady daily cost for the time it
 // ran since the last count (snapshot.LitestreamDailyCost).
 func (s *vaultService) litestreamUsage(run *vaultRun, st snapshot.LitestreamStatus, now time.Time) {
-	if run.b.lite == nil || !run.b.b2 {
-		return
+	if run.b.lite == nil || !run.b.b2 || run.b.liteMirror != nil {
+		return // the mirror's rclone counts its own calls
 	}
 	n := len(run.b.lite.DBs)
 	starts := st.Restarts
@@ -479,6 +499,7 @@ func (s *vaultService) serve(ctx context.Context, run *vaultRun, cfg *config.Set
 		s.status.Snapshots.Repo = b.restic.Repo
 	}
 	s.status.Litestream.Enabled = b.lite != nil
+	s.status.Encryption = b.encryption
 	s.mu.Unlock()
 	s.log.Info("vault: running", "root", layout.root)
 
@@ -497,6 +518,9 @@ func (s *vaultService) serve(ctx context.Context, run *vaultRun, cfg *config.Set
 				s.mu.Unlock()
 			}
 		})
+	}
+	if m := b.liteMirror; m != nil {
+		wg.Go(func() { s.runLiteMirror(ctx, m) })
 	}
 	s.ping(ctx, v)
 	s.syncAll(ctx, v)
@@ -562,6 +586,10 @@ func (s *vaultService) heartbeat(ctx context.Context, run *vaultRun, save bool) 
 			s.status.Litestream.LastError = run.liteErr
 		}
 		s.status.Litestream.DBs = litestreamNames(run.b.lite)
+		if m := run.b.liteMirror; m != nil {
+			ms := m.Status()
+			s.status.Litestream.Mirror = &ms
+		}
 	}
 	if save {
 		s.saveLocked()

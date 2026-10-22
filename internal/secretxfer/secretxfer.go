@@ -4,8 +4,9 @@
 // takes it over, directly over the tailnet (docs/CORE.md, "Moving the
 // core to another machine").
 //
-// The receiver (`fridolin core receive`) makes an ephemeral age X25519
-// key, listens once on its Tailscale address, and shows a one-time code.
+// The receiver (`fridolin core receive`) makes an ephemeral post-quantum
+// age key (ML-KEM-768 + X25519; the sender's own key, X25519, only
+// proves the code and feeds the words), listens once on its Tailscale address, and shows a one-time code.
 // The sender (`fridolin core send`) connects, and both check with
 // Tailscale (WhoIs) that the other is a device of the same owner. The
 // sender proves it knows the code without sending it (an HMAC over both
@@ -372,7 +373,10 @@ func Receive(ctx context.Context, o ReceiveOptions) (Result, error) {
 	if err != nil {
 		return Result{}, fmt.Errorf("asking Tailscale about this device: %w", err)
 	}
-	id, err := age.GenerateX25519Identity()
+	// The bundle is encrypted to this one-time key: ML-KEM-768 + X25519,
+	// so that a recording of the transfer stays closed to a quantum
+	// computer too.
+	id, err := age.GenerateHybridIdentity()
 	if err != nil {
 		return Result{}, err
 	}
@@ -603,9 +607,9 @@ func Send(ctx context.Context, o SendOptions) (Result, error) {
 	if err != nil {
 		return res, err
 	}
-	recipient, err := age.ParseX25519Recipient(hello.Pub)
+	recipient, err := age.ParseHybridRecipient(hello.Pub)
 	if err != nil {
-		return res, c.fail(errors.New("the receiver's key is not an age key"))
+		return res, c.fail(errors.New("the receiver's key is not a post-quantum age key: update fridolin on the receiving machine"))
 	}
 	id, err := age.GenerateX25519Identity()
 	if err != nil {

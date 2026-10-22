@@ -18,6 +18,9 @@ type VaultService interface {
 	Check(readDataSubset string) error
 	RestoreDrill() error
 	AllowPrune() error
+	// MigrateEncryption copies what has one layer of encryption to the
+	// stores with two; dryRun only counts, deleteOld retires the old ones.
+	MigrateEncryption(dryRun, deleteOld bool) error
 	// Get brings path back from the cold tier and returns where it is.
 	Get(ctx context.Context, path string, allowOverBudget bool) (string, error)
 }
@@ -114,4 +117,21 @@ func (a *VaultAPI) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, http.StatusOK, VaultGetResponse{Path: p})
+}
+
+// MigrateEncryption answers POST /api/vault/migrate-encryption.
+func (a *VaultAPI) MigrateEncryption(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		DryRun    bool `json:"dry_run"`
+		DeleteOld bool `json:"delete_old"`
+	}
+	if err := DecodeOptionalJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.DryRun && req.DeleteOld {
+		WriteErr(w, http.StatusBadRequest, "a dry run deletes nothing: dry_run and delete_old together")
+		return
+	}
+	a.job(w, a.Vault().MigrateEncryption(req.DryRun, req.DeleteOld))
 }

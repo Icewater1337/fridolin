@@ -22,6 +22,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/seal"
 	"github.com/Icewater1337/fridolin/internal/version"
 )
 
@@ -408,34 +409,57 @@ func composeArgs(base string, overrides ...string) []string {
 	return args
 }
 
-// identity is the age identity exports are encrypted to: the keychain's,
-// made and stored when there is none, except for a rehearsal, which makes
-// one for itself and stores nothing.
-func (m *migration) identity() (*age.X25519Identity, string, error) {
-	v, err := m.d.secrets.Get(hostsecrets.AgeIdentity)
-	switch {
-	case errors.Is(err, hostsecrets.ErrNotFound) && m.f.rehearse:
-		id, err := age.GenerateX25519Identity()
-		return id, "a new identity for this rehearsal only", err
-	case errors.Is(err, hostsecrets.ErrNotFound) && m.f.dryRun:
-		id, err := age.GenerateX25519Identity()
-		return id, "none in the keychain: the migration makes one", err
-	case errors.Is(err, hostsecrets.ErrNotFound):
-		if v, err = m.d.newIdentity(); err != nil {
-			return nil, "", err
-		}
-		if err := m.d.secrets.Set(hostsecrets.AgeIdentity, v); err != nil {
-			return nil, "", err
-		}
-		m.say("Made a new age identity and stored it as %s. Copy it to a password manager: exports made with it cannot be read without it.", hostsecrets.AgeIdentity)
-	case err != nil:
+// identity is the post-quantum age identity exports are encrypted to,
+// and exportKey the key of their inner layer (docs/VAULT.md,
+// "Encryption"): the keychain's, made and stored when there is none,
+// except for a rehearsal, which makes them for itself and stores nothing.
+func (m *migration) identity() (*age.HybridIdentity, string, error) {
+	v, where, err := m.layerSecret(hostsecrets.AgeIdentityPQ, madeIdentity, "post-quantum age identity")
+	if err != nil {
 		return nil, "", err
 	}
-	id, err := age.ParseX25519Identity(strings.TrimSpace(v))
+	id, err := age.ParseHybridIdentity(strings.TrimSpace(v))
 	if err != nil {
-		return nil, "", fmt.Errorf("%s is not an age identity", hostsecrets.AgeIdentity)
+		return nil, "", fmt.Errorf("%s is not a post-quantum age identity (AGE-SECRET-KEY-PQ-1…)", hostsecrets.AgeIdentityPQ)
 	}
-	return id, "the keychain's " + hostsecrets.AgeIdentity, nil
+	return id, where, nil
+}
+
+func (m *migration) exportKey() ([]byte, string, error) {
+	v, where, err := m.layerSecret(hostsecrets.ExportKey, madeKey, "export key")
+	if err != nil {
+		return nil, "", err
+	}
+	k, err := seal.ParseKey(v)
+	if err != nil {
+		return nil, "", fmt.Errorf("%s: %w", hostsecrets.ExportKey, err)
+	}
+	return k, where, nil
+}
+
+// layerSecret reads the keychain's secret name, making one of kind made
+// when there is none (only for this run in a rehearsal or a dry run).
+func (m *migration) layerSecret(name string, made madeSecret, what string) (string, string, error) {
+	v, err := m.d.secrets.Get(name)
+	switch {
+	case errors.Is(err, hostsecrets.ErrNotFound) && m.f.rehearse:
+		v, err = m.d.makeSecret(made)
+		return v, "a new one for this rehearsal only", err
+	case errors.Is(err, hostsecrets.ErrNotFound) && m.f.dryRun:
+		v, err = m.d.makeSecret(made)
+		return v, "none in the keychain: the migration makes one", err
+	case errors.Is(err, hostsecrets.ErrNotFound):
+		if v, err = m.d.makeSecret(made); err != nil {
+			return "", "", err
+		}
+		if err := m.d.secrets.Set(name, v); err != nil {
+			return "", "", err
+		}
+		m.say("Made a new %s and stored it as %s. Copy it to a password manager: exports made with it cannot be read without it.", what, name)
+	case err != nil:
+		return "", "", err
+	}
+	return v, "the keychain's " + name, nil
 }
 
 // ensureClaudeToken stores the native service's CLAUDE_CODE_OAUTH_TOKEN
@@ -533,7 +557,11 @@ func (m *migration) fromNative() error {
 	if err != nil {
 		return err
 	}
-	m.say("\nSecrets:\n  %s: %s", hostsecrets.AgeIdentity, idWhere)
+	exportKey, keyWhere, err := m.exportKey()
+	if err != nil {
+		return err
+	}
+	m.say("\nSecrets:\n  %s: %s\n  %s: %s", hostsecrets.AgeIdentityPQ, idWhere, hostsecrets.ExportKey, keyWhere)
 	if !m.f.rehearse {
 		line, err := ensureClaudeToken(m.d.secrets, unit, m.f.dryRun)
 		if err != nil {
@@ -610,7 +638,7 @@ func (m *migration) fromNative() error {
 	logf := func(format string, a ...any) { fmt.Fprintf(m.env.stderr, format+"\n", a...) }
 	res, err := coreexport.Export(m.ctx, dataDir, []age.Recipient{id.Recipient()}, st, coreexport.ExportOptions{
 		DB: sqliteDB{}, Version: version.String(), Hostname: host, BrainFolders: brainDirs,
-		TempDir: tmp, IncludeMedia: true,
+		TempDir: tmp, IncludeMedia: true, SealKey: exportKey,
 		Logf: func(format string, a ...any) {
 			// The brain folders stay on the host: no warning for those.
 			if !strings.Contains(format, "outside the data dir") {
@@ -861,6 +889,10 @@ func (m *migration) toNative() error {
 	if err != nil {
 		return err
 	}
+	exportKey, _, err := m.exportKey()
+	if err != nil {
+		return err
+	}
 	secrets, err := secretEnv(m.d, m.env.stderr)
 	if err != nil {
 		return err
@@ -896,7 +928,7 @@ func (m *migration) toNative() error {
 	}
 	staging := filepath.Join(runDir, "staged")
 	logf := func(format string, a ...any) { fmt.Fprintf(m.env.stderr, format+"\n", a...) }
-	res, err := coreexport.Import(m.ctx, st, []age.Identity{id}, staging, coreexport.ImportOptions{DB: sqliteDB{}, Logf: logf})
+	res, err := coreexport.Import(m.ctx, st, []age.Identity{id}, staging, coreexport.ImportOptions{SealKey: exportKey, DB: sqliteDB{}, Logf: logf})
 	if err != nil {
 		return err
 	}

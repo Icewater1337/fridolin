@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -105,11 +107,18 @@ func defaultVaultBackends(ctx context.Context, s *vaultService, cfg *config.Sett
 	if err != nil {
 		return b, err
 	}
-	cold, err := b2ColdStore(rclone, base, c, cfg.Vault.Bucket, s.usage)
+	if err := src.ensureLayers(&c); err != nil {
+		return b, err
+	}
+	encState, err := readEncryptionState(cfg.Boot.Layout().Core())
 	if err != nil {
 		return b, err
 	}
-	b.cold, b.closers, b.b2 = cold, append(b.closers, cold.Close), true
+	cold, closeCold, err := b2ColdStore(rclone, base, c, cfg.Vault.Bucket, s.usage, encState)
+	if err != nil {
+		return b, err
+	}
+	b.cold, b.closers, b.b2 = cold, append(b.closers, closeCold), true
 	b.bridgeDB = AbsPath(cfg.DBPath)
 
 	restic := findVaultTool("restic")
@@ -136,8 +145,44 @@ func defaultVaultBackends(ctx context.Context, s *vaultService, cfg *config.Sett
 		repo.Secrets = c.secrets()
 		b.restic = repo
 		b.drive = driveRepo(cfg, rclone, restic, base, c.ResticPassword, c.secrets())
+		if c.SnapCryptPassword == "" {
+			break
+		}
+		// Two layers: the repository behind rclone crypt, the one of
+		// before kept to copy from until it is retired.
+		snapEnv, err := cloud.B2Env(snapRemoteName, c.SnapKeyID, c.SnapKey)
+		if err != nil {
+			b.snapErr = err.Error()
+			break
+		}
+		crypted, err := resticCrypt{restic: restic, rclone: rclone, base: base, backend: snapEnv,
+			target: snapRemoteName + ":" + cfg.Vault.SnapshotsBucket + "/" + resticCryptPath, name: snapRemoteName + "crypt",
+			password: c.ResticPassword, cryptPassword: c.SnapCryptPassword, cacheDir: repo.CacheDir, secrets: c.secrets()}.repo()
+		if err != nil {
+			b.snapErr = err.Error()
+			break
+		}
+		if !encState.retired("restic") {
+			b.resticOld = repo
+		}
+		b.restic = crypted
+		oldDrive := b.drive
+		b.drive = driveCryptRepo(cfg, rclone, restic, base, c)
+		if !encState.retired("drive") {
+			b.driveOld = oldDrive
+		}
 	}
-	if lite := findVaultTool("litestream"); lite != "" && c.SnapKeyID != "" && c.SnapKey != "" {
+	if lite := findVaultTool("litestream"); lite != "" && c.SnapKeyID != "" && c.SnapKey != "" && c.LiteSealKey != "" && c.SnapCryptPassword != "" {
+		// Two layers: Litestream replicates into a local folder, which the
+		// mirror uploads sealed (its own key) through rclone crypt (the
+		// snapshots' crypt password).
+		mirror, closeMirror, err := liteMirrorStore(rclone, base, c, cfg.Vault.SnapshotsBucket, s.usage)
+		if err != nil {
+			return b, err
+		}
+		b.closers = append(b.closers, closeMirror)
+		b.lite, b.liteMirror = mirroredLitestream(lite, cfg, s.log, base, b.bridgeDB, mirror)
+	} else if lite != "" && c.SnapKeyID != "" && c.SnapKey != "" {
 		replica := func(name string) snapshot.Replica {
 			return snapshot.Replica{Type: "s3", Bucket: cfg.Vault.SnapshotsBucket, Path: "litestream/" + name,
 				Endpoint: "https://" + cfg.Vault.Endpoint, Region: b2Region(cfg.Vault.Endpoint), ForcePathStyle: true}
@@ -149,7 +194,100 @@ func defaultVaultBackends(ctx context.Context, s *vaultService, cfg *config.Sett
 				{Path: cfg.Boot.Layout().VaultDB(), Replica: replica("vault.db")},
 			}}
 	}
+	b.oldPurge = b2OldPurge(rclone, base, c, cfg)
+	b.encryption = describeLayers(b, c, encState, src.exportKeysHere())
 	return b, nil
+}
+
+// liteReplicaDir is the local folder Litestream replicates into when the
+// mirror carries the replicas to B2.
+func liteReplicaDir(cfg *config.Settings) string {
+	return filepath.Join(cfg.Boot.Layout().Core(), "litestream-replica")
+}
+
+// mirroredLitestream replicates bridge.db and vault.db into
+// core/litestream-replica, which the mirror uploads to store.
+func mirroredLitestream(bin string, cfg *config.Settings, log *slog.Logger, base []string, bridgeDB string, store cloud.ObjectStore) (*snapshot.Litestream, *cloud.Mirror) {
+	dir := liteReplicaDir(cfg)
+	replica := func(name string) snapshot.Replica {
+		return snapshot.Replica{Type: "file", Dir: filepath.Join(dir, name)}
+	}
+	lite := &snapshot.Litestream{Binary: bin, TempDir: cfg.Boot.Layout().Core(), Logger: quietLogger(log), Env: base,
+		DBs: []snapshot.LitestreamDB{
+			{Path: bridgeDB, Replica: replica("bridge.db")},
+			{Path: cfg.Boot.Layout().VaultDB(), Replica: replica("vault.db")},
+		}}
+	return lite, &cloud.Mirror{Dir: dir, Store: store, DeleteEvery: liteDeleteEvery}
+}
+
+// liteDeleteEvery spaces the mirror's batches of deletes, each a listing
+// (one Class C on B2): Litestream drops level-0 files hourly.
+const liteDeleteEvery = 6 * time.Hour
+
+// liteMirrorStore is <snapshots bucket>/litestream-sealed through rclone
+// crypt, sealed inside, on a daemon of its own.
+func liteMirrorStore(rclone string, base []string, c vaultCreds, bucket string, usage *cloud.Usage) (*cloud.Sealed, func() error, error) {
+	env, err := cloud.B2Env(snapRemoteName, c.SnapKeyID, c.SnapKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	crypt, err := cloud.CryptEnv("fridolinlitecrypt", snapRemoteName+":"+bucket+"/"+liteSealedPath, c.SnapCryptPassword, "")
+	if err != nil {
+		return nil, nil, err
+	}
+	d := &cloud.RcloneDaemon{Binary: rclone, Env: append(append(append([]string{}, base...), env...), crypt...), Secrets: c.secrets(),
+		Usage: usage, Op: "litestream", FastList: true}
+	sealed, err := cloud.NewSealed(d.Store("fridolinlitecrypt:"), c.LiteSealKey)
+	if err != nil {
+		_ = d.Close()
+		return nil, nil, fmt.Errorf("%s: %w", hostsecrets.LitestreamSealKey, err)
+	}
+	return sealed, d.Close, nil
+}
+
+// b2OldPurge empty the single-layer folders of before on B2 and Drive
+// with rclone purge (on B2 a delete hides the files; the bucket's
+// lifecycle rules drop them).
+func b2OldPurge(rclone string, base []string, c vaultCreds, cfg *config.Settings) map[string]func(context.Context) error {
+	purge := func(ctx context.Context, env []string, target string) error {
+		cmd := exec.CommandContext(ctx, rclone, "purge", target)
+		cmd.Env = append(append([]string{}, base...), env...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			msg := strings.TrimSpace(string(out))
+			for _, sec := range c.secrets() {
+				if sec != "" {
+					msg = strings.ReplaceAll(msg, sec, "…")
+				}
+			}
+			return fmt.Errorf("rclone purge %s: %v: %s", target, err, msg)
+		}
+		return nil
+	}
+	snap := func(path string) func(context.Context) error {
+		return func(ctx context.Context) error {
+			env, err := cloud.B2Env(snapRemoteName, c.SnapKeyID, c.SnapKey)
+			if err != nil {
+				return err
+			}
+			return purge(ctx, append(env, "RCLONE_CONFIG="+os.DevNull), snapRemoteName+":"+cfg.Vault.SnapshotsBucket+"/"+path)
+		}
+	}
+	return map[string]func(context.Context) error{
+		"restic":     snap("restic"),
+		"litestream": snap("litestream"),
+		"drive": func(ctx context.Context) error {
+			conf := cfg.Boot.Layout().RcloneConf()
+			remote := cfg.Backup.Remote
+			if remote == "" {
+				remote = "brain-gdrive"
+			}
+			if !rcloneHasRemote(conf, remote) {
+				return errDriveNotConnected
+			}
+			return purge(ctx, []string{"RCLONE_CONFIG=" + conf}, remote+":"+driveResticPath)
+		},
+	}
 }
 
 // errDriveNotConnected: the weekly copy has no Drive to go to.
@@ -171,6 +309,29 @@ func driveRepo(cfg *config.Settings, rclone, restic string, base []string, passw
 		env := append(append([]string{}, base...), "RCLONE_CONFIG="+conf, "RESTIC_PASSWORD="+password)
 		return &snapshot.Restic{Binary: restic, Repo: "rclone:" + remote + ":" + driveResticPath, Env: env,
 			Options: []string{"rclone.program=" + rclone}, CacheDir: filepath.Join(cfg.Boot.Layout().Core(), "restic-cache"), Secrets: secrets}, nil
+	}
+}
+
+// snapRemoteName is the rclone remote of the snapshots bucket, under
+// the crypt remote of the restic repository.
+const snapRemoteName = "fridolinsnap"
+
+// driveCryptRepo is the Drive repository behind rclone crypt, in
+// fridolin-restic-crypt beside the single-layer fridolin-restic.
+func driveCryptRepo(cfg *config.Settings, rclone, restic string, base []string, c vaultCreds) func() (*snapshot.Restic, error) {
+	return func() (*snapshot.Restic, error) {
+		conf := cfg.Boot.Layout().RcloneConf()
+		remote := cfg.Backup.Remote
+		if remote == "" {
+			remote = "brain-gdrive"
+		}
+		if !rcloneHasRemote(conf, remote) {
+			return nil, errDriveNotConnected
+		}
+		return resticCrypt{restic: restic, rclone: rclone, base: base, backend: []string{"RCLONE_CONFIG=" + conf},
+			target: remote + ":" + driveResticPath + "-crypt", name: "fridolindrivecrypt",
+			password: c.ResticPassword, cryptPassword: c.SnapCryptPassword,
+			cacheDir: filepath.Join(cfg.Boot.Layout().Core(), "restic-cache"), secrets: c.secrets()}.repo()
 	}
 }
 
@@ -198,29 +359,31 @@ func localVaultBackends(s *vaultService, cfg *config.Settings, dir string) (vaul
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return b, err
 	}
-	cold, err := cloud.NewDir(filepath.Join(dir, "cold"))
+	encState, err := readEncryptionState(cfg.Boot.Layout().Core())
 	if err != nil {
 		return b, err
 	}
-	b.cold = cold
+	oldCold, err := cloud.NewDir(filepath.Join(dir, "cold"))
+	if err != nil {
+		return b, err
+	}
+	sealKey, err := localSecret(dir, "vault-seal-key", "FRIDOLIN_VAULT_SEAL_KEY")
+	if err != nil {
+		return b, err
+	}
+	newCold, err := cloud.NewDir(filepath.Join(dir, "cold-sealed"))
+	if err != nil {
+		return b, err
+	}
+	sealed, err := cloud.NewSealed(newCold, sealKey)
+	if err != nil {
+		return b, err
+	}
+	b.cold = layeredCold(sealed, oldCold, encState)
 	b.bridgeDB = AbsPath(cfg.DBPath)
-	pwFile := filepath.Join(dir, "restic-password")
-	pw := os.Getenv("RESTIC_PASSWORD")
-	if pw == "" {
-		data, err := os.ReadFile(pwFile)
-		switch {
-		case err == nil:
-			pw = strings.TrimSpace(string(data))
-		case errors.Is(err, os.ErrNotExist):
-			if pw, err = newVaultPassword(); err != nil {
-				return b, err
-			}
-			if err := os.WriteFile(pwFile, []byte(pw+"\n"), 0o600); err != nil {
-				return b, err
-			}
-		default:
-			return b, err
-		}
+	pw, err := localSecret(dir, "restic-password", "RESTIC_PASSWORD")
+	if err != nil {
+		return b, err
 	}
 	base := vaultBaseEnv()
 	if restic := findVaultTool("restic"); restic != "" {
@@ -229,20 +392,81 @@ func localVaultBackends(s *vaultService, cfg *config.Settings, dir string) (vaul
 		b.drive = func() (*snapshot.Restic, error) {
 			return &snapshot.Restic{Binary: restic, Repo: filepath.Join(dir, "drive-restic"), Env: env, Secrets: []string{pw}}, nil
 		}
+		// With rclone, the repositories get their outer layer as on B2:
+		// rclone crypt over a folder.
+		if rclone, err := findRclone(cfg.Backup.RclonePath); err == nil {
+			cryptPW, err := localSecret(dir, "snapshots-crypt-password", "FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD")
+			if err != nil {
+				return b, err
+			}
+			crypted := func(folder, name string) (*snapshot.Restic, error) {
+				return resticCrypt{restic: restic, rclone: rclone, base: base, target: localCryptTarget(filepath.Join(dir, folder)),
+					name: name, password: pw, cryptPassword: cryptPW}.repo()
+			}
+			repo, err := crypted("restic-crypt", "fridolinsnapcrypt")
+			if err != nil {
+				return b, err
+			}
+			if !encState.retired("restic") {
+				b.resticOld = b.restic
+			}
+			if !encState.retired("drive") {
+				b.driveOld = b.drive
+			}
+			b.restic = repo
+			b.drive = func() (*snapshot.Restic, error) { return crypted("drive-restic-crypt", "fridolindrivecrypt") }
+		}
 	} else {
 		b.snapErr = "restic is not installed"
 	}
 	if lite := findVaultTool("litestream"); lite != "" {
-		replica := func(name string) snapshot.Replica {
-			return snapshot.Replica{Type: "file", Dir: filepath.Join(dir, "litestream", name)}
+		// As on B2: replicas in core/, mirrored sealed into the stand-in.
+		key, err := localSecret(dir, "litestream-seal-key", "FRIDOLIN_LITESTREAM_SEAL_KEY")
+		if err != nil {
+			return b, err
 		}
-		b.lite = &snapshot.Litestream{Binary: lite, TempDir: cfg.Boot.Layout().Core(), Logger: quietLogger(s.log), Env: base,
-			DBs: []snapshot.LitestreamDB{
-				{Path: b.bridgeDB, Replica: replica("bridge.db")},
-				{Path: cfg.Boot.Layout().VaultDB(), Replica: replica("vault.db")},
-			}}
+		folder, err := cloud.NewDir(filepath.Join(dir, "litestream-sealed"))
+		if err != nil {
+			return b, err
+		}
+		sealed, err := cloud.NewSealed(folder, key)
+		if err != nil {
+			return b, err
+		}
+		b.lite, b.liteMirror = mirroredLitestream(lite, cfg, s.log, base, b.bridgeDB, sealed)
 	}
+	b.oldPurge = map[string]func(context.Context) error{}
+	for id, folder := range map[string]string{"restic": "restic", "drive": "drive-restic", "litestream": "litestream"} {
+		// The dev stand-in's own folder under FRIDOLIN_VAULT_LOCAL.
+		b.oldPurge[id] = func(context.Context) error { return os.RemoveAll(filepath.Join(dir, folder)) }
+	}
+	lc := vaultCreds{VaultSealKey: sealKey}
+	if b.resticOld != nil {
+		lc.SnapCryptPassword = "set"
+	}
+	b.encryption = describeLayers(b, lc, encState, true)
 	return b, nil
+}
+
+// localSecret is the dev stand-ins' secret: from the environment, else
+// from the file name in dir, made there when missing.
+func localSecret(dir, name, env string) (string, error) {
+	if v := os.Getenv(env); v != "" {
+		return v, nil
+	}
+	file := filepath.Join(dir, name)
+	data, err := os.ReadFile(file)
+	switch {
+	case err == nil:
+		return strings.TrimSpace(string(data)), nil
+	case !errors.Is(err, os.ErrNotExist):
+		return "", err
+	}
+	v, err := newVaultPassword()
+	if err != nil {
+		return "", err
+	}
+	return v, os.WriteFile(file, []byte(v+"\n"), 0o600)
 }
 
 // quietLogger drops what l would log below info: Litestream's own chatter

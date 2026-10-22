@@ -28,6 +28,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/lease"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/seal"
 	"github.com/Icewater1337/fridolin/internal/secretxfer"
 	"github.com/Icewater1337/fridolin/internal/store"
 	"github.com/Icewater1337/fridolin/internal/version"
@@ -82,7 +83,10 @@ Flags of export, import, promote and status:
                     B2_VAULT_KEY_ID and B2_VAULT_KEY)
   --bucket NAME     the vault bucket (default fridolin-vault)
 
-The age identity comes from FRIDOLIN_AGE_IDENTITY, which core start sets.
+Exports are sealed under FRIDOLIN_EXPORT_KEY, then encrypted with age to the
+post-quantum identity in FRIDOLIN_AGE_IDENTITY_PQ; import also reads exports
+made for the X25519 identity of before (FRIDOLIN_AGE_IDENTITY). core start
+sets them.
 `
 
 // coreEnv is what the core commands read of the process: its environment,
@@ -197,17 +201,65 @@ func (sqliteDB) IntegrityCheck(ctx context.Context, path string) error {
 	return store.IntegrityCheck(ctx, path)
 }
 
-// identityFrom parses FRIDOLIN_AGE_IDENTITY.
-func identityFrom(env coreEnv) (*age.X25519Identity, error) {
-	s := strings.TrimSpace(env.getenv("FRIDOLIN_AGE_IDENTITY"))
-	if s == "" {
-		return nil, errors.New("FRIDOLIN_AGE_IDENTITY is not set: fridolin core start passes it into the container from the keychain")
+// exportKeys are the keys of the exports' two layers, from the
+// environment core start gives the container.
+type exportKeys struct {
+	// pq is the post-quantum identity (FRIDOLIN_AGE_IDENTITY_PQ), which
+	// new exports are encrypted to; nil when it is not set.
+	pq *age.HybridIdentity
+	// identities decrypt: the post-quantum one and the X25519 one of
+	// before (FRIDOLIN_AGE_IDENTITY), for the exports made for it.
+	identities []age.Identity
+	// seal is the inner layer's key (FRIDOLIN_EXPORT_KEY); nil when unset.
+	seal []byte
+}
+
+// exportKeysFrom reads FRIDOLIN_AGE_IDENTITY_PQ, FRIDOLIN_AGE_IDENTITY
+// and FRIDOLIN_EXPORT_KEY.
+func exportKeysFrom(env coreEnv) (exportKeys, error) {
+	var k exportKeys
+	if s := strings.TrimSpace(env.getenv("FRIDOLIN_AGE_IDENTITY_PQ")); s != "" {
+		id, err := age.ParseHybridIdentity(s)
+		if err != nil {
+			return k, errors.New("FRIDOLIN_AGE_IDENTITY_PQ is not a post-quantum age identity (AGE-SECRET-KEY-PQ-1…)")
+		}
+		k.pq = id
+		k.identities = append(k.identities, id)
 	}
-	id, err := age.ParseX25519Identity(s)
-	if err != nil {
-		return nil, errors.New("FRIDOLIN_AGE_IDENTITY is not an age identity (AGE-SECRET-KEY-1…)")
+	if s := strings.TrimSpace(env.getenv("FRIDOLIN_AGE_IDENTITY")); s != "" {
+		id, err := age.ParseX25519Identity(s)
+		if err != nil {
+			return k, errors.New("FRIDOLIN_AGE_IDENTITY is not an age identity (AGE-SECRET-KEY-1…)")
+		}
+		k.identities = append(k.identities, id)
 	}
-	return id, nil
+	if s := strings.TrimSpace(env.getenv("FRIDOLIN_EXPORT_KEY")); s != "" {
+		key, err := seal.ParseKey(s)
+		if err != nil {
+			return k, fmt.Errorf("FRIDOLIN_EXPORT_KEY: %w", err)
+		}
+		k.seal = key
+	}
+	return k, nil
+}
+
+// forExport checks that both layers' keys are there.
+func (k exportKeys) forExport() error {
+	switch {
+	case k.pq == nil:
+		return errors.New("FRIDOLIN_AGE_IDENTITY_PQ is not set: fridolin core start passes it into the container from the keychain (and makes it when missing)")
+	case k.seal == nil:
+		return errors.New("FRIDOLIN_EXPORT_KEY is not set: fridolin core start passes it into the container from the keychain (and makes it when missing)")
+	}
+	return nil
+}
+
+// forImport checks that some identity is there.
+func (k exportKeys) forImport() error {
+	if len(k.identities) == 0 {
+		return errors.New("neither FRIDOLIN_AGE_IDENTITY_PQ nor FRIDOLIN_AGE_IDENTITY is set: fridolin core start passes them into the container from the keychain")
+	}
+	return nil
 }
 
 // insideDataDir is the data dir of export, import, promote and status:
@@ -228,7 +280,10 @@ func insideDataDir(f insideFlags, env coreEnv) (string, error) {
 }
 
 func coreExport(ctx context.Context, f insideFlags, env coreEnv) error {
-	id, err := identityFrom(env)
+	keys, err := exportKeysFrom(env)
+	if err == nil {
+		err = keys.forExport()
+	}
 	if err != nil {
 		return err
 	}
@@ -251,8 +306,8 @@ func coreExport(ctx context.Context, f insideFlags, env coreEnv) error {
 		brains = append(brains, app.AbsPath(b.Dir(app.HomeDir())))
 	}
 	host, _ := os.Hostname()
-	res, err := coreexport.Export(ctx, dataDir, []age.Recipient{id.Recipient()}, st, coreexport.ExportOptions{
-		DB: sqliteDB{}, Version: version.String(), Hostname: host, BrainFolders: brains,
+	res, err := coreexport.Export(ctx, dataDir, []age.Recipient{keys.pq.Recipient()}, st, coreexport.ExportOptions{
+		DB: sqliteDB{}, SealKey: keys.seal, Version: version.String(), Hostname: host, BrainFolders: brains,
 		Logf: func(format string, a ...any) { fmt.Fprintf(env.stderr, format+"\n", a...) },
 	})
 	if err != nil {
@@ -263,7 +318,10 @@ func coreExport(ctx context.Context, f insideFlags, env coreEnv) error {
 }
 
 func coreImport(ctx context.Context, f insideFlags, env coreEnv) error {
-	id, err := identityFrom(env)
+	keys, err := exportKeysFrom(env)
+	if err == nil {
+		err = keys.forImport()
+	}
 	if err != nil {
 		return err
 	}
@@ -281,7 +339,7 @@ func coreImport(ctx context.Context, f insideFlags, env coreEnv) error {
 	now := time.Now()
 	staging := filepath.Join(dataDir, "core", "import", now.UTC().Format("20060102T150405Z"))
 	logf := func(format string, a ...any) { fmt.Fprintf(env.stderr, format+"\n", a...) }
-	res, err := coreexport.Import(ctx, st, []age.Identity{id}, staging, coreexport.ImportOptions{Key: f.key, DB: sqliteDB{}, Logf: importLog(f, logf)})
+	res, err := coreexport.Import(ctx, st, keys.identities, staging, coreexport.ImportOptions{Key: f.key, SealKey: keys.seal, DB: sqliteDB{}, Logf: importLog(f, logf)})
 	if err != nil {
 		return err
 	}
@@ -461,6 +519,8 @@ type hostDeps struct {
 	baseEnv     []string
 	version     string
 	newIdentity func() (string, error)
+	// newKey makes the key of a second layer; nil is seal.NewKey.
+	newKey func() (string, error)
 	// For core migrate: the host's home folder, user id and system, the
 	// native service's unit file, a cache folder for temporary exports,
 	// and the clock.
@@ -472,7 +532,7 @@ type hostDeps struct {
 
 func defaultHostDeps(env coreEnv) hostDeps {
 	d := hostDeps{run: runProgram, version: version.String(), newIdentity: func() (string, error) {
-		id, err := age.GenerateX25519Identity()
+		id, err := age.GenerateHybridIdentity()
 		if err != nil {
 			return "", err
 		}
@@ -552,22 +612,40 @@ func runProgram(ctx context.Context, name string, args, env []string, stdout, st
 }
 
 // containerSecrets map the keychain's secrets onto the container's
-// environment (compose.yaml lists the same names).
+// environment (compose.yaml lists the same names). made marks those core
+// start makes when the keychain has none: the post-quantum age identity
+// and the keys of the second layers (docs/VAULT.md, "Encryption"). The
+// X25519 identity of before is passed on while the keychain has it, only
+// to read the exports and node-target passwords made for it.
 var containerSecrets = []struct {
 	env, secret string
-	required    bool
+	made        madeSecret
 }{
-	{"FRIDOLIN_AGE_IDENTITY", hostsecrets.AgeIdentity, true},
-	{"CLAUDE_CODE_OAUTH_TOKEN", hostsecrets.ClaudeOAuthToken, false},
-	{"TS_AUTHKEY", hostsecrets.TailscaleAuthKey, false},
-	{"B2_VAULT_KEY_ID", hostsecrets.B2VaultKeyID, false},
-	{"B2_VAULT_KEY", hostsecrets.B2VaultKey, false},
-	{"B2_SNAPSHOTS_KEY_ID", hostsecrets.B2SnapshotsKeyID, false},
-	{"B2_SNAPSHOTS_KEY", hostsecrets.B2SnapshotsKey, false},
-	{"FRIDOLIN_VAULT_CRYPT_PASSWORD", hostsecrets.VaultCryptPassword, false},
-	{"FRIDOLIN_VAULT_CRYPT_PASSWORD2", hostsecrets.VaultCryptSalt, false},
-	{"RESTIC_PASSWORD", hostsecrets.ResticPassword, false},
+	{"FRIDOLIN_AGE_IDENTITY_PQ", hostsecrets.AgeIdentityPQ, madeIdentity},
+	{"FRIDOLIN_AGE_IDENTITY", hostsecrets.AgeIdentity, notMade},
+	{"FRIDOLIN_EXPORT_KEY", hostsecrets.ExportKey, madeKey},
+	{"CLAUDE_CODE_OAUTH_TOKEN", hostsecrets.ClaudeOAuthToken, notMade},
+	{"TS_AUTHKEY", hostsecrets.TailscaleAuthKey, notMade},
+	{"B2_VAULT_KEY_ID", hostsecrets.B2VaultKeyID, notMade},
+	{"B2_VAULT_KEY", hostsecrets.B2VaultKey, notMade},
+	{"B2_SNAPSHOTS_KEY_ID", hostsecrets.B2SnapshotsKeyID, notMade},
+	{"B2_SNAPSHOTS_KEY", hostsecrets.B2SnapshotsKey, notMade},
+	{"FRIDOLIN_VAULT_CRYPT_PASSWORD", hostsecrets.VaultCryptPassword, notMade},
+	{"FRIDOLIN_VAULT_CRYPT_PASSWORD2", hostsecrets.VaultCryptSalt, notMade},
+	{"FRIDOLIN_VAULT_SEAL_KEY", hostsecrets.VaultSealKey, madeKey},
+	{"RESTIC_PASSWORD", hostsecrets.ResticPassword, notMade},
+	{"FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD", hostsecrets.SnapshotsCryptPassword, madeKey},
+	{"FRIDOLIN_LITESTREAM_SEAL_KEY", hostsecrets.LitestreamSealKey, madeKey},
 }
+
+// madeSecret says whether and how core start makes a missing secret.
+type madeSecret int
+
+const (
+	notMade      madeSecret = iota
+	madeIdentity            // an ML-KEM-768 + X25519 age identity
+	madeKey                 // 32 random bytes, base64url (seal.NewKey)
+)
 
 // place names where the host secrets are.
 func (d hostDeps) place() string {
@@ -583,16 +661,18 @@ func imageTag(v string) string {
 	return regexp.MustCompile(`[^A-Za-z0-9_.-]`).ReplaceAllString(v, "-")
 }
 
-// secretEnv reads the container's secrets, making the age identity when
-// the keychain has none, and returns them as NAME=value.
+// secretEnv reads the container's secrets, making the post-quantum age
+// identity and the second layers' keys when the keychain has none, and
+// returns them as NAME=value. It never prints a value; it names what it
+// made, for the recovery sheet.
 func secretEnv(d hostDeps, stderr io.Writer) ([]string, error) {
-	var env, missing []string
+	var env, missing, made []string
 	for _, s := range containerSecrets {
 		v, err := d.secrets.Get(s.secret)
-		if errors.Is(err, hostsecrets.ErrNotFound) && s.secret == hostsecrets.AgeIdentity {
-			if v, err = d.newIdentity(); err == nil {
+		if errors.Is(err, hostsecrets.ErrNotFound) && s.made != notMade {
+			if v, err = d.makeSecret(s.made); err == nil {
 				if err = d.secrets.Set(s.secret, v); err == nil {
-					fmt.Fprintf(stderr, "Made a new age identity and stored it as %s. Exports are encrypted to it: copy it to every machine that may run the core.\n", s.secret)
+					made = append(made, s.secret)
 				}
 			}
 		}
@@ -605,10 +685,24 @@ func secretEnv(d hostDeps, stderr io.Writer) ([]string, error) {
 		}
 		env = append(env, s.env+"="+v)
 	}
+	if len(made) > 0 {
+		fmt.Fprintf(stderr, "Made %s and stored them in %s. Put each on the recovery sheet now (docs/VAULT.md, \"Recovery sheet\") and copy them to every machine that may run the core: without them nobody can read what they encrypt.\n", strings.Join(made, ", "), d.place())
+	}
 	if len(missing) > 0 {
 		fmt.Fprintf(stderr, "Not in %s, so not passed to the core: %s (store one with: fridolin core secrets set NAME)\n", d.place(), strings.Join(missing, ", "))
 	}
 	return env, nil
+}
+
+// makeSecret makes a new secret of kind m.
+func (d hostDeps) makeSecret(m madeSecret) (string, error) {
+	if m == madeIdentity {
+		return d.newIdentity()
+	}
+	if d.newKey != nil {
+		return d.newKey()
+	}
+	return seal.NewKey()
 }
 
 func coreHost(ctx context.Context, sub string, args []string, env coreEnv, d hostDeps) int {

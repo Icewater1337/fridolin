@@ -4,7 +4,9 @@ $ fridolin core start
     HOME=/Users/you
     FRIDOLIN_IMAGE=fridolin-core
     FRIDOLIN_VERSION=v1.4.0-dirty
+    FRIDOLIN_AGE_IDENTITY_PQ=<fridolin.age.identity.pq>
     FRIDOLIN_AGE_IDENTITY=<fridolin.age.identity>
+    FRIDOLIN_EXPORT_KEY=<fridolin.export.key>
     CLAUDE_CODE_OAUTH_TOKEN=<fridolin.claude.oauth.token>
     TS_AUTHKEY=<fridolin.tailscale.authkey>
     B2_VAULT_KEY_ID=<fridolin.b2.vault.keyid>
@@ -13,7 +15,10 @@ $ fridolin core start
     B2_SNAPSHOTS_KEY=<fridolin.b2.snapshots.key>
     FRIDOLIN_VAULT_CRYPT_PASSWORD=<fridolin.vault.crypt.password>
     FRIDOLIN_VAULT_CRYPT_PASSWORD2=<fridolin.vault.crypt.password2>
+    FRIDOLIN_VAULT_SEAL_KEY=<fridolin.vault.seal.key>
     RESTIC_PASSWORD=<fridolin.restic.password>
+    FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD=<fridolin.snapshots.crypt.password>
+    FRIDOLIN_LITESTREAM_SEAL_KEY=<fridolin.litestream.seal.key>
 $ fridolin core stop
   /usr/local/bin/docker compose -f <COMPOSE> down
     PATH=/usr/bin:/bin
@@ -26,7 +31,9 @@ $ fridolin core update
     HOME=/Users/you
     FRIDOLIN_IMAGE=fridolin-core
     FRIDOLIN_VERSION=v1.4.0-dirty
+    FRIDOLIN_AGE_IDENTITY_PQ=<fridolin.age.identity.pq>
     FRIDOLIN_AGE_IDENTITY=<fridolin.age.identity>
+    FRIDOLIN_EXPORT_KEY=<fridolin.export.key>
     CLAUDE_CODE_OAUTH_TOKEN=<fridolin.claude.oauth.token>
     TS_AUTHKEY=<fridolin.tailscale.authkey>
     B2_VAULT_KEY_ID=<fridolin.b2.vault.keyid>
@@ -35,13 +42,18 @@ $ fridolin core update
     B2_SNAPSHOTS_KEY=<fridolin.b2.snapshots.key>
     FRIDOLIN_VAULT_CRYPT_PASSWORD=<fridolin.vault.crypt.password>
     FRIDOLIN_VAULT_CRYPT_PASSWORD2=<fridolin.vault.crypt.password2>
+    FRIDOLIN_VAULT_SEAL_KEY=<fridolin.vault.seal.key>
     RESTIC_PASSWORD=<fridolin.restic.password>
+    FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD=<fridolin.snapshots.crypt.password>
+    FRIDOLIN_LITESTREAM_SEAL_KEY=<fridolin.litestream.seal.key>
   /usr/local/bin/docker compose -f <COMPOSE> up -d --force-recreate
     PATH=/usr/bin:/bin
     HOME=/Users/you
     FRIDOLIN_IMAGE=fridolin-core
     FRIDOLIN_VERSION=v1.4.0-dirty
+    FRIDOLIN_AGE_IDENTITY_PQ=<fridolin.age.identity.pq>
     FRIDOLIN_AGE_IDENTITY=<fridolin.age.identity>
+    FRIDOLIN_EXPORT_KEY=<fridolin.export.key>
     CLAUDE_CODE_OAUTH_TOKEN=<fridolin.claude.oauth.token>
     TS_AUTHKEY=<fridolin.tailscale.authkey>
     B2_VAULT_KEY_ID=<fridolin.b2.vault.keyid>
@@ -50,14 +62,19 @@ $ fridolin core update
     B2_SNAPSHOTS_KEY=<fridolin.b2.snapshots.key>
     FRIDOLIN_VAULT_CRYPT_PASSWORD=<fridolin.vault.crypt.password>
     FRIDOLIN_VAULT_CRYPT_PASSWORD2=<fridolin.vault.crypt.password2>
+    FRIDOLIN_VAULT_SEAL_KEY=<fridolin.vault.seal.key>
     RESTIC_PASSWORD=<fridolin.restic.password>
+    FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD=<fridolin.snapshots.crypt.password>
+    FRIDOLIN_LITESTREAM_SEAL_KEY=<fridolin.litestream.seal.key>
 $ fridolin core start --image registry.example/fridolin-core --tag v2
   /usr/local/bin/docker compose -f <COMPOSE> up -d
     PATH=/usr/bin:/bin
     HOME=/Users/you
     FRIDOLIN_IMAGE=registry.example/fridolin-core
     FRIDOLIN_VERSION=v2
+    FRIDOLIN_AGE_IDENTITY_PQ=<fridolin.age.identity.pq>
     FRIDOLIN_AGE_IDENTITY=<fridolin.age.identity>
+    FRIDOLIN_EXPORT_KEY=<fridolin.export.key>
     CLAUDE_CODE_OAUTH_TOKEN=<fridolin.claude.oauth.token>
     TS_AUTHKEY=<fridolin.tailscale.authkey>
     B2_VAULT_KEY_ID=<fridolin.b2.vault.keyid>
@@ -66,14 +83,19 @@ $ fridolin core start --image registry.example/fridolin-core --tag v2
     B2_SNAPSHOTS_KEY=<fridolin.b2.snapshots.key>
     FRIDOLIN_VAULT_CRYPT_PASSWORD=<fridolin.vault.crypt.password>
     FRIDOLIN_VAULT_CRYPT_PASSWORD2=<fridolin.vault.crypt.password2>
+    FRIDOLIN_VAULT_SEAL_KEY=<fridolin.vault.seal.key>
     RESTIC_PASSWORD=<fridolin.restic.password>
+    FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD=<fridolin.snapshots.crypt.password>
+    FRIDOLIN_LITESTREAM_SEAL_KEY=<fridolin.litestream.seal.key>
 $ fridolin core run -- core import --latest
   /usr/local/bin/docker compose -f <COMPOSE> run --rm --no-deps core core import --latest
     PATH=/usr/bin:/bin
     HOME=/Users/you
     FRIDOLIN_IMAGE=fridolin-core
     FRIDOLIN_VERSION=v1.4.0-dirty
+    FRIDOLIN_AGE_IDENTITY_PQ=<fridolin.age.identity.pq>
     FRIDOLIN_AGE_IDENTITY=<fridolin.age.identity>
+    FRIDOLIN_EXPORT_KEY=<fridolin.export.key>
     CLAUDE_CODE_OAUTH_TOKEN=<fridolin.claude.oauth.token>
     TS_AUTHKEY=<fridolin.tailscale.authkey>
     B2_VAULT_KEY_ID=<fridolin.b2.vault.keyid>
@@ -82,14 +104,19 @@ $ fridolin core run -- core import --latest
     B2_SNAPSHOTS_KEY=<fridolin.b2.snapshots.key>
     FRIDOLIN_VAULT_CRYPT_PASSWORD=<fridolin.vault.crypt.password>
     FRIDOLIN_VAULT_CRYPT_PASSWORD2=<fridolin.vault.crypt.password2>
+    FRIDOLIN_VAULT_SEAL_KEY=<fridolin.vault.seal.key>
     RESTIC_PASSWORD=<fridolin.restic.password>
+    FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD=<fridolin.snapshots.crypt.password>
+    FRIDOLIN_LITESTREAM_SEAL_KEY=<fridolin.litestream.seal.key>
 $ fridolin core run core promote
   /usr/local/bin/docker compose -f <COMPOSE> run --rm --no-deps core core promote
     PATH=/usr/bin:/bin
     HOME=/Users/you
     FRIDOLIN_IMAGE=fridolin-core
     FRIDOLIN_VERSION=v1.4.0-dirty
+    FRIDOLIN_AGE_IDENTITY_PQ=<fridolin.age.identity.pq>
     FRIDOLIN_AGE_IDENTITY=<fridolin.age.identity>
+    FRIDOLIN_EXPORT_KEY=<fridolin.export.key>
     CLAUDE_CODE_OAUTH_TOKEN=<fridolin.claude.oauth.token>
     TS_AUTHKEY=<fridolin.tailscale.authkey>
     B2_VAULT_KEY_ID=<fridolin.b2.vault.keyid>
@@ -98,4 +125,7 @@ $ fridolin core run core promote
     B2_SNAPSHOTS_KEY=<fridolin.b2.snapshots.key>
     FRIDOLIN_VAULT_CRYPT_PASSWORD=<fridolin.vault.crypt.password>
     FRIDOLIN_VAULT_CRYPT_PASSWORD2=<fridolin.vault.crypt.password2>
+    FRIDOLIN_VAULT_SEAL_KEY=<fridolin.vault.seal.key>
     RESTIC_PASSWORD=<fridolin.restic.password>
+    FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD=<fridolin.snapshots.crypt.password>
+    FRIDOLIN_LITESTREAM_SEAL_KEY=<fridolin.litestream.seal.key>
