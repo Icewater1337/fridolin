@@ -43,6 +43,13 @@ export type Runtime = {
   spool_dir?: string
   /** The live site: the paired phones' public keys (devices.ts). */
   devices_file?: string
+  /**
+   * The live site in the fridolin-core container: bind listen's port on every
+   * interface (Docker forwards the published port to the container's own
+   * address) and trust the client address forwarded from Docker's private
+   * addresses as well as from the loopback.
+   */
+  container?: boolean
 }
 
 export function readRuntime(path: string): Runtime {
@@ -67,6 +74,7 @@ export function readRuntime(path: string): Runtime {
     // Only the live site hands files to brains.
     spool_dir: raw.preview_token ? undefined : raw.spool_dir || undefined,
     devices_file: raw.preview_token ? undefined : raw.devices_file || undefined,
+    container: raw.preview_token ? undefined : raw.container === true || undefined,
   }
 }
 

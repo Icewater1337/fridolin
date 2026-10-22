@@ -267,6 +267,26 @@ a host with AppArmor (Ubuntu, Debian with AppArmor on), Docker's
 doctor`) tries it; a brain whose sandbox cannot start refuses every
 message rather than run without it.
 
+## The site
+
+The site process ([SITE.md](SITE.md)) runs in the container too, started
+by the bridge as on the Mac. With `--container` the live site binds the
+port of its listen address (`127.0.0.1:8780` by default) on the
+container's interfaces, for the same reason as the dashboard's, and
+compose publishes it as `127.0.0.1:8780:8780`: the host's Cloudflare
+tunnel, whose public host name points at `http://127.0.0.1:8780`, reaches
+it as it reached the native site. The site trusts the client address and
+scheme forwarded from the loopback and from Docker's private addresses,
+which is where the tunnel's requests come from in the container. Keep the
+site's listen port and the mapping the same; a site on another port needs
+its own mapping in a compose override.
+
+A tunnel run by the bridge (*Run the tunnel* on the Site page) runs in the
+container, where `127.0.0.1:8780` is the site itself; a tunnel run by a
+launchd agent on the Mac goes through the published port. Run one of the
+two, not both: Cloudflare spreads the requests over every connector of a
+tunnel.
+
 ## The tailnet
 
 With `core.tailnet.enabled` (a restart setting) the bridge joins the
