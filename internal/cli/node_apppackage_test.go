@@ -197,13 +197,20 @@ func TestEditsInsideAnAppPackage(t *testing.T) {
 	dir := filepath.Join(a.Local, "fridolin-node")
 	joinedIn(t, dir)
 	before, _ := os.ReadFile(filepath.Join(dir, nodeagent.ConfigFile))
-	for name, run := range map[string]func(out, errOut *bytes.Buffer) int{
-		"backup":      func(out, errOut *bytes.Buffer) int { return nodeBackup([]string{"on"}, nil, dir, inside, out, errOut) },
-		"workstation": func(out, errOut *bytes.Buffer) int { return nodeWorkstation([]string{"off"}, workstationFlags{}, dir, inside, out, errOut) },
+	for _, c := range []struct {
+		name string
+		run  func(out, errOut *bytes.Buffer) int
+	}{
+		{"backup", func(out, errOut *bytes.Buffer) int {
+			return nodeBackup([]string{"on"}, nil, dir, inside, out, errOut)
+		}},
+		{"workstation", func(out, errOut *bytes.Buffer) int {
+			return nodeWorkstation([]string{"off"}, workstationFlags{}, dir, inside, out, errOut)
+		}},
 	} {
 		var out, errOut bytes.Buffer
-		if code := run(&out, &errOut); code != 1 || !strings.Contains(errOut.String(), "fridolin node "+name+": this process runs inside the app package") {
-			t.Errorf("%s: exit %d: %s%s", name, code, out.String(), errOut.String())
+		if code := c.run(&out, &errOut); code != 1 || !strings.Contains(errOut.String(), "fridolin node "+c.name+": this process runs inside the app package") {
+			t.Errorf("%s: exit %d: %s%s", c.name, code, out.String(), errOut.String())
 		}
 	}
 	if after, _ := os.ReadFile(filepath.Join(dir, nodeagent.ConfigFile)); !bytes.Equal(before, after) {
