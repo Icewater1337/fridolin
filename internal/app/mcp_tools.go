@@ -100,6 +100,7 @@ func (b *App) newMCPTools() *mcp.Registry[mcpCaller] {
 		Call:      b.callCheckApproval,
 	})
 	b.registerFrideTools(r)
+	b.registerNodeTools(r)
 	return r
 }
 

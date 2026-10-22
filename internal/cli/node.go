@@ -26,6 +26,9 @@ Usage:
                        join the core with a code from fridolin nodes join-code, then
                        install and start the service (--no-service: only join)
   fridolin node run    run the agent in the foreground (what the service runs)
+  fridolin node rollback
+                       put back the fridolin an update from the core replaced
+                       (<binary>.prev); restart the service after
   fridolin node install|start|stop|status|uninstall
                        the service: a launchd user agent on macOS, a systemd user
                        unit on Linux, a Windows Service on Windows
@@ -105,7 +108,7 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 		return nodeJoin(pos[0], dir, o, stdout, stderr)
 	case "backup":
 		return nodeBackup(pos, backupRoots, dir, stdout, stderr)
-	case "run", "install", "start", "stop", "status", "uninstall":
+	case "run", "install", "start", "stop", "status", "uninstall", "rollback":
 		if len(pos) != 0 {
 			fmt.Fprintf(stderr, "fridolin node %s takes no arguments\n", sub)
 			return 2
@@ -127,6 +130,8 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "fridolin node run: %v\n", err)
 			return 1
 		}
+		// What updates from the core replace, and restart with.
+		a.Executable, a.Args, a.Environ = exe, os.Args[1:], os.Environ()
 		if err := nodeagent.RunService(a, svc); err != nil {
 			fmt.Fprintf(stderr, "fridolin node run: %v\n", err)
 			return 1
@@ -141,12 +146,28 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 				id = nodeagent.DeviceID(key)
 			}
 			fmt.Fprintf(stdout, "Node: %s (%s), core %s\nOffers: %s\n", cfg.Name, id, cfg.Core, cfg.Capabilities.Summary())
+			updates := "offered to the core"
+			if cfg.Update != nil && !*cfg.Update {
+				updates = "off (\"update\": false in node.json)"
+			}
+			if fp := nodeagent.CoreKeyFingerprint(dir); fp != "" {
+				updates += ", signed by the core's key " + fp
+			} else {
+				updates += ", the core's key is trusted at the first update"
+			}
+			fmt.Fprintf(stdout, "Updates: %s\nThis binary: %s (%s)\n", updates, exe, version.String())
 		}
 		st, err := nodeagent.ServiceStatus(svc)
 		if err != nil {
 			st = "unknown: " + err.Error()
 		}
 		fmt.Fprintf(stdout, "Service %s: %s\n", svc.Name, st)
+	case "rollback":
+		if err := nodeagent.Rollback(exe); err != nil {
+			fmt.Fprintf(stderr, "fridolin node rollback: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "Put %s.prev back in place of %s. Restart the agent: fridolin node stop, then fridolin node start.\n", exe, exe)
 	default:
 		if sub == "install" {
 			if _, err := nodeagent.LoadConfig(dir); err != nil {

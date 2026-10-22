@@ -266,12 +266,14 @@ nodes speak on their own port.
 
 | Route | Does |
 | --- | --- |
-| `GET /api/nodes` | `{"enabled", "listen", "nodes": [...]}`: every node of `nodes/nodes.json` with `device`, `commands`, `declared`, `approved`, `effective`, `online`, `last_seen`, `resources`, `tags` |
+| `GET /api/nodes` | `{"enabled", "listen", "version", "nodes": [...]}`: every node of `nodes/nodes.json` with `device`, `commands`, `declared`, `approved`, `effective`, `online`, `last_seen`, `resources`, `tags`, `version`, `update` (the auto policy and the last update), and `update_to` (the core's version, when the node can be updated to it now) or `update_note` (why it cannot) |
 | `POST /api/nodes/join-code` | `{"code", "expires_at", "core", "command", "command_powershell"}`: a single-use code for 10 minutes, the core's node address (its MagicDNS name on the tailnet) and the line to paste on the new machine, for sh and for PowerShell; `409` while `nodes.enabled` is off |
 | `POST /api/nodes/{id}/approve` | approves the device (first stage) |
 | `POST /api/nodes/{id}/approve-commands` | approves what the node declares now (second stage); `409` before the device is approved |
 | `POST /api/nodes/{id}/revoke` | revokes it and closes its connection |
 | `PUT /api/nodes/{id}/tags` | `{"tags": [...]}` replaces its tags; `422` for a tag that is not lower-case letters, digits and `._:-` |
+| `POST /api/nodes/{id}/update` | `{"force"?}` updates the node's fridolin to the core's version in the background and answers `202` `{"id", "to"}`; the node's `update` in `GET /api/nodes` shows how it goes ([NODES.md](NODES.md#updates)); `409` when it cannot start now (not approved, offline, busy without `force`, no build for its platform, lockdown) |
+| `PUT /api/nodes/{id}/update-policy` | `{"auto": bool}` turns the node's auto updates on or off |
 | `POST /api/nodes/{id}/call` | `{"method", "params"}` calls a capability (`exec`, `fs.list`, `fs.read`, `fs.write`, `host.info`, `notify`, and the `fride.*` methods of [NODES.md](NODES.md#fride)) and answers `{"result": …}`; a refusal is `{"error", "code"}` with `403` (`denied`, `outside-root`), `404`, `400`, `503` (not connected) or `504` |
 
 An unknown node is `404`; one that was revoked cannot be approved again

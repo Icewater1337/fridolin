@@ -57,6 +57,9 @@ type Node struct {
 	// Address is where the node last connected from.
 	Address   string               `json:"address,omitempty"`
 	Resources *nodeproto.HostStats `json:"resources,omitempty"`
+	// Update is the owner's auto policy and how the last update from the
+	// core went (update.go).
+	Update *UpdateStatus `json:"update,omitempty"`
 }
 
 // Commands is the state of the node's second approval stage; a revoked

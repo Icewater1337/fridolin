@@ -56,3 +56,5 @@ jobs:
         run: |
           docker run --rm --entrypoint /usr/local/bin/fridolin fridolin-core:ci version
           docker run --rm --entrypoint sh fridolin-core:ci -c 'claude --version && codex --version && restic version && rclone version | head -1 && litestream version && bwrap --version'
+          # The builds nodes are updated to, of the image's version.
+          docker run --rm --entrypoint sh fridolin-core:ci -c 'grep -q "\"version\": \"${{ github.sha }}\"" /opt/fridolin/node-binaries/manifest.json && ls -l /opt/fridolin/node-binaries'

@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -269,6 +270,9 @@ type State struct {
 	Approved Capabilities `json:"approved"`
 	// Message says, for a person reading the agent's log, what is next.
 	Message string `json:"message,omitempty"`
+	// CoreKey is the core's ed25519 update key, which signs the binaries
+	// it updates nodes to: a node pins it when it joins (UpdateCap).
+	CoreKey []byte `json:"core_key,omitempty"`
 }
 
 // Heartbeat is the node's periodic report.
@@ -376,7 +380,7 @@ const (
 )
 
 // Methods lists every method.
-var Methods = append(append(append([]string{MethodExec, MethodFSList, MethodFSRead, MethodFSWrite, MethodHostInfo, MethodNotify}, FrideMethods...), AndroidMethods...), BackupMethods...)
+var Methods = slices.Concat([]string{MethodExec, MethodFSList, MethodFSRead, MethodFSWrite, MethodHostInfo, MethodNotify}, FrideMethods, AndroidMethods, BackupMethods, UpdateMethods)
 
 // ExecParams runs argv on the node.
 type ExecParams struct {

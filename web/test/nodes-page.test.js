@@ -4,7 +4,7 @@ import { installDom } from './fake-dom.js';
 import { serve, settle, noConsoleErrors } from './serve.js';
 import { h } from '../assets/lib/dom.js';
 import { createPage } from '../assets/app/page.js';
-import { capSummary, gb, osName, parseTags, ruleText } from '../assets/lib/nodes.js';
+import { capSummary, gb, osName, parseTags, ruleText, updateText } from '../assets/lib/nodes.js';
 import page from '../assets/pages/nodes.js';
 
 const declared = {
@@ -160,4 +160,36 @@ test('the capability words match the bridge\'s', () => {
   assert.equal(gb(1.5 * 2 ** 30), '1.5 GB');
   assert.equal(gb(0), '');
   assert.deepEqual(parseTags(' GPU,gpu  docker,'), ['gpu', 'docker']);
+  assert.equal(capSummary({ host: true, update: {} }), 'host, update');
+  assert.equal(updateText({ state: 'failed', to: 'v2', error: 'no luck' }), 'the update to v2 failed: no luck');
+  assert.equal(updateText(null), null);
+});
+
+test('a node older than the core is updated with a button, and may update by itself', async (t) => {
+  const upd = { update: {} };
+  const older = node({ device: 'approved', commands: 'approved', declared: { ...declared, ...upd }, approved: { ...declared, ...upd }, effective: { ...declared, ...upd }, update_to: 'v2' });
+  const { root, calls, bridge } = await openPage(t, [older]);
+  assert.match(root.textContent, /May runexec \(hostname, git, go\), fs \(2 roots, 1 writable\), host, update/);
+  button(root, 'Update to v2').click();
+  await settle();
+  assert.ok(calls.some((c) => c.method === 'POST' && c.path === '/api/nodes/8233270f8a24/update'));
+  bridge.nodes = [{ ...older, update_to: undefined, version: 'v2', update: { state: 'ok', from: 'v1', to: 'v2', auto: false } }];
+  const { nodesResource } = await import('../assets/app/resources.js');
+  await nodesResource.refresh();
+  await settle();
+  assert.match(root.textContent, /updated from v1 to v2/);
+  assert.equal(button(root, 'Update to v2'), undefined, 'nothing to update to any more');
+  const sw = root.querySelectorAll('input').find((i) => i.getAttribute('role') === 'switch');
+  assert.ok(sw, 'the auto switch');
+  sw.checked = true;
+  sw.dispatchEvent(new Event('change'));
+  await settle();
+  const put = calls.find((c) => c.method === 'PUT' && c.path === '/api/nodes/8233270f8a24/update-policy');
+  assert.deepEqual(put.body, { auto: true });
+});
+
+test('a node that cannot be updated says why', async (t) => {
+  const { root } = await openPage(t, [node({ device: 'approved', commands: 'approved', update_note: 'its fridolin v1 cannot be updated from the core: update it by hand once' })]);
+  assert.match(root.textContent, /update it by hand once/);
+  assert.equal(root.querySelectorAll('button').find((b) => b.textContent.startsWith('Update to')), undefined);
 });

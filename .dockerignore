@@ -12,6 +12,7 @@
 !tools/*.py
 !container/
 !plaud-android/
+!scripts/build-node-binaries.sh
 **/testdata/
 **/*_test.go
 site/node_modules/

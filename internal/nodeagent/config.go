@@ -45,6 +45,9 @@ type Config struct {
 	// AndroidBuild false keeps the node from offering android-build where
 	// it finds a JDK and the Android SDK; unset or true offers it then.
 	AndroidBuild *bool `json:"android_build,omitempty"`
+	// Update false keeps the node from offering update, so the core never
+	// replaces its fridolin; unset or true offers it (update.go).
+	Update *bool `json:"update,omitempty"`
 }
 
 // DefaultCapabilities is what a node offers when its owner says nothing
@@ -71,6 +74,9 @@ func (c Config) Check() error {
 	}
 	if c.Capabilities.AndroidBuild != nil {
 		return errors.New(`capabilities.android_build: the agent declares it while it finds a JDK and the Android SDK; "android_build": false turns it off`)
+	}
+	if c.Capabilities.Update != nil {
+		return errors.New(`capabilities.update: the agent declares it; "update": false turns it off`)
 	}
 	if b := c.Capabilities.Backup; b != nil && len(b.Folders) > 0 {
 		return errors.New("capabilities.backup.folders: the owner picks the backup folders on the core; node.json names only the roots it lends (capabilities.backup.roots)")

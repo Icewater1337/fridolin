@@ -57,6 +57,20 @@ for compatibility.
   repository from before keeps one layer until it gets a new, empty folder.
   `core send` and `core receive` must both run this version.
 
+- The core updates its nodes' fridolin to its own version
+  (docs/NODES.md, "Updates"): Nodes → Update to <version>, `fridolin
+  nodes update <id>|--all`, or the core brain's `node_update` tool. A node
+  agent of this version offers the new capability `update` (`"update":
+  false` in `node.json` turns it off), which waits for `fridolin nodes
+  approve <id> --commands`; a node that runs an older fridolin is updated
+  by hand once, then approves `update`. The core image carries the
+  builds in `/opt/fridolin/node-binaries/`; a native core builds them with
+  `make node-binaries`. Binaries are signed by the core's new update key
+  (`nodes/update.key`), which nodes pin as `core.pub`; the node keeps
+  `<binary>.prev` and goes back to it when the new version does not
+  connect within 5 minutes (`fridolin node rollback` by hand). Auto
+  updates per node are off by default (`fridolin nodes auto-update <id>
+  on`); `fridolin doctor` warns about nodes older than the core.
 - Google Drive backups use your own Google OAuth client instead of
   rclone's shared one, which Google retires during 2026. Backup →
   Connect Google Drive signs in through the bridge (also in the core's

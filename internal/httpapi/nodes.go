@@ -22,6 +22,8 @@ type NodesService interface {
 	SetTags(id string, tags []string) (*nodes.Node, error)
 	NewJoinCode() (string, time.Time, error)
 	Call(ctx context.Context, id, method string, params, out any) error
+	StartUpdate(id string, o nodes.UpdateOptions) (string, error)
+	SetUpdateAuto(id string, auto bool) (*nodes.Node, error)
 }
 
 // NodesAPI serves /api/nodes.
@@ -34,12 +36,16 @@ type NodesAPI struct {
 	// CoreAddress is the core's node address a new machine joins
 	// (host:port).
 	CoreAddress func() string
+	// Version is the core's version, which nodes are updated to.
+	Version string
 }
 
 // NodesResponse is GET /api/nodes.
 type NodesResponse struct {
-	Enabled bool         `json:"enabled"`
-	Listen  string       `json:"listen"`
+	Enabled bool   `json:"enabled"`
+	Listen  string `json:"listen"`
+	// Version is the core's: a node's update_to names it.
+	Version string       `json:"version"`
 	Nodes   []nodes.View `json:"nodes"`
 }
 
@@ -75,7 +81,7 @@ func (a *NodesAPI) List(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	WriteJSONIfChanged(w, r, NodesResponse{Enabled: a.Enabled, Listen: a.Listen(), Nodes: views})
+	WriteJSONIfChanged(w, r, NodesResponse{Enabled: a.Enabled, Listen: a.Listen(), Version: a.Version, Nodes: views})
 }
 
 // JoinCode answers POST /api/nodes/join-code.
@@ -121,6 +127,8 @@ func writeNodeErr(w http.ResponseWriter, err error) {
 		WriteErr(w, http.StatusConflict, err.Error())
 	case errors.Is(err, nodes.ErrInvalidInput):
 		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+	case errors.Is(err, nodes.ErrUpdate):
+		WriteErr(w, http.StatusConflict, err.Error())
 	default:
 		WriteErr(w, http.StatusInternalServerError, err.Error())
 	}
@@ -159,6 +167,54 @@ func (a *NodesAPI) Tags(w http.ResponseWriter, r *http.Request) {
 	WriteJSON(w, http.StatusOK, NodeResponse{Node: n})
 }
 
+// NodeUpdateResponse is POST /api/nodes/{id}/update: the update runs in
+// the background, and GET /api/nodes shows how it goes (the node's
+// update).
+type NodeUpdateResponse struct {
+	ID string `json:"id"`
+	To string `json:"to"`
+}
+
+// Update answers POST /api/nodes/{id}/update: update the node's fridolin
+// to the core's version. force updates a busy node.
+func (a *NodesAPI) Update(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Force bool `json:"force"`
+	}
+	if err := DecodeOptionalJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	id := r.PathValue("id")
+	to, err := a.Nodes().StartUpdate(id, nodes.UpdateOptions{Force: req.Force})
+	if err != nil {
+		writeNodeErr(w, err)
+		return
+	}
+	WriteJSON(w, http.StatusAccepted, NodeUpdateResponse{ID: id, To: to})
+}
+
+// UpdatePolicy answers PUT /api/nodes/{id}/update-policy: {"auto": bool}.
+func (a *NodesAPI) UpdatePolicy(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Auto *bool `json:"auto"`
+	}
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Auto == nil {
+		WriteErr(w, http.StatusBadRequest, "auto is missing: true or false")
+		return
+	}
+	n, err := a.Nodes().SetUpdateAuto(r.PathValue("id"), *req.Auto)
+	if err != nil {
+		writeNodeErr(w, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, NodeResponse{Node: n})
+}
+
 // NodeCallResponse is POST /api/nodes/{id}/call: the method's result as
 // the node sent it.
 type NodeCallResponse struct {
@@ -184,6 +240,11 @@ func (a *NodesAPI) Call(w http.ResponseWriter, r *http.Request) {
 	// backups only (vault targets), never by hand.
 	if slices.Contains(nodeproto.BackupRepoMethods, req.Method) {
 		WriteErr(w, http.StatusBadRequest, req.Method+" is the core's backups' own; the Vault page's targets use it")
+		return
+	}
+	// An update goes through POST /api/nodes/{id}/update, which signs it.
+	if slices.Contains(nodeproto.UpdateMethods, req.Method) {
+		WriteErr(w, http.StatusBadRequest, req.Method+" is the core's updates' own; use POST /api/nodes/{id}/update")
 		return
 	}
 	params := req.Params

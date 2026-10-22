@@ -45,7 +45,7 @@ SHELLCHECK  ?= shellcheck
 FUZZTIME ?= 10s
 
 .DEFAULT_GOAL := build
-.PHONY: help build install test race race-shard race-process vet fmt fmt-check tidy-check root-check \
+.PHONY: help build install node-binaries test race race-shard race-process vet fmt fmt-check tidy-check root-check \
 	notices notices-check \
 	lint lint-go lint-sh lint-py lint-actions lint-web \
 	test-py test-web test-sh smoke fuzz-short check clean container-python-lock
@@ -59,6 +59,13 @@ build: ## build bin/fridolin, stamped with VERSION (default: git describe)
 install: build ## copy the binary to BINDIR (default ~/.local/bin)
 	install -d "$(DESTDIR)$(BINDIR)"
 	install -m 0755 "$(BINARY)" "$(DESTDIR)$(BINDIR)/fridolin"
+
+# Where node-binaries writes; the service's install finds them in
+# ~/.local/lib/fridolin/node-binaries (or $$FRIDOLIN_NODE_BINARIES).
+NODE_BINARIES ?= bin/node-binaries
+
+node-binaries: ## the builds a core updates its nodes to, for each platform, into NODE_BINARIES
+	GO="$(GO)" scripts/build-node-binaries.sh "$(VERSION)" "$(NODE_BINARIES)"
 
 test: ## Go tests
 	$(GO) test -count=1 ./...

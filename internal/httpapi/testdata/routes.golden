@@ -85,6 +85,7 @@ POST /api/nodes/{id}/approve
 POST /api/nodes/{id}/approve-commands
 POST /api/nodes/{id}/call
 POST /api/nodes/{id}/revoke
+POST /api/nodes/{id}/update
 POST /api/plaud/app/build
 POST /api/plaud/connect
 POST /api/plaud/disconnect
@@ -140,6 +141,7 @@ PUT /api/brains/{id}/skills/policy
 PUT /api/config
 PUT /api/google/client
 PUT /api/nodes/{id}/tags
+PUT /api/nodes/{id}/update-policy
 PUT /api/plaud/app/credentials
 PUT /api/plaud/settings
 PUT /api/site/builders/{id}

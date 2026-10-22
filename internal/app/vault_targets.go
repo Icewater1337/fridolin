@@ -212,7 +212,8 @@ func (t *targetService) Stop() {
 // tick starts what is due of each target whose node is there.
 func (t *targetService) tick(now time.Time) {
 	for _, tg := range t.cfgs.Get().Vault.Targets {
-		if !t.nodes.Online(tg.Node) {
+		// A node an update restarts waits for the next tick.
+		if !t.nodes.Online(tg.Node) || t.nodes.Updating(tg.Node) {
 			continue
 		}
 		hourly, nightly, check, read := targetDue(tg, t.state(tg.Name), now)

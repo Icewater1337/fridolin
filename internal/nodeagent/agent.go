@@ -49,7 +49,23 @@ type Agent struct {
 	// AndroidToolchain finds the JDK and the Android SDK android-build
 	// needs; nil looks where platform.FindAndroidToolchain does.
 	AndroidToolchain func() (platform.AndroidToolchain, error)
+	// Executable is the running binary, which an update from the core
+	// replaces (update.go); Args (without the program) and Environ are
+	// what it restarts with from a terminal. Updates fail without it.
+	Executable    string
+	Args, Environ []string
+	// Restart starts the agent again after an update or a rollback; nil
+	// restarts it the way it runs: in place from a terminal, by exiting
+	// with ExitRestart under a service manager. Tests hand in their own.
+	Restart func() error
+	// UpdateTrial is how long a new binary has to connect before the node
+	// puts the old one back (nodeproto.UpdateTrialMinutes when zero).
+	UpdateTrial time.Duration
+	// CheckBinary runs a new binary to see that it is version; nil runs
+	// `<binary> version`.
+	CheckBinary func(ctx context.Context, path, version string) error
 
+	upd       updater
 	mu        sync.Mutex
 	state     nodeproto.State
 	connected bool
@@ -253,6 +269,8 @@ func (a *Agent) Run(ctx context.Context) error {
 	fwg.Go(func() { a.frideLoop(fctx) })
 	defer fwg.Wait()
 	defer stopFride()
+	// A new binary on trial after an update from the core.
+	a.updateStartup(fctx, &fwg)
 	for {
 		start := time.Now()
 		err := a.session(ctx)
@@ -293,6 +311,15 @@ func (a *Agent) session(ctx context.Context) error {
 	a.setConnected(true)
 	defer a.setConnected(false)
 	a.logf("node: connected to the core at %s as %s (%s); device %s, commands %s%s", a.Config.Core, a.Config.Name, a.ID(), st.Device, st.Commands, messageSuffix(st))
+	a.checkCoreKey(st)
+	// An update that holds now, or one that did not: the core hears how
+	// it went.
+	if rep := a.updateConnected(); rep != nil {
+		data, _ := json.Marshal(rep)
+		if err := c.send(ctx, nodeproto.TypeEvent, "", nodeproto.Event{Kind: nodeproto.EventUpdate, Data: data}); err == nil {
+			a.updateReported()
+		}
+	}
 
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -352,6 +379,7 @@ func (a *Agent) session(ctx context.Context) error {
 				return err
 			}
 			a.setState(st)
+			a.checkCoreKey(st)
 			a.logf("node: the core says: device %s, commands %s, may serve %s%s", st.Device, st.Commands, st.Approved.Summary(), messageSuffix(st))
 		case nodeproto.TypeRequest:
 			req, err := nodeproto.DecodeBody[nodeproto.Request](env)

@@ -35,6 +35,20 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
       -ldflags "-X github.com/Icewater1337/fridolin/internal/version.version=${VERSION}" \
       -o /out/fridolin ./cmd/fridolin
 
+# ── the node binaries ─────────────────────────────────────────────────────
+# fridolin for every platform a node runs on, with the core's version,
+# which the core updates its nodes to (docs/NODES.md, "Updates"). Built on
+# the build machine's own platform (cross-compiled, cgo off), so both
+# images carry the same files; stripped and gzip'd, about 17 MB each.
+FROM --platform=${BUILDPLATFORM} ${GO_IMAGE} AS node-binaries
+ARG VERSION=dev
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY . .
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    scripts/build-node-binaries.sh "${VERSION}" /out/node-binaries
+
 # ── restic, rclone and litestream, from their releases ────────────────────
 FROM ${RUNTIME_IMAGE} AS tools
 ARG TARGETARCH
@@ -146,6 +160,9 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 # The binary with tools/ next to it, as `fridolin service install` lays
 # out an install: brains get them as $FRIDOLIN_BIN and $FRIDOLIN_TOOLS_DIR.
 COPY --from=build /out/fridolin /opt/fridolin/fridolin
+# Beside the binary, where the bridge looks for them (FRIDOLIN_NODE_BINARIES
+# names another folder).
+COPY --from=node-binaries /out/node-binaries /opt/fridolin/node-binaries
 COPY tools/*.py /opt/fridolin/tools/
 # The Plaud Sync phone app's source: the image has no JDK or Android SDK,
 # so the dashboard sends it to a node that builds Android apps

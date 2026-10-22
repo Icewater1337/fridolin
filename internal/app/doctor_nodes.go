@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/nodes"
+	"github.com/Icewater1337/fridolin/internal/version"
 )
 
 // nodeStaleAfter is how long an approved node may go unheard before
@@ -82,6 +84,12 @@ type doctorNode struct {
 	Device   string     `json:"device"`
 	LastSeen *time.Time `json:"last_seen"`
 	Online   bool       `json:"online"`
+	Version  string     `json:"version"`
+	Update   *struct {
+		State string `json:"state"`
+		To    string `json:"to"`
+		Error string `json:"error"`
+	} `json:"update"`
 	Declared struct {
 		Fride        *nodeproto.FrideCap        `json:"fride"`
 		AndroidBuild *nodeproto.AndroidBuildCap `json:"android_build"`
@@ -135,14 +143,29 @@ func askBridgeNodes(ctx context.Context, cfg *config.Settings) ([]byte, error) {
 // last_seen the bridge writes once a minute. A result is what to report
 // when there is nothing to read.
 func readNodes(ctx context.Context, env *DoctorEnv) ([]doctorNode, *DoctorResult) {
+	list, _, res := readNodesVersion(ctx, env)
+	return list, res
+}
+
+// readNodesVersion is readNodes with the core's version: the running
+// bridge's, else this binary's.
+func readNodesVersion(ctx context.Context, env *DoctorEnv) ([]doctorNode, string, *DoctorResult) {
 	var live struct {
-		Nodes []doctorNode `json:"nodes"`
+		Version string       `json:"version"`
+		Nodes   []doctorNode `json:"nodes"`
 	}
 	if env.LiveNodes != nil {
 		if data, err := env.LiveNodes(ctx, env.Config); err == nil && json.Unmarshal(data, &live) == nil {
-			return live.Nodes, nil
+			return live.Nodes, cmp.Or(live.Version, version.String()), nil
 		}
 	}
+	list, res := readNodesFile(env)
+	return list, version.String(), res
+}
+
+// readNodesFile reads the registry file, which knows nothing of who is
+// connected.
+func readNodesFile(env *DoctorEnv) ([]doctorNode, *DoctorResult) {
 	path := filepath.Join(env.Config.Layout().Nodes(), nodes.RegistryFile)
 	data, err := env.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -234,4 +257,44 @@ func checkNodesSeen(ctx context.Context, env *DoctorEnv) DoctorResult {
 			Fix:    "on each, fridolin node status shows whether its agent runs; fridolin node start starts it"}
 	}
 	return DoctorResult{Status: DoctorOK, Detail: fmt.Sprintf("%d approved nodes, each heard from in the last %v", approved, nodeStaleAfter)}
+}
+
+// checkNodesVersion warns about approved nodes that run an older fridolin
+// than the core, and about updates that failed (docs/NODES.md, Updates).
+func checkNodesVersion(ctx context.Context, env *DoctorEnv) DoctorResult {
+	list, core, res := readNodesVersion(ctx, env)
+	if res != nil {
+		return *res
+	}
+	var older, failed []string
+	approved := 0
+	for _, n := range list {
+		if n.Device != nodeproto.DeviceApproved {
+			continue
+		}
+		approved++
+		if u := n.Update; u != nil && u.State == nodes.UpdateFailed {
+			failed = append(failed, fmt.Sprintf("%s (%s, to %s: %s)", n.Name, n.ID, u.To, u.Error))
+		}
+		if n.Version != "" && nodeproto.Outdated(n.Version, core) {
+			older = append(older, fmt.Sprintf("%s (%s, %s)", n.Name, n.ID, n.Version))
+		}
+	}
+	if approved == 0 {
+		return DoctorResult{Status: DoctorOK, Detail: "no approved nodes yet"}
+	}
+	slices.Sort(older)
+	slices.Sort(failed)
+	var parts []string
+	if len(older) > 0 {
+		parts = append(parts, fmt.Sprintf("%d of %d approved nodes run an older or other fridolin than the core's %s: %s", len(older), approved, core, strings.Join(older, "; ")))
+	}
+	if len(failed) > 0 {
+		parts = append(parts, "the last update failed on "+strings.Join(failed, "; "))
+	}
+	if len(parts) > 0 {
+		return DoctorResult{Status: DoctorWarn, Detail: strings.Join(parts, "; and "),
+			Fix: "fridolin nodes update <id> (or --all), or Update on the Nodes page; a node whose fridolin predates updates is updated by hand once (docs/NODES.md, Updates)"}
+	}
+	return DoctorResult{Status: DoctorOK, Detail: fmt.Sprintf("%d approved nodes run %s, the core's version", approved, core)}
 }

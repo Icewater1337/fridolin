@@ -61,6 +61,11 @@ type program struct {
 func (p *program) Start(service.Service) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel, p.done = cancel, make(chan struct{})
+	// From a terminal the agent restarts in place after an update; under
+	// the service manager it exits for the manager to start it again.
+	p.agent.upd.mu.Lock()
+	p.agent.upd.interactive = service.Interactive()
+	p.agent.upd.mu.Unlock()
 	go func() {
 		defer close(p.done)
 		err := p.agent.Run(ctx)
