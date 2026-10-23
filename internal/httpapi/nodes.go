@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
@@ -38,6 +39,8 @@ type NodesAPI struct {
 	CoreAddress func() string
 	// Version is the core's version, which nodes are updated to.
 	Version string
+	// Box is where a node in a box comes from.
+	Box BoxSource
 }
 
 // NodesResponse is GET /api/nodes.
@@ -60,6 +63,38 @@ type JoinCodeResponse struct {
 	// runbook installs fridolin.exe in Program Files (AGENTS.md).
 	Command           string `json:"command"`
 	CommandPowerShell string `json:"command_powershell"`
+	// BoxCommand and BoxCommandPowerShell install a node in a box
+	// instead (docs/NODES.md, "Node in a box"); empty when the core does
+	// not know where its box script is published (a local build).
+	BoxCommand           string `json:"box_command,omitempty"`
+	BoxCommandPowerShell string `json:"box_command_powershell,omitempty"`
+}
+
+// BoxSource is where a node in a box of the core's version comes from:
+// the published box.sh and box.ps1 (Source, a URL their container/
+// folder is under, at the core's commit) and the registry of the images
+// (Registry, ghcr.io/<owner>). The core's image carries both
+// (FRIDOLIN_BOX_SOURCE, FRIDOLIN_BOX_REGISTRY); either empty is none.
+type BoxSource struct {
+	Source, Registry, Version string
+}
+
+// BoxSourceFromEnv is the BoxSource of the core's image, for version.
+func BoxSourceFromEnv(getenv func(string) string, version string) BoxSource {
+	return BoxSource{Source: strings.TrimRight(strings.TrimSpace(getenv("FRIDOLIN_BOX_SOURCE")), "/"), Registry: strings.TrimSpace(getenv("FRIDOLIN_BOX_REGISTRY")), Version: version}
+}
+
+// BoxCommands are the lines that install a node in a box for code: for
+// sh, and for PowerShell; empty when src is not known.
+func BoxCommands(code, core string, src BoxSource) (sh, powershell string) {
+	if src.Source == "" || src.Registry == "" || src.Version == "" {
+		return "", ""
+	}
+	sh = "curl -fsSL " + src.Source + "/container/box.sh | sh -s -- --registry " + src.Registry +
+		" --version " + src.Version + " --core " + core + " --code " + code
+	powershell = "& ([scriptblock]::Create((irm " + src.Source + "/container/box.ps1))) -Registry " + src.Registry +
+		" -Version " + src.Version + " -Core " + core + " -Code " + code
+	return sh, powershell
 }
 
 // JoinCommands are the lines to paste on a new machine for code: for sh,
@@ -102,7 +137,8 @@ func (a *NodesAPI) JoinCode(w http.ResponseWriter, r *http.Request) {
 	}
 	core := a.CoreAddress()
 	sh, ps := JoinCommands(code, core)
-	WriteJSON(w, http.StatusOK, JoinCodeResponse{Code: code, ExpiresAt: exp, Core: core, Command: sh, CommandPowerShell: ps})
+	bsh, bps := BoxCommands(code, core, a.Box)
+	WriteJSON(w, http.StatusOK, JoinCodeResponse{Code: code, ExpiresAt: exp, Core: core, Command: sh, CommandPowerShell: ps, BoxCommand: bsh, BoxCommandPowerShell: bps})
 }
 
 func (a *NodesAPI) change(w http.ResponseWriter, r *http.Request, fn func(string) (*nodes.Node, error)) {

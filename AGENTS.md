@@ -142,8 +142,39 @@ rollback`.
 
 ## B. Join this machine as a node
 
-The full runbook, with every command per OS, is docs/NODES.md, "Joining a
-machine". In short:
+**A box by default** (docs/NODES.md, "Node in a box"): Docker and one
+line, no Go, no Tailscale on the host, no service of its own.
+
+1. **Docker**: Windows `winget install --id Docker.DockerDesktop -e`
+   (UAC prompt; open Docker Desktop once for its terms, and turn on
+   "Start when you sign in"); macOS `brew install --cask orbstack` or
+   Docker Desktop; Linux Docker Engine with the compose plugin.
+   `docker info` must answer.
+2. **The line**: ask the person to send `!join` to Fridolin in their
+   own WhatsApp chat and paste the line for a box it replies with (sh,
+   or PowerShell on Windows). Run it in a terminal the person sees: it
+   asks before it starts, prints a Tailscale sign-in link (open it for
+   them; they sign in with the core's tailnet account), runs `claude
+   setup-token` in the box (open its link; they paste the token into a
+   prompt without echo, never into chat), and asks the git name and
+   email FrIDE's agents commit with. A code that ran out while they
+   signed in: `!join` again, and the same line with the new code.
+3. **Approve**: they reply `!approve ID` when Fridolin says the box
+   joined.
+4. **Verify**: `docker compose ps` in `~/.fridolin-box`
+   (`%LOCALAPPDATA%\fridolin-box`) shows `node` and `fride` running;
+   `docker compose exec node fridolin node fride status --state-dir
+   /node` says FrIDE answers; the core lists the node online with
+   `host`, `backup` and `fride`.
+
+Rollback: `!revoke ID`, then `docker compose down -v` in the box's
+folder (it deletes the node's key, the backups in the volume and FrIDE's
+workspaces: ask first).
+
+**Natively** instead, when the machine needs what a container cannot do
+(Apple builds, USB phones, notifications, the workstation mode on host
+folders), or the `!join` reply has no box line. The full runbook, with
+every command per OS, is docs/NODES.md, "Joining a machine". In short:
 
 1. **Tools**: Git, Go, Tailscale. Windows:
    `winget install --id Git.Git -e`, `winget install --id GoLang.Go -e`,

@@ -30,6 +30,12 @@ and resources at least once a minute and when the node disconnects.
 
 ## Joining a machine
 
+A machine joins as a [node in a box](#node-in-a-box) by default: Docker
+and the line `!join` sends, nothing else to install. This section is the
+native install, for a machine that needs what a container cannot do
+(Apple builds, USB devices, notifications, the workstation mode on host
+folders), or a core that offers no box line.
+
 This is the runbook a coding agent follows when the owner clones the
 repository on a new machine and says "set this machine up as a node of my
 fridolin core" (AGENTS.md, path B). The agent does every step itself
@@ -516,13 +522,126 @@ memory. A lockdown refuses the build, as it refuses `exec`.
 
 A node in a box runs as containers made from fridolin's own images,
 instead of a native install (issue #191): Docker and one compose file,
-the same on Windows, macOS and Linux. Its `node` service runs the
-`fridolin-core` image in the node's role, with the node's key and its
-backups in a volume of its own; its `fride` service runs FrIDE's
-companion from the `fridolin-fride` image, and never mounts the node's
-volume. Neither gets the Docker socket. The box's compose file and join
-script are not published yet; until they are, join machines natively as
-above.
+the same on Windows, macOS and Linux. It is the default way to join a
+machine; join natively (above) for what a container cannot do: Apple
+builds (Xcode), USB phones, desktop notifications, the workstation mode
+on the host's own folders. A machine may run a box and a native node
+side by side, with different node ids.
+
+| Service | Image | Holds | Volumes |
+| --- | --- | --- | --- |
+| `node` | `fridolin-core`, as `fridolin node run` | the node's key, `node.json`, the core's update key, its tailnet device | `fridolin-node` at `/node`; the backups at `/backups` (the volume `fridolin-backups`, or a host folder) |
+| `fride` | `fridolin-fride` | FrIDE's companion, its repositories and settings, the Claude token, the git identity | `fride-home` at `/var/lib/fride`, `fride-workspaces` at `/workspaces` |
+
+- **No Docker socket** in either service: on Docker Desktop it controls
+  the VM that shares the owner's whole home (macOS) or `C:\` (Windows),
+  which would undo the containers' wall.
+- **`fride` never mounts the node's volumes**: a coding agent cannot read
+  the node's key or the backups. Both services run unprivileged, with
+  every capability dropped and `no-new-privileges`.
+- **Its own tailnet device.** The node reaches the core over Tailscale
+  inside its container (tsnet, as the core does), as the device
+  `fridolin-box-<name>`; the host needs no Tailscale. Its device state is
+  in the node's volume, so a restart is the same device. With the
+  tailnet's default policy every device of the owner reaches every other;
+  a policy that restricts it must let `fridolin-box-*` reach
+  `fridolin-core` on port 8766.
+- **The box network.** The two services talk over the box's own compose
+  network only; nothing is published on the host.
+- **Backups**: the node lends `/backups` to the core's
+  [node targets](VAULT.md#node-targets). What lands there is restic's
+  encrypted files, never a password.
+- **No commands, no notifications** by default: the container has
+  neither the host's programs nor a desktop. `--allow` at the join still
+  allows programs, which then run inside the container.
+- **Updates** come as new images, never as a binary from the core: a box
+  does not offer `update`. Until the core can update boxes (issue #191,
+  phase 3), run the script again with `--update` and the core's new
+  version (below).
+
+### Joining a box
+
+1. **Docker.** Windows and macOS: Docker Desktop (Windows: `winget install
+   --id Docker.DockerDesktop -e`, one UAC prompt and its terms on the
+   first start; set it to start at sign-in, so the box comes back after
+   a restart). Linux: Docker Engine with the compose plugin. OrbStack
+   works on macOS.
+2. **The line from `!join`.** The owner sends `!join` to fridolin in
+   their WhatsApp chat. A core that knows where its box script is
+   published (an image CI built, or `fridolin core build` of a clean
+   checkout of a GitHub repository) answers with a line for a box first:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/OWNER/fridolin/COMMIT/container/box.sh | sh -s -- \
+     --registry ghcr.io/OWNER --version VERSION --core fridolin-core.TAILNET.ts.net:8766 --code CODE
+   ```
+
+   On Windows, in PowerShell (no administrator needed):
+
+   ```powershell
+   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/OWNER/fridolin/COMMIT/container/box.ps1))) `
+     -Registry ghcr.io/OWNER -Version VERSION -Core fridolin-core.TAILNET.ts.net:8766 -Code CODE
+   ```
+
+   The script is the one of the core's own commit, and the images are
+   of the core's version.
+3. **What the script does**, after saying so and asking:
+   - pulls both images and pins them by digest in `.env`, beside the
+     compose file it writes from the image (`fridolin box compose`), in
+     `~/.fridolin-box` (Windows `%LOCALAPPDATA%\fridolin-box`); with `gh`
+     signed in on the machine it also checks their build provenance
+     ([CORE.md](CORE.md#on-ghcr));
+   - signs the box in to the tailnet (`fridolin node tailnet`): it
+     prints a Tailscale link the owner opens and signs in to with the
+     account of the core's tailnet, or uses `TS_AUTHKEY` when set;
+   - joins the core with the code (`fridolin node join CODE --core …
+     --box`). A code works once, within 10 minutes; if it ran out while
+     the tailnet sign-in took long, send `!join` again and run the line
+     with the new code;
+   - starts the box (`docker compose up -d`);
+   - FrIDE: runs `claude setup-token` in the `fride` container (open its
+     link and sign in), takes the token it shows without echo and stores
+     it in FrIDE's volume, asks for the git name and email the agents
+     commit with, and pairs FrIDE with the node (`fride pair-companion`
+     piped into `fridolin node fride pair --code -`, so the code is never
+     shown).
+
+   Options: `--name NAME` (default: the host name), `--backups DIR` (a
+   host folder such as `F:\Fridolin`, bound into `node` only), `--no-fride`
+   (a box without FrIDE), `--dir DIR`, `--yes`. PowerShell takes the same
+   as `-Name`, `-Backups`, `-NoFride`, `-Dir`, `-Yes`.
+4. **Approve** it as any node: fridolin tells the owner in WhatsApp that
+   the box joined; `!approve ID` lets it in with what it offers (host
+   facts, backups, FrIDE once it answers), or **Approve device** and
+   **Approve commands** on the Nodes page.
+5. **Verify**: `docker compose ps` in the box's folder shows both
+   services running; `docker compose exec node fridolin node fride status
+   --state-dir /node` says FrIDE answers; the core lists the node online
+   with `host`, `backup` and `fride` (`!fleet`, or the Nodes page).
+
+**Updating** until the core does it (phase 3): the same line with
+`--update` and the core's version, no code (`-Update` in PowerShell). It
+pulls and pins the new images, writes the compose file of that version
+and recreates the services; the node keeps its key and approval.
+
+**Removing**: `docker compose down -v` in the box's folder deletes the
+containers, the network and the volumes (the node's key, the backups in
+the volume, FrIDE's workspaces), then `!revoke ID` on the core. A backups
+folder on the host stays.
+
+**Repositories for FrIDE** live in its own container, which the node
+cannot reach, so the core's `fride_repo_add` does not work for a box:
+clone into `/var/lib/fride/repos` in the `fride` container
+(`docker compose exec fride git -C /var/lib/fride/repos clone URL`), then
+**Re-check** in FrIDE's settings.
+
+### Trying a box
+
+`FRIDOLIN_BOX_NO_TAILNET=1` in the node's environment (for `node
+tailnet`, `node join --box` and `node run`) makes the box reach the core
+over its own network instead of the tailnet: for trying a box against a
+dev-mode core on the same machine (`--core host.docker.internal:PORT`,
+with `nodes.listen` on that port), never for a real one.
 
 ### The FrIDE image
 

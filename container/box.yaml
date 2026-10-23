@@ -1,0 +1,78 @@
+# A node in a box (docs/NODES.md, "Node in a box"): the node of a
+# fridolin core as two containers, from the images CI publishes.
+#
+# box.sh / box.ps1 write this file (fridolin box compose prints it) and a
+# .env beside it that pins both images by digest, then join the node:
+#
+#     FRIDOLIN_BOX_NODE_IMAGE   ghcr.io/<owner>/fridolin-core@sha256:…
+#     FRIDOLIN_BOX_FRIDE_IMAGE  ghcr.io/<owner>/fridolin-fride@sha256:…
+#     FRIDOLIN_BOX_BACKUPS      a host folder for the backups, else the volume
+#     COMPOSE_PROFILES          fride, or empty for a box without FrIDE
+#
+# No service gets the Docker socket: on Docker Desktop it controls the VM
+# that shares the owner's home or C:\, which would undo the containers'
+# wall. `fride` never mounts the node's volume, so a coding agent cannot
+# read the node's key or its backups. `docker compose down -v` leaves
+# nothing on the host but this folder (and a backups folder you named).
+name: fridolin-box
+
+services:
+  node:
+    image: ${FRIDOLIN_BOX_NODE_IMAGE:?run box.sh, which pins the image in .env}
+    restart: unless-stopped
+    init: false # tini is the image's PID 1
+    command: ["node", "run", "--state-dir", "/node"]
+    environment:
+      - TZ=${FRIDOLIN_TZ:-UTC}
+    volumes:
+      # The node's key, node.json, the core's update key and its tailnet
+      # device.
+      - fridolin-node:/node
+      # What the core's backups write here: restic's encrypted files only.
+      - ${FRIDOLIN_BOX_BACKUPS:-fridolin-backups}:/backups
+    networks: [box]
+    # The image's health check asks the core's dashboard, which a node
+    # does not run.
+    healthcheck:
+      disable: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${FRIDOLIN_BOX_NODE_MEMORY:-1g}
+    stop_grace_period: 15s
+
+  fride:
+    image: ${FRIDOLIN_BOX_FRIDE_IMAGE:?run box.sh, which pins the image in .env}
+    profiles: [fride]
+    restart: unless-stopped
+    init: false # tini is the image's PID 1
+    environment:
+      - TZ=${FRIDOLIN_TZ:-UTC}
+      - FRIDOLIN_NODE_HOST=node
+    volumes:
+      - fride-home:/var/lib/fride
+      - fride-workspaces:/workspaces
+    networks: [box]
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${FRIDOLIN_BOX_FRIDE_MEMORY:-8g}
+    stop_grace_period: 30s
+
+# The box's own network: the node reaches FrIDE as fride, FrIDE the node
+# as node, and both the internet (the tailnet, GitHub). Nothing is
+# published on the host.
+networks:
+  box: {}
+
+volumes:
+  fridolin-node:
+    name: fridolin-node
+  fridolin-backups:
+    name: fridolin-backups
+  fride-home:
+    name: fride-home
+  fride-workspaces:
+    name: fride-workspaces

@@ -118,6 +118,11 @@ func (n *tsnetNode) WhoIs(ctx context.Context, remoteAddr string) (Identity, err
 	return id, nil
 }
 
+func (n *tsnetNode) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
+	n.used.Store(true)
+	return n.srv.Dial(ctx, network, addr)
+}
+
 // Close leaves the tailnet. tsnet must not be closed before or while it
 // starts, so a node that started waits for that first; one never used
 // has nothing to close.

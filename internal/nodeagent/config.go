@@ -48,6 +48,8 @@ type Config struct {
 	// Update false keeps the node from offering update, so the core never
 	// replaces its fridolin; unset or true offers it (update.go).
 	Update *bool `json:"update,omitempty"`
+	// Box is set for a node in a box (box.go); nil for a native node.
+	Box *BoxConfig `json:"box,omitempty"`
 }
 
 // DefaultCapabilities is what a node offers when its owner says nothing
@@ -85,6 +87,9 @@ func (c Config) Check() error {
 		return err
 	}
 	if err := c.Fride.Check(); err != nil {
+		return err
+	}
+	if err := c.Box.Check(); err != nil {
 		return err
 	}
 	if b := c.Capabilities.Backup; b != nil {

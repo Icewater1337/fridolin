@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
@@ -25,8 +26,12 @@ type JoinOptions struct {
 	// (tests whose nodes must not depend on the machine's tools); nil
 	// offers it then.
 	AndroidBuild *bool
-	Version      string
-	Logf         func(string, ...any)
+	// Box makes the node a node in a box; Dial is how it reaches the core
+	// (nil: the host's network).
+	Box     *BoxConfig
+	Dial    func(ctx context.Context, network, addr string) (net.Conn, error)
+	Version string
+	Logf    func(string, ...any)
 }
 
 // Joined is what joining did.
@@ -42,7 +47,7 @@ func Join(ctx context.Context, o JoinOptions) (Joined, error) {
 	if o.Code == "" {
 		return Joined{}, errors.New("the join code is missing: send !join to the bridge in your WhatsApp chat, or run fridolin nodes join-code on the core")
 	}
-	cfg := Config{Core: o.Core, Name: o.Name, Capabilities: o.Capabilities, AndroidBuild: o.AndroidBuild}
+	cfg := Config{Core: o.Core, Name: o.Name, Capabilities: o.Capabilities, AndroidBuild: o.AndroidBuild, Box: o.Box}
 	if err := cfg.Check(); err != nil {
 		return Joined{}, err
 	}
@@ -56,7 +61,7 @@ func Join(ctx context.Context, o JoinOptions) (Joined, error) {
 	if err := SaveConfig(o.Dir, cfg); err != nil {
 		return Joined{}, err
 	}
-	a := &Agent{Dir: o.Dir, Config: cfg, Key: key, Version: o.Version, Logf: o.Logf}
+	a := &Agent{Dir: o.Dir, Config: cfg, Key: key, Version: o.Version, Logf: o.Logf, Dial: o.Dial}
 	c, st, err := a.connect(ctx, o.Code)
 	if err != nil {
 		return Joined{ID: a.ID()}, err

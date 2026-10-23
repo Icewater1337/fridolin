@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/nodeagent"
@@ -28,6 +29,9 @@ Usage:
                        join the core with a code from fridolin nodes join-code, then
                        install and start the service (--no-service: only join)
   fridolin node run    run the agent in the foreground (what the service runs)
+  fridolin node tailnet [--name NAME | --hostname HOST]
+                       in a box: join the tailnet as the box's own device (prints
+                       a sign-in link, or uses TS_AUTHKEY), before node join --box
   fridolin node rollback
                        put back the fridolin an update from the core replaced
                        (<binary>.prev); restart the service after
@@ -64,6 +68,12 @@ Join flags:
   --no-host            do not report host facts
   --no-notify          do not show notifications
   --no-service         join only; start the agent yourself (fridolin node run)
+  --box                join as a node in a box (docs/NODES.md, Node in a box): reach
+                       the core over the box's own tailnet device, forward FrIDE
+                       on the box network, install no service; offers host facts
+                       and, with /backups there, backups to it, unless flags say more
+  --box-hostname NAME  the box's tailnet name (default fridolin-box-<name>)
+  --box-no-fride       a box without the fride service
 
 Every command takes --state-dir DIR (default: the OS's per-user state folder,
 ` + "`fridolin node status`" + ` shows it). What the node offers lives in DIR/node.json;
@@ -95,6 +105,9 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 		fs.BoolVar(&ws.noTerminal, "no-terminal", false, "offer agent sessions only")
 	case "join":
 		o.register(fs)
+	case "tailnet":
+		fs.StringVar(&o.boxHostname, "hostname", "", "the box's tailnet name (default fridolin-box-<name>)")
+		fs.StringVar(&o.name, "name", "", "the node's name, which the default tailnet name is made of (default: the host name)")
 	case "backup":
 		fs.Var(&backupRoots, "root", "lend only this drive or folder (repeatable)")
 	}
@@ -123,6 +136,12 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		return nodeJoin(pos[0], dir, o, thisAppPackage(), stdout, stderr)
+	case "tailnet":
+		if len(pos) != 0 {
+			fmt.Fprintln(stderr, "fridolin node tailnet takes no arguments")
+			return 2
+		}
+		return nodeTailnet(dir, o.name, o.boxHostname, stdout, stderr)
 	case "backup":
 		return nodeBackup(pos, backupRoots, dir, thisAppPackage(), stdout, stderr)
 	case "workstation":
@@ -151,6 +170,22 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		// What updates from the core replace, and restart with.
 		a.Executable, a.Args, a.Environ = exe, os.Args[1:], os.Environ()
+		if a.Config.Box != nil {
+			tn, err := boxTailnet(dir, a.Config.Box.Hostname, stderr)
+			if err != nil {
+				fmt.Fprintf(stderr, "fridolin node run: %v\n", err)
+				return 1
+			}
+			defer tn.Close()
+			a.Dial = tn.Dial
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			if err := nodeagent.RunForeground(ctx, a); err != nil {
+				fmt.Fprintf(stderr, "fridolin node run: %v\n", err)
+				return 1
+			}
+			return 0
+		}
 		repairNodeBootTarget(stderr)
 		if err := nodeagent.RunService(a, svc); err != nil {
 			fmt.Fprintf(stderr, "fridolin node run: %v\n", err)
@@ -233,6 +268,8 @@ type joinFlags struct {
 	backup                          bool
 	workstation, allowHome          bool
 	workRoots                       multiFlag
+	box, boxNoFride                 bool
+	boxHostname                     string
 }
 
 func (o *joinFlags) register(fs *flag.FlagSet) {
@@ -249,12 +286,31 @@ func (o *joinFlags) register(fs *flag.FlagSet) {
 	fs.BoolVar(&o.noHost, "no-host", false, "do not report host facts")
 	fs.BoolVar(&o.noNotify, "no-notify", false, "do not show notifications")
 	fs.BoolVar(&o.noSvc, "no-service", false, "join only, without installing the service")
+	fs.BoolVar(&o.box, "box", false, "join as a node in a box")
+	fs.StringVar(&o.boxHostname, "box-hostname", "", "the box's tailnet name (default fridolin-box-<name>)")
+	fs.BoolVar(&o.boxNoFride, "box-no-fride", false, "a box without the fride service")
 }
 
-// capabilities builds what the node declares from the flags.
+// boxBackups is where a box's backups go: the node service's volume or
+// the host folder the owner named, mounted there (container/box.yaml).
+const boxBackups = "/backups"
+
+// capabilities builds what the node declares from the flags. A box offers
+// no commands and no notifications by default (its container has neither
+// the host's programs nor a desktop), and backups to boxBackups when it
+// is there.
 func (o joinFlags) capabilities(goos string) (nodeproto.Capabilities, error) {
 	c := nodeagent.DefaultCapabilities(goos)
 	c.Host, c.Notify = !o.noHost, !o.noNotify
+	if o.box {
+		c.Notify = false
+		if len(o.allow) == 0 {
+			c.Exec = nil
+		}
+		if !o.backup && len(o.backupRoots) == 0 && pathKindOf(boxBackups) == "dir" {
+			o.backupRoots = multiFlag{boxBackups}
+		}
+	}
 	switch {
 	case o.noExec:
 		c.Exec = nil
@@ -399,14 +455,46 @@ func nodeJoin(code, dir string, o joinFlags, pkg appPackage, stdout, stderr io.W
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	jo := nodeagent.JoinOptions{Dir: dir, Core: o.core, Code: code, Name: name, Capabilities: caps, Version: version.String()}
+	if o.box {
+		box := &nodeagent.BoxConfig{Hostname: o.boxHostname, Fride: nodeagent.BoxFride}
+		if box.Hostname == "" {
+			box.Hostname = nodeagent.BoxHostname(name)
+		}
+		if o.boxNoFride {
+			box.Fride = ""
+		}
+		if err := box.Check(); err != nil {
+			fmt.Fprintf(stderr, "fridolin node join: %v\n", err)
+			return 2
+		}
+		tn, err := boxTailnet(dir, box.Hostname, stderr)
+		if err != nil {
+			fmt.Fprintf(stderr, "fridolin node join: %v\n", err)
+			return 1
+		}
+		defer tn.Close()
+		uctx, cancel := context.WithTimeout(ctx, boxTailnetWait)
+		_, err = tn.Up(uctx)
+		cancel()
+		if err != nil {
+			fmt.Fprintf(stderr, "fridolin node join: joining the tailnet as %s: %v\n", box.Hostname, err)
+			return 1
+		}
+		jo.Box, jo.Dial, o.noSvc = box, tn.Dial, true
+	}
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-	j, err := nodeagent.Join(ctx, nodeagent.JoinOptions{Dir: dir, Core: o.core, Code: code, Name: name, Capabilities: caps, Version: version.String()})
+	j, err := nodeagent.Join(ctx, jo)
 	if err != nil {
 		fmt.Fprintf(stderr, "fridolin node join: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(stdout, "Joined the core at %s as %s (%s); this node waits for approval.\nIt offers: %s\nState dir: %s\nOn the core, approve it:\n\n  fridolin nodes approve %s\n  fridolin nodes approve %s --commands\n\n", o.core, name, j.ID, caps.Summary(), dir, j.ID, j.ID)
+	if o.box {
+		fmt.Fprintln(stdout, "Start the box's node service: docker compose up -d")
+		return 0
+	}
 	if o.noSvc {
 		fmt.Fprintf(stdout, "Start the agent with: fridolin node run --state-dir %q\n", dir)
 		return 0

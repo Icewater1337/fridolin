@@ -88,6 +88,37 @@ func TestCoreBuild(t *testing.T) {
 	if !slices.Equal(got.args, want) || slices.ContainsFunc(got.env, func(kv string) bool { return strings.HasPrefix(kv, "FRIDOLIN_AGE_IDENTITY=") }) {
 		t.Errorf("ran %q with %q", got.args, got.env)
 	}
+
+	// A clean checkout of a GitHub repository: the box source of its HEAD.
+	head := strings.Repeat("ab", 20)
+	d.git = func(dir string, args ...string) (string, error) {
+		switch args[0] {
+		case "remote":
+			return "git@github.com:Owner/fridolin.git", nil
+		case "rev-parse":
+			return head, nil
+		}
+		return "", nil
+	}
+	if code := coreHost(context.Background(), "build", []string{"--repo", repo}, env, d); code != 0 {
+		t.Fatal(code)
+	}
+	want = []string{"build", "-f", filepath.Join(repo, "container", "Dockerfile"), "--build-arg", "VERSION=v1.4.0+dirty",
+		"--build-arg", "FRIDOLIN_BOX_SOURCE=https://raw.githubusercontent.com/Owner/fridolin/" + head,
+		"--build-arg", "FRIDOLIN_BOX_REGISTRY=ghcr.io/owner", "-t", "fridolin-core:v1.4.0-dirty", repo}
+	if got := (*ran)[1].args; !slices.Equal(got, want) {
+		t.Errorf("ran %q", got)
+	}
+	for _, remote := range []string{"https://gitlab.com/owner/fridolin.git", "/srv/git/fridolin"} {
+		if src, _ := boxBuildSource(repo, hostDeps{git: func(_ string, args ...string) (string, error) {
+			if args[0] == "remote" {
+				return remote, nil
+			}
+			return head, nil
+		}}); src != "" {
+			t.Errorf("%s: box source %q", remote, src)
+		}
+	}
 }
 
 func TestCoreSecrets(t *testing.T) {

@@ -135,6 +135,12 @@ RUN npm install -g --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE
 # ── the runtime ───────────────────────────────────────────────────────────
 FROM ${RUNTIME_IMAGE}
 ARG VERSION=dev
+# Where box.sh and box.ps1 of this version are published, and the
+# registry of its images: what the core's !join reply puts in the line
+# that installs a node in a box. CI passes the repository owner's; a
+# local build without them offers native nodes only.
+ARG FRIDOLIN_BOX_SOURCE=
+ARG FRIDOLIN_BOX_REGISTRY=
 LABEL org.opencontainers.image.title="fridolin-core" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.licenses="MIT"
@@ -173,10 +179,11 @@ RUN ln -s /opt/fridolin/fridolin /usr/local/bin/fridolin
 
 # One unprivileged user owns the volume. /data is made here, owned by it
 # and 0700, so a new named volume starts out that way (Docker copies the
-# folder's owner and mode into an empty volume on first use).
+# folder's owner and mode into an empty volume on first use); /node and
+# /backups are a box's node volumes (container/box.yaml).
 RUN groupadd --gid 10001 fridolin \
  && useradd --uid 10001 --gid 10001 --home-dir /var/lib/fridolin --create-home --shell /usr/sbin/nologin fridolin \
- && install -d -o fridolin -g fridolin -m 0700 /data
+ && install -d -o fridolin -g fridolin -m 0700 /data /node /backups
 
 USER fridolin:fridolin
 # FRIDOLIN_CONTAINER=1 tells the bridge it runs here: brains' runs are
@@ -189,6 +196,8 @@ ENV HOME=/var/lib/fridolin \
     FRIDOLIN_CONFIG=/data/config.json \
     TZ=UTC \
     FRIDOLIN_CONTAINER=1 \
+    FRIDOLIN_BOX_SOURCE=${FRIDOLIN_BOX_SOURCE} \
+    FRIDOLIN_BOX_REGISTRY=${FRIDOLIN_BOX_REGISTRY} \
     LANG=C.UTF-8
 WORKDIR /data
 VOLUME ["/data"]

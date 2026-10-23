@@ -236,3 +236,17 @@ func stateDirArg(args []string) string {
 	}
 	return ""
 }
+
+// RunForeground runs the agent until ctx ends, without a service manager:
+// a node in a box, whose container is the service. A revoked or unknown
+// node stays up without reconnecting, as under a service manager, so the
+// container does not restart into the same refusal.
+func RunForeground(ctx context.Context, a *Agent) error {
+	err := a.Run(ctx)
+	if ce, ok := errors.AsType[*CloseError](err); ok && ce.Final() {
+		a.logf("node: idle until stopped; join again with a new code (fridolin node join --box)")
+		<-ctx.Done()
+		return nil
+	}
+	return err
+}

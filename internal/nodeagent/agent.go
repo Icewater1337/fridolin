@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"log"
 	"math/rand/v2"
+	"net"
+	"net/http"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -27,6 +29,9 @@ type Agent struct {
 	Config  Config
 	Key     ed25519.PrivateKey
 	Version string
+	// Dial connects to the core, nil with the host's network. A node in a
+	// box dials over its own tailnet device.
+	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
 	// Logf logs; nil logs with the standard logger.
 	Logf func(format string, args ...any)
 	// Notifier shows a notification; nil shows it the OS's way.
@@ -212,7 +217,11 @@ func closeErr(env nodeproto.Envelope) error {
 func (a *Agent) connect(ctx context.Context, joinCode string) (*conn, nodeproto.State, error) {
 	hctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	ws, _, err := websocket.Dial(hctx, coreURL(a.Config.Core), &websocket.DialOptions{Subprotocols: []string{nodeproto.Subprotocol}})
+	opts := &websocket.DialOptions{Subprotocols: []string{nodeproto.Subprotocol}}
+	if a.Dial != nil {
+		opts.HTTPClient = &http.Client{Transport: &http.Transport{DialContext: a.Dial}}
+	}
+	ws, _, err := websocket.Dial(hctx, coreURL(a.Config.Core), opts)
 	if err != nil {
 		return nil, nodeproto.State{}, fmt.Errorf("connecting to the core at %s: %w", a.Config.Core, err)
 	}
@@ -286,6 +295,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	fwg.Go(func() { a.frideLoop(fctx) })
 	defer fwg.Wait()
 	defer stopFride()
+	a.boxForward(fctx, &fwg)
 	// A new binary on trial after an update from the core.
 	a.updateStartup(fctx, &fwg)
 	// A stopping agent leaves no session behind.

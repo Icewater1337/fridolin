@@ -233,12 +233,18 @@ const NodeCommandUsage = "🖥️ Send `!approve <id>` or `!revoke <id>` with a 
 
 // JoinCodeReply answers !join: a single-use join code, valid for minutes,
 // the lines to paste on the new machine for sh and PowerShell, and the
-// core's node address.
-func JoinCodeReply(code, core, sh, powershell string, minutes int) string {
+// core's node address. boxSh and boxPowerShell, when set, install a node
+// in a box instead, and come first.
+func JoinCodeReply(code, core, sh, powershell, boxSh, boxPowerShell string, minutes int) string {
+	box := ""
+	if boxSh != "" {
+		box = fmt.Sprintf("*A node in a box* (Docker; it asks for the rest):\n\n*macOS, Linux:*\n```%s```\n\n*Windows (PowerShell):*\n```%s```\n\n"+
+			"*Or natively*, with fridolin installed on it:\n\n", boxSh, boxPowerShell)
+	}
 	return fmt.Sprintf("🔑 Join code for a new node, single-use, valid %d minutes:\n\n%s\n\n"+
-		"On the new machine, paste one line.\n\n*macOS, Linux (sh):*\n```%s```\n\n*Windows (PowerShell):*\n```%s```\n\n"+
+		"On the new machine, paste one line.\n\n%s*macOS, Linux (sh):*\n```%s```\n\n*Windows (PowerShell):*\n```%s```\n\n"+
 		"Core: %s. Add `--root PATH:rw` to share a folder, `--no-exec` to allow no commands (docs/NODES.md). "+
-		"Once it connects I'll tell you here, and `!approve <id>` lets it in.", minutes, code, sh, powershell, core)
+		"Once it connects I'll tell you here, and `!approve <id>` lets it in.", minutes, code, box, sh, powershell, core)
 }
 
 // DashboardOffNotice answers !dashboard while the dashboard is off.

@@ -103,7 +103,14 @@ func (b *App) newNodesAPI() *httpapi.NodesAPI {
 		Enabled:     b.nodesEnabled,
 		Listen:      b.nodes.Addr,
 		CoreAddress: b.joinCore,
+		Box:         b.boxSource(),
 	}
+}
+
+// boxSource is where a node in a box of this core's version comes from,
+// as the core's image says (httpapi.BoxSourceFromEnv).
+func (b *App) boxSource() httpapi.BoxSource {
+	return httpapi.BoxSourceFromEnv(os.Getenv, b.nodes.Version())
 }
 
 // lockdownNodes is the node registry as the core's callers reach it: in

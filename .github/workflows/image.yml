@@ -77,6 +77,8 @@ jobs:
         VERSION=${{ needs.version.outputs.version }}
         FRIDOLIN_REPO=${{ github.server_url }}/${{ github.repository }}
         FRIDE_REPO=${{ github.server_url }}/${{ github.repository_owner }}/fride
+        FRIDOLIN_BOX_SOURCE=https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}
+        FRIDOLIN_BOX_REGISTRY=${{ needs.version.outputs.registry }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

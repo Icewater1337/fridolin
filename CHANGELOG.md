@@ -10,6 +10,20 @@ for compatibility.
 
 ### Added
 
+- **Node in a box** (docs/NODES.md, "Node in a box"): a machine joins as
+  two containers, `node` (the `fridolin-core` image running `fridolin
+  node run`) and `fride` (FrIDE's companion), with Docker and one line
+  from `!join`, on Windows, macOS and Linux alike. `container/box.sh` and
+  `box.ps1` pin the images by digest, write the compose file
+  (`fridolin box compose`), sign the box in to the tailnet as its own
+  device (tsnet: `fridolin node tailnet`, `fridolin node join --box`),
+  join, start it and pair FrIDE; `--update` moves a box to a new
+  version. No service gets the Docker socket, and `fride` never mounts
+  the node's volumes. A core whose image knows where its box script is
+  published (CI's, or `fridolin core build` of a clean GitHub checkout)
+  puts a box line first in its `!join` reply, and the join-code API has
+  `box_command` and `box_command_powershell`. `fridolin node fride pair
+  --code -` reads the pairing code from stdin.
 - CI publishes the core's image to GHCR, `ghcr.io/OWNER/fridolin-core`,
   for amd64 and arm64, tagged with the version `fridolin version`
   reports, with build provenance (GitHub's attestations) and an SBOM, on

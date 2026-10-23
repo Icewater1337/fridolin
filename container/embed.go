@@ -16,3 +16,9 @@ var Compose []byte
 //
 //go:embed seccomp.json
 var Seccomp []byte
+
+// Box is box.yaml, the compose file of a node in a box, which
+// `fridolin box compose` prints for box.sh and box.ps1.
+//
+//go:embed box.yaml
+var Box []byte

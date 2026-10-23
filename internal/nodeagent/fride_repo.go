@@ -197,6 +197,11 @@ func runRepoTool(ctx context.Context, timeout time.Duration, dir, prog string, a
 
 // frideRepo serves fride.repo_clone and fride.repo_new.
 func (a *Agent) frideRepo(ctx context.Context, method string, cfg *FrideConfig, token string, p nodeproto.FrideRepoParams) (any, *nodeproto.Error) {
+	if a.Config.Box != nil {
+		// FrIDE's base folders are in the fride service's volume, which
+		// the node's container never mounts.
+		return nil, nodeproto.Errorf(nodeproto.CodeUnsupported, "in a box FrIDE's repositories live in its own container: clone there (docker compose exec fride git -C /var/lib/fride/repos clone URL), then Re-check in FrIDE")
+	}
 	p.Name, p.URL = strings.TrimSpace(p.Name), strings.TrimSpace(p.URL)
 	if err := checkRepoName(p.Name); err != nil {
 		return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "%v", err)
