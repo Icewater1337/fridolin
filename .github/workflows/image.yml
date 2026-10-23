@@ -15,7 +15,8 @@ on:
       - .dockerignore
       - .github/workflows/image.yml
 
-# The job only reads the repository and builds; it publishes nothing.
+# Read only by default; the jobs that publish ask for more themselves, and
+# only run on a push to main.
 permissions:
   contents: read
 
@@ -23,20 +24,59 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
-# Builds the core's image (container/Dockerfile) for both architectures the
-# core runs on, so a change that breaks the image fails here rather than at
-# `fridolin core update`. Nothing is pushed: the image is built locally on
-# the machine that runs the core (docs/CORE.md).
+# Builds the core's image (container/Dockerfile) and the box's FrIDE image
+# (container/fride/Dockerfile) for both architectures fridolin runs on, so
+# a change that breaks one fails here. On main it publishes both to GHCR,
+# as one multi-arch image each, tagged with the version `fridolin version`
+# reports (git describe --tags --always --abbrev=8), with build provenance
+# from GitHub's attestations and an SBOM. Machines pull them by digest and
+# check the provenance before they run one (docs/CORE.md, "On GHCR").
+# The registry is the repository owner's (ghcr.io/<owner>), so a fork
+# publishes to its own.
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      registry: ${{ steps.v.outputs.registry }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      # The version a build of this commit reports, as the Makefile and
+      # setup.sh stamp it; core start and box updates look for this tag.
+      # GHCR's names are lower case.
+      - id: v
+        run: |
+          echo "version=$(git describe --tags --always --abbrev=8)" >> "$GITHUB_OUTPUT"
+          echo "registry=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: version
     strategy:
       fail-fast: false
       matrix:
+        image: [fridolin-core, fridolin-fride]
+        platform: [linux/amd64, linux/arm64]
         include:
-          - { platform: linux/amd64, runner: ubuntu-latest }
-          - { platform: linux/arm64, runner: ubuntu-24.04-arm }
+          - { image: fridolin-core, dockerfile: container/Dockerfile }
+          - { image: fridolin-fride, dockerfile: container/fride/Dockerfile }
+          - { platform: linux/amd64, runner: ubuntu-latest, arch: amd64 }
+          - { platform: linux/arm64, runner: ubuntu-24.04-arm, arch: arm64 }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      REGISTRY: ${{ needs.version.outputs.registry }}
+      # Where the FrIDE image gets FrIDE and its starter repositories.
+      BUILD_ARGS: |
+        VERSION=${{ needs.version.outputs.version }}
+        FRIDOLIN_REPO=${{ github.server_url }}/${{ github.repository }}
+        FRIDE_REPO=${{ github.server_url }}/${{ github.repository_owner }}/fride
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,15 +86,115 @@ jobs:
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
-          file: container/Dockerfile
+          file: ${{ matrix.dockerfile }}
           platforms: ${{ matrix.platform }}
-          build-args: VERSION=${{ github.sha }}
+          build-args: ${{ env.BUILD_ARGS }}
           push: false
           load: true
-          tags: fridolin-core:ci
+          tags: ${{ matrix.image }}:ci
       - name: the binary and the tools answer
+        if: matrix.image == 'fridolin-core'
         run: |
           docker run --rm --entrypoint /usr/local/bin/fridolin fridolin-core:ci version
-          docker run --rm --entrypoint sh fridolin-core:ci -c 'claude --version && codex --version && restic version && rclone version | head -1 && litestream version && bwrap --version'
+          docker run --rm --entrypoint sh fridolin-core:ci -c 'claude --version && codex --version && restic version && rclone version | head -1 && litestream version && bwrap --version && gh --version | head -1'
           # The builds nodes are updated to, of the image's version.
-          docker run --rm --entrypoint sh fridolin-core:ci -c 'grep -q "\"version\": \"${{ github.sha }}\"" /opt/fridolin/node-binaries/manifest.json && ls -l /opt/fridolin/node-binaries'
+          docker run --rm --entrypoint sh fridolin-core:ci -c 'grep -q "\"version\": \"'"$VERSION"'\"" /opt/fridolin/node-binaries/manifest.json && ls -l /opt/fridolin/node-binaries'
+      - name: FrIDE and its tools answer
+        if: matrix.image == 'fridolin-fride'
+        run: |
+          docker run --rm --entrypoint sh fridolin-fride:ci -c 'test -x /opt/fride/bin/fride && claude --version && gh --version | head -1 && go version && node --version && git --version && socat -V | head -1 && test -f /opt/fride/plugins/ponytail/README.md'
+          # FrIDE starts with the box's config, its config check passes,
+          # and it answers on the port the node's agent reaches it at.
+          docker run -d --name fride-ci -e FRIDOLIN_NODE_HOST=127.0.0.1 fridolin-fride:ci
+          for _ in $(seq 1 30); do
+            docker exec fride-ci curl -fsS -o /dev/null http://127.0.0.1:17840/ && break
+            sleep 2
+          done
+          docker exec fride-ci fride config check
+          docker exec fride-ci curl -fsS -o /dev/null http://127.0.0.1:17840/
+          docker exec fride-ci sh -c 'curl -fsS -o /dev/null "http://$(hostname -i | cut -d" " -f1):17840/" -H "Host: 127.0.0.1:17840"'
+          docker rm -f fride-ci
+
+      # On main: the same build again, pushed by digest (the layers come
+      # from the cache of the build above), with an SBOM and buildx's own
+      # provenance; the merge job tags the multi-arch image.
+      - name: log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: push by digest
+        id: push
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: ${{ matrix.platform }}
+          build-args: ${{ env.BUILD_ARGS }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          sbom: true
+          provenance: mode=max
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
+      - name: keep the digest
+        if: github.event_name == 'push'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          mkdir -p digests
+          touch "digests/${DIGEST#sha256:}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: github.event_name == 'push'
+        with:
+          name: digests-${{ matrix.image }}-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    if: github.event_name == 'push'
+    needs: [version, build]
+    strategy:
+      matrix:
+        image: [fridolin-core, fridolin-fride]
+    runs-on: ubuntu-latest
+    # Writes the package, and signs its provenance with the workflow's
+    # identity (Sigstore, through GitHub's attestations).
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      IMAGE: ${{ needs.version.outputs.registry }}/${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: digests
+          pattern: digests-${{ matrix.image }}-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: the multi-arch image, tagged with the version
+        id: index
+        working-directory: digests
+        run: |
+          refs=()
+          for d in *; do refs+=("$IMAGE@sha256:$d"); done
+          docker buildx imagetools create -t "$IMAGE:$VERSION" -t "$IMAGE:main" "${refs[@]}"
+          digest=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "$IMAGE:$VERSION is $IMAGE@$digest" >> "$GITHUB_STEP_SUMMARY"
+      - name: build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.index.outputs.digest }}
+          push-to-registry: true

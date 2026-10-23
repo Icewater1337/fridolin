@@ -10,6 +10,15 @@ for compatibility.
 
 ### Added
 
+- CI publishes the core's image to GHCR, `ghcr.io/OWNER/fridolin-core`,
+  for amd64 and arm64, tagged with the version `fridolin version`
+  reports, with build provenance (GitHub's attestations) and an SBOM, on
+  every push to `main`. A new image, `ghcr.io/OWNER/fridolin-fride`,
+  holds FrIDE's companion with Claude Code, Go, Node, git and ponytail,
+  for the `fride` service of a node in a box (docs/CORE.md, "On GHCR";
+  docs/NODES.md, "Node in a box"). The images CI built before carried
+  the commit's full hash as their version; they now carry the short one
+  of `git describe`, as local builds do.
 - `fridolin core apparmor` (Linux, as root, once) installs an AppArmor
   profile for the core container, `fridolin-core`, and `core start`,
   `update` and `run` use it on a host with AppArmor
