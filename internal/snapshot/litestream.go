@@ -60,6 +60,11 @@ type Litestream struct {
 
 	mu     sync.Mutex
 	status LitestreamStatus
+	// repair carries the base name of a database whose local state
+	// litestream says is broken (see needsRepair) to the running child's
+	// supervisor; lastRepair spaces the repairs of each.
+	repair     chan string
+	lastRepair map[string]time.Time
 }
 
 // LitestreamStatus is how replication is doing.
@@ -70,6 +75,38 @@ type LitestreamStatus struct {
 	Restarts  int       `json:"restarts"`       // children started after the first
 	LastError string    `json:"last_error,omitempty"`
 	LastExit  time.Time `json:"last_exit,omitzero"`
+	// LastProblem is the last warning or error litestream logged while it
+	// ran, at LastProblemAt: a child that stays up can still fail to
+	// replicate.
+	LastProblem   string    `json:"last_problem,omitempty"`
+	LastProblemAt time.Time `json:"last_problem_at,omitzero"`
+	// Repairs counts the times a database's local state was reset and its
+	// replica started over (see needsRepair), the last at LastRepair.
+	Repairs    int       `json:"repairs,omitempty"`
+	LastRepair time.Time `json:"last_repair,omitzero"`
+}
+
+// repairEvery is the least time between two repairs of one database, so
+// that a repair that does not help is not repeated every two minutes.
+const repairEvery = time.Hour
+
+// needsRepair reports which database a line of litestream's log says has
+// lost a level-0 file it still needs, and so can never upload its changes
+// again: litestream 0.5 then logs "LTX file is missing" every two minutes,
+// stays up, and copies only the daily snapshot. It happens when a database
+// moves to a new, empty replica after Litestream pruned its first level-0
+// files (as the vault's move from B2 to the local replica the mirror
+// uploads did). The name is the database's base name, as litestream logs it.
+func needsRepair(line string) (string, bool) {
+	if !strings.Contains(line, "LTX file is missing") {
+		return "", false
+	}
+	for f := range strings.FieldsSeq(line) {
+		if name, ok := strings.CutPrefix(f, "db="); ok && name != "" {
+			return strings.Trim(name, `"`), true
+		}
+	}
+	return "", false
 }
 
 // restartReset is how long a child must have run for the backoff to start
@@ -246,6 +283,9 @@ func (l *Litestream) Run(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = os.Remove(cfg) }()
+	l.mu.Lock()
+	l.repair = make(chan string, 1)
+	l.mu.Unlock()
 	minBackoff, maxBackoff := l.MinBackoff, l.MaxBackoff
 	if minBackoff <= 0 {
 		minBackoff = time.Second
@@ -260,9 +300,12 @@ func (l *Litestream) Run(ctx context.Context) error {
 			return nil
 		}
 		started := time.Now()
-		l.runChild(ctx, cfg, !first)
+		repaired := l.runChild(ctx, cfg, !first)
 		if ctx.Err() != nil {
 			return nil
+		}
+		if repaired {
+			continue // stopped for a repair: start again at once
 		}
 		if time.Since(started) >= restartReset {
 			backoff = minBackoff
@@ -280,8 +323,32 @@ func (l *Litestream) Run(ctx context.Context) error {
 }
 
 // runChild runs one litestream until it exits or ctx ends and records
-// what happened in the status.
-func (l *Litestream) runChild(ctx context.Context, cfg string, restart bool) {
+// what happened in the status. When the child's log says a database's
+// local state is broken, it stops the child, repairs that database and
+// returns true.
+func (l *Litestream) runChild(ctx context.Context, cfg string, restart bool) (repaired bool) {
+	childCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	broken := ""
+	watched := make(chan struct{})
+	defer func() { <-watched }()
+	go func() {
+		defer close(watched)
+		select {
+		case name := <-l.repair:
+			broken = name
+			stop()
+		case <-childCtx.Done():
+		}
+	}()
+	defer func() {
+		stop()
+		<-watched
+		if broken != "" && ctx.Err() == nil {
+			l.repairDB(ctx, cfg, broken)
+			repaired = true
+		}
+	}()
 	secrets := l.secrets()
 	out := &lineWriter{secrets: secrets, emit: l.emit}
 	exited := func(err error) {
@@ -290,8 +357,8 @@ func (l *Litestream) runChild(ctx context.Context, cfg string, restart bool) {
 		defer l.mu.Unlock()
 		l.status.Running, l.status.PID, l.status.Since = false, 0, time.Time{}
 		l.status.LastExit = time.Now()
-		if ctx.Err() != nil {
-			return // stopped on purpose
+		if childCtx.Err() != nil {
+			return // stopped on purpose, or for a repair
 		}
 		msg := "litestream exited"
 		if err != nil {
@@ -307,7 +374,7 @@ func (l *Litestream) runChild(ctx context.Context, cfg string, restart bool) {
 		l.status.Restarts++
 		l.mu.Unlock()
 	}
-	cmd, err := l.command(ctx, "replicate", "-no-expand-env", "-config", cfg)
+	cmd, err := l.command(childCtx, "replicate", "-no-expand-env", "-config", cfg)
 	if err != nil {
 		exited(err)
 		return
@@ -322,10 +389,76 @@ func (l *Litestream) runChild(ctx context.Context, cfg string, restart bool) {
 	l.status.Running, l.status.PID, l.status.Since = true, cmd.Process.Pid, time.Now()
 	l.mu.Unlock()
 	exited(cmd.Wait())
+	return false
 }
 
-// emit passes on one redacted line of the child's output.
+// repairDB starts the replication of the database named name (its base
+// name) over: `litestream reset` drops its local level-0 files, and its
+// replica is emptied, so that the next sync writes a full snapshot into an
+// empty replica. Both are needed: after a reset the transaction ids start
+// at 1 again, and a restore from a replica that still holds the older
+// snapshot returns that one, without a word. Only a file replica, which
+// lies on this machine, can be emptied; for one in a bucket the state is
+// only reported. The database itself is never touched.
+func (l *Litestream) repairDB(ctx context.Context, cfg, name string) {
+	var db *LitestreamDB
+	for i := range l.DBs {
+		if filepath.Base(l.DBs[i].Path) == name {
+			db = &l.DBs[i]
+		}
+	}
+	log := l.logger()
+	if db == nil {
+		log.Warn("litestream: a database to repair is not one of ours", "db", name)
+		return
+	}
+	if db.Replica.Type != "file" || db.Replica.Dir == "" {
+		log.Warn("litestream: a database's replica cannot upload its changes; reset it and empty its replica in the bucket by hand",
+			"db", db.Path, "replica", db.Replica.Type)
+		return
+	}
+	cmd, err := l.command(ctx, "reset", "-no-expand-env", "-config", cfg, filepath.Clean(db.Path))
+	if err == nil {
+		var out []byte
+		out, err = cmd.CombinedOutput()
+		if err != nil {
+			err = fmt.Errorf("%w: %s", err, redact(strings.TrimSpace(string(out)), l.secrets()))
+		}
+	}
+	if err != nil {
+		log.Warn("litestream: reset failed", "db", db.Path, "err", err)
+		return
+	}
+	if err := os.RemoveAll(db.Replica.Dir); err != nil {
+		log.Warn("litestream: emptying the replica failed", "db", db.Path, "replica", db.Replica.Dir, "err", err)
+		return
+	}
+	l.mu.Lock()
+	l.status.Repairs++
+	l.status.LastRepair = time.Now()
+	l.mu.Unlock()
+	log.Warn("litestream: started a database's replication over: its local state had lost a file the replica needed",
+		"db", db.Path, "replica", db.Replica.Dir)
+}
+
+// emit passes on one redacted line of the child's output, records a
+// problem in the status, and asks for a repair when the line calls for one.
 func (l *Litestream) emit(line string) {
+	if isProblem(line) {
+		l.mu.Lock()
+		l.status.LastProblem, l.status.LastProblemAt = line, time.Now()
+		if name, ok := needsRepair(line); ok && time.Since(l.lastRepair[name]) >= repairEvery {
+			if l.lastRepair == nil {
+				l.lastRepair = map[string]time.Time{}
+			}
+			select {
+			case l.repair <- name:
+				l.lastRepair[name] = time.Now()
+			default: // a repair is asked for already
+			}
+		}
+		l.mu.Unlock()
+	}
 	if l.Stderr != nil {
 		_, _ = io.WriteString(l.Stderr, line+"\n")
 		return
