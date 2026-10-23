@@ -65,7 +65,7 @@ function signIn(site, me) {
   show(h('section', { class: 'signin' }, parts));
 }
 
-function home(site, me, list) {
+function home(site, me, list, builtin) {
   // A preview opened with its own link has no accounts to sign out of.
   const accounts = !site.preview || site.exit;
   const who = h('div', { class: 'who' },
@@ -75,7 +75,7 @@ function home(site, me, list) {
       class: 'small',
       onclick: async () => { await json('/auth/logout', { method: 'POST' }); location.assign('/'); },
     }, 'Sign out'));
-  const tiles = list.modules.map((m) => h('a', { class: 'tile', href: m.href, style: { '--tile': m.color } },
+  const tiles = [...builtin, ...list.modules].map((m) => h('a', { class: 'tile', href: m.href, style: { '--tile': m.color } },
     h('span', { class: 'tile-icon', 'aria-hidden': 'true' }, m.icon),
     h('div', {}, h('h3', m.title), m.description ? h('p', m.description) : null)));
   const broken = list.broken.length
@@ -103,6 +103,14 @@ function home(site, me, list) {
   }
   const me = await json('/auth/me');
   if (!me.ok) { signIn(site, me.body || {}); return; }
-  const list = await json('/api/modules');
-  home(site, me.body, list.ok ? list.body : { modules: [], broken: [] });
+  const [list, roots, wikis] = await Promise.all([json('/api/modules'), json('/_fridolin/api/files/roots'), json('/_fridolin/api/wiki')]);
+  // The built-in Files and Wiki, where the account's role sees a brain.
+  const builtin = [];
+  if (roots.ok && roots.body.roots.length) {
+    builtin.push({ title: 'Files', description: 'Browse and open the shared folders', icon: '📁', color: '#64748b', href: '/files' });
+  }
+  if (wikis.ok && wikis.body.brains.length) {
+    builtin.push({ title: 'Wiki', description: 'Read and search the wikis', icon: '📚', color: '#0ea5e9', href: '/wiki' });
+  }
+  home(site, me.body, list.ok ? list.body : { modules: [], broken: [] }, builtin);
 })();

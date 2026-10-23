@@ -96,3 +96,67 @@ button.small { padding: 6px 10px; font-size: 13px; font-weight: 500; }
 button:disabled { opacity: .6; cursor: default; }
 
 .message { max-width: 520px; margin: 12vh auto; padding: 0 16px; }
+
+/* ── the built-in Files and Wiki (builtin.js) ─────────────────────────── */
+.content.wide { max-width: 1240px; }
+.home-link { color: inherit; text-decoration: none; }
+.bnav { display: flex; gap: 4px; margin-right: auto; margin-left: 20px; }
+.bnav a { padding: 6px 10px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 14px; }
+.bnav a[aria-current="page"], .bnav a:hover { background: var(--bg); color: var(--text); }
+.crumbs { font-size: 14px; color: var(--muted); margin: 0 0 14px; overflow-wrap: anywhere; }
+.toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 16px; }
+.toolbar input { flex: 1 1 220px; }
+select { font: inherit; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+table.files { width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; font-size: 14px; }
+table.files th, table.files td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+table.files th { color: var(--muted); font-weight: 500; font-size: 13px; }
+table.files td a { text-decoration: none; overflow-wrap: anywhere; }
+table.files .num { text-align: right; white-space: nowrap; }
+table.files tr:last-child td { border-bottom: 0; }
+.filehead { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin: 0 0 16px; }
+.filehead h2 { margin: 0 0 4px; overflow-wrap: anywhere; }
+.filehead p { margin: 0; font-size: 13px; }
+.actions { display: flex; gap: 8px; }
+.button.small { padding: 6px 10px; font-size: 13px; font-weight: 500; }
+pre.text, .doc pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; overflow: auto; font-size: 13px; line-height: 1.5; white-space: pre; }
+.preview-media { max-width: 100%; }
+.preview-media img, video.preview-media { max-width: 100%; max-height: 80vh; border-radius: 8px; }
+audio { width: 100%; }
+
+.doc { line-height: 1.6; overflow-wrap: anywhere; }
+.doc img { max-width: 100%; border-radius: 6px; }
+.doc code { font-size: .9em; background: var(--surface); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.doc pre code { border: 0; padding: 0; background: none; }
+.doc blockquote { margin: 0; padding: 2px 16px; border-left: 3px solid var(--border); color: var(--muted); }
+.doc table { border-collapse: collapse; display: block; overflow-x: auto; }
+.doc th, .doc td { border: 1px solid var(--border); padding: 6px 10px; }
+.doc .align-center { text-align: center; }
+.doc .align-right { text-align: right; }
+.doc li.task { list-style: none; }
+.doc .missing { color: var(--muted); border-bottom: 1px dashed var(--muted); }
+.tags { display: flex; gap: 6px; flex-wrap: wrap; }
+.tag { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--surface); border: 1px solid var(--border); color: var(--muted); }
+.small { font-size: 13px; }
+
+.wiki { display: grid; grid-template-columns: 240px minmax(0, 1fr) 200px; gap: 28px; align-items: start; }
+.wiki-side, .toc { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow: auto; font-size: 14px; }
+.wiki-side .toolbar input { flex-basis: 100%; }
+.tree h4, .toc h4 { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.tree ul, .toc ul, .hits { list-style: none; margin: 0; padding: 0; }
+.tree a, .toc a { display: block; padding: 3px 8px; border-radius: 6px; text-decoration: none; color: var(--text); overflow-wrap: anywhere; }
+.tree a[aria-current="page"] { background: var(--surface); border: 1px solid var(--border); }
+.toc .l3 a { padding-left: 18px; }
+.toc .l4 a, .toc .l5 a, .toc .l6 a { padding-left: 28px; }
+.hits li { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.hits p { margin: 4px 0 0; font-size: 13px; }
+.backlinks { margin-top: 32px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 14px; }
+@media (max-width: 960px) {
+  .wiki { grid-template-columns: minmax(0, 1fr); }
+  .toc { display: none; }
+  .wiki-side { position: static; max-height: none; }
+}
+@media (max-width: 600px) {
+  .topbar { flex-wrap: wrap; }
+  .bnav { margin-left: 0; order: 3; width: 100%; }
+  table.files th:nth-child(3), table.files td:nth-child(3) { display: none; }
+}

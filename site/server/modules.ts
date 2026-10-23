@@ -81,11 +81,12 @@ export type ModuleManifest = {
 }
 
 /**
- * First path segments the site serves itself (/auth/*, /api/modules). A
- * module cannot take them; its server may still mount under /api/<id>. The
- * site's own files live under /_fridolin/, which no route can name.
+ * First path segments the site serves itself (/auth/*, /api/modules, the
+ * built-in /files and /wiki). A module cannot take them; its server may
+ * still mount under /api/<id>. The site's own files live under /_fridolin/,
+ * which no route can name.
  */
-export const RESERVED_ROUTES = ['auth', 'api']
+export const RESERVED_ROUTES = ['auth', 'api', 'files', 'wiki']
 
 const ID_RE = /^[a-z0-9][a-z0-9-]*$/
 /** A secret's name; Fridolin's dashboard checks the same (site_secrets.go). */
@@ -112,7 +113,9 @@ export function validateManifest(raw: unknown, folder: string): ModuleManifest {
     fail('"route" must be one path segment, e.g. "/finance"')
   }
   const route = m.route as string
-  if (RESERVED_ROUTES.includes(route.slice(1))) fail(`"route" ${route} is reserved by the site itself`)
+  if (RESERVED_ROUTES.includes(route.slice(1))) {
+    fail(`"route" ${route} is reserved by the site itself${['/files', '/wiki'].includes(route) ? ' (its built-in Files and Wiki; see docs/FILES.md)' : ''}`)
+  }
 
   checkAccess(m.access, 'access')
 
