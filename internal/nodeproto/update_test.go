@@ -24,6 +24,20 @@ func TestCompareVersions(t *testing.T) {
 		{"dev", "v1.0.0", -1, false, true},
 		{"abc1234", "def5678", -1, false, true},
 		{"dev", "dev", 0, true, false},
+		// One commit, abbreviated to different lengths by two clones, or
+		// by a stamped and an unstamped build: the same build.
+		{"0284f03", "0284f03e", 0, true, false},
+		{"0284f03e", "0284f03", 0, true, false},
+		{"dev-06ab6d8", "06ab6d82", 0, true, false},
+		{"dev-06ab6d82", "06ab6d8", 0, true, false},
+		{"0284f03e00112233445566778899aabbccddeeff", "0284f03e", 0, true, false},
+		// Other commits, dirty builds and hashes too short to be one stay
+		// different.
+		{"0284f03e", "0284f04e", -1, false, true},
+		{"dev-06ab6d8+dirty", "06ab6d82", -1, false, true},
+		{"06ab6d82-dirty", "06ab6d8", -1, false, true},
+		{"0284f0", "0284f03e", -1, false, true},
+		{"dev-", "dev-0284f03", -1, false, true},
 	} {
 		cmp, ok := CompareVersions(c.a, c.b)
 		if cmp != c.cmp || ok != c.ok {

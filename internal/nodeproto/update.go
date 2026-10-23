@@ -178,13 +178,30 @@ func parseVersion(v string) ([4]int, bool) {
 	return out, true
 }
 
+// commitRE reads a version named by its commit: `git describe --always`
+// of a checkout without tags (0284f03e, with -dirty) or a build without a
+// stamp (dev-0284f03, with +dirty).
+var commitRE = regexp.MustCompile(`^(?:dev-)?([0-9a-f]{7,40})([-+]dirty)?$`)
+
+// sameCommit reports whether a and b name the same commit with hashes of
+// different lengths: git abbreviates as long as a repository needs, so two
+// clones (or a stamped and an unstamped build) can spell one commit
+// 0284f03 and 0284f03e. A dirty build is never the same as another.
+func sameCommit(a, b string) bool {
+	ma, mb := commitRE.FindStringSubmatch(strings.TrimSpace(a)), commitRE.FindStringSubmatch(strings.TrimSpace(b))
+	if ma == nil || mb == nil || ma[2] != "" || mb[2] != "" {
+		return false
+	}
+	return strings.HasPrefix(ma[1], mb[1]) || strings.HasPrefix(mb[1], ma[1])
+}
+
 // CompareVersions orders two versions: -1 when a is older than b, 1 when
 // newer, 0 when they are the same. ok is false when the two cannot be
 // ordered (a commit hash, dev): then only equal or not is known, and cmp
 // is 0 for equal and -1 for different, so that a different build counts
 // as one to update.
 func CompareVersions(a, b string) (cmp int, ok bool) {
-	if a == b {
+	if a == b || sameCommit(a, b) {
 		return 0, true
 	}
 	va, oka := parseVersion(a)
