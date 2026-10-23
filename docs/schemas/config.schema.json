@@ -284,6 +284,47 @@
         "min_age_minutes": {"type": "integer", "minimum": 0, "maximum": 10080, "description": "Processes younger than this are left alone. Default 60."}
       }
     },
+    "schedules": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The scheduled agents of every brain (docs/BRAINS.md, Scheduled agents): whether they run on their schedules, how they are spread, and how much of their history and logs is kept.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Run the agents on their schedules; Run now works either way. Default true."
+        },
+        "jitter_minutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1440,
+          "description": "Spread each agent's runs by a fixed offset within this many minutes, unless it sets its own. Default 2."
+        },
+        "keep_days": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3650,
+          "description": "Drop runs older than this from the history (each agent keeps its newest). Default 30."
+        },
+        "keep_runs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000,
+          "description": "Keep at most this many runs of each agent. Default 100."
+        },
+        "max_total_mb": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576,
+          "description": "Drop the oldest runs of all agents until their logs take no more than this. Default 200."
+        },
+        "max_log_kb": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1048576,
+          "description": "Cut one run's log at this size. Default 1024."
+        }
+      }
+    },
     "model": {"type": "string", "deprecated": true, "description": "Retired in version 2: version 1's model, which becomes brain_model while that is empty."},
     "work_dir": {"type": "string", "deprecated": true, "description": "Retired in version 2: the folder classic mode ran in."},
     "brains": {"type": ["array", "null"], "maxItems": 0, "deprecated": true, "description": "Retired in version 2: inline brains, refused unless the list is empty."}

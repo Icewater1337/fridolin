@@ -550,6 +550,9 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 		{"brain.json effort", "brain.schema.json#/properties/effort", manifest.Efforts(), `{"id": "a", "name": "A", "effort": %s}`},
 		{"brain.json observe", "brain.schema.json#/properties/observe", manifest.ObserveModes(), `{"id": "a", "name": "A", "observe": %s}`},
 		{"brain.json role", "brain.schema.json#/properties/role", manifest.Roles(), `{"id": "a", "name": "A", "role": %s}`},
+		{"brain.json schedule report", "brain.schema.json#/properties/schedules/items/properties/report", manifest.ScheduleReports(), `{"id": "a", "name": "A", "schedules": [{"name": "s", "when": "every 6h", "report": %s}]}`},
+		{"brain.json schedule missed", "brain.schema.json#/properties/schedules/items/properties/missed", manifest.ScheduleMissed(), `{"id": "a", "name": "A", "schedules": [{"name": "s", "when": "every 6h", "missed": %s}]}`},
+		{"brain.json schedule risk", "brain.schema.json#/properties/schedules/items/properties/risk", manifest.ScheduleRisks(), `{"id": "a", "name": "A", "schedules": [{"name": "s", "when": "every 6h", "risk": %s}]}`},
 	}
 	set := newSchemaSet(t)
 	t.Setenv("HOME", t.TempDir())

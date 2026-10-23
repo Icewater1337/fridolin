@@ -195,6 +195,8 @@ type File struct {
 	// Housekeeping is the job that stops what the bridge left running
 	// (housekeeping.go).
 	Housekeeping HousekeepingConfig `json:"housekeeping"`
+	// Schedules are the scheduled agents' settings (schedules.go).
+	Schedules SchedulesConfig `json:"schedules"`
 }
 
 // retiredBrainMode is the brain_mode key. A missing key, null and true all

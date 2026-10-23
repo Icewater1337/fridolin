@@ -115,6 +115,12 @@ var fields = []fieldSpec{
 	{Field: Field{Name: "housekeeping.cpu_percent"}},
 	{Field: Field{Name: "housekeeping.rss_mb"}},
 	{Field: Field{Name: "housekeeping.min_age_minutes"}},
+	{Field: Field{Name: "schedules.enabled"}},
+	{Field: Field{Name: "schedules.jitter_minutes"}},
+	{Field: Field{Name: "schedules.keep_days"}},
+	{Field: Field{Name: "schedules.keep_runs"}},
+	{Field: Field{Name: "schedules.max_total_mb"}},
+	{Field: Field{Name: "schedules.max_log_kb"}},
 }
 
 // Fields returns an owned copy of the complete configuration field inventory.
