@@ -49,6 +49,12 @@ const (
 	// classNotFound is a catch-all for unknown paths under a prefix: a
 	// 404 for anyone, token or not.
 	classNotFound = "not-found"
+	// classTicket is a file by the ticket in its address (files_ticket.go):
+	// no token, but a ticket the dashboard got through the API.
+	classTicket = "ticket"
+	// classSiteBridge is on the site bridge's own listener
+	// (site_bridge.go): its token, and a site account.
+	classSiteBridge = "site-bridge"
 )
 
 // httpRoute is one registered pattern. probe is a concrete request path for it,
@@ -100,6 +106,19 @@ var routeInventory = []httpRoute{
 
 	// Outside the API's guard, on the outer mux.
 	{"POST", "/api/login", classLogin, ""},
+	{"GET", "/files/raw", classTicket, "/files/raw?root=brain:main&path=x"},
+
+	// The site's /files and /wiki, on the site bridge's own listener.
+	{"", "/site-api/", classSiteBridge, "/site-api/nope"},
+	{"GET", "/site-api/files/roots", classSiteBridge, ""},
+	{"GET", "/site-api/files/list", classSiteBridge, ""},
+	{"GET", "/site-api/files/search", classSiteBridge, ""},
+	{"GET", "/site-api/files/view", classSiteBridge, ""},
+	{"GET", "/site-api/files/raw", classSiteBridge, ""},
+	{"GET", "/site-api/wiki", classSiteBridge, ""},
+	{"GET", "/site-api/wiki/search", classSiteBridge, ""},
+	{"GET", "/site-api/wiki/{brain}/pages", classSiteBridge, "/site-api/wiki/main/pages"},
+	{"GET", "/site-api/wiki/{brain}/page", classSiteBridge, "/site-api/wiki/main/page"},
 
 	{"GET", "/api/status", classAPI, ""},
 	{"POST", "/api/logout", classAPI, ""},
@@ -194,6 +213,7 @@ var routeInventory = []httpRoute{
 	{"DELETE", "/api/site/users/{id}", classAPI, "/api/site/users/u1"},
 	{"PUT", "/api/site/roles", classAPI, ""},
 	{"PUT", "/api/site/tunnel", classAPI, ""},
+	{"POST", "/api/site/check-domain", classAPI, ""},
 	{"PUT", "/api/site/google-client", classAPI, ""},
 	{"DELETE", "/api/site/google-client", classAPI, ""},
 	{"GET", "/api/site/secrets", classAPI, ""},
@@ -231,6 +251,16 @@ var routeInventory = []httpRoute{
 	{"GET", "/api/brains/{id}/skills", classAPI, "/api/brains/main/skills"},
 	{"POST", "/api/brains/{id}/skills/approve", classAPI, "/api/brains/main/skills/approve"},
 	{"PUT", "/api/brains/{id}/skills/policy", classAPI, "/api/brains/main/skills/policy"},
+	{"GET", "/api/files/roots", classAPI, ""},
+	{"GET", "/api/files/list", classAPI, ""},
+	{"GET", "/api/files/search", classAPI, ""},
+	{"GET", "/api/files/view", classAPI, ""},
+	{"GET", "/api/files/raw", classAPI, ""},
+	{"GET", "/api/files/ticket", classAPI, ""},
+	{"GET", "/api/wiki", classAPI, ""},
+	{"GET", "/api/wiki/search", classAPI, ""},
+	{"GET", "/api/wiki/{brain}/pages", classAPI, "/api/wiki/main/pages"},
+	{"GET", "/api/wiki/{brain}/page", classAPI, "/api/wiki/main/page"},
 	{"GET", "/api/housekeeping", classAPI, ""},
 	{"POST", "/api/housekeeping/run", classAPI, ""},
 	{"POST", "/api/dev/inbound", classAPI, ""},
@@ -341,6 +371,7 @@ var reachesOutside = map[string]bool{
 	"POST /api/site/github-repo":       true,
 	"POST /api/backup/restore":         true,
 	"POST /api/github/test":            true,
+	"POST /api/site/check-domain":      true,
 }
 
 // TestRouteInventoryGuards probes every route of the inventory for the
@@ -518,6 +549,34 @@ func TestRouteInventoryGuards(t *testing.T) {
 				}
 				if w := request("POST", rt.path(), "{}"); w.Code != http.StatusMethodNotAllowed {
 					t.Errorf("POST: %d, want 405", w.Code)
+				}
+			case classTicket:
+				if w := request(method, rt.path(), ""); w.Code != http.StatusUnauthorized {
+					t.Errorf("without a ticket: %d, want 401", w.Code)
+				}
+				if w := request(method, rt.path()+"&ticket="+token, "", withToken); w.Code != http.StatusUnauthorized {
+					t.Errorf("with the dashboard token for a ticket: %d, want 401", w.Code)
+				}
+			case classSiteBridge:
+				url, siteToken, err := h.b.filesBridge()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if code, _ := siteBridgeRequest(t, url, "", "u_x", rt.path()); code != http.StatusUnauthorized {
+					t.Errorf("without its token: %d, want 401", code)
+				}
+				if code, _ := siteBridgeRequest(t, url, token, "u_x", rt.path()); code != http.StatusUnauthorized {
+					t.Errorf("with the dashboard token: %d, want 401", code)
+				}
+				want := http.StatusUnauthorized
+				if rt.method == "" {
+					want = http.StatusNotFound
+				}
+				if code, _ := siteBridgeRequest(t, url, siteToken, "u_nobody", rt.path()); code != want {
+					t.Errorf("for no site account: %d, want %d", code, want)
+				}
+				if w := request(method, rt.path(), "", withToken); w.Code != http.StatusNotFound {
+					t.Errorf("on the dashboard's listener: %d, want 404", w.Code)
 				}
 			case classPublic, classStatic:
 				if w := request(method, rt.path(), ""); w.Code != http.StatusOK {

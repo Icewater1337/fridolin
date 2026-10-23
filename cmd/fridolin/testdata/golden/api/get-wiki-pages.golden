@@ -1,0 +1,52 @@
+GET /api/wiki/main/pages
+200 OK
+Content-Type: application/json
+
+{
+  "brain": "main",
+  "home": "wiki/index.md",
+  "label": "Main",
+  "pages": [
+    {
+      "mod_time": "<MOD_TIME>",
+      "name": "index",
+      "path": "wiki/index.md",
+      "section": "wiki",
+      "size": 91,
+      "title": "Home"
+    },
+    {
+      "mod_time": "<MOD_TIME>",
+      "name": "people/alex",
+      "path": "wiki/people/alex.md",
+      "section": "wiki",
+      "size": 67,
+      "title": "Alex"
+    },
+    {
+      "mod_time": "<MOD_TIME>",
+      "name": "people/whatsapp-identity-map",
+      "path": "memories/people/whatsapp-identity-map.md",
+      "section": "memories",
+      "size": 317,
+      "title": "WhatsApp identity map"
+    },
+    {
+      "mod_time": "<MOD_TIME>",
+      "name": "README",
+      "path": "memories/README.md",
+      "section": "memories",
+      "size": 490,
+      "title": "Memories"
+    },
+    {
+      "mod_time": "<MOD_TIME>",
+      "name": "team",
+      "path": "memories/team.md",
+      "section": "memories",
+      "size": 30,
+      "title": "Team"
+    }
+  ],
+  "truncated": false
+}

@@ -60,9 +60,10 @@ func (b *App) siteBuilderHooks() sitesvc.SiteBuilderHooks {
 			}
 			return l
 		},
-		MediaDir: func() string { return b.cfgs.Boot().MediaDir },
-		Search:   b.runBrainSearch,
-		Device:   b.plaud.DeviceRequest,
+		MediaDir:    func() string { return b.cfgs.Boot().MediaDir },
+		Search:      b.runBrainSearch,
+		Device:      b.plaud.DeviceRequest,
+		FilesBridge: b.filesBridge,
 		// As /ingest: the brain's reply chat gets the answer, and the brain
 		// must take the files now (its queue is not full).
 		Ingest: func(brainID, sender, text string, files []string) error {

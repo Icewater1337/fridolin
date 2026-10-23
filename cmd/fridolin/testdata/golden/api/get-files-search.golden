@@ -1,0 +1,16 @@
+GET /api/files/search?root=brain:main&q=PLAN
+200 OK
+Content-Type: application/json
+
+{
+  "hits": [
+    {
+      "kind": "text",
+      "mod_time": "<MOD_TIME>",
+      "name": "plan.txt",
+      "path": "docs/plan.txt",
+      "size": 10
+    }
+  ],
+  "truncated": false
+}

@@ -25,6 +25,9 @@ type Deps struct {
 	RequiresToken     func() bool
 	SignedIn          func(*http.Request) bool
 	API               func() http.Handler
+	// FilesRaw serves /files/raw: a file by a ticket in its address, which
+	// the page's <img>, <video> and download links need (files_ticket.go).
+	FilesRaw http.HandlerFunc
 	// Remote serves the surface on the tailnet instead of this machine's
 	// loopback: Hosts are the Host values it answers to (the node's
 	// MagicDNS names), the dashboard API always wants the token or a
@@ -84,6 +87,7 @@ func New(d Deps) http.Handler {
 		mux.HandleFunc("GET /github/created", d.GitHub().Created)
 		mux.HandleFunc("GET /github/installed", d.GitHub().Installed)
 		mux.HandleFunc("POST /api/login", d.Login)
+		mux.HandleFunc("GET /files/raw", d.FilesRaw)
 		mux.Handle("/api/", APIGuard(d.Token, d.RequiresToken, d.SignedIn, d.API()))
 	}
 
@@ -117,6 +121,7 @@ type APIDeps struct {
 	Nodes        func() *NodesAPI
 	Policy       func() *PolicyAPI
 	Housekeeping func() *HousekeepingAPI
+	Files        func() *FilesAPI
 }
 
 func NewAPIMux(d APIDeps) http.Handler {
@@ -224,6 +229,7 @@ func NewAPIMux(d APIDeps) http.Handler {
 	mux.HandleFunc("PUT /api/nodes/{id}/update-policy", d.Nodes().UpdatePolicy)
 
 	d.Site(mux)
+	d.Files().Register(mux)
 	d.Policy().Register(mux)
 	d.Housekeeping().Register(mux)
 
@@ -257,6 +263,7 @@ func (a *SiteAPI) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/site/users/{id}", a.RemoveUser)
 	mux.HandleFunc("PUT /api/site/roles", a.Roles)
 	mux.HandleFunc("PUT /api/site/tunnel", a.Tunnel)
+	mux.HandleFunc("POST /api/site/check-domain", a.CheckDomain)
 	mux.HandleFunc("PUT /api/site/google-client", a.GoogleClient)
 	mux.HandleFunc("DELETE /api/site/google-client", a.GoogleClientDelete)
 	mux.HandleFunc("GET /api/site/secrets", a.Secrets)

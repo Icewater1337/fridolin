@@ -7,6 +7,8 @@ import { createAuth, loadSessionKey, page, type Auth } from './auth.ts'
 import { loadModules, mountModules, type ModuleSecrets } from './modules.ts'
 import { createPreviewAuth, previewForwarding, PreviewList } from './preview.ts'
 import { deviceRoutes } from './devices.ts'
+import { BUILTIN_ROUTES, builtinRoutes, type Bridge } from './builtin.ts'
+import { BRIDGE_SECRETS_KEY } from './config.ts'
 
 const WEB_DIR = fileURLToPath(new URL('../web/', import.meta.url))
 
@@ -27,6 +29,8 @@ export type SiteOptions = {
   googleFetch?: typeof fetch
   /** For tests: the modules' secrets, instead of reading rt.secrets_fd. */
   secrets?: ModuleSecrets
+  /** For tests: how the built-in pages reach the bridge. */
+  bridgeFetch?: typeof fetch
 }
 
 export async function createSite(rt: Runtime, opts: SiteOptions = {}): Promise<express.Express> {
@@ -65,6 +69,20 @@ export async function createSite(rt: Runtime, opts: SiteOptions = {}): Promise<e
     next()
   }
 
+  // wiki.<domain> and files.<domain>, where a tunnel sends them here too,
+  // are the built-in pages of <domain>: the session cookie belongs to
+  // <domain> alone.
+  if (rt.public_origin) {
+    const domain = new URL(rt.public_origin).hostname
+    app.use((req, res, next) => {
+      const host = req.hostname.toLowerCase()
+      const page = BUILTIN_ROUTES.find(r => host === `${r}.${domain}`)
+      if (!page) return next()
+      const path = req.originalUrl.startsWith(`/${page}`) ? req.originalUrl : `/${page}${req.originalUrl === '/' ? '' : req.originalUrl}`
+      res.redirect(301, rt.public_origin + path)
+    })
+  }
+
   app.get('/_fridolin/health', (_req, res) => { res.type('text').send('ok') })
   // Phones sign each request themselves; the live site only (devices.ts).
   if (rt.devices_file && rt.spool_dir) app.use(deviceRoutes(rt.devices_file, rt.spool_dir))
@@ -84,6 +102,18 @@ export async function createSite(rt: Runtime, opts: SiteOptions = {}): Promise<e
 
   // Only the live site has secrets; a preview runs unapproved code.
   const secrets = opts.secrets ?? (rt.secrets_fd !== undefined && !rt.preview_token ? readSecrets(rt.secrets_fd) : undefined)
+  // The bridge's token for the built-in pages travels with the secrets; no
+  // module gets it from there.
+  const bridgeToken = secrets?.[BRIDGE_SECRETS_KEY]?.bridge_token
+  if (secrets) delete secrets[BRIDGE_SECRETS_KEY]
+  const bridge: Bridge | undefined = rt.bridge_url && bridgeToken ? { url: rt.bridge_url, token: bridgeToken } : undefined
+  app.use(builtinRoutes({
+    bridge,
+    requireAuth: auth.requireAuth,
+    shell,
+    fetch: opts.bridgeFetch,
+    page: (res) => res.sendFile('builtin.html', { root: WEB_DIR }),
+  }))
   await mountModules(app, loadModules(rt.modules_dir), auth.requireAuth, secrets, { dataDir: rt.data_dir, spoolDir: rt.spool_dir })
 
   app.get('/', shell, (_req, res) => {

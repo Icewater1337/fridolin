@@ -304,10 +304,15 @@ site's listen port and the mapping the same; a site on another port needs
 its own mapping in a compose override.
 
 A tunnel run by the bridge (*Run the tunnel* on the Site page) runs in the
-container, where `127.0.0.1:8780` is the site itself; a tunnel run by a
-launchd agent on the Mac goes through the published port. Run one of the
-two, not both: Cloudflare spreads the requests over every connector of a
-tunnel.
+container, where `127.0.0.1:8780` is the site itself, and moves with the
+core; a tunnel run by a launchd agent on the Mac goes through the published
+port. Run one of the two, not both: Cloudflare spreads the requests over
+every connector of a tunnel. To move a host's tunnel into the core, turn
+*Run the tunnel* on first, check that the domain answers, then stop the
+host's `cloudflared` service: the site never goes down. Every host name of
+the tunnel must point at the site then (a host port is out of the
+container's reach); the built-in wiki replaces a separate wiki server
+([FILES.md](FILES.md#on-your-site)).
 
 ## The tailnet
 

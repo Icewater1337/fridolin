@@ -11,6 +11,9 @@ type SiteSettings struct {
 	Repo   SiteRepo `json:"repo"`
 	// Roles users can have. "admin" is always one of them.
 	Roles []string `json:"roles"`
+	// RoleBrains are the brains each role sees on the site's built-in
+	// /files and /wiki (docs/FILES.md); admin sees every brain.
+	RoleBrains map[string][]string `json:"role_brains"`
 	// Approved is the commit the live site serves.
 	Approved string       `json:"approved"`
 	History  []SiteDeploy `json:"history"`

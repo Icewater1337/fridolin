@@ -54,6 +54,10 @@ type SiteBuilderHooks struct {
 	// Device answers a phone's request the site passed on, which the
 	// bridge checks itself (plaud_app.go, site_ingest.go).
 	Device func(op, assertion string, body []byte) (map[string]any, error)
+	// FilesBridge is where the live site reads the built-in /files and
+	// /wiki: the bridge's site listener's address and the token it wants
+	// (docs/FILES.md). Nil, or an error, leaves the site without them.
+	FilesBridge func() (url, token string, err error)
 }
 
 // SiteHost supplies host lookups at their existing operation boundaries.

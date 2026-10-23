@@ -1,0 +1,24 @@
+GET /api/files/roots
+200 OK
+Content-Type: application/json
+
+{
+  "roots": [
+    {
+      "backup": "on",
+      "brain": "main",
+      "excluded": [
+        "node_modules/",
+        "*.log",
+        "- private.txt"
+      ],
+      "id": "brain:main",
+      "kind": "brain",
+      "label": "Main",
+      "location": "core",
+      "online": true,
+      "path": "<HOME>/main",
+      "writable": false
+    }
+  ]
+}

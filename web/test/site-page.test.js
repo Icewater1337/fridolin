@@ -5,6 +5,7 @@ import { serve, settle, type, noConsoleErrors } from './serve.js';
 import { h } from '../assets/lib/dom.js';
 import { createPage } from '../assets/app/page.js';
 import page from '../assets/pages/site.js';
+import { setStatus } from '../assets/app/store.js';
 
 const commit = (c) => c.repeat(40);
 
@@ -65,7 +66,12 @@ async function openPage(t, first = siteStatus(), { proposals = [], brains = [{ i
       return { ok: true };
     }
     if (path === '/api/site/deploy-key' && method === 'POST') { bridge.site.deploy_key = 'ssh-ed25519 AAAAnew fridolin-site'; return { ok: true }; }
-    if (path === '/api/site/roles' && method === 'PUT') { bridge.users.roles = ['admin', ...body.roles.map((r) => r.trim()).filter(Boolean)]; return { ok: true }; }
+    if (path === '/api/site/roles' && method === 'PUT') {
+      if (body.roles) bridge.users.roles = ['admin', ...body.roles.map((r) => r.trim()).filter(Boolean)];
+      if (body.brains) bridge.site.settings.role_brains = { ...(bridge.site.settings.role_brains || {}), ...body.brains };
+      return { ok: true };
+    }
+    if (path === '/api/site/check-domain' && method === 'POST') return { status: 200, body: bridge.check || { url: 'https://example.com/_fridolin/health', ok: true, status: 200 } };
     if (path === '/api/site/builders') return { brains: brains.map((b) => ({ ...b, builder: bridge.site.settings.builders.includes(b.id) })) };
     if (path.startsWith('/api/site/builders/') && method === 'PUT') {
       const id = decodeURIComponent(path.split('/').pop());
@@ -485,4 +491,47 @@ test('without gh there is no gh button, before or after Connect', async (t) => {
     assert.equal(button(root, 'Add it to GitHub with gh'), undefined);
     t.mock.timers.reset();
   }
+});
+
+test('the domain steps guide through the tunnel and check the domain', async (t) => {
+  const { root, bridge, calls } = await openPage(t);
+  const steps = root.querySelectorAll('ol.site-steps h3').map((e) => e.textContent);
+  assert.deepEqual(steps, ['The domain', 'A Cloudflare tunnel to it', 'Check that it answers']);
+  assert.match(root.textContent, /Cloudflare Zero Trust/);
+  assert.match(root.textContent, /wiki\.example\.com/);
+  bridge.check = { url: 'https://example.com/_fridolin/health', ok: false, status: 530, error: 'Cloudflare answers for example.com but cannot reach the site (530).' };
+  button(root, 'Check https://example.com').click();
+  await settle();
+  assert.ok(calls.some((c) => c.path === '/api/site/check-domain' && c.method === 'POST'));
+  assert.match(root.textContent, /example\.com does not answer yet/);
+  assert.match(root.textContent, /cannot reach the site \(530\)/);
+});
+
+test('a site with no repository can go on, with Files and Wiki alone', async (t) => {
+  const first = siteStatus();
+  first.settings.enabled = false;
+  first.settings.approved = '';
+  first.settings.history = [];
+  first.repo = { connected: false, github: false };
+  const { root } = await openPage(t, first);
+  assert.doesNotMatch(root.textContent, /Before the site can go on/, 'nothing stands before turning it on');
+  assert.equal(siteSwitch(root).querySelector('input').disabled, false);
+  assert.match(root.textContent, /no modules deployed/);
+});
+
+test('each role is given the brains it sees on Files and Wiki', async (t) => {
+  const { root, bridge, calls } = await openPage(t);
+  setStatus({ brains: [{ id: 'main', name: 'Main' }, { id: 'work', name: 'Work' }] });
+  await settle();
+  const row = root.querySelectorAll('tr').find((tr) => tr.textContent.startsWith('member'));
+  assert.ok(row, 'a row for the member role, none for admin');
+  assert.equal(root.querySelectorAll('tr').some((tr) => tr.textContent.startsWith('admin')), false);
+  const work = row.querySelectorAll('label.switch').find((l) => l.textContent.startsWith('Work')).querySelector('input');
+  work.checked = true;
+  work.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  const put = calls.find((c) => c.path === '/api/site/roles' && c.method === 'PUT');
+  assert.deepEqual(put.body, { brains: { member: ['work'] } });
+  assert.deepEqual(bridge.site.settings.role_brains, { member: ['work'] });
+  assert.match(root.textContent, /every view is written to the audit log/);
 });

@@ -62,6 +62,13 @@ const (
 	// NodeCommand is a command line typed into a node's terminal, its
 	// secrets masked (Scrub).
 	NodeCommand = "node_command"
+	// FileView is a file, folder or wiki page read on the Files page, the
+	// wiki or the site's /files and /wiki (docs/FILES.md): By is
+	// "dashboard" or "site:<account>", Brain the brain whose folder it is,
+	// Detail what was done (view, open, download, list, search, wiki,
+	// wiki-search), the root and the path, Outcome ok or why it was
+	// refused.
+	FileView = "file_view"
 )
 
 // Entry is one line. Fields are added, never renamed; a reader ignores

@@ -24,6 +24,30 @@ for compatibility.
   `FRIDOLIN_GITHUB_TOKEN` or the host secret `fridolin.github.token`
   (which `core start` now passes, and `core send` carries), is the second
   choice (docs/GITHUB.md).
+- **Files and Wiki**, in the dashboard and on your site (docs/FILES.md).
+  The Files page browses every folder Fridolin is linked to — each
+  brain's folder and media inbox, and the folders approved nodes lend —
+  with search by name, and opens Markdown (rendered), text, images, PDFs,
+  audio and video, or downloads the file. The Wiki page reads each
+  brain's `wiki/` folder and memory notes as pages, with `[[links]]`,
+  backlinks, a table of contents and search. Both only read; every name
+  starting with `.`, secret files, what a brain's `backup.exclude` leaves
+  out and Fridolin's own state are never shown, no symlink is followed,
+  and every view is written to the audit log (`file_view`). Markdown is
+  parsed into a tree of a few element names and built with DOM calls,
+  never HTML.
+- The site serves `/files` and `/wiki` to signed-in accounts, for the
+  brains their role is given under Site → *Files and Wiki* (`admin`: all),
+  and runs without a repository of modules, with those pages alone.
+  `wiki.<domain>` and `files.<domain>` that reach the site redirect to
+  `<domain>/wiki` and `/files`. A module whose route is `/files` or
+  `/wiki` is no longer loaded: rename its route.
+- The Site page walks through linking a domain: the domain, a Cloudflare
+  tunnel that Fridolin runs (where to create it, the token to copy, the
+  public host name to add) and a check that `https://<domain>` answers.
+  docs/SITE.md has the same steps under "From zero to your domain", and
+  `examples/site-module/` is a starter module to copy into a repository.
+
 - `fridolin core apparmor` (Linux, as root, once) installs an AppArmor
   profile for the core container, `fridolin-core`, and `core start`,
   `update` and `run` use it on a host with AppArmor

@@ -1,0 +1,8 @@
+:root { font-family: ui-sans-serif, system-ui, sans-serif; color-scheme: light dark; }
+main { max-width: 640px; margin: 0 auto; padding: 24px 16px; }
+form { display: flex; gap: 8px; }
+input { flex: 1; font: inherit; padding: 8px 10px; }
+button { font: inherit; padding: 8px 14px; }
+#error { color: #c92a2a; min-height: 1em; }
+li { margin: 6px 0; }
+small { opacity: .7; }
