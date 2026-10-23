@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -318,7 +319,7 @@ func coreExport(ctx context.Context, f insideFlags, env coreEnv) error {
 			return err
 		}
 	}
-	brains, folders := exportFolders(cfg)
+	brains, folders := exportFolders(cfg, configPath(f.config))
 	host, _ := os.Hostname()
 	res, err := coreexport.Export(ctx, dataDir, []age.Recipient{keys.pq.Recipient()}, st, coreexport.ExportOptions{
 		DB: sqliteDB{}, SealKey: keys.seal, Version: version.String(), Hostname: host, BrainFolders: brains, Folders: folders,
@@ -333,8 +334,11 @@ func coreExport(ctx context.Context, f insideFlags, env coreEnv) error {
 
 // exportFolders are the config's brain folders, absolute, and those an
 // export takes along: as far as each brain's backup settings let it reach
-// the cloud, since the export goes through the vault bucket.
-func exportFolders(cfg *config.Settings) (brains []string, folders []coreexport.Folder) {
+// the cloud, since the export goes through the vault bucket. A folder's
+// Configured path is the one config.json at cfgPath has, as typed
+// (~/Personal), which the move keeps in moved_from and brings back.
+func exportFolders(cfg *config.Settings, cfgPath string) (brains []string, folders []coreexport.Folder) {
+	written := writtenBrainPaths(cfgPath)
 	for _, b := range cfg.BrainDirs {
 		dir := app.AbsPath(b.Dir(app.HomeDir()))
 		brains = append(brains, dir)
@@ -342,9 +346,38 @@ func exportFolders(cfg *config.Settings) (brains []string, folders []coreexport.
 			continue
 		}
 		skip, excluded := app.BrainFolderFilter(b.Approved.ID, dir, b.Approved, cfg.Backup.IncludeSecretFiles)
-		folders = append(folders, coreexport.Folder{ID: b.Approved.ID, Configured: b.Path, Dir: dir, Skip: skip, Excluded: excluded})
+		configured := b.Path
+		for _, w := range written {
+			if w != b.Path && fsx.ExpandHome(w, app.HomeDir()) == b.Path {
+				configured = w
+				break
+			}
+		}
+		folders = append(folders, coreexport.Folder{ID: b.Approved.ID, Configured: configured, Dir: dir, Skip: skip, Excluded: excluded})
 	}
 	return brains, folders
+}
+
+// writtenBrainPaths are the paths of brain_dirs as config.json has them,
+// before ~ is expanded; none when it cannot be read.
+func writtenBrainPaths(cfgPath string) []string {
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return nil
+	}
+	var raw struct {
+		BrainDirs []struct {
+			Path string `json:"path"`
+		} `json:"brain_dirs"`
+	}
+	if json.Unmarshal(data, &raw) != nil {
+		return nil
+	}
+	out := make([]string, 0, len(raw.BrainDirs))
+	for _, b := range raw.BrainDirs {
+		out = append(out, b.Path)
+	}
+	return out
 }
 
 // coreListFolders is core export --list-folders.
@@ -359,7 +392,7 @@ func coreListFolders(f insideFlags, env coreEnv) error {
 			return err
 		}
 	}
-	_, folders := exportFolders(cfg)
+	_, folders := exportFolders(cfg, configPath(f.config))
 	infos, err := coreexport.ListFolders(app.AbsPath(dataDir), folders, func(p string) { fmt.Fprintln(env.stdout, p) },
 		func(format string, a ...any) { fmt.Fprintf(env.stderr, format+"\n", a...) })
 	for _, i := range infos {
@@ -408,10 +441,16 @@ func coreImport(ctx context.Context, f insideFlags, env coreEnv) error {
 	for _, p := range placed {
 		if p.Home {
 			msg := fmt.Sprintf("Brought brain %s's folder home to %s: %d files added, %d updated, %d the same", p.ID, p.Dir, p.Added, p.Updated, p.Same)
+			if p.Kept > 0 {
+				msg += fmt.Sprintf(", %d changed at home only and kept", p.Kept)
+			}
 			if p.Aside != "" {
 				msg += "; the files it replaced are in " + p.Aside
 			}
 			logf("%s", msg)
+			for _, c := range p.Conflicts {
+				logf("conflict: %s/%s changed at home and on the other machine: the home version stays, the other one is in %s", p.Dir, c, p.Aside)
+			}
 		} else {
 			logf("Put brain %s's folder into %s; the move back brings it home", p.ID, p.Dir)
 		}

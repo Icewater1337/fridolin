@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/testutil"
@@ -431,7 +432,7 @@ func TestVaultLayout(t *testing.T) {
 		"vault/documents/main/x.pdf": false, "media/main/rec.m4a": false,
 		"brains-folders": false, "brains-folders/main/memories/a.md": false, "brains-folders/other/x": true,
 		"brains-folders/main/node_modules/x.js": true, "brains-folders/main/.git/HEAD": true,
-		"brains-folders/main/claude-stream.log": true, "brains/bad/brain.json": true,
+		"brains-folders/main/claude-stream.log": true, "brains-folders/.moved-main.json": true, "brains/bad/brain.json": true,
 		"dashboard.token": true, "scripts.token": true, "rclone/rclone.conf": true, "run-tokens/main/x": true,
 		"bridge.lock": true, "core/vault-status.json": true, "tsnet/x": true, "media/main/x.lock": true,
 	} {
@@ -444,5 +445,102 @@ func TestVaultLayout(t *testing.T) {
 	}
 	if got := strings.Join(l.brainPrefixes("work"), ","); got != "vault/documents/work,media/work" {
 		t.Errorf("work's vault paths: %s", got)
+	}
+
+	// A folder a core move put into the data dir, its home in moved_from,
+	// stays out of the vault: it goes home with the next move (#182).
+	cfg.BrainDirs = []config.BrainRef{{Path: "/data/brains-folders/Personal", MovedFrom: "~/Personal"}}
+	l = vaultLayoutOf(cfg, map[string]string{"main": "/data/brains-folders/main", "personal": "/data/brains-folders/Personal"},
+		map[string]brainBackup{"/data/brains-folders/main": backed("main", "/data/brains-folders/main"), "/data/brains-folders/Personal": backed("personal", "/data/brains-folders/Personal")})
+	if !l.ignore("brains-folders/Personal/notes/a.md") || !l.ignore("brains-folders/Personal") || l.ignore("brains-folders/main/notes/a.md") {
+		t.Error("a visiting brain folder is part of the vault")
+	}
+	if got := strings.Join(l.brainPrefixes("personal"), ","); got != "vault/documents/personal,media/personal" {
+		t.Errorf("personal's vault paths: %s", got)
+	}
+	for prefix, held := range map[string]bool{
+		"brains-folders/Personal": false, "brains-folders/gone": false, "tmp": false,
+		"brains-folders": true, "brains-folders/main": true, "brains-folders/main/x": true, "vault": true, "config.json": true,
+	} {
+		if got := l.holds(prefix); got != held {
+			t.Errorf("holds(%q) = %v, want %v", prefix, got, held)
+		}
+	}
+}
+
+// TestVaultForgetsABrainFolderThatWentHome is #182: a core move had a
+// brain folder in the data dir, the vault there uploaded it, and the way
+// back brought it home, with vault.db listing the folder still. The note
+// the import leaves makes the vault forget the data dir's copy at its next
+// start, before the first sync: its rows and cold copies go, and no
+// .cold.json is written for them.
+func TestVaultForgetsABrainFolderThatWentHome(t *testing.T) {
+	local := t.TempDir()
+	t.Setenv(vaultLocalEnv, local)
+	h := newServedHarness(t, vaultConfig)
+	data := h.DataDir()
+	away := filepath.Join(data, "brains-folders", "Personal")
+	writeFile(t, filepath.Join(away, "brain.json"), `{"id":"personal"}`)
+	writeFile(t, filepath.Join(away, "notes", "a.md"), "a note")
+	writeFile(t, filepath.Join(data, "vault", "documents", "personal", "lease.pdf"), "%PDF-1.7 a lease")
+	// What the vault on the other machine did: index and upload it all.
+	cold, err := cloud.NewDir(filepath.Join(local, "cold-sealed"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed, err := vault.New(vault.Options{Root: data, DBPath: filepath.Join(data, "vault.db"), Store: cold,
+		Ignore: func(rel string) bool {
+			return rel != "brains-folders" && rel != "vault" && !strings.HasPrefix(rel, "brains-folders/") && !strings.HasPrefix(rel, "vault/")
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep, err := seed.Sync(context.Background()); err != nil || len(rep.Uploaded) != 3 {
+		t.Fatalf("seeding: %+v, %v", rep, err)
+	}
+	if err := seed.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// The way back, as core import does it: the folder goes home (the
+	// data dir's copy aside), and the note says what to forget.
+	home := filepath.Join(h.Home(), "Personal")
+	if err := os.Rename(away, home); err != nil {
+		t.Fatal(err)
+	}
+	note := filepath.Join(data, "core", vault.ForgetNoteName)
+	if err := vault.AddToForgetNote(note, vault.ForgetFolder{Prefix: "brains-folders/Personal", At: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+
+	h.startVault()
+	st := h.vaultWait("the forget", func(st vaultStatus) bool { return st.LastForget != nil && st.LastSync != nil })
+	if r := st.LastForget; r.Prefix != "brains-folders/Personal" || r.Forgotten != 2 || r.Error != "" || r.Kept != 0 {
+		t.Errorf("last forget = %+v", r)
+	}
+	if _, err := os.Stat(filepath.Join(local, "cold-sealed", "brains-folders")); !os.IsNotExist(err) {
+		t.Errorf("the cold tier keeps the folder: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(local, "cold-sealed", "vault", "documents", "personal", "lease.pdf")); err != nil {
+		t.Errorf("a document left the cold tier: %v", err)
+	}
+	if _, err := os.Stat(away); !os.IsNotExist(err) {
+		t.Errorf("the vault wrote into the data dir's old copy (.cold.json): %v", err)
+	}
+	if _, err := os.Stat(note); !os.IsNotExist(err) {
+		t.Errorf("the note stays after the forget: %v", err)
+	}
+	if got := readFile(t, filepath.Join(home, "notes", "a.md")); got != "a note" {
+		t.Errorf("at home: %q", got)
+	}
+
+	// By hand: a folder the vault keeps is refused, one it does not is a job.
+	for _, p := range []string{"vault/documents", "vault/documents/personal/x", "brains-folders/../vault", ""} {
+		if w := h.Do("POST", "/api/vault/forget", map[string]string{"prefix": p}); w.Code != http.StatusBadRequest && w.Code != http.StatusUnprocessableEntity {
+			t.Errorf("forget %q: %d %s", p, w.Code, w.Body.String())
+		}
+	}
+	st = h.vaultJob("/api/vault/forget", map[string]string{"prefix": "brains-folders/Personal"})
+	if r := st.LastForget; r.Forgotten != 0 || r.Error != "" {
+		t.Errorf("second forget = %+v", r)
 	}
 }

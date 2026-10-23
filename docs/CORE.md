@@ -871,10 +871,29 @@ On the way back, the import on the Mac, where `compose.host.yaml` binds
 `~/Personal` in again, brings each such folder home: files the brain
 added are added, files it changed are written over after the Mac's
 version moved to `core/replaced-<time>/folders/<brain id>/`, the same
-ones stay as they are, and the brain points at `~/Personal` again. Nothing
+ones stay as they are, and the brain points at `~/Personal` again, the
+path as `config.json` had it (`~/Personal`, not the expanded one). Nothing
 at home is deleted: a file the brain deleted on the other machine is
 still there, and what never left (the excluded work folders) is
 untouched. A folder below a link is never written through.
+
+A file changed at home while the folder was away is not lost. When the
+import puts a folder into the volume it records each file's sha256 in
+`/data/brains-folders/.moved-<name>.json`, beside the folder (it travels
+with the data dir, is no vault file, and the brain does not see it). On
+the way back a file whose home version no longer has that hash stays as
+it is at home: when the brain's copy did not change it either, nothing
+happens; when it did, the brain's version goes to
+`core/replaced-<time>/folders/<brain id>/` instead and import reports a
+`conflict:` line for it, to merge by hand. A move made before this record
+existed brings the brain's version home as before.
+
+While a folder visits the volume, the vault leaves it out: no cold copies
+of it go to the vault bucket (the snapshots cover it). When the way back
+brings it home, the import tells the vault to forget the volume's copy
+(`core/vault-forget.json`), so that what a vault of an older fridolin
+uploaded of it leaves the bucket and `vault.db` at the vault's next start
+([VAULT.md](VAULT.md#forgetting-a-folder)).
 
 Settings that name Mac paths (`sandbox.credentials_dir`,
 `allow_paths`) are missing on the other machine, so Google Calendar

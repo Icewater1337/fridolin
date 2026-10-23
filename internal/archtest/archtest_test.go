@@ -30,7 +30,7 @@ var imports = map[string][]string{
 	"cmd/fridolin":          {"internal/cli"},
 	"examples":              nil,
 	"container":             nil,
-	"internal/coreexport":   {"internal/cloud", "internal/store", "internal/seal"},
+	"internal/coreexport":   {"internal/cloud", "internal/store", "internal/seal", "internal/vault"},
 	"internal/hostsecrets":  nil,
 	"internal/secretxfer":   {"internal/hostsecrets"},
 	"internal/lease":        {"internal/cloud"},

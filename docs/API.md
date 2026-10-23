@@ -265,6 +265,7 @@ either):
 | `POST /api/vault/targets/{name}/snapshot`, `/check`, `/restore-drill` | start that job on the target (bodies as for the vault's own); `202`, `409` while the target runs another |
 | `POST /api/vault/targets/{name}/prune/allow` | lift the target's deletion hold |
 | `POST /api/vault/get` | `{"path": "<vault path>", "allow_over_budget": false}`: bring the file back and answer `{"path": "<absolute path>"}`; `404` for a path the vault does not hold, `412` when it would take the hot tier over its budget |
+| `POST /api/vault/forget` | `{"prefix": "brains-folders/Personal"}`: start the job that forgets a folder below the data dir the vault no longer keeps, its rows and cold copies, leaving files on disk ([VAULT.md](VAULT.md#forgetting-a-folder)); `202`, `422` for a folder the vault keeps or a path that is not clean, `409` while another job runs |
 
 ## The policy's dashboard routes
 

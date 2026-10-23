@@ -668,6 +668,26 @@ for compatibility.
 
 ### Fixed
 
+- A brain folder a core move put into the volume stays out of the vault's
+  cold tier (#182). The vault had uploaded it, and after the way back
+  `vault.db` still listed it: the vault kept its cold copies and wrote
+  `.cold.json` files for them into `/data/brains-folders/`. Now a brain
+  folder with `moved_from` is not a vault file, the import that brings a
+  folder home leaves `core/vault-forget.json`, and the vault forgets that
+  folder at its next start: rows and cold copies go, files on disk stay.
+  `fridolin vault forget PREFIX` (`POST /api/vault/forget`) does it by
+  hand, for leftovers of a move made before this version
+  (docs/VAULT.md, "Forgetting a folder").
+- The way back of a core move no longer loses an edit made at home
+  meanwhile (#182). The import that puts a brain folder into the volume
+  records each file's sha256 (`brains-folders/.moved-<name>.json`), and
+  the way back keeps a file that changed at home since: the brain's
+  version of one it changed too goes to `core/replaced-<time>/folders/`
+  and import reports it as a conflict. And `moved_from`, and the brain's
+  path after the way back, are the path as typed in `config.json`
+  (`~/Personal`) instead of the expanded one (docs/CORE.md, "Brain
+  folders on another machine").
+
 - A Windows node joined by a coding agent in the Claude desktop app no
   longer ends with a node service that fails to start with only error
   1053. The app runs as an MSIX package, and Windows keeps what any
