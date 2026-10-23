@@ -59,6 +59,15 @@ for compatibility.
   a runbook for giving a node its own companion FrIDE. It runs natively
   on macOS and Linux, and in WSL2 on Windows, started by a Scheduled
   Task.
+- The companion FrIDE's agents start with the ponytail plugin (MIT;
+  minimal code, `/ponytail-review`, `/ponytail-audit`). The runbook
+  clones it pinned to v5.3.2 into `~/fride-companion/plugins/ponytail`
+  and lists it in FrIDE's `companion.claudePlugins`, which loads it as
+  `--plugin-dir` for those agents only, with nothing installed into
+  `~/.claude` (docs/NODES.md, "Ponytail for every agent"). A companion
+  set up before needs a FrIDE with `claudePlugins` (FrIDE's pull request
+  #8), then the clone, the marker file and the config entry from that
+  section, and **Re-check** in FrIDE's Settings.
 - Everything stored off the machine is encrypted twice, with independent
   keys, and the exports' asymmetric layer is post-quantum (age with
   ML-KEM-768 + X25519; docs/VAULT.md, "Encryption"): the cold tier is

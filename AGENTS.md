@@ -260,6 +260,9 @@ machine must already be a node (path B). In short:
    into `~/fride-companion/src/fride` and build
    `~/fride-companion/bin/fride`. Clone `fridolin` and `fride` into
    `~/fride-companion/repos` (in WSL's file system, never `/mnt/c`).
+   Clone the ponytail plugin, pinned, into
+   `~/fride-companion/plugins/ponytail` (NODES.md, "Ponytail for every
+   agent"); FrIDE's agents load it through `companion.claudePlugins`.
    Write the config from NODES.md into `~/fride-companion/home`
    (`FRIDE_HOME`), and run `fride config check` and `fride doctor`.
    Ask the owner for the git name and email FrIDE's agents commit
