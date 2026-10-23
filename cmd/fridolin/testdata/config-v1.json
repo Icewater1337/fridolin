@@ -54,6 +54,7 @@
   "brain_dirs": [
     {
       "path": "~/brains/main",
+      "moved_from": "~/main",
       "approved": {
         "version": 1,
         "id": "main",

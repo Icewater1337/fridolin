@@ -124,6 +124,12 @@ func (pc PlaudConfig) Validate() error {
 type BrainRef struct {
 	Path     string             `json:"path"`
 	Approved *manifest.Manifest `json:"approved"`
+	// MovedFrom is where the folder lives on its home machine (as typed,
+	// ~/Personal), set while a core move has it in the volume instead
+	// (/data/brains-folders/Personal): the import on a machine where that
+	// folder is there brings the brain's changes home and points Path back
+	// at it (docs/CORE.md, "Brain folders on another machine").
+	MovedFrom string `json:"moved_from,omitempty"`
 }
 
 // Dir is the brain's folder with ~ expanded, for code that works on the

@@ -81,7 +81,8 @@
         "required": ["path"],
         "properties": {
           "path": {"type": "string"},
-          "approved": {"oneOf": [{"$ref": "brain.schema.json"}, {"type": "null"}]}
+          "approved": {"oneOf": [{"$ref": "brain.schema.json"}, {"type": "null"}]},
+          "moved_from": {"type": "string", "description": "Where the folder lives on its home machine, while a core move keeps it in the volume; the move back brings it home."}
         }
       }
     },

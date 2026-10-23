@@ -25,13 +25,20 @@ On the host that runs Docker:
   fridolin core send --to HOST [--code CODE]
                        on the current core's host: send its secrets to the machine
                        running core receive, after both show the same four words
+  fridolin core apparmor
+                       Linux with AppArmor, as root, once: install the core's
+                       profile, which lets the brains' sandbox make its user
+                       namespaces (Ubuntu restricts them); start and run use it
   fridolin core run [--] COMMAND...
                        run a fridolin command in a one-off container on the
                        volume, with the secrets: core import while the core
                        is stopped, say (fridolin core run core import --latest)
 
 In the core (docker exec fridolin-core fridolin core ...):
-  fridolin core export           encrypt the data dir to the vault bucket
+  fridolin core export [--list-folders]
+                                 encrypt the data dir to the vault bucket, with the
+                                 brain folders it takes along (--list-folders: list
+                                 their files and export nothing)
   fridolin core import --latest [--force]
                                  fetch, decrypt and check the latest export,
                                  then put it in place of an empty data dir
