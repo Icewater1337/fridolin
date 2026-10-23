@@ -50,5 +50,6 @@
     "enabled": false
   },
   "policy": {},
-  "housekeeping": {}
+  "housekeeping": {},
+  "schedules": {}
 }

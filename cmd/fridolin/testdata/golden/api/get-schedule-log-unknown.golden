@@ -1,0 +1,7 @@
+GET /api/schedules/main/brief/runs/20261023T060000-abcdef/log
+404 Not Found
+Content-Type: application/json
+
+{
+  "error": "no log of run 20261023T060000-abcdef: it aged out, or never started"
+}

@@ -279,3 +279,10 @@ housekeepingStopResult
 	🧹 Housekeeping stopped PID 812 (python3).
 housekeepingStopResult(failed)
 	⚠️ Housekeeping could not stop PID 812 (python3): it is not the process it was any more
+scheduleFailedNotice
+	⏰ Scheduled agent *morning-briefing* (brain main) failed: the run took too long and was stopped. Its log is on the Schedules page of the dashboard.
+scheduleCommandResult
+	⏰ Scheduled agent *scrape* ran on laptop: exit 0.
+
+	fetched 12 transactions
+	summary sent
