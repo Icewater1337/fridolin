@@ -39,7 +39,8 @@ func testSiteOptions(t *testing.T) sitesvc.SiteOptions {
 	opts.NPMInstall = func(ctx context.Context, dir string, prod bool) error {
 		src := filepath.Join(repoDir, "site", "node_modules")
 		if !fsx.Exists(src) {
-			return nil
+			// What an install leaves even then: a deploy without it is built again.
+			return os.MkdirAll(filepath.Join(dir, "node_modules"), 0o700)
 		}
 		if out, err := exec.CommandContext(ctx, "cp", "-R", src, filepath.Join(dir, "node_modules")).CombinedOutput(); err != nil {
 			return fmt.Errorf("copying node_modules: %v %s", err, out)
