@@ -1,0 +1,87 @@
+GET /api/files/view?root=brain:main&path=wiki/index.md
+200 OK
+Content-Type: application/json
+
+{
+  "doc": {
+    "body": [
+      {
+        "c": [
+          {
+            "x": "Home"
+          }
+        ],
+        "id": "home",
+        "t": "h1"
+      },
+      {
+        "c": [
+          {
+            "x": "See "
+          },
+          {
+            "c": [
+              {
+                "x": "alex"
+              }
+            ],
+            "page": "wiki/people/alex.md",
+            "t": "a"
+          },
+          {
+            "x": " and "
+          },
+          {
+            "c": [
+              {
+                "x": "the plan"
+              }
+            ],
+            "file": "docs/plan.txt",
+            "t": "a"
+          },
+          {
+            "x": "."
+          }
+        ],
+        "t": "p"
+      },
+      {
+        "c": [
+          {
+            "x": "Notes"
+          }
+        ],
+        "id": "notes",
+        "t": "h2"
+      },
+      {
+        "c": [
+          {
+            "x": "<script>alert(1)</script>"
+          }
+        ],
+        "t": "p"
+      }
+    ],
+    "title": "Home",
+    "toc": [
+      {
+        "id": "home",
+        "level": 1,
+        "text": "Home"
+      },
+      {
+        "id": "notes",
+        "level": 2,
+        "text": "Notes"
+      }
+    ]
+  },
+  "kind": "markdown",
+  "mod_time": "<MOD_TIME>",
+  "name": "index.md",
+  "path": "wiki/index.md",
+  "root": "brain:main",
+  "size": 91
+}

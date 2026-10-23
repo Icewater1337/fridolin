@@ -1,0 +1,53 @@
+GET /api/files/list?root=brain:main
+200 OK
+Content-Type: application/json
+
+{
+  "entries": [
+    {
+      "dir": true,
+      "mod_time": "<MOD_TIME>",
+      "name": "docs",
+      "size": 0
+    },
+    {
+      "dir": true,
+      "mod_time": "<MOD_TIME>",
+      "name": "memories",
+      "size": 0
+    },
+    {
+      "dir": true,
+      "mod_time": "<MOD_TIME>",
+      "name": "skills",
+      "size": 0
+    },
+    {
+      "dir": true,
+      "mod_time": "<MOD_TIME>",
+      "name": "wiki",
+      "size": 0
+    },
+    {
+      "kind": "markdown",
+      "mod_time": "<MOD_TIME>",
+      "name": "brain-prompt.md",
+      "size": 8579
+    },
+    {
+      "kind": "text",
+      "mod_time": "<MOD_TIME>",
+      "name": "brain.json",
+      "size": 520
+    },
+    {
+      "kind": "text",
+      "mod_time": "<MOD_TIME>",
+      "name": "conversation-history.jsonl",
+      "size": 360
+    }
+  ],
+  "path": "",
+  "root": "brain:main",
+  "truncated": false
+}

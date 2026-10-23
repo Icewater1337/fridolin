@@ -468,9 +468,18 @@ func snippet(text, word string) string {
 	return s
 }
 
-var inlineMarkRE = regexp.MustCompile("[*_`#>|]+|\\[\\[|\\]\\]|!?\\[|\\]\\([^)]*\\)")
+var (
+	wikiLabelRE  = regexp.MustCompile(`!?\[\[(?:[^\[\]|\n]*\|)?([^\[\]\n]*)\]\]`)
+	mdLinkTextRE = regexp.MustCompile(`!?\[([^\]\n]*)\]\([^)\n]*\)`)
+	inlineMarkRE = regexp.MustCompile("[*_`#>|]+")
+)
 
-func stripInline(s string) string { return inlineMarkRE.ReplaceAllString(s, "") }
+// stripInline is Markdown as plain text, roughly: a link as its text.
+func stripInline(s string) string {
+	s = wikiLabelRE.ReplaceAllString(s, "$1")
+	s = mdLinkTextRE.ReplaceAllString(s, "$1")
+	return inlineMarkRE.ReplaceAllString(s, "")
+}
 
 // ErrNoWiki is returned for a brain without wiki or memories pages.
 var ErrNoWiki = errors.New("this brain has no wiki/ or memories/ pages")

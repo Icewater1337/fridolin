@@ -380,7 +380,12 @@ func (a *FilesAPI) view(w http.ResponseWriter, r *http.Request, s files.Scope) {
 		WriteErr(w, http.StatusNotFound, errNoRoot.Error())
 		return
 	}
-	rel, _ := files.Clean(q.Get("path"))
+	rel, err := files.Clean(q.Get("path"))
+	if err != nil {
+		a.audit(s, root, "view", q.Get("path"), err)
+		writeFilesErr(w, err)
+		return
+	}
 	kind := files.KindOf(rel)
 	max := int64(maxViewText)
 	if kind == files.FileMarkdown {
@@ -435,7 +440,12 @@ func (a *FilesAPI) raw(w http.ResponseWriter, r *http.Request, s files.Scope) {
 		WriteErr(w, http.StatusNotFound, errNoRoot.Error())
 		return
 	}
-	rel, _ := files.Clean(q.Get("path"))
+	rel, err := files.Clean(q.Get("path"))
+	if err != nil {
+		a.audit(s, root, "open", q.Get("path"), err)
+		writeFilesErr(w, err)
+		return
+	}
 	download := q.Get("download") == "1"
 	f, err := a.open(r.Context(), root, rel, s, maxNodeFileOpen)
 	action := "open"

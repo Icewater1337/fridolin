@@ -78,7 +78,13 @@ type Root struct {
 // BrainRoot is a brain's folder, hiding its backup.exclude and the
 // absolute paths in deny.
 func BrainRoot(brainID, label, dir string, backupOn bool, exclude, deny []string) Root {
-	r := Root{ID: KindBrain + ":" + brainID, Kind: KindBrain, Brain: brainID, Label: label, Path: dir, Location: "core", Online: true, Excluded: slices.Clone(exclude)}
+	var unique []string
+	for _, x := range exclude {
+		if !slices.Contains(unique, x) {
+			unique = append(unique, x)
+		}
+	}
+	r := Root{ID: KindBrain + ":" + brainID, Kind: KindBrain, Brain: brainID, Label: label, Path: dir, Location: "core", Online: true, Excluded: unique}
 	r.Backup = "off"
 	if backupOn {
 		r.Backup = "on"

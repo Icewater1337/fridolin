@@ -1,0 +1,51 @@
+GET /api/wiki/main/page?path=wiki/people/alex.md
+200 OK
+Content-Type: application/json
+
+{
+  "backlinks": [
+    {
+      "mod_time": "<MOD_TIME>",
+      "name": "index",
+      "path": "wiki/index.md",
+      "section": "wiki",
+      "size": 91,
+      "title": "Home"
+    }
+  ],
+  "brain": "main",
+  "doc": {
+    "body": [
+      {
+        "c": [
+          {
+            "x": "Works on "
+          },
+          {
+            "c": [
+              {
+                "x": "the home page"
+              }
+            ],
+            "page": "wiki/index.md",
+            "t": "a"
+          },
+          {
+            "x": ". Budget 2026."
+          }
+        ],
+        "t": "p"
+      }
+    ],
+    "title": "Alex",
+    "toc": []
+  },
+  "page": {
+    "mod_time": "<MOD_TIME>",
+    "name": "people/alex",
+    "path": "wiki/people/alex.md",
+    "section": "wiki",
+    "size": 67,
+    "title": "Alex"
+  }
+}

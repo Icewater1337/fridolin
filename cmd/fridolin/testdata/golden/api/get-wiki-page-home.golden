@@ -1,0 +1,100 @@
+GET /api/wiki/main/page
+200 OK
+Content-Type: application/json
+
+{
+  "backlinks": [
+    {
+      "mod_time": "<MOD_TIME>",
+      "name": "people/alex",
+      "path": "wiki/people/alex.md",
+      "section": "wiki",
+      "size": 67,
+      "title": "Alex"
+    }
+  ],
+  "brain": "main",
+  "doc": {
+    "body": [
+      {
+        "c": [
+          {
+            "x": "Home"
+          }
+        ],
+        "id": "home",
+        "t": "h1"
+      },
+      {
+        "c": [
+          {
+            "x": "See "
+          },
+          {
+            "c": [
+              {
+                "x": "alex"
+              }
+            ],
+            "page": "wiki/people/alex.md",
+            "t": "a"
+          },
+          {
+            "x": " and "
+          },
+          {
+            "c": [
+              {
+                "x": "the plan"
+              }
+            ],
+            "file": "docs/plan.txt",
+            "t": "a"
+          },
+          {
+            "x": "."
+          }
+        ],
+        "t": "p"
+      },
+      {
+        "c": [
+          {
+            "x": "Notes"
+          }
+        ],
+        "id": "notes",
+        "t": "h2"
+      },
+      {
+        "c": [
+          {
+            "x": "<script>alert(1)</script>"
+          }
+        ],
+        "t": "p"
+      }
+    ],
+    "title": "Home",
+    "toc": [
+      {
+        "id": "home",
+        "level": 1,
+        "text": "Home"
+      },
+      {
+        "id": "notes",
+        "level": 2,
+        "text": "Notes"
+      }
+    ]
+  },
+  "page": {
+    "mod_time": "<MOD_TIME>",
+    "name": "index",
+    "path": "wiki/index.md",
+    "section": "wiki",
+    "size": 91,
+    "title": "Home"
+  }
+}

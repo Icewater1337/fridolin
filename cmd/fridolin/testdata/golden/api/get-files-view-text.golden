@@ -1,0 +1,13 @@
+GET /api/files/view?root=brain:main&path=docs/plan.txt
+200 OK
+Content-Type: application/json
+
+{
+  "kind": "text",
+  "mod_time": "<MOD_TIME>",
+  "name": "plan.txt",
+  "path": "docs/plan.txt",
+  "root": "brain:main",
+  "size": 10,
+  "text": "The plan.\n"
+}
