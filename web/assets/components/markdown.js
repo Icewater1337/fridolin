@@ -18,10 +18,10 @@ const WEB = /^(https?:|mailto:)/i;
 export function markdownNodes(nodes, links) {
   const out = [];
   for (const n of nodes || []) {
-    if (!n.t) { out.push(n.x || ''); continue; }
+    if (!n.t) { out.push(document.createTextNode(n.x || '')); continue; }
     if (!TAGS.has(n.t)) { out.push(...markdownNodes(n.c, links)); continue; }
     if (n.t === 'img') {
-      out.push(n.file ? h('img', { src: links.image(n.file), alt: n.alt || '', title: n.title || null, loading: 'lazy' }) : (n.alt || ''));
+      out.push(n.file ? h('img', { src: links.image(n.file), alt: n.alt || '', title: n.title || null, loading: 'lazy' }) : document.createTextNode(n.alt || ''));
       continue;
     }
     if (n.t === 'a') {
@@ -39,8 +39,8 @@ export function markdownNodes(nodes, links) {
       start: n.start || null,
       class: [n.align ? `md-${n.align}` : '', n.checked !== undefined ? 'md-task' : ''].filter(Boolean).join(' ') || null,
     });
-    if (n.checked !== undefined) el.append(h('input', { type: 'checkbox', disabled: true, checked: Boolean(n.checked), 'aria-label': n.checked ? 'Done' : 'Not done' }), ' ');
-    el.append(...markdownNodes(n.c, links).map((c) => (typeof c === 'string' ? document.createTextNode(c) : c)));
+    if (n.checked !== undefined) el.append(h('input', { type: 'checkbox', disabled: true, checked: Boolean(n.checked), 'aria-label': n.checked ? 'Done' : 'Not done' }), document.createTextNode(' '));
+    for (const c of markdownNodes(n.c, links)) el.appendChild(c);
     out.push(el);
   }
   return out;

@@ -50,8 +50,11 @@ export function builtinRoutes(opts: {
       return
     }
     const user = (req as express.Request & { user?: SessionUser }).user!
-    const q = req.originalUrl.indexOf('?')
-    const url = `${opts.bridge.url}/site-api/${p}${q >= 0 ? req.originalUrl.slice(q) : ''}`
+    // The bridge's own address, with one of CALLS as the path and the
+    // page's query: nothing the browser sends can name another server.
+    const url = new URL(opts.bridge.url)
+    url.pathname = `/site-api/${p}`
+    url.search = new URL(req.originalUrl, 'http://site.invalid').search
     const headers: Record<string, string> = {
       Authorization: `Bearer ${opts.bridge.token}`,
       'X-Fridolin-Site-User': user.id,
@@ -62,7 +65,7 @@ export function builtinRoutes(opts: {
     res.on('close', () => abort.abort())
     let upstream: Response
     try {
-      upstream = await doFetch(url, { headers, signal: abort.signal, redirect: 'error' })
+      upstream = await doFetch(url.href, { headers, signal: abort.signal, redirect: 'error' })
     } catch {
       if (!res.headersSent) res.status(502).json({ error: 'Fridolin did not answer; is the bridge running?' })
       return

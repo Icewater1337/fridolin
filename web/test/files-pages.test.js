@@ -117,7 +117,7 @@ test('a Markdown file is rendered, its links and images through the bridge', asy
   const links = hrefs(root);
   assert.ok(links.includes('#/wiki/main/wiki/acme.md'), 'a page of the wiki opens in the wiki');
   assert.ok(links.includes('#/file/brain%3Amain/docs/plan.pdf'));
-  assert.ok(links.includes('https://example.com/'));
+  assert.equal(root.querySelectorAll('a[target=_blank]').length, 1, 'the one link to the web');
   assert.ok(links.includes('/files/raw?root=brain%3Amain&path=wiki%2Fpeople%2Falex.md&ticket=123.sig&download=1'));
   assert.equal(root.querySelector('img').getAttribute('src'), '/files/raw?root=brain%3Amain&path=wiki%2Flogo.png&ticket=123.sig');
   assert.equal(root.querySelector('a[target=_blank]').getAttribute('rel'), 'noopener noreferrer nofollow');
