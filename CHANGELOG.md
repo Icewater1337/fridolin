@@ -662,6 +662,12 @@ for compatibility.
   node that already hit it). `fridolin node status` and `doctor --node`
   on Windows also tell the service's state without an administrator
   instead of "cannot tell: Access is denied".
+- Litestream stopped uploading `bridge.db` and `vault.db` after the move
+  to the local replica that the vault mirrors (`core/litestream-replica/`):
+  it logged `LTX file is missing` every two minutes and copied only the
+  daily snapshot, while `fridolin doctor` said it replicated. The bridge
+  now resets such a database and starts its replica over by itself, and
+  doctor warns while Litestream logs errors (docs/VAULT.md, "Encryption").
 - A Linux node comes back after a reboot. Its systemd user unit was
   written with kardianos/service's `WantedBy=multi-user.target`, a
   target a user's systemd never reaches, so the node stayed off until

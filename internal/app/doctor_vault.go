@@ -127,6 +127,11 @@ func checkVaultSnapshot(_ context.Context, env *DoctorEnv) DoctorResult {
 	return DoctorResult{Status: DoctorOK, Detail: detail}
 }
 
+// litestreamProblemRecent is how long a warning or error that Litestream
+// logged keeps its check from passing: it logs a lasting one again every
+// few minutes.
+const litestreamProblemRecent = 15 * time.Minute
+
 func checkVaultLitestream(_ context.Context, env *DoctorEnv) DoctorResult {
 	st, bad := env.vaultStatus()
 	if bad != nil {
@@ -138,8 +143,15 @@ func checkVaultLitestream(_ context.Context, env *DoctorEnv) DoctorResult {
 		return DoctorResult{Status: DoctorFail, Detail: "Litestream does not run: it is not installed, or the snapshots bucket has no key", Fix: installFix(env.GOOS, "benbjohnson/litestream/litestream", "")}
 	case !l.Running:
 		return DoctorResult{Status: DoctorFail, Detail: fmt.Sprintf("Litestream is not running (%d restarts): %s", l.Restarts, l.LastError), Fix: "the bridge's log says why; it restarts Litestream by itself"}
+	case !l.LastProblemAt.IsZero() && env.now().Sub(l.LastProblemAt) < litestreamProblemRecent:
+		return DoctorResult{Status: DoctorWarn, Detail: fmt.Sprintf("pid %d runs, but logged %s ago: %s", l.PID, env.now().Sub(l.LastProblemAt).Round(time.Second), l.LastProblem),
+			Fix: "the bridge's log says more; a database whose replica lost a file it needs is started over by itself, once an hour at most"}
 	}
-	return DoctorResult{Status: DoctorOK, Detail: fmt.Sprintf("pid %d, %d restarts", l.PID, l.Restarts)}
+	detail := fmt.Sprintf("pid %d, %d restarts", l.PID, l.Restarts)
+	if l.Repairs > 0 {
+		detail += fmt.Sprintf(", started over after a lost file: %d, the last %s", l.Repairs, l.LastRepair.Format(time.RFC3339))
+	}
+	return DoctorResult{Status: DoctorOK, Detail: detail}
 }
 
 // checkVaultBrainBackup warns about the brain folders the snapshots and
