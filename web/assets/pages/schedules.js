@@ -155,7 +155,7 @@ function buildForm(templates, brains) {
       field({ label: 'Vars', help: 'name=value, one a line: they fill {{name}} in the task.', control: area('vars', varsText(s.vars), 3) }),
       field({ label: 'Risk budget', control: sel('risk', RISKS, s.risk) }),
       field({ label: 'Steps approved with the schedule', help: 'One a line; its runs take them without asking.', control: area('preapproved', (s.preapproved || []).join('\n'), 2) }),
-      field({ label: 'GitHub repositories', help: 'owner/name, one a line: each run gets GH_TOKEN for these alone, with the permissions below.', control: area('githubRepos', s.github ? (s.github.repos || []).join('\n') : '', 2, { placeholder: 'you/project' }) }),
+      field({ label: 'GitHub repositories', help: 'owner/name, one a line: each run is logged in to gh for these alone, with the permissions below.', control: area('githubRepos', s.github ? (s.github.repos || []).join('\n') : '', 2, { placeholder: 'you/project' }) }),
       field({ label: 'GitHub permissions', help: 'name=read or name=write, one a line.', control: area('githubPermissions', s.github ? varsText(s.github.permissions) : '', 2, { placeholder: 'issues=write' }) }),
       field({ label: 'Tools', help: 'Off, the brain’s list applies.', control: h('div', ownTools, area('tools', (s.disallowed_tools || []).join('\n'), 2, { placeholder: 'WebFetch' })) }));
     const showKind = () => {

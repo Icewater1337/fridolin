@@ -1702,7 +1702,7 @@ The bridge itself reads two variables:
 | `BRAIN_MODE` | set to anything but `true`, `1`, `yes` or `on`, the bridge refuses to start, see [`brain_mode`](#brain_mode) |
 
 `FRIDOLIN_GITHUB_TOKEN` is the fallback GitHub token: while no GitHub
-App is connected, the bridge hands it, as `GH_TOKEN`, to the runs with a
+App is connected, the bridge logs gh in with it for the runs with a
 GitHub grant (scheduled agents with a `github` field) and to no other
 program ([BRAINS.md](BRAINS.md#github-for-scheduled-agents)).
 

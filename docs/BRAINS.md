@@ -567,7 +567,7 @@ node on a schedule. Each brain keeps its agents in `brain.json`:
 | `missed` | a run that fell due while the bridge was down: `run` (the default) runs it once when the bridge is back, however many times it fell due; `skip` waits for the next time |
 | `jitter_minutes` | each run starts a fixed number of seconds within this many minutes after its time, the same for every run of the agent; left out, [`schedules.jitter_minutes`](CONFIGURATION.md#schedules) (2) |
 | `preapproved` | steps the owner approved together with the schedule (`"file GitHub issues on example/repo"`): the run is told it may take them without `request_approval`; every other irreversible step still asks |
-| `github` | `{"repos": ["owner/name"], "permissions": {"issues": "write", "contents": "read"}}`: the GitHub access its runs, and no other run, are granted: each run gets `GH_TOKEN` for exactly these repositories and permissions, ended when the run is ([below](#github-for-scheduled-agents)) |
+| `github` | `{"repos": ["owner/name"], "permissions": {"issues": "write", "contents": "read"}}`: the GitHub access its runs, and no other run, are granted: each run is logged in to `gh` with a token for exactly these repositories and permissions, which ends with the run ([below](#github-for-scheduled-agents)) |
 
 A task file may start with a frontmatter of `description:` and
 `vars: name, other=default` lines, as the templates do; the rest is the
@@ -630,10 +630,16 @@ its private advisories), and since filing an issue publishes something,
 
 ### GitHub for scheduled agents
 
-A run gets `GH_TOKEN`, which `gh` and `git` take, only when its agent has
-a `github` grant: the run's message carries it, and as the run starts the
-bridge gets a token for exactly the grant's repositories and permissions,
-which ends with the run. No other run or program gets one.
+A run is logged in to GitHub only when its agent has a `github` grant:
+the run's message carries it, and as the run starts the bridge gets a
+token for exactly the grant's repositories and permissions and writes it
+as `gh`'s login into a folder of the run's own (`GH_CONFIG_DIR`, in the
+data dir's `run-tokens/`, which only that run's sandbox may read), never
+into the run's environment, which macOS shows the user's other
+processes. `gh` works as it is; `git` uses it with
+`git -c credential.helper='!gh auth git-credential'`. When the run ends
+the folder is removed and the token released. No other run or program
+gets one.
 
 Where the token comes from is one hook, `GitHubTokenSource` (in
 `internal/app`, set with `App.SetGitHubTokenSource`): with GitHub

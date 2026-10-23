@@ -211,7 +211,7 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["repos", "permissions"],
-            "description": "The GitHub access its runs are granted, and no other run: a token for these repositories and permissions, as GH_TOKEN, minted as a run starts and ended with it.",
+            "description": "The GitHub access its runs are granted, and no other run: a token for these repositories and permissions, as gh's login, minted as a run starts and ended with it.",
             "properties": {
               "repos": {
                 "type": ["array", "null"],

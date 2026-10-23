@@ -20,18 +20,21 @@ exactly NOTHING_TO_REPORT.
 
 ## Get the code
 
-`gh` is logged in through GH_TOKEN, a token for this run and these
-repositories alone. Check that first with `gh auth status`; if it fails,
-reply with one line saying this run got no working GitHub token (the
-owner connects GitHub on the dashboard, or sets a token) and stop.
+`gh` is logged in for this run, for these repositories alone: use it as
+it is. Check that first with `gh repo view OWNER/REPO --json name` for
+each repository; if that fails, reply with one line saying this run got
+no working GitHub access (the owner connects GitHub on the dashboard) and
+stop. Never read, print or copy its token (`gh auth token`, the files in
+`$GH_CONFIG_DIR`), and never put it into a command line.
 
 For each repository, keep a shallow clone in your cache and bring it up
-to date:
+to date (git asks gh for the login):
 
 ```bash
 dir="${XDG_CACHE_HOME:-$HOME/.cache}/fridolin-review/OWNER/REPO"
 [ -d "$dir/.git" ] || gh repo clone OWNER/REPO "$dir" -- --depth 200
-git -C "$dir" fetch --depth 200 origin && git -C "$dir" reset --hard origin/HEAD
+git -c credential.helper='!gh auth git-credential' -C "$dir" fetch --depth 200 origin
+git -C "$dir" reset --hard origin/HEAD
 git -C "$dir" rev-parse HEAD     # the commit you review; links use it
 ```
 

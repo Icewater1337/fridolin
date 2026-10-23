@@ -379,11 +379,11 @@ func TestMemoryConsolidateIsAScheduledAgent(t *testing.T) {
 }
 
 // TestScheduledAgentSecretsAndFailures: an agent with the github secret
-// gets GH_TOKEN and no other run does; a program on a node that is not
+// gets gh's login (GH_CONFIG_DIR) and no other run does; a program on a node that is not
 // there fails, and the owner hears of it.
 func TestScheduledAgentSecretsAndFailures(t *testing.T) {
 	t.Setenv(githubTokenEnv, "tok-for-tests")
-	t.Setenv("FRIDOLIN_FAKE_ENV", "GH_TOKEN")
+	t.Setenv("FRIDOLIN_FAKE_ENV", "GH_CONFIG_DIR")
 	h := newHarness(t, "")
 	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}, Schedules: []manifest.Schedule{
 		{Name: "review", When: "daily 03:00", Template: "code-review-bugs", Vars: map[string]string{"repos": "example/repo"}, GitHub: &chat.GitHubGrant{Repos: []string{"example/repo"}, Permissions: map[string]string{"issues": "write", "contents": "read"}}, Report: manifest.ReportAlways, Risk: "irreversible", Preapproved: []string{"file issues on example/repo"}},
@@ -395,8 +395,12 @@ func TestScheduledAgentSecretsAndFailures(t *testing.T) {
 	if r := h.waitRunEnded("main", "review", 1); r.Status != sched.StatusOK || !strings.Contains(r.Result, "file issues on example/repo") {
 		t.Errorf("the review run: %+v", r)
 	}
-	h.WaitSent(harnessDM, "GH_TOKEN=tok-for-tests")
-	if got := h.Answer(inbound{JID: harnessDM, Text: "hello"}); !strings.Contains(got, "GH_TOKEN unset") {
+	logins := filepath.Join(h.DataDir(), runTokensDirName, "main")
+	h.WaitSent(harnessDM, "GH_CONFIG_DIR="+logins+string(filepath.Separator)+"run-")
+	if left, _ := filepath.Glob(filepath.Join(logins, "run-*.gh")); len(left) != 0 {
+		t.Errorf("the run's GitHub login outlived it: %v", left)
+	}
+	if got := h.Answer(inbound{JID: harnessDM, Text: "hello"}); !strings.Contains(got, "GH_CONFIG_DIR unset") {
 		t.Errorf("an ordinary run got the token: %q", got)
 	}
 
@@ -417,7 +421,7 @@ func TestScheduledAgentSecretsAndFailures(t *testing.T) {
 		t.Fatalf("run: %d %s", w.Code, w.Body.String())
 	}
 	h.waitRunEnded("main", "review", 2)
-	h.WaitSent(harnessDM, "GH_TOKEN=minted-for-main")
+	h.WaitFor("the second review's answer", func() bool { return len(h.SentTo(harnessDM)) >= 3 })
 	mu.Lock()
 	if len(asked) != 1 || !slices.Equal(asked[0].Repos, []string{"example/repo"}) || asked[0].Permissions["issues"] != "write" || released != 1 {
 		t.Errorf("the source was asked %+v, released %d times", asked, released)

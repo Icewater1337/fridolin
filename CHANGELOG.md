@@ -80,7 +80,8 @@ for compatibility.
   (`{"repos": [...], "permissions": {...}}`) becomes the run's GitHub
   grant (`chat.GitHubGrant`); as the run starts the bridge gets a token
   for it from one hook (`GitHubTokenSource`), which the run alone gets as
-  `GH_TOKEN` and which is released when it ends. Until a GitHub App is
+  gh's login (`GH_CONFIG_DIR`, a folder of its own in `run-tokens/`, never
+  in its environment) and which is removed and released when it ends. Until a GitHub App is
   connected, the fallback is a typed token: `fridolin core secrets set
   github.token`, passed to the core as `FRIDOLIN_GITHUB_TOKEN`.
 - Claude's and Codex's reports of what a run cost (dollars, tokens) are

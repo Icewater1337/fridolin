@@ -73,7 +73,7 @@ type Schedule struct {
 	// its runs take without asking (filing an issue, say).
 	Preapproved []string `json:"preapproved,omitempty"`
 	// GitHub is the GitHub access its runs are granted, and no other run:
-	// a token for these repositories and permissions, as GH_TOKEN, minted
+	// a token for these repositories and permissions, as gh's login, minted
 	// as a run starts and ended with it (chat.GitHubGrant).
 	GitHub *chat.GitHubGrant `json:"github,omitempty"`
 
