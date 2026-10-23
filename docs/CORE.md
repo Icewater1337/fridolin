@@ -260,9 +260,25 @@ container with `cap_drop: [ALL]`, `no-new-privileges`, the seccomp profile
 refused calls, with `unshare`, `clone`'s namespace flags, `mount`,
 `pivot_root` and `setns` allowed) and `systempaths=unconfined` (Docker
 masks parts of `/proc`, which keeps a new `/proc` from being mounted). On
-a host with AppArmor (Ubuntu, Debian with AppArmor on), Docker's
-`docker-default` profile also forbids the mounts: add
-`apparmor=unconfined` to `security_opt` in a compose override there.
+a Linux host with AppArmor (Ubuntu, Debian with AppArmor on), Docker's
+`docker-default` profile also forbids the mounts, and Ubuntu (23.10 on)
+confines the user namespaces even an unconfined process makes
+(`kernel.apparmor_restrict_unprivileged_userns=1`: bubblewrap then fails
+with "setting up uid map: Permission denied"). So the core runs under a
+profile of its own, `fridolin-core`: unconfined like
+`apparmor=unconfined`, but allowed to make user namespaces, without
+lifting the restriction for the rest of the machine. Install it once, as
+root:
+
+```sh
+sudo ~/.local/bin/fridolin core apparmor   # writes /etc/apparmor.d/fridolin-core and loads it
+```
+
+`fridolin core start`, `update` and `run` then write
+`compose.apparmor.yaml` beside the compose file with
+`apparmor=fridolin-core` (with `apparmor=unconfined` while the profile is
+not loaded, and a warning on a host that restricts user namespaces). On
+macOS and Windows, and on Linux without AppArmor, there is no such file.
 `fridolin doctor` in the container (`docker exec fridolin-core fridolin
 doctor`) tries it; a brain whose sandbox cannot start refuses every
 message rather than run without it.
@@ -348,8 +364,11 @@ links are left out and named.
 
 Brain folders: in the container they belong in the volume, under
 `/data/brains-folders/<name>/`, and travel with the export. A brain folder
-outside the data dir (a native install's `~/brains/...`) is not in the
-export; the manifest lists it and export and import both warn.
+outside the data dir (bound in from the Mac's home) travels too, as far
+as its backup settings let it, and comes home on the way back
+([Brain folders on another machine](#brain-folders-on-another-machine));
+one whose backup keeps it home is listed in the manifest, and export and
+import both warn.
 
 On the machine that takes over, with its core stopped and an empty volume:
 
@@ -660,7 +679,7 @@ What moves, and how:
 | The host secrets: the age identity, the B2 keys, the vault and restic passwords, the Claude token | `fridolin core send` → `fridolin core receive`, directly over the tailnet ([Moving the host secrets](#moving-the-host-secrets)) |
 | The core lease | released by `fridolin core stop` on the old machine, taken by `core promote` on the new one |
 | Brain folders in the volume (`/data/brains-folders/`) | with the export |
-| Brain folders bound in from the Mac's home (`compose.host.yaml`, a migrated native install) | not at all: see [Brain folders on another machine](#brain-folders-on-another-machine) |
+| Brain folders bound in from the Mac's home (`compose.host.yaml`, a migrated native install) | with the export too, as far as each brain's backup settings let them reach the cloud; they come home on the way back: see [Brain folders on another machine](#brain-folders-on-another-machine) |
 
 **WhatsApp continuity.** The WhatsApp session is `bridge.db`, and it moves
 whole: the new core answers as the same linked device, without a new QR
@@ -698,7 +717,8 @@ macOS: `brew install go git` and `brew install --cask tailscale orbstack`
 (or Docker Desktop). Linux: Docker Engine (`curl -fsSL
 https://get.docker.com | sh`, then `sudo usermod -aG docker $USER` and a
 new login), `golang`, `git`, and Tailscale's install script; with AppArmor
-see [the sandbox](#the-brains-sandbox-in-the-container).
+(Ubuntu), after the build below, `sudo bin/fridolin core apparmor` once
+([the sandbox](#the-brains-sandbox-in-the-container)).
 
 Tailscale: `tailscale up`, open the link it prints for the owner, who
 signs in with the account of the core's tailnet; `tailscale status` then
@@ -821,26 +841,39 @@ container.
 
 ### Brain folders on another machine
 
-A brain folder that lies in the volume moves with the export. A folder
-bound in from the Mac's home (a migrated native install) stays on the
-Mac: the new core starts without it, and `fridolin check` names each
-brain it leaves out; their messages go unanswered until the core is back,
-which is acceptable for a test takeover. Settings that name Mac paths
-(`sandbox.credentials_dir`, `allow_paths`) are missing there too, so
-Google Calendar sign-ins do not work on the new machine.
+A brain folder that lies in the volume moves with the export as part of
+the data dir. A folder bound in from the Mac's home (`~/Personal`, a
+migrated native install's) goes along too, under `folders/<brain id>/`
+in the archive (format 2, which an older fridolin refuses to import), as
+far as the brain's backup settings let it reach the cloud, since the
+export goes through the vault bucket:
 
-To take a folder along, copy it into the volume, where a brain path `~/name`
-points when no `compose.host.yaml` binds the Mac's home: on the Mac
-`tar czf brains.tgz -C ~ name1 name2`, carry it over (`tailscale file cp
-brains.tgz <new-machine>:` and `tailscale file get .` there), then
+- what the brain's `backup.exclude` leaves out stays on the Mac
+  (`/work/` stays home, say), and so do secret files unless
+  `backup.include_secret_files` is on;
+- a brain whose backup is off, does not go to the cloud
+  (`backup.targets.cloud`), or whose `brain.json` cannot be read, keeps
+  its whole folder home; export says so and the brain is left out there;
+- programs built for the Mac stay too: `node_modules/`, `__pycache__/`
+  and every virtualenv (a folder with a `pyvenv.cfg`), and links.
 
-```powershell
-docker run --rm -v fridolin-data:/data -v "${PWD}:/in" --entrypoint sh fridolin-core:<tag> -c "mkdir -p /data/brains-folders && tar xzf /in/brains.tgz -C /data/brains-folders"
-```
+The import on the new machine puts each folder where the brain's path
+names it when that folder is there; otherwise into the volume,
+`/data/brains-folders/<name>`, and points the brain there, keeping its
+home path in `brain_dirs` as `moved_from` ([CONFIGURATION.md](CONFIGURATION.md#brains)).
+On the way back, the import on the Mac, where `compose.host.yaml` binds
+`~/Personal` in again, brings each such folder home: files the brain
+added are added, files it changed are written over after the Mac's
+version moved to `core/replaced-<time>/folders/<brain id>/`, the same
+ones stay as they are, and the brain points at `~/Personal` again. Nothing
+at home is deleted: a file the brain deleted on the other machine is
+still there, and what never left (the excluded work folders) is
+untouched. A folder below a link is never written through.
 
-before `core start`. These are copies: what a brain writes there does not
-reach the Mac's folders, and the way back does not bring it home. Never
-copy Mac-built virtualenvs or `node_modules` (What does not move).
+Settings that name Mac paths (`sandbox.credentials_dir`,
+`allow_paths`) are missing on the other machine, so Google Calendar
+sign-ins do not work there, and a brain's own scripts that call
+`launchctl`, `osascript` or Homebrew fail ([What does not move](#what-does-not-move)).
 
 ### Never
 

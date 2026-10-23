@@ -61,6 +61,10 @@ On the host that runs Docker:
   fridolin core send --to HOST [--code CODE]
                        on the current core's host: send its secrets to the machine
                        running core receive, after both show the same four words
+  fridolin core apparmor
+                       Linux with AppArmor, as root, once: install the core's
+                       profile, which lets the brains' sandbox make its user
+                       namespaces (Ubuntu restricts them); start and run use it
   fridolin core run [--] COMMAND...
                        run a fridolin command in a one-off container on the
                        volume, with the secrets: core import while the core
@@ -126,6 +130,8 @@ func runCore(args []string, env coreEnv) int {
 		return coreSecrets(args, env, defaultHostDeps(env))
 	case "send", "receive":
 		return coreTransfer(ctx, sub, args, env, defaultHostDeps(env))
+	case "apparmor":
+		return coreAppArmor(ctx, args, env, defaultHostDeps(env))
 	default:
 		fmt.Fprintf(env.stderr, "fridolin core: unknown command %q\n\n%s", sub, coreUsage)
 		return 2
@@ -302,12 +308,21 @@ func coreExport(ctx context.Context, f insideFlags, env coreEnv) error {
 		}
 	}
 	var brains []string
+	var folders []coreexport.Folder
 	for _, b := range cfg.BrainDirs {
-		brains = append(brains, app.AbsPath(b.Dir(app.HomeDir())))
+		dir := app.AbsPath(b.Dir(app.HomeDir()))
+		brains = append(brains, dir)
+		if b.Approved == nil || b.Approved.ID == "" {
+			continue
+		}
+		// The export goes through the vault bucket: a brain folder goes
+		// along as far as its backup settings let it reach the cloud.
+		skip, excluded := app.BrainFolderFilter(b.Approved.ID, dir, b.Approved, cfg.Backup.IncludeSecretFiles)
+		folders = append(folders, coreexport.Folder{ID: b.Approved.ID, Configured: b.Path, Dir: dir, Skip: skip, Excluded: excluded})
 	}
 	host, _ := os.Hostname()
 	res, err := coreexport.Export(ctx, dataDir, []age.Recipient{keys.pq.Recipient()}, st, coreexport.ExportOptions{
-		DB: sqliteDB{}, SealKey: keys.seal, Version: version.String(), Hostname: host, BrainFolders: brains,
+		DB: sqliteDB{}, SealKey: keys.seal, Version: version.String(), Hostname: host, BrainFolders: brains, Folders: folders,
 		Logf: func(format string, a ...any) { fmt.Fprintf(env.stderr, format+"\n", a...) },
 	})
 	if err != nil {
@@ -353,6 +368,22 @@ func coreImport(ctx context.Context, f insideFlags, env coreEnv) error {
 	if err := coreexport.Activate(staging, dataDir, f.force, now, lock); err != nil {
 		return fmt.Errorf("%w (the checked copy stays in %s)", err, staging)
 	}
+	placed, err := coreexport.PlaceFolders(dataDir, staging, app.HomeDir(), res.Manifest, now)
+	for _, p := range placed {
+		if p.Home {
+			msg := fmt.Sprintf("Brought brain %s's folder home to %s: %d files added, %d updated, %d the same", p.ID, p.Dir, p.Added, p.Updated, p.Same)
+			if p.Aside != "" {
+				msg += "; the files it replaced are in " + p.Aside
+			}
+			logf("%s", msg)
+		} else {
+			logf("Put brain %s's folder into %s; the move back brings it home", p.ID, p.Dir)
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("%w (the imported data dir is in place; the brain folders are in %s)", err, staging)
+	}
+	_ = os.RemoveAll(staging)
 	warnings, err := coreexport.FixDataDir(dataDir, app.HomeDir())
 	if err != nil {
 		return err
@@ -528,6 +559,10 @@ type hostDeps struct {
 	uid                            int
 	now                            func() time.Time
 	sleep                          func(time.Duration)
+	// apparmor reads the host's AppArmor state (hostAppArmor), and
+	// apparmorDir is where core apparmor writes the profile.
+	apparmor    func() apparmorState
+	apparmorDir string
 }
 
 func defaultHostDeps(env coreEnv) hostDeps {
@@ -541,6 +576,7 @@ func defaultHostDeps(env coreEnv) hostDeps {
 	d.docker, _ = exec.LookPath("docker")
 	d.composePath = composePathFor(runtime.GOOS)
 	d.home, d.goos, d.uid, d.now, d.sleep = app.HomeDir(), runtime.GOOS, os.Getuid(), time.Now, time.Sleep
+	d.apparmor, d.apparmorDir = hostAppArmor, "/etc/apparmor.d"
 	if c, err := os.UserCacheDir(); err == nil {
 		d.cacheDir = filepath.Join(c, "fridolin")
 		_ = os.MkdirAll(d.cacheDir, 0o700)
@@ -758,8 +794,18 @@ func coreHost(ctx context.Context, sub string, args []string, env coreEnv, d hos
 			override = p
 		}
 	}
+	// On a host with AppArmor, the core's own profile (core apparmor).
+	armor := ""
+	if *compose == "" && d.apparmor != nil {
+		var err error
+		armor, err = apparmorOverride(d.goos, path, d.apparmor(), func(msg string) { fmt.Fprintf(env.stderr, "warning: %s\n", msg) })
+		if err != nil {
+			fmt.Fprintf(env.stderr, "fridolin core %s: %v\n", sub, err)
+			return 1
+		}
+	}
 	compose1 := func(args ...string) error {
-		return d.run(ctx, d.docker, append(composeArgs(path, override), args...), childEnv, env.stdout, env.stderr)
+		return d.run(ctx, d.docker, append(composeArgs(path, override, armor), args...), childEnv, env.stdout, env.stderr)
 	}
 	var err error
 	switch sub {

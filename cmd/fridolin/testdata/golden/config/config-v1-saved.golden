@@ -72,7 +72,8 @@
             "node_modules/"
           ]
         }
-      }
+      },
+      "moved_from": "~/main"
     }
   ],
   "sandbox": {

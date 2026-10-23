@@ -41,6 +41,7 @@
         },
         "version": 1
       },
+      "moved_from": "~/main",
       "path": "<HOME>/brains/main"
     }
   ],

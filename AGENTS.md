@@ -202,7 +202,8 @@ Windows it runs in Docker Desktop with WSL2. In short:
    `wsl --install --no-distribution` elevated, restart, then `winget
    install --id Docker.DockerDesktop -e`; open Docker Desktop for its
    first run and let the person accept its terms; `docker info` must
-   answer. macOS: `brew install --cask orbstack`; Linux: Docker Engine.
+   answer. macOS: `brew install --cask orbstack`; Linux: Docker Engine, and
+   on Ubuntu (AppArmor) `sudo bin/fridolin core apparmor` once after the build.
 2. **Build** fridolin as in B, then the image of the same version:
    `fridolin core build` in the clone.
 3. **Secrets**, machine to machine: here `fridolin core receive` (the
@@ -223,8 +224,9 @@ Windows it runs in Docker Desktop with WSL2. In short:
    host `fridolin core run core import --latest --force`, `core run core
    promote`, `core start`.
 
-Brain folders bound in from the Mac's home do not move to another machine
-(docs/CORE.md says what to do for a test). The WhatsApp session moves in
+Brain folders bound in from the Mac's home move with the export, less what
+each brain's backup settings keep home, and come back on the way back
+(docs/CORE.md, "Brain folders on another machine"). The WhatsApp session moves in
 `bridge.db`: never run the old and the new core at once.
 
 ## D. Set up FrIDE on this node

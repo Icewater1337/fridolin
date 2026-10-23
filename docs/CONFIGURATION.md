@@ -631,7 +631,11 @@ dashboard; see [BRAINS.md](BRAINS.md). In `config.json` they appear as:
 ]
 ```
 
-`approved` is the manifest you accepted — the version that runs. An entry
+`approved` is the manifest you accepted — the version that runs.
+`moved_from`, which a core move sets, is where the folder lives on its home
+machine while the move keeps it in the volume (`/data/brains-folders/…`):
+the move back brings the folder home and points `path` at it again
+([CORE.md](CORE.md#brain-folders-on-another-machine)). An entry
 without one (written by hand) does not run; the Brains page shows it with a
 Remove button, and a new brain cannot be added in, around or on its folder
 until it is gone.

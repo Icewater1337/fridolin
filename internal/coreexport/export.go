@@ -54,8 +54,9 @@ const (
 	keySuffix     = ".tar.gz.age"
 	manifestName  = "manifest.json"
 	dataPrefix    = "data/"
-	// FormatVersion is the archive's format; Import refuses a newer one.
-	FormatVersion = 1
+	// FormatVersion is the newest archive format: 1, or 2 when it carries
+	// brain folders (formatFolders). Import refuses a newer one.
+	FormatVersion = formatFolders
 )
 
 // Manifest describes an export. It is the archive's first member.
@@ -78,6 +79,9 @@ type Manifest struct {
 	// Skipped are files that are neither regular files nor folders
 	// (symbolic links, sockets), which an export leaves out.
 	Skipped []string `json:"skipped,omitempty"`
+	// Folders are the brain folders from outside the data dir that the
+	// archive carries under folders/ (format 2), each with its own counts.
+	Folders []FolderInfo `json:"folders,omitempty"`
 }
 
 // DB copies and checks SQLite databases; the store package's VacuumInto
@@ -95,8 +99,10 @@ type ExportOptions struct {
 	Hostname string
 	// BrainFolders are the brain folders of the config, absolute: those
 	// below the data dir are in the export anyway, the others are listed in
-	// the manifest and warned about.
+	// the manifest and warned about, unless Folders takes them along.
 	BrainFolders []string
+	// Folders are brain folders outside the data dir to take along.
+	Folders []Folder
 	// TempDir holds the database snapshots while the archive is written;
 	// default <dataDir>/core/export-tmp, on the same disk as the data. An
 	// export of a data dir that must stay as it is (a native install's,
@@ -118,6 +124,15 @@ type ExportOptions struct {
 type ExportResult struct {
 	Key      string
 	Manifest Manifest
+}
+
+// item is one member of the archive: rel is its name below data/, or its
+// whole name below folders/.
+type item struct {
+	rel, src string
+	dir      bool
+	mode     fs.FileMode
+	mtime    time.Time
 }
 
 // excluded reports whether rel, a slash path below the data dir, stays out
@@ -191,22 +206,27 @@ func Export(ctx context.Context, dataDir string, recipients []age.Recipient, sto
 	defer os.RemoveAll(snapDir)
 
 	now := opts.Now()
-	m := Manifest{Format: FormatVersion, Version: opts.Version, CreatedAt: now.UTC(), Hostname: opts.Hostname, DataDir: dataDir}
+	m := Manifest{Format: 1, Version: opts.Version, CreatedAt: now.UTC(), Hostname: opts.Hostname, DataDir: dataDir}
+	along := map[string]bool{}
+	for _, f := range opts.Folders {
+		if f.Skip == "" && !within(dataDir, f.Dir) {
+			along[filepath.Clean(f.Dir)] = true
+		}
+	}
 	for _, f := range opts.BrainFolders {
-		if !within(dataDir, f) {
+		if !within(dataDir, f) && !along[filepath.Clean(f)] {
 			m.OutsideBrainFolders = append(m.OutsideBrainFolders, f)
 			opts.Logf("warning: brain folder %s is outside the data dir and not in the export: move it yourself", f)
+		}
+	}
+	for _, f := range opts.Folders {
+		if f.Skip != "" && !within(dataDir, f.Dir) {
+			opts.Logf("warning: brain folder %s stays: %s", f.Dir, f.Skip)
 		}
 	}
 
 	// First the list and the database snapshots, so the manifest that
 	// leads the archive is complete.
-	type item struct {
-		rel, src string
-		dir      bool
-		mode     fs.FileMode
-		mtime    time.Time
-	}
 	var items []item
 	err = filepath.WalkDir(dataDir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -261,6 +281,26 @@ func Export(ctx context.Context, dataDir string, recipients []age.Recipient, sto
 			m.Bytes += st.Size()
 		}
 	}
+	var folderMembers []item
+	for _, f := range opts.Folders {
+		if f.Skip != "" || within(dataDir, f.Dir) {
+			continue
+		}
+		if !validFolderID.MatchString(f.ID) {
+			return ExportResult{}, fmt.Errorf("export: brain id %q cannot name a folder in the archive", f.ID)
+		}
+		its, info, err := folderItems(f, opts.Logf)
+		if err != nil {
+			return ExportResult{}, fmt.Errorf("export: the brain folder %s: %w", f.Dir, err)
+		}
+		folderMembers = append(folderMembers, item{rel: foldersPrefix + f.ID, src: f.Dir, dir: true, mode: 0o700, mtime: now})
+		folderMembers = append(folderMembers, its...)
+		m.Folders = append(m.Folders, info)
+		opts.Logf("Taking along brain folder %s (%s): %d files, %d bytes; %d left out by its backup settings and as programs of this machine", f.Dir, f.ID, info.Files, info.Bytes, info.Left)
+	}
+	if len(m.Folders) > 0 {
+		m.Format = formatFolders
+	}
 
 	key := ExportKey(now)
 	pr, pw := io.Pipe()
@@ -293,6 +333,14 @@ func Export(ctx context.Context, dataDir string, recipients []age.Recipient, sto
 					return err
 				}
 				if err := writeItem(tw, dataPrefix+it.rel, it.src, it.dir, it.mode, it.mtime); err != nil {
+					return err
+				}
+			}
+			for _, it := range folderMembers {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if err := writeItem(tw, it.rel, it.src, it.dir, it.mode, it.mtime); err != nil {
 					return err
 				}
 			}

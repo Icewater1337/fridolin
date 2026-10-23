@@ -10,6 +10,25 @@ for compatibility.
 
 ### Added
 
+- `fridolin core apparmor` (Linux, as root, once) installs an AppArmor
+  profile for the core container, `fridolin-core`, and `core start`,
+  `update` and `run` use it on a host with AppArmor
+  (`compose.apparmor.yaml`). On Ubuntu 23.10 and newer the brains' sandbox
+  could not start in the container at all, `apparmor=unconfined`
+  included, since the kernel confines unprivileged user namespaces
+  (`kernel.apparmor_restrict_unprivileged_userns`); the profile allows
+  them for the core alone (docs/CORE.md, "The brains' sandbox in the
+  container").
+- Moving the core takes the brain folders along. `fridolin core export`
+  carries a brain folder bound in from the machine's home (`~/Personal`)
+  as far as the brain's backup settings let it reach the cloud: what
+  `backup.exclude` leaves out, secret files, virtualenvs, `node_modules`
+  and links stay home. The import puts it into the volume where the
+  folder is not there (`brain_dirs` gets `moved_from`), and the move back
+  brings the brain's changes home, keeping every file it replaces in
+  `core/replaced-<time>/folders/` and deleting nothing. Exports with
+  folders are format 2, which an older fridolin refuses to import
+  (docs/CORE.md, "Brain folders on another machine").
 - `POST /otp/take` hands a script the one-time code the OTP guard caught
   for its request, by the `otp_request` id `/send` answered with, once:
   the code is deleted as it goes out, and a request with no code waiting

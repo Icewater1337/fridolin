@@ -144,3 +144,13 @@ type vaultBrainRef struct {
 	Dir      string
 	Approved *manifest.Manifest
 }
+
+// BrainFolderFilter is what of the brain folder dir may leave this machine
+// through the cloud, by the same rules as the vault's backups: skip says
+// why none of it may ("" when some does), and excluded whether a path
+// below it, slash-separated, stays. A core export, which goes through the
+// vault bucket, takes a brain's folder along by it.
+func BrainFolderFilter(id, dir string, approved *manifest.Manifest, includeSecrets bool) (skip string, excluded func(rel string) bool) {
+	b := brainBackupOf(id, dir, approved, includeSecrets)
+	return b.Skip, b.excluded
+}

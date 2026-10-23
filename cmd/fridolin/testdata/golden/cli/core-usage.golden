@@ -25,6 +25,10 @@ On the host that runs Docker:
   fridolin core send --to HOST [--code CODE]
                        on the current core's host: send its secrets to the machine
                        running core receive, after both show the same four words
+  fridolin core apparmor
+                       Linux with AppArmor, as root, once: install the core's
+                       profile, which lets the brains' sandbox make its user
+                       namespaces (Ubuntu restricts them); start and run use it
   fridolin core run [--] COMMAND...
                        run a fridolin command in a one-off container on the
                        volume, with the secrets: core import while the core

@@ -156,6 +156,17 @@ func extract(ctx context.Context, tr *tar.Reader, staging string) (Manifest, err
 	seen := map[string]bool{}
 	files := 0
 	var bytesTotal int64
+	type count struct {
+		files int
+		bytes int64
+	}
+	folders := map[string]*count{}
+	for _, f := range m.Folders {
+		if !validFolderID.MatchString(f.ID) || folders[f.ID] != nil {
+			return m, fmt.Errorf("the manifest names brain folder %q twice or badly", f.ID)
+		}
+		folders[f.ID] = &count{}
+	}
 	for {
 		if err := ctx.Err(); err != nil {
 			return m, err
@@ -167,17 +178,30 @@ func extract(ctx context.Context, tr *tar.Reader, staging string) (Manifest, err
 		if err != nil {
 			return m, fmt.Errorf("reading the archive: %w", err)
 		}
-		rel, err := cleanMember(hdr.Name)
-		if err != nil {
-			return m, err
+		var rel, dst string
+		var folder *count
+		if strings.HasPrefix(hdr.Name, foldersPrefix) {
+			id, below, err := cleanFolderMember(hdr.Name)
+			if err != nil {
+				return m, err
+			}
+			if folder = folders[id]; folder == nil {
+				return m, fmt.Errorf("the archive holds brain folder %s, which its manifest does not list", id)
+			}
+			rel = foldersPrefix + id + "/" + below
+			dst = filepath.Join(stagedFolders(staging), id, filepath.FromSlash(below))
+		} else {
+			if rel, err = cleanMember(hdr.Name); err != nil {
+				return m, err
+			}
+			dst = filepath.Join(staging, filepath.FromSlash(rel))
 		}
 		if seen[rel] {
 			return m, fmt.Errorf("%s is in the archive twice", rel)
 		}
 		seen[rel] = true
-		// cleanMember already refuses ".." parts, absolute names and
+		// The cleaners already refuse ".." parts, absolute names and
 		// backslashes; the containment check says so where the write happens.
-		dst := filepath.Join(staging, filepath.FromSlash(rel))
 		if !strings.HasPrefix(dst, filepath.Clean(staging)+string(filepath.Separator)) {
 			return m, fmt.Errorf("unsafe member %q in the archive", hdr.Name)
 		}
@@ -199,6 +223,11 @@ func extract(ctx context.Context, tr *tar.Reader, staging string) (Manifest, err
 			if n != hdr.Size {
 				return m, fmt.Errorf("%s is cut short", rel)
 			}
+			if folder != nil {
+				folder.files++
+				folder.bytes += n
+				continue
+			}
 			files++
 			bytesTotal += n
 		default:
@@ -211,6 +240,11 @@ func extract(ctx context.Context, tr *tar.Reader, staging string) (Manifest, err
 	for _, db := range m.Databases {
 		if !seen[db] {
 			return m, fmt.Errorf("the database %s the manifest lists is not in the archive", db)
+		}
+	}
+	for _, f := range m.Folders {
+		if c := folders[f.ID]; c.files != f.Files || c.bytes != f.Bytes || !seen[foldersPrefix+f.ID+"/"] {
+			return m, fmt.Errorf("the archive holds %d files (%d bytes) of brain folder %s, its manifest says %d (%d bytes)", c.files, c.bytes, f.ID, f.Files, f.Bytes)
 		}
 	}
 	return m, nil
