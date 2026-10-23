@@ -1317,6 +1317,16 @@ The Plaud recorder integration; see [PLAUD.md](PLAUD.md) for every setting,
 including `interval_seconds`, `polished`, `message`, `phone_dir` and
 `phone_upload`.
 
+### GitHub
+
+GitHub has no setting in `config.json`. It is connected from the dashboard
+(*Integrations → GitHub*), whose app keeps its key where the core keeps
+its secrets, never here; see [GITHUB.md](GITHUB.md). The second choice,
+a typed token, is the environment variable `FRIDOLIN_GITHUB_TOKEN` (in
+the container, the host secret `fridolin.github.token`, which `core
+start` passes). Brains never get it: a run gets only the `GH_TOKEN` of
+its own grant.
+
 ### `dashboard`
 
 `dashboard.disabled` turns the web dashboard off (*restart*).

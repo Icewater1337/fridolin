@@ -44,6 +44,12 @@ const (
 	VaultSealKey           = "fridolin.vault.seal.key"
 	SnapshotsCryptPassword = "fridolin.snapshots.crypt.password"
 	LitestreamSealKey      = "fridolin.litestream.seal.key"
+
+	// The GitHub App's credentials on a native install (docs/GITHUB.md),
+	// which the dashboard stores when the owner connects GitHub, and the
+	// typed token that is the second choice to an app.
+	GitHubApp   = "fridolin.github.app"
+	GitHubToken = "fridolin.github.token"
 )
 
 // Account is the keychain account every secret is stored under.
@@ -57,6 +63,12 @@ type Store interface {
 	Get(name string) (string, error)
 	Set(name, value string) error
 	Has(name string) (bool, error)
+}
+
+// Deleter is a Store that can forget a secret. Deleting one the store does
+// not have is no error.
+type Deleter interface {
+	Delete(name string) error
 }
 
 var validName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
@@ -171,6 +183,24 @@ func (k Keychain) Set(name, value string) error {
 	return nil
 }
 
+func (k Keychain) Delete(name string) error {
+	if err := checkName(name); err != nil {
+		return err
+	}
+	args := []string{"delete-generic-password", "-a", Account, "-s", name}
+	if k.File != "" {
+		args = append(args, k.File)
+	}
+	_, err := k.run(args, nil)
+	if ee, ok := errors.AsType[*ExitError](err); ok && ee.Code == errSecItemNotFound {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("deleting %s from the keychain: %w", name, err)
+	}
+	return nil
+}
+
 // Files keeps each secret in a file of mode 0600 named after it, in Dir
 // (mode 0700): Linux's store, $XDG_CONFIG_HOME/fridolin/secrets.
 type Files struct{ Dir string }
@@ -236,4 +266,15 @@ func (f Files) Set(name, value string) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), p)
+}
+
+func (f Files) Delete(name string) error {
+	p, err := f.path(name)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
 }

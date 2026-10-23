@@ -138,6 +138,9 @@ func (b *App) brainRunEnv(run runInfo) runAccess {
 	if b.exe != "" {
 		access.Env = append(access.Env, "FRIDOLIN_BIN="+b.exe)
 	}
+	if g := run.Message.GitHub; g != nil && b.github != nil {
+		access = b.withGitHubToken(access, brain, *g)
+	}
 	if b.listen == "" {
 		return access
 	}
@@ -167,7 +170,9 @@ func (b *App) brainRunEnv(run runInfo) runAccess {
 	}
 	files = append(files, path)
 	access.Env = append(access.Env, "FRIDOLIN_API="+api, "FRIDOLIN_BRAIN_TOKEN_FILE="+path)
+	githubDone := access.Done
 	access.Done = func() {
+		githubDone()
 		revoke()
 		for _, f := range files {
 			if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {

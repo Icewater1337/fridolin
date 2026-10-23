@@ -1,6 +1,7 @@
-// Integrations: services that feed brains. Plaud recorder for now: connect
-// with Plaud's own sign-in, pick the brain that receives recordings, and see
-// what was handed over last.
+// Integrations: services that feed brains and that runs reach. GitHub
+// (components/github-card.js), and the Plaud recorder: connect with Plaud's
+// own sign-in, pick the brain that receives recordings, and see what was
+// handed over last.
 
 import { del, download, post, put } from '../app/api.js';
 import { brainsResource, resource } from '../app/resources.js';
@@ -14,6 +15,7 @@ import { field, toggle, select, nextId } from '../components/fields.js';
 import { pill, callout, timeAgo, mono, pageHeader, loading } from '../components/common.js';
 import { chatEl, chatName } from '../components/chat.js';
 import { liveForm } from '../components/live-form.js';
+import { githubCard } from '../components/github-card.js';
 
 const every = (sec) => (sec % 60 === 0 ? (sec === 60 ? 'minute' : `${sec / 60} minutes`) : `${sec} seconds`);
 
@@ -25,8 +27,8 @@ export default {
   render(root, ctx) {
     const card = h('section.card', loading('Checking Plaud…'));
     mount(root,
-      pageHeader('Integrations', 'Services that hand things to your brains on their own.'),
-      h('div.page-stack', card));
+      pageHeader('Integrations', 'Services that hand things to your brains on their own, and that their runs may use.'),
+      h('div.page-stack', githubCard(ctx), card));
 
     // The status never waits for Plaud: who is signed in is what the
     // bridge asked last.
