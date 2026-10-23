@@ -668,6 +668,14 @@ for compatibility.
 
 ### Fixed
 
+- On Windows, `fridolin core` commands no longer warn "syncing directory
+  after publishing …: Access is denied" for every file they write
+  (`compose.yaml`, `seccomp.json`): Windows cannot sync a folder and
+  needs none, so the bridge no longer tries there.
+- The vault leaves out a brain's rotated activity log,
+  `claude-stream.1.log`, like `claude-stream.log`; it looked for
+  `claude-stream.log.1`, a name the bridge never writes.
+
 - `fridolin doctor` no longer fails "Litestream is not running (N
   restarts)" for the first minutes after the bridge starts on a data dir
   that ran before, while Litestream replicates. `core/vault-status.json`

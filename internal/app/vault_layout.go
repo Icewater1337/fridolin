@@ -39,7 +39,7 @@ var vaultTopParts = []string{"secrets", "audit", "vault"}
 
 // vaultJunk are names inside the vault's folders that are never vault
 // files: what a brain folder rebuilds or writes all the time.
-var vaultJunk = []string{".git", "node_modules", ".venv", "__pycache__", ".DS_Store", brain.StreamLogName, brain.StreamLogName + ".1", ".cache"}
+var vaultJunk = []string{".git", "node_modules", ".venv", "__pycache__", ".DS_Store", brain.StreamLogName, brain.StreamLogOld, ".cache"}
 
 // vaultLayout says which paths below the hot root are vault files and
 // which vault paths belong to which brain.

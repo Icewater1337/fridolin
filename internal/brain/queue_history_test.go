@@ -35,7 +35,7 @@ func TestStreamLogIsRotatedAndNamesEachRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
-	if fi, err := os.Stat(filepath.Join(home, "a", streamLogOld)); err != nil || fi.Size() != streamLogMax {
+	if fi, err := os.Stat(filepath.Join(home, "a", StreamLogOld)); err != nil || fi.Size() != streamLogMax {
 		t.Errorf("rotated log: %v, %v; want the full one", fi, err)
 	}
 	data, err := os.ReadFile(logPath)

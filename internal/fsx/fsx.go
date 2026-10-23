@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -78,7 +79,11 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode, backup, exclusi
 	}
 	// Publication has committed. Report a durability warning, not a failed
 	// transaction: callers must not roll back companion manifests while the
-	// new config is already visible at path.
+	// new config is already visible at path. Windows cannot sync a
+	// directory (Access is denied) and needs none: NTFS journals the rename.
+	if runtime.GOOS == "windows" {
+		return nil
+	}
 	if err := parent.Sync(); err != nil {
 		log.Printf("warning: syncing directory after publishing %s: %v", path, err)
 	}

@@ -729,15 +729,21 @@ lists the old core's machine and `fridolin-core`.
 In the clone:
 
 ```powershell
+git checkout --detach <commit>   # the commit the old core runs, e.g. f4bd5e47
 $env:CGO_ENABLED = "0"
-go build -o bin\fridolin.exe .\cmd\fridolin
+$v = git describe --tags --always --abbrev=8
+go build -trimpath -ldflags "-X github.com/Icewater1337/fridolin/internal/version.version=$v" -o bin\fridolin.exe .\cmd\fridolin
 $fridolin = "$PWD\bin\fridolin.exe"
+& $fridolin version             # the same version string as the old core's
 & $fridolin core build          # docker build of container/Dockerfile, tagged fridolin-core:<this version>
 ```
 
-(`CGO_ENABLED=0 go build -o bin/fridolin ./cmd/fridolin` and `bin/fridolin
-core build` elsewhere.) Build the same commit the old core runs, or newer:
-`fridolin core start` runs the image of the binary's own version.
+(`make build` and `bin/fridolin core build` elsewhere.) Build the same
+commit the old core runs, or newer: `fridolin core start` runs the image
+of the binary's own version. Set the version as above: a plain `go build`
+calls itself `dev-<commit>`, so the core's version would differ from the
+old machine's for the nodes and `fridolin doctor`. The image build takes
+about ten minutes.
 On Windows `fridolin core` keeps its compose file in
 `%LOCALAPPDATA%\fridolin\`.
 
@@ -793,6 +799,12 @@ fridolin core run core export            # the final export, of the stopped volu
 & $fridolin core run core promote             # takes the lease
 & $fridolin core start
 ```
+
+Run the new machine's three commands there, in its own terminal (or have
+an agent on it run them). Nothing reaches the new machine through the
+core once it is stopped: a node's FrIDE or files are only reachable while
+a core runs. Wait for the export's `Exported … to core/exports/<time>…`
+line before the import, or `--latest` fetches the export before it.
 
 Stopping first is what keeps WhatsApp whole: an export taken while the old
 core runs misses what arrives until it stops. `promote` is refused (exit
