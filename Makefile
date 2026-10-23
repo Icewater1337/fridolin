@@ -14,7 +14,7 @@ MAIN_PKG := ./cmd/fridolin
 BINARY   ?= bin/fridolin
 # The version `fridolin version` and the log's first line report; without
 # git (a checkout from an archive) it is "dev".
-VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION  ?= $(shell git describe --tags --always --dirty --abbrev=8 2>/dev/null || echo dev)
 # Lazy (=), so only a target that builds runs git describe.
 # The variable is version in internal/version.
 VERSION_LDFLAGS = -X github.com/Icewater1337/fridolin/internal/version.version=$(VERSION)

@@ -11,8 +11,8 @@ install (`fridolin service install`) keeps working as before.
 `container/Dockerfile` builds it from the repository's root:
 
 ```bash
-docker build -f container/Dockerfile --build-arg VERSION=$(git describe --tags --always) \
-  -t fridolin-core:$(git describe --tags --always) .
+docker build -f container/Dockerfile --build-arg VERSION=$(git describe --tags --always --abbrev=8) \
+  -t fridolin-core:$(git describe --tags --always --abbrev=8) .
 ```
 
 It holds the `fridolin` binary with the Python helpers next to it

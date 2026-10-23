@@ -649,6 +649,15 @@ for compatibility.
 
 ### Fixed
 
+- A node built from the core's own commit no longer counts as older.
+  Versions name a commit by `git describe`, which abbreviates the hash as
+  long as each clone needs, so one commit was `0284f03` on one machine and
+  `0284f03e` on another (and `dev-06ab6d8` for a build without a stamp):
+  `fridolin doctor` warned about such nodes and the core offered them an
+  update. The stamps now pin `--abbrev=8` (Makefile, setup.sh, the
+  container's build in docs/CORE.md, an unstamped build's `dev-` name),
+  and two hashes of one commit compare as the same build; a dirty build
+  still differs.
 - Litestream stopped uploading `bridge.db` and `vault.db` after the move
   to the local replica that the vault mirrors (`core/litestream-replica/`):
   it logged `LTX file is missing` every two minutes and copied only the
