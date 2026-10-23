@@ -53,8 +53,8 @@ type Inbound struct {
 // GitHubGrant is what a run may do on GitHub: the bridge mints an
 // installation token of its GitHub App for exactly these repositories
 // (owner/name) and permissions ("issues": "write"), hands it to the run
-// as GH_TOKEN and revokes it when the run ends. No permissions is
-// contents and metadata read.
+// as gh's login (GH_CONFIG_DIR) and revokes it when the run ends. No
+// permissions is contents and metadata read.
 type GitHubGrant struct {
 	Repos       []string          `json:"repos"`
 	Permissions map[string]string `json:"permissions,omitempty"`

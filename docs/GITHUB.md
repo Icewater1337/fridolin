@@ -113,16 +113,29 @@ At the run's start, the bridge mints an installation access token:
 - with `contents: read` and `metadata: read` when the grant names no
   permissions.
 
-The run gets it as **`GH_TOKEN`**, the only variable it adds. Then:
+The run gets it as **gh's own login**, not as a variable:
 
-- `gh` works as it is;
-- git can use it through `gh auth git-credential`;
-- the bridge's own variables (`FRIDOLIN_GITHUB_TOKEN` included) are not
-  passed on;
-- a sandboxed run's PID namespace keeps it from other runs.
+- **Where it is:** `hosts.yml` (with a `config.yml` of version 1) in a
+  folder of its own, `run-tokens/<brain>/run-*.gh` in the data dir. That
+  is beside the run's brain API token, readable only by that brain (in
+  the container, mounted read-only into its sandbox).
+- **What the run's environment gets:** only `GH_CONFIG_DIR`, naming that
+  folder, plus `GH_PROMPT_DISABLED` and `GH_NO_UPDATE_NOTIFIER`.
+- **Why a file:** macOS shows a process's environment to the user's other
+  processes, other brains' runs among them; a file in the brain's own
+  folder stays with that brain. This is the same reason the brain API
+  token is a file.
+- **What works with it:**
+  - `gh` as it is;
+  - git through gh's credential helper: `git -c
+    credential.helper='!gh auth git-credential' push`;
+  - other programs, with `GH_TOKEN="$(gh auth token)"`.
+- **What is not passed on:** the bridge's own variables,
+  `FRIDOLIN_GITHUB_TOKEN` included.
 
 When the run ends, the bridge revokes the token
-(`DELETE /installation/token`). A token that cannot be minted leaves the
+(`DELETE /installation/token`) and removes the folder; a bridge that
+stopped without doing so removes it at its next start. A token that cannot be minted leaves the
 run without one, and the log says why: not connected, not installed on
 that owner, or a repository the installation lacks.
 

@@ -1324,8 +1324,8 @@ GitHub has no setting in `config.json`. It is connected from the dashboard
 its secrets, never here; see [GITHUB.md](GITHUB.md). The second choice,
 a typed token, is the environment variable `FRIDOLIN_GITHUB_TOKEN` (in
 the container, the host secret `fridolin.github.token`, which `core
-start` passes). Brains never get it: a run gets only the `GH_TOKEN` of
-its own grant.
+start` passes). Brains never get it: a run gets only the token of its own
+grant, as gh's login in `GH_CONFIG_DIR`.
 
 ### `dashboard`
 

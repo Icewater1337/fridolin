@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"slices"
 	"strings"
@@ -354,10 +355,15 @@ func (g *githubService) Disconnect() (httpapi.GitHubDisconnected, error) {
 	return res, nil
 }
 
-// withGitHubToken mints the token of a run's grant and hands it to the run
-// as GH_TOKEN, the only variable gh and git's credential helper (gh auth
-// git-credential) need; Done revokes it once the run is over. A token
-// that cannot be minted leaves the run without one, and the log says why.
+// withGitHubToken mints the token of a run's grant and hands it to the
+// run as gh's own login: hosts.yml in a folder of its own, beside the
+// run's brain API token (run-tokens/<brain>/run-*.gh), which only that
+// brain may read, and GH_CONFIG_DIR naming it. The token stays out of the
+// run's environment, which macOS shows to the user's other processes,
+// other brains' runs among them (TestRunTokenStaysOutOfTheEnvironment).
+// gh reads it from there, and git through gh auth git-credential. Done
+// revokes it and removes the folder once the run is over. A token that
+// cannot be minted leaves the run without one, and the log says why.
 func (b *App) withGitHubToken(access runAccess, brain string, grant chat.GitHubGrant) runAccess {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -366,11 +372,51 @@ func (b *App) withGitHubToken(access runAccess, brain string, grant chat.GitHubG
 		b.logger.Warn("github: no token for this run", "brain", brain, "repos", strings.Join(grant.Repos, ","), "err", err)
 		return access
 	}
-	access.Env = append(access.Env, "GH_TOKEN="+tok)
+	dir, err := writeGitHubLogin(runTokenDir(b.cfgs.Boot().DataDir, brain), tok)
+	if err != nil {
+		done()
+		b.logger.Warn("github: no token for this run", "brain", brain, "err", err)
+		return access
+	}
+	access.Env = append(access.Env, "GH_CONFIG_DIR="+dir, "GH_PROMPT_DISABLED=1", "GH_NO_UPDATE_NOTIFIER=1")
 	prev := access.Done
 	access.Done = func() {
 		done()
+		if err := os.RemoveAll(dir); err != nil {
+			b.logger.Warn("github: removing the run's gh login", "brain", brain, "err", err)
+		}
 		prev()
 	}
 	return access
+}
+
+// writeGitHubLogin writes gh's hosts.yml with tok into a new folder in
+// dir, readable by the bridge's user only, and returns the folder.
+func writeGitHubLogin(dir, tok string) (string, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("creating %s: %w", dir, err)
+	}
+	gh, err := os.MkdirTemp(dir, "run-*.gh")
+	if err != nil {
+		return "", err
+	}
+	// The user an installation token acts as; gh only shows it.
+	const user = "x-access-token"
+	hosts := "github.com:\n" +
+		"    users:\n" +
+		"        " + user + ":\n" +
+		"            oauth_token: " + tok + "\n" +
+		"    git_protocol: https\n" +
+		"    oauth_token: " + tok + "\n" +
+		"    user: " + user + "\n"
+	// version 1 is gh's config of more than one account, which hosts.yml
+	// is written as: without it gh migrates the folder, which asks GitHub
+	// for the user and fails for an installation token.
+	for name, data := range map[string]string{"hosts.yml": hosts, "config.yml": "version: \"1\"\n"} {
+		if err := os.WriteFile(filepath.Join(gh, name), []byte(data), 0o600); err != nil {
+			_ = os.RemoveAll(gh)
+			return "", err
+		}
+	}
+	return gh, nil
 }

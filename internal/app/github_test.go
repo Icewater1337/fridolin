@@ -218,8 +218,9 @@ func TestGitHubConnectRefuses(t *testing.T) {
 }
 
 // TestGitHubTokenForARun: a run whose message carries a grant (a scheduled
-// agent's) gets GH_TOKEN, a token for exactly the grant's repositories and
-// permissions, and the bridge revokes it when the run ends.
+// agent's) gets a token for exactly the grant's repositories and
+// permissions, as gh's login in GH_CONFIG_DIR, and the bridge revokes it
+// and removes the login when the run ends.
 func TestGitHubTokenForARun(t *testing.T) {
 	tb, _ := serveTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
@@ -242,18 +243,28 @@ func TestGitHubTokenForARun(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := fake.LastMinted()
-	if !strings.Contains(string(logged), "\nGH_TOKEN="+m.Token+"\n") || fmt.Sprint(m.Repos, m.Permissions) != "[fridolin] map[issues:write]" {
-		t.Errorf("the run got %+v; its env:\n%s", m, logged)
+	env := map[string]string{}
+	for _, kv := range strings.Split(strings.TrimSpace(string(logged)), "\n") {
+		k, v, _ := strings.Cut(kv, "=")
+		env[k] = v
 	}
-	if strings.Contains(string(logged), "FRIDOLIN_GITHUB") {
-		t.Error("the run sees the bridge's own GitHub variables")
+	dir := env["GH_CONFIG_DIR"]
+	if fmt.Sprint(m.Repos, m.Permissions) != "[fridolin] map[issues:write]" || filepath.Dir(dir) != runTokenDir(tb.cfgs.Get().DataDir, "a") {
+		t.Errorf("the run got %+v, GH_CONFIG_DIR=%q", m, dir)
 	}
-	testutil.WaitFor(t, 5*time.Second, "the run's GitHub token to be revoked", func() bool { return len(fake.Live()) == 0 })
+	// The token is in gh's login, never in the environment.
+	if strings.Contains(string(logged), m.Token) || env["GH_TOKEN"] != "" || strings.Contains(string(logged), "FRIDOLIN_GITHUB") {
+		t.Errorf("the run's environment shows a GitHub token:\n%s", logged)
+	}
+	testutil.WaitFor(t, 5*time.Second, "the run's GitHub token to be revoked and its login removed", func() bool {
+		_, err := os.Stat(dir)
+		return len(fake.Live()) == 0 && errors.Is(err, fs.ErrNotExist)
+	})
 
 	// A message without a grant gets no token.
 	tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: apiTestDM, Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
 	testutil.WaitFor(t, 10*time.Second, "the second reply", func() bool { return len(tb.sentTo(apiTestDM)) > 1 })
-	if logged, _ := os.ReadFile(envLog); strings.Contains(string(logged), "GH_TOKEN=") {
+	if logged, _ := os.ReadFile(envLog); strings.Contains(string(logged), "GH_CONFIG_DIR=") {
 		t.Error("a run without a grant got a GitHub token")
 	}
 }
@@ -331,5 +342,26 @@ func TestGitHubSecretsInTheContainer(t *testing.T) {
 	env = map[string]string{}
 	if err := s.save(creds); err == nil {
 		t.Error("kept the key without an identity to encrypt it to")
+	}
+}
+
+// TestWriteGitHubLogin: the run's gh login is hosts.yml with the token and
+// a config.yml of version 1, which gh reads without migrating it, in a
+// folder only the bridge's user may read.
+func TestWriteGitHubLogin(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "run-tokens", "a")
+	gh, err := writeGitHubLogin(dir, "ghs_abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hosts, _ := os.ReadFile(filepath.Join(gh, "hosts.yml"))
+	cfg, _ := os.ReadFile(filepath.Join(gh, "config.yml"))
+	if !strings.Contains(string(hosts), "\n    oauth_token: ghs_abc\n") || !strings.Contains(string(hosts), "            oauth_token: ghs_abc\n") || string(cfg) != "version: \"1\"\n" {
+		t.Errorf("hosts.yml:\n%s\nconfig.yml:\n%s", hosts, cfg)
+	}
+	st, _ := os.Stat(gh)
+	fst, _ := os.Stat(filepath.Join(gh, "hosts.yml"))
+	if st.Mode().Perm() != 0o700 || fst.Mode().Perm() != 0o600 || !strings.HasPrefix(filepath.Base(gh), "run-") || !strings.HasSuffix(gh, ".gh") {
+		t.Errorf("%s: modes %v %v", gh, st.Mode(), fst.Mode())
 	}
 }

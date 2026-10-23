@@ -15,8 +15,9 @@ for compatibility.
   flow, with no webhook: contents read, issues write, metadata read, and
   pull requests write when asked for. GitHub then asks which repositories
   it may use. A run whose message carries a GitHub grant (a scheduled
-  agent's) gets `GH_TOKEN`, an installation token for just its
-  repositories and permissions, revoked when the run ends. The app's key
+  agent's) gets an installation token for just its repositories and
+  permissions, as gh's login in a folder of its own (`GH_CONFIG_DIR`;
+  never in its environment), revoked when the run ends. The app's key
   goes to `secrets/github-app.age` in the core's volume (encrypted to its
   age identity) or, on a native install, to the host's secret store as
   `fridolin.github.app`; never to `config.json`. A typed token,
