@@ -46,7 +46,7 @@ serve) ;;
 esac
 
 mkdir -p "$FRIDE_HOME" "$HOME/repos" "$HOME/.claude"
-[ -e "$FRIDE_HOME/config.json" ] || cp /opt/fride/config.json "$FRIDE_HOME/config.json"
+[ -e "$FRIDE_HOME/config.json" ] || cp /opt/fride/companion.json "$FRIDE_HOME/config.json"
 # ponytail's offer to change the statusline is taken as made (docs/NODES.md,
 # "Ponytail for every agent"); /workspaces is trusted for Claude Code, as
 # the owner confirms it once on a native node.

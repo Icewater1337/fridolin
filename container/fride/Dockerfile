@@ -89,7 +89,7 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 
 COPY --from=fride /out/fride /opt/fride/bin/fride
 COPY --from=fride /out/ponytail /opt/fride/plugins/ponytail
-COPY container/fride/config.json /opt/fride/config.json
+COPY container/fride/companion.json /opt/fride/companion.json
 COPY container/fride/entrypoint.sh /opt/fride/entrypoint.sh
 RUN ln -s /opt/fride/bin/fride /usr/local/bin/fride
 
