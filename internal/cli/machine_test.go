@@ -279,7 +279,7 @@ func doctorEnvFor(reachable string, docker map[string]string) *app.DoctorEnv {
 func TestNodeChecks(t *testing.T) {
 	dir := t.TempDir()
 	running := func() (string, error) { return "running", nil }
-	rep := app.RunDoctor(context.Background(), doctorEnvFor("", nil), nodeChecks(dir, running))
+	rep := app.RunDoctor(context.Background(), doctorEnvFor("", nil), nodeChecks(dir, nodeService{status: running}))
 	if rep.OK || rep.Checks[1].ID != "node-joined" || rep.Checks[1].Status != app.DoctorFail || !strings.Contains(rep.Checks[1].Fix, "join-code") {
 		t.Fatalf("not joined: %+v", rep)
 	}
@@ -289,12 +289,12 @@ func TestNodeChecks(t *testing.T) {
 	if err := nodeagent.SaveConfig(dir, nodeagent.Config{Core: "ws://fridolin-core.example.ts.net:8766", Name: "winbox", Capabilities: nodeproto.Capabilities{Host: true}}); err != nil {
 		t.Fatal(err)
 	}
-	rep = app.RunDoctor(context.Background(), linuxNodeEnv(doctorEnvFor("fridolin-core.example.ts.net:8766", nil), "default.target", "yes"), nodeChecks(dir, running))
+	rep = app.RunDoctor(context.Background(), linuxNodeEnv(doctorEnvFor("fridolin-core.example.ts.net:8766", nil), "default.target", "yes"), nodeChecks(dir, nodeService{status: running}))
 	if !rep.OK {
 		t.Errorf("joined, reachable, running: %+v", rep)
 	}
 	stopped := func() (string, error) { return "installed, stopped", nil }
-	rep = app.RunDoctor(context.Background(), linuxNodeEnv(doctorEnvFor("", nil), "default.target", "yes"), nodeChecks(dir, stopped))
+	rep = app.RunDoctor(context.Background(), linuxNodeEnv(doctorEnvFor("", nil), "default.target", "yes"), nodeChecks(dir, nodeService{status: stopped}))
 	var failed []string
 	for _, c := range rep.Checks {
 		if c.Status == app.DoctorFail {
@@ -352,7 +352,7 @@ func TestNodeBootChecks(t *testing.T) {
 	running := func() (string, error) { return "running", nil }
 	check := func(env *app.DoctorEnv, id string) app.DoctorCheckReport {
 		t.Helper()
-		for _, c := range app.RunDoctor(context.Background(), env, nodeChecks(dir, running)).Checks {
+		for _, c := range app.RunDoctor(context.Background(), env, nodeChecks(dir, nodeService{status: running})).Checks {
 			if c.ID == id {
 				return c
 			}
@@ -374,12 +374,12 @@ func TestNodeBootChecks(t *testing.T) {
 	if c := check(env, "node-linger"); c.Status != app.DoctorWarn || c.Fix != "sudo loginctl enable-linger you" {
 		t.Errorf("no linger: %+v", c)
 	}
-	if rep := app.RunDoctor(context.Background(), env, nodeChecks(dir, running)); !rep.OK {
+	if rep := app.RunDoctor(context.Background(), env, nodeChecks(dir, nodeService{status: running})); !rep.OK {
 		t.Errorf("linger is only a warning: %+v", rep)
 	}
 	env = doctorEnvFor(reachable, nil)
 	env.GOOS = "darwin"
-	for _, c := range app.RunDoctor(context.Background(), env, nodeChecks(dir, running)).Checks {
+	for _, c := range app.RunDoctor(context.Background(), env, nodeChecks(dir, nodeService{status: running})).Checks {
 		if c.ID == "node-boot" || c.ID == "node-linger" {
 			t.Errorf("%s checked on macOS", c.ID)
 		}
