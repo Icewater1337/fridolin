@@ -207,15 +207,8 @@ fridolin node join fj-… --core fridolin-core.<tailnet>.ts.net:8766 --no-exec -
 On Linux the service is a systemd user unit, which stops when the owner
 logs out and does not start at boot unless the user lingers. On a
 server, or any machine that should serve while nobody is logged in, ask
-first, then run `sudo loginctl enable-linger $USER`. Until
-issue #171 is fixed,
-the unit also has to be linked for boot by hand, or it never starts
-after a reboot:
-
-```sh
-ln -sf ../fridolin-node.service ~/.config/systemd/user/default.target.wants/fridolin-node.service
-systemctl --user daemon-reload
-```
+first, then run `sudo loginctl enable-linger $USER`. `fridolin doctor
+--node` warns while it is off.
 
 ### 6. Approve on the core
 
