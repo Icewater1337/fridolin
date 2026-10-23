@@ -64,6 +64,7 @@ type Index struct {
 type entry struct {
 	page  Page
 	text  string   // the Markdown, without frontmatter
+	tags  []string // the frontmatter's tags
 	links []string // the pages it links to (resolved)
 }
 
@@ -72,6 +73,7 @@ type cached struct {
 	mod   time.Time
 	size  int64
 	title string
+	tags  []string
 	text  string
 	raw   []string // link targets as written
 }
@@ -162,7 +164,7 @@ func (m *Manager) build(root files.Root, s files.Scope) (*Index, error) {
 				pg.Title = path.Base(name)
 			}
 			ix.Pages = append(ix.Pages, pg)
-			ix.byPath[p] = &entry{page: pg, text: c.text}
+			ix.byPath[p] = &entry{page: pg, text: c.text, tags: c.tags}
 			return nil
 		})
 		if err != nil {
@@ -248,7 +250,7 @@ func (m *Manager) read(root files.Root, osRoot *os.Root, p string, info fs.FileI
 		return nil
 	}
 	mt, body := frontmatter(data)
-	c := &cached{mod: info.ModTime(), size: info.Size(), title: mt.title, text: string(body)}
+	c := &cached{mod: info.ModTime(), size: info.Size(), title: mt.title, tags: mt.tags, text: string(body)}
 	if c.title == "" {
 		if h := h1RE.FindSubmatch(body); h != nil {
 			c.title = strings.TrimSpace(stripInline(string(h[1])))
@@ -388,9 +390,8 @@ func (ix *Index) Render(p string) (Doc, error) {
 		return Doc{}, files.ErrHidden
 	}
 	doc := Render([]byte(e.text), p, ix)
-	if doc.Title == "" {
-		doc.Title = e.page.Title
-	}
+	// The frontmatter was read with the page; the title is the page's.
+	doc.Title, doc.Tags = e.page.Title, e.tags
 	return doc, nil
 }
 

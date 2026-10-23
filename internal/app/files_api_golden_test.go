@@ -215,11 +215,14 @@ func TestSiteRolesSeeTheirBrainsOnly(t *testing.T) {
 		if code != http.StatusOK {
 			t.Fatalf("roots as %s: %d %s", account, code, body)
 		}
-		var r struct{ Roots []struct{ ID string } }
+		var r struct{ Roots []struct{ ID, Path string } }
 		_ = json.Unmarshal([]byte(body), &r)
 		var ids []string
 		for _, x := range r.Roots {
 			ids = append(ids, x.ID)
+			if x.Path != "" {
+				t.Errorf("the site is told where %s is: %s", x.ID, x.Path)
+			}
 		}
 		return ids
 	}

@@ -126,7 +126,7 @@ func brainWiki(t *testing.T) files.Root {
 	t.Helper()
 	dir := t.TempDir()
 	write(t, dir, "wiki/_index.md", "# Wiki Index\n\n- [[acme]] and [[people/alex|Alex]]\n- [[nowhere]]\n- [[documents/plan]]\n")
-	write(t, dir, "wiki/acme.md", "---\ntitle: Acme AG\n---\nThe company. See [Alex](people/alex.md#role) and ![[logo.png]].\n")
+	write(t, dir, "wiki/acme.md", "---\ntitle: Acme AG\ntags: [company]\n---\nThe company. See [Alex](people/alex.md#role) and ![[logo.png]].\n")
 	write(t, dir, "wiki/people/alex.md", "# Alex\n\n## Role\nWorks at [[acme]]. Fundraising lead.\n")
 	write(t, dir, "wiki/logo.png", "png")
 	write(t, dir, "wiki/work/secret.md", "# Secret\nfundraising numbers")
@@ -178,6 +178,9 @@ func TestIndexResolvesLinksAndBacklinks(t *testing.T) {
 		}
 	}
 	doc, _ = ix.Render("wiki/acme.md")
+	if doc.Title != "Acme AG" || !slices.Equal(doc.Tags, []string{"company"}) {
+		t.Errorf("the frontmatter is lost: %q %v", doc.Title, doc.Tags)
+	}
 	data, _ = json.Marshal(doc)
 	if s := string(data); !strings.Contains(s, `"page":"wiki/people/alex.md","anchor":"role"`) || !strings.Contains(s, `{"t":"img","file":"wiki/logo.png","alt":"logo.png"}`) {
 		t.Errorf("acme: %s", s)

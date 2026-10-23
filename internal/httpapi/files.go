@@ -238,7 +238,14 @@ var (
 )
 
 func (a *FilesAPI) roots(w http.ResponseWriter, r *http.Request, s files.Scope) {
-	WriteJSON(w, http.StatusOK, FilesRootsResponse{Roots: a.allowed(s)})
+	roots := a.allowed(s)
+	if siteReader(s) {
+		// Where a folder is on this machine is the owner's business.
+		for i := range roots {
+			roots[i].Path, roots[i].Excluded = "", nil
+		}
+	}
+	WriteJSON(w, http.StatusOK, FilesRootsResponse{Roots: roots})
 }
 
 // nodePath is rel inside a node's root, in the node's own spelling.
