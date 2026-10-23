@@ -42,31 +42,36 @@ func TestGoldenFilesEndpoints(t *testing.T) {
 	h, s, _ := goldenBridge(t)
 	writeBrainFiles(t, filepath.Join(h.home, "main"))
 	s = s.maskKeys("mod_time", "ticket", "expires")
-	for _, tc := range []struct{ name, path string }{
-		{"files-roots", "/api/files/roots"},
-		{"files-list", "/api/files/list?root=brain:main"},
-		{"files-list-folder", "/api/files/list?root=brain:main&path=docs"},
-		{"files-list-excluded", "/api/files/list?root=brain:main&path=node_modules"},
-		{"files-list-outside", "/api/files/list?root=brain:main&path=../"},
-		{"files-list-unknown-root", "/api/files/list?root=brain:nope"},
-		{"files-search", "/api/files/search?root=brain:main&q=PLAN"},
-		{"files-view-markdown", "/api/files/view?root=brain:main&path=wiki/index.md"},
-		{"files-view-text", "/api/files/view?root=brain:main&path=docs/plan.txt"},
-		{"files-view-image", "/api/files/view?root=brain:main&path=docs/photo.png"},
-		{"files-view-secret", "/api/files/view?root=brain:main&path=.env"},
-		{"files-view-key", "/api/files/view?root=brain:main&path=id_ed25519"},
-		{"files-ticket", "/api/files/ticket?root=brain:main"},
-		{"wiki", "/api/wiki"},
-		{"wiki-pages", "/api/wiki/main/pages"},
-		{"wiki-page", "/api/wiki/main/page?path=wiki/people/alex.md"},
-		{"wiki-page-home", "/api/wiki/main/page"},
-		{"wiki-page-missing", "/api/wiki/main/page?path=wiki/nope.md"},
-		{"wiki-page-unknown-brain", "/api/wiki/nope/pages"},
-		{"wiki-search", "/api/wiki/search?q=budget"},
+	for _, tc := range []struct {
+		name, path string
+		// mask lists what depends on the machine: the size of the
+		// brain's history, whose lines hold times and paths.
+		mask []string
+	}{
+		{"files-roots", "/api/files/roots", nil},
+		{"files-list", "/api/files/list?root=brain:main", []string{"size"}},
+		{"files-list-folder", "/api/files/list?root=brain:main&path=docs", nil},
+		{"files-list-excluded", "/api/files/list?root=brain:main&path=node_modules", nil},
+		{"files-list-outside", "/api/files/list?root=brain:main&path=../", nil},
+		{"files-list-unknown-root", "/api/files/list?root=brain:nope", nil},
+		{"files-search", "/api/files/search?root=brain:main&q=PLAN", nil},
+		{"files-view-markdown", "/api/files/view?root=brain:main&path=wiki/index.md", nil},
+		{"files-view-text", "/api/files/view?root=brain:main&path=docs/plan.txt", nil},
+		{"files-view-image", "/api/files/view?root=brain:main&path=docs/photo.png", nil},
+		{"files-view-secret", "/api/files/view?root=brain:main&path=.env", nil},
+		{"files-view-key", "/api/files/view?root=brain:main&path=id_ed25519", nil},
+		{"files-ticket", "/api/files/ticket?root=brain:main", nil},
+		{"wiki", "/api/wiki", nil},
+		{"wiki-pages", "/api/wiki/main/pages", nil},
+		{"wiki-page", "/api/wiki/main/page?path=wiki/people/alex.md", nil},
+		{"wiki-page-home", "/api/wiki/main/page", nil},
+		{"wiki-page-missing", "/api/wiki/main/page?path=wiki/nope.md", nil},
+		{"wiki-page-unknown-brain", "/api/wiki/nope/pages", nil},
+		{"wiki-search", "/api/wiki/search?q=budget", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := h.Do("GET", tc.path, nil)
-			assertGolden(t, "api/get-"+tc.name+".golden", append([]byte("GET "+tc.path+"\n"), s.response(t, w)...))
+			assertGolden(t, "api/get-"+tc.name+".golden", append([]byte("GET "+tc.path+"\n"), s.with(tc.mask...).response(t, w)...))
 		})
 	}
 }

@@ -70,6 +70,7 @@ github.com/tailscale/web-client-prebuilt v0.0.0-20250124233751-d4cd19a26976 (BSD
 github.com/tailscale/wireguard-go v0.0.0-20260715223240-2e01ba5b00f0 (MIT)
 github.com/vektah/gqlparser/v2 v2.5.36 (MIT)
 github.com/x448/float16 v0.8.4 (MIT)
+github.com/yuin/goldmark v1.8.6 (MIT)
 go.mau.fi/libsignal v0.2.2 (GPL-3.0)
 go.mau.fi/util v0.9.12-0.20260717235539-f9ffa7eca58d (MPL-2.0)
 go.mau.fi/whatsmeow v0.0.0-20260730092514-662ad1dc6900 (MPL-2.0)
@@ -2575,6 +2576,33 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+
+
+==============================================================================
+github.com/yuin/goldmark v1.8.6: LICENSE
+==============================================================================
+
+MIT License
+
+Copyright (c) 2019 Yusuke Inuzuka
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 
 ==============================================================================

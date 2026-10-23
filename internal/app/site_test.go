@@ -216,8 +216,12 @@ func TestSiteAPI(t *testing.T) {
 	if code, _ := call("POST", "/api/site/users", `{"kind":"google","email":"owner@example.com","role":"admin"}`); code != 200 {
 		t.Errorf("adding the admin: %d", code)
 	}
-	if code, out := call("PUT", "/api/site/settings", `{"enabled": true}`); code != 400 || !strings.Contains(out["error"].(string), "deploy") {
+	// Without a deploy the site serves its built-in Files and Wiki alone.
+	if code, out := call("PUT", "/api/site/settings", `{"enabled": true}`); code != 200 || out["enabled"] != true {
 		t.Errorf("turning on without a deploy: %d %v", code, out)
+	}
+	if code, _ := call("PUT", "/api/site/settings", `{"enabled": false}`); code != 200 {
+		t.Errorf("turning off: %d", code)
 	}
 	if code, _ := call("PUT", "/api/site/settings", `{"domain": "example.com"}`); code != 200 {
 		t.Errorf("setting the domain: %d", code)

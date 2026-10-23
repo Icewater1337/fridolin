@@ -8,43 +8,43 @@ Content-Type: application/json
       "dir": true,
       "mod_time": "<MOD_TIME>",
       "name": "docs",
-      "size": 0
+      "size": "<SIZE>"
     },
     {
       "dir": true,
       "mod_time": "<MOD_TIME>",
       "name": "memories",
-      "size": 0
+      "size": "<SIZE>"
     },
     {
       "dir": true,
       "mod_time": "<MOD_TIME>",
       "name": "skills",
-      "size": 0
+      "size": "<SIZE>"
     },
     {
       "dir": true,
       "mod_time": "<MOD_TIME>",
       "name": "wiki",
-      "size": 0
+      "size": "<SIZE>"
     },
     {
       "kind": "markdown",
       "mod_time": "<MOD_TIME>",
       "name": "brain-prompt.md",
-      "size": 8579
+      "size": "<SIZE>"
     },
     {
       "kind": "text",
       "mod_time": "<MOD_TIME>",
       "name": "brain.json",
-      "size": 520
+      "size": "<SIZE>"
     },
     {
       "kind": "text",
       "mod_time": "<MOD_TIME>",
       "name": "conversation-history.jsonl",
-      "size": 360
+      "size": "<SIZE>"
     }
   ],
   "path": "",

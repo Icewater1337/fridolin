@@ -144,3 +144,37 @@ test('wiki.<domain> and files.<domain> lead to the pages on <domain>', async (t)
   assert.equal((await get('example.com', '/')).status, 200)
   assert.equal((await get('other.example.com', '/')).status, 200)
 })
+
+test('the starter module in examples/site-module loads and works as the site runs it', async (t) => {
+  const { cpSync, symlinkSync } = await import('node:fs')
+  const { fileURLToPath } = await import('node:url')
+  const siteDir = join(fileURLToPath(new URL('.', import.meta.url)), '..')
+  const dir = mkdtempSync(join(tmpdir(), 'fridolin-example-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  cpSync(join(siteDir, 'template'), join(dir, 'repo'), { recursive: true })
+  cpSync(join(siteDir, '..', 'examples', 'site-module'), join(dir, 'repo/modules/notes'), { recursive: true })
+  symlinkSync(join(siteDir, 'node_modules'), join(dir, 'repo/node_modules'))
+  mkdirSync(join(dir, 'data'))
+  writeFileSync(join(dir, 'users.json'), JSON.stringify({ version: 1, users: [MEMBER] }))
+  writeFileSync(join(dir, 'session.key'), randomBytes(32).toString('hex'))
+  writeFileSync(join(dir, 'runtime.json'), JSON.stringify({
+    listen: '127.0.0.1:0', modules_dir: join(dir, 'repo/modules'), data_dir: join(dir, 'data'),
+    users_file: join(dir, 'users.json'), session_key_file: join(dir, 'session.key'),
+  }))
+  const app = await createSite(readRuntime(join(dir, 'runtime.json')))
+  const server = app.listen(0, '127.0.0.1')
+  await new Promise(r => server.once('listening', r))
+  t.after(() => { server.close() })
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  const r = await fetch(`${url}/auth/login`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'sam', password: 'correct horse' }),
+  })
+  const cookie = r.headers.getSetCookie().find(c => c.startsWith('fridolin_site='))!.split(';')[0]
+  const tiles = await (await fetch(`${url}/api/modules`, { headers: { cookie } })).json() as { modules: { id: string }[]; broken: unknown[] }
+  assert.ok(tiles.modules.some(m => m.id === 'notes'), JSON.stringify(tiles))
+  const page = await fetch(`${url}/notes/`, { headers: { cookie } })
+  assert.match(await page.text(), /<base href="\/notes\/">/)
+  const add = await fetch(`${url}/notes/api/notes`, { method: 'POST', headers: { cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'hello' }) })
+  const body = await add.json() as { notes: { text: string; by: string }[] }
+  assert.deepEqual(body.notes.map(n => [n.text, n.by]), [['hello', 'Sam']])
+})
