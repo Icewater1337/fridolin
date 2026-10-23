@@ -1064,7 +1064,8 @@ owner's plugin cache, asks in an interactive session, and would need a
    the node being paired, `fride` appears in what the node offers. It
    then waits for the owner, who approves it with **Approve commands**
    on the core's Nodes page (open
-   `https://fridolin-core.<tailnet>.ts.net/#/nodes` for them) or with
+   `https://fridolin-core.<tailnet>.ts.net/#/nodes` for them, `http://`
+   when the tailnet has HTTPS off: `fridolin doctor` names the address) or with
    `fridolin nodes approve <id> --commands` on the core. Where the core
    has a chat command for approving, such as `!approve`, that works too.
 2. **Verify**, one check at a time:

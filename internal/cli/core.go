@@ -353,7 +353,7 @@ func exportFolders(cfg *config.Settings, cfgPath string) (brains []string, folde
 				break
 			}
 		}
-		folders = append(folders, coreexport.Folder{ID: b.Approved.ID, Configured: configured, Dir: dir, Skip: skip, Excluded: excluded})
+		folders = append(folders, coreexport.Folder{ID: b.Approved.ID, Configured: configured, Dir: dir, Skip: skip, Excluded: excluded, Visiting: b.MovedFrom != ""})
 	}
 	return brains, folders
 }

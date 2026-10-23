@@ -50,6 +50,12 @@ type Folder struct {
 	// what the brain's backup settings leave out of the cloud. nil keeps
 	// nothing back.
 	Excluded func(rel string) bool
+	// Visiting says the folder lies in the data dir because a core move
+	// put it there (its brain_dirs entry has moved_from). The data dir's
+	// export then leaves out of it what Excluded and folderJunk leave out
+	// on the way out, so the way back carries no more through the cloud
+	// than the way there did.
+	Visiting bool
 }
 
 // FolderInfo is a brain folder in the manifest.

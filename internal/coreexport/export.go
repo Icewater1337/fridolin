@@ -158,6 +158,26 @@ func excluded(rel string, dir bool) bool {
 	return false
 }
 
+// visitingStays reports whether p lies in a visiting brain folder and
+// stays out of the export by that folder's backup settings, and which
+// folder it is.
+func visitingStays(visiting []Folder, p string, d fs.DirEntry) (string, bool) {
+	for _, f := range visiting {
+		if !within(f.Dir, p) || filepath.Clean(p) == filepath.Clean(f.Dir) {
+			continue
+		}
+		rel, err := filepath.Rel(f.Dir, p)
+		if err != nil {
+			return "", false
+		}
+		if (f.Excluded != nil && f.Excluded(filepath.ToSlash(rel))) || (d.IsDir() && folderJunk(p, d.Name())) {
+			return f.Dir, true
+		}
+		return "", false
+	}
+	return "", false
+}
+
 // isDatabase reports whether a file is copied as a SQLite database.
 // The bridge's are *.db; a brain's Codex state (brains/<id>/codex) keeps
 // *.sqlite, whose -wal the export leaves out and VACUUM INTO takes in.
@@ -225,6 +245,14 @@ func Export(ctx context.Context, dataDir string, recipients []age.Recipient, sto
 		}
 	}
 
+	var visiting []Folder
+	for _, f := range opts.Folders {
+		if f.Visiting && within(dataDir, f.Dir) {
+			visiting = append(visiting, f)
+		}
+	}
+	left := map[string]int{}
+
 	// First the list and the database snapshots, so the manifest that
 	// leads the archive is complete.
 	var items []item
@@ -241,6 +269,13 @@ func Export(ctx context.Context, dataDir string, recipients []age.Recipient, sto
 		}
 		rel = filepath.ToSlash(rel)
 		if excluded(rel, d.IsDir()) && !(opts.IncludeMedia && rel == "media") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if f, ok := visitingStays(visiting, p, d); ok {
+			left[f]++
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -270,6 +305,11 @@ func Export(ctx context.Context, dataDir string, recipients []age.Recipient, sto
 	})
 	if err != nil {
 		return ExportResult{}, fmt.Errorf("export: %w", err)
+	}
+	for _, f := range visiting {
+		if n := left[f.Dir]; n > 0 {
+			opts.Logf("Leaving out %d files and folders of brain folder %s (%s), as its backup settings do on its way here", n, f.Dir, f.ID)
+		}
 	}
 	for _, it := range items {
 		if !it.dir {

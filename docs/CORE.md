@@ -875,7 +875,12 @@ ones stay as they are, and the brain points at `~/Personal` again, the
 path as `config.json` had it (`~/Personal`, not the expanded one). Nothing
 at home is deleted: a file the brain deleted on the other machine is
 still there, and what never left (the excluded work folders) is
-untouched. A folder below a link is never written through.
+untouched. A folder below a link is never written through. The export
+on the way back leaves out of the visiting folder what the brain's backup
+settings leave out on the way there (excluded paths, secret files,
+`node_modules/`, virtualenvs): what the brain made there of that kind
+(its `claude-stream.log` under `*.log`, a `.env`) stays on the other
+machine, as it never goes through the vault bucket.
 
 A file changed at home while the folder was away is not lost. When the
 import puts a folder into the volume it records each file's sha256 in
@@ -959,7 +964,7 @@ Mac mini (core A):
       `fridolin core start`.
 - [ ] `docker exec fridolin-core fridolin doctor`: tailnet up with its
       MagicDNS name, lease renewed, bubblewrap ok.
-- [ ] From another tailnet device: `https://fridolin-core.<tailnet>.ts.net/`
+- [ ] From another tailnet device: the dashboard address `fridolin doctor` names (`https://fridolin-core.<tailnet>.ts.net/` with HTTPS on in the tailnet, else `http://`)
       asks for the token; a setting saved there is in `audit/` with your
       login.
 - [ ] A WhatsApp message gets an answer; a brain's run cannot list

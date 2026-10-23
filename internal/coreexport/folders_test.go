@@ -129,6 +129,10 @@ func TestBrainFolderMovesAwayAndHome(t *testing.T) {
 	// The brain works there: it changes a file, adds one, deletes one.
 	write(t, away, "notes.md", "new notes", 0o644)
 	write(t, away, "added.md", "added", 0o644)
+	// What its backup settings keep out of the cloud stays on this
+	// machine on the way back too (#195): work data, programs.
+	write(t, away, "work/made-away.md", "work data made away", 0o600)
+	write(t, away, "node_modules/y/index.js", "y", 0o644)
 	if err := os.Remove(filepath.Join(away, "sub", "keep.md")); err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +148,7 @@ func TestBrainFolderMovesAwayAndHome(t *testing.T) {
 	}
 
 	// Back: the folder lies in the data dir now, and travels with it.
-	m2 := exp(vm, []Folder{{ID: "personal", Configured: away, Dir: away}}, t0.Add(2*time.Minute))
+	m2 := exp(vm, []Folder{{ID: "personal", Configured: away, Dir: away, Excluded: excluded, Visiting: true}}, t0.Add(2*time.Minute))
 	if len(m2.Folders) != 0 || m2.Format != 1 {
 		t.Errorf("the way back carries the folder in data/, not folders/: %+v", m2.Folders)
 	}
@@ -170,6 +174,11 @@ func TestBrainFolderMovesAwayAndHome(t *testing.T) {
 	}
 	if got := readFile(t, filepath.Join(personal, "added.md")); got != "added" {
 		t.Errorf("added.md = %q", got)
+	}
+	for _, stayed := range []string{"work/made-away.md", "node_modules/y/index.js"} {
+		if _, err := os.Stat(filepath.Join(personal, filepath.FromSlash(stayed))); err == nil {
+			t.Errorf("%s came home through the cloud, though the brain's backup settings leave it out", stayed)
+		}
 	}
 	for _, kept := range []string{"sub/keep.md", "work/contract.pdf", "mac-only.md", "tool/venv/bin/python"} {
 		if _, err := os.Stat(filepath.Join(personal, filepath.FromSlash(kept))); err != nil {

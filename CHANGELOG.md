@@ -677,6 +677,14 @@ for compatibility.
 
 ### Fixed
 
+- A brain folder that a core move put on another machine goes back
+  through the vault bucket only as far as the brain's backup settings
+  let it, as on its way there. The export from the other machine took
+  the visiting folder whole, so what the brain made there that its
+  settings leave out (`*.log`, secret files, `node_modules/`) went
+  through the cloud and was written home, where an excluded file that
+  also existed at home showed up as a conflict (#195).
+
 - `fridolin vault migrate-encryption --run --delete-old` retires the
   single-layer Drive repository (`fridolin-restic`) also where Google
   Drive does not let fridolin delete it. The Drive link's `drive.file`
