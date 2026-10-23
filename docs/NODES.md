@@ -66,9 +66,11 @@ show a UAC prompt: tell the owner to accept it.
 macOS: `brew install go git` and `brew install --cask tailscale` (install
 Homebrew first if `brew` is missing:
 `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`).
-Linux: `sudo apt install -y golang git` (or `sudo dnf install -y golang
-git`; Go must be 1.26 or newer, else the tarball from go.dev/dl) and
-`curl -fsSL https://tailscale.com/install.sh | sh`.
+Linux: `sudo apt install -y golang git make` (or `sudo dnf install -y
+golang git make`) and `curl -fsSL https://tailscale.com/install.sh | sh`.
+Ubuntu 24.04's `golang` is Go 1.22, which is fine: any Go 1.21 or newer
+downloads the version `go.mod` names on the first build (it needs the
+network; without it, the tarball from go.dev/dl).
 
 ### 2. Tailscale
 
@@ -77,7 +79,9 @@ as the core. Run `tailscale up` (Linux: `sudo tailscale up`); it prints a
 login link and waits. Open the link for the owner (`Start-Process URL` on
 Windows, `open URL` on macOS, `xdg-open URL` on Linux; the Windows and
 macOS apps may open it themselves), ask them to sign in with the account
-the core's tailnet belongs to, and wait. Then:
+the core's tailnet belongs to, and wait. On a server without a desktop
+(a cloud VM reached over SSH) open the link on the machine the owner sits
+at instead; `sudo tailscale up --hostname NAME` names the device. Then:
 
 ```sh
 tailscale status            # lists fridolin-core among the devices
@@ -115,8 +119,10 @@ $fridolin = "$env:ProgramFiles\fridolin\fridolin.exe"
 & $fridolin version
 ```
 
-On macOS and Linux, `make install` copies it to `~/.local/bin` (on PATH),
-which the user service runs.
+On macOS and Linux, `make install` copies it to `~/.local/bin`, which
+the user service runs. On Linux that folder is on the PATH of a login
+shell only, and only once it exists: over a plain `ssh host 'command'`,
+run `~/.local/bin/fridolin` or `bash -lc 'fridolin …'`.
 
 ### 4. A join code from the core
 
@@ -211,6 +217,19 @@ fridolin node join fj-… --core fridolin-core.<tailnet>.ts.net:8766 --no-exec -
 ```
 
 `join` prints the node's id.
+
+On Linux the service is a systemd user unit, which stops when the owner
+logs out and does not start at boot unless the user lingers. On a
+server, or any machine that should serve while nobody is logged in, ask
+first, then run `sudo loginctl enable-linger $USER`. Until
+issue #171 is fixed,
+the unit also has to be linked for boot by hand, or it never starts
+after a reboot:
+
+```sh
+ln -sf ../fridolin-node.service ~/.config/systemd/user/default.target.wants/fridolin-node.service
+systemctl --user daemon-reload
+```
 
 ### 6. Approve on the core
 
@@ -866,10 +885,23 @@ This is the same setup as on the Mac mini, next to the owner's own FrIDE.
 1. **Tools**: git, Go (the version FrIDE's `go.mod` names or a newer
    one; an older `go` fetches it), Node 18+ and Claude Code
    (`npm i -g @anthropic-ai/claude-code`), and lsof. On macOS:
-   `brew install go git node`. On Linux: the packages from WSL's
-   step 3, with `sudo`.
+   `brew install go git node`. On Linux (Ubuntu 24.04):
+   `sudo apt-get install -y git curl ca-certificates build-essential lsof nodejs npm gh`,
+   then Claude Code for the user, not root:
+   `npm config set prefix ~/.local && npm i -g @anthropic-ai/claude-code`.
+   Ubuntu's Go and Node 18 are fine; `go` fetches the version FrIDE's
+   `go.mod` names on the first build.
 2. **Claude Code login**: the owner runs `claude` once and signs in;
-   check with `claude -p hi`.
+   check with `claude -p hi`. On a machine reached over SSH, open a
+   terminal for the owner with `ssh -t HOST 'cd ~/fride-companion/workspaces && bash -lc claude'`
+   once `~/fride-companion/workspaces` exists (step 3): Claude prints a
+   sign-in URL to open on their own machine, and asks about trusting the
+   folder, which is step 6 done at once.
+   **Git identity**: FrIDE's agents commit on the node, and with no
+   identity the first commit stops to ask in the agent's terminal,
+   which the chat does not show. Ask the owner which name and email
+   to use, then
+   `git config --global user.name "NAME" && git config --global user.email EMAIL`.
 3. **Build**: run `git clone <fride-url>
    ~/fride-companion/src/fride` and
    `mkdir -p ~/fride-companion/{bin,home,repos,workspaces}`, then
@@ -893,9 +925,31 @@ This is the same setup as on the Mac mini, next to the owner's own FrIDE.
    - Linux: a systemd user unit
      `~/.config/systemd/user/fride-companion.service` with the same
      command, `Environment=FRIDE_HOME=…` and `PATH=…`, and
-     `Restart=always`. Start it with
-     `systemctl --user enable --now fride-companion`. For it to run
-     without a login, run `loginctl enable-linger` (ask first).
+     `Restart=always`:
+
+     ```ini
+     [Unit]
+     Description=FrIDE companion (under fridolin)
+
+     [Service]
+     ExecStart=%h/fride-companion/bin/fride serve --under-fridolin --port 17840
+     WorkingDirectory=%h/fride-companion/home
+     Environment=FRIDE_HOME=%h/fride-companion/home
+     Environment=SHELL=/bin/bash
+     Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+     Restart=always
+     RestartSec=5
+
+     [Install]
+     WantedBy=default.target
+     ```
+
+     Its log goes to the journal (`journalctl --user -u fride-companion`).
+     Start it with
+     `systemctl --user daemon-reload && systemctl --user enable --now fride-companion`.
+     For it to run without a login, and after a reboot, the user must
+     linger (`sudo loginctl enable-linger $USER`, ask first; the node's
+     service needs it too, see Join above).
 8. **Pair**:
 
    ```bash
@@ -974,6 +1028,17 @@ more with the owner later (see FrIDE's SETUP.md).
      mirrored networking, ask for `fride_status` instead. Then have the
      core close the task (`fride_close`), so the test leaves no
      workspace behind.
+
+     When FrIDE reports instead that the agent is idle or "stopped at
+     its prompt", look at the agent's screen (FrIDE's web UI, on the
+     node or through `ssh -L`; the board's **Show hidden** lists the
+     companion's tasks). On a node's first task, Claude Code's one-time
+     auto-mode notice can swallow the instruction; answering "send it
+     again" works
+     (FrIDE's issue #4). A
+     question the agent asks in its terminal (a missing git identity,
+     say) does not reach the chat
+     (FrIDE's issue #5).
 
 **Rollback.**
 - Windows: `Unregister-ScheduledTask -TaskName 'FrIDE companion (WSL)'`,
