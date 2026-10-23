@@ -62,7 +62,7 @@ expect "smoke builds cmd/fridolin" has smoke ' \./cmd/fridolin; '
 # fridolin version names the build: what it is given (setup.sh passes
 # its own), else what git describe says of the checkout.
 expect "build stamps the version it is given" has build '-X github.com/Icewater1337/fridolin/internal/version\.version=v0\.0\.0-sentinel"' VERSION=v0.0.0-sentinel
-described="$(git -C "$root" describe --tags --always --dirty 2>/dev/null || echo dev)"
+described="$(git -C "$root" describe --tags --always --dirty --abbrev=8 2>/dev/null || echo dev)"
 expect "build stamps git describe by default" has build "-X github.com/Icewater1337/fridolin/internal/version\\.version=$described\""
 # The linker skips an -X it has no variable for: smoke.sh checks that the
 # stamp reaches the binary.

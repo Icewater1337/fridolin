@@ -13,6 +13,7 @@ type Deps struct {
 	Ready             http.HandlerFunc
 	Send              http.HandlerFunc
 	Ingest            http.HandlerFunc
+	TakeOTP           http.HandlerFunc
 	Builder           func() http.Handler
 	Brain             func() http.Handler
 	DashboardDisabled func() bool
@@ -50,6 +51,8 @@ func New(d Deps) http.Handler {
 	mux.HandleFunc("POST /send", d.Send)
 	mux.HandleFunc("POST /ingest", d.Ingest)
 	if !d.Remote {
+		// One-time codes for local scripts; never on the tailnet.
+		mux.HandleFunc("POST /otp/take", d.TakeOTP)
 		// The site builder's MCP servers; each brain's own token (site_builder.go).
 		mux.Handle("/builder/", d.Builder())
 		// The tools brains run; each run's own token (brainapi.go).

@@ -238,6 +238,47 @@ func (o *Handoff) expire(path string, receivedMS int64) {
 	delete(o.timers, path)
 }
 
+// Take hands over the code that answers request, once: the hand-off file
+// in dir whose Request it is, unless it expired by now, is removed and its
+// record returned. ok is false when no such code is waiting, whether the
+// request is unknown, not answered yet, expired or taken already.
+func (o *Handoff) Take(dir, request string, now time.Time) (h Record, ok bool, err error) {
+	if request == "" {
+		return Record{}, false, nil
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return Record{}, false, nil
+	}
+	if err != nil {
+		return Record{}, false, err
+	}
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		data, err := os.ReadFile(path)
+		if err != nil || json.Unmarshal(data, &h) != nil || h.Request != request {
+			continue
+		}
+		if h.ExpiresUnixMS > 0 && now.UnixMilli() >= h.ExpiresUnixMS {
+			return Record{}, false, nil
+		}
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return Record{}, false, err
+		}
+		if t := o.timers[path]; t != nil {
+			t.Stop()
+			delete(o.timers, path)
+		}
+		return h, true, nil
+	}
+	return Record{}, false, nil
+}
+
 // Stop ends the expiry timers, when the bridge stops; the next start's
 // sweep removes what expired in between.
 func (o *Handoff) Stop() {

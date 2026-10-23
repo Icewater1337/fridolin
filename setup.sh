@@ -175,7 +175,7 @@ BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/fridolin-setup.XXXXXX")"
 trap 'rm -rf "$BUILD_DIR"' EXIT
 # Given to make, so that a VERSION exported in this shell for other
 # software does not end up in the build.
-VERSION="$(git -C "$REPO_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)"
+VERSION="$(git -C "$REPO_DIR" describe --tags --always --dirty --abbrev=8 2>/dev/null || echo dev)"
 NEW="$BUILD_DIR/fridolin"
 ( cd "$REPO_DIR" && make -s build VERSION="$VERSION" BINARY="$NEW" ) || fail "Build failed — see the Go errors above. Nothing was installed."
 ok "built $VERSION"

@@ -11,9 +11,16 @@ import (
 
 // version is set at build time with
 // -ldflags "-X github.com/Icewater1337/fridolin/internal/version.version=v1.2.3": make build and
-// setup.sh stamp `git describe --tags --always --dirty`, release builds
-// the tag (scripts/build-release.sh).
+// setup.sh stamp `git describe --tags --always --dirty --abbrev=8`, release
+// builds the tag (scripts/build-release.sh). The abbreviation is pinned:
+// git's own default grows with the repository and differs between clones,
+// so one commit would be called 0284f03 on one machine and 0284f03e on
+// another (nodeproto.CompareVersions still takes them as one build).
 var version = "dev"
+
+// abbrev is how many hex digits of the commit a build is named by, the
+// same as the --abbrev the stamps use.
+const abbrev = 8
 
 // String returns the release version, or the git commit for a local build.
 func String() string {
@@ -36,8 +43,8 @@ func String() string {
 	if rev == "" {
 		return version
 	}
-	if len(rev) > 7 {
-		rev = rev[:7]
+	if len(rev) > abbrev {
+		rev = rev[:abbrev]
 	}
 	if modified {
 		rev += "+dirty"

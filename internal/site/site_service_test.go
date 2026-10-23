@@ -408,6 +408,69 @@ func TestSiteRepoStarterDeployAndReview(t *testing.T) {
 	}
 }
 
+// A data dir moved to another machine (core export and import) arrives
+// without node_modules, and its repository knows the deploy folders by
+// their old paths: deploying the live commit again installs it once more.
+func TestSiteDeployAfterTheDataDirMoved(t *testing.T) {
+	ctx := t.Context()
+	opts := testSiteOptions(t)
+	installs := 0
+	opts.NPMInstall = func(ctx context.Context, dir string, prod bool) error {
+		installs++
+		return os.MkdirAll(filepath.Join(dir, "node_modules", "express"), 0o700)
+	}
+	m := NewSiteManager(opts)
+	if err := m.ConnectRepo(ctx, SiteRepo{URL: newBareRepo(t)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.AddStarter(ctx); err != nil {
+		t.Fatal(err)
+	}
+	up, err := m.Fetch(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Deploy(ctx, up.Head); err != nil {
+		t.Fatal(err)
+	}
+	waitDeploy(t, m)
+	if installs != 1 {
+		t.Fatalf("the first deploy installed %d times", installs)
+	}
+
+	moved := filepath.Join(t.TempDir(), "data")
+	if out, err := exec.Command("cp", "-R", opts.DataDir, moved).CombinedOutput(); err != nil {
+		t.Fatalf("copying the data dir: %v %s", err, out)
+	}
+	deploy := filepath.Join(moved, "site", "deploys", up.Head[:12])
+	if err := os.RemoveAll(filepath.Join(deploy, "node_modules")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(opts.DataDir); err != nil {
+		t.Fatal(err)
+	}
+	opts.DataDir = moved
+	m = NewSiteManager(opts)
+	if err := m.Deploy(ctx, up.Head); err != nil {
+		t.Fatal(err)
+	}
+	j := waitDeploy(t, m)
+	if strings.Contains(strings.Join(j.Log, "\n"), "Reusing the build") || installs != 2 {
+		t.Errorf("a deploy without node_modules was reused (%d installs): %v", installs, j.Log)
+	}
+	if !fsx.Exists(filepath.Join(deploy, "node_modules", "express")) || !fsx.Exists(filepath.Join(deploy, "modules", "welcome", "module.json")) {
+		t.Error("the deploy was not checked out and installed again")
+	}
+
+	// Once installed again, the next deploy of the commit reuses it.
+	if err := m.Deploy(ctx, up.Head); err != nil {
+		t.Fatal(err)
+	}
+	if j := waitDeploy(t, m); !strings.Contains(strings.Join(j.Log, "\n"), "Reusing the build") || installs != 2 {
+		t.Errorf("the reinstalled deploy was not reused (%d installs): %v", installs, j.Log)
+	}
+}
+
 // The whole thing: starter repository → deploy → the Node site process
 // serving it → sign in → the welcome tile.
 func TestSiteProcessEndToEnd(t *testing.T) {

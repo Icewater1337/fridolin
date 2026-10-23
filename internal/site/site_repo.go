@@ -629,18 +629,26 @@ func (m *SiteManager) runDeploy(ctx context.Context, job *SiteJob, commit string
 // builds its modules. A folder from an earlier deploy of the same commit is reused.
 func (m *SiteManager) prepareCheckout(ctx context.Context, job *SiteJob, commit, dir string) error {
 	ready := filepath.Join(dir, ".fridolin-ready")
-	if fsx.Exists(ready) {
+	root := filepath.Join(dir, filepath.FromSlash(m.Settings().Repo.Subdir))
+	// A data dir moved to another machine (docs/CORE.md) comes without
+	// node_modules, so a build whose dependencies are gone is done again.
+	if fsx.Exists(ready) && (!fsx.Exists(filepath.Join(root, "package.json")) || fsx.Exists(filepath.Join(root, "node_modules"))) {
 		job.step("Reusing the build of %s", commit[:12])
 		return nil
 	}
 	if fsx.Exists(dir) {
 		_, _ = m.git(ctx, m.repoDir(), "worktree", "remove", "--force", dir)
+		// The repository of a moved data dir knows its worktrees by their
+		// old paths, so git leaves this one alone.
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
+		_, _ = m.git(ctx, m.repoDir(), "worktree", "prune")
 	}
 	job.step("Checking out %s", commit[:12])
 	if _, err := m.git(ctx, m.repoDir(), "worktree", "add", "--force", "--detach", dir, commit); err != nil {
 		return err
 	}
-	root := filepath.Join(dir, filepath.FromSlash(m.Settings().Repo.Subdir))
 	if fsx.Exists(filepath.Join(root, "package.json")) {
 		job.step("Installing dependencies (npm)")
 		if err := m.npmInstall(ctx, root, false); err != nil {

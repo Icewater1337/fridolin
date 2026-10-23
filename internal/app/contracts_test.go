@@ -679,7 +679,7 @@ func TestHistoryLinesFollowTheSchema(t *testing.T) {
 
 // readerSchemas are the schemas of what the bridge writes for other
 // programs to read.
-var readerSchemas = []string{"history-line.schema.json", "send-response.schema.json", "ingest-response.schema.json"}
+var readerSchemas = []string{"history-line.schema.json", "send-response.schema.json", "ingest-response.schema.json", "otp-take-response.schema.json"}
 
 // TestReaderSchemasSayTheyAreClosed: a schema of what other programs read
 // refuses what it does not list, which keeps it to the code, while those
@@ -719,6 +719,21 @@ func assertScriptAPIContract(t *testing.T, path, body string, w *httptest.Respon
 	for i, line := range lines {
 		assertValid(t, set, "history-line.schema.json", fmt.Sprintf("history line %d", i+1), []byte(line))
 	}
+}
+
+// assertOTPTakeContract checks a call of /otp/take against its schemas: the
+// answer follows the response schema, as the code or the error its status
+// says, and a request the bridge took follows the request schema.
+func assertOTPTakeContract(t *testing.T, body string, w *httptest.ResponseRecorder) {
+	t.Helper()
+	set := newSchemaSet(t)
+	def := "#/$defs/error"
+	if w.Code < 300 {
+		def = "#/$defs/code"
+		assertValid(t, set, "otp-take-request.schema.json", "the request", []byte(body))
+	}
+	assertValid(t, set, "otp-take-response.schema.json", "the answer", w.Body.Bytes())
+	assertValid(t, set, "otp-take-response.schema.json"+def, fmt.Sprintf("the %d answer", w.Code), w.Body.Bytes())
 }
 
 // TestSendSchemaTakesTheOTPRequest: the answer of a /send that asks for a

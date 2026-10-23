@@ -9,6 +9,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"net/http"
+	"regexp"
 	"strings"
 )
 
@@ -25,6 +26,9 @@ type ScriptAPI struct {
 	IngestPolicy  func() IngestPolicy
 	Brain         func(string) *brain.Brain
 	IngestTarget  func(chat.Principal, *brain.Brain, []string, string, string, string) (string, error)
+	// TakeCode hands over, once, the caught code that answers the request
+	// id; ok is false when none is waiting for it.
+	TakeCode func(request string) (code OTPCodeResponse, ok bool, err error)
 }
 
 // SendRequest is the JSON body expected by POST /send.
@@ -111,6 +115,57 @@ func sendErrStatus(err error) int {
 		return http.StatusBadRequest
 	}
 	return http.StatusInternalServerError
+}
+
+// OTPTakeRequest is the JSON body expected by POST /otp/take.
+type OTPTakeRequest struct {
+	Request string `json:"request"`
+}
+
+// requestID is what NewRequestID in internal/otp makes: 16 hex digits.
+var requestID = regexp.MustCompile(`^[0-9a-f]{16}$`)
+
+// TakeOTP handles POST /otp/take {"request":"…"}: it hands the code the OTP
+// guard caught for that request id (the otp_request /send answered) to the
+// script that asked, once, and deletes it. docs/API.md is its contract.
+//
+// Only the scripts token takes a code: brains never see one, which is why
+// the sandbox denies them the hand-off folder too, and a program without a
+// token gets none whatever script_api.tokenless_send says. A request with
+// no code waiting, whether unknown, not answered yet, expired or taken
+// already, is the same 404, which tells nothing about other requests.
+func (a *ScriptAPI) TakeOTP(w http.ResponseWriter, r *http.Request) {
+	who, err := a.Authorize(r)
+	if err == nil && who.Kind == chat.CallerAnonymous {
+		err = a.TokenRequired
+	}
+	if err != nil {
+		WriteErr(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+	if who.Kind != chat.CallerScript {
+		WriteErr(w, http.StatusForbidden, "one-time codes go only to scripts with the scripts token, never to a brain")
+		return
+	}
+	var req OTPTakeRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&req); err != nil {
+		WriteErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if !requestID.MatchString(req.Request) {
+		WriteErr(w, http.StatusBadRequest, `"request" must be the otp_request id /send answered with`)
+		return
+	}
+	code, ok, err := a.TakeCode(req.Request)
+	if err != nil {
+		WriteErr(w, http.StatusInternalServerError, "taking the code failed")
+		return
+	}
+	if !ok {
+		WriteErr(w, http.StatusNotFound, "no code for this request")
+		return
+	}
+	WriteJSON(w, http.StatusOK, code)
 }
 
 // httpIngest handles POST /ingest. It feeds files that arrived outside
