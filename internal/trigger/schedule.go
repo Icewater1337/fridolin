@@ -22,6 +22,10 @@ type Schedule struct {
 	// Time is the time of day of ScheduleDaily and ScheduleWeekly, HH:MM
 	// on a 24-hour clock.
 	Time string `json:"time,omitempty"`
+	// Every is the interval of a ScheduleEvery: "30m", "6h", "2d".
+	Every string `json:"every,omitempty"`
+	// Cron is the five-field expression of a ScheduleCron.
+	Cron string `json:"cron,omitempty"`
 }
 
 // ScheduleKind is what kind of Schedule it is.
@@ -110,8 +114,14 @@ func (s Schedule) Validate() error {
 	case ScheduleDaily:
 		_, _, err := clock(s.Time)
 		return err
+	case ScheduleEvery:
+		_, err := ParseEvery(s.Every)
+		return err
+	case ScheduleCron:
+		_, err := parseCron(s.Cron)
+		return err
 	}
-	return fmt.Errorf("schedule kind %q must be once, daily or weekly", s.Kind)
+	return fmt.Errorf("schedule kind %q must be once, daily, weekly, every or cron", s.Kind)
 }
 
 // Next is the first time after after at which s falls due, in after's
@@ -121,6 +131,8 @@ func (s Schedule) Next(after time.Time) (time.Time, bool) {
 	switch s.Kind {
 	case ScheduleOnce:
 		return s.At, s.At.After(after)
+	case ScheduleEvery, ScheduleCron:
+		return s.recurringNext(after)
 	case ScheduleDaily, ScheduleWeekly:
 		hh, mm, err := clock(s.Time)
 		if err != nil {
@@ -160,6 +172,10 @@ func (s Schedule) String() string {
 		return "daily " + s.Time
 	case ScheduleWeekly:
 		return "weekly " + s.Day + " " + s.Time
+	case ScheduleEvery:
+		return "every " + s.Every
+	case ScheduleCron:
+		return "cron " + canonicalCron(s.Cron)
 	}
 	return string(s.Kind)
 }
