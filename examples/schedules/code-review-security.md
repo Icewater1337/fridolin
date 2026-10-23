@@ -3,7 +3,7 @@ description: Daily security review of GitHub repositories against current secure
 when: daily 03:00
 report: worth
 risk: irreversible
-secrets: github
+github: issues=write, contents=read, repository_advisories=write
 optional: true
 vars: repos, max_issues=3, label=security
 ---
@@ -15,10 +15,10 @@ day: then reply with exactly NOTHING_TO_REPORT.
 
 ## Get the code
 
-`gh` is logged in through GH_TOKEN. Check that first with
-`gh auth status`; if it fails, reply with one line saying the GitHub
-token is missing or wrong (the owner sets it with
-`fridolin core secrets set github.token`) and stop.
+`gh` is logged in through GH_TOKEN, a token for this run and these
+repositories alone. Check that first with `gh auth status`; if it fails,
+reply with one line saying this run got no working GitHub token (the
+owner connects GitHub on the dashboard, or sets a token) and stop.
 
 For each repository, keep a shallow clone in your cache and bring it up
 to date:
@@ -91,7 +91,8 @@ the rest in your notes for the next days.
 
   with `summary`, `description` (as below), `severity`
   (low/medium/high/critical) and `vulnerabilities` set to `[]`. If that
-  is refused (the token may lack the permission), file nothing public:
+  is refused (the grant may lack `repository_advisories: write`), file
+  nothing public:
   put the finding in your reply, which goes privately to the owner.
 - **Hardening** with a concrete, low-risk gain and no exploit described:
   a public issue, labelled `{{label}}`. Create the label once if it is

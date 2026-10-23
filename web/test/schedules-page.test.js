@@ -98,8 +98,8 @@ test('the schedule helpers', () => {
   assert.equal(taskKind({ prompt: 'x' }), 'prompt');
   assert.equal(taskKind({}), 'file');
   assert.equal(varsText({ a: '1', b: 'two' }), 'a=1\nb=two');
-  const base = { name: 'x', when: 'every 6h', description: '', enabled: true, kind: 'template', template: 't', prompt: '', promptFile: '', node: '', argv: '', dir: '', vars: 'repos = a/b\n\n', risk: '', preapproved: 'file issues\n', github: true, ownTools: false, tools: '', report: '', chat: '', timeout: '', missed: '', jitter: '' };
-  assert.deepEqual(scheduleOf(base), { name: 'x', when: 'every 6h', template: 't', vars: { repos: 'a/b' }, preapproved: ['file issues'], secrets: ['github'] });
+  const base = { name: 'x', when: 'every 6h', description: '', enabled: true, kind: 'template', template: 't', prompt: '', promptFile: '', node: '', argv: '', dir: '', vars: 'repos = a/b\n\n', risk: '', preapproved: 'file issues\n', githubRepos: 'a/b, c/d', githubPermissions: 'issues=write\ncontents=read', ownTools: false, tools: '', report: '', chat: '', timeout: '', missed: '', jitter: '' };
+  assert.deepEqual(scheduleOf(base), { name: 'x', when: 'every 6h', template: 't', vars: { repos: 'a/b' }, preapproved: ['file issues'], github: { repos: ['a/b', 'c/d'], permissions: { issues: 'write', contents: 'read' } } });
   assert.deepEqual(scheduleOf({ ...base, kind: 'command', node: 'laptop', argv: '/bin/x\n--y', enabled: false, report: 'silent', jitter: '0' }),
     { name: 'x', when: 'every 6h', enabled: false, command: { node: 'laptop', argv: ['/bin/x', '--y'] }, report: 'silent', jitter_minutes: 0 });
   assert.throws(() => scheduleOf({ ...base, vars: 'nonsense' }), /name=value/);

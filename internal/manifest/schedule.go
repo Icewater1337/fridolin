@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
@@ -71,9 +72,10 @@ type Schedule struct {
 	// Preapproved are steps the owner approved with the schedule, which
 	// its runs take without asking (filing an issue, say).
 	Preapproved []string `json:"preapproved,omitempty"`
-	// Secrets are what the bridge hands these runs, and no other: "github"
-	// is GH_TOKEN from the bridge's FRIDOLIN_GITHUB_TOKEN.
-	Secrets []string `json:"secrets,omitempty"`
+	// GitHub is the GitHub access its runs are granted, and no other run:
+	// a token for these repositories and permissions, as GH_TOKEN, minted
+	// as a run starts and ended with it (chat.GitHubGrant).
+	GitHub *chat.GitHubGrant `json:"github,omitempty"`
 
 	// FromMemory marks the schedule memory.consolidate stands for
 	// (EffectiveSchedules); it is never written.
@@ -115,9 +117,6 @@ const (
 	MissedSkip = "skip"
 )
 
-// SecretGitHub hands a schedule's runs GH_TOKEN.
-const SecretGitHub = "github"
-
 // ConsolidationSchedule is the name of the schedule memory.consolidate
 // stands for, and of its template.
 const ConsolidationSchedule = "memory-consolidation"
@@ -138,20 +137,47 @@ var (
 	validReports   = map[string]bool{"": true, ReportAlways: true, ReportWorth: true, ReportSilent: true}
 	validMissed    = map[string]bool{"": true, MissedRun: true, MissedSkip: true}
 	validRisks     = map[string]bool{"": true, "read": true, "write": true, "irreversible": true}
-	validSecrets   = map[string]bool{SecretGitHub: true}
+	githubRepoRe   = regexp.MustCompile(`^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$`)
+	githubPermRe   = regexp.MustCompile(`^[a-z][a-z_]{1,39}$`)
+	validGitHubAcc = map[string]bool{"read": true, "write": true}
 )
 
 // ValidScheduleName reports whether name may name a scheduled agent or a
 // template.
 func ValidScheduleName(name string) bool { return scheduleNameRe.MatchString(name) }
 
-// ScheduleReports, ScheduleMissed, ScheduleRisks and ScheduleSecrets are
-// the values the fields take, the unset one included where there is one
-// (TestSchemaEnumsAreTheBridgesValues).
+// ScheduleReports, ScheduleMissed and ScheduleRisks are the values the
+// fields take, the unset one included (TestSchemaEnumsAreTheBridgesValues).
 func ScheduleReports() []string { return slices.Sorted(maps.Keys(validReports)) }
 func ScheduleMissed() []string  { return slices.Sorted(maps.Keys(validMissed)) }
 func ScheduleRisks() []string   { return slices.Sorted(maps.Keys(validRisks)) }
-func ScheduleSecrets() []string { return slices.Sorted(maps.Keys(validSecrets)) }
+
+// ValidateGitHubGrant checks a GitHub grant: at least one repository, each
+// "owner/name", each once; at least one permission, each read or write.
+func ValidateGitHubGrant(g chat.GitHubGrant) error {
+	if len(g.Repos) == 0 || len(g.Repos) > 20 {
+		return fmt.Errorf("github: give 1 to 20 repos, as owner/name")
+	}
+	seen := map[string]bool{}
+	for _, r := range g.Repos {
+		if !githubRepoRe.MatchString(r) {
+			return fmt.Errorf("github: repo %q must be owner/name", r)
+		}
+		if seen[strings.ToLower(r)] {
+			return fmt.Errorf("github: repo %q is listed twice", r)
+		}
+		seen[strings.ToLower(r)] = true
+	}
+	if len(g.Permissions) == 0 {
+		return fmt.Errorf("github: give its permissions, such as {\"issues\": \"write\", \"contents\": \"read\"}")
+	}
+	for name, access := range g.Permissions {
+		if !githubPermRe.MatchString(name) || !validGitHubAcc[access] {
+			return fmt.Errorf("github: permission %q: %q must be read or write", name, access)
+		}
+	}
+	return nil
+}
 
 // IsEnabled reports whether s runs on its schedule.
 func (s Schedule) IsEnabled() bool { return s.Enabled == nil || *s.Enabled }
@@ -265,23 +291,18 @@ func (s Schedule) Validate() error {
 				return fmt.Errorf("%s: command arguments must be single lines", at)
 			}
 		}
-		if s.Risk != "" || s.DisallowedTools != nil || len(s.Secrets) > 0 || len(s.Preapproved) > 0 || len(s.Vars) > 0 {
-			return fmt.Errorf("%s: risk, disallowed_tools, secrets, preapproved and vars are for brain runs, not a command", at)
+		if s.Risk != "" || s.DisallowedTools != nil || s.GitHub != nil || len(s.Preapproved) > 0 || len(s.Vars) > 0 {
+			return fmt.Errorf("%s: risk, disallowed_tools, github, preapproved and vars are for brain runs, not a command", at)
 		}
 		return nil
 	}
 	if !validRisks[s.Risk] {
 		return fmt.Errorf("%s: risk %q must be read, write or irreversible", at, s.Risk)
 	}
-	seen := map[string]bool{}
-	for _, name := range s.Secrets {
-		if !validSecrets[name] {
-			return fmt.Errorf("%s: secret %q must be one of %s", at, name, strings.Join(ScheduleSecrets(), ", "))
+	if s.GitHub != nil {
+		if err := ValidateGitHubGrant(*s.GitHub); err != nil {
+			return fmt.Errorf("%s: %v", at, err)
 		}
-		if seen[name] {
-			return fmt.Errorf("%s: secret %q is listed twice", at, name)
-		}
-		seen[name] = true
 	}
 	return nil
 }

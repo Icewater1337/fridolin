@@ -84,9 +84,15 @@
       "preapproved": [
         "file GitHub issues on example/repo"
       ],
-      "secrets": [
-        "github"
-      ]
+      "github": {
+        "repos": [
+          "example/repo"
+        ],
+        "permissions": {
+          "contents": "read",
+          "issues": "write"
+        }
+      }
     },
     {
       "name": "scrape",

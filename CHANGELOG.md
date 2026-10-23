@@ -76,10 +76,13 @@ for compatibility.
   an older bridge recorded. Editing it on the Schedules page
   moves it into `schedules`; a bridge from before this version then no
   longer runs it, as it does not know `schedules`.
-- A GitHub token for scheduled agents: `fridolin core secrets set
-  github.token` stores it, `fridolin core start` passes it to the core as
-  `FRIDOLIN_GITHUB_TOKEN`, and only the runs of agents with
-  `"secrets": ["github"]` get it, as `GH_TOKEN`.
+- GitHub access per run: a scheduled agent's `github` field
+  (`{"repos": [...], "permissions": {...}}`) becomes the run's GitHub
+  grant (`chat.GitHubGrant`); as the run starts the bridge gets a token
+  for it from one hook (`GitHubTokenSource`), which the run alone gets as
+  `GH_TOKEN` and which is released when it ends. Until a GitHub App is
+  connected, the fallback is a typed token: `fridolin core secrets set
+  github.token`, passed to the core as `FRIDOLIN_GITHUB_TOKEN`.
 - Claude's and Codex's reports of what a run cost (dollars, tokens) are
   read from their result; scheduled agents' runs record them.
 

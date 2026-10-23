@@ -153,11 +153,11 @@ func TestStore(t *testing.T) {
 func TestTemplates(t *testing.T) {
 	fsys := fstest.MapFS{
 		"schedules/morning-briefing.md": {Data: []byte("---\ndescription: The day's appointments.\nwhen: daily 06:00\nreport: worth\nvars: greeting=Good morning\n---\n\n{{greeting}}! List today.\n")},
-		"schedules/review.md":           {Data: []byte("---\ndescription: Review.\nvars: repos, max_issues=3\nsecrets: github\noptional: true\n---\nReview {{repos}}, at most {{ max_issues }}.\n")},
+		"schedules/review.md":           {Data: []byte("---\ndescription: Review.\nvars: repos, max_issues=3\ngithub: issues=write, contents=read\noptional: true\n---\nReview {{repos}}, at most {{ max_issues }}.\n")},
 		"schedules/README.txt":          {Data: []byte("not a template")},
 	}
 	list, err := Templates(fsys, "schedules")
-	if err != nil || len(list) != 2 || list[0].Name != "morning-briefing" || list[1].Secrets[0] != "github" || !list[1].Optional {
+	if err != nil || len(list) != 2 || list[0].Name != "morning-briefing" || list[1].GitHub["issues"] != "write" || !list[1].Optional {
 		t.Fatalf("%+v %v", list, err)
 	}
 	out, err := Render(list[0], list[0].Body, nil)

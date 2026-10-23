@@ -9,13 +9,14 @@ Content-Type: application/json
   "templates": [
     {
       "description": "Daily bug hunt in GitHub repositories; files a bug report per real, reproducible finding.",
+      "github": {
+        "contents": "read",
+        "issues": "write"
+      },
       "name": "code-review-bugs",
       "optional": true,
       "report": "worth",
       "risk": "irreversible",
-      "secrets": [
-        "github"
-      ],
       "vars": [
         {
           "name": "repos",
@@ -36,13 +37,15 @@ Content-Type: application/json
     },
     {
       "description": "Daily security review of GitHub repositories against current secure-coding practice; files an issue per real finding, exploitable ones privately.",
+      "github": {
+        "contents": "read",
+        "issues": "write",
+        "repository_advisories": "write"
+      },
       "name": "code-review-security",
       "optional": true,
       "report": "worth",
       "risk": "irreversible",
-      "secrets": [
-        "github"
-      ],
       "vars": [
         {
           "name": "repos",
@@ -63,13 +66,14 @@ Content-Type: application/json
     },
     {
       "description": "Daily simplification review of GitHub repositories; questions every setting, line and dependency, and files concrete proposals that keep what users rely on.",
+      "github": {
+        "contents": "read",
+        "issues": "write"
+      },
       "name": "code-review-simplify",
       "optional": true,
       "report": "worth",
       "risk": "irreversible",
-      "secrets": [
-        "github"
-      ],
       "vars": [
         {
           "name": "repos",

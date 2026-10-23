@@ -36,13 +36,12 @@ type runPolicy struct {
 	From, FromBrain string
 	// Silent is an observe-only run, which asks nobody anything.
 	Silent bool
-	// Scheduled is, for a scheduled agent's run, the agent; Timeout,
-	// DisallowedTools and Env are what the agent sets for its runs
+	// Scheduled is, for a scheduled agent's run, the agent; Timeout and
+	// DisallowedTools are what the agent sets for its runs
 	// (agents.admitScheduled).
 	Scheduled       string
 	Timeout         time.Duration
 	DisallowedTools *[]string
-	Env             []string
 	started         time.Time
 }
 

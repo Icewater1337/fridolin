@@ -207,14 +207,33 @@
             },
             "description": "Steps approved together with the schedule, which its runs take without asking."
           },
-          "secrets": {
-            "type": "array",
-            "items": {
-              "enum": [
-                "github"
-              ]
-            },
-            "description": "What the bridge hands these runs and no other: github is GH_TOKEN from FRIDOLIN_GITHUB_TOKEN."
+          "github": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["repos", "permissions"],
+            "description": "The GitHub access its runs are granted, and no other run: a token for these repositories and permissions, as GH_TOKEN, minted as a run starts and ended with it.",
+            "properties": {
+              "repos": {
+                "type": ["array", "null"],
+                "minItems": 1,
+                "maxItems": 20,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$"
+                },
+                "description": "Repositories, as owner/name."
+              },
+              "permissions": {
+                "type": ["object", "null"],
+                "additionalProperties": {
+                  "enum": ["read", "write"]
+                },
+                "propertyNames": {
+                  "pattern": "^[a-z][a-z_]{1,39}$"
+                },
+                "description": "GitHub permissions by name: {\"issues\": \"write\", \"contents\": \"read\"}."
+              }
+            }
           }
         }
       }

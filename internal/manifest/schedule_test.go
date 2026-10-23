@@ -2,6 +2,8 @@ package manifest
 
 import (
 	"encoding/json"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"strings"
 	"testing"
 )
@@ -10,7 +12,7 @@ func TestScheduleValidate(t *testing.T) {
 	ok := []Schedule{
 		{Name: "daily-check", When: "every 6h"},
 		{Name: "brief", When: "daily 06:00", Template: "morning-briefing", Report: ReportWorth, Chat: "15551234567@s.whatsapp.net"},
-		{Name: "review", When: "cron 0 3 * * *", Template: "code-review-bugs", Vars: map[string]string{"repos": "a/b"}, Secrets: []string{"github"}, Risk: "irreversible", Preapproved: []string{"file issues on a/b"}, TimeoutMinutes: 60},
+		{Name: "review", When: "cron 0 3 * * *", Template: "code-review-bugs", Vars: map[string]string{"repos": "a/b"}, GitHub: &chat.GitHubGrant{Repos: []string{"a/b"}, Permissions: map[string]string{"issues": "write", "contents": "read"}}, Risk: "irreversible", Preapproved: []string{"file issues on a/b"}, TimeoutMinutes: 60},
 		{Name: "scrape", When: "daily 21:00", Command: &ScheduleCommand{Node: "mac-mini", Argv: []string{"/Users/you/run.sh"}}, Report: ReportSilent, Missed: MissedSkip},
 		{Name: "inline", When: "weekly mon 09:00", Prompt: "Check the inbox", JitterMinutes: new(0)},
 	}
@@ -28,13 +30,15 @@ func TestScheduleValidate(t *testing.T) {
 		"chat":        {Name: "a", When: "every 6h", Chat: "my chat"},
 		"missed":      {Name: "a", When: "every 6h", Missed: "later"},
 		"risk":        {Name: "a", When: "every 6h", Risk: "huge"},
-		"secret":      {Name: "a", When: "every 6h", Secrets: []string{"aws"}},
-		"secret dup":  {Name: "a", When: "every 6h", Secrets: []string{"github", "github"}},
+		"github repo": {Name: "a", When: "every 6h", GitHub: &chat.GitHubGrant{Repos: []string{"not a repo"}, Permissions: map[string]string{"issues": "write"}}},
+		"github dup":  {Name: "a", When: "every 6h", GitHub: &chat.GitHubGrant{Repos: []string{"a/b", "A/B"}, Permissions: map[string]string{"issues": "write"}}},
+		"github perm": {Name: "a", When: "every 6h", GitHub: &chat.GitHubGrant{Repos: []string{"a/b"}, Permissions: map[string]string{"issues": "admin"}}},
+		"github none": {Name: "a", When: "every 6h", GitHub: &chat.GitHubGrant{Repos: []string{"a/b"}}},
 		"timeout":     {Name: "a", When: "every 6h", TimeoutMinutes: -1},
 		"jitter":      {Name: "a", When: "every 6h", JitterMinutes: new(99999)},
 		"prompt file": {Name: "a", When: "every 6h", PromptFile: "../x.md"},
 		"command":     {Name: "a", When: "every 6h", Command: &ScheduleCommand{Node: "n"}},
-		"command env": {Name: "a", When: "every 6h", Command: &ScheduleCommand{Node: "n", Argv: []string{"x"}}, Secrets: []string{"github"}},
+		"command env": {Name: "a", When: "every 6h", Command: &ScheduleCommand{Node: "n", Argv: []string{"x"}}, GitHub: &chat.GitHubGrant{Repos: []string{"a/b"}, Permissions: map[string]string{"issues": "write"}}},
 		"var":         {Name: "a", When: "every 6h", Vars: map[string]string{"Bad-Name": "x"}},
 		"template":    {Name: "a", When: "every 6h", Template: "No"},
 		"preapproved": {Name: "a", When: "every 6h", Preapproved: []string{"two\nlines"}},

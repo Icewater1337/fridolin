@@ -1,15 +1,18 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/intent"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/sched"
@@ -383,7 +386,7 @@ func TestScheduledAgentSecretsAndFailures(t *testing.T) {
 	t.Setenv("FRIDOLIN_FAKE_ENV", "GH_TOKEN")
 	h := newHarness(t, "")
 	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}, Schedules: []manifest.Schedule{
-		{Name: "review", When: "daily 03:00", Template: "code-review-bugs", Vars: map[string]string{"repos": "example/repo"}, Secrets: []string{"github"}, Report: manifest.ReportAlways, Risk: "irreversible", Preapproved: []string{"file issues on example/repo"}},
+		{Name: "review", When: "daily 03:00", Template: "code-review-bugs", Vars: map[string]string{"repos": "example/repo"}, GitHub: &chat.GitHubGrant{Repos: []string{"example/repo"}, Permissions: map[string]string{"issues": "write", "contents": "read"}}, Report: manifest.ReportAlways, Risk: "irreversible", Preapproved: []string{"file issues on example/repo"}},
 		{Name: "scrape", When: "daily 21:00", Command: &manifest.ScheduleCommand{Node: "laptop", Argv: []string{"/Users/you/bin/scrape.sh"}}},
 	}})
 	if w := h.Do("POST", "/api/schedules/main/review/run", nil); w.Code != http.StatusOK {
@@ -396,6 +399,31 @@ func TestScheduledAgentSecretsAndFailures(t *testing.T) {
 	if got := h.Answer(inbound{JID: harnessDM, Text: "hello"}); !strings.Contains(got, "GH_TOKEN unset") {
 		t.Errorf("an ordinary run got the token: %q", got)
 	}
+
+	// A token source (a GitHub App) mints one for exactly the grant, and
+	// it is released once the run is over.
+	var (
+		mu       sync.Mutex
+		asked    []chat.GitHubGrant
+		released int
+	)
+	h.b.SetGitHubTokenSource(func(_ context.Context, brain string, g chat.GitHubGrant) (string, func(), error) {
+		mu.Lock()
+		defer mu.Unlock()
+		asked = append(asked, g)
+		return "minted-for-" + brain, func() { mu.Lock(); released++; mu.Unlock() }, nil
+	})
+	if w := h.Do("POST", "/api/schedules/main/review/run", nil); w.Code != http.StatusOK {
+		t.Fatalf("run: %d %s", w.Code, w.Body.String())
+	}
+	h.waitRunEnded("main", "review", 2)
+	h.WaitSent(harnessDM, "GH_TOKEN=minted-for-main")
+	mu.Lock()
+	if len(asked) != 1 || !slices.Equal(asked[0].Repos, []string{"example/repo"}) || asked[0].Permissions["issues"] != "write" || released != 1 {
+		t.Errorf("the source was asked %+v, released %d times", asked, released)
+	}
+	mu.Unlock()
+	h.b.SetGitHubTokenSource(nil)
 
 	if w := h.Do("POST", "/api/schedules/main/scrape/run", nil); w.Code != http.StatusOK {
 		t.Fatalf("run: %d %s", w.Code, w.Body.String())

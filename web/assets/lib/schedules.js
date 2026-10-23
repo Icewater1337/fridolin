@@ -54,7 +54,8 @@ export function scheduleOf(f) {
     if (f.ownTools) s.disallowed_tools = lines(f.tools);
     const pre = lines(f.preapproved);
     if (pre.length) s.preapproved = pre;
-    if (f.github) s.secrets = ['github'];
+    const repos = String(f.githubRepos || '').split(/[\s,]+/).filter(Boolean);
+    if (repos.length) s.github = { repos, permissions: parseVars(f.githubPermissions) };
   }
   if (f.report) s.report = f.report;
   if (f.chat.trim()) s.chat = f.chat.trim();

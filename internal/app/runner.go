@@ -136,10 +136,6 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 		extraEnv = append(extraEnv, "PATH="+strings.Join(dirs, string(filepath.ListSeparator))) // replaces the bridge's
 	}
 	extraEnv = append(extraEnv, runEnv...)
-	if pol != nil {
-		// A scheduled agent's secrets (GH_TOKEN): its runs alone get them.
-		extraEnv = append(extraEnv, pol.Env...)
-	}
 	if s.Provider == "codex" || (r.sandbox != nil && r.sandbox.Enabled()) {
 		// The brain's own Claude Code config dir, TMPDIR and caches, the
 		// only places outside its folder and inbox the profile lets it

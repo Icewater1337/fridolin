@@ -18,6 +18,7 @@ import (
 //	when: daily 06:00          (what the dashboard suggests)
 //	report: worth              (likewise)
 //	vars: repos, max_issues=3  (a var with = has a default)
+//	github: issues=write, contents=read  (the GitHub grant it needs)
 //	---
 //	The task, with {{repos}} and {{max_issues}} filled in.
 type Template struct {
@@ -26,8 +27,9 @@ type Template struct {
 	When        string `json:"when,omitempty"`
 	Report      string `json:"report,omitempty"`
 	Risk        string `json:"risk,omitempty"`
-	// Secrets are those a schedule of it needs, which the dashboard adds.
-	Secrets []string `json:"secrets,omitempty"`
+	// GitHub are the GitHub permissions a schedule of it needs, which the
+	// dashboard suggests for its github grant ("issues": "write").
+	GitHub map[string]string `json:"github,omitempty"`
 	// Vars are the vars it takes, in order, with their defaults ("" for
 	// one it needs).
 	Vars     []TemplateVar `json:"vars,omitempty"`
@@ -100,10 +102,13 @@ func ParseTask(name, text string) (Template, error) {
 			t.Risk = value
 		case "optional":
 			t.Optional = value == "true"
-		case "secrets":
-			for s := range strings.SplitSeq(value, ",") {
-				if s = strings.TrimSpace(s); s != "" {
-					t.Secrets = append(t.Secrets, s)
+		case "github":
+			for p := range strings.SplitSeq(value, ",") {
+				if name, access, ok := strings.Cut(strings.TrimSpace(p), "="); ok {
+					if t.GitHub == nil {
+						t.GitHub = map[string]string{}
+					}
+					t.GitHub[strings.TrimSpace(name)] = strings.TrimSpace(access)
 				}
 			}
 		case "vars":

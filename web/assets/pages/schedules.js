@@ -121,7 +121,6 @@ function buildForm(templates, brains) {
       return ids[key];
     };
     const enabled = toggle({ checked: s.enabled !== false, label: 'Runs on its schedule' });
-    const github = toggle({ checked: (s.secrets || []).includes('github'), label: 'Hand these runs GH_TOKEN (the github secret)' });
     const ownTools = toggle({ checked: Array.isArray(s.disallowed_tools), label: 'Its own list of blocked tools' });
     const brainSel = isNew ? sel('brain', brains.map((b) => [b.id, b.name || b.id]), data.brain || (brains[0] && brains[0].id)) : null;
     const kind = sel('kind', KINDS, taskKind(s));
@@ -139,7 +138,7 @@ function buildForm(templates, brains) {
         if (!ids.when.value && t.when) ids.when.value = t.when;
         if (t.report) ids.report.value = t.report;
         if (t.risk) ids.risk.value = t.risk;
-        if ((t.secrets || []).includes('github')) github.input.checked = true;
+        if (t.github && !ids.githubPermissions.value) ids.githubPermissions.value = varsText(t.github);
       }
     });
     showTemplate();
@@ -156,7 +155,8 @@ function buildForm(templates, brains) {
       field({ label: 'Vars', help: 'name=value, one a line: they fill {{name}} in the task.', control: area('vars', varsText(s.vars), 3) }),
       field({ label: 'Risk budget', control: sel('risk', RISKS, s.risk) }),
       field({ label: 'Steps approved with the schedule', help: 'One a line; its runs take them without asking.', control: area('preapproved', (s.preapproved || []).join('\n'), 2) }),
-      field({ label: 'Secrets', control: github }),
+      field({ label: 'GitHub repositories', help: 'owner/name, one a line: each run gets GH_TOKEN for these alone, with the permissions below.', control: area('githubRepos', s.github ? (s.github.repos || []).join('\n') : '', 2, { placeholder: 'you/project' }) }),
+      field({ label: 'GitHub permissions', help: 'name=read or name=write, one a line.', control: area('githubPermissions', s.github ? varsText(s.github.permissions) : '', 2, { placeholder: 'issues=write' }) }),
       field({ label: 'Tools', help: 'Off, the brain’s list applies.', control: h('div', ownTools, area('tools', (s.disallowed_tools || []).join('\n'), 2, { placeholder: 'WebFetch' })) }));
     const showKind = () => {
       for (const [k, el] of Object.entries(groups)) el.hidden = k !== kind.value;
@@ -186,7 +186,7 @@ function buildForm(templates, brains) {
       when: ids.when.value, description: ids.description.value, enabled: enabled.input.checked,
       kind: kind.value, template: tmpl.value, prompt: ids.prompt.value, promptFile: ids.promptFile.value,
       node: ids.node.value, argv: ids.argv.value, dir: ids.dir.value,
-      vars: ids.vars.value, risk: ids.risk.value, preapproved: ids.preapproved.value, github: github.input.checked,
+      vars: ids.vars.value, risk: ids.risk.value, preapproved: ids.preapproved.value, githubRepos: ids.githubRepos.value, githubPermissions: ids.githubPermissions.value,
       ownTools: ownTools.input.checked, tools: ids.tools.value,
       report: ids.report.value, chat: ids.chat.value, timeout: ids.timeout.value, missed: ids.missed.value, jitter: ids.jitter.value,
     });

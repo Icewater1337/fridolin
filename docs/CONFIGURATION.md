@@ -1701,9 +1701,10 @@ The bridge itself reads two variables:
 | `FRIDOLIN_CONFIG` | the config file when `--config` is not given; `setup.sh` sets the service up with it |
 | `BRAIN_MODE` | set to anything but `true`, `1`, `yes` or `on`, the bridge refuses to start, see [`brain_mode`](#brain_mode) |
 
-`FRIDOLIN_GITHUB_TOKEN` is the GitHub token the bridge hands, as
-`GH_TOKEN`, to the runs of scheduled agents with `"secrets": ["github"]`
-and to no other program ([BRAINS.md](BRAINS.md#github-for-scheduled-agents)).
+`FRIDOLIN_GITHUB_TOKEN` is the fallback GitHub token: while no GitHub
+App is connected, the bridge hands it, as `GH_TOKEN`, to the runs with a
+GitHub grant (scheduled agents with a `github` field) and to no other
+program ([BRAINS.md](BRAINS.md#github-for-scheduled-agents)).
 
 With `vault.enabled`, the bridge reads the vault's keys and passwords
 from its environment, `B2_VAULT_KEY_ID`, `B2_VAULT_KEY`,

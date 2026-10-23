@@ -567,7 +567,7 @@ node on a schedule. Each brain keeps its agents in `brain.json`:
 | `missed` | a run that fell due while the bridge was down: `run` (the default) runs it once when the bridge is back, however many times it fell due; `skip` waits for the next time |
 | `jitter_minutes` | each run starts a fixed number of seconds within this many minutes after its time, the same for every run of the agent; left out, [`schedules.jitter_minutes`](CONFIGURATION.md#schedules) (2) |
 | `preapproved` | steps the owner approved together with the schedule (`"file GitHub issues on example/repo"`): the run is told it may take them without `request_approval`; every other irreversible step still asks |
-| `secrets` | `["github"]` hands these runs, and no other, `GH_TOKEN` from the bridge's `FRIDOLIN_GITHUB_TOKEN` ([below](#github-for-scheduled-agents)) |
+| `github` | `{"repos": ["owner/name"], "permissions": {"issues": "write", "contents": "read"}}`: the GitHub access its runs, and no other run, are granted: each run gets `GH_TOKEN` for exactly these repositories and permissions, ended when the run is ([below](#github-for-scheduled-agents)) |
 
 A task file may start with a frontmatter of `description:` and
 `vars: name, other=default` lines, as the templates do; the rest is the
@@ -615,32 +615,40 @@ failure. Each such run is an audit line of kind `scheduled_command`.
 The three reviews keep notes in the brain's `memories/reviews/`, look for
 duplicates among the open and closed issues before they file, give
 `file:line` evidence with a link to the reviewed commit, and post no
-secrets or personal data. They need `"secrets": ["github"]`, and since
-filing an issue publishes something, `"risk": "irreversible"` and the
-filing as a `preapproved` step:
+secrets or personal data. They need a `github` grant on the repositories
+they review (the security review also `repository_advisories: write`, for
+its private advisories), and since filing an issue publishes something,
+`"risk": "irreversible"` and the filing as a `preapproved` step:
 
 ```json
 {"name": "review-bugs", "when": "daily 03:30", "template": "code-review-bugs",
- "vars": {"repos": "you/project"}, "secrets": ["github"], "risk": "irreversible",
+ "vars": {"repos": "you/project"},
+ "github": {"repos": ["you/project"], "permissions": {"issues": "write", "contents": "read"}},
+ "risk": "irreversible",
  "preapproved": ["file GitHub issues, labelled bug, on you/project"]}
 ```
 
 ### GitHub for scheduled agents
 
-A run gets `GH_TOKEN`, which `gh` and `git` take, only when its agent
-lists `"github"` in `secrets`. The bridge reads it from its own
-`FRIDOLIN_GITHUB_TOKEN`, which no other run or program gets. Give it the
-narrowest token that does the job: a fine-grained personal access token
-for the repositories the agents review alone, with *Issues: read and
-write*, *Contents: read* and *Metadata: read*, and, for the security
-review's private advisories, *Repository security advisories: read and
-write*. In the core's container, store it with
+A run gets `GH_TOKEN`, which `gh` and `git` take, only when its agent has
+a `github` grant: the run's message carries it, and as the run starts the
+bridge gets a token for exactly the grant's repositories and permissions,
+which ends with the run. No other run or program gets one.
+
+Where the token comes from is one hook, `GitHubTokenSource` (in
+`internal/app`, set with `App.SetGitHubTokenSource`): with GitHub
+connected through the bridge's GitHub App, a short-lived installation
+token minted per run and revoked when it ends. Without one, the fallback
+is a token you type in, the same for every grant, which the bridge cannot
+narrow: a fine-grained personal access token for the reviewed
+repositories alone, with *Issues: read and write*, *Contents: read* and
+*Metadata: read* (and *Repository security advisories: read and write*
+for the security review). In the core's container, store it with
 `fridolin core secrets set github.token` (it becomes
 `FRIDOLIN_GITHUB_TOKEN` at the next `fridolin core start`); on a native
 install, set `FRIDOLIN_GITHUB_TOKEN` in the service's environment
 (CONFIGURATION.md, "Where to set them"). A brain run can print its
-environment, so the token is the brain's while it runs: keep it to these
-repositories and these permissions.
+environment, so the token is the brain's while it runs.
 
 ### The Schedules page and the CLI
 

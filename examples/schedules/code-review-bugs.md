@@ -3,7 +3,7 @@ description: Daily bug hunt in GitHub repositories; files a bug report per real,
 when: daily 03:30
 report: worth
 risk: irreversible
-secrets: github
+github: issues=write, contents=read
 optional: true
 vars: repos, max_issues=3, label=bug
 ---
@@ -15,10 +15,10 @@ then reply with exactly NOTHING_TO_REPORT.
 
 ## Get the code
 
-`gh` is logged in through GH_TOKEN. Check that first with
-`gh auth status`; if it fails, reply with one line saying the GitHub
-token is missing or wrong (the owner sets it with
-`fridolin core secrets set github.token`) and stop.
+`gh` is logged in through GH_TOKEN, a token for this run and these
+repositories alone. Check that first with `gh auth status`; if it fails,
+reply with one line saying this run got no working GitHub token (the
+owner connects GitHub on the dashboard, or sets a token) and stop.
 
 For each repository, keep a shallow clone in your cache and bring it up
 to date:

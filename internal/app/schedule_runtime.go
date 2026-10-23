@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -50,11 +49,6 @@ func scheduleTemplate(name string) (sched.Template, bool) {
 	return scheduleTemplates[i], true
 }
 
-// githubTokenEnv is the bridge's variable that holds the token scheduled
-// agents with the github secret get as GH_TOKEN. No other run gets it:
-// it is not on childEnvAllowlist.
-const githubTokenEnv = "FRIDOLIN_GITHUB_TOKEN"
-
 // agents runs the brains' scheduled agents (docs/BRAINS.md, "Scheduled
 // agents"): the scheduler's tick starts the ones that fell due, the
 // dashboard and the CLI start one now, and each run's result goes where
@@ -62,8 +56,6 @@ const githubTokenEnv = "FRIDOLIN_GITHUB_TOKEN"
 type agents struct {
 	b     *App
 	store *sched.Store
-	// getenv reads the bridge's environment (the GitHub token).
-	getenv func(string) string
 
 	mu sync.Mutex
 	// running are the runs in progress, by agent key (sched.Key), and
@@ -84,11 +76,10 @@ type agentRun struct {
 	// What the policy gives a brain run (admitScheduled).
 	risk    skill.Risk
 	timeout time.Duration
-	env     []string
 }
 
 func newAgents(b *App, layout config.Layout) *agents {
-	return &agents{b: b, store: sched.NewStore(layout.Schedules()), getenv: os.Getenv,
+	return &agents{b: b, store: sched.NewStore(layout.Schedules()),
 		running: map[string]*agentRun{}, byID: map[string]*agentRun{}}
 }
 
@@ -297,14 +288,6 @@ func (a *agents) startBrainRun(br *brainruntime.Brain, ar *agentRun) error {
 	if s.TimeoutMinutes > 0 {
 		ar.timeout = time.Duration(s.TimeoutMinutes) * time.Minute
 	}
-	if slices.Contains(s.Secrets, manifest.SecretGitHub) {
-		tok := strings.TrimSpace(a.getenv(githubTokenEnv))
-		if tok == "" {
-			ar.log.Line("Warning: the schedule asks for the github secret, but the bridge has no " + githubTokenEnv + ": gh is not logged in for this run")
-		} else {
-			ar.env = append(ar.env, "GH_TOKEN="+tok)
-		}
-	}
 	msg := sched.Message(sched.Task{
 		Agent: s.Name, When: s.When, Trigger: ar.run.Trigger, Report: s.ReportMode(), Chat: chatLabel(ar.chat),
 		Preapproved: s.Preapproved, Text: text,
@@ -322,6 +305,9 @@ func (a *agents) startBrainRun(br *brainruntime.Brain, ar *agentRun) error {
 			a.ended(id, err)
 		},
 		Log: ar.log.Line,
+		// brainRunEnv mints its GitHub token as the run starts
+		// (withGitHubToken).
+		GitHub: s.GitHub,
 	}}
 	if _, _, _, err := a.b.brainMgr.Submit(m); err != nil {
 		return fmt.Errorf("the brain did not take the run: %w", err)
@@ -639,7 +625,7 @@ func (a *agents) admitScheduled(p *runPolicy, msg chat.Inbound) {
 	if ar.risk != "" {
 		p.Risk = ar.risk
 	}
-	p.Timeout, p.Env = ar.timeout, ar.env
+	p.Timeout = ar.timeout
 	p.DisallowedTools = ar.agent.DisallowedTools
 }
 
