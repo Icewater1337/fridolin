@@ -178,7 +178,7 @@ machine". In short:
    PowerShell, then `node install` and `node start` elevated, each with
    `--state-dir "$env:LOCALAPPDATA\fridolin-node"`. On Linux, ask to
    turn on lingering, so the node runs without a login and after a
-   reboot, and link its unit for boot (docs/NODES.md, step 5).
+   reboot (docs/NODES.md, step 5).
 6. **Approve**: once the node joined, Fridolin tells the person in their
    WhatsApp chat; they reply `!approve ID` (device and what it offers in
    one go), or click **Approve device** and **Approve commands** on the
