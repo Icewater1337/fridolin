@@ -26,6 +26,9 @@ func encryptionText(st vaultStatus, line func(string, ...any)) {
 			old = "; the single-layer copy is deleted"
 		}
 		line("  %-10s %s: %s (%s)%s", l.Store, mark, strings.Join(l.Layers, " + "), l.Where, old)
+		if l.Left != "" {
+			line("  %-10s by hand: %s", "", l.Left)
+		}
 	}
 	for _, t := range st.Targets {
 		switch t.Layers {
@@ -72,6 +75,9 @@ func EncryptionMigrationText(data []byte, since time.Time) (text string, done bo
 	line("migrate-encryption: %s", migrationSummary(m))
 	for _, s := range m.Stores {
 		line("  %-10s %s", s.Store, s.Action)
+		if s.Left != "" {
+			line("  %-10s by hand: %s", "", s.Left)
+		}
 		if s.Error != "" {
 			line("  %-10s error: %s", "", s.Error)
 		}

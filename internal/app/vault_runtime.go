@@ -153,7 +153,7 @@ type vaultBackends struct {
 	// oldPurge empty the folders of the single-layer stores of before, by
 	// store id ("restic", "drive", "litestream"), for migrate-encryption
 	// --delete-old.
-	oldPurge map[string]func(context.Context) error
+	oldPurge map[string]oldPurger
 	// encryption is each store's layers, for the status and doctor.
 	encryption []storeLayers
 	// lite replicates bridge.db and vault.db; nil means none.

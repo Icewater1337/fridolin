@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -247,45 +246,32 @@ func liteMirrorStore(rclone string, base []string, c vaultCreds, bucket string, 
 
 // b2OldPurge empty the single-layer folders of before on B2 and Drive
 // with rclone purge (on B2 a delete hides the files; the bucket's
-// lifecycle rules drop them).
-func b2OldPurge(rclone string, base []string, c vaultCreds, cfg *config.Settings) map[string]func(context.Context) error {
-	purge := func(ctx context.Context, env []string, target string) error {
-		cmd := exec.CommandContext(ctx, rclone, "purge", target)
-		cmd.Env = append(append([]string{}, base...), env...)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			msg := strings.TrimSpace(string(out))
-			for _, sec := range c.secrets() {
-				if sec != "" {
-					msg = strings.ReplaceAll(msg, sec, "…")
-				}
-			}
-			return fmt.Errorf("rclone purge %s: %v: %s", target, err, msg)
-		}
-		return nil
-	}
-	snap := func(path string) func(context.Context) error {
-		return func(ctx context.Context) error {
+// lifecycle rules drop them); rcloneRetire says what counts as done.
+func b2OldPurge(rclone string, base []string, c vaultCreds, cfg *config.Settings) map[string]oldPurger {
+	snap := func(path string) oldPurger {
+		return func(ctx context.Context) (string, error) {
 			env, err := cloud.B2Env(snapRemoteName, c.SnapKeyID, c.SnapKey)
 			if err != nil {
-				return err
+				return "", err
 			}
-			return purge(ctx, append(env, "RCLONE_CONFIG="+os.DevNull), snapRemoteName+":"+cfg.Vault.SnapshotsBucket+"/"+path)
+			run := execRclone(rclone, append(append(append([]string{}, base...), env...), "RCLONE_CONFIG="+os.DevNull), c.secrets())
+			return rcloneRetire(ctx, run, snapRemoteName+":"+cfg.Vault.SnapshotsBucket+"/"+path, "")
 		}
 	}
-	return map[string]func(context.Context) error{
+	return map[string]oldPurger{
 		"restic":     snap("restic"),
 		"litestream": snap("litestream"),
-		"drive": func(ctx context.Context) error {
+		"drive": func(ctx context.Context) (string, error) {
 			conf := cfg.Boot.Layout().RcloneConf()
 			remote := cfg.Backup.Remote
 			if remote == "" {
 				remote = "brain-gdrive"
 			}
 			if !rcloneHasRemote(conf, remote) {
-				return errDriveNotConnected
+				return "", errDriveNotConnected
 			}
-			return purge(ctx, []string{"RCLONE_CONFIG=" + conf}, remote+":"+driveResticPath)
+			run := execRclone(rclone, append(append([]string{}, base...), "RCLONE_CONFIG="+conf), c.secrets())
+			return rcloneRetire(ctx, run, remote+":"+driveResticPath, driveResticPath)
 		},
 	}
 }
@@ -435,10 +421,10 @@ func localVaultBackends(s *vaultService, cfg *config.Settings, dir string) (vaul
 		}
 		b.lite, b.liteMirror = mirroredLitestream(lite, cfg, s.log, base, b.bridgeDB, sealed)
 	}
-	b.oldPurge = map[string]func(context.Context) error{}
+	b.oldPurge = map[string]oldPurger{}
 	for id, folder := range map[string]string{"restic": "restic", "drive": "drive-restic", "litestream": "litestream"} {
 		// The dev stand-in's own folder under FRIDOLIN_VAULT_LOCAL.
-		b.oldPurge[id] = func(context.Context) error { return os.RemoveAll(filepath.Join(dir, folder)) }
+		b.oldPurge[id] = func(context.Context) (string, error) { return "", os.RemoveAll(filepath.Join(dir, folder)) }
 	}
 	lc := vaultCreds{VaultSealKey: sealKey}
 	if b.resticOld != nil {
