@@ -668,6 +668,18 @@ for compatibility.
 
 ### Fixed
 
+- `fridolin vault migrate-encryption --run --delete-old` retires the
+  single-layer Drive repository (`fridolin-restic`) also where Google
+  Drive does not let fridolin delete it. The Drive link's `drive.file`
+  scope reaches only what its own Google client made: the delete failed
+  with `403 appNotAuthorizedToChild`, and after a switch to your own
+  Google client the folder is not even listed ("directory not found"),
+  so the copy was never marked retired and `fridolin doctor` kept
+  warning "the single-layer copies of drive are still there". A folder
+  that is not there now counts as deleted; one Drive refuses is emptied
+  of what fridolin reaches and retired. Either way the run, `fridolin
+  vault status` and the doctor say once which folder may stay in Drive
+  for you to delete by hand (docs/VAULT.md, "Moving existing data").
 - `fridolin doctor` no longer fails "Litestream is not running (N
   restarts)" for the first minutes after the bridge starts on a data dir
   that ran before, while Litestream replicates. `core/vault-status.json`
