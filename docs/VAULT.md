@@ -226,6 +226,21 @@ it now replicates into `core/litestream-replica/`, and the vault uploads
 that folder each minute through both layers (one listing at start, deletes
 in a batch every six hours: about 5 Class C a day instead of about 210).
 
+When a database moves to a new, empty replica (as with this move from
+the bucket to `core/litestream-replica/`) after Litestream has pruned its
+first level-0 files, Litestream 0.5 can never upload that database's
+changes again: it logs `LTX file is missing` every two minutes, stays up,
+and copies only the daily snapshot. The bridge sees that line, stops
+Litestream, runs `litestream reset` for that database and empties its
+folder in `core/litestream-replica/`, then starts Litestream again, which
+writes a fresh snapshot (at most once an hour per database; the database
+itself is never touched). The reset alone is not enough: its transaction
+ids start at 1 again, and a restore from a replica that still holds the
+older snapshot returns that older copy without a word. A replica in a
+bucket is not emptied from here, so there the bridge only reports it.
+`fridolin doctor` (check `vault-litestream`) warns while Litestream has
+logged a warning or error in the last 15 minutes, and counts the repairs.
+
 The keys of the second layers are made by `fridolin core start` (and by a
 native vault) when missing, and printed by name, never by value. New keys
 always go with new folders (`vault-sealed/`, `restic-crypt/`,

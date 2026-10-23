@@ -67,6 +67,13 @@ func TestDoctorVaultChecks(t *testing.T) {
 		{name: "litestream down", mut: func(s *vaultStatus) {
 			s.Litestream.Running, s.Litestream.Restarts, s.Litestream.LastError = false, 3, "exit status 1"
 		}, id: "vault-litestream", status: DoctorFail, detail: "3 restarts"},
+		{name: "litestream runs but logs errors", mut: func(s *vaultStatus) {
+			s.Litestream.LastProblem, s.Litestream.LastProblemAt = `level=ERROR msg="monitor error" db=bridge.db hint="LTX file is missing"`, now.Add(-2*time.Minute)
+		}, id: "vault-litestream", status: DoctorWarn, detail: "logged 2m0s ago"},
+		{name: "litestream problem long ago, repaired", mut: func(s *vaultStatus) {
+			s.Litestream.LastProblem, s.Litestream.LastProblemAt = "level=ERROR", now.Add(-time.Hour)
+			s.Litestream.Repairs, s.Litestream.LastRepair = 1, now.Add(-time.Hour)
+		}, id: "vault-litestream", status: DoctorOK, detail: "started over after a lost file: 1"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

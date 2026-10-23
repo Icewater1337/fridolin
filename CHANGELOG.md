@@ -640,6 +640,12 @@ for compatibility.
 
 ### Fixed
 
+- Litestream stopped uploading `bridge.db` and `vault.db` after the move
+  to the local replica that the vault mirrors (`core/litestream-replica/`):
+  it logged `LTX file is missing` every two minutes and copied only the
+  daily snapshot, while `fridolin doctor` said it replicated. The bridge
+  now resets such a database and starts its replica over by itself, and
+  doctor warns while Litestream logs errors (docs/VAULT.md, "Encryption").
 - The site answers again when the core runs in the container. The site
   process listened on the container's own loopback and compose did not
   publish its port, so a Cloudflare tunnel on the host pointed at
