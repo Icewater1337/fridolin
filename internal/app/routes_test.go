@@ -139,6 +139,7 @@ var routeInventory = []httpRoute{
 	{"POST", "/api/vault/evict", classAPI, ""},
 	{"POST", "/api/vault/rebuild", classAPI, ""},
 	{"POST", "/api/vault/get", classAPI, ""},
+	{"POST", "/api/vault/forget", classAPI, ""},
 	{"POST", "/api/vault/snapshot", classAPI, ""},
 	{"POST", "/api/vault/check", classAPI, ""},
 	{"POST", "/api/vault/restore-drill", classAPI, ""},

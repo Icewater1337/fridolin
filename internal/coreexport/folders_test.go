@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"filippo.io/age"
+
+	"github.com/Icewater1337/fridolin/internal/vault"
 )
 
 func readFile(t *testing.T, p string) string {
@@ -63,6 +65,8 @@ func TestBrainFolderMovesAwayAndHome(t *testing.T) {
 	write(t, homeMac, "Personal/brain.json", `{"id":"personal"}`, 0o644)
 	write(t, homeMac, "Personal/notes.md", "old notes", 0o644)
 	write(t, homeMac, "Personal/sub/keep.md", "keep", 0o644)
+	write(t, homeMac, "Personal/settings.md", "settings v1", 0o644)
+	write(t, homeMac, "Personal/plan.md", "plan v1", 0o644)
 	write(t, homeMac, "Personal/work/contract.pdf", "work data", 0o600)
 	write(t, homeMac, "Personal/node_modules/x/index.js", "x", 0o644)
 	write(t, homeMac, "Personal/tool/venv/pyvenv.cfg", "home = /opt/homebrew", 0o644)
@@ -90,21 +94,24 @@ func TestBrainFolderMovesAwayAndHome(t *testing.T) {
 	var listed []string
 	infos, err := ListFolders(mac, []Folder{{ID: "personal", Configured: "~/Personal", Dir: personal, Excluded: excluded}}, func(p string) { listed = append(listed, p) }, nil)
 	slices.Sort(listed)
-	if err != nil || !slices.Equal(listed, []string{"personal/brain.json", "personal/notes.md", "personal/sub/keep.md"}) || len(infos) != 1 || infos[0].Left != 4 {
+	if err != nil || !slices.Equal(listed, []string{"personal/brain.json", "personal/notes.md", "personal/plan.md", "personal/settings.md", "personal/sub/keep.md"}) || len(infos) != 1 || infos[0].Left != 4 {
 		t.Fatalf("listed %v, %+v, %v", listed, infos, err)
 	}
 	m := exp(mac, []Folder{{ID: "personal", Configured: "~/Personal", Dir: personal, Excluded: excluded}}, t0)
-	if m.Format != formatFolders || len(m.Folders) != 1 || m.Folders[0].Files != 3 || m.Folders[0].Left != 4 {
+	if m.Format != formatFolders || len(m.Folders) != 1 || m.Folders[0].Files != 5 || m.Folders[0].Left != 4 {
 		t.Fatalf("manifest = %+v %+v", m, m.Folders)
 	}
 
 	// Away: on a machine without ~/Personal the folder goes into the volume.
 	vm, placed := importInto(t, st, id, t.TempDir(), t0.Add(time.Minute))
 	away := filepath.Join(vm, "brains-folders", "Personal")
-	if len(placed) != 1 || placed[0].Home || placed[0].Dir != away {
+	if len(placed) != 1 || placed[0].Home || placed[0].Dir != away || placed[0].Forget != "" {
 		t.Fatalf("placed away = %+v", placed)
 	}
-	if got := listFiles(t, away); !slices.Equal(got, []string{"brain.json", "notes.md", "sub/keep.md"}) {
+	if _, err := os.Stat(filepath.Join(vm, "core", vault.ForgetNoteName)); err == nil {
+		t.Error("the vault is told to forget a folder that just arrived")
+	}
+	if got := listFiles(t, away); !slices.Equal(got, []string{"brain.json", "notes.md", "plan.md", "settings.md", "sub/keep.md"}) {
 		t.Errorf("in the volume: %v (work data, venvs, node_modules and links stay home)", got)
 	}
 	bd := brainDirsOf(t, vm)
@@ -125,8 +132,16 @@ func TestBrainFolderMovesAwayAndHome(t *testing.T) {
 	if err := os.Remove(filepath.Join(away, "sub", "keep.md")); err != nil {
 		t.Fatal(err)
 	}
-	// Meanwhile at home, a file only the Mac has.
+	// Meanwhile at home, a file only the Mac has, settings.md edited on
+	// both sides (#182: the home edit must not be lost) and plan.md
+	// edited at home only.
 	write(t, homeMac, "Personal/mac-only.md", "mac", 0o644)
+	write(t, away, "settings.md", "settings v2 away", 0o644)
+	write(t, homeMac, "Personal/settings.md", "settings v2 home", 0o644)
+	write(t, homeMac, "Personal/plan.md", "plan v2 home", 0o644)
+	if _, err := os.Stat(filepath.Join(vm, "brains-folders", ".moved-Personal.json")); err != nil {
+		t.Fatalf("no record of what the folder held when it moved: %v", err)
+	}
 
 	// Back: the folder lies in the data dir now, and travels with it.
 	m2 := exp(vm, []Folder{{ID: "personal", Configured: away, Dir: away}}, t0.Add(2*time.Minute))
@@ -134,8 +149,21 @@ func TestBrainFolderMovesAwayAndHome(t *testing.T) {
 		t.Errorf("the way back carries the folder in data/, not folders/: %+v", m2.Folders)
 	}
 	back, placed := importInto(t, st, id, homeMac, t0.Add(3*time.Minute))
-	if len(placed) != 1 || !placed[0].Home || placed[0].Dir != personal || placed[0].Added != 1 || placed[0].Updated != 1 {
+	if len(placed) != 1 || !placed[0].Home || placed[0].Dir != personal || placed[0].Added != 1 || placed[0].Updated != 1 ||
+		placed[0].Kept != 1 || !slices.Equal(placed[0].Conflicts, []string{"settings.md"}) {
 		t.Fatalf("placed home = %+v", placed)
+	}
+	if got := readFile(t, filepath.Join(personal, "settings.md")); got != "settings v2 home" {
+		t.Errorf("settings.md at home = %q (the home edit was lost)", got)
+	}
+	if got := readFile(t, filepath.Join(placed[0].Aside, "settings.md")); got != "settings v2 away" {
+		t.Errorf("the other machine's settings.md aside = %q", got)
+	}
+	if got := readFile(t, filepath.Join(personal, "plan.md")); got != "plan v2 home" {
+		t.Errorf("plan.md at home = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(back, "brains-folders", ".moved-Personal.json")); err == nil {
+		t.Error("the record of the move stayed in brains-folders")
 	}
 	if got := readFile(t, filepath.Join(personal, "notes.md")); got != "new notes" {
 		t.Errorf("notes.md = %q", got)
@@ -157,6 +185,15 @@ func TestBrainFolderMovesAwayAndHome(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(back, "brains-folders", "Personal")); err == nil {
 		t.Error("the volume's copy stayed in brains-folders after it came home")
+	}
+	// What the vault uploaded of the volume's copy is no one's now: the
+	// vault forgets it when it next starts (#182).
+	if placed[0].Forget != "brains-folders/Personal" {
+		t.Errorf("Forget = %q", placed[0].Forget)
+	}
+	note, err := vault.ReadForgetNote(filepath.Join(back, "core", vault.ForgetNoteName))
+	if err != nil || len(note.Folders) != 1 || note.Folders[0].Prefix != "brains-folders/Personal" || !note.Folders[0].At.Equal(t0.Add(3*time.Minute)) {
+		t.Errorf("forget note = %+v, %v", note, err)
 	}
 }
 
@@ -185,7 +222,7 @@ func TestMergeHomeRefusesLinks(t *testing.T) {
 	if err := os.Symlink(elsewhere, filepath.Join(home, "docs")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mergeHome(home, src, filepath.Join(t.TempDir(), "aside")); err == nil {
+	if _, err := mergeHome(home, src, filepath.Join(t.TempDir(), "aside"), nil); err == nil {
 		t.Error("a merge wrote below a link")
 	}
 	if _, err := os.Stat(filepath.Join(elsewhere, "a.md")); err == nil {

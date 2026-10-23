@@ -165,6 +165,16 @@ func VaultStatusText(data []byte, now time.Time) (string, error) {
 	if r := st.LastEvict; r != nil {
 		line("last eviction: %s, %d files, %s freed%s", ago(r.At, now), r.Evicted, gib(r.FreedBytes), map[bool]string{true: ", still over budget"}[r.OverBudget])
 	}
+	if r := st.LastForget; r != nil {
+		msg := fmt.Sprintf("last forget: %s, %s: %d files, %s", ago(r.At, now), r.Prefix, r.Forgotten, gib(r.Bytes))
+		if r.Kept > 0 {
+			msg += fmt.Sprintf(", %d kept (on disk)", r.Kept)
+		}
+		if r.Error != "" {
+			msg += ", failed: " + r.Error
+		}
+		line("%s", msg)
+	}
 	sn := st.Snapshots
 	if !sn.Enabled {
 		line("snapshots: off%s", map[bool]string{true: " — " + sn.Error}[sn.Error != ""])

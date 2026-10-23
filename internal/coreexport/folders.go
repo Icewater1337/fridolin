@@ -3,6 +3,7 @@ package coreexport
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/vault"
 )
 
 // Brain folders outside the data dir (bound into the container from the
@@ -157,6 +160,16 @@ type FolderPlacement struct {
 	Home                 bool
 	Added, Updated, Same int
 	Aside                string
+	// Conflicts are the files (slash-separated, below the folder) that
+	// changed both at home and in the brain's copy since the move: the
+	// home version stays, the brain's is in Aside. Kept counts the files
+	// that changed only at home, which stay as they are.
+	Conflicts []string
+	Kept      int
+	// Forget is the vault path of the data dir's copy that came home
+	// (brains-folders/Personal): the vault forgets it when it next starts
+	// (vault.ForgetNoteName).
+	Forget string
 }
 
 // PlaceFolders puts the brain folders of an import in place, after
@@ -167,7 +180,9 @@ type FolderPlacement struct {
 // whose home is not there goes into dataDir/brains-folders/, and the brain
 // points there. Nothing at home is deleted: a file it replaces, and the
 // volume's copy that came home, go to core/replaced-<time>/folders/ in the
-// data dir.
+// data dir. The vault is told to forget the data dir's copy of a folder
+// that came home: what it uploaded of it while the folder was away is no
+// longer anyone's (a note in core/, vault.ForgetNoteName).
 func PlaceFolders(dataDir, staging, home string, m Manifest, now time.Time) ([]FolderPlacement, error) {
 	cfgPath := filepath.Join(dataDir, "config.json")
 	data, err := os.ReadFile(cfgPath)
@@ -212,6 +227,7 @@ func PlaceFolders(dataDir, staging, home string, m Manifest, now time.Time) ([]F
 	stamp := now.UTC().Format("20060102T150405Z")
 	asideRoot := filepath.Join(dataDir, "core", "replaced-"+stamp, "folders")
 	var out []FolderPlacement
+	var forget []vault.ForgetFolder
 	changed := false
 
 	// The folders the archive carries.
@@ -227,7 +243,7 @@ func PlaceFolders(dataDir, staging, home string, m Manifest, now time.Time) ([]F
 			}
 		}
 		if dir := expand(f.Configured); isHome(dir) {
-			p, err := mergeHome(dir, src, filepath.Join(asideRoot, f.ID))
+			p, err := mergeHome(dir, src, filepath.Join(asideRoot, f.ID), nil)
 			if err != nil {
 				return out, fmt.Errorf("bringing %s's folder home to %s: %w", f.ID, dir, err)
 			}
@@ -246,6 +262,9 @@ func PlaceFolders(dataDir, staging, home string, m Manifest, now time.Time) ([]F
 		}
 		if err := os.Rename(src, target); err != nil {
 			return out, fmt.Errorf("putting %s's folder into %s: %w", f.ID, target, err)
+		}
+		if err := writeOrigin(target, f.ID, now); err != nil {
+			return out, fmt.Errorf("recording what %s's folder held when it moved: %w", f.ID, err)
 		}
 		out = append(out, FolderPlacement{ID: f.ID, Dir: target})
 		if entry != nil {
@@ -281,18 +300,37 @@ func PlaceFolders(dataDir, staging, home string, m Manifest, now time.Time) ([]F
 		if _, err := os.Stat(here); err != nil {
 			return out, fmt.Errorf("the brain folder of %s, %s, is not in the import: %w", id, here, err)
 		}
-		p, err := mergeHome(dir, here, filepath.Join(asideRoot, id))
+		origin, err := readOrigin(here)
+		if err != nil {
+			return out, err
+		}
+		p, err := mergeHome(dir, here, filepath.Join(asideRoot, id), origin)
 		if err != nil {
 			return out, fmt.Errorf("bringing %s's folder home to %s: %w", id, dir, err)
 		}
 		if err := moveAside(here, filepath.Join(asideRoot, "volume", filepath.Base(here))); err != nil {
 			return out, err
 		}
+		if origin != nil {
+			if err := moveAside(originFile(here), filepath.Join(asideRoot, "volume", filepath.Base(originFile(here)))); err != nil {
+				return out, err
+			}
+		}
 		p.ID = id
+		if rel, err := filepath.Rel(dataDir, here); err == nil && rel != "." {
+			p.Forget = filepath.ToSlash(rel)
+			forget = append(forget, vault.ForgetFolder{Prefix: p.Forget, Why: "brain " + id + "'s folder went home to " + from, At: now.UTC()})
+		}
 		out = append(out, p)
 		e["path"], _ = json.Marshal(from)
 		delete(e, "moved_from")
 		changed = true
+	}
+	if len(forget) > 0 {
+		note := filepath.Join(dataDir, "core", vault.ForgetNoteName)
+		if err := vault.AddToForgetNote(note, forget...); err != nil {
+			return out, fmt.Errorf("noting for the vault what to forget in %s: %w (fridolin vault forget does it by hand)", note, err)
+		}
 	}
 	if !changed {
 		return out, nil
@@ -312,11 +350,84 @@ func PlaceFolders(dataDir, staging, home string, m Manifest, now time.Time) ([]F
 	return out, os.Rename(tmp, cfgPath)
 }
 
+// originPrefix starts the name of the file beside a folder in the volume
+// that records what the folder held when the move put it there: the
+// sha256 of each file. It lies in brains-folders/, outside the folder
+// (the brain never sees it, and it never goes home), travels with the
+// export as part of the data dir and is no vault file.
+const originPrefix = ".moved-"
+
+// folderOrigin is the content of that file.
+type folderOrigin struct {
+	ID    string            `json:"id"`
+	At    time.Time         `json:"at"`
+	Files map[string]string `json:"files"` // slash-separated path below the folder → sha256, hex
+}
+
+func originFile(dir string) string {
+	return filepath.Join(filepath.Dir(dir), originPrefix+filepath.Base(dir)+".json")
+}
+
+// writeOrigin records the sha256 of every regular file below dir.
+func writeOrigin(dir, id string, now time.Time) error {
+	o := folderOrigin{ID: id, At: now.UTC(), Files: map[string]string{}}
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || !d.Type().IsRegular() {
+			return err
+		}
+		h, err := fileHash(p)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return err
+		}
+		o.Files[filepath.ToSlash(rel)] = hex.EncodeToString(h)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(o, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := originFile(dir) + ".tmp"
+	if err := os.WriteFile(tmp, append(data, '\n'), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, originFile(dir))
+}
+
+// readOrigin returns the hashes writeOrigin recorded for dir, nil when
+// there are none (a move made before they were recorded).
+func readOrigin(dir string) (map[string]string, error) {
+	data, err := os.ReadFile(originFile(dir))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var o folderOrigin
+	if err := json.Unmarshal(data, &o); err != nil {
+		return nil, fmt.Errorf("%s: %w", originFile(dir), err)
+	}
+	if o.Files == nil {
+		o.Files = map[string]string{}
+	}
+	return o.Files, nil
+}
+
 // mergeHome writes src's files into dst, the brain's folder at home: new
 // ones are added, changed ones written over after the file there moved to
 // aside, the same ones left alone. Nothing in dst is deleted, and nothing
-// is written through a link in dst.
-func mergeHome(dst, src, aside string) (FolderPlacement, error) {
+// is written through a link in dst. With origin, the files' hashes when
+// the folder left home, a file that changed at home since stays: as it is
+// when the brain's copy did not change it, and with the brain's version
+// in aside, a conflict, when it did. Without origin the brain's copy wins.
+func mergeHome(dst, src, aside string, origin map[string]string) (FolderPlacement, error) {
 	p := FolderPlacement{Dir: dst, Home: true}
 	err := filepath.WalkDir(src, func(sp string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -354,6 +465,32 @@ func mergeHome(dst, src, aside string) (FolderPlacement, error) {
 			if same {
 				p.Same++
 				return nil
+			}
+			if origin != nil {
+				slash := filepath.ToSlash(rel)
+				was, known := origin[slash]
+				home, err := fileHash(dp)
+				if err != nil {
+					return err
+				}
+				if !known || hex.EncodeToString(home) != was {
+					// Changed at home since the move (or made there
+					// meanwhile): home wins.
+					moved, err := fileHash(sp)
+					if err != nil {
+						return err
+					}
+					if known && hex.EncodeToString(moved) == was {
+						p.Kept++
+						return nil
+					}
+					p.Conflicts = append(p.Conflicts, slash)
+					p.Aside = aside
+					if err := os.MkdirAll(filepath.Dir(filepath.Join(aside, rel)), 0o700); err != nil {
+						return err
+					}
+					return copyFile(sp, filepath.Join(aside, rel), st.Mode().Perm(), st.ModTime())
+				}
 			}
 			if err := moveAside(dp, filepath.Join(aside, rel)); err != nil {
 				return err

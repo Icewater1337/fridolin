@@ -19,7 +19,7 @@ The hot tier is the data dir, of which these parts are vault files:
 | `vault/documents/<brain>/` | documents filed for a brain |
 | `vault/workspaces/` | archived FrIDE workspaces |
 | `media/<brain>/` | each brain's media inbox, when `media_dir` lies in the data dir (the default) |
-| brain folders in the data dir | in the container, `/data/brains-folders/<name>/`, less what their backup settings leave out ([below](#brain-folders-and-their-backup-settings)) |
+| brain folders in the data dir | in the container, `/data/brains-folders/<name>/`, less what their backup settings leave out ([below](#brain-folders-and-their-backup-settings)); not a folder a core move put there (`moved_from`, [below](#forgetting-a-folder)) |
 
 Never vault files: `bridge.db` and `vault.db` with their `-wal`, `-shm`
 and `-journal` files and Litestream's `.<db>-litestream/` folders (a file
@@ -326,6 +326,7 @@ fridolin vault sync              # upload now
 fridolin vault evict             # evict now
 fridolin vault get media/main/recording.m4a   # bring one back, print where
 fridolin vault rebuild           # rebuild vault.db from the cold tier, bring back the pinned files
+fridolin vault forget brains-folders/Personal   # forget a folder the vault no longer keeps
 fridolin vault restore-drill     # restore the latest snapshot into an empty folder and check it
 fridolin vault restore-drill --target nas   # the same for a node target
 fridolin vault snapshot [--target nas] [--hourly]
@@ -343,6 +344,37 @@ more than an hour for its upload, that a snapshot is less than 26 hours
 old, that Litestream runs, that no brain folder is left out for a
 brain.json it cannot read, and that the day's B2 transactions stay within
 the budget.
+
+### Forgetting a folder
+
+The vault never deletes on its own: a file gone from disk keeps its cold
+copy, listed in its folder's `.cold.json`. That is wrong for a folder that
+was only visiting the data dir, a brain folder a core move put into the
+volume ([CORE.md](CORE.md#brain-folders-on-another-machine)) and brought
+home again: its cold copies would stay in the bucket, and the vault would
+write `.cold.json` files for them into `/data/brains-folders/` on the
+machine it came home to.
+
+So such a folder stays out of the vault while it visits: a brain folder in
+the data dir whose `brain_dirs` entry has `moved_from` is not a vault
+file (the snapshots cover it, as every brain folder). And when `fridolin
+core import` brings a folder home from the data dir, it leaves the note
+`core/vault-forget.json` naming the data dir's copy
+(`brains-folders/Personal`); the vault, at its next start and before its
+first upload, *forgets* each folder the note names: it deletes the cold
+copy of each file below it, then the file's row in `vault.db`, 200 at a
+time, deletes cold objects below it that no row names, removes the
+folder's `.cold.json` files and the folders that leaves empty, and writes
+the cold manifest again. A folder done comes off the note; one where a
+delete failed stays on it for the next start. A folder that is part of
+the vault again by then (a brain lives there) comes off without being
+forgotten.
+
+`fridolin vault forget PREFIX` (`POST /api/vault/forget`) does the same
+by hand, for a folder below the data dir that is no longer part of the
+vault: it refuses `secrets`, `vault/documents` and every other folder the
+vault keeps, and a file below PREFIX that is on disk stays, row, cold
+copy and all. `fridolin vault status` shows the last forget.
 
 ## Node targets
 
