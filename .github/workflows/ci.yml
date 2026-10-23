@@ -42,6 +42,11 @@ jobs:
         exclude:
           - {os: ubuntu-latest, shard: 3}
           - {os: ubuntu-latest, shard: 4}
+          # GitHub runs only a few macOS jobs at a time per account, so a
+          # pull request tests macOS on the current release alone; each
+          # push to main tests both. "none" matches no release.
+          - os: macos-latest
+            go: ${{ github.event_name == 'pull_request' && 'oldstable' || 'none' }}
     name: go (${{ matrix.os }}, ${{ matrix.go }}, ${{ matrix.shard }}/${{ matrix.os == 'macos-latest' && 4 || 2 }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
