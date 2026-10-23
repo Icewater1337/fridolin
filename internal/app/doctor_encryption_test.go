@@ -28,6 +28,7 @@ func TestDoctorEncryption(t *testing.T) {
 		{"all two", head + `"encryption":[` + two + `]}`, DoctorOK, "exports: age + seal"},
 		{"one layer", head + `"encryption":[` + two + `,{"store":"litestream","layers":["none"]}]}`, DoctorWarn, "one layer only: litestream"},
 		{"copying", head + `"encryption":[{"store":"cold","layers":["a","b"],"old":"copying"}]}`, DoctorWarn, "single-layer copies of cold"},
+		{"retired, a Drive folder left by hand", head + `"encryption":[` + two + `,{"store":"drive","layers":["a","b"],"old":"retired","left":"delete \"fridolin-restic\" in Google Drive"}]}`, DoctorOK, `By hand: drive: delete "fridolin-restic"`},
 		{"a target of before", head + `"encryption":[` + two + `],"targets":[{"name":"nas","layers":"restic"}]}`, DoctorWarn, "target nas"},
 		{"not described", head + `"snapshots":{}}`, DoctorWarn, "not described"},
 	} {

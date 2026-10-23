@@ -37,10 +37,13 @@ type migrationStore struct {
 	Action string `json:"action"`
 	// Pending is how much the old store holds that the new one lacks;
 	// Copied how much this run copied (files, or snapshots for restic).
-	Pending int    `json:"pending"`
-	Copied  int    `json:"copied"`
-	Retired bool   `json:"retired,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Pending int  `json:"pending"`
+	Copied  int  `json:"copied"`
+	Retired bool `json:"retired,omitempty"`
+	// Left says what of the retired copy may stay that only the owner can
+	// delete (a Drive folder the drive.file scope does not reach).
+	Left  string `json:"left,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // MigrateEncryption starts the job.
@@ -87,8 +90,9 @@ type migrator struct {
 	dryRun, deleteOld bool
 }
 
-// retire marks store retired in core/encryption.json.
-func (m migrator) retire(store string) error {
+// retire marks store retired in core/encryption.json, with what of it
+// only the owner can delete (left, may be empty).
+func (m migrator) retire(store, left string) error {
 	core := m.s.cfgs.Get().Boot.Layout().Core()
 	st, err := readEncryptionState(core)
 	if err != nil {
@@ -98,6 +102,12 @@ func (m migrator) retire(store string) error {
 		st.Retired = map[string]time.Time{}
 	}
 	st.Retired[store] = time.Now().UTC()
+	if left != "" {
+		if st.Left == nil {
+			st.Left = map[string]string{}
+		}
+		st.Left[store] = left
+	}
 	return writeEncryptionState(core, st)
 }
 
@@ -182,7 +192,7 @@ func (m migrator) cold(ctx context.Context) migrationStore {
 	if err := cloud.DeleteKeys(ctx, mig.Old, keys); err != nil {
 		return st.fail(fmt.Errorf("deleting the single-layer cold tier: %w", err))
 	}
-	if err := m.retire("cold"); err != nil {
+	if err := m.retire("cold", ""); err != nil {
 		return st.fail(err)
 	}
 	st.Retired = true
@@ -339,14 +349,18 @@ func (m migrator) purge(ctx context.Context, st migrationStore, store, what stri
 	if purge == nil {
 		return st.fail(fmt.Errorf("no way to delete the single-layer %s here", what))
 	}
-	if err := purge(ctx); err != nil {
+	left, err := purge(ctx)
+	if err != nil {
 		return st.fail(fmt.Errorf("deleting the single-layer %s: %w", what, err))
 	}
-	if err := m.retire(store); err != nil {
+	if err := m.retire(store, left); err != nil {
 		return st.fail(err)
 	}
-	st.Retired = true
+	st.Retired, st.Left = true, left
 	st.Action += "; deleted the single-layer " + what
+	if left != "" {
+		st.Action += " as far as fridolin reaches it"
+	}
 	return st
 }
 
