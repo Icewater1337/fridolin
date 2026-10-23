@@ -6,11 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
+	"net/url"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -363,5 +366,79 @@ func TestWriteGitHubLogin(t *testing.T) {
 	fst, _ := os.Stat(filepath.Join(gh, "hosts.yml"))
 	if st.Mode().Perm() != 0o700 || fst.Mode().Perm() != 0o600 || !strings.HasPrefix(filepath.Base(gh), "run-") || !strings.HasSuffix(gh, ".gh") {
 		t.Errorf("%s: modes %v %v", gh, st.Mode(), fst.Mode())
+	}
+}
+
+// TestGitHubConnectLikeABrowser walks the whole manifest flow as a browser
+// does, against a bridge served on loopback and a fake GitHub whose pages
+// stand in for the owner's clicks: the dashboard's Connect, the hand-off
+// page's form posted to GitHub, GitHub's redirect back with the code, the
+// install page, and GitHub's return to the setup URL, every redirect
+// followed. It ends on the dashboard's Integrations page with the app
+// installed, and a token minted from it works.
+func TestGitHubConnectLikeABrowser(t *testing.T) {
+	h := newServedHarness(t, "")
+	fake := useFakeGitHub(t, h.b.github)
+	w := h.Do("POST", "/api/github/connect", map[string]any{})
+	var start struct{ URL string }
+	if err := json.Unmarshal(w.Body.Bytes(), &start); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("connect: %d %s", w.Code, w.Body.String())
+	}
+
+	// The browser: cookies, redirects followed, no dashboard token.
+	var visited []string
+	browser := &http.Client{Timeout: 10 * time.Second, CheckRedirect: func(r *http.Request, via []*http.Request) error {
+		visited = append(visited, r.URL.String())
+		return nil
+	}}
+	resp, err := browser.Get("http://" + h.listen + start.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	form := regexp.MustCompile(`<form method="post" action="([^"]+)">\s*<input type="hidden" name="manifest" value="([^"]+)">`).FindSubmatch(page)
+	if form == nil {
+		t.Fatalf("no form on the hand-off page:\n%s", page)
+	}
+	action, manifest := html.UnescapeString(string(form[1])), html.UnescapeString(string(form[2]))
+
+	// Continue to GitHub: the form posts the manifest; GitHub makes the
+	// app and sends the browser back, the bridge on to the install page,
+	// GitHub back to the setup URL, and that to the dashboard.
+	resp, err = browser.PostForm(action, url.Values{"manifest": {manifest}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.Request.URL.Path != "/" || len(visited) != 4 ||
+		!strings.HasPrefix(visited[0], "http://"+h.listen+"/github/created?code=") ||
+		visited[1] != fake.URL+"/apps/"+fake.Slug+"/installations/new" ||
+		!strings.HasPrefix(visited[2], "http://"+h.listen+"/github/installed?installation_id=77") ||
+		visited[3] != "http://"+h.listen+"/#/integrations" {
+		t.Fatalf("ended at %d %s after %q", resp.StatusCode, resp.Request.URL, visited)
+	}
+	m := fake.LastManifest()
+	if m["public"] != false || fmt.Sprint(m["default_permissions"]) != "map[contents:read issues:write metadata:read]" {
+		t.Errorf("GitHub was posted %v", m)
+	}
+
+	st := h.b.github.Status(context.Background())
+	if !st.Connected || len(st.Installations) != 1 || fmt.Sprint(st.Installations[0].Repos) != "[you/fride you/fridolin]" {
+		t.Fatalf("after the flow: %+v", st)
+	}
+	tok, done, err := h.b.github.Mint(context.Background(), chat.GitHubGrant{Repos: []string{"you/fride"}, Permissions: map[string]string{"issues": "read"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issue, err := h.b.github.client.LatestIssue(context.Background(), tok, "you/fride"); err != nil || issue == nil {
+		t.Errorf("the token does not read an issue: %v", err)
+	}
+	if _, err := h.b.github.client.LatestIssue(context.Background(), tok, "you/fridolin"); !ghapp.IsStatus(err, http.StatusNotFound) {
+		t.Errorf("the token reaches a repository it was not minted for: %v", err)
+	}
+	done()
+	if len(fake.Live()) != 0 {
+		t.Errorf("tokens left: %v", fake.Live())
 	}
 }

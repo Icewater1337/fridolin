@@ -34,8 +34,12 @@ type Server struct {
 	InstallationID int64
 	Repos          []string // owner/name, what the installation reaches
 
-	mu      sync.Mutex
-	n       int
+	mu sync.Mutex
+	// Manifest is the last manifest the new-app page took, and setupURL
+	// where the install page sends the browser back.
+	Manifest map[string]any
+	setupURL string
+	n        int
 	live    map[string]Minted
 	Minted  []Minted // every token made, in order
 	Revoked []string // tokens revoked
@@ -144,7 +148,55 @@ func (m Minted) reaches(full string) bool {
 	return len(m.Repos) == 0 || slices.Contains(m.Repos, name)
 }
 
+// LastManifest is what the new-app page was posted, nil before.
+func (s *Server) LastManifest() map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Manifest
+}
+
+// web plays github.com's pages a browser goes through: the new-app page
+// takes the manifest form and, as if the owner clicked Create, sends the
+// browser to its redirect_url with the code; the install page sends it to
+// the setup_url, as if the owner clicked Install.
+func (s *Server) web(w http.ResponseWriter, r *http.Request) bool {
+	p := r.URL.Path
+	switch {
+	case r.Method == "POST" && (p == "/settings/apps/new" || strings.HasPrefix(p, "/organizations/") && strings.HasSuffix(p, "/settings/apps/new")):
+		var m map[string]any
+		if err := json.Unmarshal([]byte(r.PostFormValue("manifest")), &m); err != nil {
+			http.Error(w, "no manifest", http.StatusUnprocessableEntity)
+			return true
+		}
+		redirect, _ := m["redirect_url"].(string)
+		if _, ok := m["url"].(string); !ok || redirect == "" {
+			http.Error(w, "the manifest needs url and redirect_url", http.StatusUnprocessableEntity)
+			return true
+		}
+		s.mu.Lock()
+		s.Manifest = m
+		s.setupURL, _ = m["setup_url"].(string)
+		s.mu.Unlock()
+		http.Redirect(w, r, redirect+"?code="+Code+"&state="+r.URL.Query().Get("state"), http.StatusFound)
+	case r.Method == "GET" && p == "/apps/"+s.Slug+"/installations/new":
+		s.mu.Lock()
+		setup := s.setupURL
+		s.mu.Unlock()
+		if setup == "" {
+			http.Error(w, "no setup URL", http.StatusNotFound)
+			return true
+		}
+		http.Redirect(w, r, setup+"?installation_id="+strconv.FormatInt(s.InstallationID, 10)+"&setup_action=install", http.StatusFound)
+	default:
+		return false
+	}
+	return true
+}
+
 func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
+	if s.web(w, r) {
+		return
+	}
 	switch p := r.URL.Path; {
 	case r.Method == "POST" && strings.HasPrefix(p, "/app-manifests/") && strings.HasSuffix(p, "/conversions"):
 		if strings.TrimSuffix(strings.TrimPrefix(p, "/app-manifests/"), "/conversions") != Code {
