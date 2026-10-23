@@ -168,6 +168,7 @@ func NewAPIMux(d APIDeps) http.Handler {
 	mux.HandleFunc("POST /api/vault/evict", d.Vault().Evict)
 	mux.HandleFunc("POST /api/vault/rebuild", d.Vault().Rebuild)
 	mux.HandleFunc("POST /api/vault/get", d.Vault().Get)
+	mux.HandleFunc("POST /api/vault/forget", d.Vault().Forget)
 	mux.HandleFunc("POST /api/vault/snapshot", d.Vault().Snapshot)
 	mux.HandleFunc("POST /api/vault/check", d.Vault().Check)
 	mux.HandleFunc("POST /api/vault/restore-drill", d.Vault().RestoreDrill)

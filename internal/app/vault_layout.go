@@ -21,7 +21,10 @@ import (
 //   - the brain folders that lie in the data dir (the container's
 //     brains-folders/<name>/), less what their backup settings leave out
 //     (brainBackup): all of a folder whose backup is off or whose
-//     brain.json cannot be read.
+//     brain.json cannot be read. A folder that is only visiting, the one
+//     a core move put there with its home in brain_dirs' moved_from, is
+//     left out whole: it goes home with the next move, the snapshots
+//     cover it meanwhile, and its cold copies would outlive it (#182).
 //
 // Never part of it: bridge.db and vault.db with their sidecars (Litestream
 // replicates them, and restic gets VACUUM INTO copies; a live SQLite file
@@ -77,10 +80,16 @@ func vaultLayoutOf(cfg *config.Settings, brains map[string]string, backups map[s
 		l.media = rel
 		l.prefixes = append(l.prefixes, rel)
 	}
+	visiting := map[string]bool{}
+	for _, r := range cfg.BrainDirs {
+		if r.MovedFrom != "" {
+			visiting[filepath.Clean(AbsPath(r.Path))] = true
+		}
+	}
 	for id, dir := range brains {
 		abs := filepath.Clean(AbsPath(dir))
 		l.absBrainDirs[id] = abs
-		if rel, ok := l.rel(abs); ok && rel != "" && !l.reserved(rel) {
+		if rel, ok := l.rel(abs); ok && rel != "" && !l.reserved(rel) && !visiting[abs] {
 			l.brainDirs[id] = rel
 			l.prefixes = append(l.prefixes, rel)
 		}

@@ -21,6 +21,9 @@ type VaultService interface {
 	// MigrateEncryption copies what has one layer of encryption to the
 	// stores with two; dryRun only counts, deleteOld retires the old ones.
 	MigrateEncryption(dryRun, deleteOld bool) error
+	// Forget starts the job that drops what the vault holds below prefix,
+	// a folder it no longer keeps.
+	Forget(prefix string) error
 	// Get brings path back from the cold tier and returns where it is.
 	Get(ctx context.Context, path string, allowOverBudget bool) (string, error)
 }
@@ -96,6 +99,21 @@ func (a *VaultAPI) AllowPrune(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteJSON(w, http.StatusOK, OperationResponse{Status: "allowed"})
+}
+
+func (a *VaultAPI) Forget(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Prefix string `json:"prefix"`
+	}
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Prefix == "" {
+		WriteErr(w, http.StatusBadRequest, "prefix is empty: name the folder the vault forgets, such as brains-folders/Personal")
+		return
+	}
+	a.job(w, a.Vault().Forget(req.Prefix))
 }
 
 func (a *VaultAPI) Get(w http.ResponseWriter, r *http.Request) {

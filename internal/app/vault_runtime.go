@@ -108,11 +108,13 @@ type vaultStatus struct {
 	LastUpload  time.Time         `json:"last_upload,omitzero"`
 	LastSync    *vaultSyncRecord  `json:"last_sync,omitempty"`
 	LastEvict   *vaultEvictRecord `json:"last_evict,omitempty"`
-	Reachable   *vaultReach       `json:"reachable,omitempty"`
-	Evictions   []vault.Eviction  `json:"evictions"`
-	Snapshots   snapshotsStatus   `json:"snapshots"`
-	Litestream  litestreamView    `json:"litestream"`
-	LastDrill   *drillRecord      `json:"last_drill,omitempty"`
+	// LastForget is the folder the vault last forgot (vault_forget.go).
+	LastForget *vaultForgetRecord `json:"last_forget,omitempty"`
+	Reachable  *vaultReach        `json:"reachable,omitempty"`
+	Evictions  []vault.Eviction   `json:"evictions"`
+	Snapshots  snapshotsStatus    `json:"snapshots"`
+	Litestream litestreamView     `json:"litestream"`
+	LastDrill  *drillRecord       `json:"last_drill,omitempty"`
 	// Encryption is each off-machine store's layers (vault_encryption.go).
 	Encryption []storeLayers `json:"encryption,omitempty"`
 	// EncryptionMigration is what fridolin vault migrate-encryption last
@@ -523,6 +525,9 @@ func (s *vaultService) serve(ctx context.Context, run *vaultRun, cfg *config.Set
 		wg.Go(func() { s.runLiteMirror(ctx, m) })
 	}
 	s.ping(ctx, v)
+	// Before the first sync, which would list what is gone of them in
+	// .cold.json files.
+	s.forgetNoted(ctx, v, cfg)
 	s.syncAll(ctx, v)
 	s.evict(ctx, v)
 	wg.Go(func() {

@@ -25,6 +25,11 @@ Usage:
   fridolin vault get [--allow-over-budget] PATH
                                       bring PATH (relative to the data dir) back from the
                                       cold tier and print where it is
+  fridolin vault forget PREFIX       forget a folder the vault no longer keeps (PREFIX
+                                      relative to the data dir, such as
+                                      brains-folders/Personal): its index rows and its
+                                      copies in the cold tier are deleted; files on
+                                      disk stay (docs/VAULT.md, "Forgetting a folder")
   fridolin vault rebuild              rebuild vault.db from the cold tier and the disk, then
                                       bring back every pinned file that is only cold
   fridolin vault restore-drill [--target NAME]
@@ -130,6 +135,18 @@ func vaultCmd(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		fmt.Fprintln(stdout, resp.Path)
+		return 0
+	case "forget":
+		if fs.NArg() != 1 {
+			fmt.Fprintln(stderr, "fridolin vault forget: name one folder below the data dir, such as brains-folders/Personal")
+			return 2
+		}
+		var resp struct{ Status string }
+		if err := controlcli.VaultCall(cfg, http.MethodPost, "/api/vault/forget", map[string]string{"prefix": fs.Arg(0)}, &resp, 30*time.Second); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		fmt.Fprintf(stdout, "forget %s started; fridolin vault status shows how it went\n", fs.Arg(0))
 		return 0
 	}
 	if sub == "migrate-encryption" {
