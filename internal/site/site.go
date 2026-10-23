@@ -141,6 +141,9 @@ func (m *SiteManager) loadSettings() SiteSettings {
 	if len(s.Roles) == 1 {
 		s.Roles = append(s.Roles, "member")
 	}
+	if s.RoleBrains == nil {
+		s.RoleBrains = map[string][]string{}
+	}
 	return s
 }
 
@@ -159,6 +162,10 @@ func (m *SiteManager) Settings() SiteSettings {
 	s.History = append([]SiteDeploy{}, s.History...)
 	s.Builders = append([]string{}, s.Builders...)
 	s.Proposals = append([]SiteProposal{}, s.Proposals...)
+	s.RoleBrains = map[string][]string{}
+	for role, brains := range m.settings.RoleBrains {
+		s.RoleBrains[role] = slices.Clone(brains)
+	}
 	return s
 }
 
@@ -243,7 +250,57 @@ func (m *SiteManager) SetRoles(roles []string) error {
 		}
 	}
 	m.settings.Roles = out
+	for role := range m.settings.RoleBrains {
+		if !seen[role] || role == "admin" {
+			delete(m.settings.RoleBrains, role)
+		}
+	}
 	return m.saveSettingsLocked()
+}
+
+// siteBrainRE is a brain's id, as manifest.go checks it.
+var siteBrainRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}$`)
+
+// SetRoleBrains sets the brains each role sees on the site's /files and
+// /wiki; a role left out keeps what it had. admin sees every brain and
+// takes no list.
+func (m *SiteManager) SetRoleBrains(brains map[string][]string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	next := map[string][]string{}
+	for role, list := range m.settings.RoleBrains {
+		next[role] = list
+	}
+	for role, list := range brains {
+		if role == "admin" {
+			return errors.New("admin sees every brain; give the other roles their brains")
+		}
+		if !slices.Contains(m.settings.Roles, role) {
+			return fmt.Errorf("unknown role %q (roles: %s)", role, strings.Join(m.settings.Roles, ", "))
+		}
+		clean := []string{}
+		for _, id := range list {
+			if !siteBrainRE.MatchString(id) {
+				return fmt.Errorf("%q is not a brain id", id)
+			}
+			if !slices.Contains(clean, id) {
+				clean = append(clean, id)
+			}
+		}
+		slices.Sort(clean)
+		if len(clean) == 0 {
+			delete(next, role)
+			continue
+		}
+		next[role] = clean
+	}
+	prev := m.settings.RoleBrains
+	m.settings.RoleBrains = next
+	if err := m.saveSettingsLocked(); err != nil {
+		m.settings.RoleBrains = prev
+		return err
+	}
+	return nil
 }
 
 // ── accounts ────────────────────────────────────────────────────────────────
@@ -493,7 +550,7 @@ func (m *SiteManager) reconcile(restart bool) {
 	if ctx == nil {
 		return // not started (tests, check command)
 	}
-	if s.Enabled && s.Approved != "" {
+	if s.Enabled {
 		if restart {
 			m.site.stop()
 		}
@@ -546,6 +603,10 @@ type siteRuntime struct {
 	// DevicesFile lists the paired phones' public keys, so the live site
 	// turns away an upload no paired phone signed (plaud_app.go).
 	DevicesFile string `json:"devices_file,omitempty"`
+	// BridgeURL is the bridge's site listener, which serves the built-in
+	// /files and /wiki; its token comes through the secrets pipe. The live
+	// site only.
+	BridgeURL string `json:"bridge_url,omitempty"`
 	// Container: the live site binds listen's port on every interface of
 	// the fridolin-core container, since Docker forwards a published port
 	// to the container's own address, not to its loopback; and it trusts
@@ -638,6 +699,20 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 	if err := os.MkdirAll(tmp, 0o700); err != nil {
 		return nil, err
 	}
+	var bridgeToken string
+	if live && m.hooks.FilesBridge != nil {
+		url, token, err := m.hooks.FilesBridge()
+		if err != nil {
+			log.Printf("[site] the built-in /files and /wiki are off: %v", err)
+		} else {
+			rt.BridgeURL, bridgeToken = url, token
+		}
+	}
+	if live && s.Approved == "" {
+		if err := os.MkdirAll(modulesDir, 0o700); err != nil {
+			return nil, err
+		}
+	}
 	data, _ := json.MarshalIndent(rt, "", "  ")
 	rtFile := m.dir(name + ".runtime.json")
 	if err := fsx.WriteFileAtomic(rtFile, data, 0o600, false); err != nil {
@@ -645,11 +720,14 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 	}
 	bin, args := node, []string{"--import", "tsx/esm", filepath.Join(shell, "server", "main.ts")}
 	if live {
-		if s.Approved == "" {
-			return nil, errors.New("no commit is approved")
+		// Without an approved commit the site serves its built-in pages
+		// alone, from an empty deploy.
+		deploy := m.dir("deploys", "none")
+		root := deploy
+		if s.Approved != "" {
+			deploy = m.deployDir(s.Approved)
+			root = filepath.Join(deploy, filepath.FromSlash(s.Repo.Subdir))
 		}
-		deploy := m.deployDir(s.Approved)
-		root := filepath.Join(deploy, filepath.FromSlash(s.Repo.Subdir))
 		in := m.sandboxInput(node, deploy, root, rtFile, mods)
 		prepareDeclaredFolders(mods, in.Unwritable)
 		switch err := siteSandboxAvailable(m.sandboxExec); {
@@ -673,6 +751,11 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 		secrets, err := m.secretsFor(mods)
 		if err != nil {
 			return nil, err
+		}
+		if bridgeToken != "" {
+			if secrets, err = withBridgeToken(secrets, bridgeToken); err != nil {
+				return nil, err
+			}
 		}
 		r, err := pipeWith(secrets)
 		if err != nil {

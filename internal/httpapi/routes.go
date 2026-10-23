@@ -110,6 +110,7 @@ type APIDeps struct {
 	Nodes        func() *NodesAPI
 	Policy       func() *PolicyAPI
 	Housekeeping func() *HousekeepingAPI
+	Files        func() *FilesAPI
 }
 
 func NewAPIMux(d APIDeps) http.Handler {
@@ -212,6 +213,7 @@ func NewAPIMux(d APIDeps) http.Handler {
 	mux.HandleFunc("PUT /api/nodes/{id}/update-policy", d.Nodes().UpdatePolicy)
 
 	d.Site(mux)
+	d.Files().Register(mux)
 	d.Policy().Register(mux)
 	d.Housekeeping().Register(mux)
 
