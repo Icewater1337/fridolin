@@ -81,6 +81,17 @@ func (s *vaultService) setMigration(rec *encryptionMigration) {
 	cp.Stores = append([]migrationStore(nil), rec.Stores...)
 	s.mu.Lock()
 	s.status.EncryptionMigration = &cp
+	// A store retired by this run is retired in the status now, not only
+	// from the vault's next start, so that the doctor stops warning.
+	enc := append([]storeLayers(nil), s.status.Encryption...)
+	for _, st := range rec.Stores {
+		for i := range enc {
+			if st.Retired && enc[i].Store == st.Store && enc[i].Old == "copying" {
+				enc[i].Old, enc[i].Left = "retired", st.Left
+			}
+		}
+	}
+	s.status.Encryption = enc
 	s.mu.Unlock()
 }
 
