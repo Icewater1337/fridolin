@@ -668,6 +668,17 @@ for compatibility.
 
 ### Fixed
 
+- `fridolin doctor` no longer fails "Litestream is not running (N
+  restarts)" for the first minutes after the bridge starts on a data dir
+  that ran before, while Litestream replicates. `core/vault-status.json`
+  still held the last run's Litestream until the vault's first heartbeat,
+  which waits for the first sync of the hot tier. Now the vault starts
+  that part of its status over when it starts, and writes Litestream's
+  own state as soon as it runs; the status file says when the vault
+  started (`started_at`) and when Litestream's state was copied in
+  (`litestream.at`), and doctor takes a Litestream state from before the
+  start as not known yet: a warning for its first 5 minutes, a failure
+  after them.
 - A brain folder a core move put into the volume stays out of the vault's
   cold tier (#182). The vault had uploaded it, and after the way back
   `vault.db` still listed it: the vault kept its cold copies and wrote

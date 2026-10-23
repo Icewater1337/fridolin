@@ -129,6 +129,9 @@ type vaultStatus struct {
 	// UpdatedAt is when the running service last wrote the file: doctor
 	// takes an old one for a bridge that does not run.
 	UpdatedAt time.Time `json:"updated_at,omitzero"`
+	// StartedAt is when this run of the vault started: a Litestream status
+	// from before it (Litestream.At) is the last run's, not known yet.
+	StartedAt time.Time `json:"started_at,omitzero"`
 }
 
 // vaultBackends are what the service talks to: the cold tier, the restic
@@ -500,7 +503,10 @@ func (s *vaultService) serve(ctx context.Context, run *vaultRun, cfg *config.Set
 	if b.restic != nil {
 		s.status.Snapshots.Repo = b.restic.Repo
 	}
-	s.status.Litestream.Enabled = b.lite != nil
+	// What the last run's Litestream did is not this one's: a status
+	// file of before would say it is not running, with the old restarts.
+	s.status.StartedAt = time.Now().UTC()
+	s.status.Litestream = litestreamView{Enabled: b.lite != nil}
 	s.status.Encryption = b.encryption
 	s.mu.Unlock()
 	s.log.Info("vault: running", "root", layout.root)
@@ -520,6 +526,7 @@ func (s *vaultService) serve(ctx context.Context, run *vaultRun, cfg *config.Set
 				s.mu.Unlock()
 			}
 		})
+		wg.Go(func() { s.watchLitestreamStart(ctx, run) })
 	}
 	if m := b.liteMirror; m != nil {
 		wg.Go(func() { s.runLiteMirror(ctx, m) })
@@ -584,21 +591,59 @@ func (s *vaultService) heartbeat(ctx context.Context, run *vaultRun, save bool) 
 	if r := s.reachNow(); r != nil {
 		s.status.Reachable = r
 	}
-	if run.b.lite != nil {
-		s.status.Litestream.LitestreamStatus = run.b.lite.Status()
-		s.litestreamUsage(run, s.status.Litestream.LitestreamStatus, time.Now())
-		if s.status.Litestream.LastError == "" {
-			s.status.Litestream.LastError = run.liteErr
-		}
-		s.status.Litestream.DBs = litestreamNames(run.b.lite)
-		if m := run.b.liteMirror; m != nil {
-			ms := m.Status()
-			s.status.Litestream.Mirror = &ms
-		}
-	}
+	s.noteLitestreamLocked(run)
 	if save {
 		s.saveLocked()
 	}
+}
+
+// noteLitestreamLocked copies Litestream's live state into the status;
+// the caller holds mu.
+func (s *vaultService) noteLitestreamLocked(run *vaultRun) {
+	if run.b.lite == nil {
+		return
+	}
+	now := time.Now()
+	s.status.Litestream.LitestreamStatus = run.b.lite.Status()
+	s.status.Litestream.At = now.UTC()
+	s.litestreamUsage(run, s.status.Litestream.LitestreamStatus, now)
+	if s.status.Litestream.LastError == "" {
+		s.status.Litestream.LastError = run.liteErr
+	}
+	s.status.Litestream.DBs = litestreamNames(run.b.lite)
+	if m := run.b.liteMirror; m != nil {
+		ms := m.Status()
+		s.status.Litestream.Mirror = &ms
+	}
+}
+
+// litestreamStartPoll is how often watchLitestreamStart looks.
+var litestreamStartPoll = 100 * time.Millisecond
+
+// watchLitestreamStart writes Litestream's state into the status file as
+// soon as its first child runs (or failed to), instead of at the first
+// heartbeat, which waits for the first sync and eviction: minutes on a
+// big hot tier.
+func (s *vaultService) watchLitestreamStart(ctx context.Context, run *vaultRun) {
+	tick := time.NewTicker(litestreamStartPoll)
+	defer tick.Stop()
+	for {
+		if st := run.b.lite.Status(); st.Running || !st.LastExit.IsZero() {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ctx.Err() != nil {
+		return
+	}
+	s.noteLitestreamLocked(run)
+	s.saveLocked()
 }
 
 func litestreamNames(l *snapshot.Litestream) []string {

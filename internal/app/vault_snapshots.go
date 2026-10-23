@@ -112,6 +112,9 @@ type litestreamView struct {
 	// Mirror is the last upload of the local replicas, when they reach the
 	// cloud through the mirror (two layers).
 	Mirror *cloud.MirrorStatus `json:"mirror,omitempty"`
+	// At is when the vault last copied Litestream's live state in; before
+	// the vault's StartedAt it is not known yet.
+	At time.Time `json:"at,omitzero"`
 }
 
 type drillCheck struct {
