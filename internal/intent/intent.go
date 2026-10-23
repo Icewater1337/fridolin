@@ -1,9 +1,9 @@
 // Package intent holds a brain's standing intents: "remind me on Friday
 // at 9", "tell me when Sam mentions the boat", compiled by the brain into
 // a trigger.Schedule or a trigger.List instead of left as prose in its
-// notes, and kept by the bridge, which fires them. It also keeps when each
-// of a brain's own scheduled jobs (the weekly memory consolidation) last
-// ran.
+// notes, and kept by the bridge, which fires them. An older bridge also
+// kept here when the memory consolidation last ran, which JobLast reads
+// once (compat; scheduled agents keep their state in internal/sched).
 //
 // Only the bridge writes a brain's intents file, which lives in the data
 // dir where the sandbox keeps brains out; a brain adds one through the
@@ -56,7 +56,8 @@ type Intent struct {
 type File struct {
 	Version int      `json:"version"`
 	Intents []Intent `json:"intents"`
-	// Jobs is when each of the brain's own scheduled jobs last ran, by name.
+	// Jobs is when an older bridge last ran each of the brain's own jobs,
+	// by name (compat: read by JobLast, written no more).
 	Jobs map[string]time.Time `json:"jobs,omitempty"`
 }
 

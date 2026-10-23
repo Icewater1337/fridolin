@@ -47,6 +47,41 @@ for compatibility.
   public host name to add) and a check that `https://<domain>` answers.
   docs/SITE.md has the same steps under "From zero to your domain", and
   `examples/site-module/` is a starter module to copy into a repository.
+- Scheduled agents (#178): a brain runs a task by itself on a schedule
+  (`every 6h`, `daily 07:00`, `weekly mon 09:00`, or cron), or the bridge
+  runs a program on a node, defined in the brain's `brain.json` under
+  `schedules` (or with the task in its `schedules/` folder), so a schedule
+  a brain adds itself waits for your approval. Runs go through the
+  brain's queue, sandbox, risk levels and approvals; an agent never runs
+  twice at once, runs once after the bridge was down (or skips, with
+  `"missed": "skip"`), and is jittered. Results go to a chat always, only
+  when worth reporting, or nowhere. The dashboard's new Schedules page
+  lists the agents with their next and last run, runs, pauses, resumes
+  and edits them, and shows each one's run history (with cost or tokens
+  and the message sent) and each run's log; the reminders (standing
+  intents with a time) are listed there too. `fridolin schedules
+  list|run|pause|resume|logs` does the same from the shell, and
+  `/api/schedules` serves it (docs/API.md). The history and logs are in
+  `schedules/` in the data dir, kept within the new `schedules` settings
+  (`keep_days` 30, `keep_runs` 100, `max_total_mb` 200, `max_log_kb`
+  1024) by the housekeeping job, and in the vault's nightly snapshot.
+  Built-in templates: `memory-consolidation`, `morning-briefing` (today's
+  appointments each morning), and three daily code reviews of GitHub
+  repositories, `code-review-security`, `code-review-bugs` and
+  `code-review-simplify`, which file issues for real findings
+  (docs/BRAINS.md, "Scheduled agents").
+- `memory.consolidate` now runs as the scheduled agent
+  `memory-consolidation`, meaning what it did: the same skill on the same
+  schedule, its answer in the reply chat, counting on from the last run
+  an older bridge recorded. Editing it on the Schedules page
+  moves it into `schedules`; a bridge from before this version then no
+  longer runs it, as it does not know `schedules`.
+- A GitHub token for scheduled agents: `fridolin core secrets set
+  github.token` stores it, `fridolin core start` passes it to the core as
+  `FRIDOLIN_GITHUB_TOKEN`, and only the runs of agents with
+  `"secrets": ["github"]` get it, as `GH_TOKEN`.
+- Claude's and Codex's reports of what a run cost (dollars, tokens) are
+  read from their result; scheduled agents' runs record them.
 
 - `fridolin core apparmor` (Linux, as root, once) installs an AppArmor
   profile for the core container, `fridolin-core`, and `core start`,

@@ -300,7 +300,7 @@ func (a *agents) startBrainRun(br *brainruntime.Brain, ar *agentRun) error {
 	if slices.Contains(s.Secrets, manifest.SecretGitHub) {
 		tok := strings.TrimSpace(a.getenv(githubTokenEnv))
 		if tok == "" {
-			ar.log.Line("⚠️ The schedule asks for the github secret, but the bridge has no " + githubTokenEnv + ": gh is not logged in for this run")
+			ar.log.Line("Warning: the schedule asks for the github secret, but the bridge has no " + githubTokenEnv + ": gh is not logged in for this run")
 		} else {
 			ar.env = append(ar.env, "GH_TOKEN="+tok)
 		}
@@ -404,7 +404,7 @@ func (a *agents) finished(br *brainruntime.Brain, m brainruntime.Inbound, res cl
 		}
 		// The whole error, the CLI's stderr included, goes to the log
 		// only, which the dashboard shows the owner.
-		ar.log.Line("❌ " + res.Err.Error())
+		ar.log.Line("Error: " + res.Err.Error())
 		a.complete(ar, status, "", why, res.Usage, notice)
 	case s.ReportMode() == manifest.ReportSilent:
 		a.complete(ar, sched.StatusOK, res.Text, "", res.Usage, "")
@@ -450,11 +450,11 @@ func (a *agents) deliver(ar *agentRun, brain, text string) {
 	}
 	if err := a.b.pipeline.Reply(context.Background(), brain, ar.chat, text, a.b.cfgs.Get().MaxChunkSize); err != nil {
 		log.Printf("brain %s: scheduled agent %s: sending its result: %v", brain, ar.agent.Name, err)
-		ar.log.Line("⚠️ The result could not be sent: " + err.Error())
+		ar.log.Line("The result could not be sent: " + err.Error())
 		return
 	}
 	ar.run.Sent, ar.run.SentTo = true, ar.chat
-	ar.log.Line("📤 Sent to " + ar.chat)
+	ar.log.Line("Sent to " + ar.chat)
 }
 
 // finish is complete for a run that take has not ended yet.

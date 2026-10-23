@@ -152,7 +152,7 @@ func TestScheduledAgentsThroughTheAPI(t *testing.T) {
 	var lg struct {
 		Log string `json:"log"`
 	}
-	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &lg) != nil || !strings.Contains(lg.Log, "✅ Result") || !strings.Contains(lg.Log, "■ ok") || !strings.Contains(lg.Log, "📤 Sent to") {
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &lg) != nil || !strings.Contains(lg.Log, "✅ Result") || !strings.Contains(lg.Log, "■ ok") || !strings.Contains(lg.Log, "Sent to") {
 		t.Errorf("the log: %d %s", w.Code, w.Body.String())
 	}
 	if w := h.Do("GET", "/api/schedules/main/inbox/runs/20200101T000000-000000/log", nil); w.Code != http.StatusNotFound {
