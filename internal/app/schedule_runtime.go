@@ -542,7 +542,9 @@ func (a *agents) runCommand(ar *agentRun) {
 		a.commandEnded(ar, c.Node, sched.StatusFailed, err.Error(), nil, "")
 		return
 	}
+	a.mu.Lock() // list copies the run under it
 	ar.run.Node = node
+	a.mu.Unlock()
 	params := nodeproto.ExecParams{Argv: c.Argv, Dir: c.Dir}
 	if t := ar.agent.TimeoutMinutes; t > 0 {
 		params.TimeoutSeconds = t * 60

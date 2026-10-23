@@ -201,7 +201,7 @@ func (b *App) endDelegation(id, text string, err error) {
 // as a new message in the chat that run was for, which its reply goes to.
 func (b *App) deliverLate(d *delegation, r delegationResult) {
 	core := b.brainMgr.Get(d.from.Brain)
-	if core == nil || d.from.Chat == "" || chat.IsDelegateChat(d.from.Chat) {
+	if core == nil || d.from.Chat == "" || chat.IsInternalChat(d.from.Chat) {
 		log.Printf("brain %s: the answer of %s to its delegated task %s came after the wait, and has nowhere to go", d.from.Brain, d.to, d.id)
 		return
 	}
