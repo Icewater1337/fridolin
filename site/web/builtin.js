@@ -19,7 +19,14 @@ function h(tag, attrs, ...children) {
     else if (k === 'value') el.value = v;
     else el.setAttribute(k, v === true ? '' : v);
   }
-  for (const c of children.flat()) if (c !== null && c !== undefined && c !== false) el.append(c);
+  for (const c of children.flat()) {
+    if (c === null || c === undefined || c === false) continue;
+    // Strings always become text nodes. The typeof test is what CodeQL
+    // takes as proof that no string reaches appendChild (as in the
+    // dashboard's lib/dom.js).
+    if (typeof c === 'object' && c instanceof Node) el.appendChild(c);
+    else el.appendChild(document.createTextNode(String(c)));
+  }
   return el;
 }
 
