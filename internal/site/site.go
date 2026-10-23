@@ -82,6 +82,10 @@ type SiteManager struct {
 	ctx         context.Context
 
 	warnNoSandbox sync.Once
+
+	// For tests: where CheckDomain asks, and with what (site_domain.go).
+	domainURL    func(domain string) string
+	domainClient *http.Client
 }
 
 // NewSiteManager loads the site's settings and accounts from opts.DataDir/site.

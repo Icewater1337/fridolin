@@ -39,6 +39,7 @@ type SiteService interface {
 	SetGoogleClient(data []byte) error
 	SetRoles(roles []string) error
 	SetRoleBrains(brains map[string][]string) error
+	CheckDomain(ctx context.Context) sitesvc.DomainCheck
 	SetSecret(module, name, value string) error
 	SetTunnelToken(token string) error
 	Settings() sitesvc.SiteSettings
@@ -247,6 +248,12 @@ func (a *SiteAPI) Roles(w http.ResponseWriter, r *http.Request) {
 	}
 	s := a.Site().Settings()
 	WriteJSON(w, http.StatusOK, SiteRolesResponse{Roles: s.Roles, RoleBrains: s.RoleBrains})
+}
+
+// CheckDomain asks the domain, through the internet, whether the site
+// answers there.
+func (a *SiteAPI) CheckDomain(w http.ResponseWriter, r *http.Request) {
+	WriteJSON(w, http.StatusOK, a.Site().CheckDomain(r.Context()))
 }
 
 func (a *SiteAPI) Tunnel(w http.ResponseWriter, r *http.Request) {

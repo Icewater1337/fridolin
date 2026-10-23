@@ -7,7 +7,7 @@ import { createAuth, loadSessionKey, page, type Auth } from './auth.ts'
 import { loadModules, mountModules, type ModuleSecrets } from './modules.ts'
 import { createPreviewAuth, previewForwarding, PreviewList } from './preview.ts'
 import { deviceRoutes } from './devices.ts'
-import { builtinRoutes, type Bridge } from './builtin.ts'
+import { BUILTIN_ROUTES, builtinRoutes, type Bridge } from './builtin.ts'
 import { BRIDGE_SECRETS_KEY } from './config.ts'
 
 const WEB_DIR = fileURLToPath(new URL('../web/', import.meta.url))
@@ -67,6 +67,20 @@ export async function createSite(rt: Runtime, opts: SiteOptions = {}): Promise<e
   const shell: express.RequestHandler = (_req, res, next) => {
     res.setHeader('Content-Security-Policy', csp)
     next()
+  }
+
+  // wiki.<domain> and files.<domain>, where a tunnel sends them here too,
+  // are the built-in pages of <domain>: the session cookie belongs to
+  // <domain> alone.
+  if (rt.public_origin) {
+    const domain = new URL(rt.public_origin).hostname
+    app.use((req, res, next) => {
+      const host = req.hostname.toLowerCase()
+      const page = BUILTIN_ROUTES.find(r => host === `${r}.${domain}`)
+      if (!page) return next()
+      const path = req.originalUrl.startsWith(`/${page}`) ? req.originalUrl : `/${page}${req.originalUrl === '/' ? '' : req.originalUrl}`
+      res.redirect(301, rt.public_origin + path)
+    })
   }
 
   app.get('/_fridolin/health', (_req, res) => { res.type('text').send('ok') })

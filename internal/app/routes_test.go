@@ -205,6 +205,7 @@ var routeInventory = []httpRoute{
 	{"DELETE", "/api/site/users/{id}", classAPI, "/api/site/users/u1"},
 	{"PUT", "/api/site/roles", classAPI, ""},
 	{"PUT", "/api/site/tunnel", classAPI, ""},
+	{"POST", "/api/site/check-domain", classAPI, ""},
 	{"PUT", "/api/site/google-client", classAPI, ""},
 	{"DELETE", "/api/site/google-client", classAPI, ""},
 	{"GET", "/api/site/secrets", classAPI, ""},
@@ -357,6 +358,7 @@ var reachesOutside = map[string]bool{
 	"POST /api/site/deploy-key/github": true,
 	"POST /api/site/github-repo":       true,
 	"POST /api/backup/restore":         true,
+	"POST /api/site/check-domain":      true,
 }
 
 // TestRouteInventoryGuards probes every route of the inventory for the

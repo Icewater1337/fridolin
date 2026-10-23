@@ -251,6 +251,7 @@ func (a *SiteAPI) Register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/site/users/{id}", a.RemoveUser)
 	mux.HandleFunc("PUT /api/site/roles", a.Roles)
 	mux.HandleFunc("PUT /api/site/tunnel", a.Tunnel)
+	mux.HandleFunc("POST /api/site/check-domain", a.CheckDomain)
 	mux.HandleFunc("PUT /api/site/google-client", a.GoogleClient)
 	mux.HandleFunc("DELETE /api/site/google-client", a.GoogleClientDelete)
 	mux.HandleFunc("GET /api/site/secrets", a.Secrets)

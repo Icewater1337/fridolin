@@ -117,3 +117,30 @@ test('no module may take /files or /wiki', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('wiki.<domain> and files.<domain> lead to the pages on <domain>', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'fridolin-hosts-'))
+  t.after(() => rmSync(dir, { recursive: true, force: true }))
+  mkdirSync(join(dir, 'modules'))
+  writeFileSync(join(dir, 'users.json'), JSON.stringify({ version: 1, users: [] }))
+  writeFileSync(join(dir, 'session.key'), randomBytes(32).toString('hex'))
+  writeFileSync(join(dir, 'runtime.json'), JSON.stringify({
+    listen: '127.0.0.1:0', public_origin: 'https://example.com', modules_dir: join(dir, 'modules'),
+    users_file: join(dir, 'users.json'), session_key_file: join(dir, 'session.key'),
+  }))
+  const app = await createSite(readRuntime(join(dir, 'runtime.json')))
+  const server = app.listen(0, '127.0.0.1')
+  await new Promise(r => server.once('listening', r))
+  t.after(() => { server.close() })
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  const { request } = await import('node:http')
+  const get = (host: string, path: string) => new Promise<{ status: number; location?: string }>((resolve, reject) => {
+    request(`${url}${path}`, { headers: { host } }, (res) => { res.resume(); resolve({ status: res.statusCode!, location: res.headers.location }) }).on('error', reject).end()
+  })
+  assert.deepEqual(await get('wiki.example.com', '/'), { status: 301, location: 'https://example.com/wiki' })
+  assert.deepEqual(await get('wiki.example.com', '/acme/people/alex?x=1'), { status: 301, location: 'https://example.com/wiki/acme/people/alex?x=1' })
+  assert.deepEqual(await get('wiki.example.com', '/wiki/acme/'), { status: 301, location: 'https://example.com/wiki/acme/' })
+  assert.deepEqual(await get('files.example.com', '/main/'), { status: 301, location: 'https://example.com/files/main/' })
+  assert.equal((await get('example.com', '/')).status, 200)
+  assert.equal((await get('other.example.com', '/')).status, 200)
+})

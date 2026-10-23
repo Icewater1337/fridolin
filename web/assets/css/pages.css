@@ -231,6 +231,14 @@ blockquote.preview {
 .site-secrets li { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .site-secret-input { display: flex; align-items: center; gap: 6px; flex: 1 1 16em; min-width: 0; }
 .site-secret-input input { flex: 1 1 auto; min-width: 0; }
+.site-steps { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 18px; }
+.site-steps > li { display: flex; flex-direction: column; gap: 10px; }
+.site-steps > li::marker { font-weight: 600; }
+.site-steps > li > h3 { margin: 0; font-size: 14px; }
+.site-guide { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.site-section { padding: 8px 2px 0; }
+.site-section h2 { font-size: 16px; margin-bottom: 4px; }
+.site-brain-picks { display: flex; flex-wrap: wrap; gap: 6px 18px; }
 
 /* ── Build page ────────────────────────────────────────────────────────── */
 .build-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 16px; align-items: start; }
