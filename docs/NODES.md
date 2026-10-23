@@ -694,6 +694,7 @@ himself (`~/.fride`, port 7777, fleet mode). That one stays untouched.
 | `~/fride-companion/home` | its `FRIDE_HOME`: `config.json`, the hash of the companion token, `serve.log` |
 | `~/fride-companion/repos` | its only base folder; it starts with `fridolin` and `fride` |
 | `~/fride-companion/workspaces` | its `workspaceRoot` |
+| `~/fride-companion/plugins/ponytail` | the ponytail plugin its agents load, pinned to one commit |
 | `http://127.0.0.1:17840` | its API and UI, on loopback only |
 
 Below, `<fridolin-url>` is the clone URL of this repository
@@ -792,6 +793,13 @@ endings, rather than through `wsl` and echo.
 
    ```powershell
    wsl -d Ubuntu --exec bash -lc 'cd ~/fride-companion/repos && git clone <fridolin-url> && git clone <fride-url>'
+   ```
+
+   Then the ponytail plugin for FrIDE's agents (see "Ponytail for every
+   agent" below):
+
+   ```powershell
+   wsl -d Ubuntu --exec bash -lc 'git clone -q https://github.com/DietrichGebert/ponytail ~/fride-companion/plugins/ponytail && git -C ~/fride-companion/plugins/ponytail checkout -q --detach 16352ac229eb08a9598dcae48fe9f2b342567d86 && mkdir -p ~/.claude && touch ~/.claude/.ponytail-statusline-nudged'
    ```
 
 7. **Config.** Write `config.json` in `~/fride-companion/home` (see "The
@@ -900,7 +908,14 @@ This is the same setup as on the Mac mini, next to the owner's own FrIDE.
    `mkdir -p ~/fride-companion/{bin,home,repos,workspaces}`, then
    `go build -o ~/fride-companion/bin/fride .` in the clone.
 4. **Starter repositories**: clone `fridolin` and `fride` into
-   `~/fride-companion/repos`, as in WSL's step 6.
+   `~/fride-companion/repos`, as in WSL's step 6, and the ponytail
+   plugin (see "Ponytail for every agent" below):
+
+   ```bash
+   git clone -q https://github.com/DietrichGebert/ponytail ~/fride-companion/plugins/ponytail
+   git -C ~/fride-companion/plugins/ponytail checkout -q --detach 16352ac229eb08a9598dcae48fe9f2b342567d86
+   mkdir -p ~/.claude && touch ~/.claude/.ponytail-statusline-nudged
+   ```
 5. **Config**: write it as below, then run
    `FRIDE_HOME=~/fride-companion/home ~/fride-companion/bin/fride config check`
    and `fride doctor` the same way.
@@ -993,9 +1008,55 @@ more with the owner later (see FrIDE's SETUP.md).
       }
     }
   },
-  "companion": { "enabled": true }
+  "companion": {
+    "enabled": true,
+    "claudePlugins": ["~/fride-companion/plugins/ponytail"]
+  }
 }
 ```
+
+### Ponytail for every agent
+
+Every Claude Code agent the companion FrIDE starts loads
+[ponytail](https://github.com/DietrichGebert/ponytail) (MIT), a plugin
+that makes agents write the least code that works, with
+`/ponytail-review` and `/ponytail-audit`. FrIDE passes each folder in
+`companion.claudePlugins` to Claude Code as `--plugin-dir` (FrIDE's
+docs/COMPANION.md, "Plugins for task agents"), for new and resumed
+sessions. That loads the plugin for that session only: nothing is
+installed into `~/.claude`, no marketplace is added, the owner's own
+Claude Code sessions do not get it, and no prompt appears. A
+project-level `enabledPlugins` was not used: it installs into the
+owner's plugin cache, asks in an interactive session, and would need a
+`.claude/settings.json` in every task's worktree.
+
+- **Pinned.** The checkout is detached at one commit, ponytail v5.3.2
+  (`16352ac229eb08a9598dcae48fe9f2b342567d86`), so an upstream change
+  never reaches the agents by itself. To move it, fetch
+  (`git -C ~/fride-companion/plugins/ponytail fetch --tags`), read what
+  changed (`git -C ~/fride-companion/plugins/ponytail log --stat
+  HEAD..vX.Y.Z`, the `hooks/` folder above all), check it out with
+  `git -C ~/fride-companion/plugins/ponytail checkout -q --detach
+  vX.Y.Z`, and put its commit in this file. Agents started afterwards
+  use it; no restart is needed.
+- **What it runs.** Its hooks run `node` as the owner: at session start
+  (the ruleset, and a map of the repository from `git ls-files`), when a
+  subagent starts, and on each prompt (the `/ponytail` level). They keep
+  small state files in `~/.claude` (`.ponytail-active`,
+  `ponytail-modes/`). Its "band" is a Claude Code UI module that runs
+  `git grep` at session start and, after each turn, writes the task's
+  row (cost, tokens, turns) to `~/.config/ponytail/band/<repo>.csv` and
+  `board.html`. Its webhook is empty by default, so nothing leaves the
+  machine. `node` must be on the PATH FrIDE runs with.
+- **The statusline nudge.** In the first session without a `statusLine`
+  in `~/.claude/settings.json`, ponytail tells the agent to offer to add
+  one there, which an unattended agent should not do to the owner's own
+  settings. The empty file `~/.claude/.ponytail-statusline-nudged`
+  (made above) marks that offer as made; it changes no setting.
+- **Off.** Remove the entry from `companion.claudePlugins`: agents
+  started after the next **Re-check** in FrIDE's Settings (or a
+  restart) go without it. Deleting the checkout does the same, and
+  `fride config check` then warns.
 
 ### Approve and verify
 
@@ -1011,6 +1072,13 @@ more with the owner later (see FrIDE's SETUP.md).
      shows no failed check;
    - `fridolin node fride status` says FrIDE answers, and lists
      `fridolin` and `fride` among its repositories;
+   - ponytail loads: in `~/fride-companion/workspaces`,
+     `claude -p --plugin-dir ~/fride-companion/plugins/ponytail 'List your skills whose names start with ponytail.'`
+     names `ponytail:ponytail`, `ponytail:ponytail-review` and
+     `ponytail:ponytail-audit` (in WSL through `wsl -d Ubuntu --exec bash -lc`),
+     and while the test task below runs, its agent's command line
+     (`ps -ef | grep -- --plugin-dir`) carries
+     `--plugin-dir …/fride-companion/plugins/ponytail`;
    - the core lists the node with `fride` (in `fridolin nodes`, on the
      Nodes page, or with `!fleet` in a direct chat);
    - a tiny task from the core works. The owner writes to fridolin in
