@@ -184,7 +184,7 @@ machine". In short:
    then fails with only error 1053; `join` refuses such a state dir and
    names the one to use (docs/NODES.md, "Inside an app package"). On
    Linux, ask to turn on lingering, so the node runs without a login and
-   after a reboot, and link its unit for boot (docs/NODES.md, step 5).
+   after a reboot (docs/NODES.md, step 5).
 6. **Approve**: once the node joined, Fridolin tells the person in their
    WhatsApp chat; they reply `!approve ID` (device and what it offers in
    one go), or click **Approve device** and **Approve commands** on the

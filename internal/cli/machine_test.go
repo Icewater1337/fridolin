@@ -289,12 +289,12 @@ func TestNodeChecks(t *testing.T) {
 	if err := nodeagent.SaveConfig(dir, nodeagent.Config{Core: "ws://fridolin-core.example.ts.net:8766", Name: "winbox", Capabilities: nodeproto.Capabilities{Host: true}}); err != nil {
 		t.Fatal(err)
 	}
-	rep = app.RunDoctor(context.Background(), doctorEnvFor("fridolin-core.example.ts.net:8766", nil), nodeChecks(dir, nodeService{status: running}))
+	rep = app.RunDoctor(context.Background(), linuxNodeEnv(doctorEnvFor("fridolin-core.example.ts.net:8766", nil), "default.target", "yes"), nodeChecks(dir, nodeService{status: running}))
 	if !rep.OK {
 		t.Errorf("joined, reachable, running: %+v", rep)
 	}
 	stopped := func() (string, error) { return "installed, stopped", nil }
-	rep = app.RunDoctor(context.Background(), doctorEnvFor("", nil), nodeChecks(dir, nodeService{status: stopped}))
+	rep = app.RunDoctor(context.Background(), linuxNodeEnv(doctorEnvFor("", nil), "default.target", "yes"), nodeChecks(dir, nodeService{status: stopped}))
 	var failed []string
 	for _, c := range rep.Checks {
 		if c.Status == app.DoctorFail {
@@ -307,6 +307,82 @@ func TestNodeChecks(t *testing.T) {
 	var out bytes.Buffer
 	if code := writeMachineReport(&out, rep, dir, false); code != 1 || !strings.Contains(out.String(), "Next: tailscale status") {
 		t.Errorf("next step: %d %s", code, out.String())
+	}
+}
+
+// linuxNodeEnv makes env a Linux node's whose systemd user unit is
+// enabled into target ("" for not enabled) and whose user lingers when
+// linger is "yes".
+func linuxNodeEnv(env *app.DoctorEnv, target, linger string) *app.DoctorEnv {
+	env.GOOS, env.Home = "linux", "/home/you"
+	env.Getenv = func(name string) string {
+		if name == "USER" {
+			return "you"
+		}
+		return ""
+	}
+	stat, run := env.Stat, env.Run
+	env.Stat = func(p string) (fs.FileInfo, error) {
+		if p == nodeagent.LinuxUnitPath(env.Home) || (target != "" && p == nodeagent.LinuxWantsLink(env.Home, target)) {
+			return nil, nil
+		}
+		return stat(p)
+	}
+	env.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "loginctl" && strings.Join(args, " ") == "show-user you -p Linger" {
+			return []byte("Linger=" + linger + "\n"), nil
+		}
+		return run(ctx, name, args...)
+	}
+	return env
+}
+
+// TestNodeBootChecks: on Linux the node's user unit must be enabled into
+// default.target, which a user's systemd starts at boot, not into
+// multi-user.target, which it never reaches (issue #171); without
+// lingering doctor warns.
+func TestNodeBootChecks(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := nodeagent.NewKey(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := nodeagent.SaveConfig(dir, nodeagent.Config{Core: "ws://fridolin-core.example.ts.net:8766", Name: "box"}); err != nil {
+		t.Fatal(err)
+	}
+	running := func() (string, error) { return "running", nil }
+	check := func(env *app.DoctorEnv, id string) app.DoctorCheckReport {
+		t.Helper()
+		for _, c := range app.RunDoctor(context.Background(), env, nodeChecks(dir, nodeService{status: running})).Checks {
+			if c.ID == id {
+				return c
+			}
+		}
+		t.Fatalf("no check %s", id)
+		return app.DoctorCheckReport{}
+	}
+	reachable := "fridolin-core.example.ts.net:8766"
+	if c := check(linuxNodeEnv(doctorEnvFor(reachable, nil), "default.target", "yes"), "node-boot"); c.Status != app.DoctorOK {
+		t.Errorf("default.target: %+v", c)
+	}
+	if c := check(linuxNodeEnv(doctorEnvFor(reachable, nil), "multi-user.target", "yes"), "node-boot"); c.Status != app.DoctorFail || !strings.Contains(c.Fix, "fridolin node start") {
+		t.Errorf("multi-user.target: %+v", c)
+	}
+	if c := check(linuxNodeEnv(doctorEnvFor(reachable, nil), "", "yes"), "node-boot"); c.Status != app.DoctorFail || !strings.Contains(c.Fix, "systemctl --user enable fridolin-node") {
+		t.Errorf("not enabled: %+v", c)
+	}
+	env := linuxNodeEnv(doctorEnvFor(reachable, nil), "default.target", "no")
+	if c := check(env, "node-linger"); c.Status != app.DoctorWarn || c.Fix != "sudo loginctl enable-linger you" {
+		t.Errorf("no linger: %+v", c)
+	}
+	if rep := app.RunDoctor(context.Background(), env, nodeChecks(dir, nodeService{status: running})); !rep.OK {
+		t.Errorf("linger is only a warning: %+v", rep)
+	}
+	env = doctorEnvFor(reachable, nil)
+	env.GOOS = "darwin"
+	for _, c := range app.RunDoctor(context.Background(), env, nodeChecks(dir, nodeService{status: running})).Checks {
+		if c.ID == "node-boot" || c.ID == "node-linger" {
+			t.Errorf("%s checked on macOS", c.ID)
+		}
 	}
 }
 

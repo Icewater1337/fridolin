@@ -1,8 +1,13 @@
 package nodeagent
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +46,7 @@ func ServiceConfig(goos, exe, dir string) *service.Config {
 	case "linux":
 		c.Option["UserService"] = true
 		c.Option["Restart"] = "always"
+		c.Option["SystemdScript"] = systemdScript
 	case "windows":
 		c.Option["StartType"] = "automatic"
 		c.Option["OnFailure"] = "restart"
@@ -48,6 +54,95 @@ func ServiceConfig(goos, exe, dir string) *service.Config {
 		c.Option["OnFailureResetPeriod"] = 600
 	}
 	return c
+}
+
+// LinuxBootTarget is the target the systemd user unit is enabled into. A
+// user manager starts default.target at boot (with lingering on) and at
+// login; it never reaches multi-user.target, which is the system
+// manager's, so a unit wanted by that one does not start after a reboot.
+const LinuxBootTarget = "default.target"
+
+// legacyBootTarget is what kardianos/service's own template says.
+const legacyBootTarget = "multi-user.target"
+
+// systemdScript is kardianos/service v1.3.0's systemd template, in its
+// template syntax, with one change: WantedBy names LinuxBootTarget
+// instead of multi-user.target (issue #171).
+const systemdScript = `[Unit]
+Description={{Description}}
+ConditionFileIsExecutable={{Path | cmdEscape}}
+{{range Dependencies}}{{.}}
+{{end}}
+[Service]
+StartLimitInterval=5
+StartLimitBurst=10
+ExecStart={{Path | cmdEscape}}{{range Arguments}} {{. | cmd}}{{end}}
+{{if ChRoot}}RootDirectory={{ChRoot | cmd}}
+{{end}}{{if WorkingDirectory}}WorkingDirectory={{WorkingDirectory | cmdEscape}}
+{{end}}{{if UserName}}User={{UserName}}
+{{end}}{{if ReloadSignal}}ExecReload=/bin/kill -{{ReloadSignal}} "$MAINPID"
+{{end}}{{if PIDFile}}PIDFile={{PIDFile | cmd}}
+{{end}}{{if OutputFileSupport}}StandardOutput=file:{{LogDirectory}}/{{Name}}.out
+StandardError=file:{{LogDirectory}}/{{Name}}.err
+{{end}}{{if LimitNOFILE}}LimitNOFILE={{LimitNOFILE}}
+{{end}}{{if Restart}}Restart={{Restart}}
+{{end}}{{if SuccessExitStatus}}SuccessExitStatus={{SuccessExitStatus}}
+{{end}}RestartSec=120
+EnvironmentFile=-/etc/sysconfig/{{Name}}
+
+{{range EnvVars}}{{.}}
+{{end}}[Install]
+WantedBy=` + LinuxBootTarget + `
+`
+
+// LinuxUnitPath is where kardianos/service writes the systemd user unit
+// under the home folder home.
+func LinuxUnitPath(home string) string {
+	return filepath.Join(home, ".config", "systemd", "user", ServiceName+".service")
+}
+
+// LinuxWantsLink is the link `systemctl --user enable` makes for the
+// unit in target's .wants folder.
+func LinuxWantsLink(home, target string) string {
+	return filepath.Join(home, ".config", "systemd", "user", target+".wants", ServiceName+".service")
+}
+
+// RepairBootTarget moves a systemd user unit written before issue #171
+// was fixed from multi-user.target to LinuxBootTarget: it disables the
+// unit (which removes the old link), rewrites its WantedBy line and
+// enables it again. systemctl runs `systemctl ARGS`. It says whether it
+// changed anything; a missing or already right unit is left alone.
+//
+// compat: units that `fridolin node install` or `join` wrote with
+// kardianos/service's template say WantedBy=multi-user.target; `node
+// install`, `start`, `join` and `run` call this, so they move once.
+func RepairBootTarget(home string, systemctl func(args ...string) error) (bool, error) {
+	unit := LinuxUnitPath(home)
+	data, err := os.ReadFile(unit)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	old := []byte("\nWantedBy=" + legacyBootTarget + "\n")
+	if !bytes.Contains(data, old) {
+		return false, nil
+	}
+	name := ServiceName + ".service"
+	if err := systemctl("--user", "disable", name); err != nil {
+		return false, fmt.Errorf("systemctl --user disable %s: %w", name, err)
+	}
+	fixed := bytes.Replace(data, old, []byte("\nWantedBy="+LinuxBootTarget+"\n"), 1)
+	if err := os.WriteFile(unit, fixed, 0o644); err != nil {
+		return false, err
+	}
+	for _, args := range [][]string{{"--user", "daemon-reload"}, {"--user", "enable", name}} {
+		if err := systemctl(args...); err != nil {
+			return false, fmt.Errorf("systemctl %s: %w", strings.Join(args, " "), err)
+		}
+	}
+	return true, nil
 }
 
 // program runs the agent for the service manager.

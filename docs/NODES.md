@@ -221,15 +221,8 @@ fridolin node join fj-… --core fridolin-core.<tailnet>.ts.net:8766 --no-exec -
 On Linux the service is a systemd user unit, which stops when the owner
 logs out and does not start at boot unless the user lingers. On a
 server, or any machine that should serve while nobody is logged in, ask
-first, then run `sudo loginctl enable-linger $USER`. Until
-issue #171 is fixed,
-the unit also has to be linked for boot by hand, or it never starts
-after a reboot:
-
-```sh
-ln -sf ../fridolin-node.service ~/.config/systemd/user/default.target.wants/fridolin-node.service
-systemctl --user daemon-reload
-```
+first, then run `sudo loginctl enable-linger $USER`. `fridolin doctor
+--node` warns while it is off.
 
 ### 6. Approve on the core
 
@@ -1266,7 +1259,7 @@ node service through [kardianos/service](https://github.com/kardianos/service):
 | OS | Service |
 | --- | --- |
 | macOS | launchd user agent `ai.fridolin.node` (the bridge's is `ai.fridolin.bridge`), logs in the state dir |
-| Linux | systemd user unit `fridolin-node`, restarted always |
+| Linux | systemd user unit `fridolin-node`, wanted by `default.target`, restarted always |
 | Windows | Windows Service `fridolin-node`, started at boot, restarted after a failure |
 
 The service runs `fridolin node run --state-dir <dir>` with the binary that
@@ -1284,7 +1277,15 @@ package](#inside-an-app-package)). On a machine
 that joined a core and has no bridge config, `fridolin doctor` checks the
 node: Tailscale, `node.json` and the device key, the core's node port,
 the service, and on Windows whether the state dir it was installed with
-holds `node.json` (`--node` and `--state-dir` say so explicitly). A revoked node's
+holds `node.json` (`--node` and `--state-dir` say so explicitly), and on
+Linux that the unit is enabled into `default.target.wants` and, as a warning
+only, that the user lingers. A user's systemd starts `default.target` at
+boot when the user lingers (`sudo loginctl enable-linger $USER`), and
+otherwise at their first login; it never reaches `multi-user.target`,
+the system's target. A unit installed before this was fixed was enabled
+there and stayed off after a reboot: `fridolin node install`, `start`,
+`join` and the agent itself (`node run`, so an update reaches it) move it
+to `default.target`. A revoked node's
 agent stays up without reconnecting until it is stopped, so the service
 manager does not restart it into the same refusal.
 
