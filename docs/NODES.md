@@ -858,6 +858,26 @@ endings, rather than through `wsl` and echo.
    owner it may be minimised but must not be closed. FrIDE runs only
    while the owner is signed in, so the node offers `fride` only then.
 
+   **Restarting it** (a new `fride` binary, a config key the running
+   one predates): stopping the task ends `wsl.exe` on Windows, but the
+   `fride serve` inside Ubuntu keeps running, on the old binary even
+   after a new one was put in its place, and the task's next start
+   cannot take the port. End the Linux process too:
+
+   ```powershell
+   Stop-ScheduledTask -TaskName 'FrIDE companion (WSL)'
+   wsl -d Ubuntu --exec pkill -f 'fride-companion/bin/fride serve'
+   Start-ScheduledTask -TaskName 'FrIDE companion (WSL)'
+   ```
+
+   `wsl -d Ubuntu --exec bash -lc 'ps -eo pid,lstart,args | grep "[f]ride serve"'`
+   then shows one server, started just now. A restart ends the agents of
+   running tasks: check that none runs first. An agent of FrIDE's own
+   (WSL) cannot run this itself, since it ends with the server; it can
+   start it as a detached Windows process that waits a little, through
+   `/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe` (WSL's
+   `appendWindowsPath` may keep Windows programs off its PATH).
+
 10. **Pair the node with FrIDE**, from the owner's normal PowerShell.
     `fride` is not on Windows' PATH, so the code comes from WSL and goes
     straight into `pair` without ever being printed:
@@ -874,7 +894,7 @@ endings, rather than through `wsl` and echo.
     the agent on Windows cannot reach, so `fride_repo_add` does not
     work on a Windows node yet. Add repositories in Ubuntu instead:
     `git clone` into `~/fride-companion/repos`, then **Re-check** in
-    FrIDE's Settings (or restart the task). FrIDE and `fride_task` see
+    FrIDE's Settings (or restart it as in step 9). FrIDE and `fride_task` see
     them at once.
 
 Then continue with "Approve and verify" below.
