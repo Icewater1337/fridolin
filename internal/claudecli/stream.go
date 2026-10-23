@@ -25,6 +25,17 @@ type streamEvent struct {
 	Message *streamMsg `json:"message"`
 	Result  string     `json:"result"`
 	Error   string     `json:"error"`
+	// The result's cost: total_cost_usd and usage (Claude), or the
+	// usage of Codex's turn.completed.
+	TotalCostUSD float64      `json:"total_cost_usd"`
+	Usage        *streamUsage `json:"usage"`
+}
+
+type streamUsage struct {
+	InputTokens   int64 `json:"input_tokens"`
+	OutputTokens  int64 `json:"output_tokens"`
+	CacheCreation int64 `json:"cache_creation_input_tokens"`
+	CacheRead     int64 `json:"cache_read_input_tokens"`
 }
 
 type streamMsg struct {
@@ -195,6 +206,7 @@ type streamParser struct {
 	lastText string          // the last text the model wrote
 	asked    bool            // a question went out
 	err      error           // the run's error result
+	usage    Usage           // what the result says the run cost
 	unknown  map[string]bool // the event types logged as unknown
 }
 
@@ -240,6 +252,12 @@ func (p *streamParser) event(line []byte) {
 
 	case "result":
 		p.done = true
+		p.usage.CostUSD = event.TotalCostUSD
+		if u := event.Usage; u != nil {
+			// Codex counts its cached tokens among the input already.
+			p.usage.InputTokens = u.InputTokens + u.CacheCreation + u.CacheRead
+			p.usage.OutputTokens = u.OutputTokens
+		}
 		if event.IsError || event.Error != "" {
 			errMsg := event.Error
 			if errMsg == "" {
@@ -283,7 +301,7 @@ func (p *streamParser) event(line []byte) {
 // outcome is the run's outcome once its output ended.
 func (p *streamParser) outcome() Result {
 	if p.err != nil {
-		return Result{Err: p.err, Asked: p.asked}
+		return Result{Err: p.err, Asked: p.asked, Usage: p.usage}
 	}
 	// A -p run is stateless and nobody answers its AskUserQuestion, so the
 	// model goes on after asking, often to an answer of its own ("I booked
@@ -295,5 +313,5 @@ func (p *streamParser) outcome() Result {
 		}
 		return Result{Err: ErrNoResult}
 	}
-	return Result{Text: p.result, Asked: p.asked}
+	return Result{Text: p.result, Asked: p.asked, Usage: p.usage}
 }

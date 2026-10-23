@@ -1077,6 +1077,9 @@ func (br *Brain) logStderr(m Inbound, pid int, stderr string) {
 	if stderr == "" {
 		return
 	}
+	if m.Log != nil {
+		m.Log(fmt.Sprintf("stderr of the run, pid %d:\n%s", pid, textx.Tail(stderr, stderrLogBytes)))
+	}
 	f, err := fsx.OpenInFolder(br.root, StreamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		log.Printf("brain %s: could not open stream log: %v", br.id, err)
@@ -1272,6 +1275,9 @@ type runSink struct {
 func (s *runSink) Log(line string) {
 	if s.log != nil {
 		_, _ = fmt.Fprintf(s.log, "[%s] %s\n", time.Now().Format("15:04:05"), line)
+	}
+	if s.m.Log != nil {
+		s.m.Log(line)
 	}
 }
 

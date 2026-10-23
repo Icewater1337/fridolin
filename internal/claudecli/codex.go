@@ -82,6 +82,7 @@ func (s *codexStream) event(line []byte) streamEvent {
 			Text  string `json:"text"`
 			Phase string `json:"phase"`
 		} `json:"item"`
+		Usage *streamUsage `json:"usage"`
 	}
 	if json.Unmarshal(line, &e) != nil {
 		return streamEvent{}
@@ -96,7 +97,7 @@ func (s *codexStream) event(line []byte) streamEvent {
 		}
 		return streamEvent{Type: "assistant", Message: &streamMsg{Content: []streamContent{{Type: "tool_use", Name: e.Item.Type}}}}
 	case "turn.completed":
-		return streamEvent{Type: "result", Result: s.text}
+		return streamEvent{Type: "result", Result: s.text, Usage: e.Usage}
 	case "error":
 		// Connection retries can emit error events and still complete.
 		// Keep the diagnostic for a failed/truncated turn, but let the CLI retry.
