@@ -649,6 +649,14 @@ for compatibility.
   from the core brings. `fridolin doctor --node` (and `setup-machine
   --node`) checks on Linux that the unit is enabled for boot and warns
   when the user does not linger (docs/NODES.md, "The service").
+- The site's modules load again after the core moved to another machine.
+  A core export leaves `node_modules` out, but the live deploy's folder
+  still counted as built, so every module with server code failed with
+  "Cannot find package 'express'". A deploy folder whose dependencies are
+  gone is now checked out and installed again the next time its commit
+  is deployed (a rollback to it, or `POST /api/site/deploy` with the live
+  commit). A moved repository's deploy folders, which git still knows by
+  their old paths, are replaced too.
 - The site answers again when the core runs in the container. The site
   process listened on the container's own loopback and compose did not
   publish its port, so a Cloudflare tunnel on the host pointed at
