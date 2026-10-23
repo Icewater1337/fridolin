@@ -141,7 +141,7 @@ func TestManifest(t *testing.T) {
 			t.Errorf("pull requests %v: %s", prs, raw)
 		}
 	}
-	if !strings.HasPrefix(ghapp.NewName(), "fridolin-") || ghapp.NewName() == ghapp.NewName() {
+	if a, b := ghapp.NewName(), ghapp.NewName(); !strings.HasPrefix(a, "fridolin-") || a == b {
 		t.Error("names are not fridolin-<random>")
 	}
 	if got := ghapp.NewAppURL("", "acme", "s t"); got != "https://github.com/organizations/acme/settings/apps/new?state=s+t" {
