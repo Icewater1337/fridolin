@@ -56,6 +56,7 @@ GET /brain/mcp/tools
 GET /brain/memory/search
 GET /brain/polls
 GET /builder/context
+GET /files/raw
 GET /health
 GET /ready
 POST /api/approvals/{id}
@@ -96,6 +97,7 @@ POST /api/restart
 POST /api/site/build/{id}
 POST /api/site/build/{id}/new
 POST /api/site/build/{id}/stop
+POST /api/site/check-domain
 POST /api/site/deploy
 POST /api/site/deploy-key
 POST /api/site/deploy-key/github
