@@ -4,7 +4,8 @@ package examples
 
 import "embed"
 
-// FS is the prompt template and the skills a new brain gets.
+// FS is the prompt template and the skills a new brain gets, and the
+// built-in tasks of scheduled agents (schedules/, see internal/sched).
 //
-//go:embed brain-prompt.example.md skills/*.md
+//go:embed brain-prompt.example.md skills/*.md schedules/*.md
 var FS embed.FS
