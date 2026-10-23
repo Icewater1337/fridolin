@@ -374,6 +374,12 @@ blockquote.preview {
 .wiki-backlinks { margin-top: 18px; font-size: 14px; }
 .wiki-backlinks h3 { font-size: 14px; margin-bottom: 6px; }
 
+/* ── schedules ──────────────────────────────────────────────────────────── */
+
+.schedule-form { display: flex; flex-direction: column; gap: 16px; margin: 12px 0; }
+.schedule-log { max-height: 560px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.table tr.selected { background: var(--row-hover); }
+
 /* ── narrow screens ─────────────────────────────────────────────────────── */
 
 @media (max-width: 860px) {
