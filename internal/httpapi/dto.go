@@ -216,6 +216,21 @@ type SendResponse struct {
 	OTPRequest string `json:"otp_request,omitempty"`
 	Status     string `json:"status"`
 }
+
+// OTPCodeResponse is the answer of POST /otp/take: the hand-off of a code
+// the OTP guard caught, with the keys of <data_dir>/otp/<brain>.json.
+type OTPCodeResponse struct {
+	Brain           string `json:"brain"`
+	Chat            string `json:"chat"`
+	Sender          string `json:"sender"`
+	Code            string `json:"code"`
+	Typed           string `json:"typed"`
+	Received        string `json:"received"`
+	ReceivedUnixMS  int64  `json:"received_unix_ms"`
+	Request         string `json:"request"`
+	RequestedUnixMS int64  `json:"requested_unix_ms"`
+	ExpiresUnixMS   int64  `json:"expires_unix_ms"`
+}
 type RotateTokenResponse struct {
 	Binding *string `json:"binding,omitempty"`
 	Status  string  `json:"status"`

@@ -710,7 +710,8 @@ What the bridge does about it:
   one, is dropped before it reaches history or the model — also when it is
   sent as a reply to the request or corrected by an edit — and kept in
   `<data_dir>/otp/` for ten minutes, with the id of the request it
-  answers, for the local script that asked for it. The sender is told,
+  answers, for the local script that asked for it, which takes it once
+  with the scripts token through `POST /otp/take`. The sender is told,
   unless it was untagged group chatter, which the bridge never answers.
 
 What it does not do:

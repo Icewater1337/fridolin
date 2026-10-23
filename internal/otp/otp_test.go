@@ -237,6 +237,51 @@ func TestOTPHandoffExpires(t *testing.T) {
 	}
 }
 
+// A script takes the code of its own request, once; a code for another
+// request, or one that expired, is not handed over.
+func TestOTPHandoffTake(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "otp")
+	var o Handoff
+	t.Cleanup(o.Stop)
+	now := time.Now()
+	if _, ok, err := o.Take(dir, "0123456789abcdef", now); ok || err != nil {
+		t.Fatalf("take before any code: ok %v, err %v", ok, err)
+	}
+	for _, h := range []Record{
+		{Brain: "a", Code: "111111", Request: "aaaaaaaaaaaaaaaa", ReceivedUnixMS: 1, ExpiresUnixMS: now.Add(time.Hour).UnixMilli()},
+		{Brain: "b", Code: "222222", Request: "bbbbbbbbbbbbbbbb", ReceivedUnixMS: 2, ExpiresUnixMS: now.Add(-time.Second).UnixMilli()},
+	} {
+		if err := o.Write(dir, h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, ok, _ := o.Take(dir, "", now); ok {
+		t.Error("a code was taken for the empty request, which the brain's own asking has")
+	}
+	if _, ok, _ := o.Take(dir, "cccccccccccccccc", now); ok {
+		t.Error("a code was taken for an unknown request")
+	}
+	if _, ok, _ := o.Take(dir, "bbbbbbbbbbbbbbbb", now); ok {
+		t.Error("an expired code was handed over")
+	}
+	h, ok, err := o.Take(dir, "aaaaaaaaaaaaaaaa", now)
+	if !ok || err != nil || h.Code != "111111" || h.Brain != "a" {
+		t.Fatalf("take = %+v, %v, %v; want brain a's code", h, ok, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "a.json")); !os.IsNotExist(err) {
+		t.Errorf("the taken code's file is still there (%v)", err)
+	}
+	if _, ok, _ := o.Take(dir, "aaaaaaaaaaaaaaaa", now); ok {
+		t.Error("a code was handed over twice")
+	}
+	o.mu.Lock()
+	_, timer := o.timers[filepath.Join(dir, "a.json")]
+	o.mu.Unlock()
+	if timer {
+		t.Error("the taken code's expiry timer is still set")
+	}
+}
+
 // At startup the hand-off files of codes that expired while the bridge was
 // stopped are removed, and those still valid kept.
 func TestSweepOTPHandoffs(t *testing.T) {

@@ -10,6 +10,15 @@ for compatibility.
 
 ### Added
 
+- `POST /otp/take` hands a script the one-time code the OTP guard caught
+  for its request, by the `otp_request` id `/send` answered with, once:
+  the code is deleted as it goes out, and a request with no code waiting
+  (unknown, not answered yet, expired or taken) gets `404`. Only the
+  scripts token takes a code, never a brain's run token or a call
+  without a token, and the route is not served on the tailnet. Scripts
+  on the computer of a core in a container get their codes this way,
+  since they cannot read `otp/` in its volume (docs/API.md).
+
 - Joining a node needs no dashboard token on the new machine. New chat
   commands, for the owner (a number in `allowed_numbers`) in their direct
   chat only, audited: `!join` replies with a single-use join code (10

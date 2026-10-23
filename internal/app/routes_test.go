@@ -60,6 +60,7 @@ var routeInventory = []httpRoute{
 	{"GET", "/ready", classPublic, ""},
 	{"POST", "/send", classScript, ""},
 	{"POST", "/ingest", classScript, ""},
+	{"POST", "/otp/take", classScript, ""},
 	{"", "/", classStatic, ""},
 
 	// The builder's own routes, on a mux of their own mounted at

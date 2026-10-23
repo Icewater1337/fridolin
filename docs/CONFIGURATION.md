@@ -1421,9 +1421,14 @@ times need no time zone, unlike `received`, which ends in `Z` on a host
 set to UTC.
 
 A script that asked for a code through `/send` (with one of the
-`otp_markers` in its message) polls the file until its `request` is the
-id it got, then takes the code and deletes the file, or renames it away
-first if another program might read it too. One that asked a group also
+`otp_markers` in its message) takes it with
+[`POST /otp/take`](API.md#post-otptake) and the id it got: the bridge
+answers with the hand-off and deletes it, and with `404` until the code
+is there. That works also when the core runs in a container, whose data
+folder the computer's scripts cannot read. A script on the bridge's own
+machine may instead poll the file until its `request` is the id it got,
+then take the code and delete the file, or rename it away first if
+another program might read it too. One that asked a group also
 checks `chat` and `sender`: for ten minutes anything in the group that
 reads as a code is caught for its request, a year such as `2024` from
 another member too, so only the code from the person it asked is its

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "The body of POST /otp/take",
+  "description": "Takes the one-time code the OTP guard caught for a request, as docs/API.md describes it. Keys the bridge does not know are ignored; keys are added, never renamed or removed.",
+  "type": "object",
+  "required": ["request"],
+  "properties": {
+    "request": {"type": "string", "pattern": "^[0-9a-f]{16}$", "description": "The otp_request id POST /send answered the code request with."}
+  }
+}
