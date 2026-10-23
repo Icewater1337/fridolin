@@ -44,6 +44,8 @@ var imports = map[string][]string{
 	"internal/apperr":       nil,
 	"internal/audit":        nil,
 	"internal/archtest":     nil,
+	"internal/files":        {"internal/backup", "internal/fsx"},
+	"internal/wiki":         {"internal/files"},
 	"internal/backup":       {"internal/apperr", "internal/fsx", "internal/jsonx", "internal/testutil", "internal/textx"},
 	"internal/brain":        {"internal/chat", "internal/claudecli", "internal/fsx", "internal/history", "internal/manifest", "internal/otp", "internal/platform", "internal/prompt", "internal/route", "internal/testutil", "internal/textx"},
 	"internal/chat":         nil,
