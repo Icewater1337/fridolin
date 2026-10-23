@@ -15,7 +15,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/memindex"
 	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
-	"github.com/Icewater1337/fridolin/internal/trigger"
 )
 
 // memoryBrain is the memory index's view of brain id, whose folder is dir.
@@ -101,7 +100,8 @@ func ownerAsked(c runInfo, cfg *config.Settings) bool {
 	return sender != "" && slices.ContainsFunc(cfg.AllowedNumbers, func(n string) bool { return chat.IdentityKey(n) == sender })
 }
 
-// scheduler fires brains' standing intents and scheduled jobs.
+// scheduler fires brains' standing intents and starts their scheduled
+// agents.
 type scheduler struct {
 	b     *App
 	every time.Duration
@@ -162,8 +162,7 @@ func (s *scheduler) tick(now time.Time) {
 		for _, in := range due {
 			b.fireSchedule(br, in.Chat, intent.SenderIntent, intent.Message(in, "", "", ""))
 		}
-		mem := manifest.MemoryOf(br.Manifest())
-		if mem.Inject || mem.Consolidate != "" {
+		if usesMemoryIndex(br.Manifest()) {
 			// Kept up to date between runs too, for the doctor and for
 			// searches from outside.
 			ctx, cancel := context.WithTimeout(context.Background(), recallTimeout)
@@ -172,19 +171,18 @@ func (s *scheduler) tick(now time.Time) {
 			}
 			cancel()
 		}
-		if mem.Consolidate == "" {
-			continue
-		}
-		sc, err := trigger.ParseSchedule(mem.Consolidate, now.Location())
-		if err != nil {
-			continue // Validate refused it already
-		}
-		if ok, err := b.intents.JobDue(id, intent.ConsolidationJob, sc, now); err != nil {
-			log.Printf("brain %s: memory consolidation schedule: %v", id, err)
-		} else if ok {
-			b.fireSchedule(br, b.replyChatFor(br, b.cfgs.Get()), intent.SenderSchedule, intent.ConsolidationMessage(sc))
-		}
 	}
+	// The scheduled agents, the memory consolidation among them.
+	b.agents.tick(now)
+}
+
+// usesMemoryIndex reports whether a brain's memory index is kept up to
+// date between runs: it recalls into prompts (memory.inject), or a
+// scheduled agent consolidates its memory.
+func usesMemoryIndex(m manifest.Manifest) bool {
+	return manifest.MemoryOf(m).Inject || slices.ContainsFunc(m.EffectiveSchedules(), func(s manifest.Schedule) bool {
+		return s.Template == manifest.ConsolidationSchedule && s.IsEnabled()
+	})
 }
 
 // fireSchedule hands br text from the bridge's schedules, answered in

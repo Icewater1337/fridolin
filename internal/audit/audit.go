@@ -69,6 +69,10 @@ const (
 	// wiki-search), the root and the path, Outcome ok or why it was
 	// refused.
 	FileView = "file_view"
+	// ScheduledCommand is a scheduled agent's program run on a node:
+	// Brain and ID the agent's brain and run, Detail the agent, node and
+	// program (not its arguments), Outcome how it ended.
+	ScheduledCommand = "scheduled_command"
 )
 
 // Entry is one line. Fields are added, never renamed; a reader ignores

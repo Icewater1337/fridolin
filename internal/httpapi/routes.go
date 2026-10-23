@@ -122,6 +122,7 @@ type APIDeps struct {
 	Policy       func() *PolicyAPI
 	Housekeeping func() *HousekeepingAPI
 	Files        func() *FilesAPI
+	Schedules    func() *SchedulesAPI
 }
 
 func NewAPIMux(d APIDeps) http.Handler {
@@ -232,6 +233,7 @@ func NewAPIMux(d APIDeps) http.Handler {
 	d.Files().Register(mux)
 	d.Policy().Register(mux)
 	d.Housekeeping().Register(mux)
+	d.Schedules().Register(mux)
 
 	// Only in dev mode: outside it they are not there at all (404).
 	if d.DevMode {

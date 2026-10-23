@@ -59,7 +59,7 @@ func Templates(fsys fs.FS, dir string) ([]Template, error) {
 		if err != nil {
 			return nil, err
 		}
-		t, err := parseTemplate(name, string(data))
+		t, err := ParseTask(name, string(data))
 		if err != nil {
 			return nil, err
 		}
@@ -69,7 +69,10 @@ func Templates(fsys fs.FS, dir string) ([]Template, error) {
 	return out, nil
 }
 
-func parseTemplate(name, text string) (Template, error) {
+// ParseTask reads a task file, a template or a schedule's own prompt file:
+// its frontmatter, when it has one, as Templates reads it, and its body.
+func ParseTask(name, text string) (Template, error) {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
 	t := Template{Name: name, Body: text}
 	rest, ok := strings.CutPrefix(text, "---\n")
 	if !ok {

@@ -121,6 +121,9 @@ type App struct {
 	// sched fires.
 	intents *intent.Store
 	sched   *scheduler
+	// agents are the brains' scheduled agents (schedule_runtime.go),
+	// which sched starts when they fall due.
+	agents *agents
 	// policy is the lockdown and the runs' rate, waiters the tool calls
 	// that wait for the owner's answer (approvals.go).
 	policy  policyState
@@ -338,6 +341,9 @@ func New(opts Options) (_ *App, err error) {
 
 	b.intents = intent.NewStore(cfgs.Boot().Layout().Intents)
 	b.sched = &scheduler{b: b, every: schedulerEvery}
+	b.agents = newAgents(b, cfgs.Boot().Layout())
+	// Runs the last stop cut short end now, before anyone lists them.
+	b.agents.recover(time.Now())
 	b.brainMgr.SetHooks(BrainHooks{
 		Notice:      b.workingNotice,
 		Question:    b.askQuestion,

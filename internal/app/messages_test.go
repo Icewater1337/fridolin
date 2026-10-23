@@ -112,6 +112,8 @@ func catalogue() []struct{ name, text string } {
 		{"housekeepingSummary(problems only)", outboundmsg.HousekeepingSummary(nil, []string{"restic-lock b2 1a2b3c4d: failed: restic unlock: the repository is locked"})},
 		{"housekeepingStopResult", outboundmsg.HousekeepingStopResult("PID 812 (python3)", "")},
 		{"housekeepingStopResult(failed)", outboundmsg.HousekeepingStopResult("PID 812 (python3)", "it is not the process it was any more")},
+		{"scheduleFailedNotice", outboundmsg.ScheduleFailedNotice("morning-briefing", "main", "the run took too long and was stopped")},
+		{"scheduleCommandResult", outboundmsg.ScheduleCommandResult("scrape", "laptop", 0, "fetched 12 transactions\nsummary sent\n")},
 	}
 }
 

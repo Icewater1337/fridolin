@@ -374,5 +374,6 @@ func (b *App) apiMux() http.Handler {
 		Policy:       b.newPolicyAPI,
 		Housekeeping: b.newHousekeepingAPI,
 		Files:        b.newFilesAPI,
+		Schedules:    b.newSchedulesAPI,
 	})
 }

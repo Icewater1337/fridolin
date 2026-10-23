@@ -42,6 +42,21 @@ func (r *commandRunner) Run(ctx context.Context, spec brain.RunSpec, callbacks c
 
 func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks claudecli.Callbacks, pol *runPolicy) claudecli.Result {
 	s, prompt := spec.Settings, spec.Prompt
+	deadline := claudecli.TimedOut(s.RunTimeout)
+	if pol != nil && pol.DisallowedTools != nil {
+		// A scheduled agent's own list, for its runs only.
+		own := *s
+		own.DisallowedTools = *pol.DisallowedTools
+		s = &own
+	}
+	if pol != nil && pol.Timeout > 0 && (s.RunTimeout <= 0 || pol.Timeout < s.RunTimeout) {
+		// A scheduled agent's timeout, which only shortens
+		// run_timeout_minutes.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, pol.Timeout)
+		defer cancel()
+		deadline = claudecli.TimedOut(pol.Timeout)
+	}
 
 	mcpConfig, settings := "", ""
 	if s.Provider != "codex" && !s.InheritUser {
@@ -121,6 +136,10 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 		extraEnv = append(extraEnv, "PATH="+strings.Join(dirs, string(filepath.ListSeparator))) // replaces the bridge's
 	}
 	extraEnv = append(extraEnv, runEnv...)
+	if pol != nil {
+		// A scheduled agent's secrets (GH_TOKEN): its runs alone get them.
+		extraEnv = append(extraEnv, pol.Env...)
+	}
 	if s.Provider == "codex" || (r.sandbox != nil && r.sandbox.Enabled()) {
 		// The brain's own Claude Code config dir, TMPDIR and caches, the
 		// only places outside its folder and inbox the profile lets it
@@ -176,7 +195,7 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 	return claudecli.Run(ctx, claudecli.Invocation{
 		Run:      claudecli.Spawn{WaitDelay: runWaitDelay, Binary: binary, Args: finalArgs, Dir: spec.Dir, Env: env, Prompt: prompt},
 		Provider: s.Provider, ExitGrace: postResultGrace, NoticeAfter: workingNoticeAfter,
-		DeadlineError: claudecli.TimedOut(s.RunTimeout),
+		DeadlineError: deadline,
 	}, callbacks)
 }
 
