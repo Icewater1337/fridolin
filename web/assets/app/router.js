@@ -14,17 +14,23 @@ function decode(part) {
 
 /**
  * Finds the route for hash. A route's path is its segments, where ':name'
- * captures one segment and ':name?' an optional one. An empty hash is the
- * first route. Returns {route, params} or null.
+ * captures one segment, ':name?' an optional one and ':name*', last, the
+ * rest of them, joined by '/' ('' for none). An empty hash is the first
+ * route. Returns {route, params} or null.
  */
 export function matchRoute(routes, hash) {
   const parts = String(hash || '').replace(/^#\/?/, '').split('/').filter(Boolean).map(decode);
   if (!parts.length) return { route: routes[0], params: {} };
   for (const route of routes) {
     const segs = route.path.split('/');
-    if (parts.length > segs.length) continue;
+    const rest = segs[segs.length - 1].endsWith('*');
+    if (parts.length > segs.length && !rest) continue;
     const params = {};
     const ok = segs.every((seg, i) => {
+      if (seg.endsWith('*')) {
+        params[seg.slice(1, -1)] = parts.slice(i).join('/');
+        return true;
+      }
       if (!seg.startsWith(':')) return parts[i] === seg;
       const optional = seg.endsWith('?');
       if (i < parts.length) params[seg.slice(1, optional ? -1 : undefined)] = parts[i];

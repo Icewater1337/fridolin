@@ -1,0 +1,7 @@
+GET /api/wiki/main/page?path=wiki/nope.md
+404 Not Found
+Content-Type: application/json
+
+{
+  "error": "no such file or folder"
+}

@@ -1,0 +1,22 @@
+GET /api/wiki/search?q=budget
+200 OK
+Content-Type: application/json
+
+{
+  "hits": [
+    {
+      "brain": "main",
+      "path": "wiki/people/alex.md",
+      "section": "wiki",
+      "snippet": "Works on the home page. Budget 2026.",
+      "title": "Alex"
+    },
+    {
+      "brain": "main",
+      "path": "memories/team.md",
+      "section": "memories",
+      "snippet": "Team Alex leads the budget.",
+      "title": "Team"
+    }
+  ]
+}

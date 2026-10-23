@@ -2,9 +2,12 @@
 
 Fridolin can serve a website of your own: people sign in with Google or a
 username and password, and see a page for each part of the site they may
-open. Every part is a **module** — a folder in a private repository of yours,
-with a `module.json` that says where it lives and who may open it. Nothing in
-that repository reaches the site until you approve it in the dashboard.
+open. Every site has two of its own, **Files** and **Wiki**: your brains'
+folders and wikis, for the brains each person's role may see
+([FILES.md](FILES.md)). Every other part is a **module** — a folder in a
+private repository of yours, with a `module.json` that says where it lives
+and who may open it. Nothing in that repository reaches the site until you
+approve it in the dashboard.
 
 ```
 your repository (private)          Fridolin (this machine)                  the internet
@@ -27,13 +30,64 @@ module can reach](#what-a-module-can-reach)). Accounts, roles, the domain and
 which commit is live are set only in Fridolin's local dashboard — nothing
 reachable from the internet can change them.
 
-## Setting it up
+## From zero to your domain
 
-Dashboard → **Site**. In order:
+Dashboard → **Site**, from top to bottom; the page has the same steps.
+You need a domain whose DNS is with Cloudflare (a free account does), and
+on this machine **Node.js 22 or newer** (`brew install node`) and
+**cloudflared** (`brew install cloudflared`; the core's image has both).
+Fridolin unpacks the site process into `<data_dir>/site/shell` and installs
+its dependencies on first start.
 
-1. **Node.js 22 or newer** must be installed (`brew install node`). Fridolin
-   unpacks the site process into `<data_dir>/site/shell` and installs its
-   dependencies on first start.
+1. **Yourself.** Under *People*, add your Google address with the role
+   `admin`. Admins always sign in with Google, so set up Google sign-in too
+   (step 8 of [Adding modules](#adding-modules) explains the client; the
+   page shows the redirect URI to add).
+2. **Turn the site on** (the switch at the top). It serves Files and Wiki
+   at once, with no repository: try it on this machine at the address the
+   page shows (`http://127.0.0.1:8780` by default).
+3. **The domain.** Under *Your domain*, enter the host name, e.g.
+   `example.com`, and save. The site is then served as
+   `https://example.com`.
+4. **A Cloudflare tunnel** gives the domain to this machine without opening
+   a port:
+   1. If the domain's DNS is not with Cloudflare yet, [add the
+      domain](https://dash.cloudflare.com/) there and change its name
+      servers where you bought it.
+   2. In [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) →
+      **Networks** → **Tunnels** → **Create a tunnel**, type
+      **Cloudflared**, give it a name (e.g. `fridolin`).
+   3. On **Install and run a connector**, copy the token: the long text
+      after `--token` in any of the commands shown. Install nothing;
+      Fridolin runs the tunnel. Paste it under *Cloudflare tunnel* and
+      save. It is stored in `<data_dir>/site/tunnel.token`, never shown
+      again.
+   4. Next, add a **public host name**: your domain, no path, service
+      **HTTP**, URL `127.0.0.1:8780` (the site's *Listen on*). Cloudflare
+      adds the DNS record. You may add `wiki.example.com` the same way: it
+      leads to `example.com/wiki`.
+   5. Turn on **Run the tunnel**. Fridolin runs `cloudflared` while the
+      site is on, and the page shows its state and output. In a core
+      container it runs inside the container and moves with the core
+      ([CORE.md](CORE.md#the-site)).
+5. **Check that it answers**: *Check https://example.com* asks
+   `https://example.com/_fridolin/health` through the internet, as anyone
+   would, and says what is wrong if it does not answer: the name does not
+   resolve yet, the tunnel does not reach the site, or another server
+   answers.
+6. **Files and Wiki.** Under *Files and Wiki*, give each role the brains it
+   may see; `admin` sees all. Add people under *People* with those roles.
+   What is never shown, and how every view is audited, is in
+   [FILES.md](FILES.md).
+7. **More pages**, optionally: modules from a repository of yours (below).
+   A starter module to copy is in
+   [`examples/site-module/`](../examples/site-module/).
+
+## Adding modules
+
+Dashboard → **Site** → *Modules from your repository*. In order:
+
+1. **Node.js 22 or newer**, as above.
 2. **Repository.** A private repository on GitHub (or any git host). With the
    GitHub CLI (`gh`) logged in, *Create a private GitHub repository* makes one
    and fills in its address. Enter the SSH address
@@ -54,17 +108,11 @@ Dashboard → **Site**. In order:
    an approver must look at (below). *Approve and deploy* checks the commit out
    into its own folder, runs `npm install` and every module's build, and only
    then switches the site to it.
-6. **Turn the site on.** It listens on `127.0.0.1:8780` by default — on
-   this machine only. A core in a container publishes that port on the
-   host's loopback ([CORE.md](CORE.md#the-site)).
-7. **Domain.** Enter the host name (e.g. `example.com`); the site is then
-   served as `https://example.com`. To reach it from the internet without
-   opening a port, use a [Cloudflare
-   Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/):
-   create a tunnel in Cloudflare Zero Trust, give it a public host name for
-   your domain pointing at `http://127.0.0.1:8780`, paste the tunnel's token
-   under *Cloudflare tunnel*, and turn on *Run the tunnel* (needs
-   `brew install cloudflared`). Fridolin runs `cloudflared` while the site is on.
+6. **The site** listens on `127.0.0.1:8780` by default — on this machine
+   only. A core in a container publishes that port on the host's loopback
+   ([CORE.md](CORE.md#the-site)).
+7. **Domain and tunnel**: as in [From zero to your
+   domain](#from-zero-to-your-domain).
 8. **Google sign-in.** The site uses Fridolin's Google client (Settings →
    Google sign-in) or one of its own. Google lets a website sign people in
    only with a **Web application** client: if yours is a Desktop app client,
@@ -196,7 +244,7 @@ The folder name is the module's `id`.
 | `id` | Lowercase letters, digits and `-`. Must equal the folder name. |
 | `title`, `description`, `icon`, `color` | The tile on the home page. |
 | `order` | Tile position; lower comes first (default 100). |
-| `route` | Where the module is served: one path segment, e.g. `/finance`. `/auth` and `/api` belong to the site, and no two modules share a route. |
+| `route` | Where the module is served: one path segment, e.g. `/finance`. `/auth`, `/api`, `/files` and `/wiki` belong to the site, and no two modules share a route. |
 | `access.roles` | Roles that may open the module, listed explicitly; `"*"` means any signed-in user. Required. |
 | `access.emails` | Optional. Also require one of these addresses, **signed in with Google** (a password account's "email" is only its username and never matches). |
 | `app.dist` | Folder with the built `index.html`: relative to the module folder, absolute, or `~/…`. |
@@ -318,8 +366,10 @@ in them by declaring it.
 **One process.** All modules run in the one site process, so the profile allows
 what any of them declares. `ctx.file` and `ctx.secret` hand each module only its
 own, but within one process they are no wall: server code you approve can
-reach every module's declared files, and the site's own `users.json` (password
-hashes) and `session.key` (which signs every sign-in). Approving server code is
+reach every module's declared files, the site's own `users.json` (password
+hashes) and `session.key` (which signs every sign-in), and, through the
+token the site reads the built-in Files and Wiki with, whatever any role may
+read there ([FILES.md](FILES.md#on-your-site)). Approving server code is
 trusting it with all of that.
 
 **Deploys are not sandboxed.** `npm install` and the modules' `app.build`
@@ -411,6 +461,7 @@ Everything lives in `<data_dir>/site/` (`~/.fridolin/site/`), readable only by y
 | `session.key` | signs the site's sign-in cookies; replacing it signs everyone out |
 | `deploy_key`, `deploy_key.pub`, `known_hosts` | the repository's deploy key |
 | `tunnel.token`, `google_client.json` | the Cloudflare tunnel token; the site's own Google client, if any |
+| `deploys/none/` | the empty deploy the site runs from while no commit is approved: Files and Wiki alone |
 | `repo/` | Fridolin's clone of the repository |
 | `deploys/<commit>/` | one checkout per deployed commit (the live one and the last few) |
 | `shell/` | the site process, unpacked from the Fridolin binary |

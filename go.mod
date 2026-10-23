@@ -9,6 +9,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/kardianos/service v1.3.0
 	github.com/mdp/qrterminal/v3 v3.2.1
+	github.com/yuin/goldmark v1.8.6
 	go.mau.fi/whatsmeow v0.0.0-20260730092514-662ad1dc6900
 	golang.org/x/crypto v0.58.0
 	golang.org/x/sys v0.49.0

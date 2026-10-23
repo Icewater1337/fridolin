@@ -196,6 +196,21 @@ func (m *SiteManager) secretsFor(mods []sandbox.SiteModule) ([]byte, error) {
 	return json.Marshal(out)
 }
 
+// bridgeSecretsKey holds, among the modules' secrets, the token of the
+// bridge's site listener. No module can have it as its id ("_" is not
+// allowed there), and the site takes it out before handing secrets out.
+const bridgeSecretsKey = "_fridolin"
+
+// withBridgeToken adds the site listener's token to the secrets JSON.
+func withBridgeToken(secrets []byte, token string) ([]byte, error) {
+	out := map[string]map[string]string{}
+	if err := json.Unmarshal(secrets, &out); err != nil {
+		return nil, err
+	}
+	out[bridgeSecretsKey] = map[string]string{"bridge_token": token}
+	return json.Marshal(out)
+}
+
 // pipeWith returns the read end of a pipe that holds data, then EOF: for a
 // child process to read once at startup, so that the data is never in a file
 // it could read again, nor in its environment.

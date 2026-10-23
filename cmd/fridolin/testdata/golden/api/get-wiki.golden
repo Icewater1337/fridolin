@@ -1,0 +1,14 @@
+GET /api/wiki
+200 OK
+Content-Type: application/json
+
+{
+  "brains": [
+    {
+      "brain": "main",
+      "home": "wiki/index.md",
+      "label": "Main",
+      "pages": 5
+    }
+  ]
+}
