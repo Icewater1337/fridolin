@@ -39,7 +39,8 @@ policy describes what that copy does with data.
   sandbox off, brains run with your user's rights and can read every
   brain's token. A one-time code the OTP guard catches is kept in
   `<data_dir>/otp/` for the local script that asked for it, readable only by
-  your user, for ten minutes. [What is stored where](#what-is-stored-where)
+  your user, for ten minutes, or until the script takes it with the scripts
+  token through `POST /otp/take`, which deletes it. [What is stored where](#what-is-stored-where)
   lists it all.
 - To answer a message, the bridge runs **Claude Code or Codex CLI**, as selected
   by `agent_provider`, on your computer. The selected CLI sends the prompt —

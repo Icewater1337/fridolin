@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "The JSON answer of POST /otp/take",
+  "description": "200 with the hand-off of the code that answers the request, which is then gone, else an error with the status docs/API.md lists: 404 whenever no code waits for the request (unknown, not answered yet, expired or taken already). The guards in front of it (421 for another Host, 403 for a write from a web page) answer in plain text instead. Keys are added, never renamed or removed: a reader ignores those it does not know. This schema describes exactly the answers this version gives, and refuses any other key so that tests hold it to the code: a client validating against it should allow unknown keys, as later versions add them.",
+  "oneOf": [{"$ref": "#/$defs/code"}, {"$ref": "#/$defs/error"}],
+  "$defs": {
+    "code": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["brain", "chat", "sender", "code", "typed", "received", "received_unix_ms", "request", "requested_unix_ms", "expires_unix_ms"],
+      "properties": {
+        "brain": {"type": "string", "minLength": 1, "description": "The brain whose chat the code came in."},
+        "chat": {"type": "string", "minLength": 1, "description": "The chat's JID."},
+        "sender": {"type": "string", "description": "Who sent the code."},
+        "code": {"type": "string", "minLength": 1, "description": "The code without spaces and dashes."},
+        "typed": {"type": "string", "description": "The message as it was sent."},
+        "received": {"type": "string", "description": "When it came, RFC 3339."},
+        "received_unix_ms": {"type": "integer"},
+        "request": {"type": "string", "pattern": "^[0-9a-f]{16}$", "description": "The request it answers: the id taken."},
+        "requested_unix_ms": {"type": "integer", "description": "When the request went out."},
+        "expires_unix_ms": {"type": "integer", "description": "When the bridge would have deleted it."}
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["error"],
+      "properties": {"error": {"type": "string", "minLength": 1}}
+    }
+  }
+}

@@ -1,22 +1,25 @@
 # The script API
 
-The bridge's HTTP server (`http_listen`, default `127.0.0.1:8765`) has four
+The bridge's HTTP server (`http_listen`, default `127.0.0.1:8765`) has five
 endpoints for programs on this computer: `GET /health`, `GET /ready`,
-`POST /send` and `POST /ingest`. This page is their contract; tests pin
+`POST /send`, `POST /ingest` and `POST /otp/take`. This page is their contract; tests pin
 every part of it (`cmd/fridolin/server_test.go`, `cmd/fridolin/script_contract_test.go`). The JSON
-of `/send` and `/ingest` has schemas, which the tests check every answer,
+of `/send`, `/ingest` and `/otp/take` has schemas, which the tests check every answer,
 and every request the bridge takes, against:
 [`send-request`](schemas/send-request.schema.json),
 [`send-response`](schemas/send-response.schema.json),
-[`ingest-request`](schemas/ingest-request.schema.json) and
-[`ingest-response`](schemas/ingest-response.schema.json). Keys are added
+[`ingest-request`](schemas/ingest-request.schema.json),
+[`ingest-response`](schemas/ingest-response.schema.json),
+[`otp-take-request`](schemas/otp-take-request.schema.json) and
+[`otp-take-response`](schemas/otp-take-response.schema.json). Keys are added
 to them, never renamed or removed. The response schemas describe exactly
 the answers this version gives, and refuse any other key, which keeps
 them to the code: a client that checks answers against them should let
 unknown keys through, since later versions add them. The dashboard's own
 API under `/api/` is not a contract and changes with the dashboard.
 
-All four answer on loopback only. They refuse a request whose `Host` is not
+All of them answer on loopback only; `/otp/take` is not served on the
+core's tailnet node at all. They refuse a request whose `Host` is not
 the bridge's address (`421`, which stops DNS rebinding) and a write that a
 web page in your browser sent for another site (`403`, from the `Origin` or
 `Sec-Fetch-Site` header); those two answer in plain text. Programs such as
@@ -164,6 +167,42 @@ brain. The request returns at once; the run happens afterwards.
 | `401` | `{"error": …}` | No token, or one the bridge did not give out. |
 | `403` | `{"error": …}` | A brain named another brain. |
 | `404` | `{"error": …}` | `ingest.enabled` is off. |
+
+## `POST /otp/take`
+
+Hands a script the one-time code the OTP guard caught for its request,
+once (see [`otp_guard`](CONFIGURATION.md#otp_guard-and-otp_markers)). A
+script that asked for a code through `/send` and got an `otp_request` id
+polls this until the code is there:
+
+```json
+{"request": "9f3c2a71d04b6e58"}
+```
+
+- `request`: the `otp_request` id `/send` answered with, 16 hex digits.
+
+Only the scripts token takes a code. A brain's run token is refused,
+since brains never see codes, and so is a call without a token, whatever
+`script_api.tokenless_send` says. The answer holds the hand-off with the
+keys of `otp/<brain>.json`, and the code is gone from the bridge with it:
+a second call for the same request gets `404`. This works the same when
+the core runs in a container, whose data folder the computer's scripts
+cannot read.
+
+| Status | Body | When |
+| --- | --- | --- |
+| `200` | `{"brain", "chat", "sender", "code", "typed", "received", "received_unix_ms", "request", "requested_unix_ms", "expires_unix_ms"}` | The code that answers the request. It is deleted as it is handed over. |
+| `400` | `{"error": …}` | The body is not JSON, or `request` is missing or not such an id. |
+| `401` | `{"error": …}` | No token, or one the bridge did not give out. |
+| `403` | `{"error": …}` | A brain's run token. |
+| `404` | `{"error": "no code for this request"}` | No code waits for the request: the id is unknown, the code has not come yet, it expired (ten minutes after it came) or it was taken already. Poll again until your own timeout. |
+| `500` | `{"error": …}` | The bridge could not read or delete the hand-off. |
+
+```bash
+curl -s -X POST http://127.0.0.1:8765/otp/take \
+  -H "Authorization: Bearer $(cat ~/.fridolin/scripts.token)" \
+  -H 'Content-Type: application/json' -d '{"request":"9f3c2a71d04b6e58"}'
+```
 
 ## The run's MCP server: `GET /brain/mcp/tools`, `POST /brain/mcp/call`
 

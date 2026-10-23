@@ -1971,6 +1971,27 @@ func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 	if strings.Contains(string(hist), "483920") {
 		t.Error("the code must not be written to the conversation history")
 	}
+	// The script takes it through /otp/take by the request's id, once.
+	if w := h.Script("POST", "/otp/take", `{"request":"0123456789abcdef"}`); w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), "483920") {
+		t.Errorf("take for another request = %d %s, want 404 without the code", w.Code, w.Body.String())
+	}
+	if w := h.Script("POST", "/otp/take", `{"request":"`+answer.OTPRequest+`"}`, func(r *http.Request) { r.Header.Del("Authorization") }); w.Code != http.StatusUnauthorized {
+		t.Errorf("take without a token = %d %s, want 401", w.Code, w.Body.String())
+	}
+	took := h.Script("POST", "/otp/take", `{"request":"`+answer.OTPRequest+`"}`)
+	var taken otp.Record
+	if err := json.Unmarshal(took.Body.Bytes(), &taken); err != nil || took.Code != http.StatusOK || taken != got {
+		t.Errorf("take = %d %s, want 200 with the hand-off %+v", took.Code, took.Body.String(), got)
+	}
+	assertOTPTakeContract(t, `{"request":"`+answer.OTPRequest+`"}`, took)
+	if _, err := os.Stat(otpPath); !os.IsNotExist(err) {
+		t.Errorf("the taken code's file is still there (%v)", err)
+	}
+	if w := h.Script("POST", "/otp/take", `{"request":"`+answer.OTPRequest+`"}`); w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), "483920") {
+		t.Errorf("a second take = %d %s, want 404 without the code", w.Code, w.Body.String())
+	} else {
+		assertOTPTakeContract(t, `{"request":"`+answer.OTPRequest+`"}`, w)
+	}
 	time.Sleep(200 * time.Millisecond)
 	// The sender is told what became of the code; nothing else is sent.
 	var texts []string

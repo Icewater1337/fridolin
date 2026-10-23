@@ -131,6 +131,7 @@ POST /builder/preview
 POST /builder/propose
 POST /builder/sync
 POST /ingest
+POST /otp/take
 POST /send
 PUT /api/backup/drive-client
 PUT /api/backup/settings

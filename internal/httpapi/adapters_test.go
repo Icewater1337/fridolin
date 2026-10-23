@@ -104,3 +104,52 @@ func TestFolderPickerSerializesAndReleasesAfterCancellation(t *testing.T) {
 	}
 	mu.Unlock()
 }
+
+// /otp/take hands a code only to the scripts token, and only the one that
+// answers the request named; every other answer leaves the code out.
+func TestTakeOTPGivesCodesOnlyToScripts(t *testing.T) {
+	const id = "0123456789abcdef"
+	tokenRequired := errors.New("a token is required")
+	cases := []struct {
+		name, body string
+		who        chat.Principal
+		authErr    error
+		takeErr    error
+		waiting    bool
+		want       int
+	}{
+		{"no token", `{"request":"` + id + `"}`, chat.Principal{Kind: chat.CallerAnonymous}, nil, nil, true, http.StatusUnauthorized},
+		{"a token the bridge did not give out", `{"request":"` + id + `"}`, chat.Principal{}, errors.New("bad token"), nil, true, http.StatusUnauthorized},
+		{"a brain's run", `{"request":"` + id + `"}`, chat.Principal{Kind: chat.CallerBrain, Brain: "p"}, nil, nil, true, http.StatusForbidden},
+		{"no request", `{}`, chat.Principal{Kind: chat.CallerScript}, nil, nil, true, http.StatusBadRequest},
+		{"not an id", `{"request":"../p"}`, chat.Principal{Kind: chat.CallerScript}, nil, nil, true, http.StatusBadRequest},
+		{"no code waiting", `{"request":"` + id + `"}`, chat.Principal{Kind: chat.CallerScript}, nil, nil, false, http.StatusNotFound},
+		{"the store failed", `{"request":"` + id + `"}`, chat.Principal{Kind: chat.CallerScript}, nil, errors.New("disk"), true, http.StatusInternalServerError},
+		{"the script's own request", `{"request":"` + id + `"}`, chat.Principal{Kind: chat.CallerScript}, nil, nil, true, http.StatusOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			api := ScriptAPI{
+				Authorize:     func(*http.Request) (chat.Principal, error) { return tc.who, tc.authErr },
+				TokenRequired: tokenRequired,
+				TakeCode: func(request string) (OTPCodeResponse, bool, error) {
+					if request != id {
+						t.Fatalf("took the code of %q", request)
+					}
+					if tc.takeErr != nil {
+						return OTPCodeResponse{Code: "483920"}, false, tc.takeErr
+					}
+					return OTPCodeResponse{Code: "483920", Request: id}, tc.waiting, nil
+				},
+			}
+			w := httptest.NewRecorder()
+			api.TakeOTP(w, httptest.NewRequest("POST", "/otp/take", strings.NewReader(tc.body)))
+			if w.Code != tc.want {
+				t.Fatalf("status %d %s, want %d", w.Code, w.Body.String(), tc.want)
+			}
+			if has := strings.Contains(w.Body.String(), "483920"); has != (tc.want == http.StatusOK) {
+				t.Errorf("body %s: the code is there %v, want only with 200", w.Body.String(), has)
+			}
+		})
+	}
+}

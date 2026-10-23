@@ -27,6 +27,7 @@ func (b *App) newScriptAPI() *httpapi.ScriptAPI {
 		IngestTarget: func(who chat.Principal, br *brain.Brain, paths []string, sender, text, owner string) (string, error) {
 			return b.pipeline.Ingest(who, br, paths, sender, text, owner)
 		},
+		TakeCode: b.takeCode,
 	}
 }
 
