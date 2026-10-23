@@ -857,6 +857,12 @@ export goes through the vault bucket:
 - programs built for the Mac stay too: `node_modules/`, `__pycache__/`
   and every virtualenv (a folder with a `pyvenv.cfg`), and links.
 
+Before a move, `fridolin core run core export --list-folders` lists every
+file of the brain folders that would go along (`<brain id>/<path>`, one a
+line) and what stays home, and uploads nothing: check it for what must
+not leave the machine, and widen the brain's `backup.exclude` where it
+does not catch something.
+
 The import on the new machine puts each folder where the brain's path
 names it when that folder is there; otherwise into the volume,
 `/data/brains-folders/<name>`, and points the brain there, keeping its

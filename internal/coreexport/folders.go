@@ -497,3 +497,34 @@ func copyTree(src, dst string) error {
 		}
 	})
 }
+
+// ListFolders reports what an export would take along of folders, with
+// nothing read but the folders and nothing uploaded: emit gets each file
+// as <brain id>/<path below its folder>. A folder that stays (Skip, or one
+// below dataDir, which travels as part of the data dir) is left out.
+func ListFolders(dataDir string, folders []Folder, emit func(string), logf func(string, ...any)) ([]FolderInfo, error) {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	var out []FolderInfo
+	for _, f := range folders {
+		if f.Skip != "" {
+			logf("brain folder %s stays: %s", f.Dir, f.Skip)
+			continue
+		}
+		if within(dataDir, f.Dir) {
+			continue
+		}
+		its, info, err := folderItems(f, logf)
+		if err != nil {
+			return out, fmt.Errorf("the brain folder %s: %w", f.Dir, err)
+		}
+		for _, it := range its {
+			if !it.dir {
+				emit(strings.TrimPrefix(it.rel, foldersPrefix))
+			}
+		}
+		out = append(out, info)
+	}
+	return out, nil
+}

@@ -35,7 +35,10 @@ On the host that runs Docker:
                        is stopped, say (fridolin core run core import --latest)
 
 In the core (docker exec fridolin-core fridolin core ...):
-  fridolin core export           encrypt the data dir to the vault bucket
+  fridolin core export [--list-folders]
+                                 encrypt the data dir to the vault bucket, with the
+                                 brain folders it takes along (--list-folders: list
+                                 their files and export nothing)
   fridolin core import --latest [--force]
                                  fetch, decrypt and check the latest export,
                                  then put it in place of an empty data dir

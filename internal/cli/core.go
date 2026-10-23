@@ -71,7 +71,10 @@ On the host that runs Docker:
                        is stopped, say (fridolin core run core import --latest)
 
 In the core (docker exec fridolin-core fridolin core ...):
-  fridolin core export           encrypt the data dir to the vault bucket
+  fridolin core export [--list-folders]
+                                 encrypt the data dir to the vault bucket, with the
+                                 brain folders it takes along (--list-folders: list
+                                 their files and export nothing)
   fridolin core import --latest [--force]
                                  fetch, decrypt and check the latest export,
                                  then put it in place of an empty data dir
@@ -142,6 +145,8 @@ func runCore(args []string, env coreEnv) int {
 type insideFlags struct {
 	config, dataDir, store, bucket, key string
 	latest, force                       bool
+	// export's --list-folders: list what of the brain folders goes along.
+	listFolders bool
 	// import's moves from a native install (core migrate --from-native).
 	fromNative, rehearsal bool
 	allowPaths            multiFlag
@@ -155,6 +160,9 @@ func coreInside(ctx context.Context, sub string, args []string, env coreEnv) int
 	fs.StringVar(&f.dataDir, "data-dir", "", "the data dir (default: $FRIDOLIN_HOME, else the config's)")
 	fs.StringVar(&f.store, "store", "", "a folder, or an rclone remote:bucket (default: the B2 vault bucket)")
 	fs.StringVar(&f.bucket, "bucket", "fridolin-vault", "the vault bucket")
+	if sub == "export" {
+		fs.BoolVar(&f.listFolders, "list-folders", false, "list the files of the brain folders the export would take along (one per line, <brain id>/<path>), and export nothing")
+	}
 	if sub == "import" {
 		fs.BoolVar(&f.latest, "latest", false, "import the export core/exports/latest names")
 		fs.StringVar(&f.key, "key", "", "import this export (core/exports/<time>.tar.gz.age) instead")
@@ -286,6 +294,9 @@ func insideDataDir(f insideFlags, env coreEnv) (string, error) {
 }
 
 func coreExport(ctx context.Context, f insideFlags, env coreEnv) error {
+	if f.listFolders {
+		return coreListFolders(f, env)
+	}
 	keys, err := exportKeysFrom(env)
 	if err == nil {
 		err = keys.forExport()
@@ -307,19 +318,7 @@ func coreExport(ctx context.Context, f insideFlags, env coreEnv) error {
 			return err
 		}
 	}
-	var brains []string
-	var folders []coreexport.Folder
-	for _, b := range cfg.BrainDirs {
-		dir := app.AbsPath(b.Dir(app.HomeDir()))
-		brains = append(brains, dir)
-		if b.Approved == nil || b.Approved.ID == "" {
-			continue
-		}
-		// The export goes through the vault bucket: a brain folder goes
-		// along as far as its backup settings let it reach the cloud.
-		skip, excluded := app.BrainFolderFilter(b.Approved.ID, dir, b.Approved, cfg.Backup.IncludeSecretFiles)
-		folders = append(folders, coreexport.Folder{ID: b.Approved.ID, Configured: b.Path, Dir: dir, Skip: skip, Excluded: excluded})
-	}
+	brains, folders := exportFolders(cfg)
 	host, _ := os.Hostname()
 	res, err := coreexport.Export(ctx, dataDir, []age.Recipient{keys.pq.Recipient()}, st, coreexport.ExportOptions{
 		DB: sqliteDB{}, SealKey: keys.seal, Version: version.String(), Hostname: host, BrainFolders: brains, Folders: folders,
@@ -330,6 +329,43 @@ func coreExport(ctx context.Context, f insideFlags, env coreEnv) error {
 	}
 	fmt.Fprintf(env.stdout, "Exported %s to %s (%s): %d files, %d databases.\n", dataDir, res.Key, where, res.Manifest.Files, len(res.Manifest.Databases))
 	return nil
+}
+
+// exportFolders are the config's brain folders, absolute, and those an
+// export takes along: as far as each brain's backup settings let it reach
+// the cloud, since the export goes through the vault bucket.
+func exportFolders(cfg *config.Settings) (brains []string, folders []coreexport.Folder) {
+	for _, b := range cfg.BrainDirs {
+		dir := app.AbsPath(b.Dir(app.HomeDir()))
+		brains = append(brains, dir)
+		if b.Approved == nil || b.Approved.ID == "" {
+			continue
+		}
+		skip, excluded := app.BrainFolderFilter(b.Approved.ID, dir, b.Approved, cfg.Backup.IncludeSecretFiles)
+		folders = append(folders, coreexport.Folder{ID: b.Approved.ID, Configured: b.Path, Dir: dir, Skip: skip, Excluded: excluded})
+	}
+	return brains, folders
+}
+
+// coreListFolders is core export --list-folders.
+func coreListFolders(f insideFlags, env coreEnv) error {
+	cfg, err := app.LoadExistingConfig(configPath(f.config))
+	if err != nil {
+		return err
+	}
+	dataDir := cfg.DataDir
+	if f.dataDir != "" || env.getenv("FRIDOLIN_HOME") != "" {
+		if dataDir, err = insideDataDir(f, env); err != nil {
+			return err
+		}
+	}
+	_, folders := exportFolders(cfg)
+	infos, err := coreexport.ListFolders(app.AbsPath(dataDir), folders, func(p string) { fmt.Fprintln(env.stdout, p) },
+		func(format string, a ...any) { fmt.Fprintf(env.stderr, format+"\n", a...) })
+	for _, i := range infos {
+		fmt.Fprintf(env.stderr, "%s (%s): %d files, %d bytes would go along; %d left home\n", i.ID, i.Dir, i.Files, i.Bytes, i.Left)
+	}
+	return err
 }
 
 func coreImport(ctx context.Context, f insideFlags, env coreEnv) error {

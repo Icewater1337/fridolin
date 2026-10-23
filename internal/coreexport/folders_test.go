@@ -87,6 +87,12 @@ func TestBrainFolderMovesAwayAndHome(t *testing.T) {
 		}
 		return res.Manifest
 	}
+	var listed []string
+	infos, err := ListFolders(mac, []Folder{{ID: "personal", Configured: "~/Personal", Dir: personal, Excluded: excluded}}, func(p string) { listed = append(listed, p) }, nil)
+	slices.Sort(listed)
+	if err != nil || !slices.Equal(listed, []string{"personal/brain.json", "personal/notes.md", "personal/sub/keep.md"}) || len(infos) != 1 || infos[0].Left != 4 {
+		t.Fatalf("listed %v, %+v, %v", listed, infos, err)
+	}
 	m := exp(mac, []Folder{{ID: "personal", Configured: "~/Personal", Dir: personal, Excluded: excluded}}, t0)
 	if m.Format != formatFolders || len(m.Folders) != 1 || m.Folders[0].Files != 3 || m.Folders[0].Left != 4 {
 		t.Fatalf("manifest = %+v %+v", m, m.Folders)
