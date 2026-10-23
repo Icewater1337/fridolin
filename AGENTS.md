@@ -173,9 +173,12 @@ machine". In short:
    --root PATH:rw`. Add `--workstation` only when the person wants the
    core to run Claude Code sessions and a terminal in those folders
    (docs/NODES.md, "Workstation"); never with their home folder as a
-   root. On Windows add `--no-service` in their normal
+   root, unless they ask for it and accept what it gives away
+   (`--allow-home`). On Windows add `--no-service` in their normal
    PowerShell, then `node install` and `node start` elevated, each with
-   `--state-dir "$env:LOCALAPPDATA\fridolin-node"`.
+   `--state-dir "$env:LOCALAPPDATA\fridolin-node"`. On Linux, ask to
+   turn on lingering, so the node runs without a login and after a
+   reboot, and link its unit for boot (docs/NODES.md, step 5).
 6. **Approve**: once the node joined, Fridolin tells the person in their
    WhatsApp chat; they reply `!approve ID` (device and what it offers in
    one go), or click **Approve device** and **Approve commands** on the
@@ -251,6 +254,9 @@ machine must already be a node (path B). In short:
    `~/fride-companion/repos` (in WSL's file system, never `/mnt/c`).
    Write the config from NODES.md into `~/fride-companion/home`
    (`FRIDE_HOME`), and run `fride config check` and `fride doctor`.
+   Ask the owner for the git name and email FrIDE's agents commit
+   with, and set them (`git config --global`); without them the first
+   commit stops at a question the chat does not show.
    Keep it separate from any FrIDE the owner runs himself.
 4. **Trust**: the owner runs `claude` once in
    `~/fride-companion/workspaces` and chooses "Yes, I trust this folder".
