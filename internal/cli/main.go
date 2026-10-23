@@ -79,6 +79,9 @@ Usage:
   fridolin housekeeping run [--dry-run] | status
                                            find and stop what the bridge left
                                            running; fridolin housekeeping --help
+  fridolin schedules list|run|pause|resume|logs
+                                           the brains' scheduled agents;
+                                           fridolin schedules --help
   fridolin version
 
 Run by brains, inside a run (each prints JSON; -h shows its flags):
@@ -147,6 +150,8 @@ func Main() {
 		os.Exit(vaultCmd(args, os.Stdout, os.Stderr))
 	case "housekeeping":
 		os.Exit(housekeepingCmd(args, os.Stdout, os.Stderr))
+	case "schedules":
+		os.Exit(schedulesCmd(args, os.Stdout, os.Stderr))
 	case "history":
 		os.Exit(toolcli.History(args, processToolIO()))
 	case "polls":

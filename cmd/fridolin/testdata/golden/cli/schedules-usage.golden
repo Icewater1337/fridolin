@@ -1,0 +1,24 @@
+fridolin schedules — the brains' scheduled agents
+
+Usage:
+  fridolin schedules list [--json]
+                              every agent with its schedule, next and last run,
+                              and the reminders (standing intents with a time)
+  fridolin schedules run AGENT [--wait] [--json]
+                              run the agent now; --wait waits for the run to end
+                              and prints its log
+  fridolin schedules pause AGENT
+  fridolin schedules resume AGENT
+                              keep the agent from running on its schedule, or let
+                              it again; Run now works either way
+  fridolin schedules logs AGENT [RUN] [--runs] [--json]
+                              the log of the agent's latest run, or of RUN;
+                              --runs lists its runs instead
+
+AGENT is BRAIN/NAME, or NAME alone when one brain has an agent of that name.
+They talk to the running bridge's dashboard API. The agents themselves are
+defined in each brain's brain.json (docs/BRAINS.md, "Scheduled agents").
+
+Flags:
+  --config PATH     config file (default: $FRIDOLIN_CONFIG, else
+                    ~/.fridolin/config.json)
