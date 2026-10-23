@@ -1,0 +1,12 @@
+GET /api/files/view?root=brain:main&path=docs/photo.png
+200 OK
+Content-Type: application/json
+
+{
+  "kind": "image",
+  "mod_time": "<MOD_TIME>",
+  "name": "photo.png",
+  "path": "docs/photo.png",
+  "root": "brain:main",
+  "size": 6
+}

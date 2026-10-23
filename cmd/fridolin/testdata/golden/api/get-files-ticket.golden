@@ -1,0 +1,9 @@
+GET /api/files/ticket?root=brain:main
+200 OK
+Content-Type: application/json
+
+{
+  "expires": "<EXPIRES>",
+  "root": "brain:main",
+  "ticket": "<TICKET>"
+}

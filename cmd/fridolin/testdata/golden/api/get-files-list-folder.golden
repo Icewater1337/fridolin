@@ -1,0 +1,23 @@
+GET /api/files/list?root=brain:main&path=docs
+200 OK
+Content-Type: application/json
+
+{
+  "entries": [
+    {
+      "kind": "image",
+      "mod_time": "<MOD_TIME>",
+      "name": "photo.png",
+      "size": 6
+    },
+    {
+      "kind": "text",
+      "mod_time": "<MOD_TIME>",
+      "name": "plan.txt",
+      "size": 10
+    }
+  ],
+  "path": "docs",
+  "root": "brain:main",
+  "truncated": false
+}

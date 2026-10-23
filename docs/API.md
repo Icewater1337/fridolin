@@ -289,6 +289,12 @@ listed here because they decide what runs may do
 | `GET /api/housekeeping` | the housekeeping job ([CONFIGURATION.md](CONFIGURATION.md#housekeeping)): its settings, `next_run`, `running`, the `last` report with its `findings`, `counts` and `summary`, and the processes `asked` about that wait for the owner; ETag-cached |
 | `POST /api/housekeeping/run` | runs the job now and answers with its report once it is over; `{"dry_run": true}` only reports whatever `housekeeping.dry_run` says; `409` while a run is under way |
 
+## Files and the wiki
+
+The Files and Wiki pages' routes (`GET /api/files/…`, `/api/wiki/…`) and
+`GET /files/raw` are listed in [FILES.md](FILES.md#api); like the rest of
+`/api/`, they serve the dashboard and are not a contract.
+
 ## Limits
 
 A request body may be 1 MiB at most; a larger one is refused with `400`.

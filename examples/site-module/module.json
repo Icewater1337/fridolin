@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "id": "notes",
+  "title": "Notes",
+  "description": "A shared list of notes: a starter module",
+  "icon": "📝",
+  "color": "#0ea5e9",
+  "order": 50,
+  "route": "/notes",
+  "access": { "roles": ["admin", "member"] },
+  "app": { "dist": "app", "base": "inject" },
+  "server": { "entry": "server.ts" }
+}

@@ -1,0 +1,7 @@
+GET /api/files/view?root=brain:main&path=id_ed25519
+404 Not Found
+Content-Type: application/json
+
+{
+  "error": "no such file or folder"
+}

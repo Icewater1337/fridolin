@@ -50,6 +50,11 @@ export type Runtime = {
    * addresses as well as from the loopback.
    */
   container?: boolean
+  /**
+   * The live site: the bridge's site listener, which serves the built-in
+   * /files and /wiki (builtin.ts). Its token comes through the secrets pipe.
+   */
+  bridge_url?: string
 }
 
 export function readRuntime(path: string): Runtime {
@@ -75,6 +80,7 @@ export function readRuntime(path: string): Runtime {
     spool_dir: raw.preview_token ? undefined : raw.spool_dir || undefined,
     devices_file: raw.preview_token ? undefined : raw.devices_file || undefined,
     container: raw.preview_token ? undefined : raw.container === true || undefined,
+    bridge_url: raw.preview_token ? undefined : raw.bridge_url || undefined,
   }
 }
 
@@ -82,6 +88,9 @@ export function readRuntime(path: string): Runtime {
  * Reads the modules' secrets from the pipe Fridolin passed, then closes it:
  * they are in no file and no environment variable module code could read.
  */
+/** The key of the secrets JSON that holds the bridge's token, not a module's secrets. */
+export const BRIDGE_SECRETS_KEY = '_fridolin'
+
 export function readSecrets(fd: number): ModuleSecrets {
   let raw: unknown
   try {
