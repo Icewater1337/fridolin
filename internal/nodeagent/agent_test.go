@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -537,10 +538,63 @@ func TestServiceConfig(t *testing.T) {
 			if c.Name != "fridolin-node" || c.Option["UserService"] != true || c.Option["Restart"] != "always" {
 				t.Errorf("linux %q %v", c.Name, c.Option)
 			}
+			// A user manager never reaches multi-user.target (issue #171).
+			script, _ := c.Option["SystemdScript"].(string)
+			if !strings.Contains(script, "\nWantedBy=default.target\n") || strings.Contains(script, "multi-user") {
+				t.Errorf("linux systemd template:\n%s", script)
+			}
 		case "windows":
 			if c.Name != "fridolin-node" || c.Option["StartType"] != "automatic" || c.Option["OnFailure"] != "restart" || c.Option["UserService"] != nil {
 				t.Errorf("windows %q %v", c.Name, c.Option)
 			}
 		}
+	}
+}
+
+func TestRepairBootTarget(t *testing.T) {
+	home := t.TempDir()
+	var calls []string
+	systemctl := func(args ...string) error {
+		calls = append(calls, strings.Join(args, " "))
+		return nil
+	}
+	// No unit: nothing to do.
+	if moved, err := RepairBootTarget(home, systemctl); moved || err != nil || calls != nil {
+		t.Fatalf("no unit: %v %v %q", moved, err, calls)
+	}
+	unit := LinuxUnitPath(home)
+	if err := os.MkdirAll(filepath.Dir(unit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := "[Service]\nExecStart=/opt/fridolin node run\nRestart=always\n\n[Install]\nWantedBy=multi-user.target\n"
+	if err := os.WriteFile(unit, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := RepairBootTarget(home, systemctl)
+	if !moved || err != nil {
+		t.Fatalf("old unit: %v %v", moved, err)
+	}
+	want := []string{"--user disable fridolin-node.service", "--user daemon-reload", "--user enable fridolin-node.service"}
+	if !slices.Equal(calls, want) {
+		t.Errorf("systemctl %q, want %q", calls, want)
+	}
+	data, _ := os.ReadFile(unit)
+	if got := string(data); got != strings.Replace(old, "multi-user.target", "default.target", 1) {
+		t.Errorf("unit after the repair:\n%s", got)
+	}
+	// Once moved, it stays as it is.
+	calls = nil
+	if moved, err := RepairBootTarget(home, systemctl); moved || err != nil || calls != nil {
+		t.Errorf("second run: %v %v %q", moved, err, calls)
+	}
+	// A failing disable leaves the unit as it was.
+	if err := os.WriteFile(unit, []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RepairBootTarget(home, func(...string) error { return errors.New("no user bus") }); err == nil || !strings.Contains(err.Error(), "no user bus") {
+		t.Errorf("failing systemctl: %v", err)
+	}
+	if data, _ := os.ReadFile(unit); string(data) != old {
+		t.Errorf("unit changed though disable failed:\n%s", data)
 	}
 }

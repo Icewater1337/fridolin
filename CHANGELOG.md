@@ -646,6 +646,15 @@ for compatibility.
   daily snapshot, while `fridolin doctor` said it replicated. The bridge
   now resets such a database and starts its replica over by itself, and
   doctor warns while Litestream logs errors (docs/VAULT.md, "Encryption").
+- A Linux node comes back after a reboot. Its systemd user unit was
+  written with kardianos/service's `WantedBy=multi-user.target`, a
+  target a user's systemd never reaches, so the node stayed off until
+  someone started it. The unit is now wanted by `default.target`, and a
+  unit written before is moved there (compat) by `fridolin node
+  install`, `start`, `join` and the agent's own start, which an update
+  from the core brings. `fridolin doctor --node` (and `setup-machine
+  --node`) checks on Linux that the unit is enabled for boot and warns
+  when the user does not linger (docs/NODES.md, "The service").
 - The site answers again when the core runs in the container. The site
   process listened on the container's own loopback and compose did not
   publish its port, so a Cloudflare tunnel on the host pointed at
