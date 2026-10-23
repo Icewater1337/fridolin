@@ -662,7 +662,16 @@ for compatibility.
   node that already hit it). `fridolin node status` and `doctor --node`
   on Windows also tell the service's state without an administrator
   instead of "cannot tell: Access is denied".
-
+- The site answers again when the core runs in the container. The site
+  process listened on the container's own loopback and compose did not
+  publish its port, so a Cloudflare tunnel on the host pointed at
+  `http://127.0.0.1:8780` got no answer (Cloudflare's "Bad Gateway"). In
+  the container the live site now binds its port on the container's
+  interfaces, compose publishes it as `127.0.0.1:8780:8780`, and the
+  site trusts the client address forwarded from Docker's private
+  addresses as it does cloudflared's on the loopback (docs/CORE.md,
+  "The site"). Run `fridolin core start` of this version to recreate the
+  container with the new mapping.
 - `fridolin doctor` no longer warns that a connected node was not heard
   from (`nodes-seen`) or cannot take FrIDE work (`nodes-fride`) while
   `fridolin nodes` shows it online. The core kept each heartbeat's time
