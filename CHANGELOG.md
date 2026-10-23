@@ -677,6 +677,13 @@ for compatibility.
 
 ### Fixed
 
+- On Windows, `fridolin core` commands no longer warn "syncing directory
+  after publishing …: Access is denied" for every file they write
+  (`compose.yaml`, `seccomp.json`): Windows cannot sync a folder and
+  needs none, so the bridge no longer tries there.
+- The vault leaves out a brain's rotated activity log,
+  `claude-stream.1.log`, like `claude-stream.log`; it looked for
+  `claude-stream.log.1`, a name the bridge never writes.
 - `fridolin vault migrate-encryption --run --delete-old` retires the
   single-layer Drive repository (`fridolin-restic`) also where Google
   Drive does not let fridolin delete it. The Drive link's `drive.file`
