@@ -40,9 +40,9 @@ type Server struct {
 	Manifest map[string]any
 	setupURL string
 	n        int
-	live    map[string]Minted
-	Minted  []Minted // every token made, in order
-	Revoked []string // tokens revoked
+	live     map[string]Minted
+	Minted   []Minted // every token made, in order
+	Revoked  []string // tokens revoked
 }
 
 // Minted is one token the fake made, and what it was asked for.
