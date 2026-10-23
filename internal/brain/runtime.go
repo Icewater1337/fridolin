@@ -1240,22 +1240,22 @@ func RunHeadingPID(line string) (int, bool) {
 }
 
 // streamLogMax is the size at which the activity log is rotated when a run
-// starts: it becomes streamLogOld, replacing the one before, so the two
+// starts: it becomes StreamLogOld, replacing the one before, so the two
 // hold about twice this at most. Named *.log, the old one is left out of
 // backups too.
 const (
 	streamLogMax = 5 << 20
-	streamLogOld = "claude-stream.1.log"
+	StreamLogOld = "claude-stream.1.log"
 )
 
 // rotateStreamLog moves a full activity log aside, through the folder: a
-// rename replaces a symlink at streamLogOld itself, never what it points to.
+// rename replaces a symlink at StreamLogOld itself, never what it points to.
 func (br *Brain) rotateStreamLog() {
 	fi, err := br.root.Lstat(StreamLogName)
 	if err != nil || !fi.Mode().IsRegular() || fi.Size() < streamLogMax {
 		return
 	}
-	if err := br.root.Rename(StreamLogName, streamLogOld); err != nil {
+	if err := br.root.Rename(StreamLogName, StreamLogOld); err != nil {
 		log.Printf("brain %s: could not rotate its stream log: %v", br.id, err)
 	}
 }
