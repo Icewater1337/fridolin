@@ -33,9 +33,19 @@ what is there, and "Next:" the one step to take now. Exit status 0 when
 every required step is done, 1 when one is not, 2 for a bad flag.
 `
 
+// nodeService is what the node checks ask of the node service and of the
+// app package this process runs in; tests set their own.
+type nodeService struct {
+	status func() (string, error)
+	// stateDir is the state dir the installed service runs with
+	// (nodeagent.ServiceStateDir), "" where it is not known; nil for none.
+	stateDir func() (string, error)
+	pkg      appPackage
+}
+
 // nodeChecks are the checks of a node machine: Tailscale, node.json, the
 // device key, the core's node port, the service.
-func nodeChecks(dir string, serviceStatus func() (string, error)) []app.DoctorCheck {
+func nodeChecks(dir string, svc nodeService) []app.DoctorCheck {
 	var cfg *nodeagent.Config
 	loaded := func() (*nodeagent.Config, error) {
 		if cfg != nil {
@@ -54,6 +64,11 @@ func nodeChecks(dir string, serviceStatus func() (string, error)) []app.DoctorCh
 		{ID: "node-joined", Title: "joined a core (node.json)", Required: true, Run: func(context.Context, *app.DoctorEnv) app.DoctorResult {
 			c, err := loaded()
 			if err != nil {
+				if stray := svc.pkg.strayCopies(dir); stray != "" {
+					return app.DoctorResult{Status: app.DoctorFail, Detail: err.Error() + "; " + stray,
+						Fix: fmt.Sprintf("from a PowerShell started outside the app, copy %s and %s from there to %s; inside the app, copy them to a folder outside AppData, such as %s, and pass it as --state-dir (%s)",
+							nodeagent.ConfigFile, nodeagent.KeyFile, dir, svc.pkg.outsideDir(), packageDoc)}
+				}
 				return app.DoctorResult{Status: app.DoctorFail, Detail: err.Error(),
 					Fix: "send !join to the bridge in your WhatsApp chat (or on the core: fridolin nodes join-code), then paste the line it gives here"}
 			}
@@ -85,16 +100,26 @@ func nodeChecks(dir string, serviceStatus func() (string, error)) []app.DoctorCh
 			if _, err := loaded(); err != nil {
 				return notJoined
 			}
-			st, err := serviceStatus()
+			st, err := svc.status()
 			if err != nil {
 				return app.DoctorResult{Status: app.DoctorWarn, Detail: "cannot tell: " + err.Error(), Fix: "fridolin node status"}
 			}
+			sd := ""
+			if svc.stateDir != nil {
+				sd, _ = svc.stateDir()
+			}
 			if st != "running" {
+				if detail, fix := svc.pkg.serviceDirProblem(sd); detail != "" {
+					return app.DoctorResult{Status: app.DoctorFail, Detail: st + ": " + detail, Fix: fix}
+				}
 				fix := "fridolin node install, then fridolin node start"
 				if runtime.GOOS == "windows" {
 					fix += " (in PowerShell as administrator)"
 				}
 				return app.DoctorResult{Status: app.DoctorFail, Detail: st, Fix: fix}
+			}
+			if sd != "" && !samePath(sd, dir) {
+				st += ", with --state-dir " + sd
 			}
 			return app.DoctorResult{Status: app.DoctorOK, Detail: st}
 		}},
@@ -242,7 +267,7 @@ func setupMachineCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "fridolin setup-machine: %v\n", err)
 			return 1
 		}
-		checks, where = nodeChecks(dir, nodeServiceStatus(dir)), dir
+		checks, where = nodeChecks(dir, systemNodeService(dir)), dir
 	} else {
 		d := defaultHostDeps(coreEnv{environ: os.Environ(), stdout: stdout, stderr: stderr})
 		checks, where = coreMachineChecks(d), filepath.Dir(d.composePath)
@@ -292,13 +317,18 @@ func nodeStateDirFlag(dir string) (string, error) {
 	return filepath.Abs(dir)
 }
 
-func nodeServiceStatus(dir string) func() (string, error) {
-	return func() (string, error) {
-		exe, err := os.Executable()
-		if err != nil {
-			return "", err
-		}
-		return nodeagent.ServiceStatus(nodeagent.ServiceConfig(runtime.GOOS, exe, dir))
+// systemNodeService is this machine's node service, for the node checks.
+func systemNodeService(dir string) nodeService {
+	exe, err := os.Executable()
+	if err != nil {
+		failed := func() (string, error) { return "", err }
+		return nodeService{status: failed, stateDir: failed, pkg: thisAppPackage()}
+	}
+	cfg := nodeagent.ServiceConfig(runtime.GOOS, exe, dir)
+	return nodeService{
+		status:   func() (string, error) { return nodeagent.ServiceStatus(cfg) },
+		stateDir: func() (string, error) { return nodeagent.ServiceStateDir(cfg) },
+		pkg:      thisAppPackage(),
 	}
 }
 
@@ -309,7 +339,7 @@ func nodeDoctor(stateDir string, asJSON bool, stdout io.Writer) int {
 		fmt.Fprintf(stdout, "fridolin doctor --node: %v\n", err)
 		return 1
 	}
-	rep := app.RunDoctor(context.Background(), app.SystemDoctorEnv(""), nodeChecks(dir, nodeServiceStatus(dir)))
+	rep := app.RunDoctor(context.Background(), app.SystemDoctorEnv(""), nodeChecks(dir, systemNodeService(dir)))
 	rep.Config = dir
 	if asJSON {
 		enc := json.NewEncoder(stdout)
