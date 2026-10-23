@@ -27,6 +27,8 @@ type FilesAPI struct {
 	Nodes NodeFiles
 	// Audit records a view.
 	Audit func(FileAudit)
+	// Tickets open the dashboard's /files/raw (files_ticket.go).
+	Tickets *Tickets
 }
 
 // NodeFiles reads the folders nodes lend.
@@ -118,6 +120,9 @@ type WikiSearchResponse struct {
 	Hits []wiki.Hit `json:"hits"`
 }
 
+// Scope is who reads.
+type Scope = files.Scope
+
 // scoped is a handler for one reader.
 type scoped func(w http.ResponseWriter, r *http.Request, s files.Scope)
 
@@ -134,6 +139,7 @@ func (a *FilesAPI) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/files/search", own(a.search))
 	mux.HandleFunc("GET /api/files/view", own(a.view))
 	mux.HandleFunc("GET /api/files/raw", own(a.raw))
+	mux.HandleFunc("GET /api/files/ticket", own(a.ticket))
 	mux.HandleFunc("GET /api/wiki", own(a.wikiBrains))
 	mux.HandleFunc("GET /api/wiki/search", own(a.wikiSearch))
 	mux.HandleFunc("GET /api/wiki/{brain}/pages", own(a.wikiPages))

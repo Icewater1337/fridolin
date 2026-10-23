@@ -24,6 +24,9 @@ type Deps struct {
 	RequiresToken     func() bool
 	SignedIn          func(*http.Request) bool
 	API               func() http.Handler
+	// FilesRaw serves /files/raw: a file by a ticket in its address, which
+	// the page's <img>, <video> and download links need (files_ticket.go).
+	FilesRaw http.HandlerFunc
 	// Remote serves the surface on the tailnet instead of this machine's
 	// loopback: Hosts are the Host values it answers to (the node's
 	// MagicDNS names), the dashboard API always wants the token or a
@@ -78,6 +81,7 @@ func New(d Deps) http.Handler {
 			static.ServeHTTP(w, r)
 		}))
 		mux.HandleFunc("POST /api/login", d.Login)
+		mux.HandleFunc("GET /files/raw", d.FilesRaw)
 		mux.Handle("/api/", APIGuard(d.Token, d.RequiresToken, d.SignedIn, d.API()))
 	}
 

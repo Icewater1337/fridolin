@@ -111,6 +111,8 @@ type App struct {
 	audit       *audit.Log
 	// wikis caches the brains' wiki indexes (files_runtime.go).
 	wikis *wiki.Manager
+	// fileTickets open /files/raw for the dashboard's previews.
+	fileTickets *httpapi.Tickets
 	// siteBridge serves the site's /files and /wiki (site_bridge.go).
 	siteBridge siteBridge
 	// intents are the brains' standing intents and scheduled jobs, which
@@ -271,6 +273,7 @@ func New(opts Options) (_ *App, err error) {
 	b.exe = bridgeBinary()
 	b.audit = newAuditLog(cfg.DataDir)
 	b.wikis = wiki.NewManager()
+	b.fileTickets = httpapi.NewTickets()
 	b.loadPolicy()
 	b.mcpTools = b.newMCPTools()
 	b.fride = newFrideRuntime(b)

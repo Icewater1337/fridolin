@@ -21,7 +21,7 @@ import (
 // linked to, as the dashboard and the site read them.
 
 func (b *App) newFilesAPI() *httpapi.FilesAPI {
-	return &httpapi.FilesAPI{Roots: b.fileRoots, Wiki: b.wikis, Nodes: nodeFiles{b}, Audit: b.auditFileView}
+	return &httpapi.FilesAPI{Roots: b.fileRoots, Wiki: b.wikis, Nodes: nodeFiles{b}, Audit: b.auditFileView, Tickets: b.fileTickets}
 }
 
 // fileRoots are every running brain's folder and media inbox, and the
