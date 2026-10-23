@@ -25,7 +25,7 @@ func checkVaultEncryption(_ context.Context, env *DoctorEnv) DoctorResult {
 		return DoctorResult{Status: DoctorWarn, Detail: "the vault has not described its stores yet (a bridge from before #158, or not started)",
 			Fix: "fridolin service restart, then fridolin doctor"}
 	}
-	var parts, one, copying []string
+	var parts, one, copying, byHand []string
 	for _, l := range st.Encryption {
 		desc := l.Store + ": " + strings.Join(l.Layers, " + ")
 		if len(l.Layers) < 2 {
@@ -33,6 +33,11 @@ func checkVaultEncryption(_ context.Context, env *DoctorEnv) DoctorResult {
 		}
 		if l.Old == "copying" {
 			copying = append(copying, l.Store)
+		}
+		if l.Old == "retired" && l.Left != "" {
+			// Retired: nothing fridolin reaches is left, so no warning;
+			// what the owner may still delete by hand is said once here.
+			byHand = append(byHand, l.Store+": "+l.Left)
 		}
 		parts = append(parts, desc)
 	}
@@ -46,6 +51,9 @@ func checkVaultEncryption(_ context.Context, env *DoctorEnv) DoctorResult {
 		}
 	}
 	detail := strings.Join(parts, "; ")
+	if len(byHand) > 0 {
+		detail += ". By hand: " + strings.Join(byHand, "; ")
+	}
 	switch {
 	case len(one) > 0:
 		return DoctorResult{Status: DoctorWarn, Detail: fmt.Sprintf("one layer only: %s. %s", strings.Join(one, ", "), detail),

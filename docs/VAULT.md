@@ -268,6 +268,17 @@ sure the Litestream mirror is current. `--delete-old`, once a store's copy
 is verified, deletes its single-layer folder (on B2 a delete hides the
 files, and the bucket's lifecycle rules remove them) and records it as
 retired in `core/encryption.json`; the vault then stops reading it.
+A folder that is no longer there counts as deleted. On Google Drive the
+link's `drive.file` scope reaches only what its own Google client made:
+a folder that holds something another client made cannot be deleted
+(`403 appNotAuthorizedToChild`), and after a switch to your own Google
+client the folders the earlier client made are not even listed. Then
+`--delete-old` deletes what it reaches, retires the copy all the same,
+and the run, `fridolin vault status` ("by hand: …") and `fridolin
+doctor` name the folder (`fridolin-restic`) for you to delete in Google
+Drive yourself: find it in My Drive, delete it and empty the bin. Leave
+`fridolin-restic-crypt` (the repository behind rclone crypt) and
+`fridolin-backup` alone.
 A node target with a repository from before stays as it is, since its
 folder cannot hold both: add the target again with a new, empty folder
 (it gets both layers), take a snapshot, then remove the old target.

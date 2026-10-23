@@ -44,6 +44,10 @@ type encryptionState struct {
 	Retired map[string]time.Time `json:"retired,omitempty"`
 	// Migrated is when each store's copy was last verified.
 	Migrated map[string]time.Time `json:"migrated,omitempty"`
+	// Left is, by store id, what of a retired copy may stay that only the
+	// owner can delete: a Google Drive folder the drive.file scope does
+	// not reach (vault_retire.go).
+	Left map[string]string `json:"left,omitempty"`
 }
 
 func encryptionStatePath(coreDir string) string {
@@ -167,6 +171,9 @@ type storeLayers struct {
 	// Old is "copying" while the single-layer copy of before is still
 	// there (fridolin vault migrate-encryption), "retired" once deleted.
 	Old string `json:"old,omitempty"`
+	// Left says what of the retired copy may stay that only the owner can
+	// delete, by hand.
+	Left string `json:"left,omitempty"`
 }
 
 // The layers' names.
@@ -217,6 +224,9 @@ func describeLayers(b vaultBackends, c vaultCreds, st encryptionState, exportsTw
 					copying = b.driveOld != nil
 				}
 				l.Old = oldState(st, id, copying)
+				if l.Old == "retired" {
+					l.Left = st.Left[id]
+				}
 			}
 			out = append(out, l)
 		}

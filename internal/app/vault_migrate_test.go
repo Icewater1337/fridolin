@@ -88,6 +88,12 @@ func TestVaultMigrateEncryption(t *testing.T) {
 	if !st.EncryptionMigration.OK || got["cold"].Copied != 1 || !got["cold"].Retired || got["restic"].Copied != 1 || !got["restic"].Retired || !got["litestream"].Retired {
 		t.Fatalf("run: %+v", st.EncryptionMigration)
 	}
+	// The status says so at once, not only from the vault's next start.
+	for _, l := range st.Encryption {
+		if (l.Store == "restic" || l.Store == "drive") && l.Old != "retired" {
+			t.Errorf("%s after --delete-old: %+v", l.Store, l)
+		}
+	}
 	if objs, _ := oldCold.List(ctx, ""); len(objs) != 0 {
 		t.Errorf("the old cold tier keeps %v", objs)
 	}
