@@ -74,6 +74,20 @@ func TestDoctorVaultChecks(t *testing.T) {
 			s.Litestream.LastProblem, s.Litestream.LastProblemAt = "level=ERROR", now.Add(-time.Hour)
 			s.Litestream.Repairs, s.Litestream.LastRepair = 1, now.Add(-time.Hour)
 		}, id: "vault-litestream", status: DoctorOK, detail: "started over after a lost file: 1"},
+		{name: "litestream status of the last run", mut: func(s *vaultStatus) {
+			s.StartedAt, s.Litestream.At = now.Add(-time.Minute), now.Add(-time.Hour)
+			s.Litestream.Running, s.Litestream.PID, s.Litestream.Restarts, s.Litestream.LastError = false, 0, 2, "signal: killed"
+		}, id: "vault-litestream", status: DoctorWarn, detail: "the vault started 1m0s ago; Litestream has not said yet"},
+		{name: "litestream silent since the start", mut: func(s *vaultStatus) {
+			s.StartedAt, s.Litestream.LitestreamStatus = now.Add(-10*time.Minute), snapshot.LitestreamStatus{}
+		}, id: "vault-litestream", status: DoctorFail, detail: "the vault started 10m0s ago, and Litestream has not said"},
+		{name: "litestream reported since the start", mut: func(s *vaultStatus) {
+			s.StartedAt, s.Litestream.At = now.Add(-10*time.Minute), now.Add(-time.Minute)
+		}, id: "vault-litestream", status: DoctorOK, detail: "pid 42, 0 restarts"},
+		{name: "litestream down since the start", mut: func(s *vaultStatus) {
+			s.StartedAt, s.Litestream.At = now.Add(-10*time.Minute), now.Add(-time.Minute)
+			s.Litestream.Running, s.Litestream.Restarts, s.Litestream.LastError = false, 1, "exit status 1"
+		}, id: "vault-litestream", status: DoctorFail, detail: "not running (1 restarts)"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

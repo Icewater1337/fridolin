@@ -668,6 +668,17 @@ for compatibility.
 
 ### Fixed
 
+- `fridolin doctor` no longer fails "Litestream is not running (N
+  restarts)" for the first minutes after the bridge starts on a data dir
+  that ran before, while Litestream replicates. `core/vault-status.json`
+  still held the last run's Litestream until the vault's first heartbeat,
+  which waits for the first sync of the hot tier. Now the vault starts
+  that part of its status over when it starts, and writes Litestream's
+  own state as soon as it runs; the status file says when the vault
+  started (`started_at`) and when Litestream's state was copied in
+  (`litestream.at`), and doctor takes a Litestream state from before the
+  start as not known yet: a warning for its first 5 minutes, a failure
+  after them.
 - A Windows node joined by a coding agent in the Claude desktop app no
   longer ends with a node service that fails to start with only error
   1053. The app runs as an MSIX package, and Windows keeps what any

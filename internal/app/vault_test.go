@@ -10,13 +10,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/snapshot"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 	"github.com/Icewater1337/fridolin/internal/vault"
 )
@@ -445,4 +448,91 @@ func TestVaultLayout(t *testing.T) {
 	if got := strings.Join(l.brainPrefixes("work"), ","); got != "vault/documents/work,media/work" {
 		t.Errorf("work's vault paths: %s", got)
 	}
+}
+
+// TestVaultLitestreamStatusOfTheLastRun starts the vault on a data dir
+// whose status file holds the last run's Litestream, which had stopped
+// after restarts: the new run starts that part over and writes what its
+// own Litestream does as soon as it runs, so that fridolin doctor does not
+// fail on the old one (issue #183). The first upload is held, as a big
+// hot tier holds the first heartbeat for minutes.
+func TestVaultLitestreamStatusOfTheLastRun(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in litestream is a shell script")
+	}
+	t.Setenv(vaultLocalEnv, t.TempDir())
+	fake := filepath.Join(t.TempDir(), "litestream")
+	writeFile(t, fake, "#!/bin/sh\nexec sleep 300\n")
+	if err := os.Chmod(fake, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	replicas := t.TempDir()
+	held := make(chan struct{})
+	old := vaultBackendsFor
+	vaultBackendsFor = func(ctx context.Context, s *vaultService, cfg *config.Settings) (vaultBackends, error) {
+		b, err := defaultVaultBackends(ctx, s, cfg)
+		b.lite = &snapshot.Litestream{Binary: fake, DBs: []snapshot.LitestreamDB{
+			{Path: cfg.Boot.Layout().VaultDB(), Replica: snapshot.Replica{Type: "file", Dir: replicas}}}}
+		b.liteMirror = nil
+		b.cold = heldPuts{b.cold, held}
+		return b, err
+	}
+	t.Cleanup(func() { vaultBackendsFor = old })
+	h := newHarness(t, vaultConfig)
+	t.Cleanup(func() { close(held) }) // before the harness stops the vault
+	writeFile(t, filepath.Join(h.DataDir(), "vault", "documents", "main", "lease.pdf"), "%PDF-1.7 a lease")
+
+	// The last run's status, as the file keeps it.
+	v := h.b.vault
+	v.mu.Lock()
+	v.status.Litestream.LitestreamStatus = snapshot.LitestreamStatus{Restarts: 2, LastError: "litestream exited: signal: killed",
+		LastProblem: "level=ERROR msg=old", LastProblemAt: time.Now().Add(-time.Minute), LastExit: time.Now().Add(-time.Minute)}
+	v.status.Litestream.At = time.Now().Add(-time.Minute).UTC()
+	v.saveLocked()
+	v.mu.Unlock()
+
+	h.startVault()
+	path := v.statusPath()
+	deadline := time.Now().Add(time.Minute)
+	for {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var st vaultStatus
+		if err := json.Unmarshal(data, &st); err != nil {
+			t.Fatal(err)
+		}
+		l := st.Litestream
+		if st.State == vaultRunning && !l.At.Before(st.StartedAt) && l.Running {
+			if l.PID == 0 || l.Restarts != 0 || l.LastError != "" || l.LastProblem != "" || !l.LastExit.IsZero() {
+				t.Errorf("the new run's Litestream keeps the last run's: %+v", l)
+			}
+			break
+		}
+		if st.State == vaultRunning && (l.Restarts != 0 || l.LastError != "") {
+			t.Fatalf("the running vault's status file holds the last run's Litestream: %+v", l)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Litestream's state never reached the status file:\n%s", data)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// heldPuts holds the uploads of the hot tier's files until held closes.
+type heldPuts struct {
+	cloud.ObjectStore
+	held chan struct{}
+}
+
+func (s heldPuts) Put(ctx context.Context, key string, r io.Reader) error {
+	if strings.HasPrefix(key, "vault/") {
+		select {
+		case <-s.held:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return s.ObjectStore.Put(ctx, key, r)
 }

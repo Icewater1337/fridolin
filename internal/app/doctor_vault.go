@@ -132,6 +132,11 @@ func checkVaultSnapshot(_ context.Context, env *DoctorEnv) DoctorResult {
 // few minutes.
 const litestreamProblemRecent = 15 * time.Minute
 
+// litestreamStartGrace is how long after the vault's start its check
+// waits for a word from Litestream before it fails: the vault writes
+// Litestream's state as soon as its first child runs.
+const litestreamStartGrace = 5 * time.Minute
+
 func checkVaultLitestream(_ context.Context, env *DoctorEnv) DoctorResult {
 	st, bad := env.vaultStatus()
 	if bad != nil {
@@ -141,6 +146,13 @@ func checkVaultLitestream(_ context.Context, env *DoctorEnv) DoctorResult {
 	switch {
 	case !l.Enabled:
 		return DoctorResult{Status: DoctorFail, Detail: "Litestream does not run: it is not installed, or the snapshots bucket has no key", Fix: installFix(env.GOOS, "benbjohnson/litestream/litestream", "")}
+	case !st.StartedAt.IsZero() && l.At.Before(st.StartedAt):
+		// The last run's status, or none yet: not known.
+		since := env.now().Sub(st.StartedAt).Round(time.Second)
+		if since < litestreamStartGrace {
+			return DoctorResult{Status: DoctorWarn, Detail: fmt.Sprintf("the vault started %s ago; Litestream has not said yet whether it runs", since), Fix: "run fridolin doctor again in a minute"}
+		}
+		return DoctorResult{Status: DoctorFail, Detail: fmt.Sprintf("the vault started %s ago, and Litestream has not said since whether it runs", since), Fix: "the bridge's log says why"}
 	case !l.Running:
 		return DoctorResult{Status: DoctorFail, Detail: fmt.Sprintf("Litestream is not running (%d restarts): %s", l.Restarts, l.LastError), Fix: "the bridge's log says why; it restarts Litestream by itself"}
 	case !l.LastProblemAt.IsZero() && env.now().Sub(l.LastProblemAt) < litestreamProblemRecent:
