@@ -75,6 +75,8 @@ type Manifest struct {
 	// it as it was before there was one: nothing recalled, no
 	// consolidation.
 	Memory *Memory `json:"memory,omitempty"`
+	// Schedules are the brain's scheduled agents (schedule.go).
+	Schedules []Schedule `json:"schedules,omitempty"`
 }
 
 // RoleCore marks the core brain (Manifest.Role).
@@ -364,6 +366,9 @@ func (m *Manifest) Validate() error {
 			return fmt.Errorf("brain %q: backup target %q must be %q or \"node:<target>\", a target of vault.targets", m.ID, key, TargetCloud)
 		}
 	}
+	if err := m.validateSchedules(); err != nil {
+		return err
+	}
 	return m.validateGrants()
 }
 
@@ -405,6 +410,9 @@ func (m Manifest) Normalized() Manifest {
 		}
 	}
 	m.Grants = grants
+	if len(m.Schedules) == 0 {
+		m.Schedules = nil
+	}
 	return m
 }
 
