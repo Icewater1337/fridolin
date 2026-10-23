@@ -44,7 +44,8 @@ Ask, unless the request already says it:
   wait: `Start-Process URL` (Windows), `open URL` (macOS), `xdg-open URL`
   (Linux). Tailscale's login link (`tailscale up` prints it), Docker
   Desktop's first run, the core dashboard's Nodes page
-  (`https://fridolin-core.<tailnet>.ts.net/#/nodes`). Afterwards check it
+  (`https://fridolin-core.<tailnet>.ts.net/#/nodes`, or `http://` when
+  the tailnet has HTTPS off; `fridolin doctor` names it). Afterwards check it
   yourself (`tailscale status`, `docker info`, `fridolin nodes`).
 - **Never ask for a secret in chat**, and never print one. Secrets are
   typed by the person into a prompt without echo (`fridolin core secrets

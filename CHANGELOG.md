@@ -677,6 +677,13 @@ for compatibility.
 
 ### Fixed
 
+- A brain folder that a core move put on another machine goes back
+  through the vault bucket only as far as the brain's backup settings
+  let it, as on its way there. The export from the other machine took
+  the visiting folder whole, so what the brain made there that its
+  settings leave out (`*.log`, secret files, `node_modules/`) went
+  through the cloud and was written home, where an excluded file that
+  also existed at home showed up as a conflict (#195).
 - On Windows, `fridolin core` commands no longer warn "syncing directory
   after publishing …: Access is denied" for every file they write
   (`compose.yaml`, `seccomp.json`): Windows cannot sync a folder and
