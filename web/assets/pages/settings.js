@@ -2,7 +2,7 @@
 // everything else in the file (including fields this page does not show) is
 // sent back exactly as received.
 
-import { put, rotateToken, signOut } from '../app/api.js';
+import { put, rotateToken, signOut, errorStatus } from '../app/api.js';
 import { setRestartRequired } from '../app/store.js';
 import { configResource } from '../app/resources.js';
 import { h, mount, paint } from '../lib/dom.js';
@@ -19,9 +19,49 @@ import { googleClientCard } from '../components/calendar.js';
 import { saveBar } from '../components/save-bar.js';
 import { liveForm } from '../components/live-form.js';
 
+/** @import { PageModule } from '../app/page.js' */
+/** @import { ConfigFile, ConfigResponse, Trigger } from '../../types/api.js' */
+
+/**
+ * A setting on the page: the dotted key in config.json it edits, and its control.
+ * @typedef {object} SettingField
+ * @property {'bool' | 'text' | 'int' | 'select' | 'list' | 'triggers' | 'allowLists'} type
+ * @property {string} [key]
+ * @property {string} label
+ * @property {string} [help]
+ * @property {string | number | boolean} [def] used when the file and the effective settings have none
+ * @property {[string, string][]} [options]
+ * @property {string} [placeholder]
+ * @property {boolean} [mono]
+ * @property {boolean} [restart]
+ * @property {number} [min]
+ * @property {number} [max]
+ * @property {boolean} [nullable]
+ * @property {string} [addLabel]
+ * @property {(value: string) => string} [validate]
+ * @property {boolean} [danger]
+ * @property {boolean} [confirmOff]
+ */
+
+/**
+ * A setting's control, as the form asks it what it holds.
+ * @typedef {object} Control
+ * @property {string | null} key
+ * @property {string} label
+ * @property {HTMLElement} el
+ * @property {() => unknown} value
+ * @property {() => boolean} isDirty
+ * @property {() => boolean} isValid
+ * @property {() => unknown} serialize
+ */
+
+/** @typedef {{text: string, match: string}} TriggerRow */
+
 // The bridge refuses a relative sandbox path: as a rule it would match nothing.
+/** @param {string} v */
 const absPath = (v) => (/^(\/|~(\/|$))/.test(v) ? '' : 'Absolute, or starting with ~/');
 
+/** @type {{id: string, title: string, intro: string, fields: SettingField[]}[]} */
 const SECTIONS = [
   {
     id: 'access',
@@ -96,6 +136,7 @@ const SECTIONS = [
     title: 'Advanced',
     intro: '',
     fields: [
+      { key: 'timezone', type: 'text', mono: true, label: 'Time zone', placeholder: 'the bridge’s own (TZ)', help: 'Your IANA time zone, such as Europe/Zurich. Scheduled agents, reminders, the nightly snapshots and the daily backup run at its times of day, across daylight saving changes, and brains are told the time in it. Empty: the zone the bridge runs in, which in the core container is the one fridolin core start passed from the host.' },
       { key: 'http_listen', type: 'text', mono: true, restart: true, label: 'Listen address', placeholder: '127.0.0.1:8765', help: 'Loopback addresses only. Changing it moves this dashboard to the new address after a restart.' },
       { key: 'data_dir', type: 'text', mono: true, restart: true, label: 'Data folder', help: 'Holds the WhatsApp pairing, the database, media and the dashboard token. Changing it does not move those files — the bridge starts fresh (and unpaired) in the new folder. At startup the folder is made private to your user (mode 0700), unless it is your home folder, one above it or another user’s folder.' },
       { key: 'log_level', type: 'select', restart: true, label: 'Log level', options: [['', 'Default (info)'], ['debug', 'Debug — very verbose'], ['info', 'Info'], ['warn', 'Warnings'], ['error', 'Errors only']] },
@@ -135,7 +176,7 @@ function dashboardSignInCard() {
       })));
 }
 
-export default {
+export default /** @satisfies {PageModule} */ ({
   title: 'Settings',
   render(root, ctx) {
     const body = h('div', h('div.card', loading('Loading settings…')));
@@ -147,7 +188,7 @@ export default {
 
     // Only the settings edited here count as a conflict: one changed
     // elsewhere that is not edited here is saved as it now is.
-    const edited = (built) => built.controls.filter((c) => c.isDirty());
+    const edited = (/** @type {{controls: Control[]}} */ built) => built.controls.filter((c) => c.isDirty());
     const form = liveForm({
       build,
       edits: (d, built) => edited(built).map((c) => [c.key, getPath(d.config || {}, c.key)]),
@@ -177,13 +218,19 @@ export default {
       ctx.focusAt(target.querySelector('h2'));
     }, 5000);
 
+    /**
+     * @param {ConfigResponse} d
+     * @param {() => void} changed
+     */
     function build(d, changed) {
       const cfg = d.config || {};
       const eff = d.effective || {};
+      /** @type {Control[]} */
       const controls = [];
       const nav = h('nav.section-nav', { 'aria-label': 'Settings sections' });
       // A chip scrolls to its section and names it in the address, so
       // #/settings/<section> links (the overview has some) land there too.
+      /** @type {(title: string, sectionId: string, el: HTMLElement) => void} */
       const chip = (title, sectionId, el) => {
         const b = h('button.chip', { type: 'button' }, title);
         b.addEventListener('click', () => {
@@ -235,7 +282,7 @@ export default {
       try {
         r = await put('/api/config', { etag: latest.etag, config: next });
       } catch (e) {
-        if (e.status !== 409) throw e;
+        if (errorStatus(e) !== 409) throw e;
         await configResource.refresh();
         if (form.stale()) clash();
         else if (again) await save(false);
@@ -250,18 +297,31 @@ export default {
 
     ctx.onCleanup(() => bar.remove());
   },
-};
+});
 
 // ── controls ─────────────────────────────────────────────────────────────
 
+/**
+ * @param {SettingField} f
+ * @param {Partial<ConfigFile>} cfg
+ * @param {Partial<ConfigFile>} eff
+ * @param {() => void} onChange
+ * @returns {Control}
+ */
 function makeControl(f, cfg, eff, onChange) {
   if (f.type === 'allowLists') return allowLists(f, cfg);
   const fileVal = getPath(cfg, f.key);
   const effVal = getPath(eff, f.key);
   const tag = f.restart ? 'restart' : null;
+  // What the case below builds: the control, what it holds now and held
+  // at first, and what is saved of it.
+  /** @type {HTMLElement} */
   let input;
+  /** @type {() => unknown} */
   let read;
+  /** @type {unknown} */
   let initial;
+  /** @type {() => unknown} */
   let serialize;
   let isValid = () => true;
   let extra = null;
@@ -296,57 +356,69 @@ function makeControl(f, cfg, eff, onChange) {
       return finish(el);
     }
     case 'text': {
-      initial = typeof fileVal === 'string' ? fileVal : '';
-      const ph = typeof effVal === 'string' && effVal && effVal !== initial ? effVal : (f.placeholder || '');
-      input = textInput({ value: initial, placeholder: ph, class: f.mono ? 'mono' : '', spellcheck: f.mono ? 'false' : 'true' });
-      input.addEventListener('input', onChange);
-      read = () => input.value.trim();
+      const first = typeof fileVal === 'string' ? fileVal : '';
+      initial = first;
+      const ph = typeof effVal === 'string' && effVal && effVal !== first ? effVal : (f.placeholder || '');
+      const text = textInput({ value: first, placeholder: ph, class: f.mono ? 'mono' : '', spellcheck: f.mono ? 'false' : 'true' });
+      input = text;
+      text.addEventListener('input', onChange);
+      read = () => text.value.trim();
       serialize = read;
       break;
     }
     case 'int': {
-      initial = (fileVal === undefined || fileVal === null || (!f.nullable && fileVal === 0)) ? '' : String(fileVal);
+      const first = (fileVal === undefined || fileVal === null || (!f.nullable && fileVal === 0)) ? '' : String(fileVal);
+      initial = first;
       const ph = effVal !== undefined && effVal !== null && effVal !== 0 ? String(effVal) : String(f.def ?? '');
-      input = textInput({ value: initial, inputmode: 'numeric', placeholder: `${ph} (default)`, class: 'num' });
-      input.addEventListener('input', () => { check(); onChange(); });
+      const num = textInput({ value: first, inputmode: 'numeric', placeholder: `${ph} (default)`, class: 'num' });
+      input = num;
+      num.addEventListener('input', () => { check(); onChange(); });
       const check = () => {
-        const ok = input.value.trim() === '' || (/^\d+$/.test(input.value.trim()) && Number(input.value) >= (f.min ?? 0) && Number(input.value) <= (f.max ?? Infinity));
-        input.classList.toggle('invalid', !ok);
+        const ok = num.value.trim() === '' || (/^\d+$/.test(num.value.trim()) && Number(num.value) >= (f.min ?? 0) && Number(num.value) <= (f.max ?? Infinity));
+        num.classList.toggle('invalid', !ok);
         return ok;
       };
       isValid = check;
-      read = () => input.value.trim();
+      read = () => num.value.trim();
       serialize = () => (read() === '' ? undefined : Number(read()));
       break;
     }
     case 'select': {
       const opts = f.options;
+      /**
+       * @param {unknown} v
+       * @returns {v is string}
+       */
       const has = (v) => opts.some(([x]) => x === v);
       let v = typeof fileVal === 'string' ? fileVal : '';
-      if (!has(v)) v = has(effVal) ? effVal : (f.def ?? '');
+      if (!has(v)) v = has(effVal) ? effVal : /** @type {string} */ (f.def ?? '');
       initial = v;
-      input = select(opts, v);
-      input.addEventListener('change', onChange);
-      read = () => input.value;
+      const sel = select(opts, v);
+      input = sel;
+      sel.addEventListener('change', onChange);
+      read = () => sel.value;
       serialize = read;
       break;
     }
     case 'list': {
       const arr = Array.isArray(fileVal) ? fileVal : [];
       initial = JSON.stringify(arr);
-      input = listEditor({ values: arr, placeholder: f.placeholder, mono: f.mono !== false, addLabel: f.addLabel || 'Add', onChange, validate: f.validate, empty: emptyListText(f, effVal) });
-      read = () => JSON.stringify(input.getValues());
-      serialize = () => input.getValues();
-      isValid = () => input.isValid();
+      const list = listEditor({ values: arr, placeholder: f.placeholder, mono: f.mono !== false, addLabel: f.addLabel || 'Add', onChange, validate: f.validate, empty: emptyListText(f, effVal) });
+      input = list;
+      read = () => JSON.stringify(list.getValues());
+      serialize = () => list.getValues();
+      isValid = () => list.isValid();
       break;
     }
     case 'triggers': {
+      /** @type {Trigger[]} */
       const raw = Array.isArray(fileVal) ? fileVal : [];
       const list = raw.map((t) => (typeof t === 'string' ? { text: t, match: 'anywhere' } : { text: t.text || '', match: t.match || 'anywhere' }));
       initial = JSON.stringify(list);
-      input = triggersEditor(list, { onChange, defaults: Array.isArray(effVal) ? effVal : [] });
-      read = () => JSON.stringify(input.getValues());
-      serialize = () => input.getValues().map((t) => (t.match === 'anywhere' ? t.text : { text: t.text, match: t.match }));
+      const triggers = triggersEditor(list, { onChange, defaults: Array.isArray(effVal) ? effVal : [] });
+      input = triggers;
+      read = () => JSON.stringify(triggers.getValues());
+      serialize = () => triggers.getValues().map((t) => (t.match === 'anywhere' ? t.text : { text: t.text, match: t.match }));
       break;
     }
     default:
@@ -356,6 +428,7 @@ function makeControl(f, cfg, eff, onChange) {
   const el = field({ label: f.label, control: input, help: f.help, tag });
   return finish(el);
 
+  /** @param {HTMLElement} el */
   function finish(el) {
     return {
       key: f.key,
@@ -371,6 +444,11 @@ function makeControl(f, cfg, eff, onChange) {
 
 // The allow lists are edited on the Chats page only, through the bridge's
 // checks; Settings says how many there are. It never has unsaved changes.
+/**
+ * @param {SettingField} f
+ * @param {Partial<ConfigFile>} cfg
+ * @returns {Control}
+ */
 function allowLists(f, cfg) {
   const n = (cfg.allowed_numbers || []).length;
   const g = (cfg.allowed_groups || []).length;
@@ -381,6 +459,10 @@ function allowLists(f, cfg) {
   return { key: null, label: f.label, el, value: () => null, isDirty: () => false, isValid: () => true, serialize: () => undefined };
 }
 
+/**
+ * @param {SettingField} f
+ * @param {unknown} effVal
+ */
 function emptyListText(f, effVal) {
   if (f.key === 'otp_markers') return 'Using the built-in phrases';
   if (f.key === 'disallowed_tools') return 'No tools blocked';
@@ -388,6 +470,10 @@ function emptyListText(f, effVal) {
   return 'None';
 }
 
+/**
+ * @param {TriggerRow[]} values
+ * @param {{onChange: () => void, defaults: Trigger[]}} options
+ */
 function triggersEditor(values, { onChange, defaults }) {
   const rows = h('div.list-rows');
   const emptyEl = h('div.list-empty.muted', `Empty — the default is used: ${(defaults || []).map((t) => (typeof t === 'string' ? t : t.text)).join(', ') || '@claude'}`);
@@ -408,6 +494,6 @@ function triggersEditor(values, { onChange, defaults }) {
   values.forEach((v) => add(v));
   paintEmpty();
   el.appendChild(h('div.list-add', btn('Add trigger', { icon: 'plus', small: true, kind: 'ghost', onClick: () => { add(undefined, true); onChange(); } })));
-  el.getValues = () => [...rows.querySelectorAll('.trigger-row')].map((r) => ({ text: r.querySelector('input').value.trim(), match: r.querySelector('select').value })).filter((t) => t.text);
-  return el;
+  const getValues = () => [...rows.querySelectorAll('.trigger-row')].map((r) => ({ text: r.querySelector('input').value.trim(), match: r.querySelector('select').value })).filter((t) => t.text);
+  return Object.assign(el, { getValues });
 }

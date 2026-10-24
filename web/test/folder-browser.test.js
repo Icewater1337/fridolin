@@ -75,8 +75,9 @@ test('folders are a list of buttons', async (t) => {
   for (const b of items) {
     assert.equal(b.tagName, 'BUTTON');
     assert.equal(b.getAttribute('role'), null, 'a role on the button would hide that it is one');
-    assert.equal(b.parentNode.tagName, 'LI');
-    assert.equal(b.parentNode.parentNode.tagName, 'UL');
+    const li = /** @type {Element} */ (b.parentNode);
+    assert.equal(li.tagName, 'LI');
+    assert.equal(/** @type {Element} */ (li.parentNode).tagName, 'UL');
   }
   assert.equal(el.querySelector('[role=listitem]'), null);
 });

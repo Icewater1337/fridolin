@@ -52,7 +52,7 @@ func (m brainMemory) AddIntent(tok string, br *brainruntime.Brain, req intent.Re
 	if err != nil {
 		return nil, err
 	}
-	in, err := intent.Compile(req, c.Message.JID, chat.IdentityKey(c.Message.Sender), time.Now(), time.Local)
+	in, err := intent.Compile(req, c.Message.JID, chat.IdentityKey(c.Message.Sender), time.Now().In(m.b.zone()), m.b.zone())
 	if err != nil {
 		return nil, err
 	}

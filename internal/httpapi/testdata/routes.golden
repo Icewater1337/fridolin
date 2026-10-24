@@ -36,6 +36,7 @@ GET /api/github
 GET /api/google/client
 GET /api/logs
 GET /api/nodes
+GET /api/nodes/moves/{id}
 GET /api/plaud/app.apk
 GET /api/plaud/status
 GET /api/policy
@@ -90,6 +91,8 @@ POST /api/login/code
 POST /api/logout
 POST /api/nodes/core-secrets-transfer
 POST /api/nodes/join-code
+POST /api/nodes/move
+POST /api/nodes/move-check
 POST /api/nodes/{id}/approve
 POST /api/nodes/{id}/approve-commands
 POST /api/nodes/{id}/call

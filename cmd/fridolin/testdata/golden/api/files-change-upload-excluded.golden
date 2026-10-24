@@ -1,0 +1,7 @@
+POST /api/files/upload?root=brain:main&path=node_modules
+403 Forbidden
+Content-Type: application/json
+
+{
+  "error": "this folder takes no uploads from you"
+}

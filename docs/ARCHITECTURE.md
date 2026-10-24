@@ -263,7 +263,7 @@ when updating a golden, rather than silently recording a refactor regression.
 Tests use scratch HOME/data directories and fake providers. Native integration
 tests include the site runtime when `site/node_modules` is installed. Linux and
 macOS checks exercise platform-specific behavior. Full validation includes race
-and shuffled tests, both vet targets, staticcheck, module tidy, schema and import
+and shuffled tests, both vet targets, staticcheck, exhaustive, module tidy, schema and import
 checks, and dev-mode smoke. `make check` adds script, Python and frontend checks.
 
 Builds in a checkout do not update the installed service. `setup.sh` and service

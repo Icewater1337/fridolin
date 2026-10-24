@@ -13,21 +13,25 @@ import (
 )
 
 // NewPlaudManager supplies settings and the paths captured for this bridge start.
-func NewPlaudManager(cfgs *config.Store, env Environment, brains *BrainManager,
-	submit func(*brain.Brain, string, string, string, []string, func(error)) error,
+func NewPlaudManager(cfgs *config.Store, env Environment, brains *BrainManager, submit plaudSubmit, ask plaudAsk,
 	notify func(context.Context, string, string) error, siteURL func() string, fleet plaudFleet) *plaud.Manager {
-	return plaud.New(plaudOptions(cfgs, env, brains, submit, notify, siteURL, fleet))
+	return plaud.New(plaudOptions(cfgs, env, brains, submit, ask, notify, siteURL, fleet))
 }
 
+// plaudSubmit hands a brain a recording (App.submitHandOff).
+type plaudSubmit = func(br *brain.Brain, jid, sender, text string, media []string, done func(error)) error
+
+// plaudAsk hands a brain a voice question (App.submitAsk).
+type plaudAsk = func(br *brain.Brain, jid, sender, text string, quiet bool, answer func(string) string, done func(error)) error
+
 // plaudOptions projects command policy and host dependencies into the service.
-func plaudOptions(cfgs *config.Store, env Environment, brains *BrainManager,
-	submit func(*brain.Brain, string, string, string, []string, func(error)) error,
+func plaudOptions(cfgs *config.Store, env Environment, brains *BrainManager, submit plaudSubmit, ask plaudAsk,
 	notify func(context.Context, string, string) error, siteURL func() string, fleet plaudFleet) plaud.Options {
 	boot := cfgs.Boot()
 	return plaud.Options{
 		PlaudDir: boot.PlaudDir(), SiteDevices: boot.Layout().SiteDevices(), Home: boot.Home,
 		Settings:   func() *plaud.Snapshot { return plaudSnapshotOf(RuntimeSettings(cfgs)) },
-		Target:     func(id string) *plaud.Target { return plaudTargetOf(brains, id, submit) },
+		Target:     func(id string) *plaud.Target { return plaudTargetOf(brains, id, submit, ask) },
 		HeldTarget: func() string { return brains.HeldFor("", false) },
 		Notify:     notify,
 		FindCLI:    findPlaudCLI, CLIVersion: plaudCLIVersion,
@@ -50,6 +54,7 @@ func plaudSnapshotOf(c config.Settings) *plaud.Snapshot {
 	return &plaud.Snapshot{
 		Plaud: plaud.Settings(wire.Plaud), DataDir: c.Boot.DataDir, MediaDir: c.Boot.MediaDir,
 		QueueMaxPending: c.Live.Queue.MaxPending, OwnerChat: ownerChatNumbers(c.Live.AllowedNumbers), Interval: c.Live.Plaud.Interval,
+		Zone: c.Live.Location(),
 	}
 }
 
@@ -81,7 +86,7 @@ func brainPlaudPATH(cfg *config.Settings) string {
 
 // plaudTargetOf captures the selected runtime, rather than looking it up again
 // by ID when the transcript is finally submitted after filesystem work.
-func plaudTargetOf(brains *BrainManager, id string, submit func(*brain.Brain, string, string, string, []string, func(error)) error) *plaud.Target {
+func plaudTargetOf(brains *BrainManager, id string, submit plaudSubmit, ask plaudAsk) *plaud.Target {
 	var br *brain.Brain
 	if id != "" {
 		br = brains.Get(id)
@@ -91,7 +96,7 @@ func plaudTargetOf(brains *BrainManager, id string, submit func(*brain.Brain, st
 	if br == nil {
 		return nil
 	}
-	return &plaud.Target{
+	t := &plaud.Target{
 		BrainID:   br.ID(),
 		ReplyChat: func() string { return br.Manifest().ReplyChat },
 		OtherOwner: func(jid string) string {
@@ -104,6 +109,12 @@ func plaudTargetOf(brains *BrainManager, id string, submit func(*brain.Brain, st
 			return submit(br, jid, sender, text, media, done)
 		},
 	}
+	if ask != nil {
+		t.Ask = func(jid, sender, text string, quiet bool, answer func(string) string, done func(error)) error {
+			return ask(br, jid, sender, text, quiet, answer, done)
+		}
+	}
+	return t
 }
 
 // plaudEnvironment resolves host variables at the original process boundary.

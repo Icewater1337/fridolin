@@ -12,6 +12,10 @@ import { btn } from '../components/buttons.js';
 import { empty, pageHeader, spinner, timeAgo } from '../components/common.js';
 import { outcomeBadge, riskBadge, threadEl } from '../components/policy.js';
 
+/** @import { PageModule } from '../app/page.js' */
+/** @import { AuditEntry } from '../../types/api.js' */
+
+/** @type {[string, string][]} */
 const KINDS = [
   ['', 'Every kind'],
   ['run_start', 'Run started'], ['run_end', 'Run ended'], ['run_refused', 'Run refused'],
@@ -21,10 +25,13 @@ const KINDS = [
   ['lockdown', 'Lockdown'], ['unlock', 'Unlock'], ['skill_approved', 'Skill approved'],
   ['node_join_code', 'Join code (!join)'], ['dashboard_link', 'Sign-in link (!dashboard)'],
   ['node_approved', 'Node approved (!approve)'], ['node_revoked', 'Node revoked (!revoke)'],
+  ['core_move_requested', 'Core move asked (!movecore)'], ['core_move_approved', 'Core move voted'],
+  ['core_move_ended', 'Core move ended'], ['core_secrets', 'Host secrets kept or forgotten'],
   ['scheduled_command', 'Scheduled program on a node'],
 ];
 const KIND_LABEL = Object.fromEntries(KINDS);
 
+/** @param {AuditEntry} e */
 function lineRow(e) {
   return h('tr',
     h('td', timeAgo(e.ts)),
@@ -36,7 +43,7 @@ function lineRow(e) {
     h('td', outcomeBadge(e.outcome), e.duration_ms ? h('div.muted.small', fmtDuration(e.duration_ms / 1000)) : null));
 }
 
-export default {
+export default /** @satisfies {PageModule} */ ({
   title: 'Audit',
   render(root, ctx) {
     const filter = { kind: '', brain: '', q: '', run: ctx.params.run || '' };
@@ -53,7 +60,7 @@ export default {
 
     ctx.watch(store, (s) => s.status, (s) => {
       if (!s) return;
-      syncOptions(brainSel, [['', 'All brains'], ...(s.brains || []).map((b) => [b.id, brainLabel(b)])], filter.brain);
+      syncOptions(brainSel, [['', 'All brains'], ...(s.brains || []).map((b) => /** @type {[string, string]} */ ([b.id, brainLabel(b)]))], filter.brain);
     });
 
     const follow = () => {
@@ -83,4 +90,4 @@ export default {
       box);
     follow();
   },
-};
+});

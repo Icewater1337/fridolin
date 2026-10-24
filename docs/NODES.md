@@ -78,6 +78,15 @@ Ubuntu 24.04's `golang` is Go 1.22, which is fine: any Go 1.21 or newer
 downloads the version `go.mod` names on the first build (it needs the
 network; without it, the tarball from go.dev/dl).
 
+A machine that is to be a [core host](#core-host) (the core may move to
+it) needs more: Docker (Linux: `sudo apt install -y docker.io
+docker-compose-v2`, and the user in the `docker` group), a current GitHub
+`gh`, which checks the core's image before it is pulled (Linux: from
+GitHub's apt repository, <https://cli.github.com>; Ubuntu's own is too
+old), and on Ubuntu `sudo fridolin core apparmor` once after the build
+([CORE.md](CORE.md#the-core-moves-itself), "Before"). The first move to
+it pulls the core's image, several GB.
+
 ### 2. Tailscale
 
 The machine must be on the owner's tailnet, logged in as the same account
@@ -472,6 +481,68 @@ sends anything, the node against its own `node.json` and the approvals the
 core sent it, so a core that approved more than the node declares cannot
 make it serve more.
 
+### Programs from the core
+
+A [scheduled agent](BRAINS.md#scheduled-agents) of kind `command` runs a
+program on a node. Rather than adding each such program to `node.json` by
+hand, a node can name folders whose programs the core may add, once, on
+the node:
+
+```json
+"exec": {
+  "allow": [],
+  "accept_from_core": ["/Users/you/Personal/projects", "/Users/you/tools"],
+  "timeout_seconds": 900
+}
+```
+
+Restart the node (`fridolin node stop`, `fridolin node start`) and
+approve what it offers on the Nodes page: the folders are part of its
+declaration, so they wait for that approval like any new rule. From then
+on, approving a command agent whose program is in one of those folders
+adds that program to the node's allowlist, with exactly the agent's
+arguments; saving an agent in the wizard does the same. Deleting the
+agent removes the program again, unless another approved agent runs it
+with the same arguments.
+
+How it goes: whenever the approved agents change, a node connects or
+its commands are approved, and otherwise every half minute, the core
+works out each such node's list (the programs its approved command
+agents run there that `node.json` does not allow already) and sends a
+node whose list changed the whole of it, `exec.programs`. The list names
+the node and a sequence number, and is signed with the core's update key
+(`core.pub`, pinned when the node joined, or at its first update or list from the core). The
+node refuses a list that does not verify with that key, is for another
+node, or is no newer than the last it took. It keeps each program that
+
+- is a clean absolute path that resolves, symlinks and all, to an
+  executable file inside one of the folders (as they resolve too);
+- is no shell and no interpreter, as written or as it resolves: no `sh`,
+  `bash`, `python`, `node`, `perl`, `ruby`, `osascript`, `awk`, `find`,
+  `git`, `ssh`, `curl`, … (`nodeproto.IsInterpreter`), and on Windows no
+  `.bat`, `.cmd`, `.ps1`, `.vbs` or `.js`;
+
+and refuses the rest, each with why; the Nodes page shows both, the
+programs with the agents they are for. A folder must pass the same check
+as a workstation root: absolute, not the home folder or a whole drive,
+and neither in nor holding a system folder (`/usr`, `/bin`,
+`/opt/homebrew`, `C:\Windows`, …), the node's state dir or a place of
+keys (`~/.ssh`, …); a `node.json` with another does not load.
+
+The node writes what it kept to `exec-from-core.json` in its state dir
+and declares it as rules marked `"core": true, "exact": true`, which the
+core approves itself, because you approved the agents that run them. It
+checks such a program again before every run, and runs the file it
+resolved then: a program that became a symlink out of its folder, or a
+folder taken out of `accept_from_core`, is refused. A program the core
+did not list again is gone from the node's allowlist at once; nothing
+else in `node.json` changes. In a lockdown the core sends nothing.
+
+The Schedules page and the wizard say, for each command agent, whether
+its node runs its program, whether approving or saving adds it, or what
+the node must opt into first; `fridolin doctor` warns about approved
+command agents whose node does not allow their program (`nodes-programs`).
+
 ## android-build
 
 A node with a JDK 17 or newer and the Android SDK builds the Plaud Sync
@@ -564,12 +635,16 @@ side by side, with different node ids.
 1. **Docker.** Windows and macOS: Docker Desktop (Windows: `winget install
    --id Docker.DockerDesktop -e`, one UAC prompt and its terms on the
    first start; set it to start at sign-in, so the box comes back after
-   a restart). Linux: Docker Engine with the compose plugin. OrbStack
-   works on macOS.
+   a restart). Linux: Docker Engine with the compose plugin (Ubuntu:
+   `sudo apt-get install -y docker.io docker-compose-v2`; or Docker's
+   own packages), and Docker for the user who runs the line (`sudo
+   usermod -aG docker $USER`, then log in again; or run it as root).
+   OrbStack works on macOS. The host needs no Tailscale.
 2. **The line from `!join`.** The owner sends `!join` to fridolin in
    their WhatsApp chat. A core that knows where its box script is
    published (an image CI built, or `fridolin core build` of a clean
-   checkout of a GitHub repository) answers with a line for a box first:
+   checkout of a GitHub repository) answers with a line for a box first
+   (`fridolin nodes join-code` on the core prints the same):
 
    ```bash
    curl -fsSL https://raw.githubusercontent.com/OWNER/fridolin/COMMIT/container/box.sh | sh -s -- \
@@ -584,7 +659,9 @@ side by side, with different node ids.
    ```
 
    The script is the one of the core's own commit, and the images are
-   of the core's version.
+   of the core's version. Run it in a terminal: it asks its questions
+   on the terminal, also when it came through the pipe (over SSH: `ssh
+   -t`).
 3. **What the script does**, after saying so and asking:
    - pulls both images and pins them by digest in `.env`, beside the
      compose file it writes from the image (`fridolin box compose`), in
@@ -593,13 +670,21 @@ side by side, with different node ids.
      ([CORE.md](CORE.md#on-ghcr));
    - signs the box in to the tailnet (`fridolin node tailnet`): it
      prints a Tailscale link the owner opens and signs in to with the
-     account of the core's tailnet, or uses `TS_AUTHKEY` when set;
+     account of the core's tailnet, or uses `TS_AUTHKEY` when set.
+     Export it before the line (`export TS_AUTHKEY=…`, read from a
+     password manager, not typed into a shared shell's history): in
+     `TS_AUTHKEY=… curl … | sh` it would reach `curl` only. A key with
+     tags makes the box a device of those tags, which the tailnet's
+     policy must let reach `fridolin-core`;
    - joins the core with the code (`fridolin node join CODE --core …
      --box`). A code works once, within 10 minutes; if it ran out while
      the tailnet sign-in took long, send `!join` again and run the line
      with the new code;
    - starts the box (`docker compose up -d`) and installs its updater
-     ([Box updates](#box-updates); `--no-updater` leaves it out);
+     ([Box updates](#box-updates); `--no-updater` leaves it out). On
+     Linux the updater is a systemd user timer, which runs only while
+     the user is logged in unless lingering is on: `sudo loginctl
+     enable-linger $USER` (the script reminds you);
    - FrIDE: runs `claude setup-token` in the `fride` container (open its
      link and sign in), takes the token it shows without echo and stores
      it in FrIDE's volume, asks for the git name and email the agents
@@ -675,7 +760,10 @@ disable --now fridolin-box-updater.timer` (Linux), `crontab -e`, or
 **Removing**: `docker compose down -v` in the box's folder deletes the
 containers, the network and the volumes (the node's key, the backups in
 the volume, FrIDE's workspaces), then `!revoke ID` on the core. A backups
-folder on the host stays.
+folder on the host stays. A box made before its updater waited for the
+volume may have a `fridolin-node` volume compose did not make (compose
+warns so on every command), which `down -v` leaves: `docker volume rm
+fridolin-node`.
 
 **Repositories for FrIDE** live in its own container, which the node
 cannot reach, so the core's `fride_repo_add` does not work for a box:
@@ -816,6 +904,26 @@ with the SHA-256 of the token; anything else is refused. It sends the
 event to the core as an `event` message (kind `fride`), up to 256 waiting
 while the core is away (FrIDE retries what is refused while they wait).
 The core takes a node's events only while its `fride` is approved.
+
+**What approving `fride` means.** It is arbitrary execution on that
+machine, whatever `exec` allows: FrIDE runs Claude Code agents there,
+which can run anything the machine's user can, and on Windows reach
+PowerShell, `winget`, `docker.exe` and `C:\` through WSL's interop.
+Whoever can send `fride.task` (the core, and the core brain through
+`fride_task`) can therefore run anything there. Every place that
+approves it says so: the Nodes page while it waits, `!approve`'s answer,
+and `!fleet`, which marks a node with `fride` approved ("FrIDE's agents
+can run anything on it"):
+
+> fride lets fridolin hand coding tasks to FrIDE on this machine. FrIDE
+> runs Claude Code agents there, and they can run anything this
+> machine's user can (on Windows through WSL, PowerShell and C:\ too),
+> whatever exec allows or refuses: approving fride is approving arbitrary
+> commands on this machine. Approve it only on a machine you would let
+> fridolin do anything on.
+
+A core host that runs FrIDE as the user that holds the host secrets lets
+any FrIDE task read them; the move's report says so.
 
 ### On the core
 
@@ -1304,6 +1412,8 @@ owner's plugin cache, asks in an interactive session, and would need a
    when the tailnet has HTTPS off: `fridolin doctor` names the address) or with
    `fridolin nodes approve <id> --commands` on the core. Where the core
    has a chat command for approving, such as `!approve`, that works too.
+   Approving `fride` approves arbitrary commands on that machine
+   ([FrIDE](#fride), "What approving `fride` means").
 2. **Verify**, one check at a time:
    - `fride doctor` (in WSL, with `FRIDE_HOME=~/fride-companion/home`)
      shows no failed check;
@@ -1561,9 +1671,16 @@ of, such as those a restart of the core forgot (`node-session` findings).
 A *core host* is a machine the core may move to one day (#187). This
 first slice gives it its facts (`core.check`) and lets the host secrets
 go from one core host to another over the node channel, end to end,
-instead of `fridolin core send`/`receive` and the four words. The move
-itself (`!movecore`) comes later; `core send`/`receive` stay for a
-manual move and for an old machine that is gone.
+instead of `fridolin core send`/`receive` and the four words. The second
+moves the core itself between two native core hosts, `fridolin nodes
+move SRC DST --yes` ([CORE.md, "The core moves itself"](CORE.md#the-core-moves-itself)),
+with the methods `core.image.pull`, `core.rehearse`, `core.release`,
+`core.handoff` and `core.move.status`, each a fixed `fridolin core`
+subcommand of the agent's own binary. The third lets the owner move it
+from WhatsApp: `!movecore <node>`, a report and a poll ([CORE.md,
+"Moving the core from WhatsApp"](CORE.md#moving-the-core-from-whatsapp)).
+`core send`/`receive` stay for a manual move and for an old machine that
+is gone.
 
 It needs two keys:
 
@@ -1627,12 +1744,16 @@ must pin DST. Then:
    pinned for DST, and refuses an offer it does not verify, one that
    expired, or one for a target it does not trust. It encrypts its host
    secrets (the names `core send` sends, without the Tailscale auth key)
-   to the offer's key.
+   to the offer's key, with the secret files of its core's
+   credentials folder ([CORE.md](CORE.md#the-core-moves-itself),
+   "Secret files").
 3. DST (`core.secrets.receive`) decrypts them in memory with the one-time
    key, which goes with the first bundle, and stores them as `core
    receive` does: a name a move does not carry refuses the whole bundle,
    a value that differs from one stored refuses it unless `--replace`,
-   and a failed write puts back the earlier ones.
+   and a failed write puts back the earlier ones. The secret files go
+   into the same folder under its core's home, 0600, never over one
+   there.
 
 The core relays the offer and the ciphertext and sees names only: it
 cannot swap in a key of its own, since the source checks the signature
@@ -1640,6 +1761,9 @@ against its own pin. Both sides append a line per step to
 `secrets-transfer.log` in the state dir (`"via": "node-channel"`), names
 only. `core.secrets.forget` removes on a machine what it received over
 the node channel and did not hold before, never what was there.
+After a move the owner is asked whether the machine the core left keeps
+its copy (no vote in 24 hours forgets it), and revoking a core host that
+is connected has it forget first.
 `core.secrets.offer/send/receive` are refused through `fridolin nodes
 call`, and a lockdown refuses the transfer and every `core.secrets.*`.
 
@@ -1716,7 +1840,9 @@ another version is refused.
    `failed`, `unavailable`, `unsupported`).
    The node may also send, on its own, `event` (news, such as FrIDE's,
    with a `kind`) and `declare` (what it offers now, when FrIDE comes or
-   goes); the core answers a `declare` with `state`.
+   goes, or the core's programs changed); the core answers a `declare`
+   with `state`. `exec.programs` is the core's signed list of
+   [programs from the core](#programs-from-the-core).
 6. Either side may send `close` with a reason (`revoked`,
    `unknown-device`, `bad-auth`, `replaced`, `shutdown`, `protocol`,
    `idle`) before closing. After `revoked` or `unknown-device` the agent

@@ -29,22 +29,43 @@ On the host that runs Docker:
                        Linux with AppArmor, as root, once: install the core's
                        profile, which lets the brains' sandbox make its user
                        namespaces (Ubuntu restricts them); start and run use it
+  fridolin core pull --from REF@sha256:... [--check] [--json]
+                       check the image's build provenance (GitHub's attestation
+                       for image.yml on main), pull it by digest and tag it as
+                       this version's, for start (--check: only say whether it is here)
+  fridolin core files export|import
+                       in the core's container (core run core files …): the secret
+                       files of sandbox.credentials_dir a core move carries, as
+                       JSON; import (from stdin) writes only those not there, 0600
+  fridolin core rehearse [--json]
+                       import the latest export into a scratch volume
+                       (fridolin-move-rehearsal), check it, and remove the volume:
+                       never the core's own volume, never the lease
   fridolin core run [--] COMMAND...
                        run a fridolin command in a one-off container on the
                        volume, with the secrets: core import while the core
                        is stopped, say (fridolin core run core import --latest)
 
 In the core (docker exec fridolin-core fridolin core ...):
-  fridolin core export [--list-folders]
+  fridolin core export [--list-folders | --drift] [--use-approved]
                                  encrypt the data dir to the vault bucket, with the
                                  brain folders it takes along (--list-folders: list
-                                 their files and export nothing)
+                                 their files and export nothing; --drift: say only
+                                 which brain.json on disk differs from the manifest
+                                 you approved). It refuses while a brain.json on
+                                 disk keeps more home than the approved manifest:
+                                 approve it first, or pass --use-approved
   fridolin core import --latest [--force]
                                  fetch, decrypt and check the latest export,
                                  then put it in place of an empty data dir
                                  (--force moves what is there to core/replaced-*)
   fridolin core promote          take the core lease for this data dir
-  fridolin core status           who holds the core lease, and this device's id
+  fridolin core release          free the lease when this data dir holds it, without
+                                 a core running (a core move's target that gives up)
+  fridolin core status [--json]  who holds the core lease, this device's id and the
+                                 latest export (with --json: as a core move reads it)
+  core export takes --move ID (a core move's id, written into the export's
+  manifest and info) and --json (print the export's info).
 
 Flags of export, import, promote and status:
   --config PATH     config file (default: $FRIDOLIN_CONFIG, else ~/.fridolin/config.json)

@@ -251,7 +251,9 @@ func (s *Store) Due(brain string, now time.Time) ([]Intent, error) {
 			if last.IsZero() {
 				last = in.Created
 			}
-			if in.Schedule != nil && in.Schedule.Due(last, now) {
+			// The schedule's times of day are now's zone's (the
+			// owner's); last comes back from the file as an offset.
+			if in.Schedule != nil && in.Schedule.Due(last.In(now.Location()), now) {
 				stays := fire(&in, now)
 				out = append(out, in)
 				if !stays {

@@ -30,7 +30,10 @@ func newNodes(b *App) (*nodes.Service, error) {
 		b.work.onEvent(node, ev)
 	}
 	return nodes.New(nodes.Options{
-		Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: onEvent, OnDeclare: b.fride.onDeclare, OnJoin: b.nodeJoined, OnCoreHost: b.nodeCoreHost,
+		Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: onEvent, OnDeclare: b.fride.onDeclare, OnJoin: b.nodeJoined, OnCoreHost: b.nodeCoreHost, OnMove: b.coreMoveEnded, OnMoveStopping: b.coreMoveStopping, Site: b.moveSite,
+		// A node that connects takes the programs of its command agents.
+		OnConnect: func(n *nodes.Node) { b.programs.connected(n.ID) },
+		OnApprove: func(n *nodes.Node) { b.programs.connected(n.ID) },
 		// Updates: the core's own version, its builds for the nodes, and
 		// what keeps a node from being updated now (nodes_update.go).
 		Version: version.String(), BinariesDir: nodeBinariesDir(b.exe), Busy: b.nodeBusy, Hold: b.nodeHold,
@@ -150,7 +153,17 @@ type lockdownNodes struct {
 // scripts it is sent.
 // Starting an agent or a terminal, or acting in one, is writing too.
 // Moving or forgetting host secrets (core-host) is writing too.
-var nodeWrites = slices.Concat([]string{nodeproto.MethodExec, nodeproto.MethodFSWrite, nodeproto.MethodAndroidBuild}, nodeproto.WorkstationStarts, nodeproto.CoreSecretsMethods)
+// So is every step of a core move.
+var nodeWrites = slices.Concat([]string{nodeproto.MethodExec, nodeproto.MethodFSWrite, nodeproto.MethodAndroidBuild}, nodeproto.WorkstationStarts, nodeproto.CoreSecretsMethods, nodeproto.CoreMoveWrites)
+
+// StartMove refuses a core move during a lockdown; the pre-flight only
+// reads.
+func (n lockdownNodes) StartMove(ctx context.Context, src, dst string, o nodes.MoveOptions) (nodes.MoveRecord, error) {
+	if n.locked() {
+		return nodes.MoveRecord{}, errLockedNode
+	}
+	return n.Service.StartMove(ctx, src, dst, o)
+}
 
 // CoreSecretsTransfer refuses a transfer that is to run during a
 // lockdown; a dry run only reads.
@@ -185,6 +198,7 @@ func (b *App) fleetText() string {
 			ID: v.ID, Name: v.Name, OS: v.OS, Online: v.Online,
 			Device: v.Device, Commands: v.Commands, Tags: v.Tags, Offers: v.Effective.Summary(),
 			CoreHostPending: v.CoreHost != nil && v.CoreHost.Pending,
+			Fride:           v.Effective.Fride != nil, FridePending: v.FrideApproval != "",
 		}
 		if v.LastSeen != nil {
 			n.LastSeen = *v.LastSeen
@@ -192,4 +206,14 @@ func (b *App) fleetText() string {
 		list = append(list, n)
 	}
 	return outboundmsg.FleetReply(b.nodesEnabled, list, time.Now())
+}
+
+// moveSite is the site as a core move's report shows it (#187 §4): its
+// tunnel, when it runs inside the core (site.tunnel), moves with it.
+func (b *App) moveSite() *nodes.MoveSite {
+	if b.site == nil {
+		return nil
+	}
+	s := b.site.Settings()
+	return &nodes.MoveSite{Enabled: s.Enabled, Domain: s.Domain, Tunnel: s.Tunnel, TunnelRunning: s.Tunnel && b.site.TunnelRunning()}
 }

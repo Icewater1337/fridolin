@@ -3,6 +3,7 @@ GET /ready
 Content-Type: application/json
 
 {
+  "container": false,
   "ready": true,
   "started_at": "<TIME>",
   "version": "<VERSION>",

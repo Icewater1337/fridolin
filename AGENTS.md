@@ -359,9 +359,9 @@ machine must already be a node (path B). In short:
 ## Working on the code
 
 - `make check` runs what CI's build, lint and test jobs run: gofmt, both
-  `go vet` runs, `go mod tidy -diff`, the race tests, staticcheck,
-  shellcheck, ruff, actionlint, the action-pin check, ESLint on the
-  dashboard, the Python, web, personal-data-check, action-pin-check and
+  `go vet` runs, `go mod tidy -diff`, the race tests, staticcheck, exhaustive,
+  shellcheck, ruff, actionlint, the action-pin check, ESLint and tsc on
+  the dashboard, the Python, web, personal-data-check, action-pin-check and
   Makefile tests and a dev-mode smoke test (`make help` lists the
   targets).
   CI also runs the site's tests and the fuzz targets (both below),
@@ -371,6 +371,10 @@ machine must already be a node (path B). In short:
   None of them touches the service, which runs the copy in
   `~/.local/lib/fridolin/` that `./setup.sh` installs. While iterating,
   `go vet ./... && go test -race ./...` is enough; `gofmt` everything.
+  exhaustive (`make lint-go`) wants a switch on an enum to name every
+  constant, also when it has a default: a new constant then shows each
+  switch that must decide about it. A switch meant to cover only some
+  gets `//exhaustive:ignore` under a comment that says why.
   The tests run in an empty temp directory, with an empty temp `HOME` and
   the variables the bridge reads (`FRIDOLIN_CONFIG`, `BRAIN_MODE`) unset,
   so they never see a `config.json` in the checkout or a real data dir;
@@ -427,7 +431,12 @@ machine must already be a node (path B). In short:
   `testdata` first in a package that has none), where plain `go test`
   runs it from then on, so commit it with the fix. `make fuzz-short` runs
   every target for 10 seconds (set `FUZZTIME`); CI fuzzes every target for
-  20 seconds on each push to main.
+  20 seconds on each push to main. A run on main that fails opens or
+  updates an issue labelled `ci-main` per failing fuzz target or test
+  ("CI on main: FuzzX failing", `scripts/ci-report.sh`), with the
+  failure, the run's link and a fuzz target's failing input from the
+  run's `fuzz-failing-inputs` artifact; a later run that passes closes
+  it. Fix those before new work: a red main teaches everyone to ignore red.
 - The Python helpers in `tools/` have stdlib-only tests that never touch the
   network: `python3 -m unittest discover -s tools/tests` (`make test-py`).
   Keep them passing on Python 3.9. `make lint-py` runs ruff
@@ -484,6 +493,26 @@ machine must already be a node (path B). In short:
   `web/eslint.config.js` (names that are not defined, code that is never
   used), which needs Node 22.13+: npx fetches the version the Makefile
   pins the first time, and nothing is installed into the checkout.
+  `make typecheck-web` runs TypeScript's checker (`tsc --noEmit`, pinned
+  and fetched the same way) with `web/tsconfig.json` on the modules and
+  `web/test/tsconfig.json` on the tests. Nothing is built: the modules
+  stay plain JavaScript, typed with JSDoc (`@param`, `@typedef`,
+  `@template`). The shared types are `Child` and `Attrs` in `lib/dom.js`
+  (what `h()` takes; `h('input')` is an `HTMLInputElement`), `Resource`
+  in `app/resources.js`, `Page` and `PageModule` in `app/page.js`, and
+  the JSON the bridge's GET endpoints answer in `web/types/api.d.ts`,
+  which `get(path)` and `resource(path)` look up by path (`GetResponse`);
+  a change to a GET response changes its type there. Bring a type in
+  with `/** @import { Brain } from '../../types/api.js' */`, never with
+  `import('…')` in a type, which the modules test takes for a dynamic
+  import. A page declares its default export with
+  `/** @satisfies {PageModule} */`, which types its `root` and `ctx`.
+  Prefer a real type to `any`, and a `// @ts-expect-error` that says why
+  to a cast that hides a mistake. A caught value is `unknown`: read it
+  with `errorMessage(e)` and `errorName(e)` (`lib/errors.js`) and
+  `errorStatus(e)` (`app/api.js`). `web/test/fake-dom-globals.d.ts`
+  describes the fake DOM the tests run in. The strict options still to
+  turn on, in order, are listed in `web/tsconfig.json`.
 - The project was called whatsapp-claude-bridge before. Names from then
   that are on disk or that others rely on stay, each marked `compat:` in
   the code: the data dir `~/.whatsapp-claude-bridge`, which the bridge

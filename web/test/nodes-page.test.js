@@ -4,8 +4,10 @@ import { installDom } from './fake-dom.js';
 import { serve, settle, noConsoleErrors } from './serve.js';
 import { h } from '../assets/lib/dom.js';
 import { createPage } from '../assets/app/page.js';
-import { capSummary, gb, osName, parseTags, ruleText, updateText } from '../assets/lib/nodes.js';
+import { capSummary, gb, nodeNamed, osName, parseTags, programOnNode, ruleText, updateText } from '../assets/lib/nodes.js';
 import page from '../assets/pages/nodes.js';
+
+/** @import { Node as FleetNode } from '../types/api.js' */
 
 const declared = {
   exec: { allow: [{ name: 'hostname', args: [] }, { name: 'git', args: ['status', 'log'] }, { name: 'go', args: null }] },
@@ -227,4 +229,48 @@ test('approving core-host says what it means first, with the device key', async 
   dialog.querySelectorAll('button').find((b) => b.textContent === 'Approve core-host').click();
   await settle();
   assert.ok(calls.some((c) => c.method === 'POST' && c.path === '/api/nodes/8233270f8a24/approve-commands'));
+});
+
+test('programs from the core: the folders, what was added for which agents, and what was refused', async (t) => {
+  const exec = {
+    allow: [{ name: 'uptime', args: [] }, { name: '/Users/you/tools/daily.sh', args: ['--quiet'], exact: true, core: true }],
+    accept_from_core: ['/Users/you/tools'],
+  };
+  const { root } = await openPage(t, [node({
+    device: 'approved', commands: 'approved', declared: { exec }, approved: { exec }, effective: { exec },
+    programs: {
+      at: '2026-10-20T10:00:00Z',
+      sent: [],
+      accepted: [{ name: '/Users/you/tools/daily.sh', args: ['--quiet'], agents: ['main/daily'] }],
+      refused: [{ name: '/Users/you/tools/escape.sh', args: [], why: 'it is /tmp/x, which is in no folder this node accepts programs from' }],
+    },
+  })]);
+  const text = root.textContent;
+  assert.match(text, /Programs from the core: \/Users\/you\/tools/);
+  assert.match(text, /\/Users\/you\/tools\/daily\.sh --quiet \(exactly\) for main\/daily/);
+  assert.match(text, /Refused: .*escape\.sh — it is \/tmp\/x/);
+  assert.match(text, /Commands: uptime \(no arguments\)Programs from the core/, 'node.json’s own rules stay apart');
+});
+
+test('how a program stands on a node, before its agent is saved', () => {
+  // Only what programOnNode reads of a GET /api/nodes entry.
+  /** @type {(o: object) => FleetNode} */
+  const node = (o) => /** @type {FleetNode} */ (/** @type {unknown} */ (o));
+  const exec = { allow: [{ name: '/opt/bin/backup', args: ['--all'] }, { name: '/Users/you/tools/a.sh', args: [], exact: true, core: true }], accept_from_core: ['/Users/you/tools'] };
+  const n = node({ id: 'abc', name: 'mini', declared: { exec }, effective: { exec } });
+  assert.equal(nodeNamed([n], 'MINI'), n);
+  assert.equal(nodeNamed([n], 'abc'), n);
+  assert.equal(programOnNode(null, ['/x']).state, 'no-node');
+  assert.equal(programOnNode(n, ['/opt/bin/backup', '--all']).state, 'allowed');
+  assert.equal(programOnNode(n, ['/Users/you/tools/a.sh']).state, 'allowed');
+  assert.equal(programOnNode(n, ['/Users/you/tools/b.sh', 'x']).state, 'waiting');
+  assert.match(programOnNode(n, ['/Users/you/tools/b.sh']).text, /exactly these arguments/);
+  assert.equal(programOnNode(n, ['/Users/you/toolsx/b.sh']).state, 'not-accepted');
+  assert.equal(programOnNode(n, ['/opt/bin/backup', '--none']).state, 'not-accepted');
+  const pending = node({ ...n, effective: { exec: { allow: [] } } });
+  assert.match(programOnNode(pending, ['/Users/you/tools/b.sh']).text, /waits for your approval/);
+  const none = node({ id: 'x', name: 'box', declared: {}, effective: {} });
+  assert.match(programOnNode(none, ['/Users/you/tools/b.sh']).text, /accepts no programs from the core/);
+  assert.equal(ruleText({ name: '/a.sh', args: ['x'], exact: true }), '/a.sh x (exactly)');
+  assert.equal(capSummary({ exec: { allow: [], accept_from_core: ['/Users/you/tools'] } }), 'exec from the core (/Users/you/tools)');
 });

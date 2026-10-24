@@ -7,7 +7,19 @@ import { icon } from './icons.js';
 import { chatEl, chatName } from './chat.js';
 import { timeAgo, longText } from './common.js';
 
-/** One message row, or one event row (see eventItem). */
+/** @import { ActivityEntry } from '../../types/api.js' */
+
+/**
+ * How an activity row is shown: compact in short feeds, showBrain with a
+ * link to its brain.
+ * @typedef {{compact?: boolean, showBrain?: boolean}} ActivityOptions
+ */
+
+/**
+ * One message row, or one event row (see eventItem).
+ * @param {ActivityEntry} e
+ * @param {ActivityOptions} [options]
+ */
 export function activityItem(e, { compact = false, showBrain = true } = {}) {
   if (e.type === 'event') return eventItem(e, { compact, showBrain });
   const out = e.type === 'out';
@@ -31,6 +43,8 @@ export function activityItem(e, { compact = false, showBrain = true } = {}) {
  * text says what the person did ("voted …", "deleted a message they had
  * sent"), so it reads after their name, muted, beside an icon of its own:
  * shown as a received message, it would look as if they had typed it.
+ * @param {ActivityEntry} e
+ * @param {ActivityOptions} options
  */
 function eventItem(e, { compact, showBrain }) {
   return h(`article.act-item.event${compact ? '.compact' : ''}`,
@@ -44,13 +58,16 @@ function eventItem(e, { compact, showBrain }) {
         h('span.act-who', { title: e.from || '' }, senderLabel(e.from, e.chat)), ' ', e.text || '')));
 }
 
-const itemKey = (e) => `${e.ts}|${e.chat}|${e.type}|${(e.text || '').length}`;
+const itemKey = (/** @type {ActivityEntry} */ e) => `${e.ts}|${e.chat}|${e.type}|${(e.text || '').length}`;
 
 /**
  * Shows the messages in container, newest first as the bridge sends them,
  * with activityItem's options. A message already shown keeps its row, so
  * one that was unfolded stays unfolded; it is drawn again once its chat's
  * name is learnt.
+ * @param {Element} container
+ * @param {ActivityEntry[]} items
+ * @param {ActivityOptions} [opts]
  */
 export function showActivity(container, items, opts = {}) {
   const rows = items.map((e) => ({ ...e, chat_name: chatName(e.chat), opts }));

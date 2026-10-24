@@ -6,8 +6,16 @@ import { h } from '../assets/lib/dom.js';
 import { createPage } from '../assets/app/page.js';
 import schedulesPage from '../assets/pages/schedules.js';
 import {
-  fieldsOf, fileJSON, filterAgents, groupByBrain, inTime, permissionsOf, presetOf, scheduleOf, stateOf, taskKind, varsText, whenOf,
+  fieldsOf, fileJSON, filterAgents, groupByBrain, inTime, permissionsOf, presetOf, scheduleOf, stateOf, taskKind, varsText, whenOf, zoneNote,
 } from '../assets/lib/schedules.js';
+
+test('zoneNote says the zone times of day are in, and warns about an unset one in UTC', () => {
+  assert.equal(zoneNote(undefined), null);
+  assert.deepEqual(zoneNote({ name: 'Europe/Zurich', source: 'config' }), { text: 'Times of day are Europe/Zurich.', warn: false });
+  assert.equal(zoneNote({ name: 'UTC', source: 'process' }).warn, true);
+  assert.match(zoneNote({ name: 'Europe/Zurich', source: 'process' }).text, /Europe\/Zurich \(the bridge’s; the time zone is unset/);
+  assert.match(zoneNote({ name: 'Local', source: 'process' }).text, /the bridge’s own time zone/);
+});
 
 const DM = '15551234567@s.whatsapp.net';
 
@@ -76,7 +84,7 @@ function bridge(state) {
     if (putPath && method === 'DELETE') { state.deleted = putPath[2]; return { status: 200, body: { status: 'removed' } }; }
     if (path === '/api/brains') return [{ id: 'main', name: 'Main' }, { id: 'work', name: 'Work' }];
     if (path === '/api/github') return { connected: true, installations: [{ account: 'you', repos: ['you/project', 'you/other'] }] };
-    if (path === '/api/nodes') return { nodes: [{ id: 'n1', name: 'mac-mini', online: true }] };
+    if (path === '/api/nodes') return { nodes: [{ id: 'n1', name: 'mac-mini', online: true, declared: { exec: { allow: [], accept_from_core: ['/Users/you/tools'] } }, effective: { exec: { allow: [{ name: '/opt/bin/ok', args: [] }], accept_from_core: ['/Users/you/tools'] } } }] };
     return {};
   };
 }
@@ -87,7 +95,7 @@ function bridge(state) {
 test('the Schedules page lists agents by brain and runs and pauses them', async (t) => {
   const state = {
     enabled: true,
-    agents: [agent(), agent({ brain: 'work', brain_name: 'Work', name: 'scrape', state: 'failing', task: 'runs x on node mac-mini', schedule: { name: 'scrape', when: 'every 6h', command: { node: 'mac-mini', argv: ['/bin/x'] } }, last_run: { status: 'failed', started: '2026-10-23T00:00:00Z' } })],
+    agents: [agent(), agent({ brain: 'work', brain_name: 'Work', name: 'scrape', state: 'failing', task: 'runs x on node mac-mini', schedule: { name: 'scrape', when: 'every 6h', command: { node: 'mac-mini', argv: ['/bin/x'] } }, program: { node: 'n1', node_name: 'mac-mini', state: 'not-accepted', detail: '/bin/x is in none of the folders node mac-mini accepts programs from (/Users/you/tools)' }, last_run: { status: 'failed', started: '2026-10-23T00:00:00Z' } })],
     reminders: [
       { brain: 'main', id: 'i1', text: 'Call the dentist', when: '2026-10-24T09:00', next: '2026-10-24T09:00:00Z', chat: DM, source: 'bridge' },
       { brain: 'main', id: 'skills/reminders.json#54', text: 'Stretch', when: 'daily 20:00', next: '2026-10-23T20:00:00Z', chat: '', source: 'skills/reminders.json' },
@@ -103,6 +111,7 @@ test('the Schedules page lists agents by brain and runs and pauses them', async 
   assert.match(text, /in 1 h/, 'the next run, relative');
   assert.match(text, /took 8 s|took 8s/);
   assert.match(text, /node mac-mini/);
+  assert.match(text, /\/bin\/x is in none of the folders node mac-mini accepts/, 'a command agent says why its node will not run it');
   assert.match(text, /Call the dentist/);
   assert.match(text, /Stretch/);
   assert.match(text, /skills\/reminders\.json/);
@@ -238,6 +247,33 @@ test('the wizard adds an agent step by step', async (t) => {
   });
   assert.equal(JSON.stringify(JSON.parse(json)), JSON.stringify(JSON.parse(fileJSON(state.put.body))));
   assert.deepEqual(navigated, ['#/schedules/work/review-bugs']);
+});
+
+// A command's program: the wizard says whether its node runs it, whether
+// saving adds it, or what the node must opt into first.
+test('the wizard says how a program stands on its node', async (t) => {
+  const state = { enabled: true, agents: [] };
+  const { root } = await open(t, bridge(state), { brain: 'new' });
+  root.querySelectorAll('.template-card').find((b) => b.textContent.includes('Run a command on a node')).click();
+  await settle();
+  root.querySelectorAll('.step-btn').find((b) => b.textContent.includes('Details')).click();
+  await settle();
+  const sel = root.querySelector('.agent-wizard select');
+  sel.value = 'mac-mini';
+  sel.dispatchEvent(new Event('change'));
+  const argv = root.querySelector('.agent-wizard textarea');
+  const status = () => root.querySelector('.program-status').textContent;
+  /** @type {[string, RegExp][]} */
+  const cases = [
+    ['/Users/you/tools/daily.sh\n--quiet', /Saving adds it to node mac-mini.*exactly these arguments/],
+    ['/opt/bin/ok', /Node mac-mini runs it.*node\.json allows/],
+    ['/usr/local/bin/x', /would not run it.*in none of the folders/],
+  ];
+  for (const [typed, want] of cases) {
+    argv.value = typed;
+    argv.dispatchEvent(new Event('input'));
+    assert.match(status(), want, typed);
+  }
 });
 
 test('the wizard edits an agent and writes what changed', async (t) => {

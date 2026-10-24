@@ -4,8 +4,11 @@ import { installDom } from './fake-dom.js';
 import { h } from '../assets/lib/dom.js';
 import { liveForm } from '../assets/components/live-form.js';
 
-// A form with one text field for data.name; data.other is context it shows
-// but does not edit.
+/**
+ * A form with one text field for data.name; data.other is context it shows
+ * but does not edit.
+ * @param {{edits?: (data: {name: string, other?: number}) => unknown}} [opts]
+ */
 function nameForm({ edits } = {}) {
   installDom();
   const states = [];
@@ -42,6 +45,7 @@ test('a form without edits follows the data', () => {
 });
 
 test('edits survive new data, and a change to what they edit is flagged', async (t) => {
+  /** @type {[string, {name: string, other: number}, boolean][]} */
   const cases = [
     // name, newer data, stale?
     ['context changed', { name: 'Work', other: 2 }, false],
@@ -92,8 +96,7 @@ test('a form taken back to what it showed catches up once the focus leaves it', 
   type('Work');
   assert.equal(f.dirty(), false);
   const leave = (to) => {
-    const e = new Event('focusout', { bubbles: true });
-    e.relatedTarget = to;
+    const e = Object.assign(new Event('focusout', { bubbles: true }), { relatedTarget: to });
     f.form().input.dispatchEvent(e);
   };
   leave(f.form().el); // still in the form: typing goes on undisturbed
@@ -144,6 +147,7 @@ test('after a save the next data builds the form again', () => {
 
 test('edits() can look at the form', async (t) => {
   // Only the fields that have edits count, as on the Settings page.
+  /** @type {[string, {a: string, b: string}, boolean][]} */
   const cases = [
     // name, newer data, stale?
     ['a field without edits changed', { a: 'a', b: 'B' }, false],

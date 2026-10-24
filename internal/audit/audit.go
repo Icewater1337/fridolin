@@ -55,6 +55,16 @@ const (
 	DashboardLink = "dashboard_link"
 	NodeApproved  = "node_approved"
 	NodeRevoked   = "node_revoked"
+	// The core's move from the owner's chat (#187): !movecore asked
+	// (ID the target, Outcome whether a poll went out), the owner's
+	// "Move now" (ID the approval, Detail source and target), how a move
+	// ended (ID the move, Outcome its state), and what the machine a move
+	// left did with the host secrets (ID the node, Outcome kept or
+	// forgotten).
+	CoreMoveRequested = "core_move_requested"
+	CoreMoveApproved  = "core_move_approved"
+	CoreMoveEnded     = "core_move_ended"
+	CoreSecrets       = "core_secrets"
 	// NodeSession is a workstation session on a node (#159) starting or
 	// ending: Detail says which (agent or terminal, the node, the folder),
 	// Outcome how it ended.
@@ -69,6 +79,13 @@ const (
 	// wiki-search), the root and the path, Outcome ok or why it was
 	// refused.
 	FileView = "file_view"
+	// FileChange is a change on the Files page, the wiki or the site's
+	// /files and /wiki: By and Brain as for FileView, Detail the action
+	// (edit, create, upload, move, delete, upload-rule), the root and the
+	// path ("<path> -> <to>" for a move, and for a delete where it went in
+	// the trash), Outcome ok (with "commit <hash>" where it was committed)
+	// or why it was refused.
+	FileChange = "file_change"
 	// ScheduledCommand is a scheduled agent's program run on a node:
 	// Brain and ID the agent's brain and run, Detail the agent, node and
 	// program (not its arguments), Outcome how it ended.

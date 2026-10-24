@@ -15,6 +15,12 @@ const status = (checked) => ({
 
 const button = (root, label) => root.querySelectorAll('button').find((b) => b.textContent === label);
 
+/**
+ * A switch toggle() made: its label, with the checkbox as .input.
+ * @typedef {ReturnType<typeof import('../assets/components/fields.js').toggle>} Switch
+ */
+
+/** @param {object} [first] the Plaud status the bridge holds at first */
 async function openPage(t, first = status('2026-10-18T10:00:00Z')) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
@@ -32,7 +38,7 @@ async function openPage(t, first = status('2026-10-18T10:00:00Z')) {
   page.render(root, ctx);
   await settle();
   const poll = async (next) => { bridge.status = next; await resource('/api/plaud/status').refresh(); await settle(); };
-  const note = () => root.querySelector('.live-form').firstChild; // the "changed elsewhere" note
+  const note = () => /** @type {HTMLElement} */ (root.querySelector('.live-form').firstChild); // the "changed elsewhere" note
   return { root, ctx, poll, note, calls };
 }
 
@@ -75,7 +81,9 @@ test('coming back to the page shows the Plaud status it knows at once', async (t
 
 test('cancelling the brain_access dialog leaves nothing unsaved', async (t) => {
   const { root, ctx } = await openPage(t);
-  const access = root.querySelectorAll('label.switch').find((l) => l.textContent.includes('Let brains use')).input;
+  /** @type {Switch[]} */
+  const switches = root.querySelectorAll('label.switch');
+  const access = switches.find((l) => l.textContent.includes('Let brains use')).input;
   access.checked = true;
   access.dispatchEvent(new Event('change', { bubbles: true }));
   await settle();
@@ -273,4 +281,28 @@ test('a build on a node shows its progress, then its failure with the log', asyn
   });
   assert.match(root.textContent, /Building the app on mac-mini failed/);
   assert.match(root.textContent, /FAILURE: Build failed/);
+});
+
+test('voice mode is offered with the phone app, and its brain once it is on', async (t) => {
+  const s = status('2026-10-18T10:00:00Z');
+  const app = { credentials: true, site_url: 'https://example.com', devices: [] };
+  const { root, poll, calls } = await openPage(t, { ...s, settings: { ...s.settings, phone_upload: true }, app });
+  assert.match(root.textContent, /Voice mode: the phone app may ask by voice/);
+  assert.doesNotMatch(root.textContent, /Brain for voice questions/);
+
+  await poll({ ...s, settings: { ...s.settings, phone_upload: true, voice: true, voice_brain: 'personal' }, app });
+  assert.match(root.textContent, /Brain for voice questions/);
+  assert.match(root.textContent, /go to the phone only, not WhatsApp/);
+
+  button(root, 'Save').click();
+  await settle();
+  const saved = calls.find((c) => c.path === '/api/plaud/settings' && c.method === 'PUT');
+  assert.equal(saved.body.voice, true);
+  assert.equal(saved.body.voice_brain, 'personal');
+  assert.equal(saved.body.voice_quiet, false);
+});
+
+test('without the phone app there is no voice mode', async (t) => {
+  const { root } = await openPage(t);
+  assert.doesNotMatch(root.textContent, /Voice mode/);
 });

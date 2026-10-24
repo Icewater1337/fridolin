@@ -45,9 +45,10 @@ brain's queue, which then would turn your own messages away.
 Plaud's own app syncs a NotePin only while it is open, so a recording can
 take hours to reach Plaud's cloud, and Fridolin with it. The Plaud Sync app
 in [`plaud-android/`](../plaud-android/README.md) replaces it on an Android
-phone: it keeps the pin connected, pulls every recording off it as soon as
-it stops, has Plaud transcribe it, and saves `YYYY-MM-DD_HH-MM-SS.mp3` and
-`.txt` in the phone's `Documents/PlaudSync`. Recordings no longer go to
+phone: it checks in with the pin in the background (every 10 minutes and on
+events, or permanently connected: see [The pin's battery](#the-pins-battery)),
+pulls every recording off it, has Plaud transcribe it, and saves
+`YYYY-MM-DD_HH-MM-SS.mp3` and `.txt` in the phone's `Documents/PlaudSync`. Recordings no longer go to
 your Plaud account then, and Plaud makes no AI summary of them. The
 transcripts reach Fridolin through your site, or through a folder you sync.
 
@@ -105,6 +106,71 @@ The card lists the paired phones; **Unpair** refuses a phone's uploads from
 then on. The developer keys are inside the app too, so keep the APK to
 yourself; the key a phone pairs with is not.
 
+### Voice mode
+
+With uploads through the site, the app can also be a voice line to
+Fridolin: you ask by voice and the phone reads the answer aloud. The answer
+still reaches WhatsApp unless you turn that off.
+
+1. Dashboard → **Integrations → Plaud**: turn on **Voice mode** (`voice`),
+   pick the **Brain for voice questions** (default: the brain that gets your
+   DMs) and save. Build the app again and install it over the old one: it
+   keeps its pairing.
+2. In the app, turn on **Voice mode**. Its notification says so, and offers
+   **Ask**, **Stop** and **Skip**.
+
+While it is on:
+
+- **A NotePin recording is a question.** The app checks in with the pin
+  at least every 2 minutes then, and **Fetch now** in the app or in the
+  notification gets a question off the pin at once
+  ([The pin's battery](#the-pins-battery)). It is transcribed by Plaud as
+  usual and saved to `Documents/PlaudSync`, but it is sent as a question
+  instead of a transcript: the speaker labels and timestamps are dropped,
+  and it is not handed to the Plaud brain as a recording.
+- **Ask** (in the app and in the notification) opens the phone's own speech
+  recognizer, which needs no microphone permission for the app.
+- The question goes to the voice brain as a hand-off in its private chat,
+  as recordings do: never a group, and never a command. The brain is told
+  to answer for the ear: one to three short spoken sentences, the most
+  important point first, no lists, tables, links, code or emoji, numbers
+  and times as they are said, in the language of the question. When the
+  answer needs more, the brain writes the spoken part in a
+  `[SPOKEN]…[/SPOKEN]` block and the details after it, saying the details
+  are in WhatsApp. Only the block is read aloud, and the details go to the
+  chat without it. An answer that comes back long anyway is read only up
+  to the last whole sentence within 60 words.
+- In WhatsApp, `🎙️ <the question>` comes first, then the answer in full.
+  With `voice_quiet` neither is sent there, and only the spoken part
+  reaches the phone.
+- The phone reads the answer with Android's text-to-speech, with markdown
+  stripped, links read as "a link to example.com" and polls read as a list.
+  It picks German or English for each answer, where the phone has that
+  voice. Music ducks meanwhile. A call stops it, and it goes on from the
+  same sentence after the call. **Stop** silences it and drops what waits;
+  **Skip** goes on to the next answer.
+- **On the lock screen** an answer waits until the phone is unlocked. The
+  notification then says only *Answer ready, unlock to hear it*, never the
+  text. The app's **Speak answers while the phone is locked** allows
+  speaking anyway.
+
+How it works: the app sends the question to
+`/_fridolin/devices/voice/ask`, signed like a transcript (aud
+`fridolin:voice`). The JWT names the question's id and SHA-256, and the
+public half of a second keystore key, which can only agree keys. Fridolin
+seals the answer for that key: ECDH P-256 with a fresh key, HKDF-SHA256,
+AES-256-GCM, with the question's id as associated data. The app fetches it
+from `/_fridolin/devices/voice/reply` with a JWT naming the question (aud
+`fridolin:voice-reply`). The site holds that request up to 15 seconds
+until the answer is there, so an answer is spoken within a second or two of
+being ready. The site, where module code runs, passes on ciphertext only.
+Only the phone that asked can fetch the answer, and only its keystore opens
+it. Answers wait in Fridolin's memory for 30 minutes at most, never on disk:
+after a restart the app hears that the question is unknown, and the answer
+is in WhatsApp. A question sent again with the same id, after its answer got
+lost, asks nothing new. A phone offline keeps its questions and sends them
+later.
+
 ### Through a synced folder
 
 To hand them to a brain without the site, sync that folder to a folder on
@@ -127,6 +193,78 @@ up. A transcript is in the folder only once Plaud finished it, so it is
 handed over at the next check. Only the app's own file names count: a sync
 tool's temporary and conflict files are left alone, and so are the MP3s.
 Fridolin only reads the folder; delete old recordings on the phone.
+
+### The pin's battery
+
+A NotePin connected to the phone cannot sleep. Up to version 0.3 the app
+kept the Bluetooth link up all the time, and the pin's battery ran out
+fast. Plaud's own app connects only while it is open. The app's **Sync**
+setting now chooses:
+
+| Sync | Connects | A recording reaches the phone | Pin battery |
+| --- | --- | --- | --- |
+| **Smart** (default) | every 10 min, and when the app is opened, the phone is plugged in or unlocked (at most every 5 min), or the pin comes back in range | at the next check-in: usually minutes, at most 10 | sleeps between check-ins |
+| **Every N minutes** (2–240, default 30) | every N min, and when the app is opened | within N minutes | sleeps longest |
+| **Instant** | always | seconds after it stops | runs down fast, as before |
+
+A check-in connects, fetches what is new, deletes it on the pin, and
+disconnects a few seconds later. If the pin is recording at that moment,
+the link stays until the recording stops, so its end is seen at once: the
+pin is awake while it records anyway. **Fetch now**, in the app and in its
+notification, checks in at once in any mode. With voice mode on, smart
+and every N minutes check in at least every 2 minutes. **Unpair** connects
+to the pin first, so it needs the pin close by, not already connected.
+
+A check-in that misses the pin (out of range, phone in another room) waits
+longer each time. In smart and every-N-minutes modes the wait starts at
+the interval and doubles up to an hour (never shorter than the interval).
+In instant mode it starts at 30 seconds and doubles up to 10 minutes.
+Meanwhile a low-power scan for the pin's address notices it coming back
+and checks in then. The timer is an Android alarm that Doze lets through
+(inexactly: on a phone left still for a long time, Android may stretch
+the 10 minutes).
+
+**What the pin and Plaud's SDK offer**, which this design follows (SDK
+commit `d532d5a`, read from its public README, its template app and the
+AAR's classes):
+
+- **No "recording stopped" or "new file" signal without a connection.**
+  The SDK decodes from the pin's advertisement only who it is: the serial
+  number, the model code, the firmware version and whether it is bound.
+  Recording start and stop, and the file list, arrive only as callbacks
+  over a live, handshaken link. Plaud's background wake-up, an iBeacon the
+  pin sends while disconnected, is documented for iOS and the Note Pro
+  only. The Android SDK has no API for it.
+- **No control of the connection interval.** The SDK connects with
+  `connectGatt(autoConnect=false, TRANSPORT_LE)`, asks for a larger MTU,
+  and never calls `requestConnectionPriority`. It does not hand out its
+  `BluetoothGatt`, so the app cannot ask for
+  `CONNECTION_PRIORITY_LOW_POWER`. Keeping the link at low power (the last
+  option) is therefore not available, and instant mode is the old link
+  unchanged.
+- **The SDK's scan has no filter** (`SCAN_MODE_BALANCED`, empty filter
+  list). Android pauses such scans while the screen is off. So a check-in
+  connects straight to the pin as last found (the app keeps the SDK's
+  device record), and scans only on every third miss in a row, or when
+  it has no record yet (after pairing).
+- **The app's own scan is filtered** to the pin's address and runs at
+  `SCAN_MODE_LOW_POWER`, batched every 30 seconds where the chip can.
+  Android lets it run with the screen off, and it costs the pin nothing,
+  since the pin advertises anyway. The app runs it after a miss, to see
+  the pin come back, and in smart mode between check-ins, to see whether
+  the pin's raw advertisement (its manufacturer data, beyond the fields
+  the SDK reads) changes when a recording starts or stops. Plaud does
+  not document that, so the app finds out. A change starts a check-in
+  (at most one a minute). The check-in counts as a hit when it finds a
+  new recording or one in progress. After three tries, changes count
+  only while at least half of them were hits. Otherwise the app stops
+  using them for that pin, until a pin is paired again. The log says
+  which bytes changed and how it went, so **Share log** tells whether
+  this pin has such a signal.
+
+What to watch after switching: the pin's battery over a day or two, and
+in the app's log how long recordings waited on the pin (`N new
+recording(s) on device` against when they were made).
 
 ## What happens
 
@@ -288,4 +426,7 @@ for updates either; `plaud` in your own terminal follows your own settings.
 | `brain_access` | `false` | share the login with brains (see above) |
 | `phone_dir` | unset | a folder the phone app's files are synced to; recordings come from there instead of Plaud's cloud (see above) |
 | `phone_upload` | `false` | recordings come from the phone app, which uploads them through the site (see above); they go into `phone_dir` when that is set, else `<data_dir>/plaud/inbox` |
+| `voice` | `false` | voice mode for the phone app (see [Voice mode](#voice-mode)); needs `phone_upload` |
+| `voice_brain` | the DM brain, else the default brain | brain id that answers voice questions |
+| `voice_quiet` | `false` | answers to voice questions go to the phone only, not also to WhatsApp |
 | `cli_path` | found in the folders of `PATH` Fridolin takes its helpers from (see [CONFIGURATION.md](CONFIGURATION.md#helper-programs)), else in the newest nvm node version, else in `/opt/homebrew/bin` or `/usr/local/bin` | path to `plaud` |

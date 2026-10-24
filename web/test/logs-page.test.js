@@ -34,12 +34,13 @@ async function openPage(t) {
   t.after(() => ctx.destroy());
   page.render(root, ctx);
   await settle();
-  const texts = () => root.querySelector('.log-view').children.map((el) => (el.classList.contains('log-sep') ? '---' : el.lastChild.textContent));
+  const texts = () => [...root.querySelector('.log-view').children].map((el) => (el.classList.contains('log-sep') ? '---' : el.lastChild.textContent));
   const poll = async () => { t.mock.timers.tick(2000); await settle(); };
   return { root, bridge, calls, texts, poll, count: () => root.querySelector('.toolbar span.muted').textContent };
 }
 
 test('a restart is noticed from the log answer itself', async (t) => {
+  /** @type {[string, string[]][]} */
   const cases = [
     // The new process has logged more lines than the old cursor, or fewer.
     ['more lines than before', ['new 1', 'new 2', 'new 3', 'new 4', 'new 5']],

@@ -80,6 +80,8 @@ func runBridgeCLI(t *testing.T, root string, args ...string) (string, int) {
 		"TMPDIR=" + tmp,
 		"TMUX_TMPDIR=" + tmp,
 		"GORACE=atexit_sleep_ms=0",
+		// A fixed zone, for fridolin init and doctor to say the same everywhere.
+		"TZ=Europe/Zurich",
 		// Where a binary built with -cover writes its counters; without it,
 		// `go test -cover` would add a warning to what the command prints.
 		"GOCOVERDIR=" + t.TempDir(),

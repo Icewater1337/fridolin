@@ -17,12 +17,39 @@ import { chatEl, chatName } from '../components/chat.js';
 import { liveForm } from '../components/live-form.js';
 import { githubCard } from '../components/github-card.js';
 
-const every = (sec) => (sec % 60 === 0 ? (sec === 60 ? 'minute' : `${sec / 60} minutes`) : `${sec} seconds`);
+/** @import { PageModule } from '../app/page.js' */
+/** @import { Brain, PlaudAppBuild, PlaudConnectJob, PlaudForward, PlaudGivenUp, PlaudPhone, PlaudSettings, PlaudStatus } from '../../types/api.js' */
+
+/**
+ * What the connected card's facts show, from the status.
+ * @typedef {object} PlaudFacts
+ * @property {string} chat
+ * @property {string} chatName
+ * @property {boolean} toYou
+ * @property {string} chatBrain
+ * @property {string} target
+ * @property {PlaudForward | null} last
+ * @property {PlaudGivenUp[]} givenUp
+ * @property {number} handed
+ * @property {string} poll
+ * @property {number} pending
+ * @property {boolean} waiting
+ * @property {number} [seen]
+ * @property {string} cliVersion
+ */
+
+/**
+ * What the settings form is built from.
+ * @typedef {{st: Partial<PlaudSettings>, options: [string, string][], defaultMessage: string, interval: number}} SettingsData
+ */
+
+const every = (/** @type {number} */ sec) => (sec % 60 === 0 ? (sec === 60 ? 'minute' : `${sec / 60} minutes`) : `${sec} seconds`);
 
 // What a recording's run is up to, as the status names it.
+/** @type {Record<string, string | undefined>} */
 const runState = { handed: 'with the brain', done: 'answered', stopped: 'stopped', failed: 'its run failed, trying again' };
 
-export default {
+export default /** @satisfies {PageModule} */ ({
   title: 'Integrations',
   render(root, ctx) {
     const card = h('section.card', loading('Checking Plaud…'));
@@ -34,7 +61,9 @@ export default {
     // bridge asked last.
     const plaud = resource('/api/plaud/status');
     const refresh = () => plaud.refresh();
+    /** @type {PlaudStatus | null} */
     let status = null;
+    /** @type {Brain[]} */
     let brains = [];
 
     // While connected the card keeps these parts, so the settings keep
@@ -54,16 +83,17 @@ export default {
     const settings = liveForm({ build: buildSettings, edits: (d) => d.st });
     ctx.dirty = () => settings.dirty();
 
+    /** @type {(state: string, kind: string) => HTMLElement} */
     const head = (state, kind) => h('div.card-head',
       h('div.card-title', icon('inbox'), h('h2', 'Plaud recorder')),
       pill(state, kind));
     // A CLI version Fridolin does not read, and what to install instead.
-    const cliWarn = (warning) => (warning ? callout('warn', 'Plaud’s CLI version', warning) : null);
+    const cliWarn = (/** @type {string} */ warning) => (warning ? callout('warn', 'Plaud’s CLI version', warning) : null);
     // A sign-in under way or one that failed. The connected card shows it
     // only while the login expired, when Connect again can fail and keep
     // the old login: on a login that works, a failed attempt is old news
     // (one from before a sign-in outside the dashboard, say).
-    const connectNotes = (connect) => [
+    const connectNotes = (/** @type {PlaudConnectJob | null | undefined} */ connect) => [
       connect && connect.state === 'running' ? callout('info', 'Approve access in the browser tab Plaud just opened.',
         // The bridge passes on only the link Plaud's tool printed for
         // its sign-in; the host shows where it leads.
@@ -147,7 +177,7 @@ export default {
       }
 
       paint(card, 'connected', () => [headBox, alertsBox, factsBox, settings.el, actionsBox, appBox, loginBox]);
-      const st = s.settings || {};
+      const st = /** @type {Partial<PlaudSettings>} */ (s.settings || {});
       paint(headBox, { expired: !!s.expired, account: s.account || '', folder, phone }, ({ expired, account }) => [
         head(folder ? 'Phone folder' : phone ? 'Phone app' : expired ? 'Login expired' : 'Connected', expired ? 'bad' : 'ok'),
         folder ? h('p', 'Recordings come from the Plaud Sync phone app, through the folder ', mono(folder), ' its files are synced to (', mono('plaud.phone_dir'), ').')
@@ -173,9 +203,10 @@ export default {
       }, renderFacts);
       // The picked brain is marked when it cannot take recordings: gone,
       // or listed but not running (not approved, or it has an issue).
-      const missing = (label) => (s.brain_missing ? `${label} (missing)` : label);
+      const missing = (/** @type {string} */ label) => (s.brain_missing ? `${label} (missing)` : label);
       const auto = brains.find((b) => b.id === s.auto_brain);
-      const options = [['', `Automatic (${auto ? auto.name || auto.id : s.auto_brain || 'the DM brain'})`], ...brains.map((b) => [b.id, b.id === st.brain ? missing(brainLabel(b)) : brainLabel(b)])];
+      /** @type {[string, string][]} */
+      const options = [['', `Automatic (${auto ? auto.name || auto.id : s.auto_brain || 'the DM brain'})`], ...brains.map((b) => /** @type {[string, string]} */ ([b.id, b.id === st.brain ? missing(brainLabel(b)) : brainLabel(b)]))];
       // The picked brain keeps its option while it is gone (or the list is
       // still loading), so Save does not quietly switch to Automatic.
       if (st.brain && !brains.some((b) => b.id === st.brain)) options.push([st.brain, missing(st.brain)]);
@@ -191,6 +222,7 @@ export default {
       }
     }
 
+    /** @param {PlaudFacts} f */
     function renderFacts(f) {
       const facts = [];
       if (f.chat) {
@@ -198,6 +230,7 @@ export default {
         if (f.chatBrain) facts.push(h('div.muted.small', `What you write back in that chat goes to the ${f.chatBrain} brain, not to ${f.target}.`));
       }
       // "Send again" hands a recording over once more.
+      /** @param {string} id */
       const again = (id) => btn('Send again', {
         small: true, icon: 'refresh',
         onClick: async () => { await post('/api/plaud/resend', { id }); toast('It goes to the brain with the next check', 'ok'); await refresh(); },
@@ -215,9 +248,12 @@ export default {
       return facts.length ? h('div.facts', facts) : null;
     }
 
+    /** @param {{saved: boolean}} keys */
     function renderKeys({ saved }) {
+      /** @type {(label: string, help?: string) => HTMLElement} */
       const key = (label, help) => field({ label, help, control: h('input', { type: 'password', id: nextId('pk'), autocomplete: 'off', placeholder: saved ? 'saved — type to replace' : '' }) });
       const fields = [key('Client ID'), key('Client secret'), key('API key', 'App Settings → API Keys: Plaud transcribes with it.')];
+      /** @param {HTMLElement} f */
       const value = (f) => f.querySelector('input').value;
       return [
         h('h3', 'Phone app'),
@@ -238,6 +274,7 @@ export default {
 
     // Where the app is built: here, where this computer has a JDK and the
     // Android SDK, else on a node that builds Android apps (android-build).
+    /** @param {{site: string, saved: boolean, build: PlaudAppBuild | null, built: string, buildsOn: string, noBuilder: string}} view */
     function renderBuild({ site, saved, build, built, buildsOn, noBuilder }) {
       const running = !!(build && build.state === 'running');
       const expires = build && build.pairing_expires ? ` Its pairing code works once, until ${new Date(build.pairing_expires).toLocaleString()}.` : '';
@@ -265,8 +302,10 @@ export default {
       ];
     }
 
+    /** @param {PlaudPhone[]} devices */
     function renderPhones(devices) {
       if (!devices.length) return h('p.muted', 'No phone is paired yet.');
+      /** @param {string} id */
       const unpair = (id) => btn('Unpair', {
         small: true, kind: 'danger', icon: 'x',
         onClick: async () => {
@@ -281,10 +320,17 @@ export default {
         d.last_upload ? h('span', ' · last transcript ', timeAgo(d.last_upload)) : ' · nothing sent yet', ' ', unpair(d.id))));
     }
 
+    /**
+     * @param {SettingsData} data
+     * @param {() => void} changed
+     */
     function buildSettings({ st, options, defaultMessage, interval }, changed) {
       const enabled = toggle({ checked: !!st.enabled, label: 'Send new recordings to a brain' });
       const upload = toggle({ checked: !!st.phone_upload, label: 'Recordings come from the Plaud Sync phone app, through your site' });
       const brainSel = select(options, st.brain || '');
+      const voice = toggle({ checked: !!st.voice, label: 'Voice mode: the phone app may ask by voice and read the answer aloud' });
+      const voiceBrainSel = select(options, st.voice_brain || '');
+      const voiceQuiet = toggle({ checked: !!st.voice_quiet, label: 'Answers to voice questions go to the phone only, not WhatsApp' });
       const polished = toggle({ checked: !!st.polished, label: 'Use Plaud’s AI-cleaned transcript' });
       const accessWarn = h('div.help.warn-text', 'Brains can read the Plaud login while this is on.');
       const showAccessWarn = () => { accessWarn.hidden = !access.input.checked; };
@@ -317,6 +363,7 @@ export default {
       const value = () => ({
         enabled: enabled.input.checked, brain: brainSel.value, polished: polished.input.checked,
         brain_access: access.input.checked, message: msg.value, phone_upload: upload.input.checked,
+        voice: voice.input.checked, voice_brain: voiceBrainSel.value, voice_quiet: voiceQuiet.input.checked,
       });
       // The phone app's transcripts have no cleaned-up version, and no login is shared.
       const phone = !!(st.phone_dir || st.phone_upload);
@@ -331,10 +378,15 @@ export default {
         phone ? null : accessField,
         // A synced folder (plaud.phone_dir, in config.json) wins over uploads.
         st.phone_dir ? null : field({ control: upload, help: 'On: the app is built further down this card, and Plaud’s cloud, its CLI and your Plaud login are not used. Save, then build the app.' }),
+        // Voice mode rides on the app's uploads (docs/PLAUD.md, "Voice mode").
+        st.phone_upload && !st.phone_dir ? field({ control: voice, help: 'With the app’s Voice mode switch on, a NotePin recording or a question spoken into the phone goes to the brain below, and the phone reads its answer aloud. The answer is encrypted for the phone: your site only passes it on. The app needs a build from this card made after this was added.' }) : null,
+        st.phone_upload && !st.phone_dir && st.voice ? field({ label: 'Brain for voice questions', control: voiceBrainSel, help: 'Default: the brain that gets your DMs. Its answer goes to its private chat too, after the question.' }) : null,
+        st.phone_upload && !st.phone_dir && st.voice ? field({ control: voiceQuiet }) : null,
         field({ label: 'Instruction sent with each recording', control: msg, wide: true, help: h('span', 'It follows a first line that says what arrived. ', mono('{name}'), ', ', mono('{when}'), ' and ', mono('{duration}'), ' are filled in. How a brain files recordings belongs in its ', mono('skills/plaud.md'), '.') }));
       return { el, value };
     }
 
+    /** @param {{enabled: boolean, expired: boolean, connecting: boolean, access: boolean, phone: boolean}} view */
     function renderActions({ enabled, expired, connecting, access, phone }) {
       return [
         btn('Save', {
@@ -362,6 +414,7 @@ export default {
 
     // Disconnect, on the connected card and on one that waits for you to
     // connect again; what it signs out depends on which.
+    /** @param {{connected: boolean, expired: boolean, moved: boolean, access: boolean}} on */
     function disconnectButton({ connected, expired, moved, access }) {
       return btn('Disconnect', {
         kind: 'danger', icon: 'x', small: true,
@@ -380,4 +433,4 @@ export default {
       });
     }
   },
-};
+});

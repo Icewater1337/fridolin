@@ -503,3 +503,26 @@ func TestDeviceID(t *testing.T) {
 		t.Error("accepted a broken device id")
 	}
 }
+
+func TestReleaseDevice(t *testing.T) {
+	ctx := context.Background()
+	st, err := cloud.NewDir(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := ReleaseDevice(ctx, st, "a", time.Now()); ok || err != nil {
+		t.Fatalf("no lease: %v %v", ok, err)
+	}
+	if err := write(ctx, st, Record{DeviceID: "a", RenewedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := ReleaseDevice(ctx, st, "b", time.Now()); ok || err != nil {
+		t.Fatalf("another device's: %v %v", ok, err)
+	}
+	if ok, err := ReleaseDevice(ctx, st, "a", time.Now()); !ok || err != nil {
+		t.Fatalf("its own: %v %v", ok, err)
+	}
+	if r, _, _ := Read(ctx, st); !r.Released || r.DeviceID != "a" {
+		t.Fatalf("after: %+v", r)
+	}
+}

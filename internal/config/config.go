@@ -72,6 +72,15 @@ type File struct {
 	CodexModel  string `json:"codex_model,omitempty"`
 	CodexEffort string `json:"codex_effort,omitempty"`
 
+	// Timezone is the owner's time zone, an IANA name such as
+	// "Europe/Zurich": the zone of every time of day the bridge keeps,
+	// scheduled agents, standing intents, the nightly snapshots and the
+	// daily backup, and the "now" brains are told and run in (TZ). Empty
+	// is the zone the bridge's process runs in (TZ, else the system's),
+	// which in the core container is the one fridolin core start passed
+	// from the host. fridolin init writes the machine's.
+	Timezone string `json:"timezone,omitempty"`
+
 	// DataDir holds runtime state: SQLite DB, downloaded media, dashboard
 	// token, backup state.
 	DataDir string `json:"data_dir"`
@@ -607,6 +616,11 @@ func (c *File) Validate(goos string) error {
 	}
 	if !manifest.ValidEffort(c.CodexEffort) {
 		return fmt.Errorf("codex_effort %q must be one of low, medium, high, xhigh, max", c.CodexEffort)
+	}
+	if c.Timezone != "" {
+		if _, err := trigger.LoadZone(c.Timezone); err != nil {
+			return fmt.Errorf("timezone: %v", err)
+		}
 	}
 	if !manifest.ValidEffort(c.BrainEffort) {
 		return fmt.Errorf("brain_effort %q must be one of low, medium, high, xhigh, max", c.BrainEffort)

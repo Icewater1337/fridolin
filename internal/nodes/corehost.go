@@ -17,6 +17,8 @@ import (
 // replace a different one already on the target.
 type CoreTransferOptions struct {
 	Run, Replace bool
+	// Move is the move id the transfer is for, "" for a new one.
+	Move string
 }
 
 // CoreTransferEnd is one side of a transfer as the report shows it.
@@ -49,6 +51,13 @@ type CoreTransferReport struct {
 	Sent      []string `json:"sent,omitempty"`
 	Stored    []string `json:"stored,omitempty"`
 	Unchanged []string `json:"unchanged,omitempty"`
+	// FilesSent are the secret files of the core's credentials folder
+	// that went along (#187), FilesStored and FilesKept what the target
+	// wrote and what it had already; FilesError why the source sent none.
+	FilesSent   []string `json:"files_sent,omitempty"`
+	FilesStored []string `json:"files_stored,omitempty"`
+	FilesKept   []string `json:"files_kept,omitempty"`
+	FilesError  string   `json:"files_error,omitempty"`
 }
 
 // ErrCoreTransfer is a transfer whose checks failed.
@@ -61,17 +70,27 @@ var ErrCoreTransfer = errors.New("the host secrets cannot be transferred")
 // core relays the offer and the ciphertext. Without o.Run it only checks
 // both sides (core.check) and reports.
 func (s *Service) CoreSecretsTransfer(ctx context.Context, src, dst string, o CoreTransferOptions) (CoreTransferReport, error) {
+	rep, _, err := s.coreTransferCheck(ctx, src, dst)
+	if err != nil {
+		return rep, err
+	}
+	return s.coreTransferRun(ctx, src, dst, rep, o)
+}
+
+// coreTransferCheck checks both sides of a transfer (core.check) and
+// returns what each answered.
+func (s *Service) coreTransferCheck(ctx context.Context, src, dst string) (CoreTransferReport, [2]nodeproto.CoreCheckResult, error) {
 	var rep CoreTransferReport
+	checks := [2]nodeproto.CoreCheckResult{}
 	rep.Problems = []string{}
 	if src == dst {
-		return rep, fmt.Errorf("%w: the source and the target are the same node", ErrInvalidInput)
+		return rep, checks, fmt.Errorf("%w: the source and the target are the same node", ErrInvalidInput)
 	}
 	ends := [2]*CoreTransferEnd{&rep.Source, &rep.Target}
-	checks := [2]nodeproto.CoreCheckResult{}
 	for i, id := range []string{src, dst} {
 		n, err := s.reg.Get(id)
 		if err != nil {
-			return rep, err
+			return rep, checks, err
 		}
 		*ends[i] = CoreTransferEnd{ID: n.ID, Name: n.Name, Fingerprint: nodeproto.Fingerprint(n.PublicKey), Stored: []string{}, Missing: []string{}}
 		switch {
@@ -112,15 +131,22 @@ func (s *Service) CoreSecretsTransfer(ctx context.Context, src, dst string, o Co
 	if checks[0].ID != "" && len(rep.Source.Stored) == 0 && rep.Source.SecretsError == "" {
 		rep.Problems = append(rep.Problems, rep.Source.Name+" holds none of the host secrets")
 	}
+	return rep, checks, nil
+}
+
+// coreTransferRun moves the secrets once coreTransferCheck found nothing
+// against it (without o.Run it returns the report as it is).
+func (s *Service) coreTransferRun(ctx context.Context, src, dst string, rep CoreTransferReport, o CoreTransferOptions) (CoreTransferReport, error) {
 	if !o.Run {
 		return rep, nil
 	}
 	if len(rep.Problems) > 0 {
 		return rep, fmt.Errorf("%w: %s", ErrCoreTransfer, rep.Problems[0])
 	}
-	rnd := make([]byte, 2)
-	_, _ = rand.Read(rnd)
-	rep.Move = nodeproto.NewMoveID(time.Now(), hex.EncodeToString(rnd))
+	rep.Move = o.Move
+	if rep.Move == "" {
+		rep.Move = newMoveID()
+	}
 	var offer nodeproto.CoreSecretsOffer
 	if err := s.Call(ctx, dst, nodeproto.MethodCoreSecretsOffer, nodeproto.CoreSecretsOfferParams{Move: rep.Move}, &offer); err != nil {
 		return rep, fmt.Errorf("%s: the offer: %w", rep.Target.Name, err)
@@ -129,14 +155,21 @@ func (s *Service) CoreSecretsTransfer(ctx context.Context, src, dst string, o Co
 	if err := s.Call(ctx, src, nodeproto.MethodCoreSecretsSend, nodeproto.CoreSecretsSendParams{Offer: offer}, &bundle); err != nil {
 		return rep, fmt.Errorf("%s: sending: %w", rep.Source.Name, err)
 	}
-	rep.Sent = bundle.Names
+	rep.Sent, rep.FilesSent, rep.FilesError = bundle.Names, bundle.Files, bundle.FilesError
 	var got nodeproto.CoreSecretsReceived
 	if err := s.Call(ctx, dst, nodeproto.MethodCoreSecretsReceive, nodeproto.CoreSecretsReceiveParams{Move: rep.Move, From: src, Ciphertext: bundle.Ciphertext, Replace: o.Replace}, &got); err != nil {
 		return rep, fmt.Errorf("%s: storing: %w", rep.Target.Name, err)
 	}
-	rep.Ran, rep.Stored, rep.Unchanged = true, got.Stored, got.Unchanged
-	s.logf("nodes: moved %d host secrets from %s to %s (move %s; %d stored, %d unchanged)", len(bundle.Names), src, dst, rep.Move, len(got.Stored), len(got.Unchanged))
+	rep.Ran, rep.Stored, rep.Unchanged, rep.FilesStored, rep.FilesKept = true, got.Stored, got.Unchanged, got.FilesStored, got.FilesKept
+	s.logf("nodes: moved %d host secrets and %d secret files from %s to %s (move %s; %d stored, %d unchanged, %d files stored, %d kept)", len(bundle.Names), len(bundle.Files), src, dst, rep.Move, len(got.Stored), len(got.Unchanged), len(got.FilesStored), len(got.FilesKept))
 	return rep, nil
+}
+
+// newMoveID is a fresh move id.
+func newMoveID() string {
+	rnd := make([]byte, 2)
+	_, _ = rand.Read(rnd)
+	return nodeproto.NewMoveID(time.Now(), hex.EncodeToString(rnd))
 }
 
 // coreHostPending reports whether n offers a core-host its approval does

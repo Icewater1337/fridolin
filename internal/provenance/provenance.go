@@ -8,6 +8,7 @@ package provenance
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,6 +67,15 @@ func (v Verifier) Verify(ctx context.Context, image, repo string) error {
 	if err != nil {
 		return err
 	}
+	// GitHub's names ignore case and gh's signer check does not: a repo
+	// named from a registry (ghcr.io lowercases the owner) takes the
+	// spelling the attestation names; gh still checks the signature for it.
+	for _, b := range bundles {
+		if r := bundleRepo(b); r != "" && strings.EqualFold(r, repo) {
+			repo = r
+			break
+		}
+	}
 	dir, err := os.MkdirTemp(v.TempDir, "provenance-")
 	if err != nil {
 		return err
@@ -78,6 +88,10 @@ func (v Verifier) Verify(ctx context.Context, image, repo string) error {
 	out, err := v.run(ctx, "attestation", "verify", "oci://"+image, "--bundle", path,
 		"--repo", repo, "--signer-workflow", repo+"/"+Workflow, "--source-ref", "refs/heads/main")
 	if err != nil {
+		if strings.Contains(string(out), "unknown flag") {
+			// An old gh (Ubuntu 24.04's 2.45) prints its usage.
+			return fmt.Errorf("provenance: GitHub's CLI (gh) here is too old for gh attestation verify --source-ref: install a current one (https://cli.github.com; on Linux from GitHub's apt repository): %s", firstLine(string(out)))
+		}
 		return fmt.Errorf("provenance: %s was not built by %s's %s on main: %v %s", image, repo, Workflow, err, strings.TrimSpace(lastLines(string(out), 3)))
 	}
 	return nil
@@ -188,6 +202,43 @@ func (v Verifier) get(ctx context.Context, url, accept string) ([]byte, error) {
 	return data, nil
 }
 
+// bundleRepo is the repository (owner/name) whose workflow built what a
+// SLSA provenance bundle attests, as it spells it; "" when the bundle
+// says none. Only the spelling is used: gh verifies the bundle.
+func bundleRepo(bundle string) string {
+	var b struct {
+		DSSE struct {
+			Payload string `json:"payload"`
+		} `json:"dsseEnvelope"`
+	}
+	if json.Unmarshal([]byte(bundle), &b) != nil || b.DSSE.Payload == "" {
+		return ""
+	}
+	payload, err := base64.StdEncoding.DecodeString(b.DSSE.Payload)
+	if err != nil {
+		return ""
+	}
+	var st struct {
+		Predicate struct {
+			BuildDefinition struct {
+				ExternalParameters struct {
+					Workflow struct {
+						Repository string `json:"repository"`
+					} `json:"workflow"`
+				} `json:"externalParameters"`
+			} `json:"buildDefinition"`
+		} `json:"predicate"`
+	}
+	if json.Unmarshal(payload, &st) != nil {
+		return ""
+	}
+	r, ok := strings.CutPrefix(st.Predicate.BuildDefinition.ExternalParameters.Workflow.Repository, "https://github.com/")
+	if !ok || !repoRE.MatchString(r) {
+		return ""
+	}
+	return r
+}
+
 func compact(raw []byte) string {
 	var b strings.Builder
 	var v any
@@ -198,6 +249,11 @@ func compact(raw []byte) string {
 		}
 	}
 	return strings.ReplaceAll(string(raw), "\n", "")
+}
+
+func firstLine(s string) string {
+	l, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
+	return strings.TrimSpace(l)
 }
 
 func lastLines(s string, n int) string {

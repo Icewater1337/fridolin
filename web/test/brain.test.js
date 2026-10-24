@@ -25,6 +25,7 @@ test('slugify', async (t) => {
 });
 
 test('BRAIN_ID_RE', async (t) => {
+  /** @type {[string, boolean][]} */
   const cases = [['personal', true], ['a_b-1', true], ['-lead', false], ['Upper', false], ['a'.repeat(40), true], ['a'.repeat(41), false]];
   for (const [id, want] of cases) {
     await t.test(id, () => assert.equal(BRAIN_ID_RE.test(id), want));
@@ -32,6 +33,7 @@ test('BRAIN_ID_RE', async (t) => {
 });
 
 test('routingSummary', async (t) => {
+  /** @type {[string, Parameters<typeof routingSummary>[0], string][]} */
   const cases = [
     ['none', null, 'No chats'],
     ['empty', {}, 'No chats routed yet'],
@@ -45,6 +47,7 @@ test('routingSummary', async (t) => {
 });
 
 test('brainLabel', async (t) => {
+  /** @type {[string, Parameters<typeof brainLabel>[0], string][]} */
   const cases = [
     ['a name of its own', { id: 'work', name: 'Office' }, 'Office (work)'],
     ['the name is the id', { id: 'work', name: 'work' }, 'work'],
@@ -91,10 +94,14 @@ test('one name per issue kind, short on a pill', async (t) => {
 
 test('runtimeSummary', async (t) => {
   installDom();
+  // Runtimes with only what the summary reads.
+  /** @type {(o: object) => Parameters<typeof runtimeSummary>[0]} */
+  const runtime = (o) => /** @type {Parameters<typeof runtimeSummary>[0]} */ (/** @type {unknown} */ (o));
+  /** @type {[string, Parameters<typeof runtimeSummary>[0], string][]} */
   const cases = [
-    ['idle, never ran', {}, 'IdleNo runs yet'],
-    ['working with a queue', { running: { preview: 'hi' }, queue: [{}, {}], last: { outcome: 'ok', finished: '' } }, 'Working2 queuedRepliednever'],
-    ['the last run failed', { last: { outcome: 'error', error: 'exit 1' } }, 'IdleFailednever'],
+    ['idle, never ran', runtime({}), 'IdleNo runs yet'],
+    ['working with a queue', runtime({ running: { preview: 'hi' }, queue: [{}, {}], last: { outcome: 'ok', finished: '' } }), 'Working2 queuedRepliednever'],
+    ['the last run failed', runtime({ last: { outcome: 'error', error: 'exit 1' } }), 'IdleFailednever'],
   ];
   for (const [name, rt, want] of cases) {
     await t.test(name, () => assert.equal(h('div', runtimeSummary(rt)).textContent, want));

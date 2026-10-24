@@ -114,5 +114,9 @@ Content-Type: application/json
       ],
       "when": "daily 06:00"
     }
-  ]
+  ],
+  "timezone": {
+    "name": "Local",
+    "source": "process"
+  }
 }

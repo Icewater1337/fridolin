@@ -79,7 +79,10 @@ type SiteManager struct {
 	chats    *siteChats
 	// searchSlots limits the searches the bridge runs for the site at once.
 	searchSlots chan struct{}
-	ctx         context.Context
+	// waitSlots limits the phones' fetches of a voice answer that wait
+	// for it at once.
+	waitSlots chan struct{}
+	ctx       context.Context
 
 	warnNoSandbox sync.Once
 
@@ -114,6 +117,7 @@ func New(opts SiteOptions) *SiteManager {
 	}
 	m.chats = &siteChats{m: m}
 	m.searchSlots = make(chan struct{}, spoolSearchLimit)
+	m.waitSlots = make(chan struct{}, spoolWaitLimit)
 	m.settings = m.loadSettings()
 	m.users = m.loadUsers()
 	return m
@@ -148,6 +152,9 @@ func (m *SiteManager) loadSettings() SiteSettings {
 	if s.RoleBrains == nil {
 		s.RoleBrains = map[string][]string{}
 	}
+	if s.RoleUploads == nil {
+		s.RoleUploads = map[string][]string{}
+	}
 	return s
 }
 
@@ -166,11 +173,16 @@ func (m *SiteManager) Settings() SiteSettings {
 	s.History = append([]SiteDeploy{}, s.History...)
 	s.Builders = append([]string{}, s.Builders...)
 	s.Proposals = append([]SiteProposal{}, s.Proposals...)
-	s.RoleBrains = map[string][]string{}
-	for role, brains := range m.settings.RoleBrains {
-		s.RoleBrains[role] = slices.Clone(brains)
-	}
+	s.RoleBrains, s.RoleUploads = cloneRoleMap(m.settings.RoleBrains), cloneRoleMap(m.settings.RoleUploads)
 	return s
+}
+
+func cloneRoleMap(in map[string][]string) map[string][]string {
+	out := map[string][]string{}
+	for role, brains := range in {
+		out[role] = slices.Clone(brains)
+	}
+	return out
 }
 
 var (
@@ -254,6 +266,11 @@ func (m *SiteManager) SetRoles(roles []string) error {
 		}
 	}
 	m.settings.Roles = out
+	for role := range m.settings.RoleUploads {
+		if !seen[role] || role == "admin" {
+			delete(m.settings.RoleUploads, role)
+		}
+	}
 	for role := range m.settings.RoleBrains {
 		if !seen[role] || role == "admin" {
 			delete(m.settings.RoleBrains, role)
@@ -269,15 +286,25 @@ var siteBrainRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}$`)
 // /wiki; a role left out keeps what it had. admin sees every brain and
 // takes no list.
 func (m *SiteManager) SetRoleBrains(brains map[string][]string) error {
+	return m.setRoleMap(&m.settings.RoleBrains, brains, "admin sees every brain; give the other roles their brains")
+}
+
+// SetRoleUploads sets the brains each role may upload to on the site's
+// /files; a role left out keeps what it had.
+func (m *SiteManager) SetRoleUploads(brains map[string][]string) error {
+	return m.setRoleMap(&m.settings.RoleUploads, brains, "admin changes every brain's files; give the other roles their uploads")
+}
+
+func (m *SiteManager) setRoleMap(field *map[string][]string, brains map[string][]string, adminErr string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	next := map[string][]string{}
-	for role, list := range m.settings.RoleBrains {
+	for role, list := range *field {
 		next[role] = list
 	}
 	for role, list := range brains {
 		if role == "admin" {
-			return errors.New("admin sees every brain; give the other roles their brains")
+			return errors.New(adminErr)
 		}
 		if !slices.Contains(m.settings.Roles, role) {
 			return fmt.Errorf("unknown role %q (roles: %s)", role, strings.Join(m.settings.Roles, ", "))
@@ -298,10 +325,10 @@ func (m *SiteManager) SetRoleBrains(brains map[string][]string) error {
 		}
 		next[role] = clean
 	}
-	prev := m.settings.RoleBrains
-	m.settings.RoleBrains = next
+	prev := *field
+	*field = next
 	if err := m.saveSettingsLocked(); err != nil {
-		m.settings.RoleBrains = prev
+		*field = prev
 		return err
 	}
 	return nil
@@ -965,6 +992,12 @@ func (p *siteProc) status() SiteProcStatus {
 		st.Log = st.Log[len(st.Log)-80:]
 	}
 	return st
+}
+
+// TunnelRunning reports whether the Cloudflare tunnel runs inside this
+// process now (site.tunnel), for a core move's report.
+func (m *SiteManager) TunnelRunning() bool {
+	return m.tunnel.status().State == "running"
 }
 
 // ensure starts the supervisor unless it is already running.

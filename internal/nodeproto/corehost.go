@@ -59,7 +59,7 @@ const (
 )
 
 // CoreHostMethods lists the core-host methods.
-var CoreHostMethods = []string{MethodCoreCheck, MethodCoreSecretsOffer, MethodCoreSecretsSend, MethodCoreSecretsReceive, MethodCoreSecretsForget}
+var CoreHostMethods = append([]string{MethodCoreCheck, MethodCoreSecretsOffer, MethodCoreSecretsSend, MethodCoreSecretsReceive, MethodCoreSecretsForget}, CoreMoveMethods...)
 
 // CoreSecretsMethods are the core-host methods that move or remove host
 // secrets: a lockdown refuses them.
@@ -154,6 +154,11 @@ func Fingerprint(pub []byte) string {
 // place that approves it says so.
 const CoreHostApproval = "core-host lets fridolin move the core to this machine. The machine then holds every host secret: the B2 keys, the age identity and export key (all exports and the WhatsApp session), the Claude token. Approve only a machine you trust as much as the one that runs the core now."
 
+// FrideApproval is what approving fride means (#187 §5, "Follow-up
+// outside this design"): every place that approves it says so. FrIDE
+// runs Claude Code agents on the node, whatever exec allows.
+const FrideApproval = "fride lets fridolin hand coding tasks to FrIDE on this machine. FrIDE runs Claude Code agents there, and they can run anything this machine's user can (on Windows through WSL, PowerShell and C:\\ too), whatever exec allows or refuses: approving fride is approving arbitrary commands on this machine. Approve it only on a machine you would let fridolin do anything on."
+
 // CoreCheckResult is core.check's answer: facts, never a secret's value.
 type CoreCheckResult struct {
 	ID      string `json:"id"`
@@ -173,6 +178,12 @@ type CoreCheckResult struct {
 	SecretStore  string              `json:"secret_store"`
 	Secrets      []CoreSecretPresent `json:"secrets"`
 	SecretsError string              `json:"secrets_error,omitempty"`
+	// SecretFiles are the secret files of the core's credentials folder
+	// a move carries, by name, and SecretFilesDir that folder under ~;
+	// SecretFilesError says why they cannot be read (#187).
+	SecretFiles      []string `json:"secret_files,omitempty"`
+	SecretFilesDir   string   `json:"secret_files_dir,omitempty"`
+	SecretFilesError string   `json:"secret_files_error,omitempty"`
 	// SendTo are the targets this machine trusts, with their fingerprints.
 	SendTo []CoreHostPinView `json:"send_to"`
 	// Setup is `fridolin setup-machine --core` here; SetupNote says why
@@ -180,6 +191,14 @@ type CoreCheckResult struct {
 	Setup     []CoreCheckItem `json:"setup,omitempty"`
 	SetupOK   bool            `json:"setup_ok"`
 	SetupNote string          `json:"setup_note,omitempty"`
+	// Core is the core on this machine as the lease and the bucket see
+	// it; CoreError says why it could not be read (no store, no Docker,
+	// a box: #191 phase 4).
+	Core      *CoreRuntime `json:"core,omitempty"`
+	CoreError string       `json:"core_error,omitempty"`
+	// MachineBound is what of this machine a core that moves away leaves
+	// behind (#187 §4): a fixed scan, report only.
+	MachineBound []string `json:"machine_bound,omitempty"`
 }
 
 // CoreSecretPresent is one host secret by name, never by value.
@@ -274,6 +293,10 @@ type CoreSecretsBundle struct {
 	Ciphertext []byte   `json:"ciphertext"`
 	Names      []string `json:"names"`
 	Missing    []string `json:"missing,omitempty"`
+	// Files are the secret files of the core's credentials folder sealed
+	// beside them, by name (#187); FilesError says why none could be read.
+	Files      []string `json:"files,omitempty"`
+	FilesError string   `json:"files_error,omitempty"`
 }
 
 // CoreSecretsReceiveParams hands a target the bundle of its offer.
@@ -291,6 +314,10 @@ type CoreSecretsReceived struct {
 	Move      string   `json:"move"`
 	Stored    []string `json:"stored"`
 	Unchanged []string `json:"unchanged"`
+	// FilesStored were written into the core's credentials folder,
+	// FilesKept were there already and stay as they were.
+	FilesStored []string `json:"files_stored,omitempty"`
+	FilesKept   []string `json:"files_kept,omitempty"`
 }
 
 // CoreSecretsForgotten are the secrets a target removed.

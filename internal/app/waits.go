@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/nodes"
 )
 
 // waits are how long a bridge and its brain manager wait for what may not
@@ -39,6 +40,11 @@ type waits struct {
 	// approvalTimeout is how long an approval waits for its answer; 0 is
 	// policy.approval_timeout_minutes.
 	approvalTimeout time.Duration
+	// coreMovePoll and coreSecretsPoll are how long the !movecore poll
+	// and the keep/forget poll after a move wait for a vote.
+	coreMovePoll, coreSecretsPoll time.Duration
+	// coreMove are a move's timings (the defaults of nodes when zero).
+	coreMove nodes.MoveOptions
 }
 
 // defaultWaits are the waits of the binary's bridge.
@@ -53,6 +59,8 @@ func defaultWaits() waits {
 		nodeSessionMinAge: time.Minute,
 		reapGrace:         3 * time.Second,
 		vaultTick:         time.Minute,
+		coreMovePoll:      30 * time.Minute,
+		coreSecretsPoll:   24 * time.Hour,
 	}
 }
 

@@ -542,3 +542,19 @@ func DeviceID(dataDir string) (string, error) {
 	}
 	return id, f.Close()
 }
+
+// ReleaseDevice frees the lease when device holds it, live or stale, from
+// outside the process that took it: a core move's target that promoted
+// but gives the core up again (#187). It reports whether it released it.
+func ReleaseDevice(ctx context.Context, store Store, device string, now time.Time) (bool, error) {
+	cur, ok, err := Read(ctx, store)
+	if err != nil {
+		return false, err
+	}
+	if !ok || cur.DeviceID != device || cur.Released {
+		return false, nil
+	}
+	cur.Released = true
+	cur.RenewedAt = now.UTC()
+	return true, write(ctx, store, cur)
+}

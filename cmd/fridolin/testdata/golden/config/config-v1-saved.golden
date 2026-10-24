@@ -32,6 +32,7 @@
   "codex_path": "codex",
   "codex_model": "gpt-6.1-sol",
   "codex_effort": "high",
+  "timezone": "Europe/Zurich",
   "data_dir": "~/.fridolin",
   "db_path": "~/.fridolin/bridge.db",
   "media_dir": "~/.fridolin/media",
@@ -131,7 +132,10 @@
     "message": "[Plaud] {name} ({when}, {duration})",
     "brain_access": true,
     "phone_dir": "~/PlaudSync",
-    "phone_upload": true
+    "phone_upload": true,
+    "voice": true,
+    "voice_brain": "main",
+    "voice_quiet": true
   },
   "dashboard": {
     "require_token": true

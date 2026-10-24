@@ -49,6 +49,11 @@ type Options struct {
 	// OnDeclare hears that a node's declaration changed while it was
 	// connected, after the registry recorded it; nil for nothing.
 	OnDeclare func(n *Node)
+	// OnConnect hears that a node connected, after it was welcomed, and
+	// OnApprove that the owner approved what a node offers; nil for
+	// nothing. Each runs on its own goroutine.
+	OnConnect func(n *Node)
+	OnApprove func(n *Node)
 	// OnJoin hears that a device it did not know joined with a join code
 	// and waits for approval, once, after the registry recorded it; nil
 	// for nothing. It must not block for long.
@@ -71,6 +76,16 @@ type Options struct {
 	// for updating a node in a box (update.go); nil when the core does not
 	// know where its images are published (a local build).
 	BoxImages func(ctx context.Context, version string) (node, fride string, err error)
+	// OnMove hears a core move that ended (coremove.go); MovePoll is how
+	// often the core asks the hosts of a move how it goes (5s when zero).
+	OnMove   func(MoveRecord)
+	MovePoll time.Duration
+	// OnMoveStopping hears a move just before the source is told to stop
+	// the core, so the owner hears it while the core still runs; Site is
+	// the site as the core runs it, for a move's report (coremove.go).
+	// Either may be nil.
+	OnMoveStopping func(MoveRecord)
+	Site           func() *MoveSite
 }
 
 // Service is the node port and the registry behind it.
@@ -107,6 +122,20 @@ type Service struct {
 	// they reported meanwhile.
 	updating map[string]bool
 	reports  map[string]nodeproto.UpdateReport
+
+	// Core moves (coremove.go): the records followed in this process,
+	// the move that runs ("" for none).
+	moveMu        sync.Mutex
+	moves         map[string]*MoveRecord
+	moveActive    string
+	onMove        func(MoveRecord)
+	onStopping    func(MoveRecord)
+	site          func() *MoveSite
+	movePollEvery time.Duration
+	// progs are the lists of programs sent to nodes (programs.go).
+	progs     programsState
+	onConnect func(*Node)
+	onApprove func(*Node)
 }
 
 // New opens the registry in opts.Dir.
@@ -120,12 +149,15 @@ func New(opts Options) (*Service, error) {
 		logf = log.Printf
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Service{
+	s := &Service{
 		reg: reg, logf: logf, onEvent: opts.OnEvent, onDeclare: opts.OnDeclare, onJoin: opts.OnJoin, ctx: ctx, cancel: cancel, sessions: map[string]*session{},
 		dir: opts.Dir, version: opts.Version, binDir: opts.BinariesDir, busy: opts.Busy, hold: opts.Hold, boxImages: opts.BoxImages,
-		updating: map[string]bool{}, reports: map[string]nodeproto.UpdateReport{},
+		updating: map[string]bool{}, reports: map[string]nodeproto.UpdateReport{}, onConnect: opts.OnConnect, onApprove: opts.OnApprove,
 		onCoreHost: opts.OnCoreHost, coreHostSeen: map[string]string{},
-	}, nil
+		moves: map[string]*MoveRecord{}, onMove: opts.OnMove, onStopping: opts.OnMoveStopping, site: opts.Site, movePollEvery: opts.MovePoll,
+	}
+	s.resumeMoves()
+	return s, nil
 }
 
 // Version is the core's version, which nodes are updated to.
@@ -308,6 +340,9 @@ func (s *Service) accept(w http.ResponseWriter, r *http.Request) {
 	// on, is updated now: after the core itself was updated, every node
 	// connects again.
 	s.wg.Go(func() { s.maybeAuto(node.ID) })
+	if s.onConnect != nil {
+		s.wg.Go(func() { s.onConnect(clone(node)) })
+	}
 	s.readLoop(ss)
 	s.logf("nodes: %s (%s) disconnected", node.Name, node.ID)
 }
@@ -521,18 +556,44 @@ func (s *Service) ApproveCommands(id string) (*Node, error) {
 	if err == nil {
 		s.logf("nodes: approved what %s (%s) offers: %s", n.Name, n.ID, n.Approved.Summary())
 		s.pushState(n)
+		if s.onApprove != nil {
+			s.wg.Go(func() { s.onApprove(clone(n)) })
+		}
 	}
 	return n, err
 }
 
 // Revoke revokes node id and closes its connection at once.
+//
+// A core host that is connected forgets the host secrets a move brought
+// it first (#187 §5): once revoked, the core can no longer ask it to.
 func (s *Service) Revoke(id string) (*Node, error) {
+	n, _, err := s.RevokeForget(id)
+	return n, err
+}
+
+// RevokeForget revokes node id like Revoke, and says what its forgetting
+// the host secrets did: nil for a node that is no core host.
+func (s *Service) RevokeForget(id string) (*Node, *CoreForget, error) {
+	var forgot *CoreForget
+	if cur, err := s.reg.Get(id); err == nil && cur.Device == nodeproto.DeviceApproved && cur.Effective().CoreHost != nil {
+		ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
+		f := s.ForgetCoreSecrets(ctx, id)
+		cancel()
+		forgot = &f
+	}
 	n, err := s.reg.Revoke(id)
 	if err == nil {
 		s.logf("nodes: revoked %s (%s)", n.Name, n.ID)
 		s.pushState(n)
 	}
-	return n, err
+	return n, forgot, err
+}
+
+// FridePending reports whether n offers fride its approval does not
+// cover yet.
+func FridePending(n *Node) bool {
+	return n.Declared.Fride != nil && n.Approved.Fride == nil && n.Device != nodeproto.DeviceRevoked
 }
 
 // SetTags replaces node id's tags.
@@ -669,6 +730,12 @@ type View struct {
 	// CoreHost is set for a node that offers core-host, or had it
 	// approved (CoreHostView).
 	CoreHost *CoreHostView `json:"core_host,omitempty"`
+	// FrideApproval is what approving fride means, set while the node
+	// offers fride that waits for approval.
+	FrideApproval string `json:"fride_approval,omitempty"`
+	// Programs is how the core's last list of programs for the node went
+	// (programs.go); nil when none was sent since the core started.
+	Programs *ProgramsStatus `json:"programs,omitempty"`
 }
 
 // Views lists every node with whether it is connected.
@@ -679,6 +746,12 @@ func (s *Service) Views() ([]View, error) {
 		v := View{Node: n, Commands: n.Commands(), Effective: n.Effective(), Online: s.Online(n.ID)}
 		v.UpdateTo, v.UpdateNote = s.UpdateTarget(n)
 		v.CoreHost = coreHostView(n)
+		if FridePending(n) {
+			v.FrideApproval = nodeproto.FrideApproval
+		}
+		if st, ok := s.Programs(n.ID); ok {
+			v.Programs = &st
+		}
 		out = append(out, v)
 	}
 	return out, err

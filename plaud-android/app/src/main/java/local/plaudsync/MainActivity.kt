@@ -10,9 +10,15 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.text.InputType
+import android.view.View
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.RadioButton
+import android.widget.RadioGroup
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import java.io.File
 
@@ -29,6 +35,29 @@ class MainActivity : Activity() {
         val pad = (16 * resources.displayMetrics.density).toInt()
         fun button(label: String, onClick: () -> Unit) =
             Button(this).apply { text = label; setOnClickListener { onClick() } }
+        fun switch(label: String, on: Boolean, onChange: (Boolean) -> Unit) =
+            Switch(this).apply { text = label; isChecked = on; setOnCheckedChangeListener { _, v -> onChange(v) } }
+
+        // Voice mode needs a build from Fridolin's dashboard: it asks through the site.
+        val ask = button("Ask Fridolin") { startActivity(Intent(this, AskActivity::class.java)) }
+        val speakLocked = switch("Speak answers while the phone is locked", VoicePrefs.speakLocked(this)) {
+            VoicePrefs.setSpeakLocked(this, it)
+        }
+        fun showVoice(on: Boolean) {
+            ask.visibility = if (on) android.view.View.VISIBLE else android.view.View.GONE
+            speakLocked.visibility = ask.visibility
+        }
+        val voice = switch("Voice mode: recordings are questions, answers are read aloud", VoicePrefs.enabled(this)) {
+            VoicePrefs.setEnabled(this, it)
+            AppLog.i(if (it) "voice mode on" else "voice mode off")
+            showVoice(it)
+            if (bleAllowed()) {
+                SyncService.start(this, SyncService.ACTION_REFRESH)
+                SyncService.checkIn(this, Trigger.SETTINGS) // voice mode checks in more often
+            }
+            render()
+        }
+        showVoice(VoicePrefs.enabled(this))
 
         statusView = TextView(this).apply { textSize = 16f }
         logView = TextView(this).apply { typeface = Typeface.MONOSPACE; textSize = 11f; setTextIsSelectable(true) }
@@ -38,6 +67,13 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.VERTICAL
                 setPadding(pad, pad, pad, pad)
                 addView(statusView)
+                if (Fridolin.enabled) {
+                    addView(voice)
+                    addView(ask)
+                    addView(speakLocked)
+                }
+                addView(button("Fetch from NotePin now") { if (bleAllowed()) SyncService.checkIn(this@MainActivity, Trigger.SYNC_NOW) })
+                addView(syncSetting())
                 addView(button("Pair NotePin") { SyncService.start(this@MainActivity, SyncService.ACTION_PAIR) })
                 addView(button("Allow running in background") { askBatteryExemption() })
                 addView(button("Share log") { shareLog() })
@@ -56,7 +92,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         AppLog.onChange = { runOnUiThread { render() } }
-        startServiceIfAllowed()
+        if (bleAllowed()) SyncService.checkIn(this, Trigger.OPENED)
         render()
     }
 
@@ -71,6 +107,59 @@ class MainActivity : Activity() {
         if (bleAllowed()) SyncService.start(this)
     }
 
+    /** Sync: instant / smart / every N minutes, with what each costs the pin (docs/PLAUD.md, "The pin's battery"). */
+    private fun syncSetting(): View {
+        val modes = listOf(
+            SyncMode.SMART to "Smart (default): checks in every ${SyncPolicy.SMART_MINUTES} min, and when you open the app, plug in or unlock the phone",
+            SyncMode.INTERVAL to "Every N minutes, and when you open the app",
+            SyncMode.INSTANT to "Instant: stays connected, recordings arrive seconds after they stop (uses more pin battery)",
+        )
+        val minutes = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            hint = "Minutes (${SyncPolicy.MIN_MINUTES}–${SyncPolicy.MAX_MINUTES})"
+            setText(SyncPrefs.minutes(this@MainActivity).toString())
+            setOnFocusChangeListener { _, focused -> if (!focused) saveMinutes(this) }
+            setOnEditorActionListener { v, _, _ -> saveMinutes(v as EditText); false }
+        }
+        val group = RadioGroup(this)
+        modes.forEachIndexed { i, (mode, label) ->
+            group.addView(RadioButton(this).apply { id = 100 + i; text = label; isChecked = SyncPrefs.mode(this@MainActivity) == mode })
+        }
+        fun showMinutes() {
+            minutes.visibility = if (SyncPrefs.mode(this) == SyncMode.INTERVAL) View.VISIBLE else View.GONE
+        }
+        group.setOnCheckedChangeListener { _, id ->
+            val mode = modes[id - 100].first
+            if (mode == SyncPrefs.mode(this)) return@setOnCheckedChangeListener
+            SyncPrefs.setMode(this, mode)
+            showMinutes()
+            if (bleAllowed()) SyncService.checkIn(this, Trigger.SETTINGS)
+        }
+        showMinutes()
+        val note = TextView(this).apply {
+            textSize = 12f
+            text = "A connected NotePin cannot sleep, so instant runs its battery down fast. " +
+                "Smart and every N minutes connect only to fetch, then let it sleep: a recording can wait on the pin until the " +
+                "next check-in. With voice mode on, they check in at least every ${SyncPolicy.VOICE_MINUTES} min; " +
+                "Fetch now (here and in the notification) gets a question off the pin at once."
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(TextView(this@MainActivity).apply { text = "Sync with the NotePin"; textSize = 16f })
+            addView(group)
+            addView(minutes)
+            addView(note)
+        }
+    }
+
+    private fun saveMinutes(field: EditText) {
+        val n = field.text.toString().toIntOrNull() ?: return field.setText(SyncPrefs.minutes(this).toString())
+        val before = SyncPrefs.minutes(this)
+        SyncPrefs.setMinutes(this, n)
+        field.setText(SyncPrefs.minutes(this).toString())
+        if (SyncPrefs.minutes(this) != before && bleAllowed()) SyncService.checkIn(this, Trigger.SETTINGS)
+    }
+
     private fun render() {
         val unrestricted = getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
         statusView.text = buildString {
@@ -82,6 +171,7 @@ class MainActivity : Activity() {
                 appendLine("Fridolin: ${if (Fridolin.device(this@MainActivity) == null) "not paired yet" else "paired"}" +
                     if (waiting > 0) ", $waiting transcript(s) waiting to be sent" else "")
             }
+            if (Fridolin.enabled && VoicePrefs.enabled(this@MainActivity)) appendLine("Voice mode: on")
             append("Files: Documents/PlaudSync")
         }
         logView.text = AppLog.tail(200).asReversed().joinToString("\n")
@@ -100,7 +190,7 @@ class MainActivity : Activity() {
 
     private fun confirmUnpair() {
         AlertDialog.Builder(this)
-            .setMessage("Unbind the NotePin from this app so it can be added to the Plaud app again? It must be connected right now.")
+            .setMessage("Unbind the NotePin from this app so it can be added to the Plaud app again? Keep it close by: the app connects to it first.")
             .setPositiveButton("Unpair") { _, _ -> SyncService.start(this, SyncService.ACTION_UNPAIR) }
             .setNegativeButton("Cancel", null)
             .show()

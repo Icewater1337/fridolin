@@ -17,11 +17,19 @@ import brainsPage from '../assets/pages/brains.js';
 import overviewPage from '../assets/pages/overview.js';
 import addBrainPage from '../assets/pages/add-brain.js';
 
+/** @import { Brain, Routing } from '../types/api.js' */
+
 const WAITING = '120363000000000001@g.us';
 const GROUP = '120363000000000000@g.us';
 
-// brain(id, routing, more): an /api/brains entry of a brain that runs.
-const brain = (id, routing = {}, more = {}) => ({
+/**
+ * brain(id, routing, more): an /api/brains entry of a brain that runs,
+ * with only the fields the dashboard reads of one.
+ * @param {string} id
+ * @param {Partial<Routing>} [routing]
+ * @param {Partial<Brain>} [more]
+ */
+const brain = (id, routing = {}, more = {}) => /** @type {Brain} */ ({
   id, name: id, path: `/Users/you/${id}`, status: 'ok', issues: [],
   manifest: { version: 1, id, name: id, routing: { groups: [], ...routing } },
   runtime: { id, name: id, routing: { groups: [], ...routing }, queue: [] },
@@ -30,6 +38,7 @@ const brain = (id, routing = {}, more = {}) => ({
 });
 
 test('routingSummary names the fallback brain', async (t) => {
+  /** @type {[string, Parameters<typeof routingSummary>[0], Parameters<typeof routingSummary>[1], string][]} */
   const cases = [
     ['the first brain, without a default', { groups: ['x'] }, { fallback: true }, 'Fallback for other chats · 1 group'],
     ['and no brain handles DMs', {}, { fallback: true, noDMBrain: true }, 'Fallback for other chats and direct messages'],
@@ -45,12 +54,13 @@ test('routingSummary names the fallback brain', async (t) => {
 });
 
 test('hasDMBrain', async (t) => {
+  /** @type {[string, Parameters<typeof hasDMBrain>[0], boolean][]} */
   const cases = [
     ['none', [brain('a'), brain('b')], false],
     ['one, running', [brain('a'), brain('b', { handles_dms: true })], true],
     // It keeps the DMs while it cannot run: no other brain gets them.
     ['one that does not run', [brain('a'), brain('b', { handles_dms: true }, { runtime: undefined, status: 'missing' })], true],
-    ['an entry without a brain.json', [{ path: '/Users/you/x', status: 'unapproved', manifest: null }], false],
+    ['an entry without a brain.json', [/** @type {Brain} */ ({ path: '/Users/you/x', status: 'unapproved', manifest: null })], false],
   ];
   for (const [name, list, want] of cases) {
     await t.test(name, () => assert.equal(hasDMBrain(list), want));
@@ -58,6 +68,7 @@ test('hasDMBrain', async (t) => {
 });
 
 test('defaultBrainOption names the fallback brain', async (t) => {
+  /** @type {[string, Parameters<typeof defaultBrainOption>[0], string][]} */
   const cases = [
     ['the first brain, without a default', [brain('family', {}, { fallback: true }), brain('work')], 'Default brain (family)'],
     ['the default brain', [brain('family'), brain('work', { default: true }, { fallback: true, name: 'Office' })], 'Default brain (Office)'],
@@ -70,6 +81,7 @@ test('defaultBrainOption names the fallback brain', async (t) => {
 
 test('takeover names the brain that answers a removed brain’s chats', async (t) => {
   const personal = brain('personal', { handles_dms: true });
+  /** @type {[string, Parameters<typeof takeover>[0], string, string | null, boolean][]} */
   const cases = [
     // name, list, removed, the brain that takes over, whether it starts on the DMs
     ['a group brain', [personal, brain('work', { default: true }, { fallback: true }), brain('club', { groups: [GROUP] })], 'club', 'work', false],
@@ -226,7 +238,7 @@ async function addThroughWizard(t, before, after, off) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
-  globalThis.window = { scrollTo() {} };
+  Object.assign(globalThis, { window: { scrollTo() {} } });
   t.after(() => { delete globalThis.window; });
   let added = false;
   serve(t, (path, init) => {
@@ -272,6 +284,7 @@ test('the Add-brain wizard says when the new brain is the fallback', async (t) =
   const notes = (routing, more) => brain('notes', routing, more);
   const DM = 'Handles direct messages';
   const DEF = 'Default for unassigned chats';
+  /** @type {[string, ReturnType<typeof brain>[], ReturnType<typeof brain>[], string[], string | null, boolean][]} */
   const cases = [
     // name, before, after, switches turned off, the fallback note (null: none), whether "No chats yet" shows
     ['the first brain, without DMs or default: it gets the other chats and the DMs', [], [notes({}, { fallback: true })], [DM, DEF],

@@ -239,6 +239,8 @@ func Parse(rel string, data []byte) (Skill, error) {
 		case MapNode:
 			bad(field, "must be a list")
 			return out
+		case SeqNode:
+			// Its items, below.
 		}
 		if len(n.Items) > maxListItems {
 			bad(field, "has more than %d entries", maxListItems)
@@ -366,6 +368,8 @@ func install(n *Node, bad func(field, format string, a ...any)) []map[string]str
 		items = []*Node{n}
 	case MapNode:
 		items = []*Node{n}
+	case SeqNode:
+		// Its items are the steps.
 	}
 	if len(items) > maxListItems {
 		bad("install", "has more than %d steps", maxListItems)
@@ -393,12 +397,12 @@ func install(n *Node, bad func(field, format string, a ...any)) []map[string]str
 						}
 					}
 					step[k] = strings.Join(parts, ", ")
-				default:
+				case MapNode:
 					bad(field+"."+k, "must be text or a list")
 				}
 			}
 			out = append(out, step)
-		default:
+		case SeqNode:
 			bad(field, "must be a command or a mapping")
 		}
 	}

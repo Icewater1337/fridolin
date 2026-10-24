@@ -1,7 +1,7 @@
 // Overview: health, WhatsApp pairing, Claude CLI, sandbox, brains, backup,
 // warnings and the latest messages.
 
-import { get, post, qs } from '../app/api.js';
+import { get, post, qs, errorStatus } from '../app/api.js';
 import { store } from '../app/store.js';
 import { brainsResource, resource, schedulesResource } from '../app/resources.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
@@ -16,7 +16,10 @@ import { pill, badge, callout, timeAgo, mono, empty, spinner } from '../componen
 import { runtimeSummary, firstBrainHero } from '../components/brain.js';
 import { showActivity } from '../components/activity-item.js';
 
-export default {
+/** @import { PageModule } from '../app/page.js' */
+/** @import { ActivityEntry, Brain, HousekeepingCounts, HousekeepingFinding, HousekeepingStatus, SandboxStatus, Status, WhatsAppStatus } from '../../types/api.js' */
+
+export default /** @satisfies {PageModule} */ ({
   title: 'Overview',
   render(root, ctx) {
     const header = h('div.health');
@@ -50,7 +53,9 @@ export default {
         activityBox));
 
     // ── WhatsApp + QR ──
-    const qr = { img: null, url: '', pairing: false };
+    /** @type {{img: HTMLImageElement | null, age: HTMLElement | null, url: string, pairing: boolean}} */
+    const qr = { img: null, age: null, url: '', pairing: false };
+    /** @param {AbortSignal} signal */
     const loadQR = async (signal) => {
       try {
         const r = await get('/api/whatsapp/qr', { signal });
@@ -60,16 +65,18 @@ export default {
         }
         if (qr.age) qr.age.replaceChildren(timeAgo(r.created_at, 'Code from '));
       } catch (e) {
-        if (e.status !== 404) throw e;
+        if (errorStatus(e) !== 404) throw e;
       }
     };
 
+    /** @param {Status} s */
     const renderWA = (s) => {
-      const wa = s.whatsapp || {};
+      const wa = /** @type {Partial<WhatsAppStatus>} */ (s.whatsapp || {});
       const shown = { mode: wa.mode, own_number: wa.own_number, detail: wa.detail, qr_available: wa.qr_available, since: wa.since, dev: s.dev_mode };
       paint(waCard, shown, buildWA);
       waCard.classList.toggle('pairing', !!wa.qr_available);
     };
+    /** @param {Partial<WhatsAppStatus> & {dev: boolean}} wa */
     const buildWA = (wa) => {
       const kind = waKind(wa.mode);
       const notPaired = !wa.own_number;
@@ -116,7 +123,9 @@ export default {
 
     // ── health header ──
     // The uptime in whole minutes, so the header changes once a minute.
+    /** @param {number} sec */
     const uptime = (sec) => (sec < 60 ? '< 1 min' : fmtDuration(Math.floor(sec / 60) * 60));
+    /** @param {Status} s */
     const renderHealth = (s) => paint(header, {
       version: s.version, dev: s.dev_mode, started: s.started_at, up: uptime(s.uptime_s || 0), debouncing: s.debouncing,
     }, (x) => [
@@ -128,9 +137,11 @@ export default {
     ]);
 
     // ── first run ──
+    /** @param {Status} s */
     const renderCTA = (s) => paint(cta, (s.brains || []).length === 0 && (s.issues || []).length === 0, (show) => (show ? firstBrainHero() : null));
 
     // ── warnings and brain issues ──
+    /** @param {Status} s */
     const renderAlerts = (s) => paint(alerts, { warnings: s.warnings || [], issues: s.issues || [] }, ({ warnings, issues }) => [
       warnings.map((w) => callout('warn', null, w)),
       issues.map((is) => {
@@ -142,6 +153,7 @@ export default {
     ]);
 
     // ── cards ──
+    /** @param {Status} s */
     const renderClaude = (s) => paint(claudeCard, { ...(s.agent_provider === 'codex' ? s.codex : s.claude), provider: s.agent_provider || 'claude' }, (c) => [
       h('div.card-head', h('div.card-title', icon('terminal'), h('h2', c.provider === 'codex' ? 'Codex CLI' : 'Claude CLI')), c.found ? pill('Found', 'ok') : pill('Not found', 'bad')),
       h('div.card-body',
@@ -150,7 +162,8 @@ export default {
         !c.found ? h('p.muted', 'Install the CLI and log in with ', h('code.mono', c.provider), ', or point ', h('a', { href: '#/settings/claude' }, 'Settings → AI mode'), ' at the right binary.') : null),
     ]);
 
-    const renderSandbox = (s) => paint(sandboxCard, s.sandbox || {}, (sb) => {
+    /** @param {Status} s */
+    const renderSandbox = (s) => paint(sandboxCard, /** @type {Partial<SandboxStatus>} */ (s.sandbox || {}), (sb) => {
       let p;
       let text;
       if (!sb.supported) { p = pill('Not available', 'neutral'); text = 'The sandbox uses macOS sandbox-exec, or bubblewrap in the fridolin-core container. Here brains can read everything the bridge’s user can, the dashboard token included. A separate user for the bridge keeps them out of your own files, not out of the bridge’s.'; } else if (sb.enabled) { p = pill('On', 'ok'); text = 'Brains write only their own folders, and cannot read other brains’ folders, your keys, keychains, mail or documents.'; } else { p = pill('Off', 'warn'); text = 'Brains can read everything your user account can. Turn the sandbox on in Settings.'; }
@@ -162,6 +175,7 @@ export default {
 
     // The containerized core: its tailnet name and its lease, when either
     // is on. A lost lease means this copy no longer sends anything.
+    /** @param {Status} s */
     const renderCore = (s) => paint(coreBox, s.core || null, (c) => {
       if (!c) return [];
       const tn = c.tailnet;
@@ -187,10 +201,12 @@ export default {
     });
 
     // Whose backup failed: the bridge's settings, or a brain by its name.
+    /** @param {Status} s */
     const failedOwner = (s) => {
       const id = (s.backup || {}).last_error_brain;
       return id ? backupOwner(id, s.brains) : '';
     };
+    /** @param {Status} s */
     const renderBackup = (s) => paint(backupCard, { ...(s.backup || {}), owner: failedOwner(s) }, (b) => {
       let p;
       // Daily backups that lost their Drive link would otherwise just stop.
@@ -217,6 +233,7 @@ export default {
     // and a dry run on demand.
     const hkResource = resource('/api/housekeeping');
     let hkBusy = false;
+    /** @param {HousekeepingFinding} f */
     const findingLine = (f) => h('li.small',
       h('strong', f.kind), ' ',
       f.pid ? mono(`PID ${f.pid}`) : (f.target ? mono(f.target) : null), ' ',
@@ -227,9 +244,10 @@ export default {
       f.owner ? h('span.muted', `(${f.owner}) `) : null,
       h('span', '— ', f.reason),
       f.outcome ? [' ', badge(f.outcome, f.problem ? 'bad' : (f.outcome === 'stopped' || f.outcome === 'removed' ? 'ok' : 'neutral'))] : null);
+    /** @param {HousekeepingStatus | undefined} v */
     const renderHousekeeping = (v) => paint(housekeepingCard, { ...(v || {}), busy: hkBusy }, (x) => {
       const last = x.last;
-      const c = x.counts || {};
+      const c = /** @type {Partial<HousekeepingCounts>} */ (x.counts || {});
       let p;
       if (x.busy || x.running) p = pill('Running…', 'info', { pulse: true });
       else if (last && c.problems) p = pill(plural(c.problems, 'problem'), 'bad');
@@ -272,7 +290,9 @@ export default {
 
     // Which brain is the fallback, and whether a brain handles DMs, is in
     // /api/brains rather than the status, and seldom changes.
+    /** @type {Brain[] | null} */
     let configured = null;
+    /** @param {Status} s */
     const renderBrains = (s) => {
       const list = s.brains || [];
       // The first-brain card above says what to do then.
@@ -306,6 +326,7 @@ export default {
       if (s) renderBrains(s);
     }, 60000);
 
+    /** @param {Status} s */
     const renderAll = (s) => {
       renderHealth(s);
       renderCTA(s);
@@ -327,6 +348,7 @@ export default {
       if (qr.img) await loadQR(signal);
     }, 3000);
 
+    /** @type {ActivityEntry[] | null} */
     let items = null;
     const paintActivity = () => {
       if (!items) return;
@@ -344,4 +366,4 @@ export default {
     // Chat labels show group names once the groups have loaded.
     ctx.watch(store, (s) => s.names, paintActivity);
   },
-};
+});

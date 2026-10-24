@@ -47,10 +47,15 @@ type Decision struct {
 // offset off, does at now. skipMissed leaves out a run that is late. A
 // zero last is an agent seen for the first time: it starts counting from
 // now, so that one switched on does not run at once for times before.
+//
+// The schedule's times of day are in now's zone: pass now in the owner's
+// time zone (config's timezone). last may come back from a file in any
+// zone or as a fixed offset; it is read in now's.
 func Decide(sc trigger.Schedule, last time.Time, off time.Duration, skipMissed bool, now time.Time) Decision {
 	if last.IsZero() {
 		last = now.Add(-off)
 	}
+	last = last.In(now.Location())
 	d := Decision{Last: last}
 	slot, ok := sc.Next(last)
 	if !ok {
@@ -92,9 +97,9 @@ func latestSlot(sc trigger.Schedule, slot, by time.Time) time.Time {
 }
 
 // NextAfter is when an agent anchored at last falls due next, with its
-// offset, as Decide would say; zero for never.
-func NextAfter(sc trigger.Schedule, last time.Time, off time.Duration) time.Time {
-	n, ok := sc.Next(last)
+// offset, as Decide would say with a now in loc; zero for never.
+func NextAfter(sc trigger.Schedule, last time.Time, off time.Duration, loc *time.Location) time.Time {
+	n, ok := sc.Next(last.In(loc))
 	if !ok {
 		return time.Time{}
 	}

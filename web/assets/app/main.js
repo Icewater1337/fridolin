@@ -2,7 +2,7 @@
 // (navigation.js), the polls every page needs, and the "Connect to your
 // bridge" screen shown on 401.
 
-import { signIn, on as onApi } from './api.js';
+import { signIn, on as onApi, errorStatus } from './api.js';
 import { ignoredResource } from './resources.js';
 import { pollStatus, setIgnoredCount, loadGroups, chatName } from './store.js';
 import { mount } from '../lib/dom.js';
@@ -17,6 +17,7 @@ import { connectScreen } from './connect.js';
 import { createNavigation } from './navigation.js';
 import { ROUTES } from './routes.js';
 import { credentialFromHash } from './router.js';
+import { errorMessage } from '../lib/errors.js';
 
 // ── shell, router and connect screen ─────────────────────────────────────
 
@@ -62,7 +63,7 @@ async function signInFromHash() {
     signInProblem = '';
     return true;
   } catch (e) {
-    signInProblem = e.status === 401 ? 'That link was already used or has expired. Run fridolin open, or send !dashboard in your WhatsApp chat, for a new one.' : e.message;
+    signInProblem = errorStatus(e) === 401 ? 'That link was already used or has expired. Run fridolin open, or send !dashboard in your WhatsApp chat, for a new one.' : errorMessage(e);
     return false;
   }
 }
@@ -82,6 +83,7 @@ function showShell() {
   mount(app, shell.nodes);
 }
 
+/** @param {string} [reason] why the screen is shown */
 function showConnect(reason) {
   if (view.paused()) return;
   view.pause();

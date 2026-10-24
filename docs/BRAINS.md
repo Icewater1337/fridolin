@@ -88,6 +88,7 @@ restart.
 | `grants` | Only on the core brain: what it may do with each other brain, by that brain's id, from `delegate`, `read` and `files` (`{"family": ["delegate", "read"]}`). See [below](#the-core-brain-and-its-grants). |
 | `memory` | The [memory index](#memory): `inject` (default `false`) puts the owner's messages and the brain's own notes that match a new message into its prompt; `top_k` (default 5, at most 20) and `max_chars` (default 2000, at most 20000) bound how much; `consolidate` (`"weekly sun 18:00"`, `"daily 07:00"`; default none) runs `skills/memory-consolidation.md` on that schedule, as the [scheduled agent](#scheduled-agents) `memory-consolidation`. Left out, nothing changes for the brain. |
 | `schedules` | The brain's [scheduled agents](#scheduled-agents): tasks it runs by itself on a schedule, or programs the bridge runs on a node. |
+| `files` | `files.uploads`: the folders, with their subfolders, that take uploads from the site roles allowed to upload to the brain, each `{"folder": "documents", "to_brain": true}`; `to_brain` hands an upload to the brain, as a file sent on WhatsApp, instead of leaving it in the folder. Set on the Files page; see [FILES.md](FILES.md#uploads). |
 
 [`schemas/brain.schema.json`](schemas/brain.schema.json) is a JSON Schema
 of the file, version 1.
@@ -584,7 +585,7 @@ Personal/
 | Field | Meaning |
 | --- | --- |
 | `name` | lower-case letters, digits and `-`, unique in the brain: the file's name, which a `name` in the file must match; it may be left out |
-| `when` | `every 6h` (`m`, `h`, `d`; at least 5 minutes), `daily 07:00`, `weekly mon 09:00`, or a cron expression, `cron 0 7 * * 1-5` (minute hour day month weekday; `*`, lists, ranges, steps, `mon`…`sun`), in the bridge's time zone |
+| `when` | `every 6h` (`m`, `h`, `d`; at least 5 minutes), `daily 07:00`, `weekly mon 09:00`, or a cron expression, `cron 0 7 * * 1-5` (minute hour day month weekday; `*`, lists, ranges, steps, `mon`…`sun`), in your time zone ([`timezone`](CONFIGURATION.md#timezone), which the Schedules page names); across a daylight saving change it keeps the wall-clock time, a time the change skips runs once at the next minute that exists, and a repeated one once |
 | `enabled` | `false` keeps it from running on its schedule; *Run now* still runs it |
 | `description` | one line on what it is for |
 | `prompt`, `prompt_file`, `template`, `command` | what it does, at most one: the task inline; a file in the brain's folder; a built-in template (below); or a program on a node. None is the file `schedules/<name>.md` in the brain's folder |
@@ -644,7 +645,13 @@ is left out. A lockdown runs an agent at `read`, and refuses one whose
 
 A program runs on the node through `exec` ([NODES.md](NODES.md#what-a-node-offers)),
 no shell: its `argv[0]` must be on the node's allowlist, the node's
-commands approved, and the node online. Its output and exit code go into
+commands approved, and the node online. A node whose `node.json` names
+folders in `exec.accept_from_core` takes the program of an agent you
+approve when it lies in one of them: approving the agent adds it to the
+node's allowlist with exactly its arguments, and deleting the agent
+removes it, unless another agent runs it
+([NODES.md](NODES.md#programs-from-the-core)). The Schedules page and the
+wizard say how each agent's program stands on its node. Its output and exit code go into
 the run's log; `always` sends the end of its output, `worth` only a
 failure. Each such run is an audit line of kind `scheduled_command`.
 

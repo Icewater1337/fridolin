@@ -8,14 +8,18 @@ import { btn } from '../components/buttons.js';
 import { toggle, textInput } from '../components/fields.js';
 import { pageHeader } from '../components/common.js';
 
+/** @import { PageModule } from '../app/page.js' */
+/** @import { LogLine } from '../../types/api.js' */
+
 const MAX_LINES = 5000;
 // Go's log package prefixes "2006/01/02 15:04:05 "; the time column shows it already.
 const GO_TS = /^\d{4}\/\d{2}\/\d{2} \d{2}:\d{2}:\d{2}(\.\d+)? /;
 
-export default {
+export default /** @satisfies {PageModule} */ ({
   title: 'Logs',
   render(root, ctx) {
     let after = 0; // the last line shown, as the bridge numbers them
+    /** @type {number | null} */
     let boot = null; // when the process that numbers them started
     let count = 0; // lines shown, not counting the restart notes
     let filter = '';
@@ -32,18 +36,20 @@ export default {
       h('div.toolbar', h('div.toolbar-group', filterIn, autoSw), h('div.toolbar-group', countEl, clearBtn)),
       view);
 
+    /** @param {Element} el */
     const isLine = (el) => el.classList.contains('log-line');
     // A line's text is its last cell; the filter looks at what is shown.
+    /** @param {Element} el */
     const matches = (el) => !filter || el.lastChild.textContent.toLowerCase().includes(filter);
     const paintCount = () => {
-      const shown = filter ? [...view.children].filter((el) => isLine(el) && !el.hidden).length : count;
+      const shown = filter ? /** @type {HTMLElement[]} */ ([...view.children]).filter((el) => isLine(el) && !el.hidden).length : count;
       countEl.textContent = filter ? `${shown} of ${count} lines` : `${count} lines`;
     };
     const scrollEnd = () => { view.scrollTop = view.scrollHeight; };
 
     filterIn.addEventListener('input', ctx.debounce(() => {
       filter = filterIn.value.trim().toLowerCase();
-      for (const el of view.children) if (isLine(el)) el.hidden = !matches(el);
+      for (const el of /** @type {HTMLCollectionOf<HTMLElement>} */ (view.children)) if (isLine(el)) el.hidden = !matches(el);
       paintCount();
       if (auto) scrollEnd();
     }, 120));
@@ -56,6 +62,7 @@ export default {
       }
     });
 
+    /** @param {LogLine[]} lines */
     function addLines(lines) {
       if (!lines.length) return;
       const frag = document.createDocumentFragment();
@@ -72,7 +79,7 @@ export default {
       count += lines.length;
       // The oldest go first, and a restart note with them.
       while (count > MAX_LINES) {
-        const first = view.firstChild;
+        const first = view.children[0]; // view holds elements only: the lines and restart notes
         if (isLine(first)) count -= 1;
         first.remove();
       }
@@ -100,4 +107,4 @@ export default {
       }
     }, 2000);
   },
-};
+});

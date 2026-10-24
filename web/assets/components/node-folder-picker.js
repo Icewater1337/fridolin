@@ -9,14 +9,35 @@ import { btn } from './buttons.js';
 import { textInput } from './fields.js';
 import { badge, spinner } from './common.js';
 import { fmtBytes } from '../lib/format.js';
+import { errorMessage } from '../lib/errors.js';
 
-/** One call on the node through the dashboard's generic call route. */
+/** @import { NodeFSBrowse, NodeFSRoots } from '../../types/api.js' */
+
+/**
+ * What each node call this picker makes answers with.
+ * @typedef {{'fs.roots': NodeFSRoots, 'fs.browse': NodeFSBrowse}} FolderCalls
+ */
+
+/**
+ * One call on the node through the dashboard's generic call route; {} when
+ * it answers with no result.
+ * @template {keyof FolderCalls} M
+ * @param {string} node
+ * @param {M} method
+ * @param {Record<string, unknown>} [params]
+ * @returns {Promise<Partial<FolderCalls[M]>>}
+ */
 async function nodeCall(node, method, params) {
   const r = await post(`/api/nodes/${encodeURIComponent(node)}/call`, { method, params: params || {} });
   return r.result || {};
 }
 
-/** joinPath joins a folder name to a path in the node's own spelling. */
+/**
+ * joinPath joins a folder name to a path in the node's own spelling.
+ * @param {string} dir
+ * @param {string} name
+ * @param {string} [sep]
+ */
 export function joinPath(dir, name, sep) {
   const s = sep || (dir.includes('\\') ? '\\' : '/');
   return dir.endsWith(s) ? dir + name : dir + s + name;
@@ -27,9 +48,11 @@ export function joinPath(dir, name, sep) {
  * node's drives and folders; onPick gets the folder chosen, which may be a
  * new folder below the one shown (the core makes it when the target is
  * added).
+ * @param {{node: string, onPick: (path: string) => void}} options
  */
 export function nodeFolderPicker({ node, onPick }) {
   let sep = '/';
+  /** @type {Partial<NodeFSBrowse> | null} */
   let current = null; // the folder shown, null at the list of drives
   const listEl = h('div.fb-list');
   const err = h('p.form-error', { hidden: true });
@@ -39,7 +62,8 @@ export function nodeFolderPicker({ node, onPick }) {
   const nameIn = textInput({ placeholder: 'New folder name, such as fridolin-backup', 'aria-label': 'New folder name' });
   const newBtn = btn('Use new folder', { icon: 'folderPlus', small: true, disabled: true });
 
-  const fail = (e) => { err.hidden = false; err.textContent = e.message || String(e); };
+  /** @param {unknown} e */
+  const fail = (e) => { err.hidden = false; err.textContent = errorMessage(e); };
   upBtn.addEventListener('click', () => {
     if (!current) return;
     if (current.parent) browse(current.parent); else roots();
@@ -77,6 +101,7 @@ export function nodeFolderPicker({ node, onPick }) {
     } catch (e) { fail(e); mount(listEl); }
   }
 
+  /** @param {string} path */
   async function browse(path) {
     busy();
     try {

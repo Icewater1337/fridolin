@@ -32,11 +32,13 @@ NODE   ?= node
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 
-# Go linters are pinned: staticcheck is a go.mod tool so Dependabot sees it;
-# actionlint remains an explicit version here. ruff comes from
-# tools/requirements-dev.txt and shellcheck from your package manager.
+# Go linters are pinned: staticcheck and exhaustive are go.mod tools so
+# Dependabot sees them; actionlint remains an explicit version here. ruff
+# comes from tools/requirements-dev.txt and shellcheck from your package
+# manager.
 ACTIONLINT_VERSION  := v1.7.12
 STATICCHECK ?= $(GO) tool staticcheck
+EXHAUSTIVE  ?= $(GO) tool exhaustive
 ACTIONLINT  ?= $(GO) run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
 RUFF        ?= ruff
 SHELLCHECK  ?= shellcheck
@@ -47,7 +49,7 @@ FUZZTIME ?= 10s
 .DEFAULT_GOAL := build
 .PHONY: help build install node-binaries test race race-shard race-process vet fmt fmt-check tidy-check root-check \
 	notices notices-check \
-	lint lint-go lint-sh lint-py lint-actions lint-web \
+	lint lint-go lint-sh lint-py lint-actions lint-web typecheck-web \
 	test-py test-web test-sh smoke fuzz-short check clean container-python-lock
 
 help: ## list the targets
@@ -114,10 +116,18 @@ root-check: ## fail unless go build at the repo root refuses to build
 	fi; \
 	case "$$out" in *"no Go files"*) ;; *) printf 'go build . at the root failed, but not for want of Go files:\n%s\n' "$$out"; exit 1 ;; esac
 
-lint: lint-go lint-sh lint-py lint-actions lint-web ## every linter
+lint: lint-go lint-sh lint-py lint-actions lint-web typecheck-web ## every linter
 
-lint-go: ## staticcheck
+# exhaustive holds a switch on an enum (a defined type with constants
+# declared beside it) to a case for every constant, a default or not, so
+# that a new constant fails here at every switch that has to decide about
+# it. A default stays for values from outside (a string from JSON, a
+# number out of range), and a switch meant to cover only some constants
+# says why in a comment above its //exhaustive:ignore. A switch on
+# reflect.Kind picks a few of its 27 kinds by nature, so none is checked.
+lint-go: ## staticcheck, and exhaustive on switches over enums
 	$(STATICCHECK) ./...
+	$(EXHAUSTIVE) -typeignore '^reflect\.Kind$$' ./...
 
 lint-sh: ## shellcheck the scripts and git hooks
 	$(SHELLCHECK) --severity=warning setup.sh scripts/*.sh container/*.sh container/fride/*.sh .githooks/*
@@ -156,13 +166,30 @@ ESLINT ?= $(NPX) --yes eslint@$(ESLINT_VERSION)
 lint-web: ## ESLint on the dashboard's JS (npx fetches it)
 	cd web && NPM_CONFIG_IGNORE_SCRIPTS=true $(ESLINT) .
 
-test-sh: ## tests for the personal-data, action-pin, notices and release scripts and the Makefile
+# TypeScript's checker on the dashboard's JS and its JSDoc types, with
+# nothing built: web/tsconfig.json checks the modules against the
+# browser's DOM, web/test/tsconfig.json the tests (with node's types)
+# against the fake DOM they run in. npx fetches the pinned versions as it
+# does ESLint, so nothing is installed into the checkout. TypeScript 7 is
+# the native compiler, whose only dependencies are its binaries, one per
+# platform, at the same version. With no node_modules in web/, tsc finds
+# @types/node in npx's cache through --typeRoots. Dependabot does not see
+# these pins either, so move them by hand; both were over two weeks old
+# when pinned.
+TYPESCRIPT_VERSION := 7.0.2
+TYPES_NODE_VERSION := 24.19.1
+TSC_NPX ?= $(NPX) --yes -p typescript@$(TYPESCRIPT_VERSION) -p @types/node@$(TYPES_NODE_VERSION)
+typecheck-web: ## tsc --noEmit on the dashboard's JS and tests (npx fetches it)
+	cd web && NPM_CONFIG_IGNORE_SCRIPTS=true $(TSC_NPX) -c 'tsc -p . && tsc -p test --typeRoots "$$(dirname "$$(command -v tsc)")/../@types"'
+
+test-sh: ## tests for the personal-data, action-pin, notices, release and CI report scripts and the Makefile
 	scripts/test-check-personal-data.sh
 	scripts/test-check-action-pins.sh
 	scripts/test-third-party-notices.sh
 	scripts/test-build-release.sh
 	scripts/test-makefile.sh
 	scripts/test-test-shard.sh
+	scripts/test-ci-report.sh
 
 # A temp dir, not the binary: a check must not replace a build in use.
 # -race makes a data race at start or shutdown fail the run. The build is
