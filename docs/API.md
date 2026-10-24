@@ -288,6 +288,13 @@ listed here because they decide what runs may do
 | `POST /api/dev/vote` | dev mode only: `{"poll", "voter", "options"}` votes in a poll the dev chat shows, as a vote from WhatsApp arrives |
 | `GET /api/housekeeping` | the housekeeping job ([CONFIGURATION.md](CONFIGURATION.md#housekeeping)): its settings, `next_run`, `running`, the `last` report with its `findings`, `counts` and `summary`, and the processes `asked` about that wait for the owner; ETag-cached |
 | `POST /api/housekeeping/run` | runs the job now and answers with its report once it is over; `{"dry_run": true}` only reports whatever `housekeeping.dry_run` says; `409` while a run is under way |
+| `GET /api/schedules` | the scheduled agents of every brain that runs ([BRAINS.md](BRAINS.md#scheduled-agents)): each with its `schedule` (its `brain.json` entry), `kind`, `task`, `report`, `chat`, `enabled`, `paused`, `running`, `next`, `last_run` and a `problem` that keeps it from running; the `reminders` (standing intents with a time); the built-in `templates`; and `enabled` (`schedules.enabled`); ETag-cached |
+| `POST /api/schedules/{brain}/{name}/run` | runs the agent now and answers with the run as it starts; `{"trigger": "cli"}` marks it as the CLI's; `409` while its last run goes on |
+| `POST /api/schedules/{brain}/{name}/pause`, `.../resume` | keeps it from running on its schedule, or lets it again: `{"paused", "changed"}` |
+| `GET /api/schedules/{brain}/{name}/runs?limit=` | its runs, newest first (50, at most 1000), the one in progress included: `id`, `trigger`, `by`, `started`, `ended`, `duration_ms`, `status` (`running`, `ok`, `nothing`, `failed`, `stopped`, `dropped`, `refused`, `skipped`, `interrupted`), `result`, `error`, `sent`, `sent_to`, `cost_usd`, `input_tokens`, `output_tokens`, `exit_code`, `node`, `log_bytes`; ETag-cached |
+| `GET /api/schedules/{brain}/{name}/runs/{run}/log` | `{"id", "log", "cut", "running"}`: the run's log, its last 4 MiB; `404` once it aged out |
+| `PUT /api/schedules/{brain}/{name}` | the agent's `brain.json` entry, written into `brain.json` and its approved copy, a new agent or in place of the one of that name; `422` for an entry the bridge refuses |
+| `DELETE /api/schedules/{brain}/{name}` | takes the agent out of `brain.json` (its history stays until it ages out) |
 
 ## Files and the wiki
 

@@ -186,6 +186,9 @@ func TestGoldenGETEndpoints(t *testing.T) {
 		{"policy", "/api/policy", nil},
 		{"approvals", "/api/approvals", nil},
 		{"housekeeping", "/api/housekeeping", nil},
+		{"schedules", "/api/schedules", nil},
+		{"schedule-runs", "/api/schedules/main/brief/runs", nil},
+		{"schedule-log-unknown", "/api/schedules/main/brief/runs/20261023T060000-abcdef/log", nil},
 		// Run ids are random, and how long a run took is the machine's.
 		{"threads", "/api/threads", []string{"run", "duration_ms"}},
 		{"audit", "/api/audit", []string{"run", "duration_ms"}},

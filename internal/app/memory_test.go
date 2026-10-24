@@ -214,7 +214,7 @@ func TestSchedulerFires(t *testing.T) {
 	sc, _ := trigger.ParseSchedule("weekly sun 18:00", time.Local)
 	next, _ := sc.Next(now)
 	n = len(h.SentTo(harnessDM))
-	s.tick(next.Add(time.Minute))
+	s.tick(next.Add(3 * time.Minute)) // past its jitter, within on time
 	h.WaitFor("the consolidation's run", func() bool { return len(h.SentTo(harnessDM)) > n })
 	if p := runs()[len(runs())-1].Prompt; !strings.Contains(p, "skills/memory-consolidation.md") {
 		t.Errorf("the consolidation's prompt:\n%s", p)

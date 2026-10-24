@@ -93,6 +93,9 @@ const PolicyNote = "<policy>\nYou draft; the person you work for decides. Before
 // answer goes.
 const DelegatedNote = "Your final reply goes back to the core brain, which waits for it, and to nobody else: no chat sees it, and nobody can answer a question while you work. Do the task with what you have, and put the result, or what is missing, in your final reply."
 
+// ScheduledNote is what a scheduled agent's run is told about its chat.
+const ScheduledNote = "The new message did not come from it: the bridge sends it when one of your scheduled agents runs, and it says where your final reply goes. Nobody can answer a question while you work: do the task with what you have."
+
 // Build writes the -p prompt: the brain's instructions, the chat's
 // recent history, what the brain sent since the new message came in, what
 // the run is about, then the new message. Everything in it that someone
@@ -164,6 +167,8 @@ func Build(in Input) string {
 		where = "the site-building chat on the dashboard's Build page, not a WhatsApp chat"
 	case m.Source == chat.SourceDelegate:
 		where = "a task the core brain delegated to you, not a WhatsApp chat"
+	case m.Source == chat.SourceScheduled:
+		where = "a run of one of your scheduled agents, not a WhatsApp chat"
 	case m.IsGroup():
 		where = "the WhatsApp group " + promptJSON(m.JID)
 	}
@@ -177,6 +182,8 @@ func Build(in Input) string {
 		sb.WriteString(" The new message did not come from it: it is the result of a task you delegated to another brain, which came after you stopped waiting for it. Your reply is sent to this chat.")
 	case chat.SourceSchedule:
 		sb.WriteString(" The new message did not come from it: the bridge sends it when one of your schedules or standing intents falls due, and your reply is sent to this chat.")
+	case chat.SourceScheduled:
+		sb.WriteString(" " + ScheduledNote)
 	case chat.SourceApprovalResult:
 		sb.WriteString(" The new message did not come from it as written: it is the bridge telling you how the person you work for answered what you asked them with request_approval or ask_user, after you stopped waiting. Your reply is sent to this chat.")
 	}
@@ -198,9 +205,9 @@ func Build(in Input) string {
 	switch {
 	case in.ObserveOnly:
 		sb.WriteString(ObserveOnlyNote + "\n\n")
-	case m.Source == chat.SourceDelegate:
-		// Nobody can answer a question mid-run: the core brain waits for
-		// the final reply only.
+	case m.Source == chat.SourceDelegate, m.Source == chat.SourceScheduled:
+		// Nobody can answer a question mid-run: the core brain, or the
+		// schedule, waits for the final reply only.
 	default:
 		sb.WriteString(AskUserQuestionNote + "\n\n")
 	}

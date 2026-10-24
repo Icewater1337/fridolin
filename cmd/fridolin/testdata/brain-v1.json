@@ -60,5 +60,63 @@
     "top_k": 5,
     "max_chars": 3000,
     "consolidate": "weekly sun 18:00"
-  }
+  },
+  "schedules": [
+    {
+      "name": "review",
+      "when": "cron 0 3 * * 1-5",
+      "enabled": true,
+      "description": "Look for bugs and file issues.",
+      "template": "code-review-bugs",
+      "vars": {
+        "max_issues": "2",
+        "repos": "example/repo"
+      },
+      "report": "worth",
+      "chat": "15551234567@s.whatsapp.net",
+      "risk": "irreversible",
+      "disallowed_tools": [
+        "WebFetch"
+      ],
+      "timeout_minutes": 45,
+      "missed": "skip",
+      "jitter_minutes": 10,
+      "preapproved": [
+        "file GitHub issues on example/repo"
+      ],
+      "github": {
+        "repos": [
+          "example/repo"
+        ],
+        "permissions": {
+          "contents": "read",
+          "issues": "write"
+        }
+      }
+    },
+    {
+      "name": "scrape",
+      "when": "daily 21:00",
+      "enabled": false,
+      "command": {
+        "node": "laptop",
+        "argv": [
+          "/Users/you/bin/scrape.sh",
+          "--quiet"
+        ],
+        "dir": "/Users/you"
+      },
+      "report": "silent"
+    },
+    {
+      "name": "inbox",
+      "when": "every 6h",
+      "prompt": "Check the inbox folder and tell me about anything new."
+    },
+    {
+      "name": "notes",
+      "when": "weekly mon 09:00",
+      "prompt_file": "schedules/notes.md"
+    }
+  ]
 }

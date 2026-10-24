@@ -86,7 +86,8 @@ restart.
 | `calendar` | The Google account this brain signed in with and the calendars it may use; set by *Connect Google Calendar*, see [CALENDAR.md](CALENDAR.md). |
 | `role` | `core` for the [core brain](#the-core-brain-and-its-grants), the one brain that may reach others; left out for every other brain. At most one brain is the core. |
 | `grants` | Only on the core brain: what it may do with each other brain, by that brain's id, from `delegate`, `read` and `files` (`{"family": ["delegate", "read"]}`). See [below](#the-core-brain-and-its-grants). |
-| `memory` | The [memory index](#memory): `inject` (default `false`) puts the owner's messages and the brain's own notes that match a new message into its prompt; `top_k` (default 5, at most 20) and `max_chars` (default 2000, at most 20000) bound how much; `consolidate` (`"weekly sun 18:00"`, `"daily 07:00"`; default none) runs `skills/memory-consolidation.md` on that schedule. Left out, nothing changes for the brain. |
+| `memory` | The [memory index](#memory): `inject` (default `false`) puts the owner's messages and the brain's own notes that match a new message into its prompt; `top_k` (default 5, at most 20) and `max_chars` (default 2000, at most 20000) bound how much; `consolidate` (`"weekly sun 18:00"`, `"daily 07:00"`; default none) runs `skills/memory-consolidation.md` on that schedule, as the [scheduled agent](#scheduled-agents) `memory-consolidation`. Left out, nothing changes for the brain. |
+| `schedules` | The brain's [scheduled agents](#scheduled-agents): tasks it runs by itself on a schedule, or programs the bridge runs on a node. |
 
 [`schemas/brain.schema.json`](schemas/brain.schema.json) is a JSON Schema
 of the file, version 1.
@@ -523,11 +524,161 @@ cannot, and the command says so. The intents are kept in
 The Brain page in the dashboard lists them and removes one; so does
 `DELETE /api/brains/{id}/intents/{intent}`.
 
-`memory.consolidate` is the same mechanism for the brain's own weekly job:
-on its schedule, the brain gets a message from `schedule` asking it to
-follow `skills/memory-consolidation.md`, answered in its reply chat. The
-first time the bridge sees the setting it starts counting from then, so
-switching it on does not run the job at once.
+Standing intents with a time are listed on the dashboard's Schedules
+page too, under *Reminders*, with when each fires next; they stay
+intents, set and removed as above, and never go into `brain.json`.
+
+`memory.consolidate` is the brain's own weekly job, the scheduled agent
+`memory-consolidation` ([below](#scheduled-agents)): on its schedule the
+brain is asked to follow `skills/memory-consolidation.md`, and its one-line
+answer goes to its reply chat, as it always did. The first time the bridge
+sees the setting it starts counting from then, so switching it on does not
+run the job at once; a bridge that ran it before keeps counting from its
+last run.
+
+## Scheduled agents
+
+A scheduled agent is a task a brain runs by itself on a schedule ("every
+6 hours, check X and tell me if Y"), or a program the bridge runs on a
+node on a schedule. Each brain keeps its agents in `brain.json`:
+
+```json
+"schedules": [
+  {"name": "morning-briefing", "when": "daily 06:00", "template": "morning-briefing"},
+  {"name": "inbox", "when": "every 6h", "prompt": "Look in inbox/ for new files and tell me what needs me.", "report": "worth"},
+  {"name": "weekly-plan", "when": "weekly mon 08:00", "report": "always"},
+  {"name": "scrape", "when": "daily 21:00", "command": {"node": "laptop", "argv": ["/Users/you/bin/scrape.sh"]}, "report": "silent", "timeout_minutes": 15}
+]
+```
+
+| Field | Meaning |
+| --- | --- |
+| `name` | lower-case letters, digits and `-`, unique in the brain |
+| `when` | `every 6h` (`m`, `h`, `d`; at least 5 minutes), `daily 07:00`, `weekly mon 09:00`, or a cron expression, `cron 0 7 * * 1-5` (minute hour day month weekday; `*`, lists, ranges, steps, `mon`…`sun`), in the bridge's time zone |
+| `enabled` | `false` keeps it from running on its schedule; *Run now* still runs it |
+| `description` | one line on what it is for |
+| `prompt`, `prompt_file`, `template`, `command` | what it does, at most one: the task inline; a file in the brain's folder; a built-in template (below); or a program on a node. None is the file `schedules/<name>.md` in the brain's folder |
+| `vars` | `{"name": "value"}`, filling `{{name}}` in the template or task file |
+| `report` | where the result goes: `worth` (the default) sends the answer only when the run found something worth reporting (it answers `NOTHING_TO_REPORT` otherwise), `always` sends every answer, `silent` sends nothing. A failure is sent unless the agent is silent |
+| `chat` | the chat results go to, a JID; default the brain's `reply_chat` |
+| `risk` | the run's risk budget, `read`, `write` or `irreversible`; left out, what the task's skill triggers say, else `write` ([Skills, risk and approvals](#skills-risk-and-approvals)) |
+| `disallowed_tools` | its own blocked tools; left out, the brain's |
+| `timeout_minutes` | stops a run that takes longer; it can only shorten `run_timeout_minutes` (for a program, the node's exec timeout) |
+| `missed` | a run that fell due while the bridge was down: `run` (the default) runs it once when the bridge is back, however many times it fell due; `skip` waits for the next time |
+| `jitter_minutes` | each run starts a fixed number of seconds within this many minutes after its time, the same for every run of the agent; left out, [`schedules.jitter_minutes`](CONFIGURATION.md#schedules) (2) |
+| `preapproved` | steps the owner approved together with the schedule (`"file GitHub issues on example/repo"`): the run is told it may take them without `request_approval`; every other irreversible step still asks |
+| `github` | `{"repos": ["owner/name"], "permissions": {"issues": "write", "contents": "read"}}`: the GitHub access its runs, and no other run, are granted: each run is logged in to `gh` with a token for exactly these repositories and permissions, which ends with the run ([below](#github-for-scheduled-agents)) |
+
+A task file may start with a frontmatter of `description:` and
+`vars: name, other=default` lines, as the templates do; the rest is the
+task.
+
+**Approval.** The schedules are part of `brain.json`, so the
+[approval](#approval) of the file holds for them: what runs is the copy
+you approved. A brain asked in a chat to "check X every morning" may add
+an entry to its own `brain.json`; the bridge runs it only after you
+approve the change on the brain's page. The task file of an agent is the
+brain's own, like its prompt file, and its runs have the sandbox and risk
+levels of any run; a program on a node runs only what that node's exec
+allowlist and your approval of its commands let it. Edits on the
+dashboard's Schedules page write `brain.json` and the approved copy at
+once, as every edit there does.
+
+**How a run goes.** A brain run of an agent goes through the brain's
+queue like a message: the same sandbox, prompt, memory, risk level and
+irreversible-step approvals, which ask in your DM. It runs in a chat of
+its own, `schedule:<name>`, whose history its next run sees, so it knows
+what it reported before. Its message says the agent's name and schedule,
+where its answer goes and the steps approved with it, then the task. A
+question it asks mid-run has nobody to answer it and is not sent. An
+agent never runs twice at once: a time that comes while its run goes on
+is left out. A lockdown runs an agent at `read`, and refuses one whose
+`risk` says more; it refuses every program on a node.
+
+A program runs on the node through `exec` ([NODES.md](NODES.md#what-a-node-offers)),
+no shell: its `argv[0]` must be on the node's allowlist, the node's
+commands approved, and the node online. Its output and exit code go into
+the run's log; `always` sends the end of its output, `worth` only a
+failure. Each such run is an audit line of kind `scheduled_command`.
+
+**Built-in templates.** The bridge ships these tasks
+([`examples/schedules/`](../examples/schedules)); `vars` fills theirs:
+
+| Template | What it does |
+| --- | --- |
+| `memory-consolidation` | follows `skills/memory-consolidation.md` (what `memory.consolidate` runs) |
+| `morning-briefing` | each morning, today's appointments from the brain's calendar, "Good morning! You have N appointments today: …", and nothing on a day without any (`greeting` sets the first words) |
+| `code-review-security` | reviews GitHub repositories (`repos`) against current secure-coding practice; files a public issue labelled `security` per hardening finding, and an exploitable one only as a private draft security advisory, or in its answer to you; at most `max_issues` (3) a run |
+| `code-review-bugs` | hunts bugs and files a bug report (`bug`) per real, reproducible finding |
+| `code-review-simplify` | questions every setting, line and dependency, and files concrete proposals (`simplify`) that lose no function |
+
+The three reviews keep notes in the brain's `memories/reviews/`, look for
+duplicates among the open and closed issues before they file, give
+`file:line` evidence with a link to the reviewed commit, and post no
+secrets or personal data. They need a `github` grant on the repositories
+they review (the security review can add `repository_advisories: write`,
+for private advisories, once the GitHub App has that permission too;
+without it, an exploitable finding goes only into its answer to you), and since filing an issue publishes something,
+`"risk": "irreversible"` and the filing as a `preapproved` step:
+
+```json
+{"name": "review-bugs", "when": "daily 03:30", "template": "code-review-bugs",
+ "vars": {"repos": "you/project"},
+ "github": {"repos": ["you/project"], "permissions": {"issues": "write", "contents": "read"}},
+ "risk": "irreversible",
+ "preapproved": ["file GitHub issues, labelled bug, on you/project"]}
+```
+
+### GitHub for scheduled agents
+
+A run is logged in to GitHub only when its agent has a `github` grant:
+the run's message carries it, and as the run starts the bridge gets a
+token for exactly the grant's repositories and permissions and writes it
+as `gh`'s login into a folder of the run's own (`GH_CONFIG_DIR`, in the
+data dir's `run-tokens/`, which only that run's sandbox may read), never
+into the run's environment, which macOS shows the user's other
+processes. `gh` works as it is; `git` uses it with
+`git -c credential.helper='!gh auth git-credential'`. When the run ends
+the folder is removed and the token released. No other run or program
+gets one.
+
+The token comes from the bridge's GitHub App (Integrations → GitHub,
+[GITHUB.md](GITHUB.md)): a short-lived installation token minted per run
+for exactly the grant, and revoked when it ends. A grant's repositories
+must all be of one owner, where the app is installed, and the app must
+have each permission the grant asks for; a grant without permissions is
+contents and metadata read. Without an app, the fallback is a token you
+type in, the same for every grant, which the bridge cannot narrow: a
+fine-grained personal access token for the reviewed repositories alone,
+with *Issues: read and write*, *Contents: read* and *Metadata: read*. In
+the core's container, store it with `fridolin core secrets set
+github.token` (it becomes `FRIDOLIN_GITHUB_TOKEN` at the next `fridolin
+core start`); on a native install, set `FRIDOLIN_GITHUB_TOKEN` in the
+service's environment (CONFIGURATION.md, "Where to set them"). A run
+can read its own gh login, so the token is the brain's while it runs.
+
+### The Schedules page and the CLI
+
+The dashboard's Schedules page lists every agent with its schedule, where
+its results go, whether it is on, paused or running, when it runs next
+and how its last run went, with *Run now* and *Pause*/*Resume*; below,
+the reminders. An agent's page edits it, lists its runs (start, how long,
+result, cost or tokens, and the message sent) and shows each run's log:
+the CLI's output as the activity log has it, its tool calls, and errors.
+Pausing is the dashboard's, not `brain.json`'s: a paused agent does not
+make up the times it missed when it is resumed.
+
+```bash
+fridolin schedules list
+fridolin schedules run main/inbox --wait     # run now, then print its log
+fridolin schedules pause inbox               # NAME alone when one brain has it
+fridolin schedules resume inbox
+fridolin schedules logs inbox [RUN] [--runs]
+```
+
+The history and logs are in `schedules/` in the data dir, within the
+limits of [`schedules`](CONFIGURATION.md#schedules), and in the vault's
+nightly snapshot like the audit log.
 
 ## Moving a brain
 

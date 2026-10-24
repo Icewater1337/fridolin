@@ -198,5 +198,13 @@
     "cpu_percent": 90,
     "rss_mb": 4096,
     "min_age_minutes": 30
+  },
+  "schedules": {
+    "enabled": true,
+    "jitter_minutes": 5,
+    "keep_days": 14,
+    "keep_runs": 50,
+    "max_total_mb": 100,
+    "max_log_kb": 512
   }
 }

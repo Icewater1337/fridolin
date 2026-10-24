@@ -50,6 +50,7 @@
 /assets/lib/keypath.js 200 text/javascript; charset=utf-8
 /assets/lib/logs.js 200 text/javascript; charset=utf-8
 /assets/lib/nodes.js 200 text/javascript; charset=utf-8
+/assets/lib/schedules.js 200 text/javascript; charset=utf-8
 /assets/lib/whatsapp.js 200 text/javascript; charset=utf-8
 /assets/logo-mark.webp 200 image/webp
 /assets/pages/activity.js 200 text/javascript; charset=utf-8
@@ -68,6 +69,7 @@
 /assets/pages/logs.js 200 text/javascript; charset=utf-8
 /assets/pages/nodes.js 200 text/javascript; charset=utf-8
 /assets/pages/overview.js 200 text/javascript; charset=utf-8
+/assets/pages/schedules.js 200 text/javascript; charset=utf-8
 /assets/pages/settings.js 200 text/javascript; charset=utf-8
 /assets/pages/site.js 200 text/javascript; charset=utf-8
 /assets/pages/threads.js 200 text/javascript; charset=utf-8

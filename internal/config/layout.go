@@ -102,6 +102,10 @@ func (l Layout) MemoryIndex(id string) string { return l.join("memory", id+".db"
 // schedules, which only the bridge writes.
 func (l Layout) Intents(id string) string { return l.join("intents", id+".json") }
 
+// Schedules holds the scheduled agents' state, run history and run logs
+// (internal/sched), which only the bridge writes.
+func (l Layout) Schedules() string { return l.join("schedules") }
+
 // BrainFolders holds the brains' folders in the core's container, so that
 // they move with the volume and its exports (docs/CORE.md). There it is
 // where new brain folders go, as the home folder is elsewhere.

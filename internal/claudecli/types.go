@@ -14,6 +14,16 @@ type Result struct {
 	Asked    bool
 	Err      error
 	Duration time.Duration
+	// Usage is what the run cost, as the CLI's result reported it.
+	Usage Usage
+}
+
+// Usage is what a run cost: Claude reports dollars and tokens, Codex
+// tokens only. Input counts the cached tokens too.
+type Usage struct {
+	CostUSD      float64
+	InputTokens  int64
+	OutputTokens int64
 }
 
 // ErrPanicked is what a run that panicked inside the bridge ends with;

@@ -35,8 +35,14 @@ type runPolicy struct {
 	// and FromBrain its brain.
 	From, FromBrain string
 	// Silent is an observe-only run, which asks nobody anything.
-	Silent  bool
-	started time.Time
+	Silent bool
+	// Scheduled is, for a scheduled agent's run, the agent; Timeout and
+	// DisallowedTools are what the agent sets for its runs
+	// (agents.admitScheduled).
+	Scheduled       string
+	Timeout         time.Duration
+	DisallowedTools *[]string
+	started         time.Time
 }
 
 // defaultRisk is the budget of a run no skill trigger matched: ordinary
@@ -166,14 +172,23 @@ func (b *App) admitRun(spec brainruntime.RunSpec) (*runPolicy, error) {
 	} else {
 		p.Skill, p.Risk = b.inferSkill(spec.ID, spec.Message.Text)
 	}
+	declared := p.Skill != ""
+	if spec.Message.Source == chat.SourceScheduled {
+		b.agents.admitScheduled(p, spec.Message)
+		declared = declared || b.agents.declaresRisk(spec.Message.ID)
+	}
 	locked := b.locked()
 	refuse := func(reason, notice string) (*runPolicy, error) {
 		b.audit.Append(audit.Entry{Kind: audit.RunRefused, Thread: p.Thread, Chat: p.Chat, Brain: p.Brain, Run: p.ID, Skill: p.Skill, Risk: string(p.Risk), Outcome: reason})
 		log.Printf("brain %s: the policy did not start a run for %s: %s", p.Brain, p.Chat, reason)
 		return nil, &brainruntime.RunRefused{Reason: reason, Notice: notice}
 	}
-	if locked && p.Skill != "" && p.Risk.Rank() > skill.RiskRead.Rank() {
-		return refuse(fmt.Sprintf("lockdown, and skill %s is %s", p.Skill, p.Risk), outboundmsg.LockdownRefusedNotice)
+	if locked && declared && p.Risk.Rank() > skill.RiskRead.Rank() {
+		what := "skill " + p.Skill
+		if p.Skill == "" {
+			what = "scheduled agent " + p.Scheduled
+		}
+		return refuse(fmt.Sprintf("lockdown, and %s is %s", what, p.Risk), outboundmsg.LockdownRefusedNotice)
 	}
 	if locked {
 		p.Risk = skill.RiskRead
@@ -185,6 +200,9 @@ func (b *App) admitRun(spec brainruntime.RunSpec) (*runPolicy, error) {
 	detail := ""
 	if p.From != "" {
 		detail = "delegated by run " + p.From + " of " + p.FromBrain
+	}
+	if p.Scheduled != "" {
+		detail = "scheduled agent " + p.Scheduled
 	}
 	b.audit.Append(audit.Entry{Kind: audit.RunStart, Thread: p.Thread, Chat: p.Chat, Brain: p.Brain, Run: p.ID, Skill: p.Skill, Risk: string(p.Risk), Detail: detail})
 	return p, nil

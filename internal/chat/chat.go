@@ -45,6 +45,9 @@ type Inbound struct {
 	// Submit calls nothing. Only a hand-off that skips the debouncer sets
 	// it (Bridge.submitHandOff); a merged message keeps the first one's.
 	Done func(error)
+	// Log, when set, hears each line the run writes to the brain's
+	// activity log: a scheduled agent's run keeps its own log too.
+	Log func(line string)
 	// GitHub, when set, asks for a GitHub token for the run that answers
 	// the message (docs/GITHUB.md): a scheduled agent's grant.
 	GitHub *GitHubGrant
@@ -86,6 +89,10 @@ const (
 	// waiting for it (or its expiry), handed to the brain in the chat it
 	// was asked in.
 	SourceApprovalResult = "approval-result"
+	// SourceScheduled is a scheduled agent's run (docs/BRAINS.md,
+	// "Scheduled agents"), on a chat of its own (ScheduleChatPrefix):
+	// its answer goes where the agent's report setting says.
+	SourceScheduled = "scheduled"
 )
 
 // DelegateChatPrefix starts the JID of a delegated task's chat,
@@ -95,14 +102,26 @@ const DelegateChatPrefix = "delegate:"
 // IsDelegateChat reports whether jid is a delegated task's chat.
 func IsDelegateChat(jid string) bool { return strings.HasPrefix(jid, DelegateChatPrefix) }
 
+// ScheduleChatPrefix starts the JID of a scheduled agent's chat,
+// "schedule:<agent>": no WhatsApp chat has one.
+const ScheduleChatPrefix = "schedule:"
+
+// IsScheduleChat reports whether jid is a scheduled agent's chat.
+func IsScheduleChat(jid string) bool { return strings.HasPrefix(jid, ScheduleChatPrefix) }
+
+// IsInternalChat reports whether jid is a chat of the bridge's own, a
+// delegated task's or a scheduled agent's, which nobody reads while a run
+// works in it.
+func IsInternalChat(jid string) bool { return IsDelegateChat(jid) || IsScheduleChat(jid) }
+
 // HandedIn reports whether a program handed m to a brain rather than
 // someone writing it in a chat: files through /ingest or Plaud, a task
 // the core brain delegated or its late result, a schedule or standing
-// intent that fell due. Such a message is never a
+// intent that fell due, a scheduled agent's run. Such a message is never a
 // command, and neither interrupts a run nor is replaced by a later one.
 func (m Inbound) HandedIn() bool {
 	switch m.Source {
-	case SourceIngest, SourceDelegate, SourceDelegateResult, SourceSchedule, SourceApprovalResult:
+	case SourceIngest, SourceDelegate, SourceDelegateResult, SourceSchedule, SourceApprovalResult, SourceScheduled:
 		return true
 	}
 	return false

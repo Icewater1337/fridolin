@@ -230,6 +230,14 @@ func (h *housekeepingService) Run(ctx context.Context, trigger string, forceDry 
 	sessions, errs := h.nodeSessionFindings(ctx, rep.DryRun, set.MinAge)
 	findings = append(findings, sessions...)
 	rep.Errors = append(rep.Errors, errs...)
+	// The scheduled agents' history within schedules.keep_days, keep_runs
+	// and max_total_mb, in a dry run too: it removes only the bridge's own
+	// records, as a log rotation does, and nobody is told.
+	if n, err := h.b.agents.prune(time.Now()); err != nil {
+		rep.Errors = append(rep.Errors, "the scheduled agents' history: "+err.Error())
+	} else if n > 0 {
+		log.Printf("housekeeping: dropped %d runs of scheduled agents beyond schedules.keep_days, keep_runs or max_total_mb", n)
+	}
 	rep.Findings = findings
 	if rep.Findings == nil {
 		rep.Findings = []housekeeping.Finding{}

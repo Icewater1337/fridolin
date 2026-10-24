@@ -22,7 +22,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
-	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/memindex"
 	"github.com/Icewater1337/fridolin/internal/platform"
 )
@@ -818,7 +817,7 @@ func memoryBrains(env *DoctorEnv) map[string]string {
 		if ref.Approved == nil {
 			continue
 		}
-		if mem := manifest.MemoryOf(*ref.Approved); mem.Inject || mem.Consolidate != "" {
+		if usesMemoryIndex(*ref.Approved) {
 			out[ref.Approved.ID] = ref.Dir(env.Home)
 		}
 	}

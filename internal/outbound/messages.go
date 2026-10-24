@@ -510,3 +510,20 @@ func NodeAgentNewsMessage(n NodeAgentNews) string {
 func NodeSessionsStoppedNotice(n int) string {
 	return fmt.Sprintf("🔒 The lockdown stopped %d session(s) on nodes (agents and terminals).", n)
 }
+
+// ScheduleFailedNotice tells the owner that a run of scheduled agent
+// agent of brain failed, and why, without the CLI's stderr (that is in
+// the run's log).
+func ScheduleFailedNotice(agent, brain, why string) string {
+	return fmt.Sprintf("⏰ Scheduled agent *%s* (brain %s) failed: %s. Its log is on the Schedules page of the dashboard.", agent, brain, textx.Truncate(why, 300))
+}
+
+// ScheduleCommandResult is what a scheduled agent's program sends with
+// report "always": how it ended on node, and the end of its output.
+func ScheduleCommandResult(agent, node string, exitCode int, output string) string {
+	head := fmt.Sprintf("⏰ Scheduled agent *%s* ran on %s: exit %d.", agent, node, exitCode)
+	if output = strings.TrimSpace(output); output != "" {
+		head += "\n\n" + textx.Tail(output, 1500)
+	}
+	return head
+}

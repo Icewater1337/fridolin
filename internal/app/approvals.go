@@ -189,7 +189,7 @@ func (w *approvalWaiters) textFor(chatJID string) string {
 // owner's DM for a run in no WhatsApp chat (a delegated task's whose
 // core run was not in one, a site build).
 func (b *App) approvalChat(p *runPolicy) string {
-	if p != nil && p.Thread != "" && !chat.IsDelegateChat(p.Thread) && strings.Contains(p.Thread, "@") {
+	if p != nil && p.Thread != "" && !chat.IsInternalChat(p.Thread) && strings.Contains(p.Thread, "@") {
 		return p.Thread
 	}
 	return ownerChat(b.cfgs.Get())
