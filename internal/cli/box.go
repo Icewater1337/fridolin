@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -44,7 +45,8 @@ type boxDeps struct {
 }
 
 func defaultBoxDeps() boxDeps {
-	return boxDeps{getenv: os.Getenv, verify: provenance.Verifier{}.Verify}
+	gh, _ := exec.LookPath("gh")
+	return boxDeps{getenv: os.Getenv, verify: provenance.Verifier{Gh: gh, Environ: os.Environ()}.Verify}
 }
 
 // boxCmd runs `fridolin box` and returns its exit status.

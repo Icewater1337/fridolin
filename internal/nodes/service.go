@@ -64,6 +64,10 @@ type Options struct {
 	// Hold says why no node may be updated now (a lockdown), "" when they
 	// may; nil for never.
 	Hold func() string
+	// BoxImages names the images of the core's version pinned by digest,
+	// for updating a node in a box (update.go); nil when the core does not
+	// know where its images are published (a local build).
+	BoxImages func(ctx context.Context, version string) (node, fride string, err error)
 }
 
 // Service is the node port and the registry behind it.
@@ -78,6 +82,7 @@ type Service struct {
 	dir, version, binDir string
 	busy                 func(string) string
 	hold                 func() string
+	boxImages            func(context.Context, string) (string, string, error)
 	keyMu                sync.Mutex
 	key                  ed25519.PrivateKey
 
@@ -111,7 +116,7 @@ func New(opts Options) (*Service, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Service{
 		reg: reg, logf: logf, onEvent: opts.OnEvent, onDeclare: opts.OnDeclare, onJoin: opts.OnJoin, ctx: ctx, cancel: cancel, sessions: map[string]*session{},
-		dir: opts.Dir, version: opts.Version, binDir: opts.BinariesDir, busy: opts.Busy, hold: opts.Hold,
+		dir: opts.Dir, version: opts.Version, binDir: opts.BinariesDir, busy: opts.Busy, hold: opts.Hold, boxImages: opts.BoxImages,
 		updating: map[string]bool{}, reports: map[string]nodeproto.UpdateReport{},
 	}, nil
 }

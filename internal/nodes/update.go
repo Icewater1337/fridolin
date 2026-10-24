@@ -192,11 +192,20 @@ func (s *Service) UpdateTarget(n *Node) (to, why string) {
 	if n.Effective().Update == nil {
 		return "", "approve what it offers (update) to let the core update it"
 	}
+	if n.Declared.Update.Box {
+		if s.boxImages == nil {
+			return "", errNoBoxImages.Error()
+		}
+		return s.version, ""
+	}
 	if _, _, err := s.Binary(n.OS, n.Arch); err != nil {
 		return "", err.Error()
 	}
 	return s.version, ""
 }
+
+// errNoBoxImages is a core that cannot name its images for a box.
+var errNoBoxImages = errors.New("this core does not know where its images are published (a local build), so it cannot update a node in a box; update the box by hand (box.sh --update)")
 
 // SetUpdateAuto sets node id's auto policy.
 func (s *Service) SetUpdateAuto(id string, auto bool) (*Node, error) {
@@ -313,8 +322,13 @@ func (s *Service) prepareUpdate(id string, o UpdateOptions) (*Node, Binary, stri
 			return nil, Binary{}, "", fmt.Errorf("%w %s now: %s (force to update anyway)", ErrUpdate, n.Name, why)
 		}
 	}
-	bin, path, err := s.Binary(n.OS, n.Arch)
-	if err != nil {
+	var bin Binary
+	var path string
+	if n.Declared.Update.Box {
+		if s.boxImages == nil {
+			return nil, Binary{}, "", fmt.Errorf("%w %s: %v", ErrUpdate, n.Name, errNoBoxImages)
+		}
+	} else if bin, path, err = s.Binary(n.OS, n.Arch); err != nil {
 		return nil, Binary{}, "", fmt.Errorf("%w %s: %v", ErrUpdate, n.Name, err)
 	}
 	if _, err := s.updateKey(); err != nil {
@@ -382,6 +396,9 @@ func (s *Service) runUpdate(ctx context.Context, n *Node, bin Binary, path strin
 	if err != nil {
 		return err
 	}
+	if n.Declared.Update.Box {
+		return s.runBoxUpdate(ctx, n, key)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -427,6 +444,39 @@ func (s *Service) runUpdate(ctx context.Context, n *Node, bin Binary, path strin
 	return s.awaitUpdated(ctx, id, before)
 }
 
+// boxUpdateWait is how long the core waits for a box to come back on the
+// new images: the updater's round, pulling several GB, and its own wait
+// before it goes back.
+var boxUpdateWait = time.Duration(nodeproto.BoxUpdaterMinutes)*time.Minute + 30*time.Minute
+
+// runBoxUpdate asks a node in a box for the images of the core's version,
+// pinned by digest and signed with the update key, and waits for it to
+// connect again on them. The box's updater on its host does the work
+// (docs/NODES.md, "Box updates"); the core never reaches its Docker.
+func (s *Service) runBoxUpdate(ctx context.Context, n *Node, key ed25519.PrivateKey) error {
+	rctx, cancel := context.WithTimeout(ctx, time.Minute)
+	nodeImage, frideImage, err := s.boxImages(rctx, s.version)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("finding the images of %s: %w", s.version, err)
+	}
+	p := nodeproto.BoxUpdateParams{Version: s.version, NodeImage: nodeImage, FrideImage: frideImage,
+		Signature: nodeproto.SignBoxUpdate(key, s.version, nodeImage, frideImage)}
+	if err := p.Check(); err != nil {
+		return fmt.Errorf("the images of %s: %w", s.version, err)
+	}
+	s.mu.Lock()
+	before := s.sessions[n.ID]
+	s.mu.Unlock()
+	var res nodeproto.BoxUpdateResult
+	if err := s.Call(ctx, n.ID, nodeproto.MethodUpdateBox, p, &res); err != nil {
+		return fmt.Errorf("the box refused the update: %w", err)
+	}
+	s.setUpdate(n.ID, func(u *UpdateStatus, _ time.Time) { u.State = UpdateRestarting })
+	s.logf("nodes: %s (%s) keeps the request for %s (%s); its updater picks it up within %d minutes", n.Name, n.ID, p.Version, p.NodeImage, res.UpdaterMinutes)
+	return s.awaitUpdatedWithin(ctx, n.ID, before, boxUpdateWait)
+}
+
 // dropUpdate removes a transfer the update leaves on the node.
 func (s *Service) dropUpdate(id, transfer string) {
 	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
@@ -437,13 +487,26 @@ func (s *Service) dropUpdate(id, transfer string) {
 // awaitUpdated waits for node id to connect again, on a session other than
 // before, and checks the version it runs.
 func (s *Service) awaitUpdated(ctx context.Context, id string, before *session) error {
-	ctx, cancel := context.WithTimeout(ctx, updateWait)
+	return s.awaitUpdatedWithin(ctx, id, before, updateWait)
+}
+
+// awaitUpdatedWithin is awaitUpdated with its own wait.
+func (s *Service) awaitUpdatedWithin(ctx context.Context, id string, before *session, wait time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	t := time.NewTicker(updatePoll)
 	defer t.Stop()
 	for {
 		s.mu.Lock()
 		cur := s.sessions[id]
+		// A box reports a failed update without restarting when its
+		// updater could not even pull the images.
+		r, failed := s.reports[id]
+		if failed && !r.OK && r.To == s.version && cur == before {
+			delete(s.reports, id)
+			s.mu.Unlock()
+			return fmt.Errorf("the node stays on %s: %s", r.From, r.Error)
+		}
 		s.mu.Unlock()
 		if cur != nil && cur != before {
 			n, err := s.reg.Get(id)
@@ -466,7 +529,7 @@ func (s *Service) awaitUpdated(ctx context.Context, id string, before *session) 
 			if s.ctx.Err() != nil {
 				return errors.New("the core stopped before the node came back")
 			}
-			return fmt.Errorf("the node did not connect again within %v", updateWait)
+			return fmt.Errorf("the node did not connect again within %v", wait)
 		case <-t.C:
 		}
 	}

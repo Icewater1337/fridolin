@@ -50,8 +50,8 @@ func TestBoxJoinsAndRunsOverItsDialer(t *testing.T) {
 	if dials.Load() < 2 {
 		t.Fatalf("the box dialed %d times, want the join and the run through its dialer", dials.Load())
 	}
-	if d := a.declared(); d.Update != nil {
-		t.Fatalf("a box offers update: %+v", d.Update)
+	if d := a.declared(); d.Update == nil || !d.Update.Box {
+		t.Fatalf("a box offers update by image, not %+v", d.Update)
 	}
 }
 

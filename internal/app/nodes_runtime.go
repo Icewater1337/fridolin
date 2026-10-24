@@ -14,6 +14,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/nodes"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
+	"github.com/Icewater1337/fridolin/internal/provenance"
 	"github.com/Icewater1337/fridolin/internal/version"
 )
 
@@ -33,7 +34,29 @@ func newNodes(b *App) (*nodes.Service, error) {
 		// Updates: the core's own version, its builds for the nodes, and
 		// what keeps a node from being updated now (nodes_update.go).
 		Version: version.String(), BinariesDir: nodeBinariesDir(b.exe), Busy: b.nodeBusy, Hold: b.nodeHold,
+		// A node in a box is updated to the images of this version.
+		BoxImages: boxImages(httpapi.BoxSourceFromEnv(os.Getenv, version.String()).Registry, provenance.Registry{}),
 	})
+}
+
+// boxImages names the images of a version on registry (ghcr.io/OWNER),
+// pinned by digest, for box updates; nil when the core's image does not
+// say where it is published (a local build).
+func boxImages(registry string, reg provenance.Registry) func(context.Context, string) (string, string, error) {
+	if registry == "" {
+		return nil
+	}
+	return func(ctx context.Context, v string) (string, string, error) {
+		node, err := reg.Digest(ctx, registry+"/fridolin-core", v)
+		if err != nil {
+			return "", "", err
+		}
+		fride, err := reg.Digest(ctx, registry+"/fridolin-fride", v)
+		if err != nil {
+			return "", "", err
+		}
+		return node, fride, nil
+	}
 }
 
 // startNodes opens the node port when nodes.enabled was on at startup

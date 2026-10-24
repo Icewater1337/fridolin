@@ -8,6 +8,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/kardianos/service v1.3.0
+	github.com/klauspost/compress v1.19.1
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/yuin/goldmark v1.8.6
 	go.mau.fi/whatsmeow v0.0.0-20260730092514-662ad1dc6900
@@ -43,7 +44,6 @@ require (
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
 	github.com/huin/goupnp v1.3.0 // indirect
 	github.com/jsimonetti/rtnetlink v1.4.1 // indirect
-	github.com/klauspost/compress v1.19.1 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-sqlite3 v1.14.52 // indirect

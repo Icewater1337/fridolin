@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,9 +27,12 @@ import (
 // Workflow is the workflow that builds and attests fridolin's images.
 const Workflow = ".github/workflows/image.yml"
 
-// Verifier checks images. Its zero value asks api.github.com and runs gh
-// from the PATH.
+// Verifier checks images. Its zero value asks api.github.com; Gh (or
+// Run) says which gh runs.
 type Verifier struct {
+	// Gh is GitHub's CLI, and Environ the environment it runs with.
+	Gh      string
+	Environ []string
 	// API is GitHub's API, https://api.github.com when empty.
 	API string
 	// HTTP fetches; http.DefaultClient with a timeout when nil.
@@ -83,15 +87,15 @@ func (v Verifier) run(ctx context.Context, args ...string) ([]byte, error) {
 	if v.Run != nil {
 		return v.Run(ctx, args...)
 	}
-	gh, err := exec.LookPath("gh")
-	if err != nil {
+	gh := v.Gh
+	if gh == "" {
 		return nil, errors.New("GitHub's CLI (gh) is not installed; it checks the provenance, with no login needed")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, gh, args...)
 	// No prompt and no update check; a login is not needed with --bundle.
-	cmd.Env = append(os.Environ(), "GH_PROMPT_DISABLED=1", "GH_NO_UPDATE_NOTIFIER=1", "NO_COLOR=1")
+	cmd.Env = append(slices.Clone(v.Environ), "GH_PROMPT_DISABLED=1", "GH_NO_UPDATE_NOTIFIER=1", "NO_COLOR=1")
 	return cmd.CombinedOutput()
 }
 
