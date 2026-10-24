@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
 	"slices"
 	"strings"
 
@@ -519,6 +520,26 @@ func openCmd(args []string) {
 	printOnly := fs.Bool("print", false, "print the URL instead of opening it")
 	tailnet := fs.Bool("tailnet", false, "the link at the core's tailnet address, for another device of the tailnet; it works once, within 10 minutes")
 	_ = fs.Parse(args)
+	// A core in the container here: its fridolin makes the link, since
+	// the token is in its volume. --config or $FRIDOLIN_CONFIG means a
+	// native bridge's.
+	if *cfgPath == "" && os.Getenv("FRIDOLIN_CONFIG") == "" {
+		env := coreEnv{environ: os.Environ(), stdout: os.Stdout, stderr: os.Stderr}
+		d := hostDeps{run: runProgram, baseEnv: composeBaseEnv(runtime.GOOS, env.environ)}
+		d.docker, _ = exec.LookPath("docker")
+		url, ok, err := containerDashboardLink(context.Background(), env, d, *tailnet)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if ok {
+			if *printOnly || platform.OpenBrowser(url) != nil {
+				fmt.Println(url)
+				return
+			}
+			fmt.Printf("Opened the dashboard of the %s container\n", coreContainer)
+			return
+		}
+	}
 	inputs := app.ConfigOptions()
 	path, _ := app.ConfigPathFromPaths(*cfgPath, inputs.Paths)
 

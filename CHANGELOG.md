@@ -633,6 +633,16 @@ for compatibility.
   waits (`fride_approval` in `GET /api/nodes`), `!approve` adds it to its
   answer, and `!fleet` marks nodes with `fride` approved
   (docs/NODES.md, "FrIDE").
+- **Signing in to a container core.** The dashboard's sign-in page names
+  the steps for the way the bridge runs: for the core in its container,
+  `docker exec fridolin-core fridolin open --print` and `!dashboard`,
+  and the token in the volume (`/data/dashboard.token`) rather than
+  `~/.fridolin/dashboard.token` on the host, which is not that bridge's.
+  `fridolin open` on a machine whose core runs in the `fridolin-core`
+  container asks the container for the link and opens it, so the old
+  instruction works there too (`--config` keeps it native). `/ready`
+  has a new field, `container` (docs/CORE.md, "Signing in to the
+  dashboard").
 - **The core image has an SSH client** (`openssh-client`). The site's
   "Check for changes" fetches the site repository over SSH with its
   deploy key, which failed in the container with `ssh: not found`.

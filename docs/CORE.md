@@ -149,6 +149,26 @@ binary's version); `--compose PATH` runs a compose file of your own.
 `docker volume rm fridolin-data` without a fresh export: the volume holds the
 WhatsApp pairing.
 
+### Signing in to the dashboard
+
+The dashboard token is the container's, in the volume
+(`/data/dashboard.token`), not in a `~/.fridolin` on the host. To sign a
+browser in on the machine that runs the core:
+
+```bash
+fridolin open                                     # asks the container, opens the browser
+docker exec fridolin-core fridolin open --print   # the same by hand: open the link it prints
+```
+
+The link works once, within a minute. From another device, send
+`!dashboard` in your WhatsApp chat (a link that works once, within 10
+minutes), or `fridolin open --print --tailnet`. The sign-in page knows
+the bridge runs in the container (`"container": true` in `/ready`) and
+names these steps; pasting the token is its last resort, read with
+`docker exec fridolin-core cat /data/dashboard.token`. `fridolin open`
+with `--config PATH` or `$FRIDOLIN_CONFIG` always means a native
+bridge's config.
+
 ### Secrets
 
 `core start` and `core update` read the secrets from the host and put them
@@ -736,9 +756,10 @@ For the way back, DST pins SRC the same way. Both run the core's version
 (`fridolin nodes update ID` first), and both are native hosts: the core
 in a box comes with #191 phase 4, and a Windows node service cannot
 reach the owner's Docker Desktop, so both refuse with a reason. DST
-needs Docker and GitHub's `gh` (`brew install gh`, `apt-get install
-gh`; no login), which checks the image's provenance before it is
-pulled; the pre-flight refuses a DST without the image and without
+needs Docker and a current GitHub `gh` (`brew install gh`; on Linux
+from GitHub's own apt repository, <https://cli.github.com>: Ubuntu
+24.04's `gh` 2.45 lacks `attestation verify --source-ref`; no login),
+which checks the image's provenance before it is pulled; the pre-flight refuses a DST without the image and without
 `gh`. On Ubuntu, run `sudo fridolin core apparmor` once on DST.
 
 **The pre-flight** asks both agents (`core.check`): the versions; the
