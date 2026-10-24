@@ -18,6 +18,7 @@
 
 import { withDeadline } from '../lib/abort.js';
 import { h } from '../lib/dom.js';
+import { errorName } from '../lib/errors.js';
 
 /** @import { GetResponse } from '../../types/api.js' */
 /** @import { Credential } from './router.js' */
@@ -71,6 +72,16 @@ export class ApiError extends Error {
     this.status = status;
     this.data = data;
   }
+}
+
+/**
+ * The HTTP status of a failed call: an ApiError's, else 0 (no answer, or
+ * something else was thrown).
+ * @param {unknown} e
+ * @returns {number}
+ */
+export function errorStatus(e) {
+  return e instanceof ApiError ? e.status : 0;
 }
 
 /**
@@ -182,7 +193,7 @@ async function request(method, path, body, { signal, timeout = DEFAULT_TIMEOUT_M
       throw new ApiError(`The bridge did not answer within ${Math.round(timeout / 1000)} s. Is it stuck?`, 0, null);
     }
     // The caller gave up, maybe with a reason of its own: not the bridge's fault.
-    if ((signal && signal.aborted) || (e && e.name === 'AbortError')) throw e;
+    if ((signal && signal.aborted) || errorName(e) === 'AbortError') throw e;
     setReachable(false);
     throw new ApiError('Cannot reach the bridge. Is it still running?', 0, null);
   } finally {
@@ -308,7 +319,7 @@ export async function upload(path, files, { signal } = {}) {
   try {
     res = await fetch(path, { method: 'POST', headers, body, signal, cache: 'no-store', credentials: 'same-origin' });
   } catch (e) {
-    if ((signal && signal.aborted) || (e && e.name === 'AbortError')) throw e;
+    if ((signal && signal.aborted) || errorName(e) === 'AbortError') throw e;
     throw new ApiError('Cannot reach the bridge. Is it still running?', 0, null);
   }
   let data = null;

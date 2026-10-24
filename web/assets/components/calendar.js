@@ -1,7 +1,7 @@
 // Google Calendar: the one-time OAuth client setup (Settings) and the
 // per-brain "Connect Google Calendar" card (brain page).
 
-import { get, post, put, del } from '../app/api.js';
+import { get, post, put, del, errorStatus } from '../app/api.js';
 import { h, mount } from '../lib/dom.js';
 import { icon } from './icons.js';
 import { toast } from './toast.js';
@@ -9,6 +9,7 @@ import { btn } from './buttons.js';
 import { confirmDialog } from './dialog.js';
 import { nextId } from './fields.js';
 import { pill, callout, mono, loading } from './common.js';
+import { errorMessage } from '../lib/errors.js';
 
 const CONSOLE = 'https://console.cloud.google.com/apis/credentials';
 const ENABLE_API = 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com';
@@ -221,10 +222,10 @@ export function calendarCard(brainId, { signal } = {}) {
           r = await del(url);
         } catch (e) {
           // The revocation was not confirmed by Google, so the token was kept.
-          if (e.status !== 502) throw e;
+          if (errorStatus(e) !== 502) throw e;
           const anyway = await confirmDialog({
             title: 'Google did not revoke the access',
-            message: h('div', h('p', e.message), h('p', 'Delete the token here anyway? The access then stays at Google until you remove it at myaccount.google.com/permissions.')),
+            message: h('div', h('p', errorMessage(e)), h('p', 'Delete the token here anyway? The access then stays at Google until you remove it at myaccount.google.com/permissions.')),
             confirm: 'Delete the token', danger: true,
           });
           if (!anyway) return;
