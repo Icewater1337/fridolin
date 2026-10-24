@@ -1005,10 +1005,18 @@ func imageTag(v string) string {
 // returns them as NAME=value. It never prints a value; it names what it
 // made, for the recovery sheet.
 func secretEnv(d hostDeps, stderr io.Writer) ([]string, error) {
+	return containerSecretEnv(d, stderr, true)
+}
+
+// containerSecretEnv is secretEnv, making none unless mint: a command
+// other than core start (core run core status, which the move pre-flight
+// runs on a host that is not the core yet) must not make keys of its own,
+// which the core's would then not replace (#187).
+func containerSecretEnv(d hostDeps, stderr io.Writer, mint bool) ([]string, error) {
 	var env, missing, made []string
 	for _, s := range containerSecrets {
 		v, err := d.secrets.Get(s.secret)
-		if errors.Is(err, hostsecrets.ErrNotFound) && s.made != notMade {
+		if errors.Is(err, hostsecrets.ErrNotFound) && s.made != notMade && mint {
 			if v, err = d.makeSecret(s.made); err == nil {
 				if err = d.secrets.Set(s.secret, v); err == nil {
 					made = append(made, s.secret)
@@ -1099,7 +1107,7 @@ func coreHost(ctx context.Context, sub string, args []string, env coreEnv, d hos
 		fmt.Fprintln(env.stderr, "Could not tell this machine's time zone, so the core runs in UTC: set FRIDOLIN_TZ (such as Europe/Zurich) for core start, or \"timezone\" in the core's config.")
 	}
 	if sub != "stop" {
-		secrets, err := secretEnv(d, env.stderr)
+		secrets, err := containerSecretEnv(d, env.stderr, sub == "start" || sub == "update")
 		if err != nil {
 			fmt.Fprintf(env.stderr, "fridolin core %s: %v\n", sub, err)
 			return 1
