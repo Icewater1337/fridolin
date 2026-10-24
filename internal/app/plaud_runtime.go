@@ -54,6 +54,7 @@ func plaudSnapshotOf(c config.Settings) *plaud.Snapshot {
 	return &plaud.Snapshot{
 		Plaud: plaud.Settings(wire.Plaud), DataDir: c.Boot.DataDir, MediaDir: c.Boot.MediaDir,
 		QueueMaxPending: c.Live.Queue.MaxPending, OwnerChat: ownerChatNumbers(c.Live.AllowedNumbers), Interval: c.Live.Plaud.Interval,
+		Zone: c.Live.Location(),
 	}
 }
 

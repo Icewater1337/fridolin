@@ -79,7 +79,7 @@ that must last lives in the volume:
 | --- | --- | --- |
 | `FRIDOLIN_HOME` | `/data` | the volume: the data dir, and where `fridolin core` commands look |
 | `FRIDOLIN_CONFIG` | `/data/config.json` | the config file, in the volume |
-| `TZ` | `UTC` | compose passes `FRIDOLIN_TZ` instead when set |
+| `TZ` | `UTC` | compose passes `FRIDOLIN_TZ` instead when set, which `fridolin core start`, `run` and `update` set to the host's time zone (or keep from your shell); config's [`timezone`](CONFIGURATION.md#timezone) wins over it for schedules |
 
 On a new, empty volume the entry point writes a starter config whose
 `data_dir` is `/data` before the bridge first starts. The image's command

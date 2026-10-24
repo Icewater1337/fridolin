@@ -41,6 +41,7 @@ type Live struct {
 	CodexPath                  string
 	CodexModel                 string
 	CodexEffort                string
+	Timezone                   string
 	MaxChunkSize               int
 	MaxMediaMB                 int
 	BrainModel                 string
@@ -132,6 +133,7 @@ func liveOf(c *File) Live {
 		CodexPath:                  c.CodexPath,
 		CodexModel:                 c.CodexModel,
 		CodexEffort:                c.CodexEffort,
+		Timezone:                   c.Timezone,
 		MaxChunkSize:               c.MaxChunkSize,
 		MaxMediaMB:                 c.MaxMediaMB,
 		BrainModel:                 c.BrainModel,
@@ -245,6 +247,7 @@ func fileOf(c Live) File {
 		CodexPath:                  c.CodexPath,
 		CodexModel:                 c.CodexModel,
 		CodexEffort:                c.CodexEffort,
+		Timezone:                   c.Timezone,
 		MaxChunkSize:               c.MaxChunkSize,
 		MaxMediaMB:                 c.MaxMediaMB,
 		BrainModel:                 c.BrainModel,
@@ -335,3 +338,11 @@ func plaudConfigOf(c PlaudSettings) PlaudConfig {
 
 // AnyoneCanDM reports an explicitly open allowlist.
 func (s *Settings) AnyoneCanDM() bool { return len(s.AllowedNumbers) == 0 && s.AllowAnyDM }
+
+// Location is the owner's time zone (timezone), else the process's own
+// (time.Local, which TZ sets): the zone the bridge reads every time of day
+// in. Use it, never time.Local, so that a native bridge and the core
+// container agree.
+func (l Live) Location() *time.Location {
+	return trigger.Zone(l.Timezone)
+}

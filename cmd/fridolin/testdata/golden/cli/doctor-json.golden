@@ -143,6 +143,13 @@
       "detail": "off"
     },
     {
+      "id": "timezone",
+      "title": "time zone of schedules",
+      "required": false,
+      "status": "ok",
+      "detail": "the system's zone (timezone is unset)"
+    },
+    {
       "id": "drive-client",
       "title": "Google Drive link uses your own Google client",
       "required": false,

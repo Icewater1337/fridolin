@@ -26,6 +26,16 @@ for compatibility.
   the archive (`core/exports/<time>.json`: the data dir's device id, the
   move, the size; no data), and their manifest names the device id and
   the move (docs/CORE.md, "The core moves itself").
+- **`timezone`**, your IANA time zone (docs/CONFIGURATION.md, "Time
+  zone"; Settings → Advanced). Scheduled agents, standing intents, the
+  memory consolidation, nightly snapshots and the daily backup run at
+  its times of day, and brains are told the time in it and run with it
+  as `TZ`. Unset, the bridge's own zone stands in. `fridolin init`
+  writes the machine's zone; `fridolin core start`, `run` and `update`
+  pass the host's zone into the container as `TZ` (`FRIDOLIN_TZ`
+  overrides it). The Schedules page names the zone, and `fridolin
+  doctor` warns when it is unset and the bridge runs in UTC.
+  `GET /api/schedules` has `timezone: {name, source}`.
 - **Command agents bring their program to the node** (#213): a node
   that names folders in `exec.accept_from_core` (node.json) takes the
   program of a command agent you approve, when it lies in one of them, as
@@ -903,6 +913,13 @@ for compatibility.
 
 ### Fixed
 
+- **Schedules in the core ran in UTC.** The container has `TZ=UTC`, so a
+  `"daily 21:00"` agent ran at 23:00 in Zurich. After upgrading, run
+  `fridolin core start` once (it now passes the host's zone), or set
+  `timezone`. Across daylight saving changes a schedule keeps its wall-clock
+  time; a time the change skips runs once at the next minute that exists,
+  and a time it repeats runs once, at its first showing (before, a stored
+  anchor with a fixed offset could move a run by an hour).
 - A node in a box on a host without Tailscale (a fresh server) joins at
   the first try: the join dialed the core before the box's first netmap
   named it, the host's DNS then found no such host, and box.sh stopped

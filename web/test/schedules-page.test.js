@@ -6,8 +6,16 @@ import { h } from '../assets/lib/dom.js';
 import { createPage } from '../assets/app/page.js';
 import schedulesPage from '../assets/pages/schedules.js';
 import {
-  fieldsOf, fileJSON, filterAgents, groupByBrain, inTime, permissionsOf, presetOf, scheduleOf, stateOf, taskKind, varsText, whenOf,
+  fieldsOf, fileJSON, filterAgents, groupByBrain, inTime, permissionsOf, presetOf, scheduleOf, stateOf, taskKind, varsText, whenOf, zoneNote,
 } from '../assets/lib/schedules.js';
+
+test('zoneNote says the zone times of day are in, and warns about an unset one in UTC', () => {
+  assert.equal(zoneNote(undefined), null);
+  assert.deepEqual(zoneNote({ name: 'Europe/Zurich', source: 'config' }), { text: 'Times of day are Europe/Zurich.', warn: false });
+  assert.equal(zoneNote({ name: 'UTC', source: 'process' }).warn, true);
+  assert.match(zoneNote({ name: 'Europe/Zurich', source: 'process' }).text, /Europe\/Zurich \(the bridge’s; the time zone is unset/);
+  assert.match(zoneNote({ name: 'Local', source: 'process' }).text, /the bridge’s own time zone/);
+});
 
 const DM = '15551234567@s.whatsapp.net';
 

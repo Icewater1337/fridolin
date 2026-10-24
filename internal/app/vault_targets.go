@@ -211,7 +211,9 @@ func (t *targetService) Stop() {
 
 // tick starts what is due of each target whose node is there.
 func (t *targetService) tick(now time.Time) {
-	for _, tg := range t.cfgs.Get().Vault.Targets {
+	cfg := t.cfgs.Get()
+	now = now.In(cfg.Location())
+	for _, tg := range cfg.Vault.Targets {
 		// A node an update restarts waits for the next tick.
 		if !t.nodes.Online(tg.Node) || t.nodes.Updating(tg.Node) {
 			continue
@@ -237,7 +239,8 @@ func (t *targetService) tick(now time.Time) {
 	}
 }
 
-// targetDue reports which jobs of target tg are due at now.
+// targetDue reports which jobs of target tg are due at now, whose zone
+// is the one its night's time of day is in (the owner's).
 func targetDue(tg config.VaultTarget, st targetStatus, now time.Time) (hourly, nightly, check, read bool) {
 	failedLongAgo := func(r *snapshotRecord) bool {
 		return r.ID == "" && r.Error != "" && now.Sub(r.At) >= targetRetryAfter
@@ -248,7 +251,7 @@ func targetDue(tg config.VaultTarget, st targetStatus, now time.Time) (hourly, n
 		}
 	}
 	at, _ := time.Parse("15:04", tg.Night())
-	local := now.Local()
+	local := now
 	night := time.Date(local.Year(), local.Month(), local.Day(), at.Hour(), at.Minute(), 0, 0, local.Location())
 	if r := st.LastNightly; r == nil || (r.At.Before(night) && !now.Before(night)) || now.Sub(r.At) >= 26*time.Hour || failedLongAgo(r) {
 		nightly = true
