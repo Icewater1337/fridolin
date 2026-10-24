@@ -4,6 +4,7 @@
 // distinct message.
 
 import { toastError } from '../components/toast.js';
+import { errorMessage, errorName } from '../lib/errors.js';
 
 /**
  * A running poll. kick() runs it now and resolves once a run that started
@@ -44,7 +45,8 @@ export function backoff(interval, failures) {
 }
 
 /** @param {any} e what a run threw */
-const isAbort = (e) => e && (e.name === 'AbortError' || e.name === 'TimeoutError');
+/** @param {unknown} e */
+const isAbort = (e) => errorName(e) === 'AbortError' || errorName(e) === 'TimeoutError';
 
 // 401 opens the connect screen and 0 shows the offline banner; anything
 // else is worth a toast, and an error without a status is a bug.
@@ -93,7 +95,7 @@ export function makePoll(fn, interval, { onError = reportPollError } = {}) {
       if (!ctl.signal.aborted) { lastErr = ''; failures = 0; }
     } catch (e) {
       if (!ctl.signal.aborted && !isAbort(e)) {
-        const msg = (e && e.message) || String(e);
+        const msg = errorMessage(e);
         if (msg !== lastErr) onError(e);
         lastErr = msg;
         failures += 1;

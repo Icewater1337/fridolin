@@ -506,7 +506,9 @@ machine must already be a node (path B). In short:
   import. A page declares its default export with
   `/** @satisfies {PageModule} */`, which types its `root` and `ctx`.
   Prefer a real type to `any`, and a `// @ts-expect-error` that says why
-  to a cast that hides a mistake. `web/test/fake-dom-globals.d.ts`
+  to a cast that hides a mistake. A caught value is `unknown`: read it
+  with `errorMessage(e)` and `errorName(e)` (`lib/errors.js`) and
+  `errorStatus(e)` (`app/api.js`). `web/test/fake-dom-globals.d.ts`
   describes the fake DOM the tests run in. The strict options still to
   turn on, in order, are listed in `web/tsconfig.json`.
 - The project was called whatsapp-claude-bridge before. Names from then

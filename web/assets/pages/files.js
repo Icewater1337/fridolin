@@ -17,6 +17,7 @@ import { badge, empty, pageHeader, spinner, timeAgo } from '../components/common
 import { textInput, select } from '../components/fields.js';
 import { deleteFile, editOnOpen, moveFile, newFile, uploadButton } from '../components/file-actions.js';
 import { toast } from '../components/toast.js';
+import { errorMessage } from '../lib/errors.js';
 
 /** @import { Page, PageModule } from '../app/page.js' */
 /** @import { Child } from '../lib/dom.js' */
@@ -116,7 +117,7 @@ function ruleControl(rootId, path, rule, reload) {
       reload();
     } catch (e) {
       sel.value = own;
-      toast(e.message || String(e));
+      toast(errorMessage(e));
     }
   });
   const inherited = rule && rule.folder !== path

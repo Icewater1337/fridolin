@@ -7,7 +7,7 @@
 // so where the bridge sends one, an unchanged answer is a 304 that brings
 // nothing to download or compare.
 
-import { getIfChanged, NOT_MODIFIED } from './api.js';
+import { getIfChanged, NOT_MODIFIED, errorStatus } from './api.js';
 import { makePoll } from './poll.js';
 
 /** @import { GetResponse } from '../../types/api.js' */
@@ -173,7 +173,7 @@ function revalidating(path, { timeout, ...options }) {
     try {
       answer = await getIfChanged(path, sent ? sent.etag : '', { signal, timeout });
     } catch (e) {
-      if (e && e.status === 404 && 'missing' in options) {
+      if (errorStatus(e) === 404 && 'missing' in options) {
         last = null;
         return options.missing;
       }

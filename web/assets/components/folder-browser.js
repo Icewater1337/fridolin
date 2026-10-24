@@ -7,6 +7,7 @@ import { icon } from './icons.js';
 import { btn } from './buttons.js';
 import { toggle, textInput } from './fields.js';
 import { badge, spinner } from './common.js';
+import { errorMessage } from '../lib/errors.js';
 
 /**
  * folderBrowser({start, onPick(path, {create}), pickLabel, newLabel, signal})
@@ -82,7 +83,7 @@ export function folderBrowser({ start = '', onPick, pickLabel = 'Use this folder
     } catch (e) {
       if (loading !== mine || mine.signal.aborted) return;
       err.hidden = false;
-      err.textContent = e.message;
+      err.textContent = errorMessage(e);
       if (!data) mount(listEl);
       else paint();
     }

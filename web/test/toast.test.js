@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { installDom } from './fake-dom.js';
 import { toast, toastError } from '../assets/components/toast.js';
+import { ApiError } from '../assets/app/api.js';
 
 installDom();
 const shown = (msg) => document.querySelectorAll('.toast').filter((el) => el.textContent.includes(msg) && !el.classList.contains('leaving'));
@@ -33,7 +34,7 @@ test('a closed toast cannot take the place of a newer one with its message', (t)
 
 test('toastError stays quiet about a 401 and an abort', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  assert.equal(toastError(Object.assign(new Error('missing token'), { status: 401 })), null);
+  assert.equal(toastError(new ApiError('missing token', 401, null)), null);
   assert.equal(toastError(Object.assign(new Error('aborted'), { name: 'AbortError' })), null);
   assert.ok(toastError(new Error('Brain id taken')));
   assert.equal(shown('Brain id taken').length, 1);
