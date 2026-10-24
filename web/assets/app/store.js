@@ -49,6 +49,7 @@ export function createStore(initial) {
       [...subs].forEach(call);
     },
     subscribe(select, fn) {
+      /** @type {Sub<S>} */
       const sub = { select, fn, called: false, last: undefined };
       subs.add(sub);
       call(sub);
