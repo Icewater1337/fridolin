@@ -74,14 +74,6 @@ func newTestBridge(t *testing.T, extra string) *testBridge {
 	return &testBridge{App: b, h: b.newHTTPHandler("127.0.0.1:8765"), home: home}
 }
 
-// setenv sets name in the bridge's environment until t ends. A subtest of
-// the test that made the bridge needs it: what the subtest's own setenv sets
-// stays in the subtest's environment, which the bridge does not read.
-func (tb *testBridge) setenv(t testing.TB, name, value string) {
-	t.Helper()
-	t.Cleanup(tb.env.(*testEnv).change(name, value, false))
-}
-
 // do sends a request the way the dashboard does, then lets mutate adjust it.
 func (tb *testBridge) do(method, path string, body any, mutate ...func(*http.Request)) *httptest.ResponseRecorder {
 	var rd io.Reader
