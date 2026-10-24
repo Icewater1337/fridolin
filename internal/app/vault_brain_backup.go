@@ -48,6 +48,12 @@ func brainBackupOf(id, dir string, approved *manifest.Manifest, includeSecrets b
 		b.Skip, b.Unreadable = "its brain.json cannot be read: "+err.Error(), true
 		return b
 	}
+	return brainBackupWith(b, disk, approved, includeSecrets)
+}
+
+// brainBackupWith fills in b by the backup settings of disk and approved,
+// whichever leaves out more.
+func brainBackupWith(b brainBackup, disk, approved *manifest.Manifest, includeSecrets bool) brainBackup {
 	if !disk.Backup.Enabled || (approved != nil && !approved.Backup.Enabled) {
 		b.Skip = "its backup is off (backup.enabled)"
 		return b
@@ -149,8 +155,17 @@ type vaultBrainRef struct {
 // through the cloud, by the same rules as the vault's backups: skip says
 // why none of it may ("" when some does), and excluded whether a path
 // below it, slash-separated, stays. A core export, which goes through the
-// vault bucket, takes a brain's folder along by it.
-func BrainFolderFilter(id, dir string, approved *manifest.Manifest, includeSecrets bool) (skip string, excluded func(rel string) bool) {
+// vault bucket, takes a brain's folder along by it. approvedOnly reads
+// the approved manifest alone and not brain.json on disk (core export
+// --use-approved): the owner chose to leave an unapproved edit aside. A
+// folder that does not exist, or whose brain.json cannot be read, stays
+// left out all the same.
+func BrainFolderFilter(id, dir string, approved *manifest.Manifest, includeSecrets, approvedOnly bool) (skip string, excluded func(rel string) bool) {
 	b := brainBackupOf(id, dir, approved, includeSecrets)
+	if approvedOnly && approved != nil && !b.Unreadable {
+		if _, err := os.Stat(dir); err == nil {
+			b = brainBackupWith(brainBackup{ID: id, Dir: dir}, approved, approved, includeSecrets)
+		}
+	}
 	return b.Skip, b.excluded
 }

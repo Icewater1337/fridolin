@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -271,6 +272,7 @@ func coreSend(ctx context.Context, env coreEnv, d hostDeps, to, code string, wit
 	if len(missing) > 0 {
 		fmt.Fprintf(env.stderr, "Not in %s, so not sent: %s\n", d.place(), strings.Join(missing, ", "))
 	}
+	sendDriftCheck(ctx, env, d)
 	if code == "" {
 		var err error
 		if code, err = env.term.readLine("The code core receive shows: "); err != nil {
@@ -298,6 +300,26 @@ func coreSend(ctx context.Context, env coreEnv, d hostDeps, to, code string, wit
 		fmt.Fprintf(env.stdout, "Already there with the same value: %s\n", strings.Join(res.Unchanged, ", "))
 	}
 	return 0
+}
+
+// sendDriftCheck runs before core send: a move comes next, and its export
+// refuses while a brain.json on disk keeps more home than the manifest
+// the owner approved (#189). It asks the running core (core export
+// --drift) and passes its warnings on; a core that does not run, or
+// Docker missing, says nothing here.
+func sendDriftCheck(ctx context.Context, env coreEnv, d hostDeps) {
+	if d.docker == "" || d.run == nil {
+		return
+	}
+	var out bytes.Buffer
+	err := d.run(ctx, d.docker, []string{"exec", coreContainer, "fridolin", "core", "export", "--drift"}, d.baseEnv, &out, &out)
+	if !strings.Contains(out.String(), "warning: brain ") {
+		return
+	}
+	fmt.Fprintf(env.stderr, "Before the move, the core says:\n%s", out.String())
+	if err != nil {
+		fmt.Fprintln(env.stderr, "Its export refuses until you approve those changes in the dashboard, or pass --use-approved to core export. The secrets can go now all the same.")
+	}
 }
 
 func listOrNone(s []string) string {

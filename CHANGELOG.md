@@ -10,6 +10,17 @@ for compatibility.
 
 ### Added
 
+- **Core export says when a brain folder is not as you approved it**
+  (#189): `core export`, `--list-folders`, `fridolin doctor` (new check
+  `brain-drift`) and `core send` print a warning for each brain whose
+  `brain.json` or `.brain/schedules/` files on disk differ from the
+  approved manifest, naming the `backup.exclude`, `backup.enabled` and
+  `backup.targets.cloud` changes. The export refuses while a `brain.json`
+  on disk keeps more of its folder home than the approved manifest:
+  approve the change first, or pass the new `--use-approved` to take the
+  folder along by the approved one. `core export --drift` gives the
+  warnings alone. Scripts that run `core export` should expect exit 1
+  for such a refusal.
 - **One file per scheduled agent** in the brain's new `.brain` folder:
   `<brain>/.brain/schedules/<name>.json`
   ([schema](docs/schemas/schedule.schema.json), docs/BRAINS.md, "The
