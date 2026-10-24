@@ -1665,7 +1665,11 @@ checks that it ran.
 
 The scheduled agents of every brain ([BRAINS.md](BRAINS.md#scheduled-agents)):
 whether they run on their schedules, how they are spread, and how much of
-their run history and logs is kept.
+their run history and logs is kept. The agents themselves are not
+settings here: each is a file in its brain's folder,
+`.brain/schedules/<name>.json` ([schema](schemas/schedule.schema.json)),
+and `brain_dirs[].approved.schedules` holds the copy of each that you
+approved, which is what runs.
 
 | Field | Default | Meaning |
 | --- | --- | --- |

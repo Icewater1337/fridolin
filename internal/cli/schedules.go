@@ -62,13 +62,15 @@ type scheduleRun struct {
 }
 
 type scheduleAgent struct {
-	Brain   string       `json:"brain"`
-	Name    string       `json:"name"`
-	Task    string       `json:"task"`
-	Report  string       `json:"report"`
-	Enabled bool         `json:"enabled"`
-	Paused  bool         `json:"paused"`
-	Running bool         `json:"running"`
+	Brain   string `json:"brain"`
+	Name    string `json:"name"`
+	Task    string `json:"task"`
+	Report  string `json:"report"`
+	Enabled bool   `json:"enabled"`
+	Paused  bool   `json:"paused"`
+	Running bool   `json:"running"`
+	// State is pending for an agent that waits for its first approval.
+	State   string       `json:"state"`
 	Next    *time.Time   `json:"next"`
 	LastRun *scheduleRun `json:"last_run"`
 	Problem string       `json:"problem"`
@@ -304,13 +306,15 @@ func schedulesListText(l schedulesList, now time.Time) string {
 		b.WriteString("schedules.enabled is off: no agent runs on its schedule (Run now still works).\n\n")
 	}
 	if len(l.Agents) == 0 {
-		b.WriteString("No scheduled agents. A brain gets them in its brain.json (docs/BRAINS.md, \"Scheduled agents\").\n")
+		b.WriteString("No scheduled agents. A brain gets them in its .brain/schedules folder, or from the dashboard's Schedules page (docs/BRAINS.md, \"Scheduled agents\").\n")
 	} else {
 		w := tabwriter.NewWriter(&b, 2, 4, 2, ' ', 0)
 		fmt.Fprintln(w, "AGENT\tWHEN\tSTATE\tNEXT\tLAST RUN")
 		for _, a := range l.Agents {
 			state := "on"
 			switch {
+			case a.State == "pending":
+				state = "pending approval"
 			case a.Running:
 				state = "running"
 			case a.Paused:

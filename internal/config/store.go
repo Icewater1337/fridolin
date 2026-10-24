@@ -362,6 +362,9 @@ func (cs *Store) reread(cur *Snapshot) (*Snapshot, error) {
 // dashboard would show as changed on disk.
 type Tx struct {
 	writes []*stagedManifest
+	// files are the brains' other files it writes or removes, after the
+	// brain.json files (brainfiles.go).
+	files []*stagedFile
 	// checkBrains has the update check the brain set, see CheckBrains.
 	checkBrains bool
 }
@@ -424,6 +427,13 @@ func (tx *Tx) stage(dir string, m *manifest.Manifest, create bool) error {
 // back: one that is no regular file, such as a symlink the brain put
 // there, could not be, and is not replaced.
 func (tx *Tx) write() error {
+	if err := tx.writeManifests(); err != nil {
+		return err
+	}
+	return tx.writeFiles()
+}
+
+func (tx *Tx) writeManifests() error {
 	for _, w := range tx.writes {
 		path := filepath.Join(w.dir, manifest.File)
 		root, err := manifest.OpenRoot(w.dir, !w.create)
@@ -453,6 +463,7 @@ func (tx *Tx) write() error {
 // one first. It logs what it cannot put back: the dashboard then shows
 // that brain's brain.json as changed on disk.
 func (tx *Tx) rollback() {
+	tx.rollbackFiles()
 	for i := len(tx.writes) - 1; i >= 0; i-- {
 		w := tx.writes[i]
 		if !w.written {
@@ -496,6 +507,7 @@ func (tx *Tx) rollback() {
 
 // close releases every retained handle after commit, rollback or an error.
 func (tx *Tx) close() {
+	tx.closeFiles()
 	for _, w := range tx.writes {
 		if w.file != nil {
 			w.file.Close()

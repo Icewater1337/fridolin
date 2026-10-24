@@ -3,7 +3,7 @@
 
 import { get, post, qs } from '../app/api.js';
 import { store } from '../app/store.js';
-import { brainsResource, resource } from '../app/resources.js';
+import { brainsResource, resource, schedulesResource } from '../app/resources.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { fmtDuration, fmtBytes, plural, parseTs } from '../lib/format.js';
 import { phone } from '../lib/jid.js';
@@ -22,6 +22,7 @@ export default {
     const header = h('div.health');
     const cta = h('div');
     const alerts = h('div.alerts');
+    const agentsNote = h('div.alerts');
     const waCard = h('div.card.wa-card');
     const claudeCard = h('div.card');
     const sandboxCard = h('div.card');
@@ -36,6 +37,7 @@ export default {
       h('header.page-header', h('div.page-heading', h('h1', 'Overview'), header)),
       cta,
       alerts,
+      agentsNote,
       waCard,
       coreBox,
       h('div.grid.three', claudeCard, sandboxCard, backupCard),
@@ -288,6 +290,16 @@ export default {
         h('div.brain-row-state', runtimeSummary(b)),
         icon('right', 'row-chevron')));
     };
+    // ── scheduled agents waiting for approval ──
+    ctx.follow(schedulesResource, (d) => {
+      const pending = ((d && d.agents) || []).filter((a) => a.review && a.review.status !== 'invalid');
+      paint(agentsNote, pending.map((a) => `${a.brain}/${a.name}`).join(','), () => (pending.length
+        ? callout('warn', `${plural(pending.length, 'scheduled agent')} waiting for your approval`,
+          h('div', pending.map((a) => a.name).join(', '), ': written or changed outside the dashboard, they run only once you approve them.'),
+          h('div', h('a', { href: '#/schedules' }, 'Review & approve on the Schedules page')))
+        : null));
+    }, 30000);
+
     ctx.follow(brainsResource, (l) => {
       configured = Array.isArray(l) ? l : [];
       const s = store.get().status;

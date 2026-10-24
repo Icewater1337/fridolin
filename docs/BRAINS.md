@@ -368,6 +368,10 @@ brains for your DMs, one group for two brains and so on) or leave one that
 cannot run; a brain that cannot run already, after a hand edit of
 `config.json` say, keeps none of the others from being edited.
 
+The brain's scheduled agents, in [`.brain/schedules/`](#the-brain-folder),
+are approved the same way, each file on its own, on the Schedules page;
+`brain.json`'s approval leaves them aside.
+
 ## Files the bridge reads and writes
 
 The bridge itself, outside the sandbox, works on these files in a brain's
@@ -526,7 +530,13 @@ The Brain page in the dashboard lists them and removes one; so does
 
 Standing intents with a time are listed on the dashboard's Schedules
 page too, under *Reminders*, with when each fires next; they stay
-intents, set and removed as above, and never go into `brain.json`.
+intents, set and removed as above, and never go into `brain.json`. So
+are the reminders a brain keeps itself, in `.brain/reminders.json` or
+`skills/reminders.json` (a list of `{"id", "fire_at", "message", "sent",
+"repeat_every_days", "jid"}`, as a brain's own remind skill writes it,
+`fire_at` in the bridge's time zone): those not sent yet are listed with
+the file they are in. The brain fires those itself; the bridge only
+shows them.
 
 `memory.consolidate` is the brain's own weekly job, the scheduled agent
 `memory-consolidation` ([below](#scheduled-agents)): on its schedule the
@@ -536,24 +546,44 @@ sees the setting it starts counting from then, so switching it on does not
 run the job at once; a bridge that ran it before keeps counting from its
 last run.
 
+## The .brain folder
+
+`.brain/` in a brain's folder holds what Fridolin manages for the brain
+as definitions, one file per thing, each approved by you on its own: a
+brain, or you, can add one without touching `brain.json`, and the review
+of a change shows just that file. Today it holds the brain's
+[scheduled agents](#scheduled-agents), in `.brain/schedules/`, and may
+hold the brain's own [reminders](#standing-intents). Something new that
+Fridolin reads from a brain's folder and that needs your approval goes
+in a folder of its own there (`.brain/<kind>/<name>.json`), with a schema
+in `docs/schemas`, and is approved per file the same way: the approved
+copy lives in `config.json`, and what is on disk runs only once you
+approve it. The folder is the brain's, so it is backed up and moved with
+it; the bridge reads it as it reads a brain's other files (no symlinks
+out of the folder, nothing larger than 256 KiB).
+
 ## Scheduled agents
 
 A scheduled agent is a task a brain runs by itself on a schedule ("every
 6 hours, check X and tell me if Y"), or a program the bridge runs on a
-node on a schedule. Each brain keeps its agents in `brain.json`:
+node on a schedule. Each agent is a file of its own in the brain's
+[`.brain` folder](#the-brain-folder), `.brain/schedules/<name>.json`
+([schema](schemas/schedule.schema.json)); the file's name is the
+agent's:
 
-```json
-"schedules": [
-  {"name": "morning-briefing", "when": "daily 06:00", "template": "morning-briefing"},
-  {"name": "inbox", "when": "every 6h", "prompt": "Look in inbox/ for new files and tell me what needs me.", "report": "worth"},
-  {"name": "weekly-plan", "when": "weekly mon 08:00", "report": "always"},
-  {"name": "scrape", "when": "daily 21:00", "command": {"node": "laptop", "argv": ["/Users/you/bin/scrape.sh"]}, "report": "silent", "timeout_minutes": 15}
-]
+```text
+Personal/
+  brain.json
+  .brain/schedules/
+    morning-briefing.json   {"when": "daily 06:00", "template": "morning-briefing"}
+    inbox.json              {"when": "every 6h", "prompt": "Look in inbox/ for new files and tell me what needs me.", "report": "worth"}
+    weekly-plan.json        {"when": "weekly mon 08:00", "report": "always"}
+    scrape.json             {"when": "daily 21:00", "command": {"node": "laptop", "argv": ["/Users/you/bin/scrape.sh"]}, "report": "silent", "timeout_minutes": 15}
 ```
 
 | Field | Meaning |
 | --- | --- |
-| `name` | lower-case letters, digits and `-`, unique in the brain |
+| `name` | lower-case letters, digits and `-`, unique in the brain: the file's name, which a `name` in the file must match; it may be left out |
 | `when` | `every 6h` (`m`, `h`, `d`; at least 5 minutes), `daily 07:00`, `weekly mon 09:00`, or a cron expression, `cron 0 7 * * 1-5` (minute hour day month weekday; `*`, lists, ranges, steps, `mon`…`sun`), in the bridge's time zone |
 | `enabled` | `false` keeps it from running on its schedule; *Run now* still runs it |
 | `description` | one line on what it is for |
@@ -573,16 +603,33 @@ A task file may start with a frontmatter of `description:` and
 `vars: name, other=default` lines, as the templates do; the rest is the
 task.
 
-**Approval.** The schedules are part of `brain.json`, so the
-[approval](#approval) of the file holds for them: what runs is the copy
-you approved. A brain asked in a chat to "check X every morning" may add
-an entry to its own `brain.json`; the bridge runs it only after you
-approve the change on the brain's page. The task file of an agent is the
-brain's own, like its prompt file, and its runs have the sandbox and risk
-levels of any run; a program on a node runs only what that node's exec
-allowlist and your approval of its commands let it. Edits on the
-dashboard's Schedules page write `brain.json` and the approved copy at
-once, as every edit there does.
+**Approval.** Each agent's file is approved on its own, like
+`brain.json` is ([approval](#approval)): what runs is the copy you
+approved, which `config.json` keeps with the rest of the brain's approved
+manifest. A new file, a changed one or one that is gone shows on the
+Schedules page as *Pending approval*, with the change and what the agent
+may do (a program on a node, irreversible steps, GitHub write access,
+every tool), and runs, or stops, only once you approve that version; the
+version approved before runs on meanwhile. A brain asked in a chat to
+"check X every morning" may write such a file itself. An agent you add
+or edit on the Schedules page is yours: the bridge writes its file and
+the approved copy at once, and it needs no approval after. A file the
+bridge cannot read, or that is not a valid agent, is listed with why,
+and cannot be approved until it is fixed. `brain.json`'s own approval
+leaves the agents aside. The task file of an agent is the brain's own,
+like its prompt file, and its runs have the sandbox and risk levels of
+any run; a program on a node runs only what that node's exec allowlist
+and your approval of its commands let it.
+
+**Agents in brain.json** (compat). Before `.brain`, a brain kept its
+agents in `brain.json`, under `"schedules": [...]`, each with its `name`.
+The bridge still reads them there (a file of the same name wins), and
+moves them into their files as it starts and whenever it writes the
+brain's `brain.json`: the rest of `brain.json` stays as it was, and
+nothing approved changes, so an approved agent runs on and a pending one
+stays pending. A bridge from before `.brain` does not see the files: it
+runs the agents you approved, from `config.json`, and shows the brain's
+`brain.json` as changed on disk.
 
 **How a run goes.** A brain run of an agent goes through the brain's
 queue like a message: the same sandbox, prompt, memory, risk level and
@@ -659,14 +706,35 @@ can read its own gh login, so the token is the brain's while it runs.
 
 ### The Schedules page and the CLI
 
-The dashboard's Schedules page lists every agent with its schedule, where
-its results go, whether it is on, paused or running, when it runs next
-and how its last run went, with *Run now* and *Pause*/*Resume*; below,
-the reminders. An agent's page edits it, lists its runs (start, how long,
-result, cost or tokens, and the message sent) and shows each run's log:
-the CLI's output as the activity log has it, its tool calls, and errors.
-Pausing is the dashboard's, not `brain.json`'s: a paused agent does not
-make up the times it missed when it is resumed.
+The dashboard's Schedules page lists every agent of every brain, grouped
+by brain and filtered by brain, state or text, each with a badge for its
+state: *Pending approval*, *Active*, *Paused*, *Failing* (its last run
+failed, or it cannot run as it is) or *Disabled* (`enabled: false`). A
+card shows its schedule, its next run (in how long, and when), how its
+last run went and how long it took, and what it may do: its risk budget
+or node, its GitHub repositories and permissions, its preapproved steps
+and where its results go. *Run now* starts any approved agent at once,
+whatever its schedule, and *Pause*/*Resume* stop and restart it on its
+schedule; an agent whose run goes on cannot start twice. The agents
+waiting for approval come first, each with its review inline: what it
+may do, flagged when risky, the change field by field, and *Approve*,
+*Approve & run now* or *Delete the file*. The Overview page flags them
+too. Below the agents, the reminders.
+
+*Add agent* is a wizard: what it does (a built-in template, a custom
+prompt, or a command on a node), which brain and name, when (every few
+hours, daily, weekly, or a cron expression, with its next three runs),
+its details (the template's vars, a repository picker from Connect
+GitHub's installed repositories, the prompt or the program), what it may
+do in plain words (risk level, preapproved steps, GitHub access, node,
+where results go, and more settings), and the exact file it writes.
+Saving writes the file and approves it. An agent's page shows every
+field, its runs (start, how long, result, cost or tokens, and the
+message sent) and each run's log: the CLI's output as the activity log
+has it, its tool calls, and errors; *Edit* and *Duplicate* go through the
+same wizard, *Delete* asks first. Pausing is the dashboard's, not the
+file's: a paused agent does not make up the times it missed when it is
+resumed.
 
 ```bash
 fridolin schedules list

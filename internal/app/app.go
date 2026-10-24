@@ -533,6 +533,9 @@ func (b *App) keepInterrupted(br *brainruntime.Brain, m brainruntime.Inbound) {
 // change is not, since a deletion must take its message out of the
 // history however late.
 func (b *App) resume(ctx context.Context) {
+	// brain.json's scheduled agents move into their own files
+	// (.brain/schedules), once as the bridge starts.
+	b.registry.MigrateScheduleFiles()
 	resumeRuns := b.brainMgr.PauseRuns()
 	defer resumeRuns()
 	// Taken out of bridge.db, what was kept is handed on whole: a stop

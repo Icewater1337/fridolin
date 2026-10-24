@@ -118,9 +118,13 @@ func TestScheduledAgentsThroughTheAPI(t *testing.T) {
 	if got := h.Approved()["main"].Schedules; len(got) != 1 || got[0].Name != "inbox" || got[0].When != "every 6h" {
 		t.Fatalf("approved schedules %+v", got)
 	}
+	// Its own file, not brain.json.
 	disk, err := manifest.Read(dir)
-	if err != nil || len(disk.Schedules) != 1 {
+	if err != nil || len(disk.Schedules) != 0 {
 		t.Fatalf("brain.json: %+v %v", disk, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(dir, ".brain", "schedules", "inbox.json")); err != nil || !strings.Contains(string(data), `"every 6h"`) {
+		t.Fatalf("the agent's file: %s %v", data, err)
 	}
 	h.WaitFor("the brain to reload", func() bool { return len(h.schedules().Agents) == 1 })
 	list := h.schedules()
@@ -252,6 +256,9 @@ func TestScheduledAgentsThroughTheAPI(t *testing.T) {
 	}
 	if w := h.Do("DELETE", "/api/schedules/main/inbox", nil); w.Code != http.StatusNotFound {
 		t.Errorf("a second delete: %d", w.Code)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".brain", "schedules", "inbox.json")); !os.IsNotExist(err) {
+		t.Errorf("the removed agent's file: %v", err)
 	}
 }
 

@@ -265,6 +265,8 @@ var routeInventory = []httpRoute{
 	{"GET", "/api/housekeeping", classAPI, ""},
 	{"POST", "/api/housekeeping/run", classAPI, ""},
 	{"GET", "/api/schedules", classAPI, ""},
+	{"GET", "/api/schedules/preview", classAPI, "/api/schedules/preview?when=daily+07:00"},
+	{"POST", "/api/schedules/{brain}/{name}/approve", classAPI, "/api/schedules/main/brief/approve"},
 	{"POST", "/api/schedules/{brain}/{name}/run", classAPI, "/api/schedules/main/brief/run"},
 	{"POST", "/api/schedules/{brain}/{name}/pause", classAPI, "/api/schedules/main/brief/pause"},
 	{"POST", "/api/schedules/{brain}/{name}/resume", classAPI, "/api/schedules/main/brief/resume"},
