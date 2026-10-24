@@ -46,10 +46,9 @@ func TestBoxJoinsAndRunsOverItsDialer(t *testing.T) {
 	}
 	a.Dial, a.Logf, a.MinBackoff, a.MaxBackoff, a.HeartbeatEvery = dial, t.Logf, 10*time.Millisecond, 100*time.Millisecond, 50*time.Millisecond
 	runAgent(t, a)
-	waitFor(t, "the box to connect", func() bool { return c.svc.Online(j.ID) })
-	if dials.Load() < 2 {
-		t.Fatalf("the box dialed %d times, want the join and the run through its dialer", dials.Load())
-	}
+	// The join's own connection may still count as online for a moment
+	// (Windows closes it later), so wait for the run's dial too.
+	waitFor(t, "the box to connect through its dialer", func() bool { return dials.Load() >= 2 && c.svc.Online(j.ID) })
 	if d := a.declared(); d.Update == nil || !d.Update.Box {
 		t.Fatalf("a box offers update by image, not %+v", d.Update)
 	}
