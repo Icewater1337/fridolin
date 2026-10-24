@@ -184,6 +184,7 @@ func (b *App) fleetText() string {
 		n := outboundmsg.FleetNode{
 			ID: v.ID, Name: v.Name, OS: v.OS, Online: v.Online,
 			Device: v.Device, Commands: v.Commands, Tags: v.Tags, Offers: v.Effective.Summary(),
+			CoreHostPending: v.CoreHost != nil && v.CoreHost.Pending,
 		}
 		if v.LastSeen != nil {
 			n.LastSeen = *v.LastSeen

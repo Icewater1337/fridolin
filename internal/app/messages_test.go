@@ -137,6 +137,7 @@ var (
 		{ID: "4f1e2d3c4b5a", Name: "mini", OS: "darwin", LastSeen: fleetNow.Add(-3 * time.Hour), Device: "approved", Commands: "pending", Tags: []string{"macos"}, Offers: "host"},
 		{ID: "0a1b2c3d4e5f", Name: "pi", OS: "linux", LastSeen: fleetNow.Add(-90 * time.Second), Device: "pending", Commands: "pending"},
 		{ID: "ffeeddccbbaa", Name: "old", OS: "linux", Device: "revoked", Commands: "none"},
+		{ID: "3c1e5a7b9d0f", Name: "icebase", OS: "linux", Online: true, Device: "approved", Commands: "pending", CoreHostPending: true, Offers: "host, notify"},
 	}
 )
 

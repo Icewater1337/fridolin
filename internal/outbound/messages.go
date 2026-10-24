@@ -197,6 +197,8 @@ func FleetReply(enabled bool, nodes []FleetNode, now time.Time) string {
 			b.WriteString(" · revoked")
 		case n.Device == "pending":
 			b.WriteString(" · waiting for approval: `!approve " + n.ID + "`")
+		case n.CoreHostPending:
+			b.WriteString(" · asks for core-host (it would hold every host secret): `!approve " + n.ID + "`")
 		case n.Commands == "pending":
 			b.WriteString(" · offers more than approved: `!approve " + n.ID + "`")
 		}

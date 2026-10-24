@@ -160,3 +160,27 @@ func (s *Service) noteCoreHost(n *Node) {
 		s.onCoreHost(clone(n))
 	}
 }
+
+// CoreHostView is how the fleet shows a core host: whether its
+// core-host.json waits for approval, the device key's fingerprint the
+// owner compares with what `fridolin node core-host show` prints there,
+// and what approving it means (nodeproto.CoreHostApproval).
+type CoreHostView struct {
+	Pending     bool     `json:"pending"`
+	Fingerprint string   `json:"fingerprint"`
+	SendTo      []string `json:"send_to"`
+	Approval    string   `json:"approval"`
+}
+
+// coreHostView is n's CoreHostView, nil for a node that neither offers
+// core-host nor had it approved.
+func coreHostView(n *Node) *CoreHostView {
+	ch := n.Declared.CoreHost
+	if ch == nil {
+		ch = n.Approved.CoreHost
+	}
+	if ch == nil {
+		return nil
+	}
+	return &CoreHostView{Pending: coreHostPending(n), Fingerprint: nodeproto.Fingerprint(n.PublicKey), SendTo: append([]string{}, ch.SendTo...), Approval: nodeproto.CoreHostApproval}
+}

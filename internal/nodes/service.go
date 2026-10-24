@@ -666,6 +666,9 @@ type View struct {
 	// the core can update it; UpdateNote says why it cannot.
 	UpdateTo   string `json:"update_to,omitempty"`
 	UpdateNote string `json:"update_note,omitempty"`
+	// CoreHost is set for a node that offers core-host, or had it
+	// approved (CoreHostView).
+	CoreHost *CoreHostView `json:"core_host,omitempty"`
 }
 
 // Views lists every node with whether it is connected.
@@ -675,6 +678,7 @@ func (s *Service) Views() ([]View, error) {
 	for _, n := range list {
 		v := View{Node: n, Commands: n.Commands(), Effective: n.Effective(), Online: s.Online(n.ID)}
 		v.UpdateTo, v.UpdateNote = s.UpdateTarget(n)
+		v.CoreHost = coreHostView(n)
 		out = append(out, v)
 	}
 	return out, err
