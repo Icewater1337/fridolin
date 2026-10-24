@@ -20,11 +20,12 @@ import (
 const nodeFrideUsage = `fridolin node fride — FrIDE on this machine, run by this node (docs/NODES.md, FrIDE)
 
 Usage:
-  fridolin node fride pair --url http://127.0.0.1:PORT [--code CODE]
+  fridolin node fride pair --url http://127.0.0.1:PORT [--code CODE|-]
                        pair this node with FrIDE running in companion mode
                        (fride serve --under-fridolin): it runs
                        fride pair-companion --json for the code unless --code
-                       gives it, keeps FrIDE's token in the state dir (0600) and
+                       gives it (--code - reads it, or pair-companion's JSON,
+                       from stdin: a box pipes it over from FrIDE's container), keeps FrIDE's token in the state dir (0600) and
                        gives FrIDE a loopback webhook for its news
   fridolin node fride status
                        what is paired, and whether FrIDE answers
@@ -95,6 +96,12 @@ func nodeFrideCmd(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 		c := *code
+		if c == "-" {
+			if c, err = readPairCode(os.Stdin); err != nil {
+				fmt.Fprintf(stderr, "fridolin node fride pair: %v\n", err)
+				return 2
+			}
+		}
 		if c == "" {
 			if c, err = frideCode(ctx, *bin, *home); err != nil {
 				fmt.Fprintf(stderr, "fridolin node fride pair: %v\nRun fride pair-companion yourself and pass its code with --code.\n", err)
@@ -113,6 +120,9 @@ func nodeFrideCmd(args []string, stdout, stderr io.Writer) int {
 			if cfg.Fride.Base != "" {
 				newBase = cfg.Fride.Base
 			}
+		}
+		if cfg.Box != nil {
+			newBase = "nowhere from the core: in a box, clone them in FrIDE's container (docker compose exec fride git -C /var/lib/fride/repos clone URL)"
 		}
 		fmt.Fprintf(stdout, "Paired with FrIDE at %s (repositories: %s).\nIts news comes to %s; the token is in %s.\nRepositories the core adds go to %s.\nThe node offers fride to the core within half a minute, while FrIDE runs. On the core, approve it once:\n\n  fridolin nodes approve %s --commands\n\n",
 			*url, orNone(info.Repos), hook, filepath.Join(dir, nodeagent.FrideTokenFile), newBase, nodeID(dir))
@@ -160,6 +170,29 @@ func nodeID(dir string) string {
 		return nodeagent.DeviceID(key)
 	}
 	return "<id>"
+}
+
+// readPairCode reads a pairing code from r: the code alone, or the JSON
+// fride pair-companion --json prints.
+func readPairCode(r io.Reader) (string, error) {
+	data, err := io.ReadAll(io.LimitReader(r, 64<<10))
+	if err != nil {
+		return "", err
+	}
+	text := strings.TrimSpace(string(data))
+	if strings.HasPrefix(text, "{") {
+		var code struct {
+			Code string `json:"code"`
+		}
+		if json.Unmarshal([]byte(text), &code) == nil && code.Code != "" {
+			return code.Code, nil
+		}
+		return "", errors.New("stdin holds JSON without a code (pipe fride pair-companion --json)")
+	}
+	if text == "" || strings.ContainsAny(text, " \t\r\n") {
+		return "", errors.New("stdin holds no pairing code")
+	}
+	return text, nil
 }
 
 // frideCode asks the fride program for a pairing code, with FRIDE_HOME set

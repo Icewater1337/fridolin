@@ -73,6 +73,7 @@ Usage:
                                            run this machine as a node of a core, and
                                            pair FrIDE on it (fride pair --url URL);
                                            fridolin node help for more
+  fridolin box compose                     the compose file of a node in a box
   fridolin vault status|sync|evict|get PATH|rebuild|restore-drill
                                            the tiered store and its snapshots;
                                            fridolin vault --help for more
@@ -143,6 +144,8 @@ func Main() {
 		os.Exit(nodesCmd(args, os.Stdout, os.Stderr))
 	case "node":
 		os.Exit(nodeCmd(args, os.Stdout, os.Stderr))
+	case "box":
+		os.Exit(boxCmd(args, os.Stdout, os.Stderr))
 	case "vault":
 		os.Exit(vaultCmd(args, os.Stdout, os.Stderr))
 	case "housekeeping":

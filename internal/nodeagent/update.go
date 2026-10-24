@@ -86,8 +86,12 @@ type updater struct {
 	interactive bool
 }
 
-// updateOffered reports whether node.json lets the agent offer update.
-func (a *Agent) updateOffered() bool { return a.Config.Update == nil || *a.Config.Update }
+// updateOffered reports whether node.json lets the agent offer update. A
+// node in a box never does: its fridolin is the image's, which a binary
+// from the core cannot replace.
+func (a *Agent) updateOffered() bool {
+	return a.Config.Box == nil && (a.Config.Update == nil || *a.Config.Update)
+}
 
 // executable is the binary an update replaces, symlinks resolved.
 func (a *Agent) executable() (string, error) {

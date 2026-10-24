@@ -32,6 +32,10 @@ type Node interface {
 	// WhoIs names the tailnet user and device behind remoteAddr, the
 	// RemoteAddr of a request that came in on one of the listeners.
 	WhoIs(ctx context.Context, remoteAddr string) (Identity, error)
+	// Dial connects to addr (host:port) over the tailnet, a MagicDNS name
+	// resolved by the tailnet. A node in a box reaches the core this way
+	// (docs/NODES.md, "Node in a box"). It starts the node when needed.
+	Dial(ctx context.Context, network, addr string) (net.Conn, error)
 	// Close leaves the tailnet and closes the listeners.
 	Close() error
 }
@@ -165,6 +169,25 @@ func (f *Fake) Addr(addr string) string {
 
 // WhoIs implements Node.
 func (f *Fake) WhoIs(context.Context, string) (Identity, error) { return f.Who, nil }
+
+// Dial implements Node: the fake dials addr on the host's network, or
+// the loopback address a Listen of the fake stands for when addr's port
+// is one of them.
+func (f *Fake) Dial(ctx context.Context, network, addr string) (net.Conn, error) {
+	f.mu.Lock()
+	closed := f.closed
+	if _, port, err := net.SplitHostPort(addr); err == nil {
+		if lo, ok := f.ports[":"+port]; ok {
+			addr = lo
+		}
+	}
+	f.mu.Unlock()
+	if closed {
+		return nil, ErrClosed
+	}
+	var d net.Dialer
+	return d.DialContext(ctx, network, addr)
+}
 
 // Close implements Node.
 func (f *Fake) Close() error {

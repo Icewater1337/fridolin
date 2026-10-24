@@ -109,8 +109,9 @@ func (b *App) joinCommand(record func(id, outcome string)) string {
 	}
 	core := b.joinCore()
 	sh, ps := httpapi.JoinCommands(code, core)
+	bsh, bps := httpapi.BoxCommands(code, core, b.boxSource())
 	record("", "ok")
-	return outboundmsg.JoinCodeReply(code, core, sh, ps, int(nodes.JoinCodeTTL/time.Minute))
+	return outboundmsg.JoinCodeReply(code, core, sh, ps, bsh, bps, int(nodes.JoinCodeTTL/time.Minute))
 }
 
 // dashboardCommand answers !dashboard: a login code that lasts

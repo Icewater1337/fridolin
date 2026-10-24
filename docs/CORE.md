@@ -136,6 +136,13 @@ variables Windows programs need (`SystemRoot`, `USERPROFILE`,
 `LOCALAPPDATA`, …) besides `PATH` and Docker's own. `core migrate` is
 refused there: Windows has no native bridge to move.
 
+`core build` of a clean checkout whose `origin` is on GitHub also gives
+the image the address of that commit's box script and the registry of
+its images (`ghcr.io/<owner>`), so that the core's `!join` reply offers
+a [node in a box](NODES.md#node-in-a-box); the images of that version
+must be on GHCR, which is the case once the commit is on `main`. A build
+of a checkout with local changes leaves them out.
+
 `--image` and `--tag` pick another image (default `fridolin-core` and this
 binary's version); `--compose PATH` runs a compose file of your own.
 `stop` never removes the volume. Never run `docker compose down -v` or

@@ -638,6 +638,9 @@ type hostDeps struct {
 	// apparmorDir is where core apparmor writes the profile.
 	apparmor    func() apparmorState
 	apparmorDir string
+	// git runs git in dir and returns its output, for core build's
+	// box source; nil leaves that out.
+	git func(dir string, args ...string) (string, error)
 }
 
 func defaultHostDeps(env coreEnv) hostDeps {
@@ -652,6 +655,10 @@ func defaultHostDeps(env coreEnv) hostDeps {
 	d.composePath = composePathFor(runtime.GOOS)
 	d.home, d.goos, d.uid, d.now, d.sleep = app.HomeDir(), runtime.GOOS, os.Getuid(), time.Now, time.Sleep
 	d.apparmor, d.apparmorDir = hostAppArmor, "/etc/apparmor.d"
+	d.git = func(dir string, args ...string) (string, error) {
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+		return strings.TrimSpace(string(out)), err
+	}
 	if c, err := os.UserCacheDir(); err == nil {
 		d.cacheDir = filepath.Join(c, "fridolin")
 		_ = os.MkdirAll(d.cacheDir, 0o700)
@@ -923,13 +930,48 @@ func coreBuild(ctx context.Context, repo, ref string, env coreEnv, d hostDeps) i
 		fmt.Fprintf(env.stderr, "fridolin core build: %s is not a fridolin checkout (no container/Dockerfile); pass --repo DIR\n", repo)
 		return 2
 	}
-	args := []string{"build", "-f", dockerfile, "--build-arg", "VERSION=" + d.version, "-t", ref, repo}
+	args := []string{"build", "-f", dockerfile, "--build-arg", "VERSION=" + d.version}
+	if src, reg := boxBuildSource(repo, d); src != "" {
+		args = append(args, "--build-arg", "FRIDOLIN_BOX_SOURCE="+src, "--build-arg", "FRIDOLIN_BOX_REGISTRY="+reg)
+	}
+	args = append(args, "-t", ref, repo)
 	if err := d.run(ctx, d.docker, args, d.baseEnv, env.stdout, env.stderr); err != nil {
 		fmt.Fprintf(env.stderr, "fridolin core build: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(env.stdout, "Built %s; fridolin core start runs it.\n", ref)
 	return 0
+}
+
+// githubRemoteRE is a GitHub remote, https or ssh: its owner and name.
+var githubRemoteRE = regexp.MustCompile(`^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?$`)
+
+// boxBuildSource is where the box script of the checkout's commit is
+// published, and the registry of its images, for an image core build
+// makes: the GitHub repository of the checkout's origin at its HEAD, so
+// that the core's !join reply can offer a node in a box. Empty when the
+// origin is not on GitHub or the checkout has local changes, whose
+// commit no box can fetch.
+func boxBuildSource(repo string, d hostDeps) (source, registry string) {
+	if d.git == nil {
+		return "", ""
+	}
+	remote, err := d.git(repo, "remote", "get-url", "origin")
+	if err != nil {
+		return "", ""
+	}
+	m := githubRemoteRE.FindStringSubmatch(remote)
+	if m == nil {
+		return "", ""
+	}
+	if dirty, err := d.git(repo, "status", "--porcelain", "--untracked-files=no"); err != nil || dirty != "" {
+		return "", ""
+	}
+	head, err := d.git(repo, "rev-parse", "HEAD")
+	if err != nil || len(head) != 40 {
+		return "", ""
+	}
+	return "https://raw.githubusercontent.com/" + m[1] + "/" + m[2] + "/" + head, "ghcr.io/" + strings.ToLower(m[1])
 }
 
 // dockerMissing is what the host commands say without a docker CLI.

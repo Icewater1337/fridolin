@@ -37,7 +37,16 @@ export default {
         title: 'Join a new machine',
         wide: true,
         body: [
-          h('p', `On the new machine, with fridolin installed, run this line. The code works once, until ${absTime(r.expires_at)}.`),
+          ...(r.box_command ? [
+            h('p', `A node in a box: on the new machine, with Docker, run this line. It asks before it starts, and for the rest. The code works once, until ${absTime(r.expires_at)}.`),
+            h('p.muted.small', 'macOS, Linux:'),
+            h('div.join-command', mono(r.box_command, { copy: true })),
+            h('p.muted.small', 'Windows, in PowerShell:'),
+            h('div.join-command', mono(r.box_command_powershell, { copy: true })),
+            h('p', 'Or natively, with fridolin installed on it (Apple builds, USB devices, notifications):'),
+          ] : [
+            h('p', `On the new machine, with fridolin installed, run this line. The code works once, until ${absTime(r.expires_at)}.`),
+          ]),
           h('p.muted.small', 'macOS, Linux:'),
           h('div.join-command', mono(r.command, { copy: true })),
           ...(r.command_powershell ? [
