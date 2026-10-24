@@ -103,7 +103,7 @@ fleetReply(false)
 fleetReply(true, none)
 	🖥️ No nodes yet. Send `!join` here for a join code, and paste the line it sends on the new machine.
 fleetReply(true, nodes)
-	🖥️ *Fleet* — 4 nodes, 1 online
+	🖥️ *Fleet* — 5 nodes, 2 online
 
 	• *laptop* (Windows) — online
 	  may run: exec (hostname, whoami), fs (1 root), host
@@ -115,6 +115,9 @@ fleetReply(true, nodes)
 	  id 0a1b2c3d4e5f
 	• *old* (Linux) — never seen · revoked
 	  id ffeeddccbbaa
+	• *icebase* (Linux) — online · asks for core-host (it would hold every host secret): `!approve 3c1e5a7b9d0f`
+	  may run: host, notify
+	  id 3c1e5a7b9d0f
 nodesOffNotice
 	🖥️ Nodes are off. Turn on nodes.enabled in the config and restart the bridge to connect other machines (docs/NODES.md).
 ownerCommandGroupNotice
