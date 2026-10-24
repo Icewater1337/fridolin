@@ -47,6 +47,9 @@ Usage:
                        let the core run Claude Code or Codex sessions and a terminal
                        in these folders (docs/NODES.md, Workstation); restart the
                        service after, then approve it on the core
+  fridolin node core-host show | on | off | trust ID --key KEY | untrust ID
+                       this machine as a core host, which the core may move to and
+                       which holds host secrets; fridolin node core-host help for more
   fridolin node fride pair --url http://127.0.0.1:PORT | status
                        FrIDE on this machine, offered to the core while it runs;
                        fridolin node fride help for more
@@ -99,7 +102,11 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 	var o joinFlags
 	var backupRoots multiFlag
 	var ws workstationFlags
+	var ch coreHostFlags
 	switch sub {
+	case "core-host":
+		fs.StringVar(&ch.key, "key", "", "trust: the target's device key, hex")
+		fs.StringVar(&ch.name, "name", "", "trust: a name for the target")
 	case "workstation":
 		fs.Var(&ws.roots, "root", "a folder for agent and terminal (repeatable)")
 		fs.BoolVar(&ws.allowHome, "allow-home", false, "let a root be the home folder itself")
@@ -159,6 +166,8 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 		return nodeBackup(pos, backupRoots, dir, thisAppPackage(), stdout, stderr)
 	case "workstation":
 		return nodeWorkstation(pos, ws, dir, thisAppPackage(), stdout, stderr)
+	case "core-host":
+		return nodeCoreHost(pos, ch, dir, thisAppPackage(), stdout, stderr)
 	case "run", "install", "start", "stop", "status", "uninstall", "rollback":
 		if len(pos) != 0 {
 			fmt.Fprintf(stderr, "fridolin node %s takes no arguments\n", sub)
