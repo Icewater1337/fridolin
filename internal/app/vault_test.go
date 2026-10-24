@@ -333,8 +333,7 @@ func TestVaultToolsScope(t *testing.T) {
 // retires the old Drive backup's daily run), the mass-deletion hold and a
 // restore drill that finds the brain folder and sound database copies.
 func TestVaultSnapshotsDrillAndDrive(t *testing.T) {
-	// Serial: shortens vaultTickEvery, a package variable every bridge's
-	// vault reads.
+	t.Parallel()
 	if _, err := exec.LookPath("restic"); err != nil && findVaultTool("restic") == "" {
 		t.Skip("restic is not installed")
 	}
@@ -344,9 +343,7 @@ func TestVaultSnapshotsDrillAndDrive(t *testing.T) {
 	local := t.TempDir()
 	setenv(t, vaultLocalEnv, local)
 	setenv(t, "RESTIC_PASSWORD", "test-password")
-	oldTick := vaultTickEvery
-	vaultTickEvery = 100 * time.Millisecond
-	t.Cleanup(func() { vaultTickEvery = oldTick })
+	optionsOf(t).waits.vaultTick = 100 * time.Millisecond
 	cfg := vaultConfigRclone(t)
 	if cfg == "" {
 		cfg = vaultConfig
@@ -560,8 +557,7 @@ func TestVaultForgetsABrainFolderThatWentHome(t *testing.T) {
 // fail on the old one (issue #183). The first upload is held, as a big
 // hot tier holds the first heartbeat for minutes.
 func TestVaultLitestreamStatusOfTheLastRun(t *testing.T) {
-	// Serial: replaces vaultBackendsFor, a package variable every bridge's
-	// vault reads.
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("the stand-in litestream is a shell script")
 	}
@@ -573,8 +569,7 @@ func TestVaultLitestreamStatusOfTheLastRun(t *testing.T) {
 	}
 	replicas := t.TempDir()
 	held := make(chan struct{})
-	old := vaultBackendsFor
-	vaultBackendsFor = func(ctx context.Context, s *vaultService, cfg *config.Settings) (vaultBackends, error) {
+	optionsOf(t).hooks.vaultBackends = func(ctx context.Context, s *vaultService, cfg *config.Settings) (vaultBackends, error) {
 		b, err := defaultVaultBackends(ctx, s, cfg)
 		b.lite = &snapshot.Litestream{Binary: fake, DBs: []snapshot.LitestreamDB{
 			{Path: cfg.Boot.Layout().VaultDB(), Replica: snapshot.Replica{Type: "file", Dir: replicas}}}}
@@ -582,7 +577,6 @@ func TestVaultLitestreamStatusOfTheLastRun(t *testing.T) {
 		b.cold = heldPuts{b.cold, held}
 		return b, err
 	}
-	t.Cleanup(func() { vaultBackendsFor = old })
 	h := newHarness(t, vaultConfig)
 	t.Cleanup(func() { close(held) }) // before the harness stops the vault
 	writeFile(t, filepath.Join(h.DataDir(), "vault", "documents", "main", "lease.pdf"), "%PDF-1.7 a lease")

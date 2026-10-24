@@ -1,5 +1,7 @@
 // Line icons (24×24, stroked with currentColor), built as SVG elements.
 
+// Each icon is its paths: a path's d, or {d, fill} for one filled in.
+/** @type {Record<string, (string | {d: string, fill?: boolean})[]>} */
 const ICONS = {
   overview: ['M3 10.5 12 3l9 7.5', 'M5 9v11h5v-6h4v6h5V9'],
   activity: ['M22 12h-4l-3 9L9 3l-3 9H2'],

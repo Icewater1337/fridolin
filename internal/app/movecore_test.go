@@ -19,13 +19,6 @@ import (
 // ownerNumber is the owner's number in the harness (harnessDM).
 const ownerNumber = "15551234567"
 
-// setVar sets *v to val for the test.
-func setVar[T any](t *testing.T, v *T, val T) {
-	old := *v
-	*v = val
-	t.Cleanup(func() { *v = old })
-}
-
 // moveCorePoll sends !movecore target from the owner and waits for the
 // report and the poll it ends with, both sent after the command.
 func (h *harness) moveCorePoll(src, dst string) (report string, poll sent) {
@@ -168,8 +161,7 @@ func TestMoveCoreFromChat(t *testing.T) {
 // lockdown !movecore is refused, and a "Move now" from before is a no;
 // a message of the bridge's own account is no command.
 func TestMoveCoreCancelExpiryLockdown(t *testing.T) {
-	// Serial: shortens coreMovePollTTL, a package variable every bridge's
-	// !movecore polls read.
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts(h.b.nodes.Version(), true)
 
@@ -178,7 +170,7 @@ func TestMoveCoreCancelExpiryLockdown(t *testing.T) {
 	h.WaitSent(harnessDM, outboundmsg.CoreMoveCancelled("icebase", false))
 	h.noMove(m)
 
-	setVar(t, &coreMovePollTTL, time.Millisecond)
+	h.b.waits.coreMovePoll = time.Millisecond
 	_, poll = h.moveCorePoll("mini", "icebase")
 	time.Sleep(5 * time.Millisecond)
 	h.approvals() // sweeps the expired ones
@@ -186,7 +178,7 @@ func TestMoveCoreCancelExpiryLockdown(t *testing.T) {
 	h.vote(poll.ID, ownerNumber, outboundmsg.CoreMoveNow)
 	time.Sleep(200 * time.Millisecond)
 	h.noMove(m)
-	setVar(t, &coreMovePollTTL, 30*time.Minute)
+	h.b.waits.coreMovePoll = 30 * time.Minute
 
 	// The rate limit: three asks an hour.
 	_, poll = h.moveCorePoll("mini", "icebase")
@@ -222,12 +214,11 @@ func TestMoveCoreCancelExpiryLockdown(t *testing.T) {
 // secrets during the preparation, so the owner is asked whether it
 // keeps them, and no vote in time forgets them.
 func TestMoveCoreRollback(t *testing.T) {
-	// Serial: shortens coreMoveOptions and coreSecretsPollTTL, package
-	// variables every bridge's core moves read.
+	t.Parallel()
+	optionsOf(t).waits.coreMove = nodes.MoveOptions{HandoffDeadline: 10 * time.Second, ReadyWithin: time.Second}
+	optionsOf(t).waits.coreSecretsPoll = time.Millisecond
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts(h.b.nodes.Version(), false)
-	setVar(t, &coreMoveOptions, nodes.MoveOptions{HandoffDeadline: 10 * time.Second, ReadyWithin: time.Second})
-	setVar(t, &coreSecretsPollTTL, time.Millisecond)
 
 	_, poll := h.moveCorePoll("mini", "icebase")
 	h.vote(poll.ID, ownerNumber, outboundmsg.CoreMoveNow)

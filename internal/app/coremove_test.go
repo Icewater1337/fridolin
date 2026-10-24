@@ -44,9 +44,9 @@ type fakeCore struct {
 	// fresh is a host that never pulled the core's image: its core
 	// cannot be read, and the image is not there.
 	fresh bool
-	// keyless is a host without the bucket's keys: its core cannot be
-	// read, though it has the image.
-	keyless bool
+	// noSecrets is a host with the image but not yet the host secrets:
+	// its core cannot be read either (no bucket keys).
+	noSecrets bool
 	// files is its core's credentials folder (sandbox.credentials_dir);
 	// filesErr fails reading it.
 	files    string
@@ -110,14 +110,8 @@ const fakeStale = time.Minute
 
 func (f *fakeCore) Status(ctx context.Context) (nodeproto.CoreRuntime, error) {
 	out := nodeproto.CoreRuntime{Device: f.device}
-	if f.isFresh() {
+	if f.isFresh() || f.lacksSecrets() {
 		return out, errors.New("fridolin core run: exit status 1")
-	}
-	f.mu.Lock()
-	keyless := f.keyless
-	f.mu.Unlock()
-	if keyless {
-		return out, errors.New("fridolin core status: neither FRIDOLIN_CORE_STORE nor B2_VAULT_KEY_ID is set")
 	}
 	r, ok, err := lease.Read(ctx, f.st)
 	if err != nil {
@@ -251,6 +245,12 @@ func (f *fakeCore) Image(context.Context, string, string, bool) (nodeproto.CoreI
 		return nodeproto.CoreImageResult{Note: "pulled before anything stops"}, nil
 	}
 	return nodeproto.CoreImageResult{Present: true, Note: "the image is here"}, nil
+}
+
+func (f *fakeCore) lacksSecrets() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.noSecrets
 }
 
 func (f *fakeCore) isFresh() bool {
@@ -554,47 +554,28 @@ func (h *harness) signPlan(p nodeproto.MovePlan) nodeproto.SignedMovePlan {
 // TestCoreMoveRollsBack: icebase takes over but its core never gets
 // ready, so it stops, exports and releases the lease, and mini starts
 // again by itself on that export; the owner hears that it rolled back.
-// A target that never ran the core's version has not its image, and
-// `fridolin core run core status` there needs it: the pre-flight warns
-// instead of refusing, as the move pulls the image first (seen on a fresh
-// Linux server). A target with the image whose core cannot be read still
-// refuses.
+// A target that is no core yet cannot read its core: without the image
+// (core run core status needs it), and with it but without the host
+// secrets (the bucket's keys), which the move brings. The pre-flight warns
+// and never refuses for that: the source's lease rules out two cores
+// (seen on two fresh Linux servers).
 func TestCoreMoveCheckFreshTarget(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts(h.b.nodes.Version(), true)
-	m.dstCore.mu.Lock()
-	m.dstCore.fresh = true
-	m.dstCore.mu.Unlock()
-	rep := h.moveCheck(m.src, m.dst)
-	for _, b := range rep.Blocking {
-		if strings.Contains(b, "cannot be read") {
-			t.Fatalf("a fresh target blocks: %q", rep.Blocking)
+	for _, c := range []struct{ fresh, noSecrets bool }{{true, false}, {false, true}} {
+		m.dstCore.mu.Lock()
+		m.dstCore.fresh, m.dstCore.noSecrets = c.fresh, c.noSecrets
+		m.dstCore.mu.Unlock()
+		rep := h.moveCheck(m.src, m.dst)
+		for _, b := range rep.Blocking {
+			if strings.Contains(b, "cannot be read") {
+				t.Fatalf("%+v: the target's core blocks: %q", c, rep.Blocking)
+			}
 		}
-	}
-	if !slices.ContainsFunc(rep.Warnings, func(w string) bool { return strings.Contains(w, "has not the core's image yet") }) {
-		t.Fatalf("no warning about the image: %q", rep.Warnings)
-	}
-}
-
-// The secret files of a credentials folder that cannot be read keep the
-// core where it is: the pre-flight says so, and the transfer, the move's
-// first step, sends nothing (round 2 of the live test sent the secrets
-// with 0 files).
-func TestCoreMoveRefusesUnreadableSecretFiles(t *testing.T) {
-	t.Parallel()
-	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
-	m := h.moveHosts(h.b.nodes.Version(), true)
-	m.srcCore.mu.Lock()
-	m.srcCore.filesErr = errors.New("the secret files' folder is not a folder under ~")
-	m.srcCore.mu.Unlock()
-	rep := h.moveCheck(m.src, m.dst)
-	if !slices.ContainsFunc(rep.Blocking, func(b string) bool { return strings.Contains(b, "secret files") }) {
-		t.Fatalf("the pre-flight does not block: %q", rep.Blocking)
-	}
-	w := h.Do("POST", "/api/nodes/core-secrets-transfer", map[string]any{"source": m.src, "target": m.dst, "run": true})
-	if w.Code == http.StatusOK && strings.Contains(w.Body.String(), `"ran":true`) {
-		t.Fatalf("the transfer ran without the files: %s", w.Body.String())
+		if !slices.ContainsFunc(rep.Warnings, func(w string) bool { return strings.Contains(w, "cannot be read until the move") }) {
+			t.Fatalf("%+v: no warning: %q", c, rep.Warnings)
+		}
 	}
 }
 

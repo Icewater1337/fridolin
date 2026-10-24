@@ -236,14 +236,14 @@ func TestCoreMoveToABoxAndBack(t *testing.T) {
 	// A new box holds no bucket keys yet: its core cannot be read before
 	// the move sends them, which the pre-flight says without refusing.
 	m.dstCore.mu.Lock()
-	m.dstCore.keyless = true
+	m.dstCore.noSecrets = true
 	m.dstCore.mu.Unlock()
 	rep := h.moveCheck(m.src, m.dst)
-	if len(rep.Blocking) != 0 || !slices.ContainsFunc(rep.Warnings, func(w string) bool { return strings.Contains(w, "holds no host secrets yet") }) {
+	if len(rep.Blocking) != 0 || !slices.ContainsFunc(rep.Warnings, func(w string) bool { return strings.Contains(w, "until the move brings the host secrets") }) {
 		t.Fatalf("the pre-flight of a box without keys: %q, %q", rep.Blocking, rep.Warnings)
 	}
 	m.dstCore.mu.Lock()
-	m.dstCore.keyless = false
+	m.dstCore.noSecrets = false
 	m.dstCore.mu.Unlock()
 	rep = h.moveCheck(m.src, m.dst)
 	if len(rep.Blocking) != 0 || !rep.Target.Box || !rep.ImagePresent {

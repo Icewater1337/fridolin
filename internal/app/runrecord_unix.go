@@ -29,12 +29,12 @@ func runIsOurs(rec runRecord) bool {
 }
 
 // stopGroup ends the process group pgid: SIGTERM, then SIGKILL for what is
-// left after reapGrace.
-func stopGroup(pgid int) {
+// left after grace.
+func stopGroup(pgid int, grace time.Duration) {
 	if err := syscall.Kill(-pgid, syscall.SIGTERM); err != nil {
 		return // gone already
 	}
-	deadline := time.Now().Add(reapGrace)
+	deadline := time.Now().Add(grace)
 	for time.Now().Before(deadline) {
 		if syscall.Kill(-pgid, 0) != nil {
 			return

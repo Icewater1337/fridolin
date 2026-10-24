@@ -29,7 +29,8 @@ import (
 // FRIDOLIN_FAKE_WAIT_FILE, and with FRIDOLIN_FAKE_MCP a message holding
 // #mcp plays those steps against the run's fridolin MCP server (fakeMCP).
 // Asked for
-// --version, it answers testedClaudeVersion. Tests point claude_path at
+// --version, it answers testedClaudeVersion, or FRIDOLIN_FAKE_VERSION as
+// it is when that is set. Tests point claude_path at
 // os.Args[0], so no script or real CLI is needed. With
 // FRIDOLIN_FAKE_CONNECT it connects to that unix socket instead (see
 // fakeConnect), with FRIDOLIN_FAKE_SESSION it reports its session (see

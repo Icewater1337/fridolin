@@ -17,34 +17,16 @@
     "types": [],
     "skipLibCheck": true,
 
-    // Strictness. TypeScript 7 turns "strict" on unless told otherwise;
-    // here it is off, and the options of it that the code passes today
-    // are on. Turn these on next, one at a time, fixing what each reports
-    // (with real types, or a @ts-expect-error that says why), and add each
-    // to the options below once it passes:
-    //
-    // 1. noImplicitAny: every parameter needs a type (about 340 errors
-    //    today: callbacks and helpers in the pages, and the components
-    //    not yet annotated, such as github-card.js, tabs.js and
-    //    node-folder-picker.js).
-    // 2. strictNullChecks: null and undefined are their own types (about
-    //    320 errors today, two thirds of them "possibly null", mostly
-    //    querySelector() results and data that may not have come yet). It
-    //    makes noUncheckedIndexedAccess and strictPropertyInitialization
-    //    possible after it.
-    // 3. Then "strict": true in place of the single options, and
-    //    exactOptionalPropertyTypes if it is worth it.
-    "strict": false,
-    "strictFunctionTypes": true,
-    "strictBindCallApply": true,
-    "noImplicitThis": true,
-    "alwaysStrict": true,
+    // Strictness: all of "strict" (useUnknownInCatchVariables: a caught
+    // value is unknown, which lib/errors.js and errorStatus() in
+    // app/api.js narrow), and three checks beyond it. Candidates for
+    // later: noUncheckedIndexedAccess (85 errors today) and
+    // exactOptionalPropertyTypes (17, nearly all an option passed on as
+    // undefined, so not worth it yet).
+    "strict": true,
     "noImplicitReturns": true,
     "noImplicitOverride": true,
-    "noFallthroughCasesInSwitch": true,
-    // A caught value is unknown: lib/errors.js and errorStatus() in
-    // app/api.js narrow it (its message, its name, an ApiError's status).
-    "useUnknownInCatchVariables": true
+    "noFallthroughCasesInSwitch": true
   },
   "include": ["assets/**/*.js", "types/**/*.d.ts"]
 }

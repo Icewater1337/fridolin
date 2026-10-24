@@ -17,7 +17,8 @@ import { errorMessage } from '../lib/errors.js';
 export function connectScreen(el, { reason, onConnected }) {
   const input = textInput({ placeholder: 'Paste the token (or the whole dashboard link)', class: 'mono', 'aria-label': 'Dashboard token' });
   const errorEl = h('p.form-error', { hidden: true });
-  const form = h('form.connect-form', input, btn('Connect', { kind: 'primary', type: 'submit', icon: 'key' }));
+  const submitBtn = btn('Connect', { kind: 'primary', type: 'submit', icon: 'key' });
+  const form = h('form.connect-form', input, submitBtn);
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const t = input.value.trim();
@@ -25,7 +26,6 @@ export function connectScreen(el, { reason, onConnected }) {
     // A whole dashboard link signs in with what its fragment carries.
     const hash = t.indexOf('#');
     const credential = (hash >= 0 && credentialFromHash(t.slice(hash))) || { token: t };
-    const submitBtn = form.querySelector('button');
     submitBtn.disabled = true;
     try {
       await signIn(credential);

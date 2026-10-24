@@ -3,7 +3,6 @@ package app
 import (
 	"fmt"
 	"os/exec"
-	"time"
 
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -72,8 +71,3 @@ func resolveAgentBinary(provider, path string) (string, error) {
 	}
 	return AbsPath(found), nil
 }
-
-// runWaitDelay is how long Wait waits, once the CLI has exited, for the
-// copies of its input and output to end, a variable so tests need not
-// wait for it.
-var runWaitDelay = 5 * time.Second

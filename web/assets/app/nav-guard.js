@@ -38,11 +38,9 @@ export function guardNavigation({ win, isDirty, confirm, onDiscard, onNavigate }
   const { history, location, document } = win;
   /** @returns {number | null} */
   const placeOf = (/** @type {any} */ state) => (state && typeof state.idx === 'number' ? state.idx : null);
-  let idx = placeOf(history.state); // where the shown page's entry is
-  if (idx === null) {
-    idx = 0;
-    history.replaceState({ idx }, '');
-  }
+  const was = placeOf(history.state);
+  let idx = was === null ? 0 : was; // where the shown page's entry is
+  if (was === null) history.replaceState({ idx }, '');
   let shown = location.hash; // the address of the page shown
   let undoing = 0; // moves back to the shown page whose hashchange is no navigation
   let asking = false; // the "Discard changes?" dialog is open
@@ -96,7 +94,7 @@ export function guardNavigation({ win, isDirty, confirm, onDiscard, onNavigate }
     if (!a || a.getAttribute('target')) return;
     if (!asking && !isDirty()) return;
     e.preventDefault();
-    go(a.getAttribute('href'));
+    go(a.getAttribute('href') || '');
   }, true);
 
   /** @param {string} hash */

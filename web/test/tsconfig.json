@@ -6,7 +6,12 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     // Found in npx's cache: make typecheck-web passes --typeRoots.
-    "types": ["node"]
+    "types": ["node"],
+    // The tests are not held to all of "strict" yet: they run against the
+    // fake DOM, where most annotations would be casts. They follow in
+    // steps of their own (about 550 noImplicitAny errors today).
+    "noImplicitAny": false,
+    "strictNullChecks": false
   },
   "include": ["**/*.js", "**/*.d.ts", "../assets/**/*.js", "../types/**/*.d.ts"]
 }

@@ -92,7 +92,7 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 	rep.Secrets = tr
 	rep.Blocking = append(rep.Blocking, tr.Problems...)
 	ends := [2]*MoveEnd{&rep.Source, &rep.Target}
-	dstUnread, dstNoSecrets := "", false
+	dstUnread := ""
 	for i, id := range []string{src, dst} {
 		n, err := s.reg.Get(id)
 		if err != nil {
@@ -111,8 +111,7 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 			if i == 1 {
 				// Decided once moveImage knows whether the target has the
 				// image: without it, nothing can read the core there yet.
-				dstUnread = fmt.Sprintf("%s: the core there cannot be read: %s", n.Name, c.CoreError)
-				dstNoSecrets = !holdsSecrets(c)
+				dstUnread = c.CoreError
 				continue
 			}
 			rep.Blocking = append(rep.Blocking, fmt.Sprintf("%s: the core there cannot be read: %s", n.Name, c.CoreError))
@@ -157,19 +156,15 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 		}
 	}
 	if dstUnread != "" {
-		switch {
-		case !rep.ImagePresent:
-			// A host that never ran this version reads its core with the
-			// image the move pulls first; the lease is the source's to hold.
-			rep.Warnings = append(rep.Warnings, fmt.Sprintf("%s has not the core's image yet, so its core cannot be read before the move pulls it", rep.Target.Name))
-		case dstNoSecrets:
-			// Nor can a host that never held the bucket's keys (a new box)
-			// before the move sends them; the rehearsal reads the bucket
-			// there before anything stops.
-			rep.Warnings = append(rep.Warnings, fmt.Sprintf("%s holds no host secrets yet, so its core cannot be read before the move sends them", rep.Target.Name))
-		default:
-			rep.Blocking = append(rep.Blocking, dstUnread)
+		// The target's core is only told about: the source holds the
+		// lease, which rules out a second core. A host that is no core
+		// yet cannot read it before the move pulls the image and brings
+		// the host secrets (the bucket's keys), so it never blocks.
+		why := "its core cannot be read until the move brings the image and the host secrets"
+		if rep.ImagePresent {
+			why = "its core cannot be read until the move brings the host secrets (" + dstUnread + ")"
 		}
+		rep.Warnings = append(rep.Warnings, fmt.Sprintf("%s: %s", rep.Target.Name, why))
 	}
 	s.moveSite(&rep)
 	// About 10 MB/s each way, plus stopping and starting.
@@ -222,11 +217,6 @@ func (s *Service) moveImage(ctx context.Context, rep *MoveReport, dst string, ch
 	if !res.Present && rep.Target.Box {
 		rep.Blocking = append(rep.Blocking, fmt.Sprintf("%s: %s", rep.Target.Name, res.Note))
 	}
-}
-
-// holdsSecrets reports whether the core host of c holds any host secret.
-func holdsSecrets(c nodeproto.CoreCheckResult) bool {
-	return slices.ContainsFunc(c.Secrets, func(p nodeproto.CoreSecretPresent) bool { return p.Stored })
 }
 
 func leaseText(l *nodeproto.CoreLease) string {

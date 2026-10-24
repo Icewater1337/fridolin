@@ -87,7 +87,10 @@ func checkTimezone(_ context.Context, env *DoctorEnv) DoctorResult {
 		return DoctorResult{Status: DoctorMissing, Detail: "config did not load"}
 	}
 	if name := env.Config.Timezone; name != "" {
-		if tz != "" && tz != name {
+		// In the core's container the entrypoint gives the bridge this zone
+		// as TZ (#250); doctor, run through docker exec, has the
+		// container's own TZ instead.
+		if tz != "" && tz != name && env.ConfigGOOS != config.ContainerGOOS {
 			return DoctorResult{Status: DoctorWarn,
 				Detail: fmt.Sprintf("schedules run in %s (timezone), but the process's TZ is %s: programs that read the clock themselves see another zone", name, tz),
 				Fix:    "start the core with fridolin core start, which passes the host's zone as TZ (FRIDOLIN_TZ sets another), or set timezone to the zone you mean"}

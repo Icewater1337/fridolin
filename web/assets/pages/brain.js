@@ -123,9 +123,9 @@ export default /** @satisfies {PageModule} */ ({
       ctx.setTitle(brain.name || brain.id);
       paint(head, { name: brain.name, id: brain.id, status: brain.status, path: brain.path }, renderHead);
       paint(issuesBox, (brain.issues || []).filter((is) => is.kind !== 'drift'), renderIssues);
-      paintDrift();
+      paintDrift(brain);
       paintLive();
-      paintForm();
+      paintForm(brain);
       paint(intentsBox, brain.intents || [], renderIntents);
       paint(dangerBox, 'shown', renderDanger);
     }
@@ -170,8 +170,8 @@ export default /** @satisfies {PageModule} */ ({
     }
 
     // ── on-disk changes ──
-    function paintDrift() {
-      const b = brain;
+    /** @param {Brain} b */
+    function paintDrift(b) {
       const drift = (b.issues || []).find((is) => is.kind === 'drift');
       if (b.status !== 'drift' && !drift) { paint(driftBox, null, () => null); return; }
       paint(driftBox, { manifest: b.manifest, disk: b.disk_manifest || null, detail: drift ? drift.detail : '', path: b.path }, renderDrift);
@@ -230,7 +230,7 @@ export default /** @satisfies {PageModule} */ ({
       if (!brain) return;
       const rt = brain.runtime || null;
       // The chats it names, so their labels follow the names learnt.
-      const chats = rt ? [rt.running && rt.running.chat, ...(rt.queue || []).map((q) => q.chat), rt.last && rt.last.chat].filter(Boolean) : [];
+      const chats = rt ? [rt.running && rt.running.chat, ...(rt.queue || []).map((q) => q.chat), rt.last && rt.last.chat].filter(/** @returns {c is string} */ (c) => Boolean(c)) : [];
       paint(liveBox, { rt, status: brain.status, names: chats.map(chatName) }, renderLive);
     }
 
@@ -280,9 +280,10 @@ export default /** @satisfies {PageModule} */ ({
     // ── settings form ──
     // What the form shows: the approved manifest it edits, and what it needs
     // to explain it (the inherited settings, the other brains' routing).
-    function paintForm() {
+    /** @param {Brain} b */
+    function paintForm(b) {
       if (!brains) return; // it says which groups the other brains have
-      const m = brain.manifest;
+      const m = b.manifest;
       if (!m) {
         if (settings.dirty()) settings.discard(); // nothing left on the page to save
         paint(formBox, 'none', () => h('div.card', h('p.muted', 'This brain has no approved settings to edit.')));
@@ -292,10 +293,10 @@ export default /** @satisfies {PageModule} */ ({
       const eff = /** @type {Partial<ConfigFile>} */ ((cfg && cfg.effective) || {});
       settings.set({
         manifest: m,
-        drift: brain.status === 'drift',
+        drift: b.status === 'drift',
         eff: { brain_model: eff.brain_model || '', brain_effort: eff.brain_effort || '', disallowed_tools: eff.disallowed_tools || [] },
         allowedGroups: (cfg && cfg.config && cfg.config.allowed_groups) || eff.allowed_groups || [],
-        others: brains.filter((b) => b.id && b.id !== id && b.manifest).map((b) => ({ id: b.id, name: b.name, manifest: { routing: b.manifest.routing, role: b.manifest.role || '' } })),
+        others: brains.flatMap((o) => (o.id && o.id !== id && o.manifest ? [{ id: o.id, name: o.name, manifest: { routing: o.manifest.routing, role: o.manifest.role || '' } }] : [])),
       });
     }
 
@@ -310,7 +311,7 @@ export default /** @satisfies {PageModule} */ ({
       const observeSel = select(OBSERVE, m.observe || 'history', { name: 'observe' });
       const override = Array.isArray(m.disallowed_tools);
       const globalTools = eff.disallowed_tools.length ? eff.disallowed_tools.join(', ') : 'none';
-      const toolsIn = textInput({ value: override ? m.disallowed_tools.join(', ') : '', class: 'mono', placeholder: 'e.g. WebFetch, Bash', disabled: !override });
+      const toolsIn = textInput({ value: m.disallowed_tools ? m.disallowed_tools.join(', ') : '', class: 'mono', placeholder: 'e.g. WebFetch, Bash', disabled: !override });
       const toolsSw = toggle({
         checked: override,
         label: 'Override global tool restrictions',
@@ -399,7 +400,7 @@ export default /** @satisfies {PageModule} */ ({
       const stops = 'The bridge stops sending messages to this brain. ';
       if (!brains) return h('p', stops, 'Its chats go to the fallback brain, if another brain is left.');
       const { brain: next, dms, copy } = takeover(brains, id);
-      if (copy) return h('p', stops, 'Another folder with this id stays in the list, ', mono(next.path), ': it takes this brain’s place, for the chats its own brain.json names.');
+      if (copy && next) return h('p', stops, 'Another folder with this id stays in the list, ', mono(next.path), ': it takes this brain’s place, for the chats its own brain.json names.');
       if (!next) return h('p', stops, 'No other brain takes its chats over, so they go unanswered until you add one.');
       const name = h('strong', brainLabel(next));
       return [
@@ -439,7 +440,7 @@ export default /** @satisfies {PageModule} */ ({
 
     /** @param {IntentSchedule} s */
     function scheduleLabel(s) {
-      if (s.kind === 'once') return `once, ${new Date(s.at).toLocaleString()}`;
+      if (s.kind === 'once') return `once, ${new Date(s.at || '').toLocaleString()}`;
       if (s.kind === 'daily') return `every day at ${s.time}`;
       return `every ${s.day} at ${s.time}`;
     }

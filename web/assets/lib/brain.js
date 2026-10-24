@@ -72,7 +72,7 @@ const ISSUES = {
  * @param {{short?: boolean}} [options]
  */
 export function issueLabel(kind, { short = false } = {}) {
-  const names = ISSUES[kind];
+  const names = kind ? ISSUES[kind] : undefined;
   return names ? names[short ? 0 : 1] : String(kind || '');
 }
 

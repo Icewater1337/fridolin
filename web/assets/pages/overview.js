@@ -53,7 +53,9 @@ export default /** @satisfies {PageModule} */ ({
         activityBox));
 
     // ── WhatsApp + QR ──
-    const qr = { img: null, url: '', pairing: false };
+    /** @type {{img: HTMLImageElement | null, age: HTMLElement | null, url: string, pairing: boolean}} */
+    const qr = { img: null, age: null, url: '', pairing: false };
+    /** @param {AbortSignal} signal */
     const loadQR = async (signal) => {
       try {
         const r = await get('/api/whatsapp/qr', { signal });
@@ -78,7 +80,7 @@ export default /** @satisfies {PageModule} */ ({
     const buildWA = (wa) => {
       const kind = waKind(wa.mode);
       const notPaired = !wa.own_number;
-      const canPair = !wa.dev && (wa.mode === 'qr-expired' || (notPaired && !['pairing', 'connecting', 'connected', 'disabled'].includes(wa.mode)));
+      const canPair = !wa.dev && (wa.mode === 'qr-expired' || (notPaired && !['pairing', 'connecting', 'connected', 'disabled'].includes(wa.mode || '')));
       const pairBtn = canPair ? btn('Start pairing', {
         kind: 'primary', icon: 'phone',
         onClick: async () => {
@@ -121,6 +123,7 @@ export default /** @satisfies {PageModule} */ ({
 
     // ── health header ──
     // The uptime in whole minutes, so the header changes once a minute.
+    /** @param {number} sec */
     const uptime = (sec) => (sec < 60 ? '< 1 min' : fmtDuration(Math.floor(sec / 60) * 60));
     /** @param {Status} s */
     const renderHealth = (s) => paint(header, {
@@ -276,8 +279,8 @@ export default /** @satisfies {PageModule} */ ({
           last && last.note ? h('p.muted.small', last.note) : null,
           findings.length ? h('ul.plain-list', findings.slice(0, 8).map(findingLine)) : null,
           findings.length > 8 ? h('p.muted.small', `and ${findings.length - 8} more: fridolin housekeeping status lists them all`) : null,
-          last && (last.errors || []).length ? last.errors.map((e) => h('p.error-text.small', e)) : null,
-          (x.asked || []).length ? h('p.small', plural(x.asked.length, 'process'), ' waiting for your answer on the ', h('a', { href: '#/approvals' }, 'Approvals'), ' page') : null,
+          ((last && last.errors) || []).map((e) => h('p.error-text.small', e)),
+          x.asked && x.asked.length ? h('p.small', plural(x.asked.length, 'process'), ' waiting for your answer on the ', h('a', { href: '#/approvals' }, 'Approvals'), ' page') : null,
           x.enabled && x.next_run ? h('p.muted.small', 'Next run ', timeAgo(x.next_run)) : null,
           x.dry_run ? h('p.muted.small', 'Dry run: set housekeeping.dry_run to false in config.json once the reports look right.') : null,
           h('div.actions', runNow)),

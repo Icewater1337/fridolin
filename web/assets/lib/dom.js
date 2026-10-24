@@ -19,7 +19,7 @@
  *   class?: string | null | false,
  *   text?: string | number | null,
  *   style?: Partial<CSSStyleDeclaration>,
- *   dataset?: Record<string, string>,
+ *   dataset?: Record<string, string> | null,
  *   [name: string]: unknown,
  * }} Attrs
  */
@@ -171,13 +171,14 @@ export function reconcile(container, list, key, render) {
     const sig = JSON.stringify(item);
     let n = keep.get(k);
     keep.delete(k); // an item with the same key again gets a node of its own
-    if (n && items.get(n).sig !== sig) {
+    const was = n && items.get(n);
+    if (n && was && was.sig !== sig) {
       if (typeof n.update === 'function') {
         n.update(item);
-        items.get(n).sig = sig;
+        was.sig = sig;
       } else {
         n.remove();
-        n = null;
+        n = undefined;
       }
     }
     if (!n) {
@@ -224,6 +225,7 @@ export function syncOptions(sel, options, fallback) {
   if (JSON.stringify(now) === JSON.stringify(options)) return sel;
   const v = sel.value;
   sel.replaceChildren(...options.map(([value, label]) => h('option', { value }, label)));
+  /** @param {string} x */
   const offered = (x) => options.some(([o]) => o === x);
   sel.value = offered(v) ? v : (fallback !== undefined && offered(fallback) ? fallback : (options[0] ? options[0][0] : ''));
   return sel;
