@@ -5,14 +5,15 @@ import (
 	"testing"
 )
 
-// resolvedSettings builds value-policy fixtures. Pure sandbox projection tests
-// can describe macOS policy on either host; platform rejection has its own tests.
+// resolvedSettings builds value-policy fixtures, with ~ t's HOME (homeOf).
+// Pure sandbox projection tests can describe macOS policy on either host;
+// platform rejection has its own tests.
 func resolvedSettings(t testing.TB, file *config.File) *config.Settings {
 	t.Helper()
 	if file == nil {
 		return nil
 	}
-	s, err := config.Resolve(file, ConfigPaths(), "darwin")
+	s, err := config.Resolve(file, ConfigPathsFor(homeOf(t)), "darwin")
 	if err != nil {
 		t.Fatal(err)
 	}

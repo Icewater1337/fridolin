@@ -1,5 +1,6 @@
 package local.plaudsync
 
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -14,6 +15,7 @@ import android.content.pm.ServiceInfo
 import android.os.Environment
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.MediaStore
 import com.tinnotech.penblesdk.entity.BleDevice
 import com.tinnotech.penblesdk.entity.BleFile
@@ -40,9 +42,13 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Foreground service that keeps the BLE link to the NotePin open and pulls every recording
- * off the device as soon as it stops: device → MP3 in Documents/PlaudSync → delete on device
- * → Plaud transcription → .txt next to the MP3.
+ * Foreground service that pulls every recording off the NotePin: device → MP3 in
+ * Documents/PlaudSync → delete on device → Plaud transcription → .txt next to the MP3.
+ *
+ * How often it connects is the sync setting ([SyncMode], [SyncPolicy]): in instant mode the
+ * BLE link stays up and a recording is fetched as soon as it stops; otherwise the app checks in
+ * (connect → sync → disconnect) on a timer and on events, so the pin can sleep in between
+ * (docs/PLAUD.md, "The pin's battery").
  *
  * In voice mode (docs/PLAUD.md, "Voice mode") a recording is a question for Fridolin instead,
  * as is what is said to the phone's speech recognizer ([AskActivity]); the answer is read aloud
@@ -57,7 +63,14 @@ class SyncService : Service() {
         const val ACTION_STOP_SPEECH = "stop_speech"
         const val ACTION_SKIP = "skip"
         const val ACTION_REFRESH = "refresh"
+        const val ACTION_CHECK_IN = "check_in"
         const val EXTRA_TEXT = "text"
+        const val EXTRA_TRIGGER = "trigger"
+
+        /** Sightings this soon after the watch scan starts set the baseline advertisement (see [onSeen]). */
+        private const val ADVERT_SETTLE_MS = 60_000L
+        /** A pin the watch scan sees this soon after a missed check-in was in range all along. */
+        private const val IN_RANGE_QUIET_MS = 90_000L
 
         /** How long the app waits for the answer to a voice question. */
         private const val ANSWER_WAIT_MS = 30 * 60_000L
@@ -68,6 +81,11 @@ class SyncService : Service() {
 
         fun start(ctx: Context, action: String? = null) {
             ctx.startForegroundService(Intent(ctx, SyncService::class.java).setAction(action))
+        }
+
+        /** Asks for a check-in with the pin; [SyncPolicy.checkInOn] decides whether it happens now. */
+        fun checkIn(ctx: Context, trigger: Trigger) {
+            ctx.startForegroundService(Intent(ctx, SyncService::class.java).setAction(ACTION_CHECK_IN).putExtra(EXTRA_TRIGGER, trigger.key))
         }
 
         /** Asks Fridolin text by voice mode. */
@@ -96,7 +114,32 @@ class SyncService : Service() {
     private var recordingSid: Long? = null
     private var listAgain = false
     private val queue = ArrayDeque<Long>()
-    private var rescanJob: Job? = null
+    private var pairJob: Job? = null
+    private var searching = false
+    private var searchTimeout: Job? = null
+    private var connectTimeout: Job? = null
+    private var idleJob: Job? = null
+    private var cloudBound = false
+    // Check-ins (SyncPolicy): the pin as last found, misses in a row, when the last one started
+    private var device: BleDevice? = null
+    private var misses = 0
+    private var lastCheckIn = -SyncPolicy.UNLOCK_GAP_MS
+    private var nextCheckIn = 0L
+    private var leaving = false
+    private var unpairing = false
+    // The watch scan (PinWatch) and what it learns from the pin's advertisement (AdvertSignal)
+    private lateinit var watch: PinWatch
+    private var watchStarted = 0L
+    private var seenSinceWatch = false
+    private var advertBaseline: ByteArray? = null
+    private var advertCheckIn = false
+    private var advertHit = false
+    private val alarms by lazy { getSystemService(AlarmManager::class.java) }
+    private val checkInAlarm by lazy {
+        PendingIntent.getForegroundService(this, 20,
+            Intent(this, SyncService::class.java).setAction(ACTION_CHECK_IN).putExtra(EXTRA_TRIGGER, Trigger.TIMER.key),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+    }
     private val transcribing = Mutex()
     private val uploading = Mutex()
     private val pendingDir by lazy { File(filesDir, "pending").apply { mkdirs() } }
@@ -112,6 +155,12 @@ class SyncService : Service() {
         override fun onReceive(context: Context?, intent: Intent?) {
             speaker.resume()
             refreshNotification()
+            trigger(Trigger.UNLOCKED)
+        }
+    }
+    private val charging = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            trigger(Trigger.CHARGING)
         }
     }
     private val wakeLock by lazy {
@@ -131,6 +180,8 @@ class SyncService : Service() {
         startForeground(1, notification("Starting"), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
         speaker = Speaker(this) { refreshNotification() }
         registerReceiver(unlocked, IntentFilter(Intent.ACTION_USER_PRESENT))
+        registerReceiver(charging, IntentFilter(Intent.ACTION_POWER_CONNECTED))
+        watch = PinWatch(this) { adv -> scope.launch { onSeen(adv) } }
         AppLog.i("service started")
         scope.launch { run() }
     }
@@ -139,9 +190,11 @@ class SyncService : Service() {
         when (intent?.action) {
             ACTION_PAIR -> {
                 pairing = true
+                device = null
                 AppLog.i("pairing: looking for a NotePin S / Note Pro")
                 scan()
             }
+            ACTION_CHECK_IN -> trigger(Trigger.of(intent.getStringExtra(EXTRA_TRIGGER)))
             ACTION_UNPAIR -> unpair()
             ACTION_ASK -> intent.getStringExtra(EXTRA_TEXT)?.let { queueQuestion(it) }
             ACTION_STOP_SPEECH -> speaker.stop()
@@ -154,7 +207,10 @@ class SyncService : Service() {
     override fun onDestroy() {
         AppLog.i("service stopped")
         scope.cancel()
+        alarms.cancel(checkInAlarm)
+        watch.stop()
         unregisterReceiver(unlocked)
+        unregisterReceiver(charging)
         speaker.shutdown()
         if (wakeLock.isHeld) wakeLock.release()
         super.onDestroy()
@@ -169,7 +225,8 @@ class SyncService : Service() {
         PlaudDeviceAgent.initSDK(applicationContext, token, PlaudApi.DOMAIN)
         PlaudDeviceAgent.setBleLogLevel(android.util.Log.INFO)
         sdkReady = true
-        scan()
+        AppLog.i("sync: ${describe(SyncPrefs.mode(this))}")
+        checkIn(Trigger.TIMER)
         transcribePending()
         resumeQuestions()
         scope.launch {
@@ -201,6 +258,49 @@ class SyncService : Service() {
 
     // --- connection -------------------------------------------------------------------------
 
+    private val voice get() = Fridolin.enabled && VoicePrefs.enabled(this)
+
+    private fun describe(m: SyncMode) = when (m) {
+        SyncMode.INSTANT -> "instant, the link stays up"
+        SyncMode.SMART -> "smart, a check-in every ${SyncPolicy.SMART_MINUTES} min and on events"
+        SyncMode.INTERVAL -> "every ${SyncPrefs.minutes(this)} min"
+    } + if (m != SyncMode.INSTANT && voice) " (voice mode: at least every ${SyncPolicy.VOICE_MINUTES} min)" else ""
+
+    /** An event that may start a check-in; returns whether it did. */
+    private fun trigger(t: Trigger): Boolean {
+        if (!sdkReady || pairing) return false
+        val mode = SyncPrefs.mode(this)
+        if (t == Trigger.SETTINGS) AppLog.i("sync: ${describe(mode)}")
+        if (connected) {
+            when (t) {
+                Trigger.SYNC_NOW -> requestFileList()
+                Trigger.SETTINGS -> if (exporting == null && queue.isEmpty()) syncDone()
+                else -> {}
+            }
+            return false
+        }
+        if (connecting || searching) return false
+        if (!SyncPolicy.checkInOn(t, mode, SystemClock.elapsedRealtime() - lastCheckIn)) return false
+        if (t != Trigger.TIMER) AppLog.i("checking in with the NotePin (${t.key})")
+        checkIn(t)
+        return true
+    }
+
+    /** Connect → sync → (unless [SyncPolicy.stayConnected]) disconnect. */
+    private fun checkIn(t: Trigger) {
+        if (!sdkReady || connected || connecting || searching) return
+        val sn = savedSn ?: return setStatus("Not paired: open the app and tap Pair")
+        alarms.cancel(checkInAlarm)
+        watch.stop()
+        lastCheckIn = SystemClock.elapsedRealtime()
+        advertCheckIn = t == Trigger.ADVERT
+        advertHit = false
+        wakeLock.acquire(3 * 60_000L)
+        val dev = device ?: SyncPrefs.device(this, sn)?.also { device = it }
+        // Straight to the pin as last found; every third miss in a row looks for it afresh
+        if (dev != null && misses % 3 != 2) connect(dev) else scan()
+    }
+
     private fun scan() {
         if (!sdkReady || connected || connecting) return
         if (savedSn == null && !pairing) return setStatus("Not paired: open the app and tap Pair")
@@ -209,17 +309,24 @@ class SyncService : Service() {
             PlaudDeviceAgent.startScan()
         } catch (e: Exception) {
             AppLog.i("scan failed: ${e.message}")
-            rescanLater(60_000)
+            return missed()
         }
-    }
-
-    private fun rescanLater(ms: Long) {
-        rescanJob?.cancel()
-        rescanJob = scope.launch { delay(ms); scan() }
+        searching = true
+        // Should the SDK never report its scan over, the search still ends and the next one is planned
+        searchTimeout?.cancel()
+        searchTimeout = scope.launch {
+            delay(90_000)
+            if (searching) {
+                runCatching { PlaudDeviceAgent.stopScan() }
+                missed()
+            }
+        }
     }
 
     private fun connect(dev: BleDevice) {
         val sn = dev.getSerialNumber()
+        device = dev
+        endSearch()
         connecting = true
         setStatus("Connecting")
         scope.launch(Dispatchers.IO) {
@@ -230,34 +337,53 @@ class SyncService : Service() {
                 PlaudDeviceAgent.connectBleDevice(dev)
             } catch (e: Exception) {
                 AppLog.i("connect failed: ${e.message}")
-                withContext(Dispatchers.Main) { connecting = false; rescanLater(30_000) }
+                withContext(Dispatchers.Main) {
+                    if (connecting) {
+                        connecting = false
+                        missed()
+                    }
+                }
             }
         }
-        scope.launch {
+        connectTimeout?.cancel()
+        connectTimeout = scope.launch {
             delay(60_000)
             if (connecting && !connected) {
-                AppLog.i("connect timed out")
-                PlaudDeviceAgent.disconnect()
                 connecting = false
-                rescanLater(5_000)
+                PlaudDeviceAgent.disconnect()
+                missed()
             }
         }
     }
 
     private fun onConnectState(state: Int) {
         if (state == 1) return // GATT link only; success is bleBind(status 0) after the E2EE handshake
-        if (connecting && !connected) {
-            AppLog.i("handshake failed (state $state). If this repeats, the NotePin is probably still bound to the Plaud app")
-        } else if (connected) {
-            AppLog.i("disconnected")
-        }
+        val wasConnecting = connecting && !connected
+        val wasConnected = connected
         connecting = false
         connected = false
         exporting = null
+        recordingSid = null
         listAgain = false
         queue.clear()
-        if (wakeLock.isHeld) wakeLock.release()
-        rescanLater(5_000)
+        idleJob?.cancel()
+        when {
+            wasConnecting -> {
+                if (pairing) AppLog.i("handshake failed (state $state). If this repeats, the NotePin is probably still bound to the Plaud app")
+                missed()
+            }
+            wasConnected && leaving -> {
+                leaving = false
+                idle()
+            }
+            wasConnected -> {
+                AppLog.i("disconnected")
+                if (wakeLock.isHeld) wakeLock.release()
+                // Out of range for a moment, say: try again soon, the pin may hold a recording
+                scheduleCheckIn(SyncPolicy.DROPPED_RETRY_MS)
+                setStatus("Link lost, trying again shortly")
+            }
+        }
     }
 
     private fun onBind(sn: String?, status: Int) {
@@ -265,27 +391,159 @@ class SyncService : Service() {
         connecting = false
         connected = true
         pairing = false
+        pairJob?.cancel()
+        connectTimeout?.cancel()
+        if (misses > 0) AppLog.i("NotePin found again")
+        misses = 0
         if (savedSn != sn) {
             savedSn = sn
+            SyncPrefs.setAdvertSignal(this, AdvertSignal())
             AppLog.i("paired with ${sn.take(3)}…${sn.takeLast(4)}")
-        } else {
+        } else if (SyncPrefs.mode(this) == SyncMode.INSTANT) {
             AppLog.i("connected")
         }
+        device?.let { SyncPrefs.setDevice(this, it) }
+        if (unpairing) return unpair()
         setStatus("Connected")
-        val t = token
-        scope.launch(Dispatchers.IO) {
-            runCatching { PlaudApi.binding(t, "bind", sn) }.onFailure { AppLog.i("cloud bind: ${it.message}") }
+        if (!cloudBound) {
+            cloudBound = true
+            val t = token
+            scope.launch(Dispatchers.IO) {
+                runCatching { PlaudApi.binding(t, "bind", sn) }.onFailure { AppLog.i("cloud bind: ${it.message}") }
+            }
         }
         PlaudDeviceAgent.syncTime()
         PlaudDeviceAgent.refreshRecordState() // → bleRecordStateRefreshed → file list once idle
+        // Should the pin not answer, the link still goes once nothing is happening on it
+        idleJob = scope.launch {
+            while (true) {
+                delay(2 * 60_000L)
+                if (exporting == null && queue.isEmpty() && !leaving) syncDone()
+            }
+        }
     }
+
+    /** Nothing left to fetch: let the pin go, unless [SyncPolicy.stayConnected] keeps the link. */
+    private fun syncDone() {
+        if (wakeLock.isHeld) wakeLock.release()
+        if (advertCheckIn) learnAdvert(advertHit)
+        if (SyncPolicy.stayConnected(SyncPrefs.mode(this), recordingSid != null, unpairing)) {
+            return setStatus(if (recordingSid != null) "Connected, NotePin is recording" else "Connected, everything synced")
+        }
+        if (leaving) return
+        leaving = true
+        setStatus("Synced, letting the NotePin sleep")
+        scope.launch {
+            delay(3_000) // the last delete reaches the pin
+            if (!connected || exporting != null || queue.isNotEmpty() || recordingSid != null) {
+                leaving = false
+                return@launch
+            }
+            PlaudDeviceAgent.disconnect()
+            delay(10_000)
+            if (leaving && connected) onConnectState(0) // the SDK said nothing: count it as gone
+        }
+    }
+
+    /** Disconnected after a sync: wait for the next check-in. */
+    private fun idle() {
+        if (connected || connecting) return
+        if (savedSn == null) return setStatus("Not paired: open the app and tap Pair")
+        misses = 0
+        val wait = SyncPolicy.interval(SyncPrefs.mode(this), SyncPrefs.minutes(this), voice)
+            ?: return checkIn(Trigger.SETTINGS) // instant mode: the link belongs up
+        scheduleCheckIn(wait)
+        setStatus("Synced ${clock(System.currentTimeMillis())}, next check ${clock(nextCheckIn)}")
+    }
+
+    private fun endSearch() {
+        searching = false
+        searchTimeout?.cancel()
+    }
+
+    /** A check-in that found no pin: wait longer each time ([SyncPolicy.backoff]), and watch for it. */
+    private fun missed() {
+        endSearch()
+        if (wakeLock.isHeld) wakeLock.release()
+        advertCheckIn = false // out of reach says nothing about the advertisement
+        if (pairing) {
+            pairJob?.cancel()
+            pairJob = scope.launch { delay(30_000); scan() }
+            return
+        }
+        misses++
+        val wait = SyncPolicy.backoff(SyncPrefs.mode(this), SyncPrefs.minutes(this), voice, misses)
+        if (misses == 1 || misses % 10 == 0) {
+            AppLog.i("NotePin not reached ($misses): out of range, or still bound to the Plaud app if it is close by. " +
+                "Next try in ${wait / 1000}s, or when it is back in range")
+        }
+        scheduleCheckIn(wait)
+        setStatus("NotePin not in range, next try ${clock(nextCheckIn)}" + if (unpairing) " (to unpair it)" else "")
+    }
+
+    /** A wake-up alarm (Doze lets it through, inexactly), and the watch scan meanwhile. */
+    private fun scheduleCheckIn(ms: Long) {
+        nextCheckIn = System.currentTimeMillis() + ms
+        alarms.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + ms, checkInAlarm)
+        val mac = device?.getMacAddress()
+        if (mac == null || !SyncPolicy.watch(SyncPrefs.mode(this), misses > 0)) return watch.stop()
+        watchStarted = SystemClock.elapsedRealtime()
+        seenSinceWatch = false
+        advertBaseline = null
+        watch.start(mac)
+    }
+
+    /**
+     * The watch scan saw the pin. After missed check-ins that means it is back in range. Otherwise
+     * a change in its advertisement may mean a recording started or stopped: Plaud documents no
+     * such signal, so [AdvertSignal] learns whether it holds for this pin.
+     */
+    private fun onSeen(adv: ByteArray) {
+        if (connected || connecting || leaving) return
+        val since = SystemClock.elapsedRealtime() - watchStarted
+        if (misses > 0) {
+            if (seenSinceWatch) return
+            seenSinceWatch = true
+            // Seen at once: it was close by all along and did not connect; the backoff stands
+            if (since >= IN_RANGE_QUIET_MS) trigger(Trigger.IN_RANGE)
+            return
+        }
+        val base = advertBaseline
+        advertBaseline = adv
+        if (base == null || since < ADVERT_SETTLE_MS || base.contentEquals(adv)) return
+        if (!SyncPrefs.advertSignal(this).trusted) return
+        val changed = SyncPolicy.changedBytes(base, adv)
+        if (trigger(Trigger.ADVERT)) AppLog.i("the NotePin's advertisement changed (bytes ${changed.joinToString(",")})")
+    }
+
+    private fun learnAdvert(hit: Boolean) {
+        advertCheckIn = false
+        val before = SyncPrefs.advertSignal(this)
+        val after = before.tried(hit)
+        SyncPrefs.setAdvertSignal(this, after)
+        AppLog.i(if (hit) "the advertisement change came with a recording" else "the advertisement change brought nothing new")
+        if (before.trusted && !after.trusted) AppLog.i("this NotePin's advertisement changes say nothing about recordings: no longer watched for that")
+    }
+
+    private fun clock(ms: Long) = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(ms))
 
     private fun unpair() {
         val sn = savedSn ?: return AppLog.i("unpair: nothing paired")
-        // Without the BLE depair the device stays locked to this app, so require a live link
-        if (!connected) return AppLog.i("unpair: NotePin not connected. Bring it close, wait for 'Connected', retry")
+        // Without the BLE depair the device stays locked to this app, so it needs a live link
+        if (!connected) {
+            unpairing = true
+            AppLog.i("unpair: connecting to the NotePin first, keep it close by")
+            if (!connecting) checkIn(Trigger.SYNC_NOW)
+            return
+        }
         AppLog.i("unpairing")
+        unpairing = false
+        cloudBound = false
         savedSn = null
+        device = null
+        SyncPrefs.setDevice(this, null)
+        alarms.cancel(checkInAlarm)
+        watch.stop()
         val t = token
         scope.launch {
             withContext(Dispatchers.IO) {
@@ -293,6 +551,7 @@ class SyncService : Service() {
             }
             PlaudDeviceAgent.depair(false)
             delay(3_000)
+            leaving = true
             PlaudDeviceAgent.disconnect()
             AppLog.i("unpaired; the NotePin can be added in the Plaud app again")
         }
@@ -314,7 +573,10 @@ class SyncService : Service() {
         val fresh = onDevice
             .filter { it !in synced && it != exporting && it != recordingSid && it !in queue }
             .sorted()
-        if (fresh.isNotEmpty()) AppLog.i("${fresh.size} new recording(s) on device")
+        if (fresh.isNotEmpty()) {
+            AppLog.i("${fresh.size} new recording(s) on device")
+            advertHit = true
+        }
         queue.addAll(fresh)
         exportNext()
     }
@@ -326,8 +588,7 @@ class SyncService : Service() {
                 listAgain = false
                 return PlaudDeviceAgent.getFileList()
             }
-            if (wakeLock.isHeld) wakeLock.release()
-            return setStatus("Connected, everything synced")
+            return syncDone()
         }
         exporting = sid
         wakeLock.acquire(30 * 60_000L)
@@ -531,7 +792,7 @@ class SyncService : Service() {
     private val listener = object : PlaudDeviceAgentListener {
         override fun bleScanResult(devices: List<BleDevice>) {
             scope.launch {
-                if (connected || connecting) return@launch
+                if (connected || connecting || !searching) return@launch
                 val want = savedSn
                 val dev = devices.firstOrNull { d ->
                     val sn = d.getSerialNumber() ?: return@firstOrNull false
@@ -543,7 +804,7 @@ class SyncService : Service() {
         }
 
         override fun bleScanOverTime() {
-            scope.launch { if (!connected && !connecting) rescanLater(30_000) }
+            scope.launch { if (searching) missed() }
         }
 
         override fun bleConnectState(state: Int) {
@@ -573,7 +834,10 @@ class SyncService : Service() {
         override fun bleRecordStateRefreshed(isRecording: Boolean, sessionId: Long) {
             scope.launch {
                 recordingSid = if (isRecording) sessionId else null
-                if (isRecording) AppLog.i("device is recording; will sync when it stops") else requestFileList()
+                if (!isRecording) return@launch requestFileList()
+                AppLog.i("device is recording; will sync when it stops")
+                if (advertCheckIn) learnAdvert(true)
+                syncDone() // the link stays while it records
             }
         }
 
@@ -596,7 +860,10 @@ class SyncService : Service() {
         AppLog.onChange?.invoke()
     }
 
-    /** The ongoing notification; in voice mode it says so and offers Ask, Stop and Skip. Never an answer's text. */
+    /**
+     * The ongoing notification; between check-ins it offers Fetch now. In voice mode it says so and
+     * offers Ask, Stop and Skip. Never an answer's text.
+     */
     private fun notification(text: String): Notification {
         val b = Notification.Builder(this, "sync")
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
@@ -607,7 +874,14 @@ class SyncService : Service() {
             .setContentIntent(
                 PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
             )
-        if (!VoicePrefs.enabled(this) || !::speaker.isInitialized) return b.build()
+        val fetch = Notification.Action.Builder(null, "Fetch now",
+            PendingIntent.getService(this, 13, Intent(this, SyncService::class.java).setAction(ACTION_CHECK_IN)
+                .putExtra(EXTRA_TRIGGER, Trigger.SYNC_NOW.key), PendingIntent.FLAG_IMMUTABLE)).build()
+        val offerFetch = savedSn != null && SyncPrefs.mode(this) != SyncMode.INSTANT
+        if (!VoicePrefs.enabled(this) || !::speaker.isInitialized) {
+            if (offerFetch) b.addAction(fetch)
+            return b.build()
+        }
         b.setContentTitle("Plaud Sync · voice mode")
         b.setSubText(
             when {
@@ -624,6 +898,8 @@ class SyncService : Service() {
         if (speaker.busy) {
             b.addAction(action("Stop", ACTION_STOP_SPEECH, 11))
             b.addAction(action("Skip", ACTION_SKIP, 12))
+        } else if (offerFetch) {
+            b.addAction(fetch) // a question just recorded on the pin need not wait for the next check-in
         }
         return b.build()
     }

@@ -48,6 +48,7 @@ func useGoogleServer(tb *testBridge, srv *httptest.Server) {
 }
 
 func TestCalendarDashboardSignInFlow(t *testing.T) {
+	t.Parallel()
 	srv, got := fakeGoogle(t)
 	tb := newTestBridge(t, "")
 	useGoogleServer(tb, srv)
@@ -173,6 +174,7 @@ func TestCalendarDashboardSignInFlow(t *testing.T) {
 }
 
 func TestCalendarSignInErrorsAreShown(t *testing.T) {
+	t.Parallel()
 	srv, _ := fakeGoogle(t)
 	tb := newTestBridge(t, "")
 	useGoogleServer(tb, srv)
@@ -217,6 +219,7 @@ func portOf(tb *testBridge) string {
 // would revoke it at Google. The bridge refuses such a token file, leaves
 // the other brain's token alone, and removes only the link on disconnect.
 func TestCalendarTokenIsNotFollowed(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		link func(t *testing.T, own, other string)
@@ -321,6 +324,7 @@ func mustSymlink(t *testing.T, target, link string) {
 // with the client you configured, and a token from another client cannot
 // be refreshed. The token_uri of a pasted client file is not used either.
 func TestCalendarTokenRequestsGoToGoogleWithYourClient(t *testing.T) {
+	t.Parallel()
 	var elsewhere atomic.Int32
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		elsewhere.Add(1)
@@ -422,6 +426,7 @@ func TestCalendarTokenRequestsGoToGoogleWithYourClient(t *testing.T) {
 // larger than maxBrainFile rather than load it, and so neither refreshes
 // it nor revokes it.
 func TestOversizedCalendarTokenIsRefused(t *testing.T) {
+	t.Parallel()
 	srv, got := fakeGoogle(t)
 	tb := newTestBridge(t, "")
 	useGoogleServer(tb, srv)
@@ -464,6 +469,7 @@ func TestOversizedCalendarTokenIsRefused(t *testing.T) {
 // calendar scope a brain got from an older version, is shown on the
 // brain's page so you can narrow it.
 func TestCalendarSignInScopes(t *testing.T) {
+	t.Parallel()
 	const full = "https://www.googleapis.com/auth/calendar"
 	narrow := strings.Join(calendarScopes, " ")
 	cases := []struct {
@@ -540,6 +546,7 @@ func TestCalendarSignInScopes(t *testing.T) {
 // calendar scope whatever was granted. An answer without a scope field
 // leaves the stored ones as they were.
 func TestCalendarRefreshRecordsGrantedScopes(t *testing.T) {
+	t.Parallel()
 	const full = "https://www.googleapis.com/auth/calendar"
 	narrow := strings.Join(calendarScopes, " ")
 	cases := []struct {
@@ -621,6 +628,7 @@ func writeCalendarToken(t *testing.T, tb *testBridge, id, account, refreshToken 
 // Either way this brain's token goes, and the answer says why access stayed:
 // another brain, or a token no configured brain uses, which can be deleted.
 func TestCalendarDisconnectRevokesOnlyAnUnsharedGrant(t *testing.T) {
+	t.Parallel()
 	const shared, leftover = "brain b signs in", "a token for b, which is not a configured brain"
 	cases := []struct {
 		name           string
@@ -683,6 +691,7 @@ func TestCalendarDisconnectRevokesOnlyAnUnsharedGrant(t *testing.T) {
 // local_only then deletes it without asking Google. One Google calls
 // invalid is revoked already.
 func TestCalendarDisconnectWhenGoogleDoesNotRevoke(t *testing.T) {
+	t.Parallel()
 	srv, got := fakeGoogle(t)
 	tb := newTestBridge(t, "")
 	useGoogleServer(tb, srv)
@@ -718,6 +727,7 @@ func TestCalendarDisconnectWhenGoogleDoesNotRevoke(t *testing.T) {
 // brain's last sign-in error with the token, and one whose brain settings
 // cannot be cleared says so rather than "disconnected".
 func TestCalendarDisconnectEndsWhatTheBrainShows(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root writes to read-only folders")
 	}
@@ -771,6 +781,7 @@ func TestCalendarDisconnectEndsWhatTheBrainShows(t *testing.T) {
 // more, unless another brain shares it. Signing in to the same account
 // again revokes nothing: the new token belongs to the same grant.
 func TestCalendarSwitchRevokesTheOldAccount(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, old string
 		shared    bool
@@ -833,6 +844,7 @@ func expiredCalendarToken(t *testing.T, tb *testBridge, refreshToken string) {
 // and the refresh token Google handed out with it, and keeps the fields an
 // older calendar tool's library wrote.
 func TestCalendarRefreshKeepsTheToken(t *testing.T) {
+	t.Parallel()
 	srv, got := fakeGoogle(t)
 	tb := newTestBridge(t, "")
 	useGoogleServer(tb, srv)
@@ -865,6 +877,7 @@ func TestCalendarRefreshKeepsTheToken(t *testing.T) {
 // works; one Google could not answer just now does not, nor one refusing
 // the OAuth client, which signing in again does not mend.
 func TestCalendarRevokedSignInAsksToReconnect(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, refreshToken string
 		want               string // in list_error
@@ -897,6 +910,8 @@ func TestCalendarRevokedSignInAsksToReconnect(t *testing.T) {
 // TestCalendarRefreshThatCannotBeSavedIsLogged: the refreshed access token
 // still lists the calendars, and the failed save is logged.
 func TestCalendarRefreshThatCannotBeSavedIsLogged(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	if os.Geteuid() == 0 {
 		t.Skip("root writes to read-only folders")
 	}
@@ -949,6 +964,7 @@ func signInCallback(t *testing.T, tb *testBridge, id string, ctx context.Context
 // reaches Google, so the sign-in finishes even when the browser's request
 // is gone by then.
 func TestCalendarSignInSurvivesTheBrowserLeaving(t *testing.T) {
+	t.Parallel()
 	srv, _ := fakeGoogle(t)
 	tb := newTestBridge(t, "")
 	useGoogleServer(tb, srv)
@@ -966,6 +982,7 @@ func TestCalendarSignInSurvivesTheBrowserLeaving(t *testing.T) {
 // gets no token, which a later brain of the same id would otherwise show as
 // connected.
 func TestCalendarSignInForARemovedBrain(t *testing.T) {
+	t.Parallel()
 	srv, _ := fakeGoogle(t)
 	tb := newTestBridge(t, "")
 	useGoogleServer(tb, srv)
@@ -992,6 +1009,7 @@ func TestCalendarSignInForARemovedBrain(t *testing.T) {
 // it replaced, and revokes nothing, so that the brain keeps the access it
 // had.
 func TestCalendarSignInThatCannotBeSaved(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root writes to read-only folders")
 	}
@@ -1045,6 +1063,7 @@ func TestCalendarSignInThatCannotBeSaved(t *testing.T) {
 // the address the dashboard was started on, also after http_listen was
 // changed for the next start.
 func TestCalendarRedirectIsTheAddressServed(t *testing.T) {
+	t.Parallel()
 	srv, _ := fakeGoogle(t)
 	tb := newTestBridge(t, "")
 	useGoogleServer(tb, srv)
@@ -1164,6 +1183,7 @@ func within(done <-chan struct{}, d time.Duration) bool {
 // so the brain was connected again, and, with no calendars chosen any
 // more, used its primary one. The disconnect now waits for the refresh.
 func TestRefreshDoesNotResurrectDisconnectedToken(t *testing.T) {
+	t.Parallel()
 	g := newGatedGoogle(t)
 	tb := gatedCalendarBrain(t, g, "you@example.com")
 
@@ -1223,6 +1243,7 @@ func TestRefreshDoesNotResurrectDisconnectedToken(t *testing.T) {
 // between, which the clearing then undid: the brain was signed in with no
 // calendars chosen, and used its primary one.
 func TestDisconnectClearsTheChosenCalendars(t *testing.T) {
+	t.Parallel()
 	for _, localOnly := range []bool{true, false} {
 		t.Run(fmt.Sprintf("local_only=%v", localOnly), func(t *testing.T) {
 			g := newGatedGoogle(t)
@@ -1248,6 +1269,7 @@ func TestDisconnectClearsTheChosenCalendars(t *testing.T) {
 // token: the second waits for the first and reads the token it saved.
 // Each asked Google before, and the last answer to be saved won.
 func TestConcurrentRefreshesPostOnce(t *testing.T) {
+	t.Parallel()
 	g := newGatedGoogle(t)
 	tb := gatedCalendarBrain(t, g, "you@example.com")
 
@@ -1294,6 +1316,7 @@ func TestConcurrentRefreshesPostOnce(t *testing.T) {
 // that waits for a refresh in progress gives up when its context ends,
 // and changes nothing, rather than hang with the refresh.
 func TestWaitingForTheTokenLockEndsWithCtx(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		call func(ctx context.Context, g *google.Auth) error
@@ -1355,6 +1378,7 @@ func TestWaitingForTheTokenLockEndsWithCtx(t *testing.T) {
 // overwritten by it: the refresh wrote the old account's token back over
 // the new one, which the brain's settings named.
 func TestSignInIsNotUndoneByARefresh(t *testing.T) {
+	t.Parallel()
 	g := newGatedGoogle(t)
 	tb := gatedCalendarBrain(t, g, "team@example.com")
 
@@ -1408,6 +1432,8 @@ func TestSignInIsNotUndoneByARefresh(t *testing.T) {
 // none itself, a Disconnect included: a file of that name may be one of
 // yours that something else uses.
 func TestLeftoverClientCopiesAreReported(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	// In place of a file's content: a FIFO, or a hard link or a symlink to
 	// a file outside the folder with the content that follows.
 	const fifo, hardLink, symlink = "\x00fifo", "\x00hard link to ", "\x00symlink to "

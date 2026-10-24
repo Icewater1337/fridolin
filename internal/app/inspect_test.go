@@ -22,6 +22,8 @@ import (
 // lists, every member for ["*"], and without an entry whom allowed_numbers
 // admits.
 func TestCheckShowsWhoIsHeardInGroups(t *testing.T) {
+	// Serial: check reads the process's HOME and environment, and redirects
+	// its standard logger.
 	const group = "120363000000000000@g.us"
 	cases := []struct {
 		name   string
@@ -63,6 +65,8 @@ func TestCheckShowsWhoIsHeardInGroups(t *testing.T) {
 }
 
 func TestCheckRedact(t *testing.T) {
+	// Serial: check reads the process's HOME and environment, and redirects
+	// its standard logger.
 	// check's output goes into public bug reports. With --redact it shows
 	// no configured number, JID or home folder, in the report, the log
 	// lines of loading the config and the sandbox profile alike; without
@@ -211,6 +215,7 @@ func TestCheckRedact(t *testing.T) {
 }
 
 func TestRedactorText(t *testing.T) {
+	t.Parallel()
 	// Made-up numbers outside the placeholders' country carry
 	// personal-data:ignore.
 	r := newRedactor("/srv/first.last")
@@ -251,6 +256,8 @@ func TestRedactorText(t *testing.T) {
 }
 
 func TestCheckDisabledDashboardAndUnknownSandboxBrain(t *testing.T) {
+	// Serial: check reads the process's HOME and environment, and redirects
+	// its standard logger.
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	path := writeConfig(t, `{"http_listen":"off","claude_path":"`+fakeClaudeEnv(t, 0)+`","data_dir":"`+home+`/data"}`)
@@ -265,6 +272,8 @@ func TestCheckDisabledDashboardAndUnknownSandboxBrain(t *testing.T) {
 }
 
 func TestCheckUnavailableBrainsDoesNotSuggestEmptySetup(t *testing.T) {
+	// Serial: check reads the process's HOME and environment, and redirects
+	// its standard logger.
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	cfg := resolvedSettings(t, &config.File{ClaudePath: fakeClaudeEnv(t, 0), DataDir: filepath.Join(home, "data"), BrainDirs: []config.BrainRef{{Path: filepath.Join(home, "missing")}}})

@@ -59,10 +59,10 @@ jobs:
   # A failure opens an issue labelled ci-macos-nightly, "macOS nightly:
   # TestX failing" (scripts/ci-report.sh), which a later run that passes
   # closes. Its own label: a push to main, which runs only part of the
-  # macOS tests, must not close it. On main of this repository only.
+  # macOS tests, must not close it. On main, never in a fork.
   report:
     needs: [go-macos-full]
-    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && github.repository == 'Icewater1337/fridolin' }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && !github.event.repository.fork }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

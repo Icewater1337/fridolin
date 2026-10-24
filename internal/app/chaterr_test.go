@@ -15,10 +15,11 @@ import (
 // A run that fails tells the chat in a short message; what the CLI wrote
 // to stderr goes to the log and the dashboard only.
 func TestFailedRunPostsNoRawError(t *testing.T) {
+	t.Parallel()
 	for _, chatJID := range []string{testDMChat, testGroup} {
 		t.Run(chatJID, func(t *testing.T) {
 			tb, br := newMainBridge(t, "")
-			t.Setenv("FRIDOLIN_FAKE_STDERR_BYTES", "10")
+			setenv(t, "FRIDOLIN_FAKE_STDERR_BYTES", "10")
 			tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: chatJID, Sender: "15551234567", Text: "@claude fail", Source: chat.SourceWhatsApp}})
 			testutil.WaitFor(t, 10*time.Second, "the error notice", func() bool { return len(tb.sentTo(chatJID)) > 0 })
 			sent := tb.sentTo(chatJID)

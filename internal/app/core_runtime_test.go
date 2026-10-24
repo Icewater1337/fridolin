@@ -34,7 +34,7 @@ type runningCore struct {
 func newRunningCore(t *testing.T, extra string, opts Options) (*runningCore, error) {
 	t.Helper()
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	path := writeConfig(t, `{"data_dir": "`+home+`/data", "claude_path": "`+fakeClaudeEnv(t, 10)+`",
 		"allowed_numbers": ["15551234567"], "debounce": {"quiet_ms": 0}`+extra+`}`)
 	return startCoreAt(t, home, path, opts)
@@ -42,7 +42,7 @@ func newRunningCore(t *testing.T, extra string, opts Options) (*runningCore, err
 
 func startCoreAt(t *testing.T, home, path string, opts Options) (*runningCore, error) {
 	t.Helper()
-	cfgs, err := OpenConfigStore(path)
+	cfgs, err := openConfigStore(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,6 +77,7 @@ func waitUntil(t *testing.T, what string, cond func() bool) {
 // dashboard.require_token is off), wants a token on /send, does not serve
 // the brain API, and records who changed something in the audit log.
 func TestTailnetServesTheDashboardWithTheToken(t *testing.T) {
+	t.Parallel()
 	fake := &tailnet.Fake{
 		Status: tailnet.Status{DNSName: "fridolin-core.example.ts.net", IPs: []string{"100.64.0.1"}, MagicDNS: true},
 		Who:    tailnet.Identity{LoginName: "you@example.com", Node: "laptop"},
@@ -158,6 +159,7 @@ func TestTailnetServesTheDashboardWithTheToken(t *testing.T) {
 
 // Without the tailnet, the node port binds as the HTTP server does.
 func TestNodeListenerWithoutTailnet(t *testing.T) {
+	t.Parallel()
 	c, err := newRunningCore(t, "", Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -173,6 +175,7 @@ func TestNodeListenerWithoutTailnet(t *testing.T) {
 // at nodes.listen's port, and not on this machine's interfaces; doctor's
 // nodes-port check then reads the tailnet's state instead of dialing.
 func TestNodesPortListensOnTheTailnet(t *testing.T) {
+	t.Parallel()
 	fake := &tailnet.Fake{
 		Status: tailnet.Status{DNSName: "fridolin-core.example.ts.net.", IPs: []string{"100.64.0.1"}, MagicDNS: true},
 		Who:    tailnet.Identity{LoginName: "you@example.com", Node: "laptop"},
@@ -214,6 +217,7 @@ func readLease(t *testing.T, st cloud.ObjectStore) lease.Record {
 // its channels and refuses to send once another device took it, keeps
 // the dashboard up and says so, and refuses to start again afterwards.
 func TestLeaseLostStopsTheChannels(t *testing.T) {
+	t.Parallel()
 	st := &cloud.Dir{Root: t.TempDir()}
 	c, err := newRunningCore(t, leaseConfig, Options{LeaseStore: st, LeaseSettle: time.Millisecond})
 	if err != nil {
@@ -271,6 +275,7 @@ func TestLeaseLostStopsTheChannels(t *testing.T) {
 // A core that finds the lease held by another live device refuses to
 // start; a clean stop releases it, so the next start takes it at once.
 func TestLeaseRefusedAndReleased(t *testing.T) {
+	t.Parallel()
 	st := &cloud.Dir{Root: t.TempDir()}
 	other := lease.Record{DeviceID: "0123456789abcdef0123456789abcdef", Hostname: "core-b", StartedAt: time.Now().UTC(), RenewedAt: time.Now().UTC()}
 	data, _ := json.Marshal(other)

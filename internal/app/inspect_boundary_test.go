@@ -11,6 +11,7 @@ import (
 )
 
 func TestInspectPreservesAcceptedAliasesAndFileMetadata(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	brain := filepath.Join(tb.home, "candidate", "nested")
 	if err := os.MkdirAll(brain, 0o700); err != nil {

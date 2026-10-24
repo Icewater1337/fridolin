@@ -7,22 +7,34 @@ import { icon } from './icons.js';
 import { btn } from './buttons.js';
 import { pill, badge, timeAgo } from './common.js';
 
+/** @import { BrainRuntime, RunInfo } from '../../types/api.js' */
+
+/**
+ * How a brain's last run ended, as a pill.
+ * @param {RunInfo | null | undefined} last
+ */
 export function outcomePill(last) {
   if (!last) return pill('No runs yet', 'neutral');
+  /** @type {Record<string, [string, string]>} */
   const map = { ok: ['Replied', 'ok'], error: ['Failed', 'bad'], interrupted: ['Interrupted', 'warn'], question: ['Asked a question', 'info'] };
   const [label, kind] = map[last.outcome] || [last.outcome || 'Unknown', 'neutral'];
   return pill(label, kind, { title: last.error || '' });
 }
 
+/**
+ * A brain's status (ok, or its worst issue's kind) as a pill.
+ * @param {string} status
+ */
 export function brainStatusPill(status) {
   if (status === 'ok') return pill('Active', 'ok');
-  const kind = { drift: 'warn', missing: 'bad', invalid: 'bad', unapproved: 'bad' }[status] || 'neutral';
+  const kind = /** @type {Record<string, string>} */ ({ drift: 'warn', missing: 'bad', invalid: 'bad', unapproved: 'bad' })[status] || 'neutral';
   return pill(issueLabel(status, { short: true }), kind);
 }
 
 /**
  * What a running brain is doing, from its runtime ({running, queue, last}):
  * working or idle, how many messages wait, and how the last run ended.
+ * @param {Pick<BrainRuntime, 'running' | 'queue' | 'last'>} rt
  */
 export function runtimeSummary(rt) {
   const queued = (rt.queue || []).length;

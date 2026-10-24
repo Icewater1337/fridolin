@@ -15,20 +15,43 @@ import { openDialog, confirmDialog } from '../components/dialog.js';
 import { field, textInput, toggle, select, linesArea, linesOf, nextId } from '../components/fields.js';
 import { pill, callout, timeAgo, mono, empty, pageHeader, spinner, loading } from '../components/common.js';
 import { googleClientSetup } from '../components/calendar.js';
+import { errorMessage } from '../lib/errors.js';
+
+/** @import { PageModule } from '../app/page.js' */
+/** @import { BackupBrainStatus, BackupClientStatus, BackupConnectJob, BackupJob, BackupResult, BackupSettings, BackupStatus, RcloneStatus, RestoreResult } from '../../types/api.js' */
+
+/**
+ * What the status card shows, from the status.
+ * @typedef {object} StatusView
+ * @property {Partial<BackupSettings>} settings
+ * @property {string} next
+ * @property {RcloneStatus} rclone
+ * @property {boolean} running
+ * @property {boolean} shared
+ * @property {string} folder
+ * @property {BackupConnectJob | null} connect
+ * @property {BackupClientStatus | null} client
+ * @property {string} redirect
+ * @property {{enabled: boolean, last: BackupResult | null}[]} brains
+ * @property {BackupResult | null} bridge
+ */
 
 // A version folder is named after its run's time: in UTC with a Z, or in
 // the bridge's local time for folders made before.
+/** @param {string} v */
 function versionDate(v) {
   const m = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})(Z?)$/.exec(v || '');
   if (!m) return null;
+  /** @type {[number, number, number, number, number, number]} */
   const parts = [+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]];
   return m[7] ? new Date(Date.UTC(...parts)) : new Date(...parts);
 }
 
-export default {
+export default /** @satisfies {PageModule} */ ({
   title: 'Backup',
   render(root, ctx) {
     const statusRes = resource('/api/backup/status');
+    /** @type {BackupStatus | null} */
     let backupStatus = null;
     let mode = '';
     const regions = {};
@@ -101,6 +124,7 @@ export default {
     }
 
     // ── rclone missing ──
+    /** @param {Partial<RcloneStatus>} rc */
     function renderRclone(rc) {
       if (rc.error) {
         // backup.rclone_path names an rclone that cannot run; the bridge
@@ -127,6 +151,7 @@ export default {
     // ── connecting ──
     // The bridge signs in to Google itself, with your own OAuth client, and
     // Google sends the browser back to this page.
+    /** @param {boolean} reconnect */
     async function startConnect(reconnect) {
       const r = await post('/api/backup/connect', reconnect ? { reconnect: true } : undefined);
       if (r && r.auth_url) window.location.assign(r.auth_url);
@@ -134,6 +159,10 @@ export default {
     }
 
     // Which Google client the sign-in uses, or the steps to add one.
+    /**
+     * @param {BackupClientStatus | null} client
+     * @param {string} redirect
+     */
     function clientBlock(client, redirect) {
       if (!client) {
         return h('div.stack',
@@ -155,6 +184,7 @@ export default {
     }
 
     // A sign-in on its way: waiting for Google, or setting up the folder.
+    /** @param {BackupConnectJob} c */
     function renderSignIn(c) {
       if (c.step === 'folder') {
         return h('div.stack', h('p', spinner(), ' Setting up the folder ', h('strong', 'Fridolin'), ' in your Google Drive…'));
@@ -164,6 +194,7 @@ export default {
         c.auth_url ? h('p', h('a', { href: c.auth_url }, 'Open Google’s sign-in', icon('external'))) : null);
     }
 
+    /** @param {{connect: BackupConnectJob | null, client: BackupClientStatus | null, redirect: string}} shown */
     function renderConnect({ connect: c, client, redirect }) {
       const privacy = h('ul.facts',
         h('li', icon('shield'), h('span', 'The bridge asks only for access to files it creates (Google’s “drive.file” permission), with your own Google client. It cannot see anything else in your Drive.')),
@@ -193,6 +224,7 @@ export default {
     // ── connected: status ──
     // The link through rclone's shared client, which Google retires during
     // 2026: the switch to your own client, and how it goes.
+    /** @param {Pick<StatusView, 'shared' | 'connect' | 'client' | 'redirect' | 'running'>} view */
     function renderSwitch({ shared, connect: c, client, redirect, running }) {
       const switching = c && c.reconnect;
       if (switching && c.state === 'running') return callout('info', 'Switching to your own Google client', renderSignIn(c));
@@ -211,10 +243,11 @@ export default {
         })));
     }
 
+    /** @param {StatusView} view */
     function renderStatus({ settings: s, next, rclone, running, brains, bridge, shared, folder, connect, client, redirect }) {
       const anyEnabled = brains.some((b) => b.enabled);
       const results = [...brains.map((b) => b.last), bridge].filter(Boolean);
-      const lastOK = results.filter((r) => r.ok).sort((a, b) => new Date(b.finished) - new Date(a.finished))[0];
+      const lastOK = results.filter((r) => r.ok).sort((a, b) => new Date(b.finished).getTime() - new Date(a.finished).getTime())[0];
       return h('div.card.backup-status',
         h('div.card-head',
           h('div.card-title', icon('backup'), h('h2', 'Google Drive')),
@@ -250,6 +283,7 @@ export default {
     }
 
     // ── job progress ──
+    /** @param {{job: BackupJob, names: string[][]} | null} shown */
     function renderJob(shown) {
       if (!shown) return null;
       const { job: j } = shown;
@@ -278,6 +312,7 @@ export default {
     }
 
     // ── schedule ──
+    /** @param {{settings: Partial<BackupSettings>, inc: boolean}} data */
     function buildSchedule({ settings: s, inc }) {
       const enabled = toggle({ checked: !!s.enabled, label: 'Back up every day' });
       const time = h('input', { type: 'time', id: nextId('t'), value: s.daily_at || '03:30', step: 60, required: true });
@@ -329,13 +364,15 @@ export default {
         h('thead', h('tr', h('th', 'Brain'), h('th', 'Backup'), h('th', 'Last result'), h('th.right', ''))),
         regions.brainRows)));
       const running = !!st.job;
+      /** @type {({brain: BackupBrainStatus, running: boolean} | {bridge: BackupResult | null, inc: boolean})[]} */
       const rows = [
         ...brains.map((b) => ({ brain: b, running })),
         { bridge: st.bridge || null, inc: st.include_bridge_config !== false },
       ];
-      reconcile(regions.brainRows, rows, (r) => (r.brain ? `brain:${r.brain.id}` : 'bridge'), (r) => (r.brain ? brainRow(r) : bridgeRow(r)));
+      reconcile(regions.brainRows, rows, (r) => ('brain' in r ? `brain:${r.brain.id}` : 'bridge'), (r) => ('brain' in r ? brainRow(r) : bridgeRow(r)));
     }
 
+    /** @param {{brain: BackupBrainStatus, running: boolean}} row */
     function brainRow({ brain: b, running }) {
       const sw = toggle({
         checked: b.enabled,
@@ -348,7 +385,7 @@ export default {
             await refresh();
           } catch (e) {
             input.checked = !v;
-            toast(e.message);
+            toast(errorMessage(e));
           } finally {
             input.disabled = false;
           }
@@ -366,6 +403,7 @@ export default {
           })));
     }
 
+    /** @param {{bridge: BackupResult | null, inc: boolean}} row */
     function bridgeRow({ bridge, inc }) {
       return h('tr.muted-row',
         h('td', h('div', h('strong', 'Bridge settings')), h('div.small.muted', 'config.json and approved brain.json files')),
@@ -374,6 +412,11 @@ export default {
         h('td'));
     }
 
+    /**
+     * @param {BackupResult | null} r
+     * @param {BackupBrainStatus} [b]
+     * @param {boolean} [running]
+     */
     function resultCell(r, b, running) {
       if (!r) return h('span.muted', 'Not backed up yet');
       let state;
@@ -393,6 +436,7 @@ export default {
 
     // A run refused as a mass deletion is only mirrored when the owner says
     // so: it removes the missing files from the latest copy in Drive.
+    /** @param {BackupBrainStatus} b */
     async function mirrorDeletion(b) {
       const name = b.name || b.id;
       const days = (backupStatus.settings || {}).keep_versions_days ?? 30;
@@ -410,6 +454,7 @@ export default {
       await refresh();
     }
 
+    /** @param {BackupBrainStatus} b */
     async function editExcludes(b) {
       const ta = linesArea(b.exclude || [], { rows: 8, placeholder: 'node_modules/\n*.log' });
       // Left out of every brain folder by the bridge itself (backupSecretExcludes).
@@ -435,6 +480,7 @@ export default {
     // ── restore ──
     // How the last restore went; a failed one would otherwise look just
     // like a finished one once its progress card is gone.
+    /** @param {RestoreResult | null} r */
     function renderLastRestore(r) {
       if (!r) return null;
       const what = h('span', r.version === 'current' ? 'the latest copy' : `version ${r.version}`, ' of ', mono(r.brain), ' into ', mono(r.target));
@@ -448,6 +494,7 @@ export default {
     // Built once per connected layout, so a brain chosen and a folder typed
     // stay while the status refreshes; setBrains() only updates the choice.
     function restoreForm() {
+      /** @type {string[] | null} */
       let versions = null;
       let version = 'current';
       const brainSel = select([['', 'Choose a brain…'], ['__other', 'Another id…']], '');
@@ -472,7 +519,7 @@ export default {
           paintVersions();
         } catch (e) {
           if (ctx.dead) return;
-          mount(versionsBox, callout('bad', 'Could not list the versions', e.message));
+          mount(versionsBox, callout('bad', 'Could not list the versions', errorMessage(e)));
         }
       };
       const paintVersions = () => {
@@ -536,10 +583,10 @@ export default {
           await refresh();
         });
       });
-      form.setBrains = (brains) => {
-        syncOptions(brainSel, [['', 'Choose a brain…'], ...brains.map((b) => [b.id, brainLabel(b)]), ['__other', 'Another id…']]);
+      form.setBrains = (/** @type {BackupBrainStatus[]} */ brains) => {
+        syncOptions(brainSel, [['', 'Choose a brain…'], ...brains.map((b) => /** @type {[string, string]} */ ([b.id, brainLabel(b)])), ['__other', 'Another id…']]);
       };
       return form;
     }
   },
-};
+});

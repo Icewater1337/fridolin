@@ -1,0 +1,12 @@
+// The tests, with ../tsconfig.json's options: they run under node with
+// the fake DOM (fake-dom.js), which fake-dom-globals.d.ts describes where
+// it differs from a browser's. The modules they import are checked here
+// too, against that DOM; ../tsconfig.json checks them against a browser's.
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    // Found in npx's cache: make typecheck-web passes --typeRoots.
+    "types": ["node"]
+  },
+  "include": ["**/*.js", "**/*.d.ts", "../assets/**/*.js", "../types/**/*.d.ts"]
+}

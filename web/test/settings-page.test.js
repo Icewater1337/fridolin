@@ -7,12 +7,18 @@ import { createPage } from '../assets/app/page.js';
 import { configResource } from '../assets/app/resources.js';
 import page from '../assets/pages/settings.js';
 
+/**
+ * opts.params and opts.focusAt go to the page's ctx; opts.config is the
+ * config.json the bridge holds at first.
+ * @param {import('node:test').TestContext} t
+ * @param {Pick<import('../assets/app/page.js').PageHooks, 'params' | 'focusAt'> & {config?: Record<string, unknown>}} [opts]
+ */
 async function openPage(t, { params, focusAt, config = { claude_path: 'claude', brain_model: '', allowed_numbers: ['15551234567'] } } = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
   const scrolled = [];
-  globalThis.window = { scrollTo: (to) => scrolled.push(to) };
+  Object.assign(globalThis, { window: { scrollTo: (to) => scrolled.push(to) } });
   t.after(() => { delete globalThis.window; });
   const bridge = { etag: 'e1', config, puts: [], conflicts: 0 };
   serve(t, (path, init) => {
@@ -39,9 +45,9 @@ async function openPage(t, { params, focusAt, config = { claude_path: 'claude', 
   await settle();
   const inputFor = (label) => {
     const l = root.querySelectorAll('label').find((x) => x.textContent === label);
-    return document.getElementById(l.getAttribute('for'));
+    return /** @type {FakeElement} */ (document.getElementById(l.getAttribute('for')));
   };
-  const note = () => root.querySelector('.live-form').firstChild;
+  const note = () => /** @type {HTMLElement} */ (root.querySelector('.live-form').firstChild);
   const elsewhere = async (change) => {
     bridge.config = { ...bridge.config, ...change };
     bridge.etag = `${bridge.etag}*`;

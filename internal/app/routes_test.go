@@ -320,6 +320,7 @@ var handlerPatternRE = regexp.MustCompile(`\.Handle(?:Func)?\("((?:[A-Z]+ )?/[^"
 // same pattern registered again on another mux would answer there without
 // that mux's guards.
 func TestRouteInventoryIsComplete(t *testing.T) {
+	t.Parallel()
 	root := repoDir
 	for !fsx.Exists(filepath.Join(root, "go.mod")) {
 		if filepath.Dir(root) == root {
@@ -409,6 +410,7 @@ var reachesOutside = map[string]bool{
 // TestRouteInventoryIsComplete fails when a pattern is registered on a
 // second mux as well, outside them.
 func TestRouteInventoryGuards(t *testing.T) {
+	t.Parallel()
 	h, _, _ := goldenBridge(t)
 	api, ok := h.b.apiMux().(*http.ServeMux)
 	if !ok {

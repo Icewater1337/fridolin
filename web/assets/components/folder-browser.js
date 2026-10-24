@@ -7,12 +7,20 @@ import { icon } from './icons.js';
 import { btn } from './buttons.js';
 import { toggle, textInput } from './fields.js';
 import { badge, spinner } from './common.js';
+import { errorMessage } from '../lib/errors.js';
 
 /**
  * folderBrowser({start, onPick(path, {create}), pickLabel, newLabel, signal})
  * returns an element. onPick receives an absolute path; create is true when
  * the folder does not exist yet (typed into "New folder"). signal (the page's)
- * stops loading when it aborts.
+ * stops loading when it aborts. el.reload() loads the folder shown again.
+ * @param {object} options
+ * @param {string} [options.start]
+ * @param {(path: string, how: {create: boolean}) => void} options.onPick
+ * @param {string} [options.pickLabel]
+ * @param {string} [options.newLabel]
+ * @param {string} [options.newHint]
+ * @param {AbortSignal} [options.signal]
  */
 export function folderBrowser({ start = '', onPick, pickLabel = 'Use this folder', newLabel = 'Use new folder', newHint = '', signal }) {
   let path = start;
@@ -75,7 +83,7 @@ export function folderBrowser({ start = '', onPick, pickLabel = 'Use this folder
     } catch (e) {
       if (loading !== mine || mine.signal.aborted) return;
       err.hidden = false;
-      err.textContent = e.message;
+      err.textContent = errorMessage(e);
       if (!data) mount(listEl);
       else paint();
     }
@@ -85,6 +93,7 @@ export function folderBrowser({ start = '', onPick, pickLabel = 'Use this folder
     const home = data.home.replace(/\/+$/, '');
     const rel = data.path === home ? '' : data.path.slice(home.length + 1);
     const segs = rel ? rel.split('/') : [];
+    /** @type {HTMLElement[]} */
     const items = [h('button.crumb', { type: 'button', onclick: () => load(home) }, icon('overview'), 'Home')];
     segs.forEach((s, i) => {
       const target = `${home}/${segs.slice(0, i + 1).join('/')}`;
@@ -114,6 +123,5 @@ export function folderBrowser({ start = '', onPick, pickLabel = 'Use this folder
   }
 
   load(path);
-  el.reload = () => load(path);
-  return el;
+  return Object.assign(el, { reload: () => load(path) });
 }

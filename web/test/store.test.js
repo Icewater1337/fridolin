@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { stubFetch } from './stub-fetch.js';
 import { createStore, store, setStatus, setRestartRequired, pollStatus, rememberName, chatName, loadGroups } from '../assets/app/store.js';
 
+// The tests give only the fields of the status that they read.
+/** @import { Status } from '../types/api.js' */
+
 test('subscribe calls back now and on every change of what it selects', () => {
   const s = createStore({ a: 1, b: 1 });
   const seen = [];
@@ -35,7 +38,7 @@ test('a failing subscriber does not stop the others', () => {
 });
 
 test('pending restarts mirror what the bridge says', () => {
-  setStatus({ restart_required: ['log_level'] });
+  setStatus(/** @type {Status} */ ({ restart_required: ['log_level'] }));
   setRestartRequired(['http_listen']);
   assert.deepEqual(store.get().status.restart_required, ['http_listen'], 'replaced, not merged with the old list');
   setRestartRequired([]);
@@ -46,6 +49,7 @@ test('pending restarts mirror what the bridge says', () => {
 
 test('a status poll from before a save cannot hide its restart', async (t) => {
   const tick = () => new Promise((r) => setImmediate(r));
+  /** @type {[string, boolean][]} */
   const cases = [
     ['its answer is still on the way', false],
     ['its answer is in, not yet in the store', true],

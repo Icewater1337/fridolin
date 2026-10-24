@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -41,7 +40,7 @@ func (b *App) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 		DevMode:       b.dev != nil,
 		Platform:      runtime.GOOS,
 		WhatsApp:      httpapi.WhatsAppStatus{LinkState: wa, QRAvailable: wa.QRCode != ""},
-		Claude:        ClaudeInfo(cfg.ClaudePath, cfg.ChildEnvPassthrough),
+		Claude:        b.claudeInfo(cfg),
 		AgentProvider: string(cfg.AgentProvider),
 		Sandbox:       httpapi.SandboxStatus{Enabled: cfg.Sandbox.Enabled, Supported: config.SandboxSupported(ConfigGOOS())},
 		Issues:        nonNil(b.brainIssues(cfg)),
@@ -54,12 +53,12 @@ func (b *App) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 		Core:            b.coreStatus(),
 	}
 	if cfg.AgentProvider == "codex" {
-		st := CodexInfo(cfg.CodexPath, cfg.ChildEnvPassthrough)
+		st := b.codexInfo(cfg)
 		resp.Codex = &st
 		if !st.Found {
 			resp.Warnings = append(resp.Warnings, "Codex CLI was not found. Set its path under Settings → AI mode.")
 		}
-		if os.Getenv("CODEX_API_KEY") == "" {
+		if getenv(b.env, "CODEX_API_KEY") == "" {
 			for _, br := range b.brainMgr.Brains() {
 				if !fsx.Exists(filepath.Join(brainStateOf(cfg.DataDir, br.ID()).codex, "auth.json")) {
 					resp.Warnings = append(resp.Warnings, "Sign Codex in for brain "+br.ID()+" from Terminal: "+codexLoginHint(cfg.DataDir, br.ID()))
@@ -94,7 +93,7 @@ func (b *App) statusSnapshot(ctx context.Context) httpapi.StatusResponse {
 		} else if w := sandboxProfileWarning(b.brainMgr); w != "" {
 			resp.Warnings = append(resp.Warnings, w)
 		}
-		if cfg.AgentProvider != "codex" && !brainLoginInEnv() {
+		if cfg.AgentProvider != "codex" && !brainLoginInEnv(b.env) {
 			resp.Warnings = append(resp.Warnings, "Sandboxed brains cannot read your keychain, where the login you made with `claude` lives, and the bridge's environment has no CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY for them either: they fail with \"Not logged in\" unless their own settings log them in. Run `claude setup-token` and set the token in the bridge's environment (docs/CONFIGURATION.md, \"Where to set them\").")
 		}
 	}
@@ -175,10 +174,10 @@ var brainLoginVars = []string{
 	"CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY",
 }
 
-// brainLoginInEnv reports whether the bridge's environment holds one of
-// brainLoginVars.
-func brainLoginInEnv() bool {
-	return slices.ContainsFunc(brainLoginVars, func(name string) bool { return os.Getenv(name) != "" })
+// brainLoginInEnv reports whether the bridge's environment env holds one
+// of brainLoginVars.
+func brainLoginInEnv(env Environment) bool {
+	return slices.ContainsFunc(brainLoginVars, func(name string) bool { return getenv(env, name) != "" })
 }
 
 // sandboxProfileWarning names the brains whose profile cannot be built, or

@@ -38,6 +38,7 @@ var workBackup = manifest.Backup{Enabled: true,
 // the brain chooses, and only when the manifest the bridge runs the brain
 // with chooses them too.
 func TestNodeOnlyRouting(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	disk := writeBrainJSON(t, dir, "personal", workBackup)
 	b := brainBackupOf("personal", dir, &disk, false)
@@ -103,6 +104,7 @@ func excludedBy(rel string, patterns []string) bool {
 }
 
 func TestTargetDue(t *testing.T) {
+	t.Parallel()
 	tg := config.VaultTarget{Name: "nas", NightlyAt: "03:00", Hourly: true}
 	now := time.Date(2026, 10, 21, 4, 0, 0, 0, time.Local)
 	h, n, c, r := targetDue(tg, targetStatus{}, now)
@@ -154,6 +156,7 @@ func (s *lockedSecrets) Has(name string) (bool, error) { _, err := s.Get(name); 
 // does not choose the target stays out; the restore drill passes; and
 // the folder is a restic repository on its own, as on another machine.
 func TestNodeTargetEndToEnd(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs restic")
 	}
@@ -182,7 +185,7 @@ func TestNodeTargetEndToEnd(t *testing.T) {
 	brains := func() []vaultBrain {
 		return []vaultBrain{{ID: "personal", Dir: personal, Manifest: mp}, {ID: "other", Dir: other, Manifest: mo}}
 	}
-	v := newVaultService(cfgs, false, logger, brains, nil)
+	v := newVaultService(cfgs, envOf(t), false, logger, brains, nil)
 
 	// The node: a backup disk it lends.
 	svc, err := nodes.New(nodes.Options{Dir: filepath.Join(home, "nodes"), Logf: t.Logf})

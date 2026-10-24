@@ -19,6 +19,7 @@ import (
 // golden names the files, not their contents: a change to the dashboard's
 // code changes it only when a file of the page comes or goes.
 func TestGoldenAssetInventory(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	var sb strings.Builder
 	check := func(urlPath string, want []byte) {

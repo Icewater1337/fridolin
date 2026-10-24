@@ -12,6 +12,10 @@ import { btn } from '../components/buttons.js';
 import { empty, pageHeader, spinner, timeAgo } from '../components/common.js';
 import { outcomeBadge, riskBadge, threadEl } from '../components/policy.js';
 
+/** @import { PageModule } from '../app/page.js' */
+/** @import { AuditEntry } from '../../types/api.js' */
+
+/** @type {[string, string][]} */
 const KINDS = [
   ['', 'Every kind'],
   ['run_start', 'Run started'], ['run_end', 'Run ended'], ['run_refused', 'Run refused'],
@@ -27,6 +31,7 @@ const KINDS = [
 ];
 const KIND_LABEL = Object.fromEntries(KINDS);
 
+/** @param {AuditEntry} e */
 function lineRow(e) {
   return h('tr',
     h('td', timeAgo(e.ts)),
@@ -38,7 +43,7 @@ function lineRow(e) {
     h('td', outcomeBadge(e.outcome), e.duration_ms ? h('div.muted.small', fmtDuration(e.duration_ms / 1000)) : null));
 }
 
-export default {
+export default /** @satisfies {PageModule} */ ({
   title: 'Audit',
   render(root, ctx) {
     const filter = { kind: '', brain: '', q: '', run: ctx.params.run || '' };
@@ -55,7 +60,7 @@ export default {
 
     ctx.watch(store, (s) => s.status, (s) => {
       if (!s) return;
-      syncOptions(brainSel, [['', 'All brains'], ...(s.brains || []).map((b) => [b.id, brainLabel(b)])], filter.brain);
+      syncOptions(brainSel, [['', 'All brains'], ...(s.brains || []).map((b) => /** @type {[string, string]} */ ([b.id, brainLabel(b)]))], filter.brain);
     });
 
     const follow = () => {
@@ -85,4 +90,4 @@ export default {
       box);
     follow();
   },
-};
+});

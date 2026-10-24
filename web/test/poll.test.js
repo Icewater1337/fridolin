@@ -11,6 +11,10 @@ const settle = () => new Promise((r) => setImmediate(r));
 // AbortError when its signal fires, the way fetch does.
 function controlledRuns() {
   const runs = [];
+  /**
+   * @param {AbortSignal} signal
+   * @returns {Promise<void>}
+   */
   const fn = (signal) => new Promise((resolve, reject) => {
     const run = { signal, resolve, painted: false };
     run.finish = () => { run.painted = true; resolve(); };

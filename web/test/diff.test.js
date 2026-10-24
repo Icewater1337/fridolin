@@ -8,6 +8,7 @@ test('sortKeys sorts nested object keys and keeps array order', () => {
 });
 
 test('fieldDiff', async (t) => {
+  /** @type {[string, object, object, {path: string, a: string, b: string}[]][]} */
   const cases = [
     ['equal', { name: 'A' }, { name: 'A' }, []],
     ['changed value', { name: 'A' }, { name: 'B' }, [{ path: 'name', a: '"A"', b: '"B"' }]],
@@ -26,6 +27,7 @@ test('fieldDiff', async (t) => {
 
 test('lineDiff', async (t) => {
   const marks = (side) => side.map((l) => (l.changed ? `*${l.text}` : l.text));
+  /** @type {[string, string, string, string[], string[]][]} */
   const cases = [
     ['same', 'a\nb', 'a\nb', ['a', 'b'], ['a', 'b']],
     ['changed middle line', 'a\nb\nc', 'a\nx\nc', ['a', '*b', 'c'], ['a', '*x', 'c']],

@@ -18,8 +18,9 @@ import (
 // The bridge sweeps the hand-offs when it starts: a code that expired
 // while it was stopped is gone, one still valid stays for its script.
 func TestBridgeStartRemovesExpiredOTPHandoffs(t *testing.T) {
+	t.Parallel()
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	dir := filepath.Join(home, "data", "otp")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -31,7 +32,7 @@ func TestBridgeStartRemovesExpiredOTPHandoffs(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	cfgs, err := OpenConfigStore(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data"}`))
+	cfgs, err := openConfigStore(t, writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,6 +54,7 @@ func TestBridgeStartRemovesExpiredOTPHandoffs(t *testing.T) {
 // A code the brain asked for in its own words names no request, but says
 // when the brain asked.
 func TestHandOffOfACodeTheBrainAskedFor(t *testing.T) {
+	t.Parallel()
 	tb, br := newMainBridge(t, "")
 	asked := time.Now().Add(-2 * time.Minute).Truncate(time.Second)
 	br.AppendEntry(history.Entry{TS: asked.Format(time.RFC3339), Chat: testDMChat, From: "main", Text: "🔐 Please send me the verification code", Type: history.Out})

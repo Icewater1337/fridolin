@@ -43,7 +43,7 @@ func protectDataDir(cfg *config.Settings) {
 	// check.
 	dataDir := AbsPath(cfg.DataDir)
 	dbDir := AbsPath(filepath.Dir(cfg.DBPath))
-	home := HomeDir()
+	home := cfg.Home
 	homeOrAbove := func(dir string) bool {
 		return home != "" && fsx.Within(fsx.Canonical(home), fsx.Canonical(dir))
 	}

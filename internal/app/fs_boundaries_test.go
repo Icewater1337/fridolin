@@ -12,6 +12,7 @@ import (
 )
 
 func TestScaffoldRefusesEscapingParentSymlinks(t *testing.T) {
+	t.Parallel()
 	for _, sub := range []string{"skills", "memories/people", "prompts"} {
 		t.Run(sub, func(t *testing.T) {
 			dir, outside := t.TempDir(), t.TempDir()
@@ -41,6 +42,7 @@ func TestScaffoldRefusesEscapingParentSymlinks(t *testing.T) {
 }
 
 func TestScaffoldKeepsInternalParentSymlinks(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	for _, sub := range []string{"skills", "memories", "prompts"} {
 		if err := os.Mkdir(filepath.Join(dir, "local-"+sub), 0o700); err != nil {
@@ -69,6 +71,7 @@ func TestScaffoldKeepsInternalParentSymlinks(t *testing.T) {
 }
 
 func TestAddBrainRefusesEscapingScaffold(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	dir, outside := filepath.Join(tb.home, "candidate"), t.TempDir()
 	if err := os.Mkdir(dir, 0o700); err != nil {
@@ -90,6 +93,7 @@ func TestAddBrainRefusesEscapingScaffold(t *testing.T) {
 }
 
 func TestFSListKeepsMetadataInsideHome(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	outside := t.TempDir()
 	for _, dir := range []string{filepath.Join(outside, ".git"), filepath.Join(tb.home, "inside", ".git"), filepath.Join(tb.home, "markers")} {
@@ -150,6 +154,7 @@ func TestFSListKeepsMetadataInsideHome(t *testing.T) {
 }
 
 func TestInspectKeepsMarkerMetadataInsideHome(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	out, in := t.TempDir(), filepath.Join(tb.home, "inside")
 	for _, dir := range []string{out, in} {

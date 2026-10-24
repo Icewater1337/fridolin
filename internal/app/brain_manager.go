@@ -26,23 +26,26 @@ type BrainManager struct {
 	issues   []registry.Issue
 }
 
-func newCommandBrainManager(cfg *config.Settings) *BrainManager {
+// newCommandBrainManager builds the manager whose runs get their
+// environment from env and their home folder from cfg.
+func newCommandBrainManager(cfg *config.Settings, env Environment) *BrainManager {
 	hooks := &BrainHooks{}
 	profiler := NewSandboxProfiler(nil, cfg)
 	return &BrainManager{
 		profiler: profiler, hooks: hooks,
 		Manager: brain.NewManager(brain.Options{
-			Runner: &commandRunner{sandbox: profiler, hooks: hooks},
+			Runner: &commandRunner{sandbox: profiler, hooks: hooks, env: env, home: cfg.Home},
 			Sink:   brainHooksSink{hooks}, Input: commandBrainInputRules(hooks),
-			ViewerStart: startBrainViewer, ClaimMedia: claimBrainMedia,
+			ViewerStart: brainViewerStart(env), ClaimMedia: claimBrainMedia,
 			ShutdownGrace: func() time.Duration { return shutdownGrace },
 		}),
 	}
 }
 
-// NewBrainManager builds the configured brains.
-func NewBrainManager(cfg *config.Settings) (*BrainManager, error) {
-	bm := newCommandBrainManager(cfg)
+// NewBrainManager builds the configured brains, whose runs read env (nil
+// is the process's own).
+func NewBrainManager(cfg *config.Settings, env Environment) (*BrainManager, error) {
+	bm := newCommandBrainManager(cfg, envOr(env))
 	if err := bm.Apply(cfg); err != nil {
 		return nil, err
 	}

@@ -124,7 +124,7 @@ func newTargetService(cfgs *config.Store, v *vaultService, n *nodes.Service, con
 		logger = slog.Default()
 	}
 	t := &targetService{cfgs: cfgs, vault: v, nodes: n, log: logger, jobs: map[string]string{},
-		secrets: targetSecrets{getenv: os.Getenv, store: hostSecretStore(container), secretsDir: cfgs.Boot().Layout().Secrets(), random: newVaultPassword, log: logger},
+		secrets: targetSecrets{getenv: func(name string) string { return getenv(v.env, name) }, store: hostSecretStore(container), secretsDir: cfgs.Boot().Layout().Secrets(), random: newVaultPassword, log: logger},
 		restic:  func() string { return findVaultTool("restic") }}
 	t.file = readTargetsFile(cfgs.Boot().Layout().Core(), os.ReadFile)
 	return t
@@ -351,7 +351,7 @@ func (t *targetService) open(ctx context.Context, tg config.VaultTarget) (*targe
 		return nil, err
 	}
 	t.update(tg.Name, func(st *targetStatus) { st.Layers = string(layers) })
-	base := append(vaultBaseEnv(), srv.Env()...)
+	base := append(vaultBaseEnv(t.vault.env), srv.Env()...)
 	cache := filepath.Join(t.cfgs.Boot().Layout().Core(), "restic-cache-"+tg.Name)
 	mk := func(pw string) *snapshot.Restic {
 		return &snapshot.Restic{Binary: bin, Repo: srv.Repo(), Env: append(slices.Clone(base), "RESTIC_PASSWORD="+pw),

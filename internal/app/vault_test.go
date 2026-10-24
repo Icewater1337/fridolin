@@ -150,9 +150,10 @@ func writeFile(t *testing.T, path, content string) {
 // is 64 MB here; the 2 GB case is a manual step (docs/VAULT.md),
 // FRIDOLIN_GATE_RECORDING_MB=2048.
 func TestVaultGate(t *testing.T) {
+	t.Parallel()
 	local := t.TempDir()
-	t.Setenv(vaultLocalEnv, local)
-	t.Setenv("FRIDOLIN_FAKE_MCP", `[{"tool":"vault_get","args":{"path":"media/main/recording.m4a"}}]`)
+	setenv(t, vaultLocalEnv, local)
+	setenv(t, "FRIDOLIN_FAKE_MCP", `[{"tool":"vault_get","args":{"path":"media/main/recording.m4a"}}]`)
 	h := newServedHarness(t, vaultConfig)
 	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	data := h.DataDir()
@@ -267,7 +268,8 @@ func TestVaultGate(t *testing.T) {
 // copy it can read in its temp folder; nobody gets the data dir's other
 // files.
 func TestVaultToolsScope(t *testing.T) {
-	t.Setenv(vaultLocalEnv, t.TempDir())
+	t.Parallel()
+	setenv(t, vaultLocalEnv, t.TempDir())
 	h := coreHarness(t, []testutil.FakeMCPStep{
 		{Tool: ""},
 		{Brain: "core", Tool: "vault_get", Args: json.RawMessage(`{"path":"vault/documents/family/school.pdf"}`)},
@@ -331,6 +333,8 @@ func TestVaultToolsScope(t *testing.T) {
 // retires the old Drive backup's daily run), the mass-deletion hold and a
 // restore drill that finds the brain folder and sound database copies.
 func TestVaultSnapshotsDrillAndDrive(t *testing.T) {
+	// Serial: shortens vaultTickEvery, a package variable every bridge's
+	// vault reads.
 	if _, err := exec.LookPath("restic"); err != nil && findVaultTool("restic") == "" {
 		t.Skip("restic is not installed")
 	}
@@ -338,8 +342,8 @@ func TestVaultSnapshotsDrillAndDrive(t *testing.T) {
 		t.Skip("runs restic")
 	}
 	local := t.TempDir()
-	t.Setenv(vaultLocalEnv, local)
-	t.Setenv("RESTIC_PASSWORD", "test-password")
+	setenv(t, vaultLocalEnv, local)
+	setenv(t, "RESTIC_PASSWORD", "test-password")
 	oldTick := vaultTickEvery
 	vaultTickEvery = 100 * time.Millisecond
 	t.Cleanup(func() { vaultTickEvery = oldTick })
@@ -423,6 +427,7 @@ func TestVaultSnapshotsDrillAndDrive(t *testing.T) {
 }
 
 func TestVaultLayout(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Settings{}
 	cfg.DataDir = "/data"
 	cfg.MediaDir = "/data/media"
@@ -477,8 +482,9 @@ func TestVaultLayout(t *testing.T) {
 // start, before the first sync: its rows and cold copies go, and no
 // .cold.json is written for them.
 func TestVaultForgetsABrainFolderThatWentHome(t *testing.T) {
+	t.Parallel()
 	local := t.TempDir()
-	t.Setenv(vaultLocalEnv, local)
+	setenv(t, vaultLocalEnv, local)
 	h := newServedHarness(t, vaultConfig)
 	data := h.DataDir()
 	away := filepath.Join(data, "brains-folders", "Personal")
@@ -554,10 +560,12 @@ func TestVaultForgetsABrainFolderThatWentHome(t *testing.T) {
 // fail on the old one (issue #183). The first upload is held, as a big
 // hot tier holds the first heartbeat for minutes.
 func TestVaultLitestreamStatusOfTheLastRun(t *testing.T) {
+	// Serial: replaces vaultBackendsFor, a package variable every bridge's
+	// vault reads.
 	if runtime.GOOS == "windows" {
 		t.Skip("the stand-in litestream is a shell script")
 	}
-	t.Setenv(vaultLocalEnv, t.TempDir())
+	setenv(t, vaultLocalEnv, t.TempDir())
 	fake := filepath.Join(t.TempDir(), "litestream")
 	writeFile(t, fake, "#!/bin/sh\nexec sleep 300\n")
 	if err := os.Chmod(fake, 0o700); err != nil {

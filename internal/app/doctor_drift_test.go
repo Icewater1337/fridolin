@@ -15,6 +15,7 @@ import (
 // on disk differs from the approved manifest, and says that core export
 // refuses while it keeps more home.
 func TestDoctorBrainDrift(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	dir := filepath.Join(home, "Personal")
 	if err := os.MkdirAll(dir, 0o700); err != nil {

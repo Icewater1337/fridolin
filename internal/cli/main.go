@@ -384,11 +384,7 @@ func runCmd(args []string) int {
 		log.Printf("creating bridge: %v", err)
 		return 1
 	}
-	if cfg.AgentProvider == "codex" {
-		go app.LogCodexCLI(cfg.CodexPath, cfg.ChildEnvPassthrough)
-	} else {
-		go app.LogClaudeCLI(cfg.ClaudePath, cfg.ChildEnvPassthrough)
-	}
+	go bridge.LogAgentCLI()
 
 	signalled, stopSignals := stopOnSignals(cancel, bridge.KillRuns)
 	defer stopSignals()

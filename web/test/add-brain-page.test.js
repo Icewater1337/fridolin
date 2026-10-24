@@ -12,7 +12,7 @@ test('the wizard asks before leaving only once something was edited', async (t) 
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
-  globalThis.window = { scrollTo() {} };
+  Object.assign(globalThis, { window: { scrollTo() {} } });
   t.after(() => { delete globalThis.window; });
   serve(t, (path) => {
     if (path.startsWith('/api/fs/capabilities')) return { picker: '', home: '/Users/you' };
@@ -56,7 +56,7 @@ test('the wizard asks before leaving only once something was edited', async (t) 
 test('the folder step chooses between browsing and typing with real tabs', async (t) => {
   installDom();
   noConsoleErrors(t);
-  globalThis.window = { scrollTo() {} };
+  Object.assign(globalThis, { window: { scrollTo() {} } });
   t.after(() => { delete globalThis.window; });
   serve(t, (path) => {
     if (path.startsWith('/api/fs/capabilities')) return { picker: '', home: '/Users/you' };
@@ -86,7 +86,7 @@ test('a folder that has a brain.json shows what it asks for', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
-  globalThis.window = { scrollTo() {} };
+  Object.assign(globalThis, { window: { scrollTo() {} } });
   t.after(() => { delete globalThis.window; });
   const manifest = { version: 1, id: 'notes', name: 'Notes', routing: { handles_dms: false, default: false, groups: ['120363000000000000@g.us'] }, model: 'opus' };
   serve(t, (path) => {
@@ -121,7 +121,7 @@ test('the configure step adds the brain with the model, effort and backup the br
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
-  globalThis.window = { scrollTo() {} };
+  Object.assign(globalThis, { window: { scrollTo() {} } });
   t.after(() => { delete globalThis.window; });
   const calls = serve(t, (path, init) => {
     if (path.startsWith('/api/fs/capabilities')) return { picker: '', home: '/Users/you' };

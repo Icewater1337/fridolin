@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 
 	"strings"
 	"testing"
@@ -35,7 +36,8 @@ func newTestSite(t *testing.T) *sitesvc.SiteManager {
 
 func testSiteOptions(t *testing.T) sitesvc.SiteOptions {
 	t.Helper()
-	opts := sitesvc.SiteOptions{DataDir: t.TempDir(), GoogleClient: func() string { return "" }}
+	env := envOf(t)
+	opts := sitesvc.SiteOptions{DataDir: t.TempDir(), GoogleClient: func() string { return "" }, Host: siteHostFor(env, func() string { return getenv(env, "HOME") })}
 	opts.NPMInstall = func(ctx context.Context, dir string, prod bool) error {
 		src := filepath.Join(repoDir, "site", "node_modules")
 		if !fsx.Exists(src) {
@@ -97,6 +99,7 @@ func freePort(t *testing.T) string {
 // without a manual restart; so does a change to Fridolin's shared client
 // while the site uses that one.
 func TestSiteGoogleClientReachesRunningSite(t *testing.T) {
+	t.Parallel()
 	requireSiteRuntime(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -194,6 +197,7 @@ func TestSiteGoogleClientReachesRunningSite(t *testing.T) {
 }
 
 func TestSiteAPI(t *testing.T) {
+	t.Parallel()
 	b := &App{site: newTestSite(t)}
 	mux := http.NewServeMux()
 	b.siteAPI(mux)
@@ -249,6 +253,8 @@ func TestSiteAPI(t *testing.T) {
 // until a repository is connected gh adds it to the address typed for
 // Connect, checked as Connect checks it; afterwards to the connected one.
 func TestSiteDeployKeyWithGH(t *testing.T) {
+	// Serial: puts a fake gh on the process's PATH; the site runs gh with
+	// the process's environment.
 	if _, err := exec.LookPath("ssh-keygen"); err != nil {
 		t.Skip("no ssh-keygen")
 	}
@@ -364,5 +370,32 @@ func TestSiteDeployKeyWithGH(t *testing.T) {
 	setRepo(sitesvc.SiteRepo{URL: newBareRepo(t), Branch: "main"})
 	if code, out := call(""); code != 400 || !strings.Contains(fmt.Sprint(out["error"]), "not on GitHub") {
 		t.Errorf("connected to a repository elsewhere: %d %v", code, out)
+	}
+}
+
+// TestSiteHostDefaultsToTheProcess: a site manager given no host runs its
+// programs with the process's environment and home folder, as the binary's
+// does; a bridge passes its own (siteHostFor).
+func TestSiteHostDefaultsToTheProcess(t *testing.T) {
+	t.Parallel()
+	var h sitesvc.SiteHost
+	siteHostDefaults(&h)
+	if got := h.Home(); got != HomeDir() {
+		t.Errorf("home %q, want the process's %q", got, HomeDir())
+	}
+	if got, want := len(h.Environ()), len(os.Environ()); got != want {
+		t.Errorf("%d variables, want the process's %d", got, want)
+	}
+	if env := h.Env("/opt/node/bin/node"); !slices.Contains(env, "HOME="+HomeDir()) || !slices.Contains(env, "PATH="+siteEnvPath("/opt/node/bin/node")) {
+		t.Errorf("a site process's environment %q lacks the process's HOME or node's PATH", env)
+	}
+	if h.Node == nil || h.Tool == nil || h.GitPath == nil || h.Profile == nil || h.GoogleClientType == nil {
+		t.Errorf("a lookup was left out: %+v", h)
+	}
+
+	own := sitesvc.SiteHost{Home: func() string { return "/Users/you" }}
+	siteHostDefaults(&own)
+	if got := own.Home(); got != "/Users/you" {
+		t.Errorf("a host's own home was replaced by %q", got)
 	}
 }

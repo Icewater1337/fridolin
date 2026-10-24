@@ -2,6 +2,9 @@
 // highlighted sidebar entry all come from it. Pages load on first visit, so a
 // page that fails to load breaks only itself.
 
+/** @import { Route } from './router.js' */
+
+/** @type {Route[]} */
 export const ROUTES = [
   { id: 'overview', path: 'overview', nav: { label: 'Overview', icon: 'overview' }, load: () => import('../pages/overview.js') },
   { id: 'activity', path: 'activity/:brain?', nav: { label: 'Activity', icon: 'activity' }, load: () => import('../pages/activity.js') },

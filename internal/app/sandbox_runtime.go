@@ -137,7 +137,7 @@ func sandboxPolicyOf(cfg *config.Settings) sandboxConfig {
 
 // NewSandboxProfiler builds a profiler for the configured brains.
 func NewSandboxProfiler(workDirs map[string][]string, cfg *config.Settings) *SandboxProfiler {
-	sp := &SandboxProfiler{execPath: sandbox.ExecPath, home: HomeDir(), backend: sandboxBackend(ConfigGOOS()),
+	sp := &SandboxProfiler{execPath: sandbox.ExecPath, home: cfg.Home, backend: sandboxBackend(ConfigGOOS()),
 		bwrapPath: sandbox.BwrapPath, kind: pathKind, hostHome: ContainerHostHome()}
 	sp.probe = sync.OnceValue(func() error { return probeBwrap(sp.bwrapPath) })
 	if exe, err := os.Executable(); err == nil {

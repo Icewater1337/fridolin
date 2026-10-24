@@ -16,6 +16,7 @@ import (
 )
 
 func TestWhatsAppProjectionReadBoundaries(t *testing.T) {
+	t.Parallel()
 	cfg := config.Settings{Boot: config.Boot{MediaDir: "incoming"}, Live: config.Live{AllowedNumbers: []string{"15551234567"}, MaxChunkSize: 4000, MaxMediaMB: 12}}
 	reads := 0
 	get := func() config.Settings { reads++; return cfg }
@@ -44,6 +45,7 @@ func TestWhatsAppProjectionReadBoundaries(t *testing.T) {
 }
 
 func TestWhatsAppCallbackProjections(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	in := chat.Inbound{JID: testDMChat, ChatAlt: personLID + "@lid", Sender: "15551234567", Text: "hello", Media: []string{"file"}, Quoted: &chat.Quote{From: "15559876543", Text: "earlier"}, Source: chat.SourceWhatsApp, ID: "message", Silent: true}
