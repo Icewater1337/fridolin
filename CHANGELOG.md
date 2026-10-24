@@ -913,6 +913,10 @@ for compatibility.
 
 ### Fixed
 
+- `fridolin core` finds Docker when it runs with a short PATH, as the
+  node agent of a core host does under launchd: the move pre-flight
+  (`fridolin nodes move-check`) said "docker is not installed or not on
+  PATH" on a Mac with Docker Desktop.
 - **Schedules in the core ran in UTC.** The container has `TZ=UTC`, so a
   `"daily 21:00"` agent ran at 23:00 in Zurich. After upgrading, run
   `fridolin core start` once (it now passes the host's zone), or set
