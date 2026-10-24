@@ -211,6 +211,8 @@ func canonicalCron(expr string) string {
 
 // recurringNext is Next for the every and cron kinds.
 func (s Schedule) recurringNext(after time.Time) (time.Time, bool) {
+	// Only Next calls it, for these two kinds; Next's switch has them all.
+	//exhaustive:ignore
 	switch s.Kind {
 	case ScheduleEvery:
 		d, err := ParseEvery(s.Every)
