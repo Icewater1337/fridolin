@@ -145,7 +145,6 @@ class FakeElement extends FakeNode {
   close() { this.open = false; }
 }
 
-function toNode(n) { return n instanceof FakeNode ? n : new FakeText(String(n)); }
 
 // One compound selector part, e.g. button.crumb[type=button]#x
 function matchesCompound(el, sel) {
