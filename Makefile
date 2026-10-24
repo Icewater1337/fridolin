@@ -32,11 +32,13 @@ NODE   ?= node
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 
-# Go linters are pinned: staticcheck is a go.mod tool so Dependabot sees it;
-# actionlint remains an explicit version here. ruff comes from
-# tools/requirements-dev.txt and shellcheck from your package manager.
+# Go linters are pinned: staticcheck and exhaustive are go.mod tools so
+# Dependabot sees them; actionlint remains an explicit version here. ruff
+# comes from tools/requirements-dev.txt and shellcheck from your package
+# manager.
 ACTIONLINT_VERSION  := v1.7.12
 STATICCHECK ?= $(GO) tool staticcheck
+EXHAUSTIVE  ?= $(GO) tool exhaustive
 ACTIONLINT  ?= $(GO) run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
 RUFF        ?= ruff
 SHELLCHECK  ?= shellcheck
@@ -116,8 +118,16 @@ root-check: ## fail unless go build at the repo root refuses to build
 
 lint: lint-go lint-sh lint-py lint-actions lint-web ## every linter
 
-lint-go: ## staticcheck
+# exhaustive holds a switch on an enum (a defined type with constants
+# declared beside it) to a case for every constant, a default or not, so
+# that a new constant fails here at every switch that has to decide about
+# it. A default stays for values from outside (a string from JSON, a
+# number out of range), and a switch meant to cover only some constants
+# says why in a comment above its //exhaustive:ignore. A switch on
+# reflect.Kind picks a few of its 27 kinds by nature, so none is checked.
+lint-go: ## staticcheck, and exhaustive on switches over enums
 	$(STATICCHECK) ./...
+	$(EXHAUSTIVE) -typeignore '^reflect\.Kind$$' ./...
 
 lint-sh: ## shellcheck the scripts and git hooks
 	$(SHELLCHECK) --severity=warning setup.sh scripts/*.sh container/*.sh container/fride/*.sh .githooks/*
