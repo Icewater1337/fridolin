@@ -472,6 +472,68 @@ sends anything, the node against its own `node.json` and the approvals the
 core sent it, so a core that approved more than the node declares cannot
 make it serve more.
 
+### Programs from the core
+
+A [scheduled agent](BRAINS.md#scheduled-agents) of kind `command` runs a
+program on a node. Rather than adding each such program to `node.json` by
+hand, a node can name folders whose programs the core may add, once, on
+the node:
+
+```json
+"exec": {
+  "allow": [],
+  "accept_from_core": ["/Users/you/Personal/projects", "/Users/you/tools"],
+  "timeout_seconds": 900
+}
+```
+
+Restart the node (`fridolin node stop`, `fridolin node start`) and
+approve what it offers on the Nodes page: the folders are part of its
+declaration, so they wait for that approval like any new rule. From then
+on, approving a command agent whose program is in one of those folders
+adds that program to the node's allowlist, with exactly the agent's
+arguments; saving an agent in the wizard does the same. Deleting the
+agent removes the program again, unless another approved agent runs it
+with the same arguments.
+
+How it goes: whenever the approved agents change, a node connects or
+its commands are approved, and otherwise every half minute, the core
+works out each such node's list (the programs its approved command
+agents run there that `node.json` does not allow already) and sends a
+node whose list changed the whole of it, `exec.programs`. The list names
+the node and a sequence number, and is signed with the core's update key
+(`core.pub`, pinned when the node joined, or at its first update or list from the core). The
+node refuses a list that does not verify with that key, is for another
+node, or is no newer than the last it took. It keeps each program that
+
+- is a clean absolute path that resolves, symlinks and all, to an
+  executable file inside one of the folders (as they resolve too);
+- is no shell and no interpreter, as written or as it resolves: no `sh`,
+  `bash`, `python`, `node`, `perl`, `ruby`, `osascript`, `awk`, `find`,
+  `git`, `ssh`, `curl`, … (`nodeproto.IsInterpreter`), and on Windows no
+  `.bat`, `.cmd`, `.ps1`, `.vbs` or `.js`;
+
+and refuses the rest, each with why; the Nodes page shows both, the
+programs with the agents they are for. A folder must pass the same check
+as a workstation root: absolute, not the home folder or a whole drive,
+and neither in nor holding a system folder (`/usr`, `/bin`,
+`/opt/homebrew`, `C:\Windows`, …), the node's state dir or a place of
+keys (`~/.ssh`, …); a `node.json` with another does not load.
+
+The node writes what it kept to `exec-from-core.json` in its state dir
+and declares it as rules marked `"core": true, "exact": true`, which the
+core approves itself, because you approved the agents that run them. It
+checks such a program again before every run, and runs the file it
+resolved then: a program that became a symlink out of its folder, or a
+folder taken out of `accept_from_core`, is refused. A program the core
+did not list again is gone from the node's allowlist at once; nothing
+else in `node.json` changes. In a lockdown the core sends nothing.
+
+The Schedules page and the wizard say, for each command agent, whether
+its node runs its program, whether approving or saving adds it, or what
+the node must opt into first; `fridolin doctor` warns about approved
+command agents whose node does not allow their program (`nodes-programs`).
+
 ## android-build
 
 A node with a JDK 17 or newer and the Android SDK builds the Plaud Sync
@@ -1733,7 +1795,9 @@ another version is refused.
    `failed`, `unavailable`, `unsupported`).
    The node may also send, on its own, `event` (news, such as FrIDE's,
    with a `kind`) and `declare` (what it offers now, when FrIDE comes or
-   goes); the core answers a `declare` with `state`.
+   goes, or the core's programs changed); the core answers a `declare`
+   with `state`. `exec.programs` is the core's signed list of
+   [programs from the core](#programs-from-the-core).
 6. Either side may send `close` with a reason (`revoked`,
    `unknown-device`, `bad-auth`, `replaced`, `shutdown`, `protocol`,
    `idle`) before closing. After `revoked` or `unknown-device` the agent

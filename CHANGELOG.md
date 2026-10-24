@@ -10,6 +10,21 @@ for compatibility.
 
 ### Added
 
+- **Command agents bring their program to the node** (#213): a node
+  that names folders in `exec.accept_from_core` (node.json) takes the
+  program of a command agent you approve, when it lies in one of them, as
+  a rule of exactly its arguments; deleting the agent removes it, unless
+  another agent runs it. The core sends each node the whole list,
+  `exec.programs`, signed with its update key; the node refuses shells,
+  interpreters, anything outside the folders with symlinks resolved, and
+  checks again before every run (docs/NODES.md, "Programs from the
+  core"). The Nodes page shows the folders, the programs added and for
+  which agents, and what the node refused and why; the Schedules page and
+  the wizard say how each agent's program stands on its node, and
+  `fridolin doctor` warns about approved command agents whose node does
+  not allow their program. Nothing changes for a node without
+  `accept_from_core`; its folders wait for your approval on the Nodes
+  page like any other new rule.
 - **Files and Wiki, phase 2** (#192, #194; docs/FILES.md, "Changing
   files"): edit a text or Markdown file, or a wiki page, in place;
   upload into a folder; make a file; rename, move and delete (into the
