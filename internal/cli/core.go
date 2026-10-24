@@ -762,6 +762,9 @@ type hostDeps struct {
 	// verify checks an image's build provenance for core pull
 	// (provenance.Verifier); nil refuses to pull.
 	verify func(ctx context.Context, image, repo string) error
+	// noVerify says why verify cannot run here ("" when it can): GitHub's
+	// CLI is missing. core pull --check says so before a move needs it.
+	noVerify string
 	// zone is the host's IANA time zone (FRIDOLIN_TZ, else
 	// platform.HostZone), which the container gets as TZ; "" when this
 	// machine does not say, and the container stays in UTC.
@@ -821,6 +824,12 @@ func defaultHostDeps(env coreEnv) hostDeps {
 		d.unitPath = filepath.Join(d.home, ".config", "systemd", "user", systemdUnitName)
 	}
 	gh, _ := exec.LookPath("gh")
+	if d.goos != "windows" {
+		gh = lookPathIn("gh", envValue(env.environ, "PATH"))
+	}
+	if gh == "" {
+		d.noVerify = "GitHub's CLI (gh) is not installed, which checks the image's provenance before it is pulled (no login needed): install it (brew install gh, apt-get install gh, winget install GitHub.cli)"
+	}
 	d.verify = provenance.Verifier{Gh: gh, Environ: env.environ}.Verify
 	d.secrets = hostsecrets.ForHost(d.goos, env.getenv, d.home)
 	d.secretsPlace = hostsecrets.Place(d.goos, env.getenv, d.home)
