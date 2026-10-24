@@ -26,7 +26,7 @@ import { errorMessage } from '../lib/errors.js';
 
 /** @import { Page, PageModule } from '../app/page.js' */
 /** @import { Child } from '../lib/dom.js' */
-/** @import { Reminder, ScheduleAgent, ScheduleRun } from '../../types/api.js' */
+/** @import { Reminder, ScheduleAgent, ScheduleRun, SchedulesResponse } from '../../types/api.js' */
 
 const githubResource = resource('/api/github');
 const enc = encodeURIComponent;
@@ -308,6 +308,7 @@ function renderList(root, ctx) {
   const groupsBox = h('div', spinner());
   const remindersBox = h('div');
   const open = new Set();
+  /** @type {SchedulesResponse | null} */
   let data = null;
 
   mount(root,
