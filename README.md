@@ -198,6 +198,14 @@ once, within a minute; the browser then stays signed in for 30 days.
 *Settings → Dashboard sign-in* signs it out, or signs out every browser and
 replaces the dashboard token (`fridolin rotate-token` does the same).
 
+When the core runs in its container ([docs/CORE.md](docs/CORE.md)),
+`fridolin open` on the machine that runs Docker asks the container's own
+fridolin for the link (`docker exec fridolin-core fridolin open --print`
+does the same by hand): the token is in the container's volume, not in
+`~/.fridolin`. From another device, send `!dashboard` in your WhatsApp
+chat. The dashboard's sign-in page names the steps for the way your
+bridge runs.
+
 ### Upgrading and rolling back
 
 ```bash
