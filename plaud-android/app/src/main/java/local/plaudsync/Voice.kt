@@ -25,7 +25,56 @@ object VoicePrefs {
 }
 
 /**
- * Reads Fridolin's answers aloud with Android's TextToSpeech, one after the other. It takes
+ * A voice that speaks one piece of text at a time. [AndroidVoice], the phone's own on-device
+ * TextToSpeech, is the one there is; a better one (a server-side voice, say) can take its place
+ * behind this interface without [Speaker] changing.
+ */
+interface SpeechVoice {
+    /** Called once: whether the voice can speak at all. */
+    var onReady: (Boolean) -> Unit
+    /** Called when the piece with this id was said to its end (or could not be). */
+    var onDone: (String) -> Unit
+    fun speak(text: String, locale: Locale, id: String)
+    /** Stops the piece being said; its onDone is not called. */
+    fun stop()
+    fun supports(locale: Locale): Boolean
+    fun shutdown()
+}
+
+/** Android's TextToSpeech, on the device: free, offline where the phone has the voice. */
+class AndroidVoice(ctx: Context, attrs: AudioAttributes) : SpeechVoice {
+    override var onReady: (Boolean) -> Unit = {}
+    override var onDone: (String) -> Unit = {}
+    private val tts: TextToSpeech = TextToSpeech(ctx) { status -> onReady(status == TextToSpeech.SUCCESS) }
+
+    init {
+        tts.setAudioAttributes(attrs)
+        val said = { id: String -> onDone(id) }
+        tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(id: String) {}
+            override fun onDone(id: String) = said(id)
+
+            @Deprecated("Deprecated in Java")
+            override fun onError(id: String) = said(id)
+            override fun onStop(id: String, interrupted: Boolean) {} // stopped on purpose: stop, skip or a call
+        })
+    }
+
+    override fun speak(text: String, locale: Locale, id: String) {
+        tts.language = locale
+        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
+    }
+
+    override fun stop() {
+        tts.stop()
+    }
+
+    override fun supports(locale: Locale) = tts.isLanguageAvailable(locale) >= TextToSpeech.LANG_AVAILABLE
+    override fun shutdown() = tts.shutdown()
+}
+
+/**
+ * Reads Fridolin's answers aloud with a [SpeechVoice] (the phone's TextToSpeech), one after the other. It takes
  * transient audio focus with usage "assistant", so music ducks meanwhile; when it loses focus (a
  * call rings) it stops and goes on from the sentence it was in once it has focus back. Nothing
  * starts during a call, nor while the phone is locked unless [VoicePrefs.speakLocked]: an answer
@@ -62,25 +111,14 @@ class Speaker(private val ctx: Context, private val changed: () -> Unit) {
     /** Something is being said or waits to be. */
     val busy get() = current != null || queue.isNotEmpty()
 
-    private val tts = TextToSpeech(ctx) { status ->
-        main.post {
-            ready = status == TextToSpeech.SUCCESS
-            if (!ready) AppLog.i("voice: text-to-speech is not available on this phone") else pump()
+    private val tts: SpeechVoice = AndroidVoice(ctx, attrs).apply {
+        onReady = { ok ->
+            main.post {
+                ready = ok
+                if (!ok) AppLog.i("voice: text-to-speech is not available on this phone") else pump()
+            }
         }
-    }.apply {
-        setAudioAttributes(attrs)
-        setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-            override fun onStart(id: String) {}
-            override fun onDone(id: String) {
-                main.post { finished(id) }
-            }
-
-            @Deprecated("Deprecated in Java")
-            override fun onError(id: String) {
-                main.post { finished(id) }
-            }
-            override fun onStop(id: String, interrupted: Boolean) {} // stopped on purpose: stop, skip or a call
-        })
+        onDone = { id -> main.post { finished(id) } }
     }
 
     /** Utterance id was said: on to the next piece. */
@@ -164,10 +202,9 @@ class Speaker(private val ctx: Context, private val changed: () -> Unit) {
             if (audio.requestAudioFocus(focus) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return changed()
             hasFocus = true
         }
-        tts.language = locale
         val id = "a${System.nanoTime()}"
         speaking = id
-        tts.speak(pieces[index], TextToSpeech.QUEUE_FLUSH, null, id)
+        tts.speak(pieces[index], locale, id)
         changed()
     }
 
@@ -198,6 +235,6 @@ class Speaker(private val ctx: Context, private val changed: () -> Unit) {
             "en" -> Locale.US
             else -> return Locale.getDefault()
         }
-        return if (tts.isLanguageAvailable(want) >= TextToSpeech.LANG_AVAILABLE) want else Locale.getDefault()
+        return if (tts.supports(want)) want else Locale.getDefault()
     }
 }

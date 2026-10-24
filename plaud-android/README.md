@@ -34,7 +34,7 @@ Two ways, both in [docs/PLAUD.md](../docs/PLAUD.md#without-plauds-cloud-the-phon
 Built by Fridolin, with voice mode on in the dashboard, the app's **Voice mode** switch lets you
 ask Fridolin by voice and hear the answer: a NotePin recording, or **Ask** (the phone's speech
 recognizer), becomes a question, and the answer, encrypted to a key in the phone's keystore, is
-read aloud with Android's text-to-speech (`Voice.kt`, `SpeechText.kt`, `VoiceCrypto.kt`). See
+read aloud with Android's on-device text-to-speech (`Voice.kt`, behind the small `SpeechVoice` interface so a better voice can replace it; `SpeechText.kt`, `VoiceCrypto.kt`). See
 [docs/PLAUD.md](../docs/PLAUD.md#voice-mode).
 
 ## What you need
