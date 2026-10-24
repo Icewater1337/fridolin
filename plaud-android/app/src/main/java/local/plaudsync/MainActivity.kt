@@ -13,6 +13,7 @@ import android.provider.Settings
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import java.io.File
 
@@ -29,6 +30,26 @@ class MainActivity : Activity() {
         val pad = (16 * resources.displayMetrics.density).toInt()
         fun button(label: String, onClick: () -> Unit) =
             Button(this).apply { text = label; setOnClickListener { onClick() } }
+        fun switch(label: String, on: Boolean, onChange: (Boolean) -> Unit) =
+            Switch(this).apply { text = label; isChecked = on; setOnCheckedChangeListener { _, v -> onChange(v) } }
+
+        // Voice mode needs a build from Fridolin's dashboard: it asks through the site.
+        val ask = button("Ask Fridolin") { startActivity(Intent(this, AskActivity::class.java)) }
+        val speakLocked = switch("Speak answers while the phone is locked", VoicePrefs.speakLocked(this)) {
+            VoicePrefs.setSpeakLocked(this, it)
+        }
+        fun showVoice(on: Boolean) {
+            ask.visibility = if (on) android.view.View.VISIBLE else android.view.View.GONE
+            speakLocked.visibility = ask.visibility
+        }
+        val voice = switch("Voice mode: recordings are questions, answers are read aloud", VoicePrefs.enabled(this)) {
+            VoicePrefs.setEnabled(this, it)
+            AppLog.i(if (it) "voice mode on" else "voice mode off")
+            showVoice(it)
+            if (bleAllowed()) SyncService.start(this, SyncService.ACTION_REFRESH)
+            render()
+        }
+        showVoice(VoicePrefs.enabled(this))
 
         statusView = TextView(this).apply { textSize = 16f }
         logView = TextView(this).apply { typeface = Typeface.MONOSPACE; textSize = 11f; setTextIsSelectable(true) }
@@ -38,6 +59,11 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.VERTICAL
                 setPadding(pad, pad, pad, pad)
                 addView(statusView)
+                if (Fridolin.enabled) {
+                    addView(voice)
+                    addView(ask)
+                    addView(speakLocked)
+                }
                 addView(button("Pair NotePin") { SyncService.start(this@MainActivity, SyncService.ACTION_PAIR) })
                 addView(button("Allow running in background") { askBatteryExemption() })
                 addView(button("Share log") { shareLog() })
@@ -82,6 +108,7 @@ class MainActivity : Activity() {
                 appendLine("Fridolin: ${if (Fridolin.device(this@MainActivity) == null) "not paired yet" else "paired"}" +
                     if (waiting > 0) ", $waiting transcript(s) waiting to be sent" else "")
             }
+            if (Fridolin.enabled && VoicePrefs.enabled(this@MainActivity)) appendLine("Voice mode: on")
             append("Files: Documents/PlaudSync")
         }
         logView.text = AppLog.tail(200).asReversed().joinToString("\n")

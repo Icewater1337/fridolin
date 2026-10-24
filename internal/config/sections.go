@@ -90,6 +90,16 @@ type PlaudConfig struct {
 	// signs each upload (plaud_app.go). They go into PhoneDir, or without
 	// one into <data_dir>/plaud/inbox, and are read from there.
 	PhoneUpload bool `json:"phone_upload,omitempty"`
+	// Voice lets the app ask by voice (voice mode, docs/PLAUD.md): a
+	// spoken question goes to VoiceBrain and its answer back to the
+	// phone, which reads it aloud. Needs PhoneUpload.
+	Voice bool `json:"voice,omitempty"`
+	// VoiceBrain answers voice questions (default: the brain that handles
+	// DMs, else the default brain).
+	VoiceBrain string `json:"voice_brain,omitempty"`
+	// VoiceQuiet sends the answer to the phone only, not also to the
+	// brain's private chat on WhatsApp.
+	VoiceQuiet bool `json:"voice_quiet,omitempty"`
 }
 
 // interval is how often Plaud is checked.

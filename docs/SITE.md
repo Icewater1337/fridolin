@@ -402,8 +402,12 @@ is full, when `ingest.enabled` is off, and in previews and checks.
 ### Phones
 
 The site also takes requests from phones Fridolin paired, the Plaud Sync
-app ([PLAUD.md](PLAUD.md#through-your-site)): `POST /_fridolin/devices/pair`
-and `POST /_fridolin/devices/plaud/transcripts`. They need no sign-in, but
+app ([PLAUD.md](PLAUD.md#through-your-site)): `POST /_fridolin/devices/pair`,
+`POST /_fridolin/devices/plaud/transcripts`, and for
+[voice mode](PLAUD.md#voice-mode) `POST /_fridolin/devices/voice/ask` and
+`POST /_fridolin/devices/voice/reply`, whose answer is encrypted for the
+phone and which Fridolin answers off the spool's loop, holding it up to 15
+seconds until the answer is there. They need no sign-in, but
 each request carries a JWT signed with a key only that phone has. The site
 checks it against the public keys Fridolin writes to
 `<data_dir>/site/devices.json` and passes what passes on through the spool,

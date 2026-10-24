@@ -28,6 +28,14 @@ for compatibility.
   repository sends paths that moved, `/wiki-<x>` say, to their new
   place (docs/SITE.md, "Old addresses").
 
+- **Voice mode for the Plaud Sync app** (docs/PLAUD.md, "Voice mode"):
+  with `plaud.voice` on and the app's switch on, a NotePin recording or
+  a question spoken into the phone goes to `plaud.voice_brain` (default
+  the DM brain), and the phone reads the answer aloud. The answer is
+  encrypted for the phone, so the site only passes it on. It also goes to
+  WhatsApp, after the question, unless `plaud.voice_quiet`. New site
+  routes `/_fridolin/devices/voice/ask` and `/_fridolin/devices/voice/reply`.
+  The app needs a new build from the dashboard.
 - **core-host** (#187, first slice): a node may offer to be a core host
   with `fridolin node core-host on` on the machine, which writes
   `core-host.json` in its state dir, and the owner's approval

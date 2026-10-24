@@ -119,3 +119,60 @@ test('a client whose requests keep failing waits', async (t) => {
   for (let i = 0; i < 10; i++) assert.equal((await upload(url, p.key, 'x')).status, 401)
   assert.equal((await upload(url, p.key, 'x')).status, 429)
 })
+
+function ask(url: string, key: KeyObject, text: string, claims: object = {}) {
+  const sha256 = createHash('sha256').update(text).digest('base64url')
+  const enc = phone().jwk
+  const token = jwt(key, { iss: 'dev_1', aud: 'fridolin:voice', iat: now(), exp: now() + 300, rid: 'q_0123456789abcdef', sha256, enc, ...claims })
+  return fetch(`${url}/_fridolin/devices/voice/ask`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'text/plain; charset=utf-8' }, body: text })
+}
+
+function fetchReply(url: string, key: KeyObject, claims: object = {}) {
+  const token = jwt(key, { iss: 'dev_1', aud: 'fridolin:voice-reply', iat: now(), exp: now() + 300, rid: 'q_0123456789abcdef', ...claims })
+  return fetch(`${url}/_fridolin/devices/voice/reply`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+}
+
+test('a voice question reaches the bridge only when a paired phone signed it, with a key for the answer', async (t) => {
+  const { url, seen, pairDevice } = await start(t, r => (r.op === 'voice' ? { ok: true, state: 'waiting' } : { ok: true }))
+  const p = phone()
+  pairDevice('dev_1', p.jwk)
+
+  const res = await ask(url, p.key, 'Was steht morgen an?')
+  assert.equal(res.status, 202)
+  assert.deepEqual(await res.json(), { state: 'waiting' })
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].op, 'voice')
+  assert.equal(seen[0].body, 'Was steht morgen an?')
+
+  // Each of these is refused here and never spooled.
+  assert.equal((await ask(url, phone().key, 'hi')).status, 401, 'another key')
+  assert.equal((await ask(url, p.key, 'hi', { aud: 'fridolin:plaud-transcript' })).status, 401, 'a transcript JWT')
+  assert.equal((await ask(url, p.key, 'hi', { rid: 'short' })).status, 401, 'no valid question id')
+  assert.equal((await ask(url, p.key, 'hi', { sha256: 'x' })).status, 400, 'another text')
+  assert.equal((await ask(url, p.key, 'hi', { enc: undefined })).status, 400, 'no key for the answer')
+  assert.equal(seen.length, 1)
+})
+
+test('the answer to a voice question goes back as the bridge sealed it, and only to the phone that signs for it', async (t) => {
+  const reply = { alg: 'ECDH-ES+HKDF-SHA256+A256GCM', epk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' }, iv: 'iv', ct: 'ct' }
+  const { url, seen, pairDevice } = await start(t, r => (r.op === 'voice_reply' ? { ok: true, state: 'done', reply } : { ok: true }))
+  const p = phone()
+  pairDevice('dev_1', p.jwk)
+
+  const res = await fetchReply(url, p.key)
+  assert.equal(res.status, 200)
+  assert.deepEqual(await res.json(), { state: 'done', reply })
+  assert.equal(seen.at(-1)?.op, 'voice_reply')
+
+  const n = seen.length
+  assert.equal((await fetchReply(url, phone().key)).status, 401)
+  assert.equal((await fetchReply(url, p.key, { aud: 'fridolin:voice' })).status, 401)
+  assert.equal(seen.length, n)
+})
+
+test('a failed voice question says why', async (t) => {
+  const { url, pairDevice } = await start(t, () => ({ ok: true, state: 'failed', error: 'the question was stopped before it was answered' }))
+  const p = phone()
+  pairDevice('dev_1', p.jwk)
+  assert.deepEqual(await (await fetchReply(url, p.key)).json(), { state: 'failed', error: 'the question was stopped before it was answered' })
+})

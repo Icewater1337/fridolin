@@ -131,7 +131,10 @@
     "message": "[Plaud] {name} ({when}, {duration})",
     "brain_access": true,
     "phone_dir": "~/PlaudSync",
-    "phone_upload": true
+    "phone_upload": true,
+    "voice": true,
+    "voice_brain": "main",
+    "voice_quiet": true
   },
   "dashboard": {
     "disabled": false,
