@@ -14,7 +14,7 @@ import (
 func TestDriftOf(t *testing.T) {
 	approved := Manifest{ID: "personal", Name: "Personal", Backup: Backup{Enabled: true, Exclude: []string{"*.log"}}}
 	for _, tc := range []struct {
-		name, disk string
+		name, disk        string
 		any, backup, more bool
 		describe          string
 	}{
