@@ -207,6 +207,12 @@ nodeCoreHostAlert(changed)
 	Sends secrets only to: icebase (8233270f8a24)
 
 	You did not just run `fridolin node core-host` there? Do not approve; `!revoke 7216c2648b04` shuts it out. Otherwise `!approve 7216c2648b04`.
+coreMoveEnded(done)
+	🚚 The core moved to *icebase* (move m-20261024-1403-7f2a): the core runs on icebase (version v1.9.0, WhatsApp connected, lease held). Moving it back is `fridolin nodes move` the other way round.
+coreMoveEnded(rolled_back)
+	🔙 The core move to *icebase* failed and the core runs on *mac-mini* again (move m-20261024-1403-7f2a): mac-mini: 3c1e9a0b7d22 gave the core up (not ready in time); its state comes back with it; the core runs here again
+coreMoveEnded(failed)
+	⚠️ The core move from *mac-mini* to *icebase* failed (move m-20261024-1403-7f2a): the rehearsal on icebase: the import failed; nothing was stopped
 nodeCoreHostApprovedNote
 	🔐 That includes core-host. core-host lets fridolin move the core to this machine. The machine then holds every host secret: the B2 keys, the age identity and export key (all exports and the WhatsApp session), the Claude token. Approve only a machine you trust as much as the one that runs the core now. `!revoke <id>` takes it back.
 nodeApprovedReply

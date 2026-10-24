@@ -29,7 +29,9 @@ import (
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/lease"
 	"github.com/Icewater1337/fridolin/internal/manifest"
+	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/platform"
+	"github.com/Icewater1337/fridolin/internal/provenance"
 	"github.com/Icewater1337/fridolin/internal/seal"
 	"github.com/Icewater1337/fridolin/internal/secretxfer"
 	"github.com/Icewater1337/fridolin/internal/store"
@@ -67,6 +69,14 @@ On the host that runs Docker:
                        Linux with AppArmor, as root, once: install the core's
                        profile, which lets the brains' sandbox make its user
                        namespaces (Ubuntu restricts them); start and run use it
+  fridolin core pull --from REF@sha256:... [--check] [--json]
+                       check the image's build provenance (GitHub's attestation
+                       for image.yml on main), pull it by digest and tag it as
+                       this version's, for start (--check: only say whether it is here)
+  fridolin core rehearse [--json]
+                       import the latest export into a scratch volume
+                       (fridolin-move-rehearsal), check it, and remove the volume:
+                       never the core's own volume, never the lease
   fridolin core run [--] COMMAND...
                        run a fridolin command in a one-off container on the
                        volume, with the secrets: core import while the core
@@ -86,7 +96,12 @@ In the core (docker exec fridolin-core fridolin core ...):
                                  then put it in place of an empty data dir
                                  (--force moves what is there to core/replaced-*)
   fridolin core promote          take the core lease for this data dir
-  fridolin core status           who holds the core lease, and this device's id
+  fridolin core release          free the lease when this data dir holds it, without
+                                 a core running (a core move's target that gives up)
+  fridolin core status [--json]  who holds the core lease, this device's id and the
+                                 latest export (with --json: as a core move reads it)
+  core export takes --move ID (a core move's id, written into the export's
+  manifest and info) and --json (print the export's info).
 
 Flags of export, import, promote and status:
   --config PATH     config file (default: $FRIDOLIN_CONFIG, else ~/.fridolin/config.json)
@@ -129,9 +144,9 @@ func runCore(args []string, env coreEnv) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	switch sub {
-	case "export", "import", "promote", "status":
+	case "export", "import", "promote", "status", "release":
 		return coreInside(ctx, sub, args, env)
-	case "start", "stop", "update", "run", "build":
+	case "start", "stop", "update", "run", "build", "pull", "rehearse":
 		return coreHost(ctx, sub, args, env, defaultHostDeps(env))
 	case "migrate":
 		return coreMigrate(ctx, args, env, defaultHostDeps(env))
@@ -159,6 +174,9 @@ type insideFlags struct {
 	// import's moves from a native install (core migrate --from-native).
 	fromNative, rehearsal bool
 	allowPaths            multiFlag
+	// export's --move, and --json of export and status (#187).
+	move   string
+	asJSON bool
 }
 
 func coreInside(ctx context.Context, sub string, args []string, env coreEnv) int {
@@ -171,8 +189,12 @@ func coreInside(ctx context.Context, sub string, args []string, env coreEnv) int
 	fs.StringVar(&f.bucket, "bucket", "fridolin-vault", "the vault bucket")
 	if sub == "export" {
 		fs.BoolVar(&f.listFolders, "list-folders", false, "list the files of the brain folders the export would take along (one per line, <brain id>/<path>), and export nothing")
+		fs.StringVar(&f.move, "move", "", "the core move this export is for (m-YYYYMMDD-HHMM-hex)")
 		fs.BoolVar(&f.drift, "drift", false, "say only which brains' brain.json or scheduled agents on disk differ from the manifests you approved, and export nothing; exits 1 when the export would refuse")
 		fs.BoolVar(&f.useApproved, "use-approved", false, "take the brain folders along by the approved manifests although a brain.json on disk keeps more of its folder home")
+	}
+	if sub == "export" || sub == "status" {
+		fs.BoolVar(&f.asJSON, "json", false, "print the answer as JSON")
 	}
 	if sub == "import" {
 		fs.BoolVar(&f.latest, "latest", false, "import the export core/exports/latest names")
@@ -196,6 +218,9 @@ func coreInside(ctx context.Context, sub string, args []string, env coreEnv) int
 	case sub == "import" && f.latest == (f.key != ""):
 		fmt.Fprintln(env.stderr, "fridolin core import: pass --latest, or --key KEY")
 		return 2
+	case f.move != "" && nodeproto.CheckMoveID(f.move) != nil:
+		fmt.Fprintf(env.stderr, "fridolin core export: %v\n", nodeproto.CheckMoveID(f.move))
+		return 2
 	}
 	var err error
 	switch sub {
@@ -207,6 +232,8 @@ func coreInside(ctx context.Context, sub string, args []string, env coreEnv) int
 		err = corePromote(ctx, f, env)
 	case "status":
 		err = coreStatus(ctx, f, env)
+	case "release":
+		err = coreRelease(ctx, f, env)
 	}
 	if err != nil {
 		fmt.Fprintf(env.stderr, "fridolin core %s: %v\n", sub, err)
@@ -340,12 +367,20 @@ func coreExport(ctx context.Context, f insideFlags, env coreEnv) error {
 		return err
 	}
 	host, _ := os.Hostname()
+	device, err := lease.DeviceID(dataDir)
+	if err != nil {
+		return err
+	}
 	res, err := coreexport.Export(ctx, dataDir, []age.Recipient{keys.pq.Recipient()}, st, coreexport.ExportOptions{
 		DB: sqliteDB{}, SealKey: keys.seal, Version: version.String(), Hostname: host, BrainFolders: brains, Folders: folders,
+		DeviceID: device, Move: f.move,
 		Logf: func(format string, a ...any) { fmt.Fprintf(env.stderr, format+"\n", a...) },
 	})
 	if err != nil {
 		return err
+	}
+	if f.asJSON {
+		return json.NewEncoder(env.stdout).Encode(exportInfo(res.Info))
 	}
 	fmt.Fprintf(env.stdout, "Exported %s to %s (%s): %d files, %d databases.\n", dataDir, res.Key, where, res.Manifest.Files, len(res.Manifest.Databases))
 	return nil
@@ -647,6 +682,9 @@ func coreStatus(ctx context.Context, f insideFlags, env coreEnv) error {
 	if err != nil {
 		return err
 	}
+	if f.asJSON {
+		return coreStatusJSON(ctx, dataDir, f, env)
+	}
 	if id, err := lease.DeviceID(dataDir); err == nil {
 		fmt.Fprintf(env.stdout, "this device: %s (data dir %s)\n", id, dataDir)
 	} else {
@@ -721,6 +759,9 @@ type hostDeps struct {
 	// git runs git in dir and returns its output, for core build's
 	// box source; nil leaves that out.
 	git func(dir string, args ...string) (string, error)
+	// verify checks an image's build provenance for core pull
+	// (provenance.Verifier); nil refuses to pull.
+	verify func(ctx context.Context, image, repo string) error
 	// zone is the host's IANA time zone (FRIDOLIN_TZ, else
 	// platform.HostZone), which the container gets as TZ; "" when this
 	// machine does not say, and the container stays in UTC.
@@ -772,6 +813,8 @@ func defaultHostDeps(env coreEnv) hostDeps {
 	case "linux":
 		d.unitPath = filepath.Join(d.home, ".config", "systemd", "user", systemdUnitName)
 	}
+	gh, _ := exec.LookPath("gh")
+	d.verify = provenance.Verifier{Gh: gh, Environ: env.environ}.Verify
 	d.secrets = hostsecrets.ForHost(d.goos, env.getenv, d.home)
 	d.secretsPlace = hostsecrets.Place(d.goos, env.getenv, d.home)
 	d.baseEnv = composeBaseEnv(d.goos, env.environ)
@@ -944,6 +987,14 @@ func coreHost(ctx context.Context, sub string, args []string, env coreEnv, d hos
 	if sub == "build" {
 		fs.StringVar(&repo, "repo", ".", "the fridolin checkout to build the image from")
 	}
+	var pull pullFlags
+	if sub == "pull" {
+		fs.StringVar(&pull.image, "from", "", "the image by its digest: REGISTRY/fridolin-core@sha256:...")
+		fs.BoolVar(&pull.check, "check", false, "only say whether the image of this version is here")
+	}
+	if sub == "pull" || sub == "rehearse" {
+		fs.BoolVar(&pull.asJSON, "json", false, "print the answer as JSON")
+	}
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
 		return 0
@@ -962,6 +1013,9 @@ func coreHost(ctx context.Context, sub string, args []string, env coreEnv, d hos
 	}
 	if sub == "build" {
 		return coreBuild(ctx, repo, *image+":"+*tag, env, d)
+	}
+	if sub == "pull" {
+		return corePull(ctx, pull, *image+":"+*tag, env, d)
 	}
 	path := *compose
 	if path == "" {
@@ -1017,6 +1071,8 @@ func coreHost(ctx context.Context, sub string, args []string, env coreEnv, d hos
 	case "run":
 		// No published ports: the one-off container is no second dashboard.
 		err = compose1(append([]string{"run", "--rm", "--no-deps", "core"}, fs.Args()...)...)
+	case "rehearse":
+		return coreRehearse(ctx, pull.asJSON, path, override, armor, childEnv, env, d)
 	}
 	if err != nil {
 		fmt.Fprintf(env.stderr, "fridolin core %s: %v\n", sub, err)

@@ -278,6 +278,28 @@ func (a *Agent) coreHostCall(ctx context.Context, method string, params json.Raw
 			return nil, e
 		}
 		return a.coreForget()
+	case nodeproto.MethodCoreImagePull:
+		var p nodeproto.CoreImagePullParams
+		if e := decode(&p); e != nil {
+			return nil, e
+		}
+		return a.coreImage(ctx, p)
+	case nodeproto.MethodCoreRehearse:
+		var p nodeproto.CoreRehearseParams
+		if e := decode(&p); e != nil {
+			return nil, e
+		}
+		return a.coreRehearse(ctx, p)
+	case nodeproto.MethodCoreRelease:
+		return a.coreMoveAccept(params, nodeproto.MoveSource)
+	case nodeproto.MethodCoreHandoff:
+		return a.coreMoveAccept(params, nodeproto.MoveTarget)
+	case nodeproto.MethodCoreMoveStatus:
+		var p nodeproto.CoreMoveStatusParams
+		if e := decode(&p); e != nil {
+			return nil, e
+		}
+		return a.coreMoveStatus(p)
 	}
 	return nil, nodeproto.Errorf(nodeproto.CodeUnsupported, "no method %q", method)
 }
@@ -316,6 +338,8 @@ func (a *Agent) coreCheck(ctx context.Context) nodeproto.CoreCheckResult {
 		}
 	}
 	res.Setup, res.SetupOK, res.SetupNote = a.coreSetup(ctx)
+	res.Core, res.CoreError = a.coreRuntime(ctx)
+	res.MachineBound = a.machineBound()
 	return res
 }
 

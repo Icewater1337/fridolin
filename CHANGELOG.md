@@ -10,6 +10,22 @@ for compatibility.
 
 ### Added
 
+- **The core moves itself** (#187, second slice) between two native core
+  hosts: `fridolin nodes move-check SRC DST` is the pre-flight (versions,
+  image by digest, disk, the host secrets and the pin, the lease, what
+  stays behind), `fridolin nodes move SRC DST --yes` prepares the target
+  while the core runs (image, secrets, a rehearsal on a scratch volume),
+  then hands a move plan signed with the core's update key to both
+  agents, which stop, export, import, promote and start through the
+  lease and the exports alone, and roll back by themselves when the
+  target is not ready in time. `fridolin nodes move-status ID`, `POST
+  /api/nodes/move-check`, `POST /api/nodes/move`, `GET
+  /api/nodes/moves/{id}`. New core commands: `core status --json`,
+  `core export --move ID --json`, `core release`, `core pull --from
+  REF@sha256:…`, `core rehearse`. Exports now write their info beside
+  the archive (`core/exports/<time>.json`: the data dir's device id, the
+  move, the size; no data), and their manifest names the device id and
+  the move (docs/CORE.md, "The core moves itself").
 - **`timezone`**, your IANA time zone (docs/CONFIGURATION.md, "Time
   zone"; Settings → Advanced). Scheduled agents, standing intents, the
   memory consolidation, nightly snapshots and the daily backup run at

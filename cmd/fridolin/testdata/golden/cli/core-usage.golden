@@ -29,6 +29,14 @@ On the host that runs Docker:
                        Linux with AppArmor, as root, once: install the core's
                        profile, which lets the brains' sandbox make its user
                        namespaces (Ubuntu restricts them); start and run use it
+  fridolin core pull --from REF@sha256:... [--check] [--json]
+                       check the image's build provenance (GitHub's attestation
+                       for image.yml on main), pull it by digest and tag it as
+                       this version's, for start (--check: only say whether it is here)
+  fridolin core rehearse [--json]
+                       import the latest export into a scratch volume
+                       (fridolin-move-rehearsal), check it, and remove the volume:
+                       never the core's own volume, never the lease
   fridolin core run [--] COMMAND...
                        run a fridolin command in a one-off container on the
                        volume, with the secrets: core import while the core
@@ -48,7 +56,12 @@ In the core (docker exec fridolin-core fridolin core ...):
                                  then put it in place of an empty data dir
                                  (--force moves what is there to core/replaced-*)
   fridolin core promote          take the core lease for this data dir
-  fridolin core status           who holds the core lease, and this device's id
+  fridolin core release          free the lease when this data dir holds it, without
+                                 a core running (a core move's target that gives up)
+  fridolin core status [--json]  who holds the core lease, this device's id and the
+                                 latest export (with --json: as a core move reads it)
+  core export takes --move ID (a core move's id, written into the export's
+  manifest and info) and --json (print the export's info).
 
 Flags of export, import, promote and status:
   --config PATH     config file (default: $FRIDOLIN_CONFIG, else ~/.fridolin/config.json)
