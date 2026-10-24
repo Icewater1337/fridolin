@@ -9,6 +9,8 @@ import { toggle, textInput } from './fields.js';
 import { badge, spinner } from './common.js';
 import { errorMessage } from '../lib/errors.js';
 
+/** @import { DirectoryListing } from '../../types/api.js' */
+
 /**
  * folderBrowser({start, onPick(path, {create}), pickLabel, newLabel, signal})
  * returns an element. onPick receives an absolute path; create is true when
@@ -25,7 +27,9 @@ import { errorMessage } from '../lib/errors.js';
 export function folderBrowser({ start = '', onPick, pickLabel = 'Use this folder', newLabel = 'Use new folder', newHint = '', signal }) {
   let path = start;
   let hidden = false;
+  /** @type {DirectoryListing | null} */
   let data = null;
+  /** @type {AbortController | null} */
   let loading = null; // AbortController of the folder being loaded
   const crumbs = h('nav.fb-crumbs', { 'aria-label': 'Folder path' });
   const listEl = h('div.fb-list');
@@ -67,6 +71,7 @@ export function folderBrowser({ start = '', onPick, pickLabel = 'Use this folder
   // load before it, so a slow answer cannot replace a newer folder.
   // Leaving the page stops the one in progress.
   if (signal) signal.addEventListener('abort', () => { if (loading) loading.abort(); }, { once: true });
+  /** @param {string} p */
   async function load(p) {
     if (loading) loading.abort();
     if (signal && signal.aborted) return;
@@ -90,6 +95,7 @@ export function folderBrowser({ start = '', onPick, pickLabel = 'Use this folder
   }
 
   function paint() {
+    if (!data) return;
     const home = data.home.replace(/\/+$/, '');
     const rel = data.path === home ? '' : data.path.slice(home.length + 1);
     const segs = rel ? rel.split('/') : [];
