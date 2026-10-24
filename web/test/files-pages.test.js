@@ -173,3 +173,103 @@ test('the wiki’s front page lists the brains that have one', async (t) => {
   assert.ok(hrefs(root).includes('#/wiki/main'));
   assert.match(root.textContent, /3 pages/);
 });
+
+const byLabel = (el, label) => el.querySelectorAll('button').find((b) => b.getAttribute('aria-label') === label);
+const dialogButton = (label) => document.body.querySelectorAll('dialog button').find((b) => b.textContent === label);
+
+test('a writable folder takes uploads, and its entries are renamed and deleted', async (t) => {
+  const { root, calls } = await open(t, filesPage, { root: 'brain:main', path: 'docs' }, (path, init) => {
+    if (path === '/api/files/roots') return ROOTS;
+    if (path.startsWith('/api/files/list')) {
+      return { root: 'brain:main', path: 'docs', truncated: false, writable: true, upload: 'folder', rule: { folder: 'docs', mode: 'folder' }, entries: [{ name: 'plan.pdf', size: 2048, kind: 'pdf', mod_time: '2026-10-02T00:00:00Z' }] };
+    }
+    if (path === '/api/files/delete') return { root: 'brain:main', path: '.fridolin-trash/x/docs/plan.pdf' };
+    if (path.startsWith('/api/files/upload')) return { to: 'folder', files: [{ name: 'a.txt', path: 'docs/a.txt', size: 1 }] };
+    if (path === '/api/files/upload-rule') return { status: 'saved', init };
+    return { status: 404, body: { error: 'no' } };
+  });
+  assert.ok(byLabel(root, 'Delete plan.pdf'));
+  assert.ok(byLabel(root, 'Rename or move plan.pdf'));
+  assert.equal(root.querySelector('.files-rule select').value, 'folder', 'the folder’s own rule');
+
+  byLabel(root, 'Delete plan.pdf').click();
+  await settle(5);
+  dialogButton('Delete').click();
+  await settle(10);
+  assert.deepEqual(calls.find((c) => c.path === '/api/files/delete').body, { root: 'brain:main', path: 'docs/plan.pdf' });
+
+  const input = root.querySelector('.files-upload input[type=file]');
+  input.files = [new File(['x'], 'a.txt')];
+  input.dispatchEvent(new Event('change'));
+  await settle(10);
+  const up = calls.find((c) => c.path.startsWith('/api/files/upload'));
+  assert.equal(up.path, '/api/files/upload?root=brain%3Amain&path=docs');
+  assert.equal(up.method, 'POST');
+  assert.equal(up.headers['X-Bridge-Dashboard'], '1');
+  assert.equal(up.body.getAll('file')[0].name, 'a.txt');
+
+  const sel = root.querySelector('.files-rule select');
+  sel.value = 'brain';
+  sel.dispatchEvent(new Event('change'));
+  await settle(5);
+  assert.deepEqual(calls.find((c) => c.path === '/api/files/upload-rule').body, { root: 'brain:main', path: 'docs', mode: 'brain' });
+});
+
+test('a read-only folder offers no changes', async (t) => {
+  const { root } = await open(t, filesPage, { root: 'media:main', path: '' }, (path) => {
+    if (path === '/api/files/roots') return ROOTS;
+    if (path.startsWith('/api/files/list')) return { root: 'media:main', path: '', truncated: false, writable: false, upload: '', entries: [{ name: 'a.jpg', size: 1, kind: 'image', mod_time: '2026-10-02T00:00:00Z' }] };
+    return { status: 404, body: { error: 'no' } };
+  });
+  assert.equal(root.querySelector('.files-upload'), null);
+  assert.equal(root.querySelector('.files-actions'), null);
+  assert.equal(root.querySelector('.files-rule'), null);
+});
+
+test('an editable file is edited in place and saved with the version it started from', async (t) => {
+  const WRITABLE = { roots: [{ ...ROOTS.roots[0], writable: true }] };
+  let text = 'The plan.\n';
+  const { root, calls } = await open(t, filePage, { root: 'brain:main', path: 'docs/plan.txt' }, (path) => {
+    if (path === '/api/files/roots') return WRITABLE;
+    if (path.startsWith('/api/files/view')) return { root: 'brain:main', path: 'docs/plan.txt', name: 'plan.txt', size: text.length, mod_time: '2026-10-02T00:00:00Z', kind: 'text', text, editable: true, sha: 'v1' };
+    if (path.startsWith('/api/files/ticket')) return TICKET;
+    if (path === '/api/status') return { whatsapp: { own_number: '15551234567' } };
+    if (path === '/api/site') return { settings: { domain: 'example.com' } };
+    if (path === '/api/files/text') { text = 'Better.\n'; return { root: 'brain:main', path: 'docs/plan.txt', sha: 'v2', size: 8, commit: 'abc1234' }; }
+    return { status: 404, body: { error: 'no' } };
+  });
+  const ask = [...root.querySelectorAll('a')].find((a) => a.textContent.includes('Ask the brain'));
+  assert.equal(ask.getAttribute('href'), `https://wa.me/15551234567?text=${encodeURIComponent("About the file docs/plan.txt in the Main brain's folder: ")}`);
+  assert.ok(byLabel(root, 'Copy the link on your site'));
+  [...root.querySelectorAll('button')].find((b) => b.textContent === 'Edit').click();
+  await settle(5);
+  const area = root.querySelector('textarea.file-editor');
+  assert.equal(area.value, 'The plan.\n');
+  area.value = 'Better.\n';
+  [...root.querySelectorAll('button')].find((b) => b.textContent === 'Save').click();
+  await settle(10);
+  assert.deepEqual(calls.find((c) => c.path === '/api/files/text').body, { root: 'brain:main', path: 'docs/plan.txt', text: 'Better.\n', sha: 'v1' });
+  assert.equal(root.querySelector('textarea.file-editor'), null, 'back to the file');
+  assert.equal(root.querySelector('pre.file-text').textContent, 'Better.\n');
+});
+
+test('a wiki page you may edit is edited as Markdown', async (t) => {
+  const pages = { brain: 'main', label: 'Main', home: 'wiki/index.md', truncated: false, pages: [{ path: 'wiki/index.md', name: 'index', title: 'Home', section: 'wiki' }] };
+  const { root, calls } = await open(t, wikiPage, { brain: 'main', page: 'wiki/index.md' }, (path) => {
+    if (path === '/api/wiki/main/pages') return pages;
+    if (path.startsWith('/api/files/ticket')) return TICKET;
+    if (path.startsWith('/api/wiki/main/page')) return { brain: 'main', page: pages.pages[0], doc: DOC, backlinks: [], editable: true };
+    if (path.startsWith('/api/files/view')) return { kind: 'markdown', editable: true, sha: 's1', source: '# Home\n' };
+    if (path.startsWith('/api/files/history')) return { changes: [{ action: 'edit', path: 'wiki/index.md', by: 'dashboard', at: '2026-10-02T00:00:00Z', commit: 'abc', outcome: 'ok' }] };
+    return { status: 404, body: { error: 'no' } };
+  });
+  const hist = root.querySelector('details.file-history-box');
+  hist.open = true;
+  hist.dispatchEvent(new Event('toggle'));
+  await settle(5);
+  assert.match(hist.textContent, /edit wiki\/index\.md · dashboard/);
+  [...root.querySelectorAll('button')].find((b) => b.textContent === 'Edit').click();
+  await settle(10);
+  assert.ok(calls.some((c) => c.path === '/api/files/view?root=brain%3Amain&path=wiki%2Findex.md&source=1'));
+  assert.equal(root.querySelector('textarea.file-editor').value, '# Home\n');
+});
