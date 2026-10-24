@@ -24,6 +24,7 @@ export function capSummary(c) {
     const n = (c && c[k] && c[k].roots) ? c[k].roots.length : 0;
     if (n) parts.push(`${k} (${n} folder${n === 1 ? '' : 's'})`);
   }
+  if (c && c.core_host) parts.push('core-host');
   return parts.length ? parts.join(', ') : 'nothing';
 }
 

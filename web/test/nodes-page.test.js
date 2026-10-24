@@ -210,3 +210,21 @@ test('a node with terminal approved and online has a Terminal button', async (t)
   await settle();
   assert.equal(button(root, 'Terminal'), undefined, 'not while it is offline');
 });
+
+test('approving core-host says what it means first, with the device key', async (t) => {
+  const coreHost = { pending: true, fingerprint: 'a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90', send_to: [], approval: 'core-host lets fridolin move the core to this machine.' };
+  const decl = { ...declared, core_host: { hash: 'ab', send_to: [] } };
+  const { root, calls } = await openPage(t, [node({ device: 'approved', declared: decl, core_host: coreHost })]);
+  assert.match(root.textContent, /core-host waits for your approval/);
+  assert.match(root.textContent, /Core host: device key a1b2 c3d4/);
+  assert.match(root.textContent, /Offers.*core-host/);
+  button(root, 'Approve what it offers').click();
+  await settle();
+  const dialog = document.querySelector('dialog');
+  assert.match(dialog.textContent, /core-host lets fridolin move the core/);
+  assert.match(dialog.textContent, /a1b2 c3d4 e5f6 0718/);
+  assert.ok(!calls.some((c) => c.path.endsWith('/approve-commands')), 'nothing is approved before the owner confirms');
+  dialog.querySelectorAll('button').find((b) => b.textContent === 'Approve core-host').click();
+  await settle();
+  assert.ok(calls.some((c) => c.method === 'POST' && c.path === '/api/nodes/8233270f8a24/approve-commands'));
+});

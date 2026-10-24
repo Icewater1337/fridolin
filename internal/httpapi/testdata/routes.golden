@@ -88,6 +88,7 @@ POST /api/github/test
 POST /api/login
 POST /api/login/code
 POST /api/logout
+POST /api/nodes/core-secrets-transfer
 POST /api/nodes/join-code
 POST /api/nodes/{id}/approve
 POST /api/nodes/{id}/approve-commands

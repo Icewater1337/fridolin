@@ -12,6 +12,7 @@ import (
 	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
+	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/nodes"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 )
@@ -140,6 +141,10 @@ func (b *App) dashboardCommand(record func(id, outcome string)) string {
 func (b *App) nodeCommand(command, id string, record func(id, outcome string)) string {
 	var n *nodes.Node
 	var err error
+	coreHost := false
+	if cur, err := b.nodes.Registry().Get(id); err == nil {
+		coreHost = cur.Declared.CoreHost != nil && !nodeproto.Covers(cur.Approved, nodeproto.Capabilities{CoreHost: cur.Declared.CoreHost})
+	}
 	if command == "!revoke" {
 		n, err = b.nodes.Revoke(id)
 	} else if n, err = b.nodes.ApproveDevice(id); err == nil {
@@ -165,7 +170,33 @@ func (b *App) nodeCommand(command, id string, record func(id, outcome string)) s
 	if command == "!revoke" {
 		return outboundmsg.NodeRevokedReply(n.Name, n.ID)
 	}
-	return outboundmsg.NodeApprovedReply(n.Name, n.ID, n.Effective().Summary())
+	reply := outboundmsg.NodeApprovedReply(n.Name, n.ID, n.Effective().Summary())
+	if coreHost && n.Effective().CoreHost != nil {
+		reply += "\n\n" + outboundmsg.NodeCoreHostApprovedNote(nodeproto.CoreHostApproval)
+	}
+	return reply
+}
+
+// nodeCoreHost tells the owner, in their direct chat, that node n asks
+// for core-host, or changed its core-host.json, which waits for approval.
+func (b *App) nodeCoreHost(n *nodes.Node) {
+	cfg := b.cfgs.Get()
+	target := ownerChat(cfg)
+	if target == "" || b.outbox == nil || n.Declared.CoreHost == nil {
+		return
+	}
+	var trusts []string
+	for _, id := range n.Declared.CoreHost.SendTo {
+		name := id
+		if t, err := b.nodes.Registry().Get(id); err == nil {
+			name = t.Name + " (" + id + ")"
+		}
+		trusts = append(trusts, name)
+	}
+	msg := outboundmsg.NodeCoreHostAlert(n.Name, n.ID, nodeproto.Fingerprint(n.PublicKey), trusts, n.Approved.CoreHost != nil, nodeproto.CoreHostApproval)
+	if err := b.outbox.Text(context.Background(), target, msg, cfg.MaxChunkSize); err != nil {
+		log.Printf("nodes: telling the owner %s asks for core-host: %v", n.ID, err)
+	}
 }
 
 // nodeJoined tells the owner, in their direct chat, that a machine joined

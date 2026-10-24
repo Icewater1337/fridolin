@@ -77,6 +77,9 @@ func (c Config) Check() error {
 	if c.Capabilities.AndroidBuild != nil {
 		return errors.New(`capabilities.android_build: the agent declares it while it finds a JDK and the Android SDK; "android_build": false turns it off`)
 	}
+	if c.Capabilities.CoreHost != nil {
+		return errors.New("capabilities.core_host: core-host lives in core-host.json, which only this machine writes: fridolin node core-host on")
+	}
 	if c.Capabilities.Update != nil {
 		return errors.New(`capabilities.update: the agent declares it; "update": false turns it off`)
 	}
