@@ -89,9 +89,7 @@ func TestDetachedChildDoesNotHoldTheBrain(t *testing.T) {
 
 			// The one run slot is free for the next message, in another
 			// brain.
-			if err := os.Unsetenv("FRIDOLIN_FAKE_SETSID_CHILD"); err != nil {
-				t.Fatal(err)
-			}
+			unsetenv(t, "FRIDOLIN_FAKE_SETSID_CHILD")
 			next := brain.Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "next"}}
 			if _, _, _, err := mgr.Submit(next); err != nil {
 				t.Fatal(err)
