@@ -311,7 +311,7 @@ that `fridolin core start` passes in: the host's zone (on macOS the
 `/etc/localtime` link, on Linux `/etc/timezone` or `timedatectl`, on
 Windows its zone mapped to the IANA name), or `FRIDOLIN_TZ` when that is
 set in the shell; without either the container runs in UTC.
-`fridolin init` writes the machine's zone into a new config.
+`fridolin init` writes the machine's zone into a new config, unless it is UTC (the container's default), which it leaves unset.
 `fridolin doctor` says which zone schedules run in, and warns when it is
 unset and the bridge runs in UTC, or when it differs from the process's
 `TZ`.
