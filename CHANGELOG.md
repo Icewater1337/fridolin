@@ -913,6 +913,11 @@ for compatibility.
 
 ### Fixed
 
+- `fridolin core pull` (the first step of a core move) checks the
+  image's provenance for an owner whose GitHub name has capitals: the
+  repository named from the registry (`ghcr.io` lowercases it) did not
+  match the attestation's signer, so the pull always failed. It takes
+  the attestation's spelling, which `gh` still verifies (#187).
 - **Schedules in the core ran in UTC.** The container has `TZ=UTC`, so a
   `"daily 21:00"` agent ran at 23:00 in Zurich. After upgrading, run
   `fridolin core start` once (it now passes the host's zone), or set
