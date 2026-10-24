@@ -160,7 +160,10 @@
         "message": {"type": "string"},
         "brain_access": {"type": "boolean"},
         "phone_dir": {"anyOf": [{"const": ""}, {"$ref": "#/$defs/absolute_path"}]},
-        "phone_upload": {"type": "boolean"}
+        "phone_upload": {"type": "boolean"},
+        "voice": {"type": "boolean", "description": "Voice mode of the Plaud Sync app: spoken questions go to voice_brain, and the answer is read aloud on the phone. Needs phone_upload."},
+        "voice_brain": {"type": "string", "pattern": "^$|^[a-z0-9][a-z0-9_-]{0,39}$", "description": "The brain that answers voice questions; empty is the brain that handles DMs."},
+        "voice_quiet": {"type": "boolean", "description": "The answer to a voice question goes to the phone only, not also to WhatsApp."}
       }
     },
     "dashboard": {
