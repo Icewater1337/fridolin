@@ -495,8 +495,9 @@ machine must already be a node (path B). In short:
   to a cast that hides a mistake. A caught value is `unknown`: read it
   with `errorMessage(e)` and `errorName(e)` (`lib/errors.js`) and
   `errorStatus(e)` (`app/api.js`). `web/test/fake-dom-globals.d.ts`
-  describes the fake DOM the tests run in. The strict options still to
-  turn on, in order, are listed in `web/tsconfig.json`.
+  describes the fake DOM the tests run in. The modules are checked with
+  `"strict": true`; the tests not yet with `noImplicitAny` and
+  `strictNullChecks` (`web/test/tsconfig.json`).
 - The project was called whatsapp-claude-bridge before. Names from then
   that are on disk or that others rely on stay, each marked `compat:` in
   the code: the data dir `~/.whatsapp-claude-bridge`, which the bridge
