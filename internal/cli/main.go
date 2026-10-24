@@ -496,7 +496,12 @@ func initCmd(args []string) {
 		return
 	}
 	// The machine's time zone, the one its owner's schedules mean.
+	// UTC is left unset: in the core container it is the image's
+	// default rather than a choice, and unset follows a later TZ.
 	zone, err := platform.HostZone()
+	if zone == "UTC" || zone == "Etc/UTC" {
+		zone = ""
+	}
 	if err != nil {
 		fmt.Printf("%v: set \"timezone\" in %s to yours (such as Europe/Zurich), or schedules run in the bridge's own zone.\n", err, path)
 	}
