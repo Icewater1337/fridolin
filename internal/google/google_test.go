@@ -127,7 +127,7 @@ func TestCalendarCallProblems(t *testing.T) {
 
 // TestCalendarHintsNameTheDashboardsButtons: what a brain tells its owner
 // to click is a button the brain's Calendar card shows: "Connect Google
-// Calendar" until it is connected, "Sign in again" once Google refuses it.
+// Calendar" until it is connected, "Reconnect" once Google refuses it.
 func TestCalendarHintsNameTheDashboardsButtons(t *testing.T) {
 	t.Parallel()
 	js, err := os.ReadFile(filepath.Join(repoDir, "web", "assets", "components", "calendar.js"))
@@ -135,7 +135,7 @@ func TestCalendarHintsNameTheDashboardsButtons(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, notConnected := CallProblem(fs.ErrNotExist)
-	for _, label := range []string{"Sign in again", "Connect Google Calendar"} {
+	for _, label := range []string{"Reconnect", "Connect Google Calendar"} {
 		if !strings.Contains(calendarReconnectHint+notConnected, label) {
 			t.Errorf("no hint names %q", label)
 		}

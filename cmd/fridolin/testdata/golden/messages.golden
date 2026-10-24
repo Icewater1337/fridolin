@@ -96,6 +96,10 @@ plaudGivenUpAlert
 	⚠️ Plaud: the recording “Team sync” was not handed to brain notes: brain notes is not configured. It is still in Plaud, and the dashboard lists it (Integrations → Plaud).
 plaudExpiredAlert
 	⚠️ Plaud: the login expired, so new recordings are not arriving. Reconnect in the Fridolin dashboard (Integrations → Plaud).
+calendarGrantBrokenAlert(revoked)
+	⚠️ Google Calendar stopped working for Family: Google no longer accepts its sign-in (the access was removed, it expired, or the password changed). Open the Fridolin dashboard, Brains → Family → Calendar, and press Reconnect. This is the only message about it until it works again.
+calendarGrantBrokenAlert(reconsent)
+	⚠️ Google Calendar stopped working for Family: its Google sign-in has to be renewed. Open the Fridolin dashboard, Brains → Family → Calendar, and press Reconnect. This is the only message about it until it works again.
 plaudVoiceQuestion
 	🎙️ Was steht morgen an?
 fleetGroupNotice

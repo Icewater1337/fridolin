@@ -6,5 +6,6 @@ import (
 )
 
 func (b *App) newGoogleAPI() *httpapi.GoogleAPI {
-	return &httpapi.GoogleAPI{Google: func() httpapi.GoogleService { return b.google }, Brain: func(id string) *brain.Brain { return b.brainMgr.Get(id) }}
+	return &httpapi.GoogleAPI{Google: func() httpapi.GoogleService { return b.google }, Brain: func(id string) *brain.Brain { return b.brainMgr.Get(id) },
+		Brains: func() []*brain.Brain { return b.brainMgr.Brains() }}
 }

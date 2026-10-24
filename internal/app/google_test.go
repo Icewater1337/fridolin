@@ -1568,5 +1568,5 @@ var calendarScopes = []string{
 	"https://www.googleapis.com/auth/calendar.calendarlist.readonly", // the account's calendars, for the brain's page and `calendars`
 }
 
-const calendarReconnectHint = "Ask the owner to connect the calendar again in the dashboard: Brains → this brain → Calendar → Sign in again."
+const calendarReconnectHint = "Ask the owner to connect the calendar again in the dashboard: Brains → this brain → Calendar → Reconnect."
 const calendarCheckHint = "If it stays so, ask the owner to check that the calendar still exists and is shared with the brain's Google account, and which calendars the brain has: Brains → this brain → Calendar."

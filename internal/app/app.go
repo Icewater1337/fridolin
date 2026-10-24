@@ -428,7 +428,9 @@ func New(opts Options) (_ *App, err error) {
 	b.targets = newTargetService(cfgs, b.vault, b.nodes, opts.Container, b.logger)
 	b.github = newGitHubService(cfgs, b.env, opts.Container, b.logger)
 	b.vault.targets = b.targets
-	b.google = google.New(googleOptionsFor(cfgs))
+	googleOptions := googleOptionsFor(cfgs)
+	googleOptions.OnBroken = b.calendarGrantBroken
+	b.google = google.New(googleOptions)
 	b.backup = newProjectedBackup(cfgs, b.env, b.brainMgr, b.notifyBackup, b.vault.driveSuperseded, b.google)
 	b.plaud = NewPlaudManager(cfgs, b.env, b.brainMgr, b.submitHandOff, b.submitAsk, b.wa.SendMessage, func() string {
 		if d := b.site.Settings().Domain; d != "" {
@@ -471,7 +473,7 @@ func (b *App) Start(ctx context.Context) error {
 		Resume:           func(ctx context.Context) { b.outbox.Start(); b.resume(ctx) }, Connect: b.connectLoop,
 		Watch: func(ctx context.Context) { b.watchRequiredFiles(ctx, requiredFilesEvery) },
 		// The tailnet first: the node port listens on it.
-		Background: []func(context.Context){b.startTailnet, b.runLease, b.runB2Usage, b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start, b.vault.Start, b.targets.Start, b.watchApprovals, b.housekeeping.Start},
+		Background: []func(context.Context){b.startTailnet, b.runLease, b.runB2Usage, b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start, b.vault.Start, b.targets.Start, b.watchApprovals, b.housekeeping.Start, b.watchCalendarGrants},
 	})
 }
 

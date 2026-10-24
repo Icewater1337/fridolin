@@ -23,6 +23,7 @@ type BrainCalendarService interface {
 	InsertEvent(context.Context, *google.Token, string, map[string]any, string) (google.CalendarEvent, error)
 	DeleteEvent(context.Context, *google.Token, string, string) error
 	BusyTimes(context.Context, *google.Token, []string, time.Time, time.Time, string) ([]google.BusySlot, error)
+	Note(string, error)
 }
 type BrainAPI struct {
 	BrainForToken func(string) *brainruntime.Brain
@@ -164,10 +165,13 @@ func (a *BrainAPI) calendarCall(fn calendarHandler) func(w http.ResponseWriter, 
 				WriteErr(w, ce.status, ce.msg)
 				return
 			}
+			// The grant's health hears what Google said (google.Note).
+			a.Google().Note(br.ID(), err)
 			status, msg := google.CallProblem(err)
 			WriteErr(w, status, msg)
 			return
 		}
+		a.Google().Note(br.ID(), nil)
 		WriteJSON(w, http.StatusOK, out)
 	}
 }

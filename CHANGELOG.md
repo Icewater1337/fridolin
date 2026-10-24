@@ -34,6 +34,37 @@ for compatibility.
   keeps the settings added to `.env` (docs/NODES.md, "The core in a
   box"; docs/CORE.md, "Moving the core to a box").
 
+- **A calendar overview per brain.** A brain's Calendar card shows the
+  account, the sign-in's state (working, ends soon, revoked by Google,
+  needs reconnecting), when it last worked, its calendars with their
+  access and which are ticked, the default, and **Reconnect** next to
+  Disconnect. The bridge checks every connected brain's sign-in every six
+  hours. A broken one shows on the Overview page (`GET
+  /api/calendar/health`) and in `fridolin doctor` (`calendar-grants`), and
+  the owner gets one WhatsApp message about it. `GET
+  /api/brains/{id}/calendar` adds `health`. The brain's hint now names the
+  card's **Reconnect** button instead of "Sign in again".
+- **A guided Google setup.** Settings → Google sign-in (and a brain's
+  Calendar card before any client is set up) walks through Google Cloud
+  Console step by step: a link to each page (in your project once you
+  type its ID), the app name, scopes and redirect with copy buttons,
+  Google's "unverified app" screen and its 100-user cap explained. The
+  client goes in as the JSON file or as its ID and secret, and is checked
+  right after: `POST /api/google/client/check` asks Google's token
+  endpoint about a made-up code, which grants nothing, and says whether
+  Google knows the client. `GET /api/google/client` adds `source`,
+  `builtin` and `scopes` (docs/CALENDAR.md).
+- **A built-in Google client** for publishers' builds:
+  `FRIDOLIN_GOOGLE_CLIENT_ID` and `FRIDOLIN_GOOGLE_CLIENT_SECRET` in the
+  environment of `make build` or `scripts/build-release.sh` bake a Desktop
+  app client into the binary, so its users connect calendars and Drive
+  with one click. Public builds have none. A client pasted under Settings
+  always wins, and the dashboard labels the built-in one.
+- **Google sign-in from another machine.** A dashboard opened over the
+  tailnet opens Google in a new tab and takes the address Google sent it
+  back to (`POST /api/google/callback`), since `http://127.0.0.1:8765/`
+  does not load on that machine.
+
 - **Forgetting a former core host removes what moves brought it** (#266):
   "Forget them" in the keep/forget poll after a core move (or no vote in
   24 hours), and `!revoke` of a connected core host, now also remove the

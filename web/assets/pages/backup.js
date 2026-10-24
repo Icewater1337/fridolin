@@ -14,7 +14,7 @@ import { btn, copyButton, runBusy } from '../components/buttons.js';
 import { openDialog, confirmDialog } from '../components/dialog.js';
 import { field, textInput, toggle, select, linesArea, linesOf, nextId } from '../components/fields.js';
 import { pill, callout, timeAgo, mono, empty, pageHeader, spinner, loading } from '../components/common.js';
-import { googleClientSetup } from '../components/calendar.js';
+import { googleClientSetup, onThisMachine, pasteReturnBox } from '../components/calendar.js';
 import { errorMessage } from '../lib/errors.js';
 
 /** @import { PageModule } from '../app/page.js' */
@@ -196,9 +196,18 @@ export default /** @satisfies {PageModule} */ ({
     /** @param {boolean} reconnect */
     async function startConnect(reconnect) {
       const r = await post('/api/backup/connect', reconnect ? { reconnect: true } : undefined);
-      if (r && r.auth_url) window.location.assign(r.auth_url);
-      else await refresh();
+      if (r && r.auth_url && onThisMachine()) window.location.assign(r.auth_url);
+      else {
+        // From another machine Google's return address does not load
+        // there: Google gets a tab of its own, and this page the address
+        // it sent that tab to (pasteReturnBox).
+        if (r && r.auth_url) window.open(r.auth_url, '_blank', 'noopener');
+        await refresh();
+      }
     }
+    // Made once, so that a repaint keeps an address half pasted.
+    /** @type {HTMLElement | null} */
+    let returnBox = null;
 
     // Which Google client the sign-in uses, or the steps to add one.
     /**
@@ -212,7 +221,8 @@ export default /** @satisfies {PageModule} */ ({
             h('a', { href: '#/settings/google' }, 'Settings → Google sign-in'), ' (brains use it for their calendars too), or paste one here for Drive alone. Enable the Google Drive API in its project.'),
           googleClientSetup({ redirectUri: redirect, onSaved: () => refresh(), compact: true, drive: true }));
       }
-      const what = client.source === 'drive' ? 'the client added here for Drive' : 'your client under Settings → Google sign-in';
+      const what = client.source === 'drive' ? 'the client added here for Drive'
+        : client.source === 'builtin' ? 'the client built into this build' : 'your client under Settings → Google sign-in';
       const box = h('div');
       let pasting = false;
       return h('div.stack',
@@ -233,7 +243,8 @@ export default /** @satisfies {PageModule} */ ({
       }
       return h('div.stack',
         h('p', spinner(), ' Waiting for you to approve access at Google. This page notices by itself when you are done.'),
-        c.auth_url ? h('p', h('a', { href: c.auth_url }, 'Open Google’s sign-in', icon('external'))) : null);
+        c.auth_url ? h('p', h('a', { href: c.auth_url, target: onThisMachine() ? null : '_blank', rel: 'noopener noreferrer' }, 'Open Google’s sign-in', icon('external'))) : null,
+        onThisMachine() ? null : (returnBox ||= pasteReturnBox({ onDone: () => { returnBox = null; return refresh(); } })));
     }
 
     /** @param {{connect: BackupConnectJob | null, client: BackupClientStatus | null, redirect: string}} shown */

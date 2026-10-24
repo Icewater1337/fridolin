@@ -12,6 +12,11 @@
 #
 # The binary is pure Go (cgo off), so any machine can build any target; the
 # release workflow still builds each OS on its own runner to test it there.
+#
+# FRIDOLIN_GOOGLE_CLIENT_ID and FRIDOLIN_GOOGLE_CLIENT_SECRET, when set,
+# bake a Desktop app Google OAuth client into the binary
+# (internal/google/builtin.go), so its users connect Google without a
+# client of their own. The public releases leave them unset.
 
 set -euo pipefail
 
@@ -31,7 +36,7 @@ exe=""
 [ "$goos" = windows ] && exe=".exe"
 
 ( cd "$repo" && CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
-    go build -trimpath -ldflags "-s -w -X github.com/Icewater1337/fridolin/internal/version.version=$version" -o "$stage/$name/fridolin$exe" "$pkg" )
+    go build -trimpath -ldflags "-s -w -X github.com/Icewater1337/fridolin/internal/google.builtinClientID=${FRIDOLIN_GOOGLE_CLIENT_ID:-} -X github.com/Icewater1337/fridolin/internal/google.builtinClientSecret=${FRIDOLIN_GOOGLE_CLIENT_SECRET:-} -X github.com/Icewater1337/fridolin/internal/version.version=$version" -o "$stage/$name/fridolin$exe" "$pkg" )
 # What `fridolin service install` copies from tools/: the helpers and their
 # requirements, not their tests.
 cp "$repo"/tools/*.py "$repo"/tools/requirements*.txt "$stage/$name/tools/"
