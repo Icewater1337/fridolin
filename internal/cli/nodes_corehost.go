@@ -82,5 +82,9 @@ func writeCoreTransfer(w io.Writer, r httpapi.CoreSecretsTransferResponse) {
 	}
 	if r.Ran {
 		fmt.Fprintf(w, "\nMoved (move %s), end to end from %s to %s:\n  sent: %s\n  stored: %s\n  unchanged: %s\n", r.Move, r.Source.Name, r.Target.Name, list(r.Sent), list(r.Stored), list(r.Unchanged))
+		fmt.Fprintf(w, "  secret files sent: %s\n  written: %s\n  kept (there already): %s\n", list(r.FilesSent), list(r.FilesStored), list(r.FilesKept))
+		if r.FilesError != "" {
+			fmt.Fprintf(w, "  the secret files could not be read: %s\n", r.FilesError)
+		}
 	}
 }

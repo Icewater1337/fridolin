@@ -762,8 +762,9 @@ func (br *Brain) stopRun(run *brainRun) bool {
 // and be delivered, and is interrupted after that, which the Interrupted
 // hook hears of. shutdown returns once the worker has ended, its last
 // delivery done. A second signal can abandon a stuck shutdown. The activity viewer
-// stays, for the next start to replace.
-func (br *Brain) shutdown(grace time.Duration) {
+// stays, for the next start to replace. killWait is how long it waits for
+// the interrupted run before it logs that it is still waiting.
+func (br *Brain) shutdown(grace, killWait time.Duration) {
 	waiting := br.closeQueue()
 	br.sink.Waiting(br, waiting)
 	idle := make(chan struct{})
@@ -786,8 +787,8 @@ func (br *Brain) shutdown(grace time.Duration) {
 		}
 		select {
 		case <-idle:
-		case <-time.After(StopRunWait):
-			log.Printf("brain %s: worker still finishing %v after the interrupt; waiting for its delivery", br.id, StopRunWait)
+		case <-time.After(killWait):
+			log.Printf("brain %s: worker still finishing %v after the interrupt; waiting for its delivery", br.id, killWait)
 			// Closing the store now would lose an answer the worker is
 			// still handing to the outbox. The grace bounds the run, not
 			// the hand-off of its result.
@@ -1543,6 +1544,10 @@ type Options struct {
 	// ShutdownGrace is read when Stop reaches each live brain, at the old
 	// command policy lookup point. Nil uses the service's 15-second default.
 	ShutdownGrace func() time.Duration
+	// StopRunWait is how long Stop waits for a run it interrupted after
+	// the grace before it logs that it still waits for the delivery. Zero
+	// uses StopRunWait.
+	StopRunWait time.Duration
 }
 
 // brainApplyOptions is one reload's command projection. SetDirs runs under
@@ -1898,11 +1903,14 @@ func (bm *Manager) Stop() {
 	var wg sync.WaitGroup
 	for _, br := range brains {
 		wg.Go(func() {
-			grace := 15 * time.Second
+			grace, killWait := 15*time.Second, StopRunWait
 			if bm.options.ShutdownGrace != nil {
 				grace = bm.options.ShutdownGrace()
 			}
-			br.shutdown(grace)
+			if bm.options.StopRunWait > 0 {
+				killWait = bm.options.StopRunWait
+			}
+			br.shutdown(grace, killWait)
 		})
 	}
 	wg.Wait()

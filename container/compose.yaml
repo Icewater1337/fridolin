@@ -38,6 +38,11 @@ services:
       - TZ=${FRIDOLIN_TZ:-UTC}
     volumes:
       - fridolin-data:/data
+      # The home folder, kept: the credentials folder under ~ that a core
+      # move brings (sandbox.credentials_dir, #187) lives here; never in an
+      # export. A Mac that migrated a native install has its own home
+      # folder's binds instead (compose.host.yaml).
+      - fridolin-home:/var/lib/fridolin
     mem_limit: ${FRIDOLIN_MEMORY_LIMIT:-8g}
     # Least privilege for the bridge, which runs as uid 10001 and needs no
     # capability. Each brain's run is sandboxed with bubblewrap in user,
@@ -69,3 +74,5 @@ services:
 volumes:
   fridolin-data:
     name: ${FRIDOLIN_VOLUME:-fridolin-data}
+  fridolin-home:
+    name: fridolin-home
