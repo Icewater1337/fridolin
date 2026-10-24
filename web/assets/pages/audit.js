@@ -21,6 +21,8 @@ const KINDS = [
   ['lockdown', 'Lockdown'], ['unlock', 'Unlock'], ['skill_approved', 'Skill approved'],
   ['node_join_code', 'Join code (!join)'], ['dashboard_link', 'Sign-in link (!dashboard)'],
   ['node_approved', 'Node approved (!approve)'], ['node_revoked', 'Node revoked (!revoke)'],
+  ['core_move_requested', 'Core move asked (!movecore)'], ['core_move_approved', 'Core move voted'],
+  ['core_move_ended', 'Core move ended'], ['core_secrets', 'Host secrets kept or forgotten'],
   ['scheduled_command', 'Scheduled program on a node'],
 ];
 const KIND_LABEL = Object.fromEntries(KINDS);
