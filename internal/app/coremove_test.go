@@ -529,6 +529,7 @@ func (h *harness) signPlan(p nodeproto.MovePlan) nodeproto.SignedMovePlan {
 // and never refuses for that: the source's lease rules out two cores
 // (seen on two fresh Linux servers).
 func TestCoreMoveCheckFreshTarget(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts(h.b.nodes.Version(), true)
 	for _, c := range []struct{ fresh, noSecrets bool }{{true, false}, {false, true}} {
