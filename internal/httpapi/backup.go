@@ -212,6 +212,8 @@ func (a *BackupAPI) Versions(w http.ResponseWriter, r *http.Request) {
 	versions, err := a.Backup().Versions(r.Context(), id)
 	if err != nil {
 		status := http.StatusBadGateway
+		// Every other kind is the remote's failure: 502.
+		//exhaustive:ignore
 		switch apperr.KindOf(err) {
 		case apperr.Invalid:
 			status = http.StatusBadRequest

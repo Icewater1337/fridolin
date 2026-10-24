@@ -31,6 +31,7 @@ func backupOptions(cfgs *config.Store, env Environment, bm *BrainManager, notify
 func newProjectedBackup(cfgs *config.Store, env Environment, bm *BrainManager, notify func(context.Context, *brain.Brain, string) error, superseded func() bool, g *google.Auth) *backup.Manager {
 	opts := backupOptions(cfgs, env, bm, notify, g)
 	opts.Superseded = superseded
+	opts.Zone = func() *time.Location { return cfgs.Get().Location() }
 	m := backup.New(opts)
 	// Publication succeeds before the schedule moves; failed saves never reach this callback.
 	cfgs.Subscribe(func(prev, next *config.Settings) { m.SettingsChanged(BackupSettings(prev), BackupSettings(next)) })

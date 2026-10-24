@@ -2,12 +2,16 @@
 // links between them, backlinks, a table of contents and search across a
 // brain's pages or all of them (docs/FILES.md). #/wiki lists the brains;
 // #/wiki/<brain> opens its front page; #/wiki/<brain>/<path> a page.
-// Read-only; each page opened is written to the audit log.
+// You edit a page in place, its Markdown, and make new ones; each change
+// is audited and committed where the brain's folder is a git repository,
+// and listed under the page's History. Each page opened is written to the
+// audit log.
 
 import { get, qs } from '../app/api.js';
 import { h, mount, paint } from '../lib/dom.js';
 import { filesHref, rawHref, wikiHref } from '../lib/files.js';
 import { btn } from '../components/buttons.js';
+import { editOnOpen, historyBox, newFile, takeEditOnOpen, textEditor } from '../components/file-actions.js';
 import { empty, pageHeader, spinner, timeAgo } from '../components/common.js';
 import { textInput } from '../components/fields.js';
 import { icon } from '../components/icons.js';
@@ -93,15 +97,41 @@ function brainView(root, ctx, brain, page) {
       };
       const doc = markdownDoc(pg.doc, links);
       const hasH1 = pg.doc.body.some((n) => n.t === 'h1');
+      const rootId = `brain:${brain}`;
+      const edit = async () => {
+        const v = await get(`/api/files/view${qs({ root: rootId, path, source: '1' })}`, { signal: ctx.signal });
+        if (!v.editable) throw new Error('This page cannot be edited here.');
+        const editor = textEditor({
+          rootId, path, text: v.source, sha: v.sha,
+          onSaved: () => { ctx.dirty = null; brainView(root, ctx, brain, page); },
+          onCancel: () => { ctx.dirty = null; brainView(root, ctx, brain, page); },
+        });
+        ctx.dirty = () => editor.dirty();
+        paint(main, `edit:${path}`, () => h('div', pageHeader(`Editing ${title}`, path), editor));
+        editor.focus();
+      };
+      const tools = pg.editable ? h('div.toolbar.wiki-tools', h('div.toolbar-group',
+        btn('Edit', { icon: 'edit', small: true, onClick: edit }),
+        btn('New page', {
+          icon: 'plus', small: true,
+          onClick: async () => {
+            const folder = path.startsWith('memories/') ? 'memories' : 'wiki';
+            const p = await newFile(rootId, folder, { placeholder: 'people/alex.md' });
+            if (p) { editOnOpen(rootId, p); ctx.navigate(wikiHref(brain, p)); }
+          },
+        }))) : null;
+      if (pg.editable && takeEditOnOpen(rootId, path)) { edit(); return; }
       paint(main, `page:${path}:${pg.page.mod_time}`, () => h('div.md-layout',
         h('div',
+          tools,
           h('p.muted.small.wiki-meta', pg.page.section === 'memories' ? 'Memory note' : 'Wiki', ' · ', timeAgo(pg.page.mod_time, 'changed '), ' · ',
             h('a', { href: filesHref(`brain:${brain}`, path, false) }, path)),
           hasH1 ? null : h('h1.wiki-title', title),
           pg.doc.tags && pg.doc.tags.length ? h('div.wiki-tags', pg.doc.tags.map((t) => h('span.badge.neutral', t))) : null,
           h('div.card', doc),
           pg.backlinks.length ? h('section.wiki-backlinks', h('h3', 'Linked from'),
-            h('ul', pg.backlinks.map((b) => h('li', h('a', { href: wikiHref(brain, b.path) }, b.title))))) : null),
+            h('ul', pg.backlinks.map((b) => h('li', h('a', { href: wikiHref(brain, b.path) }, b.title))))) : null,
+          pg.editable ? historyBox(ctx, rootId, path) : null),
         markdownToc(pg.doc, doc)));
     }, (err) => {
       if (!ctx.dead) paint(main, 'error', () => h('div.card', empty(err.status === 404 ? 'No such page' : 'Could not open this page', err.status === 404 ? 'It may have been renamed or removed.' : err.message, btn('Front page', { href: wikiHref(brain, '') }))));

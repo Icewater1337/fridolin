@@ -4,9 +4,11 @@
 // modules. The pages are the site's own (web/builtin.js); what they show
 // comes from the bridge, which this process asks on its site listener with
 // the token it got through the secrets pipe, naming the signed-in account.
-// The bridge decides what that account's role may read, holds every path
-// to the brain folders and audits each view: this process only passes
-// requests on, for signed-in people, and answers back what the bridge says.
+// The bridge decides what that account's role may read and change, holds
+// every path to the brain folders and audits each view and change: this
+// process only passes requests on, for signed-in people, and answers back
+// what the bridge says. A change must carry X-Fridolin-Site, which a form
+// or a link of another site cannot send.
 
 import express from 'express'
 import { Readable } from 'node:stream'
@@ -20,11 +22,19 @@ export const BUILTIN_ROUTES = ['files', 'wiki']
 
 /** What the pages may ask, as /_fridolin/api/<path>: the bridge's /site-api/<path>. */
 const CALLS = [
-  /^files\/(roots|list|search|view|raw)$/,
+  /^files\/(roots|list|search|view|raw|history)$/,
   /^wiki$/,
   /^wiki\/search$/,
   /^wiki\/[a-z0-9][a-z0-9_-]{0,39}\/(pages|page)$/,
 ]
+
+/** The changes the pages may send, by method and path, with their body and its limit. */
+const WRITES: Record<string, { type: string; max: number }> = {
+  'PUT files/text': { type: 'application/json', max: 1 << 20 },
+  'POST files/move': { type: 'application/json', max: 1 << 20 },
+  'POST files/delete': { type: 'application/json', max: 1 << 20 },
+  'POST files/upload': { type: 'multipart/form-data', max: 1 << 30 },
+}
 
 /** Response headers passed back from the bridge. */
 const PASS_HEADERS = ['content-type', 'content-length', 'content-disposition', 'content-range', 'accept-ranges', 'last-modified', 'etag', 'content-security-policy']
@@ -39,10 +49,25 @@ export function builtinRoutes(opts: {
   const router = express.Router()
   const doFetch = opts.fetch ?? fetch
 
-  router.get('/_fridolin/api/*path', opts.requireAuth, async (req, res) => {
+  router.all('/_fridolin/api/*path', opts.requireAuth, async (req, res) => {
     const p = ([] as string[]).concat((req.params as { path: string | string[] }).path).join('/')
-    if (!CALLS.some(re => re.test(p))) {
+    const write = WRITES[`${req.method} ${p}`]
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      if (!CALLS.some(re => re.test(p))) {
+        res.status(404).json({ error: 'no such call' })
+        return
+      }
+    } else if (!write) {
       res.status(404).json({ error: 'no such call' })
+      return
+    } else if (req.get('x-fridolin-site') !== '1') {
+      res.status(403).json({ error: 'a change needs the X-Fridolin-Site header' })
+      return
+    } else if (!(req.get('content-type') || '').startsWith(write.type)) {
+      res.status(415).json({ error: `send ${write.type}` })
+      return
+    } else if (Number(req.get('content-length') || 0) > write.max) {
+      res.status(413).json({ error: 'too large' })
       return
     }
     if (!opts.bridge) {
@@ -63,9 +88,19 @@ export function builtinRoutes(opts: {
     if (range) headers.Range = range
     const abort = new AbortController()
     res.on('close', () => abort.abort())
+    const init: RequestInit & { duplex?: 'half' } = { method: req.method, headers, signal: abort.signal, redirect: 'error' }
+    if (write) {
+      // The body as it comes, never parsed here: the bridge reads it and
+      // holds it to its own limits.
+      headers['Content-Type'] = req.get('content-type')!
+      const len = req.get('content-length')
+      if (len) headers['Content-Length'] = len
+      init.body = Readable.toWeb(req) as unknown as RequestInit['body']
+      init.duplex = 'half'
+    }
     let upstream: Response
     try {
-      upstream = await doFetch(url.href, { headers, signal: abort.signal, redirect: 'error' })
+      upstream = await doFetch(url.href, init)
     } catch {
       if (!res.headersSent) res.status(502).json({ error: 'Fridolin did not answer; is the bridge running?' })
       return

@@ -1,6 +1,9 @@
 // The site's built-in Files and Wiki (docs/FILES.md): the brain folders
 // and wikis the signed-in account's role may see. Everything shown comes
-// from /_fridolin/api/, which the site passes to Fridolin. A page's
+// from /_fridolin/api/, which the site passes to Fridolin. An admin edits,
+// renames and deletes there; a role given uploads uploads into a brain's
+// upload folders. Fridolin decides what each may do and says so in what
+// it answers (writable, upload, editable); these pages only offer it. A page's
 // Markdown arrives as a tree of a few element names and texts, built here
 // with DOM calls only: nothing a brain wrote can become markup or script.
 
@@ -30,13 +33,20 @@ function h(tag, attrs, ...children) {
   return el;
 }
 
-async function api(path, params) {
+async function api(path, params, { method = 'GET', json, form } = {}) {
   const qs = params ? `?${new URLSearchParams(params)}` : '';
-  const r = await fetch(`/_fridolin/api/${path}${qs}`, { credentials: 'same-origin', cache: 'no-store' });
+  const init = { method, credentials: 'same-origin', cache: 'no-store', headers: {} };
+  if (method !== 'GET') {
+    // A change carries this header, which a form of another site cannot.
+    init.headers['X-Fridolin-Site'] = '1';
+    if (json) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(json); }
+    if (form) init.body = form;
+  }
+  const r = await fetch(`/_fridolin/api/${path}${qs}`, init);
   let body = null;
   try { body = await r.json(); } catch { /* empty */ }
   if (r.status === 401) { location.assign(`/?next=${encodeURIComponent(location.pathname + location.search)}`); throw new Error('Sign in first'); }
-  if (!r.ok) throw new Error((body && body.error) || `Error ${r.status}`);
+  if (!r.ok) throw Object.assign(new Error((body && body.error) || `Error ${r.status}`), { status: r.status });
   return body;
 }
 
@@ -69,6 +79,7 @@ function link(href, attrs, ...children) {
     onclick: (e) => {
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
       e.preventDefault();
+      notice = '';
       go(href);
     },
   }, ...children);
@@ -87,7 +98,7 @@ function frame(section, ...body) {
   app.replaceChildren(
     h('header', { class: 'topbar' }, h('h1', {}, link('/', { class: 'home-link' }, site.title)), nav,
       h('div', { class: 'who' }, h('span', me ? (me.name || me.email) : ''))),
-    h('div', { class: 'content wide' }, ...body));
+    h('div', { class: 'content wide' }, h('p', { id: 'notice', class: 'notice', role: 'status' }, notice), ...body));
 }
 
 function failure(err) {
@@ -186,18 +197,110 @@ async function folderView(brain, root, path, crumbs) {
       go(`${location.pathname}${next.size ? `?${next}` : ''}`);
     },
   }, search, sortSel, h('button', { type: 'submit' }, 'Find'));
+  const writable = !q && list.writable;
   const table = rows.length ? h('table', { class: 'files' },
-    h('thead', {}, h('tr', {}, h('th', {}, 'Name'), h('th', { class: 'num' }, 'Size'), h('th', {}, 'Modified'))),
+    h('thead', {}, h('tr', {}, h('th', {}, 'Name'), h('th', { class: 'num' }, 'Size'), h('th', {}, 'Modified'), writable ? h('th', { 'aria-label': 'Actions' }) : null)),
     h('tbody', {}, rows.map((e) => h('tr', {},
       h('td', {}, link(filesHref(brain, e.at, e.dir), {}, e.dir ? '📁 ' : '📄 ', q ? e.at : e.name)),
       h('td', { class: 'num' }, e.dir ? '' : fmtBytes(e.size)),
-      h('td', {}, fmtDate(e.mod_time))))))
+      h('td', {}, fmtDate(e.mod_time)),
+      writable ? h('td', { class: 'actions' },
+        h('button', { type: 'button', class: 'small', onclick: () => rename(root, e.at, () => render()) }, 'Rename'),
+        h('button', { type: 'button', class: 'small danger', onclick: () => remove(root, e.at, e.dir, () => render()) }, 'Delete')) : null))))
     : h('div', { class: 'empty' }, q ? 'Nothing found.' : 'This folder is empty.');
-  frame('files', crumbs, form, table, (list.truncated ? h('p', { class: 'muted' }, 'Only the first entries are shown.') : null));
+  const tools = q ? null : h('div', { class: 'toolbar' },
+    list.upload ? uploadForm(root, path, list.upload) : null,
+    writable ? h('button', { type: 'button', onclick: () => newFile(brain, root, path) }, 'New file') : null);
+  frame('files', crumbs, form, tools, table, (list.truncated ? h('p', { class: 'muted' }, 'Only the first entries are shown.') : null));
+}
+
+// ── changes ───────────────────────────────────────────────────────────────
+
+// What became of the last change, shown until another page is opened.
+let notice = '';
+function say(msg) {
+  notice = msg;
+  const el = document.getElementById('notice');
+  if (el) el.textContent = msg;
+}
+
+function committed(r) {
+  if (r && r.git_error) return `Saved, but ${r.git_error}.`;
+  return r && r.commit ? `Saved and committed (${r.commit}).` : 'Saved.';
+}
+
+async function rename(root, path, done) {
+  const to = window.prompt('Its new path in the folder (change the folders to move it):', path);
+  if (!to || to.trim() === path) return;
+  try {
+    say(committed(await api('files/move', null, { method: 'POST', json: { root, path, to: to.trim().replace(/^\/+|\/+$/g, '') } })));
+    done();
+  } catch (err) { say(err.message); }
+}
+
+async function remove(root, path, dir, done) {
+  if (!window.confirm(`Delete ${path}${dir ? ' and everything in it' : ''}? It goes into the folder’s trash, where the owner can get it back.`)) return;
+  try {
+    say(committed(await api('files/delete', null, { method: 'POST', json: { root, path } })));
+    done();
+  } catch (err) { say(err.message); }
+}
+
+async function newFile(brain, root, folder) {
+  let name = window.prompt('Name of the new Markdown or text file:', 'notes.md');
+  if (!name || !name.trim()) return;
+  name = name.trim().replace(/^\/+|\/+$/g, '');
+  if (!/\.[a-z0-9]+$/i.test(name)) name += '.md';
+  const path = folder ? `${folder}/${name}` : name;
+  try {
+    await api('files/text', null, { method: 'PUT', json: { root, path, text: '', sha: '' } });
+    go(`${filesHref(brain, path, false)}?edit=1`);
+  } catch (err) { say(err.message); }
+}
+
+function uploadForm(root, path, to) {
+  const input = h('input', { type: 'file', multiple: true, 'aria-label': 'Files to upload' });
+  const button = h('button', { type: 'submit', class: 'primary' }, to === 'brain' ? 'Send to the brain' : 'Upload');
+  return h('form', {
+    class: 'upload',
+    onsubmit: async (e) => {
+      e.preventDefault();
+      if (!input.files.length) return;
+      const form = new FormData();
+      for (const f of input.files) form.append('file', f, f.name);
+      button.disabled = true;
+      say('Uploading…');
+      try {
+        const r = await api('files/upload', { root, path }, { method: 'POST', form });
+        say(r.to === 'brain' ? `Sent to the brain, which files ${r.files.length === 1 ? 'it' : 'them'}: ${r.files.map((f) => f.name).join(', ')}.` : `Uploaded: ${r.files.map((f) => f.name).join(', ')}.`);
+        if (r.to !== 'brain') render();
+      } catch (err) { say(err.message); } finally { button.disabled = false; input.value = ''; }
+    },
+  }, input, button, to === 'brain' ? h('span', { class: 'muted small' }, ' Files go to the brain, which puts them where they belong.') : null);
+}
+
+// editor shows text to edit in place of body; save(text) saves it.
+function editor(text, save, cancel) {
+  const area = h('textarea', { class: 'editor', rows: 24, 'aria-label': 'Text' });
+  area.value = text;
+  const status = h('span', { class: 'muted small', role: 'status' });
+  const saveBtn = h('button', {
+    type: 'button',
+    class: 'primary',
+    onclick: async () => {
+      saveBtn.disabled = true;
+      try { await save(area.value); } catch (err) {
+        status.textContent = err.status === 409 ? 'It changed elsewhere meanwhile: copy your text, open the page again and make your change there.' : err.message;
+      } finally { saveBtn.disabled = false; }
+    },
+  }, 'Save');
+  window.onbeforeunload = () => (area.value !== text ? true : undefined);
+  return h('div', { class: 'edit' }, area, h('div', { class: 'toolbar' }, saveBtn,
+    h('button', { type: 'button', onclick: () => { if (area.value === text || window.confirm('Discard your changes?')) { window.onbeforeunload = null; cancel(); } } }, 'Cancel'), status));
 }
 
 async function fileView(brain, root, path, crumbs) {
-  const v = await api('files/view', { root, path });
+  const v = await api('files/view', { root, path, source: '1' });
   const ctx = {
     page: (p) => filesHref(brain, p, false),
     file: (p) => filesHref(brain, p, false),
@@ -220,12 +323,28 @@ async function fileView(brain, root, path, crumbs) {
       try { await navigator.clipboard.writeText(location.href); copy.textContent = 'Copied'; } catch { copy.textContent = 'Copy failed'; }
     },
   }, 'Copy link');
+  const holder = h('div', {}, body);
+  const edit = () => {
+    holder.replaceChildren(editor(v.kind === 'markdown' ? v.source : v.text, async (text) => {
+      const r = await api('files/text', null, { method: 'PUT', json: { root, path, text, sha: v.sha } });
+      window.onbeforeunload = null;
+      say(committed(r));
+      render();
+    }, () => holder.replaceChildren(body)));
+  };
+  const writable = me && me.role === 'admin';
+  const parent = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
   frame('files', crumbs,
     h('div', { class: 'filehead' },
       h('div', {}, h('h2', {}, v.name), h('p', { class: 'muted' }, `${fmtBytes(v.size)}${v.mod_time && !v.mod_time.startsWith('0001') ? ` · ${fmtDate(v.mod_time)}` : ''}`)),
-      h('div', { class: 'actions' }, copy, h('a', { class: 'button small', href: rawURL(root, path, true) }, 'Download'))),
+      h('div', { class: 'actions' }, copy,
+        v.editable ? h('button', { type: 'button', class: 'small', onclick: edit }, 'Edit') : null,
+        writable ? h('button', { type: 'button', class: 'small', onclick: () => rename(root, path, () => go(filesHref(brain, parent, true))) }, 'Rename') : null,
+        writable ? h('button', { type: 'button', class: 'small danger', onclick: () => remove(root, path, false, () => go(filesHref(brain, parent, true))) }, 'Delete') : null,
+        h('a', { class: 'button small', href: rawURL(root, path, true) }, 'Download'))),
     v.truncated ? h('p', { class: 'muted' }, 'Only the start of this file is shown; download it for all of it.') : null,
-    body);
+    holder);
+  if (v.editable && new URLSearchParams(location.search).get('edit') === '1') edit();
 }
 
 // ── Wiki ──────────────────────────────────────────────────────────────────
@@ -301,7 +420,18 @@ async function wikiPage(rest) {
       h('p', { class: 'muted' }, `${idx.pages.length} pages. Pick one on the left.`))));
     return;
   }
-  const pg = await api(`wiki/${encodeURIComponent(brain)}/page`, { path });
+  let pg;
+  try {
+    pg = await api(`wiki/${encodeURIComponent(brain)}/page`, { path });
+  } catch (err) {
+    if (err.status !== 404 || !name) throw err;
+    // An old link (a Quartz page's address, say) that names no page here:
+    // the pages that hold its words.
+    const words = name.split('/').pop().replace(/[-_]+/g, ' ');
+    frame('wiki', h('div', { class: 'wiki' }, side, h('div', { class: 'wiki-main' },
+      h('h2', {}, `No page “${name}”`), h('p', { class: 'muted' }, `Pages about “${words}”:`), await searchResults(brain, words))));
+    return;
+  }
   const root = `brain:${brain}`;
   const ctx = {
     page: (p, a) => pageHref(brain, p, a),
@@ -310,12 +440,26 @@ async function wikiPage(rest) {
   };
   const toc = pg.doc.toc.filter((t) => t.level > 1);
   document.title = `${pg.doc.title || pg.page.title} · ${site.title}`;
+  const article = h('article', { class: 'doc' }, renderDoc(pg.doc.body, ctx));
+  const holder = h('div', {}, article);
+  const edit = async () => {
+    try {
+      const v = await api('files/view', { root, path, source: '1' });
+      holder.replaceChildren(editor(v.source, async (text) => {
+        const r = await api('files/text', null, { method: 'PUT', json: { root, path, text, sha: v.sha } });
+        window.onbeforeunload = null;
+        say(committed(r));
+        render();
+      }, () => holder.replaceChildren(article)));
+    } catch (err) { say(err.message); }
+  };
   frame('wiki', h('div', { class: 'wiki' }, side,
     h('div', { class: 'wiki-main' },
-      h('p', { class: 'muted small' }, `${idx.label} · ${pg.page.section === 'memories' ? 'Memory note' : 'Wiki'} · edited ${fmtDate(pg.page.mod_time)}`),
+      h('p', { class: 'muted small' }, `${idx.label} · ${pg.page.section === 'memories' ? 'Memory note' : 'Wiki'} · edited ${fmtDate(pg.page.mod_time)} `,
+        pg.editable ? h('button', { type: 'button', class: 'small', onclick: edit }, 'Edit') : null),
       pg.doc.title && !pg.doc.body.some((n) => n.t === 'h1') ? h('h1', {}, pg.doc.title) : null,
       pg.doc.tags && pg.doc.tags.length ? h('p', { class: 'tags' }, pg.doc.tags.map((t) => h('span', { class: 'tag' }, t))) : null,
-      h('article', { class: 'doc' }, renderDoc(pg.doc.body, ctx)),
+      holder,
       pg.backlinks.length ? h('section', { class: 'backlinks' }, h('h3', {}, 'Linked from'),
         h('ul', {}, pg.backlinks.map((b) => h('li', {}, link(pageHref(brain, b.path), {}, b.title))))) : null),
     toc.length ? h('nav', { class: 'toc', 'aria-label': 'On this page' }, h('h4', {}, 'On this page'),

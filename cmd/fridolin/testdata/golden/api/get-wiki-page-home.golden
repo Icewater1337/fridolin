@@ -89,6 +89,7 @@ Content-Type: application/json
       }
     ]
   },
+  "editable": true,
   "page": {
     "mod_time": "<MOD_TIME>",
     "name": "index",

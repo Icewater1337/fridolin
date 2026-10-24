@@ -212,3 +212,28 @@ export function qs(params) {
   const s = p.toString();
   return s ? `?${s}` : '';
 }
+
+/**
+ * Uploads files (File objects) with a POST of path as multipart, each in a
+ * part named file, signed in as the API's calls are. No deadline: a large
+ * file takes as long as it takes, until signal aborts. Resolves with the
+ * parsed JSON, rejects with an ApiError.
+ */
+export async function upload(path, files, { signal } = {}) {
+  const body = new FormData();
+  for (const f of files) body.append('file', f, f.name);
+  const headers = { Accept: 'application/json', 'X-Bridge-Dashboard': '1' };
+  const binding = sessionBinding();
+  if (binding) headers['X-Bridge-Session'] = binding;
+  let res;
+  try {
+    res = await fetch(path, { method: 'POST', headers, body, signal, cache: 'no-store', credentials: 'same-origin' });
+  } catch (e) {
+    if ((signal && signal.aborted) || (e && e.name === 'AbortError')) throw e;
+    throw new ApiError('Cannot reach the bridge. Is it still running?', 0, null);
+  }
+  let data = null;
+  try { data = JSON.parse(await res.text()); } catch { /* not JSON */ }
+  if (!res.ok) throw new ApiError((data && data.error) || `Upload failed (${res.status} ${res.statusText})`, res.status, data);
+  return data;
+}

@@ -9,8 +9,11 @@ two places:
    each role may see.
 
 Both read the same folders through the same code in the bridge, which
-decides what each reader may see and writes every view to the audit log.
-Both only read: nothing here changes a file.
+decides what each reader may see and change, and writes every view and
+every change to the audit log. You edit, upload, rename, move and delete
+where a folder is writable ([Changing files](#changing-files)); on the
+site an admin does as you do, and a role you allow uploads into a
+brain's upload folders.
 
 ## Which folders
 
@@ -19,6 +22,9 @@ Both only read: nothing here changes a file.
 | Each running brain's folder | the brain's `brain_dirs` entry, on the core | yes, per role |
 | Each brain's media inbox: what came in on WhatsApp and through `/ingest` | `<media_dir>/<brain>` | no |
 | The folders an approved node lends (its `fs` roots) | on the node; shown while it is online | no |
+
+A brain's folder is writable; a media inbox is read-only; a node's folder
+is writable where the node granted it for writing.
 
 The Files page groups them by kind, with where each lives (*On the core*,
 *On <node>*), whether it is backed up, and the brain's `backup.exclude`
@@ -127,9 +133,16 @@ without a repository of modules; no module may take those routes. Its
 home page shows a tile for each when the account's role sees a brain.
 
 **Who sees what** is set on the dashboard's Site page, under *Files and
-Wiki*: each role is given the brains it may see. `admin` sees every
-brain, and the parts of it hidden from other roles. A role with no brains
-sees an empty page. Media inboxes and node folders are never on the site.
+Wiki*: each role is given the brains it may see, and of those the brains
+it may upload to ([Uploads](#uploads)). `admin` sees every brain, and the
+parts of it hidden from other roles, and changes them as you do on the
+dashboard. A role with no brains sees an empty page. Media inboxes and
+node folders are never on the site.
+
+A change on the site goes through the site process to the bridge, which
+decides again whether the account may make it. The page sends each with a
+header (`X-Fridolin-Site`) that a form or a link of another site cannot
+send; the sign-in cookie is `SameSite=Lax` too.
 
 **`wiki.<domain>`**: a host name `wiki.<domain>` (or `files.<domain>`) that
 the tunnel sends to the site redirects to `https://<domain>/wiki/…`
@@ -139,13 +152,95 @@ the tunnel sends to the site redirects to `https://<domain>/wiki/…`
 **How the site reaches the folders**: the site process cannot read brain
 folders, and its sandbox keeps it off the bridge's own port. The bridge
 answers it on a port of its own on the loopback, the *site bridge*, which
-serves only these reads, with a token made at startup and handed to the
+serves only these calls, with a token made at startup and handed to the
 site through its secrets pipe. The site names the signed-in account in
 each request; the bridge looks it up in the site's accounts, and lets it
-read what its role may see. Module code runs in the site's process and
+read what its role may see, and change what its role may change. Module code runs in the site's process and
 could make the same requests, as it can read the site's accounts and
 session key: approving module code trusts it with what the site's roles
 may read ([SITE.md](SITE.md#what-a-module-can-reach)).
+
+## Changing files
+
+Where a folder is writable, the dashboard (and a site admin) changes what
+is in it:
+
+- **Edit** a text or Markdown file in place, up to 512 KiB, on its page
+  (*Edit*), or a wiki page on its page. Saving sends back the version the
+  edit started from: a file that changed meanwhile, say because the brain
+  wrote it, is not overwritten; you copy your text and edit it again. The
+  file is replaced whole, through a new file beside it, so that a reader
+  never sees half of it. *New file* (a folder) and *New page* (the wiki)
+  make a Markdown or text file, with the folders its name names.
+- **Upload** one file or many into the folder you are in (*Upload*), up
+  to 200 MiB each, 20 at once; a node's folder takes 16 MiB a file. A
+  name that is taken gets " (2)", " (3)"…: an upload never replaces a
+  file. A name Fridolin hides (a secret, what the backup leaves out)
+  cannot be uploaded; a leading dot is dropped.
+- **Rename or move** a file or folder within its folder (*Rename*, or ✎
+  in the list): give its new path; the folder it goes to must be there,
+  and nothing may be there by that name.
+- **Delete** a file or folder, after asking: it moves into the folder's
+  trash, `.fridolin-trash/<date-time>/<path>`, which Fridolin does not
+  show; empty it on the computer when you are sure.
+
+None of these touches what Fridolin hides, in either direction: a hidden
+path cannot be written, renamed, moved to or deleted, and a folder that
+holds anything hidden is not moved or deleted (that would show it, or
+delete what you never saw). `brain.json`, the history and the run logs
+are Fridolin's to write: edit the brain on its page. A node's folder is
+edited and uploaded into through the node (`fs.write`); rename and delete
+its files on the node itself.
+
+**History.** Each change is an audit line of kind `file_change`; a file's
+page, and a wiki page, list the changes made to it there (*History*):
+what, by whom, when, and its commit.
+
+**Git.** Where the brain's folder is a git repository of its own (it
+holds `.git`), each change is committed: `Edit wiki/x.md (Fridolin, by
+dashboard)`, author Fridolin, only the paths it changed. git runs as the
+brain's own runs do, inside its sandbox, with hooks and fsmonitor off, so
+what the brain put into its `.git` does nothing it could not do itself. A
+change whose commit fails is still made; the page says why it was not
+committed (a path the repository ignores, say).
+
+## Uploads
+
+What becomes of an upload depends on the folder:
+
+- **It lands in the folder**, the default for you and a site admin.
+- **It goes to the brain**, in a folder whose rule says so: the files go
+  to the brain's media inbox and are handed to it as files sent on
+  WhatsApp would be, told where the uploader put them; the brain files
+  each where it belongs, and answers in its reply chat
+  ([BRAINS.md](BRAINS.md#brainjson), `reply_chat`).
+
+The rule is per folder, with its subfolders, in `brain.json`'s
+`files.uploads` (set on the Files page, in the folder: *Uploads from the
+site*):
+
+```json
+"files": { "uploads": [
+  { "folder": "documents", "to_brain": true },
+  { "folder": "inbox/scans" }
+] }
+```
+
+A folder listed there takes uploads from the **site roles** you let upload
+to the brain (Site → Files and Wiki, *May upload to*): into `documents/`
+they go to the brain, into `inbox/scans/` they land there. A role uploads
+nowhere else, edits nothing, and renames and deletes nothing. You and a
+site admin upload into any writable folder, and to the brain in a
+`to_brain` one.
+
+## Ask the brain, and links
+
+A brain's file has **Ask the brain**: it opens your WhatsApp chat with
+Fridolin (`wa.me/<its number>`) with a question about the file begun,
+for you to finish and send. **Copy the link** copies the file's address
+on your site, `https://<domain>/files/<brain>/<path>`, for whoever's
+role sees the brain, where the site has a domain; else the dashboard's
+address of its page.
 
 ## Audit
 
@@ -155,6 +250,13 @@ Every view is a line of kind `file_view` in the audit log
 `download`, `wiki`; on the site also `list`, `search` and `wiki-search`),
 the folder and the path, and `outcome` `ok` or why it was refused. A video
 that streams in pieces is one line.
+
+Every change, and every change refused, is a line of kind `file_change`:
+`detail` is the action (`edit`, `create`, `upload`, `move`, `delete`,
+`upload-rule <mode>`), the folder and the path (`<path> -> <to>` for a
+move, and for a delete where it went in the trash), and `outcome` `ok`,
+`ok; commit <hash>`, `ok; handed to the brain: <names>`, or why it was
+refused.
 
 ## API
 
@@ -173,11 +275,24 @@ The dashboard's routes, with its token or session like the rest of
 | `GET /api/wiki/{brain}/pages` | the brain's `pages` (`path`, `name`, `title`, `section`), its `home` |
 | `GET /api/wiki/{brain}/page?path=` | the page rendered (`doc`), with its `backlinks`; without `path`, the front page |
 | `GET /api/wiki/search?q=&brain=` | up to 50 `hits` with a `snippet` |
+| `GET /api/files/history?root=&path=` | the file's `changes` made here, newest first: `at`, `by`, `action`, `path`, `to`, `commit`, `outcome` |
+| `PUT /api/files/text` | `{"root", "path", "text", "sha"}`: replaces a text file whose version is still `sha` (from the view), or with `sha` `""` creates one; the new `sha`, `size`, `mod_time`, and `commit` or `git_error`; `409` when it changed meanwhile or exists |
+| `POST /api/files/upload?root=&path=` | `multipart/form-data`, each file a part named `file`: `{"to": "folder", "files": [{name, path, size}], "commit"}`, or `202` with `"to": "brain"` |
+| `POST /api/files/move` | `{"root", "path", "to"}`: its new `path` |
+| `POST /api/files/delete` | `{"root", "path"}`: where in the trash it went, as `path` |
+| `PUT /api/files/upload-rule` | `{"root", "path", "mode"}`, mode `folder`, `brain` or `""`: the folder's rule in `brain.json` `files.uploads` |
 
-A path that is hidden, leaves the folder or does not exist is `404` alike.
-The site bridge serves the same calls under `/site-api/`.
+A folder's listing says what the reader may do there: `writable`,
+`upload` (`folder`, `brain` or `""`) and, for you, the `rule` it lies
+under. A file's view says `editable`, with its `sha`, and its Markdown as
+`source` with `?source=1`; a wiki page says `editable`.
+
+A path that is hidden, leaves the folder or does not exist is `404` alike;
+a change the reader may not make is `403`. The site bridge serves the same
+calls under `/site-api/`, but for `upload-rule`.
 
 ## Not yet
 
-Editing a page or a text file in place, uploading, renaming, moving and
-deleting are a second phase; until then everything is read-only.
+Renaming and deleting in a node's folder, searching one, and opening an
+old version of a file from its history (`git show` does, where the folder
+is a repository).

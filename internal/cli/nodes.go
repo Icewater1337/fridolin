@@ -41,6 +41,14 @@ Usage:
                                            move the host secrets from core host SRC to
                                            core host DST over the node channel, end to
                                            end; without --yes only checks both sides
+  fridolin nodes move-check SRC DST        the pre-flight of moving the core from core
+                                           host SRC to DST: versions, image, disk,
+                                           secrets, the lease, what stays behind
+  fridolin nodes move SRC DST [--yes] [--no-wait]
+                                           move the core: image, secrets, rehearsal,
+                                           then a signed plan both hosts carry out;
+                                           without --yes only the pre-flight
+  fridolin nodes move-status ID            how move ID goes, from the core that runs
 
 Each asks the running bridge, with the dashboard token. Flags:
   --config PATH     config file (default: $FRIDOLIN_CONFIG, else
@@ -75,7 +83,7 @@ func nodesCmd(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 2
 	}
-	want := map[string][2]int{"list": {0, 0}, "join-code": {0, 0}, "approve": {1, 1}, "revoke": {1, 1}, "tags": {1, 2}, "call": {2, 3}, "update": {0, 1}, "auto-update": {2, 2}, "core-secrets-transfer": {2, 2}}
+	want := map[string][2]int{"list": {0, 0}, "join-code": {0, 0}, "approve": {1, 1}, "revoke": {1, 1}, "tags": {1, 2}, "call": {2, 3}, "update": {0, 1}, "auto-update": {2, 2}, "core-secrets-transfer": {2, 2}, "move-check": {2, 2}, "move": {2, 2}, "move-status": {1, 1}}
 	n, ok := want[sub]
 	if !ok {
 		fmt.Fprintf(stderr, "unknown nodes command %q\n\n%s", sub, nodesUsage)
@@ -89,12 +97,12 @@ func nodesCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "--commands goes with approve")
 		return 2
 	}
-	if (*all || *force || *noWait) && sub != "update" {
-		fmt.Fprintln(stderr, "--all, --force and --no-wait go with update")
+	if (*all || *force) && sub != "update" || *noWait && sub != "update" && sub != "move" {
+		fmt.Fprintln(stderr, "--all and --force go with update, --no-wait with update and move")
 		return 2
 	}
-	if (*yes || *replace) && sub != "core-secrets-transfer" {
-		fmt.Fprintln(stderr, "--yes and --replace go with core-secrets-transfer")
+	if *replace && sub != "core-secrets-transfer" || *yes && sub != "core-secrets-transfer" && sub != "move" {
+		fmt.Fprintln(stderr, "--replace goes with core-secrets-transfer, --yes with it and move")
 		return 2
 	}
 	if sub == "update" && *all == (len(pos) == 1) {
@@ -209,6 +217,15 @@ func nodesCmd(args []string, stdout, stderr io.Writer) int {
 		return nodesUpdate(pos, *all, *force, *noWait, call, stdout, stderr)
 	case "core-secrets-transfer":
 		return nodesCoreSecretsTransfer(cfg, pos[0], pos[1], *yes, *replace, *asJSON, stdout, stderr)
+	case "move-check", "move", "move-status":
+		api := func(method, path string, body, out any) error { return controlcli.API(cfg, method, path, body, out) }
+		switch sub {
+		case "move-check":
+			return nodesMoveCheck(api, pos[0], pos[1], *asJSON, stdout, stderr)
+		case "move":
+			return nodesMove(api, pos[0], pos[1], *yes, *noWait, *asJSON, stdout, stderr)
+		}
+		return nodesMoveStatus(api, pos[0], *asJSON, stdout, stderr)
 	}
 	return 0
 }
@@ -304,6 +321,15 @@ func writeJoinCode(w io.Writer, resp httpapi.JoinCodeResponse) {
 		sh, ps = httpapi.JoinCommands(resp.Code, resp.Core)
 	}
 	fmt.Fprintf(w, "Join code %s, valid once until %s (core %s).\nOn the new machine, paste one line:\n\n", resp.Code, resp.ExpiresAt.Local().Format("15:04"), resp.Core)
+	if resp.BoxCommand != "" {
+		// A core that knows where its box script is published offers a
+		// node in a box first, as !join does (docs/NODES.md).
+		fmt.Fprintf(w, "A node in a box (Docker; it asks for the rest):\n  macOS, Linux (sh):\n    %s\n", resp.BoxCommand)
+		if resp.BoxCommandPowerShell != "" {
+			fmt.Fprintf(w, "  Windows (PowerShell):\n    %s\n", resp.BoxCommandPowerShell)
+		}
+		fmt.Fprint(w, "\nOr natively, with fridolin installed on it:\n")
+	}
 	fmt.Fprintf(w, "  macOS, Linux (sh):\n    %s\n", sh)
 	if ps != "" {
 		fmt.Fprintf(w, "  Windows (PowerShell):\n    %s\n", ps)

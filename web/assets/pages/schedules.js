@@ -12,7 +12,7 @@ import { brainsResource, nodesResource, resource, schedulesResource } from '../a
 import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { fieldDiff, lineDiff, sortKeys } from '../lib/diff.js';
 import { fmtDuration, prettyJSON } from '../lib/format.js';
-import { STATES, fileJSON, filterAgents, groupByBrain, inTime, permissionsOf, runTime, stateOf, varsText } from '../lib/schedules.js';
+import { STATES, fileJSON, filterAgents, groupByBrain, inTime, permissionsOf, runTime, stateOf, varsText, zoneNote } from '../lib/schedules.js';
 import { agentWizard } from '../components/agent-wizard.js';
 import { btn } from '../components/buttons.js';
 import { badge, callout, empty, kv, mono, pageHeader, spinner, timeAgo } from '../components/common.js';
@@ -80,11 +80,21 @@ async function removeAgent(a, after) {
   } catch (e) { toastError(e); }
 }
 
+// How a command agent's badge looks, by how its program stands on its node.
+const PROGRAM_TONE = { allowed: 'ok', waiting: 'info', refused: 'bad', 'not-accepted': 'bad', 'no-node': 'bad' };
+
+/** How a's program stands on its node, when that needs saying: a line for its card. */
+function programNote(a) {
+  const p = a.program;
+  if (!p || p.state === 'allowed' || a.state === 'pending') return null;
+  return h(`p.small.${p.state === 'waiting' ? 'muted' : 'warn-text'}`, p.detail);
+}
+
 /** What agent a may do, as small badges: risk, node, GitHub, results. */
 function mayDo(a) {
   const s = a.schedule || {};
   const out = [];
-  if (s.command) out.push(badge(`node ${s.command.node}`, 'warn', 'Runs a program on this node'));
+  if (s.command) out.push(badge(`node ${s.command.node}`, PROGRAM_TONE[a.program && a.program.state] || 'warn', a.program ? a.program.detail : 'Runs a program on this node'));
   else out.push(riskBadge(s.risk || 'write'));
   if (s.github) {
     const perms = Object.entries(s.github.permissions || {}).map(([k, v]) => `${k}:${v}`).join(' ');
@@ -127,6 +137,10 @@ function reviewPanel(a, { after } = {}) {
     parts.push(callout('warn', 'Look closely: this agent may', h('ul.plain-list', a.risky.map((x) => h('li', x)))));
   }
   if (disk) parts.push(h('h4', 'What it may do'), h('ul.plain-list', permissionsOf(disk, a.chat).map((x) => h('li', x))));
+  if (a.program && r.status !== 'removed') {
+    const p = a.program;
+    parts.push(callout(p.state === 'allowed' || p.state === 'waiting' ? 'info' : 'warn', p.state === 'waiting' ? 'Approving adds its program to the node' : `Its program on node ${p.node_name || disk.command.node}`, p.detail));
+  }
   if (r.status === 'changed') {
     const rows = fieldDiff(r.approved || {}, disk);
     parts.push(h('h4', 'The change'), rows.length ? h('div.table-wrap', h('table.table.diff-table',
@@ -197,6 +211,7 @@ function agentCard(open, toggleOpen) {
       h('p.muted.small', a.schedule.description || a.task),
       facts(a),
       mayDo(a),
+      programNote(a),
       a.problem ? h('p.small.warn-text', a.problem) : null,
       reviewing ? reviewPanel(a) : null,
       agentActions(a));
@@ -223,6 +238,7 @@ function reminderRow(r) {
 
 function renderList(root, ctx) {
   const offNote = h('div');
+  const zoneBox = h('div');
   const pendingBox = h('div');
   const filters = { brain: '', state: '', q: '' };
   const brainSel = select([['', 'All brains']], '');
@@ -237,7 +253,7 @@ function renderList(root, ctx) {
   mount(root,
     pageHeader('Schedules', 'Each brain’s scheduled agents: tasks a brain runs by itself on a schedule, or programs on your machines. Each is a file in the brain’s .brain/schedules folder, and runs once you approved it.',
       btn('Add agent', { kind: 'primary', icon: 'plus', href: '#/schedules/new' })),
-    offNote, pendingBox,
+    offNote, zoneBox, pendingBox,
     h('section.section', h('h2.section-title', 'Agents'), toolbar, groupsBox),
     h('section.section', h('h2.section-title', 'Reminders'), h('p.muted.small', 'Reminders with a time that the brains keep: the bridge’s standing intents, and those in a brain’s own reminders file, which the brain fires itself.'), remindersBox));
 
@@ -292,6 +308,10 @@ function renderList(root, ctx) {
   ctx.follow(schedulesResource, (d) => {
     if (!d) return;
     data = d;
+    const zone = zoneNote(d.timezone);
+    paint(zoneBox, JSON.stringify(zone), () => (!zone ? null
+      : zone.warn ? callout('warn', 'Time zone unset', h('p', zone.text))
+        : h('p.muted.small.zone-note', zone.text)));
     paint(offNote, d.enabled, (on) => (on ? null : callout('warn', 'Scheduled agents are off', h('p', 'schedules.enabled is off in the settings: no agent runs on its schedule. Run now still works.'))));
     const agents = d.agents || [];
     const brains = groupByBrain(agents).map((g) => [g.brain, g.name]);

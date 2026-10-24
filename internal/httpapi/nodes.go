@@ -26,6 +26,9 @@ type NodesService interface {
 	StartUpdate(id string, o nodes.UpdateOptions) (string, error)
 	SetUpdateAuto(id string, auto bool) (*nodes.Node, error)
 	CoreSecretsTransfer(ctx context.Context, src, dst string, o nodes.CoreTransferOptions) (nodes.CoreTransferReport, error)
+	MoveCheck(ctx context.Context, src, dst string) (nodes.MoveReport, error)
+	StartMove(ctx context.Context, src, dst string, o nodes.MoveOptions) (nodes.MoveRecord, error)
+	Move(id string) (nodes.MoveRecord, error)
 }
 
 // CoreSecretsTransferRequest is POST /api/nodes/core-secrets-transfer:
@@ -328,6 +331,12 @@ func (a *NodesAPI) Call(w http.ResponseWriter, r *http.Request) {
 	// /api/nodes/core-secrets-transfer, which checks both sides first.
 	if slices.Contains([]string{nodeproto.MethodCoreSecretsOffer, nodeproto.MethodCoreSecretsSend, nodeproto.MethodCoreSecretsReceive}, req.Method) {
 		WriteErr(w, http.StatusBadRequest, req.Method+" is a host-secrets transfer's own; use POST /api/nodes/core-secrets-transfer (fridolin nodes core-secrets-transfer)")
+		return
+	}
+	// A move's steps go through POST /api/nodes/move, which checks both
+	// sides first and signs the plan.
+	if slices.Contains(nodeproto.CoreMoveWrites, req.Method) {
+		WriteErr(w, http.StatusBadRequest, req.Method+" is a core move's own; use POST /api/nodes/move (fridolin nodes move)")
 		return
 	}
 	params := req.Params

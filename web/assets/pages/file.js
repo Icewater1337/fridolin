@@ -1,7 +1,11 @@
 // One file of a linked folder (#/file/<root>/<path>, docs/FILES.md):
 // Markdown rendered, text as text, images, audio and video in the page,
 // a PDF in a tab of its own, anything else to download. Each opening is
-// written to the audit log.
+// written to the audit log. Where the folder is writable, a text or
+// Markdown file is edited in place, and any file renamed, moved or
+// deleted (components/file-actions.js); its changes are listed under
+// History. A brain's file can be asked about on WhatsApp, and its link
+// copied: its address on your site where the site has a domain.
 //
 // What a brain wrote never runs here: Markdown comes as a tree of a few
 // element names (components/markdown.js), text is a text node, and the
@@ -11,8 +15,9 @@
 import { get, qs } from '../app/api.js';
 import { h, mount, paint } from '../lib/dom.js';
 import { fmtBytes } from '../lib/format.js';
-import { filesHref, rawHref, wikiHref } from '../lib/files.js';
+import { filesHref, parentOf, rawHref, siteFileHref, whatsappHref, wikiHref } from '../lib/files.js';
 import { btn, copyButton } from '../components/buttons.js';
+import { deleteFile, historyBox, moveFile, takeEditOnOpen, textEditor } from '../components/file-actions.js';
 import { icon } from '../components/icons.js';
 import { callout, empty, pageHeader, spinner, timeAgo } from '../components/common.js';
 import { markdownDoc, markdownToc } from '../components/markdown.js';
@@ -54,6 +59,20 @@ function preview(v, root, path, ticket) {
   }
 }
 
+/** "Ask the brain" on WhatsApp, its message about the file typed out. */
+function askButton(root, path, number) {
+  if (root.kind !== 'brain' || !number) return null;
+  const text = `About the file ${path} in the ${root.label} brain's folder: `;
+  return btn('Ask the brain', { icon: 'send', small: true, href: whatsappHref(number, text), title: 'Opens your chat with Fridolin on WhatsApp, the question begun' });
+}
+
+/** The link to copy: the file on your site, for a brain's file where the site has a domain; else this page. */
+function linkToCopy(root, path, site) {
+  if (root.kind === 'brain' && site && site.domain) return siteFileHref(site.domain, root.brain, path);
+  const here = globalThis.location;
+  return `${here ? here.origin + here.pathname : ''}${filesHref(root.id, path, false)}`;
+}
+
 export default {
   title: 'File',
   render(root, ctx) {
@@ -62,23 +81,58 @@ export default {
     const header = h('div', pageHeader(path.split('/').pop() || 'File'));
     const box = h('div', spinner());
     mount(root, header, box);
+    const quiet = (p) => p.catch(() => null);
     Promise.all([
       get('/api/files/roots', { signal: ctx.signal }),
-      get(`/api/files/view${qs({ root: rootId, path })}`, { signal: ctx.signal }),
+      get(`/api/files/view${qs({ root: rootId, path, source: '1' })}`, { signal: ctx.signal }),
       get(`/api/files/ticket${qs({ root: rootId })}`, { signal: ctx.signal }),
-    ]).then(([{ roots }, v, { ticket }]) => {
+      quiet(get('/api/status', { signal: ctx.signal })),
+      quiet(get('/api/site', { signal: ctx.signal })),
+    ]).then(([{ roots }, first, { ticket }, status, site]) => {
+      let v = first;
       const r = roots.find((x) => x.id === rootId) || { id: rootId, label: rootId, kind: '' };
       const label = r.kind === 'media' ? `${r.label} · media` : r.label;
       ctx.setTitle(`${v.name} · ${label}`);
       const sub = [fmtBytes(v.size), v.mod_time && !v.mod_time.startsWith('0001') ? timeAgo(v.mod_time, 'changed ') : null];
+      const number = status && status.whatsapp && status.whatsapp.own_number;
+      let editor = null;
+      const show = () => paint(box, 'file', () => h('div',
+        v.truncated ? callout('info', 'Only the start of this file', 'Download it for all of it.') : null,
+        preview(v, r, path, ticket),
+        r.writable ? historyBox(ctx, rootId, path) : null));
+      const edit = () => {
+        editor = textEditor({
+          rootId, path, text: v.kind === 'markdown' ? v.source : v.text, sha: v.sha,
+          onSaved: async () => {
+            editor = null;
+            ctx.dirty = null;
+            v = await get(`/api/files/view${qs({ root: rootId, path, source: '1' })}`, { signal: ctx.signal });
+            show();
+          },
+          onCancel: () => { editor = null; ctx.dirty = null; show(); },
+        });
+        ctx.dirty = () => Boolean(editor && editor.dirty());
+        paint(box, 'edit', () => editor);
+        editor.focus();
+      };
       mount(header,
         pageHeader(v.name, h('span', sub.filter(Boolean).map((x, i) => (i ? [' · ', x] : x))),
           copyButton(path, 'Copy path'),
+          copyButton(linkToCopy(r, path, site && site.settings), r.kind === 'brain' && site && site.settings && site.settings.domain ? 'Copy the link on your site' : 'Copy link'),
+          askButton(r, path, number),
+          v.editable ? btn('Edit', { icon: 'edit', small: true, onClick: edit }) : null,
+          r.writable ? btn('Rename', {
+            icon: 'right', small: true,
+            onClick: async () => { const to = await moveFile(rootId, path); if (to) ctx.navigate(filesHref(rootId, to, false)); },
+          }) : null,
+          r.writable ? btn('Delete', {
+            icon: 'trash', small: true, kind: 'danger',
+            onClick: async () => { if (await deleteFile(rootId, path, false)) ctx.navigate(filesHref(rootId, parentOf(path), true)); },
+          }) : null,
           btn('Download', { icon: 'download', small: true, href: rawHref(rootId, path, ticket, true) })),
         crumbs(rootId, label, path));
-      paint(box, 'file', () => h('div',
-        v.truncated ? callout('info', 'Only the start of this file', 'Download it for all of it.') : null,
-        preview(v, r, path, ticket)));
+      if (v.editable && takeEditOnOpen(rootId, path)) edit();
+      else show();
     }, (err) => {
       if (!ctx.dead) paint(box, 'error', () => h('div.card', empty(err.status === 404 ? 'No such file' : 'Could not open this file', err.status === 404 ? 'It may have moved, or it is one Fridolin never shows (secrets, its own state, or what the folder’s backup leaves out).' : err.message)));
     });

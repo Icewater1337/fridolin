@@ -10,7 +10,7 @@
 const common = [
   'console', 'setTimeout', 'clearTimeout', 'setInterval', 'structuredClone',
   'URL', 'URLSearchParams', 'AbortController', 'AbortSignal', 'DOMException', 'Event', 'fetch',
-  'TextDecoder', 'TextEncoder', 'atob', 'btoa',
+  'TextDecoder', 'TextEncoder', 'atob', 'btoa', 'FormData', 'File',
 ];
 const browser = [...common, 'window', 'document', 'location', 'navigator', 'localStorage', 'Node'];
 // The tests also have the fake DOM's document (installDom), as the page has,

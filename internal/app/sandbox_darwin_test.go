@@ -2144,3 +2144,11 @@ func TestSandboxGitConfig(t *testing.T) {
 		})
 	}
 }
+
+// setenv sets name in the bridge's environment until t ends. Only the macOS sandbox tests use it. A subtest of
+// the test that made the bridge needs it: what the subtest's own setenv sets
+// stays in the subtest's environment, which the bridge does not read.
+func (tb *testBridge) setenv(t testing.TB, name, value string) {
+	t.Helper()
+	t.Cleanup(tb.env.(*testEnv).change(name, value, false))
+}

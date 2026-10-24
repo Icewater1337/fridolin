@@ -21,8 +21,10 @@ type PlaudService interface {
 type PlaudAPI struct {
 	Plaud        func() PlaudService
 	CurrentBrain func() string
-	HasBrain     func(string) bool
-	UpdateConfig func(func(*config.File) error) error
+	// CurrentVoiceBrain is plaud.voice_brain as saved.
+	CurrentVoiceBrain func() string
+	HasBrain          func(string) bool
+	UpdateConfig      func(func(*config.File) error) error
 }
 
 func (a *PlaudAPI) Resend(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +80,9 @@ func (a *PlaudAPI) Settings(w http.ResponseWriter, r *http.Request) {
 		Message     *string `json:"message"`
 		BrainAccess *bool   `json:"brain_access"`
 		PhoneUpload *bool   `json:"phone_upload"`
+		Voice       *bool   `json:"voice"`
+		VoiceBrain  *string `json:"voice_brain"`
+		VoiceQuiet  *bool   `json:"voice_quiet"`
 	}
 	if err := DecodeJSON(r, &req); err != nil {
 		WriteErr(w, http.StatusBadRequest, err.Error())
@@ -87,6 +92,10 @@ func (a *PlaudAPI) Settings(w http.ResponseWriter, r *http.Request) {
 	// not keep the other settings from being saved.
 	if req.Brain != nil && *req.Brain != "" && *req.Brain != a.CurrentBrain() && !a.HasBrain(*req.Brain) {
 		WriteErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("there is no approved brain %q", *req.Brain))
+		return
+	}
+	if req.VoiceBrain != nil && *req.VoiceBrain != "" && *req.VoiceBrain != a.CurrentVoiceBrain() && !a.HasBrain(*req.VoiceBrain) {
+		WriteErr(w, http.StatusUnprocessableEntity, fmt.Sprintf("there is no approved brain %q", *req.VoiceBrain))
 		return
 	}
 	err := a.UpdateConfig(func(c *config.File) error {
@@ -107,6 +116,15 @@ func (a *PlaudAPI) Settings(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.PhoneUpload != nil {
 			c.Plaud.PhoneUpload = *req.PhoneUpload
+		}
+		if req.Voice != nil {
+			c.Plaud.Voice = *req.Voice
+		}
+		if req.VoiceBrain != nil {
+			c.Plaud.VoiceBrain = *req.VoiceBrain
+		}
+		if req.VoiceQuiet != nil {
+			c.Plaud.VoiceQuiet = *req.VoiceQuiet
 		}
 		return nil
 	})

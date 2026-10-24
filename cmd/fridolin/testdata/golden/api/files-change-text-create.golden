@@ -1,0 +1,11 @@
+PUT /api/files/text
+200 OK
+Content-Type: application/json
+
+{
+  "mod_time": "<MOD_TIME>",
+  "path": "wiki/people/sam.md",
+  "root": "brain:main",
+  "sha": "52c03f444f28f31a671907e24140b66d60b808dfa133af63dc985ebb0c9e8077",
+  "size": 6
+}

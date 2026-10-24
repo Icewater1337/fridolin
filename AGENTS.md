@@ -359,7 +359,7 @@ machine must already be a node (path B). In short:
 ## Working on the code
 
 - `make check` runs what CI's build, lint and test jobs run: gofmt, both
-  `go vet` runs, `go mod tidy -diff`, the race tests, staticcheck,
+  `go vet` runs, `go mod tidy -diff`, the race tests, staticcheck, exhaustive,
   shellcheck, ruff, actionlint, the action-pin check, ESLint on the
   dashboard, the Python, web, personal-data-check, action-pin-check and
   Makefile tests and a dev-mode smoke test (`make help` lists the
@@ -371,6 +371,10 @@ machine must already be a node (path B). In short:
   None of them touches the service, which runs the copy in
   `~/.local/lib/fridolin/` that `./setup.sh` installs. While iterating,
   `go vet ./... && go test -race ./...` is enough; `gofmt` everything.
+  exhaustive (`make lint-go`) wants a switch on an enum to name every
+  constant, also when it has a default: a new constant then shows each
+  switch that must decide about it. A switch meant to cover only some
+  gets `//exhaustive:ignore` under a comment that says why.
   The tests run in an empty temp directory, with an empty temp `HOME` and
   the variables the bridge reads (`FRIDOLIN_CONFIG`, `BRAIN_MODE`) unset,
   so they never see a `config.json` in the checkout or a real data dir;

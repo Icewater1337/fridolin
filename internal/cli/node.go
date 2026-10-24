@@ -220,7 +220,8 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 		}
 	case "status":
 		fmt.Fprintf(stdout, "State dir: %s\n", dir)
-		if cfg, err := nodeagent.LoadConfig(dir); err != nil {
+		cfg, err := nodeagent.LoadConfig(dir)
+		if err != nil {
 			fmt.Fprintf(stdout, "Not joined: %v\n", err)
 		} else {
 			id := "?"
@@ -238,6 +239,11 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 				updates += ", the core's key is trusted at the first update"
 			}
 			fmt.Fprintf(stdout, "Updates: %s\nThis binary: %s (%s)\n", updates, exe, version.String())
+		}
+		if cfg.Box != nil {
+			// A box has no service of its own: docker compose runs it.
+			fmt.Fprintln(stdout, "Service: none, a node in a box (docker compose ps on the host)")
+			return 0
 		}
 		st, err := nodeagent.ServiceStatus(svc)
 		if err != nil {

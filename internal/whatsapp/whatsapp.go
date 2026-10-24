@@ -421,7 +421,7 @@ func (wa *Client) handleMessage(msg *events.Message) {
 		go wa.notify(sender.String(), wa.text.ViewOnce)
 	case kindOther:
 		wa.log.Debugf("DM %s from %s: nothing the bridge reads (a reaction, a sticker, …)", msg.Info.ID, sender.User)
-	default:
+	case kindMessage:
 		wa.handleDMMessage(msg, sender, policy, envelope)
 	}
 }
@@ -540,6 +540,8 @@ func (wa *Client) handleGroupMessage(msg *events.Message) {
 	case kindOther:
 		wa.log.Debugf("Group message %s in %s: nothing the bridge reads (a reaction, a sticker, …)", msg.Info.ID, groupJID)
 		return
+	case kindMessage, kindViewOnce:
+		// Read below, by the group's rules.
 	}
 
 	envelope := groupEnvelope(msg.Message, extractText(msg.Message), own)
