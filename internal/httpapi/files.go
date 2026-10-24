@@ -10,6 +10,7 @@ import (
 	"path"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Icewater1337/fridolin/internal/files"
 	"github.com/Icewater1337/fridolin/internal/wiki"
@@ -29,6 +30,22 @@ type FilesAPI struct {
 	Audit func(FileAudit)
 	// Tickets open the dashboard's /files/raw (files_ticket.go).
 	Tickets *Tickets
+
+	// Changes (files_write.go). Commit commits paths of root, a git
+	// repository of its own, and returns the commit; nil commits nothing.
+	Commit func(root files.Root, paths []string, message string) (string, error)
+	// Inbox is a brain's media inbox, where an upload for the brain waits.
+	Inbox func(brain string) string
+	// HandOff hands files of the brain's inbox to it, as files sent on
+	// WhatsApp, with what it is told about them.
+	HandOff func(brain, sender, text string, files []string) error
+	// SetUploadRule sets how a folder of a brain takes uploads (brain.json
+	// files.uploads): files.UploadFolder, files.UploadBrain or "".
+	SetUploadRule func(brain, folder, mode string) error
+	// History reads the changes made to a path of root, newest first.
+	History func(root files.Root, path string) ([]FileChange, error)
+	// Now is the clock of the trash's folder names; nil is time.Now.
+	Now func() time.Time
 }
 
 // NodeFiles reads the folders nodes lend.
@@ -36,11 +53,15 @@ type NodeFiles interface {
 	List(ctx context.Context, node, dir string) ([]files.Entry, error)
 	// Read reads at most max bytes of file; size is the whole file's.
 	Read(ctx context.Context, node, file string, max int64) (data []byte, size int64, truncated bool, err error)
+	// Write writes file whole, in a folder granted for writing.
+	Write(ctx context.Context, node, file string, data []byte) error
 }
 
 // FileAudit is one view for the audit log.
 type FileAudit struct {
 	By, Brain, Root, Action, Path, Outcome string
+	// Change: a change (files_write.go), not a view.
+	Change bool
 }
 
 // The most of a file a view returns, as text and as Markdown to render,
@@ -61,6 +82,14 @@ type FilesListResponse struct {
 	Path      string        `json:"path"`
 	Entries   []files.Entry `json:"entries"`
 	Truncated bool          `json:"truncated"`
+	// Writable: the reader may change what is in the folder.
+	Writable bool `json:"writable"`
+	// Upload is where the reader's upload into the folder goes:
+	// files.UploadFolder, files.UploadBrain, or "" (none taken).
+	Upload string `json:"upload"`
+	// Rule is the upload folder of the brain this folder lies in, for a
+	// reader who may change it.
+	Rule *UploadRuleView `json:"rule,omitempty"`
 }
 
 // FilesSearchResponse is what a search by name found.
@@ -83,6 +112,12 @@ type FileViewResponse struct {
 	Doc     *wiki.Doc `json:"doc,omitempty"`
 	// Truncated: Text or Doc has only the start of the file.
 	Truncated bool `json:"truncated,omitempty"`
+	// Editable: the reader may edit the file here (text or Markdown, not
+	// truncated, in a folder it may change); SHA is the version to send
+	// back with the edit. Source is the Markdown itself, with ?source=1.
+	Editable bool    `json:"editable,omitempty"`
+	SHA      string  `json:"sha,omitempty"`
+	Source   *string `json:"source,omitempty"`
 }
 
 // WikiBrain is one brain on the wiki's front page.
@@ -113,6 +148,9 @@ type WikiPageResponse struct {
 	Page      wiki.Page   `json:"page"`
 	Doc       wiki.Doc    `json:"doc"`
 	Backlinks []wiki.Page `json:"backlinks"`
+	// Editable: the reader may edit the page (through files/view?source=1
+	// and files/text).
+	Editable bool `json:"editable,omitempty"`
 }
 
 // WikiSearchResponse is what a search of the wikis found.
@@ -127,7 +165,7 @@ type Scope = files.Scope
 type scoped func(w http.ResponseWriter, r *http.Request, s files.Scope)
 
 // Owner is the dashboard's scope: everything.
-var Owner = files.Scope{Private: true, All: true, Media: true, Nodes: true, By: "dashboard"}
+var Owner = files.Scope{Private: true, All: true, Media: true, Nodes: true, Write: true, By: "dashboard"}
 
 // Register adds the dashboard's routes.
 func (a *FilesAPI) Register(mux *http.ServeMux) {
@@ -144,6 +182,12 @@ func (a *FilesAPI) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/wiki/search", own(a.wikiSearch))
 	mux.HandleFunc("GET /api/wiki/{brain}/pages", own(a.wikiPages))
 	mux.HandleFunc("GET /api/wiki/{brain}/page", own(a.wikiPage))
+	mux.HandleFunc("GET /api/files/history", own(a.history))
+	mux.HandleFunc("PUT /api/files/text", own(a.saveText))
+	mux.HandleFunc("POST /api/files/upload", own(a.upload)) // UploadPath
+	mux.HandleFunc("POST /api/files/move", own(a.move))
+	mux.HandleFunc("POST /api/files/delete", own(a.remove))
+	mux.HandleFunc("PUT /api/files/upload-rule", own(a.setUploadRule))
 }
 
 // SiteHandler serves the same reads to the site process, for the account
@@ -171,6 +215,11 @@ func (a *FilesAPI) SiteHandler(scope func(*http.Request) (files.Scope, error)) h
 	mux.HandleFunc("GET /site-api/wiki/search", as(a.wikiSearch))
 	mux.HandleFunc("GET /site-api/wiki/{brain}/pages", as(a.wikiPages))
 	mux.HandleFunc("GET /site-api/wiki/{brain}/page", as(a.wikiPage))
+	mux.HandleFunc("GET /site-api/files/history", as(a.history))
+	mux.HandleFunc("PUT /site-api/files/text", as(a.saveText))
+	mux.HandleFunc("POST /site-api/files/upload", as(a.upload))
+	mux.HandleFunc("POST /site-api/files/move", as(a.move))
+	mux.HandleFunc("POST /site-api/files/delete", as(a.remove))
 	mux.HandleFunc("/site-api/", func(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusNotFound, "no such call: "+r.Method+" "+r.URL.Path)
 	})
@@ -239,11 +288,12 @@ var (
 
 func (a *FilesAPI) roots(w http.ResponseWriter, r *http.Request, s files.Scope) {
 	roots := a.allowed(s)
-	if siteReader(s) {
-		// Where a folder is on this machine is the owner's business.
-		for i := range roots {
+	for i := range roots {
+		if siteReader(s) {
+			// Where a folder is on this machine is the owner's business.
 			roots[i].Path, roots[i].Excluded = "", nil
 		}
+		roots[i].Writable = roots[i].Writable && s.Write && roots[i].Kind != files.KindMedia
 	}
 	WriteJSON(w, http.StatusOK, FilesRootsResponse{Roots: roots})
 }
@@ -311,7 +361,14 @@ func (a *FilesAPI) list(w http.ResponseWriter, r *http.Request, s files.Scope) {
 		writeFilesErr(w, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, FilesListResponse{Root: root.ID, Path: rel, Entries: entries, Truncated: truncated})
+	out := FilesListResponse{Root: root.ID, Path: rel, Entries: entries, Truncated: truncated, Upload: root.UploadTo(rel, s)}
+	out.Writable = s.Write && root.Writable && root.Kind != files.KindMedia
+	if s.Write && root.Kind == files.KindBrain {
+		if folder, mode := root.UploadFolderOf(rel); mode != "" {
+			out.Rule = &UploadRuleView{Folder: folder, Mode: mode}
+		}
+	}
+	WriteJSON(w, http.StatusOK, out)
 }
 
 func (a *FilesAPI) search(w http.ResponseWriter, r *http.Request, s files.Scope) {
@@ -406,6 +463,16 @@ func (a *FilesAPI) view(w http.ResponseWriter, r *http.Request, s files.Scope) {
 	}
 	defer f.close()
 	out := FileViewResponse{Root: root.ID, Path: rel, Name: f.name, Size: f.size, ModTime: f.mod.UTC(), Kind: kind}
+	editable := func(data []byte) {
+		if out.Truncated || len(data) > maxEditText || !utf8.Valid(data) || root.CanWrite(rel, s) != nil {
+			return
+		}
+		out.Editable, out.SHA = true, files.SHA(data)
+		if kind == files.FileMarkdown && q.Get("source") == "1" {
+			src := string(data)
+			out.Source = &src
+		}
+	}
 	if kind == files.FileOther || kind == files.FileText || kind == files.FileMarkdown {
 		data, err := io.ReadAll(io.LimitReader(f.content, max))
 		if err != nil {
@@ -423,10 +490,12 @@ func (a *FilesAPI) view(w http.ResponseWriter, r *http.Request, s files.Scope) {
 			}
 			doc := wiki.Render(data, rel, res)
 			out.Doc = &doc
+			editable(data)
 		case kind == files.FileText || files.LooksLikeText(data[:min(len(data), 8192)]):
 			out.Kind = files.FileText
 			text := string(data)
 			out.Text = &text
+			editable(data)
 		}
 	}
 	WriteJSON(w, http.StatusOK, out)
@@ -546,7 +615,7 @@ func (a *FilesAPI) wikiPage(w http.ResponseWriter, r *http.Request, s files.Scop
 		writeFilesErr(w, err)
 		return
 	}
-	WriteJSON(w, http.StatusOK, WikiPageResponse{Brain: root.Brain, Page: page, Doc: doc, Backlinks: ix.Backlinks(p)})
+	WriteJSON(w, http.StatusOK, WikiPageResponse{Brain: root.Brain, Page: page, Doc: doc, Backlinks: ix.Backlinks(p), Editable: root.CanWrite(p, s) == nil})
 }
 
 func (a *FilesAPI) wikiSearch(w http.ResponseWriter, r *http.Request, s files.Scope) {

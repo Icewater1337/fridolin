@@ -1,0 +1,8 @@
+POST /api/files/move
+200 OK
+Content-Type: application/json
+
+{
+  "path": "wiki/plan.txt",
+  "root": "brain:main"
+}

@@ -69,6 +69,7 @@ async function openPage(t, first = siteStatus(), { proposals = [], brains = [{ i
     if (path === '/api/site/roles' && method === 'PUT') {
       if (body.roles) bridge.users.roles = ['admin', ...body.roles.map((r) => r.trim()).filter(Boolean)];
       if (body.brains) bridge.site.settings.role_brains = { ...(bridge.site.settings.role_brains || {}), ...body.brains };
+      if (body.uploads) bridge.site.settings.role_uploads = { ...(bridge.site.settings.role_uploads || {}), ...body.uploads };
       return { ok: true };
     }
     if (path === '/api/site/check-domain' && method === 'POST') return { status: 200, body: bridge.check || { url: 'https://example.com/_fridolin/health', ok: true, status: 200 } };
@@ -533,5 +534,14 @@ test('each role is given the brains it sees on Files and Wiki', async (t) => {
   const put = calls.find((c) => c.path === '/api/site/roles' && c.method === 'PUT');
   assert.deepEqual(put.body, { brains: { member: ['work'] } });
   assert.deepEqual(bridge.site.settings.role_brains, { member: ['work'] });
-  assert.match(root.textContent, /every view is written to the audit log/);
+  assert.match(root.textContent, /every view and change is written to the audit log/);
+  // Uploads, to a brain the role sees.
+  const again = root.querySelectorAll('tr').find((tr) => tr.textContent.startsWith('member'));
+  const cells = again.querySelectorAll('td');
+  assert.deepEqual(cells[2].querySelectorAll('label.switch').map((l) => l.textContent.trim()), ['Work (work)'], 'only the brains it sees');
+  const up = cells[2].querySelector('input');
+  up.checked = true;
+  up.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+  assert.deepEqual(calls.filter((c) => c.path === '/api/site/roles' && c.method === 'PUT').pop().body, { uploads: { member: ['work'] } });
 });

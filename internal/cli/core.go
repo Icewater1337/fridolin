@@ -28,6 +28,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/lease"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/provenance"
@@ -82,10 +83,14 @@ On the host that runs Docker:
                        is stopped, say (fridolin core run core import --latest)
 
 In the core (docker exec fridolin-core fridolin core ...):
-  fridolin core export [--list-folders]
+  fridolin core export [--list-folders | --drift] [--use-approved]
                                  encrypt the data dir to the vault bucket, with the
                                  brain folders it takes along (--list-folders: list
-                                 their files and export nothing)
+                                 their files and export nothing; --drift: say only
+                                 which brain.json on disk differs from the manifest
+                                 you approved). It refuses while a brain.json on
+                                 disk keeps more home than the approved manifest:
+                                 approve it first, or pass --use-approved
   fridolin core import --latest [--force]
                                  fetch, decrypt and check the latest export,
                                  then put it in place of an empty data dir
@@ -161,8 +166,11 @@ func runCore(args []string, env coreEnv) int {
 type insideFlags struct {
 	config, dataDir, store, bucket, key string
 	latest, force                       bool
-	// export's --list-folders: list what of the brain folders goes along.
-	listFolders bool
+	// export's --list-folders: list what of the brain folders goes along;
+	// --drift: say only which brain folders differ from their approved
+	// manifests; --use-approved: follow the approved manifests although
+	// brain.json on disk keeps more home.
+	listFolders, drift, useApproved bool
 	// import's moves from a native install (core migrate --from-native).
 	fromNative, rehearsal bool
 	allowPaths            multiFlag
@@ -182,6 +190,8 @@ func coreInside(ctx context.Context, sub string, args []string, env coreEnv) int
 	if sub == "export" {
 		fs.BoolVar(&f.listFolders, "list-folders", false, "list the files of the brain folders the export would take along (one per line, <brain id>/<path>), and export nothing")
 		fs.StringVar(&f.move, "move", "", "the core move this export is for (m-YYYYMMDD-HHMM-hex)")
+		fs.BoolVar(&f.drift, "drift", false, "say only which brains' brain.json or scheduled agents on disk differ from the manifests you approved, and export nothing; exits 1 when the export would refuse")
+		fs.BoolVar(&f.useApproved, "use-approved", false, "take the brain folders along by the approved manifests although a brain.json on disk keeps more of its folder home")
 	}
 	if sub == "export" || sub == "status" {
 		fs.BoolVar(&f.asJSON, "json", false, "print the answer as JSON")
@@ -201,6 +211,9 @@ func coreInside(ctx context.Context, sub string, args []string, env coreEnv) int
 		return 2
 	case fs.NArg() > 0:
 		fmt.Fprintf(env.stderr, "fridolin core %s takes no arguments, got %q\n", sub, fs.Args())
+		return 2
+	case f.listFolders && f.drift:
+		fmt.Fprintln(env.stderr, "fridolin core export: pass --list-folders or --drift, not both")
 		return 2
 	case sub == "import" && f.latest == (f.key != ""):
 		fmt.Fprintln(env.stderr, "fridolin core import: pass --latest, or --key KEY")
@@ -325,6 +338,9 @@ func coreExport(ctx context.Context, f insideFlags, env coreEnv) error {
 	if f.listFolders {
 		return coreListFolders(f, env)
 	}
+	if f.drift {
+		return coreDrift(f, env)
+	}
 	keys, err := exportKeysFrom(env)
 	if err == nil {
 		err = keys.forExport()
@@ -346,7 +362,10 @@ func coreExport(ctx context.Context, f insideFlags, env coreEnv) error {
 			return err
 		}
 	}
-	brains, folders := exportFolders(cfg, configPath(f.config))
+	brains, folders, drifts := exportFolders(cfg, configPath(f.config), f.useApproved)
+	if err := reportDrift(env.stderr, drifts, f.useApproved); err != nil {
+		return err
+	}
 	host, _ := os.Hostname()
 	device, err := lease.DeviceID(dataDir)
 	if err != nil {
@@ -372,7 +391,9 @@ func coreExport(ctx context.Context, f insideFlags, env coreEnv) error {
 // the cloud, since the export goes through the vault bucket. A folder's
 // Configured path is the one config.json at cfgPath has, as typed
 // (~/Personal), which the move keeps in moved_from and brings back.
-func exportFolders(cfg *config.Settings, cfgPath string) (brains []string, folders []coreexport.Folder) {
+// drifts are the brains whose folder differs from the approved manifest
+// (#189); useApproved follows the approved manifests alone.
+func exportFolders(cfg *config.Settings, cfgPath string, useApproved bool) (brains []string, folders []coreexport.Folder, drifts []brainDrift) {
 	written := writtenBrainPaths(cfgPath)
 	for _, b := range cfg.BrainDirs {
 		dir := app.AbsPath(b.Dir(app.HomeDir()))
@@ -380,7 +401,10 @@ func exportFolders(cfg *config.Settings, cfgPath string) (brains []string, folde
 		if b.Approved == nil || b.Approved.ID == "" {
 			continue
 		}
-		skip, excluded := app.BrainFolderFilter(b.Approved.ID, dir, b.Approved, cfg.Backup.IncludeSecretFiles)
+		if d := manifest.DriftOf(dir, *b.Approved); d.Any() {
+			drifts = append(drifts, brainDrift{ID: b.Approved.ID, Dir: dir, Drift: d})
+		}
+		skip, excluded := app.BrainFolderFilter(b.Approved.ID, dir, b.Approved, cfg.Backup.IncludeSecretFiles, useApproved)
 		configured := b.Path
 		for _, w := range written {
 			if w != b.Path && fsx.ExpandHome(w, app.HomeDir()) == b.Path {
@@ -390,7 +414,60 @@ func exportFolders(cfg *config.Settings, cfgPath string) (brains []string, folde
 		}
 		folders = append(folders, coreexport.Folder{ID: b.Approved.ID, Configured: configured, Dir: dir, Skip: skip, Excluded: excluded, Visiting: b.MovedFrom != ""})
 	}
-	return brains, folders
+	return brains, folders, drifts
+}
+
+// brainDrift is a brain whose folder on disk differs from the manifest
+// the owner approved.
+type brainDrift struct {
+	ID, Dir string
+	manifest.Drift
+}
+
+// reportDrift writes a warning per brain whose folder differs from its
+// approved manifest, and refuses, unless useApproved, when a brain.json
+// on disk would keep more of its folder home than the approved one: the
+// owner then probably means that to stay on this machine, and only they
+// can say whether it should (#189).
+func reportDrift(w io.Writer, drifts []brainDrift, useApproved bool) error {
+	var refuse []string
+	for _, d := range drifts {
+		var then string
+		switch {
+		case d.Unreadable != "":
+			then = "The export leaves the folder home until it can be read again (fridolin check says what is wrong)."
+		case d.KeepsMoreHome() && useApproved:
+			then = "With --use-approved the export follows the approved manifest and takes that along."
+		case d.KeepsMoreHome():
+			then = "The export goes by the approved manifest, which takes that along, so it refuses until you approve the change in the dashboard (Brains → " + d.ID + "), which keeps that home, or pass --use-approved, which takes it along."
+			refuse = append(refuse, d.ID)
+		case d.Backup():
+			then = "The export follows the approved manifest; approve the change in the dashboard (Brains → " + d.ID + ") for it to count."
+		default:
+			then = "What the export takes is the same either way; review it in the dashboard (Brains → " + d.ID + ")."
+		}
+		fmt.Fprintf(w, "warning: brain %s (%s): %s. %s\n", d.ID, d.Dir, d.Describe(), then)
+	}
+	if len(refuse) == 0 {
+		return nil
+	}
+	return fmt.Errorf("brain.json on disk of %s keeps more of its folder home than the manifest you approved (see the warning above), so nothing was exported: approve it in the dashboard first to keep that home, or run again with --use-approved to take it along by the approved manifest", strings.Join(refuse, ", "))
+}
+
+// coreDrift is core export --drift: the warnings alone.
+func coreDrift(f insideFlags, env coreEnv) error {
+	cfg, err := app.LoadExistingConfig(configPath(f.config))
+	if err != nil {
+		return err
+	}
+	_, _, drifts := exportFolders(cfg, configPath(f.config), f.useApproved)
+	if err := reportDrift(env.stderr, drifts, f.useApproved); err != nil {
+		return errors.New("the export would refuse: " + err.Error())
+	}
+	if len(drifts) == 0 {
+		fmt.Fprintln(env.stdout, "Every brain folder is as you approved it.")
+	}
+	return nil
 }
 
 // writtenBrainPaths are the paths of brain_dirs as config.json has them,
@@ -427,7 +504,10 @@ func coreListFolders(f insideFlags, env coreEnv) error {
 			return err
 		}
 	}
-	_, folders := exportFolders(cfg, configPath(f.config))
+	_, folders, drifts := exportFolders(cfg, configPath(f.config), f.useApproved)
+	// The list is what the export takes once it goes ahead: a refusal is
+	// a warning here.
+	_ = reportDrift(env.stderr, drifts, f.useApproved)
 	infos, err := coreexport.ListFolders(app.AbsPath(dataDir), folders, func(p string) { fmt.Fprintln(env.stdout, p) },
 		func(format string, a ...any) { fmt.Fprintf(env.stderr, format+"\n", a...) })
 	for _, i := range infos {

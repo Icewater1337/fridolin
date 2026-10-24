@@ -57,8 +57,8 @@ type Root struct {
 	// Location says where the files physically are: "core" or the node's
 	// name.
 	Location string `json:"location"`
-	// Writable: the folder may be written (a node root granted for
-	// writing). The Files page only reads, whatever this says.
+	// Writable: the folder may be changed (write.go): a brain's folder, or
+	// a node root granted for writing. A media inbox is read-only.
 	Writable bool `json:"writable"`
 	// Backup is "on", "off" or "" (a node's folder, which the core does not
 	// back up).
@@ -73,6 +73,8 @@ type Root struct {
 	// they lie inside the root.
 	patterns []string
 	deny     []string
+	// uploads are a brain root's upload folders (write.go).
+	uploads []Upload
 }
 
 // BrainRoot is a brain's folder, hiding its backup.exclude and the
@@ -84,7 +86,7 @@ func BrainRoot(brainID, label, dir string, backupOn bool, exclude, deny []string
 			unique = append(unique, x)
 		}
 	}
-	r := Root{ID: KindBrain + ":" + brainID, Kind: KindBrain, Brain: brainID, Label: label, Path: dir, Location: "core", Online: true, Excluded: unique}
+	r := Root{ID: KindBrain + ":" + brainID, Kind: KindBrain, Brain: brainID, Label: label, Path: dir, Location: "core", Writable: true, Online: true, Excluded: unique}
 	r.Backup = "off"
 	if backupOn {
 		r.Backup = "on"
@@ -139,6 +141,12 @@ type Scope struct {
 	All    bool
 	// Media and Nodes: the dashboard's only.
 	Media, Nodes bool
+	// Write may change what it reads where a root is writable (write.go):
+	// the dashboard and a site admin.
+	Write bool
+	// Uploads are the brains into whose upload folders it may upload: a
+	// site role given uploads.
+	Uploads []string
 	// By is who it is, for the audit log: "dashboard" or "site:<account>".
 	By string
 }

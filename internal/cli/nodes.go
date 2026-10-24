@@ -321,6 +321,15 @@ func writeJoinCode(w io.Writer, resp httpapi.JoinCodeResponse) {
 		sh, ps = httpapi.JoinCommands(resp.Code, resp.Core)
 	}
 	fmt.Fprintf(w, "Join code %s, valid once until %s (core %s).\nOn the new machine, paste one line:\n\n", resp.Code, resp.ExpiresAt.Local().Format("15:04"), resp.Core)
+	if resp.BoxCommand != "" {
+		// A core that knows where its box script is published offers a
+		// node in a box first, as !join does (docs/NODES.md).
+		fmt.Fprintf(w, "A node in a box (Docker; it asks for the rest):\n  macOS, Linux (sh):\n    %s\n", resp.BoxCommand)
+		if resp.BoxCommandPowerShell != "" {
+			fmt.Fprintf(w, "  Windows (PowerShell):\n    %s\n", resp.BoxCommandPowerShell)
+		}
+		fmt.Fprint(w, "\nOr natively, with fridolin installed on it:\n")
+	}
 	fmt.Fprintf(w, "  macOS, Linux (sh):\n    %s\n", sh)
 	if ps != "" {
 		fmt.Fprintf(w, "  Windows (PowerShell):\n    %s\n", ps)

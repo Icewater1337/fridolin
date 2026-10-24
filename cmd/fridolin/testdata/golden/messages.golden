@@ -96,6 +96,8 @@ plaudGivenUpAlert
 	⚠️ Plaud: the recording “Team sync” was not handed to brain notes: brain notes is not configured. It is still in Plaud, and the dashboard lists it (Integrations → Plaud).
 plaudExpiredAlert
 	⚠️ Plaud: the login expired, so new recordings are not arriving. Reconnect in the Fridolin dashboard (Integrations → Plaud).
+plaudVoiceQuestion
+	🎙️ Was steht morgen an?
 fleetGroupNotice
 	🖥️ !fleet answers only in a direct chat.
 fleetReply(false)

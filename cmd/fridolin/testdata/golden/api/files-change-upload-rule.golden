@@ -1,0 +1,7 @@
+PUT /api/files/upload-rule
+200 OK
+Content-Type: application/json
+
+{
+  "status": "saved"
+}

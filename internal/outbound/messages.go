@@ -157,6 +157,12 @@ func PlaudGivenUpAlert(name, brain, why string) string {
 	return fmt.Sprintf("⚠️ Plaud: the recording “%s” was not handed to brain %s: %s. It is still in Plaud, and the dashboard lists it (Integrations → Plaud).", name, brain, why)
 }
 
+// PlaudVoiceQuestion puts a question the owner asked by voice (the Plaud
+// Sync app's voice mode) into the chat its answer goes to.
+func PlaudVoiceQuestion(question string) string {
+	return "🎙️ " + question
+}
+
 // PlaudExpiredAlert tells the owner that the Plaud login expired.
 const PlaudExpiredAlert = "⚠️ Plaud: the login expired, so new recordings are not arriving. Reconnect in the Fridolin dashboard (Integrations → Plaud)."
 

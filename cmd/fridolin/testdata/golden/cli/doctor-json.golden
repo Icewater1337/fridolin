@@ -129,6 +129,13 @@
       "detail": "none waiting"
     },
     {
+      "id": "brain-drift",
+      "title": "brain folders as approved",
+      "required": false,
+      "status": "ok",
+      "detail": "every brain folder is as you approved it"
+    },
+    {
       "id": "lockdown",
       "title": "lockdown",
       "required": false,

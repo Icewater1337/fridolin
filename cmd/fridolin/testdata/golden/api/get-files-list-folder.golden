@@ -19,5 +19,7 @@ Content-Type: application/json
   ],
   "path": "docs",
   "root": "brain:main",
-  "truncated": false
+  "truncated": false,
+  "upload": "folder",
+  "writable": true
 }
