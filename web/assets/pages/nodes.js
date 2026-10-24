@@ -20,6 +20,13 @@ import { badge, callout, empty, kv, mono, pageHeader, pill, spinner, timeAgo } f
 /** @import { BackupCap, CoreHostView, ExecRule, FrideCap, HostStats, Node as FleetNode, NodesResponse, WorkstationCap } from '../../types/api.js' */
 
 /**
+ * A node as its card shows it: everything but what its live region shows,
+ * which changes with every poll and so would rebuild the card.
+ * @typedef {Omit<FleetNode, LiveField> & Partial<Record<LiveField, undefined>>} StableNode
+ * @typedef {'online' | 'last_seen' | 'resources' | 'address'} LiveField
+ */
+
+/**
  * A node's terminal as its card offers it: the folders granted for it.
  * @typedef {{id: string, name: string, roots: string[]}} TermTarget
  */
@@ -69,7 +76,7 @@ export default /** @satisfies {PageModule} */ ({
     }
 
     /**
-     * @param {FleetNode} n
+     * @param {StableNode} n
      * @param {string} path
      * @param {string} done
      */
@@ -83,7 +90,7 @@ export default /** @satisfies {PageModule} */ ({
     // node swaps it in and restarts, and goes back by itself when the new
     // one does not connect. A busy node (a FrIDE task, a backup) is
     // updated only when the owner says so.
-    /** @param {FleetNode} n */
+    /** @param {StableNode} n */
     async function update(n) {
       const path = `/api/nodes/${encodeURIComponent(n.id)}/update`;
       try {
@@ -103,7 +110,7 @@ export default /** @satisfies {PageModule} */ ({
     }
 
     /**
-     * @param {FleetNode} n
+     * @param {StableNode} n
      * @param {boolean} auto
      */
     async function setAuto(n, auto) {
@@ -114,7 +121,7 @@ export default /** @satisfies {PageModule} */ ({
 
     // core-host (docs/NODES.md, "core-host"): the machine may come to
     // hold every host secret, so approving it says so first.
-    /** @param {FleetNode} n */
+    /** @param {StableNode} n */
     async function approveCommands(n) {
       const ch = n.core_host;
       if (ch && ch.pending) {
@@ -132,7 +139,7 @@ export default /** @satisfies {PageModule} */ ({
       await act(n, 'approve-commands', `Approved what ${n.name} offers`);
     }
 
-    /** @param {FleetNode} n */
+    /** @param {StableNode} n */
     async function revoke(n) {
       const ok = await confirmDialog({
         title: `Revoke ${n.name}?`,
@@ -142,7 +149,7 @@ export default /** @satisfies {PageModule} */ ({
       if (ok) await act(n, 'revoke', `Revoked ${n.name}`);
     }
 
-    /** @param {FleetNode} n */
+    /** @param {StableNode} n */
     async function editTags(n) {
       const input = textInput({ value: (n.tags || []).join(', '), placeholder: 'macos, docker, gpu', 'aria-label': 'Tags' });
       await openDialog({
@@ -169,8 +176,9 @@ export default /** @satisfies {PageModule} */ ({
       const { roots } = n;
       const pick = select(roots, roots[0], { 'aria-label': 'Folder' });
       const holder = h('div.term-holder');
-      /** @type {ReturnType<typeof nodeTerminal> | null} */
-      let term = null;
+      // The open terminal; an object, since the dialog's button replaces it.
+      /** @type {{current: ReturnType<typeof nodeTerminal> | null}} */
+      const term = { current: null };
       await openDialog({
         title: `Terminal on ${n.name}`,
         wide: true,
@@ -180,18 +188,18 @@ export default /** @satisfies {PageModule} */ ({
           {
             label: 'Open', kind: 'primary',
             onClick: async () => {
-              if (term) await term.close();
-              term = nodeTerminal({ node: n.id, folder: pick.value });
-              holder.replaceChildren(term.el);
+              if (term.current) await term.current.close();
+              term.current = nodeTerminal({ node: n.id, folder: pick.value });
+              holder.replaceChildren(term.current.el);
               return false;
             },
           },
         ],
       });
-      if (term) await term.close();
+      if (term.current) await term.current.close();
     }
 
-    /** @param {FleetNode} n */
+    /** @param {StableNode} n */
     function statePills(n) {
       const out = [];
       if (n.device === 'pending') out.push(badge('device waiting', 'warn'));
@@ -201,7 +209,7 @@ export default /** @satisfies {PageModule} */ ({
       return out;
     }
 
-    /** @param {FleetNode} n */
+    /** @param {StableNode} n */
     function actions(n) {
       const out = [];
       if (n.device === 'pending') {
@@ -221,7 +229,7 @@ export default /** @satisfies {PageModule} */ ({
       return out;
     }
 
-    /** @param {FleetNode} n */
+    /** @param {StableNode} n */
     function offers(n) {
       const declared = n.declared || {};
       const rules = ((declared.exec && declared.exec.allow) || []).filter((r) => !r.core);
@@ -250,7 +258,7 @@ export default /** @satisfies {PageModule} */ ({
     // Programs from the core: the folders node.json opts in, the programs
     // the core added for approved command agents (with those agents), and
     // what the node refused of the core's last list, and why.
-    /** @param {FleetNode} n */
+    /** @param {StableNode} n */
     function programsLines(n) {
       const folders = (n.declared && n.declared.exec && n.declared.exec.accept_from_core) || [];
       const added = ((n.declared && n.declared.exec && n.declared.exec.allow) || []).filter((r) => r.core);
@@ -259,7 +267,8 @@ export default /** @satisfies {PageModule} */ ({
       /** @param {ExecRule} r */
       const agentsOf = (r) => {
         const p = st && (st.accepted || []).find((x) => x.name === r.name && (x.args || []).join('\0') === (r.args || []).join('\0'));
-        return p && (p.agents || []).length ? h('span.muted', ` for ${p.agents.join(', ')}`) : null;
+        const agents = (p && p.agents) || [];
+        return agents.length ? h('span.muted', ` for ${agents.join(', ')}`) : null;
       };
       return [
         folders.length ? h('div', h('strong', 'Programs from the core: '), folders.map((f) => mono(f)).flatMap((el, i) => (i ? [', ', el] : [el])),
@@ -326,7 +335,7 @@ export default /** @satisfies {PageModule} */ ({
     const liveOf = (n) => ({ online: !!n.online, last_seen: n.last_seen || null, resources: /** @type {Partial<HostStats>} */ (n.resources || {}), address: n.address || null, term: termOf(n) });
     /**
      * @param {FleetNode} n
-     * @returns {FleetNode}
+     * @returns {StableNode}
      */
     const stableOf = (n) => ({ ...n, online: undefined, last_seen: undefined, resources: undefined, address: undefined });
     const liveRegions = new Map(); // node id → its live region
@@ -334,11 +343,12 @@ export default /** @satisfies {PageModule} */ ({
     /** @param {ReturnType<typeof liveOf>} l */
     function live(l) {
       const res = l.resources;
+      const { term } = l;
       const memory = res.mem_total ? `${gb(res.mem_available)} free of ${gb(res.mem_total)}` : null;
       return [
         h('div.node-online', l.online ? pill('online', 'ok', { pulse: true }) : pill('offline', 'neutral'),
           l.online ? null : h('span.muted.small', 'last seen ', timeAgo(l.last_seen)),
-          l.term ? btn('Terminal', { small: true, icon: 'terminal', onClick: () => openTerminal(l.term) }) : null),
+          term ? btn('Terminal', { small: true, icon: 'terminal', onClick: () => openTerminal(term) }) : null),
         kv([
           ['CPUs', res.cpus ? String(res.cpus) : null],
           ['Memory', memory],
@@ -349,7 +359,7 @@ export default /** @satisfies {PageModule} */ ({
       ];
     }
 
-    /** @param {FleetNode} n */
+    /** @param {StableNode} n */
     function card(n) {
       const region = h('div.node-live');
       liveRegions.set(n.id, region);
@@ -375,7 +385,7 @@ export default /** @satisfies {PageModule} */ ({
           ['ID', mono(n.id, { copy: true })],
           ['May run', capSummary(n.effective)],
           ['Offers', capSummary(n.declared)],
-          ['Tags', (n.tags || []).length ? h('span.tag-list', n.tags.map((t) => badge(t))) : h('span.muted', 'none')],
+          ['Tags', n.tags && n.tags.length ? h('span.tag-list', n.tags.map((t) => badge(t))) : h('span.muted', 'none')],
           ['Version', n.version || null],
           ['Update', updateText(n.update) || n.update_note || null],
         ]),

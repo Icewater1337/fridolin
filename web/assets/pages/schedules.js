@@ -138,7 +138,7 @@ function mayDo(a) {
     const perms = Object.entries(s.github.permissions || {}).map(([k, v]) => `${k}:${v}`).join(' ');
     out.push(badge(`GitHub ${(s.github.repos || []).join(', ')}`, Object.values(s.github.permissions || {}).includes('write') ? 'warn' : 'neutral', perms));
   }
-  if ((s.preapproved || []).length) out.push(badge(`${s.preapproved.length} preapproved`, 'neutral', s.preapproved.join('\n')));
+  if (s.preapproved && s.preapproved.length) out.push(badge(`${s.preapproved.length} preapproved`, 'neutral', s.preapproved.join('\n')));
   out.push(a.report === 'silent' ? badge('silent', 'neutral', 'Sends nothing') : h('span.small.muted', a.report === 'always' ? 'always → ' : 'when worth it → ', a.chat ? threadEl(a.chat) : 'no chat'));
   return h('div.agent-may', out);
 }
@@ -169,6 +169,7 @@ function facts(a) {
  */
 function reviewPanel(a, { after } = {}) {
   const r = a.review;
+  if (!r) return null; // its callers show it only for an agent with a review
   /** @type {Child[]} */
   const parts = [h('div.card-title', icon('alert'), h('h3', REVIEW_TITLE[r.status] || 'Waiting for approval'))];
   parts.push(h('p.muted.small', 'In ', mono(r.source || a.file), ' of brain ', mono(a.brain), '. ',
@@ -185,7 +186,7 @@ function reviewPanel(a, { after } = {}) {
   if (disk) parts.push(h('h4', 'What it may do'), h('ul.plain-list', permissionsOf(disk, a.chat).map((x) => h('li', x))));
   if (a.program && r.status !== 'removed') {
     const p = a.program;
-    parts.push(callout(p.state === 'allowed' || p.state === 'waiting' ? 'info' : 'warn', p.state === 'waiting' ? 'Approving adds its program to the node' : `Its program on node ${p.node_name || disk.command.node}`, p.detail));
+    parts.push(callout(p.state === 'allowed' || p.state === 'waiting' ? 'info' : 'warn', p.state === 'waiting' ? 'Approving adds its program to the node' : `Its program on node ${p.node_name || (disk && disk.command && disk.command.node) || p.node || ''}`, p.detail));
   }
   if (r.status === 'changed') {
     const rows = fieldDiff(r.approved || {}, disk);
@@ -200,7 +201,7 @@ function reviewPanel(a, { after } = {}) {
   } else if (r.status === 'removed') {
     parts.push(h('p', 'Approving stops it: ', mono(a.schedule.when), ', ', a.task, '.'));
   } else {
-    parts.push(h('details.details', h('summary', 'The file'), h('pre.code.agent-json', fileJSON(disk))));
+    parts.push(h('details.details', h('summary', 'The file'), h('pre.code.agent-json', fileJSON(disk || {}))));
   }
   /** @param {boolean} [andRun] */
   const approve = async (andRun) => {
@@ -507,7 +508,9 @@ function renderAgent(root, ctx, brain, name, run) {
     paint(reviewBox, JSON.stringify(a.review || null), () => (a.review ? h('section.card.section', reviewPanel(a, { after: gone })) : null));
     paint(detailBox, JSON.stringify(a), () => details(a));
   }, () => (agent && agent.running ? 2000 : 5000));
-  ctx.focusAt(root.querySelector('h1'));
+  // The header is there once the agents are known (at once, when they are cached).
+  const heading = root.querySelector('h1');
+  if (heading) ctx.focusAt(heading);
 }
 
 /**
@@ -529,10 +532,11 @@ function renderWizard(root, ctx, { mode, brain, name }) {
   const note = h('div');
   const body = h('div', spinner());
   const title = { new: 'Add a scheduled agent', edit: `Edit ${name}`, duplicate: `Duplicate ${name}` }[mode];
+  const heading = h('h1', title);
   mount(root,
     h('header.page-header', h('div.page-heading',
-      h('a.back-link', { href: brain ? link(brain, name) : '#/schedules' }, icon('left'), brain ? name : 'Schedules'),
-      h('h1', title),
+      h('a.back-link', { href: brain ? link(brain, name || '') : '#/schedules' }, icon('left'), brain ? name : 'Schedules'),
+      heading,
       h('p.page-sub', mode === 'edit'
         ? 'Change what you need; Review shows the file before it is written. Saving approves it, as you are the one writing it.'
         : 'Step by step: what it does, where, when, and what it may do. Nothing is written until you save on the last step.'))),
@@ -540,18 +544,20 @@ function renderWizard(root, ctx, { mode, brain, name }) {
   ctx.setTitle(title);
 
   const save = async () => {
-    const v = form.form() && form.form().value();
-    if (!v || v.invalid) { toast(v ? v.invalid : 'Not complete yet', 'warn'); return; }
-    if (mode !== 'edit' && agents.some((a) => a.brain === v.brain && a.name === v.schedule.name)) {
-      toast(`Brain ${v.brain} has an agent ${v.schedule.name} already: give this one another name.`, 'warn');
+    const built = form.form();
+    const v = built && built.value();
+    if (!v || !v.schedule) { toast((v && v.invalid) || 'Not complete yet', 'warn'); return; }
+    const { schedule } = v;
+    if (mode !== 'edit' && agents.some((a) => a.brain === v.brain && a.name === schedule.name)) {
+      toast(`Brain ${v.brain} has an agent ${schedule.name} already: give this one another name.`, 'warn');
       return;
     }
     try {
-      await put(base(v.brain, v.schedule.name), v.schedule);
+      await put(base(v.brain, schedule.name), schedule);
       form.saved();
       toast(mode === 'edit' ? 'Saved' : 'Saved and approved: it runs on its schedule', 'ok', { timeout: 3000 });
       await schedulesResource.refresh();
-      ctx.navigate(link(v.brain, v.schedule.name));
+      ctx.navigate(link(v.brain, schedule.name));
     } catch (e) { toastError(e); }
   };
   const form = liveForm({
@@ -600,7 +606,7 @@ function renderWizard(root, ctx, { mode, brain, name }) {
   ctx.follow(nodesResource, (d) => {
     nodes.splice(0, nodes.length, ...((d && d.nodes) || []));
   }, 30000);
-  ctx.focusAt(root.querySelector('h1'));
+  ctx.focusAt(heading);
 }
 
 export default /** @satisfies {PageModule} */ ({

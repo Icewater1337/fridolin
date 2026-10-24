@@ -76,7 +76,7 @@ function logBox() {
   const text = h('pre.mono');
   const el = h('details.site-log', { hidden: true }, h('summary', 'Recent output'), text);
   return Object.assign(el, {
-    /** @param {string[] | null} lines */
+    /** @param {string[] | null | undefined} lines */
     set: (lines) => {
       el.hidden = !(lines && lines.length);
       paint(text, lines || [], (l) => l.join('\n'));
@@ -194,15 +194,16 @@ export default /** @satisfies {PageModule} */ ({
           secretsBox));
     }
 
-    function paintAll() {
+    /** @param {SiteStatus} st the newest GET /api/site */
+    function paintAll(st) {
       if (!laidOut) layout();
-      paintStatus();
-      paintRepo();
-      paintDeploy();
-      paintProposals();
-      paintBuilders();
-      paintDomain();
-      paintBuiltin();
+      paintStatus(st);
+      paintRepo(st);
+      paintDeploy(st);
+      paintProposals(st);
+      paintBuilders(st);
+      paintDomain(st);
+      paintBuiltin(st);
       // The status names what the other requests answer about; when that
       // changed, they are asked again.
       const s = st.settings;
@@ -224,7 +225,8 @@ export default /** @satisfies {PageModule} */ ({
     }
 
     // ── status ─────────────────────────────────────────────────────────
-    function paintStatus() {
+    /** @param {SiteStatus} st the newest GET /api/site */
+    function paintStatus(st) {
       const s = st.settings;
       const proc = /** @type {Partial<SiteProcStatus>} */ (st.site.process || {});
       const todo = [];
@@ -274,7 +276,8 @@ export default /** @satisfies {PageModule} */ ({
     }
 
     // ── repository ─────────────────────────────────────────────────────
-    function paintRepo() {
+    /** @param {SiteStatus} st the newest GET /api/site */
+    function paintRepo(st) {
       const s = st.settings;
       const connected = !!st.repo.connected;
       paint(repoHead, connected, (c) => h('div.card-head', h('div.card-title', icon('backup'), h('h2', 'Repository')), c ? pill('Connected', 'ok') : pill('Not connected', 'neutral')));
@@ -331,7 +334,7 @@ export default /** @satisfies {PageModule} */ ({
     function renderDisconnect({ enabled }) {
       return h('div.actions',
         btn('Disconnect', {
-          small: true, icon: 'x', disabled: enabled, title: enabled ? 'Turn the site off first' : null,
+          small: true, icon: 'x', disabled: enabled, title: enabled ? 'Turn the site off first' : undefined,
           onClick: async () => {
             if (!await confirmDialog({ title: 'Disconnect the repository?', message: 'The site’s approved commits are forgotten. Fridolin’s clone is moved aside, not deleted; the repository itself is untouched.', confirm: 'Disconnect', danger: true })) return;
             await del('/api/site/repo');
@@ -389,10 +392,11 @@ export default /** @satisfies {PageModule} */ ({
     // ── deploys ────────────────────────────────────────────────────────
     async function checkUpdates() {
       updates = await post('/api/site/fetch', undefined, { timeout: GIT_TIMEOUT_MS });
-      paintDeploy();
+      if (st) paintDeploy(st);
     }
 
-    function paintDeploy() {
+    /** @param {SiteStatus} st the newest GET /api/site */
+    function paintDeploy(st) {
       const s = st.settings;
       const job = st.deploy || null;
       const running = !!(job && job.state === 'running');
@@ -468,7 +472,7 @@ export default /** @satisfies {PageModule} */ ({
               if (sentence && !await confirmDialog({ title: 'Approve these changes?', message: sentence, confirm: 'Approve and deploy' })) return;
               await post('/api/site/deploy', { commit: u.head });
               updates = null;
-              paintDeploy();
+              if (st) paintDeploy(st);
               await refresh();
             },
           }),
@@ -489,7 +493,8 @@ export default /** @satisfies {PageModule} */ ({
     }
 
     // ── proposals from builder brains ─────────────────────────────────
-    function paintProposals() {
+    /** @param {SiteStatus} st the newest GET /api/site */
+    function paintProposals(st) {
       const s = st.settings;
       if (!s.builders.length && !s.proposals.length) {
         paint(proposalsBox, 'no builders', () => h('p.muted', 'Brains you allow to build the site (below) propose their work here. You review it and deploy it — they cannot.'));
@@ -546,7 +551,8 @@ export default /** @satisfies {PageModule} */ ({
     // way stays disabled.
     const builderSwitches = h('div.site-builders');
 
-    function paintBuilders() {
+    /** @param {SiteStatus} st the newest GET /api/site */
+    function paintBuilders(st) {
       if (!st.repo.connected) { paint(buildersBox, 'not connected', () => h('p.muted', 'Connect a repository first.')); return; }
       const known = builders.data();
       if (!known) { paint(buildersBox, 'loading', () => loading('Loading the brains…')); return; }
@@ -584,7 +590,7 @@ export default /** @satisfies {PageModule} */ ({
         },
       });
       const label = el.querySelector('.switch-label');
-      const show = () => { el.input.checked = latest.on; label.textContent = latest.label; };
+      const show = () => { el.input.checked = latest.on; if (label) label.textContent = latest.label; };
       // While its save is on its way, the switch shows what you chose.
       return Object.assign(el, { update: (/** @type {BuilderChoice} */ next) => { latest = next; if (!busy) show(); } });
     }
@@ -628,7 +634,8 @@ export default /** @satisfies {PageModule} */ ({
     }
 
     // ── domain and sign-in ─────────────────────────────────────────────
-    function paintDomain() {
+    /** @param {SiteStatus} st the newest GET /api/site */
+    function paintDomain(st) {
       const s = st.settings;
       domainForm.set({ domain: s.domain || '', title: s.title, listen: s.listen });
       paint(googleBox, st.google, renderGoogle);
@@ -668,7 +675,7 @@ export default /** @satisfies {PageModule} */ ({
     }
 
     // Saving or removing the site's own client restarts the site (site_api.go).
-    const restarting = (/** @type {string} */ what) => (st.settings.enabled ? `${what}; restarting the site` : what);
+    const restarting = (/** @type {string} */ what) => (st && st.settings.enabled ? `${what}; restarting the site` : what);
 
     /** @param {SiteStatus['google']} g */
     function renderGoogle(g) {
@@ -720,10 +727,11 @@ export default /** @satisfies {PageModule} */ ({
     // ── Files and Wiki ─────────────────────────────────────────────────
     ctx.watch(store, (x) => x.status, (status) => {
       brains = (status && status.brains) || [];
-      if (st) paintBuiltin();
+      if (st) paintBuiltin(st);
     });
 
-    function paintBuiltin() {
+    /** @param {SiteStatus} st the newest GET /api/site */
+    function paintBuiltin(st) {
       const s = st.settings;
       paint(builtinBox, {
         base: st.public_url ? st.public_url.replace(/\/$/, '') : (st.site.local_url || '').replace(/\/$/, ''),
@@ -843,7 +851,8 @@ export default /** @satisfies {PageModule} */ ({
       kind.addEventListener('change', () => {
         const isPw = kind.value === 'password';
         pwField.hidden = !isPw;
-        identField.querySelector('label').textContent = isPw ? 'Username' : 'Google address';
+        const identLabel = identField.querySelector('label'); // field() makes one, as it has a label
+        if (identLabel) identLabel.textContent = isPw ? 'Username' : 'Google address';
         ident.placeholder = isPw ? 'sam' : 'name@example.com';
         const keep = role.value;
         mount(role, ...roles.filter((r) => !isPw || r !== 'admin').map((r) => h('option', { value: r }, r)));
@@ -899,9 +908,9 @@ export default /** @satisfies {PageModule} */ ({
     // Followed last: what is known from an earlier visit paints at once,
     // with everything above defined. The status comes every 1.5 s while a
     // deploy runs, to show its steps, and every 5 s otherwise.
-    ctx.follow(site, (data) => { st = data; paintAll(); }, () => (st && st.deploy && st.deploy.state === 'running' ? 1500 : 5000));
-    ctx.follow(builders, () => { if (st) paintBuilders(); }, SLOW_MS);
-    ctx.follow(proposals, () => { if (st) paintProposals(); }, SLOW_MS);
+    ctx.follow(site, (data) => { st = data; paintAll(data); }, () => (st && st.deploy && st.deploy.state === 'running' ? 1500 : 5000));
+    ctx.follow(builders, () => { if (st) paintBuilders(st); }, SLOW_MS);
+    ctx.follow(proposals, () => { if (st) paintProposals(st); }, SLOW_MS);
     ctx.follow(secrets, paintSecrets, SLOW_MS);
     ctx.follow(users, paintPeople, SLOW_MS);
   },

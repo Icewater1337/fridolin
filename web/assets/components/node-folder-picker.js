@@ -52,7 +52,7 @@ export function joinPath(dir, name, sep) {
  */
 export function nodeFolderPicker({ node, onPick }) {
   let sep = '/';
-  /** @type {Partial<NodeFSBrowse> | null} */
+  /** @type {NodeFSBrowse | null} */
   let current = null; // the folder shown, null at the list of drives
   const listEl = h('div.fb-list');
   const err = h('p.form-error', { hidden: true });
@@ -106,16 +106,18 @@ export function nodeFolderPicker({ node, onPick }) {
     busy();
     try {
       const r = await nodeCall(node, 'fs.browse', { path });
-      current = r;
-      cur.textContent = r.path;
+      // The folder as the node spells it; as asked when it says nothing.
+      const at = r.path || path;
+      current = { ...r, path: at, folders: r.folders || [] };
+      cur.textContent = at;
       upBtn.disabled = false;
       useBtn.disabled = false;
       newBtn.disabled = false;
-      const folders = r.folders || [];
+      const { folders } = current;
       mount(listEl,
         r.repo ? h('p.small', badge('restic', 'info', 'This folder holds a restic repository'), ' This folder holds a restic repository already: a target here opens it with the password the core keeps for it.') : null,
         folders.length
-          ? h('ul.fb-entries', { 'aria-label': 'Folders' }, folders.map((name) => h('li', h('button.fb-item', { type: 'button', onclick: () => browse(joinPath(r.path, name, sep)) },
+          ? h('ul.fb-entries', { 'aria-label': 'Folders' }, folders.map((name) => h('li', h('button.fb-item', { type: 'button', onclick: () => browse(joinPath(at, name, sep)) },
             icon('folder'), h('span.fb-name', name), icon('right', 'fb-chevron')))))
           : h('div.fb-empty.muted', 'No folders here. Use this one, or name a new one below.'),
         r.truncated ? h('p.muted.small', 'More folders than shown.') : null);

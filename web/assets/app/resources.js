@@ -87,7 +87,7 @@ export function createResource(load) {
       else if (!loading && (!known || Date.now() - at > each(f))) poll.kick();
       return () => {
         if (!followers.delete(f) || followers.size) return;
-        poll.stop();
+        if (poll) poll.stop();
         poll = null;
       };
     },
@@ -180,6 +180,8 @@ function revalidating(path, { timeout, ...options }) {
       throw e;
     }
     if (answer === NOT_MODIFIED) {
+      // Only an answer we have can still hold: no ETag went without one.
+      if (!sent) throw new Error(`${path}: 304 Not Modified, but no ETag was sent`);
       last = sent;
       return sent.data;
     }

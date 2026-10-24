@@ -21,7 +21,11 @@ import { errorMessage } from '../lib/errors.js';
 
 // ── shell, router and connect screen ─────────────────────────────────────
 
-const app = document.getElementById('app');
+const app = (() => {
+  const el = document.getElementById('app');
+  if (!el) throw new Error('index.html has no #app'); // theme.js then says the dashboard did not start
+  return el;
+})();
 const shell = createShell({ onRestart: () => restartBridge() });
 
 // Every address change goes through the guard, which asks before a page
