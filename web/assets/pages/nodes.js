@@ -169,6 +169,7 @@ export default /** @satisfies {PageModule} */ ({
       const { roots } = n;
       const pick = select(roots, roots[0], { 'aria-label': 'Folder' });
       const holder = h('div.term-holder');
+      /** @type {ReturnType<typeof nodeTerminal> | null} */
       let term = null;
       await openDialog({
         title: `Terminal on ${n.name}`,
@@ -323,7 +324,10 @@ export default /** @satisfies {PageModule} */ ({
     };
     /** @param {FleetNode} n */
     const liveOf = (n) => ({ online: !!n.online, last_seen: n.last_seen || null, resources: /** @type {Partial<HostStats>} */ (n.resources || {}), address: n.address || null, term: termOf(n) });
-    /** @param {FleetNode} n */
+    /**
+     * @param {FleetNode} n
+     * @returns {FleetNode}
+     */
     const stableOf = (n) => ({ ...n, online: undefined, last_seen: undefined, resources: undefined, address: undefined });
     const liveRegions = new Map(); // node id → its live region
 

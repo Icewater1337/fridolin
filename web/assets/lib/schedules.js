@@ -2,7 +2,7 @@
 // (.brain/schedules/<name>.json) and the wizard's fields, how its times
 // and its permissions read, and how the list is filtered and grouped.
 
-/** @import { Schedule, SchedulesResponse } from '../../types/api.js' */
+/** @import { Schedule, ScheduleAgent, SchedulesResponse } from '../../types/api.js' */
 
 /**
  * The edit form's fields as scheduleOf reads them: texts as typed (lists
@@ -88,7 +88,16 @@ function lines(text) {
   return String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
 }
 
-/** The wizard's fields of schedule s, the inverse of scheduleOf. */
+/**
+ * The fields of an agent as the wizard keeps them: vars as {name: value}.
+ * @typedef {Omit<ScheduleFields, 'vars'> & {vars: Record<string, string>}} WizardFields
+ */
+
+/**
+ * The wizard's fields of schedule s, the inverse of scheduleOf.
+ * @param {Partial<Schedule>} [s]
+ * @returns {WizardFields}
+ */
 export function fieldsOf(s = {}) {
   return {
     name: s.name || '', when: s.when || '', description: s.description || '', enabled: s.enabled !== false,
@@ -103,19 +112,25 @@ export function fieldsOf(s = {}) {
 }
 
 // The order of the fields in the file the bridge writes (the Go type's).
+/** @type {(keyof Schedule)[]} */
 const FILE_ORDER = ['name', 'when', 'enabled', 'description', 'prompt', 'prompt_file', 'template', 'command', 'vars', 'report', 'chat', 'risk', 'disallowed_tools', 'timeout_minutes', 'missed', 'jitter_minutes', 'preapproved', 'github'];
+/** @param {Record<string, string>} o */
 const sortedObj = (o) => Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]]));
 
-/** The file the bridge writes for schedule s, byte for byte. */
+/**
+ * The file the bridge writes for schedule s, byte for byte.
+ * @param {Partial<Schedule>} s
+ */
 export function fileJSON(s) {
+  /** @type {Record<string, unknown>} */
   const out = {};
   for (const k of FILE_ORDER) {
-    if (s[k] === undefined) continue;
-    let v = s[k];
-    if (k === 'command') v = { node: v.node, argv: v.argv, ...(v.dir ? { dir: v.dir } : {}) };
-    if (k === 'vars') v = sortedObj(v);
-    if (k === 'github') v = { repos: v.repos, permissions: sortedObj(v.permissions || {}) };
-    out[k] = v;
+    const v = s[k];
+    if (v === undefined) continue;
+    if (k === 'command' && s.command) out[k] = { node: s.command.node, argv: s.command.argv, ...(s.command.dir ? { dir: s.command.dir } : {}) };
+    else if (k === 'vars' && s.vars) out[k] = sortedObj(s.vars);
+    else if (k === 'github' && s.github) out[k] = { repos: s.github.repos, permissions: sortedObj(s.github.permissions || {}) };
+    else out[k] = v;
   }
   return `${JSON.stringify(out, null, 2)}\n`;
 }
@@ -222,6 +237,7 @@ export function whenOf(p) {
 export const WEEKDAYS = DAYS;
 
 /** The states an agent is listed in, with their labels and badge kinds. */
+/** @type {[ScheduleAgent['state'], string, string][]} */
 export const STATES = [
   ['pending', 'Pending approval', 'warn'],
   ['active', 'Active', 'ok'],
@@ -230,13 +246,27 @@ export const STATES = [
   ['disabled', 'Disabled', 'neutral'],
 ];
 
-/** An agent's state label and badge kind. */
+/**
+ * An agent's state label and badge kind.
+ * @param {{state: string}} a
+ */
 export function stateOf(a) {
   const s = STATES.find(([k]) => k === a.state) || STATES[1];
   return { key: s[0], label: s[1], kind: s[2] };
 }
 
-/** The agents filter keeps: of brain (all for ''), in state, matching q. */
+/**
+ * What filterAgents and groupByBrain read of an agent.
+ * @typedef {{brain: string, name: string, state: string, brain_name?: string, task?: string, review?: object, schedule?: {description?: string}}} AgentLike
+ */
+
+/**
+ * The agents filter keeps: of brain (all for ''), in state, matching q.
+ * @template {AgentLike} A
+ * @param {A[]} agents
+ * @param {{brain?: string, state?: string, q?: string}} [filter]
+ * @returns {A[]}
+ */
 export function filterAgents(agents, { brain = '', state = '', q = '' } = {}) {
   const needle = q.trim().toLowerCase();
   return agents.filter((a) => (!brain || a.brain === brain)
@@ -244,8 +274,13 @@ export function filterAgents(agents, { brain = '', state = '', q = '' } = {}) {
     && (!needle || [a.name, a.brain, a.brain_name, a.task, a.schedule && a.schedule.description].some((v) => String(v || '').toLowerCase().includes(needle))));
 }
 
-/** agents grouped by brain, in order: [{brain, name, agents}]. */
+/**
+ * agents grouped by brain, in order: [{brain, name, agents}].
+ * @template {AgentLike} A
+ * @param {A[]} agents
+ */
 export function groupByBrain(agents) {
+  /** @type {{brain: string, name: string, agents: A[]}[]} */
   const out = [];
   for (const a of agents) {
     let g = out.find((x) => x.brain === a.brain);
@@ -258,13 +293,17 @@ export function groupByBrain(agents) {
   return out;
 }
 
+/** @type {Record<string, string>} */
 const RISK_TEXT = {
   read: 'Only looks: it reads files, the web and its tools, and changes nothing.',
   write: 'May change files in the brain’s folder, as a normal run does. Irreversible steps still ask you first.',
   irreversible: 'May take steps that cannot be undone (send, publish, file issues). Each still asks you, unless it is approved with the agent below.',
 };
 
-/** The risk budget s runs with, in plain words. */
+/**
+ * The risk budget s runs with, in plain words.
+ * @param {string | undefined} risk
+ */
 export function riskText(risk) {
   return RISK_TEXT[risk || 'write'];
 }
@@ -273,6 +312,8 @@ export function riskText(risk) {
  * What agent s may do, as plain sentences: its risk budget, the steps
  * approved with it, its GitHub access, the node it runs on and where its
  * results go (chat: the chat they go to, '' for the brain's own).
+ * @param {Partial<Schedule>} s
+ * @param {string} [chat]
  */
 export function permissionsOf(s, chat = '') {
   const out = [];
@@ -295,7 +336,10 @@ export function permissionsOf(s, chat = '') {
   return out;
 }
 
-/** A run's time as the Schedules page shows it: "Fri, 24 Oct, 06:00". */
+/**
+ * A run's time as the Schedules page shows it: "Fri, 24 Oct, 06:00".
+ * @param {string | number | Date} ts
+ */
 export function runTime(ts) {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return '';

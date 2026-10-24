@@ -224,6 +224,7 @@ export function syncOptions(sel, options, fallback) {
   if (JSON.stringify(now) === JSON.stringify(options)) return sel;
   const v = sel.value;
   sel.replaceChildren(...options.map(([value, label]) => h('option', { value }, label)));
+  /** @param {string} x */
   const offered = (x) => options.some(([o]) => o === x);
   sel.value = offered(v) ? v : (fallback !== undefined && offered(fallback) ? fallback : (options[0] ? options[0][0] : ''));
   return sel;

@@ -18,6 +18,7 @@ import { icon } from '../components/icons.js';
 import { markdownDoc, markdownToc } from '../components/markdown.js';
 
 /** @import { Page, PageModule } from '../app/page.js' */
+/** @import { MarkdownLinks } from '../components/markdown.js' */
 /** @import { WikiHit, WikiPageInfo } from '../../types/api.js' */
 
 /**
@@ -118,6 +119,7 @@ function brainView(root, ctx, brain, page) {
     get(`/api/wiki/${encodeURIComponent(brain)}/page${qs({ path })}`, { signal: ctx.signal }).then((pg) => {
       const title = pg.doc.title || pg.page.title;
       ctx.setTitle(`${title} · ${idx.label}`);
+      /** @type {MarkdownLinks} */
       const links = {
         page: (p) => (/^(wiki|memories)\//.test(p) ? wikiHref(brain, p) : filesHref(`brain:${brain}`, p, false)),
         file: (p) => filesHref(`brain:${brain}`, p, false),
