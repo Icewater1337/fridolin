@@ -34,6 +34,27 @@ for compatibility.
   keeps the settings added to `.env` (docs/NODES.md, "The core in a
   box"; docs/CORE.md, "Moving the core to a box").
 
+- **Forgetting a former core host removes what moves brought it** (#266):
+  "Forget them" in the keep/forget poll after a core move (or no vote in
+  24 hours), and `!revoke` of a connected core host, now also remove the
+  secret files a move wrote into the core's credentials folder (the
+  `fridolin-home` volume) and the core's data dir (`fridolin-data`:
+  `bridge.db` with the WhatsApp session, `vault.db`, the config, the
+  brain folders a move put there), not only the host secrets. Each is
+  keyed off a record the node agent keeps as a move brings it
+  (`core-secrets-received.json`): a file that was there before, and a
+  data dir that held data when a move imported into it (the core's
+  original home), stay. The data dir goes only while no move and no core
+  runs there and another device's core holds the lease. The owner's
+  message lists the secrets, files and entries of the data dir removed,
+  or why the data dir stays. New: `fridolin core forget-data`, `fridolin
+  core files forget`, `"data_dir"` in `fridolin core status --json`,
+  and `fridolin doctor --node`'s `node-core-leftovers` check, which warns
+  on a former core host that still holds core data. A data dir imported
+  by an older version is not in the record and stays: doctor says so,
+  and docs/CORE.md, "Forgetting a former core host", says how to remove
+  it by hand.
+
 - **`!movecore`** (#187, third slice): in the owner's direct chat,
   `!movecore <node>` runs the move's pre-flight and answers with a
   plain report (source → target, the expected time offline, what does

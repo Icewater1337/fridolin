@@ -565,19 +565,19 @@ func (s *Service) ApproveCommands(id string) (*Node, error) {
 
 // Revoke revokes node id and closes its connection at once.
 //
-// A core host that is connected forgets the host secrets a move brought
-// it first (#187 §5): once revoked, the core can no longer ask it to.
+// A core host that is connected forgets what moves brought it first
+// (#187 §5, #266): once revoked, the core can no longer ask it to.
 func (s *Service) Revoke(id string) (*Node, error) {
 	n, _, err := s.RevokeForget(id)
 	return n, err
 }
 
 // RevokeForget revokes node id like Revoke, and says what its forgetting
-// the host secrets did: nil for a node that is no core host.
+// what moves brought it did: nil for a node that is no core host.
 func (s *Service) RevokeForget(id string) (*Node, *CoreForget, error) {
 	var forgot *CoreForget
 	if cur, err := s.reg.Get(id); err == nil && cur.Device == nodeproto.DeviceApproved && cur.Effective().CoreHost != nil {
-		ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
+		ctx, cancel := context.WithTimeout(s.ctx, slowCalls[nodeproto.MethodCoreSecretsForget])
 		f := s.ForgetCoreSecrets(ctx, id)
 		cancel()
 		forgot = &f

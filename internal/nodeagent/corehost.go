@@ -39,9 +39,11 @@ const (
 	CoreHostFile = "core-host.json"
 	// coreSecretsDir is a box's secret store (hostsecrets.Sealed).
 	coreSecretsDir = "core-secrets"
-	// coreReceivedFile lists the secrets this machine received over the
-	// node channel that it did not hold before: what core.secrets.forget
-	// removes.
+	// coreReceivedFile records what moves brought this machine and it
+	// did not hold before: the host secrets received over the node
+	// channel, the secret files they wrote, the core's data dir a move's
+	// import put into an empty one. It is what core.secrets.forget
+	// removes, and nothing else (coreforget.go).
 	coreReceivedFile = "core-secrets-received.json"
 	// TransferLogFile gets a line, names only, for every transfer.
 	TransferLogFile = "secrets-transfer.log"
@@ -277,7 +279,7 @@ func (a *Agent) coreHostCall(ctx context.Context, method string, params json.Raw
 		if e := decode(&p); e != nil {
 			return nil, e
 		}
-		return a.coreForget()
+		return a.coreForget(ctx)
 	case nodeproto.MethodCoreImagePull:
 		var p nodeproto.CoreImagePullParams
 		if e := decode(&p); e != nil {
@@ -587,6 +589,10 @@ func (a *Agent) coreReceive(p nodeproto.CoreSecretsReceiveParams) (any, *nodepro
 		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 		filesStored, filesKept, err = fr.ImportFiles(ctx, filesDir, files)
 		cancel()
+		// Those written are the move's, even when the rest failed.
+		if nerr := a.noteFilesReceived(filesDir, filesStored); nerr != nil {
+			a.logf("node: core-host: noting the received secret files: %v", nerr)
+		}
 		if err != nil {
 			return fail(nodeproto.CodeFailed, "the host secrets are stored; writing the secret files: %v", err)
 		}
@@ -606,87 +612,11 @@ func (a *Agent) secretFiler() (SecretFiler, bool) {
 	return fr, ok
 }
 
-// coreForget is core.secrets.forget: it removes the secrets this machine
-// received over the node channel and did not hold before, never others,
-// so that it cannot empty the store of a machine that runs the core.
-func (a *Agent) coreForget() (any, *nodeproto.Error) {
-	st, _, perr := a.coreStore()
-	if perr != nil {
-		return nil, perr
-	}
-	d, ok := st.(hostsecrets.Deleter)
-	if !ok {
-		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "this store cannot remove a secret")
-	}
-	var gone, failed []string
-	for _, n := range a.coreReceived() {
-		if err := d.Delete(n); err != nil {
-			failed = append(failed, n)
-			continue
-		}
-		gone = append(gone, n)
-	}
-	if err := a.writeReceived(failed); err != nil {
-		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
-	}
-	res := "ok"
-	if len(failed) > 0 {
-		res = "could not remove " + strings.Join(failed, ", ")
-	}
-	a.transferLog(map[string]any{"direction": "forgot", "names": gone, "result": res})
-	if len(failed) > 0 {
-		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "removed %s; could not remove %s", strings.Join(gone, ", "), strings.Join(failed, ", "))
-	}
-	return nodeproto.CoreSecretsForgotten{Forgotten: orEmpty(gone)}, nil
-}
-
 func orEmpty(s []string) []string {
 	if s == nil {
 		return []string{}
 	}
 	return s
-}
-
-// coreReceived are the names core.secrets.forget would remove.
-func (a *Agent) coreReceived() []string {
-	if a.Dir == "" {
-		return nil
-	}
-	data, err := os.ReadFile(filepath.Join(a.Dir, coreReceivedFile))
-	if err != nil {
-		return nil
-	}
-	var f struct {
-		Names []string `json:"names"`
-	}
-	if json.Unmarshal(data, &f) != nil {
-		return nil
-	}
-	return slices.DeleteFunc(f.Names, func(n string) bool { return !slices.Contains(secretxfer.MoveNames, n) })
-}
-
-func (a *Agent) noteReceived(names []string) error {
-	if len(names) == 0 {
-		return nil
-	}
-	all := append(a.coreReceived(), names...)
-	sort.Strings(all)
-	return a.writeReceived(slices.Compact(all))
-}
-
-func (a *Agent) writeReceived(names []string) error {
-	if a.Dir == "" {
-		return nil
-	}
-	p := filepath.Join(a.Dir, coreReceivedFile)
-	if len(names) == 0 {
-		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		return nil
-	}
-	data, _ := json.Marshal(map[string][]string{"names": names})
-	return writeFile(p, append(data, '\n'), 0o600)
 }
 
 // transferLog appends one line, names only, to the state dir's

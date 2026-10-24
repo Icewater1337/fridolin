@@ -139,25 +139,33 @@ func (s *Service) FindNode(nameOrID string) (*Node, error) {
 	return found, nil
 }
 
-// CoreForget is what asking a core host to forget the host secrets did:
-// the names it removed, or why it could not.
+// CoreForget is what asking a core host to forget what moves brought it
+// did (#266): the host secrets it removed (Forgotten), the secret files
+// (Files, ~/dir/name) and the entries of the core's data dir (Data);
+// DataKept says why its data dir stays, and Error what could not be
+// removed, or why it could not be asked.
 type CoreForget struct {
 	Forgotten []string `json:"forgotten"`
+	Files     []string `json:"files,omitempty"`
+	Data      []string `json:"data,omitempty"`
+	DataKept  string   `json:"data_kept,omitempty"`
 	Error     string   `json:"error,omitempty"`
 }
 
-// ForgetCoreSecrets asks core host id to remove the host secrets a move
-// brought it over the node channel (core.secrets.forget). Secrets typed
-// on that machine stay: the agent never received them.
+// ForgetCoreSecrets asks core host id to remove what moves brought it
+// over the node channel (core.secrets.forget): the host secrets, the
+// secret files they wrote and the core's data dir its import put into an
+// empty one. What the machine held before stays: secrets typed there, its
+// own files, the data dir of the core's original home.
 func (s *Service) ForgetCoreSecrets(ctx context.Context, id string) CoreForget {
 	if !s.Online(id) {
 		return CoreForget{Forgotten: []string{}, Error: "it is offline"}
 	}
 	var res nodeproto.CoreSecretsForgotten
 	if err := s.Call(ctx, id, nodeproto.MethodCoreSecretsForget, struct{}{}, &res); err != nil {
-		s.logf("nodes: %s forgetting the host secrets: %v", id, err)
+		s.logf("nodes: %s forgetting what moves brought it: %v", id, err)
 		return CoreForget{Forgotten: []string{}, Error: err.Error()}
 	}
-	s.logf("nodes: %s forgot %d host secrets", id, len(res.Forgotten))
-	return CoreForget{Forgotten: append([]string{}, res.Forgotten...)}
+	s.logf("nodes: %s forgot %d host secrets, %d secret files and %d entries of the core's data dir", id, len(res.Forgotten), len(res.Files), len(res.Data))
+	return CoreForget{Forgotten: append([]string{}, res.Forgotten...), Files: res.Files, Data: res.Data, DataKept: res.DataKept, Error: strings.Join(res.Problems, "; ")}
 }

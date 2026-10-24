@@ -53,8 +53,11 @@ const (
 	// MethodCoreSecretsReceive decrypts a bundle with the offer's key and
 	// stores it (CoreSecretsReceiveParams → CoreSecretsReceived).
 	MethodCoreSecretsReceive = "core.secrets.receive"
-	// MethodCoreSecretsForget removes the host secrets this machine
-	// received over the node channel (nothing → CoreSecretsForgotten).
+	// MethodCoreSecretsForget removes what moves brought this machine:
+	// the host secrets it received over the node channel, the secret
+	// files they wrote, and the core's data dir when a move's import put
+	// it into an empty one, never what the machine held before (nothing
+	// → CoreSecretsForgotten; #266).
 	MethodCoreSecretsForget = "core.secrets.forget"
 )
 
@@ -320,7 +323,15 @@ type CoreSecretsReceived struct {
 	FilesKept   []string `json:"files_kept,omitempty"`
 }
 
-// CoreSecretsForgotten are the secrets a target removed.
+// CoreSecretsForgotten is what a core host removed of what moves brought
+// it: the host secrets by name (Forgotten), the secret files by path
+// under ~ (Files), and the entries of the core's data dir (Data, such as
+// bridge.db and brains-folders/Personal). DataKept says why the data dir
+// stays, when it does; Problems what could not be removed (#266).
 type CoreSecretsForgotten struct {
 	Forgotten []string `json:"forgotten"`
+	Files     []string `json:"files,omitempty"`
+	Data      []string `json:"data,omitempty"`
+	DataKept  string   `json:"data_kept,omitempty"`
+	Problems  []string `json:"problems,omitempty"`
 }

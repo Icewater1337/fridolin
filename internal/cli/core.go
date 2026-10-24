@@ -73,10 +73,11 @@ On the host that runs Docker:
                        check the image's build provenance (GitHub's attestation
                        for image.yml on main), pull it by digest and tag it as
                        this version's, for start (--check: only say whether it is here)
-  fridolin core files export|import
+  fridolin core files export|import|forget
                        in the core's container (core run core files …): the secret
                        files of sandbox.credentials_dir a core move carries, as
-                       JSON; import (from stdin) writes only those not there, 0600
+                       JSON; import (from stdin) writes only those not there, 0600;
+                       forget removes those named on stdin (what a move wrote)
   fridolin core rehearse [--json]
                        import the latest export into a scratch volume
                        (fridolin-move-rehearsal), check it, and remove the volume:
@@ -104,6 +105,11 @@ In the core (docker exec fridolin-core fridolin core ...):
                                  a core running (a core move's target that gives up)
   fridolin core status [--json]  who holds the core lease, this device's id and the
                                  latest export (with --json: as a core move reads it)
+  fridolin core forget-data [--json]
+                                 empty this data dir, which a core move brought to a
+                                 machine the core has left (its agent runs it when the
+                                 owner says forget): refused while a core runs on it,
+                                 and unless another device's core holds the lease
   core export takes --move ID (a core move's id, written into the export's
   manifest and info) and --json (print the export's info).
 
@@ -148,7 +154,7 @@ func runCore(args []string, env coreEnv) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	switch sub {
-	case "export", "import", "promote", "status", "release":
+	case "export", "import", "promote", "status", "release", "forget-data":
 		return coreInside(ctx, sub, args, env)
 	case "start", "stop", "update", "run", "build", "pull", "rehearse":
 		return coreHost(ctx, sub, args, env, defaultHostDeps(env))
@@ -199,7 +205,7 @@ func coreInside(ctx context.Context, sub string, args []string, env coreEnv) int
 		fs.BoolVar(&f.drift, "drift", false, "say only which brains' brain.json or scheduled agents on disk differ from the manifests you approved, and export nothing; exits 1 when the export would refuse")
 		fs.BoolVar(&f.useApproved, "use-approved", false, "take the brain folders along by the approved manifests although a brain.json on disk keeps more of its folder home")
 	}
-	if sub == "export" || sub == "status" {
+	if sub == "export" || sub == "status" || sub == "forget-data" {
 		fs.BoolVar(&f.asJSON, "json", false, "print the answer as JSON")
 	}
 	if sub == "import" {
@@ -240,6 +246,8 @@ func coreInside(ctx context.Context, sub string, args []string, env coreEnv) int
 		err = coreStatus(ctx, f, env)
 	case "release":
 		err = coreRelease(ctx, f, env)
+	case "forget-data":
+		err = coreForgetData(ctx, f, env)
 	}
 	if err != nil {
 		fmt.Fprintf(env.stderr, "fridolin core %s: %v\n", sub, err)
@@ -1153,9 +1161,10 @@ func coreHost(ctx context.Context, sub string, args []string, env coreEnv, d hos
 		}
 	case "run":
 		// No published ports: the one-off container is no second dashboard.
-		if slices.Equal(fs.Args(), []string{"core", "files", "import"}) && d.runStdin != nil {
-			// The secret files come on stdin (a core move, #187).
-			err = d.runStdin(ctx, d.docker, append(composeArgs(path, override, armor), "run", "--rm", "--no-deps", "-T", "core", "core", "files", "import"), childEnv, env.stdin, env.stdout, env.stderr)
+		if (slices.Equal(fs.Args(), []string{"core", "files", "import"}) || slices.Equal(fs.Args(), []string{"core", "files", "forget"})) && d.runStdin != nil {
+			// The secret files, or the names of those to remove, come on
+			// stdin (a core move, #187; forgetting what it brought, #266).
+			err = d.runStdin(ctx, d.docker, append(composeArgs(path, override, armor), append([]string{"run", "--rm", "--no-deps", "-T", "core"}, fs.Args()...)...), childEnv, env.stdin, env.stdout, env.stderr)
 			break
 		}
 		err = compose1(append([]string{"run", "--rm", "--no-deps", "core"}, fs.Args()...)...)

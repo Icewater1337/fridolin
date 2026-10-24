@@ -553,8 +553,10 @@ func (a *Agent) runTarget(ctx context.Context, r CoreRunner, m *moveRun) {
 		if m.State.Phase != nodeproto.MoveWaiting {
 			a.step(m, nodeproto.MoveWaiting, "wait", "waiting for %s to release the lease and export", p.Source)
 		}
+		var st nodeproto.CoreRuntime
 		for {
-			st, err := r.Status(ctx)
+			var err error
+			st, err = r.Status(ctx)
 			if ctx.Err() != nil {
 				return
 			}
@@ -571,6 +573,11 @@ func (a *Agent) runTarget(ctx context.Context, r CoreRunner, m *moveRun) {
 			if !wait(ctx, min(a.movePoll(), time.Until(p.HandoffDeadline)+time.Millisecond)) {
 				return
 			}
+		}
+		// Whether the move brings the data dir, before the import changes
+		// it: what forgetting this machine may remove (#266).
+		if err := a.noteDataImport(p.Move, st.DataDir); err != nil {
+			a.logf("node: core move %s: noting what the import brings: %v", p.Move, err)
 		}
 		a.step(m, nodeproto.MoveImporting, "import", "%s released the lease and exported; importing", p.Source)
 		if err := r.Import(ctx); err != nil {

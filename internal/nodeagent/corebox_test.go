@@ -212,6 +212,8 @@ func TestBoxCoreCommands(t *testing.T) {
 				return nil, errors.New("no files on stdin")
 			}
 			return []byte(`{"stored":["a.json"],"kept":[]}`), nil
+		case "forget-data":
+			return []byte(`{"removed":["bridge.db"]}`), nil
 		case "import":
 			if slices.Contains(args, "--rehearsal") {
 				if err := os.MkdirAll(filepath.Join(b.StateDir, coreRehearsalDir, "core"), 0o700); err != nil {
@@ -261,12 +263,27 @@ func TestBoxCoreCommands(t *testing.T) {
 		}
 	}
 
-	// No import while the core runs in the box.
+	// What a move brought, forgotten through the same commands (#266).
+	var _ CoreForgetter = b
+	if _, err := b.ForgetFiles(ctx, "~/.credentials", []string{"a.json"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.ForgetData(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls[len(calls)-2:]; !slices.Equal(got, []string{"core files forget", "core forget-data --json"}) {
+		t.Errorf("forgetting ran %q", got)
+	}
+
+	// No import, and no forgetting the data, while the core runs in the box.
 	if err := b.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if err := b.Import(ctx); err == nil {
 		t.Error("an import ran under a running core")
+	}
+	if _, err := b.ForgetData(ctx); err == nil {
+		t.Error("the data dir was forgotten under a running core")
 	}
 	_ = b.Stop(ctx)
 }

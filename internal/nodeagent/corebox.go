@@ -633,3 +633,36 @@ func (a *Agent) boxSetup(ctx context.Context) ([]nodeproto.CoreCheckItem, bool, 
 	items = append(items, sb)
 	return items, sb.Status == "ok", ""
 }
+
+// ForgetFiles removes the named secret files a move wrote into the box's
+// home (fridolin core files forget, #266).
+func (b *BoxCore) ForgetFiles(ctx context.Context, dir string, names []string) ([]string, error) {
+	in, err := json.Marshal(map[string]any{"dir": dir, "names": names})
+	if err != nil {
+		return nil, err
+	}
+	out, err := b.run(ctx, 3*time.Minute, b.DataDir, in, "core", "files", "forget")
+	if err != nil {
+		return nil, err
+	}
+	var res struct {
+		Removed []string `json:"removed"`
+	}
+	return res.Removed, decodeLast(out, &res)
+}
+
+// ForgetData empties the box's data volume (fridolin core forget-data,
+// #266), which checks the lease itself; never while the core runs here.
+func (b *BoxCore) ForgetData(ctx context.Context) ([]string, error) {
+	if b.Running() {
+		return nil, errors.New("the core runs in this box")
+	}
+	out, err := b.run(ctx, 30*time.Minute, b.DataDir, nil, "core", "forget-data", "--json")
+	if err != nil {
+		return nil, err
+	}
+	var res struct {
+		Removed []string `json:"removed"`
+	}
+	return res.Removed, decodeLast(out, &res)
+}

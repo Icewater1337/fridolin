@@ -924,18 +924,86 @@ tool for it):
 **Keep or forget the secrets.** After a move, the core asks in a second
 poll whether the machine it left keeps its copy of the host secrets:
 **Keep them on SRC** makes the next move faster; **Forget them on SRC**
-runs `core.secrets.forget` there, which removes what a move brought that
-machine over the node channel (secrets typed on it stay: the agent never
-received them). No vote within 24 hours forgets them. After a move that
-failed once the secrets had gone to DST, the same poll asks about DST.
-Revoking a core host (`!revoke`, the Nodes page, `fridolin nodes
-revoke`) has it forget them first when it is connected, and `!revoke`
-says what it forgot.
+runs `core.secrets.forget` there, which removes what moves brought that
+machine and nothing it held before ([Forgetting a former core
+host](#forgetting-a-former-core-host)): the host secrets it received
+over the node channel, the secret files they wrote, and the core's data
+dir when a move's import put it into an empty one. No vote within 24
+hours forgets them. After a move that failed once the secrets had gone
+to DST, the same poll asks about DST. Revoking a core host (`!revoke`,
+the Nodes page, `fridolin nodes revoke`) has it forget them first when
+it is connected, and `!revoke` says what it forgot.
+
+### Forgetting a former core host
+
+A machine the core moved away from must not keep the WhatsApp session or
+the credentials a move brought it once the owner says forget (#266). It
+must not lose what it held before either: the core's original home keeps
+its own data dir, to move back to, and a machine keeps the secrets typed
+on it. So the node agent records each thing a move brings as it comes,
+in `core-secrets-received.json` in its state dir, and forgetting removes
+exactly what that record names:
+
+| What | Recorded when | Removed by forgetting |
+| --- | --- | --- |
+| Host secrets | `core.secrets.receive` stored one the machine did not hold | from its secret store (keychain, files, a box's sealed store) |
+| Secret files of `sandbox.credentials_dir` | the move wrote one that was not there (one that was is kept as it was, and never recorded) | `fridolin core run core files forget`, those names only, regular files only |
+| The core's data dir (`fridolin-data`) | the move's import found it empty: nothing but its device id (`core status --json` says `"data_dir": "empty"`) | `fridolin core run core forget-data`: `bridge.db` (the WhatsApp session), `vault.db`, `config.json`, the tokens, the brain folders a move put into `brains-folders/`, `core/` with what later imports moved aside |
+
+A data dir that held a core's data when a move first imported into it
+is the machine's own from before the moves (`"own_data"` in the record):
+forgetting keeps it, and says so ("Its own data dir stays: it held the
+core's data before move … imported into it"). One a move brought stays
+the moves' through later moves, also when the core ran on it meanwhile.
+
+The data dir goes only when it is safe, checked by the agent and again
+by `core forget-data` itself, which holds the data dir's lock while it
+works: no move runs on the machine (it waits a few polls for the
+source's watch to end), no core runs on the data dir, and another
+device's core holds the lease, live. Otherwise the data dir and the
+files stay and the report says why ("the core runs here", "no other
+machine's core holds the lease, so this copy may be the core's only
+one"); the host secrets go regardless. The order is the data dir, the
+files, then the secrets, since reading the lease takes the bucket's
+keys. What could not be removed stays in the record for the next forget.
+
+The owner's message lists what went:
+
+```text
+🧹 *icebase* forgot what moves brought it:
+• host secrets: fridolin.claude.oauth.token, fridolin.b2.vault.keyid, …
+• secret files: ~/.config/fridolin/dashboard-users.json, …
+• the core's data dir: bridge.db, brains-folders/Personal, config.json, core, vault.db
+```
+
+The volume `fridolin-data` stays, empty: a later move into it is a move
+into a fresh core host. The `fridolin-home` volume keeps everything but
+the files named. Removing is deleting files; on an SSD nothing can
+promise the blocks are overwritten, so rotate what the machine held when
+it is lost or no longer trusted ([A core host that is
+gone](#recovery)).
+
+`fridolin doctor --node` on the machine says what is left there
+(`node-core-leftovers`), from the record alone: a warning for a former
+core host (the source of its latest move, done, or the target of one
+that did not end there) that still holds what moves brought it, or its
+own data dir from before them, which forgetting never removes.
+
+**By hand.** A data dir an older fridolin imported (before #266: the
+record has no word on it, and doctor says so) or one forgetting could
+not remove: on that machine, once the core runs elsewhere, `fridolin core
+run core status` must show another device holding the lease; then
+`fridolin core run core forget-data` empties the volume (or `docker
+volume rm fridolin-data` with no container on it). The secret files are
+in the `fridolin-home` volume, under the folder `sandbox.credentials_dir`
+names; `fridolin core secrets` lists the host secrets, and the machine's
+keychain or `~/.config/fridolin/secrets/` holds them.
 
 The audit log has `core_move_requested` (each `!movecore <node>`, and
 whether a poll went out), `core_move_approved` (the vote: started,
 cancelled, expired, refused), `core_move_ended` (done, rolled back,
-failed) and `core_secrets` (kept or forgotten).
+failed) and `core_secrets` (kept, or forgotten with the number of host
+secrets, secret files and entries of the data dir removed).
 
 ### The site's tunnel
 
@@ -1263,7 +1331,7 @@ sign-ins do not work there, and a brain's own scripts that call
 - **The age identity is lost.** Exports made with it cannot be decrypted.
   Keep a copy of it outside the machines (a password manager).
 - **A core host that is gone** (lost, stolen, or revoked while
-  offline, so it could not forget the host secrets first): rotate what
+  offline, so it could not forget what moves brought it first): rotate what
   it held. New B2 application keys (the vault's and the snapshots'), a
   new Claude token (`claude setup-token`), new vault, restic and
   Litestream passwords; then `fridolin core secrets set NAME` for each on

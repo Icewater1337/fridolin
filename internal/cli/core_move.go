@@ -15,6 +15,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/coreexport"
 	"github.com/Icewater1337/fridolin/internal/lease"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/provenance"
 )
 
@@ -37,7 +38,7 @@ func coreStatusJSON(ctx context.Context, dataDir string, f insideFlags, env core
 	if err != nil {
 		return err
 	}
-	out := nodeproto.CoreRuntime{Device: id}
+	out := nodeproto.CoreRuntime{Device: id, DataDir: dataDirState(dataDir)}
 	if by, err := os.ReadFile(filepath.Join(config.Layout{Root: dataDir}.Core(), app.SupersededFile)); err == nil {
 		out.Superseded = strings.TrimSpace(string(by))
 	}
@@ -65,6 +66,110 @@ func coreStatusJSON(ctx context.Context, dataDir string, f insideFlags, env core
 		out.Latest = &i
 	}
 	return json.NewEncoder(env.stdout).Encode(out)
+}
+
+// dataDirState is nodeproto.DataDirEmpty for a data dir that holds
+// nothing but its lock and device id (a fresh volume that core status
+// read), else nodeproto.DataDirHeld: anything else counts as data.
+func dataDirState(dataDir string) string {
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		return nodeproto.DataDirHeld
+	}
+	for _, e := range entries {
+		switch e.Name() {
+		case "bridge.lock":
+		case "core":
+			inner, err := os.ReadDir(filepath.Join(dataDir, "core"))
+			if err != nil {
+				return nodeproto.DataDirHeld
+			}
+			for _, c := range inner {
+				if c.Name() != filepath.Base(lease.DeviceIDFile) {
+					return nodeproto.DataDirHeld
+				}
+			}
+		default:
+			return nodeproto.DataDirHeld
+		}
+	}
+	return nodeproto.DataDirEmpty
+}
+
+// coreForgetData is core forget-data (#266): it empties this data dir,
+// which a core move brought to a machine the core has left, when the
+// owner said forget. It holds the data dir's lock throughout, so that it
+// refuses while a core runs on it, and refuses unless another device's
+// core holds the lease, live: then this copy is no core's only one, and
+// no rollback needs it. All but bridge.lock goes: bridge.db (the WhatsApp
+// session), vault.db, config.json, the tokens, the brain folders a move
+// put into brains-folders/, core/ with what imports moved aside. It says
+// what it removed.
+func coreForgetData(ctx context.Context, f insideFlags, env coreEnv) error {
+	dataDir, err := insideDataDir(f, env)
+	if err != nil {
+		return err
+	}
+	st, where, err := coreStoreFrom(f.store, f.bucket, env.environ)
+	if err != nil {
+		return err
+	}
+	l, err := platform.AcquireLock(config.Layout{Root: dataDir}.Lock())
+	if err != nil {
+		return fmt.Errorf("%w: a core runs on %s; it stays", err, dataDir)
+	}
+	defer l.Release()
+	id, err := lease.DeviceID(dataDir)
+	if err != nil {
+		return err
+	}
+	r, ok, err := lease.Read(ctx, st)
+	if err != nil {
+		return fmt.Errorf("reading the lease in %s: %w; the data dir stays", where, err)
+	}
+	_, stale := leaseTimings(f)
+	switch {
+	case !ok:
+		return fmt.Errorf("the lease in %s is free: this data dir may be the core's only copy, and stays", where)
+	case r.DeviceID == id:
+		return fmt.Errorf("this data dir (%s) holds the lease: it is the core's, and stays", id)
+	case r.Released:
+		return fmt.Errorf("device %s (%s) released the lease and no core holds it: this data dir may be needed, and stays", r.DeviceID, r.Hostname)
+	case !r.Live(time.Now(), stale):
+		return fmt.Errorf("the lease of device %s (%s) is stale: this data dir may be needed, and stays", r.DeviceID, r.Hostname)
+	}
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		return err
+	}
+	removed := []string{}
+	for _, e := range entries {
+		name := e.Name()
+		if name == "bridge.lock" {
+			continue
+		}
+		p := filepath.Join(dataDir, name)
+		if name == "brains-folders" && e.IsDir() {
+			inner, _ := os.ReadDir(p)
+			for _, c := range inner {
+				if err := os.RemoveAll(filepath.Join(p, c.Name())); err != nil {
+					return fmt.Errorf("removing %s/%s: %w (removed: %s)", name, c.Name(), err, strings.Join(removed, ", "))
+				}
+				removed = append(removed, name+"/"+c.Name())
+			}
+		}
+		if err := os.RemoveAll(p); err != nil {
+			return fmt.Errorf("removing %s: %w (removed: %s)", name, err, strings.Join(removed, ", "))
+		}
+		if name != "brains-folders" || !e.IsDir() {
+			removed = append(removed, name)
+		}
+	}
+	if f.asJSON {
+		return json.NewEncoder(env.stdout).Encode(map[string][]string{"removed": removed})
+	}
+	fmt.Fprintf(env.stdout, "Removed from %s, whose core runs on device %s (%s) now: %s.\n", dataDir, r.DeviceID, r.Hostname, strings.Join(removed, ", "))
+	return nil
 }
 
 // coreRelease is core release: it frees the lease when this data dir

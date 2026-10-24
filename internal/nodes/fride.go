@@ -36,6 +36,9 @@ var slowCalls = map[string]time.Duration{
 	// The secret files go through a one-off container on each side.
 	nodeproto.MethodCoreSecretsSend:    6 * time.Minute,
 	nodeproto.MethodCoreSecretsReceive: 6 * time.Minute,
+	// Forgetting reads the lease and removes the data dir and the secret
+	// files through one-off containers.
+	nodeproto.MethodCoreSecretsForget: 10 * time.Minute,
 }
 
 // FrideTask hands the FrIDE of node id a message.

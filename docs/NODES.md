@@ -1844,11 +1844,19 @@ The core relays the offer and the ciphertext and sees names only: it
 cannot swap in a key of its own, since the source checks the signature
 against its own pin. Both sides append a line per step to
 `secrets-transfer.log` in the state dir (`"via": "node-channel"`), names
-only. `core.secrets.forget` removes on a machine what it received over
-the node channel and did not hold before, never what was there.
-After a move the owner is asked whether the machine the core left keeps
-its copy (no vote in 24 hours forgets it), and revoking a core host that
-is connected has it forget first.
+only. `core.secrets.forget` removes on a machine what moves brought it
+and it did not hold before, never what was there: the host secrets it
+received over the node channel, the secret files they wrote, and the
+core's data dir when a move's import put it into an empty one, once
+another device's core holds the lease (#266; CORE.md, ["Forgetting a
+former core host"](CORE.md#forgetting-a-former-core-host)). The agent
+records each as it comes, in `core-secrets-received.json` in the state
+dir; a data dir that held data when a move imported into it is the
+machine's own and stays. After a move the owner is asked whether the
+machine the core left keeps its copy (no vote in 24 hours forgets it),
+and revoking a core host that is connected has it forget first.
+`fridolin doctor --node` warns on a former core host that still holds
+what moves brought it, or its own data dir from before them.
 `core.secrets.offer/send/receive` are refused through `fridolin nodes
 call`, and a lockdown refuses the transfer and every `core.secrets.*`.
 
