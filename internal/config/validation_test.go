@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -104,5 +105,20 @@ func TestChunkSizeUpperBound(t *testing.T) {
 		if (err != nil) != (size > 65536) {
 			t.Fatalf("size %d: %v", size, err)
 		}
+	}
+}
+
+// An allowed_numbers entry that is not valid UTF-8 refuses the config:
+// resolving would otherwise turn it into U+FFFD, a different entry than
+// the one written.
+func TestResolveRefusesAllowedNumbersNotUTF8(t *testing.T) {
+	for _, n := range []string{"\xff", "1555123456\xff", "+1 555\x80"} {
+		_, err := Resolve(&File{AllowedNumbers: []string{"15551234567", n}}, Paths{Home: t.TempDir()}, "linux")
+		if err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
+			t.Errorf("allowed_numbers %q: err = %v, want a refusal", n, err)
+		}
+	}
+	if _, err := Resolve(&File{AllowedNumbers: []string{"+1 555 123 4567", "�"}}, Paths{Home: t.TempDir()}, "linux"); err != nil {
+		t.Errorf("valid UTF-8 entries: %v", err)
 	}
 }

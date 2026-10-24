@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 
@@ -520,6 +521,21 @@ func WarnOddChats(path string, c *File) {
 	if len(odd) > 0 {
 		log.Printf("config %s: these entries match no chat: %s", path, strings.Join(odd, "; "))
 	}
+}
+
+// validateAllowedNumbersText refuses an allowed_numbers entry that is not
+// valid UTF-8. Such an entry is no phone number, so it is compared as
+// written, and JSON cannot hold it: Clone, and with it Resolve, would turn
+// it into U+FFFD, which would then be what a sender is compared with. A
+// config read from a file never holds one, since decoding JSON makes the
+// same replacement; only a File built in Go can.
+func (c *File) validateAllowedNumbersText() error {
+	for _, n := range c.AllowedNumbers {
+		if !utf8.ValidString(n) {
+			return fmt.Errorf("allowed_numbers %q is not valid UTF-8: use digits with the country code, e.g. 15551234567", n)
+		}
+	}
+	return nil
 }
 
 // DataDirName and LegacyDataDirName are the home-relative names of the data

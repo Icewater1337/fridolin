@@ -33,6 +33,10 @@ const (
 // defaults, ~ expansion and platform validation from explicit inputs. It reads
 // no environment or filesystem state and writes nothing, see EnsureDirs.
 func resolveFile(file *File, paths Paths, goos string) (*File, error) {
+	// Before Clone, whose JSON round trip would turn the bytes into U+FFFD.
+	if err := file.validateAllowedNumbersText(); err != nil {
+		return nil, err
+	}
 	cfg, err := file.Clone()
 	if err != nil {
 		return nil, err
