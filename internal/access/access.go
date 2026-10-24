@@ -3,6 +3,7 @@ package access
 import (
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/trigger"
@@ -29,6 +30,11 @@ func NumberAllowed(p Policy, number string) bool {
 	if len(p.AllowedNumbers) == 0 {
 		return p.AllowAnyDM
 	}
+	// No list entry is invalid UTF-8 (config.Resolve refuses one), so a
+	// sender that is can match none, not even one its bytes were mangled into.
+	if !utf8.ValidString(number) {
+		return false
+	}
 	if n, err := chat.PhoneNumber(number); err == nil {
 		number = n
 	}
@@ -52,6 +58,9 @@ func GroupSenderAllowed(p Policy, group, number string, resolved, fromMe bool) b
 	case !resolved:
 		return false
 	case listed:
+		if !utf8.ValidString(number) {
+			return false
+		}
 		if n, err := chat.PhoneNumber(number); err == nil {
 			number = n
 		}
