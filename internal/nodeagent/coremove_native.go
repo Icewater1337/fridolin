@@ -187,7 +187,7 @@ func (n NativeCore) Image(ctx context.Context, version, image string, checkOnly 
 		if err := nodeproto.CheckImageDigest(image); err != nil {
 			return res, err
 		}
-		args = append(args, "--image", image)
+		args = append(args, "--from", image)
 	}
 	if checkOnly {
 		args = append(args, "--check")
