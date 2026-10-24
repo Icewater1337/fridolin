@@ -2,11 +2,15 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/trigger"
+	"maps"
 	"path/filepath"
+	"slices"
 	"time"
+	"unicode/utf8"
 )
 
 // Defaults for optional settings.
@@ -33,6 +37,9 @@ const (
 // defaults, ~ expansion and platform validation from explicit inputs. It reads
 // no environment or filesystem state and writes nothing, see EnsureDirs.
 func resolveFile(file *File, paths Paths, goos string) (*File, error) {
+	if err := checkAccessListsUTF8(file); err != nil {
+		return nil, err
+	}
 	cfg, err := file.Clone()
 	if err != nil {
 		return nil, err
@@ -168,6 +175,34 @@ func resolveFile(file *File, paths Paths, goos string) (*File, error) {
 		return nil, err
 	}
 	return cfg, nil
+}
+
+// checkAccessListsUTF8 refuses an entry of the access lists that is not
+// valid UTF-8. Clone's JSON round trip would turn its bytes into U+FFFD,
+// and the list would then let in a sender it never named. A file read
+// from disk cannot hold one (the JSON decoder already replaced them); a
+// File built in memory can.
+func checkAccessListsUTF8(c *File) error {
+	check := func(name string, list []string) error {
+		for _, s := range list {
+			if !utf8.ValidString(s) {
+				return fmt.Errorf("%s: %q is not valid UTF-8", name, s)
+			}
+		}
+		return nil
+	}
+	if err := check("allowed_numbers", c.AllowedNumbers); err != nil {
+		return err
+	}
+	if err := check("allowed_groups", c.AllowedGroups); err != nil {
+		return err
+	}
+	for _, g := range slices.Sorted(maps.Keys(c.GroupMembers)) {
+		if err := check("group_members", append([]string{g}, c.GroupMembers[g]...)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // These configuration defaults also belong to the direct provider/chunker

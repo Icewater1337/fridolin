@@ -99,12 +99,12 @@ func (s *Service) CoreHosts(ctx context.Context) ([]CoreHostState, error) {
 			cctx, cancel := context.WithTimeout(ctx, time.Minute)
 			err := s.Call(cctx, n.ID, nodeproto.MethodCoreCheck, nil, &c)
 			cancel()
+			// A core that cannot be read (a host that never ran this
+			// version) runs nothing: MoveCheck says whether that matters.
 			switch {
 			case err != nil:
 				st.Problem = err.Error()
-			case c.Core == nil:
-				st.Problem = c.CoreError
-			default:
+			case c.Core != nil:
 				st.RunsCore = c.Core.HeldBy()
 			}
 		}

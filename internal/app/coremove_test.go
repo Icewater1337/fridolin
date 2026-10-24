@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -40,6 +41,9 @@ type fakeCore struct {
 	// fails every import.
 	ready     bool
 	importErr error
+	// fresh is a host that never pulled the core's image: its core
+	// cannot be read, and the image is not there.
+	fresh bool
 
 	mu       sync.Mutex
 	running  bool
@@ -59,6 +63,9 @@ const fakeStale = time.Minute
 
 func (f *fakeCore) Status(ctx context.Context) (nodeproto.CoreRuntime, error) {
 	out := nodeproto.CoreRuntime{Device: f.device}
+	if f.isFresh() {
+		return out, errors.New("fridolin core run: exit status 1")
+	}
 	r, ok, err := lease.Read(ctx, f.st)
 	if err != nil {
 		return out, err
@@ -187,7 +194,16 @@ func (f *fakeCore) Rehearse(ctx context.Context, move string) (nodeproto.CoreReh
 }
 
 func (f *fakeCore) Image(context.Context, string, string, bool) (nodeproto.CoreImageResult, error) {
+	if f.isFresh() {
+		return nodeproto.CoreImageResult{Note: "pulled before anything stops"}, nil
+	}
 	return nodeproto.CoreImageResult{Present: true, Note: "the image is here"}, nil
+}
+
+func (f *fakeCore) isFresh() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.fresh
 }
 
 func (f *fakeCore) state() (running bool, data string, imported []string) {
@@ -422,6 +438,28 @@ func (h *harness) signPlan(p nodeproto.MovePlan) nodeproto.SignedMovePlan {
 // TestCoreMoveRollsBack: icebase takes over but its core never gets
 // ready, so it stops, exports and releases the lease, and mini starts
 // again by itself on that export; the owner hears that it rolled back.
+// A target that never ran the core's version has not its image, and
+// `fridolin core run core status` there needs it: the pre-flight warns
+// instead of refusing, as the move pulls the image first (seen on a fresh
+// Linux server). A target with the image whose core cannot be read still
+// refuses.
+func TestCoreMoveCheckFreshTarget(t *testing.T) {
+	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
+	m := h.moveHosts(h.b.nodes.Version(), true)
+	m.dstCore.mu.Lock()
+	m.dstCore.fresh = true
+	m.dstCore.mu.Unlock()
+	rep := h.moveCheck(m.src, m.dst)
+	for _, b := range rep.Blocking {
+		if strings.Contains(b, "cannot be read") {
+			t.Fatalf("a fresh target blocks: %q", rep.Blocking)
+		}
+	}
+	if !slices.ContainsFunc(rep.Warnings, func(w string) bool { return strings.Contains(w, "has not the core's image yet") }) {
+		t.Fatalf("no warning about the image: %q", rep.Warnings)
+	}
+}
+
 func TestCoreMoveRollsBack(t *testing.T) {
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts(h.b.nodes.Version(), false)
