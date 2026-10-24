@@ -20,12 +20,12 @@ import (
 // blocks the move, a poll: Move now / Cancel. The poll is an approval
 // row of the question kind, so only the owner's vote counts, the
 // dashboard cannot answer it (a stolen dashboard session alone cannot
-// move the core), and no vote within coreMovePollTTL is a no. "Move now"
+// move the core), and no vote within waits.coreMovePoll is a no. "Move now"
 // starts the same move as `fridolin nodes move` (nodes.StartMove); the
 // owner hears when the core stops, and the core that runs afterwards,
 // on either machine, says how it ended (coreMoveEnded). Then a second
 // poll asks whether the machine the core left keeps its copy of the
-// host secrets; no vote within coreSecretsPollTTL forgets them.
+// host secrets; no vote within waits.coreSecretsPoll forgets them.
 //
 // !movecore alone lists the core hosts and what keeps the core from
 // moving to each. No brain has a tool for any of it.
@@ -39,13 +39,7 @@ const (
 // coreMoveAsksPerHour is how often !movecore <node> answers in an hour.
 const coreMoveAsksPerHour = 3
 
-// How long the move poll and the keep/forget poll wait for a vote, and
-// the move's timings (the defaults of nodes when zero). Variables, so
-// tests need not wait.
 var (
-	coreMovePollTTL    = 30 * time.Minute
-	coreSecretsPollTTL = 24 * time.Hour
-	coreMoveOptions    nodes.MoveOptions
 	// coreMoveSiteTries and coreMoveSiteWait: how often, and how far
 	// apart, the core that runs after a move asks whether the site
 	// answers at its domain.
@@ -207,7 +201,7 @@ func (b *App) coreMoveCheck(dst, dstName string) {
 		say(outboundmsg.CoreMoveNotStarted(dstName, err.Error()))
 		return
 	}
-	text := outboundmsg.CoreMoveReport(coreMoveCheckText(rep))
+	text := outboundmsg.CoreMoveReport(coreMoveCheckText(rep, b.waits.coreMovePoll))
 	say(text)
 	if len(rep.Blocking) > 0 {
 		b.audit.Append(audit.Entry{Kind: audit.CoreMoveRequested, Chat: target, ID: dst, Detail: rep.Source.Name + " → " + rep.Target.Name, Outcome: "blocked: " + rep.Blocking[0]})
@@ -218,7 +212,7 @@ func (b *App) coreMoveCheck(dst, dstName string) {
 	a := store.Approval{Kind: questionKind, ID: "a" + randomToken(9), Run: "movecore", Thread: target, Chat: target,
 		Notify: coreMoveNotify, Risk: "irreversible", Action: question, Details: text, Step: src.ID + " " + dst,
 		Options:   []string{outboundmsg.CoreMoveNow, outboundmsg.CoreMoveCancel},
-		CreatedAt: now, ExpiresAt: now.Add(coreMovePollTTL)}
+		CreatedAt: now, ExpiresAt: now.Add(b.waits.coreMovePoll)}
 	if err := b.store.AddApproval(ctx, a); err != nil {
 		log.Printf("core move: recording the poll: %v", err)
 		say(outboundmsg.CoreMoveNotStarted(dstName, "the poll could not be recorded"))
@@ -235,12 +229,13 @@ func (b *App) coreMoveCheck(dst, dstName string) {
 	b.audit.Append(audit.Entry{Kind: audit.CoreMoveRequested, Chat: target, ID: dst, Detail: rep.Source.Name + " → " + rep.Target.Name + " (approval " + a.ID + ")", Outcome: "pending"})
 }
 
-// coreMoveCheckText is rep as the owner reads it.
-func coreMoveCheckText(rep nodes.MoveReport) outboundmsg.CoreMoveCheck {
+// coreMoveCheckText is rep as the owner reads it, with a poll that waits
+// poll for a vote.
+func coreMoveCheckText(rep nodes.MoveReport, poll time.Duration) outboundmsg.CoreMoveCheck {
 	c := outboundmsg.CoreMoveCheck{Source: rep.Source.Name, Target: rep.Target.Name, TargetID: rep.Target.ID,
 		TargetOS: rep.Target.OS, TargetArch: rep.Target.Arch, Box: rep.Target.Box, Fingerprint: rep.Target.Fingerprint,
 		Outage: rep.Outage, NotOnTarget: rep.MachineBound, Warnings: rep.Warnings, Blocking: rep.Blocking,
-		PollMinutes: int(coreMovePollTTL / time.Minute)}
+		PollMinutes: int(poll / time.Minute)}
 	if rep.Site != nil {
 		c.Site = rep.Site.After
 	}
@@ -282,7 +277,7 @@ func (b *App) coreMoveDecided(a store.Approval) {
 		say(outboundmsg.CoreMoveLockdownNotice)
 		return
 	}
-	o := coreMoveOptions
+	o := b.waits.coreMove
 	o.Approval = a.ID
 	rec, err := b.nodes.StartMove(ctx, src, dst, o)
 	if err != nil {
@@ -386,11 +381,11 @@ func (b *App) askKeepSecrets(move, node, name string) {
 	}
 	ctx := context.Background()
 	now := time.Now()
-	question := outboundmsg.CoreSecretsQuestion(name, int(coreSecretsPollTTL/time.Hour))
+	question := outboundmsg.CoreSecretsQuestion(name, int(b.waits.coreSecretsPoll/time.Hour))
 	a := store.Approval{Kind: questionKind, ID: "a" + randomToken(9), Run: move, Thread: target, Chat: target,
 		Notify: coreSecretsNotify, Risk: "write", Action: question, Step: node,
 		Options:   []string{outboundmsg.CoreSecretsKeep(name), outboundmsg.CoreSecretsForget(name)},
-		CreatedAt: now, ExpiresAt: now.Add(coreSecretsPollTTL)}
+		CreatedAt: now, ExpiresAt: now.Add(b.waits.coreSecretsPoll)}
 	if err := b.store.AddApproval(ctx, a); err != nil {
 		log.Printf("core move %s: recording the keep/forget poll: %v", move, err)
 		return
