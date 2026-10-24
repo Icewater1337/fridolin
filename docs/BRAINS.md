@@ -584,7 +584,7 @@ Personal/
 | Field | Meaning |
 | --- | --- |
 | `name` | lower-case letters, digits and `-`, unique in the brain: the file's name, which a `name` in the file must match; it may be left out |
-| `when` | `every 6h` (`m`, `h`, `d`; at least 5 minutes), `daily 07:00`, `weekly mon 09:00`, or a cron expression, `cron 0 7 * * 1-5` (minute hour day month weekday; `*`, lists, ranges, steps, `mon`…`sun`), in the bridge's time zone |
+| `when` | `every 6h` (`m`, `h`, `d`; at least 5 minutes), `daily 07:00`, `weekly mon 09:00`, or a cron expression, `cron 0 7 * * 1-5` (minute hour day month weekday; `*`, lists, ranges, steps, `mon`…`sun`), in your time zone ([`timezone`](CONFIGURATION.md#timezone), which the Schedules page names); across a daylight saving change it keeps the wall-clock time, a time the change skips runs once at the next minute that exists, and a repeated one once |
 | `enabled` | `false` keeps it from running on its schedule; *Run now* still runs it |
 | `description` | one line on what it is for |
 | `prompt`, `prompt_file`, `template`, `command` | what it does, at most one: the task inline; a file in the brain's folder; a built-in template (below); or a program on a node. None is the file `schedules/<name>.md` in the brain's folder |

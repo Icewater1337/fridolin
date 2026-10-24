@@ -10,6 +10,17 @@ for compatibility.
 
 ### Added
 
+- **`timezone`**, your IANA time zone (docs/CONFIGURATION.md, "Time
+  zone"; Settings → Advanced). Scheduled agents, standing intents, the
+  memory consolidation, nightly snapshots and the daily backup run at
+  its times of day, and brains are told the time in it and run with it
+  as `TZ`. Unset, the bridge's own zone stands in. `fridolin init`
+  writes the machine's zone; `fridolin core start`, `run` and `update`
+  pass the host's zone into the container as `TZ` (`FRIDOLIN_TZ`
+  overrides it). The Schedules page names the zone, and `fridolin
+  doctor` warns when it is unset and the bridge runs in UTC.
+  `GET /api/schedules` has `timezone: {name, source}`.
+
 - **One file per scheduled agent** in the brain's new `.brain` folder:
   `<brain>/.brain/schedules/<name>.json`
   ([schema](docs/schemas/schedule.schema.json), docs/BRAINS.md, "The
@@ -820,6 +831,14 @@ for compatibility.
   folder of the calendar tokens; nothing in `tools/` read it any more.
 
 ### Fixed
+
+- **Schedules in the core ran in UTC.** The container has `TZ=UTC`, so a
+  `"daily 21:00"` agent ran at 23:00 in Zurich. After upgrading, run
+  `fridolin core start` once (it now passes the host's zone), or set
+  `timezone`. Across daylight saving changes a schedule keeps its wall-clock
+  time; a time the change skips runs once at the next minute that exists,
+  and a time it repeats runs once, at its first showing (before, a stored
+  anchor with a fixed offset could move a run by an hour).
 
 - A brain folder that a core move put on another machine goes back
   through the vault bucket only as far as the brain's backup settings
