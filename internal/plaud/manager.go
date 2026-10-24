@@ -359,6 +359,8 @@ type Manager struct {
 	// appJob is the last build of the app (under mu).
 	devMu  sync.Mutex
 	appJob *plaudAppJob
+	// voice holds the voice questions of the phone app (voice.go).
+	voice voiceBook
 }
 
 // New creates the manager from its settings and runtime callbacks.

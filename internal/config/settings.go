@@ -110,6 +110,9 @@ type PlaudSettings struct {
 	BrainAccess       bool
 	PhoneDir          string
 	PhoneUpload       bool
+	Voice             bool
+	VoiceBrain        string
+	VoiceQuiet        bool
 }
 
 func settingsOf(c *File, paths Paths) *Settings {
@@ -212,6 +215,9 @@ func plaudSettingsOf(c PlaudConfig) PlaudSettings {
 		BrainAccess:       c.BrainAccess,
 		PhoneDir:          c.PhoneDir,
 		PhoneUpload:       c.PhoneUpload,
+		Voice:             c.Voice,
+		VoiceBrain:        c.VoiceBrain,
+		VoiceQuiet:        c.VoiceQuiet,
 	}
 }
 
@@ -321,6 +327,9 @@ func plaudConfigOf(c PlaudSettings) PlaudConfig {
 		BrainAccess:     c.BrainAccess,
 		PhoneDir:        c.PhoneDir,
 		PhoneUpload:     c.PhoneUpload,
+		Voice:           c.Voice,
+		VoiceBrain:      c.VoiceBrain,
+		VoiceQuiet:      c.VoiceQuiet,
 	}
 }
 

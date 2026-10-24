@@ -29,7 +29,7 @@ func TestPlaudTargetRetainsRuntimeAcrossReplacement(t *testing.T) {
 		submitted = br
 		done(nil)
 		return nil
-	})
+	}, nil)
 	if target == nil || target.ID() != "a" || target.ReplyChat() != first || target.OtherOwner(first) != "" {
 		t.Fatal("selected runtime lost its routing or reply settings")
 	}
@@ -54,10 +54,10 @@ func TestPlaudTargetRetainsRuntimeAcrossReplacement(t *testing.T) {
 	if err := target.Submit(second, "plaud", "transcript", nil, func(error) { ended = true }); err != nil || submitted != old || !ended {
 		t.Fatalf("handoff changed runtime or completion callback: %v", err)
 	}
-	if automatic := plaudTargetOf(mgr, "", nil); automatic == nil || automatic.ReplyChat() != first {
+	if automatic := plaudTargetOf(mgr, "", nil, nil); automatic == nil || automatic.ReplyChat() != first {
 		t.Fatal("a fresh automatic selection missed the current route")
 	}
-	if plaudTargetOf(mgr, "missing", nil) != nil {
+	if plaudTargetOf(mgr, "missing", nil, nil) != nil {
 		t.Fatal("an explicit missing target fell back to another brain")
 	}
 }
