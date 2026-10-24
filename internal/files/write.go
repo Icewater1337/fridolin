@@ -446,6 +446,17 @@ func CreateIn(dir, name string, body io.Reader, max int64) (string, int64, error
 	return "", 0, ErrExists
 }
 
+// RemoveIn removes the file name of the folder dir, through os.Root: an
+// upload CreateIn wrote that the brain did not take.
+func RemoveIn(dir, name string) error {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return root.Remove(name)
+}
+
 // maxScan bounds the entries a move or delete looks through in a folder.
 const maxScan = 100_000
 

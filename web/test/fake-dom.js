@@ -32,7 +32,9 @@ class FakeNode {
     return child;
   }
 
-  append(...nodes) { nodes.forEach((n) => this.appendChild(toNode(n))); }
+  // Strings become text nodes; the typeof test is what CodeQL takes as
+  // proof that no string reaches appendChild (as in lib/dom.js).
+  append(...nodes) { nodes.forEach((n) => this.appendChild(typeof n === 'object' && n instanceof FakeNode ? n : new FakeText(String(n)))); }
 
   insertBefore(child, ref) {
     if (!ref) return this.appendChild(child);

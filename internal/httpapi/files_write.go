@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	"os"
 	"path"
 	"slices"
 	"strings"
@@ -390,7 +389,7 @@ func (a *FilesAPI) upload(w http.ResponseWriter, r *http.Request, s files.Scope)
 	var handed []string
 	undo := func() {
 		for _, p := range handed {
-			_ = os.Remove(p)
+			_ = files.RemoveIn(a.Inbox(root.Brain), path.Base(p))
 		}
 	}
 	for {
