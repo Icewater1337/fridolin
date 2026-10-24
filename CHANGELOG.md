@@ -913,6 +913,9 @@ for compatibility.
 
 ### Fixed
 
+- The move pre-flight no longer refuses a target that never ran the
+  core's version: reading its core needs the image, which the move
+  pulls first. It says so as a warning instead (#187).
 - **Schedules in the core ran in UTC.** The container has `TZ=UTC`, so a
   `"daily 21:00"` agent ran at 23:00 in Zurich. After upgrading, run
   `fridolin core start` once (it now passes the host's zone), or set
