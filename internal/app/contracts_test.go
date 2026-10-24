@@ -52,6 +52,7 @@ type schemaType struct {
 var schemaTypes = []schemaType{
 	{schema: "config.schema.json", typ: reflect.TypeFor[config.File](), closed: true, extra: config.RetiredKeyNames()},
 	{schema: "brain.schema.json", typ: reflect.TypeFor[manifest.Manifest](), closed: true},
+	{schema: "schedule.schema.json", typ: reflect.TypeFor[manifest.Schedule](), closed: true},
 	{schema: "history-line.schema.json", typ: reflect.TypeFor[history.Entry](), closed: true},
 	{schema: "send-request.schema.json", typ: reflect.TypeFor[httpapi.SendRequest]()},
 	{schema: "ingest-request.schema.json", typ: reflect.TypeFor[httpapi.IngestRequest](), refused: []string{"scope"}},
@@ -550,9 +551,9 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 		{"brain.json effort", "brain.schema.json#/properties/effort", manifest.Efforts(), `{"id": "a", "name": "A", "effort": %s}`},
 		{"brain.json observe", "brain.schema.json#/properties/observe", manifest.ObserveModes(), `{"id": "a", "name": "A", "observe": %s}`},
 		{"brain.json role", "brain.schema.json#/properties/role", manifest.Roles(), `{"id": "a", "name": "A", "role": %s}`},
-		{"brain.json schedule report", "brain.schema.json#/properties/schedules/items/properties/report", manifest.ScheduleReports(), `{"id": "a", "name": "A", "schedules": [{"name": "s", "when": "every 6h", "report": %s}]}`},
-		{"brain.json schedule missed", "brain.schema.json#/properties/schedules/items/properties/missed", manifest.ScheduleMissed(), `{"id": "a", "name": "A", "schedules": [{"name": "s", "when": "every 6h", "missed": %s}]}`},
-		{"brain.json schedule risk", "brain.schema.json#/properties/schedules/items/properties/risk", manifest.ScheduleRisks(), `{"id": "a", "name": "A", "schedules": [{"name": "s", "when": "every 6h", "risk": %s}]}`},
+		{"schedule report", "schedule.schema.json#/properties/report", manifest.ScheduleReports(), `{"name": "s", "when": "every 6h", "report": %s}`},
+		{"schedule missed", "schedule.schema.json#/properties/missed", manifest.ScheduleMissed(), `{"name": "s", "when": "every 6h", "missed": %s}`},
+		{"schedule risk", "schedule.schema.json#/properties/risk", manifest.ScheduleRisks(), `{"name": "s", "when": "every 6h", "risk": %s}`},
 	}
 	set := newSchemaSet(t)
 	t.Setenv("HOME", t.TempDir())
@@ -576,12 +577,15 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 			for _, value := range want {
 				doc := fmt.Sprintf(tc.file, value)
 				var err error
-				if schema == "brain.schema.json" {
+				switch schema {
+				case "brain.schema.json":
 					var m *manifest.Manifest
 					if m, err = manifest.Decode([]byte(doc)); err == nil {
 						err = m.Validate()
 					}
-				} else {
+				case "schedule.schema.json":
+					_, err = manifest.DecodeSchedule("s", []byte(doc))
+				default:
 					_, err = LoadConfig(writeConfig(t, doc))
 				}
 				if err != nil {

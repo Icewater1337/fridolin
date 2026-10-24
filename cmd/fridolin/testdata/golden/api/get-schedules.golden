@@ -5,6 +5,7 @@ Content-Type: application/json
 {
   "agents": [],
   "enabled": true,
+  "pending": 0,
   "reminders": [],
   "templates": [
     {

@@ -85,7 +85,22 @@ func (g *Registry) updateManifestIn(c *config.File, tx *config.Tx, id string, mu
 		if m.ID != id {
 			return fmt.Errorf("a brain's id cannot change")
 		}
-		if err := tx.WriteManifest(ref.Dir(g.options.Home()), &m); err != nil {
+		dir := ref.Dir(g.options.Home())
+		// brain.json is written without its scheduled agents, which live
+		// in their own files: those it still lists move there as they
+		// are, approved or not (compat: brain.json held them before
+		// .brain).
+		moves, err := manifest.InlineScheduleFiles(dir)
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		for _, rel := range slices.Sorted(maps.Keys(moves)) {
+			if err := tx.WriteBrainFile(dir, rel, moves[rel]); err != nil {
+				return err
+			}
+		}
+		file := m.WithoutSchedules()
+		if err := tx.WriteManifest(dir, &file); err != nil {
 			return err
 		}
 		n := m.Normalized()
@@ -234,9 +249,12 @@ func (g *Registry) Approve(id string, reviewed manifest.Manifest) error {
 			if err != nil {
 				return err
 			}
-			if !disk.Equal(reviewed) {
+			if !disk.EqualBrain(reviewed) {
 				return ErrReviewedManifestChanged
 			}
+			// The scheduled agents stay as approved: each is approved on
+			// its own (ApproveSchedule).
+			disk.Schedules = ref.Approved.Schedules
 			if disk.ID != id {
 				return fmt.Errorf("the brain.json on disk changed the id to %q — ids cannot change", disk.ID)
 			}
@@ -663,7 +681,12 @@ func Views(cfg *config.Settings, issues []Issue) []View {
 		if ref.Approved != nil {
 			v.ID, v.Name = ref.Approved.ID, ref.Approved.Name
 		}
-		if disk, err := manifest.Read(fsx.Canonical(ref.Path)); err == nil && (ref.Approved == nil || !disk.Equal(*ref.Approved)) {
+		if disk, err := manifest.Read(fsx.Canonical(ref.Path)); err == nil && (ref.Approved == nil || !disk.EqualBrain(*ref.Approved)) {
+			// Its scheduled agents are reviewed one by one on the
+			// Schedules page, not in brain.json's diff.
+			if ref.Approved != nil {
+				disk.Schedules = ref.Approved.Schedules
+			}
 			v.Disk = disk
 		}
 		out = append(out, v)

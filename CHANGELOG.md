@@ -10,6 +10,24 @@ for compatibility.
 
 ### Added
 
+- **One file per scheduled agent** in the brain's new `.brain` folder:
+  `<brain>/.brain/schedules/<name>.json`
+  ([schema](docs/schemas/schedule.schema.json), docs/BRAINS.md, "The
+  .brain folder"). Each file is approved on its own on the Schedules
+  page, with what the agent may do shown first; a new, changed or
+  removed file runs, or stops, only once approved, and the approved
+  version runs on meanwhile. Agents added or edited on the Schedules
+  page are written and approved at once. `brain.json`'s approval leaves
+  the agents aside. `GET /api/schedules` gives each agent its `state`
+  (`pending`, `active`, `paused`, `failing`, `disabled`), `file`,
+  `risky` and pending `review`, and counts `pending`; `POST
+  /api/schedules/{brain}/{name}/approve` approves a file as reviewed,
+  and `GET /api/schedules/preview?when=` says when a schedule runs next.
+- The Schedules page's reminders now include those a brain keeps itself
+  in `.brain/reminders.json` or `skills/reminders.json`, as a remind
+  skill writes them; only the bridge's own standing intents were listed,
+  so a brain with its own reminders showed none.
+
 - **Box updates** (#191 phase 3): the core updates a node in a box to
   the images of its own version, pinned by digest and signed with its
   update key, from the Nodes page or by auto update. The agent only keeps
@@ -491,6 +509,14 @@ for compatibility.
   Off by default: without `vault.enabled` nothing changes.
 
 ### Changed
+
+- **Scheduled agents move out of `brain.json`** (compat): a bridge
+  starting up moves each entry of a brain's `brain.json` `"schedules"`
+  into its file, keeping the rest of `brain.json` as it was, and still
+  reads entries left there (a file of the same name wins). Nothing
+  approved changes. Going back to a version before this one, the bridge
+  runs the agents you approved (from `config.json`) but does not see the
+  files, and shows `brain.json` as changed on disk.
 
 - The vault and the core lease spend a fraction of Backblaze B2's capped
   transactions: an idle core went from about 40,600 Class C and 7,600

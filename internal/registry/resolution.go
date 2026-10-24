@@ -89,7 +89,8 @@ func Resolve(refs []config.BrainRef, checkDir func(dir, configured string) error
 			issues = append(issues, Issue{ID: m.ID, Path: ref.Path, Kind: IssueInvalid, Detail: "the folder " + err.Error() + ", so it cannot hold a brain; move the brain to a folder of its own", Entry: i, Routing: m.Routing})
 			continue
 		}
-		if disk, err := manifest.Read(dir); err == nil && !disk.Equal(m) {
+		// Each scheduled agent is approved on its own (ScheduleReviews).
+		if disk, err := manifest.Read(dir); err == nil && !disk.EqualBrain(m) {
 			issues = append(issues, Issue{ID: m.ID, Path: ref.Path, Kind: IssueDrift, Detail: "brain.json changed on disk — review and approve it in the dashboard", Entry: i})
 		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			issues = append(issues, Issue{ID: m.ID, Path: ref.Path, Kind: IssueDrift, Detail: err.Error(), Entry: i})
