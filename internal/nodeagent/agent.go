@@ -88,8 +88,19 @@ type Agent struct {
 	CoreSecrets      hostsecrets.Store
 	CoreSecretsPlace string
 	CoreSetup        func(ctx context.Context) ([]nodeproto.CoreCheckItem, bool, string)
+	// CoreRunner does what a core move does to the core here; nil is
+	// NativeCore with Executable (coremove.go). CoreScan, when set, is the
+	// machine-bound scan instead of the files it reads. MovePoll is how
+	// often a move reads the lease (10s), MoveGrace how long after the
+	// deadline the source starts again on its own data
+	// (nodeproto.MoveRollbackGrace), MoveExportWait how long it waits for
+	// the target's export once the target released the lease (15m).
+	CoreRunner                          CoreRunner
+	CoreScan                            func() []string
+	MovePoll, MoveGrace, MoveExportWait time.Duration
 
 	core      coreHost
+	moves     coreMoves
 	upd       updater
 	mu        sync.Mutex
 	state     nodeproto.State
@@ -297,6 +308,8 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.frideCheck(ctx)
 	a.androidCheck(true)
 	a.coreHostChanged()
+	a.coreMovesStart(ctx)
+	defer a.coreMovesStop()
 	if a.Dir != "" {
 		pruneAndroid(filepath.Join(a.Dir, androidTransfers), time.Now(), 0)
 	}
