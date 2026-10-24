@@ -20,7 +20,17 @@ for compatibility.
   overrides it). The Schedules page names the zone, and `fridolin
   doctor` warns when it is unset and the bridge runs in UTC.
   `GET /api/schedules` has `timezone: {name, source}`.
-
+- **core-host** (#187, first slice): a node may offer to be a core host
+  with `fridolin node core-host on` on the machine, which writes
+  `core-host.json` in its state dir, and the owner's approval
+  (`!approve`, the Nodes page, `fridolin nodes approve ID --commands`),
+  which says what it means. Every change of that file waits for the
+  approval again. `fridolin nodes core-secrets-transfer SRC DST [--yes]`
+  moves the host secrets from one core host to another over the node
+  channel, end to end, to a target device key the source pinned with
+  `fridolin node core-host trust` (a dry run without `--yes`).
+  `!fleet`, `fridolin nodes` and the Nodes page show it
+  (docs/NODES.md, "core-host").
 - **One file per scheduled agent** in the brain's new `.brain` folder:
   `<brain>/.brain/schedules/<name>.json`
   ([schema](docs/schemas/schedule.schema.json), docs/BRAINS.md, "The
@@ -530,6 +540,9 @@ for compatibility.
 
 ### Changed
 
+- **The core image has an SSH client** (`openssh-client`). The site's
+  "Check for changes" fetches the site repository over SSH with its
+  deploy key, which failed in the container with `ssh: not found`.
 - **Scheduled agents move out of `brain.json`** (compat): a bridge
   starting up moves each entry of a brain's `brain.json` `"schedules"`
   into its file, keeping the rest of `brain.json` as it was, and still

@@ -30,7 +30,7 @@ func newNodes(b *App) (*nodes.Service, error) {
 		b.work.onEvent(node, ev)
 	}
 	return nodes.New(nodes.Options{
-		Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: onEvent, OnDeclare: b.fride.onDeclare, OnJoin: b.nodeJoined,
+		Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: onEvent, OnDeclare: b.fride.onDeclare, OnJoin: b.nodeJoined, OnCoreHost: b.nodeCoreHost,
 		// Updates: the core's own version, its builds for the nodes, and
 		// what keeps a node from being updated now (nodes_update.go).
 		Version: version.String(), BinariesDir: nodeBinariesDir(b.exe), Busy: b.nodeBusy, Hold: b.nodeHold,
@@ -149,7 +149,17 @@ type lockdownNodes struct {
 // nodeWrites are the methods a lockdown refuses: a build runs the build
 // scripts it is sent.
 // Starting an agent or a terminal, or acting in one, is writing too.
-var nodeWrites = append([]string{nodeproto.MethodExec, nodeproto.MethodFSWrite, nodeproto.MethodAndroidBuild}, nodeproto.WorkstationStarts...)
+// Moving or forgetting host secrets (core-host) is writing too.
+var nodeWrites = slices.Concat([]string{nodeproto.MethodExec, nodeproto.MethodFSWrite, nodeproto.MethodAndroidBuild}, nodeproto.WorkstationStarts, nodeproto.CoreSecretsMethods)
+
+// CoreSecretsTransfer refuses a transfer that is to run during a
+// lockdown; a dry run only reads.
+func (n lockdownNodes) CoreSecretsTransfer(ctx context.Context, src, dst string, o nodes.CoreTransferOptions) (nodes.CoreTransferReport, error) {
+	if o.Run && n.locked() {
+		return nodes.CoreTransferReport{Problems: []string{errLockedNode.Error()}}, errLockedNode
+	}
+	return n.Service.CoreSecretsTransfer(ctx, src, dst, o)
+}
 
 func (n lockdownNodes) Call(ctx context.Context, id, method string, params, out any) error {
 	if n.locked() && slices.Contains(nodeWrites, method) {
@@ -174,6 +184,7 @@ func (b *App) fleetText() string {
 		n := outboundmsg.FleetNode{
 			ID: v.ID, Name: v.Name, OS: v.OS, Online: v.Online,
 			Device: v.Device, Commands: v.Commands, Tags: v.Tags, Offers: v.Effective.Summary(),
+			CoreHostPending: v.CoreHost != nil && v.CoreHost.Pending,
 		}
 		if v.LastSeen != nil {
 			n.LastSeen = *v.LastSeen

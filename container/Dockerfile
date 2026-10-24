@@ -147,7 +147,7 @@ LABEL org.opencontainers.image.title="fridolin-core" \
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      ca-certificates tzdata tini bubblewrap ffmpeg python3 git curl jq sqlite3 age \
+      ca-certificates tzdata tini bubblewrap ffmpeg python3 git openssh-client curl jq sqlite3 age \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=tools /usr/local/bin/restic /usr/local/bin/rclone /usr/local/bin/litestream \
