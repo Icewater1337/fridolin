@@ -79,7 +79,7 @@ that must last lives in the volume:
 | --- | --- | --- |
 | `FRIDOLIN_HOME` | `/data` | the volume: the data dir, and where `fridolin core` commands look |
 | `FRIDOLIN_CONFIG` | `/data/config.json` | the config file, in the volume |
-| `TZ` | `UTC` | compose passes `FRIDOLIN_TZ` instead when set |
+| `TZ` | `UTC` | compose passes `FRIDOLIN_TZ` instead when set, which `fridolin core start`, `run` and `update` set to the host's time zone (or keep from your shell); config's [`timezone`](CONFIGURATION.md#timezone) wins over it for schedules |
 
 On a new, empty volume the entry point writes a starter config whose
 `data_dir` is `/data` before the bridge first starts. The image's command
@@ -716,6 +716,105 @@ copies into the volume unchanged (until you rotate it in the core, after
 which copy the new one back). In a brain's run the bridge sets
 `FRIDOLIN_API` and `FRIDOLIN_BRAIN_TOKEN_FILE` as before.
 
+## The core moves itself
+
+Between two core hosts ([docs/NODES.md, "core-host"](NODES.md#core-host))
+the core moves on its own, without the steps of the next section by hand
+(#187, second slice). This slice is driven from the CLI; `!movecore` on
+WhatsApp, with an approval poll, comes next.
+
+```sh
+fridolin nodes move-check SRC DST       # the pre-flight, read only (POST /api/nodes/move-check)
+fridolin nodes move SRC DST             # the same, and how to start it
+fridolin nodes move SRC DST --yes       # move the core, and follow it to its end
+fridolin nodes move-status ID           # how move ID went (GET /api/nodes/moves/{id})
+```
+
+**Before.** SRC and DST are core hosts the owner approved, both online,
+and SRC pins DST's device key (`fridolin node core-host trust` on SRC).
+For the way back, DST pins SRC the same way. Both run the core's version
+(`fridolin nodes update ID` first), and both are native hosts: the core
+in a box comes with #191 phase 4, and a Windows node service cannot
+reach the owner's Docker Desktop, so both refuse with a reason. DST
+needs Docker and GitHub's `gh` (`brew install gh`, `apt-get install
+gh`; no login), which checks the image's provenance before it is
+pulled; the pre-flight refuses a DST without the image and without
+`gh`. On Ubuntu, run `sudo fridolin core apparmor` once on DST.
+
+**The pre-flight** asks both agents (`core.check`): the versions; the
+core on each as the lease and the bucket see it (SRC holds the lease, DST
+does not); the image of the core's version by digest and whether DST has
+it (`core.image.pull`, checking only); DST's free disk against the latest
+export; the host secrets by name and the pin; whether DST runs FrIDE
+(whose tasks could then read the secrets); and what of SRC stays behind
+(a fixed scan, report only: `compose.host.yaml` binds, a Cloudflare
+tunnel run by a launchd or systemd job, host jobs that call
+`127.0.0.1:8765` or read `scripts.token`, Apple-only work on a Mac). What
+blocks the move is listed under "It cannot run".
+
+**The move**, `fridolin nodes move SRC DST --yes`:
+
+1. While the core runs: DST pulls the image by digest after checking its
+   build provenance (`fridolin core pull --from REF@sha256:…`, which
+   tags it as its version); the host secrets go from SRC to DST end to
+   end, as `core-secrets-transfer` sends them; DST rehearses
+   (`fridolin core rehearse`: the latest export imported into the scratch
+   volume `fridolin-move-rehearsal`, every member and database checked,
+   the volume removed; never `fridolin-data`, never the lease). A failure
+   here stops nothing.
+2. The core signs a **move plan** with its update key (the one nodes
+   already pin for updates): the move id, SRC and DST, SRC's data dir by
+   its lease device id, the version, the image, when it was issued, the
+   handoff deadline (15 minutes) and `ready_within` (10 minutes). It
+   writes its record of the move into `nodes/moves/<id>.json`, which the
+   final export carries, and hands the plan to DST (`core.handoff`), then
+   to SRC (`core.release`). An agent refuses a plan that is not signed
+   by the pinned core key, does not name it in that role, is older than
+   15 minutes, whose deadline passed, whose id it saw before, or that is
+   for another version than its own.
+3. From here only the two agents act, and they coordinate only through
+   the lease and the exports in the bucket:
+   - SRC: `fridolin core stop` (a clean stop releases the lease), checks
+     that the lease is released by its data dir, else starts the core
+     again; then `fridolin core run core export --move ID` (the export's
+     manifest, and its info beside the archive, `core/exports/<time>.json`,
+     name the data dir's device id and the move).
+   - DST: waits until the lease is released by SRC's data dir and the
+     latest export is SRC's of this move (until the deadline, else it
+     gives up and changes nothing), then `core run core import --latest
+     --force`, `core run core promote` (never after the deadline), `core
+     start`, and asks `/ready` until WhatsApp is connected and the lease
+     held, within `ready_within`.
+4. The core that runs then (on DST, the same tailnet name) follows its
+   record from the export, asks both agents (`core.move.status`), tells
+   SRC that DST runs it, which ends SRC's watch, and tells the owner on
+   WhatsApp. `fridolin nodes move --yes` keeps asking while the core is
+   away and prints each step; run it against the core's tailnet address
+   to see the end from DST.
+
+**Automatic rollback.** Every step is written to `core-moves/<id>.json`
+in each agent's state dir, and a restarted agent goes on from there.
+
+| What went wrong | What happens |
+| --- | --- |
+| The image, the secrets or the rehearsal | Nothing stopped; the move is cancelled. |
+| SRC's stop does not release the lease, or its export fails | SRC starts the core again on its own data. |
+| DST's import or promote fails, or the deadline passes | DST takes no lease. SRC, at the deadline plus 2 minutes, finds the lease still released by itself: `core run core promote`, `core start` on its own data. |
+| DST started, but is not ready within `ready_within` | DST stops, exports (move ID, its own device id: it may have answered messages) and frees the lease (`fridolin core release`). SRC finds the lease released by DST and DST's export of the move: `import --latest --force`, `promote`, `start`. |
+| DST released the lease without an export of the move | SRC waits 15 minutes for one, then starts on its own data. |
+| DST stopped renewing the lease (power) | Once the lease is stale (20 minutes), SRC imports DST's last export of the move, or starts on its own when there is none; what DST received since is lost, and WhatsApp may ask to pair again ([Recovery](#recovery)). |
+
+The owner hears how it ended from the core that runs afterwards: "The
+core moved to DST", or "The core move to DST failed and the core runs on
+SRC again", with what the hosts said. A lockdown refuses a move, and
+every step of one through `fridolin nodes call`.
+
+The commands the agents run, also by hand on a host: `fridolin core
+status --json` (this data dir's device id, the lease, the latest
+export's info), `core export --move ID --json`, `core release`, `core
+pull --from REF@sha256:… [--check] [--json]` and `core rehearse
+[--json]`.
+
 ## Moving the core to another machine
 
 The runbook a coding agent follows when the owner clones the repository on
@@ -928,6 +1027,22 @@ file of the brain folders that would go along (`<brain id>/<path>`, one a
 line) and what stays home, and uploads nothing: check it for what must
 not leave the machine, and widen the brain's `backup.exclude` where it
 does not catch something.
+
+The backup settings that decide are those of the manifest you approved
+in the dashboard, which `config.json` holds, not `brain.json` on disk: an
+edit to `brain.json` counts once you approve it. `--list-folders`,
+`export`, `fridolin doctor` (check `brain-drift`) and, before the
+transfer, `fridolin core send` print a `warning:` for each brain whose
+`brain.json` or `.brain/schedules/` files on disk differ from the approved
+manifest, saying whether the difference touches `backup.exclude`,
+`backup.enabled` or `backup.targets.cloud`. When the `brain.json` on disk
+would keep more home than the approved one (an exclude the approved one
+lacks, the backup or its cloud target turned off), you probably mean that
+to stay on this machine, so the export refuses and uploads nothing until
+you either approve the change in the dashboard (Brains), which keeps it
+home, or run it again with `--use-approved`, which takes the folder along
+by the approved manifest. `fridolin core run core export --drift` gives
+the warnings alone, and exits 1 when the export would refuse.
 
 The import on the new machine puts each folder where the brain's path
 names it when that folder is there; otherwise into the volume,

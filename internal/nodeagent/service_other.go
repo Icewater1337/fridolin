@@ -26,8 +26,11 @@ func serviceStatus(cfg *service.Config) (string, error) {
 		return "running", nil
 	case service.StatusStopped:
 		return "installed, stopped", nil
+	case service.StatusUnknown:
+		fallthrough
+	default:
+		return fmt.Sprintf("unknown (%d)", st), nil
 	}
-	return fmt.Sprintf("unknown (%d)", st), nil
 }
 
 // serviceStateDir is not read back here: the launchd agent and the

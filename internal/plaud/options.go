@@ -20,6 +20,9 @@ type Settings struct {
 	BrainAccess     bool   `json:"brain_access,omitempty"`
 	PhoneDir        string `json:"phone_dir,omitempty"`
 	PhoneUpload     bool   `json:"phone_upload,omitempty"`
+	Voice           bool   `json:"voice,omitempty"`
+	VoiceBrain      string `json:"voice_brain,omitempty"`
+	VoiceQuiet      bool   `json:"voice_quiet,omitempty"`
 }
 
 // Snapshot keeps one poll's policy and paths together.
@@ -29,6 +32,17 @@ type Snapshot struct {
 	QueueMaxPending   int
 	OwnerChat         string
 	Interval          time.Duration
+	// Zone is the owner's time zone, the one a recording's date and time
+	// are written in; nil is the process's.
+	Zone *time.Location
+}
+
+// zone is cfg's Zone, else time.Local.
+func (cfg *Snapshot) zone() *time.Location {
+	if cfg == nil || cfg.Zone == nil {
+		return time.Local
+	}
+	return cfg.Zone
 }
 
 // Options supplies startup paths and current settings without a config store.
@@ -75,6 +89,11 @@ type Target struct {
 	ReplyChat  func() string
 	OtherOwner func(jid string) string
 	Submit     func(jid, sender, text string, media []string, done func(error)) error
+	// Ask hands the brain a voice question (voice mode): answer hears the
+	// text of its answer and returns what jid gets of it, unless quiet,
+	// and done hears how the run ended. Nil where the brain takes no
+	// questions.
+	Ask func(jid, sender, text string, quiet bool, answer func(string) string, done func(error)) error
 }
 
 func (t *Target) ID() string { return t.BrainID }

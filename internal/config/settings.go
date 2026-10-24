@@ -41,6 +41,7 @@ type Live struct {
 	CodexPath                  string
 	CodexModel                 string
 	CodexEffort                string
+	Timezone                   string
 	MaxChunkSize               int
 	MaxMediaMB                 int
 	BrainModel                 string
@@ -110,6 +111,9 @@ type PlaudSettings struct {
 	BrainAccess       bool
 	PhoneDir          string
 	PhoneUpload       bool
+	Voice             bool
+	VoiceBrain        string
+	VoiceQuiet        bool
 }
 
 func settingsOf(c *File, paths Paths) *Settings {
@@ -129,6 +133,7 @@ func liveOf(c *File) Live {
 		CodexPath:                  c.CodexPath,
 		CodexModel:                 c.CodexModel,
 		CodexEffort:                c.CodexEffort,
+		Timezone:                   c.Timezone,
 		MaxChunkSize:               c.MaxChunkSize,
 		MaxMediaMB:                 c.MaxMediaMB,
 		BrainModel:                 c.BrainModel,
@@ -212,6 +217,9 @@ func plaudSettingsOf(c PlaudConfig) PlaudSettings {
 		BrainAccess:       c.BrainAccess,
 		PhoneDir:          c.PhoneDir,
 		PhoneUpload:       c.PhoneUpload,
+		Voice:             c.Voice,
+		VoiceBrain:        c.VoiceBrain,
+		VoiceQuiet:        c.VoiceQuiet,
 	}
 }
 
@@ -239,6 +247,7 @@ func fileOf(c Live) File {
 		CodexPath:                  c.CodexPath,
 		CodexModel:                 c.CodexModel,
 		CodexEffort:                c.CodexEffort,
+		Timezone:                   c.Timezone,
 		MaxChunkSize:               c.MaxChunkSize,
 		MaxMediaMB:                 c.MaxMediaMB,
 		BrainModel:                 c.BrainModel,
@@ -321,8 +330,19 @@ func plaudConfigOf(c PlaudSettings) PlaudConfig {
 		BrainAccess:     c.BrainAccess,
 		PhoneDir:        c.PhoneDir,
 		PhoneUpload:     c.PhoneUpload,
+		Voice:           c.Voice,
+		VoiceBrain:      c.VoiceBrain,
+		VoiceQuiet:      c.VoiceQuiet,
 	}
 }
 
 // AnyoneCanDM reports an explicitly open allowlist.
 func (s *Settings) AnyoneCanDM() bool { return len(s.AllowedNumbers) == 0 && s.AllowAnyDM }
+
+// Location is the owner's time zone (timezone), else the process's own
+// (time.Local, which TZ sets): the zone the bridge reads every time of day
+// in. Use it, never time.Local, so that a native bridge and the core
+// container agree.
+func (l Live) Location() *time.Location {
+	return trigger.Zone(l.Timezone)
+}

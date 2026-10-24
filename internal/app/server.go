@@ -34,14 +34,16 @@ func (b *App) maySend(who chat.Principal, jid string, cfg *config.Settings) erro
 			return fmt.Errorf("brain %s may send only to its own chats, and %s is not one of them", who.Brain, jid)
 		}
 		return nil
+	case chat.CallerAnonymous:
+		if !cfg.ScriptAPI.TokenlessSend {
+			return fmt.Errorf("%w (script_api.tokenless_send is off)", errTokenRequired)
+		}
+		if !allowedChat(jid, cfg) {
+			return fmt.Errorf("without a token, /send reaches only the allowed chats (allowed_numbers, allowed_groups), and %s is not one", jid)
+		}
+		return nil
 	}
-	if !cfg.ScriptAPI.TokenlessSend {
-		return fmt.Errorf("%w (script_api.tokenless_send is off)", errTokenRequired)
-	}
-	if !allowedChat(jid, cfg) {
-		return fmt.Errorf("without a token, /send reaches only the allowed chats (allowed_numbers, allowed_groups), and %s is not one", jid)
-	}
-	return nil
+	return fmt.Errorf("unknown caller kind %d", who.Kind)
 }
 
 // brainChat reports whether jid is one of br's own chats: its reply chat
@@ -98,6 +100,16 @@ func (b *App) handOff(br *brain.Brain, jid, sender, text string, media []string)
 // run ended, see Inbound.Done.
 func (b *App) submitHandOff(br *brain.Brain, jid, sender, text string, media []string, done func(error)) error {
 	m := brain.Inbound{Inbound: chat.Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Media: media, Source: chat.SourceIngest, At: time.Now(), Done: done}}
+	_, _, _, err := b.brainMgr.Submit(m)
+	return err
+}
+
+// submitAsk hands br a question whose answer answer hears (the Plaud
+// Sync app's voice mode): a hand-off like submitHandOff, whose answer
+// goes to jid too unless quiet.
+func (b *App) submitAsk(br *brain.Brain, jid, sender, text string, quiet bool, answer func(string) string, done func(error)) error {
+	m := brain.Inbound{Inbound: chat.Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Source: chat.SourceIngest, At: time.Now(),
+		Done: done, Answer: answer, AnswerOnly: quiet}}
 	_, _, _, err := b.brainMgr.Submit(m)
 	return err
 }

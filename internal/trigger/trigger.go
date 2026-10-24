@@ -163,7 +163,9 @@ func (t Trigger) find(text string) (int, int, bool) {
 			return 0, 0, false
 		}
 		return lead, end, true
-	default:
+	case MatchAnywhere, MatchWord:
+		fallthrough
+	default: // an empty match is MatchAnywhere
 		for i := 0; i < len(text); {
 			if end, ok := hasFoldPrefix(text[i:], t.Text); ok {
 				end += i

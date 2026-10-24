@@ -160,9 +160,18 @@ func TestFilesRawServesWhatTheTicketOpens(t *testing.T) {
 // siteBridgeRequest asks the site bridge for path as account (none: "").
 func siteBridgeRequest(t *testing.T, url, token, account, path string) (int, string) {
 	t.Helper()
-	req, err := http.NewRequest("GET", url+path, nil)
+	return siteBridgeCall(t, "GET", url, token, account, path, "")
+}
+
+// siteBridgeCall is a request of method with an empty body of type ct.
+func siteBridgeCall(t *testing.T, method, url, token, account, path, ct string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(method, url+path, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if ct != "" {
+		req.Header.Set("Content-Type", ct)
 	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)

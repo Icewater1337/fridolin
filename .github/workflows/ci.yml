@@ -161,7 +161,7 @@ jobs:
 
       # The linters need one Go release, but both systems: some files only
       # build on one of them.
-      - name: staticcheck
+      - name: staticcheck and exhaustive
         if: matrix.go == 'stable'
         run: make lint-go
 

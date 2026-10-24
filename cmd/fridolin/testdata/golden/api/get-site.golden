@@ -32,6 +32,7 @@ Content-Type: application/json
       "url": ""
     },
     "role_brains": {},
+    "role_uploads": {},
     "roles": [
       "admin",
       "member"

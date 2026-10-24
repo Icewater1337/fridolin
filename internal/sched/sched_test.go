@@ -65,7 +65,7 @@ func TestDecide(t *testing.T) {
 	if !d.Run || !d.Last.Equal(at(t, "2026-10-23 18:00")) || !d.Next.Equal(at(t, "2026-10-24 00:00")) {
 		t.Errorf("every: %+v", d)
 	}
-	if n := NextAfter(every, at(t, "2026-10-23 00:00"), time.Minute); !n.Equal(at(t, "2026-10-23 06:01")) {
+	if n := NextAfter(every, at(t, "2026-10-23 00:00"), time.Minute, time.UTC); !n.Equal(at(t, "2026-10-23 06:01")) {
 		t.Errorf("NextAfter = %v", n)
 	}
 }
@@ -189,6 +189,46 @@ func TestMessageAndWorth(t *testing.T) {
 	for reply, worth := range map[string]bool{"": false, "NOTHING_TO_REPORT": false, " **NOTHING_TO_REPORT** ": false, "Checked.\nNOTHING_TO_REPORT": false, "You have 2 appointments": true} {
 		if Worth(reply) != worth {
 			t.Errorf("Worth(%q) = %v", reply, !worth)
+		}
+	}
+}
+
+// Ticking every 30 seconds across both DST changes, "daily 21:00" and
+// "daily 02:30" run once a day at their wall-clock time in the owner's
+// zone, whatever zone the anchor comes back from the state file in.
+func TestDecideAcrossDST(t *testing.T) {
+	loc, err := time.LoadLocation("Europe/Zurich")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		when, from string
+		want       []string // wall clock, Europe/Zurich
+	}{
+		{"daily 21:00", "2026-10-23 20:00", []string{"2026-10-23 21:00", "2026-10-24 21:00", "2026-10-25 21:00", "2026-10-26 21:00"}},
+		{"daily 02:30", "2026-10-23 20:00", []string{"2026-10-24 02:30", "2026-10-25 02:30", "2026-10-26 02:30", "2026-10-27 02:30"}},
+		{"daily 02:30", "2027-03-26 20:00", []string{"2027-03-27 02:30", "2027-03-28 03:00", "2027-03-29 02:30", "2027-03-30 02:30"}},
+	} {
+		sc, err := trigger.ParseRecurring(c.when, loc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		now, _ := time.ParseInLocation("2006-01-02 15:04", c.from, loc)
+		var last time.Time
+		var runs []string
+		for end := now.Add(80 * time.Hour); now.Before(end); now = now.Add(30 * time.Second) {
+			d := Decide(sc, last, 0, false, now)
+			// The state file keeps the anchor as RFC 3339, an offset.
+			last = d.Last.In(time.FixedZone("", 7200))
+			if d.Run {
+				if d.Late {
+					t.Errorf("%s: late at %s", c.when, now)
+				}
+				runs = append(runs, d.Last.In(loc).Format("2006-01-02 15:04"))
+			}
+		}
+		if strings.Join(runs, ",") != strings.Join(c.want, ",") {
+			t.Errorf("%s: ran at %v, want %v", c.when, runs, c.want)
 		}
 	}
 }

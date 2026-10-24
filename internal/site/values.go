@@ -14,6 +14,10 @@ type SiteSettings struct {
 	// RoleBrains are the brains each role sees on the site's built-in
 	// /files and /wiki (docs/FILES.md); admin sees every brain.
 	RoleBrains map[string][]string `json:"role_brains"`
+	// RoleUploads are the brains each role may upload to there, into the
+	// folders each brain takes uploads in (brain.json files.uploads), of
+	// those it sees; admin changes every brain's files.
+	RoleUploads map[string][]string `json:"role_uploads"`
 	// Approved is the commit the live site serves.
 	Approved string       `json:"approved"`
 	History  []SiteDeploy `json:"history"`

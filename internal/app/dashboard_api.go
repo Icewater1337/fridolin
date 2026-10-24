@@ -144,7 +144,7 @@ func (b *App) outboxWarnings(ctx context.Context) []string {
 	var out []string
 	if sum.Waiting > 0 && time.Since(sum.OldestWaiting) > outboxWaitWarning {
 		w := fmt.Sprintf("%d %s waiting to go out to WhatsApp, the oldest since %s; the bridge keeps trying for an hour.",
-			sum.Waiting, plural(sum.Waiting, "reply is", "replies are"), sum.OldestWaiting.Local().Format("15:04"))
+			sum.Waiting, plural(sum.Waiting, "reply is", "replies are"), sum.OldestWaiting.In(b.zone()).Format("15:04"))
 		if sum.WaitingError != "" {
 			w += " Last error: " + textx.Truncate(sum.WaitingError, 200)
 		}
@@ -153,7 +153,7 @@ func (b *App) outboxWarnings(ctx context.Context) []string {
 	if sum.Failed > 0 {
 		out = append(out, fmt.Sprintf("%d %s could not be delivered to WhatsApp and %s given up on, the last at %s: %s. The chats never got them, and the brains' history does not hold them.",
 			sum.Failed, plural(sum.Failed, "reply", "replies"), plural(sum.Failed, "was", "were"),
-			sum.LastFailed.Local().Format("Jan 2 15:04"), textx.Truncate(sum.FailedError, 200)))
+			sum.LastFailed.In(b.zone()).Format("Jan 2 15:04"), textx.Truncate(sum.FailedError, 200)))
 	}
 	return out
 }

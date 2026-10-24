@@ -32,18 +32,27 @@ func Starter(goos string) *File {
 }
 
 func EnsureFile(path string, paths Paths, goos string) error {
-	return WriteStarter(path, "", "", paths, goos)
+	return WriteStarter(path, StarterValues{}, paths, goos)
+}
+
+// StarterValues are what fridolin init fills into the starter config.
+type StarterValues struct {
+	ClaudePath, DataDir string
+	// Timezone is the machine's IANA time zone, "" to leave it unset.
+	Timezone string
 }
 
 // WriteStarter writes the starter config to path unless there is a
-// file there. Its data_dir is dataDir, else StarterDataDir's: without one
-// every start would pick the data dir again, by which folders exist.
-func WriteStarter(path, claudePath, dataDir string, paths Paths, goos string) error {
+// file there. Its data_dir is v.DataDir, else StarterDataDir's: without
+// one every start would pick the data dir again, by which folders exist.
+func WriteStarter(path string, v StarterValues, paths Paths, goos string) error {
 	if _, err := os.Stat(path); err == nil || !os.IsNotExist(err) {
 		return err
 	}
 	cfg := Starter(goos)
-	cfg.ClaudePath = claudePath
+	cfg.ClaudePath = v.ClaudePath
+	cfg.Timezone = v.Timezone
+	dataDir := v.DataDir
 	cfg.DataDir = dataDir
 	if dataDir == "" {
 		cfg.DataDir = StarterDataDir(paths)

@@ -96,6 +96,7 @@ const SECTIONS = [
     title: 'Advanced',
     intro: '',
     fields: [
+      { key: 'timezone', type: 'text', mono: true, label: 'Time zone', placeholder: 'the bridge’s own (TZ)', help: 'Your IANA time zone, such as Europe/Zurich. Scheduled agents, reminders, the nightly snapshots and the daily backup run at its times of day, across daylight saving changes, and brains are told the time in it. Empty: the zone the bridge runs in, which in the core container is the one fridolin core start passed from the host.' },
       { key: 'http_listen', type: 'text', mono: true, restart: true, label: 'Listen address', placeholder: '127.0.0.1:8765', help: 'Loopback addresses only. Changing it moves this dashboard to the new address after a restart.' },
       { key: 'data_dir', type: 'text', mono: true, restart: true, label: 'Data folder', help: 'Holds the WhatsApp pairing, the database, media and the dashboard token. Changing it does not move those files — the bridge starts fresh (and unpaired) in the new folder. At startup the folder is made private to your user (mode 0700), unless it is your home folder, one above it or another user’s folder.' },
       { key: 'log_level', type: 'select', restart: true, label: 'Log level', options: [['', 'Default (info)'], ['debug', 'Debug — very verbose'], ['info', 'Info'], ['warn', 'Warnings'], ['error', 'Errors only']] },
