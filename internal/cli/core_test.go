@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -151,6 +152,27 @@ func TestCoreRun(t *testing.T) {
 	got := (*ran)[0]
 	if !slices.Equal(got.args[3:], []string{"run", "--rm", "--no-deps", "core", "core", "import", "--latest"}) || !slices.Contains(got.env, "FRIDOLIN_AGE_IDENTITY=AGE-SECRET-KEY-1OLD") {
 		t.Errorf("ran %q with %q", got.args, got.env)
+	}
+}
+
+// core run makes no key: on a host that is not the core yet (the move
+// pre-flight runs core run core status there) a key of its own would
+// later refuse the core's (#187). core start still makes the missing ones.
+func TestCoreRunMakesNoSecrets(t *testing.T) {
+	secrets := mapSecrets{}
+	d, _ := hostFixture(t, secrets)
+	env := coreEnv{stdout: io.Discard, stderr: io.Discard}
+	if code := coreHost(context.Background(), "run", []string{"core", "status", "--json"}, env, d); code != 0 {
+		t.Fatal(code)
+	}
+	if len(secrets) != 0 {
+		t.Fatalf("core run made %v", slices.Sorted(maps.Keys(secrets)))
+	}
+	if code := coreHost(context.Background(), "start", nil, env, d); code != 0 {
+		t.Fatal(code)
+	}
+	if _, ok := secrets[hostsecrets.AgeIdentityPQ]; !ok {
+		t.Fatalf("core start made none: %v", slices.Sorted(maps.Keys(secrets)))
 	}
 }
 
