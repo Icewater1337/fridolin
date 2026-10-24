@@ -19,17 +19,8 @@
 
     // Strictness. TypeScript 7 turns "strict" on unless told otherwise;
     // here it is off, and the options of it that the code passes today
-    // are on. Turn these on next, one at a time, fixing what each reports
-    // (with real types, or a @ts-expect-error that says why), and add each
-    // to the options below once it passes:
-    //
-    // 1. strictNullChecks: null and undefined are their own types (about
-    //    320 errors today, two thirds of them "possibly null", mostly
-    //    querySelector() results and data that may not have come yet). It
-    //    makes noUncheckedIndexedAccess and strictPropertyInitialization
-    //    possible after it.
-    // 2. Then "strict": true in place of the single options, and
-    //    exactOptionalPropertyTypes if it is worth it.
+    // are on. Every option of it passes now: next, "strict": true in
+    // place of the single options.
     "strict": false,
     "strictFunctionTypes": true,
     "strictBindCallApply": true,
@@ -42,7 +33,10 @@
     // app/api.js narrow it (its message, its name, an ApiError's status).
     "useUnknownInCatchVariables": true,
     // Every parameter and variable has a type, written or inferred.
-    "noImplicitAny": true
+    "noImplicitAny": true,
+    // null and undefined are their own types: data that may not have come
+    // yet is passed on, or checked, before it is read.
+    "strictNullChecks": true
   },
   "include": ["assets/**/*.js", "types/**/*.d.ts"]
 }
