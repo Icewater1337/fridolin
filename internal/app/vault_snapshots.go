@@ -168,7 +168,8 @@ func (vs *vaultSnapshots) due(now time.Time) (hourly, nightly, check, read, copy
 	if r := st.LastHourly; r == nil || now.Sub(r.At) >= snapshotHourlyEvery {
 		hourly = true
 	}
-	local := now.Local()
+	// The night is the owner's (timezone), not the container's.
+	local := now.In(vs.cfg.Location())
 	night := time.Date(local.Year(), local.Month(), local.Day(), snapshotNightAt, 0, 0, 0, local.Location())
 	if r := st.LastNightly; r == nil || (r.At.Before(night) && !now.Before(night)) || now.Sub(r.At) >= 26*time.Hour {
 		nightly = true

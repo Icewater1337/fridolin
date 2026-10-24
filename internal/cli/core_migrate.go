@@ -652,7 +652,7 @@ func (m *migration) fromNative() error {
 	m.say("Exported %s to %s (%s): %d files, %d bytes, %d databases.", dataDir, res.Key, where, res.Manifest.Files, res.Manifest.Bytes, len(res.Manifest.Databases))
 
 	// 6. Import it into the volume, in a one-off container with the mounts.
-	childEnv := append(slices.Clone(m.d.baseEnv), "FRIDOLIN_IMAGE="+m.f.image, "FRIDOLIN_VERSION="+m.f.tag)
+	childEnv := append(append(slices.Clone(m.d.baseEnv), "FRIDOLIN_IMAGE="+m.f.image, "FRIDOLIN_VERSION="+m.f.tag), m.d.zoneEnv()...)
 	compose := composeArgs(base, override)
 	volume := coreVolume
 	if m.f.rehearse {
@@ -901,7 +901,7 @@ func (m *migration) toNative() error {
 	if err := writeCompose(base); err != nil {
 		return err
 	}
-	childEnv := append(append(slices.Clone(m.d.baseEnv), "FRIDOLIN_IMAGE="+m.f.image, "FRIDOLIN_VERSION="+m.f.tag), secrets...)
+	childEnv := append(append(append(slices.Clone(m.d.baseEnv), "FRIDOLIN_IMAGE="+m.f.image, "FRIDOLIN_VERSION="+m.f.tag), m.d.zoneEnv()...), secrets...)
 	run := append(composeArgs(base, m.overridePath()), "run", "--rm", "--no-deps")
 	exportArgs := []string{"core", "export"}
 	var st cloud.ObjectStore

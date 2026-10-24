@@ -940,10 +940,10 @@ func (p *Manager) fetchCloud(ctx context.Context, cfg *Snapshot, id string, item
 	}
 	// When it was recorded, else when it reached Plaud, else today.
 	// Dates go year first, so that files sort by date.
-	day, when := time.Now().Format("2006-01-02"), "unknown"
+	day, when := time.Now().In(cfg.zone()).Format("2006-01-02"), "unknown"
 	for _, k := range []string{"start_at", "created_at"} {
 		if t, ok := plaudTime(d[k]); ok {
-			local := t.Local()
+			local := t.In(cfg.zone())
 			day, when = local.Format("2006-01-02"), local.Format("2006-01-02 15:04")
 			break
 		}

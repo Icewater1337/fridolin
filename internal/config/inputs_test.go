@@ -101,7 +101,7 @@ func TestStarterUsesInjectedPathsAndPlatform(t *testing.T) {
 		t.Fatal("starter did not use the injected platform")
 	}
 	path := filepath.Join(home, "requested", "config.json")
-	if err := WriteStarter(path, "claude", "", paths, "linux"); err != nil {
+	if err := WriteStarter(path, StarterValues{ClaudePath: "claude"}, paths, "linux"); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)

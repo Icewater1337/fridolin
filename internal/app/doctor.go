@@ -141,6 +141,7 @@ var DoctorRegistry = []DoctorCheck{
 	{ID: "memory-index", Title: "memory index and its provenance gate", Required: true, Applies: memoryEnabled, Run: checkMemoryIndex},
 	{ID: "approvals", Title: "approvals waiting", Run: checkPendingApprovals},
 	{ID: "lockdown", Title: "lockdown", Run: checkLockdown},
+	{ID: "timezone", Title: "time zone of schedules", Run: checkTimezone},
 	{ID: "nodes-fride", Title: "FrIDE on the nodes", Required: true, Applies: nodesOn, Run: checkNodesFride},
 }
 
