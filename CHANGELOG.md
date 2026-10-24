@@ -10,6 +10,15 @@ for compatibility.
 
 ### Added
 
+- CI publishes the core's image to GHCR, `ghcr.io/OWNER/fridolin-core`,
+  for amd64 and arm64, tagged with the version `fridolin version`
+  reports, with build provenance (GitHub's attestations) and an SBOM, on
+  every push to `main`. A new image, `ghcr.io/OWNER/fridolin-fride`,
+  holds FrIDE's companion with Claude Code, Go, Node, git and ponytail,
+  for the `fride` service of a node in a box (docs/CORE.md, "On GHCR";
+  docs/NODES.md, "Node in a box"). The images CI built before carried
+  the commit's full hash as their version; they now carry the short one
+  of `git describe`, as local builds do.
 - **Connect GitHub** (Dashboard → Integrations → GitHub, #202) makes a
   private GitHub App of this Fridolin's own through GitHub's manifest
   flow, with no webhook: contents read, issues write, metadata read, and

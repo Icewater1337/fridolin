@@ -512,6 +512,55 @@ and offered: those tagged `android` or `android-build` first
 (`fridolin nodes tags <id> android`), then the one with the most free
 memory. A lockdown refuses the build, as it refuses `exec`.
 
+## Node in a box
+
+A node in a box runs as containers made from fridolin's own images,
+instead of a native install (issue #191): Docker and one compose file,
+the same on Windows, macOS and Linux. Its `node` service runs the
+`fridolin-core` image in the node's role, with the node's key and its
+backups in a volume of its own; its `fride` service runs FrIDE's
+companion from the `fridolin-fride` image, and never mounts the node's
+volume. Neither gets the Docker socket. The box's compose file and join
+script are not published yet; until they are, join machines natively as
+above.
+
+### The FrIDE image
+
+`ghcr.io/OWNER/fridolin-fride` ([container/fride/Dockerfile](../container/fride/Dockerfile))
+holds FrIDE, built from a pinned commit of its repository, with Claude
+Code (the version the core's image has), git, Go (the version FrIDE's
+`go.mod` asks for; `GOTOOLCHAIN=auto` fetches a newer one a repository
+names), Node, GitHub's `gh`, ripgrep, jq, lsof and python3, and the
+ponytail plugin at the commit [below](#ponytail-for-every-agent). CI
+publishes it beside the core's image, with the same version tags and
+build provenance ([CORE.md](CORE.md#on-ghcr)).
+
+It runs as the user `fride` (uid 10002), apart from the node's (10001),
+with two volumes: `/var/lib/fride` (FrIDE's home in `~/fride`, its config,
+the repositories in `~/repos`, Claude Code's settings, the git identity
+and the Go caches) and `/workspaces` (the tasks' workspaces). On its
+first start it writes FrIDE's config for the box (the one [below](#the-config)
+with the box's paths), clones `fridolin` and `fride` into `~/repos`,
+marks `/workspaces` as trusted for Claude Code and marks ponytail's
+statusline offer as made. Nothing secret is in the image:
+
+- **The Claude token** (from `claude setup-token`, typed by the owner)
+  goes into the home volume through stdin, never a command line:
+  `docker compose exec -T fride /opt/fride/entrypoint.sh set-claude-token`,
+  then `docker compose restart fride`.
+- **The git identity** the agents commit with:
+  `docker compose exec fride git config --global user.name NAME` (and
+  `user.email`).
+
+FrIDE answers only on its loopback and posts its news to a loopback
+webhook, and the node's agent insists on loopback addresses for both. So
+the two services forward on the box's network: in the `fride` container,
+port 17840 of the network reaches FrIDE on its loopback and the
+loopback's 17841 reaches the `node` service; the agent forwards the
+other way in the `node` container. Both sides see `127.0.0.1`, and the
+containers share no network namespace, so FrIDE never reaches what
+listens on the node's loopback.
+
 ## FrIDE
 
 FrIDE is the coding IDE; under fridolin it is where every change to code

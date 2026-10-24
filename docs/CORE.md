@@ -15,6 +15,34 @@ docker build -f container/Dockerfile --build-arg VERSION=$(git describe --tags -
   -t fridolin-core:$(git describe --tags --always --abbrev=8) .
 ```
 
+### On GHCR
+
+CI publishes the image of every commit on `main` to the GitHub Container
+Registry, as one image for `linux/amd64` and `linux/arm64`:
+`ghcr.io/OWNER/fridolin-core:<version>`, where `<version>` is what
+that commit's `fridolin version` reports (`git describe --tags --always
+--abbrev=8`, the tag `core start` uses). `:main` names the newest. The
+package is public, so pulling it needs no login.
+
+Each image comes with build provenance: a signed statement, made with
+GitHub's attestations (Sigstore), that this repository's
+`.github/workflows/image.yml` built that digest from that commit on
+`main`. Machines take an image by its digest, never by a tag, and check
+the provenance before they run it: with GitHub's CLI, which needs no
+login for it,
+
+```bash
+gh attestation verify oci://ghcr.io/OWNER/fridolin-core@sha256:DIGEST \
+  --repo OWNER/fridolin --signer-workflow OWNER/fridolin/.github/workflows/image.yml
+```
+
+An SBOM and buildx's own provenance are attached to each platform's
+image. The same workflow publishes `ghcr.io/OWNER/fridolin-fride`,
+the FrIDE image of a node in a box ([NODES.md](NODES.md#node-in-a-box)),
+with the same version tags and provenance.
+
+### What is in it
+
 It holds the `fridolin` binary with the Python helpers next to it
 (`/opt/fridolin/fridolin`, `/opt/fridolin/tools/`), python3, Node 22 and
 the Claude CLI (a pinned version, at least the one the bridge is tested

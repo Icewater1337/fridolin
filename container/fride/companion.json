@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "name": "fridolin companion (box)",
+  "workspaceRoot": "/workspaces",
+  "baseFolders": ["/var/lib/fride/repos"],
+  "coreRepos": ["fridolin"],
+  "maxSlots": 2,
+  "requirements": [
+    { "name": "go", "command": "go version", "why": "fridolin and fride are Go programs" }
+  ],
+  "defaultProfile": "dev",
+  "profiles": {
+    "dev": {
+      "description": "fridolin from the task's worktree in dev mode: no WhatsApp, scratch data dir and HOME under the workspace",
+      "entry": "bridge",
+      "services": {
+        "bridge": {
+          "repo": "fridolin",
+          "run": "mkdir -p {{workspace}}/.dev/bridge/home && printf '{\"data_dir\":\"%s\",\"http_listen\":\"127.0.0.1:%s\",\"allowed_numbers\":[],\"allow_any_dm\":false,\"sandbox\":{\"enabled\":false}}' {{workspace}}/.dev/bridge {{port}} > {{workspace}}/.dev/bridge/config.json && go build -o {{workspace}}/.dev/bin/fridolin ./cmd/fridolin && exec {{workspace}}/.dev/bin/fridolin --no-whatsapp --config {{workspace}}/.dev/bridge/config.json",
+          "port": 18810,
+          "env": {
+            "HOME": "{{workspace}}/.dev/bridge/home",
+            "GOPATH": "{{home}}/go",
+            "GOCACHE": "{{home}}/.cache/fride-go-build",
+            "FRIDOLIN_CONFIG": "{{workspace}}/.dev/bridge/config.json",
+            "BROWSER": "none"
+          },
+          "health": "http://127.0.0.1:{{port}}/health",
+          "startTimeout": 600
+        }
+      }
+    }
+  },
+  "companion": {
+    "enabled": true,
+    "claudePlugins": ["/opt/fride/plugins/ponytail"]
+  }
+}

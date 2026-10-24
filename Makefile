@@ -120,7 +120,7 @@ lint-go: ## staticcheck
 	$(STATICCHECK) ./...
 
 lint-sh: ## shellcheck the scripts and git hooks
-	$(SHELLCHECK) --severity=warning setup.sh scripts/*.sh container/*.sh .githooks/*
+	$(SHELLCHECK) --severity=warning setup.sh scripts/*.sh container/*.sh container/fride/*.sh .githooks/*
 
 lint-py: ## ruff on tools/ (pip install -r tools/requirements-dev.txt)
 	$(RUFF) check tools
