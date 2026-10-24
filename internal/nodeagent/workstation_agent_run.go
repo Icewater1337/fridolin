@@ -344,8 +344,11 @@ func cutPrefixFold(s, prefix string) (string, bool) {
 // endTurn decides what the turn's end means: a question, a permission or
 // an irreversible step to ask about, or the session's end.
 func (s *agentSession) endTurn(res turnResult) {
+	// Listed before the session can end below, so that no one reads it
+	// ended with what changed still missing.
+	changed, stat := s.changes()
 	s.mu.Lock()
-	if !s.ended.IsZero() {
+	if !s.ended.IsZero() || s.stopping {
 		s.mu.Unlock()
 		return
 	}
@@ -383,6 +386,7 @@ func (s *agentSession) endTurn(res turnResult) {
 	ended := s.state != nodeproto.AgentWaiting
 	if ended {
 		s.ended = time.Now()
+		s.changed, s.diffStat = changed, stat
 	}
 	s.mu.Unlock()
 	if ended {
