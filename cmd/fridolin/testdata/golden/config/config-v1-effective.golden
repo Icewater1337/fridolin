@@ -163,6 +163,7 @@
       "<HOME>/.fridolin/credentials/google_calendar_token_main.json"
     ]
   },
+  "timezone": "Europe/Zurich",
   "triggers": [
     "@claude",
     {

@@ -32,6 +32,7 @@
   "codex_path": "codex",
   "codex_model": "gpt-6.1-sol",
   "codex_effort": "high",
+  "timezone": "Europe/Zurich",
   "data_dir": "~/.fridolin",
   "db_path": "~/.fridolin/bridge.db",
   "media_dir": "~/.fridolin/media",

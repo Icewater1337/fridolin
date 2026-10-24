@@ -21,7 +21,8 @@ missing  litestream (needed from M3): litestream is not installed
 ok       age: /opt/homebrew/bin/age (v1.2.1)
 ok       approvals waiting: none waiting
 ok       lockdown: off
+ok       time zone of schedules: the system's zone (timezone is unset)
 ok       Google Drive link uses your own Google client: Google Drive is not connected
 ok       housekeeping ran: off (housekeeping.enabled), and never run here
 
-13 ok, 2 warn, 3 missing, 1 fail; a required check fails
+14 ok, 2 warn, 3 missing, 1 fail; a required check fails
