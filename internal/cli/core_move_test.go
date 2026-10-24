@@ -121,6 +121,24 @@ func TestCorePull(t *testing.T) {
 	if code := coreHost(context.Background(), "pull", []string{"--check", "--json"}, env, d); code != 0 || len(*ran) != 1 || !strings.Contains(stdout.String(), `"present":true`) {
 		t.Errorf("--check: exit %d, ran %v: %s", code, *ran, stdout.String())
 	}
+	// A host without gh, and without the image, cannot take a move: the
+	// pre-flight's --check says so instead of the move failing at the pull.
+	d.run = func(_ context.Context, _ string, args, _ []string, _, _ io.Writer) error {
+		if len(args) > 1 && args[0] == "image" && args[1] == "inspect" {
+			return errors.New("no such image")
+		}
+		return nil
+	}
+	d.noVerify = "GitHub's CLI (gh) is not installed"
+	var errb bytes.Buffer
+	if code := coreHost(context.Background(), "pull", []string{"--from", image, "--check", "--json"}, coreEnv{stdout: io.Discard, stderr: &errb}, d); code != 1 || !strings.Contains(errb.String(), "gh") {
+		t.Errorf("--check without gh: exit %d: %s", code, errb.String())
+	}
+	// With the image there, gh is not needed.
+	d.run = func(context.Context, string, []string, []string, io.Writer, io.Writer) error { return nil }
+	if code := coreHost(context.Background(), "pull", []string{"--from", image, "--check"}, coreEnv{stdout: io.Discard, stderr: io.Discard}, d); code != 0 {
+		t.Errorf("--check with the image, without gh: exit %d", code)
+	}
 }
 
 // core rehearse imports into its scratch volume only, and removes it.

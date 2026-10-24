@@ -735,7 +735,11 @@ and SRC pins DST's device key (`fridolin node core-host trust` on SRC).
 For the way back, DST pins SRC the same way. Both run the core's version
 (`fridolin nodes update ID` first), and both are native hosts: the core
 in a box comes with #191 phase 4, and a Windows node service cannot
-reach the owner's Docker Desktop, so both refuse with a reason.
+reach the owner's Docker Desktop, so both refuse with a reason. DST
+needs Docker and GitHub's `gh` (`brew install gh`, `apt-get install
+gh`; no login), which checks the image's provenance before it is
+pulled; the pre-flight refuses a DST without the image and without
+`gh`. On Ubuntu, run `sudo fridolin core apparmor` once on DST.
 
 **The pre-flight** asks both agents (`core.check`): the versions; the
 core on each as the lease and the bucket see it (SRC holds the lease, DST
