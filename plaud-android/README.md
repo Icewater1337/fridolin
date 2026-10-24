@@ -29,6 +29,14 @@ Two ways, both in [docs/PLAUD.md](../docs/PLAUD.md#without-plauds-cloud-the-phon
   `Documents/PlaudSync` to a folder on the computer Fridolin runs on, for example with
   [Syncthing](https://syncthing.net) (Syncthing-Fork on the phone).
 
+## Voice mode
+
+Built by Fridolin, with voice mode on in the dashboard, the app's **Voice mode** switch lets you
+ask Fridolin by voice and hear the answer: a NotePin recording, or **Ask** (the phone's speech
+recognizer), becomes a question, and the answer, encrypted to a key in the phone's keystore, is
+read aloud with Android's text-to-speech (`Voice.kt`, `SpeechText.kt`, `VoiceCrypto.kt`). See
+[docs/PLAUD.md](../docs/PLAUD.md#voice-mode).
+
 ## What you need
 
 - A Plaud developer app at [portal.plaud.ai](https://portal.plaud.ai) (free tier: one device,
@@ -47,7 +55,7 @@ Two ways, both in [docs/PLAUD.md](../docs/PLAUD.md#without-plauds-cloud-the-phon
   sdkmanager "platforms;android-35" "build-tools;35.0.0"
   ```
 
-## Build
+## Build and test
 
 Fridolin's dashboard runs this build itself for the site upload. By hand (for the synced
 folder, or to work on the app):
@@ -56,7 +64,11 @@ folder, or to work on the app):
 cd plaud-android
 ANDROID_HOME=$(brew --prefix)/share/android-commandlinetools ./gradlew assembleDebug
 # → app/build/outputs/apk/debug/app-debug.apk
+ANDROID_HOME=$(brew --prefix)/share/android-commandlinetools ./gradlew testDebugUnitTest
 ```
+
+The unit tests run on the JVM: the text made for speech, and opening an answer the bridge
+sealed (the vector of `TestVoiceSealVector` in `internal/plaud/voice_test.go`).
 
 The first build fetches the SDK into `app/libs/` and checks its hash. The credentials are built
 into the APK, so keep the APK to yourself. Fridolin's build passes `-PfridolinConfig=<file>` (the

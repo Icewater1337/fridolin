@@ -10,6 +10,15 @@ for compatibility.
 
 ### Added
 
+- **Voice mode for the Plaud Sync app** (docs/PLAUD.md, "Voice mode"):
+  with `plaud.voice` on and the app's switch on, a NotePin recording or
+  a question spoken into the phone goes to `plaud.voice_brain` (default
+  the DM brain), and the phone reads the answer aloud. The answer is
+  encrypted for the phone, so the site only passes it on. It also goes to
+  WhatsApp, after the question, unless `plaud.voice_quiet`. New site
+  routes `/_fridolin/devices/voice/ask` and `/_fridolin/devices/voice/reply`.
+  The app needs a new build from the dashboard.
+
 - **One file per scheduled agent** in the brain's new `.brain` folder:
   `<brain>/.brain/schedules/<name>.json`
   ([schema](docs/schemas/schedule.schema.json), docs/BRAINS.md, "The
