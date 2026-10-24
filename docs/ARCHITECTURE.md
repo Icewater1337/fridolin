@@ -179,8 +179,9 @@ fixture links preserve those original bytes. A behavior change must be explicit
 when updating a golden, rather than silently recording a refactor regression.
 
 Tests use scratch HOME/data directories and fake providers. Native integration
-tests include the site runtime when `site/node_modules` is installed. Linux and
-macOS checks exercise platform-specific behavior. Full validation includes race
+tests include the site runtime when `site/node_modules` is installed. Linux runs
+every test; macOS and Windows run the tests of what differs there
+(`scripts/os-tests.sh`), and the whole macOS suite runs nightly. Full validation includes race
 and shuffled tests, both vet targets, staticcheck, exhaustive, module tidy, schema and import
 checks, and dev-mode smoke. `make check` adds script, Python and frontend checks.
 
