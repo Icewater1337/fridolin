@@ -168,7 +168,8 @@ func TestMoveCoreFromChat(t *testing.T) {
 // lockdown !movecore is refused, and a "Move now" from before is a no;
 // a message of the bridge's own account is no command.
 func TestMoveCoreCancelExpiryLockdown(t *testing.T) {
-	t.Parallel()
+	// Serial: shortens coreMovePollTTL, a package variable every bridge's
+	// !movecore polls read.
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts(h.b.nodes.Version(), true)
 

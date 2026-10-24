@@ -542,6 +542,7 @@ func TestCoreMoveCheckFreshTarget(t *testing.T) {
 // first step, sends nothing (round 2 of the live test sent the secrets
 // with 0 files).
 func TestCoreMoveRefusesUnreadableSecretFiles(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts(h.b.nodes.Version(), true)
 	m.srcCore.mu.Lock()
