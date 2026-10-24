@@ -9,6 +9,7 @@ import { createPreviewAuth, previewForwarding, PreviewList } from './preview.ts'
 import { deviceRoutes } from './devices.ts'
 import { BUILTIN_ROUTES, builtinRoutes, type Bridge } from './builtin.ts'
 import { BRIDGE_SECRETS_KEY } from './config.ts'
+import { loadRedirects, redirectRoutes } from './redirects.ts'
 
 const WEB_DIR = fileURLToPath(new URL('../web/', import.meta.url))
 
@@ -115,6 +116,12 @@ export async function createSite(rt: Runtime, opts: SiteOptions = {}): Promise<e
     page: (res) => res.sendFile('builtin.html', { root: WEB_DIR }),
   }))
   await mountModules(app, loadModules(rt.modules_dir), auth.requireAuth, secrets, { dataDir: rt.data_dir, spoolDir: rt.spool_dir })
+  // Old addresses, after the modules: a module's own route comes first.
+  try {
+    app.use(redirectRoutes(loadRedirects(rt.modules_dir)))
+  } catch (err) {
+    console.error(`[site] ${err instanceof Error ? err.message : err}; no redirects`)
+  }
 
   app.get('/', shell, (_req, res) => {
     res.setHeader('Cache-Control', 'no-cache')
