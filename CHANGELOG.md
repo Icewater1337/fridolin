@@ -519,6 +519,9 @@ for compatibility.
 
 ### Changed
 
+- **The core image has an SSH client** (`openssh-client`). The site's
+  "Check for changes" fetches the site repository over SSH with its
+  deploy key, which failed in the container with `ssh: not found`.
 - **Scheduled agents move out of `brain.json`** (compat): a bridge
   starting up moves each entry of a brain's `brain.json` `"schedules"`
   into its file, keeping the rest of `brain.json` as it was, and still
