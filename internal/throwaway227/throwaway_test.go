@@ -7,7 +7,7 @@ import "testing"
 func FuzzThrowawayFor227(f *testing.F) {
 	f.Add("ab")
 	f.Fuzz(func(t *testing.T, s string) {
-		if len(s) < 0 {
+		if len(s) > 4 {
 			t.Fatalf("an input longer than 4 bytes: %d", len(s))
 		}
 	})
