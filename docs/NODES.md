@@ -502,7 +502,7 @@ works out each such node's list (the programs its approved command
 agents run there that `node.json` does not allow already) and sends a
 node whose list changed the whole of it, `exec.programs`. The list names
 the node and a sequence number, and is signed with the core's update key
-(`core.pub`, pinned when the node joined or at its first update). The
+(`core.pub`, pinned when the node joined, or at its first update or list from the core). The
 node refuses a list that does not verify with that key, is for another
 node, or is no newer than the last it took. It keeps each program that
 
