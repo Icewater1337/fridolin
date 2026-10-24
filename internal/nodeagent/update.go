@@ -87,10 +87,10 @@ type updater struct {
 }
 
 // updateOffered reports whether node.json lets the agent offer update. A
-// node in a box never does: its fridolin is the image's, which a binary
-// from the core cannot replace.
+// node in a box offers it by image (box_update.go): its fridolin is the
+// image's, which a binary from the core cannot replace.
 func (a *Agent) updateOffered() bool {
-	return a.Config.Box == nil && (a.Config.Update == nil || *a.Config.Update)
+	return a.Config.Update == nil || *a.Config.Update
 }
 
 // executable is the binary an update replaces, symlinks resolved.
@@ -361,7 +361,15 @@ func (a *Agent) updateCall(ctx context.Context, method string, raw json.RawMessa
 	if a.Dir == "" {
 		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "the agent has no state dir")
 	}
+	if box := a.Config.Box != nil; box != (method == nodeproto.MethodUpdateBox) {
+		if box {
+			return nil, nodeproto.Errorf(nodeproto.CodeUnsupported, "a node in a box is updated by image (update.box), not by binary")
+		}
+		return nil, nodeproto.Errorf(nodeproto.CodeUnsupported, "update.box is for a node in a box; this one is updated by binary")
+	}
 	switch method {
+	case nodeproto.MethodUpdateBox:
+		return a.boxUpdate(raw)
 	case nodeproto.MethodUpdateWrite, nodeproto.MethodUpdateDrop:
 		var p nodeproto.FrideChunkParams
 		if len(raw) > 0 {
