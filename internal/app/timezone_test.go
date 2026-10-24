@@ -10,6 +10,7 @@ import (
 )
 
 func TestCheckTimezone(t *testing.T) {
+	t.Parallel()
 	withZone := func(zone string) *config.Settings {
 		c := &config.Settings{}
 		c.Timezone = zone
@@ -50,6 +51,7 @@ func TestCheckTimezone(t *testing.T) {
 // The owner's zone reaches brain runs as TZ and as the "now" of their
 // prompt; unset, runs keep the process's.
 func TestOwnerZone(t *testing.T) {
+	t.Parallel()
 	c := &config.Settings{}
 	if ownerZone(c) != nil || zoneEnv("") != nil {
 		t.Error("an unset timezone sets a zone")

@@ -344,6 +344,7 @@ func (h *harness) startMove(src, dst string, deadline, ready int) (nodes.MoveRec
 // the core runs on icebase on mini's final export. Then the way back,
 // the same command the other way round.
 func TestCoreMove(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts(h.b.nodes.Version(), true)
 
@@ -511,6 +512,7 @@ func (h *harness) signPlan(p nodeproto.MovePlan) nodeproto.SignedMovePlan {
 // Linux server). A target with the image whose core cannot be read still
 // refuses.
 func TestCoreMoveCheckFreshTarget(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts(h.b.nodes.Version(), true)
 	m.dstCore.mu.Lock()
@@ -528,6 +530,7 @@ func TestCoreMoveCheckFreshTarget(t *testing.T) {
 }
 
 func TestCoreMoveRollsBack(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts(h.b.nodes.Version(), false)
 	rec, body := h.startMove(m.src, m.dst, 10, 1)
@@ -553,6 +556,7 @@ func TestCoreMoveRollsBack(t *testing.T) {
 // TestCoreMoveTargetFails: icebase's import fails, so it takes no lease;
 // past the deadline and its grace mini starts again on its own data dir.
 func TestCoreMoveTargetFails(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts(h.b.nodes.Version(), true)
 	m.dstCore.importErr = errors.New("the disk is full")
@@ -574,6 +578,7 @@ func TestCoreMoveTargetFails(t *testing.T) {
 // core's key; and the pre-flight blocks a move to a host of another
 // version, which the move then refuses to start.
 func TestCoreMoveRefusesPlans(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts("v0.0.1-other", true)
 	base := nodeproto.MovePlan{Move: "m-20261024-1200-0001", Source: m.src, Target: m.dst, SourceDevice: m.srcCore.device, Version: "v0.0.1-other"}
