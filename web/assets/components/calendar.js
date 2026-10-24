@@ -11,6 +11,8 @@ import { nextId } from './fields.js';
 import { pill, callout, mono, loading } from './common.js';
 import { errorMessage } from '../lib/errors.js';
 
+/** @import { CalendarStatus } from '../../types/api.js' */
+
 const CONSOLE = 'https://console.cloud.google.com/apis/credentials';
 const ENABLE_API = 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com';
 const ENABLE_DRIVE_API = 'https://console.cloud.google.com/apis/library/drive.googleapis.com';
@@ -120,6 +122,7 @@ export function googleClientCard({ signal } = {}) {
  */
 export function calendarCard(brainId, { signal } = {}) {
   const el = h('div.card', loading('Checking calendar…'));
+  /** @type {Set<string> | null} */
   let selection = null; // Set of calendar ids being edited
   let dflt = '';
 
@@ -145,6 +148,7 @@ export function calendarCard(brainId, { signal } = {}) {
   // wrote next to the tokens, each holding a client secret. The bridge
   // goes by name and secret only, so it cannot tell such a copy from a
   // file of the owner's: it names them, but deletes none itself.
+  /** @param {CalendarStatus} s */
   function copiesBox(s) {
     const names = s.leftover_client_copies || [];
     if (!names.length) return null;
@@ -154,6 +158,7 @@ export function calendarCard(brainId, { signal } = {}) {
       '. The bridge no longer reads them, and a brain the sandbox does not hold (on Linux, or with the sandbox off) can: delete them by hand, unless something else of yours uses them.');
   }
 
+  /** @param {CalendarStatus} s */
   function render(s) {
     const errBox = s.last_error ? callout('bad', 'Sign-in did not finish', s.last_error) : null;
     if (!s.client_configured && !s.connected) {

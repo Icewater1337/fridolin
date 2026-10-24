@@ -6,6 +6,8 @@ import { h } from '../lib/dom.js';
 import { EFFORTS } from '../lib/brain.js';
 import { field, textInput, select, toggle, linesArea, linesOf } from './fields.js';
 
+/** @import { BrainManifest, ConfigFile } from '../../types/api.js' */
+
 /**
  * brainSettingsFields(manifest, eff) returns {model, backup, value()}: model
  * holds the model and effort fields, backup the backup switch and the
@@ -13,8 +15,11 @@ import { field, textInput, select, toggle, linesArea, linesOf } from './fields.j
  * show ({model, effort, backup: {enabled, exclude}}; without backup,
  * backups are on), eff the global brain_model and brain_effort that
  * empty fields inherit. value() is what they hold now, in brain.json's form.
+ * @param {Partial<Pick<BrainManifest, 'model' | 'effort' | 'backup'>>} [manifest]
+ * @param {Partial<Pick<ConfigFile, 'brain_model' | 'brain_effort'>>} [eff]
  */
 export function brainSettingsFields(manifest = {}, eff = {}) {
+  /** @type {Partial<BrainManifest['backup']>} */
   const backup = manifest.backup || { enabled: true };
   const modelIn = textInput({ value: manifest.model || '', class: 'mono', placeholder: eff.brain_model ? `inherit (${eff.brain_model})` : 'inherit' });
   const effortSel = select(EFFORTS.map(([v, l]) => [v, v === '' && eff.brain_effort ? `Inherit (${eff.brain_effort})` : l]), manifest.effort || '');
