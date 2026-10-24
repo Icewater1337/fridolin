@@ -6,7 +6,11 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     // Found in npx's cache: make typecheck-web passes --typeRoots.
-    "types": ["node"]
+    "types": ["node"],
+    // The tests stay at the strictness the dashboard had before: they run
+    // against the fake DOM, where most annotations would be casts. They
+    // follow in steps of their own.
+    "noImplicitAny": false
   },
   "include": ["**/*.js", "**/*.d.ts", "../assets/**/*.js", "../types/**/*.d.ts"]
 }

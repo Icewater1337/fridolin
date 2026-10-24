@@ -33,7 +33,23 @@ import { pill, callout, timeAgo, mono, empty, pageHeader, spinner, loading, kv }
  * @property {VaultReach | null} reachable
  */
 
+/**
+ * The parts of the page that a layout has, each filled by paint().
+ * @typedef {object} Regions
+ * @property {HTMLDivElement} [targets]
+ * @property {HTMLDivElement} [off]
+ * @property {HTMLDivElement} [head]
+ * @property {HTMLDivElement} [hot]
+ * @property {HTMLDivElement} [snapshots]
+ * @property {HTMLDivElement} [litestream]
+ * @property {HTMLDivElement} [b2]
+ * @property {HTMLDivElement} [drill]
+ * @property {HTMLDivElement} [evictions]
+ * @property {HTMLTableSectionElement} [evictionRows]
+ */
+
 // What each job the status names is called on the page.
+/** @type {Record<string, string>} */
 const JOBS = {
   sync: 'Upload',
   evict: 'Eviction',
@@ -44,6 +60,7 @@ const JOBS = {
 };
 const jobName = (/** @type {string} */ job) => JOBS[job] || job;
 
+/** @type {Record<string, [string, string]>} */
 const STATES = {
   running: ['Running', 'ok'],
   starting: ['Starting', 'info'],
@@ -71,6 +88,7 @@ export default /** @satisfies {PageModule} */ ({
     /** @type {Partial<VaultStatus> | null} */
     let status = null;
     let mode = '';
+    /** @type {Regions} */
     const regions = {};
     const main = h('div.page-stack', h('div.card', loading('Checking the vault…')));
     mount(root, pageHeader('Vault', 'Files kept on this computer and, encrypted, in Backblaze B2, with snapshots to restore from.'), main);
@@ -103,7 +121,7 @@ export default /** @satisfies {PageModule} */ ({
     };
 
     function layout() {
-      for (const k of Object.keys(regions)) delete regions[k];
+      for (const k of /** @type {(keyof Regions)[]} */ (Object.keys(regions))) delete regions[k];
       regions.targets = h('div');
       const targets = h('section.section', h('h2.section-title', 'Backup targets'), regions.targets);
       if (mode === 'off') {
@@ -165,6 +183,7 @@ export default /** @satisfies {PageModule} */ ({
     function renderHead({ state, error, root: dir, job }) {
       const [label, kind] = STATES[state] || [state || 'Unknown', 'neutral'];
       const running = !!job;
+      /** @type {(text: string, iconName: string, path: string, body?: unknown, primary?: boolean) => HTMLButtonElement} */
       const action = (text, iconName, path, body, primary) => btn(text, {
         kind: primary ? 'primary' : '', icon: iconName, disabled: running,
         onClick: () => start(path, body, text.replace(/ now$/, '')),
@@ -323,6 +342,7 @@ export default /** @satisfies {PageModule} */ ({
       if (!u) return h('div.card', h('div.card-body', h('p.muted', 'No B2 transactions counted today.')));
       const cls = u.classes || {};
       const pct = u.percent || {};
+      /** @param {string} c */
       const level = (c) => {
         const p = pct[c] || 0;
         const kind = p >= 100 ? 'bad' : p >= 70 ? 'warn' : 'ok';
@@ -381,6 +401,7 @@ export default /** @satisfies {PageModule} */ ({
     /** @param {VaultTarget} t */
     function targetCard(t) {
       const running = !!t.job;
+      /** @type {(text: string, iconName: string, path: string, body: unknown) => HTMLButtonElement} */
       const job = (text, iconName, path, body) => btn(text, {
         icon: iconName, small: true, disabled: running || !t.ready,
         onClick: () => start(`/api/vault/targets/${encodeURIComponent(t.name)}/${path}`, body, `${text} (${t.name})`),
@@ -427,10 +448,13 @@ export default /** @satisfies {PageModule} */ ({
       const key = `node:${t.name}`;
       const rows = (brains || []).map((b) => {
         const bk = /** @type {Partial<BrainBackup>} */ ((b.manifest && b.manifest.backup) || {});
-        const row = { id: b.id, targets: { ...(bk.targets || {}) }, chosen: !!(bk.targets || {})[key], nodeOnly: (bk.node_only || []).join(', ') };
-        row.was = { chosen: row.chosen, nodeOnly: row.nodeOnly };
-        row.input = textInput({ value: row.nodeOnly, placeholder: '/work/, /clients/', 'aria-label': `Paths of ${b.id} only for node targets` });
-        return row;
+        const chosen = !!(bk.targets || {})[key];
+        const nodeOnly = (bk.node_only || []).join(', ');
+        return {
+          id: b.id, targets: { ...(bk.targets || {}) }, chosen, nodeOnly,
+          was: { chosen, nodeOnly },
+          input: textInput({ value: nodeOnly, placeholder: '/work/, /clients/', 'aria-label': `Paths of ${b.id} only for node targets` }),
+        };
       });
       const body = h('div.stack',
         h('p.muted', 'A brain\'s folder goes here once you tick it. Paths listed beside it never go to the cloud, only to the node targets the brain goes to; its exclude list still keeps the rest out of both.'),
@@ -497,7 +521,7 @@ export default /** @satisfies {PageModule} */ ({
       let dataDir = false;
       const chosen = h('code.mono', 'none yet');
       const pickerWrap = h('div');
-      const showPicker = () => mount(pickerWrap, nodeFolderPicker({ node: state.node, onPick: (p) => { state.folder = p; chosen.textContent = p; } }));
+      const showPicker = () => mount(pickerWrap, nodeFolderPicker({ node: state.node, onPick: (/** @type {string} */ p) => { state.folder = p; chosen.textContent = p; } }));
       const nodeSel = select(ready.map((n) => [n.id, `${n.name} (${n.id}${n.online ? '' : ', offline'})`]), state.node, { 'aria-label': 'Node' });
       nodeSel.addEventListener('change', () => { state.node = nodeSel.value; state.folder = ''; chosen.textContent = 'none yet'; showPicker(); });
       showPicker();
