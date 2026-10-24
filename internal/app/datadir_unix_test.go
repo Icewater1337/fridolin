@@ -13,6 +13,8 @@ import (
 )
 
 func TestProtectDataDirMakesExistingDataDirPrivate(t *testing.T) {
+	// Serial: protectDataDir's warnings go to the process's standard logger
+	// (captureLog), and it changes the working directory.
 	for _, tc := range []struct {
 		name     string
 		mode     os.FileMode
@@ -28,7 +30,7 @@ func TestProtectDataDirMakesExistingDataDirPrivate(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := fsx.Canonical(t.TempDir())
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			data := filepath.Join(home, "data")
 			mkdirMode(t, data, tc.mode)
 			dataDir := data
@@ -38,7 +40,7 @@ func TestProtectDataDirMakesExistingDataDirPrivate(t *testing.T) {
 			}
 			logs := captureLog(t)
 
-			cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+dataDir+`"}`))
+			cfg, err := loadConfig(t, writeConfig(t, `{"data_dir": "`+dataDir+`"}`))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -54,6 +56,8 @@ func TestProtectDataDirMakesExistingDataDirPrivate(t *testing.T) {
 }
 
 func TestProtectDataDirLeavesHomeAlone(t *testing.T) {
+	// Serial: protectDataDir's warnings go to the process's standard logger
+	// (captureLog), and it changes the working directory.
 	// Making the home folder 0700 would cut other users and services off
 	// from all of it, so a data_dir there or above it only gets a warning.
 	for _, tc := range []struct {
@@ -78,9 +82,9 @@ func TestProtectDataDirLeavesHomeAlone(t *testing.T) {
 			if err := os.Chmod(root, tc.mode); err != nil {
 				t.Fatal(err)
 			}
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			t.Chdir(home)
-			cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+tc.dataDir(root, home)+`"}`))
+			cfg, err := loadConfig(t, writeConfig(t, `{"data_dir": "`+tc.dataDir(root, home)+`"}`))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -105,6 +109,8 @@ func TestProtectDataDirLeavesHomeAlone(t *testing.T) {
 }
 
 func TestProtectDataDirOnlyWarnsAboutOpenDBFolder(t *testing.T) {
+	// Serial: protectDataDir's warnings go to the process's standard logger
+	// (captureLog).
 	// A db_path outside the data dir may live in a folder shared on purpose.
 	for _, tc := range []struct {
 		name     string
@@ -126,7 +132,7 @@ func TestProtectDataDirOnlyWarnsAboutOpenDBFolder(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			mkdirMode(t, filepath.Join(home, "data"), 0o700)
 			if err := os.Symlink(filepath.Join(home, "data"), filepath.Join(home, "link")); err != nil {
 				t.Fatal(err)
@@ -139,7 +145,7 @@ func TestProtectDataDirOnlyWarnsAboutOpenDBFolder(t *testing.T) {
 			} else {
 				mkdirMode(t, dbDir, tc.mode)
 			}
-			cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/`+tc.dataDir+`", "db_path": "`+dbDir+`/bridge.db"}`))
+			cfg, err := loadConfig(t, writeConfig(t, `{"data_dir": "`+home+`/`+tc.dataDir+`", "db_path": "`+dbDir+`/bridge.db"}`))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -161,9 +167,11 @@ func TestProtectDataDirOnlyWarnsAboutOpenDBFolder(t *testing.T) {
 }
 
 func TestProtectDataDirLeavesOtherUsersFolderAlone(t *testing.T) {
+	// Serial: protectDataDir's warnings go to the process's standard logger
+	// (captureLog).
 	// A data dir that belongs to another user is theirs to set. Only root
 	// could change it, and should not.
-	t.Setenv("HOME", t.TempDir())
+	setenv(t, "HOME", t.TempDir())
 	var data string
 	if os.Geteuid() == 0 {
 		data = filepath.Join(t.TempDir(), "data")

@@ -7,15 +7,43 @@
 // was asked; until then, the request fails once its signal aborts, as
 // fetch does.
 
+/** @import { TestContext } from 'node:test' */
+
+/**
+ * A request the page made: its body parsed from JSON (or as it was sent,
+ * a FormData), its headers as the page passed them.
+ * @typedef {{path: string, method: string, headers: Record<string, string>, body: any}} Call
+ */
+
+/**
+ * What a route answers: a body (any JSON), or {status, body, headers};
+ * or a promise of either.
+ * @typedef {any} Answer
+ */
+
+/**
+ * The request as a route sees it. body is the JSON the page sent (a
+ * FormData for an upload, which no route reads as text).
+ * @typedef {{method?: string, headers?: Record<string, string>, body?: string, signal?: AbortSignal | null}} RouteInit
+ */
+
+/**
+ * @param {TestContext} t
+ * @param {(path: string, init: RouteInit) => Answer} route
+ * @returns {Call[]}
+ */
 export function serve(t, route) {
   const real = globalThis.fetch;
+  /** @type {Call[]} */
   const calls = [];
   const aborted = () => new DOMException('aborted', 'AbortError');
-  globalThis.fetch = async (url, init = {}) => {
+  // Its answers have only what api.js reads of a Response.
+  /** @type {(url: string | URL, init?: RequestInit) => Promise<object>} */
+  const fetch = async (url, init = {}) => {
     if (init.signal && init.signal.aborted) throw aborted();
     const path = String(url);
-    calls.push({ path, method: init.method || 'GET', headers: init.headers || {}, body: typeof init.body === 'string' ? JSON.parse(init.body) : init.body });
-    let r = route(path, init);
+    calls.push({ path, method: init.method || 'GET', headers: /** @type {Record<string, string>} */ (init.headers || {}), body: typeof init.body === 'string' ? JSON.parse(init.body) : init.body });
+    let r = route(path, /** @type {RouteInit} */ (init));
     if (r && typeof r.then === 'function') {
       const { signal } = init;
       r = await (signal ? Promise.race([r, new Promise((_, reject) => signal.addEventListener('abort', () => reject(aborted()), { once: true }))]) : r);
@@ -24,16 +52,24 @@ export function serve(t, route) {
     const text = r.body === undefined ? '' : JSON.stringify(r.body);
     return { ok: r.status >= 200 && r.status < 300, status: r.status, statusText: '', headers: new Headers(r.headers), text: async () => text };
   };
+  Object.assign(globalThis, { fetch });
   t.after(() => { globalThis.fetch = real; });
   return calls;
 }
 
-/** Lets the requests a page started come back and their answers paint. */
+/**
+ * Lets the requests a page started come back and their answers paint.
+ * @param {number} [rounds]
+ */
 export async function settle(rounds = 10) {
   for (let i = 0; i < rounds; i++) await new Promise((r) => setImmediate(r));
 }
 
-/** Sets an input's value as typing does, firing the input event. */
+/**
+ * Sets an input's value as typing does, firing the input event.
+ * @param {HTMLInputElement | HTMLTextAreaElement} input
+ * @param {string} text
+ */
 export function type(input, text) {
   input.value = text;
   input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -43,9 +79,11 @@ export function type(input, text) {
  * Fails the test when the page logs an error: a store or resource
  * subscriber that throws is caught and only logged, so a page could break
  * without anything else failing.
+ * @param {TestContext} t
  */
 export function noConsoleErrors(t) {
   const real = console.error;
+  /** @type {string[]} */
   const seen = [];
   console.error = (...args) => seen.push(args.map(String).join(' '));
   t.after(() => {

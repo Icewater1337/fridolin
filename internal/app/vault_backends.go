@@ -27,20 +27,20 @@ const vaultLocalEnv = "FRIDOLIN_VAULT_LOCAL"
 // driveResticPath is the Drive repository's folder in the Drive remote.
 const driveResticPath = "fridolin-restic"
 
-// vaultBaseEnv is what of the bridge's environment rclone, restic and
+// vaultBaseEnv is what of the bridge's environment env rclone, restic and
 // Litestream get: where programs and the home folder are, never the
 // bridge's secrets.
-func vaultBaseEnv() []string {
-	var env []string
+func vaultBaseEnv(env Environment) []string {
+	var out []string
 	for _, name := range []string{"PATH", "HOME", "TMPDIR", "USER", "LANG", "SSL_CERT_FILE", "SSL_CERT_DIR", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy"} {
-		if v, ok := os.LookupEnv(name); ok {
-			env = append(env, name+"="+v)
+		if v, ok := envOr(env).LookupEnv(name); ok {
+			out = append(out, name+"="+v)
 		}
 	}
-	if !strings.Contains(strings.Join(env, "\n"), "PATH=") {
-		env = append(env, "PATH="+helperPath())
+	if !strings.Contains(strings.Join(out, "\n"), "PATH=") {
+		out = append(out, "PATH="+helperPath())
 	}
-	return env
+	return out
 }
 
 // hostSecretStore is the host's secret store of a native install: the
@@ -80,7 +80,8 @@ func b2Region(endpoint string) string {
 // crypt, restic on the snapshots bucket, Litestream to it, and the Drive
 // repository through the Drive connection of the backup.
 func defaultVaultBackends(ctx context.Context, s *vaultService, cfg *config.Settings) (vaultBackends, error) {
-	if dir := os.Getenv(vaultLocalEnv); dir != "" {
+	env := envOr(s.env)
+	if dir := getenv(env, vaultLocalEnv); dir != "" {
 		return localVaultBackends(s, cfg, dir)
 	}
 	var b vaultBackends
@@ -88,8 +89,8 @@ func defaultVaultBackends(ctx context.Context, s *vaultService, cfg *config.Sett
 	if err != nil {
 		return b, fmt.Errorf("the vault reaches B2 through rclone: %w", err)
 	}
-	base := vaultBaseEnv()
-	src := vaultSecretSource{getenv: os.Getenv, store: hostSecretStore(s.container), random: newVaultPassword, log: s.log}
+	base := vaultBaseEnv(env)
+	src := vaultSecretSource{getenv: func(name string) string { return getenv(env, name) }, store: hostSecretStore(s.container), random: newVaultPassword, log: s.log}
 	c, err := src.read()
 	if err != nil {
 		return b, err
@@ -353,7 +354,7 @@ func localVaultBackends(s *vaultService, cfg *config.Settings, dir string) (vaul
 	if err != nil {
 		return b, err
 	}
-	sealKey, err := localSecret(dir, "vault-seal-key", "FRIDOLIN_VAULT_SEAL_KEY")
+	sealKey, err := localSecret(s.env, dir, "vault-seal-key", "FRIDOLIN_VAULT_SEAL_KEY")
 	if err != nil {
 		return b, err
 	}
@@ -367,11 +368,11 @@ func localVaultBackends(s *vaultService, cfg *config.Settings, dir string) (vaul
 	}
 	b.cold = layeredCold(sealed, oldCold, encState)
 	b.bridgeDB = AbsPath(cfg.DBPath)
-	pw, err := localSecret(dir, "restic-password", "RESTIC_PASSWORD")
+	pw, err := localSecret(s.env, dir, "restic-password", "RESTIC_PASSWORD")
 	if err != nil {
 		return b, err
 	}
-	base := vaultBaseEnv()
+	base := vaultBaseEnv(s.env)
 	if restic := findVaultTool("restic"); restic != "" {
 		env := append(append([]string{}, base...), "RESTIC_PASSWORD="+pw)
 		b.restic = &snapshot.Restic{Binary: restic, Repo: filepath.Join(dir, "restic"), Env: env, Secrets: []string{pw}}
@@ -381,7 +382,7 @@ func localVaultBackends(s *vaultService, cfg *config.Settings, dir string) (vaul
 		// With rclone, the repositories get their outer layer as on B2:
 		// rclone crypt over a folder.
 		if rclone, err := findRclone(cfg.Backup.RclonePath); err == nil {
-			cryptPW, err := localSecret(dir, "snapshots-crypt-password", "FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD")
+			cryptPW, err := localSecret(s.env, dir, "snapshots-crypt-password", "FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD")
 			if err != nil {
 				return b, err
 			}
@@ -407,7 +408,7 @@ func localVaultBackends(s *vaultService, cfg *config.Settings, dir string) (vaul
 	}
 	if lite := findVaultTool("litestream"); lite != "" {
 		// As on B2: replicas in core/, mirrored sealed into the stand-in.
-		key, err := localSecret(dir, "litestream-seal-key", "FRIDOLIN_LITESTREAM_SEAL_KEY")
+		key, err := localSecret(s.env, dir, "litestream-seal-key", "FRIDOLIN_LITESTREAM_SEAL_KEY")
 		if err != nil {
 			return b, err
 		}
@@ -434,10 +435,11 @@ func localVaultBackends(s *vaultService, cfg *config.Settings, dir string) (vaul
 	return b, nil
 }
 
-// localSecret is the dev stand-ins' secret: from the environment, else
-// from the file name in dir, made there when missing.
-func localSecret(dir, name, env string) (string, error) {
-	if v := os.Getenv(env); v != "" {
+// localSecret is the dev stand-ins' secret: from the variable env of the
+// bridge's environment from, else from the file name in dir, made there
+// when missing.
+func localSecret(from Environment, dir, name, env string) (string, error) {
+	if v := getenv(envOr(from), env); v != "" {
 		return v, nil
 	}
 	file := filepath.Join(dir, name)

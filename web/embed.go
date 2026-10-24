@@ -6,8 +6,9 @@ package web
 import "embed"
 
 // FS is the page's files, as the dashboard serves them under /. Only the
-// page is embedded: this folder also holds its JavaScript tests and the
-// package.json node reads for them.
+// page is embedded: this folder also holds its JavaScript tests, the
+// package.json node reads for them, and the tsconfig.json and types/
+// declarations TypeScript's checker reads (make typecheck-web).
 //
 //go:embed index.html favicon.svg assets
 var FS embed.FS

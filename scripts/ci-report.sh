@@ -2,13 +2,14 @@
 #
 # Reports a CI run on main in issues, so a failure after a merge reaches
 # someone (#227). Run by the report job in .github/workflows/ci.yml after
-# the other jobs, for pushes to main only.
+# the other jobs, for pushes to main only, and by the one in
+# .github/workflows/macos-full.yml after the nightly macOS suite.
 #
 #   scripts/ci-report.sh
 #
 # It reads the logs of the run's failed jobs and opens one issue per
-# failing fuzz target or test, titled "CI on main: NAME failing", with the
-# failure, the jobs, the run's link and, for a fuzz target, the failing
+# failing fuzz target or test, titled "CI on main: NAME failing" (see
+# REPORT_NAME below), with the failure, the jobs, the run's link and, for a fuzz target, the failing
 # input from the fuzz-failing-inputs artifact. A failed package without a
 # failing test (a build failure, a timeout) gets one per package, and a job
 # with neither (gofmt, a linter) one per job. An open issue of that title
@@ -26,8 +27,14 @@
 # Environment: GH_TOKEN, REPO (owner/name), RUN_ID, RUN_ATTEMPT, RUN_URL,
 # HEAD_SHA, SELF_JOB (this job's name, which is still running), and
 # optionally GH (the gh to run), MAX_ISSUES (default 10), BRANCH (whose
-# newest commit a run must be on to close, default main) and
-# GITHUB_STEP_SUMMARY.
+# newest commit a run must be on to close, default main),
+# GITHUB_STEP_SUMMARY, and for a workflow that reports apart from ci.yml
+# (the nightly macOS suite) REPORT_NAME (the titles' prefix, default "CI
+# on main"), REPORT_LABEL (default ci-main) and REPORT_WORKFLOW (the file
+# named in the issues). Issues are told apart by their label: a run closes
+# only issues of its own, so a passing push to main, which no longer runs
+# the whole macOS suite, does not close the issue of a test that fails
+# only there.
 #
 # Exit status: 0 when everything was reported; 1 when gh failed; 2 for
 # usage.
@@ -38,7 +45,11 @@ gh="${GH:-gh}"
 max="${MAX_ISSUES:-10}"
 branch="${BRANCH:-main}"
 [[ $max =~ ^[0-9]+$ ]] || { echo "$0: MAX_ISSUES must be a number" >&2; exit 2; }
-label="ci-main"
+name_="${REPORT_NAME:-CI on main}"
+label="${REPORT_LABEL:-ci-main}"
+workflow="${REPORT_WORKFLOW:-.github/workflows/ci.yml}"
+[[ $name_ =~ ^[A-Za-z0-9\ ]+$ && $label =~ ^[a-z0-9-]+$ && $workflow =~ ^[A-Za-z0-9./_-]+$ ]] ||
+	{ echo "$0: REPORT_NAME, REPORT_LABEL or REPORT_WORKFLOW has characters it may not" >&2; exit 2; }
 marker="<!-- ci-main-report"
 module="github.com/Icewater1337/fridolin"
 : "${REPO:?}" "${RUN_ID:?}" "${RUN_ATTEMPT:?}" "${RUN_URL:?}" "${HEAD_SHA:?}" "${SELF_JOB:?}"
@@ -170,7 +181,7 @@ while IFS=$'\t' read -r id conclusion job; do
 		short="${pkg#"$module"/}"
 		[ "$short" != "$module" ] || short="."
 		if [ "$kind" = package ]; then
-			record "package-${short//\//-}" "CI on main: package $short failing" package "$job" "$log.d/$n" "$pkg"
+			record "package-${short//\//-}" "$name_: package $short failing" package "$job" "$log.d/$n" "$pkg"
 			reported=1
 			continue
 		fi
@@ -180,8 +191,8 @@ while IFS=$'\t' read -r id conclusion job; do
 		[ "$input" != - ] || input=""
 		[[ $input =~ ^testdata/fuzz/Fuzz[A-Za-z0-9_]*/[0-9a-f]+$ ]] || input=""
 		case "$name" in
-		Fuzz*) record "fuzz-$name" "CI on main: $name failing" fuzz "$job" "$log.d/$n" "$pkg" "$short/$input" ;;
-		*) record "test-$name" "CI on main: $name failing" test "$job" "$log.d/$n" "$pkg" ;;
+		Fuzz*) record "fuzz-$name" "$name_: $name failing" fuzz "$job" "$log.d/$n" "$pkg" "$short/$input" ;;
+		*) record "test-$name" "$name_: $name failing" test "$job" "$log.d/$n" "$pkg" ;;
 		esac
 		reported=1
 	done <"$log.tsv"
@@ -189,7 +200,7 @@ while IFS=$'\t' read -r id conclusion job; do
 		# Not a test: one issue per job, whatever system or release it ran on.
 		base="${job%% (*}"
 		[ -s "$log.d/job" ] || printf '(no error lines in the log)\n' >"$log.d/job"
-		record "job-${base//[^A-Za-z0-9_-]/-}" "CI on main: job $base failing" job "$job" "$log.d/job"
+		record "job-${base//[^A-Za-z0-9_-]/-}" "$name_: job $base failing" job "$job" "$log.d/job"
 	fi
 done <"$work/jobs"
 
@@ -202,7 +213,7 @@ body() {
 	input="$(cat "$d/input")"
 	printf '%s kind=%s -->\n' "$marker" "$kind"
 	case "$kind" in
-	fuzz | test) printf '**%s** in `%s` failed on `main` at %s in [run %s](%s).\n\n' "$(cut -d' ' -f4 "$d/title")" "$(cat "$d/package")" "$HEAD_SHA" "$RUN_ID" "$RUN_URL" ;;
+	fuzz | test) printf '**%s** in `%s` failed on `main` at %s in [run %s](%s).\n\n' "$(awk '{ print $(NF - 1) }' "$d/title")" "$(cat "$d/package")" "$HEAD_SHA" "$RUN_ID" "$RUN_URL" ;;
 	package) printf 'Package `%s` failed on `main` at %s in [run %s](%s), without a failing test: it did not build, panicked or timed out.\n\n' "$(cat "$d/package")" "$HEAD_SHA" "$RUN_ID" "$RUN_URL" ;;
 	job) printf 'A job failed on `main` at %s in [run %s](%s), outside the tests.\n\n' "$HEAD_SHA" "$RUN_ID" "$RUN_URL" ;;
 	esac
@@ -221,11 +232,11 @@ body() {
 			printf '\nThe failing input was not found in the run'"'"'s `fuzz-failing-inputs` artifact.\n'
 		fi
 	fi
-	printf '\nOpened and updated by the report job of `.github/workflows/ci.yml`, which closes it once a later run on `main` passes.\n'
+	printf '\nOpened and updated by the report job of `%s`, which closes it once a later run on `main` passes.\n' "$workflow"
 }
 
 if [ -n "$(ls "$work/found")" ]; then
-	"$gh" label create "$label" --repo "$REPO" --force --color B60205 --description "A CI failure on main, reported by the report job" >/dev/null
+	"$gh" label create "$label" --repo "$REPO" --force --color B60205 --description "A failure of $name_, reported by the report job" >/dev/null
 fi
 count=0 overflow=""
 reported_titles="$work/reported"
@@ -255,13 +266,13 @@ for d in "$work/found"/*; do
 done
 
 if [ -n "$overflow" ]; then
-	title="CI on main: more failures than one run reports"
+	title="$name_: more failures than one run reports"
 	printf '%s\n' "$title" >>"$reported_titles"
 	{
 		printf '%s kind=overflow -->\n' "$marker"
 		printf '[Run %s](%s) at %s had more than %s failures. These got no issue of their own:\n\n' "$RUN_ID" "$RUN_URL" "$HEAD_SHA" "$max"
 		printf '%s' "$overflow" | sed 's/.*/- &/'
-		printf '\nOpened and updated by the report job of `.github/workflows/ci.yml`, which closes it once a later run on `main` passes.\n'
+		printf '\nOpened and updated by the report job of `%s`, which closes it once a later run on `main` passes.\n' "$workflow"
 	} >"$work/overflow"
 	existing="$(jq -r --arg t "$title" '[.[] | select(.title == $t and .state == "OPEN")] | .[0].number // empty' "$work/issues")"
 	if [ -z "$existing" ]; then

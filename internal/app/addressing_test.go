@@ -21,6 +21,7 @@ import (
 // Quote-replying to one of the bridge's messages in a group addresses it:
 // the most natural way to follow up gets an answer, not a silent run.
 func TestGroupReplyToTheBridgeIsAnswered(t *testing.T) {
+	t.Parallel()
 	tb, _ := newMainBridge(t, "")
 	own := types.JID{User: otherNumber, Device: 12, Server: types.DefaultUserServer}
 	wa := tb.whatsAppOffline(t, &store.Device{ID: &own, LIDs: bridgeLIDs{}})
@@ -32,6 +33,7 @@ func TestGroupReplyToTheBridgeIsAnswered(t *testing.T) {
 // then not fetched, its caption is read without an answer, and a photo
 // without one runs nothing.
 func TestGroupFilesAndForwardsCanBeChatter(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, `, "otp_guard": true`)
 	off := false
 	tb.addFolderBrain(t, manifest.Manifest{ID: "family", Name: "Family", Routing: manifest.Routing{

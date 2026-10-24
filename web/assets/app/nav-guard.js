@@ -6,6 +6,18 @@
 // leaves no copy of the page behind, and Back still works.
 
 /**
+ * What the guard and the router need of a window: a browser's, or the
+ * tests' fakeWindow(). history.state is what the guard put there, or
+ * anything another script did.
+ * @typedef {object} RouterWindow
+ * @property {{readonly state: any, replaceState: (state: unknown, unused: string, url?: string) => void, go: (delta: number) => void}} history
+ * @property {{hash: string}} location
+ * @property {{addEventListener: (type: 'click', fn: (e: MouseEvent) => void, capture?: boolean) => void}} document
+ * @property {(type: 'popstate' | 'hashchange', fn: () => void) => void} addEventListener
+ * @property {(x: number, y: number) => void} scrollTo
+ */
+
+/**
  * guardNavigation({win, isDirty, confirm, onDiscard, onNavigate}) watches
  * win's links and hashchanges. isDirty() says whether leaving needs
  * asking, confirm() asks (resolving true to leave), onDiscard() drops the
@@ -14,15 +26,21 @@
  * link does, replace changes the address in place without leaving the
  * page. Every other history.replaceState must go through replace, which
  * keeps an entry's place.
+ * @param {object} options
+ * @param {RouterWindow} options.win
+ * @param {() => boolean} options.isDirty
+ * @param {() => Promise<boolean>} options.confirm
+ * @param {() => void} options.onDiscard
+ * @param {() => void} options.onNavigate
+ * @returns {{go: (hash: string) => Promise<void>, replace: (hash: string) => void}}
  */
 export function guardNavigation({ win, isDirty, confirm, onDiscard, onNavigate }) {
   const { history, location, document } = win;
-  const placeOf = (state) => (state && typeof state.idx === 'number' ? state.idx : null);
-  let idx = placeOf(history.state); // where the shown page's entry is
-  if (idx === null) {
-    idx = 0;
-    history.replaceState({ idx }, '');
-  }
+  /** @returns {number | null} */
+  const placeOf = (/** @type {any} */ state) => (state && typeof state.idx === 'number' ? state.idx : null);
+  const was = placeOf(history.state);
+  let idx = was === null ? 0 : was; // where the shown page's entry is
+  if (was === null) history.replaceState({ idx }, '');
   let shown = location.hash; // the address of the page shown
   let undoing = 0; // moves back to the shown page whose hashchange is no navigation
   let asking = false; // the "Discard changes?" dialog is open
@@ -71,13 +89,15 @@ export function guardNavigation({ win, isDirty, confirm, onDiscard, onNavigate }
   // (the skip link), so leaving is not what they do.
   document.addEventListener('click', (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    const a = e.target && e.target.closest ? e.target.closest('a[href^="#/"]') : null;
+    const t = /** @type {Element | null} */ (e.target);
+    const a = t && t.closest ? t.closest('a[href^="#/"]') : null;
     if (!a || a.getAttribute('target')) return;
     if (!asking && !isDirty()) return;
     e.preventDefault();
-    go(a.getAttribute('href'));
+    go(a.getAttribute('href') || '');
   }, true);
 
+  /** @param {string} hash */
   async function go(hash) {
     if (hash === location.hash || asking) return;
     if (isDirty()) {
@@ -89,6 +109,7 @@ export function guardNavigation({ win, isDirty, confirm, onDiscard, onNavigate }
 
   return {
     go,
+    /** @param {string} hash */
     replace(hash) {
       history.replaceState({ idx }, '', hash);
       shown = location.hash;

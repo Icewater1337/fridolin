@@ -628,6 +628,20 @@ for compatibility.
 
 ### Changed
 
+- **The Plaud Sync app lets the NotePin sleep** (docs/PLAUD.md, "The
+  pin's battery"). A permanent Bluetooth link kept the pin awake and
+  emptied its battery fast. The app's new **Sync** setting is **smart**
+  by default: it connects only to fetch and lets go afterwards. It checks
+  in every 10 minutes, and at once when the app is opened, the phone is
+  plugged in or unlocked, or the pin comes back in range. It stays
+  connected while the pin records, so the stop is seen at once. **Every N
+  minutes** checks in only on its timer and when the app is opened.
+  **Instant** keeps the old permanent link. With voice mode on it checks
+  in at least every 2 minutes, and **Fetch now** (in the app and the
+  notification) fetches at once. A pin out of range is tried less and
+  less often, up to an hour apart. Rebuild the app (Integrations →
+  Plaud → Build phone app) and install it over the old one. It keeps
+  its pairing, and **Unpair** now connects to the pin itself.
 - **Approving `fride` says what it is**: arbitrary execution on that
   machine, whatever `exec` allows. The Nodes page shows it while `fride`
   waits (`fride_approval` in `GET /api/nodes`), `!approve` adds it to its
@@ -948,6 +962,13 @@ for compatibility.
 
 ### Fixed
 
+- A core move to a fresh core host: the pull of the core's image (several
+  GB), the rehearsal and the secrets with their files may take longer than
+  a minute, which the core cut off ("did not answer core.image.pull
+  within 1m0s"); a target whose core cannot be read yet (no image, or no
+  host secrets before the move brings them) is a warning in the
+  pre-flight, not a refusal. In the core's container doctor no longer
+  warns that the process's TZ differs from `timezone` (#187).
 - A core move carries the secret files of a hidden credentials folder
   (`~/.something`): the folder check refused a leading dot, and the
   move went on with the host secrets and no files. A move now stops
@@ -1013,6 +1034,12 @@ for compatibility.
   published.
 - `fridolin node status` in a box says it has no service of its own
   instead of "unknown: exit status 1".
+- On the Build page, a message that could not be sent and a preview that
+  could not be started now show as an error toast, read out at once and
+  kept for 9 seconds. They showed as a plain note with the info icon,
+  for 5 seconds.
+- The Files page says "Only the first entries are shown." under a folder
+  the bridge lists only in part. The note was never shown.
 
 - A brain folder that a core move put on another machine goes back
   through the vault bucket only as far as the brain's backup settings

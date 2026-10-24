@@ -2,13 +2,20 @@
 
 import { plural } from './format.js';
 
+/** @import { Brain, Routing } from '../../types/api.js' */
+
 export const BRAIN_ID_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+/** @type {[string, string][]} [value, label] */
 export const EFFORTS = [['', 'Inherit'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high'], ['max', 'Max']];
 // What a brain does with untagged group messages (brain.json "observe").
+/** @type {[string, string][]} [value, label] */
 export const OBSERVE = [['history', 'Keep them in the history'], ['run', 'Also run the brain on each, observe-only']];
 export const DEFAULT_BACKUP_EXCLUDES = ['node_modules/', '*.log', '.DS_Store', '.venv/', '__pycache__/'];
 
-/** A brain id suggested from a name: lowercase, dashes, at most 40 characters. */
+/**
+ * A brain id suggested from a name: lowercase, dashes, at most 40 characters.
+ * @param {unknown} s
+ */
 export function slugify(s) {
   let out = '';
   let dash = false;
@@ -22,7 +29,10 @@ export function slugify(s) {
   return out || 'brain';
 }
 
-/** A brain as a choice in a list: its name, with the id when that differs. */
+/**
+ * A brain as a choice in a list: its name, with the id when that differs.
+ * @param {{id: string, name?: string}} b
+ */
 export function brainLabel(b) {
   return b.name && b.name !== b.id ? `${b.name} (${b.id})` : b.id;
 }
@@ -37,6 +47,8 @@ export const BRIDGE_BACKUP_ID = '_bridge';
  * Whose backup id is, as a backup job or a failed backup names it: the
  * bridge's settings, or the brain of that id in brains (the id itself
  * when it is not there).
+ * @param {string} id
+ * @param {{id: string, name?: string}[] | null | undefined} brains
  */
 export function backupOwner(id, brains) {
   if (id === BRIDGE_BACKUP_ID) return 'Bridge settings';
@@ -46,6 +58,7 @@ export function backupOwner(id, brains) {
 
 // What a brain's issue kinds (and status, which names the worst of them)
 // are called: short on a pill, long where the brain is not named around it.
+/** @type {Record<string, [string, string]>} */
 const ISSUES = {
   drift: ['Changed on disk', 'brain.json changed on disk'],
   missing: ['Folder missing', 'Brain folder missing'],
@@ -53,9 +66,13 @@ const ISSUES = {
   unapproved: ['Not approved', 'Brain not approved'],
 };
 
-/** The name of an issue kind (long unless short is set); an unknown kind as it is. */
+/**
+ * The name of an issue kind (long unless short is set); an unknown kind as it is.
+ * @param {string | null | undefined} kind
+ * @param {{short?: boolean}} [options]
+ */
 export function issueLabel(kind, { short = false } = {}) {
-  const names = ISSUES[kind];
+  const names = kind ? ISSUES[kind] : undefined;
   return names ? names[short ? 0 : 1] : String(kind || '');
 }
 
@@ -64,6 +81,8 @@ export function issueLabel(kind, { short = false } = {}) {
  * as the brain the chats no other brain claims go to, which without a
  * default brain is the first one; noDMBrain: no brain handles direct
  * messages, so those go to the fallback brain too (see hasDMBrain).
+ * @param {Partial<Routing> | null | undefined} routing
+ * @param {{fallback?: boolean, noDMBrain?: boolean}} [options]
  */
 export function routingSummary(routing, { fallback = false, noDMBrain = false } = {}) {
   if (!routing && !fallback) return 'No chats';
@@ -77,23 +96,31 @@ export function routingSummary(routing, { fallback = false, noDMBrain = false } 
   return parts.length ? parts.join(' · ') : 'No chats routed yet';
 }
 
-const routingOf = (b) => (b && b.manifest && b.manifest.routing) || {};
+/** @returns {Partial<Routing>} */
+const routingOf = (/** @type {Brain | null | undefined} */ b) => (b && b.manifest && b.manifest.routing) || {};
 
 /**
  * Whether a brain of the /api/brains list handles direct messages. Its
  * approved brain.json says so, whether it runs or not: a DM brain that
  * cannot run hands them to no other brain.
+ * @param {Brain[] | null | undefined} brains
  */
 export function hasDMBrain(brains) {
   return (brains || []).some((b) => routingOf(b).handles_dms);
 }
 
-/** The fallback brain of the /api/brains list (see routingSummary), or null. */
+/**
+ * The fallback brain of the /api/brains list (see routingSummary), or null.
+ * @param {Brain[] | null | undefined} brains
+ */
 function fallbackOf(brains) {
   return (brains || []).find((b) => b.fallback) || null;
 }
 
-/** The Chats page's choice for a group that names no brain, which the fallback brain answers. */
+/**
+ * The Chats page's choice for a group that names no brain, which the fallback brain answers.
+ * @param {Brain[] | null | undefined} brains
+ */
 export function defaultBrainOption(brains) {
   const f = fallbackOf(brains);
   return f ? `Default brain (${f.name || f.id})` : 'Default brain';
@@ -108,6 +135,9 @@ export function defaultBrainOption(brains) {
  * it did not get before. The bridge removes the first entry with that id
  * only: when a later one, a second folder claiming the id, is left, it
  * takes the brain's place with its own brain.json, and copy is true.
+ * @param {Brain[] | null | undefined} brains
+ * @param {string} id
+ * @returns {{brain: Brain | null, dms: boolean, copy: boolean}}
  */
 export function takeover(brains, id) {
   const list = brains || [];

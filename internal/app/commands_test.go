@@ -172,7 +172,7 @@ func replyMessage(text, quoted string) *waE2E.Message {
 // process is up.
 func startLongRun(t *testing.T, tb *testBridge, br *brain.Brain, m brain.Inbound) {
 	t.Helper()
-	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	tb.handleInbound(context.Background(), m)
 	testutil.WaitFor(t, 5*time.Second, "the run for "+m.JID, func() bool {
 		r := br.Snapshot().Running
@@ -183,6 +183,7 @@ func startLongRun(t *testing.T, tb *testBridge, br *brain.Brain, m brain.Inbound
 // A reply's quote reaches the model and the history exactly as the
 // "[reply to …]" line it has always been.
 func TestQuotedReplyReachesModelAndHistory(t *testing.T) {
+	t.Parallel()
 	tb, br := newMainBridge(t, "")
 	tb.whatsApp(t).ProcessMessage(replyEvent("yes, book it", "Lunch at 12?"))
 
@@ -200,6 +201,7 @@ func TestQuotedReplyReachesModelAndHistory(t *testing.T) {
 // Quote-replying to the bot's "send me the code" is how people answer it:
 // the code must still be kept out of the history and the model.
 func TestOTPGuardDropsQuotedCode(t *testing.T) {
+	t.Parallel()
 	tb, br := newMainBridge(t, "")
 	br.AppendHistory(testDMChat, "main", "🔐 Please send me the verification code", history.Out)
 
@@ -231,6 +233,7 @@ func TestOTPGuardDropsQuotedCode(t *testing.T) {
 // long after the request, is a message like any other. A code written in
 // groups is caught too, and its sender is told, unless it was chatter.
 func TestOTPGuardIsScopedToTheChatAndTheWindow(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		askIn    string        // the chat the brain asked for a code
@@ -278,6 +281,7 @@ func TestOTPGuardIsScopedToTheChatAndTheWindow(t *testing.T) {
 // Every untagged message goes into the history with its quote: a "yes" may
 // answer what the brain asked.
 func TestJunkFilterIgnoresTheQuote(t *testing.T) {
+	t.Parallel()
 	q := &chat.Quote{From: otherNumber, Text: "Lunch at 12?"}
 	cases := []struct {
 		name string
@@ -312,6 +316,7 @@ func TestJunkFilterIgnoresTheQuote(t *testing.T) {
 // about the quoted message. It has no text of its own, and must still reach
 // the brain and be answered.
 func TestTriggerOnlyReplyAsksAboutTheQuote(t *testing.T) {
+	t.Parallel()
 	want := `[reply to ` + otherNumber + `: "Lunch?"]`
 	cases := []struct {
 		name string
@@ -347,6 +352,7 @@ func TestTriggerOnlyReplyAsksAboutTheQuote(t *testing.T) {
 // A file the bridge could not download is not lost without a word: the
 // sender is asked to send it again, and its caption is still answered.
 func TestFailedDownloadIsAnswered(t *testing.T) {
+	t.Parallel()
 	photo := &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Caption: proto.String("What is this?")}}
 	cases := []struct {
 		name string
@@ -386,6 +392,7 @@ func TestFailedDownloadIsAnswered(t *testing.T) {
 // The dashboard shows a run or a waiting message as the model sees it, quote
 // included: a reply that is only the trigger has no text of its own.
 func TestPreviewShowsTheQuote(t *testing.T) {
+	t.Parallel()
 	tb, br := newMainBridge(t, "")
 	q := &chat.Quote{From: otherNumber, Text: "Lunch?"}
 	line := `[reply to ` + otherNumber + `: "Lunch?"]`
@@ -403,6 +410,7 @@ func TestPreviewShowsTheQuote(t *testing.T) {
 
 // A command sent as a reply is still a command.
 func TestQuotedCommandIsRecognised(t *testing.T) {
+	t.Parallel()
 	t.Run("!help", func(t *testing.T) {
 		tb, br := newMainBridge(t, "")
 		tb.whatsApp(t).ProcessMessage(replyEvent("!help", "Here is your summary."))
@@ -430,6 +438,7 @@ func TestQuotedCommandIsRecognised(t *testing.T) {
 // included. WhatsApp writes the mention into the text as "@" and the
 // number or LID, and the command must still be recognised.
 func TestMentionAddressesTheBridge(t *testing.T) {
+	t.Parallel()
 	own := types.JID{User: otherNumber, Device: 12, Server: types.DefaultUserServer}
 	byNumber := types.NewJID(otherNumber, types.DefaultUserServer).String()
 	byLID := types.NewJID(bridgeLID, types.HiddenUserServer).String()
@@ -465,6 +474,7 @@ func TestMentionAddressesTheBridge(t *testing.T) {
 // endpoint applies the WhatsApp client's trigger rules: the trigger is
 // stripped, and an untagged group message arrives Silent.
 func TestGroupCommandsMustBeAddressed(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		jid     string
@@ -501,6 +511,7 @@ func TestGroupCommandsMustBeAddressed(t *testing.T) {
 
 // An untagged "!stop" in a group must not stop the run a member asked for.
 func TestUntaggedStopInGroupIsChatter(t *testing.T) {
+	t.Parallel()
 	tb, br := newMainBridge(t, "")
 	startLongRun(t, tb, br, brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567", Text: "summarise the thread", Source: chat.SourceWhatsApp}})
 
@@ -521,6 +532,7 @@ func TestUntaggedStopInGroupIsChatter(t *testing.T) {
 // A full queue points to !stop as the chat must send it, and says what it
 // drops: only what that chat has waiting.
 func TestQueueFullReplyNamesTheChatsStop(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		next brain.Inbound
@@ -562,6 +574,7 @@ func queuePreviews(br *brain.Brain) []string {
 // !stop and !reset act only on the chat that sent them. One brain serves the
 // DM and the group here, so the other chat's run and queue must survive.
 func TestStopAndResetAreScopedToTheChat(t *testing.T) {
+	t.Parallel()
 	const otherDM = otherNumber + "@s.whatsapp.net"
 	cases := []struct {
 		name        string
@@ -611,6 +624,7 @@ func TestStopAndResetAreScopedToTheChat(t *testing.T) {
 // without its earlier messages, while what the brain wrote into its memory
 // files stays. !help says the same.
 func TestResetReplySaysWhatItDoes(t *testing.T) {
+	t.Parallel()
 	tb, _ := newMainBridge(t, "")
 	ctx := context.Background()
 	for _, cmd := range []string{"!reset", "!help"} {
@@ -633,9 +647,10 @@ func TestResetReplySaysWhatItDoes(t *testing.T) {
 // the chat. Its other chats keep theirs, and the marker is no message:
 // neither the dashboard's feed nor a history search shows it.
 func TestResetStartsOnlyThatChatAfresh(t *testing.T) {
+	t.Parallel()
 	tb, br := newMainBridge(t, "")
 	promptLog := filepath.Join(tb.home, "prompts.log")
-	t.Setenv("FRIDOLIN_FAKE_PROMPT_LOG", promptLog)
+	setenv(t, "FRIDOLIN_FAKE_PROMPT_LOG", promptLog)
 	ctx := context.Background()
 	// send sends text and waits until the answer is in the history.
 	send := func(chatJID, sender, text string) {
@@ -706,6 +721,7 @@ func TestResetStartsOnlyThatChatAfresh(t *testing.T) {
 // next message gets "no brain is set up", so the reply does not promise that
 // message sees the history.
 func TestResetWithoutABrain(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
 	sent := tb.sentTo(testDMChat)
@@ -718,6 +734,7 @@ func TestResetWithoutABrain(t *testing.T) {
 // never resumes a session, and nothing read the PIDs. The tables stay, for
 // an older bridge rolled back to.
 func TestBrainRunsWriteNoSessionOrProcessRows(t *testing.T) {
+	t.Parallel()
 	tb, br := newMainBridge(t, "")
 	rows := func(when string) {
 		t.Helper()
@@ -741,6 +758,7 @@ func TestBrainRunsWriteNoSessionOrProcessRows(t *testing.T) {
 // In interrupt mode a request that has to wait for another chat is told so,
 // like in queue mode; one that takes over its sender's own run is not.
 func TestInterruptModeQueuedNotice(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		next   brain.Inbound
@@ -754,7 +772,7 @@ func TestInterruptModeQueuedNotice(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newMainBridge(t, `, "queue": {"mode": "interrupt"}`)
 			startLongRun(t, tb, br, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "dm 1", Source: chat.SourceWhatsApp}})
-			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+			setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "10")
 			c.next.Source = "whatsapp"
 			tb.handleInbound(context.Background(), c.next)
 			if got := tb.sentPrefix(c.next.JID, "⏳ Queued (#1)"); got != c.notice {
@@ -767,6 +785,7 @@ func TestInterruptModeQueuedNotice(t *testing.T) {
 // A DM goes by its number and its LID (chatJIDs), and !reset may come by
 // either: the next message by the number starts afresh all the same.
 func TestResetByLIDStartsTheDMAfresh(t *testing.T) {
+	t.Parallel()
 	tb, br := newMainBridge(t, "")
 	br.AppendHistory(testDMChat, "15551234567", "before the reset", history.In)
 	tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: otherNumber + "@lid", Sender: "15551234567", Text: "!reset", Source: chat.SourceWhatsApp}})
@@ -780,6 +799,7 @@ func TestResetByLIDStartsTheDMAfresh(t *testing.T) {
 // It is the same chat, so a !stop that arrives by LID stops that run and
 // drops what waits behind it.
 func TestStopByLIDReachesTheDMsRun(t *testing.T) {
+	t.Parallel()
 	const lid = otherNumber + "@lid"
 	tb, br := newMainBridge(t, "")
 	ctx := context.Background()

@@ -16,6 +16,7 @@ import (
 // and the question about it reach the brain as one message, the photo
 // first.
 func TestPhotoThenQuestionMergePhotoFirst(t *testing.T) {
+	t.Parallel()
 	dl := &fakeDownloader{body: "JPEG", hold: make(chan struct{})}
 	tw := newTestWhatsApp(t, func(opts *whatsapp.Options) { opts.Downloader = dl })
 	merged := make(chan brain.Inbound, 1)

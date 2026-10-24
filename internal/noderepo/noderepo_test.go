@@ -98,6 +98,7 @@ func fleet(t *testing.T, folder string) (*nodes.Service, string) {
 // prunes through the node channel; the folder is then an ordinary local
 // repository restic opens directly, as on another machine.
 func TestResticThroughTheNode(t *testing.T) {
+	t.Parallel()
 	bin := resticBinary(t)
 	disk := t.TempDir()
 	folder := filepath.Join(disk, "fridolin-backup")
@@ -150,12 +151,7 @@ func TestResticThroughTheNode(t *testing.T) {
 	if err := r.Forget(ctx, snapshot.Retention{Hourly: 1}, []string{"fridolin"}, true); err != nil {
 		t.Fatal(err)
 	}
-	snaps, err := r.Snapshots(ctx, nil)
-	if err != nil || len(snaps) == 0 {
-		t.Fatalf("snapshots: %v %v", snaps, err)
-	}
-
-	restore := func(rr *snapshot.Restic) {
+	restore := func(t *testing.T, rr *snapshot.Restic) {
 		t.Helper()
 		target := t.TempDir()
 		if err := rr.Restore(ctx, "latest", target); err != nil {
@@ -168,10 +164,29 @@ func TestResticThroughTheNode(t *testing.T) {
 			}
 		}
 	}
-	restore(r)
-	// On another machine: the folder alone, as a local repository.
-	local := &snapshot.Restic{Binary: bin, Repo: folder, Env: base, Secrets: []string{pw}}
-	restore(local)
+	// What only reads the repository runs side by side, as restic allows:
+	// each restic opens it with a key derivation of half a second or so.
+	t.Run("read", func(t *testing.T) {
+		t.Run("snapshots", func(t *testing.T) {
+			t.Parallel()
+			snaps, err := r.Snapshots(ctx, nil)
+			if err != nil || len(snaps) == 0 {
+				t.Fatalf("snapshots: %v %v", snaps, err)
+			}
+		})
+		t.Run("restore through the node", func(t *testing.T) {
+			t.Parallel()
+			restore(t, r)
+		})
+		// On another machine: the folder alone, as a local repository.
+		t.Run("restore from the folder", func(t *testing.T) {
+			t.Parallel()
+			restore(t, &snapshot.Restic{Binary: bin, Repo: folder, Env: base, Secrets: []string{pw}})
+		})
+	})
+	if t.Failed() {
+		return
+	}
 
 	if info, err := svc.BackupInfo(ctx, id, folder); err != nil || !info.Repo || info.Size < int64(len(big)) {
 		t.Fatalf("info: %+v %v", info, err)

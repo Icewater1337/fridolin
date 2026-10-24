@@ -5,6 +5,12 @@
 import { h } from '../lib/dom.js';
 import { nextId } from './fields.js';
 
+/**
+ * How a tab came to be chosen: a click, a key, or tabs() itself at first.
+ * @typedef {'click' | 'key' | 'init'} TabSelectedBy
+ */
+
+/** @type {Record<string, (i: number, n: number) => number>} */
 const MOVES = {
   ArrowRight: (i, n) => (i + 1) % n,
   ArrowLeft: (i, n) => (i - 1 + n) % n,
@@ -19,6 +25,13 @@ const MOVES = {
  * selected and again on each change. by is 'click', 'key' or 'init', so a
  * panel can focus its input when the tab was clicked, but not take the
  * focus from a tab being chosen with the keyboard.
+ * @template {string} K
+ * @param {object} options
+ * @param {string} options.label
+ * @param {readonly (readonly [K, string])[]} options.items
+ * @param {K} [options.selected]
+ * @param {(key: K, panel: HTMLDivElement, how: {by: TabSelectedBy}) => void} options.onSelect
+ * @returns {{list: HTMLDivElement, panel: HTMLDivElement, select: (key: K, by?: TabSelectedBy) => void}}
  */
 export function tabs({ label, items, selected = items[0][0], onSelect }) {
   const id = nextId('tabs');
@@ -37,8 +50,13 @@ export function tabs({ label, items, selected = items[0][0], onSelect }) {
     return b;
   });
   const list = h('div.tabs', { role: 'tablist', 'aria-label': label }, buttons);
+  /** @type {K | null} */
   let current = null;
 
+  /**
+   * @param {K} key
+   * @param {TabSelectedBy} [by]
+   */
   function select(key, by = 'click') {
     if (key === current) return;
     current = key;

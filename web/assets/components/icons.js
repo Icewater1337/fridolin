@@ -1,5 +1,7 @@
 // Line icons (24×24, stroked with currentColor), built as SVG elements.
 
+// Each icon is its paths: a path's d, or {d, fill} for one filled in.
+/** @type {Record<string, (string | {d: string, fill?: boolean})[]>} */
 const ICONS = {
   overview: ['M3 10.5 12 3l9 7.5', 'M5 9v11h5v-6h4v6h5V9'],
   activity: ['M22 12h-4l-3 9L9 3l-3 9H2'],
@@ -54,6 +56,13 @@ const ICONS = {
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 
+/**
+ * The icon called name (info for a name it does not know), with cls as
+ * more classes.
+ * @param {string} name
+ * @param {string} [cls]
+ * @returns {SVGSVGElement}
+ */
 export function icon(name, cls = '') {
   const svg = document.createElementNS(SVGNS, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');

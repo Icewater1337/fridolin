@@ -25,9 +25,10 @@ func promptBlock(prompt, tag string) string {
 // chat history ends before it. Messages that came in while it waited in
 // the queue are not in its history either; they have runs of their own.
 func TestPromptShowsTheMessageOnce(t *testing.T) {
+	t.Parallel()
 	mgr, d, home := queueTestManager(t, 300, "")
 	promptLog := filepath.Join(home, "prompts.log")
-	t.Setenv("FRIDOLIN_FAKE_PROMPT_LOG", promptLog)
+	setenv(t, "FRIDOLIN_FAKE_PROMPT_LOG", promptLog)
 	for _, text := range []string{"MSG-ONE", "MSG-TWO", "MSG-THREE"} {
 		if _, _, _, err := mgr.Submit(dm(text)); err != nil {
 			t.Fatal(err)
@@ -82,6 +83,7 @@ func TestPromptShowsTheMessageOnce(t *testing.T) {
 // The prompt says what kind of chat the run is in, which a JID does not
 // tell the model, and when the new message did not come from that chat.
 func TestPromptSaysWhatChatItIs(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		m        brain.Inbound

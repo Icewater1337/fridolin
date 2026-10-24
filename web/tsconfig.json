@@ -1,0 +1,32 @@
+// TypeScript's checker on the dashboard, with nothing built: the modules
+// stay the plain ES modules the bridge serves, and their types come from
+// JSDoc (@param, @typedef, @import) and the declarations in types/, which
+// are never served. `make typecheck-web` runs it with the TypeScript the
+// Makefile pins, through npx; test/tsconfig.json checks the tests.
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "es2023",
+    "module": "esnext",
+    // Relative imports with their .js, as the browser loads them.
+    "moduleResolution": "bundler",
+    "lib": ["es2023", "dom", "dom.iterable"],
+    // The browser's globals only: node's are the tests' (test/tsconfig.json).
+    "types": [],
+    "skipLibCheck": true,
+
+    // Strictness: all of "strict" (useUnknownInCatchVariables: a caught
+    // value is unknown, which lib/errors.js and errorStatus() in
+    // app/api.js narrow), and three checks beyond it. Candidates for
+    // later: noUncheckedIndexedAccess (85 errors today) and
+    // exactOptionalPropertyTypes (17, nearly all an option passed on as
+    // undefined, so not worth it yet).
+    "strict": true,
+    "noImplicitReturns": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["assets/**/*.js", "types/**/*.d.ts"]
+}

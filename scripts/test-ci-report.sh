@@ -260,6 +260,25 @@ check "many: two issues of their own" test "$(grep -c '^issue create --repo o/r 
 check "many: the rest in one more" grep -q '^issue create --repo o/r --title CI on main: more failures than one run reports ' "$FAKE/calls"
 check "many: which names it" body_has 3 "CI on main: TestC failing"
 
+# ── another workflow's report: its own titles and label ──
+setup nightly
+jobs "20:failure:go-macos-full (1/2)"
+log 20 <<EOF
+--- FAIL: TestA (0.00s)
+    a_test.go:1: boom
+FAIL	$mod/internal/x	0.1s
+EOF
+REPORT_NAME="macOS nightly" REPORT_LABEL=ci-macos-nightly REPORT_WORKFLOW=.github/workflows/macos-full.yml run
+check "nightly: the script succeeds" succeeded
+check "nightly: only its own label's issues are read" grep -q '^issue list --repo o/r --label ci-macos-nightly ' "$FAKE/calls"
+check "nightly: the issue has its title and label" grep -q '^issue create --repo o/r --title macOS nightly: TestA failing --label ci-macos-nightly ' "$FAKE/calls"
+check "nightly: the body names the test" body_has 1 "**TestA** in \`$mod/internal/x\`"
+check "nightly: and the workflow" body_has 1 'report job of `.github/workflows/macos-full.yml`'
+setup nightly-bad
+jobs "20:success:go-macos-full (1/2)"
+REPORT_NAME='x`y' run
+check "nightly: a name with a backtick is refused" grep -q 'exit status 2' "$FAKE/out"
+
 # ── the report job waits for every other job of ci.yml ──
 # A job left out of its needs can still be running when the report reads
 # the run, and its failure is never reported.

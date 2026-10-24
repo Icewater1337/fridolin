@@ -24,11 +24,13 @@ import (
 	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/audit"
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/intent"
+	"github.com/Icewater1337/fridolin/internal/lease"
 	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/mcp"
@@ -104,6 +106,16 @@ type App struct {
 	started time.Time
 	// restart is the optional embedding owner callback.
 	restart func()
+	// env is the environment the bridge reads and hands its programs
+	// (Options.Env).
+	env Environment
+	// cliVersions caches the versions of the agent CLIs the bridge found
+	// (claudeInfo).
+	cliVersions claudecli.Prober
+	// waits are how long the bridge waits for what may not come, and hooks
+	// what tests watch (Options.waits, Options.hooks).
+	waits waits
+	hooks testHooks
 
 	// listen is the address the HTTP server binds, "" when it is off;
 	// runs reach the brain API there with a token from runTokens.
@@ -189,6 +201,17 @@ type Options struct {
 	// LeaseRetry is the first wait before a lease renewal that failed on
 	// the store is tried again (default 30 s; tests shorten it).
 	LeaseRetry time.Duration
+	// LeaseClock is the lease's clock; nil is the system's. Tests move it
+	// past the staleness window instead of waiting it out.
+	LeaseClock lease.Clock
+	// Env is the environment the bridge reads while it runs and hands, in
+	// part, to the programs it starts; nil is the process's own. The home
+	// folder comes from the config store (Boot.Home), not from Env.
+	Env Environment
+	// waits shorten the bridge's waits in tests (nil: defaultWaits), and
+	// hooks let them watch it; the binary sets neither.
+	waits *waits
+	hooks testHooks
 }
 
 // New creates and wires up all components. It holds the data
@@ -199,6 +222,7 @@ func New(opts Options) (_ *App, err error) {
 		return nil, fmt.Errorf("application configuration is required")
 	}
 	cfg := RuntimeConfig(cfgs)
+	w := waitsOr(opts.waits)
 	// Before the lock, which is a file in the data dir.
 	if err := cfgs.Boot().EnsureDirs(); err != nil {
 		return nil, err
@@ -220,7 +244,7 @@ func New(opts Options) (_ *App, err error) {
 	otp.Sweep(filepath.Join(cfg.DataDir, "otp"), time.Now())
 	// With the lock held no other bridge runs here, so any run the last one
 	// recorded that is still going was left behind by a crash.
-	reapOrphanedRuns(cfg.DataDir)
+	reapOrphanedRuns(cfg.DataDir, w.reapGrace)
 	// What older versions left in the media folder goes aside before any
 	// brain has an inbox there, one named like it would read it (see
 	// retireLegacyMedia). Here, with the lock held, and not wherever the
@@ -258,8 +282,11 @@ func New(opts Options) (_ *App, err error) {
 		activity: activity.New(500),
 		started:  time.Now(),
 		restart:  opts.Restart,
+		env:      envOr(opts.Env),
+		waits:    w,
+		hooks:    opts.hooks,
 		core: coreRuntime{tailnetFactory: opts.Tailnet, tailnetAuthKey: opts.TailnetAuthKey,
-			leaseStore: opts.LeaseStore, leaseSettle: opts.LeaseSettle, leaseRetry: opts.LeaseRetry},
+			leaseStore: opts.LeaseStore, leaseSettle: opts.LeaseSettle, leaseRetry: opts.LeaseRetry, leaseClock: opts.LeaseClock},
 		b2: loadB2Usage(cfgs.Boot()),
 	}
 	if st, ok := opts.LeaseStore.(interface{ SetUsage(*cloud.Usage, string) }); ok {
@@ -303,7 +330,7 @@ func New(opts Options) (_ *App, err error) {
 		b.logger = slog.New(logx.Fanout(sink, logx.NewTextHandler(b.logs, nil)))
 	}
 
-	mgr, err := NewBrainManager(cfg)
+	mgr, err := newBrainManager(cfg, b.env, b.waits)
 	if err != nil {
 		return nil, fmt.Errorf("creating brain manager: %w", err)
 	}
@@ -313,7 +340,6 @@ func New(opts Options) (_ *App, err error) {
 		}
 	}()
 	b.brainMgr = mgr
-	mgr.profiler.home = cfgs.Boot().Home
 	mgr.profiler.SetConfigFile(cfgs.Path())
 	for _, is := range mgr.Issues() {
 		log.Printf("brain %s (%s): %s — %s", is.ID, is.Path, is.Kind, is.Detail)
@@ -391,21 +417,23 @@ func New(opts Options) (_ *App, err error) {
 	}
 	// A refused scheduled backup goes to the brain's chat, like Plaud's
 	// expired-login notice: the owner may not open the dashboard for weeks.
-	b.vault = newVaultService(cfgs, opts.Container, b.logger, b.vaultBrains, b.openMedia)
+	b.vault = newVaultService(cfgs, b.env, opts.Container, b.logger, b.vaultBrains, b.openMedia)
 	b.housekeeping = newHousekeeping(b, opts.Container)
 	b.vault.usage = b.b2
+	b.vault.tick, b.vault.backends = b.waits.vaultTick, opts.hooks.vaultBackends
 	b.targets = newTargetService(cfgs, b.vault, b.nodes, opts.Container, b.logger)
-	b.github = newGitHubService(cfgs, opts.Container, b.logger)
+	b.github = newGitHubService(cfgs, b.env, opts.Container, b.logger)
 	b.vault.targets = b.targets
 	b.google = google.New(googleOptionsFor(cfgs))
-	b.backup = newProjectedBackup(cfgs, b.brainMgr, b.notifyBackup, b.vault.driveSuperseded, b.google)
-	b.plaud = NewPlaudManager(cfgs, b.brainMgr, b.submitHandOff, b.submitAsk, b.wa.SendMessage, func() string {
+	b.backup = newProjectedBackup(cfgs, b.env, b.brainMgr, b.notifyBackup, b.vault.driveSuperseded, b.google)
+	b.plaud = NewPlaudManager(cfgs, b.env, b.brainMgr, b.submitHandOff, b.submitAsk, b.wa.SendMessage, func() string {
 		if d := b.site.Settings().Domain; d != "" {
 			return "https://" + d
 		}
 		return ""
 	}, newPlaudFleet(b.nodes, b.locked))
-	b.site = NewSiteManager(sitesvc.SiteOptions{DataDir: cfg.DataDir, GoogleClient: b.google.ClientPath, Builder: b.siteBuilderHooks(), Container: opts.Container})
+	b.site = NewSiteManager(sitesvc.SiteOptions{DataDir: cfg.DataDir, GoogleClient: b.google.ClientPath, Builder: b.siteBuilderHooks(), Container: opts.Container,
+		Host: siteHostFor(b.env, func() string { return cfgs.Boot().Home })})
 	// What builder brains say in the Build page's chats goes there, not to WhatsApp.
 	b.wa = siteChatMessenger{Messenger: b.wa, appendMessage: b.site.AppendBuildMessage}
 	pace := outboundmsg.OutboxPace

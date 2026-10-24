@@ -5,7 +5,7 @@
 // which checks it, and the page shows the bridge's answer when it refuses
 // one.
 
-import { post } from '../app/api.js';
+import { post, errorStatus } from '../app/api.js';
 import { store, loadGroups, rememberName } from '../app/store.js';
 import { brainsResource, configResource, ignoredResource } from '../app/resources.js';
 import { h, mount, paint, reconcile, syncOptions } from '../lib/dom.js';
@@ -19,12 +19,28 @@ import { confirmDialog, openDialog } from '../components/dialog.js';
 import { field, listEditor, select, textInput } from '../components/fields.js';
 import { pill, badge, timeAgo, mono, empty, pageHeader, spinner } from '../components/common.js';
 import { chatName } from '../components/chat.js';
+import { errorMessage } from '../lib/errors.js';
 
-export default {
+/** @import { PageModule } from '../app/page.js' */
+/** @import { Brain, ConfigFile, ConfigResponse, IgnoredChat, WhatsAppGroup } from '../../types/api.js' */
+
+/**
+ * A row of the waiting chats, with the brains a group can go to.
+ * @typedef {{c: IgnoredChat, options: [string, string][] | null}} WaitingItem
+ */
+/**
+ * A row of the groups table: owner is the brain whose routing names it, '' for none.
+ * @typedef {{g: WhatsAppGroup, owner: string, options: [string, string][]}} GroupItem
+ */
+
+export default /** @satisfies {PageModule} */ ({
   title: 'Chats',
   render(root, ctx) {
+    /** @type {Brain[] | null} */
     let brains = null;
+    /** @type {IgnoredChat[] | null} */
     let ignored = null;
+    /** @type {ConfigResponse | null} */
     let cfg = null;
 
     const waitingBox = h('div', spinner());
@@ -80,10 +96,12 @@ export default {
 
     // A group that names no brain goes to the fallback brain, which is
     // the default brain or else the first: the option names it either way.
+    /** @type {(withDefault: boolean) => [string, string][]} */
     const brainOptions = (withDefault) => [
-      ...(withDefault ? [['', defaultBrainOption(brains)]] : []),
-      ...(brains || []).filter((b) => b.id).map((b) => [b.id, brainLabel(b)]),
+      ...(withDefault ? [/** @type {[string, string]} */ (['', defaultBrainOption(brains)])] : []),
+      ...(brains || []).filter((b) => b.id).map((b) => /** @type {[string, string]} */ ([b.id, brainLabel(b)])),
     ];
+    /** @param {string} jid */
     const explicitOwner = (jid) => {
       const b = (brains || []).find((x) => x.manifest && x.manifest.routing && (x.manifest.routing.groups || []).includes(jid));
       return b ? b.id : '';
@@ -125,6 +143,7 @@ export default {
     }
 
     // A row keeps its brain choice while it refreshes.
+    /** @param {WaitingItem} item */
     function waitingRow(item) {
       let { c } = item;
       const isGroup = c.kind === 'group';
@@ -135,7 +154,7 @@ export default {
       const allow = btn(isGroup ? 'Allow' : 'Allow this number', {
         kind: 'primary', small: true, icon: 'check',
         onClick: async () => {
-          const body = isGroup ? { jid: c.jid, kind: 'group', brain: sel.value } : { jid: c.jid, kind: 'dm', number: c.sender };
+          const body = isGroup ? { jid: c.jid, kind: 'group', brain: sel ? sel.value : '' } : { jid: c.jid, kind: 'dm', number: c.sender };
           await post('/api/chats/allow', body);
           toast(isGroup ? `Allowed ${title()}` : `Allowed ${phone(c.sender) || title()}`, 'ok');
           if (isGroup) await loadGroups(true);
@@ -154,17 +173,18 @@ export default {
         h('div.waiting-icon', icon(isGroup ? 'users' : 'user')),
         h('div.waiting-main', head, meta, h('div.small', mono(c.jid))),
         h('div.waiting-actions', sel, allow, dismiss));
-      row.update = (next) => {
+      /** @param {WaitingItem} next */
+      const update = (next) => {
         c = next.c;
         mount(head, h('strong', title()), badge(isGroup ? 'group' : 'direct message', 'neutral'));
         mount(meta,
           isGroup && c.push_name ? `Last from ${c.push_name} · ` : '',
           !isGroup && c.push_name && c.sender ? `${phone(c.sender)} · ` : '',
           plural(c.count, 'message'), ' · last ', timeAgo(c.last_seen));
-        if (sel) syncOptions(sel, next.options, '');
+        if (sel && next.options) syncOptions(sel, next.options, '');
       };
-      row.update(item);
-      return row;
+      update(item);
+      return Object.assign(row, { update });
     }
 
     // ── groups ──
@@ -187,7 +207,9 @@ export default {
 
     // A row keeps the brain picked in it while it refreshes, until the
     // group's brain changes (here or elsewhere), which it then shows.
+    /** @param {GroupItem} item */
     function groupRow(item) {
+      /** @type {GroupItem | null} */
       let cur = null;
       const sel = select([], '', { 'aria-label': 'Brain for this group', class: 'small-select' });
       const nameCell = h('td');
@@ -199,6 +221,7 @@ export default {
         small: true,
         title: 'Send this group to the chosen brain',
         onClick: async () => {
+          if (!cur) return;
           const { g, owner } = cur;
           if (!sel.value || sel.value === owner) { toast('Pick a different brain first', 'info'); return; }
           await post('/api/chats/allow', { jid: g.jid, kind: 'group', brain: sel.value });
@@ -210,6 +233,7 @@ export default {
       const allow = btn('Allow', {
         small: true, kind: 'primary', icon: 'check',
         onClick: async () => {
+          if (!cur) return;
           const { g } = cur;
           await post('/api/chats/allow', { jid: g.jid, kind: 'group', brain: sel.value });
           toast(`Allowed ${g.name || 'the group'}`, 'ok');
@@ -218,7 +242,8 @@ export default {
         },
       });
       const tr = h('tr', nameCell, peopleCell, statusCell, h('td', note, sel), actionCell);
-      tr.update = (next) => {
+      /** @param {GroupItem} next */
+      const update = (next) => {
         const prev = cur;
         cur = next;
         const { g, owner } = next;
@@ -231,15 +256,15 @@ export default {
         if (!prev || picked === prev.owner || owner !== prev.owner) sel.value = next.options.some(([v]) => v === owner) ? owner : sel.value;
         mount(actionCell, g.allowed ? route : allow);
       };
-      tr.update(item);
-      return tr;
+      update(item);
+      return Object.assign(tr, { update });
     }
 
     // ── allow lists (config) ──
     function paintLists() {
       if (!cfg || !brains) return;
-      const file = cfg.config || {};
-      const eff = cfg.effective || {};
+      const file = /** @type {Partial<ConfigFile>} */ (cfg.config || {});
+      const eff = /** @type {Partial<ConfigFile>} */ (cfg.effective || {});
       const numbers = file.allowed_numbers || [];
       const groups = file.allowed_groups || [];
       const members = file.group_members || {};
@@ -279,6 +304,11 @@ export default {
 
     // Whose messages in a group reach its brain, as the bridge decides
     // (groupSenderAllowed): its entry, or without one the allowed numbers.
+    /**
+     * @param {string[] | null} entry the group's group_members entry
+     * @param {number} numbers how many numbers are allowed
+     * @param {boolean} anyDM
+     */
     function heardSummary(entry, numbers, anyDM) {
       if (entry === null) {
         if (!numbers) return anyDM ? 'Heard: every member, since anyone may message the bridge' : 'Heard: nobody, until you allow a number';
@@ -291,6 +321,11 @@ export default {
 
     // The editor checks each number as the bridge does (validateGroupMembers),
     // and the bridge checks the list again when it saves.
+    /**
+     * @param {string} g the group's JID
+     * @param {string} name
+     * @param {string[] | null} entry
+     */
     function editMembers(g, name, entry) {
       const everyone = entry !== null && entry.length === 1 && entry[0] === '*';
       const mode = entry === null ? '' : (everyone ? '*' : 'list');
@@ -301,7 +336,7 @@ export default {
       ], mode, { 'aria-label': 'Who is heard' });
       const modeHelp = h('div.help');
       const list = listEditor({
-        values: mode === 'list' ? entry : [],
+        values: mode === 'list' && entry ? entry : [],
         placeholder: '15551234567',
         addLabel: 'Add number',
         validate: (v) => {
@@ -318,7 +353,7 @@ export default {
           '': 'As without an entry: the allowed numbers on this page are heard, and while that list is empty and “Let anyone message” is on, anyone.',
           '*': 'Everyone in the group, also whoever its admins add later, can start a run with every permission the brain has.',
           list: 'Only these members can start a run or stop one; what the others write is not read, not even into the brain’s history.',
-        }[modeSel.value];
+        }[modeSel.value] || '';
       };
       modeSel.addEventListener('change', () => { err.hidden = true; sync(); });
       list.addEventListener('input', () => { err.hidden = true; });
@@ -349,9 +384,9 @@ export default {
               try {
                 await post('/api/chats/members', { jid: g, members });
               } catch (ex) {
-                if (ex.status !== 400 && ex.status !== 422) throw ex;
+                if (errorStatus(ex) !== 400 && errorStatus(ex) !== 422) throw ex;
                 err.hidden = false;
-                err.textContent = ex.message;
+                err.textContent = errorMessage(ex);
                 return false;
               }
               toast(`Saved who is heard in ${name || 'the group'}`, 'ok');
@@ -363,6 +398,12 @@ export default {
       });
     }
 
+    /**
+     * @param {string} title
+     * @param {string} message
+     * @param {Record<string, string>} body what /api/chats/revoke takes
+     * @param {string} done the toast once it is removed
+     */
     function removeBtn(title, message, body, done) {
       return btn('', {
         kind: 'ghost', small: true, icon: 'trash', title: 'Remove',
@@ -373,8 +414,8 @@ export default {
             toast(done, 'ok');
           } catch (ex) {
             // Gone already, e.g. removed in another tab: the refresh shows it.
-            if (ex.status !== 404) throw ex;
-            toast(ex.message, 'info');
+            if (errorStatus(ex) !== 404) throw ex;
+            toast(errorMessage(ex), 'info');
           }
           await Promise.all([configResource.refresh(), loadGroups(true)]);
         },
@@ -382,6 +423,7 @@ export default {
     }
 
     // The bridge checks what is typed; a refusal shows under the box.
+    /** @param {{placeholder: string, label: string, help: string, add: (value: string) => Promise<unknown>}} options */
     function addForm({ placeholder, label, help, add }) {
       const input = textInput({ placeholder, class: 'mono', 'aria-label': label });
       const err = h('div.form-error.small', { hidden: true });
@@ -395,9 +437,9 @@ export default {
           try {
             await add(input.value);
           } catch (ex) {
-            if (ex.status !== 400) throw ex;
+            if (errorStatus(ex) !== 400) throw ex;
             err.hidden = false;
-            err.textContent = ex.message;
+            err.textContent = errorMessage(ex);
             input.focus();
             return;
           }
@@ -409,4 +451,4 @@ export default {
       return form;
     }
   },
-};
+});

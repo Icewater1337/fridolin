@@ -42,6 +42,7 @@ func (tb *testBridge) script(method, path, body, token string) *httptest.Respons
 // The contract of /health, /send and /ingest (docs/API.md): every status
 // code and the shape of every body. Errors are JSON {"error": ...}.
 func TestScriptAPIContract(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "personal", Name: "Personal", Routing: manifest.Routing{HandlesDMs: true}})
 	media := tb.cfgs.Get().MediaDir
@@ -146,6 +147,7 @@ func (f failingMessenger) SendChunked(context.Context, string, string) error { r
 // A send that WhatsApp refused gets a status that says whose problem it is,
 // and what did go out before a failure is in the history.
 func TestSendFailureStatus(t *testing.T) {
+	t.Parallel()
 	const dm = "15551234567@s.whatsapp.net"
 	cases := []struct {
 		name string

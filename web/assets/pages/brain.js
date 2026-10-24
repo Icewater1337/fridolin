@@ -1,7 +1,7 @@
 // One brain: live run and queue, settings (brain.json), on-disk changes
 // waiting for approval, recent messages, and removal.
 
-import { post, put, del, qs } from '../app/api.js';
+import { post, put, del, qs, errorStatus } from '../app/api.js';
 import { store } from '../app/store.js';
 import { brainsResource, configResource, resource } from '../app/resources.js';
 import { routingEditor } from '../components/routing-editor.js';
@@ -25,15 +25,38 @@ import { saveBar } from '../components/save-bar.js';
 import { liveForm } from '../components/live-form.js';
 import { grantsEditor } from '../components/grants-editor.js';
 import { skillsCard } from '../components/skills-card.js';
+import { errorMessage } from '../lib/errors.js';
 
-export default {
+/** @import { PageModule } from '../app/page.js' */
+/** @import { ActivityEntry, Brain, BrainIssue, BrainManifest, BrainRuntime, ConfigFile, ConfigResponse, Intent, IntentSchedule } from '../../types/api.js' */
+
+/**
+ * Another brain as the settings form needs it: its routing, for the
+ * groups it holds, and whether it is the core brain.
+ * @typedef {Pick<Brain, 'id' | 'name'> & {manifest: Pick<BrainManifest, 'routing' | 'role'>}} OtherBrain
+ */
+/**
+ * What the settings form is built from: the approved manifest it edits,
+ * and what it needs to explain it.
+ * @typedef {object} SettingsData
+ * @property {BrainManifest} manifest
+ * @property {boolean} drift
+ * @property {{brain_model: string, brain_effort: string, disallowed_tools: string[]}} eff the inherited settings
+ * @property {string[]} allowedGroups
+ * @property {OtherBrain[]} others
+ */
+
+export default /** @satisfies {PageModule} */ ({
   title: (params) => `Brain ${params.id}`,
   render(root, ctx) {
     const id = ctx.params.id;
     // The brain, followed on its own; null when there is none.
     const one = resource(`/api/brains/${encodeURIComponent(id)}`, { missing: null });
+    /** @type {Brain | null | undefined} */
     let brain; // undefined until it is in
+    /** @type {Brain[] | null} */
     let brains = null; // the /api/brains list, once it is in: the other brains' routing
+    /** @type {ConfigResponse | null} */
     let cfg = null;
 
     const head = h('div');
@@ -100,14 +123,15 @@ export default {
       ctx.setTitle(brain.name || brain.id);
       paint(head, { name: brain.name, id: brain.id, status: brain.status, path: brain.path }, renderHead);
       paint(issuesBox, (brain.issues || []).filter((is) => is.kind !== 'drift'), renderIssues);
-      paintDrift();
+      paintDrift(brain);
       paintLive();
-      paintForm();
+      paintForm(brain);
       paint(intentsBox, brain.intents || [], renderIntents);
       paint(dangerBox, 'shown', renderDanger);
     }
 
     // ── recent messages ──
+    /** @type {ActivityEntry[] | null} */
     let items = null;
     const paintActivity = () => {
       if (!items) return;
@@ -128,6 +152,7 @@ export default {
       paintLive();
     });
 
+    /** @param {Pick<Brain, 'name' | 'id' | 'status' | 'path'>} b */
     function renderHead(b) {
       return h('header.page-header',
         h('div.page-heading',
@@ -139,18 +164,20 @@ export default {
           h('div.path-line', icon('folder'), mono(b.path, { copy: true }))));
     }
 
+    /** @param {BrainIssue[]} issues */
     function renderIssues(issues) {
       return issues.map((is) => callout('bad', issueLabel(is.kind), is.detail));
     }
 
     // ── on-disk changes ──
-    function paintDrift() {
-      const b = brain;
+    /** @param {Brain} b */
+    function paintDrift(b) {
       const drift = (b.issues || []).find((is) => is.kind === 'drift');
       if (b.status !== 'drift' && !drift) { paint(driftBox, null, () => null); return; }
       paint(driftBox, { manifest: b.manifest, disk: b.disk_manifest || null, detail: drift ? drift.detail : '', path: b.path }, renderDrift);
     }
 
+    /** @param {{manifest: BrainManifest | null, disk: BrainManifest | null, detail: string, path: string}} drift */
     function renderDrift({ manifest, disk, detail, path }) {
       if (!disk) {
         return callout('warn', 'brain.json on disk cannot be read', detail, h('div.muted.small', 'The bridge keeps running the approved version. Fix the file, or save the settings below to overwrite it.'));
@@ -171,8 +198,8 @@ export default {
           try {
             await post(`/api/brains/${encodeURIComponent(id)}/approve`, { manifest: disk });
           } catch (e) {
-            if (e.status !== 409) throw e;
-            toast(e.message, 'warn');
+            if (errorStatus(e) !== 409) throw e;
+            toast(errorMessage(e), 'warn');
             await refresh();
             return;
           }
@@ -203,10 +230,11 @@ export default {
       if (!brain) return;
       const rt = brain.runtime || null;
       // The chats it names, so their labels follow the names learnt.
-      const chats = rt ? [rt.running && rt.running.chat, ...(rt.queue || []).map((q) => q.chat), rt.last && rt.last.chat].filter(Boolean) : [];
+      const chats = rt ? [rt.running && rt.running.chat, ...(rt.queue || []).map((q) => q.chat), rt.last && rt.last.chat].filter(/** @returns {c is string} */ (c) => Boolean(c)) : [];
       paint(liveBox, { rt, status: brain.status, names: chats.map(chatName) }, renderLive);
     }
 
+    /** @param {{rt: BrainRuntime | null, status: Brain['status']}} live */
     function renderLive({ rt, status }) {
       if (!rt) {
         return h('div.card', h('p.muted', status === 'ok' ? 'This brain is not running yet.' : 'This brain is not running until the problem above is fixed.'));
@@ -214,7 +242,7 @@ export default {
       const run = rt.running;
       const queue = rt.queue || [];
       const last = rt.last;
-      const stop = (clear) => btn(clear ? 'Stop & clear queue' : 'Stop', {
+      const stop = (/** @type {boolean} */ clear) => btn(clear ? 'Stop & clear queue' : 'Stop', {
         kind: clear ? 'danger' : '', icon: 'stop', small: true,
         onClick: async () => {
           if (clear && queue.length) {
@@ -252,25 +280,30 @@ export default {
     // ── settings form ──
     // What the form shows: the approved manifest it edits, and what it needs
     // to explain it (the inherited settings, the other brains' routing).
-    function paintForm() {
+    /** @param {Brain} b */
+    function paintForm(b) {
       if (!brains) return; // it says which groups the other brains have
-      const m = brain.manifest;
+      const m = b.manifest;
       if (!m) {
         if (settings.dirty()) settings.discard(); // nothing left on the page to save
         paint(formBox, 'none', () => h('div.card', h('p.muted', 'This brain has no approved settings to edit.')));
         return;
       }
       paint(formBox, 'form', () => settings.el);
-      const eff = (cfg && cfg.effective) || {};
+      const eff = /** @type {Partial<ConfigFile>} */ ((cfg && cfg.effective) || {});
       settings.set({
         manifest: m,
-        drift: brain.status === 'drift',
+        drift: b.status === 'drift',
         eff: { brain_model: eff.brain_model || '', brain_effort: eff.brain_effort || '', disallowed_tools: eff.disallowed_tools || [] },
         allowedGroups: (cfg && cfg.config && cfg.config.allowed_groups) || eff.allowed_groups || [],
-        others: brains.filter((b) => b.id && b.id !== id && b.manifest).map((b) => ({ id: b.id, name: b.name, manifest: { routing: b.manifest.routing, role: b.manifest.role || '' } })),
+        others: brains.flatMap((o) => (o.id && o.id !== id && o.manifest ? [{ id: o.id, name: o.name, manifest: { routing: o.manifest.routing, role: o.manifest.role || '' } }] : [])),
       });
     }
 
+    /**
+     * @param {SettingsData} data
+     * @param {() => void} changed
+     */
     function buildForm({ manifest: m, drift, eff, allowedGroups, others }, changed) {
       const nameIn = textInput({ value: m.name || '', spellcheck: 'true' });
       const routing = routingEditor({ routing: m.routing || {}, selfId: id, brains: others, allowedGroups, onChange: changed, signal: ctx.signal });
@@ -278,7 +311,7 @@ export default {
       const observeSel = select(OBSERVE, m.observe || 'history', { name: 'observe' });
       const override = Array.isArray(m.disallowed_tools);
       const globalTools = eff.disallowed_tools.length ? eff.disallowed_tools.join(', ') : 'none';
-      const toolsIn = textInput({ value: override ? m.disallowed_tools.join(', ') : '', class: 'mono', placeholder: 'e.g. WebFetch, Bash', disabled: !override });
+      const toolsIn = textInput({ value: m.disallowed_tools ? m.disallowed_tools.join(', ') : '', class: 'mono', placeholder: 'e.g. WebFetch, Bash', disabled: !override });
       const toolsSw = toggle({
         checked: override,
         label: 'Override global tool restrictions',
@@ -367,7 +400,7 @@ export default {
       const stops = 'The bridge stops sending messages to this brain. ';
       if (!brains) return h('p', stops, 'Its chats go to the fallback brain, if another brain is left.');
       const { brain: next, dms, copy } = takeover(brains, id);
-      if (copy) return h('p', stops, 'Another folder with this id stays in the list, ', mono(next.path), ': it takes this brain’s place, for the chats its own brain.json names.');
+      if (copy && next) return h('p', stops, 'Another folder with this id stays in the list, ', mono(next.path), ': it takes this brain’s place, for the chats its own brain.json names.');
       if (!next) return h('p', stops, 'No other brain takes its chats over, so they go unanswered until you add one.');
       const name = h('strong', brainLabel(next));
       return [
@@ -381,6 +414,7 @@ export default {
     // ── standing intents ──
     // What the brain was asked to remember to do, which the bridge fires:
     // at a time, or on a message that mentions a keyword (docs/BRAINS.md).
+    /** @param {Intent[]} list */
     function renderIntents(list) {
       if (!list.length) {
         return h('div.card', h('p.muted', 'None. When you ask this brain in your direct chat to remind you of something, or to tell you when something comes up, it sets one here.'));
@@ -404,8 +438,9 @@ export default {
         })))));
     }
 
+    /** @param {IntentSchedule} s */
     function scheduleLabel(s) {
-      if (s.kind === 'once') return `once, ${new Date(s.at).toLocaleString()}`;
+      if (s.kind === 'once') return `once, ${new Date(s.at || '').toLocaleString()}`;
       if (s.kind === 'daily') return `every day at ${s.time}`;
       return `every ${s.day} at ${s.time}`;
     }
@@ -435,4 +470,4 @@ export default {
           })));
     }
   },
-};
+});

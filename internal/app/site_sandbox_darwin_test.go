@@ -24,6 +24,8 @@ import (
 // declared programs run, and none reaches the bridge's own port. No node
 // needed: this is the profile, under the real sandbox-exec.
 func TestSiteSandboxEnforcesDeclarations(t *testing.T) {
+	// Serial: writes the site's folders under the process's HOME, which the
+	// site's sandbox profile is made for.
 	requireSandboxExec(t)
 	home := HomeDir()
 	data := filepath.Join(home, config.DataDirName)

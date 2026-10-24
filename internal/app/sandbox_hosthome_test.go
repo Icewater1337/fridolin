@@ -14,6 +14,7 @@ import (
 // with plaud.brain_access read-only but for tokens.json, and git's stored
 // credentials masked.
 func TestGoldenBwrapHostHome(t *testing.T) {
+	t.Parallel()
 	sb := config.SandboxConfig{CredentialsDir: "/Users/you/.secrets", AllowPaths: []string{"/Users/you/shared"}}
 	sp := bwrapProfiler(t, sb, map[string][]string{
 		"main":   {"/Users/you/Main"},
@@ -30,8 +31,10 @@ func TestGoldenBwrapHostHome(t *testing.T) {
 }
 
 func TestContainerHostHome(t *testing.T) {
+	// Serial: InContainer and ContainerHostHome read the process's
+	// environment.
 	t.Setenv(HostHomeVar, "/Users/you")
-	t.Setenv("HOME", "/Users/you")
+	setenv(t, "HOME", "/Users/you")
 	t.Setenv("FRIDOLIN_CONTAINER", "")
 	if got := ContainerHostHome(); got != "" {
 		t.Errorf("outside the container: %q", got)

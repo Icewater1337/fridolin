@@ -39,6 +39,7 @@ test('phoneDigits takes the numbers the bridge takes', async (t) => {
 
 test('GROUP_JID_RE takes what the bridge allows', async (t) => {
   // The same cases as TestAllowListEntries in dashboard_test.go.
+  /** @type {[string, boolean][]} */
   const cases = [
     [GROUP, true],
     ['15551234567-1400000000@g.us', true], // personal-data:ignore (an old-style group JID made of placeholders)

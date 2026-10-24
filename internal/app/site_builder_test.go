@@ -43,6 +43,7 @@ func newTestBuilderSite(t *testing.T) (*sitesvc.SiteManager, string) {
 }
 
 func TestWithArgsBeforePrint(t *testing.T) {
+	t.Parallel()
 	args := []string{"--output-format", "stream-json", "--mcp-config", "a.json", "-p"}
 	got := strings.Join(withArgsBeforePrint(args, []string{"--plugin-dir", "x", "--mcp-config", "b.json"}), " ")
 	if got != "--output-format stream-json --mcp-config a.json --plugin-dir x --mcp-config b.json -p" {
@@ -54,6 +55,7 @@ func TestWithArgsBeforePrint(t *testing.T) {
 }
 
 func TestBuilderHandlerNeedsTheBrainsToken(t *testing.T) {
+	t.Parallel()
 	m, _ := newTestBuilderSite(t)
 	b := &App{site: m}
 	h := b.builderHandler()
@@ -71,6 +73,7 @@ func TestBuilderHandlerNeedsTheBrainsToken(t *testing.T) {
 }
 
 func TestSiteMCPServer(t *testing.T) {
+	t.Parallel()
 	var gotAuth, gotBody string
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")

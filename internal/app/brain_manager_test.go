@@ -11,8 +11,9 @@ import (
 )
 
 func TestBrainManagerCommandKeepsDiagnosticsOutsideRuntime(t *testing.T) {
+	t.Parallel()
 	cfg := resolvedSettings(t, &config.File{})
-	mgr := newCommandBrainManager(cfg)
+	mgr := newCommandBrainManager(cfg, envOf(t), defaultWaits())
 	t.Cleanup(mgr.Stop)
 	sp := manifest.Spec{Dir: filepath.Join(t.TempDir(), "absent"), Entry: 3, Manifest: manifest.Manifest{ID: "missing", Routing: manifest.Routing{HandlesDMs: true}}}
 	drift := registry.Issue{ID: "changed", Kind: "drift", Detail: "approved values still run"}

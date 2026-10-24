@@ -18,6 +18,8 @@ type BrainManager struct {
 	applyMu  sync.Mutex
 	profiler *SandboxProfiler
 	hooks    *BrainHooks
+	// waits are how long its runs and its stop wait.
+	waits waits
 
 	// Diagnostics publish just after a successful runtime reload. Independent
 	// route and issue reads are not a transaction, but reading diagnostics
@@ -26,23 +28,31 @@ type BrainManager struct {
 	issues   []registry.Issue
 }
 
-func newCommandBrainManager(cfg *config.Settings) *BrainManager {
+// newCommandBrainManager builds the manager whose runs get their
+// environment from env and their home folder from cfg, and wait as w says.
+func newCommandBrainManager(cfg *config.Settings, env Environment, w waits) *BrainManager {
 	hooks := &BrainHooks{}
 	profiler := NewSandboxProfiler(nil, cfg)
 	return &BrainManager{
-		profiler: profiler, hooks: hooks,
+		profiler: profiler, hooks: hooks, waits: w,
 		Manager: brain.NewManager(brain.Options{
-			Runner: &commandRunner{sandbox: profiler, hooks: hooks},
+			Runner: &commandRunner{sandbox: profiler, hooks: hooks, env: env, home: cfg.Home, waits: w},
 			Sink:   brainHooksSink{hooks}, Input: commandBrainInputRules(hooks),
-			ViewerStart: startBrainViewer, ClaimMedia: claimBrainMedia,
-			ShutdownGrace: func() time.Duration { return shutdownGrace },
+			ViewerStart: brainViewerStart(env), ClaimMedia: claimBrainMedia,
+			ShutdownGrace: func() time.Duration { return w.shutdownGrace },
 		}),
 	}
 }
 
-// NewBrainManager builds the configured brains.
-func NewBrainManager(cfg *config.Settings) (*BrainManager, error) {
-	bm := newCommandBrainManager(cfg)
+// NewBrainManager builds the configured brains, whose runs read env (nil
+// is the process's own).
+func NewBrainManager(cfg *config.Settings, env Environment) (*BrainManager, error) {
+	return newBrainManager(cfg, env, defaultWaits())
+}
+
+// newBrainManager is NewBrainManager with the waits w.
+func newBrainManager(cfg *config.Settings, env Environment, w waits) (*BrainManager, error) {
+	bm := newCommandBrainManager(cfg, envOr(env), w)
 	if err := bm.Apply(cfg); err != nil {
 		return nil, err
 	}
@@ -72,7 +82,7 @@ func (bm *BrainManager) reload(specs []manifest.Spec, issues []registry.Issue, c
 }
 
 func (bm *BrainManager) reloadLocked(specs []manifest.Spec, issues []registry.Issue, cfg *config.Settings, ownPATH map[string][]string) error {
-	failures, err := bm.Manager.Apply(specs, brainGlobalsOf(cfg), brain.ApplyOptions{
+	failures, err := bm.Manager.Apply(specs, brainGlobalsOf(cfg, bm.waits.runTimeoutUnit), brain.ApplyOptions{
 		Held: HeldBrainRoutes(issues), OwnPATH: ownPATH,
 		SetDirs: func(dirs map[string][]string) { bm.profiler.Update(dirs, cfg) },
 	})

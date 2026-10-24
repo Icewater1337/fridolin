@@ -40,6 +40,7 @@ func bwrapProfiler(t *testing.T, sb config.SandboxConfig, workDirs map[string][]
 // brain's own places writable, the system and its run's token folder
 // read-only, and the masks where a bind would show what it must not see.
 func TestGoldenBwrapArgs(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		sb       config.SandboxConfig
@@ -84,6 +85,7 @@ func TestGoldenBwrapArgs(t *testing.T) {
 // namespaces, no bind of the data dir as a whole, and the other brains'
 // folders, the database and the config never bound.
 func TestBwrapArgsKeepTheDataDirOut(t *testing.T) {
+	t.Parallel()
 	sp := bwrapProfiler(t, config.SandboxConfig{}, map[string][]string{
 		"main": {"/data/brains-folders/main"}, "work": {"/data/brains-folders/work"},
 	}, nil)
@@ -112,6 +114,7 @@ func TestBwrapArgsKeepTheDataDirOut(t *testing.T) {
 // The command writes the brain's passwd and group before the run, with
 // the brain's own user and its state folder as home.
 func TestBwrapCommandWritesTheBrainsUser(t *testing.T) {
+	t.Parallel()
 	data := t.TempDir()
 	sp := bwrapProfiler(t, config.SandboxConfig{}, map[string][]string{"main": {filepath.Join(data, "brains-folders", "main")}}, nil)
 	sp.DataDir = data
@@ -148,6 +151,7 @@ func TestBwrapCommandWritesTheBrainsUser(t *testing.T) {
 // call is on the container's loopback. The memory indexes, the intents,
 // the vault's index and documents and the audit log stay out of sight.
 func TestBwrapRunReachesItsToolsAndNotTheirStores(t *testing.T) {
+	t.Parallel()
 	sp := bwrapProfiler(t, config.SandboxConfig{AllowPaths: []string{"/data"}}, map[string][]string{"main": {"/data/brains-folders/main"}}, map[string]string{
 		"/data/memory": "dir", "/data/intents": "dir", "/data/vault": "dir", "/data/audit": "dir", "/data/vault.db": "file",
 	})

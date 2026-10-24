@@ -5,6 +5,27 @@ import { h, append } from '../lib/dom.js';
 import { icon } from './icons.js';
 import { btn, runBusy } from './buttons.js';
 
+/** @import { Child } from '../lib/dom.js' */
+
+/**
+ * A dialog's button. Clicking it closes the dialog with value (label when
+ * value is undefined); one with onClick runs that instead, as openDialog
+ * says.
+ * @typedef {object} DialogAction
+ * @property {string} label
+ * @property {string} [kind]
+ * @property {string} [icon]
+ * @property {unknown} [value]
+ * @property {(dialog: HTMLDialogElement) => unknown} [onClick]
+ */
+
+/**
+ * What openDialog returns: a promise of what the dialog closed with, which
+ * close(v) closes it with from outside and setActions(list) gives new buttons.
+ * @typedef {Promise<unknown> & {close: (v?: unknown) => void, setActions: (list: DialogAction[]) => void}} DialogHandle
+ */
+
+/** @type {Set<(v: unknown) => void>} */
 const openDialogs = new Set();
 
 /** Closes every open dialog of the page (used when the page changes). */
@@ -21,13 +42,25 @@ export function closeAllDialogs() {
  * dismissible false gives it no close button and keeps Escape and a click
  * beside it from closing it. A dialog that outlivesPage is the app's, not
  * the page's: a page change leaves it open.
+ * @param {object} options
+ * @param {string} options.title
+ * @param {Child} [options.body]
+ * @param {DialogAction[]} [options.actions]
+ * @param {boolean} [options.wide]
+ * @param {boolean} [options.dismissible]
+ * @param {boolean} [options.outlivesPage]
+ * @returns {DialogHandle}
  */
 export function openDialog({ title, body, actions = [{ label: 'Close', value: null }], wide = false, dismissible = true, outlivesPage = false }) {
+  /** @type {((v: unknown) => void) | null} */
   let finishFn = null;
+  /** @type {((list: DialogAction[]) => void) | null} */
   let setActionsFn = null;
+  /** @type {Promise<unknown>} */
   const promise = new Promise((resolve) => {
     const dlg = h(`dialog.dialog${wide ? '.wide' : ''}`, { 'aria-label': title });
     let done = false;
+    /** @param {unknown} v */
     const finish = (v) => {
       if (done) return;
       done = true;
@@ -39,12 +72,14 @@ export function openDialog({ title, body, actions = [{ label: 'Close', value: nu
     finishFn = finish;
     if (!outlivesPage) openDialogs.add(finish);
     const footer = h('div.dialog-actions');
+    /** @param {DialogAction} a */
     const button = (a) => {
       const b = btn(a.label, { kind: a.kind || '', icon: a.icon });
       b.addEventListener('click', async (e) => {
         e.preventDefault();
-        if (!a.onClick) { finish(a.value === undefined ? a.label : a.value); return; }
-        const r = await runBusy(b, () => a.onClick(dlg));
+        const { onClick } = a;
+        if (!onClick) { finish(a.value === undefined ? a.label : a.value); return; }
+        const r = await runBusy(b, () => onClick(dlg));
         if (r !== false && r !== undefined) finish(r);
       });
       return b;
@@ -63,13 +98,26 @@ export function openDialog({ title, body, actions = [{ label: 'Close', value: nu
     document.body.appendChild(dlg);
     dlg.showModal();
   });
-  /** Closes the dialog from outside; the promise resolves with v. */
-  promise.close = (v = null) => { if (finishFn) finishFn(v); };
-  /** Replaces the dialog's buttons with these actions, e.g. once what it waited for is over. */
-  promise.setActions = (list) => { if (setActionsFn) setActionsFn(list); };
-  return promise;
+  return Object.assign(promise, {
+    /**
+     * Closes the dialog from outside; the promise resolves with v.
+     * @param {unknown} [v]
+     */
+    close: (v = null) => { if (finishFn) finishFn(v); },
+    /**
+     * Replaces the dialog's buttons with these actions, e.g. once what it waited for is over.
+     * @param {DialogAction[]} list
+     */
+    setActions: (list) => { if (setActionsFn) setActionsFn(list); },
+  });
 }
 
+/**
+ * Asks a yes/no question; resolves with true for confirm, false for cancel
+ * or a dismissed dialog.
+ * @param {{title: string, message: Child, confirm?: string, danger?: boolean, cancel?: string}} options
+ * @returns {Promise<boolean>}
+ */
 export async function confirmDialog({ title, message, confirm = 'Confirm', danger = false, cancel = 'Cancel' }) {
   const v = await openDialog({
     title,

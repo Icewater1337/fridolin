@@ -12,6 +12,7 @@ import (
 // These diagnostics were captured from the original command-owned storedInbound
 // decoder under Go 1.27 and Go 1.26 before moving its representation.
 func TestSavedInboundDecoderDiagnostics(t *testing.T) {
+	t.Parallel()
 	cases := []struct{ input, want, old string }{
 		{"[]", "json: cannot unmarshal array into Go value of type main.storedInbound", "json: cannot unmarshal array into Go value of type main.storedInbound"},
 		{"17", "json: cannot unmarshal number into Go value of type main.storedInbound", "json: cannot unmarshal number into Go value of type main.storedInbound"},

@@ -82,6 +82,9 @@ func TestStopBeforeTheCLIStartsIsAnInterruption(t *testing.T) {
 
 // A result is final even if a stop or deadline arrives while inherited
 // output is still open. Keep both answers and the CLI's own error then.
+// The output stays open until the test releases it, after the stop or the
+// deadline: runWaitDelay is longer than the test waits, so nothing else
+// can end the run first, and the run ends as soon as it is released.
 func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -98,7 +101,7 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 		for _, tc := range cases {
 			t.Run(provider+"/"+tc.name, func(t *testing.T) {
 				prevGrace, prevDelay := postResultGrace, runWaitDelay
-				postResultGrace, runWaitDelay = 30*time.Second, 3*time.Second
+				postResultGrace, runWaitDelay = 30*time.Second, time.Minute
 				t.Cleanup(func() { postResultGrace, runWaitDelay = prevGrace, prevDelay })
 				mgr, _, home := queueTestManager(t, 0, "")
 				setsidChildren(t, home, "stdout,stderr")
@@ -128,12 +131,13 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 					}
 				}
 				t.Setenv("FRIDOLIN_FAKE_RESULT", output)
+				var ctx context.Context
 				ctx, cancel := context.WithCancel(context.Background())
-				if tc.timeout {
-					cancel()
-					ctx, cancel = context.WithTimeout(context.Background(), 2*time.Second)
-				}
 				defer cancel()
+				deadline := &deadlineCtx{Context: context.Background(), done: make(chan struct{})}
+				if tc.timeout {
+					ctx = deadline
+				}
 				m := dm("answer before stopping")
 				run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m}
 				result := make(chan claudecli.Result, 1)
@@ -142,9 +146,24 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 					data, _ := os.ReadFile(filepath.Join(br.workDir, StreamLogName))
 					return strings.Contains(string(data), "✅ Result:") || strings.Contains(string(data), "❌ Error:")
 				})
-				if !tc.timeout {
+				var pids []string
+				testutil.WaitFor(t, 5*time.Second, "the grandchild holding the output", func() bool {
+					data, _ := os.ReadFile(filepath.Join(home, "pids"))
+					pids = strings.Fields(string(data))
+					return len(pids) == 2
+				})
+				if tc.timeout {
+					close(deadline.done)
+				} else {
 					cancel()
 				}
+				// The stop or deadline is in while the output is held: now
+				// let it go, as the grandchild would once it ends.
+				grandchild, err := strconv.Atoi(pids[1])
+				if err != nil {
+					t.Fatal(err)
+				}
+				testutil.KillPID(grandchild)
 				select {
 				case res := <-result:
 					if tc.empty {
@@ -162,10 +181,28 @@ func TestCancellationKeepsTheRecordedResult(t *testing.T) {
 						}
 					}
 				case <-time.After(10 * time.Second):
-					t.Fatal("the cancelled run kept waiting for inherited output")
+					t.Fatal("the cancelled run kept waiting once its output was released")
 				}
 			})
 		}
+	}
+}
+
+// deadlineCtx is a run's deadline that the test sets off itself, by
+// closing done: Err is then context.DeadlineExceeded, as at run_timeout.
+type deadlineCtx struct {
+	context.Context
+	done chan struct{}
+}
+
+func (c *deadlineCtx) Done() <-chan struct{} { return c.done }
+
+func (c *deadlineCtx) Err() error {
+	select {
+	case <-c.done:
+		return context.DeadlineExceeded
+	default:
+		return nil
 	}
 }
 

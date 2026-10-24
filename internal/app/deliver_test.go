@@ -49,6 +49,7 @@ func outbound(t *testing.T, br *brain.Brain) map[string][]string {
 // is a silent run's or an error the bridge reports, so later runs and the
 // OTP guard do not take them for something the brain said.
 func TestRepliesAreRecordedAsSent(t *testing.T) {
+	t.Parallel()
 	const poll = "[POLL]\nQuestion: Lunch?\n- Yes\n- No\n[/POLL]"
 	const pollText = "📊 *Lunch?*\n1. Yes\n2. No"
 	offline := func(tb *testBridge) Messenger {
@@ -97,6 +98,7 @@ func TestRepliesAreRecordedAsSent(t *testing.T) {
 // when it was sent. An untagged group message's run is never sent, so its
 // answer is not in the history, while the DM's is.
 func TestSilentRunLeavesNoReplyInTheHistory(t *testing.T) {
+	t.Parallel()
 	tb, br := newObservingBridge(t, `, "queue": {"notify": false}`)
 	ctx := context.Background()
 	tb.handleInbound(ctx, brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567", Text: "we meet at noon", Silent: true, Source: chat.SourceWhatsApp}})
@@ -132,9 +134,8 @@ func TestSilentRunLeavesNoReplyInTheHistory(t *testing.T) {
 // the outbox, and the run has asked. One the outbox could not take is on
 // its way to nobody, and the run did not ask.
 func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
-	prev := workingNoticeAfter
-	workingNoticeAfter = 50 * time.Millisecond
-	t.Cleanup(func() { workingNoticeAfter = prev })
+	t.Parallel()
+	optionsOf(t).waits.workingNotice = 50 * time.Millisecond
 	dm := brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "book a table", Source: chat.SourceWhatsApp}}
 	cases := []struct {
 		name    string
@@ -153,8 +154,8 @@ func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newObservingBridge(t, "")
-			t.Setenv("FRIDOLIN_FAKE_ASK", `{"questions":[{"question":"Which day?"}]}`)
-			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "300") // time for the working notice
+			setenv(t, "FRIDOLIN_FAKE_ASK", `{"questions":[{"question":"Which day?"}]}`)
+			setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "300") // time for the working notice
 			if c.refused {
 				if _, err := testStoreSQL(t, tb.cfgs.Startup().DBPath).Exec(`CREATE TRIGGER refuse_outbox BEFORE INSERT ON outbox BEGIN SELECT RAISE(FAIL, 'disk full'); END`); err != nil {
 					t.Fatal(err)
@@ -196,8 +197,9 @@ func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
 // the chat: the question with its options first, then the reply, and the
 // history holds both in that order.
 func TestQuestionAndFinalReplyBothReachTheChat(t *testing.T) {
+	t.Parallel()
 	tb, br := newMainBridge(t, "")
-	t.Setenv("FRIDOLIN_FAKE_ASK", `{"questions":[{"header":"Day","question":"Which day?","options":[{"label":"Monday"},{"label":"Tuesday"}]}]}`)
+	setenv(t, "FRIDOLIN_FAKE_ASK", `{"questions":[{"header":"Day","question":"Which day?","options":[{"label":"Monday"},{"label":"Tuesday"}]}]}`)
 	tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "book a table", Source: chat.SourceWhatsApp}})
 	testutil.WaitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(testDMChat)) == 2 })
 	testutil.WaitFor(t, 5*time.Second, "the reply in the history", func() bool { return len(outbound(t, br)[testDMChat]) == 2 })
@@ -220,6 +222,7 @@ func TestQuestionAndFinalReplyBothReachTheChat(t *testing.T) {
 // the answer to a question the run asked before it was over, which must
 // learn what that run settled on in the end ("I booked Monday").
 func TestQueuedRunSeesWhatWasSentWhileItWaited(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name          string
 		env           map[string]string
@@ -235,9 +238,9 @@ func TestQueuedRunSeesWhatWasSentWhileItWaited(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newMainBridge(t, `, "queue": {"notify": false}`)
 			promptLog := filepath.Join(tb.home, "prompts.log")
-			t.Setenv("FRIDOLIN_FAKE_PROMPT_LOG", promptLog)
+			setenv(t, "FRIDOLIN_FAKE_PROMPT_LOG", promptLog)
 			for k, v := range c.env {
-				t.Setenv(k, v)
+				setenv(t, k, v)
 			}
 			ctx := context.Background()
 			tb.handleInbound(ctx, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: c.first, Source: chat.SourceWhatsApp}})

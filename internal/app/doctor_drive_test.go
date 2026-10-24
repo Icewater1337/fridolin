@@ -10,6 +10,7 @@ import (
 // rclone config uses rclone's shared client (no client_id), with the fix,
 // and is fine without one or once every Drive remote has its own client.
 func TestDoctorDriveClient(t *testing.T) {
+	t.Parallel()
 	const conf = "/home/you/.fridolin/rclone/rclone.conf"
 	cases := []struct {
 		name, file, status, detail string

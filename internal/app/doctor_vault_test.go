@@ -12,6 +12,7 @@ import (
 )
 
 func TestDoctorVaultChecks(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	healthy := func() vaultStatus {
 		return vaultStatus{

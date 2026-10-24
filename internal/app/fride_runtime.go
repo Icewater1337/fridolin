@@ -31,10 +31,6 @@ import (
 // (store.FrideThread), relays FrIDE's news there, moves work between nodes
 // through the vault, and archives a closed task's workspace into the vault.
 
-// frideRetryEvery is how often waiting work is offered to the nodes again,
-// besides whenever a node's FrIDE comes up.
-var frideRetryEvery = 30 * time.Second
-
 // frideRuntime is the core's side of FrIDE. Its goroutines start with the
 // first news or the first work, and stop with the bridge.
 type frideRuntime struct {
@@ -125,7 +121,7 @@ func (f *frideRuntime) relayLoop() {
 }
 
 func (f *frideRuntime) queueLoop() {
-	t := time.NewTicker(frideRetryEvery)
+	t := time.NewTicker(f.b.waits.frideRetry)
 	defer t.Stop()
 	for {
 		select {

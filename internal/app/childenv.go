@@ -112,23 +112,24 @@ var childEnvAllowlist = []childEnvVar{
 }
 
 // childEnv is the environment for a program of scope: the variables of the
-// bridge's environment that childEnvAllowlist gives it or passthrough
-// (child_env_passthrough) names, then extra (NAME=value), which the bridge
-// sets on purpose and which replace a variable of the same name.
-func childEnv(scope childScope, passthrough []string, extra ...string) []string {
+// bridge's environment env (nil: the process's) that childEnvAllowlist
+// gives it or passthrough (child_env_passthrough) names, then extra
+// (NAME=value), which the bridge sets on purpose and which replace a
+// variable of the same name.
+func childEnv(env Environment, scope childScope, passthrough []string, extra ...string) []string {
 	set := make(map[string]bool, len(extra))
 	for _, kv := range extra {
 		name, _, _ := strings.Cut(kv, "=")
 		set[name] = true
 	}
-	var env []string
-	for _, kv := range os.Environ() {
+	var out []string
+	for _, kv := range envOr(env).Environ() {
 		name, _, _ := strings.Cut(kv, "=")
 		if !set[name] && (childGets(scope, name) || slices.Contains(passthrough, name)) {
-			env = append(env, kv)
+			out = append(out, kv)
 		}
 	}
-	return append(env, extra...)
+	return append(out, extra...)
 }
 
 // desktopKey marks a context whose helper runs open your browser.

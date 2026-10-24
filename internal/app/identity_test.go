@@ -29,6 +29,7 @@ import (
 )
 
 func TestChatJID(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in, want string // want "" = refused
 	}{
@@ -66,9 +67,10 @@ func TestChatJID(t *testing.T) {
 // A number written into config.json by hand, the way people write it,
 // lets its sender in; the running config holds it as digits.
 func TestLoadConfigNormalisesAllowedNumbers(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_numbers": ["+1 555 123-4567", "15559876543", "call me"]}`))
+	setenv(t, "HOME", home)
+	cfg, err := loadConfig(t, writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_numbers": ["+1 555 123-4567", "15559876543", "call me"]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,6 +87,7 @@ func TestLoadConfigNormalisesAllowedNumbers(t *testing.T) {
 
 // The Overview says when allowed_numbers holds an entry that lets nobody in.
 func TestStatusWarnsAboutAnAllowedNumberThatIsNone(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, `, "allowed_numbers": ["15551234567", "my phone"]`)
 	var st httpapi.StatusResponse
 	if err := json.Unmarshal(tb.do("GET", "/api/status", nil).Body.Bytes(), &st); err != nil {
@@ -99,6 +102,7 @@ func TestStatusWarnsAboutAnAllowedNumberThatIsNone(t *testing.T) {
 // under the chat's JID, where the brain's next run looks; a chat that is
 // none is the script's mistake, a 400, not a failed send.
 func TestHTTPSendTakesANumber(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "p", Name: "P", Routing: manifest.Routing{HandlesDMs: true}})
 	br := tb.brainMgr.Get("p")
@@ -130,6 +134,7 @@ func TestHTTPSendTakesANumber(t *testing.T) {
 // /send to a person's LID goes to, and is recorded under, their number,
 // the JID the chat's runs read its history by.
 func TestHTTPSendToALIDUsesTheNumber(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "p", Name: "P", Routing: manifest.Routing{HandlesDMs: true}})
 	tb.lids = func() store.LIDStore { return personLIDs{} }
@@ -151,6 +156,7 @@ func TestHTTPSendToALIDUsesTheNumber(t *testing.T) {
 }
 
 func TestCanonicalUser(t *testing.T) {
+	t.Parallel()
 	pn := types.NewJID("15551234567", types.DefaultUserServer)
 	lid := types.NewJID(personLID, types.HiddenUserServer)
 	stranger := types.NewJID("272727", types.HiddenUserServer)
@@ -181,6 +187,8 @@ func TestCanonicalUser(t *testing.T) {
 // A LID the store fails to look up stays a LID, and the log names it
 // masked: the log goes along with bug reports.
 func TestCanonicalUserLogsAFailedLookupMasked(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	logged := captureLog(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -195,6 +203,7 @@ func TestCanonicalUserLogsAFailedLookupMasked(t *testing.T) {
 }
 
 func TestOwnerChat(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		numbers []string
 		want    string
@@ -214,6 +223,7 @@ func TestOwnerChat(t *testing.T) {
 // A group member addressed by LID is known by their number, so the identity
 // map names them; so is the author of a message a reply quotes.
 func TestGroupSenderAndQuoteByNumber(t *testing.T) {
+	t.Parallel()
 	tb, br := newMainBridge(t, "")
 	if err := os.MkdirAll(filepath.Join(br.Dir(), "memories", "people"), 0o700); err != nil {
 		t.Fatal(err)
@@ -256,6 +266,7 @@ func TestGroupSenderAndQuoteByNumber(t *testing.T) {
 // History a DM wrote under its LID, before DMs were keyed by number, is
 // still that chat's: the next run sees it.
 func TestPrefaceReadsADMsLIDHistory(t *testing.T) {
+	t.Parallel()
 	br := bareBrain(t)
 	lid := types.NewJID(personLID, types.HiddenUserServer).String()
 	br.AppendHistory(lid, "15551234567", "OLD-UNDER-LID", history.In)

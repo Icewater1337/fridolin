@@ -92,6 +92,7 @@ func pollQuestions(doc map[string]any) []string {
 // route to it and the one it replies in: brain r gets files through
 // /ingest only and answers in the DM, so the polls it sends go there.
 func TestPollsAreTheBrainsOwn(t *testing.T) {
+	t.Parallel()
 	tb, url := serveTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "g", Name: "G", Routing: manifest.Routing{Groups: []string{apiTestGroup}}})
@@ -165,12 +166,13 @@ func TestPollsAreTheBrainsOwn(t *testing.T) {
 // binary and the brain API are, and gets a token of its own in a file,
 // which works while the run lasts and not after it.
 func TestRunsGetATokenForTheirRunOnly(t *testing.T) {
+	t.Parallel()
 	tb, url := serveTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	savePoll(t, tb, "P1", apiTestDM, "Lunch?", []string{"Yes", "No"}, nil)
 	envLog := filepath.Join(t.TempDir(), "brain.env")
-	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
-	t.Setenv("FRIDOLIN_FAKE_POLLS", "1")
+	setenv(t, "FRIDOLIN_FAKE_ENV_LOG", envLog)
+	setenv(t, "FRIDOLIN_FAKE_POLLS", "1")
 
 	tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"}})
 	testutil.WaitFor(t, 10*time.Second, "the reply", func() bool { return len(tb.sentTo(apiTestDM)) > 0 })
@@ -213,6 +215,7 @@ func TestRunsGetATokenForTheirRunOnly(t *testing.T) {
 // running at the same time could read a token there and call the brain
 // API as this brain (TestSandboxKeepsRunTokensToTheirBrain).
 func TestRunTokenStaysOutOfTheEnvironment(t *testing.T) {
+	t.Parallel()
 	tb, _ := serveTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	access := tb.brainRunEnv(runInfo{Brain: "a"})
@@ -259,10 +262,11 @@ func TestRunTokenStaysOutOfTheEnvironment(t *testing.T) {
 // nothing else. One that cannot start, since another bridge holds the data
 // dir, leaves them alone: they are that bridge's runs'.
 func TestBridgePrunesStaleRunTokens(t *testing.T) {
+	t.Parallel()
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	data := filepath.Join(home, "data")
-	cfgs, err := OpenConfigStore(writeConfig(t, `{"data_dir": "`+data+`", "http_listen": "off"}`))
+	cfgs, err := openConfigStore(t, writeConfig(t, `{"data_dir": "`+data+`", "http_listen": "off"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -361,6 +365,7 @@ func TestRunTokens(t *testing.T) {
 }
 
 func TestBrainAPIRefusals(t *testing.T) {
+	t.Parallel()
 	tb, _ := serveTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
 	tok, revoke := tb.runTokens.mint("a")

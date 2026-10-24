@@ -78,6 +78,15 @@ Ubuntu 24.04's `golang` is Go 1.22, which is fine: any Go 1.21 or newer
 downloads the version `go.mod` names on the first build (it needs the
 network; without it, the tarball from go.dev/dl).
 
+A machine that is to be a [core host](#core-host) (the core may move to
+it) needs more: Docker (Linux: `sudo apt install -y docker.io
+docker-compose-v2`, and the user in the `docker` group), a current GitHub
+`gh`, which checks the core's image before it is pulled (Linux: from
+GitHub's apt repository, <https://cli.github.com>; Ubuntu's own is too
+old), and on Ubuntu `sudo fridolin core apparmor` once after the build
+([CORE.md](CORE.md#the-core-moves-itself), "Before"). The first move to
+it pulls the core's image, several GB.
+
 ### 2. Tailscale
 
 The machine must be on the owner's tailnet, logged in as the same account

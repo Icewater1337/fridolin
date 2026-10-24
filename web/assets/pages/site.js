@@ -17,6 +17,24 @@ import { field, toggle, select, textInput } from '../components/fields.js';
 import { pill, callout, mono, pageHeader, loading, timeAgo, kv } from '../components/common.js';
 import { liveForm } from '../components/live-form.js';
 
+/** @import { PageModule } from '../app/page.js' */
+/** @import { Child } from '../lib/dom.js' */
+/** @import { BrainRuntime, ModuleChange, ProposalSnapshot, SiteDeploy, SiteDeploySnapshot, SiteModuleSecrets, SiteProcStatus, SiteStatus, SiteUser } from '../../types/api.js' */
+
+/**
+ * What Check for changes finds: POST /api/site/fetch (site.SiteUpdates).
+ * @typedef {object} SiteUpdates
+ * @property {string} head
+ * @property {string} approved
+ * @property {{commit: string, subject: string, author: string, at: string}[]} commits
+ * @property {ModuleChange[]} changes
+ */
+
+/**
+ * A brain's switch under Builders.
+ * @typedef {{id: string, name: string, label: string, on: boolean}} BuilderChoice
+ */
+
 // What some requests run on the bridge has limits of its own: 3 minutes for
 // a git or gh call (SiteManager.git), 10 for an npm install. They wait
 // longer than that, so the bridge's own error shows, not "did not answer".
@@ -30,9 +48,14 @@ const SLOW_MS = 60000;
 
 // What of the status those depend on, as the page saw it last (on this
 // visit or an earlier one).
+/** @type {{builders: string, proposals: string, secrets: string, users: string} | null} */
 let seenDeps = null;
 
-const short = (c) => (c ? c.slice(0, 12) : '');
+const short = (/** @type {string} */ c) => (c ? c.slice(0, 12) : '');
+/**
+ * @param {string} state a SiteProcStatus state, or ''
+ * @param {boolean} [healthy]
+ */
 const procPill = (state, healthy) => {
   if (state === 'running') return healthy === false ? pill('Starting…', 'warn', { pulse: true }) : pill('Running', 'ok');
   if (state === 'starting') return pill('Starting…', 'warn', { pulse: true });
@@ -42,7 +65,7 @@ const procPill = (state, healthy) => {
 
 // A part of a card that paint() fills on its own. It lays out its children
 // as the card's own (display: contents), so the card's spacing holds.
-const region = (...children) => h('div.region', children);
+const region = (/** @type {Child[]} */ ...children) => h('div.region', children);
 
 /**
  * A process's recent output, folded: built once, so it stays open while
@@ -52,14 +75,16 @@ const region = (...children) => h('div.region', children);
 function logBox() {
   const text = h('pre.mono');
   const el = h('details.site-log', { hidden: true }, h('summary', 'Recent output'), text);
-  el.set = (lines) => {
-    el.hidden = !(lines && lines.length);
-    paint(text, lines || [], (l) => l.join('\n'));
-  };
-  return el;
+  return Object.assign(el, {
+    /** @param {string[] | null | undefined} lines */
+    set: (lines) => {
+      el.hidden = !(lines && lines.length);
+      paint(text, lines || [], (l) => l.join('\n'));
+    },
+  });
 }
 
-export default {
+export default /** @satisfies {PageModule} */ ({
   title: 'Site',
   render(root, ctx) {
     const site = resource('/api/site');
@@ -67,7 +92,9 @@ export default {
     const proposals = resource('/api/site/proposals');
     const secrets = resource('/api/site/secrets');
     const users = resource('/api/site/users');
+    /** @type {SiteStatus | null} */
     let st = null; // the newest GET /api/site
+    /** @type {SiteUpdates | null} */
     let updates = null; // what Check for changes found, until it is deployed
 
     // Resolves once the page shows what the bridge has now. A poll on its
@@ -111,6 +138,7 @@ export default {
     const tunnelLog = logBox();
     const checkBox = region();
     const builtinBox = region();
+    /** @type {BrainRuntime[]} */
     let brains = []; // the bridge's brains, for the roles' Files and Wiki
 
     const usersBox = region(loading('Loading the accounts…'));
@@ -131,7 +159,7 @@ export default {
     // token, a Google client, a new GitHub repository's name) are .draft:
     // empty until you type, and emptied again once saved.
     ctx.dirty = () => [st && st.repo.connected ? null : repoForm, domainForm, addForm, rolesForm].some((f) => f && f.dirty())
-      || [...stack.querySelectorAll('.draft')].some((el) => el.value !== '');
+      || [...stack.querySelectorAll('.draft')].some((el) => /** @type {HTMLInputElement | HTMLTextAreaElement} */ (el).value !== '');
 
     const stack = h('div.page-stack', h('section.card', loading('Loading the site…')));
     mount(root,
@@ -140,6 +168,7 @@ export default {
     let laidOut = false;
     function layout() {
       laidOut = true;
+      /** @type {(iconName: string, title: string) => HTMLDivElement} */
       const head = (iconName, title) => h('div.card-head', h('div.card-title', icon(iconName), h('h2', title)));
       mount(stack,
         h('section.card', statusHead, todoBox, factsBox, stoppedBox, statusActions, siteLog),
@@ -165,15 +194,16 @@ export default {
           secretsBox));
     }
 
-    function paintAll() {
+    /** @param {SiteStatus} st the newest GET /api/site */
+    function paintAll(st) {
       if (!laidOut) layout();
-      paintStatus();
-      paintRepo();
-      paintDeploy();
-      paintProposals();
-      paintBuilders();
-      paintDomain();
-      paintBuiltin();
+      paintStatus(st);
+      paintRepo(st);
+      paintDeploy(st);
+      paintProposals(st);
+      paintBuilders(st);
+      paintDomain(st);
+      paintBuiltin(st);
       // The status names what the other requests answer about; when that
       // changed, they are asked again.
       const s = st.settings;
@@ -195,9 +225,10 @@ export default {
     }
 
     // ── status ─────────────────────────────────────────────────────────
-    function paintStatus() {
+    /** @param {SiteStatus} st the newest GET /api/site */
+    function paintStatus(st) {
       const s = st.settings;
-      const proc = st.site.process || {};
+      const proc = /** @type {Partial<SiteProcStatus>} */ (st.site.process || {});
       const todo = [];
       if (st.runtime.node_error) todo.push(st.runtime.node_error);
       if (!st.accounts.admins) todo.push('Add yourself as an admin with your Google address (People, below).');
@@ -205,7 +236,7 @@ export default {
         h('div.card-title', icon('external'), h('h2', title)),
         enabled ? procPill(state, healthy) : pill('Off', 'neutral')));
       paint(todoBox, todo, (list) => (list.length ? callout('info', 'Before the site can go on', h('ul', list.map((t) => h('li', t)))) : null));
-      const last = (s.history || []).at(-1) || {};
+      const last = /** @type {Partial<SiteDeploy>} */ ((s.history || []).at(-1) || {});
       paint(factsBox, {
         local: st.site.local_url, public: st.public_url || '', approved: s.approved || '', subject: last.subject || '',
         accounts: st.accounts, sandbox: st.site.sandbox || null,
@@ -215,6 +246,10 @@ export default {
       siteLog.set(proc.log);
     }
 
+    /**
+     * @param {{local: string, public: string, approved: string, subject: string,
+     *   accounts: SiteStatus['accounts'], sandbox: SiteStatus['site']['sandbox'] | null}} f
+     */
     function renderFacts(f) {
       return kv([
         ['On this Mac', h('a', { href: f.local, target: '_blank', rel: 'noopener noreferrer' }, f.local)],
@@ -225,6 +260,7 @@ export default {
       ]);
     }
 
+    /** @param {{enabled: boolean, blocked: boolean}} state */
     function renderStatusActions({ enabled, blocked }) {
       const sw = toggle({
         checked: enabled, label: enabled ? 'The site is on' : 'The site is off', disabled: blocked,
@@ -240,7 +276,8 @@ export default {
     }
 
     // ── repository ─────────────────────────────────────────────────────
-    function paintRepo() {
+    /** @param {SiteStatus} st the newest GET /api/site */
+    function paintRepo(st) {
       const s = st.settings;
       const connected = !!st.repo.connected;
       paint(repoHead, connected, (c) => h('div.card-head', h('div.card-title', icon('backup'), h('h2', 'Repository')), c ? pill('Connected', 'ok') : pill('Not connected', 'neutral')));
@@ -264,6 +301,7 @@ export default {
     // The key has to be on a private repository before Connect can clone
     // it, so until a repository is connected gh adds it to the address
     // typed in the form below.
+    /** @param {{key: string, github: boolean, gh: boolean, connected: boolean}} state */
     function renderDeployKey({ key, github, gh, connected }) {
       const keyRow = key
         ? h('div', h('p.small', connected
@@ -275,6 +313,7 @@ export default {
       return h('div.site-block', h('h3', 'Deploy key'), keyRow);
     }
 
+    /** @param {boolean} connected */
     async function addKeyWithGH(connected) {
       let body;
       if (!connected) {
@@ -291,10 +330,11 @@ export default {
       toast(`Deploy key added to ${r.repo} on GitHub`, 'ok');
     }
 
+    /** @param {{enabled: boolean}} state */
     function renderDisconnect({ enabled }) {
       return h('div.actions',
         btn('Disconnect', {
-          small: true, icon: 'x', disabled: enabled, title: enabled ? 'Turn the site off first' : null,
+          small: true, icon: 'x', disabled: enabled, title: enabled ? 'Turn the site off first' : undefined,
           onClick: async () => {
             if (!await confirmDialog({ title: 'Disconnect the repository?', message: 'The site’s approved commits are forgotten. Fridolin’s clone is moved aside, not deleted; the repository itself is untouched.', confirm: 'Disconnect', danger: true })) return;
             await del('/api/site/repo');
@@ -304,6 +344,7 @@ export default {
         }));
     }
 
+    /** @param {{gh: boolean}} state */
     function renderRepoIntro({ gh }) {
       const ghName = textInput({ placeholder: 'my-site', class: 'draft' });
       return [
@@ -321,6 +362,10 @@ export default {
       ];
     }
 
+    /**
+     * @param {{url: string, branch: string, subdir: string}} data
+     * @param {() => void} changed
+     */
     function buildRepoForm({ url, branch, subdir }, changed) {
       const urlIn = textInput({ placeholder: 'git@github.com:you/my-site.git', value: url });
       const branchIn = textInput({ value: branch });
@@ -341,16 +386,17 @@ export default {
             await checkUpdates();
           },
         })));
-      return { el, value, setURL(u) { urlIn.value = u; changed(); }, focusURL() { urlIn.focus(); } };
+      return { el, value, setURL(/** @type {string} */ u) { urlIn.value = u; changed(); }, focusURL() { urlIn.focus(); } };
     }
 
     // ── deploys ────────────────────────────────────────────────────────
     async function checkUpdates() {
       updates = await post('/api/site/fetch', undefined, { timeout: GIT_TIMEOUT_MS });
-      paintDeploy();
+      if (st) paintDeploy(st);
     }
 
-    function paintDeploy() {
+    /** @param {SiteStatus} st the newest GET /api/site */
+    function paintDeploy(st) {
       const s = st.settings;
       const job = st.deploy || null;
       const running = !!(job && job.state === 'running');
@@ -373,6 +419,7 @@ export default {
       paint(earlierList, { done, approved: s.approved || '', running }, renderEarlier);
     }
 
+    /** @param {Pick<SiteDeploySnapshot, 'state' | 'commit' | 'step' | 'error'> | null} job */
     function renderJob(job) {
       if (!job) return null;
       return callout(job.state === 'error' ? 'bad' : job.state === 'done' ? 'ok' : 'info',
@@ -382,6 +429,7 @@ export default {
     }
 
     // "It changes who may open it and where it is served." — from the review items.
+    /** @param {ModuleChange[] | null} changes */
     function reviewSentence(changes) {
       const notes = [...new Set((changes || []).flatMap((c) => c.review.map((r) => r.note)))];
       if (!notes.length) return '';
@@ -389,6 +437,7 @@ export default {
       return `It changes ${list}. Look at the list before approving.`;
     }
 
+    /** @param {ModuleChange} change */
     function reviewList(change) {
       if (!change.review.length) return h('p.small.muted', 'No change to access, server code, files or commands.');
       return h('ul.site-review', change.review.map((r) => h('li',
@@ -397,8 +446,9 @@ export default {
         mono(r.new === null || r.new === undefined ? 'none' : JSON.stringify(r.new)))));
     }
 
-    const changeBlock = (c) => h('div.site-change', h('div', h('strong', c.id), ' ', pill(c.status, c.status === 'removed' ? 'bad' : c.review.length ? 'warn' : 'neutral')), reviewList(c));
+    const changeBlock = (/** @type {ModuleChange} */ c) => h('div.site-change', h('div', h('strong', c.id), ' ', pill(c.status, c.status === 'removed' ? 'bad' : c.review.length ? 'warn' : 'neutral')), reviewList(c));
 
+    /** @param {{updates: SiteUpdates | null, approved: string, branch: string, running: boolean}} state */
     function renderUpdates({ updates: u, approved, branch, running }) {
       if (!u) return h('div.actions', btn('Check for changes', { icon: 'refresh', onClick: checkUpdates }));
       if (!u.head) {
@@ -422,7 +472,7 @@ export default {
               if (sentence && !await confirmDialog({ title: 'Approve these changes?', message: sentence, confirm: 'Approve and deploy' })) return;
               await post('/api/site/deploy', { commit: u.head });
               updates = null;
-              paintDeploy();
+              if (st) paintDeploy(st);
               await refresh();
             },
           }),
@@ -430,6 +480,7 @@ export default {
       ];
     }
 
+    /** @param {{done: SiteDeploy[], approved: string, running: boolean}} state */
     function renderEarlier({ done, approved, running }) {
       return [...done].reverse().map((d) => h('li', mono(short(d.commit)), ' ', d.subject, h('span.muted.small', ' — ', timeAgo(d.at)),
         d.commit === approved ? pill('live', 'ok') : btn('Roll back to this', {
@@ -442,7 +493,8 @@ export default {
     }
 
     // ── proposals from builder brains ─────────────────────────────────
-    function paintProposals() {
+    /** @param {SiteStatus} st the newest GET /api/site */
+    function paintProposals(st) {
       const s = st.settings;
       if (!s.builders.length && !s.proposals.length) {
         paint(proposalsBox, 'no builders', () => h('p.muted', 'Brains you allow to build the site (below) propose their work here. You review it and deploy it — they cannot.'));
@@ -457,6 +509,7 @@ export default {
       paint(proposalsBox, { list: known.proposals, running: !!(st.deploy && st.deploy.state === 'running'), branch: s.repo.branch }, renderProposals);
     }
 
+    /** @param {{list: ProposalSnapshot[], running: boolean, branch: string}} state */
     function renderProposals({ list, running, branch }) {
       return list.map(({ proposal: p, changes, preview, error }) => h('div.site-block',
         h('div', h('strong', p.title), h('span.muted.small', ` — ${p.brain}, `, timeAgo(p.at), ' · ', mono(short(p.commit)))),
@@ -498,7 +551,8 @@ export default {
     // way stays disabled.
     const builderSwitches = h('div.site-builders');
 
-    function paintBuilders() {
+    /** @param {SiteStatus} st the newest GET /api/site */
+    function paintBuilders(st) {
       if (!st.repo.connected) { paint(buildersBox, 'not connected', () => h('p.muted', 'Connect a repository first.')); return; }
       const known = builders.data();
       if (!known) { paint(buildersBox, 'loading', () => loading('Loading the brains…')); return; }
@@ -506,6 +560,7 @@ export default {
       reconcile(builderSwitches, known.brains.map((br) => ({ id: br.id, name: br.name || br.id, label: brainLabel(br), on: br.builder })), (b) => b.id, builderSwitch);
     }
 
+    /** @param {boolean} any */
     function renderBuilders(any) {
       return [
         h('p.small', 'A brain you allow gets the site-builder skills and tools, and a workspace of its own (a clone of the repository in its folder, under .fridolin-site). It builds and previews inside its sandbox and can only propose; you merge and deploy here.'),
@@ -513,6 +568,7 @@ export default {
       ];
     }
 
+    /** @param {BuilderChoice} b */
     function builderSwitch(b) {
       let latest = b; // the newest state of this brain
       let busy = false; // its save is on its way
@@ -534,10 +590,9 @@ export default {
         },
       });
       const label = el.querySelector('.switch-label');
-      const show = () => { el.input.checked = latest.on; label.textContent = latest.label; };
+      const show = () => { el.input.checked = latest.on; if (label) label.textContent = latest.label; };
       // While its save is on its way, the switch shows what you chose.
-      el.update = (next) => { latest = next; if (!busy) show(); };
-      return el;
+      return Object.assign(el, { update: (/** @type {BuilderChoice} */ next) => { latest = next; if (!busy) show(); } });
     }
 
     // ── secrets the modules declare ───────────────────────────────────
@@ -546,8 +601,13 @@ export default {
       if (known) paint(secretsBox, known.modules, renderSecrets);
     }
 
+    /** @param {SiteModuleSecrets[]} modules */
     function renderSecrets(modules) {
       if (!modules.length) return h('p.muted', 'No live module declares a secret.');
+      /**
+       * @param {SiteModuleSecrets} m
+       * @param {string} name
+       */
       const row = (m, name) => {
         const isSet = m.set.includes(name);
         const declared = m.declared.includes(name);
@@ -574,11 +634,12 @@ export default {
     }
 
     // ── domain and sign-in ─────────────────────────────────────────────
-    function paintDomain() {
+    /** @param {SiteStatus} st the newest GET /api/site */
+    function paintDomain(st) {
       const s = st.settings;
       domainForm.set({ domain: s.domain || '', title: s.title, listen: s.listen });
       paint(googleBox, st.google, renderGoogle);
-      const tunnel = st.tunnel.process || {};
+      const tunnel = /** @type {Partial<SiteProcStatus>} */ (st.tunnel.process || {});
       paint(tunnelGuide, { listen: s.listen, domain: s.domain || '' }, renderTunnelGuide);
       paint(tunnelSetup, { listen: s.listen, saved: !!st.tunnel.token_saved, cloudflared: !!st.runtime.cloudflared }, renderTunnelSetup);
       paint(checkBox, { domain: s.domain || '', on: !!s.enabled }, renderCheck);
@@ -591,6 +652,7 @@ export default {
       tunnelLog.set(tunnel.log);
     }
 
+    /** @param {{domain: string, title: string, listen: string}} data */
     function buildDomainForm({ domain, title, listen }) {
       const domainIn = textInput({ placeholder: 'example.com', value: domain });
       const titleIn = textInput({ value: title });
@@ -613,8 +675,9 @@ export default {
     }
 
     // Saving or removing the site's own client restarts the site (site_api.go).
-    const restarting = (what) => (st.settings.enabled ? `${what}; restarting the site` : what);
+    const restarting = (/** @type {string} */ what) => (st && st.settings.enabled ? `${what}; restarting the site` : what);
 
+    /** @param {SiteStatus['google']} g */
     function renderGoogle(g) {
       const clientNote = g.source === 'none'
         ? callout('warn', 'Google sign-in is off', 'Add a Google OAuth client — under Settings → Google sign-in for all of Fridolin, or a separate one for the site below.')
@@ -631,7 +694,9 @@ export default {
             g.source === 'site' ? btn('Remove', { small: true, onClick: async () => { await del('/api/site/google-client'); toast(restarting('Google client removed'), 'ok'); await refresh(); } }) : null)));
     }
 
+    /** @param {{listen: string, domain: string}} state */
     function renderTunnelGuide({ listen, domain }) {
+      /** @type {(href: string, text: string) => HTMLAnchorElement} */
       const ext = (href, text) => h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text);
       const name = domain || 'example.com';
       return h('ol.small.site-guide',
@@ -642,6 +707,7 @@ export default {
         h('li', 'Turn on ', h('em', 'Run the tunnel'), ' below, and the site (top of this page).'));
     }
 
+    /** @param {{domain: string, on: boolean}} state */
     function renderCheck({ domain, on }) {
       const out = region();
       return [
@@ -661,10 +727,11 @@ export default {
     // ── Files and Wiki ─────────────────────────────────────────────────
     ctx.watch(store, (x) => x.status, (status) => {
       brains = (status && status.brains) || [];
-      if (st) paintBuiltin();
+      if (st) paintBuiltin(st);
     });
 
-    function paintBuiltin() {
+    /** @param {SiteStatus} st the newest GET /api/site */
+    function paintBuiltin(st) {
       const s = st.settings;
       paint(builtinBox, {
         base: st.public_url ? st.public_url.replace(/\/$/, '') : (st.site.local_url || '').replace(/\/$/, ''),
@@ -672,9 +739,16 @@ export default {
       }, renderBuiltin);
     }
 
+    /** @param {{base: string, roles: string[], map: Record<string, string[]>, uploads: Record<string, string[]>, brains: {id: string, label: string}[]}} state */
     function renderBuiltin({ base, roles, map, uploads, brains: list }) {
       // One column of toggles: the brains a role sees (key "brains"), or
       // those it may upload to ("uploads"), of those it sees.
+      /**
+       * @param {string} role
+       * @param {'brains' | 'uploads'} key
+       * @param {{id: string, label: string}[]} from
+       * @param {(want: boolean, label: string) => string} msg
+       */
       const picks = (role, key, from, msg) => {
         const chosen = new Set((key === 'brains' ? map : uploads)[role] || []);
         return h('div.site-brain-picks', from.map((b) => toggle({
@@ -689,6 +763,7 @@ export default {
           },
         })));
       };
+      /** @param {string} role */
       const roleRow = (role) => {
         const sees = list.filter((b) => (map[role] || []).includes(b.id));
         return h('tr', h('td', h('strong', role)),
@@ -707,6 +782,7 @@ export default {
       ];
     }
 
+    /** @param {{saved: boolean, cloudflared: boolean}} state */
     function renderTunnelSetup({ saved, cloudflared }) {
       const token = h('input.draft', { type: 'password', autocomplete: 'off', placeholder: saved ? 'saved — paste a new one to replace it' : 'eyJ…' });
       return [
@@ -730,9 +806,15 @@ export default {
       rolesForm.set({ roles });
     }
 
+    /**
+     * @param {string[]} roles
+     * @param {string} value
+     * @param {SiteUser['kind']} kind
+     */
     const roleSelect = (roles, value, kind) => select(roles.filter((r) => kind === 'google' || r !== 'admin'), value);
-    const who = (u) => u.name || u.email || u.username;
+    const who = (/** @type {SiteUser} */ u) => u.name || u.email || u.username;
 
+    /** @param {{u: SiteUser, roles: string[]}} row */
     function userRow({ u, roles }) {
       const role = roleSelect(roles, u.role, u.kind);
       role.addEventListener('change', async () => {
@@ -756,6 +838,7 @@ export default {
           })));
     }
 
+    /** @param {{roles: string[]}} data */
     function buildAddForm({ roles }) {
       const kind = select([['google', 'Google account'], ['password', 'Username and password']], 'google');
       const ident = textInput({ placeholder: 'name@example.com' });
@@ -768,7 +851,8 @@ export default {
       kind.addEventListener('change', () => {
         const isPw = kind.value === 'password';
         pwField.hidden = !isPw;
-        identField.querySelector('label').textContent = isPw ? 'Username' : 'Google address';
+        const identLabel = identField.querySelector('label'); // field() makes one, as it has a label
+        if (identLabel) identLabel.textContent = isPw ? 'Username' : 'Google address';
         ident.placeholder = isPw ? 'sam' : 'name@example.com';
         const keep = role.value;
         mount(role, ...roles.filter((r) => !isPw || r !== 'admin').map((r) => h('option', { value: r }, r)));
@@ -791,6 +875,7 @@ export default {
       return { el, value };
     }
 
+    /** @param {{roles: string[]}} data */
     function buildRolesForm({ roles }) {
       const rolesIn = textInput({ value: roles.filter((r) => r !== 'admin').join(', ') });
       const value = () => rolesIn.value;
@@ -807,6 +892,7 @@ export default {
       return { el, value };
     }
 
+    /** @param {SiteUser} u */
     async function newPassword(u) {
       const pw = h('input', { type: 'password', autocomplete: 'new-password', placeholder: 'at least 10 characters' });
       await openDialog({
@@ -822,10 +908,10 @@ export default {
     // Followed last: what is known from an earlier visit paints at once,
     // with everything above defined. The status comes every 1.5 s while a
     // deploy runs, to show its steps, and every 5 s otherwise.
-    ctx.follow(site, (data) => { st = data; paintAll(); }, () => (st && st.deploy && st.deploy.state === 'running' ? 1500 : 5000));
-    ctx.follow(builders, () => { if (st) paintBuilders(); }, SLOW_MS);
-    ctx.follow(proposals, () => { if (st) paintProposals(); }, SLOW_MS);
+    ctx.follow(site, (data) => { st = data; paintAll(data); }, () => (st && st.deploy && st.deploy.state === 'running' ? 1500 : 5000));
+    ctx.follow(builders, () => { if (st) paintBuilders(st); }, SLOW_MS);
+    ctx.follow(proposals, () => { if (st) paintProposals(st); }, SLOW_MS);
     ctx.follow(secrets, paintSecrets, SLOW_MS);
     ctx.follow(users, paintPeople, SLOW_MS);
   },
-};
+});

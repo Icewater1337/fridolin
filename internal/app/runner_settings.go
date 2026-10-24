@@ -25,17 +25,17 @@ func withArgsBeforePrint(args, extra []string) []string {
 	return append(out, args[len(args)-1:]...)
 }
 
-// excludeInstructionsAbove returns the --settings for a brain in dir that
-// keep the CLI from loading your instructions above the folder, which
-// --setting-sources does not cover: the CLI reads the CLAUDE.md files and
-// .claude rules of every folder up to / as part of the project, and your
-// user memory in ~/.claude whatever the sources. Its claudeMdExcludes
+// excludeInstructionsAbove returns the --settings for a brain in dir, with
+// home the home folder, that keep the CLI from loading your instructions
+// above the folder, which --setting-sources does not cover: the CLI reads
+// the CLAUDE.md files and .claude rules of every folder up to / as part of
+// the project, and your user memory in ~/.claude whatever the sources. Its claudeMdExcludes
 // setting skips them, and it merges with the brain's own. It does not
 // cover the skills, agents and commands in those .claude folders, nor
 // stop a brain from reading the files with its tools; that takes the
 // sandbox, which denies them all.
-func excludeInstructionsAbove(dir string) string {
-	data, err := json.Marshal(map[string][]string{"claudeMdExcludes": instructionsAbove(dir, HomeDir())})
+func excludeInstructionsAbove(dir, home string) string {
+	data, err := json.Marshal(map[string][]string{"claudeMdExcludes": instructionsAbove(dir, home)})
 	if err != nil {
 		return ""
 	}

@@ -46,6 +46,7 @@ func makeFiles(t *testing.T, root string, paths ...string) {
 }
 
 func TestLayoutOf(t *testing.T) {
+	t.Parallel()
 	root := fsx.Canonical(t.TempDir())
 	makeFiles(t, root,
 		"src/fridolin/go.mod", "src/fridolin/tools/poll_results.py", "src/fridolin/fridolin", "src/fridolin/bin/fridolin",
@@ -86,6 +87,8 @@ func TestLayoutOf(t *testing.T) {
 }
 
 func TestBrainRunsKnowWhereTheToolsAre(t *testing.T) {
+	// Serial: replaces ownLayout, a package variable, and unsets
+	// FRIDOLIN_TOOLS_DIR in the process's environment.
 	// The starter prompt and the example skills run the helpers as
 	// $FRIDOLIN_TOOLS_DIR/<tool>, wherever the bridge is installed.
 	cases := []struct {
@@ -99,7 +102,7 @@ func TestBrainRunsKnowWhereTheToolsAre(t *testing.T) {
 			useLayout(t, platform.BridgeLayout{Tools: c.tools})
 			t.Setenv("FRIDOLIN_TOOLS_DIR", "")
 			os.Unsetenv("FRIDOLIN_TOOLS_DIR")
-			t.Setenv("FRIDOLIN_FAKE_ENV", "FRIDOLIN_TOOLS_DIR")
+			setenv(t, "FRIDOLIN_FAKE_ENV", "FRIDOLIN_TOOLS_DIR")
 			cfg, _ := brainASetup(t)
 			mgr := newTestManager(t, cfg)
 			d := &deliveries{}
@@ -125,8 +128,10 @@ func TestBrainRunsKnowWhereTheToolsAre(t *testing.T) {
 // make check runs outside the sandbox, and one inside the install folder a
 // tool the bridge runs. Both used to be only a warning.
 func TestCheckBrainPathRefusesTheBridgesOwnFolders(t *testing.T) {
+	// Serial: replaces ownLayout, a package variable every brain check
+	// reads.
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	src, lib := home+"/src/fridolin", home+"/.local/lib/fridolin"
 	cfg := &config.File{DataDir: home + "/.fridolin"}
 	const (
@@ -160,10 +165,11 @@ func TestCheckBrainPathRefusesTheBridgesOwnFolders(t *testing.T) {
 }
 
 func TestSandboxProfileProtectsTheBridgesOwnFiles(t *testing.T) {
+	t.Parallel()
 	// launchd runs the bridge outside the sandbox, and setup.sh in the
 	// checkout builds what it runs next: a brain must not write either.
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	makeFiles(t, home,
 		"src/fridolin/go.mod", "src/fridolin/tools/poll_results.py", "src/fridolin/fridolin", "src/fridolin/bin/fridolin",
 		"lib/fridolin/fridolin", "lib/fridolin/tools/poll_results.py",

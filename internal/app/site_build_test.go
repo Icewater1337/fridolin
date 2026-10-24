@@ -25,6 +25,7 @@ import (
 )
 
 func TestBuildChatJIDs(t *testing.T) {
+	t.Parallel()
 	for jid, want := range map[string]string{
 		buildChatJID("web", 1):              "web",
 		buildChatJID("my-site", 12):         "my-site",
@@ -45,6 +46,7 @@ func TestBuildChatJIDs(t *testing.T) {
 // that start with the same ⏳ too, such as the one about Claude's usage
 // limit.
 func TestBuildChatLeavesOutOnlyTheWorkingNotice(t *testing.T) {
+	t.Parallel()
 	m := newTestSite(t)
 	s := siteChatMessenger{appendMessage: m.AppendBuildMessage}
 	for _, tc := range []struct {
@@ -69,9 +71,10 @@ func TestBuildChatLeavesOutOnlyTheWorkingNotice(t *testing.T) {
 // A message on the Build page runs the builder brain in a chat of its own;
 // its answer lands in the page, not in WhatsApp.
 func TestSiteBuildChat(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	argsLog := filepath.Join(t.TempDir(), "args.log")
-	t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
+	setenv(t, "FRIDOLIN_FAKE_ARGS_LOG", argsLog)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "web", Name: "Web"})
 	link := func(ctx context.Context, dir string, _ bool) error {
 		if src := filepath.Join(repoDir, "site", "node_modules"); fsx.Exists(src) {
@@ -80,7 +83,7 @@ func TestSiteBuildChat(t *testing.T) {
 		return nil
 	}
 
-	m := NewSiteManager(sitesvc.SiteOptions{DataDir: tb.cfgs.Get().DataDir,
+	m := NewSiteManager(sitesvc.SiteOptions{DataDir: tb.cfgs.Get().DataDir, Host: siteHostFor(tb.env, func() string { return tb.cfgs.Boot().Home }),
 		GoogleClient: tb.google.ClientPath, Builder: tb.siteBuilderHooks(), NPMInstall: link,
 		WorkspaceInstall: func(ctx context.Context, _, dir string) error { return link(ctx, dir, false) },
 	})
@@ -159,6 +162,7 @@ func TestSiteBuildChat(t *testing.T) {
 // "[1/5]" to "[5/5]" for a page that has no length limit. WhatsApp
 // still gets it in parts.
 func TestLongBuildChatAnswerStaysWhole(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("This is one sentence of a long answer. ", 24)
 	cases := []struct {
 		name  string
@@ -214,6 +218,8 @@ func TestLongBuildChatAnswerStaysWhole(t *testing.T) {
 // The Build page shows the log of the run in flight: from the heading that
 // names its pid to the next run's, never the lines of the runs before it.
 func TestCurrentRunLogIsTheRunsOwn(t *testing.T) {
+	// Serial: "no file left open" counts the files the whole process has
+	// open, and turns its garbage collector off.
 	chatJID := brain.Inbound{Inbound: chat.Inbound{JID: buildChatJID("web", 1), Sender: "dashboard"}}
 	heading := func(pid int) string {
 		return fmt.Sprintf("[10:00:00] ── Run for %s from %s, pid %d, model sonnet ──", chatJID.JID, chatJID.Sender, pid)

@@ -53,6 +53,7 @@ type coreRuntime struct {
 	leaseStore     cloud.ObjectStore
 	leaseSettle    time.Duration
 	leaseRetry     time.Duration
+	leaseClock     lease.Clock
 
 	mu         sync.Mutex
 	node       tailnet.Node
@@ -149,7 +150,7 @@ func (b *App) acquireLease() error {
 	resume := b.lastLeaseHolder(id)
 	held, err := lease.Acquire(ctx, lease.Options{
 		Store: b.core.leaseStore, DeviceID: id, Hostname: host, PID: os.Getpid(), Version: version.String(),
-		Renew: l.Renew(), Stale: l.Stale(), Settle: b.core.leaseSettle, Retry: b.core.leaseRetry,
+		Renew: l.Renew(), Stale: l.Stale(), Settle: b.core.leaseSettle, Retry: b.core.leaseRetry, Clock: b.core.leaseClock,
 		Resume:       resume,
 		OnLost:       b.leaseLost,
 		OnRenew:      func(r lease.Record) { b.setLeaseState(leaseHeld(r)) },

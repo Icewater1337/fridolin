@@ -26,10 +26,12 @@ func makeImmutable(t *testing.T, path string) {
 }
 
 func TestProtectDataDirWarnsWhenChmodFails(t *testing.T) {
+	// Serial: protectDataDir's warnings go to the process's standard logger
+	// (captureLog).
 	// The same goes for a data dir the bridge cannot chmod: it is logged,
 	// and protectDataDir has no error for the caller to stop on.
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	data := filepath.Join(home, "data")
 	mkdirMode(t, data, 0o755)
 	makeImmutable(t, data)

@@ -15,6 +15,7 @@ import (
 // The dashboard shows the required files missing now: one restored
 // stops being reported, one deleted later is, without a restart.
 func TestWarningsFollowTheRequiredFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	a, b := filepath.Join(dir, "a.json"), filepath.Join(dir, "b.json")
 	tb := newTestBridge(t, `, "startup_checks": {"required_files": ["`+a+`", "`+b+`"], "hint": "restore them"}`)
@@ -41,6 +42,7 @@ func TestWarningsFollowTheRequiredFiles(t *testing.T) {
 // The alert goes out once per change of what is missing, not on every
 // look, and again once a file goes missing after all were back.
 func TestRequiredFilesAlertOncePerChange(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	a := filepath.Join(dir, "a.json")
 	tb := newTestBridge(t, `, "startup_checks": {"required_files": ["`+a+`"], "notify_whatsapp": true}`)

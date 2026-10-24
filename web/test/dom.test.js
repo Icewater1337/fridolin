@@ -11,9 +11,10 @@ test('reconcile keeps the nodes of unchanged items', () => {
   const ul = h('ul', h('span.spinner'));
   reconcile(ul, [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], (x) => x.id, row);
   assert.deepEqual(texts(ul), ['A', 'B'], 'the spinner made way');
-  const [a, b] = ul.children;
+  const [a, b] = /** @type {FakeElement[]} */ ([...ul.children]);
   a.value = 'typed'; // what a person typed, or any other state of the node
 
+  /** @type {[string, {id: string, text: string}[], string[]][]} */
   const cases = [
     ['the same items', [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }], ['A', 'B']],
     ['one more at the top', [{ id: 'c', text: 'C' }, { id: 'a', text: 'A' }, { id: 'b', text: 'B' }], ['C', 'A', 'B']],
@@ -23,8 +24,9 @@ test('reconcile keeps the nodes of unchanged items', () => {
   for (const [name, list, want] of cases) {
     reconcile(ul, list, (x) => x.id, row);
     assert.deepEqual(texts(ul), want, name);
-    assert.equal(ul.children.find((n) => n.dataset.id === 'a'), a, `${name}: a is the same node`);
-    assert.equal(ul.children.find((n) => n.dataset.id === 'b'), b, `${name}: b is the same node`);
+    const nodes = /** @type {HTMLElement[]} */ ([...ul.children]);
+    assert.equal(nodes.find((n) => n.dataset.id === 'a'), a, `${name}: a is the same node`);
+    assert.equal(nodes.find((n) => n.dataset.id === 'b'), b, `${name}: b is the same node`);
   }
   assert.equal(a.value, 'typed');
 });
@@ -47,6 +49,7 @@ test('reconcile moves nodes only when the order changed', () => {
 
 test('a changed item is updated in place, or rebuilt', () => {
   installDom();
+  /** @type {[string, boolean][]} */
   const cases = [
     ['without update(), the node is rebuilt', false],
     ['with update(), the node refreshes itself', true],
@@ -56,6 +59,7 @@ test('a changed item is updated in place, or rebuilt', () => {
     let built = 0;
     const render = (item) => {
       built++;
+      /** @type {HTMLLIElement & {update?: (next: {text: string}) => void}} */
       const li = row(item);
       if (withUpdate) li.update = (next) => { li.textContent = next.text; };
       return li;
@@ -98,6 +102,7 @@ test('paint builds a region again only when its data changed', () => {
 
 test('syncOptions keeps the choice while it is offered', () => {
   installDom();
+  /** @type {[string, string, [string, string][], string | undefined, string][]} */
   const cases = [
     // name, chosen before, new options, fallback, chosen after
     ['still offered', 'b', [['a', 'A'], ['b', 'B'], ['c', 'C']], undefined, 'b'],
@@ -111,7 +116,8 @@ test('syncOptions keeps the choice while it is offered', () => {
     sel.value = before;
     syncOptions(sel, options, fallback);
     assert.equal(sel.value, want, name);
-    assert.deepEqual(sel.children.map((o) => [o.value, o.textContent]), options, name);
+    const shown = /** @type {HTMLOptionElement[]} */ ([...sel.children]);
+    assert.deepEqual(shown.map((o) => [o.value, o.textContent]), options, name);
   }
   const sel = h('select', h('option', { value: 'a' }, 'A'));
   const opt = sel.firstChild;

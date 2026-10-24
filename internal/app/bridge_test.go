@@ -29,8 +29,9 @@ func writeConfig(t *testing.T, body string) string {
 }
 
 func TestLoadConfigDefaults(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	cfg, err := LoadConfig(writeConfig(t, `{}`))
+	t.Parallel()
+	setenv(t, "HOME", t.TempDir())
+	cfg, err := loadConfig(t, writeConfig(t, `{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,6 +48,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 
 // max_media_mb defaults to 100 and must stay within what WhatsApp can send.
 func TestLoadConfigMaxMediaMB(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		body string
 		want int // 0: rejected
@@ -60,8 +62,8 @@ func TestLoadConfigMaxMediaMB(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.body, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
-			cfg, err := LoadConfig(writeConfig(t, c.body))
+			setenv(t, "HOME", t.TempDir())
+			cfg, err := loadConfig(t, writeConfig(t, c.body))
 			if c.want == 0 {
 				if err == nil {
 					t.Errorf("loaded with max_media_mb %d, want an error", cfg.MaxMediaMB)
@@ -82,9 +84,10 @@ func TestLoadConfigMaxMediaMB(t *testing.T) {
 }
 
 func TestLoadConfigExpandsHome(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	cfg, err := LoadConfig(writeConfig(t, `{
+	setenv(t, "HOME", home)
+	cfg, err := loadConfig(t, writeConfig(t, `{
 		"data_dir": "~/data",
 		"brain_mode": true,
 		"brain_dirs": [{"path": "~/brains/a", "approved": {"id": "a", "name": "A"}}]
@@ -112,13 +115,15 @@ func mkdirMode(t *testing.T, dir string, mode os.FileMode) {
 }
 
 func TestNewBridgeMakesDataDirPrivate(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	// protectDataDir does not run on config loads, so starting the bridge
 	// is what must call it.
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	data := filepath.Join(home, "data")
 	mkdirMode(t, data, 0o755)
-	cfgs, err := OpenConfigStore(writeConfig(t, `{"brain_mode": true, "data_dir": "`+data+`"}`))
+	cfgs, err := openConfigStore(t, writeConfig(t, `{"brain_mode": true, "data_dir": "`+data+`"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,18 +142,20 @@ func TestNewBridgeMakesDataDirPrivate(t *testing.T) {
 }
 
 func TestConfigWritesLeaveFolderModesAlone(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	// effective() runs on every load and on every dashboard save. Changing
 	// modes there would act on a folder typed into Settings before any
 	// restart, and its warnings would repeat on every write.
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	data := filepath.Join(home, "data")
 	shared := filepath.Join(home, "shared")
 	mkdirMode(t, data, 0o755)
 	mkdirMode(t, shared, 0o755)
 	logs := captureLog(t)
 
-	cs, err := OpenConfigStore(writeConfig(t, `{"data_dir": "`+data+`", "db_path": "`+shared+`/bridge.db"}`))
+	cs, err := openConfigStore(t, writeConfig(t, `{"data_dir": "`+data+`", "db_path": "`+shared+`/bridge.db"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,14 +174,16 @@ func TestConfigWritesLeaveFolderModesAlone(t *testing.T) {
 }
 
 func TestLoadConfigAllowsNoBrains(t *testing.T) {
+	t.Parallel()
 	// A fresh install starts with no brains and adds them in the dashboard.
-	t.Setenv("HOME", t.TempDir())
-	if _, err := LoadConfig(writeConfig(t, `{"brain_mode":true,"brain_dirs":[]}`)); err != nil {
+	setenv(t, "HOME", t.TempDir())
+	if _, err := loadConfig(t, writeConfig(t, `{"brain_mode":true,"brain_dirs":[]}`)); err != nil {
 		t.Fatalf("an empty brain list must load: %v", err)
 	}
 }
 
 func TestLoadConfigMaxChunkSize(t *testing.T) {
+	t.Parallel()
 	// Below 100 the "[i/N] " numbering leaves too little room for text;
 	// such a limit is refused at load time rather than quietly changed.
 	cases := []struct {
@@ -191,8 +200,8 @@ func TestLoadConfigMaxChunkSize(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
-			cfg, err := LoadConfig(writeConfig(t, tc.body))
+			setenv(t, "HOME", t.TempDir())
+			cfg, err := loadConfig(t, writeConfig(t, tc.body))
 			if tc.want == 0 {
 				if err == nil || !strings.Contains(err.Error(), "max_chunk_size") {
 					t.Fatalf("expected a max_chunk_size error, got %v", err)
@@ -210,7 +219,8 @@ func TestLoadConfigMaxChunkSize(t *testing.T) {
 }
 
 func TestExampleConfigIsValid(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Parallel()
+	setenv(t, "HOME", t.TempDir())
 	example, err := os.ReadFile(filepath.Join(repoDir, "config.example.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -218,7 +228,7 @@ func TestExampleConfigIsValid(t *testing.T) {
 	cfgPath := writeConfig(t, string(example))
 	if runtime.GOOS != "darwin" {
 		// The example turns the sandbox on, which only macOS can honour.
-		if _, err := LoadConfig(cfgPath); err == nil || !strings.Contains(err.Error(), "sandbox.enabled") {
+		if _, err := loadConfig(t, cfgPath); err == nil || !strings.Contains(err.Error(), "sandbox.enabled") {
 			t.Fatalf("config.example.json on %s: err = %v, want the sandbox.enabled error", runtime.GOOS, err)
 		}
 		// The rest of it must load all the same.
@@ -237,12 +247,14 @@ func TestExampleConfigIsValid(t *testing.T) {
 		}
 		cfgPath = writeConfig(t, string(data))
 	}
-	if _, err := LoadConfig(cfgPath); err != nil {
+	if _, err := loadConfig(t, cfgPath); err != nil {
 		t.Fatalf("config.example.json does not load: %v", err)
 	}
 }
 
 func TestLogDMAccessWarnsWhenAnyoneCanDM(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	yes, no := true, false
 	open := &config.File{AllowAnyDM: &yes}
 	unset := &config.File{}
@@ -282,7 +294,7 @@ func TestLogDMAccessWarnsWhenAnyoneCanDM(t *testing.T) {
 func newTestManager(t *testing.T, cfg *config.Settings) *BrainManager {
 	t.Helper()
 	requireTestDataDir(t, cfg)
-	mgr, err := NewBrainManager(cfg)
+	mgr, err := newBrainManager(cfg, envOf(t), *optionsOf(t).waits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,10 +302,11 @@ func newTestManager(t *testing.T, cfg *config.Settings) *BrainManager {
 }
 
 func TestBrainRouting(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := loadConfig(t, writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
 		brainFolder(t, home+"/p", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
@@ -322,9 +335,10 @@ func TestBrainRouting(t *testing.T) {
 // Route honours a brain named on the message before routing by chat, and a
 // named brain that is gone is never swapped for the chat's owner.
 func TestRouteHonoursTheNamedBrain(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	cfg, err := LoadConfig(writeConfig(t, `{
+	setenv(t, "HOME", home)
+	cfg, err := loadConfig(t, writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
 		brainFolder(t, home+"/p", manifest.Manifest{ID: "personal", Routing: manifest.Routing{HandlesDMs: true}}),
@@ -365,6 +379,7 @@ func TestRouteHonoursTheNamedBrain(t *testing.T) {
 // which WhatsApp may use instead of each other; a group goes by its JID
 // only.
 func TestChatJIDs(t *testing.T) {
+	t.Parallel()
 	const (
 		pn    = "15551234567@s.whatsapp.net"
 		lid   = "15559876543@lid"
@@ -390,10 +405,11 @@ func TestChatJIDs(t *testing.T) {
 }
 
 func TestBrainRoutingFallsBackToFirstBrain(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := loadConfig(t, writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data"`+brainDirsJSON(t, brainFolder(t, home+"/o", manifest.Manifest{ID: "only"}))+`
 	}`))
@@ -409,8 +425,9 @@ func TestBrainRoutingFallsBackToFirstBrain(t *testing.T) {
 }
 
 func TestSandboxProfileIsolatesBrains(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 
 	cfg := &config.File{DataDir: filepath.Join(home, "data")}
 	sp := NewSandboxProfiler(map[string][]string{
@@ -434,8 +451,9 @@ func TestSandboxProfileIsolatesBrains(t *testing.T) {
 // token now, so the keychains are denied like the other secrets, after the
 // allow_paths allows, which therefore cannot open them.
 func TestSandboxProfileDeniesSecretsAndTheKeychains(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 
 	cfg := &config.File{DataDir: filepath.Join(home, "data"), Sandbox: config.SandboxConfig{AllowPaths: []string{filepath.Join(home, "Library")}}}
 	profile := mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {"/tmp/a"}}, resolvedSettings(t, cfg)), "a")
@@ -458,10 +476,11 @@ func TestSandboxProfileDeniesSecretsAndTheKeychains(t *testing.T) {
 // OAuth client copy older versions wrote next to it, its own included,
 // whether they are in the data dir or in sandbox.credentials_dir.
 func TestSandboxProfileKeepsCalendarTokensFromBrains(t *testing.T) {
+	t.Parallel()
 	for _, creds := range []string{"", "creds"} {
 		t.Run("credentials_dir "+creds, func(t *testing.T) {
 			home := t.TempDir()
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			cfg := &config.File{DataDir: filepath.Join(home, "data")}
 			if creds != "" {
 				cfg.Sandbox.CredentialsDir = filepath.Join(home, creds)
@@ -479,8 +498,9 @@ func TestSandboxProfileKeepsCalendarTokensFromBrains(t *testing.T) {
 }
 
 func TestSandboxProfileIncludesConfiguredDenies(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 
 	cfg := &config.File{
 		DataDir: filepath.Join(home, "data"),
@@ -501,6 +521,7 @@ func TestSandboxProfileIncludesConfiguredDenies(t *testing.T) {
 // and the bridge's backup and offers the queue and observe modes. Only
 // this test keeps the two sides in step.
 func TestNamesReadOutsideGo(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		file string
 		want []string
@@ -529,6 +550,7 @@ func TestNamesReadOutsideGo(t *testing.T) {
 // TestNamesReadOutsideGo holds to bridgeBackupID; the other modules
 // import it from there, so none can be left behind when it changes.
 func TestDashboardSpellsTheBridgesBackupIDOnce(t *testing.T) {
+	t.Parallel()
 	assets := filepath.Join(repoDir, "web", "assets")
 	err := filepath.WalkDir(assets, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() || filepath.Ext(path) != ".js" || path == filepath.Join(assets, "lib", "brain.js") {

@@ -4,6 +4,7 @@ import { ROUTES } from '../assets/app/routes.js';
 import { matchRoute, routeHref, activeNav, docTitle, credentialFromHash } from '../assets/app/router.js';
 
 test('matchRoute finds the page and its parameters', async (t) => {
+  /** @type {[string, string, string | null, Record<string, string> | null][]} */
   const cases = [
     ['no hash', '', 'overview', {}],
     ['bare #/', '#/', 'overview', {}],
@@ -74,6 +75,7 @@ test('every title names the product the same way', async (t) => {
 });
 
 test('credentialFromHash', async (t) => {
+  /** @type {[string, string, ReturnType<typeof credentialFromHash>][]} */
   const cases = [
     ['no hash', '', null],
     ['a page', '#/overview', null],
