@@ -235,6 +235,7 @@ var routeInventory = []httpRoute{
 	{"POST", "/api/github/disconnect", classAPI, ""},
 	{"GET", "/api/nodes", classAPI, ""},
 	{"POST", "/api/nodes/join-code", classAPI, ""},
+	{"POST", "/api/nodes/core-secrets-transfer", classAPI, ""},
 	{"POST", "/api/nodes/{id}/approve", classAPI, "/api/nodes/n1/approve"},
 	{"POST", "/api/nodes/{id}/approve-commands", classAPI, "/api/nodes/n1/approve-commands"},
 	{"POST", "/api/nodes/{id}/revoke", classAPI, "/api/nodes/n1/revoke"},

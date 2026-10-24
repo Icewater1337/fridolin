@@ -279,6 +279,32 @@ func NodeApprovedReply(name, id, offers string) string {
 	return fmt.Sprintf("✅ *%s* (%s) is approved: it may serve %s. `!fleet` lists it; `!revoke %s` shuts it out again.", name, id, offers, id)
 }
 
+// NodeCoreHostAlert tells the owner that a node asks for core-host, or
+// that its core-host.json changed (changed), which waits for approval
+// again: what approving means (meaning, nodeproto.CoreHostApproval), the
+// device key's fingerprint, and the targets it trusts.
+func NodeCoreHostAlert(name, id, fingerprint string, trusts []string, changed bool, meaning string) string {
+	var b strings.Builder
+	if changed {
+		fmt.Fprintf(&b, "🔐 *%s* (%s) changed its core-host settings, which wait for your approval again.", name, id)
+	} else {
+		fmt.Fprintf(&b, "🔐 *%s* (%s) offers core-host.", name, id)
+	}
+	b.WriteString("\n\n" + meaning)
+	b.WriteString("\n\nDevice key: `" + fingerprint + "`")
+	if len(trusts) > 0 {
+		b.WriteString("\nSends secrets only to: " + strings.Join(trusts, ", "))
+	}
+	fmt.Fprintf(&b, "\n\nYou did not just run `fridolin node core-host` there? Do not approve; `!revoke %s` shuts it out. Otherwise `!approve %s`.", id, id)
+	return b.String()
+}
+
+// NodeCoreHostApprovedNote follows NodeApprovedReply when the approval
+// took in core-host: what that means.
+func NodeCoreHostApprovedNote(meaning string) string {
+	return "🔐 That includes core-host. " + meaning + " `!revoke <id>` takes it back."
+}
+
 // NodeRevokedReply answers !revoke.
 func NodeRevokedReply(name, id string) string {
 	return fmt.Sprintf("🚫 *%s* (%s) is revoked: it is disconnected and refused from now on. To bring it back, it joins again with a new code (`!join`).", name, id)

@@ -25,6 +25,47 @@ type NodesService interface {
 	Call(ctx context.Context, id, method string, params, out any) error
 	StartUpdate(id string, o nodes.UpdateOptions) (string, error)
 	SetUpdateAuto(id string, auto bool) (*nodes.Node, error)
+	CoreSecretsTransfer(ctx context.Context, src, dst string, o nodes.CoreTransferOptions) (nodes.CoreTransferReport, error)
+}
+
+// CoreSecretsTransferRequest is POST /api/nodes/core-secrets-transfer:
+// the host secrets from one core host to another (#187), a dry run
+// unless Run.
+type CoreSecretsTransferRequest struct {
+	Source  string `json:"source"`
+	Target  string `json:"target"`
+	Run     bool   `json:"run"`
+	Replace bool   `json:"replace"`
+}
+
+// CoreSecretsTransferResponse is its answer: the report, and the error
+// that stopped a transfer that was to run.
+type CoreSecretsTransferResponse struct {
+	nodes.CoreTransferReport
+	Error string `json:"error,omitempty"`
+}
+
+// CoreSecretsTransfer answers POST /api/nodes/core-secrets-transfer. A
+// transfer that cannot run, or fails, answers 409 with the report.
+func (a *NodesAPI) CoreSecretsTransfer(w http.ResponseWriter, r *http.Request) {
+	var req CoreSecretsTransferRequest
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.Source == "" || req.Target == "" {
+		WriteErr(w, http.StatusBadRequest, "source and target are the ids of two nodes")
+		return
+	}
+	rep, err := a.Nodes().CoreSecretsTransfer(r.Context(), req.Source, req.Target, nodes.CoreTransferOptions{Run: req.Run, Replace: req.Replace})
+	switch {
+	case errors.Is(err, nodes.ErrUnknownNode), errors.Is(err, nodes.ErrInvalidInput):
+		writeNodeErr(w, err)
+	case err != nil:
+		WriteJSON(w, http.StatusConflict, CoreSecretsTransferResponse{CoreTransferReport: rep, Error: err.Error()})
+	default:
+		WriteJSON(w, http.StatusOK, CoreSecretsTransferResponse{CoreTransferReport: rep})
+	}
 }
 
 // NodesAPI serves /api/nodes.
@@ -281,6 +322,12 @@ func (a *NodesAPI) Call(w http.ResponseWriter, r *http.Request) {
 	// An update goes through POST /api/nodes/{id}/update, which signs it.
 	if slices.Contains(nodeproto.UpdateMethods, req.Method) {
 		WriteErr(w, http.StatusBadRequest, req.Method+" is the core's updates' own; use POST /api/nodes/{id}/update")
+		return
+	}
+	// A transfer's three steps go through POST
+	// /api/nodes/core-secrets-transfer, which checks both sides first.
+	if slices.Contains([]string{nodeproto.MethodCoreSecretsOffer, nodeproto.MethodCoreSecretsSend, nodeproto.MethodCoreSecretsReceive}, req.Method) {
+		WriteErr(w, http.StatusBadRequest, req.Method+" is a host-secrets transfer's own; use POST /api/nodes/core-secrets-transfer (fridolin nodes core-secrets-transfer)")
 		return
 	}
 	params := req.Params
