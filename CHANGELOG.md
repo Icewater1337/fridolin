@@ -10,6 +10,27 @@ for compatibility.
 
 ### Added
 
+- **A guided Google setup.** Settings → Google sign-in (and a brain's
+  Calendar card before any client is set up) walks through Google Cloud
+  Console step by step: a link to each page (in your project once you
+  type its ID), the app name, scopes and redirect with copy buttons,
+  Google's "unverified app" screen and its 100-user cap explained. The
+  client goes in as the JSON file or as its ID and secret, and is checked
+  right after: `POST /api/google/client/check` asks Google's token
+  endpoint about a made-up code, which grants nothing, and says whether
+  Google knows the client. `GET /api/google/client` adds `source`,
+  `builtin` and `scopes` (docs/CALENDAR.md).
+- **A built-in Google client** for publishers' builds:
+  `FRIDOLIN_GOOGLE_CLIENT_ID` and `FRIDOLIN_GOOGLE_CLIENT_SECRET` in the
+  environment of `make build` or `scripts/build-release.sh` bake a Desktop
+  app client into the binary, so its users connect calendars and Drive
+  with one click. Public builds have none. A client pasted under Settings
+  always wins, and the dashboard labels the built-in one.
+- **Google sign-in from another machine.** A dashboard opened over the
+  tailnet opens Google in a new tab and takes the address Google sent it
+  back to (`POST /api/google/callback`), since `http://127.0.0.1:8765/`
+  does not load on that machine.
+
 - **`!movecore`** (#187, third slice): in the owner's direct chat,
   `!movecore <node>` runs the move's pre-flight and answers with a
   plain report (source → target, the expected time offline, what does

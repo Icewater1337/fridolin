@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -18,6 +19,8 @@ type GoogleService interface {
 	Callback(context.Context, url.Values) (string, error)
 	RedirectURI() string
 	Client() *google.Client
+	Builtin() *google.Client
+	CheckClient(context.Context) (google.ClientCheck, error)
 	SetClient([]byte) (*google.Client, error)
 	DeleteClient() error
 	StartSignIn(string) (string, error)
@@ -50,16 +53,65 @@ func (a *GoogleAPI) Callback(w http.ResponseWriter, r *http.Request) {
 
 func (a *GoogleAPI) Client(w http.ResponseWriter, r *http.Request) {
 	g := a.Google()
-	resp := GoogleClientResponse{Configured: false, RedirectURI: g.RedirectURI()}
+	resp := GoogleClientResponse{Configured: false, RedirectURI: g.RedirectURI(), Builtin: g.Builtin() != nil,
+		Scopes: append(google.CalendarScopes(), backup.DriveScope)}
 	if c := g.Client(); c != nil {
 		hint := c.ClientID
 		if i := strings.Index(hint, "-"); i > 0 {
 			hint = hint[:i] + "-…"
 		}
-		clientType := c.Type
-		resp.Configured, resp.Type, resp.ClientIDHint = true, &clientType, &hint
+		clientType, source := c.Type, c.Source
+		resp.Configured, resp.Type, resp.ClientIDHint, resp.Source = true, &clientType, &hint, &source
 	}
 	WriteJSON(w, http.StatusOK, resp)
+}
+
+// CheckClient checks the client sign-ins use, with a request to Google
+// that grants nothing (google.CheckClient).
+func (a *GoogleAPI) CheckClient(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	res, err := a.Google().CheckClient(ctx)
+	if errors.Is(err, google.ErrNoClient) {
+		WriteErr(w, http.StatusPreconditionFailed, err.Error())
+		return
+	}
+	if err != nil {
+		WriteErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, res)
+}
+
+// PastedCallback finishes a sign-in whose return address did not load: a
+// dashboard opened from another machine (the core over the tailnet, say)
+// sends the browser back to the bridge's loopback address on that
+// machine, where nothing answers. The owner pastes the address from the
+// browser's address bar instead; its one-time state ties it to a sign-in
+// the dashboard started, as at the redirect itself.
+func (a *GoogleAPI) PastedCallback(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := DecodeJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	u, err := url.Parse(strings.TrimSpace(req.URL))
+	q := url.Values{}
+	if err == nil {
+		q = u.Query()
+	}
+	if err != nil || q.Get("state") == "" || (q.Get("code") == "" && q.Get("error") == "") {
+		WriteErr(w, http.StatusUnprocessableEntity, "that is not the address Google sent the browser to: copy the whole address of the page that did not load, starting with http://127.0.0.1")
+		return
+	}
+	redirect, err := a.Google().Callback(r.Context(), q)
+	if err != nil {
+		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, GoogleCallbackResponse{Redirect: redirect})
 }
 
 func (a *GoogleAPI) SetClient(w http.ResponseWriter, r *http.Request) {

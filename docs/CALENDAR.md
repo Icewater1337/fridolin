@@ -6,39 +6,117 @@ account's calendars: list events, find free time, create and delete events.
 ## One-time setup: a Google OAuth client
 
 Google only lets an app ask for calendar access through an OAuth client that
-belongs to a Google Cloud project. The bridge does not ship one — you create
-your own once, and every brain uses it to sign in.
+belongs to a Google Cloud project. You create your own once, and every
+brain uses it to sign in; the same client connects the
+[Drive backup](BACKUP.md#use-your-own-google-client). A build whose
+publisher baked a client in needs none of this (see
+[Built-in client](#built-in-client)).
 
-1. Open [Google Cloud Console](https://console.cloud.google.com/), pick or
-   create a project, and **enable the Google Calendar API**
-   (APIs & Services → Library → Google Calendar API → Enable).
-2. **Consent screen** (APIs & Services → OAuth consent screen): choose
-   *External*, fill in an app name and your email.
-   - While the app is in *Testing*, add every Google account a brain will
-     sign in with as a *test user*. Google expires sign-ins of apps in
-     Testing after **7 days**.
-   - To avoid that, *publish* the app (Publishing status → In production).
-     Since it is only used by you, there is nothing to verify; Google shows
-     an "unverified app" notice during sign-in, which you can continue past.
-3. **Credentials → Create credentials → OAuth client ID → Desktop app.**
-   Download the JSON.
-4. In the dashboard: **Settings → Google sign-in**, paste the JSON (or pick
-   the file) and save.
+The dashboard walks you through it: **Settings → Google sign-in** (or a
+brain's Calendar card, before any client is set up). It lists the steps
+below, each with a link straight to the right page of Google Cloud
+Console, the values to type with copy buttons, and, once you type your
+project's ID, links that open that project. It takes about ten minutes.
 
-A *Desktop app* client is the right type: Google lets it return to the bridge
-on `http://127.0.0.1:<port>/` without any further setup. A *Web application*
-client also works if you add the bridge's address
-(`http://127.0.0.1:8765/` by default) to its authorised redirect URIs. The
-address is the one the bridge is serving on: a changed `http_listen` counts
-for sign-ins only after the restart that moves the dashboard there.
+1. **Create a project** ([New project](https://console.cloud.google.com/projectcreate)),
+   named *Fridolin* say, or use one you have. Type its project ID into the
+   dashboard, and the following links open it.
+2. **Enable the APIs**: one page enables the Google Calendar API and the
+   Google Drive API together
+   ([link](https://console.cloud.google.com/flows/enableapi?apiid=calendar-json.googleapis.com,drive.googleapis.com)).
+   Drive is for backups; leave it out if you will not back up to Drive.
+3. **Consent screen** ([Google Auth Platform](https://console.cloud.google.com/auth/overview);
+   older consoles: APIs & Services → OAuth consent screen) → *Get started*:
+   - App name *Fridolin*, your address as the user support email;
+     audience **External**; your address as the contact.
+   - [Branding](https://console.cloud.google.com/auth/branding): leave
+     **Authorised domains** empty. A Desktop app client returns to the
+     bridge on this machine (`http://127.0.0.1:8765/`), which needs no
+     domain, and Fridolin needs no homepage or privacy-policy link.
+   - [Data access](https://console.cloud.google.com/auth/scopes) → *Add or
+     remove scopes* → *Manually add scopes*: the dashboard lists the four
+     with copy buttons — `calendar.events`, `calendar.events.freebusy`,
+     `calendar.calendarlist.readonly` (the calendar's, below) and
+     `drive.file` (the backup's), each under
+     `https://www.googleapis.com/auth/`. A brain's calendar sign-in never
+     asks for Drive, nor the Drive sign-in for calendars.
+   - [Audience](https://console.cloud.google.com/auth/audience) →
+     **Publish app**, so the status reads *In production*. An app left in
+     *Testing* works only for the test users you list, and Google ends
+     their sign-ins after **7 days**.
+4. **Create the client** ([Create client](https://console.cloud.google.com/auth/clients/create)):
+   application type **Desktop app**, name *Fridolin*. A Desktop app client
+   needs no redirect URI: Google lets it return to the bridge on
+   `http://127.0.0.1:<port>/` on its own.
+5. **Add it in the dashboard**: paste the JSON the dialog offers to
+   download (or pick the file), or copy the client ID and secret into the
+   two fields. Google shows a new client's secret only once, when it is
+   created; on the client's page you can add a new one.
+6. **The check.** Saving checks the client right away: that the ID looks
+   like Google's, which redirect it needs, and whether Google knows the ID
+   and secret. For the last the bridge asks Google's token endpoint to
+   trade in a made-up code, which grants nothing: Google refuses an ID or
+   secret it does not know (or a deleted client) differently from a bad
+   code. A client the check finds broken is saved but not taken quietly:
+   the dashboard says what is wrong, and you paste it again or keep it
+   anyway. **Check the client** under Settings runs it again.
 
-The client file is stored in `~/.fridolin/google/`, which brains
-cannot read.
+A *Web application* client also works if you add the bridge's address
+(`http://127.0.0.1:8765/` by default, the dashboard shows it) to its
+authorised redirect URIs; Google checks that only at the first sign-in, so
+the check can only remind you. The address is the one the bridge is
+serving on: a changed `http_listen` counts for sign-ins only after the
+restart that moves the dashboard there.
 
-The same client also connects the [Drive backup](BACKUP.md#use-your-own-google-client):
-enable the Google Drive API in its project and add the `drive.file` scope
-to its consent screen. A brain's calendar sign-in never asks for Drive,
-nor the Drive sign-in for calendars.
+The client file is stored in `~/.fridolin/google/`, which brains cannot
+read. The dashboard never shows the secret again, and the bridge never
+logs it.
+
+### "Google hasn't verified this app", and the 100-user cap
+
+Your app is in production but not verified, so every sign-in first shows
+**"Google hasn't verified this app"**. That is expected: Google verifies
+apps offered to the public, and this one is yours. Click **Advanced**, then
+**Go to Fridolin (unsafe)** (your app's name), and allow access.
+
+An unverified app may be used by at most **100 Google accounts** in its
+lifetime. Each account that signs in counts once; signing in again does
+not count again. One person's accounts, and their family's, are far from
+that, so there is nothing to apply for.
+
+### Built-in client
+
+A publisher who builds Fridolin for other people can bake a Desktop app
+client of their own project into the binary, so that its users connect
+with one click and skip the setup:
+
+```bash
+FRIDOLIN_GOOGLE_CLIENT_ID=….apps.googleusercontent.com \
+FRIDOLIN_GOOGLE_CLIENT_SECRET=GOCSPX-… make build
+```
+
+`make build` and `scripts/build-release.sh` read the two variables from
+the environment (the line `make` prints names them without their values)
+and pass them to `go build -ldflags -X` (`internal/google/builtin.go`). The
+public builds leave them unset and have no built-in client. With one,
+Settings → Google sign-in says **Built-in client** and the setup steps are
+skipped; the Drive backup uses it too, so its project needs both APIs and
+all four scopes. A client you paste under Settings always takes its place;
+brains that connected with the built-in one keep refreshing with it until
+they connect again. Users of a published build see the publisher's app
+name on Google's consent screen, and count towards that app's 100-user cap
+until the publisher has it verified.
+
+### A dashboard opened from another machine
+
+Google sends the browser back to `http://127.0.0.1:8765/`: the bridge on
+the machine that runs the browser. When you open the dashboard from
+another machine — the core over the tailnet, say — that address does not
+load there. The dashboard then opens Google's sign-in in a tab of its own
+and shows a box: copy the whole address of the tab that did not load
+(`http://127.0.0.1:8765/?state=…&code=…`) and paste it there. Its
+one-time state ties it to the sign-in you started, so it works once, within
+15 minutes. The Backup page does the same for the Drive link.
 
 ## Connecting a brain
 
@@ -179,6 +257,9 @@ brain's old token.
 
 ## Troubleshooting
 
+- **The check says "Google does not accept this client ID and secret"** —
+  a typo, a secret Google replaced, or a deleted client. Copy both again
+  from the client's page in Google Cloud Console, or create a new client.
 - **"redirect_uri_mismatch"** — you are using a *Web application* client; add
   `http://127.0.0.1:8765/` to its redirect URIs, or create a Desktop app client.
 - **"Access blocked: app has not completed verification"** — the account is

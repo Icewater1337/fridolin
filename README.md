@@ -535,9 +535,10 @@ sends. [docs/API.md](docs/API.md) is their full contract.
 
 Dashboard → *Brains → brain → Calendar → Connect Google Calendar*: sign in
 with the account for that brain and tick the calendars it may use. It needs a
-Google OAuth client, which you create once in Google Cloud Console and paste
-under *Settings → Google sign-in*. Step by step:
-[docs/CALENDAR.md](docs/CALENDAR.md).
+Google OAuth client, which you create once in Google Cloud Console: *Settings
+→ Google sign-in* walks you through it, with a link to each page, the values
+to copy and a check of the client once you paste it. A build with a built-in
+client skips that. Details: [docs/CALENDAR.md](docs/CALENDAR.md).
 
 ### GitHub
 

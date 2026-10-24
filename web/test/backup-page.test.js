@@ -268,7 +268,7 @@ test('without a Google client, connecting asks for one first', async (t) => {
   const { root } = await renderWith(t, { ...disconnected(), client: null, redirect_uri: 'http://127.0.0.1:8765/' });
   const connect = root.querySelectorAll('button').find((b) => b.textContent === 'Connect Google Drive');
   assert.ok(connect && connect.disabled, 'Connect waits for a client');
-  assert.ok(root.textContent.includes('enable the Google Drive API'), root.textContent);
+  assert.ok(root.textContent.includes('Enable the Google Drive API'), root.textContent);
   assert.ok(root.querySelector('textarea'), 'a box to paste a client for Drive');
 });
 

@@ -86,6 +86,8 @@ POST /api/fs/pick
 POST /api/github/connect
 POST /api/github/disconnect
 POST /api/github/test
+POST /api/google/callback
+POST /api/google/client/check
 POST /api/login
 POST /api/login/code
 POST /api/logout

@@ -31,10 +31,13 @@ import (
 // Google sign-in for calendars.
 //
 // Google only lets an app ask for calendar access through an OAuth client
-// registered in a Google Cloud project. The bridge does not ship one: you
-// create a "Desktop app" client once (docs/CALENDAR.md) and paste its JSON
-// into the dashboard. After that every brain connects its own Google account
-// with a normal sign-in in the browser — no API keys, no files to copy.
+// registered in a Google Cloud project. The public builds ship none: you
+// create a "Desktop app" client once (the dashboard's Settings → Google
+// sign-in walks through it, docs/CALENDAR.md too) and paste it there. A
+// publisher's build may carry a built-in one instead (builtin.go), which a
+// pasted client always overrides. After that every brain connects its own
+// Google account with a normal sign-in in the browser — no API keys, no
+// files to copy.
 //
 // The sign-in returns to the bridge itself (http://127.0.0.1:<port>/), which
 // Google allows for Desktop app clients. The resulting token is written to
@@ -55,6 +58,10 @@ var calendarScopes = []string{
 	"https://www.googleapis.com/auth/calendar.events.freebusy",       // free: the busy times of the brain's calendars
 	"https://www.googleapis.com/auth/calendar.calendarlist.readonly", // the account's calendars, for the brain's page and `calendars`
 }
+
+// CalendarScopes are what a brain's calendar sign-in asks for, for the
+// setup steps that list them on the consent screen.
+func CalendarScopes() []string { return slices.Clone(calendarScopes) }
 
 // missingScopes are the calendarScopes granted lacks. Google's consent
 // screen lets the person untick some of them.
@@ -103,7 +110,10 @@ type Client struct {
 	Type         string // installed or web
 	ClientID     string
 	ClientSecret string
-	raw          []byte
+	// Source is SourceOwn or SourceBuiltin for the client a sign-in uses
+	// (Auth.Client); "" for one only parsed.
+	Source string
+	raw    []byte
 }
 
 // ParseClient reads the JSON Google Cloud Console offers for download.
@@ -163,11 +173,13 @@ type oauthPending struct {
 // Options supplies startup paths and the live configuration operations
 // consumed by Google sign-in. The command owns configuration and manifests.
 type Options struct {
-	Endpoints      Endpoints
-	HTTP           *http.Client
-	ClientPath     string
-	RedirectURI    string
-	CredsDir       func() string
+	Endpoints   Endpoints
+	HTTP        *http.Client
+	ClientPath  string
+	RedirectURI string
+	CredsDir    func() string
+	// Builtin is the client baked into the build (BuiltinClient), or nil.
+	Builtin        *Client
 	Configured     func(brainID string) bool
 	UpdateManifest func(brainID string, update func(*manifest.Manifest) error) error
 }
@@ -334,8 +346,18 @@ func calendarTokenBrain(name string) (brainID string, ok bool) {
 	return id, true
 }
 
-// Client returns the configured OAuth client, or nil.
+// Client returns the OAuth client sign-ins use: the one pasted under
+// Settings → Google sign-in, else the build's built-in one, else nil.
 func (g *Auth) Client() *Client {
+	if c := g.OwnClient(); c != nil {
+		return c
+	}
+	return g.Builtin()
+}
+
+// OwnClient returns the client pasted under Settings → Google sign-in, or
+// nil.
+func (g *Auth) OwnClient() *Client {
 	data, err := os.ReadFile(g.ClientPath())
 	if err != nil {
 		return nil
@@ -344,7 +366,31 @@ func (g *Auth) Client() *Client {
 	if err != nil {
 		return nil
 	}
+	c.Source = SourceOwn
 	return c
+}
+
+// Builtin returns the client baked into the build, or nil.
+func (g *Auth) Builtin() *Client {
+	if b := g.options.Builtin; b != nil && b.ClientID != "" && b.ClientSecret != "" {
+		c := *b
+		c.Type, c.Source = "installed", SourceBuiltin
+		return &c
+	}
+	return nil
+}
+
+// clientFor is the client that issued a token for clientID: a refresh
+// token works only with that one. A brain that signed in with the built-in
+// client keeps refreshing with it after you paste a client of your own,
+// until it connects again. Nil when neither is that client.
+func (g *Auth) clientFor(clientID string) *Client {
+	for _, c := range []*Client{g.OwnClient(), g.Builtin()} {
+		if c != nil && c.ClientID == clientID {
+			return c
+		}
+	}
+	return nil
 }
 
 // SetClient validates and stores the OAuth client file.
@@ -816,13 +862,14 @@ func (g *Auth) AccessToken(ctx context.Context, brainID string) (*Token, error) 
 	}
 	// A brain the sandbox does not hold can write its token file, so the
 	// client in it is not trusted: the refresh uses yours, at Google's
-	// fixed endpoint. A refresh token works only with the client that
-	// issued it, so a token from another client cannot be refreshed here.
-	c := g.Client()
-	if c == nil {
+	// fixed endpoint, or the built-in one. A refresh token works only with
+	// the client that issued it, so a token from another client cannot be
+	// refreshed here.
+	if g.Client() == nil {
 		return nil, &signInError{errors.New("add your Google OAuth client first (Settings → Google sign-in)")}
 	}
-	if t.ClientID != c.ClientID {
+	c := g.clientFor(t.ClientID)
+	if c == nil {
 		return nil, &signInError{errors.New("this brain signed in with another Google OAuth client than the one in Settings → Google sign-in — connect it again")}
 	}
 	tr, err := g.postToken(ctx, c, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {t.RefreshToken}})

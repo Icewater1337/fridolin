@@ -59,7 +59,7 @@ func driveOAuth(g *google.Auth) backup.OAuth {
 		if c == nil {
 			return nil
 		}
-		return &backup.OAuthClient{Type: c.Type, ClientID: c.ClientID, ClientSecret: c.ClientSecret}
+		return &backup.OAuthClient{Type: c.Type, ClientID: c.ClientID, ClientSecret: c.ClientSecret, Builtin: c.Source == google.SourceBuiltin}
 	}
 	return backup.OAuth{
 		SignInClient: func() *backup.OAuthClient { return convert(g.Client()) },

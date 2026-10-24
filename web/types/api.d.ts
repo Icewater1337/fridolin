@@ -936,7 +936,7 @@ export interface BackupBrainStatus {
 
 /** The Google client a Drive sign-in uses. */
 export interface BackupClientStatus {
-  /** drive (pasted for Drive alone) or google (Settings → Google sign-in). */
+  /** drive (pasted for Drive alone), google (Settings → Google sign-in) or builtin (the build's own). */
   source: string;
   type: string;
   client_id_hint: string;
@@ -1851,14 +1851,37 @@ export interface GitHubStatus {
   error?: string;
 }
 
-/** GET /api/google/client. */
+/** GET /api/google/client: the client sign-ins use, and what its setup needs. */
 export interface GoogleClient {
+  /** This build carries a built-in client, used or not. */
+  builtin: boolean;
   /** The client id's project number. */
   client_id_hint?: string;
   configured: boolean;
   redirect_uri: string;
+  /** The scopes to add on the consent screen: the calendar's and Drive's. */
+  scopes: string[];
+  /** own (pasted under Settings) or builtin (the build's own). */
+  source?: string;
   /** installed or web. */
   type?: string;
+}
+
+/** One thing POST /api/google/client/check looked at. */
+export interface GoogleClientCheckItem {
+  name: string;
+  /** ok, warn or bad. */
+  status: string;
+  detail: string;
+}
+
+/** POST /api/google/client/check. */
+export interface GoogleClientCheck {
+  source: string;
+  type: string;
+  /** The worst of the items' statuses. */
+  status: string;
+  items: GoogleClientCheckItem[];
 }
 
 export interface CalendarEntry {

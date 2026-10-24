@@ -198,6 +198,8 @@ func NewAPIMux(d APIDeps) http.Handler {
 	mux.HandleFunc("GET /api/google/client", d.Google().Client)
 	mux.HandleFunc("PUT /api/google/client", d.Google().SetClient)
 	mux.HandleFunc("DELETE /api/google/client", d.Google().DeleteClient)
+	mux.HandleFunc("POST /api/google/client/check", d.Google().CheckClient)
+	mux.HandleFunc("POST /api/google/callback", d.Google().PastedCallback)
 	mux.HandleFunc("GET /api/brains/{id}/calendar", d.Google().Status)
 	mux.HandleFunc("POST /api/brains/{id}/calendar/connect", d.Google().Connect)
 	mux.HandleFunc("PUT /api/brains/{id}/calendar", d.Google().Select)

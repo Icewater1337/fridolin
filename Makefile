@@ -18,6 +18,12 @@ VERSION  ?= $(shell git describe --tags --always --dirty --abbrev=8 2>/dev/null 
 # Lazy (=), so only a target that builds runs git describe.
 # The variable is version in internal/version.
 VERSION_LDFLAGS = -X github.com/Icewater1337/fridolin/internal/version.version=$(VERSION)
+# A built-in Google OAuth client (internal/google/builtin.go), for a
+# publisher's builds: the shell expands FRIDOLIN_GOOGLE_CLIENT_ID and
+# FRIDOLIN_GOOGLE_CLIENT_SECRET from the environment, so the line make
+# prints names them without their values. Unset, the build has none and
+# its command line stays as it was.
+GOOGLE_LDFLAGS = $(if $(FRIDOLIN_GOOGLE_CLIENT_ID),-X github.com/Icewater1337/fridolin/internal/google.builtinClientID=$${FRIDOLIN_GOOGLE_CLIENT_ID} -X github.com/Icewater1337/fridolin/internal/google.builtinClientSecret=$${FRIDOLIN_GOOGLE_CLIENT_SECRET:-} )
 
 GO     ?= go
 PYTHON ?= python3
@@ -56,7 +62,7 @@ help: ## list the targets
 	@awk -F':.*## ' '/^[a-z-]+:.*## / { printf "  %-14s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 build: ## build bin/fridolin, stamped with VERSION (default: git describe)
-	$(GO) build -trimpath -ldflags "$(VERSION_LDFLAGS)" -o "$(BINARY)" $(MAIN_PKG)
+	$(GO) build -trimpath -ldflags "$(GOOGLE_LDFLAGS)$(VERSION_LDFLAGS)" -o "$(BINARY)" $(MAIN_PKG)
 
 install: build ## copy the binary to BINDIR (default ~/.local/bin)
 	install -d "$(DESTDIR)$(BINDIR)"
