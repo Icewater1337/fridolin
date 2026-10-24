@@ -72,6 +72,9 @@ type Options struct {
 	// still work. compat: until then the Drive sync keeps running, so a
 	// bridge that turns the vault on is never without a backup on Drive.
 	Superseded func() bool
+	// Zone is the owner's time zone, the one daily_at is in; nil is the
+	// process's (time.Local).
+	Zone func() *time.Location
 }
 
 // SettingsChanged runs only after a successful configuration publication.

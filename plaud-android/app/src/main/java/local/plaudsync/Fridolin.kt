@@ -10,15 +10,20 @@ import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.math.BigInteger
+import java.security.KeyFactory
 import java.security.KeyPairGenerator
 import java.security.KeyStore
 import java.security.MessageDigest
 import java.security.PrivateKey
 import java.security.Signature
+import java.security.SecureRandom
 import java.security.interfaces.ECPublicKey
 import java.security.spec.ECGenParameterSpec
+import java.security.spec.ECPoint
+import java.security.spec.ECPublicKeySpec
 import java.util.Base64
 import java.util.concurrent.TimeUnit
+import javax.crypto.KeyAgreement
 
 /**
  * Uploads transcripts to Fridolin through its site (docs/PLAUD.md, "Through your site"), when
@@ -26,9 +31,13 @@ import java.util.concurrent.TimeUnit
  * with, using a key pair made in the Android keystore: the private key never leaves it. Each
  * upload is a JWT (ES256) signed with that key, naming the recording and the transcript's
  * SHA-256. Everything here blocks: call from Dispatchers.IO.
+ *
+ * Voice mode asks Fridolin a question the same way ([ask]) and fetches the answer ([reply]),
+ * which comes back encrypted to a second keystore key, one for key agreement only ([VoiceCrypto]).
  */
 object Fridolin {
     private const val ALIAS = "fridolin-device"
+    private const val VOICE_ALIAS = "fridolin-voice"
     private val b64 = Base64.getUrlEncoder().withoutPadding()
     private val http = OkHttpClient.Builder().callTimeout(60, TimeUnit.SECONDS).build()
 
@@ -40,6 +49,76 @@ object Fridolin {
     /** The id Fridolin gave this phone, or null before pairing. */
     fun device(ctx: Context): String? = prefs(ctx).getString("device", null)
 
+    /** A new id for a voice question. */
+    fun newQuestionId(): String = b64.encodeToString(ByteArray(18).also { SecureRandom().nextBytes(it) })
+
+    /** Where a voice question stands: "waiting", "done" (text is the answer, null when it had none), "failed" or "unknown". */
+    data class Reply(val state: String, val text: String? = null, val error: String? = null)
+
+    /** Sends a voice question, pairing first if need be; its answer comes with [reply]. Throws when it did not arrive. */
+    fun ask(ctx: Context, rid: String, question: ByteArray): String {
+        val device = device(ctx) ?: pair(ctx)
+        val now = System.currentTimeMillis() / 1000
+        val sha256 = b64.encodeToString(MessageDigest.getInstance("SHA-256").digest(question))
+        val jwt = sign(
+            JSONObject().put("iss", device).put("aud", "fridolin:voice").put("iat", now).put("exp", now + 300)
+                .put("rid", rid).put("sha256", sha256).put("enc", voiceJwk())
+        )
+        return unpairedOn401(ctx) {
+            post("/_fridolin/devices/voice/ask", question.toRequestBody("text/plain; charset=utf-8".toMediaType()), jwt).optString("state")
+        }
+    }
+
+    /** The answer to question rid once there; the site holds the request up to 15 seconds while it is not. */
+    fun reply(ctx: Context, rid: String): Reply {
+        val device = device(ctx) ?: throw IllegalStateException("not paired")
+        val now = System.currentTimeMillis() / 1000
+        val jwt = sign(JSONObject().put("iss", device).put("aud", "fridolin:voice-reply").put("iat", now).put("exp", now + 300).put("rid", rid))
+        val r = unpairedOn401(ctx) { post("/_fridolin/devices/voice/reply", ByteArray(0).toRequestBody(null), jwt) }
+        val state = r.optString("state")
+        val text = r.optJSONObject("reply")?.let { open(rid, it) }
+        return Reply(state, text, r.optString("error").takeIf { it.isNotEmpty() })
+    }
+
+    private fun <T> unpairedOn401(ctx: Context, call: () -> T): T = try {
+        call()
+    } catch (e: Refused) {
+        // Unpaired on the dashboard: the next try pairs again, which works with a new build.
+        if (e.code == 401) prefs(ctx).edit().remove("device").apply()
+        throw e
+    }
+
+    /** Opens a sealed answer with the voice key, which never leaves the keystore. */
+    private fun open(rid: String, sealed: JSONObject): String {
+        val d = Base64.getUrlDecoder()
+        val epk = sealed.getJSONObject("epk")
+        val (private, public) = voiceKeys()
+        val point = ECPoint(BigInteger(1, d.decode(epk.getString("x"))), BigInteger(1, d.decode(epk.getString("y"))))
+        val theirs = KeyFactory.getInstance("EC").generatePublic(ECPublicKeySpec(point, public.params))
+        val secret = KeyAgreement.getInstance("ECDH", "AndroidKeyStore").run {
+            init(private)
+            doPhase(theirs, true)
+            generateSecret()
+        }
+        return VoiceCrypto.open(secret, rid, d.decode(sealed.getString("iv")), d.decode(sealed.getString("ct")))
+    }
+
+    private fun voiceKeys(): Pair<PrivateKey, ECPublicKey> {
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        if (!ks.containsAlias(VOICE_ALIAS)) {
+            KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, "AndroidKeyStore").apply {
+                initialize(
+                    KeyGenParameterSpec.Builder(VOICE_ALIAS, KeyProperties.PURPOSE_AGREE_KEY)
+                        .setAlgorithmParameterSpec(ECGenParameterSpec("secp256r1"))
+                        .build()
+                )
+            }.generateKeyPair()
+        }
+        return (ks.getKey(VOICE_ALIAS, null) as PrivateKey) to (ks.getCertificate(VOICE_ALIAS).publicKey as ECPublicKey)
+    }
+
+    private fun voiceJwk(): JSONObject = jwkOf(voiceKeys().second)
+
     /** Uploads one transcript, pairing first if need be. Throws when it did not arrive. */
     fun upload(ctx: Context, name: String, text: ByteArray) {
         val device = device(ctx) ?: pair(ctx)
@@ -49,13 +128,7 @@ object Fridolin {
             JSONObject().put("iss", device).put("aud", "fridolin:plaud-transcript")
                 .put("iat", now).put("exp", now + 300).put("name", name).put("sha256", sha256)
         )
-        try {
-            post("/_fridolin/devices/plaud/transcripts", text.toRequestBody("text/plain; charset=utf-8".toMediaType()), jwt)
-        } catch (e: Refused) {
-            // Unpaired on the dashboard: the next try pairs again, which works with a new build.
-            if (e.code == 401) prefs(ctx).edit().remove("device").apply()
-            throw e
-        }
+        unpairedOn401(ctx) { post("/_fridolin/devices/plaud/transcripts", text.toRequestBody("text/plain; charset=utf-8".toMediaType()), jwt) }
     }
 
     private fun pair(ctx: Context): String {
@@ -99,8 +172,10 @@ object Fridolin {
         return (ks.getKey(ALIAS, null) as PrivateKey) to (ks.getCertificate(ALIAS).publicKey as ECPublicKey)
     }
 
-    private fun jwk(): JSONObject {
-        val w = keys().second.w
+    private fun jwk(): JSONObject = jwkOf(keys().second)
+
+    private fun jwkOf(key: ECPublicKey): JSONObject {
+        val w = key.w
         return JSONObject().put("kty", "EC").put("crv", "P-256")
             .put("x", b64.encodeToString(bytes32(w.affineX))).put("y", b64.encodeToString(bytes32(w.affineY)))
     }

@@ -1,0 +1,7 @@
+PUT /api/files/text
+404 Not Found
+Content-Type: application/json
+
+{
+  "error": "no such file or folder"
+}

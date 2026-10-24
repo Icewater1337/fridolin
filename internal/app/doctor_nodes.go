@@ -91,10 +91,12 @@ type doctorNode struct {
 		Error string `json:"error"`
 	} `json:"update"`
 	Declared struct {
+		Exec         *nodeproto.ExecCap         `json:"exec"`
 		Fride        *nodeproto.FrideCap        `json:"fride"`
 		AndroidBuild *nodeproto.AndroidBuildCap `json:"android_build"`
 	} `json:"declared"`
 	Approved struct {
+		Exec         *nodeproto.ExecCap         `json:"exec"`
 		Fride        *nodeproto.FrideCap        `json:"fride"`
 		AndroidBuild *nodeproto.AndroidBuildCap `json:"android_build"`
 	} `json:"approved"`
@@ -221,6 +223,47 @@ func checkNodesFride(ctx context.Context, env *DoctorEnv) DoctorResult {
 	}
 	slices.Sort(ok)
 	return DoctorResult{Status: DoctorOK, Detail: "FrIDE answers on " + strings.Join(ok, ", ")}
+}
+
+// checkNodesPrograms warns about approved command agents whose node does
+// not run their program: not in its allowlist, and not added by the core.
+func checkNodesPrograms(ctx context.Context, env *DoctorEnv) DoctorResult {
+	cmds := approvedCommands(env.Config.BrainDirs)
+	if len(cmds) == 0 {
+		return DoctorResult{Status: DoctorOK, Detail: "no approved agent runs a program on a node"}
+	}
+	list, res := readNodes(ctx, env)
+	if res != nil {
+		return *res
+	}
+	var bad []string
+	fix := "approve the node's commands on the Nodes page, and add the program's folder to exec.accept_from_core in the node's node.json (docs/NODES.md, Programs from the core)"
+	for _, c := range cmds {
+		i := slices.IndexFunc(list, func(n doctorNode) bool { return n.ID == c.Node })
+		if i < 0 {
+			i = slices.IndexFunc(list, func(n doctorNode) bool { return strings.EqualFold(n.Name, c.Node) })
+		}
+		if i < 0 {
+			bad = append(bad, fmt.Sprintf("%s: there is no node %q", c.Agent, c.Node))
+			continue
+		}
+		n := list[i]
+		eff := nodeproto.Intersect(nodeproto.Capabilities{Exec: n.Declared.Exec}, nodeproto.Capabilities{Exec: n.Approved.Exec})
+		switch {
+		case n.Device != nodeproto.DeviceApproved:
+			bad = append(bad, fmt.Sprintf("%s: node %s is %s", c.Agent, n.Name, n.Device))
+		case eff.PermitsExec(c.Argv) == nil:
+		case eff.Allows(nodeproto.MethodExecPrograms) && slices.ContainsFunc(eff.Exec.AcceptFromCore, func(f string) bool { return under(f, c.Argv[0]) }):
+			bad = append(bad, fmt.Sprintf("%s: node %s accepts %s, and has not taken it yet (it does when it connects; the Nodes page says why it refused one)", c.Agent, n.Name, c.Argv[0]))
+		default:
+			bad = append(bad, fmt.Sprintf("%s: node %s does not allow %s", c.Agent, n.Name, c.Argv[0]))
+		}
+	}
+	if len(bad) > 0 {
+		slices.Sort(bad)
+		return DoctorResult{Status: DoctorWarn, Detail: fmt.Sprintf("%d of %d command agents cannot run: %s", len(bad), len(cmds), strings.Join(bad, "; ")), Fix: fix}
+	}
+	return DoctorResult{Status: DoctorOK, Detail: fmt.Sprintf("the nodes allow the programs of all %d command agents", len(cmds))}
 }
 
 // checkNodesSeen warns about approved nodes the core has not heard from

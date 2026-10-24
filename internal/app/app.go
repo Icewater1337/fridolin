@@ -86,7 +86,10 @@ type App struct {
 	// nodes is the fleet's registry and node port; nodesEnabled and
 	// nodesListen are nodes.enabled and nodes.listen as the bridge
 	// started, which wait for a restart.
-	nodes        *nodes.Service
+	nodes *nodes.Service
+	// programs keeps the nodes' allowlists in step with the approved
+	// command agents (node_programs.go).
+	programs     *nodePrograms
 	nodesEnabled bool
 	nodesListen  string
 	// fride is the core's side of FrIDE on the nodes (fride_runtime.go).
@@ -306,6 +309,7 @@ func New(opts Options) (_ *App, err error) {
 	b.mcpTools = b.newMCPTools()
 	b.fride = newFrideRuntime(b)
 	b.work = newWorkRuntime(b)
+	b.programs = newNodePrograms(b)
 	if b.nodes, err = newNodes(b); err != nil {
 		return nil, err
 	}
@@ -415,7 +419,7 @@ func New(opts Options) (_ *App, err error) {
 	b.vault.targets = b.targets
 	b.google = google.New(googleOptionsFor(cfgs))
 	b.backup = newProjectedBackup(cfgs, b.env, b.brainMgr, b.notifyBackup, b.vault.driveSuperseded, b.google)
-	b.plaud = NewPlaudManager(cfgs, b.env, b.brainMgr, b.submitHandOff, b.wa.SendMessage, func() string {
+	b.plaud = NewPlaudManager(cfgs, b.env, b.brainMgr, b.submitHandOff, b.submitAsk, b.wa.SendMessage, func() string {
 		if d := b.site.Settings().Domain; d != "" {
 			return "https://" + d
 		}

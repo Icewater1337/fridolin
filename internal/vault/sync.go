@@ -211,6 +211,8 @@ func (v *Vault) syncOne(ctx context.Context, rel string, prov Provenance, rep *S
 			if sum, _, err := v.hashFile(rel); err == nil && sum == r.ColdSHA256 {
 				return v.reconcile(ctx, r, rep)
 			}
+		case TierHot:
+			// Not uploaded yet, or changed since: uploaded below.
 		}
 	}
 	return v.upload(ctx, rel, r, known, prov, rep)

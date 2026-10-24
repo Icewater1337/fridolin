@@ -69,6 +69,13 @@ const (
 	// wiki-search), the root and the path, Outcome ok or why it was
 	// refused.
 	FileView = "file_view"
+	// FileChange is a change on the Files page, the wiki or the site's
+	// /files and /wiki: By and Brain as for FileView, Detail the action
+	// (edit, create, upload, move, delete, upload-rule), the root and the
+	// path ("<path> -> <to>" for a move, and for a delete where it went in
+	// the trash), Outcome ok (with "commit <hash>" where it was committed)
+	// or why it was refused.
+	FileChange = "file_change"
 	// ScheduledCommand is a scheduled agent's program run on a node:
 	// Brain and ID the agent's brain and run, Detail the agent, node and
 	// program (not its arguments), Outcome how it ended.

@@ -48,6 +48,7 @@
     "codex_path": {"type": "string", "description": "The Codex CLI; empty defaults to codex on PATH."},
     "codex_model": {"type": "string", "description": "The model for all Codex runs; empty defaults to gpt-6.1-sol."},
     "codex_effort": {"enum": ["", "low", "medium", "high", "xhigh", "max"], "description": "Codex reasoning effort; empty defaults to high."},
+    "timezone": {"type": "string", "description": "The owner's IANA time zone, such as Europe/Zurich: scheduled agents, standing intents, nightly snapshots and the daily backup run at its times of day, and brains run with it as TZ. Empty is the bridge process's own zone (TZ, else the system's)."},
     "data_dir": {"type": "string", "description": "The bridge's own data: bridge.db, media, tokens. Needs a restart."},
     "db_path": {"type": "string", "description": "Default <data_dir>/bridge.db. Needs a restart."},
     "media_dir": {"type": "string", "description": "Default <data_dir>/media. Needs a restart."},
@@ -160,7 +161,10 @@
         "message": {"type": "string"},
         "brain_access": {"type": "boolean"},
         "phone_dir": {"anyOf": [{"const": ""}, {"$ref": "#/$defs/absolute_path"}]},
-        "phone_upload": {"type": "boolean"}
+        "phone_upload": {"type": "boolean"},
+        "voice": {"type": "boolean", "description": "Voice mode of the Plaud Sync app: spoken questions go to voice_brain, and the answer is read aloud on the phone. Needs phone_upload."},
+        "voice_brain": {"type": "string", "pattern": "^$|^[a-z0-9][a-z0-9_-]{0,39}$", "description": "The brain that answers voice questions; empty is the brain that handles DMs."},
+        "voice_quiet": {"type": "boolean", "description": "The answer to a voice question goes to the phone only, not also to WhatsApp."}
       }
     },
     "dashboard": {

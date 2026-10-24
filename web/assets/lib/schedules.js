@@ -239,3 +239,17 @@ export function runTime(ts) {
   if (Number.isNaN(d.getTime())) return '';
   return d.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
+
+/**
+ * What the Schedules page says about the zone the bridge reads times of
+ * day in (GET /api/schedules' timezone): its text, and whether to warn,
+ * which it does when the zone is UTC only because timezone is unset.
+ */
+export function zoneNote(tz) {
+  if (!tz || !tz.name) return null;
+  if (tz.source === 'config') return { text: `Times of day are ${tz.name}.`, warn: false };
+  const utc = ['UTC', 'Etc/UTC', 'UTC0', 'GMT', 'Etc/GMT'].includes(tz.name);
+  if (utc) return { text: 'Times of day are UTC: the time zone is unset in the settings, and the bridge runs in UTC. Set it under Settings → Advanced → Time zone.', warn: true };
+  const name = tz.name === 'Local' ? 'the bridge’s own time zone' : tz.name;
+  return { text: `Times of day are ${name} (the bridge’s; the time zone is unset in the settings).`, warn: false };
+}

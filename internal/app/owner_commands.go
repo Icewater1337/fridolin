@@ -211,3 +211,17 @@ func (b *App) nodeJoined(n *nodes.Node) {
 		log.Printf("nodes: telling the owner %s joined: %v", n.ID, err)
 	}
 }
+
+// coreMoveEnded tells the owner, in their direct chat, how a core move
+// ended: the core that runs afterwards says it, on either machine.
+func (b *App) coreMoveEnded(r nodes.MoveRecord) {
+	cfg := b.cfgs.Get()
+	target := ownerChat(cfg)
+	if target == "" || b.outbox == nil {
+		return
+	}
+	msg := outboundmsg.CoreMoveEnded(r.ID, r.SourceName, r.TargetName, r.State, r.Detail)
+	if err := b.outbox.Text(context.Background(), target, msg, cfg.MaxChunkSize); err != nil {
+		log.Printf("nodes: telling the owner how core move %s ended: %v", r.ID, err)
+	}
+}

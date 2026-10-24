@@ -298,9 +298,11 @@ listed here because they decide what runs may do
 
 ## Files and the wiki
 
-The Files and Wiki pages' routes (`GET /api/files/…`, `/api/wiki/…`) and
+The Files and Wiki pages' routes (`/api/files/…`, `/api/wiki/…`) and
 `GET /files/raw` are listed in [FILES.md](FILES.md#api); like the rest of
-`/api/`, they serve the dashboard and are not a contract.
+`/api/`, they serve the dashboard and are not a contract. An upload
+(`POST /api/files/upload`) is the one write whose body is
+`multipart/form-data`, of up to 1 GiB, rather than JSON.
 
 ## Limits
 
