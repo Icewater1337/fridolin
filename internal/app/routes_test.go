@@ -119,6 +119,11 @@ var routeInventory = []httpRoute{
 	{"GET", "/site-api/wiki/search", classSiteBridge, ""},
 	{"GET", "/site-api/wiki/{brain}/pages", classSiteBridge, "/site-api/wiki/main/pages"},
 	{"GET", "/site-api/wiki/{brain}/page", classSiteBridge, "/site-api/wiki/main/page"},
+	{"GET", "/site-api/files/history", classSiteBridge, ""},
+	{"PUT", "/site-api/files/text", classSiteBridge, ""},
+	{"POST", "/site-api/files/upload", classSiteBridge, ""},
+	{"POST", "/site-api/files/move", classSiteBridge, ""},
+	{"POST", "/site-api/files/delete", classSiteBridge, ""},
 
 	{"GET", "/api/status", classAPI, ""},
 	{"POST", "/api/logout", classAPI, ""},
@@ -261,6 +266,12 @@ var routeInventory = []httpRoute{
 	{"GET", "/api/wiki/search", classAPI, ""},
 	{"GET", "/api/wiki/{brain}/pages", classAPI, "/api/wiki/main/pages"},
 	{"GET", "/api/wiki/{brain}/page", classAPI, "/api/wiki/main/page"},
+	{"GET", "/api/files/history", classAPI, ""},
+	{"PUT", "/api/files/text", classAPI, ""},
+	{"POST", "/api/files/upload", classAPI, ""},
+	{"POST", "/api/files/move", classAPI, ""},
+	{"POST", "/api/files/delete", classAPI, ""},
+	{"PUT", "/api/files/upload-rule", classAPI, ""},
 	{"GET", "/api/housekeeping", classAPI, ""},
 	{"POST", "/api/housekeeping/run", classAPI, ""},
 	{"GET", "/api/schedules", classAPI, ""},
@@ -572,21 +583,32 @@ func TestRouteInventoryGuards(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if code, _ := siteBridgeRequest(t, url, "", "u_x", rt.path()); code != http.StatusUnauthorized {
+				if code, _ := siteBridgeCall(t, method, url, "", "u_x", rt.path(), ""); code != http.StatusUnauthorized {
 					t.Errorf("without its token: %d, want 401", code)
 				}
-				if code, _ := siteBridgeRequest(t, url, token, "u_x", rt.path()); code != http.StatusUnauthorized {
+				if code, _ := siteBridgeCall(t, method, url, token, "u_x", rt.path(), ""); code != http.StatusUnauthorized {
 					t.Errorf("with the dashboard token: %d, want 401", code)
 				}
 				want := http.StatusUnauthorized
 				if rt.method == "" {
 					want = http.StatusNotFound
 				}
-				if code, _ := siteBridgeRequest(t, url, siteToken, "u_nobody", rt.path()); code != want {
+				ct := siteWrites[method+" "+rt.path()]
+				if code, _ := siteBridgeCall(t, method, url, siteToken, "u_nobody", rt.path(), ct); code != want {
 					t.Errorf("for no site account: %d, want %d", code, want)
 				}
-				if w := request(method, rt.path(), "", withToken); w.Code != http.StatusNotFound {
-					t.Errorf("on the dashboard's listener: %d, want 404", w.Code)
+				if method != "GET" {
+					if code, _ := siteBridgeCall(t, method, url, siteToken, "u_nobody", rt.path(), "text/plain"); code != http.StatusUnsupportedMediaType {
+						t.Errorf("another body: %d, want 415", code)
+					}
+				}
+				// The dashboard's own pages answer a GET; anything else is refused.
+				want = http.StatusNotFound
+				if method != "GET" {
+					want = http.StatusMethodNotAllowed
+				}
+				if w := request(method, rt.path(), "", withToken); w.Code != want {
+					t.Errorf("on the dashboard's listener: %d, want %d", w.Code, want)
 				}
 			case classPublic, classStatic:
 				if w := request(method, rt.path(), ""); w.Code != http.StatusOK {

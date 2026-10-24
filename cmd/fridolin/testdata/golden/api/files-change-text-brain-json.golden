@@ -1,0 +1,7 @@
+PUT /api/files/text
+403 Forbidden
+Content-Type: application/json
+
+{
+  "error": "Fridolin keeps this file itself; change it on the brain's page"
+}

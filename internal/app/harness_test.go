@@ -219,6 +219,18 @@ func (h *harness) Do(method, path string, body any, mutate ...func(*http.Request
 	return w
 }
 
+// DoRaw sends a dashboard request with a body of type ct, as Do does.
+func (h *harness) DoRaw(method, path, ct string, body []byte) *httptest.ResponseRecorder {
+	h.t.Helper()
+	r := httptest.NewRequest(method, "http://"+h.listen+path, bytes.NewReader(body))
+	r.Header.Set("X-Bridge-Token", h.token())
+	r.Header.Set("X-Bridge-Dashboard", "1")
+	r.Header.Set("Content-Type", ct)
+	w := httptest.NewRecorder()
+	h.h.ServeHTTP(w, r)
+	return w
+}
+
 // Script sends a request the way a local script does: a JSON body and the
 // scripts token from the data dir, no dashboard token or header. mutate
 // adjusts it first.

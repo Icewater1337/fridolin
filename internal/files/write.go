@@ -45,11 +45,11 @@ const TrashDir = ".fridolin-trash"
 
 // Errors of a change.
 var (
-	ErrReadOnly = errors.New("this folder is read-only here")
-	ErrChanged  = errors.New("the file changed since you opened it; open it again, and make your change there")
-	ErrExists   = errors.New("there is already a file or folder of that name")
-	ErrTooLarge = errors.New("the file is too large")
-	errProtect  = errors.New("Fridolin keeps this file itself; change it on the brain's page")
+	ErrReadOnly  = errors.New("this folder is read-only here")
+	ErrChanged   = errors.New("the file changed since you opened it; open it again, and make your change there")
+	ErrExists    = errors.New("there is already a file or folder of that name")
+	ErrTooLarge  = errors.New("the file is too large")
+	ErrProtected = errors.New("Fridolin keeps this file itself; change it on the brain's page")
 )
 
 // noWrite are the files of a brain folder nobody changes here: its
@@ -78,14 +78,20 @@ func (r Root) uploadRule(rel string) (Upload, bool) {
 // UploadRule says how the folder rel takes uploads by the rule of the
 // brain: UploadFolder, UploadBrain, or "" where it has none.
 func (r Root) UploadRule(rel string) string {
+	_, mode := r.UploadFolderOf(rel)
+	return mode
+}
+
+// UploadFolderOf is the upload folder rel lies in and its mode, or "", "".
+func (r Root) UploadFolderOf(rel string) (folder, mode string) {
 	u, ok := r.uploadRule(rel)
 	switch {
 	case !ok:
-		return ""
+		return "", ""
 	case u.ToBrain:
-		return UploadBrain
+		return u.Folder, UploadBrain
 	}
-	return UploadFolder
+	return u.Folder, UploadFolder
 }
 
 // CanWrite reports whether s may change rel (cleaned) in r.
@@ -100,7 +106,7 @@ func (r Root) CanWrite(rel string, s Scope) error {
 		return ErrHidden
 	}
 	if r.Kind == KindBrain && slices.Contains(noWrite, rel) {
-		return errProtect
+		return ErrProtected
 	}
 	return nil
 }

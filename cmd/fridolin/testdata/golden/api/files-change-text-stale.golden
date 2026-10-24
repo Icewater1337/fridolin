@@ -1,0 +1,7 @@
+PUT /api/files/text
+409 Conflict
+Content-Type: application/json
+
+{
+  "error": "the file changed since you opened it; open it again, and make your change there"
+}
