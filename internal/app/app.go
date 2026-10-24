@@ -86,6 +86,9 @@ type App struct {
 	// nodesListen are nodes.enabled and nodes.listen as the bridge
 	// started, which wait for a restart.
 	nodes *nodes.Service
+	// coreMove is the !movecore checked or waiting for its vote
+	// (coremove_runtime.go).
+	coreMove coreMoveAsk
 	// programs keeps the nodes' allowlists in step with the approved
 	// command agents (node_programs.go).
 	programs     *nodePrograms

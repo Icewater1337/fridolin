@@ -317,6 +317,9 @@ export default {
         n.core_host && n.core_host.pending && n.device === 'approved'
           ? callout('warn', 'core-host waits for your approval', n.core_host.approval)
           : null,
+        n.fride_approval && n.device === 'approved'
+          ? callout('warn', 'fride waits for your approval', n.fride_approval)
+          : null,
         region,
         kv([
           ['ID', mono(n.id, { copy: true })],

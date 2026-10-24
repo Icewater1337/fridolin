@@ -154,6 +154,11 @@ func Fingerprint(pub []byte) string {
 // place that approves it says so.
 const CoreHostApproval = "core-host lets fridolin move the core to this machine. The machine then holds every host secret: the B2 keys, the age identity and export key (all exports and the WhatsApp session), the Claude token. Approve only a machine you trust as much as the one that runs the core now."
 
+// FrideApproval is what approving fride means (#187 §5, "Follow-up
+// outside this design"): every place that approves it says so. FrIDE
+// runs Claude Code agents on the node, whatever exec allows.
+const FrideApproval = "fride lets fridolin hand coding tasks to FrIDE on this machine. FrIDE runs Claude Code agents there, and they can run anything this machine's user can (on Windows through WSL, PowerShell and C:\\ too), whatever exec allows or refuses: approving fride is approving arbitrary commands on this machine. Approve it only on a machine you would let fridolin do anything on."
+
 // CoreCheckResult is core.check's answer: facts, never a secret's value.
 type CoreCheckResult struct {
 	ID      string `json:"id"`
