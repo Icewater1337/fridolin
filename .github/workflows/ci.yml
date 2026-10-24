@@ -290,9 +290,10 @@ jobs:
   # pull request. Pushes to main of this repository only, so the write
   # permission is never in a run a pull request or a fork started. It runs
   # after every other job, also when they all passed, so it can close; a
-  # job added to this workflow goes into needs too.
+  # job added to this workflow goes into needs too (scripts/test-ci-report.sh
+  # fails until it does).
   report:
-    needs: [go, go-windows, fuzz, scripts, python, web, site, personal-data]
+    needs: [go, go-checks, go-windows, fuzz, scripts, python, web, site, personal-data]
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Icewater1337/fridolin' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -260,6 +260,18 @@ check "many: two issues of their own" test "$(grep -c '^issue create --repo o/r 
 check "many: the rest in one more" grep -q '^issue create --repo o/r --title CI on main: more failures than one run reports ' "$FAKE/calls"
 check "many: which names it" body_has 3 "CI on main: TestC failing"
 
+# ── the report job waits for every other job of ci.yml ──
+# A job left out of its needs can still be running when the report reads
+# the run, and its failure is never reported.
+ci="$here/../.github/workflows/ci.yml"
+jobs_of_ci="$(awk '/^jobs:/ { in_jobs = 1; next } in_jobs && /^  [a-z][a-z0-9_-]*:$/ { sub(/^  /, ""); sub(/:$/, ""); if ($0 != "report") print }' "$ci" | LC_ALL=C sort)"
+needs_of_report="$(awk '/^  report:$/ { in_report = 1; next } in_report && /^    needs:/ { sub(/^    needs: *\[/, ""); sub(/\].*/, ""); gsub(/ /, ""); gsub(/,/, "\n"); print; exit }' "$ci" | LC_ALL=C sort)"
+FAKE="$work/needs"
+mkdir -p "$FAKE"
+printf 'jobs:  %s\nneeds: %s\n' "$(echo $jobs_of_ci)" "$(echo $needs_of_report)" >"$FAKE/out"
+: >"$FAKE/calls"
+check "ci.yml: the report job needs every other job" test -n "$jobs_of_ci" -a "$jobs_of_ci" = "$needs_of_report"
+
 if [ "$failed" -gt 0 ]; then
 	echo "$failed case(s) failed"
 	exit 1
