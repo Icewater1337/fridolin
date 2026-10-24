@@ -420,7 +420,12 @@ machine must already be a node (path B). In short:
   `testdata` first in a package that has none), where plain `go test`
   runs it from then on, so commit it with the fix. `make fuzz-short` runs
   every target for 10 seconds (set `FUZZTIME`); CI fuzzes every target for
-  20 seconds on each push to main.
+  20 seconds on each push to main. A run on main that fails opens or
+  updates an issue labelled `ci-main` per failing fuzz target or test
+  ("CI on main: FuzzX failing", `scripts/ci-report.sh`), with the
+  failure, the run's link and a fuzz target's failing input from the
+  run's `fuzz-failing-inputs` artifact; a later run that passes closes
+  it. Fix those before new work: a red main teaches everyone to ignore red.
 - The Python helpers in `tools/` have stdlib-only tests that never touch the
   network: `python3 -m unittest discover -s tools/tests` (`make test-py`).
   Keep them passing on Python 3.9. `make lint-py` runs ruff
