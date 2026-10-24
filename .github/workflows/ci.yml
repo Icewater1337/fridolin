@@ -34,10 +34,10 @@ jobs:
         # still accept a release without security fixes.
         go: [oldstable, stable]
         # The slowest job is what a pull request waits for, so the race
-        # tests run in slices, one job each (scripts/test-shard.sh): four
-        # on macOS, where they take about twice as long, two on Linux. The
-        # checks that run once per system and release go with the last
-        # slice, which has the fewest tests (SHARDS below).
+        # tests run in slices, one job each (scripts/test-shard.sh, which
+        # runs a slice's packages side by side): four on macOS, where they
+        # take about twice as long, two on Linux (SHARDS below). The checks
+        # that run once per system and release are go-checks, beside them.
         shard: [1, 2, 3, 4]
         exclude:
           - {os: ubuntu-latest, shard: 3}
@@ -60,28 +60,19 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # setup-go keys its cache on the system, the release and a hash of
+      # cache-dependency-path (go.sum by default), and the first job to
+      # finish with a key saves it for every run after, until the hash
+      # changes. These slices build every package with -race, which a job
+      # that builds without it (site, CodeQL) would leave out of the cache,
+      # so each kind of job hashes other files and has a cache of its own.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ matrix.go }}
           cache: true
-
-      # The steps are Makefile targets, so `make check` runs the same.
-      - name: gofmt
-        if: matrix.shard == fromJSON(env.SHARDS)
-        run: make fmt-check
-
-      - name: go vet
-        if: matrix.shard == fromJSON(env.SHARDS)
-        run: make vet
-
-      - name: build
-        if: matrix.shard == fromJSON(env.SHARDS)
-        run: make build
-
-      # The main package is in cmd/fridolin. An old `go build -o fridolin .`
-      # at the root must fail rather than write something over the binary.
-      - name: no Go files at the root
-        run: make root-check
+          cache-dependency-path: |
+            go.mod
+            go.sum
 
       # The backup tests that run the real rclone skip without it. Linux
       # gets a pinned release, checked against its published checksum
@@ -104,37 +95,82 @@ jobs:
           rclone version
           echo "FRIDOLIN_REQUIRE_RCLONE=1" >> "$GITHUB_ENV"
 
+      # The step is a Makefile target, so `make check` runs the same.
       - name: test
         run: make race-shard SHARD=${{ matrix.shard }}/${{ env.SHARDS }}
 
+  # What runs once per system and release, beside the test slices instead
+  # of after one of them. The steps are Makefile targets, so `make check`
+  # runs the same.
+  go-checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        go: [oldstable, stable]
+        exclude:
+          # As in go: a pull request checks macOS on the current release.
+          - os: macos-latest
+            go: ${{ github.event_name == 'pull_request' && 'oldstable' || 'none' }}
+    name: go checks (${{ matrix.os }}, ${{ matrix.go }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # A cache of its own (see go): it builds for Linux and Windows too,
+      # and mostly without -race. The steps are Makefile targets.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            Makefile
+
+      - name: gofmt
+        run: make fmt-check
+
+      - name: go vet
+        run: make vet
+
+      - name: build
+        run: make build
+
+      # The main package is in cmd/fridolin. An old `go build -o fridolin .`
+      # at the root must fail rather than write something over the binary.
+      - name: no Go files at the root
+        run: make root-check
+
       - name: repeat provider process tests
-        if: matrix.shard == fromJSON(env.SHARDS)
         run: make race-process
 
       # Builds the binary with -race in a temp dir, starts it in dev mode on
       # a scratch config and stops it.
       - name: smoke test
-        if: matrix.shard == fromJSON(env.SHARDS)
         run: make smoke
 
       # The linters need one Go release, but both systems: some files only
       # build on one of them.
       - name: staticcheck
-        if: matrix.go == 'stable' && matrix.shard == fromJSON(env.SHARDS)
+        if: matrix.go == 'stable'
         run: make lint-go
 
       - name: go.mod and go.sum are tidy
-        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest' && matrix.shard == fromJSON(env.SHARDS)
+        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest'
         run: make tidy-check
 
       # It lists what every release platform links, so one run covers
       # them all. A dependency update fails here until make notices ran.
       - name: THIRD_PARTY_NOTICES is current
-        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest' && matrix.shard == fromJSON(env.SHARDS)
+        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest'
         run: make notices-check
 
       - name: actionlint and action pins
-        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest' && matrix.shard == fromJSON(env.SHARDS)
+        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest'
         run: make lint-actions
 
   # Windows builds everything and vets it, and runs the tests of the
@@ -332,10 +368,14 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
+      # A cache of its own (see go): it builds without -race.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
           cache: true
+          cache-dependency-path: |
+            go.sum
+            site/package-lock.json
 
       - name: install
         working-directory: site
