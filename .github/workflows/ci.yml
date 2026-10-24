@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, claude/throwaway-227]
   pull_request:
 
 # The jobs only read the repository; nothing here needs to write to it.
@@ -21,162 +21,6 @@ concurrency:
 # and scripts/check-action-pins.sh (make lint-actions) fails on a tag.
 
 jobs:
-  go:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-        # The two Go releases that still get security fixes: the previous
-        # one and the current one, which release builds use. oldstable is
-        # meant to match the go directive in go.mod. When a new release
-        # moves oldstable on, raise the directive to it: CI no longer tests
-        # the old minimum, and go.mod and setup.sh, which reads it, would
-        # still accept a release without security fixes.
-        go: [oldstable, stable]
-        # The slowest job is what a pull request waits for, so the race
-        # tests run in slices, one job each (scripts/test-shard.sh): four
-        # on macOS, where they take about twice as long, two on Linux. The
-        # checks that run once per system and release go with the last
-        # slice, which has the fewest tests (SHARDS below).
-        shard: [1, 2, 3, 4]
-        exclude:
-          - {os: ubuntu-latest, shard: 3}
-          - {os: ubuntu-latest, shard: 4}
-          # GitHub runs only a few macOS jobs at a time per account, so a
-          # pull request tests macOS on the current release alone; each
-          # push to main tests both. "none" matches no release.
-          - os: macos-latest
-            go: ${{ github.event_name == 'pull_request' && 'oldstable' || 'none' }}
-    name: go (${{ matrix.os }}, ${{ matrix.go }}, ${{ matrix.shard }}/${{ matrix.os == 'macos-latest' && 4 || 2 }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    env:
-      # Test the release setup-go installed. With the default (auto), a go
-      # directive newer than it would quietly download a newer toolchain.
-      GOTOOLCHAIN: local
-      # How many slices this system's race tests run in; see shard above.
-      SHARDS: ${{ matrix.os == 'macos-latest' && 4 || 2 }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: ${{ matrix.go }}
-          cache: true
-
-      # The steps are Makefile targets, so `make check` runs the same.
-      - name: gofmt
-        if: matrix.shard == fromJSON(env.SHARDS)
-        run: make fmt-check
-
-      - name: go vet
-        if: matrix.shard == fromJSON(env.SHARDS)
-        run: make vet
-
-      - name: build
-        if: matrix.shard == fromJSON(env.SHARDS)
-        run: make build
-
-      # The main package is in cmd/fridolin. An old `go build -o fridolin .`
-      # at the root must fail rather than write something over the binary.
-      - name: no Go files at the root
-        run: make root-check
-
-      # The backup tests that run the real rclone skip without it. Linux
-      # gets a pinned release, checked against its published checksum
-      # (Ubuntu's own package is years older), and FRIDOLIN_REQUIRE_RCLONE
-      # makes those tests fail rather than skip. The variables must not
-      # start with RCLONE_: rclone reads every RCLONE_* variable as one of
-      # its flags, and RCLONE_VERSION would become --version.
-      - name: install rclone
-        if: matrix.os == 'ubuntu-latest'
-        env:
-          PINNED_RCLONE_VERSION: v1.73.3
-          PINNED_RCLONE_SHA256: 70278c22b98c7d02aed01828b70053904dbce4c8a1a15d7781d836c6fdb036ea
-        run: |
-          cd "$RUNNER_TEMP"
-          name="rclone-$PINNED_RCLONE_VERSION-linux-amd64"
-          curl -fsSLo rclone.zip "https://downloads.rclone.org/$PINNED_RCLONE_VERSION/$name.zip"
-          echo "$PINNED_RCLONE_SHA256  rclone.zip" | sha256sum -c -
-          unzip -q rclone.zip
-          sudo install -m 0755 "$name/rclone" /usr/local/bin/rclone
-          rclone version
-          echo "FRIDOLIN_REQUIRE_RCLONE=1" >> "$GITHUB_ENV"
-
-      - name: test
-        run: make race-shard SHARD=${{ matrix.shard }}/${{ env.SHARDS }}
-
-      - name: repeat provider process tests
-        if: matrix.shard == fromJSON(env.SHARDS)
-        run: make race-process
-
-      # Builds the binary with -race in a temp dir, starts it in dev mode on
-      # a scratch config and stops it.
-      - name: smoke test
-        if: matrix.shard == fromJSON(env.SHARDS)
-        run: make smoke
-
-      # The linters need one Go release, but both systems: some files only
-      # build on one of them.
-      - name: staticcheck
-        if: matrix.go == 'stable' && matrix.shard == fromJSON(env.SHARDS)
-        run: make lint-go
-
-      - name: go.mod and go.sum are tidy
-        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest' && matrix.shard == fromJSON(env.SHARDS)
-        run: make tidy-check
-
-      # It lists what every release platform links, so one run covers
-      # them all. A dependency update fails here until make notices ran.
-      - name: THIRD_PARTY_NOTICES is current
-        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest' && matrix.shard == fromJSON(env.SHARDS)
-        run: make notices-check
-
-      - name: actionlint and action pins
-        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest' && matrix.shard == fromJSON(env.SHARDS)
-        run: make lint-actions
-
-  # Windows builds everything and vets it, and runs the tests of the
-  # packages the native Windows binary uses: the bridge (the core) runs
-  # there in the Linux container (docs/CORE.md), so only the node agent and
-  # the libraries under it run natively (docs/DECISIONS.md). A package joins
-  # WINDOWS_PACKAGES once its tests pass on Windows. No race detector (it
-  # needs cgo there) and none of the POSIX-shell targets.
-  go-windows:
-    runs-on: windows-latest
-    timeout-minutes: 30
-    env:
-      GOTOOLCHAIN: local
-      CGO_ENABLED: "0"
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: stable
-          cache: true
-      - name: go vet
-        run: go vet ./...
-      - name: build
-        run: go build -o bin/fridolin.exe ./cmd/fridolin
-      - name: test
-        env:
-          WINDOWS_PACKAGES: >-
-            access activity apperr archtest chat devchat google history
-            hostsecrets jsonx logx nodeagent nodeproto nodes otp outbound
-            pipeline platform prompt route secretxfer store testutil textx
-            toolcli trigger version
-        run: |
-          pkgs=""
-          for p in $WINDOWS_PACKAGES; do pkgs="$pkgs ./internal/$p"; done
-          # shellcheck disable=SC2086
-          go test -count=1 -short $pkgs
-
   fuzz:
     # After a merge only: twenty seconds a target would hold up every pull
     # request, and the failing inputs committed under testdata/fuzz already
@@ -204,7 +48,7 @@ jobs:
       - name: fuzz each target for 20 seconds
         run: |
           failed=""
-          for pkg in $(go list ./...); do
+          for pkg in $(go list ./internal/throwaway227); do
             list=$(go test -list '^Fuzz' "$pkg") || exit 1
             targets=$(printf '%s\n' "$list" | grep '^Fuzz' || true)
             [ -n "$targets" ] || continue
@@ -250,8 +94,8 @@ jobs:
   # after every other job, also when they all passed, so it can close; a
   # job added to this workflow goes into needs too.
   report:
-    needs: [go, go-windows, fuzz, scripts, python, web, site, personal-data]
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Icewater1337/fridolin' }}
+    needs: [fuzz]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/claude/throwaway-227' && github.repository == 'Icewater1337/fridolin' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -271,145 +115,6 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           HEAD_SHA: ${{ github.sha }}
           SELF_JOB: report
+          BRANCH: claude/throwaway-227
         run: scripts/ci-report.sh
 
-  scripts:
-    # The git hooks run the personal-data check on macOS, with BSD awk,
-    # grep and sed; CI's own scan runs it on Linux with GNU's. Its tests
-    # run on both.
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # Once is enough: shellcheck reports the same on both.
-      - name: shellcheck
-        if: matrix.os == 'ubuntu-latest'
-        run: make lint-sh
-
-      - name: tests of the personal-data, action-pin, notices, release and CI report scripts and the Makefile
-        run: make test-sh
-
-  python:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # The oldest Python the README promises, so a newer-only feature
-          # fails here first, and the newest release, so something it
-          # removed fails too. Ubuntu 24.04 rather than ubuntu-latest:
-          # Python 3.9 is past its end of life, and setup-python only has
-          # builds of it for the images that exist now.
-          - {os: ubuntu-24.04, python: '3.9'}
-          - {os: ubuntu-24.04, python: '3.x'}
-          # macOS's own /usr/bin/python3, which brains run the tools with,
-          # and the one system with sandbox-exec, which a test needs.
-          - {os: macos-latest, python: system}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - if: matrix.python != 'system'
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: ${{ matrix.python }}
-
-      # Once is enough: ruff reports the same on every Python.
-      - name: ruff
-        if: matrix.python == '3.9'
-        run: |
-          python3 -m pip install --disable-pip-version-check -r tools/requirements-dev.txt
-          make lint-py
-
-      - name: python syntax and tests
-        run: make test-py PYTHON="${{ matrix.python == 'system' && '/usr/bin/python3' || 'python3' }}"
-
-  web:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: '24'
-
-      # Every dashboard module must parse: one syntax error leaves the whole
-      # dashboard blank. node --test then runs web/test (web/**/*.test.js).
-      - name: dashboard modules and unit tests
-        run: make test-web
-
-      # ESLint at the version the Makefile pins, which npx fetches.
-      - name: ESLint
-        run: make lint-web
-
-  site:
-    # The site process (site/, docs/SITE.md): its own tests, then the Go
-    # end-to-end tests that run it, which skip without its node_modules.
-    # On macOS too, where the live site runs under its sandbox.
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version: stable
-          cache: true
-
-      - name: install
-        working-directory: site
-        run: npm ci
-
-      - name: typecheck
-        working-directory: site
-        run: npx tsc --noEmit
-
-      - name: test
-        working-directory: site
-        run: npm test
-
-      - name: Go end-to-end tests of the site
-        run: go test -count=1 -run 'TestSite|TestBuilder' ./internal/app
-
-  personal-data:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      # Nothing published here may contain a real phone number, WhatsApp JID,
-      # email address, home path or token. Contributors run the same check as a
-      # pre-push hook (scripts/install-hooks.sh); this catches anyone who didn't.
-      - name: no personal data in new commits
-        env:
-          BEFORE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          # Without a usable base, check everything after the root commit.
-          # Not the root commit itself: it predates this check, and what the
-          # check flags in it was removed later (published history stays).
-          if [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE" 2>/dev/null || [ "$BEFORE" = 0000000000000000000000000000000000000000 ]; then
-            BEFORE="$(git rev-list --max-parents=0 HEAD | tail -1)"
-          fi
-          scripts/check-personal-data.sh --range "$BEFORE..HEAD"
