@@ -177,7 +177,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
           f.risk = t.risk || '';
           if (!f.name || mode === 'new') f.name = t.name.replace(/^code-review-/, 'review-');
           if (!f.description) f.description = t.description || '';
-          f.vars = Object.fromEntries((t.vars || []).filter((v) => v.default).map((v) => [v.name, v.default]));
+          f.vars = Object.fromEntries((t.vars || []).flatMap((v) => (v.default ? [[v.name, v.default]] : [])));
           if (t.github) f.githubPermissions = Object.entries(t.github).map(([k, v]) => `${k}=${v}`).join('\n');
         }
         changed();

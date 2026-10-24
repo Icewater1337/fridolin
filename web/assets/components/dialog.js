@@ -77,8 +77,9 @@ export function openDialog({ title, body, actions = [{ label: 'Close', value: nu
       const b = btn(a.label, { kind: a.kind || '', icon: a.icon });
       b.addEventListener('click', async (e) => {
         e.preventDefault();
-        if (!a.onClick) { finish(a.value === undefined ? a.label : a.value); return; }
-        const r = await runBusy(b, () => a.onClick(dlg));
+        const { onClick } = a;
+        if (!onClick) { finish(a.value === undefined ? a.label : a.value); return; }
+        const r = await runBusy(b, () => onClick(dlg));
         if (r !== false && r !== undefined) finish(r);
       });
       return b;
