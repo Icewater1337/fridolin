@@ -441,3 +441,32 @@ func TestCoreMachineChecks(t *testing.T) {
 		t.Errorf("all there but the optional secrets: %d %s", code, out.String())
 	}
 }
+
+// The node doctor flags a former core host that still holds what moves
+// brought it, or its own data dir from before them, and says how to
+// remove it (#266).
+func TestCoreLeftoversResult(t *testing.T) {
+	cases := []struct {
+		name   string
+		l      nodeagent.CoreLeftovers
+		status string
+		want   string
+	}{
+		{"no moves", nodeagent.CoreLeftovers{}, app.DoctorOK, "no core moved away"},
+		{"runs the core", nodeagent.CoreLeftovers{Secrets: []string{"fridolin.claude.oauth.token"}, DataMove: "m-20261024-1200-0001", LastMove: "m-20261024-1200-0001"}, app.DoctorOK, "for the core that runs or may run here"},
+		{"former, holds", nodeagent.CoreLeftovers{Former: true, LastMove: "m-20261024-1300-0002", Files: []string{"~/.creds/dashboard-users.json"}, DataMove: "m-20261024-1200-0001"}, app.DoctorWarn, "the core's data dir that move m-20261024-1200-0001 brought"},
+		{"former, unrecorded", nodeagent.CoreLeftovers{Former: true, LastMove: "m-20261024-1300-0002", Unrecorded: true}, app.DoctorWarn, "before fridolin recorded"},
+		{"former, forgotten", nodeagent.CoreLeftovers{Former: true, LastMove: "m-20261024-1300-0002", DataForgotten: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}, app.DoctorOK, "forgotten (2026-10-24)"},
+		{"former, original home", nodeagent.CoreLeftovers{Former: true, LastMove: "m-20261024-1300-0002"}, app.DoctorWarn, "ran the core before any move"},
+		{"former, own data", nodeagent.CoreLeftovers{Former: true, LastMove: "m-20261024-1300-0002", OwnDataMove: "m-20261024-1200-0001"}, app.DoctorWarn, "before move m-20261024-1200-0001 imported"},
+	}
+	for _, c := range cases {
+		r := coreLeftoversResult(c.l)
+		if r.Status != c.status || !strings.Contains(r.Detail, c.want) {
+			t.Errorf("%s: %s %q, want %s %q", c.name, r.Status, r.Detail, c.status, c.want)
+		}
+		if r.Status == app.DoctorWarn && !strings.Contains(r.Fix, "Forgetting a former core host") {
+			t.Errorf("%s: the fix %q", c.name, r.Fix)
+		}
+	}
+}

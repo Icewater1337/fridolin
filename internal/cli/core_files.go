@@ -36,12 +36,18 @@ type secretFilesResult struct {
 // files that are not there yet, 0600: a machine that ran the core before
 // keeps its folder as it was. The container's home is the volume
 // fridolin-home, unless a Mac's compose.host.yaml binds its own folders.
+//
+// Forget removes the files named on stdin that a move wrote (#266): the
+// agent of a former core host sends only those its record names.
 func coreFiles(args []string, env coreEnv) int {
-	if len(args) != 1 || (args[0] != "export" && args[0] != "import") {
-		fmt.Fprintln(env.stderr, "usage: fridolin core files export|import (in the core's container: fridolin core run core files …)")
+	if len(args) != 1 || (args[0] != "export" && args[0] != "import" && args[0] != "forget") {
+		fmt.Fprintln(env.stderr, "usage: fridolin core files export|import|forget (in the core's container: fridolin core run core files …)")
 		return 2
 	}
 	home := envValue(env.environ, "HOME")
+	if args[0] == "forget" {
+		return coreFilesForget(home, env)
+	}
 	if args[0] == "export" {
 		out := secretFiles{Files: map[string][]byte{}}
 		dir, err := credentialsDir(env, home)
@@ -127,4 +133,58 @@ func credentialsDir(env coreEnv, home string) (string, error) {
 
 func expandTilde(dir, home string) string {
 	return filepath.Join(home, strings.TrimPrefix(dir, "~/"))
+}
+
+// coreFilesForget is core files forget: it reads {"dir": "~/x", "names":
+// [...]} on stdin and removes each named secret file directly in that
+// folder, a regular file only (never through a link), printing those it
+// removed as ~/x/name. A name a move never carries is refused; one not
+// there is skipped.
+func coreFilesForget(home string, env coreEnv) int {
+	var in struct {
+		Dir   string   `json:"dir"`
+		Names []string `json:"names"`
+	}
+	if env.stdin == nil {
+		fmt.Fprintln(env.stderr, "fridolin core files forget: nothing on stdin")
+		return 2
+	}
+	if err := json.NewDecoder(io.LimitReader(env.stdin, 64<<10)).Decode(&in); err != nil {
+		fmt.Fprintf(env.stderr, "fridolin core files forget: %v\n", err)
+		return 2
+	}
+	if err := secretxfer.CheckFilesDir(in.Dir); err != nil {
+		fmt.Fprintf(env.stderr, "fridolin core files forget: %v\n", err)
+		return 2
+	}
+	for _, n := range in.Names {
+		if !secretxfer.FileName(n) {
+			fmt.Fprintf(env.stderr, "fridolin core files forget: %q is no secret file a move carries\n", n)
+			return 2
+		}
+	}
+	dir := expandTilde(in.Dir, home)
+	removed := []string{}
+	for _, n := range in.Names {
+		p := filepath.Join(dir, n)
+		st, err := os.Lstat(p)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			fmt.Fprintf(env.stderr, "fridolin core files forget: %v\n", err)
+			return 1
+		}
+		if !st.Mode().IsRegular() {
+			fmt.Fprintf(env.stderr, "fridolin core files forget: %s/%s is not a regular file: left as it is\n", in.Dir, n)
+			continue
+		}
+		if err := os.Remove(p); err != nil {
+			fmt.Fprintf(env.stderr, "fridolin core files forget: %v\n", err)
+			return 1
+		}
+		removed = append(removed, in.Dir+"/"+n)
+	}
+	_ = json.NewEncoder(env.stdout).Encode(map[string][]string{"removed": removed})
+	return 0
 }

@@ -152,9 +152,20 @@ func TestMoveCoreFromChat(t *testing.T) {
 	}
 	forget := h.waitPoll(harnessDM, "Keep the host secrets on icebase?")
 	h.vote(forget.ID, ownerNumber, outboundmsg.CoreSecretsForget("icebase"))
-	h.WaitSent(harnessDM, "*icebase* forgot the host secrets a move brought it: "+hostsecrets.ClaudeOAuthToken)
+	gone := h.WaitSent(harnessDM, "*icebase* forgot what moves brought it:")
+	for _, want := range []string{"• host secrets: " + hostsecrets.ClaudeOAuthToken, "• the core's data dir: bridge.db, config.json"} {
+		if !strings.Contains(gone, want) {
+			t.Errorf("the forget report lacks %q: %q", want, gone)
+		}
+	}
 	if _, err := m.dstStore.Get(hostsecrets.ClaudeOAuthToken); err == nil {
 		t.Error("icebase still holds the secret")
+	}
+	if _, data, _ := m.dstCore.state(); data != "" {
+		t.Errorf("icebase still holds the core's data dir: %q", data)
+	}
+	if _, data, _ := m.srcCore.state(); data != "icebase's data" {
+		t.Errorf("mini's data dir: %q", data)
 	}
 	for _, msg := range h.Outbox() {
 		if strings.Contains(msg.Text, m.secret) {
@@ -242,9 +253,17 @@ func TestMoveCoreRollback(t *testing.T) {
 	}
 	time.Sleep(5 * time.Millisecond)
 	h.approvals() // sweeps the expired ones
-	h.WaitSent(harnessDM, "No vote in time, so: *icebase* forgot the host secrets a move brought it: "+hostsecrets.ClaudeOAuthToken)
+	gone := h.WaitSent(harnessDM, "No vote in time, so: *icebase* forgot what moves brought it:\n• host secrets: "+hostsecrets.ClaudeOAuthToken)
+	// icebase imported mini's export into an empty data dir before it gave
+	// up: that goes too, now that mini holds the lease again.
+	if !strings.Contains(gone, "• the core's data dir: bridge.db, config.json") {
+		t.Errorf("the forget report: %q", gone)
+	}
 	if _, err := m.dstStore.Get(hostsecrets.ClaudeOAuthToken); err == nil {
 		t.Error("icebase still holds the secret")
+	}
+	if _, data, _ := m.dstCore.state(); data != "" {
+		t.Errorf("icebase still holds the core's data dir: %q", data)
 	}
 	ended := h.auditOf("core_move_ended")
 	if len(ended) != 1 || ended[0]["outcome"] != nodes.MoveRolledBack {
@@ -265,7 +284,7 @@ func TestRevokeCoreHostForgets(t *testing.T) {
 		t.Fatalf("icebase did not get the secret: %v", err)
 	}
 	reply := h.Answer(inbound{JID: harnessDM, Text: "!revoke " + m.dst})
-	if want := outboundmsg.NodeRevokedReply("icebase", m.dst) + "\n\n" + outboundmsg.NodeRevokedCoreSecretsNote([]string{hostsecrets.ClaudeOAuthToken}, ""); reply != want {
+	if want := outboundmsg.NodeRevokedReply("icebase", m.dst) + "\n\n" + outboundmsg.NodeRevokedCoreSecretsNote(outboundmsg.CoreForgetReport{Secrets: []string{hostsecrets.ClaudeOAuthToken}}); reply != want {
 		t.Errorf("!revoke:\n%s\nwant\n%s", reply, want)
 	}
 	if _, err := m.dstStore.Get(hostsecrets.ClaudeOAuthToken); err == nil {

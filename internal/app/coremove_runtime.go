@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -403,7 +404,9 @@ func (b *App) askKeepSecrets(move, node, name string) {
 
 // coreSecretsDecided takes the owner's answer to the keep/forget poll:
 // keep leaves the secrets there; forget, or no vote in time, asks the
-// machine to remove what a move brought it (core.secrets.forget).
+// machine to remove what moves brought it (core.secrets.forget): the host
+// secrets, the secret files and the core's data dir, as its record says
+// (#266).
 func (b *App) coreSecretsDecided(a store.Approval) {
 	node := a.Step
 	name := node
@@ -419,13 +422,29 @@ func (b *App) coreSecretsDecided(a store.Approval) {
 		b.tellOwner(outboundmsg.CoreSecretsKept(name))
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), coreForgetTimeout)
 	defer cancel()
 	f := b.nodes.ForgetCoreSecrets(ctx, node)
-	entry.Outcome = "forgotten"
-	if f.Error != "" {
-		entry.Outcome = "forget failed: " + f.Error
-	}
+	entry.Outcome = forgetOutcome(f)
 	b.audit.Append(entry)
-	b.tellOwner(outboundmsg.CoreSecretsForgotten(name, f.Forgotten, f.Error, expired))
+	b.tellOwner(outboundmsg.CoreSecretsForgotten(name, forgetReport(f), expired))
+}
+
+// coreForgetTimeout bounds asking a core host to forget: it reads the
+// lease and removes the data dir and the files through one-off
+// containers.
+const coreForgetTimeout = 10 * time.Minute
+
+// forgetReport is f as the owner's messages say it.
+func forgetReport(f nodes.CoreForget) outboundmsg.CoreForgetReport {
+	return outboundmsg.CoreForgetReport{Secrets: f.Forgotten, Files: f.Files, Data: f.Data, DataKept: f.DataKept, Failure: f.Error}
+}
+
+// forgetOutcome is f for the audit log: counts and names, never a value.
+func forgetOutcome(f nodes.CoreForget) string {
+	out := fmt.Sprintf("forgotten: %d host secrets, %d secret files, %d entries of the data dir", len(f.Forgotten), len(f.Files), len(f.Data))
+	if f.Error != "" {
+		out += "; failed: " + f.Error
+	}
+	return out
 }

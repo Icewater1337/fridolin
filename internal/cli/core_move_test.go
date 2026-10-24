@@ -6,15 +6,20 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"filippo.io/age"
 
+	"github.com/Icewater1337/fridolin/internal/cloud"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/lease"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
 // The core commands a core move's agent runs (#187), on a folder store:
@@ -71,6 +76,80 @@ func TestCoreMoveCommands(t *testing.T) {
 	}
 	if code, out, _ := run("release"); code != 0 || !strings.Contains(out, "nothing to release") {
 		t.Errorf("a second release: %d %s", code, out)
+	}
+}
+
+// core forget-data (#266): it empties the data dir only while no core
+// runs on it and another device's core holds the lease, live, and says
+// what it removed; status --json tells an empty data dir from one with
+// data, which is how a move's target knows whether the move brings it.
+func TestCoreForgetData(t *testing.T) {
+	storeDir, data := t.TempDir(), t.TempDir()
+	makeFiles(t, data, "bridge.db", "config.json", "brains-folders/Personal/notes.md", "brains-folders/.moved-Personal.json", "core/replaced-20261024T120000Z/bridge.db")
+	run := func(args ...string) (int, string, string) {
+		var stdout, stderr bytes.Buffer
+		code := runCore(append(args, "--store", storeDir), coreEnv{environ: []string{"FRIDOLIN_HOME=" + data}, stdout: &stdout, stderr: &stderr})
+		return code, stdout.String(), stderr.String()
+	}
+	dataDir := func() string {
+		t.Helper()
+		_, out, errOut := run("status", "--json")
+		var st nodeproto.CoreRuntime
+		if err := json.Unmarshal([]byte(out), &st); err != nil {
+			t.Fatalf("status --json: %s %s", out, errOut)
+		}
+		return st.DataDir
+	}
+	if got := dataDir(); got != nodeproto.DataDirHeld {
+		t.Errorf("a data dir with data: %q", got)
+	}
+	stays := func(why string) {
+		t.Helper()
+		if code, _, errOut := run("forget-data", "--json"); code == 0 || !strings.Contains(errOut, why) {
+			t.Errorf("forget-data: %d %s, want %q", code, errOut, why)
+		}
+		if _, err := os.Stat(filepath.Join(data, "bridge.db")); err != nil {
+			t.Fatalf("forget-data removed the data dir (%s): %v", why, err)
+		}
+	}
+	stays("is free")
+	if code, _, errOut := run("promote"); code != 0 {
+		t.Fatalf("promote: %s", errOut)
+	}
+	stays("holds the lease")
+	if code, _, errOut := run("release"); code != 0 {
+		t.Fatalf("release: %s", errOut)
+	}
+	st, err := cloud.NewDir(storeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other := lease.Options{Store: st, DeviceID: "fedcba9876543210fedcba9876543210", Hostname: "icebase", Version: "test", Renew: time.Minute, Stale: lease.DefaultStale, Settle: time.Millisecond}
+	if _, err := lease.Acquire(context.Background(), other); err != nil {
+		t.Fatal(err)
+	}
+	// A core on the data dir holds its lock.
+	l, err := platform.AcquireLock(config.Layout{Root: data}.Lock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stays("a core runs on")
+	l.Release()
+
+	code, out, errOut := run("forget-data", "--json")
+	var res struct{ Removed []string }
+	if code != 0 || json.Unmarshal([]byte(out), &res) != nil {
+		t.Fatalf("forget-data: %d %s %s", code, out, errOut)
+	}
+	if want := []string{"brains-folders/.moved-Personal.json", "brains-folders/Personal", "bridge.db", "config.json", "core"}; !slices.Equal(res.Removed, want) {
+		t.Errorf("removed %q, want %q", res.Removed, want)
+	}
+	left, _ := os.ReadDir(data)
+	if len(left) != 1 || left[0].Name() != "bridge.lock" {
+		t.Errorf("left in the data dir: %v", left)
+	}
+	if got := dataDir(); got != nodeproto.DataDirEmpty {
+		t.Errorf("an emptied data dir: %q", got)
 	}
 }
 

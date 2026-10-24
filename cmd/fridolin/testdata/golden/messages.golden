@@ -303,19 +303,30 @@ coreMoveCancelled(expired)
 coreMoveStopping
 	⏸️ icebase is ready. Stopping the core on *mac-mini* now. Expect about 2 to 4 minutes offline; messages you send meanwhile wait and are answered from *icebase*.
 coreSecretsQuestion
-	🔐 Keep the host secrets on mac-mini? It no longer runs the core. Keeping them makes the next move faster; forgetting them leaves less on that machine. No vote within 24 hours forgets them.
+	🔐 Keep the host secrets on mac-mini? It no longer runs the core. Keeping them makes the next move faster; forgetting removes what moves brought it: the host secrets, the secret files and the core's data dir with the WhatsApp session, never what it held before. No vote within 24 hours forgets them.
 coreSecretsKeep
 	🔐 Keep them on mac-mini
 coreSecretsForget
 	🧹 Forget them on mac-mini
 coreSecretsKept
-	🔐 *mac-mini* keeps its copy of the host secrets. Revoking it (`!revoke`) makes it forget them first.
+	🔐 *mac-mini* keeps its copy of the host secrets, and what else moves brought it. Revoking it (`!revoke`) makes it forget them first.
 coreSecretsForgotten
-	🧹 *icebase* forgot the host secrets a move brought it: CLAUDE_CODE_OAUTH_TOKEN, FRIDOLIN_AGE_IDENTITY.
+	🧹 *icebase* forgot what moves brought it:
+	• host secrets: CLAUDE_CODE_OAUTH_TOKEN, FRIDOLIN_AGE_IDENTITY
+	• secret files: ~/.config/fridolin/dashboard-users.json
+	• the core's data dir: bridge.db, brains-folders/Personal, config.json, core, vault.db
 coreSecretsForgotten(expired, none)
-	🧹 No vote in time, so: *mac-mini* had no host secrets a move brought it: what it holds was typed there, and stays.
+	🧹 No vote in time, so: *mac-mini* held nothing a move brought it: what it holds was there before, and stays.
+coreSecretsForgotten(own data)
+	🧹 *mac-mini* forgot what moves brought it:
+	• host secrets: CLAUDE_CODE_OAUTH_TOKEN
+	Its own data dir stays: it held the core's data before move m-20261024-1200-0001 imported into it.
+coreSecretsForgotten(partly)
+	🧹 *icebase* forgot what moves brought it:
+	• host secrets: CLAUDE_CODE_OAUTH_TOKEN
+	⚠️ Not all of it: kept the core's data dir and the secret files a move brought: the core runs here. docs/CORE.md, "Forgetting a former core host", says how to remove the rest by hand.
 coreSecretsForgotten(failed)
-	⚠️ *icebase* could not forget the host secrets: it is offline. Revoking it while it is online (`!revoke`) makes it forget them; docs/CORE.md, "A core host that is gone", says which keys to rotate.
+	⚠️ *icebase* could not forget what moves brought it: it is offline. Revoking it while it is online (`!revoke`) makes it try again; docs/CORE.md, "Forgetting a former core host", says how to remove it by hand and which keys to rotate.
 coreMoveSiteAnswers
 	🌐 The site answers at example.com, from *icebase*.
 coreMoveSiteDown
@@ -323,11 +334,13 @@ coreMoveSiteDown
 nodeFrideApprovedNote
 	⚠️ That includes fride. fride lets fridolin hand coding tasks to FrIDE on this machine. FrIDE runs Claude Code agents there, and they can run anything this machine's user can (on Windows through WSL, PowerShell and C:\ too), whatever exec allows or refuses: approving fride is approving arbitrary commands on this machine. Approve it only on a machine you would let fridolin do anything on. `!revoke <id>` takes it back.
 nodeRevokedCoreSecretsNote
-	🔐 It is a core host, and forgot the host secrets a move brought it first: CLAUDE_CODE_OAUTH_TOKEN.
+	🔐 It is a core host, and forgot what moves brought it first:
+	• host secrets: CLAUDE_CODE_OAUTH_TOKEN
+	• the core's data dir: bridge.db, config.json
 nodeRevokedCoreSecretsNote(none)
-	🔐 It is a core host; it held no host secrets a move brought it.
+	🔐 It is a core host; it held nothing a move brought it.
 nodeRevokedCoreSecretsNote(failed)
-	🔐 It is a core host and could not forget the host secrets first (it is offline). If it held any, rotate them: docs/CORE.md, "A core host that is gone".
+	🔐 It is a core host and could not forget what moves brought it first (it is offline). If it held host secrets, rotate them: docs/CORE.md, "A core host that is gone".
 nodeCoreHostApprovedNote
 	🔐 That includes core-host. core-host lets fridolin move the core to this machine. The machine then holds every host secret: the B2 keys, the age identity and export key (all exports and the WhatsApp session), the Claude token. Approve only a machine you trust as much as the one that runs the core now. `!revoke <id>` takes it back.
 nodeApprovedReply
