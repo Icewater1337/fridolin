@@ -545,7 +545,7 @@ func (s *Service) watchMove(ctx context.Context, r *MoveRecord) {
 			if dstState != nil && dstState.Detail != "" {
 				why += "; " + r.TargetName + ": " + dstState.Detail
 			}
-			s.moveStep(r, MoveRolledBack, "rolled back", "the move to %s failed and the core runs on %s again: %s", r.TargetName, r.SourceName, why)
+			s.moveStep(r, MoveRolledBack, "rolled back", "%s: %s", r.SourceName, why)
 			return
 		case srcState != nil && srcState.Phase == nodeproto.MoveFailed:
 			s.moveStep(r, MoveFailed, "failed", "%s: %s", r.SourceName, srcState.Detail)

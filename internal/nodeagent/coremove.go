@@ -576,7 +576,7 @@ func (a *Agent) runTarget(ctx context.Context, r CoreRunner, m *moveRun) {
 			return
 		}
 		if ok {
-			a.step(m, nodeproto.MoveDone, "ready", "the core runs here (%s)", detail)
+			a.step(m, nodeproto.MoveDone, "ready", "%s", detail)
 			return
 		}
 		last = detail

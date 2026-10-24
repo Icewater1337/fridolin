@@ -564,7 +564,7 @@ func CoreMoveEnded(move, source, target, state, detail string) string {
 	case "done":
 		return fmt.Sprintf("🚚 The core moved to *%s* (move %s): %s. Moving it back is `fridolin nodes move` the other way round.", target, move, detail)
 	case "rolled_back":
-		return fmt.Sprintf("↩️ The core move to *%s* failed and the core runs on *%s* again (move %s): %s", target, source, move, detail)
+		return fmt.Sprintf("🔙 The core move to *%s* failed and the core runs on *%s* again (move %s): %s", target, source, move, detail)
 	case "failed":
 		return fmt.Sprintf("⚠️ The core move from *%s* to *%s* failed (move %s): %s", source, target, move, detail)
 	}
