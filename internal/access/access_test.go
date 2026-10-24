@@ -96,3 +96,19 @@ func TestAccessDecision(t *testing.T) {
 		})
 	}
 }
+
+// A sender that is not UTF-8 matches no entry, not even the U+FFFD its
+// bytes would be mangled into (#225).
+func TestSenderThatIsNotUTF8MatchesNothing(t *testing.T) {
+	const group = "120363000000000000@g.us"
+	p := Policy{AllowedNumbers: []string{"�"}, GroupMembers: map[string][]string{group: {"�"}}}
+	if NumberAllowed(p, "\xff") {
+		t.Error("NumberAllowed: \\xff matches U+FFFD")
+	}
+	if GroupSenderAllowed(p, group, "\xff", true, false) {
+		t.Error("GroupSenderAllowed: \\xff matches U+FFFD")
+	}
+	if !NumberAllowed(p, "�") || !GroupSenderAllowed(p, group, "�", true, false) {
+		t.Error("an entry is no longer compared as written")
+	}
+}

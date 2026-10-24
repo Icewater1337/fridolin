@@ -86,6 +86,7 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 	rep.Secrets = tr
 	rep.Blocking = append(rep.Blocking, tr.Problems...)
 	ends := [2]*MoveEnd{&rep.Source, &rep.Target}
+	dstUnread := ""
 	for i, id := range []string{src, dst} {
 		n, err := s.reg.Get(id)
 		if err != nil {
@@ -101,6 +102,12 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 			rep.Blocking = append(rep.Blocking, fmt.Sprintf("%s runs version %s and the core %s: update it first (fridolin nodes update %s)", n.Name, c.Version, s.version, n.ID))
 		}
 		if c.Core == nil {
+			if i == 1 {
+				// Decided once moveImage knows whether the target has the
+				// image: without it, nothing can read the core there yet.
+				dstUnread = fmt.Sprintf("%s: the core there cannot be read: %s", n.Name, c.CoreError)
+				continue
+			}
 			rep.Blocking = append(rep.Blocking, fmt.Sprintf("%s: the core there cannot be read: %s", n.Name, c.CoreError))
 		}
 	}
@@ -132,6 +139,15 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 			rep.Warnings = append(rep.Warnings, dstName+" runs FrIDE: once the secrets are there, any FrIDE task can read them")
 		}
 		s.moveImage(ctx, &rep, dst, true)
+	}
+	if dstUnread != "" {
+		if rep.ImagePresent {
+			rep.Blocking = append(rep.Blocking, dstUnread)
+		} else {
+			// A host that never ran this version reads its core with the
+			// image the move pulls first; the lease is the source's to hold.
+			rep.Warnings = append(rep.Warnings, fmt.Sprintf("%s has not the core's image yet, so its core cannot be read before the move pulls it", rep.Target.Name))
+		}
 	}
 	// About 10 MB/s each way, plus stopping and starting.
 	secs := 2*rep.ExportBytes/(10<<20) + 120

@@ -34,14 +34,16 @@ func (b *App) maySend(who chat.Principal, jid string, cfg *config.Settings) erro
 			return fmt.Errorf("brain %s may send only to its own chats, and %s is not one of them", who.Brain, jid)
 		}
 		return nil
+	case chat.CallerAnonymous:
+		if !cfg.ScriptAPI.TokenlessSend {
+			return fmt.Errorf("%w (script_api.tokenless_send is off)", errTokenRequired)
+		}
+		if !allowedChat(jid, cfg) {
+			return fmt.Errorf("without a token, /send reaches only the allowed chats (allowed_numbers, allowed_groups), and %s is not one", jid)
+		}
+		return nil
 	}
-	if !cfg.ScriptAPI.TokenlessSend {
-		return fmt.Errorf("%w (script_api.tokenless_send is off)", errTokenRequired)
-	}
-	if !allowedChat(jid, cfg) {
-		return fmt.Errorf("without a token, /send reaches only the allowed chats (allowed_numbers, allowed_groups), and %s is not one", jid)
-	}
-	return nil
+	return fmt.Errorf("unknown caller kind %d", who.Kind)
 }
 
 // brainChat reports whether jid is one of br's own chats: its reply chat

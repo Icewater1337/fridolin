@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -340,5 +341,29 @@ func TestCoreStoreFrom(t *testing.T) {
 	}
 	if slices.Contains(r.Env, "SECRET=x") || !slices.Contains(r.Env, "RCLONE_CONFIG_FRIDOLINVAULT_ACCOUNT=id") {
 		t.Errorf("rclone's environment = %q", r.Env)
+	}
+}
+
+// The node agent of a core host runs from launchd with PATH
+// /usr/bin:/bin:/usr/sbin:/sbin, without Docker Desktop's /usr/local/bin.
+func TestWithDockerPath(t *testing.T) {
+	env := withDockerPath([]string{"HOME=/Users/you", "PATH=/usr/bin:/bin:/usr/sbin:/sbin"}, "darwin", "/Users/you")
+	want := "PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin:/Users/you/.orbstack/bin:/Applications/Docker.app/Contents/Resources/bin"
+	if !slices.Contains(env, want) || !slices.Contains(env, "HOME=/Users/you") || len(env) != 2 {
+		t.Fatalf("darwin: %q", env)
+	}
+	// A place PATH has already is not added twice; an unset PATH gets them.
+	if env := withDockerPath([]string{"PATH=/usr/local/bin:/usr/bin"}, "linux", "/home/you"); !slices.Equal(env, []string{"PATH=/usr/local/bin:/usr/bin:/snap/bin"}) {
+		t.Fatalf("linux: %q", env)
+	}
+	if env := withDockerPath(nil, "linux", "/home/you"); !slices.Equal(env, []string{"PATH=/usr/local/bin:/usr/bin:/snap/bin"}) {
+		t.Fatalf("no PATH: %q", env)
+	}
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && lookPathIn("docker", "/nonexistent:"+bin) != filepath.Join(bin, "docker") {
+		t.Fatalf("lookPathIn did not find docker in %s", bin)
 	}
 }

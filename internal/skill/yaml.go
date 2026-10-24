@@ -682,7 +682,7 @@ func formatValue(b *bytes.Buffer, v *Node, indent int) {
 			case SeqNode:
 				b.WriteString(pad + "-")
 				formatValue(b, it, indent+2)
-			default:
+			case ScalarNode:
 				b.WriteString(pad + "- " + quoteScalar(it.Value) + "\n")
 			}
 		}
