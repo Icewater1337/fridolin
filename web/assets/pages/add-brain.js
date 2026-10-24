@@ -141,8 +141,9 @@ export default /** @satisfies {PageModule} */ ({
     }
 
     async function nativePick() {
-      pickAbort = new AbortController();
-      const stopBtn = btn('Stop waiting', { onClick: () => { pickAbort.abort(); } });
+      const abort = new AbortController();
+      pickAbort = abort;
+      const stopBtn = btn('Stop waiting', { onClick: () => { abort.abort(); } });
       mount(body, h('div.card.wizard-card.waiting',
         spinner('large'),
         h('h2', 'A folder dialog opened on your computer'),
@@ -150,7 +151,7 @@ export default /** @satisfies {PageModule} */ ({
         h('div.actions', stopBtn)));
       try {
         // The dialog waits for a person, so the request has no deadline.
-        const r = await post('/api/fs/pick', undefined, { signal: pickAbort.signal, timeout: 0 });
+        const r = await post('/api/fs/pick', undefined, { signal: abort.signal, timeout: 0 });
         if (ctx.dead) return;
         if (r && r.path) {
           picked = { path: r.path, create: false };
@@ -169,16 +170,20 @@ export default /** @satisfies {PageModule} */ ({
 
     // ── step 2: inspect ──
     async function renderInspect() {
-      mount(body, h('div.card.wizard-card', loading('Checking ', mono(picked.path), '…')));
+      const at = picked;
+      if (!at) { go('folder'); return; } // the folder step picks one first
+      mount(body, h('div.card.wizard-card', loading('Checking ', mono(at.path), '…')));
+      /** @type {Inspection} */
+      let r;
       try {
-        report = await post('/api/brains/inspect', { path: picked.path }, { signal: ctx.signal });
+        r = await post('/api/brains/inspect', { path: at.path }, { signal: ctx.signal });
+        report = r;
       } catch (e) {
         if (ctx.dead) return;
         mount(body, h('div.card.wizard-card', callout('bad', 'Could not check that folder', errorMessage(e)), h('div.actions', btn('Back', { icon: 'left', onClick: () => go('folder') }))));
         return;
       }
       if (ctx.dead) return;
-      const r = report;
       const problems = r.problems || [];
       const warnings = r.warnings || [];
       const notDir = r.exists && !r.is_dir;
@@ -216,7 +221,7 @@ export default /** @satisfies {PageModule} */ ({
       }
       mount(body, h('div.card.wizard-card',
         h('h2', 'Check the folder'),
-        h('div.path-line', mono(r.abs_path || picked.path, { copy: true })),
+        h('div.path-line', mono(r.abs_path || at.path, { copy: true })),
         h('ul.facts', facts.map(([i, t]) => h('li', icon(i), h('span', t)))),
         problems.map((p) => callout('bad', null, p)),
         warnings.map((w) => callout('warn', null, w)),
@@ -239,6 +244,7 @@ export default /** @satisfies {PageModule} */ ({
       }
       if (step !== 'configure') return;
       const r = report;
+      if (!r) { go('folder'); return; } // the inspect step fills it first
       const taken = new Set(brains.map((b) => b.id));
       let idTouched = false;
       const nameIn = textInput({ value: r.suggested ? r.suggested.name : '', placeholder: 'Personal', required: true, spellcheck: 'true' });
@@ -314,9 +320,11 @@ export default /** @satisfies {PageModule} */ ({
     /** @param {{manifest?: BrainManifest, useExisting?: boolean}} what the new brain.json, or the folder's own */
     async function submit({ manifest, useExisting = false }) {
       const r = report;
+      const at = picked;
+      if (!r || !at) return false; // only the inspect and configure steps submit, once both are there
       /** @type {{id: string, path: string, created: string[] | null}} */
       const res = await post('/api/brains', {
-        path: r.abs_path || picked.path,
+        path: r.abs_path || at.path,
         manifest: useExisting ? {} : manifest,
         create_dir: !r.exists,
         use_existing: useExisting,
@@ -339,7 +347,7 @@ export default /** @satisfies {PageModule} */ ({
         h('div.done-icon', icon('check')),
         h('h2', `${name} is ready`),
         h('p', 'The brain is registered and will answer from ', mono(res.path), '.'),
-        (res.created || []).length ? h('div',
+        res.created && res.created.length ? h('div',
           h('p.muted', 'Created:'),
           h('ul.created-list', res.created.map((c) => h('li', mono(c))))) : h('p.muted', 'No files were created — the folder already had everything.'),
         quiet ? callout('warn', 'No chats yet', 'This brain does not answer any chat yet. Give it direct messages or groups on its page.') : null,

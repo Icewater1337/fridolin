@@ -9,7 +9,7 @@ export function waKind(mode) {
   return /** @type {Record<string, string>} */ ({
     connected: 'ok', connecting: 'warn', pairing: 'warn', 'qr-expired': 'warn', disconnected: 'warn',
     'logged-out': 'bad', replaced: 'bad', outdated: 'bad', banned: 'bad', failed: 'bad', disabled: 'neutral',
-  })[mode] || 'neutral';
+  })[mode || ''] || 'neutral';
 }
 
 /**
@@ -30,5 +30,5 @@ export function waLabel(mode) {
     banned: 'Temporarily banned by WhatsApp',
     failed: 'WhatsApp refused the connection',
     disabled: 'WhatsApp off',
-  })[mode] || (mode ? `WhatsApp: ${mode}` : 'WhatsApp');
+  })[mode || ''] || (mode ? `WhatsApp: ${mode}` : 'WhatsApp');
 }

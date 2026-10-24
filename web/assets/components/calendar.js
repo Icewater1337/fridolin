@@ -184,12 +184,13 @@ export function calendarCard(brainId, { signal } = {}) {
       selection = new Set((s.selected && s.selected.length) ? s.selected : cals.filter((c) => c.primary).map((c) => c.id));
       dflt = s.default || [...selection][0] || '';
     }
+    const chosen = selection; // the ticks, kept across renders
     const rows = cals.map((c) => {
-      const cb = h('input', { type: 'checkbox', checked: selection.has(c.id), id: nextId('cal') });
-      const radio = h('input', { type: 'radio', name: `dflt-${brainId}`, checked: c.id === dflt, disabled: !selection.has(c.id), title: 'New events go here' });
+      const cb = h('input', { type: 'checkbox', checked: chosen.has(c.id), id: nextId('cal') });
+      const radio = h('input', { type: 'radio', name: `dflt-${brainId}`, checked: c.id === dflt, disabled: !chosen.has(c.id), title: 'New events go here' });
       cb.addEventListener('change', () => {
-        if (cb.checked) selection.add(c.id); else selection.delete(c.id);
-        if (!selection.has(dflt)) dflt = [...selection][0] || '';
+        if (cb.checked) chosen.add(c.id); else chosen.delete(c.id);
+        if (!chosen.has(dflt)) dflt = [...chosen][0] || '';
         render(s);
       });
       radio.addEventListener('change', () => { dflt = c.id; });
@@ -204,7 +205,7 @@ export function calendarCard(brainId, { signal } = {}) {
     const saveBtn = btn('Save calendars', {
       kind: 'primary', icon: 'check',
       onClick: async () => {
-        const list = cals.map((c) => c.id).filter((id) => selection.has(id));
+        const list = cals.map((c) => c.id).filter((id) => chosen.has(id));
         if (!list.length) { toast('Tick at least one calendar, or disconnect'); return; }
         await put(`/api/brains/${encodeURIComponent(brainId)}/calendar`, { account: s.account, calendars: list, default: dflt });
         toast('Calendars saved', 'ok');
