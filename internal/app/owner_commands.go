@@ -180,7 +180,7 @@ func (b *App) nodeCommand(command, id string, record func(id, outcome string)) s
 	if command == "!revoke" {
 		reply := outboundmsg.NodeRevokedReply(n.Name, n.ID)
 		if forgot != nil {
-			reply += "\n\n" + outboundmsg.NodeRevokedCoreSecretsNote(forgot.Forgotten, forgot.Error)
+			reply += "\n\n" + outboundmsg.NodeRevokedCoreSecretsNote(forgetReport(*forgot))
 		}
 		return reply
 	}

@@ -1,0 +1,68 @@
+# What macOS and Windows CI test beyond what scripts/os-tests.sh finds by
+# itself (packages built from other files there than on Linux, and test
+# files with a build constraint). Linux CI runs every test; the full macOS
+# suite runs nightly (.github/workflows/macos-full.yml).
+#
+#   GOOS PACKAGE            all of its tests
+#   GOOS PACKAGE REGEX      its tagged test files' tests and those REGEX
+#                           matches, instead of all of them (no spaces or
+#                           slashes in REGEX)
+#   GOOS PACKAGE -          none: its tests do not pass there yet
+#
+# Add a package whose code takes another way on that system through
+# runtime.GOOS, or that drives a program only that system has.
+
+# macOS: the host CLI, the native node agent and the sandbox.
+darwin internal/hostsecrets   # the Keychain, through security(1)
+darwin internal/secretxfer    # moving host secrets between machines
+darwin internal/nodeagent     # launchd, exec and PATH lookup of the node agent
+darwin internal/cli           # fridolin core / node / service on the host
+darwin internal/sandbox       # the sandbox-exec profiles
+darwin internal/site          # the site process under sandbox-exec
+darwin internal/fsx           # case-insensitive and symlinked paths
+darwin internal/version
+# The bridge's runtime is too big to run whole on every pull request: its
+# darwin files' tests, and those that branch on runtime.GOOS or pin what
+# macOS writes (sandbox profiles, the starter config, the golden files).
+darwin internal/app ^Test(Sandbox|SiteAPISecrets|ExampleConfigIsValid|GoldenStarterConfig|CheckRunsABrainWhoseFolderHoldsAPATHFolder|RuntimePathConsumersKeepBootAndApplyLiveOptions|CheckRedact|CheckLeavesTheMediaFolderAlone|Viewer|BridgeTellsTheSandboxItsConfigFile|BrowserProfilesDenyEveryChannel|Lock|Golden)
+
+# Windows: the bridge runs there only in the Linux container
+# (docs/CORE.md), so the native binary is the node agent and the host CLI
+# and the libraries under them (docs/DECISIONS.md). These packages pass on
+# Windows; one joins the list once its tests do.
+#
+# Built from other files on Windows, but not passing there yet: fixtures
+# write Windows paths into JSON unescaped (cli), tests expect POSIX modes
+# and paths (fsx, snapshot), and fsx.Resolve and Canonical turn
+# C:\Users\… into \C:Users\…. Each joins once it passes.
+windows internal/app -        # no tests of its own for Windows
+windows internal/cli -
+windows internal/fsx -
+windows internal/snapshot -
+windows internal/access
+windows internal/activity
+windows internal/apperr
+windows internal/archtest
+windows internal/chat
+windows internal/devchat
+windows internal/google
+windows internal/history
+windows internal/hostsecrets
+windows internal/jsonx
+windows internal/logx
+windows internal/nodeagent
+windows internal/nodeproto
+windows internal/nodes
+windows internal/otp
+windows internal/outbound
+windows internal/pipeline
+windows internal/platform
+windows internal/prompt
+windows internal/route
+windows internal/secretxfer
+windows internal/store
+windows internal/testutil
+windows internal/textx
+windows internal/toolcli
+windows internal/trigger
+windows internal/version

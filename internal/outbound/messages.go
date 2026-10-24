@@ -777,7 +777,7 @@ func CoreMoveEnded(move, source, target, state, detail string, notOnTarget []str
 // the host secrets; CoreSecretsKeep and CoreSecretsForget are the
 // options. No vote in hours counts as forget.
 func CoreSecretsQuestion(host string, hours int) string {
-	return fmt.Sprintf("🔐 Keep the host secrets on %s? It no longer runs the core. Keeping them makes the next move faster; forgetting them leaves less on that machine. No vote within %d hours forgets them.", textx.Truncate(host, 60), hours)
+	return fmt.Sprintf("🔐 Keep the host secrets on %s? It no longer runs the core. Keeping them makes the next move faster; forgetting removes what moves brought it: the host secrets, the secret files and the core's data dir with the WhatsApp session, never what it held before. No vote within %d hours forgets them.", textx.Truncate(host, 60), hours)
 }
 
 // CoreSecretsKeep is the keep option of CoreSecretsQuestion.
@@ -792,24 +792,30 @@ func CoreSecretsForget(host string) string {
 
 // CoreSecretsKept answers a keep vote.
 func CoreSecretsKept(host string) string {
-	return fmt.Sprintf("🔐 *%s* keeps its copy of the host secrets. Revoking it (`!revoke`) makes it forget them first.", host)
+	return fmt.Sprintf("🔐 *%s* keeps its copy of the host secrets, and what else moves brought it. Revoking it (`!revoke`) makes it forget them first.", host)
 }
 
-// CoreSecretsForgotten says what forgetting the host secrets on host
-// did: the names removed, or why it could not (failure), and whether no
-// vote decided it (expired).
-func CoreSecretsForgotten(host string, names []string, failure string, expired bool) string {
+// CoreSecretsForgotten says what forgetting what moves brought host did
+// (r), and whether no vote decided it (expired).
+func CoreSecretsForgotten(host string, r CoreForgetReport, expired bool) string {
 	why := ""
 	if expired {
 		why = "No vote in time, so: "
 	}
+	lines := r.removed()
+	var msg string
 	switch {
-	case failure != "":
-		return fmt.Sprintf("⚠️ %s*%s* could not forget the host secrets: %s. Revoking it while it is online (`!revoke`) makes it forget them; docs/CORE.md, \"A core host that is gone\", says which keys to rotate.", why, host, textx.Truncate(failure, 300))
-	case len(names) == 0:
-		return fmt.Sprintf("🧹 %s*%s* had no host secrets a move brought it: what it holds was typed there, and stays.", why, host)
+	case len(lines) == 0 && r.Failure != "":
+		msg = fmt.Sprintf("⚠️ %s*%s* could not forget what moves brought it: %s. Revoking it while it is online (`!revoke`) makes it try again; docs/CORE.md, \"Forgetting a former core host\", says how to remove it by hand and which keys to rotate.", why, host, textx.Truncate(r.Failure, 300))
+	case len(lines) == 0:
+		msg = fmt.Sprintf("🧹 %s*%s* held nothing a move brought it: what it holds was there before, and stays.", why, host)
+	default:
+		msg = fmt.Sprintf("🧹 %s*%s* forgot what moves brought it:\n%s", why, host, strings.Join(lines, "\n"))
+		if r.Failure != "" {
+			msg += fmt.Sprintf("\n⚠️ Not all of it: %s. docs/CORE.md, \"Forgetting a former core host\", says how to remove the rest by hand.", textx.Truncate(r.Failure, 300))
+		}
 	}
-	return fmt.Sprintf("🧹 %s*%s* forgot the host secrets a move brought it: %s.", why, host, strings.Join(names, ", "))
+	return msg + r.dataNote()
 }
 
 // CoreMoveSiteAnswers says the site answers at its domain once the core
@@ -831,13 +837,18 @@ func NodeFrideApprovedNote(meaning string) string {
 }
 
 // NodeRevokedCoreSecretsNote follows !revoke's answer for a core host:
-// what forgetting the host secrets did there first.
-func NodeRevokedCoreSecretsNote(names []string, failure string) string {
+// what forgetting what moves brought it did there first (r).
+func NodeRevokedCoreSecretsNote(r CoreForgetReport) string {
+	lines := r.removed()
 	switch {
-	case failure != "":
-		return fmt.Sprintf("🔐 It is a core host and could not forget the host secrets first (%s). If it held any, rotate them: docs/CORE.md, \"A core host that is gone\".", textx.Truncate(failure, 200))
-	case len(names) == 0:
-		return "🔐 It is a core host; it held no host secrets a move brought it."
+	case len(lines) == 0 && r.Failure != "":
+		return fmt.Sprintf("🔐 It is a core host and could not forget what moves brought it first (%s). If it held host secrets, rotate them: docs/CORE.md, \"A core host that is gone\".", textx.Truncate(r.Failure, 200)) + r.dataNote()
+	case len(lines) == 0:
+		return "🔐 It is a core host; it held nothing a move brought it." + r.dataNote()
 	}
-	return "🔐 It is a core host, and forgot the host secrets a move brought it first: " + strings.Join(names, ", ") + "."
+	msg := "🔐 It is a core host, and forgot what moves brought it first:\n" + strings.Join(lines, "\n")
+	if r.Failure != "" {
+		msg += fmt.Sprintf("\n⚠️ Not all of it: %s. docs/CORE.md, \"Forgetting a former core host\", says how to remove the rest by hand.", textx.Truncate(r.Failure, 200))
+	}
+	return msg + r.dataNote()
 }

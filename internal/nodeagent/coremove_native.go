@@ -246,3 +246,42 @@ func (n NativeCore) ImportFiles(ctx context.Context, dir string, files map[strin
 	}
 	return res.Stored, res.Kept, nil
 }
+
+// ForgetFiles removes the named secret files from dir through the core's
+// container (fridolin core files forget, on stdin, #266).
+func (n NativeCore) ForgetFiles(ctx context.Context, dir string, names []string) ([]string, error) {
+	in, err := json.Marshal(map[string]any{"dir": dir, "names": names})
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	var stdout bytes.Buffer
+	stderr := &limitedBuffer{max: 64 << 10}
+	cmd := exec.CommandContext(ctx, n.Exe, "core", "run", "core", "files", "forget")
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = bytes.NewReader(in), &stdout, stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("fridolin core run core files forget: %v: %s", err, lastLine(stderr.String()))
+	}
+	var res struct {
+		Removed []string `json:"removed"`
+	}
+	if err := decodeLast(stdout.Bytes(), &res); err != nil {
+		return nil, err
+	}
+	return res.Removed, nil
+}
+
+// ForgetData empties the core's data dir through a one-off container on
+// its volume (fridolin core forget-data, #266), which checks the lease
+// itself.
+func (n NativeCore) ForgetData(ctx context.Context) ([]string, error) {
+	out, err := n.run(ctx, 30*time.Minute, "core", "run", "core", "forget-data", "--json")
+	if err != nil {
+		return nil, err
+	}
+	var res struct {
+		Removed []string `json:"removed"`
+	}
+	return res.Removed, decodeLast(out, &res)
+}

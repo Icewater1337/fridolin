@@ -366,6 +366,16 @@ machine must already be a node (path B). In short:
   targets).
   CI also runs the site's tests and the fuzz targets (both below),
   govulncheck, CodeQL and the personal-data scan of the pushed commits.
+  CI runs every Go test on Linux, and vets and lints macOS's and
+  Windows's files there too (`GOOS`, `make lint-go-os`). macOS and
+  Windows test only what differs there (`make os-tests`,
+  `scripts/os-tests.sh`): packages built from other files for that
+  system, the tests in files with a build constraint, and what
+  `.github/os-specific-packages.txt` adds. A package whose code takes
+  another way through `runtime.GOOS`, or drives a program only one
+  system has, goes into that file. The whole macOS suite runs nightly
+  and on demand (`.github/workflows/macos-full.yml`); its failures open
+  issues labelled `ci-macos-nightly`.
   `make check` builds only into temp dirs; `make build` writes
   `bin/fridolin`, and `make install` also copies it to `~/.local/bin`.
   None of them touches the service, which runs the copy in

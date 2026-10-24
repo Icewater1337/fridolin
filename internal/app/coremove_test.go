@@ -106,10 +106,44 @@ func (f *fakeCore) ImportFiles(_ context.Context, dir string, files map[string][
 	return stored, kept, nil
 }
 
+// ForgetFiles and ForgetData stand in for core files forget and core
+// forget-data: the named files of the folder, and the data, which a
+// running core keeps.
+func (f *fakeCore) ForgetFiles(_ context.Context, dir string, names []string) ([]string, error) {
+	if dir != "~/.credentials" {
+		return nil, fmt.Errorf("the files to forget are in %q", dir)
+	}
+	removed := []string{}
+	for _, n := range names {
+		if err := os.Remove(filepath.Join(f.files, n)); err == nil {
+			removed = append(removed, dir+"/"+n)
+		}
+	}
+	return removed, nil
+}
+
+func (f *fakeCore) ForgetData(context.Context) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.running {
+		return nil, errors.New("a core runs on this data dir")
+	}
+	if f.data == "" {
+		return []string{}, nil
+	}
+	f.data = ""
+	return []string{"bridge.db", "config.json"}, nil
+}
+
 const fakeStale = time.Minute
 
 func (f *fakeCore) Status(ctx context.Context) (nodeproto.CoreRuntime, error) {
-	out := nodeproto.CoreRuntime{Device: f.device}
+	out := nodeproto.CoreRuntime{Device: f.device, DataDir: nodeproto.DataDirEmpty}
+	f.mu.Lock()
+	if f.data != "" {
+		out.DataDir = nodeproto.DataDirHeld
+	}
+	f.mu.Unlock()
 	if f.isFresh() || f.lacksSecrets() {
 		return out, errors.New("fridolin core run: exit status 1")
 	}
@@ -441,6 +475,79 @@ func TestCoreMove(t *testing.T) {
 		return strings.Contains(st.Detail, "secret files: 0 stored, 2 kept")
 	}) {
 		t.Errorf("the way back's files: %+v", back.Steps)
+	}
+
+	// Forgetting (#266). mini was the core's home before any move: the way
+	// back imported into its own data dir, and its secrets and files were
+	// its own, so nothing goes.
+	ctx := context.Background()
+	f := h.b.nodes.ForgetCoreSecrets(ctx, m.src)
+	if len(f.Forgotten) != 0 || len(f.Files) != 0 || len(f.Data) != 0 || f.Error != "" || !strings.Contains(f.DataKept, "Its own data dir stays") {
+		t.Errorf("forgetting on mini: %+v", f)
+	}
+	if running, data, _ := m.srcCore.state(); !running || data != "icebase's data" {
+		t.Errorf("mini after forgetting: running %v on %q", running, data)
+	}
+	if _, err := os.Stat(filepath.Join(m.srcCore.files, "google_calendar_token_personal.json")); err != nil {
+		t.Errorf("forgetting removed mini's own file: %v", err)
+	}
+	// icebase got everything from the first move: the secret, the two
+	// files and the data dir, into an empty one; all of it goes, and only
+	// that: restore.sh was never the move's.
+	if err := os.WriteFile(filepath.Join(m.dstCore.files, "restore.sh"), []byte("#!/bin/sh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f = h.b.nodes.ForgetCoreSecrets(ctx, m.dst)
+	wantFiles := []string{"~/.credentials/dashboard-users.json", "~/.credentials/google_calendar_token_personal.json"}
+	if !slices.Equal(f.Forgotten, []string{hostsecrets.ClaudeOAuthToken}) || !slices.Equal(f.Files, wantFiles) || !slices.Equal(f.Data, []string{"bridge.db", "config.json"}) || f.Error != "" {
+		t.Errorf("forgetting on icebase: %+v", f)
+	}
+	if _, data, _ := m.dstCore.state(); data != "" {
+		t.Errorf("icebase still holds the data dir: %q", data)
+	}
+	left, _ := filepath.Glob(filepath.Join(m.dstCore.files, "*"))
+	if len(left) != 1 || filepath.Base(left[0]) != "restore.sh" {
+		t.Errorf("icebase's credentials folder after forgetting: %q", left)
+	}
+	if _, err := m.dstStore.Get(hostsecrets.ClaudeOAuthToken); err == nil {
+		t.Error("icebase still holds the secret")
+	}
+	// Once more, nothing is left to forget.
+	if f = h.b.nodes.ForgetCoreSecrets(ctx, m.dst); len(f.Forgotten)+len(f.Files)+len(f.Data) != 0 || f.Error != "" {
+		t.Errorf("forgetting twice: %+v", f)
+	}
+}
+
+// TestCoreForgetWhileTheCoreRunsThere: a core host the core runs on keeps
+// its data dir and the secret files when asked to forget, and says why:
+// the lease is its own (#266). The source, which never imported, has no
+// data dir a move brought.
+func TestCoreForgetWhileTheCoreRunsThere(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
+	m := h.moveHosts(h.b.nodes.Version(), true)
+	if err := os.WriteFile(filepath.Join(m.srcCore.files, "dashboard-users.json"), []byte("[]"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if rec, body := h.startMove(m.src, m.dst, 10, 10); rec.State != nodes.MoveDone {
+		t.Fatalf("the move ended %s: %s", rec.State, body)
+	}
+	f := h.b.nodes.ForgetCoreSecrets(context.Background(), m.dst)
+	if len(f.Data) != 0 || len(f.Files) != 0 || !strings.Contains(f.Error, "the core runs here") {
+		t.Errorf("forgetting where the core runs: %+v", f)
+	}
+	if running, data, _ := m.dstCore.state(); !running || data != "mini's data" {
+		t.Errorf("icebase after forgetting: running %v on %q", running, data)
+	}
+	if _, err := os.Stat(filepath.Join(m.dstCore.files, "dashboard-users.json")); err != nil {
+		t.Errorf("icebase lost the secret file: %v", err)
+	}
+	f = h.b.nodes.ForgetCoreSecrets(context.Background(), m.src)
+	if len(f.Data) != 0 || f.DataKept != "" || f.Error != "" {
+		t.Errorf("forgetting on mini: %+v", f)
+	}
+	if _, data, _ := m.srcCore.state(); data != "mini's data" {
+		t.Errorf("mini's own data dir: %q", data)
 	}
 }
 

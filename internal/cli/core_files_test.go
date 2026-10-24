@@ -84,3 +84,37 @@ func TestCoreFiles(t *testing.T) {
 		t.Errorf("bad input: %d", code)
 	}
 }
+
+// core files forget, as a former core host's agent runs it (#266): only
+// the files named go, only regular files directly in the folder under ~,
+// and a name a move never carries is refused.
+func TestCoreFilesForget(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, ".creds")
+	for _, name := range []string{"dashboard-users.json", "google_calendar_token_home.json"} {
+		makeFiles(t, dir, name)
+	}
+	if err := os.Symlink(filepath.Join(home, "elsewhere.json"), filepath.Join(dir, "google_oauth_web_credentials.json")); err != nil {
+		t.Fatal(err)
+	}
+	forget := func(body string) (int, string) {
+		var out bytes.Buffer
+		code := runCore([]string{"files", "forget"}, coreEnv{environ: []string{"HOME=" + home}, stdin: strings.NewReader(body), stdout: &out, stderr: io.Discard})
+		return code, out.String()
+	}
+	code, out := forget(`{"dir": "~/.creds", "names": ["dashboard-users.json", "google_oauth_web_credentials.json", "google_calendar_token_work.json"]}`)
+	var res struct{ Removed []string }
+	if code != 0 || json.Unmarshal([]byte(out), &res) != nil || !slices.Equal(res.Removed, []string{"~/.creds/dashboard-users.json"}) {
+		t.Fatalf("forget: %d %s", code, out)
+	}
+	for _, name := range []string{"google_calendar_token_home.json", "google_oauth_web_credentials.json"} {
+		if _, err := os.Lstat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("%s went: %v", name, err)
+		}
+	}
+	for _, bad := range []string{`{"dir": "~/../etc", "names": ["dashboard-users.json"]}`, `{"dir": "~/.creds", "names": ["../.ssh/id_ed25519"]}`, `not json`} {
+		if code, _ := forget(bad); code != 2 {
+			t.Errorf("%s: exit %d", bad, code)
+		}
+	}
+}
