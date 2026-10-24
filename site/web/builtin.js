@@ -420,7 +420,18 @@ async function wikiPage(rest) {
       h('p', { class: 'muted' }, `${idx.pages.length} pages. Pick one on the left.`))));
     return;
   }
-  const pg = await api(`wiki/${encodeURIComponent(brain)}/page`, { path });
+  let pg;
+  try {
+    pg = await api(`wiki/${encodeURIComponent(brain)}/page`, { path });
+  } catch (err) {
+    if (err.status !== 404 || !name) throw err;
+    // An old link (a Quartz page's address, say) that names no page here:
+    // the pages that hold its words.
+    const words = name.split('/').pop().replace(/[-_]+/g, ' ');
+    frame('wiki', h('div', { class: 'wiki' }, side, h('div', { class: 'wiki-main' },
+      h('h2', {}, `No page “${name}”`), h('p', { class: 'muted' }, `Pages about “${words}”:`), await searchResults(brain, words))));
+    return;
+  }
   const root = `brain:${brain}`;
   const ctx = {
     page: (p, a) => pageHref(brain, p, a),
