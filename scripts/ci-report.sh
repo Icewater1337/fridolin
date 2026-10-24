@@ -152,11 +152,11 @@ while IFS=$'\t' read -r id conclusion job; do
 	# The jobs' names come from this workflow; keep to what one looks like.
 	[[ $job =~ ^[A-Za-z0-9\ ._,/()-]+$ ]] || job="job $id"
 	[ "$job" != fuzz ] || [ -d "$work/inputs" ] ||
-		"$gh" run download "$RUN_ID" --repo "$REPO" --name fuzz-failing-inputs --dir "$work/inputs" >/dev/null 2>&1 ||
+		"$gh" run download "$RUN_ID" --repo "$REPO" --name fuzz-failing-inputs --dir "$work/inputs" </dev/null >/dev/null 2>&1 ||
 		mkdir -p "$work/inputs"
 	log="$work/logs/$id"
 	mkdir -p "$log.d"
-	"$gh" api "repos/$REPO/actions/jobs/$id/logs" >"$log"
+	"$gh" api "repos/$REPO/actions/jobs/$id/logs" </dev/null >"$log"
 	parse "$log" "$log.d" >"$log.tsv"
 	reported=0
 	while IFS=$'\t' read -r kind name pkg input n; do
