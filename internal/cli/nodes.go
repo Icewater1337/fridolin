@@ -37,6 +37,10 @@ Usage:
                                            waits until it runs it or went back
   fridolin nodes auto-update ID on|off     update it by itself whenever it runs an
                                            older version than the core
+  fridolin nodes core-secrets-transfer SRC DST [--yes] [--replace]
+                                           move the host secrets from core host SRC to
+                                           core host DST over the node channel, end to
+                                           end; without --yes only checks both sides
 
 Each asks the running bridge, with the dashboard token. Flags:
   --config PATH     config file (default: $FRIDOLIN_CONFIG, else
@@ -61,6 +65,8 @@ func nodesCmd(args []string, stdout, stderr io.Writer) int {
 	all := fs.Bool("all", false, "update every node that runs an older version")
 	force := fs.Bool("force", false, "update a busy node, or one newer than the core")
 	noWait := fs.Bool("no-wait", false, "start the update and return")
+	yes := fs.Bool("yes", false, "core-secrets-transfer: move the secrets (without it, a dry run)")
+	replace := fs.Bool("replace", false, "core-secrets-transfer: let a value replace a different one on the target")
 	fs.Usage = func() { fmt.Fprint(stderr, nodesUsage) }
 	pos, err := parseInterspersed(fs, args)
 	if errors.Is(err, flag.ErrHelp) {
@@ -69,7 +75,7 @@ func nodesCmd(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 2
 	}
-	want := map[string][2]int{"list": {0, 0}, "join-code": {0, 0}, "approve": {1, 1}, "revoke": {1, 1}, "tags": {1, 2}, "call": {2, 3}, "update": {0, 1}, "auto-update": {2, 2}}
+	want := map[string][2]int{"list": {0, 0}, "join-code": {0, 0}, "approve": {1, 1}, "revoke": {1, 1}, "tags": {1, 2}, "call": {2, 3}, "update": {0, 1}, "auto-update": {2, 2}, "core-secrets-transfer": {2, 2}}
 	n, ok := want[sub]
 	if !ok {
 		fmt.Fprintf(stderr, "unknown nodes command %q\n\n%s", sub, nodesUsage)
@@ -85,6 +91,10 @@ func nodesCmd(args []string, stdout, stderr io.Writer) int {
 	}
 	if (*all || *force || *noWait) && sub != "update" {
 		fmt.Fprintln(stderr, "--all, --force and --no-wait go with update")
+		return 2
+	}
+	if (*yes || *replace) && sub != "core-secrets-transfer" {
+		fmt.Fprintln(stderr, "--yes and --replace go with core-secrets-transfer")
 		return 2
 	}
 	if sub == "update" && *all == (len(pos) == 1) {
@@ -149,10 +159,16 @@ func nodesCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "Revoked %s (%s): it is disconnected and refused from now on.\n", n.Name, n.ID)
 		case *commands:
 			fmt.Fprintf(stdout, "Approved what %s (%s) offers: %s\n", n.Name, n.ID, n.Approved.Summary())
+			if n.Approved.CoreHost != nil {
+				fmt.Fprintf(stdout, "That includes core-host. %s\nDevice key: %s. Revoke it with: fridolin nodes revoke %s\n", nodeproto.CoreHostApproval, nodeproto.Fingerprint(n.PublicKey), n.ID)
+			}
 		default:
 			fmt.Fprintf(stdout, "Approved the device %s (%s).\n", n.Name, n.ID)
 			if n.Commands() == nodeproto.CommandsPending {
 				fmt.Fprintf(stdout, "It offers %s. Approve that with: fridolin nodes approve %s --commands\n", n.Declared.Summary(), n.ID)
+				if n.Declared.CoreHost != nil {
+					fmt.Fprintf(stdout, "It asks for core-host. %s\nDevice key: %s\n", nodeproto.CoreHostApproval, nodeproto.Fingerprint(n.PublicKey))
+				}
 			}
 		}
 	case "tags":
@@ -191,6 +207,8 @@ func nodesCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "Auto updates of %s (%s): %s\n", resp.Node.Name, resp.Node.ID, pos[1])
 	case "update":
 		return nodesUpdate(pos, *all, *force, *noWait, call, stdout, stderr)
+	case "core-secrets-transfer":
+		return nodesCoreSecretsTransfer(cfg, pos[0], pos[1], *yes, *replace, *asJSON, stdout, stderr)
 	}
 	return 0
 }
@@ -336,4 +354,15 @@ func writeNodesTable(w io.Writer, resp httpapi.NodesResponse, now time.Time) {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", n.ID, n.Name, n.OS, n.Device, n.Commands, seen, tags, n.Effective.Summary())
 	}
 	_ = tw.Flush()
+	for _, n := range resp.Nodes {
+		ch := n.CoreHost
+		if ch == nil || !ch.Pending || n.Device == nodeproto.DeviceRevoked {
+			continue
+		}
+		fmt.Fprintf(w, "\n%s (%s) asks for core-host. %s\nDevice key: %s", n.Name, n.ID, ch.Approval, ch.Fingerprint)
+		if len(ch.SendTo) > 0 {
+			fmt.Fprintf(w, "; sends secrets only to %s", strings.Join(ch.SendTo, ", "))
+		}
+		fmt.Fprintf(w, "\nApprove it with: fridolin nodes approve %s --commands\n", n.ID)
+	}
 }
