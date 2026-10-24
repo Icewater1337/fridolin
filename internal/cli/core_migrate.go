@@ -54,6 +54,8 @@ const (
 	rehearsalContainer = "fridolin-rehearsal"
 	rehearsalVolume    = "fridolin-rehearsal"
 	coreVolume         = "fridolin-data"
+	// coreContainer is the core's container (container/compose.yaml).
+	coreContainer = "fridolin-core"
 )
 
 // hostMount is a folder or file of the host bound into the container at

@@ -160,3 +160,13 @@ audio { width: 100%; }
   .bnav { margin-left: 0; order: 3; width: 100%; }
   table.files th:nth-child(3), table.files td:nth-child(3) { display: none; }
 }
+
+/* Changes on the built-in Files and Wiki */
+.notice:empty { display: none; }
+.notice { margin: 0 0 12px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.toolbar .upload { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+td.actions { white-space: nowrap; text-align: right; }
+td.actions button + button { margin-left: 4px; }
+button.danger { color: #b42318; }
+textarea.editor { display: block; width: 100%; min-height: 55vh; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; box-sizing: border-box; }
+.edit .toolbar { margin-top: 10px; }

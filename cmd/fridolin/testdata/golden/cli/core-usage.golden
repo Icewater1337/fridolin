@@ -35,10 +35,14 @@ On the host that runs Docker:
                        is stopped, say (fridolin core run core import --latest)
 
 In the core (docker exec fridolin-core fridolin core ...):
-  fridolin core export [--list-folders]
+  fridolin core export [--list-folders | --drift] [--use-approved]
                                  encrypt the data dir to the vault bucket, with the
                                  brain folders it takes along (--list-folders: list
-                                 their files and export nothing)
+                                 their files and export nothing; --drift: say only
+                                 which brain.json on disk differs from the manifest
+                                 you approved). It refuses while a brain.json on
+                                 disk keeps more home than the approved manifest:
+                                 approve it first, or pass --use-approved
   fridolin core import --latest [--force]
                                  fetch, decrypt and check the latest export,
                                  then put it in place of an empty data dir

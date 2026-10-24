@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Icewater1337/fridolin/internal/jsonx"
 
@@ -77,6 +78,56 @@ type Manifest struct {
 	Memory *Memory `json:"memory,omitempty"`
 	// Schedules are the brain's scheduled agents (schedule.go).
 	Schedules []Schedule `json:"schedules,omitempty"`
+	// Files is how the Files page and the site take uploads into the
+	// brain's folder (docs/FILES.md, "Uploads"); nil takes them only from
+	// you.
+	Files *Files `json:"files,omitempty"`
+}
+
+// Files is brain.json's "files": the folders that take uploads from site
+// roles allowed to upload to the brain, and what becomes of an upload.
+type Files struct {
+	Uploads []UploadFolder `json:"uploads,omitempty"`
+}
+
+// UploadFolder is a folder that takes uploads, with its subfolders.
+type UploadFolder struct {
+	// Folder is relative to the brain folder, with / between names:
+	// "documents", "inbox/scans".
+	Folder string `json:"folder"`
+	// ToBrain hands an upload to the brain, as a file sent on WhatsApp,
+	// which files it where it belongs; off, the file lands in the folder.
+	ToBrain bool `json:"to_brain,omitempty"`
+}
+
+// ValidUploadFolder reports whether folder may be an upload folder: a
+// relative path of plain names, none of them hidden.
+func ValidUploadFolder(folder string) bool {
+	if folder == "" || len(folder) > 200 || strings.ContainsAny(folder, "\\\x00\r\n") || !utf8.ValidString(folder) {
+		return false
+	}
+	for seg := range strings.SplitSeq(folder, "/") {
+		if seg == "" || seg == "." || seg == ".." || strings.HasPrefix(seg, ".") {
+			return false
+		}
+	}
+	return true
+}
+
+// UploadRule is the upload folder rel (a cleaned path in the brain
+// folder) lies in, the deepest one, and whether there is one.
+func (f *Files) UploadRule(rel string) (UploadFolder, bool) {
+	var best UploadFolder
+	found := false
+	if f == nil {
+		return best, false
+	}
+	for _, u := range f.Uploads {
+		if (rel == u.Folder || strings.HasPrefix(rel, u.Folder+"/")) && (!found || len(u.Folder) > len(best.Folder)) {
+			best, found = u, true
+		}
+	}
+	return best, found
 }
 
 // RoleCore marks the core brain (Manifest.Role).
@@ -366,6 +417,18 @@ func (m *Manifest) Validate() error {
 			return fmt.Errorf("brain %q: backup target %q must be %q or \"node:<target>\", a target of vault.targets", m.ID, key, TargetCloud)
 		}
 	}
+	if f := m.Files; f != nil {
+		seen := map[string]bool{}
+		for _, u := range f.Uploads {
+			if !ValidUploadFolder(u.Folder) {
+				return fmt.Errorf("brain %q: files.uploads folder %q must be a path inside the brain folder, of names that do not start with a dot", m.ID, u.Folder)
+			}
+			if seen[u.Folder] {
+				return fmt.Errorf("brain %q: files.uploads lists %q twice", m.ID, u.Folder)
+			}
+			seen[u.Folder] = true
+		}
+	}
 	if err := m.validateSchedules(); err != nil {
 		return err
 	}
@@ -412,6 +475,14 @@ func (m Manifest) Normalized() Manifest {
 	m.Grants = grants
 	if len(m.Schedules) == 0 {
 		m.Schedules = nil
+	}
+	if m.Files != nil {
+		if len(m.Files.Uploads) == 0 {
+			m.Files = nil
+		} else {
+			m.Files = &Files{Uploads: slices.Clone(m.Files.Uploads)}
+			slices.SortFunc(m.Files.Uploads, func(a, b UploadFolder) int { return strings.Compare(a.Folder, b.Folder) })
+		}
 	}
 	return m
 }

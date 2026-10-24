@@ -20,6 +20,7 @@ missing  litestream (needed from M3): litestream is not installed
          fix: brew install benbjohnson/litestream/litestream
 ok       age: /opt/homebrew/bin/age (v1.2.1)
 ok       approvals waiting: none waiting
+ok       brain folders as approved: every brain folder is as you approved it
 ok       lockdown: off
 ok       time zone of schedules: the system's zone (timezone is unset)
 ok       Google Drive link uses your own Google client: Google Drive is not connected

@@ -88,6 +88,7 @@ restart.
 | `grants` | Only on the core brain: what it may do with each other brain, by that brain's id, from `delegate`, `read` and `files` (`{"family": ["delegate", "read"]}`). See [below](#the-core-brain-and-its-grants). |
 | `memory` | The [memory index](#memory): `inject` (default `false`) puts the owner's messages and the brain's own notes that match a new message into its prompt; `top_k` (default 5, at most 20) and `max_chars` (default 2000, at most 20000) bound how much; `consolidate` (`"weekly sun 18:00"`, `"daily 07:00"`; default none) runs `skills/memory-consolidation.md` on that schedule, as the [scheduled agent](#scheduled-agents) `memory-consolidation`. Left out, nothing changes for the brain. |
 | `schedules` | The brain's [scheduled agents](#scheduled-agents): tasks it runs by itself on a schedule, or programs the bridge runs on a node. |
+| `files` | `files.uploads`: the folders, with their subfolders, that take uploads from the site roles allowed to upload to the brain, each `{"folder": "documents", "to_brain": true}`; `to_brain` hands an upload to the brain, as a file sent on WhatsApp, instead of leaving it in the folder. Set on the Files page; see [FILES.md](FILES.md#uploads). |
 
 [`schemas/brain.schema.json`](schemas/brain.schema.json) is a JSON Schema
 of the file, version 1.

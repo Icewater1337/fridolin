@@ -22,11 +22,13 @@ import (
 // The site's sandbox keeps module code off the bridge's own port (the
 // dashboard, /send, /ingest), so the bridge answers the site on a port of
 // its own: a listener on the loopback, bound on first use, that serves
-// only the read-only Files and wiki calls, with a token made at startup
+// only the Files and wiki calls, with a token made at startup
 // that the site gets through its secrets pipe. The site names the
 // signed-in account in each request; the bridge looks it up in the site's
-// accounts and lets it read the brains its role may see (admin: all).
-// Everything a site account reads is audited.
+// accounts and lets it read the brains its role may see (admin: all),
+// change them if it is an admin, and upload into the upload folders of the
+// brains its role may upload to. Everything a site account reads or
+// changes is audited.
 //
 // Module code runs in the same process as the site and can make the same
 // requests, as it can read users.json and session.key: approving module
@@ -86,8 +88,18 @@ func (b *App) stopSiteBridge() {
 	}
 }
 
+// siteWrites are the calls of the site bridge that change files, with the
+// body each takes.
+var siteWrites = map[string]string{
+	"PUT /site-api/files/text":    "application/json",
+	"POST /site-api/files/move":   "application/json",
+	"POST /site-api/files/delete": "application/json",
+	"POST /site-api/files/upload": "multipart/form-data",
+}
+
 // siteBridgeHandler admits a request to next only from this machine
-// (Host is the listener's address), with the token and for GET.
+// (Host is the listener's address), with the token, and for GET or one
+// of siteWrites with its body.
 func siteBridgeHandler(addr, token string, next http.Handler) http.Handler {
 	_, port, _ := net.SplitHostPort(addr)
 	hosts := map[string]bool{addr: true, "localhost:" + port: true}
@@ -104,15 +116,28 @@ func siteBridgeHandler(addr, token string, next http.Handler) http.Handler {
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			httpapi.WriteErr(w, http.StatusMethodNotAllowed, "the site bridge only reads")
-			return
+			ct, ok := siteWrites[r.Method+" "+r.URL.Path]
+			if !ok {
+				httpapi.WriteErr(w, http.StatusMethodNotAllowed, "no such change on the site bridge")
+				return
+			}
+			if !strings.HasPrefix(r.Header.Get("Content-Type"), ct) {
+				httpapi.WriteErr(w, http.StatusUnsupportedMediaType, "send "+ct)
+				return
+			}
+			limit := int64(1 << 20)
+			if ct != "application/json" {
+				limit = httpapi.MaxUploadBody
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
 		}
 		next.ServeHTTP(w, r)
 	})
 }
 
 // siteScope is what the site account a request names may read: admin
-// every brain, other roles the brains Site → Roles gives them.
+// every brain, which it may change too, other roles the brains Site →
+// Files and Wiki gives them, and uploads to those it lets them upload to.
 func (b *App) siteScope(r *http.Request) (files.Scope, error) {
 	id := r.Header.Get(siteUserHeader)
 	if id == "" {
@@ -124,9 +149,10 @@ func (b *App) siteScope(r *http.Request) (files.Scope, error) {
 		}
 		by := "site:" + u.Display()
 		if u.Role == "admin" {
-			return files.Scope{Private: true, All: true, By: by}, nil
+			return files.Scope{Private: true, All: true, Write: true, By: by}, nil
 		}
-		return files.Scope{Brains: b.site.Settings().RoleBrains[u.Role], By: by}, nil
+		set := b.site.Settings()
+		return files.Scope{Brains: set.RoleBrains[u.Role], Uploads: set.RoleUploads[u.Role], By: by}, nil
 	}
 	return files.Scope{}, errors.New("no such site account")
 }

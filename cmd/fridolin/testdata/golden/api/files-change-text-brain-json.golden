@@ -1,0 +1,7 @@
+PUT /api/files/text
+403 Forbidden
+Content-Type: application/json
+
+{
+  "error": "this file is Fridolin's own; change it on the brain's page"
+}
