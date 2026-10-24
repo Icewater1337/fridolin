@@ -27,8 +27,8 @@ import (
 func setsidChildren(t *testing.T, home, holds string) {
 	t.Helper()
 	pidLog := filepath.Join(home, "pids")
-	t.Setenv("FRIDOLIN_FAKE_PID_LOG", pidLog)
-	t.Setenv("FRIDOLIN_FAKE_SETSID_CHILD", holds)
+	setenv(t, "FRIDOLIN_FAKE_PID_LOG", pidLog)
+	setenv(t, "FRIDOLIN_FAKE_SETSID_CHILD", holds)
 	t.Cleanup(func() {
 		data, _ := os.ReadFile(pidLog)
 		// Each run logs the CLI's PID, then its grandchild's.
@@ -49,6 +49,8 @@ func setsidChildren(t *testing.T, home, holds string) {
 // stderr too, it turned the answer that had come into a "took too long"
 // error once run_timeout came.
 func TestDetachedChildDoesNotHoldTheBrain(t *testing.T) {
+	// Serial: shortens runTimeoutUnit, postResultGrace and runWaitDelay,
+	// package variables every run reads.
 	cases := []struct {
 		name         string
 		holds        string
@@ -108,10 +110,11 @@ func TestDetachedChildDoesNotHoldTheBrain(t *testing.T) {
 // not in argv, where every process listing showed it and ARG_MAX bounded
 // it.
 func TestSiteSearchStartsClaudeAsBrainRunsDo(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	argsLog := filepath.Join(tb.home, "args.log")
-	t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
+	setenv(t, "FRIDOLIN_FAKE_ARGS_LOG", argsLog)
 	const prompt = "SEARCH-PROMPT where is the letter?"
 	var out bytes.Buffer
 	if err := tb.runBrainSearch(context.Background(), "a", prompt, &out); err != nil {
@@ -140,10 +143,12 @@ func TestSiteSearchStartsClaudeAsBrainRunsDo(t *testing.T) {
 // stderr is kept up to its end only, however much it is, and that end
 // names the error. It was all kept in memory.
 func TestSiteSearchKeepsOnlyTheEndOfStderr(t *testing.T) {
+	// Serial: it measures what the whole process allocates, which tests
+	// running beside it would add to.
 	tb := newTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	const flood = 16 << 20
-	t.Setenv("FRIDOLIN_FAKE_STDERR_BYTES", strconv.Itoa(flood))
+	setenv(t, "FRIDOLIN_FAKE_STDERR_BYTES", strconv.Itoa(flood))
 	var before, after runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&before)
@@ -158,8 +163,9 @@ func TestSiteSearchKeepsOnlyTheEndOfStderr(t *testing.T) {
 }
 
 func TestKillRunsRejectsReloadAlreadyInProgress(t *testing.T) {
+	t.Parallel()
 	mgr, _, home := queueTestManager(t, 0, "")
-	cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", "claude_path": "`+os.Args[0]+`"}`))
+	cfg, err := loadConfig(t, writeConfig(t, `{"data_dir": "`+home+`/data", "claude_path": "`+os.Args[0]+`"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

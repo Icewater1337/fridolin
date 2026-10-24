@@ -99,8 +99,10 @@ func skipWithoutSh(t *testing.T) {
 // and reports what changed; a terminal runs a command; nothing leaves the
 // granted folder; everything is audited; a lockdown refuses starting.
 func TestWorkstationThroughNodes(t *testing.T) {
+	// Serial: shortens nodeSessionMinAge, a package variable every bridge's
+	// workstation reads.
 	skipWithoutSh(t)
-	t.Setenv("FRIDOLIN_FAKE_MCP", "[]")
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
 	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8767"}}`)
 	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
 	h.AddBrain(manifest.Manifest{ID: "family", Name: "Family", Routing: manifest.Routing{Groups: []string{harnessGroup}}})
@@ -120,7 +122,7 @@ func TestWorkstationThroughNodes(t *testing.T) {
 	h.WaitFor("laptop approved", func() bool { return h.b.work.anyWorkNode("agent") && h.b.work.anyWorkNode("terminal") })
 
 	// A sub-brain never has them.
-	t.Setenv("FRIDOLIN_FAKE_MCP", `[{"brain":"family"}]`)
+	setenv(t, "FRIDOLIN_FAKE_MCP", `[{"brain":"family"}]`)
 	if reply := h.Answer(inbound{JID: harnessGroup, Sender: "15551234567", Text: "@claude fix the app #mcp"}); strings.Contains(reply, "node_agent") || strings.Contains(reply, "node_terminal") {
 		t.Errorf("family has workstation tools:\n%s", reply)
 	}

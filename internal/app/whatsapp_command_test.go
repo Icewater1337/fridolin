@@ -21,6 +21,7 @@ import (
 // channels before it reaches WhatsApp, whatever chat a brain or script
 // names.
 func TestSendRefusesStatusBroadcastAndChannels(t *testing.T) {
+	t.Parallel()
 	tw := newTestWhatsApp(t)
 	ctx := context.Background()
 	sends := map[string]func(jid string) error{
@@ -51,6 +52,7 @@ func TestSendRefusesStatusBroadcastAndChannels(t *testing.T) {
 }
 
 func TestCheckRecipient(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		jid    string
 		refuse bool

@@ -26,6 +26,7 @@ import (
 )
 
 func TestVoteText(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		selected []string
 		want     string
@@ -46,6 +47,7 @@ func TestVoteText(t *testing.T) {
 // identity map names the voter. That is the brain that sent it, even in a
 // chat another brain owns.
 func TestPollVoteBecomesAHistoryEvent(t *testing.T) {
+	t.Parallel()
 	hash := func(s string) []byte { h := sha256.Sum256([]byte(s)); return h[:] }
 	voter := types.NewJID("15551234567", types.DefaultUserServer)
 	for _, c := range []struct {
@@ -90,6 +92,8 @@ func TestPollVoteBecomesAHistoryEvent(t *testing.T) {
 // Who voted for what goes to the debug log only: the main log, which is
 // kept and sent along with bug reports, names no voter and no choice.
 func TestPollVoteIsLoggedAtDebug(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	hash := func(s string) []byte { h := sha256.Sum256([]byte(s)); return h[:] }
 	logged := captureLog(t)
 	tb, _ := newMainBridge(t, "")
@@ -114,6 +118,8 @@ func TestPollVoteIsLoggedAtDebug(t *testing.T) {
 // A vote that cannot be decrypted or saved is logged as an error, the
 // voter masked there too, in what whatsmeow says as well.
 func TestPollVoteFailuresMaskTheVoter(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	voter := types.NewJID(otherNumber, types.DefaultUserServer)
 	cases := []struct {
 		name string
@@ -160,6 +166,7 @@ func TestPollVoteFailuresMaskTheVoter(t *testing.T) {
 
 // A poll a brain sends is kept with that brain's id.
 func TestSentPollRemembersItsBrain(t *testing.T) {
+	t.Parallel()
 	tb, _ := newMainBridge(t, "")
 	if err := tb.outbox.Reply(context.Background(), "main", testDMChat, "[POLL]\nQuestion: Lunch?\n- yes\n- no\n[/POLL]", 0); err != nil {
 		t.Fatal(err)

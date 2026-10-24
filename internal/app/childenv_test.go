@@ -18,6 +18,7 @@ import (
 )
 
 func TestChildGets(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name                   string
 		claude, other, desktop bool // given to a Claude run, to any other program, to a sign-in
@@ -85,6 +86,8 @@ func TestChildGets(t *testing.T) {
 }
 
 func TestChildEnv(t *testing.T) {
+	// Serial: onlyEnv swaps the whole process environment, as a service file
+	// would.
 	onlyEnv(t, map[string]string{
 		"HOME":                    "/Users/you",
 		"PATH":                    "/usr/bin:/bin",
@@ -120,7 +123,7 @@ func TestChildEnv(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := childEnv(tc.scope, tc.passthrough, tc.extra...)
+			got := childEnv(envOf(t), tc.scope, tc.passthrough, tc.extra...)
 			slices.Sort(got)
 			if !slices.Equal(got, tc.want) {
 				t.Errorf("childEnv = %q, want %q", got, tc.want)
@@ -133,6 +136,8 @@ func TestChildEnv(t *testing.T) {
 // variables on childEnvAllowlist, the Claude CLI's login among them, and
 // the bridge's own, and nothing else of the bridge's environment.
 func TestBrainGetsOnlyTheAllowlistedEnvironment(t *testing.T) {
+	// Serial: onlyEnv swaps the whole process environment, as a service file
+	// would.
 	listed := map[string]string{
 		// What a launchd job that logs the CLI in with a token sets, with
 		// HOME (below).
@@ -206,6 +211,8 @@ func TestBrainGetsOnlyTheAllowlistedEnvironment(t *testing.T) {
 // TestBrainGetsThePassthrough: child_env_passthrough hands a brain the
 // variables it names, and only those.
 func TestBrainGetsThePassthrough(t *testing.T) {
+	// Serial: onlyEnv swaps the whole process environment, as a service file
+	// would.
 	env := map[string]string{"GROQ_API_KEY": "test-groq-key", "SSH_AUTH_SOCK": "/tmp/agent.sock", "FRIDOLIN_TEST_SECRET": "test-secret"}
 	cases := []struct {
 		name, config string
@@ -233,6 +240,7 @@ func TestBrainGetsThePassthrough(t *testing.T) {
 }
 
 func TestChildEnvPassthroughNames(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		ok   bool
@@ -253,9 +261,9 @@ func TestChildEnvPassthroughNames(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			names, _ := json.Marshal([]string{tc.name})
-			_, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", "child_env_passthrough": `+string(names)+`}`))
+			_, err := loadConfig(t, writeConfig(t, `{"data_dir": "`+home+`/data", "child_env_passthrough": `+string(names)+`}`))
 			if tc.ok && err != nil {
 				t.Fatalf("Load: %v", err)
 			}
@@ -271,15 +279,16 @@ func TestChildEnvPassthroughNames(t *testing.T) {
 // script there may run what a brain can change, so it gets what a brain
 // gets and no more.
 func TestClaudeVersionCheckGetsABrainsEnvironment(t *testing.T) {
+	t.Parallel()
 	script := filepath.Join(t.TempDir(), "claude")
 	body := "#!/bin/sh\necho \"9.9 ${CLAUDE_CODE_OAUTH_TOKEN:-unset} ${GROQ_API_KEY:-unset} ${FRIDOLIN_TEST_SECRET:-unset}\"\n"
 	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
-	t.Setenv("GROQ_API_KEY", "test-groq-key")
-	t.Setenv("FRIDOLIN_TEST_SECRET", "test-secret")
-	if got, want := ClaudeInfo(script, []string{"GROQ_API_KEY"}).Version, "9.9 test-oauth-token test-groq-key unset"; got != want {
+	setenv(t, "CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
+	setenv(t, "GROQ_API_KEY", "test-groq-key")
+	setenv(t, "FRIDOLIN_TEST_SECRET", "test-secret")
+	if got, want := ClaudeInfo(envOf(t), script, []string{"GROQ_API_KEY"}).Version, "9.9 test-oauth-token test-groq-key unset"; got != want {
 		t.Errorf("version = %q, want %q", got, want)
 	}
 }
@@ -310,6 +319,8 @@ func onlyEnv(t *testing.T, env map[string]string) {
 // TestOnlyEnvRefusesParallelTests: onlyEnv swaps the environment of the
 // whole process, which a parallel test shares with the tests beside it.
 func TestOnlyEnvRefusesParallelTests(t *testing.T) {
+	// Serial: its parallel subtest checks that onlyEnv refuses to run in
+	// one.
 	t.Run("parallel", func(t *testing.T) {
 		t.Parallel()
 		defer func() {
@@ -341,7 +352,7 @@ func brainRunEnv(t *testing.T, env map[string]string, configValue string) (map[s
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := loadConfig(t, writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+os.Args[0]+`",
@@ -380,6 +391,7 @@ func brainRunEnv(t *testing.T, env map[string]string, configValue string) (map[s
 // a symlink is refused, since the profile allows it by name, and so is an
 // id that cannot name a folder.
 func TestPrepareBrainState(t *testing.T) {
+	t.Parallel()
 	for _, inherit := range []bool{false, true} {
 		t.Run(fmt.Sprintf("inherit_claude_user_config=%v", inherit), func(t *testing.T) {
 			data := fsx.Canonical(t.TempDir())

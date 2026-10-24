@@ -37,6 +37,7 @@ func requireSiteRuntime(t *testing.T) {
 }
 
 func TestSiteAPISecrets(t *testing.T) {
+	t.Parallel()
 	b := &App{site: newTestSite(t)}
 	mux := http.NewServeMux()
 	b.siteAPI(mux)
@@ -72,8 +73,9 @@ func TestSiteAPISecrets(t *testing.T) {
 // what the brains' keeps of the bridge itself: its data dir, DB, config,
 // credentials and sandbox.deny_paths; and keeps the bridge's binary unwritable.
 func TestSandboxProfilerSitePaths(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	cfg := &config.File{DataDir: filepath.Join(home, "data"), DBPath: filepath.Join(home, "db", "bridge.db")}
 	cfg.Sandbox.CredentialsDir = filepath.Join(home, "creds")
 	cfg.Sandbox.DenyPaths = []string{filepath.Join(home, "private")}

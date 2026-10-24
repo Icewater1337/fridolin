@@ -8,6 +8,7 @@ import (
 )
 
 func TestBrainSinkKeepsWaitingFallbackAndQuestionAcknowledgement(t *testing.T) {
+	t.Parallel()
 	accepted := false
 	sink := brainHooksSink{&BrainHooks{Question: func(_ *brain.Brain, jid, text string) bool {
 		if jid != "chat" || text != outboundmsg.QuestionPrefix+outboundmsg.WorkingNotice {

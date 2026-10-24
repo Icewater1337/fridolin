@@ -65,11 +65,11 @@ func githubHome() string {
 	return ghapp.DefaultWeb
 }
 
-func newGitHubService(cfgs *config.Store, container bool, logger *slog.Logger) *githubService {
+func newGitHubService(cfgs *config.Store, env Environment, container bool, logger *slog.Logger) *githubService {
 	return &githubService{
 		client: &ghapp.Client{},
 		web:    ghapp.DefaultWeb,
-		secrets: githubSecrets{getenv: os.Getenv, store: githubHostStore(container),
+		secrets: githubSecrets{getenv: func(name string) string { return getenv(env, name) }, store: githubHostStore(container),
 			secretsDir: cfgs.Boot().Layout().Secrets()},
 		log: logger, now: time.Now,
 		pending: map[string]githubPending{},

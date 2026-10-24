@@ -16,6 +16,7 @@ import (
 // The node checks apply with nodes.enabled: the port must answer (M2's
 // gate), and approved nodes not heard from for 5 minutes are a warning.
 func TestDoctorNodeChecks(t *testing.T) {
+	t.Parallel()
 	off := RunDoctor(context.Background(), healthyMac().doctorEnv(doctorConfig(nil), nil), DoctorRegistry)
 	for _, c := range off.Checks {
 		if strings.HasPrefix(c.ID, "nodes-") {
@@ -75,6 +76,7 @@ func TestDoctorNodeChecks(t *testing.T) {
 // once a minute). Without a bridge they read the file, where online
 // means nothing.
 func TestDoctorNodeChecksPreferTheBridge(t *testing.T) {
+	t.Parallel()
 	const registry = "/home/you/.fridolin/nodes/nodes.json"
 	// The file kept the time of the connect, an hour before doctor runs.
 	const file = `{"nodes":[{"id":"m","name":"mac-mini","device":"approved","last_seen":"2026-10-20T11:00:00Z","online":true,"declared":{"fride":{"url":"http://127.0.0.1:7777"}},"approved":{"fride":{"url":"http://127.0.0.1:7777"}}}]}`
@@ -114,6 +116,7 @@ func TestDoctorNodeChecksPreferTheBridge(t *testing.T) {
 // askBridgeNodes asks GET /api/nodes with the dashboard token from the
 // data dir, on loopback for a bridge bound to every interface.
 func TestAskBridgeNodes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	token := config.Layout{Root: dir}.DashboardToken()
 	if err := os.WriteFile(token, []byte("tok\n"), 0o600); err != nil {
@@ -148,6 +151,7 @@ func TestAskBridgeNodes(t *testing.T) {
 // nodes-version warns about approved nodes older than the core, by the
 // running bridge's version, and about failed updates.
 func TestDoctorNodesVersion(t *testing.T) {
+	t.Parallel()
 	cfg := doctorConfig(func(c *config.Settings) { c.Nodes = config.NodesConfig{Enabled: true, Listen: ":8766"} })
 	for _, tc := range []struct {
 		name, live, status, detail string

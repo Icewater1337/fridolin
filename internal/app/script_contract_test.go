@@ -94,6 +94,7 @@ func scriptCall(t *testing.T, h *harness, s *scrubber, brains map[string]string,
 }
 
 func TestGoldenSendContract(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"max_chunk_size": 100}`)
 	s := h.scrubber()
 	// The DM brain, and a brain that owns the group.
@@ -151,6 +152,7 @@ func withToken(tok string) func(*http.Request) {
 }
 
 func TestGoldenIngestContract(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"ingest": {"enabled": true}}`)
 	s := h.scrubber()
 	brains := map[string]string{

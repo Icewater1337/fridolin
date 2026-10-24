@@ -70,6 +70,7 @@ func (p testPhone) upload(t *testing.T, device, name, text string) string {
 // transcript it signs reaches the brain like any phone recording, while
 // one it did not sign, or one from a phone unpaired since, does not.
 func TestPlaudPhoneUploadsThroughTheSite(t *testing.T) {
+	t.Parallel()
 	tb, fp := plaudBridge(t, `, "phone_upload": true`)
 	ctx := context.Background()
 	phone := newTestPhone(t)
@@ -142,6 +143,7 @@ func TestPlaudPhoneUploadsThroughTheSite(t *testing.T) {
 }
 
 func TestPlaudPhoneUploadOffRefusesPhones(t *testing.T) {
+	t.Parallel()
 	tb, _ := plaudBridge(t, "")
 	phone := newTestPhone(t)
 	code, _ := plaudFixturePairing(t, tb)

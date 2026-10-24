@@ -25,6 +25,7 @@ func (r *pipelineNoticeRecorder) SendMessage(_ context.Context, _, text string) 
 // The pipeline is constructed before the site's transport wrapper. A notice
 // must use the current transport and the current trigger after a settings edit.
 func TestMessagePipelineReadsLiveSettingsAndTransport(t *testing.T) {
+	t.Parallel()
 	tb, _ := newMainBridge(t, "")
 	original := tb.wa
 	recorder := &pipelineNoticeRecorder{Messenger: original}

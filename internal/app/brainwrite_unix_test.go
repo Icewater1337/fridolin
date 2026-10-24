@@ -16,6 +16,7 @@ import (
 // A short write must not publish part of a new manifest: a transaction
 // cannot roll back a file whose creation never reported success.
 func TestNewManifestWriteFailureLeavesNoFile(t *testing.T) {
+	t.Parallel()
 	const child = "FRIDOLIN_TEST_PARTIAL_MANIFEST"
 	if os.Getenv(child) != "1" {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestNewManifestWriteFailureLeavesNoFile$")

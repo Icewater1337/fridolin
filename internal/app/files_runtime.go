@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -28,7 +27,7 @@ func (b *App) newFilesAPI() *httpapi.FilesAPI {
 // folders approved nodes lend.
 func (b *App) fileRoots() []files.Root {
 	cfg := b.cfgs.Get()
-	deny := filesDeny(cfg.DataDir, cfg.DBPath, cfg.Sandbox.DenyPaths, sandboxPolicyOf(cfg).protected(HomeDir(), ownLayout()))
+	deny := filesDeny(b.env, cfg.Home, cfg.DataDir, cfg.DBPath, cfg.Sandbox.DenyPaths, sandboxPolicyOf(cfg).protected(cfg.Home, ownLayout()))
 	media := AbsPath(cfg.MediaDir)
 	if media == "" && cfg.DataDir != "" {
 		media = filepath.Join(AbsPath(cfg.DataDir), "media")
@@ -80,11 +79,10 @@ func (b *App) fileRoots() []files.Root {
 // it: the bridge's data folder, database and config, the credentials
 // folder, sandbox.deny_paths and what the sandbox keeps from brains. Your
 // own folders (Documents and the like) are not among them: brains live
-// there.
-func filesDeny(dataDir, dbPath string, denyPaths []string, protected []sandbox.ProtectedPath) []string {
-	home := HomeDir()
-	out := []string{AbsPath(dataDir), AbsPath(dbPath), os.Getenv("FRIDOLIN_SECRETS_DIR")}
-	if p := os.Getenv("FRIDOLIN_CONFIG"); p != "" {
+// there. env is the bridge's environment, home its home folder.
+func filesDeny(env Environment, home, dataDir, dbPath string, denyPaths []string, protected []sandbox.ProtectedPath) []string {
+	out := []string{AbsPath(dataDir), AbsPath(dbPath), getenv(env, "FRIDOLIN_SECRETS_DIR")}
+	if p := getenv(env, "FRIDOLIN_CONFIG"); p != "" {
 		out = append(out, AbsPath(p))
 	}
 	for _, p := range denyPaths {

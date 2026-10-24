@@ -21,6 +21,7 @@ import (
 // certificates here), and the dashboard API then answers it without the
 // token. The code works once.
 func TestTailnetSignInWithALink(t *testing.T) {
+	t.Parallel()
 	fake := &tailnet.Fake{
 		Status: tailnet.Status{DNSName: "fridolin-core.example.ts.net", IPs: []string{"100.64.0.1"}, MagicDNS: true},
 		Who:    tailnet.Identity{LoginName: "you@example.com", Node: "pc"},

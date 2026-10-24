@@ -29,8 +29,8 @@ import (
 func openTxStore(t *testing.T, body string) *config.Store {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	cs, err := OpenConfigStore(writeConfig(t, body))
+	setenv(t, "HOME", home)
+	cs, err := openConfigStore(t, writeConfig(t, body))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,6 +41,7 @@ func openTxStore(t *testing.T, body string) *config.Store {
 // free for the next update: net/http would recover the handler's panic,
 // and a lock left held would block every later save.
 func TestConfigUpdatePanicIsAnError(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		mutate func(*config.File) error
@@ -107,6 +108,7 @@ func TestConfigUpdatePanicIsAnError(t *testing.T) {
 // updates commit: with an etag of a later write, a save of the page's
 // stale config would pass the conflict check and undo that write.
 func TestGetConfigSendsTheETagOfItsConfig(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	// The etag is the hash of config.json, which is the file layer GET
 	// sends, indented; without brains, brain_dirs is null in both.
@@ -174,6 +176,7 @@ func TestGetConfigSendsTheETagOfItsConfig(t *testing.T) {
 // a configuration a later update replaced because the later notification
 // overtook the earlier one.
 func TestConfigSubscribersHearUpdatesInOrder(t *testing.T) {
+	t.Parallel()
 	cs := openTxStore(t, `{}`)
 	var mu sync.Mutex
 	var heard []string
@@ -219,6 +222,8 @@ func TestConfigSubscribersHearUpdatesInOrder(t *testing.T) {
 // A subscriber that panics is logged; the update stays saved, the other
 // subscribers hear of it, and the next update is not blocked.
 func TestConfigSubscriberPanicIsLogged(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	cs := openTxStore(t, `{}`)
 	logs := captureLog(t)
 	cs.Subscribe(func(_, next *config.Settings) {
@@ -245,6 +250,7 @@ func TestConfigSubscriberPanicIsLogged(t *testing.T) {
 // After updates that run at once, the brains run on the configuration the
 // store has, not on one an update replaced.
 func TestBrainsRunOnTheLatestConfig(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	for round := 0; round < 5; round++ {
@@ -278,6 +284,7 @@ func TestBrainsRunOnTheLatestConfig(t *testing.T) {
 // update, not the one the notification carries: a notification that comes
 // after a later update's leaves the brains on the later one.
 func TestBridgeAppliesTheLatestConfigOnALateNotification(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	rename := func(name string) config.Snapshot {
@@ -300,6 +307,7 @@ func TestBridgeAppliesTheLatestConfigOnALateNotification(t *testing.T) {
 // when another update has written one since: with that one's etag, the
 // page would take the other write for its own and save over it.
 func TestPutConfigSendsItsOwnETag(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	var once sync.Once
 	var putETag string
@@ -361,6 +369,8 @@ func editByHand(t *testing.T, path string, edit func(c map[string]any)) {
 // by the next save. A save of the whole config made from the one before
 // is a conflict; once reloaded, the page shows the hand edit and saves.
 func TestHandEditThenSaveWithTheOldETagConflicts(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	tb := newTestBridge(t, "")
 	var page struct {
 		ETag   string         `json:"etag"`
@@ -405,6 +415,7 @@ func TestHandEditThenSaveWithTheOldETagConflicts(t *testing.T) {
 // A save that changes one thing, as allowing a chat does, goes on top of a
 // hand edit of config.json: both stay.
 func TestHandEditThenDeltaUpdateKeepsBoth(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	editByHand(t, tb.cfgs.Path(), func(c map[string]any) { c["max_chunk_size"] = 1234 })
 	if w := tb.do("POST", "/api/chats/allow", httpapi.ChatRequest{Kind: "dm", Number: "15559876543"}); w.Code != 200 {
@@ -425,6 +436,7 @@ func TestHandEditThenDeltaUpdateKeepsBoth(t *testing.T) {
 // A hand edit that leaves config.json unloadable, half typed say, makes a
 // save fail instead of writing over it; the bridge runs on what it had.
 func TestHandEditThatDoesNotLoadIsNotWrittenOver(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, body, want string
 	}{
@@ -454,6 +466,7 @@ func TestHandEditThatDoesNotLoadIsNotWrittenOver(t *testing.T) {
 // A config.json that is gone is written again by the next save, from the
 // configuration the bridge runs with.
 func TestConfigFileGoneIsWrittenAgain(t *testing.T) {
+	t.Parallel()
 	cs := openTxStore(t, `{"allowed_numbers":["15551234567"]}`)
 	if err := os.Remove(cs.Path()); err != nil {
 		t.Fatal(err)
@@ -475,9 +488,10 @@ func TestConfigFileGoneIsWrittenAgain(t *testing.T) {
 // not there, and a folder typed into Settings waits for the restart that
 // uses it. The bridge makes them as it starts (EnsureDirs).
 func TestTheConfigMakesNoFolders(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	folders := []string{home, filepath.Join(root, "data"), filepath.Join(root, "db"), filepath.Join(root, "media"), filepath.Join(root, "new-media")}
 	noFolders := func(when string) {
 		t.Helper()
@@ -488,7 +502,7 @@ func TestTheConfigMakesNoFolders(t *testing.T) {
 		}
 	}
 
-	if _, err := LoadConfig(filepath.Join(root, "typo.json")); err != nil {
+	if _, err := loadConfig(t, filepath.Join(root, "typo.json")); err != nil {
 		t.Fatal(err)
 	}
 	noFolders("loading a config file that is not there")
@@ -498,7 +512,7 @@ func TestTheConfigMakesNoFolders(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cs, err := OpenConfigStore(path)
+	cs, err := openConfigStore(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -522,6 +536,8 @@ func TestTheConfigMakesNoFolders(t *testing.T) {
 // mistyped --config say, fail and make nothing, instead of reporting the
 // defaults as a config that is fine.
 func TestCommandsRefuseAMissingConfig(t *testing.T) {
+	// Serial: runs fridolin's commands in the process, which read its HOME
+	// and redirect its standard logger.
 	for _, args := range [][]string{{"check"}, {"open", "--print"}, {"rotate-token"}} {
 		t.Run(args[0], func(t *testing.T) {
 			root, home := fixtureHome(t)
@@ -566,6 +582,8 @@ func treeOf(t *testing.T, root string) []string {
 // inside a section or a brain's approved manifest: a typo there was
 // dropped without a word on the next save.
 func TestUnknownConfigKeysAreLoggedByPath(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	cases := []struct {
 		name, body string
 		want       string // the logged list, "" for no line
@@ -596,6 +614,7 @@ func TestUnknownConfigKeysAreLoggedByPath(t *testing.T) {
 
 // unknownKeys goes into maps and slices that hold structs.
 func TestUnknownKeysInMapsAndSlices(t *testing.T) {
+	t.Parallel()
 	type item struct {
 		Name string `json:"name"`
 	}
@@ -617,6 +636,7 @@ func TestUnknownKeysInMapsAndSlices(t *testing.T) {
 // A hand edit follows the same version migration as startup, but its ETag
 // still names the exact bytes on disk until a successful delta saves v2.
 func TestConfigExternalEditMigrationKeepsItsETag(t *testing.T) {
+	t.Parallel()
 	cs := openTxStore(t, `{"version":2,"brain_model":"sonnet"}`)
 	old := cs.ETag()
 	const external = `{"model":"opus","log_level":"debug"}`
@@ -655,6 +675,7 @@ func TestConfigExternalEditMigrationKeepsItsETag(t *testing.T) {
 
 // A newer hand edit must not be published or overwritten by an update.
 func TestConfigUpdateRefusesANewerExternalVersion(t *testing.T) {
+	t.Parallel()
 	cs := openTxStore(t, `{"version":2,"brain_model":"sonnet"}`)
 	before := cs.Snapshot()
 	const external = `{"version":3,"brain_model":"opus","a_new_setting":true}`

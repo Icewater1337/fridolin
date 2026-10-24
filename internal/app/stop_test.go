@@ -11,6 +11,7 @@ import (
 )
 
 func TestSupervisorStopKeepsLayerOrderAndRunsOnce(t *testing.T) {
+	t.Parallel()
 	var supervisor app.Supervisor
 	var order []string
 	record := func(name string) func() { return func() { order = append(order, name) } }

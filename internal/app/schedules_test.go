@@ -104,6 +104,7 @@ func (h *harness) waitRunEnded(brain, name string, n int) sched.Run {
 // says, keeps its run history with each run's log, and pauses, resumes,
 // changes and goes away.
 func TestScheduledAgentsThroughTheAPI(t *testing.T) {
+	t.Parallel()
 	runs := fakeRuns(t)
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
@@ -172,7 +173,7 @@ func TestScheduledAgentsThroughTheAPI(t *testing.T) {
 	if code := put("inbox", map[string]any{"when": "every 6h", "prompt": "Check the inbox folder."}); *code != http.StatusOK {
 		t.Fatalf("PUT: %d", *code)
 	}
-	t.Setenv("FRIDOLIN_FAKE_RESULT", `{"type":"result","result":"NOTHING_TO_REPORT","total_cost_usd":0.25,"usage":{"input_tokens":100,"output_tokens":7}}`)
+	setenv(t, "FRIDOLIN_FAKE_RESULT", `{"type":"result","result":"NOTHING_TO_REPORT","total_cost_usd":0.25,"usage":{"input_tokens":100,"output_tokens":7}}`)
 	n = len(h.SentTo(harnessDM))
 	h.WaitFor("the edit to apply", func() bool { return h.schedules().Agents[0].Report == manifest.ReportWorth })
 	if w := h.Do("POST", "/api/schedules/main/inbox/run", nil); w.Code != http.StatusOK {
@@ -185,10 +186,10 @@ func TestScheduledAgentsThroughTheAPI(t *testing.T) {
 	if len(h.SentTo(harnessDM)) != n {
 		t.Errorf("nothing to report, but sent %q", h.SentTo(harnessDM)[n:])
 	}
-	t.Setenv("FRIDOLIN_FAKE_RESULT", "")
+	setenv(t, "FRIDOLIN_FAKE_RESULT", "")
 
 	// Never two runs of one agent at once.
-	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "1500")
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "1500")
 	if w := h.Do("POST", "/api/schedules/main/inbox/run", nil); w.Code != http.StatusOK {
 		t.Fatalf("run now: %d %s", w.Code, w.Body.String())
 	}
@@ -199,7 +200,7 @@ func TestScheduledAgentsThroughTheAPI(t *testing.T) {
 		t.Error("the run in progress is not listed as running")
 	}
 	h.waitRunEnded("main", "inbox", 3)
-	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "10")
 
 	// Pause and resume.
 	if w := h.Do("POST", "/api/schedules/main/inbox/pause", nil); w.Code != http.StatusOK {
@@ -268,6 +269,7 @@ func TestScheduledAgentsThroughTheAPI(t *testing.T) {
 // starts one while its run goes on, and leaves a paused agent and one
 // switched off alone.
 func TestScheduledAgentsOnTheirSchedule(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}, Schedules: []manifest.Schedule{
 		{Name: "often", When: "every 6h", Prompt: "Look around.", Report: manifest.ReportSilent, JitterMinutes: new(0)},
@@ -320,7 +322,7 @@ func TestScheduledAgentsOnTheirSchedule(t *testing.T) {
 	}
 
 	// While a run goes on, the next slot starts none.
-	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "1500")
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "1500")
 	a.tick(t0.Add(66*time.Hour + time.Minute))
 	h.WaitFor("the run to start", func() bool { return h.agent("main", "often").Running })
 	a.tick(t0.Add(72*time.Hour + time.Minute))
@@ -333,6 +335,7 @@ func TestScheduledAgentsOnTheirSchedule(t *testing.T) {
 // TestSchedulesSwitchedOff: with schedules.enabled off nothing runs on
 // its schedule, and Run now still does.
 func TestSchedulesSwitchedOff(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"schedules": {"enabled": false}}`)
 	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}, Schedules: []manifest.Schedule{
 		{Name: "often", When: "every 6h", Prompt: "Look around.", Report: manifest.ReportSilent},
@@ -358,6 +361,7 @@ func TestSchedulesSwitchedOff(t *testing.T) {
 // the agent memory-consolidation, keeps the last run an older bridge
 // recorded, and an edit moves it into the schedules list.
 func TestMemoryConsolidateIsAScheduledAgent(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}, Memory: &manifest.Memory{Inject: true, Consolidate: "weekly sun 18:00"}})
 	list := h.schedules()
@@ -391,8 +395,9 @@ func TestMemoryConsolidateIsAScheduledAgent(t *testing.T) {
 // GitHub App for exactly its grant, and no other run does; a program on a
 // node that is not there fails, and the owner hears of it.
 func TestScheduledAgentSecretsAndFailures(t *testing.T) {
-	t.Setenv("FRIDOLIN_GITHUB_TOKEN", "tok-for-tests")
-	t.Setenv("FRIDOLIN_FAKE_ENV", "GH_CONFIG_DIR")
+	t.Parallel()
+	setenv(t, "FRIDOLIN_GITHUB_TOKEN", "tok-for-tests")
+	setenv(t, "FRIDOLIN_FAKE_ENV", "GH_CONFIG_DIR")
 	h := newHarness(t, "")
 	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}, Schedules: []manifest.Schedule{
 		{Name: "review", When: "daily 03:00", Template: "code-review-bugs", Vars: map[string]string{"repos": "you/fridolin"}, GitHub: &chat.GitHubGrant{Repos: []string{"you/fridolin"}, Permissions: map[string]string{"issues": "write", "contents": "read"}}, Report: manifest.ReportAlways, Risk: "irreversible", Preapproved: []string{"file issues on you/fridolin"}},

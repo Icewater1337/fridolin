@@ -69,6 +69,8 @@ func fixtureHome(t *testing.T) (root, home string) {
 // configuration the bridge runs with, what it logs about the file, and what
 // the next dashboard save writes back.
 func TestGoldenConfigFixtures(t *testing.T) {
+	// Serial: fixtureHome sets the process's HOME, which the fixtures' ~
+	// needs, and captureLog takes over its standard logger.
 	for _, name := range []string{"config-v1", "config-legacy"} {
 		t.Run(name, func(t *testing.T) {
 			root, _ := fixtureHome(t)
@@ -78,7 +80,7 @@ func TestGoldenConfigFixtures(t *testing.T) {
 			}
 			s := newScrubber(root)
 			logs := captureLog(t)
-			cs, err := OpenConfigStore(path)
+			cs, err := openConfigStore(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -107,6 +109,7 @@ func TestGoldenConfigFixtures(t *testing.T) {
 // key it lacks: it is a version 1 file, from before the key, and what a
 // save makes of it (config-v1-saved.golden) has it.
 func TestConfigV1HasEverySetting(t *testing.T) {
+	t.Parallel()
 	for _, key := range unsetKeys(t, reflect.TypeFor[config.File](), fixture(t, "config-v1.json")) {
 		if key != "version" {
 			t.Errorf("config-v1.json has no %q", key)
@@ -195,6 +198,7 @@ func structOf(typ reflect.Type) reflect.Type {
 }
 
 func TestUnsetKeys(t *testing.T) {
+	t.Parallel()
 	// The check itself: a key missing at the top or one level down shows.
 	type section struct {
 		A string `json:"a"`
@@ -231,6 +235,7 @@ func TestUnsetKeys(t *testing.T) {
 // TestBrainV1Fixture: brain-v1.json, with every field, reads back and is
 // written again byte for byte, as Add brain and every manifest edit write it.
 func TestBrainV1Fixture(t *testing.T) {
+	t.Parallel()
 	data := fixture(t, "brain-v1.json")
 	m, err := manifest.Decode(data)
 	if err != nil {
@@ -256,6 +261,7 @@ func TestBrainV1Fixture(t *testing.T) {
 // written again byte for byte, as AppendHistory writes lines, and the
 // lines between them have every type and set every field.
 func TestHistoryV1Fixture(t *testing.T) {
+	t.Parallel()
 	sc := bufio.NewScanner(bytes.NewReader(fixture(t, "history-v1.jsonl")))
 	kinds := map[string]bool{}
 	keys := map[string]json.RawMessage{}
@@ -302,6 +308,7 @@ const (
 // older versions wrote. It is a SQL dump rather than the database file: a
 // reviewer can read it, and the personal-data check can scan it.
 func TestGenerateFixtures(t *testing.T) {
+	t.Parallel()
 	if !*generate {
 		t.Skip("run with -generate to rewrite testdata/bridge-v1.sql")
 	}
@@ -470,6 +477,7 @@ func loadSQL(t testing.TB, dbPath string, dump []byte) {
 // today's store: the device still pairs the bridge, and the polls, votes and
 // ignored chats read back.
 func TestBridgeV1Fixture(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "bridge.db")
 	loadSQL(t, dbPath, fixture(t, "bridge-v1.sql"))
 	s := openTestStore(t, dbPath)
@@ -523,6 +531,7 @@ func TestBridgeV1Fixture(t *testing.T) {
 // Reopening through the shared pool must not alter the paired device or the
 // independent whatsmeow schema version. Legacy application rows remain usable.
 func TestSharedStoreReopensV1Fixture(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "bridge.db")
 	loadSQL(t, dbPath, fixture(t, "bridge-v1.sql"))
 	db := testStoreSQL(t, dbPath)

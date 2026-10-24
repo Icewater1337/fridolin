@@ -29,6 +29,7 @@ import (
 // A save changes what the next process opens. Every active writer and the
 // brain's environment keep using the running paths in the meantime.
 func TestRestartOnlyPathsStayAtBootAfterAPISave(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"otp_guard":true,"otp_markers":["Examplebank 2FA"],"ingest":{"enabled":true}}`)
 	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	boot := h.DataDir()
@@ -93,7 +94,7 @@ func TestRestartOnlyPathsStayAtBootAfterAPISave(t *testing.T) {
 	// from internal brain settings.
 	for key, want := range map[string]string{"BRIDGE_DATA_DIR": boot, "BRIDGE_DB_PATH": filepath.Join(boot, "bridge.db"), "FRIDOLIN_BRAIN_TOKEN_FILE": filepath.Join(boot, "run-tokens", "main")} {
 		h.WaitFor("the preceding environment probe to finish", func() bool { return !h.Running("main") })
-		t.Setenv("FRIDOLIN_FAKE_ENV", key)
+		setenv(t, "FRIDOLIN_FAKE_ENV", key)
 		if got := h.Answer(inbound{JID: harnessDM, Text: "show " + key}); !strings.Contains(got, want) || strings.Contains(got, next) {
 			t.Errorf("run environment %s = %q, want %q", key, got, want)
 		}
@@ -128,6 +129,7 @@ func TestRestartOnlyPathsStayAtBootAfterAPISave(t *testing.T) {
 }
 
 func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, `, "plaud":{"phone_upload":true,"enabled":true}`)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	runSettings := captureBootRunSettings(t, tb)
@@ -214,7 +216,7 @@ func TestRuntimePathConsumersKeepBootAndApplyLiveOptions(t *testing.T) {
 	}
 	// Changing the process environment after open must not relocate home denies.
 	replacementHome := t.TempDir()
-	t.Setenv("HOME", replacementHome)
+	setenv(t, "HOME", replacementHome)
 	profile, err = tb.brainMgr.profiler.Profile("main")
 	if err != nil || !strings.Contains(profile, filepath.Join(boot.Home, ".ssh")) || strings.Contains(profile, filepath.Join(replacementHome, ".ssh")) {
 		t.Errorf("sandbox home changed after startup: %v", err)
@@ -294,9 +296,10 @@ func captureBootRunSettings(t *testing.T, tb *testBridge) func() brain.Settings 
 // Exercise the options used by New with only I/O consumers replaced.
 // A settings callback accidentally wired to Get would fail this.
 func TestWhatsAppAttachmentKeepsBootMediaAfterAPISave(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	cs, err := OpenConfigStore(writeConfig(t, fmt.Sprintf(`{"data_dir":%q,"allowed_numbers":["15551234567"]}`, filepath.Join(home, "running"))))
+	setenv(t, "HOME", home)
+	cs, err := openConfigStore(t, writeConfig(t, fmt.Sprintf(`{"data_dir":%q,"allowed_numbers":["15551234567"]}`, filepath.Join(home, "running"))))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,6 +362,7 @@ func TestWhatsAppAttachmentKeepsBootMediaAfterAPISave(t *testing.T) {
 // A direct request must not turn the still-active private data folder into a
 // writable brain just because Settings now names the next process's folder.
 func TestRegistryKeepsRunningPathsProtectedAfterAPISave(t *testing.T) {
+	t.Parallel()
 	// Use a non-default data path: the default home folders are always denied,
 	// which would hide a regression in retaining this process's custom path.
 	tb := newTestBridge(t, "")
@@ -386,6 +390,7 @@ func TestRegistryKeepsRunningPathsProtectedAfterAPISave(t *testing.T) {
 // A file edit can bypass the Add workflow. Runtime resolution must independently
 // apply startup path protection when reconciling the saved brain set.
 func TestRuntimeResolutionKeepsRunningPathsProtectedAfterFileEdit(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	active := tb.cfgs.Boot().DataDir
 	next := filepath.Join(tb.home, "next-start")
@@ -425,6 +430,7 @@ func TestRuntimeResolutionKeepsRunningPathsProtectedAfterFileEdit(t *testing.T) 
 }
 
 func TestRestoreKeepsRunningPathsProtectedAfterAPISave(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	active := tb.cfgs.Boot().DataDir
 	next := filepath.Join(tb.home, "next-start")

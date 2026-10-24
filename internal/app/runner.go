@@ -22,6 +22,10 @@ import (
 type commandRunner struct {
 	sandbox *SandboxProfiler
 	hooks   *BrainHooks
+	// env is the bridge's environment, of which runs get part
+	// (childEnv), and home its home folder.
+	env  Environment
+	home string
 }
 
 func (r *commandRunner) Run(ctx context.Context, spec brain.RunSpec, callbacks claudecli.Callbacks) claudecli.Result {
@@ -61,7 +65,7 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 	mcpConfig, settings := "", ""
 	if s.Provider != "codex" && !s.InheritUser {
 		mcpConfig = mcpConfigOf(spec.ID, spec.Dir)
-		settings = excludeInstructionsAbove(spec.Dir)
+		settings = excludeInstructionsAbove(spec.Dir, r.home)
 	}
 	args := claudeArgs(s, mcpConfig, settings)
 	if s.Provider == "codex" {
@@ -130,7 +134,7 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 	}
 	if path := s.PlaudPATH; path != "" || len(s.OwnPATH) > 0 {
 		if path == "" {
-			path = os.Getenv("PATH")
+			path = getenv(r.env, "PATH")
 		}
 		dirs := append(slices.Clone(s.OwnPATH), filepath.SplitList(path)...)
 		extraEnv = append(extraEnv, "PATH="+strings.Join(dirs, string(filepath.ListSeparator))) // replaces the bridge's
@@ -167,7 +171,7 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 	if s.Provider == "codex" {
 		scope = codexChild
 	}
-	env := childEnv(scope, s.EnvPassthrough, extraEnv...)
+	env := childEnv(r.env, scope, s.EnvPassthrough, extraEnv...)
 
 	// Only once the sandbox is settled: a refused run starts no process.
 	spec.BeforeStart()

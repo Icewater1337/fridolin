@@ -52,13 +52,15 @@ func requireSandboxExec(t *testing.T) {
 // folder, and still starts when TMPDIR is unwritable (which used to break
 // the profile file and, before that, the sandbox itself).
 func TestSandboxedRunAppliesProfileInline(t *testing.T) {
+	// Serial: sets the process's TMPDIR, where os.TempDir puts what every
+	// test writes.
 	requireSandboxExec(t)
 	mgr, d, home := queueTestManager(t, 0, `, "sandbox": {"enabled": true}`)
 	secret := filepath.Join(home, "b", "secret.txt")
 	if err := os.WriteFile(secret, []byte("brain b only"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("FRIDOLIN_FAKE_READ", secret)
+	setenv(t, "FRIDOLIN_FAKE_READ", secret)
 
 	tmp := t.TempDir()
 	if err := os.Chmod(tmp, 0o500); err != nil {
@@ -86,6 +88,7 @@ func TestSandboxedRunAppliesProfileInline(t *testing.T) {
 // DISABLE_AUTOUPDATER=1, whatever the bridge's own value; runs without the
 // sandbox get the bridge's own, which childEnvAllowlist passes on.
 func TestSandboxedRunTurnsOffTheAutoUpdater(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, extra string
 		bridge      string // the bridge's own value, "" for unset
@@ -101,11 +104,11 @@ func TestSandboxedRunTurnsOffTheAutoUpdater(t *testing.T) {
 			if strings.Contains(c.extra, `"enabled": true`) {
 				requireSandboxExec(t)
 			}
-			t.Setenv("DISABLE_AUTOUPDATER", c.bridge)
+			setenv(t, "DISABLE_AUTOUPDATER", c.bridge)
 			if c.bridge == "" {
-				os.Unsetenv("DISABLE_AUTOUPDATER")
+				unsetenv(t, "DISABLE_AUTOUPDATER")
 			}
-			t.Setenv("FRIDOLIN_FAKE_ENV", "DISABLE_AUTOUPDATER")
+			setenv(t, "FRIDOLIN_FAKE_ENV", "DISABLE_AUTOUPDATER")
 			mgr, d, _ := queueTestManager(t, 0, c.extra)
 			if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
 				t.Fatal(err)
@@ -128,13 +131,14 @@ func TestSandboxedRunTurnsOffTheAutoUpdater(t *testing.T) {
 // the brain's own Claude Code config dir and TMPDIR as its runs do, or the
 // CLI could keep neither its state nor its temporary files.
 func TestSandboxedSiteSearchGetsTheBrainsOwnState(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	tb := newTestBridge(t, `, "sandbox": {"enabled": true}`)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	state := filepath.Join(tb.home, "data", "brains", "a")
 	for name, want := range map[string]string{"CLAUDE_CONFIG_DIR": state + "/claude", "TMPDIR": state + "/tmp"} {
 		t.Run(name, func(t *testing.T) {
-			t.Setenv("FRIDOLIN_FAKE_ENV", name)
+			tb.setenv(t, "FRIDOLIN_FAKE_ENV", name)
 			var out bytes.Buffer
 			if err := tb.runBrainSearch(context.Background(), "a", "where is the letter?", &out); err != nil {
 				t.Fatalf("search: %v\n%s", err, out.String())
@@ -157,6 +161,7 @@ func TestSandboxedSiteSearchGetsTheBrainsOwnState(t *testing.T) {
 // profile cannot tell that from a configured folder, so only brain
 // resolution can refuse it.
 func TestSandboxIgnoresPlantedSymlinks(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	homes := []struct {
 		name string
@@ -176,7 +181,7 @@ func TestSandboxIgnoresPlantedSymlinks(t *testing.T) {
 		for _, pl := range plants {
 			t.Run(h.name+"/"+pl.name, func(t *testing.T) {
 				home := h.make(t)
-				t.Setenv("HOME", home)
+				setenv(t, "HOME", home)
 				sp, _ := sandboxFixture(t, home, "b", "clients")
 				link := filepath.Join(home, pl.link)
 				if err := os.Rename(link, link+".moved"); err != nil {
@@ -254,6 +259,7 @@ type sandboxCheck struct {
 // of the path and through the real one, because the sandbox matches real
 // paths and an injected brain can use either.
 func TestSandboxEnforcesProfile(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	checks := []sandboxCheck{
 		{"own folder read", false, "assistant/a/notes.md", true},
@@ -288,7 +294,7 @@ func TestSandboxEnforcesProfile(t *testing.T) {
 	for _, l := range sandboxLayouts() {
 		t.Run(l.name, func(t *testing.T) {
 			home := l.home(t)
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir)
 			for _, f := range []string{".claude/settings.json", ".claude/projects/p/s.jsonl", ".claude.json", ".claude.json.backup", ".plaud/tokens.json"} {
 				writeTestFile(t, filepath.Join(home, f), "content of "+f)
@@ -322,6 +328,7 @@ func TestSandboxEnforcesProfile(t *testing.T) {
 // under its new name (mv ~/.git-credentials ~/gc && cat ~/gc). Every class
 // of deny must refuse the rename, while the brain's own tree stays free.
 func TestSandboxRefusesRenames(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	cases := []struct {
 		name     string
@@ -353,7 +360,7 @@ func TestSandboxRefusesRenames(t *testing.T) {
 	for _, l := range sandboxLayouts() {
 		t.Run(l.name, func(t *testing.T) {
 			home := l.home(t)
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir)
 			for _, f := range []string{".git-credentials", "Library/Mail/inbox", ".claude/projects/other/s.jsonl", "assistant/a/sub/f"} {
 				p := filepath.Join(home, f)
@@ -409,6 +416,7 @@ func TestSandboxRefusesRenames(t *testing.T) {
 // Claude Code state your sessions share: a brain keeps its own (see
 // TestSandboxWritesOnlyItsOwnPlaces). Your shell files stay readable.
 func TestSandboxProtectsCodeOutsideIt(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	cases := []struct {
 		name, cmd string // cmd runs in sh with $HOME set
@@ -434,7 +442,7 @@ func TestSandboxProtectsCodeOutsideIt(t *testing.T) {
 	for _, l := range sandboxLayouts() {
 		t.Run(l.name, func(t *testing.T) {
 			home := l.home(t)
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir)
 			for _, f := range []string{".zshrc", ".claude/settings.json", "Library/LaunchAgents/ai.fridolin.bridge.plist", "dotfiles/bashrc"} {
 				p := filepath.Join(home, f)
@@ -473,6 +481,7 @@ func TestSandboxProtectsCodeOutsideIt(t *testing.T) {
 // too. Under the real sandbox-exec none of that is writable, while the
 // brain's own CLAUDE.md and .claude/ are.
 func TestSandboxProtectsMemoryAboveBrains(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	cases := []struct {
 		name, cmd string // cmd runs in sh with $HOME set
@@ -494,7 +503,7 @@ func TestSandboxProtectsMemoryAboveBrains(t *testing.T) {
 	for _, l := range sandboxLayouts() {
 		t.Run(l.name, func(t *testing.T) {
 			home := l.home(t)
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir)
 			for _, f := range []string{"CLAUDE.md", "assistant/CLAUDE.md", ".claude/projects/p/memory/MEMORY.md", ".claude/projects/p/s.jsonl"} {
 				p := filepath.Join(home, f)
@@ -524,6 +533,7 @@ func TestSandboxProtectsMemoryAboveBrains(t *testing.T) {
 // stays readable. With inherit_claude_user_config the instructions and
 // your setup are readable again, but still not movable.
 func TestSandboxKeepsYourInstructionsFromBrains(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	cases := []struct {
 		name, cmd         string // cmd runs in sh with $HOME set
@@ -550,7 +560,7 @@ func TestSandboxKeepsYourInstructionsFromBrains(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				home := l.home(t)
-				t.Setenv("HOME", home)
+				setenv(t, "HOME", home)
 				sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir, map[string]any{"inherit_claude_user_config": inherit})
 				for _, f := range []string{"CLAUDE.md", "CLAUDE.local.md", "assistant/CLAUDE.md", "assistant/.claude/rules/r.md",
 					"assistant/.claude/skills/s/SKILL.md", ".claude/CLAUDE.md", ".claude/rules/r.md", ".claude/settings.json", "assistant/a/CLAUDE.md"} {
@@ -603,11 +613,12 @@ func TestSandboxKeepsYourInstructionsFromBrains(t *testing.T) {
 // Code config dir, TMPDIR and caches. It can still run the programs the
 // bridge runs, and read the bridge's tools.
 func TestSandboxWritesOnlyItsOwnPlaces(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	outside := fsx.Canonical(t.TempDir()) // not in HOME, like /opt/homebrew
-	t.Setenv("OUT", outside)
+	setenv(t, "OUT", outside)
 	sp, own := sandboxFixture(t, home, "b", "clients")
 	for _, f := range []string{
 		".local/lib/fridolin/fridolin", ".local/lib/fridolin/install.json", ".local/lib/fridolin/tools/calendar_tool.py",
@@ -624,8 +635,8 @@ func TestSandboxWritesOnlyItsOwnPlaces(t *testing.T) {
 	}
 	sp.bridgeExe = filepath.Join(home, ".local", "lib", "fridolin", "fridolin")
 	state := filepath.Join(home, ".fridolin", "brains", "a")
-	t.Setenv("S", state)
-	t.Setenv("I", filepath.Join(home, ".fridolin", "media", "a"))
+	setenv(t, "S", state)
+	setenv(t, "I", filepath.Join(home, ".fridolin", "media", "a"))
 	cases := []struct {
 		name, cmd string // cmd runs in sh with $HOME, $OUT, $S (a's state) and $I (a's inbox) set
 		allow     bool
@@ -677,9 +688,10 @@ func TestSandboxWritesOnlyItsOwnPlaces(t *testing.T) {
 // preferences file in its own folder by its path. Preferences are your
 // user's, not HOME's, so the domain is a throwaway one, removed after.
 func TestSandboxKeepsBrainsFromWritingYourPreferences(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	sp, own := sandboxFixture(t, home, "b", "clients")
 	domain := fmt.Sprintf("com.example.fridolin-test.%d.%d", os.Getpid(), time.Now().UnixNano())
 	t.Cleanup(func() {
@@ -708,7 +720,7 @@ func TestSandboxKeepsBrainsFromWritingYourPreferences(t *testing.T) {
 			}
 			cmd := exec.Command(bin, argv...)
 			cmd.Dir = own
-			cmd.Env = append(os.Environ(), env...)
+			cmd.Env = append(envOf(t).Environ(), env...)
 			out, err := cmd.CombinedOutput()
 			if allowed := err == nil; allowed != c.allow {
 				t.Errorf("defaults %q: allowed=%v, want %v (output %q)", c.args, allowed, c.allow, out)
@@ -729,19 +741,20 @@ func TestSandboxKeepsBrainsFromWritingYourPreferences(t *testing.T) {
 // profile denies writing /dev/tty even to a run that has one (the control,
 // started the old way, which shows the terminal is there).
 func TestSandboxedRunsCannotTypeIntoTheTerminal(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	if _, err := os.Stat("/usr/bin/script"); err != nil {
 		t.Skip("no script(1):", err)
 	}
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	sp, own := sandboxFixture(t, home, "b", "clients")
 	state := sandboxStateEnv(t, sp, "a")
 	bin, argv, err := sp.Command("a", os.Args[0], nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := append(append(os.Environ(), state...), "FRIDOLIN_FAKE_TTY=1")
+	env := append(append(envOf(t).Environ(), state...), "FRIDOLIN_FAKE_TTY=1")
 	run := func(t *testing.T, isolate bool) string {
 		t.Helper()
 		spec, err := json.Marshal(map[string]any{"argv": append([]string{bin}, argv...), "dir": own, "env": env, "isolate": isolate})
@@ -751,7 +764,7 @@ func TestSandboxedRunsCannotTypeIntoTheTerminal(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 		defer cancel()
 		cmd := exec.CommandContext(ctx, "/usr/bin/script", "-q", "/dev/null", os.Args[0])
-		cmd.Env = append(os.Environ(), "FRIDOLIN_FAKE_TTY_PARENT="+string(spec))
+		cmd.Env = append(envOf(t).Environ(), "FRIDOLIN_FAKE_TTY_PARENT="+string(spec))
 		out, err := cmd.CombinedOutput()
 		if err != nil && ctx.Err() != nil {
 			t.Fatalf("script: %v: %s", err, out)
@@ -786,9 +799,10 @@ func TestSandboxedRunsCannotTypeIntoTheTerminal(t *testing.T) {
 // docs/CONFIGURATION.md and the starter prompt tell brains to name
 // $TMPDIR; so does a fixed path in /tmp.
 func TestSandboxGivesBrainsTheirOwnTemporaryFiles(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	sp, own := sandboxFixture(t, home, "b", "clients")
 	tmp := filepath.Join(home, ".fridolin", "brains", "a", "tmp")
 	// inTmp checks that the file $f a command made is in the brain's TMPDIR.
@@ -834,9 +848,11 @@ EOF'`, true},
 // of its folder: the bridge takes such a folder off its own PATH (see
 // TestSetBridgePATH), and that brain used to be refused instead.
 func TestSandboxKeepsTheBridgesProgramsFromBrains(t *testing.T) {
+	// Serial: the profile protects the programs on the process's PATH, which
+	// it sets.
 	requireSandboxExec(t)
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	sp, own := sandboxFixture(t, home, "b", "clients")
 	claude := filepath.Join(home, ".local", "bin", "claude")
 	if err := os.MkdirAll(filepath.Dir(claude), 0o700); err != nil {
@@ -880,9 +896,11 @@ func TestSandboxKeepsTheBridgesProgramsFromBrains(t *testing.T) {
 // real sandbox-exec they now stay closed, while the CLI's state is still
 // written.
 func TestSandboxKeepsTheBridgesProgramsInASharedClaudeDir(t *testing.T) {
+	// Serial: the profile protects the programs on the process's PATH, which
+	// it sets.
 	requireSandboxExec(t)
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	local := filepath.Join(home, ".claude", "local")
 	claude := filepath.Join(local, "claude")
 	if err := os.MkdirAll(local, 0o700); err != nil {
@@ -919,11 +937,12 @@ func TestSandboxKeepsTheBridgesProgramsInASharedClaudeDir(t *testing.T) {
 // from another machine) used to be readable by every brain, and so was a
 // data dir left behind under the old project name.
 func TestSandboxDeniesBridgeSecretsWhereverTheyLive(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	for _, l := range sandboxLayouts() {
 		t.Run(l.name, func(t *testing.T) {
 			home := l.home(t)
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir, map[string]any{"db_path": "~/wa-store/bridge.db"})
 			for _, f := range []string{
 				"wa-store/bridge.db-wal",
@@ -972,6 +991,7 @@ func TestSandboxDeniesBridgeSecretsWhereverTheyLive(t *testing.T) {
 // environment, macOS would show it to every process of the same user,
 // sandboxed or not.
 func TestSandboxKeepsRunTokensToTheirBrain(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	tb, _ := serveTestBridge(t, `, "sandbox": {"enabled": true}`)
 	dirs := map[string]string{
@@ -1010,7 +1030,7 @@ func TestSandboxKeepsRunTokensToTheirBrain(t *testing.T) {
 			}
 			cmd := exec.Command(bin, argv...)
 			cmd.Dir = dirs[c.brain]
-			cmd.Env = append(os.Environ(), files...)
+			cmd.Env = append(envOf(t).Environ(), files...)
 			out, err := cmd.CombinedOutput()
 			denied := err != nil && strings.Contains(string(out), "Operation not permitted") && !strings.HasPrefix(string(out), "sandbox-exec:")
 			if err != nil && !denied {
@@ -1027,11 +1047,12 @@ func TestSandboxKeepsRunTokensToTheirBrain(t *testing.T) {
 // the file the bridge wrote for it and asks the bridge, as `fridolin polls`
 // does in a real run.
 func TestSandboxedRunReachesTheBrainAPI(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	tb, _ := serveTestBridge(t, `, "sandbox": {"enabled": true}`)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	savePoll(t, tb, "P1", apiTestDM, "Lunch?", []string{"Yes", "No"}, nil)
-	t.Setenv("FRIDOLIN_FAKE_POLLS", "1")
+	setenv(t, "FRIDOLIN_FAKE_POLLS", "1")
 	tb.handleInbound(context.Background(), brainruntime.Inbound{Inbound: chat.Inbound{JID: apiTestDM, Sender: "15551234567", Text: "polls?", Source: "whatsapp"}})
 	testutil.WaitFor(t, 20*time.Second, "the reply", func() bool { return len(tb.sentTo(apiTestDM)) > 0 })
 	if reply := tb.sentTo(apiTestDM)[0]; !strings.Contains(reply, `polls=0 {`) || !strings.Contains(reply, `"question": "Lunch?"`) {
@@ -1044,8 +1065,9 @@ func TestSandboxedRunReachesTheBrainAPI(t *testing.T) {
 // the run's token and asks the bridge for the run's tools; a delegated
 // task runs in the sub-brain's own sandbox and comes back.
 func TestSandboxedRunStartsItsMCPServer(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
-	t.Setenv("FRIDOLIN_FAKE_MCP", `[{"tool":""},{"brain":"core","tool":"delegate","args":{"brain":"family","task":"ping"}}]`)
+	setenv(t, "FRIDOLIN_FAKE_MCP", `[{"tool":""},{"brain":"core","tool":"delegate","args":{"brain":"family","task":"ping"}}]`)
 	h := newServedHarness(t, `{"sandbox": {"enabled": true}}`)
 	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
 	h.AddBrain(manifest.Manifest{ID: "family", Name: "Family", Routing: manifest.Routing{Groups: []string{harnessGroup}}})
@@ -1061,11 +1083,12 @@ func TestSandboxedRunStartsItsMCPServer(t *testing.T) {
 // release channel beside the stable one; other programs' folders in
 // Application Support stay readable.
 func TestSandboxDeniesBrowserProfiles(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	for _, l := range sandboxLayouts() {
 		t.Run(l.name, func(t *testing.T) {
 			home := l.home(t)
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir)
 			for _, c := range []struct {
 				folder string
@@ -1102,9 +1125,10 @@ func TestSandboxDeniesBrowserProfiles(t *testing.T) {
 // the .env older versions read next to it, are neither readable nor
 // writable under the real sandbox-exec.
 func TestSandboxDeniesTheConfigFile(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	// A save in progress: fsx.WriteFileAtomic writes the whole config here
 	// first.
 	for _, f := range []string{"etc/config.json", "etc/.env", "etc/.config.json.123456.tmp", "a/notes.md"} {
@@ -1139,9 +1163,10 @@ func TestSandboxDeniesTheConfigFile(t *testing.T) {
 // brain's inbox stays readable and an entry inside a default-denied home
 // folder still works.
 func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	// Ready for inboxes, as the bridge has it before any run, so that a's
 	// photo stays in a's inbox.
 	if err := mediaInboxAt(filepath.Join(home, ".fridolin", "media")).RetireLegacy(); err != nil {
@@ -1191,6 +1216,7 @@ func TestSandboxAllowPathsKeepBridgeSecrets(t *testing.T) {
 // neither made there, moved there nor hard-linked there, while the folders
 // and files the CLI itself creates still can be.
 func TestSandboxRefusesLinksIntoSessionRecords(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	cases := []struct {
 		name, cmd string // cmd runs in sh with $HOME and $L, a folder of the brain's own, set
@@ -1208,7 +1234,7 @@ func TestSandboxRefusesLinksIntoSessionRecords(t *testing.T) {
 		for _, shared := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/inherit_claude_user_config=%v", l.name, shared), func(t *testing.T) {
 				home := l.home(t)
-				t.Setenv("HOME", home)
+				setenv(t, "HOME", home)
 				sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir, map[string]any{"inherit_claude_user_config": shared})
 				for _, d := range []string{".claude/projects/p", ".claude/sessions"} {
 					if err := os.MkdirAll(filepath.Join(home, d), 0o700); err != nil {
@@ -1219,7 +1245,7 @@ func TestSandboxRefusesLinksIntoSessionRecords(t *testing.T) {
 				if err := os.Mkdir(loot, 0o700); err != nil {
 					t.Fatal(err)
 				}
-				t.Setenv("L", loot)
+				setenv(t, "L", loot)
 				for _, c := range cases {
 					t.Run(c.name, func(t *testing.T) {
 						if allowed, out := sandboxRun(t, sp, ownDir, "/bin/sh", "-c", c.cmd); allowed != (shared && c.shared) {
@@ -1255,14 +1281,15 @@ func TestSandboxRefusesLinksIntoSessionRecords(t *testing.T) {
 // folder, where what the CLI and your own sessions write there would land.
 // Each step builds the profile afresh, as each run does.
 func TestSandboxLetsTheCLICreateItsState(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	sp, ownDir := sandboxFixture(t, home, "b", "clients", map[string]any{"inherit_claude_user_config": true})
 	if _, err := os.Stat(filepath.Join(home, ".claude")); !os.IsNotExist(err) {
 		t.Fatalf("~/.claude exists before the run: %v", err)
 	}
-	t.Setenv("L", filepath.Join(ownDir, "loot"))
+	setenv(t, "L", filepath.Join(ownDir, "loot"))
 	steps := []struct {
 		name  string
 		cmd   string
@@ -1296,9 +1323,10 @@ func TestSandboxLetsTheCLICreateItsState(t *testing.T) {
 // is your home folder, is refused outright: its folder rule used to win
 // over every deny inside it.
 func TestSandboxOwnFolderKeepsWhatIsInsideIt(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	box := filepath.Join(home, "box")
 	for _, f := range []string{"notes.md", "work/private/contract.txt", "work/private/share/ok.txt"} {
 		p := filepath.Join(box, f)
@@ -1329,7 +1357,7 @@ func TestSandboxOwnFolderKeepsWhatIsInsideIt(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			t.Setenv("B", box)
+			setenv(t, "B", box)
 			if allowed, out := sandboxRun(t, sp, box, "/bin/sh", "-c", c.cmd); allowed != c.allow {
 				t.Errorf("%s: allowed=%v, want %v (output %q)", c.cmd, allowed, c.allow, out)
 			}
@@ -1354,6 +1382,7 @@ func TestSandboxOwnFolderKeepsWhatIsInsideIt(t *testing.T) {
 // link. Under the real sandbox-exec the folder cannot be moved, by either
 // spelling, while everything inside it stays the brain's to change.
 func TestSandboxPinsItsOwnFolder(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	cases := []struct {
 		name, cmd string // cmd runs in sh with $A, $R, $B and $HOME set
@@ -1368,16 +1397,16 @@ func TestSandboxPinsItsOwnFolder(t *testing.T) {
 	for _, l := range sandboxLayouts() {
 		t.Run(l.name, func(t *testing.T) {
 			home := l.home(t)
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			sp, ownDir := sandboxFixture(t, home, l.otherBrain, l.denyDir)
 			configured := filepath.Join(home, "assistant", "a")
 			real, err := filepath.EvalSymlinks(configured)
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Setenv("A", configured)
-			t.Setenv("R", real)
-			t.Setenv("B", filepath.Join(home, "assistant", l.otherBrain))
+			setenv(t, "A", configured)
+			setenv(t, "R", real)
+			setenv(t, "B", filepath.Join(home, "assistant", l.otherBrain))
 			for _, c := range cases {
 				t.Run(c.name, func(t *testing.T) {
 					if allowed, out := sandboxRun(t, sp, ownDir, "/bin/sh", "-c", c.cmd); allowed != c.allow {
@@ -1407,6 +1436,7 @@ func TestSandboxPinsItsOwnFolder(t *testing.T) {
 // and realpath failed by the real one), while the rest of ~/Documents and
 // the other brain stay closed.
 func TestSandboxOpensItsOwnFolderThroughASymlink(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	home := fsx.Canonical(t.TempDir())
 	if err := os.MkdirAll(filepath.Join(home, "Documents", "assistant"), 0o700); err != nil {
@@ -1415,7 +1445,7 @@ func TestSandboxOpensItsOwnFolderThroughASymlink(t *testing.T) {
 	if err := os.Symlink(filepath.Join(home, "Documents", "assistant"), filepath.Join(home, "assistant")); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	sp, ownDir := sandboxFixture(t, home, "b", "clients")
 	if want := filepath.Join(home, "Documents", "assistant", "a"); ownDir != want {
 		t.Fatalf("brain a runs in %s, want %s", ownDir, want)
@@ -1441,10 +1471,10 @@ func TestSandboxOpensItsOwnFolderThroughASymlink(t *testing.T) {
 		{"find a file's real path", `realpath "$R/notes.md" >/dev/null`, true},
 		{"list the folder above it", `ls "$HOME/Documents/assistant"`, false},
 	}
-	t.Setenv("A", filepath.Join(home, "assistant", "a"))
-	t.Setenv("R", ownDir)
-	t.Setenv("B", filepath.Join(home, "assistant", "b"))
-	t.Setenv("RB", filepath.Join(home, "Documents", "assistant", "b"))
+	setenv(t, "A", filepath.Join(home, "assistant", "a"))
+	setenv(t, "R", ownDir)
+	setenv(t, "B", filepath.Join(home, "assistant", "b"))
+	setenv(t, "RB", filepath.Join(home, "Documents", "assistant", "b"))
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			if allowed, out := sandboxRun(t, sp, ownDir, "/bin/sh", "-c", c.cmd); allowed != c.allow {
@@ -1460,14 +1490,15 @@ func TestSandboxOpensItsOwnFolderThroughASymlink(t *testing.T) {
 // inbox there: not another brain's, not an attachment on its way to the
 // brain of its chat, not a file at the top, and it cannot list the folder.
 func TestSandboxKeepsAMediaFolderOutsideTheDataDir(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	sp, own := sandboxFixture(t, home, "b", "clients", map[string]any{"media_dir": "~/media"})
 	for _, f := range []string{"media/a/photo.jpg", "media/b/dm.pdf", "media/" + mediafiles.IncomingDir + "/voice.ogg", "media/top.pdf"} {
 		writeTestFile(t, filepath.Join(home, f), "content of "+f)
 	}
-	t.Setenv("M", filepath.Join(home, "media"))
+	setenv(t, "M", filepath.Join(home, "media"))
 	cases := []struct {
 		name, cmd string // cmd runs in sh with $M, the media folder, set
 		allow     bool
@@ -1504,6 +1535,7 @@ func TestSandboxKeepsAMediaFolderOutsideTheDataDir(t *testing.T) {
 // folder is 0755 here and the file 0644, as ones made by hand may be: the
 // sandbox checks only a chmod that changes the mode.
 func TestSandboxLetsBrainsRefreshASharedPlaudLogin(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	refresh := `P="$HOME/.plaud" && mkdir -p "$P" && chmod 700 "$P" && chmod 600 "$P/tokens.json" && printf '{"access_token":"new"}' > "$P/tokens.json"`
 	type plaudCase struct {
@@ -1539,7 +1571,7 @@ const dir = path.join(os.homedir(), ".plaud"), file = path.join(dir, "tokens.jso
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			home := fsx.Canonical(t.TempDir())
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			sp, own := sandboxFixture(t, home, "b", "clients", map[string]any{"plaud": map[string]any{"brain_access": c.access}})
 			if err := os.Mkdir(filepath.Join(home, ".plaud"), 0o755); err != nil {
 				t.Fatal(err)
@@ -1620,7 +1652,7 @@ func sandboxFixture(t *testing.T, home, otherBrain, denyDir string, extra ...map
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfgs, err := OpenConfigStore(writeConfig(t, string(cfgJSON)))
+	cfgs, err := openConfigStore(t, writeConfig(t, string(cfgJSON)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1696,7 +1728,7 @@ func sandboxRun(t *testing.T, sp *SandboxProfiler, dir, prog string, args ...str
 	}
 	cmd := exec.Command(bin, argv...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), env...)
+	cmd.Env = append(envOf(t).Environ(), env...)
 	out, err := cmd.CombinedOutput()
 	switch {
 	case err == nil:
@@ -1743,6 +1775,7 @@ func resolvedForTest(t *testing.T, p string) string {
 // "On" from the config alone, so the status warns when runs are refused for
 // a missing sandbox-exec or a profile that cannot be built.
 func TestStatusWarnsWhenSandboxDoesNotApply(t *testing.T) {
+	t.Parallel()
 	a := manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}}
 	b := manifest.Manifest{ID: "b", Name: "B", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}
 	cases := []struct {
@@ -1771,7 +1804,7 @@ func TestStatusWarnsWhenSandboxDoesNotApply(t *testing.T) {
 				requireSandboxExec(t)
 			}
 			// Brains can log in; see TestStatusWarnsWhenBrainsCannotLogIn.
-			t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-token")
+			setenv(t, "CLAUDE_CODE_OAUTH_TOKEN", "test-token")
 			tb := newTestBridge(t, `, "sandbox": {"enabled": true}`)
 			if tc.atHome {
 				ref := brainFolder(t, "~", a)
@@ -1818,6 +1851,7 @@ func TestStatusWarnsWhenSandboxDoesNotApply(t *testing.T) {
 // bridge's environment every brain fails with "Not logged in", so the
 // status says so.
 func TestStatusWarnsWhenBrainsCannotLogIn(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, sandbox string
 		env           map[string]string
@@ -1832,7 +1866,7 @@ func TestStatusWarnsWhenBrainsCannotLogIn(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, name := range brainLoginVars {
-				t.Setenv(name, tc.env[name])
+				setenv(t, name, tc.env[name])
 			}
 			tb := newTestBridge(t, `, "sandbox": {"enabled": `+tc.sandbox+`}`)
 			var st httpapi.StatusResponse
@@ -1861,6 +1895,8 @@ func TestStatusWarnsWhenBrainsCannotLogIn(t *testing.T) {
 // are denied in the profile too, but not tried here: either would act on
 // your desktop if the deny failed.
 func TestSandboxStopsStartingCodeOutsideIt(t *testing.T) {
+	// Serial: changes the process's working directory, TMPDIR and
+	// TMUX_TMPDIR.
 	requireSandboxExec(t)
 	layouts := []struct {
 		name   string
@@ -1879,7 +1915,7 @@ func TestSandboxStopsStartingCodeOutsideIt(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			t.Setenv("TMPDIR", tmp)
 			t.Setenv("TMUX_TMPDIR", filepath.Join(home, "tmuxdir"))
 			sp, own := sandboxFixture(t, home, "b", "clients")
@@ -1941,7 +1977,7 @@ func TestSandboxStopsStartingCodeOutsideIt(t *testing.T) {
 					if c.cmd != "" {
 						allowed, out = sandboxRun(t, sp, own, "/bin/sh", "-c", c.cmd)
 					} else {
-						t.Setenv("FRIDOLIN_FAKE_CONNECT", c.connect)
+						setenv(t, "FRIDOLIN_FAKE_CONNECT", c.connect)
 						allowed, out = sandboxRun(t, sp, own, os.Args[0])
 					}
 					if allowed != c.allow {
@@ -1966,6 +2002,7 @@ func TestSandboxStopsStartingCodeOutsideIt(t *testing.T) {
 // leave them writable. "deny" hides them, "read" lets a brain read them to
 // commit in its own folder. git's credential files stay unreadable in both.
 func TestSandboxGitConfig(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	cases := []struct {
 		name, cmd string // cmd runs in sh with $HOME set
@@ -1983,7 +2020,7 @@ func TestSandboxGitConfig(t *testing.T) {
 	for _, mode := range []string{"read", "deny"} {
 		t.Run(mode, func(t *testing.T) {
 			home := fsx.Canonical(t.TempDir())
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			sp, own := sandboxFixture(t, home, "b", "clients", map[string]any{"sandbox": map[string]any{"enabled": true, "git_config": mode}})
 			for name, content := range map[string]string{
 				".gitconfig":              "[include]\n\tpath = .gitconfig-extra ; local settings\n",

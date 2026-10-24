@@ -14,6 +14,7 @@ import (
 // Expected strings preserve request/config shapes before extraction on both
 // supported decoder contexts. Production formatting never changes the context.
 func TestManifestJSONDiagnosticContracts(t *testing.T) {
+	t.Parallel()
 	innerContext := jsonUsesInnerStructContext(t)
 	for _, tc := range []struct{ input, request, approved, innerRequest, innerApproved string }{
 		{"[]", "json: cannot unmarshal array into Go struct field .manifest of type main.BrainManifest", "json: cannot unmarshal array into Go struct field Config.brain_dirs.0.approved of type main.BrainManifest", "", "json: cannot unmarshal array into Go struct field BrainRef.brain_dirs.approved of type main.BrainManifest"},
@@ -67,6 +68,7 @@ func TestManifestJSONDiagnosticContracts(t *testing.T) {
 // Add decodes a raw manifest after the outer request, so the diagnostic has
 // the direct manifest type context captured before package extraction.
 func TestAddBrainManifestJSONDiagnosticContracts(t *testing.T) {
+	t.Parallel()
 	innerContext := jsonUsesInnerStructContext(t)
 	for _, tc := range []struct{ input, want, innerWant string }{
 		{"[]", "manifest: invalid JSON: json: cannot unmarshal array into Go value of type main.BrainManifest", ""},

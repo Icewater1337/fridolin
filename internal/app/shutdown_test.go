@@ -40,6 +40,8 @@ import (
 // Stop runs once, however often and from wherever it is called: a restart
 // and a signal that come together, or a test and its cleanup.
 func TestStopRunsOnce(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	tb := newTestBridge(t, "")
 	var logs lockedBuffer
 	defer log.SetOutput(log.Writer())
@@ -72,6 +74,8 @@ func (brokenListener) Accept() (net.Conn, error) { return nil, errListenerBroke 
 // dead: Start returns the error, for main to stop the bridge, instead of
 // running on without them.
 func TestStartReturnsAServeError(t *testing.T) {
+	// Serial: replaces listenHTTP, a package variable every bridge's start
+	// reads.
 	tb := newTestBridge(t, `, "http_listen": "127.0.0.1:0"`)
 	prev := listenHTTP
 	t.Cleanup(func() { listenHTTP = prev })
@@ -95,6 +99,8 @@ func TestStartReturnsAServeError(t *testing.T) {
 // is done once the stop begins, and what is left of it after httpStopWait
 // is cut off, so that it cannot hold up the stop.
 func TestStopEndsTheRequestsInFlight(t *testing.T) {
+	// Serial: replaces listenHTTP and httpStopWait, package variables every
+	// bridge reads.
 	tb := newTestBridge(t, `, "http_listen": "127.0.0.1:0"`)
 	prevWait, prevListen := httpStopWait, listenHTTP
 	t.Cleanup(func() { httpStopWait, listenHTTP = prevWait, prevListen })
@@ -159,6 +165,8 @@ var errExecStub = errors.New("exec: not in a test")
 // a restart that no signal overtook, once the instance lock is free for
 // the process that takes over.
 func TestServe(t *testing.T) {
+	// Serial: replaces execSelf and listenHTTP, package variables, and
+	// captures the standard logger.
 	tests := []struct {
 		name      string
 		end       func(t *testing.T, tb *testBridge, cancel context.CancelCauseFunc)
@@ -239,6 +247,7 @@ func TestServe(t *testing.T) {
 // Without a way to restart, as in check or a test, the restart button
 // says so instead of answering that it restarts.
 func TestRestartNeedsSomeoneToRestart(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	if w := tb.do("POST", "/api/restart", nil); w.Code != http.StatusServiceUnavailable {
 		t.Errorf("POST /api/restart: %d %s, want 503", w.Code, w.Body.String())
@@ -251,6 +260,8 @@ func TestRestartNeedsSomeoneToRestart(t *testing.T) {
 // grace a bridge has outside the tests; it holds the data dir's instance
 // lock against this one.
 func TestASecondSignalStopsAtOnce(t *testing.T) {
+	// Serial: cliFixture sets the process's HOME, and the bridge it starts
+	// binds a port that freePort found free.
 	for _, provider := range []string{"claude", "codex"} {
 		t.Run(provider, func(t *testing.T) { secondSignalStopsAtOnce(t, provider) })
 	}
@@ -392,6 +403,8 @@ func setShutdownGrace(t *testing.T, d time.Duration) {
 // and sent once, before the stop or after the next start. One that does
 // not is stopped once the grace is over, and the stop goes on.
 func TestStopGivesTheRunInFlightItsGrace(t *testing.T) {
+	// Serial: shortens shutdownGrace, a package variable every bridge's stop
+	// reads.
 	tests := []struct {
 		name    string
 		runMS   string
@@ -406,7 +419,7 @@ func TestStopGivesTheRunInFlightItsGrace(t *testing.T) {
 			setShutdownGrace(t, tc.grace)
 			h := newHarness(t, "")
 			dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
-			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", tc.runMS)
+			setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", tc.runMS)
 			h.Inject(inbound{JID: harnessDM, Text: "almost done"})
 			h.WaitFor("the run", func() bool { return h.RunStarted("main") })
 			began := time.Now()
@@ -442,6 +455,8 @@ func TestStopGivesTheRunInFlightItsGrace(t *testing.T) {
 // bridge closes the outbox and the store once the brains have stopped, and
 // a reply handed over after that would be lost.
 func TestStopWaitsForTheDelivery(t *testing.T) {
+	// Serial: shortens shutdownGrace, a package variable every bridge's stop
+	// reads.
 	setShutdownGrace(t, 10*time.Second)
 	mgr, _, _ := queueTestManager(t, 300, "")
 	var delivered atomic.Bool
@@ -460,6 +475,7 @@ func TestStopWaitsForTheDelivery(t *testing.T) {
 }
 
 func TestStopWaitsForARemovedBrainsDelivery(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -499,6 +515,8 @@ func TestStopWaitsForARemovedBrainsDelivery(t *testing.T) {
 // an answer already being delivered. A second signal remains the way to
 // abandon a stuck shutdown.
 func TestStopWaitsForDeliveryAfterTheKillTimeout(t *testing.T) {
+	// Serial: shortens shutdownGrace, a package variable every bridge's stop
+	// reads.
 	setShutdownGrace(t, time.Millisecond)
 	mgr, _, _ := queueTestManager(t, 10, "")
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -535,6 +553,7 @@ func TestStopWaitsForDeliveryAfterTheKillTimeout(t *testing.T) {
 // message can start a run and make side effects, even when replaying the
 // intervening messages takes long enough to schedule a worker.
 func TestResumeAppliesChangesBeforeStartingQueuedRuns(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	var started atomic.Int32
@@ -570,15 +589,17 @@ func TestResumeAppliesChangesBeforeStartingQueuedRuns(t *testing.T) {
 // answered, once, its line in the history once, and the chat hears that
 // the restart cut the first one's run short.
 func TestShutdownKeepsWhatItHolds(t *testing.T) {
+	// Serial: shortens shutdownGrace, a package variable every bridge's stop
+	// reads.
 	setShutdownGrace(t, 200*time.Millisecond)
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
-	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	h.WhatsApp(dmEvent("3EB0FIRST", textMsg("first")))
 	h.WaitFor("the first run", func() bool { return h.RunStarted("main") })
 	h.WhatsApp(dmEvent("3EB0SECOND", textMsg("second")))
 	h.WaitSent(harnessDM, "Queued")
-	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "10")
 	h.Restart()
 	h.WaitSent(harnessDM, "says: second")
 	h.WaitFor("the answer in the history", func() bool {
@@ -603,6 +624,7 @@ func TestShutdownKeepsWhatItHolds(t *testing.T) {
 // has taken it out of bridge.db, so a notice not queued then would be
 // lost.
 func TestResumeOutlivesItsContext(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	m := brain.Inbound{Inbound: chat.Inbound{JID: harnessDM, Sender: "15551234567", Text: "summarise", Source: chat.SourceWhatsApp, At: time.Now(), ID: "3EB0CUT"}}
 	if err := KeepInterrupted(t.Context(), tb.store, "main", m); err != nil {
@@ -618,6 +640,7 @@ func TestResumeOutlivesItsContext(t *testing.T) {
 // next start, as the one message it was, each of its parts in the history
 // once.
 func TestShutdownKeepsTheDebouncedBatch(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"debounce": {"quiet_ms": 60000, "max_wait_ms": 120000}}`)
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	h.WhatsAppAndWait(dmEvent("3EB0ONE", textMsg("part one")))
@@ -643,10 +666,12 @@ func TestShutdownKeepsTheDebouncedBatch(t *testing.T) {
 // with a line in the log: an answer that late would only confuse. What it
 // kept since is answered.
 func TestShutdownDropsWhatIsKeptTooLong(t *testing.T) {
+	// Serial: shortens shutdownGrace, a package variable every bridge's stop
+	// reads. Its warning goes to the standard logger (captureLog).
 	setShutdownGrace(t, 200*time.Millisecond)
 	h := newHarness(t, "")
 	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
-	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	h.WhatsApp(dmEvent("3EB0RUN", textMsg("a long one")))
 	h.WaitFor("the run", func() bool { return h.RunStarted("main") })
 	old := dmEvent("3EB0OLD", textMsg("from long ago"))
@@ -655,7 +680,7 @@ func TestShutdownDropsWhatIsKeptTooLong(t *testing.T) {
 	h.WaitSent(harnessDM, "Queued (#1)")
 	h.WhatsApp(dmEvent("3EB0NEW", textMsg("from just now")))
 	h.WaitSent(harnessDM, "Queued (#2)")
-	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "10")
 	var logs lockedBuffer
 	defer log.SetOutput(log.Writer())
 	log.SetOutput(&logs)
@@ -674,15 +699,17 @@ func TestShutdownDropsWhatIsKeptTooLong(t *testing.T) {
 // next start handles it as if it came in then, after what the brains had
 // waiting: a deletion of a waiting message takes that one out.
 func TestShutdownKeepsWhatComesInDuringTheStop(t *testing.T) {
+	// Serial: shortens shutdownGrace, a package variable every bridge's stop
+	// reads.
 	setShutdownGrace(t, 20*time.Second)
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
-	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "3000")
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "3000")
 	h.WhatsApp(dmEvent("3EB0FIRST", textMsg("first")))
 	h.WaitFor("the first run", func() bool { return h.RunStarted("main") })
 	h.WhatsApp(dmEvent("3EB0DOOMED", textMsg("doomed")))
 	h.WaitSent(harnessDM, "Queued")
-	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "10")
 
 	b := h.b
 	db := testStoreSQL(t, b.cfgs.Get().DBPath)

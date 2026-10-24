@@ -6,33 +6,49 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/claudecli"
+	"github.com/Icewater1337/fridolin/internal/config"
 )
 
-// claudeInfo finds the CLI and its version. The version is cached until the
+// ClaudeInfo finds the CLI and its version. The version is cached until the
 // binary changes: `claude` on the PATH is a symlink the CLI moves to each
 // new release it installs, and the dashboard must not show the old one for
 // as long as the bridge runs. A CLI that is not found is looked up again
 // every time, so installing it shows at once. It runs the CLI with a
-// brain's environment: a claude_path wrapper may run what a brain can
-// change.
-func ClaudeInfo(path string, passthrough []string) claudecli.Status {
-	return cliInfo(path, passthrough, claudeChild)
+// brain's environment, taken from env: a claude_path wrapper may run what
+// a brain can change.
+func ClaudeInfo(env Environment, path string, passthrough []string) claudecli.Status {
+	return cliInfo(&cliVersions, env, path, passthrough, claudeChild)
 }
 
-func CodexInfo(path string, passthrough []string) claudecli.Status {
-	return cliInfo(path, passthrough, codexChild)
+func CodexInfo(env Environment, path string, passthrough []string) claudecli.Status {
+	return cliInfo(&cliVersions, env, path, passthrough, codexChild)
 }
 
+// cliVersions caches the versions ClaudeInfo and CodexInfo found; a bridge
+// keeps its own (App.cliVersions).
 var cliVersions claudecli.Prober
 
-func cliInfo(path string, passthrough []string, scope childScope) claudecli.Status {
+// cliInfo is ClaudeInfo for the CLI of scope, with the versions cached in
+// versions.
+func cliInfo(versions *claudecli.Prober, env Environment, path string, passthrough []string, scope childScope) claudecli.Status {
 	resolved, err := exec.LookPath(path)
 	if err != nil {
 		return claudecli.Status{Path: path}
 	}
 	// Absolute, as runs start it (resolveAgentBinary): a PATH entry may be
 	// relative.
-	return cliVersions.Info(path, AbsPath(resolved), childEnv(scope, passthrough))
+	return versions.Info(path, AbsPath(resolved), childEnv(env, scope, passthrough))
+}
+
+// claudeInfo is ClaudeInfo for the bridge, with its environment and its own
+// cache.
+func (b *App) claudeInfo(cfg *config.Settings) claudecli.Status {
+	return cliInfo(&b.cliVersions, b.env, cfg.ClaudePath, cfg.ChildEnvPassthrough, claudeChild)
+}
+
+// codexInfo is CodexInfo for the bridge.
+func (b *App) codexInfo(cfg *config.Settings) claudecli.Status {
+	return cliInfo(&b.cliVersions, b.env, cfg.CodexPath, cfg.ChildEnvPassthrough, codexChild)
 }
 
 // resolveAgentBinary is the absolute path of the agent CLI a run starts,

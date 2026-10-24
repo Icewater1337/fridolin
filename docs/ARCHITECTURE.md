@@ -72,6 +72,11 @@ metadata; schema and documentation checks guard the JSON contract.
 construction releases acquired resources. Options provide configuration, optional
 listener/restart capabilities, the dashboard log ring and lifecycle logger.
 Construction does not begin outbound delivery before a listener can be bound.
+The bridge reads its environment through `Options.Env` (nil is the process's)
+and its home folder from the config store (`Boot.Home`): what its programs get
+(`childEnv`), the variables it looks up, `~`. The binary passes no `Env` and
+opens the config with the process's home; tests give each bridge both of its
+own, so that bridges in parallel tests never share them.
 
 `App.Run(ctx)` owns its cancellation cause and teardown. The supervisor binds the
 HTTP listener before starting intake, resume and background work. Bind failures

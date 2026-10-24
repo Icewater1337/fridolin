@@ -15,6 +15,7 @@ import (
 // without an entry whom allowed_numbers admits. A LID nothing maps to a
 // number matches no number, and the bridge's own account always passes.
 func TestGroupSenderAllowed(t *testing.T) {
+	t.Parallel()
 	const (
 		group  = testGroup
 		other  = "120363000000000001@g.us"
@@ -124,6 +125,7 @@ func FuzzGroupSenderAllowed(f *testing.F) {
 // group_members is read like allowed_numbers, its numbers kept as digits,
 // and a config whose entries cannot mean what they say does not load.
 func TestLoadConfigGroupMembers(t *testing.T) {
+	t.Parallel()
 	const groups = `"allowed_groups": ["120363000000000000@g.us", "120363000000000001@g.us"]`
 	cases := []struct {
 		name    string
@@ -146,8 +148,8 @@ func TestLoadConfigGroupMembers(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			home := t.TempDir()
-			t.Setenv("HOME", home)
-			cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/data", `+groups+`, "group_members": `+c.members+`}`))
+			setenv(t, "HOME", home)
+			cfg, err := loadConfig(t, writeConfig(t, `{"data_dir": "`+home+`/data", `+groups+`, "group_members": `+c.members+`}`))
 			if c.err != "" {
 				if err == nil || !strings.Contains(err.Error(), c.err) {
 					t.Fatalf("Load: %v, want an error saying %q", err, c.err)
@@ -174,6 +176,7 @@ func TestLoadConfigGroupMembers(t *testing.T) {
 // must not repeat an entry that is no number, or a key that is no group:
 // either may be a phone number written in a way nothing recognises.
 func TestGroupMembersErrorNamesNoEntry(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		members map[string][]string
@@ -202,9 +205,10 @@ func TestGroupMembersErrorNamesNoEntry(t *testing.T) {
 // An edit that leaves an entry for a group no longer allowed is refused
 // like a config file that has one, and changes nothing.
 func TestConfigUpdateRefusesStrayGroupMembers(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	cs, err := OpenConfigStore(writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_groups": ["120363000000000000@g.us"], "group_members": {"120363000000000000@g.us": ["15551234567"]}}`))
+	setenv(t, "HOME", home)
+	cs, err := openConfigStore(t, writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_groups": ["120363000000000000@g.us"], "group_members": {"120363000000000000@g.us": ["15551234567"]}}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,14 +229,16 @@ func TestConfigUpdateRefusesStrayGroupMembers(t *testing.T) {
 // member in again; a group with an entry, or a bridge anyone may DM, is
 // not.
 func TestConfigWarnsAboutGroupsWithoutMembers(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	const (
 		listed = "120363000000000001@g.us"
 		added  = "120363000000000002@g.us"
 	)
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	logged := captureLog(t)
-	cs, err := OpenConfigStore(writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_numbers": ["15551234567"],
+	cs, err := openConfigStore(t, writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_numbers": ["15551234567"],
 		"allowed_groups": ["120363000000000000@g.us", "`+listed+`"], "group_members": {"`+listed+`": ["15559876543"]}}`))
 	if err != nil {
 		t.Fatal(err)
@@ -278,10 +284,12 @@ func TestConfigWarnsAboutGroupsWithoutMembers(t *testing.T) {
 // While anyone may DM, a group without an entry still lets every member
 // in, so there is nothing to warn about.
 func TestNoGroupWarningWhileAnyoneMayDM(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	logged := captureLog(t)
-	if _, err := OpenConfigStore(writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_numbers": [], "allow_any_dm": true, "allowed_groups": ["120363000000000000@g.us"]}`)); err != nil {
+	if _, err := openConfigStore(t, writeConfig(t, `{"data_dir": "`+home+`/data", "allowed_numbers": [], "allow_any_dm": true, "allowed_groups": ["120363000000000000@g.us"]}`)); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(logged(), "\n"); strings.Contains(got, "group_members") {
@@ -292,6 +300,8 @@ func TestNoGroupWarningWhileAnyoneMayDM(t *testing.T) {
 // Who was let in or out of which group is a security change like any
 // other, and the log says so.
 func TestLogSecurityChangesNamesGroupMembers(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	const other = "120363000000000001@g.us"
 	logged := captureLog(t)
 	prev := &config.Settings{Live: config.Live{GroupMembers: map[string][]string{testGroup: {"15551234567"}}}}

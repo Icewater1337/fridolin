@@ -40,6 +40,7 @@ func failingDir(t *testing.T) (*cloud.Dir, *atomic.Bool) {
 // never held the lease refuses; one that held it last starts unverified,
 // keeps its channels, and is held again once the store answers.
 func TestLeaseStoreRefusingAtStart(t *testing.T) {
+	t.Parallel()
 	st, failing := failingDir(t)
 	failing.Store(true)
 	opts := Options{LeaseStore: st, LeaseSettle: time.Millisecond, LeaseRetry: 20 * time.Millisecond}
@@ -88,6 +89,7 @@ func TestLeaseStoreRefusingAtStart(t *testing.T) {
 // Renewals that fail on the store leave the channels running, however
 // long; only another device's record, once the store answers, stops them.
 func TestLeaseRenewalFailuresKeepTheChannels(t *testing.T) {
+	t.Parallel()
 	st, failing := failingDir(t)
 	c, err := newRunningCore(t, leaseConfig, Options{LeaseStore: st, LeaseSettle: time.Millisecond, LeaseRetry: 20 * time.Millisecond})
 	if err != nil {

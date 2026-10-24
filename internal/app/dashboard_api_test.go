@@ -35,6 +35,7 @@ import (
 // decoder. A handler may still refuse it for what it says, in this empty
 // test bridge, but never because a key is unknown.
 func TestDashboardRequestBodiesDecode(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "notes", Name: "Notes", Routing: manifest.Routing{HandlesDMs: true, Default: true}})
 	manifest := map[string]any{
@@ -100,6 +101,7 @@ func TestDashboardRequestBodiesDecode(t *testing.T) {
 
 // A body the decoder refuses gets a 400 that says why.
 func TestDashboardRefusesUnknownKeys(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	w := tb.do("POST", "/api/brains/inspect", map[string]any{"path": "~/x", "paht": "~/y"})
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `unknown field \"paht\"`) {
@@ -115,6 +117,7 @@ func TestDashboardRefusesUnknownKeys(t *testing.T) {
 // 405 with Allow for one asked with the wrong method. Outside dev mode the
 // dev endpoints are not there at all.
 func TestAPIRoutesAnswer404And405(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	cases := []struct {
 		method, path string
@@ -154,6 +157,7 @@ func TestAPIRoutesAnswer404And405(t *testing.T) {
 // A brain's backup settings have a route of their own, and the global
 // settings no longer take a brain.
 func TestBrainBackupRoute(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "notes", Name: "Notes"})
 	if w := tb.do("PUT", "/api/brains/notes/backup", map[string]any{"enabled": false, "exclude": []string{" *.tmp ", ""}}); w.Code != 200 {
@@ -172,6 +176,7 @@ func TestBrainBackupRoute(t *testing.T) {
 }
 
 func TestOriginGuardAndNoStore(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	cases := []struct {
 		origin string
@@ -201,6 +206,7 @@ func TestOriginGuardAndNoStore(t *testing.T) {
 }
 
 func TestHTTPServerTimeouts(t *testing.T) {
+	t.Parallel()
 	s := httpapi.NewServer(http.NotFoundHandler())
 	if s.ReadHeaderTimeout <= 0 || s.ReadTimeout <= 0 || s.IdleTimeout <= 0 || s.MaxHeaderBytes <= 0 || s.MaxHeaderBytes > 1<<20 {
 		t.Fatalf("read header %v, read %v, idle %v, max header %d", s.ReadHeaderTimeout, s.ReadTimeout, s.IdleTimeout, s.MaxHeaderBytes)
@@ -212,6 +218,7 @@ func TestHTTPServerTimeouts(t *testing.T) {
 }
 
 func TestIsolationHeadersAndOAuthCallback(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	noToken := func(r *http.Request) { r.Header.Del("X-Bridge-Token") }
 	cases := []struct {
@@ -260,6 +267,7 @@ func (p *lockProbe) Write(b []byte) (int, error) {
 // The backup status and cancel are written after the backup manager's lock
 // is released: a client that reads slowly must not hold up the job.
 func TestBackupStatusWritesWithoutTheLock(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	for _, c := range []struct {
 		method, path string
@@ -318,6 +326,7 @@ func hasWarning(warnings []string, part string) bool {
 // Turning the dashboard token off is saved but waits for a restart, with a
 // warning until then; turning it on applies at once.
 func TestRequireTokenOffWaitsForARestart(t *testing.T) {
+	t.Parallel()
 	noToken := func(r *http.Request) { r.Header.Del("X-Bridge-Token") }
 	t.Run("off", func(t *testing.T) {
 		tb := newTestBridge(t, "")
@@ -356,6 +365,7 @@ func TestRequireTokenOffWaitsForARestart(t *testing.T) {
 // Brains with all permissions and no sandbox can read the token
 // themselves, on every OS, and the status says so.
 func TestTokenWarningsWithoutASandbox(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	cases := []struct {
 		name    string
@@ -391,6 +401,7 @@ func TestTokenWarningsWithoutASandbox(t *testing.T) {
 // config, and only with the etag it was read with. Every refused request
 // leaves config.json as it was.
 func TestPutConfigRefusesBlindAndPartialWrites(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, `, "dangerously_skip_permissions": true`)
 	var cur struct {
 		ETag   string         `json:"etag"`
@@ -444,6 +455,8 @@ func TestPutConfigRefusesBlindAndPartialWrites(t *testing.T) {
 
 // Every change to a security setting is logged in one line.
 func TestConfigUpdateLogsSecurityChanges(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	tb := newTestBridge(t, "")
 	logged := captureLog(t)
 	w := tb.editConfig(t, func(c map[string]any) {
@@ -468,6 +481,7 @@ func TestConfigUpdateLogsSecurityChanges(t *testing.T) {
 // Approving a drift approves the brain.json the dashboard showed: if the
 // brain rewrote it since, the approval is refused and nothing changes.
 func TestApproveBindsToTheReviewedManifest(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	m := manifest.Manifest{ID: "notes", Name: "Notes"}
 	dir := tb.addFolderBrain(t, m)
@@ -515,6 +529,7 @@ func TestApproveBindsToTheReviewedManifest(t *testing.T) {
 // so the dashboard can say whose those chats are: not a second folder that
 // claims its id, which does not run.
 func TestBrainsMarkTheFallback(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		brains []manifest.Manifest
@@ -579,6 +594,7 @@ func TestBrainsMarkTheFallback(t *testing.T) {
 // state it is in, so the Brain page that follows it shows what the list
 // showed; with two folders claiming the id, the first one's.
 func TestAPIBrainIsItsEntryOfTheList(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	m := manifest.Manifest{ID: "notes", Name: "Notes"}
 	dir := tb.addFolderBrain(t, m)
@@ -639,6 +655,7 @@ func TestAPIBrainIsItsEntryOfTheList(t *testing.T) {
 // folder: a new brain or a restore cannot be put in it, around it or on it.
 // Its issues stay on that entry, and it can be removed through the API.
 func TestUnapprovedBrainEntries(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, `, "brain_dirs": [{"path": "~/a", "approved": null}]`)
 	if err := os.MkdirAll(filepath.Join(tb.home, "a", "inner"), 0o700); err != nil {
 		t.Fatal(err)
@@ -704,6 +721,7 @@ func dirExists(p string) bool {
 // /api/status and /api/brains report the same issues: a brain.json that
 // changed on disk shows in both at once, not only after the next reload.
 func TestStatusAndBrainsShareTheIssues(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	dir := tb.addFolderBrain(t, manifest.Manifest{ID: "notes", Name: "Notes"})
 	if err := manifest.Write(dir, &manifest.Manifest{ID: "notes", Name: "Changed"}, true); err != nil {
@@ -718,6 +736,7 @@ func TestStatusAndBrainsShareTheIssues(t *testing.T) {
 
 // A folder that cannot be a brain is not looked into.
 func TestInspectDoesNotProbeRefusedFolders(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	outside := t.TempDir()
 	if err := os.Mkdir(filepath.Join(outside, ".git"), 0o700); err != nil {
@@ -739,6 +758,7 @@ func TestInspectDoesNotProbeRefusedFolders(t *testing.T) {
 // addMu runs them one after the other, so the second one's checks see the
 // first and refuse it.
 func TestConcurrentAddsCannotBothClaimAGroup(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	for round := range 8 {
 		group := fmt.Sprintf("1203630000000000%02d@g.us", round+10)
@@ -776,6 +796,7 @@ func TestConcurrentAddsCannotBothClaimAGroup(t *testing.T) {
 // brain claims refuses the add: it is checked again inside its config
 // update, and its folder is not left scaffolded.
 func TestAddBrainRechecksAgainstOtherWriters(t *testing.T) {
+	t.Parallel()
 	const group = "120363000000000000@g.us"
 	tb := newTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A"})
@@ -826,6 +847,7 @@ func TestAddBrainRechecksAgainstOtherWriters(t *testing.T) {
 // it happened to create first, such as brain.json, that the winner counts
 // on.
 func TestConcurrentAddsOfOneFolder(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	for round := range 8 {
 		path := fmt.Sprintf("~/race-%d", round)
@@ -873,6 +895,7 @@ func TestConcurrentAddsOfOneFolder(t *testing.T) {
 // A brain that could not be registered leaves no scaffold behind, so the
 // same folder can be added again.
 func TestFailedAddRemovesTheScaffold(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root writes into a read-only folder")
 	}
@@ -920,6 +943,7 @@ func TestFailedAddRemovesTheScaffold(t *testing.T) {
 // it: those take the list the WhatsApp client keeps, and only its Refresh
 // button, with ?fresh=1, has the client ask WhatsApp again.
 func TestGroupsAskWhatsAppOnlyWhenFresh(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	fl := &fakeLister{}
 	tw := newTestWhatsApp(t, func(opts *whatsapp.Options) { opts.Groups = fl })
@@ -956,6 +980,7 @@ func TestGroupsAskWhatsAppOnlyWhenFresh(t *testing.T) {
 // that sends it back while nothing changed gets a 304 without a body; once
 // something changed, the new answer with a new ETag.
 func TestPolledEndpointsAnswer304WhileUnchanged(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	dir := tb.addFolderBrain(t, manifest.Manifest{ID: "notes", Name: "Notes"})
 	say := func(text string) func() {
@@ -1012,6 +1037,7 @@ func TestPolledEndpointsAnswer304WhileUnchanged(t *testing.T) {
 
 // A limit above the maximum gets the maximum, not the default.
 func TestListLimitsClampToTheMaximum(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	for i := range 600 {
 		fmt.Fprintf(tb.logs, "line %d\n", i)
@@ -1048,10 +1074,12 @@ func TestListLimitsClampToTheMaximum(t *testing.T) {
 // loads, with a warning that names the entries. A number written with a
 // "+" and spaces matches its chat, and is not named.
 func TestConfigWarnsAboutOddChats(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
+	setenv(t, "HOME", t.TempDir())
 	logged := captureLog(t)
 	path := writeConfig(t, `{"data_dir": "`+t.TempDir()+`", "allowed_numbers": ["15551234567", "+1 555 987 6543", "call me"], "allowed_groups": ["120363000000000000@g.us", " 120363000000000001@g.us", "@g.us"]}`)
-	if _, err := OpenConfigStore(path); err != nil {
+	if _, err := openConfigStore(t, path); err != nil {
 		t.Fatal(err)
 	}
 	got := strings.Join(logged(), "\n")
@@ -1072,6 +1100,7 @@ func TestConfigWarnsAboutOddChats(t *testing.T) {
 // A folder dialog that was cancelled is a cancel; one that failed is an
 // error, so a dialog that cannot open does not pass for a cancel.
 func TestRunPickerTellsCancelFromFailure(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, tool, script string
 		want               string // a path, "cancel", or part of the error
@@ -1113,6 +1142,7 @@ func TestRunPickerTellsCancelFromFailure(t *testing.T) {
 // an http_listen saved since waits for a restart, and a client replaced
 // meanwhile did not issue the code.
 func TestSignInKeepsItsClientAndRedirect(t *testing.T) {
+	t.Parallel()
 	srv, got := fakeGoogle(t)
 	tb := newTestBridge(t, "")
 	useGoogleServer(tb, srv)
