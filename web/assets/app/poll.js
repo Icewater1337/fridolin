@@ -82,7 +82,7 @@ export function makePoll(fn, interval, { onError = reportPollError } = {}) {
   const settle = (/** @type {(() => void)[]} */ list) => list.forEach((resolve) => resolve());
 
   async function run() {
-    clearTimeout(timer);
+    if (timer !== null) clearTimeout(timer);
     timer = null;
     if (stopped) { settle(kicks.splice(0)); return; }
     if (paused()) { waiting = true; return; }
@@ -128,7 +128,7 @@ export function makePoll(fn, interval, { onError = reportPollError } = {}) {
     stop() {
       stopped = true;
       live.delete(p);
-      clearTimeout(timer);
+      if (timer !== null) clearTimeout(timer);
       if (running) running.abort();
       else settle(kicks.splice(0));
     },
