@@ -994,6 +994,12 @@ func (p *siteProc) status() SiteProcStatus {
 	return st
 }
 
+// TunnelRunning reports whether the Cloudflare tunnel runs inside this
+// process now (site.tunnel), for a core move's report.
+func (m *SiteManager) TunnelRunning() bool {
+	return m.tunnel.status().State == "running"
+}
+
 // ensure starts the supervisor unless it is already running.
 func (p *siteProc) ensure(parent context.Context, build func(context.Context) (*exec.Cmd, error)) {
 	p.mu.Lock()

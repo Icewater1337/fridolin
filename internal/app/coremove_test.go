@@ -220,6 +220,7 @@ type moveHosts struct {
 	srcCore, dstCore *fakeCore
 	srcAgent         *nodeagent.Agent
 	dstAgent         *nodeagent.Agent
+	dstStore         *memSecrets
 	secret           string
 }
 
@@ -242,7 +243,7 @@ func (h *harness) moveHosts(version string, dstReady bool) moveHosts {
 		}
 	}
 	var dstDir string
-	m.dst, dstDir, _, m.dstAgent = h.coreHostNodeWith(addr, "icebase", setup(m.dstCore))
+	m.dst, dstDir, m.dstStore, m.dstAgent = h.coreHostNodeWith(addr, "icebase", setup(m.dstCore))
 	key, err := nodeagent.LoadKey(dstDir)
 	if err != nil {
 		t.Fatal(err)
@@ -325,7 +326,7 @@ func TestCoreMove(t *testing.T) {
 	if strings.Contains(body, m.secret) {
 		t.Error("the move's record holds a secret's value")
 	}
-	h.WaitSent(harnessDM, "The core moved to *icebase*")
+	h.WaitSent(harnessDM, "Running on *icebase* now")
 	if running, _, _ := m.srcCore.state(); running {
 		t.Error("mini runs the core after the move")
 	}
@@ -362,6 +363,26 @@ func TestCoreMove(t *testing.T) {
 func (h *harness) moveBack(m moveHosts) nodes.MoveRecord {
 	t := h.t
 	t.Helper()
+	h.pinBack(m)
+	rec, body := h.startMove(m.dst, m.src, 10, 10)
+	if rec.State != nodes.MoveDone {
+		t.Fatalf("the way back ended %s: %s", rec.State, body)
+	}
+	if running, data, _ := m.srcCore.state(); !running || data != "icebase's data" {
+		t.Errorf("mini after the way back: running %v on %q", running, data)
+	}
+	if running, _, _ := m.dstCore.state(); running {
+		t.Error("icebase still runs the core")
+	}
+	return rec
+}
+
+// pinBack lets icebase send the secrets back to mini: it pins mini's
+// device key, a change of its core-host.json the owner approves again,
+// and its core gets data of its own.
+func (h *harness) pinBack(m moveHosts) {
+	t := h.t
+	t.Helper()
 	dir := m.dstAgent.Dir
 	srcKey, err := nodeagent.LoadKey(m.srcAgent.Dir)
 	if err != nil {
@@ -378,17 +399,6 @@ func (h *harness) moveBack(m moveHosts) nodes.MoveRecord {
 	m.dstCore.mu.Lock()
 	m.dstCore.data = "icebase's data"
 	m.dstCore.mu.Unlock()
-	rec, body := h.startMove(m.dst, m.src, 10, 10)
-	if rec.State != nodes.MoveDone {
-		t.Fatalf("the way back ended %s: %s", rec.State, body)
-	}
-	if running, data, _ := m.srcCore.state(); !running || data != "icebase's data" {
-		t.Errorf("mini after the way back: running %v on %q", running, data)
-	}
-	if running, _, _ := m.dstCore.state(); running {
-		t.Error("icebase still runs the core")
-	}
-	return rec
 }
 
 func (h *harness) moveStatus(id, move string) nodeproto.CoreMoveState {
