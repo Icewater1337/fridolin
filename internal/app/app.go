@@ -40,6 +40,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/store"
 	"github.com/Icewater1337/fridolin/internal/tailnet"
 	"github.com/Icewater1337/fridolin/internal/whatsapp"
+	"github.com/Icewater1337/fridolin/internal/wiki"
 
 	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
@@ -78,7 +79,9 @@ type App struct {
 	targets      *targetService
 	google       *google.Auth
 	plaud        *plaud.Manager
-	site         *sitesvc.SiteManager
+	// github is the GitHub App and the runs' tokens (github_runtime.go).
+	github *githubService
+	site   *sitesvc.SiteManager
 	// nodes is the fleet's registry and node port; nodesEnabled and
 	// nodesListen are nodes.enabled and nodes.listen as the bridge
 	// started, which wait for a restart.
@@ -108,6 +111,12 @@ type App struct {
 	mcpTools    *mcp.Registry[mcpCaller]
 	delegations delegations
 	audit       *audit.Log
+	// wikis caches the brains' wiki indexes (files_runtime.go).
+	wikis *wiki.Manager
+	// fileTickets open /files/raw for the dashboard's previews.
+	fileTickets *httpapi.Tickets
+	// siteBridge serves the site's /files and /wiki (site_bridge.go).
+	siteBridge siteBridge
 	// intents are the brains' standing intents and scheduled jobs, which
 	// sched fires.
 	intents *intent.Store
@@ -265,6 +274,8 @@ func New(opts Options) (_ *App, err error) {
 	}
 	b.exe = bridgeBinary()
 	b.audit = newAuditLog(cfg.DataDir)
+	b.wikis = wiki.NewManager()
+	b.fileTickets = httpapi.NewTickets()
 	b.loadPolicy()
 	b.mcpTools = b.newMCPTools()
 	b.fride = newFrideRuntime(b)
@@ -371,6 +382,7 @@ func New(opts Options) (_ *App, err error) {
 	b.housekeeping = newHousekeeping(b, opts.Container)
 	b.vault.usage = b.b2
 	b.targets = newTargetService(cfgs, b.vault, b.nodes, opts.Container, b.logger)
+	b.github = newGitHubService(cfgs, opts.Container, b.logger)
 	b.vault.targets = b.targets
 	b.google = google.New(googleOptionsFor(cfgs))
 	b.backup = newProjectedBackup(cfgs, b.brainMgr, b.notifyBackup, b.vault.driveSuperseded, b.google)
@@ -455,7 +467,7 @@ func (b *App) Stop() {
 func (b *App) stopResources() {
 	b.supervisor.Stop(StopOptions{Logger: b.logger,
 		CloseIntake: b.intake.Close, HTTPGrace: httpStopWait,
-		Background: []func(){b.sched.Stop, b.backup.Stop, b.plaud.Stop, b.site.Stop, b.nodes.Stop, b.fride.Stop, b.vault.Stop, b.targets.Stop, b.stopTailnet},
+		Background: []func(){b.sched.Stop, b.backup.Stop, b.plaud.Stop, b.site.Stop, b.stopSiteBridge, b.nodes.Stop, b.fride.Stop, b.vault.Stop, b.targets.Stop, b.stopTailnet},
 		KeepPending: func() {
 			for _, m := range b.deb.Drain() {
 				b.keep(InboundHeld, "", m)

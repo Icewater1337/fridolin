@@ -32,6 +32,7 @@ GET /api/config
 GET /api/dev/outbox
 GET /api/fs/capabilities
 GET /api/fs/list
+GET /api/github
 GET /api/google/client
 GET /api/logs
 GET /api/nodes
@@ -56,6 +57,10 @@ GET /brain/mcp/tools
 GET /brain/memory/search
 GET /brain/polls
 GET /builder/context
+GET /files/raw
+GET /github/connect
+GET /github/created
+GET /github/installed
 GET /health
 GET /ready
 POST /api/approvals/{id}
@@ -77,6 +82,9 @@ POST /api/chats/revoke
 POST /api/dev/inbound
 POST /api/dev/vote
 POST /api/fs/pick
+POST /api/github/connect
+POST /api/github/disconnect
+POST /api/github/test
 POST /api/login
 POST /api/login/code
 POST /api/logout
@@ -96,6 +104,7 @@ POST /api/restart
 POST /api/site/build/{id}
 POST /api/site/build/{id}/new
 POST /api/site/build/{id}/stop
+POST /api/site/check-domain
 POST /api/site/deploy
 POST /api/site/deploy-key
 POST /api/site/deploy-key/github

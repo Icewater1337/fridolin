@@ -367,10 +367,12 @@ func (b *App) apiMux() http.Handler {
 		Google:       b.newGoogleAPI,
 		Plaud:        b.newPlaudAPI,
 		PlaudApp:     b.newPlaudAppAPI,
+		GitHub:       b.newGitHubAPI,
 		Auth:         b.newDashboardAuth,
 		Dev:          b.newDevAPI,
 		Nodes:        b.newNodesAPI,
 		Policy:       b.newPolicyAPI,
 		Housekeeping: b.newHousekeepingAPI,
+		Files:        b.newFilesAPI,
 	})
 }

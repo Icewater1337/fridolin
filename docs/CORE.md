@@ -175,6 +175,12 @@ after the service.
 | `fridolin.vault.seal.key` | `FRIDOLIN_VAULT_SEAL_KEY` | the cold tier's inner layer; made by `core start` when missing |
 | `fridolin.snapshots.crypt.password` | `FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD` | the outer layer of the restic repositories and Litestream; made by `core start` when missing |
 | `fridolin.litestream.seal.key` | `FRIDOLIN_LITESTREAM_SEAL_KEY` | Litestream's inner layer; made by `core start` when missing |
+| `fridolin.github.token` | `FRIDOLIN_GITHUB_TOKEN` | optional, and never named as missing: a typed GitHub token, the second choice to the GitHub App ([GITHUB.md](GITHUB.md)) |
+
+The GitHub App that the dashboard connects is not a host secret: the
+container cannot write the keychain. Its key goes to
+`secrets/github-app.age` in the volume, encrypted to the post-quantum
+identity, and moves with the export ([GITHUB.md](GITHUB.md#where-the-keys-are)).
 
 Which store each key opens, and the recovery sheet to keep: [VAULT.md](VAULT.md#encryption).
 
@@ -228,7 +234,7 @@ secrets).
 The secrets sent are the age identities (post-quantum and, while stored,
 X25519), the export key, the Claude token, both B2 key pairs, the vault's
 crypt passwords and seal key, the restic password, the snapshots' crypt
-password and the Litestream seal key; the Tailscale
+password, the Litestream seal key and a typed GitHub token while one is stored; the Tailscale
 auth key only with `--with-tailscale-key` (the new machine logs in to the
 tailnet itself, and the core's own node key moves in the export). Codex
 sign-ins are files in the volume and move with the export. Each side
@@ -333,10 +339,15 @@ site's listen port and the mapping the same; a site on another port needs
 its own mapping in a compose override.
 
 A tunnel run by the bridge (*Run the tunnel* on the Site page) runs in the
-container, where `127.0.0.1:8780` is the site itself; a tunnel run by a
-launchd agent on the Mac goes through the published port. Run one of the
-two, not both: Cloudflare spreads the requests over every connector of a
-tunnel.
+container, where `127.0.0.1:8780` is the site itself, and moves with the
+core; a tunnel run by a launchd agent on the Mac goes through the published
+port. Run one of the two, not both: Cloudflare spreads the requests over
+every connector of a tunnel. To move a host's tunnel into the core, turn
+*Run the tunnel* on first, check that the domain answers, then stop the
+host's `cloudflared` service: the site never goes down. Every host name of
+the tunnel must point at the site then (a host port is out of the
+container's reach); the built-in wiki replaces a separate wiki server
+([FILES.md](FILES.md#on-your-site)).
 
 ## The tailnet
 

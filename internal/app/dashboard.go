@@ -38,8 +38,9 @@ func (b *App) httpDeps(listen string, tailnetHosts map[string]bool) httpapi.Deps
 		Builder: b.builderHandler, Brain: b.brainAPIHandler,
 		DashboardDisabled: func() bool { return b.cfgs.Get().Dashboard.Disabled }, Static: web.FS,
 		GoogleCallback: func(w http.ResponseWriter, r *http.Request) { b.newGoogleAPI().Callback(w, r) },
+		GitHub:         b.newGitHubAPI,
 		Login:          b.newDashboardAuth().Login, Token: b.token, RequiresToken: b.requiresToken,
-		SignedIn: b.newDashboardAuth().SignedIn, API: b.apiMux,
+		SignedIn: b.newDashboardAuth().SignedIn, API: b.apiMux, FilesRaw: b.newFilesAPI().TicketRaw,
 		Remote: tailnetHosts != nil, Hosts: tailnetHosts,
 	}
 }

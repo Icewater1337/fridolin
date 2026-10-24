@@ -35,6 +35,10 @@ func (f *fakeSecurity) run(_ context.Context, _ string, args []string, stdin io.
 	if !ok {
 		return nil, &ExitError{Code: 44, Stderr: "The specified item could not be found in the keychain."}
 	}
+	if args[0] == "delete-generic-password" {
+		delete(f.items, svc)
+		return nil, nil
+	}
 	return []byte(v + "\n"), nil
 }
 
@@ -61,6 +65,15 @@ func TestKeychain(t *testing.T) {
 	}
 	if len(fake.stdin) != 1 || !strings.Contains(fake.stdin[0], "-a fridolin -s fridolin.age.identity") {
 		t.Errorf("stdin %q", fake.stdin)
+	}
+	if err := k.Delete(AgeIdentity); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := k.Has(AgeIdentity); ok || err != nil {
+		t.Errorf("Has after Delete: %v %v", ok, err)
+	}
+	if err := k.Delete(AgeIdentity); err != nil {
+		t.Errorf("deleting what is not there: %v", err)
 	}
 	if err := k.Set(AgeIdentity, "has \" quote"); err == nil {
 		t.Error("passed a value with a quote to security -i")
@@ -109,6 +122,14 @@ func TestFiles(t *testing.T) {
 	}
 	if _, err := f.Get(TailscaleAuthKey); err == nil {
 		t.Error("read a secret others may read")
+	}
+	for range 2 {
+		if err := f.Delete(TailscaleAuthKey); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ok, err := f.Has(TailscaleAuthKey); ok || err != nil {
+		t.Errorf("Has after Delete: %v %v", ok, err)
 	}
 }
 

@@ -19,6 +19,7 @@ $ fridolin core start
     RESTIC_PASSWORD=<fridolin.restic.password>
     FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD=<fridolin.snapshots.crypt.password>
     FRIDOLIN_LITESTREAM_SEAL_KEY=<fridolin.litestream.seal.key>
+    FRIDOLIN_GITHUB_TOKEN=<fridolin.github.token>
 $ fridolin core stop
   /usr/local/bin/docker compose -f <COMPOSE> down
     PATH=/usr/bin:/bin
@@ -46,6 +47,7 @@ $ fridolin core update
     RESTIC_PASSWORD=<fridolin.restic.password>
     FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD=<fridolin.snapshots.crypt.password>
     FRIDOLIN_LITESTREAM_SEAL_KEY=<fridolin.litestream.seal.key>
+    FRIDOLIN_GITHUB_TOKEN=<fridolin.github.token>
   /usr/local/bin/docker compose -f <COMPOSE> up -d --force-recreate
     PATH=/usr/bin:/bin
     HOME=/Users/you
@@ -66,6 +68,7 @@ $ fridolin core update
     RESTIC_PASSWORD=<fridolin.restic.password>
     FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD=<fridolin.snapshots.crypt.password>
     FRIDOLIN_LITESTREAM_SEAL_KEY=<fridolin.litestream.seal.key>
+    FRIDOLIN_GITHUB_TOKEN=<fridolin.github.token>
 $ fridolin core start --image registry.example/fridolin-core --tag v2
   /usr/local/bin/docker compose -f <COMPOSE> up -d
     PATH=/usr/bin:/bin
@@ -87,6 +90,7 @@ $ fridolin core start --image registry.example/fridolin-core --tag v2
     RESTIC_PASSWORD=<fridolin.restic.password>
     FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD=<fridolin.snapshots.crypt.password>
     FRIDOLIN_LITESTREAM_SEAL_KEY=<fridolin.litestream.seal.key>
+    FRIDOLIN_GITHUB_TOKEN=<fridolin.github.token>
 $ fridolin core run -- core import --latest
   /usr/local/bin/docker compose -f <COMPOSE> run --rm --no-deps core core import --latest
     PATH=/usr/bin:/bin
@@ -108,6 +112,7 @@ $ fridolin core run -- core import --latest
     RESTIC_PASSWORD=<fridolin.restic.password>
     FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD=<fridolin.snapshots.crypt.password>
     FRIDOLIN_LITESTREAM_SEAL_KEY=<fridolin.litestream.seal.key>
+    FRIDOLIN_GITHUB_TOKEN=<fridolin.github.token>
 $ fridolin core run core promote
   /usr/local/bin/docker compose -f <COMPOSE> run --rm --no-deps core core promote
     PATH=/usr/bin:/bin
@@ -129,3 +134,4 @@ $ fridolin core run core promote
     RESTIC_PASSWORD=<fridolin.restic.password>
     FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD=<fridolin.snapshots.crypt.password>
     FRIDOLIN_LITESTREAM_SEAL_KEY=<fridolin.litestream.seal.key>
+    FRIDOLIN_GITHUB_TOKEN=<fridolin.github.token>

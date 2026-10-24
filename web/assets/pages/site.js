@@ -1,10 +1,12 @@
-// Site: your own website (docs/SITE.md). Link the repository that holds its
-// modules, approve what goes live, set the domain and sign-in, and manage who
-// may sign in. Everything here stays on this machine; the site itself only
-// reads the result.
+// Site: your own website (docs/SITE.md). Link a domain through a Cloudflare
+// tunnel, choose which brains each role sees on the built-in Files and Wiki,
+// manage who may sign in, and, optionally, link the repository that holds
+// more modules and approve what goes live. Everything here stays on this
+// machine; the site itself only reads the result.
 
 import { post, put, del } from '../app/api.js';
 import { resource } from '../app/resources.js';
+import { store } from '../app/store.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { brainLabel } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
@@ -101,11 +103,15 @@ export default {
     const secretsBox = region(loading('Loading the secrets…'));
 
     const googleBox = region();
+    const tunnelGuide = region();
     const tunnelSetup = region();
     const tunnelSwitch = region();
     const tunnelState = region();
     const tunnelError = region();
     const tunnelLog = logBox();
+    const checkBox = region();
+    const builtinBox = region();
+    let brains = []; // the bridge's brains, for the roles' Files and Wiki
 
     const usersBox = region(loading('Loading the accounts…'));
     const userRows = h('tbody');
@@ -137,19 +143,26 @@ export default {
       const head = (iconName, title) => h('div.card-head', h('div.card-title', icon(iconName), h('h2', title)));
       mount(stack,
         h('section.card', statusHead, todoBox, factsBox, stoppedBox, statusActions, siteLog),
+        h('section.card', head('external', 'Your domain'),
+          h('p.small', 'Three steps give the site a domain of yours, reached from the internet through a Cloudflare tunnel that Fridolin runs: no port is opened on this machine. docs/SITE.md, “From zero to your domain”, has the same steps.'),
+          h('ol.site-steps',
+            h('li', h('h3', 'The domain'), domainForm.el),
+            h('li', h('h3', 'A Cloudflare tunnel to it'), tunnelGuide, tunnelSetup, h('div.actions', tunnelSwitch, tunnelState), tunnelError, tunnelLog),
+            h('li', h('h3', 'Check that it answers'), checkBox))),
+        h('section.card', head('folder', 'Files and Wiki'), builtinBox),
+        h('section.card', head('users', 'People'),
+          h('p.small', 'Who may sign in to the site, and their role. Admins sign in with Google. The role decides which brains someone sees on Files and Wiki (above), and a module’s ', mono('module.json'), ' which roles may open it.'),
+          usersBox, addForm.el,
+          h('details.site-block', h('summary', 'Roles'), rolesForm.el), googleBox),
+        h('div.site-section', h('h2', 'Modules from your repository'),
+          h('p.small.muted', 'Optional: more pages of your own, each a module in a private repository, which goes live only once you approve a commit. Start from examples/site-module in Fridolin’s repository.')),
         h('section.card', repoHead, repoTop, keyBox, repoBottom),
         h('section.card', deployHead, jobBox, updatesBox, earlier),
         h('section.card', head('inbox', 'Proposals'), proposalsBox),
         h('section.card', head('brain', 'Builders'), buildersBox),
         h('section.card', head('key', 'Secrets'),
           h('p.small', 'API keys and passwords a module needs, by the names its ', mono('module.json'), ' lists in ', mono('capabilities.secrets'), '. A value is never shown again. Only the module that declares a secret gets it, through ', mono('ctx.secret(name)'), ', when the site starts; saving one restarts the site.'),
-          secretsBox),
-        h('section.card', head('lock', 'Domain and sign-in'), domainForm.el, googleBox,
-          h('div.site-block', h('h3', 'Cloudflare tunnel'), tunnelSetup, h('div.actions', tunnelSwitch, tunnelState), tunnelError, tunnelLog)),
-        h('section.card', head('users', 'People'),
-          h('p.small', 'Who may sign in to the site, and their role. Admins sign in with Google. A module’s ', mono('module.json'), ' says which roles may open it.'),
-          usersBox, addForm.el,
-          h('details.site-block', h('summary', 'Roles'), rolesForm.el)));
+          secretsBox));
     }
 
     function paintAll() {
@@ -160,6 +173,7 @@ export default {
       paintProposals();
       paintBuilders();
       paintDomain();
+      paintBuiltin();
       // The status names what the other requests answer about; when that
       // changed, they are asked again.
       const s = st.settings;
@@ -186,8 +200,6 @@ export default {
       const proc = st.site.process || {};
       const todo = [];
       if (st.runtime.node_error) todo.push(st.runtime.node_error);
-      if (!st.repo.connected) todo.push('Connect the repository that holds the site (below).');
-      else if (!s.approved) todo.push('Deploy a commit of the repository (Deploys, below).');
       if (!st.accounts.admins) todo.push('Add yourself as an admin with your Google address (People, below).');
       paint(statusHead, { title: s.title, enabled: s.enabled, state: proc.state || '', healthy: st.site.healthy }, ({ title, enabled, state, healthy }) => h('div.card-head',
         h('div.card-title', icon('external'), h('h2', title)),
@@ -207,7 +219,7 @@ export default {
       return kv([
         ['On this Mac', h('a', { href: f.local, target: '_blank', rel: 'noopener noreferrer' }, f.local)],
         ['Public address', f.public ? h('a', { href: f.public, target: '_blank', rel: 'noopener noreferrer' }, f.public) : h('span.muted', 'no domain yet')],
-        ['Live commit', f.approved ? h('span', mono(short(f.approved)), ' ', f.subject) : null],
+        ['Pages', h('span', 'Files and Wiki', f.approved ? h('span', ', and the modules of commit ', mono(short(f.approved)), ' ', f.subject) : h('span.muted', ' (no modules deployed)'))],
         ['Accounts', `${f.accounts.total} (${f.accounts.admins} admin${f.accounts.admins === 1 ? '' : 's'})`],
         ['Sandbox', f.sandbox ? h('span', pill(f.sandbox.on ? 'On' : 'Off', f.sandbox.on ? 'ok' : 'warn'), ' ', h('span.small.muted', f.sandbox.note)) : null],
       ]);
@@ -567,7 +579,9 @@ export default {
       domainForm.set({ domain: s.domain || '', title: s.title, listen: s.listen });
       paint(googleBox, st.google, renderGoogle);
       const tunnel = st.tunnel.process || {};
+      paint(tunnelGuide, { listen: s.listen, domain: s.domain || '' }, renderTunnelGuide);
       paint(tunnelSetup, { listen: s.listen, saved: !!st.tunnel.token_saved, cloudflared: !!st.runtime.cloudflared }, renderTunnelSetup);
+      paint(checkBox, { domain: s.domain || '', on: !!s.enabled }, renderCheck);
       paint(tunnelSwitch, { on: !!s.tunnel, disabled: !st.tunnel.token_saved || !st.runtime.cloudflared }, ({ on, disabled }) => toggle({
         checked: on, label: 'Run the tunnel while the site is on', disabled,
         onChange: async (want, input) => { try { await put('/api/site/settings', { tunnel: want }); await refresh(); } catch (e) { input.checked = !want; toastError(e); } },
@@ -584,9 +598,9 @@ export default {
       const value = () => ({ domain: domainIn.value, title: titleIn.value, listen: listenIn.value });
       const el = h('div.site-form',
         h('div.form-grid',
-          field({ label: 'Domain', control: domainIn, help: 'The public host name, served over https. Point it at this Mac with a tunnel (below).' }),
+          field({ label: 'Domain', control: domainIn, help: 'The public host name, e.g. example.com, served over https. Its DNS must be with Cloudflare.' }),
           field({ label: 'Site name', control: titleIn }),
-          field({ label: 'Listen on', control: listenIn, help: 'Keep it on 127.0.0.1: the tunnel reaches it from this Mac.' })),
+          field({ label: 'Listen on', control: listenIn, help: 'Keep it on 127.0.0.1: the tunnel reaches it from this machine.' })),
         h('div.actions', btn('Save', {
           kind: 'primary', onClick: async () => {
             await put('/api/site/settings', value());
@@ -617,10 +631,77 @@ export default {
             g.source === 'site' ? btn('Remove', { small: true, onClick: async () => { await del('/api/site/google-client'); toast(restarting('Google client removed'), 'ok'); await refresh(); } }) : null)));
     }
 
-    function renderTunnelSetup({ listen, saved, cloudflared }) {
+    function renderTunnelGuide({ listen, domain }) {
+      const ext = (href, text) => h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text);
+      const name = domain || 'example.com';
+      return h('ol.small.site-guide',
+        h('li', 'The domain’s DNS must be with Cloudflare: if it is not yet, ', ext('https://dash.cloudflare.com/', 'add it to Cloudflare'), ' and change its name servers where you bought it.'),
+        h('li', 'Open ', ext('https://one.dash.cloudflare.com/', 'Cloudflare Zero Trust'), ' → Networks → Tunnels → ', h('em', 'Create a tunnel'), ', type ', h('em', 'Cloudflared'), '. Name it, e.g. fridolin.'),
+        h('li', 'On ', h('em', 'Install and run a connector'), ', copy the token: the long text after ', mono('--token'), ' in any of the commands shown. Install nothing: Fridolin runs the tunnel. Paste the token below.'),
+        h('li', 'Next, add a public host name: ', mono(name), ', no path, service ', h('em', 'HTTP'), ', URL ', mono(listen, { copy: true }), '. Cloudflare adds the DNS record. Optionally add ', mono(`wiki.${name}`), ' the same way: it leads to ', mono(`${name}/wiki`), '.'),
+        h('li', 'Turn on ', h('em', 'Run the tunnel'), ' below, and the site (top of this page).'));
+    }
+
+    function renderCheck({ domain, on }) {
+      const out = region();
+      return [
+        h('div.actions', btn(domain ? `Check https://${domain}` : 'Check', {
+          small: true, icon: 'refresh', disabled: !domain,
+          onClick: async () => {
+            const r = await post('/api/site/check-domain', undefined, { timeout: 45000 });
+            paint(out, r, (x) => (x.ok
+              ? callout('ok', `${domain} answers`, h('div', 'The site is live: ', h('a', { href: `https://${domain}/`, target: '_blank', rel: 'noopener noreferrer' }, `https://${domain}/`)))
+              : callout('bad', `${domain} does not answer yet`, x.error)));
+          },
+        }), on ? null : h('span.small.muted', 'Turn the site on first.')),
+        out,
+      ];
+    }
+
+    // ── Files and Wiki ─────────────────────────────────────────────────
+    ctx.watch(store, (x) => x.status, (status) => {
+      brains = (status && status.brains) || [];
+      if (st) paintBuiltin();
+    });
+
+    function paintBuiltin() {
+      const s = st.settings;
+      paint(builtinBox, {
+        base: st.public_url ? st.public_url.replace(/\/$/, '') : (st.site.local_url || '').replace(/\/$/, ''),
+        roles: s.roles, map: s.role_brains || {}, brains: brains.map((b) => ({ id: b.id, label: brainLabel(b) })),
+      }, renderBuiltin);
+    }
+
+    function renderBuiltin({ base, roles, map, brains: list }) {
+      const roleRow = (role) => {
+        const chosen = new Set(map[role] || []);
+        return h('tr', h('td', h('strong', role)), h('td', h('div.site-brain-picks', list.map((b) => toggle({
+          checked: chosen.has(b.id), label: b.label,
+          onChange: async (want, input) => {
+            const next = list.map((x) => x.id).filter((id) => (id === b.id ? want : chosen.has(id)));
+            try {
+              await put('/api/site/roles', { brains: { [role]: next } });
+              toast(want ? `${role} sees ${b.label}` : `${role} no longer sees ${b.label}`, 'ok');
+              await refresh();
+            } catch (e) { input.checked = !want; toastError(e); }
+          },
+        })))));
+      };
+      const others = roles.filter((r) => r !== 'admin');
+      return [
+        h('p.small', 'Every Fridolin’s site has two pages of its own: ',
+          base ? h('a', { href: `${base}/files`, target: '_blank', rel: 'noopener noreferrer' }, 'Files') : 'Files', ', the brains’ folders to browse and open, and ',
+          base ? h('a', { href: `${base}/wiki`, target: '_blank', rel: 'noopener noreferrer' }, 'Wiki') : 'Wiki',
+          ', their wiki/ and memories/ pages. Someone who signs in sees the brains their role is given here; admins see every brain. What a brain’s backup leaves out, secrets, chat histories and Fridolin’s own state are never shown, and every view is written to the audit log.'),
+        !list.length ? callout('info', 'No brains yet', 'Add a brain first; its folder and wiki then show here.')
+          : others.length ? h('div.table-wrap', h('table.table', h('thead', h('tr', h('th', 'Role'), h('th', 'Brains it sees'))), h('tbody', others.map(roleRow))))
+            : callout('info', 'Only admins so far', 'Add a role under People → Roles to share brains with others.'),
+      ];
+    }
+
+    function renderTunnelSetup({ saved, cloudflared }) {
       const token = h('input.draft', { type: 'password', autocomplete: 'off', placeholder: saved ? 'saved — paste a new one to replace it' : 'eyJ…' });
       return [
-        h('p.small', 'A tunnel gives the domain to this Mac without opening a port. In Cloudflare Zero Trust create a tunnel, give it a public host name for your domain pointing at ', mono(`http://${listen}`), ', and paste its token here.'),
         !cloudflared ? callout('info', 'cloudflared is not installed', h('div', 'macOS: ', mono('brew install cloudflared', { copy: true }))) : null,
         h('div.actions', token, btn(saved ? 'Replace token' : 'Save token', { small: true, onClick: async () => { await put('/api/site/tunnel', { token: token.value }); token.value = ''; toast('Tunnel token saved', 'ok'); await refresh(); } }),
           saved ? btn('Remove token', { small: true, onClick: async () => { await put('/api/site/tunnel', { token: '' }); await refresh(); } }) : null),

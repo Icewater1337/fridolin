@@ -98,10 +98,20 @@ and use the calendars you pick: list events, find free time, create events.
 the bridge — nightly summaries, alerts — or hand a brain files that arrived
 some other way.
 
-**Your own site.** Optionally, a website of your own on your domain: people
-sign in with Google or a password, and each page is a module in a private
-repository you link in the dashboard. Nothing goes live until you approve it.
-See [docs/SITE.md](docs/SITE.md).
+**Files and Wiki.** The dashboard's Files page browses every folder Fridolin
+is linked to — the brains' folders, their media, the folders nodes lend —
+and opens Markdown, text, images, PDFs, audio and video; the Wiki page reads
+each brain's `wiki/` and memory notes, with links between pages, backlinks
+and search. Read-only, every view audited, and what a backup leaves out,
+secrets and Fridolin's own state are never shown. See
+[docs/FILES.md](docs/FILES.md).
+
+**Your own site.** Optionally, a website of your own on your domain, linked
+from the dashboard through a Cloudflare tunnel Fridolin runs: people sign in
+with Google or a password and see Files and Wiki for the brains their role
+may see, and any modules of a private repository you link. Nothing goes live
+until you approve it. See [docs/SITE.md](docs/SITE.md), "From zero to your
+domain".
 
 ---
 
@@ -518,6 +528,16 @@ with the account for that brain and tick the calendars it may use. It needs a
 Google OAuth client, which you create once in Google Cloud Console and paste
 under *Settings → Google sign-in*. Step by step:
 [docs/CALENDAR.md](docs/CALENDAR.md).
+
+### GitHub
+
+Dashboard → *Integrations → GitHub → Connect GitHub* makes a private
+GitHub App of this Fridolin's own in one click (GitHub's manifest flow),
+and GitHub asks which repositories it may use. Runs that need GitHub, such
+as a scheduled review that files issues, get a token for just their
+repositories and permissions, which lasts at most an hour and is revoked
+when the run ends. No personal access token is kept. See
+[docs/GITHUB.md](docs/GITHUB.md).
 
 ### Plaud recorder
 
