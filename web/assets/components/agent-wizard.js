@@ -14,6 +14,9 @@ import { btn } from './buttons.js';
 import { callout } from './common.js';
 import { field, nextId, select, textInput, toggle } from './fields.js';
 import { icon } from './icons.js';
+import { errorMessage } from '../lib/errors.js';
+
+/** @import { Child } from '../lib/dom.js' */
 
 const STEPS = [['what', 'What'], ['brain', 'Brain'], ['when', 'When'], ['details', 'Details'], ['permissions', 'Permissions'], ['review', 'Review']];
 
@@ -75,7 +78,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
     const el = h('div.agent-wizard', stepper, body, nav);
 
     const value = () => scheduleOf(f);
-    const valid = () => { try { value(); return ''; } catch (e) { return e.message; } };
+    const valid = () => { try { value(); return ''; } catch (e) { return errorMessage(e); } };
 
     // What each step needs before the next.
     const missing = (key) => {
@@ -189,7 +192,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
               : h('div', h('div.field-label', 'Next runs'), h('ol.next-runs', (r.next || []).map((t) => h('li', h('strong', runTime(t)), h('span.muted', ` · ${inTime(t)}`)))),
                 h('p.muted.small', 'In the bridge’s time zone; each run may start up to a few minutes later (jitter), so agents due at once do not all start together.')));
           } catch (e) {
-            mount(out, h('p.muted', `Cannot preview: ${e.message}`));
+            mount(out, h('p.muted', `Cannot preview: ${errorMessage(e)}`));
           }
         }, 250);
       };
@@ -240,7 +243,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
 
     function detailsStep() {
       if (f.kind === 'command') {
-        const node = nodes.length ? select([['', 'Choose a node'], ...nodes.map((n) => [n.name || n.id, n.name ? `${n.name}${n.online === false ? ' (offline)' : ''}` : n.id])], f.node) : textInput({ value: f.node, placeholder: 'mac-mini' });
+        const node = nodes.length ? select([['', 'Choose a node'], ...nodes.map((n) => /** @type {[string, string]} */ ([n.name || n.id, n.name ? `${n.name}${n.online === false ? ' (offline)' : ''}` : n.id]))], f.node) : textInput({ value: f.node, placeholder: 'mac-mini' });
         node.addEventListener('change', () => set('node', node.value));
         node.addEventListener('input', () => set('node', node.value));
         const argv = h('textarea.mono', { rows: 3, id: nextId('argv'), placeholder: '/Users/you/bin/scrape.sh\n--quiet' });
@@ -300,6 +303,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
       const plain = h('ul.plain-list', (s ? permissionsOf(s) : []).map((t) => h('li', t)));
       const refreshPlain = () => { try { mount(plain, permissionsOf(value()).map((t) => h('li', t))); } catch { /* still incomplete */ } };
       const setP = (k, v) => { set(k, v); refreshPlain(); };
+      /** @type {Child[]} */
       const parts = [h('h2', 'What may it do?'), h('p.muted', 'In plain words, what this agent is allowed to do. You approve it as you save it.')];
       if (f.kind !== 'command') {
         parts.push(h('h3', 'Risk level'), choiceCards('risk', [['read', 'Read', riskText('read')], ['write', 'Write (default)', riskText('write')], ['irreversible', 'Irreversible', riskText('irreversible')]], f.risk || 'write', (r) => setP('risk', r === 'write' ? '' : r)));
@@ -362,7 +366,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
     function reviewStep() {
       let s;
       try { s = value(); } catch (e) {
-        return [h('h2', 'Review'), callout('warn', 'Not complete yet', e.message)];
+        return [h('h2', 'Review'), callout('warn', 'Not complete yet', errorMessage(e))];
       }
       const file = `.brain/schedules/${s.name}.json`;
       const b = brains.find((x) => x.id === brain);
@@ -394,7 +398,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
       el,
       brain: () => brain,
       value: () => {
-        try { return { brain, schedule: value() }; } catch (e) { return { brain, invalid: e.message, fields: { ...f, vars: { ...f.vars } } }; }
+        try { return { brain, schedule: value() }; } catch (e) { return { brain, invalid: errorMessage(e), fields: { ...f, vars: { ...f.vars } } }; }
       },
     };
   };

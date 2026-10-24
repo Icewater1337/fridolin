@@ -3,7 +3,7 @@
 // the brain wrote or changed itself counts as read-only until you
 // approve it here, or edit its policy, which writes it into the file.
 
-import { get, post, put } from '../app/api.js';
+import { get, post, put, errorStatus } from '../app/api.js';
 import { h, paint } from '../lib/dom.js';
 import { btn } from './buttons.js';
 import { openDialog } from './dialog.js';
@@ -31,7 +31,11 @@ function policyLines(p) {
     h('dt', 'Vault'), h('dd', list(p.vault)));
 }
 
-/** skillsCard(brainId, {signal}) is the card of brainId's skills. */
+/**
+ * skillsCard(brainId, {signal}) is the card of brainId's skills.
+ * @param {string} brainId
+ * @param {{signal?: AbortSignal}} [options]
+ */
 export function skillsCard(brainId, { signal } = {}) {
   const el = h('div.stack', h('div.card', loading('Reading skills…')));
   const base = `/api/brains/${encodeURIComponent(brainId)}/skills`;
@@ -41,7 +45,7 @@ export function skillsCard(brainId, { signal } = {}) {
     try {
       data = await get(base, { signal });
     } catch (e) {
-      if (e && e.status === 404) { paint(el, 'gone', () => h('div.card', empty('Not running', 'Skills show once the brain runs.'))); return; }
+      if (errorStatus(e) === 404) { paint(el, 'gone', () => h('div.card', empty('Not running', 'Skills show once the brain runs.'))); return; }
       throw e;
     }
     render(data);

@@ -40,7 +40,7 @@ async function openPage(t, opts = {}) {
   page.render(root, ctx);
   await settle();
   const nameIn = () => root.querySelector('.brain-form input');
-  const note = () => root.querySelector('.live-form').firstChild; // the "changed elsewhere" note
+  const note = () => /** @type {HTMLElement} */ (root.querySelector('.live-form').firstChild); // the "changed elsewhere" note
   const bar = () => root.querySelector('.save-bar');
   const poll = async (brains) => {
     bridge.brains = brains;
@@ -86,6 +86,7 @@ test('a setting typed back to what it was is no unsaved change', async (t) => {
 });
 
 test('edits whose form left the page are not unsaved changes', async (t) => {
+  /** @type {[string, object[]][]} */
   const cases = [
     // name, what the bridge then has
     ['the brain was removed', []],
@@ -118,6 +119,7 @@ test('a brain that does not exist shows only that', async (t) => {
 test('approving drift sends the brain.json shown', async (t) => {
   // A rename only, so no confirmation dialog stands in the way.
   const drifted = { ...view('Work'), status: 'drift', disk_manifest: manifest('Office'), issues: [{ kind: 'drift', detail: 'brain.json changed on disk' }] };
+  /** @type {[string, {status: number, body: object}, [string, RegExp]][]} */
   const cases = [
     // name, the bridge's answer, the toast it gives
     ['the bridge approves it', { status: 200, body: { status: 'approved' } }, ['ok', /Changes approved/]],

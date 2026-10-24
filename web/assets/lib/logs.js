@@ -1,6 +1,7 @@
 // Reading the bridge's log lines: how serious one is. Pure, so unit-tested
 // (web/test/logs.test.js).
 
+/** @type {Record<string, string>} */
 const TAGS = { ERROR: 'err', WARN: 'warn', INFO: '', DEBUG: 'debug' };
 
 /**
@@ -11,11 +12,13 @@ const TAGS = { ERROR: 'err', WARN: 'warn', INFO: '', DEBUG: 'debug' };
  * text the line quotes ("backup work: FAILED: …", "brain work: error for
  * …: …"), leaving out what it puts in quotes. A message that merely
  * contains the word is not an error.
+ * @param {unknown} text
+ * @returns {'err' | 'warn' | 'dev' | 'debug' | ''}
  */
 export function logLevel(text) {
   const t = String(text || '');
   const tag = /^\[[^\]\s]+ (ERROR|WARN|INFO|DEBUG)\]/.exec(t);
-  if (tag) return TAGS[tag[1]];
+  if (tag) return /** @type {'err' | 'warn' | 'debug' | ''} */ (TAGS[tag[1]]);
   if (t.startsWith('[dev]')) return 'dev';
   if (/^(panic|fatal error):/.test(t)) return 'err';
   if (/^warning:/i.test(t)) return 'warn';

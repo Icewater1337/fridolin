@@ -12,8 +12,12 @@ import { h } from '../assets/lib/dom.js';
 import { createShell } from '../assets/app/shell.js';
 import { createNavigation } from '../assets/app/navigation.js';
 
-// Pages with a heading; settings names the section its address points
-// to, as the Settings page does.
+/**
+ * Pages with a heading; settings names the section its address points
+ * to, as the Settings page does. extra(ctx) gives what follows the heading.
+ * @param {string} title
+ * @param {(ctx: import('../assets/app/page.js').Page) => Node[]} [extra]
+ */
 const page = (title, extra = () => []) => async () => ({
   default: {
     title,
@@ -28,6 +32,11 @@ const ROUTES = [
   { id: 'settings', path: 'settings/:section?', load: page('Settings', () => [h('section', { id: 'sec-access' }, h('h2', 'Access'))]) },
 ];
 
+/**
+ * @param {import('node:test').TestContext} t
+ * @param {string} [start] the address the dashboard opens at
+ * @param {{onAddress?: () => boolean}} [opts]
+ */
 function open(t, start = '#/overview', { onAddress } = {}) {
   installDom();
   runThemeScript(t);
@@ -48,11 +57,13 @@ test('opening the dashboard leaves the focus where the browser put it', async (t
 });
 
 test('following a link moves the focus to the new page', async (t) => {
-  for (const [href, want] of [
+  /** @type {[string, (s: import('../assets/app/shell.js').Shell) => Element][]} */
+  const cases = [
     ['#/settings', (s) => s.page.querySelector('h1')],
     ['#/settings/access', (s) => s.page.querySelector('#sec-access h2')],
     ['#/nope', (s) => s.page], // no page, so no heading: the page area
-  ]) {
+  ];
+  for (const [href, want] of cases) {
     await t.test(href, async (t) => {
       const { w, shell, view } = open(t);
       view.start();

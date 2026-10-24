@@ -1,6 +1,6 @@
 // Add a brain: choose a folder → check it → configure → done.
 
-import { get, post } from '../app/api.js';
+import { get, post, errorStatus } from '../app/api.js';
 import { folderBrowser } from '../components/folder-browser.js';
 import { routingEditor } from '../components/routing-editor.js';
 import { h, mount } from '../lib/dom.js';
@@ -13,19 +13,45 @@ import { field, textInput } from '../components/fields.js';
 import { brainSettingsFields } from '../components/brain-fields.js';
 import { tabs } from '../components/tabs.js';
 import { callout, mono, spinner, loading } from '../components/common.js';
+import { errorMessage, errorName } from '../lib/errors.js';
+
+/** @import { PageModule } from '../app/page.js' */
+/** @import { Brain, BrainManifest, ConfigFile, ConfigResponse, FSCapabilities } from '../../types/api.js' */
+
+/**
+ * What POST /api/brains/inspect says about a folder (registry.Inspection).
+ * A folder with problems is not looked into: it has none of the optional fields.
+ * @typedef {object} Inspection
+ * @property {string} abs_path
+ * @property {string[]} problems
+ * @property {string[]} warnings
+ * @property {boolean} [exists]
+ * @property {boolean} [is_dir]
+ * @property {number} [entries]
+ * @property {boolean} [is_git]
+ * @property {boolean} [has_prompt]
+ * @property {boolean} [has_history]
+ * @property {BrainManifest} [manifest] its brain.json, when it has one that reads
+ * @property {{id: string, name: string}} [suggested]
+ */
 
 const STEPS = [['folder', 'Folder'], ['inspect', 'Check'], ['configure', 'Configure']];
 
-export default {
+export default /** @satisfies {PageModule} */ ({
   title: 'Add brain',
   render(root, ctx) {
     let step = 'folder';
-    let picked = null; // {path, create}
-    let report = null; // inspect response
+    /** @type {{path: string, create: boolean | null} | null} */
+    let picked = null;
+    /** @type {Inspection | null} */
+    let report = null;
+    /** @type {FSCapabilities | null} */
     let caps = null;
+    /** @type {AbortController | null} */
     let pickAbort = null;
     let tab = 'browse';
-    let configure = null; // the configure step's form: {value(), base}
+    /** @type {{value: () => unknown, base: string} | null} */
+    let configure = null; // the configure step's form
 
     const stepper = h('ol.stepper');
     const body = h('div.wizard-body');
@@ -51,6 +77,7 @@ export default {
         h('span.step-label', label))));
     }
 
+    /** @param {string} next */
     function go(next) {
       step = next;
       configure = null;
@@ -132,8 +159,8 @@ export default {
         }
         toast('No folder was chosen', 'info');
       } catch (e) {
-        if (e.name === 'AbortError') toast('Stopped waiting for the folder dialog.', 'info');
-        else toast(e.message);
+        if (errorName(e) === 'AbortError') toast('Stopped waiting for the folder dialog.', 'info');
+        else toast(errorMessage(e));
       } finally {
         pickAbort = null;
       }
@@ -147,7 +174,7 @@ export default {
         report = await post('/api/brains/inspect', { path: picked.path }, { signal: ctx.signal });
       } catch (e) {
         if (ctx.dead) return;
-        mount(body, h('div.card.wizard-card', callout('bad', 'Could not check that folder', e.message), h('div.actions', btn('Back', { icon: 'left', onClick: () => go('folder') }))));
+        mount(body, h('div.card.wizard-card', callout('bad', 'Could not check that folder', errorMessage(e)), h('div.actions', btn('Back', { icon: 'left', onClick: () => go('folder') }))));
         return;
       }
       if (ctx.dead) return;
@@ -156,6 +183,7 @@ export default {
       const warnings = r.warnings || [];
       const notDir = r.exists && !r.is_dir;
       if (notDir) problems.push('This path is a file, not a folder.');
+      /** @type {[string, string][]} [icon, text] */
       const facts = [];
       // The bridge does not look into a folder that cannot be a brain, so
       // there are no facts about it to show.
@@ -199,12 +227,14 @@ export default {
     // ── step 3: configure ──
     async function renderConfigure() {
       mount(body, h('div.card.wizard-card', loading('Loading…')));
+      /** @type {Brain[]} */
       let brains = [];
+      /** @type {ConfigResponse | null} */
       let cfg = null;
       try {
         [brains, cfg] = await Promise.all([get('/api/brains', { signal: ctx.signal }), get('/api/config', { signal: ctx.signal })]);
       } catch (e) {
-        if (ctx.dead || e.status === 401) return;
+        if (ctx.dead || errorStatus(e) === 401) return;
         toastError(e);
       }
       if (step !== 'configure') return;
@@ -238,7 +268,7 @@ export default {
         if (cleaned !== idIn.value) idIn.value = cleaned;
         checkId();
       });
-      const eff = (cfg && cfg.effective) || {};
+      const eff = /** @type {Partial<ConfigFile>} */ ((cfg && cfg.effective) || {});
       const allowedGroups = (cfg && cfg.config && cfg.config.allowed_groups) || eff.allowed_groups || [];
       const noDM = !brains.some((b) => b.manifest && b.manifest.routing && b.manifest.routing.handles_dms);
       const routing = routingEditor({
@@ -281,8 +311,10 @@ export default {
       nameIn.focus();
     }
 
+    /** @param {{manifest?: BrainManifest, useExisting?: boolean}} what the new brain.json, or the folder's own */
     async function submit({ manifest, useExisting = false }) {
       const r = report;
+      /** @type {{id: string, path: string, created: string[] | null}} */
       const res = await post('/api/brains', {
         path: r.abs_path || picked.path,
         manifest: useExisting ? {} : manifest,
@@ -325,4 +357,4 @@ export default {
 
     go('folder');
   },
-};
+});

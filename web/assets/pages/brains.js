@@ -11,7 +11,10 @@ import { toast } from '../components/toast.js';
 import { mono, pageHeader, spinner } from '../components/common.js';
 import { brainStatusPill, runtimeSummary, firstBrainHero } from '../components/brain.js';
 
-export default {
+/** @import { PageModule } from '../app/page.js' */
+/** @import { Brain, BrainManifest } from '../../types/api.js' */
+
+export default /** @satisfies {PageModule} */ ({
   title: 'Brains',
   render(root, ctx) {
     const box = h('div', spinner());
@@ -35,11 +38,12 @@ export default {
       reconcile(cards, brains.map((b) => ({ b, noDMBrain })), ({ b }) => b.id || `path:${b.path}`, brainCard);
     }, 3000);
   },
-};
+});
 
+/** @param {{b: Brain, noDMBrain: boolean}} row */
 function brainCard({ b, noDMBrain }) {
   const rt = b.runtime;
-  const m = b.manifest || {};
+  const m = /** @type {Partial<BrainManifest>} */ (b.manifest || {});
   const routing = (rt && rt.routing) || m.routing;
   const href = b.id ? `#/brains/${encodeURIComponent(b.id)}` : null;
   const body = [

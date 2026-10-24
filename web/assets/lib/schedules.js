@@ -2,7 +2,47 @@
 // (.brain/schedules/<name>.json) and the wizard's fields, how its times
 // and its permissions read, and how the list is filtered and grouped.
 
-/** The kind of task an agent has, as the form's select names it. */
+/** @import { Schedule, SchedulesResponse } from '../../types/api.js' */
+
+/**
+ * The edit form's fields as scheduleOf reads them: texts as typed (lists
+ * one a line, vars and permissions name=value lines), and the switches.
+ * @typedef {object} ScheduleFields
+ * @property {string} name
+ * @property {string} when
+ * @property {string} description
+ * @property {boolean} enabled
+ * @property {string} kind template, prompt, command or file
+ * @property {string} template
+ * @property {string} prompt
+ * @property {string} promptFile
+ * @property {string} node
+ * @property {string} argv
+ * @property {string} dir
+ * @property {string | Record<string, string>} vars name=value lines, or the wizard's {name: value}
+ * @property {string} risk
+ * @property {string} preapproved
+ * @property {string} githubRepos
+ * @property {string} githubPermissions
+ * @property {boolean} ownTools
+ * @property {string} tools
+ * @property {string} report
+ * @property {string} chat
+ * @property {string} timeout
+ * @property {string} missed
+ * @property {string} jitter
+ */
+
+/**
+ * The wizard's "When" step: a mode and what it takes. hours may be the
+ * number typed, as text.
+ * @typedef {{mode: string, hours?: number | string, time?: string, day?: string, cron?: string}} WhenPreset
+ */
+
+/**
+ * The kind of task an agent has, as the form's select names it.
+ * @param {Partial<Schedule>} s
+ */
 export function taskKind(s) {
   if (s.command) return 'command';
   if (s.template) return 'template';
@@ -10,14 +50,21 @@ export function taskKind(s) {
   return 'file';
 }
 
-/** vars ({name: value}) as the form's lines, name=value. */
+/**
+ * vars ({name: value}) as the form's lines, name=value.
+ * @param {Record<string, string> | null | undefined} vars
+ */
 export function varsText(vars) {
   return Object.entries(vars || {}).map(([k, v]) => `${k}=${v}`).join('\n');
 }
 
-/** The form's name=value lines as vars; blank lines are left out. An
- * object is taken as it is, less its empty values. */
+/**
+ * The form's name=value lines as vars; blank lines are left out. An
+ * object is taken as it is, less its empty values.
+ * @param {string | Record<string, string>} text
+ */
 function parseVars(text) {
+  /** @type {Record<string, string>} */
   const out = {};
   if (text && typeof text === 'object') {
     for (const [k, v] of Object.entries(text)) if (String(v ?? '').trim()) out[k] = String(v).trim();
@@ -33,7 +80,10 @@ function parseVars(text) {
   return out;
 }
 
-/** The non-blank lines of text, trimmed. */
+/**
+ * The non-blank lines of text, trimmed.
+ * @param {string} text
+ */
 function lines(text) {
   return String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
 }
@@ -75,8 +125,11 @@ export function fileJSON(s) {
  * (strings, booleans; vars as name=value lines or an object). It throws
  * an Error that says what is missing. Fields the agent's kind does not take are
  * left out, and so are defaults, so that an entry says only what it sets.
+ * @param {ScheduleFields} f
+ * @returns {Schedule}
  */
 export function scheduleOf(f) {
+  /** @type {Schedule} */
   const s = { name: f.name.trim(), when: f.when.trim() };
   if (!f.enabled) s.enabled = false;
   if (f.description.trim()) s.description = f.description.trim();
@@ -110,7 +163,11 @@ export function scheduleOf(f) {
   return s;
 }
 
-/** "in 2 h 5 min", "in 3 min", "now": how far ahead ts is. */
+/**
+ * "in 2 h 5 min", "in 3 min", "now": how far ahead ts is.
+ * @param {string | number | Date} ts
+ * @param {number} [now]
+ */
 export function inTime(ts, now = Date.now()) {
   const ms = new Date(ts).getTime() - now;
   if (!Number.isFinite(ms)) return '';
@@ -130,6 +187,8 @@ const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
  * time} for "daily HH:MM", {mode: 'weekly', day, time} for "weekly DAY
  * HH:MM", and {mode: 'cron', cron} for anything else, a cron expression
  * or an every with minutes or days.
+ * @param {string} when
+ * @returns {WhenPreset}
  */
 export function presetOf(when) {
   const w = String(when || '').trim().toLowerCase();
@@ -142,7 +201,10 @@ export function presetOf(when) {
   return { mode: 'cron', cron: w.replace(/^cron /, '') };
 }
 
-/** The when string of a preset, the inverse of presetOf. */
+/**
+ * The when string of a preset, the inverse of presetOf.
+ * @param {WhenPreset} p
+ */
 export function whenOf(p) {
   switch (p.mode) {
     case 'every': return `every ${Math.max(1, Number(p.hours) || 1)}h`;
@@ -244,6 +306,8 @@ export function runTime(ts) {
  * What the Schedules page says about the zone the bridge reads times of
  * day in (GET /api/schedules' timezone): its text, and whether to warn,
  * which it does when the zone is UTC only because timezone is unset.
+ * @param {SchedulesResponse['timezone'] | null | undefined} tz
+ * @returns {{text: string, warn: boolean} | null}
  */
 export function zoneNote(tz) {
   if (!tz || !tz.name) return null;

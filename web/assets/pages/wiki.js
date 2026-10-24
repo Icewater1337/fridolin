@@ -17,6 +17,13 @@ import { textInput } from '../components/fields.js';
 import { icon } from '../components/icons.js';
 import { markdownDoc, markdownToc } from '../components/markdown.js';
 
+/** @import { Page, PageModule } from '../app/page.js' */
+/** @import { WikiHit, WikiPageInfo } from '../../types/api.js' */
+
+/**
+ * @param {WikiHit[]} list
+ * @param {boolean} oneBrain
+ */
 function hits(list, oneBrain) {
   if (!list.length) return h('div.card', empty('Nothing found', 'No page has all of these words.'));
   return h('ul.wiki-hits', list.map((x) => h('li',
@@ -25,7 +32,12 @@ function hits(list, oneBrain) {
     h('p.muted.small', x.snippet))));
 }
 
-/** A search box; results go into out. */
+/**
+ * A search box; results go into out.
+ * @param {Page} ctx
+ * @param {HTMLElement} out
+ * @param {string} brain
+ */
 function searchBox(ctx, out, brain) {
   const input = textInput({ type: 'search', placeholder: brain ? 'Search this wiki' : 'Search every wiki', 'aria-label': 'Search the wiki' });
   input.addEventListener('keydown', (e) => {
@@ -41,6 +53,10 @@ function searchBox(ctx, out, brain) {
   return input;
 }
 
+/**
+ * @param {HTMLElement} root
+ * @param {Page} ctx
+ */
 function brainsView(root, ctx) {
   const results = h('div');
   const box = h('div', spinner());
@@ -57,8 +73,14 @@ function brainsView(root, ctx) {
   }, (err) => { if (!ctx.dead) paint(box, 'error', () => h('div.card', empty('Could not read the wikis', err.message))); });
 }
 
-/** The pages, by folder: the wiki's own, then the memory notes. */
+/**
+ * The pages, by folder: the wiki's own, then the memory notes.
+ * @param {string} brain
+ * @param {WikiPageInfo[]} pages
+ * @param {string} current
+ */
 function pageTree(brain, pages, current) {
+  /** @type {Map<string, WikiPageInfo[]>} */
   const groups = new Map();
   for (const p of pages) {
     const folder = p.section === 'memories' ? 'Memories' : (p.name.includes('/') ? p.name.slice(0, p.name.lastIndexOf('/')) : '');
@@ -70,6 +92,12 @@ function pageTree(brain, pages, current) {
     h('ul', list.map((p) => h('li', h('a', { href: wikiHref(brain, p.path), 'aria-current': p.path === current ? 'page' : null }, p.title)))))));
 }
 
+/**
+ * @param {HTMLElement} root
+ * @param {Page} ctx
+ * @param {string} brain
+ * @param {string} page
+ */
 function brainView(root, ctx, brain, page) {
   const results = h('div');
   const main = h('div.wiki-main', spinner());
@@ -141,10 +169,10 @@ function brainView(root, ctx, brain, page) {
   });
 }
 
-export default {
+export default /** @satisfies {PageModule} */ ({
   title: 'Wiki',
   render(root, ctx) {
     if (ctx.params.brain) brainView(root, ctx, ctx.params.brain, ctx.params.page || '');
     else brainsView(root, ctx);
   },
-};
+});

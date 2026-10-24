@@ -4,11 +4,22 @@
 // distinct message.
 
 import { toastError } from '../components/toast.js';
+import { errorMessage, errorName } from '../lib/errors.js';
 
+/**
+ * A running poll. kick() runs it now and resolves once a run that started
+ * after the kick has finished; stop() ends it.
+ * @typedef {{kick: () => Promise<void>, resume: () => void, retry: () => void, stop: () => void}} Poll
+ */
+
+/** @type {Set<Poll>} */
 const live = new Set();
 let paused = () => false;
 
-/** Sets what pauses every poll: a hidden tab, the connect screen. */
+/**
+ * Sets what pauses every poll: a hidden tab, the connect screen.
+ * @param {() => boolean} fn
+ */
 export function pausePollsWhen(fn) { paused = fn; }
 
 /** Runs the polls that were due while paused. */
@@ -23,16 +34,23 @@ export function retryPolls() { live.forEach((p) => p.retry()); }
 // (retryPolls) brings them all back.
 const MAX_BACKOFF_MS = 30000;
 
-/** How long a poll waits after failures failed runs in a row, given its interval. */
+/**
+ * How long a poll waits after failures failed runs in a row, given its interval.
+ * @param {number} interval
+ * @param {number} failures
+ */
 export function backoff(interval, failures) {
   if (!failures) return interval;
   return Math.min(interval * 2 ** failures, Math.max(interval, MAX_BACKOFF_MS));
 }
 
-const isAbort = (e) => e && (e.name === 'AbortError' || e.name === 'TimeoutError');
+/** @param {any} e what a run threw */
+/** @param {unknown} e */
+const isAbort = (e) => errorName(e) === 'AbortError' || errorName(e) === 'TimeoutError';
 
 // 401 opens the connect screen and 0 shows the offline banner; anything
 // else is worth a toast, and an error without a status is a bug.
+/** @param {any} e what a run threw */
 function reportPollError(e) {
   if (e && e.status === undefined) console.error(e);
   if (e && e.status !== 401 && e.status !== 0) toastError(e);
@@ -44,17 +62,24 @@ function reportPollError(e) {
  * started after the kick has finished, so a button can wait for the refresh
  * it asked for. A kick during a run aborts that run (its signal fires, so its
  * requests stop and it paints nothing stale) and starts a fresh one.
+ * @param {(signal: AbortSignal) => unknown} fn
+ * @param {number | (() => number)} interval
+ * @param {{onError?: (e: any) => void}} [options] onError gets what a run threw, once per message in a row
+ * @returns {Poll}
  */
 export function makePoll(fn, interval, { onError = reportPollError } = {}) {
+  /** @type {ReturnType<typeof setTimeout> | null} */
   let timer = null;
+  /** @type {AbortController | null} */
   let running = null; // the AbortController of the run in progress
   let stopped = false;
   let waiting = false; // due, but paused
   let failures = 0; // failed runs in a row
+  /** @type {(() => void)[]} */
   let kicks = []; // resolvers of kick() calls the next run answers
   let lastErr = '';
   const next = () => backoff(typeof interval === 'function' ? interval() : interval, failures);
-  const settle = (list) => list.forEach((resolve) => resolve());
+  const settle = (/** @type {(() => void)[]} */ list) => list.forEach((resolve) => resolve());
 
   async function run() {
     clearTimeout(timer);
@@ -70,7 +95,7 @@ export function makePoll(fn, interval, { onError = reportPollError } = {}) {
       if (!ctl.signal.aborted) { lastErr = ''; failures = 0; }
     } catch (e) {
       if (!ctl.signal.aborted && !isAbort(e)) {
-        const msg = (e && e.message) || String(e);
+        const msg = errorMessage(e);
         if (msg !== lastErr) onError(e);
         lastErr = msg;
         failures += 1;
@@ -88,9 +113,10 @@ export function makePoll(fn, interval, { onError = reportPollError } = {}) {
     timer = setTimeout(run, next());
   }
 
+  /** @type {Poll} */
   const p = {
     kick() {
-      return new Promise((resolve) => {
+      return new Promise((/** @type {() => void} */ resolve) => {
         if (stopped) { resolve(); return; }
         kicks.push(resolve);
         if (running) running.abort();
