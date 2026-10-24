@@ -7,7 +7,7 @@
 // its review, /edit and /duplicate take it through the wizard, and
 // /<run> shows a run's log. The reminders are listed below the agents.
 
-import { del, get, post, put } from '../app/api.js';
+import { del, get, post, put, errorStatus } from '../app/api.js';
 import { brainsResource, nodesResource, resource, schedulesResource } from '../app/resources.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { fieldDiff, lineDiff, sortKeys } from '../lib/diff.js';
@@ -22,6 +22,7 @@ import { icon } from '../components/icons.js';
 import { liveForm } from '../components/live-form.js';
 import { outcomeBadge, riskBadge, threadEl } from '../components/policy.js';
 import { toast, toastError } from '../components/toast.js';
+import { errorMessage } from '../lib/errors.js';
 
 /** @import { Page, PageModule } from '../app/page.js' */
 /** @import { Child } from '../lib/dom.js' */
@@ -81,7 +82,7 @@ async function runSoon(a) {
       await schedulesResource.refresh();
       return;
     } catch (e) {
-      if (e.status !== 404 || i === 9) { toastError(e); return; }
+      if (errorStatus(e) !== 404 || i === 9) { toastError(e); return; }
       await new Promise((r) => { setTimeout(r, 500); });
     }
   }
@@ -208,7 +209,7 @@ function reviewPanel(a, { after } = {}) {
     try {
       await post(`${base(a.brain, a.name)}/approve`, { schedule: r.status === 'removed' ? null : disk });
     } catch (e) {
-      if (e.status === 409) { toast(e.message, 'warn'); await schedulesResource.refresh(); return; }
+      if (errorStatus(e) === 409) { toast(errorMessage(e), 'warn'); await schedulesResource.refresh(); return; }
       toastError(e);
       return;
     }

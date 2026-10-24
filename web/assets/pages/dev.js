@@ -1,6 +1,6 @@
 // Dev mode (--no-whatsapp): inject messages and read what the bridge "sent".
 
-import { get, post } from '../app/api.js';
+import { get, post, errorStatus } from '../app/api.js';
 import { store } from '../app/store.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { toast } from '../components/toast.js';
@@ -9,6 +9,7 @@ import { field, textInput, toggle } from '../components/fields.js';
 import { timeAgo, empty, pageHeader, callout, longText } from '../components/common.js';
 import { chatEl, chatName } from '../components/chat.js';
 import { isGroupJid } from '../lib/jid.js';
+import { errorMessage } from '../lib/errors.js';
 
 /** @import { PageModule } from '../app/page.js' */
 /** @import { DevMessage } from '../../types/api.js' */
@@ -103,14 +104,14 @@ export default /** @satisfies {PageModule} */ ({
         await post('/api/dev/vote', { poll: m.id, voter: voterOf(), options: [option] });
         toast(`Voted “${option}” as ${voterOf()}`, 'ok', { timeout: 2000 });
       } catch (e) {
-        toast(e.message || String(e), 'error');
+        toast(errorMessage(e), 'error');
       }
     };
     const outboxPoll = ctx.poll(async (signal) => {
       try {
         items = await get('/api/dev/outbox', { signal });
       } catch (e) {
-        if (e.status === 404) { paint(outbox, 'unavailable', () => empty('Not available', 'Only in dev mode: start the bridge with --no-whatsapp.')); return; }
+        if (errorStatus(e) === 404) { paint(outbox, 'unavailable', () => empty('Not available', 'Only in dev mode: start the bridge with --no-whatsapp.')); return; }
         throw e;
       }
       paintOutbox();

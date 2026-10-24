@@ -4,6 +4,7 @@
 import { h } from '../lib/dom.js';
 import { icon } from './icons.js';
 import { toast, toastError } from './toast.js';
+import { errorName } from '../lib/errors.js';
 
 /** @import { Child } from '../lib/dom.js' */
 
@@ -67,7 +68,7 @@ export async function runBusy(button, fn) {
   try {
     return await fn();
   } catch (e) {
-    if (e && e.name !== 'AbortError') toastError(e);
+    if (errorName(e) !== 'AbortError') toastError(e);
     return undefined;
   } finally {
     if (button) { button.disabled = false; button.classList.remove('busy'); }

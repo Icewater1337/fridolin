@@ -5,7 +5,7 @@
 // which checks it, and the page shows the bridge's answer when it refuses
 // one.
 
-import { post } from '../app/api.js';
+import { post, errorStatus } from '../app/api.js';
 import { store, loadGroups, rememberName } from '../app/store.js';
 import { brainsResource, configResource, ignoredResource } from '../app/resources.js';
 import { h, mount, paint, reconcile, syncOptions } from '../lib/dom.js';
@@ -19,6 +19,7 @@ import { confirmDialog, openDialog } from '../components/dialog.js';
 import { field, listEditor, select, textInput } from '../components/fields.js';
 import { pill, badge, timeAgo, mono, empty, pageHeader, spinner } from '../components/common.js';
 import { chatName } from '../components/chat.js';
+import { errorMessage } from '../lib/errors.js';
 
 /** @import { PageModule } from '../app/page.js' */
 /** @import { Brain, ConfigFile, ConfigResponse, IgnoredChat, WhatsAppGroup } from '../../types/api.js' */
@@ -381,9 +382,9 @@ export default /** @satisfies {PageModule} */ ({
               try {
                 await post('/api/chats/members', { jid: g, members });
               } catch (ex) {
-                if (ex.status !== 400 && ex.status !== 422) throw ex;
+                if (errorStatus(ex) !== 400 && errorStatus(ex) !== 422) throw ex;
                 err.hidden = false;
-                err.textContent = ex.message;
+                err.textContent = errorMessage(ex);
                 return false;
               }
               toast(`Saved who is heard in ${name || 'the group'}`, 'ok');
@@ -411,8 +412,8 @@ export default /** @satisfies {PageModule} */ ({
             toast(done, 'ok');
           } catch (ex) {
             // Gone already, e.g. removed in another tab: the refresh shows it.
-            if (ex.status !== 404) throw ex;
-            toast(ex.message, 'info');
+            if (errorStatus(ex) !== 404) throw ex;
+            toast(errorMessage(ex), 'info');
           }
           await Promise.all([configResource.refresh(), loadGroups(true)]);
         },
@@ -434,9 +435,9 @@ export default /** @satisfies {PageModule} */ ({
           try {
             await add(input.value);
           } catch (ex) {
-            if (ex.status !== 400) throw ex;
+            if (errorStatus(ex) !== 400) throw ex;
             err.hidden = false;
-            err.textContent = ex.message;
+            err.textContent = errorMessage(ex);
             input.focus();
             return;
           }

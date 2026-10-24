@@ -5,8 +5,9 @@ import { h, mount } from '../lib/dom.js';
 import { icon } from '../components/icons.js';
 import { btn, copyButton } from '../components/buttons.js';
 import { textInput } from '../components/fields.js';
-import { get, signIn } from './api.js';
+import { ApiError, get, signIn, errorStatus } from './api.js';
 import { credentialFromHash } from './router.js';
+import { errorMessage } from '../lib/errors.js';
 
 /**
  * Fills el with the connect screen; onConnected runs once signed in.
@@ -32,9 +33,9 @@ export function connectScreen(el, { reason, onConnected }) {
       onConnected();
     } catch (err) {
       errorEl.hidden = false;
-      errorEl.textContent = err.status === 401
+      errorEl.textContent = errorStatus(err) === 401
         ? (credential.code ? 'That link was already used or has expired. Run the command above for a new one.' : 'That token was not accepted. Check that you copied all of it.')
-        : err.message;
+        : errorMessage(err);
     } finally {
       submitBtn.disabled = false;
     }
@@ -60,7 +61,8 @@ async function runsInContainer() {
     return (await get('/ready', { timeout: 5000 })).container === true;
   } catch (e) {
     // /ready answers 503 with the same body while WhatsApp is not connected.
-    return !!(e && e.data && e.data.container === true);
+    const data = e instanceof ApiError ? e.data : null;
+    return Boolean(data && typeof data === 'object' && 'container' in data && data.container === true);
   }
 }
 

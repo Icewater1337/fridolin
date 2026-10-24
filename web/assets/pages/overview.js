@@ -1,7 +1,7 @@
 // Overview: health, WhatsApp pairing, Claude CLI, sandbox, brains, backup,
 // warnings and the latest messages.
 
-import { get, post, qs } from '../app/api.js';
+import { get, post, qs, errorStatus } from '../app/api.js';
 import { store } from '../app/store.js';
 import { brainsResource, resource, schedulesResource } from '../app/resources.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
@@ -63,7 +63,7 @@ export default /** @satisfies {PageModule} */ ({
         }
         if (qr.age) qr.age.replaceChildren(timeAgo(r.created_at, 'Code from '));
       } catch (e) {
-        if (e.status !== 404) throw e;
+        if (errorStatus(e) !== 404) throw e;
       }
     };
 

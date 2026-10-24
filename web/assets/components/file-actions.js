@@ -4,13 +4,14 @@
 // trash. The bridge checks every change again, audits it and commits it
 // where the folder is a git repository; these only ask and show.
 
-import { api, get, qs, upload } from '../app/api.js';
+import { api, get, qs, upload, errorStatus } from '../app/api.js';
 import { h, mount } from '../lib/dom.js';
 import { btn } from './buttons.js';
 import { spinner, timeAgo } from './common.js';
 import { confirmDialog, openDialog } from './dialog.js';
 import { textInput } from './fields.js';
 import { toast } from './toast.js';
+import { errorMessage } from '../lib/errors.js';
 
 /** @import { Page } from '../app/page.js' */
 /** @import { FileCommit, FileMoved, FileSaved, FilesUploaded } from '../../types/api.js' */
@@ -157,7 +158,7 @@ export function uploadButton(rootId, path, to, onDone) {
       else noteCommit(r);
       if (onDone) onDone(r);
     } catch (e) {
-      toast(e.message || String(e));
+      toast(errorMessage(e));
     } finally {
       button.disabled = false;
       button.classList.remove('busy');
@@ -199,7 +200,7 @@ export function textEditor({ rootId, path, text, sha, onSaved, onCancel }) {
         noteCommit(r);
         if (onSaved) onSaved(r, base);
       } catch (e) {
-        status.textContent = e.status === 409 ? 'It changed elsewhere meanwhile: copy your text, open the file again and make your change there.' : (e.message || String(e));
+        status.textContent = errorStatus(e) === 409 ? 'It changed elsewhere meanwhile: copy your text, open the file again and make your change there.' : errorMessage(e);
       }
     },
   });

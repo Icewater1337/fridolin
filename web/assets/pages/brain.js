@@ -1,7 +1,7 @@
 // One brain: live run and queue, settings (brain.json), on-disk changes
 // waiting for approval, recent messages, and removal.
 
-import { post, put, del, qs } from '../app/api.js';
+import { post, put, del, qs, errorStatus } from '../app/api.js';
 import { store } from '../app/store.js';
 import { brainsResource, configResource, resource } from '../app/resources.js';
 import { routingEditor } from '../components/routing-editor.js';
@@ -25,6 +25,7 @@ import { saveBar } from '../components/save-bar.js';
 import { liveForm } from '../components/live-form.js';
 import { grantsEditor } from '../components/grants-editor.js';
 import { skillsCard } from '../components/skills-card.js';
+import { errorMessage } from '../lib/errors.js';
 
 /** @import { PageModule } from '../app/page.js' */
 /** @import { ActivityEntry, Brain, BrainIssue, BrainManifest, BrainRuntime, ConfigFile, ConfigResponse, Intent, IntentSchedule } from '../../types/api.js' */
@@ -197,8 +198,8 @@ export default /** @satisfies {PageModule} */ ({
           try {
             await post(`/api/brains/${encodeURIComponent(id)}/approve`, { manifest: disk });
           } catch (e) {
-            if (e.status !== 409) throw e;
-            toast(e.message, 'warn');
+            if (errorStatus(e) !== 409) throw e;
+            toast(errorMessage(e), 'warn');
             await refresh();
             return;
           }

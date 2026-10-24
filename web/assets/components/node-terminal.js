@@ -10,6 +10,7 @@ import { h } from '../lib/dom.js';
 import { fromBase64, termText } from '../lib/nodes.js';
 import { btn } from './buttons.js';
 import { textInput } from './fields.js';
+import { errorMessage } from '../lib/errors.js';
 
 /**
  * Calls method on node through the bridge; resolves with its result.
@@ -60,7 +61,7 @@ export function nodeTerminal({ node, folder, onEnd }) {
     try {
       await nodeCall(node, 'terminal.send', { id, data });
     } catch (e) {
-      status.textContent = `Not sent: ${e.message}`;
+      status.textContent = `Not sent: ${errorMessage(e)}`;
     }
   };
 
@@ -79,7 +80,7 @@ export function nodeTerminal({ node, folder, onEnd }) {
       try {
         o = await nodeCall(node, 'terminal.read', { id, offset, wait_ms: 15000 });
       } catch (e) {
-        end(`Reading failed: ${e.message}`);
+        end(`Reading failed: ${errorMessage(e)}`);
         return;
       }
       if (o.dropped) show('\n[earlier output is gone]\n');
@@ -108,7 +109,7 @@ export function nodeTerminal({ node, folder, onEnd }) {
       input.focus();
       readLoop();
     } catch (e) {
-      end(`Could not open: ${e.message}`);
+      end(`Could not open: ${errorMessage(e)}`);
     }
   })();
 
