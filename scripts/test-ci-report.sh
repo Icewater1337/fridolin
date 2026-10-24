@@ -68,9 +68,11 @@ jobs() {
 	printf '{"jobs":[%s,{"id":1,"conclusion":null,"name":"report"}]}\n' "$out" >"$FAKE/jobs.json"
 }
 
-# log ID — the log of job ID from stdin, with the timestamps GitHub adds.
+# log ID — the log of job ID from stdin, with the timestamps GitHub adds;
+# ESC becomes the escape character, which starts the colour codes in one.
+esc="$(printf '\033')"
 log() {
-	sed 's/^/2026-10-24T10:41:55.3154436Z /' >"$FAKE/log.$1"
+	sed -e 's/^/2026-10-24T10:41:55.3154436Z /' -e "s/ESC/$esc/g" >"$FAKE/log.$1"
 }
 
 run() {
@@ -99,6 +101,7 @@ check() {
 called() { grep -qxF -- "$1" "$FAKE/calls"; }
 not_called() { ! grep -qF -- "$1" "$FAKE/calls"; }
 body_has() { grep -qF -- "$2" "$FAKE/body.$1"; }
+not_in_body() { ! grep -qF -- "$2" "$FAKE/body.$1"; }
 
 # ── a fuzz finding, a test failing on two systems, a build failure, gofmt ──
 setup mixed
@@ -171,7 +174,7 @@ setup lint
 jobs "20:failure:go (ubuntu-latest, stable, 2/2)" "23:failure:go (macos-latest, stable, 4/4)"
 for id in 20 23; do
 	log "$id" <<'EOF'
-Run make fmt-check
+ESC[36;1mRun make fmt-checkESC[0m
 internal/app/x.go
 ##[error]Process completed with exit code 1.
 EOF
@@ -179,6 +182,8 @@ done
 run
 check "lint: one issue for the job, whatever it ran on" test "$(grep -c '^issue create --repo o/r --title CI on main: job go failing ' "$FAKE/calls")" = 1
 check "lint: the body has the lines before the error" body_has 1 "internal/app/x.go"
+check "lint: without the log's colour codes" grep -qx "Run make fmt-check" "$FAKE/body.1"
+check "lint: ... or any escape character" not_in_body 1 "$esc"
 
 # ── untrusted names in the log ──
 setup hostile

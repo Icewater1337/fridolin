@@ -79,6 +79,8 @@ parse() {
 	function finish() { if (cur != "") add(0, cur, in_path, buf); cur = "" }
 	{
 		sub(/\r$/, "")
+		gsub(/\033\[[0-9;?]*[A-Za-z]/, "")
+		gsub(/[\001-\010\013-\037\177]/, "")
 		sub(/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9:.]*Z /, "")
 		ring[NR % 20] = $0
 	}
@@ -156,7 +158,9 @@ while IFS=$'\t' read -r id conclusion job; do
 		mkdir -p "$work/inputs"
 	log="$work/logs/$id"
 	mkdir -p "$log.d"
-	"$gh" api "repos/$REPO/actions/jobs/$id/logs" </dev/null >"$log"
+	# Logs have colour codes, which gh refuses to print without the flag;
+	# parse takes them out, with every other control character.
+	"$gh" api "repos/$REPO/actions/jobs/$id/logs" --allow-escape-sequences </dev/null >"$log"
 	parse "$log" "$log.d" >"$log.tsv"
 	reported=0
 	while IFS=$'\t' read -r kind name pkg input n; do
