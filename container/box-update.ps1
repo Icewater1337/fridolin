@@ -53,7 +53,7 @@ try {
     }
     [IO.File]::WriteAllLines((Join-Path $PSScriptRoot ".env"), $lines)
     $compose = docker run --rm --entrypoint /opt/fridolin/fridolin $node box compose
-    if ($LASTEXITCODE -eq 0) {
+    if ($LASTEXITCODE -eq 0 -and -not (($compose -join "`n") -match 'docker\.sock')) {
         [IO.File]::WriteAllText((Join-Path $PSScriptRoot "compose.yaml"), (($compose -join "`n") + "`n"))
         $script = docker run --rm --entrypoint /opt/fridolin/fridolin $node box updater ps1
         if ($LASTEXITCODE -eq 0) { [IO.File]::WriteAllText((Join-Path $PSScriptRoot "update.ps1"), (($script -join "`r`n") + "`r`n")) }

@@ -72,7 +72,8 @@ cp compose.yaml compose.yaml.prev
 sed -e "s|^FRIDOLIN_BOX_NODE_IMAGE=.*|FRIDOLIN_BOX_NODE_IMAGE=$node|" \
 	-e "s|^FRIDOLIN_BOX_FRIDE_IMAGE=.*|FRIDOLIN_BOX_FRIDE_IMAGE=$fride|" .env.prev >.env.new
 mv .env.new .env
-if docker run --rm --entrypoint /opt/fridolin/fridolin "$node" box compose >compose.yaml.new; then
+if docker run --rm --entrypoint /opt/fridolin/fridolin "$node" box compose >compose.yaml.new &&
+	! grep -q 'docker\.sock' compose.yaml.new; then
 	mv compose.yaml.new compose.yaml
 	docker run --rm --entrypoint /opt/fridolin/fridolin "$node" box updater sh >update.sh.new && chmod 755 update.sh.new && mv update.sh.new update.sh
 else

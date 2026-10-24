@@ -555,9 +555,8 @@ side by side, with different node ids.
   neither the host's programs nor a desktop. `--allow` at the join still
   allows programs, which then run inside the container.
 - **Updates** come as new images, never as a binary from the core: a box
-  does not offer `update`. Until the core can update boxes (issue #191,
-  phase 3), run the script again with `--update` and the core's new
-  version (below).
+  offers `update (box)`, and its updater on the host applies them
+  ([Box updates](#box-updates)).
 
 ### Joining a box
 
@@ -598,7 +597,8 @@ side by side, with different node ids.
      --box`). A code works once, within 10 minutes; if it ran out while
      the tailnet sign-in took long, send `!join` again and run the line
      with the new code;
-   - starts the box (`docker compose up -d`);
+   - starts the box (`docker compose up -d`) and installs its updater
+     ([Box updates](#box-updates); `--no-updater` leaves it out);
    - FrIDE: runs `claude setup-token` in the `fride` container (open its
      link and sign in), takes the token it shows without echo and stores
      it in FrIDE's volume, asks for the git name and email the agents
@@ -619,10 +619,57 @@ side by side, with different node ids.
    --state-dir /node` says FrIDE answers; the core lists the node online
    with `host`, `backup` and `fride` (`!fleet`, or the Nodes page).
 
-**Updating** until the core does it (phase 3): the same line with
-`--update` and the core's version, no code (`-Update` in PowerShell). It
-pulls and pins the new images, writes the compose file of that version
-and recreates the services; the node keeps its key and approval.
+**Updating by hand**: the same line with `--update` and the core's
+version, no code (`-Update` in PowerShell). It pulls and pins the new
+images, writes the compose file and the updater of that version and
+recreates the services; the node keeps its key and approval. A box made
+before its image knew `fridolin box pending` (#191 phase 2) needs this
+once before the core can update it.
+
+### Box updates
+
+The core updates a box to the images of its own version, pinned by
+digest, without ever reaching the box's Docker:
+
+1. The owner clicks **Update** on the Nodes page, or turns on auto
+   updates, as for any node (`update` must be approved). The core looks
+   up the digests of `fridolin-core:VERSION` and `fridolin-fride:VERSION`
+   on its registry (anonymously: the packages are public; a core of a
+   local build, which does not know its registry, says so and offers no
+   update), signs version and both digests with its update key, and
+   calls `update.box`.
+2. The agent checks the signature against the core key it pinned at the
+   join and keeps the request in its volume (`box-update.json`). That is
+   all it does: the `node` service has no Docker socket.
+3. The **updater** on the host (`update.sh` beside the compose file, run
+   every 2 minutes as the owner by the launchd agent
+   `ai.fridolin.box-updater`, the systemd user timer
+   `fridolin-box-updater` or cron; on Windows `update.ps1`, run by the
+   Scheduled Task *fridolin box updater* while the owner is signed in)
+   asks a throwaway container **of the image the box runs now** to check
+   the request (`fridolin box pending`): the signature again, that both
+   images are `ghcr.io/OWNER/fridolin-core@sha256:…` and
+   `…/fridolin-fride@sha256:…` of the registry that image was built for,
+   and their build provenance (GitHub's attestations for this
+   repository's `image.yml` on `main`, checked with `gh attestation
+   verify --bundle`, which needs no login). A request that fails is
+   dropped and reported.
+4. It pulls both images by digest, keeps `.env` and `compose.yaml` as
+   `.prev`, writes the new digests and the new version's compose file
+   (refusing one that names the Docker socket) and updater, and runs
+   `docker compose up -d`.
+5. It waits up to 5 minutes for the `node` service to be healthy, which
+   it is while the agent is connected to the core (`fridolin node
+   health`). If it is not, the `.prev` files come back and the old
+   images start again.
+6. The result goes into the node's volume (`fridolin box result`); the
+   agent reports it to the core, which shows it on the Nodes page like
+   any update. The updater logs to `update.log` beside the compose file.
+
+Removing the updater: `launchctl bootout gui/$(id -u)/ai.fridolin.box-updater`
+and its plist in `~/Library/LaunchAgents` (macOS), `systemctl --user
+disable --now fridolin-box-updater.timer` (Linux), `crontab -e`, or
+`Unregister-ScheduledTask "fridolin box updater"` (Windows).
 
 **Removing**: `docker compose down -v` in the box's folder deletes the
 containers, the network and the volumes (the node's key, the backups in
