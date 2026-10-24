@@ -450,6 +450,30 @@ one with `ctx.secret('OPENAI_API_KEY')`, which throws for a name its
 `module.json` does not list and for one without a value yet. Saving or removing
 a secret restarts the site. Previews and checks get no secrets.
 
+## Old addresses
+
+When the built-in Files and Wiki take over what modules did, or a module
+moves, `modules/redirects.json` in the repository keeps old links
+working:
+
+```json
+{
+  "redirects": [
+    { "from": "/wiki-team", "to": "/wiki/team" },
+    { "from": "/files-team/api/download", "to": "/files/team" },
+    { "from": "/files-team", "to": "/files/team" }
+  ]
+}
+```
+
+A request for `from`, or a path below it, is sent (`302`) to `to` with the
+rest of its path and its query: `/wiki-team/people/alex` goes to
+`/wiki/team/people/alex`. The longest `from` that matches wins. Both are
+paths of this site; `/_fridolin` and `/auth` are not taken, and a
+module's own route comes first. A file that does not read is reported in
+the site's log, and the site runs without redirects. It comes with a
+commit you approve, as modules do.
+
 ## Files
 
 Everything lives in `<data_dir>/site/` (`~/.fridolin/site/`), readable only by you:
