@@ -457,7 +457,7 @@ type IngestConfig struct {
 
 // StartupChecksConfig lists files that must exist for the assistant to work —
 // credentials, typically. Missing ones are logged loudly, shown on the
-// dashboard and optionally sent to you over WhatsApp (see health.go).
+// dashboard and optionally sent to you over WhatsApp (internal/startupcheck).
 type StartupChecksConfig struct {
 	RequiredFiles  []string `json:"required_files,omitempty"`
 	NotifyWhatsApp bool     `json:"notify_whatsapp,omitempty"`
