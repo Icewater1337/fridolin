@@ -10,6 +10,31 @@ for compatibility.
 
 ### Added
 
+- **The core in a box** (#191 phase 4): a node in a box can take the
+  core and give it back, with the same `!movecore` / `fridolin nodes
+  move`, plan, lease and automatic rollback as a native core host. The
+  core runs inside the box's `node` container, as the agent's child
+  (`fridolin run --container --box`), on the volume `fridolin-box-data`,
+  with the host secrets of the box's sealed store in its environment;
+  the role is `core-role.json` in the node's volume, so a box that is
+  the core starts it again after a restart or update. No Docker socket;
+  FrIDE never mounts the core's volumes and its address cannot reach the
+  core's dashboard or site. The settings come as a second compose file,
+  `core.yaml` with `seccomp.json` (`fridolin box core-compose`, `fridolin
+  box seccomp`), which `box.sh`, `box.ps1` and the box updaters write
+  and name in `.env`'s `COMPOSE_FILE`: a box made before gets them with
+  its second update, or `box.sh --update` (`box.ps1 -Update`) once.
+  They publish the dashboard and site on the host's `127.0.0.1:8765` and
+  `:8780` (`FRIDOLIN_BOX_DASHBOARD_PORT`, `FRIDOLIN_BOX_SITE_PORT`); on
+  Ubuntu set `FRIDOLIN_BOX_APPARMOR=fridolin-core` after `sudo fridolin
+  core apparmor`. The move's pre-flight no longer refuses a box: it
+  checks the box's core settings and its sandbox (bubblewrap), says
+  what changes there (brain folders in the volume, not a host folder;
+  what is bound to the source stays on its node), and warns instead of
+  refusing a target that holds no host secrets yet. `box.sh --update`
+  keeps the settings added to `.env` (docs/NODES.md, "The core in a
+  box"; docs/CORE.md, "Moving the core to a box").
+
 - **`!movecore`** (#187, third slice): in the owner's direct chat,
   `!movecore <node>` runs the move's pre-flight and answers with a
   plain report (source → target, the expected time offline, what does
