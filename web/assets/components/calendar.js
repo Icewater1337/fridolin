@@ -41,6 +41,17 @@ export function consoleLink(path, project, params = {}) {
   return `${CONSOLE}${path}${qs ? `?${qs.replace(/%2C/g, ',')}` : ''}`;
 }
 
+/**
+ * A Google Cloud project ID as typed, or "": 6 to 30 lowercase letters,
+ * digits and hyphens, starting with a letter. Nothing else ever reaches a
+ * link, so what is typed cannot turn one into another kind of address.
+ * @param {string} typed
+ */
+export function projectId(typed) {
+  const id = typed.trim().toLowerCase();
+  return /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/.test(id) ? id : '';
+}
+
 /** The address bar of a dashboard served on this machine says 127.0.0.1. */
 export function onThisMachine() {
   const host = (globalThis.location && globalThis.location.hostname) || '127.0.0.1';
@@ -122,7 +133,7 @@ export function googleClientSetup({ redirectUri = 'http://127.0.0.1:8765/', onSa
   };
   const projectIn = h('input.mono', { id: nextId('gproject'), type: 'text', spellcheck: 'false', autocomplete: 'off', placeholder: 'fridolin-123456' });
   projectIn.addEventListener('input', () => {
-    project = projectIn.value.trim();
+    project = projectId(projectIn.value);
     for (const l of links) l.el.setAttribute('href', consoleLink(l.path, project, l.params));
   });
 

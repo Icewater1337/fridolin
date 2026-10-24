@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { installDom } from './fake-dom.js';
 import { stubFetch } from './stub-fetch.js';
-import { calendarCard, googleClientSetup, googleClientCard, consoleLink, clientJSONFrom, clientCheckResult } from '../assets/components/calendar.js';
+import { calendarCard, googleClientSetup, googleClientCard, consoleLink, clientJSONFrom, projectId, clientCheckResult } from '../assets/components/calendar.js';
 
 // setImmediate, because the tests mock setTimeout (the toasts' and the
 // requests' timers) so nothing waits for them.
@@ -294,4 +294,11 @@ test('a sign-in that ends soon says so', async (t) => {
   net.answer(0, { ...connected, health: { state: 'expiring', detail: 'Google ends this sign-in on 7 Jan 2026 10:00: connect again before then', expires: '2026-01-07T10:00:00Z' } });
   await tick();
   assert.ok(card.textContent.includes('This sign-in ends soon') && card.textContent.includes('Ends soon'), card.textContent);
+});
+
+test('only a Google project ID reaches the console links', () => {
+  assert.equal(projectId(' Fridolin-123456 '), 'fridolin-123456');
+  assert.equal(projectId('javascript:alert(1)'), '', 'not a project ID');
+  assert.equal(projectId('abc'), '', 'too short');
+  assert.equal(projectId('1abcdef'), '', 'starts with a digit');
 });

@@ -566,7 +566,10 @@ func (g *Auth) Callback(ctx context.Context, q url.Values) (string, error) {
 		g.mu.Lock()
 		g.lastError[p.brainID] = msg
 		g.mu.Unlock()
-		log.Printf("brain %s: Google sign-in failed: %s", p.brainID, msg)
+		// msg may hold what the browser brought back (Google's error), so
+		// it cannot start a line of its own in the log.
+		oneLine := strings.NewReplacer("\n", " ", "\r", " ").Replace(msg)
+		log.Printf("brain %s: Google sign-in failed: %s", p.brainID, oneLine)
 		return back, nil
 	}
 	if e := q.Get("error"); e != "" {
