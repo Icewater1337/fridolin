@@ -49,7 +49,7 @@ func TestResponseDTOsKeepMapWireEncoding(t *testing.T) {
 		{"DevIgnoredResponse", DevIgnoredResponse{}, []string{"Reason=reason", "Status=status"}},
 		{"ChatRevokedResponse", ChatRevokedResponse{}, []string{"Removed=removed", "Status=status"}},
 		{"BuilderSyncResponse", BuilderSyncResponse{}, []string{"Result=result"}},
-		{"SiteRolesResponse", SiteRolesResponse{}, []string{"RoleBrains=role_brains", "Roles=roles"}},
+		{"SiteRolesResponse", SiteRolesResponse{}, []string{"RoleBrains=role_brains", "RoleUploads=role_uploads", "Roles=roles"}},
 		{"SiteUsersResponse", SiteUsersResponse{}, []string{"Roles=roles", "Users=users"}},
 		{"OperationResponse", OperationResponse{}, []string{"Status=status"}},
 		{"RestoreStartedResponse", RestoreStartedResponse{}, []string{"Status=status", "Target=target"}},

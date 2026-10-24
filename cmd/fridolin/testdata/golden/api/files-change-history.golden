@@ -1,0 +1,24 @@
+GET /api/files/history?root=brain:main&path=wiki/plan.txt
+200 OK
+Content-Type: application/json
+
+{
+  "changes": [
+    {
+      "action": "delete",
+      "at": "<AT>",
+      "by": "dashboard",
+      "outcome": "ok",
+      "path": "wiki/plan.txt",
+      "to": "<TO>"
+    },
+    {
+      "action": "move",
+      "at": "<AT>",
+      "by": "dashboard",
+      "outcome": "ok",
+      "path": "docs/plan.txt",
+      "to": "<TO>"
+    }
+  ]
+}

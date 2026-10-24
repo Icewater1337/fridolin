@@ -345,6 +345,7 @@ func (a *Agent) declared() nodeproto.Capabilities {
 	a.fride.mu.Unlock()
 	a.declareWork(&c)
 	c.CoreHost = a.coreHostDeclared()
+	a.declareCorePrograms(&c)
 	return c
 }
 

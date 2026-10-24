@@ -96,6 +96,10 @@ type plaudClaims struct {
 	Key    *plaudJWK `json:"key,omitempty"`
 	Name   string    `json:"name,omitempty"`
 	SHA256 string    `json:"sha256,omitempty"`
+	// Rid and Enc are a voice question's (voice.go): the id the app gave
+	// it, and the key its answer is encrypted to.
+	Rid string    `json:"rid,omitempty"`
+	Enc *plaudJWK `json:"enc,omitempty"`
 }
 
 // parsePlaudJWT reads the claims of a compact ES256 JWS without checking
@@ -256,7 +260,9 @@ func (p *Manager) RevokeDevice(id string) error {
 var ErrUnknownDevice = errors.New("there is no such paired phone")
 
 // DeviceRequest answers a phone's request that the site passed on:
-// "pair", or "transcript" with the transcript in body (site_ingest.go).
+// "pair", "transcript" with the transcript in body, "voice" with a voice
+// question in body, or "voice_reply", which waits up to VoiceReplyWait
+// for the answer to one (site_ingest.go).
 // Its errors go back to the phone, so they name what is wrong and nothing
 // the request carried.
 func (p *Manager) DeviceRequest(op, assertion string, body []byte) (map[string]any, error) {
@@ -269,6 +275,10 @@ func (p *Manager) DeviceRequest(op, assertion string, body []byte) (map[string]a
 		return map[string]any{"device": id}, nil
 	case "transcript":
 		return nil, p.takeTranscript(assertion, body, time.Now())
+	case "voice":
+		return p.takeVoice(assertion, body, time.Now())
+	case "voice_reply":
+		return p.voiceReply(assertion, time.Now())
 	}
 	return nil, fmt.Errorf("unknown request %q", op)
 }

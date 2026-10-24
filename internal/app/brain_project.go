@@ -34,6 +34,7 @@ func brainGlobalsOf(cfg *config.Settings) brain.Globals {
 			// would name another one. R6 supplies these startup paths through Boot.
 			DataDir: AbsPath(cfg.DataDir), DBPath: AbsPath(cfg.DBPath), PlaudPATH: brainPlaudPATH(cfg),
 			Vault:      cfg.Vault.Enabled,
+			Zone:       ownerZone(cfg),
 			FrideTools: cfg.NodesEnabled,
 		},
 	}

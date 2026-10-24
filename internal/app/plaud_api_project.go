@@ -7,9 +7,10 @@ import (
 
 func (b *App) newPlaudAPI() *httpapi.PlaudAPI {
 	return &httpapi.PlaudAPI{
-		Plaud:        func() httpapi.PlaudService { return b.plaud },
-		CurrentBrain: func() string { return b.cfgs.Get().Plaud.Brain },
-		HasBrain:     func(id string) bool { return b.brainMgr.Get(id) != nil },
-		UpdateConfig: func(update func(*config.File) error) error { _, err := b.cfgs.Update("", update); return err },
+		Plaud:             func() httpapi.PlaudService { return b.plaud },
+		CurrentBrain:      func() string { return b.cfgs.Get().Plaud.Brain },
+		CurrentVoiceBrain: func() string { return b.cfgs.Get().Plaud.VoiceBrain },
+		HasBrain:          func(id string) bool { return b.brainMgr.Get(id) != nil },
+		UpdateConfig:      func(update func(*config.File) error) error { _, err := b.cfgs.Update("", update); return err },
 	}
 }

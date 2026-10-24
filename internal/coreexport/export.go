@@ -17,6 +17,7 @@ package coreexport
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"encoding/json"
@@ -82,6 +83,10 @@ type Manifest struct {
 	// Folders are the brain folders from outside the data dir that the
 	// archive carries under folders/ (format 2), each with its own counts.
 	Folders []FolderInfo `json:"folders,omitempty"`
+	// DeviceID is the exported data dir's device id (the lease's), and
+	// Move the core move it was made for (#187), when one.
+	DeviceID string `json:"device_id,omitempty"`
+	Move     string `json:"move,omitempty"`
 }
 
 // DB copies and checks SQLite databases; the store package's VacuumInto
@@ -116,14 +121,18 @@ type ExportOptions struct {
 	// age encrypts it: two layers with independent keys, the outer one
 	// post-quantum when the recipients are (docs/CORE.md, "Encryption").
 	SealKey []byte
-	Now     func() time.Time
-	Logf    func(format string, args ...any)
+	// DeviceID and Move go into the manifest and the export's info
+	// (Info), which a core move reads without the keys.
+	DeviceID, Move string
+	Now            func() time.Time
+	Logf           func(format string, args ...any)
 }
 
 // ExportResult is what Export wrote.
 type ExportResult struct {
 	Key      string
 	Manifest Manifest
+	Info     Info
 }
 
 // item is one member of the archive: rel is its name below data/, or its
@@ -226,7 +235,7 @@ func Export(ctx context.Context, dataDir string, recipients []age.Recipient, sto
 	defer os.RemoveAll(snapDir)
 
 	now := opts.Now()
-	m := Manifest{Format: 1, Version: opts.Version, CreatedAt: now.UTC(), Hostname: opts.Hostname, DataDir: dataDir}
+	m := Manifest{Format: 1, Version: opts.Version, CreatedAt: now.UTC(), Hostname: opts.Hostname, DataDir: dataDir, DeviceID: opts.DeviceID, Move: opts.Move}
 	along := map[string]bool{}
 	for _, f := range opts.Folders {
 		if f.Skip == "" && !within(dataDir, f.Dir) {
@@ -344,9 +353,10 @@ func Export(ctx context.Context, dataDir string, recipients []age.Recipient, sto
 
 	key := ExportKey(now)
 	pr, pw := io.Pipe()
+	counted := &countingWriter{w: pw}
 	go func() {
 		pw.CloseWithError(func() error {
-			enc, err := age.Encrypt(pw, recipients...)
+			enc, err := age.Encrypt(counted, recipients...)
 			if err != nil {
 				return err
 			}
@@ -391,11 +401,31 @@ func Export(ctx context.Context, dataDir string, recipients []age.Recipient, sto
 		pr.CloseWithError(err)
 		return ExportResult{}, fmt.Errorf("export: uploading %s: %w", key, err)
 	}
+	info := Info{Key: key, Device: opts.DeviceID, Move: opts.Move, Version: opts.Version, Hostname: opts.Hostname, CreatedAt: m.CreatedAt, Bytes: counted.n}
+	idata, err := json.Marshal(info)
+	if err != nil {
+		return ExportResult{}, err
+	}
+	if err := store.Put(ctx, InfoKey(key), bytes.NewReader(append(idata, '\n'))); err != nil {
+		return ExportResult{}, fmt.Errorf("export: %s is uploaded, but its info failed: %w", key, err)
+	}
 	if err := store.Put(ctx, LatestKey, strings.NewReader(key+"\n")); err != nil {
 		return ExportResult{}, fmt.Errorf("export: %s is uploaded, but pointing %s at it failed: %w", key, LatestKey, err)
 	}
 	opts.Logf("Exported %d files (%d bytes, %d databases) to %s", m.Files, m.Bytes, len(m.Databases), key)
-	return ExportResult{Key: key, Manifest: m}, nil
+	return ExportResult{Key: key, Manifest: m, Info: info}, nil
+}
+
+// countingWriter counts what goes through it.
+type countingWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n += int64(n)
+	return n, err
 }
 
 func writeItem(tw *tar.Writer, name, src string, dir bool, mode fs.FileMode, mtime time.Time) error {

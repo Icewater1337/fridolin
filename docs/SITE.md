@@ -402,8 +402,12 @@ is full, when `ingest.enabled` is off, and in previews and checks.
 ### Phones
 
 The site also takes requests from phones Fridolin paired, the Plaud Sync
-app ([PLAUD.md](PLAUD.md#through-your-site)): `POST /_fridolin/devices/pair`
-and `POST /_fridolin/devices/plaud/transcripts`. They need no sign-in, but
+app ([PLAUD.md](PLAUD.md#through-your-site)): `POST /_fridolin/devices/pair`,
+`POST /_fridolin/devices/plaud/transcripts`, and for
+[voice mode](PLAUD.md#voice-mode) `POST /_fridolin/devices/voice/ask` and
+`POST /_fridolin/devices/voice/reply`, whose answer is encrypted for the
+phone and which Fridolin answers off the spool's loop, holding it up to 15
+seconds until the answer is there. They need no sign-in, but
 each request carries a JWT signed with a key only that phone has. The site
 checks it against the public keys Fridolin writes to
 `<data_dir>/site/devices.json` and passes what passes on through the spool,
@@ -449,6 +453,30 @@ file and no environment variable module code could read. Server code asks for
 one with `ctx.secret('OPENAI_API_KEY')`, which throws for a name its
 `module.json` does not list and for one without a value yet. Saving or removing
 a secret restarts the site. Previews and checks get no secrets.
+
+## Old addresses
+
+When the built-in Files and Wiki take over what modules did, or a module
+moves, `modules/redirects.json` in the repository keeps old links
+working:
+
+```json
+{
+  "redirects": [
+    { "from": "/wiki-team", "to": "/wiki/team" },
+    { "from": "/files-team/api/download", "to": "/files/team" },
+    { "from": "/files-team", "to": "/files/team" }
+  ]
+}
+```
+
+A request for `from`, or a path below it, is sent (`302`) to `to` with the
+rest of its path and its query: `/wiki-team/people/alex` goes to
+`/wiki/team/people/alex`. The longest `from` that matches wins. Both are
+paths of this site; `/_fridolin` and `/auth` are not taken, and a
+module's own route comes first. A file that does not read is reported in
+the site's log, and the site runs without redirects. It comes with a
+commit you approve, as modules do.
 
 ## Files
 

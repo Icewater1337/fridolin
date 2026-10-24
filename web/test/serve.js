@@ -14,7 +14,7 @@ export function serve(t, route) {
   globalThis.fetch = async (url, init = {}) => {
     if (init.signal && init.signal.aborted) throw aborted();
     const path = String(url);
-    calls.push({ path, method: init.method || 'GET', headers: init.headers || {}, body: init.body ? JSON.parse(init.body) : undefined });
+    calls.push({ path, method: init.method || 'GET', headers: init.headers || {}, body: typeof init.body === 'string' ? JSON.parse(init.body) : init.body });
     let r = route(path, init);
     if (r && typeof r.then === 'function') {
       const { signal } = init;

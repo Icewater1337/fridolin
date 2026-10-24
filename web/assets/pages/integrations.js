@@ -285,6 +285,9 @@ export default {
       const enabled = toggle({ checked: !!st.enabled, label: 'Send new recordings to a brain' });
       const upload = toggle({ checked: !!st.phone_upload, label: 'Recordings come from the Plaud Sync phone app, through your site' });
       const brainSel = select(options, st.brain || '');
+      const voice = toggle({ checked: !!st.voice, label: 'Voice mode: the phone app may ask by voice and read the answer aloud' });
+      const voiceBrainSel = select(options, st.voice_brain || '');
+      const voiceQuiet = toggle({ checked: !!st.voice_quiet, label: 'Answers to voice questions go to the phone only, not WhatsApp' });
       const polished = toggle({ checked: !!st.polished, label: 'Use Plaud’s AI-cleaned transcript' });
       const accessWarn = h('div.help.warn-text', 'Brains can read the Plaud login while this is on.');
       const showAccessWarn = () => { accessWarn.hidden = !access.input.checked; };
@@ -317,6 +320,7 @@ export default {
       const value = () => ({
         enabled: enabled.input.checked, brain: brainSel.value, polished: polished.input.checked,
         brain_access: access.input.checked, message: msg.value, phone_upload: upload.input.checked,
+        voice: voice.input.checked, voice_brain: voiceBrainSel.value, voice_quiet: voiceQuiet.input.checked,
       });
       // The phone app's transcripts have no cleaned-up version, and no login is shared.
       const phone = !!(st.phone_dir || st.phone_upload);
@@ -331,6 +335,10 @@ export default {
         phone ? null : accessField,
         // A synced folder (plaud.phone_dir, in config.json) wins over uploads.
         st.phone_dir ? null : field({ control: upload, help: 'On: the app is built further down this card, and Plaud’s cloud, its CLI and your Plaud login are not used. Save, then build the app.' }),
+        // Voice mode rides on the app's uploads (docs/PLAUD.md, "Voice mode").
+        st.phone_upload && !st.phone_dir ? field({ control: voice, help: 'With the app’s Voice mode switch on, a NotePin recording or a question spoken into the phone goes to the brain below, and the phone reads its answer aloud. The answer is encrypted for the phone: your site only passes it on. The app needs a build from this card made after this was added.' }) : null,
+        st.phone_upload && !st.phone_dir && st.voice ? field({ label: 'Brain for voice questions', control: voiceBrainSel, help: 'Default: the brain that gets your DMs. Its answer goes to its private chat too, after the question.' }) : null,
+        st.phone_upload && !st.phone_dir && st.voice ? field({ control: voiceQuiet }) : null,
         field({ label: 'Instruction sent with each recording', control: msg, wide: true, help: h('span', 'It follows a first line that says what arrived. ', mono('{name}'), ', ', mono('{when}'), ' and ', mono('{duration}'), ' are filled in. How a brain files recordings belongs in its ', mono('skills/plaud.md'), '.') }));
       return { el, value };
     }

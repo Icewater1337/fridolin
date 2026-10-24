@@ -62,6 +62,9 @@ type scheduleView struct {
 	// Schedule is its definition, as the edit form takes it: the approved
 	// one, or, for a pending agent, the one on disk.
 	Schedule manifest.Schedule `json:"schedule"`
+	// Program is how a command agent's program stands on its node: allowed,
+	// or what approving it does, or why the node will not run it.
+	Program *programView `json:"program,omitempty"`
 }
 
 // The states of an agent (scheduleView.State).
@@ -95,6 +98,9 @@ type reminderView struct {
 type schedulesView struct {
 	// Enabled is schedules.enabled: off, no agent runs on its schedule.
 	Enabled bool `json:"enabled"`
+	// Timezone is the zone every time of day is in (timezone, else the
+	// bridge's own), for the page to say so.
+	Timezone timezoneView `json:"timezone"`
 	// Pending counts the agents whose definition on disk waits for the
 	// owner's approval, new or changed.
 	Pending   int              `json:"pending"`
@@ -175,8 +181,16 @@ func (a *agents) list(context.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	now := time.Now()
-	out := schedulesView{Enabled: cfg.Live.Schedules.Enabled, Agents: []scheduleView{}, Reminders: []reminderView{}, Templates: scheduleTemplates}
+	now := time.Now().In(cfg.Live.Location())
+	views, _ := a.b.nodes.Views()
+	program := func(s manifest.Schedule, approved bool) *programView {
+		if s.Command == nil {
+			return nil
+		}
+		p := programOn(views, s.Command.Node, s.Command.Argv, approved)
+		return &p
+	}
+	out := schedulesView{Enabled: cfg.Live.Schedules.Enabled, Timezone: zoneView(cfg), Agents: []scheduleView{}, Reminders: []reminderView{}, Templates: scheduleTemplates}
 	for _, br := range a.b.brainMgr.Brains() {
 		m := br.Manifest()
 		reviews := map[string]manifest.ScheduleReview{}
@@ -190,7 +204,7 @@ func (a *agents) list(context.Context) (any, error) {
 				Brain: br.ID(), BrainName: m.Name, Name: s.Name, Kind: runKind(s), Task: taskOf(s),
 				Report: s.ReportMode(), Chat: a.resultChat(br, s, cfg), Enabled: s.IsEnabled(), Paused: st.Paused,
 				FromMemory: s.FromMemory, LastRun: st.LastRun, Problem: a.problemOf(br, s), Schedule: s,
-				File: manifest.ScheduleFile(s.Name), Risky: risksOf(s),
+				File: manifest.ScheduleFile(s.Name), Risky: risksOf(s), Program: program(s, true),
 			}
 			if s.FromMemory {
 				v.File = ""
@@ -218,7 +232,7 @@ func (a *agents) list(context.Context) (any, error) {
 				if last.IsZero() {
 					last = now
 				}
-				if next := sched.NextAfter(sc, last, sched.Offset(br.ID(), s.Name, jitterOf(s, cfg.Live.Schedules))); !next.IsZero() {
+				if next := sched.NextAfter(sc, last, sched.Offset(br.ID(), s.Name, jitterOf(s, cfg.Live.Schedules)), now.Location()); !next.IsZero() {
 					v.Next = &next
 				}
 			}
@@ -233,7 +247,7 @@ func (a *agents) list(context.Context) (any, error) {
 			v := scheduleView{
 				Brain: br.ID(), BrainName: m.Name, Name: r.Name, Kind: runKind(s), Task: taskOf(s),
 				Report: s.ReportMode(), Chat: a.resultChat(br, s, cfg), State: AgentPending, Enabled: s.IsEnabled(),
-				Problem: r.Detail, File: r.Source, Risky: risksOf(s), Review: &r, Schedule: s,
+				Problem: r.Detail, File: r.Source, Risky: risksOf(s), Review: &r, Schedule: s, Program: program(s, false),
 			}
 			if r.Disk != nil && v.Problem == "" {
 				v.Problem = a.problemOf(br, s)
@@ -277,7 +291,7 @@ func (a *agents) reminders(br *brainruntime.Brain, now time.Time) []reminderView
 			if last.IsZero() {
 				last = in.Created
 			}
-			if next, ok := in.Schedule.Next(last); ok {
+			if next, ok := in.Schedule.Next(last.In(now.Location())); ok {
 				rv.Next = &next
 			}
 			out = append(out, rv)
@@ -391,6 +405,7 @@ func (a *agents) put(_ context.Context, brain, name string, s manifest.Schedule)
 	if err := a.b.registry.PutSchedule(brain, s); err != nil {
 		return nil, err
 	}
+	a.b.programs.changed()
 	return httpapi.OperationResponse{Status: "saved"}, nil
 }
 
@@ -416,6 +431,7 @@ func (a *agents) approve(_ context.Context, brain, name string, reviewed *manife
 	if err := a.b.registry.ApproveSchedule(brain, name, reviewed); err != nil {
 		return nil, err
 	}
+	a.b.programs.changed()
 	return httpapi.OperationResponse{Status: "approved"}, nil
 }
 
@@ -425,11 +441,12 @@ func (a *agents) remove(_ context.Context, brain, name string) (any, error) {
 	if err := a.b.registry.RemoveSchedule(brain, name); err != nil {
 		return nil, err
 	}
+	a.b.programs.changed()
 	return httpapi.OperationResponse{Status: "removed"}, nil
 }
 
 // schedulePreview answers GET /api/schedules/preview: when the schedule
-// when would run next, in the bridge's time zone, without jitter.
+// when would run next, in the owner's time zone, without jitter.
 type schedulePreview struct {
 	When  string      `json:"when"`
 	Next  []time.Time `json:"next"`
@@ -438,7 +455,7 @@ type schedulePreview struct {
 
 func (a *agents) preview(_ context.Context, when string) (any, error) {
 	out := schedulePreview{When: strings.TrimSpace(when), Next: []time.Time{}}
-	now := time.Now()
+	now := time.Now().In(a.b.zone())
 	sc, err := (manifest.Schedule{When: out.When}).Parsed(now.Location())
 	if err != nil {
 		out.Error = err.Error()

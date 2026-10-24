@@ -116,7 +116,8 @@ func APIGuard(token *Token, requiresToken func() bool, signedIn func(*http.Reque
 }
 
 // CheckWrite holds a write to what APIGuard asks of one, the dashboard
-// header and a JSON body of at most 1 MiB, and answers it when it falls
+// header and a JSON body of at most 1 MiB (an upload to the Files page:
+// multipart, of at most MaxUploadBody), and answers it when it falls
 // short. It reports whether the request may go on.
 func CheckWrite(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
@@ -125,6 +126,10 @@ func CheckWrite(w http.ResponseWriter, r *http.Request) bool {
 	if r.Header.Get("X-Bridge-Dashboard") != "1" {
 		WriteErr(w, http.StatusForbidden, "missing X-Bridge-Dashboard header")
 		return false
+	}
+	if r.Method == http.MethodPost && r.URL.Path == UploadPath && strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		r.Body = http.MaxBytesReader(w, r.Body, MaxUploadBody)
+		return true
 	}
 	if r.ContentLength != 0 && !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		WriteErr(w, http.StatusUnsupportedMediaType, "send JSON")

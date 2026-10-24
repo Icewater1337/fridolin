@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
@@ -113,6 +114,16 @@ func (c Config) Check() error {
 			if err := CheckWorkRoot(r, w.AllowHome, ""); err != nil {
 				return fmt.Errorf("%s: root %w", kind, err)
 			}
+		}
+	}
+	if e := c.Capabilities.Exec; e != nil {
+		for _, f := range e.AcceptFromCore {
+			if err := CheckWorkRoot(f, false, ""); err != nil {
+				return fmt.Errorf("exec: accept_from_core folder %w", err)
+			}
+		}
+		if slices.ContainsFunc(e.Allow, func(r nodeproto.ExecRule) bool { return r.Core }) {
+			return errors.New("exec.allow: a rule marked core is one the core added (exec-from-core.json); node.json's rules are the owner's")
 		}
 	}
 	if fs := c.Capabilities.FS; fs != nil {

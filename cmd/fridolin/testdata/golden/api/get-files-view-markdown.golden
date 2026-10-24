@@ -78,10 +78,12 @@ Content-Type: application/json
       }
     ]
   },
+  "editable": true,
   "kind": "markdown",
   "mod_time": "<MOD_TIME>",
   "name": "index.md",
   "path": "wiki/index.md",
   "root": "brain:main",
+  "sha": "3fe992ecf329ac3722c6297b51bf0906c0d1780cbcd12a9415d0000b3ea08f45",
   "size": 91
 }

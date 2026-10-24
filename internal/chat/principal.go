@@ -25,6 +25,9 @@ func (p Principal) Via() string {
 		return "script"
 	case CallerBrain:
 		return "brain"
+	case CallerAnonymous:
+		fallthrough
+	default:
+		return "api"
 	}
-	return "api"
 }

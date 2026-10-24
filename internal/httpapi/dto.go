@@ -199,8 +199,9 @@ type SiteProposalsResponse struct {
 }
 
 type SiteRolesResponse struct {
-	RoleBrains map[string][]string `json:"role_brains"`
-	Roles      []string            `json:"roles"`
+	RoleBrains  map[string][]string `json:"role_brains"`
+	RoleUploads map[string][]string `json:"role_uploads"`
+	Roles       []string            `json:"roles"`
 }
 
 type SiteSecretsResponse struct {

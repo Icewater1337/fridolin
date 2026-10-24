@@ -1,0 +1,35 @@
+GET /api/files/list?root=brain:main&path=docs
+200 OK
+Content-Type: application/json
+
+{
+  "entries": [
+    {
+      "kind": "other",
+      "mod_time": "<MOD_TIME>",
+      "name": "env",
+      "size": 1
+    },
+    {
+      "kind": "image",
+      "mod_time": "<MOD_TIME>",
+      "name": "photo.png",
+      "size": 6
+    },
+    {
+      "kind": "pdf",
+      "mod_time": "<MOD_TIME>",
+      "name": "scan one.pdf",
+      "size": 6
+    }
+  ],
+  "path": "docs",
+  "root": "brain:main",
+  "rule": {
+    "folder": "docs",
+    "mode": "brain"
+  },
+  "truncated": false,
+  "upload": "brain",
+  "writable": true
+}

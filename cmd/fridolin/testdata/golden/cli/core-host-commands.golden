@@ -4,6 +4,7 @@ $ fridolin core start
     HOME=/Users/you
     FRIDOLIN_IMAGE=fridolin-core
     FRIDOLIN_VERSION=v1.4.0-dirty
+    FRIDOLIN_TZ=Europe/Zurich
     FRIDOLIN_AGE_IDENTITY_PQ=<fridolin.age.identity.pq>
     FRIDOLIN_AGE_IDENTITY=<fridolin.age.identity>
     FRIDOLIN_EXPORT_KEY=<fridolin.export.key>
@@ -26,12 +27,14 @@ $ fridolin core stop
     HOME=/Users/you
     FRIDOLIN_IMAGE=fridolin-core
     FRIDOLIN_VERSION=v1.4.0-dirty
+    FRIDOLIN_TZ=Europe/Zurich
 $ fridolin core update
   /usr/local/bin/docker compose -f <COMPOSE> pull
     PATH=/usr/bin:/bin
     HOME=/Users/you
     FRIDOLIN_IMAGE=fridolin-core
     FRIDOLIN_VERSION=v1.4.0-dirty
+    FRIDOLIN_TZ=Europe/Zurich
     FRIDOLIN_AGE_IDENTITY_PQ=<fridolin.age.identity.pq>
     FRIDOLIN_AGE_IDENTITY=<fridolin.age.identity>
     FRIDOLIN_EXPORT_KEY=<fridolin.export.key>
@@ -53,6 +56,7 @@ $ fridolin core update
     HOME=/Users/you
     FRIDOLIN_IMAGE=fridolin-core
     FRIDOLIN_VERSION=v1.4.0-dirty
+    FRIDOLIN_TZ=Europe/Zurich
     FRIDOLIN_AGE_IDENTITY_PQ=<fridolin.age.identity.pq>
     FRIDOLIN_AGE_IDENTITY=<fridolin.age.identity>
     FRIDOLIN_EXPORT_KEY=<fridolin.export.key>
@@ -75,6 +79,7 @@ $ fridolin core start --image registry.example/fridolin-core --tag v2
     HOME=/Users/you
     FRIDOLIN_IMAGE=registry.example/fridolin-core
     FRIDOLIN_VERSION=v2
+    FRIDOLIN_TZ=Europe/Zurich
     FRIDOLIN_AGE_IDENTITY_PQ=<fridolin.age.identity.pq>
     FRIDOLIN_AGE_IDENTITY=<fridolin.age.identity>
     FRIDOLIN_EXPORT_KEY=<fridolin.export.key>
@@ -97,6 +102,7 @@ $ fridolin core run -- core import --latest
     HOME=/Users/you
     FRIDOLIN_IMAGE=fridolin-core
     FRIDOLIN_VERSION=v1.4.0-dirty
+    FRIDOLIN_TZ=Europe/Zurich
     FRIDOLIN_AGE_IDENTITY_PQ=<fridolin.age.identity.pq>
     FRIDOLIN_AGE_IDENTITY=<fridolin.age.identity>
     FRIDOLIN_EXPORT_KEY=<fridolin.export.key>
@@ -119,6 +125,7 @@ $ fridolin core run core promote
     HOME=/Users/you
     FRIDOLIN_IMAGE=fridolin-core
     FRIDOLIN_VERSION=v1.4.0-dirty
+    FRIDOLIN_TZ=Europe/Zurich
     FRIDOLIN_AGE_IDENTITY_PQ=<fridolin.age.identity.pq>
     FRIDOLIN_AGE_IDENTITY=<fridolin.age.identity>
     FRIDOLIN_EXPORT_KEY=<fridolin.export.key>

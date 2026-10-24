@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -45,7 +47,7 @@ type ranCmd struct {
 func hostFixture(t *testing.T, secrets mapSecrets) (hostDeps, *[]ranCmd) {
 	var ran []ranCmd
 	return hostDeps{
-		secrets: secrets, docker: "/usr/local/bin/docker", version: "v1.4.0+dirty",
+		secrets: secrets, docker: "/usr/local/bin/docker", version: "v1.4.0+dirty", zone: "Europe/Zurich",
 		composePath: filepath.Join(t.TempDir(), "fridolin", "compose.yaml"),
 		baseEnv:     []string{"PATH=/usr/bin:/bin", "HOME=/Users/you"},
 		newIdentity: func() (string, error) { return "AGE-SECRET-KEY-PQ-1NEW", nil },
@@ -150,6 +152,27 @@ func TestCoreRun(t *testing.T) {
 	got := (*ran)[0]
 	if !slices.Equal(got.args[3:], []string{"run", "--rm", "--no-deps", "core", "core", "import", "--latest"}) || !slices.Contains(got.env, "FRIDOLIN_AGE_IDENTITY=AGE-SECRET-KEY-1OLD") {
 		t.Errorf("ran %q with %q", got.args, got.env)
+	}
+}
+
+// core run makes no key: on a host that is not the core yet (the move
+// pre-flight runs core run core status there) a key of its own would
+// later refuse the core's (#187). core start still makes the missing ones.
+func TestCoreRunMakesNoSecrets(t *testing.T) {
+	secrets := mapSecrets{}
+	d, _ := hostFixture(t, secrets)
+	env := coreEnv{stdout: io.Discard, stderr: io.Discard}
+	if code := coreHost(context.Background(), "run", []string{"core", "status", "--json"}, env, d); code != 0 {
+		t.Fatal(code)
+	}
+	if len(secrets) != 0 {
+		t.Fatalf("core run made %v", slices.Sorted(maps.Keys(secrets)))
+	}
+	if code := coreHost(context.Background(), "start", nil, env, d); code != 0 {
+		t.Fatal(code)
+	}
+	if _, ok := secrets[hostsecrets.AgeIdentityPQ]; !ok {
+		t.Fatalf("core start made none: %v", slices.Sorted(maps.Keys(secrets)))
 	}
 }
 
@@ -340,5 +363,29 @@ func TestCoreStoreFrom(t *testing.T) {
 	}
 	if slices.Contains(r.Env, "SECRET=x") || !slices.Contains(r.Env, "RCLONE_CONFIG_FRIDOLINVAULT_ACCOUNT=id") {
 		t.Errorf("rclone's environment = %q", r.Env)
+	}
+}
+
+// The node agent of a core host runs from launchd with PATH
+// /usr/bin:/bin:/usr/sbin:/sbin, without Docker Desktop's /usr/local/bin.
+func TestWithDockerPath(t *testing.T) {
+	env := withDockerPath([]string{"HOME=/Users/you", "PATH=/usr/bin:/bin:/usr/sbin:/sbin"}, "darwin", "/Users/you")
+	want := "PATH=/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin:/Users/you/.orbstack/bin:/Applications/Docker.app/Contents/Resources/bin"
+	if !slices.Contains(env, want) || !slices.Contains(env, "HOME=/Users/you") || len(env) != 2 {
+		t.Fatalf("darwin: %q", env)
+	}
+	// A place PATH has already is not added twice; an unset PATH gets them.
+	if env := withDockerPath([]string{"PATH=/usr/local/bin:/usr/bin"}, "linux", "/home/you"); !slices.Equal(env, []string{"PATH=/usr/local/bin:/usr/bin:/snap/bin"}) {
+		t.Fatalf("linux: %q", env)
+	}
+	if env := withDockerPath(nil, "linux", "/home/you"); !slices.Equal(env, []string{"PATH=/usr/local/bin:/usr/bin:/snap/bin"}) {
+		t.Fatalf("no PATH: %q", env)
+	}
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && lookPathIn("docker", "/nonexistent:"+bin) != filepath.Join(bin, "docker") {
+		t.Fatalf("lookPathIn did not find docker in %s", bin)
 	}
 }

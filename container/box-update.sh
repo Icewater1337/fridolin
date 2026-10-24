@@ -33,6 +33,10 @@ trap 'rmdir "$lock" 2>/dev/null || true' EXIT
 docker info >/dev/null 2>&1 || exit 0
 current=$(sed -n 's/^FRIDOLIN_BOX_NODE_IMAGE=//p' .env)
 [ -n "$current" ] || exit 0
+# Until docker compose made the node's volume (box.sh installs the updater
+# first), there is nothing to update; a docker run -v here would make the
+# volume outside compose, which then never removes it with down -v.
+docker volume inspect "$volume" >/dev/null 2>&1 || exit 0
 
 set +e
 answer=$(docker run --rm -v "$volume:/node" --entrypoint /opt/fridolin/fridolin "$current" box pending --state-dir /node 2>>update.log)

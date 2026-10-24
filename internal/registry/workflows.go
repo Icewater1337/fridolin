@@ -200,6 +200,32 @@ func (g *Registry) UpdateBackupTargets(id string, targets map[string]bool, nodeO
 	return err
 }
 
+// SetUploadFolder sets how folder of brain id takes uploads (brain.json
+// files.uploads): mode "folder" lands them there, "brain" hands them to
+// the brain, "" takes the folder off the list.
+func (g *Registry) SetUploadFolder(id, folder, mode string) error {
+	if mode != "" && mode != "folder" && mode != "brain" {
+		return apperr.New(apperr.Invalid, `mode must be "folder", "brain" or "" (no uploads)`)
+	}
+	_, err := g.store.UpdateTx("", func(c *config.File, tx *config.Tx) error {
+		return g.updateManifestIn(c, tx, id, func(m *manifest.Manifest) error {
+			var list []manifest.UploadFolder
+			if m.Files != nil {
+				list = slices.DeleteFunc(slices.Clone(m.Files.Uploads), func(u manifest.UploadFolder) bool { return u.Folder == folder })
+			}
+			if mode != "" {
+				list = append(list, manifest.UploadFolder{Folder: folder, ToBrain: mode == "brain"})
+			}
+			m.Files = &manifest.Files{Uploads: list}
+			if len(list) == 0 {
+				m.Files = nil
+			}
+			return m.Validate()
+		})
+	})
+	return err
+}
+
 func (g *Registry) AllowChat(dm bool, entry, brainID string) error {
 	_, err := g.store.UpdateTx("", func(c *config.File, tx *config.Tx) error {
 		if dm {
