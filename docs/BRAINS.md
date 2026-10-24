@@ -644,7 +644,13 @@ is left out. A lockdown runs an agent at `read`, and refuses one whose
 
 A program runs on the node through `exec` ([NODES.md](NODES.md#what-a-node-offers)),
 no shell: its `argv[0]` must be on the node's allowlist, the node's
-commands approved, and the node online. Its output and exit code go into
+commands approved, and the node online. A node whose `node.json` names
+folders in `exec.accept_from_core` takes the program of an agent you
+approve when it lies in one of them: approving the agent adds it to the
+node's allowlist with exactly its arguments, and deleting the agent
+removes it, unless another agent runs it
+([NODES.md](NODES.md#programs-from-the-core)). The Schedules page and the
+wizard say how each agent's program stands on its node. Its output and exit code go into
 the run's log; `always` sends the end of its output, `worth` only a
 failure. Each such run is an audit line of kind `scheduled_command`.
 
