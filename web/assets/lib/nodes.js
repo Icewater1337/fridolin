@@ -7,6 +7,9 @@ export function capSummary(c) {
   if (c && c.exec && (c.exec.allow || []).length) {
     parts.push(`exec (${c.exec.allow.map((r) => r.name).join(', ')})`);
   }
+  if (c && c.exec && (c.exec.accept_from_core || []).length) {
+    parts.push(`exec from the core (${c.exec.accept_from_core.join(', ')})`);
+  }
   const roots = (c && c.fs && c.fs.roots) || [];
   if (roots.length) {
     const w = roots.filter((r) => r.write).length;
@@ -30,6 +33,7 @@ export function capSummary(c) {
 
 /** How an exec rule reads: "git status|log", "hostname (no arguments)", "go (any arguments)". */
 export function ruleText(r) {
+  if (r.exact) return `${[r.name, ...(r.args || [])].join(' ')} (exactly)`;
   if (r.args === null || r.args === undefined) return `${r.name} (any arguments)`;
   if (!r.args.length) return `${r.name} (no arguments)`;
   return `${r.name} ${r.args.join(' | ')}`;
@@ -99,4 +103,49 @@ export function fromBase64(b64, decoder = new TextDecoder()) {
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   return decoder.decode(bytes, { stream: true });
+}
+
+/** The node of a's list a command agent names, by id or by name; null for none. */
+export function nodeNamed(nodes, ref) {
+  const list = nodes || [];
+  return list.find((n) => n.id === ref) || list.find((n) => (n.name || '').toLowerCase() === String(ref || '').toLowerCase()) || null;
+}
+
+const sameArgs = (a, b) => (a || []).length === (b || []).length && (a || []).every((x, i) => x === b[i]);
+
+// Whether a rule allows argv, as the node checks it (ExecRule.Matches).
+function matches(r, argv) {
+  if (!argv.length || argv[0] !== r.name) return false;
+  if (r.exact) return sameArgs(r.args, argv.slice(1));
+  if (r.args === null || r.args === undefined) return true;
+  const res = r.args.map((p) => { try { return new RegExp(`^(?:${p})$`); } catch { return null; } }).filter(Boolean);
+  return argv.slice(1).every((x) => res.some((re) => re.test(x)));
+}
+
+const under = (folder, path) => {
+  const norm = (s) => String(s || '').replace(/\\/g, '/').replace(/\/+$/, '');
+  const f = norm(folder);
+  return f !== '' && norm(path).startsWith(`${f}/`);
+};
+
+/**
+ * How a command agent's program stands on node n (a GET /api/nodes
+ * entry), before the agent is saved: {state, text}, state being allowed,
+ * waiting (saving adds it), refused, not-accepted or no-node — as the
+ * bridge's programOn says it for a saved agent.
+ */
+export function programOnNode(n, argv) {
+  if (!n) return { state: 'no-node', text: 'There is no such node: the Nodes page lists them.' };
+  const name = n.name || n.id;
+  if (!argv || !argv.length || !argv[0]) return { state: 'refused', text: 'Name the program first.' };
+  const eff = (n.effective && n.effective.exec) || {};
+  const own = (eff.allow || []).filter((r) => !r.core);
+  if (own.some((r) => matches(r, argv))) return { state: 'allowed', text: `Node ${name}’s node.json allows ${argv[0]}.` };
+  if ((eff.allow || []).some((r) => r.core && matches(r, argv))) return { state: 'allowed', text: `Node ${name} runs it already, for another approved agent.` };
+  const declared = (n.declared && n.declared.exec && n.declared.exec.accept_from_core) || [];
+  const folders = eff.accept_from_core || [];
+  if (!declared.length) return { state: 'not-accepted', text: `Node ${name} accepts no programs from the core. On ${name}, add the program’s folder to exec.accept_from_core in its node.json, or allow the program there (docs/NODES.md, “Programs from the core”).` };
+  if (!folders.length) return { state: 'not-accepted', text: `Node ${name} accepts programs from ${declared.join(', ')}, which waits for your approval on the Nodes page.` };
+  if (!folders.some((f) => under(f, argv[0]))) return { state: 'not-accepted', text: `${argv[0]} is in none of the folders node ${name} accepts programs from (${folders.join(', ')}).` };
+  return { state: 'waiting', text: `Saving adds it to node ${name}’s allowlist, with exactly these arguments; the node checks it is there, is no shell, and stays inside ${folders.join(', ')}.` };
 }
