@@ -117,6 +117,11 @@ func corePull(ctx context.Context, p pullFlags, ref string, env coreEnv, d hostD
 		note := ref + " is here"
 		if !present {
 			note = ref + " is not here"
+			if p.check && p.image != "" && d.noVerify != "" {
+				// The move would pull it and fail there: say so now.
+				fmt.Fprintf(env.stderr, "fridolin core pull: %s is not here, and it cannot be pulled: %s\n", ref, d.noVerify)
+				return 1
+			}
 		}
 		return answer(nodeproto.CoreImageResult{Image: p.image, Present: present, Note: note}, 0)
 	}
