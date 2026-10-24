@@ -32,6 +32,15 @@ func TestGoldenJoinCode(t *testing.T) {
 		Core: "fridolin-core.example.ts.net:8766", Command: sh, CommandPowerShell: ps,
 	})
 	assertGolden(t, "cli/nodes-join-code.golden", out.Bytes())
+	// A core that knows where its box script is published: the box first.
+	var box bytes.Buffer
+	bsh, bps := httpapi.BoxCommands("fj-abcd1234", "fridolin-core.example.ts.net:8766",
+		httpapi.BoxSource{Source: "https://raw.githubusercontent.com/OWNER/fridolin/COMMIT", Registry: "ghcr.io/owner", Version: "abcd1234"})
+	writeJoinCode(&box, httpapi.JoinCodeResponse{
+		Code: "fj-abcd1234", ExpiresAt: time.Date(2026, 10, 21, 14, 5, 0, 0, time.Local),
+		Core: "fridolin-core.example.ts.net:8766", Command: sh, CommandPowerShell: ps, BoxCommand: bsh, BoxCommandPowerShell: bps,
+	})
+	assertGolden(t, "cli/nodes-join-code-box.golden", box.Bytes())
 	// A core from before the PowerShell line: built from its address.
 	var old bytes.Buffer
 	writeJoinCode(&old, httpapi.JoinCodeResponse{Code: "fj-x", Core: "mini:8766", Command: "fridolin node join fj-x --core mini:8766"})

@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -141,5 +143,41 @@ func TestBoxUpdaterScripts(t *testing.T) {
 		if strings.Contains(out.String(), "docker.sock") {
 			t.Fatalf("the %s updater names the Docker socket", kind)
 		}
+	}
+}
+
+// box.sh installs the updater before docker compose made the node's
+// volume; a round then must not docker run -v it into being, or compose
+// never owns it and down -v leaves the node's key behind.
+func TestBoxUpdaterWaitsForTheNodesVolume(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the sh updater")
+	}
+	var out, errb bytes.Buffer
+	if code := runBox([]string{"updater", "sh"}, &out, &errb, boxDeps{}); code != 0 {
+		t.Fatalf("exit %d: %s", code, errb.String())
+	}
+	dir, bin := t.TempDir(), t.TempDir()
+	for name, body := range map[string]string{"update.sh": out.String(), ".env": "FRIDOLIN_BOX_NODE_IMAGE=" + testNodeImage + "\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls := filepath.Join(t.TempDir(), "calls")
+	docker := "#!/bin/sh\necho \"$*\" >>" + calls + "\ncase \"$1\" in info) exit 0 ;; volume) exit 1 ;; esac\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(docker), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("/bin/sh", filepath.Join(dir, "update.sh"))
+	cmd.Env = append(os.Environ(), "PATH="+bin+":/usr/bin:/bin")
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v: %s", err, b)
+	}
+	got, _ := os.ReadFile(calls)
+	if strings.Contains(string(got), "run ") {
+		t.Fatalf("the updater ran a container before the volume existed:\n%s", got)
+	}
+	if !strings.Contains(string(got), "volume inspect fridolin-node") {
+		t.Fatalf("the updater did not look for the volume:\n%s", got)
 	}
 }

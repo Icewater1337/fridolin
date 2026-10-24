@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
@@ -32,6 +33,16 @@ type JoinOptions struct {
 	Dial    func(ctx context.Context, network, addr string) (net.Conn, error)
 	Version string
 	Logf    func(string, ...any)
+}
+
+// tailnetNameWait is how long Join waits for the tailnet to know the
+// core's name, trying again every tailnetNameRetry.
+var tailnetNameWait, tailnetNameRetry = 30 * time.Second, time.Second
+
+// isNameNotFound is whether err is a lookup that found no such host.
+func isNameNotFound(err error) bool {
+	var dns *net.DNSError
+	return errors.As(err, &dns) && dns.IsNotFound
 }
 
 // Joined is what joining did.
@@ -63,6 +74,19 @@ func Join(ctx context.Context, o JoinOptions) (Joined, error) {
 	}
 	a := &Agent{Dir: o.Dir, Config: cfg, Key: key, Version: o.Version, Logf: o.Logf, Dial: o.Dial}
 	c, st, err := a.connect(ctx, o.Code)
+	// A box that has just come onto the tailnet may dial before its first
+	// netmap names the core, and tsnet then asks the host's DNS, which
+	// does not know it (a host without Tailscale): wait for the netmap.
+	// The code is spent only once the core has it, so trying again is safe.
+	for wait := tailnetNameWait; err != nil && o.Dial != nil && isNameNotFound(err) && wait > 0; wait -= tailnetNameRetry {
+		a.logf("node: the tailnet does not know %s yet; trying again", o.Core)
+		select {
+		case <-ctx.Done():
+			return Joined{ID: a.ID()}, err
+		case <-time.After(tailnetNameRetry):
+		}
+		c, st, err = a.connect(ctx, o.Code)
+	}
 	if err != nil {
 		return Joined{ID: a.ID()}, err
 	}
