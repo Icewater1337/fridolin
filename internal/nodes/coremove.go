@@ -111,7 +111,7 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 			if i == 1 {
 				// Decided once moveImage knows whether the target has the
 				// image: without it, nothing can read the core there yet.
-				dstUnread = fmt.Sprintf("%s: the core there cannot be read: %s", n.Name, c.CoreError)
+				dstUnread = c.CoreError
 				continue
 			}
 			rep.Blocking = append(rep.Blocking, fmt.Sprintf("%s: the core there cannot be read: %s", n.Name, c.CoreError))
@@ -153,13 +153,15 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 		s.moveImage(ctx, &rep, dst, true)
 	}
 	if dstUnread != "" {
+		// The target's core is only told about: the source holds the
+		// lease, which rules out a second core. A host that is no core
+		// yet cannot read it before the move pulls the image and brings
+		// the host secrets (the bucket's keys), so it never blocks.
+		why := "its core cannot be read until the move brings the image and the host secrets"
 		if rep.ImagePresent {
-			rep.Blocking = append(rep.Blocking, dstUnread)
-		} else {
-			// A host that never ran this version reads its core with the
-			// image the move pulls first; the lease is the source's to hold.
-			rep.Warnings = append(rep.Warnings, fmt.Sprintf("%s has not the core's image yet, so its core cannot be read before the move pulls it", rep.Target.Name))
+			why = "its core cannot be read until the move brings the host secrets (" + dstUnread + ")"
 		}
+		rep.Warnings = append(rep.Warnings, fmt.Sprintf("%s: %s", rep.Target.Name, why))
 	}
 	s.moveSite(&rep)
 	// About 10 MB/s each way, plus stopping and starting.

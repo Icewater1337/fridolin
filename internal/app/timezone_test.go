@@ -23,7 +23,10 @@ func TestCheckTimezone(t *testing.T) {
 	}{
 		{"set and TZ agrees", "Europe/Zurich", "darwin", withZone("Europe/Zurich"), DoctorOK, "Europe/Zurich (timezone)"},
 		{"set, TZ unset", "", config.ContainerGOOS, withZone("Europe/Zurich"), DoctorOK, "Europe/Zurich (timezone)"},
-		{"set, TZ another zone", "UTC", config.ContainerGOOS, withZone("Europe/Zurich"), DoctorWarn, "but the process's TZ is UTC"},
+		{"set, TZ another zone", "UTC", "linux", withZone("Europe/Zurich"), DoctorWarn, "but the process's TZ is UTC"},
+		// The container's entrypoint gives the bridge timezone as TZ (#250);
+		// doctor through docker exec has the container's own.
+		{"set, the container's TZ another zone", "Etc/UTC", config.ContainerGOOS, withZone("Europe/Zurich"), DoctorOK, "Europe/Zurich (timezone)"},
 		{"unset in UTC", "UTC", config.ContainerGOOS, withZone(""), DoctorWarn, "runs in UTC"},
 		{"unset, no TZ in the container", "", config.ContainerGOOS, withZone(""), DoctorWarn, "runs in UTC"},
 		{"unset, TZ the owner's", "Europe/Zurich", config.ContainerGOOS, withZone(""), DoctorOK, "Europe/Zurich (TZ; timezone is unset)"},
