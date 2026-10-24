@@ -10,6 +10,20 @@ for compatibility.
 
 ### Added
 
+- **Connect GitHub** (Dashboard → Integrations → GitHub, #202) makes a
+  private GitHub App of this Fridolin's own through GitHub's manifest
+  flow, with no webhook: contents read, issues write, metadata read, and
+  pull requests write when asked for. GitHub then asks which repositories
+  it may use. A run whose message carries a GitHub grant (a scheduled
+  agent's) gets an installation token for just its repositories and
+  permissions, as gh's login in a folder of its own (`GH_CONFIG_DIR`;
+  never in its environment), revoked when the run ends. The app's key
+  goes to `secrets/github-app.age` in the core's volume (encrypted to its
+  age identity) or, on a native install, to the host's secret store as
+  `fridolin.github.app`; never to `config.json`. A typed token,
+  `FRIDOLIN_GITHUB_TOKEN` or the host secret `fridolin.github.token`
+  (which `core start` now passes, and `core send` carries), is the second
+  choice (docs/GITHUB.md).
 - **Files and Wiki**, in the dashboard and on your site (docs/FILES.md).
   The Files page browses every folder Fridolin is linked to — each
   brain's folder and media inbox, and the folders approved nodes lend —

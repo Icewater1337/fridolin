@@ -112,7 +112,8 @@ for (const c of [
 
 test('a card that was never connected offers Connect, or the phone app instead, but no Disconnect', async (t) => {
   const { root } = await openPage(t, { ...status('2026-10-18T10:00:00Z'), connected: false });
-  assert.deepEqual(root.querySelectorAll('button').map((b) => b.textContent), ['Connect Plaud', 'Use the Plaud Sync phone app instead']);
+  const plaud = root.querySelectorAll('section.card').find((c) => c.textContent.includes('Plaud recorder'));
+  assert.deepEqual(plaud.querySelectorAll('button').map((b) => b.textContent), ['Connect Plaud', 'Use the Plaud Sync phone app instead']);
 });
 
 test('the brains to pick are named with their ids', async (t) => {

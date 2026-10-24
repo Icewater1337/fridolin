@@ -1,0 +1,9 @@
+GET /api/github
+200 OK
+Content-Type: application/json
+
+{
+  "connected": false,
+  "installations": [],
+  "typed_token": false
+}

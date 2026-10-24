@@ -210,6 +210,10 @@ blockquote.preview {
 .vault-checks li.bad .icon { color: var(--bad); }
 .vault-table td:first-child { overflow-wrap: anywhere; }
 
+/* ── integrations: the GitHub hand-off page (httpapi/github.go) ─────────── */
+
+.handoff { max-width: 40rem; margin: 48px auto; padding: 0 16px; display: grid; gap: 16px; }
+
 /* ── site ───────────────────────────────────────────────────────────────── */
 
 .site-block { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }

@@ -34,7 +34,7 @@ var imports = map[string][]string{
 	"internal/hostsecrets":  nil,
 	"internal/secretxfer":   {"internal/hostsecrets"},
 	"internal/lease":        {"internal/cloud"},
-	"internal/app":          {"internal/app/apptest", "examples", "internal/access", "internal/activity", "internal/apperr", "internal/backup", "internal/brain", "internal/chat", "internal/claudecli", "internal/cli", "internal/cloud", "internal/config", "internal/controlcli", "internal/devchat", "internal/fsx", "internal/google", "internal/history", "internal/hostsecrets", "internal/httpapi", "internal/intent", "internal/jsonx", "internal/logx", "internal/manifest", "internal/mcp", "internal/media", "internal/memindex", "internal/nodeagent", "internal/nodeproto", "internal/nodes", "internal/otp", "internal/outbound", "internal/pipeline", "internal/platform", "internal/plaud", "internal/prompt", "internal/registry", "internal/route", "internal/sandbox", "internal/site", "internal/snapshot", "internal/store", "internal/testutil", "internal/textx", "internal/toolcli", "internal/trigger", "internal/vault", "internal/version", "internal/whatsapp", "web", "internal/lease", "internal/tailnet", "internal/audit", "internal/skill", "internal/housekeeping", "internal/noderepo", "internal/seal", "internal/rcrypt", "internal/files", "internal/wiki"},
+	"internal/app":          {"internal/app/apptest", "examples", "internal/access", "internal/activity", "internal/apperr", "internal/backup", "internal/brain", "internal/chat", "internal/claudecli", "internal/cli", "internal/cloud", "internal/config", "internal/controlcli", "internal/devchat", "internal/fsx", "internal/google", "internal/history", "internal/hostsecrets", "internal/httpapi", "internal/intent", "internal/jsonx", "internal/logx", "internal/manifest", "internal/mcp", "internal/media", "internal/memindex", "internal/nodeagent", "internal/nodeproto", "internal/nodes", "internal/otp", "internal/outbound", "internal/pipeline", "internal/platform", "internal/plaud", "internal/prompt", "internal/registry", "internal/route", "internal/sandbox", "internal/site", "internal/snapshot", "internal/store", "internal/testutil", "internal/textx", "internal/toolcli", "internal/trigger", "internal/vault", "internal/version", "internal/whatsapp", "web", "internal/lease", "internal/tailnet", "internal/audit", "internal/skill", "internal/housekeeping", "internal/noderepo", "internal/seal", "internal/rcrypt", "internal/ghapp", "internal/ghapp/ghapptest", "internal/files", "internal/wiki"},
 	"internal/nodeproto":    nil,
 	"internal/nodes":        {"internal/fsx", "internal/nodeproto"},
 	"internal/nodeagent":    {"internal/nodeproto", "internal/nodes", "internal/platform", "internal/testutil"},
@@ -89,6 +89,10 @@ var imports = map[string][]string{
 	"site":                  nil,
 	"web":                   nil,
 	"internal/noderepo":     {"internal/rcrypt", "internal/nodeproto", "internal/nodes", "internal/nodeagent", "internal/platform", "internal/snapshot", "internal/testutil"},
+
+	// The GitHub App client and its fake of GitHub.
+	"internal/ghapp":           {"internal/ghapp/ghapptest"},
+	"internal/ghapp/ghapptest": nil,
 }
 
 // ambientAllowed are the packages below internal/ that may read the

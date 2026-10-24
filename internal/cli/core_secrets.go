@@ -64,6 +64,7 @@ var transferSecrets = []string{
 	hostsecrets.B2VaultKeyID, hostsecrets.B2VaultKey, hostsecrets.B2SnapshotsKeyID, hostsecrets.B2SnapshotsKey,
 	hostsecrets.VaultCryptPassword, hostsecrets.VaultCryptSalt, hostsecrets.VaultSealKey,
 	hostsecrets.ResticPassword, hostsecrets.SnapshotsCryptPassword, hostsecrets.LitestreamSealKey,
+	hostsecrets.GitHubToken,
 }
 
 // secretFullName takes a secret's name with or without "fridolin.", and

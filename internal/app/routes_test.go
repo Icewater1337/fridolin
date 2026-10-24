@@ -41,6 +41,11 @@ const (
 	classBuilder = "builder"
 	// classBrainRun needs the token of a brain's run in progress.
 	classBrainRun = "brain-run"
+	// classGitHubFlow is a page of the GitHub App's manifest flow that the
+	// browser is sent to: GET only, no token, and what it does is tied to
+	// a one-time state an API call made (the install's return only sends
+	// the browser on).
+	classGitHubFlow = "github-flow"
 	// classNotFound is a catch-all for unknown paths under a prefix: a
 	// 404 for anyone, token or not.
 	classNotFound = "not-found"
@@ -68,6 +73,9 @@ var routeInventory = []httpRoute{
 	{"POST", "/ingest", classScript, ""},
 	{"POST", "/otp/take", classScript, ""},
 	{"", "/", classStatic, ""},
+	{"GET", "/github/connect", classGitHubFlow, ""},
+	{"GET", "/github/created", classGitHubFlow, "/github/created?code=x&state=nope"},
+	{"GET", "/github/installed", classGitHubFlow, ""},
 
 	// The builder's own routes, on a mux of their own mounted at
 	// /builder/. That mux has no catch-all, so this entry is the mount: an
@@ -221,6 +229,10 @@ var routeInventory = []httpRoute{
 	{"POST", "/api/site/build/{id}", classAPI, "/api/site/build/main"},
 	{"POST", "/api/site/build/{id}/new", classAPI, "/api/site/build/main/new"},
 	{"POST", "/api/site/build/{id}/stop", classAPI, "/api/site/build/main/stop"},
+	{"GET", "/api/github", classAPI, ""},
+	{"POST", "/api/github/connect", classAPI, ""},
+	{"POST", "/api/github/test", classAPI, ""},
+	{"POST", "/api/github/disconnect", classAPI, ""},
 	{"GET", "/api/nodes", classAPI, ""},
 	{"POST", "/api/nodes/join-code", classAPI, ""},
 	{"POST", "/api/nodes/{id}/approve", classAPI, "/api/nodes/n1/approve"},
@@ -358,6 +370,7 @@ var reachesOutside = map[string]bool{
 	"POST /api/site/deploy-key/github": true,
 	"POST /api/site/github-repo":       true,
 	"POST /api/backup/restore":         true,
+	"POST /api/github/test":            true,
 	"POST /api/site/check-domain":      true,
 }
 
@@ -521,6 +534,21 @@ func TestRouteInventoryGuards(t *testing.T) {
 				}
 				if w := request(method, rt.path(), "", withToken, asBearer); w.Code != http.StatusNotFound {
 					t.Errorf("with the dashboard token: %d, want 404", w.Code)
+				}
+			case classGitHubFlow:
+				// Without a state it made, a page refuses (or only sends the
+				// browser on); with the dashboard's token it does no more.
+				for _, mutate := range [][]func(*http.Request){nil, {withToken}} {
+					w := request(method, rt.path(), "", mutate...)
+					if w.Code != http.StatusBadRequest && w.Code != http.StatusSeeOther {
+						t.Errorf("an unknown state: %d, want 400 or 303", w.Code)
+					}
+					if loc := w.Header().Get("Location"); w.Code == http.StatusSeeOther && loc != "/#/integrations" {
+						t.Errorf("sent the browser to %q", loc)
+					}
+				}
+				if w := request("POST", rt.path(), "{}"); w.Code != http.StatusMethodNotAllowed {
+					t.Errorf("POST: %d, want 405", w.Code)
 				}
 			case classTicket:
 				if w := request(method, rt.path(), ""); w.Code != http.StatusUnauthorized {
