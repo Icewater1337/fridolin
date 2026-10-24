@@ -21,3 +21,19 @@ export function rawHref(root, path, ticket, download) {
   if (download) p.set('download', '1');
   return `/files/raw?${p}`;
 }
+
+/** Where a brain's file is on the site of domain, for whoever's role sees the brain. */
+export function siteFileHref(domain, brain, path) {
+  return `https://${domain}/files/${encodeURIComponent(brain)}/${enc(path)}`;
+}
+
+/** A WhatsApp chat with number (digits), its message box holding text. */
+export function whatsappHref(number, text) {
+  return `https://wa.me/${String(number).replace(/\D/g, '')}?text=${encodeURIComponent(text)}`;
+}
+
+/** The parent folder of path ('' at the top). */
+export function parentOf(path) {
+  const i = path.lastIndexOf('/');
+  return i < 0 ? '' : path.slice(0, i);
+}

@@ -1,0 +1,11 @@
+PUT /api/files/text
+200 OK
+Content-Type: application/json
+
+{
+  "mod_time": "<MOD_TIME>",
+  "path": "docs/plan.txt",
+  "root": "brain:main",
+  "sha": "0602cd5618215ee050c86e83ff2a0269c47bd5b749d69585a13f78a9fdbfc1d0",
+  "size": 14
+}

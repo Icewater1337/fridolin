@@ -10,6 +10,24 @@ for compatibility.
 
 ### Added
 
+- **Files and Wiki, phase 2** (#192, #194; docs/FILES.md, "Changing
+  files"): edit a text or Markdown file, or a wiki page, in place;
+  upload into a folder; make a file; rename, move and delete (into the
+  folder's `.fridolin-trash`), each after asking where it matters, on
+  the dashboard and, for a site admin, on the site. Every change is an
+  audit line of the new kind `file_change`, listed as the file's
+  History, and is committed where the brain's folder is a git
+  repository (git in the brain's sandbox, hooks off). A brain's
+  `files.uploads` in `brain.json` names folders that take uploads from
+  the site roles you let upload (Site → Files and Wiki, *May upload
+  to*; `role_uploads` in the site's settings), and whether an upload
+  lands there or goes to the brain like a file sent on WhatsApp. A
+  file's page has *Ask the brain* (a WhatsApp chat with the question
+  begun) and copies its link on your site.
+- **Old site addresses**: `modules/redirects.json` in the site
+  repository sends paths that moved, `/wiki-<x>` say, to their new
+  place (docs/SITE.md, "Old addresses").
+
 - **Core export says when a brain folder is not as you approved it**
   (#189): `core export`, `--list-folders`, `fridolin doctor` (new check
   `brain-drift`) and `core send` print a warning for each brain whose
