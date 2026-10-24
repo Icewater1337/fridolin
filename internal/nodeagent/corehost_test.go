@@ -16,17 +16,18 @@ import (
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/secretxfer"
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // coreHostAgent is an agent with core-host on and its host secrets in a
 // folder of files.
-func coreHostAgent(t *testing.T, name string) (*Agent, hostsecrets.Files) {
+func coreHostAgent(t *testing.T, name string) (*Agent, *testutil.Secrets) {
 	t.Helper()
 	_, key, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := hostsecrets.Files{Dir: t.TempDir()}
+	st := testutil.NewSecrets()
 	a := &Agent{Dir: t.TempDir(), Key: key, Config: Config{Core: "x", Name: name}, CoreSecrets: st, Logf: t.Logf,
 		CoreSetup: func(context.Context) ([]nodeproto.CoreCheckItem, bool, string) { return nil, true, "" }}
 	if err := SaveCoreHost(a.Dir, CoreHostConfig{Enabled: true}); err != nil {
