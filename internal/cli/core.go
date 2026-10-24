@@ -762,6 +762,9 @@ type hostDeps struct {
 	// verify checks an image's build provenance for core pull
 	// (provenance.Verifier); nil refuses to pull.
 	verify func(ctx context.Context, image, repo string) error
+	// noVerify says why verify cannot run here ("" when it can): GitHub's
+	// CLI is missing. core pull --check says so before a move needs it.
+	noVerify string
 	// zone is the host's IANA time zone (FRIDOLIN_TZ, else
 	// platform.HostZone), which the container gets as TZ; "" when this
 	// machine does not say, and the container stays in UTC.
@@ -795,9 +798,16 @@ func defaultHostDeps(env coreEnv) hostDeps {
 		}
 		return id.String(), nil
 	}}
-	d.docker, _ = exec.LookPath("docker")
 	d.composePath = composePathFor(runtime.GOOS)
 	d.home, d.goos, d.uid, d.now, d.sleep = app.HomeDir(), runtime.GOOS, os.Getuid(), time.Now, time.Sleep
+	// A launchd agent or systemd unit (the node agent on a core host) runs
+	// with a short PATH that lacks Docker's own places.
+	if d.goos == "windows" {
+		d.docker, _ = exec.LookPath("docker")
+	} else {
+		env.environ = withDockerPath(env.environ, d.goos, d.home)
+		d.docker = lookPathIn("docker", envValue(env.environ, "PATH"))
+	}
 	d.apparmor, d.apparmorDir = hostAppArmor, "/etc/apparmor.d"
 	d.git = func(dir string, args ...string) (string, error) {
 		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
@@ -814,6 +824,12 @@ func defaultHostDeps(env coreEnv) hostDeps {
 		d.unitPath = filepath.Join(d.home, ".config", "systemd", "user", systemdUnitName)
 	}
 	gh, _ := exec.LookPath("gh")
+	if d.goos != "windows" {
+		gh = lookPathIn("gh", envValue(env.environ, "PATH"))
+	}
+	if gh == "" {
+		d.noVerify = "GitHub's CLI (gh) is not installed, which checks the image's provenance before it is pulled (no login needed): install it (brew install gh, apt-get install gh, winget install GitHub.cli)"
+	}
 	d.verify = provenance.Verifier{Gh: gh, Environ: env.environ}.Verify
 	d.secrets = hostsecrets.ForHost(d.goos, env.getenv, d.home)
 	d.secretsPlace = hostsecrets.Place(d.goos, env.getenv, d.home)
@@ -868,6 +884,59 @@ func composeBaseEnv(goos string, environ []string) []string {
 		}
 	}
 	return out
+}
+
+// dockerDirs are where Docker Desktop, OrbStack, Homebrew and the Linux
+// packages put docker and its helpers (credential helpers, compose).
+func dockerDirs(goos, home string) []string {
+	switch goos {
+	case "darwin":
+		return []string{"/usr/local/bin", "/opt/homebrew/bin", filepath.Join(home, ".orbstack", "bin"), "/Applications/Docker.app/Contents/Resources/bin"}
+	case "linux":
+		return []string{"/usr/local/bin", "/usr/bin", "/snap/bin"}
+	}
+	return nil
+}
+
+// withDockerPath is environ with dockerDirs added to the end of PATH, so
+// that docker, and the helpers it runs from PATH, are found.
+func withDockerPath(environ []string, goos, home string) []string {
+	dirs := dockerDirs(goos, home)
+	if len(dirs) == 0 {
+		return environ
+	}
+	path := envValue(environ, "PATH")
+	have := filepath.SplitList(path)
+	for _, d := range dirs {
+		if !slices.Contains(have, d) {
+			have = append(have, d)
+		}
+	}
+	out := slices.DeleteFunc(slices.Clone(environ), func(kv string) bool { return strings.HasPrefix(kv, "PATH=") })
+	return append(out, "PATH="+strings.Join(have, string(os.PathListSeparator)))
+}
+
+// envValue is name's value in environ, "" when unset.
+func envValue(environ []string, name string) string {
+	for _, kv := range environ {
+		if k, v, ok := strings.Cut(kv, "="); ok && k == name {
+			return v
+		}
+	}
+	return ""
+}
+
+// lookPathIn is exec.LookPath against path instead of this process's PATH.
+func lookPathIn(name, path string) string {
+	for _, dir := range filepath.SplitList(path) {
+		if dir == "" {
+			continue
+		}
+		if p, err := exec.LookPath(filepath.Join(dir, name)); err == nil {
+			return p
+		}
+	}
+	return ""
 }
 
 func runProgram(ctx context.Context, name string, args, env []string, stdout, stderr io.Writer) error {
