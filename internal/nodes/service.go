@@ -53,6 +53,9 @@ type Options struct {
 	// and waits for approval, once, after the registry recorded it; nil
 	// for nothing. It must not block for long.
 	OnJoin func(n *Node)
+	// OnCoreHost hears, once per core-host.json, a node that asks for
+	// core-host its approval does not cover (corehost.go).
+	OnCoreHost func(n *Node)
 	// Version is the core's own version, which nodes are updated to, and
 	// BinariesDir the folder with its builds for each platform
 	// (BinariesManifest); "" for none (update.go).
@@ -77,6 +80,9 @@ type Service struct {
 	onEvent   func(string, nodeproto.Event)
 	onDeclare func(*Node)
 	onJoin    func(*Node)
+	// onCoreHost and the hash of core-host.json last told of, per node.
+	onCoreHost   func(*Node)
+	coreHostSeen map[string]string
 
 	// Updates (update.go).
 	dir, version, binDir string
@@ -118,6 +124,7 @@ func New(opts Options) (*Service, error) {
 		reg: reg, logf: logf, onEvent: opts.OnEvent, onDeclare: opts.OnDeclare, onJoin: opts.OnJoin, ctx: ctx, cancel: cancel, sessions: map[string]*session{},
 		dir: opts.Dir, version: opts.Version, binDir: opts.BinariesDir, busy: opts.Busy, hold: opts.Hold, boxImages: opts.BoxImages,
 		updating: map[string]bool{}, reports: map[string]nodeproto.UpdateReport{},
+		onCoreHost: opts.OnCoreHost, coreHostSeen: map[string]string{},
 	}, nil
 }
 
@@ -363,6 +370,7 @@ func (s *Service) handshake(ss *session, remote string) (*Node, error) {
 			s.onJoin(clone(node))
 		}
 	}
+	s.noteCoreHost(node)
 	return node, nil
 }
 
@@ -431,6 +439,7 @@ func (s *Service) readLoop(ss *session) {
 			if s.onDeclare != nil {
 				s.onDeclare(n)
 			}
+			s.noteCoreHost(n)
 		case nodeproto.TypeEvent:
 			ev, err := nodeproto.DecodeBody[nodeproto.Event](env)
 			if err != nil {
