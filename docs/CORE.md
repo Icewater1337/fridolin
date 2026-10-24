@@ -242,6 +242,14 @@ appends a line to `secrets-transfer.log` beside its compose file: the
 time, the direction, the other device and its login, the names stored or
 unchanged, the result, never a value.
 
+Between two nodes approved for `core-host`, `fridolin nodes
+core-secrets-transfer SRC DST --yes` on the core moves the same names
+over the node channel instead, end to end between the two node agents:
+the target signs a one-time key with its device key, and the source
+encrypts only to a key it pinned on its own machine (`fridolin node
+core-host trust`), so nobody compares four words. docs/NODES.md,
+"core-host", has the details.
+
 
 The post-quantum age identity and the export key encrypt every export.
 `core start` makes them the first time and says so: copy them into the

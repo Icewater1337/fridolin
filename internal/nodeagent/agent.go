@@ -18,6 +18,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/platform"
 )
@@ -80,7 +81,15 @@ type Agent struct {
 	TerminalShell   []string
 	TerminalIdle    time.Duration
 	AgentMaxRuntime time.Duration
+	// CoreSecrets is where core-host keeps host secrets (CoreSecretsPlace
+	// names it); nil is the box's sealed files or the host's store
+	// (corehost.go). CoreSetup, when set, is setup-machine --core's
+	// checks instead of running the agent's own binary.
+	CoreSecrets      hostsecrets.Store
+	CoreSecretsPlace string
+	CoreSetup        func(ctx context.Context) ([]nodeproto.CoreCheckItem, bool, string)
 
+	core      coreHost
 	upd       updater
 	mu        sync.Mutex
 	state     nodeproto.State
@@ -287,6 +296,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	// declares them when they are there.
 	a.frideCheck(ctx)
 	a.androidCheck(true)
+	a.coreHostChanged()
 	if a.Dir != "" {
 		pruneAndroid(filepath.Join(a.Dir, androidTransfers), time.Now(), 0)
 	}

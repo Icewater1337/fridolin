@@ -16,6 +16,8 @@ type FleetNode struct {
 	Tags             []string
 	// Offers is what it may serve now, in a few words.
 	Offers string
+	// CoreHostPending is set while its core-host waits for approval.
+	CoreHostPending bool
 }
 
 func countNodes(n int) string {

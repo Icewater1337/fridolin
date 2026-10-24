@@ -57,16 +57,8 @@ func stdinTerminal() terminalIO {
 }
 
 // transferSecrets are the host secrets a move carries to the next
-// machine: all the core's but the Tailscale auth key, since the next
-// machine logs in to the tailnet itself and the core's own node key moves
-// in the export (--with-tailscale-key adds it).
-var transferSecrets = []string{
-	hostsecrets.AgeIdentityPQ, hostsecrets.AgeIdentity, hostsecrets.ExportKey, hostsecrets.ClaudeOAuthToken,
-	hostsecrets.B2VaultKeyID, hostsecrets.B2VaultKey, hostsecrets.B2SnapshotsKeyID, hostsecrets.B2SnapshotsKey,
-	hostsecrets.VaultCryptPassword, hostsecrets.VaultCryptSalt, hostsecrets.VaultSealKey,
-	hostsecrets.ResticPassword, hostsecrets.SnapshotsCryptPassword, hostsecrets.LitestreamSealKey,
-	hostsecrets.GitHubToken,
-}
+// machine (secretxfer.MoveNames; --with-tailscale-key adds that key).
+var transferSecrets = secretxfer.MoveNames
 
 // secretFullName takes a secret's name with or without "fridolin.", and
 // refuses one the core does not use.
