@@ -24,6 +24,15 @@ const VAR_HELP = {
   greeting: 'The first words of the message.',
 };
 
+// The built-in templates' names as the cards show them.
+const TITLES = {
+  'morning-briefing': 'Morning briefing',
+  'memory-consolidation': 'Memory consolidation',
+  'code-review-security': 'Code review: security',
+  'code-review-bugs': 'Code review: bugs',
+  'code-review-simplify': 'Code review: simplify',
+};
+
 const CUSTOM = [
   { key: 'prompt', title: 'Custom prompt', text: 'Your own task, in your words: the brain runs it on the schedule, with its memory, tools and sandbox.' },
   { key: 'command', title: 'Run a command on a node', text: 'A program on one of your machines (a node), no Claude run: a scraper, a backup, a check. Only what the node’s allowlist lets it run.' },
@@ -115,7 +124,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
         go('brain');
       };
       const cards = [
-        ...templates.map((t) => ({ kind: 'template', template: t.name, title: t.name, text: t.description, chosen: f.kind === 'template' && f.template === t.name })),
+        ...templates.map((t) => ({ kind: 'template', template: t.name, title: TITLES[t.name] || t.name, text: t.description, chosen: f.kind === 'template' && f.template === t.name })),
         ...CUSTOM.map((c) => ({ kind: c.key, title: c.title, text: c.text, chosen: f.kind === c.key || (c.key === 'prompt' && f.kind === 'file') })),
       ];
       return [

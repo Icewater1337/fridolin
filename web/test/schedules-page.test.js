@@ -189,7 +189,7 @@ test('the wizard adds an agent step by step', async (t) => {
   const { root, ctx, navigated, calls } = await open(t, bridge(state), { brain: 'new' });
   assert.match(root.textContent, /What should it do\?/);
   assert.match(root.textContent, /Run a command on a node/);
-  root.querySelectorAll('.template-card').find((b) => b.textContent.includes('code-review-bugs')).click();
+  root.querySelectorAll('.template-card').find((b) => b.textContent.includes('Code review: bugs')).click();
   await settle();
   // Brain and name, the template's name suggested.
   assert.match(root.textContent, /Which brain runs it\?/);
