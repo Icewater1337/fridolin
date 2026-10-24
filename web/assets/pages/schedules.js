@@ -80,11 +80,21 @@ async function removeAgent(a, after) {
   } catch (e) { toastError(e); }
 }
 
+// How a command agent's badge looks, by how its program stands on its node.
+const PROGRAM_TONE = { allowed: 'ok', waiting: 'info', refused: 'bad', 'not-accepted': 'bad', 'no-node': 'bad' };
+
+/** How a's program stands on its node, when that needs saying: a line for its card. */
+function programNote(a) {
+  const p = a.program;
+  if (!p || p.state === 'allowed' || a.state === 'pending') return null;
+  return h(`p.small.${p.state === 'waiting' ? 'muted' : 'warn-text'}`, p.detail);
+}
+
 /** What agent a may do, as small badges: risk, node, GitHub, results. */
 function mayDo(a) {
   const s = a.schedule || {};
   const out = [];
-  if (s.command) out.push(badge(`node ${s.command.node}`, 'warn', 'Runs a program on this node'));
+  if (s.command) out.push(badge(`node ${s.command.node}`, PROGRAM_TONE[a.program && a.program.state] || 'warn', a.program ? a.program.detail : 'Runs a program on this node'));
   else out.push(riskBadge(s.risk || 'write'));
   if (s.github) {
     const perms = Object.entries(s.github.permissions || {}).map(([k, v]) => `${k}:${v}`).join(' ');
@@ -127,6 +137,10 @@ function reviewPanel(a, { after } = {}) {
     parts.push(callout('warn', 'Look closely: this agent may', h('ul.plain-list', a.risky.map((x) => h('li', x)))));
   }
   if (disk) parts.push(h('h4', 'What it may do'), h('ul.plain-list', permissionsOf(disk, a.chat).map((x) => h('li', x))));
+  if (a.program && r.status !== 'removed') {
+    const p = a.program;
+    parts.push(callout(p.state === 'allowed' || p.state === 'waiting' ? 'info' : 'warn', p.state === 'waiting' ? 'Approving adds its program to the node' : `Its program on node ${p.node_name || disk.command.node}`, p.detail));
+  }
   if (r.status === 'changed') {
     const rows = fieldDiff(r.approved || {}, disk);
     parts.push(h('h4', 'The change'), rows.length ? h('div.table-wrap', h('table.table.diff-table',
@@ -197,6 +211,7 @@ function agentCard(open, toggleOpen) {
       h('p.muted.small', a.schedule.description || a.task),
       facts(a),
       mayDo(a),
+      programNote(a),
       a.problem ? h('p.small.warn-text', a.problem) : null,
       reviewing ? reviewPanel(a) : null,
       agentActions(a));

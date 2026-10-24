@@ -102,6 +102,7 @@ type Agent struct {
 	core      coreHost
 	moves     coreMoves
 	upd       updater
+	progs     execPrograms
 	mu        sync.Mutex
 	state     nodeproto.State
 	connected bool

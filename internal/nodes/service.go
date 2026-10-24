@@ -49,6 +49,11 @@ type Options struct {
 	// OnDeclare hears that a node's declaration changed while it was
 	// connected, after the registry recorded it; nil for nothing.
 	OnDeclare func(n *Node)
+	// OnConnect hears that a node connected, after it was welcomed, and
+	// OnApprove that the owner approved what a node offers; nil for
+	// nothing. Each runs on its own goroutine.
+	OnConnect func(n *Node)
+	OnApprove func(n *Node)
 	// OnJoin hears that a device it did not know joined with a join code
 	// and waits for approval, once, after the registry recorded it; nil
 	// for nothing. It must not block for long.
@@ -119,6 +124,10 @@ type Service struct {
 	moveActive    string
 	onMove        func(MoveRecord)
 	movePollEvery time.Duration
+	// progs are the lists of programs sent to nodes (programs.go).
+	progs     programsState
+	onConnect func(*Node)
+	onApprove func(*Node)
 }
 
 // New opens the registry in opts.Dir.
@@ -135,7 +144,7 @@ func New(opts Options) (*Service, error) {
 	s := &Service{
 		reg: reg, logf: logf, onEvent: opts.OnEvent, onDeclare: opts.OnDeclare, onJoin: opts.OnJoin, ctx: ctx, cancel: cancel, sessions: map[string]*session{},
 		dir: opts.Dir, version: opts.Version, binDir: opts.BinariesDir, busy: opts.Busy, hold: opts.Hold, boxImages: opts.BoxImages,
-		updating: map[string]bool{}, reports: map[string]nodeproto.UpdateReport{},
+		updating: map[string]bool{}, reports: map[string]nodeproto.UpdateReport{}, onConnect: opts.OnConnect, onApprove: opts.OnApprove,
 		onCoreHost: opts.OnCoreHost, coreHostSeen: map[string]string{},
 		moves: map[string]*MoveRecord{}, onMove: opts.OnMove, movePollEvery: opts.MovePoll,
 	}
@@ -323,6 +332,9 @@ func (s *Service) accept(w http.ResponseWriter, r *http.Request) {
 	// on, is updated now: after the core itself was updated, every node
 	// connects again.
 	s.wg.Go(func() { s.maybeAuto(node.ID) })
+	if s.onConnect != nil {
+		s.wg.Go(func() { s.onConnect(clone(node)) })
+	}
 	s.readLoop(ss)
 	s.logf("nodes: %s (%s) disconnected", node.Name, node.ID)
 }
@@ -536,6 +548,9 @@ func (s *Service) ApproveCommands(id string) (*Node, error) {
 	if err == nil {
 		s.logf("nodes: approved what %s (%s) offers: %s", n.Name, n.ID, n.Approved.Summary())
 		s.pushState(n)
+		if s.onApprove != nil {
+			s.wg.Go(func() { s.onApprove(clone(n)) })
+		}
 	}
 	return n, err
 }
@@ -684,6 +699,9 @@ type View struct {
 	// CoreHost is set for a node that offers core-host, or had it
 	// approved (CoreHostView).
 	CoreHost *CoreHostView `json:"core_host,omitempty"`
+	// Programs is how the core's last list of programs for the node went
+	// (programs.go); nil when none was sent since the core started.
+	Programs *ProgramsStatus `json:"programs,omitempty"`
 }
 
 // Views lists every node with whether it is connected.
@@ -694,6 +712,9 @@ func (s *Service) Views() ([]View, error) {
 		v := View{Node: n, Commands: n.Commands(), Effective: n.Effective(), Online: s.Online(n.ID)}
 		v.UpdateTo, v.UpdateNote = s.UpdateTarget(n)
 		v.CoreHost = coreHostView(n)
+		if st, ok := s.Programs(n.ID); ok {
+			v.Programs = &st
+		}
 		out = append(out, v)
 	}
 	return out, err

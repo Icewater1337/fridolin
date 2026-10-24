@@ -56,6 +56,9 @@ func (a *Agent) call(ctx context.Context, req nodeproto.Request) (any, *nodeprot
 	if !eff.Allows(req.Method) {
 		return nil, nodeproto.Errorf(nodeproto.CodeDenied, "%s is not approved on this node", req.Method)
 	}
+	if req.Method == nodeproto.MethodExecPrograms {
+		return a.execProgramsCall(req.Params)
+	}
 	if slices.Contains(nodeproto.FrideMethods, req.Method) {
 		return a.frideCall(ctx, req.Method, req.Params)
 	}
@@ -145,6 +148,12 @@ func (a *Agent) exec(ctx context.Context, eff nodeproto.Capabilities, p nodeprot
 	if p.Dir != "" && !filepath.IsAbs(p.Dir) {
 		return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "dir %q is not absolute", p.Dir)
 	}
+	// A program only the core added is checked again: it may have moved
+	// or become a symlink since.
+	real, perr := a.corePath(eff, p.Argv)
+	if perr != nil {
+		return nil, perr
+	}
 	timeout := time.Duration(eff.Exec.Timeout()) * time.Second
 	if p.TimeoutSeconds > 0 && time.Duration(p.TimeoutSeconds)*time.Second < timeout {
 		timeout = time.Duration(p.TimeoutSeconds) * time.Second
@@ -157,6 +166,10 @@ func (a *Agent) exec(ctx context.Context, eff nodeproto.Capabilities, p nodeprot
 	// bare name up in the PATH, and refuses one found relative to the
 	// working directory.
 	cmd := exec.CommandContext(ctx, p.Argv[0], p.Argv[1:]...)
+	if real != "" {
+		// The file just checked, not what the path may point to by now.
+		cmd.Path = real
+	}
 	cmd.Dir = p.Dir
 	stdout := &cappedBuffer{max: eff.Exec.OutputCap()}
 	stderr := &cappedBuffer{max: eff.Exec.OutputCap()}

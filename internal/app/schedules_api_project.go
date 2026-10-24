@@ -62,6 +62,9 @@ type scheduleView struct {
 	// Schedule is its definition, as the edit form takes it: the approved
 	// one, or, for a pending agent, the one on disk.
 	Schedule manifest.Schedule `json:"schedule"`
+	// Program is how a command agent's program stands on its node: allowed,
+	// or what approving it does, or why the node will not run it.
+	Program *programView `json:"program,omitempty"`
 }
 
 // The states of an agent (scheduleView.State).
@@ -176,6 +179,14 @@ func (a *agents) list(context.Context) (any, error) {
 		return nil, err
 	}
 	now := time.Now()
+	views, _ := a.b.nodes.Views()
+	program := func(s manifest.Schedule, approved bool) *programView {
+		if s.Command == nil {
+			return nil
+		}
+		p := programOn(views, s.Command.Node, s.Command.Argv, approved)
+		return &p
+	}
 	out := schedulesView{Enabled: cfg.Live.Schedules.Enabled, Agents: []scheduleView{}, Reminders: []reminderView{}, Templates: scheduleTemplates}
 	for _, br := range a.b.brainMgr.Brains() {
 		m := br.Manifest()
@@ -190,7 +201,7 @@ func (a *agents) list(context.Context) (any, error) {
 				Brain: br.ID(), BrainName: m.Name, Name: s.Name, Kind: runKind(s), Task: taskOf(s),
 				Report: s.ReportMode(), Chat: a.resultChat(br, s, cfg), Enabled: s.IsEnabled(), Paused: st.Paused,
 				FromMemory: s.FromMemory, LastRun: st.LastRun, Problem: a.problemOf(br, s), Schedule: s,
-				File: manifest.ScheduleFile(s.Name), Risky: risksOf(s),
+				File: manifest.ScheduleFile(s.Name), Risky: risksOf(s), Program: program(s, true),
 			}
 			if s.FromMemory {
 				v.File = ""
@@ -233,7 +244,7 @@ func (a *agents) list(context.Context) (any, error) {
 			v := scheduleView{
 				Brain: br.ID(), BrainName: m.Name, Name: r.Name, Kind: runKind(s), Task: taskOf(s),
 				Report: s.ReportMode(), Chat: a.resultChat(br, s, cfg), State: AgentPending, Enabled: s.IsEnabled(),
-				Problem: r.Detail, File: r.Source, Risky: risksOf(s), Review: &r, Schedule: s,
+				Problem: r.Detail, File: r.Source, Risky: risksOf(s), Review: &r, Schedule: s, Program: program(s, false),
 			}
 			if r.Disk != nil && v.Problem == "" {
 				v.Problem = a.problemOf(br, s)
@@ -391,6 +402,7 @@ func (a *agents) put(_ context.Context, brain, name string, s manifest.Schedule)
 	if err := a.b.registry.PutSchedule(brain, s); err != nil {
 		return nil, err
 	}
+	a.b.programs.changed()
 	return httpapi.OperationResponse{Status: "saved"}, nil
 }
 
@@ -416,6 +428,7 @@ func (a *agents) approve(_ context.Context, brain, name string, reviewed *manife
 	if err := a.b.registry.ApproveSchedule(brain, name, reviewed); err != nil {
 		return nil, err
 	}
+	a.b.programs.changed()
 	return httpapi.OperationResponse{Status: "approved"}, nil
 }
 
@@ -425,6 +438,7 @@ func (a *agents) remove(_ context.Context, brain, name string) (any, error) {
 	if err := a.b.registry.RemoveSchedule(brain, name); err != nil {
 		return nil, err
 	}
+	a.b.programs.changed()
 	return httpapi.OperationResponse{Status: "removed"}, nil
 }
 

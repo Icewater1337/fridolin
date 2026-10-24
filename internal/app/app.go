@@ -85,7 +85,10 @@ type App struct {
 	// nodes is the fleet's registry and node port; nodesEnabled and
 	// nodesListen are nodes.enabled and nodes.listen as the bridge
 	// started, which wait for a restart.
-	nodes        *nodes.Service
+	nodes *nodes.Service
+	// programs keeps the nodes' allowlists in step with the approved
+	// command agents (node_programs.go).
+	programs     *nodePrograms
 	nodesEnabled bool
 	nodesListen  string
 	// fride is the core's side of FrIDE on the nodes (fride_runtime.go).
@@ -283,6 +286,7 @@ func New(opts Options) (_ *App, err error) {
 	b.mcpTools = b.newMCPTools()
 	b.fride = newFrideRuntime(b)
 	b.work = newWorkRuntime(b)
+	b.programs = newNodePrograms(b)
 	if b.nodes, err = newNodes(b); err != nil {
 		return nil, err
 	}

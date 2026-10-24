@@ -31,6 +31,9 @@ func newNodes(b *App) (*nodes.Service, error) {
 	}
 	return nodes.New(nodes.Options{
 		Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: onEvent, OnDeclare: b.fride.onDeclare, OnJoin: b.nodeJoined, OnCoreHost: b.nodeCoreHost, OnMove: b.coreMoveEnded,
+		// A node that connects takes the programs of its command agents.
+		OnConnect: func(n *nodes.Node) { b.programs.connected(n.ID) },
+		OnApprove: func(n *nodes.Node) { b.programs.connected(n.ID) },
 		// Updates: the core's own version, its builds for the nodes, and
 		// what keeps a node from being updated now (nodes_update.go).
 		Version: version.String(), BinariesDir: nodeBinariesDir(b.exe), Busy: b.nodeBusy, Hold: b.nodeHold,
