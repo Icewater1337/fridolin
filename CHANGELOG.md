@@ -923,6 +923,11 @@ for compatibility.
 
 ### Fixed
 
+- A core export carries `core/encryption.json`, the buckets' encryption
+  state (which stores are encrypted twice, which single-layer copies are
+  retired), and the import puts it in place, keeping the target's earlier
+  one as `encryption.json.before-<time>`. The core on another machine
+  thought the single-layer copies still there (#187).
 - `fridolin core run` no longer makes the post-quantum age identity and
   the second layers' keys when the machine has none; only `core start`
   and `core update` do. The move pre-flight runs `core run core status`
