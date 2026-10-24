@@ -28,8 +28,10 @@
 #   --dir DIR          where the compose file and .env go (default ~/.fridolin-box)
 #   --yes              do not ask before starting
 #   --update           update a box made before to --version: pull, pin,
-#                      write the compose file, recreate; the node keeps its
-#                      key and approval (--core and --code are not needed)
+#                      write the compose files, recreate; the node keeps its
+#                      key and approval (--core and --code are not needed),
+#                      and a box made before the core could run in a box
+#                      gets the core's settings (core.yaml)
 #   --no-updater       do not install the box's updater, which applies the
 #                      updates the core asks for (docs/NODES.md, "Box updates")
 set -eu
@@ -95,8 +97,10 @@ This makes $name a node of the fridolin core at $core, in a box:
 
   1. pull $node_ref$( [ "$fride" = 1 ] && printf '\n     and  %s' "$fride_ref")
      and pin both by digest in $dir/.env
-  2. write the box's compose file there (docker compose project fridolin-box,
-     volumes fridolin-node, $( [ -n "$backups" ] && printf 'backups in %s' "$backups" || printf 'fridolin-backups')$( [ "$fride" = 1 ] && printf ', fride-home, fride-workspaces'))
+  2. write the box's compose files there (docker compose project fridolin-box,
+     volumes fridolin-node, $( [ -n "$backups" ] && printf 'backups in %s' "$backups" || printf 'fridolin-backups')$( [ "$fride" = 1 ] && printf ', fride-home, fride-workspaces'),
+     and the core's settings, off until a core move hands the core to this
+     box: fridolin-box-data, fridolin-box-home, the dashboard on 127.0.0.1)
   3. sign the box in to your tailnet as its own device (a link to open)
   4. join the core with the code from !join, and start the box with its
      updater (every 2 minutes, as you: it applies the updates the core
@@ -107,7 +111,7 @@ EOF
      set the git identity they commit with, and pair it with the node
 EOF
 fi
-printf '\nNo service gets the Docker socket; FrIDE never sees the node'"'"'s key or backups.\n'
+printf '\nNo service gets the Docker socket; FrIDE never sees the node'"'"'s key, its backups or the core'"'"'s data and secrets.\n'
 if [ "$yes" != 1 ]; then
 	ask "Continue? [y/N] " answer
 	case "$answer" in y | Y | yes | YES) ;; *) die "stopped; nothing was changed" ;; esac
@@ -148,19 +152,38 @@ mkdir -p "$dir"
 chmod 700 "$dir"
 cd "$dir"
 umask 077
+# Settings the owner added to .env (ports, memory, AppArmor, time zone)
+# stay.
+kept=""
+[ -f .env ] && kept=$(grep -E '^(FRIDOLIN_BOX_(APPARMOR|DASHBOARD_PORT|SITE_PORT|CORE_MEMORY|NODE_MEMORY|FRIDE_MEMORY)|FRIDOLIN_TZ)=' .env || true)
 {
 	echo "# Written by box.sh; box updates rewrite the image lines."
 	echo "FRIDOLIN_BOX_NODE_IMAGE=$node_image"
 	echo "FRIDOLIN_BOX_FRIDE_IMAGE=${fride_image:-none}"
 	[ -n "$backups" ] && echo "FRIDOLIN_BOX_BACKUPS=$backups"
 	[ "$fride" = 1 ] && echo "COMPOSE_PROFILES=fride" || echo "COMPOSE_PROFILES="
-} >.env
+	echo "COMPOSE_FILE=compose.yaml:core.yaml"
+	if [ -n "$kept" ]; then printf '%s\n' "$kept"; fi
+} >.env.new
+mv .env.new .env
 docker run --rm --entrypoint /opt/fridolin/fridolin "$node_image" box compose >compose.yaml.new
 mv compose.yaml.new compose.yaml
+docker run --rm --entrypoint /opt/fridolin/fridolin "$node_image" box core-compose >core.yaml.new
+mv core.yaml.new core.yaml
+docker run --rm --entrypoint /opt/fridolin/fridolin "$node_image" box seccomp >seccomp.json.new
+mv seccomp.json.new seccomp.json
 docker run --rm --entrypoint /opt/fridolin/fridolin "$node_image" box updater sh >update.sh.new
 chmod 755 update.sh.new
 mv update.sh.new update.sh
-echo "compose.yaml, .env and update.sh are in $dir"
+echo "compose.yaml, core.yaml, seccomp.json, .env and update.sh are in $dir"
+# Ubuntu confines the user namespaces the brains' sandbox makes; the core
+# in this box needs a profile that allows them (docs/NODES.md, "The core
+# in a box").
+if [ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null)" = Y ] &&
+	[ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null)" = 1 ] &&
+	! grep -q '^FRIDOLIN_BOX_APPARMOR=' .env; then
+	echo "note: AppArmor restricts user namespaces here. Before this box can take the core, load the fridolin-core profile (sudo fridolin core apparmor, docs/CORE.md) and add FRIDOLIN_BOX_APPARMOR=fridolin-core to $dir/.env; the core's move check says so until then."
+fi
 
 # The box's updater (docs/NODES.md, "Box updates"): every 2 minutes, as
 # you, it applies an update the core asked for, once a throwaway container
@@ -285,5 +308,6 @@ The core tells you in WhatsApp that $name joined; reply !approve <id> there
 (or approve it on the dashboard's Nodes page).
 
 In $dir: docker compose ps | logs | stop | start. Remove the box
-with docker compose down -v (it deletes the node's key, its backups$( [ -n "$backups" ] && printf ' except %s' "$backups")$( [ "$fride" = 1 ] && printf ' and FrIDE'"'"'s workspaces')).
+with docker compose down -v (it deletes the node's key, its backups$( [ -n "$backups" ] && printf ' except %s' "$backups")$( [ "$fride" = 1 ] && printf ' and FrIDE'"'"'s workspaces'),
+and the core's data once this box runs the core: never while it does).
 EOF

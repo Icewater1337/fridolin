@@ -222,7 +222,7 @@ func (a *Agent) coreStore() (hostsecrets.Store, string, *nodeproto.Error) {
 		if err != nil {
 			return nil, "", nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
 		}
-		return hostsecrets.Sealed{Dir: filepath.Join(a.Dir, coreSecretsDir), Key: k}, "the box's volume (sealed)", nil
+		return BoxSecretStore(a.Dir, k), "the box's volume (sealed)", nil
 	}
 	if runtime.GOOS == "windows" {
 		return nil, "", nodeproto.Errorf(nodeproto.CodeUnavailable, "the node service runs as LocalSystem, whose Credential Manager is not the owner's: move the secrets with fridolin core send and receive")
@@ -337,7 +337,7 @@ func (a *Agent) coreCheck(ctx context.Context) nodeproto.CoreCheckResult {
 			res.Secrets = append(res.Secrets, nodeproto.CoreSecretPresent{Name: n, Stored: ok, Received: ok && slices.Contains(received, n)})
 		}
 	}
-	if fr, ok := a.secretFiler(); ok && a.Config.Box == nil {
+	if fr, ok := a.secretFiler(); ok {
 		fctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 		dir, files, err := fr.ExportFiles(fctx)
 		cancel()
@@ -359,13 +359,14 @@ func (a *Agent) coreCheck(ctx context.Context) nodeproto.CoreCheckResult {
 }
 
 // coreSetup runs `fridolin setup-machine --core --json` with the agent's
-// own binary; a box leaves it out, since Docker is its host's.
+// own binary; a box checks its own settings instead, since Docker is its
+// host's.
 func (a *Agent) coreSetup(ctx context.Context) ([]nodeproto.CoreCheckItem, bool, string) {
 	if a.CoreSetup != nil {
 		return a.CoreSetup(ctx)
 	}
 	if a.Config.Box != nil {
-		return nil, true, "a box: the image, Docker and the volumes are the box's own"
+		return a.boxSetup(ctx)
 	}
 	if a.Executable == "" {
 		return nil, false, "not run: the agent does not know its own binary"

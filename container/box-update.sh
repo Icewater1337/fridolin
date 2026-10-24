@@ -10,7 +10,9 @@
 # checks the request's signature against the core's key the box pinned,
 # that both images are of the box's own registry, and their build
 # provenance (fridolin box pending). Then it pulls them by digest, writes
-# .env and the new version's compose file, recreates the services and
+# .env and the new version's compose files (compose.yaml, and core.yaml
+# with seccomp.json: the core's settings, which a box made before the core
+# could run in a box gets here), recreates the services and
 # waits up to 5 minutes for the node to be connected to the core again.
 # If it is not, the .env and compose file of before come back. The result
 # goes into the node's volume, and the agent reports it to the core.
@@ -73,12 +75,25 @@ fi
 
 cp .env .env.prev
 cp compose.yaml compose.yaml.prev
+for f in core.yaml seccomp.json; do
+	if [ -f "$f" ]; then cp "$f" "$f.prev"; fi
+done
 sed -e "s|^FRIDOLIN_BOX_NODE_IMAGE=.*|FRIDOLIN_BOX_NODE_IMAGE=$node|" \
 	-e "s|^FRIDOLIN_BOX_FRIDE_IMAGE=.*|FRIDOLIN_BOX_FRIDE_IMAGE=$fride|" .env.prev >.env.new
 mv .env.new .env
 if docker run --rm --entrypoint /opt/fridolin/fridolin "$node" box compose >compose.yaml.new &&
 	! grep -q 'docker\.sock' compose.yaml.new; then
 	mv compose.yaml.new compose.yaml
+	# The core's settings, from an image that has them.
+	if docker run --rm --entrypoint /opt/fridolin/fridolin "$node" box core-compose >core.yaml.new 2>/dev/null &&
+		! grep -q 'docker\.sock' core.yaml.new &&
+		docker run --rm --entrypoint /opt/fridolin/fridolin "$node" box seccomp >seccomp.json.new 2>/dev/null; then
+		mv core.yaml.new core.yaml
+		mv seccomp.json.new seccomp.json
+		grep -q '^COMPOSE_FILE=' .env || echo "COMPOSE_FILE=compose.yaml:core.yaml" >>.env
+	else
+		rm -f core.yaml.new seccomp.json.new
+	fi
 	docker run --rm --entrypoint /opt/fridolin/fridolin "$node" box updater sh >update.sh.new && chmod 755 update.sh.new && mv update.sh.new update.sh
 else
 	rm -f compose.yaml.new
@@ -101,11 +116,14 @@ fi
 if [ "$healthy" = 1 ]; then
 	log "the box runs $version"
 	result "$node" ok
-	rm -f .env.prev compose.yaml.prev
+	rm -f .env.prev compose.yaml.prev core.yaml.prev seccomp.json.prev
 else
 	log "the node did not connect to the core within 5 minutes on $version; going back"
 	mv .env.prev .env
 	mv compose.yaml.prev compose.yaml
+	for f in core.yaml seccomp.json; do
+		if [ -f "$f.prev" ]; then mv "$f.prev" "$f"; fi
+	done
 	docker compose up -d --remove-orphans >>update.log 2>&1 || log "starting the old images failed"
 	result "$current" failed "the node did not connect to the core within 5 minutes on the new images; back on the old ones"
 fi

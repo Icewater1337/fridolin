@@ -175,6 +175,10 @@ type Options struct {
 	// come only from its environment (the vault never reads or makes host
 	// secrets there).
 	Container bool
+	// Box: the container is a box's node container (docs/NODES.md, "The
+	// core in a box"), whose agent publishes the dashboard and the site
+	// from the loopback: the site listens there, as on a native host.
+	Box bool
 	// Tailnet makes the core's tailnet node when core.tailnet.enabled; nil
 	// uses tsnet (tailnet.New). Tests pass a fake.
 	Tailnet tailnet.Factory
@@ -405,7 +409,7 @@ func New(opts Options) (_ *App, err error) {
 		}
 		return ""
 	}, newPlaudFleet(b.nodes, b.locked))
-	b.site = NewSiteManager(sitesvc.SiteOptions{DataDir: cfg.DataDir, GoogleClient: b.google.ClientPath, Builder: b.siteBuilderHooks(), Container: opts.Container})
+	b.site = NewSiteManager(sitesvc.SiteOptions{DataDir: cfg.DataDir, GoogleClient: b.google.ClientPath, Builder: b.siteBuilderHooks(), Container: opts.Container && !opts.Box})
 	// What builder brains say in the Build page's chats goes there, not to WhatsApp.
 	b.wa = siteChatMessenger{Messenger: b.wa, appendMessage: b.site.AppendBuildMessage}
 	pace := outboundmsg.OutboxPace

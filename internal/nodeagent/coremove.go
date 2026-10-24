@@ -125,7 +125,7 @@ func (a *Agent) coreRunner() (CoreRunner, *nodeproto.Error) {
 		return a.CoreRunner, nil
 	}
 	if a.Config.Box != nil {
-		return nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "the core does not run in a box yet (#191 phase 4): move it to a native core host")
+		return nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "this box has not the core's settings (box-core.yaml): update it with box.sh --update (box.ps1 -Update), which writes them (docs/NODES.md, \"The core in a box\")")
 	}
 	if runtime.GOOS == "windows" {
 		return nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "the node service runs as LocalSystem, whose Docker Desktop and Credential Manager are not the owner's: move the core by hand (docs/CORE.md, Moving the core to another machine)")
@@ -657,7 +657,7 @@ func (a *Agent) coreImage(ctx context.Context, p nodeproto.CoreImagePullParams) 
 			return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "%v", err)
 		}
 	}
-	if a.Config.Box != nil && a.CoreRunner == nil {
+	if a.Config.Box != nil {
 		// A box runs its image pinned by digest; the core's version is
 		// the box's when the box was updated to it.
 		if p.Version == a.Version {

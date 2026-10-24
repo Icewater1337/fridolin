@@ -959,36 +959,29 @@ func runProgramStdin(ctx context.Context, name string, args, env []string, stdin
 }
 
 // containerSecrets map the keychain's secrets onto the container's
-// environment (compose.yaml lists the same names). made marks those core
-// start makes when the keychain has none: the post-quantum age identity
-// and the keys of the second layers (docs/VAULT.md, "Encryption"). The
-// X25519 identity of before is passed on while the keychain has it, only
-// to read the exports and node-target passwords made for it. optional
-// ones are not named as missing: most cores never have them.
-var containerSecrets = []struct {
+// environment (hostsecrets.CoreEnv, which compose.yaml lists). made marks
+// those core start makes when the keychain has none: the post-quantum age
+// identity and the keys of the second layers (docs/VAULT.md,
+// "Encryption").
+var containerSecrets = func() []struct {
 	env, secret string
 	made        madeSecret
 	optional    bool
-}{
-	{"FRIDOLIN_AGE_IDENTITY_PQ", hostsecrets.AgeIdentityPQ, madeIdentity, false},
-	{"FRIDOLIN_AGE_IDENTITY", hostsecrets.AgeIdentity, notMade, false},
-	{"FRIDOLIN_EXPORT_KEY", hostsecrets.ExportKey, madeKey, false},
-	{"CLAUDE_CODE_OAUTH_TOKEN", hostsecrets.ClaudeOAuthToken, notMade, false},
-	{"TS_AUTHKEY", hostsecrets.TailscaleAuthKey, notMade, false},
-	{"B2_VAULT_KEY_ID", hostsecrets.B2VaultKeyID, notMade, false},
-	{"B2_VAULT_KEY", hostsecrets.B2VaultKey, notMade, false},
-	{"B2_SNAPSHOTS_KEY_ID", hostsecrets.B2SnapshotsKeyID, notMade, false},
-	{"B2_SNAPSHOTS_KEY", hostsecrets.B2SnapshotsKey, notMade, false},
-	{"FRIDOLIN_VAULT_CRYPT_PASSWORD", hostsecrets.VaultCryptPassword, notMade, false},
-	{"FRIDOLIN_VAULT_CRYPT_PASSWORD2", hostsecrets.VaultCryptSalt, notMade, false},
-	{"FRIDOLIN_VAULT_SEAL_KEY", hostsecrets.VaultSealKey, madeKey, false},
-	{"RESTIC_PASSWORD", hostsecrets.ResticPassword, notMade, false},
-	{"FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD", hostsecrets.SnapshotsCryptPassword, madeKey, false},
-	{"FRIDOLIN_LITESTREAM_SEAL_KEY", hostsecrets.LitestreamSealKey, madeKey, false},
-	// A typed GitHub token, the second choice to a connected GitHub App
-	// (docs/GITHUB.md).
-	{"FRIDOLIN_GITHUB_TOKEN", hostsecrets.GitHubToken, notMade, true},
-}
+} {
+	made := map[string]madeSecret{
+		hostsecrets.AgeIdentityPQ: madeIdentity, hostsecrets.ExportKey: madeKey, hostsecrets.VaultSealKey: madeKey,
+		hostsecrets.SnapshotsCryptPassword: madeKey, hostsecrets.LitestreamSealKey: madeKey,
+	}
+	out := make([]struct {
+		env, secret string
+		made        madeSecret
+		optional    bool
+	}, len(hostsecrets.CoreEnv))
+	for i, e := range hostsecrets.CoreEnv {
+		out[i].env, out[i].secret, out[i].made, out[i].optional = e.Env, e.Name, made[e.Name], e.Optional
+	}
+	return out
+}()
 
 // madeSecret says whether and how core start makes a missing secret.
 type madeSecret int

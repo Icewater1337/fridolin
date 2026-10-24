@@ -26,6 +26,13 @@ const boxUsage = `fridolin box — a node in a box (docs/NODES.md, "Node in a bo
 Usage:
   fridolin box compose   print the box's compose file of this version, which
                          box.sh and box.ps1 write beside their .env
+  fridolin box core-compose
+                         print the core's settings of a box (its data volume,
+                         ports and the sandbox's profile), which box.sh, box.ps1
+                         and the updaters write as core.yaml (docs/NODES.md,
+                         "The core in a box")
+  fridolin box seccomp   print the seccomp profile core.yaml names, written
+                         beside it as seccomp.json
   fridolin box updater sh|ps1
                          print the box's updater for the host (box-update.sh,
                          box-update.ps1), which box.sh and box.ps1 install
@@ -70,6 +77,17 @@ func runBox(args []string, stdout, stderr io.Writer, d boxDeps) int {
 			return 2
 		}
 		_, _ = stdout.Write(container.Box)
+		return 0
+	case "core-compose", "seccomp":
+		if len(args) != 0 {
+			fmt.Fprintf(stderr, "fridolin box %s takes no arguments\n", sub)
+			return 2
+		}
+		if sub == "seccomp" {
+			_, _ = stdout.Write(container.Seccomp)
+		} else {
+			_, _ = stdout.Write(container.BoxCore)
+		}
 		return 0
 	case "updater":
 		switch {

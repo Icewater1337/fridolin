@@ -92,7 +92,7 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 	rep.Secrets = tr
 	rep.Blocking = append(rep.Blocking, tr.Problems...)
 	ends := [2]*MoveEnd{&rep.Source, &rep.Target}
-	dstUnread := ""
+	dstUnread, dstNoSecrets := "", false
 	for i, id := range []string{src, dst} {
 		n, err := s.reg.Get(id)
 		if err != nil {
@@ -112,6 +112,7 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 				// Decided once moveImage knows whether the target has the
 				// image: without it, nothing can read the core there yet.
 				dstUnread = fmt.Sprintf("%s: the core there cannot be read: %s", n.Name, c.CoreError)
+				dstNoSecrets = !holdsSecrets(c)
 				continue
 			}
 			rep.Blocking = append(rep.Blocking, fmt.Sprintf("%s: the core there cannot be read: %s", n.Name, c.CoreError))
@@ -151,14 +152,23 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 			rep.Warnings = append(rep.Warnings, dstName+" runs FrIDE: once the secrets are there, any FrIDE task can read them")
 		}
 		s.moveImage(ctx, &rep, dst, true)
+		if rep.Target.Box {
+			s.moveToBox(&rep, checks[1])
+		}
 	}
 	if dstUnread != "" {
-		if rep.ImagePresent {
-			rep.Blocking = append(rep.Blocking, dstUnread)
-		} else {
+		switch {
+		case !rep.ImagePresent:
 			// A host that never ran this version reads its core with the
 			// image the move pulls first; the lease is the source's to hold.
 			rep.Warnings = append(rep.Warnings, fmt.Sprintf("%s has not the core's image yet, so its core cannot be read before the move pulls it", rep.Target.Name))
+		case dstNoSecrets:
+			// Nor can a host that never held the bucket's keys (a new box)
+			// before the move sends them; the rehearsal reads the bucket
+			// there before anything stops.
+			rep.Warnings = append(rep.Warnings, fmt.Sprintf("%s holds no host secrets yet, so its core cannot be read before the move sends them", rep.Target.Name))
+		default:
+			rep.Blocking = append(rep.Blocking, dstUnread)
 		}
 	}
 	s.moveSite(&rep)
@@ -166,6 +176,25 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 	secs := 2*rep.ExportBytes/(10<<20) + 120
 	rep.Outage = fmt.Sprintf("about %d to %d minutes", max(1, secs/60), max(2, 2*secs/60))
 	return rep, nil
+}
+
+// moveToBox is what the pre-flight adds for a box target (docs/NODES.md,
+// "The core in a box"): its own checks (the core's settings, the brains'
+// sandbox) block when they fail, and the owner learns what changes when
+// the core runs in a box.
+func (s *Service) moveToBox(rep *MoveReport, c nodeproto.CoreCheckResult) {
+	name := rep.Target.Name
+	for _, it := range c.Setup {
+		if it.Required && it.Status == "fail" {
+			rep.Blocking = append(rep.Blocking, fmt.Sprintf("%s: %s: %s", name, it.Title, it.Detail))
+		}
+	}
+	rep.Warnings = append(rep.Warnings,
+		fmt.Sprintf("%s is a box: the core runs in its node container, the brain folders in its volume fridolin-box-data. They go with every export and come back on a move back, but no folder of that machine shows them, so Finder or Obsidian there cannot edit them", name),
+		fmt.Sprintf("the dashboard on %s is at http://127.0.0.1:8765 (FRIDOLIN_BOX_DASHBOARD_PORT in the box's .env), and on the tailnet as before", name))
+	if len(rep.MachineBound) > 0 {
+		rep.Warnings = append(rep.Warnings, fmt.Sprintf("what is bound to %s stays there and runs on its node, called over the node channel while it is online: a box runs no host scripts", rep.Source.Name))
+	}
 }
 
 // moveImage finds the core's image by digest and asks the target whether
@@ -193,6 +222,11 @@ func (s *Service) moveImage(ctx context.Context, rep *MoveReport, dst string, ch
 	if !res.Present && rep.Target.Box {
 		rep.Blocking = append(rep.Blocking, fmt.Sprintf("%s: %s", rep.Target.Name, res.Note))
 	}
+}
+
+// holdsSecrets reports whether the core host of c holds any host secret.
+func holdsSecrets(c nodeproto.CoreCheckResult) bool {
+	return slices.ContainsFunc(c.Secrets, func(p nodeproto.CoreSecretPresent) bool { return p.Stored })
 }
 
 func leaseText(l *nodeproto.CoreLease) string {

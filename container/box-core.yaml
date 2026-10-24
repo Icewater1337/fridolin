@@ -1,0 +1,61 @@
+# The core's settings of a node in a box (docs/NODES.md, "The core in a
+# box"): what the box's node service needs to take the core from another
+# machine and run it inside itself. box.sh and box.ps1 write this file as
+# core.yaml beside compose.yaml (fridolin box core-compose prints it),
+# seccomp.json beside it (fridolin box seccomp), and name both in .env's
+# COMPOSE_FILE, so docker compose reads them together. A box made before
+# gets them with its next update.
+#
+# While the box is a node, the core is off and these change nothing but
+# what the container may do. A core move starts the core in the node
+# container, on the volume fridolin-box-data, with the host secrets of the
+# box's sealed store; the role is a file in the node's volume, never a
+# Docker call: no service gets the Docker socket.
+#
+#     FRIDOLIN_BOX_DASHBOARD_PORT  the dashboard on the host's 127.0.0.1 (8765)
+#     FRIDOLIN_BOX_SITE_PORT       the site on the host's 127.0.0.1 (8780)
+#     FRIDOLIN_BOX_CORE_MEMORY     the node service's memory with a core (8g)
+#     FRIDOLIN_BOX_APPARMOR        on Linux with AppArmor (Ubuntu): the profile
+#                                  the core runs under, fridolin-core after
+#                                  `fridolin core apparmor` (docs/CORE.md)
+#
+# Never `docker compose down -v` a box that is the core: the volume
+# fridolin-box-data is the core, as fridolin-data is a core container's.
+services:
+  node:
+    environment:
+      - FRIDOLIN_BOX_CORE=1
+    volumes:
+      # The core's data dir, empty until a move imports the core's export
+      # into it. Named apart from a core container's fridolin-data, so a
+      # machine that runs both never shares one.
+      - fridolin-data:/data
+      # The core's home: the credentials folder a core move brings
+      # (sandbox.credentials_dir), never in an export.
+      - fridolin-home:/var/lib/fridolin
+    # The dashboard and the site, on this machine only, as a core
+    # container publishes them. The core listens on the container's
+    # loopback; the node agent forwards these ports to it and refuses
+    # FrIDE's address. The core's tailnet (tsnet) is the way in from
+    # anywhere else, nodes included.
+    ports:
+      - "127.0.0.1:${FRIDOLIN_BOX_DASHBOARD_PORT:-8765}:8765"
+      - "127.0.0.1:${FRIDOLIN_BOX_SITE_PORT:-8780}:8780"
+    # The core container's profile (compose.yaml): bubblewrap gives each
+    # brain's run its own user, mount and PID namespaces, which Docker's
+    # default seccomp profile and masked /proc paths forbid. With
+    # FRIDOLIN_BOX_APPARMOR unset the last line is a second
+    # no-new-privileges, which changes nothing.
+    security_opt:
+      - seccomp=./seccomp.json
+      - systempaths=unconfined
+      - ${FRIDOLIN_BOX_APPARMOR:+apparmor=}${FRIDOLIN_BOX_APPARMOR:-no-new-privileges:true}
+    mem_limit: ${FRIDOLIN_BOX_CORE_MEMORY:-8g}
+    # The core stops cleanly within 30 seconds, releasing the lease.
+    stop_grace_period: 45s
+
+volumes:
+  fridolin-data:
+    name: fridolin-box-data
+  fridolin-home:
+    name: fridolin-box-home

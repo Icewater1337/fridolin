@@ -117,22 +117,7 @@ func (a *Agent) boxForward(ctx context.Context, wg *sync.WaitGroup) {
 	}
 	hook := net.JoinHostPort("127.0.0.1", strconv.Itoa(BoxWebhookPort))
 	frideHost, _, _ := net.SplitHostPort(b.Fride)
-	fromFride := func(addr net.Addr) bool {
-		ta, ok := addr.(*net.TCPAddr)
-		if !ok {
-			return false
-		}
-		ips, err := net.DefaultResolver.LookupIPAddr(ctx, frideHost)
-		if err != nil {
-			return false
-		}
-		for _, ip := range ips {
-			if ip.IP.Equal(ta.IP) {
-				return true
-			}
-		}
-		return false
-	}
+	fromFride := fromHost(ctx, frideHost)
 	for _, ip := range boxAddrs() {
 		addr := net.JoinHostPort(ip, strconv.Itoa(BoxWebhookPort))
 		ln, err := lc.Listen(ctx, "tcp", addr)

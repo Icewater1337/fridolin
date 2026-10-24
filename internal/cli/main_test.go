@@ -536,6 +536,7 @@ func TestRunFlags(t *testing.T) {
 		{nil, runOptions{}, ""},
 		{[]string{"--config", "/tmp/x.json", "--no-whatsapp", "--open"}, runOptions{config: "/tmp/x.json", noWhatsApp: true, open: true}, ""},
 		{[]string{"--log-file", "/tmp/x.log"}, runOptions{logFile: "/tmp/x.log"}, ""},
+		{[]string{"--container", "--box"}, runOptions{container: true, box: true}, ""},
 		{[]string{"--check"}, runOptions{}, "flag provided but not defined: -check"},
 		{[]string{"--config", "/tmp/x.json", "--check"}, runOptions{config: "/tmp/x.json"}, "flag provided but not defined: -check"},
 		{[]string{"--dashboard-only"}, runOptions{}, "flag provided but not defined: -dashboard-only"},
@@ -559,6 +560,10 @@ func TestRunFlags(t *testing.T) {
 				t.Errorf("printed %q, want the usage text", out.String())
 			}
 		})
+	}
+	// --box is the core in a box's node container, which is a container.
+	if _, err := parseRunFlags([]string{"--box"}, io.Discard); err == nil || !strings.Contains(err.Error(), "--box goes with --container") {
+		t.Errorf("--box alone: %v", err)
 	}
 }
 
