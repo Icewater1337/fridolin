@@ -913,6 +913,13 @@ for compatibility.
 
 ### Fixed
 
+- `fridolin core run` no longer makes the post-quantum age identity and
+  the second layers' keys when the machine has none; only `core start`
+  and `core update` do. The move pre-flight runs `core run core status`
+  on the target, which made keys of its own there, and the core's then
+  could not replace them: the move stopped at the secrets. On a machine
+  that has such keys and is not the core, remove them before moving the
+  core there (`fridolin core secrets`, docs/CORE.md) (#187).
 - `fridolin core pull` (the first step of a core move) checks the
   image's provenance for an owner whose GitHub name has capitals: the
   repository named from the registry (`ghcr.io` lowercases it) did not
