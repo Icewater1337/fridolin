@@ -11,6 +11,7 @@ import { callout } from '../components/common.js';
 import { ROUTES } from './routes.js';
 import { BRAND, routeHref } from './router.js';
 import { store } from './store.js';
+import { errorMessage } from '../lib/errors.js';
 
 /** @import { WhatsAppStatus } from '../../types/api.js' */
 
@@ -49,6 +50,7 @@ function themeButton() {
  * focusPage returns the element it focused. onRestart runs from the
  * restart banner's button, onReload (location.reload) from the update
  * banner's.
+ * @param {{onRestart: () => void, onReload?: () => void}} options
  */
 export function createShell({ onRestart, onReload = () => location.reload() }) {
   const links = new Map();
@@ -100,6 +102,7 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
   const skip = h('a.skip-link', { href: '#main' }, 'Skip to content');
   skip.addEventListener('click', (e) => { e.preventDefault(); focusPage(); });
 
+  /** @param {boolean} open */
   const setNav = (open) => {
     sidebar.classList.toggle('nav-open', open);
     menuBtn.setAttribute('aria-expanded', String(open));
@@ -112,6 +115,7 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
     menuBtn.focus();
   });
 
+  /** @type {(id: string, n: number, title: string) => void} */
   const setBadge = (id, n, title) => {
     const b = links.get(id).badgeEl;
     b.hidden = !n;
@@ -155,6 +159,7 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
   return {
     nodes: [skip, sidebar, h('div.content', banners, page)],
     page,
+    /** @param {string} id */
     setActive(id) {
       links.forEach((a, key) => {
         if (key === id) a.setAttribute('aria-current', 'page');
@@ -163,6 +168,7 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
     },
     closeNav() { setNav(false); },
     focusPage,
+    /** @param {boolean} off */
     setOffline(off) { offline.hidden = !off; },
   };
 }
@@ -170,10 +176,12 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
 /**
  * What a page shows when it failed to load or to render. Mixed versions
  * after an update are one cause, so it offers a reload (location.reload).
+ * @param {unknown} e what was thrown
+ * @param {() => void} [onReload]
  */
 export function pageFailed(e, onReload = () => location.reload()) {
   return callout('bad', 'This page failed to load',
-    h('div', (e && e.message) || String(e)),
+    h('div', errorMessage(e)),
     h('p.muted.small', 'If Fridolin was just updated, reloading the page loads the new version of all of it.'),
     h('div.actions', btn('Reload page', { kind: 'primary', icon: 'refresh', small: true, onClick: () => onReload() })));
 }
