@@ -166,13 +166,14 @@ ESLINT ?= $(NPX) --yes eslint@$(ESLINT_VERSION)
 lint-web: ## ESLint on the dashboard's JS (npx fetches it)
 	cd web && NPM_CONFIG_IGNORE_SCRIPTS=true $(ESLINT) .
 
-test-sh: ## tests for the personal-data, action-pin, notices and release scripts and the Makefile
+test-sh: ## tests for the personal-data, action-pin, notices, release and CI report scripts and the Makefile
 	scripts/test-check-personal-data.sh
 	scripts/test-check-action-pins.sh
 	scripts/test-third-party-notices.sh
 	scripts/test-build-release.sh
 	scripts/test-makefile.sh
 	scripts/test-test-shard.sh
+	scripts/test-ci-report.sh
 
 # A temp dir, not the binary: a check must not replace a build in use.
 # -race makes a data race at start or shutdown fail the run. The build is

@@ -44,6 +44,8 @@ type fakeCore struct {
 	// fresh is a host that never pulled the core's image: its core
 	// cannot be read, and the image is not there.
 	fresh bool
+	// files is its core's credentials folder (sandbox.credentials_dir).
+	files string
 
 	mu       sync.Mutex
 	running  bool
@@ -56,7 +58,41 @@ type fakeCore struct {
 func newFakeCore(t *testing.T, name string, st cloud.ObjectStore, ready bool) *fakeCore {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
-	return &fakeCore{name: name, device: hex.EncodeToString(b), st: st, ready: ready}
+	return &fakeCore{name: name, device: hex.EncodeToString(b), st: st, ready: ready, files: t.TempDir()}
+}
+
+// ExportFiles and ImportFiles stand in for core files export and import
+// (secretxfer.ReadFiles and StoreFiles in the container): the .json files
+// of the folder, and only those not there yet are written.
+func (f *fakeCore) ExportFiles(context.Context) (string, map[string][]byte, error) {
+	out := map[string][]byte{}
+	names, err := filepath.Glob(filepath.Join(f.files, "*.json"))
+	for _, p := range names {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return "", nil, err
+		}
+		out[filepath.Base(p)] = b
+	}
+	return "~/credentials", out, err
+}
+
+func (f *fakeCore) ImportFiles(_ context.Context, dir string, files map[string][]byte) (stored, kept []string, err error) {
+	if dir != "~/credentials" {
+		return nil, nil, fmt.Errorf("the files came for %q", dir)
+	}
+	for n, b := range files {
+		p := filepath.Join(f.files, n)
+		if _, err := os.Stat(p); err == nil {
+			kept = append(kept, n)
+			continue
+		}
+		if err := os.WriteFile(p, b, 0o600); err != nil {
+			return stored, kept, err
+		}
+		stored = append(stored, n)
+	}
+	return stored, kept, nil
 }
 
 const fakeStale = time.Minute
@@ -220,6 +256,7 @@ type moveHosts struct {
 	srcCore, dstCore *fakeCore
 	srcAgent         *nodeagent.Agent
 	dstAgent         *nodeagent.Agent
+	dstStore         *memSecrets
 	secret           string
 }
 
@@ -242,7 +279,7 @@ func (h *harness) moveHosts(version string, dstReady bool) moveHosts {
 		}
 	}
 	var dstDir string
-	m.dst, dstDir, _, m.dstAgent = h.coreHostNodeWith(addr, "icebase", setup(m.dstCore))
+	m.dst, dstDir, m.dstStore, m.dstAgent = h.coreHostNodeWith(addr, "icebase", setup(m.dstCore))
 	key, err := nodeagent.LoadKey(dstDir)
 	if err != nil {
 		t.Fatal(err)
@@ -310,6 +347,14 @@ func TestCoreMove(t *testing.T) {
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts(h.b.nodes.Version(), true)
 
+	// mini's credentials folder: the files a move carries, and one it
+	// does not.
+	for name, body := range map[string]string{"google_calendar_token_personal.json": `{"t":"test-value-1"}`, "dashboard-users.json": "[]", "restore.sh": "#!/bin/sh\n"} {
+		if err := os.WriteFile(filepath.Join(m.srcCore.files, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	rep := h.moveCheck(m.src, m.dst)
 	if len(rep.Blocking) != 0 || !rep.Secrets.Pinned || !rep.ImagePresent || rep.Source.Core == nil || !rep.Source.Core.HeldBy() {
 		t.Fatalf("the pre-flight: %+v", rep)
@@ -325,7 +370,7 @@ func TestCoreMove(t *testing.T) {
 	if strings.Contains(body, m.secret) {
 		t.Error("the move's record holds a secret's value")
 	}
-	h.WaitSent(harnessDM, "The core moved to *icebase*")
+	h.WaitSent(harnessDM, "Running on *icebase* now")
 	if running, _, _ := m.srcCore.state(); running {
 		t.Error("mini runs the core after the move")
 	}
@@ -336,6 +381,17 @@ func TestCoreMove(t *testing.T) {
 	st, _ := m.dstCore.Status(context.Background())
 	if !st.HeldBy() {
 		t.Errorf("icebase does not hold the lease: %+v", st.Lease)
+	}
+	// The secret files came along, and only those; the record names them
+	// and holds no content.
+	if b, err := os.ReadFile(filepath.Join(m.dstCore.files, "google_calendar_token_personal.json")); err != nil || !strings.Contains(string(b), "test-value-1") {
+		t.Errorf("icebase's calendar token: %q, %v", b, err)
+	}
+	if _, err := os.Stat(filepath.Join(m.dstCore.files, "restore.sh")); err == nil {
+		t.Error("a file a move does not carry went along")
+	}
+	if strings.Contains(body, "test-value-1") || !strings.Contains(body, "secret files: 2 stored") {
+		t.Errorf("the record of the files: %s", body)
 	}
 	h.WaitFor("mini's watch to end", func() bool {
 		st := h.moveStatus(m.src, rec.ID)
@@ -354,12 +410,44 @@ func TestCoreMove(t *testing.T) {
 	}
 
 	// The way back: icebase must pin mini first, which is a change of
-	// its core-host.json the owner approves again.
-	_ = h.moveBack(m)
+	// its core-host.json the owner approves again. icebase's token was
+	// refreshed meanwhile; mini keeps its own folder as it was.
+	if err := os.WriteFile(filepath.Join(m.dstCore.files, "google_calendar_token_personal.json"), []byte(`{"t":"refreshed"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	back := h.moveBack(m)
+	if b, _ := os.ReadFile(filepath.Join(m.srcCore.files, "google_calendar_token_personal.json")); !strings.Contains(string(b), "test-value-1") {
+		t.Errorf("the way back replaced mini's token: %s", b)
+	}
+	if !slices.ContainsFunc(back.Steps, func(st nodeproto.CoreMoveStep) bool {
+		return strings.Contains(st.Detail, "secret files: 0 stored, 2 kept")
+	}) {
+		t.Errorf("the way back's files: %+v", back.Steps)
+	}
 }
 
 // moveBack pins mini on icebase and moves the core back.
 func (h *harness) moveBack(m moveHosts) nodes.MoveRecord {
+	t := h.t
+	t.Helper()
+	h.pinBack(m)
+	rec, body := h.startMove(m.dst, m.src, 10, 10)
+	if rec.State != nodes.MoveDone {
+		t.Fatalf("the way back ended %s: %s", rec.State, body)
+	}
+	if running, data, _ := m.srcCore.state(); !running || data != "icebase's data" {
+		t.Errorf("mini after the way back: running %v on %q", running, data)
+	}
+	if running, _, _ := m.dstCore.state(); running {
+		t.Error("icebase still runs the core")
+	}
+	return rec
+}
+
+// pinBack lets icebase send the secrets back to mini: it pins mini's
+// device key, a change of its core-host.json the owner approves again,
+// and its core gets data of its own.
+func (h *harness) pinBack(m moveHosts) {
 	t := h.t
 	t.Helper()
 	dir := m.dstAgent.Dir
@@ -378,17 +466,6 @@ func (h *harness) moveBack(m moveHosts) nodes.MoveRecord {
 	m.dstCore.mu.Lock()
 	m.dstCore.data = "icebase's data"
 	m.dstCore.mu.Unlock()
-	rec, body := h.startMove(m.dst, m.src, 10, 10)
-	if rec.State != nodes.MoveDone {
-		t.Fatalf("the way back ended %s: %s", rec.State, body)
-	}
-	if running, data, _ := m.srcCore.state(); !running || data != "icebase's data" {
-		t.Errorf("mini after the way back: running %v on %q", running, data)
-	}
-	if running, _, _ := m.dstCore.state(); running {
-		t.Error("icebase still runs the core")
-	}
-	return rec
 }
 
 func (h *harness) moveStatus(id, move string) nodeproto.CoreMoveState {

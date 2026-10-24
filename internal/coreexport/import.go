@@ -335,6 +335,23 @@ func ActivateWith(staged, target string, opts ActivateOptions) error {
 	if err != nil {
 		return err
 	}
+	// The buckets' encryption state comes with the export; the one here
+	// stays beside it as encryption.json.before-<time>.
+	if src := filepath.Join(staged, filepath.FromSlash(EncryptionState)); exists(src) {
+		dst := filepath.Join(target, filepath.FromSlash(EncryptionState))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+			return err
+		}
+		if exists(dst) {
+			if err := os.Rename(dst, dst+".before-"+opts.Now.UTC().Format("20060102T150405Z")); err != nil {
+				return fmt.Errorf("activate: keeping the encryption state: %w", err)
+			}
+		}
+		if err := os.Rename(src, dst); err != nil {
+			return fmt.Errorf("activate: moving the encryption state into place: %w", err)
+		}
+		_ = os.Remove(filepath.Join(staged, "core"))
+	}
 	for _, e := range entries {
 		if slices.Contains(stay, e.Name()) {
 			continue
@@ -448,3 +465,8 @@ func openInner(r io.Reader, key []byte) (io.Reader, bool, error) {
 
 // sealMagic starts every sealed stream.
 const sealMagic = "FRDSEAL1"
+
+func exists(p string) bool {
+	_, err := os.Lstat(p)
+	return err == nil
+}

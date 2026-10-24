@@ -34,20 +34,21 @@ jobs:
         # still accept a release without security fixes.
         go: [oldstable, stable]
         # The slowest job is what a pull request waits for, so the race
-        # tests run in slices, one job each (scripts/test-shard.sh): four
-        # on macOS, where they take about twice as long, two on Linux. The
-        # checks that run once per system and release go with the last
-        # slice, which has the fewest tests (SHARDS below).
-        shard: [1, 2, 3, 4]
+        # tests run in slices, one job each (scripts/test-shard.sh, which
+        # runs a slice's packages side by side): three on macOS, where they
+        # take about half as long again, two on Linux (SHARDS below). Each
+        # slice then takes about as long as internal/app's share of it. The
+        # checks that run once per system and release are go-checks,
+        # beside them, but for the two that build with -race.
+        shard: [1, 2, 3]
         exclude:
           - {os: ubuntu-latest, shard: 3}
-          - {os: ubuntu-latest, shard: 4}
           # GitHub runs only a few macOS jobs at a time per account, so a
           # pull request tests macOS on the current release alone; each
           # push to main tests both. "none" matches no release.
           - os: macos-latest
             go: ${{ github.event_name == 'pull_request' && 'oldstable' || 'none' }}
-    name: go (${{ matrix.os }}, ${{ matrix.go }}, ${{ matrix.shard }}/${{ matrix.os == 'macos-latest' && 4 || 2 }})
+    name: go (${{ matrix.os }}, ${{ matrix.go }}, ${{ matrix.shard }}/${{ matrix.os == 'macos-latest' && 3 || 2 }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     env:
@@ -55,33 +56,25 @@ jobs:
       # directive newer than it would quietly download a newer toolchain.
       GOTOOLCHAIN: local
       # How many slices this system's race tests run in; see shard above.
-      SHARDS: ${{ matrix.os == 'macos-latest' && 4 || 2 }}
+      SHARDS: ${{ matrix.os == 'macos-latest' && 3 || 2 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # setup-go keys its cache on the system, the release and a hash of
+      # cache-dependency-path (go.sum by default), and the first job to
+      # finish with a key saves it for every run after, until the hash
+      # changes. These slices build every package with -race, which the
+      # jobs that build without it (site, CodeQL) would leave out of the
+      # cache, so they hash other files and have a cache of their own;
+      # go-checks too. A cache is about 0.4 GB, of the repository's 10.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ matrix.go }}
           cache: true
-
-      # The steps are Makefile targets, so `make check` runs the same.
-      - name: gofmt
-        if: matrix.shard == fromJSON(env.SHARDS)
-        run: make fmt-check
-
-      - name: go vet
-        if: matrix.shard == fromJSON(env.SHARDS)
-        run: make vet
-
-      - name: build
-        if: matrix.shard == fromJSON(env.SHARDS)
-        run: make build
-
-      # The main package is in cmd/fridolin. An old `go build -o fridolin .`
-      # at the root must fail rather than write something over the binary.
-      - name: no Go files at the root
-        run: make root-check
+          cache-dependency-path: |
+            go.mod
+            go.sum
 
       # The backup tests that run the real rclone skip without it. Linux
       # gets a pinned release, checked against its published checksum
@@ -104,9 +97,12 @@ jobs:
           rclone version
           echo "FRIDOLIN_REQUIRE_RCLONE=1" >> "$GITHUB_ENV"
 
+      # The steps are Makefile targets, so `make check` runs the same.
       - name: test
         run: make race-shard SHARD=${{ matrix.shard }}/${{ env.SHARDS }}
 
+      # These two build with -race too, so they run where that build is in
+      # the cache: a few seconds each, after one of the slices.
       - name: repeat provider process tests
         if: matrix.shard == fromJSON(env.SHARDS)
         run: make race-process
@@ -117,24 +113,70 @@ jobs:
         if: matrix.shard == fromJSON(env.SHARDS)
         run: make smoke
 
+  # What runs once per system and release, beside the test slices instead
+  # of after one of them, but for the -race steps above. The steps are
+  # Makefile targets, so `make check` runs the same.
+  go-checks:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        go: [oldstable, stable]
+        exclude:
+          # As in go: a pull request checks macOS on the current release.
+          - os: macos-latest
+            go: ${{ github.event_name == 'pull_request' && 'oldstable' || 'none' }}
+    name: go checks (${{ matrix.os }}, ${{ matrix.go }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # A cache of its own (see go): it builds without -race, for Linux and
+      # Windows too.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            Makefile
+
+      - name: gofmt
+        run: make fmt-check
+
+      - name: go vet
+        run: make vet
+
+      - name: build
+        run: make build
+
+      # The main package is in cmd/fridolin. An old `go build -o fridolin .`
+      # at the root must fail rather than write something over the binary.
+      - name: no Go files at the root
+        run: make root-check
+
       # The linters need one Go release, but both systems: some files only
       # build on one of them.
       - name: staticcheck and exhaustive
-        if: matrix.go == 'stable' && matrix.shard == fromJSON(env.SHARDS)
+        if: matrix.go == 'stable'
         run: make lint-go
 
       - name: go.mod and go.sum are tidy
-        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest' && matrix.shard == fromJSON(env.SHARDS)
+        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest'
         run: make tidy-check
 
       # It lists what every release platform links, so one run covers
       # them all. A dependency update fails here until make notices ran.
       - name: THIRD_PARTY_NOTICES is current
-        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest' && matrix.shard == fromJSON(env.SHARDS)
+        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest'
         run: make notices-check
 
       - name: actionlint and action pins
-        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest' && matrix.shard == fromJSON(env.SHARDS)
+        if: matrix.go == 'stable' && matrix.os == 'ubuntu-latest'
         run: make lint-actions
 
   # Windows builds everything and vets it, and runs the tests of the
@@ -228,12 +270,50 @@ jobs:
 
       # The engine saves a failing input under testdata/fuzz/<target> in the
       # package. Commit it with the fix, and go test runs it from then on.
+      # The artifact holds every package's testdata/fuzz, the inputs
+      # committed before included. go.mod is there to root the artifact at
+      # the repository: its paths start at the common folder of what it
+      # holds, and the report job finds a package's input at its path.
       - name: keep the failing inputs
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-failing-inputs
-          path: '**/testdata/fuzz/**'
+          path: |
+            go.mod
+            **/testdata/fuzz/**
+          retention-days: 30
+
+  # A run on main reports itself in issues (scripts/ci-report.sh): one per
+  # failing fuzz target or test, which a later run that passes closes.
+  # Nobody watches main's runs, and a failure after a merge shows in no
+  # pull request. Pushes to main of this repository only, so the write
+  # permission is never in a run a pull request or a fork started. It runs
+  # after every other job, also when they all passed, so it can close; a
+  # job added to this workflow goes into needs too.
+  report:
+    needs: [go, go-windows, fuzz, scripts, python, web, site, personal-data]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'Icewater1337/fridolin' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read # the run's jobs, their logs and the fuzz artifact
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: report in issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HEAD_SHA: ${{ github.sha }}
+          SELF_JOB: report
+        run: scripts/ci-report.sh
 
   scripts:
     # The git hooks run the personal-data check on macOS, with BSD awk,
@@ -255,7 +335,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: make lint-sh
 
-      - name: tests of the personal-data, action-pin, notices and release scripts and the Makefile
+      - name: tests of the personal-data, action-pin, notices, release and CI report scripts and the Makefile
         run: make test-sh
 
   python:

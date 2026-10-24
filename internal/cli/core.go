@@ -73,6 +73,10 @@ On the host that runs Docker:
                        check the image's build provenance (GitHub's attestation
                        for image.yml on main), pull it by digest and tag it as
                        this version's, for start (--check: only say whether it is here)
+  fridolin core files export|import
+                       in the core's container (core run core files …): the secret
+                       files of sandbox.credentials_dir a core move carries, as
+                       JSON; import (from stdin) writes only those not there, 0600
   fridolin core rehearse [--json]
                        import the latest export into a scratch volume
                        (fridolin-move-rehearsal), check it, and remove the volume:
@@ -152,6 +156,8 @@ func runCore(args []string, env coreEnv) int {
 		return coreMigrate(ctx, args, env, defaultHostDeps(env))
 	case "secrets":
 		return coreSecrets(args, env, defaultHostDeps(env))
+	case "files":
+		return coreFiles(args, env)
 	case "send", "receive":
 		return coreTransfer(ctx, sub, args, env, defaultHostDeps(env))
 	case "apparmor":
@@ -735,6 +741,9 @@ type hostDeps struct {
 	tailnet secretxfer.Tailnet
 	// run runs a program with exactly env as its environment.
 	run func(ctx context.Context, name string, args, env []string, stdout, stderr io.Writer) error
+	// runStdin is run with stdin, for core run core files import, which
+	// reads the secret files there; nil runs without.
+	runStdin func(ctx context.Context, name string, args, env []string, stdin io.Reader, stdout, stderr io.Writer) error
 	// docker is the docker CLI's path.
 	docker      string
 	composePath string
@@ -791,7 +800,7 @@ func hostZone(getenv func(string) string) string {
 }
 
 func defaultHostDeps(env coreEnv) hostDeps {
-	d := hostDeps{run: runProgram, version: version.String(), newIdentity: func() (string, error) {
+	d := hostDeps{run: runProgram, runStdin: runProgramStdin, version: version.String(), newIdentity: func() (string, error) {
 		id, err := age.GenerateHybridIdentity()
 		if err != nil {
 			return "", err
@@ -828,7 +837,7 @@ func defaultHostDeps(env coreEnv) hostDeps {
 		gh = lookPathIn("gh", envValue(env.environ, "PATH"))
 	}
 	if gh == "" {
-		d.noVerify = "GitHub's CLI (gh) is not installed, which checks the image's provenance before it is pulled (no login needed): install it (brew install gh, apt-get install gh, winget install GitHub.cli)"
+		d.noVerify = "GitHub's CLI (gh) is not installed, which checks the image's provenance before it is pulled (no login needed): install a current one (brew install gh, winget install GitHub.cli, on Linux from GitHub's apt repository: https://cli.github.com)"
 	}
 	d.verify = provenance.Verifier{Gh: gh, Environ: env.environ}.Verify
 	d.secrets = hostsecrets.ForHost(d.goos, env.getenv, d.home)
@@ -940,8 +949,12 @@ func lookPathIn(name, path string) string {
 }
 
 func runProgram(ctx context.Context, name string, args, env []string, stdout, stderr io.Writer) error {
+	return runProgramStdin(ctx, name, args, env, nil, stdout, stderr)
+}
+
+func runProgramStdin(ctx context.Context, name string, args, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Env, cmd.Stdout, cmd.Stderr = env, stdout, stderr
+	cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = env, stdin, stdout, stderr
 	return cmd.Run()
 }
 
@@ -1147,6 +1160,11 @@ func coreHost(ctx context.Context, sub string, args []string, env coreEnv, d hos
 		}
 	case "run":
 		// No published ports: the one-off container is no second dashboard.
+		if slices.Equal(fs.Args(), []string{"core", "files", "import"}) && d.runStdin != nil {
+			// The secret files come on stdin (a core move, #187).
+			err = d.runStdin(ctx, d.docker, append(composeArgs(path, override, armor), "run", "--rm", "--no-deps", "-T", "core", "core", "files", "import"), childEnv, env.stdin, env.stdout, env.stderr)
+			break
+		}
 		err = compose1(append([]string{"run", "--rm", "--no-deps", "core"}, fs.Args()...)...)
 	case "rehearse":
 		return coreRehearse(ctx, pull.asJSON, path, override, armor, childEnv, env, d)
