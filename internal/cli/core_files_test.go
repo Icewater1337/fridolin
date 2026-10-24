@@ -16,7 +16,7 @@ import (
 // sandbox.credentials_dir, which goes along under ~.
 func TestCoreFiles(t *testing.T) {
 	home := t.TempDir()
-	dir := filepath.Join(home, "creds")
+	dir := filepath.Join(home, ".creds")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -26,7 +26,7 @@ func TestCoreFiles(t *testing.T) {
 		}
 	}
 	cfg := filepath.Join(t.TempDir(), "config.json")
-	// Written by hand as ~/creds; loaded and saved by the bridge, expanded.
+	// Written by hand as ~/.creds; loaded and saved by the bridge, expanded.
 	if err := os.WriteFile(cfg, []byte(`{"sandbox": {"credentials_dir": "`+dir+`"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -35,17 +35,17 @@ func TestCoreFiles(t *testing.T) {
 		t.Fatalf("export: exit %d", code)
 	}
 	var got secretFiles
-	if err := json.Unmarshal(out.Bytes(), &got); err != nil || got.Dir != "~/creds" || len(got.Files) != 1 || string(got.Files["google_calendar_token_home.json"]) != `{"t":1}` {
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil || got.Dir != "~/.creds" || len(got.Files) != 1 || string(got.Files["google_calendar_token_home.json"]) != `{"t":1}` {
 		t.Fatalf("export: %s, %v", out.String(), err)
 	}
 
 	// Import into another home: what is there stays, the rest is written,
 	// into the folder named under ~.
 	other := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(other, "creds"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(other, ".creds"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(other, "creds", "dashboard-users.json"), []byte("mine"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(other, ".creds", "dashboard-users.json"), []byte("mine"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	got.Files["dashboard-users.json"] = []byte("theirs")
@@ -58,7 +58,7 @@ func TestCoreFiles(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &res); err != nil || !slices.Equal(res.Stored, []string{"google_calendar_token_home.json"}) || !slices.Equal(res.Kept, []string{"dashboard-users.json"}) {
 		t.Fatalf("import: %s, %v", out.String(), err)
 	}
-	if b, _ := os.ReadFile(filepath.Join(other, "creds", "dashboard-users.json")); string(b) != "mine" {
+	if b, _ := os.ReadFile(filepath.Join(other, ".creds", "dashboard-users.json")); string(b) != "mine" {
 		t.Fatalf("a file there was replaced: %s", b)
 	}
 

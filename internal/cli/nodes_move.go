@@ -186,6 +186,9 @@ func writeMoveReport(w io.Writer, r nodes.MoveReport) {
 		return strings.Join(s, ", ")
 	}
 	fmt.Fprintf(w, "Host secrets: the target lacks %s; %s pins its key: %v\n", list(r.Secrets.Target.Missing), r.Source.Name, r.Secrets.Pinned)
+	if r.SecretFilesDir != "" {
+		fmt.Fprintf(w, "Secret files (%s): %s\n", r.SecretFilesDir, list(r.SecretFiles))
+	}
 	if r.Outage != "" {
 		fmt.Fprintf(w, "Offline: %s\n", r.Outage)
 	}

@@ -948,6 +948,11 @@ for compatibility.
 
 ### Fixed
 
+- A core move carries the secret files of a hidden credentials folder
+  (`~/.something`): the folder check refused a leading dot, and the
+  move went on with the host secrets and no files. A move now stops
+  before anything stops when the source's secret files cannot be read,
+  and the pre-flight says so (#187).
 - A core export carries `core/encryption.json`, the buckets' encryption
   state (which stores are encrypted twice, which single-layer copies are
   retired), and the import puts it in place, keeping the target's earlier

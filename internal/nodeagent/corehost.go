@@ -337,6 +337,21 @@ func (a *Agent) coreCheck(ctx context.Context) nodeproto.CoreCheckResult {
 			res.Secrets = append(res.Secrets, nodeproto.CoreSecretPresent{Name: n, Stored: ok, Received: ok && slices.Contains(received, n)})
 		}
 	}
+	if fr, ok := a.secretFiler(); ok && a.Config.Box == nil {
+		fctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+		dir, files, err := fr.ExportFiles(fctx)
+		cancel()
+		if err != nil {
+			res.SecretFilesError = err.Error()
+		} else {
+			res.SecretFilesDir = dir
+			for n, b := range files {
+				res.SecretFiles = append(res.SecretFiles, n)
+				clear(b)
+			}
+			sort.Strings(res.SecretFiles)
+		}
+	}
 	res.Setup, res.SetupOK, res.SetupNote = a.coreSetup(ctx)
 	res.Core, res.CoreError = a.coreRuntime(ctx)
 	res.MachineBound = a.machineBound()
@@ -480,8 +495,9 @@ func (a *Agent) coreSend(p nodeproto.CoreSecretsSendParams) (any, *nodeproto.Err
 		filesDir, files, err = fr.ExportFiles(ctx)
 		cancel()
 		if err != nil {
-			b.FilesError = err.Error()
-			a.logf("node: core-host: reading the secret files: %v", err)
+			// Never the secrets without the files the core needs: the
+			// move stops here, before anything stops.
+			return fail(nodeproto.CodeFailed, "reading the secret files of the core's credentials folder: %v", err)
 		}
 	}
 	defer func() {

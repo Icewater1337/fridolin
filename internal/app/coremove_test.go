@@ -44,8 +44,10 @@ type fakeCore struct {
 	// fresh is a host that never pulled the core's image: its core
 	// cannot be read, and the image is not there.
 	fresh bool
-	// files is its core's credentials folder (sandbox.credentials_dir).
-	files string
+	// files is its core's credentials folder (sandbox.credentials_dir);
+	// filesErr fails reading it.
+	files    string
+	filesErr error
 
 	mu       sync.Mutex
 	running  bool
@@ -65,6 +67,12 @@ func newFakeCore(t *testing.T, name string, st cloud.ObjectStore, ready bool) *f
 // (secretxfer.ReadFiles and StoreFiles in the container): the .json files
 // of the folder, and only those not there yet are written.
 func (f *fakeCore) ExportFiles(context.Context) (string, map[string][]byte, error) {
+	f.mu.Lock()
+	ferr := f.filesErr
+	f.mu.Unlock()
+	if ferr != nil {
+		return "", nil, ferr
+	}
 	out := map[string][]byte{}
 	names, err := filepath.Glob(filepath.Join(f.files, "*.json"))
 	for _, p := range names {
@@ -74,11 +82,11 @@ func (f *fakeCore) ExportFiles(context.Context) (string, map[string][]byte, erro
 		}
 		out[filepath.Base(p)] = b
 	}
-	return "~/credentials", out, err
+	return "~/.credentials", out, err
 }
 
 func (f *fakeCore) ImportFiles(_ context.Context, dir string, files map[string][]byte) (stored, kept []string, err error) {
-	if dir != "~/credentials" {
+	if dir != "~/.credentials" {
 		return nil, nil, fmt.Errorf("the files came for %q", dir)
 	}
 	for n, b := range files {
@@ -526,6 +534,26 @@ func TestCoreMoveCheckFreshTarget(t *testing.T) {
 	}
 	if !slices.ContainsFunc(rep.Warnings, func(w string) bool { return strings.Contains(w, "has not the core's image yet") }) {
 		t.Fatalf("no warning about the image: %q", rep.Warnings)
+	}
+}
+
+// The secret files of a credentials folder that cannot be read keep the
+// core where it is: the pre-flight says so, and the transfer, the move's
+// first step, sends nothing (round 2 of the live test sent the secrets
+// with 0 files).
+func TestCoreMoveRefusesUnreadableSecretFiles(t *testing.T) {
+	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
+	m := h.moveHosts(h.b.nodes.Version(), true)
+	m.srcCore.mu.Lock()
+	m.srcCore.filesErr = errors.New("the secret files' folder is not a folder under ~")
+	m.srcCore.mu.Unlock()
+	rep := h.moveCheck(m.src, m.dst)
+	if !slices.ContainsFunc(rep.Blocking, func(b string) bool { return strings.Contains(b, "secret files") }) {
+		t.Fatalf("the pre-flight does not block: %q", rep.Blocking)
+	}
+	w := h.Do("POST", "/api/nodes/core-secrets-transfer", map[string]any{"source": m.src, "target": m.dst, "run": true})
+	if w.Code == http.StatusOK && strings.Contains(w.Body.String(), `"ran":true`) {
+		t.Fatalf("the transfer ran without the files: %s", w.Body.String())
 	}
 }
 
