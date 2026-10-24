@@ -165,8 +165,25 @@ func (a *Agent) coreMovesStop() {
 	a.moves.wg.Wait()
 }
 
+// movePath is the state file of move id, which must be a move id: one
+// name in core-moves, never a path.
+func (a *Agent) movePath(id string) (string, error) {
+	if err := nodeproto.CheckMoveID(id); err != nil {
+		return "", err
+	}
+	name := filepath.Base(id + ".json")
+	if name != id+".json" || strings.Contains(name, "..") {
+		return "", fmt.Errorf("%q is not a move id", id)
+	}
+	return filepath.Join(a.Dir, coreMovesDir, name), nil
+}
+
 func (a *Agent) loadMove(id string) (*moveRun, error) {
-	data, err := os.ReadFile(filepath.Join(a.Dir, coreMovesDir, id+".json"))
+	p, err := a.movePath(id)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(p)
 	if err != nil {
 		return nil, err
 	}
@@ -187,9 +204,11 @@ func (a *Agent) saveMove(m *moveRun) {
 	}
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err == nil {
-		dir := filepath.Join(a.Dir, coreMovesDir)
-		if err = os.MkdirAll(dir, 0o700); err == nil {
-			err = writeFile(filepath.Join(dir, m.State.Move+".json"), append(data, '\n'), 0o600)
+		var p string
+		if p, err = a.movePath(m.State.Move); err == nil {
+			if err = os.MkdirAll(filepath.Dir(p), 0o700); err == nil {
+				err = writeFile(p, append(data, '\n'), 0o600)
+			}
 		}
 	}
 	if err != nil {
@@ -253,7 +272,10 @@ func (a *Agent) coreMoveAccept(raw json.RawMessage, role string) (any, *nodeprot
 	}
 	_, seen := a.moves.runs[p.Move]
 	if !seen && a.Dir != "" {
-		_, err := os.Stat(filepath.Join(a.Dir, coreMovesDir, p.Move+".json"))
+		path, err := a.movePath(p.Move)
+		if err == nil {
+			_, err = os.Stat(path)
+		}
 		seen = err == nil
 	}
 	busy := slices.ContainsFunc(mapValues(a.moves.runs), func(o *moveRun) bool { return !nodeproto.MoveFinal(o.State.Phase) })

@@ -230,7 +230,11 @@ type MoveOptions struct {
 	Approval string
 }
 
-func (s *Service) movePath(id string) string { return filepath.Join(s.dir, movesDir, id+".json") }
+// movePath is the record of move id: one name in moves, never a path
+// (callers check the id with nodeproto.CheckMoveID first).
+func (s *Service) movePath(id string) string {
+	return filepath.Join(s.dir, movesDir, filepath.Base(id+".json"))
+}
 
 func (s *Service) saveMoveLocked(r *MoveRecord) {
 	r.Updated = time.Now().UTC()
@@ -288,6 +292,9 @@ func (s *Service) Move(id string) (MoveRecord, error) {
 }
 
 func (s *Service) loadMove(id string) (*MoveRecord, error) {
+	if err := nodeproto.CheckMoveID(id); err != nil || strings.Contains(id, "..") {
+		return nil, fmt.Errorf("%w: %q is not a move id", ErrInvalidInput, id)
+	}
 	data, err := os.ReadFile(s.movePath(id))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("%w: no move %s", ErrUnknownNode, id)
