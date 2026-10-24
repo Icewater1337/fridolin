@@ -151,6 +151,7 @@ func (h *setupHarness) run(t *testing.T, home string, args, env []string) (out s
 }
 
 func TestSetupSaysWhatHappened(t *testing.T) {
+	t.Parallel()
 	// setup.sh used to offer a rollback after an install that changed
 	// nothing, which would swap a working install for the one before, and
 	// to tell someone with a bridge running to start a second one.
@@ -238,6 +239,7 @@ func TestSetupSaysWhatHappened(t *testing.T) {
 }
 
 func TestSetupShowsTheFirstStepsOnlyToANewSetup(t *testing.T) {
+	t.Parallel()
 	// Every upgrade ended with "Pair WhatsApp", "Add a brain" and "Allow
 	// your number", which a config already set up has done.
 	h := newSetupHarness(t)
@@ -265,6 +267,7 @@ func TestSetupShowsTheFirstStepsOnlyToANewSetup(t *testing.T) {
 }
 
 func TestSetupBuildsAndTestsWithTheMakefile(t *testing.T) {
+	t.Parallel()
 	// setup.sh had a go build and a go test of its own, which could drift
 	// from the Makefile's that CI runs. It runs make build, stamped with
 	// the version it names (this copy has no git, so "dev"), and make test.
@@ -337,6 +340,7 @@ func TestSetupBuildsAndTestsWithTheMakefile(t *testing.T) {
 }
 
 func TestSetupTakesItsFoldersFromFridolinVariables(t *testing.T) {
+	t.Parallel()
 	// setup.sh read DATA_DIR and INSTALL_DIR, names other software exports
 	// too, and kept its own copy of the bridge's data-dir rules. It reads
 	// FRIDOLIN_DATA_DIR and FRIDOLIN_INSTALL_DIR, and asks the build for

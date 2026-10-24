@@ -21,7 +21,8 @@ import (
 )
 
 func TestCodexDefaultsAndValidation(t *testing.T) {
-	cfg, err := config.Resolve(&config.File{}, ConfigPaths(), runtime.GOOS)
+	t.Parallel()
+	cfg, err := config.Resolve(&config.File{}, ConfigPathsFor(homeOf(t)), runtime.GOOS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +30,7 @@ func TestCodexDefaultsAndValidation(t *testing.T) {
 		t.Fatalf("wrong agent defaults: %s %s %s %s", cfg.AgentProvider, cfg.CodexPath, cfg.CodexModel, cfg.CodexEffort)
 	}
 	for _, c := range []*config.File{{AgentProvider: "other"}, {CodexEffort: "minimal"}} {
-		if _, err := config.Resolve(c, ConfigPaths(), runtime.GOOS); err == nil {
+		if _, err := config.Resolve(c, ConfigPathsFor(homeOf(t)), runtime.GOOS); err == nil {
 			t.Fatal("accepted invalid configuration")
 		}
 	}
@@ -48,6 +49,7 @@ func TestCodexDefaultsAndValidation(t *testing.T) {
 }
 
 func TestCodexArgsPermissions(t *testing.T) {
+	t.Parallel()
 	for _, external := range []bool{false, true} {
 		for _, tools := range []bool{false, true} {
 			s := &brain.Settings{Dangerously: tools, DataDir: "/data", MediaDir: "/media", Manifest: manifest.Manifest{ID: "a"}}
@@ -74,6 +76,7 @@ func TestCodexArgsPermissions(t *testing.T) {
 }
 
 func TestCodexWebToolRestrictions(t *testing.T) {
+	t.Parallel()
 	for _, blocked := range [][]string{nil, {"WebFetch"}, {"WebSearch"}, {"WebFetch", "WebSearch"}} {
 		if err := claudecli.ValidateCodexTools(blocked); err != nil {
 			t.Fatal(err)
@@ -109,12 +112,13 @@ echo '{"type":"turn.completed"}'
 }
 
 func TestCodexDashboardSwitch(t *testing.T) {
+	t.Parallel()
 	cli := fakeCodex(t)
 	cfg, _ := json.Marshal(map[string]any{"codex_path": cli, "brain_model": "sonnet", "brain_effort": "low", "disallowed_tools": []string{"WebFetch", "WebSearch"}})
 	h := newHarness(t, string(cfg))
 	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}, Model: "opus", Effort: "max"})
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-claude-token")
-	t.Setenv("CODEX_API_KEY", "test-codex-key")
+	setenv(t, "CLAUDE_CODE_OAUTH_TOKEN", "test-claude-token")
+	setenv(t, "CODEX_API_KEY", "test-codex-key")
 	change := func(provider string) {
 		v := h.Config()
 		var raw map[string]any
@@ -169,6 +173,7 @@ func TestCodexDashboardSwitch(t *testing.T) {
 }
 
 func TestCodexRefusesBlockedTools(t *testing.T) {
+	t.Parallel()
 	cli := fakeCodex(t)
 	mgr, d, home := queueTestManager(t, 0, `,"agent_provider":"codex","codex_path":`+string(mustJSON(t, cli))+`,"disallowed_tools":["Bash"]`)
 	if _, _, _, err := mgr.Submit(dm("hello")); err != nil {
@@ -193,6 +198,7 @@ func mustJSON(t *testing.T, v any) []byte {
 }
 
 func TestCodexChatErrorsNameTheRightProvider(t *testing.T) {
+	t.Parallel()
 	for _, msg := range []string{"Not logged in", "401 Unauthorized", "quota exceeded", "something failed"} {
 		text := pipeline.ChatErrorText(&claudecli.Error{Message: msg, Provider: "codex"}, true)
 		if !strings.Contains(text, "Codex") || strings.Contains(text, "Claude") {

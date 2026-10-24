@@ -12,6 +12,11 @@ import { pageFailed } from './shell.js';
 import { guardNavigation } from './nav-guard.js';
 import { matchRoute, activeNav, docTitle } from './router.js';
 
+/** @import { RouterWindow } from './nav-guard.js' */
+/** @import { Page } from './page.js' */
+/** @import { Route } from './router.js' */
+/** @import { Shell } from './shell.js' */
+
 /**
  * createNavigation({win, shell, routes, confirm, onAddress}) renders the
  * route of routes that win's address names into shell (createShell's).
@@ -22,8 +27,15 @@ import { matchRoute, activeNav, docTitle } from './router.js';
  * go(hash), replace(hash)}: start renders the page the dashboard opened
  * on, pause leaves the page for the connect screen and renders nothing
  * until resume, and go and replace are the guard's.
+ * @param {object} options
+ * @param {RouterWindow} options.win
+ * @param {Shell} options.shell
+ * @param {Route[]} options.routes
+ * @param {() => Promise<boolean>} options.confirm
+ * @param {() => boolean} [options.onAddress]
  */
 export function createNavigation({ win, shell, routes, confirm, onAddress = () => false }) {
+  /** @type {Page | null} */
   let current = null; // the page context in use
   let paused = false; // the connect screen is shown instead
 
@@ -41,14 +53,17 @@ export function createNavigation({ win, shell, routes, confirm, onAddress = () =
   // ctx.focusAt, e.g. the section a Settings link points to. Following a
   // link and coming back from the connect screen do that; opening the
   // dashboard leaves the focus where the browser puts it.
+  /** @param {{focus: boolean}} how */
   async function render({ focus }) {
     if (paused) return;
     const match = matchRoute(routes, win.location.hash);
     if (current) current.destroy();
     closeAllDialogs();
+    /** @type {HTMLElement | null} */
     let placed = null; // where the focus was put
     // A page that names its part late moves the focus only while it is
     // still where it was put: the person may have moved on.
+    /** @param {HTMLElement} [el] */
     const place = (el) => {
       if (!focus || ctx.dead || (placed && document.activeElement !== placed)) return;
       placed = shell.focusPage(el);

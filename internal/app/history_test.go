@@ -10,6 +10,7 @@ import (
 
 // The dashboard's feed is seeded with the history's last lines.
 func TestActivitySeedReadsTheLastLines(t *testing.T) {
+	t.Parallel()
 	br := bareBrain(t)
 	for i := range 60 {
 		br.AppendHistory(testDMChat, "15551234567", fmt.Sprintf("message %d", i), history.In)

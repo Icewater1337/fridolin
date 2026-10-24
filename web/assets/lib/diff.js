@@ -1,33 +1,55 @@
 // Comparing an approved brain.json with the one on disk: a per-setting table
 // and a line diff of the pretty-printed JSON.
 
-/** A copy of v with every object's keys sorted, so equal values print alike. */
+/**
+ * A line of one side of lineDiff's diff, changed when the other side lacks it.
+ * @typedef {{text: string, changed: boolean}} DiffLine
+ */
+
+/**
+ * A copy of v with every object's keys sorted, so equal values print alike.
+ * @template T
+ * @param {T} v
+ * @returns {T}
+ */
 export function sortKeys(v) {
-  if (Array.isArray(v)) return v.map(sortKeys);
+  if (Array.isArray(v)) return /** @type {T} */ (v.map(sortKeys));
   if (v && typeof v === 'object') {
+    /** @type {Record<string, unknown>} */
     const out = {};
-    for (const k of Object.keys(v).sort()) out[k] = sortKeys(v[k]);
-    return out;
+    for (const k of Object.keys(v).sort()) out[k] = sortKeys(/** @type {Record<string, unknown>} */ (v)[k]);
+    return /** @type {T} */ (out);
   }
   return v;
 }
 
+/**
+ * @param {unknown} v
+ * @param {string} prefix
+ * @param {Map<string, unknown>} out
+ */
 function flatten(v, prefix, out) {
   if (v && typeof v === 'object' && !Array.isArray(v)) {
-    for (const k of Object.keys(v)) flatten(v[k], prefix ? `${prefix}.${k}` : k, out);
+    for (const k of Object.keys(v)) flatten(/** @type {Record<string, unknown>} */ (v)[k], prefix ? `${prefix}.${k}` : k, out);
   } else {
     out.set(prefix, v);
   }
   return out;
 }
 
+/** @param {unknown} v */
 function show(v) {
   if (v === undefined) return '(not set)';
   if (Array.isArray(v)) return v.length ? v.map((x) => JSON.stringify(x)).join('\n') : '[]';
   return JSON.stringify(v);
 }
 
-/** The settings (dotted paths) whose values differ, as {path, a, b}; unset and empty count as equal. */
+/**
+ * The settings (dotted paths) whose values differ, as {path, a, b}; unset and empty count as equal.
+ * @param {unknown} a
+ * @param {unknown} b
+ * @returns {{path: string, a: string, b: string}[]}
+ */
 export function fieldDiff(a, b) {
   const fa = flatten(a, '', new Map());
   const fb = flatten(b, '', new Map());
@@ -36,13 +58,18 @@ export function fieldDiff(a, b) {
   for (const k of keys) {
     const x = show(fa.get(k));
     const y = show(fb.get(k));
-    const empty = (s) => s === '(not set)' || s === '""' || s === '[]' || s === 'null';
+    const empty = (/** @type {string} */ s) => s === '(not set)' || s === '""' || s === '[]' || s === 'null';
     if (x !== y && !(empty(x) && empty(y))) rows.push({ path: k, a: x, b: y });
   }
   return rows;
 }
 
-/** Line diff via LCS; marks lines that only appear on one side. */
+/**
+ * Line diff via LCS; marks lines that only appear on one side.
+ * @param {string} aText
+ * @param {string} bText
+ * @returns {{left: DiffLine[], right: DiffLine[]}}
+ */
 export function lineDiff(aText, bText) {
   const a = aText.split('\n');
   const b = bText.split('\n');

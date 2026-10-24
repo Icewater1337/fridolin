@@ -186,6 +186,7 @@ func eventTitles(doc map[string]any) []string {
 // in the brain's timezone, and never touches a calendar the brain may not
 // use.
 func TestCalendarListThroughTheBridge(t *testing.T) {
+	t.Parallel()
 	f := newFakeCalendarAPI(t)
 	f.events["you@example.com"] = []map[string]any{
 		calendarEvent("1", "Dentist", "2026-01-05T09:00:00+01:00", "2026-01-05T10:00:00+01:00"),
@@ -247,6 +248,7 @@ func TestCalendarListThroughTheBridge(t *testing.T) {
 // approved manifest, so another calendar of the account is refused before
 // Google is asked, whatever the call names.
 func TestCalendarIsHeldToTheBrainsCalendars(t *testing.T) {
+	t.Parallel()
 	f := newFakeCalendarAPI(t)
 	_, url, token := calendarBrain(t, f, []string{"you@example.com", "team@example.com"}, "team@example.com", false)
 	for _, args := range [][]string{
@@ -282,6 +284,7 @@ func TestCalendarIsHeldToTheBrainsCalendars(t *testing.T) {
 // that is not ticked, or none, falls back to the first ticked calendar,
 // so new events and deletes never reach a calendar the brain may not use.
 func TestCalendarDefaultIsOneOfTheBrainsCalendars(t *testing.T) {
+	t.Parallel()
 	for _, def := range []string{"private@example.com", ""} {
 		t.Run(fmt.Sprintf("default %q", def), func(t *testing.T) {
 			f := newFakeCalendarAPI(t)
@@ -322,6 +325,7 @@ func TestCalendarDefaultIsOneOfTheBrainsCalendars(t *testing.T) {
 // TestCalendarWithNoCalendarsChosen: a brain whose brain.json has no
 // calendars (one connected by hand) gets its primary calendar only.
 func TestCalendarWithNoCalendarsChosen(t *testing.T) {
+	t.Parallel()
 	f := newFakeCalendarAPI(t)
 	tb, url, token := calendarBrain(t, f, nil, "", false)
 	if tb.brainMgr.Get("a").Manifest().Calendar != nil {
@@ -340,6 +344,7 @@ func TestCalendarWithNoCalendarsChosen(t *testing.T) {
 }
 
 func TestCalendarCreate(t *testing.T) {
+	t.Parallel()
 	f := newFakeCalendarAPI(t)
 	tb, url, token := calendarBrain(t, f, []string{"you@example.com", "team@example.com"}, "team@example.com", false)
 	cases := []struct {
@@ -400,6 +405,7 @@ func TestCalendarCreate(t *testing.T) {
 // TestCalendarRefusesBadCalls: a mistake is an error the assistant can act
 // on, before anything reaches Google.
 func TestCalendarRefusesBadCalls(t *testing.T) {
+	t.Parallel()
 	f := newFakeCalendarAPI(t)
 	_, url, token := calendarBrain(t, f, []string{"you@example.com"}, "you@example.com", false)
 	cases := []struct {
@@ -443,6 +449,7 @@ func TestCalendarRefusesBadCalls(t *testing.T) {
 }
 
 func TestCalendarDelete(t *testing.T) {
+	t.Parallel()
 	f := newFakeCalendarAPI(t)
 	_, url, token := calendarBrain(t, f, []string{"you@example.com", "team@example.com"}, "team@example.com", false)
 	if code, doc := brainTool(t, toolcli.Calendar, url, token, "delete", "--event-id", "e1"); code != 0 || doc["deleted"] != "e1" {
@@ -458,6 +465,7 @@ func TestCalendarDelete(t *testing.T) {
 }
 
 func TestCalendarFree(t *testing.T) {
+	t.Parallel()
 	f := newFakeCalendarAPI(t)
 	f.busy["you@example.com"] = []google.BusySlot{
 		{Start: "2026-01-05T08:30:00Z", End: "2026-01-05T09:30:00Z"}, // 09:30-10:30 in Zurich
@@ -497,6 +505,7 @@ func TestCalendarFree(t *testing.T) {
 // type of its error tells GoogleCallProblem which of these it is: the
 // command prints the message, and the call it makes answers the status.
 func TestCalendarSignInProblems(t *testing.T) {
+	t.Parallel()
 	// Expired, so a call has to refresh it first.
 	expired := google.Token{
 		Token: "ACCESS-OLD", RefreshToken: "RT-1", ClientID: "123-abc.apps.googleusercontent.com",
@@ -596,6 +605,7 @@ func TestCalendarSignInProblems(t *testing.T) {
 
 // Keep user-visible decoder diagnostics stable when the event DTO moves packages.
 func TestCalendarEventDecodeErrors(t *testing.T) {
+	t.Parallel()
 	f := newFakeCalendarAPI(t)
 	tb, _, token := calendarBrain(t, f, []string{"you@example.com"}, "you@example.com", false)
 	cases := []struct {

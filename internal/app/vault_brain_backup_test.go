@@ -78,6 +78,7 @@ func (f brainBackupFixture) snapshots() *vaultSnapshots {
 // brain.json and of the manifest the bridge runs it with, whichever
 // leaves out more; a brain.json that cannot be read leaves the folder out.
 func TestBrainBackupOf(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	disk := writeBrainJSON(t, dir, "x", manifest.Backup{Enabled: true, Exclude: []string{"/work/"}})
 	b := brainBackupOf("x", dir, nil, true)
@@ -122,6 +123,7 @@ func TestBrainBackupOf(t *testing.T) {
 // TestVaultSnapshotPathsFollowBackupSettings: what restic is told for
 // each brain folder.
 func TestVaultSnapshotPathsFollowBackupSettings(t *testing.T) {
+	t.Parallel()
 	f := newBrainBackupFixture(t)
 	vs := f.snapshots()
 	paths, excludes := vs.paths(snapshotNightly)
@@ -160,6 +162,7 @@ func TestVaultSnapshotPathsFollowBackupSettings(t *testing.T) {
 // brain folder in the hot root what its backup settings do, and all of a
 // folder whose brain.json cannot be read.
 func TestVaultLayoutFollowsBackupSettings(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfg := &config.Settings{}
 	cfg.DataDir = dir
@@ -202,6 +205,7 @@ func TestVaultLayoutFollowsBackupSettings(t *testing.T) {
 // of the snapshot; every other file is in it, the same names in other
 // folders too.
 func TestVaultSnapshotHonoursBackupExcludeWithRestic(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs restic")
 	}

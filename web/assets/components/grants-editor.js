@@ -6,6 +6,8 @@
 import { h } from '../lib/dom.js';
 import { nextId } from './fields.js';
 
+/** @import { Brain } from '../../types/api.js' */
+
 /** The kinds of grant, in brain.json's order, with what each lets the core do. */
 const GRANT_KINDS = [
   ['delegate', 'Delegate', 'Hand it a task and get its answer'],
@@ -20,6 +22,11 @@ const GRANT_KINDS = [
  * for you to take away: the bridge refuses to save it. el.getValue() is
  * the grants as brain.json has them: only brains with a grant, their
  * kinds sorted.
+ * @param {object} [options]
+ * @param {Record<string, string[]> | null} [options.grants]
+ * @param {Pick<Brain, 'id' | 'name'>[]} [options.brains]
+ * @param {() => void} [options.onChange]
+ * @returns {HTMLDivElement & {getValue: () => Record<string, string[]>}}
  */
 export function grantsEditor({ grants = {}, brains = [], onChange } = {}) {
   const given = grants || {};
@@ -27,6 +34,7 @@ export function grantsEditor({ grants = {}, brains = [], onChange } = {}) {
   for (const id of Object.keys(given).sort()) {
     if (!rows.some((r) => r.id === id)) rows.push({ id, name: id, known: false });
   }
+  /** @type {{id: string, kind: string, input: HTMLInputElement}[]} */
   const boxes = []; // [{id, kind, input}]
   const el = h('div.grants-editor');
   if (!rows.length) {
@@ -47,7 +55,8 @@ export function grantsEditor({ grants = {}, brains = [], onChange } = {}) {
           return h('td', input);
         })))))));
   }
-  el.getValue = () => {
+  const getValue = () => {
+    /** @type {Record<string, string[]>} */
     const out = {};
     for (const { id, kind, input } of boxes) {
       if (input.checked) (out[id] = out[id] || []).push(kind);
@@ -57,5 +66,5 @@ export function grantsEditor({ grants = {}, brains = [], onChange } = {}) {
     }
     return out;
   };
-  return el;
+  return Object.assign(el, { getValue });
 }

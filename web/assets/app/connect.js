@@ -5,10 +5,15 @@ import { h, mount } from '../lib/dom.js';
 import { icon } from '../components/icons.js';
 import { btn, copyButton } from '../components/buttons.js';
 import { textInput } from '../components/fields.js';
-import { get, signIn } from './api.js';
+import { ApiError, get, signIn, errorStatus } from './api.js';
 import { credentialFromHash } from './router.js';
+import { errorMessage } from '../lib/errors.js';
 
-/** Fills el with the connect screen; onConnected runs once signed in. */
+/**
+ * Fills el with the connect screen; onConnected runs once signed in.
+ * @param {HTMLElement} el
+ * @param {{reason?: string, onConnected: () => void}} options reason says why the screen is shown
+ */
 export function connectScreen(el, { reason, onConnected }) {
   const input = textInput({ placeholder: 'Paste the token (or the whole dashboard link)', class: 'mono', 'aria-label': 'Dashboard token' });
   const errorEl = h('p.form-error', { hidden: true });
@@ -28,9 +33,9 @@ export function connectScreen(el, { reason, onConnected }) {
       onConnected();
     } catch (err) {
       errorEl.hidden = false;
-      errorEl.textContent = err.status === 401
+      errorEl.textContent = errorStatus(err) === 401
         ? (credential.code ? 'That link was already used or has expired. Run the command above for a new one.' : 'That token was not accepted. Check that you copied all of it.')
-        : err.message;
+        : errorMessage(err);
     } finally {
       submitBtn.disabled = false;
     }
@@ -56,15 +61,21 @@ async function runsInContainer() {
     return (await get('/ready', { timeout: 5000 })).container === true;
   } catch (e) {
     // /ready answers 503 with the same body while WhatsApp is not connected.
-    return !!(e && e.data && e.data.container === true);
+    const data = e instanceof ApiError ? e.data : null;
+    return Boolean(data && typeof data === 'object' && 'container' in data && data.container === true);
   }
 }
 
+/** @param {string} cmd */
 function commandLine(cmd) {
   return h('div.code-line', h('code.mono', cmd), copyButton(cmd));
 }
 
 // A bridge on this computer: fridolin open reads the token from its data folder.
+/**
+ * @param {HTMLFormElement} form
+ * @param {HTMLElement} errorEl
+ */
 function nativeSteps(form, errorEl) {
   return [
     h('li', h('div', 'In a terminal on this computer, run'), commandLine('fridolin open'), h('div.muted.small', 'It opens this dashboard and signs you in, with a link that works once.')),
@@ -75,6 +86,10 @@ function nativeSteps(form, errorEl) {
 
 // The container core (docs/CORE.md): its data folder is the fridolin-data
 // volume, so a token in the host's home folder is not this bridge's.
+/**
+ * @param {HTMLFormElement} form
+ * @param {HTMLElement} errorEl
+ */
 function containerSteps(form, errorEl) {
   return [
     h('li', h('div', 'This bridge runs in the ', h('code.mono', 'fridolin-core'), ' container. In a terminal on the computer that runs it, run'), commandLine('docker exec fridolin-core fridolin open --print'),

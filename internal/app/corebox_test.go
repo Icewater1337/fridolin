@@ -225,6 +225,7 @@ func (s *boxSim) envOfLastStart() []string {
 // into its data volume, takes the lease and starts the core inside its
 // node container with the host secrets of its sealed store; then back.
 func TestCoreMoveToABoxAndBack(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHostsWith(h.b.nodes.Version(), true, moveBoxes{dst: true})
 	box := m.dstBox
@@ -316,6 +317,7 @@ func TestCoreMoveToABoxAndBack(t *testing.T) {
 // and the box takes it back on mini's export, starting the core in its
 // container again.
 func TestCoreMoveRollsBackToABox(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHostsWith(h.b.nodes.Version(), false, moveBoxes{src: true})
 	box := m.srcBox
@@ -350,6 +352,7 @@ func TestCoreMoveRollsBackToABox(t *testing.T) {
 // A box made before it could take the core, and one whose sandbox cannot
 // run, are no target: the pre-flight says what to do.
 func TestCoreMoveToABoxNeedsItsSettings(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHostsWith(h.b.nodes.Version(), true, moveBoxes{dst: true, noSettings: true})
 	rep := h.moveCheck(m.src, m.dst)

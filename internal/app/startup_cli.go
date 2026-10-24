@@ -7,20 +7,30 @@ import (
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 )
 
-// LogClaudeCLI says at startup which CLI brains run and warns when it is
-// missing or too old, so a log excerpt shows it next to the bridge's own
-// version.
-func LogClaudeCLI(path string, passthrough []string) {
-	st := ClaudeInfo(path, passthrough)
+// LogAgentCLI says at startup which CLI brains run, Claude Code's or in
+// Codex mode Codex's, and warns when it is missing or too old, so a log
+// excerpt shows it next to the bridge's own version.
+func (b *App) LogAgentCLI() {
+	cfg := b.cfgs.Get()
+	if cfg.AgentProvider == "codex" {
+		logCodexCLI(cfg.CodexPath, b.codexInfo(cfg))
+		return
+	}
+	logClaudeCLI(cfg.ClaudePath, b.claudeInfo(cfg))
+}
+
+// logClaudeCLI writes the startup line for the Claude CLI at path, found
+// as st.
+func logClaudeCLI(path string, st claudecli.Status) {
 	logCLI("Claude Code CLI", "Settings → Claude", path, st)
 	if w := claudecli.VersionWarning(st); w != "" {
 		log.Printf("WARNING: %s", w)
 	}
 }
 
-// LogCodexCLI is LogClaudeCLI for Codex mode.
-func LogCodexCLI(path string, passthrough []string) {
-	logCLI("Codex CLI", "Settings → AI mode", path, CodexInfo(path, passthrough))
+// logCodexCLI is logClaudeCLI for Codex mode.
+func logCodexCLI(path string, st claudecli.Status) {
+	logCLI("Codex CLI", "Settings → AI mode", path, st)
 }
 
 // logCLI writes the line for the CLI called name, found as st for the

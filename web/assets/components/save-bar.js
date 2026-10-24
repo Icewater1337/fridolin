@@ -10,12 +10,14 @@ import { btn } from './buttons.js';
  * save is the form's save button; floating keeps the bar in view at the
  * bottom of the window. bar.show(text) shows it, by default with "Unsaved
  * changes", and bar.hide() hides it.
+ * @param {{save: Node, onDiscard: () => void, floating?: boolean}} options
  */
 export function saveBar({ save, onDiscard, floating = false }) {
   const text = h('span');
   const bar = h(`div.save-bar${floating ? '.floating' : ''}`, { hidden: true },
     icon('edit'), text, btn('Discard', { onClick: () => onDiscard() }), save);
-  bar.show = (what = 'Unsaved changes') => { text.textContent = what; bar.hidden = false; };
-  bar.hide = () => { bar.hidden = true; };
-  return bar;
+  return Object.assign(bar, {
+    show: (what = 'Unsaved changes') => { text.textContent = what; bar.hidden = false; },
+    hide: () => { bar.hidden = true; },
+  });
 }

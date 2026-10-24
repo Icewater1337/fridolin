@@ -41,6 +41,7 @@ test('without unsaved changes, links and Back just navigate', async () => {
 });
 
 test('Back from unsaved changes asks, and either way the history stays intact', async (t) => {
+  /** @type {[string, boolean, string[], number][]} */
   const cases = [
     // name, answer, rendered, position afterwards
     ['cancelled', false, [], 2],
@@ -90,6 +91,7 @@ test('Forward and a jump of several entries are undone and redone as a whole', a
 });
 
 test('a link from unsaved changes adds an entry only once confirmed', async (t) => {
+  /** @type {[string, boolean, string[], string[]][]} */
   const cases = [
     ['cancelled', false, ['#/overview', '#/settings'], []],
     ['confirmed', true, ['#/overview', '#/settings', '#/brains'], ['#/brains']],

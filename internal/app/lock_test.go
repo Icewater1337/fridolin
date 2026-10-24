@@ -21,12 +21,13 @@ import (
 )
 
 func TestNewBridgeTakesTheInstanceLock(t *testing.T) {
+	t.Parallel()
 	// The lock used to be taken only by `fridolin run`, so a test or any other
 	// caller of New opened bridge.db next to a running bridge.
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	dataDir := filepath.Join(home, "data")
-	cfgs, err := OpenConfigStore(writeConfig(t, `{"data_dir": "`+dataDir+`", "http_listen": "off"}`))
+	cfgs, err := openConfigStore(t, writeConfig(t, `{"data_dir": "`+dataDir+`", "http_listen": "off"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,6 +82,7 @@ func TestNewBridgeTakesTheInstanceLock(t *testing.T) {
 }
 
 func TestBridgeClosesTheStoreWhenItGivesUpTheLock(t *testing.T) {
+	t.Parallel()
 	// The lock only keeps a second bridge off bridge.db if giving it back
 	// means the database is closed, whether the bridge stopped or failed to
 	// start while or after opening it. This checks what is still open
@@ -154,9 +156,9 @@ func TestBridgeClosesTheStoreWhenItGivesUpTheLock(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			home := fsx.Canonical(t.TempDir())
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			dataDir := filepath.Join(home, "data")
-			cfgs, err := OpenConfigStore(writeConfig(t, `{"data_dir": "`+dataDir+`", "http_listen": "off"}`))
+			cfgs, err := openConfigStore(t, writeConfig(t, `{"data_dir": "`+dataDir+`", "http_listen": "off"}`))
 			if err != nil {
 				t.Fatal(err)
 			}

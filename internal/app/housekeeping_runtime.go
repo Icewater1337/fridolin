@@ -450,7 +450,7 @@ func (h *housekeepingService) tellOwner(ctx context.Context, rep housekeeping.Re
 
 // viewer is a handle on the activity viewer's tmux server.
 func (h *housekeepingService) viewer(cfg *config.Settings) *platform.Viewer {
-	return &platform.Viewer{TmuxPath: findTmux(), Env: childEnv(anyChild, cfg.ChildEnvPassthrough), Timeout: viewerTimeout}
+	return &platform.Viewer{TmuxPath: findTmux(), Env: childEnv(h.b.env, anyChild, cfg.ChildEnvPassthrough), Timeout: viewerTimeout}
 }
 
 // viewerFindings are activity viewer sessions of loaded brains that

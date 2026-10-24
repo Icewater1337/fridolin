@@ -1,7 +1,12 @@
 // What the Nodes page says about a node's capabilities, as the bridge's
 // Capabilities.Summary says it in the CLI and !fleet.
 
-/** "exec (uname, df), fs (2 roots, 1 writable), host, notify, fride, backup (1 folder)", or "nothing". */
+/** @import { ExecCap, ExecRule, Node, NodeCapabilities, NodeUpdateStatus, ScheduleProgram } from '../../types/api.js' */
+
+/**
+ * "exec (uname, df), fs (2 roots, 1 writable), host, notify, fride, backup (1 folder)", or "nothing".
+ * @param {NodeCapabilities | null | undefined} c
+ */
 export function capSummary(c) {
   const parts = [];
   if (c && c.exec && (c.exec.allow || []).length) {
@@ -23,7 +28,7 @@ export function capSummary(c) {
     parts.push(n ? `backup (${n} folder${n === 1 ? '' : 's'})` : 'backup');
   }
   if (c && c.update) parts.push('update');
-  for (const k of ['agent', 'terminal']) {
+  for (const k of /** @type {const} */ (['agent', 'terminal'])) {
     const n = (c && c[k] && c[k].roots) ? c[k].roots.length : 0;
     if (n) parts.push(`${k} (${n} folder${n === 1 ? '' : 's'})`);
   }
@@ -31,7 +36,10 @@ export function capSummary(c) {
   return parts.length ? parts.join(', ') : 'nothing';
 }
 
-/** How an exec rule reads: "git status|log", "hostname (no arguments)", "go (any arguments)". */
+/**
+ * How an exec rule reads: "git status|log", "hostname (no arguments)", "go (any arguments)".
+ * @param {ExecRule} r
+ */
 export function ruleText(r) {
   if (r.exact) return `${[r.name, ...(r.args || [])].join(' ')} (exactly)`;
   if (r.args === null || r.args === undefined) return `${r.name} (any arguments)`;
@@ -39,7 +47,10 @@ export function ruleText(r) {
   return `${r.name} ${r.args.join(' | ')}`;
 }
 
-/** How a node's last update from the core went, in a few words; null for none. */
+/**
+ * How a node's last update from the core went, in a few words; null for none.
+ * @param {NodeUpdateStatus | null | undefined} u
+ */
 export function updateText(u) {
   if (!u || !u.state) return null;
   switch (u.state) {
@@ -51,18 +62,27 @@ export function updateText(u) {
   }
 }
 
-/** The OS as people name it. */
+/**
+ * The OS as people name it.
+ * @param {string | undefined} goos
+ */
 export function osName(goos) {
-  return { darwin: 'macOS', windows: 'Windows', linux: 'Linux' }[goos] || goos || '?';
+  return /** @type {Record<string, string>} */ ({ darwin: 'macOS', windows: 'Windows', linux: 'Linux' })[goos] || goos || '?';
 }
 
-/** "4 GB of 16 GB free" style figures from bytes. */
+/**
+ * "4 GB of 16 GB free" style figures from bytes.
+ * @param {number | null | undefined} n
+ */
 export function gb(n) {
   if (!n) return '';
   return `${(n / (1 << 30)).toFixed(n < 10 * (1 << 30) ? 1 : 0)} GB`;
 }
 
-/** Tags typed into one box, as the bridge takes them. */
+/**
+ * Tags typed into one box, as the bridge takes them.
+ * @param {string | null | undefined} text
+ */
 export function parseTags(text) {
   return [...new Set(String(text || '').split(/[\s,]+/).map((t) => t.trim().toLowerCase()).filter(Boolean))];
 }
@@ -76,6 +96,9 @@ const ANSI = /\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(\x07|\x1b\\)|[()][0-9A-Za-
  * line-oriented view: escape sequences out, a carriage return starts its
  * line over, a backspace takes back a character, other control characters
  * out. It keeps at most max characters (the end).
+ * @param {string} shown
+ * @param {string} chunk
+ * @param {number} [max]
  */
 export function termText(shown, chunk, max = 200000) {
   let out = shown || '';
@@ -96,6 +119,8 @@ export function termText(shown, chunk, max = 200000) {
  * base64 → UTF-8 text (Go's []byte arrives as base64). Pass the same
  * decoder for every chunk of one stream, so a character split between two
  * chunks comes out whole.
+ * @param {string | null | undefined} b64
+ * @param {TextDecoder} [decoder]
  */
 export function fromBase64(b64, decoder = new TextDecoder()) {
   if (!b64) return '';
@@ -105,24 +130,36 @@ export function fromBase64(b64, decoder = new TextDecoder()) {
   return decoder.decode(bytes, { stream: true });
 }
 
-/** The node of a's list a command agent names, by id or by name; null for none. */
+/**
+ * The node of a's list a command agent names, by id or by name; null for none.
+ * @param {Node[] | null | undefined} nodes
+ * @param {string} ref
+ * @returns {Node | null}
+ */
 export function nodeNamed(nodes, ref) {
   const list = nodes || [];
   return list.find((n) => n.id === ref) || list.find((n) => (n.name || '').toLowerCase() === String(ref || '').toLowerCase()) || null;
 }
 
+/** @type {(a: string[] | null, b: string[]) => boolean} */
 const sameArgs = (a, b) => (a || []).length === (b || []).length && (a || []).every((x, i) => x === b[i]);
 
-// Whether a rule allows argv, as the node checks it (ExecRule.Matches).
+/**
+ * Whether a rule allows argv, as the node checks it (ExecRule.Matches).
+ * @param {ExecRule} r
+ * @param {string[]} argv
+ */
 function matches(r, argv) {
   if (!argv.length || argv[0] !== r.name) return false;
   if (r.exact) return sameArgs(r.args, argv.slice(1));
   if (r.args === null || r.args === undefined) return true;
-  const res = r.args.map((p) => { try { return new RegExp(`^(?:${p})$`); } catch { return null; } }).filter(Boolean);
+  const res = r.args.map((p) => { try { return new RegExp(`^(?:${p})$`); } catch { return null; } }).filter((re) => re !== null);
   return argv.slice(1).every((x) => res.some((re) => re.test(x)));
 }
 
+/** @type {(folder: string, path: string) => boolean} */
 const under = (folder, path) => {
+  /** @param {string} s */
   const norm = (s) => String(s || '').replace(/\\/g, '/').replace(/\/+$/, '');
   const f = norm(folder);
   return f !== '' && norm(path).startsWith(`${f}/`);
@@ -133,11 +170,15 @@ const under = (folder, path) => {
  * entry), before the agent is saved: {state, text}, state being allowed,
  * waiting (saving adds it), refused, not-accepted or no-node — as the
  * bridge's programOn says it for a saved agent.
+ * @param {Node | null} n
+ * @param {string[]} argv
+ * @returns {{state: ScheduleProgram['state'], text: string}}
  */
 export function programOnNode(n, argv) {
   if (!n) return { state: 'no-node', text: 'There is no such node: the Nodes page lists them.' };
   const name = n.name || n.id;
   if (!argv || !argv.length || !argv[0]) return { state: 'refused', text: 'Name the program first.' };
+  /** @type {Partial<ExecCap>} */
   const eff = (n.effective && n.effective.exec) || {};
   const own = (eff.allow || []).filter((r) => !r.core);
   if (own.some((r) => matches(r, argv))) return { state: 'allowed', text: `Node ${name}’s node.json allows ${argv[0]}.` };

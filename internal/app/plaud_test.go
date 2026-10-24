@@ -35,10 +35,10 @@ const (
 // newFakePlaud configures the command integration fixture's child processes.
 func newFakePlaud(t *testing.T) *testutil.PlaudFixture {
 	fp := testutil.NewPlaudFixture(t)
-	t.Setenv("FRIDOLIN_FAKE_PLAUD", "1")
-	t.Setenv("FRIDOLIN_FAKE_PLAUD_DIR", fp.Dir)
+	setenv(t, "FRIDOLIN_FAKE_PLAUD", "1")
+	setenv(t, "FRIDOLIN_FAKE_PLAUD_DIR", fp.Dir)
 	// Every CLI call is a run of this test binary; avoid race-detector exit waits.
-	t.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
+	setenv(t, "GORACE", strings.TrimSpace(getenv(envOf(t), "GORACE")+" atexit_sleep_ms=0"))
 	return fp
 }
 
@@ -83,6 +83,7 @@ func plaudDeliver(t *testing.T, tb *testBridge, fp *testutil.PlaudFixture) error
 // The recording runs in the brain picked for Plaud, even when that brain
 // answers in the DM, which belongs to the DM brain.
 func TestPlaudRunsInThePickedBrain(t *testing.T) {
+	t.Parallel()
 	const dm = "15551234567@s.whatsapp.net"
 	tb, fp := plaudBridge(t, "")
 	gDir := tb.addFolderBrain(t, manifest.Manifest{ID: "g", Name: "Recordings", ReplyChat: dm})
@@ -117,6 +118,7 @@ func TestPlaudRunsInThePickedBrain(t *testing.T) {
 // only when that is a direct chat, else to your DM, never to a group — even
 // for a brain that serves one, or whose reply chat is one.
 func TestPlaudSummariesStayOutOfGroups(t *testing.T) {
+	t.Parallel()
 	const (
 		dm    = "15551234567@s.whatsapp.net"
 		other = "15559876543@s.whatsapp.net"
@@ -167,6 +169,7 @@ func TestPlaudSummariesStayOutOfGroups(t *testing.T) {
 // nothing is written to the media folder, and the reason shows on the
 // dashboard. Once there is a DM, it arrives.
 func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
+	t.Parallel()
 	tb, fp := plaudBridgeWith(t, `, "allowed_numbers": []`, "", plaudGroupBrain("f"))
 	err := plaudDeliver(t, tb, fp)
 	if err == nil || !strings.Contains(err.Error(), "no private chat") {
@@ -203,6 +206,7 @@ func TestPlaudWithoutAPrivateChatWaits(t *testing.T) {
 // The card labels its "Automatic" choice with the brain Automatic picks,
 // which is not the target while another brain is picked.
 func TestPlaudStatusNamesTheAutomaticBrain(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name, picked, target string
 	}{
@@ -230,6 +234,7 @@ func TestPlaudStatusNamesTheAutomaticBrain(t *testing.T) {
 // a brain that is not running, even one the brain list shows (its folder
 // is gone), but still save the rest while the picked one is gone.
 func TestPlaudMissingBrainIsReported(t *testing.T) {
+	t.Parallel()
 	tb, fp := plaudBridgeWith(t, `, "brain_dirs": [{"path": "~/gone", "approved": {"id": "gone", "name": "Gone"}}]`, `, "brain": "ghost"`, plaudDMBrain)
 	err := plaudDeliver(t, tb, fp)
 	if err == nil || !strings.Contains(err.Error(), "brain ghost") {
@@ -279,6 +284,7 @@ func TestPlaudMissingBrainIsReported(t *testing.T) {
 // the check fails with its error, which the card shows, and the recording
 // arrives once the problem is gone.
 func TestPlaudDeliveryErrorIsShown(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range []string{"fail_file", "fail_transcript"} {
 		t.Run(fixture, func(t *testing.T) {
 			tb, fp := plaudBridge(t, "")
@@ -356,6 +362,7 @@ func (r *plaudRecorder) count() int {
 // take it (its queue is full) leaves it waiting, with the reason on the
 // card. After a restart, one whose run never ended is handed over again.
 func TestPlaudRecordingIsSeenOnlyOnceItsRunEnds(t *testing.T) {
+	t.Parallel()
 	stop := []error{claudecli.ErrInterrupted, brainruntime.ErrDropped}
 	for _, c := range []struct {
 		name    string
@@ -523,8 +530,9 @@ func (tb *testBridge) plaudSeenAll(ids ...string) bool {
 // the chat its summaries go to stops it, waiting or running, as a stop
 // rather than a failure.
 func TestPlaudHandOffThroughTheBridge(t *testing.T) {
+	t.Parallel()
 	tb, _ := plaudBridgeWith(t, `, "queue": {"max_pending": 1}`, "", plaudDMBrain)
-	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "3000")
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "3000")
 	br := tb.brainMgr.Get("p")
 	const dm = "15551234567@s.whatsapp.net"
 	var mu sync.Mutex
@@ -558,6 +566,7 @@ func TestPlaudHandOffThroughTheBridge(t *testing.T) {
 // not fail, and log the same error, on every interval. The card still says
 // what is missing, from the status call.
 func TestPlaudWithoutAPrivateChatIsQuietWhileNothingWaits(t *testing.T) {
+	t.Parallel()
 	tb, fp := plaudBridgeWith(t, `, "allowed_numbers": []`, "", plaudGroupBrain("f"))
 	_ = os.MkdirAll(filepath.Dir(tb.plaudTokenPath()), 0o700)
 	_ = os.WriteFile(tb.plaudTokenPath(), []byte("{}"), 0o600)
@@ -581,6 +590,7 @@ func TestPlaudWithoutAPrivateChatIsQuietWhileNothingWaits(t *testing.T) {
 // The expiry notice follows the same rule: your DM for a group brain, and
 // nothing at all without a private chat (the dashboard shows the expiry).
 func TestPlaudExpiryNoticeStaysPrivate(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name string
 		top  string
@@ -611,6 +621,7 @@ func TestPlaudExpiryNoticeStaysPrivate(t *testing.T) {
 // The status tells the card where summaries go, and warns when that chat
 // belongs to another brain or when there is no private chat.
 func TestPlaudStatusShowsWhereSummariesGo(t *testing.T) {
+	t.Parallel()
 	const dm = "15551234567@s.whatsapp.net"
 	for _, c := range []struct {
 		name  string
@@ -639,6 +650,7 @@ func TestPlaudStatusShowsWhereSummariesGo(t *testing.T) {
 }
 
 func TestPlaudFirstSyncThenForwardsNewRecordings(t *testing.T) {
+	t.Parallel()
 	tb, fp := plaudBridge(t, "")
 	ctx := context.Background()
 	if w := tb.do("POST", "/api/plaud/connect", nil); w.Code != 202 {
@@ -760,6 +772,7 @@ func plaudWaiting(st *plaudFixtureState, id string, at time.Time) *plaudFixtureS
 // is asked once after the sign-in, and for a login from before sign-ins
 // were recorded once in the background, not on every call.
 func TestPlaudStatusDoesNotRunTheCLI(t *testing.T) {
+	t.Parallel()
 	account := func(tb *testBridge) string {
 		var s struct{ Account string }
 		_ = json.Unmarshal(tb.do("GET", "/api/plaud/status", nil).Body.Bytes(), &s)
@@ -820,6 +833,7 @@ func plaudRevokeLogin(t *testing.T, tb *testBridge, fp *testutil.PlaudFixture) {
 // check syncs again and still forwards none of the recordings that already
 // exist.
 func TestPlaudFailedFirstSyncForwardsNothingOld(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name, fixture string
 		auth          bool
@@ -882,6 +896,8 @@ func (tb *testBridge) plaudForwarded() bool {
 // over, so its existing recordings are not sent; the same account keeps its
 // place, so what it recorded while it was signed out still arrives.
 func TestPlaudStateBelongsToTheAccount(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	for _, c := range []struct {
 		name    string
 		state   plaudFixtureState
@@ -955,8 +971,9 @@ func plaudIDs(prefix string, n int) []string {
 // queue, however many checks come while it works: none of them finds the
 // queue full, and your own message to that brain still gets in.
 func TestPlaudBacklogLeavesRoomInTheBrainsQueue(t *testing.T) {
+	t.Parallel()
 	tb, fp := plaudBridge(t, "")
-	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "60000") // the cleanup stops the runs
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "60000") // the cleanup stops the runs
 	plaudSignIn(t, tb)
 	if err := tb.writePlaudState(plaudSeededState("u_1", plaudOld1)); err != nil {
 		t.Fatal(err)
@@ -984,6 +1001,7 @@ func TestPlaudBacklogLeavesRoomInTheBrainsQueue(t *testing.T) {
 // saved, rewrites its transcript file instead of adding a copy, even when
 // it was renamed in Plaud in between.
 func TestPlaudRetryRewritesTheSameTranscript(t *testing.T) {
+	t.Parallel()
 	tb, fp := plaudBridge(t, "")
 	if err := plaudDeliver(t, tb, fp); err != nil {
 		t.Fatal(err)
@@ -1020,6 +1038,7 @@ func TestPlaudRetryRewritesTheSameTranscript(t *testing.T) {
 // recording's transcript will go. The transcript replaces the link instead
 // of being written through it to the file it points to.
 func TestPlaudTranscriptReplacesASymlink(t *testing.T) {
+	t.Parallel()
 	tb, fp := plaudBridge(t, "")
 	target := filepath.Join(t.TempDir(), "elsewhere.txt")
 	if err := os.WriteFile(target, []byte("keep me"), 0o600); err != nil {
@@ -1059,6 +1078,7 @@ func TestPlaudTranscriptReplacesASymlink(t *testing.T) {
 // recording waits for another try, and nothing lands where the link
 // points.
 func TestPlaudTranscriptStaysInTheInbox(t *testing.T) {
+	t.Parallel()
 	tb, fp := plaudBridge(t, "")
 	media := tb.cfgs.Get().MediaDir
 	elsewhere := t.TempDir()
@@ -1090,6 +1110,7 @@ func TestPlaudTranscriptStaysInTheInbox(t *testing.T) {
 // it is refused, and a check asked for anyway does nothing: one from the
 // poller, or one Check now started just before the switch went off.
 func TestPlaudCheckNowNeedsSendingOn(t *testing.T) {
+	t.Parallel()
 	tb, fp := plaudBridge(t, "")
 	plaudSignIn(t, tb)
 	if err := tb.writePlaudState(plaudSeededState("u_1", plaudOld1)); err != nil {
@@ -1123,6 +1144,7 @@ func TestPlaudCheckNowNeedsSendingOn(t *testing.T) {
 // While a real accepted check is waiting in the runner, the HTTP adapter
 // reports "already checking"; after it completes the same route starts a new one.
 func TestPlaudCheckNowWhileChecking(t *testing.T) {
+	t.Parallel()
 	tb, _ := plaudBridge(t, "")
 	plaudSignIn(t, tb)
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -1177,6 +1199,7 @@ func TestPlaudCheckNowWhileChecking(t *testing.T) {
 // expiry notice of a login Plaud refused. Once Fridolin is stopping, Check
 // now starts none.
 func TestPlaudStopEndsCheckNow(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		// hold has the check wait in held until it is cancelled.
@@ -1248,6 +1271,7 @@ func TestPlaudStopEndsCheckNow(t *testing.T) {
 // CLI, until you connect again, and then starts over for that account if
 // it is another one.
 func TestPlaudBrainAccessNeedsConnectingAgain(t *testing.T) {
+	t.Parallel()
 	tb, fp := plaudBridge(t, "")
 	plaudSignIn(t, tb)
 	if err := tb.writePlaudState(plaudRecordLogin(tb, plaudSeededState("u_1", plaudOld1))); err != nil {
@@ -1306,6 +1330,7 @@ func TestPlaudBrainAccessNeedsConnectingAgain(t *testing.T) {
 // still there afterwards (brains and your terminal would go on using it).
 // Fridolin itself no longer does.
 func TestPlaudDisconnectReportsALoginThatStays(t *testing.T) {
+	t.Parallel()
 	tb, fp := plaudBridge(t, `, "brain_access": true`)
 	plaudSignIn(t, tb)
 	fp.Write("logout_keeps", "")
@@ -1342,6 +1367,7 @@ func TestPlaudDisconnectReportsALoginThatStays(t *testing.T) {
 // terminal when you turned brain_access off: it is left alone, and does
 // not count as Fridolin's afterwards.
 func TestPlaudDisconnectAfterTheLoginMoved(t *testing.T) {
+	t.Parallel()
 	for _, access := range []bool{true, false} {
 		t.Run(fmt.Sprintf("brain_access turned %v", map[bool]string{true: "on", false: "off"}[access]), func(t *testing.T) {
 			tb, fp := plaudBridge(t, fmt.Sprintf(`, "brain_access": %v`, !access))
@@ -1386,9 +1412,10 @@ func TestPlaudDisconnectAfterTheLoginMoved(t *testing.T) {
 // Brains' runs get Plaud's telemetry opt-out too, whether or not brains may
 // use the CLI: a brain that runs it must not report to Plaud's analytics.
 func TestBrainRunsKeepPlaudTelemetryOff(t *testing.T) {
+	t.Parallel()
 	tb, _ := plaudBridge(t, "")
 	envLog := filepath.Join(t.TempDir(), "brain.env")
-	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
+	setenv(t, "FRIDOLIN_FAKE_ENV_LOG", envLog)
 	tb.handleInbound(context.Background(), brainruntime.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
 	testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return len(tb.dev.Outbox()) > 0 })
 	logged, err := os.ReadFile(envLog)
@@ -1406,11 +1433,12 @@ func TestBrainRunsKeepPlaudTelemetryOff(t *testing.T) {
 // folder comes last when it holds no node, as the test binary's does (see
 // TestBrainPlaudPATH); without it their PATH is the bridge's.
 func TestBrainsFindThePlaudCLIWhenTheyMayUseIt(t *testing.T) {
+	t.Parallel()
 	for _, access := range []bool{true, false} {
 		t.Run(fmt.Sprintf("brain_access=%v", access), func(t *testing.T) {
 			tb, _ := plaudBridge(t, fmt.Sprintf(`, "brain_access": %v`, access))
 			envLog := filepath.Join(t.TempDir(), "brain.env")
-			t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
+			setenv(t, "FRIDOLIN_FAKE_ENV_LOG", envLog)
 			tb.handleInbound(context.Background(), brainruntime.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp"}})
 			testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return len(tb.dev.Outbox()) > 0 })
 			logged, _ := os.ReadFile(envLog)
@@ -1429,6 +1457,7 @@ func TestBrainsFindThePlaudCLIWhenTheyMayUseIt(t *testing.T) {
 }
 
 func TestPlaudBrainAccessSharesTheLogin(t *testing.T) {
+	t.Parallel()
 	tb, fp := plaudBridge(t, `, "brain_access": true`)
 	fp.Files()
 	_ = tb.plaud.Poll(context.Background())
@@ -1462,6 +1491,7 @@ func TestPlaudBrainAccessSharesTheLogin(t *testing.T) {
 }
 
 func TestPlaudConnectShowsTheSignInLinkWhileWaiting(t *testing.T) {
+	t.Parallel()
 	tb, fp := plaudBridge(t, "")
 	fp.Write("login_wait", "")
 	if rec := tb.do("POST", "/api/plaud/connect", nil); rec.Code != 202 {
@@ -1497,6 +1527,7 @@ func TestPlaudConnectShowsTheSignInLinkWhileWaiting(t *testing.T) {
 // wrote a new one, which signed in all the same, while a failure that
 // leaves the old login in place did not.
 func TestPlaudConnectJudgesTheSignInByTheLogin(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name, fixture string
 		oldLogin      bool
@@ -1537,6 +1568,7 @@ func TestPlaudConnectJudgesTheSignInByTheLogin(t *testing.T) {
 // The card says which version of the CLI is installed, read from its npm
 // package without running it, and warns about one Fridolin does not read.
 func TestPlaudCLIVersion(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		version string
 		warns   string // in the warning; "" for none
@@ -1578,6 +1610,8 @@ func TestPlaudCLIVersion(t *testing.T) {
 // Without plaud.cli_path and with no plaud on PATH, the CLI of the newest
 // nvm node version is used, by version and not by name.
 func TestFindPlaudCLIPrefersTheNewestNode(t *testing.T) {
+	// Serial: the bridge finds the Plaud CLI and its node on the process's
+	// PATH and under its HOME.
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("PATH", "/usr/bin:/bin")
@@ -1603,6 +1637,8 @@ func TestFindPlaudCLIPrefersTheNewestNode(t *testing.T) {
 // bridge's PATH that helperPath keeps: none outside HOME, where a brain
 // may have planted a node.
 func TestPlaudPATH(t *testing.T) {
+	// Serial: the bridge finds the Plaud CLI and its node on the process's
+	// PATH and under its HOME.
 	planted, home := plantedOutsideHome(t)
 	homeBin := filepath.Join(home, ".local", "bin")
 	t.Setenv("PATH", planted+":"+homeBin+":/usr/bin:/bin")
@@ -1654,6 +1690,8 @@ func TestPlaudPATH(t *testing.T) {
 // and a brain folder may not hold one (see bridgeProgramsOf), so that no
 // brain can put a node in the CLI's folder that would move it first.
 func TestBrainPlaudPATH(t *testing.T) {
+	// Serial: the bridge finds the Plaud CLI and its node on the process's
+	// PATH and under its HOME.
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	homeBin := filepath.Join(home, ".local", "bin")
@@ -1717,9 +1755,10 @@ func writeExecutables(t *testing.T, paths ...string) {
 }
 
 func TestPlaudConfigValidation(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Parallel()
+	setenv(t, "HOME", t.TempDir())
 	for _, bad := range []string{`{"plaud":{"brain":"Not A Slug"}}`, `{"plaud":{"interval_seconds":5}}`} {
-		if _, err := LoadConfig(writeConfig(t, bad)); err == nil {
+		if _, err := loadConfig(t, writeConfig(t, bad)); err == nil {
 			t.Errorf("%s should be rejected", bad)
 		}
 	}
@@ -1731,6 +1770,7 @@ func TestPlaudConfigValidation(t *testing.T) {
 // names in child_env_passthrough, which are for brains. Only `plaud login`,
 // which opens your browser, gets your desktop session's variables.
 func TestPlaudCLIGetsTheAllowlistedEnvironment(t *testing.T) {
+	t.Parallel()
 	tb, fp := plaudBridgeWith(t, `, "child_env_passthrough": ["GROQ_API_KEY"]`, "")
 	for k, v := range map[string]string{
 		"HTTPS_PROXY":             "http://proxy.example.com:3128",
@@ -1740,7 +1780,7 @@ func TestPlaudCLIGetsTheAllowlistedEnvironment(t *testing.T) {
 		"CLAUDE_CODE_OAUTH_TOKEN": "test-oauth-token",
 		"FRIDOLIN_TEST_SECRET":    "test-secret",
 	} {
-		t.Setenv(k, v)
+		setenv(t, k, v)
 	}
 	bin, err := findPlaudCLI(tb.cfgs.Get().Plaud.CLIPath)
 	if err != nil {
@@ -1809,6 +1849,7 @@ func TestPlaudCLIGetsTheAllowlistedEnvironment(t *testing.T) {
 // also one that arrives after newer ones, and nothing a sync tool leaves
 // beside them counts.
 func TestPlaudPhoneFolder(t *testing.T) {
+	t.Parallel()
 	phone := t.TempDir()
 	tb, fp := plaudBridge(t, `, "phone_dir": "`+phone+`"`)
 	ctx := context.Background()
@@ -1874,6 +1915,7 @@ func TestPlaudPhoneFolder(t *testing.T) {
 // HTTP disconnect still signs out when its caller has already left. The
 // service's command-serialization test separately exercises concurrent runs.
 func TestPlaudDisconnectAfterTheRequestEnds(t *testing.T) {
+	t.Parallel()
 	tb, fp := plaudBridge(t, "")
 	plaudSignIn(t, tb)
 	gone, cancel := context.WithCancel(context.Background())
@@ -1887,6 +1929,7 @@ func TestPlaudDisconnectAfterTheRequestEnds(t *testing.T) {
 // The dashboard's disconnect clears a remembered expiry as well as a login
 // still present on disk; daily-notice scheduling is exercised with service ticks.
 func TestPlaudDashboardDisconnectClearsExpiredLogin(t *testing.T) {
+	t.Parallel()
 	tb, fp := plaudBridge(t, "")
 	plaudSignIn(t, tb)
 	if err := tb.writePlaudState(plaudRecordLogin(tb, plaudSeededState("u_1", plaudOld1))); err != nil {

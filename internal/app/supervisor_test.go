@@ -13,6 +13,7 @@ import (
 )
 
 func TestSupervisorBindsBeforeStartingServices(t *testing.T) {
+	t.Parallel()
 	var s app.Supervisor
 	sentinel := errors.New("port occupied")
 	unexpected := func(context.Context) { t.Error("started a service after bind failure") }
@@ -30,6 +31,7 @@ func TestSupervisorBindsBeforeStartingServices(t *testing.T) {
 }
 
 func TestSupervisorJoinsWatcherBeforeReturningOnCancellation(t *testing.T) {
+	t.Parallel()
 	var s app.Supervisor
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

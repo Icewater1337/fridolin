@@ -4,31 +4,47 @@
 // trash. The bridge checks every change again, audits it and commits it
 // where the folder is a git repository; these only ask and show.
 
-import { api, get, qs, upload } from '../app/api.js';
+import { api, get, qs, upload, errorStatus } from '../app/api.js';
 import { h, mount } from '../lib/dom.js';
 import { btn } from './buttons.js';
 import { spinner, timeAgo } from './common.js';
 import { confirmDialog, openDialog } from './dialog.js';
 import { textInput } from './fields.js';
 import { toast } from './toast.js';
+import { errorMessage } from '../lib/errors.js';
 
+/** @import { Page } from '../app/page.js' */
+/** @import { FileCommit, FileMoved, FileSaved, FilesUploaded } from '../../types/api.js' */
+
+/** @param {string} p */
 const baseName = (p) => p.slice(p.lastIndexOf('/') + 1);
 
 // A file just made opens in its editor: the page that made it says so
 // here, the File or Wiki page asks as it opens.
 let editNext = '';
 
-/** Opens the file path of root in its editor when its page opens next. */
+/**
+ * Opens the file path of root in its editor when its page opens next.
+ * @param {string} rootId
+ * @param {string} path
+ */
 export function editOnOpen(rootId, path) { editNext = `${rootId}\u0000${path}`; }
 
-/** Whether the file path of root was to open in its editor; asks once. */
+/**
+ * Whether the file path of root was to open in its editor; asks once.
+ * @param {string} rootId
+ * @param {string} path
+ */
 export function takeEditOnOpen(rootId, path) {
   const yes = editNext === `${rootId}\u0000${path}`;
   editNext = '';
   return yes;
 }
 
-/** Tells what became of a change in a git repository. */
+/**
+ * Tells what became of a change in a git repository.
+ * @param {FileCommit | null} r
+ */
 function noteCommit(r) {
   if (r && r.git_error) toast(`Saved, but ${r.git_error}`, 'warn');
   else if (r && r.commit) toast(`Saved and committed (${r.commit})`, 'ok', { timeout: 2500 });
@@ -38,10 +54,13 @@ function noteCommit(r) {
 /**
  * Asks for a new path of path in the root and moves it there. Resolves
  * with the new path, or null.
+ * @param {string} rootId
+ * @param {string} path
+ * @returns {Promise<string | null>}
  */
 export async function moveFile(rootId, path) {
   const input = textInput({ value: path, 'aria-label': 'New path', spellcheck: 'false', autocomplete: 'off' });
-  const r = await openDialog({
+  const r = /** @type {FileMoved | null} */ (await openDialog({
     title: `Rename or move ${baseName(path)}`,
     body: h('div', h('p.muted', 'Its path in the folder. Change the name to rename it, the folders before it to move it; the folder must be there.'), input),
     actions: [
@@ -56,13 +75,19 @@ export async function moveFile(rootId, path) {
         },
       },
     ],
-  });
+  }));
   if (!r) return null;
   noteCommit(r);
   return r.path;
 }
 
-/** Asks, then deletes path (into the folder's trash). Resolves true once it is gone. */
+/**
+ * Asks, then deletes path (into the folder's trash). Resolves true once it is gone.
+ * @param {string} rootId
+ * @param {string} path
+ * @param {boolean | undefined} dir path is a folder
+ * @returns {Promise<boolean>}
+ */
 export async function deleteFile(rootId, path, dir) {
   const ok = await confirmDialog({
     title: `Delete ${baseName(path)}?`,
@@ -71,17 +96,21 @@ export async function deleteFile(rootId, path, dir) {
     danger: true,
   });
   if (!ok) return false;
-  noteCommit(await api('POST', '/api/files/delete', { root: rootId, path }));
+  noteCommit(/** @type {FileMoved} */ (await api('POST', '/api/files/delete', { root: rootId, path })));
   return true;
 }
 
 /**
  * Asks for the name of a new text or Markdown file in folder and creates
  * it empty, or with text. Resolves with its path, or null.
+ * @param {string} rootId
+ * @param {string} folder
+ * @param {{text?: string, placeholder?: string}} [options]
+ * @returns {Promise<string | null>}
  */
 export async function newFile(rootId, folder, { text = '', placeholder = 'notes.md' } = {}) {
   const input = textInput({ placeholder, 'aria-label': 'Name', spellcheck: 'false', autocomplete: 'off' });
-  const r = await openDialog({
+  const r = /** @type {FileSaved | null} */ (await openDialog({
     title: 'New file',
     body: h('div', h('p.muted', `A Markdown (.md) or text (.txt) file in ${folder ? `${folder}/` : 'the folder'}; a name with / in it makes the folders too.`), input),
     actions: [
@@ -97,7 +126,7 @@ export async function newFile(rootId, folder, { text = '', placeholder = 'notes.
         },
       },
     ],
-  });
+  }));
   if (!r) return null;
   noteCommit(r);
   return r.path;
@@ -106,6 +135,10 @@ export async function newFile(rootId, folder, { text = '', placeholder = 'notes.
 /**
  * An Upload button for the folder path of root: where the files go is the
  * bridge's to say (to: 'folder' or 'brain'). onDone(result) runs after.
+ * @param {string} rootId
+ * @param {string} path
+ * @param {'folder' | 'brain'} to
+ * @param {(r: FilesUploaded) => void} [onDone]
  */
 export function uploadButton(rootId, path, to, onDone) {
   const input = h('input', { type: 'file', multiple: true, hidden: true, 'aria-label': 'Files to upload' });
@@ -118,13 +151,14 @@ export function uploadButton(rootId, path, to, onDone) {
     button.disabled = true;
     button.classList.add('busy');
     try {
+      /** @type {FilesUploaded} */
       const r = await upload(`/api/files/upload?${new URLSearchParams({ root: rootId, path })}`, list);
       const n = r.files.length;
       if (r.to === 'brain') toast(`${n === 1 ? 'The file went' : `${n} files went`} to the brain, which files ${n === 1 ? 'it' : 'them'}. Its answer comes in its chat.`, 'ok');
       else noteCommit(r);
       if (onDone) onDone(r);
     } catch (e) {
-      toast(e.message || String(e));
+      toast(errorMessage(e));
     } finally {
       button.disabled = false;
       button.classList.remove('busy');
@@ -139,6 +173,13 @@ export function uploadButton(rootId, path, to, onDone) {
  * refused, and the text stays to copy. onSaved(result, text) runs after a
  * save, onCancel() after Cancel. editor.dirty() says whether there is
  * something to save.
+ * @param {object} options
+ * @param {string} options.rootId
+ * @param {string} options.path
+ * @param {string} options.text
+ * @param {string} options.sha
+ * @param {(r: FileSaved, text: string) => void} [options.onSaved]
+ * @param {() => void} [options.onCancel]
  */
 export function textEditor({ rootId, path, text, sha, onSaved, onCancel }) {
   let base = text;
@@ -151,6 +192,7 @@ export function textEditor({ rootId, path, text, sha, onSaved, onCancel }) {
     icon: 'check',
     onClick: async () => {
       try {
+        /** @type {FileSaved} */
         const r = await api('PUT', '/api/files/text', { root: rootId, path, text: area.value, sha: version });
         base = area.value;
         version = r.sha;
@@ -158,7 +200,7 @@ export function textEditor({ rootId, path, text, sha, onSaved, onCancel }) {
         noteCommit(r);
         if (onSaved) onSaved(r, base);
       } catch (e) {
-        status.textContent = e.status === 409 ? 'It changed elsewhere meanwhile: copy your text, open the file again and make your change there.' : (e.message || String(e));
+        status.textContent = errorStatus(e) === 409 ? 'It changed elsewhere meanwhile: copy your text, open the file again and make your change there.' : errorMessage(e);
       }
     },
   });
@@ -170,12 +212,15 @@ export function textEditor({ rootId, path, text, sha, onSaved, onCancel }) {
     },
   });
   const el = h('div.card.file-edit', area, h('div.toolbar', h('div.toolbar-group', save, cancel), status));
-  el.dirty = () => area.value !== base;
-  el.focus = () => area.focus();
-  return el;
+  return Object.assign(el, { dirty: () => area.value !== base, focus: () => area.focus() });
 }
 
-/** The changes made to the file here, newest first, once asked for. */
+/**
+ * The changes made to the file here, newest first, once asked for.
+ * @param {Page} ctx
+ * @param {string} rootId
+ * @param {string} path
+ */
 export function historyBox(ctx, rootId, path) {
   const list = h('div');
   const box = h('details.card.file-history-box', h('summary', 'History'), list);

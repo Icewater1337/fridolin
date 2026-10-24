@@ -26,6 +26,7 @@ import (
 var noAndroidBuild = new(bool)
 
 func TestAppBuildersPickByTagThenMemory(t *testing.T) {
+	t.Parallel()
 	ab := &nodeproto.AndroidBuildCap{Java: "21"}
 	view := func(id string, online bool, tags []string, free uint64, build bool) nodes.View {
 		v := nodes.View{Node: &nodes.Node{ID: id, Name: id, Tags: tags, Resources: &nodeproto.HostStats{MemAvailable: free}}, Online: online}
@@ -53,6 +54,7 @@ func TestAppBuildersPickByTagThenMemory(t *testing.T) {
 // The Plaud card's build on a node, through the node port and an agent in
 // this process, with a fake Gradle: the APK arrives, a lockdown refuses.
 func TestPlaudFleetBuildsOnANode(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("a node offers android-build on macOS and Linux only")
 	}
@@ -142,6 +144,7 @@ func TestPlaudFleetBuildsOnANode(t *testing.T) {
 // The doctor check: a way to build the phone app while it uploads
 // through the site.
 func TestDoctorPlaudAppBuild(t *testing.T) {
+	t.Parallel()
 	const registry = "/home/you/.fridolin/nodes/nodes.json"
 	fresh := `"last_seen":"2026-10-20T11:59:00Z"`
 	ab := `"android_build":{"java":"21"}`

@@ -24,20 +24,31 @@ func gitPath() string {
 	return "/usr/bin/git"
 }
 
-// siteEnv is the whole environment of a site process: nothing of the bridge's
-// own environment (tokens, API keys) reaches it.
-func siteEnv(bin string, extra ...string) []string {
-	env := []string{
-		"HOME=" + HomeDir(),
+// siteEnv is the whole environment of a site process, with home the home
+// folder and the user's name and temp folder from the bridge's
+// environment env: nothing else of it (tokens, API keys) reaches it.
+func siteEnv(env Environment, home, bin string, extra ...string) []string {
+	out := []string{
+		"HOME=" + home,
 		"PATH=" + siteEnvPath(bin),
 		"LANG=en_US.UTF-8",
 	}
 	for _, k := range []string{"USER", "LOGNAME", "TMPDIR"} {
-		if v := os.Getenv(k); v != "" {
-			env = append(env, k+"="+v)
+		if v := getenv(env, k); v != "" {
+			out = append(out, k+"="+v)
 		}
 	}
-	return append(env, extra...)
+	return append(out, extra...)
+}
+
+// siteHostFor is the site's view of the host the bridge runs on: its
+// environment env and its home folder home.
+func siteHostFor(env Environment, home func() string) sitesvc.SiteHost {
+	return sitesvc.SiteHost{
+		Home:    home,
+		Environ: env.Environ,
+		Env:     func(bin string, extra ...string) []string { return siteEnv(env, home(), bin, extra...) },
+	}
 }
 
 // siteEnvPath is the PATH of a site process: the folder of the program it
@@ -100,11 +111,19 @@ func toolFallbackDirs() []string {
 	return []string{"/opt/homebrew/bin", "/usr/local/bin", filepath.Join(HomeDir(), ".local/bin")}
 }
 
-// NewSiteManager supplies the host capabilities before constructing the service.
+// NewSiteManager supplies the host capabilities before constructing the
+// service: those opts.Host leaves out are the process's (siteHostDefaults).
 func NewSiteManager(opts sitesvc.SiteOptions) *sitesvc.SiteManager {
-	h := &opts.Host
+	siteHostDefaults(&opts.Host)
+	return sitesvc.New(opts)
+}
+
+// siteHostDefaults fills in what h leaves out: the process's environment
+// and home folder (siteHostFor), and the bridge's own lookups.
+func siteHostDefaults(h *sitesvc.SiteHost) {
+	process := siteHostFor(processEnv{}, HomeDir)
 	if h.Home == nil {
-		h.Home = HomeDir
+		h.Home = process.Home
 	}
 	if h.Node == nil {
 		h.Node = findNode
@@ -116,10 +135,10 @@ func NewSiteManager(opts sitesvc.SiteOptions) *sitesvc.SiteManager {
 		h.GitPath = gitPath
 	}
 	if h.Env == nil {
-		h.Env = siteEnv
+		h.Env = process.Env
 	}
 	if h.Environ == nil {
-		h.Environ = os.Environ
+		h.Environ = process.Environ
 	}
 	if h.Profile == nil {
 		h.Profile = siteSandboxProfile
@@ -133,7 +152,6 @@ func NewSiteManager(opts sitesvc.SiteOptions) *sitesvc.SiteManager {
 			return c.Type, nil
 		}
 	}
-	return sitesvc.New(opts)
 }
 
 func siteSandboxProfile(in sandbox.SitePolicy) (string, error) {

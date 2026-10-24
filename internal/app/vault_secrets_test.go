@@ -28,6 +28,7 @@ func (m mapSecrets) Has(name string) (bool, error) {
 }
 
 func TestVaultSecrets(t *testing.T) {
+	t.Parallel()
 	env := map[string]string{"B2_VAULT_KEY_ID": "env-id", "RESTIC_PASSWORD": ""}
 	store := mapSecrets{hostsecrets.B2VaultKeyID: "store-id", hostsecrets.B2VaultKey: "store-key"}
 	var logs bytes.Buffer
@@ -85,6 +86,7 @@ func TestVaultSecrets(t *testing.T) {
 }
 
 func TestNewVaultPasswordFitsTheKeychain(t *testing.T) {
+	t.Parallel()
 	pw, err := newVaultPassword()
 	if err != nil {
 		t.Fatal(err)

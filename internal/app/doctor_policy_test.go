@@ -10,6 +10,7 @@ import (
 // TestDoctorPolicyChecks: doctor warns about an approval that has waited
 // more than an hour, and shows the lockdown, from the audit log alone.
 func TestDoctorPolicyChecks(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
 		name, log          string

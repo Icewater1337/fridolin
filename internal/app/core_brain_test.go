@@ -23,7 +23,7 @@ func coreHarness(t *testing.T, steps []testutil.FakeMCPStep) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("FRIDOLIN_FAKE_MCP", string(data))
+	setenv(t, "FRIDOLIN_FAKE_MCP", string(data))
 	h := newServedHarness(t, "")
 	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
 	h.AddBrain(manifest.Manifest{ID: "family", Name: "Family", Routing: manifest.Routing{Groups: []string{harnessGroup}}})
@@ -82,6 +82,7 @@ func (h *harness) auditLines() []map[string]any {
 // no delegate tool. Every tool list here is what `fridolin mcp --run` hands
 // the CLI, asked of the bridge with the run's own token.
 func TestCoreDelegatesOnlyWhenGranted(t *testing.T) {
+	t.Parallel()
 	h := coreHarness(t, []testutil.FakeMCPStep{
 		{Tool: ""},
 		{Brain: "core", Tool: "delegate", Args: json.RawMessage(`{"brain":"family","task":"Summarise last week's family chat. #mcp"}`)},
@@ -166,9 +167,10 @@ func TestCoreDelegatesOnlyWhenGranted(t *testing.T) {
 // returns, and the sub-brain's answer comes to the core brain as a new
 // message in the chat its run was for, which it answers there.
 func TestLateDelegationAnswerComesToTheCoresChat(t *testing.T) {
+	t.Parallel()
 	release := filepath.Join(t.TempDir(), "release")
-	t.Setenv("FRIDOLIN_FAKE_WAIT_FILE", release)
-	t.Setenv("FRIDOLIN_FAKE_WAIT_BRAIN", "family")
+	setenv(t, "FRIDOLIN_FAKE_WAIT_FILE", release)
+	setenv(t, "FRIDOLIN_FAKE_WAIT_BRAIN", "family")
 	h := coreHarness(t, []testutil.FakeMCPStep{
 		{Brain: "core", Tool: "delegate", Args: json.RawMessage(`{"brain":"family","task":"Find the photos","timeout_seconds":1}`)},
 	})
@@ -195,6 +197,7 @@ func TestLateDelegationAnswerComesToTheCoresChat(t *testing.T) {
 // token, for the run it was made for, and compute the tools from the
 // brain's approved manifest, whatever a request says.
 func TestMCPAPIKnowsTheRunByItsToken(t *testing.T) {
+	t.Parallel()
 	h := coreHarness(t, nil)
 	h.grant(map[string][]string{"family": {"delegate"}})
 	tok, revoke := h.b.runTokens.mintRun(runInfo{Brain: "core", ID: "r1", Chat: harnessDM})
@@ -238,6 +241,7 @@ func TestMCPAPIKnowsTheRunByItsToken(t *testing.T) {
 // from them: the Brains page shows the change, and only your approval
 // there makes it count.
 func TestGrantsWrittenByABrainWaitForApproval(t *testing.T) {
+	t.Parallel()
 	h := coreHarness(t, nil)
 	tok, revoke := h.b.runTokens.mintRun(runInfo{Brain: "core", ID: "r1", Chat: harnessDM})
 	defer revoke()
@@ -275,6 +279,7 @@ func TestGrantsWrittenByABrainWaitForApproval(t *testing.T) {
 // Codex the same server as -c settings that pass it the two variables
 // leading to the bridge, and a wait long enough for a delegated task.
 func TestRunMCPArgsForEachProvider(t *testing.T) {
+	t.Parallel()
 	access := runAccess{MCPConfig: "/data/run-tokens/core/run-r1.mcp.json", MCPCommand: []string{"/opt/fridolin", "mcp", "--run", "r1"}}
 	if got := strings.Join(runMCPArgs("claude", access), " "); got != "--mcp-config /data/run-tokens/core/run-r1.mcp.json --allowed-tools mcp__fridolin" {
 		t.Errorf("claude: %s", got)
@@ -289,6 +294,7 @@ func TestRunMCPArgsForEachProvider(t *testing.T) {
 }
 
 func TestReadMemoryStaysInMemoriesAndSkills(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	for _, f := range []string{"memories/a.md", "memories/sub/b.md", "memories/raw.txt", "skills/s/SKILL.md", "brain.json", "conversation-history.jsonl"} {
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, f)), 0o700); err != nil {

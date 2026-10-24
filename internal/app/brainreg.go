@@ -14,11 +14,12 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
-// ResolveBrains resolves the current configuration without freezing the
-// security policy or ambient home/layout inputs between candidate folders.
+// ResolveBrains resolves the current configuration, against the home folder
+// it was resolved with, without freezing the security policy or layout
+// inputs between candidate folders.
 func ResolveBrains(cfg *config.Settings) ([]manifest.Spec, []registry.Issue) {
 	return registry.Resolve(cfg.BrainDirs, func(dir, configured string) error {
-		return checkBrainDir(dir, configured, cfg, HomeDir())
+		return checkBrainDir(dir, configured, cfg, cfg.Home)
 	})
 }
 
@@ -26,7 +27,7 @@ func ResolveBrains(cfg *config.Settings) ([]manifest.Spec, []registry.Issue) {
 // command boundary; the registry receives explicit inputs and one checker.
 func CheckBrainPath(path string, cfg *config.Settings, otherDirs []string) (string, []string, []string) {
 	return registry.CheckPath(path, registry.PathContext{
-		Home: HomeDir(), Others: otherDirs,
+		Home: cfg.Home, Others: otherDirs,
 		CheckDir: func(dir, configured, home string) error {
 			return checkBrainDir(dir, configured, cfg, home)
 		},
@@ -77,7 +78,13 @@ func updateManifest(cs *config.Store, id string, mutate func(m *manifest.Manifes
 // also protects the active process's paths until a restart applies the saved
 // paths. The nil-store checker is used only for candidate config validation.
 func registryFor(cs *config.Store) *registry.Registry {
-	options := registry.Options{Home: HomeDir, CheckDir: brainDirCheck(cs), Templates: brainTemplates, HistoryFile: history.FileName}
+	return registryAt(cs, HomeDir)
+}
+
+// registryAt is registryFor with home the home folder when there is no
+// store.
+func registryAt(cs *config.Store, home func() string) *registry.Registry {
+	options := registry.Options{Home: home, CheckDir: brainDirCheck(cs), Templates: brainTemplates, HistoryFile: history.FileName}
 	if cs != nil {
 		options.Home = func() string {
 			// In the container the home folder is not kept: brain folders
@@ -115,4 +122,8 @@ func brainDirCheck(cs *config.Store) func(string, string, *config.Settings, stri
 	}
 }
 
-func CheckSet(before, after *config.Settings) error { return registryFor(nil).CheckSet(before, after) }
+// CheckSet checks a config edit's brains (registry.CheckSet) against the
+// home folder the config was resolved with.
+func CheckSet(before, after *config.Settings) error {
+	return registryAt(nil, func() string { return after.Home }).CheckSet(before, after)
+}

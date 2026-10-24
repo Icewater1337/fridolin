@@ -24,6 +24,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/activity"
 	"github.com/Icewater1337/fridolin/internal/audit"
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/history"
@@ -104,6 +105,12 @@ type App struct {
 	started time.Time
 	// restart is the optional embedding owner callback.
 	restart func()
+	// env is the environment the bridge reads and hands its programs
+	// (Options.Env).
+	env Environment
+	// cliVersions caches the versions of the agent CLIs the bridge found
+	// (claudeInfo).
+	cliVersions claudecli.Prober
 
 	// listen is the address the HTTP server binds, "" when it is off;
 	// runs reach the brain API there with a token from runTokens.
@@ -193,6 +200,10 @@ type Options struct {
 	// LeaseRetry is the first wait before a lease renewal that failed on
 	// the store is tried again (default 30 s; tests shorten it).
 	LeaseRetry time.Duration
+	// Env is the environment the bridge reads while it runs and hands, in
+	// part, to the programs it starts; nil is the process's own. The home
+	// folder comes from the config store (Boot.Home), not from Env.
+	Env Environment
 }
 
 // New creates and wires up all components. It holds the data
@@ -262,6 +273,7 @@ func New(opts Options) (_ *App, err error) {
 		activity: activity.New(500),
 		started:  time.Now(),
 		restart:  opts.Restart,
+		env:      envOr(opts.Env),
 		core: coreRuntime{tailnetFactory: opts.Tailnet, tailnetAuthKey: opts.TailnetAuthKey,
 			leaseStore: opts.LeaseStore, leaseSettle: opts.LeaseSettle, leaseRetry: opts.LeaseRetry},
 		b2: loadB2Usage(cfgs.Boot()),
@@ -307,7 +319,7 @@ func New(opts Options) (_ *App, err error) {
 		b.logger = slog.New(logx.Fanout(sink, logx.NewTextHandler(b.logs, nil)))
 	}
 
-	mgr, err := NewBrainManager(cfg)
+	mgr, err := NewBrainManager(cfg, b.env)
 	if err != nil {
 		return nil, fmt.Errorf("creating brain manager: %w", err)
 	}
@@ -317,7 +329,6 @@ func New(opts Options) (_ *App, err error) {
 		}
 	}()
 	b.brainMgr = mgr
-	mgr.profiler.home = cfgs.Boot().Home
 	mgr.profiler.SetConfigFile(cfgs.Path())
 	for _, is := range mgr.Issues() {
 		log.Printf("brain %s (%s): %s — %s", is.ID, is.Path, is.Kind, is.Detail)
@@ -395,21 +406,22 @@ func New(opts Options) (_ *App, err error) {
 	}
 	// A refused scheduled backup goes to the brain's chat, like Plaud's
 	// expired-login notice: the owner may not open the dashboard for weeks.
-	b.vault = newVaultService(cfgs, opts.Container, b.logger, b.vaultBrains, b.openMedia)
+	b.vault = newVaultService(cfgs, b.env, opts.Container, b.logger, b.vaultBrains, b.openMedia)
 	b.housekeeping = newHousekeeping(b, opts.Container)
 	b.vault.usage = b.b2
 	b.targets = newTargetService(cfgs, b.vault, b.nodes, opts.Container, b.logger)
-	b.github = newGitHubService(cfgs, opts.Container, b.logger)
+	b.github = newGitHubService(cfgs, b.env, opts.Container, b.logger)
 	b.vault.targets = b.targets
 	b.google = google.New(googleOptionsFor(cfgs))
-	b.backup = newProjectedBackup(cfgs, b.brainMgr, b.notifyBackup, b.vault.driveSuperseded, b.google)
-	b.plaud = NewPlaudManager(cfgs, b.brainMgr, b.submitHandOff, b.submitAsk, b.wa.SendMessage, func() string {
+	b.backup = newProjectedBackup(cfgs, b.env, b.brainMgr, b.notifyBackup, b.vault.driveSuperseded, b.google)
+	b.plaud = NewPlaudManager(cfgs, b.env, b.brainMgr, b.submitHandOff, b.submitAsk, b.wa.SendMessage, func() string {
 		if d := b.site.Settings().Domain; d != "" {
 			return "https://" + d
 		}
 		return ""
 	}, newPlaudFleet(b.nodes, b.locked))
-	b.site = NewSiteManager(sitesvc.SiteOptions{DataDir: cfg.DataDir, GoogleClient: b.google.ClientPath, Builder: b.siteBuilderHooks(), Container: opts.Container && !opts.Box})
+	b.site = NewSiteManager(sitesvc.SiteOptions{DataDir: cfg.DataDir, GoogleClient: b.google.ClientPath, Builder: b.siteBuilderHooks(), Container: opts.Container && !opts.Box,
+		Host: siteHostFor(b.env, func() string { return cfgs.Boot().Home })})
 	// What builder brains say in the Build page's chats goes there, not to WhatsApp.
 	b.wa = siteChatMessenger{Messenger: b.wa, appendMessage: b.site.AppendBuildMessage}
 	pace := outboundmsg.OutboxPace

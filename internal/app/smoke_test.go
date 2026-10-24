@@ -31,6 +31,7 @@ var raceDetector bool
 // API, a brain answers a message, POST /api/restart brings the same process
 // back serving, and SIGTERM stops it cleanly. -short skips it.
 func TestSmoke(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("builds and runs the bridge")
 	}
