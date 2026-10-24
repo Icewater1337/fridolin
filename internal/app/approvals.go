@@ -544,6 +544,16 @@ func (b *App) deliverAnswer(a store.Approval) {
 		b.work.decided(a)
 		return
 	}
+	// A move's answers ask the nodes, which takes a while: not on the
+	// goroutine that brought the vote.
+	if a.Notify == coreMoveNotify {
+		go b.coreMoveDecided(a)
+		return
+	}
+	if a.Notify == coreSecretsNotify {
+		go b.coreSecretsDecided(a)
+		return
+	}
 	br := b.brainMgr.Get(a.Notify)
 	if br == nil || a.Chat == "" {
 		log.Printf("approval %s: the answer came once its run was over, and brain %s is not there to hear it", a.ID, a.Notify)

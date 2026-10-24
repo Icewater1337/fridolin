@@ -80,6 +80,12 @@ type Options struct {
 	// often the core asks the hosts of a move how it goes (5s when zero).
 	OnMove   func(MoveRecord)
 	MovePoll time.Duration
+	// OnMoveStopping hears a move just before the source is told to stop
+	// the core, so the owner hears it while the core still runs; Site is
+	// the site as the core runs it, for a move's report (coremove.go).
+	// Either may be nil.
+	OnMoveStopping func(MoveRecord)
+	Site           func() *MoveSite
 }
 
 // Service is the node port and the registry behind it.
@@ -123,6 +129,8 @@ type Service struct {
 	moves         map[string]*MoveRecord
 	moveActive    string
 	onMove        func(MoveRecord)
+	onStopping    func(MoveRecord)
+	site          func() *MoveSite
 	movePollEvery time.Duration
 	// progs are the lists of programs sent to nodes (programs.go).
 	progs     programsState
@@ -146,7 +154,7 @@ func New(opts Options) (*Service, error) {
 		dir: opts.Dir, version: opts.Version, binDir: opts.BinariesDir, busy: opts.Busy, hold: opts.Hold, boxImages: opts.BoxImages,
 		updating: map[string]bool{}, reports: map[string]nodeproto.UpdateReport{}, onConnect: opts.OnConnect, onApprove: opts.OnApprove,
 		onCoreHost: opts.OnCoreHost, coreHostSeen: map[string]string{},
-		moves: map[string]*MoveRecord{}, onMove: opts.OnMove, movePollEvery: opts.MovePoll,
+		moves: map[string]*MoveRecord{}, onMove: opts.OnMove, onStopping: opts.OnMoveStopping, site: opts.Site, movePollEvery: opts.MovePoll,
 	}
 	s.resumeMoves()
 	return s, nil
@@ -556,13 +564,36 @@ func (s *Service) ApproveCommands(id string) (*Node, error) {
 }
 
 // Revoke revokes node id and closes its connection at once.
+//
+// A core host that is connected forgets the host secrets a move brought
+// it first (#187 §5): once revoked, the core can no longer ask it to.
 func (s *Service) Revoke(id string) (*Node, error) {
+	n, _, err := s.RevokeForget(id)
+	return n, err
+}
+
+// RevokeForget revokes node id like Revoke, and says what its forgetting
+// the host secrets did: nil for a node that is no core host.
+func (s *Service) RevokeForget(id string) (*Node, *CoreForget, error) {
+	var forgot *CoreForget
+	if cur, err := s.reg.Get(id); err == nil && cur.Device == nodeproto.DeviceApproved && cur.Effective().CoreHost != nil {
+		ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
+		f := s.ForgetCoreSecrets(ctx, id)
+		cancel()
+		forgot = &f
+	}
 	n, err := s.reg.Revoke(id)
 	if err == nil {
 		s.logf("nodes: revoked %s (%s)", n.Name, n.ID)
 		s.pushState(n)
 	}
-	return n, err
+	return n, forgot, err
+}
+
+// FridePending reports whether n offers fride its approval does not
+// cover yet.
+func FridePending(n *Node) bool {
+	return n.Declared.Fride != nil && n.Approved.Fride == nil && n.Device != nodeproto.DeviceRevoked
 }
 
 // SetTags replaces node id's tags.
@@ -699,6 +730,9 @@ type View struct {
 	// CoreHost is set for a node that offers core-host, or had it
 	// approved (CoreHostView).
 	CoreHost *CoreHostView `json:"core_host,omitempty"`
+	// FrideApproval is what approving fride means, set while the node
+	// offers fride that waits for approval.
+	FrideApproval string `json:"fride_approval,omitempty"`
 	// Programs is how the core's last list of programs for the node went
 	// (programs.go); nil when none was sent since the core started.
 	Programs *ProgramsStatus `json:"programs,omitempty"`
@@ -712,6 +746,9 @@ func (s *Service) Views() ([]View, error) {
 		v := View{Node: n, Commands: n.Commands(), Effective: n.Effective(), Online: s.Online(n.ID)}
 		v.UpdateTo, v.UpdateNote = s.UpdateTarget(n)
 		v.CoreHost = coreHostView(n)
+		if FridePending(n) {
+			v.FrideApproval = nodeproto.FrideApproval
+		}
 		if st, ok := s.Programs(n.ID); ok {
 			v.Programs = &st
 		}

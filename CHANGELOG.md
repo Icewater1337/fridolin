@@ -10,6 +10,26 @@ for compatibility.
 
 ### Added
 
+- **`!movecore`** (#187, third slice): in the owner's direct chat,
+  `!movecore <node>` runs the move's pre-flight and answers with a
+  plain report (source → target, the expected time offline, what does
+  not work on the target, what becomes of the site) and a poll, Move now
+  / Cancel. Only the owner's vote counts, the dashboard cannot answer
+  it, no vote in 30 minutes is a no, a lockdown refuses it, and it
+  answers 3 times an hour. "Move now" runs the same move as `fridolin
+  nodes move --yes`; the owner hears when the core stops and, from the
+  core that runs afterwards, how it ended. `!movecore` alone lists the
+  core hosts and what keeps the core from moving to each;
+  `!movecore <old host>` is the way back. After a move a second poll
+  asks whether the machine the core left keeps the host secrets (no
+  vote in 24 hours forgets them, `core.secrets.forget`), and revoking a
+  connected core host has it forget them first. The move's report (and
+  `POST /api/nodes/move-check`'s `site`) says whether the site's
+  Cloudflare tunnel runs in the core and moves with it, and the new core
+  checks that the domain answers. New audit kinds: `core_move_requested`,
+  `core_move_approved`, `core_move_ended`, `core_secrets`
+  (docs/CORE.md, "Moving the core from WhatsApp").
+
 - **The core moves itself** (#187, second slice) between two native core
   hosts: `fridolin nodes move-check SRC DST` is the pre-flight (versions,
   image by digest, disk, the host secrets and the pin, the lease, what
@@ -608,6 +628,21 @@ for compatibility.
 
 ### Changed
 
+- **Approving `fride` says what it is**: arbitrary execution on that
+  machine, whatever `exec` allows. The Nodes page shows it while `fride`
+  waits (`fride_approval` in `GET /api/nodes`), `!approve` adds it to its
+  answer, and `!fleet` marks nodes with `fride` approved
+  (docs/NODES.md, "FrIDE").
+- **Signing in to a container core.** The dashboard's sign-in page names
+  the steps for the way the bridge runs: for the core in its container,
+  `docker exec fridolin-core fridolin open --print` and `!dashboard`,
+  and the token in the volume (`/data/dashboard.token`) rather than
+  `~/.fridolin/dashboard.token` on the host, which is not that bridge's.
+  `fridolin open` on a machine whose core runs in the `fridolin-core`
+  container asks the container for the link and opens it, so the old
+  instruction works there too (`--config` keeps it native). `/ready`
+  has a new field, `container` (docs/CORE.md, "Signing in to the
+  dashboard").
 - **The core image has an SSH client** (`openssh-client`). The site's
   "Check for changes" fetches the site repository over SSH with its
   deploy key, which failed in the container with `ssh: not found`.
