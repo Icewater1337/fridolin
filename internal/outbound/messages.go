@@ -555,3 +555,18 @@ func ScheduleCommandResult(agent, node string, exitCode int, output string) stri
 	}
 	return head
 }
+
+// CoreMoveEnded tells the owner how a core move ended (#187): state is
+// the record's (done, rolled_back, failed, unknown), detail what the
+// hosts said, which names no secret.
+func CoreMoveEnded(move, source, target, state, detail string) string {
+	switch state {
+	case "done":
+		return fmt.Sprintf("🚚 The core moved to *%s* (move %s): %s. Moving it back is `fridolin nodes move` the other way round.", target, move, detail)
+	case "rolled_back":
+		return fmt.Sprintf("↩️ The core move to *%s* failed and the core runs on *%s* again (move %s): %s", target, source, move, detail)
+	case "failed":
+		return fmt.Sprintf("⚠️ The core move from *%s* to *%s* failed (move %s): %s", source, target, move, detail)
+	}
+	return fmt.Sprintf("❓ The core move from *%s* to *%s* (move %s) did not say how it ended: %s", source, target, move, detail)
+}

@@ -71,6 +71,10 @@ type Options struct {
 	// for updating a node in a box (update.go); nil when the core does not
 	// know where its images are published (a local build).
 	BoxImages func(ctx context.Context, version string) (node, fride string, err error)
+	// OnMove hears a core move that ended (coremove.go); MovePoll is how
+	// often the core asks the hosts of a move how it goes (5s when zero).
+	OnMove   func(MoveRecord)
+	MovePoll time.Duration
 }
 
 // Service is the node port and the registry behind it.
@@ -107,6 +111,14 @@ type Service struct {
 	// they reported meanwhile.
 	updating map[string]bool
 	reports  map[string]nodeproto.UpdateReport
+
+	// Core moves (coremove.go): the records followed in this process,
+	// the move that runs ("" for none).
+	moveMu        sync.Mutex
+	moves         map[string]*MoveRecord
+	moveActive    string
+	onMove        func(MoveRecord)
+	movePollEvery time.Duration
 }
 
 // New opens the registry in opts.Dir.
@@ -120,12 +132,15 @@ func New(opts Options) (*Service, error) {
 		logf = log.Printf
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Service{
+	s := &Service{
 		reg: reg, logf: logf, onEvent: opts.OnEvent, onDeclare: opts.OnDeclare, onJoin: opts.OnJoin, ctx: ctx, cancel: cancel, sessions: map[string]*session{},
 		dir: opts.Dir, version: opts.Version, binDir: opts.BinariesDir, busy: opts.Busy, hold: opts.Hold, boxImages: opts.BoxImages,
 		updating: map[string]bool{}, reports: map[string]nodeproto.UpdateReport{},
 		onCoreHost: opts.OnCoreHost, coreHostSeen: map[string]string{},
-	}, nil
+		moves: map[string]*MoveRecord{}, onMove: opts.OnMove, movePollEvery: opts.MovePoll,
+	}
+	s.resumeMoves()
+	return s, nil
 }
 
 // Version is the core's version, which nodes are updated to.
