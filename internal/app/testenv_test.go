@@ -84,43 +84,95 @@ func (e *testEnv) change(name, value string, unset bool) (restore func()) {
 	}
 }
 
-// testEnvs holds each running test's environment by its name.
-var testEnvs = struct {
-	sync.Mutex
-	m map[string]*testEnv
-}{m: map[string]*testEnv{}}
+// perTest keeps a T for each running test, by its name. A test gets its
+// own the first time it asks: a copy of the closest enclosing test's, or a
+// fresh one, so that a subtest starts from what its parent set while what
+// it changes stays its own (subtests may run in parallel, each making its
+// own bridge).
+type perTest[T any] struct {
+	mu    sync.Mutex
+	m     map[string]*T
+	fresh func() *T
+	copy  func(*T) *T
+}
 
-// envOf is t's environment. A test gets its own the first time it asks,
-// starting from what the closest enclosing test that has one set, so that
-// a subtest sees its parent's HOME and fake CLIs, while what it sets stays
-// its own: subtests may run in parallel, each with its own bridge. A
-// bridge made in a parent therefore does not see what a subtest sets; set
-// that in the parent's (setenv with the parent's t).
-func envOf(t testing.TB) *testEnv {
+func (r *perTest[T]) of(t testing.TB) *T {
 	t.Helper()
-	testEnvs.Lock()
-	defer testEnvs.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	name := t.Name()
-	if e, ok := testEnvs.m[name]; ok {
-		return e
+	if v, ok := r.m[name]; ok {
+		return v
 	}
-	e := &testEnv{set: map[string]string{}, unset: map[string]bool{}}
-	for p := name; strings.Contains(p, "/"); {
+	var v *T
+	for p := name; strings.Contains(p, "/") && v == nil; {
 		p = p[:strings.LastIndex(p, "/")]
-		if parent, ok := testEnvs.m[p]; ok {
-			parent.mu.Lock()
-			e.set, e.unset = maps.Clone(parent.set), maps.Clone(parent.unset)
-			parent.mu.Unlock()
-			break
+		if parent, ok := r.m[p]; ok {
+			v = r.copy(parent)
 		}
 	}
-	testEnvs.m[name] = e
+	if v == nil {
+		v = r.fresh()
+	}
+	if r.m == nil {
+		r.m = map[string]*T{}
+	}
+	r.m[name] = v
 	t.Cleanup(func() {
-		testEnvs.Lock()
-		defer testEnvs.Unlock()
-		delete(testEnvs.m, name)
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		delete(r.m, name)
 	})
-	return e
+	return v
+}
+
+var testEnvs = perTest[testEnv]{
+	fresh: func() *testEnv { return &testEnv{set: map[string]string{}, unset: map[string]bool{}} },
+	copy: func(parent *testEnv) *testEnv {
+		parent.mu.Lock()
+		defer parent.mu.Unlock()
+		return &testEnv{set: maps.Clone(parent.set), unset: maps.Clone(parent.unset)}
+	},
+}
+
+// envOf is t's environment (see perTest). A bridge made in a parent does
+// not see what a subtest sets; set that in the parent's (setenv with the
+// parent's t, or testBridge.setenv).
+func envOf(t testing.TB) *testEnv {
+	t.Helper()
+	return testEnvs.of(t)
+}
+
+var testOptions = perTest[Options]{
+	fresh: func() *Options {
+		w := defaultWaits()
+		return &Options{waits: &w}
+	},
+	copy: func(parent *Options) *Options {
+		o, w := *parent, *parent.waits
+		o.waits = &w
+		return &o
+	},
+}
+
+// optionsOf are the Options of the bridges and brain managers t makes,
+// besides their config and environment: the waits a test shortens and the
+// hooks it watches (see perTest). Set them before making the bridge, which
+// takes a copy.
+func optionsOf(t testing.TB) *Options {
+	t.Helper()
+	return testOptions.of(t)
+}
+
+// bridgeOptions are the Options of a dev-mode bridge on cfgs that t makes:
+// optionsOf(t), with t's environment.
+func bridgeOptions(t testing.TB, cfgs *config.Store) Options {
+	t.Helper()
+	o := *optionsOf(t)
+	w := *o.waits
+	o.waits = &w
+	o.Config, o.NoWhatsApp, o.Env = cfgs, true, envOf(t)
+	return o
 }
 
 // setenv sets name to value in t's environment until t ends, as t.Setenv

@@ -134,11 +134,8 @@ func TestSilentRunLeavesNoReplyInTheHistory(t *testing.T) {
 // the outbox, and the run has asked. One the outbox could not take is on
 // its way to nobody, and the run did not ask.
 func TestMidRunMessagesOnlyForAddressedMessages(t *testing.T) {
-	// Serial: shortens workingNoticeAfter, a package variable every run
-	// reads.
-	prev := workingNoticeAfter
-	workingNoticeAfter = 50 * time.Millisecond
-	t.Cleanup(func() { workingNoticeAfter = prev })
+	t.Parallel()
+	optionsOf(t).waits.workingNotice = 50 * time.Millisecond
 	dm := brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "book a table", Source: chat.SourceWhatsApp}}
 	cases := []struct {
 		name    string

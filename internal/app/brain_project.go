@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/chat"
@@ -15,10 +16,12 @@ import (
 // seam receives brainGlobals directly; configuration and host discovery stay
 // here rather than becoming imports of the brain runtime.
 func settingsFor(cfg *config.Settings, sp manifest.Spec) *brain.Settings {
-	return brain.MergeSettings(brainGlobalsOf(cfg), sp)
+	return brain.MergeSettings(brainGlobalsOf(cfg, defaultWaits().runTimeoutUnit), sp)
 }
 
-func brainGlobalsOf(cfg *config.Settings) brain.Globals {
+// brainGlobalsOf are the brains' settings from cfg, with timeoutUnit what
+// one of run_timeout_minutes is.
+func brainGlobalsOf(cfg *config.Settings, timeoutUnit time.Duration) brain.Globals {
 	return brain.Globals{
 		CodexModel: cfg.CodexModel, CodexEffort: cfg.CodexEffort, RunLimit: cfg.MaxConcurrentRuns,
 		Defaults: brain.Settings{
@@ -27,7 +30,7 @@ func brainGlobalsOf(cfg *config.Settings) brain.Globals {
 			DisallowedTools: append([]string(nil), cfg.DisallowedTools...),
 			Dangerously:     cfg.DangerouslySkipPermissions, InheritUser: cfg.InheritClaudeUserConfig,
 			OTPGuard: cfg.OTPGuard, OTPMarkers: append([]string(nil), cfg.OTPMarkers...),
-			Viewer: cfg.Viewer, RunTimeout: runTimeout(cfg), QueueMode: string(cfg.Queue.Mode), MaxPending: cfg.Queue.MaxPending,
+			Viewer: cfg.Viewer, RunTimeout: runTimeout(cfg, timeoutUnit), QueueMode: string(cfg.Queue.Mode), MaxPending: cfg.Queue.MaxPending,
 			CredsDir: CredentialsDir(cfg), MediaDir: cfg.MediaDir,
 			EnvPassthrough: append([]string(nil), cfg.ChildEnvPassthrough...), ToolsDir: ownLayout().Tools,
 			// Absolute: brains run in their own folder, where a relative data_dir

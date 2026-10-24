@@ -78,7 +78,7 @@ func queueTestManager(t *testing.T, sleepMS int, extra string, modify ...func(*b
 	mgr := newTestManager(t, cfg)
 	if len(modify) > 0 {
 		mgr.Manager.Stop()
-		opts := brainruntime.Options{Runner: &commandRunner{sandbox: mgr.profiler, hooks: mgr.hooks, env: envOf(t), home: cfg.Home}, Sink: brainHooksSink{mgr.hooks}, Input: commandBrainInputRules(nil), ViewerStart: brainViewerStart(envOf(t)), ClaimMedia: claimBrainMedia, ShutdownGrace: func() time.Duration { return shutdownGrace }}
+		opts := brainruntime.Options{Runner: &commandRunner{sandbox: mgr.profiler, hooks: mgr.hooks, env: envOf(t), home: cfg.Home, waits: mgr.waits}, Sink: brainHooksSink{mgr.hooks}, Input: commandBrainInputRules(nil), ViewerStart: brainViewerStart(envOf(t)), ClaimMedia: claimBrainMedia, ShutdownGrace: func() time.Duration { return mgr.waits.shutdownGrace }}
 		for _, f := range modify {
 			f(&opts)
 		}
@@ -1441,17 +1441,15 @@ func TestPanicsInARunAreContained(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.notice > 0 {
+				optionsOf(t).waits.workingNotice = tc.notice
+			}
 			mgr, _, home := queueTestManager(t, 10, "")
 			for k, v := range tc.env {
 				setenv(t, k, v)
 			}
 			pidLog := filepath.Join(home, "pids")
 			setenv(t, "FRIDOLIN_FAKE_PID_LOG", pidLog)
-			if tc.notice > 0 {
-				prev := workingNoticeAfter
-				workingNoticeAfter = tc.notice
-				t.Cleanup(func() { workingNoticeAfter = prev })
-			}
 			d := &deliveries{}
 			var first sync.Once
 			mgr.SetHooks(tc.hooks(d, &first))
@@ -1500,11 +1498,8 @@ func TestPanicsInARunAreContained(t *testing.T) {
 // question it sent before it hung does not make it an answer: the chat
 // still hears that the run was stopped.
 func TestRunTimeoutStopsAStuckRun(t *testing.T) {
-	// Serial: shortens runTimeoutUnit, a package variable every bridge's
-	// runs read.
-	prev := runTimeoutUnit
-	runTimeoutUnit = 100 * time.Millisecond
-	t.Cleanup(func() { runTimeoutUnit = prev })
+	t.Parallel()
+	optionsOf(t).waits.runTimeoutUnit = 100 * time.Millisecond
 	cases := []struct {
 		name     string
 		sleepMS  int
@@ -1563,11 +1558,8 @@ func TestRunTimeoutStopsAStuckRun(t *testing.T) {
 // the CLI has exited, Wait stops waiting for the output after
 // runWaitDelay, the rest of the run is stopped, and the answer goes out.
 func TestRunEndsSoonAfterItsResult(t *testing.T) {
-	// Serial: shortens postResultGrace and runWaitDelay, package variables
-	// every run reads.
-	prevGrace, prevDelay := postResultGrace, runWaitDelay
-	postResultGrace, runWaitDelay = 300*time.Millisecond, 300*time.Millisecond
-	t.Cleanup(func() { postResultGrace, runWaitDelay = prevGrace, prevDelay })
+	t.Parallel()
+	optionsOf(t).waits.postResultGrace, optionsOf(t).waits.runWaitDelay = 300*time.Millisecond, 300*time.Millisecond
 	mgr, d, _ := queueTestManager(t, 10, "")
 	setenv(t, "FRIDOLIN_FAKE_CHILD", "1") // sleeps 30 s holding the output open
 	start := time.Now()
@@ -1587,11 +1579,8 @@ func TestRunEndsSoonAfterItsResult(t *testing.T) {
 // after the result stops what is left of the run, but the answer that is
 // in still goes out.
 func TestRunTimeoutKeepsAnAnswerThatCame(t *testing.T) {
-	// Serial: shortens runTimeoutUnit and postResultGrace, package variables
-	// every run reads.
-	prevUnit, prevGrace := runTimeoutUnit, postResultGrace
-	runTimeoutUnit, postResultGrace = 100*time.Millisecond, 10*time.Second
-	t.Cleanup(func() { runTimeoutUnit, postResultGrace = prevUnit, prevGrace })
+	t.Parallel()
+	optionsOf(t).waits.runTimeoutUnit, optionsOf(t).waits.postResultGrace = 100*time.Millisecond, 10*time.Second
 	mgr, d, _ := queueTestManager(t, 0, `, "run_timeout_minutes": 20`)
 	setenv(t, "FRIDOLIN_FAKE_CHILD", "1") // sleeps 30 s holding the output open
 	if _, _, _, err := mgr.Submit(dm("answer in time")); err != nil {
@@ -1632,7 +1621,7 @@ func TestRunTimeoutSetting(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := runTimeout(cfg); got != tc.want {
+			if got := runTimeout(cfg, time.Minute); got != tc.want {
 				t.Errorf("RunTimeout = %v, want %v", got, tc.want)
 			}
 		})
@@ -1707,8 +1696,8 @@ func TestRunLimitSetting(t *testing.T) {
 				t.Errorf("RunLimit = %d, want %d", got, c.want)
 			}
 			mgr := newTestManager(t, cfg)
-			if brainGlobalsOf(cfg).RunLimit != c.want {
-				t.Errorf("slots limit = %d, want %d", brainGlobalsOf(cfg).RunLimit, c.want)
+			if brainGlobalsOf(cfg, time.Minute).RunLimit != c.want {
+				t.Errorf("slots limit = %d, want %d", brainGlobalsOf(cfg, time.Minute).RunLimit, c.want)
 			}
 			n := 7
 			next := *cfg
@@ -1716,8 +1705,8 @@ func TestRunLimitSetting(t *testing.T) {
 			if err := mgr.Apply(&next); err != nil {
 				t.Fatal(err)
 			}
-			if brainGlobalsOf(&next).RunLimit != 7 {
-				t.Errorf("slots limit after a change = %d, want 7", brainGlobalsOf(&next).RunLimit)
+			if brainGlobalsOf(&next, time.Minute).RunLimit != 7 {
+				t.Errorf("slots limit after a change = %d, want 7", brainGlobalsOf(&next, time.Minute).RunLimit)
 			}
 		})
 	}

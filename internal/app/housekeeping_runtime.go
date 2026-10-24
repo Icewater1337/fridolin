@@ -368,7 +368,7 @@ func (b *App) askForHousekeeping(ctx context.Context, f housekeeping.Finding) (s
 		Notify: housekeepingNotify, Risk: "write",
 		Action:    fmt.Sprintf("Housekeeping: stop PID %d (%s), %.0f%% CPU, %s, up %s, which the bridge did not start", f.PID, f.Name, f.CPUPercent, housekeeping.Bytes(f.RSS), (time.Duration(f.AgeSeconds) * time.Second).String()),
 		Details:   f.Command + "\n\n" + f.Reason,
-		CreatedAt: now, ExpiresAt: now.Add(approvalTimeout(b))}
+		CreatedAt: now, ExpiresAt: now.Add(b.approvalTimeout())}
 	if err := b.store.AddApproval(ctx, a); err != nil {
 		return "", err
 	}

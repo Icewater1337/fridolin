@@ -389,13 +389,11 @@ func secondSignalStopsAtOnce(t *testing.T, provider string) {
 	testutil.WaitFor(t, 5*time.Second, "the run's child to be killed", func() bool { return !testutil.PIDAlive(childPID) })
 }
 
-// setShutdownGrace gives the runs in flight d to finish when the test's
-// bridges stop.
+// setShutdownGrace gives the runs in flight d to finish when the bridges
+// and brain managers t makes from now on stop.
 func setShutdownGrace(t *testing.T, d time.Duration) {
 	t.Helper()
-	prev := shutdownGrace
-	shutdownGrace = d
-	t.Cleanup(func() { shutdownGrace = prev })
+	optionsOf(t).waits.shutdownGrace = d
 }
 
 // The run in flight when the bridge stops gets the grace to finish: one
@@ -403,8 +401,7 @@ func setShutdownGrace(t *testing.T, d time.Duration) {
 // and sent once, before the stop or after the next start. One that does
 // not is stopped once the grace is over, and the stop goes on.
 func TestStopGivesTheRunInFlightItsGrace(t *testing.T) {
-	// Serial: shortens shutdownGrace, a package variable every bridge's stop
-	// reads.
+	t.Parallel()
 	tests := []struct {
 		name    string
 		runMS   string
@@ -455,8 +452,7 @@ func TestStopGivesTheRunInFlightItsGrace(t *testing.T) {
 // bridge closes the outbox and the store once the brains have stopped, and
 // a reply handed over after that would be lost.
 func TestStopWaitsForTheDelivery(t *testing.T) {
-	// Serial: shortens shutdownGrace, a package variable every bridge's stop
-	// reads.
+	t.Parallel()
 	setShutdownGrace(t, 10*time.Second)
 	mgr, _, _ := queueTestManager(t, 300, "")
 	var delivered atomic.Bool
@@ -515,8 +511,7 @@ func TestStopWaitsForARemovedBrainsDelivery(t *testing.T) {
 // an answer already being delivered. A second signal remains the way to
 // abandon a stuck shutdown.
 func TestStopWaitsForDeliveryAfterTheKillTimeout(t *testing.T) {
-	// Serial: shortens shutdownGrace, a package variable every bridge's stop
-	// reads.
+	t.Parallel()
 	setShutdownGrace(t, time.Millisecond)
 	mgr, _, _ := queueTestManager(t, 10, "")
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -589,8 +584,7 @@ func TestResumeAppliesChangesBeforeStartingQueuedRuns(t *testing.T) {
 // answered, once, its line in the history once, and the chat hears that
 // the restart cut the first one's run short.
 func TestShutdownKeepsWhatItHolds(t *testing.T) {
-	// Serial: shortens shutdownGrace, a package variable every bridge's stop
-	// reads.
+	t.Parallel()
 	setShutdownGrace(t, 200*time.Millisecond)
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
@@ -666,8 +660,8 @@ func TestShutdownKeepsTheDebouncedBatch(t *testing.T) {
 // with a line in the log: an answer that late would only confuse. What it
 // kept since is answered.
 func TestShutdownDropsWhatIsKeptTooLong(t *testing.T) {
-	// Serial: shortens shutdownGrace, a package variable every bridge's stop
-	// reads. Its warning goes to the standard logger (captureLog).
+	// Serial: its warning goes to the process's standard logger
+	// (captureLog).
 	setShutdownGrace(t, 200*time.Millisecond)
 	h := newHarness(t, "")
 	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
@@ -699,8 +693,7 @@ func TestShutdownDropsWhatIsKeptTooLong(t *testing.T) {
 // next start handles it as if it came in then, after what the brains had
 // waiting: a deletion of a waiting message takes that one out.
 func TestShutdownKeepsWhatComesInDuringTheStop(t *testing.T) {
-	// Serial: shortens shutdownGrace, a package variable every bridge's stop
-	// reads.
+	t.Parallel()
 	setShutdownGrace(t, 20*time.Second)
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})

@@ -114,7 +114,7 @@ func (b *App) runBrainSearch(ctx context.Context, brainID, prompt string, out io
 		bin, args = sbBin, sbArgs
 		env = append(append(env, state...), "DISABLE_AUTOUPDATER=1")
 	}
-	proc, err := claudecli.Start(ctx, claudecli.Spawn{WaitDelay: runWaitDelay, Binary: bin, Args: args, Dir: br.Dir(), Env: env, Prompt: prompt, Stdout: out})
+	proc, err := claudecli.Start(ctx, claudecli.Spawn{WaitDelay: b.waits.runWaitDelay, Binary: bin, Args: args, Dir: br.Dir(), Env: env, Prompt: prompt, Stdout: out})
 	if err == nil {
 		err = proc.Wait()
 	}

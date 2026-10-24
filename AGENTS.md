@@ -382,10 +382,12 @@ machine must already be a node (path B). In short:
   `t.Parallel()` first and has an environment of its own, in which
   `setenv` sets `HOME` and the fake CLIs' `FRIDOLIN_FAKE_*`; the bridges,
   brain managers and configs it makes read that one (`envOf`,
-  `app.Options.Env`), not the process's. A test that must change what the
-  whole process shares (its environment, working directory, standard
-  logger or a package variable) says why in a `// Serial:` comment first
-  instead, and runs before the parallel ones;
+  `app.Options.Env`), not the process's. The waits a test shortens (a
+  stop's grace, run timeouts, retries) and the hooks it watches go in
+  `optionsOf(t)` before it makes the bridge, never in a package variable.
+  A test that must change what the whole process shares (its environment,
+  working directory, standard logger or a package variable) says why in a
+  `// Serial:` comment first instead, and runs before the parallel ones;
   `TestEveryTestSaysWhetherItRunsInParallel` holds every test to one or
   the other.
 - The golden files in `cmd/fridolin/testdata/golden` pin what the bridge says and writes

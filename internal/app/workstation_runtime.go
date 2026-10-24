@@ -316,7 +316,7 @@ func (w *workRuntime) askApproval(a *workAgent, s nodeproto.AgentSession) (strin
 		Notify: workNotify, Risk: "irreversible",
 		Action:    fmt.Sprintf("Agent #%d on %s (in %s): %s", a.N, w.nodeName(a.Node), a.Folder, s.Question),
 		Details:   fmt.Sprintf("node %s, session %s, %s", a.Node, a.ID, a.Provider),
-		CreatedAt: now, ExpiresAt: now.Add(approvalTimeout(b))}
+		CreatedAt: now, ExpiresAt: now.Add(b.approvalTimeout())}
 	if err := b.store.AddApproval(ctx, ap); err != nil {
 		return "", err
 	}
