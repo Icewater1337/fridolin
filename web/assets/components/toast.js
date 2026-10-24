@@ -21,7 +21,7 @@ const recentToasts = new Map();
 
 /** @param {string} kind */
 function regionFor(kind) {
-  if (!toastBox || !toastBox.isConnected) {
+  if (!toastBox || !toastBox.isConnected || !regions) {
     regions = {
       alert: h('div.toast-region', { role: 'alert' }),
       status: h('div.toast-region', { role: 'status', 'aria-live': 'polite' }),
@@ -59,7 +59,7 @@ export function toast(message, kind = 'error', { timeout } = {}) {
   const remove = () => {
     if (gone) return;
     gone = true;
-    clearTimeout(timer);
+    if (timer !== null) clearTimeout(timer);
     timer = null;
     el.classList.add('leaving');
     setTimeout(() => el.remove(), 200);

@@ -15,7 +15,7 @@ import { field, toggle, textInput } from './fields.js';
 import { pill, callout, mono, loading } from './common.js';
 
 /** @import { Page } from '../app/page.js' */
-/** @import { GitHubStatus } from '../../types/api.js' */
+/** @import { GitHubAppInfo, GitHubStatus } from '../../types/api.js' */
 
 /** @type {(href: string, text: string) => HTMLAnchorElement} */
 const external = (href, text) => h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text);
@@ -57,7 +57,7 @@ export function githubCard(ctx) {
     toast(`Read ${what} of ${r.repo} with a token that may only read issues, then revoked it`, 'ok', { timeout: 8000 });
   };
 
-  /** @param {Partial<GitHubStatus>} st */
+  /** @param {{app: GitHubAppInfo}} st */
   const disconnect = async (st) => {
     const ok = await confirmDialog({
       title: 'Disconnect GitHub?',
@@ -75,7 +75,8 @@ export function githubCard(ctx) {
 
   /** @param {Partial<GitHubStatus>} st */
   function render(st) {
-    if (!st.connected) {
+    const { app } = st; // the bridge names the app whenever it is connected
+    if (!st.connected || !app) {
       paint(card, { error: st.error || '', typed: !!st.typed_token, deleteURL }, (s) => [
         head('Not connected', 'neutral'),
         h('p', 'Connect GitHub once: Fridolin makes a private GitHub App of its own, with no webhook, and you pick the repositories it may use. Each run that needs GitHub — a scheduled review that files issues, say — gets a token that lasts at most an hour, only for its repositories and permissions, revoked when the run ends.'),
@@ -91,9 +92,9 @@ export function githubCard(ctx) {
     deleteURL = '';
     const insts = st.installations || [];
     const repos = insts.flatMap((i) => i.repos || []);
-    paint(card, st, (s) => [
+    paint(card, { ...st, app }, (s) => [
       head(insts.length ? 'Connected' : 'Not installed yet', insts.length ? 'ok' : 'warn'),
-      h('p', 'App ', external(s.app.html_url || s.settings_url, s.app.name || s.app.slug), s.app.owner ? ` on ${s.app.owner}` : '', '. Its key is kept in ', s.where, '.'),
+      h('p', 'App ', external(s.app.html_url || s.settings_url || '', s.app.name || s.app.slug), s.app.owner ? ` on ${s.app.owner}` : '', '. Its key is kept in ', s.where, '.'),
       s.error ? callout('bad', 'GitHub did not answer as expected', s.error) : null,
       insts.length ? null : callout('warn', 'Pick its repositories', 'The app is made but not installed anywhere yet: install it on the repositories Fridolin may use.'),
       insts.length ? h('div.facts', insts.map((i) => h('div',
