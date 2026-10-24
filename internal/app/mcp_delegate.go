@@ -233,8 +233,15 @@ func (b *App) auditDelegation(d *delegation, outcome string) {
 // deliverRun delivers a finished run: to its chat, through the pipeline,
 // for a delegated task to the core run that waits for it, and for a
 // scheduled agent where its report setting says. A delegated run's reply
-// never reaches a WhatsApp chat.
+// never reaches a WhatsApp chat. A message with Answer hears the answer
+// first, and one with AnswerOnly nothing more is done with.
 func (b *App) deliverRun(br *brainruntime.Brain, m brainruntime.Inbound, res claudecli.Result) {
+	if m.Answer != nil && res.Err == nil && res.Text != "" && !m.Silent {
+		res.Text = m.Answer(res.Text)
+	}
+	if m.AnswerOnly {
+		return
+	}
 	switch m.Source {
 	case chat.SourceDelegate:
 		b.delegationFinished(br, m, res)

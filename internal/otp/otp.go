@@ -225,6 +225,18 @@ func (o *Handoff) Write(dir string, h Record) error {
 // expire removes the file at path if it still holds the code received at
 // receivedMS.
 func (o *Handoff) expire(path string, receivedMS int64) {
+	o.expireAgain(path, receivedMS, 0)
+}
+
+// expireRetry is how soon a removal that failed is first tried again:
+// on Windows a file cannot be removed while a script has it open to read,
+// as it may at the very moment the code expires.
+const expireRetry = 20 * time.Millisecond
+
+// expireAgain is expire after it failed with a wait of retry before, which
+// doubles, up to a minute, until the file goes, holds a newer code or the
+// bridge stops.
+func (o *Handoff) expireAgain(path string, receivedMS int64, retry time.Duration) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	var h Record
@@ -233,7 +245,17 @@ func (o *Handoff) expire(path string, receivedMS int64) {
 		return
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		log.Printf("otp: removing an expired code: %v", err)
+		if retry == 0 {
+			log.Printf("otp: removing an expired code: %v; trying again", err)
+		}
+		retry = min(max(2*retry, expireRetry), time.Minute)
+		if o.timers != nil {
+			if t := o.timers[path]; t != nil {
+				t.Stop()
+			}
+			o.timers[path] = time.AfterFunc(retry, func() { o.expireAgain(path, receivedMS, retry) })
+		}
+		return
 	}
 	delete(o.timers, path)
 }
