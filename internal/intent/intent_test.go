@@ -127,27 +127,19 @@ func TestLimit(t *testing.T) {
 	}
 }
 
-func TestJobDue(t *testing.T) {
+func TestJobLast(t *testing.T) {
 	s := newStore(t)
-	sc := trigger.Schedule{Kind: trigger.ScheduleWeekly, Day: "sun", Time: "18:00"}
-	tue := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
-	if due, err := s.JobDue("main", ConsolidationJob, sc, tue); due || err != nil {
-		t.Fatalf("first look: %v %v, want not due", due, err)
+	if _, ok := s.JobLast("main", "memory-consolidation"); ok {
+		t.Error("a job no bridge ran has a last run")
 	}
-	if due, _ := s.JobDue("main", ConsolidationJob, sc, tue.Add(24*time.Hour)); due {
-		t.Error("due on Wednesday")
+	ran := time.Date(2026, 10, 18, 18, 0, 0, 0, time.UTC)
+	if err := s.update("main", func(f *File) (bool, error) {
+		f.Jobs = map[string]time.Time{"memory-consolidation": ran}
+		return true, nil
+	}); err != nil {
+		t.Fatal(err)
 	}
-	sun := time.Date(2026, 10, 25, 18, 0, 30, 0, time.UTC)
-	if due, _ := s.JobDue("main", ConsolidationJob, sc, sun); !due {
-		t.Error("not due on Sunday at 18:00")
-	}
-	if due, _ := s.JobDue("main", ConsolidationJob, sc, sun.Add(time.Minute)); due {
-		t.Error("due twice")
-	}
-	if due, _ := s.JobDue("main", ConsolidationJob, sc, sun.Add(7*24*time.Hour)); !due {
-		t.Error("not due the next Sunday")
-	}
-	if !strings.Contains(ConsolidationMessage(sc), "skills/memory-consolidation.md") {
-		t.Error(ConsolidationMessage(sc))
+	if last, ok := s.JobLast("main", "memory-consolidation"); !ok || !last.Equal(ran) {
+		t.Errorf("JobLast = %v %v", last, ok)
 	}
 }

@@ -21,6 +21,7 @@ const KINDS = [
   ['lockdown', 'Lockdown'], ['unlock', 'Unlock'], ['skill_approved', 'Skill approved'],
   ['node_join_code', 'Join code (!join)'], ['dashboard_link', 'Sign-in link (!dashboard)'],
   ['node_approved', 'Node approved (!approve)'], ['node_revoked', 'Node revoked (!revoke)'],
+  ['scheduled_command', 'Scheduled program on a node'],
 ];
 const KIND_LABEL = Object.fromEntries(KINDS);
 

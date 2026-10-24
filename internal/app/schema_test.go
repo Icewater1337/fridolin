@@ -244,6 +244,10 @@ func (s *schemaSet) validate(at schemaAt, v any, path string) []string {
 				if str, ok := v.(string); ok && len([]rune(str)) < schemaInt(arg) {
 					fail("%q is shorter than %d", str, schemaInt(arg))
 				}
+			case "maxLength":
+				if str, ok := v.(string); ok && len([]rune(str)) > schemaInt(arg) {
+					fail("%q is longer than %d", str, schemaInt(arg))
+				}
 			case "pattern":
 				if str, ok := v.(string); ok {
 					re, err := regexp.Compile(arg.(string))

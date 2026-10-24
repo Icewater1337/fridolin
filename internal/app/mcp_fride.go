@@ -140,7 +140,7 @@ func (b *App) callFrideTask(ctx context.Context, c mcpCaller, raw json.RawMessag
 	// App.guarded (registerFrideTools) before anything leaves the core: a
 	// lockdown or a run whose budget is read gets its error result.
 	chatJID := c.run.Chat
-	if chatJID == "" || chat.IsDelegateChat(chatJID) {
+	if chatJID == "" || chat.IsInternalChat(chatJID) {
 		return mcp.ErrorResult("this run answers no chat, so FrIDE's questions and news would have nowhere to go"), nil
 	}
 	t, placed, _, err := b.fride.newWork(ctx, chatJID, c.run.Brain, a.Message, a.Repos, a.Node)

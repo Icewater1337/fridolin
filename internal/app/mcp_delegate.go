@@ -201,7 +201,7 @@ func (b *App) endDelegation(id, text string, err error) {
 // as a new message in the chat that run was for, which its reply goes to.
 func (b *App) deliverLate(d *delegation, r delegationResult) {
 	core := b.brainMgr.Get(d.from.Brain)
-	if core == nil || d.from.Chat == "" || chat.IsDelegateChat(d.from.Chat) {
+	if core == nil || d.from.Chat == "" || chat.IsInternalChat(d.from.Chat) {
 		log.Printf("brain %s: the answer of %s to its delegated task %s came after the wait, and has nowhere to go", d.from.Brain, d.to, d.id)
 		return
 	}
@@ -231,30 +231,35 @@ func (b *App) auditDelegation(d *delegation, outcome string) {
 }
 
 // deliverRun delivers a finished run: to its chat, through the pipeline,
-// or for a delegated task to the core run that waits for it. A delegated
-// run's reply never reaches a WhatsApp chat.
+// for a delegated task to the core run that waits for it, and for a
+// scheduled agent where its report setting says. A delegated run's reply
+// never reaches a WhatsApp chat.
 func (b *App) deliverRun(br *brainruntime.Brain, m brainruntime.Inbound, res claudecli.Result) {
-	if m.Source == chat.SourceDelegate {
+	switch m.Source {
+	case chat.SourceDelegate:
 		b.delegationFinished(br, m, res)
+		return
+	case chat.SourceScheduled:
+		b.agents.finished(br, m, res)
 		return
 	}
 	b.pipeline.Finished(br, m, res)
 }
 
 // workingNotice tells a chat that a run is at work on its message; a
-// delegated task's chat is no chat anybody reads.
+// delegated task's chat, or a scheduled agent's, is no chat anybody reads.
 func (b *App) workingNotice(jid, text string) {
-	if chat.IsDelegateChat(jid) {
+	if chat.IsInternalChat(jid) {
 		return
 	}
 	b.pipeline.WorkingNotice(jid, text)
 }
 
 // askQuestion sends a question a run asks mid-way to its chat. A delegated
-// run has nobody to ask: its question is not sent, and it goes on to its
-// final reply, which the core brain gets.
+// or scheduled run has nobody to ask: its question is not sent, and it
+// goes on to its final reply.
 func (b *App) askQuestion(br *brainruntime.Brain, jid, text string) bool {
-	if chat.IsDelegateChat(jid) {
+	if chat.IsInternalChat(jid) {
 		return false
 	}
 	return b.pipeline.Question(br, jid, text)

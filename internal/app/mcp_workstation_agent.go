@@ -43,7 +43,7 @@ func (b *App) callAgentRun(ctx context.Context, c mcpCaller, raw json.RawMessage
 	if strings.TrimSpace(a.Prompt) == "" {
 		return mcp.ErrorResult("prompt is empty: say what the session is to do"), nil
 	}
-	if c.run.Chat == "" || chat.IsDelegateChat(c.run.Chat) {
+	if c.run.Chat == "" || chat.IsInternalChat(c.run.Chat) {
 		return mcp.ErrorResult("this run answers no chat, so the session's questions and news would have nowhere to go"), nil
 	}
 	if err := (nodeproto.AgentStartParams{Folder: "/x", Prompt: a.Prompt, Provider: a.Provider, Model: a.Model}).Check(); err != nil {

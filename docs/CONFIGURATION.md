@@ -1661,6 +1661,28 @@ found a problem it cannot fix, never in a dry run. The Overview page shows
 its last report, `fridolin housekeeping status` too, and `fridolin doctor`
 checks that it ran.
 
+### `schedules`
+
+The scheduled agents of every brain ([BRAINS.md](BRAINS.md#scheduled-agents)):
+whether they run on their schedules, how they are spread, and how much of
+their run history and logs is kept.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` | run the agents on their schedules; *Run now* on the Schedules page and `fridolin schedules run` work either way |
+| `jitter_minutes` | `2` | each agent starts a fixed number of seconds, within this many minutes, after its time, so that agents due at the same time do not all start together; an agent's own `jitter_minutes` wins |
+| `keep_days` | `30` | runs older than this leave the history, with their logs |
+| `keep_runs` | `100` | each agent keeps at most this many runs |
+| `max_total_mb` | `200` | the oldest runs of all agents go until their logs take no more than this |
+| `max_log_kb` | `1024` | one run's log is cut here, with a line that says so |
+
+Each agent keeps its newest run whatever the limits say. The history and
+logs are in `schedules/` in the data dir, where brains never reach; the
+housekeeping job applies the limits every time it runs (also in a dry
+run, as they only remove the bridge's own records), and the bridge after
+each run of the agent. The vault's nightly snapshot of the data dir takes
+them with it, like the audit log.
+
 ---
 
 ## Environment variables
@@ -1678,6 +1700,11 @@ The bridge itself reads two variables:
 | -------- | ------------ |
 | `FRIDOLIN_CONFIG` | the config file when `--config` is not given; `setup.sh` sets the service up with it |
 | `BRAIN_MODE` | set to anything but `true`, `1`, `yes` or `on`, the bridge refuses to start, see [`brain_mode`](#brain_mode) |
+
+`FRIDOLIN_GITHUB_TOKEN` is the fallback GitHub token: while no GitHub
+App is connected, the bridge logs gh in with it for the runs with a
+GitHub grant (scheduled agents with a `github` field) and to no other
+program ([BRAINS.md](BRAINS.md#github-for-scheduled-agents)).
 
 With `vault.enabled`, the bridge reads the vault's keys and passwords
 from its environment, `B2_VAULT_KEY_ID`, `B2_VAULT_KEY`,

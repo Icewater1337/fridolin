@@ -144,6 +144,14 @@
     "enabled": false,
     "git_config": "deny"
   },
+  "schedules": {
+    "enabled": true,
+    "jitter_minutes": 5,
+    "keep_days": 14,
+    "keep_runs": 50,
+    "max_log_kb": 512,
+    "max_total_mb": 100
+  },
   "script_api": {
     "tokenless_send": false
   },

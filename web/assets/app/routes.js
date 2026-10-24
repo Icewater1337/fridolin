@@ -13,6 +13,7 @@ export const ROUTES = [
   { id: 'wiki', path: 'wiki/:brain?/:page*', nav: { label: 'Wiki', icon: 'book' }, load: () => import('../pages/wiki.js') },
   { id: 'chats', path: 'chats', nav: { label: 'Chats', icon: 'chats' }, load: () => import('../pages/chats.js') },
   { id: 'threads', path: 'threads', nav: { label: 'Threads', icon: 'clock' }, load: () => import('../pages/threads.js') },
+  { id: 'schedules', path: 'schedules/:brain?/:name?/:run?', nav: { label: 'Schedules', icon: 'event' }, load: () => import('../pages/schedules.js') },
   { id: 'approvals', path: 'approvals', nav: { label: 'Approvals', icon: 'shield' }, load: () => import('../pages/approvals.js') },
   { id: 'audit', path: 'audit/:run?', nav: { label: 'Audit', icon: 'lock' }, load: () => import('../pages/audit.js') },
   { id: 'settings', path: 'settings/:section?', nav: { label: 'Settings', icon: 'settings' }, load: () => import('../pages/settings.js') },

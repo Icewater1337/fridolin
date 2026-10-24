@@ -1,0 +1,117 @@
+GET /api/schedules
+200 OK
+Content-Type: application/json
+
+{
+  "agents": [],
+  "enabled": true,
+  "reminders": [],
+  "templates": [
+    {
+      "description": "Daily bug hunt in GitHub repositories; files a bug report per real, reproducible finding.",
+      "github": {
+        "contents": "read",
+        "issues": "write"
+      },
+      "name": "code-review-bugs",
+      "optional": true,
+      "report": "worth",
+      "risk": "irreversible",
+      "vars": [
+        {
+          "name": "repos",
+          "required": true
+        },
+        {
+          "default": "3",
+          "name": "max_issues",
+          "required": false
+        },
+        {
+          "default": "bug",
+          "name": "label",
+          "required": false
+        }
+      ],
+      "when": "daily 03:30"
+    },
+    {
+      "description": "Daily security review of GitHub repositories against current secure-coding practice; files an issue per real finding, exploitable ones privately.",
+      "github": {
+        "contents": "read",
+        "issues": "write"
+      },
+      "name": "code-review-security",
+      "optional": true,
+      "report": "worth",
+      "risk": "irreversible",
+      "vars": [
+        {
+          "name": "repos",
+          "required": true
+        },
+        {
+          "default": "3",
+          "name": "max_issues",
+          "required": false
+        },
+        {
+          "default": "security",
+          "name": "label",
+          "required": false
+        }
+      ],
+      "when": "daily 03:00"
+    },
+    {
+      "description": "Daily simplification review of GitHub repositories; questions every setting, line and dependency, and files concrete proposals that keep what users rely on.",
+      "github": {
+        "contents": "read",
+        "issues": "write"
+      },
+      "name": "code-review-simplify",
+      "optional": true,
+      "report": "worth",
+      "risk": "irreversible",
+      "vars": [
+        {
+          "name": "repos",
+          "required": true
+        },
+        {
+          "default": "2",
+          "name": "max_issues",
+          "required": false
+        },
+        {
+          "default": "simplify",
+          "name": "label",
+          "required": false
+        }
+      ],
+      "when": "daily 04:00"
+    },
+    {
+      "description": "Promote what lasts from the daily notes into memories/core.md (what memory.consolidate runs).",
+      "name": "memory-consolidation",
+      "optional": false,
+      "report": "always",
+      "when": "weekly sun 18:00"
+    },
+    {
+      "description": "Each morning, today's appointments from the brain's calendar, sent only when there are any.",
+      "name": "morning-briefing",
+      "optional": false,
+      "report": "worth",
+      "risk": "read",
+      "vars": [
+        {
+          "default": "Good morning",
+          "name": "greeting",
+          "required": false
+        }
+      ],
+      "when": "daily 06:00"
+    }
+  ]
+}

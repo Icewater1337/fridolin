@@ -1,0 +1,5 @@
+GET /api/schedules/main/brief/runs
+200 OK
+Content-Type: application/json
+
+[]

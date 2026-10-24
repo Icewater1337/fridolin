@@ -51,6 +51,7 @@ Content-Type: application/json
       "deny_paths": null,
       "enabled": false
     },
+    "schedules": {},
     "script_api": {},
     "startup_checks": {},
     "triggers": [],
@@ -148,6 +149,14 @@ Content-Type: application/json
       "deny_paths": null,
       "enabled": false,
       "git_config": "read"
+    },
+    "schedules": {
+      "enabled": true,
+      "jitter_minutes": 2,
+      "keep_days": 30,
+      "keep_runs": 100,
+      "max_log_kb": 1024,
+      "max_total_mb": 200
     },
     "script_api": {
       "tokenless_send": true
