@@ -1,5 +1,6 @@
 // WhatsApp ids and phone numbers, shortened for people to read.
 
+/** @param {unknown} jid */
 export function isGroupJid(jid) { return typeof jid === 'string' && jid.endsWith('@g.us'); }
 
 /**
@@ -9,7 +10,11 @@ export function isGroupJid(jid) { return typeof jid === 'string' && jid.endsWith
  */
 export const GROUP_JID_RE = /^[0-9]+(-[0-9]+)?@g\.us$/;
 
-/** Short, readable form of a chat JID. */
+/**
+ * Short, readable form of a chat JID.
+ * @param {string | null | undefined} jid
+ * @returns {string}
+ */
 export function shortJid(jid) {
   if (!jid) return '';
   const [user, server] = String(jid).split('@');
@@ -26,6 +31,8 @@ export function shortJid(jid) {
  * identity.go): a +, spaces, dashes, dots, brackets and @s.whatsapp.net
  * go, and 6 to 15 digits must be left. A @lid JID holds WhatsApp's
  * internal id for a sender, no number.
+ * @param {unknown} s
+ * @returns {string | null}
  */
 export function phoneDigits(s) {
   const t = String(s ?? '').trim();
@@ -35,16 +42,28 @@ export function phoneDigits(s) {
   return /^[0-9]{6,15}$/.test(n) ? n : null;
 }
 
+/**
+ * A number with one leading +, '' for none.
+ * @param {string | number | null | undefined} num
+ */
 export function phone(num) {
   return num ? `+${String(num).replace(/^\+/, '')}` : '';
 }
 
-/** A sender as the bridge reports it: a bare number gets a +, anything else stays. */
+/**
+ * A sender as the bridge reports it: a bare number gets a +, anything else stays.
+ * @param {string} s
+ */
 export function phoneish(s) {
   return /^\d{6,}$/.test(s) ? phone(s) : s;
 }
 
-/** Who wrote a message, given its sender and chat. */
+/**
+ * Who wrote a message, given its sender and chat.
+ * @param {string | null | undefined} from
+ * @param {string | null | undefined} chat
+ * @returns {string}
+ */
 export function senderLabel(from, chat) {
   if (!from) return 'Someone';
   if (/^\d{6,}$/.test(from)) return `+${from}`;

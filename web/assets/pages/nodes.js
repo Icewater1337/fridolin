@@ -16,9 +16,18 @@ import { nodeTerminal } from '../components/node-terminal.js';
 import { toast } from '../components/toast.js';
 import { badge, callout, empty, kv, mono, pageHeader, pill, spinner, timeAgo } from '../components/common.js';
 
-export default {
+/** @import { PageModule } from '../app/page.js' */
+/** @import { BackupCap, CoreHostView, ExecRule, FrideCap, HostStats, Node as FleetNode, NodesResponse, WorkstationCap } from '../../types/api.js' */
+
+/**
+ * A node's terminal as its card offers it: the folders granted for it.
+ * @typedef {{id: string, name: string, roots: string[]}} TermTarget
+ */
+
+export default /** @satisfies {PageModule} */ ({
   title: 'Nodes',
   render(root, ctx) {
+    /** @type {Partial<NodesResponse> | null} */
     let data = null;
     const notice = h('div');
     const list = h('div.node-list', spinner());
@@ -59,6 +68,11 @@ export default {
       await refresh();
     }
 
+    /**
+     * @param {FleetNode} n
+     * @param {string} path
+     * @param {string} done
+     */
     async function act(n, path, done) {
       await post(`/api/nodes/${encodeURIComponent(n.id)}/${path}`, {});
       toast(done, 'ok');
@@ -69,6 +83,7 @@ export default {
     // node swaps it in and restarts, and goes back by itself when the new
     // one does not connect. A busy node (a FrIDE task, a backup) is
     // updated only when the owner says so.
+    /** @param {FleetNode} n */
     async function update(n) {
       const path = `/api/nodes/${encodeURIComponent(n.id)}/update`;
       try {
@@ -87,6 +102,10 @@ export default {
       await refresh();
     }
 
+    /**
+     * @param {FleetNode} n
+     * @param {boolean} auto
+     */
     async function setAuto(n, auto) {
       await put(`/api/nodes/${encodeURIComponent(n.id)}/update-policy`, { auto });
       toast(auto ? `${n.name} updates by itself from now on` : `${n.name} waits for you to update it`, 'ok');
@@ -95,6 +114,7 @@ export default {
 
     // core-host (docs/NODES.md, "core-host"): the machine may come to
     // hold every host secret, so approving it says so first.
+    /** @param {FleetNode} n */
     async function approveCommands(n) {
       const ch = n.core_host;
       if (ch && ch.pending) {
@@ -112,6 +132,7 @@ export default {
       await act(n, 'approve-commands', `Approved what ${n.name} offers`);
     }
 
+    /** @param {FleetNode} n */
     async function revoke(n) {
       const ok = await confirmDialog({
         title: `Revoke ${n.name}?`,
@@ -121,6 +142,7 @@ export default {
       if (ok) await act(n, 'revoke', `Revoked ${n.name}`);
     }
 
+    /** @param {FleetNode} n */
     async function editTags(n) {
       const input = textInput({ value: (n.tags || []).join(', '), placeholder: 'macos, docker, gpu', 'aria-label': 'Tags' });
       await openDialog({
@@ -142,6 +164,7 @@ export default {
 
     // A shell in a folder the node granted for terminal; it ends with
     // the dialog.
+    /** @param {TermTarget} n */
     async function openTerminal(n) {
       const { roots } = n;
       const pick = select(roots, roots[0], { 'aria-label': 'Folder' });
@@ -167,6 +190,7 @@ export default {
       if (term) await term.close();
     }
 
+    /** @param {FleetNode} n */
     function statePills(n) {
       const out = [];
       if (n.device === 'pending') out.push(badge('device waiting', 'warn'));
@@ -176,6 +200,7 @@ export default {
       return out;
     }
 
+    /** @param {FleetNode} n */
     function actions(n) {
       const out = [];
       if (n.device === 'pending') {
@@ -195,6 +220,7 @@ export default {
       return out;
     }
 
+    /** @param {FleetNode} n */
     function offers(n) {
       const declared = n.declared || {};
       const rules = ((declared.exec && declared.exec.allow) || []).filter((r) => !r.core);
@@ -212,6 +238,7 @@ export default {
 
     // core-host: the device key the owner compares, and the targets this
     // machine sends host secrets to.
+    /** @param {CoreHostView | undefined} ch */
     function coreHostLine(ch) {
       if (!ch) return null;
       const to = ch.send_to || [];
@@ -222,11 +249,13 @@ export default {
     // Programs from the core: the folders node.json opts in, the programs
     // the core added for approved command agents (with those agents), and
     // what the node refused of the core's last list, and why.
+    /** @param {FleetNode} n */
     function programsLines(n) {
       const folders = (n.declared && n.declared.exec && n.declared.exec.accept_from_core) || [];
       const added = ((n.declared && n.declared.exec && n.declared.exec.allow) || []).filter((r) => r.core);
       const st = n.programs || null;
       if (!folders.length && !added.length && !st) return null;
+      /** @param {ExecRule} r */
       const agentsOf = (r) => {
         const p = st && (st.accepted || []).find((x) => x.name === r.name && (x.args || []).join('\0') === (r.args || []).join('\0'));
         return p && (p.agents || []).length ? h('span.muted', ` for ${p.agents.join(', ')}`) : null;
@@ -242,6 +271,10 @@ export default {
 
     // Workstation: the folders an agent session or a terminal may run in,
     // the providers the node found and how it confines them.
+    /**
+     * @param {string} label
+     * @param {WorkstationCap | undefined} w
+     */
     function workLine(label, w) {
       if (!w) return null;
       const extra = [w.providers && w.providers.length ? w.providers.join(', ') : null, w.sandbox ? `sandbox ${w.sandbox}` : null].filter(Boolean);
@@ -252,6 +285,10 @@ export default {
 
     // Backups: the places the node lends, and the folders the owner
     // picked for the Vault page's targets.
+    /**
+     * @param {BackupCap | undefined} b
+     * @param {BackupCap | undefined} approved
+     */
     function backupLine(b, approved) {
       if (!b) return null;
       const roots = b.roots || [];
@@ -264,6 +301,7 @@ export default {
     // FrIDE answers on the node. Its UI is on the node's own loopback,
     // which the node agent is to publish over the tailnet; until then the
     // page shows the address the node reports.
+    /** @param {FrideCap | undefined} f */
     function frideLine(f) {
       if (!f) return null;
       const repos = f.repos || [];
@@ -275,14 +313,21 @@ export default {
     // What changes with every heartbeat: whether it is online and its
     // free resources. It is painted into the card on its own, so the card
     // and its buttons stay while a node reports (see paintAll).
+    /**
+     * @param {FleetNode} n
+     * @returns {TermTarget | null}
+     */
     const termOf = (n) => {
       const roots = (n.effective && n.effective.terminal && n.effective.terminal.roots) || [];
       return n.online && roots.length ? { id: n.id, name: n.name, roots } : null;
     };
-    const liveOf = (n) => ({ online: !!n.online, last_seen: n.last_seen || null, resources: n.resources || {}, address: n.address || null, term: termOf(n) });
+    /** @param {FleetNode} n */
+    const liveOf = (n) => ({ online: !!n.online, last_seen: n.last_seen || null, resources: /** @type {Partial<HostStats>} */ (n.resources || {}), address: n.address || null, term: termOf(n) });
+    /** @param {FleetNode} n */
     const stableOf = (n) => ({ ...n, online: undefined, last_seen: undefined, resources: undefined, address: undefined });
     const liveRegions = new Map(); // node id → its live region
 
+    /** @param {ReturnType<typeof liveOf>} l */
     function live(l) {
       const res = l.resources;
       const memory = res.mem_total ? `${gb(res.mem_available)} free of ${gb(res.mem_total)}` : null;
@@ -300,6 +345,7 @@ export default {
       ];
     }
 
+    /** @param {FleetNode} n */
     function card(n) {
       const region = h('div.node-live');
       liveRegions.set(n.id, region);
@@ -361,4 +407,4 @@ export default {
       paintAll();
     }, 3000);
   },
-};
+});

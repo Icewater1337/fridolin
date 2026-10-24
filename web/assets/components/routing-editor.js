@@ -9,6 +9,8 @@ import { btn } from './buttons.js';
 import { toggle, field, textInput, nextId } from './fields.js';
 import { mono, loading } from './common.js';
 
+/** @import { Brain, BrainManifest, Routing } from '../../types/api.js' */
+
 /**
  * routingEditor({routing, selfId, brains, allowedGroups, onChange, signal})
  * brains: the /api/brains list (to see which brain holds DMs, default, groups).
@@ -16,11 +18,20 @@ import { mono, loading } from './common.js';
  * Returns an element with getValue() → {handles_dms, default, groups,
  * answer_files, answer_forwards}; the last two are left out while on, the
  * default, so a brain.json only names them when they are off.
+ * @param {object} options
+ * @param {Partial<Routing>} [options.routing]
+ * @param {string} [options.selfId]
+ * @param {(Pick<Brain, 'id' | 'name'> & {manifest: Pick<BrainManifest, 'routing'> | null})[]} [options.brains] what it reads of /api/brains
+ * @param {string[] | null} [options.allowedGroups]
+ * @param {() => void} [options.onChange]
+ * @param {AbortSignal} [options.signal]
+ * @returns {HTMLDivElement & {getValue: () => Routing}}
  */
 export function routingEditor({ routing = {}, selfId = '', brains = [], allowedGroups = [], onChange, signal }) {
   const others = brains.filter((b) => b.id && b.id !== selfId && b.manifest);
   const dmOwner = others.find((b) => b.manifest.routing && b.manifest.routing.handles_dms);
   const defOwner = others.find((b) => b.manifest.routing && b.manifest.routing.default);
+  /** @type {Map<string, string>} */
   const claimed = new Map();
   for (const b of others) for (const g of (b.manifest.routing && b.manifest.routing.groups) || []) claimed.set(g, brainLabel(b));
 
@@ -48,6 +59,7 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
   const forwards = toggle({ checked: routing.answer_forwards !== false, label: 'Answer forwarded messages in its groups', onChange: changedFn });
 
   const selected = new Set(routing.groups || []);
+  /** @type {Set<string>} */
   const extra = new Set(); // JIDs typed in by hand
   const groupsBox = h('div.group-picks', h('div.muted.small', loading('Loading your WhatsApp groups…')));
   const note = h('div.help');
@@ -69,6 +81,7 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
   addIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); addGroup(); } });
 
   function paintGroups() {
+    /** @type {Map<string, {jid: string, name: string, participants?: number, allowed: boolean}>} */
     const rows = new Map();
     const { groups, groupsError } = store.get();
     for (const g of groups || []) {
@@ -101,7 +114,14 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
       : 'Only allowed groups are listed. A group can belong to one brain; members still need to tag the bridge (see Settings → Access → Triggers), and only the members the group admits are read (Chats → Allowed groups → Members).';
   }
 
-  const el = h('div.routing-editor',
+  const getValue = () => {
+    /** @type {Routing} */
+    const v = { handles_dms: dm.input.checked, default: def.input.checked, groups: [...selected] };
+    if (!files.input.checked) v.answer_files = false;
+    if (!forwards.input.checked) v.answer_forwards = false;
+    return v;
+  };
+  const el = Object.assign(h('div.routing-editor',
     h('div.field', dm, h('div.help', 'All direct messages from allowed numbers go to this brain. Only one brain can do this.'), dmWarn),
     h('div.field', def, h('div.help', 'Allowed groups that no brain claims come here — and direct messages too, when no brain handles them.'), defWarn),
     field({ label: 'Groups', control: groupsBox, wide: true }),
@@ -109,18 +129,13 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
     h('div.field', h('label.field-label', { for: addIn.id }, 'Add a group by its JID'), h('div.inline-add', addIn, addBtn)),
     addErr,
     h('div.field', files, h('div.help', 'A photo, document, voice note or video gets an answer. Off: the brain reads only its caption, without answering, and the file is not downloaded; tag the bridge to ask about one.')),
-    h('div.field', forwards, h('div.help', 'Off: a forwarded message is chatter the brain reads without answering.')));
-  el.getValue = () => {
-    const v = { handles_dms: dm.input.checked, default: def.input.checked, groups: [...selected] };
-    if (!files.input.checked) v.answer_files = false;
-    if (!forwards.input.checked) v.answer_forwards = false;
-    return v;
-  };
+    h('div.field', forwards, h('div.help', 'Off: a forwarded message is chatter the brain reads without answering.'))), { getValue });
 
   // Paints once the groups are known (or failed to load), and again when
   // they or their names change. It stops when the page goes, or when a
   // change finds the editor no longer shown (its form was rebuilt).
   // loadGroups() fetches the groups unless they are fresh.
+  /** @type {(() => void)[]} */
   let offs = [];
   const stop = () => { offs.forEach((off) => off()); offs = []; };
   const paintKnown = () => {

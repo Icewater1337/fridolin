@@ -11,9 +11,16 @@ import { toast } from '../components/toast.js';
 import { callout, empty, longText, pageHeader, spinner, timeAgo } from '../components/common.js';
 import { riskBadge, statusBadge, threadEl } from '../components/policy.js';
 
+/** @import { PageModule } from '../app/page.js' */
+/** @import { Approval } from '../../types/api.js' */
+
 const approvalsResource = resource('/api/approvals');
 const policyResource = resource('/api/policy');
 
+/**
+ * @param {Approval} a
+ * @param {boolean} approve
+ */
 function decide(a, approve) {
   return async () => {
     await post(`/api/approvals/${encodeURIComponent(a.id)}`, { decision: approve ? 'approve' : 'deny' });
@@ -22,6 +29,7 @@ function decide(a, approve) {
   };
 }
 
+/** @param {Approval} a */
 function pendingCard(a) {
   const question = a.kind === 'question';
   return h('article.card.approval-card',
@@ -42,6 +50,7 @@ function pendingCard(a) {
         h('span.muted.small', h('span', 'No answer by '), timeAgo(a.expires_at), h('span', ' counts as no.'))));
 }
 
+/** @param {Approval} a */
 function historyRow(a) {
   return h('tr',
     h('td', timeAgo(a.decided_at || a.created_at)),
@@ -52,7 +61,7 @@ function historyRow(a) {
     h('td', a.decided_by ? h('span.mono.small', a.decided_by) : null));
 }
 
-export default {
+export default /** @satisfies {PageModule} */ ({
   title: 'Approvals',
   render(root, ctx) {
     const lock = h('div');
@@ -110,4 +119,4 @@ export default {
         : h('div.card', empty('Nothing decided yet', 'Answered, denied and expired requests are kept here.'))));
     }, 3000);
   },
-};
+});

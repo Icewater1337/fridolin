@@ -197,12 +197,15 @@ test('an allowed group says who is heard there, and the editor saves a list of n
 test('every member, and back to the allowed numbers', async (t) => {
   const { root, calls } = await openPage(t, { members: { [GROUP]: ['15551234567'] } });
   assert.equal(heard(root), 'Heard: +15551234567');
-  for (const [value, members, summary] of [['*', ['*'], 'Heard: every member'], ['', null, 'Heard: the allowed numbers']]) {
+  /** @type {[string, string[] | null, string][]} */
+  const cases = [['*', ['*'], 'Heard: every member'], ['', null, 'Heard: the allowed numbers']];
+  for (const [value, members, summary] of cases) {
     const dlg = await openMembers(root);
     const mode = dlg.querySelector('select');
     mode.value = value;
     mode.dispatchEvent(new Event('change'));
-    assert.equal(dlg.querySelector('.list-editor').closest('.field').hidden, true, 'the numbers are only for a list');
+    const field = /** @type {HTMLElement} */ (dlg.querySelector('.list-editor').closest('.field'));
+    assert.equal(field.hidden, true, 'the numbers are only for a list');
     dialogButton('Save').click();
     await settle();
     assert.deepEqual(saved(calls).at(-1), { jid: GROUP, members });

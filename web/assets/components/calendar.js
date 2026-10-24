@@ -17,6 +17,7 @@ const ENABLE_DRIVE_API = 'https://console.cloud.google.com/apis/library/drive.go
 /**
  * Steps and a paste box for a Google OAuth client. onSaved() runs (and is awaited) after a successful save.
  * drive: the client is for the Drive backup alone (saved to /api/backup/drive-client, steps name the Drive API).
+ * @param {{redirectUri?: string, onSaved?: (saved: {note?: string} | null) => unknown, compact?: boolean, drive?: boolean}} [options]
  */
 export function googleClientSetup({ redirectUri, onSaved, compact = false, drive = false } = {}) {
   const endpoint = drive ? '/api/backup/drive-client' : '/api/google/client';
@@ -55,9 +56,17 @@ export function googleClientSetup({ redirectUri, onSaved, compact = false, drive
 }
 
 // A load that failed because the page went away needs no message.
+/**
+ * @param {AbortSignal | undefined} signal
+ * @param {(e: any) => void} show
+ * @returns {(e: any) => void}
+ */
 const failed = (signal, show) => (e) => { if (!(signal && signal.aborted)) show(e); };
 
-/** Settings page card: client status, replace or remove. signal is the page's. */
+/**
+ * Settings page card: client status, replace or remove. signal is the page's.
+ * @param {{signal?: AbortSignal}} [options]
+ */
 export function googleClientCard({ signal } = {}) {
   const el = h('section.card.settings-section', { id: 'sec-google' },
     h('div.section-heading', h('h2', 'Google sign-in'), h('p.muted.section-intro', 'Brains can connect a Google account for their calendar. Google needs an OAuth client from a Google Cloud project for that — you set it up once here, then every brain signs in with one click on its own page.')));
@@ -102,7 +111,12 @@ export function googleClientCard({ signal } = {}) {
   return el;
 }
 
-/** Brain page card: connect, choose calendars, disconnect. signal is the page's. */
+/**
+ * Brain page card: connect, choose calendars, disconnect. signal is the
+ * page's. el.refresh() checks the calendar again.
+ * @param {string} brainId
+ * @param {{signal?: AbortSignal}} [options]
+ */
 export function calendarCard(brainId, { signal } = {}) {
   const el = h('div.card', loading('Checking calendar…'));
   let selection = null; // Set of calendar ids being edited
@@ -237,7 +251,6 @@ export function calendarCard(brainId, { signal } = {}) {
   }
 
   refresh().catch(failed(signal, (e) => mount(el, callout('bad', 'Could not check the calendar', e.message))));
-  el.refresh = refresh;
-  return el;
+  return Object.assign(el, { refresh });
 }
 

@@ -9,6 +9,25 @@ import { btn } from './buttons.js';
 import { callout } from './common.js';
 
 /**
+ * What build() returns: the form's element, what it would save now, and
+ * whatever else the page wants back from form().
+ * @typedef {{el: Node, value: () => unknown}} BuiltForm
+ */
+
+/**
+ * @template D, B
+ * @typedef {object} LiveForm
+ * @property {HTMLDivElement} el
+ * @property {(data: D) => void} set
+ * @property {() => boolean} dirty
+ * @property {() => boolean} stale
+ * @property {() => void} discard
+ * @property {() => void} saved
+ * @property {() => B | null} form
+ * @property {() => D} data
+ */
+
+/**
  * liveForm({build, edits, onChange, staleNote}) returns
  * {el, set(data), dirty(), stale(), discard(), saved(), form(), data()}.
  *
@@ -32,6 +51,14 @@ import { callout } from './common.js';
  * the form counts as clean, and the next data that differs builds it
  * again in any case. form() is what build returned last; data() the
  * newest data.
+ * @template D
+ * @template {BuiltForm} B
+ * @param {object} options
+ * @param {(data: D, changed: () => void) => B} options.build
+ * @param {(data: D, form: B) => unknown} [options.edits]
+ * @param {(state: {dirty: boolean, stale: boolean}) => void} [options.onChange]
+ * @param {{title?: string, text?: string, action?: string}} [options.staleNote]
+ * @returns {LiveForm<D, B>}
  */
 export function liveForm({ build, edits = (d) => d, onChange = () => {}, staleNote = {} }) {
   const note = callout('warn', staleNote.title || 'These settings changed elsewhere', { hidden: true },
@@ -40,14 +67,17 @@ export function liveForm({ build, edits = (d) => d, onChange = () => {}, staleNo
   const box = h('div.live-form-body');
   const el = h('div.live-form', note, box);
 
+  /** @type {B | null} */
   let built = null; // what build returned
+  /** @type {D} */
   let initial; // the data it was built from
   let base = ''; // JSON of its value() right after building
+  /** @type {D} */
   let latest; // the newest data
   let moved = false; // what the form edits changed since it was built
   let rebuildNext = false;
 
-  const json = (v) => JSON.stringify(v);
+  const json = (/** @type {unknown} */ v) => JSON.stringify(v);
   const dirty = () => !!built && json(built.value()) !== base;
   // Without edits there is nothing to lose: a form taken back to what it
   // showed is not stale, though the next new data still builds it again.
@@ -56,12 +86,13 @@ export function liveForm({ build, edits = (d) => d, onChange = () => {}, staleNo
     note.hidden = !isStale();
     onChange({ dirty: dirty(), stale: isStale() });
   };
-  const setMoved = (v) => {
+  const setMoved = (/** @type {boolean} */ v) => {
     if (v === moved) return;
     moved = v;
     report();
   };
 
+  /** @param {D} data */
   function rebuild(data) {
     latest = data;
     initial = data;
@@ -82,7 +113,7 @@ export function liveForm({ build, edits = (d) => d, onChange = () => {}, staleNo
   // It catches up once the focus leaves it, which interrupts no typing.
   // Saved edits wait for the data that holds them instead.
   box.addEventListener('focusout', (e) => {
-    const to = e.relatedTarget || document.activeElement;
+    const to = /** @type {Node | null} */ (e.relatedTarget) || document.activeElement;
     if (to && box.contains(to)) return;
     if (built && !rebuildNext && !dirty() && json(latest) !== json(initial)) rebuild(latest);
   });

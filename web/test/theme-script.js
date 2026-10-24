@@ -17,7 +17,7 @@ export function runThemeScript(t, { saved = null, blocked = false } = {}) {
     : { getItem: (k) => (storage.has(k) ? storage.get(k) : null), setItem: (k, v) => { storage.set(k, String(v)); } };
   const win = { addEventListener() {} };
   vm.runInNewContext(source, { window: win, document: globalThis.document, localStorage, setTimeout });
-  globalThis.window = { fridolinTheme: win.fridolinTheme };
+  Object.assign(globalThis, { window: { fridolinTheme: win.fridolinTheme } });
   t.after(() => { delete globalThis.window; });
   return storage;
 }

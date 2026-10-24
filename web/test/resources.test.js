@@ -62,6 +62,7 @@ test('a new follower gets what is known at once, and fresh data when it is old',
   fetches[0].resolve(['a']);
   await settle();
 
+  /** @type {[string, number, number, boolean][]} */
   const cases = [
     // name, how long after the last answer, the follower's interval, a fetch?
     ['fresh enough', 2000, 3000, false],
