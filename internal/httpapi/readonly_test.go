@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -78,6 +79,19 @@ func TestReadOnlyReadyModes(t *testing.T) {
 		ReadyAPI{Connection: readinessProbe(tc.mode), DevMode: tc.dev, Version: func() string { return "test" }, StartedAt: time.Unix(123, 0).UTC()}.ServeHTTP(w, httptest.NewRequest("GET", "/ready", nil))
 		if w.Code != tc.status || w.Header().Get("Cache-Control") != "no-store" {
 			t.Fatalf("%+v: status=%d headers=%v", tc, w.Code, w.Header())
+		}
+	}
+}
+
+// The sign-in page reads container from /ready to name the steps that work
+// for the way the bridge runs.
+func TestReadyNamesTheContainer(t *testing.T) {
+	for _, in := range []bool{false, true} {
+		w := httptest.NewRecorder()
+		ReadyAPI{Connection: readinessProbe("connected"), Version: func() string { return "test" }, Container: in}.ServeHTTP(w, httptest.NewRequest("GET", "/ready", nil))
+		var resp ReadyResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || resp.Container != in {
+			t.Fatalf("container=%v: %s (%v)", in, w.Body.String(), err)
 		}
 	}
 }

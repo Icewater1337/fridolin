@@ -149,6 +149,26 @@ binary's version); `--compose PATH` runs a compose file of your own.
 `docker volume rm fridolin-data` without a fresh export: the volume holds the
 WhatsApp pairing.
 
+### Signing in to the dashboard
+
+The dashboard token is the container's, in the volume
+(`/data/dashboard.token`), not in a `~/.fridolin` on the host. To sign a
+browser in on the machine that runs the core:
+
+```bash
+fridolin open                                     # asks the container, opens the browser
+docker exec fridolin-core fridolin open --print   # the same by hand: open the link it prints
+```
+
+The link works once, within a minute. From another device, send
+`!dashboard` in your WhatsApp chat (a link that works once, within 10
+minutes), or `fridolin open --print --tailnet`. The sign-in page knows
+the bridge runs in the container (`"container": true` in `/ready`) and
+names these steps; pasting the token is its last resort, read with
+`docker exec fridolin-core cat /data/dashboard.token`. `fridolin open`
+with `--config PATH` or `$FRIDOLIN_CONFIG` always means a native
+bridge's config.
+
 ### Secrets
 
 `core start` and `core update` read the secrets from the host and put them
