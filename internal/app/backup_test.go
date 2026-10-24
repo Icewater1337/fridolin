@@ -910,6 +910,9 @@ func TestBackupPartlyReadableFolderWithRealRclone(t *testing.T) {
 		t.Skip("root can read a folder with mode 000")
 	}
 	tb, remoteDir := rcloneTestBridge(t, "")
+	// The read error makes rclone try the sync three times, 10 seconds
+	// apart. The real rclone still does, with the pause cut short.
+	useRclone(t, tb, shortRetrySleep(t, needRclone(t)))
 	dir := addBackupBrain(t, tb, "notes")
 	for _, rel := range []string{"memories/old.md", "locked/secret.md", "deleted.md"} {
 		p := filepath.Join(dir, rel)
@@ -944,6 +947,18 @@ func TestBackupPartlyReadableFolderWithRealRclone(t *testing.T) {
 			t.Errorf("current/%s: %v; %s", rel, err, why)
 		}
 	}
+}
+
+// shortRetrySleep is a script that runs rclone with the arguments it is
+// given, but with 100ms for the pause --retries-sleep asks for.
+func shortRetrySleep(t *testing.T, rclone string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "rclone")
+	script := "#!/bin/sh\nprev=\nfor a; do\n\tshift\n\tcase $prev in --retries-sleep) set -- \"$@\" 100ms ;; *) set -- \"$@\" \"$a\" ;; esac\n\tprev=$a\ndone\nexec '" + rclone + "' \"$@\"\n"
+	if err := os.WriteFile(p, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 // connectAlias gives the bridge's rclone config a remote, so that the
