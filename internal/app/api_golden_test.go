@@ -172,6 +172,7 @@ func TestGoldenGETEndpoints(t *testing.T) {
 		{"calendar", "/api/brains/main/calendar?list=0", nil},
 		{"calendar-unknown-brain", "/api/brains/nope/calendar", nil},
 		{"plaud-status", "/api/plaud/status", nil},
+		{"github", "/api/github", nil},
 		// Which of node, cloudflared and gh this machine has, and whether
 		// it has sandbox-exec for the live site (macOS only).
 		{"site", "/api/site", []string{"runtime", "site.sandbox.on", "site.sandbox.note"}},

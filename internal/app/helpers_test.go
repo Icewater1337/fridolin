@@ -20,6 +20,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
+	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/registry"
@@ -318,7 +319,17 @@ func RunTestMain(m *testing.M, main func(), run func(context.Context, *App, func
 		Version:        claudecli.TestedClaudeVersion,
 		RunMain:        main,
 		BeforeChildren: func() { childEnvAllowlist = append(childEnvAllowlist, testChildEnv...) },
-		BeforeTests:    func() { shutdownGrace = 0 },
+		BeforeTests: func() {
+			shutdownGrace = 0
+			// Each bridge a test makes keeps a GitHub app in a store of its
+			// own in memory, never in the login keychain.
+			githubHostStore = func(container bool) hostsecrets.Store {
+				if container {
+					return nil
+				}
+				return &memSecrets{m: map[string]string{}}
+			}
+		},
 		Ready: func(p testutil.Paths) {
 			testHome, goToolHome, pkgDir, repoDir = p.Home, p.OriginalHome, p.PackageDir, p.RepoDir
 		},

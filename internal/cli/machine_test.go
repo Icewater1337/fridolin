@@ -119,7 +119,7 @@ func TestCoreSecrets(t *testing.T) {
 	}{
 		"already there":    {"AGE-SECRET-KEY-1NEW", []string{"set", "age.identity"}, "--replace"},
 		"not an identity":  {"nope", []string{"set", "age.identity", "--replace"}, "not an age identity"},
-		"unknown name":     {"x", []string{"set", "github.token"}, "not a secret the core uses"},
+		"unknown name":     {"x", []string{"set", "gitlab.token"}, "not a secret the core uses"},
 		"empty":            {"\n", []string{"set", "restic.password"}, "empty"},
 		"a space":          {"a b", []string{"set", "restic.password"}, "spaces"},
 		"too many":         {"", []string{"set", "a", "b"}, "usage"},

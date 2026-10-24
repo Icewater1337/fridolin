@@ -79,7 +79,9 @@ type App struct {
 	targets      *targetService
 	google       *google.Auth
 	plaud        *plaud.Manager
-	site         *sitesvc.SiteManager
+	// github is the GitHub App and the runs' tokens (github_runtime.go).
+	github *githubService
+	site   *sitesvc.SiteManager
 	// nodes is the fleet's registry and node port; nodesEnabled and
 	// nodesListen are nodes.enabled and nodes.listen as the bridge
 	// started, which wait for a restart.
@@ -380,6 +382,7 @@ func New(opts Options) (_ *App, err error) {
 	b.housekeeping = newHousekeeping(b, opts.Container)
 	b.vault.usage = b.b2
 	b.targets = newTargetService(cfgs, b.vault, b.nodes, opts.Container, b.logger)
+	b.github = newGitHubService(cfgs, opts.Container, b.logger)
 	b.vault.targets = b.targets
 	b.google = google.New(googleOptionsFor(cfgs))
 	b.backup = newProjectedBackup(cfgs, b.brainMgr, b.notifyBackup, b.vault.driveSuperseded, b.google)

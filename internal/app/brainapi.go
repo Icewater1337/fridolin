@@ -138,6 +138,9 @@ func (b *App) brainRunEnv(run runInfo) runAccess {
 	if b.exe != "" {
 		access.Env = append(access.Env, "FRIDOLIN_BIN="+b.exe)
 	}
+	if g := run.Message.GitHub; g != nil && b.github != nil {
+		access = b.withGitHubToken(access, brain, *g)
+	}
 	if b.listen == "" {
 		return access
 	}
@@ -167,7 +170,9 @@ func (b *App) brainRunEnv(run runInfo) runAccess {
 	}
 	files = append(files, path)
 	access.Env = append(access.Env, "FRIDOLIN_API="+api, "FRIDOLIN_BRAIN_TOKEN_FILE="+path)
+	githubDone := access.Done
 	access.Done = func() {
+		githubDone()
 		revoke()
 		for _, f := range files {
 			if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -236,8 +241,11 @@ func pruneRunTokens(dataDir string) {
 	files, _ := filepath.Glob(filepath.Join(AbsPath(dataDir), runTokensDirName, "*", "run-*.token"))
 	configs, _ := filepath.Glob(filepath.Join(AbsPath(dataDir), runTokensDirName, "*", "run-*.mcp.json"))
 	files = append(files, configs...)
-	for _, f := range files {
-		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	// And the runs' gh logins (withGitHubToken), whose tokens GitHub ends
+	// within the hour.
+	gh, _ := filepath.Glob(filepath.Join(AbsPath(dataDir), runTokensDirName, "*", "run-*.gh"))
+	for _, f := range append(files, gh...) {
+		if err := os.RemoveAll(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			log.Printf("warning: removing a stale brain API token: %v", err)
 		}
 	}

@@ -19,6 +19,7 @@ type Deps struct {
 	DashboardDisabled func() bool
 	Static            fs.FS
 	GoogleCallback    http.HandlerFunc
+	GitHub            func() *GitHubAPI
 	Login             http.HandlerFunc
 	Token             *Token
 	RequiresToken     func() bool
@@ -80,6 +81,11 @@ func New(d Deps) http.Handler {
 			}
 			static.ServeHTTP(w, r)
 		}))
+		// The GitHub App's manifest flow (github.go): pages the browser is
+		// sent to, each tied to a one-time state rather than a token.
+		mux.HandleFunc("GET /github/connect", d.GitHub().Handoff)
+		mux.HandleFunc("GET /github/created", d.GitHub().Created)
+		mux.HandleFunc("GET /github/installed", d.GitHub().Installed)
 		mux.HandleFunc("POST /api/login", d.Login)
 		mux.HandleFunc("GET /files/raw", d.FilesRaw)
 		mux.Handle("/api/", APIGuard(d.Token, d.RequiresToken, d.SignedIn, d.API()))
@@ -109,6 +115,7 @@ type APIDeps struct {
 	Google       func() *GoogleAPI
 	Plaud        func() *PlaudAPI
 	PlaudApp     func() *PlaudAppAPI
+	GitHub       func() *GitHubAPI
 	Auth         func() *DashboardAuth
 	Dev          func() *DevAPI
 	Nodes        func() *NodesAPI
@@ -205,6 +212,11 @@ func NewAPIMux(d APIDeps) http.Handler {
 	mux.HandleFunc("POST /api/plaud/app/build", d.PlaudApp().Build)
 	mux.HandleFunc("GET /api/plaud/app.apk", d.PlaudApp().Download)
 	mux.HandleFunc("DELETE /api/plaud/devices/{id}", d.PlaudApp().RevokeDevice)
+
+	mux.HandleFunc("GET /api/github", d.GitHub().Status)
+	mux.HandleFunc("POST /api/github/connect", d.GitHub().Connect)
+	mux.HandleFunc("POST /api/github/test", d.GitHub().Test)
+	mux.HandleFunc("POST /api/github/disconnect", d.GitHub().Disconnect)
 
 	mux.HandleFunc("GET /api/nodes", d.Nodes().List)
 	mux.HandleFunc("POST /api/nodes/join-code", d.Nodes().JoinCode)

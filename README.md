@@ -529,6 +529,16 @@ Google OAuth client, which you create once in Google Cloud Console and paste
 under *Settings → Google sign-in*. Step by step:
 [docs/CALENDAR.md](docs/CALENDAR.md).
 
+### GitHub
+
+Dashboard → *Integrations → GitHub → Connect GitHub* makes a private
+GitHub App of this Fridolin's own in one click (GitHub's manifest flow),
+and GitHub asks which repositories it may use. Runs that need GitHub, such
+as a scheduled review that files issues, get a token for just their
+repositories and permissions, which lasts at most an hour and is revoked
+when the run ends. No personal access token is kept. See
+[docs/GITHUB.md](docs/GITHUB.md).
+
 ### Plaud recorder
 
 Record conversations with a Plaud? Dashboard → *Integrations → Plaud* signs in
