@@ -10,6 +10,26 @@ for compatibility.
 
 ### Added
 
+- **`!movecore`** (#187, third slice): in the owner's direct chat,
+  `!movecore <node>` runs the move's pre-flight and answers with a
+  plain report (source → target, the expected time offline, what does
+  not work on the target, what becomes of the site) and a poll, Move now
+  / Cancel. Only the owner's vote counts, the dashboard cannot answer
+  it, no vote in 30 minutes is a no, a lockdown refuses it, and it
+  answers 3 times an hour. "Move now" runs the same move as `fridolin
+  nodes move --yes`; the owner hears when the core stops and, from the
+  core that runs afterwards, how it ended. `!movecore` alone lists the
+  core hosts and what keeps the core from moving to each;
+  `!movecore <old host>` is the way back. After a move a second poll
+  asks whether the machine the core left keeps the host secrets (no
+  vote in 24 hours forgets them, `core.secrets.forget`), and revoking a
+  connected core host has it forget them first. The move's report (and
+  `POST /api/nodes/move-check`'s `site`) says whether the site's
+  Cloudflare tunnel runs in the core and moves with it, and the new core
+  checks that the domain answers. New audit kinds: `core_move_requested`,
+  `core_move_approved`, `core_move_ended`, `core_secrets`
+  (docs/CORE.md, "Moving the core from WhatsApp").
+
 - **The core moves itself** (#187, second slice) between two native core
   hosts: `fridolin nodes move-check SRC DST` is the pre-flight (versions,
   image by digest, disk, the host secrets and the pin, the lease, what
@@ -608,6 +628,11 @@ for compatibility.
 
 ### Changed
 
+- **Approving `fride` says what it is**: arbitrary execution on that
+  machine, whatever `exec` allows. The Nodes page shows it while `fride`
+  waits (`fride_approval` in `GET /api/nodes`), `!approve` adds it to its
+  answer, and `!fleet` marks nodes with `fride` approved
+  (docs/NODES.md, "FrIDE").
 - **Signing in to a container core.** The dashboard's sign-in page names
   the steps for the way the bridge runs: for the core in its container,
   `docker exec fridolin-core fridolin open --print` and `!dashboard`,
@@ -928,6 +953,16 @@ for compatibility.
   retired), and the import puts it in place, keeping the target's earlier
   one as `encryption.json.before-<time>`. The core on another machine
   thought the single-layer copies still there (#187).
+- A core move carries the secret files of the core's credentials folder
+  (`sandbox.credentials_dir` under `~`: the Google OAuth web client,
+  `dashboard-users.json`, each brain's calendar client and token) with
+  the host secrets, sealed to the target's key, and the target writes
+  them 0600 into the same folder under its core's home, never over a file
+  it has. The container's home folder is now the volume `fridolin-home`,
+  so they stay there; before, the core on the target missed them
+  (calendar, startup check) (#187). The core's process now runs in
+  config's `timezone` when it is set, not in the TZ of the host that
+  started it (#250).
 - `fridolin core run` no longer makes the post-quantum age identity and
   the second layers' keys when the machine has none; only `core start`
   and `core update` do. The move pre-flight runs `core run core status`

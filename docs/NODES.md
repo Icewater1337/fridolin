@@ -896,6 +896,26 @@ event to the core as an `event` message (kind `fride`), up to 256 waiting
 while the core is away (FrIDE retries what is refused while they wait).
 The core takes a node's events only while its `fride` is approved.
 
+**What approving `fride` means.** It is arbitrary execution on that
+machine, whatever `exec` allows: FrIDE runs Claude Code agents there,
+which can run anything the machine's user can, and on Windows reach
+PowerShell, `winget`, `docker.exe` and `C:\` through WSL's interop.
+Whoever can send `fride.task` (the core, and the core brain through
+`fride_task`) can therefore run anything there. Every place that
+approves it says so: the Nodes page while it waits, `!approve`'s answer,
+and `!fleet`, which marks a node with `fride` approved ("FrIDE's agents
+can run anything on it"):
+
+> fride lets fridolin hand coding tasks to FrIDE on this machine. FrIDE
+> runs Claude Code agents there, and they can run anything this
+> machine's user can (on Windows through WSL, PowerShell and C:\ too),
+> whatever exec allows or refuses: approving fride is approving arbitrary
+> commands on this machine. Approve it only on a machine you would let
+> fridolin do anything on.
+
+A core host that runs FrIDE as the user that holds the host secrets lets
+any FrIDE task read them; the move's report says so.
+
 ### On the core
 
 With `nodes.enabled`, the core brain (`role: core`) gets five tools, and
@@ -1383,6 +1403,8 @@ owner's plugin cache, asks in an interactive session, and would need a
    when the tailnet has HTTPS off: `fridolin doctor` names the address) or with
    `fridolin nodes approve <id> --commands` on the core. Where the core
    has a chat command for approving, such as `!approve`, that works too.
+   Approving `fride` approves arbitrary commands on that machine
+   ([FrIDE](#fride), "What approving `fride` means").
 2. **Verify**, one check at a time:
    - `fride doctor` (in WSL, with `FRIDE_HOME=~/fride-companion/home`)
      shows no failed check;
@@ -1645,9 +1667,11 @@ moves the core itself between two native core hosts, `fridolin nodes
 move SRC DST --yes` ([CORE.md, "The core moves itself"](CORE.md#the-core-moves-itself)),
 with the methods `core.image.pull`, `core.rehearse`, `core.release`,
 `core.handoff` and `core.move.status`, each a fixed `fridolin core`
-subcommand of the agent's own binary. `!movecore` on WhatsApp comes
-later; `core send`/`receive` stay for a manual move and for an old
-machine that is gone.
+subcommand of the agent's own binary. The third lets the owner move it
+from WhatsApp: `!movecore <node>`, a report and a poll ([CORE.md,
+"Moving the core from WhatsApp"](CORE.md#moving-the-core-from-whatsapp)).
+`core send`/`receive` stay for a manual move and for an old machine that
+is gone.
 
 It needs two keys:
 
@@ -1711,12 +1735,16 @@ must pin DST. Then:
    pinned for DST, and refuses an offer it does not verify, one that
    expired, or one for a target it does not trust. It encrypts its host
    secrets (the names `core send` sends, without the Tailscale auth key)
-   to the offer's key.
+   to the offer's key, with the secret files of its core's
+   credentials folder ([CORE.md](CORE.md#the-core-moves-itself),
+   "Secret files").
 3. DST (`core.secrets.receive`) decrypts them in memory with the one-time
    key, which goes with the first bundle, and stores them as `core
    receive` does: a name a move does not carry refuses the whole bundle,
    a value that differs from one stored refuses it unless `--replace`,
-   and a failed write puts back the earlier ones.
+   and a failed write puts back the earlier ones. The secret files go
+   into the same folder under its core's home, 0600, never over one
+   there.
 
 The core relays the offer and the ciphertext and sees names only: it
 cannot swap in a key of its own, since the source checks the signature
@@ -1724,6 +1752,9 @@ against its own pin. Both sides append a line per step to
 `secrets-transfer.log` in the state dir (`"via": "node-channel"`), names
 only. `core.secrets.forget` removes on a machine what it received over
 the node channel and did not hold before, never what was there.
+After a move the owner is asked whether the machine the core left keeps
+its copy (no vote in 24 hours forgets it), and revoking a core host that
+is connected has it forget first.
 `core.secrets.offer/send/receive` are refused through `fridolin nodes
 call`, and a lockdown refuses the transfer and every `core.secrets.*`.
 
