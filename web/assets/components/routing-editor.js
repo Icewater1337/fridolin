@@ -143,7 +143,7 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
     const s = store.get();
     if (s.groups !== null || s.groupsError) paintGroups();
   };
-  offs = [(s) => s.groups, (s) => s.groupsError, (s) => s.names].map((select) => store.subscribe(select, paintKnown));
+  offs = [store.subscribe((s) => s.groups, paintKnown), store.subscribe((s) => s.groupsError, paintKnown), store.subscribe((s) => s.names, paintKnown)];
   if (signal) signal.addEventListener('abort', stop, { once: true });
   loadGroups();
   return el;

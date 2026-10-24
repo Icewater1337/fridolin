@@ -18,6 +18,7 @@ import { googleClientSetup } from '../components/calendar.js';
 import { errorMessage } from '../lib/errors.js';
 
 /** @import { PageModule } from '../app/page.js' */
+/** @import { DialogHandle } from '../components/dialog.js' */
 /** @import { BackupBrainStatus, BackupClientStatus, BackupConnectJob, BackupJob, BackupResult, BackupSettings, BackupStatus, RcloneStatus, RestoreResult } from '../../types/api.js' */
 
 /**
@@ -34,6 +35,29 @@ import { errorMessage } from '../lib/errors.js';
  * @property {string} redirect
  * @property {{enabled: boolean, last: BackupResult | null}[]} brains
  * @property {BackupResult | null} bridge
+ */
+
+/**
+ * What the schedule form would save now.
+ * @typedef {{enabled: boolean, daily_at: string, root: string, keep_versions_days: string, include_bridge_config: boolean}} ScheduleValue
+ */
+
+/**
+ * The schedule form, as liveForm takes it.
+ * @typedef {{el: HTMLFormElement, value: () => ScheduleValue, bar: HTMLDivElement}} ScheduleForm
+ */
+
+/**
+ * The parts of the page that a layout has, each filled by paint().
+ * @typedef {object} Regions
+ * @property {HTMLDivElement} [rclone]
+ * @property {HTMLDivElement} [connect]
+ * @property {HTMLDivElement} [status]
+ * @property {HTMLDivElement} [job]
+ * @property {HTMLDivElement} [brains]
+ * @property {HTMLTableSectionElement} [brainRows]
+ * @property {HTMLFormElement & {setBrains: (brains: BackupBrainStatus[]) => void}} [restore]
+ * @property {HTMLDivElement} [lastRestore]
  */
 
 // A version folder is named after its run's time: in UTC with a Z, or in
@@ -54,6 +78,7 @@ export default /** @satisfies {PageModule} */ ({
     /** @type {BackupStatus | null} */
     let backupStatus = null;
     let mode = '';
+    /** @type {Regions} */
     const regions = {};
     const main = h('div.page-stack', h('div.card', loading('Checking backup status…')));
     mount(root, pageHeader('Backup', 'Daily backups of your brains to your own Google Drive, with older versions kept for a while.'), main);
@@ -82,7 +107,7 @@ export default /** @satisfies {PageModule} */ ({
 
     // A new layout has new, empty regions, which paint() fills.
     function layout() {
-      for (const k of Object.keys(regions)) delete regions[k];
+      for (const k of /** @type {(keyof Regions)[]} */ (Object.keys(regions))) delete regions[k];
       if (mode === 'norclone') {
         regions.rclone = h('div');
         mount(main, regions.rclone);
@@ -312,7 +337,10 @@ export default /** @satisfies {PageModule} */ ({
     }
 
     // ── schedule ──
-    /** @param {{settings: Partial<BackupSettings>, inc: boolean}} data */
+    /**
+     * @param {{settings: Partial<BackupSettings>, inc: boolean}} data
+     * @returns {ScheduleForm}
+     */
     function buildSchedule({ settings: s, inc }) {
       const enabled = toggle({ checked: !!s.enabled, label: 'Back up every day' });
       const time = h('input', { type: 'time', id: nextId('t'), value: s.daily_at || '03:30', step: 60, required: true });
@@ -321,6 +349,7 @@ export default /** @satisfies {PageModule} */ ({
       const incSw = toggle({ checked: inc !== false, label: 'Also back up the bridge’s settings' });
       const saveBtn = btn('Save schedule', { kind: 'primary', type: 'submit', icon: 'check' });
       const bar = h('div.actions', { hidden: true }, btn('Discard', { onClick: () => schedule.discard() }), saveBtn);
+      /** @returns {ScheduleValue} */
       const value = () => ({
         enabled: enabled.input.checked,
         daily_at: time.value,
@@ -524,6 +553,7 @@ export default /** @satisfies {PageModule} */ ({
       };
       const paintVersions = () => {
         const name = nextId('ver');
+        /** @type {(value: string, title: string, sub: string) => HTMLLabelElement} */
         const opt = (value, title, sub) => {
           const id = nextId('v');
           const r = h('input', { type: 'radio', name, id, value, checked: value === version });
@@ -545,6 +575,7 @@ export default /** @satisfies {PageModule} */ ({
 
       async function pickTarget() {
         const id = currentId() || 'brain';
+        /** @type {DialogHandle | null} */
         let pending = null;
         const fb = folderBrowser({
           pickLabel: 'Restore into a new folder here',
@@ -554,7 +585,7 @@ export default /** @satisfies {PageModule} */ ({
         });
         pending = openDialog({ title: 'Where should the copy go?', body: h('div', h('p.muted', 'Pick a folder; the backup is copied into a new folder inside it. Or type a name for a new folder.'), fb), wide: true, actions: [{ label: 'Cancel', value: null }] });
         const picked = await pending;
-        if (picked) { targetIn.value = picked; targetIn.dataset.touched = '1'; }
+        if (typeof picked === 'string' && picked) { targetIn.value = picked; targetIn.dataset.touched = '1'; }
       }
 
       const form = h('form.card.form',
@@ -583,10 +614,12 @@ export default /** @satisfies {PageModule} */ ({
           await refresh();
         });
       });
-      form.setBrains = (/** @type {BackupBrainStatus[]} */ brains) => {
-        syncOptions(brainSel, [['', 'Choose a brain…'], ...brains.map((b) => /** @type {[string, string]} */ ([b.id, brainLabel(b)])), ['__other', 'Another id…']]);
-      };
-      return form;
+      return Object.assign(form, {
+        /** @param {BackupBrainStatus[]} brains */
+        setBrains(brains) {
+          syncOptions(brainSel, [['', 'Choose a brain…'], ...brains.map((b) => /** @type {[string, string]} */ ([b.id, brainLabel(b)])), ['__other', 'Another id…']]);
+        },
+      });
     }
   },
 });

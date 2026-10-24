@@ -26,7 +26,7 @@ import { errorMessage } from '../lib/errors.js';
 
 /** @import { Page, PageModule } from '../app/page.js' */
 /** @import { Child } from '../lib/dom.js' */
-/** @import { Reminder, ScheduleAgent, ScheduleRun } from '../../types/api.js' */
+/** @import { Node as FleetNode, Reminder, ScheduleAgent, ScheduleProgram, ScheduleRun, SchedulesResponse, ScheduleTemplate } from '../../types/api.js' */
 
 const githubResource = resource('/api/github');
 const enc = encodeURIComponent;
@@ -111,6 +111,7 @@ async function removeAgent(a, after) {
 }
 
 // How a command agent's badge looks, by how its program stands on its node.
+/** @type {Record<ScheduleProgram['state'], string>} */
 const PROGRAM_TONE = { allowed: 'ok', waiting: 'info', refused: 'bad', 'not-accepted': 'bad', 'no-node': 'bad' };
 
 /**
@@ -131,7 +132,7 @@ function mayDo(a) {
   const s = a.schedule;
   /** @type {Child[]} */
   const out = [];
-  if (s.command) out.push(badge(`node ${s.command.node}`, PROGRAM_TONE[a.program && a.program.state] || 'warn', a.program ? a.program.detail : 'Runs a program on this node'));
+  if (s.command) out.push(badge(`node ${s.command.node}`, (a.program && PROGRAM_TONE[a.program.state]) || 'warn', a.program ? a.program.detail : 'Runs a program on this node'));
   else out.push(riskBadge(s.risk || 'write'));
   if (s.github) {
     const perms = Object.entries(s.github.permissions || {}).map(([k, v]) => `${k}:${v}`).join(' ');
@@ -201,6 +202,7 @@ function reviewPanel(a, { after } = {}) {
   } else {
     parts.push(h('details.details', h('summary', 'The file'), h('pre.code.agent-json', fileJSON(disk))));
   }
+  /** @param {boolean} [andRun] */
   const approve = async (andRun) => {
     if (a.risky && a.risky.length && r.status !== 'removed') {
       const ok = await confirmDialog({ title: `Approve ${a.name}?`, message: `It may: ${a.risky.join('; ')}. Approve it only if you or someone you trust wrote it.`, confirm: 'Approve' });
@@ -308,6 +310,7 @@ function renderList(root, ctx) {
   const groupsBox = h('div', spinner());
   const remindersBox = h('div');
   const open = new Set();
+  /** @type {SchedulesResponse | null} */
   let data = null;
 
   mount(root,
@@ -317,6 +320,7 @@ function renderList(root, ctx) {
     h('section.section', h('h2.section-title', 'Agents'), toolbar, groupsBox),
     h('section.section', h('h2.section-title', 'Reminders'), h('p.muted.small', 'Reminders with a time that the brains keep: the bridge’s standing intents, and those in a brain’s own reminders file, which the brain fires itself.'), remindersBox));
 
+  /** @param {ScheduleAgent} a */
   const toggleOpen = (a) => {
     const key = `${a.brain}/${a.name}`;
     if (open.has(key)) open.delete(key); else open.add(key);
@@ -459,6 +463,7 @@ function renderAgent(root, ctx, brain, name, run) {
   const detailBox = h('div', spinner());
   const runsBody = h('tbody');
   const logBox = h('div');
+  /** @type {ScheduleAgent | null} */
   let agent = null;
   mount(root,
     h('a.back-link', { href: '#/schedules' }, icon('left'), 'Schedules'),
@@ -512,9 +517,14 @@ function renderAgent(root, ctx, brain, name, run) {
  */
 function renderWizard(root, ctx, { mode, brain, name }) {
   const step = { current: mode === 'new' ? 'what' : 'when' };
+  // What the wizard offers, filled in as each resource answers.
+  /** @type {ScheduleTemplate[]} */
   const templates = [];
+  /** @type {{id: string, name: string}[]} */
   const brains = [];
+  /** @type {string[]} */
   const repos = [];
+  /** @type {FleetNode[]} */
   const nodes = [];
   const note = h('div');
   const body = h('div', spinner());
@@ -551,6 +561,7 @@ function renderWizard(root, ctx, { mode, brain, name }) {
   });
   ctx.dirty = () => form.dirty();
 
+  /** @type {ScheduleAgent[]} */
   let agents = [];
   let haveBrains = false;
   let haveAgents = false;

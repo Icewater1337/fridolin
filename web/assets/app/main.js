@@ -83,6 +83,7 @@ function showShell() {
   mount(app, shell.nodes);
 }
 
+/** @param {string} [reason] why the screen is shown */
 function showConnect(reason) {
   if (view.paused()) return;
   view.pause();
