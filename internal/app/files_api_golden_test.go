@@ -39,6 +39,7 @@ func writeBrainFiles(t *testing.T, dir string) {
 
 // TestGoldenFilesEndpoints pins what the Files page and the wiki read.
 func TestGoldenFilesEndpoints(t *testing.T) {
+	t.Parallel()
 	h, s, _ := goldenBridge(t)
 	writeBrainFiles(t, filepath.Join(h.home, "main"))
 	s = s.maskKeys("mod_time", "ticket", "expires")
@@ -89,6 +90,7 @@ func fileTicket(t *testing.T, h *harness, root string) string {
 }
 
 func TestFilesRawServesWhatTheTicketOpens(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main"})
 	writeBrainFiles(t, dir)
@@ -197,6 +199,7 @@ func siteBridgeCall(t *testing.T, method, url, token, account, path, ct string) 
 }
 
 func TestSiteRolesSeeTheirBrainsOnly(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	writeBrainFiles(t, h.AddBrain(manifest.Manifest{ID: "main", Name: "Main"}))
 	writeBrainFiles(t, h.AddBrain(manifest.Manifest{ID: "other", Name: "Other"}))

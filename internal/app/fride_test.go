@@ -65,10 +65,12 @@ func (h *harness) fakeFrideNode(name, addr string, ff *testutil.FakeFride) (stri
 // through the vault and a close that archives, and the tools only on the
 // core brain.
 func TestFrideThroughNodes(t *testing.T) {
+	// Serial: shortens frideRetryEvery, a package variable every bridge's
+	// FrIDE reads.
 	saved := frideRetryEvery
 	frideRetryEvery = 100 * time.Millisecond
 	t.Cleanup(func() { frideRetryEvery = saved })
-	t.Setenv("FRIDOLIN_FAKE_MCP", "[]")
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
 	laptopFride, miniFride := testutil.StartFakeFride(t, "api"), testutil.StartFakeFride(t, "api")
 	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
@@ -79,7 +81,7 @@ func TestFrideThroughNodes(t *testing.T) {
 	mini, _ := h.fakeFrideNode("mini", addr, miniFride)
 
 	// A sub-brain has no FrIDE tools.
-	t.Setenv("FRIDOLIN_FAKE_MCP", `[{"brain":"family"}]`)
+	setenv(t, "FRIDOLIN_FAKE_MCP", `[{"brain":"family"}]`)
 	if reply := h.Answer(inbound{JID: harnessGroup, Sender: "15551234567", Text: "@claude fix the app #mcp"}); strings.Contains(reply, "fride_") {
 		t.Errorf("family has FrIDE tools:\n%s", reply)
 	}
@@ -173,6 +175,8 @@ func TestFrideThroughNodes(t *testing.T) {
 // fake FrIDE's base folder, which then knows them; a repository it has is
 // not added twice; the arguments are checked first.
 func TestFrideRepoAddTool(t *testing.T) {
+	// Serial: puts a fake git on the process's PATH and git's settings in
+	// its environment, which the node agent runs git with.
 	if runtime.GOOS == "windows" {
 		t.Skip("the fake gh is a shell script")
 	}
@@ -205,7 +209,7 @@ func TestFrideRepoAddTool(t *testing.T) {
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	t.Setenv("FRIDOLIN_FAKE_MCP", "[]")
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
 	ff := testutil.StartFakeFride(t, "web")
 	ff.SetBaseFolders(repos)
 	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)

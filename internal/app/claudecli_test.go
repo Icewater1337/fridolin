@@ -25,10 +25,11 @@ func versionCLI(t *testing.T, path, out string) string {
 }
 
 func TestClaudeInfoNoticesANewRelease(t *testing.T) {
+	t.Parallel()
 	// The CLI updates itself while the bridge runs; the dashboard used to
 	// show the version it saw first until the bridge restarted.
 	cli := versionCLI(t, "", "2.1.0 (Claude Code)")
-	if st := ClaudeInfo(cli, nil); !st.Found || st.Version != "2.1.0 (Claude Code)" {
+	if st := ClaudeInfo(envOf(t), cli, nil); !st.Found || st.Version != "2.1.0 (Claude Code)" {
 		t.Fatalf("first look: %+v", st)
 	}
 	versionCLI(t, cli, "2.1.400 (Claude Code)")
@@ -36,7 +37,7 @@ func TestClaudeInfoNoticesANewRelease(t *testing.T) {
 	if err := os.Chtimes(cli, later, later); err != nil {
 		t.Fatal(err)
 	}
-	if st := ClaudeInfo(cli, nil); st.Version != "2.1.400 (Claude Code)" {
+	if st := ClaudeInfo(envOf(t), cli, nil); st.Version != "2.1.400 (Claude Code)" {
 		t.Errorf("after the update: %+v, want 2.1.400", st)
 	}
 
@@ -48,7 +49,7 @@ func TestClaudeInfoNoticesANewRelease(t *testing.T) {
 		if err := os.Symlink(oldCLI, link); err != nil {
 			t.Fatal(err)
 		}
-		if st := ClaudeInfo(link, nil); st.Version != "2.1.0 (Claude Code)" {
+		if st := ClaudeInfo(envOf(t), link, nil); st.Version != "2.1.0 (Claude Code)" {
 			t.Fatalf("first look: %+v", st)
 		}
 		if err := os.Remove(link); err != nil {
@@ -57,24 +58,25 @@ func TestClaudeInfoNoticesANewRelease(t *testing.T) {
 		if err := os.Symlink(newCLI, link); err != nil {
 			t.Fatal(err)
 		}
-		if st := ClaudeInfo(link, nil); st.Version != "2.1.500 (Claude Code)" {
+		if st := ClaudeInfo(envOf(t), link, nil); st.Version != "2.1.500 (Claude Code)" {
 			t.Errorf("after the update: %+v, want 2.1.500", st)
 		}
 	})
 
 	t.Run("installed after the first look", func(t *testing.T) {
 		cli := filepath.Join(t.TempDir(), "claude")
-		if st := ClaudeInfo(cli, nil); st.Found {
+		if st := ClaudeInfo(envOf(t), cli, nil); st.Found {
 			t.Fatalf("found before it exists: %+v", st)
 		}
 		versionCLI(t, cli, claudecli.TestedClaudeVersion+" (Claude Code)")
-		if st := ClaudeInfo(cli, nil); !st.Found {
+		if st := ClaudeInfo(envOf(t), cli, nil); !st.Found {
 			t.Errorf("still not found once installed: %+v", st)
 		}
 	})
 }
 
 func TestStatusWarnsAboutAnOldClaude(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		version string
 		warn    bool
@@ -101,6 +103,8 @@ func TestStatusWarnsAboutAnOldClaude(t *testing.T) {
 }
 
 func TestStartupLogNamesTheClaudeCLI(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	cases := []struct {
 		name, version string
 		missing       bool
@@ -117,7 +121,7 @@ func TestStartupLogNamesTheClaudeCLI(t *testing.T) {
 				versionCLI(t, cli, c.version)
 			}
 			logged := captureLog(t)
-			LogClaudeCLI(cli, nil)
+			logClaudeCLI(cli, ClaudeInfo(envOf(t), cli, nil))
 			out := strings.Join(logged(), "\n")
 			for _, w := range c.want {
 				if !strings.Contains(out, w) {
@@ -132,22 +136,45 @@ func TestStartupLogNamesTheClaudeCLI(t *testing.T) {
 }
 
 func TestStartupLogNamesTheCodexCLI(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	// In Codex mode the line was the Status struct printed with %+v,
 	// and a missing CLI got no warning.
 	cli := versionCLI(t, filepath.Join(t.TempDir(), "codex"), "codex-cli 0.163.0")
 	logged := captureLog(t)
-	LogCodexCLI(cli, nil)
+	logCodexCLI(cli, CodexInfo(envOf(t), cli, nil))
 	if out, want := strings.Join(logged(), "\n"), "Codex CLI: "+cli+", codex-cli 0.163.0"; !strings.Contains(out, want) || strings.Contains(out, "WARNING") {
 		t.Errorf("log %q, want %q in it and no warning", out, want)
 	}
 
 	missing := filepath.Join(t.TempDir(), "codex")
 	logged = captureLog(t)
-	LogCodexCLI(missing, nil)
+	logCodexCLI(missing, CodexInfo(envOf(t), missing, nil))
 	out := strings.Join(logged(), "\n")
 	for _, w := range []string{"WARNING: the Codex CLI (" + missing + ") was not found", "Settings → AI mode"} {
 		if !strings.Contains(out, w) {
 			t.Errorf("log %q, want %q in it", out, w)
 		}
+	}
+}
+
+// TestStartupLogNamesTheConfiguredCLI: the bridge's startup line names the
+// CLI its brains run, Claude Code's, or in Codex mode Codex's.
+func TestStartupLogNamesTheConfiguredCLI(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
+	codex := versionCLI(t, filepath.Join(t.TempDir(), "codex"), "codex-cli 0.163.0")
+	for _, c := range []struct{ name, extra, want string }{
+		{"claude", "", "Claude Code CLI: "},
+		{"codex", `, "agent_provider": "codex", "codex_path": "` + codex + `"`, "Codex CLI: " + codex + ", codex-cli 0.163.0"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			tb := newTestBridge(t, c.extra)
+			logged := captureLog(t)
+			tb.LogAgentCLI()
+			if out := strings.Join(logged(), "\n"); !strings.Contains(out, c.want) {
+				t.Errorf("log %q, want %q in it", out, c.want)
+			}
+		})
 	}
 }

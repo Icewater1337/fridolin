@@ -15,6 +15,7 @@ import (
 // fine under 70% of the budget, a warning above, a failure once B2 refused
 // a call for a cap, in the counts or in what the lease last said.
 func TestDoctorB2Transactions(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
 	cfg := &config.Settings{Boot: config.Boot{DataDir: "/data"}}
 	cfg.Core.Lease.Enabled = true

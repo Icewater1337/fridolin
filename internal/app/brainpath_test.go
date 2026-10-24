@@ -32,8 +32,10 @@ import (
 // was removed, which stays out of the bridge's. The service file's
 // folders, kept out of PATH already, are logged with where they go.
 func TestSetBridgePATH(t *testing.T) {
+	// Serial: setBridgePATH reads, and changes, the process's PATH. Its log
+	// lines go to the process's standard logger.
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	for _, d := range []string{"real/q", "assistant/personal/bin", "assistant/personal/tools", "new/bin"} {
 		if err := os.MkdirAll(filepath.Join(home, d), 0o700); err != nil {
 			t.Fatal(err)
@@ -127,15 +129,16 @@ func TestSetBridgePATH(t *testing.T) {
 // the programs there first on PATH, while the bridge's own PATH and every
 // other brain's run lack it.
 func TestBrainRunsGetTheirOwnPATHFolders(t *testing.T) {
+	// Serial: setBridgePATH reads, and changes, the process's PATH.
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	if err := os.MkdirAll(home+"/assistant/personal/bin", 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", home+"/assistant/personal/bin:/usr/bin:/bin")
-	t.Setenv("FRIDOLIN_FAKE_ENV", "PATH")
+	setenv(t, "FRIDOLIN_FAKE_ENV", "PATH")
 	claude := fakeClaudeEnv(t, 0)
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := loadConfig(t, writeConfig(t, `{
 		"brain_mode": true,
 		"claude_path": "`+claude+`",
 		"data_dir": "`+home+`/data"`+brainDirsJSON(t,
@@ -182,8 +185,10 @@ func TestBrainRunsGetTheirOwnPATHFolders(t *testing.T) {
 // brain invalid and left it out, so DMs went to the default brain. It now
 // lists the brain with no issue, and prints its profile.
 func TestCheckRunsABrainWhoseFolderHoldsAPATHFolder(t *testing.T) {
+	// Serial: setBridgePATH reads, and changes, the process's PATH. Its log
+	// lines go to the process's standard logger.
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	if err := os.MkdirAll(home+"/assistant/personal/bin", 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -220,8 +225,10 @@ func TestCheckRunsABrainWhoseFolderHoldsAPATHFolder(t *testing.T) {
 // brain-owned PATH folders before that first subprocess, just as startup
 // does before the dashboard can probe it.
 func TestCheckDoesNotExecuteBrainPATHPrograms(t *testing.T) {
+	// Serial: setBridgePATH reads, and changes, the process's PATH. Its log
+	// lines go to the process's standard logger.
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	brain := filepath.Join(home, "brain")
 	ownedBin, trustedBin := filepath.Join(brain, "bin"), filepath.Join(home, "trusted", "bin")
 	for _, dir := range []string{ownedBin, trustedBin} {

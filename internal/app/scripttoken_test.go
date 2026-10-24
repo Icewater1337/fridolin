@@ -42,8 +42,9 @@ func tokenBridge(t *testing.T, extra string) *testBridge {
 // A brain's run is never told the scripts token or the dashboard token: it
 // calls /send and /ingest with its run's token (brainapi.go).
 func TestBrainRunsAreNotToldTheScriptsToken(t *testing.T) {
+	t.Parallel()
 	envLog := filepath.Join(t.TempDir(), "brain.env")
-	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
+	setenv(t, "FRIDOLIN_FAKE_ENV_LOG", envLog)
 	tb := newTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	if w := tb.do("POST", "/api/dev/inbound", map[string]any{"jid": tokenTestDM, "text": "hi"}); w.Code != 202 {
@@ -58,6 +59,7 @@ func TestBrainRunsAreNotToldTheScriptsToken(t *testing.T) {
 
 // Who may /send where, and who may hand files to which brain.
 func TestScriptTokenScopes(t *testing.T) {
+	t.Parallel()
 	const otherNumber = "15559876543@s.whatsapp.net"
 	tb := tokenBridge(t, "")
 	// The tokens of runs in progress, as brainRunEnv makes them.
@@ -135,6 +137,7 @@ func TestMaySendRefusesAnUnknownCaller(t *testing.T) {
 // The Authorization header names the Bearer scheme in any case, as RFC 7235
 // allows; anything else is a bad token, not an anonymous call.
 func TestAuthorizeReadsTheBearerScheme(t *testing.T) {
+	t.Parallel()
 	var runs runTokens
 	run, revoke := runs.mint("a")
 	defer revoke()
@@ -179,6 +182,7 @@ func TestAuthorizeReadsTheBearerScheme(t *testing.T) {
 
 // The scripts token is a file in the data dir, made once and kept.
 func TestScriptsTokenFile(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	path := filepath.Join(tb.cfgs.Get().DataDir, "scripts.token")
 	data, err := os.ReadFile(path)
@@ -200,6 +204,7 @@ func TestScriptsTokenFile(t *testing.T) {
 // What came in through /send is marked in history, and the brain does not
 // read a line a script or another brain sent as its own words.
 func TestSendHistoryShowsWhoSentIt(t *testing.T) {
+	t.Parallel()
 	tb := tokenBridge(t, "")
 	a, revoke := tb.runTokens.mint("a")
 	defer revoke()
@@ -245,6 +250,7 @@ func TestSendHistoryShowsWhoSentIt(t *testing.T) {
 }
 
 func TestOutboundSender(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		from, via, want string
 	}{

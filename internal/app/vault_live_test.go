@@ -32,6 +32,7 @@ import (
 //
 // It never touches lifecycle rules, and never deletes outside its prefixes.
 func TestLiveB2(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("FRIDOLIN_LIVE_B2") != "1" {
 		t.Skip("set FRIDOLIN_LIVE_B2=1 and the B2 keys to run against Backblaze")
 	}

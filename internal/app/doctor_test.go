@@ -166,6 +166,7 @@ func result(t *testing.T, rep DoctorReport, id string) DoctorCheckReport {
 }
 
 func TestDoctorChecks(t *testing.T) {
+	t.Parallel()
 	notFound := fakeRun{err: fakeExit(44)}
 	tests := []struct {
 		name   string
@@ -279,6 +280,7 @@ func TestDoctorChecks(t *testing.T) {
 // Only the checks that concern the AI mode run, and the keychain is asked
 // whether a secret is there, never for its value.
 func TestDoctorAppliesAndNeverReadsSecrets(t *testing.T) {
+	t.Parallel()
 	s := healthyMac()
 	rep := RunDoctor(context.Background(), s.doctorEnv(doctorConfig(nil), nil), DoctorRegistry)
 	for _, c := range rep.Checks {
@@ -309,6 +311,7 @@ func TestDoctorAppliesAndNeverReadsSecrets(t *testing.T) {
 // A check a later milestone needs is optional now: it may be missing
 // without failing the report, and says which milestone needs it.
 func TestDoctorOptionalChecksDoNotFail(t *testing.T) {
+	t.Parallel()
 	s := healthyMac()
 	s.path = map[string]string{"claude": "/usr/local/bin/claude"}
 	s.runs = map[string]fakeRun{"/usr/local/bin/claude --version": {out: "2.1.302 (Claude Code)"}}
@@ -329,6 +332,7 @@ func TestDoctorOptionalChecksDoNotFail(t *testing.T) {
 // A check that does not end in time ends with the context: doctor gives
 // each one its own deadline.
 func TestDoctorCheckDeadline(t *testing.T) {
+	t.Parallel()
 	var deadline bool
 	rep := RunDoctor(context.Background(), healthyMac().doctorEnv(doctorConfig(nil), nil), []DoctorCheck{{
 		ID: "slow", Title: "slow",
@@ -346,6 +350,7 @@ func TestDoctorCheckDeadline(t *testing.T) {
 // Mac that has the bridge's own needs and lacks most of what later
 // milestones add.
 func TestGoldenDoctor(t *testing.T) {
+	t.Parallel()
 	s := healthyMac()
 	delete(s.path, "docker")
 	delete(s.path, "litestream")
@@ -370,6 +375,7 @@ func TestGoldenDoctor(t *testing.T) {
 // the command with ErrDoctorFailed and a JSON report that says so, and
 // --redact writes ~ for the home folder in the paths of one that does.
 func TestWriteDoctor(t *testing.T) {
+	// Serial: doctor redirects the process's standard logger.
 	_, home := fixtureHome(t)
 	bad := filepath.Join(home, "bad.json")
 	good := filepath.Join(home, "good.json")

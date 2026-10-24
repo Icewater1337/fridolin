@@ -14,6 +14,7 @@ import (
 // The gate checks of M1 read what the running core wrote to <data>/core,
 // and run bubblewrap as a brain's run would.
 func TestDoctorCoreChecks(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	cfg := &config.Settings{Boot: config.Boot{DataDir: "/data"}}
 	cfg.Core.Tailnet.Enabled = true

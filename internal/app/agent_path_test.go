@@ -32,6 +32,8 @@ func agentOnPATH(t *testing.T, name string) string {
 }
 
 func TestResolveAgentBinary(t *testing.T) {
+	// Serial: puts the agent CLI on the process's PATH, where the bridge
+	// looks it up.
 	claude := agentOnPATH(t, "claude")
 	for _, tc := range []struct{ provider, path string }{{"claude", "claude"}, {"claude", ""}, {"", claude}} {
 		got, err := resolveAgentBinary(tc.provider, tc.path)
@@ -58,6 +60,8 @@ func TestResolveAgentBinary(t *testing.T) {
 // "personal": "codex" is not an absolute path`. The runner now hands the
 // sandbox the CLI's absolute path, found on the bridge's PATH.
 func TestRunnerHandsBwrapTheAgentsAbsolutePath(t *testing.T) {
+	// Serial: puts the agent CLI on the process's PATH, where the bridge
+	// looks it up.
 	for _, provider := range []string{"claude", "codex"} {
 		t.Run(provider, func(t *testing.T) {
 			agent := agentOnPATH(t, provider)
@@ -73,7 +77,7 @@ func TestRunnerHandsBwrapTheAgentsAbsolutePath(t *testing.T) {
 			if err := os.WriteFile(sp.bwrapPath, nil, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			r := &commandRunner{sandbox: sp}
+			r := &commandRunner{sandbox: sp, env: envOf(t)}
 			var spawned claudecli.Spawn
 			refused := errors.New("not started in a test")
 			res := r.Run(context.Background(), brain.RunSpec{
@@ -106,9 +110,11 @@ func TestRunnerHandsBwrapTheAgentsAbsolutePath(t *testing.T) {
 // A CLI that is not on the bridge's PATH ends the run before anything
 // starts, with an error that names the setting.
 func TestRunnerRefusesAMissingAgent(t *testing.T) {
+	// Serial: puts the agent CLI on the process's PATH, where the bridge
+	// looks it up.
 	agentOnPATH(t, "claude")
 	var started bool
-	r := &commandRunner{}
+	r := &commandRunner{env: envOf(t)}
 	res := r.Run(context.Background(), brain.RunSpec{
 		ID: "personal", Dir: t.TempDir(), Prompt: "hi", BeforeStart: func() { started = true },
 		Settings: &brain.Settings{Provider: "codex", CodexPath: "codex"},

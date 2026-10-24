@@ -58,6 +58,8 @@ func forgetTmux(t *testing.T) {
 // symlink to a folder of helperDirs; one that resolves into HOME counts as
 // under HOME, as for the sandbox.
 func TestHelperPath(t *testing.T) {
+	// Serial: helperPath reads the process's PATH and HOME, and helperDirs
+	// is a package variable.
 	home := fsx.Canonical(t.TempDir())
 	outside := fsx.Canonical(t.TempDir())
 	if err := os.MkdirAll(filepath.Join(home, "bin"), 0o700); err != nil {
@@ -108,6 +110,8 @@ func TestHelperPath(t *testing.T) {
 // under HOME, where the sandbox keeps brains from planting it, is still
 // found, ahead of the folder outside.
 func TestHelpersAreNotFoundInFoldersBrainsCanWrite(t *testing.T) {
+	// Serial: the bridge looks its helpers up on the process's PATH and
+	// under its HOME, and tmuxPath is a package variable.
 	cases := []struct {
 		name string
 		find func(t *testing.T) string

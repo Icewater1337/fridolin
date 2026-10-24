@@ -150,6 +150,7 @@ var (
 // each message starts with an emoji and a space, and every name
 // messages.go declares is in it.
 func TestGoldenMessages(t *testing.T) {
+	t.Parallel()
 	var out strings.Builder
 	named := map[string]bool{}
 	for _, m := range catalogue() {
@@ -223,6 +224,7 @@ var notChatText = map[string]string{
 // string that starts with an emoji, the mark of a message the bridge
 // sends into chats, so that a new one goes into the catalogue.
 func TestChatMessagesLiveInTheCatalogue(t *testing.T) {
+	t.Parallel()
 	var files []string
 	err := filepath.WalkDir(repoDir, func(path string, d fs.DirEntry, err error) error {
 		switch {

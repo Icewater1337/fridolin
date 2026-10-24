@@ -56,6 +56,7 @@ func withSession(s *signIn) func(*http.Request) {
 // The browser signs in with a login code or the token and gets a session
 // cookie that scripts on the page cannot read; the code works once.
 func TestDashboardSignIn(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	now := time.Now
 	var err error
@@ -135,6 +136,7 @@ func TestDashboardSignIn(t *testing.T) {
 // browser's cookie named, rather than leaving it for maxSessions to push
 // out; a refused sign-in leaves it alone.
 func TestSignInAgainReplacesTheSession(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	first := sessionOf(tb.login(map[string]string{"token": tb.token.Value()}))
 	other := sessionOf(tb.login(map[string]string{"token": tb.token.Value()})) // another browser's
@@ -177,6 +179,7 @@ func TestSignInAgainReplacesTheSession(t *testing.T) {
 // binding lives in the browser's storage on disk; neither may be enough
 // on its own.
 func TestSessionNeedsCookieAndBinding(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	a := sessionOf(tb.login(map[string]string{"token": tb.token.Value()}))
 	b := sessionOf(tb.login(map[string]string{"token": tb.token.Value()}))
@@ -222,6 +225,7 @@ func TestSessionNeedsCookieAndBinding(t *testing.T) {
 // Sessions survive a restart, are stored only as hashes, and end on sign
 // out; rotating the token signs out every browser and the old token.
 func TestDashboardSessionsLastAndEnd(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	a := sessionOf(tb.login(map[string]string{"token": tb.token.Value()}))
 	b := sessionOf(tb.login(map[string]string{"token": tb.token.Value()}))
@@ -287,6 +291,7 @@ func TestDashboardSessionsLastAndEnd(t *testing.T) {
 // token, as `fridolin rotate-token` does, is no browser and gets no
 // session, which would only sit in the sessions file for a month.
 func TestRotateForgetsLoginCodes(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	code, _ := tb.sessions.NewCode()
 	w := tb.do("POST", "/api/token/rotate", nil)
@@ -315,6 +320,7 @@ func TestRotateForgetsLoginCodes(t *testing.T) {
 }
 
 func TestSessionCookieNamePerPort(t *testing.T) {
+	t.Parallel()
 	if a, b := httpapi.SessionCookieName("127.0.0.1:8765"), httpapi.SessionCookieName("127.0.0.1:9999"); a == b || a != "fridolin_session_8765" {
 		t.Fatalf("%q, %q", a, b)
 	}
@@ -324,6 +330,7 @@ func TestSessionCookieNamePerPort(t *testing.T) {
 // HTTP the bridge serves, a Secure cookie would not be kept by every
 // browser.
 func TestSessionCookieSecureOnlyOverTLS(t *testing.T) {
+	t.Parallel()
 	overTLS := func(r *http.Request) { r.TLS = &tls.ConnectionState{} }
 	cases := []struct {
 		name, path string
@@ -388,6 +395,7 @@ func closedPort(t *testing.T) string {
 // fridolin open asks the running bridge for a login code: the link it
 // opens holds that, not the token.
 func TestOpenAsksForALoginCode(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	listen := serveBridge(t, tb)
 	code, err := controlcli.AskLoginCode(listen, tb.token.Value())
@@ -424,6 +432,7 @@ func stubBridge(t *testing.T, status int, body string) string {
 // codes answers 404, and the command says to restart it rather than
 // putting the token in the link, as that build's own `open` did.
 func TestDashboardLink(t *testing.T) {
+	t.Parallel()
 	const token = "0123456789abcdef"
 	cases := []struct {
 		name, body string
@@ -464,6 +473,7 @@ func TestDashboardLink(t *testing.T) {
 // runs, changes the files itself; a bridge that runs without answering is
 // left alone.
 func TestRotateTokenCommand(t *testing.T) {
+	t.Parallel()
 	t.Run("through the bridge", func(t *testing.T) {
 		tb := newTestBridge(t, "")
 		cfg := *tb.cfgs.Get()
@@ -545,6 +555,7 @@ func TestRotateTokenCommand(t *testing.T) {
 
 // The login endpoint's answers carry no secret either.
 func TestLoginAnswersCarryNoToken(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	for _, w := range []*httptest.ResponseRecorder{
 		tb.login(map[string]string{"token": tb.token.Value()}),

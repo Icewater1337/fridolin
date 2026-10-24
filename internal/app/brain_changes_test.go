@@ -31,6 +31,7 @@ func historyTexts(t *testing.T, br *brain.Brain, typ string) []string {
 // A message deleted for everyone is not answered and leaves the history,
 // wherever it was: waiting, being answered, or answered already.
 func TestDeletedMessageIsNotAnsweredAndLeavesTheHistory(t *testing.T) {
+	t.Parallel()
 	t.Run("waiting", func(t *testing.T) {
 		tb, br := newMainBridge(t, "")
 		startLongRun(t, tb, br, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "a long report", Source: chat.SourceWhatsApp}})
@@ -51,7 +52,7 @@ func TestDeletedMessageIsNotAnsweredAndLeavesTheHistory(t *testing.T) {
 
 	t.Run("being answered", func(t *testing.T) {
 		tb, br := newMainBridge(t, "")
-		t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
+		setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "30000")
 		wa := tb.whatsApp(t)
 		wa.ProcessMessage(dmEvent("3EB0RUN", textMsg("write it all down")))
 		testutil.WaitFor(t, 5*time.Second, "the run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
@@ -105,6 +106,7 @@ func TestDeletedMessageIsNotAnsweredAndLeavesTheHistory(t *testing.T) {
 // history. One the brain already acted on starts no run of its own, which
 // could do it all again; the history notes it for the next run.
 func TestEditedMessage(t *testing.T) {
+	t.Parallel()
 	t.Run("waiting", func(t *testing.T) {
 		tb, br := newMainBridge(t, "")
 		startLongRun(t, tb, br, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "a long report", Source: chat.SourceWhatsApp}})
@@ -118,7 +120,7 @@ func TestEditedMessage(t *testing.T) {
 		if got := historyTexts(t, br, history.In); !slices.Equal(got, []string{"a long report", "book Wednesday"}) {
 			t.Errorf("history holds %q, want the edit in place", got)
 		}
-		t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+		setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "10")
 		br.StopCurrent(false)
 		testutil.WaitFor(t, 10*time.Second, "the edited message's answer", func() bool { return tb.sentPrefix(testDMChat, "echo:") })
 		if got := tb.sentTo(testDMChat); !strings.HasSuffix(got[len(got)-1], "15551234567 says: book Wednesday") {
@@ -153,6 +155,7 @@ func TestEditedMessage(t *testing.T) {
 // the OTP guard had kept out, corrected by its sender, into the history
 // and the next run's prompt.
 func TestEditOfAMessageTheHistoryLacks(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		// code is a message the OTP guard catches, sent as 3EB0OTP.
@@ -212,6 +215,7 @@ func TestEditOfAMessageTheHistoryLacks(t *testing.T) {
 // The dashboard's activity feed follows the history: a deleted message
 // leaves it, and a waiting one that was edited shows its new text.
 func TestActivityFollowsChanges(t *testing.T) {
+	t.Parallel()
 	tb, br := newMainBridge(t, "")
 	startLongRun(t, tb, br, brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "a long report", Source: chat.SourceWhatsApp}})
 	wa := tb.whatsApp(t)

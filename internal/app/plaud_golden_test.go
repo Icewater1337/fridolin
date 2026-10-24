@@ -191,6 +191,7 @@ func plaudGoldenArgs(args []string, out string) []string {
 // The fake CLI prints what the real one printed for the same recordings,
 // on the same streams, and leaves the login as it did.
 func TestFakePlaudPrintsWhatTheRealCLIPrints(t *testing.T) {
+	t.Parallel()
 	runs := loadPlaudGolden(t)
 	list, recs := plaudGoldenRecordings()
 	for name, want := range runs {
@@ -331,6 +332,7 @@ func realPlaudEnv(bin, home string) []string {
 // An installed CLI still prints what the golden output says, so the fake,
 // and what Fridolin reads, still match it.
 func TestPlaudCLIContract(t *testing.T) {
+	t.Parallel()
 	bin := realPlaudCLI(t)
 	if v := plaudCLIVersion(bin); v != "0.3.15" && !*updatePlaudGolden {
 		t.Errorf("%s is version %q; the recorded output is from %s", bin, v, "0.3.15")
@@ -379,6 +381,7 @@ func TestPlaudCLIContract(t *testing.T) {
 // stand-in for Plaud's API hands both new recordings over, each with its
 // summary and transcript whole and its own date.
 func TestPlaudForwardWithTheRealCLI(t *testing.T) {
+	t.Parallel()
 	bin := realPlaudCLI(t)
 	list, recs := plaudGoldenRecordings()
 	srv := httptest.NewServer(plaudStubAPI(list, recs))

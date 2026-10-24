@@ -23,6 +23,8 @@ import (
 // window, gets what childEnv gives any program and the names in
 // child_env_passthrough, not the bridge's whole environment.
 func TestViewerGetsTheAllowlistedEnvironment(t *testing.T) {
+	// Serial: replaces tmuxPath, osascript and startViewer, package
+	// variables, and sets TMUX_TMPDIR in the process's environment.
 	logs := t.TempDir()
 	bin := t.TempDir()
 	// Each call records its environment under its first argument.
@@ -51,7 +53,7 @@ func TestViewerGetsTheAllowlistedEnvironment(t *testing.T) {
 	}
 
 	dir := t.TempDir()
-	viewer, err := startBrainViewer("claude-a", filepath.Join(dir, brain.StreamLogName), dir, []string{"GROQ_API_KEY"})
+	viewer, err := brainViewerStart(envOf(t))("claude-a", filepath.Join(dir, brain.StreamLogName), dir, []string{"GROQ_API_KEY"})
 	if err != nil || viewer == nil {
 		t.Fatalf("no viewer started: %v", err)
 	}
@@ -71,7 +73,7 @@ func TestViewerGetsTheAllowlistedEnvironment(t *testing.T) {
 				t.Fatal(err)
 			}
 			env := strings.Split(string(data), "\n")
-			for _, want := range []string{"HOME=" + os.Getenv("HOME"), "TMUX_TMPDIR=" + filepath.Join(logs, "tmux"), "GROQ_API_KEY=test-groq-key"} {
+			for _, want := range []string{"HOME=" + homeOf(t), "TMUX_TMPDIR=" + filepath.Join(logs, "tmux"), "GROQ_API_KEY=test-groq-key"} {
 				if !slices.Contains(env, want) {
 					t.Errorf("%s lacks %s", call, want)
 				}
@@ -94,6 +96,8 @@ func TestViewerGetsTheAllowlistedEnvironment(t *testing.T) {
 // osascript call gets platform.SystemPATH and no other PATH, whatever the viewer's
 // environment says.
 func TestViewerRunsOnlySystemPrograms(t *testing.T) {
+	// Serial: replaces tmuxPath and osascript, package variables, and
+	// changes the process's PATH and HOME.
 	if osascript != "/usr/bin/osascript" {
 		t.Errorf("osascript = %q, want /usr/bin/osascript", osascript)
 	}
@@ -156,12 +160,14 @@ func TestViewerRunsOnlySystemPrograms(t *testing.T) {
 // viewer's is neither taken for it nor replaced. The session's sh and tail
 // are the system's, not the ones first on the viewer's PATH.
 func TestViewerWithRealTmux(t *testing.T) {
+	// Serial: replaces tmuxPath and osascript, package variables, and sets
+	// the process's TMUX_TMPDIR.
 	tmux, err := exec.LookPath("tmux")
 	if err != nil {
 		t.Skip("tmux not installed")
 	}
 	t.Setenv("TMUX_TMPDIR", tmuxSocketDir(t))
-	env := childEnv(anyChild, nil)
+	env := childEnv(envOf(t), anyChild, nil)
 	tmuxCmd := func(args ...string) *exec.Cmd {
 		cmd := exec.Command(tmux, args...)
 		cmd.Env = env

@@ -130,6 +130,8 @@ func cliFixture(t *testing.T, configValue string, brains func(home string) []con
 // TestGoldenCheck pins what `fridolin check` prints: the summary, with
 // --route the brain each chat goes to, and a config that does not load.
 func TestGoldenCheck(t *testing.T) {
+	// Serial: runs fridolin's commands in the process, which read its HOME
+	// and redirect its standard logger.
 	brains := func(home string) []config.BrainRef {
 		return []config.BrainRef{
 			brainFolder(t, "~/main", manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}}),
@@ -178,6 +180,8 @@ func TestGoldenCheck(t *testing.T) {
 // block. So do the bridge's programs outside the test's folder, which it
 // leaves out (withoutSystemPrograms).
 func TestGoldenSandboxProfiles(t *testing.T) {
+	// Serial: runs fridolin's commands in the process, which read its HOME
+	// and redirect its standard logger.
 	gitconfig := func(home string) {
 		if err := os.WriteFile(filepath.Join(home, ".gitconfig"), []byte("[user]\n\tname = You\n[include]\n\tpath = ~/.gitconfig-work\n"), 0o600); err != nil {
 			t.Fatal(err)
@@ -271,6 +275,7 @@ func withoutSystemPrograms(profile string) string {
 }
 
 func TestWithoutSystemPrograms(t *testing.T) {
+	t.Parallel()
 	lines := func(l ...string) string { return strings.Join(l, "\n") }
 	tests := []struct{ name, in, want string }{
 		{"a program and a PATH folder outside the test's folder", lines(
@@ -324,6 +329,8 @@ func TestWithoutSystemPrograms(t *testing.T) {
 // TestGoldenStarterConfig pins the config `fridolin init` writes. The
 // sandbox is on where it can run, on macOS.
 func TestGoldenStarterConfig(t *testing.T) {
+	// Serial: runs fridolin's commands in the process, which read its HOME
+	// and redirect its standard logger.
 	root, _ := fixtureHome(t)
 	cfg := filepath.Join(root, "home", ".fridolin", "config.json")
 	out, code := runBridgeCLI(t, root, "init", "--config", cfg, "--claude-path", "/opt/claude/bin/claude")

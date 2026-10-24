@@ -36,6 +36,7 @@ func (h *harness) brainViews() []httpapi.BrainView {
 // in both brains' brain.json. When the second one cannot be written, the
 // first is put back: no brain.json keeps a change config.json never got.
 func TestAssignGroupPutsBackTheFirstBrainJSON(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root can write into a read-only folder")
 	}
@@ -77,6 +78,7 @@ func TestAssignGroupPutsBackTheFirstBrainJSON(t *testing.T) {
 // that registers it. When config.json cannot be written, the add fails and
 // leaves no brain.json behind, nor the rest of what it scaffolded.
 func TestAFailedAddLeavesNoBrainJSON(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root can write into a read-only folder")
 	}
@@ -107,6 +109,7 @@ func TestAFailedAddLeavesNoBrainJSON(t *testing.T) {
 // brain, once that update's checks pass, not with the rest of the folder
 // before them.
 func TestAddWritesBrainJSONWithTheRegistration(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	// Another writer holds the config update while the add scaffolds.
 	inside, release, saved := make(chan struct{}), make(chan struct{}), make(chan error, 1)
@@ -150,6 +153,7 @@ func TestAddWritesBrainJSONWithTheRegistration(t *testing.T) {
 // Fridolin before a rollback say, is refused, and no edit writes over it:
 // writing it back would drop the settings this version does not know.
 func TestANewerBrainJSONIsRefusedAndKept(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	path := filepath.Join(dir, manifest.File)
@@ -210,7 +214,9 @@ func TestANewerBrainJSONIsRefusedAndKept(t *testing.T) {
 // A field brain.json has but this version does not know is logged by its
 // path, once, while the brain loads as before.
 func TestUnknownBrainJSONFieldsAreLogged(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
+	setenv(t, "HOME", t.TempDir())
 	dir := t.TempDir()
 	body := `{"version": 1, "id": "a", "name": "A", "nmae": "x", "routing": {"handles_dm": true, "groups": []}}`
 	if err := os.WriteFile(filepath.Join(dir, manifest.File), []byte(body), 0o600); err != nil {
@@ -254,6 +260,7 @@ func breakApproved(t *testing.T, tb *testBridge, id string, edit func(m *manifes
 // not block edits and approvals of the other brains with its own error;
 // an edit that makes brains clash is still refused.
 func TestOneBrokenBrainDoesNotBlockTheOthers(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	a := tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "b", Name: "B"})
@@ -310,6 +317,7 @@ func TestOneBrokenBrainDoesNotBlockTheOthers(t *testing.T) {
 // claims too; moving the group to c would let b run again, and take the
 // DMs from c without a word.
 func TestAllowingAGroupChecksTheBrains(t *testing.T) {
+	t.Parallel()
 	const group = "120363000000000000@g.us"
 	tb := newTestBridge(t, "")
 	a := tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{Groups: []string{group}}})

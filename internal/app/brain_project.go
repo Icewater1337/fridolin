@@ -51,8 +51,12 @@ func dataEnv(s *brain.Settings) []string {
 // startViewer is NewTmuxViewer, a variable so tests need no tmux.
 var startViewer = NewTmuxViewer
 
-func startBrainViewer(name, streamLog, cwd string, passthrough []string) (*platform.Viewer, error) {
-	return startViewer(name, streamLog, cwd, childEnv(anyChild, passthrough))
+// brainViewerStart starts a brain's activity viewer with the part of the
+// bridge's environment env that any program gets.
+func brainViewerStart(env Environment) func(name, streamLog, cwd string, passthrough []string) (*platform.Viewer, error) {
+	return func(name, streamLog, cwd string, passthrough []string) (*platform.Viewer, error) {
+		return startViewer(name, streamLog, cwd, childEnv(env, anyChild, passthrough))
+	}
 }
 
 func isBuildChat(jid string) bool { return brainOfBuildJID(jid) != "" }

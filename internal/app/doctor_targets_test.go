@@ -15,6 +15,7 @@ import (
 // TestDoctorVaultTargets: a target without a snapshot within its window
 // (its node off, its disk unplugged) warns.
 func TestDoctorVaultTargets(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
 	cfg := &config.Settings{}
 	cfg.DataDir = "/data"

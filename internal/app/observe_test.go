@@ -17,6 +17,7 @@ import (
 )
 
 func TestObserveRuns(t *testing.T) {
+	t.Parallel()
 	chatter := brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567", Text: "we meet at noon", Silent: true}}
 	junk := brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567", Text: "ok", Silent: true}}
 	file := brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: "15551234567", Media: []string{"/m/1.jpg"}, Silent: true}}
@@ -46,6 +47,7 @@ func TestObserveRuns(t *testing.T) {
 // its own only when the brain observes with runs. Either way nothing is
 // sent back.
 func TestUntaggedChatterRunsOnlyWhenObserved(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		observe string
 		runs    int // Claude runs for the chatter and the DM after it
@@ -58,7 +60,7 @@ func TestUntaggedChatterRunsOnlyWhenObserved(t *testing.T) {
 		t.Run("observe "+c.observe, func(t *testing.T) {
 			tb, br := newMainBridgeWith(t, `, "queue": {"notify": false}`, manifest.Manifest{Observe: c.observe})
 			argsLog := filepath.Join(tb.home, "args.log")
-			t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
+			setenv(t, "FRIDOLIN_FAKE_ARGS_LOG", argsLog)
 			ctx := context.Background()
 			tb.handleInbound(ctx, brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "we meet at noon", Silent: true, Source: chat.SourceWhatsApp}})
 			testutil.WaitFor(t, 5*time.Second, "the chatter in the history", func() bool { return len(readHistory(t, br)) == 1 })
@@ -94,10 +96,11 @@ func TestUntaggedChatterRunsOnlyWhenObserved(t *testing.T) {
 // the one in flight, whose message is in the history already, and goes
 // ahead of the chatter that waits for one.
 func TestAddressedWorkGoesAheadOfObserveRuns(t *testing.T) {
+	t.Parallel()
 	t.Run("the run in flight stops", func(t *testing.T) {
 		tb, br := newObservingBridge(t, `, "queue": {"notify": false}`)
 		startLongRun(t, tb, br, brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "long chatter", Silent: true, Source: chat.SourceWhatsApp}})
-		t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+		setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "10")
 		tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: testDMChat, Sender: "15551234567", Text: "hello", Source: chat.SourceWhatsApp}})
 		// The observe-only run would sleep for 30 seconds.
 		testutil.WaitFor(t, 10*time.Second, "the DM's answer", func() bool { return len(tb.sentTo(testDMChat)) == 1 })
@@ -135,9 +138,10 @@ func TestAddressedWorkGoesAheadOfObserveRuns(t *testing.T) {
 // and says nothing about questions reaching the chat. A run for a message
 // addressed to the brain in the same group is not marked.
 func TestObserveRunsAreToldSo(t *testing.T) {
+	t.Parallel()
 	tb, br := newObservingBridge(t, "")
 	promptLog := filepath.Join(tb.home, "prompts.log")
-	t.Setenv("FRIDOLIN_FAKE_PROMPT_LOG", promptLog)
+	setenv(t, "FRIDOLIN_FAKE_PROMPT_LOG", promptLog)
 	ctx := context.Background()
 	tb.handleInbound(ctx, brain.Inbound{Inbound: chat.Inbound{JID: testGroup, Sender: otherNumber, Text: "CHATTER", Silent: true, Source: chat.SourceWhatsApp}})
 	testutil.WaitFor(t, 5*time.Second, "the observe-only run", func() bool { return br.Snapshot().Last != nil })

@@ -99,6 +99,7 @@ func findingOf(r housekeeping.Report, pid int) (housekeeping.Finding, bool) {
 }
 
 func TestHousekeepingDryRunByDefaultThenActs(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	f := useFakeProcs(h)
 
@@ -164,6 +165,7 @@ func TestHousekeepingDryRunByDefaultThenActs(t *testing.T) {
 }
 
 func TestHousekeepingLockdownOnlyReports(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"housekeeping": {"dry_run": false}}`)
 	f := useFakeProcs(h)
 	if _, err := h.b.setLockdown(t.Context(), true, "dashboard"); err != nil {
@@ -178,6 +180,7 @@ func TestHousekeepingLockdownOnlyReports(t *testing.T) {
 // TestHousekeepingAsksInTheContainer: a heavy process that is not the
 // bridge's is put to the owner, and stopped once the owner says yes.
 func TestHousekeepingAsksInTheContainer(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"housekeeping": {"dry_run": false}}`)
 	f := useFakeProcs(h)
 	h.b.housekeeping.container = true

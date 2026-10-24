@@ -50,7 +50,7 @@ type testBridge struct {
 func newTestBridge(t *testing.T, extra string) *testBridge {
 	t.Helper()
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	claude := fakeClaudeEnv(t, 10)
 	path := writeConfig(t, `{
 		"brain_mode": true,
@@ -60,12 +60,12 @@ func newTestBridge(t *testing.T, extra string) *testBridge {
 		"allowed_groups": ["120363000000000000@g.us"],
 		"debounce": {"quiet_ms": 0}`+extra+`
 	}`)
-	cfgs, err := OpenConfigStore(path)
+	cfgs, err := openConfigStore(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	requireTestDataDir(t, cfgs.Get())
-	b, err := New(Options{Config: cfgs, NoWhatsApp: true})
+	b, err := New(Options{Config: cfgs, NoWhatsApp: true, Env: envOf(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,6 +121,7 @@ func (tb *testBridge) addFolderBrain(t *testing.T, m manifest.Manifest) string {
 }
 
 func TestDashboardGuards(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	cases := []struct {
 		name   string
@@ -164,6 +165,7 @@ func TestDashboardGuards(t *testing.T) {
 // bridge only, no plugins, and Trusted Types without a policy, so no
 // string is ever parsed into the page as HTML or run as script.
 func TestDashboardCSP(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	want := map[string]string{
 		"default-src":               "'self'",
@@ -197,6 +199,7 @@ func TestDashboardCSP(t *testing.T) {
 // module scripts. The JavaScript tests and the package.json that marks the
 // modules for node sit in web/ too, but are not part of the page.
 func TestDashboardServesOnlyThePage(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	cases := []struct {
 		path string
@@ -230,6 +233,7 @@ func TestDashboardServesOnlyThePage(t *testing.T) {
 // changed instead of downloading all of them on every visit, and a
 // folder is not listed.
 func TestDashboardStaticFilesHaveValidatorsAndNoListings(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	get := func(path string, mutate ...func(*http.Request)) *httptest.ResponseRecorder {
 		return h.Do("GET", path, nil, append([]func(*http.Request){func(r *http.Request) { r.Header.Del("X-Bridge-Token") }}, mutate...)...)
@@ -279,6 +283,7 @@ func TestDashboardStaticFilesHaveValidatorsAndNoListings(t *testing.T) {
 // TestStatusWarnsWhenBrainsInheritYourClaudeSetup: inherit_claude_user_config
 // has no dashboard field, so the status says when it is on.
 func TestStatusWarnsWhenBrainsInheritYourClaudeSetup(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, config string
 		want         bool
@@ -310,6 +315,7 @@ func TestStatusWarnsWhenBrainsInheritYourClaudeSetup(t *testing.T) {
 }
 
 func TestSendKeepsScriptContractButBlocksBrowsers(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	send := func(mutate ...func(*http.Request)) int {
 		return h.Script("POST", "/send", `{"jid":"15551234567@s.whatsapp.net","text":"hello"}`, mutate...).Code
@@ -328,6 +334,7 @@ func TestSendKeepsScriptContractButBlocksBrowsers(t *testing.T) {
 // POST /send refuses Status, broadcast lists and channels with a JSON
 // error: a script must not be able to post a Status in the bridge's name.
 func TestHTTPSendRefusesStatusBroadcastAndChannels(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	for _, jid := range []string{"status@broadcast", "1700000000@broadcast", "120363000000000000@newsletter"} {
 		t.Run(jid, func(t *testing.T) {
@@ -346,6 +353,7 @@ func TestHTTPSendRefusesStatusBroadcastAndChannels(t *testing.T) {
 }
 
 func TestSendRefusesMissingJIDOrText(t *testing.T) {
+	t.Parallel()
 	// Blank text gives no chunks, so it used to send nothing while still
 	// answering "sent" and writing the blank text to the brain's history.
 	h := newHarness(t, "")
@@ -384,6 +392,7 @@ type stateMessenger struct {
 func (m stateMessenger) State() chat.LinkState { return m.state }
 
 func TestReadyReportsWhetherMessagesCanGoOut(t *testing.T) {
+	t.Parallel()
 	// /health only says the process is up. /ready tells a script (or
 	// setup) whether /send can deliver, without the dashboard token.
 	cases := []struct {
@@ -441,6 +450,7 @@ func TestReadyReportsWhetherMessagesCanGoOut(t *testing.T) {
 }
 
 func TestIngestConfinedToMediaDir(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"ingest": {"enabled": true}}`)
 	dir := h.AddBrain(manifest.Manifest{ID: "personal", Name: "Personal", Routing: manifest.Routing{HandlesDMs: true}})
 	media := filepath.Join(h.DataDir(), "media")
@@ -488,6 +498,7 @@ func TestIngestConfinedToMediaDir(t *testing.T) {
 // kept every brain's Plaud transcripts. Nor may it take another brain's
 // files, or an attachment still on its way to the brain of its chat.
 func TestIngestKeepsOtherBrainsFiles(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "personal", Name: "Personal", Routing: manifest.Routing{HandlesDMs: true}})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "team", Name: "Team", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}})
@@ -617,6 +628,7 @@ func TestIngestKeepsOtherBrainsFiles(t *testing.T) {
 
 // An unknown brain is named as it was sent, in Go quotes.
 func TestUnknownBrainIsQuotedAsSent(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"ingest": {"enabled": true}}`)
 	const want = `unknown brain "<a&b>"`
 	var body struct{ Error string }
@@ -637,6 +649,7 @@ func TestUnknownBrainIsQuotedAsSent(t *testing.T) {
 // told the field to use, even when it names a brain that exists, and
 // nothing is handed to any brain.
 func TestIngestRefusesScope(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"ingest": {"enabled": true}}`)
 	dir := h.AddBrain(manifest.Manifest{ID: "personal", Name: "Personal", Routing: manifest.Routing{HandlesDMs: true}})
 	for name, body := range map[string]string{
@@ -668,6 +681,7 @@ func TestIngestRefusesScope(t *testing.T) {
 // still be handled by the brain the request names: its prompt, memory,
 // sandbox and history.
 func TestIngestRunsInTheNamedBrain(t *testing.T) {
+	t.Parallel()
 	const dm = "15551234567@s.whatsapp.net"
 	h := newHarness(t, `{"ingest": {"enabled": true}}`)
 	dmDir := h.AddBrain(manifest.Manifest{ID: "dm", Name: "DM", Routing: manifest.Routing{HandlesDMs: true}})
@@ -696,6 +710,7 @@ func TestIngestRunsInTheNamedBrain(t *testing.T) {
 // like any other message. Otherwise a brain could plant a code for the
 // script that waits for one, through its own /ingest.
 func TestIngestedCodeIsNotCaught(t *testing.T) {
+	t.Parallel()
 	const dm = "15551234567@s.whatsapp.net"
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}, "otp_guard": true, "otp_markers": ["Examplebank 2FA"]`)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "dm", Name: "DM", Routing: manifest.Routing{HandlesDMs: true}})
@@ -719,6 +734,7 @@ func TestIngestedCodeIsNotCaught(t *testing.T) {
 // nothing to stop. WhatsApp may address the DM by the sender's LID, while the
 // hand-off names the phone number; it is the same chat.
 func TestStopReachesAHandOffInItsReplyChat(t *testing.T) {
+	t.Parallel()
 	const dm = "15551234567@s.whatsapp.net"
 	for _, c := range []struct {
 		name string
@@ -731,7 +747,7 @@ func TestStopReachesAHandOffInItsReplyChat(t *testing.T) {
 			tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
 			tb.addFolderBrain(t, manifest.Manifest{ID: "dm", Name: "DM", Routing: manifest.Routing{HandlesDMs: true}})
 			tb.addFolderBrain(t, manifest.Manifest{ID: "up", Name: "Uploads", ReplyChat: dm})
-			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
+			setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "30000")
 			up := tb.brainMgr.Get("up")
 
 			if w := tb.ingest(`{"brain":"up","text":"file this"}`); w.Code != 202 {
@@ -769,11 +785,12 @@ func TestStopReachesAHandOffInItsReplyChat(t *testing.T) {
 // answers in the chat: once it says the chat has nothing running or waiting,
 // up must have neither the file it is on nor the one waiting.
 func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
+	t.Parallel()
 	const dm = "15551234567@s.whatsapp.net"
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "dm", Name: "DM", Routing: manifest.Routing{HandlesDMs: true}})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "up", Name: "Uploads", ReplyChat: dm})
-	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	up := tb.brainMgr.Get("up")
 
 	if w := tb.ingest(`{"brain":"up","text":"file this"}`); w.Code != 202 {
@@ -806,6 +823,7 @@ func TestResetReachesAHandOffInItsReplyChat(t *testing.T) {
 // there says it cleared them: up is busy with its own group, and a file
 // handed to it for the DM waits behind that run.
 func TestStopCountsWaitingHandOffs(t *testing.T) {
+	t.Parallel()
 	const (
 		dm    = "15551234567@s.whatsapp.net"
 		group = "120363000000000000@g.us"
@@ -813,7 +831,7 @@ func TestStopCountsWaitingHandOffs(t *testing.T) {
 	tb := newTestBridge(t, `, "ingest": {"enabled": true}`)
 	tb.addFolderBrain(t, manifest.Manifest{ID: "dm", Name: "DM", Routing: manifest.Routing{HandlesDMs: true}})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "up", Name: "Uploads", ReplyChat: dm, Routing: manifest.Routing{Groups: []string{group}}})
-	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "30000")
 	up := tb.brainMgr.Get("up")
 
 	if _, _, _, err := tb.brainMgr.Submit(brainruntime.Inbound{Inbound: chat.Inbound{JID: group, Sender: "15551234567", Text: "group work", Source: chat.SourceWhatsApp}}); err != nil {
@@ -839,6 +857,7 @@ func TestStopCountsWaitingHandOffs(t *testing.T) {
 }
 
 func TestReplyChatFor(t *testing.T) {
+	t.Parallel()
 	const (
 		dm = "15551234567@s.whatsapp.net"
 		g1 = "120363000000000001@g.us"
@@ -879,6 +898,7 @@ func TestReplyChatFor(t *testing.T) {
 // try out hand-offs without WhatsApp. Like a hand-off it carries no commands:
 // "!help" is text for the named brain, not a command for the chat's owner.
 func TestDevInboundCanNameABrain(t *testing.T) {
+	t.Parallel()
 	const dm = "15551234567@s.whatsapp.net"
 	h := newHarness(t, "")
 	h.AddBrain(manifest.Manifest{ID: "dm", Name: "DM", Routing: manifest.Routing{HandlesDMs: true}})
@@ -908,6 +928,7 @@ func TestDevInboundCanNameABrain(t *testing.T) {
 // number. A member it refuses reaches no brain, and the group, which is
 // allowed, does not wait for access.
 func TestDevInboundHearsWhomGroupMembersAdmits(t *testing.T) {
+	t.Parallel()
 	const (
 		listed   = `{"group_members": {"` + harnessGroup + `": ["15551234567"]}}`
 		everyone = `{"group_members": {"` + harnessGroup + `": ["*"]}}`
@@ -960,6 +981,7 @@ func TestDevInboundHearsWhomGroupMembersAdmits(t *testing.T) {
 }
 
 func TestAddBrainAllowChatAndRoute(t *testing.T) {
+	t.Parallel()
 	const club = "120363000000000001@g.us"
 	h := newHarness(t, "")
 	dir := filepath.Join(h.Home(), "family")
@@ -1048,6 +1070,7 @@ func TestAddBrainAllowChatAndRoute(t *testing.T) {
 }
 
 func TestApproveDrift(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	m := manifest.Manifest{ID: "notes", Name: "Notes"}
 	dir := h.AddBrain(m)
@@ -1096,6 +1119,7 @@ func TestApproveDrift(t *testing.T) {
 // that was told it is queued. With nothing running, Stop stops nothing. A
 // third message, sent once the run has ended, shows that nothing else came.
 func TestStopRunFromTheDashboard(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name   string
 		clear  bool
@@ -1108,8 +1132,8 @@ func TestStopRunFromTheDashboard(t *testing.T) {
 			h := newHarness(t, "")
 			h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 			pids := filepath.Join(t.TempDir(), "pids")
-			t.Setenv("FRIDOLIN_FAKE_PID_LOG", pids)
-			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "30000")
+			setenv(t, "FRIDOLIN_FAKE_PID_LOG", pids)
+			setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "30000")
 			h.Inject(inbound{JID: harnessDM, Text: "first"})
 			// The CLI writes its PID once it runs, with the sleep in its
 			// environment; the runs after it answer at once.
@@ -1117,7 +1141,7 @@ func TestStopRunFromTheDashboard(t *testing.T) {
 				data, _ := os.ReadFile(pids)
 				return len(data) > 0
 			})
-			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "0")
+			setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "0")
 			h.Inject(inbound{JID: harnessDM, Text: "second"})
 			h.WaitSent(harnessDM, "Queued")
 
@@ -1161,6 +1185,7 @@ func TestStopRunFromTheDashboard(t *testing.T) {
 // another brain is refused and leaves config.json and every brain.json as
 // they were.
 func TestUpdateBrain(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	dirB := h.AddBrain(manifest.Manifest{ID: "b", Name: "B"})
@@ -1237,6 +1262,7 @@ func manifestFiles(t *testing.T, dirs ...string) []string {
 // shows drift. A brain that is not there is refused before any brain.json
 // is written.
 func TestAssignGroup(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, to string
 		want     map[string][]string // brain → its groups after the request
@@ -1289,6 +1315,7 @@ func TestAssignGroup(t *testing.T) {
 }
 
 func TestAllowListEntries(t *testing.T) {
+	t.Parallel()
 	numbers := []struct {
 		in, want string // want "" = refused
 	}{
@@ -1351,6 +1378,7 @@ func TestAllowListEntries(t *testing.T) {
 }
 
 func TestAllowAndRevokeChats(t *testing.T) {
+	t.Parallel()
 	const group = "120363000000000001@g.us"
 	cases := []struct {
 		name    string
@@ -1435,6 +1463,7 @@ func TestAllowAndRevokeChats(t *testing.T) {
 // Revoking a group drops its group_members entry with it, which the
 // config would otherwise refuse, and leaves the other groups' alone.
 func TestRevokedGroupTakesItsMembers(t *testing.T) {
+	t.Parallel()
 	const other = "120363000000000001@g.us"
 	tb := newTestBridge(t, `, "allowed_groups": ["120363000000000000@g.us", "`+other+`"],
 		"group_members": {"120363000000000000@g.us": ["15559876543"], "`+other+`": ["*"]}`)
@@ -1455,6 +1484,7 @@ func TestRevokedGroupTakesItsMembers(t *testing.T) {
 // null takes the entry away. What the config would refuse is refused,
 // with config.json left as it was, and the other groups' entries stay.
 func TestGroupMembersEditedOnTheChatsPage(t *testing.T) {
+	t.Parallel()
 	const other, unknown = "120363000000000001@g.us", "120363000000000009@g.us"
 	start := map[string][]string{other: {AnyMember}}
 	cases := []struct {
@@ -1512,6 +1542,7 @@ func TestGroupMembersEditedOnTheChatsPage(t *testing.T) {
 }
 
 func TestRevokedGroupKeepsItsBrain(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "family", Name: "Family", Routing: manifest.Routing{Groups: []string{harnessGroup}}})
 	if w := h.Do("POST", "/api/chats/revoke", map[string]string{"kind": "group", "jid": harnessGroup}); w.Code != 200 {
@@ -1529,6 +1560,7 @@ func TestRevokedGroupKeepsItsBrain(t *testing.T) {
 }
 
 func TestAllowingATypedChatClearsItsWaitingChat(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		wrote inbound // what the chat sent while it was not allowed
@@ -1576,6 +1608,8 @@ func (l *lockedBuffer) String() string {
 }
 
 func TestBridgeStartupWarnsWhenAnyoneCanDM(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	var logs lockedBuffer
 	defer log.SetOutput(log.Writer())
 	log.SetOutput(&logs)
@@ -1586,6 +1620,8 @@ func TestBridgeStartupWarnsWhenAnyoneCanDM(t *testing.T) {
 }
 
 func TestEmptyingTheAllowlistWarnsOnlyWithAllowAnyDM(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	tests := []struct {
 		name   string
 		config string
@@ -1622,6 +1658,8 @@ func TestEmptyingTheAllowlistWarnsOnlyWithAllowAnyDM(t *testing.T) {
 }
 
 func TestAPINeverReturnsSecrets(t *testing.T) {
+	// Serial: the secret must be in the process's environment, wherever the
+	// bridge would read it from.
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-"+"ant-oat01-very-secret-value")
 	h := newHarness(t, "")
 	for _, p := range []string{"/api/status", "/api/config", "/api/brains", "/api/logs", "/api/backup/status"} {
@@ -1633,6 +1671,7 @@ func TestAPINeverReturnsSecrets(t *testing.T) {
 }
 
 func TestGetConfigLocksNoSettings(t *testing.T) {
+	// Serial: what the config must ignore is in the process's environment.
 	// Environment variables used to override config.json, and the response
 	// named the settings they locked, so the dashboard could disable them.
 	// Now the file is all there is: what it says is what runs.
@@ -1656,6 +1695,7 @@ func TestGetConfigLocksNoSettings(t *testing.T) {
 }
 
 func TestPutConfigKeepsBrainsAndReportsRestart(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	h.AddBrain(manifest.Manifest{ID: "p", Name: "P"})
 	got := h.Config()
@@ -1687,6 +1727,7 @@ func TestPutConfigKeepsBrainsAndReportsRestart(t *testing.T) {
 // every tab. Set back to the value the bridge started with, it is not
 // pending any more.
 func TestStatusReportsSettingsWaitingForRestart(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	status := func(t *testing.T) []string {
 		t.Helper()
@@ -1737,6 +1778,7 @@ func TestStatusReportsSettingsWaitingForRestart(t *testing.T) {
 // The settings page sends brain_mode back as it got it, true. A request
 // that turns it off is refused, not saved: the next start would fail on it.
 func TestPutConfigRefusesClassicMode(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	got := h.Config()
 	var configValue map[string]any
@@ -1762,6 +1804,7 @@ func TestPutConfigRefusesClassicMode(t *testing.T) {
 // the upgrade, which sends no version, the save is migrated like a version
 // 1 file and says why; in a version 2 save, brains is an unknown key.
 func TestPutConfigRefusesInlineBrains(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		version any // the save's version, nil for none
@@ -1799,6 +1842,7 @@ func TestPutConfigRefusesInlineBrains(t *testing.T) {
 // Allowing a group for a brain takes it away from the brain that had it,
 // in both brain.json files, and leaves that brain's other groups alone.
 func TestAllowGroupMovesItBetweenBrains(t *testing.T) {
+	t.Parallel()
 	const moved, kept = "120363000000000001@g.us", "120363000000000002@g.us"
 	h := newHarness(t, `{"allowed_groups": ["`+moved+`", "`+kept+`"]}`)
 	fromDir := h.AddBrain(manifest.Manifest{ID: "from", Name: "From", Routing: manifest.Routing{Groups: []string{kept, moved}}})
@@ -1832,6 +1876,7 @@ func (q qrMessenger) State() chat.LinkState { return chat.LinkState{Mode: "pairi
 // The pairing code is served as a PNG, square and big enough to scan once
 // the dashboard scales it, and only while there is a code.
 func TestQRCodeIsServedAsAPNG(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	if w := tb.do("GET", "/api/whatsapp/qr", nil); w.Code != http.StatusNotFound {
 		t.Errorf("without a code: %d, want 404", w.Code)
@@ -1866,6 +1911,7 @@ func TestQRCodeIsServedAsAPNG(t *testing.T) {
 // retired model key shows its value there, and a save from a tab opened
 // before the upgrade, which still sends model, keeps it the same way.
 func TestConfigPageFoldsTheRetiredModel(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"model": "sonnet"}`)
 	got := h.Config()
 	var configValue map[string]any
@@ -1899,6 +1945,7 @@ func TestConfigPageFoldsTheRetiredModel(t *testing.T) {
 }
 
 func TestAddBrainBackupDefaults(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	// No backup settings given: backed up, with the default exclusions.
 	_ = h.Do("POST", "/api/brains", map[string]any{"path": "~/a", "create_dir": true, "manifest": map[string]any{"id": "a", "name": "A"}})
@@ -1925,6 +1972,7 @@ func TestAddBrainBackupDefaults(t *testing.T) {
 }
 
 func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"otp_guard": true, "otp_markers": ["Examplebank 2FA"]}`)
 	dir := h.AddBrain(manifest.Manifest{ID: "p", Name: "P", Routing: manifest.Routing{HandlesDMs: true}})
 	// A local script asks for a code through /send, which names the
@@ -2007,6 +2055,7 @@ func TestOTPGuardHandsCodeToLocalScripts(t *testing.T) {
 // /send names a message that asks for a one-time code, which the guard
 // would catch the answer to, and records the name with its history line.
 func TestSendNamesACodeRequest(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, extra, text string
 		brain             bool // a brain answers the chat

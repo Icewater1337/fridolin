@@ -9,6 +9,7 @@ import (
 // stays the same for the whole boot, unlike the boot time, which moves when
 // the wall clock is stepped.
 func TestBootIDIsTheBootSession(t *testing.T) {
+	t.Parallel()
 	id, err := bootID()
 	if err != nil {
 		t.Fatal(err)
