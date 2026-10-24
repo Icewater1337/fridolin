@@ -948,6 +948,11 @@ for compatibility.
 
 ### Fixed
 
+- A core export carries `core/encryption.json`, the buckets' encryption
+  state (which stores are encrypted twice, which single-layer copies are
+  retired), and the import puts it in place, keeping the target's earlier
+  one as `encryption.json.before-<time>`. The core on another machine
+  thought the single-layer copies still there (#187).
 - A core move carries the secret files of the core's credentials folder
   (`sandbox.credentials_dir` under `~`: the Google OAuth web client,
   `dashboard-users.json`, each brain's calendar client and token) with
