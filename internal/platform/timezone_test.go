@@ -55,7 +55,7 @@ func TestHostZone(t *testing.T) {
 
 // Every IANA name of the Windows table loads.
 func TestWindowsZonesLoad(t *testing.T) {
-	for win, iana := range windowsZones {
+	for win, iana := range windowsZones() {
 		if _, err := time.LoadLocation(iana); err != nil {
 			t.Errorf("%s: %s: %v", win, iana, err)
 		}
