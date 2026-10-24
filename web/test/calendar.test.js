@@ -157,7 +157,7 @@ test('the setup walks through every Google Cloud step and follows the project ty
     'Desktop app', 'http://127.0.0.1:8765/', 'calendar.events.freebusy', 'drive.file', 'Google hasn’t verified this app', 'Advanced', '100 Google accounts']) {
     assert.ok(text.includes(want), `the setup says ${want}`);
   }
-  const hrefs = () => setup.querySelectorAll('a').map((a) => a.getAttribute('href')).filter((x) => x.startsWith('https://console.cloud.google.com'));
+  const hrefs = () => setup.querySelectorAll('a').map((a) => a.getAttribute('href')).filter((x) => x && new URL(x).host === 'console.cloud.google.com');
   assert.ok(hrefs().some((x) => x.includes('/flows/enableapi?apiid=calendar-json.googleapis.com,drive.googleapis.com')), hrefs().join(' '));
   assert.ok(hrefs().some((x) => x.includes('/auth/clients/create')));
   const project = setup.querySelectorAll('input').find((i) => i.getAttribute('placeholder') === 'fridolin-123456');
