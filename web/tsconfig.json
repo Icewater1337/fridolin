@@ -23,16 +23,12 @@
     // (with real types, or a @ts-expect-error that says why), and add each
     // to the options below once it passes:
     //
-    // 1. noImplicitAny: every parameter needs a type (about 340 errors
-    //    today: callbacks and helpers in the pages, and the components
-    //    not yet annotated, such as github-card.js, tabs.js and
-    //    node-folder-picker.js).
-    // 2. strictNullChecks: null and undefined are their own types (about
+    // 1. strictNullChecks: null and undefined are their own types (about
     //    320 errors today, two thirds of them "possibly null", mostly
     //    querySelector() results and data that may not have come yet). It
     //    makes noUncheckedIndexedAccess and strictPropertyInitialization
     //    possible after it.
-    // 3. Then "strict": true in place of the single options, and
+    // 2. Then "strict": true in place of the single options, and
     //    exactOptionalPropertyTypes if it is worth it.
     "strict": false,
     "strictFunctionTypes": true,
@@ -44,7 +40,9 @@
     "noFallthroughCasesInSwitch": true,
     // A caught value is unknown: lib/errors.js and errorStatus() in
     // app/api.js narrow it (its message, its name, an ApiError's status).
-    "useUnknownInCatchVariables": true
+    "useUnknownInCatchVariables": true,
+    // Every parameter and variable has a type, written or inferred.
+    "noImplicitAny": true
   },
   "include": ["assets/**/*.js", "types/**/*.d.ts"]
 }

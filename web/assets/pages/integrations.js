@@ -46,6 +46,7 @@ import { githubCard } from '../components/github-card.js';
 const every = (/** @type {number} */ sec) => (sec % 60 === 0 ? (sec === 60 ? 'minute' : `${sec / 60} minutes`) : `${sec} seconds`);
 
 // What a recording's run is up to, as the status names it.
+/** @type {Record<string, string | undefined>} */
 const runState = { handed: 'with the brain', done: 'answered', stopped: 'stopped', failed: 'its run failed, trying again' };
 
 export default /** @satisfies {PageModule} */ ({
@@ -82,6 +83,7 @@ export default /** @satisfies {PageModule} */ ({
     const settings = liveForm({ build: buildSettings, edits: (d) => d.st });
     ctx.dirty = () => settings.dirty();
 
+    /** @type {(state: string, kind: string) => HTMLElement} */
     const head = (state, kind) => h('div.card-head',
       h('div.card-title', icon('inbox'), h('h2', 'Plaud recorder')),
       pill(state, kind));
@@ -228,6 +230,7 @@ export default /** @satisfies {PageModule} */ ({
         if (f.chatBrain) facts.push(h('div.muted.small', `What you write back in that chat goes to the ${f.chatBrain} brain, not to ${f.target}.`));
       }
       // "Send again" hands a recording over once more.
+      /** @param {string} id */
       const again = (id) => btn('Send again', {
         small: true, icon: 'refresh',
         onClick: async () => { await post('/api/plaud/resend', { id }); toast('It goes to the brain with the next check', 'ok'); await refresh(); },
@@ -247,8 +250,10 @@ export default /** @satisfies {PageModule} */ ({
 
     /** @param {{saved: boolean}} keys */
     function renderKeys({ saved }) {
+      /** @type {(label: string, help?: string) => HTMLElement} */
       const key = (label, help) => field({ label, help, control: h('input', { type: 'password', id: nextId('pk'), autocomplete: 'off', placeholder: saved ? 'saved — type to replace' : '' }) });
       const fields = [key('Client ID'), key('Client secret'), key('API key', 'App Settings → API Keys: Plaud transcribes with it.')];
+      /** @param {HTMLElement} f */
       const value = (f) => f.querySelector('input').value;
       return [
         h('h3', 'Phone app'),
@@ -300,6 +305,7 @@ export default /** @satisfies {PageModule} */ ({
     /** @param {PlaudPhone[]} devices */
     function renderPhones(devices) {
       if (!devices.length) return h('p.muted', 'No phone is paired yet.');
+      /** @param {string} id */
       const unpair = (id) => btn('Unpair', {
         small: true, kind: 'danger', icon: 'x',
         onClick: async () => {

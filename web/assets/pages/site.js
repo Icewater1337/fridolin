@@ -168,6 +168,7 @@ export default /** @satisfies {PageModule} */ ({
     let laidOut = false;
     function layout() {
       laidOut = true;
+      /** @type {(iconName: string, title: string) => HTMLDivElement} */
       const head = (iconName, title) => h('div.card-head', h('div.card-title', icon(iconName), h('h2', title)));
       mount(stack,
         h('section.card', statusHead, todoBox, factsBox, stoppedBox, statusActions, siteLog),
@@ -688,6 +689,7 @@ export default /** @satisfies {PageModule} */ ({
 
     /** @param {{listen: string, domain: string}} state */
     function renderTunnelGuide({ listen, domain }) {
+      /** @type {(href: string, text: string) => HTMLAnchorElement} */
       const ext = (href, text) => h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text);
       const name = domain || 'example.com';
       return h('ol.small.site-guide',

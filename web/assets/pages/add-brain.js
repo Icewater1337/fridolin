@@ -330,7 +330,8 @@ export default /** @satisfies {PageModule} */ ({
       // brain whatever its brain.json says: it gets the chats no brain
       // claims. Only the bridge knows (/api/brains marks it), and without
       // its answer the page says neither that nor that no chat comes.
-      const brains = await get('/api/brains').catch(() => null);
+      /** @type {Brain[] | null} */
+      const brains = await get('/api/brains').catch(/** @returns {null} */ () => null);
       const fallback = Array.isArray(brains) && brains.some((b) => b.fallback && b.id === res.id);
       const quiet = Array.isArray(brains) && !fallback && m && m.routing && !m.routing.handles_dms && !m.routing.default && !(m.routing.groups || []).length;
       const isDefault = !!(m && m.routing && m.routing.default);

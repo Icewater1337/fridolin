@@ -24,6 +24,7 @@ import { markdownDoc, markdownToc } from '../components/markdown.js';
 
 /** @import { PageModule } from '../app/page.js' */
 /** @import { Child } from '../lib/dom.js' */
+/** @import { MarkdownLinks } from '../components/markdown.js' */
 /** @import { FileRoot, FileRootKind, FileView, SiteSettings } from '../../types/api.js' */
 
 /**
@@ -52,6 +53,7 @@ function crumbs(rootId, label, path) {
  * Where a rendered Markdown file's links go, from root.
  * @param {Root} root
  * @param {string} ticket
+ * @returns {MarkdownLinks}
  */
 function links(root, ticket) {
   return {
@@ -116,7 +118,8 @@ export default /** @satisfies {PageModule} */ ({
     const header = h('div', pageHeader(path.split('/').pop() || 'File'));
     const box = h('div', spinner());
     mount(root, header, box);
-    const quiet = (p) => p.catch(() => null);
+    /** @type {<T>(p: Promise<T>) => Promise<T | null>} */
+    const quiet = (p) => p.catch(/** @returns {null} */ () => null);
     Promise.all([
       get('/api/files/roots', { signal: ctx.signal }),
       get(`/api/files/view${qs({ root: rootId, path, source: '1' })}`, { signal: ctx.signal }),

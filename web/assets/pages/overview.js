@@ -53,7 +53,9 @@ export default /** @satisfies {PageModule} */ ({
         activityBox));
 
     // ── WhatsApp + QR ──
-    const qr = { img: null, url: '', pairing: false };
+    /** @type {{img: HTMLImageElement | null, age: HTMLElement | null, url: string, pairing: boolean}} */
+    const qr = { img: null, age: null, url: '', pairing: false };
+    /** @param {AbortSignal} signal */
     const loadQR = async (signal) => {
       try {
         const r = await get('/api/whatsapp/qr', { signal });
@@ -121,6 +123,7 @@ export default /** @satisfies {PageModule} */ ({
 
     // ── health header ──
     // The uptime in whole minutes, so the header changes once a minute.
+    /** @param {number} sec */
     const uptime = (sec) => (sec < 60 ? '< 1 min' : fmtDuration(Math.floor(sec / 60) * 60));
     /** @param {Status} s */
     const renderHealth = (s) => paint(header, {

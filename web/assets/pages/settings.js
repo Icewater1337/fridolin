@@ -58,6 +58,7 @@ import { liveForm } from '../components/live-form.js';
 /** @typedef {{text: string, match: string}} TriggerRow */
 
 // The bridge refuses a relative sandbox path: as a rule it would match nothing.
+/** @param {string} v */
 const absPath = (v) => (/^(\/|~(\/|$))/.test(v) ? '' : 'Absolute, or starting with ~/');
 
 /** @type {{id: string, title: string, intro: string, fields: SettingField[]}[]} */
@@ -229,6 +230,7 @@ export default /** @satisfies {PageModule} */ ({
       const nav = h('nav.section-nav', { 'aria-label': 'Settings sections' });
       // A chip scrolls to its section and names it in the address, so
       // #/settings/<section> links (the overview has some) land there too.
+      /** @type {(title: string, sectionId: string, el: HTMLElement) => void} */
       const chip = (title, sectionId, el) => {
         const b = h('button.chip', { type: 'button' }, title);
         b.addEventListener('click', () => {
@@ -311,9 +313,15 @@ function makeControl(f, cfg, eff, onChange) {
   const fileVal = getPath(cfg, f.key);
   const effVal = getPath(eff, f.key);
   const tag = f.restart ? 'restart' : null;
+  // What the case below builds: the control, what it holds now and held
+  // at first, and what is saved of it.
+  /** @type {HTMLElement} */
   let input;
+  /** @type {() => unknown} */
   let read;
+  /** @type {unknown} */
   let initial;
+  /** @type {() => unknown} */
   let serialize;
   let isValid = () => true;
   let extra = null;
@@ -348,26 +356,30 @@ function makeControl(f, cfg, eff, onChange) {
       return finish(el);
     }
     case 'text': {
-      initial = typeof fileVal === 'string' ? fileVal : '';
-      const ph = typeof effVal === 'string' && effVal && effVal !== initial ? effVal : (f.placeholder || '');
-      input = textInput({ value: initial, placeholder: ph, class: f.mono ? 'mono' : '', spellcheck: f.mono ? 'false' : 'true' });
-      input.addEventListener('input', onChange);
-      read = () => input.value.trim();
+      const first = typeof fileVal === 'string' ? fileVal : '';
+      initial = first;
+      const ph = typeof effVal === 'string' && effVal && effVal !== first ? effVal : (f.placeholder || '');
+      const text = textInput({ value: first, placeholder: ph, class: f.mono ? 'mono' : '', spellcheck: f.mono ? 'false' : 'true' });
+      input = text;
+      text.addEventListener('input', onChange);
+      read = () => text.value.trim();
       serialize = read;
       break;
     }
     case 'int': {
-      initial = (fileVal === undefined || fileVal === null || (!f.nullable && fileVal === 0)) ? '' : String(fileVal);
+      const first = (fileVal === undefined || fileVal === null || (!f.nullable && fileVal === 0)) ? '' : String(fileVal);
+      initial = first;
       const ph = effVal !== undefined && effVal !== null && effVal !== 0 ? String(effVal) : String(f.def ?? '');
-      input = textInput({ value: initial, inputmode: 'numeric', placeholder: `${ph} (default)`, class: 'num' });
-      input.addEventListener('input', () => { check(); onChange(); });
+      const num = textInput({ value: first, inputmode: 'numeric', placeholder: `${ph} (default)`, class: 'num' });
+      input = num;
+      num.addEventListener('input', () => { check(); onChange(); });
       const check = () => {
-        const ok = input.value.trim() === '' || (/^\d+$/.test(input.value.trim()) && Number(input.value) >= (f.min ?? 0) && Number(input.value) <= (f.max ?? Infinity));
-        input.classList.toggle('invalid', !ok);
+        const ok = num.value.trim() === '' || (/^\d+$/.test(num.value.trim()) && Number(num.value) >= (f.min ?? 0) && Number(num.value) <= (f.max ?? Infinity));
+        num.classList.toggle('invalid', !ok);
         return ok;
       };
       isValid = check;
-      read = () => input.value.trim();
+      read = () => num.value.trim();
       serialize = () => (read() === '' ? undefined : Number(read()));
       break;
     }
@@ -381,28 +393,32 @@ function makeControl(f, cfg, eff, onChange) {
       let v = typeof fileVal === 'string' ? fileVal : '';
       if (!has(v)) v = has(effVal) ? effVal : /** @type {string} */ (f.def ?? '');
       initial = v;
-      input = select(opts, v);
-      input.addEventListener('change', onChange);
-      read = () => input.value;
+      const sel = select(opts, v);
+      input = sel;
+      sel.addEventListener('change', onChange);
+      read = () => sel.value;
       serialize = read;
       break;
     }
     case 'list': {
       const arr = Array.isArray(fileVal) ? fileVal : [];
       initial = JSON.stringify(arr);
-      input = listEditor({ values: arr, placeholder: f.placeholder, mono: f.mono !== false, addLabel: f.addLabel || 'Add', onChange, validate: f.validate, empty: emptyListText(f, effVal) });
-      read = () => JSON.stringify(input.getValues());
-      serialize = () => input.getValues();
-      isValid = () => input.isValid();
+      const list = listEditor({ values: arr, placeholder: f.placeholder, mono: f.mono !== false, addLabel: f.addLabel || 'Add', onChange, validate: f.validate, empty: emptyListText(f, effVal) });
+      input = list;
+      read = () => JSON.stringify(list.getValues());
+      serialize = () => list.getValues();
+      isValid = () => list.isValid();
       break;
     }
     case 'triggers': {
+      /** @type {Trigger[]} */
       const raw = Array.isArray(fileVal) ? fileVal : [];
       const list = raw.map((t) => (typeof t === 'string' ? { text: t, match: 'anywhere' } : { text: t.text || '', match: t.match || 'anywhere' }));
       initial = JSON.stringify(list);
-      input = triggersEditor(list, { onChange, defaults: Array.isArray(effVal) ? effVal : [] });
-      read = () => JSON.stringify(input.getValues());
-      serialize = () => input.getValues().map((t) => (t.match === 'anywhere' ? t.text : { text: t.text, match: t.match }));
+      const triggers = triggersEditor(list, { onChange, defaults: Array.isArray(effVal) ? effVal : [] });
+      input = triggers;
+      read = () => JSON.stringify(triggers.getValues());
+      serialize = () => triggers.getValues().map((t) => (t.match === 'anywhere' ? t.text : { text: t.text, match: t.match }));
       break;
     }
     default:
