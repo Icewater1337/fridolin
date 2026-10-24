@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,18 +17,17 @@ import (
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/secretxfer"
-	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // coreHostAgent is an agent with core-host on and its host secrets in a
 // folder of files.
-func coreHostAgent(t *testing.T, name string) (*Agent, *testutil.Secrets) {
+func coreHostAgent(t *testing.T, name string) (*Agent, *memSecrets) {
 	t.Helper()
 	_, key, err := ed25519.GenerateKey(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := testutil.NewSecrets()
+	st := newMemSecrets()
 	a := &Agent{Dir: t.TempDir(), Key: key, Config: Config{Core: "x", Name: name}, CoreSecrets: st, Logf: t.Logf,
 		CoreSetup: func(context.Context) ([]nodeproto.CoreCheckItem, bool, string) { return nil, true, "" }}
 	if err := SaveCoreHost(a.Dir, CoreHostConfig{Enabled: true}); err != nil {
@@ -270,4 +270,44 @@ func TestCoreSecretsReceiveRefusesUnknownNames(t *testing.T) {
 	if v, _ := dstStore.Get(hostsecrets.ClaudeOAuthToken); v != "test-oauth-old" {
 		t.Fatal("the stored value changed")
 	}
+}
+
+// memSecrets is a host secret store in memory: the file store refuses
+// Windows' file modes.
+type memSecrets struct {
+	mu sync.Mutex
+	m  map[string]string
+}
+
+func newMemSecrets() *memSecrets { return &memSecrets{m: map[string]string{}} }
+
+func (s *memSecrets) Get(name string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := s.m[name]
+	if !ok {
+		return "", hostsecrets.ErrNotFound
+	}
+	return v, nil
+}
+
+func (s *memSecrets) Set(name, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.m[name] = value
+	return nil
+}
+
+func (s *memSecrets) Has(name string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.m[name]
+	return ok, nil
+}
+
+func (s *memSecrets) Delete(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.m, name)
+	return nil
 }

@@ -13,13 +13,12 @@ import (
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/nodeagent"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
-	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // coreHostNode joins a node named name with core-host on in its
 // core-host.json (pins: the targets it trusts), keeping its host secrets
 // in a folder of files, and runs its agent in this process.
-func (h *harness) coreHostNode(addr, name string, pins ...nodeagent.CoreHostPin) (string, string, *testutil.Secrets, *nodeagent.Agent) {
+func (h *harness) coreHostNode(addr, name string, pins ...nodeagent.CoreHostPin) (string, string, *memSecrets, *nodeagent.Agent) {
 	h.t.Helper()
 	t := h.t
 	w := h.Do("POST", "/api/nodes/join-code", map[string]any{})
@@ -39,7 +38,7 @@ func (h *harness) coreHostNode(addr, name string, pins ...nodeagent.CoreHostPin)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st := testutil.NewSecrets()
+	st := newMemSecrets()
 	agent.Logf, agent.HeartbeatEvery, agent.FrideCheckEvery = t.Logf, 100*time.Millisecond, 100*time.Millisecond
 	agent.CoreSecrets, agent.CoreSecretsPlace = st, "test files"
 	agent.CoreSetup = func(context.Context) ([]nodeproto.CoreCheckItem, bool, string) { return nil, true, "" }
@@ -206,3 +205,7 @@ func (h *harness) coreHostApproved(id string) bool {
 	n, err := h.b.nodes.Registry().Get(id)
 	return err == nil && n.Effective().CoreHost != nil
 }
+
+// newMemSecrets is an empty memSecrets (github_test.go): the file store
+// refuses Windows' file modes.
+func newMemSecrets() *memSecrets { return &memSecrets{m: map[string]string{}} }
