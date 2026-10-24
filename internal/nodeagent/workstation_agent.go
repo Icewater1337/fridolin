@@ -46,6 +46,7 @@ type agentSession struct {
 	nextSeq      int
 	turns        int
 	ended        time.Time
+	stopping     bool     // stop is killing the turn to end the session
 	resume       string   // the provider's own session or thread
 	allowed      []string // tools the owner allowed (no sandbox)
 	pendingAllow []string // tools the last turn was refused
@@ -223,7 +224,7 @@ func (a *Agent) agentReply(p nodeproto.AgentReplyParams) (any, *nodeproto.Error)
 		return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "at most %d bytes", nodeproto.MaxAgentPrompt)
 	}
 	s.mu.Lock()
-	if s.state != nodeproto.AgentWaiting {
+	if s.state != nodeproto.AgentWaiting || s.stopping {
 		state := s.state
 		s.mu.Unlock()
 		return nil, nodeproto.Errorf(nodeproto.CodeDenied, "agent session %s is %s, not waiting for an answer", p.ID, state)
@@ -262,18 +263,16 @@ func (a *Agent) agentStop(id string) (any, *nodeproto.Error) {
 	return s.snapshot(0), nil
 }
 
-// stop ends the session: its turn is killed, what changed is listed.
+// stop ends the session: its turn is killed, what changed is listed,
+// and only then does it say it stopped.
 func (s *agentSession) stop(why string) {
 	s.mu.Lock()
-	if !s.ended.IsZero() {
+	if !s.ended.IsZero() || s.stopping {
 		s.mu.Unlock()
 		return
 	}
+	s.stopping = true
 	cancel, done := s.cancelTurn, s.turnDone
-	s.state = nodeproto.AgentStopped
-	s.ask, s.question = "", ""
-	s.ended = time.Now()
-	s.addEventLocked("stopped", why)
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
@@ -282,17 +281,23 @@ func (s *agentSession) stop(why string) {
 		case <-time.After(10 * time.Second):
 		}
 	}
+	changed, stat := s.changes()
+	s.mu.Lock()
+	s.state = nodeproto.AgentStopped
+	s.ask, s.question = "", ""
+	s.ended = time.Now()
+	s.changed, s.diffStat = changed, stat
+	s.addEventLocked("stopped", why)
+	s.mu.Unlock()
 	s.finish()
 	s.a.logf("node: agent session %s stopped: %s", s.id, why)
 	s.a.pushNews(s.snapshot(0))
 }
 
-// finish lists what changed, forgets the core's token and removes the
-// session's temp folder.
+// finish forgets the core's token and removes the session's temp folder
+// once the session ended.
 func (s *agentSession) finish() {
-	changed, stat := s.changes()
 	s.mu.Lock()
-	s.changed, s.diffStat = changed, stat
 	s.coreToken = ""
 	s.mu.Unlock()
 	s.cancelAll()
