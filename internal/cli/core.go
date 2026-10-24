@@ -828,7 +828,7 @@ func defaultHostDeps(env coreEnv) hostDeps {
 		gh = lookPathIn("gh", envValue(env.environ, "PATH"))
 	}
 	if gh == "" {
-		d.noVerify = "GitHub's CLI (gh) is not installed, which checks the image's provenance before it is pulled (no login needed): install it (brew install gh, apt-get install gh, winget install GitHub.cli)"
+		d.noVerify = "GitHub's CLI (gh) is not installed, which checks the image's provenance before it is pulled (no login needed): install a current one (brew install gh, winget install GitHub.cli, on Linux from GitHub's apt repository: https://cli.github.com)"
 	}
 	d.verify = provenance.Verifier{Gh: gh, Environ: env.environ}.Verify
 	d.secrets = hostsecrets.ForHost(d.goos, env.getenv, d.home)
