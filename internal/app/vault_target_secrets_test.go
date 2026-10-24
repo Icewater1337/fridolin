@@ -16,6 +16,7 @@ import (
 // host's store, or, in the container, an age file in secrets/; it is made
 // only while the repository does not exist.
 func TestTargetSecrets(t *testing.T) {
+	t.Parallel()
 	id, err := age.GenerateHybridIdentity()
 	if err != nil {
 		t.Fatal(err)

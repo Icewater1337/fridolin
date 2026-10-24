@@ -16,6 +16,7 @@ import (
 )
 
 func TestApplicationRestartStopsAndReleasesInstanceLock(t *testing.T) {
+	t.Parallel()
 	h := apptest.New(t)
 	if status, body := h.Do(http.MethodPost, "/api/restart", nil); status != http.StatusAccepted {
 		t.Fatalf("restart: %d %s", status, body)
@@ -36,6 +37,7 @@ func TestApplicationRestartStopsAndReleasesInstanceLock(t *testing.T) {
 }
 
 func TestApplicationCancellationStopsNormally(t *testing.T) {
+	t.Parallel()
 	h := apptest.New(t)
 	if status, body := h.Do(http.MethodGet, "/api/status", nil); status != http.StatusOK {
 		t.Fatalf("status: %d %s", status, body)
@@ -47,6 +49,7 @@ func TestApplicationCancellationStopsNormally(t *testing.T) {
 }
 
 func TestApplicationStopOwnsRunShutdown(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	cfg, err := config.Open(filepath.Join(home, "config.json"), config.Options{GOOS: runtime.GOOS, Paths: config.Paths{Home: home, DefaultDataDir: filepath.Join(home, "data")}, Getenv: func(string) string { return "" }})
 	if err != nil {
@@ -86,6 +89,7 @@ func TestApplicationStopOwnsRunShutdown(t *testing.T) {
 }
 
 func TestApplicationStopBeforeRunReleasesConstruction(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	cfg, err := config.Open(filepath.Join(home, "config.json"), config.Options{GOOS: runtime.GOOS, Paths: config.Paths{Home: home, DefaultDataDir: filepath.Join(home, "data")}, Getenv: func(string) string { return "" }})
 	if err != nil {

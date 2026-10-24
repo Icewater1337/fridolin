@@ -22,6 +22,7 @@ import (
 // config.json then could not be written, so the brain showed as changed
 // on disk. Now the failed save puts brain.json back as it was.
 func TestAFailedConfigWriteLeavesBrainJSONAsItWas(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root can write into a read-only folder")
 	}

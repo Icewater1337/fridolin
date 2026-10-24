@@ -19,10 +19,11 @@ import (
 )
 
 func TestConfigStoreUpdateWritesAtomicallyAndKeepsTilde(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	path := writeConfig(t, `{"data_dir":"~/data","allowed_numbers":["15551234567"]}`)
-	cs, err := OpenConfigStore(path)
+	cs, err := openConfigStore(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,6 +75,7 @@ func TestConfigStoreUpdateWritesAtomicallyAndKeepsTilde(t *testing.T) {
 // DATA_DIR meant for something else moved the bridge's data, and every one
 // of them locked its setting in the dashboard.
 func TestEnvironmentDoesNotOverrideTheConfig(t *testing.T) {
+	// Serial: what the config must ignore is in the process's environment.
 	// $ELSEWHERE is a dir of the subtest's own, so a regression that
 	// creates it is blamed on the one variable that did.
 	vars := []struct{ name, value string }{
@@ -97,7 +99,7 @@ func TestEnvironmentDoesNotOverrideTheConfig(t *testing.T) {
 		{"VIEWER", "true"},
 	}
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	path := writeConfig(t, `{
 		"allowed_numbers": ["15551234567"],
 		"allowed_groups": ["120363000000000000@g.us"],
@@ -137,7 +139,7 @@ func TestEnvironmentDoesNotOverrideTheConfig(t *testing.T) {
 // configuration as JSON.
 func effectiveJSON(t *testing.T, path string) string {
 	t.Helper()
-	cfg, err := LoadConfig(path)
+	cfg, err := loadConfig(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,8 +151,9 @@ func effectiveJSON(t *testing.T, path string) string {
 }
 
 func TestConfigDefaultsAndLoopbackOnly(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	cfg, err := LoadConfig(writeConfig(t, `{}`))
+	t.Parallel()
+	setenv(t, "HOME", t.TempDir())
+	cfg, err := loadConfig(t, writeConfig(t, `{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,22 +169,23 @@ func TestConfigDefaultsAndLoopbackOnly(t *testing.T) {
 	if resolvedSettings(t, &config.File{}).AllowAnyDM {
 		t.Error("an empty file must resolve to closed DM access")
 	}
-	cfg, err = LoadConfig(writeConfig(t, `{"http_listen":"off"}`))
+	cfg, err = loadConfig(t, writeConfig(t, `{"http_listen":"off"}`))
 	if err != nil || cfg.HTTPEnabled {
 		t.Error(`"off" must disable the HTTP server`)
 	}
-	if _, err := LoadConfig(writeConfig(t, `{"http_listen":"0.0.0.0:8765"}`)); err == nil {
+	if _, err := loadConfig(t, writeConfig(t, `{"http_listen":"0.0.0.0:8765"}`)); err == nil {
 		t.Error("a non-loopback http_listen must be rejected")
 	}
 }
 
 func TestStarterConfigLoads(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Parallel()
+	setenv(t, "HOME", t.TempDir())
 	path := filepath.Join(t.TempDir(), "config.json")
 	if err := EnsureConfigFile(path); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(path)
+	cfg, err := loadConfig(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,6 +217,8 @@ func readRawConfig(t *testing.T, path string) map[string]json.RawMessage {
 // refused, with what to do instead; quietly running brains would leave the
 // chats with no brain set up. Without the switch, or with it on, it loads.
 func TestConfigRefusesClassicMode(t *testing.T) {
+	// Serial: BRAIN_MODE, which the config refuses, is in the process's
+	// environment.
 	cases := []struct {
 		name, config string
 		env          string // BRAIN_MODE in the environment, "" for unset
@@ -230,12 +236,12 @@ func TestConfigRefusesClassicMode(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
+			setenv(t, "HOME", t.TempDir())
 			testutil.ClearEnv(t, "BRAIN_MODE")
 			if c.env != "" {
 				t.Setenv("BRAIN_MODE", c.env)
 			}
-			_, err := LoadConfig(writeConfig(t, c.config))
+			_, err := loadConfig(t, writeConfig(t, c.config))
 			switch {
 			case c.want == "" && err != nil:
 				t.Fatalf("load: %v, want it to load", err)
@@ -258,9 +264,10 @@ func TestConfigRefusesClassicMode(t *testing.T) {
 // cannot set it to false; a dashboard save that tries is refused, see
 // TestPutConfigRefusesClassicMode.)
 func TestConfigSavesKeepBrainModeOn(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Parallel()
+	setenv(t, "HOME", t.TempDir())
 	path := writeConfig(t, `{"log_level": "info"}`)
-	cs, err := OpenConfigStore(path)
+	cs, err := openConfigStore(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +277,7 @@ func TestConfigSavesKeepBrainModeOn(t *testing.T) {
 	if raw := readRawConfig(t, path); string(raw["brain_mode"]) != "true" {
 		t.Errorf(`saved "brain_mode": %s, want true`, raw["brain_mode"])
 	}
-	if _, err := LoadConfig(path); err != nil {
+	if _, err := loadConfig(t, path); err != nil {
 		t.Errorf("the saved config does not load: %v", err)
 	}
 }
@@ -281,6 +288,7 @@ func TestConfigSavesKeepBrainModeOn(t *testing.T) {
 // to the default brain. An empty or null list loads, see
 // TestRetiredConfigKeys.
 func TestConfigRefusesInlineBrains(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, config string
 		want         string // part of the error
@@ -290,8 +298,8 @@ func TestConfigRefusesInlineBrains(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
-			_, err := OpenConfigStore(writeConfig(t, c.config))
+			setenv(t, "HOME", t.TempDir())
+			_, err := openConfigStore(t, writeConfig(t, c.config))
 			switch {
 			case err == nil:
 				t.Fatalf("loaded, want an error containing %q", c.want)
@@ -318,6 +326,8 @@ func TestConfigRefusesInlineBrains(t *testing.T) {
 // to it while brain_model was empty, so it becomes brain_model then, and
 // they run with the same model as before.
 func TestRetiredConfigKeys(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	cases := []struct {
 		name, config string
 		brainModel   string   // the effective brain_model
@@ -336,10 +346,10 @@ func TestRetiredConfigKeys(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
+			setenv(t, "HOME", t.TempDir())
 			path := writeConfig(t, c.config)
 			logs := captureLog(t)
-			cs, err := OpenConfigStore(path)
+			cs, err := openConfigStore(t, path)
 			if err != nil {
 				t.Fatalf("load: %v, want it to load", err)
 			}
@@ -390,8 +400,9 @@ func TestRetiredConfigKeys(t *testing.T) {
 // The live config has model and no brain_model, and its brains name no
 // model of their own: they must keep running with that model.
 func TestBrainsKeepTheRetiredModel(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	cfg, err := LoadConfig(writeConfig(t, `{"model": "sonnet"}`))
+	t.Parallel()
+	setenv(t, "HOME", t.TempDir())
+	cfg, err := loadConfig(t, writeConfig(t, `{"model": "sonnet"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,6 +417,8 @@ func TestBrainsKeepTheRetiredModel(t *testing.T) {
 // The data dir from before the rename is still found when ~/.fridolin
 // does not exist, and the log says so, until data_dir names it.
 func TestLegacyDataDir(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	cases := []struct {
 		name        string
 		dirs        []string // made in the home folder
@@ -421,14 +434,14 @@ func TestLegacyDataDir(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			home := t.TempDir()
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			for _, d := range c.dirs {
 				if err := os.Mkdir(filepath.Join(home, d), 0o700); err != nil {
 					t.Fatal(err)
 				}
 			}
 			logs := captureLog(t)
-			cs, err := OpenConfigStore(writeConfig(t, c.config))
+			cs, err := openConfigStore(t, writeConfig(t, c.config))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -443,10 +456,11 @@ func TestLegacyDataDir(t *testing.T) {
 }
 
 func TestConfigStoreRejectsTooSmallChunkSize(t *testing.T) {
+	t.Parallel()
 	// The dashboard asks for at least 100 too, but the server must not rely
 	// on it: a smaller limit would leave no room for the numbering.
-	t.Setenv("HOME", t.TempDir())
-	cs, err := OpenConfigStore(writeConfig(t, `{}`))
+	setenv(t, "HOME", t.TempDir())
+	cs, err := openConfigStore(t, writeConfig(t, `{}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,6 +473,7 @@ func TestConfigStoreRejectsTooSmallChunkSize(t *testing.T) {
 }
 
 func TestDMAccessFollowsAllowAnyDM(t *testing.T) {
+	t.Parallel()
 	// Allowed senders run Claude with all its permissions, so only an
 	// explicit allow_any_dm: true may open an empty allowlist to everyone.
 	const stranger = "15559876543"
@@ -478,8 +493,8 @@ func TestDMAccessFollowsAllowAnyDM(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
-			cfg, err := LoadConfig(writeConfig(t, tc.config))
+			setenv(t, "HOME", t.TempDir())
+			cfg, err := loadConfig(t, writeConfig(t, tc.config))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -491,10 +506,11 @@ func TestDMAccessFollowsAllowAnyDM(t *testing.T) {
 }
 
 func TestRemovingTheLastNumberDoesNotOpenDMs(t *testing.T) {
+	t.Parallel()
 	// A config from before allow_any_dm existed: once the dashboard removes
 	// its last number, the list is empty and the flag is still unset.
-	t.Setenv("HOME", t.TempDir())
-	cs, err := OpenConfigStore(writeConfig(t, `{"allowed_numbers":["15551234567"]}`))
+	setenv(t, "HOME", t.TempDir())
+	cs, err := openConfigStore(t, writeConfig(t, `{"allowed_numbers":["15551234567"]}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -507,6 +523,8 @@ func TestRemovingTheLastNumberDoesNotOpenDMs(t *testing.T) {
 }
 
 func TestDotEnvIsNotRead(t *testing.T) {
+	// Serial: changes the process's working directory and environment, and
+	// captures its standard logger.
 	// A .env sets nothing, next to config.json, where older versions read
 	// settings from, or in the working directory. One next to the config is
 	// named in the log, so settings that stopped applying do not go
@@ -529,7 +547,7 @@ func TestDotEnvIsNotRead(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
+			setenv(t, "HOME", t.TempDir())
 			testutil.ClearEnv(t, "MODEL", "FRIDOLIN_TEST_DOTENV_ONLY")
 			path := writeConfig(t, `{"brain_model":"from-file"}`)
 			dotenv := filepath.Join(filepath.Dir(path), ".env")
@@ -555,7 +573,7 @@ func TestDotEnvIsNotRead(t *testing.T) {
 				path = "config.json"
 			}
 			logs := captureLog(t)
-			cs, err := OpenConfigStore(path)
+			cs, err := openConfigStore(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -599,11 +617,13 @@ func TestDotEnvIsNotRead(t *testing.T) {
 // bridge before it can save it without the settings it does not know, and
 // a dashboard save of one is refused.
 func TestConfigVersionOnDisk(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	t.Run("a version 1 file", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setenv(t, "HOME", t.TempDir())
 		const body = `{"model": "sonnet", "log_level": "info"}`
 		path := writeConfig(t, body)
-		cs, err := OpenConfigStore(path)
+		cs, err := openConfigStore(t, path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -620,15 +640,15 @@ func TestConfigVersionOnDisk(t *testing.T) {
 		if string(raw["version"]) != "2" || string(raw["brain_model"]) != `"sonnet"` || raw["model"] != nil {
 			t.Errorf("saved version %s, brain_model %s, model %s; want 2, \"sonnet\" and no model", raw["version"], raw["brain_model"], raw["model"])
 		}
-		if _, err := OpenConfigStore(path); err != nil {
+		if _, err := openConfigStore(t, path); err != nil {
 			t.Errorf("the saved file does not load: %v", err)
 		}
 	})
 
 	t.Run("no file", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setenv(t, "HOME", t.TempDir())
 		path := filepath.Join(t.TempDir(), "config.json")
-		cs, err := OpenConfigStore(path)
+		cs, err := openConfigStore(t, path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -641,10 +661,10 @@ func TestConfigVersionOnDisk(t *testing.T) {
 	})
 
 	t.Run("a version 2 file with a retired key", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setenv(t, "HOME", t.TempDir())
 		path := writeConfig(t, `{"version": 2, "model": "sonnet"}`)
 		logs := captureLog(t)
-		cs, err := OpenConfigStore(path)
+		cs, err := openConfigStore(t, path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -657,10 +677,10 @@ func TestConfigVersionOnDisk(t *testing.T) {
 	})
 
 	t.Run("a newer file", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setenv(t, "HOME", t.TempDir())
 		const body = `{"version": 3, "allowed_numbers": ["15551234567"], "a_newer_setting": true}`
 		path := writeConfig(t, body)
-		_, err := OpenConfigStore(path)
+		_, err := openConfigStore(t, path)
 		if err == nil || !errors.Is(err, config.ErrTooNew) {
 			t.Fatalf("err = %v, want errConfigTooNew", err)
 		}
@@ -675,8 +695,8 @@ func TestConfigVersionOnDisk(t *testing.T) {
 	})
 
 	t.Run("a newer dashboard save", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
-		cs, err := OpenConfigStore(writeConfig(t, `{}`))
+		setenv(t, "HOME", t.TempDir())
+		cs, err := openConfigStore(t, writeConfig(t, `{}`))
 		if err != nil {
 			t.Fatal(err)
 		}

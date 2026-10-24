@@ -133,6 +133,7 @@ func (f *flakyMessenger) sent(jid string) []string {
 // once WhatsApp connects, from the message that failed, so no part reaches
 // the chat twice. The brain's history records it only then.
 func TestReplyIsRecordedOnceDelivered(t *testing.T) {
+	t.Parallel()
 	tb, br := newMainBridge(t, `, "max_chunk_size": 100`)
 	wa := newFlakyMessenger(func() int { return tb.cfgs.Get().MaxChunkSize }, true)
 	wa.dropAfter = 1 // the first chunk goes out, then the connection drops
@@ -173,6 +174,7 @@ func TestReplyIsRecordedOnceDelivered(t *testing.T) {
 // at all yet while WhatsApp is down. The chat gets the answer before
 // anything the second run says, so that run must read it as said.
 func TestQueuedRunReadsTheAnswerBeforeIt(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		delay  time.Duration
@@ -186,8 +188,8 @@ func TestQueuedRunReadsTheAnswerBeforeIt(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			tb, br := newMainBridge(t, "")
 			prompts := filepath.Join(t.TempDir(), "prompts")
-			t.Setenv("FRIDOLIN_FAKE_PROMPT_LOG", prompts)
-			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "800")
+			setenv(t, "FRIDOLIN_FAKE_PROMPT_LOG", prompts)
+			setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "800")
 			wa := newFlakyMessenger(func() int { return tb.cfgs.Get().MaxChunkSize }, c.online)
 			wa.delay = c.delay
 			tb.wa = wa
@@ -216,6 +218,7 @@ func TestQueuedRunReadsTheAnswerBeforeIt(t *testing.T) {
 // recorded once, when the removal works: the history must not hold a
 // line that the retry writes again, nor the chat get the reply twice.
 func TestReplyIsRecordedOnceWhenItsRowStays(t *testing.T) {
+	t.Parallel()
 	tb, br := newMainBridge(t, "")
 	db := testStoreSQL(t, tb.cfgs.Startup().DBPath)
 	// bridge.db refuses to delete from the outbox until the trigger goes.
@@ -250,6 +253,7 @@ func TestReplyIsRecordedOnceWhenItsRowStays(t *testing.T) {
 // Asking for the summary, which the dashboard does every few seconds,
 // changes nothing; the outbox itself forgets replies given up on long ago.
 func TestOutboxSummaryOnlyReads(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := openOutboxStore(t, dir)
 	db := testStoreSQL(t, filepath.Join(dir, "bridge.db"))
@@ -286,6 +290,7 @@ func TestOutboxSummaryOnlyReads(t *testing.T) {
 // A question a brain asks mid-run waits in the outbox for the connection;
 // the working notice goes out at once or not at all, whatever its text.
 func TestQuestionsWaitAndNoticesDoNot(t *testing.T) {
+	t.Parallel()
 	tb, br := newMainBridge(t, "")
 	tb.wa = newFlakyMessenger(func() int { return tb.cfgs.Get().MaxChunkSize }, false)
 	(brainHooksSink{tb.brainMgr.hooks}).Question(br, testDMChat, "Which day suits you?")
@@ -310,6 +315,7 @@ func openOutboxStore(t *testing.T, dir string) *store.Store {
 // A reply still waiting when the bridge stops goes out after it starts
 // again, recorded in the history of the brain that wrote it.
 func TestOutboxSurvivesARestart(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfg := func() int { return 4000 }
 	s := openOutboxStore(t, dir)
@@ -372,6 +378,7 @@ func (m *stopsDuringTheSend) SendMessage(ctx context.Context, jid, text string) 
 // outbox and recorded before the stop returns and the store closes, so the
 // next start does not send it again.
 func TestOutboxRecordsWhatWentOutAsItStops(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	cfg := func() int { return 4000 }
 	s := openOutboxStore(t, dir)
@@ -415,6 +422,7 @@ func TestOutboxRecordsWhatWentOutAsItStops(t *testing.T) {
 // text, and a recipient the bridge refuses is given up on at once. Either
 // way the dashboard hears of it.
 func TestOutboxGivesUp(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := openOutboxStore(t, dir)
 	db := testStoreSQL(t, filepath.Join(dir, "bridge.db"))
@@ -447,6 +455,7 @@ func TestOutboxGivesUp(t *testing.T) {
 // One chat's replies go out in order: a later one waits for an earlier
 // that failed. Another chat's go on.
 func TestOutboxKeepsAChatsOrder(t *testing.T) {
+	t.Parallel()
 	s := openOutboxStore(t, t.TempDir())
 	m := newFlakyMessenger(func() int { return 0 }, false)
 	o := outboundmsg.NewOutbox(s, func() outboundmsg.Link { return m }, 0, nil)
@@ -478,6 +487,7 @@ func TestOutboxKeepsAChatsOrder(t *testing.T) {
 // retry due at once, not after outboxFirstRetry: TestOutboxKeepsAChatsOrder
 // timed out on CI when its setOnline landed in that window.
 func TestOutboxRetriesAtOnceWhenTheLinkCameUpDuringTheSend(t *testing.T) {
+	t.Parallel()
 	s := openOutboxStore(t, t.TempDir())
 	m := newFlakyMessenger(func() int { return 0 }, false)
 	m.upOnFail = true
@@ -493,6 +503,7 @@ func TestOutboxRetriesAtOnceWhenTheLinkCameUpDuringTheSend(t *testing.T) {
 // The Overview says when replies wait for long, and when some were given
 // up on.
 func TestStatusWarnsAboutTheOutbox(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	tb.wa = newFlakyMessenger(func() int { return tb.cfgs.Get().MaxChunkSize }, false)
 	ctx := context.Background()
@@ -513,6 +524,7 @@ func TestStatusWarnsAboutTheOutbox(t *testing.T) {
 // reads counts as waiting or as given up on, never as both or neither.
 // TestOutboxGivesUp saw one counted twice on CI.
 func TestOutboxSummaryIsOneMoment(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s := openOutboxStore(t, dir)
 	db := testStoreSQL(t, filepath.Join(dir, "bridge.db"))
@@ -584,6 +596,7 @@ func (e *earlyVoter) SendPoll(ctx context.Context, jid, q string, opts []string,
 // A poll is kept before it goes out, so that a vote that arrives before
 // the send returns finds it; one that fails after all is not kept.
 func TestPollIsKeptBeforeItCanBeVotedOn(t *testing.T) {
+	t.Parallel()
 	for _, fail := range []bool{false, true} {
 		t.Run(fmt.Sprint("fail=", fail), func(t *testing.T) {
 			s := openOutboxStore(t, t.TempDir())

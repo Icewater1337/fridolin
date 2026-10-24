@@ -14,6 +14,7 @@ import (
 )
 
 func TestCodexSandboxKeepsPersonalStateAndOtherBrainsOut(t *testing.T) {
+	t.Parallel()
 	requireSandboxExec(t)
 	cli := fakeCodex(t)
 	script, err := os.ReadFile(cli)

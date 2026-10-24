@@ -71,6 +71,7 @@ func (h *harness) noMove(m moveHosts) {
 // mini keeps the secrets. Then the way back the same way, after which
 // icebase forgets the secrets the first move brought it.
 func TestMoveCoreFromChat(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts(h.b.nodes.Version(), true)
 
@@ -167,6 +168,8 @@ func TestMoveCoreFromChat(t *testing.T) {
 // lockdown !movecore is refused, and a "Move now" from before is a no;
 // a message of the bridge's own account is no command.
 func TestMoveCoreCancelExpiryLockdown(t *testing.T) {
+	// Serial: shortens coreMovePollTTL, a package variable every bridge's
+	// !movecore polls read.
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts(h.b.nodes.Version(), true)
 
@@ -219,6 +222,8 @@ func TestMoveCoreCancelExpiryLockdown(t *testing.T) {
 // secrets during the preparation, so the owner is asked whether it
 // keeps them, and no vote in time forgets them.
 func TestMoveCoreRollback(t *testing.T) {
+	// Serial: shortens coreMoveOptions and coreSecretsPollTTL, package
+	// variables every bridge's core moves read.
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts(h.b.nodes.Version(), false)
 	setVar(t, &coreMoveOptions, nodes.MoveOptions{HandoffDeadline: 10 * time.Second, ReadyWithin: time.Second})
@@ -250,6 +255,7 @@ func TestMoveCoreRollback(t *testing.T) {
 // TestRevokeCoreHostForgets: !revoke of a connected core host that holds
 // secrets a move brought it makes it forget them first, and says so.
 func TestRevokeCoreHostForgets(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts(h.b.nodes.Version(), true)
 	if code, tr, body := h.coreTransfer(m.src, m.dst, true); code != http.StatusOK || !tr.Ran {
@@ -271,6 +277,7 @@ func TestRevokeCoreHostForgets(t *testing.T) {
 // says plainly that it is arbitrary execution there; the dashboard's
 // view says it while it waits, and !fleet marks it once approved.
 func TestApproveFrideSaysWhatItMeans(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	addr := h.StartNodes()
 	ff := testutil.StartFakeFride(t, "fridolin")

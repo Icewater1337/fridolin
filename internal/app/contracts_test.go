@@ -64,6 +64,7 @@ var schemaTypes = []schemaType{
 // writes for the field (null for a pointer, slice or map without
 // omitempty, which a nil one writes).
 func TestSchemasFollowTheGoTypes(t *testing.T) {
+	t.Parallel()
 	for _, st := range schemaTypes {
 		t.Run(st.schema, func(t *testing.T) {
 			set := newSchemaSet(t)
@@ -289,6 +290,7 @@ func schemaAdmits(set *schemaSet, at schemaAt, jt string) bool {
 // too many, a type it does not take, the null of a nil list, and the same
 // one level down.
 func TestSchemaCompare(t *testing.T) {
+	t.Parallel()
 	type section struct {
 		A string `json:"a"`
 	}
@@ -354,6 +356,7 @@ func assertValid(t testing.TB, set *schemaSet, ref, what string, data []byte) {
 // TestConfigSchemaVersion: the schema's version is the one the bridge
 // writes.
 func TestConfigSchemaVersion(t *testing.T) {
+	t.Parallel()
 	version := newSchemaSet(t).resolve("config.schema.json", "#/properties/version").schema.(map[string]any)
 	if got := fmt.Sprint(version["maximum"]); got != fmt.Sprint(config.Version) {
 		t.Errorf("config.schema.json reads up to version %s, the bridge %d", got, config.Version)
@@ -363,6 +366,8 @@ func TestConfigSchemaVersion(t *testing.T) {
 // TestConfigFilesFollowTheSchema: the config fixtures, what a save writes
 // of each, and the starter config follow config.schema.json.
 func TestConfigFilesFollowTheSchema(t *testing.T) {
+	// Serial: fixtureHome sets the process's HOME, and EnsureConfigFile
+	// resolves ~ against it.
 	set := newSchemaSet(t)
 	for _, name := range []string{"config-v1", "config-legacy"} {
 		t.Run(name, func(t *testing.T) {
@@ -373,7 +378,7 @@ func TestConfigFilesFollowTheSchema(t *testing.T) {
 			if err := os.WriteFile(path, data, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			cs, err := OpenConfigStore(path)
+			cs, err := openConfigStore(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -388,7 +393,7 @@ func TestConfigFilesFollowTheSchema(t *testing.T) {
 		})
 	}
 	t.Run("starter", func(t *testing.T) {
-		t.Setenv("HOME", t.TempDir())
+		setenv(t, "HOME", t.TempDir())
 		path := filepath.Join(t.TempDir(), "config.json")
 		if err := EnsureConfigFile(path); err != nil {
 			t.Fatal(err)
@@ -413,6 +418,7 @@ func TestConfigFilesFollowTheSchema(t *testing.T) {
 // the bridge only warns about, such as a group JID with a typo, is not one
 // of them.
 func TestConfigSchemaRefusesWhatTheBridgeRefuses(t *testing.T) {
+	t.Parallel()
 	set := newSchemaSet(t)
 	for _, configValue := range []string{
 		`{"version": 3}`,
@@ -468,8 +474,8 @@ func TestConfigSchemaRefusesWhatTheBridgeRefuses(t *testing.T) {
 		`{"policy": {"approval_timeout_hours": -1}}`,
 	} {
 		t.Run(configValue, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
-			if _, err := LoadConfig(writeConfig(t, configValue)); err == nil {
+			setenv(t, "HOME", t.TempDir())
+			if _, err := loadConfig(t, writeConfig(t, configValue)); err == nil {
 				t.Fatal("the bridge loads it")
 			}
 			if len(set.ValidateJSON("config.schema.json", []byte(configValue))) == 0 {
@@ -484,8 +490,9 @@ func TestConfigSchemaRefusesWhatTheBridgeRefuses(t *testing.T) {
 // too, but for the few that docs/CONFIGURATION.md names as ones the
 // schema refuses all the same.
 func TestConfigSchemaTakesWhatTheBridgeTakes(t *testing.T) {
+	t.Parallel()
 	set := newSchemaSet(t)
-	t.Setenv("HOME", t.TempDir())
+	setenv(t, "HOME", t.TempDir())
 	for _, tc := range []struct {
 		config  string
 		refused bool // by the schema, as docs/CONFIGURATION.md says
@@ -509,7 +516,7 @@ func TestConfigSchemaTakesWhatTheBridgeTakes(t *testing.T) {
 		{`{"http_listen": "127.0.0.1:"}`, true},
 	} {
 		t.Run(tc.config, func(t *testing.T) {
-			if _, err := LoadConfig(writeConfig(t, tc.config)); err != nil {
+			if _, err := loadConfig(t, writeConfig(t, tc.config)); err != nil {
 				t.Fatalf("the bridge refuses it: %v", err)
 			}
 			if problems := set.ValidateJSON("config.schema.json", []byte(tc.config)); len(problems) > 0 != tc.refused {
@@ -527,6 +534,7 @@ func TestConfigSchemaTakesWhatTheBridgeTakes(t *testing.T) {
 // to take, such as a new effort of the Claude CLI, that the schema still
 // refuses.
 func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
+	t.Parallel()
 	var matches, levels []string
 	for _, m := range trigger.MatchValues() {
 		matches = append(matches, string(m))
@@ -556,7 +564,7 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 		{"schedule risk", "schedule.schema.json#/properties/risk", manifest.ScheduleRisks(), `{"name": "s", "when": "every 6h", "risk": %s}`},
 	}
 	set := newSchemaSet(t)
-	t.Setenv("HOME", t.TempDir())
+	setenv(t, "HOME", t.TempDir())
 	for _, tc := range tests {
 		t.Run(tc.setting, func(t *testing.T) {
 			schema, _, _ := strings.Cut(tc.enum, "#")
@@ -586,7 +594,7 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 				case "schedule.schema.json":
 					_, err = manifest.DecodeSchedule("s", []byte(doc))
 				default:
-					_, err = LoadConfig(writeConfig(t, doc))
+					_, err = loadConfig(t, writeConfig(t, doc))
 				}
 				if err != nil {
 					t.Errorf("the bridge refuses %s: %v", doc, err)
@@ -600,6 +608,7 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 // TestConfigSchemaTakesPhoneNumbersAsWritten: the numbers group_members
 // takes, written as people write them, the schema takes too.
 func TestConfigSchemaTakesPhoneNumbersAsWritten(t *testing.T) {
+	t.Parallel()
 	set := newSchemaSet(t)
 	for _, n := range []string{"15551234567", "+1 555 123 4567", "+1 (555) 123-4567", "+1\u00a0555\u00a0123\u00a04567", "1.555.123.4567", "15551234567@s.whatsapp.net", " +15551234567 ", "155512"} {
 		t.Run(n, func(t *testing.T) {
@@ -618,6 +627,7 @@ func TestConfigSchemaTakesPhoneNumbersAsWritten(t *testing.T) {
 // TestBrainFilesFollowTheSchema: brain-v1.json, a new brain's brain.json
 // and the copy config.json holds of it follow brain.schema.json.
 func TestBrainFilesFollowTheSchema(t *testing.T) {
+	t.Parallel()
 	set := newSchemaSet(t)
 	assertValid(t, set, "brain.schema.json", "brain-v1.json", fixture(t, "brain-v1.json"))
 
@@ -638,6 +648,7 @@ func TestBrainFilesFollowTheSchema(t *testing.T) {
 // TestBrainSchemaRefusesWhatTheBridgeRefuses: each of these brain.json
 // files is refused when the brain is added or loaded, and by the schema.
 func TestBrainSchemaRefusesWhatTheBridgeRefuses(t *testing.T) {
+	t.Parallel()
 	set := newSchemaSet(t)
 	for _, manifestJSON := range []string{
 		`{"name": "No id"}`,
@@ -668,6 +679,7 @@ func TestBrainSchemaRefusesWhatTheBridgeRefuses(t *testing.T) {
 // lines a brain writes for a message, its answer and a !reset, follow
 // history-line.schema.json.
 func TestHistoryLinesFollowTheSchema(t *testing.T) {
+	t.Parallel()
 	set := newSchemaSet(t)
 	for i, line := range strings.Split(strings.TrimSpace(string(fixture(t, "history-v1.jsonl"))), "\n") {
 		assertValid(t, set, "history-line.schema.json", fmt.Sprintf("line %d of history-v1.jsonl", i+1), []byte(line))
@@ -693,6 +705,7 @@ var readerSchemas = []string{"history-line.schema.json", "send-response.schema.j
 // programs are to ignore what a later version adds. So its description
 // tells a reader that validates against it to allow that.
 func TestReaderSchemasSayTheyAreClosed(t *testing.T) {
+	t.Parallel()
 	set := newSchemaSet(t)
 	for _, name := range readerSchemas {
 		desc, _ := set.file(name).(map[string]any)["description"].(string)
@@ -747,6 +760,7 @@ func assertOTPTakeContract(t *testing.T, body string, w *httptest.ResponseRecord
 // one-time code, which carries an otp_request, follows the response
 // schema, and so does the history line it writes.
 func TestSendSchemaTakesTheOTPRequest(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"otp_guard": true}`)
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	body := `{"jid": "` + harnessDM + `", "text": "Please send me the 6-digit verification code."}`
@@ -761,6 +775,7 @@ func TestSendSchemaTakesTheOTPRequest(t *testing.T) {
 // written in ways the golden calls are not, and the history lines they
 // add, follow the schemas.
 func TestScriptAPISchemasTakeWhatTheBridgeTakes(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"ingest": {"enabled": true}}`)
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	for _, tc := range []struct{ path, body string }{
@@ -789,6 +804,7 @@ func TestScriptAPISchemasTakeWhatTheBridgeTakes(t *testing.T) {
 // refuse too. One for a chat or a brain the bridge does not know is not
 // among them.
 func TestScriptAPISchemasRefuseBadRequests(t *testing.T) {
+	t.Parallel()
 	set := newSchemaSet(t)
 	for _, tc := range []struct{ endpoint, body string }{
 		{"send", `{"jid":`},
@@ -819,6 +835,7 @@ func TestScriptAPISchemasRefuseBadRequests(t *testing.T) {
 // docs/COMPATIBILITY.md, which names the contracts, lead to a file and,
 // with a #, to a heading in it.
 func TestContractDocsLinkWhatExists(t *testing.T) {
+	t.Parallel()
 	schemas, err := filepath.Glob(filepath.Join(repoDir, "docs", "schemas", "*.json"))
 	if err != nil || len(schemas) == 0 {
 		t.Fatalf("no schemas: %v", err)
@@ -905,6 +922,7 @@ func headingAnchors(md string) []string {
 // or in a paragraph that names it and the restart. A heading marked so
 // names one of them.
 func TestRestartSettingsAreMarked(t *testing.T) {
+	t.Parallel()
 	set := newSchemaSet(t)
 	restart := map[string]bool{}
 	for _, name := range config.RestartFieldNames() {
@@ -961,6 +979,7 @@ func TestRestartSettingsAreMarked(t *testing.T) {
 // The field inventory and the user guide must grow together. Nested settings
 // may be described by their short key within their section or JSON example.
 func TestConfigFieldsAreDocumented(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile(filepath.Join(repoDir, "docs", "CONFIGURATION.md"))
 	if err != nil {
 		t.Fatal(err)

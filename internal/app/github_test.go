@@ -133,6 +133,7 @@ func connectFakeGitHub(t *testing.T, h *harness, fake *ghapptest.Server) {
 // disconnects. The key and the client secret never reach config.json, a
 // file in the data dir in clear, an API answer or the log.
 func TestGitHubConnect(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	fake := useFakeGitHub(t, h.b.github)
 	connectFakeGitHub(t, h, fake)
@@ -199,6 +200,7 @@ func TestGitHubConnect(t *testing.T) {
 // TestGitHubConnectRefuses: a state the bridge did not make opens no
 // page, and the dashboard's address and an organization are checked.
 func TestGitHubConnectRefuses(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	useFakeGitHub(t, h.b.github)
 	for _, path := range []string{"/github/connect", "/github/connect?state=nope", "/github/created?code=" + ghapptest.Code + "&state=nope"} {
@@ -225,6 +227,7 @@ func TestGitHubConnectRefuses(t *testing.T) {
 // permissions, as gh's login in GH_CONFIG_DIR, and the bridge revokes it
 // and removes the login when the run ends.
 func TestGitHubTokenForARun(t *testing.T) {
+	t.Parallel()
 	tb, _ := serveTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	fake := useFakeGitHub(t, tb.github)
@@ -236,7 +239,7 @@ func TestGitHubTokenForARun(t *testing.T) {
 		t.Fatal(err)
 	}
 	envLog := filepath.Join(t.TempDir(), "brain.env")
-	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
+	setenv(t, "FRIDOLIN_FAKE_ENV_LOG", envLog)
 
 	grant := &chat.GitHubGrant{Repos: []string{"you/fridolin"}, Permissions: map[string]string{"issues": "write"}}
 	tb.handleInbound(context.Background(), brain.Inbound{Inbound: chat.Inbound{JID: apiTestDM, Sender: "15551234567", Text: "file the issue", Source: chat.SourceSchedule, GitHub: grant}})
@@ -273,6 +276,7 @@ func TestGitHubTokenForARun(t *testing.T) {
 }
 
 func TestGitHubMintRefuses(t *testing.T) {
+	t.Parallel()
 	g := &githubService{client: &ghapp.Client{}, secrets: githubSecrets{getenv: func(string) string { return "" }, store: &memSecrets{m: map[string]string{}}},
 		log: slog.New(slog.DiscardHandler), now: time.Now}
 	ctx := context.Background()
@@ -305,6 +309,7 @@ func TestGitHubMintRefuses(t *testing.T) {
 // credentials go to secrets/github-app.age, encrypted to the core's
 // post-quantum identity, and are read back and forgotten there.
 func TestGitHubSecretsInTheContainer(t *testing.T) {
+	t.Parallel()
 	id, err := age.GenerateHybridIdentity()
 	if err != nil {
 		t.Fatal(err)
@@ -352,6 +357,7 @@ func TestGitHubSecretsInTheContainer(t *testing.T) {
 // a config.yml of version 1, which gh reads without migrating it, in a
 // folder only the bridge's user may read.
 func TestWriteGitHubLogin(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "run-tokens", "a")
 	gh, err := writeGitHubLogin(dir, "ghs_abc")
 	if err != nil {
@@ -377,6 +383,7 @@ func TestWriteGitHubLogin(t *testing.T) {
 // followed. It ends on the dashboard's Integrations page with the app
 // installed, and a token minted from it works.
 func TestGitHubConnectLikeABrowser(t *testing.T) {
+	t.Parallel()
 	h := newServedHarness(t, "")
 	fake := useFakeGitHub(t, h.b.github)
 	w := h.Do("POST", "/api/github/connect", map[string]any{})

@@ -14,6 +14,7 @@ import (
 )
 
 func TestBackupSettingsProjectionPreservesStatusJSON(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{`{}`, `{"backup":{"enabled":true,"keep_versions_days":0,"include_bridge_config":false,"include_secret_files":true}}`} {
 		var file config.File
 		if err := json.Unmarshal([]byte(raw), &file); err != nil {
@@ -38,6 +39,7 @@ func TestBackupSettingsProjectionPreservesStatusJSON(t *testing.T) {
 }
 
 func TestBackupTargetProjectionKeepsIdentityAndOwnsExcludes(t *testing.T) {
+	t.Parallel()
 	mgr := brain.NewManager(brain.Options{})
 	t.Cleanup(mgr.Stop)
 	sp := manifest.Spec{Dir: t.TempDir(), Manifest: manifest.Manifest{ID: "notes", Name: "Before", Backup: manifest.Backup{Enabled: true, Exclude: []string{"one"}}}}

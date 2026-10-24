@@ -47,7 +47,7 @@ func captureLog(t *testing.T) func() []string {
 func brainASetup(t *testing.T) (*config.Settings, string) {
 	t.Helper()
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	m := testManifest("a")
 	m.Routing.HandlesDMs = true
 	if _, err := registry.Scaffold(filepath.Join(home, "a"), &m, brainTemplates); err != nil {
@@ -63,7 +63,7 @@ func brainASetup(t *testing.T) (*config.Settings, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := loadConfig(t, writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+fakeClaudeEnv(t, 0)+`",
@@ -104,11 +104,13 @@ func plant(t *testing.T, path, target string) {
 // they used to fall back to the default brain, which then read a group
 // meant for another (see TestLeftOutBrainsKeepTheirChats).
 func TestBrainWhoseFolderCannotBeOpenedIsLeftOut(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	if os.Geteuid() == 0 {
 		t.Skip("root opens any folder")
 	}
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	dirs := brainDirsJSON(t,
 		brainFolder(t, "~/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true, Default: true}}),
 		brainFolder(t, "~/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}}),
@@ -118,7 +120,7 @@ func TestBrainWhoseFolderCannotBeOpenedIsLeftOut(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := loadConfig(t, writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+fakeClaudeEnv(t, 0)+`"`+dirs+`
@@ -155,6 +157,7 @@ func TestBrainWhoseFolderCannotBeOpenedIsLeftOut(t *testing.T) {
 // the overview, say why a brain whose folder cannot be opened is not
 // running, until a reload finds the folder fine.
 func TestLeftOutBrainShowsWhyOnItsPage(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root opens any folder")
 	}
@@ -211,6 +214,7 @@ func TestLeftOutBrainShowsWhyOnItsPage(t *testing.T) {
 // read, while the brain runs on with the manifest you approved. A FIFO
 // there must not hang the reload either.
 func TestManifestIsNotFollowedOutOfTheFolder(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		plant func(t *testing.T, home string)

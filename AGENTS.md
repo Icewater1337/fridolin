@@ -382,7 +382,16 @@ machine must already be a node (path B). In short:
   package's own `testdata` through `pkgDir`. Tests set up brains as the
   bridge runs them, in folders with a `brain.json` listed in `brain_dirs`
   (`brainFolder`, `addFolderBrain`); a config with inline `"brains"` no
-  longer loads.
+  longer loads. The tests of `internal/app` run in parallel: each calls
+  `t.Parallel()` first and has an environment of its own, in which
+  `setenv` sets `HOME` and the fake CLIs' `FRIDOLIN_FAKE_*`; the bridges,
+  brain managers and configs it makes read that one (`envOf`,
+  `app.Options.Env`), not the process's. A test that must change what the
+  whole process shares (its environment, working directory, standard
+  logger or a package variable) says why in a `// Serial:` comment first
+  instead, and runs before the parallel ones;
+  `TestEveryTestSaysWhetherItRunsInParallel` holds every test to one or
+  the other.
 - The golden files in `cmd/fridolin/testdata/golden` pin what the bridge says and writes
   today: every GET of the API, config writes and their errors, the files the
   dashboard serves, sandbox profiles, prompts and the Claude CLI's

@@ -11,6 +11,7 @@ import (
 )
 
 func TestDoctorEncryption(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
 	cfg := &config.Settings{Boot: config.Boot{DataDir: "/data"}}
 	cfg.Vault.Enabled = true

@@ -11,6 +11,7 @@ import (
 )
 
 func TestDoctorHousekeeping(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
 	cfg := &config.Settings{Boot: config.Boot{DataDir: "/data"}}
 	cfg.Housekeeping = config.HousekeepingSettings{Enabled: true, DryRun: true, Every: 48 * time.Hour}

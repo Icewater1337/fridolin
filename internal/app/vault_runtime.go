@@ -190,6 +190,9 @@ type vaultService struct {
 	cfgs      *config.Store
 	container bool
 	log       *slog.Logger
+	// env is the bridge's environment, which the dev stand-ins and the
+	// secrets are read from and the vault's programs get part of.
+	env Environment
 	// brains lists the loaded brains; openMedia the files of the messages
 	// they run or have waiting (absolute paths).
 	brains    func() []vaultBrain
@@ -264,11 +267,11 @@ func (s *vaultService) litestreamUsage(run *vaultRun, st snapshot.LitestreamStat
 	run.liteCounted = now
 }
 
-func newVaultService(cfgs *config.Store, container bool, logger *slog.Logger, brains func() []vaultBrain, openMedia func() []string) *vaultService {
+func newVaultService(cfgs *config.Store, env Environment, container bool, logger *slog.Logger, brains func() []vaultBrain, openMedia func() []string) *vaultService {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	s := &vaultService{cfgs: cfgs, container: container, log: logger, brains: brains, openMedia: openMedia}
+	s := &vaultService{cfgs: cfgs, env: envOr(env), container: container, log: logger, brains: brains, openMedia: openMedia}
 	s.status = s.loadStatus()
 	s.status.Enabled = cfgs.Get().Vault.Enabled
 	s.status.Snapshots.SkippedBrains = nil

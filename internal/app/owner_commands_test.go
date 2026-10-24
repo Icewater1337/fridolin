@@ -26,6 +26,7 @@ var (
 // one go) and shuts it out with !revoke. The audit log has each, never
 // the code.
 func TestJoinFromChat(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	addr := h.StartNodes()
 	_, port, _ := net.SplitHostPort(addr)
@@ -108,6 +109,7 @@ func TestJoinFromChat(t *testing.T) {
 // chat: in a group, even from the owner, and from anyone else they hand
 // out nothing.
 func TestOwnerCommandsOwnerOnly(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true}, "group_members": {"120363000000000000@g.us": ["*"]}}`)
 	for _, cmd := range []string{"!join", "!dashboard", "!approve x", "!revoke x"} {
 		got := h.Answer(inbound{JID: harnessGroup, Sender: "15551234567", Text: "@claude " + cmd})
@@ -136,6 +138,7 @@ func TestOwnerCommandsOwnerOnly(t *testing.T) {
 // !join and !dashboard answer ownerAsksPerHour times an hour each; with
 // nodes off !join says so.
 func TestOwnerCommandsRateLimit(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true}}`)
 	for _, cmd := range []string{"!join", "!dashboard"} {
 		for i := range ownerAsksPerHour {
@@ -165,6 +168,7 @@ func TestOwnerCommandsRateLimit(t *testing.T) {
 // !dashboard's link signs one browser in, once, here on the core machine
 // (the tailnet's is in TestTailnetSignInWithALink).
 func TestDashboardLinkFromChat(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	reply := h.Answer(inbound{JID: harnessDM, Text: "!dashboard"})
 	m := loginLinkRE.FindStringSubmatch(reply)

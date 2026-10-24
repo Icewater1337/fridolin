@@ -7,6 +7,7 @@ import (
 )
 
 func TestMaskChatJID(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"120363000000000000@g.us":    "120363000000000000@g.us",
 		"15551234567@s.whatsapp.net": logx.MaskPhone("15551234567") + "@s.whatsapp.net",

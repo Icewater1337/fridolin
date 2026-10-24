@@ -16,8 +16,9 @@ import (
 // run's error keeps a short tail, and the activity log gets the end, with
 // the line that says what went wrong.
 func TestRunStderrIsBounded(t *testing.T) {
+	t.Parallel()
 	mgr, d, _ := queueTestManager(t, 0, "")
-	t.Setenv("FRIDOLIN_FAKE_STDERR_BYTES", "1000000")
+	setenv(t, "FRIDOLIN_FAKE_STDERR_BYTES", "1000000")
 	if _, _, _, err := mgr.Submit(dm("fail loudly")); err != nil {
 		t.Fatal(err)
 	}

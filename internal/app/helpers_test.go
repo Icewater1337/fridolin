@@ -46,6 +46,7 @@ var testChildEnv = []childEnvVar{
 // checked in a test binary of its own, since the restart replaces the
 // process that makes it.
 func TestRestartInATestFailsTheRun(t *testing.T) {
+	t.Parallel()
 	const child, held = "FRIDOLIN_TEST_RESTART_CHILD", "the guards held: this is still the test"
 	if os.Getenv(child) == "1" {
 		tb := newTestBridge(t, `, "http_listen": "127.0.0.1:0"`)
@@ -150,10 +151,12 @@ func fakePromptsIn(t *testing.T, path string) []string {
 	return strings.Split(string(data), testutil.PromptMark+"\n")[1:]
 }
 
-func fakeClaudeEnv(t *testing.T, sleepMS int) string {
+// fakeClaudeEnv makes this test binary the Claude CLI of the bridges t
+// makes, one that answers after sleepMS, and returns its path.
+func fakeClaudeEnv(t testing.TB, sleepMS int) string {
 	t.Helper()
-	t.Setenv("FRIDOLIN_FAKE_CLAUDE", "1")
-	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", strconv.Itoa(sleepMS))
+	setenv(t, "FRIDOLIN_FAKE_CLAUDE", "1")
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", strconv.Itoa(sleepMS))
 	return os.Args[0]
 }
 
@@ -192,6 +195,7 @@ func checkTestDataDir(root string, cfg config.Boot) error {
 }
 
 func TestCheckTestDataDir(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	in := filepath.Join(root, "data")
 	out := filepath.Join(filepath.Dir(root), "elsewhere")
@@ -223,6 +227,7 @@ func TestCheckTestDataDir(t *testing.T) {
 }
 
 func TestRequireTestDataDir(t *testing.T) {
+	t.Parallel()
 	// TestCheckTestDataDir passing says nothing about whether the guard the
 	// helpers call checks at all, or against which root. A data dir in
 	// another test's temp dir lies in the system temp dir too, so a root
@@ -274,14 +279,11 @@ func logContains(logs func() []string, substr string) bool {
 
 // brainFolder makes the folder at path a brain, scaffolded as Add brain does,
 // and returns the brain_dirs entry that runs it with m approved. path goes
-// into the config as given, and a ~ in it is the test's HOME, so set that
-// first. A manifest without a name is named after its id.
+// into the config as given, and a ~ in it is the test's HOME (homeOf), so
+// set that first. A manifest without a name is named after its id.
 func brainFolder(t testing.TB, path string, m manifest.Manifest) config.BrainRef {
 	t.Helper()
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
-	}
+	home := homeOf(t)
 	if m.Name == "" {
 		m.Name = m.ID
 	}

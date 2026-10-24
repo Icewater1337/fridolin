@@ -14,6 +14,7 @@ import (
 // every Go file of the module, not just this package's, so the check still
 // covers them all once the code is split into packages.
 func TestGroupJIDsAreToldApartInOnePlace(t *testing.T) {
+	t.Parallel()
 	bySuffix := regexp.MustCompile(`HasSuffix\(.*("@g\.us"|types\.GroupServer)`)
 	root := repoDir
 	for {

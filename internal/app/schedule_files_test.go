@@ -63,6 +63,7 @@ func (h *harness) review(brain, name string) (listedReview, int) {
 // was reviewed, and a change to it, or its removal, waits likewise while
 // the approved version runs on.
 func TestAgentFilesWaitForApproval(t *testing.T) {
+	t.Parallel()
 	fakeRuns(t)
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
@@ -152,6 +153,7 @@ func TestAgentFilesWaitForApproval(t *testing.T) {
 // brain.json kept as it was, and nothing approved changes: an approved
 // agent runs on, and a pending one stays pending.
 func TestInlineSchedulesMoveIntoFiles(t *testing.T) {
+	t.Parallel()
 	fakeRuns(t)
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
@@ -207,6 +209,7 @@ func TestInlineSchedulesMoveIntoFiles(t *testing.T) {
 // TestRemindersFromTheBrainsFile: the Schedules page lists the reminders
 // a brain keeps in its own file, those still to come.
 func TestRemindersFromTheBrainsFile(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	if err := os.WriteFile(filepath.Join(dir, "skills", "reminders.json"), []byte(`[
@@ -233,6 +236,7 @@ func TestRemindersFromTheBrainsFile(t *testing.T) {
 // TestSchedulePreview: when a schedule would run next, or why it is no
 // schedule.
 func TestSchedulePreview(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	var p schedulePreview
 	w := h.Do("GET", "/api/schedules/preview?when=daily+07:00", nil)
