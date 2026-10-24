@@ -237,7 +237,7 @@ func (b *App) auditDelegation(d *delegation, outcome string) {
 // first, and one with AnswerOnly nothing more is done with.
 func (b *App) deliverRun(br *brainruntime.Brain, m brainruntime.Inbound, res claudecli.Result) {
 	if m.Answer != nil && res.Err == nil && res.Text != "" && !m.Silent {
-		m.Answer(res.Text)
+		res.Text = m.Answer(res.Text)
 	}
 	if m.AnswerOnly {
 		return

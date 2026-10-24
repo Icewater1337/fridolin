@@ -21,7 +21,7 @@ type voiceTestAsk struct {
 	asked []string
 	quiet []bool
 	jids  []string
-	ans   func(string)
+	ans   func(string) string
 	done  func(error)
 }
 
@@ -33,7 +33,7 @@ func voiceTest(t *testing.T, extra string) (*Manager, *plaudServiceFixture, *voi
 	rec := &voiceTestAsk{}
 	target := &Target{BrainID: "p", ReplyChat: func() string { return "" }, OtherOwner: func(string) string { return "" },
 		Submit: func(_, _, _ string, _ []string, done func(error)) error { done(nil); return nil },
-		Ask: func(jid, sender, text string, quiet bool, answer func(string), done func(error)) error {
+		Ask: func(jid, sender, text string, quiet bool, answer func(string) string, done func(error)) error {
 			rec.mu.Lock()
 			defer rec.mu.Unlock()
 			if sender != voiceSender {
@@ -154,7 +154,9 @@ func TestVoiceQuestionIsAnsweredToThePhoneThatAsked(t *testing.T) {
 		fetched <- result{m, err}
 	}()
 	time.Sleep(50 * time.Millisecond)
-	rec.ans("Morgen um neun: Zahnarzt.")
+	if chat := rec.ans("Morgen um neun: Zahnarzt."); chat != "Morgen um neun: Zahnarzt." {
+		t.Errorf("the chat gets %q", chat)
+	}
 	rec.done(nil)
 	r := <-fetched
 	if r.err != nil || r.m["state"] != voiceDone {
@@ -316,5 +318,48 @@ func TestVoiceSealVector(t *testing.T) {
 	}
 	if s := openVoiceReply(t, phone, voiceVectorRid, reply); s != voiceVectorText {
 		t.Errorf("opened %q", s)
+	}
+}
+
+func TestVoiceSpokenBlockIsReadAndTheRestGoesToTheChat(t *testing.T) {
+	p, _, rec, phone, enc := voiceTest(t, "")
+	if _, err := voiceAsk(t, p, phone, enc, "dev_1", voiceTestRid, "Was steht diese Woche an?"); err != nil {
+		t.Fatal(err)
+	}
+	chat := rec.ans("[SPOKEN]Drei Termine, der wichtigste: Zahnarzt am Dienstag um halb zehn. Details in WhatsApp.[/SPOKEN]\n\n- Di 09:30 Zahnarzt\n- Mi 14:00 Call\n- Fr 18:00 Essen")
+	if strings.Contains(chat, "SPOKEN") || !strings.HasPrefix(chat, "- Di 09:30 Zahnarzt") {
+		t.Errorf("the chat gets %q", chat)
+	}
+	m, err := voiceFetch(t, p, phone, "dev_1", voiceTestRid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := openVoiceReply(t, enc, voiceTestRid, m["reply"].(map[string]any)); s != "Drei Termine, der wichtigste: Zahnarzt am Dienstag um halb zehn. Details in WhatsApp." {
+		t.Errorf("the phone hears %q", s)
+	}
+}
+
+func TestSpokenAnswer(t *testing.T) {
+	long := strings.Repeat("This sentence has exactly seven words here. ", 12)
+	for _, c := range []struct{ in, spoken, chat string }{
+		{"Kurz und gut.", "Kurz und gut.", "Kurz und gut."},
+		{"[SPOKEN] Only this. [/SPOKEN]", "Only this.", "Only this."},
+		{"Intro.\n[SPOKEN]Said.[/SPOKEN]\nDetails.", "Said.", "Intro.\n\nDetails."},
+		// Long without a block: whole sentences up to 60 words.
+		{long, strings.TrimSpace(strings.Repeat("This sentence has exactly seven words here. ", 8)), long},
+	} {
+		spoken, chat := spokenAnswer(c.in)
+		if spoken != c.spoken || chat != c.chat {
+			t.Errorf("spokenAnswer(%.40q) = %q, %q; want %q, %q", c.in, spoken, chat, c.spoken, c.chat)
+		}
+	}
+	// One endless sentence is cut at 60 words.
+	words := strings.TrimSpace(strings.Repeat("word ", 100))
+	if s, _ := spokenAnswer(words); len(strings.Fields(s)) != maxSpokenWords || !strings.HasSuffix(s, "…") {
+		t.Errorf("an endless sentence: %q", s)
+	}
+	// A full stop inside a number or a time is no sentence's end.
+	if s := shortenSpoken("It costs 3.50 francs. "+long, 10); s != "It costs 3.50 francs." {
+		t.Errorf("shortened to %q", s)
 	}
 }

@@ -22,7 +22,7 @@ func NewPlaudManager(cfgs *config.Store, brains *BrainManager, submit plaudSubmi
 type plaudSubmit = func(br *brain.Brain, jid, sender, text string, media []string, done func(error)) error
 
 // plaudAsk hands a brain a voice question (App.submitAsk).
-type plaudAsk = func(br *brain.Brain, jid, sender, text string, quiet bool, answer func(string), done func(error)) error
+type plaudAsk = func(br *brain.Brain, jid, sender, text string, quiet bool, answer func(string) string, done func(error)) error
 
 // plaudOptions projects command policy and host dependencies into the service.
 func plaudOptions(cfgs *config.Store, brains *BrainManager, submit plaudSubmit, ask plaudAsk,
@@ -109,7 +109,7 @@ func plaudTargetOf(brains *BrainManager, id string, submit plaudSubmit, ask plau
 		},
 	}
 	if ask != nil {
-		t.Ask = func(jid, sender, text string, quiet bool, answer func(string), done func(error)) error {
+		t.Ask = func(jid, sender, text string, quiet bool, answer func(string) string, done func(error)) error {
 			return ask(br, jid, sender, text, quiet, answer, done)
 		}
 	}

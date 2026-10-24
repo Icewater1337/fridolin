@@ -30,6 +30,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
@@ -62,8 +63,63 @@ const (
 )
 
 // voicePrompt goes before a voice question: the brain answers it as it
-// would a message, but for the ear.
-const voicePrompt = "[Voice question from the owner's phone (Plaud Sync voice mode). Your answer is read aloud there by text-to-speech, and also reaches this chat unless voice replies are set to the phone only. Answer briefly, in plain spoken sentences: no markdown, tables, emoji or links read out letter by letter. Answer in the language of the question.]"
+// would a message, but for the ear, with a spoken version in a
+// [SPOKEN] block when the full answer is longer (spokenAnswer).
+const voicePrompt = `[Voice question from the owner's phone (Plaud Sync voice mode). Your answer is read aloud there.
+Answer for the ear: one to three short spoken sentences, the most important point first. No lists, tables, links, code, markdown or emoji. Write numbers, dates and times the way they are said ("half past nine on Tuesday", not "09:30, Tue"). Answer in the language of the question.
+If the answer needs more detail than that, put the spoken sentences in a block of their own, [SPOKEN]like this[/SPOKEN], then write the details as usual after it, and say in the spoken part that the details are in WhatsApp. Only the block is read aloud; the details go to this chat.]`
+
+// maxSpokenWords caps what the phone reads of an answer that came back
+// long anyway: it is cut at the last sentence that fits.
+const maxSpokenWords = 60
+
+var spokenRE = regexp.MustCompile(`(?s)\[SPOKEN\](.*?)\[/SPOKEN\]`)
+
+// spokenAnswer splits a brain's answer to a voice question into what the
+// phone reads aloud and what the chat gets: the [SPOKEN] block and the
+// rest, or without one the whole answer for both. What is read is at most
+// maxSpokenWords, cut at a sentence's end.
+func spokenAnswer(text string) (spoken, chat string) {
+	chat = text
+	spoken = text
+	if m := spokenRE.FindStringSubmatchIndex(text); m != nil {
+		spoken = text[m[2]:m[3]]
+		chat = strings.TrimSpace(strings.TrimSpace(text[:m[0]]) + "\n\n" + strings.TrimSpace(text[m[1]:]))
+		if chat == "" {
+			chat = strings.TrimSpace(spoken)
+		}
+	}
+	return shortenSpoken(strings.TrimSpace(spoken), maxSpokenWords), chat
+}
+
+// shortenSpoken is text cut to whole sentences of at most max words
+// together; a first sentence longer than that is cut at max words.
+func shortenSpoken(text string, max int) string {
+	if len(strings.Fields(text)) <= max {
+		return text
+	}
+	var out strings.Builder
+	words := 0
+	start := 0
+	for i, r := range text {
+		end := i + utf8.RuneLen(r)
+		if !strings.ContainsRune(".!?…", r) || (end < len(text) && !unicode.IsSpace(rune(text[end]))) {
+			continue
+		}
+		sentence := text[start:end]
+		n := len(strings.Fields(sentence))
+		if words+n > max {
+			break
+		}
+		out.WriteString(sentence)
+		words += n
+		start = end
+	}
+	if words == 0 {
+		return strings.Join(strings.Fields(text)[:max], " ") + "…"
+	}
+	return strings.TrimSpace(out.String())
+}
 
 var errVoiceOff = errors.New("voice mode is off (plaud.voice)")
 
@@ -250,8 +306,9 @@ func (p *Manager) takeVoice(assertion string, body []byte, now time.Time) (map[s
 		cancel()
 	}
 	rid := c.Rid
-	answer := func(text string) {
-		reply, err := sealVoiceReply(c.Enc, rid, []byte(text), nil, nil)
+	answer := func(text string) string {
+		spoken, chat := spokenAnswer(text)
+		reply, err := sealVoiceReply(c.Enc, rid, []byte(spoken), nil, nil)
 		p.voice.end(key, func(q *voiceQuestion) {
 			if err != nil {
 				q.state, q.err = voiceFailed, "the answer could not be encrypted for this phone"
@@ -259,6 +316,7 @@ func (p *Manager) takeVoice(assertion string, body []byte, now time.Time) (map[s
 			}
 			q.state, q.reply = voiceDone, reply
 		})
+		return chat
 	}
 	done := func(err error) {
 		p.voice.end(key, func(q *voiceQuestion) {

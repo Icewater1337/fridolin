@@ -128,10 +128,17 @@ While it is on:
   recognizer, which needs no microphone permission for the app.
 - The question goes to the voice brain as a hand-off in its private chat,
   as recordings do: never a group, and never a command. The brain is told
-  that the answer is read aloud: short spoken sentences, in the language of
-  the question. In WhatsApp, `🎙️ <the question>` comes first, then the
-  answer. With `voice_quiet` neither is sent there, and the answer goes to
-  the phone only.
+  to answer for the ear: one to three short spoken sentences, the most
+  important point first, no lists, tables, links, code or emoji, numbers
+  and times as they are said, in the language of the question. When the
+  answer needs more, the brain writes the spoken part in a
+  `[SPOKEN]…[/SPOKEN]` block and the details after it, saying the details
+  are in WhatsApp. Only the block is read aloud, and the details go to the
+  chat without it. An answer that comes back long anyway is read only up
+  to the last whole sentence within 60 words.
+- In WhatsApp, `🎙️ <the question>` comes first, then the answer in full.
+  With `voice_quiet` neither is sent there, and only the spoken part
+  reaches the phone.
 - The phone reads the answer with Android's text-to-speech, with markdown
   stripped, links read as "a link to example.com" and polls read as a list.
   It picks German or English for each answer, where the phone has that

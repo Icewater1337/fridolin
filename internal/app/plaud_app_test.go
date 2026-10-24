@@ -262,11 +262,15 @@ func voiceAnswer(t *testing.T, tb *testBridge, phone testPhone, device, rid stri
 	return string(pt)
 }
 
-// A question asked by voice reaches the DM brain as a hand-off; its answer
-// comes back to the phone, sealed for it, and goes to WhatsApp after the
-// question, unless voice_quiet keeps it on the phone.
+// A question asked by voice reaches the DM brain as a hand-off, with the
+// instruction to answer for the ear; the spoken part of its answer comes
+// back to the phone, sealed for it, and the rest goes to WhatsApp after
+// the question, unless voice_quiet keeps it all on the phone. (The fake
+// CLI answers with its prompt, whose example of a [SPOKEN] block stands
+// in for the brain's.)
 func TestPlaudVoiceQuestionIsAnsweredThroughABrain(t *testing.T) {
 	for _, quiet := range []bool{false, true} {
+		runs := fakeRuns(t)
 		extra := `, "phone_upload": true, "voice": true`
 		if quiet {
 			extra += `, "voice_quiet": true`
@@ -279,9 +283,17 @@ func TestPlaudVoiceQuestionIsAnsweredThroughABrain(t *testing.T) {
 		if ans, err := voiceQuestion(t, tb, phone, device, rid, "Was steht morgen an?", enc); err != nil || ans["state"] != "waiting" {
 			t.Fatalf("quiet %v: ask = %v, %v", quiet, ans, err)
 		}
-		answer := voiceAnswer(t, tb, phone, device, rid, enc)
-		if !strings.Contains(answer, "Was steht morgen an?") {
+		if answer := voiceAnswer(t, tb, phone, device, rid, enc); answer != "like this" {
 			t.Errorf("quiet %v: the phone heard %q", quiet, answer)
+		}
+		if !quiet {
+			// What the brain is told, as its run's prompt has it.
+			r := runs()[len(runs())-1]
+			i, j := strings.Index(r.Prompt, "[Voice question"), strings.Index(r.Prompt, "Was steht morgen an?")
+			if i < 0 || j < i {
+				t.Fatalf("the run's prompt:\n%s", r.Prompt)
+			}
+			assertGolden(t, "run/prompt-voice.golden", []byte(r.Prompt[i:j+len("Was steht morgen an?")]+"\n"))
 		}
 		out := tb.dev.Outbox()
 		if quiet {
@@ -292,8 +304,9 @@ func TestPlaudVoiceQuestionIsAnsweredThroughABrain(t *testing.T) {
 		}
 		testutil.WaitFor(t, 5*time.Second, "the WhatsApp answer", func() bool { return len(tb.dev.Outbox()) == 2 })
 		out = tb.dev.Outbox() // newest first
-		if out[1].Text != "🎙️ Was steht morgen an?" || out[0].Text != answer || out[0].JID != out[1].JID {
-			t.Errorf("WhatsApp got %.80q, then %.80q; the phone %.80q", out[1].Text, out[0].Text, answer)
+		if out[1].Text != "🎙️ Was steht morgen an?" || out[0].JID != out[1].JID ||
+			strings.Contains(out[0].Text, "[SPOKEN]") || !strings.Contains(out[0].Text, "Was steht morgen an?") {
+			t.Errorf("WhatsApp got %.80q, then %.200q", out[1].Text, out[0].Text)
 		}
 	}
 }
