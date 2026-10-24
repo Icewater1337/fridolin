@@ -349,6 +349,14 @@ func (a *Agent) session(ctx context.Context) error {
 			a.updateReported()
 		}
 	}
+	if rep := a.boxResult(); rep != nil {
+		data, _ := json.Marshal(rep)
+		if err := c.send(ctx, nodeproto.TypeEvent, "", nodeproto.Event{Kind: nodeproto.EventUpdate, Data: data}); err == nil {
+			a.boxResultReported()
+		}
+	}
+	a.boxStatus(true)
+	defer a.boxStatus(false)
 
 	var wg sync.WaitGroup
 	defer wg.Wait()
@@ -364,6 +372,15 @@ func (a *Agent) session(ctx context.Context) error {
 			if err := c.send(ctx, nodeproto.TypeHeartbeat, "", nodeproto.Heartbeat{Stats: a.stats()}); err != nil {
 				cancel()
 				return
+			}
+			a.boxStatus(true)
+			// The box's updater writes its result while the new agent is
+			// already connected.
+			if rep := a.boxResult(); rep != nil {
+				data, _ := json.Marshal(rep)
+				if c.send(ctx, nodeproto.TypeEvent, "", nodeproto.Event{Kind: nodeproto.EventUpdate, Data: data}) == nil {
+					a.boxResultReported()
+				}
 			}
 			select {
 			case <-ctx.Done():

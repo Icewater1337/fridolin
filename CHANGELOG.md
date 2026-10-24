@@ -10,6 +10,16 @@ for compatibility.
 
 ### Added
 
+- **Box updates** (#191 phase 3): the core updates a node in a box to
+  the images of its own version, pinned by digest and signed with its
+  update key, from the Nodes page or by auto update. The agent only keeps
+  the request; the box's updater on the host (installed by `box.sh` and
+  `box.ps1`, every 2 minutes as the owner; `--no-updater` leaves it out)
+  checks it in a throwaway container of the current image, with the
+  images' build provenance, pulls, recreates, and goes back to the images
+  of before when the node does not connect again within 5 minutes. No
+  service gets the Docker socket. The node service's health check is now
+  `fridolin node health` (docs/NODES.md, "Box updates").
 - **Node in a box** (docs/NODES.md, "Node in a box"): a machine joins as
   two containers, `node` (the `fridolin-core` image running `fridolin
   node run`) and `fride` (FrIDE's companion), with Docker and one line

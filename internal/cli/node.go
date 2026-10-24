@@ -29,6 +29,8 @@ Usage:
                        join the core with a code from fridolin nodes join-code, then
                        install and start the service (--no-service: only join)
   fridolin node run    run the agent in the foreground (what the service runs)
+  fridolin node health in a box: exit 0 while the agent is connected to the
+                       core (the node service's health check)
   fridolin node tailnet [--name NAME | --hostname HOST]
                        in a box: join the tailnet as the box's own device (prints
                        a sign-in link, or uses TS_AUTHKEY), before node join --box
@@ -136,6 +138,17 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		return nodeJoin(pos[0], dir, o, thisAppPackage(), stdout, stderr)
+	case "health":
+		if len(pos) != 0 {
+			fmt.Fprintln(stderr, "fridolin node health takes no arguments")
+			return 2
+		}
+		if err := nodeagent.BoxHealthy(dir, 90*time.Second, time.Now()); err != nil {
+			fmt.Fprintf(stderr, "fridolin node health: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, "connected")
+		return 0
 	case "tailnet":
 		if len(pos) != 0 {
 			fmt.Fprintln(stderr, "fridolin node tailnet takes no arguments")

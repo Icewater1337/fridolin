@@ -31,10 +31,14 @@ services:
       # What the core's backups write here: restic's encrypted files only.
       - ${FRIDOLIN_BOX_BACKUPS:-fridolin-backups}:/backups
     networks: [box]
-    # The image's health check asks the core's dashboard, which a node
-    # does not run.
+    # Healthy while the agent is connected to the core: the box's updater
+    # waits for it after an update, and goes back when it does not come.
     healthcheck:
-      disable: true
+      test: ["CMD", "/opt/fridolin/fridolin", "node", "health", "--state-dir", "/node"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
     cap_drop:
       - ALL
     security_opt:

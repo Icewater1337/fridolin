@@ -330,7 +330,7 @@ func (a *Agent) declared() nodeproto.Capabilities {
 	c.AndroidBuild = a.androidDeclared()
 	c.Update = nil
 	if a.updateOffered() {
-		c.Update = &nodeproto.UpdateCap{}
+		c.Update = &nodeproto.UpdateCap{Box: a.Config.Box != nil}
 	}
 	a.fride.mu.Lock()
 	if a.fride.cap != nil {

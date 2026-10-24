@@ -30,9 +30,11 @@
 #   --update           update a box made before to --version: pull, pin,
 #                      write the compose file, recreate; the node keeps its
 #                      key and approval (--core and --code are not needed)
+#   --no-updater       do not install the box's updater, which applies the
+#                      updates the core asks for (docs/NODES.md, "Box updates")
 set -eu
 
-registry="" version="" core="" code="" name="" backups="" fride=1 yes=0 update=0
+registry="" version="" core="" code="" name="" backups="" fride=1 yes=0 update=0 no_updater=0
 answer="" git_name="" git_email=""
 dir="${FRIDOLIN_BOX_DIR:-$HOME/.fridolin-box}"
 
@@ -60,7 +62,8 @@ while [ $# -gt 0 ]; do
 	--no-fride) fride=0; shift ;;
 	--yes) yes=1; shift ;;
 	--update) update=1; shift ;;
-	-h | --help) sed -n '2,32p' "$0" 2>/dev/null || true; exit 0 ;;
+	--no-updater) no_updater=1; shift ;;
+	-h | --help) sed -n '2,34p' "$0" 2>/dev/null || true; exit 0 ;;
 	*) die "unknown option $1 (--help lists them)" ;;
 	esac
 done
@@ -95,7 +98,9 @@ This makes $name a node of the fridolin core at $core, in a box:
   2. write the box's compose file there (docker compose project fridolin-box,
      volumes fridolin-node, $( [ -n "$backups" ] && printf 'backups in %s' "$backups" || printf 'fridolin-backups')$( [ "$fride" = 1 ] && printf ', fride-home, fride-workspaces'))
   3. sign the box in to your tailnet as its own device (a link to open)
-  4. join the core with the code from !join, and start the box
+  4. join the core with the code from !join, and start the box with its
+     updater (every 2 minutes, as you: it applies the updates the core
+     asks for, once their signature and build provenance are checked)
 EOF
 	[ "$fride" = 1 ] && cat <<EOF
   5. FrIDE: sign Claude in for its agents (claude setup-token, in the box),
@@ -152,7 +157,62 @@ umask 077
 } >.env
 docker run --rm --entrypoint /opt/fridolin/fridolin "$node_image" box compose >compose.yaml.new
 mv compose.yaml.new compose.yaml
-echo "compose.yaml and .env are in $dir"
+docker run --rm --entrypoint /opt/fridolin/fridolin "$node_image" box updater sh >update.sh.new
+chmod 755 update.sh.new
+mv update.sh.new update.sh
+echo "compose.yaml, .env and update.sh are in $dir"
+
+# The box's updater (docs/NODES.md, "Box updates"): every 2 minutes, as
+# you, it applies an update the core asked for, once a throwaway container
+# of the current image checked it. It is the only part that reaches Docker.
+install_updater() {
+	case "$(uname -s)" in
+	Darwin)
+		plist="$HOME/Library/LaunchAgents/ai.fridolin.box-updater.plist"
+		mkdir -p "$HOME/Library/LaunchAgents"
+		cat >"$plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>ai.fridolin.box-updater</string>
+  <key>ProgramArguments</key><array><string>/bin/sh</string><string>$dir/update.sh</string></array>
+  <key>StartInterval</key><integer>120</integer>
+  <key>RunAtLoad</key><true/>
+  <key>StandardOutPath</key><string>$dir/update.log</string>
+  <key>StandardErrorPath</key><string>$dir/update.log</string>
+</dict>
+</plist>
+PLIST
+		launchctl bootout "gui/$(id -u)/ai.fridolin.box-updater" 2>/dev/null || true
+		launchctl bootstrap "gui/$(id -u)" "$plist" && echo "The updater runs every 2 minutes (launchd agent ai.fridolin.box-updater)."
+		;;
+	*)
+		if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
+			unit="$HOME/.config/systemd/user"
+			mkdir -p "$unit"
+			printf '[Unit]\nDescription=fridolin box updater\n\n[Service]\nType=oneshot\nExecStart=/bin/sh %s/update.sh\n' "$dir" >"$unit/fridolin-box-updater.service"
+			printf '[Unit]\nDescription=fridolin box updater, every 2 minutes\n\n[Timer]\nOnBootSec=2min\nOnUnitActiveSec=2min\n\n[Install]\nWantedBy=timers.target\n' >"$unit/fridolin-box-updater.timer"
+			systemctl --user daemon-reload
+			systemctl --user enable --now fridolin-box-updater.timer >/dev/null && echo "The updater runs every 2 minutes (systemd user timer fridolin-box-updater)."
+			echo "note: for it to run while you are logged out: loginctl enable-linger $(id -un)"
+		elif command -v crontab >/dev/null 2>&1; then
+			{
+				crontab -l 2>/dev/null | grep -v 'fridolin-box-updater' || true
+				echo "*/2 * * * * /bin/sh $dir/update.sh # fridolin-box-updater"
+			} | crontab -
+			echo "The updater runs every 2 minutes (crontab)."
+		else
+			echo "note: no launchd, systemd or cron here: the box updates only with box.sh --update"
+		fi
+		;;
+	esac
+}
+if [ "$no_updater" = 1 ]; then
+	echo "note: no updater (--no-updater): the box updates only with box.sh --update"
+else
+	install_updater
+fi
 
 if [ "$update" = 1 ]; then
 	say "Recreating the box"

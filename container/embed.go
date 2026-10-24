@@ -22,3 +22,12 @@ var Seccomp []byte
 //
 //go:embed box.yaml
 var Box []byte
+
+// BoxUpdaterSh and BoxUpdaterPs1 are the box's updater for macOS and
+// Linux, and for Windows, which `fridolin box updater` prints.
+//
+//go:embed box-update.sh
+var BoxUpdaterSh []byte
+
+//go:embed box-update.ps1
+var BoxUpdaterPs1 []byte

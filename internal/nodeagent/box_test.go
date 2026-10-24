@@ -49,8 +49,8 @@ func TestBoxJoinsAndRunsOverItsDialer(t *testing.T) {
 	// The join's own connection may still count as online for a moment
 	// (Windows closes it later), so wait for the run's dial too.
 	waitFor(t, "the box to connect through its dialer", func() bool { return dials.Load() >= 2 && c.svc.Online(j.ID) })
-	if d := a.declared(); d.Update != nil {
-		t.Fatalf("a box offers update: %+v", d.Update)
+	if d := a.declared(); d.Update == nil || !d.Update.Box {
+		t.Fatalf("a box offers update by image, not %+v", d.Update)
 	}
 }
 

@@ -25,7 +25,10 @@ param(
     [switch]$Yes,
     # Update a box made before to -Version: pull, pin, write the compose
     # file, recreate; the node keeps its key and approval.
-    [switch]$Update
+    [switch]$Update,
+    # Do not install the box's updater, which applies the updates the core
+    # asks for (docs/NODES.md, "Box updates").
+    [switch]$NoUpdater
 )
 
 $ErrorActionPreference = "Stop"
@@ -66,7 +69,9 @@ Write-Host ""
 Write-Host "  1. pull $nodeRef$(if ($fride) { " and $frideRef" }), pinned by digest in $Dir\.env"
 Write-Host "  2. write the box's compose file there (docker compose project fridolin-box)"
 Write-Host "  3. sign the box in to your tailnet as its own device (a link to open)"
-Write-Host "  4. join the core with the code from !join, and start the box"
+Write-Host "  4. join the core with the code from !join, and start the box with its updater"
+Write-Host "     (every 2 minutes, as you: it applies the updates the core asks for, once"
+Write-Host "     their signature and build provenance are checked)"
 if ($fride) { Write-Host "  5. FrIDE: sign Claude in for its agents, set their git identity, pair it with the node" }
 }
 Write-Host ""
@@ -123,7 +128,26 @@ $envLines += $(if ($fride) { "COMPOSE_PROFILES=fride" } else { "COMPOSE_PROFILES
 $compose = docker run --rm --entrypoint /opt/fridolin/fridolin $nodeImage box compose
 if ($LASTEXITCODE -ne 0) { Die "the image did not print its compose file" }
 [IO.File]::WriteAllText((Join-Path $Dir "compose.yaml"), (($compose -join "`n") + "`n"))
-Write-Host "compose.yaml and .env are in $Dir"
+$updater = docker run --rm --entrypoint /opt/fridolin/fridolin $nodeImage box updater ps1
+if ($LASTEXITCODE -ne 0) { Die "the image did not print its updater" }
+[IO.File]::WriteAllText((Join-Path $Dir "update.ps1"), (($updater -join "`r`n") + "`r`n"))
+Write-Host "compose.yaml, .env and update.ps1 are in $Dir"
+
+# The box's updater (docs/NODES.md, "Box updates"): a Scheduled Task runs
+# update.ps1 every 2 minutes while you are signed in, hidden, as you. It
+# applies an update the core asked for once a throwaway container of the
+# current image checked it, and is the only part that reaches Docker.
+if ($NoUpdater) {
+    Write-Host "note: no updater (-NoUpdater): the box updates only with box.ps1 -Update"
+} else {
+    $ps = (Get-Command powershell.exe -ErrorAction SilentlyContinue).Source
+    if (-not $ps) { $ps = (Get-Process -Id $PID).Path }
+    $action = New-ScheduledTaskAction -Execute $ps -Argument ("-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"" + (Join-Path $Dir "update.ps1") + "`"")
+    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2)
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
+    Register-ScheduledTask -TaskName "fridolin box updater" -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
+    Write-Host "The updater runs every 2 minutes while you are signed in (Scheduled Task 'fridolin box updater')."
+}
 
 if ($Update) {
     Say "Recreating the box"

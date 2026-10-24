@@ -20,7 +20,14 @@ import (
 // (UpdateMessage), which the node checks against the key it pinned:
 // at join, or, for a node that joined before it knew the key, at its
 // first update, which needs the approval first.
-type UpdateCap struct{}
+//
+// A node in a box (Box) is updated by image instead: the core signs the
+// digests of its own version's images (BoxUpdateMessage), the node keeps
+// the request in its volume, and the box's updater on the host checks,
+// pulls and recreates (docs/NODES.md, "Box updates").
+type UpdateCap struct {
+	Box bool `json:"box,omitempty"`
+}
 
 // The update methods. Each needs the update capability.
 const (
@@ -34,10 +41,83 @@ const (
 	// MethodUpdateDrop removes a transfer (FrideChunkParams with the ID →
 	// nothing).
 	MethodUpdateDrop = "update.drop"
+	// MethodUpdateBox asks a node in a box for the images of a version
+	// (BoxUpdateParams → BoxUpdateResult).
+	MethodUpdateBox = "update.box"
 )
 
 // UpdateMethods lists the update methods.
-var UpdateMethods = []string{MethodUpdateWrite, MethodUpdateApply, MethodUpdateDrop}
+var UpdateMethods = []string{MethodUpdateWrite, MethodUpdateApply, MethodUpdateDrop, MethodUpdateBox}
+
+// BoxUpdateParams asks a box for the images of Version, pinned by digest:
+// NodeImage for its node service, FrideImage for its fride service, as
+// the core's Signature over BoxUpdateMessage says.
+type BoxUpdateParams struct {
+	Version    string `json:"version"`
+	NodeImage  string `json:"node_image"`
+	FrideImage string `json:"fride_image"`
+	Signature  []byte `json:"signature"`
+}
+
+// imageDigestRE is an image named by its digest: a registry path, then
+// @sha256: and 64 hex digits.
+var imageDigestRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*(?:\.[a-z0-9._-]+)*(?::[0-9]+)?(?:/[a-z0-9][a-z0-9._-]*)+@sha256:[0-9a-f]{64}$`)
+
+// CheckImageDigest reports what is wrong with an image reference that must
+// name a digest.
+func CheckImageDigest(ref string) error {
+	if len(ref) > 512 || !imageDigestRE.MatchString(ref) {
+		return fmt.Errorf("image %q is not a registry path pinned by digest (…@sha256:<64 hex digits>)", ref)
+	}
+	return nil
+}
+
+// Check reports what is wrong with the params.
+func (p BoxUpdateParams) Check() error {
+	if err := CheckVersion(p.Version); err != nil {
+		return err
+	}
+	if err := CheckImageDigest(p.NodeImage); err != nil {
+		return err
+	}
+	if err := CheckImageDigest(p.FrideImage); err != nil {
+		return err
+	}
+	if len(p.Signature) != ed25519.SignatureSize {
+		return errors.New("the signature is missing")
+	}
+	return nil
+}
+
+// BoxUpdateMessage is what the core signs for a box update: the protocol,
+// the version and both images by digest.
+func BoxUpdateMessage(version, nodeImage, frideImage string) []byte {
+	return []byte("fridolin-box-update/v1\x00" + version + "\x00" + nodeImage + "\x00" + frideImage)
+}
+
+// SignBoxUpdate signs a box update with the core's update key.
+func SignBoxUpdate(key ed25519.PrivateKey, version, nodeImage, frideImage string) []byte {
+	return ed25519.Sign(key, BoxUpdateMessage(version, nodeImage, frideImage))
+}
+
+// VerifyBoxUpdate checks the signature of p with the core's public key.
+func VerifyBoxUpdate(pub []byte, p BoxUpdateParams) bool {
+	if len(pub) != ed25519.PublicKeySize {
+		return false
+	}
+	return ed25519.Verify(ed25519.PublicKey(pub), BoxUpdateMessage(p.Version, p.NodeImage, p.FrideImage), p.Signature)
+}
+
+// BoxUpdateResult is a box's answer: the request is kept for the box's
+// updater, which picks it up within UpdaterMinutes.
+type BoxUpdateResult struct {
+	From           string `json:"from"`
+	To             string `json:"to"`
+	UpdaterMinutes int    `json:"updater_minutes"`
+}
+
+// BoxUpdaterMinutes is how often a box's updater looks for a request.
+const BoxUpdaterMinutes = 2
 
 // Bounds of an update.
 const (

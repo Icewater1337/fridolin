@@ -348,7 +348,7 @@ func Intersect(declared, approved Capabilities) Capabilities {
 	out.Notify = declared.Notify && approved.Notify
 	out.Backup = intersectBackup(declared.Backup, approved.Backup)
 	if declared.Update != nil && approved.Update != nil {
-		out.Update = &UpdateCap{}
+		out.Update = &UpdateCap{Box: declared.Update.Box}
 	}
 	out.Agent = intersectWork(declared.Agent, approved.Agent)
 	out.Terminal = intersectWork(declared.Terminal, approved.Terminal)
@@ -439,7 +439,11 @@ func (c Capabilities) Summary() string {
 		}
 	}
 	if c.Update != nil {
-		parts = append(parts, "update")
+		if c.Update.Box {
+			parts = append(parts, "update (box)")
+		} else {
+			parts = append(parts, "update")
+		}
 	}
 	if c.Agent != nil {
 		parts = append(parts, c.Agent.summary("agent"))
