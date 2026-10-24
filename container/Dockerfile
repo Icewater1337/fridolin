@@ -181,6 +181,8 @@ RUN ln -s /opt/fridolin/fridolin /usr/local/bin/fridolin
 # and 0700, so a new named volume starts out that way (Docker copies the
 # folder's owner and mode into an empty volume on first use); /node and
 # /backups are a box's node volumes (container/box.yaml).
+# The home folder is the volume fridolin-home (compose.yaml), where the
+# credentials folder a core move brings lives (sandbox.credentials_dir).
 RUN groupadd --gid 10001 fridolin \
  && useradd --uid 10001 --gid 10001 --home-dir /var/lib/fridolin --create-home --shell /usr/sbin/nologin fridolin \
  && install -d -o fridolin -g fridolin -m 0700 /data /node /backups

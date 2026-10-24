@@ -948,6 +948,16 @@ for compatibility.
 
 ### Fixed
 
+- A core move carries the secret files of the core's credentials folder
+  (`sandbox.credentials_dir` under `~`: the Google OAuth web client,
+  `dashboard-users.json`, each brain's calendar client and token) with
+  the host secrets, sealed to the target's key, and the target writes
+  them 0600 into the same folder under its core's home, never over a file
+  it has. The container's home folder is now the volume `fridolin-home`,
+  so they stay there; before, the core on the target missed them
+  (calendar, startup check) (#187). The core's process now runs in
+  config's `timezone` when it is set, not in the TZ of the host that
+  started it (#250).
 - `fridolin core run` no longer makes the post-quantum age identity and
   the second layers' keys when the machine has none; only `core start`
   and `core update` do. The move pre-flight runs `core run core status`

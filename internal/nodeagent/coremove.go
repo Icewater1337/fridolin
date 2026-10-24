@@ -30,6 +30,18 @@ const coreMovesDir = "core-moves"
 // CoreRunner is what core-host does to the core on this machine. Every
 // method does one fixed thing; NativeCore runs the agent's own binary
 // with a fixed `fridolin core` subcommand for each.
+// SecretFiler is a CoreRunner that also moves the secret files of the
+// core's credentials folder (sandbox.credentials_dir) with the host
+// secrets.
+type SecretFiler interface {
+	// ExportFiles reads them, with the folder under ~ config names
+	// (sandbox.credentials_dir; "" for none).
+	ExportFiles(ctx context.Context) (dir string, files map[string][]byte, err error)
+	// ImportFiles writes them into dir under the core's home, keeping
+	// any there already.
+	ImportFiles(ctx context.Context, dir string, files map[string][]byte) (stored, kept []string, err error)
+}
+
 type CoreRunner interface {
 	// Status reads this data dir's device id, the lease and the latest
 	// export.
