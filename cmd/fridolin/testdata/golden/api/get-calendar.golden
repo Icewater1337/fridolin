@@ -8,6 +8,9 @@ Content-Type: application/json
   "client_configured": true,
   "connected": true,
   "default": "you@example.com",
+  "health": {
+    "state": "unchecked"
+  },
   "leftover_client_copies": [],
   "selected": [
     "you@example.com",

@@ -125,9 +125,9 @@ func TestOptionalResponseFieldsKeepPresence(t *testing.T) {
 		{"rotate", RotateTokenResponse{Status: "rotated"}, `{"status":"rotated"}`},
 		{"rotate empty binding", RotateTokenResponse{Binding: &empty, Status: "rotated"}, `{"binding":"","status":"rotated"}`},
 		{"rotate binding", RotateTokenResponse{Binding: &value, Status: "rotated"}, `{"binding":"value","status":"rotated"}`},
-		{"Google absent", GoogleClientResponse{RedirectURI: "callback"}, `{"configured":false,"redirect_uri":"callback"}`},
-		{"Google empty", GoogleClientResponse{ClientIDHint: &empty, Configured: true, RedirectURI: "callback", Type: &empty}, `{"client_id_hint":"","configured":true,"redirect_uri":"callback","type":""}`},
-		{"Google configured", GoogleClientResponse{ClientIDHint: &value, Configured: true, RedirectURI: "callback", Type: &value}, `{"client_id_hint":"value","configured":true,"redirect_uri":"callback","type":"value"}`},
+		{"Google absent", GoogleClientResponse{RedirectURI: "callback"}, `{"builtin":false,"configured":false,"redirect_uri":"callback","scopes":null}`},
+		{"Google empty", GoogleClientResponse{ClientIDHint: &empty, Configured: true, RedirectURI: "callback", Type: &empty}, `{"builtin":false,"client_id_hint":"","configured":true,"redirect_uri":"callback","scopes":null,"type":""}`},
+		{"Google configured", GoogleClientResponse{ClientIDHint: &value, Configured: true, RedirectURI: "callback", Type: &value}, `{"builtin":false,"client_id_hint":"value","configured":true,"redirect_uri":"callback","scopes":null,"type":"value"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

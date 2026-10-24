@@ -23,7 +23,8 @@ ok       approvals waiting: none waiting
 ok       brain folders as approved: every brain folder is as you approved it
 ok       lockdown: off
 ok       time zone of schedules: the system's zone (timezone is unset)
+ok       brains' Google Calendar sign-ins work: no brain's calendar has been used yet
 ok       Google Drive link uses your own Google client: Google Drive is not connected
 ok       housekeeping ran: off (housekeeping.enabled), and never run here
 
-15 ok, 2 warn, 3 missing, 1 fail; a required check fails
+16 ok, 2 warn, 3 missing, 1 fail; a required check fails

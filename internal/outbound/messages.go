@@ -163,6 +163,19 @@ func PlaudVoiceQuestion(question string) string {
 	return "🎙️ " + question
 }
 
+// CalendarGrantBrokenAlert tells the owner that the Google Calendar of the
+// brain named name stopped working: revoked says Google refused its
+// sign-in, else the sign-in needs a new consent. No ids: the owner finds
+// the brain by its name on the Brains page.
+func CalendarGrantBrokenAlert(name string, revoked bool) string {
+	why := "its Google sign-in has to be renewed"
+	if revoked {
+		why = "Google no longer accepts its sign-in (the access was removed, it expired, or the password changed)"
+	}
+	return fmt.Sprintf("⚠️ Google Calendar stopped working for %s: %s. Open the Fridolin dashboard, Brains → %s → Calendar, and press Reconnect. "+
+		"This is the only message about it until it works again.", name, why, name)
+}
+
 // PlaudExpiredAlert tells the owner that the Plaud login expired.
 const PlaudExpiredAlert = "⚠️ Plaud: the login expired, so new recordings are not arriving. Reconnect in the Fridolin dashboard (Integrations → Plaud)."
 

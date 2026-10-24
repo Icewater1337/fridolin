@@ -18,6 +18,18 @@ func FakeGoogle(t *testing.T) (*httptest.Server, *map[string]string) {
 			for k, v := range r.PostForm {
 				got[k] = v[0]
 			}
+			// The made-up code google.CheckClient trades in: Google knows
+			// the client unless its secret is WRONG-SECRET.
+			if r.PostForm.Get("code") == "fridolin-client-check" {
+				if r.PostForm.Get("client_secret") == "WRONG-SECRET" {
+					w.WriteHeader(401)
+					fmt.Fprint(w, `{"error":"invalid_client","error_description":"Unauthorized"}`)
+					return
+				}
+				w.WriteHeader(400)
+				fmt.Fprint(w, `{"error":"invalid_grant","error_description":"Malformed auth code."}`)
+				return
+			}
 			if r.PostForm.Get("code") == "bad" {
 				w.WriteHeader(400)
 				fmt.Fprint(w, `{"error":"invalid_grant","error_description":"Bad Request"}`)

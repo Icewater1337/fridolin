@@ -3,8 +3,16 @@ GET /api/google/client
 Content-Type: application/json
 
 {
+  "builtin": false,
   "client_id_hint": "123-…",
   "configured": true,
   "redirect_uri": "http://127.0.0.1:8765/",
+  "scopes": [
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.events.freebusy",
+    "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+    "https://www.googleapis.com/auth/drive.file"
+  ],
+  "source": "own",
   "type": "installed"
 }

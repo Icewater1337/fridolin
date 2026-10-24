@@ -46,6 +46,9 @@ const DriveFolder = "Fridolin"
 // OAuthClient is a Google OAuth client: "installed" (Desktop app) or "web".
 type OAuthClient struct {
 	Type, ClientID, ClientSecret string
+	// Builtin marks the client baked into the build, which SignInClient
+	// returns when none was pasted under Settings → Google sign-in.
+	Builtin bool
 }
 
 // OAuthToken is what a Drive sign-in returns.
@@ -70,8 +73,9 @@ type OAuth struct {
 
 // ClientStatus is the client a Drive sign-in would use, for the Backup page.
 type ClientStatus struct {
-	// Source is "drive" (pasted for Drive alone) or "google" (the client
-	// under Settings → Google sign-in).
+	// Source is "drive" (pasted for Drive alone), "google" (the client
+	// under Settings → Google sign-in) or "builtin" (the build's own,
+	// without one there).
 	Source       string `json:"source"`
 	Type         string `json:"type"`
 	ClientIDHint string `json:"client_id_hint"`
@@ -97,6 +101,9 @@ func (m *Manager) driveClient() (*OAuthClient, string) {
 	}
 	if m.opts.OAuth.SignInClient != nil {
 		if c := m.opts.OAuth.SignInClient(); c != nil {
+			if c.Builtin {
+				return c, "builtin"
+			}
 			return c, "google"
 		}
 	}
