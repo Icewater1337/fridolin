@@ -26,6 +26,7 @@ export default /** @satisfies {PageModule} */ ({
     const cta = h('div');
     const alerts = h('div.alerts');
     const agentsNote = h('div.alerts');
+    const calendarNote = h('div.alerts');
     const waCard = h('div.card.wa-card');
     const claudeCard = h('div.card');
     const sandboxCard = h('div.card');
@@ -41,6 +42,7 @@ export default /** @satisfies {PageModule} */ ({
       cta,
       alerts,
       agentsNote,
+      calendarNote,
       waCard,
       coreBox,
       h('div.grid.three', claudeCard, sandboxCard, backupCard),
@@ -319,6 +321,16 @@ export default /** @satisfies {PageModule} */ ({
           h('div', h('a', { href: '#/schedules' }, 'Review & approve on the Schedules page')))
         : null));
     }, 30000);
+
+    // ── brains whose Google Calendar sign-in broke ──
+    ctx.follow(resource('/api/calendar/health'), (d) => {
+      const broken = ((d && d.brains) || []).filter((b) => b.state === 'revoked' || b.state === 'needs_reconsent');
+      paint(calendarNote, broken.map((b) => `${b.id}:${b.state}`).join(','), () => (broken.length
+        ? callout('bad', broken.length === 1 ? `Google Calendar stopped working for ${broken[0].name || broken[0].id}` : `Google Calendar stopped working for ${plural(broken.length, 'brain')}`,
+          h('div', 'Google no longer accepts their sign-in, or it has to be renewed. Reconnect on the brain’s page: '),
+          h('div', broken.flatMap((b, i) => [i ? ', ' : null, h('a', { href: `#/brains/${encodeURIComponent(b.id)}` }, b.name || b.id)])))
+        : null));
+    }, 60000);
 
     ctx.follow(brainsResource, (l) => {
       configured = Array.isArray(l) ? l : [];

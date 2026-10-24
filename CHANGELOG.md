@@ -10,6 +10,16 @@ for compatibility.
 
 ### Added
 
+- **A calendar overview per brain.** A brain's Calendar card shows the
+  account, the sign-in's state (working, ends soon, revoked by Google,
+  needs reconnecting), when it last worked, its calendars with their
+  access and which are ticked, the default, and **Reconnect** next to
+  Disconnect. The bridge checks every connected brain's sign-in every six
+  hours. A broken one shows on the Overview page (`GET
+  /api/calendar/health`) and in `fridolin doctor` (`calendar-grants`), and
+  the owner gets one WhatsApp message about it. `GET
+  /api/brains/{id}/calendar` adds `health`. The brain's hint now names the
+  card's **Reconnect** button instead of "Sign in again".
 - **A guided Google setup.** Settings → Google sign-in (and a brain's
   Calendar card before any client is set up) walks through Google Cloud
   Console step by step: a link to each page (in your project once you

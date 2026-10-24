@@ -149,6 +149,9 @@ type Token struct {
 	Scopes       []string `json:"scopes"`
 	Account      string   `json:"account,omitempty"`
 	Expiry       string   `json:"expiry,omitempty"`
+	// RefreshExpiry is when Google ends the sign-in, when it said so
+	// (refresh_token_expires_in: an app in Testing, time-limited access).
+	RefreshExpiry string `json:"refresh_token_expiry,omitempty"`
 }
 
 // oauthPending is a sign-in waiting for Google to send the browser back.
@@ -179,7 +182,13 @@ type Options struct {
 	RedirectURI string
 	CredsDir    func() string
 	// Builtin is the client baked into the build (BuiltinClient), or nil.
-	Builtin        *Client
+	Builtin *Client
+	// HealthPath keeps the brains' grant health (health.go); "" keeps it
+	// in memory only.
+	HealthPath string
+	// OnBroken hears, once, that brainID's calendar grant stopped working:
+	// state is GrantRevoked or GrantReconsent.
+	OnBroken       func(brainID, state string)
 	Configured     func(brainID string) bool
 	UpdateManifest func(brainID string, update func(*manifest.Manifest) error) error
 }
@@ -192,6 +201,7 @@ type Auth struct {
 	pending    map[string]oauthPending  // state → sign-in in progress
 	lastError  map[string]string        // brain id → last sign-in error
 	tokenLocks map[string]chan struct{} // brain id → its token's lock; see lockToken
+	health     map[string]grantRecord   // brain id → its grant's health, loaded on first use (health.go)
 }
 
 // New creates the manager, and logs the files in the credentials
@@ -630,6 +640,7 @@ func (g *Auth) Callback(ctx context.Context, q url.Values) (string, error) {
 		}
 		return fail("saving the brain's calendar settings failed: " + err.Error())
 	}
+	g.signedIn(p.brainID)
 	log.Printf("brain %s: Google Calendar connected (%s)", p.brainID, MaskEmail(account))
 	// Only now: a sign-in that failed above leaves the brain with the old
 	// token, which must still work.
@@ -654,9 +665,12 @@ type tokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	ExpiresIn    int    `json:"expires_in"`
-	Scope        string `json:"scope"` // what Google granted, space-separated
-	Error        string `json:"error"`
-	ErrorDesc    string `json:"error_description"`
+	// RefreshExpiresIn is the refresh token's remaining life in seconds,
+	// which Google sends only for one it limited.
+	RefreshExpiresIn int    `json:"refresh_token_expires_in"`
+	Scope            string `json:"scope"` // what Google granted, space-separated
+	Error            string `json:"error"`
+	ErrorDesc        string `json:"error_description"`
 }
 
 // oauthError is a refusal from Google's token endpoint.
@@ -725,8 +739,18 @@ func (g *Auth) exchange(ctx context.Context, p oauthPending, code string) (*Toke
 	return &Token{
 		Token: tr.AccessToken, RefreshToken: tr.RefreshToken, TokenURI: g.options.Endpoints.Token,
 		ClientID: c.ClientID, ClientSecret: c.ClientSecret, Scopes: tr.grantedScopes(p.scopes),
-		Expiry: time.Now().Add(tokenLifetime(tr.ExpiresIn)).UTC().Format("2006-01-02T15:04:05.000000Z"),
+		Expiry:        time.Now().Add(tokenLifetime(tr.ExpiresIn)).UTC().Format("2006-01-02T15:04:05.000000Z"),
+		RefreshExpiry: tr.refreshExpiry(),
 	}, nil
+}
+
+// refreshExpiry is when the refresh token ends, as Token.RefreshExpiry,
+// or "" when Google set no limit.
+func (tr *tokenResponse) refreshExpiry() string {
+	if tr.RefreshExpiresIn <= 0 {
+		return ""
+	}
+	return time.Now().Add(time.Duration(tr.RefreshExpiresIn) * time.Second).UTC().Format("2006-01-02T15:04:05.000000Z")
 }
 
 // grantedScopes are the scopes Google says it granted, else asked: an
@@ -884,6 +908,9 @@ func (g *Auth) AccessToken(ctx context.Context, brainID string) (*Token, error) 
 	if tr.RefreshToken != "" {
 		t.RefreshToken = tr.RefreshToken
 	}
+	if e := tr.refreshExpiry(); e != "" {
+		t.RefreshExpiry = e
+	}
 	// The access token is good for this call either way; a token not saved
 	// is only refreshed again next time.
 	if err := writeTokenFields(g.TokenPath(brainID), fields, t); err != nil {
@@ -896,7 +923,11 @@ func (g *Auth) AccessToken(ctx context.Context, brainID string) (*Token, error) 
 // as it was read, so that what an older calendar tool's library added
 // stays.
 func writeTokenFields(path string, fields map[string]json.RawMessage, t *Token) error {
-	for k, v := range map[string]any{"token": t.Token, "refresh_token": t.RefreshToken, "expiry": t.Expiry, "scopes": t.Scopes} {
+	values := map[string]any{"token": t.Token, "refresh_token": t.RefreshToken, "expiry": t.Expiry, "scopes": t.Scopes}
+	if t.RefreshExpiry != "" {
+		values["refresh_token_expiry"] = t.RefreshExpiry
+	}
+	for k, v := range values {
 		raw, err := json.Marshal(v)
 		if err != nil {
 			return err
@@ -1037,6 +1068,7 @@ func (g *Auth) Disconnect(ctx context.Context, brainID string, localOnly bool) (
 	g.mu.Lock()
 	delete(g.lastError, brainID)
 	g.mu.Unlock()
+	g.forgetHealth(brainID)
 	if err := g.options.UpdateManifest(brainID, func(m *manifest.Manifest) error { m.Calendar = nil; return nil }); err != nil {
 		return revoked, note, fmt.Errorf("the token was deleted, but saving the brain's calendar settings failed: %w", err)
 	}
@@ -1120,8 +1152,10 @@ type CalendarSnapshot struct {
 	LeftoverClientCopies []string        `json:"leftover_client_copies"`
 	ListError            *string         `json:"list_error,omitempty"`
 	ReconnectNeeded      *bool           `json:"reconnect_needed,omitempty"`
-	Selected             []string        `json:"selected"`
-	TokenPath            string          `json:"token_path"`
+	// Health is the grant's health (health.go), when connected.
+	Health    *GrantHealth `json:"health,omitempty"`
+	Selected  []string     `json:"selected"`
+	TokenPath string       `json:"token_path"`
 }
 
 // CalendarStatus returns the current connection and optional calendar list.
@@ -1173,6 +1207,7 @@ func (g *Auth) CalendarStatus(ctx context.Context, brainID string, cal *manifest
 				}
 			}
 		}
+		g.Note(brainID, err)
 		if err != nil {
 			message := err.Error()
 			resp.ListError = &message
@@ -1181,6 +1216,7 @@ func (g *Auth) CalendarStatus(ctx context.Context, brainID string, cal *manifest
 			resp.ReconnectNeeded = &reconnect
 		}
 	}
+	resp.Health = g.Health(brainID)
 	return resp
 }
 

@@ -10,9 +10,9 @@ import { btn } from './buttons.js';
 import { confirmDialog } from './dialog.js';
 import { nextId } from './fields.js';
 import { tabs } from './tabs.js';
-import { pill, callout, mono, loading } from './common.js';
+import { pill, callout, mono, loading, timeAgo, kv } from './common.js';
 import { errorMessage } from '../lib/errors.js';
-/** @import { GoogleClientCheck, CalendarStatus } from '../../types/api.js' */
+/** @import { GoogleClientCheck, GrantHealth, CalendarStatus, CalendarEntry } from '../../types/api.js' */
 
 const CONSOLE = 'https://console.cloud.google.com';
 const CALENDAR_API = 'calendar-json.googleapis.com';
@@ -253,6 +253,49 @@ export function pasteReturnBox({ redirectUri = 'http://127.0.0.1:8765/', onDone 
     h('div.actions', go));
 }
 
+// What a calendar's access role lets the account do, in plain words.
+/** @type {Record<string, string>} */
+const ACCESS = { owner: 'owner', writer: 'can edit', reader: 'read only', freeBusyReader: 'free/busy only' };
+
+// The grant's state, as the card's pill says it.
+/** @type {Record<string, [string, string]>} */
+const GRANT_PILLS = {
+  valid: ['Working', 'ok'],
+  expiring: ['Ends soon', 'warn'],
+  revoked: ['Revoked by Google', 'bad'],
+  needs_reconsent: ['Needs reconnecting', 'bad'],
+  unchecked: ['Connected', 'neutral'],
+};
+
+/** @param {GrantHealth} health */
+function grantPill(health) {
+  const [text, kind] = GRANT_PILLS[health.state] || GRANT_PILLS.unchecked;
+  return pill(text, kind, { title: health.detail });
+}
+
+/**
+ * The overview of a connected brain's calendar: the account, the grant's
+ * state and when it last worked, the calendars ticked and the default.
+ * @param {CalendarStatus} s
+ * @param {CalendarEntry[]} cals
+ */
+function grantFacts(s, cals) {
+  const health = s.health || { state: 'unchecked' };
+  const name = (/** @type {string | undefined} */ id) => {
+    const c = cals.find((x) => x.id === id);
+    return (c && c.summary) || id || '—';
+  };
+  const ticked = s.selected || [];
+  return kv([
+    ['Account', h('strong', s.account || 'unknown account')],
+    ['Sign-in', h('span', grantPill(health), health.since ? h('span.muted.small', ' ', timeAgo(health.since, 'since ')) : null)],
+    ['Last worked', health.last_ok ? timeAgo(health.last_ok) : h('span.muted', 'not used yet')],
+    ['Google ends it', health.expires ? timeAgo(health.expires) : null],
+    ['Calendars', ticked.length ? ticked.map(name).join(', ') : h('span.muted', 'the primary one')],
+    ['Default', name(s.default || ticked[0])],
+  ]);
+}
+
 // A load that failed because the page went away needs no message.
 /**
  * @param {AbortSignal | undefined} signal
@@ -410,6 +453,8 @@ export function calendarCard(brainId, { signal } = {}) {
     }
 
     const cals = s.calendars || [];
+    const health = s.health || { state: 'unchecked' };
+    const broken = health.state === 'revoked' || health.state === 'needs_reconsent';
     if (!selection) {
       selection = new Set((s.selected && s.selected.length) ? s.selected : cals.filter((c) => c.primary).map((c) => c.id));
       dflt = s.default || [...selection][0] || '';
@@ -429,7 +474,7 @@ export function calendarCard(brainId, { signal } = {}) {
       return h('tr',
         h('td', cb),
         h('td', h('label', { for: cb.id }, swatch, ' ', c.summary || c.id, c.primary ? h('span.muted', ' (primary)') : null)),
-        h('td.muted.small', c.access_role === 'reader' || c.access_role === 'freeBusyReader' ? 'read only' : ''),
+        h('td.muted.small', ACCESS[c.access_role] || c.access_role || ''),
         h('td', h('label.small', radio, ' default')));
     });
     const saveBtn = btn('Save calendars', {
@@ -473,15 +518,20 @@ export function calendarCard(brainId, { signal } = {}) {
       },
     });
     show(
-      h('div.card-head', h('div.card-title', icon('clock'), h('h3', 'Google Calendar')), pill('Connected', 'ok')),
+      h('div.card-head', h('div.card-title', icon('clock'), h('h3', 'Google Calendar')), grantPill(health)),
       errBox,
       copiesBox(s),
-      h('p', 'Signed in as ', h('strong', s.account || 'unknown account'), '.'),
+      grantFacts(s, cals),
+      broken || health.state === 'expiring'
+        ? callout(broken ? 'bad' : 'warn', broken ? (health.state === 'revoked' ? 'Google revoked this sign-in' : 'This sign-in has to be renewed') : 'This sign-in ends soon',
+          health.detail || '', h('div', 'Reconnect signs in again, with the same or another account; the calendars you ticked stay ticked for the same account.'),
+          h('div.actions', connectButton('Reconnect')))
+        : null,
       s.broad_access ? callout('warn', 'More access than the calendar needs',
         'This brain signed in with full access to the account’s calendars, which older versions asked for and which includes deleting calendars and changing who they are shared with. Disconnect, then connect again, to grant only what the calendar uses: its events, free and busy times, and the list of calendars. Disconnecting revokes the old access at Google, every copy of it included, unless another brain is signed in to the same Google account: disconnect that one too, or the old access stays.') : null,
-      s.list_error ? callout('bad', s.reconnect_needed ? 'Google no longer accepts this sign-in' : 'Could not load the calendars', s.list_error, h('div.actions', connectButton('Sign in again'))) : null,
+      s.list_error && !broken ? callout('bad', s.reconnect_needed ? 'Google no longer accepts this sign-in' : 'Could not load the calendars', s.list_error, h('div.actions', connectButton('Reconnect'))) : null,
       cals.length ? h('div.table-wrap', h('table.table',
-        h('thead', h('tr', h('th', ''), h('th', 'Calendar'), h('th', ''), h('th', 'New events'))),
+        h('thead', h('tr', h('th', 'Use'), h('th', 'Calendar'), h('th', 'Access'), h('th', 'New events'))),
         h('tbody', rows))) : null,
       h('p.muted.small', 'Google grants access to the whole account; the bridge makes this brain’s calendar calls itself, only on the calendars you tick, and with the sandbox on the brain cannot read the token. Token: ', mono(s.token_path)),
       h('div.actions', cals.length ? saveBtn : null, connectButton('Switch account'), disconnectBtn));

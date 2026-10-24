@@ -148,6 +148,38 @@ account (see below): disconnect that brain too, or remove the access at
 [myaccount.google.com/permissions](https://myaccount.google.com/permissions),
 before you connect again.
 
+## Calendar overview
+
+A connected brain's Calendar card shows:
+
+- the **account** it signed in with;
+- its **sign-in**: *Working* (Google answered the last call), *Ends soon*
+  (Google set an end to it, as for an app in Testing, and it is less than
+  two days away), *Revoked by Google* (Google refused it: the access was
+  removed at myaccount.google.com/permissions, it expired, or the
+  account's password changed), *Needs reconnecting* (the bridge cannot use
+  it as it is: no refresh token, another OAuth client, a scope left
+  unticked, or Google refuses the client it was issued to), or
+  *Connected* before anything has used it;
+- **last worked**: when Google last answered a calendar call with it, from
+  the brain, this card, or the bridge's own check;
+- the account's **calendars**, which ones the brain may use, the access
+  the account has to each (owner, can edit, read only, free/busy only),
+  and the **default**, where new events go;
+- **Reconnect**, which runs Google's consent again, and **Disconnect**.
+
+The bridge keeps this record in `~/.fridolin/google/calendar_health.json`
+(no tokens in it) and asks Google every six hours, first two minutes after
+it starts, whether each connected brain's sign-in still works, so a
+revocation shows before a brain needs its calendar. A Google outage or the
+network changes nothing there.
+
+When a sign-in breaks, the Overview page names the brain with a link to
+it, `fridolin doctor` warns (`calendar-grants`), and the owner gets one
+WhatsApp message, in plain words, by the brain's name. There is no second
+message until it works again or the brain reconnects; a later break is
+told again.
+
 ## What the brain gets
 
 The sign-in is saved as the brain's token,
@@ -266,10 +298,10 @@ brain's old token.
   not a test user of an app in *Testing*. Add it, or publish the app.
 - **Works for a week, then fails** — the app is in *Testing*; publish it and
   connect again.
-- **The brain says to reconnect the calendar**, or its page says Google no
-  longer accepts the sign-in — Google refused the saved sign-in (access
+- **The brain says to reconnect the calendar**, its card says *Revoked by
+  Google*, or the Overview says its calendar stopped working — Google refused the saved sign-in (access
   removed, the 7-day *Testing* limit, a changed password). Connect again on
-  the brain's Calendar page.
+  the brain's Calendar page (**Reconnect**).
 - **"did not return a refresh token"** — remove the app at
   myaccount.google.com/permissions and connect again.
 - **"signed in with another Google OAuth client"** on a brain's page — the

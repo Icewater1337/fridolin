@@ -1922,6 +1922,30 @@ export interface CalendarEntry {
   color?: string;
 }
 
+/** A brain's calendar grant: how it stands with Google. */
+export interface GrantHealth {
+  /** valid, expiring, revoked, needs_reconsent or unchecked. */
+  state: string;
+  detail?: string;
+  /** When Google last answered a calendar call with it. */
+  last_ok?: string;
+  /** When it broke. */
+  since?: string;
+  /** When Google ends the sign-in, for one it limited. */
+  expires?: string;
+}
+
+/** One connected brain of GET /api/calendar/health. */
+export interface CalendarHealthRow extends GrantHealth {
+  id: string;
+  name: string;
+}
+
+/** GET /api/calendar/health. */
+export interface CalendarHealth {
+  brains: CalendarHealthRow[];
+}
+
 /** GET /api/brains/{id}/calendar (?list=0 leaves the calendars unlisted). */
 export interface CalendarStatus {
   account?: string;
@@ -1937,6 +1961,8 @@ export interface CalendarStatus {
   leftover_client_copies: string[];
   list_error?: string;
   reconnect_needed?: boolean;
+  /** The grant's health, when connected. */
+  health?: GrantHealth;
   /** The calendars the brain may use. */
   selected: string[];
   token_path: string;
@@ -2285,6 +2311,7 @@ export interface ApiGet {
   '/api/housekeeping': HousekeepingStatus;
   '/api/github': GitHubStatus;
   '/api/google/client': GoogleClient;
+  '/api/calendar/health': CalendarHealth;
   '/api/dev/outbox': DevMessage[];
   '/api/logs': Logs;
   '/api/fs/list': DirectoryListing;

@@ -85,6 +85,12 @@ func (e *googleAPIError) Error() string {
 	return fmt.Sprintf("Google Calendar %d: %s", e.status, strings.TrimSuffix(e.message, "."))
 }
 
+// scopeMissing reports whether e is Google saying the token lacks a scope
+// the call needs, which only a new consent mends.
+func (e *googleAPIError) scopeMissing() bool {
+	return e.status == http.StatusForbidden && strings.Contains(strings.ToLower(e.message), "insufficient")
+}
+
 // hint is what a brain should do about e, or "".
 func (e *googleAPIError) hint() string {
 	switch e.status {
@@ -100,7 +106,7 @@ func (e *googleAPIError) hint() string {
 
 // calendarReconnectHint is what a brain tells its owner when Google no
 // longer takes its sign-in.
-const calendarReconnectHint = "Ask the owner to connect the calendar again in the dashboard: Brains → this brain → Calendar → Sign in again."
+const calendarReconnectHint = "Ask the owner to connect the calendar again in the dashboard: Brains → this brain → Calendar → Reconnect."
 
 // calendarAPI calls the Calendar API with the brain's access token: method
 // on path with query, body as JSON when it is not nil, and the answer

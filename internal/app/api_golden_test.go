@@ -170,6 +170,7 @@ func TestGoldenGETEndpoints(t *testing.T) {
 		{"backup-versions-unknown-brain", "/api/brains/nope/backup/versions", nil},
 		{"vault-status", "/api/vault/status", nil},
 		{"google-client", "/api/google/client", nil},
+		{"calendar-health", "/api/calendar/health", nil},
 		{"calendar", "/api/brains/main/calendar?list=0", nil},
 		{"calendar-unknown-brain", "/api/brains/nope/calendar", nil},
 		{"plaud-status", "/api/plaud/status", nil},

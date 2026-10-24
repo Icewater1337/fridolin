@@ -15,6 +15,7 @@ func googleOptionsFor(cfgs *config.Store) google.Options {
 		RedirectURI: "http://" + boot.HTTPListen + "/",
 		CredsDir:    func() string { return CredentialsDir(RuntimeConfig(cfgs)) },
 		Builtin:     google.BuiltinClient(),
+		HealthPath:  boot.Layout().CalendarHealth(),
 		Configured: func(brainID string) bool {
 			for _, ref := range cfgs.Get().BrainDirs {
 				if ref.Approved != nil && ref.Approved.ID == brainID {

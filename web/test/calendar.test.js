@@ -68,7 +68,7 @@ test('a sign-in Google no longer accepts says so', async (t) => {
   net.answer(0, { ...connected, calendars: [], list_error: 'the sign-in no longer works at Google — connect this brain again', reconnect_needed: true });
   await tick();
   assert.ok(card.textContent.includes('Google no longer accepts this sign-in'), card.textContent);
-  assert.ok(button(card, 'Sign in again'));
+  assert.ok(button(card, 'Reconnect'));
 });
 
 test('the broad-access warning says when Disconnect leaves the old access', async (t) => {
@@ -242,4 +242,56 @@ test('a check result names each item', () => {
   installDom();
   const el = clientCheckResult({ status: 'warn', source: 'own', type: 'web', items: [{ name: 'Redirect', status: 'warn', detail: 'must be one of its Authorised redirect URIs' }] });
   assert.ok(el.textContent.includes('The client works, with a note') && el.textContent.includes('Authorised redirect URIs'), el.textContent);
+});
+
+test('a connected card shows the account, the grant, when it last worked, the calendars and the default', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const document = installDom();
+  const net = stubFetch(t);
+  const card = calendarCard('work');
+  document.body.append(card);
+  net.answer(0, {
+    ...connected,
+    calendars: [{ id: 'you@example.com', summary: 'Me', primary: true, access_role: 'owner' }, { id: 'team', summary: 'Team', primary: false, access_role: 'reader' }],
+    selected: ['you@example.com', 'team'], default: 'team',
+    health: { state: 'valid', last_ok: '2026-01-05T10:00:00Z' },
+  });
+  await tick();
+  const text = card.textContent;
+  for (const want of ['you@example.com', 'Working', 'Last worked', 'Me, Team', 'Default', 'owner', 'read only']) assert.ok(text.includes(want), `${want} in ${text}`);
+  assert.ok(card.querySelector('time'), 'when it last worked');
+  assert.ok(!text.includes('Google revoked this sign-in'));
+});
+
+test('a grant Google revoked offers Reconnect, which runs the consent again', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const document = installDom();
+  const net = stubFetch(t);
+  const assigned = [];
+  Object.assign(globalThis, { window: { location: { assign: (u) => assigned.push(u) } } });
+  t.after(() => { delete globalThis.window; });
+  const card = calendarCard('work');
+  document.body.append(card);
+  net.answer(0, { ...connected, calendars: [], list_error: 'Token has been expired or revoked.', reconnect_needed: true,
+    health: { state: 'revoked', detail: 'Google no longer accepts this sign-in (Token has been expired or revoked.)', since: '2026-01-05T10:00:00Z' } });
+  await tick();
+  assert.ok(card.textContent.includes('Revoked by Google') && card.textContent.includes('Google revoked this sign-in'), card.textContent);
+  assert.equal(card.querySelectorAll('button').filter((b) => b.textContent === 'Reconnect').length, 1, 'one Reconnect, not one per box');
+  button(card, 'Reconnect').click();
+  await tick();
+  assert.equal(net.calls[1].url, '/api/brains/work/calendar/connect');
+  net.answer(1, { auth_url: 'https://accounts.google.com/o/oauth2/v2/auth?state=s' });
+  await tick();
+  assert.deepEqual(assigned, ['https://accounts.google.com/o/oauth2/v2/auth?state=s']);
+});
+
+test('a sign-in that ends soon says so', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const document = installDom();
+  const net = stubFetch(t);
+  const card = calendarCard('work');
+  document.body.append(card);
+  net.answer(0, { ...connected, health: { state: 'expiring', detail: 'Google ends this sign-in on 7 Jan 2026 10:00: connect again before then', expires: '2026-01-07T10:00:00Z' } });
+  await tick();
+  assert.ok(card.textContent.includes('This sign-in ends soon') && card.textContent.includes('Ends soon'), card.textContent);
 });

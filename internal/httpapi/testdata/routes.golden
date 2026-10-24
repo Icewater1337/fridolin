@@ -27,6 +27,7 @@ GET /api/brains/{id}
 GET /api/brains/{id}/backup/versions
 GET /api/brains/{id}/calendar
 GET /api/brains/{id}/skills
+GET /api/calendar/health
 GET /api/chats/ignored
 GET /api/config
 GET /api/dev/outbox

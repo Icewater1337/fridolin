@@ -27,11 +27,28 @@ type GoogleService interface {
 	CalendarStatus(context.Context, string, *manifest.Calendar, bool) google.CalendarSnapshot
 	Select(string, manifest.Calendar) error
 	Disconnect(context.Context, string, bool) (bool, string, error)
+	Health(string) *google.GrantHealth
 }
 
 type GoogleAPI struct {
 	Google func() GoogleService
 	Brain  func(string) *brain.Brain
+	// Brains are the brains the bridge runs, for CalendarHealth.
+	Brains func() []*brain.Brain
+}
+
+// CalendarHealth answers GET /api/calendar/health: the calendar grant of
+// each brain that is connected, for the Overview's warning.
+func (a *GoogleAPI) CalendarHealth(w http.ResponseWriter, r *http.Request) {
+	resp := CalendarHealthResponse{Brains: []CalendarHealthRow{}}
+	if a.Brains != nil {
+		for _, br := range a.Brains() {
+			if h := a.Google().Health(br.ID()); h != nil {
+				resp.Brains = append(resp.Brains, CalendarHealthRow{ID: br.ID(), Name: br.Name(), GrantHealth: *h})
+			}
+		}
+	}
+	WriteJSON(w, http.StatusOK, resp)
 }
 
 // IsOAuthCallback reports whether a request to / is Google returning.

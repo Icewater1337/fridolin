@@ -189,6 +189,7 @@ var routeInventory = []httpRoute{
 	{"DELETE", "/api/google/client", classAPI, ""},
 	{"POST", "/api/google/client/check", classAPI, ""},
 	{"POST", "/api/google/callback", classAPI, ""},
+	{"GET", "/api/calendar/health", classAPI, ""},
 	{"GET", "/api/brains/{id}/calendar", classAPI, "/api/brains/main/calendar?list=0"},
 	{"POST", "/api/brains/{id}/calendar/connect", classAPI, "/api/brains/main/calendar/connect"},
 	{"PUT", "/api/brains/{id}/calendar", classAPI, "/api/brains/main/calendar"},

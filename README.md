@@ -538,7 +538,10 @@ with the account for that brain and tick the calendars it may use. It needs a
 Google OAuth client, which you create once in Google Cloud Console: *Settings
 → Google sign-in* walks you through it, with a link to each page, the values
 to copy and a check of the client once you paste it. A build with a built-in
-client skips that. Details: [docs/CALENDAR.md](docs/CALENDAR.md).
+client skips that. The brain's Calendar card shows whether its sign-in
+still works and when it last did, with **Reconnect** when Google revoked
+it; the Overview page and a WhatsApp message tell you when one breaks.
+Details: [docs/CALENDAR.md](docs/CALENDAR.md).
 
 ### GitHub
 

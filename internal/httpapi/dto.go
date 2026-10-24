@@ -252,6 +252,18 @@ type GoogleClientResponse struct {
 	Type         *string  `json:"type,omitempty"`
 }
 
+// CalendarHealthResponse is GET /api/calendar/health.
+type CalendarHealthResponse struct {
+	Brains []CalendarHealthRow `json:"brains"`
+}
+
+// CalendarHealthRow is one connected brain's calendar grant.
+type CalendarHealthRow struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	google.GrantHealth
+}
+
 // GoogleCallbackResponse is where the dashboard goes after a pasted
 // sign-in address was taken.
 type GoogleCallbackResponse struct {

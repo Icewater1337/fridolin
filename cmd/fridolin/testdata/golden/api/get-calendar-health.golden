@@ -1,0 +1,13 @@
+GET /api/calendar/health
+200 OK
+Content-Type: application/json
+
+{
+  "brains": [
+    {
+      "id": "main",
+      "name": "Main",
+      "state": "unchecked"
+    }
+  ]
+}
