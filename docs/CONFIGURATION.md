@@ -1343,8 +1343,8 @@ Google Drive backups; see [BACKUP.md](BACKUP.md).
 ### `plaud`
 
 The Plaud recorder integration; see [PLAUD.md](PLAUD.md) for every setting,
-including `interval_seconds`, `polished`, `message`, `phone_dir` and
-`phone_upload`.
+including `interval_seconds`, `polished`, `message`, `phone_dir`,
+`phone_upload` and voice mode's `voice`, `voice_brain` and `voice_quiet`.
 
 ### GitHub
 

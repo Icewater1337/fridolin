@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 // The site passes a phone's request on through its spool; the bridge
@@ -31,5 +33,56 @@ func TestSiteSpoolPassesPhoneRequestsOn(t *testing.T) {
 	}
 	if a := readSpoolAnswer(t, dir); a["ok"] != true || a["device"] != "dev_1" {
 		t.Errorf("answer = %v", a)
+	}
+}
+
+// A fetch of a voice answer waits for it off the spool's loop: the
+// requests after it are answered meanwhile, and it once, when it is there.
+func TestSiteSpoolLetsAVoiceFetchWait(t *testing.T) {
+	m := newTestSite(t)
+	release := make(chan struct{})
+	var mu sync.Mutex
+	calls := map[string]int{}
+	m.hooks.Device = func(op, assertion string, body []byte) (map[string]any, error) {
+		mu.Lock()
+		calls[op]++
+		mu.Unlock()
+		if op == "voice_reply" {
+			<-release
+			return map[string]any{"state": "done"}, nil
+		}
+		return nil, nil
+	}
+	spool := func(name, req string) string {
+		dir := filepath.Join(m.spoolDir(), strings.Repeat(name, 24))
+		os.MkdirAll(dir, 0o700)
+		os.WriteFile(filepath.Join(dir, "device.json"), []byte(req), 0o600)
+		return dir
+	}
+	wait := spool("a", `{"op":"voice_reply","assertion":"a.b.c"}`)
+	m.processSpool(context.Background())
+	other := spool("b", `{"op":"transcript","assertion":"a.b.c"}`)
+	m.processSpool(context.Background())
+	if a := readSpoolAnswer(t, other); a["ok"] != true {
+		t.Errorf("the request after the fetch: %v", a)
+	}
+	if _, err := os.Stat(filepath.Join(wait, "result.json")); err == nil {
+		t.Fatal("the fetch was answered before its answer was there")
+	}
+	close(release)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(wait, "result.json")); err == nil || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if a := readSpoolAnswer(t, wait); a["state"] != "done" {
+		t.Errorf("the fetch's answer: %v", a)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if calls["voice_reply"] != 1 {
+		t.Errorf("the fetch was passed on %d times", calls["voice_reply"])
 	}
 }

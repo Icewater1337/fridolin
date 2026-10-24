@@ -5,9 +5,11 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Environment
 import android.os.IBinder
@@ -41,12 +43,24 @@ import java.util.Locale
  * Foreground service that keeps the BLE link to the NotePin open and pulls every recording
  * off the device as soon as it stops: device → MP3 in Documents/PlaudSync → delete on device
  * → Plaud transcription → .txt next to the MP3.
+ *
+ * In voice mode (docs/PLAUD.md, "Voice mode") a recording is a question for Fridolin instead,
+ * as is what is said to the phone's speech recognizer ([AskActivity]); the answer is read aloud
+ * ([Speaker]).
  */
 class SyncService : Service() {
 
     companion object {
         const val ACTION_PAIR = "pair"
         const val ACTION_UNPAIR = "unpair"
+        const val ACTION_ASK = "ask"
+        const val ACTION_STOP_SPEECH = "stop_speech"
+        const val ACTION_SKIP = "skip"
+        const val ACTION_REFRESH = "refresh"
+        const val EXTRA_TEXT = "text"
+
+        /** How long the app waits for the answer to a voice question. */
+        private const val ANSWER_WAIT_MS = 30 * 60_000L
 
         @Volatile
         var status = "Not running"
@@ -54,6 +68,11 @@ class SyncService : Service() {
 
         fun start(ctx: Context, action: String? = null) {
             ctx.startForegroundService(Intent(ctx, SyncService::class.java).setAction(action))
+        }
+
+        /** Asks Fridolin text by voice mode. */
+        fun ask(ctx: Context, text: String) {
+            ctx.startForegroundService(Intent(ctx, SyncService::class.java).setAction(ACTION_ASK).putExtra(EXTRA_TEXT, text))
         }
     }
 
@@ -84,6 +103,17 @@ class SyncService : Service() {
     // Transcripts waiting to reach Fridolin (Fridolin.kt), when the app was built for it
     private val outboxDir by lazy { File(filesDir, "outbox").apply { mkdirs() } }
     private val exportDir by lazy { File(cacheDir, "export").apply { mkdirs() } }
+    // Voice questions: <id>.ask waits to be sent, <id>.wait for its answer
+    private val voiceDir by lazy { File(filesDir, "voice").apply { mkdirs() } }
+    private val asking = Mutex()
+    private val awaiting = mutableSetOf<String>()
+    private lateinit var speaker: Speaker
+    private val unlocked = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            speaker.resume()
+            refreshNotification()
+        }
+    }
     private val wakeLock by lazy {
         getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "plaudsync:export")
@@ -99,6 +129,8 @@ class SyncService : Service() {
             NotificationChannel("sync", "Plaud sync", NotificationManager.IMPORTANCE_LOW)
         )
         startForeground(1, notification("Starting"), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+        speaker = Speaker(this) { refreshNotification() }
+        registerReceiver(unlocked, IntentFilter(Intent.ACTION_USER_PRESENT))
         AppLog.i("service started")
         scope.launch { run() }
     }
@@ -111,6 +143,10 @@ class SyncService : Service() {
                 scan()
             }
             ACTION_UNPAIR -> unpair()
+            ACTION_ASK -> intent.getStringExtra(EXTRA_TEXT)?.let { queueQuestion(it) }
+            ACTION_STOP_SPEECH -> speaker.stop()
+            ACTION_SKIP -> speaker.skip()
+            ACTION_REFRESH -> refreshNotification()
         }
         return START_STICKY
     }
@@ -118,6 +154,8 @@ class SyncService : Service() {
     override fun onDestroy() {
         AppLog.i("service stopped")
         scope.cancel()
+        unregisterReceiver(unlocked)
+        speaker.shutdown()
         if (wakeLock.isHeld) wakeLock.release()
         super.onDestroy()
     }
@@ -133,6 +171,7 @@ class SyncService : Service() {
         sdkReady = true
         scan()
         transcribePending()
+        resumeQuestions()
         scope.launch {
             while (true) {
                 uploadPending()
@@ -345,7 +384,9 @@ class SyncService : Service() {
                     val text = withContext(Dispatchers.IO) { PlaudApi.transcribe(t, mp3) }
                     withContext(Dispatchers.IO) {
                         saveToDocuments("${mp3.nameWithoutExtension}.txt", "text/plain") { it.write(text.toByteArray()) }
-                        if (Fridolin.enabled) File(outboxDir, "${mp3.nameWithoutExtension}.txt").writeBytes(text.toByteArray())
+                        // In voice mode a recording is a question, not a transcript to hand over.
+                        if (Fridolin.enabled && VoicePrefs.enabled(this@SyncService)) writeQuestion(SpeechText.question(text))
+                        else if (Fridolin.enabled) File(outboxDir, "${mp3.nameWithoutExtension}.txt").writeBytes(text.toByteArray())
                     }
                     mp3.delete()
                     AppLog.i("transcript saved: ${mp3.nameWithoutExtension}.txt")
@@ -376,6 +417,89 @@ class SyncService : Service() {
             }
         } finally {
             uploading.unlock()
+        }
+    }
+
+    // --- voice mode ---------------------------------------------------------------------------
+
+    /** Keeps a question until it is sent (so a restart or no network loses nothing). */
+    private fun writeQuestion(text: String) {
+        if (text.isBlank()) return
+        File(voiceDir, Fridolin.newQuestionId() + ".ask").writeText(text)
+    }
+
+    private fun queueQuestion(text: String) {
+        if (!Fridolin.enabled) return AppLog.i("voice: this build has no site to ask Fridolin through")
+        scope.launch {
+            withContext(Dispatchers.IO) { writeQuestion(text) }
+            AppLog.i("voice: question taken")
+            sendQuestions()
+        }
+    }
+
+    /** After a start: what was asked waits for its answer again, and what was not is sent. */
+    private fun resumeQuestions() {
+        if (!Fridolin.enabled) return
+        voiceDir.listFiles { f -> f.name.endsWith(".wait") }.orEmpty().forEach { awaitAnswer(it) }
+        scope.launch { sendQuestions() }
+    }
+
+    /** Sends the questions waiting to go, oldest first; what fails waits for the next try. */
+    private suspend fun sendQuestions() {
+        if (!asking.tryLock()) return
+        try {
+            for (q in voiceDir.listFiles { f -> f.name.endsWith(".ask") }.orEmpty().sortedBy { it.lastModified() }) {
+                val rid = q.nameWithoutExtension
+                try {
+                    withContext(Dispatchers.IO) { Fridolin.ask(this@SyncService, rid, q.readBytes()) }
+                    val wait = File(voiceDir, "$rid.wait")
+                    q.renameTo(wait)
+                    AppLog.i("voice: asked Fridolin")
+                    awaitAnswer(wait)
+                } catch (e: Exception) {
+                    AppLog.i("voice: asking failed, will retry: ${e.message}")
+                    scope.launch { delay(60_000); sendQuestions() }
+                    break
+                }
+            }
+        } finally {
+            asking.unlock()
+        }
+        refreshNotification()
+    }
+
+    /** Fetches the answer to a question that was sent, until it is there or [ANSWER_WAIT_MS] passed. */
+    private fun awaitAnswer(wait: File) {
+        val rid = wait.nameWithoutExtension
+        if (!awaiting.add(rid)) return
+        refreshNotification()
+        scope.launch {
+            try {
+                while (System.currentTimeMillis() - wait.lastModified() < ANSWER_WAIT_MS) {
+                    val r = try {
+                        withContext(Dispatchers.IO) { Fridolin.reply(this@SyncService, rid) }
+                    } catch (e: Exception) {
+                        AppLog.i("voice: fetching the answer failed, will retry: ${e.message}")
+                        delay(10_000)
+                        continue
+                    }
+                    when (r.state) {
+                        "waiting" -> { delay(1_000); continue } // the site held it 15 s already
+                        "done" -> if (r.text != null) {
+                            AppLog.i("voice: answer received")
+                            speaker.say(r.text)
+                        } else AppLog.i("voice: Fridolin answered in WhatsApp only")
+                        "failed" -> AppLog.i("voice: Fridolin could not answer: ${r.error}")
+                        else -> AppLog.i("voice: Fridolin no longer knows the question (restarted?); its answer is in WhatsApp")
+                    }
+                    return@launch
+                }
+                AppLog.i("voice: no answer within ${ANSWER_WAIT_MS / 60_000} minutes")
+            } finally {
+                wait.delete()
+                awaiting.remove(rid)
+                refreshNotification()
+            }
         }
     }
 
@@ -464,18 +588,43 @@ class SyncService : Service() {
 
     private fun setStatus(s: String) {
         status = s
-        getSystemService(NotificationManager::class.java).notify(1, notification(s))
+        refreshNotification()
+    }
+
+    private fun refreshNotification() {
+        getSystemService(NotificationManager::class.java).notify(1, notification(status))
         AppLog.onChange?.invoke()
     }
 
-    private fun notification(text: String): Notification =
-        Notification.Builder(this, "sync")
+    /** The ongoing notification; in voice mode it says so and offers Ask, Stop and Skip. Never an answer's text. */
+    private fun notification(text: String): Notification {
+        val b = Notification.Builder(this, "sync")
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
             .setContentTitle("Plaud Sync")
             .setContentText(text)
             .setOngoing(true)
+            .setVisibility(Notification.VISIBILITY_PRIVATE)
             .setContentIntent(
                 PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
             )
-            .build()
+        if (!VoicePrefs.enabled(this) || !::speaker.isInitialized) return b.build()
+        b.setContentTitle("Plaud Sync · voice mode")
+        b.setSubText(
+            when {
+                speaker.held -> "Answer ready, unlock to hear it"
+                speaker.busy -> "Speaking"
+                awaiting.isNotEmpty() -> "Waiting for Fridolin's answer"
+                else -> null
+            }
+        )
+        fun action(label: String, action: String, code: Int) = Notification.Action.Builder(null, label,
+            PendingIntent.getService(this, code, Intent(this, SyncService::class.java).setAction(action), PendingIntent.FLAG_IMMUTABLE)).build()
+        b.addAction(Notification.Action.Builder(null, "Ask",
+            PendingIntent.getActivity(this, 10, Intent(this, AskActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE)).build())
+        if (speaker.busy) {
+            b.addAction(action("Stop", ACTION_STOP_SPEECH, 11))
+            b.addAction(action("Skip", ACTION_SKIP, 12))
+        }
+        return b.build()
+    }
 }

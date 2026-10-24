@@ -3,6 +3,12 @@
 //
 //   POST /_fridolin/devices/pair                   {"assertion": JWT}
 //   POST /_fridolin/devices/plaud/transcripts      Authorization: Bearer JWT, the transcript as the body
+//   POST /_fridolin/devices/voice/ask              Authorization: Bearer JWT, a voice question as the body
+//   POST /_fridolin/devices/voice/reply            Authorization: Bearer JWT naming the question
+//
+// Voice mode (docs/PLAUD.md, "Voice mode"): the answer to a question comes
+// back encrypted to a key of the phone's keystore, so this process only
+// ever passes on ciphertext. A fetch of it waits up to 15 seconds for it.
 //
 // Each JWT is ES256, signed with a key the phone made in its keystore: the
 // pairing one with the key it pairs, which it carries, an upload with the
@@ -19,13 +25,17 @@ import { awaitAnswer, RefusedError } from './ingest.ts'
 
 export type Jwk = { kty: string; crv: string; x: string; y: string }
 type Device = { id: string; key: Jwk }
-type Claims = { iss?: string; aud?: string; iat?: number; exp?: number; code?: string; key?: Jwk; name?: string; sha256?: string }
+type Claims = { iss?: string; aud?: string; iat?: number; exp?: number; code?: string; key?: Jwk; name?: string; sha256?: string; rid?: string; enc?: Jwk }
 
 const PAIR_AUD = 'fridolin:pair'
 const TRANSCRIPT_AUD = 'fridolin:plaud-transcript'
 const MAX_AGE_S = 600
 const SKEW_S = 60
 const TRANSCRIPT_MAX = 512 * 1024
+const VOICE_AUD = 'fridolin:voice'
+const VOICE_REPLY_AUD = 'fridolin:voice-reply'
+const QUESTION_MAX = 16 * 1024
+const RID = /^[A-Za-z0-9_-]{16,64}$/
 
 /** The claims of an ES256 JWT, unchecked: they name the key to check it with. */
 export function jwtClaims(token: string): Claims | null {
@@ -145,6 +155,40 @@ export function deviceRoutes(devicesFile: string, spoolDir: string): express.Rou
       return
     }
     await answer(req, res, () => handOver(spoolDir, { op: 'transcript', assertion: token }, body), () => res.status(201).json({ ok: true }))
+  })
+
+  const bearer = (req: express.Request) => /^Bearer (\S+)$/.exec(req.get('authorization') ?? '')?.[1] ?? ''
+  /** The claims of a request a paired phone signed for aud and that names a question, or null. */
+  const signed = (req: express.Request, aud: string): Claims | null => {
+    const token = bearer(req)
+    const claims = jwtClaims(token)
+    const device = devices.byId(claims?.iss)
+    if (!claims || !device || !verifyJwt(token, device.key, aud) || !RID.test(claims.rid ?? '')) return null
+    return claims
+  }
+
+  router.post('/_fridolin/devices/voice/ask', express.raw({ type: () => true, limit: QUESTION_MAX }), async (req, res) => {
+    const claims = signed(req, VOICE_AUD)
+    if (!claims) {
+      refuse(req, res, 401, 'Not signed by a paired phone')
+      return
+    }
+    const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0)
+    if (claims.sha256 !== createHash('sha256').update(body).digest('base64url') || !claims.enc) {
+      refuse(req, res, 400, 'The signature is for another question')
+      return
+    }
+    await answer(req, res, () => handOver(spoolDir, { op: 'voice', assertion: bearer(req) }, body), r => res.status(202).json({ state: r.state }))
+  })
+
+  router.post('/_fridolin/devices/voice/reply', async (req, res) => {
+    if (!signed(req, VOICE_REPLY_AUD)) {
+      refuse(req, res, 401, 'Not signed by a paired phone')
+      return
+    }
+    // The bridge holds this one until the answer is there, at most 15 seconds.
+    await answer(req, res, () => handOver(spoolDir, { op: 'voice_reply', assertion: bearer(req) }),
+      r => res.json({ state: r.state, ...(r.reply ? { reply: r.reply } : {}), ...(r.error ? { error: r.error } : {}) }))
   })
   return router
 }
