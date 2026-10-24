@@ -500,7 +500,8 @@ func TestStopWaitsForARemovedBrainsDelivery(t *testing.T) {
 // abandon a stuck shutdown.
 func TestStopWaitsForDeliveryAfterTheKillTimeout(t *testing.T) {
 	setShutdownGrace(t, time.Millisecond)
-	mgr, _, _ := queueTestManager(t, 10, "")
+	const killWait = 300 * time.Millisecond // brain.StopRunWait outside tests
+	mgr, _, _ := queueTestManager(t, 10, "", func(o *brain.Options) { o.StopRunWait = killWait })
 	entered, release := make(chan struct{}), make(chan struct{})
 	releaseDelivery := sync.OnceFunc(func() { close(release) })
 	defer releaseDelivery()
@@ -521,7 +522,7 @@ func TestStopWaitsForDeliveryAfterTheKillTimeout(t *testing.T) {
 	select {
 	case <-stopped:
 		t.Fatal("Stop returned while delivery still needed the store")
-	case <-time.After(brain.StopRunWait + 200*time.Millisecond):
+	case <-time.After(killWait + 200*time.Millisecond):
 	}
 	releaseDelivery()
 	select {
