@@ -1561,9 +1561,14 @@ of, such as those a restart of the core forgot (`node-session` findings).
 A *core host* is a machine the core may move to one day (#187). This
 first slice gives it its facts (`core.check`) and lets the host secrets
 go from one core host to another over the node channel, end to end,
-instead of `fridolin core send`/`receive` and the four words. The move
-itself (`!movecore`) comes later; `core send`/`receive` stay for a
-manual move and for an old machine that is gone.
+instead of `fridolin core send`/`receive` and the four words. The second
+moves the core itself between two native core hosts, `fridolin nodes
+move SRC DST --yes` ([CORE.md, "The core moves itself"](CORE.md#the-core-moves-itself)),
+with the methods `core.image.pull`, `core.rehearse`, `core.release`,
+`core.handoff` and `core.move.status`, each a fixed `fridolin core`
+subcommand of the agent's own binary. `!movecore` on WhatsApp comes
+later; `core send`/`receive` stay for a manual move and for an old
+machine that is gone.
 
 It needs two keys:
 
