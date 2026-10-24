@@ -30,6 +30,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/intent"
+	"github.com/Icewater1337/fridolin/internal/lease"
 	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/mcp"
@@ -194,6 +195,9 @@ type Options struct {
 	// LeaseRetry is the first wait before a lease renewal that failed on
 	// the store is tried again (default 30 s; tests shorten it).
 	LeaseRetry time.Duration
+	// LeaseClock is the lease's clock; nil is the system's. Tests move it
+	// past the staleness window instead of waiting it out.
+	LeaseClock lease.Clock
 	// Env is the environment the bridge reads while it runs and hands, in
 	// part, to the programs it starts; nil is the process's own. The home
 	// folder comes from the config store (Boot.Home), not from Env.
@@ -276,7 +280,7 @@ func New(opts Options) (_ *App, err error) {
 		waits:    w,
 		hooks:    opts.hooks,
 		core: coreRuntime{tailnetFactory: opts.Tailnet, tailnetAuthKey: opts.TailnetAuthKey,
-			leaseStore: opts.LeaseStore, leaseSettle: opts.LeaseSettle, leaseRetry: opts.LeaseRetry},
+			leaseStore: opts.LeaseStore, leaseSettle: opts.LeaseSettle, leaseRetry: opts.LeaseRetry, leaseClock: opts.LeaseClock},
 		b2: loadB2Usage(cfgs.Boot()),
 	}
 	if st, ok := opts.LeaseStore.(interface{ SetUsage(*cloud.Usage, string) }); ok {

@@ -300,6 +300,12 @@ func TestSandboxEnforcesProfile(t *testing.T) {
 				writeTestFile(t, filepath.Join(home, f), "content of "+f)
 			}
 			expand := strings.NewReplacer("{b}", l.otherBrain, "{deny}", l.denyDir)
+			type tried struct {
+				name, path string
+				allow      bool
+			}
+			var all []tried
+			var attempts []sandboxAttempt
 			for _, c := range checks {
 				configured := filepath.Join(home, expand.Replace(c.path))
 				spellings := [][2]string{{"configured", configured}}
@@ -311,13 +317,17 @@ func TestSandboxEnforcesProfile(t *testing.T) {
 					if c.write {
 						p += "." + label // a fresh file per spelling
 					}
-					t.Run(c.name+"/"+label, func(t *testing.T) {
-						allowed, out := sandboxTry(t, sp, ownDir, c.write, p)
-						if allowed != c.allow {
-							t.Errorf("%s: allowed=%v, want %v (output %q)", p, allowed, c.allow, out)
-						}
-					})
+					all = append(all, tried{c.name + "/" + label, p, c.allow})
+					attempts = append(attempts, sandboxTryAttempt(c.write, p))
 				}
+			}
+			outcomes := sandboxRunAll(t, sp, ownDir, attempts)
+			for i, c := range all {
+				t.Run(c.name, func(t *testing.T) {
+					if o := outcomes[i]; o.allowed != c.allow {
+						t.Errorf("%s: allowed=%v, want %v (output %q)", c.path, o.allowed, c.allow, o.out)
+					}
+				})
 			}
 		})
 	}
@@ -572,30 +582,35 @@ func TestSandboxKeepsYourInstructionsFromBrains(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				// The CLI walks up from the folder's real path, which in the
+				// symlinked layout passes a folder no configured path names.
+				real, err := filepath.EvalSymlinks(ownDir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				above := filepath.Join(filepath.Dir(filepath.Dir(real)), "CLAUDE.md")
+				if err := os.WriteFile(above, []byte("content of "+above), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				var attempts []sandboxAttempt
 				for _, c := range cases {
+					attempts = append(attempts, sandboxAttempt{cmd: c.cmd})
+				}
+				outcomes := sandboxRunAll(t, sp, ownDir, append(attempts, sandboxTryAttempt(false, above)))
+				for i, c := range cases {
 					t.Run(c.name, func(t *testing.T) {
 						want := c.isolated
 						if inherit {
 							want = c.inherit
 						}
-						if allowed, out := sandboxRun(t, sp, ownDir, "/bin/sh", "-c", c.cmd); allowed != want {
-							t.Errorf("%s: allowed=%v, want %v (output %q)", c.cmd, allowed, want, out)
+						if o := outcomes[i]; o.allowed != want {
+							t.Errorf("%s: allowed=%v, want %v (output %q)", c.cmd, o.allowed, want, o.out)
 						}
 					})
 				}
-				// The CLI walks up from the folder's real path, which in the
-				// symlinked layout passes a folder no configured path names.
 				t.Run("read the CLAUDE.md two folders above its real path", func(t *testing.T) {
-					real, err := filepath.EvalSymlinks(ownDir)
-					if err != nil {
-						t.Fatal(err)
-					}
-					p := filepath.Join(filepath.Dir(filepath.Dir(real)), "CLAUDE.md")
-					if err := os.WriteFile(p, []byte("content of "+p), 0o600); err != nil {
-						t.Fatal(err)
-					}
-					if allowed, out := sandboxTry(t, sp, ownDir, false, p); allowed != inherit {
-						t.Errorf("reading %s: allowed=%v, want %v (output %q)", p, allowed, inherit, out)
+					if o := outcomes[len(cases)]; o.allowed != inherit {
+						t.Errorf("reading %s: allowed=%v, want %v (output %q)", above, o.allowed, inherit, o.out)
 					}
 				})
 			})
@@ -1738,6 +1753,93 @@ func sandboxRun(t *testing.T, sp *SandboxProfiler, dir, prog string, args ...str
 	}
 	t.Fatalf("%s %q: %v: %s", prog, args, err, out)
 	return false, ""
+}
+
+// sandboxAttempt is one command sandboxRunAll runs: shell code, which
+// finds path in $p.
+type sandboxAttempt struct{ cmd, path string }
+
+// sandboxTryAttempt is sandboxTry's read (cat) or write of path, for
+// sandboxRunAll.
+func sandboxTryAttempt(write bool, path string) sandboxAttempt {
+	if write {
+		return sandboxAttempt{`printf planted > "$p"`, path}
+	}
+	return sandboxAttempt{`/bin/cat "$p"`, path}
+}
+
+// sandboxOutcome is what one attempt of sandboxRunAll did.
+type sandboxOutcome struct {
+	allowed bool
+	out     string
+}
+
+// sandboxRunAllScript runs each pair of arguments, shell code and the $p it
+// reads, in turn, and prints each one's exit status and output, each
+// followed by a NUL.
+const sandboxRunAllScript = `while [ $# -gt 1 ]; do
+  c=$1 p=$2
+  shift 2
+  out=$(eval "$c" 2>&1)
+  rc=$?
+  printf '%s\0%s\0' "$rc" "$out"
+done`
+
+// sandboxRunAll runs attempts in turn as brain a under its profile, from
+// dir, in one sh under one sandbox-exec, and reports each as sandboxRun
+// would: one profile and one sandbox-exec for a hundred checks, not one
+// each. Anything other than success or the sandbox's "Operation not
+// permitted" fails the test, so a missing file never passes as denied.
+// The reads run /bin/cat from that sh, not as the sandboxed program
+// itself, so a profile that refused to start it would make every read
+// look denied: it first runs /bin/cat once, which must be allowed.
+func sandboxRunAll(t *testing.T, sp *SandboxProfiler, dir string, attempts []sandboxAttempt) []sandboxOutcome {
+	t.Helper()
+	args := []string{"-c", sandboxRunAllScript, "sh", `/bin/cat "$p"`, "/dev/null"}
+	for _, a := range attempts {
+		args = append(args, a.cmd, a.path)
+	}
+	env := sandboxStateEnv(t, sp, "a")
+	bin, argv, err := sp.Command("a", "/bin/sh", args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(bin, argv...)
+	cmd.Dir = dir
+	cmd.Env = append(envOf(t).Environ(), env...)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("the sandboxed sh: %v: %s", err, stderr.String())
+	}
+	fields := strings.Split(string(out), "\x00")
+	if len(fields) != 2*(len(attempts)+1)+1 {
+		t.Fatalf("the sandboxed sh reported %d fields for %d attempts: %q (stderr %q)", len(fields), len(attempts), out, stderr.String())
+	}
+	outcomes := make([]sandboxOutcome, 0, len(attempts)+1)
+	for i := 0; i+1 < len(fields); i += 2 {
+		rc, o := fields[i], fields[i+1]
+		var cmd string
+		if i == 0 {
+			cmd = `/bin/cat /dev/null`
+		} else {
+			a := attempts[i/2-1]
+			cmd = a.cmd + " with $p=" + a.path
+		}
+		switch {
+		case rc == "0":
+			outcomes = append(outcomes, sandboxOutcome{true, o})
+		case strings.Contains(o, "Operation not permitted") && !strings.HasPrefix(o, "sandbox-exec:"):
+			outcomes = append(outcomes, sandboxOutcome{false, o})
+		default:
+			t.Fatalf("%s: exit status %s: %s", cmd, rc, o)
+		}
+	}
+	if !outcomes[0].allowed {
+		t.Fatalf("/bin/cat does not run in the sandbox, so a denied read would prove nothing: %s", outcomes[0].out)
+	}
+	return outcomes[1:]
 }
 
 // sandboxStateEnv creates brain id's state as a run does, with the folders

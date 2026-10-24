@@ -23,14 +23,26 @@ func TestCheckShowsTheClaudeVersion(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
+			// The test binary is the CLI (testutil's fake), through a link
+			// of each case's own, which check caches the version by. It is
+			// no new program, which macOS would scan before its first run.
+			t.Setenv("FRIDOLIN_FAKE_CLAUDE", "1")
+			t.Setenv("FRIDOLIN_FAKE_VERSION", c.version)
 			cli := filepath.Join(home, "bin", "claude")
 			if !c.missing {
 				if err := os.MkdirAll(filepath.Dir(cli), 0o700); err != nil {
 					t.Fatal(err)
 				}
-				versionCLI(t, cli, c.version)
+				self, err := os.Executable()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(self, cli); err != nil {
+					t.Fatal(err)
+				}
 			}
-			path := writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data", "claude_path": "`+cli+`"}`)
+			path := writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data", "claude_path": "`+cli+`",
+				"child_env_passthrough": ["FRIDOLIN_FAKE_CLAUDE", "FRIDOLIN_FAKE_VERSION"]}`)
 			out := captureStdout(t, func() { checkCmd([]string{"--config", path}) })
 			line := lineWith(out, "claude:")
 			if !strings.Contains(line, cli) || !strings.Contains(line, c.want) {

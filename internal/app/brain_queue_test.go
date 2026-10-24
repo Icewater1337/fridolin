@@ -1577,15 +1577,39 @@ func TestRunEndsSoonAfterItsResult(t *testing.T) {
 
 // TestRunTimeoutKeepsAnAnswerThatCame: a deadline that comes in the grace
 // after the result stops what is left of the run, but the answer that is
-// in still goes out.
+// in still goes out. The output stays open until the test releases it,
+// once the deadline has passed: runWaitDelay is longer than the test
+// waits, so nothing else ends the run first.
 func TestRunTimeoutKeepsAnAnswerThatCame(t *testing.T) {
 	t.Parallel()
-	optionsOf(t).waits.runTimeoutUnit, optionsOf(t).waits.postResultGrace = 100*time.Millisecond, 10*time.Second
-	mgr, d, _ := queueTestManager(t, 0, `, "run_timeout_minutes": 20`)
+	w := optionsOf(t).waits
+	w.runTimeoutUnit, w.postResultGrace, w.runWaitDelay = 50*time.Millisecond, 10*time.Second, time.Minute
+	const timeout = 20 * 50 * time.Millisecond
+	mgr, d, home := queueTestManager(t, 0, `, "run_timeout_minutes": 20`)
+	childLog := filepath.Join(home, "child-pid")
 	setenv(t, "FRIDOLIN_FAKE_CHILD", "1") // sleeps 30 s holding the output open
+	setenv(t, "FRIDOLIN_FAKE_CHILD_PID_LOG", childLog)
 	if _, _, _, err := mgr.Submit(dm("answer in time")); err != nil {
 		t.Fatal(err)
 	}
+	var started time.Time
+	testutil.WaitFor(t, 10*time.Second, "the run to start", func() bool {
+		if r := mgr.Get("a").Snapshot().Running; r != nil {
+			started = r.Started
+			return true
+		}
+		return false
+	})
+	var child int
+	testutil.WaitFor(t, 10*time.Second, "the command holding the output", func() bool {
+		data, _ := os.ReadFile(childLog)
+		child, _ = strconv.Atoi(string(data))
+		return child > 0
+	})
+	// The run's deadline is set before it is marked started: past this, it
+	// has come while the output is held.
+	time.Sleep(time.Until(started.Add(timeout + 50*time.Millisecond)))
+	testutil.KillPID(child)
 	testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
 	if res := d.all()[0].res; res.Err != nil || !strings.HasSuffix(res.Text, "says: answer in time") {
 		t.Errorf("result = %+v, want the answer that came before the deadline", res)

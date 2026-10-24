@@ -212,6 +212,7 @@ func TestSetupSaysWhatHappened(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel() // each run has its own HOME, TMPDIR and environment
 			home := fsx.Canonical(t.TempDir())
 			if c.oldBuild {
 				makeFiles(t, home, ".local/lib/fridolin/fridolin")
@@ -408,6 +409,7 @@ func TestSetupTakesItsFoldersFromFridolinVariables(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel() // each run has its own HOME, TMPDIR and environment
 			home := fsx.Canonical(t.TempDir())
 			expand := strings.NewReplacer("$HOME", home, "$REPO", h.repo).Replace
 			if len(c.files) > 0 {
