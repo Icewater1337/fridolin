@@ -49,8 +49,7 @@ func setsidChildren(t *testing.T, home, holds string) {
 // stderr too, it turned the answer that had come into a "took too long"
 // error once run_timeout came.
 func TestDetachedChildDoesNotHoldTheBrain(t *testing.T) {
-	// Serial: shortens runTimeoutUnit, postResultGrace and runWaitDelay,
-	// package variables every run reads.
+	t.Parallel()
 	cases := []struct {
 		name         string
 		holds        string
@@ -65,9 +64,8 @@ func TestDetachedChildDoesNotHoldTheBrain(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			prevGrace, prevDelay, prevUnit := postResultGrace, runWaitDelay, runTimeoutUnit
-			postResultGrace, runWaitDelay, runTimeoutUnit = tc.grace, tc.delay, 100*time.Millisecond
-			t.Cleanup(func() { postResultGrace, runWaitDelay, runTimeoutUnit = prevGrace, prevDelay, prevUnit })
+			w := optionsOf(t).waits
+			w.postResultGrace, w.runWaitDelay, w.runTimeoutUnit = tc.grace, tc.delay, 100*time.Millisecond
 			mgr, d, home := queueTestManager(t, 0, `, "max_concurrent_runs": 1, "run_timeout_minutes": `+tc.minutes)
 			setsidChildren(t, home, tc.holds)
 

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -65,19 +66,11 @@ var (
 	maxApprovalWait     = 10 * time.Minute
 )
 
-// approvalWaitEnded, when set, runs as a call's wait for approval id
-// ends unanswered, once the call stopped waiting: tests decide the
-// approval at that moment.
-var approvalWaitEnded func(id string)
-
-// approvalDecided, when set, runs in decide once bridge.db has the
-// answer to approval id and before decide hands it on: tests start a
-// call at that moment.
-var approvalDecided func(id string)
-
-// approvalTimeout is how long an approval waits for its answer. A
-// variable, so tests need not wait an hour.
-var approvalTimeout = func(b *App) time.Duration { return b.cfgs.Get().Live.Policy.ApprovalTimeout() }
+// approvalTimeout is how long an approval waits for its answer:
+// policy.approval_timeout_minutes, unless a test's waits shorten it.
+func (b *App) approvalTimeout() time.Duration {
+	return cmp.Or(b.waits.approvalTimeout, b.cfgs.Get().Live.Policy.ApprovalTimeout())
+}
 
 // approvalWaiters are the tool calls waiting for an answer, by approval
 // id, and the free-text questions a call waits on, by chat.
@@ -360,7 +353,7 @@ func (b *App) ask(ctx context.Context, c mcpCaller, a store.Approval) (store.App
 	if p.FromBrain != "" {
 		a.Notify = p.FromBrain // a delegated run is over by then: its core brain hears
 	}
-	a.CreatedAt, a.ExpiresAt = now, now.Add(approvalTimeout(b))
+	a.CreatedAt, a.ExpiresAt = now, now.Add(b.approvalTimeout())
 	if err := b.store.AddApproval(ctx, a); err != nil {
 		return a, fmt.Errorf("the bridge could not record the request: %w", err)
 	}
@@ -426,8 +419,8 @@ func (b *App) awaitAnswer(ctx context.Context, a store.Approval, wait time.Durat
 		// Taken by an answer as the wait ended: it is in the channel.
 		return answerResult(<-ch)
 	}
-	if approvalWaitEnded != nil {
-		approvalWaitEnded(a.ID)
+	if b.hooks.approvalWaitEnded != nil {
+		b.hooks.approvalWaitEnded(a.ID)
 	}
 	// No call waits any more: an answer from here on goes on to the brain
 	// as a message, which decidedResult does not hand over a second time.
@@ -508,8 +501,8 @@ func (b *App) decide(ctx context.Context, id, status, answer, by string, late la
 		log.Printf("approval %s: %v", id, err)
 		return a, false
 	}
-	if approvalDecided != nil {
-		approvalDecided(id)
+	if b.hooks.approvalDecided != nil {
+		b.hooks.approvalDecided(id)
 	}
 	ch := b.waiters.hand(id, late != callerAnswers)
 	b.waiters.settle.Unlock()

@@ -65,11 +65,8 @@ func (h *harness) fakeFrideNode(name, addr string, ff *testutil.FakeFride) (stri
 // through the vault and a close that archives, and the tools only on the
 // core brain.
 func TestFrideThroughNodes(t *testing.T) {
-	// Serial: shortens frideRetryEvery, a package variable every bridge's
-	// FrIDE reads.
-	saved := frideRetryEvery
-	frideRetryEvery = 100 * time.Millisecond
-	t.Cleanup(func() { frideRetryEvery = saved })
+	t.Parallel()
+	optionsOf(t).waits.frideRetry = 100 * time.Millisecond
 	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
 	laptopFride, miniFride := testutil.StartFakeFride(t, "api"), testutil.StartFakeFride(t, "api")
 	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)

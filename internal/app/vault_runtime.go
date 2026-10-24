@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -51,7 +52,6 @@ var (
 	vaultManifestEvery = 10 * time.Minute
 	vaultEvictEvery    = 15 * time.Minute
 	vaultFullSyncEvery = 6 * time.Hour
-	vaultTickEvery     = time.Minute
 )
 
 // vaultEvictionsShown is how many evictions the status lists.
@@ -173,10 +173,6 @@ type vaultBackends struct {
 	b2 bool
 }
 
-// vaultBackendsFor builds the backends, a variable so tests hand in local
-// ones.
-var vaultBackendsFor = defaultVaultBackends
-
 // vaultBrain is what the vault knows of a brain.
 type vaultBrain struct {
 	ID, Dir string
@@ -193,6 +189,10 @@ type vaultService struct {
 	// env is the bridge's environment, which the dev stand-ins and the
 	// secrets are read from and the vault's programs get part of.
 	env Environment
+	// tick is how often the loop looks at what is due (waits.vaultTick),
+	// and backends builds the backends (defaultVaultBackends when nil).
+	tick     time.Duration
+	backends func(ctx context.Context, s *vaultService, cfg *config.Settings) (vaultBackends, error)
 	// brains lists the loaded brains; openMedia the files of the messages
 	// they run or have waiting (absolute paths).
 	brains    func() []vaultBrain
@@ -450,7 +450,11 @@ func (s *vaultService) setError(err error) {
 
 // serve opens the vault and runs it until ctx ends.
 func (s *vaultService) serve(ctx context.Context, run *vaultRun, cfg *config.Settings) {
-	b, err := vaultBackendsFor(ctx, s, cfg)
+	build := s.backends
+	if build == nil {
+		build = defaultVaultBackends
+	}
+	b, err := build(ctx, s, cfg)
 	if err != nil {
 		if ctx.Err() == nil {
 			s.log.Error("vault: not started", "err", err)
@@ -547,7 +551,7 @@ func (s *vaultService) serve(ctx context.Context, run *vaultRun, cfg *config.Set
 		}
 	})
 	lastEvict, lastFull := time.Now(), time.Now()
-	tick := time.NewTicker(vaultTickEvery)
+	tick := time.NewTicker(cmp.Or(s.tick, defaultWaits().vaultTick))
 	defer tick.Stop()
 	s.heartbeat(ctx, run, true)
 	for {

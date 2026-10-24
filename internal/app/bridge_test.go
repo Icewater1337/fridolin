@@ -294,7 +294,7 @@ func TestLogDMAccessWarnsWhenAnyoneCanDM(t *testing.T) {
 func newTestManager(t *testing.T, cfg *config.Settings) *BrainManager {
 	t.Helper()
 	requireTestDataDir(t, cfg)
-	mgr, err := NewBrainManager(cfg, envOf(t))
+	mgr, err := newBrainManager(cfg, envOf(t), *optionsOf(t).waits)
 	if err != nil {
 		t.Fatal(err)
 	}
