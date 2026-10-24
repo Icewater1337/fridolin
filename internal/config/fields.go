@@ -48,6 +48,7 @@ var fields = []fieldSpec{
 	{Field: Field{Name: "codex_path"}},
 	{Field: Field{Name: "codex_model"}},
 	{Field: Field{Name: "codex_effort"}},
+	{Field: Field{Name: "timezone"}},
 	{Field: Field{Name: "max_chunk_size"}},
 	{Field: Field{Name: "max_media_mb"}},
 	{Field: Field{Name: "brain_model"}},

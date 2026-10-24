@@ -192,9 +192,10 @@ func (c *cronSpec) next(after time.Time) (time.Time, bool) {
 				if !c.minute[m] {
 					continue
 				}
-				t := time.Date(day.Year(), day.Month(), day.Day(), h, m, 0, 0, after.Location())
-				// A wall time a DST change skips is normalised into
-				// the next hour, possibly another day: keep to the day.
+				t := wallTime(day.Year(), day.Month(), day.Day(), h, m, after.Location())
+				// A wall time a DST change skips is the moment the
+				// clocks jump to, one it repeats its first showing
+				// (wallTime); keep to the day.
 				if t.After(after) && t.Day() == day.Day() {
 					return t, true
 				}
