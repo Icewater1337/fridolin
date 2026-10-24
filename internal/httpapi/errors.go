@@ -25,6 +25,8 @@ func statusFor(kind apperr.Kind) int {
 		return http.StatusForbidden
 	case apperr.BadJSON:
 		return http.StatusBadRequest
+	case apperr.Unknown:
+		fallthrough
 	default:
 		return http.StatusInternalServerError
 	}

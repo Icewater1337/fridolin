@@ -51,6 +51,7 @@ require (
 	github.com/mdlayher/socket v0.5.0 // indirect
 	github.com/mitchellh/go-ps v1.0.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/nishanths/exhaustive v0.15.0 // indirect
 	github.com/petermattis/goid v0.0.0-20260713124913-97594f28f5ca // indirect
 	github.com/pires/go-proxyproto v0.8.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
@@ -85,4 +86,7 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 )
 
-tool honnef.co/go/tools/cmd/staticcheck
+tool (
+	github.com/nishanths/exhaustive/cmd/exhaustive
+	honnef.co/go/tools/cmd/staticcheck
+)

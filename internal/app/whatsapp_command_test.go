@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 )
@@ -93,6 +94,14 @@ func FuzzNumberAllowed(f *testing.F) {
 			allowed = strings.Split(list, ",")
 		}
 		cfg := &config.File{AllowedNumbers: allowed, AllowAnyDM: &anyDM}
+		// An entry that is not UTF-8 is refused, not mangled into one
+		// that lets someone else in.
+		if slices.ContainsFunc(allowed, func(a string) bool { return !utf8.ValidString(a) }) {
+			if _, err := config.Resolve(cfg, ConfigPaths(), "darwin"); err == nil {
+				t.Errorf("allowed_numbers %q: resolved, want an error", allowed)
+			}
+			return
+		}
 		got := NumberAllowed(resolvedSettings(t, cfg), number)
 		if len(allowed) == 0 {
 			if got != anyDM {
@@ -107,7 +116,8 @@ func FuzzNumberAllowed(f *testing.F) {
 			}
 			return s
 		}
-		listed := slices.ContainsFunc(allowed, func(a string) bool { return canon(a) == canon(number) })
+		// A sender that is not UTF-8 matches nothing.
+		listed := utf8.ValidString(number) && slices.ContainsFunc(allowed, func(a string) bool { return canon(a) == canon(number) })
 		if got != listed {
 			t.Errorf("allowed_numbers %q: %q allowed: %v, listed: %v", allowed, number, got, listed)
 		}

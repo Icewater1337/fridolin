@@ -321,6 +321,8 @@ func (r *renderer) cells(row ast.Node, tag string) []Node {
 				cell.Align = "center"
 			case east.AlignRight:
 				cell.Align = "right"
+			case east.AlignNone:
+				// No align attribute.
 			}
 		}
 		out = append(out, cell)
