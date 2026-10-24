@@ -416,7 +416,10 @@ func (s *Service) runMove(ctx context.Context, r *MoveRecord, o MoveOptions) {
 		fail("the host secrets: %v", err)
 		return
 	}
-	s.moveStep(r, "", "secrets", "%s: %d stored, %d unchanged (names only through the core)", r.TargetName, len(tr.Stored), len(tr.Unchanged))
+	s.moveStep(r, "", "secrets", "%s: %d stored, %d unchanged; secret files: %d stored, %d kept (names only through the core)", r.TargetName, len(tr.Stored), len(tr.Unchanged), len(tr.FilesStored), len(tr.FilesKept))
+	if tr.FilesError != "" {
+		s.moveStep(r, "", "secrets", "the secret files of %s could not be read, so none went: %s", r.SourceName, tr.FilesError)
+	}
 	var reh nodeproto.CoreRehearsal
 	rctx, cancel := context.WithTimeout(ctx, time.Hour)
 	err = s.Call(rctx, dst, nodeproto.MethodCoreRehearse, nodeproto.CoreRehearseParams{Move: r.ID}, &reh)

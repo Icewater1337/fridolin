@@ -30,6 +30,17 @@ if [ -n "${FRIDOLIN_HOST_HOME:-}" ] && [ "$FRIDOLIN_HOST_HOME" = "${HOME:-}" ] &
 	done
 fi
 
+# The owner's zone (config's timezone) is the process's too, whatever
+# host started the container: core start passes the host's zone as TZ,
+# which on a server is often UTC (#250). Brains' runs get it already.
+if [ -r "$FRIDOLIN_CONFIG" ]; then
+	zone=$(jq -r '.timezone // empty' "$FRIDOLIN_CONFIG" 2>/dev/null || true)
+	case "$zone" in
+	"" | *[!A-Za-z0-9_+/-]* | /* | *..*) ;;
+	*) [ -f "/usr/share/zoneinfo/$zone" ] && TZ=$zone && export TZ ;;
+	esac
+fi
+
 if [ "${1:-run}" = run ] && [ ! -e "$FRIDOLIN_CONFIG" ]; then
 	/opt/fridolin/fridolin init --config "$FRIDOLIN_CONFIG" --data-dir "$FRIDOLIN_HOME" \
 		--claude-path /usr/local/bin/claude

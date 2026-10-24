@@ -1711,12 +1711,16 @@ must pin DST. Then:
    pinned for DST, and refuses an offer it does not verify, one that
    expired, or one for a target it does not trust. It encrypts its host
    secrets (the names `core send` sends, without the Tailscale auth key)
-   to the offer's key.
+   to the offer's key, with the secret files of its core's
+   credentials folder ([CORE.md](CORE.md#the-core-moves-itself),
+   "Secret files").
 3. DST (`core.secrets.receive`) decrypts them in memory with the one-time
    key, which goes with the first bundle, and stores them as `core
    receive` does: a name a move does not carry refuses the whole bundle,
    a value that differs from one stored refuses it unless `--replace`,
-   and a failed write puts back the earlier ones.
+   and a failed write puts back the earlier ones. The secret files go
+   into the same folder under its core's home, 0600, never over one
+   there.
 
 The core relays the offer and the ciphertext and sees names only: it
 cannot swap in a key of its own, since the source checks the signature

@@ -44,6 +44,8 @@ type fakeCore struct {
 	// fresh is a host that never pulled the core's image: its core
 	// cannot be read, and the image is not there.
 	fresh bool
+	// files is its core's credentials folder (sandbox.credentials_dir).
+	files string
 
 	mu       sync.Mutex
 	running  bool
@@ -56,7 +58,41 @@ type fakeCore struct {
 func newFakeCore(t *testing.T, name string, st cloud.ObjectStore, ready bool) *fakeCore {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
-	return &fakeCore{name: name, device: hex.EncodeToString(b), st: st, ready: ready}
+	return &fakeCore{name: name, device: hex.EncodeToString(b), st: st, ready: ready, files: t.TempDir()}
+}
+
+// ExportFiles and ImportFiles stand in for core files export and import
+// (secretxfer.ReadFiles and StoreFiles in the container): the .json files
+// of the folder, and only those not there yet are written.
+func (f *fakeCore) ExportFiles(context.Context) (string, map[string][]byte, error) {
+	out := map[string][]byte{}
+	names, err := filepath.Glob(filepath.Join(f.files, "*.json"))
+	for _, p := range names {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return "", nil, err
+		}
+		out[filepath.Base(p)] = b
+	}
+	return "~/credentials", out, err
+}
+
+func (f *fakeCore) ImportFiles(_ context.Context, dir string, files map[string][]byte) (stored, kept []string, err error) {
+	if dir != "~/credentials" {
+		return nil, nil, fmt.Errorf("the files came for %q", dir)
+	}
+	for n, b := range files {
+		p := filepath.Join(f.files, n)
+		if _, err := os.Stat(p); err == nil {
+			kept = append(kept, n)
+			continue
+		}
+		if err := os.WriteFile(p, b, 0o600); err != nil {
+			return stored, kept, err
+		}
+		stored = append(stored, n)
+	}
+	return stored, kept, nil
 }
 
 const fakeStale = time.Minute
@@ -310,6 +346,14 @@ func TestCoreMove(t *testing.T) {
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	m := h.moveHosts(h.b.nodes.Version(), true)
 
+	// mini's credentials folder: the files a move carries, and one it
+	// does not.
+	for name, body := range map[string]string{"google_calendar_token_personal.json": `{"t":"test-value-1"}`, "dashboard-users.json": "[]", "restore.sh": "#!/bin/sh\n"} {
+		if err := os.WriteFile(filepath.Join(m.srcCore.files, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	rep := h.moveCheck(m.src, m.dst)
 	if len(rep.Blocking) != 0 || !rep.Secrets.Pinned || !rep.ImagePresent || rep.Source.Core == nil || !rep.Source.Core.HeldBy() {
 		t.Fatalf("the pre-flight: %+v", rep)
@@ -337,6 +381,17 @@ func TestCoreMove(t *testing.T) {
 	if !st.HeldBy() {
 		t.Errorf("icebase does not hold the lease: %+v", st.Lease)
 	}
+	// The secret files came along, and only those; the record names them
+	// and holds no content.
+	if b, err := os.ReadFile(filepath.Join(m.dstCore.files, "google_calendar_token_personal.json")); err != nil || !strings.Contains(string(b), "test-value-1") {
+		t.Errorf("icebase's calendar token: %q, %v", b, err)
+	}
+	if _, err := os.Stat(filepath.Join(m.dstCore.files, "restore.sh")); err == nil {
+		t.Error("a file a move does not carry went along")
+	}
+	if strings.Contains(body, "test-value-1") || !strings.Contains(body, "secret files: 2 stored") {
+		t.Errorf("the record of the files: %s", body)
+	}
 	h.WaitFor("mini's watch to end", func() bool {
 		st := h.moveStatus(m.src, rec.ID)
 		return st.Phase == nodeproto.MoveDone
@@ -354,8 +409,20 @@ func TestCoreMove(t *testing.T) {
 	}
 
 	// The way back: icebase must pin mini first, which is a change of
-	// its core-host.json the owner approves again.
-	_ = h.moveBack(m)
+	// its core-host.json the owner approves again. icebase's token was
+	// refreshed meanwhile; mini keeps its own folder as it was.
+	if err := os.WriteFile(filepath.Join(m.dstCore.files, "google_calendar_token_personal.json"), []byte(`{"t":"refreshed"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	back := h.moveBack(m)
+	if b, _ := os.ReadFile(filepath.Join(m.srcCore.files, "google_calendar_token_personal.json")); !strings.Contains(string(b), "test-value-1") {
+		t.Errorf("the way back replaced mini's token: %s", b)
+	}
+	if !slices.ContainsFunc(back.Steps, func(st nodeproto.CoreMoveStep) bool {
+		return strings.Contains(st.Detail, "secret files: 0 stored, 2 kept")
+	}) {
+		t.Errorf("the way back's files: %+v", back.Steps)
+	}
 }
 
 // moveBack pins mini on icebase and moves the core back.
