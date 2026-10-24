@@ -376,9 +376,53 @@ blockquote.preview {
 
 /* ── schedules ──────────────────────────────────────────────────────────── */
 
-.schedule-form { display: flex; flex-direction: column; gap: 16px; margin: 12px 0; }
 .schedule-log { max-height: 560px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .table tr.selected { background: var(--row-hover); }
+.agent-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 14px; }
+.agent-filters .field { min-width: 160px; flex: 0 1 220px; }
+.agent-group { margin-bottom: 22px; }
+.agent-group-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.agent-group-head h3 { font-size: 16px; }
+.agent-list { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); }
+.agent-card { display: flex; flex-direction: column; gap: 10px; padding: 16px; border-left: 4px solid var(--border-strong); }
+.agent-card.state-active { border-left-color: var(--ok); }
+.agent-card.state-pending { border-left-color: var(--warn); }
+.agent-card.state-failing { border-left-color: var(--bad); }
+.agent-card > p { margin: 0; }
+.agent-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
+.agent-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.agent-title strong { font-size: 15px; overflow-wrap: anywhere; }
+.agent-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px 14px; margin: 0; }
+.agent-facts dt { font-size: 12px; color: var(--muted); font-weight: 600; }
+.agent-facts dd { margin: 2px 0 0; font-size: 13.5px; }
+.agent-may { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pending-agents { display: flex; flex-direction: column; gap: 12px; }
+.review-panel { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.review-panel h3, .review-panel h4 { font-size: 14.5px; margin: 0; }
+.agent-json, .agent-prompt { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 420px; }
+
+/* the "Add agent" wizard */
+.agent-wizard { display: flex; flex-direction: column; gap: 18px; }
+.agent-wizard .wizard-body { gap: 14px; }
+.agent-wizard h2 { font-size: 18px; }
+.agent-wizard h3 { font-size: 15px; margin-top: 6px; }
+.step-btn { display: inline-flex; align-items: center; gap: 8px; background: none; border: 0; padding: 2px; color: inherit; font: inherit; cursor: pointer; }
+.template-cards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); }
+.template-card { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: inherit; font: inherit; cursor: pointer; }
+.template-card:hover { border-color: var(--border-strong); }
+.template-card.chosen { border-color: var(--accent); background: var(--accent-soft); }
+.choice-cards { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); }
+.choice-card { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; align-items: start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.choice-card:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.choice-card input { margin-top: 3px; }
+.choice-title { font-weight: 600; }
+.choice-text { grid-column: 2; font-size: 13px; color: var(--muted); }
+.next-runs { margin: 4px 0; padding-left: 20px; }
+.repo-picker { display: flex; flex-direction: column; gap: 8px; }
+.repo-list { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.check-row { display: inline-flex; align-items: center; gap: 6px; }
+.github-grant { display: flex; flex-direction: column; gap: 10px; }
+.wizard-hint { flex: 1; }
 
 /* ── narrow screens ─────────────────────────────────────────────────────── */
 
@@ -402,6 +446,7 @@ blockquote.preview {
   .brain-card .row-chevron { display: none; }
   .wizard-actions { flex-direction: column-reverse; align-items: stretch; }
   .wizard-actions .btn { width: 100%; white-space: normal; }
+  .agent-head .btn { width: 100%; }
   .diff-cols { grid-template-columns: minmax(0, 1fr); }
   .danger-card { flex-direction: column; align-items: flex-start; }
   .groups-table td:first-child { min-width: 0; }

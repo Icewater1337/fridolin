@@ -81,3 +81,16 @@ test('the housekeeping card shows the last dry run and what it would stop', asyn
   assert.ok(text.includes('would stop'), text);
   assert.ok(text.includes('left running by a run of brain main'), text);
 });
+
+test('scheduled agents waiting for approval are flagged', async (t) => {
+  const root = await openOverview(t, {}, {
+    '/api/schedules': { agents: [
+      { brain: 'main', name: 'review-bugs', state: 'pending', review: { status: 'new' } },
+      { brain: 'main', name: 'brief', state: 'active' },
+    ] },
+  });
+  const text = root.textContent;
+  assert.ok(text.includes('1 scheduled agent waiting for your approval'), text);
+  assert.ok(text.includes('review-bugs'), text);
+  assert.ok(root.querySelectorAll('a').some((a) => a.getAttribute('href') === '#/schedules'));
+});
