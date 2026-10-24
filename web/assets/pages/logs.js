@@ -40,7 +40,7 @@ export default /** @satisfies {PageModule} */ ({
     const isLine = (el) => el.classList.contains('log-line');
     // A line's text is its last cell; the filter looks at what is shown.
     /** @param {Element} el */
-    const matches = (el) => !filter || el.lastChild.textContent.toLowerCase().includes(filter);
+    const matches = (el) => !filter || ((el.lastChild && el.lastChild.textContent) || '').toLowerCase().includes(filter);
     const paintCount = () => {
       const shown = filter ? /** @type {HTMLElement[]} */ ([...view.children]).filter((el) => isLine(el) && !el.hidden).length : count;
       countEl.textContent = filter ? `${shown} of ${count} lines` : `${count} lines`;

@@ -10,7 +10,8 @@
     // The tests stay at the strictness the dashboard had before: they run
     // against the fake DOM, where most annotations would be casts. They
     // follow in steps of their own.
-    "noImplicitAny": false
+    "noImplicitAny": false,
+    "strictNullChecks": false
   },
   "include": ["**/*.js", "**/*.d.ts", "../assets/**/*.js", "../types/**/*.d.ts"]
 }
