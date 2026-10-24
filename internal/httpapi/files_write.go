@@ -204,7 +204,7 @@ func (a *FilesAPI) saveText(w http.ResponseWriter, r *http.Request, s files.Scop
 	c := FileChange{Action: action, Path: rel}
 	var gitErr string
 	if err == nil {
-		c.Commit, gitErr = a.commit(root, s, cases(action)+" "+rel, rel)
+		c.Commit, gitErr = a.commit(root, s, capitalized(action)+" "+rel, rel)
 		c.Outcome = gitOutcome(gitErr)
 	}
 	a.audited(s, root, c, err)
@@ -226,7 +226,7 @@ func gitOutcome(gitErr string) string {
 	return "ok; " + gitErr
 }
 
-func cases(action string) string {
+func capitalized(action string) string {
 	if action == "" {
 		return ""
 	}
