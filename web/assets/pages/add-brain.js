@@ -1,6 +1,6 @@
 // Add a brain: choose a folder → check it → configure → done.
 
-import { get, post } from '../app/api.js';
+import { get, post, errorStatus } from '../app/api.js';
 import { folderBrowser } from '../components/folder-browser.js';
 import { routingEditor } from '../components/routing-editor.js';
 import { h, mount } from '../lib/dom.js';
@@ -13,6 +13,7 @@ import { field, textInput } from '../components/fields.js';
 import { brainSettingsFields } from '../components/brain-fields.js';
 import { tabs } from '../components/tabs.js';
 import { callout, mono, spinner, loading } from '../components/common.js';
+import { errorMessage, errorName } from '../lib/errors.js';
 
 /** @import { PageModule } from '../app/page.js' */
 /** @import { Brain, BrainManifest, ConfigFile, ConfigResponse, FSCapabilities } from '../../types/api.js' */
@@ -158,8 +159,8 @@ export default /** @satisfies {PageModule} */ ({
         }
         toast('No folder was chosen', 'info');
       } catch (e) {
-        if (e.name === 'AbortError') toast('Stopped waiting for the folder dialog.', 'info');
-        else toast(e.message);
+        if (errorName(e) === 'AbortError') toast('Stopped waiting for the folder dialog.', 'info');
+        else toast(errorMessage(e));
       } finally {
         pickAbort = null;
       }
@@ -173,7 +174,7 @@ export default /** @satisfies {PageModule} */ ({
         report = await post('/api/brains/inspect', { path: picked.path }, { signal: ctx.signal });
       } catch (e) {
         if (ctx.dead) return;
-        mount(body, h('div.card.wizard-card', callout('bad', 'Could not check that folder', e.message), h('div.actions', btn('Back', { icon: 'left', onClick: () => go('folder') }))));
+        mount(body, h('div.card.wizard-card', callout('bad', 'Could not check that folder', errorMessage(e)), h('div.actions', btn('Back', { icon: 'left', onClick: () => go('folder') }))));
         return;
       }
       if (ctx.dead) return;
@@ -233,7 +234,7 @@ export default /** @satisfies {PageModule} */ ({
       try {
         [brains, cfg] = await Promise.all([get('/api/brains', { signal: ctx.signal }), get('/api/config', { signal: ctx.signal })]);
       } catch (e) {
-        if (ctx.dead || e.status === 401) return;
+        if (ctx.dead || errorStatus(e) === 401) return;
         toastError(e);
       }
       if (step !== 'configure') return;

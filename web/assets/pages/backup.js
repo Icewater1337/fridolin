@@ -15,6 +15,7 @@ import { openDialog, confirmDialog } from '../components/dialog.js';
 import { field, textInput, toggle, select, linesArea, linesOf, nextId } from '../components/fields.js';
 import { pill, callout, timeAgo, mono, empty, pageHeader, spinner, loading } from '../components/common.js';
 import { googleClientSetup } from '../components/calendar.js';
+import { errorMessage } from '../lib/errors.js';
 
 /** @import { PageModule } from '../app/page.js' */
 /** @import { BackupBrainStatus, BackupClientStatus, BackupConnectJob, BackupJob, BackupResult, BackupSettings, BackupStatus, RcloneStatus, RestoreResult } from '../../types/api.js' */
@@ -384,7 +385,7 @@ export default /** @satisfies {PageModule} */ ({
             await refresh();
           } catch (e) {
             input.checked = !v;
-            toast(e.message);
+            toast(errorMessage(e));
           } finally {
             input.disabled = false;
           }
@@ -518,7 +519,7 @@ export default /** @satisfies {PageModule} */ ({
           paintVersions();
         } catch (e) {
           if (ctx.dead) return;
-          mount(versionsBox, callout('bad', 'Could not list the versions', e.message));
+          mount(versionsBox, callout('bad', 'Could not list the versions', errorMessage(e)));
         }
       };
       const paintVersions = () => {

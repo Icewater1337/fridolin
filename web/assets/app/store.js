@@ -144,7 +144,7 @@ export async function loadGroups(force = false, { fresh = false } = {}) {
       store.set({ groups: Array.isArray(list) ? list : [], groupsError: '' });
       learnNames(store.get().groups.map((g) => /** @type {[string, string]} */ ([g.jid, g.name])));
     } catch (e) {
-      store.set({ groupsError: e.message || 'WhatsApp is not connected', ...(force ? { groups: null } : {}) });
+      store.set({ groupsError: (e instanceof Error && e.message) || 'WhatsApp is not connected', ...(force ? { groups: null } : {}) });
     } finally {
       groupsAt = Date.now();
       groupsLoading = null;

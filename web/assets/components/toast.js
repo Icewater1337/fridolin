@@ -3,6 +3,8 @@
 
 import { h } from '../lib/dom.js';
 import { icon } from './icons.js';
+import { errorStatus } from '../app/api.js';
+import { errorMessage, errorName } from '../lib/errors.js';
 
 // The corner and its two live regions: errors go to an alert, which a
 // screen reader reads out at once, the rest to a polite status. So the
@@ -100,9 +102,7 @@ export function toast(message, kind = 'error', { timeout } = {}) {
  * @returns {HTMLDivElement | null}
  */
 export function toastError(e) {
-  const err = /** @type {{message?: string, status?: number, name?: string} | null | undefined} */ (e);
-  const msg = (err && err.message) ? err.message : String(e);
-  if (err && err.status === 401) return null; // the connect screen takes over
-  if (err && err.name === 'AbortError') return null; // the page that asked is gone
-  return toast(msg, 'error');
+  if (errorStatus(e) === 401) return null; // the connect screen takes over
+  if (errorName(e) === 'AbortError') return null; // the page that asked is gone
+  return toast(errorMessage(e), 'error');
 }

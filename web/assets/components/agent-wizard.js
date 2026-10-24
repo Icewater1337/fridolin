@@ -14,6 +14,7 @@ import { btn } from './buttons.js';
 import { callout } from './common.js';
 import { field, nextId, select, textInput, toggle } from './fields.js';
 import { icon } from './icons.js';
+import { errorMessage } from '../lib/errors.js';
 
 /** @import { Child } from '../lib/dom.js' */
 
@@ -77,7 +78,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
     const el = h('div.agent-wizard', stepper, body, nav);
 
     const value = () => scheduleOf(f);
-    const valid = () => { try { value(); return ''; } catch (e) { return e.message; } };
+    const valid = () => { try { value(); return ''; } catch (e) { return errorMessage(e); } };
 
     // What each step needs before the next.
     const missing = (key) => {
@@ -191,7 +192,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
               : h('div', h('div.field-label', 'Next runs'), h('ol.next-runs', (r.next || []).map((t) => h('li', h('strong', runTime(t)), h('span.muted', ` · ${inTime(t)}`)))),
                 h('p.muted.small', 'In the bridge’s time zone; each run may start up to a few minutes later (jitter), so agents due at once do not all start together.')));
           } catch (e) {
-            mount(out, h('p.muted', `Cannot preview: ${e.message}`));
+            mount(out, h('p.muted', `Cannot preview: ${errorMessage(e)}`));
           }
         }, 250);
       };
@@ -365,7 +366,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
     function reviewStep() {
       let s;
       try { s = value(); } catch (e) {
-        return [h('h2', 'Review'), callout('warn', 'Not complete yet', e.message)];
+        return [h('h2', 'Review'), callout('warn', 'Not complete yet', errorMessage(e))];
       }
       const file = `.brain/schedules/${s.name}.json`;
       const b = brains.find((x) => x.id === brain);
@@ -397,7 +398,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
       el,
       brain: () => brain,
       value: () => {
-        try { return { brain, schedule: value() }; } catch (e) { return { brain, invalid: e.message, fields: { ...f, vars: { ...f.vars } } }; }
+        try { return { brain, schedule: value() }; } catch (e) { return { brain, invalid: errorMessage(e), fields: { ...f, vars: { ...f.vars } } }; }
       },
     };
   };

@@ -2,7 +2,7 @@
 // everything else in the file (including fields this page does not show) is
 // sent back exactly as received.
 
-import { put, rotateToken, signOut } from '../app/api.js';
+import { put, rotateToken, signOut, errorStatus } from '../app/api.js';
 import { setRestartRequired } from '../app/store.js';
 import { configResource } from '../app/resources.js';
 import { h, mount, paint } from '../lib/dom.js';
@@ -280,7 +280,7 @@ export default /** @satisfies {PageModule} */ ({
       try {
         r = await put('/api/config', { etag: latest.etag, config: next });
       } catch (e) {
-        if (e.status !== 409) throw e;
+        if (errorStatus(e) !== 409) throw e;
         await configResource.refresh();
         if (form.stale()) clash();
         else if (again) await save(false);
