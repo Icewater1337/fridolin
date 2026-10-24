@@ -10,8 +10,9 @@ import (
 
 // SchedulesAPI serves the brains' scheduled agents (docs/BRAINS.md,
 // "Scheduled agents"): the list with their reminders, run now, pause and
-// resume, each agent's runs and each run's log, and editing an agent,
-// which writes brain.json as every edit in the dashboard does.
+// resume, each agent's runs and each run's log, editing an agent, which
+// writes its file in .brain/schedules, approving one the owner did not
+// write, and when a schedule would run.
 type SchedulesAPI struct {
 	List   func(context.Context) (any, error)
 	Run    func(ctx context.Context, brain, name, by string) (any, error)
@@ -20,6 +21,18 @@ type SchedulesAPI struct {
 	Log    func(ctx context.Context, brain, name, run string) (any, error)
 	Put    func(ctx context.Context, brain, name string, s manifest.Schedule) (any, error)
 	Remove func(ctx context.Context, brain, name string) (any, error)
+	// Approve approves an agent's file as the owner reviewed it; reviewed
+	// nil approves its removal.
+	Approve func(ctx context.Context, brain, name string, reviewed *manifest.Schedule) (any, error)
+	// Preview says when a schedule would run next.
+	Preview func(ctx context.Context, when string) (any, error)
+}
+
+// ScheduleApproveRequest is the body of POST
+// /api/schedules/{brain}/{name}/approve: the agent as the owner reviewed
+// it, null for its removal.
+type ScheduleApproveRequest struct {
+	Schedule *manifest.Schedule `json:"schedule"`
 }
 
 // ScheduleRunRequest is the body of POST /api/schedules/{brain}/{name}/run.
@@ -38,6 +51,23 @@ func (a *SchedulesAPI) Register(mux *http.ServeMux) {
 			return
 		}
 		WriteJSONIfChanged(w, r, out)
+	})
+	mux.HandleFunc("GET /api/schedules/preview", func(w http.ResponseWriter, r *http.Request) {
+		out, err := a.Preview(r.Context(), r.URL.Query().Get("when"))
+		if err != nil {
+			writeKindErr(w, err)
+			return
+		}
+		WriteJSONIfChanged(w, r, out)
+	})
+	mux.HandleFunc("POST /api/schedules/{brain}/{name}/approve", func(w http.ResponseWriter, r *http.Request) {
+		var req ScheduleApproveRequest
+		if err := manifest.JSONError(DecodeJSON(r, &req)); err != nil {
+			WriteErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		out, err := a.Approve(r.Context(), r.PathValue("brain"), r.PathValue("name"), req.Schedule)
+		writeResult(w, out, err)
 	})
 	mux.HandleFunc("POST /api/schedules/{brain}/{name}/run", func(w http.ResponseWriter, r *http.Request) {
 		var req ScheduleRunRequest
