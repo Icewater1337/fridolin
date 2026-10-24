@@ -93,6 +93,25 @@ export default {
       await refresh();
     }
 
+    // core-host (docs/NODES.md, "core-host"): the machine may come to
+    // hold every host secret, so approving it says so first.
+    async function approveCommands(n) {
+      const ch = n.core_host;
+      if (ch && ch.pending) {
+        const ok = await confirmDialog({
+          title: `Approve core-host on ${n.name}?`,
+          message: [
+            h('p', ch.approval),
+            h('p', 'Device key: ', mono(ch.fingerprint)),
+            h('p.muted.small', `Compare it with what fridolin node core-host show prints on ${n.name}. Did you not just turn core-host on there? Revoke it instead.`),
+          ],
+          confirm: 'Approve core-host', danger: true,
+        });
+        if (!ok) return;
+      }
+      await act(n, 'approve-commands', `Approved what ${n.name} offers`);
+    }
+
     async function revoke(n) {
       const ok = await confirmDialog({
         title: `Revoke ${n.name}?`,
@@ -162,7 +181,7 @@ export default {
       if (n.device === 'pending') {
         out.push(btn('Approve device', { kind: 'primary', small: true, icon: 'check', onClick: () => act(n, 'approve', `Approved the device ${n.name}`) }));
       } else if (n.device === 'approved' && n.commands === 'pending') {
-        out.push(btn('Approve what it offers', { kind: 'primary', small: true, icon: 'check', onClick: () => act(n, 'approve-commands', `Approved what ${n.name} offers`) }));
+        out.push(btn('Approve what it offers', { kind: 'primary', small: true, icon: 'check', onClick: () => approveCommands(n) }));
       }
       const updating = n.update && (n.update.state === 'sending' || n.update.state === 'restarting');
       // Offline nodes are refused by the bridge, which says so.
@@ -186,7 +205,17 @@ export default {
         frideLine(declared.fride),
         backupLine(declared.backup, n.approved && n.approved.backup),
         workLine('Agent sessions', declared.agent),
-        workLine('Terminal', declared.terminal));
+        workLine('Terminal', declared.terminal),
+        coreHostLine(n.core_host));
+    }
+
+    // core-host: the device key the owner compares, and the targets this
+    // machine sends host secrets to.
+    function coreHostLine(ch) {
+      if (!ch) return null;
+      const to = ch.send_to || [];
+      return h('div', h('strong', 'Core host: '), 'device key ', mono(ch.fingerprint),
+        h('span.muted', to.length ? ` · sends secrets only to ${to.join(', ')}` : ' · trusts no target'));
     }
 
     // Workstation: the folders an agent session or a terminal may run in,
@@ -262,6 +291,9 @@ export default {
           : null,
         n.device === 'approved' && n.commands === 'pending' && n.commands_approved_at
           ? callout('warn', 'It offers more than you approved', `Approved so far: ${capSummary(n.approved)}. It now offers: ${capSummary(n.declared)}. Until you approve, it serves only what both include.`)
+          : null,
+        n.core_host && n.core_host.pending && n.device === 'approved'
+          ? callout('warn', 'core-host waits for your approval', n.core_host.approval)
           : null,
         region,
         kv([

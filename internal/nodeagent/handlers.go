@@ -68,6 +68,9 @@ func (a *Agent) call(ctx context.Context, req nodeproto.Request) (any, *nodeprot
 	if slices.Contains(nodeproto.UpdateMethods, req.Method) {
 		return a.updateCall(ctx, req.Method, req.Params)
 	}
+	if slices.Contains(nodeproto.CoreHostMethods, req.Method) {
+		return a.coreHostCall(ctx, req.Method, req.Params)
+	}
 	if slices.Contains(nodeproto.AgentMethods, req.Method) || slices.Contains(nodeproto.TerminalMethods, req.Method) {
 		return a.workstationCall(ctx, eff, req.Method, req.Params)
 	}
