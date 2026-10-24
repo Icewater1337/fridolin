@@ -913,6 +913,11 @@ for compatibility.
 
 ### Fixed
 
+- `fridolin core pull` (the first step of a core move) checks the
+  image's provenance for an owner whose GitHub name has capitals: the
+  repository named from the registry (`ghcr.io` lowercases it) did not
+  match the attestation's signer, so the pull always failed. It takes
+  the attestation's spelling, which `gh` still verifies (#187).
 - The move pre-flight no longer refuses a target that never ran the
   core's version: reading its core needs the image, which the move
   pulls first. It says so as a warning instead (#187).
