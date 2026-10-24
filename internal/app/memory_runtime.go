@@ -153,6 +153,8 @@ func (s *scheduler) Stop() {
 // tick fires what fell due by now, for every brain that runs.
 func (s *scheduler) tick(now time.Time) {
 	b := s.b
+	// Times of day are the owner's (timezone), never the process's.
+	now = now.In(b.zone())
 	for _, br := range b.brainMgr.Brains() {
 		id := br.ID()
 		due, err := b.intents.Due(id, now)
@@ -174,6 +176,7 @@ func (s *scheduler) tick(now time.Time) {
 	}
 	// The scheduled agents, the memory consolidation among them.
 	b.agents.tick(now)
+	b.programs.sync()
 }
 
 // usesMemoryIndex reports whether a brain's memory index is kept up to

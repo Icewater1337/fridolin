@@ -45,6 +45,7 @@
     "tokenless_send": false
   },
   "startup_checks": {},
+  "timezone": "Europe/Zurich",
   "triggers": [
     "@claude"
   ],

@@ -14,7 +14,7 @@ import { loadModules } from '../server/modules.ts'
 
 const MEMBER = { id: 'u_member', kind: 'password', username: 'sam', name: 'Sam', role: 'member', password_hash: hashPassword('correct horse', 100_000) }
 
-type Call = { url: string; headers: Headers }
+type Call = { url: string; headers: Headers; method: string; body?: string }
 
 async function startSite(t: import('node:test').TestContext, opts: { bridge?: boolean } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'fridolin-builtin-'))
@@ -29,7 +29,8 @@ async function startSite(t: import('node:test').TestContext, opts: { bridge?: bo
   }))
   const calls: Call[] = []
   const bridgeFetch = (async (input: string | URL | Request, init?: RequestInit) => {
-    calls.push({ url: String(input), headers: new Headers(init?.headers) })
+    const body = init?.body ? await new Response(init.body as ConstructorParameters<typeof Response>[0]).text() : undefined
+    calls.push({ url: String(input), headers: new Headers(init?.headers), method: init?.method ?? 'GET', body })
     if (String(input).includes('/files/raw')) {
       return new Response('%PDF-1', { status: 200, headers: { 'content-type': 'application/pdf', 'content-security-policy': "default-src 'none'", 'x-secret': 'no' } })
     }
@@ -177,4 +178,32 @@ test('the starter module in examples/site-module loads and works as the site run
   const add = await fetch(`${url}/notes/api/notes`, { method: 'POST', headers: { cookie, 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'hello' }) })
   const body = await add.json() as { notes: { text: string; by: string }[] }
   assert.deepEqual(body.notes.map(n => [n.text, n.by]), [['hello', 'Sam']])
+})
+
+test('a change is passed on with its body, only with the site header and its type', async (t) => {
+  const { url, cookie, calls } = await startSite(t)
+  const send = (method: string, p: string, body: string | FormData, headers: Record<string, string>) =>
+    fetch(`${url}/_fridolin/api/${p}`, { method, headers: { Cookie: cookie, ...headers }, body })
+  const json = JSON.stringify({ root: 'brain:main', path: 'docs/a.md', text: 'x', sha: 's' })
+  assert.equal((await send('PUT', 'files/text', json, { 'Content-Type': 'application/json' })).status, 403, 'no site header')
+  assert.equal((await send('PUT', 'files/text', 'a=b', { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Fridolin-Site': '1' })).status, 415)
+  assert.equal((await send('POST', 'files/upload-rule', json, { 'Content-Type': 'application/json', 'X-Fridolin-Site': '1' })).status, 404, 'the dashboard\'s alone')
+  assert.equal((await send('DELETE', 'files/roots', '', { 'X-Fridolin-Site': '1' })).status, 404)
+  assert.equal(calls.length, 0, 'nothing refused reached the bridge')
+
+  assert.equal((await send('PUT', 'files/text', json, { 'Content-Type': 'application/json', 'X-Fridolin-Site': '1' })).status, 200)
+  const put = calls.pop()!
+  assert.equal(put.method, 'PUT')
+  assert.equal(new URL(put.url).pathname, '/site-api/files/text')
+  assert.equal(put.body, json)
+  assert.equal(put.headers.get('x-fridolin-site-user'), 'u_member')
+  assert.equal(put.headers.get('authorization'), 'Bearer bridge-token')
+
+  const form = new FormData()
+  form.append('file', new Blob(['hello']), 'a.txt')
+  assert.equal((await send('POST', 'files/upload?root=brain%3Amain&path=docs', form, { 'X-Fridolin-Site': '1' })).status, 200)
+  const up = calls.pop()!
+  assert.equal(new URL(up.url).search, '?root=brain%3Amain&path=docs')
+  assert.match(up.headers.get('content-type')!, /^multipart\/form-data; boundary=/)
+  assert.match(up.body!, /filename="a.txt"[\s\S]*hello/)
 })

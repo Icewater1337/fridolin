@@ -20,6 +20,13 @@ import (
 // in a folder of files, and runs its agent in this process.
 func (h *harness) coreHostNode(addr, name string, pins ...nodeagent.CoreHostPin) (string, string, *memSecrets, *nodeagent.Agent) {
 	h.t.Helper()
+	return h.coreHostNodeWith(addr, name, nil, pins...)
+}
+
+// coreHostNodeWith is coreHostNode with setup, when set, changing the
+// agent before it runs.
+func (h *harness) coreHostNodeWith(addr, name string, setup func(*nodeagent.Agent), pins ...nodeagent.CoreHostPin) (string, string, *memSecrets, *nodeagent.Agent) {
+	h.t.Helper()
 	t := h.t
 	w := h.Do("POST", "/api/nodes/join-code", map[string]any{})
 	var jc struct{ Code string }
@@ -42,6 +49,9 @@ func (h *harness) coreHostNode(addr, name string, pins ...nodeagent.CoreHostPin)
 	agent.Logf, agent.HeartbeatEvery, agent.FrideCheckEvery = t.Logf, 100*time.Millisecond, 100*time.Millisecond
 	agent.CoreSecrets, agent.CoreSecretsPlace = st, "test files"
 	agent.CoreSetup = func(context.Context) ([]nodeproto.CoreCheckItem, bool, string) { return nil, true, "" }
+	if setup != nil {
+		setup(agent)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { _ = agent.Run(ctx); close(done) }()

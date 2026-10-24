@@ -30,7 +30,10 @@ func newNodes(b *App) (*nodes.Service, error) {
 		b.work.onEvent(node, ev)
 	}
 	return nodes.New(nodes.Options{
-		Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: onEvent, OnDeclare: b.fride.onDeclare, OnJoin: b.nodeJoined, OnCoreHost: b.nodeCoreHost,
+		Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: onEvent, OnDeclare: b.fride.onDeclare, OnJoin: b.nodeJoined, OnCoreHost: b.nodeCoreHost, OnMove: b.coreMoveEnded,
+		// A node that connects takes the programs of its command agents.
+		OnConnect: func(n *nodes.Node) { b.programs.connected(n.ID) },
+		OnApprove: func(n *nodes.Node) { b.programs.connected(n.ID) },
 		// Updates: the core's own version, its builds for the nodes, and
 		// what keeps a node from being updated now (nodes_update.go).
 		Version: version.String(), BinariesDir: nodeBinariesDir(b.exe), Busy: b.nodeBusy, Hold: b.nodeHold,
@@ -150,7 +153,17 @@ type lockdownNodes struct {
 // scripts it is sent.
 // Starting an agent or a terminal, or acting in one, is writing too.
 // Moving or forgetting host secrets (core-host) is writing too.
-var nodeWrites = slices.Concat([]string{nodeproto.MethodExec, nodeproto.MethodFSWrite, nodeproto.MethodAndroidBuild}, nodeproto.WorkstationStarts, nodeproto.CoreSecretsMethods)
+// So is every step of a core move.
+var nodeWrites = slices.Concat([]string{nodeproto.MethodExec, nodeproto.MethodFSWrite, nodeproto.MethodAndroidBuild}, nodeproto.WorkstationStarts, nodeproto.CoreSecretsMethods, nodeproto.CoreMoveWrites)
+
+// StartMove refuses a core move during a lockdown; the pre-flight only
+// reads.
+func (n lockdownNodes) StartMove(ctx context.Context, src, dst string, o nodes.MoveOptions) (nodes.MoveRecord, error) {
+	if n.locked() {
+		return nodes.MoveRecord{}, errLockedNode
+	}
+	return n.Service.StartMove(ctx, src, dst, o)
+}
 
 // CoreSecretsTransfer refuses a transfer that is to run during a
 // lockdown; a dry run only reads.

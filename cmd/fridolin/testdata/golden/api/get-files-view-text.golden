@@ -3,11 +3,13 @@ GET /api/files/view?root=brain:main&path=docs/plan.txt
 Content-Type: application/json
 
 {
+  "editable": true,
   "kind": "text",
   "mod_time": "<MOD_TIME>",
   "name": "plan.txt",
   "path": "docs/plan.txt",
   "root": "brain:main",
+  "sha": "56739bb8b5fd8c5cc0d9c0ea284350e858eb3083884dd5357494c3a1374d85cf",
   "size": 10,
   "text": "The plan.\n"
 }

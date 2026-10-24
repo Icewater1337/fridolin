@@ -101,7 +101,7 @@ func TestStarterUsesInjectedPathsAndPlatform(t *testing.T) {
 		t.Fatal("starter did not use the injected platform")
 	}
 	path := filepath.Join(home, "requested", "config.json")
-	if err := WriteStarter(path, "claude", "", paths, "linux"); err != nil {
+	if err := WriteStarter(path, StarterValues{ClaudePath: "claude"}, paths, "linux"); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(path)
@@ -114,5 +114,27 @@ func TestStarterUsesInjectedPathsAndPlatform(t *testing.T) {
 	}
 	if file.DataDir != "~/"+LegacyDataDirName || file.Sandbox.Enabled {
 		t.Fatalf("starter changed chosen inputs: %+v", file)
+	}
+}
+
+// An access list entry that is not UTF-8 is refused before Clone's JSON
+// round trip turns it into U+FFFD, which a sender could then be (#225).
+func TestResolveRefusesAccessListsThatAreNotUTF8(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	paths := Paths{Home: home, DefaultDataDir: filepath.Join(home, DataDirName)}
+	for name, file := range map[string]*File{
+		"allowed_numbers":     {AllowedNumbers: []string{"15551234567", "\xff"}},
+		"allowed_groups":      {AllowedGroups: []string{"\xff@g.us"}},
+		"group_members":       {GroupMembers: map[string][]string{"120363000000000000@g.us": {"\xff"}}},
+		"group_members group": {GroupMembers: map[string][]string{"\xff@g.us": {"15551234567"}}},
+	} {
+		_, err := resolveFile(file, paths, "linux")
+		if err == nil || !strings.Contains(err.Error(), "is not valid UTF-8") {
+			t.Errorf("%s: err = %v, want one naming invalid UTF-8", name, err)
+		}
+	}
+	if _, err := resolveFile(&File{AllowedNumbers: []string{"�"}}, paths, "linux"); err != nil {
+		t.Errorf("a valid U+FFFD entry: %v", err)
 	}
 }

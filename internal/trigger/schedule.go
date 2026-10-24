@@ -139,10 +139,11 @@ func (s Schedule) Next(after time.Time) (time.Time, bool) {
 			return time.Time{}, false
 		}
 		y, mo, d := after.Date()
-		// Eight days cover any weekday after any time; time.Date
-		// normalizes the day and keeps the wall clock across DST changes.
+		// Eight days cover any weekday after any time; wallTime keeps
+		// the wall clock across DST changes and decides the times a
+		// change skips or repeats.
 		for i := 0; i <= 8; i++ {
-			t := time.Date(y, mo, d+i, hh, mm, 0, 0, after.Location())
+			t := wallTime(y, mo, d+i, hh, mm, after.Location())
 			if !t.After(after) {
 				continue
 			}

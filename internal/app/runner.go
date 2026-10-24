@@ -123,6 +123,9 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 	extraEnv = append(extraEnv, providerEnv...)
 	extraEnv = append(extraEnv, google.CalendarEnv(spec.ID, s.Manifest, s.CredsDir)...)
 	extraEnv = append(extraEnv, plaudOptOut...)
+	if s.Zone != nil {
+		extraEnv = append(extraEnv, zoneEnv(s.Zone.String())...)
+	}
 	if s.ToolsDir != "" {
 		// Prompts and skills run the helpers as $FRIDOLIN_TOOLS_DIR/<tool>,
 		// wherever the bridge is installed.

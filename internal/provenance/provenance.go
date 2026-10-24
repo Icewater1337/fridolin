@@ -8,6 +8,7 @@ package provenance
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -65,6 +66,15 @@ func (v Verifier) Verify(ctx context.Context, image, repo string) error {
 	bundles, err := v.bundles(ctx, repo, m[1])
 	if err != nil {
 		return err
+	}
+	// GitHub's names ignore case and gh's signer check does not: a repo
+	// named from a registry (ghcr.io lowercases the owner) takes the
+	// spelling the attestation names; gh still checks the signature for it.
+	for _, b := range bundles {
+		if r := bundleRepo(b); r != "" && strings.EqualFold(r, repo) {
+			repo = r
+			break
+		}
 	}
 	dir, err := os.MkdirTemp(v.TempDir, "provenance-")
 	if err != nil {
@@ -186,6 +196,43 @@ func (v Verifier) get(ctx context.Context, url, accept string) ([]byte, error) {
 		return nil, errors.New("provenance: an answer too large for an attestation")
 	}
 	return data, nil
+}
+
+// bundleRepo is the repository (owner/name) whose workflow built what a
+// SLSA provenance bundle attests, as it spells it; "" when the bundle
+// says none. Only the spelling is used: gh verifies the bundle.
+func bundleRepo(bundle string) string {
+	var b struct {
+		DSSE struct {
+			Payload string `json:"payload"`
+		} `json:"dsseEnvelope"`
+	}
+	if json.Unmarshal([]byte(bundle), &b) != nil || b.DSSE.Payload == "" {
+		return ""
+	}
+	payload, err := base64.StdEncoding.DecodeString(b.DSSE.Payload)
+	if err != nil {
+		return ""
+	}
+	var st struct {
+		Predicate struct {
+			BuildDefinition struct {
+				ExternalParameters struct {
+					Workflow struct {
+						Repository string `json:"repository"`
+					} `json:"workflow"`
+				} `json:"externalParameters"`
+			} `json:"buildDefinition"`
+		} `json:"predicate"`
+	}
+	if json.Unmarshal(payload, &st) != nil {
+		return ""
+	}
+	r, ok := strings.CutPrefix(st.Predicate.BuildDefinition.ExternalParameters.Workflow.Repository, "https://github.com/")
+	if !ok || !repoRE.MatchString(r) {
+		return ""
+	}
+	return r
 }
 
 func compact(raw []byte) string {

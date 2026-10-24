@@ -2,6 +2,7 @@ package provenance
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -104,5 +105,37 @@ func TestRegistryDigest(t *testing.T) {
 	}
 	if _, err := reg.Digest(context.Background(), "docker.io/owner/x", "v1"); err == nil {
 		t.Fatal("another registry passed")
+	}
+}
+
+// ghcr.io lowercases the owner, GitHub keeps its spelling, and gh's
+// signer check is case-sensitive: Verify asks gh for the repository as
+// the attestation spells it (seen with an owner named with a capital).
+func TestVerifyTakesTheAttestationsSpelling(t *testing.T) {
+	stmt := `{"predicate":{"buildDefinition":{"externalParameters":{"workflow":{"repository":"https://github.com/Owner/fridolin"}}}}}`
+	bundle := `{"dsseEnvelope":{"payload":"` + base64.StdEncoding.EncodeToString([]byte(stmt)) + `"}}`
+	other := `{"dsseEnvelope":{"payload":"` + base64.StdEncoding.EncodeToString([]byte(strings.ReplaceAll(stmt, "Owner/fridolin", "Someone/else"))) + `"}}`
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/owner/fridolin/attestations/"+digest {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"attestations":[{"bundle":` + other + `},{"bundle":` + bundle + `}]}`))
+	}))
+	defer srv.Close()
+	var args []string
+	v := Verifier{API: srv.URL, HTTP: srv.Client(), TempDir: t.TempDir(), Run: func(_ context.Context, a ...string) ([]byte, error) {
+		args = a
+		return nil, nil
+	}}
+	if err := v.Verify(context.Background(), "ghcr.io/owner/fridolin-core@"+digest, "owner/fridolin"); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(args, " ")
+	if !strings.Contains(got, "--repo Owner/fridolin") || !strings.Contains(got, "--signer-workflow Owner/fridolin/.github/workflows/image.yml") {
+		t.Fatalf("gh %s", got)
+	}
+	if bundleRepo(`{"a":1}`) != "" || bundleRepo(`{"dsseEnvelope":{"payload":"!!"}}`) != "" {
+		t.Fatal("a bundle without a repository named one")
 	}
 }

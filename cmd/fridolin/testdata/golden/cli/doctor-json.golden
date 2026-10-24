@@ -129,11 +129,25 @@
       "detail": "none waiting"
     },
     {
+      "id": "brain-drift",
+      "title": "brain folders as approved",
+      "required": false,
+      "status": "ok",
+      "detail": "every brain folder is as you approved it"
+    },
+    {
       "id": "lockdown",
       "title": "lockdown",
       "required": false,
       "status": "ok",
       "detail": "off"
+    },
+    {
+      "id": "timezone",
+      "title": "time zone of schedules",
+      "required": false,
+      "status": "ok",
+      "detail": "the system's zone (timezone is unset)"
     },
     {
       "id": "drive-client",

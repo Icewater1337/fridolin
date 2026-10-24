@@ -15,6 +15,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/history"
 	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 	"github.com/Icewater1337/fridolin/internal/testutil"
@@ -113,6 +114,21 @@ func TestScriptTokenScopes(t *testing.T) {
 	}
 	if w := off.script("POST", "/send", send(tokenTestDM), off.scriptAuth.scripts.Value()); w.Code != 200 {
 		t.Errorf("scripts token with tokenless_send off: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// maySend refuses a caller kind it does not know rather than take it for
+// one without a token: a new kind must say where it may send.
+func TestMaySendRefusesAnUnknownCaller(t *testing.T) {
+	cfg := &config.Settings{}
+	cfg.ScriptAPI.TokenlessSend = true
+	cfg.AllowedNumbers = []string{"15551234567"}
+	b := &App{}
+	if err := b.maySend(chat.Principal{Kind: chat.CallerAnonymous}, tokenTestDM, cfg); err != nil {
+		t.Fatalf("no token, to an allowed number, tokenless_send on: %v", err)
+	}
+	if err := b.maySend(chat.Principal{Kind: chat.PrincipalKind(99)}, tokenTestDM, cfg); err == nil {
+		t.Fatal("an unknown caller kind may send")
 	}
 }
 

@@ -59,7 +59,7 @@ const (
 )
 
 // CoreHostMethods lists the core-host methods.
-var CoreHostMethods = []string{MethodCoreCheck, MethodCoreSecretsOffer, MethodCoreSecretsSend, MethodCoreSecretsReceive, MethodCoreSecretsForget}
+var CoreHostMethods = append([]string{MethodCoreCheck, MethodCoreSecretsOffer, MethodCoreSecretsSend, MethodCoreSecretsReceive, MethodCoreSecretsForget}, CoreMoveMethods...)
 
 // CoreSecretsMethods are the core-host methods that move or remove host
 // secrets: a lockdown refuses them.
@@ -180,6 +180,14 @@ type CoreCheckResult struct {
 	Setup     []CoreCheckItem `json:"setup,omitempty"`
 	SetupOK   bool            `json:"setup_ok"`
 	SetupNote string          `json:"setup_note,omitempty"`
+	// Core is the core on this machine as the lease and the bucket see
+	// it; CoreError says why it could not be read (no store, no Docker,
+	// a box: #191 phase 4).
+	Core      *CoreRuntime `json:"core,omitempty"`
+	CoreError string       `json:"core_error,omitempty"`
+	// MachineBound is what of this machine a core that moves away leaves
+	// behind (#187 §4): a fixed scan, report only.
+	MachineBound []string `json:"machine_bound,omitempty"`
 }
 
 // CoreSecretPresent is one host secret by name, never by value.

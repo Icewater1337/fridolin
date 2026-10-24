@@ -468,7 +468,7 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 			PlaudDir: filepath.Join(home, "data", "plaud"), Home: home,
 			Settings: func() *plaud.Snapshot { return plaudSnapshotOf(*cfg) },
 			FindCLI:  findPlaudCLI, CLIVersion: plaudCLIVersion,
-			Target:     func(id string) *plaud.Target { return plaudTargetOf(mgr, id, nil) },
+			Target:     func(id string) *plaud.Target { return plaudTargetOf(mgr, id, nil, nil) },
 			HeldTarget: func() string { return mgr.HeldFor("", false) },
 		})
 		t.Cleanup(p.Stop)

@@ -98,6 +98,8 @@ plaudGivenUpAlert
 	⚠️ Plaud: the recording “Team sync” was not handed to brain notes: brain notes is not configured. It is still in Plaud, and the dashboard lists it (Integrations → Plaud).
 plaudExpiredAlert
 	⚠️ Plaud: the login expired, so new recordings are not arriving. Reconnect in the Fridolin dashboard (Integrations → Plaud).
+plaudVoiceQuestion
+	🎙️ Was steht morgen an?
 fleetGroupNotice
 	🖥️ !fleet answers only in a direct chat.
 fleetReply(false)
@@ -191,6 +193,12 @@ dashboardLinkReply(local)
 	The core is not on the tailnet, so it works only on the core machine.
 
 	It signs that browser in for 30 days; send `!dashboard` again for another link. Do not forward it.
+coreMoveEnded(done)
+	🚚 The core moved to *icebase* (move m-20261024-1403-7f2a): the core runs on icebase (version v1.9.0, WhatsApp connected, lease held). Moving it back is `fridolin nodes move` the other way round.
+coreMoveEnded(rolled_back)
+	🔙 The core move to *icebase* failed and the core runs on *mac-mini* again (move m-20261024-1403-7f2a): mac-mini: 3c1e9a0b7d22 gave the core up (not ready in time); its state comes back with it; the core runs here again
+coreMoveEnded(failed)
+	⚠️ The core move from *mac-mini* to *icebase* failed (move m-20261024-1403-7f2a): the rehearsal on icebase: the import failed; nothing was stopped
 nodeCoreHostApprovedNote
 	🔐 That includes core-host. Approving core-host lets the core move to this machine. It then holds all of Fridolin's secrets: the WhatsApp session, the backup keys and the Claude token. Approve it only for a machine you trust as much as the one the core runs on now.
 nodeApprovedReply

@@ -40,6 +40,9 @@ const (
 func classify(evt *events.Message) (kind msgKind, target string, content *waE2E.Message) {
 	msg := evt.Message
 	if pm := msg.GetProtocolMessage(); pm != nil {
+		// Of WhatsApp's many protocol message types only these two change
+		// a message; the rest are kindOther.
+		//exhaustive:ignore
 		switch pm.GetType() {
 		case waE2E.ProtocolMessage_REVOKE:
 			return kindRevoke, pm.GetKey().GetID(), nil

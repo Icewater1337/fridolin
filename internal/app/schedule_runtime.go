@@ -112,6 +112,7 @@ func jitterOf(s manifest.Schedule, cfg config.SchedulesSettings) time.Duration {
 
 // tick starts the agents that fell due by now, of every brain that runs.
 func (a *agents) tick(now time.Time) {
+	now = now.In(a.b.zone())
 	a.recover(now)
 	cfg := a.b.cfgs.Get().Live.Schedules
 	states, err := a.store.States()

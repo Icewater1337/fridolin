@@ -202,3 +202,17 @@ func (b *App) nodeCoreHost(*nodes.Node) { b.alertPendingApprovals(context.Backgr
 // nodeJoined tells the owner, in their direct chat, that a machine joined
 // with a join code and waits for approval.
 func (b *App) nodeJoined(*nodes.Node) { b.alertPendingApprovals(context.Background()) }
+
+// coreMoveEnded tells the owner, in their direct chat, how a core move
+// ended: the core that runs afterwards says it, on either machine.
+func (b *App) coreMoveEnded(r nodes.MoveRecord) {
+	cfg := b.cfgs.Get()
+	target := ownerChat(cfg)
+	if target == "" || b.outbox == nil {
+		return
+	}
+	msg := outboundmsg.CoreMoveEnded(r.ID, r.SourceName, r.TargetName, r.State, r.Detail)
+	if err := b.outbox.Text(context.Background(), target, msg, cfg.MaxChunkSize); err != nil {
+		log.Printf("nodes: telling the owner how core move %s ended: %v", r.ID, err)
+	}
+}

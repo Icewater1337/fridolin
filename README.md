@@ -102,8 +102,10 @@ some other way.
 is linked to — the brains' folders, their media, the folders nodes lend —
 and opens Markdown, text, images, PDFs, audio and video; the Wiki page reads
 each brain's `wiki/` and memory notes, with links between pages, backlinks
-and search. Read-only, every view audited, and what a backup leaves out,
-secrets and Fridolin's own state are never shown. See
+and search. You edit files and pages in place, upload (or hand uploads to
+the brain), rename, move and delete, each audited and committed where a
+brain's folder is a git repository; what a backup leaves out, secrets and
+Fridolin's own state are never shown or changed. See
 [docs/FILES.md](docs/FILES.md).
 
 **Your own site.** Optionally, a website of your own on your domain, linked
@@ -869,13 +871,13 @@ plus anything in your personal denylist
 your name, your numbers, your company). CI runs the same check.
 
 `make check` runs what CI's build, lint and test jobs run: gofmt, `go vet`,
-`go mod tidy -diff`, the race tests, staticcheck, shellcheck, ruff,
+`go mod tidy -diff`, the race tests, staticcheck, exhaustive, shellcheck, ruff,
 actionlint, a check that every workflow action is pinned to a commit SHA,
 a check that `THIRD_PARTY_NOTICES` is current, ESLint on the dashboard,
 the Python, dashboard, personal-data-check, action-pin-check, notices,
 release-archive and Makefile tests, and a smoke test that starts a
 race-enabled build in dev mode on a scratch config (`make help` lists every
-target). staticcheck runs through `go tool` and actionlint through `go run`, both pinned, and ESLint through `npx` at a pinned version, which it fetches
+target). staticcheck and exhaustive run through `go tool` and actionlint through `go run`, all pinned, and ESLint through `npx` at a pinned version, which it fetches
 the first time; ruff comes from `pip install -r tools/requirements-dev.txt`,
 shellcheck from your package manager. `make check` builds into a temp dir.
 `make build` writes `bin/fridolin` (it builds `./cmd/fridolin`; the

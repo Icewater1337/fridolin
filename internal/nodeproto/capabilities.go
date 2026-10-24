@@ -42,6 +42,11 @@ type ExecCap struct {
 	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
 	// MaxOutputBytes caps stdout and stderr each (0: DefaultMaxOutputBytes).
 	MaxOutputBytes int `json:"max_output_bytes,omitempty"`
+	// AcceptFromCore are the folders, absolute on the node, whose
+	// programs the core may add to Allow (exec_programs.go): the owner
+	// opts a folder in on the node, and the core adds a program when the
+	// owner approves a command agent that runs it.
+	AcceptFromCore []string `json:"accept_from_core,omitempty"`
 }
 
 // ExecRule allows one program.
@@ -52,6 +57,12 @@ type ExecRule struct {
 	// Args, when not null, are regular expressions; each argument of the
 	// call must match one of them whole. null allows any arguments, [] none.
 	Args []string `json:"args"`
+	// Exact makes Args the call's arguments themselves, in order: no
+	// patterns, no more and no fewer.
+	Exact bool `json:"exact,omitempty"`
+	// Core marks a rule the core added (exec_programs.go), which is
+	// always Exact and names an absolute path.
+	Core bool `json:"core,omitempty"`
 }
 
 // FSCap reads, and where granted writes, files under its roots.
@@ -73,7 +84,7 @@ const (
 	MaxExecTimeoutSeconds     = 3600
 	DefaultMaxOutputBytes     = 1 << 20
 	MaxOutputBytesLimit       = 16 << 20
-	maxRules                  = 64
+	MaxExecRules              = 64
 	maxPatterns               = 32
 	maxPatternLen             = 256
 	maxRoots                  = 32
@@ -144,8 +155,8 @@ func isAbs(p string) bool {
 // Check reports what is wrong with the declaration, nil when nothing is.
 func (c Capabilities) Check() error {
 	if e := c.Exec; e != nil {
-		if len(e.Allow) > maxRules {
-			return fmt.Errorf("exec: at most %d rules", maxRules)
+		if len(e.Allow) > MaxExecRules {
+			return fmt.Errorf("exec: at most %d rules", MaxExecRules)
 		}
 		if e.TimeoutSeconds < 0 || e.TimeoutSeconds > MaxExecTimeoutSeconds {
 			return fmt.Errorf("exec: timeout_seconds from 0 to %d", MaxExecTimeoutSeconds)
@@ -156,6 +167,14 @@ func (c Capabilities) Check() error {
 		for _, r := range e.Allow {
 			if err := r.Check(); err != nil {
 				return err
+			}
+		}
+		if len(e.AcceptFromCore) > maxRoots {
+			return fmt.Errorf("exec: at most %d accept_from_core folders", maxRoots)
+		}
+		for _, f := range e.AcceptFromCore {
+			if f == "" || len(f) > maxPathLen || strings.ContainsRune(f, 0) || !isAbs(f) {
+				return fmt.Errorf("exec: accept_from_core folder %q must be an absolute path", f)
 			}
 		}
 	}
@@ -198,8 +217,18 @@ func (r ExecRule) Check() error {
 		return fmt.Errorf("exec: %q is a shell or runs other programs; a node never allows one", r.Name)
 	case len(r.Args) > maxPatterns:
 		return fmt.Errorf("exec: %s: at most %d argument patterns", r.Name, maxPatterns)
+	case r.Core && (!r.Exact || !isAbs(r.Name)):
+		return fmt.Errorf("exec: %s: a rule the core added is exact and names an absolute path", r.Name)
+	case r.Core && IsInterpreter(r.Name):
+		return fmt.Errorf("exec: %s: the core never adds an interpreter", r.Name)
 	}
 	for _, p := range r.Args {
+		if r.Exact {
+			if len(p) > maxPathLen || strings.ContainsRune(p, 0) {
+				return fmt.Errorf("exec: %s: an argument longer than %d", r.Name, maxPathLen)
+			}
+			continue
+		}
 		if len(p) > maxPatternLen {
 			return fmt.Errorf("exec: %s: pattern longer than %d", r.Name, maxPatternLen)
 		}
@@ -216,6 +245,9 @@ func anchor(p string) string { return `^(?:` + p + `)$` }
 func (r ExecRule) Matches(argv []string) bool {
 	if len(argv) == 0 || argv[0] != r.Name {
 		return false
+	}
+	if r.Exact {
+		return slices.Equal(argv[1:], r.Args)
 	}
 	if r.Args == nil {
 		return true
@@ -237,7 +269,7 @@ func (r ExecRule) Matches(argv []string) bool {
 }
 
 func (r ExecRule) equal(o ExecRule) bool {
-	return r.Name == o.Name && (r.Args == nil) == (o.Args == nil) && slices.Equal(r.Args, o.Args)
+	return r.Name == o.Name && (r.Args == nil) == (o.Args == nil) && slices.Equal(r.Args, o.Args) && r.Exact == o.Exact && r.Core == o.Core
 }
 
 // ErrNotAllowed is an exec call no rule allows.
@@ -269,6 +301,8 @@ func (c Capabilities) Allows(method string) bool {
 	switch method {
 	case MethodExec:
 		return c.Exec != nil && len(c.Exec.Allow) > 0
+	case MethodExecPrograms:
+		return c.Exec != nil && len(c.Exec.AcceptFromCore) > 0
 	case MethodFSList, MethodFSRead:
 		return c.FS != nil && len(c.FS.Roots) > 0
 	case MethodFSWrite:
@@ -304,7 +338,7 @@ func (c Capabilities) Allows(method string) bool {
 
 // Empty reports whether nothing is offered.
 func (c Capabilities) Empty() bool {
-	return (c.Exec == nil || len(c.Exec.Allow) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil && c.AndroidBuild == nil && c.Backup == nil && c.Update == nil && c.Agent == nil && c.Terminal == nil && c.CoreHost == nil
+	return (c.Exec == nil || len(c.Exec.Allow) == 0 && len(c.Exec.AcceptFromCore) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil && c.AndroidBuild == nil && c.Backup == nil && c.Update == nil && c.Agent == nil && c.Terminal == nil && c.CoreHost == nil
 }
 
 // Covers reports whether approved covers every part of declared: each
@@ -332,13 +366,18 @@ func Covers(approved, declared Capabilities) bool {
 	if !coversWork(approved.Agent, declared.Agent) || !coversWork(approved.Terminal, declared.Terminal) {
 		return false
 	}
-	if d := declared.Exec; d != nil && len(d.Allow) > 0 {
+	if d := declared.Exec; d != nil && (len(d.Allow) > 0 || len(d.AcceptFromCore) > 0) {
 		a := approved.Exec
 		if a == nil || d.Timeout() > a.Timeout() || d.OutputCap() > a.OutputCap() {
 			return false
 		}
 		for _, r := range d.Allow {
 			if !slices.ContainsFunc(a.Allow, r.equal) {
+				return false
+			}
+		}
+		for _, f := range d.AcceptFromCore {
+			if !slices.Contains(a.AcceptFromCore, f) {
 				return false
 			}
 		}
@@ -387,7 +426,12 @@ func Intersect(declared, approved Capabilities) Capabilities {
 				e.Allow = append(e.Allow, r)
 			}
 		}
-		if len(e.Allow) > 0 {
+		for _, f := range d.AcceptFromCore {
+			if slices.Contains(a.AcceptFromCore, f) {
+				e.AcceptFromCore = append(e.AcceptFromCore, f)
+			}
+		}
+		if len(e.Allow) > 0 || len(e.AcceptFromCore) > 0 {
 			out.Exec = e
 		}
 	}
@@ -417,6 +461,9 @@ func (c Capabilities) Summary() string {
 			names[i] = r.Name
 		}
 		parts = append(parts, "exec ("+strings.Join(names, ", ")+")")
+	}
+	if c.Exec != nil && len(c.Exec.AcceptFromCore) > 0 {
+		parts = append(parts, "exec from the core ("+strings.Join(c.Exec.AcceptFromCore, ", ")+")")
 	}
 	if c.FS != nil && len(c.FS.Roots) > 0 {
 		w := 0

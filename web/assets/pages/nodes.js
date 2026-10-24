@@ -197,10 +197,11 @@ export default {
 
     function offers(n) {
       const declared = n.declared || {};
-      const rules = (declared.exec && declared.exec.allow) || [];
+      const rules = ((declared.exec && declared.exec.allow) || []).filter((r) => !r.core);
       const roots = (declared.fs && declared.fs.roots) || [];
       return h('div.node-offers',
         rules.length ? h('div', h('strong', 'Commands: '), rules.map((r) => mono(ruleText(r))).flatMap((el, i) => (i ? [', ', el] : [el]))) : null,
+        programsLines(n),
         roots.length ? h('div', h('strong', 'Folders: '), roots.map((r) => mono(`${r.path}${r.write ? ' (read and write)' : ' (read only)'}`)).flatMap((el, i) => (i ? [', ', el] : [el]))) : null,
         frideLine(declared.fride),
         backupLine(declared.backup, n.approved && n.approved.backup),
@@ -216,6 +217,27 @@ export default {
       const to = ch.send_to || [];
       return h('div', h('strong', 'Core host: '), 'device key ', mono(ch.fingerprint),
         h('span.muted', to.length ? ` · sends secrets only to ${to.join(', ')}` : ' · trusts no target'));
+    }
+
+    // Programs from the core: the folders node.json opts in, the programs
+    // the core added for approved command agents (with those agents), and
+    // what the node refused of the core's last list, and why.
+    function programsLines(n) {
+      const folders = (n.declared && n.declared.exec && n.declared.exec.accept_from_core) || [];
+      const added = ((n.declared && n.declared.exec && n.declared.exec.allow) || []).filter((r) => r.core);
+      const st = n.programs || null;
+      if (!folders.length && !added.length && !st) return null;
+      const agentsOf = (r) => {
+        const p = st && (st.accepted || []).find((x) => x.name === r.name && (x.args || []).join('\0') === (r.args || []).join('\0'));
+        return p && (p.agents || []).length ? h('span.muted', ` for ${p.agents.join(', ')}`) : null;
+      };
+      return [
+        folders.length ? h('div', h('strong', 'Programs from the core: '), folders.map((f) => mono(f)).flatMap((el, i) => (i ? [', ', el] : [el])),
+          h('span.muted', ' · approving a command agent adds its program from these folders')) : null,
+        added.length ? h('div', h('strong', 'Added for agents: '), h('ul.plain-list', added.map((r) => h('li', mono(ruleText(r)), agentsOf(r))))) : null,
+        st && (st.refused || []).length ? h('div', h('strong', 'Refused: '), h('ul.plain-list', st.refused.map((r) => h('li', mono(r.name), h('span.muted', ` — ${r.why}`))))) : null,
+        st && st.error ? h('div.warn-text.small', `The core’s last list did not reach it: ${st.error}`) : null,
+      ];
     }
 
     // Workstation: the folders an agent session or a terminal may run in,
