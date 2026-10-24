@@ -8,10 +8,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/housekeeping"
 )
 
-// nodeSessionMinAge is the least age of a node session housekeeping
-// stops; tests lower it.
-var nodeSessionMinAge = time.Minute
-
 // nodeSessionFindings are the agent sessions and terminals that run on
 // nodes and that the core has no record of (#159): a restart of the core
 // forgot them, so nobody hears their news or closes them. Unless dry, it
@@ -22,7 +18,7 @@ func (h *housekeepingService) nodeSessionFindings(ctx context.Context, dry bool,
 	if h.b.work == nil || !h.b.nodesEnabled {
 		return nil, nil
 	}
-	minAge = max(minAge, nodeSessionMinAge)
+	minAge = max(minAge, h.b.waits.nodeSessionMinAge)
 	list, errs := h.b.work.orphans(ctx)
 	var out []housekeeping.Finding
 	for _, o := range list {

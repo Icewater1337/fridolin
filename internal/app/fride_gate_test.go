@@ -280,12 +280,9 @@ func step(tool, args string) testutil.FakeMCPStep {
 }
 
 func TestFrideGate(t *testing.T) {
-	// Serial: shortens frideRetryEvery, a package variable every bridge's
-	// FrIDE reads.
+	t.Parallel()
 	bin := frideBinary(t)
-	saved := frideRetryEvery
-	frideRetryEvery = 200 * time.Millisecond
-	t.Cleanup(func() { frideRetryEvery = saved })
+	optionsOf(t).waits.frideRetry = 200 * time.Millisecond
 	prompts := filepath.Join(t.TempDir(), "prompts.log")
 	setenv(t, "FRIDOLIN_FAKE_PROMPT_LOG", prompts)
 	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
