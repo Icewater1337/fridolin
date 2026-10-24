@@ -130,6 +130,27 @@ func (a *Agent) checkCoreProgram(pr nodeproto.ExecProgram) (string, error) {
 	if nodeproto.IsInterpreter(real) {
 		return "", fmt.Errorf("%s is %s, a shell or an interpreter, which the core never adds", name, real)
 	}
+	for _, f := range folders {
+		if CheckWorkRoot(f, false, a.Dir) != nil {
+			continue
+		}
+		rf, err := filepath.EvalSymlinks(f)
+		if err != nil {
+			continue
+		}
+		if inside(rf, real) && !sameFile(rf, real) {
+			return checkExecutable(name, real)
+		}
+	}
+	if real != name {
+		return "", fmt.Errorf("%s is %s, which is in no folder this node accepts programs from (%s)", name, real, strings.Join(folders, ", "))
+	}
+	return "", fmt.Errorf("%s is in no folder this node accepts programs from (%s)", name, strings.Join(folders, ", "))
+}
+
+// checkExecutable reports why real, the file name resolves to, confined
+// to an accepted folder already, is no executable file; real when it is.
+func checkExecutable(name, real string) (string, error) {
 	info, err := os.Stat(real)
 	if err != nil {
 		return "", err
@@ -140,22 +161,7 @@ func (a *Agent) checkCoreProgram(pr nodeproto.ExecProgram) (string, error) {
 	if runtime.GOOS != "windows" && info.Mode().Perm()&0o111 == 0 {
 		return "", fmt.Errorf("%s is not executable (chmod +x)", name)
 	}
-	for _, f := range folders {
-		if CheckWorkRoot(f, false, a.Dir) != nil {
-			continue
-		}
-		rf, err := filepath.EvalSymlinks(f)
-		if err != nil {
-			continue
-		}
-		if inside(rf, real) && !sameFile(rf, real) {
-			return real, nil
-		}
-	}
-	if real != name {
-		return "", fmt.Errorf("%s is %s, which is in no folder this node accepts programs from (%s)", name, real, strings.Join(folders, ", "))
-	}
-	return "", fmt.Errorf("%s is in no folder this node accepts programs from (%s)", name, strings.Join(folders, ", "))
+	return real, nil
 }
 
 // execProgramsCall serves exec.programs: the core's whole list of the
