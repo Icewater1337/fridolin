@@ -3,6 +3,7 @@ package secretxfer
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -72,7 +73,7 @@ func TestSecretFilesTravelSealed(t *testing.T) {
 	if b, _ := os.ReadFile(filepath.Join(dst, "dashboard-users.json")); string(b) != `["mine"]` {
 		t.Fatalf("a file there was replaced: %s", b)
 	}
-	if fi, err := os.Stat(filepath.Join(dst, "google_calendar_token_personal.json")); err != nil || fi.Mode().Perm() != 0o600 {
+	if fi, err := os.Stat(filepath.Join(dst, "google_calendar_token_personal.json")); err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600) {
 		t.Fatalf("mode %v: %v", fi, err)
 	}
 
