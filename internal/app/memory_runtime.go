@@ -176,6 +176,7 @@ func (s *scheduler) tick(now time.Time) {
 	}
 	// The scheduled agents, the memory consolidation among them.
 	b.agents.tick(now)
+	b.programs.sync()
 }
 
 // usesMemoryIndex reports whether a brain's memory index is kept up to
