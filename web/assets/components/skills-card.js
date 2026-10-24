@@ -31,7 +31,11 @@ function policyLines(p) {
     h('dt', 'Vault'), h('dd', list(p.vault)));
 }
 
-/** skillsCard(brainId, {signal}) is the card of brainId's skills. */
+/**
+ * skillsCard(brainId, {signal}) is the card of brainId's skills.
+ * @param {string} brainId
+ * @param {{signal?: AbortSignal}} [options]
+ */
 export function skillsCard(brainId, { signal } = {}) {
   const el = h('div.stack', h('div.card', loading('Reading skills…')));
   const base = `/api/brains/${encodeURIComponent(brainId)}/skills`;

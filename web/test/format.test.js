@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { parseTs, relTime, hhmmss, stamp, fmtDuration, fmtBytes, plural, prettyJSON } from '../assets/lib/format.js';
 
 test('parseTs', async (t) => {
+  /** @type {[string, import('../assets/lib/format.js').Timestamp, number | null][]} */
   const cases = [
     ['empty string', '', null],
     ['zero', 0, null],
@@ -56,6 +57,7 @@ test('hhmmss', async (t) => {
 });
 
 test('stamp', async (t) => {
+  /** @type {[string, Date, string][]} */
   const cases = [
     ['local time, zero-padded', new Date(2026, 0, 2, 3, 4, 59), '20260102-0304'],
     ['two-digit month, day and time', new Date(2026, 11, 31, 23, 59), '20261231-2359'],
@@ -71,6 +73,7 @@ test('stamp', async (t) => {
 });
 
 test('fmtDuration', async (t) => {
+  /** @type {[number | null | undefined, string][]} */
   const cases = [
     [null, ''],
     [undefined, ''],
@@ -88,6 +91,7 @@ test('fmtDuration', async (t) => {
 });
 
 test('fmtBytes', async (t) => {
+  /** @type {[number, string][]} */
   const cases = [
     [0, '0 B'],
     [999, '999 B'],
@@ -102,6 +106,7 @@ test('fmtBytes', async (t) => {
 });
 
 test('plural', async (t) => {
+  /** @type {[Parameters<typeof plural>, string][]} */
   const cases = [
     [[1, 'brain'], '1 brain'],
     [[0, 'brain'], '0 brains'],

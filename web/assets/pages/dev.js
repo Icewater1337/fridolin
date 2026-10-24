@@ -10,12 +10,15 @@ import { timeAgo, empty, pageHeader, callout, longText } from '../components/com
 import { chatEl, chatName } from '../components/chat.js';
 import { isGroupJid } from '../lib/jid.js';
 
+/** @import { PageModule } from '../app/page.js' */
+/** @import { DevMessage } from '../../types/api.js' */
+
 const DM = '15551234567@s.whatsapp.net';
 const GROUP = '120363000000000000@g.us';
 const DM_SENDER = 'defaults to the number in the JID';
 const GROUP_SENDER = 'the member’s number, one the group admits';
 
-export default {
+export default /** @satisfies {PageModule} */ ({
   title: 'Dev',
   render(root, ctx) {
     const notice = h('div');
@@ -75,6 +78,7 @@ export default {
       paint(notice, !!s.dev_mode, (dev) => (dev ? null : callout('warn', 'Dev mode is off', 'This page only works when the bridge was started with --no-whatsapp.')));
     });
 
+    /** @type {DevMessage[] | null} */
     let items = null;
     const paintOutbox = () => {
       if (!items) return;
@@ -90,6 +94,10 @@ export default {
     // as one from WhatsApp would: an approval's poll counts it only from
     // an allowed number.
     const voterOf = () => senderIn.value.trim() || jidIn.value.trim().split('@')[0];
+    /**
+     * @param {DevMessage} m
+     * @param {string} option
+     */
     const vote = async (m, option) => {
       try {
         await post('/api/dev/vote', { poll: m.id, voter: voterOf(), options: [option] });
@@ -110,4 +118,4 @@ export default {
     // Chat labels show group names once the groups have loaded.
     ctx.watch(store, (s) => s.names, paintOutbox);
   },
-};
+});

@@ -5,6 +5,9 @@ import { runThemeScript } from './theme-script.js';
 import { createShell, pageFailed } from '../assets/app/shell.js';
 import { setStatus, setIgnoredCount } from '../assets/app/store.js';
 
+// The tests give only the fields of the status that the shell reads.
+/** @import { Status } from '../types/api.js' */
+
 function shellInPage(t, theme) {
   installDom();
   const storage = runThemeScript(t, theme);
@@ -20,24 +23,24 @@ function shellInPage(t, theme) {
 test('the restart banner shows what the bridge says is waiting for a restart', (t) => {
   const { app, restarts } = shellInPage(t);
   const banner = () => app.querySelector('.banner.warn');
-  setStatus({ restart_required: ['log_level', 'http_listen'] });
+  setStatus(/** @type {Status} */ ({ restart_required: ['log_level', 'http_listen'] }));
   assert.equal(banner().hidden, false);
   assert.match(banner().textContent, /Restart the bridge to apply: log_level, http_listen/);
   banner().querySelector('button').click();
   assert.equal(restarts(), 1);
-  setStatus({ restart_required: [] });
+  setStatus(/** @type {Status} */ ({ restart_required: [] }));
   assert.equal(banner().hidden, true, 'gone once nothing waits, e.g. after the restart');
 });
 
 test('the sidebar follows the status', (t) => {
   const { app } = shellInPage(t);
   const link = (label) => app.querySelectorAll('.nav-link').find((a) => a.textContent.startsWith(label));
-  setStatus({ dev_mode: true, version: '1.2.3', whatsapp: { mode: 'disabled' }, issues: [{ kind: 'drift' }] });
+  setStatus(/** @type {Status} */ ({ dev_mode: true, version: '1.2.3', whatsapp: { mode: 'disabled' }, issues: [{ kind: 'drift' }] }));
   assert.equal(link('Dev').hidden, false);
   assert.equal(app.querySelector('.version').textContent, 'v1.2.3');
   assert.equal(app.querySelector('.sidebar-status').textContent, 'Dev mode (no WhatsApp)');
   assert.equal(link('Brains').querySelector('.nav-badge').textContent, '1');
-  setStatus({ dev_mode: false, whatsapp: { mode: 'connected' }, issues: [] });
+  setStatus(/** @type {Status} */ ({ dev_mode: false, whatsapp: { mode: 'connected' }, issues: [] }));
   assert.equal(link('Dev').hidden, true);
   assert.equal(app.querySelector('.sidebar-status').textContent, 'WhatsApp connected');
   assert.equal(link('Brains').querySelector('.nav-badge').hidden, true);
@@ -58,11 +61,11 @@ test('a new bridge version asks for a reload', (t) => {
   setStatus(null);
   const { app, reloads } = shellInPage(t);
   const banner = () => app.querySelector('.banner.info');
-  setStatus({ version: '1.2.3' });
+  setStatus(/** @type {Status} */ ({ version: '1.2.3' }));
   assert.equal(banner().hidden, true, 'the version the page started with');
-  setStatus({ version: '1.2.3', uptime_s: 5 });
+  setStatus(/** @type {Status} */ ({ version: '1.2.3', uptime_s: 5 }));
   assert.equal(banner().hidden, true);
-  setStatus({ version: '1.3.0' });
+  setStatus(/** @type {Status} */ ({ version: '1.3.0' }));
   assert.equal(banner().hidden, false);
   assert.match(banner().textContent, /Fridolin was updated/);
   banner().querySelector('button').click();
@@ -98,7 +101,7 @@ test('focusPage puts the focus on the heading given, the page heading, or the pa
 
 test('the skip link comes first and moves the focus to the page', (t) => {
   const { shell, app } = shellInPage(t);
-  const skip = app.firstChild;
+  const skip = /** @type {Element} */ (app.firstChild);
   assert.equal(skip.tagName, 'A');
   assert.equal(skip.textContent, 'Skip to content');
   const heading = document.createElement('h1');

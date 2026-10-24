@@ -4,6 +4,7 @@ import { getPath, setPath } from '../assets/lib/keypath.js';
 
 test('getPath', async (t) => {
   const cfg = { claude_path: 'claude', queue: { mode: 'interrupt', notify: false }, sandbox: { enabled: true, deny_paths: ['~/clients'] }, log_level: null };
+  /** @type {[string, string, unknown][]} */
   const cases = [
     ['a top-level key', 'claude_path', 'claude'],
     ['a nested key', 'queue.mode', 'interrupt'],

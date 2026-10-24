@@ -9,6 +9,10 @@ import { fmtDuration, plural } from '../lib/format.js';
 import { empty, pageHeader, spinner, timeAgo } from '../components/common.js';
 import { outcomeBadge, riskBadge, threadEl } from '../components/policy.js';
 
+/** @import { PageModule } from '../app/page.js' */
+/** @import { Thread, ThreadRun } from '../../types/api.js' */
+
+/** @param {ThreadRun} r */
 function runRow(r) {
   return h('tr',
     h('td', timeAgo(r.started)),
@@ -19,6 +23,7 @@ function runRow(r) {
     h('td.right', h('a.link-btn', { href: `#/audit/${encodeURIComponent(r.run)}` }, 'Audit')));
 }
 
+/** @param {Thread} t */
 function threadCard(t) {
   return h('article.card.flush',
     h('div.act-meta.thread-head',
@@ -33,11 +38,12 @@ function threadCard(t) {
       h('tbody', (t.runs || []).map(runRow)))));
 }
 
-export default {
+export default /** @satisfies {PageModule} */ ({
   title: 'Threads',
   render(root, ctx) {
     const box = h('div', spinner());
     const list = h('div.stack');
+    /** @type {Thread[] | null} */
     let threads = null;
     const show = () => {
       if (!threads) return;
@@ -55,4 +61,4 @@ export default {
     // Chat labels use group names once the groups have loaded.
     ctx.watch(store, (s) => s.names, () => { list.replaceChildren(); show(); });
   },
-};
+});

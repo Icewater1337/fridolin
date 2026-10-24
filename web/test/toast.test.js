@@ -44,10 +44,12 @@ test('errors are announced as alerts, the rest politely', (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const err = toast('Could not save', 'error');
   const ok = toast('Saved the brain', 'ok');
-  assert.equal(err.parentNode.getAttribute('role'), 'alert');
-  assert.equal(ok.parentNode.getAttribute('role'), 'status');
-  assert.equal(ok.parentNode.getAttribute('aria-live'), 'polite');
-  assert.equal(err.parentNode.parentNode, ok.parentNode.parentNode, 'both in the same corner');
+  const alerts = /** @type {Element} */ (err.parentNode);
+  const polite = /** @type {Element} */ (ok.parentNode);
+  assert.equal(alerts.getAttribute('role'), 'alert');
+  assert.equal(polite.getAttribute('role'), 'status');
+  assert.equal(polite.getAttribute('aria-live'), 'polite');
+  assert.equal(alerts.parentNode, polite.parentNode, 'both in the same corner');
   t.mock.timers.tick(10000);
 });
 

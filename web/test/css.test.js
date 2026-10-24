@@ -18,8 +18,9 @@ const files = fs.readdirSync(CSS).filter((f) => f.endsWith('.css')).sort();
 
 /**
  * The rules of a stylesheet: {at, selector, body} for each style rule,
- * where at lists the at-rules (e.g. @media) it sits in, and {statement}
- * for the at-rules that end in a semicolon (@layer, @import).
+ * where at lists the at-rules it sits in (such as a media query), and
+ * {statement} for the at-rules that end in a semicolon (the layer and
+ * import statements).
  */
 function parseCSS(src) {
   const css = src.replace(/\/\*[\s\S]*?\*\//g, '');

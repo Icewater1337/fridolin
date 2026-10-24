@@ -263,11 +263,13 @@ test('the wizard says how a program stands on its node', async (t) => {
   sel.dispatchEvent(new Event('change'));
   const argv = root.querySelector('.agent-wizard textarea');
   const status = () => root.querySelector('.program-status').textContent;
-  for (const [typed, want] of [
+  /** @type {[string, RegExp][]} */
+  const cases = [
     ['/Users/you/tools/daily.sh\n--quiet', /Saving adds it to node mac-mini.*exactly these arguments/],
     ['/opt/bin/ok', /Node mac-mini runs it.*node\.json allows/],
     ['/usr/local/bin/x', /would not run it.*in none of the folders/],
-  ]) {
+  ];
+  for (const [typed, want] of cases) {
     argv.value = typed;
     argv.dispatchEvent(new Event('input'));
     assert.match(status(), want, typed);

@@ -11,7 +11,8 @@ export function serve(t, route) {
   const real = globalThis.fetch;
   const calls = [];
   const aborted = () => new DOMException('aborted', 'AbortError');
-  globalThis.fetch = async (url, init = {}) => {
+  // Its answers have only what api.js reads of a Response.
+  const fetch = async (url, init = {}) => {
     if (init.signal && init.signal.aborted) throw aborted();
     const path = String(url);
     calls.push({ path, method: init.method || 'GET', headers: init.headers || {}, body: typeof init.body === 'string' ? JSON.parse(init.body) : init.body });
@@ -24,6 +25,7 @@ export function serve(t, route) {
     const text = r.body === undefined ? '' : JSON.stringify(r.body);
     return { ok: r.status >= 200 && r.status < 300, status: r.status, statusText: '', headers: new Headers(r.headers), text: async () => text };
   };
+  Object.assign(globalThis, { fetch });
   t.after(() => { globalThis.fetch = real; });
   return calls;
 }

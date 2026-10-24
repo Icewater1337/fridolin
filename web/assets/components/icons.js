@@ -54,6 +54,13 @@ const ICONS = {
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 
+/**
+ * The icon called name (info for a name it does not know), with cls as
+ * more classes.
+ * @param {string} name
+ * @param {string} [cls]
+ * @returns {SVGSVGElement}
+ */
 export function icon(name, cls = '') {
   const svg = document.createElementNS(SVGNS, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
