@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
 // machineBound is the source's fixed scan for what a core that moves away
@@ -18,8 +20,15 @@ func (a *Agent) machineBound() []string {
 	if a.Config.Box != nil {
 		return nil
 	}
-	home, _ := os.UserHomeDir()
-	cfgDir, _ := os.UserConfigDir()
+	home := platform.ExpandHome("~")
+	if home == "~" {
+		return nil
+	}
+	// Where fridolin core keeps its compose file (os.UserConfigDir).
+	cfgDir := filepath.Join(home, ".config")
+	if runtime.GOOS == "darwin" {
+		cfgDir = filepath.Join(home, "Library", "Application Support")
+	}
 	return scanMachineBound(runtime.GOOS, home, cfgDir)
 }
 
