@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/app"
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
@@ -155,7 +156,51 @@ func nodeChecks(dir string, svc nodeService) []app.DoctorCheck {
 			}
 			return app.DoctorResult{Status: app.DoctorOK, Detail: "on for " + user}
 		}},
+		{ID: "node-core-leftovers", Title: "what core moves left on this machine", Run: func(context.Context, *app.DoctorEnv) app.DoctorResult {
+			return coreLeftoversResult(nodeagent.ReadCoreLeftovers(dir))
+		}},
 	}
+}
+
+// coreLeftoversResult flags a former core host that still holds the
+// core's data or credentials (#266), from what its agent recorded as
+// moves brought them: what forgetting removes, and the data dir that
+// forgetting keeps, the machine's own from before the moves.
+func coreLeftoversResult(l nodeagent.CoreLeftovers) app.DoctorResult {
+	byHand := "docs/CORE.md, \"Forgetting a former core host\""
+	if !l.Former {
+		detail := "no core moved away from this machine"
+		if l.Holds() {
+			detail += "; it holds what moves brought it, for the core that runs or may run here"
+		}
+		return app.DoctorResult{Status: app.DoctorOK, Detail: detail}
+	}
+	var held []string
+	if len(l.Secrets) > 0 {
+		held = append(held, "host secrets "+strings.Join(l.Secrets, ", "))
+	}
+	if len(l.Files) > 0 {
+		held = append(held, "secret files "+strings.Join(l.Files, ", "))
+	}
+	if l.DataMove != "" {
+		held = append(held, "the core's data dir that move "+l.DataMove+" brought (bridge.db holds the WhatsApp session)")
+	}
+	switch {
+	case len(held) > 0:
+		return app.DoctorResult{Status: app.DoctorWarn, Detail: fmt.Sprintf("the core moved away in move %s, and this machine still holds %s", l.LastMove, strings.Join(held, "; ")),
+			Fix: "on the core, vote forget in the keep/forget poll, or !revoke this node (it forgets them first); by hand: " + byHand}
+	case l.Unrecorded:
+		return app.DoctorResult{Status: app.DoctorWarn, Detail: "the core moved away in move " + l.LastMove + "; a move imported its data dir here before fridolin recorded what a move brings, so forgetting leaves it (bridge.db holds the WhatsApp session)",
+			Fix: "remove it by hand once the core runs elsewhere: " + byHand}
+	case !l.DataForgotten.IsZero():
+		return app.DoctorResult{Status: app.DoctorOK, Detail: "the core moved away in move " + l.LastMove + "; what moves brought this machine is forgotten (" + l.DataForgotten.Format(time.DateOnly) + ")"}
+	}
+	why := "this machine ran the core before any move"
+	if l.OwnDataMove != "" {
+		why = "it held the core's data before move " + l.OwnDataMove + " imported into it"
+	}
+	return app.DoctorResult{Status: app.DoctorWarn, Detail: "the core moved away in move " + l.LastMove + "; its own data dir stays here, which forgetting never removes: " + why + " (bridge.db holds an older WhatsApp session)",
+		Fix: "keep it to move the core back here; to remove it once you will not: " + byHand}
 }
 
 func onLinux(env *app.DoctorEnv) bool { return env.GOOS == "linux" }
