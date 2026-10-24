@@ -83,6 +83,7 @@ func (h *harness) coreTransfer(src, dst string, run bool) (int, coreTransfer, st
 // approved, the secrets go end to end and the core sees only names; and
 // a change of core-host.json waits for approval again.
 func TestCoreSecretsTransfer(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	addr := h.StartNodes()
 
