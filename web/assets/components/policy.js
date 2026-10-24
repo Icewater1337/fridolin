@@ -5,15 +5,23 @@ import { h } from '../lib/dom.js';
 import { badge } from './common.js';
 import { chatEl } from './chat.js';
 
+/** @type {Record<string, string>} */
 const RISK = { read: 'neutral', write: 'info', irreversible: 'warn' };
+/** @type {Record<string, string>} */
 const STATUS = { pending: 'info', approved: 'ok', answered: 'ok', denied: 'bad', expired: 'neutral' };
 
-/** The badge of a risk level; nothing for none. */
+/**
+ * The badge of a risk level; nothing for none.
+ * @param {string | null | undefined} risk
+ */
 export function riskBadge(risk) {
   return risk ? badge(risk, RISK[risk] || 'neutral', 'Risk level') : null;
 }
 
-/** The badge of how a run or a tool call ended. */
+/**
+ * The badge of how a run or a tool call ended.
+ * @param {string | null | undefined} outcome
+ */
 export function outcomeBadge(outcome) {
   const o = String(outcome || '');
   if (!o) return null;
@@ -24,12 +32,18 @@ export function outcomeBadge(outcome) {
   return badge(o, 'bad');
 }
 
-/** The badge of an approval's status. */
+/**
+ * The badge of an approval's status.
+ * @param {string} status
+ */
 export function statusBadge(status) {
   return badge(status, STATUS[status] || 'neutral');
 }
 
-/** A thread or chat: a WhatsApp chat by name, a delegated task's by id. */
+/**
+ * A thread or chat: a WhatsApp chat by name, a delegated task's by id.
+ * @param {string | null | undefined} jid
+ */
 export function threadEl(jid) {
   if (jid && jid.startsWith('delegate:')) return h('code.mono', jid);
   return chatEl(jid);

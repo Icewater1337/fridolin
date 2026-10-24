@@ -11,6 +11,13 @@ import { fromBase64, termText } from '../lib/nodes.js';
 import { btn } from './buttons.js';
 import { textInput } from './fields.js';
 
+/**
+ * Calls method on node through the bridge; resolves with its result.
+ * @param {string} node
+ * @param {string} method
+ * @param {Record<string, unknown>} [params]
+ * @returns {Promise<any>} what the node's method answers
+ */
 async function nodeCall(node, method, params) {
   const r = await post(`/api/nodes/${encodeURIComponent(node)}/call`, { method, params: params || {} });
   return r.result || {};
@@ -20,6 +27,8 @@ async function nodeCall(node, method, params) {
  * nodeTerminal({node, folder}) opens a terminal and returns {el, close}:
  * el shows it, close ends it (once). onEnd(text) hears when it ended on
  * its own or failed.
+ * @param {{node: string, folder: string, onEnd?: (text: string) => void}} options
+ * @returns {{el: HTMLDivElement, close: () => Promise<void>}}
  */
 export function nodeTerminal({ node, folder, onEnd }) {
   const out = h('pre.term-out', { tabindex: '0', 'aria-live': 'polite', 'aria-label': 'Terminal output' });
@@ -27,25 +36,26 @@ export function nodeTerminal({ node, folder, onEnd }) {
   const input = textInput({ placeholder: 'Type a command, then Enter', 'aria-label': 'Command', autocomplete: 'off', spellcheck: 'false' });
   input.disabled = true;
   const decoder = new TextDecoder();
+  /** @type {string | null} */
   let id = null;
   let offset = 0;
   let shown = '';
   let ended = false;
   let exited = false;
 
-  const show = (chunk) => {
+  const show = (/** @type {string} */ chunk) => {
     shown = termText(shown, chunk);
     out.textContent = shown;
     out.scrollTop = out.scrollHeight;
   };
-  const end = (text) => {
+  const end = (/** @type {string} */ text) => {
     if (ended) return;
     ended = true;
     input.disabled = true;
     status.textContent = text;
     if (onEnd) onEnd(text);
   };
-  const send = async (data) => {
+  const send = async (/** @type {string} */ data) => {
     if (!id || ended) return;
     try {
       await nodeCall(node, 'terminal.send', { id, data });

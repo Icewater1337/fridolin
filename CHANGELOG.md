@@ -968,6 +968,12 @@ for compatibility.
   published.
 - `fridolin node status` in a box says it has no service of its own
   instead of "unknown: exit status 1".
+- On the Build page, a message that could not be sent and a preview that
+  could not be started now show as an error toast, read out at once and
+  kept for 9 seconds. They showed as a plain note with the info icon,
+  for 5 seconds.
+- The Files page says "Only the first entries are shown." under a folder
+  the bridge lists only in part. The note was never shown.
 
 - A brain folder that a core move put on another machine goes back
   through the vault bucket only as far as the brain's backup settings
