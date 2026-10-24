@@ -178,6 +178,12 @@ type CoreCheckResult struct {
 	SecretStore  string              `json:"secret_store"`
 	Secrets      []CoreSecretPresent `json:"secrets"`
 	SecretsError string              `json:"secrets_error,omitempty"`
+	// SecretFiles are the secret files of the core's credentials folder
+	// a move carries, by name, and SecretFilesDir that folder under ~;
+	// SecretFilesError says why they cannot be read (#187).
+	SecretFiles      []string `json:"secret_files,omitempty"`
+	SecretFilesDir   string   `json:"secret_files_dir,omitempty"`
+	SecretFilesError string   `json:"secret_files_error,omitempty"`
 	// SendTo are the targets this machine trusts, with their fingerprints.
 	SendTo []CoreHostPinView `json:"send_to"`
 	// Setup is `fridolin setup-machine --core` here; SetupNote says why

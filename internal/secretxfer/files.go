@@ -25,13 +25,18 @@ const (
 
 // filesDir is the credentials folder as config names it under the core's
 // home: "~/" and plain path components, never "..".
-var filesDir = regexp.MustCompile(`^~(/[A-Za-z0-9_][A-Za-z0-9._-]{0,63}){1,4}$`)
+var filesDir = regexp.MustCompile(`^~(/[A-Za-z0-9._-]{1,64}){1,4}$`)
 
 // CheckFilesDir reports what is wrong with a credentials folder a move
 // names for its secret files.
 func CheckFilesDir(dir string) error {
-	if !filesDir.MatchString(dir) || strings.Contains(dir, "/..") {
+	if !filesDir.MatchString(dir) {
 		return fmt.Errorf("the secret files' folder %q is not a folder under ~", dir)
+	}
+	for _, c := range strings.Split(dir, "/")[1:] {
+		if c == "." || c == ".." {
+			return fmt.Errorf("the secret files' folder %q is not a folder under ~", dir)
+		}
 	}
 	return nil
 }

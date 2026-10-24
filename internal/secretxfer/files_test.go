@@ -81,9 +81,15 @@ func TestSecretFilesTravelSealed(t *testing.T) {
 	if _, err := SealBundleFiles("mini", map[string]string{"fridolin.export.key": "k1"}, map[string][]byte{"../x.json": []byte("x")}, "~/credentials", id.Recipient().String()); err == nil {
 		t.Fatal("sealed a file outside the names")
 	}
-	for _, bad := range []string{"/etc", "~/../etc", "~", "~/a/../../b", "credentials"} {
+	for _, bad := range []string{"/etc", "~/../etc", "~", "~/a/../../b", "credentials", "~/.", "~/x/..", "~/a b"} {
 		if CheckFilesDir(bad) == nil {
 			t.Errorf("the folder %q passed", bad)
+		}
+	}
+	// A hidden folder, as a credentials folder usually is.
+	for _, good := range []string{"~/.creds", "~/.config/creds", "~/creds"} {
+		if err := CheckFilesDir(good); err != nil {
+			t.Errorf("the folder %q: %v", good, err)
 		}
 	}
 	if _, _, err := StoreFiles(dst, map[string][]byte{"id_rsa": []byte("x")}); err == nil {
