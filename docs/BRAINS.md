@@ -616,8 +616,9 @@ The three reviews keep notes in the brain's `memories/reviews/`, look for
 duplicates among the open and closed issues before they file, give
 `file:line` evidence with a link to the reviewed commit, and post no
 secrets or personal data. They need a `github` grant on the repositories
-they review (the security review also `repository_advisories: write`, for
-its private advisories), and since filing an issue publishes something,
+they review (the security review can add `repository_advisories: write`,
+for private advisories, once the GitHub App has that permission too;
+without it, an exploitable finding goes only into its answer to you), and since filing an issue publishes something,
 `"risk": "irreversible"` and the filing as a `preapproved` step:
 
 ```json
@@ -641,20 +642,20 @@ processes. `gh` works as it is; `git` uses it with
 the folder is removed and the token released. No other run or program
 gets one.
 
-Where the token comes from is one hook, `GitHubTokenSource` (in
-`internal/app`, set with `App.SetGitHubTokenSource`): with GitHub
-connected through the bridge's GitHub App, a short-lived installation
-token minted per run and revoked when it ends. Without one, the fallback
-is a token you type in, the same for every grant, which the bridge cannot
-narrow: a fine-grained personal access token for the reviewed
-repositories alone, with *Issues: read and write*, *Contents: read* and
-*Metadata: read* (and *Repository security advisories: read and write*
-for the security review). In the core's container, store it with
-`fridolin core secrets set github.token` (it becomes
-`FRIDOLIN_GITHUB_TOKEN` at the next `fridolin core start`); on a native
-install, set `FRIDOLIN_GITHUB_TOKEN` in the service's environment
-(CONFIGURATION.md, "Where to set them"). A brain run can print its
-environment, so the token is the brain's while it runs.
+The token comes from the bridge's GitHub App (Integrations → GitHub,
+[GITHUB.md](GITHUB.md)): a short-lived installation token minted per run
+for exactly the grant, and revoked when it ends. A grant's repositories
+must all be of one owner, where the app is installed, and the app must
+have each permission the grant asks for; a grant without permissions is
+contents and metadata read. Without an app, the fallback is a token you
+type in, the same for every grant, which the bridge cannot narrow: a
+fine-grained personal access token for the reviewed repositories alone,
+with *Issues: read and write*, *Contents: read* and *Metadata: read*. In
+the core's container, store it with `fridolin core secrets set
+github.token` (it becomes `FRIDOLIN_GITHUB_TOKEN` at the next `fridolin
+core start`); on a native install, set `FRIDOLIN_GITHUB_TOKEN` in the
+service's environment (CONFIGURATION.md, "Where to set them"). A run
+can read its own gh login, so the token is the brain's while it runs.
 
 ### The Schedules page and the CLI
 

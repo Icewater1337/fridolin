@@ -3,7 +3,7 @@ description: Daily security review of GitHub repositories against current secure
 when: daily 03:00
 report: worth
 risk: irreversible
-github: issues=write, contents=read, repository_advisories=write
+github: issues=write, contents=read
 optional: true
 vars: repos, max_issues=3, label=security
 ---

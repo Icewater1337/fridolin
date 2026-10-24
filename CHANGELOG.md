@@ -78,12 +78,11 @@ for compatibility.
   longer runs it, as it does not know `schedules`.
 - GitHub access per run: a scheduled agent's `github` field
   (`{"repos": [...], "permissions": {...}}`) becomes the run's GitHub
-  grant (`chat.GitHubGrant`); as the run starts the bridge gets a token
-  for it from one hook (`GitHubTokenSource`), which the run alone gets as
-  gh's login (`GH_CONFIG_DIR`, a folder of its own in `run-tokens/`, never
-  in its environment) and which is removed and released when it ends. Until a GitHub App is
-  connected, the fallback is a typed token: `fridolin core secrets set
-  github.token`, passed to the core as `FRIDOLIN_GITHUB_TOKEN`.
+  grant (`chat.GitHubGrant`, as Connect GitHub has it): as the run
+  starts, the GitHub App mints a token for exactly it, which the run alone
+  gets as gh's login (`GH_CONFIG_DIR`, never in its environment) and
+  which is revoked when it ends; without an app, the typed
+  `fridolin.github.token` (docs/GITHUB.md).
 - Claude's and Codex's reports of what a run cost (dollars, tokens) are
   read from their result; scheduled agents' runs record them.
 

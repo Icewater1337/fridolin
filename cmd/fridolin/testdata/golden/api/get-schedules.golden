@@ -39,8 +39,7 @@ Content-Type: application/json
       "description": "Daily security review of GitHub repositories against current secure-coding practice; files an issue per real finding, exploitable ones privately.",
       "github": {
         "contents": "read",
-        "issues": "write",
-        "repository_advisories": "write"
+        "issues": "write"
       },
       "name": "code-review-security",
       "optional": true,
