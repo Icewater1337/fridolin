@@ -38,6 +38,10 @@ func runFakeClaude(version string, polls func(io.Writer) int) {
 	args := os.Args[1:]
 	if len(args) == 1 && args[0] == "--version" {
 		// What the dashboard and `fridolin check` ask for.
+		if v := os.Getenv("FRIDOLIN_FAKE_VERSION"); v != "" {
+			fmt.Println(v)
+			return
+		}
 		fmt.Println(version + " (Claude Code)")
 		return
 	}
