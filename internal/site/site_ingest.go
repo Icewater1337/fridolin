@@ -61,6 +61,7 @@ var spoolEntryRE = regexp.MustCompile(`^[0-9a-f]{24}$`)
 const (
 	spoolSearchLimit   = 4 // searches at once
 	spoolSearchTimeout = 3 * time.Minute
+	spoolWaitLimit     = 8 // phones' fetches of a voice answer waiting at once
 )
 
 func (m *SiteManager) spoolDir() string { return m.dir("spool") }
@@ -113,6 +114,10 @@ func (m *SiteManager) processSpool(ctx context.Context) {
 		case spoolHas(root, name, "search.json"):
 			m.startSpoolSearch(ctx, name)
 		case spoolHas(root, name, "device.json"):
+			if m.deviceWaits(root, name) {
+				m.startDeviceWait(name)
+				continue
+			}
 			extra, err := m.takeDeviceEntry(root, name)
 			spoolAnswer(root, name, err, extra)
 		default:
@@ -310,6 +315,47 @@ func (m *SiteManager) takeDeviceEntry(root *os.Root, entry string) (map[string]a
 		return nil, errors.New("this Fridolin takes no requests from phones")
 	}
 	return m.hooks.Device(req.Op, req.Assertion, body)
+}
+
+// deviceWaits reports whether a phone's request may wait for its answer:
+// a fetch of a voice answer (voice_reply), which the bridge holds until
+// the answer is there (plaud.VoiceReplyWait). It is answered off the
+// spool's loop, so that it holds up no other request.
+func (m *SiteManager) deviceWaits(root *os.Root, entry string) bool {
+	data, err := spoolRead(root, path.Join(entry, "device.json"), 16*1024)
+	if err != nil {
+		return false
+	}
+	var req spoolDevice
+	return json.Unmarshal(data, &req) == nil && req.Op == "voice_reply"
+}
+
+// startDeviceWait answers a waiting request once, as startSpoolSearch
+// runs a search once.
+func (m *SiteManager) startDeviceWait(entry string) {
+	root, err := os.OpenRoot(m.spoolDir())
+	if err != nil {
+		return
+	}
+	f, err := root.OpenFile(path.Join(entry, "started"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		root.Close()
+		return
+	}
+	f.Close()
+	select {
+	case m.waitSlots <- struct{}{}:
+	default:
+		spoolAnswer(root, entry, errors.New("too many phones waiting for answers; try again in a moment"), nil)
+		root.Close()
+		return
+	}
+	go func() {
+		defer root.Close()
+		defer func() { <-m.waitSlots }()
+		extra, err := m.takeDeviceEntry(root, entry)
+		spoolAnswer(root, entry, err, extra)
+	}()
 }
 
 // ── ctx.search ────────────────────────────────────────────────────────────

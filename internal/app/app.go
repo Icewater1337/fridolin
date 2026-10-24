@@ -396,7 +396,7 @@ func New(opts Options) (_ *App, err error) {
 	b.vault.targets = b.targets
 	b.google = google.New(googleOptionsFor(cfgs))
 	b.backup = newProjectedBackup(cfgs, b.brainMgr, b.notifyBackup, b.vault.driveSuperseded, b.google)
-	b.plaud = NewPlaudManager(cfgs, b.brainMgr, b.submitHandOff, b.wa.SendMessage, func() string {
+	b.plaud = NewPlaudManager(cfgs, b.brainMgr, b.submitHandOff, b.submitAsk, b.wa.SendMessage, func() string {
 		if d := b.site.Settings().Domain; d != "" {
 			return "https://" + d
 		}
