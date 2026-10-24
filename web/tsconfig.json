@@ -17,26 +17,16 @@
     "types": [],
     "skipLibCheck": true,
 
-    // Strictness. TypeScript 7 turns "strict" on unless told otherwise;
-    // here it is off, and the options of it that the code passes today
-    // are on. Every option of it passes now: next, "strict": true in
-    // place of the single options.
-    "strict": false,
-    "strictFunctionTypes": true,
-    "strictBindCallApply": true,
-    "noImplicitThis": true,
-    "alwaysStrict": true,
+    // Strictness: all of "strict" (useUnknownInCatchVariables: a caught
+    // value is unknown, which lib/errors.js and errorStatus() in
+    // app/api.js narrow), and three checks beyond it. Candidates for
+    // later: noUncheckedIndexedAccess (85 errors today) and
+    // exactOptionalPropertyTypes (17, nearly all an option passed on as
+    // undefined, so not worth it yet).
+    "strict": true,
     "noImplicitReturns": true,
     "noImplicitOverride": true,
-    "noFallthroughCasesInSwitch": true,
-    // A caught value is unknown: lib/errors.js and errorStatus() in
-    // app/api.js narrow it (its message, its name, an ApiError's status).
-    "useUnknownInCatchVariables": true,
-    // Every parameter and variable has a type, written or inferred.
-    "noImplicitAny": true,
-    // null and undefined are their own types: data that may not have come
-    // yet is passed on, or checked, before it is read.
-    "strictNullChecks": true
+    "noFallthroughCasesInSwitch": true
   },
   "include": ["assets/**/*.js", "types/**/*.d.ts"]
 }
