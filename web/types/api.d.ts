@@ -750,6 +750,36 @@ export interface Node {
   programs?: ProgramsStatus;
 }
 
+/** A drive or volume of a node (nodeproto.FSVolume). */
+export interface NodeVolume {
+  /** Its root: C:\, /, /Volumes/Backup. */
+  path: string;
+  label?: string;
+  /** Bytes left; left out where unknown. */
+  free?: number;
+  /** An external or network disk that may be away. */
+  removable?: boolean;
+}
+
+/** The result of the node call fs.roots (nodeproto.FSRootsResult). */
+export interface NodeFSRoots {
+  /** The node's path separator, "\\" or "/". */
+  sep: string;
+  roots: NodeVolume[];
+}
+
+/** The result of the node call fs.browse (nodeproto.BrowseResult): a folder's folders, by name. */
+export interface NodeFSBrowse {
+  path: string;
+  /** The folder above; left out at a volume's root. */
+  parent?: string;
+  folders: string[];
+  /** The folder holds a restic repository already. */
+  repo?: boolean;
+  /** More folders than a listing holds. */
+  truncated?: boolean;
+}
+
 /** GET /api/nodes. */
 export interface NodesResponse {
   /** nodes.enabled as the bridge started. */
