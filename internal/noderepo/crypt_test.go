@@ -20,6 +20,7 @@ import (
 // core sees its repository as usual, and on another machine rclone's
 // crypt remote over the folder opens it for restic.
 func TestResticThroughTheNodeEncrypted(t *testing.T) {
+	t.Parallel()
 	bin := resticBinary(t)
 	disk := t.TempDir()
 	folder := filepath.Join(disk, "fridolin-backup")
@@ -68,11 +69,7 @@ func TestResticThroughTheNodeEncrypted(t *testing.T) {
 	if err != nil || !bytes.HasPrefix(cfg, []byte("RCLONE\x00\x00")) {
 		t.Fatalf("the config on the node is not in rclone crypt's format: %v", err)
 	}
-	// restic alone cannot open the folder any more.
-	if ok, err := (&snapshot.Restic{Binary: bin, Repo: folder, Env: base}).Exists(ctx); err == nil && ok {
-		t.Error("restic opened the folder without the outer layer")
-	}
-	restoreAndCompare := func(rr *snapshot.Restic) {
+	restoreAndCompare := func(t *testing.T, rr *snapshot.Restic) {
 		t.Helper()
 		target := t.TempDir()
 		if err := rr.Restore(ctx, "latest", target); err != nil {
@@ -83,20 +80,36 @@ func TestResticThroughTheNodeEncrypted(t *testing.T) {
 			t.Fatalf("restored wrong: %v", err)
 		}
 	}
-	restoreAndCompare(r)
-
-	// Another machine: rclone crypt over the folder, restic over rclone.
-	rclone, err := exec.LookPath("rclone")
-	if err != nil {
-		t.Skip("rclone is not installed: the restore through rclone is not tried")
-	}
-	out, err := exec.Command(rclone, "obscure", cryptPW).Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	env := append(append([]string{}, base...),
-		"RCLONE_CONFIG_NODECRYPT_TYPE=crypt", "RCLONE_CONFIG_NODECRYPT_REMOTE="+folder,
-		"RCLONE_CONFIG_NODECRYPT_FILENAME_ENCRYPTION=off", "RCLONE_CONFIG_NODECRYPT_DIRECTORY_NAME_ENCRYPTION=false",
-		"RCLONE_CONFIG_NODECRYPT_SUFFIX=none", "RCLONE_CONFIG_NODECRYPT_PASSWORD="+strings.TrimSpace(string(out)))
-	restoreAndCompare(&snapshot.Restic{Binary: bin, Repo: "rclone:nodecrypt:", Env: env, Options: []string{"rclone.program=" + rclone}})
+	// What only reads the repository runs side by side, as restic allows:
+	// each restic opens it with a key derivation of half a second or so.
+	t.Run("read", func(t *testing.T) {
+		// restic alone cannot open the folder any more.
+		t.Run("restic alone", func(t *testing.T) {
+			t.Parallel()
+			if ok, err := (&snapshot.Restic{Binary: bin, Repo: folder, Env: base}).Exists(ctx); err == nil && ok {
+				t.Error("restic opened the folder without the outer layer")
+			}
+		})
+		t.Run("restore through the node", func(t *testing.T) {
+			t.Parallel()
+			restoreAndCompare(t, r)
+		})
+		// Another machine: rclone crypt over the folder, restic over rclone.
+		t.Run("restore through rclone crypt", func(t *testing.T) {
+			t.Parallel()
+			rclone, err := exec.LookPath("rclone")
+			if err != nil {
+				t.Skip("rclone is not installed: the restore through rclone is not tried")
+			}
+			out, err := exec.Command(rclone, "obscure", cryptPW).Output()
+			if err != nil {
+				t.Fatal(err)
+			}
+			env := append(append([]string{}, base...),
+				"RCLONE_CONFIG_NODECRYPT_TYPE=crypt", "RCLONE_CONFIG_NODECRYPT_REMOTE="+folder,
+				"RCLONE_CONFIG_NODECRYPT_FILENAME_ENCRYPTION=off", "RCLONE_CONFIG_NODECRYPT_DIRECTORY_NAME_ENCRYPTION=false",
+				"RCLONE_CONFIG_NODECRYPT_SUFFIX=none", "RCLONE_CONFIG_NODECRYPT_PASSWORD="+strings.TrimSpace(string(out)))
+			restoreAndCompare(t, &snapshot.Restic{Binary: bin, Repo: "rclone:nodecrypt:", Env: env, Options: []string{"rclone.program=" + rclone}})
+		})
+	})
 }
