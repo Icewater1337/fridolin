@@ -913,6 +913,9 @@ for compatibility.
 
 ### Fixed
 
+- The move pre-flight no longer refuses a target that never ran the
+  core's version: reading its core needs the image, which the move
+  pulls first. It says so as a warning instead (#187).
 - `fridolin core` finds Docker when it runs with a short PATH, as the
   node agent of a core host does under launchd: the move pre-flight
   (`fridolin nodes move-check`) said "docker is not installed or not on
