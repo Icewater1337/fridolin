@@ -12,8 +12,9 @@ export function capSummary(c) {
   if (c && c.exec && (c.exec.allow || []).length) {
     parts.push(`exec (${c.exec.allow.map((r) => r.name).join(', ')})`);
   }
-  if (c && c.exec && (c.exec.accept_from_core || []).length) {
-    parts.push(`exec from the core (${c.exec.accept_from_core.join(', ')})`);
+  const fromCore = (c && c.exec && c.exec.accept_from_core) || [];
+  if (fromCore.length) {
+    parts.push(`exec from the core (${fromCore.join(', ')})`);
   }
   const roots = (c && c.fs && c.fs.roots) || [];
   if (roots.length) {
@@ -67,7 +68,7 @@ export function updateText(u) {
  * @param {string | undefined} goos
  */
 export function osName(goos) {
-  return /** @type {Record<string, string>} */ ({ darwin: 'macOS', windows: 'Windows', linux: 'Linux' })[goos] || goos || '?';
+  return /** @type {Record<string, string>} */ ({ darwin: 'macOS', windows: 'Windows', linux: 'Linux' })[goos || ''] || goos || '?';
 }
 
 /**

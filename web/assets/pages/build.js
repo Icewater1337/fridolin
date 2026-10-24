@@ -64,7 +64,8 @@ export default /** @satisfies {PageModule} */ ({
       }
     }
 
-    function paintChat() {
+    /** @param {BuildChat} chat */
+    function paintChat(chat) {
       // The newest message comes into view, unless you scrolled up to read.
       const atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 40;
       if (paint(messagesEl, chat.messages, renderMessages) && (atBottom || chat.messages.length <= 1)) messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -168,7 +169,7 @@ export default /** @satisfies {PageModule} */ ({
         paint(body, 'chat', renderLayout);
       }
       chat = await get(`/api/site/build/${encodeURIComponent(brainID)}`, { signal });
-      paintChat();
+      paintChat(chat);
     }, () => (chat && (chat.running || chat.queued) ? 1500 : 5000));
   },
 });

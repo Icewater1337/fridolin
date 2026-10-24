@@ -143,7 +143,7 @@ func startHarness(t *testing.T, cfgJSON string, ln net.Listener) *harness {
 		t.Fatal(err)
 	}
 	requireTestDataDir(t, cfgs.Get())
-	b, err := New(Options{Config: cfgs, NoWhatsApp: true, Env: envOf(t)})
+	b, err := New(bridgeOptions(t, cfgs))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func (h *harness) Reopen() {
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	b, err := New(Options{Config: cfgs, NoWhatsApp: true, Env: envOf(h.t)})
+	b, err := New(bridgeOptions(h.t, cfgs))
 	if err != nil {
 		h.t.Fatal(err)
 	}

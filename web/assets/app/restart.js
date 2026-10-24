@@ -11,6 +11,7 @@ import { toast, toastError } from '../components/toast.js';
 import { openDialog } from '../components/dialog.js';
 import { spinner } from '../components/common.js';
 
+/** @param {number} ms */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** reload is location.reload, unless a test says otherwise. */

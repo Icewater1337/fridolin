@@ -99,8 +99,7 @@ func skipWithoutSh(t *testing.T) {
 // and reports what changed; a terminal runs a command; nothing leaves the
 // granted folder; everything is audited; a lockdown refuses starting.
 func TestWorkstationThroughNodes(t *testing.T) {
-	// Serial: shortens nodeSessionMinAge, a package variable every bridge's
-	// workstation reads.
+	t.Parallel()
 	skipWithoutSh(t)
 	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
 	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8767"}}`)
@@ -179,9 +178,8 @@ func TestWorkstationThroughNodes(t *testing.T) {
 
 	// A restart forgets the sessions: housekeeping stops what then runs
 	// on the node with nobody following it.
-	saved := nodeSessionMinAge
-	nodeSessionMinAge = 0
-	t.Cleanup(func() { nodeSessionMinAge = saved })
+	// From now on, before the housekeeping run below reads it.
+	h.b.waits.nodeSessionMinAge = 0
 	if reply := h.coreSays("shell", step("node_terminal_open", `{}`)); !strings.Contains(reply, "Opened terminal #3") {
 		t.Fatalf("terminal #3:\n%s", reply)
 	}

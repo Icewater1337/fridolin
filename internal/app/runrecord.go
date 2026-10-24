@@ -57,15 +57,12 @@ func recordRun(dataDir, brain string, pid int) string {
 	return ""
 }
 
-// reapGrace is how long reapOrphanedRuns gives a group to end after SIGTERM
-// before it kills it.
-var reapGrace = 3 * time.Second
-
 // reapOrphanedRuns stops the process groups of the runs a bridge that is
-// gone left behind, and forgets every record. Call it while holding the
-// instance lock and before any brain runs, so that each record is from a
-// bridge that is not running any more.
-func reapOrphanedRuns(dataDir string) {
+// gone left behind, each given grace to end after SIGTERM, and forgets
+// every record. Call it while holding the instance lock and before any
+// brain runs, so that each record is from a bridge that is not running any
+// more.
+func reapOrphanedRuns(dataDir string, grace time.Duration) {
 	entries, err := os.ReadDir(runsDir(dataDir))
 	if err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
@@ -86,7 +83,7 @@ func reapOrphanedRuns(dataDir string) {
 		}
 		if err == nil && boot != "" && rec.Boot == boot && rec.PGID > 1 && runIsOurs(rec) {
 			log.Printf("brain %s: stopping run %d, which the last bridge left running", rec.Brain, rec.PGID)
-			stopGroup(rec.PGID)
+			stopGroup(rec.PGID, grace)
 		}
 		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			log.Printf("removing %s: %v", p, err)

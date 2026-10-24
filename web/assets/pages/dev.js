@@ -35,6 +35,7 @@ export default /** @satisfies {PageModule} */ ({
     // A group message without a sender is from no number, which only a
     // group open to every member hears: the hint asks for a member there.
     const hintSender = () => senderIn.setAttribute('placeholder', isGroupJid(jidIn.value.trim()) ? GROUP_SENDER : DM_SENDER);
+    /** @param {string} jid */
     const pick = (jid) => { jidIn.value = jid; hintSender(); };
     jidIn.addEventListener('input', hintSender);
     const form = h('form.card.form',

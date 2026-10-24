@@ -18,6 +18,7 @@ import { icon } from '../components/icons.js';
 import { markdownDoc, markdownToc } from '../components/markdown.js';
 
 /** @import { Page, PageModule } from '../app/page.js' */
+/** @import { MarkdownLinks } from '../components/markdown.js' */
 /** @import { WikiHit, WikiPageInfo } from '../../types/api.js' */
 
 /**
@@ -84,8 +85,9 @@ function pageTree(brain, pages, current) {
   const groups = new Map();
   for (const p of pages) {
     const folder = p.section === 'memories' ? 'Memories' : (p.name.includes('/') ? p.name.slice(0, p.name.lastIndexOf('/')) : '');
-    if (!groups.has(folder)) groups.set(folder, []);
-    groups.get(folder).push(p);
+    let list = groups.get(folder);
+    if (!list) { list = []; groups.set(folder, list); }
+    list.push(p);
   }
   return h('nav.wiki-tree', { 'aria-label': 'Pages' }, [...groups].map(([folder, list]) => h('div',
     folder ? h('h3', folder) : null,
@@ -118,6 +120,7 @@ function brainView(root, ctx, brain, page) {
     get(`/api/wiki/${encodeURIComponent(brain)}/page${qs({ path })}`, { signal: ctx.signal }).then((pg) => {
       const title = pg.doc.title || pg.page.title;
       ctx.setTitle(`${title} · ${idx.label}`);
+      /** @type {MarkdownLinks} */
       const links = {
         page: (p) => (/^(wiki|memories)\//.test(p) ? wikiHref(brain, p) : filesHref(`brain:${brain}`, p, false)),
         file: (p) => filesHref(`brain:${brain}`, p, false),
@@ -130,7 +133,7 @@ function brainView(root, ctx, brain, page) {
         const v = await get(`/api/files/view${qs({ root: rootId, path, source: '1' })}`, { signal: ctx.signal });
         if (!v.editable) throw new Error('This page cannot be edited here.');
         const editor = textEditor({
-          rootId, path, text: v.source, sha: v.sha,
+          rootId, path, text: v.source || '', sha: v.sha || '',
           onSaved: () => { ctx.dirty = null; brainView(root, ctx, brain, page); },
           onCancel: () => { ctx.dirty = null; brainView(root, ctx, brain, page); },
         });

@@ -154,7 +154,7 @@ export default /** @satisfies {PageModule} */ ({
       const allow = btn(isGroup ? 'Allow' : 'Allow this number', {
         kind: 'primary', small: true, icon: 'check',
         onClick: async () => {
-          const body = isGroup ? { jid: c.jid, kind: 'group', brain: sel.value } : { jid: c.jid, kind: 'dm', number: c.sender };
+          const body = isGroup ? { jid: c.jid, kind: 'group', brain: sel ? sel.value : '' } : { jid: c.jid, kind: 'dm', number: c.sender };
           await post('/api/chats/allow', body);
           toast(isGroup ? `Allowed ${title()}` : `Allowed ${phone(c.sender) || title()}`, 'ok');
           if (isGroup) await loadGroups(true);
@@ -181,7 +181,7 @@ export default /** @satisfies {PageModule} */ ({
           isGroup && c.push_name ? `Last from ${c.push_name} · ` : '',
           !isGroup && c.push_name && c.sender ? `${phone(c.sender)} · ` : '',
           plural(c.count, 'message'), ' · last ', timeAgo(c.last_seen));
-        if (sel) syncOptions(sel, next.options, '');
+        if (sel && next.options) syncOptions(sel, next.options, '');
       };
       update(item);
       return Object.assign(row, { update });
@@ -221,6 +221,7 @@ export default /** @satisfies {PageModule} */ ({
         small: true,
         title: 'Send this group to the chosen brain',
         onClick: async () => {
+          if (!cur) return;
           const { g, owner } = cur;
           if (!sel.value || sel.value === owner) { toast('Pick a different brain first', 'info'); return; }
           await post('/api/chats/allow', { jid: g.jid, kind: 'group', brain: sel.value });
@@ -232,6 +233,7 @@ export default /** @satisfies {PageModule} */ ({
       const allow = btn('Allow', {
         small: true, kind: 'primary', icon: 'check',
         onClick: async () => {
+          if (!cur) return;
           const { g } = cur;
           await post('/api/chats/allow', { jid: g.jid, kind: 'group', brain: sel.value });
           toast(`Allowed ${g.name || 'the group'}`, 'ok');
@@ -334,7 +336,7 @@ export default /** @satisfies {PageModule} */ ({
       ], mode, { 'aria-label': 'Who is heard' });
       const modeHelp = h('div.help');
       const list = listEditor({
-        values: mode === 'list' ? entry : [],
+        values: mode === 'list' && entry ? entry : [],
         placeholder: '15551234567',
         addLabel: 'Add number',
         validate: (v) => {
@@ -351,7 +353,7 @@ export default /** @satisfies {PageModule} */ ({
           '': 'As without an entry: the allowed numbers on this page are heard, and while that list is empty and “Let anyone message” is on, anyone.',
           '*': 'Everyone in the group, also whoever its admins add later, can start a run with every permission the brain has.',
           list: 'Only these members can start a run or stop one; what the others write is not read, not even into the brain’s history.',
-        }[modeSel.value];
+        }[modeSel.value] || '';
       };
       modeSel.addEventListener('change', () => { err.hidden = true; sync(); });
       list.addEventListener('input', () => { err.hidden = true; });

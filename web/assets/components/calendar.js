@@ -12,7 +12,7 @@ import { nextId } from './fields.js';
 import { tabs } from './tabs.js';
 import { pill, callout, mono, loading } from './common.js';
 import { errorMessage } from '../lib/errors.js';
-/** @import { GoogleClientCheck } from '../../types/api.js' */
+/** @import { GoogleClientCheck, CalendarStatus } from '../../types/api.js' */
 
 const CONSOLE = 'https://console.cloud.google.com';
 const CALENDAR_API = 'calendar-json.googleapis.com';
@@ -340,6 +340,7 @@ export function googleClientCard({ signal } = {}) {
  */
 export function calendarCard(brainId, { signal } = {}) {
   const el = h('div.card', loading('Checking calendar…'));
+  /** @type {Set<string> | null} */
   let selection = null; // Set of calendar ids being edited
   let dflt = '';
   // The paste box for a sign-in from another machine; it stays while the
@@ -377,6 +378,7 @@ export function calendarCard(brainId, { signal } = {}) {
   // wrote next to the tokens, each holding a client secret. The bridge
   // goes by name and secret only, so it cannot tell such a copy from a
   // file of the owner's: it names them, but deletes none itself.
+  /** @param {CalendarStatus} s */
   function copiesBox(s) {
     const names = s.leftover_client_copies || [];
     if (!names.length) return null;
@@ -386,6 +388,7 @@ export function calendarCard(brainId, { signal } = {}) {
       '. The bridge no longer reads them, and a brain the sandbox does not hold (on Linux, or with the sandbox off) can: delete them by hand, unless something else of yours uses them.');
   }
 
+  /** @param {CalendarStatus} s */
   function render(s) {
     const errBox = s.last_error ? callout('bad', 'Sign-in did not finish', s.last_error) : null;
     if (!s.client_configured && !s.connected) {
@@ -411,12 +414,13 @@ export function calendarCard(brainId, { signal } = {}) {
       selection = new Set((s.selected && s.selected.length) ? s.selected : cals.filter((c) => c.primary).map((c) => c.id));
       dflt = s.default || [...selection][0] || '';
     }
+    const chosen = selection; // the ticks, kept across renders
     const rows = cals.map((c) => {
-      const cb = h('input', { type: 'checkbox', checked: selection.has(c.id), id: nextId('cal') });
-      const radio = h('input', { type: 'radio', name: `dflt-${brainId}`, checked: c.id === dflt, disabled: !selection.has(c.id), title: 'New events go here' });
+      const cb = h('input', { type: 'checkbox', checked: chosen.has(c.id), id: nextId('cal') });
+      const radio = h('input', { type: 'radio', name: `dflt-${brainId}`, checked: c.id === dflt, disabled: !chosen.has(c.id), title: 'New events go here' });
       cb.addEventListener('change', () => {
-        if (cb.checked) selection.add(c.id); else selection.delete(c.id);
-        if (!selection.has(dflt)) dflt = [...selection][0] || '';
+        if (cb.checked) chosen.add(c.id); else chosen.delete(c.id);
+        if (!chosen.has(dflt)) dflt = [...chosen][0] || '';
         render(s);
       });
       radio.addEventListener('change', () => { dflt = c.id; });
@@ -431,7 +435,7 @@ export function calendarCard(brainId, { signal } = {}) {
     const saveBtn = btn('Save calendars', {
       kind: 'primary', icon: 'check',
       onClick: async () => {
-        const list = cals.map((c) => c.id).filter((id) => selection.has(id));
+        const list = cals.map((c) => c.id).filter((id) => chosen.has(id));
         if (!list.length) { toast('Tick at least one calendar, or disconnect'); return; }
         await put(`/api/brains/${encodeURIComponent(brainId)}/calendar`, { account: s.account, calendars: list, default: dflt });
         toast('Calendars saved', 'ok');

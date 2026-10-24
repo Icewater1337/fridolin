@@ -45,7 +45,10 @@ export function markdownNodes(nodes, links) {
       else if (n.missing) out.push(h('span.md-missing', { title: `No page “${n.page}” yet` }, kids));
       else if (n.page) out.push(h('a', { href: links.page(n.page, n.anchor), title: n.title || null }, kids));
       else if (n.file) out.push(h('a', { href: links.file(n.file), title: n.title || null }, kids));
-      else if (n.anchor) out.push(h('a', { href: '#', onclick: (/** @type {MouseEvent} */ e) => { e.preventDefault(); scrollToAnchor(/** @type {Element} */ (e.currentTarget), n.anchor); } }, kids));
+      else if (n.anchor) {
+        const { anchor } = n;
+        out.push(h('a', { href: '#', onclick: (/** @type {MouseEvent} */ e) => { e.preventDefault(); scrollToAnchor(/** @type {Element} */ (e.currentTarget), anchor); } }, kids));
+      }
       else out.push(...kids);
       continue;
     }

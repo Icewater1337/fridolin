@@ -36,9 +36,11 @@ export default /** @satisfies {PageModule} */ ({
       h('div.toolbar', h('div.toolbar-group', filterIn, autoSw), h('div.toolbar-group', countEl, clearBtn)),
       view);
 
+    /** @param {Element} el */
     const isLine = (el) => el.classList.contains('log-line');
     // A line's text is its last cell; the filter looks at what is shown.
-    const matches = (el) => !filter || el.lastChild.textContent.toLowerCase().includes(filter);
+    /** @param {Element} el */
+    const matches = (el) => !filter || ((el.lastChild && el.lastChild.textContent) || '').toLowerCase().includes(filter);
     const paintCount = () => {
       const shown = filter ? /** @type {HTMLElement[]} */ ([...view.children]).filter((el) => isLine(el) && !el.hidden).length : count;
       countEl.textContent = filter ? `${shown} of ${count} lines` : `${count} lines`;
@@ -77,7 +79,7 @@ export default /** @satisfies {PageModule} */ ({
       count += lines.length;
       // The oldest go first, and a restart note with them.
       while (count > MAX_LINES) {
-        const first = view.firstChild;
+        const first = view.children[0]; // view holds elements only: the lines and restart notes
         if (isLine(first)) count -= 1;
         first.remove();
       }

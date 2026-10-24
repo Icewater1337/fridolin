@@ -12,6 +12,11 @@ import { mono, loading } from './common.js';
 /** @import { Brain, BrainManifest, Routing } from '../../types/api.js' */
 
 /**
+ * What the editor reads of a brain of /api/brains.
+ * @typedef {Pick<Brain, 'id' | 'name'> & {manifest: Pick<BrainManifest, 'routing'> | null}} RoutedBrain
+ */
+
+/**
  * routingEditor({routing, selfId, brains, allowedGroups, onChange, signal})
  * brains: the /api/brains list (to see which brain holds DMs, default, groups).
  * signal: the page's; once it aborts, the editor stops following the groups.
@@ -21,14 +26,14 @@ import { mono, loading } from './common.js';
  * @param {object} options
  * @param {Partial<Routing>} [options.routing]
  * @param {string} [options.selfId]
- * @param {(Pick<Brain, 'id' | 'name'> & {manifest: Pick<BrainManifest, 'routing'> | null})[]} [options.brains] what it reads of /api/brains
+ * @param {RoutedBrain[]} [options.brains] what it reads of /api/brains
  * @param {string[] | null} [options.allowedGroups]
  * @param {() => void} [options.onChange]
  * @param {AbortSignal} [options.signal]
  * @returns {HTMLDivElement & {getValue: () => Routing}}
  */
 export function routingEditor({ routing = {}, selfId = '', brains = [], allowedGroups = [], onChange, signal }) {
-  const others = brains.filter((b) => b.id && b.id !== selfId && b.manifest);
+  const others = brains.filter(/** @returns {b is RoutedBrain & {manifest: NonNullable<RoutedBrain['manifest']>}} */ (b) => Boolean(b.id && b.id !== selfId && b.manifest));
   const dmOwner = others.find((b) => b.manifest.routing && b.manifest.routing.handles_dms);
   const defOwner = others.find((b) => b.manifest.routing && b.manifest.routing.default);
   /** @type {Map<string, string>} */
@@ -143,7 +148,7 @@ export function routingEditor({ routing = {}, selfId = '', brains = [], allowedG
     const s = store.get();
     if (s.groups !== null || s.groupsError) paintGroups();
   };
-  offs = [(s) => s.groups, (s) => s.groupsError, (s) => s.names].map((select) => store.subscribe(select, paintKnown));
+  offs = [store.subscribe((s) => s.groups, paintKnown), store.subscribe((s) => s.groupsError, paintKnown), store.subscribe((s) => s.names, paintKnown)];
   if (signal) signal.addEventListener('abort', stop, { once: true });
   loadGroups();
   return el;

@@ -23,10 +23,14 @@ import { liveForm } from '../components/live-form.js';
 /** @import { ConfigFile, ConfigResponse, Trigger } from '../../types/api.js' */
 
 /**
- * A setting on the page: the dotted key in config.json it edits, and its control.
- * @typedef {object} SettingField
- * @property {'bool' | 'text' | 'int' | 'select' | 'list' | 'triggers' | 'allowLists'} type
- * @property {string} [key]
+ * A setting on the page: the dotted key in config.json it edits, and its
+ * control. Only the allow lists, which the Chats page edits, have no key.
+ * @typedef {FieldOptions & ({type: 'allowLists', key?: undefined} | {type: 'bool' | 'text' | 'int' | 'select' | 'list' | 'triggers', key: string})} SettingField
+ */
+
+/**
+ * What a setting's control is built with.
+ * @typedef {object} FieldOptions
  * @property {string} label
  * @property {string} [help]
  * @property {string | number | boolean} [def] used when the file and the effective settings have none
@@ -58,6 +62,7 @@ import { liveForm } from '../components/live-form.js';
 /** @typedef {{text: string, match: string}} TriggerRow */
 
 // The bridge refuses a relative sandbox path: as a rule it would match nothing.
+/** @param {string} v */
 const absPath = (v) => (/^(\/|~(\/|$))/.test(v) ? '' : 'Absolute, or starting with ~/');
 
 /** @type {{id: string, title: string, intro: string, fields: SettingField[]}[]} */
@@ -187,7 +192,7 @@ export default /** @satisfies {PageModule} */ ({
 
     // Only the settings edited here count as a conflict: one changed
     // elsewhere that is not edited here is saved as it now is.
-    const edited = (/** @type {{controls: Control[]}} */ built) => built.controls.filter((c) => c.isDirty());
+    const edited = (/** @type {{controls: Control[]}} */ built) => built.controls.filter(/** @returns {c is Control & {key: string}} */ (c) => c.key !== null && c.isDirty());
     const form = liveForm({
       build,
       edits: (d, built) => edited(built).map((c) => [c.key, getPath(d.config || {}, c.key)]),
@@ -214,7 +219,8 @@ export default /** @satisfies {PageModule} */ ({
       const target = ctx.params.section && document.getElementById(`sec-${ctx.params.section}`);
       if (!target) return;
       target.scrollIntoView({ block: 'start' });
-      ctx.focusAt(target.querySelector('h2'));
+      const heading = target.querySelector('h2');
+      if (heading) ctx.focusAt(heading);
     }, 5000);
 
     /**
@@ -229,6 +235,7 @@ export default /** @satisfies {PageModule} */ ({
       const nav = h('nav.section-nav', { 'aria-label': 'Settings sections' });
       // A chip scrolls to its section and names it in the address, so
       // #/settings/<section> links (the overview has some) land there too.
+      /** @type {(title: string, sectionId: string, el: HTMLElement) => void} */
       const chip = (title, sectionId, el) => {
         const b = h('button.chip', { type: 'button' }, title);
         b.addEventListener('click', () => {
@@ -270,6 +277,7 @@ export default /** @satisfies {PageModule} */ ({
     };
     async function save(again = true) {
       const built = form.form();
+      if (!built) return; // nothing to save before the settings came
       if (form.stale()) { clash(); return; }
       const invalid = built.controls.find((c) => c.isDirty() && !c.isValid());
       if (invalid) { toast(`Check “${invalid.label}” — it has an invalid entry`); invalid.el.scrollIntoView({ block: 'center' }); return; }
@@ -308,12 +316,19 @@ export default /** @satisfies {PageModule} */ ({
  */
 function makeControl(f, cfg, eff, onChange) {
   if (f.type === 'allowLists') return allowLists(f, cfg);
-  const fileVal = getPath(cfg, f.key);
-  const effVal = getPath(eff, f.key);
+  const { key, type } = f;
+  const fileVal = getPath(cfg, key);
+  const effVal = getPath(eff, key);
   const tag = f.restart ? 'restart' : null;
+  // What the case below builds: the control, what it holds now and held
+  // at first, and what is saved of it.
+  /** @type {HTMLElement} */
   let input;
+  /** @type {() => unknown} */
   let read;
+  /** @type {unknown} */
   let initial;
+  /** @type {() => unknown} */
   let serialize;
   let isValid = () => true;
   let extra = null;
@@ -348,31 +363,35 @@ function makeControl(f, cfg, eff, onChange) {
       return finish(el);
     }
     case 'text': {
-      initial = typeof fileVal === 'string' ? fileVal : '';
-      const ph = typeof effVal === 'string' && effVal && effVal !== initial ? effVal : (f.placeholder || '');
-      input = textInput({ value: initial, placeholder: ph, class: f.mono ? 'mono' : '', spellcheck: f.mono ? 'false' : 'true' });
-      input.addEventListener('input', onChange);
-      read = () => input.value.trim();
+      const first = typeof fileVal === 'string' ? fileVal : '';
+      initial = first;
+      const ph = typeof effVal === 'string' && effVal && effVal !== first ? effVal : (f.placeholder || '');
+      const text = textInput({ value: first, placeholder: ph, class: f.mono ? 'mono' : '', spellcheck: f.mono ? 'false' : 'true' });
+      input = text;
+      text.addEventListener('input', onChange);
+      read = () => text.value.trim();
       serialize = read;
       break;
     }
     case 'int': {
-      initial = (fileVal === undefined || fileVal === null || (!f.nullable && fileVal === 0)) ? '' : String(fileVal);
+      const first = (fileVal === undefined || fileVal === null || (!f.nullable && fileVal === 0)) ? '' : String(fileVal);
+      initial = first;
       const ph = effVal !== undefined && effVal !== null && effVal !== 0 ? String(effVal) : String(f.def ?? '');
-      input = textInput({ value: initial, inputmode: 'numeric', placeholder: `${ph} (default)`, class: 'num' });
-      input.addEventListener('input', () => { check(); onChange(); });
+      const num = textInput({ value: first, inputmode: 'numeric', placeholder: `${ph} (default)`, class: 'num' });
+      input = num;
+      num.addEventListener('input', () => { check(); onChange(); });
       const check = () => {
-        const ok = input.value.trim() === '' || (/^\d+$/.test(input.value.trim()) && Number(input.value) >= (f.min ?? 0) && Number(input.value) <= (f.max ?? Infinity));
-        input.classList.toggle('invalid', !ok);
+        const ok = num.value.trim() === '' || (/^\d+$/.test(num.value.trim()) && Number(num.value) >= (f.min ?? 0) && Number(num.value) <= (f.max ?? Infinity));
+        num.classList.toggle('invalid', !ok);
         return ok;
       };
       isValid = check;
-      read = () => input.value.trim();
+      read = () => num.value.trim();
       serialize = () => (read() === '' ? undefined : Number(read()));
       break;
     }
     case 'select': {
-      const opts = f.options;
+      const opts = f.options || [];
       /**
        * @param {unknown} v
        * @returns {v is string}
@@ -381,32 +400,36 @@ function makeControl(f, cfg, eff, onChange) {
       let v = typeof fileVal === 'string' ? fileVal : '';
       if (!has(v)) v = has(effVal) ? effVal : /** @type {string} */ (f.def ?? '');
       initial = v;
-      input = select(opts, v);
-      input.addEventListener('change', onChange);
-      read = () => input.value;
+      const sel = select(opts, v);
+      input = sel;
+      sel.addEventListener('change', onChange);
+      read = () => sel.value;
       serialize = read;
       break;
     }
     case 'list': {
       const arr = Array.isArray(fileVal) ? fileVal : [];
       initial = JSON.stringify(arr);
-      input = listEditor({ values: arr, placeholder: f.placeholder, mono: f.mono !== false, addLabel: f.addLabel || 'Add', onChange, validate: f.validate, empty: emptyListText(f, effVal) });
-      read = () => JSON.stringify(input.getValues());
-      serialize = () => input.getValues();
-      isValid = () => input.isValid();
+      const list = listEditor({ values: arr, placeholder: f.placeholder, mono: f.mono !== false, addLabel: f.addLabel || 'Add', onChange, validate: f.validate, empty: emptyListText(f, effVal) });
+      input = list;
+      read = () => JSON.stringify(list.getValues());
+      serialize = () => list.getValues();
+      isValid = () => list.isValid();
       break;
     }
     case 'triggers': {
+      /** @type {Trigger[]} */
       const raw = Array.isArray(fileVal) ? fileVal : [];
       const list = raw.map((t) => (typeof t === 'string' ? { text: t, match: 'anywhere' } : { text: t.text || '', match: t.match || 'anywhere' }));
       initial = JSON.stringify(list);
-      input = triggersEditor(list, { onChange, defaults: Array.isArray(effVal) ? effVal : [] });
-      read = () => JSON.stringify(input.getValues());
-      serialize = () => input.getValues().map((t) => (t.match === 'anywhere' ? t.text : { text: t.text, match: t.match }));
+      const triggers = triggersEditor(list, { onChange, defaults: Array.isArray(effVal) ? effVal : [] });
+      input = triggers;
+      read = () => JSON.stringify(triggers.getValues());
+      serialize = () => triggers.getValues().map((t) => (t.match === 'anywhere' ? t.text : { text: t.text, match: t.match }));
       break;
     }
     default:
-      throw new Error(`unknown field type ${f.type}`);
+      throw new Error(`unknown field type ${type}`);
   }
 
   const el = field({ label: f.label, control: input, help: f.help, tag });
@@ -415,7 +438,7 @@ function makeControl(f, cfg, eff, onChange) {
   /** @param {HTMLElement} el */
   function finish(el) {
     return {
-      key: f.key,
+      key,
       label: f.label,
       el,
       value: read,
@@ -463,6 +486,8 @@ function triggersEditor(values, { onChange, defaults }) {
   const emptyEl = h('div.list-empty.muted', `Empty — the default is used: ${(defaults || []).map((t) => (typeof t === 'string' ? t : t.text)).join(', ') || '@claude'}`);
   const el = h('div.list-editor.triggers-editor', emptyEl, rows);
   const paintEmpty = () => { emptyEl.hidden = rows.children.length > 0; };
+  /** @type {Map<Element, {text: HTMLInputElement, match: HTMLSelectElement}>} */
+  const fields = new Map(); // each row's input and select
   const add = (t = { text: '', match: 'anywhere' }, focus = false) => {
     const text = textInput({ value: t.text, placeholder: '@claude', class: 'mono', 'aria-label': 'Trigger word' });
     const match = select([['anywhere', 'Anywhere'], ['start', 'At the start'], ['word', 'Whole word']], t.match, { 'aria-label': 'Where it must appear' });
@@ -470,7 +495,8 @@ function triggersEditor(values, { onChange, defaults }) {
     const row = h('div.list-row.trigger-row', text, match, del);
     text.addEventListener('input', onChange);
     match.addEventListener('change', onChange);
-    del.addEventListener('click', () => { row.remove(); paintEmpty(); onChange(); });
+    del.addEventListener('click', () => { row.remove(); fields.delete(row); paintEmpty(); onChange(); });
+    fields.set(row, { text, match });
     rows.appendChild(row);
     paintEmpty();
     if (focus) text.focus();
@@ -478,6 +504,9 @@ function triggersEditor(values, { onChange, defaults }) {
   values.forEach((v) => add(v));
   paintEmpty();
   el.appendChild(h('div.list-add', btn('Add trigger', { icon: 'plus', small: true, kind: 'ghost', onClick: () => { add(undefined, true); onChange(); } })));
-  const getValues = () => [...rows.querySelectorAll('.trigger-row')].map((r) => ({ text: r.querySelector('input').value.trim(), match: r.querySelector('select').value })).filter((t) => t.text);
+  const getValues = () => [...rows.children].flatMap((r) => {
+    const f = fields.get(r);
+    return f ? [{ text: f.text.value.trim(), match: f.match.value }] : [];
+  }).filter((t) => t.text);
   return Object.assign(el, { getValues });
 }

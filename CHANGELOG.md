@@ -983,6 +983,13 @@ for compatibility.
 
 ### Fixed
 
+- A core move to a fresh core host: the pull of the core's image (several
+  GB), the rehearsal and the secrets with their files may take longer than
+  a minute, which the core cut off ("did not answer core.image.pull
+  within 1m0s"); a target whose core cannot be read yet (no image, or no
+  host secrets before the move brings them) is a warning in the
+  pre-flight, not a refusal. In the core's container doctor no longer
+  warns that the process's TZ differs from `timezone` (#187).
 - A core move carries the secret files of a hidden credentials folder
   (`~/.something`): the folder check refused a leading dot, and the
   move went on with the host secrets and no files. A move now stops

@@ -91,6 +91,7 @@ const SORTS = [['name', 'Name'], ['date', 'Newest first'], ['size', 'Largest fir
  * @returns {Row[]}
  */
 function sorted(rows, how) {
+  /** @type {(a: Row, b: Row) => number} */
   const dirsFirst = (a, b) => Number(Boolean(b.dir)) - Number(Boolean(a.dir));
   if (how === 'date') return [...rows].sort((a, b) => dirsFirst(a, b) || String(b.mod_time).localeCompare(String(a.mod_time)));
   if (how === 'size') return [...rows].sort((a, b) => dirsFirst(a, b) || (b.size || 0) - (a.size || 0));

@@ -46,6 +46,7 @@ import { githubCard } from '../components/github-card.js';
 const every = (/** @type {number} */ sec) => (sec % 60 === 0 ? (sec === 60 ? 'minute' : `${sec / 60} minutes`) : `${sec} seconds`);
 
 // What a recording's run is up to, as the status names it.
+/** @type {Record<string, string | undefined>} */
 const runState = { handed: 'with the brain', done: 'answered', stopped: 'stopped', failed: 'its run failed, trying again' };
 
 export default /** @satisfies {PageModule} */ ({
@@ -82,6 +83,7 @@ export default /** @satisfies {PageModule} */ ({
     const settings = liveForm({ build: buildSettings, edits: (d) => d.st });
     ctx.dirty = () => settings.dirty();
 
+    /** @type {(state: string, kind: string) => HTMLElement} */
     const head = (state, kind) => h('div.card-head',
       h('div.card-title', icon('inbox'), h('h2', 'Plaud recorder')),
       pill(state, kind));
@@ -123,11 +125,11 @@ export default /** @satisfies {PageModule} */ ({
     // (plaud.interval_seconds).
     const signingIn = () => !!(status && status.connect && status.connect.state === 'running');
     const building = () => !!(status && status.app && status.app.build && status.app.build.state === 'running');
-    ctx.follow(brainsResource, (list) => { brains = list || []; if (status) render(); }, 60000);
-    ctx.follow(plaud, (s) => { status = s; render(); }, () => (signingIn() || building() ? 2000 : 20000));
+    ctx.follow(brainsResource, (list) => { brains = list || []; if (status) render(status); }, 60000);
+    ctx.follow(plaud, (s) => { status = s; render(s); }, () => (signingIn() || building() ? 2000 : 20000));
 
-    function render() {
-      const s = status;
+    /** @param {PlaudStatus} s */
+    function render(s) {
       // Recordings from the Plaud Sync phone app need no CLI and no login:
       // they come from a folder its files are synced to (plaud.phone_dir),
       // or it uploads them through the site (plaud.phone_upload).
@@ -228,6 +230,7 @@ export default /** @satisfies {PageModule} */ ({
         if (f.chatBrain) facts.push(h('div.muted.small', `What you write back in that chat goes to the ${f.chatBrain} brain, not to ${f.target}.`));
       }
       // "Send again" hands a recording over once more.
+      /** @param {string} id */
       const again = (id) => btn('Send again', {
         small: true, icon: 'refresh',
         onClick: async () => { await post('/api/plaud/resend', { id }); toast('It goes to the brain with the next check', 'ok'); await refresh(); },
@@ -247,9 +250,9 @@ export default /** @satisfies {PageModule} */ ({
 
     /** @param {{saved: boolean}} keys */
     function renderKeys({ saved }) {
-      const key = (label, help) => field({ label, help, control: h('input', { type: 'password', id: nextId('pk'), autocomplete: 'off', placeholder: saved ? 'saved — type to replace' : '' }) });
-      const fields = [key('Client ID'), key('Client secret'), key('API key', 'App Settings → API Keys: Plaud transcribes with it.')];
-      const value = (f) => f.querySelector('input').value;
+      const inputs = [0, 1, 2].map(() => h('input', { type: 'password', id: nextId('pk'), autocomplete: 'off', placeholder: saved ? 'saved — type to replace' : '' }));
+      const fields = [field({ label: 'Client ID', control: inputs[0] }), field({ label: 'Client secret', control: inputs[1] }),
+        field({ label: 'API key', help: 'App Settings → API Keys: Plaud transcribes with it.', control: inputs[2] })];
       return [
         h('h3', 'Phone app'),
         h('p.muted.small', 'The app is built with your Plaud developer app’s keys (portal.plaud.ai → App Settings). Fridolin keeps them in its data folder and never shows them again. They end up inside the app, so keep the app to yourself.'),
@@ -257,9 +260,9 @@ export default /** @satisfies {PageModule} */ ({
         h('div.actions', btn(saved ? 'Replace keys' : 'Save keys', {
           icon: 'key',
           onClick: async () => {
-            const [clientId, clientSecret, apiKey] = fields.map(value);
+            const [clientId, clientSecret, apiKey] = inputs.map((i) => i.value);
             await put('/api/plaud/app/credentials', { client_id: clientId, client_secret: clientSecret, api_key: apiKey });
-            fields.forEach((f) => { f.querySelector('input').value = ''; });
+            inputs.forEach((i) => { i.value = ''; });
             toast('Plaud developer keys saved', 'ok');
             await refresh();
           },
@@ -281,7 +284,7 @@ export default /** @satisfies {PageModule} */ ({
           h('div.muted.small', noBuilder)) : null,
         build && build.state === 'error' ? callout('bad', `Building the app${where} failed`, h('div', build.error), build.log ? h('pre.small', build.log) : null) : null,
         running && build.stage ? h('p', icon('refresh'), ' ', build.stage, '…') : null,
-        built && !running ? h('p', 'Built ', timeAgo(built), where && build.state === 'done' ? where : '', '.', expires) : null,
+        built && !running ? h('p', 'Built ', timeAgo(built), where && build && build.state === 'done' ? where : '', '.', expires) : null,
         !running && buildsOn && buildsOn !== 'this computer' ? h('p.muted.small', 'This computer has no JDK and Android SDK: the node ', h('strong', buildsOn), ' builds the app and sends it back.') : null,
         h('div.actions',
           btn(running ? 'Building… (a few minutes)' : built ? 'Build again' : 'Build phone app', {
@@ -300,6 +303,7 @@ export default /** @satisfies {PageModule} */ ({
     /** @param {PlaudPhone[]} devices */
     function renderPhones(devices) {
       if (!devices.length) return h('p.muted', 'No phone is paired yet.');
+      /** @param {string} id */
       const unpair = (id) => btn('Unpair', {
         small: true, kind: 'danger', icon: 'x',
         onClick: async () => {
@@ -386,7 +390,9 @@ export default /** @satisfies {PageModule} */ ({
         btn('Save', {
           kind: 'primary', icon: 'check',
           onClick: async () => {
-            await put('/api/plaud/settings', settings.form().value());
+            const form = settings.form();
+            if (!form) return; // the actions show only with the settings form
+            await put('/api/plaud/settings', form.value());
             settings.saved();
             toast('Plaud settings saved', 'ok');
             await refresh();

@@ -14,10 +14,18 @@ import { confirmDialog } from './dialog.js';
 import { field, toggle, textInput } from './fields.js';
 import { pill, callout, mono, loading } from './common.js';
 
+/** @import { Page } from '../app/page.js' */
+/** @import { GitHubAppInfo, GitHubStatus } from '../../types/api.js' */
+
+/** @type {(href: string, text: string) => HTMLAnchorElement} */
 const external = (href, text) => h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, text);
+/** @type {(href: string | undefined, label: string, kind?: string) => HTMLAnchorElement} */
 const linkButton = (href, label, kind = '') => h(`a.btn${kind ? `.${kind}` : ''}`, { href, target: '_blank', rel: 'noopener noreferrer' }, icon('external'), h('span.btn-label', label));
 
-/** githubCard(ctx): the card, following /api/github for the page. */
+/**
+ * githubCard(ctx): the card, following /api/github for the page.
+ * @param {Page} ctx
+ */
 export function githubCard(ctx) {
   const card = h('section.card', loading('Checking GitHub…'));
   const github = resource('/api/github');
@@ -32,6 +40,7 @@ export function githubCard(ctx) {
     field({ control: prs, help: 'Off: the app may read code and write issues. FrIDE’s pushes and pull requests need this on; you can change the app’s permissions on GitHub later too.' }),
     field({ label: 'Organization that owns the app', control: org, help: 'Leave empty to make the app on your own account.' }));
 
+  /** @type {(state: string, kind: string) => HTMLDivElement} */
   const head = (state, kind) => h('div.card-head', h('div.card-title', icon('git'), h('h2', 'GitHub')), pill(state, kind));
 
   const connect = async () => {
@@ -41,12 +50,14 @@ export function githubCard(ctx) {
     window.location.assign(r.url);
   };
 
+  /** @param {string} repo */
   const test = async (repo) => {
     const r = await post('/api/github/test', { repo }, { timeout: 60000 });
     const what = r.issue ? `#${r.issue.number} “${r.issue.title}”` : 'that it has no issue';
     toast(`Read ${what} of ${r.repo} with a token that may only read issues, then revoked it`, 'ok', { timeout: 8000 });
   };
 
+  /** @param {{app: GitHubAppInfo}} st */
   const disconnect = async (st) => {
     const ok = await confirmDialog({
       title: 'Disconnect GitHub?',
@@ -62,8 +73,10 @@ export function githubCard(ctx) {
 
   ctx.follow(github, (st) => render(st || {}), 30000);
 
+  /** @param {Partial<GitHubStatus>} st */
   function render(st) {
-    if (!st.connected) {
+    const { app } = st; // the bridge names the app whenever it is connected
+    if (!st.connected || !app) {
       paint(card, { error: st.error || '', typed: !!st.typed_token, deleteURL }, (s) => [
         head('Not connected', 'neutral'),
         h('p', 'Connect GitHub once: Fridolin makes a private GitHub App of its own, with no webhook, and you pick the repositories it may use. Each run that needs GitHub — a scheduled review that files issues, say — gets a token that lasts at most an hour, only for its repositories and permissions, revoked when the run ends.'),
@@ -79,9 +92,9 @@ export function githubCard(ctx) {
     deleteURL = '';
     const insts = st.installations || [];
     const repos = insts.flatMap((i) => i.repos || []);
-    paint(card, st, (s) => [
+    paint(card, { ...st, app }, (s) => [
       head(insts.length ? 'Connected' : 'Not installed yet', insts.length ? 'ok' : 'warn'),
-      h('p', 'App ', external(s.app.html_url || s.settings_url, s.app.name || s.app.slug), s.app.owner ? ` on ${s.app.owner}` : '', '. Its key is kept in ', s.where, '.'),
+      h('p', 'App ', external(s.app.html_url || s.settings_url || '', s.app.name || s.app.slug), s.app.owner ? ` on ${s.app.owner}` : '', '. Its key is kept in ', s.where, '.'),
       s.error ? callout('bad', 'GitHub did not answer as expected', s.error) : null,
       insts.length ? null : callout('warn', 'Pick its repositories', 'The app is made but not installed anywhere yet: install it on the repositories Fridolin may use.'),
       insts.length ? h('div.facts', insts.map((i) => h('div',

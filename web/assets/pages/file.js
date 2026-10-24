@@ -24,6 +24,7 @@ import { markdownDoc, markdownToc } from '../components/markdown.js';
 
 /** @import { PageModule } from '../app/page.js' */
 /** @import { Child } from '../lib/dom.js' */
+/** @import { MarkdownLinks } from '../components/markdown.js' */
 /** @import { FileRoot, FileRootKind, FileView, SiteSettings } from '../../types/api.js' */
 
 /**
@@ -52,10 +53,12 @@ function crumbs(rootId, label, path) {
  * Where a rendered Markdown file's links go, from root.
  * @param {Root} root
  * @param {string} ticket
+ * @returns {MarkdownLinks}
  */
 function links(root, ticket) {
+  const { brain } = root;
   return {
-    page: (p) => (root.kind === 'brain' && /^(wiki|memories)\//.test(p) ? wikiHref(root.brain, p) : filesHref(root.id, p, false)),
+    page: (p) => (root.kind === 'brain' && brain && /^(wiki|memories)\//.test(p) ? wikiHref(brain, p) : filesHref(root.id, p, false)),
     file: (p) => filesHref(root.id, p, false),
     image: (p) => rawHref(root.id, p, ticket),
   };
@@ -69,11 +72,12 @@ function links(root, ticket) {
  */
 function preview(v, root, path, ticket) {
   const src = rawHref(root.id, path, ticket);
+  // A Markdown file comes rendered; one without its doc has no preview.
+  if (v.kind === 'markdown' && v.doc) {
+    const doc = markdownDoc(v.doc, links(root, ticket));
+    return h('div.md-layout', h('div.card', doc), markdownToc(v.doc, doc));
+  }
   switch (v.kind) {
-    case 'markdown': {
-      const doc = markdownDoc(v.doc, links(root, ticket));
-      return h('div.md-layout', h('div.card', doc), markdownToc(v.doc, doc));
-    }
     case 'text': return h('div.card.flush', h('pre.file-text', v.text));
     case 'image': return h('div.card.file-media', h('img', { src, alt: v.name }));
     case 'audio': return h('div.card', h('audio', { controls: true, preload: 'metadata', src }));
@@ -103,7 +107,7 @@ function askButton(root, path, number) {
  * @param {SiteSettings | null | undefined} site
  */
 function linkToCopy(root, path, site) {
-  if (root.kind === 'brain' && site && site.domain) return siteFileHref(site.domain, root.brain, path);
+  if (root.kind === 'brain' && root.brain && site && site.domain) return siteFileHref(site.domain, root.brain, path);
   const here = globalThis.location;
   return `${here ? here.origin + here.pathname : ''}${filesHref(root.id, path, false)}`;
 }
@@ -116,7 +120,8 @@ export default /** @satisfies {PageModule} */ ({
     const header = h('div', pageHeader(path.split('/').pop() || 'File'));
     const box = h('div', spinner());
     mount(root, header, box);
-    const quiet = (p) => p.catch(() => null);
+    /** @type {<T>(p: Promise<T>) => Promise<T | null>} */
+    const quiet = (p) => p.catch(/** @returns {null} */ () => null);
     Promise.all([
       get('/api/files/roots', { signal: ctx.signal }),
       get(`/api/files/view${qs({ root: rootId, path, source: '1' })}`, { signal: ctx.signal }),
@@ -139,7 +144,7 @@ export default /** @satisfies {PageModule} */ ({
         r.writable ? historyBox(ctx, rootId, path) : null));
       const edit = () => {
         editor = textEditor({
-          rootId, path, text: v.kind === 'markdown' ? v.source : v.text, sha: v.sha,
+          rootId, path, text: (v.kind === 'markdown' ? v.source : v.text) || '', sha: v.sha || '',
           onSaved: async () => {
             editor = null;
             ctx.dirty = null;
