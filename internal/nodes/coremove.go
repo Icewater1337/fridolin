@@ -50,6 +50,10 @@ type MoveReport struct {
 	Source  MoveEnd `json:"source"`
 	Target  MoveEnd `json:"target"`
 	Version string  `json:"version"`
+	// SecretFiles are the secret files of the source's credentials folder
+	// that go with the host secrets (#187), SecretFilesDir that folder.
+	SecretFiles    []string `json:"secret_files,omitempty"`
+	SecretFilesDir string   `json:"secret_files_dir,omitempty"`
 	// Image is the core's image by digest, "" for a local build;
 	// ImagePresent whether the target has it, ImageNote what it said.
 	Image        string `json:"image,omitempty"`
@@ -127,6 +131,12 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 	}
 	if checks[0].ID != "" {
 		rep.MachineBound = append(rep.MachineBound, checks[0].MachineBound...)
+		rep.SecretFiles, rep.SecretFilesDir = checks[0].SecretFiles, checks[0].SecretFilesDir
+		if e := checks[0].SecretFilesError; e != "" {
+			// The core there may need them (calendars, the dashboard's
+			// users): never move without them.
+			rep.Blocking = append(rep.Blocking, fmt.Sprintf("%s: the secret files of the core's credentials folder cannot be read: %s", srcName, e))
+		}
 	}
 	if checks[1].ID != "" {
 		need := uint64(2*rep.ExportBytes) + 4<<30
