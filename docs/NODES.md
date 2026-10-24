@@ -1590,7 +1590,8 @@ again, a target trusted or no longer trusted) waits for the owner's
 approval again, and the chat hears of it ("changed its core-host
 settings"). A FrIDE task on the same machine can write that file; it
 cannot approve the change. `!fleet`, `fridolin nodes` and the Nodes page
-show `core-host`, the device key's fingerprint and whether it waits.
+show `core-host` and whether it waits; the Nodes page, and `fridolin
+nodes` while it waits, the device key's fingerprint too.
 
 ```sh
 fridolin node core-host show                 # on, the device id, key and fingerprint, the pins
