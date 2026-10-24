@@ -783,6 +783,21 @@ blocks the move is listed under "It cannot run".
    volume `fridolin-move-rehearsal`, every member and database checked,
    the volume removed; never `fridolin-data`, never the lease). A failure
    here stops nothing.
+   **Secret files.** With the host secrets go the secret files of the
+   core's credentials folder (`sandbox.credentials_dir`, a folder under
+   `~`): `google_oauth_web_credentials.json`, `dashboard-users.json`,
+   `google_calendar_credentials_<brain>.json` and
+   `google_calendar_token_<brain>.json`, nothing else of the folder.
+   SRC reads them through its core's container (`fridolin core run core
+   files export`), seals them and the folder's name under `~` beside the
+   secrets to DST's one-time key, and DST writes them through its own
+   (`core files import`) into that folder under its core's home: each
+   0600, only the files it has not got, so a machine that ran the core
+   before (a Mac whose `compose.host.yaml` binds its own folder) keeps it
+   exactly as it was. Elsewhere the container's home is the volume
+   `fridolin-home`, which no export carries. The core relays them and
+   sees their names only. A `credentials_dir` in the data dir needs
+   none of this: the export carries it.
 2. The core signs a **move plan** with its update key (the one nodes
    already pin for updates): the move id, SRC and DST, SRC's data dir by
    its lease device id, the version, the image, when it was issued, the

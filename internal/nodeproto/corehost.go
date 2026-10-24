@@ -282,6 +282,10 @@ type CoreSecretsBundle struct {
 	Ciphertext []byte   `json:"ciphertext"`
 	Names      []string `json:"names"`
 	Missing    []string `json:"missing,omitempty"`
+	// Files are the secret files of the core's credentials folder sealed
+	// beside them, by name (#187); FilesError says why none could be read.
+	Files      []string `json:"files,omitempty"`
+	FilesError string   `json:"files_error,omitempty"`
 }
 
 // CoreSecretsReceiveParams hands a target the bundle of its offer.
@@ -299,6 +303,10 @@ type CoreSecretsReceived struct {
 	Move      string   `json:"move"`
 	Stored    []string `json:"stored"`
 	Unchanged []string `json:"unchanged"`
+	// FilesStored were written into the core's credentials folder,
+	// FilesKept were there already and stay as they were.
+	FilesStored []string `json:"files_stored,omitempty"`
+	FilesKept   []string `json:"files_kept,omitempty"`
 }
 
 // CoreSecretsForgotten are the secrets a target removed.

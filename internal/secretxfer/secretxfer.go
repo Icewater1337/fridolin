@@ -274,6 +274,11 @@ type bundle struct {
 	V       int               `json:"v"`
 	From    string            `json:"from"`
 	Secrets map[string]string `json:"secrets"`
+	// Files are the secret files of the core's credentials folder
+	// (FileNames), by name; only a move over the node channel sends them.
+	Files map[string][]byte `json:"files,omitempty"`
+	// FilesDir is the credentials folder under ~ they belong in.
+	FilesDir string `json:"files_dir,omitempty"`
 }
 
 var secretName = regexp.MustCompile(`^fridolin\.[a-z0-9][a-z0-9._-]*$`)
@@ -303,6 +308,14 @@ func DecodeBundle(data []byte) (map[string]string, string, error) {
 	}
 	if dec.More() {
 		return nil, "", errors.New("a malformed bundle: trailing data")
+	}
+	if err := checkFiles(b.Files); err != nil {
+		return nil, "", err
+	}
+	if len(b.Files) > 0 {
+		if err := CheckFilesDir(b.FilesDir); err != nil {
+			return nil, "", err
+		}
 	}
 	switch {
 	case b.V != Version:
