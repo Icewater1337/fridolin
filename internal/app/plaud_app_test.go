@@ -2,7 +2,11 @@ package app
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/ecdh"
 	"crypto/ecdsa"
+	"crypto/hkdf"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
@@ -166,6 +170,8 @@ type plaudPhoneFixtureClaims struct {
 	Key    *plaudPhoneFixtureKey `json:"key,omitempty"`
 	Name   string                `json:"name,omitempty"`
 	SHA256 string                `json:"sha256,omitempty"`
+	Rid    string                `json:"rid,omitempty"`
+	Enc    *plaudPhoneFixtureKey `json:"enc,omitempty"`
 }
 
 // A fresh app build persists the hash of its one-use pairing code. Arrangement
@@ -183,4 +189,111 @@ func plaudFixturePairing(t *testing.T, tb *testBridge) (string, error) {
 		return "", err
 	}
 	return code, os.WriteFile(filepath.Join(dir, "devices.json"), data, 0600)
+}
+
+// voicePair pairs phone and returns its device id.
+func voicePair(t *testing.T, tb *testBridge, phone testPhone) string {
+	t.Helper()
+	code, err := plaudFixturePairing(t, tb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ans, err := tb.plaud.DeviceRequest("pair", phone.pairing(t, code), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ans["device"].(string)
+}
+
+// voiceQuestion asks question by voice as the app does, with enc as the
+// key its answer is encrypted to.
+func voiceQuestion(t *testing.T, tb *testBridge, phone testPhone, device, rid, question string, enc *ecdh.PrivateKey) (map[string]any, error) {
+	t.Helper()
+	b := enc.PublicKey().Bytes()
+	e := base64.RawURLEncoding.EncodeToString
+	now := time.Now().Unix()
+	sum := sha256.Sum256([]byte(question))
+	return tb.plaud.DeviceRequest("voice", phone.sign(t, plaudPhoneFixtureClaims{Iss: device, Aud: "fridolin:voice", Iat: now, Exp: now + 300, Rid: rid,
+		SHA256: e(sum[:]), Enc: &plaudPhoneFixtureKey{Kty: "EC", Crv: "P-256", X: e(b[1:33]), Y: e(b[33:])}}), []byte(question))
+}
+
+// voiceAnswer fetches the answer to rid until it is there, and opens it.
+func voiceAnswer(t *testing.T, tb *testBridge, phone testPhone, device, rid string, enc *ecdh.PrivateKey) string {
+	t.Helper()
+	var ans map[string]any
+	testutil.WaitFor(t, 20*time.Second, "the voice answer", func() bool {
+		now := time.Now().Unix()
+		var err error
+		ans, err = tb.plaud.DeviceRequest("voice_reply", phone.sign(t, plaudPhoneFixtureClaims{Iss: device, Aud: "fridolin:voice-reply", Iat: now, Exp: now + 300, Rid: rid}), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ans["state"] != "waiting"
+	})
+	if ans["state"] != "done" {
+		t.Fatalf("answer = %v", ans)
+	}
+	// Through JSON, as the site passes it on.
+	data, _ := json.Marshal(ans["reply"])
+	var r struct {
+		Epk    plaudPhoneFixtureKey `json:"epk"`
+		IV, CT string
+	}
+	if err := json.Unmarshal(data, &r); err != nil {
+		t.Fatal(err)
+	}
+	d := base64.RawURLEncoding.DecodeString
+	x, _ := d(r.Epk.X)
+	y, _ := d(r.Epk.Y)
+	pub, err := ecdh.P256().NewPublicKey(append(append([]byte{4}, x...), y...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret, _ := enc.ECDH(pub)
+	key, _ := hkdf.Key(sha256.New, secret, nil, "fridolin voice reply v1", 32)
+	block, _ := aes.NewCipher(key)
+	gcm, _ := cipher.NewGCM(block)
+	iv, _ := d(r.IV)
+	ct, _ := d(r.CT)
+	pt, err := gcm.Open(nil, iv, ct, []byte(rid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pt)
+}
+
+// A question asked by voice reaches the DM brain as a hand-off; its answer
+// comes back to the phone, sealed for it, and goes to WhatsApp after the
+// question, unless voice_quiet keeps it on the phone.
+func TestPlaudVoiceQuestionIsAnsweredThroughABrain(t *testing.T) {
+	for _, quiet := range []bool{false, true} {
+		extra := `, "phone_upload": true, "voice": true`
+		if quiet {
+			extra += `, "voice_quiet": true`
+		}
+		tb, _ := plaudBridge(t, extra)
+		phone := newTestPhone(t)
+		device := voicePair(t, tb, phone)
+		enc, _ := ecdh.P256().GenerateKey(rand.Reader)
+		rid := "q_voice_question_1"
+		if ans, err := voiceQuestion(t, tb, phone, device, rid, "Was steht morgen an?", enc); err != nil || ans["state"] != "waiting" {
+			t.Fatalf("quiet %v: ask = %v, %v", quiet, ans, err)
+		}
+		answer := voiceAnswer(t, tb, phone, device, rid, enc)
+		if !strings.Contains(answer, "Was steht morgen an?") {
+			t.Errorf("quiet %v: the phone heard %q", quiet, answer)
+		}
+		out := tb.dev.Outbox()
+		if quiet {
+			if len(out) != 0 {
+				t.Errorf("quiet: WhatsApp got %+v", out)
+			}
+			continue
+		}
+		testutil.WaitFor(t, 5*time.Second, "the WhatsApp answer", func() bool { return len(tb.dev.Outbox()) == 2 })
+		out = tb.dev.Outbox() // newest first
+		if out[1].Text != "🎙️ Was steht morgen an?" || out[0].Text != answer || out[0].JID != out[1].JID {
+			t.Errorf("WhatsApp got %.80q, then %.80q; the phone %.80q", out[1].Text, out[0].Text, answer)
+		}
+	}
 }

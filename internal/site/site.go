@@ -79,6 +79,9 @@ type SiteManager struct {
 	chats    *siteChats
 	// searchSlots limits the searches the bridge runs for the site at once.
 	searchSlots chan struct{}
+	// waitSlots limits the phones' fetches of a voice answer that wait
+	// for it at once.
+	waitSlots chan struct{}
 	ctx         context.Context
 
 	warnNoSandbox sync.Once
@@ -114,6 +117,7 @@ func New(opts SiteOptions) *SiteManager {
 	}
 	m.chats = &siteChats{m: m}
 	m.searchSlots = make(chan struct{}, spoolSearchLimit)
+	m.waitSlots = make(chan struct{}, spoolWaitLimit)
 	m.settings = m.loadSettings()
 	m.users = m.loadUsers()
 	return m

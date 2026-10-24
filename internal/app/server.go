@@ -102,6 +102,16 @@ func (b *App) submitHandOff(br *brain.Brain, jid, sender, text string, media []s
 	return err
 }
 
+// submitAsk hands br a question whose answer answer hears (the Plaud
+// Sync app's voice mode): a hand-off like submitHandOff, whose answer
+// goes to jid too unless quiet.
+func (b *App) submitAsk(br *brain.Brain, jid, sender, text string, quiet bool, answer func(string), done func(error)) error {
+	m := brain.Inbound{Inbound: chat.Inbound{JID: jid, Brain: br.ID(), Sender: sender, Text: text, Source: chat.SourceIngest, At: time.Now(),
+		Done: done, Answer: answer, AnswerOnly: quiet}}
+	_, _, _, err := b.brainMgr.Submit(m)
+	return err
+}
+
 // replyChatFor picks the chat a brain answers in when a message did not come
 // from a chat: its configured reply_chat, else your own DM (ownerChat) for
 // the brain that gets DMs (the DM brain, or the fallback when there is

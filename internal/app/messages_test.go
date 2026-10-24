@@ -56,6 +56,7 @@ func catalogue() []struct{ name, text string } {
 		{"backupRefusedAlert", outboundmsg.BackupRefusedAlert("Notes", "it would delete 12 of 40 files")},
 		{"plaudGivenUpAlert", outboundmsg.PlaudGivenUpAlert("Team sync", "notes", "brain notes is not configured")},
 		{"plaudExpiredAlert", outboundmsg.PlaudExpiredAlert},
+		{"plaudVoiceQuestion", outboundmsg.PlaudVoiceQuestion("Was steht morgen an?")},
 		{"fleetGroupNotice", outboundmsg.FleetGroupNotice},
 		{"fleetReply(false)", outboundmsg.FleetReply(false, nil, fleetNow)},
 		{"fleetReply(true, none)", outboundmsg.FleetReply(true, nil, fleetNow)},

@@ -51,6 +51,13 @@ type Inbound struct {
 	// GitHub, when set, asks for a GitHub token for the run that answers
 	// the message (docs/GITHUB.md): a scheduled agent's grant.
 	GitHub *GitHubGrant
+	// Answer, when set, hears the text of the run's answer before it is
+	// delivered: the Plaud Sync app's voice mode reads it aloud on the
+	// phone (docs/PLAUD.md, "Voice mode"). Only a hand-off sets it.
+	Answer func(text string)
+	// AnswerOnly keeps the answer, and a failed run's notice, out of the
+	// chat: Answer and Done are all that hear how the run ended.
+	AnswerOnly bool
 }
 
 // GitHubGrant is what a run may do on GitHub: the bridge mints an

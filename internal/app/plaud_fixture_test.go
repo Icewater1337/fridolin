@@ -139,7 +139,7 @@ func (tb *testBridge) plaudTokenPath() string {
 func (tb *testBridge) replacePlaud(t *testing.T, change func(*plaud.Options)) {
 	t.Helper()
 	tb.plaud.Stop()
-	options := plaudOptions(tb.cfgs, tb.brainMgr, tb.submitHandOff, tb.wa.SendMessage, nil, plaudFleet{})
+	options := plaudOptions(tb.cfgs, tb.brainMgr, tb.submitHandOff, tb.submitAsk, tb.wa.SendMessage, nil, plaudFleet{})
 	change(&options)
 	tb.plaud = plaud.New(options)
 	// App.Stop owns the current manager; keep its original cleanup order.

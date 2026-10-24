@@ -20,6 +20,9 @@ type Settings struct {
 	BrainAccess     bool   `json:"brain_access,omitempty"`
 	PhoneDir        string `json:"phone_dir,omitempty"`
 	PhoneUpload     bool   `json:"phone_upload,omitempty"`
+	Voice           bool   `json:"voice,omitempty"`
+	VoiceBrain      string `json:"voice_brain,omitempty"`
+	VoiceQuiet      bool   `json:"voice_quiet,omitempty"`
 }
 
 // Snapshot keeps one poll's policy and paths together.
@@ -75,6 +78,10 @@ type Target struct {
 	ReplyChat  func() string
 	OtherOwner func(jid string) string
 	Submit     func(jid, sender, text string, media []string, done func(error)) error
+	// Ask hands the brain a voice question (voice mode): answer hears the
+	// text of its answer, which goes to jid as well unless quiet, and
+	// done how the run ended. Nil where the brain takes no questions.
+	Ask func(jid, sender, text string, quiet bool, answer func(string), done func(error)) error
 }
 
 func (t *Target) ID() string { return t.BrainID }
