@@ -3,5 +3,5 @@ PUT /api/files/text
 Content-Type: application/json
 
 {
-  "error": "Fridolin keeps this file itself; change it on the brain's page"
+  "error": "this file is Fridolin's own; change it on the brain's page"
 }

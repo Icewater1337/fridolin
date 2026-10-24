@@ -49,7 +49,7 @@ var (
 	ErrChanged   = errors.New("the file changed since you opened it; open it again, and make your change there")
 	ErrExists    = errors.New("there is already a file or folder of that name")
 	ErrTooLarge  = errors.New("the file is too large")
-	ErrProtected = errors.New("Fridolin keeps this file itself; change it on the brain's page")
+	ErrProtected = errors.New("this file is Fridolin's own; change it on the brain's page")
 )
 
 // noWrite are the files of a brain folder nobody changes here: its
@@ -396,7 +396,7 @@ func (r Root) Create(dir, name string, body io.Reader, max int64, s Scope) (stri
 	return "", 0, ErrExists
 }
 
-var errUnshown = errors.New("Fridolin never shows a file of this name (a secret, or what the brain's backup leaves out), so it cannot be uploaded here")
+var errUnshown = errors.New("a file of this name is never shown (a secret, or what the brain's backup leaves out), so it cannot be uploaded here")
 
 // copyAtMost copies body into f and closes it; more than max bytes is
 // ErrTooLarge.
