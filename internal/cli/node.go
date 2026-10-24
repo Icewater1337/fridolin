@@ -183,6 +183,11 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		// What updates from the core replace, and restart with.
 		a.Executable, a.Args, a.Environ = exe, os.Args[1:], os.Environ()
+		if a.Config.Box == nil {
+			// core-host keeps host secrets where fridolin core does.
+			home, _ := os.UserHomeDir()
+			a.CoreSecrets, a.CoreSecretsPlace = nodeagent.HostSecretStore(runtime.GOOS, os.Getenv, home)
+		}
 		if a.Config.Box != nil {
 			tn, err := boxTailnet(dir, a.Config.Box.Hostname, stderr)
 			if err != nil {
