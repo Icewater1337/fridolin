@@ -79,14 +79,40 @@ func catalogue() []struct{ name, text string } {
 		{"dashboardOffNotice", outboundmsg.DashboardOffNotice},
 		{"dashboardLinkReply(tailnet)", outboundmsg.DashboardLinkReply("http://fridolin-core.example.ts.net/#login=CODE", "http://127.0.0.1:8765/#login=CODE", 10)},
 		{"dashboardLinkReply(local)", outboundmsg.DashboardLinkReply("", "http://127.0.0.1:8765/#login=CODE", 10)},
-		{"nodeJoinedAlert", outboundmsg.NodeJoinedAlert("laptop", "windows", "8233270f8a24")},
-		{"nodeCoreHostAlert", outboundmsg.NodeCoreHostAlert("icebase", "8233270f8a24", "a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90", nil, false, nodeproto.CoreHostApproval)},
-		{"nodeCoreHostAlert(changed)", outboundmsg.NodeCoreHostAlert("mac-mini", "7216c2648b04", "a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90", []string{"icebase (8233270f8a24)"}, true, nodeproto.CoreHostApproval)},
 		{"coreMoveEnded(done)", outboundmsg.CoreMoveEnded("m-20261024-1403-7f2a", "mac-mini", "icebase", "done", "the core runs on icebase (version v1.9.0, WhatsApp connected, lease held)")},
 		{"coreMoveEnded(rolled_back)", outboundmsg.CoreMoveEnded("m-20261024-1403-7f2a", "mac-mini", "icebase", "rolled_back", "mac-mini: 3c1e9a0b7d22 gave the core up (not ready in time); its state comes back with it; the core runs here again")},
 		{"coreMoveEnded(failed)", outboundmsg.CoreMoveEnded("m-20261024-1403-7f2a", "mac-mini", "icebase", "failed", "the rehearsal on icebase: the import failed; nothing was stopped")},
 		{"nodeCoreHostApprovedNote", outboundmsg.NodeCoreHostApprovedNote(nodeproto.CoreHostApproval)},
-		{"nodeApprovedReply", outboundmsg.NodeApprovedReply("laptop", "8233270f8a24", "fs (1 root, 1 writable), host, notify")},
+		{"nodeApprovedReply", outboundmsg.NodeApprovedReply("laptop", "8233270f8a24", nodeproto.Capabilities{Host: true, Notify: true, FS: &nodeproto.FSCap{Roots: []nodeproto.FSRoot{{Path: "/home/you/Shared", Write: true}}}}.Plain())},
+		{"approvalAlert(node)", outboundmsg.ApprovalAlert(catalogueNodeApproval, fleetNow)},
+		{"approvalAlert(core-host, unexpected)", outboundmsg.ApprovalAlert(outboundmsg.OwnerApproval{
+			Subject: "*icebase* (Linux) asks to hold all of Fridolin's secrets (core-host)", Label: "*icebase*", When: fleetNow.Add(-26 * time.Hour),
+			Note:       nodeproto.CoreHostApproval,
+			Facts:      []string{"From: your local network, 192.168.1.20", "Device key: `a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90`", "Sends secrets only to: laptop"},
+			Allows:     nodeproto.Capabilities{Host: true, CoreHost: &nodeproto.CoreHostCap{Hash: "ab"}}.Plain(),
+			Unexpected: "the machine asked for this itself; nobody asked from WhatsApp or the dashboard.", Ref: "3c1e5a7b9d0f",
+		}, fleetNow)},
+		{"approvalAlert(schedule)", outboundmsg.ApprovalAlert(outboundmsg.OwnerApproval{
+			Subject: "*Main* wants a new scheduled agent, *scrape*", When: fleetNow.Add(-3 * 24 * time.Hour),
+			Facts:      []string{"Runs: daily 07:00, on its own", "Does: runs scrape on node laptop"},
+			Allows:     []string{"run a program on node laptop: scrape --all"},
+			Unexpected: "it was written into the brain's folder, not made in the dashboard.", Ref: "main/scrape",
+		}, fleetNow)},
+		{"approvalsWaitingAlert", outboundmsg.ApprovalsWaitingAlert([]outboundmsg.OwnerApproval{catalogueNodeApproval,
+			{Subject: "*Main* has a new skill, *taxes*", When: fleetNow.Add(-90 * time.Minute), Unexpected: "it was written into the brain's folder, not made in the dashboard."}}, fleetNow)},
+		{"approvalPickQuestion(approve)", outboundmsg.ApprovalPickQuestion(true, 3)},
+		{"approvalPickQuestion(deny)", outboundmsg.ApprovalPickQuestion(false, 3)},
+		{"approvalPickNotice(approve)", outboundmsg.ApprovalPickNotice(true)},
+		{"approvalPickNotice(deny)", outboundmsg.ApprovalPickNotice(false)},
+		{"nothingPendingReply", outboundmsg.NothingPendingReply},
+		{"approvalConfirmReply(unexpected)", outboundmsg.ApprovalConfirmReply(catalogueNodeApproval, "This is unexpected: its join code came neither from your !join nor from the dashboard.", 2)},
+		{"approvalConfirmReply(expired)", outboundmsg.ApprovalConfirmReply(catalogueNodeApproval, outboundmsg.ApprovalExpiredWhy(fleetNow.Add(-50*time.Hour), fleetNow), 2)},
+		{"approvedReply", outboundmsg.ApprovedReply("the skill *taxes* of Main", "It applies as its file says from now on.")},
+		{"deniedReply", outboundmsg.DeniedReply("the skill *taxes* of Main", "What you approved before stays (or, for a new one, it only reads); it waits on the brain's Skills page.")},
+		{"approvalPollStale", outboundmsg.ApprovalPollStale},
+		{"approvalFailedReply", outboundmsg.ApprovalFailedReply("the new brain.json of *Main*", "the brain.json on disk changed again")},
+		{"fleetWaitingNote(1)", strings.TrimSpace(outboundmsg.FleetWaitingNote(1))},
+		{"fleetWaitingNote(3)", strings.TrimSpace(outboundmsg.FleetWaitingNote(3))},
 		{"nodeRevokedReply", outboundmsg.NodeRevokedReply("laptop", "8233270f8a24")},
 		{"nodeIsRevokedReply", outboundmsg.NodeIsRevokedReply("laptop", "8233270f8a24")},
 		{"nodeUnknownReply", outboundmsg.NodeUnknownReply("nope")},
@@ -132,16 +158,25 @@ func catalogue() []struct{ name, text string } {
 	}
 }
 
+// catalogueNodeApproval is a node that joined with a code from !join, as
+// its alert tells it.
+var catalogueNodeApproval = outboundmsg.OwnerApproval{
+	Subject: "*laptop* (Windows) wants to join as a node", Label: "*laptop*", When: fleetNow.Add(-3 * time.Minute),
+	Facts:  []string{"From: laptop (you@example.com) on your tailnet, 100.64.0.7", "Started: with a join code you asked for with !join"},
+	Allows: nodeproto.Capabilities{Host: true, Fride: &nodeproto.FrideCap{URL: "http://127.0.0.1:17840"}}.Plain(),
+	Ref:    "8233270f8a24", Option: "laptop (Windows) joins as a node",
+}
+
 // fleetNow and fleetNodes are the fleet !fleet lists in the catalogue:
 // one node of each state.
 var (
 	fleetNow   = time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	fleetNodes = []outboundmsg.FleetNode{
-		{ID: "8233270f8a24", Name: "laptop", OS: "windows", Online: true, Device: "approved", Commands: "approved", Tags: []string{"gpu", "windows"}, Offers: "exec (hostname, whoami), fs (1 root), host"},
-		{ID: "4f1e2d3c4b5a", Name: "mini", OS: "darwin", LastSeen: fleetNow.Add(-3 * time.Hour), Device: "approved", Commands: "pending", Tags: []string{"macos"}, Offers: "host"},
+		{ID: "8233270f8a24", Name: "laptop", OS: "windows", Online: true, Device: "approved", Commands: "approved", Tags: []string{"gpu", "windows"}, Can: nodeproto.Capabilities{Host: true, Exec: &nodeproto.ExecCap{Allow: []nodeproto.ExecRule{{Name: "hostname"}, {Name: "whoami"}}}}.Plain()},
+		{ID: "4f1e2d3c4b5a", Name: "mini", OS: "darwin", LastSeen: fleetNow.Add(-3 * time.Hour), Device: "approved", Commands: "pending", Tags: []string{"macos"}, Can: []string{"report its system details (OS, disk, memory)"}},
 		{ID: "0a1b2c3d4e5f", Name: "pi", OS: "linux", LastSeen: fleetNow.Add(-90 * time.Second), Device: "pending", Commands: "pending"},
 		{ID: "ffeeddccbbaa", Name: "old", OS: "linux", Device: "revoked", Commands: "none"},
-		{ID: "3c1e5a7b9d0f", Name: "icebase", OS: "linux", Online: true, Device: "approved", Commands: "pending", CoreHostPending: true, Offers: "host, notify"},
+		{ID: "3c1e5a7b9d0f", Name: "icebase", OS: "linux", Online: true, Device: "approved", Commands: "pending", CoreHostPending: true, Can: []string{"report its system details (OS, disk, memory)", "show notifications on its screen"}},
 	}
 )
 

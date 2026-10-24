@@ -33,7 +33,7 @@ Usage:
 
 The settings live in core-host.json in the state dir, which only this
 machine writes. Every change waits for the owner's approval on the core
-(!approve ID, or fridolin nodes approve ID --commands) before it counts.
+(!approve in WhatsApp, or fridolin nodes approve ID --commands) before it counts.
 `
 
 // nodeCoreHost runs `fridolin node core-host`.

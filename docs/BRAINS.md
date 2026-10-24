@@ -341,9 +341,12 @@ The kinds: `run_start`, `run_end`, `run_refused`, `tool_call` (the tool's
 name and how it ended, never its arguments), `approval_requested`,
 `approval_vote`, `approval_decided`, `question_asked`,
 `question_answered`, `delegation`, `lockdown`, `unlock`,
-`skill_approved`, and the owner's node commands `node_join_code`
+`skill_approved`, the owner's node commands `node_join_code`
 (`!join`), `dashboard_link` (`!dashboard`), `node_approved` (`!approve`)
-and `node_revoked` (`!revoke`), never with the code or link. Texts are shortened, and what looks like a password or
+and `node_revoked` (`!deny`, `!revoke`), never with the code or link, and
+`owner_approval`: the owner's `!approve` and `!deny` of anything else, a
+vote in the poll that picks one, and the confirmation an unexpected one
+asks for. Texts are shortened, and what looks like a password or
 token is masked. The dashboard's Threads page groups the runs by thread,
 and its Audit page filters the lines. `fridolin doctor` warns about an
 approval that has waited more than an hour, and says when the bridge is
@@ -372,6 +375,19 @@ cannot run; a brain that cannot run already, after a hand edit of
 The brain's scheduled agents, in [`.brain/schedules/`](#the-brain-folder),
 are approved the same way, each file on its own, on the Schedules page;
 `brain.json`'s approval leaves them aside.
+
+The bridge also tells you in your WhatsApp chat, within a minute, of a
+changed `brain.json`, a new or changed scheduled agent and a new or
+changed skill: what changed and what it would let the brain do ("run with
+these settings changed: routing", "Runs: daily 07:00, on its own", "start
+when a message says: steuer"), flagged *Unexpected*, since the brain wrote
+it into its own folder rather than you in the dashboard. Reply `!approve`
+twice (the second within 2 minutes) to approve it as it is on disk then,
+or `!deny` to leave the approved version running and stop being asked
+until the file changes again. With several waiting, `!approve` sends a
+poll to pick one. A run's request for approval, which has its own poll,
+is answered by `!approve` and `!deny` too
+([NODES.md](NODES.md#approving-from-whatsapp) has the rules).
 
 ## Files the bridge reads and writes
 

@@ -152,7 +152,7 @@ func Fingerprint(pub []byte) string {
 
 // CoreHostApproval is what approving core-host means (#187 §1): every
 // place that approves it says so.
-const CoreHostApproval = "core-host lets fridolin move the core to this machine. The machine then holds every host secret: the B2 keys, the age identity and export key (all exports and the WhatsApp session), the Claude token. Approve only a machine you trust as much as the one that runs the core now."
+const CoreHostApproval = "Approving core-host lets the core move to this machine. It then holds all of Fridolin's secrets: the WhatsApp session, the backup keys and the Claude token. Approve it only for a machine you trust as much as the one the core runs on now."
 
 // CoreCheckResult is core.check's answer: facts, never a secret's value.
 type CoreCheckResult struct {

@@ -363,6 +363,7 @@ func (h *harness) moveBack(m moveHosts) nodes.MoveRecord {
 	t := h.t
 	t.Helper()
 	dir := m.dstAgent.Dir
+	told := len(h.SentTo(harnessDM))
 	srcKey, err := nodeagent.LoadKey(m.srcAgent.Dir)
 	if err != nil {
 		t.Fatal(err)
@@ -370,7 +371,14 @@ func (h *harness) moveBack(m moveHosts) nodes.MoveRecord {
 	if err := nodeagent.SaveCoreHost(dir, nodeagent.CoreHostConfig{Enabled: true, SendTo: []nodeagent.CoreHostPin{{ID: m.src, PublicKey: hex.EncodeToString(srcKey.Public().(ed25519.PublicKey)), Name: "mini", PinnedAt: time.Now().UTC().Truncate(time.Second)}}}); err != nil {
 		t.Fatal(err)
 	}
-	h.WaitSent(harnessDM, "*icebase* ("+m.dst+") changed its core-host settings")
+	h.WaitFor("the owner told icebase asks for core-host again", func() bool {
+		for _, msg := range h.SentTo(harnessDM)[told:] {
+			if strings.Contains(msg, "asks to hold all of Fridolin's secrets (core-host)") && strings.Contains(msg, "_ref "+m.dst+"_") {
+				return true
+			}
+		}
+		return false
+	})
 	if w := h.Do("POST", "/api/nodes/"+m.dst+"/approve-commands", nil); w.Code != http.StatusOK {
 		t.Fatalf("approve-commands: %d %s", w.Code, w.Body.String())
 	}

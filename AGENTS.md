@@ -159,7 +159,7 @@ line, no Go, no Tailscale on the host, no service of its own.
    prompt without echo, never into chat), and asks the git name and
    email FrIDE's agents commit with. A code that ran out while they
    signed in: `!join` again, and the same line with the new code.
-3. **Approve**: they reply `!approve ID` when Fridolin says the box
+3. **Approve**: they reply `!approve` when Fridolin says the box
    joined.
 4. **Verify**: `docker compose ps` in `~/.fridolin-box`
    (`%LOCALAPPDATA%\fridolin-box`) shows `node` and `fride` running;
@@ -167,7 +167,7 @@ line, no Go, no Tailscale on the host, no service of its own.
    /node` says FrIDE answers; the core lists the node online with
    `host`, `backup` and `fride`.
 
-Rollback: `!revoke ID`, then `docker compose down -v` in the box's
+Rollback: `!revoke ID` (the ref `!fleet` shows), then `docker compose down -v` in the box's
 folder (it deletes the node's key, the backups in the volume and FrIDE's
 workspaces: ask first).
 
@@ -218,7 +218,7 @@ every command per OS, is docs/NODES.md, "Joining a machine". In short:
    Linux, ask to turn on lingering, so the node runs without a login and
    after a reboot (docs/NODES.md, step 5).
 6. **Approve**: once the node joined, Fridolin tells the person in their
-   WhatsApp chat; they reply `!approve ID` (device and what it offers in
+   WhatsApp chat; they reply `!approve` (device and what it offers in
    one go), or click **Approve device** and **Approve commands** on the
    Nodes page (or `fridolin nodes approve ID` and `fridolin nodes approve
    ID --commands` on the core).

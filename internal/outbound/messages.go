@@ -59,7 +59,8 @@ func HelpReply(groupTrigger string) string {
 		"• `!lockdown` — owner only: pause all work but reading until `!unlock`\n" +
 		"• `!join` — owner only, direct chat: a join code for a new node\n" +
 		"• `!dashboard` — owner only, direct chat: a sign-in link for the dashboard\n" +
-		"• `!approve <id>`, `!revoke <id>` — owner only, direct chat: let a node in, or shut it out"
+		"• `!approve`, `!deny` — owner only, direct chat: approve, or turn down, what waits for you (a poll asks which when several wait)\n" +
+		"• `!revoke <ref>` — owner only, direct chat: shut a node out"
 	if groupTrigger != "" {
 		help += "\n\nIn this group, start your message with `" + groupTrigger + "` or reply to one of mine to address me, commands included."
 	}
@@ -200,23 +201,36 @@ func FleetReply(enabled bool, nodes []FleetNode, now time.Time) string {
 		fmt.Fprintf(&b, "\n• *%s* (%s) — %s", n.Name, osLabel(n.OS), seen(n, now))
 		switch {
 		case n.Device == "revoked":
-			b.WriteString(" · revoked")
+			b.WriteString(" · shut out")
 		case n.Device == "pending":
-			b.WriteString(" · waiting for approval: `!approve " + n.ID + "`")
+			b.WriteString("\n  ⏳ wants to join — reply !approve")
 		case n.CoreHostPending:
-			b.WriteString(" · asks for core-host (it would hold every host secret): `!approve " + n.ID + "`")
+			b.WriteString("\n  ⏳ asks to hold all of Fridolin's secrets (core-host) — reply !approve")
 		case n.Commands == "pending":
-			b.WriteString(" · offers more than approved: `!approve " + n.ID + "`")
+			b.WriteString("\n  ⏳ asks to do more than you approved — reply !approve")
 		}
-		if n.Device == "approved" {
-			b.WriteString("\n  may run: " + n.Offers)
+		if n.Device == "approved" && len(n.Can) > 0 {
+			b.WriteString("\n  can: " + strings.Join(n.Can, "; "))
 		}
-		b.WriteString("\n  id " + n.ID)
+		b.WriteString("\n  _ref " + n.ID)
 		if len(n.Tags) > 0 {
 			b.WriteString(" · " + strings.Join(n.Tags, ", "))
 		}
+		b.WriteString("_")
 	}
 	return b.String()
+}
+
+// FleetWaitingNote follows FleetReply while n things that are not nodes
+// wait for the owner's approval; "" for none.
+func FleetWaitingNote(n int) string {
+	switch n {
+	case 0:
+		return ""
+	case 1:
+		return "\n\n🔐 One more thing waits for your approval — reply !approve."
+	}
+	return fmt.Sprintf("\n\n🔐 %d more things wait for your approval — reply !approve.", n)
 }
 
 // NodesOffNotice answers !fleet and !join while nodes.enabled is off.
@@ -224,11 +238,11 @@ const NodesOffNotice = "🖥️ Nodes are off. Turn on nodes.enabled in the conf
 
 // OwnerCommandGroupNotice answers !join, !dashboard, !approve or !revoke
 // in a group: what they hand out or change is the owner's alone.
-const OwnerCommandGroupNotice = "🔒 !join, !dashboard, !approve and !revoke answer only in the owner's direct chat."
+const OwnerCommandGroupNotice = "🔒 !join, !dashboard, !approve, !deny and !revoke answer only in the owner's direct chat."
 
 // OwnerCommandOwnerOnly answers !join, !dashboard, !approve or !revoke
 // from someone who is not the owner (a number in allowed_numbers).
-const OwnerCommandOwnerOnly = "🔒 Only the owner can ask for join codes and sign-in links, or approve and revoke nodes."
+const OwnerCommandOwnerOnly = "🔒 Only the owner can ask for join codes and sign-in links, or approve and turn things down."
 
 // OwnerCommandRateLimited answers !join or !dashboard asked for more than
 // max times in the last hour.
@@ -236,8 +250,9 @@ func OwnerCommandRateLimited(command string, max int) string {
 	return fmt.Sprintf("⏳ %s answered %d times in the last hour, the most allowed. Try again later, or use the dashboard.", command, max)
 }
 
-// NodeCommandUsage answers !approve or !revoke without one node id.
-const NodeCommandUsage = "🖥️ Send `!approve <id>` or `!revoke <id>` with a node's id; `!fleet` lists them."
+// NodeCommandUsage answers !approve, !deny or !revoke with more than one
+// word after it.
+const NodeCommandUsage = "🔐 Send !approve or !deny alone: I ask which one when several things wait. `!revoke <ref>` shuts out a node `!fleet` lists."
 
 // JoinCodeReply answers !join: a single-use join code, valid for minutes,
 // the lines to paste on the new machine for sh and PowerShell, and the
@@ -252,7 +267,7 @@ func JoinCodeReply(code, core, sh, powershell, boxSh, boxPowerShell string, minu
 	return fmt.Sprintf("🔑 Join code for a new node, single-use, valid %d minutes:\n\n%s\n\n"+
 		"On the new machine, paste one line.\n\n%s*macOS, Linux (sh):*\n```%s```\n\n*Windows (PowerShell):*\n```%s```\n\n"+
 		"Core: %s. Add `--root PATH:rw` to share a folder, `--no-exec` to allow no commands (docs/NODES.md). "+
-		"Once it connects I'll tell you here, and `!approve <id>` lets it in.", minutes, code, box, sh, powershell, core)
+		"Once it connects I'll tell you here, and !approve lets it in.", minutes, code, box, sh, powershell, core)
 }
 
 // DashboardOffNotice answers !dashboard while the dashboard is off.
@@ -274,58 +289,40 @@ func DashboardLinkReply(tailnet, local string, minutes int) string {
 	return b.String()
 }
 
-// NodeJoinedAlert tells the owner that a machine joined with a join code
-// and waits for approval.
-func NodeJoinedAlert(name, goos, id string) string {
-	return fmt.Sprintf("🖥️ *%s* (%s) wants to join as a node — approve it on the Nodes page or reply `!approve %s`. "+
-		"Not yours? `!revoke %s` shuts it out.", name, osLabel(goos), id, id)
-}
-
-// NodeApprovedReply answers !approve: the device, and what it offers
-// (offers), are approved.
-func NodeApprovedReply(name, id, offers string) string {
-	return fmt.Sprintf("✅ *%s* (%s) is approved: it may serve %s. `!fleet` lists it; `!revoke %s` shuts it out again.", name, id, offers, id)
-}
-
-// NodeCoreHostAlert tells the owner that a node asks for core-host, or
-// that its core-host.json changed (changed), which waits for approval
-// again: what approving means (meaning, nodeproto.CoreHostApproval), the
-// device key's fingerprint, and the targets it trusts.
-func NodeCoreHostAlert(name, id, fingerprint string, trusts []string, changed bool, meaning string) string {
+// NodeApprovedReply answers !approve of a node: it is approved, and can
+// now do what can says, one sentence each.
+func NodeApprovedReply(name, id string, can []string) string {
 	var b strings.Builder
-	if changed {
-		fmt.Fprintf(&b, "🔐 *%s* (%s) changed its core-host settings, which wait for your approval again.", name, id)
-	} else {
-		fmt.Fprintf(&b, "🔐 *%s* (%s) offers core-host.", name, id)
+	fmt.Fprintf(&b, "✅ *%s* is approved.", name)
+	if len(can) > 0 {
+		b.WriteString(" It can now:")
+		for _, c := range can {
+			b.WriteString("\n• " + c)
+		}
 	}
-	b.WriteString("\n\n" + meaning)
-	b.WriteString("\n\nDevice key: `" + fingerprint + "`")
-	if len(trusts) > 0 {
-		b.WriteString("\nSends secrets only to: " + strings.Join(trusts, ", "))
-	}
-	fmt.Fprintf(&b, "\n\nYou did not just run `fridolin node core-host` there? Do not approve; `!revoke %s` shuts it out. Otherwise `!approve %s`.", id, id)
+	fmt.Fprintf(&b, "\n\n`!fleet` lists it. To shut it out again: `!revoke %s`.", id)
 	return b.String()
 }
 
 // NodeCoreHostApprovedNote follows NodeApprovedReply when the approval
 // took in core-host: what that means.
 func NodeCoreHostApprovedNote(meaning string) string {
-	return "🔐 That includes core-host. " + meaning + " `!revoke <id>` takes it back."
+	return "🔐 That includes core-host. " + meaning
 }
 
 // NodeRevokedReply answers !revoke.
 func NodeRevokedReply(name, id string) string {
-	return fmt.Sprintf("🚫 *%s* (%s) is revoked: it is disconnected and refused from now on. To bring it back, it joins again with a new code (`!join`).", name, id)
+	return fmt.Sprintf("🚫 *%s* is shut out: it is disconnected and refused from now on. To bring it back, it joins again with a new code (`!join`).\n\n_ref %s_", name, id)
 }
 
 // NodeIsRevokedReply answers !approve for a node that was revoked.
 func NodeIsRevokedReply(name, id string) string {
-	return fmt.Sprintf("🚫 *%s* (%s) was revoked, so it cannot be approved. It joins again with a new code (`!join`), as a new node.", name, id)
+	return fmt.Sprintf("🚫 *%s* was shut out, so it cannot be approved. It joins again with a new code (`!join`), as a new node.\n\n_ref %s_", name, id)
 }
 
 // NodeUnknownReply answers !approve or !revoke with an id no node has.
 func NodeUnknownReply(id string) string {
-	return "❓ No node has the id " + textx.Truncate(id, 40) + ". `!fleet` lists them."
+	return "❓ Nothing waits with the ref " + textx.Truncate(id, 40) + ", and no node has it. Send !approve alone to see what waits; `!fleet` lists the nodes."
 }
 
 // The approval poll: a run's request_approval asks the owner with
@@ -560,6 +557,113 @@ func ScheduleCommandResult(agent, node string, exitCode int, output string) stri
 		head += "\n\n" + textx.Tail(output, 1500)
 	}
 	return head
+}
+
+// The owner's approvals (approvals.go): the alert, the poll that picks
+// one, and the replies to !approve and !deny.
+
+// ApprovalAlert tells the owner that a waits for their approval.
+func ApprovalAlert(a OwnerApproval, now time.Time) string {
+	var b strings.Builder
+	b.WriteString("🔐 " + a.Subject + ".\n")
+	if !a.When.IsZero() {
+		b.WriteString("\n• When: " + when(a.When, now))
+	}
+	for _, f := range a.Facts {
+		b.WriteString("\n• " + f)
+	}
+	if len(a.Allows) > 0 {
+		b.WriteString("\n\nIf you approve, it can:")
+		for _, s := range a.Allows {
+			b.WriteString("\n• " + s)
+		}
+	}
+	if a.Note != "" {
+		b.WriteString("\n\n" + a.Note)
+	}
+	if a.Unexpected != "" {
+		b.WriteString("\n\n⚠️ *Unexpected:* " + a.Unexpected)
+	}
+	b.WriteString("\n\nWas this you? Reply !approve — or !deny if not.")
+	if a.Ref != "" {
+		b.WriteString("\n\n_ref " + a.Ref + "_")
+	}
+	return b.String()
+}
+
+// ApprovalsWaitingAlert tells the owner that several things wait for
+// their approval at once, which one message lists.
+func ApprovalsWaitingAlert(list []OwnerApproval, now time.Time) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "🔐 %d things wait for your approval:\n", len(list))
+	for i, a := range list {
+		fmt.Fprintf(&b, "\n%d. %s", i+1, a.Subject)
+		if !a.When.IsZero() {
+			b.WriteString(" — " + when(a.When, now))
+		}
+		if a.Unexpected != "" {
+			b.WriteString("\n   ⚠️ Unexpected: " + a.Unexpected)
+		}
+	}
+	b.WriteString("\n\nReply !approve to pick one to approve, or !deny to pick one to turn down.")
+	return b.String()
+}
+
+// ApprovalPickQuestion is the question of the poll !approve (approve
+// true) or !deny sends while several things wait.
+func ApprovalPickQuestion(approve bool, n int) string {
+	if approve {
+		return fmt.Sprintf("🔐 %d things wait for you. Which one do you approve?", n)
+	}
+	return fmt.Sprintf("🚫 %d things wait for you. Which one do you turn down?", n)
+}
+
+// ApprovalPickNotice follows that poll.
+func ApprovalPickNotice(approve bool) string {
+	if approve {
+		return "🗳️ Tap the one to approve in the poll above. Your vote approves it; nobody else's counts."
+	}
+	return "🗳️ Tap the one to turn down in the poll above. Your vote turns it down; nobody else's counts."
+}
+
+// NothingPendingReply answers !approve or !deny while nothing waits.
+const NothingPendingReply = "✅ Nothing waits for your approval."
+
+// ApprovalConfirmReply answers !approve (or a vote) for a that the owner
+// may not have started, or that waited too long (why): it goes ahead
+// only on a second !approve within minutes.
+func ApprovalConfirmReply(a OwnerApproval, why string, minutes int) string {
+	return fmt.Sprintf("⚠️ %s.\n\n%s\n\nTo be sure: reply !approve again within %d minutes to approve it, or !deny to turn it down.", a.Subject, why, minutes)
+}
+
+// ApprovedReply answers an approval of what label names, and what it
+// changes now (done).
+func ApprovedReply(label, done string) string {
+	s := "✅ Approved: " + label + "."
+	if done != "" {
+		s += " " + done
+	}
+	return s
+}
+
+// DeniedReply answers a denial of what label names, and what it
+// changes now (done).
+func DeniedReply(label, done string) string {
+	s := "🚫 Turned down: " + label + "."
+	if done != "" {
+		s += " " + done
+	}
+	return s
+}
+
+// ApprovalPollStale answers a vote in a poll whose list changed since,
+// or that the bridge no longer knows (it restarted).
+const ApprovalPollStale = "⌛ That poll is out of date. Send !approve (or !deny) again for what waits now."
+
+// ApprovalFailedReply answers an approval or denial of what label names
+// that did not go through: why.
+func ApprovalFailedReply(label, why string) string {
+	return "❌ That did not work for " + label + ": " + textx.Truncate(why, 300)
 }
 
 // CoreMoveEnded tells the owner how a core move ended (#187): state is

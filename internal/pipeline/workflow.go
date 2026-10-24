@@ -57,8 +57,9 @@ type Workflow struct {
 
 // OwnerCommands are the commands only the owner may send, in their
 // direct chat (Workflow.Owner): a join code for a new node, a dashboard
-// sign-in link, and approving or revoking a node.
-var OwnerCommands = []string{"!join", "!dashboard", "!approve", "!revoke"}
+// sign-in link, approving or turning down what waits for the owner, and
+// shutting a node out.
+var OwnerCommands = []string{"!join", "!dashboard", "!approve", "!deny", "!revoke"}
 
 // handleInbound is the entry point for every allowed message. Access control
 // already happened, for WhatsApp and dev messages alike: groups against

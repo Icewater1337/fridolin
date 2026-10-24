@@ -66,7 +66,7 @@ func (b *App) ownerCommand(m brainruntime.Inbound, command string, args []string
 	if n, err := chat.PhoneNumber(m.Sender); err == nil {
 		by = n
 	}
-	kind := map[string]string{"!join": audit.NodeJoinCode, "!dashboard": audit.DashboardLink, "!approve": audit.NodeApproved, "!revoke": audit.NodeRevoked}[command]
+	kind := map[string]string{"!join": audit.NodeJoinCode, "!dashboard": audit.DashboardLink, "!approve": audit.NodeApproved, "!deny": audit.NodeRevoked, "!revoke": audit.NodeRevoked}[command]
 	record := func(id, outcome string) {
 		b.audit.Append(audit.Entry{Kind: kind, Chat: m.JID, By: by, ID: id, Detail: command, Outcome: outcome})
 		log.Printf("owner command: %s from %s in %s: %s", command, by, m.JID, outcome)
@@ -85,8 +85,25 @@ func (b *App) ownerCommand(m brainruntime.Inbound, command string, args []string
 	case "!dashboard":
 		return b.dashboardCommand(record)
 	}
-	if len(args) != 1 {
+	ctx := context.Background()
+	approve := command == "!approve"
+	switch len(args) {
+	case 0:
+		// !approve or !deny alone, and !revoke alone as !deny: what waits.
+		return b.ownerDecide(ctx, m.JID, by, approve)
+	case 1:
+	default:
 		return outboundmsg.NodeCommandUsage
+	}
+	// !revoke <ref> shuts a node out, approved or not; !approve and !deny
+	// <ref> settle what waits with that ref, a node's too.
+	if command != "!revoke" {
+		if reply, ok := b.ownerDecideRef(ctx, by, args[0], approve); ok {
+			return reply
+		}
+	}
+	if command == "!deny" {
+		command = "!revoke"
 	}
 	return b.nodeCommand(command, args[0], record)
 }
@@ -102,7 +119,7 @@ func (b *App) joinCommand(record func(id, outcome string)) string {
 		record("", "refused: rate limit")
 		return outboundmsg.OwnerCommandRateLimited("!join", ownerAsksPerHour)
 	}
-	code, _, err := b.nodes.NewJoinCode()
+	code, _, err := b.nodes.NewJoinCodeFrom(nodes.JoinedFromChat)
 	if err != nil {
 		log.Printf("nodes: a join code for !join: %v", err)
 		record("", "failed")
@@ -170,7 +187,7 @@ func (b *App) nodeCommand(command, id string, record func(id, outcome string)) s
 	if command == "!revoke" {
 		return outboundmsg.NodeRevokedReply(n.Name, n.ID)
 	}
-	reply := outboundmsg.NodeApprovedReply(n.Name, n.ID, n.Effective().Summary())
+	reply := outboundmsg.NodeApprovedReply(n.Name, n.ID, n.Effective().Plain())
 	if coreHost && n.Effective().CoreHost != nil {
 		reply += "\n\n" + outboundmsg.NodeCoreHostApprovedNote(nodeproto.CoreHostApproval)
 	}
@@ -178,39 +195,13 @@ func (b *App) nodeCommand(command, id string, record func(id, outcome string)) s
 }
 
 // nodeCoreHost tells the owner, in their direct chat, that node n asks
-// for core-host, or changed its core-host.json, which waits for approval.
-func (b *App) nodeCoreHost(n *nodes.Node) {
-	cfg := b.cfgs.Get()
-	target := ownerChat(cfg)
-	if target == "" || b.outbox == nil || n.Declared.CoreHost == nil {
-		return
-	}
-	var trusts []string
-	for _, id := range n.Declared.CoreHost.SendTo {
-		name := id
-		if t, err := b.nodes.Registry().Get(id); err == nil {
-			name = t.Name + " (" + id + ")"
-		}
-		trusts = append(trusts, name)
-	}
-	msg := outboundmsg.NodeCoreHostAlert(n.Name, n.ID, nodeproto.Fingerprint(n.PublicKey), trusts, n.Approved.CoreHost != nil, nodeproto.CoreHostApproval)
-	if err := b.outbox.Text(context.Background(), target, msg, cfg.MaxChunkSize); err != nil {
-		log.Printf("nodes: telling the owner %s asks for core-host: %v", n.ID, err)
-	}
-}
+// for core-host, or changed its core-host.json, which waits for approval:
+// as every approval, in alertPendingApprovals.
+func (b *App) nodeCoreHost(*nodes.Node) { b.alertPendingApprovals(context.Background()) }
 
 // nodeJoined tells the owner, in their direct chat, that a machine joined
 // with a join code and waits for approval.
-func (b *App) nodeJoined(n *nodes.Node) {
-	cfg := b.cfgs.Get()
-	target := ownerChat(cfg)
-	if target == "" || b.outbox == nil {
-		return
-	}
-	if err := b.outbox.Text(context.Background(), target, outboundmsg.NodeJoinedAlert(n.Name, n.OS, n.ID), cfg.MaxChunkSize); err != nil {
-		log.Printf("nodes: telling the owner %s joined: %v", n.ID, err)
-	}
-}
+func (b *App) nodeJoined(*nodes.Node) { b.alertPendingApprovals(context.Background()) }
 
 // coreMoveEnded tells the owner, in their direct chat, how a core move
 // ended: the core that runs afterwards says it, on either machine.

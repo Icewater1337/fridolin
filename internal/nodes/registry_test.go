@@ -302,3 +302,35 @@ func TestFlushWritesWhatSeenKept(t *testing.T) {
 		t.Errorf("Flush of an unknown node: %v", err)
 	}
 }
+
+// A node keeps where its join code came from, for the owner's alert, and
+// when what it offers last changed.
+func TestJoinedViaAndDeclaredAt(t *testing.T) {
+	clk := &clock{time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)}
+	r, err := OpenRegistry(t.TempDir(), clk.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, origin := range []string{JoinedFromChat, JoinedFromDashboard, ""} {
+		code, _, err := r.NewJoinCodeFrom(origin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := hello(t, code, nodeproto.Capabilities{Host: true})
+		n, err := r.Hello(h, "a")
+		if err != nil || n.JoinedVia != origin || n.DeclaredAt == nil || !n.DeclaredAt.Equal(clk.t) {
+			t.Fatalf("joined with a code from %q: %+v %v", origin, n, err)
+		}
+		if origin != JoinedFromChat {
+			continue
+		}
+		// The same offer again keeps the time; another one moves it.
+		clk.t = clk.t.Add(time.Hour)
+		if n, _ = r.Hello(nodeproto.Hello{DeviceID: h.DeviceID, PublicKey: h.PublicKey, Name: "laptop", Capabilities: h.Capabilities}, "a"); !n.DeclaredAt.Equal(clk.t.Add(-time.Hour)) {
+			t.Errorf("the same offer moved DeclaredAt: %v", n.DeclaredAt)
+		}
+		if n, _ = r.Declare(h.DeviceID, nodeproto.Capabilities{Host: true, Notify: true}); !n.DeclaredAt.Equal(clk.t) {
+			t.Errorf("another offer kept DeclaredAt: %v", n.DeclaredAt)
+		}
+	}
+}

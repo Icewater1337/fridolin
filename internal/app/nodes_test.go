@@ -181,7 +181,7 @@ func TestNodesGate(t *testing.T) {
 	}
 	h.Inject(inbound{JID: harnessDM, Text: "!fleet"})
 	fleet := h.WaitSent(harnessDM, "*Fleet*")
-	for _, want := range []string{"*laptop*", "online", "id " + j.ID, "gpu, windows", "may run: exec ("} {
+	for _, want := range []string{"*laptop*", "online", "_ref " + j.ID, "gpu, windows", "can: run these programs there when asked: "} {
 		if !strings.Contains(fleet, want) {
 			t.Errorf("!fleet lacks %q:\n%s", want, fleet)
 		}
