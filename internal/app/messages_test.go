@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 )
 
@@ -79,6 +80,9 @@ func catalogue() []struct{ name, text string } {
 		{"dashboardLinkReply(tailnet)", outboundmsg.DashboardLinkReply("http://fridolin-core.example.ts.net/#login=CODE", "http://127.0.0.1:8765/#login=CODE", 10)},
 		{"dashboardLinkReply(local)", outboundmsg.DashboardLinkReply("", "http://127.0.0.1:8765/#login=CODE", 10)},
 		{"nodeJoinedAlert", outboundmsg.NodeJoinedAlert("laptop", "windows", "8233270f8a24")},
+		{"nodeCoreHostAlert", outboundmsg.NodeCoreHostAlert("icebase", "8233270f8a24", "a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90", nil, false, nodeproto.CoreHostApproval)},
+		{"nodeCoreHostAlert(changed)", outboundmsg.NodeCoreHostAlert("mac-mini", "7216c2648b04", "a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90", []string{"icebase (8233270f8a24)"}, true, nodeproto.CoreHostApproval)},
+		{"nodeCoreHostApprovedNote", outboundmsg.NodeCoreHostApprovedNote(nodeproto.CoreHostApproval)},
 		{"nodeApprovedReply", outboundmsg.NodeApprovedReply("laptop", "8233270f8a24", "fs (1 root, 1 writable), host, notify")},
 		{"nodeRevokedReply", outboundmsg.NodeRevokedReply("laptop", "8233270f8a24")},
 		{"nodeIsRevokedReply", outboundmsg.NodeIsRevokedReply("laptop", "8233270f8a24")},
@@ -134,6 +138,7 @@ var (
 		{ID: "4f1e2d3c4b5a", Name: "mini", OS: "darwin", LastSeen: fleetNow.Add(-3 * time.Hour), Device: "approved", Commands: "pending", Tags: []string{"macos"}, Offers: "host"},
 		{ID: "0a1b2c3d4e5f", Name: "pi", OS: "linux", LastSeen: fleetNow.Add(-90 * time.Second), Device: "pending", Commands: "pending"},
 		{ID: "ffeeddccbbaa", Name: "old", OS: "linux", Device: "revoked", Commands: "none"},
+		{ID: "3c1e5a7b9d0f", Name: "icebase", OS: "linux", Online: true, Device: "approved", Commands: "pending", CoreHostPending: true, Offers: "host, notify"},
 	}
 )
 

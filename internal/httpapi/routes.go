@@ -221,6 +221,7 @@ func NewAPIMux(d APIDeps) http.Handler {
 
 	mux.HandleFunc("GET /api/nodes", d.Nodes().List)
 	mux.HandleFunc("POST /api/nodes/join-code", d.Nodes().JoinCode)
+	mux.HandleFunc("POST /api/nodes/core-secrets-transfer", d.Nodes().CoreSecretsTransfer)
 	mux.HandleFunc("POST /api/nodes/{id}/approve", d.Nodes().ApproveDevice)
 	mux.HandleFunc("POST /api/nodes/{id}/approve-commands", d.Nodes().ApproveCommands)
 	mux.HandleFunc("POST /api/nodes/{id}/revoke", d.Nodes().Revoke)

@@ -29,6 +29,9 @@ type Capabilities struct {
 	// granted folders: the workstation mode (workstation.go).
 	Agent    *WorkstationCap `json:"agent,omitempty"`
 	Terminal *WorkstationCap `json:"terminal,omitempty"`
+	// CoreHost (core-host) is a machine the core may move to, and that
+	// holds host secrets for it (corehost.go).
+	CoreHost *CoreHostCap `json:"core_host,omitempty"`
 }
 
 // ExecCap runs allowlisted commands.
@@ -178,6 +181,9 @@ func (c Capabilities) Check() error {
 	if err := c.Terminal.Check("terminal"); err != nil {
 		return err
 	}
+	if err := c.CoreHost.Check(); err != nil {
+		return err
+	}
 	return c.Fride.Check()
 }
 
@@ -290,12 +296,15 @@ func (c Capabilities) Allows(method string) bool {
 	if slices.Contains(TerminalMethods, method) {
 		return c.Terminal != nil && len(c.Terminal.Roots) > 0
 	}
+	if slices.Contains(CoreHostMethods, method) {
+		return c.CoreHost != nil
+	}
 	return false
 }
 
 // Empty reports whether nothing is offered.
 func (c Capabilities) Empty() bool {
-	return (c.Exec == nil || len(c.Exec.Allow) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil && c.AndroidBuild == nil && c.Backup == nil && c.Update == nil && c.Agent == nil && c.Terminal == nil
+	return (c.Exec == nil || len(c.Exec.Allow) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil && c.AndroidBuild == nil && c.Backup == nil && c.Update == nil && c.Agent == nil && c.Terminal == nil && c.CoreHost == nil
 }
 
 // Covers reports whether approved covers every part of declared: each
@@ -305,8 +314,12 @@ func (c Capabilities) Empty() bool {
 // approved at all: FrIDE's address and repositories, and the JDK and
 // platforms, are only what the node reports; so is update. Backup is covered for the
 // places the approval lends (coversBackup); its folders are the
-// approval's own.
+// approval's own. core-host is covered by an approval of the same
+// core-host.json (its hash): every change of that file is approved again.
 func Covers(approved, declared Capabilities) bool {
+	if d := declared.CoreHost; d != nil && (approved.CoreHost == nil || approved.CoreHost.Hash != d.Hash) {
+		return false
+	}
 	if declared.Host && !approved.Host || declared.Notify && !approved.Notify || declared.Fride != nil && approved.Fride == nil {
 		return false
 	}
@@ -349,6 +362,11 @@ func Intersect(declared, approved Capabilities) Capabilities {
 	out.Backup = intersectBackup(declared.Backup, approved.Backup)
 	if declared.Update != nil && approved.Update != nil {
 		out.Update = &UpdateCap{Box: declared.Update.Box}
+	}
+	if d, a := declared.CoreHost, approved.CoreHost; d != nil && a != nil && d.Hash == a.Hash {
+		ch := *d
+		ch.SendTo = slices.Clone(d.SendTo)
+		out.CoreHost = &ch
 	}
 	out.Agent = intersectWork(declared.Agent, approved.Agent)
 	out.Terminal = intersectWork(declared.Terminal, approved.Terminal)
@@ -450,6 +468,9 @@ func (c Capabilities) Summary() string {
 	}
 	if c.Terminal != nil {
 		parts = append(parts, c.Terminal.summary("terminal"))
+	}
+	if c.CoreHost != nil {
+		parts = append(parts, c.CoreHost.summary())
 	}
 	if len(parts) == 0 {
 		return "nothing"
