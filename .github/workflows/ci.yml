@@ -315,6 +315,10 @@ jobs:
       - name: ESLint
         run: make lint-web
 
+      # TypeScript's checker on the JSDoc types, at the pinned version.
+      - name: tsc
+        run: make typecheck-web
+
   site:
     # The site process (site/, docs/SITE.md): its own tests, then the Go
     # end-to-end tests that run it, which skip without its node_modules.

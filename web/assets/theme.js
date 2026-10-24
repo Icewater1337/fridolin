@@ -33,7 +33,7 @@
     if (msg) msg.textContent = 'The dashboard failed to load. The browser console says why; reloading the page may help.';
   };
   window.addEventListener('error', function (e) {
-    var el = e.target;
+    var el = /** @type {Element | null} */ (e.target);
     if (e.error !== undefined || (el && el.tagName === 'SCRIPT')) failed();
   }, true);
   window.addEventListener('load', function () { setTimeout(failed, 10000); });

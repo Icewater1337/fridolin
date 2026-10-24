@@ -5,7 +5,10 @@ import { h } from '../assets/lib/dom.js';
 import { activityItem, showActivity } from '../assets/components/activity-item.js';
 import { setChatNames } from '../assets/components/chat.js';
 
+/** @import { ActivityEntry } from '../types/api.js' */
+
 const GROUP = '120363000000000000@g.us';
+/** @type {(ts: string, text: string) => ActivityEntry} */
 const msg = (ts, text) => ({ ts, chat: GROUP, type: 'in', from: '15551234567', text, brain: 'work' });
 const long = 'line\n'.repeat(20);
 
@@ -17,7 +20,7 @@ test('a refresh keeps the rows of messages already shown', () => {
   document.body.append(feed);
   const older = msg('2026-10-18T10:00:00Z', long);
   showActivity(feed, [older]);
-  const row = feed.firstChild;
+  const row = /** @type {Element} */ (feed.firstChild);
   row.querySelector('button').click(); // unfold it
   assert.equal(row.querySelector('.msg-wrap').classList.contains('collapsed'), false);
 

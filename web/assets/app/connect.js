@@ -8,7 +8,11 @@ import { textInput } from '../components/fields.js';
 import { get, signIn } from './api.js';
 import { credentialFromHash } from './router.js';
 
-/** Fills el with the connect screen; onConnected runs once signed in. */
+/**
+ * Fills el with the connect screen; onConnected runs once signed in.
+ * @param {HTMLElement} el
+ * @param {{reason?: string, onConnected: () => void}} options reason says why the screen is shown
+ */
 export function connectScreen(el, { reason, onConnected }) {
   const input = textInput({ placeholder: 'Paste the token (or the whole dashboard link)', class: 'mono', 'aria-label': 'Dashboard token' });
   const errorEl = h('p.form-error', { hidden: true });
@@ -60,11 +64,16 @@ async function runsInContainer() {
   }
 }
 
+/** @param {string} cmd */
 function commandLine(cmd) {
   return h('div.code-line', h('code.mono', cmd), copyButton(cmd));
 }
 
 // A bridge on this computer: fridolin open reads the token from its data folder.
+/**
+ * @param {HTMLFormElement} form
+ * @param {HTMLElement} errorEl
+ */
 function nativeSteps(form, errorEl) {
   return [
     h('li', h('div', 'In a terminal on this computer, run'), commandLine('fridolin open'), h('div.muted.small', 'It opens this dashboard and signs you in, with a link that works once.')),
@@ -75,6 +84,10 @@ function nativeSteps(form, errorEl) {
 
 // The container core (docs/CORE.md): its data folder is the fridolin-data
 // volume, so a token in the host's home folder is not this bridge's.
+/**
+ * @param {HTMLFormElement} form
+ * @param {HTMLElement} errorEl
+ */
 function containerSteps(form, errorEl) {
   return [
     h('li', h('div', 'This bridge runs in the ', h('code.mono', 'fridolin-core'), ' container. In a terminal on the computer that runs it, run'), commandLine('docker exec fridolin-core fridolin open --print'),

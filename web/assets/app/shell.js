@@ -12,6 +12,13 @@ import { ROUTES } from './routes.js';
 import { BRAND, routeHref } from './router.js';
 import { store } from './store.js';
 
+/** @import { WhatsAppStatus } from '../../types/api.js' */
+
+/**
+ * What createShell returns.
+ * @typedef {ReturnType<typeof createShell>} Shell
+ */
+
 const THEMES = ['auto', 'light', 'dark'];
 
 // theme.js, which runs before the modules, applied the saved theme and
@@ -49,8 +56,7 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
   for (const route of ROUTES) {
     if (!route.nav) continue;
     const badgeEl = h('span.nav-badge', { hidden: true });
-    const a = h('a.nav-link', { href: routeHref(route), hidden: route.nav.devOnly ? true : null }, icon(route.nav.icon), h('span', route.nav.label), badgeEl);
-    a.badgeEl = badgeEl;
+    const a = Object.assign(h('a.nav-link', { href: routeHref(route), hidden: route.nav.devOnly ? true : null }, icon(route.nav.icon), h('span', route.nav.label), badgeEl), { badgeEl });
     links.set(route.id, a);
     nav.appendChild(a);
   }
@@ -79,6 +85,10 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
   // The keyboard's way into a page: the heading given, else the page's
   // own, or the page area until it has one. A screen reader then reads
   // the new page from there, not on from the link that was followed.
+  /**
+   * @param {HTMLElement} [target]
+   * @returns {HTMLElement} what it focused
+   */
   const focusPage = (target) => {
     const heading = target || page.querySelector('h1');
     if (heading) heading.setAttribute('tabindex', '-1');
@@ -113,7 +123,7 @@ export function createShell({ onRestart, onReload = () => location.reload() }) {
     if (!s) return;
     links.get('dev').hidden = !s.dev_mode;
     version.textContent = s.version ? (/^\d/.test(s.version) ? `v${s.version}` : String(s.version)) : '';
-    const wa = s.whatsapp || {};
+    const wa = /** @type {Partial<WhatsAppStatus>} */ (s.whatsapp || {});
     waDot.className = `dot ${waKind(wa.mode)}`;
     waText.textContent = s.dev_mode ? 'Dev mode (no WhatsApp)' : waLabel(wa.mode);
     const issues = (s.issues || []).length;

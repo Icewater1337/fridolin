@@ -19,9 +19,48 @@ import { googleClientCard } from '../components/calendar.js';
 import { saveBar } from '../components/save-bar.js';
 import { liveForm } from '../components/live-form.js';
 
+/** @import { PageModule } from '../app/page.js' */
+/** @import { ConfigFile, ConfigResponse, Trigger } from '../../types/api.js' */
+
+/**
+ * A setting on the page: the dotted key in config.json it edits, and its control.
+ * @typedef {object} SettingField
+ * @property {'bool' | 'text' | 'int' | 'select' | 'list' | 'triggers' | 'allowLists'} type
+ * @property {string} [key]
+ * @property {string} label
+ * @property {string} [help]
+ * @property {string | number | boolean} [def] used when the file and the effective settings have none
+ * @property {[string, string][]} [options]
+ * @property {string} [placeholder]
+ * @property {boolean} [mono]
+ * @property {boolean} [restart]
+ * @property {number} [min]
+ * @property {number} [max]
+ * @property {boolean} [nullable]
+ * @property {string} [addLabel]
+ * @property {(value: string) => string} [validate]
+ * @property {boolean} [danger]
+ * @property {boolean} [confirmOff]
+ */
+
+/**
+ * A setting's control, as the form asks it what it holds.
+ * @typedef {object} Control
+ * @property {string | null} key
+ * @property {string} label
+ * @property {HTMLElement} el
+ * @property {() => unknown} value
+ * @property {() => boolean} isDirty
+ * @property {() => boolean} isValid
+ * @property {() => unknown} serialize
+ */
+
+/** @typedef {{text: string, match: string}} TriggerRow */
+
 // The bridge refuses a relative sandbox path: as a rule it would match nothing.
 const absPath = (v) => (/^(\/|~(\/|$))/.test(v) ? '' : 'Absolute, or starting with ~/');
 
+/** @type {{id: string, title: string, intro: string, fields: SettingField[]}[]} */
 const SECTIONS = [
   {
     id: 'access',
@@ -136,7 +175,7 @@ function dashboardSignInCard() {
       })));
 }
 
-export default {
+export default /** @satisfies {PageModule} */ ({
   title: 'Settings',
   render(root, ctx) {
     const body = h('div', h('div.card', loading('Loading settings…')));
@@ -148,7 +187,7 @@ export default {
 
     // Only the settings edited here count as a conflict: one changed
     // elsewhere that is not edited here is saved as it now is.
-    const edited = (built) => built.controls.filter((c) => c.isDirty());
+    const edited = (/** @type {{controls: Control[]}} */ built) => built.controls.filter((c) => c.isDirty());
     const form = liveForm({
       build,
       edits: (d, built) => edited(built).map((c) => [c.key, getPath(d.config || {}, c.key)]),
@@ -178,9 +217,14 @@ export default {
       ctx.focusAt(target.querySelector('h2'));
     }, 5000);
 
+    /**
+     * @param {ConfigResponse} d
+     * @param {() => void} changed
+     */
     function build(d, changed) {
       const cfg = d.config || {};
       const eff = d.effective || {};
+      /** @type {Control[]} */
       const controls = [];
       const nav = h('nav.section-nav', { 'aria-label': 'Settings sections' });
       // A chip scrolls to its section and names it in the address, so
@@ -251,10 +295,17 @@ export default {
 
     ctx.onCleanup(() => bar.remove());
   },
-};
+});
 
 // ── controls ─────────────────────────────────────────────────────────────
 
+/**
+ * @param {SettingField} f
+ * @param {Partial<ConfigFile>} cfg
+ * @param {Partial<ConfigFile>} eff
+ * @param {() => void} onChange
+ * @returns {Control}
+ */
 function makeControl(f, cfg, eff, onChange) {
   if (f.type === 'allowLists') return allowLists(f, cfg);
   const fileVal = getPath(cfg, f.key);
@@ -322,9 +373,13 @@ function makeControl(f, cfg, eff, onChange) {
     }
     case 'select': {
       const opts = f.options;
+      /**
+       * @param {unknown} v
+       * @returns {v is string}
+       */
       const has = (v) => opts.some(([x]) => x === v);
       let v = typeof fileVal === 'string' ? fileVal : '';
-      if (!has(v)) v = has(effVal) ? effVal : (f.def ?? '');
+      if (!has(v)) v = has(effVal) ? effVal : /** @type {string} */ (f.def ?? '');
       initial = v;
       input = select(opts, v);
       input.addEventListener('change', onChange);
@@ -357,6 +412,7 @@ function makeControl(f, cfg, eff, onChange) {
   const el = field({ label: f.label, control: input, help: f.help, tag });
   return finish(el);
 
+  /** @param {HTMLElement} el */
   function finish(el) {
     return {
       key: f.key,
@@ -372,6 +428,11 @@ function makeControl(f, cfg, eff, onChange) {
 
 // The allow lists are edited on the Chats page only, through the bridge's
 // checks; Settings says how many there are. It never has unsaved changes.
+/**
+ * @param {SettingField} f
+ * @param {Partial<ConfigFile>} cfg
+ * @returns {Control}
+ */
 function allowLists(f, cfg) {
   const n = (cfg.allowed_numbers || []).length;
   const g = (cfg.allowed_groups || []).length;
@@ -382,6 +443,10 @@ function allowLists(f, cfg) {
   return { key: null, label: f.label, el, value: () => null, isDirty: () => false, isValid: () => true, serialize: () => undefined };
 }
 
+/**
+ * @param {SettingField} f
+ * @param {unknown} effVal
+ */
 function emptyListText(f, effVal) {
   if (f.key === 'otp_markers') return 'Using the built-in phrases';
   if (f.key === 'disallowed_tools') return 'No tools blocked';
@@ -389,6 +454,10 @@ function emptyListText(f, effVal) {
   return 'None';
 }
 
+/**
+ * @param {TriggerRow[]} values
+ * @param {{onChange: () => void, defaults: Trigger[]}} options
+ */
 function triggersEditor(values, { onChange, defaults }) {
   const rows = h('div.list-rows');
   const emptyEl = h('div.list-empty.muted', `Empty — the default is used: ${(defaults || []).map((t) => (typeof t === 'string' ? t : t.text)).join(', ') || '@claude'}`);
@@ -409,6 +478,6 @@ function triggersEditor(values, { onChange, defaults }) {
   values.forEach((v) => add(v));
   paintEmpty();
   el.appendChild(h('div.list-add', btn('Add trigger', { icon: 'plus', small: true, kind: 'ghost', onClick: () => { add(undefined, true); onChange(); } })));
-  el.getValues = () => [...rows.querySelectorAll('.trigger-row')].map((r) => ({ text: r.querySelector('input').value.trim(), match: r.querySelector('select').value })).filter((t) => t.text);
-  return el;
+  const getValues = () => [...rows.querySelectorAll('.trigger-row')].map((r) => ({ text: r.querySelector('input').value.trim(), match: r.querySelector('select').value })).filter((t) => t.text);
+  return Object.assign(el, { getValues });
 }

@@ -13,9 +13,10 @@ class FakeNode {
   get firstChild() { return this.childNodes[0] || null; }
   get lastChild() { return this.childNodes[this.childNodes.length - 1] || null; }
   get isConnected() {
+    /** @type {FakeNode} */
     let n = this;
     while (n.parentNode) n = n.parentNode;
-    return n === globalThis.document;
+    return n === fakeDocument();
   }
 
   get textContent() { return this.childNodes.map((n) => n.textContent).join(''); }
@@ -79,7 +80,9 @@ class FakeNode {
 
 class FakeText extends FakeNode {
   constructor(data) { super(); this.data = data; }
+  /** @override */
   get textContent() { return this.data; }
+  /** @override */
   set textContent(v) { this.data = String(v); }
 }
 
@@ -139,7 +142,7 @@ class FakeElement extends FakeNode {
   }
 
   click() { if (!this.disabled) this.dispatchEvent(new Event('click', { bubbles: true, cancelable: true })); }
-  focus() { globalThis.document.activeElement = this; }
+  focus() { fakeDocument().activeElement = this; }
   scrollIntoView() {}
   showModal() { this.open = true; }
   close() { this.open = false; }
@@ -194,9 +197,11 @@ class FakeDocument extends FakeNode {
   getElementById(id) { return this.querySelector(`#${id}`); }
 }
 
+// The document installDom installed, which tsc knows as the DOM's Document.
+const fakeDocument = () => /** @type {FakeDocument} */ (/** @type {unknown} */ (globalThis.document));
+
 /** Installs a fresh document (and Node) as globals; returns it. */
 export function installDom() {
-  globalThis.Node = FakeNode;
-  globalThis.document = new FakeDocument();
+  Object.assign(globalThis, { Node: FakeNode, document: new FakeDocument() });
   return globalThis.document;
 }
