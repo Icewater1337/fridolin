@@ -660,9 +660,11 @@ func (b *App) sweepApprovals(ctx context.Context) {
 	}
 }
 
-// watchApprovals sweeps every minute until ctx ends.
+// watchApprovals sweeps every minute until ctx ends, and tells the owner
+// of what newly waits for their approval (alertPendingApprovals).
 func (b *App) watchApprovals(ctx context.Context) {
 	b.sweepApprovals(ctx)
+	b.alertPendingApprovals(ctx)
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	for {
@@ -671,6 +673,7 @@ func (b *App) watchApprovals(ctx context.Context) {
 			return
 		case <-t.C:
 			b.sweepApprovals(ctx)
+			b.alertPendingApprovals(ctx)
 		}
 	}
 }

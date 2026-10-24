@@ -41,7 +41,7 @@ repository on a new machine and says "set this machine up as a node of my
 fridolin core" (AGENTS.md, path B). The agent does every step itself
 except the three only the owner can do: signing in to Tailscale,
 getting a join code from the core (`!join` in their WhatsApp chat with
-the bridge), and approving the node (`!approve <id>` there, or the Nodes
+the bridge), and approving the node (`!approve` there, or the Nodes
 page). None of them needs the dashboard token on the new machine. The
 agent opens what needs a browser for the owner, then waits and checks. `fridolin setup-machine --node` says at any point what
 is done and what to do next; it only looks and may be run again and again.
@@ -140,7 +140,7 @@ and the core's node address. The code is single-use, expires in 10
 minutes and grants nothing until the owner approves the node, so it may
 go through the chat.
 
-`!join` (like `!dashboard`, `!approve` and `!revoke`) answers only the
+`!join` (like `!dashboard`, `!approve`, `!deny` and `!revoke`) answers only the
 owner — a number in `allowed_numbers` — and only in their direct chat,
 never in a group; each of `!join` and `!dashboard` answers 5 times an
 hour, and every request, refused or not, goes into the audit log (kinds
@@ -232,12 +232,16 @@ first, then run `sudo loginctl enable-linger $USER`. `fridolin doctor
 
 ### 6. Approve on the core
 
-When the node joins, the core tells the owner in their WhatsApp chat:
-"*laptop* (Windows) wants to join as a node — approve it on the Nodes
-page or reply `!approve <id>`". `!approve <id>` approves the device and
-what it offers (the folder, host facts, notifications) in one go, and is
-audited; `!revoke <id>` shuts it out instead. On the Nodes page the same
-is **Approve device**, then **Approve commands**. Or on the Mac:
+When the node joins, the core tells the owner in their WhatsApp chat, in
+plain words: "*laptop* (Windows) wants to join as a node", when, where it
+connected from, that it was started with the code from their `!join`, what
+approving lets it do (one line each: "read and change the files in
+C:\Users\you\Shared", "report its system details"), and "Was this you?
+Reply !approve — or !deny if not". `!approve` alone approves the device and
+what it offers in one go, and is audited; `!deny` shuts it out instead.
+Nobody types the id ([Approving from WhatsApp](#approving-from-whatsapp)).
+On the Nodes page the same is **Approve device**, then **Approve
+commands**. Or on the Mac:
 
 ```sh
 docker exec fridolin-core fridolin nodes approve <id>
@@ -371,8 +375,8 @@ owner wants. Joining again later makes a new device with a new code.
 4. Then approve what it offers, separately:
    `fridolin nodes approve <id> --commands`.
 
-   Or both at once: reply `!approve <id>` to the message the bridge sends
-   you when the node joins.
+   Or both at once: reply `!approve` to the message the bridge sends you
+   when the node joins ([Approving from WhatsApp](#approving-from-whatsapp)).
 
 Until step 3 a node serves nothing; until step 4 it serves nothing either.
 If the node later offers more (you edited its `node.json`, or joined with
@@ -387,7 +391,47 @@ the machine back, it joins again with a new code, as a new device.
 `fridolin nodes` lists the nodes; `fridolin nodes tags <id> docker,gpu`
 replaces a node's tags (`nodes.json` may also be edited by hand; the core
 reads it again when it changes). In a direct chat, `!fleet` lists the
-nodes, whether each is online, and what each may run.
+nodes, whether each is online, what each may do in plain words, and what
+waits for your approval ("⏳ wants to join — reply !approve"), with each
+node's id last, for reference.
+
+### Approving from WhatsApp
+
+Everything that waits for the owner is told in their direct chat the same
+way, and answered with one word: a node's device, what a node offers
+(core-host among it), a brain's [scheduled agent, changed brain.json or
+skill](BRAINS.md#approval), and a run's request for approval. The alert
+says what wants what, when, where it came from and how it was started,
+what approving would let it do (one sentence per capability), and "Was
+this you?". It ends with "Reply !approve — or !deny if not"; the id comes
+last, in small print, for reference only. Several at once come as one
+list.
+
+- `!approve` alone approves the one thing that waits. With several
+  waiting it sends a poll, one plain option each; the owner's vote
+  approves that one, and nobody else's vote counts. `!deny` alone (and
+  `!revoke` alone) turns one down the same way: a node that waits to join
+  is shut out, a node's request for more keeps what was approved before,
+  and a brain's file stays unapproved, without being asked about again
+  until it changes.
+- Something the owner did not start is flagged *Unexpected*: a node whose
+  join code came neither from `!join` nor from the dashboard (or
+  `fridolin nodes join-code`, which goes through it), a node asking for
+  more or for core-host on its own, a file a brain wrote into its own
+  folder. `!approve` alone then asks once more: "reply !approve again
+  within 2 minutes". So does something that waited longer than a day,
+  and something the owner was never shown (the alert comes first).
+- `!approve <ref>` and `!deny <ref>` still name one by the ref the alert
+  ends with; `!revoke <ref>` shuts out a node, approved or not.
+- Only the owner, in their direct chat. Every `!approve`, `!deny`, vote
+  and confirmation goes into the audit log (`node_approved`,
+  `node_revoked`, and `owner_approval` for the rest). What the owner was
+  told of, and turned down, is kept in `<data_dir>/owner-approvals.json`,
+  so a restart does not tell it again.
+
+The Nodes page says the same for a waiting node: how it was started, and
+"If you approve, it can:" with the same sentences (`allows` in `GET
+/api/nodes`, and `joined_via`: `chat`, `dashboard` or none).
 
 ## What a node offers
 

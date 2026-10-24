@@ -55,6 +55,10 @@ const (
 	DashboardLink = "dashboard_link"
 	NodeApproved  = "node_approved"
 	NodeRevoked   = "node_revoked"
+	// OwnerApproval is the owner's !approve or !deny of something that is
+	// not a node, a vote in the poll that picks one, and the confirmation
+	// an unexpected one asks for (owner_approvals.go).
+	OwnerApproval = "owner_approval"
 	// NodeSession is a workstation session on a node (#159) starting or
 	// ending: Detail says which (agent or terminal, the node, the folder),
 	// Outcome how it ended.

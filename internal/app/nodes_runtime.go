@@ -183,7 +183,7 @@ func (b *App) fleetText() string {
 	for _, v := range views {
 		n := outboundmsg.FleetNode{
 			ID: v.ID, Name: v.Name, OS: v.OS, Online: v.Online,
-			Device: v.Device, Commands: v.Commands, Tags: v.Tags, Offers: v.Effective.Summary(),
+			Device: v.Device, Commands: v.Commands, Tags: v.Tags, Can: v.Effective.Plain(),
 			CoreHostPending: v.CoreHost != nil && v.CoreHost.Pending,
 		}
 		if v.LastSeen != nil {
@@ -191,5 +191,12 @@ func (b *App) fleetText() string {
 		}
 		list = append(list, n)
 	}
-	return outboundmsg.FleetReply(b.nodesEnabled, list, time.Now())
+	reply := outboundmsg.FleetReply(b.nodesEnabled, list, time.Now())
+	others := 0
+	for _, it := range b.waiting(context.Background()) {
+		if it.kind != pendingNode {
+			others++
+		}
+	}
+	return reply + outboundmsg.FleetWaitingNote(others)
 }

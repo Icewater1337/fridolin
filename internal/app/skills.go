@@ -253,13 +253,13 @@ func (b *App) approveSkill(ctx context.Context, id string, req httpapi.SkillAppr
 	if req.Hash != s.Hash {
 		return nil, apperr.New(apperr.Conflict, "the skill changed again since you reviewed it — look at it again and approve that")
 	}
-	if err := b.recordSkillApproval(ctx, id, req.Path, s.Policy); err != nil {
+	if err := b.recordSkillApproval(ctx, id, req.Path, s.Policy, "dashboard"); err != nil {
 		return nil, err
 	}
 	return b.findSkill(ctx, id, req.Path)
 }
 
-func (b *App) recordSkillApproval(ctx context.Context, id, rel string, p skill.Policy) error {
+func (b *App) recordSkillApproval(ctx context.Context, id, rel string, p skill.Policy, by string) error {
 	p = p.Normalized()
 	data, err := json.Marshal(p)
 	if err != nil {
@@ -268,7 +268,7 @@ func (b *App) recordSkillApproval(ctx context.Context, id, rel string, p skill.P
 	if err := b.store.ApproveSkill(ctx, store.SkillApproval{Brain: id, Path: rel, Hash: p.Hash(), Policy: data, ApprovedAt: time.Now()}); err != nil {
 		return err
 	}
-	b.audit.Append(audit.Entry{Kind: audit.SkillApproved, Brain: id, Skill: rel, Risk: string(p.Risk), By: "dashboard",
+	b.audit.Append(audit.Entry{Kind: audit.SkillApproved, Brain: id, Skill: rel, Risk: string(p.Risk), By: by,
 		Detail: fmt.Sprintf("approve %v, triggers %v, vault %v", p.Approve, p.Triggers, p.Vault), Outcome: "ok"})
 	return nil
 }
@@ -303,7 +303,7 @@ func (b *App) setSkillPolicy(ctx context.Context, id string, req httpapi.SkillPo
 	if err != nil {
 		return nil, err
 	}
-	if err := b.recordSkillApproval(ctx, id, req.Path, s.Policy); err != nil {
+	if err := b.recordSkillApproval(ctx, id, req.Path, s.Policy, "dashboard"); err != nil {
 		return nil, err
 	}
 	return b.findSkill(ctx, id, req.Path)

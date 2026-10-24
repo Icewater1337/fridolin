@@ -49,7 +49,7 @@ func TestJoinFromChat(t *testing.T) {
 		t.Fatal(err)
 	}
 	alert := h.WaitSent(harnessDM, "wants to join")
-	if !strings.Contains(alert, "*laptop*") || !strings.Contains(alert, "`!approve "+j.ID+"`") {
+	if !strings.Contains(alert, "*laptop*") || !strings.Contains(alert, "Reply !approve") || !strings.Contains(alert, "_ref "+j.ID+"_") {
 		t.Errorf("the join alert: %q", alert)
 	}
 	// Single-use.
@@ -57,13 +57,13 @@ func TestJoinFromChat(t *testing.T) {
 		t.Error("a second machine joined with the same code")
 	}
 
-	if got := h.Answer(inbound{JID: harnessDM, Text: "!approve"}); got != outboundmsg.NodeCommandUsage {
-		t.Errorf("!approve without an id: %q", got)
+	if got := h.Answer(inbound{JID: harnessDM, Text: "!approve one two"}); got != outboundmsg.NodeCommandUsage {
+		t.Errorf("!approve with two words: %q", got)
 	}
 	if got := h.Answer(inbound{JID: harnessDM, Text: "!approve nope"}); got != outboundmsg.NodeUnknownReply("nope") {
 		t.Errorf("!approve nope: %q", got)
 	}
-	if got := h.Answer(inbound{JID: harnessDM, Text: "!APPROVE " + j.ID}); !strings.HasPrefix(got, "✅ *laptop*") || !strings.Contains(got, "host") {
+	if got := h.Answer(inbound{JID: harnessDM, Text: "!APPROVE " + j.ID}); !strings.HasPrefix(got, "✅ *laptop* is approved") || !strings.Contains(got, "system details") {
 		t.Errorf("!approve: %q", got)
 	}
 	if v := h.nodeViews(); len(v) != 1 || v[0].Device != nodeproto.DeviceApproved || v[0].Commands != nodeproto.CommandsApproved {
@@ -81,7 +81,7 @@ func TestJoinFromChat(t *testing.T) {
 
 	for kind, want := range map[string][]string{
 		"node_join_code": {"ok"},
-		"node_approved":  {"refused: unknown node", "ok", "refused: revoked"},
+		"node_approved":  {"refused: unknown node", "approved", "refused: revoked"},
 		"node_revoked":   {"ok"},
 	} {
 		lines := h.auditOf(kind)

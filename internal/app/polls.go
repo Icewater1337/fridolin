@@ -30,6 +30,10 @@ func (b *App) recordVote(v pollVote) {
 		b.approvalVote(id, v)
 		return
 	}
+	if token, ok := strings.CutPrefix(v.Poll.Ref, ownerPickPrefix); ok {
+		b.ownerPickVote(token, v)
+		return
+	}
 	br := b.brainMgr.Get(v.Poll.Brain)
 	if br == nil {
 		br = b.brainMgr.BrainFor(v.Poll.Chat, chat.IsGroupJID(v.Poll.Chat))

@@ -14,8 +14,9 @@ type FleetNode struct {
 	// Device and Commands are the two approval stages (nodeproto).
 	Device, Commands string
 	Tags             []string
-	// Offers is what it may serve now, in a few words.
-	Offers string
+	// Can is what it may do now, one plain sentence each
+	// (nodeproto.Capabilities.Plain).
+	Can []string
 	// CoreHostPending is set while its core-host waits for approval.
 	CoreHostPending bool
 }

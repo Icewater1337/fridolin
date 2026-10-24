@@ -106,13 +106,13 @@ func TestCoreSecretsTransfer(t *testing.T) {
 	}
 
 	// The owner hears of both, with what approving means and the key.
-	alert := h.WaitSent(harnessDM, "*icebase* ("+dst+") offers core-host")
-	for _, want := range []string{nodeproto.CoreHostApproval, nodeproto.Fingerprint(dstPub), "!approve " + dst} {
+	alert := h.waitSentAll(harnessDM, "*icebase* (", "(core-host)")
+	for _, want := range []string{"holding all of Fridolin's secrets (core-host)", nodeproto.CoreHostApproval, nodeproto.Fingerprint(dstPub), "Reply !approve", "_ref " + dst + "_"} {
 		if !strings.Contains(alert, want) {
 			t.Errorf("the alert lacks %q:\n%s", want, alert)
 		}
 	}
-	if alert := h.WaitSent(harnessDM, "*mini* ("+src+") offers core-host"); !strings.Contains(alert, "Sends secrets only to: icebase ("+dst+")") {
+	if alert := h.waitSentAll(harnessDM, "*mini* (", "(core-host)"); !strings.Contains(alert, "Sends secrets only to: icebase") {
 		t.Errorf("the alert does not name the trusted target:\n%s", alert)
 	}
 
@@ -143,7 +143,7 @@ func TestCoreSecretsTransfer(t *testing.T) {
 		return srcAgent.State().Approved.CoreHost != nil && dstAgent.State().Approved.CoreHost != nil
 	})
 	h.Inject(inbound{JID: harnessDM, Text: "!fleet"})
-	if fleet := h.WaitSent(harnessDM, "*Fleet*"); !strings.Contains(fleet, "core-host (trusts 1 target)") {
+	if fleet := h.WaitSent(harnessDM, "*Fleet*"); !strings.Contains(fleet, nodeproto.CoreHostPlain) {
 		t.Errorf("!fleet does not show core-host:\n%s", fleet)
 	}
 
@@ -192,11 +192,32 @@ func TestCoreSecretsTransfer(t *testing.T) {
 	if err := nodeagent.SaveCoreHost(srcDir, nodeagent.CoreHostConfig{Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
-	h.WaitSent(harnessDM, "*mini* ("+src+") changed its core-host settings")
+	h.waitSentAll(harnessDM, "*mini* (", "asks to hold all of Fridolin's secrets (core-host)")
 	h.WaitFor("mini's core-host pending again", func() bool { return srcAgent.State().Approved.CoreHost == nil || !h.coreHostApproved(src) })
 	if _, rep, _ := h.coreTransfer(src, dst, false); len(rep.Problems) == 0 || !strings.Contains(rep.Problems[0], "waits for your approval") {
 		t.Fatalf("after core-host.json changed: %+v", rep.Problems)
 	}
+}
+
+// waitSentAll waits for a message to jid that holds every one of subs,
+// and returns it.
+func (h *harness) waitSentAll(jid string, subs ...string) string {
+	h.t.Helper()
+	var got string
+	h.WaitFor("a message to "+jid+" with "+strings.Join(subs, " and "), func() bool {
+		for _, m := range h.SentTo(jid) {
+			ok := true
+			for _, s := range subs {
+				ok = ok && strings.Contains(m, s)
+			}
+			if ok {
+				got = m
+				return true
+			}
+		}
+		return false
+	})
+	return got
 }
 
 // coreHostApproved reports whether the approval of node id covers the

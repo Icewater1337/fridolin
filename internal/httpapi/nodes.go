@@ -21,7 +21,7 @@ type NodesService interface {
 	ApproveCommands(id string) (*nodes.Node, error)
 	Revoke(id string) (*nodes.Node, error)
 	SetTags(id string, tags []string) (*nodes.Node, error)
-	NewJoinCode() (string, time.Time, error)
+	NewJoinCodeFrom(origin string) (string, time.Time, error)
 	Call(ctx context.Context, id, method string, params, out any) error
 	StartUpdate(id string, o nodes.UpdateOptions) (string, error)
 	SetUpdateAuto(id string, auto bool) (*nodes.Node, error)
@@ -171,7 +171,7 @@ func (a *NodesAPI) JoinCode(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusConflict, "nodes are off: turn on nodes.enabled and restart the bridge, so nodes can connect")
 		return
 	}
-	code, exp, err := a.Nodes().NewJoinCode()
+	code, exp, err := a.Nodes().NewJoinCodeFrom(nodes.JoinedFromDashboard)
 	if err != nil {
 		WriteErr(w, http.StatusInternalServerError, err.Error())
 		return
