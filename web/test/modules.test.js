@@ -150,6 +150,7 @@ test('index.html has no inline script or style', () => {
 // The check on pages that break each rule, so a check that misses one
 // fails here rather than passing index.html.
 test('inlineCode finds each kind of inline script and style', async (t) => {
+  /** @type {[string, string, string[]][]} */
   const cases = [
     ['scripts loaded by src', '<script src="/a.js"></script>\n<script type="module" src="/b.js"></script>', []],
     ['an inline script', '<script>run()</script>', ['a script without src', 'a script with a body']],

@@ -144,13 +144,23 @@ type item struct {
 	mtime    time.Time
 }
 
+// EncryptionState is the one file of core/ an export carries.
+const EncryptionState = "core/encryption.json"
+
 // excluded reports whether rel, a slash path below the data dir, stays out
 // of an export, and whether it is a folder.
 func excluded(rel string, dir bool) bool {
 	parts := strings.Split(rel, "/")
 	base := parts[len(parts)-1]
+	// core/ is this machine's own (the lease's state, staging, caches),
+	// but for EncryptionState: which stores of the buckets are encrypted
+	// twice and which single-layer copies are retired, which is the
+	// buckets' state and moves with the core (#187).
+	if parts[0] == "core" && len(parts) > 1 {
+		return dir || rel != EncryptionState
+	}
 	if dir {
-		if len(parts) == 1 && slices.Contains([]string{"runs", "run-tokens", "media", "vault", "core", "migration"}, base) {
+		if len(parts) == 1 && slices.Contains([]string{"runs", "run-tokens", "media", "vault", "migration"}, base) {
 			return true
 		}
 		// A brain's TMPDIR and caches (brains/<id>/tmp, brains/<id>/cache).

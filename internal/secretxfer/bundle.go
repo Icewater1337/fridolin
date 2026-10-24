@@ -2,6 +2,7 @@ package secretxfer
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,6 +30,23 @@ var MoveNames = []string{
 // post-quantum age recipient (ML-KEM-768 + X25519), the bundle core send
 // sends. Nothing of it stays in clear.
 func SealBundle(from string, secrets map[string]string, recipient string) ([]byte, error) {
+	return SealBundleFiles(from, secrets, nil, "", recipient)
+}
+
+// SealBundleFiles is SealBundle with the secret files of the core's
+// credentials folder (FileNames) beside the secrets, and that folder
+// under ~ (dir).
+func SealBundleFiles(from string, secrets map[string]string, files map[string][]byte, dir, recipient string) ([]byte, error) {
+	if err := checkFiles(files); err != nil {
+		return nil, err
+	}
+	if len(files) > 0 {
+		if err := CheckFilesDir(dir); err != nil {
+			return nil, err
+		}
+	} else {
+		dir = ""
+	}
 	if len(secrets) == 0 {
 		return nil, errors.New("there are no secrets to send")
 	}
@@ -41,7 +59,7 @@ func SealBundle(from string, secrets map[string]string, recipient string) ([]byt
 	if err != nil {
 		return nil, errors.New("the receiver's key is not a post-quantum age key")
 	}
-	plain, err := encodeBundle(from, secrets)
+	plain, err := json.Marshal(bundle{V: Version, From: from, Secrets: secrets, Files: files, FilesDir: dir})
 	if err != nil {
 		return nil, err
 	}
@@ -62,16 +80,31 @@ func SealBundle(from string, secrets map[string]string, recipient string) ([]byt
 
 // OpenBundle decrypts a bundle with id, in memory, and reads it.
 func OpenBundle(ct []byte, id age.Identity) (map[string]string, string, error) {
+	secrets, _, _, from, err := OpenBundleFiles(ct, id)
+	return secrets, from, err
+}
+
+// OpenBundleFiles is OpenBundle with the bundle's secret files and the
+// folder under ~ they belong in.
+func OpenBundleFiles(ct []byte, id age.Identity) (map[string]string, map[string][]byte, string, string, error) {
 	r, err := age.Decrypt(bytes.NewReader(ct), id)
 	if err != nil {
-		return nil, "", fmt.Errorf("decrypting the bundle: %w", err)
+		return nil, nil, "", "", fmt.Errorf("decrypting the bundle: %w", err)
 	}
 	plain, err := io.ReadAll(io.LimitReader(r, maxMessage))
 	if err != nil {
-		return nil, "", fmt.Errorf("decrypting the bundle: %w", err)
+		return nil, nil, "", "", fmt.Errorf("decrypting the bundle: %w", err)
 	}
 	defer clear(plain)
-	return DecodeBundle(plain)
+	secrets, from, err := DecodeBundle(plain)
+	if err != nil {
+		return nil, nil, "", "", err
+	}
+	var b bundle
+	if err := json.Unmarshal(plain, &b); err != nil {
+		return nil, nil, "", "", fmt.Errorf("a malformed bundle: %w", err)
+	}
+	return secrets, b.Files, b.FilesDir, from, nil
 }
 
 // StoreBundle writes received secrets into st as core receive does: a

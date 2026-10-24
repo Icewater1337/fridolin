@@ -54,6 +54,7 @@ func viewSHA(t *testing.T, h *harness, root, path string) string {
 
 // TestGoldenFilesChanges pins what the changes answer.
 func TestGoldenFilesChanges(t *testing.T) {
+	t.Parallel()
 	h, s, _ := goldenBridge(t)
 	dir := filepath.Join(h.home, "main")
 	writeBrainFiles(t, dir)
@@ -106,6 +107,7 @@ func TestGoldenFilesChanges(t *testing.T) {
 }
 
 func TestUploadToTheBrainHandsTheFilesOver(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", ReplyChat: "15551234567@s.whatsapp.net",
 		Files: &manifest.Files{Uploads: []manifest.UploadFolder{{Folder: "docs", ToBrain: true}}}})
@@ -128,6 +130,7 @@ func TestUploadToTheBrainHandsTheFilesOver(t *testing.T) {
 }
 
 func TestSiteRolesChangeWhatTheirRoleAllows(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", ReplyChat: "15551234567@s.whatsapp.net",
 		Files: &manifest.Files{Uploads: []manifest.UploadFolder{{Folder: "docs"}}}})
@@ -225,6 +228,7 @@ func TestSiteRolesChangeWhatTheirRoleAllows(t *testing.T) {
 }
 
 func TestEditsAreCommittedInARepository(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
 	}

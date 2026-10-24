@@ -33,6 +33,10 @@ On the host that runs Docker:
                        check the image's build provenance (GitHub's attestation
                        for image.yml on main), pull it by digest and tag it as
                        this version's, for start (--check: only say whether it is here)
+  fridolin core files export|import
+                       in the core's container (core run core files …): the secret
+                       files of sandbox.credentials_dir a core move carries, as
+                       JSON; import (from stdin) writes only those not there, 0600
   fridolin core rehearse [--json]
                        import the latest export into a scratch volume
                        (fridolin-move-rehearsal), check it, and remove the volume:

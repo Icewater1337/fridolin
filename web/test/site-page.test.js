@@ -7,6 +7,9 @@ import { createPage } from '../assets/app/page.js';
 import page from '../assets/pages/site.js';
 import { setStatus } from '../assets/app/store.js';
 
+// The tests give only the fields of the status that the page reads.
+/** @import { Status } from '../types/api.js' */
+
 const commit = (c) => c.repeat(40);
 
 // What GET /api/site answers for a site that is connected, deployed and on.
@@ -26,7 +29,7 @@ function siteStatus() {
     },
     public_url: 'https://example.com/',
     tunnel: { process: { state: '', error: '', log: null }, token_saved: false },
-    repo: { connected: true, github: true },
+    repo: { connected: true, github: 'you/my-site' },
     deploy_key: 'ssh-ed25519 AAAAexample fridolin-site',
     google: { source: 'shared', type: 'web', redirect_uri: 'https://example.com/auth/callback' },
     accounts: { total: 1, admins: 1 },
@@ -46,7 +49,7 @@ async function openPage(t, first = siteStatus(), { proposals = [], brains = [{ i
     proposals,
     holdNext: null, // a promise the next GET /api/site waits for
     holdBuilder: null, // a promise the next PUT /api/site/builders/{id} waits for
-    github: { ok: true, repo: 'you/my-site' }, // what POST /api/site/deploy-key/github answers
+    github: /** @type {object} */ ({ ok: true, repo: 'you/my-site' }), // what POST /api/site/deploy-key/github answers
   };
   const calls = serve(t, (path, init) => {
     const method = init.method || 'GET';
@@ -111,8 +114,12 @@ async function openPage(t, first = siteStatus(), { proposals = [], brains = [{ i
 const button = (root, label) => root.querySelectorAll('button').find((b) => b.textContent === label);
 const inputFor = (root, label) => {
   const l = root.querySelectorAll('label').find((x) => x.textContent === label);
-  return document.getElementById(l.getAttribute('for'));
+  return /** @type {FakeElement} */ (document.getElementById(l.getAttribute('for')));
 };
+/**
+ * A switch toggle() made: its label, with the checkbox as .input.
+ * @typedef {ReturnType<typeof import('../assets/components/fields.js').toggle>} Switch
+ */
 const siteSwitch = (root) => root.querySelectorAll('label.switch').find((l) => /The site is/.test(l.textContent));
 
 test('opening the page asks for the site once', async (t) => {
@@ -233,7 +240,7 @@ test('saving one card keeps what is typed into another', async (t) => {
 
 test('a repository typed in stays while the deploy key is made', async (t) => {
   const fresh = siteStatus();
-  fresh.repo = { connected: false, github: false };
+  fresh.repo = { connected: false, github: '' };
   fresh.settings = { ...fresh.settings, enabled: false, approved: '', history: [], repo: { url: '', branch: 'main', subdir: '' } };
   delete fresh.deploy_key;
   const { root, ctx, bridge, poll } = await openPage(t, fresh);
@@ -252,7 +259,7 @@ test('a repository typed in stays while the deploy key is made', async (t) => {
 test('what is typed into the repository form outlasts a clone', async (t) => {
   const notConnected = () => {
     const s = siteStatus();
-    s.repo = { connected: false, github: false };
+    s.repo = { connected: false, github: '' };
     s.settings = { ...s.settings, enabled: false, approved: '', history: [], repo: { url: '', branch: 'main', subdir: '' } };
     return s;
   };
@@ -286,7 +293,7 @@ test('what is typed into the repository form outlasts a clone', async (t) => {
 
 test('a secret or token typed in counts as unsaved until it is saved', async (t) => {
   const notConnected = siteStatus();
-  notConnected.repo = { connected: false, github: false };
+  notConnected.repo = { connected: false, github: '' };
   notConnected.runtime.gh = true;
   notConnected.settings = { ...notConnected.settings, enabled: false, approved: '', history: [], repo: { url: '', branch: 'main', subdir: '' } };
   const placeholder = (p) => (root) => root.querySelectorAll('input, textarea').find((i) => i.getAttribute('placeholder') === p);
@@ -353,7 +360,11 @@ test('a builder switch stays put while it saves', async (t) => {
   for (const c of cases) {
     await t.test(c.name, async (t) => {
       const { root, bridge, calls, poll } = await openPage(t, siteStatus(), { brains: [{ id: 'web', name: 'Web' }, { id: 'docs', name: 'Docs' }] });
-      const switchOf = (label) => root.querySelectorAll('.site-builders label.switch').find((l) => l.textContent === label);
+      const switchOf = (label) => {
+        /** @type {Switch[]} */
+        const switches = root.querySelectorAll('.site-builders label.switch');
+        return switches.find((l) => l.textContent === label);
+      };
       const web = switchOf('Web (web)');
       const docs = switchOf('Docs (docs)');
       let release;
@@ -513,7 +524,7 @@ test('a site with no repository can go on, with Files and Wiki alone', async (t)
   first.settings.enabled = false;
   first.settings.approved = '';
   first.settings.history = [];
-  first.repo = { connected: false, github: false };
+  first.repo = { connected: false, github: '' };
   const { root } = await openPage(t, first);
   assert.doesNotMatch(root.textContent, /Before the site can go on/, 'nothing stands before turning it on');
   assert.equal(siteSwitch(root).querySelector('input').disabled, false);
@@ -522,7 +533,7 @@ test('a site with no repository can go on, with Files and Wiki alone', async (t)
 
 test('each role is given the brains it sees on Files and Wiki', async (t) => {
   const { root, bridge, calls } = await openPage(t);
-  setStatus({ brains: [{ id: 'main', name: 'Main' }, { id: 'work', name: 'Work' }] });
+  setStatus(/** @type {Status} */ ({ brains: [{ id: 'main', name: 'Main' }, { id: 'work', name: 'Work' }] }));
   await settle();
   const row = root.querySelectorAll('tr').find((tr) => tr.textContent.startsWith('member'));
   assert.ok(row, 'a row for the member role, none for admin');

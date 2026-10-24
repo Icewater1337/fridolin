@@ -16,6 +16,11 @@ const connected = {
   installations: [{ id: 77, account: 'you', html_url: 'https://github.com/settings/installations/77', repository_selection: 'selected', repos: ['you/fride', 'you/fridolin'], permissions: {} }],
 };
 
+/**
+ * A switch toggle() made: its label, with the checkbox as .input.
+ * @typedef {ReturnType<typeof import('../assets/components/fields.js').toggle>} Switch
+ */
+
 const button = (root, label) => root.querySelectorAll('button').find((b) => b.textContent === label);
 
 async function openCard(t, first) {
@@ -23,7 +28,7 @@ async function openCard(t, first) {
   installDom();
   noConsoleErrors(t);
   const assigned = [];
-  globalThis.window = { scrollTo() {}, location: { assign: (u) => assigned.push(u) } };
+  Object.assign(globalThis, { window: { scrollTo() {}, location: { assign: (u) => assigned.push(u) } } });
   t.after(() => { delete globalThis.window; });
   const bridge = { status: first };
   const calls = serve(t, (path, init) => {
@@ -46,7 +51,9 @@ async function openCard(t, first) {
 test('Connect GitHub asks for the app the owner chose and goes to the hand-off page', async (t) => {
   const { root, calls, assigned } = await openCard(t, { connected: false, installations: [] });
   assert.match(root.textContent, /Not connected/);
-  const prs = root.querySelector('label.switch').input;
+  /** @type {Switch} */
+  const sw = root.querySelector('label.switch');
+  const prs = sw.input;
   prs.checked = true;
   type(root.querySelector('input[type=text]'), ' acme ');
   button(root, 'Connect GitHub').click();

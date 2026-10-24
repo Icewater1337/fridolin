@@ -337,6 +337,21 @@ func (a *Agent) coreCheck(ctx context.Context) nodeproto.CoreCheckResult {
 			res.Secrets = append(res.Secrets, nodeproto.CoreSecretPresent{Name: n, Stored: ok, Received: ok && slices.Contains(received, n)})
 		}
 	}
+	if fr, ok := a.secretFiler(); ok && a.Config.Box == nil {
+		fctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+		dir, files, err := fr.ExportFiles(fctx)
+		cancel()
+		if err != nil {
+			res.SecretFilesError = err.Error()
+		} else {
+			res.SecretFilesDir = dir
+			for n, b := range files {
+				res.SecretFiles = append(res.SecretFiles, n)
+				clear(b)
+			}
+			sort.Strings(res.SecretFiles)
+		}
+	}
 	res.Setup, res.SetupOK, res.SetupNote = a.coreSetup(ctx)
 	res.Core, res.CoreError = a.coreRuntime(ctx)
 	res.MachineBound = a.machineBound()
@@ -470,13 +485,37 @@ func (a *Agent) coreSend(p nodeproto.CoreSecretsSendParams) (any, *nodeproto.Err
 			b.Names = append(b.Names, n)
 		}
 	}
-	ct, err := secretxfer.SealBundle(a.Config.Name, secrets, o.Recipient)
+	// The secret files of the core's credentials folder go along, read
+	// through the core's container; a host whose core cannot be read
+	// sends the secrets without them and says so.
+	var files map[string][]byte
+	var filesDir string
+	if fr, ok := a.secretFiler(); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+		filesDir, files, err = fr.ExportFiles(ctx)
+		cancel()
+		if err != nil {
+			// Never the secrets without the files the core needs: the
+			// move stops here, before anything stops.
+			return fail(nodeproto.CodeFailed, "reading the secret files of the core's credentials folder: %v", err)
+		}
+	}
+	defer func() {
+		for k := range files {
+			clear(files[k])
+		}
+	}()
+	for n := range files {
+		b.Files = append(b.Files, n)
+	}
+	sort.Strings(b.Files)
+	ct, err := secretxfer.SealBundleFiles(a.Config.Name, secrets, files, filesDir, o.Recipient)
 	if err != nil {
 		return fail(nodeproto.CodeFailed, "%v", err)
 	}
 	b.Ciphertext = ct
-	a.transferLog(map[string]any{"direction": "sent", "move": o.Move, "peer": o.Target, "peer_name": pin.Name, "names": b.Names, "result": "ok"})
-	a.logf("node: core-host: encrypted %d host secrets for %s (move %s)", len(b.Names), o.Target, o.Move)
+	a.transferLog(map[string]any{"direction": "sent", "move": o.Move, "peer": o.Target, "peer_name": pin.Name, "names": b.Names, "files": b.Files, "result": "ok"})
+	a.logf("node: core-host: encrypted %d host secrets and %d secret files for %s (move %s)", len(b.Names), len(b.Files), o.Target, o.Move)
 	return b, nil
 }
 
@@ -506,11 +545,23 @@ func (a *Agent) coreReceive(p nodeproto.CoreSecretsReceiveParams) (any, *nodepro
 	if perr != nil {
 		return fail(perr.Code, "%s", perr.Message)
 	}
-	secrets, _, err := secretxfer.OpenBundle(p.Ciphertext, off.id)
+	secrets, files, filesDir, _, err := secretxfer.OpenBundleFiles(p.Ciphertext, off.id)
 	if err != nil {
 		return fail(nodeproto.CodeDenied, "%v", err)
 	}
 	defer clear(secrets)
+	defer func() {
+		for k := range files {
+			clear(files[k])
+		}
+	}()
+	var fr SecretFiler
+	if len(files) > 0 {
+		var ok bool
+		if fr, ok = a.secretFiler(); !ok {
+			return fail(nodeproto.CodeUnavailable, "the bundle holds secret files, and this machine cannot write them into the core's credentials folder")
+		}
+	}
 	var absent []string
 	for n := range secrets {
 		if ok, err := st.Has(n); err == nil && !ok {
@@ -530,9 +581,28 @@ func (a *Agent) coreReceive(p nodeproto.CoreSecretsReceiveParams) (any, *nodepro
 	if err := a.noteReceived(fresh); err != nil {
 		a.logf("node: core-host: noting the received secrets: %v", err)
 	}
-	a.transferLog(map[string]any{"direction": "received", "move": p.Move, "peer": p.From, "stored": stored, "unchanged": unchanged, "result": "ok"})
-	a.logf("node: core-host: stored %d host secrets in %s from %s (move %s)", len(stored), place, p.From, p.Move)
-	return nodeproto.CoreSecretsReceived{Move: p.Move, Stored: orEmpty(stored), Unchanged: orEmpty(unchanged)}, nil
+	var filesStored, filesKept []string
+	if fr != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+		filesStored, filesKept, err = fr.ImportFiles(ctx, filesDir, files)
+		cancel()
+		if err != nil {
+			return fail(nodeproto.CodeFailed, "the host secrets are stored; writing the secret files: %v", err)
+		}
+	}
+	a.transferLog(map[string]any{"direction": "received", "move": p.Move, "peer": p.From, "stored": stored, "unchanged": unchanged, "files_stored": filesStored, "files_kept": filesKept, "result": "ok"})
+	a.logf("node: core-host: stored %d host secrets in %s and %d secret files (%d kept) from %s (move %s)", len(stored), place, len(filesStored), len(filesKept), p.From, p.Move)
+	return nodeproto.CoreSecretsReceived{Move: p.Move, Stored: orEmpty(stored), Unchanged: orEmpty(unchanged), FilesStored: filesStored, FilesKept: filesKept}, nil
+}
+
+// secretFiler is the core runner when it also moves secret files.
+func (a *Agent) secretFiler() (SecretFiler, bool) {
+	r, perr := a.coreRunner()
+	if perr != nil {
+		return nil, false
+	}
+	fr, ok := r.(SecretFiler)
+	return fr, ok
 }
 
 // coreForget is core.secrets.forget: it removes the secrets this machine

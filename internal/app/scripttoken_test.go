@@ -122,6 +122,7 @@ func TestScriptTokenScopes(t *testing.T) {
 // maySend refuses a caller kind it does not know rather than take it for
 // one without a token: a new kind must say where it may send.
 func TestMaySendRefusesAnUnknownCaller(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Settings{}
 	cfg.ScriptAPI.TokenlessSend = true
 	cfg.AllowedNumbers = []string{"15551234567"}

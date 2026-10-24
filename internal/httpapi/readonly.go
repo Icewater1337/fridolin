@@ -49,6 +49,9 @@ type ReadyAPI struct {
 	// the channels are stopped, so the bridge is not ready; an unverified
 	// one (the store does not answer) keeps them running.
 	Lease func() *LeaseStatus
+	// Container is whether the bridge runs in the fridolin-core image,
+	// for the dashboard's sign-in steps.
+	Container bool
 }
 
 func (a ActivityAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -84,6 +87,10 @@ type ReadyResponse struct {
 	// Lease is the core lease, when it is on: who holds it, not whose
 	// account this is.
 	Lease *LeaseStatus `json:"lease,omitempty"`
+	// Container says the bridge runs in the fridolin-core container, so
+	// the sign-in page names docker exec instead of a host command and the
+	// host's data folder.
+	Container bool `json:"container"`
 }
 
 // httpReady handles GET /ready: 200 when /send can deliver (WhatsApp is
@@ -98,6 +105,7 @@ func (a ReadyAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		WhatsApp:  mode,
 		Version:   a.Version(),
 		StartedAt: a.StartedAt,
+		Container: a.Container,
 	}
 	if a.Lease != nil {
 		// Unverified (the lease store does not answer) keeps the channels

@@ -29,6 +29,7 @@ func coreRuleFor(c nodeproto.Capabilities, name string) bool {
 // and the Schedules page says why; removing the agent removes the program,
 // but only once no other agent runs it.
 func TestCommandAgentAddsItsProgram(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("the test programs are shell scripts")
 	}

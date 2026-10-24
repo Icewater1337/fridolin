@@ -14,10 +14,27 @@ import { btn } from './buttons.js';
 import { callout } from './common.js';
 import { field, nextId, select, textInput, toggle } from './fields.js';
 import { icon } from './icons.js';
+import { errorMessage } from '../lib/errors.js';
+
+/** @import { Child } from '../lib/dom.js' */
+/** @import { WizardFields } from '../lib/schedules.js' */
+/** @import { Node, Schedule, SchedulePreview, ScheduleProgram, ScheduleTemplate } from '../../types/api.js' */
+
+/**
+ * What the wizard edits: a brain's agent, or for a new one no schedule.
+ * @typedef {{brain?: string, name?: string, schedule: Schedule | null}} WizardData
+ */
+
+/**
+ * What the wizard's fields come to: the agent, or why it is not complete
+ * yet, with the fields as they are.
+ * @typedef {{brain: string, schedule: Schedule, invalid?: undefined} | {brain: string, invalid: string, fields: WizardFields, schedule?: undefined}} WizardValue
+ */
 
 const STEPS = [['what', 'What'], ['brain', 'Brain'], ['when', 'When'], ['details', 'Details'], ['permissions', 'Permissions'], ['review', 'Review']];
 
 // What the built-in templates' vars mean.
+/** @type {Record<string, string>} */
 const VAR_HELP = {
   repos: 'The GitHub repositories it reviews, owner/name, separated by spaces.',
   max_issues: 'The most issues it files in one run; the rest stay in its notes.',
@@ -26,6 +43,7 @@ const VAR_HELP = {
 };
 
 // The built-in templates' names as the cards show them.
+/** @type {Record<string, string>} */
 const TITLES = {
   'morning-briefing': 'Morning briefing',
   'memory-consolidation': 'Memory consolidation',
@@ -39,11 +57,18 @@ const CUSTOM = [
   { key: 'command', title: 'Run a command on a node', text: 'A program on one of your machines (a node), no Claude run: a scraper, a backup, a check. Only what the node’s allowlist lets it run.' },
 ];
 
+/** @type {[string, string, string][]} */
 const REPORTS = [['worth', 'Only when worth reporting', 'The run says whether it found something; nothing is sent otherwise. Failures are always sent.'],
   ['always', 'Every time', 'Every result goes to the chat.'],
   ['silent', 'Never', 'Nothing is sent: the result is in its history and log here.']];
 
-/** A radio group of cards: options [[value, title, text]]. */
+/**
+ * A radio group of cards: options [[value, title, text]].
+ * @param {string} name
+ * @param {[string, string, string?][]} options
+ * @param {string} value
+ * @param {(v: string) => void} onPick
+ */
 function choiceCards(name, options, value, onPick) {
   return h('div.choice-cards', { role: 'radiogroup' }, options.map(([v, title, text]) => {
     const input = h('input', { type: 'radio', name, value: v, checked: v === value, id: nextId(name) });
@@ -58,6 +83,16 @@ function choiceCards(name, options, value, onPick) {
  * {current} kept across rebuilds; repos are the GitHub repositories the
  * app is installed on; onSave() saves the value; preview(when) answers
  * {next, error} (GET /api/schedules/preview).
+ * @param {object} options
+ * @param {ScheduleTemplate[]} options.templates
+ * @param {{id: string, name?: string}[]} options.brains
+ * @param {string[]} [options.repos]
+ * @param {Node[]} [options.nodes]
+ * @param {'new' | 'edit' | 'duplicate'} [options.mode]
+ * @param {{current: string}} [options.step]
+ * @param {() => void} [options.onSave]
+ * @param {(when: string) => Promise<SchedulePreview>} [options.preview]
+ * @returns {(data: WizardData, changed: () => void) => {el: HTMLDivElement, brain: () => string, value: () => WizardValue}}
  */
 export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 'new', step = { current: 'what' }, onSave, preview = (when) => get(`/api/schedules/preview?when=${encodeURIComponent(when)}`) }) {
   return (data, changed) => {
@@ -67,6 +102,11 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
     if (mode === 'new' && !data.schedule) f.kind = '';
     const edit = mode === 'edit';
     const tmpl = () => templates.find((t) => t.name === f.template);
+    /**
+     * @template {keyof WizardFields} K
+     * @param {K} k
+     * @param {WizardFields[K]} v
+     */
     const set = (k, v) => { f[k] = v; changed(); };
 
     const stepper = h('ol.stepper.wizard-steps');
@@ -75,9 +115,10 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
     const el = h('div.agent-wizard', stepper, body, nav);
 
     const value = () => scheduleOf(f);
-    const valid = () => { try { value(); return ''; } catch (e) { return e.message; } };
+    const valid = () => { try { value(); return ''; } catch (e) { return errorMessage(e); } };
 
     // What each step needs before the next.
+    /** @param {string} key */
     const missing = (key) => {
       switch (key) {
         case 'what': return f.kind ? '' : 'Choose what it does.';
@@ -94,6 +135,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
       }
     };
 
+    /** @param {string} key */
     const go = (key) => { step.current = key; paint(); };
 
     // How the program stands on its node: allowed, added on saving, or
@@ -103,7 +145,9 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
     const programCallout = () => {
       const p = programNow();
       const tone = p.state === 'allowed' ? 'ok' : p.state === 'waiting' ? 'info' : 'warn';
-      const title = { allowed: `Node ${f.node} runs it`, waiting: `Saving adds it to node ${f.node}`, 'no-node': 'No such node' }[p.state] || `Node ${f.node || '…'} would not run it`;
+      /** @type {Partial<Record<ScheduleProgram['state'], string>>} */
+      const titles = { allowed: `Node ${f.node} runs it`, waiting: `Saving adds it to node ${f.node}`, 'no-node': 'No such node' };
+      const title = titles[p.state] || `Node ${f.node || '…'} would not run it`;
       return callout(tone, title, p.text);
     };
 
@@ -118,6 +162,10 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
 
     // ── 1. what it does ──
     function whatStep() {
+      /**
+       * @param {string} kind
+       * @param {string} [template]
+       */
       const pick = (kind, template) => {
         f.kind = kind;
         f.template = template || '';
@@ -135,6 +183,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
         changed();
         go('brain');
       };
+      /** @type {{kind: string, template?: string, title: string, text: string, chosen: boolean}[]} */
       const cards = [
         ...templates.map((t) => ({ kind: 'template', template: t.name, title: TITLES[t.name] || t.name, text: t.description, chosen: f.kind === 'template' && f.template === t.name })),
         ...CUSTOM.map((c) => ({ kind: c.key, title: c.title, text: c.text, chosen: f.kind === c.key || (c.key === 'prompt' && f.kind === 'file') })),
@@ -173,7 +222,9 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
       const p = presetOf(f.when || '');
       if (!f.when) Object.assign(p, { mode: 'daily', time: '07:00' });
       const out = h('div.when-preview', { 'aria-live': 'polite' });
-      let timer = null;
+      /** @type {ReturnType<typeof setTimeout> | undefined} */
+      let timer;
+      /** @param {boolean} [quiet] */
       const update = (quiet) => {
         f.when = whenOf(p);
         if (!quiet) changed();
@@ -189,7 +240,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
               : h('div', h('div.field-label', 'Next runs'), h('ol.next-runs', (r.next || []).map((t) => h('li', h('strong', runTime(t)), h('span.muted', ` · ${inTime(t)}`)))),
                 h('p.muted.small', 'In the bridge’s time zone; each run may start up to a few minutes later (jitter), so agents due at once do not all start together.')));
           } catch (e) {
-            mount(out, h('p.muted', `Cannot preview: ${e.message}`));
+            mount(out, h('p.muted', `Cannot preview: ${errorMessage(e)}`));
           }
         }, 250);
       };
@@ -221,6 +272,10 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
     }
 
     // ── 4. details ──
+    /**
+     * @param {string} value
+     * @param {(repos: string) => void} onChange
+     */
     function repoPicker(value, onChange) {
       const chosen = new Set(String(value || '').split(/[\s,]+/).filter(Boolean));
       const other = textInput({ value: [...chosen].filter((r) => !repos.includes(r)).join(' '), placeholder: 'owner/name', class: 'mono' });
@@ -240,7 +295,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
 
     function detailsStep() {
       if (f.kind === 'command') {
-        const node = nodes.length ? select([['', 'Choose a node'], ...nodes.map((n) => [n.name || n.id, n.name ? `${n.name}${n.online === false ? ' (offline)' : ''}` : n.id])], f.node) : textInput({ value: f.node, placeholder: 'mac-mini' });
+        const node = nodes.length ? select([['', 'Choose a node'], ...nodes.map((n) => /** @type {[string, string]} */ ([n.name || n.id, n.name ? `${n.name}${n.online === false ? ' (offline)' : ''}` : n.id]))], f.node) : textInput({ value: f.node, placeholder: 'mac-mini' });
         node.addEventListener('change', () => set('node', node.value));
         node.addEventListener('input', () => set('node', node.value));
         const argv = h('textarea.mono', { rows: 3, id: nextId('argv'), placeholder: '/Users/you/bin/scrape.sh\n--quiet' });
@@ -299,7 +354,13 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
       const s = (() => { try { return value(); } catch { return null; } })();
       const plain = h('ul.plain-list', (s ? permissionsOf(s) : []).map((t) => h('li', t)));
       const refreshPlain = () => { try { mount(plain, permissionsOf(value()).map((t) => h('li', t))); } catch { /* still incomplete */ } };
+      /**
+       * @template {keyof WizardFields} K
+       * @param {K} k
+       * @param {WizardFields[K]} v
+       */
       const setP = (k, v) => { set(k, v); refreshPlain(); };
+      /** @type {Child[]} */
       const parts = [h('h2', 'What may it do?'), h('p.muted', 'In plain words, what this agent is allowed to do. You approve it as you save it.')];
       if (f.kind !== 'command') {
         parts.push(h('h3', 'Risk level'), choiceCards('risk', [['read', 'Read', riskText('read')], ['write', 'Write (default)', riskText('write')], ['irreversible', 'Irreversible', riskText('irreversible')]], f.risk || 'write', (r) => setP('risk', r === 'write' ? '' : r)));
@@ -311,6 +372,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
         const ghBox = h('div.github-grant');
         const paintGh = () => {
           ghBox.hidden = !ghOn.input.checked;
+          /** @type {Record<string, string>} */
           const perms = {};
           for (const line of f.githubPermissions.split('\n')) { const [k, v] = line.split('='); if (k && k.trim()) perms[k.trim()] = (v || '').trim(); }
           const names = [...new Set(['contents', 'issues', 'pull_requests', ...Object.keys(perms)])];
@@ -362,7 +424,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
     function reviewStep() {
       let s;
       try { s = value(); } catch (e) {
-        return [h('h2', 'Review'), callout('warn', 'Not complete yet', e.message)];
+        return [h('h2', 'Review'), callout('warn', 'Not complete yet', errorMessage(e))];
       }
       const file = `.brain/schedules/${s.name}.json`;
       const b = brains.find((x) => x.id === brain);
@@ -375,6 +437,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
       ];
     }
 
+    /** @type {Record<string, () => Child[]>} */
     const RENDER = { what: whatStep, brain: brainStep, when: whenStep, details: detailsStep, permissions: permissionsStep, review: reviewStep };
 
     function paint() {
@@ -394,7 +457,7 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
       el,
       brain: () => brain,
       value: () => {
-        try { return { brain, schedule: value() }; } catch (e) { return { brain, invalid: e.message, fields: { ...f, vars: { ...f.vars } } }; }
+        try { return { brain, schedule: value() }; } catch (e) { return { brain, invalid: errorMessage(e), fields: { ...f, vars: { ...f.vars } } }; }
       },
     };
   };

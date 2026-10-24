@@ -31,6 +31,7 @@ test('a request the bridge never answers times out', async (t) => {
 });
 
 test('the caller can still abort, and that is no error to show', async (t) => {
+  /** @type {[string, Error | undefined, (e: Error) => boolean][]} */
   const cases = [
     ['without a reason', undefined, (e) => e.name === 'AbortError'],
     ['with a reason', new Error('left the page'), (e) => e.message === 'left the page'],
@@ -59,6 +60,7 @@ test('timeout 0 waits as long as it takes', async (t) => {
 });
 
 test('answers and refusals', async (t) => {
+  /** @type {[string, number, object | undefined, object][]} */
   const cases = [
     ['JSON body', 200, { a: 1 }, { data: { a: 1 } }],
     ['empty body', 200, undefined, { data: null }],
@@ -77,6 +79,7 @@ test('answers and refusals', async (t) => {
 });
 
 test('getIfChanged sends the ETag back, and a 304 means the answer held', async (t) => {
+  /** @type {[string, string, [object | undefined, number?, Record<string, string>?], object | symbol][]} */
   const cases = [
     // name, the ETag sent, the answer, what it resolves with
     ['first poll', '', [{ n: 1 }, 200, { ETag: '"e1"' }], { data: { n: 1 }, etag: '"e1"' }],
@@ -172,11 +175,13 @@ test('every call carries the binding the sign-in returned, until sign-out', asyn
 
 test('the binding is kept in localStorage, where every tab finds it', async (t) => {
   const store = new Map();
-  globalThis.localStorage = {
-    getItem: (k) => (store.has(k) ? store.get(k) : null),
-    setItem: (k, v) => store.set(k, String(v)),
-    removeItem: (k) => store.delete(k),
-  };
+  Object.assign(globalThis, {
+    localStorage: {
+      getItem: (k) => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: (k) => store.delete(k),
+    },
+  });
   t.after(() => { delete globalThis.localStorage; });
   const net = stubFetch(t);
   await answered(net, () => signIn({ token: 'pasted' }), { status: 'signed in', binding: 'bind-1' });
@@ -203,12 +208,15 @@ test('a refused sign-in does not sign the app out', async (t) => {
 
 test('the token an older dashboard kept in localStorage is removed', async () => {
   const removed = [];
-  globalThis.localStorage = {
-    getItem: () => 'old-token',
-    setItem: () => { throw new Error('nothing may be stored'); },
-    removeItem: (k) => removed.push(k),
-  };
+  Object.assign(globalThis, {
+    localStorage: {
+      getItem: () => 'old-token',
+      setItem: () => { throw new Error('nothing may be stored'); },
+      removeItem: (k) => removed.push(k),
+    },
+  });
   try {
+    // @ts-expect-error -- the query string loads a fresh copy of the module, which tsc cannot resolve
     await import('../assets/app/api.js?with-storage');
   } finally {
     delete globalThis.localStorage;

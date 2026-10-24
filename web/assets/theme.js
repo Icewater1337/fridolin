@@ -9,6 +9,7 @@
   // window.fridolinTheme, as modules cannot import from a classic script.
   var KEY = 'bridgeTheme';
   var root = document.documentElement;
+  /** @param {string | null} t light, dark, or anything else for auto */
   var apply = function (t) {
     if (t === 'light' || t === 'dark') root.setAttribute('data-theme', t);
     else root.removeAttribute('data-theme');
@@ -33,7 +34,7 @@
     if (msg) msg.textContent = 'The dashboard failed to load. The browser console says why; reloading the page may help.';
   };
   window.addEventListener('error', function (e) {
-    var el = e.target;
+    var el = /** @type {Element | null} */ (e.target);
     if (e.error !== undefined || (el && el.tagName === 'SCRIPT')) failed();
   }, true);
   window.addEventListener('load', function () { setTimeout(failed, 10000); });

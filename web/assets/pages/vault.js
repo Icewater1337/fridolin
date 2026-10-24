@@ -15,7 +15,41 @@ import { field, select, textInput, toggle } from '../components/fields.js';
 import { nodeFolderPicker } from '../components/node-folder-picker.js';
 import { pill, callout, timeAgo, mono, empty, pageHeader, spinner, loading, kv } from '../components/common.js';
 
+/** @import { PageModule } from '../app/page.js' */
+/** @import { Child } from '../lib/dom.js' */
+/** @import { B2Usage, BrainBackup, DeletionHold, DrillRecord, DriveSnapshotsStatus, LitestreamStatus, SnapshotRecord, SnapshotsStatus, TargetRetention, VaultEvictRecord, VaultEviction, VaultFileCounts, VaultReach, VaultStatus, VaultSyncRecord, VaultTarget } from '../../types/api.js' */
+
+/**
+ * What the hot tier's card shows, from the status.
+ * @typedef {object} HotView
+ * @property {number} hot
+ * @property {number} budget
+ * @property {number} target
+ * @property {number} cold
+ * @property {Partial<VaultFileCounts>} files
+ * @property {string} lastUpload
+ * @property {VaultSyncRecord | null} sync
+ * @property {VaultEvictRecord | null} evict
+ * @property {VaultReach | null} reachable
+ */
+
+/**
+ * The parts of the page that a layout has, each filled by paint().
+ * @typedef {object} Regions
+ * @property {HTMLDivElement} [targets]
+ * @property {HTMLDivElement} [off]
+ * @property {HTMLDivElement} [head]
+ * @property {HTMLDivElement} [hot]
+ * @property {HTMLDivElement} [snapshots]
+ * @property {HTMLDivElement} [litestream]
+ * @property {HTMLDivElement} [b2]
+ * @property {HTMLDivElement} [drill]
+ * @property {HTMLDivElement} [evictions]
+ * @property {HTMLTableSectionElement} [evictionRows]
+ */
+
 // What each job the status names is called on the page.
+/** @type {Record<string, string>} */
 const JOBS = {
   sync: 'Upload',
   evict: 'Eviction',
@@ -24,8 +58,9 @@ const JOBS = {
   check: 'Snapshot check',
   'restore-drill': 'Restore drill',
 };
-const jobName = (job) => JOBS[job] || job;
+const jobName = (/** @type {string} */ job) => JOBS[job] || job;
 
+/** @type {Record<string, [string, string]>} */
 const STATES = {
   running: ['Running', 'ok'],
   starting: ['Starting', 'info'],
@@ -33,21 +68,27 @@ const STATES = {
   off: ['Off', 'neutral'],
 };
 
-/** A time with its error, or "never" when it has no time. */
+/**
+ * A time with its error, or "never" when it has no time.
+ * @param {{at?: string} | null | undefined} r
+ */
 function when(r) {
   return r && r.at ? timeAgo(r.at) : h('span.muted', 'never');
 }
 
+/** @param {string} [err] */
 function errorLine(err) {
   return err ? h('div.error-text.small', err) : null;
 }
 
-export default {
+export default /** @satisfies {PageModule} */ ({
   title: 'Vault',
   render(root, ctx) {
     const statusRes = resource('/api/vault/status');
+    /** @type {Partial<VaultStatus> | null} */
     let status = null;
     let mode = '';
+    /** @type {Regions} */
     const regions = {};
     const main = h('div.page-stack', h('div.card', loading('Checking the vault…')));
     mount(root, pageHeader('Vault', 'Files kept on this computer and, encrypted, in Backblaze B2, with snapshots to restore from.'), main);
@@ -68,6 +109,11 @@ export default {
 
     // Starts a job: 202 says it started, a 409 (another job runs) becomes
     // a toast through btn's handler.
+    /**
+     * @param {string} path
+     * @param {unknown} body
+     * @param {string} what
+     */
     const start = async (path, body, what) => {
       await post(path, body);
       toast(`${what} started`, 'ok');
@@ -75,7 +121,7 @@ export default {
     };
 
     function layout() {
-      for (const k of Object.keys(regions)) delete regions[k];
+      for (const k of /** @type {(keyof Regions)[]} */ (Object.keys(regions))) delete regions[k];
       regions.targets = h('div');
       const targets = h('section.section', h('h2.section-title', 'Backup targets'), regions.targets);
       if (mode === 'off') {
@@ -133,9 +179,11 @@ export default {
     }
 
     // ── state and the manual jobs ──
+    /** @param {{state: string, error: string, root: string, job: string}} head */
     function renderHead({ state, error, root: dir, job }) {
       const [label, kind] = STATES[state] || [state || 'Unknown', 'neutral'];
       const running = !!job;
+      /** @type {(text: string, iconName: string, path: string, body?: unknown, primary?: boolean) => HTMLButtonElement} */
       const action = (text, iconName, path, body, primary) => btn(text, {
         kind: primary ? 'primary' : '', icon: iconName, disabled: running,
         onClick: () => start(path, body, text.replace(/ now$/, '')),
@@ -157,6 +205,7 @@ export default {
     }
 
     // ── hot tier ──
+    /** @param {HotView} view */
     function renderHot({ hot, budget, target, cold, files, lastUpload, sync, evict, reachable }) {
       const pct = budget ? Math.round((hot / budget) * 100) : 0;
       let usage;
@@ -193,6 +242,7 @@ export default {
     }
 
     // ── snapshots ──
+    /** @param {SnapshotRecord | null | undefined} r */
     function snapLine(r) {
       if (!r || !r.at) return h('span.muted', 'none yet');
       return h('span',
@@ -202,6 +252,7 @@ export default {
         timeAgo(r.at), errorLine(r.error));
     }
 
+    /** @param {{snap: SnapshotsStatus | null, job: string}} shown */
     function renderSnapshots({ snap, job }) {
       if (!snap || !snap.enabled) {
         return h('div.card', h('div.card-body', h('p.muted', 'Snapshots are off.'), snap && snap.error ? callout('bad', null, snap.error) : null));
@@ -226,6 +277,7 @@ export default {
           ])));
     }
 
+    /** @param {DriveSnapshotsStatus | null | undefined} d */
     function renderDrive(d) {
       if (!d || !d.enabled) return h('span.muted', 'Off');
       const copy = d.last_copy;
@@ -239,6 +291,10 @@ export default {
     // Pruning stops when a snapshot holds far fewer files than the one
     // before, so a mass deletion cannot prune away the snapshots that
     // still have the files; only the owner lets it go on.
+    /**
+     * @param {DeletionHold} hold
+     * @param {boolean} running
+     */
     function renderHold(hold, running) {
       return callout('warn', 'Pruning is on hold',
         h('p', 'Snapshot ', mono(hold.snapshot || ''), ` holds ${plural(hold.files || 0, 'file')}, down from ${hold.prev_files || 0} in the one before`,
@@ -263,6 +319,7 @@ export default {
     }
 
     // ── Litestream ──
+    /** @param {LitestreamStatus | null} l */
     function renderLitestream(l) {
       if (!l || !l.enabled) return h('div.card', h('div.card-body', h('p.muted', 'Litestream is off.')));
       return h('div.card',
@@ -280,10 +337,12 @@ export default {
     // ── B2 transactions ──
     // What the bridge spent today (UTC) of Backblaze's capped classes: the
     // free tier refuses every call of a class past 2,500 a day.
+    /** @param {B2Usage | null} u */
     function renderB2(u) {
       if (!u) return h('div.card', h('div.card-body', h('p.muted', 'No B2 transactions counted today.')));
       const cls = u.classes || {};
       const pct = u.percent || {};
+      /** @param {string} c */
       const level = (c) => {
         const p = pct[c] || 0;
         const kind = p >= 100 ? 'bad' : p >= 70 ? 'warn' : 'ok';
@@ -304,6 +363,7 @@ export default {
     }
 
     // ── restore drill ──
+    /** @param {{drill: DrillRecord | null, job: string}} shown */
     function renderDrill({ drill: d, job }) {
       const run = btn('Run restore drill', {
         icon: 'play', disabled: !!job,
@@ -327,6 +387,7 @@ export default {
     // restic repositories in folders on nodes, besides the cloud: each
     // brain.json says which get its folder (backup.targets), and which of
     // its paths go only there (backup.node_only).
+    /** @param {VaultTarget[]} list */
     function renderTargets(list) {
       const add = btn('Add target…', { icon: 'plus', kind: list.length ? '' : 'primary', onClick: addTarget });
       if (!list.length) {
@@ -337,14 +398,16 @@ export default {
       return h('div.page-stack', list.map(targetCard), h('div.actions', add));
     }
 
+    /** @param {VaultTarget} t */
     function targetCard(t) {
       const running = !!t.job;
+      /** @type {(text: string, iconName: string, path: string, body: unknown) => HTMLButtonElement} */
       const job = (text, iconName, path, body) => btn(text, {
         icon: iconName, small: true, disabled: running || !t.ready,
         onClick: () => start(`/api/vault/targets/${encodeURIComponent(t.name)}/${path}`, body, `${text} (${t.name})`),
       });
       const [label, kind] = t.ready ? (t.online ? ['Ready', 'ok'] : ['Offline', 'warn']) : [t.online ? 'Not ready' : 'Offline', 'warn'];
-      const keep = t.retention || {};
+      const keep = /** @type {Partial<TargetRetention>} */ (t.retention || {});
       const drill = t.last_drill;
       const check = t.last_check;
       return h('div.card',
@@ -357,7 +420,7 @@ export default {
           t.deletion_hold ? callout('warn', 'Pruning is on hold',
             h('p', 'Snapshot ', mono(t.deletion_hold.snapshot || ''), ` holds ${plural(t.deletion_hold.files || 0, 'file')}, down from ${t.deletion_hold.prev_files || 0}.`),
             h('div.actions', btn('Allow pruning', { small: true, icon: 'trash', onClick: async () => { await post(`/api/vault/targets/${encodeURIComponent(t.name)}/prune/allow`, {}); await refresh(); } }))) : null,
-          kv([
+          kv(/** @type {[Child, Child][]} */ ([
             ['Node', h('span', t.node_name || t.node, ' ', mono(t.node))],
             ['Folder', mono(t.folder, { copy: true })],
             ['Brains', (t.brains || []).length ? (t.brains || []).join(', ') : h('span.muted', 'none yet — choose this target in a brain\'s backup settings')],
@@ -368,7 +431,7 @@ export default {
             ['Size', t.size_at ? `${fmtBytes(t.size)} in ${plural(t.files || 0, 'file')} · ${fmtBytes(t.free)} free on its disk` : h('span.muted', 'not measured yet')],
             ['Last check', check && check.at ? h('span', check.ok ? pill('OK', 'ok') : pill('Failed', 'bad'), ' ', timeAgo(check.at), errorLine(check.error)) : h('span.muted', 'never')],
             ['Restore drill', drill && drill.at ? h('span', drill.ok ? pill('Passed', 'ok') : pill('Failed', 'bad'), ' ', timeAgo(drill.at), drill.detail ? h('div.muted.small', drill.detail) : null) : h('span.muted', 'never')],
-          ].filter(Boolean)),
+          ]).filter(Boolean)),
           h('div.actions',
             job('Back up now', 'backup', 'snapshot', { kind: 'nightly' }),
             job('Check', 'shield', 'check', {}),
@@ -379,15 +442,19 @@ export default {
 
     // Which brains go to the target, and which of their paths go only to
     // node targets (brain.json backup.targets and backup.node_only).
+    /** @param {VaultTarget} t */
     async function chooseBrains(t) {
       const brains = await get('/api/brains');
       const key = `node:${t.name}`;
       const rows = (brains || []).map((b) => {
-        const bk = (b.manifest && b.manifest.backup) || {};
-        const row = { id: b.id, targets: { ...(bk.targets || {}) }, chosen: !!(bk.targets || {})[key], nodeOnly: (bk.node_only || []).join(', ') };
-        row.was = { chosen: row.chosen, nodeOnly: row.nodeOnly };
-        row.input = textInput({ value: row.nodeOnly, placeholder: '/work/, /clients/', 'aria-label': `Paths of ${b.id} only for node targets` });
-        return row;
+        const bk = /** @type {Partial<BrainBackup>} */ ((b.manifest && b.manifest.backup) || {});
+        const chosen = !!(bk.targets || {})[key];
+        const nodeOnly = (bk.node_only || []).join(', ');
+        return {
+          id: b.id, targets: { ...(bk.targets || {}) }, chosen, nodeOnly,
+          was: { chosen, nodeOnly },
+          input: textInput({ value: nodeOnly, placeholder: '/work/, /clients/', 'aria-label': `Paths of ${b.id} only for node targets` }),
+        };
       });
       const body = h('div.stack',
         h('p.muted', 'A brain\'s folder goes here once you tick it. Paths listed beside it never go to the cloud, only to the node targets the brain goes to; its exclude list still keeps the rest out of both.'),
@@ -417,6 +484,7 @@ export default {
       });
     }
 
+    /** @param {VaultTarget} t */
     async function removeTarget(t) {
       const ok = await confirmDialog({
         title: `Remove the target ${t.name}?`,
@@ -453,7 +521,7 @@ export default {
       let dataDir = false;
       const chosen = h('code.mono', 'none yet');
       const pickerWrap = h('div');
-      const showPicker = () => mount(pickerWrap, nodeFolderPicker({ node: state.node, onPick: (p) => { state.folder = p; chosen.textContent = p; } }));
+      const showPicker = () => mount(pickerWrap, nodeFolderPicker({ node: state.node, onPick: (/** @type {string} */ p) => { state.folder = p; chosen.textContent = p; } }));
       const nodeSel = select(ready.map((n) => [n.id, `${n.name} (${n.id}${n.online ? '' : ', offline'})`]), state.node, { 'aria-label': 'Node' });
       nodeSel.addEventListener('change', () => { state.node = nodeSel.value; state.folder = ''; chosen.textContent = 'none yet'; showPicker(); });
       showPicker();
@@ -487,6 +555,7 @@ export default {
     }
 
     // ── eviction log ──
+    /** @param {VaultEviction[]} list */
     function paintEvictions(list) {
       if (!list.length) {
         paint(regions.evictions, 'none', () => h('div.card', empty('No evictions yet', 'Files moved off this computer to make room show here.')));
@@ -502,4 +571,4 @@ export default {
         h('td.nowrap', timeAgo(e.at))));
     }
   },
-};
+});

@@ -6,12 +6,16 @@ import { restartBridge } from '../assets/app/restart.js';
 import { store, setStatus } from '../assets/app/store.js';
 import { closeAllDialogs } from '../assets/components/dialog.js';
 
+// The tests give only the fields of the status that a restart reads.
+/** @import { Status } from '../types/api.js' */
+
 // setImmediate, because the tests mock setTimeout (the waits between checks).
 const tick = () => new Promise((r) => setImmediate(r));
 
 // Pages load their modules on first visit, so a tab that saw the bridge
 // come back as another version reloads instead of mixing the two builds.
 test('restarting reloads the page when the version changed', async (t) => {
+  /** @type {[string, string, boolean][]} */
   const cases = [
     ['same version', '1.2.3', false],
     ['new version', '1.3.0', true],
@@ -22,7 +26,7 @@ test('restarting reloads the page when the version changed', async (t) => {
       t.mock.timers.enable({ apis: ['setTimeout'] });
       const document = installDom();
       const net = stubFetch(t);
-      setStatus({ started_at: '2026-10-18T09:00:00Z', version: '1.2.3', restart_required: ['log_level'] });
+      setStatus(/** @type {Status} */ ({ started_at: '2026-10-18T09:00:00Z', version: '1.2.3', restart_required: ['log_level'] }));
       let reloads = 0;
       const done = restartBridge({ reload: () => { reloads++; } });
       assert.equal(net.calls[0].url, '/api/restart');
@@ -49,7 +53,7 @@ test('the restart dialog stays until the bridge is back', async (t) => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const document = installDom();
   const net = stubFetch(t);
-  setStatus({ started_at: '2026-10-18T09:00:00Z', version: '1.2.3', restart_required: [] });
+  setStatus(/** @type {Status} */ ({ started_at: '2026-10-18T09:00:00Z', version: '1.2.3', restart_required: [] }));
   const done = restartBridge({ reload: () => {} });
   const dialog = document.querySelector('dialog');
   assert.equal(dialog.open, true);
@@ -76,7 +80,7 @@ test('a bridge that does not come back offers to close the dialog or reload', as
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const document = installDom();
   const net = stubFetch(t);
-  const before = { started_at: '2026-10-18T09:00:00Z', version: '1.2.3', restart_required: [] };
+  const before = /** @type {Status} */ ({ started_at: '2026-10-18T09:00:00Z', version: '1.2.3', restart_required: [] });
   setStatus(before);
   let reloads = 0;
   let finished = false;

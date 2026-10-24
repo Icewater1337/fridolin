@@ -270,12 +270,50 @@ jobs:
 
       # The engine saves a failing input under testdata/fuzz/<target> in the
       # package. Commit it with the fix, and go test runs it from then on.
+      # The artifact holds every package's testdata/fuzz, the inputs
+      # committed before included. go.mod is there to root the artifact at
+      # the repository: its paths start at the common folder of what it
+      # holds, and the report job finds a package's input at its path.
       - name: keep the failing inputs
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-failing-inputs
-          path: '**/testdata/fuzz/**'
+          path: |
+            go.mod
+            **/testdata/fuzz/**
+          retention-days: 30
+
+  # A run on main reports itself in issues (scripts/ci-report.sh): one per
+  # failing fuzz target or test, which a later run that passes closes.
+  # Nobody watches main's runs, and a failure after a merge shows in no
+  # pull request. Pushes to main of this repository only, so the write
+  # permission is never in a run a pull request or a fork started. It runs
+  # after every other job, also when they all passed, so it can close; a
+  # job added to this workflow goes into needs too.
+  report:
+    needs: [go, go-windows, fuzz, scripts, python, web, site, personal-data]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && !github.event.repository.fork }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read # the run's jobs, their logs and the fuzz artifact
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: report in issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HEAD_SHA: ${{ github.sha }}
+          SELF_JOB: report
+        run: scripts/ci-report.sh
 
   scripts:
     # The git hooks run the personal-data check on macOS, with BSD awk,
@@ -297,7 +335,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: make lint-sh
 
-      - name: tests of the personal-data, action-pin, notices and release scripts and the Makefile
+      - name: tests of the personal-data, action-pin, notices, release and CI report scripts and the Makefile
         run: make test-sh
 
   python:
@@ -356,6 +394,10 @@ jobs:
       # ESLint at the version the Makefile pins, which npx fetches.
       - name: ESLint
         run: make lint-web
+
+      # TypeScript's checker on the JSDoc types, at the pinned version.
+      - name: tsc
+        run: make typecheck-web
 
   site:
     # The site process (site/, docs/SITE.md): its own tests, then the Go

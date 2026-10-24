@@ -271,6 +271,7 @@ func voiceAnswer(t *testing.T, tb *testBridge, phone testPhone, device, rid stri
 // CLI answers with its prompt, whose example of a [SPOKEN] block stands
 // in for the brain's.)
 func TestPlaudVoiceQuestionIsAnsweredThroughABrain(t *testing.T) {
+	t.Parallel()
 	for _, quiet := range []bool{false, true} {
 		runs := fakeRuns(t)
 		extra := `, "phone_upload": true, "voice": true`

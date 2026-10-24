@@ -9,11 +9,15 @@ import { select, textInput } from '../components/fields.js';
 import { empty, pageHeader, spinner } from '../components/common.js';
 import { showActivity } from '../components/activity-item.js';
 
-export default {
+/** @import { PageModule } from '../app/page.js' */
+/** @import { ActivityEntry, Status } from '../../types/api.js' */
+
+export default /** @satisfies {PageModule} */ ({
   title: 'Activity',
   render(root, ctx) {
     let brain = ctx.params.brain || '';
     let search = '';
+    /** @type {ActivityEntry[] | null} */
     let items = null;
     let unfollow = () => {};
 
@@ -22,8 +26,10 @@ export default {
     const list = h('div.activity-list', spinner());
     const count = h('span.muted.small');
 
+    /** @param {Status} s */
     const fillBrains = (s) => {
-      const opts = [['', 'All brains'], ...(s.brains || []).map((b) => [b.id, brainLabel(b)])];
+      /** @type {[string, string][]} */
+      const opts = [['', 'All brains'], ...(s.brains || []).map((b) => /** @type {[string, string]} */ ([b.id, brainLabel(b)]))];
       if (brain && !opts.some(([v]) => v === brain)) opts.push([brain, brain]);
       syncOptions(brainSel, opts, brain);
     };
@@ -73,4 +79,4 @@ export default {
       list);
     follow();
   },
-};
+});
