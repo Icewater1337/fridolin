@@ -706,14 +706,35 @@ can read its own gh login, so the token is the brain's while it runs.
 
 ### The Schedules page and the CLI
 
-The dashboard's Schedules page lists every agent with its schedule, where
-its results go, whether it is on, paused or running, when it runs next
-and how its last run went, with *Run now* and *Pause*/*Resume*; below,
-the reminders. An agent's page edits it, lists its runs (start, how long,
-result, cost or tokens, and the message sent) and shows each run's log:
-the CLI's output as the activity log has it, its tool calls, and errors.
-Pausing is the dashboard's, not `brain.json`'s: a paused agent does not
-make up the times it missed when it is resumed.
+The dashboard's Schedules page lists every agent of every brain, grouped
+by brain and filtered by brain, state or text, each with a badge for its
+state: *Pending approval*, *Active*, *Paused*, *Failing* (its last run
+failed, or it cannot run as it is) or *Disabled* (`enabled: false`). A
+card shows its schedule, its next run (in how long, and when), how its
+last run went and how long it took, and what it may do: its risk budget
+or node, its GitHub repositories and permissions, its preapproved steps
+and where its results go. *Run now* starts any approved agent at once,
+whatever its schedule, and *Pause*/*Resume* stop and restart it on its
+schedule; an agent whose run goes on cannot start twice. The agents
+waiting for approval come first, each with its review inline: what it
+may do, flagged when risky, the change field by field, and *Approve*,
+*Approve & run now* or *Delete the file*. The Overview page flags them
+too. Below the agents, the reminders.
+
+*Add agent* is a wizard: what it does (a built-in template, a custom
+prompt, or a command on a node), which brain and name, when (every few
+hours, daily, weekly, or a cron expression, with its next three runs),
+its details (the template's vars, a repository picker from Connect
+GitHub's installed repositories, the prompt or the program), what it may
+do in plain words (risk level, preapproved steps, GitHub access, node,
+where results go, and more settings), and the exact file it writes.
+Saving writes the file and approves it. An agent's page shows every
+field, its runs (start, how long, result, cost or tokens, and the
+message sent) and each run's log: the CLI's output as the activity log
+has it, its tool calls, and errors; *Edit* and *Duplicate* go through the
+same wizard, *Delete* asks first. Pausing is the dashboard's, not the
+file's: a paused agent does not make up the times it missed when it is
+resumed.
 
 ```bash
 fridolin schedules list

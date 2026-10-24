@@ -23,6 +23,15 @@ for compatibility.
   `risky` and pending `review`, and counts `pending`; `POST
   /api/schedules/{brain}/{name}/approve` approves a file as reviewed,
   and `GET /api/schedules/preview?when=` says when a schedule runs next.
+- **The Schedules page, redone**: agents grouped by brain with filters,
+  a state badge each (Pending approval, Active, Paused, Failing,
+  Disabled), the next run as relative and absolute time, the last run's
+  result and duration, and what each may do; agents waiting for
+  approval come first with Review & approve inline (Approve & run now
+  too), and the Overview page flags them. *Add agent* is a six-step
+  wizard (template, brain, when with the next three runs, vars with a
+  GitHub repository picker, permissions in plain words, the exact file);
+  agents are edited and duplicated through it, and deleted after asking.
 - The Schedules page's reminders now include those a brain keeps itself
   in `.brain/reminders.json` or `skills/reminders.json`, as a remind
   skill writes them; only the bridge's own standing intents were listed,
