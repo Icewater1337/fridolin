@@ -92,6 +92,45 @@ func TestAgentSessionAsksAndFinishes(t *testing.T) {
 	}
 }
 
+// TestAgentSessionEndsWithItsChanges reads the session without pause
+// while its last turn ends: no read sees it ended before what changed is
+// listed (#200, #226). waitFor's 10ms naps, and the round trip through
+// the core, missed that window but now and then on CI.
+func TestAgentSessionEndsWithItsChanges(t *testing.T) {
+	root := t.TempDir()
+	c, a := workNode(t, root)
+	ctx := context.Background()
+	s, err := c.svc.AgentStart(ctx, a.ID(), nodeproto.AgentStartParams{Folder: root, Prompt: "pick a colour"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitSession(t, c, a, s.ID, nodeproto.AgentWaiting)
+	a.work.mu.Lock()
+	sess := a.work.agents[s.ID]
+	a.work.mu.Unlock()
+	if _, err := c.svc.AgentReply(ctx, a.ID(), nodeproto.AgentReplyParams{ID: s.ID, Text: "blue"}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		snap := sess.snapshot(0)
+		if snap.Ended != nil {
+			if snap.State != nodeproto.AgentDone || !slices.Contains(snap.Changed, "A colour.txt") {
+				t.Fatalf("ended as %s with changed %v", snap.State, snap.Changed)
+			}
+			// The turn still logs its end through the test.
+			sess.mu.Lock()
+			done := sess.turnDone
+			sess.mu.Unlock()
+			<-done
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the session did not end: %+v", snap)
+		}
+	}
+}
+
 func TestAgentPermissionIsAskedAsIrreversible(t *testing.T) {
 	root := t.TempDir()
 	c, a := workNode(t, root)
