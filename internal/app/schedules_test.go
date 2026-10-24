@@ -21,20 +21,22 @@ import (
 
 // listedAgent is an agent as GET /api/schedules lists it.
 type listedAgent struct {
-	Brain      string            `json:"brain"`
-	Name       string            `json:"name"`
-	Kind       string            `json:"kind"`
-	Task       string            `json:"task"`
-	Report     string            `json:"report"`
-	Chat       string            `json:"chat"`
-	Enabled    bool              `json:"enabled"`
-	Paused     bool              `json:"paused"`
-	Running    bool              `json:"running"`
-	FromMemory bool              `json:"from_memory"`
-	Next       *time.Time        `json:"next"`
-	LastRun    *sched.Run        `json:"last_run"`
-	Problem    string            `json:"problem"`
-	Schedule   manifest.Schedule `json:"schedule"`
+	Brain      string                   `json:"brain"`
+	Name       string                   `json:"name"`
+	Kind       string                   `json:"kind"`
+	Task       string                   `json:"task"`
+	Report     string                   `json:"report"`
+	Chat       string                   `json:"chat"`
+	Enabled    bool                     `json:"enabled"`
+	Paused     bool                     `json:"paused"`
+	Running    bool                     `json:"running"`
+	FromMemory bool                     `json:"from_memory"`
+	Next       *time.Time               `json:"next"`
+	LastRun    *sched.Run               `json:"last_run"`
+	Problem    string                   `json:"problem"`
+	Schedule   manifest.Schedule        `json:"schedule"`
+	Program    *programView             `json:"program"`
+	Review     *manifest.ScheduleReview `json:"review"`
 }
 
 // schedulesList is GET /api/schedules as a test reads it.
