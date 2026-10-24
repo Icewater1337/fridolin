@@ -736,9 +736,10 @@ For the way back, DST pins SRC the same way. Both run the core's version
 (`fridolin nodes update ID` first), and both are native hosts: the core
 in a box comes with #191 phase 4, and a Windows node service cannot
 reach the owner's Docker Desktop, so both refuse with a reason. DST
-needs Docker and GitHub's `gh` (`brew install gh`, `apt-get install
-gh`; no login), which checks the image's provenance before it is
-pulled; the pre-flight refuses a DST without the image and without
+needs Docker and a current GitHub `gh` (`brew install gh`; on Linux
+from GitHub's own apt repository, <https://cli.github.com>: Ubuntu
+24.04's `gh` 2.45 lacks `attestation verify --source-ref`; no login),
+which checks the image's provenance before it is pulled; the pre-flight refuses a DST without the image and without
 `gh`. On Ubuntu, run `sudo fridolin core apparmor` once on DST.
 
 **The pre-flight** asks both agents (`core.check`): the versions; the

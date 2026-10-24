@@ -52,6 +52,12 @@ func TestVerifyHandsGitHubsBundlesToGh(t *testing.T) {
 		}
 	}
 
+	v.Run = func(context.Context, ...string) ([]byte, error) {
+		return []byte("unknown flag: --source-ref\n\nUsage:  gh attestation verify ..."), errors.New("exit 1")
+	}
+	if err := v.Verify(context.Background(), img, "owner/fridolin"); err == nil || !strings.Contains(err.Error(), "too old") {
+		t.Fatalf("an old gh: %v", err)
+	}
 	v.Run = func(context.Context, ...string) ([]byte, error) { return []byte("x\nno match"), errors.New("exit 1") }
 	if err := v.Verify(context.Background(), img, "owner/fridolin"); err == nil || !strings.Contains(err.Error(), "no match") {
 		t.Fatalf("a failed check: %v", err)
