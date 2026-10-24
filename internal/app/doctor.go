@@ -143,6 +143,7 @@ var DoctorRegistry = []DoctorCheck{
 	{ID: "approvals", Title: "approvals waiting", Run: checkPendingApprovals},
 	{ID: "brain-drift", Title: "brain folders as approved", Run: checkBrainDrift},
 	{ID: "lockdown", Title: "lockdown", Run: checkLockdown},
+	{ID: "timezone", Title: "time zone of schedules", Run: checkTimezone},
 	{ID: "nodes-fride", Title: "FrIDE on the nodes", Required: true, Applies: nodesOn, Run: checkNodesFride},
 }
 

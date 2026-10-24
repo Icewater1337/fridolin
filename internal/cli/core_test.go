@@ -45,7 +45,7 @@ type ranCmd struct {
 func hostFixture(t *testing.T, secrets mapSecrets) (hostDeps, *[]ranCmd) {
 	var ran []ranCmd
 	return hostDeps{
-		secrets: secrets, docker: "/usr/local/bin/docker", version: "v1.4.0+dirty",
+		secrets: secrets, docker: "/usr/local/bin/docker", version: "v1.4.0+dirty", zone: "Europe/Zurich",
 		composePath: filepath.Join(t.TempDir(), "fridolin", "compose.yaml"),
 		baseEnv:     []string{"PATH=/usr/bin:/bin", "HOME=/Users/you"},
 		newIdentity: func() (string, error) { return "AGE-SECRET-KEY-PQ-1NEW", nil },

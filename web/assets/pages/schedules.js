@@ -12,7 +12,7 @@ import { brainsResource, nodesResource, resource, schedulesResource } from '../a
 import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { fieldDiff, lineDiff, sortKeys } from '../lib/diff.js';
 import { fmtDuration, prettyJSON } from '../lib/format.js';
-import { STATES, fileJSON, filterAgents, groupByBrain, inTime, permissionsOf, runTime, stateOf, varsText } from '../lib/schedules.js';
+import { STATES, fileJSON, filterAgents, groupByBrain, inTime, permissionsOf, runTime, stateOf, varsText, zoneNote } from '../lib/schedules.js';
 import { agentWizard } from '../components/agent-wizard.js';
 import { btn } from '../components/buttons.js';
 import { badge, callout, empty, kv, mono, pageHeader, spinner, timeAgo } from '../components/common.js';
@@ -238,6 +238,7 @@ function reminderRow(r) {
 
 function renderList(root, ctx) {
   const offNote = h('div');
+  const zoneBox = h('div');
   const pendingBox = h('div');
   const filters = { brain: '', state: '', q: '' };
   const brainSel = select([['', 'All brains']], '');
@@ -252,7 +253,7 @@ function renderList(root, ctx) {
   mount(root,
     pageHeader('Schedules', 'Each brain’s scheduled agents: tasks a brain runs by itself on a schedule, or programs on your machines. Each is a file in the brain’s .brain/schedules folder, and runs once you approved it.',
       btn('Add agent', { kind: 'primary', icon: 'plus', href: '#/schedules/new' })),
-    offNote, pendingBox,
+    offNote, zoneBox, pendingBox,
     h('section.section', h('h2.section-title', 'Agents'), toolbar, groupsBox),
     h('section.section', h('h2.section-title', 'Reminders'), h('p.muted.small', 'Reminders with a time that the brains keep: the bridge’s standing intents, and those in a brain’s own reminders file, which the brain fires itself.'), remindersBox));
 
@@ -307,6 +308,10 @@ function renderList(root, ctx) {
   ctx.follow(schedulesResource, (d) => {
     if (!d) return;
     data = d;
+    const zone = zoneNote(d.timezone);
+    paint(zoneBox, JSON.stringify(zone), () => (!zone ? null
+      : zone.warn ? callout('warn', 'Time zone unset', h('p', zone.text))
+        : h('p.muted.small.zone-note', zone.text)));
     paint(offNote, d.enabled, (on) => (on ? null : callout('warn', 'Scheduled agents are off', h('p', 'schedules.enabled is off in the settings: no agent runs on its schedule. Run now still works.'))));
     const agents = d.agents || [];
     const brains = groupByBrain(agents).map((g) => [g.brain, g.name]);

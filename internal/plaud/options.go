@@ -32,6 +32,17 @@ type Snapshot struct {
 	QueueMaxPending   int
 	OwnerChat         string
 	Interval          time.Duration
+	// Zone is the owner's time zone, the one a recording's date and time
+	// are written in; nil is the process's.
+	Zone *time.Location
+}
+
+// zone is cfg's Zone, else time.Local.
+func (cfg *Snapshot) zone() *time.Location {
+	if cfg == nil || cfg.Zone == nil {
+		return time.Local
+	}
+	return cfg.Zone
 }
 
 // Options supplies startup paths and current settings without a config store.

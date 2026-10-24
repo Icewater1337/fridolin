@@ -165,12 +165,21 @@ const (
 // Back up now disabled.
 var refusalNoticeTimeout = 30 * time.Second
 
+// zonedNow is time.Now in the zone zone names, which daily_at and the
+// day of the last scheduled run are in.
+func zonedNow(zone func() *time.Location) func() time.Time {
+	if zone == nil {
+		return time.Now
+	}
+	return func() time.Time { return time.Now().In(zone()) }
+}
+
 // New loads the saved backup state. A state file that cannot
 // be read is kept as state.json.corrupt and the bridge starts with none: the
 // last results and the day of the last scheduled run are gone then, and the
 // log says so rather than leaving it to the next scheduled run to show.
 func New(opts Options) *Manager {
-	m := &Manager{opts: opts, now: time.Now, idleWait: backupIdleWait, notify: opts.Notify}
+	m := &Manager{opts: opts, now: zonedNow(opts.Zone), idleWait: backupIdleWait, notify: opts.Notify}
 	m.runner = opts.Runner
 	if m.runner == nil {
 		m.runner = m.runRclone
@@ -1093,8 +1102,8 @@ func (m *Manager) Start(ctx context.Context) {
 			select {
 			case <-ctx.Done():
 				return
-			case now := <-t.C:
-				m.tick(now)
+			case <-t.C:
+				m.tick(m.now())
 			}
 		}
 	})

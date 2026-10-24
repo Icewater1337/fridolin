@@ -292,6 +292,35 @@ DMs never need a trigger.
 
 ---
 
+## Time zone
+
+### `timezone`
+
+Your time zone, an IANA name such as `"Europe/Zurich"` (**Settings →
+Advanced → Time zone**). Every time of day the bridge keeps is in it:
+scheduled agents (`"daily 21:00"` is 21:00 there), standing intents and
+reminders, the memory consolidation, the nightly vault snapshots and
+targets, and the daily backup's `backup.daily_at`. Brains are told the
+time in it, and their runs get it as `TZ`, so `fridolin calendar` and
+the scripts they run agree. It takes effect without a restart.
+
+Empty (the default for a config written before this setting) is the zone
+the bridge's process runs in: `TZ`, else the system's. On a native
+install that is your machine's. In the core container it is the `TZ`
+that `fridolin core start` passes in: the host's zone (on macOS the
+`/etc/localtime` link, on Linux `/etc/timezone` or `timedatectl`, on
+Windows its zone mapped to the IANA name), or `FRIDOLIN_TZ` when that is
+set in the shell; without either the container runs in UTC.
+`fridolin init` writes the machine's zone into a new config, unless it is UTC (the container's default), which it leaves unset.
+`fridolin doctor` says which zone schedules run in, and warns when it is
+unset and the bridge runs in UTC, or when it differs from the process's
+`TZ`.
+
+Daylight saving changes keep the wall clock: a `"daily 21:00"` agent runs
+at 21:00 on both sides of a change. A time the clocks skip in spring
+(02:30 when they jump from 02:00 to 03:00) runs once, at 03:00; a time
+they show twice in autumn runs once, at its first showing.
+
 ## AI mode
 
 ### `agent_provider`
