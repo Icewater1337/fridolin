@@ -30,7 +30,15 @@ darwin internal/app ^Test(Sandbox|SiteAPISecrets|ExampleConfigIsValid|GoldenStar
 # (docs/CORE.md), so the native binary is the node agent and the host CLI
 # and the libraries under them (docs/DECISIONS.md). These packages pass on
 # Windows; one joins the list once its tests do.
-windows internal/app ^$       # only its tests for Windows (^$ adds none)
+#
+# Built from other files on Windows, but not passing there yet: fixtures
+# write Windows paths into JSON unescaped (cli), tests expect POSIX modes
+# and paths (fsx, snapshot), and fsx.Resolve and Canonical turn
+# C:\Users\… into \C:Users\…. Each joins once it passes.
+windows internal/app -        # no tests of its own for Windows
+windows internal/cli -
+windows internal/fsx -
+windows internal/snapshot -
 windows internal/access
 windows internal/activity
 windows internal/apperr
