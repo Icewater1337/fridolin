@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -235,6 +236,37 @@ func TestOTPHandoffExpires(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("a removed hand-off came back (%v)", err)
 	}
+}
+
+// A code whose removal fails at its expiry (on Windows, while a script
+// reads the file) goes once it can be removed.
+func TestOTPHandoffExpiresAfterAFailedRemoval(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("a read-only folder does not keep its files from being removed here")
+	}
+	dir := filepath.Join(t.TempDir(), "otp")
+	path := filepath.Join(dir, "a.json")
+	var o Handoff
+	t.Cleanup(o.Stop)
+	h := Record{Brain: "a", Code: "111111", ReceivedUnixMS: 1, ExpiresUnixMS: time.Now().Add(time.Hour).UnixMilli()}
+	if err := o.Write(dir, h); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+	o.expire(path, h.ReceivedUnixMS)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("removed from a read-only folder: %v", err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	waitForOTP(t, 5*time.Second, "the code to expire once it can be removed", func() bool {
+		_, err := os.Stat(path)
+		return os.IsNotExist(err)
+	})
 }
 
 // A script takes the code of its own request, once; a code for another

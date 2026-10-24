@@ -1,0 +1,17 @@
+Join code fj-abcd1234, valid once until 14:05 (core fridolin-core.example.ts.net:8766).
+On the new machine, paste one line:
+
+A node in a box (Docker; it asks for the rest):
+  macOS, Linux (sh):
+    curl -fsSL https://raw.githubusercontent.com/OWNER/fridolin/COMMIT/container/box.sh | sh -s -- --registry ghcr.io/owner --version abcd1234 --core fridolin-core.example.ts.net:8766 --code fj-abcd1234
+  Windows (PowerShell):
+    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/OWNER/fridolin/COMMIT/container/box.ps1))) -Registry ghcr.io/owner -Version abcd1234 -Core fridolin-core.example.ts.net:8766 -Code fj-abcd1234
+
+Or natively, with fridolin installed on it:
+  macOS, Linux (sh):
+    fridolin node join fj-abcd1234 --core fridolin-core.example.ts.net:8766
+  Windows (PowerShell):
+    & "$env:ProgramFiles\fridolin\fridolin.exe" node join fj-abcd1234 --core fridolin-core.example.ts.net:8766
+
+Add --root PATH[:rw] to share a folder, --no-exec to allow no commands (docs/NODES.md).
+Then approve it here: fridolin nodes approve <id>, and fridolin nodes approve <id> --commands

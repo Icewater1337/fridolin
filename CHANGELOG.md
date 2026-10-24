@@ -854,6 +854,23 @@ for compatibility.
 
 ### Fixed
 
+- A node in a box on a host without Tailscale (a fresh server) joins at
+  the first try: the join dialed the core before the box's first netmap
+  named it, the host's DNS then found no such host, and box.sh stopped
+  with "joining failed". The join now waits up to 30 seconds for the
+  tailnet to know the core.
+- The box's updater no longer makes the node's volume before `docker
+  compose` does (box.sh starts the updater first). Such a volume made
+  every compose command warn that it "was not created by Docker
+  Compose", and `docker compose down -v` left it, with the node's key,
+  behind. A box that has one keeps it; `docker volume rm fridolin-node`
+  after `down -v` removes it.
+- `fridolin nodes join-code` prints the line for a node in a box first,
+  as `!join` does, when the core knows where its box script is
+  published.
+- `fridolin node status` in a box says it has no service of its own
+  instead of "unknown: exit status 1".
+
 - A brain folder that a core move put on another machine goes back
   through the vault bucket only as far as the brain's backup settings
   let it, as on its way there. The export from the other machine took
