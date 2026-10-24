@@ -929,6 +929,22 @@ line) and what stays home, and uploads nothing: check it for what must
 not leave the machine, and widen the brain's `backup.exclude` where it
 does not catch something.
 
+The backup settings that decide are those of the manifest you approved
+in the dashboard, which `config.json` holds, not `brain.json` on disk: an
+edit to `brain.json` counts once you approve it. `--list-folders`,
+`export`, `fridolin doctor` (check `brain-drift`) and, before the
+transfer, `fridolin core send` print a `warning:` for each brain whose
+`brain.json` or `.brain/schedules/` files on disk differ from the approved
+manifest, saying whether the difference touches `backup.exclude`,
+`backup.enabled` or `backup.targets.cloud`. When the `brain.json` on disk
+would keep more home than the approved one (an exclude the approved one
+lacks, the backup or its cloud target turned off), you probably mean that
+to stay on this machine, so the export refuses and uploads nothing until
+you either approve the change in the dashboard (Brains), which keeps it
+home, or run it again with `--use-approved`, which takes the folder along
+by the approved manifest. `fridolin core run core export --drift` gives
+the warnings alone, and exits 1 when the export would refuse.
+
 The import on the new machine puts each folder where the brain's path
 names it when that folder is there; otherwise into the volume,
 `/data/brains-folders/<name>`, and points the brain there, keeping its

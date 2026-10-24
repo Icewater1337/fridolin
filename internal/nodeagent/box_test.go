@@ -54,6 +54,32 @@ func TestBoxJoinsAndRunsOverItsDialer(t *testing.T) {
 	}
 }
 
+// A box's first dial may come before its netmap names the core; tsnet
+// then asks the host's DNS, which does not know the name. The join waits
+// for the tailnet instead of failing (seen on a host without Tailscale).
+func TestBoxJoinWaitsForTheTailnetToKnowTheCore(t *testing.T) {
+	c := startCore(t, t.TempDir())
+	const tailnetCore = "fridolin-core.example.ts.net:8766"
+	defer func(w, r time.Duration) { tailnetNameWait, tailnetNameRetry = w, r }(tailnetNameWait, tailnetNameRetry)
+	tailnetNameWait, tailnetNameRetry = 5*time.Second, 10*time.Millisecond
+	var dials atomic.Int32
+	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if dials.Add(1) <= 3 {
+			return nil, &net.OpError{Op: "dial", Net: network, Err: &net.DNSError{Err: "no such host", Name: "fridolin-core.example.ts.net", IsNotFound: true}}
+		}
+		var d net.Dialer
+		return d.DialContext(ctx, network, c.addr)
+	}
+	_, err := Join(context.Background(), JoinOptions{Dir: t.TempDir(), Core: tailnetCore, Code: c.code(t), Name: "box",
+		Capabilities: nodeproto.Capabilities{Host: true}, Box: &BoxConfig{Hostname: BoxHostname("box")}, Dial: dial, Version: "test", Logf: t.Logf})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := dials.Load(); n != 4 {
+		t.Fatalf("dials = %d, want 3 that found no host and one that joined", n)
+	}
+}
+
 func TestBoxConfigCheck(t *testing.T) {
 	for _, tc := range []struct {
 		box *BoxConfig
