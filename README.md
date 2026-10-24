@@ -102,8 +102,10 @@ some other way.
 is linked to — the brains' folders, their media, the folders nodes lend —
 and opens Markdown, text, images, PDFs, audio and video; the Wiki page reads
 each brain's `wiki/` and memory notes, with links between pages, backlinks
-and search. Read-only, every view audited, and what a backup leaves out,
-secrets and Fridolin's own state are never shown. See
+and search. You edit files and pages in place, upload (or hand uploads to
+the brain), rename, move and delete, each audited and committed where a
+brain's folder is a git repository; what a backup leaves out, secrets and
+Fridolin's own state are never shown or changed. See
 [docs/FILES.md](docs/FILES.md).
 
 **Your own site.** Optionally, a website of your own on your domain, linked

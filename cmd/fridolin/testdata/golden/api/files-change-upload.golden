@@ -1,0 +1,19 @@
+POST /api/files/upload?root=brain:main&path=docs
+200 OK
+Content-Type: application/json
+
+{
+  "files": [
+    {
+      "name": "scan one.pdf",
+      "path": "docs/scan one.pdf",
+      "size": 6
+    },
+    {
+      "name": "env",
+      "path": "docs/env",
+      "size": 1
+    }
+  ],
+  "to": "folder"
+}

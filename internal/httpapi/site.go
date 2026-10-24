@@ -39,6 +39,7 @@ type SiteService interface {
 	SetGoogleClient(data []byte) error
 	SetRoles(roles []string) error
 	SetRoleBrains(brains map[string][]string) error
+	SetRoleUploads(brains map[string][]string) error
 	CheckDomain(ctx context.Context) sitesvc.DomainCheck
 	SetSecret(module, name, value string) error
 	SetTunnelToken(token string) error
@@ -227,8 +228,10 @@ func (a *SiteAPI) Roles(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		// Roles replaces the list when given.
 		Roles []string `json:"roles"`
-		// Brains sets the brains of the roles it names (docs/FILES.md).
-		Brains map[string][]string `json:"brains"`
+		// Brains sets the brains of the roles it names (docs/FILES.md),
+		// Uploads the brains they may upload to.
+		Brains  map[string][]string `json:"brains"`
+		Uploads map[string][]string `json:"uploads"`
 	}
 	if err := DecodeJSON(r, &req); err != nil {
 		WriteErr(w, http.StatusBadRequest, err.Error())
@@ -246,8 +249,14 @@ func (a *SiteAPI) Roles(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.Uploads != nil {
+		if err := a.Site().SetRoleUploads(req.Uploads); err != nil {
+			WriteErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	s := a.Site().Settings()
-	WriteJSON(w, http.StatusOK, SiteRolesResponse{Roles: s.Roles, RoleBrains: s.RoleBrains})
+	WriteJSON(w, http.StatusOK, SiteRolesResponse{Roles: s.Roles, RoleBrains: s.RoleBrains, RoleUploads: s.RoleUploads})
 }
 
 // CheckDomain asks the domain, through the internet, whether the site

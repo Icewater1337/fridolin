@@ -18,7 +18,7 @@ Content-Type: application/json
       "location": "core",
       "online": true,
       "path": "<HOME>/main",
-      "writable": false
+      "writable": true
     }
   ]
 }

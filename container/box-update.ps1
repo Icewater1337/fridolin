@@ -29,6 +29,11 @@ try {
     if ($LASTEXITCODE -ne 0) { exit 0 }
     $current = EnvValue "FRIDOLIN_BOX_NODE_IMAGE"
     if (-not $current) { exit 0 }
+    # Until docker compose made the node's volume (box.ps1 installs the
+    # updater first), there is nothing to update; a docker run -v here would
+    # make the volume outside compose, which then never removes it with down -v.
+    docker volume inspect $volume *> $null
+    if ($LASTEXITCODE -ne 0) { exit 0 }
     $answer = docker run --rm -v "${volume}:/node" --entrypoint /opt/fridolin/fridolin $current box pending --state-dir /node 2>> update.log
     if ($LASTEXITCODE -eq 3) { exit 0 }
     if ($LASTEXITCODE -ne 0) { Log "the core's request was refused (above); nothing changed"; exit 0 }

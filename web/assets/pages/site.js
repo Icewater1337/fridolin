@@ -668,33 +668,41 @@ export default {
       const s = st.settings;
       paint(builtinBox, {
         base: st.public_url ? st.public_url.replace(/\/$/, '') : (st.site.local_url || '').replace(/\/$/, ''),
-        roles: s.roles, map: s.role_brains || {}, brains: brains.map((b) => ({ id: b.id, label: brainLabel(b) })),
+        roles: s.roles, map: s.role_brains || {}, uploads: s.role_uploads || {}, brains: brains.map((b) => ({ id: b.id, label: brainLabel(b) })),
       }, renderBuiltin);
     }
 
-    function renderBuiltin({ base, roles, map, brains: list }) {
-      const roleRow = (role) => {
-        const chosen = new Set(map[role] || []);
-        return h('tr', h('td', h('strong', role)), h('td', h('div.site-brain-picks', list.map((b) => toggle({
+    function renderBuiltin({ base, roles, map, uploads, brains: list }) {
+      // One column of toggles: the brains a role sees (key "brains"), or
+      // those it may upload to ("uploads"), of those it sees.
+      const picks = (role, key, from, msg) => {
+        const chosen = new Set((key === 'brains' ? map : uploads)[role] || []);
+        return h('div.site-brain-picks', from.map((b) => toggle({
           checked: chosen.has(b.id), label: b.label,
           onChange: async (want, input) => {
             const next = list.map((x) => x.id).filter((id) => (id === b.id ? want : chosen.has(id)));
             try {
-              await put('/api/site/roles', { brains: { [role]: next } });
-              toast(want ? `${role} sees ${b.label}` : `${role} no longer sees ${b.label}`, 'ok');
+              await put('/api/site/roles', { [key]: { [role]: next } });
+              toast(msg(want, b.label), 'ok');
               await refresh();
             } catch (e) { input.checked = !want; toastError(e); }
           },
-        })))));
+        })));
+      };
+      const roleRow = (role) => {
+        const sees = list.filter((b) => (map[role] || []).includes(b.id));
+        return h('tr', h('td', h('strong', role)),
+          h('td', picks(role, 'brains', list, (want, label) => (want ? `${role} sees ${label}` : `${role} no longer sees ${label}`))),
+          h('td', sees.length ? picks(role, 'uploads', sees, (want, label) => (want ? `${role} may upload to ${label}` : `${role} no longer uploads to ${label}`)) : h('span.muted.small', '—')));
       };
       const others = roles.filter((r) => r !== 'admin');
       return [
         h('p.small', 'Every Fridolin’s site has two pages of its own: ',
           base ? h('a', { href: `${base}/files`, target: '_blank', rel: 'noopener noreferrer' }, 'Files') : 'Files', ', the brains’ folders to browse and open, and ',
           base ? h('a', { href: `${base}/wiki`, target: '_blank', rel: 'noopener noreferrer' }, 'Wiki') : 'Wiki',
-          ', their wiki/ and memories/ pages. Someone who signs in sees the brains their role is given here; admins see every brain. What a brain’s backup leaves out, secrets, chat histories and Fridolin’s own state are never shown, and every view is written to the audit log.'),
+          ', their wiki/ and memories/ pages. Someone who signs in sees the brains their role is given here; admins see every brain, and edit, upload, rename and delete there as you do here. A role may upload to a brain it sees, into the folders the brain takes uploads in: choose those on the Files page, in each folder. What a brain’s backup leaves out, secrets, chat histories and Fridolin’s own state are never shown, and every view and change is written to the audit log.'),
         !list.length ? callout('info', 'No brains yet', 'Add a brain first; its folder and wiki then show here.')
-          : others.length ? h('div.table-wrap', h('table.table', h('thead', h('tr', h('th', 'Role'), h('th', 'Brains it sees'))), h('tbody', others.map(roleRow))))
+          : others.length ? h('div.table-wrap', h('table.table', h('thead', h('tr', h('th', 'Role'), h('th', 'Brains it sees'), h('th', 'May upload to'))), h('tbody', others.map(roleRow))))
             : callout('info', 'Only admins so far', 'Add a role under People → Roles to share brains with others.'),
       ];
     }

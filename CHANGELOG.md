@@ -25,6 +25,35 @@ for compatibility.
   not allow their program. Nothing changes for a node without
   `accept_from_core`; its folders wait for your approval on the Nodes
   page like any other new rule.
+- **Files and Wiki, phase 2** (#192, #194; docs/FILES.md, "Changing
+  files"): edit a text or Markdown file, or a wiki page, in place;
+  upload into a folder; make a file; rename, move and delete (into the
+  folder's `.fridolin-trash`), each after asking where it matters, on
+  the dashboard and, for a site admin, on the site. Every change is an
+  audit line of the new kind `file_change`, listed as the file's
+  History, and is committed where the brain's folder is a git
+  repository (git in the brain's sandbox, hooks off). A brain's
+  `files.uploads` in `brain.json` names folders that take uploads from
+  the site roles you let upload (Site → Files and Wiki, *May upload
+  to*; `role_uploads` in the site's settings), and whether an upload
+  lands there or goes to the brain like a file sent on WhatsApp. A
+  file's page has *Ask the brain* (a WhatsApp chat with the question
+  begun) and copies its link on your site.
+- **Old site addresses**: `modules/redirects.json` in the site
+  repository sends paths that moved, `/wiki-<x>` say, to their new
+  place (docs/SITE.md, "Old addresses").
+
+- **Core export says when a brain folder is not as you approved it**
+  (#189): `core export`, `--list-folders`, `fridolin doctor` (new check
+  `brain-drift`) and `core send` print a warning for each brain whose
+  `brain.json` or `.brain/schedules/` files on disk differ from the
+  approved manifest, naming the `backup.exclude`, `backup.enabled` and
+  `backup.targets.cloud` changes. The export refuses while a `brain.json`
+  on disk keeps more of its folder home than the approved manifest:
+  approve the change first, or pass the new `--use-approved` to take the
+  folder along by the approved one. `core export --drift` gives the
+  warnings alone. Scripts that run `core export` should expect exit 1
+  for such a refusal.
 - **Voice mode for the Plaud Sync app** (docs/PLAUD.md, "Voice mode"):
   with `plaud.voice` on and the app's switch on, a NotePin recording or
   a question spoken into the phone goes to `plaud.voice_brain` (default
@@ -857,6 +886,23 @@ for compatibility.
   folder of the calendar tokens; nothing in `tools/` read it any more.
 
 ### Fixed
+
+- A node in a box on a host without Tailscale (a fresh server) joins at
+  the first try: the join dialed the core before the box's first netmap
+  named it, the host's DNS then found no such host, and box.sh stopped
+  with "joining failed". The join now waits up to 30 seconds for the
+  tailnet to know the core.
+- The box's updater no longer makes the node's volume before `docker
+  compose` does (box.sh starts the updater first). Such a volume made
+  every compose command warn that it "was not created by Docker
+  Compose", and `docker compose down -v` left it, with the node's key,
+  behind. A box that has one keeps it; `docker volume rm fridolin-node`
+  after `down -v` removes it.
+- `fridolin nodes join-code` prints the line for a node in a box first,
+  as `!join` does, when the core knows where its box script is
+  published.
+- `fridolin node status` in a box says it has no service of its own
+  instead of "unknown: exit status 1".
 
 - A brain folder that a core move put on another machine goes back
   through the vault bucket only as far as the brain's backup settings

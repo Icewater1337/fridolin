@@ -63,6 +63,26 @@
         "consolidate": {"type": "string", "pattern": "^$|^\\s*(([Ww][Ee][Ee][Kk][Ll][Yy]\\s+)?[A-Za-z]{3,9}|[Dd][Aa][Ii][Ll][Yy])\\s+[0-9]{1,2}:[0-9]{2}\\s*$", "description": "When the brain runs skills/memory-consolidation.md: \"weekly sun 18:00\" or \"daily 07:00\", in the bridge's time zone; empty never."}
       }
     },
+    "files": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How the Files page and the site take uploads into the brain's folder (docs/FILES.md, Uploads).",
+      "properties": {
+        "uploads": {
+          "type": ["array", "null"],
+          "description": "The folders, with their subfolders, that take uploads from the site roles allowed to upload to this brain. You upload anywhere from the dashboard.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["folder"],
+            "properties": {
+              "folder": {"type": "string", "maxLength": 200, "pattern": "^[^./\\\\][^/\\\\]*(/[^./\\\\][^/\\\\]*)*$", "description": "Relative to the brain folder, with / between names, none starting with a dot."},
+              "to_brain": {"type": "boolean", "description": "Hand an upload to the brain, as a file sent on WhatsApp, instead of leaving it in the folder. Default false."}
+            }
+          }
+        }
+      }
+    },
     "schedules": {
       "type": "array",
       "maxItems": 50,

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/nodeagent"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
@@ -132,5 +133,18 @@ func TestWorkstationFlags(t *testing.T) {
 	out.Reset()
 	if code := nodeCmd([]string{"workstation", "off", "--state-dir", state}, &out, &errOut); code != 0 || !strings.Contains(out.String(), "offers: host\n") {
 		t.Fatalf("workstation off: %d %q", code, out.String())
+	}
+}
+
+func TestStatusOfANodeInABox(t *testing.T) {
+	dir := t.TempDir()
+	if err := nodeagent.SaveConfig(dir, nodeagent.Config{Core: "core:8766", Name: "box", Box: &nodeagent.BoxConfig{Hostname: "fridolin-box-box"}}); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	// A box has no service manager to ask: docker compose runs it.
+	if code := nodeCmd([]string{"status", "--state-dir", dir}, &out, &errOut); code != 0 ||
+		!strings.Contains(out.String(), "Service: none, a node in a box") || strings.Contains(out.String(), "unknown") {
+		t.Errorf("status: exit %d: %s %s", code, out.String(), errOut.String())
 	}
 }

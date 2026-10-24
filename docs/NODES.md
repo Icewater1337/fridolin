@@ -626,12 +626,16 @@ side by side, with different node ids.
 1. **Docker.** Windows and macOS: Docker Desktop (Windows: `winget install
    --id Docker.DockerDesktop -e`, one UAC prompt and its terms on the
    first start; set it to start at sign-in, so the box comes back after
-   a restart). Linux: Docker Engine with the compose plugin. OrbStack
-   works on macOS.
+   a restart). Linux: Docker Engine with the compose plugin (Ubuntu:
+   `sudo apt-get install -y docker.io docker-compose-v2`; or Docker's
+   own packages), and Docker for the user who runs the line (`sudo
+   usermod -aG docker $USER`, then log in again; or run it as root).
+   OrbStack works on macOS. The host needs no Tailscale.
 2. **The line from `!join`.** The owner sends `!join` to fridolin in
    their WhatsApp chat. A core that knows where its box script is
    published (an image CI built, or `fridolin core build` of a clean
-   checkout of a GitHub repository) answers with a line for a box first:
+   checkout of a GitHub repository) answers with a line for a box first
+   (`fridolin nodes join-code` on the core prints the same):
 
    ```bash
    curl -fsSL https://raw.githubusercontent.com/OWNER/fridolin/COMMIT/container/box.sh | sh -s -- \
@@ -646,7 +650,9 @@ side by side, with different node ids.
    ```
 
    The script is the one of the core's own commit, and the images are
-   of the core's version.
+   of the core's version. Run it in a terminal: it asks its questions
+   on the terminal, also when it came through the pipe (over SSH: `ssh
+   -t`).
 3. **What the script does**, after saying so and asking:
    - pulls both images and pins them by digest in `.env`, beside the
      compose file it writes from the image (`fridolin box compose`), in
@@ -655,13 +661,21 @@ side by side, with different node ids.
      ([CORE.md](CORE.md#on-ghcr));
    - signs the box in to the tailnet (`fridolin node tailnet`): it
      prints a Tailscale link the owner opens and signs in to with the
-     account of the core's tailnet, or uses `TS_AUTHKEY` when set;
+     account of the core's tailnet, or uses `TS_AUTHKEY` when set.
+     Export it before the line (`export TS_AUTHKEY=…`, read from a
+     password manager, not typed into a shared shell's history): in
+     `TS_AUTHKEY=… curl … | sh` it would reach `curl` only. A key with
+     tags makes the box a device of those tags, which the tailnet's
+     policy must let reach `fridolin-core`;
    - joins the core with the code (`fridolin node join CODE --core …
      --box`). A code works once, within 10 minutes; if it ran out while
      the tailnet sign-in took long, send `!join` again and run the line
      with the new code;
    - starts the box (`docker compose up -d`) and installs its updater
-     ([Box updates](#box-updates); `--no-updater` leaves it out);
+     ([Box updates](#box-updates); `--no-updater` leaves it out). On
+     Linux the updater is a systemd user timer, which runs only while
+     the user is logged in unless lingering is on: `sudo loginctl
+     enable-linger $USER` (the script reminds you);
    - FrIDE: runs `claude setup-token` in the `fride` container (open its
      link and sign in), takes the token it shows without echo and stores
      it in FrIDE's volume, asks for the git name and email the agents
@@ -737,7 +751,10 @@ disable --now fridolin-box-updater.timer` (Linux), `crontab -e`, or
 **Removing**: `docker compose down -v` in the box's folder deletes the
 containers, the network and the volumes (the node's key, the backups in
 the volume, FrIDE's workspaces), then `!revoke ID` on the core. A backups
-folder on the host stays.
+folder on the host stays. A box made before its updater waited for the
+volume may have a `fridolin-node` volume compose did not make (compose
+warns so on every command), which `down -v` leaves: `docker volume rm
+fridolin-node`.
 
 **Repositories for FrIDE** live in its own container, which the node
 cannot reach, so the core's `fride_repo_add` does not work for a box:

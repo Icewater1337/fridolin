@@ -40,6 +40,7 @@ Content-Type: application/json
     "title": "Alex",
     "toc": []
   },
+  "editable": true,
   "page": {
     "mod_time": "<MOD_TIME>",
     "name": "people/alex",
