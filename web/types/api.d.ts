@@ -658,20 +658,20 @@ export interface NodeCapabilities {
 export interface CoreHostCap {
   /** A node in a box. */
   box?: boolean;
-  /** SHA-256 of the node's core-host.json, hex; an approval covers this one. */
+  /** SHA-256 of the node's core-host.json, hex. */
   hash: string;
-  /** The device ids it encrypts host secrets to. */
+  /** The device ids it pins. */
   send_to?: string[];
 }
 
 /** How the fleet shows a core host (nodes.CoreHostView). */
 export interface CoreHostView {
-  /** Its core-host.json waits for the owner's approval. */
-  pending: boolean;
+  /** The owner confirmed it: their vote on a move to it. */
+  confirmed: boolean;
   /** The device key's, to compare with `fridolin node core-host show`. */
   fingerprint: string;
   send_to: string[];
-  /** What approving it means, in words. */
+  /** What moving the core there means, in words. */
   approval: string;
 }
 

@@ -408,7 +408,7 @@ node's id last, for reference.
 
 Everything that waits for the owner is told in their direct chat the same
 way, and answered with one word: a node's device, what a node offers
-(core-host and fride among it, each with what approving it means), a
+(fride among it, with what approving it means), a
 brain's [scheduled agent, changed brain.json or
 skill](BRAINS.md#approval) (for an agent that runs a program on a node,
 also what approving does to that node's allowlist, or why the program
@@ -438,7 +438,7 @@ list.
 - Something the owner did not start is flagged *Unexpected*: a node whose
   join code came neither from `!join` nor from the dashboard (or
   `fridolin nodes join-code`, which goes through it), a node asking for
-  more or for core-host on its own, a file a brain wrote into its own
+  more on its own, a file a brain wrote into its own
   folder. `!approve` alone then asks once more: "reply !approve again
   within 2 minutes". So does something that waited longer than a day,
   and something the owner was never shown (the alert comes first). A
@@ -496,7 +496,7 @@ another. `fridolin node status` shows it.
 | `android-build` (`android_build`) | `android.build`, `android.read`, `android.drop` | builds an Android app with Gradle, while the node has a JDK 17+ and the Android SDK: see [android-build](#android-build) below |
 | `backup` | `fs.roots`, `fs.browse`, `backup.*` | keeps the core's restic repositories in folders the owner picks: see [Backups](#backups) below |
 | `agent`, `terminal` | `agent.*`, `terminal.*` | a Claude Code or Codex session, and a shell, in folders the owner granted: see [Workstation](#workstation) below |
-| `core-host` (`core_host`) | `core.check`, `core.secrets.*` | a machine the core may move to, which holds host secrets for it; turned on in `core-host.json`, not `node.json`: see [core-host](#core-host) below |
+| `core-host` (`core_host`) | `core.check`, `core.secrets.*` | a machine the core may move to, which holds host secrets for it; on unless `core-host.json` turns it off (not `node.json`), and needs no approval: see [core-host](#core-host) below |
 
 **exec rules.** `name` is `argv[0]` exactly: a bare program name, which
 the node looks up in its `PATH`, or an absolute path. `args` `null` allows
@@ -874,12 +874,9 @@ and the move's pre-flight refuses a box whose sandbox does not start.
 Settings you add to `.env` (the ports, memory, AppArmor, `FRIDOLIN_TZ`)
 stay across `box.sh --update`.
 
-**Making it a core host.** As on any machine, two keys: on the box's
-host, in its folder, `docker compose exec node fridolin node core-host
-on --state-dir /node` (and `… core-host show`, `… core-host trust ID
---key KEY` for the targets it sends to on the way back), then the
-owner's `!approve`. The source pins the box's device key as for any
-target ([core-host](#core-host)).
+**Making it a core host.** Nothing to do: a box, like every approved
+node, is a core host unless core-host is off there, and the owner's vote
+on the first `!movecore <box>` confirms it ([core-host](#core-host)).
 
 **A move to the box** is the same move ([CORE.md, "The core moves
 itself"](CORE.md#the-core-moves-itself)): `!movecore <box>` or `fridolin
@@ -1825,47 +1822,50 @@ from WhatsApp: `!movecore <node>`, a report and a poll ([CORE.md,
 `core send`/`receive` stay for a manual move and for an old machine that
 is gone.
 
-It needs two keys:
+**Every node is a core host** unless its owner turns it off on that
+machine, and it needs no approval of its own:
 
-1. **On the machine**, in a terminal there: `fridolin node core-host on`.
-   It writes `core-host.json` in the node's state dir, never
-   `node.json`: the core cannot turn it on, and a `node.json` that names
-   `core_host` does not load. The agent declares the file's SHA-256
-   within a minute, without a restart.
-2. **On the core**, the owner's approval: `!approve ID`, **Approve what
-   it offers** on the Nodes page, or `fridolin nodes approve ID
-   --commands`. Each says first what it means:
+1. **On the machine**, nothing. A node without `core-host.json` in its
+   state dir offers core-host; `fridolin node core-host off` there
+   writes that file and stops it, `on` turns it on again. The core
+   cannot change it: it is not `node.json`, and a `node.json` that
+   names `core_host` does not load.
+2. **The owner's vote** on the first move to the machine confirms it as
+   a core host: `!movecore <node>` says in its report that the machine
+   never held the core and what that means
+   (`nodeproto.CoreHostApproval`), and "Move now" records the
+   confirmation (`core_host_confirmed_at` in the registry). Only that
+   vote, in the owner's WhatsApp chat, sets it: approving a node's
+   commands on the dashboard or with `fridolin nodes approve` does not,
+   and `fridolin nodes move`, `POST /api/nodes/move` and the transfer
+   below refuse a machine that is not confirmed. A core host approved
+   before this version counts as confirmed. Revoking a node drops it.
 
-   > core-host lets fridolin move the core to this machine. The machine
-   > then holds every host secret: the B2 keys, the age identity and
-   > export key (all exports and the WhatsApp session), the Claude token.
-   > Approve only a machine you trust as much as the one that runs the
-   > core now.
-
-   The owner's WhatsApp chat hears of every node that asks for it, with
-   its device key's fingerprint and the targets it trusts.
-
-An approval covers one `core-host.json`: every change of the file (on
-again, a target trusted or no longer trusted) waits for the owner's
-approval again, and the chat hears of it ("changed its core-host
-settings"). A FrIDE task on the same machine can write that file; it
-cannot approve the change. `!fleet`, `fridolin nodes` and the Nodes page
-show `core-host` and whether it waits; the Nodes page, and `fridolin
-nodes` while it waits, the device key's fingerprint too.
+`!fleet`, `fridolin nodes` and the Nodes page show `core-host`; the
+Nodes page also shows the device key's fingerprint and whether the
+owner confirmed it, and `!movecore` alone lists every core host the
+core could move to.
 
 ```sh
-fridolin node core-host show                 # on, the device id, key and fingerprint, the pins
-fridolin node core-host on | off
-fridolin node core-host trust ID --key KEY [--name NAME]
+fridolin node core-host show                 # on or off, the device id, key and fingerprint, the pins
+fridolin node core-host off | on
+fridolin node core-host trust ID --key KEY [--name NAME]    # optional: pin a target
 fridolin node core-host untrust ID
 ```
 
-**Trusting a target.** A source sends its secrets only to a target whose
-device key it pinned *on the source machine*. On the target, `fridolin
-node core-host show` prints the line to run on the source, `fridolin
-node core-host trust ID --key KEY`; `trust` checks that the key is ID's
-(the device id is derived from it) and prints its fingerprint, which the
-owner compares with what the target and the core's alert show.
+**Whose key the secrets go to.** A source encrypts its secrets only to
+an offer signed by the target's device key. That key is the one the
+core approved when the target joined, and the core names it to the
+source in `core.secrets.send` (`target_key`) only for a target the owner
+confirmed. The source checks that the key is the target's (the device
+id is derived from it) and that it signed the offer. A core that named
+another key would gain nothing: it runs with these secrets already. A
+pin (`fridolin node core-host trust` on the source, with the key
+`core-host show` prints on the target) wins over the key the core names,
+and lets the secrets go to that target without the owner's
+confirmation; it is no longer needed for a move. A source that runs a
+fridolin from before this sends to pinned targets only, and the
+pre-flight says to update it (`core.check`'s `trusts_core`).
 
 **Moving the secrets.** On the core:
 
@@ -1876,16 +1876,17 @@ fridolin nodes core-secrets-transfer SRC DST --yes --replace   # let a value rep
 ```
 
 (`POST /api/nodes/core-secrets-transfer` with `source`, `target`, `run`,
-`replace`.) Both nodes must be approved for core-host and online, and SRC
-must pin DST. Then:
+`replace`.) Both devices must be approved and online, and DST pinned by
+SRC or confirmed by the owner. Then:
 
 1. DST (`core.secrets.offer`) makes a one-time post-quantum age key
    (ML-KEM-768 + X25519), held in memory for 10 minutes, and signs it,
    the move id, its device id and the expiry with its device key
    (`node.key`).
 2. SRC (`core.secrets.send`) checks that signature against the key it
-   pinned for DST, and refuses an offer it does not verify, one that
-   expired, or one for a target it does not trust. It encrypts its host
+   pinned for DST, or else the key the core names, and refuses an offer
+   it does not verify, one that expired, or one for a target it has
+   neither a pin nor a key for. It encrypts its host
    secrets (the names `core send` sends, without the Tailscale auth key)
    to the offer's key, with the secret files of its core's
    credentials folder ([CORE.md](CORE.md#the-core-moves-itself),
@@ -1898,11 +1899,10 @@ must pin DST. Then:
    into the same folder under its core's home, 0600, never over one
    there.
 
-The core relays the offer and the ciphertext and sees names only: it
-cannot swap in a key of its own, since the source checks the signature
-against its own pin. Both sides append a line per step to
-`secrets-transfer.log` in the state dir (`"via": "node-channel"`), names
-only. `core.secrets.forget` removes on a machine what moves brought it
+The core relays the offer and the ciphertext and sees names only. Both
+sides append a line per step to `secrets-transfer.log` in the state dir
+(`"via": "node-channel"`; the source's says `"trust": "pin"` or
+`"core"`), names only. `core.secrets.forget` removes on a machine what moves brought it
 and it did not hold before, never what was there: the host secrets it
 received over the node channel, the secret files they wrote, and the
 core's data dir when a move's import put it into an empty one, once

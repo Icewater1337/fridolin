@@ -166,9 +166,8 @@ func (b *App) dashboardCommand(record func(id, outcome string)) string {
 func (b *App) nodeCommand(command, id string, record func(id, outcome string)) string {
 	var n *nodes.Node
 	var err error
-	coreHost, fride := false, false
+	fride := false
 	if cur, err := b.nodes.Registry().Get(id); err == nil {
-		coreHost = cur.Declared.CoreHost != nil && !nodeproto.Covers(cur.Approved, nodeproto.Capabilities{CoreHost: cur.Declared.CoreHost})
 		fride = nodes.FridePending(cur)
 	}
 	var forgot *nodes.CoreForget
@@ -202,19 +201,11 @@ func (b *App) nodeCommand(command, id string, record func(id, outcome string)) s
 		return reply
 	}
 	reply := outboundmsg.NodeApprovedReply(n.Name, n.ID, n.Effective().Plain())
-	if coreHost && n.Effective().CoreHost != nil {
-		reply += "\n\n" + outboundmsg.NodeCoreHostApprovedNote(nodeproto.CoreHostApproval)
-	}
 	if fride && n.Effective().Fride != nil {
 		reply += "\n\n" + outboundmsg.NodeFrideApprovedNote(nodeproto.FrideApproval)
 	}
 	return reply
 }
-
-// nodeCoreHost tells the owner, in their direct chat, that node n asks
-// for core-host, or changed its core-host.json, which waits for approval:
-// as every approval, in alertPendingApprovals.
-func (b *App) nodeCoreHost(*nodes.Node) { b.alertPendingApprovals(context.Background()) }
 
 // nodeJoined tells the owner, in their direct chat, that a machine joined
 // with a join code and waits for approval.

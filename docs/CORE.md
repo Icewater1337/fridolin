@@ -262,13 +262,15 @@ appends a line to `secrets-transfer.log` beside its compose file: the
 time, the direction, the other device and its login, the names stored or
 unchanged, the result, never a value.
 
-Between two nodes approved for `core-host`, `fridolin nodes
-core-secrets-transfer SRC DST --yes` on the core moves the same names
-over the node channel instead, end to end between the two node agents:
-the target signs a one-time key with its device key, and the source
-encrypts only to a key it pinned on its own machine (`fridolin node
-core-host trust`), so nobody compares four words. docs/NODES.md,
-"core-host", has the details.
+Between two core hosts (every approved node is one unless it turned
+core-host off), a core move, or `fridolin nodes core-secrets-transfer
+SRC DST --yes` on the core, moves the same names over the node channel
+instead, end to end between the two node agents: the target signs a
+one-time key with its device key, and the source encrypts only to the
+device key the core approved at the target's join, once the owner
+confirmed the target with their `!movecore` vote (or to a key it pinned
+itself), so nobody compares four words. docs/NODES.md, "core-host", has
+the details.
 
 
 The post-quantum age identity and the export key encrypt every export.
@@ -751,9 +753,13 @@ fridolin nodes move SRC DST --yes       # move the core, and follow it to its en
 fridolin nodes move-status ID           # how move ID went (GET /api/nodes/moves/{id})
 ```
 
-**Before.** SRC and DST are core hosts the owner approved, both online,
-and SRC pins DST's device key (`fridolin node core-host trust` on SRC).
-For the way back, DST pins SRC the same way. Both run the core's version
+**Before.** SRC and DST are approved nodes, both online, neither with
+core-host turned off. A DST that never held the core needs the owner's
+vote: `!movecore DST` says so in its report, and "Move now" confirms
+it; `fridolin nodes move` and `POST /api/nodes/move` refuse it until
+then (a stolen dashboard session alone cannot send the secrets to a new
+machine). The way back to a machine that ran the core before this
+version is confirmed already. Both run the core's version
 (`fridolin nodes update ID` first). Each is a native host or a box
 ([below](#moving-the-core-to-a-box)); a native Windows node service
 cannot reach the owner's Docker Desktop and refuses with a reason (make
@@ -917,10 +923,13 @@ tool for it):
   first): "Moving the core…", then "Stopping the core on SRC now", then
   the end, from whichever core runs. During a lockdown `!movecore` is
   refused, and a "Move now" from before is a no.
+- **The first move to a machine** that never held the core says so in
+  the report ("🔐 … has never held the core", and what that means), and
+  the owner's "Move now" is what confirms it as a core host: the core
+  then names its device key to the source. Nothing on either machine
+  needs to be run first.
 - **The way back** is the same command the other way round:
-  `!movecore mac-mini`. DST must pin SRC first
-  (`fridolin node core-host trust` on DST), a change of DST's
-  `core-host.json` the owner approves again.
+  `!movecore mac-mini`.
 
 **Keep or forget the secrets.** After a move, the core asks in a second
 poll whether the machine it left keeps its copy of the host secrets:

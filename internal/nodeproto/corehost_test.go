@@ -13,10 +13,10 @@ const (
 	hashB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 )
 
-// core-host is approved for one core-host.json: a new hash (a new pin,
-// turned on again) waits for the owner, and meanwhile the node may serve
-// none of it.
-func TestCoreHostCoveredByItsHash(t *testing.T) {
+// core-host needs no approval of its own (the owner's vote on a move
+// confirms a core host): an approved node serves it as it declares it,
+// and it leaves the commands' approval as it is.
+func TestCoreHostNeedsNoApproval(t *testing.T) {
 	declared := Capabilities{Host: true, CoreHost: &CoreHostCap{Hash: hashA, SendTo: []string{"0123456789ab"}}}
 	if err := declared.Check(); err != nil {
 		t.Fatal(err)
@@ -24,22 +24,18 @@ func TestCoreHostCoveredByItsHash(t *testing.T) {
 	if !declared.Allows(MethodCoreSecretsSend) || (Capabilities{Host: true}).Allows(MethodCoreCheck) {
 		t.Fatal("Allows")
 	}
-	if declared.Empty() || (Capabilities{CoreHost: &CoreHostCap{Hash: hashA}}).Empty() {
-		t.Fatal("Empty")
+	if declared.Empty() || !(Capabilities{CoreHost: &CoreHostCap{Hash: hashA}}).Empty() {
+		t.Fatal("Empty: core-host alone asks for no approval")
 	}
-	if Covers(Capabilities{Host: true}, declared) {
-		t.Fatal("covered without core-host approved")
+	if !Covers(Capabilities{Host: true}, declared) {
+		t.Fatal("core-host needs an approval")
 	}
-	approved := declared
-	if !Covers(approved, declared) || Intersect(declared, approved).CoreHost == nil {
-		t.Fatal("not covered by its own approval")
+	if eff := Intersect(declared, Capabilities{}); eff.CoreHost == nil || eff.Host {
+		t.Fatalf("core-host is not served without an approval: %+v", eff)
 	}
 	changed := Capabilities{Host: true, CoreHost: &CoreHostCap{Hash: hashB}}
-	if Covers(approved, changed) {
-		t.Fatal("a changed core-host.json is covered")
-	}
-	if eff := Intersect(changed, approved); eff.CoreHost != nil || !eff.Host {
-		t.Fatalf("a changed core-host.json is served: %+v", eff)
+	if eff := Intersect(changed, declared); eff.CoreHost == nil || eff.CoreHost.Hash != hashB || !eff.Host {
+		t.Fatalf("a changed core-host.json is not served as it is: %+v", eff)
 	}
 	if got := declared.Summary(); got != "host, core-host (trusts 1 target)" {
 		t.Fatalf("summary %q", got)

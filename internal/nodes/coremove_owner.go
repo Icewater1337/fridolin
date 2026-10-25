@@ -69,17 +69,17 @@ type CoreHostState struct {
 	Name   string `json:"name"`
 	OS     string `json:"os,omitempty"`
 	Online bool   `json:"online"`
-	// Approved is core-host approved as the node offers it now; Pending
-	// is an offer that waits for the owner.
-	Approved bool `json:"approved"`
-	Pending  bool `json:"pending"`
+	// Approved is an approved device that offers core-host; Confirmed
+	// one the owner confirmed (a move to it once had their vote).
+	Approved  bool `json:"approved"`
+	Confirmed bool `json:"confirmed"`
 	// RunsCore is set for the host whose core holds the lease.
 	RunsCore bool `json:"runs_core"`
 	// Problem says why it could not be asked.
 	Problem string `json:"problem,omitempty"`
 }
 
-// CoreHosts lists the nodes that offer core-host or had it approved, and
+// CoreHosts lists the nodes that offer core-host, and
 // asks each approved one that is online whether it runs the core
 // (core.check: its data dir holds the lease).
 func (s *Service) CoreHosts(ctx context.Context) ([]CoreHostState, error) {
@@ -89,10 +89,10 @@ func (s *Service) CoreHosts(ctx context.Context) ([]CoreHostState, error) {
 	}
 	var out []CoreHostState
 	for _, n := range all {
-		if n.Device == nodeproto.DeviceRevoked || (n.Declared.CoreHost == nil && n.Approved.CoreHost == nil) {
+		if n.Device == nodeproto.DeviceRevoked || n.Declared.CoreHost == nil {
 			continue
 		}
-		st := CoreHostState{ID: n.ID, Name: n.Name, OS: n.OS, Online: s.Online(n.ID), Pending: coreHostPending(n),
+		st := CoreHostState{ID: n.ID, Name: n.Name, OS: n.OS, Online: s.Online(n.ID), Confirmed: n.CoreHostConfirmed(),
 			Approved: n.Device == nodeproto.DeviceApproved && n.Effective().CoreHost != nil}
 		if st.Approved && st.Online {
 			var c nodeproto.CoreCheckResult

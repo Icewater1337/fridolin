@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/audit"
+	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/nodes"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/store"
@@ -146,11 +147,11 @@ func (b *App) coreMoveTargets() string {
 		if src != nil && h.ID == src.ID {
 			continue
 		}
-		e := outboundmsg.CoreMoveHost{Name: h.Name, ID: h.ID, Online: h.Online, Pending: h.Pending}
+		e := outboundmsg.CoreMoveHost{Name: h.Name, ID: h.ID, Online: h.Online, New: !h.Confirmed}
 		switch {
-		case !h.Approved && !h.Pending:
-			e.Problem = "its device or its core-host is not approved"
-		case !h.Approved || !h.Online:
+		case !h.Approved:
+			e.Problem = "its device is not approved: reply !approve"
+		case !h.Online:
 		case h.Problem != "":
 			e.Problem = h.Problem
 		case src != nil:
@@ -236,7 +237,7 @@ func coreMoveCheckText(rep nodes.MoveReport, poll time.Duration) outboundmsg.Cor
 	c := outboundmsg.CoreMoveCheck{Source: rep.Source.Name, Target: rep.Target.Name, TargetID: rep.Target.ID,
 		TargetOS: rep.Target.OS, TargetArch: rep.Target.Arch, Box: rep.Target.Box, Fingerprint: rep.Target.Fingerprint,
 		Outage: rep.Outage, NotOnTarget: rep.MachineBound, Warnings: rep.Warnings, Blocking: rep.Blocking,
-		PollMinutes: int(poll / time.Minute)}
+		PollMinutes: int(poll / time.Minute), FirstTime: rep.Secrets.NeedsConfirm, FirstTimeNote: nodeproto.CoreHostApproval}
 	if rep.Site != nil {
 		c.Site = rep.Site.After
 	}
@@ -280,6 +281,9 @@ func (b *App) coreMoveDecided(a store.Approval) {
 	}
 	o := b.waits.coreMove
 	o.Approval = a.ID
+	// The owner's vote is what confirms a new core host: no other path
+	// sets it (nodes.MoveOptions.ConfirmTarget).
+	o.ConfirmTarget = true
 	rec, err := b.nodes.StartMove(ctx, src, dst, o)
 	if err != nil {
 		why := err.Error()
