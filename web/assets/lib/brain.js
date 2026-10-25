@@ -10,6 +10,9 @@ export const EFFORTS = [['', 'Inherit'], ['low', 'Low'], ['medium', 'Medium'], [
 // What a brain does with untagged group messages (brain.json "observe").
 /** @type {[string, string][]} [value, label] */
 export const OBSERVE = [['history', 'Keep them in the history'], ['run', 'Also run the brain on each, observe-only']];
+// Whether the brain asks you before an irreversible step (brain.json "approvals").
+/** @type {[string, string][]} [value, label] */
+export const APPROVALS = [['ask', 'Ask me first, with a poll'], ['auto', 'Act without asking']];
 export const DEFAULT_BACKUP_EXCLUDES = ['node_modules/', '*.log', '.DS_Store', '.venv/', '__pycache__/'];
 
 /**

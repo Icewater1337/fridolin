@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -27,6 +28,23 @@ type FakeMCPStep struct {
 	Write string `json:"write,omitempty"`
 }
 
+// FakeApprovalID in a step's Args stands for the last approval_id the
+// run saw: in what a step before got back, else in its new message, as
+// a model passes on the id a tool or the task gave it.
+const FakeApprovalID = "$APPROVAL_ID"
+
+// approvalIDRe finds an approval_id in a tool's answer or a message.
+var approvalIDRe = regexp.MustCompile(`approval_id (a[0-9A-Za-z_-]+)`)
+
+// lastApprovalID is the last approval_id in text, or "".
+func lastApprovalID(text string) string {
+	all := approvalIDRe.FindAllStringSubmatch(text, -1)
+	if len(all) == 0 {
+		return ""
+	}
+	return all[len(all)-1][1]
+}
+
 // FakeMCPTrigger in the new message makes the fake CLI play its
 // FRIDOLIN_FAKE_MCP steps; other messages are only echoed.
 const FakeMCPTrigger = "#mcp"
@@ -38,7 +56,7 @@ const FakeMCPTrigger = "#mcp"
 // step got back is returned as " [brain:tool] result" for the run's
 // answer. The server runs this test binary as the bridge's CLI
 // (FRIDOLIN_TEST_RUN_MAIN), so it is the real `fridolin mcp`.
-func fakeMCP(args []string, steps string) string {
+func fakeMCP(args []string, msg, steps string) string {
 	var plan []FakeMCPStep
 	if err := json.Unmarshal([]byte(steps), &plan); err != nil {
 		return " [mcp] bad FRIDOLIN_FAKE_MCP: " + err.Error()
@@ -81,6 +99,7 @@ func fakeMCP(args []string, steps string) string {
 	c.notify("notifications/initialized")
 	var out strings.Builder
 	last := ""
+	approvalID := lastApprovalID(msg)
 	for _, s := range plan {
 		if s.When != "" && !strings.HasPrefix(last, s.When) {
 			fmt.Fprintf(&out, " [%s:skipped %s%s]", brain, s.Tool, s.Write)
@@ -117,7 +136,7 @@ func fakeMCP(args []string, steps string) string {
 		}
 		params := map[string]any{"name": s.Tool}
 		if s.Args != nil {
-			params["arguments"] = s.Args
+			params["arguments"] = json.RawMessage(strings.ReplaceAll(string(s.Args), FakeApprovalID, approvalID))
 		}
 		res, err := c.request("tools/call", params)
 		if err != nil {
@@ -139,6 +158,9 @@ func fakeMCP(args []string, steps string) string {
 			label += " failed"
 		}
 		last = strings.Join(text, " ")
+		if id := lastApprovalID(last); id != "" {
+			approvalID = id
+		}
 		fmt.Fprintf(&out, " [%s] %s", label, last)
 	}
 	return out.String()

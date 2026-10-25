@@ -14,6 +14,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/mcp"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
@@ -37,6 +38,9 @@ type delegation struct {
 	id       string
 	from     runInfo // the core run that delegated
 	to, task string
+	// approval is the owner's approval the core run handed over with the
+	// task (delegate's approval_id); its ID is "" for none.
+	approval store.Approval
 	started  time.Time
 	// result gets the answer while the core run waits for it.
 	result chan delegationResult
@@ -101,11 +105,11 @@ func delegateChat(coreRun string) string { return chat.DelegateChatPrefix + core
 // its delegate chat, and waits up to wait for the answer: the sub-brain's
 // worker runs it like any message, with its own prompt, memory and
 // sandbox. Its answer comes back here, never to a chat (delegationFinished).
-func (b *App) delegate(ctx context.Context, c mcpCaller, to, task string, wait time.Duration) *mcp.CallResult {
-	d := &delegation{id: "d" + randomToken(9), from: c.run, to: to, task: task, started: time.Now(), result: make(chan delegationResult, 1)}
+func (b *App) delegate(ctx context.Context, c mcpCaller, to, task string, approval store.Approval, wait time.Duration) *mcp.CallResult {
+	d := &delegation{id: "d" + randomToken(9), from: c.run, to: to, task: task, approval: approval, started: time.Now(), result: make(chan delegationResult, 1)}
 	b.delegations.add(d)
 	m := brainruntime.Inbound{Inbound: chat.Inbound{
-		JID: delegateChat(c.run.ID), Brain: to, Sender: c.run.Brain, Text: task,
+		JID: delegateChat(c.run.ID), Brain: to, Sender: c.run.Brain, Text: delegatedTask(task, approval),
 		Source: chat.SourceDelegate, At: d.started, ID: d.id,
 		// After a run Finished has handled, this finds the task ended; it
 		// ends one that never ran: dropped, or its brain removed.
@@ -135,6 +139,20 @@ func (b *App) delegate(ctx context.Context, c mcpCaller, to, task string, wait t
 		return delegationAnswer(to, <-d.result)
 	}
 	return mcp.TextResult(fmt.Sprintf("%s is still working on it after %s. Its answer will come to you in this chat as a new message once it is there; do not delegate the same task again meanwhile.", to, wait.Round(time.Second)))
+}
+
+// delegatedTask is the message a delegated task's run is handed: the task,
+// after the step the owner approved for it, if the core run handed an
+// approval over, as a scheduled agent's message names the steps approved
+// with its schedule (sched.Message). The owner is asked once, where the
+// conversation is: in the core run, before it delegates. The run may use
+// the id (runPolicy.Approval); every other irreversible step still asks.
+func delegatedTask(task string, a store.Approval) string {
+	if a.ID == "" {
+		return task
+	}
+	return fmt.Sprintf("The owner approved this step already, before the task was handed to you (approval_id %s): %q. Take it without request_approval, and pass approval_id %s to a tool that asks for one. Every other irreversible step still needs request_approval.\n\nThe task:\n\n%s",
+		a.ID, textx.Truncate(a.Action, 300), a.ID, task)
 }
 
 // delegationAnswer is the tool result for a delegated task's outcome.
@@ -226,6 +244,9 @@ func (b *App) auditDelegation(d *delegation, outcome string) {
 	}
 	if p := d.from.Policy; p != nil {
 		e.Thread, e.Skill, e.Risk = p.Thread, p.Skill, string(p.Risk)
+	}
+	if d.approval.ID != "" {
+		e.Detail += " (approval " + d.approval.ID + ")"
 	}
 	b.audit.Append(e)
 }

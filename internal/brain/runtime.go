@@ -1205,7 +1205,7 @@ func (br *Brain) buildPrompt(s *Settings, m Inbound) string {
 	if s.Zone != nil {
 		now = now.In(s.Zone)
 	}
-	in := prompttext.Input{Now: now, BrainID: br.id, Message: m.Inbound, BuildChat: br.input.BuildChat != nil && br.input.BuildChat(m.JID), ObserveOnly: m.Silent, Vault: s.Vault, CodeToFride: s.FrideTools && s.Manifest.IsCore()}
+	in := prompttext.Input{Now: now, BrainID: br.id, Message: m.Inbound, BuildChat: br.input.BuildChat != nil && br.input.BuildChat(m.JID), ObserveOnly: m.Silent, Vault: s.Vault, CodeToFride: s.FrideTools && s.Manifest.IsCore(), AutoApprove: s.Manifest.AutoApproves()}
 	if name := s.PromptFile; name != "" {
 		if data, err := br.readFile(name); err != nil {
 			log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)

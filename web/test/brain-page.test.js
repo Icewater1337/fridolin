@@ -173,7 +173,7 @@ test('the model, effort and backup settings are the wizard’s, and save with th
   await settle();
   const saved = calls.find((c) => c.path === '/api/brains/work' && c.method === 'PUT');
   assert.ok(saved, 'the settings were saved');
-  assert.deepEqual(saved.body.manifest, { ...m, model: 'opus', effort: '', observe: 'history', backup: { enabled: false, exclude: ['node_modules/', '*.log'] } });
+  assert.deepEqual(saved.body.manifest, { ...m, model: 'opus', effort: '', observe: 'history', approvals: 'ask', backup: { enabled: false, exclude: ['node_modules/', '*.log'] } });
   const toasts = (k) => document.querySelectorAll(`.toast.${k}`).map((el) => el.textContent);
   assert.deepEqual(toasts('error'), []);
   assert.ok(toasts('ok').includes('Settings saved'), `toasts: ${toasts('ok')}`);
@@ -222,6 +222,19 @@ test('the settings say what untagged group messages get, and save it', async (t)
   await settle();
   const saved = calls.filter((c) => c.method === 'PUT').map((c) => [c.path, c.body.manifest.observe]);
   assert.deepEqual(saved, [['/api/brains/work', 'run']]);
+});
+
+test('the settings say whether the brain asks before an irreversible step, and save it', async (t) => {
+  const { root, calls } = await openPage(t);
+  const approvals = root.querySelector('.brain-form select[name=approvals]');
+  assert.equal(approvals.value, 'ask', 'a brain.json without the setting asks');
+  assert.match(fieldset(root, 'Approvals').textContent, /security trade-off/);
+  approvals.value = 'auto';
+  approvals.dispatchEvent(new Event('change', { bubbles: true }));
+  root.querySelector('.brain-form').dispatchEvent(new Event('submit', { cancelable: true }));
+  await settle();
+  const saved = calls.filter((c) => c.method === 'PUT').map((c) => [c.path, c.body.manifest.approvals]);
+  assert.deepEqual(saved, [['/api/brains/work', 'auto']]);
 });
 
 const other = (id, name, extra = {}) => ({ id, name, path: `/Users/you/${id}`, status: 'ok', issues: [], manifest: { version: 1, id, name, routing: { handles_dms: false, default: false, groups: [] }, ...extra } });

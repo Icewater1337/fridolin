@@ -63,6 +63,7 @@ restart.
   "prompt_file": "brain-prompt.md",
   "reply_chat": "",
   "observe": "history",
+  "approvals": "ask",
   "backup": { "enabled": true, "exclude": ["node_modules/", "*.log", "/big-exports/"] }
 }
 ```
@@ -82,6 +83,7 @@ restart.
 | `prompt_file` | The prompt sent ahead of every message, relative to the folder. It must stay inside the folder, and be a file rather than a symlink (see [Files the bridge reads and writes](#files-the-bridge-reads-and-writes)). |
 | `reply_chat` | Where answers go for files handed in through `/ingest`. The files are handled by this brain even when the chat belongs to another one, so a brain without chats can answer in your DM. `!stop` and `!reset` in that chat also stop this brain's work on them, and `!reset` starts the chat afresh for this brain too. Default: the first allowed number for the brain that gets DMs (the DM brain, or the fallback brain when none handles DMs), else the brain's first group. |
 | `observe` | What the brain does with untagged group messages, the ones nobody addressed to it (see [triggers](CONFIGURATION.md#triggers)). `history`, the default, keeps them in its history, where its next run in that group reads them; they cost nothing. `run` also gives each one a run of its own (a bare "ok" or emoji excepted), for a brain that keeps notes as the conversation goes: its prompt marks it `<observe_only>`, nothing it writes is sent, and a message addressed to the brain stops it and goes first, but each costs a full Claude run, with tools, on whatever any member the group's `group_members` admits writes (see [group_members](CONFIGURATION.md#group_members)). Set in the dashboard under *Untagged group messages*. |
+| `approvals` | Whether the brain asks you before an irreversible step. `ask`, the default: `request_approval` puts a poll in your chat and waits for your yes ([Skills, risk and approvals](#skills-risk-and-approvals)). `auto`: it answers approved at once, without a poll, and the brain's prompt says it may act without asking and must say in its reply what it did. **A security trade-off**: the brain then sends, posts, pays, submits and deletes on its own judgement, which a message, file or web page it reads can sway; set it only on a brain you trust that far, such as your own core brain in your DM. See [Acting without asking](#acting-without-asking). Set in the dashboard under *Approvals*; like every field here, a change the brain makes itself waits for your approval. |
 | `backup` | Where this folder is backed up; see [BACKUP.md](BACKUP.md) and [below](#backups-cloud-and-node-targets). `backup.exclude` applies to the Google Drive backup and to the vault's snapshots (and its cold tier, for a folder in the data dir), and to the node targets; `backup.enabled: false` keeps the folder out of every backup ([VAULT.md](VAULT.md#brain-folders-and-their-backup-settings)). `backup.targets` and `backup.node_only` send it, or parts of it, to [node targets](VAULT.md#node-targets). |
 | `calendar` | The Google account this brain signed in with and the calendars it may use; set by *Connect Google Calendar*, see [CALENDAR.md](CALENDAR.md). |
 | `role` | `core` for the [core brain](#the-core-brain-and-its-grants), the one brain that may reach others; left out for every other brain. At most one brain is the core. |
@@ -212,6 +214,23 @@ to whom and the task (shortened) as its detail, the outcome and how long
 it took. The delegated run is in its core run's thread, with its risk
 level.
 
+**You are asked once, at the start.** Handing a task over is not an
+irreversible step itself, and the core does not ask you for it. When the
+task holds one (posting in a group, sending, paying), the core asks you
+for that step with `request_approval` before it delegates, in the chat
+you are talking to it in, and passes the approval's id as `delegate`'s
+`approval_id`. The bridge checks it is an approved, unused request of the
+core's own, and the delegated run is told, ahead of the task, that you
+approved that step (with the id, as a scheduled agent is told the steps
+approved with its schedule): it takes it without asking again, and an
+irreversible tool of the bridge's takes the id from it, once. Any other
+irreversible step it still asks you for, in the core run's chat. A task
+handed over without an approval asks you from the delegated run, when it
+comes to the step. Either way one poll, not two. The audit log's
+`delegation` and `run_start` lines name the approval handed over. An
+approval the core's own `approvals: auto` gave goes only to a brain set to
+`auto` too: a brain that asks still asks you.
+
 `read_memory` reads one file, or lists a folder, of `memories/` (only
 its `.md` files) or `skills/`. The bridge reads it outside the sandbox,
 so it follows no symlink on the way, not even one inside the folder.
@@ -313,6 +332,32 @@ which it answers there. Pending approvals live in `bridge.db`, so a
 restart keeps them. At most `policy.max_pending_irreversible` (3)
 irreversible ones wait at once. A tool the bridge marks irreversible takes
 the id of an approved request as `approval_id`, once.
+
+### Acting without asking
+
+A brain whose `brain.json` says `"approvals": "auto"` (the brain page's
+*Approvals*: *Act without asking*) is not asked about: its
+`request_approval` answers approved at once, without a poll, and its
+prompt says it may act without asking and must say in its reply what it
+did. Each such approval is still a row of the Approvals page's history,
+approved by `auto`, and two lines of the audit log
+(`approval_requested`, `approval_decided` by `auto`); an irreversible
+tool takes its id as any other. It covers the steps a skill lists under
+`approve` too; the bridge's log names each such step it let through.
+What still holds:
+
+- a lockdown: `request_approval` is refused, as for every brain;
+- the run's risk level: a run held to `read` (by its skill, or a
+  lockdown) asks you with a poll as before;
+- `policy.max_pending_irreversible`: with that many waiting, the call is
+  refused;
+- an observe-only run has no `request_approval` at all;
+- a task the brain delegates follows the other brain's own setting: an
+  `auto` approval does not travel to a brain that asks.
+
+This is a security trade-off: the poll is what stops a brain that a
+message, a file or a web page talked into something. Use it for a brain
+that only you talk to, and keep `!lockdown` in mind.
 
 `ask_user(question, options)` asks you a question: with options as a
 poll whose vote is the answer, without as a message whose answer is the

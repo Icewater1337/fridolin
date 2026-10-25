@@ -60,6 +60,10 @@ type Manifest struct {
 	// ObserveHistory (the default) or ObserveRun, see observe.go.
 	Observe string `json:"observe,omitempty"`
 
+	// Approvals is whether request_approval asks the owner (ApprovalsAsk,
+	// the default) or answers approved at once (ApprovalsAuto).
+	Approvals string `json:"approvals,omitempty"`
+
 	Backup Backup `json:"backup"`
 
 	// Calendar is the Google account this brain signed in with and the
@@ -368,6 +372,9 @@ func (m *Manifest) Validate() error {
 	if !ValidObserve(m.Observe) {
 		return fmt.Errorf("brain %q: observe %q must be %q or %q", m.ID, m.Observe, ObserveHistory, ObserveRun)
 	}
+	if !ValidApprovals(m.Approvals) {
+		return fmt.Errorf("brain %q: approvals %q must be %q or %q", m.ID, m.Approvals, ApprovalsAsk, ApprovalsAuto)
+	}
 	if m.PromptFile != "" {
 		if filepath.IsAbs(m.PromptFile) || strings.HasPrefix(filepath.Clean(m.PromptFile), "..") {
 			return fmt.Errorf("brain %q: prompt_file must be a path inside the brain folder", m.ID)
@@ -446,6 +453,9 @@ func (m Manifest) Normalized() Manifest {
 	}
 	if m.Observe == "" {
 		m.Observe = ObserveHistory
+	}
+	if m.Approvals == "" {
+		m.Approvals = ApprovalsAsk
 	}
 	if m.Routing.Groups == nil {
 		m.Routing.Groups = []string{}
@@ -740,6 +750,7 @@ type Spec struct {
 // validEfforts are the values brain_effort and a brain's effort take, ""
 // being the CLI's default. Like the other sets of values a setting takes
 // (validGitConfigs, validQueueModes, validTriggerMatches, validObserve,
+// validApprovals,
 // waLevels), it is what the schemas in docs/schemas list for the setting,
 // which TestSchemaEnumsAreTheBridgesValues checks.
 var validEfforts = map[string]bool{"": true, "low": true, "medium": true, "high": true, "xhigh": true, "max": true}
@@ -762,6 +773,21 @@ const (
 // validObserve are the values brain.json may give observe.
 var validObserve = map[string]bool{"": true, ObserveHistory: true, ObserveRun: true}
 
+// Whether a brain's request_approval asks the owner: Manifest.Approvals.
+const (
+	// ApprovalsAsk, the default, puts a poll in the owner's chat and waits
+	// for the vote.
+	ApprovalsAsk = "ask"
+	// ApprovalsAuto answers approved at once, recorded as approved by
+	// "auto": the owner trusts the brain to act without asking. Lockdown,
+	// the run's risk budget, policy.max_pending_irreversible and
+	// observe-only runs still hold.
+	ApprovalsAuto = "auto"
+)
+
+// validApprovals are the values brain.json may give approvals.
+var validApprovals = map[string]bool{"": true, ApprovalsAsk: true, ApprovalsAuto: true}
+
 // ValidID reports whether id is the stable slug accepted for a brain.
 func ValidID(id string) bool { return brainIDRe.MatchString(id) }
 
@@ -776,3 +802,13 @@ func ValidObserve(mode string) bool { return validObserve[mode] }
 
 // ObserveModes returns the accepted settings, including the unset value.
 func ObserveModes() []string { return slices.Sorted(maps.Keys(validObserve)) }
+
+// ValidApprovals reports whether mode is a supported approvals setting.
+func ValidApprovals(mode string) bool { return validApprovals[mode] }
+
+// ApprovalsModes returns the accepted settings, including the unset value.
+func ApprovalsModes() []string { return slices.Sorted(maps.Keys(validApprovals)) }
+
+// AutoApproves reports whether the brain's request_approval answers
+// approved without asking the owner.
+func (m Manifest) AutoApproves() bool { return m.Approvals == ApprovalsAuto }

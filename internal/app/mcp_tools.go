@@ -2,9 +2,11 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/mcp"
 	"github.com/Icewater1337/fridolin/internal/skill"
+	"github.com/Icewater1337/fridolin/internal/store"
 )
 
 // mcpCaller is the run a tool call comes from, as the bridge knows it: the
@@ -180,10 +183,13 @@ func (b *App) describeDelegate(c mcpCaller) mcp.Tool {
 	return mcp.Tool{
 		Description: "Hand a bounded task to another brain and get its answer. That brain works on it with its own instructions, memory and files, which you do not see, so put everything it needs into the task. " +
 			fmt.Sprintf("Waits up to timeout_seconds (default %d, at most %d); an answer that comes later arrives in this chat as a new message. ", int(defaultDelegateWait/time.Second), int(maxDelegateWait/time.Second)) +
+			"Delegating is not an irreversible step itself: never ask the person for approval just to hand a task over. " +
+			"When the task holds an irreversible step (sending, posting, paying, submitting, deleting), ask for that step once, before you delegate: call request_approval with the step as the brain will take it (\"Post 'Hello' in the family group\", not \"Ask the family brain to post\"), and pass the approval_id it answers approved with here. The brain then takes exactly that step without asking again; any other irreversible step it still asks for. Without approval_id, the brain asks the person itself. " +
 			"Brains you may delegate to: " + c.brainList(targets, b.brainName) + ".",
 		InputSchema: schema(map[string]any{
 			"brain":           map[string]any{"type": "string", "enum": targets, "description": "The brain's id."},
 			"task":            strProp("What the brain is to do, with all it needs to know. It cannot ask you back."),
+			"approval_id":     strProp("The approval_id of the request_approval in which the person approved the task's irreversible step, if you asked them."),
 			"timeout_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": int(maxDelegateWait / time.Second), "description": "How long to wait for the answer."},
 		}, "brain", "task"),
 	}
@@ -193,10 +199,11 @@ func (b *App) callDelegate(ctx context.Context, c mcpCaller, raw json.RawMessage
 	var args struct {
 		Brain          string `json:"brain"`
 		Task           string `json:"task"`
+		ApprovalID     string `json:"approval_id"`
 		TimeoutSeconds int    `json:"timeout_seconds"`
 	}
 	if err := json.Unmarshal(raw, &args); err != nil {
-		return mcp.ErrorResult("the arguments are {\"brain\": \"<id>\", \"task\": \"…\", \"timeout_seconds\": N}: " + err.Error()), nil
+		return mcp.ErrorResult("the arguments are {\"brain\": \"<id>\", \"task\": \"…\", \"approval_id\": \"…\", \"timeout_seconds\": N}: " + err.Error()), nil
 	}
 	if strings.TrimSpace(args.Task) == "" {
 		return mcp.ErrorResult("task is empty: say what the brain is to do"), nil
@@ -210,7 +217,45 @@ func (b *App) callDelegate(ctx context.Context, c mcpCaller, raw json.RawMessage
 	if args.TimeoutSeconds > 0 {
 		wait = min(time.Duration(args.TimeoutSeconds)*time.Second, maxDelegateWait)
 	}
-	return b.delegate(ctx, c, args.Brain, args.Task, wait), nil
+	var approval store.Approval
+	if id := strings.TrimSpace(args.ApprovalID); id != "" {
+		a, msg, err := b.handOver(ctx, c, id, args.Brain)
+		if err != nil {
+			return nil, err
+		}
+		if msg != "" {
+			return mcp.ErrorResult(msg), nil
+		}
+		approval = a
+	}
+	return b.delegate(ctx, c, args.Brain, args.Task, approval, wait), nil
+}
+
+// handOver checks approval id, which c's run passes on to brain to with
+// a delegated task: an approved request_approval of the run's brain, not
+// used yet. It returns what goes with the task, or msg, why nothing may,
+// for the run. An approval the core's approvals: auto gave, not the
+// owner, goes only to a brain that approves by itself too: to one that
+// asks, it does not travel, and that brain asks as its own setting says.
+func (b *App) handOver(ctx context.Context, c mcpCaller, id, to string) (a store.Approval, msg string, err error) {
+	a, err = b.store.ApprovalByID(ctx, id)
+	switch {
+	case errors.Is(err, sql.ErrNoRows) || (err == nil && (a.Brain != c.run.Brain || a.Kind != approvalKind)):
+		return a, fmt.Sprintf("there is no approval %q of yours: pass the approval_id request_approval answered approved with, or none", id), nil
+	case err != nil:
+		return a, "", err
+	case a.Status != store.ApprovalApproved:
+		return a, fmt.Sprintf("approval %s is %s, not approved: do not delegate its step", id, a.Status), nil
+	case a.Used:
+		return a, fmt.Sprintf("approval %s was used already: ask again for another action", id), nil
+	}
+	if a.DecidedBy == autoApprovedBy {
+		if br := b.brainMgr.Get(to); br == nil || !br.Manifest().AutoApproves() {
+			log.Printf("brain %s: approval %s came from its approvals: auto, not the owner; it does not go to %s, which asks the owner itself", c.run.Brain, id, to)
+			return store.Approval{}, "", nil
+		}
+	}
+	return a, "", nil
 }
 
 func (b *App) callListBrains(_ context.Context, c mcpCaller, _ json.RawMessage) (*mcp.CallResult, error) {

@@ -8,6 +8,7 @@ Content-Type: application/json
     "id": "main",
     "issues": [],
     "manifest": {
+      "approvals": "ask",
       "backup": {
         "enabled": true,
         "exclude": [
@@ -58,6 +59,7 @@ Content-Type: application/json
         "seconds": "<SECONDS>"
       },
       "manifest": {
+        "approvals": "ask",
         "backup": {
           "enabled": true,
           "exclude": [

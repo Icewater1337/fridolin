@@ -31,6 +31,7 @@ Content-Type: application/json
         "seconds": "<SECONDS>"
       },
       "manifest": {
+        "approvals": "ask",
         "backup": {
           "enabled": true,
           "exclude": [
