@@ -164,6 +164,10 @@ class MainActivity : Activity() {
         val unrestricted = getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName)
         statusView.text = buildString {
             appendLine(if (bleAllowed()) SyncService.status else "Bluetooth permission missing: allow 'Nearby devices'")
+            SyncPrefs.battery(this@MainActivity)?.let { b ->
+                val at = java.text.SimpleDateFormat("dd.MM. HH:mm", java.util.Locale.getDefault()).format(java.util.Date(b.at))
+                appendLine("NotePin battery: ${b.level}%${if (b.charging == true) ", charging" else ""} (at $at)")
+            }
             appendLine("Background: ${if (unrestricted) "allowed" else "NOT allowed, tap the button below"}")
             appendLine("Transcripts: ${if (BuildConfig.API_KEY.isEmpty()) "off (no api_key in build)" else "on"}")
             if (Fridolin.enabled) {

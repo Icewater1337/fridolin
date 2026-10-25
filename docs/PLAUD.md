@@ -217,10 +217,11 @@ to the pin first, so it needs the pin close by, not already connected.
 
 A check-in that misses the pin (out of range, phone in another room) waits
 longer each time. In smart and every-N-minutes modes the wait starts at
-the interval and doubles up to an hour (never shorter than the interval).
-In instant mode it starts at 30 seconds and doubles up to 10 minutes.
-Meanwhile a low-power scan for the pin's address notices it coming back
-and checks in then. The timer is an Android alarm that Doze lets through
+the interval and doubles up to an hour (never shorter than the interval;
+with voice mode on, up to 10 minutes). In instant mode it starts at 30
+seconds and doubles up to 10 minutes. Meanwhile, after a miss that did
+not see the pin at all, a low-power scan notices it coming back and checks
+in then. The timer is an Android alarm that Doze lets through
 (inexactly: on a phone left still for a long time, Android may stretch
 the 10 minutes).
 
@@ -243,15 +244,24 @@ AAR's classes):
   option) is therefore not available, and instant mode is the old link
   unchanged.
 - **The SDK's scan has no filter** (`SCAN_MODE_BALANCED`, empty filter
-  list). Android pauses such scans while the screen is off. So a check-in
-  connects straight to the pin as last found (the app keeps the SDK's
-  device record), and scans only on every third miss in a row, or when
-  it has no record yet (after pairing).
-- **The app's own scan is filtered** to the pin's address and runs at
-  `SCAN_MODE_LOW_POWER`, batched every 30 seconds where the chip can.
-  Android lets it run with the screen off, and it costs the pin nothing,
-  since the pin advertises anyway. The app runs it after a miss, to see
-  the pin come back, and in smart mode between check-ins, to see whether
+  list). Android pauses such scans while the screen is off, so the app
+  uses it only to pair. Version 0.4 connected straight to the pin's last
+  known address instead. On the owner's phone that failed all night
+  until the app was opened, so the pin's address changes, or a saved
+  device record does not connect.
+- **The app's own scan is filtered** by the Bluetooth company id in
+  Plaud's advertisement (what the SDK calls the manufacturer code), not
+  by an address. It turns each sighting into the SDK's device record with
+  the SDK's own parser (the pinned AAR's `com.plaud.sdk.proto.u4.a`,
+  which the SDK's scan calls too), and picks the pin by its serial number.
+  A check-in looks with it for up to 20 seconds
+  (`SCAN_MODE_LOW_LATENCY`) and connects to the address the pin uses
+  right then. The log says when that address differs from the last one.
+  Between check-ins it runs at `SCAN_MODE_LOW_POWER`, batched every 30
+  seconds where the chip can. Android lets it run with the screen off,
+  and it costs the pin nothing, since the pin advertises anyway. The app
+  runs it after a miss, to see the pin come back, and in smart mode
+  between check-ins, to see whether
   the pin's raw advertisement (its manufacturer data, beyond the fields
   the SDK reads) changes when a recording starts or stops. Plaud does
   not document that, so the app finds out. A change starts a check-in
@@ -261,6 +271,11 @@ AAR's classes):
   using them for that pin, until a pin is paired again. The log says
   which bytes changed and how it went, so **Share log** tells whether
   this pin has such a signal.
+
+**The pin's battery** is asked each time a recording is saved off the pin
+(`getChargingState`). The pin also reports changes while connected. The
+app logs `NotePin battery N%` and shows the last reading on its screen,
+so the log is a history of the battery against the recordings.
 
 What to watch after switching: the pin's battery over a day or two, and
 in the app's log how long recordings waited on the pin (`N new

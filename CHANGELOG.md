@@ -1064,6 +1064,19 @@ for compatibility.
 
 ### Fixed
 
+- **Plaud Sync 0.5 reaches the NotePin with the screen off.** In 0.4 the
+  check-ins connected to the pin's last known address and missed it all
+  night, until the app was opened. Each check-in now looks for the pin
+  first, with a scan filtered by Plaud's company id that Android runs
+  with the screen off, and connects to the address the pin uses then.
+  With voice mode on, a pin out of reach is tried at least every 10
+  minutes, not every hour.
+- **Voice mode: a NotePin recording reaches Fridolin again.** Its
+  transcript was saved as a question, but the question was sent only at
+  the app's next start. It is sent right after transcription now.
+- New in the app: the **NotePin's battery**, asked with each synced
+  recording, on its screen and in its log.
+
 - A core move to a fresh core host: the pull of the core's image (several
   GB), the rehearsal and the secrets with their files may take longer than
   a minute, which the core cut off ("did not answer core.image.pull

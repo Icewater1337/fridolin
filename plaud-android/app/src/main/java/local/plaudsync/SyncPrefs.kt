@@ -16,6 +16,19 @@ object SyncPrefs {
     fun minutes(ctx: Context) = SyncPolicy.minutes(prefs(ctx).getInt("sync_minutes", SyncPolicy.DEFAULT_MINUTES))
     fun setMinutes(ctx: Context, n: Int) = prefs(ctx).edit().putInt("sync_minutes", SyncPolicy.minutes(n)).apply()
 
+    /** The pin's battery as it last reported it: percent, charging (null: not said), when. */
+    data class Battery(val level: Int, val charging: Boolean?, val at: Long)
+
+    fun battery(ctx: Context): Battery? = prefs(ctx).run {
+        val level = getInt("battery_level", -1)
+        if (level < 0) null else Battery(level, if (contains("battery_charging")) getBoolean("battery_charging", false) else null, getLong("battery_at", 0))
+    }
+
+    fun setBattery(ctx: Context, b: Battery) = prefs(ctx).edit().apply {
+        putInt("battery_level", b.level).putLong("battery_at", b.at)
+        if (b.charging != null) putBoolean("battery_charging", b.charging) else remove("battery_charging")
+    }.apply()
+
     fun advertSignal(ctx: Context) = prefs(ctx).run { AdvertSignal(getInt("advert_tries", 0), getInt("advert_hits", 0)) }
     fun setAdvertSignal(ctx: Context, s: AdvertSignal) =
         prefs(ctx).edit().putInt("advert_tries", s.tries).putInt("advert_hits", s.hits).apply()

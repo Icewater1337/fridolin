@@ -58,9 +58,11 @@ class SyncPolicyTest {
     }
 
     @Test
-    fun backoffInVoiceModeStartsShortButStillBacksOff() {
-        val waits = (1..7).map { SyncPolicy.backoff(SyncMode.SMART, 30, voice = true, misses = it) / min }
-        assertEquals(listOf(2L, 4, 8, 16, 32, 60, 60), waits)
+    fun backoffInVoiceModeStartsShortAndStopsAtTenMinutes() {
+        SyncMode.entries.filter { it != SyncMode.INSTANT }.forEach { mode ->
+            val waits = (1..6).map { SyncPolicy.backoff(mode, 30, voice = true, misses = it) / min }
+            assertEquals(listOf(2L, 4, 8, 10, 10, 10), waits)
+        }
     }
 
     @Test

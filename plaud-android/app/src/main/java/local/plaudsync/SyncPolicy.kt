@@ -56,6 +56,8 @@ object SyncPolicy {
     const val INSTANT_BACKOFF_CAP_MS = 10 * 60_000L
     /** Check-ins that keep missing the pin double their wait up to this (or the interval, if longer). */
     const val BACKOFF_CAP_MS = 60 * 60_000L
+    /** With voice mode on a question should not wait an hour: the wait stops doubling here. */
+    const val VOICE_BACKOFF_CAP_MS = 10 * 60_000L
     /** A link that dropped mid-sync (out of range for a moment, say) is tried again after this. */
     const val DROPPED_RETRY_MS = 30_000L
 
@@ -79,11 +81,16 @@ object SyncPolicy {
     /**
      * The wait before the next try after [misses] tries in a row found no pin (0: none missed):
      * the interval (instant mode: [INSTANT_RETRY_MS]), doubled for each miss after the first,
-     * never more than the cap. The pin coming back in range ends the wait early ([Trigger.IN_RANGE]).
+     * never more than the cap (in voice mode [VOICE_BACKOFF_CAP_MS]). The pin coming back in range
+     * ends the wait early ([Trigger.IN_RANGE]).
      */
     fun backoff(mode: SyncMode, minutes: Int, voice: Boolean, misses: Int): Long {
         val base = interval(mode, minutes, voice) ?: INSTANT_RETRY_MS
-        val cap = if (mode == SyncMode.INSTANT) INSTANT_BACKOFF_CAP_MS else maxOf(BACKOFF_CAP_MS, base)
+        val cap = when {
+            mode == SyncMode.INSTANT -> INSTANT_BACKOFF_CAP_MS
+            voice -> maxOf(VOICE_BACKOFF_CAP_MS, base)
+            else -> maxOf(BACKOFF_CAP_MS, base)
+        }
         val doublings = (misses - 1).coerceIn(0, 30)
         return if (base > cap shr doublings) cap else base shl doublings
     }
