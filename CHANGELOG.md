@@ -1130,6 +1130,12 @@ for compatibility.
 
 ### Fixed
 
+- **The box updater no longer flashes a window on Windows.** The
+  Scheduled Task *fridolin box updater* starts PowerShell through
+  `conhost.exe --headless`; with `-WindowStyle Hidden` alone a console
+  window opened and closed every 2 minutes. A box made before gets the
+  quiet task with its next `box.ps1 -Update`.
+
 - **Site modules find the packages of a `package.json` in a subfolder.**
   The deploy ran `npm install` only in the site's folder, and the live
   site started on a deploy whose `node_modules` a core move had left out,

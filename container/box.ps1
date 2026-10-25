@@ -162,15 +162,21 @@ if ($LASTEXITCODE -ne 0) { Die "the image did not print its updater" }
 Write-Host "compose.yaml, core.yaml, seccomp.json, .env and update.ps1 are in $Dir"
 
 # The box's updater (docs/NODES.md, "Box updates"): a Scheduled Task runs
-# update.ps1 every 2 minutes while you are signed in, hidden, as you. It
-# applies an update the core asked for once a throwaway container of the
-# current image checked it, and is the only part that reaches Docker.
+# update.ps1 every 2 minutes while you are signed in, without a window,
+# as you. It applies an update the core asked for once a throwaway
+# container of the current image checked it, and is the only part that
+# reaches Docker.
 if ($NoUpdater) {
     Write-Host "note: no updater (-NoUpdater): the box updates only with box.ps1 -Update"
 } else {
     $ps = (Get-Command powershell.exe -ErrorAction SilentlyContinue).Source
     if (-not $ps) { $ps = (Get-Process -Id $PID).Path }
-    $action = New-ScheduledTaskAction -Execute $ps -Argument ("-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"" + (Join-Path $Dir "update.ps1") + "`"")
+    # conhost.exe --headless gives PowerShell, and the docker calls of
+    # update.ps1, a console that is never shown: -WindowStyle Hidden alone
+    # hides the console only once it is open, so a window flashes every
+    # round. Docker Desktop's Windows all have --headless (1809 and later).
+    $conhost = Join-Path $env:SystemRoot "System32\conhost.exe"
+    $action = New-ScheduledTaskAction -Execute $conhost -Argument ("--headless `"$ps`" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"" + (Join-Path $Dir "update.ps1") + "`"")
     $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2)
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
     Register-ScheduledTask -TaskName "fridolin box updater" -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
