@@ -1,7 +1,7 @@
 // Tests for the site-module loader: npm test
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, openSync, fstatSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSync, symlinkSync, openSync, fstatSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -201,7 +201,8 @@ test('a module finds the packages of the package.json above it, and a missing on
   // As a site repository with dashboard/package.json, dashboard/lib and
   // dashboard/modules. Two of them: Node keeps a failed import, by its path.
   const siteRepo = (installed: boolean) => {
-    const repo = mkdtempSync(join(tmpdir(), 'site-subfolder-'))
+    // Its real path, as Node names the importing file (macOS's /var is a link).
+    const repo = realpathSync(mkdtempSync(join(tmpdir(), 'site-subfolder-')))
     t.after(() => rmSync(repo, { recursive: true, force: true }))
     const dashboard = join(repo, 'dashboard')
     mkdirSync(join(dashboard, 'lib'), { recursive: true })
