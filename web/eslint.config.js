@@ -67,3 +67,5 @@ export default [
     rules,
   },
 ];
+
+# Automated fix for issue #296: Windows box updater runs only hourly, but the core says it picks updates up within 2 minutes
