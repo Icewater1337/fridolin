@@ -205,7 +205,7 @@ TSC_NPX ?= $(NPX) --yes -p typescript@$(TYPESCRIPT_VERSION) -p @types/node@$(TYP
 typecheck-web: ## tsc --noEmit on the dashboard's JS and tests (npx fetches it)
 	cd web && NPM_CONFIG_IGNORE_SCRIPTS=true $(TSC_NPX) -c 'tsc -p . && tsc -p test --typeRoots "$$(dirname "$$(command -v tsc)")/../@types"'
 
-test-sh: ## tests for the personal-data, action-pin, notices, release, OS-test and CI report scripts and the Makefile
+test-sh: ## tests for the personal-data, action-pin, notices, release, OS-test and CI report scripts, FrIDE's token store and the Makefile
 	scripts/test-check-personal-data.sh
 	scripts/test-check-action-pins.sh
 	scripts/test-third-party-notices.sh
@@ -214,6 +214,7 @@ test-sh: ## tests for the personal-data, action-pin, notices, release, OS-test a
 	scripts/test-test-shard.sh
 	scripts/test-os-tests.sh
 	scripts/test-ci-report.sh
+	scripts/test-fride-entrypoint.sh
 
 # A temp dir, not the binary: a check must not replace a build in use.
 # -race makes a data race at start or shutdown fail the run. The build is

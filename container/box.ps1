@@ -215,17 +215,23 @@ if ($fride) {
     $restart = $false
     docker compose exec -T fride test -s /var/lib/fride/.config/fridolin-box/claude-token
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "FrIDE's agents need a Claude sign-in. claude setup-token runs in the box now: open the link it prints, sign in, and it shows a token."
+        Write-Host "FrIDE's agents need a Claude sign-in. claude setup-token runs in the box now: open the link it prints and sign in, paste the code the browser shows into its prompt, and it prints a token that starts with sk-ant-oat."
         docker compose exec fride claude setup-token
-        $secure = Read-Host "Paste the token (it is not shown)" -AsSecureString
-        $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
-        if ($token) {
+        # set-claude-token refuses what is not a token (the browser's code,
+        # say) and says why: ask again, three times at most. It also drops
+        # what Windows PowerShell adds to what it pipes (a carriage return,
+        # sometimes a byte order mark).
+        for ($try = 0; $try -lt 3 -and -not $restart; $try++) {
+            $secure = Read-Host "Paste the token that starts with sk-ant-oat, not the code from the browser (it is not shown)" -AsSecureString
+            $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR([Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure))
+            if (-not $token) { break }
             $token | docker compose exec -T fride /opt/fride/entrypoint.sh set-claude-token
-            $restart = $true
-        } else {
-            Write-Host "note: no token; later: pipe it into docker compose exec -T fride /opt/fride/entrypoint.sh set-claude-token, then docker compose restart fride"
+            if ($LASTEXITCODE -eq 0) { $restart = $true }
         }
         $token = $null
+        if (-not $restart) {
+            Write-Host "note: no token stored; later: claude setup-token, then pipe the token into docker compose exec -T fride /opt/fride/entrypoint.sh set-claude-token, then docker compose restart fride"
+        }
     }
     $email = & { $ErrorActionPreference = "Continue"; docker compose exec -T fride git config --global user.email 2>$null }
     if (-not $email) {

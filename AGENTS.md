@@ -155,8 +155,10 @@ line, no Go, no Tailscale on the host, no service of its own.
    or PowerShell on Windows). Run it in a terminal the person sees: it
    asks before it starts, prints a Tailscale sign-in link (open it for
    them; they sign in with the core's tailnet account), runs `claude
-   setup-token` in the box (open its link; they paste the token into a
-   prompt without echo, never into chat), and asks the git name and
+   setup-token` in the box (open its link; the code the browser shows
+   goes into `setup-token`'s prompt, and the token it then prints,
+   `sk-ant-oat…`, into the script's prompt without echo, never into
+   chat), and asks the git name and
    email FrIDE's agents commit with. A code that ran out while they
    signed in: `!join` again, and the same line with the new code.
 3. **Approve**: they reply `!approve` when Fridolin says the box
