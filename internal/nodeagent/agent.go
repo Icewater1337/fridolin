@@ -320,6 +320,10 @@ func (a *Agent) Run(ctx context.Context) error {
 	defer fwg.Wait()
 	defer stopFride()
 	a.boxForward(fctx, &fwg)
+	// The core in a box: its ports, and the core when the box is it.
+	if s, ok := a.CoreRunner.(interface{ Supervise(context.Context) }); ok {
+		fwg.Go(func() { s.Supervise(fctx) })
+	}
 	// A new binary on trial after an update from the core.
 	a.updateStartup(fctx, &fwg)
 	// A stopping agent leaves no session behind.

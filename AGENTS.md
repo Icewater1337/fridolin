@@ -234,7 +234,20 @@ dir.
 
 The full runbook is docs/CORE.md, "Moving the core to another machine".
 The core is the container image plus the `fridolin-data` volume; on
-Windows it runs in Docker Desktop with WSL2. In short:
+Windows it runs in Docker Desktop with WSL2.
+
+**A box target first.** When this machine is a node in a box (path B),
+or can become one, and the person's fridolin already moves itself (both
+machines core hosts), no steps here are needed: turn core-host on in
+the box (`docker compose exec node fridolin node core-host on
+--state-dir /node` in `~/.fridolin-box`, `%LOCALAPPDATA%\fridolin-box` on
+Windows), have the person `!approve` it and pin it on the current core's
+host (`fridolin node core-host trust ID --key KEY`, the line `… core-host
+show` prints), then the person sends `!movecore <box>` and votes. The
+box runs the core in its own container (docs/NODES.md, "The core in a
+box"; docs/CORE.md, "Moving the core to a box"). On Ubuntu the box first
+needs `FRIDOLIN_BOX_APPARMOR` (the same section); the pre-flight says
+what else is missing. Otherwise, by hand:
 
 1. **Tools**: Git, Go, Tailscale (as in B), and Docker. Windows:
    `wsl --install --no-distribution` elevated, restart, then `winget

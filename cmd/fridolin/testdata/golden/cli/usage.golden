@@ -81,3 +81,6 @@ Run flags:
   --container       inside the fridolin-core image: bind the dashboard's port on
                     the container's interfaces (Docker publishes it on the
                     host's 127.0.0.1 only); the image passes it
+  --box             with --container, in a box's node container (the core in a
+                    box, docs/NODES.md): the dashboard and the site stay on the
+                    loopback, and the node agent publishes them, refusing FrIDE

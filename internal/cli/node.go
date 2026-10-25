@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -198,6 +199,10 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 			a.CoreSecrets, a.CoreSecretsPlace = nodeagent.HostSecretStore(runtime.GOOS, os.Getenv, home)
 		}
 		if a.Config.Box != nil {
+			if err := boxCoreRunner(a, exe, dir); err != nil {
+				fmt.Fprintf(stderr, "fridolin node run: %v\n", err)
+				return 1
+			}
 			tn, err := boxTailnet(dir, a.Config.Box.Hostname, stderr)
 			if err != nil {
 				fmt.Fprintf(stderr, "fridolin node run: %v\n", err)
@@ -243,6 +248,7 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 		if cfg.Box != nil {
 			// A box has no service of its own: docker compose runs it.
 			fmt.Fprintln(stdout, "Service: none, a node in a box (docker compose ps on the host)")
+			fmt.Fprintf(stdout, "Core: %s\n", boxCoreState(dir))
 			return 0
 		}
 		st, err := nodeagent.ServiceStatus(svc)
@@ -663,4 +669,44 @@ func repairNodeBootTarget(w io.Writer) {
 	case moved:
 		fmt.Fprintf(w, "fridolin node: the service now starts with %s, so it comes back after a reboot (it was linked to multi-user.target)\n", nodeagent.LinuxBootTarget)
 	}
+}
+
+// boxCoreRunner gives a box's agent the core it may run (docs/NODES.md,
+// "The core in a box") when the box has the core's settings
+// (container/box-core.yaml sets FRIDOLIN_BOX_CORE): the image's binary on
+// the box's data volume, with the host secrets of its sealed store.
+func boxCoreRunner(a *nodeagent.Agent, exe, dir string) error {
+	if os.Getenv(nodeagent.BoxCoreEnv) != "1" {
+		return nil
+	}
+	k, err := nodeagent.CoreSecretsKey(a.Key)
+	if err != nil {
+		return err
+	}
+	dataDir := os.Getenv("FRIDOLIN_HOME")
+	if dataDir == "" {
+		dataDir = "/data"
+	}
+	entry := "/opt/fridolin/entrypoint.sh"
+	if pathKindOf(entry) != "file" {
+		entry = ""
+	}
+	a.CoreRunner = &nodeagent.BoxCore{Exe: exe, Entrypoint: entry, StateDir: dir, DataDir: dataDir,
+		Secrets: nodeagent.BoxSecretStore(dir, k), Environ: os.Environ(), Fride: a.Config.Box.Fride,
+		Ports: nodeagent.BoxCorePorts, Logf: log.Printf}
+	return nil
+}
+
+// boxCoreState says what of the core runs in the box in dir.
+func boxCoreState(dir string) string {
+	role, err := nodeagent.LoadCoreRole(dir)
+	switch {
+	case err != nil:
+		return err.Error()
+	case role == nodeagent.RoleCore:
+		return "this box is the core (it runs in the node container, on the box's data volume)"
+	case os.Getenv(nodeagent.BoxCoreEnv) == "1":
+		return "standby: a core move can hand the core to this box"
+	}
+	return "standby, without the core's settings (box-core.yaml): box.sh --update writes them"
 }

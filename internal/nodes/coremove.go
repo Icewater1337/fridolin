@@ -151,6 +151,9 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 			rep.Warnings = append(rep.Warnings, dstName+" runs FrIDE: once the secrets are there, any FrIDE task can read them")
 		}
 		s.moveImage(ctx, &rep, dst, true)
+		if rep.Target.Box {
+			s.moveToBox(&rep, checks[1])
+		}
 	}
 	if dstUnread != "" {
 		// The target's core is only told about: the source holds the
@@ -168,6 +171,25 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 	secs := 2*rep.ExportBytes/(10<<20) + 120
 	rep.Outage = fmt.Sprintf("about %d to %d minutes", max(1, secs/60), max(2, 2*secs/60))
 	return rep, nil
+}
+
+// moveToBox is what the pre-flight adds for a box target (docs/NODES.md,
+// "The core in a box"): its own checks (the core's settings, the brains'
+// sandbox) block when they fail, and the owner learns what changes when
+// the core runs in a box.
+func (s *Service) moveToBox(rep *MoveReport, c nodeproto.CoreCheckResult) {
+	name := rep.Target.Name
+	for _, it := range c.Setup {
+		if it.Required && it.Status == "fail" {
+			rep.Blocking = append(rep.Blocking, fmt.Sprintf("%s: %s: %s", name, it.Title, it.Detail))
+		}
+	}
+	rep.Warnings = append(rep.Warnings,
+		fmt.Sprintf("%s is a box: the core runs in its node container, the brain folders in its volume fridolin-box-data. They go with every export and come back on a move back, but no folder of that machine shows them, so Finder or Obsidian there cannot edit them", name),
+		fmt.Sprintf("the dashboard on %s is at http://127.0.0.1:8765 (FRIDOLIN_BOX_DASHBOARD_PORT in the box's .env), and on the tailnet as before", name))
+	if len(rep.MachineBound) > 0 {
+		rep.Warnings = append(rep.Warnings, fmt.Sprintf("what is bound to %s stays there and runs on its node, called over the node channel while it is online: a box runs no host scripts", rep.Source.Name))
+	}
 }
 
 // moveImage finds the core's image by digest and asks the target whether

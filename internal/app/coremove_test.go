@@ -309,9 +309,25 @@ type moveHosts struct {
 	dstAgent         *nodeagent.Agent
 	dstStore         *memSecrets
 	secret           string
+	// srcBox and dstBox are the boxes among them (moveBoxes), nil for a
+	// native core host.
+	srcBox, dstBox *boxSim
+}
+
+// moveBoxes says which of the two core hosts are boxes (corebox_test.go):
+// their agents run the real BoxCore, with the box's sealed store, on a
+// simulated node container.
+type moveBoxes struct {
+	src, dst bool
+	// noSettings is a box made before its core settings (no BoxCore).
+	noSettings bool
 }
 
 func (h *harness) moveHosts(version string, dstReady bool) moveHosts {
+	return h.moveHostsWith(version, dstReady, moveBoxes{})
+}
+
+func (h *harness) moveHostsWith(version string, dstReady bool, boxes moveBoxes) moveHosts {
 	h.t.Helper()
 	t := h.t
 	addr := h.StartNodes()
@@ -321,23 +337,34 @@ func (h *harness) moveHosts(version string, dstReady bool) moveHosts {
 		t.Fatal(err)
 	}
 	m := moveHosts{srcCore: newFakeCore(t, "mini", bucket, true), dstCore: newFakeCore(t, "icebase", bucket, dstReady), secret: "test-oauth-move-value"}
-	setup := func(c *fakeCore) func(*nodeagent.Agent) {
+	setup := func(c *fakeCore, box bool, sim **boxSim) func(*nodeagent.Agent) {
 		return func(a *nodeagent.Agent) {
 			a.Version = version
 			a.CoreRunner = c
 			a.CoreScan = func() []string { return []string{"Apple-only work stays on this Mac"} }
 			a.MovePoll, a.MoveGrace, a.MoveExportWait = 50*time.Millisecond, 300*time.Millisecond, 2*time.Second
+			if box {
+				*sim = newBoxSim(t, c, a)
+				if boxes.noSettings {
+					a.CoreRunner = nil
+				}
+			}
 		}
 	}
 	var dstDir string
-	m.dst, dstDir, m.dstStore, m.dstAgent = h.coreHostNodeWith(addr, "icebase", setup(m.dstCore))
+	m.dst, dstDir, m.dstStore, m.dstAgent = h.coreHostNodeWith(addr, "icebase", setup(m.dstCore, boxes.dst, &m.dstBox))
 	key, err := nodeagent.LoadKey(dstDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pin := nodeagent.CoreHostPin{ID: m.dst, PublicKey: hex.EncodeToString(key.Public().(ed25519.PublicKey)), Name: "icebase", PinnedAt: time.Now().UTC().Truncate(time.Second)}
-	var srcStore *memSecrets
-	m.src, _, srcStore, m.srcAgent = h.coreHostNodeWith(addr, "mini", setup(m.srcCore), pin)
+	var srcStore hostsecrets.Store
+	var srcMem *memSecrets
+	m.src, _, srcMem, m.srcAgent = h.coreHostNodeWith(addr, "mini", setup(m.srcCore, boxes.src, &m.srcBox), pin)
+	srcStore = srcMem
+	if m.srcBox != nil {
+		srcStore = m.srcBox.store
+	}
 	if err := srcStore.Set(hostsecrets.ClaudeOAuthToken, m.secret); err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +380,11 @@ func (h *harness) moveHosts(version string, dstReady bool) moveHosts {
 	})
 	// mini runs the core: the lease, and an export from before.
 	m.srcCore.data = "mini's data"
-	if err := m.srcCore.Start(context.Background()); err != nil {
+	var start nodeagent.CoreRunner = m.srcCore
+	if m.srcBox != nil {
+		start = m.srcAgent.CoreRunner
+	}
+	if err := start.Start(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := m.srcCore.Export(context.Background(), ""); err != nil {

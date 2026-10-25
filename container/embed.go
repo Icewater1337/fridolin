@@ -23,6 +23,14 @@ var Seccomp []byte
 //go:embed box.yaml
 var Box []byte
 
+// BoxCore is box-core.yaml, the core's settings of a box (its data and
+// home volumes, the published ports, the sandbox's security profile),
+// which `fridolin box core-compose` prints for box.sh, box.ps1 and the
+// updaters to write as core.yaml beside the box's compose file.
+//
+//go:embed box-core.yaml
+var BoxCore []byte
+
 // BoxUpdaterSh and BoxUpdaterPs1 are the box's updater for macOS and
 // Linux, and for Windows, which `fridolin box updater` prints.
 //

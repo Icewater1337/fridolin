@@ -110,6 +110,9 @@ Run flags:
   --container       inside the fridolin-core image: bind the dashboard's port on
                     the container's interfaces (Docker publishes it on the
                     host's 127.0.0.1 only); the image passes it
+  --box             with --container, in a box's node container (the core in a
+                    box, docs/NODES.md): the dashboard and the site stay on the
+                    loopback, and the node agent publishes them, refusing FrIDE
 `
 
 func Main() {
@@ -296,6 +299,7 @@ type runOptions struct {
 	open       bool
 	logFile    string
 	container  bool
+	box        bool
 }
 
 // parseRunFlags reads the run command's flags, which are also what
@@ -311,7 +315,16 @@ func parseRunFlags(args []string, output io.Writer) (runOptions, error) {
 	fs.BoolVar(&o.open, "open", false, "open the dashboard in the browser once started")
 	fs.StringVar(&o.logFile, "log-file", "", "the file stderr goes to, rotated at 10 MiB (the launchd agent passes it)")
 	fs.BoolVar(&o.container, "container", false, "inside the fridolin-core container: bind the dashboard's port on the container's interfaces, which Docker publishes on the host's loopback only")
-	return o, fs.Parse(args)
+	fs.BoolVar(&o.box, "box", false, "with --container, in a box's node container: the dashboard and the site stay on the loopback, where the node agent forwards the published ports to")
+	if err := fs.Parse(args); err != nil {
+		return o, err
+	}
+	if o.box && !o.container {
+		err := errors.New("--box goes with --container")
+		fmt.Fprintln(output, err)
+		return o, err
+	}
+	return o, nil
 }
 
 func runCmd(args []string) int {
@@ -356,8 +369,8 @@ func runCmd(args []string) int {
 	defer cancel(nil)
 	// NewBridge takes the data dir's instance lock, so dev mode with the live
 	// data dir is refused next to the running bridge too.
-	appOpts := app.Options{Logger: slog.Default(), Config: cfgs, NoWhatsApp: opts.noWhatsApp, Logs: ring, Container: opts.container}
-	if opts.container {
+	appOpts := app.Options{Logger: slog.Default(), Config: cfgs, NoWhatsApp: opts.noWhatsApp, Logs: ring, Container: opts.container, Box: opts.box}
+	if opts.container && !opts.box {
 		appOpts.Listen = containerListen
 	}
 	boot := cfgs.Boot()

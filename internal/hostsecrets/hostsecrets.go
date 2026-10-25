@@ -52,6 +52,41 @@ const (
 	GitHubToken = "fridolin.github.token"
 )
 
+// EnvSecret is one variable of the core's environment and the host
+// secret it comes from.
+type EnvSecret struct {
+	Env, Name string
+	// Optional ones are not named as missing: most cores never have them.
+	Optional bool
+}
+
+// CoreEnv maps the host secrets onto the core container's environment
+// (container/compose.yaml lists the same variables): what `fridolin core
+// start` passes from the keychain, and what a box's agent passes from its
+// sealed store to the core it runs (docs/NODES.md, "The core in a box").
+// The X25519 identity of before only reads the exports and node-target
+// passwords made for it.
+var CoreEnv = []EnvSecret{
+	{"FRIDOLIN_AGE_IDENTITY_PQ", AgeIdentityPQ, false},
+	{"FRIDOLIN_AGE_IDENTITY", AgeIdentity, false},
+	{"FRIDOLIN_EXPORT_KEY", ExportKey, false},
+	{"CLAUDE_CODE_OAUTH_TOKEN", ClaudeOAuthToken, false},
+	{"TS_AUTHKEY", TailscaleAuthKey, false},
+	{"B2_VAULT_KEY_ID", B2VaultKeyID, false},
+	{"B2_VAULT_KEY", B2VaultKey, false},
+	{"B2_SNAPSHOTS_KEY_ID", B2SnapshotsKeyID, false},
+	{"B2_SNAPSHOTS_KEY", B2SnapshotsKey, false},
+	{"FRIDOLIN_VAULT_CRYPT_PASSWORD", VaultCryptPassword, false},
+	{"FRIDOLIN_VAULT_CRYPT_PASSWORD2", VaultCryptSalt, false},
+	{"FRIDOLIN_VAULT_SEAL_KEY", VaultSealKey, false},
+	{"RESTIC_PASSWORD", ResticPassword, false},
+	{"FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD", SnapshotsCryptPassword, false},
+	{"FRIDOLIN_LITESTREAM_SEAL_KEY", LitestreamSealKey, false},
+	// A typed GitHub token, the second choice to a connected GitHub App
+	// (docs/GITHUB.md).
+	{"FRIDOLIN_GITHUB_TOKEN", GitHubToken, true},
+}
+
 // Account is the keychain account every secret is stored under.
 const Account = "fridolin"
 

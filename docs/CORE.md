@@ -753,9 +753,10 @@ fridolin nodes move-status ID           # how move ID went (GET /api/nodes/moves
 **Before.** SRC and DST are core hosts the owner approved, both online,
 and SRC pins DST's device key (`fridolin node core-host trust` on SRC).
 For the way back, DST pins SRC the same way. Both run the core's version
-(`fridolin nodes update ID` first), and both are native hosts: the core
-in a box comes with #191 phase 4, and a Windows node service cannot
-reach the owner's Docker Desktop, so both refuse with a reason. DST
+(`fridolin nodes update ID` first). Each is a native host or a box
+([below](#moving-the-core-to-a-box)); a native Windows node service
+cannot reach the owner's Docker Desktop and refuses with a reason (make
+that machine a box instead). A native DST
 needs Docker and a current GitHub `gh` (`brew install gh`; on Linux
 from GitHub's own apt repository, <https://cli.github.com>: Ubuntu
 24.04's `gh` 2.45 lacks `attestation verify --source-ref`; no login),
@@ -853,6 +854,37 @@ status --json` (this data dir's device id, the lease, the latest
 export's info), `core export --move ID --json`, `core release`, `core
 pull --from REF@sha256:… [--check] [--json]` and `core rehearse
 [--json]`.
+
+### Moving the core to a box
+
+A [node in a box](NODES.md#the-core-in-a-box) can be SRC or DST of the
+same move, with the same plan, lease and rollback: the agent in the
+box's `node` container does each step itself, with the same `fridolin
+core` commands, on the box's data volume `fridolin-box-data` instead of
+a core container's `fridolin-data`, and runs the core as its own child
+(`fridolin run --container --box`). Nothing of it reaches Docker:
+
+| Step | A native host | A box |
+| --- | --- | --- |
+| The image | `core pull --from REF@sha256:…` | the box runs its image by digest; a box on another version is updated first (`fridolin nodes update ID`) |
+| The host secrets | the keychain (macOS) or files under `~/.config` | the box's sealed store in its node volume; the core gets them in its environment, the names `core start` passes |
+| The secret files | `core run core files import` into the core's home | `core files import` into the box's home volume `fridolin-box-home` |
+| The rehearsal | the scratch volume `fridolin-move-rehearsal` | a scratch folder in the node's volume |
+| Stop, start | `fridolin core stop`, `core start` (compose) | the agent stops its core (SIGTERM) or starts it, and writes the box's role (`core-role.json`), which a restarted box follows |
+
+What changes for the owner when the core runs in a box (the pre-flight
+says so): the brain folders live in the volume `fridolin-box-data`,
+not in a folder of that machine (Finder, Obsidian there cannot edit
+them), and travel with every export; the dashboard is at
+`http://127.0.0.1:8765` on the box's host (`FRIDOLIN_BOX_DASHBOARD_PORT`),
+the site at its port 8780 for a Cloudflare tunnel on that host; what was
+bound to SRC (scripts on a Mac, Apple builds) stays there and runs on
+its node over the node channel while it is online. The box needs its
+core settings (`core.yaml`) and, on Linux with AppArmor,
+`FRIDOLIN_BOX_APPARMOR` ([NODES.md](NODES.md#the-core-in-a-box)); the
+pre-flight refuses it without them. A Windows PC becomes a core host
+this way, without WSL commands or a Credential Manager: Docker Desktop
+runs the box.
 
 ### Moving the core from WhatsApp
 
@@ -1003,7 +1035,10 @@ times over three minutes, while the tunnel connects) and tells the owner
 
 The runbook a coding agent follows when the owner clones the repository on
 another machine and says "move the core to this machine" (AGENTS.md, path
-C), to test a takeover or for good. The new machine runs the same
+C), to test a takeover or for good. When the machine is (or can become) a
+[node in a box](NODES.md#the-core-in-a-box) and both machines are core
+hosts, [the core moves itself](#moving-the-core-to-a-box) instead, with
+no steps by hand. The new machine runs the same
 container image with Docker; on Windows that is Docker Desktop on WSL2.
 `fridolin setup-machine --core` says at any point what is done and what
 is next; it only looks.

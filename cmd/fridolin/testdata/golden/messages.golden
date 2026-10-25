@@ -257,7 +257,7 @@ coreMoveTargets
 coreMoveTargets(none)
 	🚚 The core runs on *mac-mini*.
 
-	No other machine can take it yet. A machine becomes a core host with `fridolin node core-host on` there (a box: `--core-host` when it joins) and your `!approve`.
+	No other machine can take it yet. A machine becomes a core host with `fridolin node core-host on` there (in a box: `docker compose exec node fridolin node core-host on --state-dir /node` in its folder) and your `!approve`.
 coreMoveTargets(no source)
 	🚚 I can't tell which machine runs the core: no core host says it holds the lease. A core that runs outside a node (a native install that is no core host) cannot move by itself; docs/CORE.md, "The core moves itself".
 

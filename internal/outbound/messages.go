@@ -628,7 +628,7 @@ func CoreMoveTargets(runsOn string, hosts []CoreMoveHost) string {
 		fmt.Fprintf(&b, "🚚 The core runs on *%s*.", runsOn)
 	}
 	if len(hosts) == 0 {
-		b.WriteString("\n\nNo other machine can take it yet. A machine becomes a core host with `fridolin node core-host on` there (a box: `--core-host` when it joins) and your `!approve`.")
+		b.WriteString("\n\nNo other machine can take it yet. A machine becomes a core host with `fridolin node core-host on` there (in a box: `docker compose exec node fridolin node core-host on --state-dir /node` in its folder) and your `!approve`.")
 		return b.String()
 	}
 	b.WriteString("\n")
