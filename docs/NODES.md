@@ -792,7 +792,7 @@ digest, without ever reaching the box's Docker:
    join and keeps the request in its volume (`box-update.json`). That is
    all it does: the `node` service has no Docker socket.
 3. The **updater** on the host (`update.sh` beside the compose file, run
-   every 2 minutes as the owner by the launchd agent
+   every hour as the owner by the launchd agent
    `ai.fridolin.box-updater`, the systemd user timer
    `fridolin-box-updater` or cron; on Windows `update.ps1`, run by the
    Scheduled Task *fridolin box updater* while the owner is signed in)

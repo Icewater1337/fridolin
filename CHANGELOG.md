@@ -287,7 +287,7 @@ for compatibility.
   the images of its own version, pinned by digest and signed with its
   update key, from the Nodes page or by auto update. The agent only keeps
   the request; the box's updater on the host (installed by `box.sh` and
-  `box.ps1`, every 2 minutes as the owner; `--no-updater` leaves it out)
+  `box.ps1`, every hour as the owner; `--no-updater` leaves it out)
   checks it in a throwaway container of the current image, with the
   images' build provenance, pulls, recreates, and goes back to the images
   of before when the node does not connect again within 5 minutes. No
@@ -1133,8 +1133,10 @@ for compatibility.
 - **The box updater no longer flashes a window on Windows.** The
   Scheduled Task *fridolin box updater* starts PowerShell through
   `conhost.exe --headless`; with `-WindowStyle Hidden` alone a console
-  window opened and closed every 2 minutes. A box made before gets the
-  quiet task with its next `box.ps1 -Update`.
+  window opened and closed every 2 minutes. The updater now runs every
+  hour on every system, and the core waits for a box's update as long
+  as the box says its updater takes. A box made before gets the quiet,
+  hourly updater with its next `box.sh --update` or `box.ps1 -Update`.
 
 - **Site modules find the packages of a `package.json` in a subfolder.**
   The deploy ran `npm install` only in the site's folder, and the live

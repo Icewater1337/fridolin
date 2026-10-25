@@ -78,7 +78,7 @@ Write-Host "  2. write the box's compose files there (docker compose project fri
 Write-Host "     the core's settings, off until a core move hands the core to this box"
 Write-Host "  3. sign the box in to your tailnet as its own device (a link to open)"
 Write-Host "  4. join the core with the code from !join, and start the box with its updater"
-Write-Host "     (every 2 minutes, as you: it applies the updates the core asks for, once"
+Write-Host "     (every hour, as you: it applies the updates the core asks for, once"
 Write-Host "     their signature and build provenance are checked)"
 if ($fride) { Write-Host "  5. FrIDE: sign Claude in for its agents, set their git identity, pair it with the node" }
 }
@@ -162,7 +162,7 @@ if ($LASTEXITCODE -ne 0) { Die "the image did not print its updater" }
 Write-Host "compose.yaml, core.yaml, seccomp.json, .env and update.ps1 are in $Dir"
 
 # The box's updater (docs/NODES.md, "Box updates"): a Scheduled Task runs
-# update.ps1 every 2 minutes while you are signed in, without a window,
+# update.ps1 every hour while you are signed in, without a window,
 # as you. It applies an update the core asked for once a throwaway
 # container of the current image checked it, and is the only part that
 # reaches Docker.
@@ -177,10 +177,10 @@ if ($NoUpdater) {
     # round. Docker Desktop's Windows all have --headless (1809 and later).
     $conhost = Join-Path $env:SystemRoot "System32\conhost.exe"
     $action = New-ScheduledTaskAction -Execute $conhost -Argument ("--headless `"$ps`" -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"" + (Join-Path $Dir "update.ps1") + "`"")
-    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 2)
+    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Hours 1)
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 30)
     Register-ScheduledTask -TaskName "fridolin box updater" -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
-    Write-Host "The updater runs every 2 minutes while you are signed in (Scheduled Task 'fridolin box updater')."
+    Write-Host "The updater runs every hour while you are signed in (Scheduled Task 'fridolin box updater')."
 }
 
 if ($Update) {
