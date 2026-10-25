@@ -216,6 +216,22 @@ func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) {
 	if err := f.b.store.SaveFrideThread(ctx, t); err != nil {
 		log.Printf("fride: recording FrIDE #%d: %v", t.ID, err)
 	}
+	if ev.Kind() == nodeproto.FrideFailed && nodeproto.FrideNotLoggedIn(ev.Text) {
+		// FrIDE there cannot think (#288): the work goes to another
+		// FrIDE if one takes it, and stays here for a retry otherwise.
+		moved := t
+		moved.State, moved.Node, moved.FrideThread, moved.FrideStatus, moved.TaskID, moved.Branch = store.FrideQueued, "", 0, "", "", ""
+		pctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		placed, _ := f.place(pctx, &moved, node)
+		cancel()
+		unlock()
+		to := ""
+		if placed {
+			t, to = moved, f.nodeName(moved.Node)
+		}
+		f.say(t, outboundmsg.FrideNotLoggedInNotice(t.ID, f.nodeName(node), to, nodeproto.FrideLoginFix))
+		return
+	}
 	unlock()
 	f.say(t, outboundmsg.FrideNewsMessage(outboundmsg.FrideNews{
 		Thread: t.ID, Node: f.nodeName(node), Kind: ev.Kind(), Text: ev.Text,
@@ -260,11 +276,12 @@ func noFrideNode(want string, repos []string) string {
 	return why
 }
 
-// place hands thread t to the FrIDE of a node that may take it: one that
-// matches, whose memory check says a stack may start, the one with the
-// most memory free first. It reports why none took it.
-func (f *frideRuntime) place(ctx context.Context, t *store.FrideThread) (placed bool, why string) {
-	cands := f.frideNodes(t.WantNode, t.Repos)
+// place hands thread t to the FrIDE of a node other than skip that may
+// take it: one that matches, whose memory check says a stack may start,
+// the one with the most memory free first, and one whose Claude is not
+// logged in only when no other takes it. It reports why none took it.
+func (f *frideRuntime) place(ctx context.Context, t *store.FrideThread, skip string) (placed bool, why string) {
+	cands := slices.DeleteFunc(f.frideNodes(t.WantNode, t.Repos), func(v nodes.View) bool { return v.ID == skip })
 	if len(cands) == 0 {
 		return false, noFrideNode(t.WantNode, t.Repos)
 	}
@@ -286,7 +303,11 @@ func (f *frideRuntime) place(ctx context.Context, t *store.FrideThread) (placed 
 		}
 	}
 	slices.SortStableFunc(fits, func(a, b fit) int {
-		switch {
+		switch al, bl := a.v.Effective.Fride.NotLoggedIn, b.v.Effective.Fride.NotLoggedIn; {
+		case al != bl && bl:
+			return -1
+		case al != bl:
+			return 1
 		case a.mem.HostFree > b.mem.HostFree:
 			return -1
 		case a.mem.HostFree < b.mem.HostFree:
@@ -386,7 +407,7 @@ func (f *frideRuntime) retryQueued() {
 			continue
 		}
 		ctx, cancel := context.WithTimeout(f.ctx, 2*time.Minute)
-		placed, _ := f.place(ctx, &t)
+		placed, _ := f.place(ctx, &t, "")
 		cancel()
 		unlock()
 		if placed {
@@ -406,7 +427,7 @@ func (f *frideRuntime) newWork(ctx context.Context, chat, brain, message string,
 	}
 	t.ID = id
 	unlock := f.lock(id)
-	placed, why := f.place(ctx, &t)
+	placed, why := f.place(ctx, &t, "")
 	unlock()
 	if !placed {
 		f.say(t, outboundmsg.FrideQueuedNotice(t.ID, why))

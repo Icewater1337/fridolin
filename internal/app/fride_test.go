@@ -241,3 +241,34 @@ func TestFrideRepoAddTool(t *testing.T) {
 		t.Fatalf("fride_repo_add in a lockdown:\n%s", reply)
 	}
 }
+
+// A FrIDE whose Claude is not logged in (#288): its failed thread moves
+// to another node, the node says so in what it declares, and new work
+// goes elsewhere while another node can take it.
+func TestFrideNotLoggedIn(t *testing.T) {
+	t.Parallel()
+	optionsOf(t).waits.frideRetry = time.Hour
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	boxFride, miniFride := testutil.StartFakeFride(t, "api"), testutil.StartFakeFride(t, "api")
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	addr := h.StartNodes()
+	box, _ := h.fakeFrideNode("box", addr, boxFride)
+	h.fakeFrideNode("mini", addr, miniFride)
+
+	reply := h.coreSays("add a health endpoint", step("fride_task", `{"message":"Add a health endpoint","repos":["api"]}`))
+	if !strings.Contains(reply, "Handed to FrIDE on box as FrIDE #1") {
+		t.Fatalf("fride_task:\n%s", reply)
+	}
+	boxFride.Emit(map[string]any{"event": "failed", "thread_id": 1, "text": "FrIDE inbox #1 · failed\nthe orchestrator could not think: Not logged in · Please run /login", "status": "failed"})
+	h.WaitSent(harnessDM, "*FrIDE #1* could not start on box: FrIDE's Claude there is not logged in. It went to mini instead.")
+	h.WaitFor("box declaring that its Claude is not logged in", func() bool {
+		n, err := h.b.nodes.Registry().Get(box)
+		return err == nil && n.Declared.Fride != nil && n.Declared.Fride.NotLoggedIn
+	})
+
+	reply = h.coreSays("and docs", step("fride_task", `{"message":"Write docs"}`))
+	if !strings.Contains(reply, "Handed to FrIDE on mini as FrIDE #2") {
+		t.Fatalf("new work went to the node without a login:\n%s", reply)
+	}
+}

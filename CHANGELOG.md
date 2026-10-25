@@ -1130,6 +1130,16 @@ for compatibility.
 
 ### Fixed
 
+- **FrIDE work no longer sticks on a node whose FrIDE has no Claude
+  login.** When FrIDE fails a thread with "Not logged in", the node says
+  so in what it offers (`fride (Claude not logged in)`, and `fridolin
+  doctor`'s "FrIDE on the nodes" warns with the fix), the thread goes to
+  another node's FrIDE that can take it, and new work goes elsewhere
+  while one can. With no other node the chat gets the fix: in the box,
+  `docker compose exec fride claude setup-token` and `set-claude-token`,
+  then `docker compose restart fride`. The mark clears when FrIDE
+  restarts, sends other news, or after an hour.
+
 - **The box updater no longer flashes a window on Windows.** The
   Scheduled Task *fridolin box updater* starts PowerShell through
   `conhost.exe --headless`; with `-WindowStyle Hidden` alone a console

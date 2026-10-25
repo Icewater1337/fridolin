@@ -89,6 +89,10 @@ const (
 	// frideTransferTTL is how long a staged bundle is kept unread.
 	frideTransferTTL = 24 * time.Hour
 	maxWebhookBody   = 1 << 20
+	// frideNoLoginFor is how long a failure saying FrIDE's Claude is not
+	// logged in marks the declaration, unless FrIDE restarts or sends
+	// other news first: then the core tries it again.
+	frideNoLoginFor = time.Hour
 )
 
 // fride is the agent's link to FrIDE.
@@ -102,6 +106,9 @@ type fride struct {
 	srv     *http.Server
 	srvAddr string
 	lastErr string
+	// noLogin is when FrIDE last failed a thread for want of a Claude
+	// login; zero for not since its news said otherwise.
+	noLogin time.Time
 
 	// events is the news on its way to the core; changed says the
 	// declaration changed.
@@ -276,9 +283,15 @@ func (a *Agent) frideCheck(ctx context.Context) bool {
 	}
 	f.mu.Lock()
 	old := f.cap
+	if next == nil {
+		// FrIDE went away, or restarts with the login fixed.
+		f.noLogin = time.Time{}
+	} else {
+		next.NotLoggedIn = !f.noLogin.IsZero() && time.Since(f.noLogin) < frideNoLoginFor
+	}
 	f.cap = next
 	f.mu.Unlock()
-	changed := (old == nil) != (next == nil) || old != nil && (old.URL != next.URL || !slices.Equal(old.Repos, next.Repos))
+	changed := (old == nil) != (next == nil) || old != nil && (old.URL != next.URL || !slices.Equal(old.Repos, next.Repos) || old.NotLoggedIn != next.NotLoggedIn)
 	if changed {
 		if next != nil {
 			a.logf("node: FrIDE answers at %s; offering it to the core", next.URL)
@@ -433,12 +446,44 @@ func (a *Agent) frideWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.fride.init()
+	switch {
+	case ev.Kind() == nodeproto.FrideFailed && nodeproto.FrideNotLoggedIn(ev.Text):
+		a.frideLogin(time.Now())
+	case ev.Kind() != nodeproto.FrideFailed:
+		a.frideLogin(time.Time{})
+	}
 	select {
 	case a.fride.events <- ev:
 		w.WriteHeader(http.StatusNoContent)
 	default:
 		// FrIDE retries a 503 for about two minutes.
 		http.Error(w, "the queue to the core is full", http.StatusServiceUnavailable)
+	}
+}
+
+// frideLogin records when FrIDE last failed for want of a Claude login
+// (zero: its news says Claude thinks), and declares it again when that
+// changes what the node offers.
+func (a *Agent) frideLogin(at time.Time) {
+	f := &a.fride
+	f.mu.Lock()
+	f.noLogin = at
+	changed := f.cap != nil && f.cap.NotLoggedIn != !at.IsZero()
+	if changed {
+		c := *f.cap
+		c.NotLoggedIn = !at.IsZero()
+		f.cap = &c
+	}
+	f.mu.Unlock()
+	if !changed {
+		return
+	}
+	if !at.IsZero() {
+		a.logf("node: FrIDE's Claude is not logged in; telling the core, which sends new work elsewhere. Fix: %s", nodeproto.FrideLoginFix)
+	}
+	select {
+	case f.changed <- struct{}{}:
+	default:
 	}
 }
 

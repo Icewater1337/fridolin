@@ -199,6 +199,7 @@ func checkNodesFride(ctx context.Context, env *DoctorEnv) DoctorResult {
 	}
 	now := env.now()
 	var ok, down []string
+	noLogin := false
 	for _, n := range list {
 		if n.Device != nodeproto.DeviceApproved || n.Approved.Fride == nil {
 			continue
@@ -208,6 +209,9 @@ func checkNodesFride(ctx context.Context, env *DoctorEnv) DoctorResult {
 			down = append(down, n.Name+" ("+n.ID+", not heard from)")
 		case n.Declared.Fride == nil:
 			down = append(down, n.Name+" ("+n.ID+", FrIDE does not answer)")
+		case n.Declared.Fride.NotLoggedIn:
+			down = append(down, n.Name+" ("+n.ID+", FrIDE's Claude is not logged in)")
+			noLogin = true
 		default:
 			ok = append(ok, n.Name+" ("+n.Declared.Fride.URL+")")
 		}
@@ -217,9 +221,13 @@ func checkNodesFride(ctx context.Context, env *DoctorEnv) DoctorResult {
 	}
 	if len(down) > 0 {
 		slices.Sort(down)
+		fix := "on each, start FrIDE with fride serve --under-fridolin, and check fridolin node fride status and fridolin node status"
+		if noLogin {
+			fix += "; where its Claude is not logged in, " + nodeproto.FrideLoginFix
+		}
 		return DoctorResult{Status: DoctorWarn,
 			Detail: fmt.Sprintf("%d of %d nodes with FrIDE cannot take work: %s", len(down), len(ok)+len(down), strings.Join(down, "; ")),
-			Fix:    "on each, start FrIDE with fride serve --under-fridolin, and check fridolin node fride status and fridolin node status"}
+			Fix:    fix}
 	}
 	slices.Sort(ok)
 	return DoctorResult{Status: DoctorOK, Detail: "FrIDE answers on " + strings.Join(ok, ", ")}

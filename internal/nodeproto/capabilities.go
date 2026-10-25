@@ -489,7 +489,11 @@ func (c Capabilities) Summary() string {
 		parts = append(parts, "notify")
 	}
 	if c.Fride != nil {
-		parts = append(parts, "fride")
+		if c.Fride.NotLoggedIn {
+			parts = append(parts, "fride (Claude not logged in)")
+		} else {
+			parts = append(parts, "fride")
+		}
 	}
 	if c.AndroidBuild != nil {
 		parts = append(parts, "android-build")
