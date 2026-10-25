@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/mcp"
 	"github.com/Icewater1337/fridolin/internal/skill"
 )
@@ -139,8 +138,8 @@ func (b *App) callFrideTask(ctx context.Context, c mcpCaller, raw json.RawMessag
 	// Policy (PLAN.md, M5): fride_task is a write action, checked by
 	// App.guarded (registerFrideTools) before anything leaves the core: a
 	// lockdown or a run whose budget is read gets its error result.
-	chatJID := c.run.Chat
-	if chatJID == "" || chat.IsInternalChat(chatJID) {
+	chatJID := b.newsChat(c)
+	if chatJID == "" {
 		return mcp.ErrorResult("this run answers no chat, so FrIDE's questions and news would have nowhere to go"), nil
 	}
 	t, placed, _, err := b.fride.newWork(ctx, chatJID, c.run.Brain, a.Message, a.Repos, a.Node)
@@ -150,7 +149,16 @@ func (b *App) callFrideTask(ctx context.Context, c mcpCaller, raw json.RawMessag
 	if !placed {
 		return mcp.TextResult(fmt.Sprintf("FrIDE #%d waits: no machine with FrIDE can take it now. The chat has been told, and hears when it starts; you need not repeat it.", t.ID)), nil
 	}
-	return mcp.TextResult(fmt.Sprintf("Handed to FrIDE on %s as FrIDE #%d (FrIDE's status: %s). Its questions and news will arrive in this chat as messages naming FrIDE #%d.", b.fride.nodeName(t.Node), t.ID, orDefault(t.FrideStatus, "queued"), t.ID)), nil
+	return mcp.TextResult(fmt.Sprintf("Handed to FrIDE on %s as FrIDE #%d (FrIDE's status: %s). Its questions and news will arrive in %s as messages naming FrIDE #%d.", b.fride.nodeName(t.Node), t.ID, orDefault(t.FrideStatus, "queued"), newsWhere(c, chatJID), t.ID)), nil
+}
+
+// newsWhere names chatJID, where a tool's news go, to the run: "this
+// chat" when the run answers it.
+func newsWhere(c mcpCaller, chatJID string) string {
+	if chatJID == c.run.Chat {
+		return "this chat"
+	}
+	return chatLabel(chatJID)
 }
 
 func (b *App) callFrideStatus(ctx context.Context, _ mcpCaller, raw json.RawMessage) (*mcp.CallResult, error) {

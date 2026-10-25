@@ -277,6 +277,14 @@ func (p *streamParser) event(line []byte) {
 			return
 		}
 		p.result = event.Result
+		if p.result == "" && p.lastText != "" && !p.asked && p.provider != "codex" {
+			// Claude's result carries only the model's last message, which
+			// is empty when it wrote its answer and then only called tools:
+			// the answer is the last text it wrote. (Codex's result is its
+			// final answer, never its commentary.)
+			p.result = p.lastText
+			p.sink.Log("(the result carried no text: the answer is the last text the run wrote)")
+		}
 		p.sink.Log("✅ Result: " + textx.Truncate(p.result, 2000))
 		p.sink.Result(p.outcome())
 
@@ -301,7 +309,7 @@ func (p *streamParser) event(line []byte) {
 // outcome is the run's outcome once its output ended.
 func (p *streamParser) outcome() Result {
 	if p.err != nil {
-		return Result{Err: p.err, Asked: p.asked, Usage: p.usage}
+		return Result{Err: p.err, Asked: p.asked, Usage: p.usage, LastText: p.lastText}
 	}
 	// A -p run is stateless and nobody answers its AskUserQuestion, so the
 	// model goes on after asking, often to an answer of its own ("I booked

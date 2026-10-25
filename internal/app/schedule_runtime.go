@@ -246,6 +246,32 @@ func (a *agents) resultChat(br *brainruntime.Brain, s manifest.Schedule, cfg *co
 	return a.b.replyChatFor(br, cfg)
 }
 
+// newsChat is the chat a run's FrIDE thread or workstation session sends
+// its questions and news to (docs/BRAINS.md, "Scheduled agents"): the
+// chat the run answers, or for a scheduled agent's run the chat its
+// report goes to, else the owner's DM. "" when nobody would hear them:
+// an observe-only run, a silent agent, a delegated task's chat.
+func (b *App) newsChat(c mcpCaller) string {
+	if c.run.Policy != nil && c.run.Policy.Silent {
+		return ""
+	}
+	jid := c.run.Chat
+	if !chat.IsScheduleChat(jid) {
+		if jid == "" || chat.IsInternalChat(jid) {
+			return ""
+		}
+		return jid
+	}
+	ar := b.agents.lookup(c.run.Message.ID)
+	if ar == nil || ar.agent.ReportMode() == manifest.ReportSilent {
+		return ""
+	}
+	if ar.chat != "" {
+		return ar.chat
+	}
+	return ownerChat(b.cfgs.Get())
+}
+
 // task is the task of brain run agent s of br: its prompt, its prompt
 // file or its template, with its vars filled in.
 func (a *agents) task(br *brainruntime.Brain, s manifest.Schedule) (string, error) {
@@ -392,11 +418,22 @@ func (a *agents) finished(br *brainruntime.Brain, m brainruntime.Inbound, res cl
 		// The whole error, the CLI's stderr included, goes to the log
 		// only, which the dashboard shows the owner.
 		ar.log.Line("Error: " + res.Err.Error())
-		a.complete(ar, status, "", why, res.Usage, notice)
+		if res.LastText != "" {
+			// What it wrote before the error, its summary often: kept in
+			// the log and the run's history, not sent.
+			ar.log.Line("Its last text before the error:\n" + res.LastText)
+			log.Printf("brain %s: scheduled agent %s: run %s ended in an error after it wrote %d characters, kept in its history", br.ID(), s.Name, ar.run.ID, len(res.LastText))
+		}
+		a.complete(ar, status, res.LastText, why, res.Usage, notice)
 	case s.ReportMode() == manifest.ReportSilent:
 		a.complete(ar, sched.StatusOK, res.Text, "", res.Usage, "")
 	case s.ReportMode() == manifest.ReportWorth && !sched.Worth(res.Text):
 		a.complete(ar, sched.StatusNothing, res.Text, "", res.Usage, "")
+	case strings.TrimSpace(res.Text) == "":
+		// Nothing to send: said in the log, so that a lost report shows.
+		ar.log.Line("The run ended without an answer to send")
+		log.Printf("brain %s: scheduled agent %s: run %s ended without an answer to send", br.ID(), s.Name, ar.run.ID)
+		a.complete(ar, sched.StatusOK, "", "", res.Usage, "")
 	default:
 		a.deliver(ar, br.ID(), res.Text)
 		a.complete(ar, sched.StatusOK, res.Text, "", res.Usage, "")
@@ -433,6 +470,7 @@ func (a *agents) failureNotice(ar *agentRun, why string) string {
 // history records it there once it is sent.
 func (a *agents) deliver(ar *agentRun, brain, text string) {
 	if ar.chat == "" {
+		ar.log.Line("Not sent: the agent reports to no chat")
 		return
 	}
 	if err := a.b.pipeline.Reply(context.Background(), brain, ar.chat, text, a.b.cfgs.Get().MaxChunkSize); err != nil {

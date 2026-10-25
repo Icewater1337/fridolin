@@ -700,9 +700,21 @@ its own, `schedule:<name>`, whose history its next run sees, so it knows
 what it reported before. Its message says the agent's name and schedule,
 where its answer goes and the steps approved with it, then the task. A
 question it asks mid-run has nobody to answer it and is not sent. An
+answer it writes and then follows with tool calls only is still its
+answer: the bridge reports the last text the run wrote when the CLI's
+result carries none. A run that ends in an error keeps that text in its
+history and log, and the chat is told of the failure only. An
 agent never runs twice at once: a time that comes while its run goes on
 is left out. A lockdown runs an agent at `read`, and refuses one whose
 `risk` says more; it refuses every program on a node.
+
+**FrIDE and workstation sessions from an agent.** A run of an agent
+that reports somewhere may hand work to FrIDE (`fride_task`) or start a
+session on a workstation node (`node_agent_run`): their questions and
+news go to the chat the agent reports to (its `chat`, else the brain's
+reply chat, else your DM), where you answer them as usual, or where the
+brain's next run passes your answer on with `fride_reply`. A `silent`
+agent reports nowhere, and its runs may start neither.
 
 A program runs on the node through `exec` ([NODES.md](NODES.md#what-a-node-offers)),
 no shell: its `argv[0]` must be on the node's allowlist, the node's

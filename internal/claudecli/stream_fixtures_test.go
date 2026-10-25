@@ -351,6 +351,7 @@ func TestParseStreamKeepsTheFirstResult(t *testing.T) {
 		err                error
 	}{
 		{"empty result", `{"type":"result","result":""}`, "", ErrNoResult},
+		{"text, tools, empty result", `{"type":"assistant","message":{"content":[{"type":"text","text":"summary"}]}}` + "\n" + `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Write"}]}}` + "\n" + `{"type":"result","result":""}`, "summary", nil},
 		{"answer then error", `{"type":"result","result":"done"}` + "\n" + `{"type":"result","is_error":true,"result":"late error"}`, "done", nil},
 		{"answer then answer", `{"type":"result","result":"done"}` + "\n" + `{"type":"result","result":"late answer"}`, "done", nil},
 	}

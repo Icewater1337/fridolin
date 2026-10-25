@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/mcp"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
@@ -43,13 +42,14 @@ func (b *App) callAgentRun(ctx context.Context, c mcpCaller, raw json.RawMessage
 	if strings.TrimSpace(a.Prompt) == "" {
 		return mcp.ErrorResult("prompt is empty: say what the session is to do"), nil
 	}
-	if c.run.Chat == "" || chat.IsInternalChat(c.run.Chat) {
+	chatJID := b.newsChat(c)
+	if chatJID == "" {
 		return mcp.ErrorResult("this run answers no chat, so the session's questions and news would have nowhere to go"), nil
 	}
 	if err := (nodeproto.AgentStartParams{Folder: "/x", Prompt: a.Prompt, Provider: a.Provider, Model: a.Model}).Check(); err != nil {
 		return mcp.ErrorResult(err.Error()), nil
 	}
-	w, s, err := b.work.startAgent(ctx, c, a.Node, a.Folder, a.Prompt, a.Provider, a.Model, a.UseCoreLogin)
+	w, s, err := b.work.startAgent(ctx, c, chatJID, a.Node, a.Folder, a.Prompt, a.Provider, a.Model, a.UseCoreLogin)
 	if err != nil {
 		return mcp.ErrorResult(err.Error()), nil
 	}
@@ -57,8 +57,8 @@ func (b *App) callAgentRun(ctx context.Context, c mcpCaller, raw json.RawMessage
 	if s.CoreLogin {
 		login = "the core's login"
 	}
-	return mcp.TextResult(fmt.Sprintf("Started Agent #%d on %s in %s (%s, %s, sandbox %s). Its questions, steps to approve and its end arrive in this chat as messages naming Agent #%d; you need not wait for it.",
-		w.N, b.work.nodeName(w.Node), w.Folder, s.Provider, login, s.Sandbox, w.N)), nil
+	return mcp.TextResult(fmt.Sprintf("Started Agent #%d on %s in %s (%s, %s, sandbox %s). Its questions, steps to approve and its end arrive in %s as messages naming Agent #%d; you need not wait for it.",
+		w.N, b.work.nodeName(w.Node), w.Folder, s.Provider, login, s.Sandbox, newsWhere(c, chatJID), w.N)), nil
 }
 
 // agentView is what node_agent_status shows of a session.

@@ -171,8 +171,9 @@ func (w *workRuntime) auditSession(e audit.Entry) {
 	w.b.audit.Append(e)
 }
 
-// startAgent starts a session for a core run in chat.
-func (w *workRuntime) startAgent(ctx context.Context, c mcpCaller, want, folder, prompt, provider, model string, coreLogin bool) (*workAgent, nodeproto.AgentSession, error) {
+// startAgent starts a session for a core run, whose news go to chatJID
+// (App.newsChat).
+func (w *workRuntime) startAgent(ctx context.Context, c mcpCaller, chatJID, want, folder, prompt, provider, model string, coreLogin bool) (*workAgent, nodeproto.AgentSession, error) {
 	v, folder, err := w.place("agent", want, folder)
 	if err != nil {
 		return nil, nodeproto.AgentSession{}, err
@@ -193,7 +194,7 @@ func (w *workRuntime) startAgent(ctx context.Context, c mcpCaller, want, folder,
 	}
 	w.mu.Lock()
 	w.next++
-	a := &workAgent{N: w.next, Node: v.ID, ID: s.ID, Folder: s.Folder, Provider: s.Provider, Chat: c.run.Chat, Brain: c.run.Brain, Run: c.run.ID, Started: time.Now()}
+	a := &workAgent{N: w.next, Node: v.ID, ID: s.ID, Folder: s.Folder, Provider: s.Provider, Chat: chatJID, Brain: c.run.Brain, Run: c.run.ID, Started: time.Now()}
 	w.agents[a.N] = a
 	w.mu.Unlock()
 	if coreLogin {
