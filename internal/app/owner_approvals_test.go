@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -196,7 +197,7 @@ func TestApproveSeveral(t *testing.T) {
 		t.Fatalf("!approve with four waiting: %q", notice)
 	}
 	for name, id := range ids {
-		if !strings.Contains(notice, "• "+name+" (Linux) joins as a node: `"+id+"`") {
+		if !strings.Contains(notice, "• "+name+" ("+hostOS+") joins as a node: `"+id+"`") {
 			t.Errorf("the notice lacks the ref of %s:\n%s", name, notice)
 		}
 	}
@@ -206,7 +207,7 @@ func TestApproveSeveral(t *testing.T) {
 		name, _, _ := strings.Cut(o, " ")
 		option[name] = o
 	}
-	if len(poll.Poll) != 4 || option["mini"] != "mini (Linux) joins as a node" {
+	if len(poll.Poll) != 4 || option["mini"] != "mini ("+hostOS+") joins as a node" {
 		t.Fatalf("the poll: %+v", poll)
 	}
 
@@ -270,7 +271,7 @@ func TestApproveSeveralUnexpected(t *testing.T) {
 	poll := h.waitPoll(harnessDM, "Tick the ones you approve.")
 	h.vote(poll.ID, "15551234567", poll.Poll...)
 	ask := h.WaitSent(harnessDM, "wait for a second word")
-	for _, want := range []string{"⚠️ To be sure, 2 of them wait for a second word:", ". *a* (Linux) wants to join as a node.\n   This is unexpected", ". *b* (Linux) wants to join", "within 2 minutes to approve them all"} {
+	for _, want := range []string{"⚠️ To be sure, 2 of them wait for a second word:", ". *a* (" + hostOS + ") wants to join as a node.\n   This is unexpected", ". *b* (" + hostOS + ") wants to join", "within 2 minutes to approve them all"} {
 		if !strings.Contains(ask, want) {
 			t.Errorf("the ask lacks %q:\n%s", want, ask)
 		}
@@ -368,3 +369,6 @@ func TestApproveRunRequest(t *testing.T) {
 		t.Errorf("the approval: %+v %v", got, err)
 	}
 }
+
+// hostOS is the OS label of the machine the tests run on: test agents report runtime.GOOS.
+var hostOS = osName(runtime.GOOS)
