@@ -20,7 +20,19 @@ type FrideCap struct {
 	URL string `json:"url"`
 	// Repos are the repositories FrIDE knows on the node.
 	Repos []string `json:"repos,omitempty"`
+	// NotLoggedIn says FrIDE's Claude was not logged in when a thread last
+	// failed there: work goes to another FrIDE while one can take it.
+	NotLoggedIn bool `json:"not_logged_in,omitempty"`
 }
+
+// FrideNotLoggedIn reports whether FrIDE's failure text says its Claude is
+// not logged in ("Not logged in · Please run /login").
+func FrideNotLoggedIn(text string) bool {
+	return strings.Contains(strings.ToLower(text), "not logged in")
+}
+
+// FrideLoginFix is how the owner logs FrIDE's Claude in again.
+const FrideLoginFix = "in the node's box run docker compose exec fride claude setup-token and set-claude-token, then docker compose restart fride (natively: log in to claude as FrIDE's user and restart fride serve)"
 
 // Bounds of a fride declaration.
 const (

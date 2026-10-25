@@ -429,6 +429,16 @@ func FrideQueuedNotice(thread int64, why string) string {
 	return fmt.Sprintf("⏳ *FrIDE #%d* waits: no node with FrIDE can take it now (%s). It starts as soon as one can, and I'll say so here.", thread, why)
 }
 
+// FrideNotLoggedInNotice says thread failed on node because FrIDE's
+// Claude is not logged in there, where it went instead (to; "" for
+// nowhere), and fix.
+func FrideNotLoggedInNotice(thread int64, node, to, fix string) string {
+	if to != "" {
+		return fmt.Sprintf("⚠️ *FrIDE #%d* could not start on %s: FrIDE's Claude there is not logged in. It went to %s instead.\nTo fix %s: %s.", thread, node, to, node, fix)
+	}
+	return fmt.Sprintf("⚠️ *FrIDE #%d* could not start on %s: FrIDE's Claude there is not logged in, and no other node can take it now.\nTo fix it: %s. Then answer here to make it try again.", thread, node, fix)
+}
+
 // FridePlacedNotice says a waiting thread went to node.
 func FridePlacedNotice(thread int64, node string) string {
 	return fmt.Sprintf("🛠️ *FrIDE #%d* went to %s now.", thread, node)

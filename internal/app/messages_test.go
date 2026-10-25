@@ -189,6 +189,8 @@ func catalogue() []struct{ name, text string } {
 		{"frideNewsMessage(done)", outboundmsg.FrideNewsMessage(outboundmsg.FrideNews{Thread: 3, Node: "laptop", Kind: "done", Text: "FrIDE inbox #1 · done\n• Inbox #1 is done: health — task health is closed.", Task: "health", Branch: "feat/health", Rationale: "/Users/you/fride-workspaces/health/api/docs/rationale/health.md"})},
 		{"frideNewsMessage(failed)", outboundmsg.FrideNewsMessage(outboundmsg.FrideNews{Thread: 3, Node: "laptop", Kind: "failed", Text: "FrIDE inbox #1 · failed\nthe message could not be read"})},
 		{"frideQueuedNotice", outboundmsg.FrideQueuedNotice(3, "laptop: not enough memory for another stack")},
+		{"frideNotLoggedInNotice(moved)", outboundmsg.FrideNotLoggedInNotice(3, "box", "laptop", nodeproto.FrideLoginFix)},
+		{"frideNotLoggedInNotice(stays)", outboundmsg.FrideNotLoggedInNotice(3, "box", "", nodeproto.FrideLoginFix)},
 		{"fridePlacedNotice", outboundmsg.FridePlacedNotice(3, "laptop")},
 		{"frideMoveUsage", outboundmsg.FrideMoveUsage},
 		{"frideMoveGroupNotice", outboundmsg.FrideMoveGroupNotice},
