@@ -224,16 +224,11 @@ func (b *App) nodeItem(ctx context.Context, n *nodes.Node) (pendingItem, bool) {
 	m.Ref = n.ID
 	m.Label = "*" + n.Name + "*"
 	m.Facts = append(m.Facts, "From: "+b.nodeWhere(ctx, n.Address))
-	coreHost := n.Declared.CoreHost != nil && !nodeproto.Covers(n.Approved, nodeproto.Capabilities{CoreHost: n.Declared.CoreHost})
 	fride := nodes.FridePending(n)
 	if pendingDevice {
 		it.since = n.JoinedAt
 		m.Subject = fmt.Sprintf("*%s* (%s) wants to join as a node", n.Name, os)
 		m.Option = fmt.Sprintf("%s (%s) joins as a node", n.Name, os)
-		if coreHost {
-			m.Subject += ", holding all of Fridolin's secrets (core-host)"
-			m.Option += ", core-host"
-		}
 		switch n.JoinedVia {
 		case nodes.JoinedFromChat:
 			m.Facts = append(m.Facts, "Started: with a join code you asked for with !join")
@@ -248,9 +243,6 @@ func (b *App) nodeItem(ctx context.Context, n *nodes.Node) (pendingItem, bool) {
 		}
 		m.Unexpected = "the machine asked for this itself; nobody asked from WhatsApp or the dashboard."
 		switch {
-		case coreHost:
-			m.Subject = fmt.Sprintf("*%s* (%s) asks to hold all of Fridolin's secrets (core-host)", n.Name, os)
-			m.Option = fmt.Sprintf("%s holds all secrets (core-host)", n.Name)
 		case fride:
 			m.Subject = fmt.Sprintf("*%s* (%s) asks to let FrIDE's agents run anything on it (fride)", n.Name, os)
 			m.Option = fmt.Sprintf("%s runs FrIDE (fride)", n.Name)
@@ -262,23 +254,8 @@ func (b *App) nodeItem(ctx context.Context, n *nodes.Node) (pendingItem, bool) {
 			m.Option = fmt.Sprintf("%s serves the core", n.Name)
 		}
 	}
-	if coreHost {
-		m.Note = nodeproto.CoreHostApproval
-		m.Facts = append(m.Facts, "Device key: `"+nodeproto.Fingerprint(n.PublicKey)+"`")
-		if len(n.Declared.CoreHost.SendTo) > 0 {
-			var to []string
-			for _, id := range n.Declared.CoreHost.SendTo {
-				name := id
-				if t, err := b.nodes.Registry().Get(id); err == nil {
-					name = t.Name
-				}
-				to = append(to, name)
-			}
-			m.Facts = append(m.Facts, "Sends secrets only to: "+strings.Join(to, ", "))
-		}
-	}
 	if fride {
-		m.Note = strings.TrimSpace(m.Note + "\n\n" + nodeproto.FrideApproval)
+		m.Note = nodeproto.FrideApproval
 	}
 	m.When = it.since
 	m.Allows = n.Declared.Plain()
@@ -295,9 +272,6 @@ func (b *App) nodeItem(ctx context.Context, n *nodes.Node) (pendingItem, bool) {
 			return "", err
 		}
 		reply := outboundmsg.NodeApprovedReply(got.Name, got.ID, got.Effective().Plain())
-		if coreHost && got.Effective().CoreHost != nil {
-			reply += "\n\n" + outboundmsg.NodeCoreHostApprovedNote(nodeproto.CoreHostApproval)
-		}
 		if fride && got.Effective().Fride != nil {
 			reply += "\n\n" + outboundmsg.NodeFrideApprovedNote(nodeproto.FrideApproval)
 		}

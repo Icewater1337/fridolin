@@ -96,7 +96,7 @@ func catalogue() []struct{ name, text string } {
 			{Name: "icebase", ID: "3c1e9a0b7d22", Online: true},
 			{Name: "laptop", ID: "8233270f8a24", Online: true, Problem: "laptop runs version v1.8.0 and the core v1.9.0: update it first (fridolin nodes update 8233270f8a24)"},
 			{Name: "pi", ID: "0a1b2c3d4e5f"},
-			{Name: "nas", ID: "4f1e2d3c4b5a", Online: true, Pending: true},
+			{Name: "nas", ID: "4f1e2d3c4b5a", Online: true, New: true},
 		})},
 		{"coreMoveTargets(none)", outboundmsg.CoreMoveTargets("mac-mini", nil)},
 		{"coreMoveTargets(no source)", outboundmsg.CoreMoveTargets("", []outboundmsg.CoreMoveHost{{Name: "icebase", ID: "3c1e9a0b7d22", Online: true}})},
@@ -107,7 +107,9 @@ func catalogue() []struct{ name, text string } {
 			Warnings:    []string{"icebase runs FrIDE: once the secrets are there, any FrIDE task can read them"}, PollMinutes: 30})},
 		{"coreMoveReport(plain)", outboundmsg.CoreMoveReport(outboundmsg.CoreMoveCheck{Source: "icebase", Target: "mac-mini", TargetID: "7216c2648b04", TargetOS: "darwin", TargetArch: "arm64",
 			Fingerprint: "a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90", Outage: "about 2 to 4 minutes", PollMinutes: 30})},
-		{"coreMoveReport(blocked)", outboundmsg.CoreMoveReport(outboundmsg.CoreMoveCheck{Source: "mac-mini", Target: "icebase", Blocking: []string{"mac-mini does not trust icebase: on mac-mini, fridolin node core-host trust 3c1e9a0b7d22 --key KEY"}})},
+		{"coreMoveReport(first time)", outboundmsg.CoreMoveReport(outboundmsg.CoreMoveCheck{Source: "mac-mini", Target: "icebase", TargetID: "3c1e9a0b7d22", TargetOS: "linux", TargetArch: "amd64", Box: true,
+			Fingerprint: "a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90", Outage: "about 2 to 4 minutes", PollMinutes: 30, FirstTime: true, FirstTimeNote: nodeproto.CoreHostApproval})},
+		{"coreMoveReport(blocked)", outboundmsg.CoreMoveReport(outboundmsg.CoreMoveCheck{Source: "mac-mini", Target: "icebase", Blocking: []string{"mac-mini runs a fridolin that sends host secrets to pinned targets only: update it first (fridolin nodes update 7216c2648b04)"}})},
 		{"coreMoveQuestion", outboundmsg.CoreMoveQuestion("mac-mini", "icebase")},
 		{"coreMoveHereAlready", outboundmsg.CoreMoveHereAlready("mac-mini")},
 		{"coreMoveNoSource", outboundmsg.CoreMoveNoSource},
@@ -131,14 +133,13 @@ func catalogue() []struct{ name, text string } {
 		{"nodeRevokedCoreSecretsNote", outboundmsg.NodeRevokedCoreSecretsNote(outboundmsg.CoreForgetReport{Secrets: []string{"CLAUDE_CODE_OAUTH_TOKEN"}, Data: []string{"bridge.db", "config.json"}})},
 		{"nodeRevokedCoreSecretsNote(none)", outboundmsg.NodeRevokedCoreSecretsNote(outboundmsg.CoreForgetReport{})},
 		{"nodeRevokedCoreSecretsNote(failed)", outboundmsg.NodeRevokedCoreSecretsNote(outboundmsg.CoreForgetReport{Failure: "it is offline"})},
-		{"nodeCoreHostApprovedNote", outboundmsg.NodeCoreHostApprovedNote(nodeproto.CoreHostApproval)},
 		{"nodeApprovedReply", outboundmsg.NodeApprovedReply("laptop", "8233270f8a24", nodeproto.Capabilities{Host: true, Notify: true, FS: &nodeproto.FSCap{Roots: []nodeproto.FSRoot{{Path: "/home/you/Shared", Write: true}}}}.Plain())},
 		{"approvalAlert(node)", outboundmsg.ApprovalAlert(catalogueNodeApproval, fleetNow)},
-		{"approvalAlert(core-host, unexpected)", outboundmsg.ApprovalAlert(outboundmsg.OwnerApproval{
-			Subject: "*icebase* (Linux) asks to hold all of Fridolin's secrets (core-host)", Label: "*icebase*", When: fleetNow.Add(-26 * time.Hour),
-			Note:       nodeproto.CoreHostApproval,
-			Facts:      []string{"From: your local network, 192.168.1.20", "Device key: `a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90`", "Sends secrets only to: laptop"},
-			Allows:     nodeproto.Capabilities{Host: true, CoreHost: &nodeproto.CoreHostCap{Hash: "ab"}}.Plain(),
+		{"approvalAlert(fride, unexpected)", outboundmsg.ApprovalAlert(outboundmsg.OwnerApproval{
+			Subject: "*icebase* (Linux) asks to let FrIDE's agents run anything on it (fride)", Label: "*icebase*", When: fleetNow.Add(-26 * time.Hour),
+			Note:       nodeproto.FrideApproval,
+			Facts:      []string{"From: your local network, 192.168.1.20"},
+			Allows:     nodeproto.Capabilities{Host: true, Fride: &nodeproto.FrideCap{}}.Plain(),
 			Unexpected: "the machine asked for this itself; nobody asked from WhatsApp or the dashboard.", Ref: "3c1e5a7b9d0f",
 		}, fleetNow)},
 		{"approvalAlert(schedule)", outboundmsg.ApprovalAlert(outboundmsg.OwnerApproval{
@@ -230,7 +231,6 @@ var (
 		{ID: "9d8c7b6a5f4e", Name: "pc", OS: "windows", Online: true, Device: "approved", Commands: "approved", Fride: true, Can: nodeproto.Capabilities{Host: true, Fride: &nodeproto.FrideCap{}}.Plain()},
 		{ID: "5e6f7a8b9c0d", Name: "studio", OS: "darwin", Online: true, Device: "approved", Commands: "pending", FridePending: true, Can: []string{"report its system details (OS, disk, memory)"}},
 		{ID: "ffeeddccbbaa", Name: "old", OS: "linux", Device: "revoked", Commands: "none"},
-		{ID: "3c1e5a7b9d0f", Name: "icebase", OS: "linux", Online: true, Device: "approved", Commands: "pending", CoreHostPending: true, Can: []string{"report its system details (OS, disk, memory)", "show notifications on its screen"}},
 	}
 )
 

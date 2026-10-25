@@ -28,11 +28,10 @@ import (
 )
 
 // core-host (docs/NODES.md, "core-host"; #187): a machine the core may
-// move to. Its local settings, the opt-in and the targets this machine
-// trusts, live in core-host.json in the state dir, not node.json: the
-// core cannot change them, and the workstation's sandbox denies the
-// state dir. The agent declares the file's hash, and the core's approval
-// covers that one hash.
+// move to. Every node is one unless its owner turns it off there. Its
+// local settings, that opt-out and the targets this machine pins, live
+// in core-host.json in the state dir, not node.json: the core cannot
+// change them, and the workstation's sandbox denies the state dir.
 const (
 	// CoreHostFile is the core-host settings, written only by `fridolin
 	// node core-host` on this machine.
@@ -53,7 +52,8 @@ const (
 
 // CoreHostConfig is core-host.json.
 type CoreHostConfig struct {
-	// Enabled is the local opt-in: `fridolin node core-host on`.
+	// Enabled is false once `fridolin node core-host off` ran here; a
+	// machine without core-host.json is a core host.
 	Enabled bool `json:"enabled"`
 	// SendTo are the targets this machine encrypts host secrets to
 	// (`fridolin node core-host trust ID --key KEY`).
@@ -124,12 +124,13 @@ func (c CoreHostConfig) Pin(id string) (CoreHostPin, bool) {
 	return c.SendTo[i], true
 }
 
-// LoadCoreHost reads dir's core-host.json; a missing file is core-host off.
+// LoadCoreHost reads dir's core-host.json; a missing file is core-host
+// on, with no pins.
 func LoadCoreHost(dir string) (CoreHostConfig, error) {
 	var c CoreHostConfig
 	data, err := os.ReadFile(filepath.Join(dir, CoreHostFile))
 	if errors.Is(err, os.ErrNotExist) {
-		return c, nil
+		return CoreHostConfig{Enabled: true}, nil
 	}
 	if err != nil {
 		return c, err
@@ -167,8 +168,8 @@ type coreOffer struct {
 	expires time.Time
 }
 
-// coreHostDeclared is the core_host the node declares now: nil unless
-// core-host.json turns it on.
+// coreHostDeclared is the core_host the node declares now: nil once
+// core-host.json turns it off.
 func (a *Agent) coreHostDeclared() *nodeproto.CoreHostCap {
 	if a.Dir == "" {
 		return nil
@@ -312,6 +313,7 @@ func (a *Agent) coreCheck(ctx context.Context) nodeproto.CoreCheckResult {
 	res := nodeproto.CoreCheckResult{
 		ID: a.ID(), Version: a.Version, OS: runtime.GOOS, Arch: runtime.GOARCH, Box: a.Config.Box != nil,
 		Fingerprint: nodeproto.Fingerprint(pub), PublicKey: hex.EncodeToString(pub), SendTo: []nodeproto.CoreHostPinView{},
+		TrustsCore: true,
 	}
 	if a.Dir != "" {
 		if free, err := platform.FreeBytes(a.Dir); err == nil {
@@ -435,8 +437,10 @@ func (a *Agent) coreOffer(p nodeproto.CoreSecretsOfferParams) (any, *nodeproto.E
 
 // coreSend is core.secrets.send: the host secrets, encrypted to the
 // offer's key once its signature verifies with the key this machine
-// pinned for the target. The core, which relays the offer, cannot swap
-// in a key of its own.
+// pinned for the target, or, without a pin, the key the core names: the
+// device key it approved at the target's join, and names only for a
+// target the owner confirmed in WhatsApp. A core that lied about it
+// would hold these secrets already: it runs with them.
 func (a *Agent) coreSend(p nodeproto.CoreSecretsSendParams) (any, *nodeproto.Error) {
 	o := p.Offer
 	fail := func(code, format string, args ...any) (any, *nodeproto.Error) {
@@ -454,16 +458,27 @@ func (a *Agent) coreSend(p nodeproto.CoreSecretsSendParams) (any, *nodeproto.Err
 	if err != nil {
 		return fail(nodeproto.CodeFailed, "%v", err)
 	}
-	pin, ok := cfg.Pin(o.Target)
-	if !ok {
-		return fail(nodeproto.CodeDenied, "this machine does not trust %s as a target: on this machine, fridolin node core-host trust %s --key KEY (the key fridolin node core-host show prints there)", o.Target, o.Target)
-	}
-	key, err := pin.Key()
-	if err != nil {
-		return fail(nodeproto.CodeFailed, "%v", err)
+	pin, pinned := cfg.Pin(o.Target)
+	var key ed25519.PublicKey
+	switch {
+	case pinned:
+		if key, err = pin.Key(); err != nil {
+			return fail(nodeproto.CodeFailed, "%v", err)
+		}
+	case p.TargetKey != "":
+		b, err := hex.DecodeString(p.TargetKey)
+		if err != nil || len(b) != ed25519.PublicKeySize {
+			return fail(nodeproto.CodeBadRequest, "the target key is not an ed25519 public key in hex")
+		}
+		key = ed25519.PublicKey(b)
+		if nodeproto.DeviceIDFor(key) != o.Target {
+			return fail(nodeproto.CodeDenied, "the target key is the key of %s, not of %s: nothing was sent", nodeproto.DeviceIDFor(key), o.Target)
+		}
+	default:
+		return fail(nodeproto.CodeDenied, "the core named no key for %s, and this machine pins none: the owner confirms a new core host with !movecore in WhatsApp", o.Target)
 	}
 	if !nodeproto.VerifyCoreSecretsOffer(key, o) {
-		return fail(nodeproto.CodeDenied, "the offer of %s is not signed by the key pinned for it here (fingerprint %s): nothing was sent", o.Target, nodeproto.Fingerprint(key))
+		return fail(nodeproto.CodeDenied, "the offer of %s is not signed by its device key (fingerprint %s): nothing was sent", o.Target, nodeproto.Fingerprint(key))
 	}
 	now := time.Now()
 	if !now.Before(o.Expires) || o.Expires.After(now.Add(nodeproto.CoreSecretsOfferTTL+time.Minute)) {
@@ -517,7 +532,11 @@ func (a *Agent) coreSend(p nodeproto.CoreSecretsSendParams) (any, *nodeproto.Err
 		return fail(nodeproto.CodeFailed, "%v", err)
 	}
 	b.Ciphertext = ct
-	a.transferLog(map[string]any{"direction": "sent", "move": o.Move, "peer": o.Target, "peer_name": pin.Name, "names": b.Names, "files": b.Files, "result": "ok"})
+	trust := "core"
+	if pinned {
+		trust = "pin"
+	}
+	a.transferLog(map[string]any{"direction": "sent", "move": o.Move, "peer": o.Target, "peer_name": pin.Name, "trust": trust, "names": b.Names, "files": b.Files, "result": "ok"})
 	a.logf("node: core-host: encrypted %d host secrets and %d secret files for %s (move %s)", len(b.Names), len(b.Files), o.Target, o.Move)
 	return b, nil
 }

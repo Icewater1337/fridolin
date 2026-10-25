@@ -58,9 +58,6 @@ type Options struct {
 	// and waits for approval, once, after the registry recorded it; nil
 	// for nothing. It must not block for long.
 	OnJoin func(n *Node)
-	// OnCoreHost hears, once per core-host.json, a node that asks for
-	// core-host its approval does not cover (corehost.go).
-	OnCoreHost func(n *Node)
 	// Version is the core's own version, which nodes are updated to, and
 	// BinariesDir the folder with its builds for each platform
 	// (BinariesManifest); "" for none (update.go).
@@ -95,9 +92,6 @@ type Service struct {
 	onEvent   func(string, nodeproto.Event)
 	onDeclare func(*Node)
 	onJoin    func(*Node)
-	// onCoreHost and the hash of core-host.json last told of, per node.
-	onCoreHost   func(*Node)
-	coreHostSeen map[string]string
 
 	// Updates (update.go).
 	dir, version, binDir string
@@ -153,7 +147,6 @@ func New(opts Options) (*Service, error) {
 		reg: reg, logf: logf, onEvent: opts.OnEvent, onDeclare: opts.OnDeclare, onJoin: opts.OnJoin, ctx: ctx, cancel: cancel, sessions: map[string]*session{},
 		dir: opts.Dir, version: opts.Version, binDir: opts.BinariesDir, busy: opts.Busy, hold: opts.Hold, boxImages: opts.BoxImages,
 		updating: map[string]bool{}, reports: map[string]nodeproto.UpdateReport{}, onConnect: opts.OnConnect, onApprove: opts.OnApprove,
-		onCoreHost: opts.OnCoreHost, coreHostSeen: map[string]string{},
 		moves: map[string]*MoveRecord{}, onMove: opts.OnMove, onStopping: opts.OnMoveStopping, site: opts.Site, movePollEvery: opts.MovePoll,
 	}
 	s.resumeMoves()
@@ -405,7 +398,6 @@ func (s *Service) handshake(ss *session, remote string) (*Node, error) {
 			s.onJoin(clone(node))
 		}
 	}
-	s.noteCoreHost(node)
 	return node, nil
 }
 
@@ -474,7 +466,6 @@ func (s *Service) readLoop(ss *session) {
 			if s.onDeclare != nil {
 				s.onDeclare(n)
 			}
-			s.noteCoreHost(n)
 		case nodeproto.TypeEvent:
 			ev, err := nodeproto.DecodeBody[nodeproto.Event](env)
 			if err != nil {
@@ -573,14 +564,19 @@ func (s *Service) Revoke(id string) (*Node, error) {
 }
 
 // RevokeForget revokes node id like Revoke, and says what its forgetting
-// what moves brought it did: nil for a node that is no core host.
+// what moves brought it did: nil for a node that is no core host, or one
+// the owner never confirmed that held nothing (every node is a core
+// host, and one that never took the core has nothing to forget, unless
+// a pin let secrets go to it: it is asked while it is online).
 func (s *Service) RevokeForget(id string) (*Node, *CoreForget, error) {
 	var forgot *CoreForget
-	if cur, err := s.reg.Get(id); err == nil && cur.Device == nodeproto.DeviceApproved && cur.Effective().CoreHost != nil {
+	if cur, err := s.reg.Get(id); err == nil && cur.Device == nodeproto.DeviceApproved && cur.Effective().CoreHost != nil && (cur.CoreHostConfirmed() || s.Online(id)) {
 		ctx, cancel := context.WithTimeout(s.ctx, slowCalls[nodeproto.MethodCoreSecretsForget])
 		f := s.ForgetCoreSecrets(ctx, id)
 		cancel()
-		forgot = &f
+		if cur.CoreHostConfirmed() || len(f.Forgotten)+len(f.Files)+len(f.Data) > 0 || f.DataKept != "" {
+			forgot = &f
+		}
 	}
 	n, err := s.reg.Revoke(id)
 	if err == nil {
@@ -732,8 +728,7 @@ type View struct {
 	// the core can update it; UpdateNote says why it cannot.
 	UpdateTo   string `json:"update_to,omitempty"`
 	UpdateNote string `json:"update_note,omitempty"`
-	// CoreHost is set for a node that offers core-host, or had it
-	// approved (CoreHostView).
+	// CoreHost is set for a node that offers core-host (CoreHostView).
 	CoreHost *CoreHostView `json:"core_host,omitempty"`
 	// Allows says what approving what it offers lets it do, one plain
 	// sentence each (nodeproto.Capabilities.Plain), as the owner's

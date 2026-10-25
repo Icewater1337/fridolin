@@ -213,8 +213,6 @@ func FleetReply(enabled bool, nodes []FleetNode, now time.Time) string {
 			b.WriteString("\n  ⏳ wants to join — reply !approve")
 		case n.FridePending:
 			b.WriteString("\n  ⏳ asks to let FrIDE's agents run anything on it (fride) — reply !approve")
-		case n.CoreHostPending:
-			b.WriteString("\n  ⏳ asks to hold all of Fridolin's secrets (core-host) — reply !approve")
 		case n.Commands == "pending":
 			b.WriteString("\n  ⏳ asks to do more than you approved — reply !approve")
 		}
@@ -314,12 +312,6 @@ func NodeApprovedReply(name, id string, can []string) string {
 	}
 	fmt.Fprintf(&b, "\n\n`!fleet` lists it. To shut it out again: `!revoke %s`.", id)
 	return b.String()
-}
-
-// NodeCoreHostApprovedNote follows NodeApprovedReply when the approval
-// took in core-host: what that means.
-func NodeCoreHostApprovedNote(meaning string) string {
-	return "🔐 That includes core-host. " + meaning
 }
 
 // NodeRevokedReply answers !revoke.
@@ -742,8 +734,9 @@ func CoreMoveChecking(target string) string {
 type CoreMoveHost struct {
 	Name, ID string
 	Online   bool
-	// Pending is core-host waiting for the owner's approval.
-	Pending bool
+	// New is a machine the owner has not confirmed as a core host: the
+	// first move there lets it hold the secrets.
+	New bool
 	// Problem is the first thing that keeps the core from moving there,
 	// "" when it can.
 	Problem string
@@ -759,21 +752,21 @@ func CoreMoveTargets(runsOn string, hosts []CoreMoveHost) string {
 		fmt.Fprintf(&b, "🚚 The core runs on *%s*.", runsOn)
 	}
 	if len(hosts) == 0 {
-		b.WriteString("\n\nNo other machine can take it yet. A machine becomes a core host with `fridolin node core-host on` there (in a box: `docker compose exec node fridolin node core-host on --state-dir /node` in its folder) and your `!approve`.")
+		b.WriteString("\n\nNo other machine can take it yet. Every node you approved can, unless core-host is off there: `!join` adds one (a node in a box is the easiest).")
 		return b.String()
 	}
 	b.WriteString("\n")
 	for _, h := range hosts {
 		fmt.Fprintf(&b, "\n• *%s* — ", h.Name)
 		switch {
-		case h.Pending:
-			b.WriteString("asks to hold all of Fridolin's secrets (core-host) — reply !approve")
 		case !h.Online:
 			b.WriteString("offline")
 		case h.Problem != "":
 			b.WriteString("not now: " + textx.Truncate(h.Problem, 300))
 		case runsOn == "":
 			b.WriteString("a core host")
+		case h.New:
+			fmt.Fprintf(&b, "ready: `!movecore %s` (it never held the core: moving there lets it hold all of Fridolin's secrets)", h.Name)
 		default:
 			fmt.Fprintf(&b, "ready: `!movecore %s`", h.Name)
 		}
@@ -798,6 +791,11 @@ type CoreMoveCheck struct {
 	Blocking []string
 	// PollMinutes is how long the poll waits for a vote.
 	PollMinutes int
+	// FirstTime is a target the owner has not confirmed as a core host:
+	// the vote is what lets it hold the secrets, and FirstTimeNote says
+	// what that means.
+	FirstTime     bool
+	FirstTimeNote string
 }
 
 // CoreMoveReport is !movecore's report: source → target, the expected
@@ -820,6 +818,9 @@ func CoreMoveReport(c CoreMoveCheck) string {
 	fmt.Fprintf(&b, "🚚 *Move the core from %s to %s?*\n\n", c.Source, c.Target)
 	fmt.Fprintf(&b, "*%s* is %s on %s %s, id %s, device key `%s`.\n", c.Target, kind, osLabel(c.TargetOS), c.TargetArch, c.TargetID, c.Fingerprint)
 	fmt.Fprintf(&b, "Offline: %s. Messages you send meanwhile wait and are answered from %s. If %s does not come up, %s starts again by itself.", c.Outage, c.Target, c.Target, c.Source)
+	if c.FirstTime {
+		fmt.Fprintf(&b, "\n\n🔐 *%s has never held the core.* %s", c.Target, c.FirstTimeNote)
+	}
 	if len(c.NotOnTarget) > 0 {
 		fmt.Fprintf(&b, "\n\n*Not working on %s:*", c.Target)
 		for _, m := range c.NotOnTarget {

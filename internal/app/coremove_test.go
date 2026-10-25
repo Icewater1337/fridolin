@@ -301,7 +301,7 @@ func (f *fakeCore) state() (running bool, data string, imported []string) {
 
 // moveHosts are two core hosts on a dev-mode core: mini runs the core
 // (it holds the lease and exported once), icebase may take it; mini
-// pins icebase's device key and both are approved for core-host.
+// pins icebase's device key, and both devices are approved.
 type moveHosts struct {
 	src, dst         string
 	srcCore, dstCore *fakeCore
@@ -375,7 +375,7 @@ func (h *harness) moveHostsWith(version string, dstReady bool, boxes moveBoxes) 
 			}
 		}
 	}
-	h.WaitFor("both approved for core-host", func() bool {
+	h.WaitFor("both serving core-host", func() bool {
 		return m.srcAgent.State().Approved.CoreHost != nil && m.dstAgent.State().Approved.CoreHost != nil
 	})
 	// mini runs the core: the lease, and an export from before.
@@ -492,8 +492,8 @@ func TestCoreMove(t *testing.T) {
 		t.Errorf("a reused plan: %v", err)
 	}
 
-	// The way back: icebase must pin mini first, which is a change of
-	// its core-host.json the owner approves again. icebase's token was
+	// The way back: icebase pins nothing, so mini needs the owner's
+	// confirmation, which this API cannot give. icebase's token was
 	// refreshed meanwhile; mini keeps its own folder as it was.
 	if err := os.WriteFile(filepath.Join(m.dstCore.files, "google_calendar_token_personal.json"), []byte(`{"t":"refreshed"}`), 0o600); err != nil {
 		t.Fatal(err)
@@ -582,11 +582,20 @@ func TestCoreForgetWhileTheCoreRunsThere(t *testing.T) {
 	}
 }
 
-// moveBack pins mini on icebase and moves the core back.
+// moveBack moves the core back to mini, which the owner confirms as a
+// core host first: through the API alone the move is refused.
 func (h *harness) moveBack(m moveHosts) nodes.MoveRecord {
 	t := h.t
 	t.Helper()
-	h.pinBack(m)
+	h.backData(m)
+	h.WaitFor("the move before to let go", func() bool { return h.b.nodes.MoveActive() == "" })
+	w := h.Do("POST", "/api/nodes/move", map[string]any{"source": m.dst, "target": m.src})
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "only your vote in WhatsApp") {
+		t.Fatalf("the way back before mini is confirmed: %d %s", w.Code, w.Body.String())
+	}
+	if _, err := h.b.nodes.Registry().ConfirmCoreHost(m.src); err != nil {
+		t.Fatal(err)
+	}
 	rec, body := h.startMove(m.dst, m.src, 10, 10)
 	if rec.State != nodes.MoveDone {
 		t.Fatalf("the way back ended %s: %s", rec.State, body)
@@ -600,33 +609,8 @@ func (h *harness) moveBack(m moveHosts) nodes.MoveRecord {
 	return rec
 }
 
-// pinBack lets icebase send the secrets back to mini: it pins mini's
-// device key, a change of its core-host.json the owner approves again,
-// and its core gets data of its own.
-func (h *harness) pinBack(m moveHosts) {
-	t := h.t
-	t.Helper()
-	dir := m.dstAgent.Dir
-	told := len(h.SentTo(harnessDM))
-	srcKey, err := nodeagent.LoadKey(m.srcAgent.Dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := nodeagent.SaveCoreHost(dir, nodeagent.CoreHostConfig{Enabled: true, SendTo: []nodeagent.CoreHostPin{{ID: m.src, PublicKey: hex.EncodeToString(srcKey.Public().(ed25519.PublicKey)), Name: "mini", PinnedAt: time.Now().UTC().Truncate(time.Second)}}}); err != nil {
-		t.Fatal(err)
-	}
-	h.WaitFor("the owner told icebase asks for core-host again", func() bool {
-		for _, msg := range h.SentTo(harnessDM)[told:] {
-			if strings.Contains(msg, "asks to hold all of Fridolin's secrets (core-host)") && strings.Contains(msg, "_ref "+m.dst+"_") {
-				return true
-			}
-		}
-		return false
-	})
-	if w := h.Do("POST", "/api/nodes/"+m.dst+"/approve-commands", nil); w.Code != http.StatusOK {
-		t.Fatalf("approve-commands: %d %s", w.Code, w.Body.String())
-	}
-	h.WaitFor("icebase approved again", func() bool { return h.coreHostApproved(m.dst) && m.dstAgent.State().Approved.CoreHost != nil })
+// backData gives icebase's core data of its own, for the way back.
+func (h *harness) backData(m moveHosts) {
 	m.dstCore.mu.Lock()
 	m.dstCore.data = "icebase's data"
 	m.dstCore.mu.Unlock()

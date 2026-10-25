@@ -30,7 +30,7 @@ func newNodes(b *App) (*nodes.Service, error) {
 		b.work.onEvent(node, ev)
 	}
 	return nodes.New(nodes.Options{
-		Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: onEvent, OnDeclare: b.fride.onDeclare, OnJoin: b.nodeJoined, OnCoreHost: b.nodeCoreHost, OnMove: b.coreMoveEnded, OnMoveStopping: b.coreMoveStopping, Site: b.moveSite,
+		Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: onEvent, OnDeclare: b.fride.onDeclare, OnJoin: b.nodeJoined, OnMove: b.coreMoveEnded, OnMoveStopping: b.coreMoveStopping, Site: b.moveSite,
 		// A node that connects takes the programs of its command agents.
 		OnConnect: func(n *nodes.Node) { b.programs.connected(n.ID) },
 		OnApprove: func(n *nodes.Node) { b.programs.connected(n.ID) },
@@ -197,8 +197,7 @@ func (b *App) fleetText() string {
 		n := outboundmsg.FleetNode{
 			ID: v.ID, Name: v.Name, OS: v.OS, Online: v.Online,
 			Device: v.Device, Commands: v.Commands, Tags: v.Tags, Can: v.Effective.Plain(),
-			CoreHostPending: v.CoreHost != nil && v.CoreHost.Pending,
-			Fride:           v.Effective.Fride != nil, FridePending: v.FrideApproval != "",
+			Fride: v.Effective.Fride != nil, FridePending: v.FrideApproval != "",
 		}
 		if v.LastSeen != nil {
 			n.LastSeen = *v.LastSeen

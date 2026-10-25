@@ -17,8 +17,6 @@ type FleetNode struct {
 	// Can is what it may do now, one plain sentence each
 	// (nodeproto.Capabilities.Plain).
 	Can []string
-	// CoreHostPending is set while its core-host waits for approval.
-	CoreHostPending bool
 	// Fride is set for a node whose fride is approved, which is arbitrary
 	// execution there (nodeproto.FrideApproval); FridePending while its
 	// fride waits for approval.

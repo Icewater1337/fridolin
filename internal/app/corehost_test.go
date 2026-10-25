@@ -68,7 +68,8 @@ type coreTransfer struct {
 		ID, Fingerprint string
 		Stored, Missing []string
 	}
-	Pinned                  bool
+	Pinned, Confirmed       bool
+	NeedsConfirm            bool `json:"needs_confirm"`
 	Problems                []string
 	Ran                     bool
 	Move                    string
@@ -87,24 +88,25 @@ func (h *harness) coreTransfer(src, dst string, run bool) (int, coreTransfer, st
 }
 
 // TestCoreSecretsTransfer is #187's first slice end to end on a dev-mode
-// core with two agents in this process: both turn core-host on and the
-// owner hears of it with the device key; nothing moves before the owner
-// approved it, nor towards a target the source does not pin; once
-// approved, the secrets go end to end and the core sees only names; and
-// a change of core-host.json waits for approval again.
+// core with two agents in this process: both are core hosts without any
+// approval of it, and the owner is not asked; the secrets go towards a
+// target the source pins, end to end, and the core sees only names;
+// towards one it does not pin, only once the owner confirmed it (their
+// vote on a move: never through this API); and not to a machine whose
+// core-host is off.
 func TestCoreSecretsTransfer(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	addr := h.StartNodes()
 
-	dst, dstDir, dstStore, dstAgent := h.coreHostNode(addr, "icebase")
+	dst, dstDir, dstStore, _ := h.coreHostNode(addr, "icebase")
 	dstKey, err := nodeagent.LoadKey(dstDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	dstPub := dstKey.Public().(ed25519.PublicKey)
 	pin := nodeagent.CoreHostPin{ID: dst, PublicKey: hex.EncodeToString(dstPub), Name: "icebase", PinnedAt: time.Now().UTC().Truncate(time.Second)}
-	src, srcDir, srcStore, srcAgent := h.coreHostNode(addr, "mini", pin)
+	src, _, srcStore, _ := h.coreHostNode(addr, "mini", pin)
 	values := map[string]string{
 		hostsecrets.AgeIdentityPQ:    "AGE-SECRET-KEY-PQ-1E2ETEST",
 		hostsecrets.ExportKey:        "export-key-e2e-test",
@@ -116,24 +118,9 @@ func TestCoreSecretsTransfer(t *testing.T) {
 		}
 	}
 
-	// The owner hears of both, with what approving means and the key.
-	alert := h.waitSentAll(harnessDM, "*icebase* (", "(core-host)")
-	for _, want := range []string{"holding all of Fridolin's secrets (core-host)", nodeproto.CoreHostApproval, nodeproto.Fingerprint(dstPub), "Reply !approve", "_ref " + dst + "_"} {
-		if !strings.Contains(alert, want) {
-			t.Errorf("the alert lacks %q:\n%s", want, alert)
-		}
-	}
-	if alert := h.waitSentAll(harnessDM, "*mini* (", "(core-host)"); !strings.Contains(alert, "Sends secrets only to: icebase") {
-		t.Errorf("the alert does not name the trusted target:\n%s", alert)
-	}
-
-	// Not approved: the dry run says so, and a run refuses. mini's
-	// device is approved, its core-host is not.
-	if w := h.Do("POST", "/api/nodes/"+src+"/approve", nil); w.Code != http.StatusOK {
-		t.Fatalf("approve: %d %s", w.Code, w.Body.String())
-	}
+	// Devices not approved: the dry run says so, and a run refuses.
 	_, rep, _ := h.coreTransfer(src, dst, false)
-	if len(rep.Problems) != 2 || !strings.Contains(rep.Problems[0], "core-host waits for your approval") || !strings.Contains(rep.Problems[1], "the device is pending") {
+	if len(rep.Problems) != 2 || !strings.Contains(rep.Problems[0], "the device is pending") || !strings.Contains(rep.Problems[1], "the device is pending") {
 		t.Fatalf("before the approval: %+v", rep.Problems)
 	}
 	if code, _, _ := h.coreTransfer(src, dst, true); code != http.StatusConflict {
@@ -143,28 +130,21 @@ func TestCoreSecretsTransfer(t *testing.T) {
 	if code, _, _ := h.nodeCall(src, nodeproto.MethodCoreSecretsSend, map[string]any{}); code != http.StatusBadRequest {
 		t.Fatalf("core.secrets.send through /call: %d", code)
 	}
-
-	// !approve says what core-host means; the Nodes page approves the other.
-	h.Inject(inbound{JID: harnessDM, Text: "!approve " + dst})
-	h.WaitSent(harnessDM, "That includes core-host")
-	if w := h.Do("POST", "/api/nodes/"+src+"/approve-commands", nil); w.Code != http.StatusOK {
-		t.Fatalf("approve-commands: %d %s", w.Code, w.Body.String())
+	for _, id := range []string{src, dst} {
+		if w := h.Do("POST", "/api/nodes/"+id+"/approve", nil); w.Code != http.StatusOK {
+			t.Fatalf("approve: %d %s", w.Code, w.Body.String())
+		}
 	}
-	h.WaitFor("both agents approved for core-host", func() bool {
-		return srcAgent.State().Approved.CoreHost != nil && dstAgent.State().Approved.CoreHost != nil
-	})
-	h.Inject(inbound{JID: harnessDM, Text: "!fleet"})
-	if fleet := h.WaitSent(harnessDM, "*Fleet*"); !strings.Contains(fleet, nodeproto.CoreHostPlain) {
-		t.Errorf("!fleet does not show core-host:\n%s", fleet)
-	}
+	h.WaitFor("both agents serving core-host", func() bool { return h.coreHostApproved(src) && h.coreHostApproved(dst) })
 
-	// The other way round, icebase does not trust mini: nothing goes.
+	// The other way round icebase pins nothing, and the owner confirmed
+	// no one: nothing goes, and this API cannot confirm it.
 	_, rep, _ = h.coreTransfer(dst, src, false)
-	if rep.Pinned || len(rep.Problems) == 0 || !strings.Contains(strings.Join(rep.Problems, "\n"), "does not trust") {
-		t.Fatalf("towards an unpinned target: %+v", rep)
+	if rep.Pinned || rep.Confirmed || !rep.NeedsConfirm || !strings.Contains(strings.Join(rep.Problems, "\n"), "only your vote in WhatsApp") {
+		t.Fatalf("towards an unconfirmed target: %+v", rep)
 	}
 	if code, _, _ := h.coreTransfer(dst, src, true); code != http.StatusConflict {
-		t.Fatalf("a run towards an unpinned target: %d", code)
+		t.Fatalf("a run towards an unconfirmed target: %d", code)
 	}
 
 	// A dry run moves nothing.
@@ -198,15 +178,28 @@ func TestCoreSecretsTransfer(t *testing.T) {
 		}
 	}
 
-	// core-host.json changed on mini (another target trusted, or the
-	// pin gone): it waits for the owner again, and nothing goes.
-	if err := nodeagent.SaveCoreHost(srcDir, nodeagent.CoreHostConfig{Enabled: true}); err != nil {
+	// Once the owner confirmed mini (as their vote on a move does), the
+	// core names icebase mini's key, and the secrets go back unpinned.
+	if _, err := h.b.nodes.Registry().ConfirmCoreHost(src); err != nil {
 		t.Fatal(err)
 	}
-	h.waitSentAll(harnessDM, "*mini* (", "asks to hold all of Fridolin's secrets (core-host)")
-	h.WaitFor("mini's core-host pending again", func() bool { return srcAgent.State().Approved.CoreHost == nil || !h.coreHostApproved(src) })
-	if _, rep, _ := h.coreTransfer(src, dst, false); len(rep.Problems) == 0 || !strings.Contains(rep.Problems[0], "waits for your approval") {
-		t.Fatalf("after core-host.json changed: %+v", rep.Problems)
+	code, rep, body = h.coreTransfer(dst, src, true)
+	if code != http.StatusOK || !rep.Ran || rep.Pinned || !rep.Confirmed || len(rep.Unchanged) != 3 {
+		t.Fatalf("towards a confirmed target: %d %s", code, body)
+	}
+	for _, m := range h.SentTo(harnessDM) {
+		if strings.Contains(m, "core-host") {
+			t.Errorf("the owner was asked about core-host:\n%s", m)
+		}
+	}
+
+	// core-host off on icebase: it is no core host any more.
+	if err := nodeagent.SaveCoreHost(dstDir, nodeagent.CoreHostConfig{Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	h.WaitFor("icebase no core host", func() bool { return !h.coreHostApproved(dst) })
+	if _, rep, _ := h.coreTransfer(src, dst, false); len(rep.Problems) == 0 || !strings.Contains(rep.Problems[0], "is no core host") {
+		t.Fatalf("after core-host off: %+v", rep.Problems)
 	}
 }
 
@@ -231,8 +224,8 @@ func (h *harness) waitSentAll(jid string, subs ...string) string {
 	return got
 }
 
-// coreHostApproved reports whether the approval of node id covers the
-// core-host.json it declares now.
+// coreHostApproved reports whether node id may serve core-host now: an
+// approved device that offers it.
 func (h *harness) coreHostApproved(id string) bool {
 	n, err := h.b.nodes.Registry().Get(id)
 	return err == nil && n.Effective().CoreHost != nil

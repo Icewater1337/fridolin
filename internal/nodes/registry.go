@@ -67,6 +67,35 @@ type Node struct {
 	// Update is the owner's auto policy and how the last update from the
 	// core went (update.go).
 	Update *UpdateStatus `json:"update,omitempty"`
+	// CoreHostConfirmedAt is when the owner confirmed the node as a core
+	// host: their WhatsApp vote on the first move to it (ConfirmCoreHost),
+	// or, from before, an approval of its core-host (migrateCoreHost).
+	// Until then the core names no source its device key, so no host
+	// secret can go there; the dashboard cannot set it.
+	CoreHostConfirmedAt *time.Time `json:"core_host_confirmed_at,omitempty"`
+}
+
+// CoreHostConfirmed reports whether the owner confirmed n as a core host.
+func (n *Node) CoreHostConfirmed() bool {
+	return n.Device == nodeproto.DeviceApproved && n.CoreHostConfirmedAt != nil
+}
+
+// migrateCoreHost turns a core-host approved before it needed none into
+// a confirmation (compat: a registry from before the owner's vote on a
+// move confirmed core hosts), and drops it from Approved, which no
+// longer holds core-host.
+func migrateCoreHost(n *Node) {
+	if n.Approved.CoreHost == nil {
+		return
+	}
+	if n.CoreHostConfirmedAt == nil && n.Device == nodeproto.DeviceApproved {
+		at := n.CommandsApprovedAt
+		if at == nil {
+			at = n.DeviceApprovedAt
+		}
+		n.CoreHostConfirmedAt = at
+	}
+	n.Approved.CoreHost = nil
 }
 
 // Commands is the state of the node's second approval stage; a revoked
@@ -202,6 +231,7 @@ func (r *Registry) reloadLocked() error {
 			return fmt.Errorf("reading %s: a node without an id", r.path)
 		}
 		n.Tags = normalizeTags(n.Tags)
+		migrateCoreHost(n)
 	}
 	f.Nodes = slices.DeleteFunc(f.Nodes, func(n *Node) bool { return n == nil })
 	r.file, r.stamp = f, stamp
@@ -483,8 +513,27 @@ func (r *Registry) ApproveCommands(id string) (*Node, error) {
 			folders = n.Approved.Backup.Folders
 		}
 		n.Approved, n.CommandsApprovedAt = n.Declared, &now
+		// core-host is no command: the owner's vote on a move confirms it.
+		n.Approved.CoreHost = nil
 		if b := n.Declared.Backup; b != nil {
 			n.Approved.Backup = &nodeproto.BackupCap{Roots: slices.Clone(b.Roots), Folders: folders}
+		}
+		return nil
+	})
+}
+
+// ConfirmCoreHost records the owner's confirmation of an approved node
+// as a core host. Only the owner's WhatsApp vote on a move calls it.
+func (r *Registry) ConfirmCoreHost(id string) (*Node, error) {
+	return r.change(id, func(n *Node, now time.Time) error {
+		switch n.Device {
+		case nodeproto.DeviceRevoked:
+			return ErrRevoked
+		case nodeproto.DevicePending:
+			return ErrNotApproved
+		}
+		if n.CoreHostConfirmedAt == nil {
+			n.CoreHostConfirmedAt = &now
 		}
 		return nil
 	})
@@ -497,7 +546,7 @@ func (r *Registry) Revoke(id string) (*Node, error) {
 		if n.Device != nodeproto.DeviceRevoked {
 			n.Device, n.RevokedAt = nodeproto.DeviceRevoked, &now
 		}
-		n.Approved, n.CommandsApprovedAt = nodeproto.Capabilities{}, nil
+		n.Approved, n.CommandsApprovedAt, n.CoreHostConfirmedAt = nodeproto.Capabilities{}, nil, nil
 		return nil
 	})
 }

@@ -39,9 +39,14 @@ type CoreTransferEnd struct {
 type CoreTransferReport struct {
 	Source CoreTransferEnd `json:"source"`
 	Target CoreTransferEnd `json:"target"`
-	// Pinned says whether the source trusts the target's device key;
-	// without it nothing can go.
-	Pinned bool `json:"pinned"`
+	// Pinned says whether the source pinned the target's device key;
+	// Confirmed whether the owner confirmed the target as a core host,
+	// so that the core names the source its key. Without either nothing
+	// can go: NeedsConfirm is then set, and only the owner's vote on a
+	// move (MoveOptions.ConfirmTarget) clears it.
+	Pinned       bool `json:"pinned"`
+	Confirmed    bool `json:"confirmed"`
+	NeedsConfirm bool `json:"needs_confirm,omitempty"`
 	// Problems keep the transfer from running.
 	Problems []string `json:"problems"`
 	Ran      bool     `json:"ran"`
@@ -66,15 +71,26 @@ var ErrCoreTransfer = errors.New("the host secrets cannot be transferred")
 // CoreSecretsTransfer moves the host secrets from node src to node dst
 // over the node channel: dst makes a one-time key and signs it with its
 // device key, src checks the signature against the key it pinned for
-// dst and encrypts its secrets to it, dst decrypts and stores them. The
-// core relays the offer and the ciphertext. Without o.Run it only checks
-// both sides (core.check) and reports.
+// dst, or the one the core names for a confirmed core host, and
+// encrypts its secrets to it, dst decrypts and stores them. The core
+// relays the offer and the ciphertext. Without o.Run it only checks
+// both sides (core.check) and reports. It never confirms a target: a
+// machine the owner has not confirmed needs a move from WhatsApp.
 func (s *Service) CoreSecretsTransfer(ctx context.Context, src, dst string, o CoreTransferOptions) (CoreTransferReport, error) {
 	rep, _, err := s.coreTransferCheck(ctx, src, dst)
 	if err != nil {
 		return rep, err
 	}
+	if rep.NeedsConfirm {
+		rep.Problems = append(rep.Problems, unconfirmedProblem(rep.Target.Name))
+	}
 	return s.coreTransferRun(ctx, src, dst, rep, o)
+}
+
+// unconfirmedProblem is what keeps the host secrets from a machine the
+// owner has not confirmed as a core host, outside their vote.
+func unconfirmedProblem(name string) string {
+	return fmt.Sprintf("%s has never been confirmed as a core host: only your vote in WhatsApp lets it hold the secrets (!movecore %s)", name, name)
 }
 
 // coreTransferCheck checks both sides of a transfer (core.check) and
@@ -97,12 +113,12 @@ func (s *Service) coreTransferCheck(ctx context.Context, src, dst string) (CoreT
 		case n.Device != nodeproto.DeviceApproved:
 			rep.Problems = append(rep.Problems, fmt.Sprintf("%s (%s): the device is %s", n.Name, n.ID, n.Device))
 			continue
-		case n.Effective().CoreHost == nil && n.Declared.CoreHost != nil:
-			rep.Problems = append(rep.Problems, fmt.Sprintf("%s (%s): core-host waits for your approval (fridolin nodes approve %s --commands)", n.Name, n.ID, n.ID))
-			continue
 		case n.Effective().CoreHost == nil:
-			rep.Problems = append(rep.Problems, fmt.Sprintf("%s (%s) is no core host: on that machine, fridolin node core-host on", n.Name, n.ID))
+			rep.Problems = append(rep.Problems, fmt.Sprintf("%s (%s) is no core host: its core-host is off, or its fridolin is too old to offer it by default (on that machine, fridolin node core-host on, or fridolin nodes update %s)", n.Name, n.ID, n.ID))
 			continue
+		}
+		if i == 1 {
+			rep.Confirmed = n.CoreHostConfirmed()
 		}
 		if err := s.Call(ctx, id, nodeproto.MethodCoreCheck, nil, &checks[i]); err != nil {
 			rep.Problems = append(rep.Problems, fmt.Sprintf("%s (%s): core.check: %v", n.Name, n.ID, err))
@@ -125,8 +141,12 @@ func (s *Service) coreTransferCheck(ctx context.Context, src, dst string) (CoreT
 		return p.ID == dst && p.Fingerprint == rep.Target.Fingerprint
 	})
 	if checks[0].ID != "" && !rep.Pinned {
-		rep.Problems = append(rep.Problems, fmt.Sprintf("%s does not trust %s: on %s, fridolin node core-host trust %s --key KEY, with the key fridolin node core-host show prints on %s (fingerprint %s)",
-			rep.Source.Name, rep.Target.Name, rep.Source.Name, dst, rep.Target.Name, rep.Target.Fingerprint))
+		switch {
+		case !checks[0].TrustsCore:
+			rep.Problems = append(rep.Problems, fmt.Sprintf("%s runs a fridolin that sends host secrets to pinned targets only: update it first (fridolin nodes update %s)", rep.Source.Name, src))
+		case !rep.Confirmed:
+			rep.NeedsConfirm = true
+		}
 	}
 	if checks[0].ID != "" && len(rep.Source.Stored) == 0 && rep.Source.SecretsError == "" {
 		rep.Problems = append(rep.Problems, rep.Source.Name+" holds none of the host secrets")
@@ -143,6 +163,19 @@ func (s *Service) coreTransferRun(ctx context.Context, src, dst string, rep Core
 	if len(rep.Problems) > 0 {
 		return rep, fmt.Errorf("%w: %s", ErrCoreTransfer, rep.Problems[0])
 	}
+	params := nodeproto.CoreSecretsSendParams{}
+	if !rep.Pinned {
+		// The key the core approved at the target's join, named only for
+		// a core host the owner confirmed, as it is now.
+		n, err := s.reg.Get(dst)
+		if err != nil {
+			return rep, err
+		}
+		if !n.CoreHostConfirmed() {
+			return rep, fmt.Errorf("%w: %s", ErrCoreTransfer, unconfirmedProblem(n.Name))
+		}
+		params.TargetKey = hex.EncodeToString(n.PublicKey)
+	}
 	rep.Move = o.Move
 	if rep.Move == "" {
 		rep.Move = newMoveID()
@@ -151,8 +184,9 @@ func (s *Service) coreTransferRun(ctx context.Context, src, dst string, rep Core
 	if err := s.Call(ctx, dst, nodeproto.MethodCoreSecretsOffer, nodeproto.CoreSecretsOfferParams{Move: rep.Move}, &offer); err != nil {
 		return rep, fmt.Errorf("%s: the offer: %w", rep.Target.Name, err)
 	}
+	params.Offer = offer
 	var bundle nodeproto.CoreSecretsBundle
-	if err := s.Call(ctx, src, nodeproto.MethodCoreSecretsSend, nodeproto.CoreSecretsSendParams{Offer: offer}, &bundle); err != nil {
+	if err := s.Call(ctx, src, nodeproto.MethodCoreSecretsSend, params, &bundle); err != nil {
 		return rep, fmt.Errorf("%s: sending: %w", rep.Source.Name, err)
 	}
 	rep.Sent, rep.FilesSent, rep.FilesError = bundle.Names, bundle.Files, bundle.FilesError
@@ -172,48 +206,24 @@ func newMoveID() string {
 	return nodeproto.NewMoveID(time.Now(), hex.EncodeToString(rnd))
 }
 
-// coreHostPending reports whether n offers a core-host its approval does
-// not cover: a new one, or a changed core-host.json.
-func coreHostPending(n *Node) bool {
-	d := n.Declared.CoreHost
-	return d != nil && n.Device != nodeproto.DeviceRevoked && (n.Approved.CoreHost == nil || n.Approved.CoreHost.Hash != d.Hash)
-}
-
-// noteCoreHost tells OnCoreHost once per core-host.json that node n asks
-// for core-host, so the owner hears of every change of that file.
-func (s *Service) noteCoreHost(n *Node) {
-	if s.onCoreHost == nil || !coreHostPending(n) {
-		return
-	}
-	s.mu.Lock()
-	seen := s.coreHostSeen[n.ID] == n.Declared.CoreHost.Hash
-	s.coreHostSeen[n.ID] = n.Declared.CoreHost.Hash
-	s.mu.Unlock()
-	if !seen {
-		s.onCoreHost(clone(n))
-	}
-}
-
-// CoreHostView is how the fleet shows a core host: whether its
-// core-host.json waits for approval, the device key's fingerprint the
-// owner compares with what `fridolin node core-host show` prints there,
-// and what approving it means (nodeproto.CoreHostApproval).
+// CoreHostView is how the fleet shows a core host: whether the owner
+// confirmed it (their vote on a move to it), the device key's
+// fingerprint, which `fridolin node core-host show` prints there, the
+// targets it pins, and what moving the core there means
+// (nodeproto.CoreHostApproval).
 type CoreHostView struct {
-	Pending     bool     `json:"pending"`
+	Confirmed   bool     `json:"confirmed"`
 	Fingerprint string   `json:"fingerprint"`
 	SendTo      []string `json:"send_to"`
 	Approval    string   `json:"approval"`
 }
 
-// coreHostView is n's CoreHostView, nil for a node that neither offers
-// core-host nor had it approved.
+// coreHostView is n's CoreHostView, nil for a node that does not offer
+// core-host.
 func coreHostView(n *Node) *CoreHostView {
 	ch := n.Declared.CoreHost
-	if ch == nil {
-		ch = n.Approved.CoreHost
-	}
-	if ch == nil {
+	if ch == nil || n.Device == nodeproto.DeviceRevoked {
 		return nil
 	}
-	return &CoreHostView{Pending: coreHostPending(n), Fingerprint: nodeproto.Fingerprint(n.PublicKey), SendTo: append([]string{}, ch.SendTo...), Approval: nodeproto.CoreHostApproval}
+	return &CoreHostView{Confirmed: n.CoreHostConfirmed(), Fingerprint: nodeproto.Fingerprint(n.PublicKey), SendTo: append([]string{}, ch.SendTo...), Approval: nodeproto.CoreHostApproval}
 }

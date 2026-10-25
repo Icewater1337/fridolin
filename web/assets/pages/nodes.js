@@ -119,23 +119,8 @@ export default /** @satisfies {PageModule} */ ({
       await refresh();
     }
 
-    // core-host (docs/NODES.md, "core-host"): the machine may come to
-    // hold every host secret, so approving it says so first.
     /** @param {StableNode} n */
     async function approveCommands(n) {
-      const ch = n.core_host;
-      if (ch && ch.pending) {
-        const ok = await confirmDialog({
-          title: `Approve core-host on ${n.name}?`,
-          message: [
-            h('p', ch.approval),
-            h('p', 'Device key: ', mono(ch.fingerprint)),
-            h('p.muted.small', `Compare it with what fridolin node core-host show prints on ${n.name}. Did you not just turn core-host on there? Revoke it instead.`),
-          ],
-          confirm: 'Approve core-host', danger: true,
-        });
-        if (!ok) return;
-      }
       await act(n, 'approve-commands', `Approved what ${n.name} offers`);
     }
 
@@ -245,14 +230,16 @@ export default /** @satisfies {PageModule} */ ({
         coreHostLine(n.core_host));
     }
 
-    // core-host: the device key the owner compares, and the targets this
-    // machine sends host secrets to.
+    // core-host (docs/NODES.md, "core-host"): every node is one unless
+    // it turned it off; the owner's !movecore vote confirms it, never
+    // this page.
     /** @param {CoreHostView | undefined} ch */
     function coreHostLine(ch) {
       if (!ch) return null;
       const to = ch.send_to || [];
       return h('div', h('strong', 'Core host: '), 'device key ', mono(ch.fingerprint),
-        h('span.muted', to.length ? ` · sends secrets only to ${to.join(', ')}` : ' · trusts no target'));
+        h('span.muted', ch.confirmed ? ' · confirmed: it may hold the secrets' : ' · never held the core: the first !movecore vote in WhatsApp confirms it'),
+        to.length ? h('span.muted', ` · pins ${to.join(', ')}`) : null);
     }
 
     // Programs from the core: the folders node.json opts in, the programs
@@ -390,9 +377,6 @@ export default /** @satisfies {PageModule} */ ({
           h('div.card-title', h('h2', n.name), h('span.muted', osName(n.os), n.arch ? ` · ${n.arch}` : '')),
           h('div.node-state', statePills(n))),
         waitingCallout(n),
-        n.core_host && n.core_host.pending && n.device === 'approved'
-          ? callout('warn', 'core-host waits for your approval', n.core_host.approval)
-          : null,
         n.fride_approval && n.device === 'approved'
           ? callout('warn', 'fride waits for your approval', n.fride_approval)
           : null,

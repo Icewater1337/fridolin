@@ -48,7 +48,8 @@ const (
 	MethodCoreSecretsOffer = "core.secrets.offer"
 	// MethodCoreSecretsSend encrypts this machine's host secrets to an
 	// offer, after checking its signature against the target's device
-	// key as pinned here (CoreSecretsSendParams → CoreSecretsBundle).
+	// key as pinned here, or as the core names it (CoreSecretsSendParams
+	// → CoreSecretsBundle).
 	MethodCoreSecretsSend = "core.secrets.send"
 	// MethodCoreSecretsReceive decrypts a bundle with the offer's key and
 	// stores it (CoreSecretsReceiveParams → CoreSecretsReceived).
@@ -153,9 +154,10 @@ func Fingerprint(pub []byte) string {
 	return strings.Join(parts, " ")
 }
 
-// CoreHostApproval is what approving core-host means (#187 §1): every
-// place that approves it says so.
-const CoreHostApproval = "Approving core-host lets the core move to this machine. It then holds all of Fridolin's secrets: the WhatsApp session, the keys that open every backup and export, and the Claude token. Approve it only for a machine you trust as much as the one the core runs on now."
+// CoreHostApproval is what the first move to a machine means (#187 §1):
+// the move's report and poll say so, since the owner's vote is what lets
+// it hold the secrets.
+const CoreHostApproval = "Moving the core there lets that machine hold all of Fridolin's secrets: the WhatsApp session, the keys that open every backup and export, and the Claude token. Move it only to a machine you trust as much as the one the core runs on now."
 
 // FrideApproval is what approving fride means (#187 §5, "Follow-up
 // outside this design"): every place that approves it says so. FrIDE
@@ -189,6 +191,11 @@ type CoreCheckResult struct {
 	SecretFilesError string   `json:"secret_files_error,omitempty"`
 	// SendTo are the targets this machine trusts, with their fingerprints.
 	SendTo []CoreHostPinView `json:"send_to"`
+	// TrustsCore is set by an agent that takes the target key the core
+	// names in core.secrets.send (CoreSecretsSendParams.TargetKey) for a
+	// target it has no pin of; an older agent sends to pinned targets
+	// only.
+	TrustsCore bool `json:"trusts_core,omitempty"`
 	// Setup is `fridolin setup-machine --core` here; SetupNote says why
 	// it was not run (a box: Docker is the box host's).
 	Setup     []CoreCheckItem `json:"setup,omitempty"`
@@ -285,6 +292,11 @@ func VerifyCoreSecretsOffer(pub []byte, o CoreSecretsOffer) bool {
 // CoreSecretsSendParams hands a source a target's offer.
 type CoreSecretsSendParams struct {
 	Offer CoreSecretsOffer `json:"offer"`
+	// TargetKey is the target's device key, hex, as the core approved it
+	// at the target's join, for a target the owner confirmed as a core
+	// host. The source checks the offer's signature against it when it
+	// has no pin of the target; a pin, where there is one, wins.
+	TargetKey string `json:"target_key,omitempty"`
 }
 
 // CoreSecretsBundle is a source's answer: its host secrets encrypted to
