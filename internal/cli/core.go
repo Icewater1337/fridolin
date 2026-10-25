@@ -842,7 +842,9 @@ func defaultHostDeps(env coreEnv) hostDeps {
 	}
 	gh, _ := exec.LookPath("gh")
 	if d.goos != "windows" {
-		gh = lookPathIn("gh", envValue(env.environ, "PATH"))
+		// gh's own installer and `go install` put it in ~/.local/bin or ~/bin,
+		// which launchd's PATH lacks too (#249).
+		gh = lookPathIn("gh", strings.Join([]string{envValue(env.environ, "PATH"), filepath.Join(d.home, ".local", "bin"), filepath.Join(d.home, "bin")}, string(os.PathListSeparator)))
 	}
 	if gh == "" {
 		d.noVerify = "GitHub's CLI (gh) is not installed, which checks the image's provenance before it is pulled (no login needed): install a current one (brew install gh, winget install GitHub.cli, on Linux from GitHub's apt repository: https://cli.github.com)"
