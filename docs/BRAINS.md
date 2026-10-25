@@ -390,7 +390,7 @@ name and how it ended, never its arguments), `approval_requested`,
 (`!join`), `dashboard_link` (`!dashboard`), `node_approved` (`!approve`)
 and `node_revoked` (`!deny`, `!revoke`), never with the code or link, and
 `owner_approval`: the owner's `!approve` and `!deny` of anything else, a
-vote in the poll that picks one, and the confirmation an unexpected one
+vote in the poll that lists them (each tick it newly makes), and the confirmation an unexpected one
 asks for. Texts are shortened, and what looks like a password or
 token is masked. The dashboard's Threads page groups the runs by thread,
 and its Audit page filters the lines. `fridolin doctor` warns about an

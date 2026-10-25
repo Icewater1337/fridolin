@@ -639,3 +639,25 @@ func TestPollIsKeptBeforeItCanBeVotedOn(t *testing.T) {
 		})
 	}
 }
+
+// A poll of the bridge's own is single choice; a MultiPoll lets the voter
+// tick every option.
+func TestMultiPollLetsEveryOptionBeTicked(t *testing.T) {
+	t.Parallel()
+	s := openOutboxStore(t, t.TempDir())
+	o := outboundmsg.NewPausedOutbox(s, func() outboundmsg.Link { return nil }, 0, nil)
+	ctx := context.Background()
+	if err := o.Poll(ctx, testDMChat, "One?", []string{"a", "b", "c"}, "x:1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.MultiPoll(ctx, testDMChat, "Some?", []string{"a", "b", "c"}, "x:2"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := s.PendingOutbox(ctx)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("outbox = %+v, %v", rows, err)
+	}
+	if got := []int{rows[0].Parts[0].Max, rows[1].Parts[0].Max}; got[0] != 1 || got[1] != 3 {
+		t.Errorf("max selectable = %v, want [1 3]", got)
+	}
+}

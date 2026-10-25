@@ -423,9 +423,12 @@ last, in small print, for reference only. Several at once come as one
 list.
 
 - `!approve` alone approves the one thing that waits. With several
-  waiting it sends a poll, one plain option each; the owner's vote
-  approves that one, and nobody else's vote counts. `!deny` alone (and
-  `!revoke` alone) turns one down the same way: a node that waits to join
+  waiting it sends a multi-select poll, one plain option each, and under
+  it the ref of each option. Every option the owner ticks is approved;
+  one vote that ticks several approves them all and says so in one
+  message, and taking a tick back undoes nothing. Nobody else's vote
+  counts. A poll has room for 12; the notice says how many more wait.
+  `!deny` alone (and `!revoke` alone) turns them down the same way: a node that waits to join
   is shut out, a node's request for more keeps what was approved before,
   and a brain's file stays unapproved, without being asked about again
   until it changes. For the core move, `!approve` is "Move now" and
@@ -438,7 +441,9 @@ list.
   more or for core-host on its own, a file a brain wrote into its own
   folder. `!approve` alone then asks once more: "reply !approve again
   within 2 minutes". So does something that waited longer than a day,
-  and something the owner was never shown (the alert comes first).
+  and something the owner was never shown (the alert comes first). A
+  poll vote that ticks several such ones lists them in one message, and
+  the second `!approve` approves them all.
 - `!approve <ref>` and `!deny <ref>` still name one by the ref the alert
   ends with; `!revoke <ref>` shuts out a node, approved or not.
 - Only the owner, in their direct chat. Every `!approve`, `!deny`, vote

@@ -55,7 +55,7 @@ for compatibility.
   do in one sentence per capability, and "Was this you? Reply !approve —
   or !deny if not", with the id last, for reference. `!approve` and the
   new `!deny` work alone: on the one thing waiting, or through a poll
-  that picks one when several wait (only the owner's vote counts).
+  when several wait (only the owner's vote counts).
   Something the owner did not start (a join code from neither `!join`
   nor the dashboard, a node asking for more on its own, a file a brain
   wrote), or that waited over a day, asks for a second `!approve` within
@@ -764,6 +764,16 @@ for compatibility.
   Off by default: without `vault.enabled` nothing changes.
 
 ### Changed
+
+- **Several approvals at once, in one poll.** With several things
+  waiting, `!approve` (and `!deny`) alone sends a multi-select poll: "N
+  things wait for you. Tick the ones you approve." Each tick approves
+  that one, and one message per vote says what the vote approved; taking
+  a tick back undoes nothing. A message under the poll lists the ref of
+  each option, for `!approve <ref>`. Ticked ones that ask for a second
+  `!approve` (unexpected, waited over a day) are listed together, and one
+  `!approve` within 2 minutes approves them all. Only the owner's vote
+  counts, as before; with one thing waiting nothing changed.
 
 - `!approve` without an id no longer answers with its usage: it approves
   what waits. The node alerts' and `!fleet`'s wording changed (pinned in

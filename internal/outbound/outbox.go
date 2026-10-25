@@ -134,6 +134,11 @@ func (o *Outbox) Poll(ctx context.Context, chat, question string, options []stri
 	return o.add(ctx, store.OutboxRow{Chat: chat, Parts: []store.OutboxPart{{Question: question, Options: options, Max: 1, Ref: ref}}})
 }
 
+// MultiPoll is Poll whose voter may tick every option.
+func (o *Outbox) MultiPoll(ctx context.Context, chat, question string, options []string, ref string) error {
+	return o.add(ctx, store.OutboxRow{Chat: chat, Parts: []store.OutboxPart{{Question: question, Options: options, Max: min(len(options), MaxPollOptions), Ref: ref}}})
+}
+
 // textParts is text as the messages it goes to chat as.
 func (o *Outbox) textParts(chat, text string, maxChunk int) []store.OutboxPart {
 	var parts []store.OutboxPart

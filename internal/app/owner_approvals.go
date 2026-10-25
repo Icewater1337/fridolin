@@ -37,8 +37,8 @@ import (
 // or changed skill, and a run's request_approval. The owner hears of each
 // once in their direct chat, in plain words (alertPendingApprovals), and
 // answers with !approve or !deny alone: with one thing waiting that one,
-// with several a poll that picks one (ownerPickVote). `!approve <ref>`
-// still names one.
+// with several a multi-select poll whose ticks each approve (or turn down)
+// one (ownerPickVote). `!approve <ref>` still names one.
 //
 // Safety: only the owner, in their direct chat (ownerCommand), and only
 // the owner's vote in the poll. Something the owner did not start (a
@@ -54,8 +54,8 @@ const (
 	// approvalFreshFor is how long something waits before !approve alone
 	// no longer approves it without asking again.
 	approvalFreshFor = 24 * time.Hour
-	// ownerPickPrefix is the ref of the poll that picks one; the token
-	// after it names the pick.
+	// ownerPickPrefix is the ref of the poll that picks; the token after
+	// it names the pick.
 	ownerPickPrefix = "owner-pick:"
 )
 
@@ -97,7 +97,7 @@ type ownerApprovals struct {
 	mu     sync.Mutex
 	loaded bool
 	state  ownerApprovalsFile
-	// confirm is the one that waits for a second !approve.
+	// confirm is what waits for a second !approve.
 	confirm *ownerConfirm
 	// picks are the polls sent, by token.
 	picks map[string]ownerPick
@@ -111,14 +111,19 @@ type ownerApprovalsFile struct {
 }
 
 type ownerConfirm struct {
-	key string
-	at  time.Time
+	keys []string
+	at   time.Time
 }
 
 type ownerPick struct {
 	approve bool
+	options []string          // in the poll's order
 	keys    map[string]string // option → key
-	at      time.Time
+	// done are the options a vote ticked already: a vote carries the
+	// voter's whole selection, so only what it newly ticks is decided,
+	// and taking a tick back undoes nothing.
+	done map[string]bool
+	at   time.Time
 }
 
 // load reads the file once; the caller holds mu.
@@ -838,8 +843,14 @@ func (b *App) ownerDecide(ctx context.Context, jid, by string, approve bool) str
 	b.approvals.confirm = nil
 	b.approvals.mu.Unlock()
 	if c != nil && now.Sub(c.at) <= confirmWindow {
-		if i := slices.IndexFunc(items, func(it pendingItem) bool { return it.key == c.key }); i >= 0 {
-			return b.settle(ctx, items[i], by, approve, "confirmed")
+		var replies []string
+		for _, key := range c.keys {
+			if i := slices.IndexFunc(items, func(it pendingItem) bool { return it.key == key }); i >= 0 {
+				replies = append(replies, b.settle(ctx, items[i], by, approve, "confirmed"))
+			}
+		}
+		if len(replies) > 0 {
+			return strings.Join(replies, "\n\n")
 		}
 	}
 	switch len(items) {
@@ -859,34 +870,44 @@ func (b *App) settleOrAsk(ctx context.Context, it pendingItem, by string, approv
 	if !approve {
 		return b.settle(ctx, it, by, false, "")
 	}
-	b.approvals.mu.Lock()
-	b.approvals.load(b.ownerApprovalsPath())
-	_, shown := b.approvals.state.Alerted[it.key]
-	b.approvals.mu.Unlock()
-	shown = shown || it.silent // a run's poll shows it
-	var why string
+	why, unseen := b.confirmWhy(it, now)
 	switch {
-	case !shown:
+	case unseen:
 		// Approve only what the owner has seen: this is it.
 		b.markAlerted(it.key, now)
-		b.setConfirm(it.key, now)
+		b.setConfirm(now, it.key)
 		b.auditOwner(it, by, "approve", "shown first")
 		return outboundmsg.ApprovalAlert(it.msg, now)
-	case !it.expires.IsZero() && now.After(it.expires):
-		why = outboundmsg.ApprovalExpiredWhy(it.since, now)
-	case it.msg.Unexpected != "":
-		why = "This is unexpected: " + it.msg.Unexpected
-	default:
+	case why == "":
 		return b.settle(ctx, it, by, true, "")
 	}
-	b.setConfirm(it.key, now)
+	b.setConfirm(now, it.key)
 	b.auditOwner(it, by, "approve", "asked to confirm")
 	return outboundmsg.ApprovalConfirmReply(it.msg, why, int(confirmWindow/time.Minute))
 }
 
-func (b *App) setConfirm(key string, now time.Time) {
+// confirmWhy says why approving it asks for a second !approve first, ""
+// for no reason: it waited too long, or it was not the owner's doing.
+// unseen reports that the owner was never shown it, which asks too.
+func (b *App) confirmWhy(it pendingItem, now time.Time) (why string, unseen bool) {
 	b.approvals.mu.Lock()
-	b.approvals.confirm = &ownerConfirm{key: key, at: now}
+	b.approvals.load(b.ownerApprovalsPath())
+	_, shown := b.approvals.state.Alerted[it.key]
+	b.approvals.mu.Unlock()
+	switch {
+	case !shown && !it.silent: // a run's poll shows it
+		return "", true
+	case !it.expires.IsZero() && now.After(it.expires):
+		return outboundmsg.ApprovalExpiredWhy(it.since, now), false
+	case it.msg.Unexpected != "":
+		return "This is unexpected: " + it.msg.Unexpected, false
+	}
+	return "", false
+}
+
+func (b *App) setConfirm(now time.Time, keys ...string) {
+	b.approvals.mu.Lock()
+	b.approvals.confirm = &ownerConfirm{keys: keys, at: now}
 	b.approvals.mu.Unlock()
 }
 
@@ -956,19 +977,32 @@ func (b *App) ownerDecideRef(ctx context.Context, by, ref string, approve bool) 
 	return "", false
 }
 
-// sendPick sends the poll that picks one of items.
+// sendPick sends the multi-select poll whose ticks each approve (or turn
+// down) one of items, and returns what follows it: how to vote, and the
+// ref of each.
 func (b *App) sendPick(ctx context.Context, jid, by string, items []pendingItem, approve bool) string {
-	items = items[:min(len(items), outboundmsg.MaxPollOptions)]
-	pick := ownerPick{approve: approve, keys: map[string]string{}, at: time.Now()}
+	more := max(0, len(items)-outboundmsg.MaxPollOptions)
+	items = items[:len(items)-more]
+	pick := ownerPick{approve: approve, keys: map[string]string{}, done: map[string]bool{}, at: time.Now()}
 	options := make([]string, 0, len(items))
+	var refs []string
 	for _, it := range items {
-		o := textx.Truncate(cmp.Or(it.msg.Option, it.msg.Ref), 90)
+		label := cmp.Or(it.msg.Option, it.msg.Ref)
+		o := textx.Truncate(label, 90)
+		if pick.keys[o] != "" && it.msg.Ref != "" {
+			// Two that read the same: the ref tells them apart.
+			o = textx.Truncate(label, 88-min(len(it.msg.Ref), 40)) + " (" + textx.Truncate(it.msg.Ref, 40) + ")"
+		}
 		for n := 2; pick.keys[o] != ""; n++ {
-			o = fmt.Sprintf("%s (%d)", textx.Truncate(cmp.Or(it.msg.Option, it.msg.Ref), 85), n)
+			o = fmt.Sprintf("%s (%d)", textx.Truncate(label, 85), n)
 		}
 		pick.keys[o] = it.key
 		options = append(options, o)
+		if it.msg.Ref != "" {
+			refs = append(refs, o+": `"+it.msg.Ref+"`")
+		}
 	}
+	pick.options = options
 	token := randomToken(9)
 	b.approvals.mu.Lock()
 	if b.approvals.picks == nil {
@@ -981,17 +1015,18 @@ func (b *App) sendPick(ctx context.Context, jid, by string, items []pendingItem,
 	}
 	b.approvals.picks[token] = pick
 	b.approvals.mu.Unlock()
-	if err := b.outbox.Poll(ctx, jid, outboundmsg.ApprovalPickQuestion(approve, len(items)), options, ownerPickPrefix+token); err != nil {
+	if err := b.outbox.MultiPoll(ctx, jid, outboundmsg.ApprovalPickQuestion(approve, len(items)), options, ownerPickPrefix+token); err != nil {
 		log.Printf("approvals: sending the poll: %v", err)
 		return outboundmsg.ChatErrGeneric
 	}
 	b.auditOwner(pendingItem{}, by, map[bool]string{true: "approve", false: "deny"}[approve], fmt.Sprintf("poll sent: %d options", len(options)))
-	return outboundmsg.ApprovalPickNotice(approve)
+	return outboundmsg.ApprovalPickNotice(approve, refs, more)
 }
 
-// ownerPickVote takes a vote in the poll that picks one: only the
-// owner's, in their direct chat, decides; it then goes as !approve alone
-// would for that one.
+// ownerPickVote takes a vote in the poll that picks: only the owner's, in
+// their direct chat, decides. Each option the vote newly ticks goes as
+// !approve alone (or !deny) would for that one, and one message says
+// what came of them all; a tick taken back undoes nothing.
 func (b *App) ownerPickVote(token string, v pollVote) {
 	voter := v.Voter.User
 	entry := audit.Entry{Kind: audit.OwnerApproval, Chat: v.Poll.Chat, By: voter, Detail: "poll vote: " + strings.Join(v.Selected, ", ")}
@@ -1008,30 +1043,98 @@ func (b *App) ownerPickVote(token string, v pollVote) {
 	ctx := context.Background()
 	b.approvals.mu.Lock()
 	pick, ok := b.approvals.picks[token]
-	key := pick.keys[v.Selected[0]]
-	if ok && key != "" {
-		delete(b.approvals.picks, token)
-	}
-	b.approvals.mu.Unlock()
-	reply := outboundmsg.ApprovalPollStale
-	var found *pendingItem
-	if key != "" {
-		for _, it := range b.waiting(ctx) {
-			if it.key == key {
-				found = &it
-				break
-			}
+	var ticked []string // options newly ticked, in the poll's order
+	for _, o := range pick.options {
+		if slices.Contains(v.Selected, o) && !pick.done[o] {
+			pick.done[o] = true
+			ticked = append(ticked, o)
 		}
 	}
-	if found == nil {
+	b.approvals.mu.Unlock()
+	if !ok {
 		entry.Outcome = "ignored: poll out of date"
 		b.audit.Append(entry)
-	} else {
-		entry.ID, entry.Outcome = found.msg.Ref, "picked"
-		b.audit.Append(entry)
-		reply = b.settleOrAsk(ctx, *found, voter, pick.approve, time.Now())
+		b.answerVote(ctx, v.Poll.Chat, outboundmsg.ApprovalPollStale)
+		return
 	}
-	if err := b.outbox.Text(ctx, v.Poll.Chat, reply, b.cfgs.Get().MaxChunkSize); err != nil {
+	if len(ticked) == 0 {
+		entry.Outcome = "ignored: nothing newly ticked"
+		b.audit.Append(entry)
+		return
+	}
+	waiting := b.waiting(ctx)
+	now := time.Now()
+	var found []pendingItem
+	var gone []string
+	for _, o := range ticked {
+		if i := slices.IndexFunc(waiting, func(it pendingItem) bool { return it.key == pick.keys[o] }); i >= 0 {
+			found = append(found, waiting[i])
+		} else {
+			gone = append(gone, o)
+		}
+	}
+	if len(found) == 0 {
+		entry.Outcome = "ignored: poll out of date"
+		b.audit.Append(entry)
+		b.answerVote(ctx, v.Poll.Chat, outboundmsg.ApprovalPollStale)
+		return
+	}
+	refs := make([]string, len(found))
+	for i, it := range found {
+		refs[i] = it.msg.Ref
+	}
+	entry.ID, entry.Outcome = strings.Join(refs, ", "), fmt.Sprintf("picked %d", len(found))
+	b.audit.Append(entry)
+	var replies []string
+	var asks []pendingItem
+	var whys []string
+	unseen := false // the one ask, if one, was never shown
+	for _, it := range found {
+		if pick.approve {
+			why, never := b.confirmWhy(it, now)
+			if never {
+				b.markAlerted(it.key, now)
+				why, unseen = outboundmsg.ApprovalUnseenWhy, true
+			}
+			if why != "" {
+				asks, whys = append(asks, it), append(whys, why)
+				continue
+			}
+		}
+		replies = append(replies, b.settle(ctx, it, voter, pick.approve, "poll"))
+	}
+	if len(asks) > 0 {
+		var keys []string
+		list := make([]outboundmsg.OwnerApproval, len(asks))
+		b.approvals.mu.Lock()
+		if c := b.approvals.confirm; c != nil && now.Sub(c.at) <= confirmWindow {
+			// What an earlier vote asked about still waits for the word.
+			keys = append(keys, c.keys...)
+		}
+		b.approvals.mu.Unlock()
+		for i, it := range asks {
+			keys, list[i] = append(keys, it.key), it.msg
+			b.auditOwner(it, voter, "approve poll", "asked to confirm")
+		}
+		b.setConfirm(now, keys...)
+		minutes := int(confirmWindow / time.Minute)
+		switch {
+		case len(asks) == 1 && unseen:
+			replies = append(replies, outboundmsg.ApprovalAlert(list[0], now))
+		case len(asks) == 1:
+			replies = append(replies, outboundmsg.ApprovalConfirmReply(list[0], whys[0], minutes))
+		default:
+			replies = append(replies, outboundmsg.ApprovalsConfirmReply(list, whys, minutes))
+		}
+	}
+	if len(gone) > 0 {
+		replies = append(replies, outboundmsg.ApprovalPollGone(gone))
+	}
+	b.answerVote(ctx, v.Poll.Chat, strings.Join(replies, "\n\n"))
+}
+
+func (b *App) answerVote(ctx context.Context, chat, reply string) {
+	if err := b.outbox.Text(ctx, chat, reply, b.cfgs.Get().MaxChunkSize); err != nil {
 		log.Printf("approvals: answering a vote: %v", err)
 	}
 }
