@@ -3,6 +3,7 @@ package nodes
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -51,6 +52,9 @@ func (s *Service) moveSite(rep *MoveReport) {
 	}
 	switch {
 	case site.Tunnel && site.TunnelRunning:
+		// The core's own tunnel keeps the site up after the move, so a
+		// cloudflared job on the host is not something it loses (#248).
+		rep.MachineBound = slices.DeleteFunc(rep.MachineBound, func(m string) bool { return strings.Contains(m, tunnelOnHost) })
 		site.After = fmt.Sprintf("the site's tunnel runs inside the core and moves with it: %s answers from %s once the core runs there", where, rep.Target.Name)
 	case site.Tunnel:
 		site.After = fmt.Sprintf("the site's tunnel runs inside the core and moves with it, but it is not running now: %s does not answer before the move either (Site page)", where)
