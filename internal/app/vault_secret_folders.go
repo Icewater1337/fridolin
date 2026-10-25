@@ -755,10 +755,9 @@ func (sf *vaultSecretFolders) restoreLocked(ctx context.Context, cfg *config.Set
 			return err
 		}
 	} else {
-		if !filepath.IsAbs(dest) {
-			return apperr.New(apperr.Invalid, fmt.Sprintf("--to %q: an absolute path", dest))
+		if dest, err = secretRestoreTarget(dest, cfg.Boot.Home, cfg.DataDir); err != nil {
+			return err
 		}
-		dest = filepath.Clean(dest)
 		for _, f := range live {
 			if fsx.Within(fsx.Canonical(dest), fsx.Canonical(f.Path)) || fsx.Within(fsx.Canonical(f.Path), fsx.Canonical(dest)) {
 				return apperr.New(apperr.Invalid, fmt.Sprintf("%s is or holds the live %s %s: restore into a new folder, or over the live folders with --force", dest, f.Source, f.Path))
@@ -807,6 +806,28 @@ func (sf *vaultSecretFolders) restoreLocked(ctx context.Context, cfg *config.Set
 		}
 	}
 	return os.RemoveAll(dest)
+}
+
+// secretRestoreTarget checks --to: absolute, and inside the home folder
+// or the data dir (not either itself). The folder comes from the request,
+// so it is built again from that base and a part of it that stays inside,
+// as restoreTarget does for the Drive backup's restores.
+func secretRestoreTarget(to, home, dataDir string) (string, error) {
+	if !filepath.IsAbs(to) {
+		return "", apperr.New(apperr.Invalid, fmt.Sprintf("--to %q: an absolute path", to))
+	}
+	target := fsx.Canonical(to)
+	for _, base := range []string{home, dataDir} {
+		if base == "" {
+			continue
+		}
+		base = fsx.Canonical(AbsPath(base))
+		rel, err := filepath.Rel(base, target)
+		if err == nil && rel != "." && filepath.IsLocal(rel) {
+			return filepath.Join(base, rel), nil
+		}
+	}
+	return "", apperr.New(apperr.Invalid, fmt.Sprintf("--to %s: a new folder inside your home folder or the data dir", to))
 }
 
 // newUniqueFolder makes base (0700), or base-2, base-3, … when it is
@@ -885,7 +906,7 @@ func (sf *vaultSecretFolders) extract(ctx context.Context, version, dest string)
 			continue
 		}
 		name := strings.TrimSuffix(h.Name, "/")
-		if name == "" || path.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") || strings.Contains(name, "\\") {
+		if name == "" || path.Clean(name) != name || strings.Contains(name, "\\") || !filepath.IsLocal(filepath.FromSlash(name)) {
 			return man, files, bytes, fmt.Errorf("the version holds a bad name %q", h.Name)
 		}
 		label, _, _ := strings.Cut(name, "/")
@@ -893,6 +914,9 @@ func (sf *vaultSecretFolders) extract(ctx context.Context, version, dest string)
 			return man, files, bytes, fmt.Errorf("the version holds %q outside its folders", h.Name)
 		}
 		p := filepath.Join(dest, filepath.FromSlash(name))
+		if !strings.HasPrefix(p, filepath.Clean(dest)+string(filepath.Separator)) {
+			return man, files, bytes, fmt.Errorf("the version holds %q outside its folders", h.Name)
+		}
 		mode := fs.FileMode(h.Mode).Perm()
 		switch h.Typeflag {
 		case tar.TypeDir:

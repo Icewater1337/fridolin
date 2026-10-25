@@ -196,7 +196,10 @@ func TestVaultSecretFoldersRoundTrip(t *testing.T) {
 	if _, code := secretRestore(h, map[string]any{"at": "2020-01-01"}); code != http.StatusNotFound {
 		t.Errorf("a restore of a day before the first version: %d", code)
 	}
-	to := filepath.Join(t.TempDir(), "new")
+	if _, code := secretRestore(h, map[string]any{"to": filepath.Join(t.TempDir(), "outside")}); code != http.StatusUnprocessableEntity {
+		t.Errorf("a restore outside the home folder and the data dir: %d", code)
+	}
+	to := filepath.Join(h.Home(), "restored", "new")
 	if rec, code := secretRestore(h, map[string]any{"to": to, "at": time.Now().Add(time.Minute).Format(time.RFC3339)}); code != http.StatusOK || rec.To != to || rec.Files != 5 {
 		t.Errorf("a restore --to --at: %d %+v", code, rec)
 	}

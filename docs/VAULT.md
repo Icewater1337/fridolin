@@ -215,7 +215,7 @@ days, while the last try failed and while pruning is held.
 fridolin vault restore-secrets --list                # the versions
 fridolin vault restore-secrets                       # the newest, into a new folder
 fridolin vault restore-secrets --at 2026-10-20       # the newest of that day or before
-fridolin vault restore-secrets --to /tmp/secrets     # into a new or empty folder of yours
+fridolin vault restore-secrets --to ~/restored-secrets   # into a new or empty folder of yours
 fridolin vault restore-secrets --force               # over the live folders
 ```
 
@@ -223,7 +223,8 @@ A restore takes the newest version at or before `--at` (a date, which is
 the end of that day, `2026-10-20T14:30` in the bridge's timezone, or RFC
 3339; default the newest) and writes each folder of it, with its files'
 bytes, modes and times, into a new folder: `--to DIR` (new, or empty,
-and neither a live secret folder nor a folder holding one) or, by
+inside the home folder or the data dir, and neither a live secret folder
+nor a folder holding one) or, by
 default, `core/restored-secrets-<time>/` in the data dir, which no
 snapshot takes. It prints which folder there is which live one; copy what
 you need over by hand.

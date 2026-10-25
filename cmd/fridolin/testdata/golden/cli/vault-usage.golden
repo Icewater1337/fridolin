@@ -29,7 +29,7 @@ Usage:
                                       restore the newest version of the secret folders
                                       (at or before DATE: 2026-10-20, 2026-10-20T14:30
                                       or RFC 3339) into DIR, a new or empty folder
-                                      (default core/restored-secrets-<time> in the data
+                                      in the home folder or the data dir (default core/restored-secrets-<time> in the data
                                       dir); --force restores over the live folders
                                       instead, after copying them to
                                       core/replaced-secrets-<time>/; --list lists the
