@@ -31,6 +31,7 @@ GET /api/calendar/health
 GET /api/chats/ignored
 GET /api/config
 GET /api/dev/outbox
+GET /api/fride
 GET /api/fs/capabilities
 GET /api/fs/list
 GET /api/github

@@ -76,6 +76,8 @@ type PolicyAPI struct {
 	Skills         func(ctx context.Context, brain string) (any, error)
 	ApproveSkill   func(ctx context.Context, brain string, req SkillApproveRequest) (any, error)
 	SetSkillPolicy func(ctx context.Context, brain string, req SkillPolicyRequest) (any, error)
+	// Fride lists the FrIDE threads with their news (GET /api/fride).
+	Fride func(context.Context) (any, error)
 }
 
 // get answers a GET with what fn returns, with an ETag.

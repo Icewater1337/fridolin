@@ -10,6 +10,21 @@ for compatibility.
 
 ### Added
 
+- **FrIDE is quiet in WhatsApp.** A new setting, `fride.news`
+  (Settings → Messages), is `"quiet"` by default: a chat gets only work
+  that is done or merged, failures (an identical one once per thread)
+  and real questions; "Created task …", FrIDE's echo of the brief and
+  progress stay on the new FrIDE page of the dashboard, which keeps each
+  thread's news whole. `"all"` sends every piece of news, as before.
+  Either way a FrIDE message is at most three lines, and one text a
+  node sends for several threads goes out once, naming the threads.
+  Work a scheduled agent hands to FrIDE never posts to WhatsApp any
+  more: FrIDE's questions, and work done or failed, start a run of that
+  agent, which answers FrIDE itself and tells you only what merged,
+  failed for good or needs your decision. A question from FrIDE that
+  asks nothing is shown as news. `bridge.db` gets a table,
+  `fride_news` (migration 7); an older bridge rolled back to ignores it.
+
 - **A brain can act without asking** (`"approvals": "auto"` in
   brain.json, the brain page's *Approvals*): its `request_approval`
   answers approved at once, without a poll, recorded in the Approvals

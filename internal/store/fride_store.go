@@ -150,3 +150,70 @@ func (s *Store) FrideThreads(ctx context.Context, state string) ([]FrideThread, 
 	}
 	return out, rows.Err()
 }
+
+// The fride_news table keeps what FrIDE said about each thread in full:
+// the chat gets a few lines of it, the dashboard all of it.
+
+// migrateV7 adds fride_news.
+func migrateV7(tx *sql.Tx) error {
+	stmts := []string{
+		`CREATE TABLE fride_news (
+			id        INTEGER PRIMARY KEY AUTOINCREMENT,
+			thread    INTEGER NOT NULL,             -- fride_threads.id
+			kind      TEXT NOT NULL,                -- started, update, question, done, failed
+			text      TEXT NOT NULL,                -- FrIDE's text, whole
+			at        DATETIME NOT NULL
+		)`,
+		`CREATE INDEX fride_news_by_thread ON fride_news (thread, id)`,
+	}
+	for _, s := range stmts {
+		if _, err := tx.Exec(s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// MaxFrideNews is how many pieces of news a thread keeps.
+const MaxFrideNews = 50
+
+// FrideNewsItem is one row of fride_news.
+type FrideNewsItem struct {
+	ID     int64
+	Thread int64
+	Kind   string
+	Text   string
+	At     time.Time
+}
+
+// AddFrideNews records news of thread, and keeps the thread's latest
+// MaxFrideNews.
+func (s *Store) AddFrideNews(ctx context.Context, n FrideNewsItem) error {
+	at := n.At
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO fride_news (thread, kind, text, at) VALUES (?, ?, ?, ?)`, n.Thread, n.Kind, n.Text, at); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `DELETE FROM fride_news WHERE thread = ? AND id NOT IN (SELECT id FROM fride_news WHERE thread = ? ORDER BY id DESC LIMIT ?)`, n.Thread, n.Thread, MaxFrideNews)
+	return err
+}
+
+// FrideNews lists thread's news, oldest first.
+func (s *Store) FrideNews(ctx context.Context, thread int64) ([]FrideNewsItem, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, thread, kind, text, at FROM fride_news WHERE thread = ? ORDER BY id`, thread)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FrideNewsItem
+	for rows.Next() {
+		var n FrideNewsItem
+		if err := rows.Scan(&n.ID, &n.Thread, &n.Kind, &n.Text, &n.At); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}

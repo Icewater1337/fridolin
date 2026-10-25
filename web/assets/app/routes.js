@@ -20,6 +20,7 @@ export const ROUTES = [
   { id: 'approvals', path: 'approvals', nav: { label: 'Approvals', icon: 'shield' }, load: () => import('../pages/approvals.js') },
   { id: 'audit', path: 'audit/:run?', nav: { label: 'Audit', icon: 'lock' }, load: () => import('../pages/audit.js') },
   { id: 'settings', path: 'settings/:section?', nav: { label: 'Settings', icon: 'settings' }, load: () => import('../pages/settings.js') },
+  { id: 'fride', path: 'fride/:thread?', nav: { label: 'FrIDE', icon: 'git' }, load: () => import('../pages/fride.js') },
   { id: 'nodes', path: 'nodes', nav: { label: 'Nodes', icon: 'server' }, load: () => import('../pages/nodes.js') },
   { id: 'backup', path: 'backup', nav: { label: 'Backup', icon: 'backup' }, load: () => import('../pages/backup.js') },
   { id: 'vault', path: 'vault', nav: { label: 'Vault', icon: 'lock' }, load: () => import('../pages/vault.js') },

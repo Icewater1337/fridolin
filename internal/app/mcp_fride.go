@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/mcp"
 	"github.com/Icewater1337/fridolin/internal/skill"
 )
@@ -138,7 +139,7 @@ func (b *App) callFrideTask(ctx context.Context, c mcpCaller, raw json.RawMessag
 	// Policy (PLAN.md, M5): fride_task is a write action, checked by
 	// App.guarded (registerFrideTools) before anything leaves the core: a
 	// lockdown or a run whose budget is read gets its error result.
-	chatJID := b.newsChat(c)
+	chatJID := b.frideChat(c)
 	if chatJID == "" {
 		return mcp.ErrorResult("this run answers no chat, so FrIDE's questions and news would have nowhere to go"), nil
 	}
@@ -149,7 +150,21 @@ func (b *App) callFrideTask(ctx context.Context, c mcpCaller, raw json.RawMessag
 	if !placed {
 		return mcp.TextResult(fmt.Sprintf("FrIDE #%d waits: no machine with FrIDE can take it now. The chat has been told, and hears when it starts; you need not repeat it.", t.ID)), nil
 	}
+	if chat.IsScheduleChat(chatJID) {
+		return mcp.TextResult(fmt.Sprintf("Handed to FrIDE on %s as FrIDE #%d (FrIDE's status: %s). Its news does not go to WhatsApp: when FrIDE asks, or the work is done or failed, a run of this agent starts with FrIDE's text, to answer it (fride_reply) or follow up (fride_close).", b.fride.nodeName(t.Node), t.ID, orDefault(t.FrideStatus, "queued"))), nil
+	}
 	return mcp.TextResult(fmt.Sprintf("Handed to FrIDE on %s as FrIDE #%d (FrIDE's status: %s). Its questions and news will arrive in %s as messages naming FrIDE #%d.", b.fride.nodeName(t.Node), t.ID, orDefault(t.FrideStatus, "queued"), newsWhere(c, chatJID), t.ID)), nil
+}
+
+// frideChat is where the news of FrIDE work a run hands over goes: a
+// scheduled agent's run keeps it to itself, in its own chat
+// (schedule:<agent>), where FrIDE's questions start a run of the agent
+// and never reach WhatsApp; any other run, newsChat.
+func (b *App) frideChat(c mcpCaller) string {
+	if chat.IsScheduleChat(c.run.Chat) && (c.run.Policy == nil || !c.run.Policy.Silent) && b.agents.lookup(c.run.Message.ID) != nil {
+		return c.run.Chat
+	}
+	return b.newsChat(c)
 }
 
 // newsWhere names chatJID, where a tool's news go, to the run: "this

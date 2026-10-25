@@ -206,6 +206,8 @@ type File struct {
 	Housekeeping HousekeepingConfig `json:"housekeeping"`
 	// Schedules are the scheduled agents' settings (schedules.go).
 	Schedules SchedulesConfig `json:"schedules"`
+	// Fride is how FrIDE's news reaches the chats (fride.go).
+	Fride FrideConfig `json:"fride"`
 }
 
 // retiredBrainMode is the brain_mode key. A missing key, null and true all
@@ -624,6 +626,9 @@ func (c *File) Validate(goos string) error {
 	}
 	if !manifest.ValidEffort(c.BrainEffort) {
 		return fmt.Errorf("brain_effort %q must be one of low, medium, high, xhigh, max", c.BrainEffort)
+	}
+	if !validFrideNews[c.Fride.News] {
+		return fmt.Errorf("fride.news must be %q or %q, not %q", FrideNewsQuiet, FrideNewsAll, c.Fride.News)
 	}
 	if !validQueueModes[c.Queue.Mode] {
 		return fmt.Errorf("queue.mode must be %q or %q, not %q", QueueModeQueue, QueueModeInterrupt, c.Queue.Mode)

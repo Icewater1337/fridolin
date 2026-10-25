@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
 )
@@ -146,6 +147,8 @@ func envOf(t testing.TB) *testEnv {
 var testOptions = perTest[Options]{
 	fresh: func() *Options {
 		w := defaultWaits()
+		// FrIDE's news goes out once a moment has gathered it.
+		w.frideGather = 50 * time.Millisecond
 		return &Options{waits: &w}
 	},
 	copy: func(parent *Options) *Options {

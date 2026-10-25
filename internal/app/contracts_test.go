@@ -552,6 +552,7 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 		{"brain_effort", "config.schema.json#/properties/brain_effort", manifest.Efforts(), `{"brain_effort": %s}`},
 		{"agent_provider", "config.schema.json#/properties/agent_provider", []string{"", "claude", "codex"}, `{"agent_provider": %s}`},
 		{"codex_effort", "config.schema.json#/properties/codex_effort", manifest.Efforts(), `{"codex_effort": %s}`},
+		{"fride.news", "config.schema.json#/properties/fride/properties/news", config.FrideNewsModes(), `{"fride": {"news": %s}}`},
 		{"queue.mode", "config.schema.json#/properties/queue/properties/mode", config.QueueModes(), `{"queue": {"mode": %s}}`},
 		{"sandbox.git_config", "config.schema.json#/properties/sandbox/properties/git_config", config.GitConfigs(), `{"sandbox": {"git_config": %s}}`},
 		{"triggers match", "config.schema.json#/properties/triggers/items/oneOf/1/properties/match", matches, `{"triggers": [{"text": "@c", "match": %s}]}`},

@@ -91,6 +91,9 @@ func resolveFile(file *File, paths Paths, goos string) (*File, error) {
 	if cfg.HTTPListen == "" {
 		cfg.HTTPListen = DefaultHTTPListen
 	}
+	if cfg.Fride.News == "" {
+		cfg.Fride.News = FrideNewsQuiet
+	}
 	if cfg.Queue.Mode == "" {
 		cfg.Queue.Mode = QueueModeQueue
 	}

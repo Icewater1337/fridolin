@@ -517,6 +517,18 @@ frideNewsMessage(failed)
 	⚠️ *FrIDE #3* failed on laptop.
 	the message could not be read
 	Answer here to make it try again.
+frideNewsMessage(long)
+	❓ *FrIDE #3* asks (on laptop):
+
+	Which way should I fix it?
+	Option one
+	Option two
+	… more in the dashboard (FrIDE page)
+
+	Answer here, and I'll pass it on.
+frideFanoutMessage
+	🛠️ *FrIDE on mini* (#9, #10, #15):
+	Orchestrator report: all three tasks are merged.
 frideQueuedNotice
 	⏳ *FrIDE #3* waits: no node with FrIDE can take it now (laptop: not enough memory for another stack). It starts as soon as one can, and I'll say so here.
 frideNotLoggedInNotice(moved)

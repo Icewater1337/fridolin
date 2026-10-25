@@ -1723,6 +1723,23 @@ run, as they only remove the bridge's own records), and the bridge after
 each run of the agent. The vault's nightly snapshot of the data dir takes
 them with it, like the audit log.
 
+### `fride.news`
+
+How FrIDE's news reaches the chat that handed it work
+([NODES.md](NODES.md#fride)).
+
+| Value | Meaning |
+| --- | --- |
+| `quiet` (default) | only work that is done or merged, failures and real questions; progress, "Created task …" and FrIDE's echo of the brief stay on the dashboard's FrIDE page; an identical error is sent once per thread |
+| `all` | every piece of FrIDE's news, as before |
+
+Either way a message is at most a few lines, and the FrIDE page keeps
+each thread's news in full. The same text from one node for several
+threads within a minute goes out once, naming the threads. Work that a
+scheduled agent handed to FrIDE never posts to a chat: its news goes to
+the agent, which answers FrIDE itself and reports only what matters
+([BRAINS.md](BRAINS.md#scheduled-agents)).
+
 ---
 
 ## Environment variables

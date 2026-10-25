@@ -2,6 +2,8 @@ package app
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -20,13 +22,16 @@ func (h *harness) runAgentNow(brain, name string, n int) sched.Run {
 	return h.waitRunEnded(brain, name, n)
 }
 
-// A scheduled agent's run answers no chat of its own, but reports to one:
-// FrIDE work it starts sends its questions and news there, the owner's
-// DM here. An agent that reports nowhere may not start any, nor may a
-// workstation session start from it.
+// A scheduled agent's FrIDE work keeps its news to the agent: nothing of
+// it reaches WhatsApp; a question starts a run of the agent with FrIDE's
+// text, which answers it itself, and news that arrives while a run of the
+// agent goes on waits for one more. A workstation session still needs a
+// chat that hears it, which a silent agent has not.
 func TestScheduledAgentsHandWorkToFride(t *testing.T) {
 	t.Parallel()
 	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	prompts := filepath.Join(t.TempDir(), "prompts.log")
+	setenv(t, "FRIDOLIN_FAKE_PROMPT_LOG", prompts)
 	ff := testutil.StartFakeFride(t, "api")
 	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
@@ -40,25 +45,60 @@ func TestScheduledAgentsHandWorkToFride(t *testing.T) {
 	}
 	h.WaitFor("the agents", func() bool { return len(h.schedules().Agents) == 2 })
 
-	setenv(t, "FRIDOLIN_FAKE_MCP", `[{"brain":"core","tool":"fride_task","args":{"message":"Fix bug #12","repos":["api"]}}]`)
+	setenv(t, "FRIDOLIN_FAKE_MCP", `[{"brain":"core","tool":"fride_task","args":{"message":"Fix GitHub issue #12","repos":["api"]}}]`)
 	r := h.runAgentNow("core", "fix-bugs", 1)
-	if r.Status != sched.StatusOK || !strings.Contains(r.Result, "Handed to FrIDE on laptop as FrIDE #1") || !strings.Contains(r.Result, "the owner's chat ("+harnessDM+")") {
+	if r.Status != sched.StatusOK || !strings.Contains(r.Result, "Handed to FrIDE on laptop as FrIDE #1") || !strings.Contains(r.Result, "Its news does not go to WhatsApp") {
 		t.Fatalf("fride_task from a scheduled run: %+v", r)
 	}
+	dm := len(h.SentTo(harnessDM))
+
+	// FrIDE asks: a run of the agent answers, and the DM hears nothing.
+	setenv(t, "FRIDOLIN_FAKE_MCP", `[{"brain":"core","tool":"fride_reply","args":{"thread":1,"text":"the small one"}}]`)
 	if code := ff.Ask(1, "Which fix?"); code != http.StatusNoContent {
 		t.Fatalf("the webhook answered %d", code)
 	}
-	h.WaitSent(harnessDM, "❓ *FrIDE #1* asks (on laptop):\n\nWhich fix?")
-	// The owner answers in the chat, where the brain's DM run passes it on.
-	reply := h.coreSays("the small one", step("fride_reply", `{"thread":1,"text":"the small one"}`))
-	if !strings.Contains(reply, "Passed on to FrIDE #1 on laptop") {
-		t.Fatalf("fride_reply:\n%s", reply)
+	r = h.waitRunEnded("core", "fix-bugs", 2)
+	if r.Trigger != sched.TriggerFride || r.Status != sched.StatusOK {
+		t.Fatalf("the run for FrIDE's question: %+v", r)
+	}
+	if got := ff.Replies(1); len(got) != 1 || got[0] != "the small one" {
+		t.Errorf("FrIDE got %q", got)
+	}
+	data, _ := os.ReadFile(prompts)
+	for _, want := range []string{"FrIDE #1 on laptop: question", "Answer it with fride_reply, thread 1", "The work you handed it: Fix GitHub issue #12", "Which fix?", "Nobody answers FrIDE in WhatsApp"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("the run's prompt lacks %q:\n%s", want, data)
+		}
+	}
+	// Progress starts no run; work done does.
+	ff.Start(1, "fix-12", "fix/12")
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	ff.Emit(map[string]any{"event": "done", "thread_id": 1, "task_id": "fix-12", "text": "PR merged", "status": "done"})
+	r = h.waitRunEnded("core", "fix-bugs", 3)
+	if r.Trigger != sched.TriggerFride {
+		t.Fatalf("the run for FrIDE's done: %+v", r)
+	}
+	if runs := h.agentRuns("core", "fix-bugs"); len(runs) != 3 {
+		t.Errorf("%d runs; progress started one", len(runs))
+	}
+	for _, m := range h.SentTo(harnessDM)[dm:] {
+		// The fake agent's own report echoes its prompt; FrIDE's messages
+		// name the thread in bold.
+		if strings.Contains(m, "*FrIDE #") {
+			t.Errorf("FrIDE's news reached the DM: %q", m)
+		}
+	}
+	// The dashboard keeps it all.
+	w := h.Do("GET", "/api/fride", nil)
+	if !strings.Contains(w.Body.String(), "Which fix?") || !strings.Contains(w.Body.String(), `"chat": "schedule:fix-bugs"`) && !strings.Contains(w.Body.String(), `"chat":"schedule:fix-bugs"`) {
+		t.Errorf("GET /api/fride: %s", w.Body.String())
 	}
 
-	// Silent: nobody would hear FrIDE, so nothing starts.
+	// Silent: its FrIDE work is its own too, but a workstation session
+	// has nobody to tell.
 	setenv(t, "FRIDOLIN_FAKE_MCP", `[{"brain":"core","tool":"fride_task","args":{"message":"Fix bug #13"}},{"brain":"core","tool":"node_agent_run","args":{"prompt":"x"}}]`)
 	r = h.runAgentNow("core", "quiet", 1)
-	if !strings.Contains(r.Result, "[core:fride_task failed] this run answers no chat") {
+	if !strings.Contains(r.Result, "as FrIDE #2") {
 		t.Fatalf("fride_task from a silent agent: %+v", r)
 	}
 	if strings.Contains(r.Result, "Started Agent") {

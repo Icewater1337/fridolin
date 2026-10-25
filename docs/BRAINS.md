@@ -709,12 +709,23 @@ is left out. A lockdown runs an agent at `read`, and refuses one whose
 `risk` says more; it refuses every program on a node.
 
 **FrIDE and workstation sessions from an agent.** A run of an agent
-that reports somewhere may hand work to FrIDE (`fride_task`) or start a
-session on a workstation node (`node_agent_run`): their questions and
-news go to the chat the agent reports to (its `chat`, else the brain's
-reply chat, else your DM), where you answer them as usual, or where the
-brain's next run passes your answer on with `fride_reply`. A `silent`
-agent reports nowhere, and its runs may start neither.
+may hand work to FrIDE (`fride_task`). That work's news never goes to
+WhatsApp: it stays in the agent's own chat (`schedule:<name>`) and on
+the dashboard's FrIDE page. A question from FrIDE, or work done or
+failed, starts a run of the agent out of its schedule, with FrIDE's text
+and the work it was handed: that run answers FrIDE itself
+(`fride_reply`) or follows up (`fride_close` once merged), and tells the
+chat the agent reports to only when something merged, failed for good
+or needs your decision on something destructive or security-relevant
+(else it ends with `NOTHING_TO_REPORT`, whatever the agent's `report`;
+a `silent` agent tells nobody). One such run at a time: news that
+arrives while a run of the agent goes on waits for one more, together.
+A paused or switched-off agent, or one that runs a program, gets no run;
+the news stays on the FrIDE page. A run of an agent that reports
+somewhere may also start a session on a workstation node
+(`node_agent_run`), whose questions and news go to the chat the agent
+reports to (its `chat`, else the brain's reply chat, else your DM),
+where you answer them as usual; a `silent` agent's runs may not.
 
 A program runs on the node through `exec` ([NODES.md](NODES.md#what-a-node-offers)),
 no shell: its `argv[0]` must be on the node's allowlist, the node's

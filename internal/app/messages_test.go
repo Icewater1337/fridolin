@@ -188,6 +188,8 @@ func catalogue() []struct{ name, text string } {
 		{"frideNewsMessage(update)", outboundmsg.FrideNewsMessage(outboundmsg.FrideNews{Thread: 3, Node: "laptop", Kind: "update", Text: "FrIDE inbox #1 · active · health\n→ health: the tests pass"})},
 		{"frideNewsMessage(done)", outboundmsg.FrideNewsMessage(outboundmsg.FrideNews{Thread: 3, Node: "laptop", Kind: "done", Text: "FrIDE inbox #1 · done\n• Inbox #1 is done: health — task health is closed.", Task: "health", Branch: "feat/health", Rationale: "/Users/you/fride-workspaces/health/api/docs/rationale/health.md"})},
 		{"frideNewsMessage(failed)", outboundmsg.FrideNewsMessage(outboundmsg.FrideNews{Thread: 3, Node: "laptop", Kind: "failed", Text: "FrIDE inbox #1 · failed\nthe message could not be read"})},
+		{"frideNewsMessage(long)", outboundmsg.FrideNewsMessage(outboundmsg.FrideNews{Thread: 3, Node: "laptop", Kind: "question", Text: "Which way should I fix it?\nOption one\nOption two\nOption three\nOption four"})},
+		{"frideFanoutMessage", outboundmsg.FrideFanoutMessage("mini", "update", []int64{9, 10, 15}, "FrIDE inbox #9 · update\nOrchestrator report: all three tasks are merged.")},
 		{"frideQueuedNotice", outboundmsg.FrideQueuedNotice(3, "laptop: not enough memory for another stack")},
 		{"frideNotLoggedInNotice(moved)", outboundmsg.FrideNotLoggedInNotice(3, "box", "laptop", nodeproto.FrideLoginFix)},
 		{"frideNotLoggedInNotice(stays)", outboundmsg.FrideNotLoggedInNotice(3, "box", "", nodeproto.FrideLoginFix)},

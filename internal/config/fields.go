@@ -127,6 +127,7 @@ var fields = []fieldSpec{
 	{Field: Field{Name: "schedules.keep_runs"}},
 	{Field: Field{Name: "schedules.max_total_mb"}},
 	{Field: Field{Name: "schedules.max_log_kb"}},
+	{Field: Field{Name: "fride.news"}},
 }
 
 // Fields returns an owned copy of the complete configuration field inventory.

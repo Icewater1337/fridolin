@@ -69,7 +69,7 @@ func TestFrideThroughNodes(t *testing.T) {
 	optionsOf(t).waits.frideRetry = 100 * time.Millisecond
 	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
 	laptopFride, miniFride := testutil.StartFakeFride(t, "api"), testutil.StartFakeFride(t, "api")
-	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}, "fride": {"news": "all"}}`)
 	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
 	h.AddBrain(manifest.Manifest{ID: "family", Name: "Family", Routing: manifest.Routing{Groups: []string{harnessGroup}}})
 	addr := h.StartNodes()
@@ -270,5 +270,71 @@ func TestFrideNotLoggedIn(t *testing.T) {
 	reply = h.coreSays("and docs", step("fride_task", `{"message":"Write docs"}`))
 	if !strings.Contains(reply, "Handed to FrIDE on mini as FrIDE #2") {
 		t.Fatalf("new work went to the node without a login:\n%s", reply)
+	}
+}
+
+// FrIDE's news in a chat that handed it work, quiet by default: one text
+// the node sends for every thread goes out once naming the threads;
+// bookkeeping, progress and progress dressed up as a question stay on
+// the dashboard; an identical error goes out once per thread; a long text
+// is cut to a few lines, whole on the dashboard.
+func TestFrideNewsQuiet(t *testing.T) {
+	t.Parallel()
+	optionsOf(t).waits.frideGather = 300 * time.Millisecond
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	ff := testutil.StartFakeFride(t, "api")
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	addr := h.StartNodes()
+	h.fakeFrideNode("mini", addr, ff)
+
+	steps := make([]testutil.FakeMCPStep, 10)
+	for i := range steps {
+		steps[i] = step("fride_task", `{"message":"Fix issue","repos":["api"]}`)
+	}
+	if reply := h.coreSays("fix the ten issues", steps...); !strings.Contains(reply, "as FrIDE #10") {
+		t.Fatalf("fride_task:\n%s", reply)
+	}
+	dm := len(h.SentTo(harnessDM))
+	since := func() []string { return h.SentTo(harnessDM)[dm:] }
+
+	// One report for every thread, in the same second: one message.
+	report := "Orchestrator report: all ten tasks are merged."
+	for i := 1; i <= 10; i++ {
+		ff.Emit(map[string]any{"event": "update", "thread_id": i, "text": report, "status": "running"})
+	}
+	h.WaitSent(harnessDM, "*FrIDE on mini* (#1, #2, #3, #4, #5, #6, #7, #8, #9, #10):\n"+report)
+	time.Sleep(time.Second)
+	if n := len(since()); n != 1 {
+		t.Fatalf("the fan-out went out %d times: %q", n, since())
+	}
+	// The same text again within the minute is not sent again.
+	ff.Emit(map[string]any{"event": "update", "thread_id": 3, "text": report, "status": "running"})
+
+	// Bookkeeping, progress and a question that asks nothing stay quiet.
+	ff.Emit(map[string]any{"event": "update", "thread_id": 1, "text": "Created task fix-1 on `api`, with new branch fix/1", "status": "running"})
+	ff.Emit(map[string]any{"event": "update", "thread_id": 1, "text": "• → agent: Fix GitHub issue #1", "status": "running"})
+	ff.Emit(map[string]any{"event": "started", "thread_id": 2, "task_id": "fix-2", "text": "started", "status": "running"})
+	ff.Emit(map[string]any{"event": "question", "thread_id": 2, "text": "FrIDE inbox #2 · needs your reply\nThe agent is still working; I'd resend it later.", "status": "needs_reply"})
+	// An error twice: once.
+	for range 2 {
+		ff.Emit(map[string]any{"event": "failed", "thread_id": 4, "text": "the build broke", "status": "failed"})
+	}
+	// A real question, long: cut short.
+	long := "Which way should I fix it?\nOption one\nOption two\nOption three\nOption four"
+	ff.Emit(map[string]any{"event": "question", "thread_id": 5, "text": long, "status": "needs_reply"})
+	h.WaitSent(harnessDM, "❓ *FrIDE #5* asks (on mini):\n\nWhich way should I fix it?\nOption one\nOption two\n"+outboundmsg.FrideMore)
+	h.WaitSent(harnessDM, "⚠️ *FrIDE #4* failed on mini.\nthe build broke")
+	time.Sleep(time.Second)
+	if got := since(); len(got) != 3 {
+		t.Fatalf("a quiet chat got %d messages:\n%s", len(got), strings.Join(got, "\n---\n"))
+	}
+
+	// The dashboard has every piece in full.
+	w := h.Do("GET", "/api/fride", nil)
+	for _, want := range []string{"Created task fix-1", "Option four", "resend it later"} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("GET /api/fride lacks %q", want)
+		}
 	}
 }

@@ -119,6 +119,7 @@ var appMigrations = []func(*sql.Tx) error{
 	migrateV4,
 	migrateV5,
 	migrateV6,
+	migrateV7,
 }
 
 // migrate brings the bridge's tables to the newest version, one
