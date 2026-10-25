@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -224,5 +225,32 @@ func TestBoxFrideNeverSeesTheCore(t *testing.T) {
 	}
 	if _, ok := base["services.fride.ports"]; ok {
 		t.Error("FrIDE publishes a port")
+	}
+}
+
+// compose merges box-core.yaml's security options into box.yaml's and
+// refuses one that is then there twice, which stopped every compose
+// command of a box: with FRIDOLIN_BOX_APPARMOR unset, the last line
+// repeated box.yaml's no-new-privileges:true.
+func TestBoxCoreRepeatsNoSecurityOption(t *testing.T) {
+	alt := regexp.MustCompile(`\$\{FRIDOLIN_BOX_APPARMOR:\+([^}]*)\}`)
+	def := regexp.MustCompile(`\$\{FRIDOLIN_BOX_APPARMOR:-([^}]*)\}`)
+	base := composeTree(t, container.Box)["services.node.security_opt"]
+	core := composeTree(t, container.BoxCore)["services.node.security_opt"]
+	for _, profile := range []string{"", "fridolin-core"} {
+		merged := slices.Clone(base)
+		for _, o := range core {
+			if profile == "" {
+				o = def.ReplaceAllString(alt.ReplaceAllString(o, ""), "$1")
+			} else {
+				o = def.ReplaceAllString(alt.ReplaceAllString(o, "$1"), profile)
+			}
+			merged = append(merged, o)
+		}
+		for i, o := range merged {
+			if slices.Contains(merged[i+1:], o) {
+				t.Errorf("FRIDOLIN_BOX_APPARMOR=%q: the node's security_opt has %s twice: %q", profile, o, merged)
+			}
+		}
 	}
 }

@@ -138,6 +138,10 @@ if [ "$fride" = 1 ]; then
 fi
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
 	repo="${registry#ghcr.io/}/fridolin"
+	# The registry's name is lowercase and GitHub's need not be, while gh
+	# compares --signer-workflow exactly: take GitHub's own spelling.
+	named=$(gh api "repos/$repo" --jq .full_name 2>/dev/null) || named=""
+	if [ -n "$named" ]; then repo=$named; fi
 	for img in $node_image $fride_image; do
 		gh attestation verify "oci://$img" --repo "$repo" --signer-workflow "$repo/.github/workflows/image.yml" >/dev/null ||
 			die "$img has no valid build provenance from $repo; not starting it"

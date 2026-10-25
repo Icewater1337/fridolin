@@ -39,6 +39,13 @@ function Run([string]$exe, [string[]]$a) {
     & $exe @a
     if ($LASTEXITCODE -ne 0) { throw "$exe $($a -join ' ') failed ($LASTEXITCODE)" }
 }
+# Runs a native program for its exit status alone, its output discarded.
+# Windows PowerShell makes an error of each line a program writes to a
+# redirected stderr, which "Stop" would turn into the end of this script.
+function Quiet([string]$exe, [string[]]$a) {
+    $ErrorActionPreference = "Continue"
+    & $exe @a *> $null
+}
 
 if (-not $Update -and -not $Core) { Die "-Core is missing (the core's !join reply has the whole line)" }
 if ($Update) {
@@ -84,9 +91,9 @@ if (-not $Yes) {
 
 Say "Checking Docker"
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { Die "docker is not installed: winget install --id Docker.DockerDesktop -e, then start Docker Desktop once" }
-docker compose version *> $null
+Quiet docker @("compose", "version")
 if ($LASTEXITCODE -ne 0) { Die "docker compose is missing (it comes with Docker Desktop)" }
-docker info *> $null
+Quiet docker @("info")
 if ($LASTEXITCODE -ne 0) { Die "Docker does not answer: start Docker Desktop and run this again" }
 
 Say "Pulling the images"
@@ -106,9 +113,13 @@ if ($fride) {
     Write-Host "fride: $frideImage"
 }
 $gh = Get-Command gh -ErrorAction SilentlyContinue
-if ($gh) { gh auth status *> $null }
+if ($gh) { Quiet gh @("auth", "status") }
 if ($gh -and $LASTEXITCODE -eq 0) {
     $repo = $Registry.Substring("ghcr.io/".Length) + "/fridolin"
+    # The registry's name is lowercase and GitHub's need not be, while gh
+    # compares --signer-workflow exactly: take GitHub's own spelling.
+    $named = & { $ErrorActionPreference = "Continue"; gh api "repos/$repo" --jq .full_name 2>$null }
+    if ($LASTEXITCODE -eq 0 -and $named) { $repo = "$named".Trim() }
     foreach ($img in @($nodeImage) + $(if ($fride) { @($frideImage) } else { @() })) {
         gh attestation verify "oci://$img" --repo $repo --signer-workflow "$repo/.github/workflows/image.yml" | Out-Null
         if ($LASTEXITCODE -ne 0) { Die "$img has no valid build provenance from $repo; not starting it" }
@@ -137,9 +148,11 @@ $envLines += $kept
 $compose = docker run --rm --entrypoint /opt/fridolin/fridolin $nodeImage box compose
 if ($LASTEXITCODE -ne 0) { Die "the image did not print its compose file" }
 [IO.File]::WriteAllText((Join-Path $Dir "compose.yaml"), (($compose -join "`n") + "`n"))
-$core = docker run --rm --entrypoint /opt/fridolin/fridolin $nodeImage box core-compose
+# Not $core: PowerShell's names ignore case, and that one is -Core, which
+# the join below passes.
+$coreYaml = docker run --rm --entrypoint /opt/fridolin/fridolin $nodeImage box core-compose
 if ($LASTEXITCODE -ne 0) { Die "the image did not print the core's settings" }
-[IO.File]::WriteAllText((Join-Path $Dir "core.yaml"), (($core -join "`n") + "`n"))
+[IO.File]::WriteAllText((Join-Path $Dir "core.yaml"), (($coreYaml -join "`n") + "`n"))
 $seccomp = docker run --rm --entrypoint /opt/fridolin/fridolin $nodeImage box seccomp
 if ($LASTEXITCODE -ne 0) { Die "the image did not print its seccomp profile" }
 [IO.File]::WriteAllText((Join-Path $Dir "seccomp.json"), (($seccomp -join "`n") + "`n"))
@@ -188,7 +201,7 @@ if ($fride) {
     Say "FrIDE"
     $up = $false
     for ($i = 0; $i -lt 60; $i++) {
-        docker compose exec -T fride curl -fsS -o /dev/null http://127.0.0.1:17840/ *> $null
+        Quiet docker @("compose", "exec", "-T", "fride", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:17840/")
         if ($LASTEXITCODE -eq 0) { $up = $true; break }
         Start-Sleep -Seconds 2
     }
@@ -208,7 +221,7 @@ if ($fride) {
         }
         $token = $null
     }
-    $email = docker compose exec -T fride git config --global user.email 2>$null
+    $email = & { $ErrorActionPreference = "Continue"; docker compose exec -T fride git config --global user.email 2>$null }
     if (-not $email) {
         $gitName = Read-Host "The name FrIDE's agents commit with"
         $gitEmail = Read-Host "Their email"

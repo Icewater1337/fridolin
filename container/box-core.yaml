@@ -45,11 +45,13 @@ services:
     # brain's run its own user, mount and PID namespaces, which Docker's
     # default seccomp profile and masked /proc paths forbid. With
     # FRIDOLIN_BOX_APPARMOR unset the last line is a second
-    # no-new-privileges, which changes nothing.
+    # no-new-privileges, which changes nothing. It is spelled without
+    # compose.yaml's `:true`: compose merges the two lists and refuses
+    # equal items in them.
     security_opt:
       - seccomp=./seccomp.json
       - systempaths=unconfined
-      - ${FRIDOLIN_BOX_APPARMOR:+apparmor=}${FRIDOLIN_BOX_APPARMOR:-no-new-privileges:true}
+      - ${FRIDOLIN_BOX_APPARMOR:+apparmor=}${FRIDOLIN_BOX_APPARMOR:-no-new-privileges}
     mem_limit: ${FRIDOLIN_BOX_CORE_MEMORY:-8g}
     # The core stops cleanly within 30 seconds, releasing the lease.
     stop_grace_period: 45s
