@@ -285,7 +285,17 @@ func Append(root *os.Root, entry Entry) (Entry, error) {
 	if err != nil {
 		return entry, err
 	}
-	_, _ = f.Write(append(data, '\n'))
-	f.Close()
-	return entry, nil
+	st, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return entry, err
+	}
+	if _, err := f.Write(append(data, '\n')); err != nil {
+		// Cut a half line off, or the next entry is glued onto it and
+		// Scan skips both as not JSON.
+		_ = f.Truncate(st.Size())
+		f.Close()
+		return entry, err
+	}
+	return entry, f.Close()
 }

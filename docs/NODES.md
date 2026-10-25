@@ -771,6 +771,10 @@ side by side, with different node ids.
    services running; `docker compose exec node fridolin node fride status
    --state-dir /node` says FrIDE answers; the core lists the node online
    with `host`, `backup` and `fride` (`!fleet`, or the Nodes page).
+   `docker compose exec node fridolin doctor --node --state-dir /node`
+   checks the box from inside: it leaves out the host's Tailscale and a
+   node service, which a box does not have, and checks that the agent is
+   connected to the core over the box's own tailnet device.
 
 **Updating by hand**: the same line with `--update` and the core's
 version, no code (`-Update` in PowerShell). It pulls and pins the new
