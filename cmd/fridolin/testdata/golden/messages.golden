@@ -109,7 +109,7 @@ fleetReply(false)
 fleetReply(true, none)
 	🖥️ No nodes yet. Send `!join` here for a join code, and paste the line it sends on the new machine.
 fleetReply(true, nodes)
-	🖥️ *Fleet* — 7 nodes, 4 online
+	🖥️ *Fleet* — 6 nodes, 3 online
 
 	• *laptop* (Windows) — online
 	  can: run these programs there when asked: hostname, whoami; report its system details (OS, disk, memory)
@@ -131,10 +131,6 @@ fleetReply(true, nodes)
 	  _ref 5e6f7a8b9c0d_
 	• *old* (Linux) — never seen · shut out
 	  _ref ffeeddccbbaa_
-	• *icebase* (Linux) — online
-	  ⏳ asks to hold all of Fridolin's secrets (core-host) — reply !approve
-	  can: report its system details (OS, disk, memory); show notifications on its screen
-	  _ref 3c1e5a7b9d0f_
 nodesOffNotice
 	🖥️ Nodes are off. Turn on nodes.enabled in the config and restart the bridge to connect other machines (docs/NODES.md).
 ownerCommandGroupNotice
@@ -238,11 +234,11 @@ coreMoveTargets
 	• *icebase* — ready: `!movecore icebase`
 	• *laptop* — not now: laptop runs version v1.8.0 and the core v1.9.0: update it first (fridolin nodes update 8233270f8a24)
 	• *pi* — offline
-	• *nas* — asks to hold all of Fridolin's secrets (core-host) — reply !approve
+	• *nas* — ready: `!movecore nas` (it never held the core: moving there lets it hold all of Fridolin's secrets)
 coreMoveTargets(none)
 	🚚 The core runs on *mac-mini*.
 
-	No other machine can take it yet. A machine becomes a core host with `fridolin node core-host on` there (in a box: `docker compose exec node fridolin node core-host on --state-dir /node` in its folder) and your `!approve`.
+	No other machine can take it yet. Every node you approved can, unless core-host is off there: `!join` adds one (a node in a box is the easiest).
 coreMoveTargets(no source)
 	🚚 I can't tell which machine runs the core: no core host says it holds the lease. A core that runs outside a node (a native install that is no core host) cannot move by itself; docs/CORE.md, "The core moves itself".
 
@@ -269,10 +265,19 @@ coreMoveReport(plain)
 	Offline: about 2 to 4 minutes. Messages you send meanwhile wait and are answered from mac-mini. If mac-mini does not come up, icebase starts again by itself.
 
 	Was this you? Vote in the poll below, or reply !approve — or !deny if not. No vote within 30 minutes is a no. `!movecore icebase` moves it back later.
+coreMoveReport(first time)
+	🚚 *Move the core from mac-mini to icebase?*
+
+	*icebase* is a box on Linux amd64, id 3c1e9a0b7d22, device key `a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90`.
+	Offline: about 2 to 4 minutes. Messages you send meanwhile wait and are answered from icebase. If icebase does not come up, mac-mini starts again by itself.
+
+	🔐 *icebase has never held the core.* Moving the core there lets that machine hold all of Fridolin's secrets: the WhatsApp session, the keys that open every backup and export, and the Claude token. Move it only to a machine you trust as much as the one the core runs on now.
+
+	Was this you? Vote in the poll below, or reply !approve — or !deny if not. No vote within 30 minutes is a no. `!movecore mac-mini` moves it back later.
 coreMoveReport(blocked)
 	🚫 The core cannot move from *mac-mini* to *icebase* now:
 
-	• mac-mini does not trust icebase: on mac-mini, fridolin node core-host trust 3c1e9a0b7d22 --key KEY
+	• mac-mini runs a fridolin that sends host secrets to pinned targets only: update it first (fridolin nodes update 7216c2648b04)
 
 	Fix that and send `!movecore icebase` again. Nothing changed.
 coreMoveQuestion
@@ -330,8 +335,6 @@ nodeRevokedCoreSecretsNote(none)
 	🔐 It is a core host; it held nothing a move brought it.
 nodeRevokedCoreSecretsNote(failed)
 	🔐 It is a core host and could not forget what moves brought it first (it is offline). If it held host secrets, rotate them: docs/CORE.md, "A core host that is gone".
-nodeCoreHostApprovedNote
-	🔐 That includes core-host. Approving core-host lets the core move to this machine. It then holds all of Fridolin's secrets: the WhatsApp session, the keys that open every backup and export, and the Claude token. Approve it only for a machine you trust as much as the one the core runs on now.
 nodeApprovedReply
 	✅ *laptop* is approved. It can now:
 	• read and change the files in /home/you/Shared
@@ -353,19 +356,17 @@ approvalAlert(node)
 	Was this you? Reply !approve — or !deny if not.
 
 	_ref 8233270f8a24_
-approvalAlert(core-host, unexpected)
-	🔐 *icebase* (Linux) asks to hold all of Fridolin's secrets (core-host).
+approvalAlert(fride, unexpected)
+	🔐 *icebase* (Linux) asks to let FrIDE's agents run anything on it (fride).
 
 	• When: Mon 19 Oct 10:00 (26 hours ago)
 	• From: your local network, 192.168.1.20
-	• Device key: `a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90`
-	• Sends secrets only to: laptop
 
 	If you approve, it can:
 	• report its system details (OS, disk, memory)
-	• hold all of Fridolin's secrets, so the core can move there
+	• run FrIDE coding tasks on this machine — that means it can run any command there
 
-	Approving core-host lets the core move to this machine. It then holds all of Fridolin's secrets: the WhatsApp session, the keys that open every backup and export, and the Claude token. Approve it only for a machine you trust as much as the one the core runs on now.
+	fride lets fridolin hand coding tasks to FrIDE on this machine. FrIDE runs Claude Code agents there, and they can run anything this machine's user can (on Windows through WSL, PowerShell and C:\ too), whatever exec allows or refuses: approving fride is approving arbitrary commands on this machine. Approve it only on a machine you would let fridolin do anything on.
 
 	⚠️ *Unexpected:* the machine asked for this itself; nobody asked from WhatsApp or the dashboard.
 

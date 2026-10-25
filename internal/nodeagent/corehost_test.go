@@ -70,7 +70,7 @@ func callCore[T any](t *testing.T, a *Agent, method string, params any) (T, *nod
 const testMove = "m-20261024-0900-7f2a"
 
 // TestCoreHostDeclaresItsFile: core-host.json, and every change of it,
-// is what the agent declares, as a hash the core's approval covers.
+// is what the agent declares, as a hash.
 func TestCoreHostDeclaresItsFile(t *testing.T) {
 	a, _ := coreHostAgent(t, "mini")
 	b, _ := coreHostAgent(t, "icebase")
@@ -236,6 +236,85 @@ func TestCoreSecretsSendRefuses(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(src.Dir, TransferLogFile))
 	if strings.Count(string(data), `"refused: `) != 5 {
 		t.Errorf("the refusals are not logged:\n%s", data)
+	}
+}
+
+// TestCoreSecretsSendToTheCoresKey: without a pin, a source sends to the
+// device key the core names, once the offer verifies with it; a key
+// that is another device's, or an offer that key did not sign, gets
+// nothing, and a pin wins over the key the core names.
+func TestCoreSecretsSendToTheCoresKey(t *testing.T) {
+	src, srcStore := coreHostAgent(t, "mini")
+	dst, _ := coreHostAgent(t, "icebase")
+	other, _ := coreHostAgent(t, "stranger")
+	if err := srcStore.Set(hostsecrets.ClaudeOAuthToken, "test-oauth-test"); err != nil {
+		t.Fatal(err)
+	}
+	if !src.coreCheck(context.Background()).TrustsCore {
+		t.Fatal("core.check does not say the agent takes the core's key")
+	}
+	keyOf := func(a *Agent) string { return hex.EncodeToString(a.Key.Public().(ed25519.PublicKey)) }
+	send := func(o nodeproto.CoreSecretsOffer, key string) *nodeproto.Error {
+		_, perr := callCore[nodeproto.CoreSecretsBundle](t, src, nodeproto.MethodCoreSecretsSend, nodeproto.CoreSecretsSendParams{Offer: o, TargetKey: key})
+		return perr
+	}
+	offer, perr := callCore[nodeproto.CoreSecretsOffer](t, dst, nodeproto.MethodCoreSecretsOffer, nodeproto.CoreSecretsOfferParams{Move: testMove})
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	if perr := send(offer, ""); perr == nil || perr.Code != nodeproto.CodeDenied {
+		t.Fatalf("no pin and no key: %v", perr)
+	}
+	if perr := send(offer, keyOf(other)); perr == nil || perr.Code != nodeproto.CodeDenied || !strings.Contains(perr.Message, "the key of "+other.ID()) {
+		t.Fatalf("another device's key: %v", perr)
+	}
+	if perr := send(offer, "nothex"); perr == nil || perr.Code != nodeproto.CodeBadRequest {
+		t.Fatalf("a key that is no key: %v", perr)
+	}
+	_, coreKey, _ := ed25519.GenerateKey(nil)
+	forged := offer
+	forged.Target = nodeproto.DeviceIDFor(coreKey.Public().(ed25519.PublicKey))
+	forged.Signature = nodeproto.SignCoreSecretsOffer(dst.Key, forged)
+	if perr := send(forged, hex.EncodeToString(coreKey.Public().(ed25519.PublicKey))); perr == nil || perr.Code != nodeproto.CodeDenied {
+		t.Fatalf("an offer the named key did not sign: %v", perr)
+	}
+	if perr := send(offer, keyOf(dst)); perr != nil {
+		t.Fatalf("the core's key: %v", perr)
+	}
+	data, _ := os.ReadFile(filepath.Join(src.Dir, TransferLogFile))
+	if !strings.Contains(string(data), `"trust":"core"`) {
+		t.Errorf("the log does not say whose word the key was:\n%s", data)
+	}
+
+	// A pin wins: the key the core names for a pinned target is ignored.
+	trust(t, src, other)
+	theirs, perr := callCore[nodeproto.CoreSecretsOffer](t, other, nodeproto.MethodCoreSecretsOffer, nodeproto.CoreSecretsOfferParams{Move: "m-20261024-0900-beef"})
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	resigned := theirs
+	resigned.Signature = nodeproto.SignCoreSecretsOffer(coreKey, resigned)
+	if perr := send(resigned, hex.EncodeToString(coreKey.Public().(ed25519.PublicKey))); perr == nil || perr.Code != nodeproto.CodeDenied {
+		t.Fatalf("the core's key over a pin: %v", perr)
+	}
+	if perr := send(theirs, keyOf(dst)); perr != nil {
+		t.Fatalf("a pinned target with another key named: %v", perr)
+	}
+}
+
+// TestCoreHostOnWithoutAFile: a node that never ran core-host is a core
+// host, until core-host off.
+func TestCoreHostOnWithoutAFile(t *testing.T) {
+	_, key, _ := ed25519.GenerateKey(nil)
+	a := &Agent{Dir: t.TempDir(), Key: key, Config: Config{Core: "x", Name: "box"}}
+	if ch := a.coreHostDeclared(); ch == nil || ch.Check() != nil {
+		t.Fatalf("declared without core-host.json: %+v", ch)
+	}
+	if err := SaveCoreHost(a.Dir, CoreHostConfig{Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	if a.coreHostDeclared() != nil {
+		t.Fatal("declared after core-host off")
 	}
 }
 

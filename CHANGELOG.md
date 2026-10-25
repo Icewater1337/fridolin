@@ -765,6 +765,23 @@ for compatibility.
 
 ### Changed
 
+- **Every node is a core host, and moving the core is one vote.** A
+  node no longer needs `fridolin node core-host on`, an approval of
+  core-host, or a `core-host trust` pin on the machine the core runs on:
+  every approved node may take the core unless `fridolin node core-host
+  off` ran there. `!movecore <node>` says when the machine never held
+  the core, and the owner's "Move now" is what lets it hold the secrets:
+  the core then names the target's device key, the one it approved at
+  the join, to the source, which checks the target's signature against
+  it. Only that WhatsApp vote confirms a new core host: `fridolin nodes
+  move`, `POST /api/nodes/move` and `core-secrets-transfer` refuse an
+  unconfirmed target, so a stolen dashboard session alone still cannot
+  send the secrets to a new machine. Core hosts approved before count as
+  confirmed; pins still work and win over the core's key. `!approve`
+  and the Nodes page no longer ask about core-host. Update the source
+  node too (`fridolin nodes update ID`): an older one sends to pinned
+  targets only, and the pre-flight says so.
+
 - **Several approvals at once, in one poll.** With several things
   waiting, `!approve` (and `!deny`) alone sends a multi-select poll: "N
   things wait for you. Tick the ones you approve." Each tick approves

@@ -380,15 +380,4 @@ func writeNodesTable(w io.Writer, resp httpapi.NodesResponse, now time.Time) {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", n.ID, n.Name, n.OS, n.Device, n.Commands, seen, tags, n.Effective.Summary())
 	}
 	_ = tw.Flush()
-	for _, n := range resp.Nodes {
-		ch := n.CoreHost
-		if ch == nil || !ch.Pending || n.Device == nodeproto.DeviceRevoked {
-			continue
-		}
-		fmt.Fprintf(w, "\n%s (%s) asks for core-host. %s\nDevice key: %s", n.Name, n.ID, ch.Approval, ch.Fingerprint)
-		if len(ch.SendTo) > 0 {
-			fmt.Fprintf(w, "; sends secrets only to %s", strings.Join(ch.SendTo, ", "))
-		}
-		fmt.Fprintf(w, "\nApprove it with: fridolin nodes approve %s --commands\n", n.ID)
-	}
 }

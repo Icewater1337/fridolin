@@ -27,8 +27,9 @@ func joinedState(t *testing.T, name string) (string, ed25519.PrivateKey) {
 	return dir, key
 }
 
-// TestNodeCoreHost turns core-host on, pins a target's key as its show
-// prints it, and refuses a key that is not the target's.
+// TestNodeCoreHost finds core-host on without a core-host.json, turns it
+// off and on, pins a target's key as its show prints it, and refuses a
+// key that is not the target's.
 func TestNodeCoreHost(t *testing.T) {
 	src, _ := joinedState(t, "mini")
 	dst, dstKey := joinedState(t, "icebase")
@@ -37,8 +38,14 @@ func TestNodeCoreHost(t *testing.T) {
 		code := nodeCmd(append(append([]string{"core-host"}, args...), "--state-dir", dir), &out, &errOut)
 		return code, out.String(), errOut.String()
 	}
-	if code, out, _ := run(src, "show"); code != 0 || !strings.Contains(out, "core-host: off") {
-		t.Fatalf("show before on: %d %q", code, out)
+	if code, out, _ := run(src, "show"); code != 0 || !strings.Contains(out, "core-host: on") || !strings.Contains(out, "No pin is needed") {
+		t.Fatalf("show before anything: %d %q", code, out)
+	}
+	if code, out, e := run(src, "off"); code != 0 || !strings.Contains(out, "core-host is off") {
+		t.Fatalf("off: %d %q %q", code, out, e)
+	}
+	if _, out, _ := run(src, "show"); !strings.Contains(out, "core-host: off") {
+		t.Fatalf("show after off: %q", out)
 	}
 	if code, out, e := run(src, "on"); code != 0 || !strings.Contains(out, "core-host is on") {
 		t.Fatalf("on: %d %q %q", code, out, e)

@@ -58,14 +58,8 @@ func (c Capabilities) Plain() []string {
 	if c.Terminal != nil {
 		out = append(out, "open a terminal in "+folders(c.Terminal.Roots)+" — anything you could type there")
 	}
-	if c.CoreHost != nil {
-		out = append(out, CoreHostPlain)
-	}
 	return out
 }
-
-// CoreHostPlain is the sentence of Plain for core-host.
-const CoreHostPlain = "hold all of Fridolin's secrets, so the core can move there"
 
 func folders(roots []string) string {
 	switch len(roots) {

@@ -86,6 +86,10 @@ func TestMoveCoreFromChat(t *testing.T) {
 			t.Errorf("the report lacks %q:\n%s", want, report)
 		}
 	}
+	// mini pins icebase: the move needs no confirmation of it.
+	if strings.Contains(report, "never held the core") {
+		t.Errorf("the report asks to confirm a pinned target:\n%s", report)
+	}
 	if len(poll.Poll) != 2 || poll.Poll[0] != outboundmsg.CoreMoveNow || poll.Poll[1] != outboundmsg.CoreMoveCancel {
 		t.Errorf("the poll's options: %q", poll.Poll)
 	}
@@ -135,13 +139,23 @@ func TestMoveCoreFromChat(t *testing.T) {
 		t.Fatalf("icebase did not get the secret: %v", err)
 	}
 
-	// The way back, by chat too.
-	h.pinBack(m)
-	_, back := h.moveCorePoll("icebase", "mini")
+	// The way back, by chat too: icebase pins nothing, and mini was
+	// never confirmed, so the owner's vote confirms it.
+	h.backData(m)
+	if n, _ := h.b.nodes.Registry().Get(m.src); n.CoreHostConfirmed() {
+		t.Fatal("mini is confirmed before any vote")
+	}
+	backReport, back := h.moveCorePoll("icebase", "mini")
+	if !strings.Contains(backReport, "🔐 *mini has never held the core.*") {
+		t.Errorf("the way back's report does not say mini never held the core:\n%s", backReport)
+	}
 	h.vote(back.ID, ownerNumber, outboundmsg.CoreMoveNow)
 	h.WaitSent(harnessDM, "Running on *mini* now")
 	if running, data, _ := m.srcCore.state(); !running || data != "icebase's data" {
 		t.Errorf("mini after the way back: running %v on %q", running, data)
+	}
+	if n, _ := h.b.nodes.Registry().Get(m.src); !n.CoreHostConfirmed() {
+		t.Error("mini is not confirmed after the owner's vote")
 	}
 	forget := h.waitPoll(harnessDM, "Keep the host secrets on icebase?")
 	h.vote(forget.ID, ownerNumber, outboundmsg.CoreSecretsForget("icebase"))

@@ -79,7 +79,7 @@ const secretValue = "test-value-9f3c"
 // with files of several modes, a subfolder and a symbolic link.
 func writeSecretFolders(t *testing.T, home string) (creds, legacy string) {
 	t.Helper()
-	creds, legacy = filepath.Join(home, ".fridolin-secrets"), filepath.Join(home, ".personal-calendar")
+	creds, legacy = filepath.Join(home, ".app-secrets"), filepath.Join(home, ".personal-calendar")
 	when := time.Date(2026, 10, 1, 8, 30, 15, 123456789, time.UTC)
 	for _, f := range []struct {
 		path string
@@ -138,7 +138,7 @@ func TestVaultSecretFoldersRoundTrip(t *testing.T) {
 	logs := &lockedBuffer{}
 	optionsOf(t).Logger = slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	h := newHarness(t, `{"vault": {"enabled": true, "hot_budget_gb": 3, "secret_dirs": ["~/.personal-calendar"]},
-		"sandbox": {"credentials_dir": "~/.fridolin-secrets"}}`)
+		"sandbox": {"credentials_dir": "~/.app-secrets"}}`)
 	creds, legacy := writeSecretFolders(t, h.Home())
 	before := map[string]secretTree{creds: readSecretTree(t, creds), legacy: readSecretTree(t, legacy)}
 	h.startVault()
@@ -149,7 +149,7 @@ func TestVaultSecretFoldersRoundTrip(t *testing.T) {
 		data, _ := json.MarshalIndent(sf, "", "  ")
 		t.Fatalf("after the backup:\n%s", data)
 	}
-	if got := []string{sf.Folders[0].Label, sf.Folders[1].Label}; !slices.Equal(got, []string{".fridolin-secrets", ".personal-calendar"}) || sf.Folders[1].Skipped != 1 {
+	if got := []string{sf.Folders[0].Label, sf.Folders[1].Label}; !slices.Equal(got, []string{".app-secrets", ".personal-calendar"}) || sf.Folders[1].Skipped != 1 {
 		t.Errorf("folders %+v", sf.Folders)
 	}
 	version := sf.LastOK.Version
@@ -176,7 +176,7 @@ func TestVaultSecretFoldersRoundTrip(t *testing.T) {
 	if code != http.StatusOK || rec.Version != version || rec.Files != 5 || !strings.HasPrefix(rec.To, filepath.Join(h.DataDir(), "core", "restored-secrets-")) {
 		t.Fatalf("restore: %d %+v", code, rec)
 	}
-	for _, f := range []struct{ live, label string }{{creds, ".fridolin-secrets"}, {legacy, ".personal-calendar"}} {
+	for _, f := range []struct{ live, label string }{{creds, ".app-secrets"}, {legacy, ".personal-calendar"}} {
 		want := maps.Clone(before[f.live])
 		delete(want, "link") // links stay out of a version
 		if d := want.diff(readSecretTree(t, filepath.Join(rec.To, f.label))); len(d) > 0 {
@@ -226,7 +226,7 @@ func TestVaultSecretFoldersRoundTrip(t *testing.T) {
 	if got := readSecretTree(t, creds); got["google_calendar_token_main.json"] != before[creds]["google_calendar_token_main.json"] || got["new-since.json"] == "" {
 		t.Errorf("after --force: %q", got)
 	}
-	if data, err := os.ReadFile(filepath.Join(rec.Replaced, ".fridolin-secrets", "google_calendar_token_main.json")); err != nil || string(data) != "a broken token" {
+	if data, err := os.ReadFile(filepath.Join(rec.Replaced, ".app-secrets", "google_calendar_token_main.json")); err != nil || string(data) != "a broken token" {
 		t.Errorf("the copy of what --force replaced: %q %v", data, err)
 	}
 	if _, code := secretRestore(h, map[string]any{"force": true, "to": to}); code != http.StatusUnprocessableEntity {
@@ -256,7 +256,7 @@ func TestVaultSecretFoldersOnChange(t *testing.T) {
 	setenv(t, vaultLocalEnv, local)
 	optionsOf(t).waits.vaultTick = 50 * time.Millisecond
 	optionsOf(t).waits.secretFoldersChange = time.Millisecond
-	h := newHarness(t, `{"vault": {"enabled": true, "hot_budget_gb": 3}, "sandbox": {"credentials_dir": "~/.fridolin-secrets"}}`)
+	h := newHarness(t, `{"vault": {"enabled": true, "hot_budget_gb": 3}, "sandbox": {"credentials_dir": "~/.app-secrets"}}`)
 	creds, _ := writeSecretFolders(t, h.Home())
 	h.startVault()
 	first := h.vaultWait("the first version", func(st vaultStatus) bool {
@@ -400,7 +400,7 @@ func TestDoctorVaultSecretFolders(t *testing.T) {
 			data, _ := json.Marshal(st)
 			s.contents = map[string]string{"/home/you/.fridolin/core/vault-status.json": string(data)}
 			env := s.doctorEnv(doctorConfig(func(c *config.Settings) {
-				c.Vault.Enabled, c.Sandbox.CredentialsDir = true, "/home/you/.fridolin-secrets"
+				c.Vault.Enabled, c.Sandbox.CredentialsDir = true, "/home/you/.app-secrets"
 			}), nil)
 			env.Now = func() time.Time { return now }
 			got := result(t, RunDoctor(context.Background(), env, DoctorRegistry), "vault-secret-folders")

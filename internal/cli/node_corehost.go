@@ -22,18 +22,20 @@ const nodeCoreHostUsage = `fridolin node core-host — this machine as a core ho
 
 Usage:
   fridolin node core-host show       whether core-host is on, this machine's device id,
-                                     key and fingerprint, and the targets it trusts
-  fridolin node core-host on         offer core-host to the core: a machine the core
-                                     may move to, which then holds every host secret
-  fridolin node core-host off        stop offering it
+                                     key and fingerprint, and the targets it pins
+  fridolin node core-host off        never let the core move to this machine
+  fridolin node core-host on         let it again (the default)
   fridolin node core-host trust ID --key KEY [--name NAME]
-                                     send host secrets to node ID: pin its device key,
-                                     as fridolin node core-host show prints it there
-  fridolin node core-host untrust ID stop sending host secrets to node ID
+                                     pin node ID's device key, as fridolin node
+                                     core-host show prints it there (optional)
+  fridolin node core-host untrust ID remove that pin
 
-The settings live in core-host.json in the state dir, which only this
-machine writes. Every change waits for the owner's approval on the core
-(!approve in WhatsApp, or fridolin nodes approve ID --commands) before it counts.
+Every node is a core host unless core-host is off there: the owner's vote
+on the first !movecore to it, in WhatsApp, is what lets it hold the secrets,
+and a source then sends them to the device key the core approved at its
+join. A pin is only needed to move without the core's word (a pinned key
+wins over the one the core names). The settings live in core-host.json in
+the state dir, which only this machine writes.
 `
 
 // nodeCoreHost runs `fridolin node core-host`.
@@ -114,9 +116,9 @@ func nodeCoreHost(pos []string, o coreHostFlags, dir string, pkg appPackage, std
 	}
 	switch {
 	case !ch.Enabled:
-		fmt.Fprintln(stdout, "core-host is off on this machine: it offers the core neither core.check nor host secrets.")
+		fmt.Fprintln(stdout, "core-host is off on this machine: the core cannot move here, and it neither reports for a move nor takes or sends host secrets. The agent tells the core within a minute.")
 	default:
-		fmt.Fprintf(stdout, "core-host is on (settings %s). The agent tells the core within a minute; the change counts once the owner approves it there: !approve %s, or fridolin nodes approve %s --commands.\n", ch.Hash()[:12], id, id)
+		fmt.Fprintf(stdout, "core-host is on (%s): the core may move here once the owner votes for it (!movecore %s in WhatsApp). The agent tells the core within a minute.\n", id, cfg.Name)
 	}
 	return 0
 }
@@ -125,15 +127,15 @@ func nodeCoreHost(pos []string, o coreHostFlags, dir string, pkg appPackage, std
 // key: what a source machine pins with trust.
 func writeCoreHostShow(w io.Writer, name string, key ed25519.PrivateKey, ch nodeagent.CoreHostConfig) {
 	pub := key.Public().(ed25519.PublicKey)
-	state := "off (fridolin node core-host on offers it)"
+	state := "off (fridolin node core-host on turns it on again)"
 	if ch.Enabled {
 		state = "on"
 	}
 	fmt.Fprintf(w, "Node: %s (%s)\ncore-host: %s\nDevice key: %s\nFingerprint: %s\n", name, nodeagent.DeviceID(key), state, hex.EncodeToString(pub), nodeproto.Fingerprint(pub))
 	if len(ch.SendTo) == 0 {
-		fmt.Fprintln(w, "Trusts no target: it sends host secrets nowhere.")
+		fmt.Fprintln(w, "Pins no target: it sends host secrets to the device key the core names for a target the owner confirmed.")
 	} else {
-		fmt.Fprintln(w, "Sends host secrets only to:")
+		fmt.Fprintln(w, "Pinned targets (their pin wins over the key the core names):")
 		for _, p := range ch.SendTo {
 			k, _ := p.Key()
 			label := p.ID
@@ -147,5 +149,5 @@ func writeCoreHostShow(w io.Writer, name string, key ed25519.PrivateKey, ch node
 	if name != "" && !strings.ContainsAny(name, " \t'\"$`\\") {
 		nameFlag = " --name " + name
 	}
-	fmt.Fprintf(w, "\nTo let another core host send its secrets here, run there:\n  fridolin node core-host trust %s --key %s%s\n", nodeagent.DeviceID(key), hex.EncodeToString(pub), nameFlag)
+	fmt.Fprintf(w, "\nNo pin is needed. To pin this machine on another core host anyway, run there:\n  fridolin node core-host trust %s --key %s%s\n", nodeagent.DeviceID(key), hex.EncodeToString(pub), nameFlag)
 }

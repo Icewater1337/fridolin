@@ -334,3 +334,62 @@ func TestJoinedViaAndDeclaredAt(t *testing.T) {
 		}
 	}
 }
+
+// TestCoreHostConfirmation: core-host needs no approval, approving a
+// node's commands never confirms it as a core host, ConfirmCoreHost
+// does, revoking drops it, and a core-host approved before this counts
+// as confirmed (compat).
+func TestCoreHostConfirmation(t *testing.T) {
+	dir := t.TempDir()
+	r, err := OpenRegistry(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _, _ := r.NewJoinCode()
+	h := hello(t, code, nodeproto.Capabilities{Host: true, CoreHost: &nodeproto.CoreHostCap{Hash: strings.Repeat("a", 64)}})
+	if _, err := r.Hello(h, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.ConfirmCoreHost(h.DeviceID); !errors.Is(err, ErrNotApproved) {
+		t.Fatalf("confirming a pending device: %v", err)
+	}
+	n, err := r.ApproveDevice(h.DeviceID)
+	if err != nil || n.Effective().CoreHost == nil || n.CoreHostConfirmed() {
+		t.Fatalf("an approved device: core-host %+v, confirmed %v, %v", n.Effective().CoreHost, n.CoreHostConfirmed(), err)
+	}
+	if n, err = r.ApproveCommands(h.DeviceID); err != nil || n.Approved.CoreHost != nil || n.CoreHostConfirmed() || n.Commands() != nodeproto.CommandsApproved {
+		t.Fatalf("approving the commands: %+v %v", n, err)
+	}
+	if n, err = r.ConfirmCoreHost(h.DeviceID); err != nil || !n.CoreHostConfirmed() {
+		t.Fatalf("confirmed: %+v %v", n, err)
+	}
+	if n, err = r.Revoke(h.DeviceID); err != nil || n.CoreHostConfirmed() || n.CoreHostConfirmedAt != nil {
+		t.Fatalf("revoked: %+v %v", n, err)
+	}
+
+	// A registry from before: core-host in approved.
+	data, err := os.ReadFile(r.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f map[string]any
+	if err := json.Unmarshal(data, &f); err != nil {
+		t.Fatal(err)
+	}
+	old := f["nodes"].([]any)[0].(map[string]any)
+	old["device"] = nodeproto.DeviceApproved
+	old["commands_approved_at"] = "2026-10-20T10:00:00Z"
+	old["approved"] = map[string]any{"host": true, "core_host": map[string]any{"hash": strings.Repeat("a", 64)}}
+	data, _ = json.Marshal(f)
+	if err := os.WriteFile(dir+"/"+RegistryFile, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r2, err := OpenRegistry(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err = r2.Get(h.DeviceID)
+	if err != nil || !n.CoreHostConfirmed() || n.Approved.CoreHost != nil || !n.CoreHostConfirmedAt.Equal(time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)) {
+		t.Fatalf("a core-host approved before: %+v %v", n, err)
+	}
+}

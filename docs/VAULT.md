@@ -188,7 +188,7 @@ it, is never a secret folder: the vault refuses it, and doctor says so.
 - **what**: one version is a tar of every folder, streamed through both
   layers (nothing of it is written to disk on the way), named by its UTC
   time (`20261025T030000Z.tar`): a manifest saying which folder is which,
-  then each folder under its name (`.fridolin-secrets/`,
+  then each folder under its name (`.app-secrets/`,
   `.personal-calendar/`) with its files' bytes, modes and times. Symbolic
   links and special files are left out (the status counts them). The
   folders together may hold 10,000 files and 64 MB.

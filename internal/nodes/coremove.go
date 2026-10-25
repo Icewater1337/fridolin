@@ -281,6 +281,11 @@ type MoveOptions struct {
 	HandoffDeadline, ReadyWithin time.Duration
 	// Approval names the approval that let the move run.
 	Approval string
+	// ConfirmTarget confirms the target as a core host before the move
+	// (Registry.ConfirmCoreHost): set only for the owner's WhatsApp vote,
+	// so that a move to a machine that never held the secrets cannot run
+	// from the dashboard or its API alone.
+	ConfirmTarget bool
 }
 
 // movePath is the record of move id: one name in moves, never a path
@@ -416,9 +421,20 @@ func (s *Service) StartMove(ctx context.Context, src, dst string, o MoveOptions)
 		release()
 		return MoveRecord{Report: rep}, err
 	}
+	if rep.Secrets.NeedsConfirm && !o.ConfirmTarget {
+		rep.Blocking = append(rep.Blocking, unconfirmedProblem(rep.Target.Name))
+	}
 	if len(rep.Blocking) > 0 {
 		release()
 		return MoveRecord{Report: rep}, fmt.Errorf("%w: %s", ErrMoveBlocked, rep.Blocking[0])
+	}
+	if rep.Secrets.NeedsConfirm {
+		if _, err := s.reg.ConfirmCoreHost(dst); err != nil {
+			release()
+			return MoveRecord{Report: rep}, err
+		}
+		s.logf("nodes: the owner confirmed %s (%s) as a core host", rep.Target.Name, dst)
+		rep.Secrets.Confirmed, rep.Secrets.NeedsConfirm = true, false
 	}
 	now := time.Now().UTC()
 	r := &MoveRecord{ID: newMoveID(), Source: src, Target: dst, SourceName: rep.Source.Name, TargetName: rep.Target.Name,

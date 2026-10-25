@@ -185,7 +185,16 @@ func writeMoveReport(w io.Writer, r nodes.MoveReport) {
 		}
 		return strings.Join(s, ", ")
 	}
-	fmt.Fprintf(w, "Host secrets: the target lacks %s; %s pins its key: %v\n", list(r.Secrets.Target.Missing), r.Source.Name, r.Secrets.Pinned)
+	trust := "the owner confirmed it as a core host"
+	switch {
+	case r.Secrets.Pinned:
+		trust = r.Source.Name + " pins its key"
+	case r.Secrets.NeedsConfirm:
+		trust = "it never held the core: only the owner's !movecore vote in WhatsApp lets it hold the secrets, not this command"
+	case !r.Secrets.Confirmed:
+		trust = "not confirmed"
+	}
+	fmt.Fprintf(w, "Host secrets: the target lacks %s; %s\n", list(r.Secrets.Target.Missing), trust)
 	if r.SecretFilesDir != "" {
 		fmt.Fprintf(w, "Secret files (%s): %s\n", r.SecretFilesDir, list(r.SecretFiles))
 	}
