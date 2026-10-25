@@ -203,27 +203,6 @@ func TestCoreSecretsTransfer(t *testing.T) {
 	}
 }
 
-// waitSentAll waits for a message to jid that holds every one of subs,
-// and returns it.
-func (h *harness) waitSentAll(jid string, subs ...string) string {
-	h.t.Helper()
-	var got string
-	h.WaitFor("a message to "+jid+" with "+strings.Join(subs, " and "), func() bool {
-		for _, m := range h.SentTo(jid) {
-			ok := true
-			for _, s := range subs {
-				ok = ok && strings.Contains(m, s)
-			}
-			if ok {
-				got = m
-				return true
-			}
-		}
-		return false
-	})
-	return got
-}
-
 // coreHostApproved reports whether node id may serve core-host now: an
 // approved device that offers it.
 func (h *harness) coreHostApproved(id string) bool {
