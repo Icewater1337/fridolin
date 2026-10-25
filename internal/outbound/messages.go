@@ -157,12 +157,6 @@ func PlaudGivenUpAlert(name, brain, why string) string {
 	return fmt.Sprintf("⚠️ Plaud: the recording “%s” was not handed to brain %s: %s. It is still in Plaud, and the dashboard lists it (Integrations → Plaud).", name, brain, why)
 }
 
-// PlaudVoiceQuestion puts a question the owner asked by voice (the Plaud
-// Sync app's voice mode) into the chat its answer goes to.
-func PlaudVoiceQuestion(question string) string {
-	return "🎙️ " + question
-}
-
 // CalendarGrantBrokenAlert tells the owner that the Google Calendar of the
 // brain named name stopped working: revoked says Google refused its
 // sign-in, else the sign-in needs a new consent. No ids: the owner finds

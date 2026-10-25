@@ -9,13 +9,14 @@ package plaud
 // public key of the phone's keystore, one for key agreement only. The
 // bridge hands the question to plaud.voice_brain, in that brain's private
 // chat, where the answer goes as usual unless plaud.voice_quiet. The
+// question itself never goes to the chat: the brain files it with its
+// notes (voicePrompt). The
 // answer is encrypted to the phone's key (sealVoiceReply) and waits here,
 // in memory, until the phone fetches it with a JWT naming the question
 // (aud fridolin:voice-reply). The site, which runs module code, carries
 // only ciphertext: nobody without the phone's keystore reads the answer.
 
 import (
-	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdh"
@@ -32,8 +33,6 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
-
-	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 )
 
 const (
@@ -67,7 +66,8 @@ const (
 // [SPOKEN] block when the full answer is longer (spokenAnswer).
 const voicePrompt = `[Voice question from the owner's phone (Plaud Sync voice mode). Your answer is read aloud there.
 Answer for the ear: one to three short spoken sentences, the most important point first. No lists, tables, links, code, markdown or emoji. Write numbers, dates and times the way they are said ("half past nine on Tuesday", not "09:30, Tue"). Answer in the language of the question.
-If the answer needs more detail than that, put the spoken sentences in a block of their own, [SPOKEN]like this[/SPOKEN], then write the details as usual after it, and say in the spoken part that the details are in WhatsApp. Only the block is read aloud; the details go to this chat.]`
+If the answer needs more detail than that, put the spoken sentences in a block of their own, [SPOKEN]like this[/SPOKEN], then write the details as usual after it, and say in the spoken part that the details are in WhatsApp. Only the block is read aloud; the details go to this chat.
+The question is not shown in this chat. Keep it with your notes, as a voice question with today's date, the way skills/plaud.md files recordings (without that skill, wherever your notes go), and do not mention that in your answer.]`
 
 // maxSpokenWords caps what the phone reads of an answer that came back
 // long anyway: it is cut at the last sentence that fits.
@@ -297,14 +297,6 @@ func (p *Manager) takeVoice(assertion string, body []byte, now time.Time) (map[s
 		return nil, err
 	}
 	quiet := cfg.Plaud.VoiceQuiet
-	if !quiet {
-		// So that the answer in the chat says what it answers.
-		ctx, cancel := context.WithTimeout(p.lifetime(), 10*time.Second)
-		if err := p.notify(ctx, jid, outboundmsg.PlaudVoiceQuestion(question)); err != nil {
-			log.Printf("plaud: could not send the voice question to the chat: %v", err)
-		}
-		cancel()
-	}
 	rid := c.Rid
 	answer := func(text string) string {
 		spoken, chat := spokenAnswer(text)

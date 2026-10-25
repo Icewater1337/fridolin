@@ -59,7 +59,6 @@ func catalogue() []struct{ name, text string } {
 		{"plaudExpiredAlert", outboundmsg.PlaudExpiredAlert},
 		{"calendarGrantBrokenAlert(revoked)", outboundmsg.CalendarGrantBrokenAlert("Family", true)},
 		{"calendarGrantBrokenAlert(reconsent)", outboundmsg.CalendarGrantBrokenAlert("Family", false)},
-		{"plaudVoiceQuestion", outboundmsg.PlaudVoiceQuestion("Was steht morgen an?")},
 		{"fleetGroupNotice", outboundmsg.FleetGroupNotice},
 		{"fleetReply(false)", outboundmsg.FleetReply(false, nil, fleetNow)},
 		{"fleetReply(true, none)", outboundmsg.FleetReply(true, nil, fleetNow)},
