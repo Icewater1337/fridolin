@@ -426,6 +426,56 @@ func TestNodeBootChecks(t *testing.T) {
 	}
 }
 
+// TestNodeChecksInABox: a node in a box has no host Tailscale, service or
+// systemd unit, and a dial from its container misses the tailnet device
+// its agent reaches the core with, so doctor --node goes by the agent's
+// own word on its connection there instead of failing those checks.
+func TestNodeChecksInABox(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := nodeagent.NewKey(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := nodeagent.SaveConfig(dir, nodeagent.Config{Core: "fridolin-core.example.ts.net:8766", Name: "box", Capabilities: nodeproto.Capabilities{Host: true},
+		Box: &nodeagent.BoxConfig{Hostname: "fridolin-box-box", Fride: nodeagent.BoxFride}}); err != nil {
+		t.Fatal(err)
+	}
+	noService := func() (string, error) { return "", errors.New("exit status 1") }
+	now := time.Now()
+	run := func(at time.Time) (rep app.DoctorReport, ids, failed []string) {
+		t.Helper()
+		env := linuxNodeEnv(doctorEnvFor("", nil), "", "no")
+		env.LookPath = func(string) (string, error) { return "", errors.New("not found") }
+		env.Now = func() time.Time { return at }
+		rep = app.RunDoctor(context.Background(), env, nodeChecks(dir, nodeService{status: noService}))
+		for _, c := range rep.Checks {
+			ids = append(ids, c.ID)
+			if c.Status == app.DoctorFail {
+				failed = append(failed, c.ID)
+			}
+		}
+		return rep, ids, failed
+	}
+	rep, ids, failed := run(now)
+	if want := []string{"node-joined", "node-key", "node-box-core", "node-core-leftovers"}; !slices.Equal(ids, want) {
+		t.Errorf("checks in a box: %q, want %q", ids, want)
+	}
+	if rep.OK || !slices.Equal(failed, []string{"node-box-core"}) {
+		t.Errorf("never connected: %q", failed)
+	}
+	status := fmt.Sprintf(`{"connected":true,"version":"v1","at":%q}`, now.UTC().Format(time.RFC3339Nano))
+	if err := os.WriteFile(filepath.Join(dir, nodeagent.BoxStatusFile), []byte(status), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if rep, _, _ := run(now.Add(time.Second)); !rep.OK {
+		t.Errorf("connected: %+v", rep)
+	}
+	rep, _, failed = run(now.Add(5 * time.Minute))
+	var out bytes.Buffer
+	if code := writeMachineReport(&out, rep, dir, false); code != 1 || !slices.Equal(failed, []string{"node-box-core"}) || !strings.Contains(out.String(), "Next: on the host, in the box's folder: docker compose logs node") {
+		t.Errorf("stale status: %q %d %s", failed, code, out.String())
+	}
+}
+
 func TestCoreMachineChecks(t *testing.T) {
 	d, _ := hostFixture(t, mapSecrets{hostsecrets.AgeIdentityPQ: "a", hostsecrets.ExportKey: "k", hostsecrets.B2VaultKeyID: "b", hostsecrets.B2VaultKey: "c"})
 	docker := map[string]string{"info": "29.0.0"}

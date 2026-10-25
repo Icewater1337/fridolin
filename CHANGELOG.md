@@ -1130,6 +1130,15 @@ for compatibility.
 
 ### Fixed
 
+- **`fridolin doctor --node` in a box no longer fails what a box does
+  not have.** Inside a box's `node` container it reported the host's
+  Tailscale missing, the core's port unreachable (a dial from the
+  container misses the box's own tailnet device) and no node service or
+  systemd unit, while the box was connected. With `box` in node.json it
+  now leaves those out and checks `node-box-core` instead: that the
+  agent was connected to the core within the last 90 seconds, as
+  `fridolin node health` does. `setup-machine --node` checks the same.
+
 - **FrIDE work no longer sticks on a node whose FrIDE has no Claude
   login.** When FrIDE fails a thread with "Not logged in", the node says
   so in what it offers (`fride (Claude not logged in)`, and `fridolin

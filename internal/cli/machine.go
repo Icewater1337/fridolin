@@ -44,8 +44,16 @@ type nodeService struct {
 	pkg      appPackage
 }
 
+// boxHealthMaxAge is how old a box agent's last word may be for it to
+// count as connected (fridolin node health, the box's healthcheck).
+const boxHealthMaxAge = 90 * time.Second
+
 // nodeChecks are the checks of a node machine: Tailscale, node.json, the
-// device key, the core's node port, the service.
+// device key, the core's node port, the service. A node in a box has no
+// Tailscale, service or systemd unit of its own (docker compose runs it),
+// and reaches the core over a tailnet device inside its agent, which a
+// dial from here does not use: there the agent's own word on its
+// connection stands in for the port and the service.
 func nodeChecks(dir string, svc nodeService) []app.DoctorCheck {
 	var cfg *nodeagent.Config
 	loaded := func() (*nodeagent.Config, error) {
@@ -60,8 +68,16 @@ func nodeChecks(dir string, svc nodeService) []app.DoctorCheck {
 		return cfg, nil
 	}
 	notJoined := app.DoctorResult{Status: app.DoctorWarn, Detail: "not checked: this machine has not joined a core", Fix: "join first (the node-joined line)"}
+	inBox := func(*app.DoctorEnv) bool {
+		c, err := loaded()
+		return err == nil && c.Box != nil
+	}
+	native := func(env *app.DoctorEnv) bool { return !inBox(env) }
+	nativeLinux := func(env *app.DoctorEnv) bool { return onLinux(env) && !inBox(env) }
+	tailscale := app.TailscaleCheck(true)
+	tailscale.Applies = native
 	return []app.DoctorCheck{
-		app.TailscaleCheck(true),
+		tailscale,
 		{ID: "node-joined", Title: "joined a core (node.json)", Required: true, Run: func(context.Context, *app.DoctorEnv) app.DoctorResult {
 			c, err := loaded()
 			if err != nil {
@@ -85,7 +101,7 @@ func nodeChecks(dir string, svc nodeService) []app.DoctorCheck {
 			}
 			return app.DoctorResult{Status: app.DoctorOK, Detail: "device " + nodeagent.DeviceID(key)}
 		}},
-		{ID: "node-core", Title: "core's node port reachable", Required: true, Run: func(ctx context.Context, env *app.DoctorEnv) app.DoctorResult {
+		{ID: "node-core", Title: "core's node port reachable", Required: true, Applies: native, Run: func(ctx context.Context, env *app.DoctorEnv) app.DoctorResult {
 			c, err := loaded()
 			if err != nil {
 				return notJoined
@@ -97,7 +113,19 @@ func nodeChecks(dir string, svc nodeService) []app.DoctorCheck {
 			}
 			return app.DoctorResult{Status: app.DoctorOK, Detail: addr + " answers"}
 		}},
-		{ID: "node-service", Title: "node service", Required: true, Run: func(context.Context, *app.DoctorEnv) app.DoctorResult {
+		{ID: "node-box-core", Title: "connected to the core (the box's tailnet device)", Required: true, Applies: inBox, Run: func(_ context.Context, env *app.DoctorEnv) app.DoctorResult {
+			c, _ := loaded()
+			now := time.Now()
+			if env.Now != nil {
+				now = env.Now()
+			}
+			if err := nodeagent.BoxHealthy(dir, boxHealthMaxAge, now); err != nil {
+				return app.DoctorResult{Status: app.DoctorFail, Detail: fmt.Sprintf("%s: %v", c.Core, err),
+					Fix: "on the host, in the box's folder: docker compose logs node; a tailnet policy that restricts devices must let " + c.Box.Hostname + " reach fridolin-core on port 8766"}
+			}
+			return app.DoctorResult{Status: app.DoctorOK, Detail: c.Core + " as " + c.Box.Hostname}
+		}},
+		{ID: "node-service", Title: "node service", Required: true, Applies: native, Run: func(context.Context, *app.DoctorEnv) app.DoctorResult {
 			if _, err := loaded(); err != nil {
 				return notJoined
 			}
@@ -124,7 +152,7 @@ func nodeChecks(dir string, svc nodeService) []app.DoctorCheck {
 			}
 			return app.DoctorResult{Status: app.DoctorOK, Detail: st}
 		}},
-		{ID: "node-boot", Title: "node service starts at boot (systemd)", Required: true, Applies: onLinux, Run: func(_ context.Context, env *app.DoctorEnv) app.DoctorResult {
+		{ID: "node-boot", Title: "node service starts at boot (systemd)", Required: true, Applies: nativeLinux, Run: func(_ context.Context, env *app.DoctorEnv) app.DoctorResult {
 			if _, err := loaded(); err != nil {
 				return notJoined
 			}
@@ -141,7 +169,7 @@ func nodeChecks(dir string, svc nodeService) []app.DoctorCheck {
 			}
 			return app.DoctorResult{Status: app.DoctorFail, Detail: "not enabled: the node stays off after a reboot", Fix: "systemctl --user enable " + nodeagent.ServiceName}
 		}},
-		{ID: "node-linger", Title: "systemd keeps your services without a login (linger)", Applies: onLinux, Run: func(ctx context.Context, env *app.DoctorEnv) app.DoctorResult {
+		{ID: "node-linger", Title: "systemd keeps your services without a login (linger)", Applies: nativeLinux, Run: func(ctx context.Context, env *app.DoctorEnv) app.DoctorResult {
 			user := env.Getenv("USER")
 			if user == "" {
 				return app.DoctorResult{Status: app.DoctorWarn, Detail: "cannot tell: USER is not set", Fix: "loginctl show-user $USER -p Linger"}
