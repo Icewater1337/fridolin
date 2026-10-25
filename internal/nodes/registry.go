@@ -48,6 +48,13 @@ type Node struct {
 	Declared nodeproto.Capabilities `json:"declared"`
 	Approved nodeproto.Capabilities `json:"approved"`
 	JoinedAt time.Time              `json:"joined_at"`
+	// JoinedVia is where its join code came from: JoinedFromChat (the
+	// owner's !join), JoinedFromDashboard (the Nodes page or `fridolin
+	// nodes join-code`), or "" for a code from neither, or from before
+	// the bridge kept it. The owner's alert says it, and flags "".
+	JoinedVia string `json:"joined_via,omitempty"`
+	// DeclaredAt is when what it offers last changed.
+	DeclaredAt *time.Time `json:"declared_at,omitempty"`
 	// DeviceApprovedAt and CommandsApprovedAt are when the stages were
 	// approved; RevokedAt when it was revoked.
 	DeviceApprovedAt   *time.Time `json:"device_approved_at,omitempty"`
@@ -102,7 +109,15 @@ type joinCode struct {
 	// Hash is the SHA-256 of the code, hex: the file never holds a code.
 	Hash      string    `json:"hash"`
 	ExpiresAt time.Time `json:"expires_at"`
+	// Origin is who asked for it (Node.JoinedVia).
+	Origin string `json:"origin,omitempty"`
 }
+
+// Where a join code came from (Node.JoinedVia).
+const (
+	JoinedFromChat      = "chat"
+	JoinedFromDashboard = "dashboard"
+)
 
 type registryFile struct {
 	Version   int        `json:"version"`
@@ -300,8 +315,16 @@ func hashCode(code string) string {
 }
 
 // NewJoinCode makes a single-use join code, valid for JoinCodeTTL, and
-// keeps only its hash.
+// keeps only its hash. Nobody in particular asked for it: a node that
+// joins with it is unexpected (NewJoinCodeFrom).
 func (r *Registry) NewJoinCode() (code string, expires time.Time, err error) {
+	return r.NewJoinCodeFrom("")
+}
+
+// NewJoinCodeFrom is NewJoinCode for a code origin asked for
+// (JoinedFromChat, JoinedFromDashboard): the node that joins with it
+// keeps it as JoinedVia.
+func (r *Registry) NewJoinCodeFrom(origin string) (code string, expires time.Time, err error) {
 	raw := make([]byte, 15)
 	if _, err := rand.Read(raw); err != nil {
 		return "", time.Time{}, err
@@ -310,7 +333,7 @@ func (r *Registry) NewJoinCode() (code string, expires time.Time, err error) {
 	expires = r.now().Add(JoinCodeTTL).UTC().Truncate(time.Second)
 	err = r.update(func(f *registryFile) error {
 		f.pruneCodes(r.now())
-		f.JoinCodes = append(f.JoinCodes, joinCode{Hash: hashCode(code), ExpiresAt: expires})
+		f.JoinCodes = append(f.JoinCodes, joinCode{Hash: hashCode(code), ExpiresAt: expires, Origin: origin})
 		return nil
 	})
 	return code, expires, err
@@ -345,8 +368,9 @@ func (r *Registry) hello(h nodeproto.Hello, address string) (out *Node, joined b
 			if i < 0 {
 				return ErrBadJoinCode
 			}
+			origin := f.JoinCodes[i].Origin
 			f.JoinCodes = slices.Delete(f.JoinCodes, i, i+1)
-			n = &Node{ID: h.DeviceID, PublicKey: h.PublicKey, Device: nodeproto.DevicePending, JoinedAt: now, Tags: osTags(h.OS)}
+			n = &Node{ID: h.DeviceID, PublicKey: h.PublicKey, Device: nodeproto.DevicePending, JoinedAt: now, JoinedVia: origin, Tags: osTags(h.OS)}
 			f.Nodes = append(f.Nodes, n)
 			joined = true
 		}
@@ -357,7 +381,7 @@ func (r *Registry) hello(h nodeproto.Hello, address string) (out *Node, joined b
 			return fmt.Errorf("%w: another key for node %s", ErrInvalidInput, n.ID)
 		}
 		n.Name, n.OS, n.Arch, n.Version = h.Name, h.OS, h.Arch, h.Version
-		n.Declared = h.Capabilities
+		n.declare(h.Capabilities, now)
 		n.LastSeen, n.Address = &now, address
 		out = clone(n)
 		return nil
@@ -372,9 +396,19 @@ func (r *Registry) Declare(id string, caps nodeproto.Capabilities) (*Node, error
 		if n.Device == nodeproto.DeviceRevoked {
 			return ErrRevoked
 		}
-		n.Declared = caps
+		n.declare(caps, r.now().UTC().Truncate(time.Second))
 		return nil
 	})
+}
+
+// declare records caps as what n offers, and when that changed.
+func (n *Node) declare(caps nodeproto.Capabilities, now time.Time) {
+	before, _ := json.Marshal(n.Declared)
+	after, _ := json.Marshal(caps)
+	if n.DeclaredAt == nil || string(before) != string(after) {
+		n.DeclaredAt = &now
+	}
+	n.Declared = caps
 }
 
 // SeenWriteEvery is how often Seen writes a connected node's last_seen

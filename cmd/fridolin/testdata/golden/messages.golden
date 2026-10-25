@@ -28,7 +28,8 @@ helpReply("")
 	• `!lockdown` — owner only: pause all work but reading until `!unlock`
 	• `!join` — owner only, direct chat: a join code for a new node
 	• `!dashboard` — owner only, direct chat: a sign-in link for the dashboard
-	• `!approve <id>`, `!revoke <id>` — owner only, direct chat: let a node in, or shut it out
+	• `!approve`, `!deny` — owner only, direct chat: approve, or turn down, what waits for you (a poll asks which when several wait)
+	• `!revoke <ref>` — owner only, direct chat: shut a node out
 helpReply("@claude")
 	🤖 *Fridolin*
 
@@ -43,7 +44,8 @@ helpReply("@claude")
 	• `!lockdown` — owner only: pause all work but reading until `!unlock`
 	• `!join` — owner only, direct chat: a join code for a new node
 	• `!dashboard` — owner only, direct chat: a sign-in link for the dashboard
-	• `!approve <id>`, `!revoke <id>` — owner only, direct chat: let a node in, or shut it out
+	• `!approve`, `!deny` — owner only, direct chat: approve, or turn down, what waits for you (a poll asks which when several wait)
+	• `!revoke <ref>` — owner only, direct chat: shut a node out
 
 	In this group, start your message with `@claude` or reply to one of mine to address me, commands included.
 queuedNotice(2)
@@ -110,35 +112,39 @@ fleetReply(true, nodes)
 	🖥️ *Fleet* — 7 nodes, 4 online
 
 	• *laptop* (Windows) — online
-	  may run: exec (hostname, whoami), fs (1 root), host
-	  id 8233270f8a24 · gpu, windows
-	• *mini* (macOS) — last seen 3h ago · offers more than approved: `!approve 4f1e2d3c4b5a`
-	  may run: host
-	  id 4f1e2d3c4b5a · macos
-	• *pi* (Linux) — last seen 1m ago · waiting for approval: `!approve 0a1b2c3d4e5f`
-	  id 0a1b2c3d4e5f
+	  can: run these programs there when asked: hostname, whoami; report its system details (OS, disk, memory)
+	  _ref 8233270f8a24 · gpu, windows_
+	• *mini* (macOS) — last seen 3h ago
+	  ⏳ asks to do more than you approved — reply !approve
+	  can: report its system details (OS, disk, memory)
+	  _ref 4f1e2d3c4b5a · macos_
+	• *pi* (Linux) — last seen 1m ago
+	  ⏳ wants to join — reply !approve
+	  _ref 0a1b2c3d4e5f_
 	• *pc* (Windows) — online
-	  may run: fride, host
+	  can: report its system details (OS, disk, memory); run FrIDE coding tasks on this machine — that means it can run any command there
 	  ⚠️ fride: FrIDE's agents can run anything on it
-	  id 9d8c7b6a5f4e
-	• *studio* (macOS) — online · asks for fride (its agents could run anything there): `!approve 5e6f7a8b9c0d`
-	  may run: host
-	  id 5e6f7a8b9c0d
-	• *old* (Linux) — never seen · revoked
-	  id ffeeddccbbaa
-	• *icebase* (Linux) — online · asks for core-host (it would hold every host secret): `!approve 3c1e5a7b9d0f`
-	  may run: host, notify
-	  id 3c1e5a7b9d0f
+	  _ref 9d8c7b6a5f4e_
+	• *studio* (macOS) — online
+	  ⏳ asks to let FrIDE's agents run anything on it (fride) — reply !approve
+	  can: report its system details (OS, disk, memory)
+	  _ref 5e6f7a8b9c0d_
+	• *old* (Linux) — never seen · shut out
+	  _ref ffeeddccbbaa_
+	• *icebase* (Linux) — online
+	  ⏳ asks to hold all of Fridolin's secrets (core-host) — reply !approve
+	  can: report its system details (OS, disk, memory); show notifications on its screen
+	  _ref 3c1e5a7b9d0f_
 nodesOffNotice
 	🖥️ Nodes are off. Turn on nodes.enabled in the config and restart the bridge to connect other machines (docs/NODES.md).
 ownerCommandGroupNotice
-	🔒 !join, !dashboard, !approve, !revoke and !movecore answer only in the owner's direct chat.
+	🔒 !join, !dashboard, !approve, !deny, !revoke and !movecore answer only in the owner's direct chat.
 ownerCommandOwnerOnly
-	🔒 Only the owner can ask for join codes and sign-in links, approve and revoke nodes, or move the core.
+	🔒 Only the owner can ask for join codes and sign-in links, approve and turn things down, or move the core.
 ownerCommandRateLimited
 	⏳ !join answered 5 times in the last hour, the most allowed. Try again later, or use the dashboard.
 nodeCommandUsage
-	🖥️ Send `!approve <id>` or `!revoke <id>` with a node's id; `!fleet` lists them.
+	🔐 Send !approve or !deny alone: I ask which one when several things wait. `!revoke <ref>` shuts out a node `!fleet` lists.
 joinCodeReply
 	🔑 Join code for a new node, single-use, valid 10 minutes:
 
@@ -152,7 +158,7 @@ joinCodeReply
 	*Windows (PowerShell):*
 	```& "$env:ProgramFiles\fridolin\fridolin.exe" node join fj-abcdefghijklmnopqrstuvwx --core fridolin-core.example.ts.net:8766```
 
-	Core: fridolin-core.example.ts.net:8766. Add `--root PATH:rw` to share a folder, `--no-exec` to allow no commands (docs/NODES.md). Once it connects I'll tell you here, and `!approve <id>` lets it in.
+	Core: fridolin-core.example.ts.net:8766. Add `--root PATH:rw` to share a folder, `--no-exec` to allow no commands (docs/NODES.md). Once it connects I'll tell you here, and !approve lets it in.
 joinCodeReply(box)
 	🔑 Join code for a new node, single-use, valid 10 minutes:
 
@@ -176,7 +182,7 @@ joinCodeReply(box)
 	*Windows (PowerShell):*
 	```& "$env:ProgramFiles\fridolin\fridolin.exe" node join fj-abcdefghijklmnopqrstuvwx --core fridolin-core.example.ts.net:8766```
 
-	Core: fridolin-core.example.ts.net:8766. Add `--root PATH:rw` to share a folder, `--no-exec` to allow no commands (docs/NODES.md). Once it connects I'll tell you here, and `!approve <id>` lets it in.
+	Core: fridolin-core.example.ts.net:8766. Add `--root PATH:rw` to share a folder, `--no-exec` to allow no commands (docs/NODES.md). Once it connects I'll tell you here, and !approve lets it in.
 dashboardOffNotice
 	🔗 The dashboard is turned off (dashboard.disabled or http_enabled), so there is nothing to sign in to.
 dashboardLinkReply(tailnet)
@@ -197,25 +203,6 @@ dashboardLinkReply(local)
 	The core is not on the tailnet, so it works only on the core machine.
 
 	It signs that browser in for 30 days; send `!dashboard` again for another link. Do not forward it.
-nodeJoinedAlert
-	🖥️ *laptop* (Windows) wants to join as a node — approve it on the Nodes page or reply `!approve 8233270f8a24`. Not yours? `!revoke 8233270f8a24` shuts it out.
-nodeCoreHostAlert
-	🔐 *icebase* (8233270f8a24) offers core-host.
-
-	core-host lets fridolin move the core to this machine. The machine then holds every host secret: the B2 keys, the age identity and export key (all exports and the WhatsApp session), the Claude token. Approve only a machine you trust as much as the one that runs the core now.
-
-	Device key: `a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90`
-
-	You did not just run `fridolin node core-host` there? Do not approve; `!revoke 8233270f8a24` shuts it out. Otherwise `!approve 8233270f8a24`.
-nodeCoreHostAlert(changed)
-	🔐 *mac-mini* (7216c2648b04) changed its core-host settings, which wait for your approval again.
-
-	core-host lets fridolin move the core to this machine. The machine then holds every host secret: the B2 keys, the age identity and export key (all exports and the WhatsApp session), the Claude token. Approve only a machine you trust as much as the one that runs the core now.
-
-	Device key: `a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90`
-	Sends secrets only to: icebase (8233270f8a24)
-
-	You did not just run `fridolin node core-host` there? Do not approve; `!revoke 7216c2648b04` shuts it out. Otherwise `!approve 7216c2648b04`.
 coreMoveEnded(done)
 	🚚 Running on *icebase* now (move m-20261024-1403-7f2a): the core runs on icebase (version v1.9.0, WhatsApp connected, lease held).
 
@@ -251,7 +238,7 @@ coreMoveTargets
 	• *icebase* — ready: `!movecore icebase`
 	• *laptop* — not now: laptop runs version v1.8.0 and the core v1.9.0: update it first (fridolin nodes update 8233270f8a24)
 	• *pi* — offline
-	• *nas* — asks to be a core host and waits for you: `!approve 4f1e2d3c4b5a`
+	• *nas* — asks to hold all of Fridolin's secrets (core-host) — reply !approve
 coreMoveTargets(none)
 	🚚 The core runs on *mac-mini*.
 
@@ -274,14 +261,14 @@ coreMoveReport
 	*Good to know:*
 	• icebase runs FrIDE: once the secrets are there, any FrIDE task can read them
 
-	Vote in the poll below within 30 minutes; no vote is a no. `!movecore mac-mini` moves it back later.
+	Was this you? Vote in the poll below, or reply !approve — or !deny if not. No vote within 30 minutes is a no. `!movecore mac-mini` moves it back later.
 coreMoveReport(plain)
 	🚚 *Move the core from icebase to mac-mini?*
 
 	*mac-mini* is a node on macOS arm64, id 7216c2648b04, device key `a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90`.
 	Offline: about 2 to 4 minutes. Messages you send meanwhile wait and are answered from mac-mini. If mac-mini does not come up, icebase starts again by itself.
 
-	Vote in the poll below within 30 minutes; no vote is a no. `!movecore icebase` moves it back later.
+	Was this you? Vote in the poll below, or reply !approve — or !deny if not. No vote within 30 minutes is a no. `!movecore icebase` moves it back later.
 coreMoveReport(blocked)
 	🚫 The core cannot move from *mac-mini* to *icebase* now:
 
@@ -305,7 +292,7 @@ coreMoveCancelled(expired)
 coreMoveStopping
 	⏸️ icebase is ready. Stopping the core on *mac-mini* now. Expect about 2 to 4 minutes offline; messages you send meanwhile wait and are answered from *icebase*.
 coreSecretsQuestion
-	🔐 Keep the host secrets on mac-mini? It no longer runs the core. Keeping them makes the next move faster; forgetting removes what moves brought it: the host secrets, the secret files and the core's data dir with the WhatsApp session, never what it held before. No vote within 24 hours forgets them.
+	🔐 Keep the host secrets on mac-mini? It no longer runs the core. Keeping them makes the next move faster; forgetting removes what moves brought it: the host secrets, the secret files and the core's data dir with the WhatsApp session, never what it held before. No vote within 24 hours forgets them. Or reply !approve to keep them, !deny to forget them.
 coreSecretsKeep
 	🔐 Keep them on mac-mini
 coreSecretsForget
@@ -344,15 +331,115 @@ nodeRevokedCoreSecretsNote(none)
 nodeRevokedCoreSecretsNote(failed)
 	🔐 It is a core host and could not forget what moves brought it first (it is offline). If it held host secrets, rotate them: docs/CORE.md, "A core host that is gone".
 nodeCoreHostApprovedNote
-	🔐 That includes core-host. core-host lets fridolin move the core to this machine. The machine then holds every host secret: the B2 keys, the age identity and export key (all exports and the WhatsApp session), the Claude token. Approve only a machine you trust as much as the one that runs the core now. `!revoke <id>` takes it back.
+	🔐 That includes core-host. Approving core-host lets the core move to this machine. It then holds all of Fridolin's secrets: the WhatsApp session, the keys that open every backup and export, and the Claude token. Approve it only for a machine you trust as much as the one the core runs on now.
 nodeApprovedReply
-	✅ *laptop* (8233270f8a24) is approved: it may serve fs (1 root, 1 writable), host, notify. `!fleet` lists it; `!revoke 8233270f8a24` shuts it out again.
+	✅ *laptop* is approved. It can now:
+	• read and change the files in /home/you/Shared
+	• report its system details (OS, disk, memory)
+	• show notifications on its screen
+
+	`!fleet` lists it. To shut it out again: `!revoke 8233270f8a24`.
+approvalAlert(node)
+	🔐 *laptop* (Windows) wants to join as a node.
+
+	• When: Tue 20 Oct 11:57 (3 minutes ago)
+	• From: laptop (you@example.com) on your tailnet, 100.64.0.7
+	• Started: with a join code you asked for with !join
+
+	If you approve, it can:
+	• report its system details (OS, disk, memory)
+	• run FrIDE coding tasks on this machine — that means it can run any command there
+
+	Was this you? Reply !approve — or !deny if not.
+
+	_ref 8233270f8a24_
+approvalAlert(core-host, unexpected)
+	🔐 *icebase* (Linux) asks to hold all of Fridolin's secrets (core-host).
+
+	• When: Mon 19 Oct 10:00 (26 hours ago)
+	• From: your local network, 192.168.1.20
+	• Device key: `a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90`
+	• Sends secrets only to: laptop
+
+	If you approve, it can:
+	• report its system details (OS, disk, memory)
+	• hold all of Fridolin's secrets, so the core can move there
+
+	Approving core-host lets the core move to this machine. It then holds all of Fridolin's secrets: the WhatsApp session, the keys that open every backup and export, and the Claude token. Approve it only for a machine you trust as much as the one the core runs on now.
+
+	⚠️ *Unexpected:* the machine asked for this itself; nobody asked from WhatsApp or the dashboard.
+
+	Was this you? Reply !approve — or !deny if not.
+
+	_ref 3c1e5a7b9d0f_
+approvalAlert(schedule)
+	🔐 *Main* wants a new scheduled agent, *scrape*.
+
+	• When: Sat 17 Oct 12:00 (3 days ago)
+	• Runs: daily 07:00, on its own
+	• Does: runs scrape on node laptop
+	• Program: approving the agent adds it to node laptop's allowlist, with exactly these arguments
+
+	If you approve, it can:
+	• run a program on node laptop: scrape --all
+
+	⚠️ *Unexpected:* it was written into the brain's folder, not made in the dashboard.
+
+	Was this you? Reply !approve — or !deny if not.
+
+	_ref main/scrape_
+approvalsWaitingAlert
+	🔐 2 things wait for your approval:
+
+	1. *laptop* (Windows) wants to join as a node — Tue 20 Oct 11:57 (3 minutes ago)
+	2. *Main* has a new skill, *taxes* — Tue 20 Oct 10:30 (an hour ago)
+	   ⚠️ Unexpected: it was written into the brain's folder, not made in the dashboard.
+
+	Reply !approve to pick one to approve, or !deny to pick one to turn down.
+approvalPickQuestion(approve)
+	🔐 3 things wait for you. Which one do you approve?
+approvalPickQuestion(deny)
+	🚫 3 things wait for you. Which one do you turn down?
+approvalPickNotice(approve)
+	🗳️ Tap the one to approve in the poll above. Your vote approves it; nobody else's counts.
+approvalPickNotice(deny)
+	🗳️ Tap the one to turn down in the poll above. Your vote turns it down; nobody else's counts.
+nothingPendingReply
+	✅ Nothing waits for your approval.
+approvalConfirmReply(unexpected)
+	⚠️ *laptop* (Windows) wants to join as a node.
+
+	This is unexpected: its join code came neither from your !join nor from the dashboard.
+
+	To be sure: reply !approve again within 2 minutes to approve it, or !deny to turn it down.
+approvalConfirmReply(expired)
+	⚠️ *laptop* (Windows) wants to join as a node.
+
+	It has waited since Sun 18 Oct 10:00 (2 days ago), longer than approvals are good for.
+
+	To be sure: reply !approve again within 2 minutes to approve it, or !deny to turn it down.
+approvedReply
+	✅ Approved: the skill *taxes* of Main. It applies as its file says from now on.
+deniedReply
+	🚫 Turned down: the skill *taxes* of Main. What you approved before stays (or, for a new one, it only reads); it waits on the brain's Skills page.
+approvalPollStale
+	⌛ That poll is out of date. Send !approve (or !deny) again for what waits now.
+approvalFailedReply
+	❌ That did not work for the new brain.json of *Main*: the brain.json on disk changed again
+fleetWaitingNote(1)
+	🔐 One more thing waits for your approval — reply !approve.
+fleetWaitingNote(3)
+	🔐 3 more things wait for your approval — reply !approve.
 nodeRevokedReply
-	🚫 *laptop* (8233270f8a24) is revoked: it is disconnected and refused from now on. To bring it back, it joins again with a new code (`!join`).
+	🚫 *laptop* is shut out: it is disconnected and refused from now on. To bring it back, it joins again with a new code (`!join`).
+
+	_ref 8233270f8a24_
 nodeIsRevokedReply
-	🚫 *laptop* (8233270f8a24) was revoked, so it cannot be approved. It joins again with a new code (`!join`), as a new node.
+	🚫 *laptop* was shut out, so it cannot be approved. It joins again with a new code (`!join`), as a new node.
+
+	_ref 8233270f8a24_
 nodeUnknownReply
-	❓ No node has the id nope. `!fleet` lists them.
+	❓ Nothing waits with the ref nope, and no node has it. Send !approve alone to see what waits; `!fleet` lists the nodes.
 approvalYes
 	✅ Yes
 approvalNo

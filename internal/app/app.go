@@ -148,6 +148,9 @@ type App struct {
 	waiters approvalWaiters
 	// ownerAsks counts the owner's !join and !dashboard (owner_commands.go).
 	ownerAsks ownerCommandRate
+	// approvals is what the owner was told waits for them, and the !approve
+	// that waits to be confirmed (owner_approvals.go).
+	approvals ownerApprovals
 	// lids is whatsmeow's map between LIDs and phone numbers, nil in dev
 	// mode, for what knows a person by LID outside an event: a /send to
 	// one.

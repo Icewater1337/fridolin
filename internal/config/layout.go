@@ -33,6 +33,10 @@ func (l Layout) Lock() string { return l.join("bridge.lock") }
 // DashboardToken is the dashboard's token.
 func (l Layout) DashboardToken() string { return l.join("dashboard.token") }
 
+// OwnerApprovals is what the bridge told the owner of what waits for
+// their approval, and what they turned down (owner_approvals.go).
+func (l Layout) OwnerApprovals() string { return l.join("owner-approvals.json") }
+
 // DashboardSessions holds the dashboard's signed-in browsers.
 func (l Layout) DashboardSessions() string { return l.join("dashboard-sessions.json") }
 

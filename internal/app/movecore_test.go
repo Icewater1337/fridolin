@@ -167,6 +167,40 @@ func TestMoveCoreFromChat(t *testing.T) {
 	}
 }
 
+// TestMoveCoreByApproveAndDeny: the move's polls answer to !approve and
+// !deny alone too, as every approval does: !deny cancels the move,
+// !approve moves the core, and after the move !approve keeps the host
+// secrets on the machine the core left.
+func TestMoveCoreByApproveAndDeny(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
+	m := h.moveHosts(h.b.nodes.Version(), true)
+
+	report, _ := h.moveCorePoll("mini", "icebase")
+	if !strings.Contains(report, "Was this you? Vote in the poll below, or reply !approve — or !deny if not.") {
+		t.Errorf("the report does not ask: %q", report)
+	}
+	if got := h.Answer(inbound{JID: harnessDM, Text: "!deny"}); got != outboundmsg.DeniedReply("the core's move from *mini* to *icebase*", "") {
+		t.Errorf("!deny: %q", got)
+	}
+	h.WaitSent(harnessDM, outboundmsg.CoreMoveCancelled("icebase", false))
+	h.noMove(m)
+
+	h.moveCorePoll("mini", "icebase")
+	if got := h.Answer(inbound{JID: harnessDM, Text: "!approve"}); got != outboundmsg.ApprovedReply("the core's move from *mini* to *icebase*", "") {
+		t.Errorf("!approve: %q", got)
+	}
+	h.WaitSent(harnessDM, "Running on *icebase* now")
+	h.waitPoll(harnessDM, "Keep the host secrets on mini?")
+	if got := h.Answer(inbound{JID: harnessDM, Text: "!approve"}); got != outboundmsg.ApprovedReply("keeping the host secrets on *mini*", "") {
+		t.Errorf("!approve of keeping the secrets: %q", got)
+	}
+	h.WaitSent(harnessDM, outboundmsg.CoreSecretsKept("mini"))
+	if got := h.Answer(inbound{JID: harnessDM, Text: "!approve"}); got != outboundmsg.NothingPendingReply {
+		t.Errorf("!approve with nothing left: %q", got)
+	}
+}
+
 // TestMoveCoreCancelExpiryLockdown: Cancel leaves the core where it is;
 // so does a poll nobody votes in, and a vote after it expired; during a
 // lockdown !movecore is refused, and a "Move now" from before is a no;
