@@ -302,6 +302,7 @@ func (vs *vaultSnapshots) paths(kind string) (paths, excludes []string) {
 	for _, dir := range dirs {
 		excludes = append(excludes, l.backups[dir].resticExcludes()...)
 	}
+	excludes = append(excludes, l.secretExcludes()...)
 	ids := make([]string, 0, len(l.absBrainDirs))
 	for id := range l.absBrainDirs {
 		ids = append(ids, id)
@@ -353,6 +354,9 @@ func dataDirExcludes(data string, dbs map[string]string) []string {
 		filepath.Join(data, "core", "import"),
 		filepath.Join(data, "core", "replaced-*"),
 		filepath.Join(data, "core", "drill-*"),
+		// What a restore of the secret folders wrote (core/replaced-*
+		// holds what a forced one replaced): they go to B2 only.
+		filepath.Join(data, "core", "restored-secrets-*"),
 	)
 }
 
@@ -394,6 +398,10 @@ func (s *vaultService) AllowPrune() error {
 		s.log.Info("vault: pruning allowed again after a deletion hold", "snapshot", s.status.Snapshots.DeletionHold.Snapshot)
 	}
 	s.status.Snapshots.DeletionHold = nil
+	if sf := s.status.SecretFolders; sf != nil && sf.PruneHold != nil {
+		s.log.Info("vault: pruning the secret folders' versions allowed again after a deletion hold", "version", sf.PruneHold.Snapshot)
+		sf.PruneHold = nil
+	}
 	s.saveLocked()
 	return nil
 }

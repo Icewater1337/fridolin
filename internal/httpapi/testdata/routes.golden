@@ -131,6 +131,8 @@ POST /api/vault/migrate-encryption
 POST /api/vault/prune/allow
 POST /api/vault/rebuild
 POST /api/vault/restore-drill
+POST /api/vault/secret-folders/backup
+POST /api/vault/secret-folders/restore
 POST /api/vault/snapshot
 POST /api/vault/sync
 POST /api/vault/targets

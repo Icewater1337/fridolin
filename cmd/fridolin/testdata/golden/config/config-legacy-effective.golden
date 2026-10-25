@@ -108,6 +108,7 @@
     "endpoint": "s3.eu-central-003.backblazeb2.com",
     "headroom_percent": 10,
     "hot_budget_gb": 50,
+    "secret_keep_days": 30,
     "snapshots_bucket": "fridolin-snapshots"
   },
   "version": 2,

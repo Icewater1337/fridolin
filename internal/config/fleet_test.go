@@ -27,7 +27,7 @@ func TestFleetSectionsDefaultOff(t *testing.T) {
 		Vault: VaultConfig{
 			HotBudgetGB: 50, ActivityDays: 60, ColdAfterDays: 90, HeadroomPercent: 10,
 			Bucket: "fridolin-vault", SnapshotsBucket: "fridolin-snapshots",
-			Endpoint: "s3.eu-central-003.backblazeb2.com", B2DailyBudget: 2000,
+			Endpoint: "s3.eu-central-003.backblazeb2.com", B2DailyBudget: 2000, SecretKeepDays: 30,
 		},
 		Nodes:  NodesConfig{Listen: ":8766"},
 		Policy: PolicyConfig{MaxRunsPerHour: 20, MaxPendingIrreversible: 3, ApprovalTimeoutHours: 24},
@@ -45,7 +45,7 @@ func TestFleetSectionsDefaultOff(t *testing.T) {
 func TestFleetSectionsKeepWhatIsSet(t *testing.T) {
 	t.Parallel()
 	data := []byte(`{"core": {"tailnet": {"enabled": true, "hostname": "core-2"}, "lease": {"enabled": true, "renew_seconds": 10, "stale_seconds": 11}, "memory_limit_gb": 2},
-		"vault": {"enabled": true, "hot_budget_gb": 1, "activity_days": 2, "cold_after_days": 3, "headroom_percent": 4, "bucket": "my-vault", "snapshots_bucket": "my-snaps", "endpoint": "localhost", "b2_daily_budget": 900},
+		"vault": {"enabled": true, "hot_budget_gb": 1, "activity_days": 2, "cold_after_days": 3, "headroom_percent": 4, "bucket": "my-vault", "snapshots_bucket": "my-snaps", "endpoint": "localhost", "b2_daily_budget": 900, "secret_dirs": ["/srv/secrets"], "secret_keep_days": 7},
 		"nodes": {"enabled": true, "listen": "[::1]:9000"},
 		"policy": {"max_runs_per_hour": 1, "max_pending_irreversible": 1, "approval_timeout_hours": 1}}`)
 	var f File
@@ -77,6 +77,10 @@ func TestFleetSectionsRefuse(t *testing.T) {
 		{`{"core": {"lease": {"renew_seconds": 300, "stale_seconds": 300}}}`, "must be more than"},
 		{`{"core": {"lease": {"renew_seconds": 1200}}}`, "must be more than"},
 		{`{"vault": {"b2_daily_budget": -1}}`, "vault.b2_daily_budget"},
+		{`{"vault": {"secret_keep_days": -1}}`, "vault.secret_keep_days"},
+		{`{"vault": {"secret_dirs": ["relative/secrets"]}}`, "vault.secret_dirs"},
+		{`{"vault": {"secret_dirs": ["/"]}}`, "vault.secret_dirs"},
+		{`{"vault": {"secret_dirs": ["~/.personal-calendar", "~/.personal-calendar/"]}}`, "listed twice"},
 		{`{"core": {"memory_limit_gb": -8}}`, "core.memory_limit_gb"},
 		{`{"vault": {"hot_budget_gb": -1}}`, "vault.hot_budget_gb"},
 		{`{"vault": {"activity_days": -1}}`, "vault.activity_days"},

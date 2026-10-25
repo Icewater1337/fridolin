@@ -187,6 +187,8 @@ func NewAPIMux(d APIDeps) http.Handler {
 	mux.HandleFunc("POST /api/vault/restore-drill", d.Vault().RestoreDrill)
 	mux.HandleFunc("POST /api/vault/prune/allow", d.Vault().AllowPrune)
 	mux.HandleFunc("POST /api/vault/migrate-encryption", d.Vault().MigrateEncryption)
+	mux.HandleFunc("POST /api/vault/secret-folders/backup", d.Vault().BackupSecretFolders)
+	mux.HandleFunc("POST /api/vault/secret-folders/restore", d.Vault().RestoreSecretFolders)
 	mux.HandleFunc("POST /api/vault/targets", d.Vault().Targets.Add)
 	mux.HandleFunc("PUT /api/vault/targets/{name}", d.Vault().Targets.Change)
 	mux.HandleFunc("DELETE /api/vault/targets/{name}", d.Vault().Targets.Remove)

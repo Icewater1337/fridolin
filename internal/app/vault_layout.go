@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/backup"
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/config"
 )
@@ -63,6 +64,13 @@ type vaultLayout struct {
 	// the folders in the hot root, by vault path.
 	backups    map[string]brainBackup
 	backupRels map[string]brainBackup
+	// secretDirs are the secret folders (secretFolderPaths), absolute,
+	// and secretRels those in the hot root, by vault path: they go to
+	// their own backup only (vault_secret_folders.go), never to the cold
+	// tier, which could evict from them, nor to a snapshot, which goes to
+	// Google Drive and node targets too.
+	secretDirs []string
+	secretRels []string
 }
 
 // vaultLayoutOf works the hot root out of the settings, the brains (id →
@@ -102,9 +110,24 @@ func vaultLayoutOf(cfg *config.Settings, brains map[string]string, backups map[s
 			l.backupRels[rel] = b
 		}
 	}
+	l.secretDirs = secretFolderPaths(cfg)
+	for _, d := range l.secretDirs {
+		if rel, ok := l.rel(d); ok && rel != "" {
+			l.secretRels = append(l.secretRels, rel)
+		}
+	}
 	slices.Sort(l.prefixes)
 	l.prefixes = slices.Compact(l.prefixes)
 	return l
+}
+
+// secretExcludes are restic's --exclude values for the secret folders.
+func (l vaultLayout) secretExcludes() []string {
+	out := make([]string, 0, len(l.secretDirs))
+	for _, d := range l.secretDirs {
+		out = append(out, backup.ResticPath(d))
+	}
+	return out
 }
 
 // reserved reports whether rel lies in a part of the data dir that is
@@ -137,6 +160,11 @@ func (l vaultLayout) rel(abs string) (string, bool) {
 // ignore is vault.Options.Ignore: true for every path below the hot root
 // that is not a vault file nor a folder on the way to one.
 func (l vaultLayout) ignore(rel string) bool {
+	for _, d := range l.secretRels {
+		if rel == d || strings.HasPrefix(rel, d+"/") {
+			return true
+		}
+	}
 	if slices.Contains(l.files, rel) {
 		return false
 	}

@@ -80,7 +80,8 @@ type mountInputs struct {
 // container: each brain folder outside the data dir (read-write), the
 // calendar credentials (sandbox.credentials_dir, read-write as natively:
 // the bridge saves a refreshed or new sign-in's token there, by renaming
-// a new file over the old one; brains never see the folder), sandbox.allow_paths and
+// a new file over the old one; brains never see the folder), vault.secret_dirs
+// (read-only: the vault backs them up and never writes there), sandbox.allow_paths and
 // startup_checks.required_files (read-only), plaud.phone_dir, the Plaud
 // CLI's login in ~/.plaud with plaud.brain_access (read-write: the login
 // is refreshed there), ~/.gitconfig unless sandbox.git_config is "deny",
@@ -132,6 +133,12 @@ func nativeMounts(cfg *config.Settings, in mountInputs) ([]hostMount, []string, 
 	}
 	if err := add(cfg.Sandbox.CredentialsDir, false, "sandbox.credentials_dir", false, false); err != nil {
 		return nil, nil, err
+	}
+	for _, p := range cfg.Vault.SecretDirs {
+		// The vault only reads them, to back them up.
+		if err := add(p, true, "vault.secret_dirs entry", false, false); err != nil {
+			return nil, nil, err
+		}
 	}
 	for _, p := range cfg.Sandbox.AllowPaths {
 		if err := add(p, true, "sandbox.allow_paths entry", false, true); err != nil {

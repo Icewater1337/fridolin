@@ -1293,6 +1293,67 @@ export interface VaultTarget {
   layers?: string;
 }
 
+/** A secret folder as the status shows it: its numbers, never its files. */
+export interface SecretFolderView {
+  path: string;
+  /** sandbox.credentials_dir or vault.secret_dirs. */
+  source: string;
+  /** Its folder in a version and in a restore. */
+  label: string;
+  files: number;
+  bytes: number;
+  skipped?: number;
+  error?: string;
+}
+
+/** A version of the secret folders taken, or tried. */
+export interface SecretBackupRecord {
+  at?: string;
+  version?: string;
+  /** first, daily, changed or asked. */
+  reason: string;
+  files: number;
+  bytes: number;
+  error?: string;
+}
+
+/** A version of the secret folders in the bucket. */
+export interface SecretVersion {
+  version: string;
+  at: string;
+  bytes: number;
+}
+
+/** The last restore of the secret folders. */
+export interface SecretRestoreRecord {
+  at?: string;
+  version?: string;
+  to?: string;
+  force?: boolean;
+  replaced?: string;
+  folders?: SecretFolderView[];
+  files: number;
+  bytes: number;
+  kept?: number;
+  error?: string;
+}
+
+/** The secret folders' backups (docs/VAULT.md, Secret folders). */
+export interface SecretFoldersStatus {
+  enabled: boolean;
+  error?: string;
+  where?: string;
+  keep_days: number;
+  folders: SecretFolderView[] | null;
+  last?: SecretBackupRecord;
+  last_ok?: SecretBackupRecord;
+  versions?: SecretVersion[];
+  fingerprint?: string;
+  prune_hold?: DeletionHold;
+  last_prune?: VaultRecord;
+  last_restore?: SecretRestoreRecord;
+}
+
 /** GET /api/vault/status. */
 export interface VaultStatus {
   enabled: boolean;
@@ -1318,6 +1379,8 @@ export interface VaultStatus {
   encryption?: StoreLayers[];
   encryption_migration?: EncryptionMigration;
   b2?: B2Usage;
+  /** Left out while no secret folder is set. */
+  secret_folders?: SecretFoldersStatus;
   /** Left out while there are none. */
   targets?: VaultTarget[];
   updated_at?: string;

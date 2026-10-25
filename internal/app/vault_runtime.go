@@ -123,6 +123,9 @@ type vaultStatus struct {
 	// B2 is the bridge's Backblaze B2 transactions today (b2usage.go),
 	// omitted while it made none.
 	B2 *b2UsageView `json:"b2,omitempty"`
+	// SecretFolders are the secret folders' backups
+	// (vault_secret_folders.go); omitted while none is set.
+	SecretFolders *secretFoldersStatus `json:"secret_folders,omitempty"`
 	// Targets are the node targets (vault_targets.go), which run whether
 	// or not the vault does; omitted while there are none.
 	Targets []targetView `json:"targets,omitempty"`
@@ -168,6 +171,11 @@ type vaultBackends struct {
 	// closers end what the backends keep running (the cold tier's rclone
 	// daemon) when the vault stops.
 	closers []func() error
+	// secretFolders is the secret folders' store, in the vault bucket
+	// through both of the cold tier's layers; nil leaves them without a
+	// backup, and secretFoldersErr says why.
+	secretFolders    cloud.ObjectStore
+	secretFoldersErr string
 	// b2 is set when the buckets are Backblaze's (not the local stand-ins
 	// of FRIDOLIN_VAULT_LOCAL): restic's and Litestream's calls count then.
 	b2 bool
@@ -193,6 +201,8 @@ type vaultService struct {
 	// and backends builds the backends (defaultVaultBackends when nil).
 	tick     time.Duration
 	backends func(ctx context.Context, s *vaultService, cfg *config.Settings) (vaultBackends, error)
+	// secretChange is waits.secretFoldersChange.
+	secretChange time.Duration
 	// brains lists the loaded brains; openMedia the files of the messages
 	// they run or have waiting (absolute paths).
 	brains    func() []vaultBrain
@@ -221,11 +231,13 @@ type vaultService struct {
 
 // vaultRun is one start of the vault, until a stop or a settings change.
 type vaultRun struct {
-	v      *vault.Vault
-	b      vaultBackends
-	snaps  *vaultSnapshots
-	cancel context.CancelFunc
-	done   chan struct{}
+	v     *vault.Vault
+	b     vaultBackends
+	snaps *vaultSnapshots
+	// secrets backs up the secret folders.
+	secrets *vaultSecretFolders
+	cancel  context.CancelFunc
+	done    chan struct{}
 	// liteErr is why Litestream's supervisor gave up, if it did.
 	liteErr string
 	// liteCounted is when Litestream's steady cost was last counted, and
@@ -501,6 +513,7 @@ func (s *vaultService) serve(ctx context.Context, run *vaultRun, cfg *config.Set
 	s.mu.Lock()
 	run.v, run.b = v, b
 	run.snaps = newVaultSnapshots(s, run, cfg)
+	run.secrets = newVaultSecretFolders(s, b)
 	s.status.State, s.status.Error = vaultRunning, ""
 	s.status.Root = layout.root
 	s.status.BudgetBytes = int64(cfg.Vault.HotBudgetGB) << 30
@@ -573,6 +586,7 @@ func (s *vaultService) serve(ctx context.Context, run *vaultRun, cfg *config.Set
 			}
 			s.refreshLayout()
 			run.snaps.tick(ctx, now)
+			run.secrets.tick(ctx, now)
 			s.heartbeat(ctx, run, true)
 		}
 	}
@@ -881,6 +895,11 @@ func (s *vaultService) Status(ctx context.Context) vaultStatus {
 	st := s.status
 	st.Job = s.job
 	st.Evictions = slices.Clone(st.Evictions)
+	if sf := st.SecretFolders; sf != nil {
+		// Its updates replace fields and slices, never change them in place.
+		c := *sf
+		st.SecretFolders = &c
+	}
 	if st.Evictions == nil {
 		st.Evictions = []vault.Eviction{}
 	}

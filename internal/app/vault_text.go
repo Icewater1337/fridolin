@@ -212,6 +212,9 @@ func VaultStatusText(data []byte, now time.Time) (string, error) {
 			line("  copy to Google Drive (%s): %s %s", d.Repo, state, ago(d.LastCopy.At, now))
 		}
 	}
+	if sf := st.SecretFolders; sf != nil {
+		secretFoldersText(sf, now, line)
+	}
 	if l := st.Litestream; l.Enabled {
 		if l.Running {
 			line("litestream: running (pid %d) for %s, %d restarts, %s", l.PID, now.Sub(l.Since).Round(time.Second), l.Restarts, strings.Join(l.DBs, ", "))
@@ -255,4 +258,46 @@ func VaultStatusText(data []byte, now time.Time) (string, error) {
 	targetsText(st.Targets, now, line)
 	encryptionText(st, line)
 	return b.String(), nil
+}
+
+// secretFoldersText is fridolin vault status's lines for the secret
+// folders: names, counts and sizes, never a file.
+func secretFoldersText(sf *secretFoldersStatus, now time.Time, line func(string, ...any)) {
+	if !sf.Enabled {
+		line("secret folders: NOT backed up%s", map[bool]string{true: " — " + sf.Error}[sf.Error != ""])
+	} else {
+		line("secret folders: to %s, %d days of versions kept", sf.Where, sf.KeepDays)
+	}
+	for _, f := range sf.Folders {
+		if f.Error != "" {
+			line("  %s (%s): %s", f.Path, f.Source, f.Error)
+			continue
+		}
+		skipped := ""
+		if f.Skipped > 0 {
+			skipped = fmt.Sprintf(", %d links or special files left out", f.Skipped)
+		}
+		line("  %s (%s): %d files, %s%s", f.Path, f.Source, f.Files, gib(f.Bytes), skipped)
+	}
+	if r := sf.LastOK; r != nil {
+		line("  last backup: %s %s, %d files, %s (%s)", r.Version, ago(r.At, now), r.Files, gib(r.Bytes), r.Reason)
+	} else {
+		line("  last backup: never")
+	}
+	if r := sf.Last; r != nil && r.Error != "" {
+		line("  last try FAILED %s: %s", ago(r.At, now), r.Error)
+	}
+	if n := len(sf.Versions); n > 0 {
+		line("  versions: %d, from %s to %s (fridolin vault restore-secrets --list)", n, sf.Versions[0].At.Local().Format("2006-01-02 15:04"), sf.Versions[n-1].At.Local().Format("2006-01-02 15:04"))
+	}
+	if h := sf.PruneHold; h != nil {
+		line("  pruning held since %s: version %s has %d files, the one before %d (allow it on the Vault page)", ago(h.Since, now), h.Snapshot, h.Files, h.PrevFiles)
+	}
+	if r := sf.LastRestore; r != nil {
+		state := "ok"
+		if r.Error != "" {
+			state = "FAILED: " + r.Error
+		}
+		line("  last restore: %s %s of %s into %s, %d files", state, ago(r.At, now), r.Version, r.To, r.Files)
+	}
 }

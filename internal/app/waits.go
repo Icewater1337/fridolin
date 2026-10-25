@@ -37,6 +37,9 @@ type waits struct {
 	reapGrace time.Duration
 	// vaultTick is how often the vault's loop looks at what is due.
 	vaultTick time.Duration
+	// secretFoldersChange is how long after a version of the secret
+	// folders a change to them is backed up at the earliest.
+	secretFoldersChange time.Duration
 	// approvalTimeout is how long an approval waits for its answer; 0 is
 	// policy.approval_timeout_minutes.
 	approvalTimeout time.Duration
@@ -50,17 +53,18 @@ type waits struct {
 // defaultWaits are the waits of the binary's bridge.
 func defaultWaits() waits {
 	return waits{
-		shutdownGrace:     shutdownGrace,
-		workingNotice:     10 * time.Second,
-		postResultGrace:   5 * time.Second,
-		runWaitDelay:      5 * time.Second,
-		runTimeoutUnit:    time.Minute,
-		frideRetry:        30 * time.Second,
-		nodeSessionMinAge: time.Minute,
-		reapGrace:         3 * time.Second,
-		vaultTick:         time.Minute,
-		coreMovePoll:      30 * time.Minute,
-		coreSecretsPoll:   24 * time.Hour,
+		shutdownGrace:       shutdownGrace,
+		workingNotice:       10 * time.Second,
+		postResultGrace:     5 * time.Second,
+		runWaitDelay:        5 * time.Second,
+		runTimeoutUnit:      time.Minute,
+		frideRetry:          30 * time.Second,
+		nodeSessionMinAge:   time.Minute,
+		reapGrace:           3 * time.Second,
+		vaultTick:           time.Minute,
+		secretFoldersChange: 10 * time.Minute,
+		coreMovePoll:        30 * time.Minute,
+		coreSecretsPoll:     24 * time.Hour,
 	}
 }
 

@@ -114,11 +114,16 @@ func defaultVaultBackends(ctx context.Context, s *vaultService, cfg *config.Sett
 	if err != nil {
 		return b, err
 	}
-	cold, closeCold, err := b2ColdStore(rclone, base, c, cfg.Vault.Bucket, s.usage, encState)
+	cold, secrets, closeCold, err := b2ColdStore(rclone, base, c, cfg.Vault.Bucket, s.usage, encState)
 	if err != nil {
 		return b, err
 	}
 	b.cold, b.closers, b.b2 = cold, append(b.closers, closeCold), true
+	if secrets != nil {
+		b.secretFolders = secrets
+	} else {
+		b.secretFoldersErr = errSecretFoldersOneLayer
+	}
 	b.bridgeDB = AbsPath(cfg.DBPath)
 
 	restic := findVaultTool("restic")
@@ -277,6 +282,10 @@ func b2OldPurge(rclone string, base []string, c vaultCreds, cfg *config.Settings
 	}
 }
 
+// errSecretFoldersOneLayer: the secret folders go up with both layers or
+// not at all.
+const errSecretFoldersOneLayer = "the secret folders go to B2 only with both layers, and the cold tier's inner layer has no key: " + hostsecrets.VaultSealKey + " (fridolin core start makes it)"
+
 // errDriveNotConnected: the weekly copy has no Drive to go to.
 var errDriveNotConnected = errors.New("the weekly copy needs Google Drive, which is not connected (Backup → Connect Google Drive)")
 
@@ -367,6 +376,14 @@ func localVaultBackends(s *vaultService, cfg *config.Settings, dir string) (vaul
 		return b, err
 	}
 	b.cold = layeredCold(sealed, oldCold, encState)
+	// The secret folders' versions, sealed as the cold tier.
+	secretsDir, err := cloud.NewDir(filepath.Join(dir, secretFoldersPath))
+	if err != nil {
+		return b, err
+	}
+	if b.secretFolders, err = cloud.NewSealed(secretsDir, sealKey); err != nil {
+		return b, err
+	}
 	b.bridgeDB = AbsPath(cfg.DBPath)
 	pw, err := localSecret(s.env, dir, "restic-password", "RESTIC_PASSWORD")
 	if err != nil {

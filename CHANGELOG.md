@@ -10,6 +10,32 @@ for compatibility.
 
 ### Added
 
+- **The secret folders go to the vault.** With the vault on, the
+  credentials folder (`sandbox.credentials_dir`: the Google OAuth
+  client, the calendar credentials and tokens, the dashboard users) and
+  the folders of the new `vault.secret_dirs` (such as
+  `["~/.personal-calendar"]`) are backed up to B2 only: one version a
+  day, and one after a change (at most every ten minutes), each a tar of
+  every folder sealed with the cold tier's key inside rclone crypt with
+  its passwords, into `secret-folders-sealed/` in the vault bucket; never
+  to Google Drive or a node target. The vault only reads them. It keeps
+  every version of the last day and the newest of each of the
+  `vault.secret_keep_days` (30) days before, with the snapshots'
+  mass-deletion hold. `fridolin vault restore-secrets [--to DIR] [--at
+  DATE]` restores one into a new folder (by default
+  `core/restored-secrets-<time>` in the data dir); `--force` restores
+  over the live folders, after copying them to
+  `core/replaced-secrets-<time>/`. `fridolin vault backup-secrets` takes
+  a version now, `fridolin vault status` shows the folders, the last
+  backup and the versions, and `fridolin doctor` warns
+  (`vault-secret-folders`) while there is none younger than two days.
+  The log and the status name folders and count files and bytes, never
+  a file's content. A credentials folder that lies in the data dir or a
+  brain folder is now left out of the snapshots (which go to Drive and
+  node targets too) and of the cold tier; `fridolin core migrate` binds
+  `vault.secret_dirs` into the core read-only (docs/VAULT.md, "Secret
+  folders").
+
 - **The core in a box** (#191 phase 4): a node in a box can take the
   core and give it back, with the same `!movecore` / `fridolin nodes
   move`, plan, lease and automatic rollback as a native core host. The

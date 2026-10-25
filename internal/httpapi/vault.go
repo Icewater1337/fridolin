@@ -26,6 +26,12 @@ type VaultService interface {
 	Forget(prefix string) error
 	// Get brings path back from the cold tier and returns where it is.
 	Get(ctx context.Context, path string, allowOverBudget bool) (string, error)
+	// BackupSecretFolders starts a backup of the secret folders.
+	BackupSecretFolders() error
+	// RestoreSecretFolders restores a version of the secret folders, the
+	// newest at or before at, into to (a new folder), or with force over
+	// the live folders, and says what it did.
+	RestoreSecretFolders(ctx context.Context, to, at string, force bool) (any, error)
 }
 
 // VaultAPI serves /api/vault/*. Its jobs run in the background: a POST
@@ -152,4 +158,33 @@ func (a *VaultAPI) MigrateEncryption(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.job(w, a.Vault().MigrateEncryption(req.DryRun, req.DeleteOld))
+}
+
+// BackupSecretFolders answers POST /api/vault/secret-folders/backup.
+func (a *VaultAPI) BackupSecretFolders(w http.ResponseWriter, r *http.Request) {
+	if err := DecodeOptionalJSON(r, &struct{}{}); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	a.job(w, a.Vault().BackupSecretFolders())
+}
+
+// RestoreSecretFolders answers POST /api/vault/secret-folders/restore,
+// once the restore is done.
+func (a *VaultAPI) RestoreSecretFolders(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		To    string `json:"to"`
+		At    string `json:"at"`
+		Force bool   `json:"force"`
+	}
+	if err := DecodeOptionalJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	res, err := a.Vault().RestoreSecretFolders(r.Context(), req.To, req.At, req.Force)
+	if err != nil {
+		WriteErr(w, statusFor(apperr.KindOf(err)), err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, res)
 }

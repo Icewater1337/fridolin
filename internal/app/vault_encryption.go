@@ -206,6 +206,10 @@ func describeLayers(b vaultBackends, c vaultCreds, st encryptionState, exportsTw
 		cold.Old = oldState(st, "cold", migrating)
 	}
 	out = append(out, cold)
+	if b.secretFolders != nil {
+		out = append(out, storeLayers{Store: "secret-folders", Where: "vault bucket, " + secretFoldersPath + "/", Layers: []string{layerCrypt, layerSeal},
+			Keys: []string{hostsecrets.VaultCryptPassword, hostsecrets.VaultCryptSalt, hostsecrets.VaultSealKey}})
+	}
 	if b.restic != nil {
 		for _, id := range []string{"restic", "drive"} {
 			l := storeLayers{Store: id, Where: "snapshots bucket, restic/", Layers: []string{layerRestic}, Keys: []string{hostsecrets.ResticPassword}}

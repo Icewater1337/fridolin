@@ -187,6 +187,10 @@
     "endpoint": "s3.example-region.backblazeb2.com",
     "headroom_percent": 15,
     "hot_budget_gb": 40,
+    "secret_dirs": [
+      "<HOME>/.personal-calendar"
+    ],
+    "secret_keep_days": 45,
     "snapshots_bucket": "example-snapshots",
     "targets": [
       {

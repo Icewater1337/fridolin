@@ -167,6 +167,9 @@ func resolveFile(file *File, paths Paths, goos string) (*File, error) {
 	for i := range cfg.Sandbox.AllowPaths {
 		cfg.Sandbox.AllowPaths[i] = fsx.ExpandHome(cfg.Sandbox.AllowPaths[i], home)
 	}
+	for i := range cfg.Vault.SecretDirs {
+		cfg.Vault.SecretDirs[i] = fsx.ExpandHome(cfg.Vault.SecretDirs[i], home)
+	}
 	for i := range cfg.StartupChecks.RequiredFiles {
 		cfg.StartupChecks.RequiredFiles[i] = fsx.ExpandHome(cfg.StartupChecks.RequiredFiles[i], home)
 	}

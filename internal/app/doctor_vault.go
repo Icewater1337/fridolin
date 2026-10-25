@@ -16,6 +16,7 @@ var vaultDoctorChecks = []DoctorCheck{
 	{ID: "vault-snapshot", Title: "snapshot within 26 hours", Required: true, Applies: vaultOn, Run: checkVaultSnapshot},
 	{ID: "vault-brain-backup", Title: "brain folders follow their backup settings", Required: true, Applies: vaultOn, Run: checkVaultBrainBackup},
 	{ID: "vault-litestream", Title: "Litestream replicating bridge.db and vault.db", Required: true, Applies: vaultOn, Run: checkVaultLitestream},
+	{ID: "vault-secret-folders", Title: "secret folders backed up within 2 days", Required: true, Applies: vaultSecretFoldersSet, Run: checkVaultSecretFolders},
 }
 
 func init() { DoctorRegistry = append(DoctorRegistry, vaultDoctorChecks...) }
@@ -26,6 +27,9 @@ const (
 	vaultUploadWithin = time.Hour        // a file waits at most this long for its upload
 	vaultSnapWithin   = 26 * time.Hour   // a nightly snapshot, with two hours to spare
 	vaultReachWithin  = 45 * time.Minute // the vault shows the cold tier answering at least every 30 minutes
+	// vaultSecretsWithin: a version goes up each day; two days without
+	// one is a warning.
+	vaultSecretsWithin = 48 * time.Hour
 )
 
 func vaultOn(env *DoctorEnv) bool { return env.Config != nil && env.Config.Vault.Enabled }
@@ -192,4 +196,51 @@ func checkVaultBrainBackup(_ context.Context, env *DoctorEnv) DoctorResult {
 		return DoctorResult{Status: DoctorOK, Detail: "every brain.json read; left out as their backup is off: " + strings.Join(off, ", ")}
 	}
 	return DoctorResult{Status: DoctorOK, Detail: "every brain.json read"}
+}
+
+// vaultSecretFoldersSet: the vault runs and a secret folder is set.
+func vaultSecretFoldersSet(env *DoctorEnv) bool {
+	return vaultOn(env) && len(secretFolderPaths(env.Config)) > 0
+}
+
+// checkVaultSecretFolders warns while the secret folders have no version
+// in B2 younger than two days, or the last try failed.
+func checkVaultSecretFolders(_ context.Context, env *DoctorEnv) DoctorResult {
+	st, bad := env.vaultStatus()
+	if bad != nil {
+		return *bad
+	}
+	sf := st.SecretFolders
+	fix := "fridolin vault backup-secrets, then fridolin vault status"
+	switch {
+	case sf == nil:
+		return DoctorResult{Status: DoctorWarn, Detail: "the vault has not looked at the secret folders yet", Fix: "run fridolin doctor again in a minute"}
+	case !sf.Enabled:
+		return DoctorResult{Status: DoctorWarn, Detail: "the secret folders are not backed up: " + sf.Error, Fix: "fridolin core start makes the missing key; then restart the core"}
+	case sf.LastOK == nil:
+		detail := "no backup of the secret folders yet"
+		if sf.Last != nil && sf.Last.Error != "" {
+			detail += ": " + sf.Last.Error
+		}
+		return DoctorResult{Status: DoctorWarn, Detail: detail, Fix: fix}
+	}
+	age := env.now().Sub(sf.LastOK.At)
+	detail := fmt.Sprintf("%d folders, %d files, last backed up %s ago (%s)", len(sf.Folders), sf.LastOK.Files, age.Round(time.Second), sf.LastOK.Version)
+	switch {
+	case age > vaultSecretsWithin:
+		return DoctorResult{Status: DoctorWarn, Detail: fmt.Sprintf("the last backup of the secret folders is %s old", age.Round(time.Minute)) + lastSecretError(sf), Fix: fix}
+	case sf.Last != nil && sf.Last.Error != "":
+		return DoctorResult{Status: DoctorWarn, Detail: detail + lastSecretError(sf), Fix: fix}
+	case sf.PruneHold != nil:
+		return DoctorResult{Status: DoctorWarn, Detail: detail + fmt.Sprintf("; pruning is held: version %s has %d files, the one before %d", sf.PruneHold.Snapshot, sf.PruneHold.Files, sf.PruneHold.PrevFiles),
+			Fix: "look at what was deleted, then Allow pruning on the dashboard's Vault page"}
+	}
+	return DoctorResult{Status: DoctorOK, Detail: detail}
+}
+
+func lastSecretError(sf *secretFoldersStatus) string {
+	if sf.Last != nil && sf.Last.Error != "" {
+		return "; the last try failed: " + sf.Last.Error
+	}
+	return ""
 }

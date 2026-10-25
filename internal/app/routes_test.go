@@ -177,6 +177,8 @@ var routeInventory = []httpRoute{
 	{"POST", "/api/vault/restore-drill", classAPI, ""},
 	{"POST", "/api/vault/prune/allow", classAPI, ""},
 	{"POST", "/api/vault/migrate-encryption", classAPI, ""},
+	{"POST", "/api/vault/secret-folders/backup", classAPI, ""},
+	{"POST", "/api/vault/secret-folders/restore", classAPI, ""},
 	{"POST", "/api/vault/targets", classAPI, ""},
 	{"PUT", "/api/vault/targets/{name}", classAPI, ""},
 	{"DELETE", "/api/vault/targets/{name}", classAPI, ""},

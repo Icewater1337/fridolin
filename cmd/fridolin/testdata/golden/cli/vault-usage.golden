@@ -23,6 +23,17 @@ Usage:
                                       take a snapshot now (to node target NAME)
   fridolin vault check [--target NAME]
                                       check the snapshots' repository (of node target NAME)
+  fridolin vault backup-secrets      back up the secret folders (sandbox.credentials_dir,
+                                      vault.secret_dirs) to B2 now
+  fridolin vault restore-secrets [--to DIR] [--at DATE] [--force] [--list]
+                                      restore the newest version of the secret folders
+                                      (at or before DATE: 2026-10-20, 2026-10-20T14:30
+                                      or RFC 3339) into DIR, a new or empty folder
+                                      (default core/restored-secrets-<time> in the data
+                                      dir); --force restores over the live folders
+                                      instead, after copying them to
+                                      core/replaced-secrets-<time>/; --list lists the
+                                      versions (docs/VAULT.md, "Secret folders")
   fridolin vault migrate-encryption --dry-run | --run [--delete-old]
                                       move what has one layer of encryption to the
                                       stores with two (docs/VAULT.md, "Encryption"):
@@ -33,9 +44,12 @@ Node targets (vault.targets, docs/VAULT.md "Node targets") are restic
 repositories in folders on nodes; status lists them, and the Vault page adds
 them.
 
-Each asks the running bridge; sync, evict, rebuild, restore-drill, snapshot
-and check start a job and return, and status shows how it went. status reads
-what the bridge last wrote when none runs.
+Each asks the running bridge; sync, evict, rebuild, restore-drill, snapshot,
+check and backup-secrets start a job and return, and status shows how it
+went; restore-secrets waits for its restore. status reads what the bridge
+last wrote when none runs. In the core, run them in its container (docker
+exec fridolin-core fridolin vault ...): restore-secrets' folders are the
+container's.
 
 Flags:
   --config PATH     config file (default: $FRIDOLIN_CONFIG, else

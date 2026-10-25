@@ -435,6 +435,7 @@ func (r *targetRun) paths(kind string) (paths, excludes []string, err error) {
 		}
 	})
 	data := r.tg.IncludeDataDir && kind == snapshotNightly
+	excludes = append(excludes, l.secretExcludes()...)
 	for _, id := range ids {
 		dir := l.absBrainDirs[id]
 		b, known := l.backups[dir]

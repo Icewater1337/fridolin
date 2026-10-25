@@ -184,7 +184,11 @@
         "read_data_days": 14,
         "window_hours": 30
       }
-    ]
+    ],
+    "secret_dirs": [
+      "~/.personal-calendar"
+    ],
+    "secret_keep_days": 45
   },
   "nodes": {
     "enabled": true,
