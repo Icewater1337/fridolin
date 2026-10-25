@@ -1103,6 +1103,20 @@ for compatibility.
 
 ### Fixed
 
+- **A scheduled agent can hand work to FrIDE.** `fride_task` and
+  `node_agent_run` refused every scheduled run ("this run answers no
+  chat"). A run of an agent that reports somewhere now sends FrIDE's,
+  or the session's, questions and news to the chat it reports to: its
+  `chat`, else the brain's reply chat, else your DM. A `silent` agent
+  and an observe-only run are still refused (docs/BRAINS.md, "FrIDE and
+  workstation sessions from an agent").
+
+- **A scheduled agent's summary is no longer lost** when it wrote it and
+  then only called tools: the CLI's result is empty then, and the run
+  failed with "the agent gave no answer". The last text the run wrote is
+  its answer now, for every run. A run that ends in an error keeps that
+  text in its history and log.
+
 - **One poll for a delegated step, not two.** The core brain asked you
   to approve the delegation and the delegated brain asked again for the
   step. Now the core asks once, for the step, and hands the approval over

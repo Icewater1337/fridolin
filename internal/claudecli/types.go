@@ -16,6 +16,9 @@ type Result struct {
 	Duration time.Duration
 	// Usage is what the run cost, as the CLI's result reported it.
 	Usage Usage
+	// LastText is, for a run that ended in an error result, the last text
+	// the model wrote before it: a summary the error would lose otherwise.
+	LastText string
 }
 
 // Usage is what a run cost: Claude reports dollars and tokens, Codex
