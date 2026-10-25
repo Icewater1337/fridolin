@@ -140,9 +140,12 @@ While it is on:
   are in WhatsApp. Only the block is read aloud, and the details go to the
   chat without it. An answer that comes back long anyway is read only up
   to the last whole sentence within 60 words.
-- In WhatsApp, `🎙️ <the question>` comes first, then the answer in full.
-  With `voice_quiet` neither is sent there, and only the spoken part
-  reaches the phone.
+- **The question itself never goes to WhatsApp.** The brain is told to
+  keep it with its notes, as a voice question with the day's date, the way
+  its `skills/plaud.md` files recordings (without that skill, wherever its
+  notes go), and not to mention that in its answer. WhatsApp gets the
+  answer in full, unless `voice_quiet` is on. Then nothing goes there, and
+  only the spoken part reaches the phone.
 - The phone reads the answer with Android's text-to-speech, with markdown
   stripped, links read as "a link to example.com" and polls read as a list.
   It picks German or English for each answer, where the phone has that

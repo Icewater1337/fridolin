@@ -1038,6 +1038,13 @@ for compatibility.
 
 ### Fixed
 
+- **Voice mode no longer posts the question to WhatsApp.** A NotePin
+  recording or a spoken question in voice mode used to arrive in the chat
+  as `🎙️ <the question>` before the answer. Now only the answer goes
+  there (and none with `plaud.voice_quiet`). The brain is told to file the
+  question with its notes, the way its `skills/plaud.md` files recordings,
+  without mentioning it in the answer (docs/PLAUD.md, "Voice mode").
+
 - **Plaud Sync 0.5 reaches the NotePin with the screen off.** In 0.4 the
   check-ins connected to the pin's last known address and missed it all
   night, until the app was opened. Each check-in now looks for the pin
