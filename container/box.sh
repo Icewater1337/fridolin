@@ -103,7 +103,7 @@ This makes $name a node of the fridolin core at $core, in a box:
      box: fridolin-box-data, fridolin-box-home, the dashboard on 127.0.0.1)
   3. sign the box in to your tailnet as its own device (a link to open)
   4. join the core with the code from !join, and start the box with its
-     updater (every 2 minutes, as you: it applies the updates the core
+     updater (every hour, as you: it applies the updates the core
      asks for, once their signature and build provenance are checked)
 EOF
 	[ "$fride" = 1 ] && cat <<EOF
@@ -189,7 +189,7 @@ if [ "$(cat /sys/module/apparmor/parameters/enabled 2>/dev/null)" = Y ] &&
 	echo "note: AppArmor restricts user namespaces here. Before this box can take the core, load the fridolin-core profile (sudo fridolin core apparmor, docs/CORE.md) and add FRIDOLIN_BOX_APPARMOR=fridolin-core to $dir/.env; the core's move check says so until then."
 fi
 
-# The box's updater (docs/NODES.md, "Box updates"): every 2 minutes, as
+# The box's updater (docs/NODES.md, "Box updates"): every hour, as
 # you, it applies an update the core asked for, once a throwaway container
 # of the current image checked it. It is the only part that reaches Docker.
 install_updater() {
@@ -204,7 +204,7 @@ install_updater() {
 <dict>
   <key>Label</key><string>ai.fridolin.box-updater</string>
   <key>ProgramArguments</key><array><string>/bin/sh</string><string>$dir/update.sh</string></array>
-  <key>StartInterval</key><integer>120</integer>
+  <key>StartInterval</key><integer>3600</integer>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>$dir/update.log</string>
   <key>StandardErrorPath</key><string>$dir/update.log</string>
@@ -212,23 +212,23 @@ install_updater() {
 </plist>
 PLIST
 		launchctl bootout "gui/$(id -u)/ai.fridolin.box-updater" 2>/dev/null || true
-		launchctl bootstrap "gui/$(id -u)" "$plist" && echo "The updater runs every 2 minutes (launchd agent ai.fridolin.box-updater)."
+		launchctl bootstrap "gui/$(id -u)" "$plist" && echo "The updater runs every hour (launchd agent ai.fridolin.box-updater)."
 		;;
 	*)
 		if command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
 			unit="$HOME/.config/systemd/user"
 			mkdir -p "$unit"
 			printf '[Unit]\nDescription=fridolin box updater\n\n[Service]\nType=oneshot\nExecStart=/bin/sh %s/update.sh\n' "$dir" >"$unit/fridolin-box-updater.service"
-			printf '[Unit]\nDescription=fridolin box updater, every 2 minutes\n\n[Timer]\nOnBootSec=2min\nOnUnitActiveSec=2min\n\n[Install]\nWantedBy=timers.target\n' >"$unit/fridolin-box-updater.timer"
+			printf '[Unit]\nDescription=fridolin box updater, every hour\n\n[Timer]\nOnBootSec=2min\nOnUnitActiveSec=1h\n\n[Install]\nWantedBy=timers.target\n' >"$unit/fridolin-box-updater.timer"
 			systemctl --user daemon-reload
-			systemctl --user enable --now fridolin-box-updater.timer >/dev/null && echo "The updater runs every 2 minutes (systemd user timer fridolin-box-updater)."
+			systemctl --user enable --now fridolin-box-updater.timer >/dev/null && echo "The updater runs every hour (systemd user timer fridolin-box-updater)."
 			echo "note: for it to run while you are logged out: loginctl enable-linger $(id -un)"
 		elif command -v crontab >/dev/null 2>&1; then
 			{
 				crontab -l 2>/dev/null | grep -v 'fridolin-box-updater' || true
-				echo "*/2 * * * * /bin/sh $dir/update.sh # fridolin-box-updater"
+				echo "0 * * * * /bin/sh $dir/update.sh # fridolin-box-updater"
 			} | crontab -
-			echo "The updater runs every 2 minutes (crontab)."
+			echo "The updater runs every hour (crontab)."
 		else
 			echo "note: no launchd, systemd or cron here: the box updates only with box.sh --update"
 		fi

@@ -445,9 +445,15 @@ func (s *Service) runUpdate(ctx context.Context, n *Node, bin Binary, path strin
 }
 
 // boxUpdateWait is how long the core waits for a box to come back on the
-// new images: the updater's round, pulling several GB, and its own wait
-// before it goes back.
-var boxUpdateWait = time.Duration(nodeproto.BoxUpdaterMinutes)*time.Minute + 30*time.Minute
+// new images: the updater's round, as often as the box says its updater
+// runs (2 minutes on a box made before it ran hourly), pulling several GB,
+// and its own wait before it goes back.
+func boxUpdateWait(updaterMinutes int) time.Duration {
+	if updaterMinutes <= 0 {
+		updaterMinutes = nodeproto.BoxUpdaterMinutes
+	}
+	return time.Duration(updaterMinutes)*time.Minute + 30*time.Minute
+}
 
 // runBoxUpdate asks a node in a box for the images of the core's version,
 // pinned by digest and signed with the update key, and waits for it to
@@ -474,7 +480,7 @@ func (s *Service) runBoxUpdate(ctx context.Context, n *Node, key ed25519.Private
 	}
 	s.setUpdate(n.ID, func(u *UpdateStatus, _ time.Time) { u.State = UpdateRestarting })
 	s.logf("nodes: %s (%s) keeps the request for %s (%s); its updater picks it up within %d minutes", n.Name, n.ID, p.Version, p.NodeImage, res.UpdaterMinutes)
-	return s.awaitUpdatedWithin(ctx, n.ID, before, boxUpdateWait)
+	return s.awaitUpdatedWithin(ctx, n.ID, before, boxUpdateWait(res.UpdaterMinutes))
 }
 
 // dropUpdate removes a transfer the update leaves on the node.

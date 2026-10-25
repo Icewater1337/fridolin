@@ -1,7 +1,8 @@
 # The box's updater on Windows (docs/NODES.md, "Box updates"), as
 # box-update.sh is on macOS and Linux: box.ps1 writes it beside the box's
 # compose file (fridolin box updater ps1 prints it) and a Scheduled Task
-# runs it every 2 minutes while the owner is signed in, hidden.
+# runs it every hour while the owner is signed in, through
+# conhost.exe --headless, so no window opens.
 #
 # Each round a throwaway container of the image the box runs now checks
 # the core's request (its signature against the core's key the box

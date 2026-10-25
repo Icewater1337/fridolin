@@ -1,7 +1,7 @@
 #!/bin/sh
 # The box's updater (docs/NODES.md, "Box updates"). box.sh writes it
 # beside the box's compose file (fridolin box updater sh prints it) and
-# runs it every 2 minutes as the owner: a launchd agent on macOS, a
+# runs it every hour as the owner: a launchd agent on macOS, a
 # systemd user timer on Linux, else cron.
 #
 # The box's services never reach Docker; this does, on the host, for one

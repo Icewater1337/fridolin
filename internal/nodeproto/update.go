@@ -117,7 +117,7 @@ type BoxUpdateResult struct {
 }
 
 // BoxUpdaterMinutes is how often a box's updater looks for a request.
-const BoxUpdaterMinutes = 2
+const BoxUpdaterMinutes = 60
 
 // Bounds of an update.
 const (
