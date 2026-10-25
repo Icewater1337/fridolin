@@ -301,9 +301,19 @@ func (m *SiteManager) createWorkspace(ctx context.Context, brainID string) error
 	if _, err := m.sandboxed(ctx, brainID, ws, time.Minute, git, "checkout", "--quiet", "-B", builderBranch(brainID), "refs/remotes/origin/"+siteBaseRef); err != nil {
 		return err
 	}
+	return m.ensureWorkspaceDeps(ctx, brainID)
+}
+
+// ensureWorkspaceDeps installs, as the brain, the dependencies the
+// workspace's package folders (site_deps.go) do not have yet: all of them
+// in a new workspace, and one a module brought since.
+func (m *SiteManager) ensureWorkspaceDeps(ctx context.Context, brainID string) error {
+	ws := m.workspace(brainID)
 	root := filepath.Join(ws, filepath.FromSlash(m.Settings().Repo.Subdir))
-	if fsx.Exists(filepath.Join(root, "package.json")) {
-		return m.workspaceInstall(ctx, brainID, root)
+	for _, dir := range missingDeps(packageDirs(ws, root)) {
+		if err := m.workspaceInstall(ctx, brainID, dir); err != nil {
+			return fmt.Errorf("installing the dependencies in %s: %w", relDir(ws, dir), err)
+		}
 	}
 	return nil
 }
@@ -383,6 +393,9 @@ func (m *SiteManager) BuilderCheck(ctx context.Context, brainID string) (CheckRe
 	res := CheckResult{Mounted: []string{}, Broken: []BrokenModule{}, Review: []ModuleChange{}}
 	node, err := m.host.Node()
 	if err != nil {
+		return res, err
+	}
+	if err := m.ensureWorkspaceDeps(ctx, brainID); err != nil {
 		return res, err
 	}
 	shell := filepath.Join(m.builderBase(brainID), "shell")
@@ -619,6 +632,9 @@ func (m *SiteManager) previewURLs(brainID string, p *sitePreview) map[string]str
 func (m *SiteManager) BuilderPreview(ctx context.Context, brainID string) (map[string]string, error) {
 	m.stopPreview(brainID)
 	if err := m.ensureBuilderShell(ctx, brainID); err != nil {
+		return nil, err
+	}
+	if err := m.ensureWorkspaceDeps(ctx, brainID); err != nil {
 		return nil, err
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

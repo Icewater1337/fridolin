@@ -1113,6 +1113,20 @@ for compatibility.
 
 ### Fixed
 
+- **Site modules find the packages of a `package.json` in a subfolder.**
+  The deploy ran `npm install` only in the site's folder, and the live
+  site started on a deploy whose `node_modules` a core move had left out,
+  so modules failed with "Cannot find package 'express'". Now the deploy
+  installs into every folder that holds the `package.json` nearest above
+  a module's `module.json` (`dashboard/package.json` for
+  `dashboard/modules/*`, or a module's own), the builder's workspace and
+  its previews do the same, the site installs what a deploy is missing
+  before it starts, and the sandbox lets the site run what each of them
+  installed. Installs with a lock file are kept in
+  `<data_dir>/site/npm-cache` by its hash, so a deploy whose dependencies
+  did not change copies them. The load error names the `package.json`
+  it went by (docs/SITE.md, "Where the package.json goes").
+
 - **A scheduled agent can hand work to FrIDE.** `fride_task` and
   `node_agent_run` refused every scheduled run ("this run answers no
   chat"). A run of an agent that reports somewhere now sends FrIDE's,

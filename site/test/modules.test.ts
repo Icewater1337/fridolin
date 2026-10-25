@@ -195,6 +195,53 @@ export default (ctx) => {
   assert.equal(readFileSync(join(root, 'alpha/data/note.txt'), 'utf8'), 'hello from the manifest')
 })
 
+// ── A package.json in a subfolder ─────────────────────────────────────────────
+
+test('a module finds the packages of the package.json above it, and a missing one names that package.json', async (t) => {
+  // As a site repository with dashboard/package.json, dashboard/lib and
+  // dashboard/modules. Two of them: Node keeps a failed import, by its path.
+  const siteRepo = (installed: boolean) => {
+    const repo = mkdtempSync(join(tmpdir(), 'site-subfolder-'))
+    t.after(() => rmSync(repo, { recursive: true, force: true }))
+    const dashboard = join(repo, 'dashboard')
+    mkdirSync(join(dashboard, 'lib'), { recursive: true })
+    writeFileSync(join(dashboard, 'package.json'), '{ "type": "module" }')
+    writeFileSync(join(dashboard, 'lib', 'search.ts'), "import 'no-such-package-here'\nexport const search = 1\n")
+    if (installed) symlinkSync(join(SITE_DIR, 'node_modules'), join(dashboard, 'node_modules'))
+    const server = { access: { roles: ['*'] }, server: { entry: 'server.ts' } }
+    writeModule(join(dashboard, 'modules'), 'finance', server, { 'server.ts': "import express from 'express'\nexport default () => express.Router()\n" })
+    writeModule(join(dashboard, 'modules'), 'search', server, { 'server.ts': "import { search } from '../../lib/search.ts'\nimport express from 'express'\nexport default () => { void search; return express.Router() }\n" })
+    return dashboard
+  }
+  const requireAuth: express.RequestHandler = (_req, _res, next) => next()
+
+  // Not installed: the message says so, and which package.json it went by.
+  const bare = siteRepo(false)
+  const before = await mountModules(express(), loadModules(join(bare, 'modules')), requireAuth)
+  const finance = before.broken.find(b => b.id === 'finance')
+  assert.ok(finance, JSON.stringify(before))
+  assert.match(finance.error, /Cannot find package 'express'/)
+  assert.ok(finance.error.includes(`${join(bare, 'package.json')} has no node_modules beside it`), finance.error)
+
+  // Installed beside it, as a deploy does: express is found from modules/finance.
+  const dashboard = siteRepo(true)
+  const after = await mountModules(express(), loadModules(join(dashboard, 'modules')), requireAuth)
+  assert.deepEqual(after.mounted, ['finance'])
+  // A package the package.json does not list, imported from dashboard/lib.
+  const search = after.broken.find(b => b.id === 'search')
+  assert.ok(search, JSON.stringify(after))
+  assert.ok(search.error.includes(`add it to ${join(dashboard, 'package.json')}`), search.error)
+})
+
+test('a module with no package.json above it is told to add one', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'site-nopkg-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  writeModule(root, 'lonely', { access: { roles: ['*'] }, server: { entry: 'server.mjs' } }, { 'server.mjs': "import 'no-such-package-here'\nexport default () => {}\n" })
+  const { broken } = await mountModules(express(), loadModules(root), (_req, _res, next) => next())
+  assert.equal(broken.length, 1)
+  assert.match(broken[0].error, /no package\.json in .*lonely or a folder above it: add one that lists it/)
+})
+
 // ── Secrets ───────────────────────────────────────────────────────────────────
 
 test('ctx.secret hands a module only the secrets it declares, and only its own', async (t) => {
