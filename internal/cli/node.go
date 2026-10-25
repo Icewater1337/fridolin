@@ -151,7 +151,7 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "fridolin node health takes no arguments")
 			return 2
 		}
-		if err := nodeagent.BoxHealthy(dir, 90*time.Second, time.Now()); err != nil {
+		if err := nodeagent.BoxHealthy(dir, boxHealthMaxAge, time.Now()); err != nil {
 			fmt.Fprintf(stderr, "fridolin node health: %v\n", err)
 			return 1
 		}
