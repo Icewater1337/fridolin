@@ -31,10 +31,13 @@ import (
 // Google sign-in for calendars.
 //
 // Google only lets an app ask for calendar access through an OAuth client
-// registered in a Google Cloud project. The bridge does not ship one: you
-// create a "Desktop app" client once (docs/CALENDAR.md) and paste its JSON
-// into the dashboard. After that every brain connects its own Google account
-// with a normal sign-in in the browser — no API keys, no files to copy.
+// registered in a Google Cloud project. The public builds ship none: you
+// create a "Desktop app" client once (the dashboard's Settings → Google
+// sign-in walks through it, docs/CALENDAR.md too) and paste it there. A
+// publisher's build may carry a built-in one instead (builtin.go), which a
+// pasted client always overrides. After that every brain connects its own
+// Google account with a normal sign-in in the browser — no API keys, no
+// files to copy.
 //
 // The sign-in returns to the bridge itself (http://127.0.0.1:<port>/), which
 // Google allows for Desktop app clients. The resulting token is written to
@@ -55,6 +58,10 @@ var calendarScopes = []string{
 	"https://www.googleapis.com/auth/calendar.events.freebusy",       // free: the busy times of the brain's calendars
 	"https://www.googleapis.com/auth/calendar.calendarlist.readonly", // the account's calendars, for the brain's page and `calendars`
 }
+
+// CalendarScopes are what a brain's calendar sign-in asks for, for the
+// setup steps that list them on the consent screen.
+func CalendarScopes() []string { return slices.Clone(calendarScopes) }
 
 // missingScopes are the calendarScopes granted lacks. Google's consent
 // screen lets the person untick some of them.
@@ -103,7 +110,10 @@ type Client struct {
 	Type         string // installed or web
 	ClientID     string
 	ClientSecret string
-	raw          []byte
+	// Source is SourceOwn or SourceBuiltin for the client a sign-in uses
+	// (Auth.Client); "" for one only parsed.
+	Source string
+	raw    []byte
 }
 
 // ParseClient reads the JSON Google Cloud Console offers for download.
@@ -139,6 +149,9 @@ type Token struct {
 	Scopes       []string `json:"scopes"`
 	Account      string   `json:"account,omitempty"`
 	Expiry       string   `json:"expiry,omitempty"`
+	// RefreshExpiry is when Google ends the sign-in, when it said so
+	// (refresh_token_expires_in: an app in Testing, time-limited access).
+	RefreshExpiry string `json:"refresh_token_expiry,omitempty"`
 }
 
 // oauthPending is a sign-in waiting for Google to send the browser back.
@@ -163,11 +176,19 @@ type oauthPending struct {
 // Options supplies startup paths and the live configuration operations
 // consumed by Google sign-in. The command owns configuration and manifests.
 type Options struct {
-	Endpoints      Endpoints
-	HTTP           *http.Client
-	ClientPath     string
-	RedirectURI    string
-	CredsDir       func() string
+	Endpoints   Endpoints
+	HTTP        *http.Client
+	ClientPath  string
+	RedirectURI string
+	CredsDir    func() string
+	// Builtin is the client baked into the build (BuiltinClient), or nil.
+	Builtin *Client
+	// HealthPath keeps the brains' grant health (health.go); "" keeps it
+	// in memory only.
+	HealthPath string
+	// OnBroken hears, once, that brainID's calendar grant stopped working:
+	// state is GrantRevoked or GrantReconsent.
+	OnBroken       func(brainID, state string)
 	Configured     func(brainID string) bool
 	UpdateManifest func(brainID string, update func(*manifest.Manifest) error) error
 }
@@ -180,6 +201,7 @@ type Auth struct {
 	pending    map[string]oauthPending  // state → sign-in in progress
 	lastError  map[string]string        // brain id → last sign-in error
 	tokenLocks map[string]chan struct{} // brain id → its token's lock; see lockToken
+	health     map[string]grantRecord   // brain id → its grant's health, loaded on first use (health.go)
 }
 
 // New creates the manager, and logs the files in the credentials
@@ -334,8 +356,18 @@ func calendarTokenBrain(name string) (brainID string, ok bool) {
 	return id, true
 }
 
-// Client returns the configured OAuth client, or nil.
+// Client returns the OAuth client sign-ins use: the one pasted under
+// Settings → Google sign-in, else the build's built-in one, else nil.
 func (g *Auth) Client() *Client {
+	if c := g.OwnClient(); c != nil {
+		return c
+	}
+	return g.Builtin()
+}
+
+// OwnClient returns the client pasted under Settings → Google sign-in, or
+// nil.
+func (g *Auth) OwnClient() *Client {
 	data, err := os.ReadFile(g.ClientPath())
 	if err != nil {
 		return nil
@@ -344,7 +376,31 @@ func (g *Auth) Client() *Client {
 	if err != nil {
 		return nil
 	}
+	c.Source = SourceOwn
 	return c
+}
+
+// Builtin returns the client baked into the build, or nil.
+func (g *Auth) Builtin() *Client {
+	if b := g.options.Builtin; b != nil && b.ClientID != "" && b.ClientSecret != "" {
+		c := *b
+		c.Type, c.Source = "installed", SourceBuiltin
+		return &c
+	}
+	return nil
+}
+
+// clientFor is the client that issued a token for clientID: a refresh
+// token works only with that one. A brain that signed in with the built-in
+// client keeps refreshing with it after you paste a client of your own,
+// until it connects again. Nil when neither is that client.
+func (g *Auth) clientFor(clientID string) *Client {
+	for _, c := range []*Client{g.OwnClient(), g.Builtin()} {
+		if c != nil && c.ClientID == clientID {
+			return c
+		}
+	}
+	return nil
 }
 
 // SetClient validates and stores the OAuth client file.
@@ -510,7 +566,10 @@ func (g *Auth) Callback(ctx context.Context, q url.Values) (string, error) {
 		g.mu.Lock()
 		g.lastError[p.brainID] = msg
 		g.mu.Unlock()
-		log.Printf("brain %s: Google sign-in failed: %s", p.brainID, msg)
+		// msg may hold what the browser brought back (Google's error), so
+		// it cannot start a line of its own in the log.
+		oneLine := strings.NewReplacer("\n", " ", "\r", " ").Replace(msg)
+		log.Printf("brain %s: Google sign-in failed: %s", p.brainID, oneLine)
 		return back, nil
 	}
 	if e := q.Get("error"); e != "" {
@@ -584,6 +643,7 @@ func (g *Auth) Callback(ctx context.Context, q url.Values) (string, error) {
 		}
 		return fail("saving the brain's calendar settings failed: " + err.Error())
 	}
+	g.signedIn(p.brainID)
 	log.Printf("brain %s: Google Calendar connected (%s)", p.brainID, MaskEmail(account))
 	// Only now: a sign-in that failed above leaves the brain with the old
 	// token, which must still work.
@@ -608,9 +668,12 @@ type tokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
 	ExpiresIn    int    `json:"expires_in"`
-	Scope        string `json:"scope"` // what Google granted, space-separated
-	Error        string `json:"error"`
-	ErrorDesc    string `json:"error_description"`
+	// RefreshExpiresIn is the refresh token's remaining life in seconds,
+	// which Google sends only for one it limited.
+	RefreshExpiresIn int    `json:"refresh_token_expires_in"`
+	Scope            string `json:"scope"` // what Google granted, space-separated
+	Error            string `json:"error"`
+	ErrorDesc        string `json:"error_description"`
 }
 
 // oauthError is a refusal from Google's token endpoint.
@@ -679,8 +742,18 @@ func (g *Auth) exchange(ctx context.Context, p oauthPending, code string) (*Toke
 	return &Token{
 		Token: tr.AccessToken, RefreshToken: tr.RefreshToken, TokenURI: g.options.Endpoints.Token,
 		ClientID: c.ClientID, ClientSecret: c.ClientSecret, Scopes: tr.grantedScopes(p.scopes),
-		Expiry: time.Now().Add(tokenLifetime(tr.ExpiresIn)).UTC().Format("2006-01-02T15:04:05.000000Z"),
+		Expiry:        time.Now().Add(tokenLifetime(tr.ExpiresIn)).UTC().Format("2006-01-02T15:04:05.000000Z"),
+		RefreshExpiry: tr.refreshExpiry(),
 	}, nil
+}
+
+// refreshExpiry is when the refresh token ends, as Token.RefreshExpiry,
+// or "" when Google set no limit.
+func (tr *tokenResponse) refreshExpiry() string {
+	if tr.RefreshExpiresIn <= 0 {
+		return ""
+	}
+	return time.Now().Add(time.Duration(tr.RefreshExpiresIn) * time.Second).UTC().Format("2006-01-02T15:04:05.000000Z")
 }
 
 // grantedScopes are the scopes Google says it granted, else asked: an
@@ -816,13 +889,14 @@ func (g *Auth) AccessToken(ctx context.Context, brainID string) (*Token, error) 
 	}
 	// A brain the sandbox does not hold can write its token file, so the
 	// client in it is not trusted: the refresh uses yours, at Google's
-	// fixed endpoint. A refresh token works only with the client that
-	// issued it, so a token from another client cannot be refreshed here.
-	c := g.Client()
-	if c == nil {
+	// fixed endpoint, or the built-in one. A refresh token works only with
+	// the client that issued it, so a token from another client cannot be
+	// refreshed here.
+	if g.Client() == nil {
 		return nil, &signInError{errors.New("add your Google OAuth client first (Settings → Google sign-in)")}
 	}
-	if t.ClientID != c.ClientID {
+	c := g.clientFor(t.ClientID)
+	if c == nil {
 		return nil, &signInError{errors.New("this brain signed in with another Google OAuth client than the one in Settings → Google sign-in — connect it again")}
 	}
 	tr, err := g.postToken(ctx, c, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {t.RefreshToken}})
@@ -837,6 +911,9 @@ func (g *Auth) AccessToken(ctx context.Context, brainID string) (*Token, error) 
 	if tr.RefreshToken != "" {
 		t.RefreshToken = tr.RefreshToken
 	}
+	if e := tr.refreshExpiry(); e != "" {
+		t.RefreshExpiry = e
+	}
 	// The access token is good for this call either way; a token not saved
 	// is only refreshed again next time.
 	if err := writeTokenFields(g.TokenPath(brainID), fields, t); err != nil {
@@ -849,7 +926,11 @@ func (g *Auth) AccessToken(ctx context.Context, brainID string) (*Token, error) 
 // as it was read, so that what an older calendar tool's library added
 // stays.
 func writeTokenFields(path string, fields map[string]json.RawMessage, t *Token) error {
-	for k, v := range map[string]any{"token": t.Token, "refresh_token": t.RefreshToken, "expiry": t.Expiry, "scopes": t.Scopes} {
+	values := map[string]any{"token": t.Token, "refresh_token": t.RefreshToken, "expiry": t.Expiry, "scopes": t.Scopes}
+	if t.RefreshExpiry != "" {
+		values["refresh_token_expiry"] = t.RefreshExpiry
+	}
+	for k, v := range values {
 		raw, err := json.Marshal(v)
 		if err != nil {
 			return err
@@ -990,6 +1071,7 @@ func (g *Auth) Disconnect(ctx context.Context, brainID string, localOnly bool) (
 	g.mu.Lock()
 	delete(g.lastError, brainID)
 	g.mu.Unlock()
+	g.forgetHealth(brainID)
 	if err := g.options.UpdateManifest(brainID, func(m *manifest.Manifest) error { m.Calendar = nil; return nil }); err != nil {
 		return revoked, note, fmt.Errorf("the token was deleted, but saving the brain's calendar settings failed: %w", err)
 	}
@@ -1073,8 +1155,10 @@ type CalendarSnapshot struct {
 	LeftoverClientCopies []string        `json:"leftover_client_copies"`
 	ListError            *string         `json:"list_error,omitempty"`
 	ReconnectNeeded      *bool           `json:"reconnect_needed,omitempty"`
-	Selected             []string        `json:"selected"`
-	TokenPath            string          `json:"token_path"`
+	// Health is the grant's health (health.go), when connected.
+	Health    *GrantHealth `json:"health,omitempty"`
+	Selected  []string     `json:"selected"`
+	TokenPath string       `json:"token_path"`
 }
 
 // CalendarStatus returns the current connection and optional calendar list.
@@ -1126,6 +1210,7 @@ func (g *Auth) CalendarStatus(ctx context.Context, brainID string, cal *manifest
 				}
 			}
 		}
+		g.Note(brainID, err)
 		if err != nil {
 			message := err.Error()
 			resp.ListError = &message
@@ -1134,6 +1219,7 @@ func (g *Auth) CalendarStatus(ctx context.Context, brainID string, cal *manifest
 			resp.ReconnectNeeded = &reconnect
 		}
 	}
+	resp.Health = g.Health(brainID)
 	return resp
 }
 

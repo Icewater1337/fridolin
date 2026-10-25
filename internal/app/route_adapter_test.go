@@ -11,6 +11,7 @@ import (
 )
 
 func TestReplyChatKeepsHeldDMAndRetiredBrainIdentity(t *testing.T) {
+	t.Parallel()
 	const group = "120363000000000000@g.us"
 	const owner = "15551234567@s.whatsapp.net"
 

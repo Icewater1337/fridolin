@@ -21,26 +21,34 @@ import (
 var errCap = &cloud.RcloneError{Op: "rcd", Key: lease.Key, ExitCode: -1, Err: errors.New("rclone rcd answered 403"),
 	Stderr: "failed to authorize account: Transaction cap exceeded (403 transaction_cap_exceeded)"}
 
-// failedCalls counts the calls failingDir refused.
-var failedCalls atomic.Int64
-
-// failingDir is a cloud.Dir whose calls fail with errCap while failing.
-func failingDir(t *testing.T) (*cloud.Dir, *atomic.Bool) {
-	var failing atomic.Bool
+// failingDir is a cloud.Dir whose calls fail with errCap while failing;
+// failed counts the calls it refused.
+func failingDir(t *testing.T) (dir *cloud.Dir, failing *atomic.Bool, failed *atomic.Int64) {
+	failing, failed = new(atomic.Bool), new(atomic.Int64)
 	return &cloud.Dir{Root: t.TempDir(), Fail: func(string, string) error {
 		if failing.Load() {
-			failedCalls.Add(1)
+			failed.Add(1)
 			return errCap
 		}
 		return nil
-	}}, &failing
+	}}, failing, failed
+}
+
+// aheadClock is the system clock, moved ahead by what ahead holds.
+type aheadClock struct{ ahead atomic.Int64 }
+
+func (c *aheadClock) Now() time.Time { return time.Now().Add(time.Duration(c.ahead.Load())) }
+
+func (c *aheadClock) Sleep(ctx context.Context, d time.Duration) error {
+	return lease.SystemClock{}.Sleep(ctx, d)
 }
 
 // The lease store refusing at start (B2's cap used up): a device that
 // never held the lease refuses; one that held it last starts unverified,
 // keeps its channels, and is held again once the store answers.
 func TestLeaseStoreRefusingAtStart(t *testing.T) {
-	st, failing := failingDir(t)
+	t.Parallel()
+	st, failing, failedCalls := failingDir(t)
 	failing.Store(true)
 	opts := Options{LeaseStore: st, LeaseSettle: time.Millisecond, LeaseRetry: 20 * time.Millisecond}
 	_, err := newRunningCore(t, leaseConfig, opts)
@@ -88,14 +96,20 @@ func TestLeaseStoreRefusingAtStart(t *testing.T) {
 // Renewals that fail on the store leave the channels running, however
 // long; only another device's record, once the store answers, stops them.
 func TestLeaseRenewalFailuresKeepTheChannels(t *testing.T) {
-	st, failing := failingDir(t)
-	c, err := newRunningCore(t, leaseConfig, Options{LeaseStore: st, LeaseSettle: time.Millisecond, LeaseRetry: 20 * time.Millisecond})
+	t.Parallel()
+	st, failing, failed := failingDir(t)
+	clock := &aheadClock{}
+	c, err := newRunningCore(t, leaseConfig, Options{LeaseStore: st, LeaseSettle: time.Millisecond, LeaseRetry: 20 * time.Millisecond, LeaseClock: clock})
 	if err != nil {
 		t.Fatal(err)
 	}
 	failing.Store(true)
 	waitUntil(t, "the lease to be unverified", func() bool { ls := c.leaseStatus(); return ls != nil && ls.State == "unverified" })
-	time.Sleep(5 * time.Second) // past the staleness window (4 s)
+	// Past the staleness window (4 s) on the lease's clock, and renewals
+	// fail there too.
+	clock.ahead.Store(int64(5 * time.Second))
+	n := failed.Load()
+	waitUntil(t, "renewals past the staleness window", func() bool { return failed.Load() > n+2 })
 	if c.core.lost.Load() {
 		t.Fatal("store failures stopped the channels")
 	}

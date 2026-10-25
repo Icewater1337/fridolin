@@ -13,6 +13,7 @@ import (
 // and the working notice as it is, whatever either starts with: the
 // bridge used to tell the two apart by a leading ⏳.
 func TestMidRunMessagesReachTheChatMarked(t *testing.T) {
+	t.Parallel()
 	const dm = "15551234567@s.whatsapp.net"
 	tb := newTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})

@@ -28,8 +28,9 @@ func testManifest(id string) manifest.Manifest {
 }
 
 func TestCheckBrainPath(t *testing.T) {
+	t.Parallel()
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	cfg := &config.File{DataDir: filepath.Join(home, ".fridolin")}
 	others := []string{filepath.Join(home, "brains", "medical")}
 
@@ -86,8 +87,10 @@ func TestCheckBrainPath(t *testing.T) {
 // folder held: a brain at your home folder read the data dir and ~/.ssh.
 // Now each is left out with an issue, and the others still run.
 func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
+	// Serial: the sandbox protects the folders of the process's PATH, which
+	// it sets.
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	if err := os.MkdirAll(filepath.Join(home, "elsewhere"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -137,6 +140,7 @@ func TestResolveBrainsRefusesFoldersTheSandboxProtects(t *testing.T) {
 }
 
 func TestScaffoldBrainNeverOverwrites(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "brain")
 	_ = os.MkdirAll(dir, 0o700)
 	_ = os.WriteFile(filepath.Join(dir, "brain-prompt.md"), []byte("mine"), 0o600)
@@ -166,6 +170,7 @@ func TestScaffoldBrainNeverOverwrites(t *testing.T) {
 // adds its own and loads the folder's CLAUDE.md and .claude/. A brain told
 // otherwise looks for its instructions in the wrong place.
 func TestScaffoldedPromptSaysWhatItIs(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "brain")
 	m := testManifest("fam")
 	if _, err := registry.Scaffold(dir, &m, brainTemplates); err != nil {
@@ -276,6 +281,7 @@ func FuzzDecodeManifest(f *testing.F) {
 // as they are in the checkout: all the skills, in name order, and the
 // prompt with its placeholder.
 func TestEmbeddedTemplatesAreTheExamples(t *testing.T) {
+	t.Parallel()
 	prompt, err := os.ReadFile(filepath.Join(repoDir, "examples", "brain-prompt.example.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -305,6 +311,7 @@ func TestEmbeddedTemplatesAreTheExamples(t *testing.T) {
 // The brain.json in docs/BRAINS.md is the one example of a manifest, so it
 // must be one this version accepts as it stands.
 func TestBrainsDocExampleIsAValidManifest(t *testing.T) {
+	t.Parallel()
 	doc, err := os.ReadFile(filepath.Join(repoDir, "docs", "BRAINS.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -333,6 +340,7 @@ func TestBrainsDocExampleIsAValidManifest(t *testing.T) {
 // Older versions wrote the checkout's path into the prompt, and a literal
 // <bridge-repo> into the skills.
 func TestBrainTemplatesNameNoPaths(t *testing.T) {
+	t.Parallel()
 	m := testManifest("a")
 	m.Name = "Family"
 	exe, _ := os.Executable()
@@ -384,6 +392,7 @@ func TestBrainTemplatesNameNoPaths(t *testing.T) {
 // told the brain cannot run; chats no brain left out claims still go to
 // the default brain. A default brain left out keeps what it would take.
 func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
+	t.Parallel()
 	const otherGroup = "120363000000000009@g.us"
 	cases := []struct {
 		name            string
@@ -421,9 +430,9 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			home := fsx.Canonical(t.TempDir())
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			path := writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data", "claude_path": "`+home+`/no-claude", "allowed_groups": ["`+testGroup+`", "`+otherGroup+`"]`+brainDirsJSON(t, c.brains(home)...)+`}`)
-			cfg, err := LoadConfig(path)
+			cfg, err := loadConfig(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -454,8 +463,8 @@ func TestLeftOutBrainsKeepTheirChats(t *testing.T) {
 	}
 	t.Run("Plaud recordings wait", func(t *testing.T) {
 		home := fsx.Canonical(t.TempDir())
-		t.Setenv("HOME", home)
-		cfg, err := LoadConfig(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data", "allowed_numbers": ["15551234567"]`+brainDirsJSON(t,
+		setenv(t, "HOME", home)
+		cfg, err := loadConfig(t, writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data", "allowed_numbers": ["15551234567"]`+brainDirsJSON(t,
 			config.BrainRef{Path: home + "/gone", Approved: &manifest.Manifest{ID: "personal", Name: "personal", Routing: manifest.Routing{HandlesDMs: true}}},
 			brainFolder(t, home+"/work", manifest.Manifest{ID: "work", Routing: manifest.Routing{Default: true}}),
 		)+`}`))

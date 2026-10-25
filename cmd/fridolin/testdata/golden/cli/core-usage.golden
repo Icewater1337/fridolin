@@ -33,6 +33,11 @@ On the host that runs Docker:
                        check the image's build provenance (GitHub's attestation
                        for image.yml on main), pull it by digest and tag it as
                        this version's, for start (--check: only say whether it is here)
+  fridolin core files export|import|forget
+                       in the core's container (core run core files …): the secret
+                       files of sandbox.credentials_dir a core move carries, as
+                       JSON; import (from stdin) writes only those not there, 0600;
+                       forget removes those named on stdin (what a move wrote)
   fridolin core rehearse [--json]
                        import the latest export into a scratch volume
                        (fridolin-move-rehearsal), check it, and remove the volume:
@@ -60,6 +65,11 @@ In the core (docker exec fridolin-core fridolin core ...):
                                  a core running (a core move's target that gives up)
   fridolin core status [--json]  who holds the core lease, this device's id and the
                                  latest export (with --json: as a core move reads it)
+  fridolin core forget-data [--json]
+                                 empty this data dir, which a core move brought to a
+                                 machine the core has left (its agent runs it when the
+                                 owner says forget): refused while a core runs on it,
+                                 and unless another device's core holds the lease
   core export takes --move ID (a core move's id, written into the export's
   manifest and info) and --json (print the export's info).
 

@@ -6,21 +6,26 @@ import { get, post } from '../app/api.js';
 import { h, mount, paint } from '../lib/dom.js';
 import { brainLabel } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
-import { toast } from '../components/toast.js';
+import { toastError } from '../components/toast.js';
 import { btn } from '../components/buttons.js';
 import { select } from '../components/fields.js';
 import { pill, callout, pageHeader, loading, timeAgo } from '../components/common.js';
 
+/** @import { PageModule } from '../app/page.js' */
+/** @import { BuildChat, BuildMessage, BuilderRow, PreviewURLs, SiteProposal } from '../../types/api.js' */
+
 const STORE_KEY = 'bridgeBuildBrain';
 
-export default {
+export default /** @satisfies {PageModule} */ ({
   title: 'Build',
   render(root, ctx) {
     const body = h('div', loading('Loading…'));
     mount(root, pageHeader('Build', 'Ask a builder brain for a page or a change. It builds and previews it in its sandbox and proposes it; you approve it under Site.'), body);
 
+    /** @type {BuilderRow[]} */
     let brains = [];
     let brainID = '';
+    /** @type {BuildChat | null} */
     let chat = null;
     let draft = '';
 
@@ -53,13 +58,14 @@ export default {
         input.value = ''; draft = '';
         poller.kick();
       } catch (e) {
-        toast(e.message, 'bad');
+        toastError(e);
       } finally {
         sendBtn.disabled = false;
       }
     }
 
-    function paintChat() {
+    /** @param {BuildChat} chat */
+    function paintChat(chat) {
       // The newest message comes into view, unless you scrolled up to read.
       const atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 40;
       if (paint(messagesEl, chat.messages, renderMessages) && (atBottom || chat.messages.length <= 1)) messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -72,26 +78,31 @@ export default {
       paint(previewEl, chat.preview || null, renderPreview);
     }
 
+    /** @param {BuildMessage[]} messages */
     function renderMessages(messages) {
       return messages.length ? messages.map((m) => h(`div.build-msg.${m.role}`,
         h('div.build-text', m.text), h('div.build-time', timeAgo(m.at))))
         : h('p.muted.build-empty', 'Nothing yet. Say what the site should have — the brain asks if it needs to know more.');
     }
 
+    /** @param {{busy: boolean, running: boolean, last: string}} state */
     function renderWorking({ busy, running, last }) {
       return busy ? h('div.build-working', h('span.spinner'), h('span', running ? 'Working' : 'Waiting its turn'),
         last ? h('span.muted.small.build-last', last) : null) : null;
     }
 
+    /** @param {boolean} running */
     function renderStop(running) {
       return running ? btn('Stop', { small: true, icon: 'x', onClick: async () => { await post(`/api/site/build/${encodeURIComponent(brainID)}/stop`); poller.kick(); } }) : null;
     }
 
+    /** @param {SiteProposal | null} p */
     function renderProposal(p) {
       return p ? callout('info', `Proposed: ${p.title}`,
         h('div', 'Waiting for you under ', h('a', { href: '#/site' }, 'Site → Proposals'), ' — ', timeAgo(p.at))) : null;
     }
 
+    /** @param {PreviewURLs | null} preview */
     function renderPreview(preview) {
       if (!preview) {
         return h('div.build-preview-empty',
@@ -117,7 +128,7 @@ export default {
       try {
         await post(`/api/site/previews/${encodeURIComponent(brainID)}`);
         poller.kick();
-      } catch (e) { toast(e.message, 'bad'); }
+      } catch (e) { toastError(e); }
     }
 
     function renderLayout() {
@@ -158,7 +169,7 @@ export default {
         paint(body, 'chat', renderLayout);
       }
       chat = await get(`/api/site/build/${encodeURIComponent(brainID)}`, { signal });
-      paintChat();
+      paintChat(chat);
     }, () => (chat && (chat.running || chat.queued) ? 1500 : 5000));
   },
-};
+});

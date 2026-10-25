@@ -139,6 +139,7 @@ func (h *harness) WaitBackup() {
 // TestGoldenGETEndpoints pins every GET the dashboard and scripts use, on a
 // bridge with a brain, an ignored chat, a backup, a calendar and Plaud.
 func TestGoldenGETEndpoints(t *testing.T) {
+	t.Parallel()
 	h, s, _ := goldenBridge(t)
 	tests := []struct {
 		name, path string
@@ -169,6 +170,7 @@ func TestGoldenGETEndpoints(t *testing.T) {
 		{"backup-versions-unknown-brain", "/api/brains/nope/backup/versions", nil},
 		{"vault-status", "/api/vault/status", nil},
 		{"google-client", "/api/google/client", nil},
+		{"calendar-health", "/api/calendar/health", nil},
 		{"calendar", "/api/brains/main/calendar?list=0", nil},
 		{"calendar-unknown-brain", "/api/brains/nope/calendar", nil},
 		{"plaud-status", "/api/plaud/status", nil},
@@ -208,6 +210,7 @@ func TestGoldenGETEndpoints(t *testing.T) {
 // TestGoldenConfigWrites pins what PUT /api/config answers, and the errors
 // of the endpoints that change settings, with their status codes.
 func TestGoldenConfigWrites(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	s := h.scrubber()
 	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})

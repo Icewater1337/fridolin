@@ -50,6 +50,10 @@ type MoveReport struct {
 	Source  MoveEnd `json:"source"`
 	Target  MoveEnd `json:"target"`
 	Version string  `json:"version"`
+	// SecretFiles are the secret files of the source's credentials folder
+	// that go with the host secrets (#187), SecretFilesDir that folder.
+	SecretFiles    []string `json:"secret_files,omitempty"`
+	SecretFilesDir string   `json:"secret_files_dir,omitempty"`
 	// Image is the core's image by digest, "" for a local build;
 	// ImagePresent whether the target has it, ImageNote what it said.
 	Image        string `json:"image,omitempty"`
@@ -62,8 +66,10 @@ type MoveReport struct {
 	ExportBytes  int64    `json:"export_bytes,omitempty"`
 	Outage       string   `json:"outage,omitempty"`
 	MachineBound []string `json:"machine_bound"`
-	Warnings     []string `json:"warnings"`
-	Blocking     []string `json:"blocking"`
+	// Site is the site and what becomes of it, nil when it is off.
+	Site     *MoveSite `json:"site,omitempty"`
+	Warnings []string  `json:"warnings"`
+	Blocking []string  `json:"blocking"`
 }
 
 // ErrMoveBlocked is a move whose pre-flight found something against it.
@@ -105,7 +111,7 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 			if i == 1 {
 				// Decided once moveImage knows whether the target has the
 				// image: without it, nothing can read the core there yet.
-				dstUnread = fmt.Sprintf("%s: the core there cannot be read: %s", n.Name, c.CoreError)
+				dstUnread = c.CoreError
 				continue
 			}
 			rep.Blocking = append(rep.Blocking, fmt.Sprintf("%s: the core there cannot be read: %s", n.Name, c.CoreError))
@@ -125,6 +131,12 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 	}
 	if checks[0].ID != "" {
 		rep.MachineBound = append(rep.MachineBound, checks[0].MachineBound...)
+		rep.SecretFiles, rep.SecretFilesDir = checks[0].SecretFiles, checks[0].SecretFilesDir
+		if e := checks[0].SecretFilesError; e != "" {
+			// The core there may need them (calendars, the dashboard's
+			// users): never move without them.
+			rep.Blocking = append(rep.Blocking, fmt.Sprintf("%s: the secret files of the core's credentials folder cannot be read: %s", srcName, e))
+		}
 	}
 	if checks[1].ID != "" {
 		need := uint64(2*rep.ExportBytes) + 4<<30
@@ -139,20 +151,45 @@ func (s *Service) MoveCheck(ctx context.Context, src, dst string) (MoveReport, e
 			rep.Warnings = append(rep.Warnings, dstName+" runs FrIDE: once the secrets are there, any FrIDE task can read them")
 		}
 		s.moveImage(ctx, &rep, dst, true)
-	}
-	if dstUnread != "" {
-		if rep.ImagePresent {
-			rep.Blocking = append(rep.Blocking, dstUnread)
-		} else {
-			// A host that never ran this version reads its core with the
-			// image the move pulls first; the lease is the source's to hold.
-			rep.Warnings = append(rep.Warnings, fmt.Sprintf("%s has not the core's image yet, so its core cannot be read before the move pulls it", rep.Target.Name))
+		if rep.Target.Box {
+			s.moveToBox(&rep, checks[1])
 		}
 	}
+	if dstUnread != "" {
+		// The target's core is only told about: the source holds the
+		// lease, which rules out a second core. A host that is no core
+		// yet cannot read it before the move pulls the image and brings
+		// the host secrets (the bucket's keys), so it never blocks.
+		why := "its core cannot be read until the move brings the image and the host secrets"
+		if rep.ImagePresent {
+			why = "its core cannot be read until the move brings the host secrets (" + dstUnread + ")"
+		}
+		rep.Warnings = append(rep.Warnings, fmt.Sprintf("%s: %s", rep.Target.Name, why))
+	}
+	s.moveSite(&rep)
 	// About 10 MB/s each way, plus stopping and starting.
 	secs := 2*rep.ExportBytes/(10<<20) + 120
 	rep.Outage = fmt.Sprintf("about %d to %d minutes", max(1, secs/60), max(2, 2*secs/60))
 	return rep, nil
+}
+
+// moveToBox is what the pre-flight adds for a box target (docs/NODES.md,
+// "The core in a box"): its own checks (the core's settings, the brains'
+// sandbox) block when they fail, and the owner learns what changes when
+// the core runs in a box.
+func (s *Service) moveToBox(rep *MoveReport, c nodeproto.CoreCheckResult) {
+	name := rep.Target.Name
+	for _, it := range c.Setup {
+		if it.Required && it.Status == "fail" {
+			rep.Blocking = append(rep.Blocking, fmt.Sprintf("%s: %s: %s", name, it.Title, it.Detail))
+		}
+	}
+	rep.Warnings = append(rep.Warnings,
+		fmt.Sprintf("%s is a box: the core runs in its node container, the brain folders in its volume fridolin-box-data. They go with every export and come back on a move back, but no folder of that machine shows them, so Finder or Obsidian there cannot edit them", name),
+		fmt.Sprintf("the dashboard on %s is at http://127.0.0.1:8765 (FRIDOLIN_BOX_DASHBOARD_PORT in the box's .env), and on the tailnet as before", name))
+	if len(rep.MachineBound) > 0 {
+		rep.Warnings = append(rep.Warnings, fmt.Sprintf("what is bound to %s stays there and runs on its node, called over the node channel while it is online: a box runs no host scripts", rep.Source.Name))
+	}
 }
 
 // moveImage finds the core's image by digest and asks the target whether
@@ -290,6 +327,14 @@ func cloneMove(r *MoveRecord) MoveRecord {
 	return cp
 }
 
+// MoveActive is the id of the move that runs, "" for none ("checking"
+// while one is checked before it starts).
+func (s *Service) MoveActive() string {
+	s.moveMu.Lock()
+	defer s.moveMu.Unlock()
+	return s.moveActive
+}
+
 // Move is the record of move id.
 func (s *Service) Move(id string) (MoveRecord, error) {
 	if err := nodeproto.CheckMoveID(id); err != nil {
@@ -416,7 +461,10 @@ func (s *Service) runMove(ctx context.Context, r *MoveRecord, o MoveOptions) {
 		fail("the host secrets: %v", err)
 		return
 	}
-	s.moveStep(r, "", "secrets", "%s: %d stored, %d unchanged (names only through the core)", r.TargetName, len(tr.Stored), len(tr.Unchanged))
+	s.moveStep(r, "", "secrets", "%s: %d stored, %d unchanged; secret files: %d stored, %d kept (names only through the core)", r.TargetName, len(tr.Stored), len(tr.Unchanged), len(tr.FilesStored), len(tr.FilesKept))
+	if tr.FilesError != "" {
+		s.moveStep(r, "", "secrets", "the secret files of %s could not be read, so none went: %s", r.SourceName, tr.FilesError)
+	}
 	var reh nodeproto.CoreRehearsal
 	rctx, cancel := context.WithTimeout(ctx, time.Hour)
 	err = s.Call(rctx, dst, nodeproto.MethodCoreRehearse, nodeproto.CoreRehearseParams{Move: r.ID}, &reh)
@@ -455,6 +503,12 @@ func (s *Service) runMove(ctx context.Context, r *MoveRecord, o MoveOptions) {
 		return
 	}
 	s.moveStep(r, "", "handoff", "%s waits for the core", r.TargetName)
+	if s.onStopping != nil {
+		s.moveMu.Lock()
+		cp := cloneMove(r)
+		s.moveMu.Unlock()
+		s.onStopping(cp)
+	}
 	// From here the source stops this core (when it runs there): this
 	// record goes into the final export as it is now.
 	if err := s.Call(ctx, src, nodeproto.MethodCoreRelease, signed, &accepted); err != nil {

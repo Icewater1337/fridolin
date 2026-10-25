@@ -42,6 +42,7 @@ func (r *scriptedRclone) answer(op, out string, err error) {
 }
 
 func TestRcloneRetire(t *testing.T) {
+	t.Parallel()
 	notFound := errors.New("rclone purge: exit status 3: ERROR : error listing: directory not found")
 	refused := errors.New("rclone purge: exit status 1: googleapi: Error 403: The user may not have granted the app 202264815644 write access to all of the children of file X., appNotAuthorizedToChild")
 	ctx := context.Background()
@@ -126,6 +127,7 @@ func opsOf(calls []string) string {
 // TestExecRcloneMasksSecrets: what rclone says comes back with the
 // secrets masked.
 func TestExecRcloneMasksSecrets(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "rclone")
 	writeFile(t, bin, "#!/bin/sh\necho \"failed with s3cret-value\" >&2\nexit 1\n")
@@ -141,6 +143,7 @@ func TestExecRcloneMasksSecrets(t *testing.T) {
 // TestRetiredWithLeftover: a store retired with something left for the
 // owner is no longer "copying", and says what is left.
 func TestRetiredWithLeftover(t *testing.T) {
+	t.Parallel()
 	st := encryptionState{Retired: map[string]time.Time{"drive": time.Now()}, Left: map[string]string{"drive": "delete it"}}
 	b := vaultBackends{restic: &snapshot.Restic{}}
 	for _, l := range describeLayers(b, vaultCreds{SnapCryptPassword: "set"}, st, true) {

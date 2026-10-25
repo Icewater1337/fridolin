@@ -62,6 +62,7 @@ func tree(t *testing.T, s *scrubber, dir string, show ...string) []byte {
 // bridge's own configuration is staged in, and the rclone commands of one
 // run, a brain and the bridge, then the prune.
 func TestGoldenBackupFiles(t *testing.T) {
+	t.Parallel()
 	h, s, fakes := goldenBridge(t)
 	backup := filepath.Join(h.DataDir(), "backup")
 	filter, err := os.ReadFile(filepath.Join(backup, "filters-main.txt"))
@@ -89,6 +90,7 @@ func TestGoldenBackupFiles(t *testing.T) {
 // files and their modes, brain.json and the starter prompt in full, and the
 // examples' skills by checksum.
 func TestGoldenScaffold(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "notes", Name: "Notes", Routing: manifest.Routing{Groups: []string{harnessGroup}}})
 	assertGolden(t, "scaffold/tree.golden", tree(t, h.scrubber(), dir, manifest.File, manifest.DefaultPromptFile, prompttext.IdentityMapPath))

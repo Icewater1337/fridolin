@@ -51,6 +51,13 @@ type CoreTransferReport struct {
 	Sent      []string `json:"sent,omitempty"`
 	Stored    []string `json:"stored,omitempty"`
 	Unchanged []string `json:"unchanged,omitempty"`
+	// FilesSent are the secret files of the core's credentials folder
+	// that went along (#187), FilesStored and FilesKept what the target
+	// wrote and what it had already; FilesError why the source sent none.
+	FilesSent   []string `json:"files_sent,omitempty"`
+	FilesStored []string `json:"files_stored,omitempty"`
+	FilesKept   []string `json:"files_kept,omitempty"`
+	FilesError  string   `json:"files_error,omitempty"`
 }
 
 // ErrCoreTransfer is a transfer whose checks failed.
@@ -148,13 +155,13 @@ func (s *Service) coreTransferRun(ctx context.Context, src, dst string, rep Core
 	if err := s.Call(ctx, src, nodeproto.MethodCoreSecretsSend, nodeproto.CoreSecretsSendParams{Offer: offer}, &bundle); err != nil {
 		return rep, fmt.Errorf("%s: sending: %w", rep.Source.Name, err)
 	}
-	rep.Sent = bundle.Names
+	rep.Sent, rep.FilesSent, rep.FilesError = bundle.Names, bundle.Files, bundle.FilesError
 	var got nodeproto.CoreSecretsReceived
 	if err := s.Call(ctx, dst, nodeproto.MethodCoreSecretsReceive, nodeproto.CoreSecretsReceiveParams{Move: rep.Move, From: src, Ciphertext: bundle.Ciphertext, Replace: o.Replace}, &got); err != nil {
 		return rep, fmt.Errorf("%s: storing: %w", rep.Target.Name, err)
 	}
-	rep.Ran, rep.Stored, rep.Unchanged = true, got.Stored, got.Unchanged
-	s.logf("nodes: moved %d host secrets from %s to %s (move %s; %d stored, %d unchanged)", len(bundle.Names), src, dst, rep.Move, len(got.Stored), len(got.Unchanged))
+	rep.Ran, rep.Stored, rep.Unchanged, rep.FilesStored, rep.FilesKept = true, got.Stored, got.Unchanged, got.FilesStored, got.FilesKept
+	s.logf("nodes: moved %d host secrets and %d secret files from %s to %s (move %s; %d stored, %d unchanged, %d files stored, %d kept)", len(bundle.Names), len(bundle.Files), src, dst, rep.Move, len(got.Stored), len(got.Unchanged), len(got.FilesStored), len(got.FilesKept))
 	return rep, nil
 }
 

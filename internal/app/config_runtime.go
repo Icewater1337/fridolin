@@ -12,13 +12,10 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
-// runTimeoutUnit is what one of run_timeout_minutes is, a variable so that
-// tests need not wait a minute.
-var runTimeoutUnit = time.Minute
-
-// runTimeout is how long a brain's run may take, 0 for no limit.
-func runTimeout(c *config.Settings) time.Duration {
-	return c.RunTimeout / time.Minute * runTimeoutUnit
+// runTimeout is how long a brain's run may take, 0 for no limit, with unit
+// what one of run_timeout_minutes is (waits.runTimeoutUnit).
+func runTimeout(c *config.Settings, unit time.Duration) time.Duration {
+	return c.RunTimeout / time.Minute * unit
 }
 
 // protectDataDir takes group and other access away from the data dir and
@@ -43,7 +40,7 @@ func protectDataDir(cfg *config.Settings) {
 	// check.
 	dataDir := AbsPath(cfg.DataDir)
 	dbDir := AbsPath(filepath.Dir(cfg.DBPath))
-	home := HomeDir()
+	home := cfg.Home
 	homeOrAbove := func(dir string) bool {
 		return home != "" && fsx.Within(fsx.Canonical(home), fsx.Canonical(dir))
 	}

@@ -234,7 +234,20 @@ dir.
 
 The full runbook is docs/CORE.md, "Moving the core to another machine".
 The core is the container image plus the `fridolin-data` volume; on
-Windows it runs in Docker Desktop with WSL2. In short:
+Windows it runs in Docker Desktop with WSL2.
+
+**A box target first.** When this machine is a node in a box (path B),
+or can become one, and the person's fridolin already moves itself (both
+machines core hosts), no steps here are needed: turn core-host on in
+the box (`docker compose exec node fridolin node core-host on
+--state-dir /node` in `~/.fridolin-box`, `%LOCALAPPDATA%\fridolin-box` on
+Windows), have the person `!approve` it and pin it on the current core's
+host (`fridolin node core-host trust ID --key KEY`, the line `… core-host
+show` prints), then the person sends `!movecore <box>` and votes. The
+box runs the core in its own container (docs/NODES.md, "The core in a
+box"; docs/CORE.md, "Moving the core to a box"). On Ubuntu the box first
+needs `FRIDOLIN_BOX_APPARMOR` (the same section); the pre-flight says
+what else is missing. Otherwise, by hand:
 
 1. **Tools**: Git, Go, Tailscale (as in B), and Docker. Windows:
    `wsl --install --no-distribution` elevated, restart, then `winget
@@ -360,12 +373,22 @@ machine must already be a node (path B). In short:
 
 - `make check` runs what CI's build, lint and test jobs run: gofmt, both
   `go vet` runs, `go mod tidy -diff`, the race tests, staticcheck, exhaustive,
-  shellcheck, ruff, actionlint, the action-pin check, ESLint on the
-  dashboard, the Python, web, personal-data-check, action-pin-check and
+  shellcheck, ruff, actionlint, the action-pin check, ESLint and tsc on
+  the dashboard, the Python, web, personal-data-check, action-pin-check and
   Makefile tests and a dev-mode smoke test (`make help` lists the
   targets).
   CI also runs the site's tests and the fuzz targets (both below),
   govulncheck, CodeQL and the personal-data scan of the pushed commits.
+  CI runs every Go test on Linux, and vets and lints macOS's and
+  Windows's files there too (`GOOS`, `make lint-go-os`). macOS and
+  Windows test only what differs there (`make os-tests`,
+  `scripts/os-tests.sh`): packages built from other files for that
+  system, the tests in files with a build constraint, and what
+  `.github/os-specific-packages.txt` adds. A package whose code takes
+  another way through `runtime.GOOS`, or drives a program only one
+  system has, goes into that file. The whole macOS suite runs nightly
+  and on demand (`.github/workflows/macos-full.yml`); its failures open
+  issues labelled `ci-macos-nightly`.
   `make check` builds only into temp dirs; `make build` writes
   `bin/fridolin`, and `make install` also copies it to `~/.local/bin`.
   None of them touches the service, which runs the copy in
@@ -382,7 +405,18 @@ machine must already be a node (path B). In short:
   package's own `testdata` through `pkgDir`. Tests set up brains as the
   bridge runs them, in folders with a `brain.json` listed in `brain_dirs`
   (`brainFolder`, `addFolderBrain`); a config with inline `"brains"` no
-  longer loads.
+  longer loads. The tests of `internal/app` run in parallel: each calls
+  `t.Parallel()` first and has an environment of its own, in which
+  `setenv` sets `HOME` and the fake CLIs' `FRIDOLIN_FAKE_*`; the bridges,
+  brain managers and configs it makes read that one (`envOf`,
+  `app.Options.Env`), not the process's. The waits a test shortens (a
+  stop's grace, run timeouts, retries) and the hooks it watches go in
+  `optionsOf(t)` before it makes the bridge, never in a package variable.
+  A test that must change what the whole process shares (its environment,
+  working directory, standard logger or a package variable) says why in a
+  `// Serial:` comment first instead, and runs before the parallel ones;
+  `TestEveryTestSaysWhetherItRunsInParallel` holds every test to one or
+  the other.
 - The golden files in `cmd/fridolin/testdata/golden` pin what the bridge says and writes
   today: every GET of the API, config writes and their errors, the files the
   dashboard serves, sandbox profiles, prompts and the Claude CLI's
@@ -420,7 +454,12 @@ machine must already be a node (path B). In short:
   `testdata` first in a package that has none), where plain `go test`
   runs it from then on, so commit it with the fix. `make fuzz-short` runs
   every target for 10 seconds (set `FUZZTIME`); CI fuzzes every target for
-  20 seconds on each push to main.
+  20 seconds on each push to main. A run on main that fails opens or
+  updates an issue labelled `ci-main` per failing fuzz target or test
+  ("CI on main: FuzzX failing", `scripts/ci-report.sh`), with the
+  failure, the run's link and a fuzz target's failing input from the
+  run's `fuzz-failing-inputs` artifact; a later run that passes closes
+  it. Fix those before new work: a red main teaches everyone to ignore red.
 - The Python helpers in `tools/` have stdlib-only tests that never touch the
   network: `python3 -m unittest discover -s tools/tests` (`make test-py`).
   Keep them passing on Python 3.9. `make lint-py` runs ruff
@@ -477,6 +516,27 @@ machine must already be a node (path B). In short:
   `web/eslint.config.js` (names that are not defined, code that is never
   used), which needs Node 22.13+: npx fetches the version the Makefile
   pins the first time, and nothing is installed into the checkout.
+  `make typecheck-web` runs TypeScript's checker (`tsc --noEmit`, pinned
+  and fetched the same way) with `web/tsconfig.json` on the modules and
+  `web/test/tsconfig.json` on the tests. Nothing is built: the modules
+  stay plain JavaScript, typed with JSDoc (`@param`, `@typedef`,
+  `@template`). The shared types are `Child` and `Attrs` in `lib/dom.js`
+  (what `h()` takes; `h('input')` is an `HTMLInputElement`), `Resource`
+  in `app/resources.js`, `Page` and `PageModule` in `app/page.js`, and
+  the JSON the bridge's GET endpoints answer in `web/types/api.d.ts`,
+  which `get(path)` and `resource(path)` look up by path (`GetResponse`);
+  a change to a GET response changes its type there. Bring a type in
+  with `/** @import { Brain } from '../../types/api.js' */`, never with
+  `import('…')` in a type, which the modules test takes for a dynamic
+  import. A page declares its default export with
+  `/** @satisfies {PageModule} */`, which types its `root` and `ctx`.
+  Prefer a real type to `any`, and a `// @ts-expect-error` that says why
+  to a cast that hides a mistake. A caught value is `unknown`: read it
+  with `errorMessage(e)` and `errorName(e)` (`lib/errors.js`) and
+  `errorStatus(e)` (`app/api.js`). `web/test/fake-dom-globals.d.ts`
+  describes the fake DOM the tests run in. The modules are checked with
+  `"strict": true`; the tests not yet with `noImplicitAny` and
+  `strictNullChecks` (`web/test/tsconfig.json`).
 - The project was called whatsapp-claude-bridge before. Names from then
   that are on disk or that others rely on stay, each marked `compat:` in
   the code: the data dir `~/.whatsapp-claude-bridge`, which the bridge

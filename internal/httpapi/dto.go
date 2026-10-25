@@ -237,11 +237,37 @@ type RotateTokenResponse struct {
 	Binding *string `json:"binding,omitempty"`
 	Status  string  `json:"status"`
 }
+
+// GoogleClientResponse is the client sign-ins use (Source says which: the
+// one pasted under Settings, or the build's built-in one), and what the
+// setup steps need: the redirect and the scopes to add.
 type GoogleClientResponse struct {
-	ClientIDHint *string `json:"client_id_hint,omitempty"`
-	Configured   bool    `json:"configured"`
-	RedirectURI  string  `json:"redirect_uri"`
-	Type         *string `json:"type,omitempty"`
+	// Builtin says this build carries a built-in client, used or not.
+	Builtin      bool     `json:"builtin"`
+	ClientIDHint *string  `json:"client_id_hint,omitempty"`
+	Configured   bool     `json:"configured"`
+	RedirectURI  string   `json:"redirect_uri"`
+	Scopes       []string `json:"scopes"`
+	Source       *string  `json:"source,omitempty"`
+	Type         *string  `json:"type,omitempty"`
+}
+
+// CalendarHealthResponse is GET /api/calendar/health.
+type CalendarHealthResponse struct {
+	Brains []CalendarHealthRow `json:"brains"`
+}
+
+// CalendarHealthRow is one connected brain's calendar grant.
+type CalendarHealthRow struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	google.GrantHealth
+}
+
+// GoogleCallbackResponse is where the dashboard goes after a pasted
+// sign-in address was taken.
+type GoogleCallbackResponse struct {
+	Redirect string `json:"redirect"`
 }
 
 // Builder responses retain optional keys even when their values are empty.

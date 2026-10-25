@@ -187,6 +187,9 @@ var routeInventory = []httpRoute{
 	{"GET", "/api/google/client", classAPI, ""},
 	{"PUT", "/api/google/client", classAPI, ""},
 	{"DELETE", "/api/google/client", classAPI, ""},
+	{"POST", "/api/google/client/check", classAPI, ""},
+	{"POST", "/api/google/callback", classAPI, ""},
+	{"GET", "/api/calendar/health", classAPI, ""},
 	{"GET", "/api/brains/{id}/calendar", classAPI, "/api/brains/main/calendar?list=0"},
 	{"POST", "/api/brains/{id}/calendar/connect", classAPI, "/api/brains/main/calendar/connect"},
 	{"PUT", "/api/brains/{id}/calendar", classAPI, "/api/brains/main/calendar"},
@@ -320,6 +323,7 @@ var handlerPatternRE = regexp.MustCompile(`\.Handle(?:Func)?\("((?:[A-Z]+ )?/[^"
 // same pattern registered again on another mux would answer there without
 // that mux's guards.
 func TestRouteInventoryIsComplete(t *testing.T) {
+	t.Parallel()
 	root := repoDir
 	for !fsx.Exists(filepath.Join(root, "go.mod")) {
 		if filepath.Dir(root) == root {
@@ -409,6 +413,7 @@ var reachesOutside = map[string]bool{
 // TestRouteInventoryIsComplete fails when a pattern is registered on a
 // second mux as well, outside them.
 func TestRouteInventoryGuards(t *testing.T) {
+	t.Parallel()
 	h, _, _ := goldenBridge(t)
 	api, ok := h.b.apiMux().(*http.ServeMux)
 	if !ok {

@@ -78,6 +78,15 @@ Ubuntu 24.04's `golang` is Go 1.22, which is fine: any Go 1.21 or newer
 downloads the version `go.mod` names on the first build (it needs the
 network; without it, the tarball from go.dev/dl).
 
+A machine that is to be a [core host](#core-host) (the core may move to
+it) needs more: Docker (Linux: `sudo apt install -y docker.io
+docker-compose-v2`, and the user in the `docker` group), a current GitHub
+`gh`, which checks the core's image before it is pulled (Linux: from
+GitHub's apt repository, <https://cli.github.com>; Ubuntu's own is too
+old), and on Ubuntu `sudo fridolin core apparmor` once after the build
+([CORE.md](CORE.md#the-core-moves-itself), "Before"). The first move to
+it pulls the core's image, several GB.
+
 ### 2. Tailscale
 
 The machine must be on the owner's tailnet, logged in as the same account
@@ -399,8 +408,14 @@ node's id last, for reference.
 
 Everything that waits for the owner is told in their direct chat the same
 way, and answered with one word: a node's device, what a node offers
-(core-host among it), a brain's [scheduled agent, changed brain.json or
-skill](BRAINS.md#approval), and a run's request for approval. The alert
+(core-host and fride among it, each with what approving it means), a
+brain's [scheduled agent, changed brain.json or
+skill](BRAINS.md#approval) (for an agent that runs a program on a node,
+also what approving does to that node's allowlist, or why the program
+would not run there yet: "Programs from the core"), a run's request for
+approval, and the core move's two polls ([`!movecore`](CORE.md), and
+afterwards whether the machine the core left keeps the host secrets).
+The alert
 says what wants what, when, where it came from and how it was started,
 what approving would let it do (one sentence per capability), and "Was
 this you?". It ends with "Reply !approve — or !deny if not"; the id comes
@@ -413,7 +428,10 @@ list.
   `!revoke` alone) turns one down the same way: a node that waits to join
   is shut out, a node's request for more keeps what was approved before,
   and a brain's file stays unapproved, without being asked about again
-  until it changes.
+  until it changes. For the core move, `!approve` is "Move now" and
+  `!deny` "Cancel"; for the poll after it, `!approve` keeps the host
+  secrets and `!deny` forgets them. Voting in those polls works as
+  before.
 - Something the owner did not start is flagged *Unexpected*: a node whose
   join code came neither from `!join` nor from the dashboard (or
   `fridolin nodes join-code`, which goes through it), a node asking for
@@ -637,14 +655,15 @@ side by side, with different node ids.
 
 | Service | Image | Holds | Volumes |
 | --- | --- | --- | --- |
-| `node` | `fridolin-core`, as `fridolin node run` | the node's key, `node.json`, the core's update key, its tailnet device | `fridolin-node` at `/node`; the backups at `/backups` (the volume `fridolin-backups`, or a host folder) |
+| `node` | `fridolin-core`, as `fridolin node run` | the node's key, `node.json`, the core's update key, its tailnet device; a standby core, off until a core move hands the core to this box ([The core in a box](#the-core-in-a-box)) | `fridolin-node` at `/node`; the backups at `/backups` (the volume `fridolin-backups`, or a host folder); the core's `fridolin-box-data` at `/data` and `fridolin-box-home` at `/var/lib/fridolin` |
 | `fride` | `fridolin-fride` | FrIDE's companion, its repositories and settings, the Claude token, the git identity | `fride-home` at `/var/lib/fride`, `fride-workspaces` at `/workspaces` |
 
 - **No Docker socket** in either service: on Docker Desktop it controls
   the VM that shares the owner's whole home (macOS) or `C:\` (Windows),
   which would undo the containers' wall.
 - **`fride` never mounts the node's volumes**: a coding agent cannot read
-  the node's key or the backups. Both services run unprivileged, with
+  the node's key, the backups, or the core's data and host secrets once
+  the box runs the core. Both services run unprivileged, with
   every capability dropped and `no-new-privileges`.
 - **Its own tailnet device.** The node reaches the core over Tailscale
   inside its container (tsnet, as the core does), as the device
@@ -654,7 +673,12 @@ side by side, with different node ids.
   a policy that restricts it must let `fridolin-box-*` reach
   `fridolin-core` on port 8766.
 - **The box network.** The two services talk over the box's own compose
-  network only; nothing is published on the host.
+  network only. Nothing is published on the host but, while the box runs
+  the core, its dashboard and site on the host's `127.0.0.1`, which
+  FrIDE's address on the box network cannot reach. (Docker Desktop lets
+  any container reach the host's `127.0.0.1` as `host.docker.internal`,
+  FrIDE's too: there the dashboard's sign-in guards it, as it does
+  against every program on the machine.)
 - **Backups**: the node lends `/backups` to the core's
   [node targets](VAULT.md#node-targets). What lands there is restic's
   encrypted files, never a password.
@@ -775,10 +799,13 @@ digest, without ever reaching the box's Docker:
    repository's `image.yml` on `main`, checked with `gh attestation
    verify --bundle`, which needs no login). A request that fails is
    dropped and reported.
-4. It pulls both images by digest, keeps `.env` and `compose.yaml` as
-   `.prev`, writes the new digests and the new version's compose file
-   (refusing one that names the Docker socket) and updater, and runs
-   `docker compose up -d`.
+4. It pulls both images by digest, keeps `.env`, `compose.yaml`,
+   `core.yaml` and `seccomp.json` as `.prev`, writes the new digests and
+   the new version's compose files (refusing one that names the Docker
+   socket; `core.yaml` and `seccomp.json` from an image that has them,
+   adding them to `.env`'s `COMPOSE_FILE` once) and updater, and runs
+   `docker compose up -d`. A box that runs the core stops it cleanly and
+   starts it again on the new image.
 5. It waits up to 5 minutes for the `node` service to be healthy, which
    it is while the agent is connected to the core (`fridolin node
    health`). If it is not, the `.prev` files come back and the old
@@ -805,6 +832,81 @@ cannot reach, so the core's `fride_repo_add` does not work for a box:
 clone into `/var/lib/fride/repos` in the `fride` container
 (`docker compose exec fride git -C /var/lib/fride/repos clone URL`), then
 **Re-check** in FrIDE's settings.
+
+### The core in a box
+
+A box can take the core from another machine and give it back (#191
+phase 4): the core then runs **inside the box's `node` container**, as a
+child of the node agent, on the box's own data volume. No second
+container, no Docker socket: the box's role is a file in the node's
+volume (`core-role.json`, `standby` or `core`), which the agent reads
+when it starts, so a box that is the core starts it again after a
+restart or a box update, and `docker compose stop` stops it cleanly
+(which releases the lease) without standing the box down.
+
+**The core's settings** are a second compose file beside the box's,
+`core.yaml` ([container/box-core.yaml](../container/box-core.yaml),
+`fridolin box core-compose`), with `seccomp.json` beside it (`fridolin
+box seccomp`), both named in `.env`'s `COMPOSE_FILE`. `box.sh` and
+`box.ps1` write them; a box made before gets them with its next update
+(the updater of the version before writes the box's own compose file
+only, so it takes one more update, or `box.sh --update` once). They give
+the `node` service:
+
+| What | Why |
+| --- | --- |
+| `fridolin-box-data` at `/data`, `fridolin-box-home` at `/var/lib/fridolin` | the core's data dir and its home (the credentials folder a move brings, never in an export); named apart from a core container's `fridolin-data`, so a machine that runs both never shares one |
+| `127.0.0.1:8765` and `127.0.0.1:8780` on the host (`FRIDOLIN_BOX_DASHBOARD_PORT`, `FRIDOLIN_BOX_SITE_PORT` in `.env`) | the dashboard and the site, as a core container publishes them. The core listens on the container's loopback (`fridolin run --container --box`), and the agent forwards the published ports to it, refusing FrIDE's address on the box network |
+| the core container's seccomp profile and `systempaths=unconfined` | bubblewrap gives each brain's run its own user, mount and PID namespaces ([CORE.md](CORE.md#the-brains-sandbox-in-the-container)) |
+| `FRIDOLIN_BOX_CORE=1`, `mem_limit` `FRIDOLIN_BOX_CORE_MEMORY` (8g), `stop_grace_period` 45s | the agent may run the core; room for it; a clean stop |
+
+On **Linux with AppArmor** (Ubuntu), which confines the user namespaces
+bubblewrap makes, load the core's profile once (`sudo fridolin core
+apparmor`, from a fridolin build on that machine, [CORE.md](CORE.md#the-brains-sandbox-in-the-container))
+and add `FRIDOLIN_BOX_APPARMOR=fridolin-core` to the box's `.env`, then
+`docker compose up -d`. `box.sh` says so when it sees the restriction,
+and the move's pre-flight refuses a box whose sandbox does not start.
+Settings you add to `.env` (the ports, memory, AppArmor, `FRIDOLIN_TZ`)
+stay across `box.sh --update`.
+
+**Making it a core host.** As on any machine, two keys: on the box's
+host, in its folder, `docker compose exec node fridolin node core-host
+on --state-dir /node` (and `… core-host show`, `… core-host trust ID
+--key KEY` for the targets it sends to on the way back), then the
+owner's `!approve`. The source pins the box's device key as for any
+target ([core-host](#core-host)).
+
+**A move to the box** is the same move ([CORE.md, "The core moves
+itself"](CORE.md#the-core-moves-itself)): `!movecore <box>` or `fridolin
+nodes move SRC BOX --yes`. In the box:
+
+- the host secrets go into its sealed store in the node's volume, the
+  secret files of the credentials folder into the core's home volume;
+- the rehearsal imports the latest export into a scratch folder in the
+  node's volume and removes it: never `/data`, never the lease;
+- the handoff runs `fridolin core import --latest --force` on `/data`,
+  `core promote`, then starts the core (`run --container --box`, through
+  the image's entrypoint) with the host secrets of the sealed store in
+  its environment, the same names `fridolin core start` passes from a
+  Mac's keychain (`hostsecrets.CoreEnv`), and waits for `/ready`;
+- as the source, the box stops its core (SIGTERM; a core that does not
+  end within 30 seconds is killed, and the move then sees the lease not
+  released), exports, and stands down. A rollback starts it again.
+
+The pre-flight says what changes on a box: its own checks (the core's
+settings, bubblewrap) block when they fail; the brain folders live in
+`fridolin-box-data`, so they move with every export and come home on the
+way back, but no folder of that machine shows them; what is bound to the
+source (scripts on a Mac, Apple builds) stays there and runs on its
+node, called over the node channel while it is online. A new box cannot
+read the lease before the move sends it the bucket's keys, which the
+pre-flight says without refusing.
+
+`fridolin node status` in the box (`docker compose exec node fridolin
+node status --state-dir /node`) says whether it is the core. **Never
+`docker compose down -v`** a box that runs the core: `fridolin-box-data`
+is the core, as `fridolin-data` is a core container's. Move the core
+away first.
 
 ### Trying a box
 
@@ -939,6 +1041,26 @@ with the SHA-256 of the token; anything else is refused. It sends the
 event to the core as an `event` message (kind `fride`), up to 256 waiting
 while the core is away (FrIDE retries what is refused while they wait).
 The core takes a node's events only while its `fride` is approved.
+
+**What approving `fride` means.** It is arbitrary execution on that
+machine, whatever `exec` allows: FrIDE runs Claude Code agents there,
+which can run anything the machine's user can, and on Windows reach
+PowerShell, `winget`, `docker.exe` and `C:\` through WSL's interop.
+Whoever can send `fride.task` (the core, and the core brain through
+`fride_task`) can therefore run anything there. Every place that
+approves it says so: the Nodes page while it waits, `!approve`'s answer,
+and `!fleet`, which marks a node with `fride` approved ("FrIDE's agents
+can run anything on it"):
+
+> fride lets fridolin hand coding tasks to FrIDE on this machine. FrIDE
+> runs Claude Code agents there, and they can run anything this
+> machine's user can (on Windows through WSL, PowerShell and C:\ too),
+> whatever exec allows or refuses: approving fride is approving arbitrary
+> commands on this machine. Approve it only on a machine you would let
+> fridolin do anything on.
+
+A core host that runs FrIDE as the user that holds the host secrets lets
+any FrIDE task read them; the move's report says so.
 
 ### On the core
 
@@ -1427,6 +1549,8 @@ owner's plugin cache, asks in an interactive session, and would need a
    when the tailnet has HTTPS off: `fridolin doctor` names the address) or with
    `fridolin nodes approve <id> --commands` on the core. Where the core
    has a chat command for approving, such as `!approve`, that works too.
+   Approving `fride` approves arbitrary commands on that machine
+   ([FrIDE](#fride), "What approving `fride` means").
 2. **Verify**, one check at a time:
    - `fride doctor` (in WSL, with `FRIDE_HOME=~/fride-companion/home`)
      shows no failed check;
@@ -1687,11 +1811,14 @@ go from one core host to another over the node channel, end to end,
 instead of `fridolin core send`/`receive` and the four words. The second
 moves the core itself between two native core hosts, `fridolin nodes
 move SRC DST --yes` ([CORE.md, "The core moves itself"](CORE.md#the-core-moves-itself)),
+to and from a box too ([The core in a box](#the-core-in-a-box)),
 with the methods `core.image.pull`, `core.rehearse`, `core.release`,
 `core.handoff` and `core.move.status`, each a fixed `fridolin core`
-subcommand of the agent's own binary. `!movecore` on WhatsApp comes
-later; `core send`/`receive` stay for a manual move and for an old
-machine that is gone.
+subcommand of the agent's own binary. The third lets the owner move it
+from WhatsApp: `!movecore <node>`, a report and a poll ([CORE.md,
+"Moving the core from WhatsApp"](CORE.md#moving-the-core-from-whatsapp)).
+`core send`/`receive` stay for a manual move and for an old machine that
+is gone.
 
 It needs two keys:
 
@@ -1755,26 +1882,41 @@ must pin DST. Then:
    pinned for DST, and refuses an offer it does not verify, one that
    expired, or one for a target it does not trust. It encrypts its host
    secrets (the names `core send` sends, without the Tailscale auth key)
-   to the offer's key.
+   to the offer's key, with the secret files of its core's
+   credentials folder ([CORE.md](CORE.md#the-core-moves-itself),
+   "Secret files").
 3. DST (`core.secrets.receive`) decrypts them in memory with the one-time
    key, which goes with the first bundle, and stores them as `core
    receive` does: a name a move does not carry refuses the whole bundle,
    a value that differs from one stored refuses it unless `--replace`,
-   and a failed write puts back the earlier ones.
+   and a failed write puts back the earlier ones. The secret files go
+   into the same folder under its core's home, 0600, never over one
+   there.
 
 The core relays the offer and the ciphertext and sees names only: it
 cannot swap in a key of its own, since the source checks the signature
 against its own pin. Both sides append a line per step to
 `secrets-transfer.log` in the state dir (`"via": "node-channel"`), names
-only. `core.secrets.forget` removes on a machine what it received over
-the node channel and did not hold before, never what was there.
+only. `core.secrets.forget` removes on a machine what moves brought it
+and it did not hold before, never what was there: the host secrets it
+received over the node channel, the secret files they wrote, and the
+core's data dir when a move's import put it into an empty one, once
+another device's core holds the lease (#266; CORE.md, ["Forgetting a
+former core host"](CORE.md#forgetting-a-former-core-host)). The agent
+records each as it comes, in `core-secrets-received.json` in the state
+dir; a data dir that held data when a move imported into it is the
+machine's own and stays. After a move the owner is asked whether the
+machine the core left keeps its copy (no vote in 24 hours forgets it),
+and revoking a core host that is connected has it forget first.
+`fridolin doctor --node` warns on a former core host that still holds
+what moves brought it, or its own data dir from before them.
 `core.secrets.offer/send/receive` are refused through `fridolin nodes
 call`, and a lockdown refuses the transfer and every `core.secrets.*`.
 
 **Where the secrets live.** A native node keeps them where `fridolin
 core` does (the macOS keychain, else files under the user's config). A
 node in a box keeps them in its volume, sealed with a key derived from
-its device key. A native Windows node keeps none: the service runs as
+its device key, and the core it runs reads them from there. A native Windows node keeps none: the service runs as
 LocalSystem, whose Credential Manager is not the owner's (use `core
 send`/`receive` there for now).
 

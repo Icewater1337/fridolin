@@ -94,12 +94,12 @@ func (b *App) runBrainSearch(ctx context.Context, brainID, prompt string, out io
 	cfg := RuntimeConfig(b.cfgs)
 	// Only the brain folder's own setup, as for a brain's runs, and tools
 	// that only read.
-	args := claudecli.ArgList(true, excludeInstructionsAbove(br.Dir()), "--tools", "Read,Grep,Glob")
+	args := claudecli.ArgList(true, excludeInstructionsAbove(br.Dir(), cfg.Home), "--tools", "Read,Grep,Glob")
 	bin, err := resolveAgentBinary("claude", cfg.ClaudePath)
 	if err != nil {
 		return err
 	}
-	env := childEnv(claudeChild, cfg.ChildEnvPassthrough)
+	env := childEnv(b.env, claudeChild, cfg.ChildEnvPassthrough)
 	if sp := b.brainMgr.profiler; sp != nil && sp.Enabled() {
 		// The brain's own Claude Code config dir, TMPDIR and caches, as for
 		// its runs (see invoke): it may write nowhere else.
@@ -114,7 +114,7 @@ func (b *App) runBrainSearch(ctx context.Context, brainID, prompt string, out io
 		bin, args = sbBin, sbArgs
 		env = append(append(env, state...), "DISABLE_AUTOUPDATER=1")
 	}
-	proc, err := claudecli.Start(ctx, claudecli.Spawn{WaitDelay: runWaitDelay, Binary: bin, Args: args, Dir: br.Dir(), Env: env, Prompt: prompt, Stdout: out})
+	proc, err := claudecli.Start(ctx, claudecli.Spawn{WaitDelay: b.waits.runWaitDelay, Binary: bin, Args: args, Dir: br.Dir(), Env: env, Prompt: prompt, Stdout: out})
 	if err == nil {
 		err = proc.Wait()
 	}

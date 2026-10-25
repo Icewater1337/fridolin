@@ -5,6 +5,8 @@ import { stubFetch } from './stub-fetch.js';
 import { routingEditor } from '../assets/components/routing-editor.js';
 import { loadGroups, rememberName } from '../assets/app/store.js';
 
+/** @import { Brain } from '../types/api.js' */
+
 const GROUP = '120363000000000000@g.us';
 const tick = () => new Promise((r) => setImmediate(r));
 const names = (el) => el.querySelectorAll('.group-pick-name').map((n) => n.textContent);
@@ -61,10 +63,11 @@ test('the editor names the brains that hold DMs, the default and a group', async
   const groupsLoaded = loadGroups(true);
   net.answer(0, [{ jid: GROUP, name: 'Family', allowed: true }]);
   await groupsLoaded;
-  const brains = [
+  // Only what the editor reads of each /api/brains entry.
+  const brains = /** @type {Brain[]} */ ([
     { id: 'work', name: 'Office', manifest: { routing: { handles_dms: true, groups: [GROUP] } } },
     { id: 'home', name: 'home', manifest: { routing: { default: true } } },
-  ];
+  ]);
   const el = routingEditor({ routing: { handles_dms: true, default: true }, selfId: 'new', brains, allowedGroups: [GROUP] });
   document.body.append(el);
   const warnings = el.querySelectorAll('.warn-text').filter((w) => !w.hidden).map((w) => w.textContent);

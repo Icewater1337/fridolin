@@ -56,7 +56,7 @@ func policyHarness(t *testing.T, cfgJSON string, steps []testutil.FakeMCPStep) *
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("FRIDOLIN_FAKE_MCP", string(data))
+	setenv(t, "FRIDOLIN_FAKE_MCP", string(data))
 	h := newServedHarness(t, cfgJSON)
 	dir := h.AddBrain(manifest.Manifest{ID: "taxes", Name: "Taxes", Routing: manifest.Routing{HandlesDMs: true}})
 	if err := os.MkdirAll(filepath.Join(dir, "skills", "taxes-de"), 0o700); err != nil {
@@ -160,6 +160,7 @@ func (h *harness) answerAfter(m inbound, during func()) string {
 // the owner's No ends the run with the step not taken, and the audit
 // log has the request and the votes; no vote in time counts as no.
 func TestIrreversibleStepWaitsForApproval(t *testing.T) {
+	t.Parallel()
 	h := policyHarness(t, "", nil)
 	dir := filepath.Join(h.Home(), "taxes")
 
@@ -211,8 +212,8 @@ func TestIrreversibleStepWaitsForApproval(t *testing.T) {
 	}
 
 	// No vote within the timeout counts as no.
-	defer func(old func(*App) time.Duration) { approvalTimeout = old }(approvalTimeout)
-	approvalTimeout = func(*App) time.Duration { return time.Second }
+	// Set before the next run, which reads it when it asks.
+	h.b.waits.approvalTimeout = time.Second
 	reply = h.Answer(inbound{JID: harnessDM, Text: "Steuer again #mcp"})
 	for !strings.HasPrefix(reply, "echo:") {
 		reply = h.WaitSent(harnessDM, "Steuer again")
@@ -231,6 +232,7 @@ func TestIrreversibleStepWaitsForApproval(t *testing.T) {
 // TestApprovedStepGoesAhead: the owner's yes, here from the dashboard,
 // lets the step through, and the thread view shows the run.
 func TestApprovedStepGoesAhead(t *testing.T) {
+	t.Parallel()
 	h := policyHarness(t, "", nil)
 	reply := h.answerAfter(inbound{JID: harnessDM, Text: "Steuer, bitte #mcp"}, func() {
 		h.waitPoll(harnessDM, "Submit")
@@ -268,6 +270,7 @@ func TestApprovedStepGoesAhead(t *testing.T) {
 // stopped waiting, after a restart even, goes to the brain as a new
 // message in the chat, which it answers there.
 func TestLateApprovalReachesTheBrain(t *testing.T) {
+	t.Parallel()
 	h := policyHarness(t, "", []testutil.FakeMCPStep{
 		{Tool: "request_approval", Args: json.RawMessage(`{"action":"Send the offer to the client","wait_seconds":1}`)},
 	})
@@ -299,6 +302,7 @@ func TestLateApprovalReachesTheBrain(t *testing.T) {
 // second run, told to take the step again. Now the call waits for decide
 // and gets the yes from it, and nothing goes as a message.
 func TestApprovalSeenAsItIsDecidedGoesOnce(t *testing.T) {
+	t.Parallel()
 	h := policyHarness(t, "", nil)
 	ctx := context.Background()
 	now := time.Now()
@@ -311,8 +315,8 @@ func TestApprovalSeenAsItIsDecidedGoesOnce(t *testing.T) {
 
 	res := make(chan *mcp.CallResult, 1)
 	var early *mcp.CallResult
-	t.Cleanup(func() { approvalDecided = nil })
-	approvalDecided = func(string) {
+	// dashboardDecide calls it on this goroutine.
+	h.b.hooks.approvalDecided = func(string) {
 		go func() { res <- h.b.awaitAnswer(ctx, a, 5*time.Second) }()
 		// The call must not answer before decide has handed the answer on.
 		select {
@@ -323,7 +327,7 @@ func TestApprovalSeenAsItIsDecidedGoesOnce(t *testing.T) {
 	if _, err := h.b.dashboardDecide(ctx, a.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	approvalDecided = nil
+	h.b.hooks.approvalDecided = nil
 	got := early
 	if got == nil {
 		got = <-res
@@ -348,9 +352,9 @@ func TestApprovalSeenAsItIsDecidedGoesOnce(t *testing.T) {
 // well, and the new message started a second run that was told to take
 // the action again.
 func TestApprovalAsTheWaitEndsGoesOnce(t *testing.T) {
+	t.Parallel()
 	var h *harness
-	t.Cleanup(func() { approvalWaitEnded = nil })
-	approvalWaitEnded = func(id string) {
+	optionsOf(t).hooks.approvalWaitEnded = func(id string) {
 		if _, err := h.b.dashboardDecide(context.Background(), id, true); err != nil {
 			t.Errorf("approving as the wait ended: %v", err)
 		}
@@ -381,9 +385,9 @@ func TestApprovalAsTheWaitEndsGoesOnce(t *testing.T) {
 // as ask_user stops waiting goes on to the brain as the owner's message,
 // and the call answers pending instead of the answer as well.
 func TestTypedAnswerAsTheWaitEndsGoesOnce(t *testing.T) {
+	t.Parallel()
 	var h *harness
-	t.Cleanup(func() { approvalWaitEnded = nil })
-	approvalWaitEnded = func(id string) {
+	optionsOf(t).hooks.approvalWaitEnded = func(id string) {
 		h.Inject(inbound{JID: harnessDM, Text: "INV-42"})
 		h.WaitFor("the typed answer", func() bool {
 			a, err := h.b.store.ApprovalByID(context.Background(), id)
@@ -408,6 +412,7 @@ func TestTypedAnswerAsTheWaitEndsGoesOnce(t *testing.T) {
 // brain as a new message; check_approval does not hand it over a second
 // time.
 func TestCheckApprovalAfterTheLateAnswer(t *testing.T) {
+	t.Parallel()
 	h := policyHarness(t, "", []testutil.FakeMCPStep{
 		{Tool: "request_approval", Args: json.RawMessage(`{"action":"Send the offer to the client","wait_seconds":1}`)},
 	})
@@ -438,6 +443,7 @@ func TestCheckApprovalAfterTheLateAnswer(t *testing.T) {
 // TestAskUser: ask_user with options is a poll whose vote is the answer;
 // without, the owner's next message in the chat is, and goes no further.
 func TestAskUser(t *testing.T) {
+	t.Parallel()
 	h := policyHarness(t, "", []testutil.FakeMCPStep{
 		{Tool: "ask_user", Args: json.RawMessage(`{"question":"Which account?","options":["Giro","Savings"],"wait_seconds":30}`)},
 		{Tool: "ask_user", Args: json.RawMessage(`{"question":"What is the reference?","wait_seconds":30}`)},
@@ -464,6 +470,7 @@ func TestAskUser(t *testing.T) {
 // ones, which may ask nothing; a skill's run that needs more is refused;
 // !lockdown from anyone else is refused; the dashboard unlocks.
 func TestLockdown(t *testing.T) {
+	t.Parallel()
 	h := policyHarness(t, `{"group_members": {"120363000000000000@g.us": ["*"]}}`, nil)
 	if got := h.Answer(inbound{JID: harnessGroup, Sender: strangerNumber, Text: "@claude !lockdown"}); got != outboundmsg.LockdownOwnerOnly {
 		t.Errorf("a stranger's !lockdown: %q", got)
@@ -503,6 +510,7 @@ func TestLockdown(t *testing.T) {
 
 // TestRateLimit: a chat starts at most policy.max_runs_per_hour runs.
 func TestRateLimit(t *testing.T) {
+	t.Parallel()
 	h := policyHarness(t, `{"policy": {"max_runs_per_hour": 2}}`, []testutil.FakeMCPStep{})
 	for i := range 2 {
 		if got := h.Answer(inbound{JID: harnessDM, Text: "hi"}); !strings.HasPrefix(got, "echo:") {
@@ -517,6 +525,7 @@ func TestRateLimit(t *testing.T) {
 // TestIrreversibleToolNeedsApproval: a tool registered as irreversible
 // takes an approval_id of an approved request of the same brain, once.
 func TestIrreversibleToolNeedsApproval(t *testing.T) {
+	t.Parallel()
 	h := policyHarness(t, "", []testutil.FakeMCPStep{})
 	h.b.mcpTools.Register(mcp.Entry[mcpCaller]{
 		Name:     "submit_form",
@@ -560,6 +569,7 @@ func TestIrreversibleToolNeedsApproval(t *testing.T) {
 // TestStarterSkillsHaveFrontmatter: the skills a new brain gets read as
 // the portable format, so they apply as declared (skillStarter).
 func TestStarterSkillsHaveFrontmatter(t *testing.T) {
+	t.Parallel()
 	for _, s := range brainTemplates.Skills {
 		got, err := skill.Parse("skills/"+s.Name, []byte(s.Content))
 		if err != nil || !got.Frontmatter || got.Description == "" {
@@ -575,6 +585,7 @@ func TestStarterSkillsHaveFrontmatter(t *testing.T) {
 // into the file and approves it; a brain's later edit leaves the
 // approved policy in force until approved again.
 func TestSkillPolicyFromTheDashboard(t *testing.T) {
+	t.Parallel()
 	h := policyHarness(t, "", []testutil.FakeMCPStep{})
 	dir := filepath.Join(h.Home(), "taxes")
 	// A starter skill applies as the bridge wrote it.
@@ -611,6 +622,7 @@ func TestSkillPolicyFromTheDashboard(t *testing.T) {
 // act (exec, fs.write) while reading a node still goes; a run whose
 // budget is read may not set an intent either.
 func TestLockdownCoversIntentsAndNodes(t *testing.T) {
+	t.Parallel()
 	tb, url := serveTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
 	ask := chat.Inbound{JID: apiTestDM, Sender: "15551234567", Source: chat.SourceWhatsApp, Text: "remind me"}

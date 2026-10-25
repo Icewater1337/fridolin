@@ -108,6 +108,8 @@ func dataDir(t *testing.T) string {
 	write(t, dir, "media/family/photo.jpg", "jpg", 0o600)
 	write(t, dir, "vault/documents/big.pdf", "pdf", 0o600)
 	write(t, dir, "core/device-id", "0123456789abcdef0123456789abcdef", 0o600)
+	write(t, dir, "core/encryption.json", `{"retired":["drive"]}`, 0o600)
+	write(t, dir, "core/restic-cache/x", "cache", 0o600)
 	write(t, dir, "bridge.lock", "", 0o600)
 	write(t, dir, "config.json.tmp", "half", 0o600)
 	liveDB(t, filepath.Join(dir, "bridge.db"), "whatsapp-session")
@@ -193,7 +195,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	}
 	want := []string{
 		"audit/2026-10-20.jsonl", "brains-folders/family/CLAUDE.md", "brains/family/claude/settings.json",
-		"bridge.db", "config.json", "dashboard.token", "google/oauth_client.json", "nodes/registry.json",
+		"bridge.db", "config.json", "core/encryption.json", "dashboard.token", "google/oauth_client.json", "nodes/registry.json",
 		"otp/family.json", "rclone/rclone.conf", "scripts.token", "secrets/b2.age", "tsnet/tailscaled.state", "vault.db",
 	}
 	if got := listFiles(t, staging); !slices.Equal(got, want) {
@@ -217,8 +219,16 @@ func TestExportImportRoundTrip(t *testing.T) {
 
 	unlocked := false
 	lock := func(string) (func(), error) { return func() { unlocked = true }, nil }
+	// The target's own encryption state stays beside the one that comes.
+	write(t, target, "core/encryption.json", `{"retired":[]}`, 0o600)
 	if err := Activate(staging, target, false, t0, lock); err != nil {
 		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(target, "core", "encryption.json")); string(b) != `{"retired":["drive"]}` {
+		t.Errorf("the encryption state after the import: %s", b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(target, "core", "encryption.json.before-20261020T120000Z")); string(b) != `{"retired":[]}` {
+		t.Errorf("the target's earlier encryption state: %s", b)
 	}
 	if !unlocked {
 		t.Error("the lock was not given back")

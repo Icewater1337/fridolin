@@ -100,7 +100,7 @@ func CheckReport(w io.Writer, path string, cfg *config.Settings, o CheckOptions)
 	SetBridgePATH(cfg)
 	fmt.Fprintf(w, "Config OK: %s\n", path)
 	if cfg.AgentProvider == "codex" {
-		st := CodexInfo(cfg.CodexPath, cfg.ChildEnvPassthrough)
+		st := CodexInfo(nil, cfg.CodexPath, cfg.ChildEnvPassthrough)
 		fmt.Fprintf(w, "  codex:     %s (found: %t, %s), model %s, effort %s\n", st.Path, st.Found, st.Version, cfg.CodexModel, cfg.CodexEffort)
 	} else {
 		fmt.Fprintf(w, "  claude:    %s\n", claudeSummary(cfg.ClaudePath, cfg.ChildEnvPassthrough))
@@ -202,7 +202,7 @@ func leftOutError(issues []registry.Issue) error {
 // claudeSummary is the CLI brains run and its version, with a warning when
 // it is missing or older than the release the bridge was tested with.
 func claudeSummary(path string, passthrough []string) string {
-	st := ClaudeInfo(path, passthrough)
+	st := ClaudeInfo(nil, path, passthrough)
 	switch {
 	case !st.Found:
 		return path + " — not found, so brains cannot run"

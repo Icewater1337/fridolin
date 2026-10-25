@@ -198,6 +198,14 @@ once, within a minute; the browser then stays signed in for 30 days.
 *Settings → Dashboard sign-in* signs it out, or signs out every browser and
 replaces the dashboard token (`fridolin rotate-token` does the same).
 
+When the core runs in its container ([docs/CORE.md](docs/CORE.md)),
+`fridolin open` on the machine that runs Docker asks the container's own
+fridolin for the link (`docker exec fridolin-core fridolin open --print`
+does the same by hand): the token is in the container's volume, not in
+`~/.fridolin`. From another device, send `!dashboard` in your WhatsApp
+chat. The dashboard's sign-in page names the steps for the way your
+bridge runs.
+
 ### Upgrading and rolling back
 
 ```bash
@@ -528,9 +536,13 @@ sends. [docs/API.md](docs/API.md) is their full contract.
 
 Dashboard → *Brains → brain → Calendar → Connect Google Calendar*: sign in
 with the account for that brain and tick the calendars it may use. It needs a
-Google OAuth client, which you create once in Google Cloud Console and paste
-under *Settings → Google sign-in*. Step by step:
-[docs/CALENDAR.md](docs/CALENDAR.md).
+Google OAuth client, which you create once in Google Cloud Console: *Settings
+→ Google sign-in* walks you through it, with a link to each page, the values
+to copy and a check of the client once you paste it. A build with a built-in
+client skips that. The brain's Calendar card shows whether its sign-in
+still works and when it last did, with **Reconnect** when Google revoked
+it; the Overview page and a WhatsApp message tell you when one breaks.
+Details: [docs/CALENDAR.md](docs/CALENDAR.md).
 
 ### GitHub
 
@@ -873,11 +885,12 @@ your name, your numbers, your company). CI runs the same check.
 `make check` runs what CI's build, lint and test jobs run: gofmt, `go vet`,
 `go mod tidy -diff`, the race tests, staticcheck, exhaustive, shellcheck, ruff,
 actionlint, a check that every workflow action is pinned to a commit SHA,
-a check that `THIRD_PARTY_NOTICES` is current, ESLint on the dashboard,
+a check that `THIRD_PARTY_NOTICES` is current, ESLint and TypeScript's
+checker on the dashboard,
 the Python, dashboard, personal-data-check, action-pin-check, notices,
 release-archive and Makefile tests, and a smoke test that starts a
 race-enabled build in dev mode on a scratch config (`make help` lists every
-target). staticcheck and exhaustive run through `go tool` and actionlint through `go run`, all pinned, and ESLint through `npx` at a pinned version, which it fetches
+target). staticcheck and exhaustive run through `go tool` and actionlint through `go run`, all pinned, and ESLint and TypeScript through `npx` at pinned versions, which it fetches
 the first time; ruff comes from `pip install -r tools/requirements-dev.txt`,
 shellcheck from your package manager. `make check` builds into a temp dir.
 `make build` writes `bin/fridolin` (it builds `./cmd/fridolin`; the

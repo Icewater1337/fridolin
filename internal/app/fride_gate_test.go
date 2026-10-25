@@ -259,7 +259,7 @@ func (h *harness) frideNode(name, addr string, fs *frideServer) (id, stateDir st
 func (h *harness) coreSays(text string, steps ...testutil.FakeMCPStep) string {
 	h.t.Helper()
 	data, _ := json.Marshal(steps)
-	h.t.Setenv("FRIDOLIN_FAKE_MCP", string(data))
+	setenv(h.t, "FRIDOLIN_FAKE_MCP", string(data))
 	before := len(h.SentTo(harnessDM))
 	h.Inject(inbound{JID: harnessDM, Text: text + " " + testutil.FakeMCPTrigger})
 	var got string
@@ -280,13 +280,12 @@ func step(tool, args string) testutil.FakeMCPStep {
 }
 
 func TestFrideGate(t *testing.T) {
+	t.Parallel()
 	bin := frideBinary(t)
-	saved := frideRetryEvery
-	frideRetryEvery = 200 * time.Millisecond
-	t.Cleanup(func() { frideRetryEvery = saved })
+	optionsOf(t).waits.frideRetry = 200 * time.Millisecond
 	prompts := filepath.Join(t.TempDir(), "prompts.log")
-	t.Setenv("FRIDOLIN_FAKE_PROMPT_LOG", prompts)
-	t.Setenv("FRIDOLIN_FAKE_MCP", "[]")
+	setenv(t, "FRIDOLIN_FAKE_PROMPT_LOG", prompts)
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
 	root := t.TempDir()
 	laptopFride := startFrideServer(t, bin, root, "laptop", "")
 	miniFride := startFrideServer(t, bin, root, "mini", filepath.Join(root, "laptop", "repos", "api"))

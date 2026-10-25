@@ -52,6 +52,10 @@ func (l Layout) RcloneConf() string { return l.join("rclone", "rclone.conf") }
 // GoogleClient is the Google OAuth client pasted into Settings.
 func (l Layout) GoogleClient() string { return l.join("google", "oauth_client.json") }
 
+// CalendarHealth is the health of the brains' calendar grants: when
+// Google last answered each, and whether it refused one since.
+func (l Layout) CalendarHealth() string { return l.join("google", "calendar_health.json") }
+
 // DriveClient is a Google OAuth client pasted on the Backup page for the
 // Drive link alone; without one the link uses GoogleClient.
 func (l Layout) DriveClient() string { return l.join("google", "drive_oauth_client.json") }

@@ -45,9 +45,10 @@ brain's queue, which then would turn your own messages away.
 Plaud's own app syncs a NotePin only while it is open, so a recording can
 take hours to reach Plaud's cloud, and Fridolin with it. The Plaud Sync app
 in [`plaud-android/`](../plaud-android/README.md) replaces it on an Android
-phone: it keeps the pin connected, pulls every recording off it as soon as
-it stops, has Plaud transcribe it, and saves `YYYY-MM-DD_HH-MM-SS.mp3` and
-`.txt` in the phone's `Documents/PlaudSync`. Recordings no longer go to
+phone: it checks in with the pin in the background (every 10 minutes and on
+events, or permanently connected: see [The pin's battery](#the-pins-battery)),
+pulls every recording off it, has Plaud transcribe it, and saves
+`YYYY-MM-DD_HH-MM-SS.mp3` and `.txt` in the phone's `Documents/PlaudSync`. Recordings no longer go to
 your Plaud account then, and Plaud makes no AI summary of them. The
 transcripts reach Fridolin through your site, or through a folder you sync.
 
@@ -120,7 +121,10 @@ still reaches WhatsApp unless you turn that off.
 
 While it is on:
 
-- **A NotePin recording is a question.** It is transcribed by Plaud as
+- **A NotePin recording is a question.** The app checks in with the pin
+  at least every 2 minutes then, and **Fetch now** in the app or in the
+  notification gets a question off the pin at once
+  ([The pin's battery](#the-pins-battery)). It is transcribed by Plaud as
   usual and saved to `Documents/PlaudSync`, but it is sent as a question
   instead of a transcript: the speaker labels and timestamps are dropped,
   and it is not handed to the Plaud brain as a recording.
@@ -189,6 +193,93 @@ up. A transcript is in the folder only once Plaud finished it, so it is
 handed over at the next check. Only the app's own file names count: a sync
 tool's temporary and conflict files are left alone, and so are the MP3s.
 Fridolin only reads the folder; delete old recordings on the phone.
+
+### The pin's battery
+
+A NotePin connected to the phone cannot sleep. Up to version 0.3 the app
+kept the Bluetooth link up all the time, and the pin's battery ran out
+fast. Plaud's own app connects only while it is open. The app's **Sync**
+setting now chooses:
+
+| Sync | Connects | A recording reaches the phone | Pin battery |
+| --- | --- | --- | --- |
+| **Smart** (default) | every 10 min, and when the app is opened, the phone is plugged in or unlocked (at most every 5 min), or the pin comes back in range | at the next check-in: usually minutes, at most 10 | sleeps between check-ins |
+| **Every N minutes** (2–240, default 30) | every N min, and when the app is opened | within N minutes | sleeps longest |
+| **Instant** | always | seconds after it stops | runs down fast, as before |
+
+A check-in connects, fetches what is new, deletes it on the pin, and
+disconnects a few seconds later. If the pin is recording at that moment,
+the link stays until the recording stops, so its end is seen at once: the
+pin is awake while it records anyway. **Fetch now**, in the app and in its
+notification, checks in at once in any mode. With voice mode on, smart
+and every N minutes check in at least every 2 minutes. **Unpair** connects
+to the pin first, so it needs the pin close by, not already connected.
+
+A check-in that misses the pin (out of range, phone in another room) waits
+longer each time. In smart and every-N-minutes modes the wait starts at
+the interval and doubles up to an hour (never shorter than the interval;
+with voice mode on, up to 10 minutes). In instant mode it starts at 30
+seconds and doubles up to 10 minutes. Meanwhile, after a miss that did
+not see the pin at all, a low-power scan notices it coming back and checks
+in then. The timer is an Android alarm that Doze lets through
+(inexactly: on a phone left still for a long time, Android may stretch
+the 10 minutes).
+
+**What the pin and Plaud's SDK offer**, which this design follows (SDK
+commit `d532d5a`, read from its public README, its template app and the
+AAR's classes):
+
+- **No "recording stopped" or "new file" signal without a connection.**
+  The SDK decodes from the pin's advertisement only who it is: the serial
+  number, the model code, the firmware version and whether it is bound.
+  Recording start and stop, and the file list, arrive only as callbacks
+  over a live, handshaken link. Plaud's background wake-up, an iBeacon the
+  pin sends while disconnected, is documented for iOS and the Note Pro
+  only. The Android SDK has no API for it.
+- **No control of the connection interval.** The SDK connects with
+  `connectGatt(autoConnect=false, TRANSPORT_LE)`, asks for a larger MTU,
+  and never calls `requestConnectionPriority`. It does not hand out its
+  `BluetoothGatt`, so the app cannot ask for
+  `CONNECTION_PRIORITY_LOW_POWER`. Keeping the link at low power (the last
+  option) is therefore not available, and instant mode is the old link
+  unchanged.
+- **The SDK's scan has no filter** (`SCAN_MODE_BALANCED`, empty filter
+  list). Android pauses such scans while the screen is off, so the app
+  uses it only to pair. Version 0.4 connected straight to the pin's last
+  known address instead. On the owner's phone that failed all night
+  until the app was opened, so the pin's address changes, or a saved
+  device record does not connect.
+- **The app's own scan is filtered** by the Bluetooth company id in
+  Plaud's advertisement (what the SDK calls the manufacturer code), not
+  by an address. It turns each sighting into the SDK's device record with
+  the SDK's own parser (the pinned AAR's `com.plaud.sdk.proto.u4.a`,
+  which the SDK's scan calls too), and picks the pin by its serial number.
+  A check-in looks with it for up to 20 seconds
+  (`SCAN_MODE_LOW_LATENCY`) and connects to the address the pin uses
+  right then. The log says when that address differs from the last one.
+  Between check-ins it runs at `SCAN_MODE_LOW_POWER`, batched every 30
+  seconds where the chip can. Android lets it run with the screen off,
+  and it costs the pin nothing, since the pin advertises anyway. The app
+  runs it after a miss, to see the pin come back, and in smart mode
+  between check-ins, to see whether
+  the pin's raw advertisement (its manufacturer data, beyond the fields
+  the SDK reads) changes when a recording starts or stops. Plaud does
+  not document that, so the app finds out. A change starts a check-in
+  (at most one a minute). The check-in counts as a hit when it finds a
+  new recording or one in progress. After three tries, changes count
+  only while at least half of them were hits. Otherwise the app stops
+  using them for that pin, until a pin is paired again. The log says
+  which bytes changed and how it went, so **Share log** tells whether
+  this pin has such a signal.
+
+**The pin's battery** is asked each time a recording is saved off the pin
+(`getChargingState`). The pin also reports changes while connected. The
+app logs `NotePin battery N%` and shows the last reading on its screen,
+so the log is a history of the battery against the recordings.
+
+What to watch after switching: the pin's battery over a day or two, and
+in the app's log how long recordings waited on the pin (`N new
+recording(s) on device` against when they were made).
 
 ## What happens
 

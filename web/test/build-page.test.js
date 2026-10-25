@@ -19,9 +19,11 @@ async function openPage(t, first = chat()) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
-  const bridge = { chat: first };
-  const calls = serve(t, (path) => {
+  // refuse, when set, is the error the bridge answers a message with.
+  const bridge = { chat: first, refuse: '' };
+  const calls = serve(t, (path, init) => {
     if (path === '/api/site/builders') return { brains: [{ id: 'web', name: 'Web', builder: true }, { id: 'docs', name: 'docs', builder: true }, { id: 'home', name: 'Home', builder: false }] };
+    if (path.startsWith('/api/site/build/') && init.method === 'POST' && bridge.refuse) return { status: 500, body: { error: bridge.refuse } };
     if (path.startsWith('/api/site/build/')) return bridge.chat;
     return {};
   });
@@ -38,6 +40,7 @@ async function openPage(t, first = chat()) {
 }
 
 test('an identical answer replaces no nodes', async (t) => {
+  /** @type {[string, ReturnType<typeof chat>][]} */
   const cases = [
     ['idle', chat()],
     ['working', chat({ running: true, activity: ['[10:01:02] 🔧 Write modules/events/page.tsx'] })],
@@ -110,4 +113,17 @@ test('the builder brains are offered by name and id', async (t) => {
   await settle();
   assert.equal(calls.at(-1).path, '/api/site/build/docs');
   assert.ok(root.querySelector('.build-empty'), 'the other brain’s chat is shown');
+});
+
+test('a message the bridge refuses is reported as an error', async (t) => {
+  const { root, bridge } = await openPage(t);
+  bridge.refuse = 'the builder is busy';
+  const input = root.querySelector('textarea');
+  input.value = 'Add a page';
+  [...root.querySelectorAll('button')].find((b) => b.textContent === 'Send').click();
+  await settle();
+  const alert = document.querySelector('.toast-region[role=alert]');
+  assert.match(alert.textContent, /the builder is busy/, 'in the region a screen reader reads out at once');
+  assert.ok(alert.querySelector('.toast.error'), 'styled as an error');
+  assert.equal(input.value, 'Add a page', 'the message is kept to send again');
 });

@@ -13,9 +13,9 @@ import (
 )
 
 // NewPlaudManager supplies settings and the paths captured for this bridge start.
-func NewPlaudManager(cfgs *config.Store, brains *BrainManager, submit plaudSubmit, ask plaudAsk,
+func NewPlaudManager(cfgs *config.Store, env Environment, brains *BrainManager, submit plaudSubmit, ask plaudAsk,
 	notify func(context.Context, string, string) error, siteURL func() string, fleet plaudFleet) *plaud.Manager {
-	return plaud.New(plaudOptions(cfgs, brains, submit, ask, notify, siteURL, fleet))
+	return plaud.New(plaudOptions(cfgs, env, brains, submit, ask, notify, siteURL, fleet))
 }
 
 // plaudSubmit hands a brain a recording (App.submitHandOff).
@@ -25,7 +25,7 @@ type plaudSubmit = func(br *brain.Brain, jid, sender, text string, media []strin
 type plaudAsk = func(br *brain.Brain, jid, sender, text string, quiet bool, answer func(string) string, done func(error)) error
 
 // plaudOptions projects command policy and host dependencies into the service.
-func plaudOptions(cfgs *config.Store, brains *BrainManager, submit plaudSubmit, ask plaudAsk,
+func plaudOptions(cfgs *config.Store, env Environment, brains *BrainManager, submit plaudSubmit, ask plaudAsk,
 	notify func(context.Context, string, string) error, siteURL func() string, fleet plaudFleet) plaud.Options {
 	boot := cfgs.Boot()
 	return plaud.Options{
@@ -35,14 +35,14 @@ func plaudOptions(cfgs *config.Store, brains *BrainManager, submit plaudSubmit, 
 		HeldTarget: func() string { return brains.HeldFor("", false) },
 		Notify:     notify,
 		FindCLI:    findPlaudCLI, CLIVersion: plaudCLIVersion,
-		Environ: plaudEnvironment, DesktopContext: withDesktop,
+		Environ: func(ctx context.Context, bin, home string) []string { return plaudEnvironment(ctx, env, bin, home) }, DesktopContext: withDesktop,
 		Inbox: mediaInboxAt,
 		RunInterrupted: func(err error) bool {
 			return errors.Is(err, claudecli.ErrInterrupted) || errors.Is(err, brain.ErrDropped) || errors.Is(err, context.Canceled)
 		},
 		SiteURL: siteURL, AppSource: plaudAppSource, AndroidToolchain: androidToolchain,
 		AppEnviron: func(ctx context.Context, javaHome, sdk string) []string {
-			return childEnv(helperScope(ctx), nil, "JAVA_HOME="+javaHome, "ANDROID_HOME="+sdk)
+			return childEnv(env, helperScope(ctx), nil, "JAVA_HOME="+javaHome, "ANDROID_HOME="+sdk)
 		},
 		AppBuilders: fleet.builders, BuildOnNode: fleet.build,
 	}
@@ -118,7 +118,7 @@ func plaudTargetOf(brains *BrainManager, id string, submit plaudSubmit, ask plau
 }
 
 // plaudEnvironment resolves host variables at the original process boundary.
-func plaudEnvironment(ctx context.Context, bin, home string) []string {
-	return childEnv(helperScope(ctx), nil, "HOME="+home, "PATH="+plaudPATH(bin),
+func plaudEnvironment(ctx context.Context, env Environment, bin, home string) []string {
+	return childEnv(env, helperScope(ctx), nil, "HOME="+home, "PATH="+plaudPATH(bin),
 		"DO_NOT_TRACK=1", "PLAUD_TELEMETRY_DISABLED=1", "PLAUD_NO_UPDATE_NOTIFIER=1", "NO_COLOR=1")
 }

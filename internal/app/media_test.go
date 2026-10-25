@@ -28,6 +28,7 @@ import (
 // of the brain that takes it, and the history names them there. Another
 // brain's inbox gets nothing.
 func TestBrainTakesItsFilesIntoItsInbox(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	dmDir := tb.addFolderBrain(t, manifest.Manifest{ID: "dm", Name: "DM", Routing: manifest.Routing{HandlesDMs: true}})
 	tb.addFolderBrain(t, manifest.Manifest{ID: "g", Name: "Group", Routing: manifest.Routing{Groups: []string{"120363000000000000@g.us"}}})
@@ -56,9 +57,10 @@ func TestBrainTakesItsFilesIntoItsInbox(t *testing.T) {
 // got paths that no longer existed and the files stayed in the removed
 // brain's inbox. The retry now takes them from there.
 func TestRemovedBrainHandsItsFilesOn(t *testing.T) {
+	t.Parallel()
 	mgr, d, home := queueTestManager(t, 0, "")
 	// The same brains, with a removed and b taking the direct messages.
-	next, err := LoadConfig(writeConfig(t, `{
+	next, err := loadConfig(t, writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+os.Args[0]+`"`+brainDirsJSON(t,
@@ -115,6 +117,7 @@ func TestRemovedBrainHandsItsFilesOn(t *testing.T) {
 // files that were gone, and so did the run of a message one of whose parts
 // was edited or deleted while it waited.
 func TestMergedMessageNamesItsFilesInTheInbox(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		change *chat.Change // applied while the message waits
@@ -170,7 +173,7 @@ func TestMergedMessageNamesItsFilesInTheInbox(t *testing.T) {
 				t.Errorf("the history names the files %q, want %q", named, want)
 			}
 
-			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+			setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "10")
 			br.StopCurrent(false)
 			testutil.WaitFor(t, 10*time.Second, "the merged message's run", func() bool { return d.count() == 2 })
 			got := d.all()[1].msg.Media
@@ -209,8 +212,10 @@ func writeTestFile(t *testing.T, p, content string) string {
 // the new bridge never moved what the old one downloaded meanwhile. Now
 // only the bridge's start and a brain's first inbox do it.
 func TestCheckLeavesTheMediaFolderAlone(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	path := writeConfig(t, `{
 		"brain_mode": true,
 		"claude_path": "`+home+`/no-claude",
@@ -236,7 +241,7 @@ func TestCheckLeavesTheMediaFolderAlone(t *testing.T) {
 		t.Errorf("check left the media folder holding %q, want it as it was", names)
 	}
 	// The bridge itself still does it when it starts.
-	cfgs, err := OpenConfigStore(path)
+	cfgs, err := openConfigStore(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,6 +263,7 @@ func TestCheckLeavesTheMediaFolderAlone(t *testing.T) {
 // no run, until it is gone. A media folder that cannot be readied at all
 // leaves runs without an inbox rather than refusing them.
 func TestLegacyMediaThatCannotMoveStays(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root moves any folder")
 	}

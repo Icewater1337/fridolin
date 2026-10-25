@@ -7,7 +7,7 @@ import (
 
 func (b *App) newFilesystemAPI() *httpapi.FilesystemAPI {
 	return &httpapi.FilesystemAPI{
-		Home:            HomeDir,
+		Home:            func() string { return b.cfgs.Boot().Home },
 		BrowseHome:      func() string { return b.cfgs.Boot().Home },
 		DataDir:         func() string { return b.cfgs.Boot().DataDir },
 		FolderPicker:    platform.FolderPicker,

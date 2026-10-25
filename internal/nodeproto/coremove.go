@@ -237,6 +237,22 @@ type CoreRuntime struct {
 	Superseded string          `json:"superseded,omitempty"`
 	Lease      *CoreLease      `json:"lease,omitempty"`
 	Latest     *CoreExportInfo `json:"latest,omitempty"`
+	// DataDir says whether the data dir holds a core's data (DataDirHeld)
+	// or nothing but its device id (DataDirEmpty); "" when not known (an
+	// older version), which a move takes for held (#266).
+	DataDir string `json:"data_dir,omitempty"`
+}
+
+// The values of CoreRuntime.DataDir.
+const (
+	DataDirEmpty = "empty"
+	DataDirHeld  = "held"
+)
+
+// LiveElsewhere reports whether another device's core holds the lease,
+// live: the one state in which this data dir is no core's only copy.
+func (r CoreRuntime) LiveElsewhere() bool {
+	return r.Lease != nil && r.Lease.State == LeaseLive && r.Lease.Device != r.Device
 }
 
 // HeldBy reports whether the lease is live and held by this data dir.

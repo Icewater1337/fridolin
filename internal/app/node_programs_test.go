@@ -29,6 +29,7 @@ func coreRuleFor(c nodeproto.Capabilities, name string) bool {
 // and the Schedules page says why; removing the agent removes the program,
 // but only once no other agent runs it.
 func TestCommandAgentAddsItsProgram(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("the test programs are shell scripts")
 	}
@@ -95,6 +96,16 @@ func TestCommandAgentAddsItsProgram(t *testing.T) {
 	a := h.agent("main", "daily")
 	if a.Program == nil || a.Program.State != ProgramWaiting || !strings.Contains(a.Program.Detail, "approving the agent adds it") {
 		t.Fatalf("a pending agent: %+v", a.Program)
+	}
+	// The owner's WhatsApp approval says the same, in its plain words.
+	var facts []string
+	for _, it := range h.b.waiting(context.Background()) {
+		if it.kind == pendingSchedule && it.msg.Ref == "main/daily" {
+			facts = it.msg.Facts
+		}
+	}
+	if !slices.Contains(facts, "Program: approving the agent adds it to node laptop's allowlist, with exactly these arguments") {
+		t.Errorf("the approval's facts: %q", facts)
 	}
 	if w := h.Do("POST", "/api/schedules/main/daily/approve", map[string]any{"schedule": a.Review.Disk}); w.Code != http.StatusOK {
 		t.Fatalf("approve: %d %s", w.Code, w.Body.String())

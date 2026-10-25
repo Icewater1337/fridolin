@@ -33,7 +33,7 @@ func (b *App) httpDeps(listen string, tailnetHosts map[string]bool) httpapi.Deps
 	}
 	return httpapi.Deps{
 		Listen: listen, Ready: func(w http.ResponseWriter, r *http.Request) {
-			httpapi.ReadyAPI{Connection: b.wa, DevMode: b.dev != nil, Version: version.String, StartedAt: b.started, Lease: lease}.ServeHTTP(w, r)
+			httpapi.ReadyAPI{Connection: b.wa, DevMode: b.dev != nil, Version: version.String, StartedAt: b.started, Lease: lease, Container: InContainer()}.ServeHTTP(w, r)
 		}, Send: b.newScriptAPI().Send, Ingest: b.newScriptAPI().Ingest, TakeOTP: b.newScriptAPI().TakeOTP,
 		Builder: b.builderHandler, Brain: b.brainAPIHandler,
 		DashboardDisabled: func() bool { return b.cfgs.Get().Dashboard.Disabled }, Static: web.FS,

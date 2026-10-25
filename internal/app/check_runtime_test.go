@@ -10,6 +10,7 @@ import (
 )
 
 func TestCheckRoutesRetainsUnavailableClaimsAndProfilePaths(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	active := manifest.Spec{Dir: t.TempDir(), Manifest: manifest.Manifest{ID: "active"}}
 	missing := manifest.Spec{
@@ -33,6 +34,7 @@ func TestCheckRoutesRetainsUnavailableClaimsAndProfilePaths(t *testing.T) {
 }
 
 func TestCheckRoutesValidatesBeforeOpeningFolders(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	_, _, err := checkRoutes([]manifest.Spec{
 		{Dir: filepath.Join(root, "one"), Manifest: manifest.Manifest{ID: "same"}},

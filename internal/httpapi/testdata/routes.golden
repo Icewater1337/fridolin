@@ -27,6 +27,7 @@ GET /api/brains/{id}
 GET /api/brains/{id}/backup/versions
 GET /api/brains/{id}/calendar
 GET /api/brains/{id}/skills
+GET /api/calendar/health
 GET /api/chats/ignored
 GET /api/config
 GET /api/dev/outbox
@@ -86,6 +87,8 @@ POST /api/fs/pick
 POST /api/github/connect
 POST /api/github/disconnect
 POST /api/github/test
+POST /api/google/callback
+POST /api/google/client/check
 POST /api/login
 POST /api/login/code
 POST /api/logout

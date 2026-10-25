@@ -74,6 +74,8 @@ func (h *harness) nodeViews() []struct {
 // allowlist lacks and a path outside the root, and revoking the node
 // disconnects it and keeps it out.
 func TestNodesGate(t *testing.T) {
+	// Serial: the node agent runs its commands with the process's
+	// environment, which must make the test binary the fake CLI.
 	h := newHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}}`)
 	addr := h.StartNodes()
 
@@ -90,6 +92,7 @@ func TestNodesGate(t *testing.T) {
 
 	// The node: an allowlist of the test binary asked for its version (it
 	// answers as the fake Claude CLI), and one granted folder.
+	t.Setenv("FRIDOLIN_FAKE_CLAUDE", "1")
 	exe, err := filepath.Abs(os.Args[0])
 	if err != nil {
 		t.Fatal(err)
@@ -220,6 +223,7 @@ func TestNodesGate(t *testing.T) {
 
 // With nodes off the registry still answers, and no join code is made.
 func TestNodesOff(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	if v := h.Do("GET", "/api/nodes", nil); v.Code != http.StatusOK || !strings.Contains(v.Body.String(), `"enabled":false`) {
 		t.Fatalf("GET /api/nodes: %d %s", v.Code, v.Body.String())
@@ -241,6 +245,7 @@ func TestNodesOff(t *testing.T) {
 }
 
 func TestNodeCoreAddress(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		listen  string
 		tailnet config.TailnetConfig

@@ -29,7 +29,7 @@ type run struct {
 func fakeRuns(t *testing.T) func() []run {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "runs.jsonl")
-	t.Setenv("FRIDOLIN_FAKE_RUN_LOG", path)
+	setenv(t, "FRIDOLIN_FAKE_RUN_LOG", path)
 	return func() []run {
 		data, err := os.ReadFile(path)
 		if os.IsNotExist(err) {
@@ -54,6 +54,7 @@ func fakeRuns(t *testing.T) func() []run {
 }
 
 func TestFakeRunsReadsWholeLinesOnly(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name, log string
 		want      int
@@ -65,7 +66,7 @@ func TestFakeRunsReadsWholeLinesOnly(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			runs := fakeRuns(t)
-			if err := os.WriteFile(os.Getenv("FRIDOLIN_FAKE_RUN_LOG"), []byte(c.log), 0o600); err != nil {
+			if err := os.WriteFile(getenv(envOf(t), "FRIDOLIN_FAKE_RUN_LOG"), []byte(c.log), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			if got := runs(); len(got) != c.want {
@@ -129,6 +130,7 @@ Answer in one sentence.
 // settings and with a brain's own; and the history lines the bridge writes
 // for each kind of message.
 func TestGoldenRuns(t *testing.T) {
+	t.Parallel()
 	runs := fakeRuns(t)
 	h := newHarness(t, `{"brain_model": "sonnet", "brain_effort": "high", "disallowed_tools": ["WebFetch"], "dangerously_skip_permissions": true, "ingest": {"enabled": true}, "group_members": {"`+harnessGroup+`": ["*"]}}`)
 	s := h.scrubber()

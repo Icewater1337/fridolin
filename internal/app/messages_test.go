@@ -57,6 +57,8 @@ func catalogue() []struct{ name, text string } {
 		{"backupRefusedAlert", outboundmsg.BackupRefusedAlert("Notes", "it would delete 12 of 40 files")},
 		{"plaudGivenUpAlert", outboundmsg.PlaudGivenUpAlert("Team sync", "notes", "brain notes is not configured")},
 		{"plaudExpiredAlert", outboundmsg.PlaudExpiredAlert},
+		{"calendarGrantBrokenAlert(revoked)", outboundmsg.CalendarGrantBrokenAlert("Family", true)},
+		{"calendarGrantBrokenAlert(reconsent)", outboundmsg.CalendarGrantBrokenAlert("Family", false)},
 		{"plaudVoiceQuestion", outboundmsg.PlaudVoiceQuestion("Was steht morgen an?")},
 		{"fleetGroupNotice", outboundmsg.FleetGroupNotice},
 		{"fleetReply(false)", outboundmsg.FleetReply(false, nil, fleetNow)},
@@ -79,9 +81,57 @@ func catalogue() []struct{ name, text string } {
 		{"dashboardOffNotice", outboundmsg.DashboardOffNotice},
 		{"dashboardLinkReply(tailnet)", outboundmsg.DashboardLinkReply("http://fridolin-core.example.ts.net/#login=CODE", "http://127.0.0.1:8765/#login=CODE", 10)},
 		{"dashboardLinkReply(local)", outboundmsg.DashboardLinkReply("", "http://127.0.0.1:8765/#login=CODE", 10)},
-		{"coreMoveEnded(done)", outboundmsg.CoreMoveEnded("m-20261024-1403-7f2a", "mac-mini", "icebase", "done", "the core runs on icebase (version v1.9.0, WhatsApp connected, lease held)")},
-		{"coreMoveEnded(rolled_back)", outboundmsg.CoreMoveEnded("m-20261024-1403-7f2a", "mac-mini", "icebase", "rolled_back", "mac-mini: 3c1e9a0b7d22 gave the core up (not ready in time); its state comes back with it; the core runs here again")},
-		{"coreMoveEnded(failed)", outboundmsg.CoreMoveEnded("m-20261024-1403-7f2a", "mac-mini", "icebase", "failed", "the rehearsal on icebase: the import failed; nothing was stopped")},
+		{"coreMoveEnded(done)", outboundmsg.CoreMoveEnded("m-20261024-1403-7f2a", "mac-mini", "icebase", "done", "the core runs on icebase (version v1.9.0, WhatsApp connected, lease held)",
+			[]string{"Apple-only work (Xcode and iOS builds, osascript, launchctl) stays on this Mac: keep a native node here for it"})},
+		{"coreMoveEnded(done, nothing left)", outboundmsg.CoreMoveEnded("m-20261024-1403-7f2a", "icebase", "mac-mini", "done", "the core runs on mac-mini (version v1.9.0, WhatsApp connected, lease held)", nil)},
+		{"coreMoveEnded(rolled_back)", outboundmsg.CoreMoveEnded("m-20261024-1403-7f2a", "mac-mini", "icebase", "rolled_back", "mac-mini: 3c1e9a0b7d22 gave the core up (not ready in time); its state comes back with it; the core runs here again", nil)},
+		{"coreMoveEnded(failed)", outboundmsg.CoreMoveEnded("m-20261024-1403-7f2a", "mac-mini", "icebase", "failed", "the rehearsal on icebase: the import failed; nothing was stopped", nil)},
+		{"coreMoveEnded(unknown)", outboundmsg.CoreMoveEnded("m-20261024-1403-7f2a", "mac-mini", "icebase", "unknown", "neither host said how the move ended; see fridolin core status on both", nil)},
+		{"coreMoveNow", outboundmsg.CoreMoveNow},
+		{"coreMoveCancel", outboundmsg.CoreMoveCancel},
+		{"coreMoveLockdownNotice", outboundmsg.CoreMoveLockdownNotice},
+		{"coreMoveRunningNotice", outboundmsg.CoreMoveRunningNotice},
+		{"coreMoveUsage", outboundmsg.CoreMoveUsage},
+		{"coreMoveChecking", outboundmsg.CoreMoveChecking("icebase")},
+		{"coreMoveTargets", outboundmsg.CoreMoveTargets("mac-mini", []outboundmsg.CoreMoveHost{
+			{Name: "icebase", ID: "3c1e9a0b7d22", Online: true},
+			{Name: "laptop", ID: "8233270f8a24", Online: true, Problem: "laptop runs version v1.8.0 and the core v1.9.0: update it first (fridolin nodes update 8233270f8a24)"},
+			{Name: "pi", ID: "0a1b2c3d4e5f"},
+			{Name: "nas", ID: "4f1e2d3c4b5a", Online: true, Pending: true},
+		})},
+		{"coreMoveTargets(none)", outboundmsg.CoreMoveTargets("mac-mini", nil)},
+		{"coreMoveTargets(no source)", outboundmsg.CoreMoveTargets("", []outboundmsg.CoreMoveHost{{Name: "icebase", ID: "3c1e9a0b7d22", Online: true}})},
+		{"coreMoveReport", outboundmsg.CoreMoveReport(outboundmsg.CoreMoveCheck{Source: "mac-mini", Target: "icebase", TargetID: "3c1e9a0b7d22", TargetOS: "windows", TargetArch: "amd64", Box: true,
+			Fingerprint: "a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90", Outage: "about 2 to 4 minutes",
+			NotOnTarget: []string{"Apple-only work (Xcode and iOS builds, osascript, launchctl) stays on this Mac: keep a native node here for it"},
+			Site:        "the site's tunnel runs inside the core and moves with it: example.com answers from icebase once the core runs there",
+			Warnings:    []string{"icebase runs FrIDE: once the secrets are there, any FrIDE task can read them"}, PollMinutes: 30})},
+		{"coreMoveReport(plain)", outboundmsg.CoreMoveReport(outboundmsg.CoreMoveCheck{Source: "icebase", Target: "mac-mini", TargetID: "7216c2648b04", TargetOS: "darwin", TargetArch: "arm64",
+			Fingerprint: "a1b2 c3d4 e5f6 0718 293a 4b5c 6d7e 8f90", Outage: "about 2 to 4 minutes", PollMinutes: 30})},
+		{"coreMoveReport(blocked)", outboundmsg.CoreMoveReport(outboundmsg.CoreMoveCheck{Source: "mac-mini", Target: "icebase", Blocking: []string{"mac-mini does not trust icebase: on mac-mini, fridolin node core-host trust 3c1e9a0b7d22 --key KEY"}})},
+		{"coreMoveQuestion", outboundmsg.CoreMoveQuestion("mac-mini", "icebase")},
+		{"coreMoveHereAlready", outboundmsg.CoreMoveHereAlready("mac-mini")},
+		{"coreMoveNoSource", outboundmsg.CoreMoveNoSource},
+		{"coreMoveStarted", outboundmsg.CoreMoveStarted("mac-mini", "icebase", "m-20261024-1403-7f2a")},
+		{"coreMoveNotStarted", outboundmsg.CoreMoveNotStarted("icebase", "icebase is offline")},
+		{"coreMoveCancelled(vote)", outboundmsg.CoreMoveCancelled("icebase", false)},
+		{"coreMoveCancelled(expired)", outboundmsg.CoreMoveCancelled("icebase", true)},
+		{"coreMoveStopping", outboundmsg.CoreMoveStopping("mac-mini", "icebase", "about 2 to 4 minutes")},
+		{"coreSecretsQuestion", outboundmsg.CoreSecretsQuestion("mac-mini", 24)},
+		{"coreSecretsKeep", outboundmsg.CoreSecretsKeep("mac-mini")},
+		{"coreSecretsForget", outboundmsg.CoreSecretsForget("mac-mini")},
+		{"coreSecretsKept", outboundmsg.CoreSecretsKept("mac-mini")},
+		{"coreSecretsForgotten", outboundmsg.CoreSecretsForgotten("icebase", outboundmsg.CoreForgetReport{Secrets: []string{"CLAUDE_CODE_OAUTH_TOKEN", "FRIDOLIN_AGE_IDENTITY"}, Files: []string{"~/.config/fridolin/dashboard-users.json"}, Data: []string{"bridge.db", "brains-folders/Personal", "config.json", "core", "vault.db"}}, false)},
+		{"coreSecretsForgotten(expired, none)", outboundmsg.CoreSecretsForgotten("mac-mini", outboundmsg.CoreForgetReport{}, true)},
+		{"coreSecretsForgotten(own data)", outboundmsg.CoreSecretsForgotten("mac-mini", outboundmsg.CoreForgetReport{Secrets: []string{"CLAUDE_CODE_OAUTH_TOKEN"}, DataKept: "Its own data dir stays: it held the core's data before move m-20261024-1200-0001 imported into it"}, false)},
+		{"coreSecretsForgotten(partly)", outboundmsg.CoreSecretsForgotten("icebase", outboundmsg.CoreForgetReport{Secrets: []string{"CLAUDE_CODE_OAUTH_TOKEN"}, Failure: "kept the core's data dir and the secret files a move brought: the core runs here"}, false)},
+		{"coreSecretsForgotten(failed)", outboundmsg.CoreSecretsForgotten("icebase", outboundmsg.CoreForgetReport{Failure: "it is offline"}, false)},
+		{"coreMoveSiteAnswers", outboundmsg.CoreMoveSiteAnswers("example.com", "icebase")},
+		{"coreMoveSiteDown", outboundmsg.CoreMoveSiteDown("example.com", "icebase", "example.com does not resolve yet.")},
+		{"nodeFrideApprovedNote", outboundmsg.NodeFrideApprovedNote(nodeproto.FrideApproval)},
+		{"nodeRevokedCoreSecretsNote", outboundmsg.NodeRevokedCoreSecretsNote(outboundmsg.CoreForgetReport{Secrets: []string{"CLAUDE_CODE_OAUTH_TOKEN"}, Data: []string{"bridge.db", "config.json"}})},
+		{"nodeRevokedCoreSecretsNote(none)", outboundmsg.NodeRevokedCoreSecretsNote(outboundmsg.CoreForgetReport{})},
+		{"nodeRevokedCoreSecretsNote(failed)", outboundmsg.NodeRevokedCoreSecretsNote(outboundmsg.CoreForgetReport{Failure: "it is offline"})},
 		{"nodeCoreHostApprovedNote", outboundmsg.NodeCoreHostApprovedNote(nodeproto.CoreHostApproval)},
 		{"nodeApprovedReply", outboundmsg.NodeApprovedReply("laptop", "8233270f8a24", nodeproto.Capabilities{Host: true, Notify: true, FS: &nodeproto.FSCap{Roots: []nodeproto.FSRoot{{Path: "/home/you/Shared", Write: true}}}}.Plain())},
 		{"approvalAlert(node)", outboundmsg.ApprovalAlert(catalogueNodeApproval, fleetNow)},
@@ -94,7 +144,7 @@ func catalogue() []struct{ name, text string } {
 		}, fleetNow)},
 		{"approvalAlert(schedule)", outboundmsg.ApprovalAlert(outboundmsg.OwnerApproval{
 			Subject: "*Main* wants a new scheduled agent, *scrape*", When: fleetNow.Add(-3 * 24 * time.Hour),
-			Facts:      []string{"Runs: daily 07:00, on its own", "Does: runs scrape on node laptop"},
+			Facts:      []string{"Runs: daily 07:00, on its own", "Does: runs scrape on node laptop", "Program: approving the agent adds it to node laptop's allowlist, with exactly these arguments"},
 			Allows:     []string{"run a program on node laptop: scrape --all"},
 			Unexpected: "it was written into the brain's folder, not made in the dashboard.", Ref: "main/scrape",
 		}, fleetNow)},
@@ -175,6 +225,8 @@ var (
 		{ID: "8233270f8a24", Name: "laptop", OS: "windows", Online: true, Device: "approved", Commands: "approved", Tags: []string{"gpu", "windows"}, Can: nodeproto.Capabilities{Host: true, Exec: &nodeproto.ExecCap{Allow: []nodeproto.ExecRule{{Name: "hostname"}, {Name: "whoami"}}}}.Plain()},
 		{ID: "4f1e2d3c4b5a", Name: "mini", OS: "darwin", LastSeen: fleetNow.Add(-3 * time.Hour), Device: "approved", Commands: "pending", Tags: []string{"macos"}, Can: []string{"report its system details (OS, disk, memory)"}},
 		{ID: "0a1b2c3d4e5f", Name: "pi", OS: "linux", LastSeen: fleetNow.Add(-90 * time.Second), Device: "pending", Commands: "pending"},
+		{ID: "9d8c7b6a5f4e", Name: "pc", OS: "windows", Online: true, Device: "approved", Commands: "approved", Fride: true, Can: nodeproto.Capabilities{Host: true, Fride: &nodeproto.FrideCap{}}.Plain()},
+		{ID: "5e6f7a8b9c0d", Name: "studio", OS: "darwin", Online: true, Device: "approved", Commands: "pending", FridePending: true, Can: []string{"report its system details (OS, disk, memory)"}},
 		{ID: "ffeeddccbbaa", Name: "old", OS: "linux", Device: "revoked", Commands: "none"},
 		{ID: "3c1e5a7b9d0f", Name: "icebase", OS: "linux", Online: true, Device: "approved", Commands: "pending", CoreHostPending: true, Can: []string{"report its system details (OS, disk, memory)", "show notifications on its screen"}},
 	}
@@ -185,6 +237,7 @@ var (
 // each message starts with an emoji and a space, and every name
 // messages.go declares is in it.
 func TestGoldenMessages(t *testing.T) {
+	t.Parallel()
 	var out strings.Builder
 	named := map[string]bool{}
 	for _, m := range catalogue() {
@@ -258,6 +311,7 @@ var notChatText = map[string]string{
 // string that starts with an emoji, the mark of a message the bridge
 // sends into chats, so that a new one goes into the catalogue.
 func TestChatMessagesLiveInTheCatalogue(t *testing.T) {
+	t.Parallel()
 	var files []string
 	err := filepath.WalkDir(repoDir, func(path string, d fs.DirEntry, err error) error {
 		switch {

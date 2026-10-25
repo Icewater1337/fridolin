@@ -374,6 +374,7 @@ func compactJSON(v any) string {
 // TestSchemaSet: the validator itself, on a schema with every keyword it
 // knows.
 func TestSchemaSet(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	schemas := map[string]string{
 		"thing.schema.json": `{

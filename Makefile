@@ -18,6 +18,12 @@ VERSION  ?= $(shell git describe --tags --always --dirty --abbrev=8 2>/dev/null 
 # Lazy (=), so only a target that builds runs git describe.
 # The variable is version in internal/version.
 VERSION_LDFLAGS = -X github.com/Icewater1337/fridolin/internal/version.version=$(VERSION)
+# A built-in Google OAuth client (internal/google/builtin.go), for a
+# publisher's builds: the shell expands FRIDOLIN_GOOGLE_CLIENT_ID and
+# FRIDOLIN_GOOGLE_CLIENT_SECRET from the environment, so the line make
+# prints names them without their values. Unset, the build has none and
+# its command line stays as it was.
+GOOGLE_LDFLAGS = $(if $(FRIDOLIN_GOOGLE_CLIENT_ID),-X github.com/Icewater1337/fridolin/internal/google.builtinClientID=$${FRIDOLIN_GOOGLE_CLIENT_ID} -X github.com/Icewater1337/fridolin/internal/google.builtinClientSecret=$${FRIDOLIN_GOOGLE_CLIENT_SECRET:-} )
 
 GO     ?= go
 PYTHON ?= python3
@@ -47,16 +53,16 @@ SHELLCHECK  ?= shellcheck
 FUZZTIME ?= 10s
 
 .DEFAULT_GOAL := build
-.PHONY: help build install node-binaries test race race-shard race-process vet fmt fmt-check tidy-check root-check \
+.PHONY: help build install node-binaries test race race-shard race-process os-tests vet fmt fmt-check tidy-check root-check \
 	notices notices-check \
-	lint lint-go lint-sh lint-py lint-actions lint-web \
+	lint lint-go lint-go-os lint-sh lint-py lint-actions lint-web typecheck-web \
 	test-py test-web test-sh smoke fuzz-short check clean container-python-lock
 
 help: ## list the targets
 	@awk -F':.*## ' '/^[a-z-]+:.*## / { printf "  %-14s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
 build: ## build bin/fridolin, stamped with VERSION (default: git describe)
-	$(GO) build -trimpath -ldflags "$(VERSION_LDFLAGS)" -o "$(BINARY)" $(MAIN_PKG)
+	$(GO) build -trimpath -ldflags "$(GOOGLE_LDFLAGS)$(VERSION_LDFLAGS)" -o "$(BINARY)" $(MAIN_PKG)
 
 install: build ## copy the binary to BINDIR (default ~/.local/bin)
 	install -d "$(DESTDIR)$(BINDIR)"
@@ -78,14 +84,20 @@ race: ## Go tests with the race detector, as CI runs them
 race-shard: ## one slice of the race tests, SHARD=i/n (CI splits the macOS run)
 	GO="$(GO)" scripts/test-shard.sh $(subst /, ,$(SHARD)) -race -count=1 -timeout 30m
 
+# macOS and Windows CI run only these; Linux runs everything, and the full
+# macOS suite runs nightly (.github/workflows/macos-full.yml).
+os-tests: ## race tests of what differs on this system from Linux (scripts/os-tests.sh)
+	GO="$(GO)" scripts/os-tests.sh -race -count=1 -timeout 30m
+
 race-process: ## repeat extracted provider process tests under the race detector
 	$(GO) test -race -shuffle=on -count=5 -timeout 30m ./internal/claudecli
 
-# The other vets cover the Linux- and Windows-only files from macOS (CI also
-# runs Linux and Windows).
-vet: ## go vet, natively and for Linux and Windows without cgo
+# The other vets cover the files of the other systems from any one of them,
+# so CI vets all three on Linux.
+vet: ## go vet, natively and for Linux, macOS and Windows without cgo
 	$(GO) vet ./...
 	CGO_ENABLED=0 GOOS=linux $(GO) vet ./...
+	CGO_ENABLED=0 GOOS=darwin $(GO) vet ./...
 	CGO_ENABLED=0 GOOS=windows $(GO) vet ./...
 
 fmt: ## gofmt every Go file in place
@@ -116,7 +128,7 @@ root-check: ## fail unless go build at the repo root refuses to build
 	fi; \
 	case "$$out" in *"no Go files"*) ;; *) printf 'go build . at the root failed, but not for want of Go files:\n%s\n' "$$out"; exit 1 ;; esac
 
-lint: lint-go lint-sh lint-py lint-actions lint-web ## every linter
+lint: lint-go lint-go-os lint-sh lint-py lint-actions lint-web typecheck-web ## every linter
 
 # exhaustive holds a switch on an enum (a defined type with constants
 # declared beside it) to a case for every constant, a default or not, so
@@ -128,6 +140,17 @@ lint: lint-go lint-sh lint-py lint-actions lint-web ## every linter
 lint-go: ## staticcheck, and exhaustive on switches over enums
 	$(STATICCHECK) ./...
 	$(EXHAUSTIVE) -typeignore '^reflect\.Kind$$' ./...
+
+# The same linters on another system's files, from any machine: they are
+# built for this one and analyse for LINT_GOOS (go tool would build them
+# for LINT_GOOS). CI lints macOS's files this way on Linux.
+LINT_GOOS ?= darwin
+lint-go-os: ## staticcheck and exhaustive for LINT_GOOS (default darwin)
+	@set -e; tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
+	$(GO) build -o "$$tmp/" honnef.co/go/tools/cmd/staticcheck github.com/nishanths/exhaustive/cmd/exhaustive; \
+	echo "GOOS=$(LINT_GOOS) staticcheck ./... && exhaustive ./..."; \
+	CGO_ENABLED=0 GOOS=$(LINT_GOOS) "$$tmp/staticcheck" ./...; \
+	CGO_ENABLED=0 GOOS=$(LINT_GOOS) "$$tmp/exhaustive" -typeignore '^reflect\.Kind$$' ./...
 
 lint-sh: ## shellcheck the scripts and git hooks
 	$(SHELLCHECK) --severity=warning setup.sh scripts/*.sh container/*.sh container/fride/*.sh .githooks/*
@@ -166,13 +189,31 @@ ESLINT ?= $(NPX) --yes eslint@$(ESLINT_VERSION)
 lint-web: ## ESLint on the dashboard's JS (npx fetches it)
 	cd web && NPM_CONFIG_IGNORE_SCRIPTS=true $(ESLINT) .
 
-test-sh: ## tests for the personal-data, action-pin, notices and release scripts and the Makefile
+# TypeScript's checker on the dashboard's JS and its JSDoc types, with
+# nothing built: web/tsconfig.json checks the modules against the
+# browser's DOM, web/test/tsconfig.json the tests (with node's types)
+# against the fake DOM they run in. npx fetches the pinned versions as it
+# does ESLint, so nothing is installed into the checkout. TypeScript 7 is
+# the native compiler, whose only dependencies are its binaries, one per
+# platform, at the same version. With no node_modules in web/, tsc finds
+# @types/node in npx's cache through --typeRoots. Dependabot does not see
+# these pins either, so move them by hand; both were over two weeks old
+# when pinned.
+TYPESCRIPT_VERSION := 7.0.2
+TYPES_NODE_VERSION := 24.19.1
+TSC_NPX ?= $(NPX) --yes -p typescript@$(TYPESCRIPT_VERSION) -p @types/node@$(TYPES_NODE_VERSION)
+typecheck-web: ## tsc --noEmit on the dashboard's JS and tests (npx fetches it)
+	cd web && NPM_CONFIG_IGNORE_SCRIPTS=true $(TSC_NPX) -c 'tsc -p . && tsc -p test --typeRoots "$$(dirname "$$(command -v tsc)")/../@types"'
+
+test-sh: ## tests for the personal-data, action-pin, notices, release, OS-test and CI report scripts and the Makefile
 	scripts/test-check-personal-data.sh
 	scripts/test-check-action-pins.sh
 	scripts/test-third-party-notices.sh
 	scripts/test-build-release.sh
 	scripts/test-makefile.sh
 	scripts/test-test-shard.sh
+	scripts/test-os-tests.sh
+	scripts/test-ci-report.sh
 
 # A temp dir, not the binary: a check must not replace a build in use.
 # -race makes a data race at start or shutdown fail the run. The build is

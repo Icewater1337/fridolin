@@ -148,6 +148,7 @@ test('a restore shows while it runs and how it went once it ended', async (t) =>
   installDom();
   noConsoleErrors(t);
   const running = { ...connected(), job: { kind: 'restore', brain: 'work', target: '/Users/you/restored/work', started: '2026-10-18T09:00:00Z', queue: [], done: [] } };
+  /** @type {{status: object}} */
   const bridge = { status: running };
   serve(t, (path) => (path.startsWith('/api/backup/status') ? bridge.status : {}));
   const root = h('div');
@@ -247,7 +248,7 @@ async function renderWith(t, status) {
   installDom();
   noConsoleErrors(t);
   const assigned = [];
-  globalThis.window = { scrollTo() {}, location: { assign: (u) => assigned.push(u) } };
+  Object.assign(globalThis, { window: { scrollTo() {}, location: { assign: (u) => assigned.push(u) } } });
   t.after(() => { delete globalThis.window; });
   const calls = serve(t, (path) => {
     if (path.startsWith('/api/backup/status')) return status;
@@ -267,7 +268,7 @@ test('without a Google client, connecting asks for one first', async (t) => {
   const { root } = await renderWith(t, { ...disconnected(), client: null, redirect_uri: 'http://127.0.0.1:8765/' });
   const connect = root.querySelectorAll('button').find((b) => b.textContent === 'Connect Google Drive');
   assert.ok(connect && connect.disabled, 'Connect waits for a client');
-  assert.ok(root.textContent.includes('enable the Google Drive API'), root.textContent);
+  assert.ok(root.textContent.includes('Enable the Google Drive API'), root.textContent);
   assert.ok(root.querySelector('textarea'), 'a box to paste a client for Drive');
 });
 

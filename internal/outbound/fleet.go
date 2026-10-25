@@ -19,6 +19,10 @@ type FleetNode struct {
 	Can []string
 	// CoreHostPending is set while its core-host waits for approval.
 	CoreHostPending bool
+	// Fride is set for a node whose fride is approved, which is arbitrary
+	// execution there (nodeproto.FrideApproval); FridePending while its
+	// fride waits for approval.
+	Fride, FridePending bool
 }
 
 func countNodes(n int) string {

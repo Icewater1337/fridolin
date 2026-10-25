@@ -46,6 +46,7 @@
 /assets/lib/brain.js 200 text/javascript; charset=utf-8
 /assets/lib/diff.js 200 text/javascript; charset=utf-8
 /assets/lib/dom.js 200 text/javascript; charset=utf-8
+/assets/lib/errors.js 200 text/javascript; charset=utf-8
 /assets/lib/files.js 200 text/javascript; charset=utf-8
 /assets/lib/format.js 200 text/javascript; charset=utf-8
 /assets/lib/jid.js 200 text/javascript; charset=utf-8

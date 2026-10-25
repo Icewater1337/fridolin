@@ -74,9 +74,10 @@ type googleClientFake struct {
 	err    error
 }
 
-func (f *googleClientFake) Client() *google.Client { return f.client }
-func (f *googleClientFake) RedirectURI() string    { return "http://localhost/callback" }
-func (f *googleClientFake) DeleteClient() error    { return f.err }
+func (f *googleClientFake) Client() *google.Client  { return f.client }
+func (f *googleClientFake) Builtin() *google.Client { return nil }
+func (f *googleClientFake) RedirectURI() string     { return "http://localhost/callback" }
+func (f *googleClientFake) DeleteClient() error     { return f.err }
 func TestGoogleClientHidesClientIdentifierAndPreservesEmptyType(t *testing.T) {
 	f := &googleClientFake{client: &google.Client{ClientID: "prefix-private", Type: ""}}
 	a := GoogleAPI{Google: func() GoogleService { return f }}

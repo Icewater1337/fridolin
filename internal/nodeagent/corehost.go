@@ -39,9 +39,11 @@ const (
 	CoreHostFile = "core-host.json"
 	// coreSecretsDir is a box's secret store (hostsecrets.Sealed).
 	coreSecretsDir = "core-secrets"
-	// coreReceivedFile lists the secrets this machine received over the
-	// node channel that it did not hold before: what core.secrets.forget
-	// removes.
+	// coreReceivedFile records what moves brought this machine and it
+	// did not hold before: the host secrets received over the node
+	// channel, the secret files they wrote, the core's data dir a move's
+	// import put into an empty one. It is what core.secrets.forget
+	// removes, and nothing else (coreforget.go).
 	coreReceivedFile = "core-secrets-received.json"
 	// TransferLogFile gets a line, names only, for every transfer.
 	TransferLogFile = "secrets-transfer.log"
@@ -222,7 +224,7 @@ func (a *Agent) coreStore() (hostsecrets.Store, string, *nodeproto.Error) {
 		if err != nil {
 			return nil, "", nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
 		}
-		return hostsecrets.Sealed{Dir: filepath.Join(a.Dir, coreSecretsDir), Key: k}, "the box's volume (sealed)", nil
+		return BoxSecretStore(a.Dir, k), "the box's volume (sealed)", nil
 	}
 	if runtime.GOOS == "windows" {
 		return nil, "", nodeproto.Errorf(nodeproto.CodeUnavailable, "the node service runs as LocalSystem, whose Credential Manager is not the owner's: move the secrets with fridolin core send and receive")
@@ -277,7 +279,7 @@ func (a *Agent) coreHostCall(ctx context.Context, method string, params json.Raw
 		if e := decode(&p); e != nil {
 			return nil, e
 		}
-		return a.coreForget()
+		return a.coreForget(ctx)
 	case nodeproto.MethodCoreImagePull:
 		var p nodeproto.CoreImagePullParams
 		if e := decode(&p); e != nil {
@@ -337,6 +339,21 @@ func (a *Agent) coreCheck(ctx context.Context) nodeproto.CoreCheckResult {
 			res.Secrets = append(res.Secrets, nodeproto.CoreSecretPresent{Name: n, Stored: ok, Received: ok && slices.Contains(received, n)})
 		}
 	}
+	if fr, ok := a.secretFiler(); ok {
+		fctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+		dir, files, err := fr.ExportFiles(fctx)
+		cancel()
+		if err != nil {
+			res.SecretFilesError = err.Error()
+		} else {
+			res.SecretFilesDir = dir
+			for n, b := range files {
+				res.SecretFiles = append(res.SecretFiles, n)
+				clear(b)
+			}
+			sort.Strings(res.SecretFiles)
+		}
+	}
 	res.Setup, res.SetupOK, res.SetupNote = a.coreSetup(ctx)
 	res.Core, res.CoreError = a.coreRuntime(ctx)
 	res.MachineBound = a.machineBound()
@@ -344,13 +361,14 @@ func (a *Agent) coreCheck(ctx context.Context) nodeproto.CoreCheckResult {
 }
 
 // coreSetup runs `fridolin setup-machine --core --json` with the agent's
-// own binary; a box leaves it out, since Docker is its host's.
+// own binary; a box checks its own settings instead, since Docker is its
+// host's.
 func (a *Agent) coreSetup(ctx context.Context) ([]nodeproto.CoreCheckItem, bool, string) {
 	if a.CoreSetup != nil {
 		return a.CoreSetup(ctx)
 	}
 	if a.Config.Box != nil {
-		return nil, true, "a box: the image, Docker and the volumes are the box's own"
+		return a.boxSetup(ctx)
 	}
 	if a.Executable == "" {
 		return nil, false, "not run: the agent does not know its own binary"
@@ -470,13 +488,37 @@ func (a *Agent) coreSend(p nodeproto.CoreSecretsSendParams) (any, *nodeproto.Err
 			b.Names = append(b.Names, n)
 		}
 	}
-	ct, err := secretxfer.SealBundle(a.Config.Name, secrets, o.Recipient)
+	// The secret files of the core's credentials folder go along, read
+	// through the core's container; a host whose core cannot be read
+	// sends the secrets without them and says so.
+	var files map[string][]byte
+	var filesDir string
+	if fr, ok := a.secretFiler(); ok {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+		filesDir, files, err = fr.ExportFiles(ctx)
+		cancel()
+		if err != nil {
+			// Never the secrets without the files the core needs: the
+			// move stops here, before anything stops.
+			return fail(nodeproto.CodeFailed, "reading the secret files of the core's credentials folder: %v", err)
+		}
+	}
+	defer func() {
+		for k := range files {
+			clear(files[k])
+		}
+	}()
+	for n := range files {
+		b.Files = append(b.Files, n)
+	}
+	sort.Strings(b.Files)
+	ct, err := secretxfer.SealBundleFiles(a.Config.Name, secrets, files, filesDir, o.Recipient)
 	if err != nil {
 		return fail(nodeproto.CodeFailed, "%v", err)
 	}
 	b.Ciphertext = ct
-	a.transferLog(map[string]any{"direction": "sent", "move": o.Move, "peer": o.Target, "peer_name": pin.Name, "names": b.Names, "result": "ok"})
-	a.logf("node: core-host: encrypted %d host secrets for %s (move %s)", len(b.Names), o.Target, o.Move)
+	a.transferLog(map[string]any{"direction": "sent", "move": o.Move, "peer": o.Target, "peer_name": pin.Name, "names": b.Names, "files": b.Files, "result": "ok"})
+	a.logf("node: core-host: encrypted %d host secrets and %d secret files for %s (move %s)", len(b.Names), len(b.Files), o.Target, o.Move)
 	return b, nil
 }
 
@@ -506,11 +548,23 @@ func (a *Agent) coreReceive(p nodeproto.CoreSecretsReceiveParams) (any, *nodepro
 	if perr != nil {
 		return fail(perr.Code, "%s", perr.Message)
 	}
-	secrets, _, err := secretxfer.OpenBundle(p.Ciphertext, off.id)
+	secrets, files, filesDir, _, err := secretxfer.OpenBundleFiles(p.Ciphertext, off.id)
 	if err != nil {
 		return fail(nodeproto.CodeDenied, "%v", err)
 	}
 	defer clear(secrets)
+	defer func() {
+		for k := range files {
+			clear(files[k])
+		}
+	}()
+	var fr SecretFiler
+	if len(files) > 0 {
+		var ok bool
+		if fr, ok = a.secretFiler(); !ok {
+			return fail(nodeproto.CodeUnavailable, "the bundle holds secret files, and this machine cannot write them into the core's credentials folder")
+		}
+	}
 	var absent []string
 	for n := range secrets {
 		if ok, err := st.Has(n); err == nil && !ok {
@@ -530,43 +584,32 @@ func (a *Agent) coreReceive(p nodeproto.CoreSecretsReceiveParams) (any, *nodepro
 	if err := a.noteReceived(fresh); err != nil {
 		a.logf("node: core-host: noting the received secrets: %v", err)
 	}
-	a.transferLog(map[string]any{"direction": "received", "move": p.Move, "peer": p.From, "stored": stored, "unchanged": unchanged, "result": "ok"})
-	a.logf("node: core-host: stored %d host secrets in %s from %s (move %s)", len(stored), place, p.From, p.Move)
-	return nodeproto.CoreSecretsReceived{Move: p.Move, Stored: orEmpty(stored), Unchanged: orEmpty(unchanged)}, nil
+	var filesStored, filesKept []string
+	if fr != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+		filesStored, filesKept, err = fr.ImportFiles(ctx, filesDir, files)
+		cancel()
+		// Those written are the move's, even when the rest failed.
+		if nerr := a.noteFilesReceived(filesDir, filesStored); nerr != nil {
+			a.logf("node: core-host: noting the received secret files: %v", nerr)
+		}
+		if err != nil {
+			return fail(nodeproto.CodeFailed, "the host secrets are stored; writing the secret files: %v", err)
+		}
+	}
+	a.transferLog(map[string]any{"direction": "received", "move": p.Move, "peer": p.From, "stored": stored, "unchanged": unchanged, "files_stored": filesStored, "files_kept": filesKept, "result": "ok"})
+	a.logf("node: core-host: stored %d host secrets in %s and %d secret files (%d kept) from %s (move %s)", len(stored), place, len(filesStored), len(filesKept), p.From, p.Move)
+	return nodeproto.CoreSecretsReceived{Move: p.Move, Stored: orEmpty(stored), Unchanged: orEmpty(unchanged), FilesStored: filesStored, FilesKept: filesKept}, nil
 }
 
-// coreForget is core.secrets.forget: it removes the secrets this machine
-// received over the node channel and did not hold before, never others,
-// so that it cannot empty the store of a machine that runs the core.
-func (a *Agent) coreForget() (any, *nodeproto.Error) {
-	st, _, perr := a.coreStore()
+// secretFiler is the core runner when it also moves secret files.
+func (a *Agent) secretFiler() (SecretFiler, bool) {
+	r, perr := a.coreRunner()
 	if perr != nil {
-		return nil, perr
+		return nil, false
 	}
-	d, ok := st.(hostsecrets.Deleter)
-	if !ok {
-		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "this store cannot remove a secret")
-	}
-	var gone, failed []string
-	for _, n := range a.coreReceived() {
-		if err := d.Delete(n); err != nil {
-			failed = append(failed, n)
-			continue
-		}
-		gone = append(gone, n)
-	}
-	if err := a.writeReceived(failed); err != nil {
-		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "%v", err)
-	}
-	res := "ok"
-	if len(failed) > 0 {
-		res = "could not remove " + strings.Join(failed, ", ")
-	}
-	a.transferLog(map[string]any{"direction": "forgot", "names": gone, "result": res})
-	if len(failed) > 0 {
-		return nil, nodeproto.Errorf(nodeproto.CodeFailed, "removed %s; could not remove %s", strings.Join(gone, ", "), strings.Join(failed, ", "))
-	}
-	return nodeproto.CoreSecretsForgotten{Forgotten: orEmpty(gone)}, nil
+	fr, ok := r.(SecretFiler)
+	return fr, ok
 }
 
 func orEmpty(s []string) []string {
@@ -574,48 +617,6 @@ func orEmpty(s []string) []string {
 		return []string{}
 	}
 	return s
-}
-
-// coreReceived are the names core.secrets.forget would remove.
-func (a *Agent) coreReceived() []string {
-	if a.Dir == "" {
-		return nil
-	}
-	data, err := os.ReadFile(filepath.Join(a.Dir, coreReceivedFile))
-	if err != nil {
-		return nil
-	}
-	var f struct {
-		Names []string `json:"names"`
-	}
-	if json.Unmarshal(data, &f) != nil {
-		return nil
-	}
-	return slices.DeleteFunc(f.Names, func(n string) bool { return !slices.Contains(secretxfer.MoveNames, n) })
-}
-
-func (a *Agent) noteReceived(names []string) error {
-	if len(names) == 0 {
-		return nil
-	}
-	all := append(a.coreReceived(), names...)
-	sort.Strings(all)
-	return a.writeReceived(slices.Compact(all))
-}
-
-func (a *Agent) writeReceived(names []string) error {
-	if a.Dir == "" {
-		return nil
-	}
-	p := filepath.Join(a.Dir, coreReceivedFile)
-	if len(names) == 0 {
-		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		return nil
-	}
-	data, _ := json.Marshal(map[string][]string{"names": names})
-	return writeFile(p, append(data, '\n'), 0o600)
 }
 
 // transferLog appends one line, names only, to the state dir's

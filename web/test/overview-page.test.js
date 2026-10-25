@@ -38,7 +38,9 @@ test('backups that were never set up are offered', async (t) => {
   assert.ok(!text.includes('Daily backups are on'), text);
 });
 
-for (const [job, want] of [[{}, 'Backing up…'], [{ restoring: true }, 'Restoring…']]) {
+/** @type {[{restoring?: boolean}, string][]} */
+const jobs = [[{}, 'Backing up…'], [{ restoring: true }, 'Restoring…']];
+for (const [job, want] of jobs) {
   test(`a running job reads "${want}"`, async (t) => {
     const root = await openOverview(t, { backup: { connected: true, enabled: true, running: true, ...job } });
     assert.ok(root.textContent.includes(want), root.textContent);
@@ -93,4 +95,22 @@ test('scheduled agents waiting for approval are flagged', async (t) => {
   assert.ok(text.includes('1 scheduled agent waiting for your approval'), text);
   assert.ok(text.includes('review-bugs'), text);
   assert.ok(root.querySelectorAll('a').some((a) => a.getAttribute('href') === '#/schedules'));
+});
+
+test('a brain whose Google Calendar sign-in broke is named, with a link to Reconnect', async (t) => {
+  const root = await openOverview(t, {}, {
+    '/api/calendar/health': { brains: [
+      { id: 'fam', name: 'Family', state: 'revoked', detail: 'Google no longer accepts this sign-in' },
+      { id: 'work', name: 'Work', state: 'valid' },
+    ] },
+  });
+  const text = root.textContent;
+  assert.ok(text.includes('Google Calendar stopped working for Family'), text);
+  assert.ok(!text.includes('Work'), 'a working calendar is not named');
+  assert.ok(root.querySelectorAll('a').some((a) => a.getAttribute('href') === '#/brains/fam'), 'a link to the brain');
+});
+
+test('no warning while every calendar works', async (t) => {
+  const root = await openOverview(t, {}, { '/api/calendar/health': { brains: [{ id: 'work', name: 'Work', state: 'expiring' }] } });
+  assert.ok(!root.textContent.includes('Google Calendar stopped working'), root.textContent);
 });

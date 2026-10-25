@@ -44,6 +44,12 @@ type ownerCommandRate struct {
 // allow counts command at now, unless it answered ownerAsksPerHour
 // times in the hour before.
 func (r *ownerCommandRate) allow(command string, now time.Time) bool {
+	return r.allowN(command, ownerAsksPerHour, now)
+}
+
+// allowN counts command at now, unless it answered limit times in the
+// hour before.
+func (r *ownerCommandRate) allowN(command string, limit int, now time.Time) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.asks == nil {
@@ -51,7 +57,7 @@ func (r *ownerCommandRate) allow(command string, now time.Time) bool {
 	}
 	cut := now.Add(-time.Hour)
 	recent := slices.DeleteFunc(r.asks[command], func(t time.Time) bool { return !t.After(cut) })
-	if len(recent) >= ownerAsksPerHour {
+	if len(recent) >= limit {
 		r.asks[command] = recent
 		return false
 	}
@@ -66,7 +72,7 @@ func (b *App) ownerCommand(m brainruntime.Inbound, command string, args []string
 	if n, err := chat.PhoneNumber(m.Sender); err == nil {
 		by = n
 	}
-	kind := map[string]string{"!join": audit.NodeJoinCode, "!dashboard": audit.DashboardLink, "!approve": audit.NodeApproved, "!deny": audit.NodeRevoked, "!revoke": audit.NodeRevoked}[command]
+	kind := map[string]string{"!join": audit.NodeJoinCode, "!dashboard": audit.DashboardLink, "!approve": audit.NodeApproved, "!deny": audit.NodeRevoked, "!revoke": audit.NodeRevoked, "!movecore": audit.CoreMoveRequested}[command]
 	record := func(id, outcome string) {
 		b.audit.Append(audit.Entry{Kind: kind, Chat: m.JID, By: by, ID: id, Detail: command, Outcome: outcome})
 		log.Printf("owner command: %s from %s in %s: %s", command, by, m.JID, outcome)
@@ -84,6 +90,8 @@ func (b *App) ownerCommand(m brainruntime.Inbound, command string, args []string
 		return b.joinCommand(record)
 	case "!dashboard":
 		return b.dashboardCommand(record)
+	case "!movecore":
+		return b.moveCoreCommand(args, record)
 	}
 	ctx := context.Background()
 	approve := command == "!approve"
@@ -158,12 +166,14 @@ func (b *App) dashboardCommand(record func(id, outcome string)) string {
 func (b *App) nodeCommand(command, id string, record func(id, outcome string)) string {
 	var n *nodes.Node
 	var err error
-	coreHost := false
+	coreHost, fride := false, false
 	if cur, err := b.nodes.Registry().Get(id); err == nil {
 		coreHost = cur.Declared.CoreHost != nil && !nodeproto.Covers(cur.Approved, nodeproto.Capabilities{CoreHost: cur.Declared.CoreHost})
+		fride = nodes.FridePending(cur)
 	}
+	var forgot *nodes.CoreForget
 	if command == "!revoke" {
-		n, err = b.nodes.Revoke(id)
+		n, forgot, err = b.nodes.RevokeForget(id)
 	} else if n, err = b.nodes.ApproveDevice(id); err == nil {
 		n, err = b.nodes.ApproveCommands(id)
 	}
@@ -185,11 +195,18 @@ func (b *App) nodeCommand(command, id string, record func(id, outcome string)) s
 	}
 	record(id, "ok")
 	if command == "!revoke" {
-		return outboundmsg.NodeRevokedReply(n.Name, n.ID)
+		reply := outboundmsg.NodeRevokedReply(n.Name, n.ID)
+		if forgot != nil {
+			reply += "\n\n" + outboundmsg.NodeRevokedCoreSecretsNote(forgetReport(*forgot))
+		}
+		return reply
 	}
 	reply := outboundmsg.NodeApprovedReply(n.Name, n.ID, n.Effective().Plain())
 	if coreHost && n.Effective().CoreHost != nil {
 		reply += "\n\n" + outboundmsg.NodeCoreHostApprovedNote(nodeproto.CoreHostApproval)
+	}
+	if fride && n.Effective().Fride != nil {
+		reply += "\n\n" + outboundmsg.NodeFrideApprovedNote(nodeproto.FrideApproval)
 	}
 	return reply
 }
@@ -202,17 +219,3 @@ func (b *App) nodeCoreHost(*nodes.Node) { b.alertPendingApprovals(context.Backgr
 // nodeJoined tells the owner, in their direct chat, that a machine joined
 // with a join code and waits for approval.
 func (b *App) nodeJoined(*nodes.Node) { b.alertPendingApprovals(context.Background()) }
-
-// coreMoveEnded tells the owner, in their direct chat, how a core move
-// ended: the core that runs afterwards says it, on either machine.
-func (b *App) coreMoveEnded(r nodes.MoveRecord) {
-	cfg := b.cfgs.Get()
-	target := ownerChat(cfg)
-	if target == "" || b.outbox == nil {
-		return
-	}
-	msg := outboundmsg.CoreMoveEnded(r.ID, r.SourceName, r.TargetName, r.State, r.Detail)
-	if err := b.outbox.Text(context.Background(), target, msg, cfg.MaxChunkSize); err != nil {
-		log.Printf("nodes: telling the owner how core move %s ended: %v", r.ID, err)
-	}
-}

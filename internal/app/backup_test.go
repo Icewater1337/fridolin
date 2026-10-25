@@ -35,6 +35,7 @@ import (
 // moving it marks when, so that neither starts a backup at once, and only
 // once the change is saved. One the config refuses changes nothing.
 func TestBackupScheduleIsArmedOnlyBySavedChanges(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, `, "backup": {"daily_at": "03:30"}`)
 	armed := func() time.Time { return persistedBackupState(t, tb).ArmedAt }
 	if w := tb.do("PUT", "/api/backup/settings", map[string]any{"enabled": true, "root": "../x"}); w.Code != 422 {
@@ -98,6 +99,7 @@ func (f *fakeDrive) run(_ context.Context, args []string, _ io.Writer) ([]byte, 
 // browser back to the Backup page; the token lands in the rclone remote
 // with the client, inside a folder of its own, and never in the API.
 func TestConnectDriveThroughTheDashboard(t *testing.T) {
+	t.Parallel()
 	srv, got := fakeGoogle(t)
 	script := filepath.Join(t.TempDir(), "rclone")
 	if err := os.WriteFile(script, []byte("#!/bin/sh\n"), 0o700); err != nil {
@@ -164,11 +166,12 @@ func TestConnectDriveThroughTheDashboard(t *testing.T) {
 }
 
 func TestRunRcloneUsesIsolatedConfig(t *testing.T) {
+	t.Parallel()
 	bin := t.TempDir()
 	script := filepath.Join(bin, "rclone")
 	_ = os.WriteFile(script, []byte("#!/bin/sh\necho \"$@\" > \"$(dirname \"$0\")/args\"\nenv > \"$(dirname \"$0\")/env\"\necho '[]'\n"), 0o700)
 	tb := newTestBridge(t, `, "backup": {"rclone_path": "`+script+`"}`)
-	t.Setenv("RCLONE_CONFIG_EVIL_TYPE", "local")
+	setenv(t, "RCLONE_CONFIG_EVIL_TYPE", "local")
 	connectAlias(t, tb)
 	if _, err := tb.backup.Versions(context.Background(), "notes"); err != nil {
 		t.Fatal(err)
@@ -190,6 +193,8 @@ func TestRunRcloneUsesIsolatedConfig(t *testing.T) {
 // also for an rclone_path that is a bare name: an rclone in another PATH
 // folder may be one a brain planted there.
 func TestFindRclone(t *testing.T) {
+	// Serial: findRclone looks on the process's PATH and under its HOME, and
+	// rcloneFallbacks is a package variable.
 	dir := t.TempDir()
 	write := func(name string, mode os.FileMode) string {
 		p := filepath.Join(dir, name)
@@ -258,6 +263,7 @@ func TestFindRclone(t *testing.T) {
 // wrong with a configured rclone_path, and Connect refuses with that rather
 // than an install hint.
 func TestBackupStatusNamesABrokenRclonePath(t *testing.T) {
+	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "rclone")
 	tb := newTestBridge(t, `, "backup": {"rclone_path": "`+missing+`"}`)
 	var st struct {
@@ -283,6 +289,7 @@ func TestBackupStatusNamesABrokenRclonePath(t *testing.T) {
 // desktop session's variables: the bridge, not rclone, opens Google's
 // sign-in now.
 func TestRcloneGetsTheAllowlistedEnvironment(t *testing.T) {
+	t.Parallel()
 	bin := t.TempDir()
 	script := filepath.Join(bin, "rclone")
 	// Each run records its environment under its command.
@@ -301,7 +308,7 @@ func TestRcloneGetsTheAllowlistedEnvironment(t *testing.T) {
 		"CLAUDE_CODE_OAUTH_TOKEN":  "test-oauth-token",
 		"FRIDOLIN_TEST_SECRET":     "test-secret",
 	} {
-		t.Setenv(k, v)
+		setenv(t, k, v)
 	}
 	connectAlias(t, tb)
 	desktop := []string{"DISPLAY=:0", "DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/test-bus", "XDG_DATA_DIRS=/usr/share:/var/lib/snapd/desktop"}
@@ -328,7 +335,7 @@ func TestRcloneGetsTheAllowlistedEnvironment(t *testing.T) {
 				t.Fatal(err)
 			}
 			env := strings.Split(string(data), "\n")
-			for _, want := range []string{"HOME=" + os.Getenv("HOME"), "HTTPS_PROXY=http://proxy.example.com:3128", "RCLONE_CONFIG=" + tb.cfgs.Boot().RcloneConf()} {
+			for _, want := range []string{"HOME=" + homeOf(t), "HTTPS_PROXY=http://proxy.example.com:3128", "RCLONE_CONFIG=" + tb.cfgs.Boot().RcloneConf()} {
 				if !slices.Contains(env, want) {
 					t.Errorf("rclone lacks %s", want)
 				}
@@ -353,6 +360,7 @@ func TestRcloneGetsTheAllowlistedEnvironment(t *testing.T) {
 // (an rclone alias remote standing in for Google Drive), changes it, backs up
 // again, and restores into a new folder.
 func TestBackupRoundTripWithRealRclone(t *testing.T) {
+	t.Parallel()
 	rclone := needRclone(t)
 	tb := newTestBridge(t, `, "backup": {"keep_versions_days": 0}`)
 	useRclone(t, tb, rclone)
@@ -438,6 +446,7 @@ func TestBackupRoundTripWithRealRclone(t *testing.T) {
 // TestBackupVersionsNewestFirst lists version folders by the time in their
 // names, with anything else after them.
 func TestBackupVersionsNewestFirst(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	connectAlias(t, tb)
 	installBackupRunner(t, tb, func(_ context.Context, args []string, _ io.Writer) ([]byte, error) {
@@ -561,6 +570,7 @@ func backupStatus(t *testing.T, tb *testBridge) (running bool, last map[string]*
 // old the file itself is, and whole version folders go once their run is
 // older than that.
 func TestBackupPruneKeepsVersionsByRunDate(t *testing.T) {
+	t.Parallel()
 	tb, remoteDir := rcloneTestBridge(t, `, "backup": {"keep_versions_days": 30}`)
 	dir := addBackupBrain(t, tb, "notes")
 	old := time.Now().AddDate(0, 0, -90)
@@ -672,6 +682,7 @@ const notesBase = config.DefaultBackupRemote + ":" + config.DefaultBackupRoot + 
 // TestBackupRunForceOverridesRefusal: the API's force field reaches the run,
 // and only for the brains it names.
 func TestBackupRunForceOverridesRefusal(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	_ = os.MkdirAll(filepath.Dir(tb.cfgs.Boot().RcloneConf()), 0o700)
 	_ = os.WriteFile(tb.cfgs.Boot().RcloneConf(), []byte("[brain-gdrive]\ntype = alias\nremote = /nowhere\n"), 0o600)
@@ -728,6 +739,7 @@ func scheduledBackupBridge(t *testing.T) (*testBridge, *deletionRunner) {
 // brain succeeds, manual refusals are never sent (the owner is looking at
 // the dashboard), and a notice that failed to send is tried next time.
 func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
+	t.Parallel()
 	tb, runner := scheduledBackupBridge(t)
 	var failNotice bool
 	installBackupRunner(t, tb, runner.run, func(opts *backup.Options) {
@@ -795,6 +807,7 @@ func TestScheduledRefusalIsToldOnWhatsApp(t *testing.T) {
 // current/ alone, and a forced run from the API mirrors the deletion with
 // the files kept in versions/.
 func TestBackupMassDeletionWithRealRclone(t *testing.T) {
+	t.Parallel()
 	tb, remoteDir := rcloneTestBridge(t, "")
 	dir := addBackupBrain(t, tb, "notes")
 	for i := 0; i < 6; i++ {
@@ -867,6 +880,7 @@ func TestBackupMassDeletionWithRealRclone(t *testing.T) {
 // did, the brain would be refused every night, and a forced run could not
 // clear it.
 func TestBackupExcludedThenDeletedWithRealRclone(t *testing.T) {
+	t.Parallel()
 	tb, remoteDir := rcloneTestBridge(t, "")
 	dir := addBackupBrain(t, tb, "notes")
 	_ = os.WriteFile(filepath.Join(dir, "memories", "keep.md"), []byte("keep"), 0o600)
@@ -906,10 +920,14 @@ func TestBackupExcludedThenDeletedWithRealRclone(t *testing.T) {
 // readable new file reaches current/, nothing is deleted from it, and the
 // run fails with the read error.
 func TestBackupPartlyReadableFolderWithRealRclone(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root can read a folder with mode 000")
 	}
 	tb, remoteDir := rcloneTestBridge(t, "")
+	// The read error makes rclone try the sync three times, 10 seconds
+	// apart. The real rclone still does, with the pause cut short.
+	useRclone(t, tb, shortRetrySleep(t, needRclone(t)))
 	dir := addBackupBrain(t, tb, "notes")
 	for _, rel := range []string{"memories/old.md", "locked/secret.md", "deleted.md"} {
 		p := filepath.Join(dir, rel)
@@ -946,6 +964,18 @@ func TestBackupPartlyReadableFolderWithRealRclone(t *testing.T) {
 	}
 }
 
+// shortRetrySleep is a script that runs rclone with the arguments it is
+// given, but with 100ms for the pause --retries-sleep asks for.
+func shortRetrySleep(t *testing.T, rclone string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "rclone")
+	script := "#!/bin/sh\nprev=\nfor a; do\n\tshift\n\tcase $prev in --retries-sleep) set -- \"$@\" 100ms ;; *) set -- \"$@\" \"$a\" ;; esac\n\tprev=$a\ndone\nexec '" + rclone + "' \"$@\"\n"
+	if err := os.WriteFile(p, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
 // connectAlias gives the bridge's rclone config a remote, so that the
 // bridge counts Drive as connected.
 func connectAlias(t *testing.T, tb *testBridge) {
@@ -964,6 +994,7 @@ func connectAlias(t *testing.T, tb *testBridge) {
 // keeps from brains: the copy is written outside any sandbox, so
 // ~/.claude/skills/x would be loaded by your own Claude Code sessions.
 func TestBackupRestoreChecksWhatItIsGiven(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, `, "sandbox": {"credentials_dir": "~/creds", "deny_paths": ["~/clients"]}`)
 	connectAlias(t, tb)
 	addBackupBrain(t, tb, "notes")
@@ -1047,6 +1078,7 @@ func TestBackupRestoreChecksWhatItIsGiven(t *testing.T) {
 // your own files are open to a restore now; secrets and deny_paths
 // entries stay refused.
 func TestBackupRestoreIntoYourOwnFilesFolders(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, `, "sandbox": {"deny_paths": ["~/clients"]}`)
 	cases := []struct {
 		target string
@@ -1072,6 +1104,7 @@ func TestBackupRestoreIntoYourOwnFilesFolders(t *testing.T) {
 // TestBackupRestoreNeedsDrive: a restore and the versions list say that
 // Drive is not connected, rather than fail out of sight.
 func TestBackupRestoreNeedsDrive(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	if w := tb.do("POST", "/api/backup/restore", map[string]string{"brain": "notes", "version": "current", "target": "~/restored"}); w.Code != 412 {
 		t.Errorf("restore = %d %s, want 412", w.Code, w.Body.String())
@@ -1085,6 +1118,7 @@ func TestBackupRestoreNeedsDrive(t *testing.T) {
 // kind, copies the folder it was asked for, and its outcome, a failure
 // included, stays on the Backup page after it ended.
 func TestBackupRestoreRecordsItsResult(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		version string
@@ -1155,6 +1189,7 @@ func TestBackupRestoreRecordsItsResult(t *testing.T) {
 // TestBackupRestoreFolderThatCannotBeMade: the restore folder is made
 // before the job starts, so a failure is the request's error.
 func TestBackupRestoreFolderThatCannotBeMade(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() == 0 {
 		t.Skip("root writes to read-only folders")
 	}
@@ -1177,6 +1212,7 @@ func TestBackupRestoreFolderThatCannotBeMade(t *testing.T) {
 // TestBackupCancel: Cancel on the Backup page stops the running backup,
 // whose result then says it was cancelled, and is refused when none runs.
 func TestBackupCancel(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	connectAlias(t, tb)
 	addBackupBrain(t, tb, "notes")
@@ -1211,6 +1247,7 @@ func TestBackupCancel(t *testing.T) {
 // files, which no exclude list can include again ('+' lines are dropped),
 // even an empty one; include_secret_files leaves them to the brain's list.
 func TestBackupLeavesSecretsOut(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name           string
 		excludes       []string
@@ -1267,6 +1304,7 @@ func TestBackupLeavesSecretsOut(t *testing.T) {
 // TestBackupSecretExcludesAreDocumented: docs/BACKUP.md promises what is
 // never uploaded, so it must name every pattern backupSecretExcludes holds.
 func TestBackupSecretExcludesAreDocumented(t *testing.T) {
+	t.Parallel()
 	doc, err := os.ReadFile(filepath.Join(repoDir, "docs", "BACKUP.md"))
 	if err != nil {
 		t.Fatal(err)
@@ -1284,6 +1322,8 @@ func TestBackupSecretExcludesAreDocumented(t *testing.T) {
 // end before it copies the folder, but only so long: then it copies it
 // anyway, and the log says so.
 func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	cases := []struct {
 		name        string
 		wait        time.Duration
@@ -1319,7 +1359,7 @@ func TestBackupWaitsForTheBrainToFinish(t *testing.T) {
 			})
 			logged := captureLog(t)
 
-			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "1500")
+			setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "1500")
 			if _, _, err := br.Submit(brainruntime.Inbound{Inbound: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "hello", Source: "whatsapp", At: time.Now()}}); err != nil {
 				t.Fatal(err)
 			}

@@ -80,7 +80,9 @@ const (
 
 // newHarness starts a dev-mode bridge in a temp folder: HOME is
 // <root>/home, the data dir ~/.fridolin, and the Claude CLI is this test
-// binary (see TestMain). cfgJSON is a JSON object whose keys replace those
+// binary (see TestMain). HOME and the fake CLI's variables are set in t's
+// environment (envOf), not the process's, so a test that makes one can run
+// in parallel. cfgJSON is a JSON object whose keys replace those
 // of the base config, which allows harnessDM and harnessGroup and turns
 // the debounce off; "" or "{}" keeps the base config.
 func newHarness(t *testing.T, cfgJSON string) *harness {
@@ -108,7 +110,7 @@ func startHarness(t *testing.T, cfgJSON string, ln net.Listener) *harness {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	cfg := map[string]any{
 		"data_dir":        filepath.Join(home, ".fridolin"),
 		"claude_path":     fakeClaudeEnv(t, 10),
@@ -136,12 +138,12 @@ func startHarness(t *testing.T, cfgJSON string, ln net.Listener) *harness {
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfgs, err := OpenConfigStore(path)
+	cfgs, err := openConfigStore(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	requireTestDataDir(t, cfgs.Get())
-	b, err := New(Options{Config: cfgs, NoWhatsApp: true})
+	b, err := New(bridgeOptions(t, cfgs))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,11 +179,11 @@ func (h *harness) Restart() {
 func (h *harness) Reopen() {
 	h.t.Helper()
 	h.sentBefore = h.Outbox()
-	cfgs, err := OpenConfigStore(h.cfg)
+	cfgs, err := openConfigStore(h.t, h.cfg)
 	if err != nil {
 		h.t.Fatal(err)
 	}
-	b, err := New(Options{Config: cfgs, NoWhatsApp: true})
+	b, err := New(bridgeOptions(h.t, cfgs))
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -535,6 +537,7 @@ func (h *harness) scrubber() *scrubber {
 }
 
 func TestHarnessAnswersADM(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
 	h.Inject(inbound{JID: harnessDM, Text: "hello"})

@@ -39,6 +39,7 @@ func writeHistory(t *testing.T, dir string, entries ...history.Entry) {
 // WhatsApp does, in <memory_recall>, with its source anchor. A brain
 // without memory.inject gets no recall at all.
 func TestMemoryGate(t *testing.T) {
+	t.Parallel()
 	runs := fakeRuns(t)
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true, Groups: []string{harnessGroup}}, Memory: &manifest.Memory{Inject: true}})
@@ -116,6 +117,7 @@ func between(s, from, to string) (string, bool) {
 // of the brain lists them and searches its memory, labelled. The dashboard
 // lists them too.
 func TestStandingIntents(t *testing.T) {
+	t.Parallel()
 	tb, url := serveTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true, Groups: []string{apiTestGroup}}})
 	owner, revokeOwner := tb.runTokens.mintFor("a", chat.Inbound{JID: apiTestDM, Sender: "15551234567", Source: chat.SourceWhatsApp, Text: "remind me"})
@@ -191,6 +193,7 @@ func TestStandingIntents(t *testing.T) {
 // answered in the owner's chat; a keyword intent fires on a group member's
 // message and not on the owner's in the chat it was set in.
 func TestSchedulerFires(t *testing.T) {
+	t.Parallel()
 	runs := fakeRuns(t)
 	h := newHarness(t, `{"group_members": {"`+harnessGroup+`": ["*"]}}`)
 	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true, Groups: []string{harnessGroup}}, Memory: &manifest.Memory{Consolidate: "weekly sun 18:00"}})

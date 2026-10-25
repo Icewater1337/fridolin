@@ -88,6 +88,10 @@ func (v Verifier) Verify(ctx context.Context, image, repo string) error {
 	out, err := v.run(ctx, "attestation", "verify", "oci://"+image, "--bundle", path,
 		"--repo", repo, "--signer-workflow", repo+"/"+Workflow, "--source-ref", "refs/heads/main")
 	if err != nil {
+		if strings.Contains(string(out), "unknown flag") {
+			// An old gh (Ubuntu 24.04's 2.45) prints its usage.
+			return fmt.Errorf("provenance: GitHub's CLI (gh) here is too old for gh attestation verify --source-ref: install a current one (https://cli.github.com; on Linux from GitHub's apt repository): %s", firstLine(string(out)))
+		}
 		return fmt.Errorf("provenance: %s was not built by %s's %s on main: %v %s", image, repo, Workflow, err, strings.TrimSpace(lastLines(string(out), 3)))
 	}
 	return nil
@@ -245,6 +249,11 @@ func compact(raw []byte) string {
 		}
 	}
 	return strings.ReplaceAll(string(raw), "\n", "")
+}
+
+func firstLine(s string) string {
+	l, _, _ := strings.Cut(strings.TrimSpace(s), "\n")
+	return strings.TrimSpace(l)
 }
 
 func lastLines(s string, n int) string {

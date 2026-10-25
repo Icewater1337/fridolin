@@ -13,12 +13,12 @@ import (
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 )
 
-func backupOptions(cfgs *config.Store, bm *BrainManager, notify func(context.Context, *brain.Brain, string) error, g *google.Auth) backup.Options {
+func backupOptions(cfgs *config.Store, env Environment, bm *BrainManager, notify func(context.Context, *brain.Brain, string) error, g *google.Auth) backup.Options {
 	boot := cfgs.Boot()
 	opts := backup.Options{BackupDir: boot.BackupDir(), RcloneConf: boot.RcloneConf(), Settings: func() backup.Settings { return BackupSettings(cfgs.Get()) },
 		Targets: func() []backup.Target { return BackupTargets(bm.Brains(), notify) }, BridgeFiles: func() (backup.BridgeFiles, error) { return BackupFiles(cfgs) },
 		FindRclone: findRclone, Environ: func(ctx context.Context) []string {
-			return childEnv(helperScope(ctx), nil, "RCLONE_CONFIG="+boot.RcloneConf())
+			return childEnv(env, helperScope(ctx), nil, "RCLONE_CONFIG="+boot.RcloneConf())
 		},
 		InstallHint: rcloneInstallHint, RefusalText: outboundmsg.BackupRefusedAlert,
 		DriveClientPath: boot.Layout().DriveClient(), OAuth: driveOAuth(g)}
@@ -28,8 +28,8 @@ func backupOptions(cfgs *config.Store, bm *BrainManager, notify func(context.Con
 	return opts
 }
 
-func newProjectedBackup(cfgs *config.Store, bm *BrainManager, notify func(context.Context, *brain.Brain, string) error, superseded func() bool, g *google.Auth) *backup.Manager {
-	opts := backupOptions(cfgs, bm, notify, g)
+func newProjectedBackup(cfgs *config.Store, env Environment, bm *BrainManager, notify func(context.Context, *brain.Brain, string) error, superseded func() bool, g *google.Auth) *backup.Manager {
+	opts := backupOptions(cfgs, env, bm, notify, g)
 	opts.Superseded = superseded
 	opts.Zone = func() *time.Location { return cfgs.Get().Location() }
 	m := backup.New(opts)
@@ -59,7 +59,7 @@ func driveOAuth(g *google.Auth) backup.OAuth {
 		if c == nil {
 			return nil
 		}
-		return &backup.OAuthClient{Type: c.Type, ClientID: c.ClientID, ClientSecret: c.ClientSecret}
+		return &backup.OAuthClient{Type: c.Type, ClientID: c.ClientID, ClientSecret: c.ClientSecret, Builtin: c.Source == google.SourceBuiltin}
 	}
 	return backup.OAuth{
 		SignInClient: func() *backup.OAuthClient { return convert(g.Client()) },

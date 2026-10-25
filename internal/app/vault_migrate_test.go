@@ -16,6 +16,7 @@ import (
 // fridolin vault migrate-encryption: a dry run counts, a run copies and
 // verifies, --delete-old deletes the old folders and retires them.
 func TestVaultMigrateEncryption(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("runs restic")
 	}
@@ -29,8 +30,8 @@ func TestVaultMigrateEncryption(t *testing.T) {
 	}
 	ctx := context.Background()
 	local := t.TempDir()
-	t.Setenv(vaultLocalEnv, local)
-	t.Setenv("RESTIC_PASSWORD", "test-password")
+	setenv(t, vaultLocalEnv, local)
+	setenv(t, "RESTIC_PASSWORD", "test-password")
 
 	// Before: the single-layer cold tier and repository.
 	oldCold, err := cloud.NewDir(filepath.Join(local, "cold"))
@@ -40,7 +41,7 @@ func TestVaultMigrateEncryption(t *testing.T) {
 	if err := oldCold.Put(ctx, "vault/documents/main/old.pdf", strings.NewReader("%PDF an old file")); err != nil {
 		t.Fatal(err)
 	}
-	old := &snapshot.Restic{Binary: bin, Repo: filepath.Join(local, "restic"), Env: append(vaultBaseEnv(), "RESTIC_PASSWORD=test-password")}
+	old := &snapshot.Restic{Binary: bin, Repo: filepath.Join(local, "restic"), Env: append(vaultBaseEnv(envOf(t)), "RESTIC_PASSWORD=test-password")}
 	if err := old.Init(ctx, nil); err != nil {
 		t.Fatal(err)
 	}

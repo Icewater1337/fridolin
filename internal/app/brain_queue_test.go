@@ -62,9 +62,9 @@ func (d *deliveries) all() []delivered {
 func queueTestManager(t *testing.T, sleepMS int, extra string, modify ...func(*brainruntime.Options)) (*BrainManager, *deliveries, string) {
 	t.Helper()
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	claude := fakeClaudeEnv(t, sleepMS)
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := loadConfig(t, writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+claude+`"`+brainDirsJSON(t,
@@ -78,7 +78,7 @@ func queueTestManager(t *testing.T, sleepMS int, extra string, modify ...func(*b
 	mgr := newTestManager(t, cfg)
 	if len(modify) > 0 {
 		mgr.Manager.Stop()
-		opts := brainruntime.Options{Runner: &commandRunner{sandbox: mgr.profiler, hooks: mgr.hooks}, Sink: brainHooksSink{mgr.hooks}, Input: commandBrainInputRules(nil), ViewerStart: startBrainViewer, ClaimMedia: claimBrainMedia, ShutdownGrace: func() time.Duration { return shutdownGrace }}
+		opts := brainruntime.Options{Runner: &commandRunner{sandbox: mgr.profiler, hooks: mgr.hooks, env: envOf(t), home: cfg.Home, waits: mgr.waits}, Sink: brainHooksSink{mgr.hooks}, Input: commandBrainInputRules(nil), ViewerStart: brainViewerStart(envOf(t)), ClaimMedia: claimBrainMedia, ShutdownGrace: func() time.Duration { return mgr.waits.shutdownGrace }}
 		for _, f := range modify {
 			f(&opts)
 		}
@@ -98,6 +98,7 @@ func dm(text string) brainruntime.Inbound {
 }
 
 func TestBrainRunsAndDeliversInOrder(t *testing.T) {
+	t.Parallel()
 	mgr, d, home := queueTestManager(t, 50, "")
 	for _, txt := range []string{"one", "two", "three"} {
 		if _, _, _, err := mgr.Submit(dm(txt)); err != nil {
@@ -123,6 +124,7 @@ func TestBrainRunsAndDeliversInOrder(t *testing.T) {
 }
 
 func TestBusyReportedAndQueuePosition(t *testing.T) {
+	t.Parallel()
 	mgr, d, _ := queueTestManager(t, 400, "")
 	_, _, busy, _ := mgr.Submit(dm("first"))
 	if busy {
@@ -137,6 +139,7 @@ func TestBusyReportedAndQueuePosition(t *testing.T) {
 }
 
 func TestStopKillsTheRunningProcess(t *testing.T) {
+	t.Parallel()
 	// The private fork's queue never recorded the current run, so !stop and
 	// !reset could not kill it. Regression test.
 	mgr, d, _ := queueTestManager(t, 30000, "")
@@ -168,6 +171,7 @@ func TestStopKillsTheRunningProcess(t *testing.T) {
 // not the brain's own work, not hand-offs that answer elsewhere, and not the
 // chat's own brain (that one !stop stops with StopChat).
 func TestStopHandOffsLeavesOtherWorkAlone(t *testing.T) {
+	t.Parallel()
 	const (
 		chatJID = "15551234567@s.whatsapp.net"
 		other   = "120363000000000001@g.us"
@@ -228,10 +232,11 @@ func TestStopHandOffsLeavesOtherWorkAlone(t *testing.T) {
 }
 
 func TestInterruptModeSupersedes(t *testing.T) {
+	t.Parallel()
 	mgr, d, _ := queueTestManager(t, 30000, `, "queue": {"mode": "interrupt"}`)
 	_, _, _, _ = mgr.Submit(dm("old"))
 	testutil.WaitFor(t, 5*time.Second, "old run", func() bool { r := mgr.Get("a").Snapshot().Running; return r != nil && r.PID > 0 })
-	t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "10")
 	_, _, _, _ = mgr.Submit(dm("new"))
 	testutil.WaitFor(t, 10*time.Second, "two deliveries", func() bool { return d.count() == 2 })
 	runs := d.all()
@@ -245,6 +250,7 @@ func TestInterruptModeSupersedes(t *testing.T) {
 // chatter has no answer to give, and the request it killed would never be
 // answered either.
 func TestInterruptModeOnlyReplacesTheSendersOwnRun(t *testing.T) {
+	t.Parallel()
 	const group = "120363000000000000@g.us" // brain b's group
 	g := func(sender, text string, silent bool) brainruntime.Inbound {
 		return brainruntime.Inbound{Inbound: chat.Inbound{JID: group, Sender: sender, Text: text, Silent: silent}}
@@ -281,7 +287,7 @@ func TestInterruptModeOnlyReplacesTheSendersOwnRun(t *testing.T) {
 			br, _, _, _ := mgr.Submit(c.running)
 			testutil.WaitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
 			pid := br.Snapshot().Running.PID
-			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+			setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "10")
 			for _, w := range c.waiting {
 				if _, _, _, err := mgr.Submit(w); err != nil {
 					t.Fatal(err)
@@ -330,6 +336,7 @@ func TestInterruptModeOnlyReplacesTheSendersOwnRun(t *testing.T) {
 // asked for before and the chat's chatter; other people, and other chats
 // served by the same brain, keep their place.
 func TestInterruptModeKeepsOthersWaiting(t *testing.T) {
+	t.Parallel()
 	g := func(sender, text string, silent bool) brainruntime.Inbound {
 		return brainruntime.Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: sender, Text: text, Silent: silent}}
 	}
@@ -355,7 +362,7 @@ func TestInterruptModeKeepsOthersWaiting(t *testing.T) {
 			mgr, d, _ := queueTestManager(t, 30000, `, "queue": {"mode": "interrupt"}`)
 			br, _, _, _ := mgr.Submit(c.running)
 			testutil.WaitFor(t, 5*time.Second, "the first run", func() bool { r := br.Snapshot().Running; return r != nil && r.PID > 0 })
-			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+			setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "10")
 			for _, w := range c.waiting {
 				_, _, _, _ = mgr.Submit(w)
 			}
@@ -381,6 +388,7 @@ func TestInterruptModeKeepsOthersWaiting(t *testing.T) {
 // max_pending bounds the queue in interrupt mode too: requests from other
 // chats replace nothing, so they can fill it.
 func TestInterruptModeQueueIsBounded(t *testing.T) {
+	t.Parallel()
 	mgr, _, _ := queueTestManager(t, 30000, `, "queue": {"mode": "interrupt", "max_pending": 2}`)
 	br := mgr.Get("a")
 	if _, _, err := br.Submit(dm("long task")); err != nil {
@@ -399,6 +407,7 @@ func TestInterruptModeQueueIsBounded(t *testing.T) {
 }
 
 func TestSilentMessagesAreSupersededAndQueueOverflows(t *testing.T) {
+	t.Parallel()
 	mgr, d, _ := queueTestManager(t, 500, `, "queue": {"max_pending": 2}`)
 	g := func(text string, silent bool) brainruntime.Inbound {
 		return brainruntime.Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: text, Silent: silent}}
@@ -419,11 +428,12 @@ func TestSilentMessagesAreSupersededAndQueueOverflows(t *testing.T) {
 }
 
 func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
+	t.Parallel()
 	mgr, d, home := queueTestManager(t, 0, "")
 	// Keep both real child processes running until reload has retired b.
 	// A fixed sleep lets them finish before a loaded runner applies config.
 	release := filepath.Join(home, "release-runs")
-	t.Setenv("FRIDOLIN_FAKE_WAIT_FILE", release)
+	setenv(t, "FRIDOLIN_FAKE_WAIT_FILE", release)
 	a, b := mgr.Get("a"), mgr.Get("b")
 	_, _, _, _ = mgr.Submit(dm("keep going"))
 	_, _, _, _ = mgr.Submit(brainruntime.Inbound{Inbound: chat.Inbound{JID: "120363000000000000@g.us", Sender: "15551234567", Text: "doomed"}})
@@ -452,7 +462,7 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 	}
 
 	// Remove b, give a a new model, add c.
-	cfg, err := LoadConfig(writeConfig(t, `{
+	cfg, err := loadConfig(t, writeConfig(t, `{
 		"brain_mode": true,
 		"data_dir": "`+home+`/data",
 		"claude_path": "`+os.Args[0]+`",
@@ -512,6 +522,7 @@ func TestReloadKeepsRunningBrainAndRetiresRemoved(t *testing.T) {
 // Its history line is there once, whether the new folder has the old
 // history (moved) or not (a copy, or another brain).
 func TestReloadHandsOnWhatWaited(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		// reload changes the brains, the DM brain a among them, and
@@ -542,10 +553,10 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			home := fsx.Canonical(t.TempDir())
-			t.Setenv("HOME", home)
+			setenv(t, "HOME", home)
 			claude := fakeClaudeEnv(t, 30000)
 			configValue := func(refs ...config.BrainRef) *config.Settings {
-				cfg, err := LoadConfig(writeConfig(t, `{
+				cfg, err := loadConfig(t, writeConfig(t, `{
 					"data_dir": "`+home+`/data",
 					"claude_path": "`+claude+`"`+brainDirsJSON(t, refs...)+`
 				}`))
@@ -565,7 +576,7 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 				t.Fatal(err)
 			}
 			hasRun(t, mgr.Get("a"))
-			t.Setenv("FRIDOLIN_FAKE_SLEEP_MS", "10")
+			setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "10")
 			if _, _, _, err := mgr.Submit(dm("second")); err != nil {
 				t.Fatal(err)
 			}
@@ -604,6 +615,7 @@ func TestReloadHandsOnWhatWaited(t *testing.T) {
 // DMs in its own brain.json keeps its routing, and the change shows as
 // drift until you approve it.
 func TestReloadRunsTheApprovedManifest(t *testing.T) {
+	t.Parallel()
 	const dmChat = "15551234567@s.whatsapp.net"
 	tb := newTestBridge(t, "")
 	tb.addFolderBrain(t, manifest.Manifest{ID: "a", Name: "A", Routing: manifest.Routing{HandlesDMs: true}})
@@ -634,10 +646,11 @@ func TestReloadRunsTheApprovedManifest(t *testing.T) {
 // were. ResolveBrains leaves such brains out, so this guards any other way
 // a set reaches the manager.
 func TestReloadRefusesAClashingSet(t *testing.T) {
+	t.Parallel()
 	const group = "120363000000000000@g.us"
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
-	cfg, err := LoadConfig(writeConfig(t, `{"data_dir": "`+home+`/data"`+brainDirsJSON(t,
+	setenv(t, "HOME", home)
+	cfg, err := loadConfig(t, writeConfig(t, `{"data_dir": "`+home+`/data"`+brainDirsJSON(t,
 		brainFolder(t, "~/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 		brainFolder(t, "~/b", manifest.Manifest{ID: "b", Routing: manifest.Routing{Groups: []string{group}}}),
 	)+`}`))
@@ -666,6 +679,7 @@ func TestReloadRefusesAClashingSet(t *testing.T) {
 // behaviour. The other settings map to their flags, and -p comes last,
 // without the prompt, which goes on stdin.
 func TestClaudeArgs(t *testing.T) {
+	t.Parallel()
 	const mcp = "/brains/a/.mcp.json"
 	const settings = `{"claudeMdExcludes":["/brains/CLAUDE.md"]}`
 	cases := []struct {
@@ -716,6 +730,7 @@ func TestClaudeArgs(t *testing.T) {
 // process listing shows it and ARG_MAX bounds it: a message of a megabyte
 // and more, a few long pasted texts, still runs.
 func TestPromptGoesOnStdin(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		text string
@@ -727,7 +742,7 @@ func TestPromptGoesOnStdin(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			mgr, d, home := queueTestManager(t, 0, "")
 			argsLog := filepath.Join(home, "args.log")
-			t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
+			setenv(t, "FRIDOLIN_FAKE_ARGS_LOG", argsLog)
 			if _, _, _, err := mgr.Submit(dm(c.text)); err != nil {
 				t.Fatal(err)
 			}
@@ -748,6 +763,7 @@ func TestPromptGoesOnStdin(t *testing.T) {
 // CLI may meet them, and your user memory for a brain outside your home
 // folder too, but nothing of the brain's own folder.
 func TestInstructionsAbove(t *testing.T) {
+	t.Parallel()
 	mkdir := func(t *testing.T, p string) {
 		if err := os.MkdirAll(p, 0o700); err != nil {
 			t.Fatal(err)
@@ -826,6 +842,7 @@ func TestInstructionsAbove(t *testing.T) {
 // without it "{x,y}" and "@(y)" let the rules through. The characters in
 // the last case it matched unescaped.
 func TestGlobEscape(t *testing.T) {
+	t.Parallel()
 	cases := []struct{ path, want string }{
 		{"/Users/you/brains", "/Users/you/brains"},
 		{"/Users/you/notes (old)", "/Users/you/notes [(]old[)]"},
@@ -850,6 +867,7 @@ func TestGlobEscape(t *testing.T) {
 // it (see TestMCPConfigOf). inherit_claude_user_config drops them all
 // again.
 func TestBrainRunsWithItsOwnClaudeSetup(t *testing.T) {
+	t.Parallel()
 	write := func(body string) func(t *testing.T, p string) {
 		return func(t *testing.T, p string) {
 			if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
@@ -892,7 +910,7 @@ func TestBrainRunsWithItsOwnClaudeSetup(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mgr, d, home := queueTestManager(t, 0, tc.extra)
 			argsLog := filepath.Join(home, "args.log")
-			t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
+			setenv(t, "FRIDOLIN_FAKE_ARGS_LOG", argsLog)
 			mcp := filepath.Join(home, "a", ".mcp.json")
 			if tc.mcp != nil {
 				tc.mcp(t, mcp)
@@ -909,7 +927,7 @@ func TestBrainRunsWithItsOwnClaudeSetup(t *testing.T) {
 				t.Fatal(err)
 			}
 			got := string(data)
-			fill := strings.NewReplacer("<mcp>", mcp, "<settings>", excludeInstructionsAbove(filepath.Join(home, "a"))).Replace
+			fill := strings.NewReplacer("<mcp>", mcp, "<settings>", excludeInstructionsAbove(filepath.Join(home, "a"), home)).Replace
 			for _, w := range tc.want {
 				if w = fill(w); !strings.Contains(got, w) {
 					t.Errorf("args %q lack %q", got, w)
@@ -931,6 +949,8 @@ func TestBrainRunsWithItsOwnClaudeSetup(t *testing.T) {
 // outside the sandbox, so it follows no symlink and reads no FIFO, folder
 // or huge file.
 func TestMCPConfigOf(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	write := func(body string) func(t *testing.T, p string) {
 		return func(t *testing.T, p string) {
 			if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
@@ -1035,6 +1055,8 @@ func TestMCPConfigOf(t *testing.T) {
 // file it cannot read leaves out every server, since nothing can tell
 // which ones it turns off. enabledMcpjsonServers changes nothing.
 func TestMCPConfigOfDropsServersTurnedOff(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	const servers = `{"mcpServers": {"keep": {"command": "k", "args": ["<&>"]}, "off": {"command": "o"}}, "other": 1}`
 	cases := []struct {
 		name           string
@@ -1129,6 +1151,8 @@ func TestMCPConfigOfDropsServersTurnedOff(t *testing.T) {
 // brain turns off. Such a folder counts as settings it cannot read, so the
 // brain gets no server. A link that stays inside the folder is followed.
 func TestMCPConfigOfStaysInTheBrainFolder(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to.
 	cases := []struct {
 		name    string
 		link    func(dir, other string) string // where the brain's .claude points
@@ -1197,10 +1221,11 @@ func TestMCPConfigOfStaysInTheBrainFolder(t *testing.T) {
 }
 
 func TestStopKillsProcessesClaudeStarted(t *testing.T) {
+	t.Parallel()
 	// A command Claude started keeps the output pipe open; stopping must kill
 	// the whole process group, not just the CLI, or the stop hangs.
 	mgr, d, _ := queueTestManager(t, 30000, "")
-	t.Setenv("FRIDOLIN_FAKE_CHILD", "1")
+	setenv(t, "FRIDOLIN_FAKE_CHILD", "1")
 	_, _, _, _ = mgr.Submit(dm("long task with a child"))
 	br := mgr.Get("a")
 	testutil.WaitFor(t, 5*time.Second, "run with a pid", func() bool {
@@ -1217,14 +1242,16 @@ func TestStopKillsProcessesClaudeStarted(t *testing.T) {
 }
 
 func TestBrainsDoNotSeeTheDotEnv(t *testing.T) {
+	// Serial: what it checks is that nothing reaches the process's own
+	// environment, which testutil.ClearEnv empties of those names.
 	// The bridge reads no .env. Older versions exported the one next to
 	// config.json into the bridge's environment, which every brain
 	// inherits, so any brain could read it with `env`.
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	testutil.ClearEnv(t, "MODEL", "FRIDOLIN_TEST_DOTENV_ONLY")
 	envLog := filepath.Join(home, "brain.env")
-	t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
+	setenv(t, "FRIDOLIN_FAKE_ENV_LOG", envLog)
 	claude := fakeClaudeEnv(t, 0)
 	path := writeConfig(t, `{
 		"brain_mode": true,
@@ -1238,7 +1265,7 @@ func TestBrainsDoNotSeeTheDotEnv(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(filepath.Dir(path), ".env"), []byte(dotenv), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := LoadConfig(path)
+	cfg, err := loadConfig(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1276,6 +1303,7 @@ func TestBrainsDoNotSeeTheDotEnv(t *testing.T) {
 // names or knowing data_dir and db_path. What the bridge's own environment
 // has under those names does not reach them.
 func TestBrainsAreToldTheDataDir(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		settings string // config.json settings besides the brain
@@ -1298,23 +1326,23 @@ func TestBrainsAreToldTheDataDir(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			home := fsx.Canonical(t.TempDir())
-			t.Setenv("HOME", home)
-			t.Setenv("BRIDGE_DATA_DIR", "/from/the/bridge/env")
-			t.Setenv("BRIDGE_DB_PATH", "/from/the/bridge/env/bridge.db")
+			setenv(t, "HOME", home)
+			setenv(t, "BRIDGE_DATA_DIR", "/from/the/bridge/env")
+			setenv(t, "BRIDGE_DB_PATH", "/from/the/bridge/env/bridge.db")
 			if c.legacy {
 				if err := os.Mkdir(home+"/.whatsapp-claude-bridge", 0o700); err != nil {
 					t.Fatal(err)
 				}
 			}
 			envLog := filepath.Join(home, "brain.env")
-			t.Setenv("FRIDOLIN_FAKE_ENV_LOG", envLog)
+			setenv(t, "FRIDOLIN_FAKE_ENV_LOG", envLog)
 			claude := fakeClaudeEnv(t, 0)
 			path := writeConfig(t, `{`+c.settings+`
 				"claude_path": "`+claude+`"`+brainDirsJSON(t,
 				brainFolder(t, home+"/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 			)+`
 			}`)
-			cfg, err := LoadConfig(path)
+			cfg, err := loadConfig(t, path)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1354,6 +1382,8 @@ func TestBrainsAreToldTheDataDir(t *testing.T) {
 // A brain runs in its own folder, so a relative data_dir or db_path, which
 // the bridge opens relative to its working directory, reaches it absolute.
 func TestDataEnvIsAbsolute(t *testing.T) {
+	// Serial: changes the process's working directory, against which a
+	// relative data_dir resolves.
 	cwd := fsx.Canonical(t.TempDir())
 	t.Chdir(cwd)
 	s := settingsFor(resolvedSettings(t, &config.File{DataDir: "rel", DBPath: "rel/bridge.db"}), manifest.Spec{})
@@ -1369,6 +1399,9 @@ func TestDataEnvIsAbsolute(t *testing.T) {
 // on with the next message, the bridge keeps running, and no process of
 // the run is left behind.
 func TestPanicsInARunAreContained(t *testing.T) {
+	// Serial: captureLog takes over the process's standard logger, which
+	// every bridge writes to. It also shortens workingNoticeAfter, a package
+	// variable.
 	cases := []struct {
 		name     string
 		env      map[string]string
@@ -1408,17 +1441,15 @@ func TestPanicsInARunAreContained(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.notice > 0 {
+				optionsOf(t).waits.workingNotice = tc.notice
+			}
 			mgr, _, home := queueTestManager(t, 10, "")
 			for k, v := range tc.env {
-				t.Setenv(k, v)
+				setenv(t, k, v)
 			}
 			pidLog := filepath.Join(home, "pids")
-			t.Setenv("FRIDOLIN_FAKE_PID_LOG", pidLog)
-			if tc.notice > 0 {
-				prev := workingNoticeAfter
-				workingNoticeAfter = tc.notice
-				t.Cleanup(func() { workingNoticeAfter = prev })
-			}
+			setenv(t, "FRIDOLIN_FAKE_PID_LOG", pidLog)
 			d := &deliveries{}
 			var first sync.Once
 			mgr.SetHooks(tc.hooks(d, &first))
@@ -1467,9 +1498,8 @@ func TestPanicsInARunAreContained(t *testing.T) {
 // question it sent before it hung does not make it an answer: the chat
 // still hears that the run was stopped.
 func TestRunTimeoutStopsAStuckRun(t *testing.T) {
-	prev := runTimeoutUnit
-	runTimeoutUnit = 100 * time.Millisecond
-	t.Cleanup(func() { runTimeoutUnit = prev })
+	t.Parallel()
+	optionsOf(t).waits.runTimeoutUnit = 100 * time.Millisecond
 	cases := []struct {
 		name     string
 		sleepMS  int
@@ -1486,7 +1516,7 @@ func TestRunTimeoutStopsAStuckRun(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			mgr, d, _ := queueTestManager(t, tc.sleepMS, `, "run_timeout_minutes": `+tc.minutes)
 			for k, v := range tc.env {
-				t.Setenv(k, v)
+				setenv(t, k, v)
 			}
 			var mu sync.Mutex
 			var sent []string
@@ -1528,11 +1558,10 @@ func TestRunTimeoutStopsAStuckRun(t *testing.T) {
 // the CLI has exited, Wait stops waiting for the output after
 // runWaitDelay, the rest of the run is stopped, and the answer goes out.
 func TestRunEndsSoonAfterItsResult(t *testing.T) {
-	prevGrace, prevDelay := postResultGrace, runWaitDelay
-	postResultGrace, runWaitDelay = 300*time.Millisecond, 300*time.Millisecond
-	t.Cleanup(func() { postResultGrace, runWaitDelay = prevGrace, prevDelay })
+	t.Parallel()
+	optionsOf(t).waits.postResultGrace, optionsOf(t).waits.runWaitDelay = 300*time.Millisecond, 300*time.Millisecond
 	mgr, d, _ := queueTestManager(t, 10, "")
-	t.Setenv("FRIDOLIN_FAKE_CHILD", "1") // sleeps 30 s holding the output open
+	setenv(t, "FRIDOLIN_FAKE_CHILD", "1") // sleeps 30 s holding the output open
 	start := time.Now()
 	if _, _, _, err := mgr.Submit(dm("quick answer")); err != nil {
 		t.Fatal(err)
@@ -1548,16 +1577,39 @@ func TestRunEndsSoonAfterItsResult(t *testing.T) {
 
 // TestRunTimeoutKeepsAnAnswerThatCame: a deadline that comes in the grace
 // after the result stops what is left of the run, but the answer that is
-// in still goes out.
+// in still goes out. The output stays open until the test releases it,
+// once the deadline has passed: runWaitDelay is longer than the test
+// waits, so nothing else ends the run first.
 func TestRunTimeoutKeepsAnAnswerThatCame(t *testing.T) {
-	prevUnit, prevGrace := runTimeoutUnit, postResultGrace
-	runTimeoutUnit, postResultGrace = 100*time.Millisecond, 10*time.Second
-	t.Cleanup(func() { runTimeoutUnit, postResultGrace = prevUnit, prevGrace })
-	mgr, d, _ := queueTestManager(t, 0, `, "run_timeout_minutes": 20`)
-	t.Setenv("FRIDOLIN_FAKE_CHILD", "1") // sleeps 30 s holding the output open
+	t.Parallel()
+	w := optionsOf(t).waits
+	w.runTimeoutUnit, w.postResultGrace, w.runWaitDelay = 50*time.Millisecond, 10*time.Second, time.Minute
+	const timeout = 20 * 50 * time.Millisecond
+	mgr, d, home := queueTestManager(t, 0, `, "run_timeout_minutes": 20`)
+	childLog := filepath.Join(home, "child-pid")
+	setenv(t, "FRIDOLIN_FAKE_CHILD", "1") // sleeps 30 s holding the output open
+	setenv(t, "FRIDOLIN_FAKE_CHILD_PID_LOG", childLog)
 	if _, _, _, err := mgr.Submit(dm("answer in time")); err != nil {
 		t.Fatal(err)
 	}
+	var started time.Time
+	testutil.WaitFor(t, 10*time.Second, "the run to start", func() bool {
+		if r := mgr.Get("a").Snapshot().Running; r != nil {
+			started = r.Started
+			return true
+		}
+		return false
+	})
+	var child int
+	testutil.WaitFor(t, 10*time.Second, "the command holding the output", func() bool {
+		data, _ := os.ReadFile(childLog)
+		child, _ = strconv.Atoi(string(data))
+		return child > 0
+	})
+	// The run's deadline is set before it is marked started: past this, it
+	// has come while the output is held.
+	time.Sleep(time.Until(started.Add(timeout + 50*time.Millisecond)))
+	testutil.KillPID(child)
 	testutil.WaitFor(t, 10*time.Second, "the run", func() bool { return d.count() == 1 })
 	if res := d.all()[0].res; res.Err != nil || !strings.HasSuffix(res.Text, "says: answer in time") {
 		t.Errorf("result = %+v, want the answer that came before the deadline", res)
@@ -1567,6 +1619,7 @@ func TestRunTimeoutKeepsAnAnswerThatCame(t *testing.T) {
 // TestRunTimeoutSetting: run_timeout_minutes defaults to 30, takes 0 for no
 // limit, and refuses what makes no sense.
 func TestRunTimeoutSetting(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		json    string
 		want    time.Duration
@@ -1581,8 +1634,8 @@ func TestRunTimeoutSetting(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.json, func(t *testing.T) {
 			home := fsx.Canonical(t.TempDir())
-			t.Setenv("HOME", home)
-			cfg, err := LoadConfig(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data"`+tc.json+`}`))
+			setenv(t, "HOME", home)
+			cfg, err := loadConfig(t, writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data"`+tc.json+`}`))
 			if tc.wantErr {
 				if err == nil || !strings.Contains(err.Error(), "run_timeout_minutes") {
 					t.Errorf("err = %v, want run_timeout_minutes refused", err)
@@ -1592,7 +1645,7 @@ func TestRunTimeoutSetting(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got := runTimeout(cfg); got != tc.want {
+			if got := runTimeout(cfg, time.Minute); got != tc.want {
 				t.Errorf("RunTimeout = %v, want %v", got, tc.want)
 			}
 		})
@@ -1603,6 +1656,7 @@ func TestRunTimeoutSetting(t *testing.T) {
 // works does not keep another chat's one waiting behind all three, and
 // Submit says where each waits.
 func TestBusyChatDoesNotHoldUpAnother(t *testing.T) {
+	t.Parallel()
 	mgr, d, _ := queueTestManager(t, 400, "")
 	br := mgr.Get("a")
 	other := brainruntime.Inbound{Inbound: chat.Inbound{JID: otherNumber + "@s.whatsapp.net", Sender: otherNumber, Text: "other 1"}}
@@ -1637,6 +1691,7 @@ func TestBusyChatDoesNotHoldUpAnother(t *testing.T) {
 // The limit is read when the configuration changes, and refused outside
 // 0 (no limit) to 64.
 func TestRunLimitSetting(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		json string
 		want int
@@ -1651,7 +1706,7 @@ func TestRunLimitSetting(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.json, func(t *testing.T) {
 			home := t.TempDir()
-			cfg, err := LoadConfig(writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data"`+c.json+`}`))
+			cfg, err := loadConfig(t, writeConfig(t, `{"brain_mode": true, "data_dir": "`+home+`/data"`+c.json+`}`))
 			if c.err != "" {
 				if err == nil || !strings.Contains(err.Error(), c.err) {
 					t.Errorf("err = %v, want %q", err, c.err)
@@ -1665,8 +1720,8 @@ func TestRunLimitSetting(t *testing.T) {
 				t.Errorf("RunLimit = %d, want %d", got, c.want)
 			}
 			mgr := newTestManager(t, cfg)
-			if brainGlobalsOf(cfg).RunLimit != c.want {
-				t.Errorf("slots limit = %d, want %d", brainGlobalsOf(cfg).RunLimit, c.want)
+			if brainGlobalsOf(cfg, time.Minute).RunLimit != c.want {
+				t.Errorf("slots limit = %d, want %d", brainGlobalsOf(cfg, time.Minute).RunLimit, c.want)
 			}
 			n := 7
 			next := *cfg
@@ -1674,8 +1729,8 @@ func TestRunLimitSetting(t *testing.T) {
 			if err := mgr.Apply(&next); err != nil {
 				t.Fatal(err)
 			}
-			if brainGlobalsOf(&next).RunLimit != 7 {
-				t.Errorf("slots limit after a change = %d, want 7", brainGlobalsOf(&next).RunLimit)
+			if brainGlobalsOf(&next, time.Minute).RunLimit != 7 {
+				t.Errorf("slots limit after a change = %d, want 7", brainGlobalsOf(&next, time.Minute).RunLimit)
 			}
 		})
 	}

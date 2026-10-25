@@ -332,6 +332,7 @@ func (s *scrubber) response(t testing.TB, w *httptest.ResponseRecorder) []byte {
 }
 
 func TestScrubberJSON(t *testing.T) {
+	t.Parallel()
 	root := fsx.Canonical(t.TempDir())
 	s := newScrubber(root).maskKeys("pid", "a.*.node")
 	tests := []struct {
@@ -359,6 +360,7 @@ func TestScrubberJSON(t *testing.T) {
 }
 
 func TestScrubberAbove(t *testing.T) {
+	t.Parallel()
 	// The folders above the root differ between systems; once masked, the
 	// lines naming them are one per block on every system, with a count
 	// that shows whether each folder had its line.
@@ -415,6 +417,7 @@ func TestScrubberAbove(t *testing.T) {
 }
 
 func TestScrubberWithLeavesTheOriginal(t *testing.T) {
+	t.Parallel()
 	root := fsx.Canonical(t.TempDir())
 	// Room to append in place: a copy that shared the array would write
 	// its new mask into the original's.

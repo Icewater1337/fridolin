@@ -25,9 +25,110 @@ for compatibility.
   2 minutes. Brain files, schedules and skills are now told in WhatsApp
   too, within a minute. `!approve <ref>` still works; `!revoke` alone
   is `!deny`. `!fleet` and the Nodes page use the same wording; `GET
-  /api/nodes` gives each node `allows` and `joined_via`. New audit kind
+  /api/nodes` gives each node `allows` and `joined_via`. The same holds
+  for what came since: fride and core-host say what approving them
+  means, a scheduled agent that runs a program on a node says what
+  approving does to that node's allowlist, and `!movecore`'s poll (Move
+  now / Cancel) and the keep/forget poll after a move answer to
+  `!approve` and `!deny` too. New audit kind
   `owner_approval`; new file `<data_dir>/owner-approvals.json`
   (docs/NODES.md, "Approving from WhatsApp").
+
+- **The core in a box** (#191 phase 4): a node in a box can take the
+  core and give it back, with the same `!movecore` / `fridolin nodes
+  move`, plan, lease and automatic rollback as a native core host. The
+  core runs inside the box's `node` container, as the agent's child
+  (`fridolin run --container --box`), on the volume `fridolin-box-data`,
+  with the host secrets of the box's sealed store in its environment;
+  the role is `core-role.json` in the node's volume, so a box that is
+  the core starts it again after a restart or update. No Docker socket;
+  FrIDE never mounts the core's volumes and its address cannot reach the
+  core's dashboard or site. The settings come as a second compose file,
+  `core.yaml` with `seccomp.json` (`fridolin box core-compose`, `fridolin
+  box seccomp`), which `box.sh`, `box.ps1` and the box updaters write
+  and name in `.env`'s `COMPOSE_FILE`: a box made before gets them with
+  its second update, or `box.sh --update` (`box.ps1 -Update`) once.
+  They publish the dashboard and site on the host's `127.0.0.1:8765` and
+  `:8780` (`FRIDOLIN_BOX_DASHBOARD_PORT`, `FRIDOLIN_BOX_SITE_PORT`); on
+  Ubuntu set `FRIDOLIN_BOX_APPARMOR=fridolin-core` after `sudo fridolin
+  core apparmor`. The move's pre-flight no longer refuses a box: it
+  checks the box's core settings and its sandbox (bubblewrap), says
+  what changes there (brain folders in the volume, not a host folder;
+  what is bound to the source stays on its node). `box.sh --update`
+  keeps the settings added to `.env` (docs/NODES.md, "The core in a
+  box"; docs/CORE.md, "Moving the core to a box").
+
+- **A calendar overview per brain.** A brain's Calendar card shows the
+  account, the sign-in's state (working, ends soon, revoked by Google,
+  needs reconnecting), when it last worked, its calendars with their
+  access and which are ticked, the default, and **Reconnect** next to
+  Disconnect. The bridge checks every connected brain's sign-in every six
+  hours. A broken one shows on the Overview page (`GET
+  /api/calendar/health`) and in `fridolin doctor` (`calendar-grants`), and
+  the owner gets one WhatsApp message about it. `GET
+  /api/brains/{id}/calendar` adds `health`. The brain's hint now names the
+  card's **Reconnect** button instead of "Sign in again".
+- **A guided Google setup.** Settings → Google sign-in (and a brain's
+  Calendar card before any client is set up) walks through Google Cloud
+  Console step by step: a link to each page (in your project once you
+  type its ID), the app name, scopes and redirect with copy buttons,
+  Google's "unverified app" screen and its 100-user cap explained. The
+  client goes in as the JSON file or as its ID and secret, and is checked
+  right after: `POST /api/google/client/check` asks Google's token
+  endpoint about a made-up code, which grants nothing, and says whether
+  Google knows the client. `GET /api/google/client` adds `source`,
+  `builtin` and `scopes` (docs/CALENDAR.md).
+- **A built-in Google client** for publishers' builds:
+  `FRIDOLIN_GOOGLE_CLIENT_ID` and `FRIDOLIN_GOOGLE_CLIENT_SECRET` in the
+  environment of `make build` or `scripts/build-release.sh` bake a Desktop
+  app client into the binary, so its users connect calendars and Drive
+  with one click. Public builds have none. A client pasted under Settings
+  always wins, and the dashboard labels the built-in one.
+- **Google sign-in from another machine.** A dashboard opened over the
+  tailnet opens Google in a new tab and takes the address Google sent it
+  back to (`POST /api/google/callback`), since `http://127.0.0.1:8765/`
+  does not load on that machine.
+
+- **Forgetting a former core host removes what moves brought it** (#266):
+  "Forget them" in the keep/forget poll after a core move (or no vote in
+  24 hours), and `!revoke` of a connected core host, now also remove the
+  secret files a move wrote into the core's credentials folder (the
+  `fridolin-home` volume) and the core's data dir (`fridolin-data`:
+  `bridge.db` with the WhatsApp session, `vault.db`, the config, the
+  brain folders a move put there), not only the host secrets. Each is
+  keyed off a record the node agent keeps as a move brings it
+  (`core-secrets-received.json`): a file that was there before, and a
+  data dir that held data when a move imported into it (the core's
+  original home), stay. The data dir goes only while no move and no core
+  runs there and another device's core holds the lease. The owner's
+  message lists the secrets, files and entries of the data dir removed,
+  or why the data dir stays. New: `fridolin core forget-data`, `fridolin
+  core files forget`, `"data_dir"` in `fridolin core status --json`,
+  and `fridolin doctor --node`'s `node-core-leftovers` check, which warns
+  on a former core host that still holds core data. A data dir imported
+  by an older version is not in the record and stays: doctor says so,
+  and docs/CORE.md, "Forgetting a former core host", says how to remove
+  it by hand.
+
+- **`!movecore`** (#187, third slice): in the owner's direct chat,
+  `!movecore <node>` runs the move's pre-flight and answers with a
+  plain report (source → target, the expected time offline, what does
+  not work on the target, what becomes of the site) and a poll, Move now
+  / Cancel. Only the owner's vote counts, the dashboard cannot answer
+  it, no vote in 30 minutes is a no, a lockdown refuses it, and it
+  answers 3 times an hour. "Move now" runs the same move as `fridolin
+  nodes move --yes`; the owner hears when the core stops and, from the
+  core that runs afterwards, how it ended. `!movecore` alone lists the
+  core hosts and what keeps the core from moving to each;
+  `!movecore <old host>` is the way back. After a move a second poll
+  asks whether the machine the core left keeps the host secrets (no
+  vote in 24 hours forgets them, `core.secrets.forget`), and revoking a
+  connected core host has it forget them first. The move's report (and
+  `POST /api/nodes/move-check`'s `site`) says whether the site's
+  Cloudflare tunnel runs in the core and moves with it, and the new core
+  checks that the domain answers. New audit kinds: `core_move_requested`,
+  `core_move_approved`, `core_move_ended`, `core_secrets`
+  (docs/CORE.md, "Moving the core from WhatsApp").
 
 - **The core moves itself** (#187, second slice) between two native core
   hosts: `fridolin nodes move-check SRC DST` is the pre-flight (versions,
@@ -631,6 +732,35 @@ for compatibility.
   what waits. The node alerts' and `!fleet`'s wording changed (pinned in
   `messages.golden`), and `nodeproto.CoreHostApproval` reads plainer.
 
+- **The Plaud Sync app lets the NotePin sleep** (docs/PLAUD.md, "The
+  pin's battery"). A permanent Bluetooth link kept the pin awake and
+  emptied its battery fast. The app's new **Sync** setting is **smart**
+  by default: it connects only to fetch and lets go afterwards. It checks
+  in every 10 minutes, and at once when the app is opened, the phone is
+  plugged in or unlocked, or the pin comes back in range. It stays
+  connected while the pin records, so the stop is seen at once. **Every N
+  minutes** checks in only on its timer and when the app is opened.
+  **Instant** keeps the old permanent link. With voice mode on it checks
+  in at least every 2 minutes, and **Fetch now** (in the app and the
+  notification) fetches at once. A pin out of range is tried less and
+  less often, up to an hour apart. Rebuild the app (Integrations →
+  Plaud → Build phone app) and install it over the old one. It keeps
+  its pairing, and **Unpair** now connects to the pin itself.
+- **Approving `fride` says what it is**: arbitrary execution on that
+  machine, whatever `exec` allows. The Nodes page shows it while `fride`
+  waits (`fride_approval` in `GET /api/nodes`), `!approve` adds it to its
+  answer, and `!fleet` marks nodes with `fride` approved
+  (docs/NODES.md, "FrIDE").
+- **Signing in to a container core.** The dashboard's sign-in page names
+  the steps for the way the bridge runs: for the core in its container,
+  `docker exec fridolin-core fridolin open --print` and `!dashboard`,
+  and the token in the volume (`/data/dashboard.token`) rather than
+  `~/.fridolin/dashboard.token` on the host, which is not that bridge's.
+  `fridolin open` on a machine whose core runs in the `fridolin-core`
+  container asks the container for the link and opens it, so the old
+  instruction works there too (`--config` keeps it native). `/ready`
+  has a new field, `container` (docs/CORE.md, "Signing in to the
+  dashboard").
 - **The core image has an SSH client** (`openssh-client`). The site's
   "Check for changes" fetches the site repository over SSH with its
   deploy key, which failed in the container with `ssh: not found`.
@@ -936,6 +1066,53 @@ for compatibility.
 
 ### Fixed
 
+- **Plaud Sync 0.5 reaches the NotePin with the screen off.** In 0.4 the
+  check-ins connected to the pin's last known address and missed it all
+  night, until the app was opened. Each check-in now looks for the pin
+  first, with a scan filtered by Plaud's company id that Android runs
+  with the screen off, and connects to the address the pin uses then.
+  With voice mode on, a pin out of reach is tried at least every 10
+  minutes, not every hour.
+- **Voice mode: a NotePin recording reaches Fridolin again.** Its
+  transcript was saved as a question, but the question was sent only at
+  the app's next start. It is sent right after transcription now.
+- New in the app: the **NotePin's battery**, asked with each synced
+  recording, on its screen and in its log.
+
+- A core move to a fresh core host: the pull of the core's image (several
+  GB), the rehearsal and the secrets with their files may take longer than
+  a minute, which the core cut off ("did not answer core.image.pull
+  within 1m0s"); a target whose core cannot be read yet (no image, or no
+  host secrets before the move brings them) is a warning in the
+  pre-flight, not a refusal. In the core's container doctor no longer
+  warns that the process's TZ differs from `timezone` (#187).
+- A core move carries the secret files of a hidden credentials folder
+  (`~/.something`): the folder check refused a leading dot, and the
+  move went on with the host secrets and no files. A move now stops
+  before anything stops when the source's secret files cannot be read,
+  and the pre-flight says so (#187).
+- A core export carries `core/encryption.json`, the buckets' encryption
+  state (which stores are encrypted twice, which single-layer copies are
+  retired), and the import puts it in place, keeping the target's earlier
+  one as `encryption.json.before-<time>`. The core on another machine
+  thought the single-layer copies still there (#187).
+- A core move carries the secret files of the core's credentials folder
+  (`sandbox.credentials_dir` under `~`: the Google OAuth web client,
+  `dashboard-users.json`, each brain's calendar client and token) with
+  the host secrets, sealed to the target's key, and the target writes
+  them 0600 into the same folder under its core's home, never over a file
+  it has. The container's home folder is now the volume `fridolin-home`,
+  so they stay there; before, the core on the target missed them
+  (calendar, startup check) (#187). The core's process now runs in
+  config's `timezone` when it is set, not in the TZ of the host that
+  started it (#250).
+- `fridolin core run` no longer makes the post-quantum age identity and
+  the second layers' keys when the machine has none; only `core start`
+  and `core update` do. The move pre-flight runs `core run core status`
+  on the target, which made keys of its own there, and the core's then
+  could not replace them: the move stopped at the secrets. On a machine
+  that has such keys and is not the core, remove them before moving the
+  core there (`fridolin core secrets`, docs/CORE.md) (#187).
 - `fridolin core pull` (the first step of a core move) checks the
   image's provenance for an owner whose GitHub name has capitals: the
   repository named from the registry (`ghcr.io` lowercases it) did not
@@ -974,6 +1151,12 @@ for compatibility.
   published.
 - `fridolin node status` in a box says it has no service of its own
   instead of "unknown: exit status 1".
+- On the Build page, a message that could not be sent and a preview that
+  could not be started now show as an error toast, read out at once and
+  kept for 9 seconds. They showed as a plain note with the info icon,
+  for 5 seconds.
+- The Files page says "Only the first entries are shown." under a folder
+  the bridge lists only in part. The note was never shown.
 
 - A brain folder that a core move put on another machine goes back
   through the vault bucket only as far as the brain's backup settings

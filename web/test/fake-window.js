@@ -39,8 +39,13 @@ export function fakeWindow(start = ['#/overview']) {
     win,
     hashes: () => entries.map((e) => e.hash),
     at: () => at,
-    // A click on a link: the browser follows it unless a listener (or,
-    // with handled, the link's own handler after them) prevented that.
+    /**
+     * A click on a link: the browser follows it unless a listener (or,
+     * with handled, the link's own handler after them) prevented that.
+     * The rest of opts (metaKey and the like) goes into the event.
+     * @param {string} href
+     * @param {{handled?: boolean} & Partial<Pick<MouseEvent, 'button' | 'metaKey' | 'ctrlKey' | 'shiftKey' | 'altKey'>>} [opts]
+     */
     click(href, { handled = false, ...mods } = {}) {
       const a = { getAttribute: (k) => (k === 'href' ? href : null) };
       // closest('a[href^="…"]') finds the link when its href starts so.

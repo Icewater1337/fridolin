@@ -30,6 +30,18 @@ const coreMovesDir = "core-moves"
 // CoreRunner is what core-host does to the core on this machine. Every
 // method does one fixed thing; NativeCore runs the agent's own binary
 // with a fixed `fridolin core` subcommand for each.
+// SecretFiler is a CoreRunner that also moves the secret files of the
+// core's credentials folder (sandbox.credentials_dir) with the host
+// secrets.
+type SecretFiler interface {
+	// ExportFiles reads them, with the folder under ~ config names
+	// (sandbox.credentials_dir; "" for none).
+	ExportFiles(ctx context.Context) (dir string, files map[string][]byte, err error)
+	// ImportFiles writes them into dir under the core's home, keeping
+	// any there already.
+	ImportFiles(ctx context.Context, dir string, files map[string][]byte) (stored, kept []string, err error)
+}
+
 type CoreRunner interface {
 	// Status reads this data dir's device id, the lease and the latest
 	// export.
@@ -113,7 +125,7 @@ func (a *Agent) coreRunner() (CoreRunner, *nodeproto.Error) {
 		return a.CoreRunner, nil
 	}
 	if a.Config.Box != nil {
-		return nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "the core does not run in a box yet (#191 phase 4): move it to a native core host")
+		return nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "this box has not the core's settings (box-core.yaml): update it with box.sh --update (box.ps1 -Update), which writes them (docs/NODES.md, \"The core in a box\")")
 	}
 	if runtime.GOOS == "windows" {
 		return nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "the node service runs as LocalSystem, whose Docker Desktop and Credential Manager are not the owner's: move the core by hand (docs/CORE.md, Moving the core to another machine)")
@@ -541,8 +553,10 @@ func (a *Agent) runTarget(ctx context.Context, r CoreRunner, m *moveRun) {
 		if m.State.Phase != nodeproto.MoveWaiting {
 			a.step(m, nodeproto.MoveWaiting, "wait", "waiting for %s to release the lease and export", p.Source)
 		}
+		var st nodeproto.CoreRuntime
 		for {
-			st, err := r.Status(ctx)
+			var err error
+			st, err = r.Status(ctx)
 			if ctx.Err() != nil {
 				return
 			}
@@ -559,6 +573,11 @@ func (a *Agent) runTarget(ctx context.Context, r CoreRunner, m *moveRun) {
 			if !wait(ctx, min(a.movePoll(), time.Until(p.HandoffDeadline)+time.Millisecond)) {
 				return
 			}
+		}
+		// Whether the move brings the data dir, before the import changes
+		// it: what forgetting this machine may remove (#266).
+		if err := a.noteDataImport(p.Move, st.DataDir); err != nil {
+			a.logf("node: core move %s: noting what the import brings: %v", p.Move, err)
 		}
 		a.step(m, nodeproto.MoveImporting, "import", "%s released the lease and exported; importing", p.Source)
 		if err := r.Import(ctx); err != nil {
@@ -645,7 +664,7 @@ func (a *Agent) coreImage(ctx context.Context, p nodeproto.CoreImagePullParams) 
 			return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "%v", err)
 		}
 	}
-	if a.Config.Box != nil && a.CoreRunner == nil {
+	if a.Config.Box != nil {
 		// A box runs its image pinned by digest; the core's version is
 		// the box's when the box was updated to it.
 		if p.Version == a.Version {

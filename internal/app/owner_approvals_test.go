@@ -50,6 +50,7 @@ func (h *harness) device(id string) string {
 // told in plain words, with no code to type, and !approve alone lets it
 // in; then nothing waits. The audit log has it.
 func TestApproveAlone(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true}}`)
 	addr := h.StartNodes()
 	id := h.joinNode(addr, "laptop", nodes.JoinedFromChat, nodeproto.Capabilities{Host: true, Exec: &nodeproto.ExecCap{Allow: []nodeproto.ExecRule{{Name: "hostname"}}}})
@@ -89,6 +90,7 @@ func TestApproveAlone(t *testing.T) {
 // more; a second !approve within confirmWindow lets it in, one later asks
 // again. !deny needs no second word.
 func TestApproveUnexpected(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true}}`)
 	addr := h.StartNodes()
 	id := h.joinNode(addr, "stranger", "", nodeproto.Capabilities{Host: true})
@@ -136,6 +138,7 @@ func TestApproveUnexpected(t *testing.T) {
 // TestApproveExpired: a machine that waited longer than approvalFreshFor
 // is not approved by !approve alone without a second one.
 func TestApproveExpired(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true}}`)
 	addr := h.StartNodes()
 	id := h.joinNode(addr, "laptop", nodes.JoinedFromDashboard, nodeproto.Capabilities{Host: true})
@@ -178,6 +181,7 @@ func TestApproveExpired(t *testing.T) {
 // that one. A second vote in the same poll is out of date. `!approve
 // <ref>` still names one.
 func TestApproveSeveral(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true}}`)
 	addr := h.StartNodes()
 	laptop := h.joinNode(addr, "laptop", nodes.JoinedFromChat, nodeproto.Capabilities{Host: true})
@@ -230,6 +234,7 @@ func TestApproveSeveral(t *testing.T) {
 // dashboard, and approved with !approve alone twice; !deny leaves one as
 // it is and stops asking.
 func TestApproveBrainFiles(t *testing.T) {
+	t.Parallel()
 	fakeRuns(t)
 	h := newHarness(t, "")
 	dir := h.AddBrain(manifest.Manifest{ID: "taxes", Name: "Taxes", Routing: manifest.Routing{HandlesDMs: true}})
@@ -289,6 +294,7 @@ func TestApproveBrainFiles(t *testing.T) {
 // TestApproveRunRequest: a run's request_approval, which has its own
 // poll, is answered by !approve alone too, and its brain hears it.
 func TestApproveRunRequest(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t, "")
 	now := time.Now()
 	a := store.Approval{ID: "atest", Kind: approvalKind, Brain: "main", Notify: "main", Thread: harnessDM, Chat: harnessDM,

@@ -67,7 +67,8 @@ if ($Update) {
 Write-Host "This makes $Name a node of the fridolin core at $Core, in a box:"
 Write-Host ""
 Write-Host "  1. pull $nodeRef$(if ($fride) { " and $frideRef" }), pinned by digest in $Dir\.env"
-Write-Host "  2. write the box's compose file there (docker compose project fridolin-box)"
+Write-Host "  2. write the box's compose files there (docker compose project fridolin-box), with"
+Write-Host "     the core's settings, off until a core move hands the core to this box"
 Write-Host "  3. sign the box in to your tailnet as its own device (a link to open)"
 Write-Host "  4. join the core with the code from !join, and start the box with its updater"
 Write-Host "     (every 2 minutes, as you: it applies the updates the core asks for, once"
@@ -75,7 +76,7 @@ Write-Host "     their signature and build provenance are checked)"
 if ($fride) { Write-Host "  5. FrIDE: sign Claude in for its agents, set their git identity, pair it with the node" }
 }
 Write-Host ""
-Write-Host "No service gets the Docker socket; FrIDE never sees the node's key or backups."
+Write-Host "No service gets the Docker socket; FrIDE never sees the node's key, its backups or the core's data and secrets."
 if (-not $Yes) {
     $answer = Read-Host "Continue? [y/N]"
     if ($answer -notmatch '^(y|yes)$') { Die "stopped; nothing was changed" }
@@ -120,18 +121,32 @@ if ($gh -and $LASTEXITCODE -eq 0) {
 Say "Writing $Dir"
 New-Item -ItemType Directory -Force -Path $Dir | Out-Null
 Set-Location -LiteralPath $Dir
+# Settings the owner added to .env (ports, memory, time zone) stay.
+$kept = @()
+if (Test-Path -LiteralPath (Join-Path $Dir ".env")) {
+    $kept = @(Get-Content -LiteralPath (Join-Path $Dir ".env") | Where-Object { $_ -match '^(FRIDOLIN_BOX_(APPARMOR|DASHBOARD_PORT|SITE_PORT|CORE_MEMORY|NODE_MEMORY|FRIDE_MEMORY)|FRIDOLIN_TZ)=' })
+}
 $envLines = @("# Written by box.ps1; box updates rewrite the image lines.", "FRIDOLIN_BOX_NODE_IMAGE=$nodeImage", "FRIDOLIN_BOX_FRIDE_IMAGE=$frideImage")
 if ($Backups) { $envLines += "FRIDOLIN_BOX_BACKUPS=$Backups" }
 $envLines += $(if ($fride) { "COMPOSE_PROFILES=fride" } else { "COMPOSE_PROFILES=" })
+# The core's settings (core.yaml) beside the box's own; ";" separates them on Windows.
+$envLines += "COMPOSE_FILE=compose.yaml;core.yaml"
+$envLines += $kept
 # No BOM: compose reads .env as plain UTF-8.
 [IO.File]::WriteAllLines((Join-Path $Dir ".env"), $envLines)
 $compose = docker run --rm --entrypoint /opt/fridolin/fridolin $nodeImage box compose
 if ($LASTEXITCODE -ne 0) { Die "the image did not print its compose file" }
 [IO.File]::WriteAllText((Join-Path $Dir "compose.yaml"), (($compose -join "`n") + "`n"))
+$core = docker run --rm --entrypoint /opt/fridolin/fridolin $nodeImage box core-compose
+if ($LASTEXITCODE -ne 0) { Die "the image did not print the core's settings" }
+[IO.File]::WriteAllText((Join-Path $Dir "core.yaml"), (($core -join "`n") + "`n"))
+$seccomp = docker run --rm --entrypoint /opt/fridolin/fridolin $nodeImage box seccomp
+if ($LASTEXITCODE -ne 0) { Die "the image did not print its seccomp profile" }
+[IO.File]::WriteAllText((Join-Path $Dir "seccomp.json"), (($seccomp -join "`n") + "`n"))
 $updater = docker run --rm --entrypoint /opt/fridolin/fridolin $nodeImage box updater ps1
 if ($LASTEXITCODE -ne 0) { Die "the image did not print its updater" }
 [IO.File]::WriteAllText((Join-Path $Dir "update.ps1"), (($updater -join "`r`n") + "`r`n"))
-Write-Host "compose.yaml, .env and update.ps1 are in $Dir"
+Write-Host "compose.yaml, core.yaml, seccomp.json, .env and update.ps1 are in $Dir"
 
 # The box's updater (docs/NODES.md, "Box updates"): a Scheduled Task runs
 # update.ps1 every 2 minutes while you are signed in, hidden, as you. It
@@ -211,4 +226,4 @@ docker compose exec -T node fridolin node status --state-dir /node | Select-Obje
 Write-Host ""
 Write-Host "The core tells you in WhatsApp that $Name joined; reply !approve <id> there (or approve it on the dashboard's Nodes page)."
 Write-Host "In ${Dir}: docker compose ps | logs | stop | start. Docker Desktop starts the box again after a restart once it runs at sign-in (Settings > General)."
-Write-Host "Remove the box with docker compose down -v (it deletes the node's key and its backups$(if ($Backups) { " except $Backups" }))."
+Write-Host "Remove the box with docker compose down -v (it deletes the node's key and its backups$(if ($Backups) { " except $Backups" }), and the core's data once this box runs the core: never while it does)."

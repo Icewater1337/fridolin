@@ -66,6 +66,11 @@ const (
 	pendingSchedule = "schedule"
 	pendingBrain    = "brain"
 	pendingSkill    = "skill"
+	// pendingCoreMove is !movecore's poll, Move now / Cancel, and
+	// pendingCoreSecrets the poll after a move, whether the machine the
+	// core left keeps the host secrets (coremove_runtime.go).
+	pendingCoreMove    = "coremove"
+	pendingCoreSecrets = "coresecrets"
 )
 
 // pendingItem is one thing that waits for the owner.
@@ -163,6 +168,7 @@ func (b *App) pendingApprovals(ctx context.Context) []pendingItem {
 	var out []pendingItem
 	out = append(out, b.pendingNodes(ctx)...)
 	out = append(out, b.pendingRuns(ctx)...)
+	out = append(out, b.pendingCoreQuestions(ctx)...)
 	out = append(out, b.pendingBrainFiles(ctx)...)
 	slices.SortStableFunc(out, func(x, y pendingItem) int {
 		return cmp.Or(x.since.Compare(y.since), cmp.Compare(x.key, y.key))
@@ -214,6 +220,7 @@ func (b *App) nodeItem(ctx context.Context, n *nodes.Node) (pendingItem, bool) {
 	m.Label = "*" + n.Name + "*"
 	m.Facts = append(m.Facts, "From: "+b.nodeWhere(ctx, n.Address))
 	coreHost := n.Declared.CoreHost != nil && !nodeproto.Covers(n.Approved, nodeproto.Capabilities{CoreHost: n.Declared.CoreHost})
+	fride := nodes.FridePending(n)
 	if pendingDevice {
 		it.since = n.JoinedAt
 		m.Subject = fmt.Sprintf("*%s* (%s) wants to join as a node", n.Name, os)
@@ -239,6 +246,9 @@ func (b *App) nodeItem(ctx context.Context, n *nodes.Node) (pendingItem, bool) {
 		case coreHost:
 			m.Subject = fmt.Sprintf("*%s* (%s) asks to hold all of Fridolin's secrets (core-host)", n.Name, os)
 			m.Option = fmt.Sprintf("%s holds all secrets (core-host)", n.Name)
+		case fride:
+			m.Subject = fmt.Sprintf("*%s* (%s) asks to let FrIDE's agents run anything on it (fride)", n.Name, os)
+			m.Option = fmt.Sprintf("%s runs FrIDE (fride)", n.Name)
 		case n.CommandsApprovedAt != nil:
 			m.Subject = fmt.Sprintf("*%s* (%s) asks to do more than you approved", n.Name, os)
 			m.Option = fmt.Sprintf("%s does more than approved", n.Name)
@@ -262,6 +272,9 @@ func (b *App) nodeItem(ctx context.Context, n *nodes.Node) (pendingItem, bool) {
 			m.Facts = append(m.Facts, "Sends secrets only to: "+strings.Join(to, ", "))
 		}
 	}
+	if fride {
+		m.Note = strings.TrimSpace(m.Note + "\n\n" + nodeproto.FrideApproval)
+	}
 	m.When = it.since
 	m.Allows = n.Declared.Plain()
 	if !it.since.IsZero() {
@@ -279,6 +292,9 @@ func (b *App) nodeItem(ctx context.Context, n *nodes.Node) (pendingItem, bool) {
 		reply := outboundmsg.NodeApprovedReply(got.Name, got.ID, got.Effective().Plain())
 		if coreHost && got.Effective().CoreHost != nil {
 			reply += "\n\n" + outboundmsg.NodeCoreHostApprovedNote(nodeproto.CoreHostApproval)
+		}
+		if fride && got.Effective().Fride != nil {
+			reply += "\n\n" + outboundmsg.NodeFrideApprovedNote(nodeproto.FrideApproval)
 		}
 		return reply, nil
 	}
@@ -419,6 +435,80 @@ func (b *App) pendingRuns(ctx context.Context) []pendingItem {
 	return out
 }
 
+// pendingCoreQuestions are the core move's polls that wait: !movecore's
+// Move now / Cancel, and keep or forget the host secrets after a move.
+// Each has its own poll, which tells it; !approve answers it with the
+// first option (move, keep), !deny with the second (cancel, forget).
+func (b *App) pendingCoreQuestions(ctx context.Context) []pendingItem {
+	if b.store == nil || b.nodes == nil {
+		return nil
+	}
+	pending, _, err := b.store.Approvals(ctx, 0)
+	if err != nil {
+		log.Printf("approvals: %v", err)
+		return nil
+	}
+	nodeName := func(id string) string {
+		if n, err := b.nodes.Registry().Get(id); err == nil {
+			return n.Name
+		}
+		return id
+	}
+	var out []pendingItem
+	for _, a := range pending {
+		if a.Kind != questionKind || len(a.Options) != 2 {
+			continue
+		}
+		it := pendingItem{key: "question:" + a.ID, since: a.CreatedAt, silent: true}
+		m := &it.msg
+		m.When, m.Ref = a.CreatedAt, a.ID
+		// What follows the answer says what came of it (coreMoveDecided,
+		// coreSecretsDecided).
+		switch a.Notify {
+		case coreMoveNotify:
+			src, dst, _ := strings.Cut(a.Step, " ")
+			srcName, dstName := nodeName(src), nodeName(dst)
+			it.kind = pendingCoreMove
+			m.Subject = fmt.Sprintf("You asked to move the core from *%s* to *%s*", srcName, dstName)
+			m.Label = fmt.Sprintf("the core's move from *%s* to *%s*", srcName, dstName)
+			m.Option = textx.Truncate("Move the core to "+dstName, 90)
+			m.Facts = []string{"Started: with your !movecore"}
+			m.Allows = []string{fmt.Sprintf("stop the core on %s and start it on %s, with all of Fridolin's secrets", srcName, dstName)}
+		case coreSecretsNotify:
+			name := nodeName(a.Step)
+			it.kind = pendingCoreSecrets
+			m.Subject = fmt.Sprintf("*%s* still holds Fridolin's secrets after the core left it", name)
+			m.Label = fmt.Sprintf("keeping the host secrets on *%s*", name)
+			m.Option = textx.Truncate("Keep the secrets on "+name, 90)
+			m.Facts = []string{"Started: by the core move " + a.Run}
+			m.Allows = []string{"keep the host secrets, the secret files and the core's data dir a move brought it, so the next move is faster"}
+		default:
+			continue
+		}
+		id, keep, drop := a.ID, a.Options[0], a.Options[1]
+		answer := func(ctx context.Context, option, by string) error {
+			if got, ok := b.decide(ctx, id, store.ApprovalAnswered, option, by, answerAsMessage); !ok {
+				return fmt.Errorf("it is %s already", got.Status)
+			}
+			return nil
+		}
+		it.approve = func(ctx context.Context, by string) (string, error) {
+			if err := answer(ctx, keep, by); err != nil {
+				return "", err
+			}
+			return outboundmsg.ApprovedReply(m.Label, ""), nil
+		}
+		it.deny = func(ctx context.Context, by string) (string, error) {
+			if err := answer(ctx, drop, by); err != nil {
+				return "", err
+			}
+			return outboundmsg.DeniedReply(m.Label, ""), nil
+		}
+		out = append(out, it)
+	}
+	return out
+}
+
 // ownerThread reports whether thread is the owner's own direct chat.
 func (b *App) ownerThread(thread string) bool {
 	if thread == "" || chat.IsGroupJID(thread) {
@@ -514,6 +604,9 @@ func (b *App) scheduleItem(brain, brainName string, r manifest.ScheduleReview, s
 			m.Facts = append(m.Facts, "For: "+textx.Truncate(s.Description, 200))
 		}
 		m.Facts = append(m.Facts, "Does: "+taskOf(s))
+		if c := s.Command; c != nil && len(c.Argv) > 0 {
+			m.Facts = append(m.Facts, b.programFact(c.Node, c.Argv))
+		}
 		for _, r := range risksOf(s) {
 			m.Allows = append(m.Allows, canPhrase(r))
 		}
@@ -530,6 +623,24 @@ func (b *App) scheduleItem(brain, brainName string, r manifest.ScheduleReview, s
 		return outboundmsg.DeniedReply(m.Label, "What you approved before stays; the file waits on the Schedules page."), nil
 	}
 	return it
+}
+
+// programFact says what approving a scheduled agent that runs argv on
+// node ref does to that node's allowlist (#221, programOn), or why the
+// program would not run there yet.
+func (b *App) programFact(ref string, argv []string) string {
+	var views []nodes.View
+	if b.nodes != nil {
+		views, _ = b.nodes.Views()
+	}
+	p := programOn(views, ref, argv, false)
+	switch p.State {
+	case ProgramAllowed:
+		return "Program: " + p.Detail + " already"
+	case ProgramWaiting:
+		return "Program: " + p.Detail
+	}
+	return "Program: it would not run yet — " + p.Detail
 }
 
 // canPhrase turns one of risksOf's lines ("runs a program …") into one
@@ -638,6 +749,8 @@ func skillPlain(p skill.Policy) []string {
 		out = append(out, "take steps that cannot be undone, such as sending or submitting things (each still asks you first)")
 	case skill.RiskWrite:
 		out = append(out, "change things, such as writing files")
+	case skill.RiskRead:
+		out = append(out, "only read")
 	default:
 		out = append(out, "only read")
 	}

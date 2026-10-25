@@ -7,7 +7,7 @@
 // its review, /edit and /duplicate take it through the wizard, and
 // /<run> shows a run's log. The reminders are listed below the agents.
 
-import { del, get, post, put } from '../app/api.js';
+import { del, get, post, put, errorStatus } from '../app/api.js';
 import { brainsResource, nodesResource, resource, schedulesResource } from '../app/resources.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { fieldDiff, lineDiff, sortKeys } from '../lib/diff.js';
@@ -22,18 +22,43 @@ import { icon } from '../components/icons.js';
 import { liveForm } from '../components/live-form.js';
 import { outcomeBadge, riskBadge, threadEl } from '../components/policy.js';
 import { toast, toastError } from '../components/toast.js';
+import { errorMessage } from '../lib/errors.js';
+
+/** @import { Page, PageModule } from '../app/page.js' */
+/** @import { Child } from '../lib/dom.js' */
+/** @import { Node as FleetNode, Reminder, ScheduleAgent, ScheduleProgram, ScheduleRun, SchedulesResponse, ScheduleTemplate } from '../../types/api.js' */
 
 const githubResource = resource('/api/github');
 const enc = encodeURIComponent;
+/**
+ * The API path of brain's agent name.
+ * @param {string} brain
+ * @param {string} name
+ * @returns {`/api/schedules/${string}/${string}`}
+ */
 const base = (brain, name) => `/api/schedules/${enc(brain)}/${enc(name)}`;
+/**
+ * The dashboard address of brain's agent name, or of one of its runs.
+ * @param {string} brain
+ * @param {string} name
+ * @param {string} [run]
+ */
 const link = (brain, name, run) => `#/schedules/${enc(brain)}/${enc(name)}${run ? `/${enc(run)}` : ''}`;
+/** @type {Record<string, string>} */
 const REVIEW_TITLE = { new: 'New agent, waiting for your approval', changed: 'Its file changed: the change waits for your approval', removed: 'Its file is gone: its removal waits for your approval', invalid: 'Its file cannot be used as it is' };
 
+/** @param {ScheduleAgent} a */
 function stateBadge(a) {
   const s = stateOf(a);
   return badge(s.label, s.kind);
 }
 
+/**
+ * POSTs body to path, says done, and refreshes the list; resolves whether it worked.
+ * @param {string} path
+ * @param {string} done
+ * @param {unknown} [body]
+ */
 async function act(path, done, body) {
   try {
     await post(path, body);
@@ -48,6 +73,7 @@ async function act(path, done, body) {
 
 // An agent just approved runs once its brain took up the new approval,
 // which follows the save by a moment: Run now waits for it.
+/** @param {ScheduleAgent} a */
 async function runSoon(a) {
   for (let i = 0; i < 10; i += 1) {
     try {
@@ -56,12 +82,16 @@ async function runSoon(a) {
       await schedulesResource.refresh();
       return;
     } catch (e) {
-      if (e.status !== 404 || i === 9) { toastError(e); return; }
+      if (errorStatus(e) !== 404 || i === 9) { toastError(e); return; }
       await new Promise((r) => { setTimeout(r, 500); });
     }
   }
 }
 
+/**
+ * @param {ScheduleAgent} a
+ * @param {() => void} [after] runs once it is gone
+ */
 async function removeAgent(a, after) {
   const pending = a.state === 'pending';
   const ok = await confirmDialog({
@@ -81,31 +111,42 @@ async function removeAgent(a, after) {
 }
 
 // How a command agent's badge looks, by how its program stands on its node.
+/** @type {Record<ScheduleProgram['state'], string>} */
 const PROGRAM_TONE = { allowed: 'ok', waiting: 'info', refused: 'bad', 'not-accepted': 'bad', 'no-node': 'bad' };
 
-/** How a's program stands on its node, when that needs saying: a line for its card. */
+/**
+ * How a's program stands on its node, when that needs saying: a line for its card.
+ * @param {ScheduleAgent} a
+ */
 function programNote(a) {
   const p = a.program;
   if (!p || p.state === 'allowed' || a.state === 'pending') return null;
   return h(`p.small.${p.state === 'waiting' ? 'muted' : 'warn-text'}`, p.detail);
 }
 
-/** What agent a may do, as small badges: risk, node, GitHub, results. */
+/**
+ * What agent a may do, as small badges: risk, node, GitHub, results.
+ * @param {ScheduleAgent} a
+ */
 function mayDo(a) {
-  const s = a.schedule || {};
+  const s = a.schedule;
+  /** @type {Child[]} */
   const out = [];
-  if (s.command) out.push(badge(`node ${s.command.node}`, PROGRAM_TONE[a.program && a.program.state] || 'warn', a.program ? a.program.detail : 'Runs a program on this node'));
+  if (s.command) out.push(badge(`node ${s.command.node}`, (a.program && PROGRAM_TONE[a.program.state]) || 'warn', a.program ? a.program.detail : 'Runs a program on this node'));
   else out.push(riskBadge(s.risk || 'write'));
   if (s.github) {
     const perms = Object.entries(s.github.permissions || {}).map(([k, v]) => `${k}:${v}`).join(' ');
     out.push(badge(`GitHub ${(s.github.repos || []).join(', ')}`, Object.values(s.github.permissions || {}).includes('write') ? 'warn' : 'neutral', perms));
   }
-  if ((s.preapproved || []).length) out.push(badge(`${s.preapproved.length} preapproved`, 'neutral', s.preapproved.join('\n')));
+  if (s.preapproved && s.preapproved.length) out.push(badge(`${s.preapproved.length} preapproved`, 'neutral', s.preapproved.join('\n')));
   out.push(a.report === 'silent' ? badge('silent', 'neutral', 'Sends nothing') : h('span.small.muted', a.report === 'always' ? 'always → ' : 'when worth it → ', a.chat ? threadEl(a.chat) : 'no chat'));
   return h('div.agent-may', out);
 }
 
-/** The run facts of agent a: when, next run, last run. */
+/**
+ * The run facts of agent a: when, next run, last run.
+ * @param {ScheduleAgent} a
+ */
 function facts(a) {
   const last = a.last_run;
   let next = h('span.muted', '—');
@@ -121,9 +162,15 @@ function facts(a) {
       : h('span.muted', 'never'))));
 }
 
-/** The review of a's pending change, with Approve, Approve & run now and Delete. */
+/**
+ * The review of a's pending change, with Approve, Approve & run now and Delete.
+ * @param {ScheduleAgent} a
+ * @param {{after?: () => void}} [options] after runs once an approved removal is done
+ */
 function reviewPanel(a, { after } = {}) {
   const r = a.review;
+  if (!r) return null; // its callers show it only for an agent with a review
+  /** @type {Child[]} */
   const parts = [h('div.card-title', icon('alert'), h('h3', REVIEW_TITLE[r.status] || 'Waiting for approval'))];
   parts.push(h('p.muted.small', 'In ', mono(r.source || a.file), ' of brain ', mono(a.brain), '. ',
     r.status === 'new' ? 'It runs only once you approve this version.' : r.status === 'invalid' ? 'Fix the file, or delete it.' : 'The version you approved runs until you approve this one.'));
@@ -139,7 +186,7 @@ function reviewPanel(a, { after } = {}) {
   if (disk) parts.push(h('h4', 'What it may do'), h('ul.plain-list', permissionsOf(disk, a.chat).map((x) => h('li', x))));
   if (a.program && r.status !== 'removed') {
     const p = a.program;
-    parts.push(callout(p.state === 'allowed' || p.state === 'waiting' ? 'info' : 'warn', p.state === 'waiting' ? 'Approving adds its program to the node' : `Its program on node ${p.node_name || disk.command.node}`, p.detail));
+    parts.push(callout(p.state === 'allowed' || p.state === 'waiting' ? 'info' : 'warn', p.state === 'waiting' ? 'Approving adds its program to the node' : `Its program on node ${p.node_name || (disk && disk.command && disk.command.node) || p.node || ''}`, p.detail));
   }
   if (r.status === 'changed') {
     const rows = fieldDiff(r.approved || {}, disk);
@@ -154,8 +201,9 @@ function reviewPanel(a, { after } = {}) {
   } else if (r.status === 'removed') {
     parts.push(h('p', 'Approving stops it: ', mono(a.schedule.when), ', ', a.task, '.'));
   } else {
-    parts.push(h('details.details', h('summary', 'The file'), h('pre.code.agent-json', fileJSON(disk))));
+    parts.push(h('details.details', h('summary', 'The file'), h('pre.code.agent-json', fileJSON(disk || {}))));
   }
+  /** @param {boolean} [andRun] */
   const approve = async (andRun) => {
     if (a.risky && a.risky.length && r.status !== 'removed') {
       const ok = await confirmDialog({ title: `Approve ${a.name}?`, message: `It may: ${a.risky.join('; ')}. Approve it only if you or someone you trust wrote it.`, confirm: 'Approve' });
@@ -164,7 +212,7 @@ function reviewPanel(a, { after } = {}) {
     try {
       await post(`${base(a.brain, a.name)}/approve`, { schedule: r.status === 'removed' ? null : disk });
     } catch (e) {
-      if (e.status === 409) { toast(e.message, 'warn'); await schedulesResource.refresh(); return; }
+      if (errorStatus(e) === 409) { toast(errorMessage(e), 'warn'); await schedulesResource.refresh(); return; }
       toastError(e);
       return;
     }
@@ -180,7 +228,11 @@ function reviewPanel(a, { after } = {}) {
   return h('section.review-panel', parts);
 }
 
-/** The buttons of agent a: Run now, Pause or Resume, Edit, Duplicate, Delete. */
+/**
+ * The buttons of agent a: Run now, Pause or Resume, Edit, Duplicate, Delete.
+ * @param {ScheduleAgent} a
+ * @param {{onDeleted?: () => void, small?: boolean}} [options]
+ */
 function agentActions(a, { onDeleted, small = true } = {}) {
   const pendingNew = a.state === 'pending';
   return h('div.actions',
@@ -193,7 +245,13 @@ function agentActions(a, { onDeleted, small = true } = {}) {
     a.from_memory ? null : btn('Delete…', { small, kind: 'ghost', icon: 'trash', onClick: () => removeAgent(a, onDeleted) }));
 }
 
-/** One agent of the list. */
+/**
+ * One agent of the list. open holds brain/name of the agents whose review
+ * is unfolded; toggleOpen(a) folds or unfolds a's.
+ * @param {Set<string>} open
+ * @param {(a: ScheduleAgent) => void} toggleOpen
+ * @returns {(a: ScheduleAgent) => HTMLElement}
+ */
 function agentCard(open, toggleOpen) {
   return (a) => {
     const reviewing = a.review && open.has(`${a.brain}/${a.name}`);
@@ -218,6 +276,7 @@ function agentCard(open, toggleOpen) {
   };
 }
 
+/** @param {Reminder} r */
 function reminderRow(r) {
   return h('tr',
     h('td', r.text),
@@ -236,18 +295,23 @@ function reminderRow(r) {
     } }) : null));
 }
 
+/**
+ * @param {HTMLElement} root
+ * @param {Page} ctx
+ */
 function renderList(root, ctx) {
   const offNote = h('div');
   const zoneBox = h('div');
   const pendingBox = h('div');
   const filters = { brain: '', state: '', q: '' };
   const brainSel = select([['', 'All brains']], '');
-  const stateSel = select([['', 'All states'], ...STATES.map(([k, label]) => [k, label])], '');
+  const stateSel = select([['', 'All states'], ...STATES.map(([k, label]) => /** @type {[string, string]} */ ([k, label]))], '');
   const search = textInput({ type: 'search', placeholder: 'Search agents' });
   const toolbar = h('div.toolbar.agent-filters', field({ label: 'Brain', control: brainSel }), field({ label: 'State', control: stateSel }), field({ label: 'Search', control: search }));
   const groupsBox = h('div', spinner());
   const remindersBox = h('div');
   const open = new Set();
+  /** @type {SchedulesResponse | null} */
   let data = null;
 
   mount(root,
@@ -257,6 +321,7 @@ function renderList(root, ctx) {
     h('section.section', h('h2.section-title', 'Agents'), toolbar, groupsBox),
     h('section.section', h('h2.section-title', 'Reminders'), h('p.muted.small', 'Reminders with a time that the brains keep: the bridge’s standing intents, and those in a brain’s own reminders file, which the brain fires itself.'), remindersBox));
 
+  /** @param {ScheduleAgent} a */
   const toggleOpen = (a) => {
     const key = `${a.brain}/${a.name}`;
     if (open.has(key)) open.delete(key); else open.add(key);
@@ -334,6 +399,13 @@ function renderList(root, ctx) {
   }, 5000);
 }
 
+/**
+ * A row of an agent's runs; the selected run is marked.
+ * @param {string} brain
+ * @param {string} name
+ * @param {string} [selected]
+ * @returns {(r: ScheduleRun) => HTMLTableRowElement}
+ */
 function runRow(brain, name, selected) {
   return (r) => {
     let cost = '';
@@ -349,9 +421,13 @@ function runRow(brain, name, selected) {
   };
 }
 
-/** Everything about agent a, field by field. */
+/**
+ * Everything about agent a, field by field.
+ * @param {ScheduleAgent} a
+ */
 function details(a) {
-  const s = a.schedule || {};
+  const s = a.schedule;
+  /** @type {Child} */
   let what = a.task;
   if (s.prompt) what = h('div', h('div', 'Its prompt:'), h('pre.code.agent-prompt', s.prompt));
   return h('section.card.section',
@@ -375,12 +451,20 @@ function details(a) {
     a.file ? h('details.details', h('summary', 'The file'), h('pre.code.agent-json', fileJSON(s))) : null);
 }
 
+/**
+ * @param {HTMLElement} root
+ * @param {Page} ctx
+ * @param {string} brain
+ * @param {string} name
+ * @param {string} [run]
+ */
 function renderAgent(root, ctx, brain, name, run) {
   const head = h('div');
   const reviewBox = h('div');
   const detailBox = h('div', spinner());
   const runsBody = h('tbody');
   const logBox = h('div');
+  /** @type {ScheduleAgent | null} */
   let agent = null;
   mount(root,
     h('a.back-link', { href: '#/schedules' }, icon('left'), 'Schedules'),
@@ -424,22 +508,35 @@ function renderAgent(root, ctx, brain, name, run) {
     paint(reviewBox, JSON.stringify(a.review || null), () => (a.review ? h('section.card.section', reviewPanel(a, { after: gone })) : null));
     paint(detailBox, JSON.stringify(a), () => details(a));
   }, () => (agent && agent.running ? 2000 : 5000));
-  ctx.focusAt(root.querySelector('h1'));
+  // The header is there once the agents are known (at once, when they are cached).
+  const heading = root.querySelector('h1');
+  if (heading) ctx.focusAt(heading);
 }
 
+/**
+ * @param {HTMLElement} root
+ * @param {Page} ctx
+ * @param {{mode: 'new' | 'edit' | 'duplicate', brain?: string, name?: string}} what
+ */
 function renderWizard(root, ctx, { mode, brain, name }) {
   const step = { current: mode === 'new' ? 'what' : 'when' };
+  // What the wizard offers, filled in as each resource answers.
+  /** @type {ScheduleTemplate[]} */
   const templates = [];
+  /** @type {{id: string, name: string}[]} */
   const brains = [];
+  /** @type {string[]} */
   const repos = [];
+  /** @type {FleetNode[]} */
   const nodes = [];
   const note = h('div');
   const body = h('div', spinner());
   const title = { new: 'Add a scheduled agent', edit: `Edit ${name}`, duplicate: `Duplicate ${name}` }[mode];
+  const heading = h('h1', title);
   mount(root,
     h('header.page-header', h('div.page-heading',
-      h('a.back-link', { href: brain ? link(brain, name) : '#/schedules' }, icon('left'), brain ? name : 'Schedules'),
-      h('h1', title),
+      h('a.back-link', { href: brain ? link(brain, name || '') : '#/schedules' }, icon('left'), brain ? name : 'Schedules'),
+      heading,
       h('p.page-sub', mode === 'edit'
         ? 'Change what you need; Review shows the file before it is written. Saving approves it, as you are the one writing it.'
         : 'Step by step: what it does, where, when, and what it may do. Nothing is written until you save on the last step.'))),
@@ -447,18 +544,20 @@ function renderWizard(root, ctx, { mode, brain, name }) {
   ctx.setTitle(title);
 
   const save = async () => {
-    const v = form.form() && form.form().value();
-    if (!v || v.invalid) { toast(v ? v.invalid : 'Not complete yet', 'warn'); return; }
-    if (mode !== 'edit' && agents.some((a) => a.brain === v.brain && a.name === v.schedule.name)) {
-      toast(`Brain ${v.brain} has an agent ${v.schedule.name} already: give this one another name.`, 'warn');
+    const built = form.form();
+    const v = built && built.value();
+    if (!v || !v.schedule) { toast((v && v.invalid) || 'Not complete yet', 'warn'); return; }
+    const { schedule } = v;
+    if (mode !== 'edit' && agents.some((a) => a.brain === v.brain && a.name === schedule.name)) {
+      toast(`Brain ${v.brain} has an agent ${schedule.name} already: give this one another name.`, 'warn');
       return;
     }
     try {
-      await put(base(v.brain, v.schedule.name), v.schedule);
+      await put(base(v.brain, schedule.name), schedule);
       form.saved();
       toast(mode === 'edit' ? 'Saved' : 'Saved and approved: it runs on its schedule', 'ok', { timeout: 3000 });
       await schedulesResource.refresh();
-      ctx.navigate(link(v.brain, v.schedule.name));
+      ctx.navigate(link(v.brain, schedule.name));
     } catch (e) { toastError(e); }
   };
   const form = liveForm({
@@ -468,6 +567,7 @@ function renderWizard(root, ctx, { mode, brain, name }) {
   });
   ctx.dirty = () => form.dirty();
 
+  /** @type {ScheduleAgent[]} */
   let agents = [];
   let haveBrains = false;
   let haveAgents = false;
@@ -506,10 +606,10 @@ function renderWizard(root, ctx, { mode, brain, name }) {
   ctx.follow(nodesResource, (d) => {
     nodes.splice(0, nodes.length, ...((d && d.nodes) || []));
   }, 30000);
-  ctx.focusAt(root.querySelector('h1'));
+  ctx.focusAt(heading);
 }
 
-export default {
+export default /** @satisfies {PageModule} */ ({
   title: 'Schedules',
   render(root, ctx) {
     const { brain, name, run } = ctx.params;
@@ -518,4 +618,4 @@ export default {
     else if (brain && name) renderAgent(root, ctx, brain, name, run);
     else renderList(root, ctx);
   },
-};
+});

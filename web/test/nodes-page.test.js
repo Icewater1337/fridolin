@@ -7,6 +7,8 @@ import { createPage } from '../assets/app/page.js';
 import { capSummary, gb, nodeNamed, osName, parseTags, programOnNode, ruleText, updateText } from '../assets/lib/nodes.js';
 import page from '../assets/pages/nodes.js';
 
+/** @import { Node as FleetNode } from '../types/api.js' */
+
 const declared = {
   exec: { allow: [{ name: 'hostname', args: [] }, { name: 'git', args: ['status', 'log'] }, { name: 'go', args: null }] },
   fs: { roots: [{ path: '/Users/you/Shared', write: true }, { path: '/Users/you/Docs' }] },
@@ -265,8 +267,11 @@ test('programs from the core: the folders, what was added for which agents, and 
 });
 
 test('how a program stands on a node, before its agent is saved', () => {
+  // Only what programOnNode reads of a GET /api/nodes entry.
+  /** @type {(o: object) => FleetNode} */
+  const node = (o) => /** @type {FleetNode} */ (/** @type {unknown} */ (o));
   const exec = { allow: [{ name: '/opt/bin/backup', args: ['--all'] }, { name: '/Users/you/tools/a.sh', args: [], exact: true, core: true }], accept_from_core: ['/Users/you/tools'] };
-  const n = { id: 'abc', name: 'mini', declared: { exec }, effective: { exec } };
+  const n = node({ id: 'abc', name: 'mini', declared: { exec }, effective: { exec } });
   assert.equal(nodeNamed([n], 'MINI'), n);
   assert.equal(nodeNamed([n], 'abc'), n);
   assert.equal(programOnNode(null, ['/x']).state, 'no-node');
@@ -276,9 +281,9 @@ test('how a program stands on a node, before its agent is saved', () => {
   assert.match(programOnNode(n, ['/Users/you/tools/b.sh']).text, /exactly these arguments/);
   assert.equal(programOnNode(n, ['/Users/you/toolsx/b.sh']).state, 'not-accepted');
   assert.equal(programOnNode(n, ['/opt/bin/backup', '--none']).state, 'not-accepted');
-  const pending = { ...n, effective: { exec: { allow: [] } } };
+  const pending = node({ ...n, effective: { exec: { allow: [] } } });
   assert.match(programOnNode(pending, ['/Users/you/tools/b.sh']).text, /waits for your approval/);
-  const none = { id: 'x', name: 'box', declared: {}, effective: {} };
+  const none = node({ id: 'x', name: 'box', declared: {}, effective: {} });
   assert.match(programOnNode(none, ['/Users/you/tools/b.sh']).text, /accepts no programs from the core/);
   assert.equal(ruleText({ name: '/a.sh', args: ['x'], exact: true }), '/a.sh x (exactly)');
   assert.equal(capSummary({ exec: { allow: [], accept_from_core: ['/Users/you/tools'] } }), 'exec from the core (/Users/you/tools)');

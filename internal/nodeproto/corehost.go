@@ -53,8 +53,11 @@ const (
 	// MethodCoreSecretsReceive decrypts a bundle with the offer's key and
 	// stores it (CoreSecretsReceiveParams → CoreSecretsReceived).
 	MethodCoreSecretsReceive = "core.secrets.receive"
-	// MethodCoreSecretsForget removes the host secrets this machine
-	// received over the node channel (nothing → CoreSecretsForgotten).
+	// MethodCoreSecretsForget removes what moves brought this machine:
+	// the host secrets it received over the node channel, the secret
+	// files they wrote, and the core's data dir when a move's import put
+	// it into an empty one, never what the machine held before (nothing
+	// → CoreSecretsForgotten; #266).
 	MethodCoreSecretsForget = "core.secrets.forget"
 )
 
@@ -152,7 +155,12 @@ func Fingerprint(pub []byte) string {
 
 // CoreHostApproval is what approving core-host means (#187 §1): every
 // place that approves it says so.
-const CoreHostApproval = "Approving core-host lets the core move to this machine. It then holds all of Fridolin's secrets: the WhatsApp session, the backup keys and the Claude token. Approve it only for a machine you trust as much as the one the core runs on now."
+const CoreHostApproval = "Approving core-host lets the core move to this machine. It then holds all of Fridolin's secrets: the WhatsApp session, the keys that open every backup and export, and the Claude token. Approve it only for a machine you trust as much as the one the core runs on now."
+
+// FrideApproval is what approving fride means (#187 §5, "Follow-up
+// outside this design"): every place that approves it says so. FrIDE
+// runs Claude Code agents on the node, whatever exec allows.
+const FrideApproval = "fride lets fridolin hand coding tasks to FrIDE on this machine. FrIDE runs Claude Code agents there, and they can run anything this machine's user can (on Windows through WSL, PowerShell and C:\\ too), whatever exec allows or refuses: approving fride is approving arbitrary commands on this machine. Approve it only on a machine you would let fridolin do anything on."
 
 // CoreCheckResult is core.check's answer: facts, never a secret's value.
 type CoreCheckResult struct {
@@ -173,6 +181,12 @@ type CoreCheckResult struct {
 	SecretStore  string              `json:"secret_store"`
 	Secrets      []CoreSecretPresent `json:"secrets"`
 	SecretsError string              `json:"secrets_error,omitempty"`
+	// SecretFiles are the secret files of the core's credentials folder
+	// a move carries, by name, and SecretFilesDir that folder under ~;
+	// SecretFilesError says why they cannot be read (#187).
+	SecretFiles      []string `json:"secret_files,omitempty"`
+	SecretFilesDir   string   `json:"secret_files_dir,omitempty"`
+	SecretFilesError string   `json:"secret_files_error,omitempty"`
 	// SendTo are the targets this machine trusts, with their fingerprints.
 	SendTo []CoreHostPinView `json:"send_to"`
 	// Setup is `fridolin setup-machine --core` here; SetupNote says why
@@ -282,6 +296,10 @@ type CoreSecretsBundle struct {
 	Ciphertext []byte   `json:"ciphertext"`
 	Names      []string `json:"names"`
 	Missing    []string `json:"missing,omitempty"`
+	// Files are the secret files of the core's credentials folder sealed
+	// beside them, by name (#187); FilesError says why none could be read.
+	Files      []string `json:"files,omitempty"`
+	FilesError string   `json:"files_error,omitempty"`
 }
 
 // CoreSecretsReceiveParams hands a target the bundle of its offer.
@@ -299,9 +317,21 @@ type CoreSecretsReceived struct {
 	Move      string   `json:"move"`
 	Stored    []string `json:"stored"`
 	Unchanged []string `json:"unchanged"`
+	// FilesStored were written into the core's credentials folder,
+	// FilesKept were there already and stay as they were.
+	FilesStored []string `json:"files_stored,omitempty"`
+	FilesKept   []string `json:"files_kept,omitempty"`
 }
 
-// CoreSecretsForgotten are the secrets a target removed.
+// CoreSecretsForgotten is what a core host removed of what moves brought
+// it: the host secrets by name (Forgotten), the secret files by path
+// under ~ (Files), and the entries of the core's data dir (Data, such as
+// bridge.db and brains-folders/Personal). DataKept says why the data dir
+// stays, when it does; Problems what could not be removed (#266).
 type CoreSecretsForgotten struct {
 	Forgotten []string `json:"forgotten"`
+	Files     []string `json:"files,omitempty"`
+	Data      []string `json:"data,omitempty"`
+	DataKept  string   `json:"data_kept,omitempty"`
+	Problems  []string `json:"problems,omitempty"`
 }

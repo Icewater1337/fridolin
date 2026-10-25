@@ -164,6 +164,19 @@ func PlaudVoiceQuestion(question string) string {
 	return "🎙️ " + question
 }
 
+// CalendarGrantBrokenAlert tells the owner that the Google Calendar of the
+// brain named name stopped working: revoked says Google refused its
+// sign-in, else the sign-in needs a new consent. No ids: the owner finds
+// the brain by its name on the Brains page.
+func CalendarGrantBrokenAlert(name string, revoked bool) string {
+	why := "its Google sign-in has to be renewed"
+	if revoked {
+		why = "Google no longer accepts its sign-in (the access was removed, it expired, or the password changed)"
+	}
+	return fmt.Sprintf("⚠️ Google Calendar stopped working for %s: %s. Open the Fridolin dashboard, Brains → %s → Calendar, and press Reconnect. "+
+		"This is the only message about it until it works again.", name, why, name)
+}
+
 // PlaudExpiredAlert tells the owner that the Plaud login expired.
 const PlaudExpiredAlert = "⚠️ Plaud: the login expired, so new recordings are not arriving. Reconnect in the Fridolin dashboard (Integrations → Plaud)."
 
@@ -204,6 +217,8 @@ func FleetReply(enabled bool, nodes []FleetNode, now time.Time) string {
 			b.WriteString(" · shut out")
 		case n.Device == "pending":
 			b.WriteString("\n  ⏳ wants to join — reply !approve")
+		case n.FridePending:
+			b.WriteString("\n  ⏳ asks to let FrIDE's agents run anything on it (fride) — reply !approve")
 		case n.CoreHostPending:
 			b.WriteString("\n  ⏳ asks to hold all of Fridolin's secrets (core-host) — reply !approve")
 		case n.Commands == "pending":
@@ -211,6 +226,9 @@ func FleetReply(enabled bool, nodes []FleetNode, now time.Time) string {
 		}
 		if n.Device == "approved" && len(n.Can) > 0 {
 			b.WriteString("\n  can: " + strings.Join(n.Can, "; "))
+		}
+		if n.Device == "approved" && n.Fride {
+			b.WriteString("\n  ⚠️ fride: FrIDE's agents can run anything on it")
 		}
 		b.WriteString("\n  _ref " + n.ID)
 		if len(n.Tags) > 0 {
@@ -238,11 +256,11 @@ const NodesOffNotice = "🖥️ Nodes are off. Turn on nodes.enabled in the conf
 
 // OwnerCommandGroupNotice answers !join, !dashboard, !approve or !revoke
 // in a group: what they hand out or change is the owner's alone.
-const OwnerCommandGroupNotice = "🔒 !join, !dashboard, !approve, !deny and !revoke answer only in the owner's direct chat."
+const OwnerCommandGroupNotice = "🔒 !join, !dashboard, !approve, !deny, !revoke and !movecore answer only in the owner's direct chat."
 
 // OwnerCommandOwnerOnly answers !join, !dashboard, !approve or !revoke
 // from someone who is not the owner (a number in allowed_numbers).
-const OwnerCommandOwnerOnly = "🔒 Only the owner can ask for join codes and sign-in links, or approve and turn things down."
+const OwnerCommandOwnerOnly = "🔒 Only the owner can ask for join codes and sign-in links, approve and turn things down, or move the core."
 
 // OwnerCommandRateLimited answers !join or !dashboard asked for more than
 // max times in the last hour.
@@ -666,17 +684,275 @@ func ApprovalFailedReply(label, why string) string {
 	return "❌ That did not work for " + label + ": " + textx.Truncate(why, 300)
 }
 
+// The core's move from the owner's chat (#187 §3): !movecore <node>
+// checks the move and asks with a poll whose options are CoreMoveNow and
+// CoreMoveCancel; only the owner's vote counts, and no vote in time is a
+// no. A move that ended asks whether the machine it left keeps the host
+// secrets (CoreSecretsQuestion).
+const (
+	CoreMoveNow    = "🚚 Move now"
+	CoreMoveCancel = "✋ Cancel"
+)
+
+// CoreMoveLockdownNotice answers !movecore, or a "Move now" vote, during
+// a lockdown.
+const CoreMoveLockdownNotice = "🔒 The bridge is in lockdown: the core does not move. `!unlock` first, then `!movecore` again."
+
+// CoreMoveRunningNotice answers !movecore while a move runs or waits for
+// its vote.
+const CoreMoveRunningNotice = "🚚 A core move runs or waits for your vote already: one at a time."
+
+// CoreMoveUsage answers !movecore with more than one word after it.
+const CoreMoveUsage = "🚚 Send `!movecore <node>` to move the core to that machine, or `!movecore` alone to see where it can go."
+
+// CoreMoveChecking answers !movecore <node> at once: the check takes a
+// moment, and the report follows.
+func CoreMoveChecking(target string) string {
+	return fmt.Sprintf("🔎 Checking whether the core can move to *%s*…", target)
+}
+
+// CoreMoveHost is a machine !movecore lists.
+type CoreMoveHost struct {
+	Name, ID string
+	Online   bool
+	// Pending is core-host waiting for the owner's approval.
+	Pending bool
+	// Problem is the first thing that keeps the core from moving there,
+	// "" when it can.
+	Problem string
+}
+
+// CoreMoveTargets answers !movecore alone: where the core runs (runsOn,
+// "" when no core host holds the lease) and where it can go.
+func CoreMoveTargets(runsOn string, hosts []CoreMoveHost) string {
+	var b strings.Builder
+	if runsOn == "" {
+		b.WriteString("🚚 I can't tell which machine runs the core: no core host says it holds the lease. A core that runs outside a node (a native install that is no core host) cannot move by itself; docs/CORE.md, \"The core moves itself\".")
+	} else {
+		fmt.Fprintf(&b, "🚚 The core runs on *%s*.", runsOn)
+	}
+	if len(hosts) == 0 {
+		b.WriteString("\n\nNo other machine can take it yet. A machine becomes a core host with `fridolin node core-host on` there (in a box: `docker compose exec node fridolin node core-host on --state-dir /node` in its folder) and your `!approve`.")
+		return b.String()
+	}
+	b.WriteString("\n")
+	for _, h := range hosts {
+		fmt.Fprintf(&b, "\n• *%s* — ", h.Name)
+		switch {
+		case h.Pending:
+			b.WriteString("asks to hold all of Fridolin's secrets (core-host) — reply !approve")
+		case !h.Online:
+			b.WriteString("offline")
+		case h.Problem != "":
+			b.WriteString("not now: " + textx.Truncate(h.Problem, 300))
+		case runsOn == "":
+			b.WriteString("a core host")
+		default:
+			fmt.Fprintf(&b, "ready: `!movecore %s`", h.Name)
+		}
+	}
+	return b.String()
+}
+
+// CoreMoveCheck is a move's pre-flight as the owner reads it.
+type CoreMoveCheck struct {
+	Source, Target, TargetID string
+	TargetOS, TargetArch     string
+	Box                      bool
+	Fingerprint              string
+	// Outage is the expected time offline, in words.
+	Outage string
+	// NotOnTarget is what stays on the source; Site what becomes of the
+	// site ("" when it is off); Warnings the rest worth knowing.
+	NotOnTarget []string
+	Site        string
+	Warnings    []string
+	// Blocking keeps the move from running: no poll then.
+	Blocking []string
+	// PollMinutes is how long the poll waits for a vote.
+	PollMinutes int
+}
+
+// CoreMoveReport is !movecore's report: source → target, the expected
+// time offline, what does not work on the target; and either what
+// keeps the move from running or that the poll below asks.
+func CoreMoveReport(c CoreMoveCheck) string {
+	var b strings.Builder
+	if len(c.Blocking) > 0 {
+		fmt.Fprintf(&b, "🚫 The core cannot move from *%s* to *%s* now:\n", c.Source, c.Target)
+		for _, p := range c.Blocking {
+			b.WriteString("\n• " + textx.Truncate(p, 400))
+		}
+		fmt.Fprintf(&b, "\n\nFix that and send `!movecore %s` again. Nothing changed.", c.Target)
+		return b.String()
+	}
+	kind := "a node"
+	if c.Box {
+		kind = "a box"
+	}
+	fmt.Fprintf(&b, "🚚 *Move the core from %s to %s?*\n\n", c.Source, c.Target)
+	fmt.Fprintf(&b, "*%s* is %s on %s %s, id %s, device key `%s`.\n", c.Target, kind, osLabel(c.TargetOS), c.TargetArch, c.TargetID, c.Fingerprint)
+	fmt.Fprintf(&b, "Offline: %s. Messages you send meanwhile wait and are answered from %s. If %s does not come up, %s starts again by itself.", c.Outage, c.Target, c.Target, c.Source)
+	if len(c.NotOnTarget) > 0 {
+		fmt.Fprintf(&b, "\n\n*Not working on %s:*", c.Target)
+		for _, m := range c.NotOnTarget {
+			b.WriteString("\n• " + textx.Truncate(m, 300))
+		}
+	}
+	if c.Site != "" {
+		b.WriteString("\n\n🌐 *The site:* " + c.Site + ".")
+	}
+	if len(c.Warnings) > 0 {
+		b.WriteString("\n\n*Good to know:*")
+		for _, w := range c.Warnings {
+			b.WriteString("\n• " + textx.Truncate(w, 300))
+		}
+	}
+	fmt.Fprintf(&b, "\n\nWas this you? Vote in the poll below, or reply !approve — or !deny if not. No vote within %d minutes is a no. `!movecore %s` moves it back later.", c.PollMinutes, c.Source)
+	return b.String()
+}
+
+// CoreMoveQuestion is the move poll's question.
+func CoreMoveQuestion(source, target string) string {
+	return fmt.Sprintf("🚚 Move the core from %s to %s now?", textx.Truncate(source, 60), textx.Truncate(target, 60))
+}
+
+// CoreMoveHereAlready answers !movecore for the machine that runs the
+// core.
+func CoreMoveHereAlready(name string) string {
+	return fmt.Sprintf("🚚 The core runs on *%s* already.", name)
+}
+
+// CoreMoveNoSource answers !movecore <node> when no core host holds the
+// lease.
+const CoreMoveNoSource = "🚚 I can't tell which machine runs the core: no core host says it holds the lease, so the core cannot move by itself. `!movecore` lists the core hosts."
+
+// CoreMoveStarted answers a "Move now" vote: the move runs.
+func CoreMoveStarted(source, target, move string) string {
+	return fmt.Sprintf("🚚 Moving the core from *%s* to *%s* (move %s). First %s gets ready while the core keeps running here; I'll say when the core stops.", source, target, move, target)
+}
+
+// CoreMoveNotStarted says a voted move did not start: why, from the
+// check run again.
+func CoreMoveNotStarted(target, why string) string {
+	return fmt.Sprintf("🚫 The core did not move to *%s*: %s. Nothing changed.", target, textx.Truncate(why, 400))
+}
+
+// CoreMoveCancelled says a move's poll ended without a move: the owner
+// cancelled (expired false), or did not vote in time.
+func CoreMoveCancelled(target string, expired bool) string {
+	if expired {
+		return fmt.Sprintf("⌛ No vote in time: the core stays where it is and does not move to *%s*. Send `!movecore %s` again when you want it.", target, target)
+	}
+	return fmt.Sprintf("✋ Cancelled: the core stays where it is and does not move to *%s*.", target)
+}
+
+// CoreMoveStopping says the core stops on source now: the outage begins.
+func CoreMoveStopping(source, target, outage string) string {
+	return fmt.Sprintf("⏸️ %s is ready. Stopping the core on *%s* now. Expect %s offline; messages you send meanwhile wait and are answered from *%s*.", target, source, outage, target)
+}
+
 // CoreMoveEnded tells the owner how a core move ended (#187): state is
 // the record's (done, rolled_back, failed, unknown), detail what the
-// hosts said, which names no secret.
-func CoreMoveEnded(move, source, target, state, detail string) string {
+// hosts said, which names no secret. notOnTarget is what the move's
+// report said does not work on the target, for a move that is done.
+func CoreMoveEnded(move, source, target, state, detail string, notOnTarget []string) string {
 	switch state {
 	case "done":
-		return fmt.Sprintf("🚚 The core moved to *%s* (move %s): %s. Moving it back is `fridolin nodes move` the other way round.", target, move, detail)
+		var b strings.Builder
+		fmt.Fprintf(&b, "🚚 Running on *%s* now (move %s): %s.", target, move, detail)
+		if len(notOnTarget) > 0 {
+			b.WriteString("\n\nNot working here:")
+			for _, m := range notOnTarget {
+				b.WriteString("\n• " + textx.Truncate(m, 300))
+			}
+		}
+		fmt.Fprintf(&b, "\n\n`!movecore %s` moves the core back.", source)
+		return b.String()
 	case "rolled_back":
 		return fmt.Sprintf("🔙 The core move to *%s* failed and the core runs on *%s* again (move %s): %s", target, source, move, detail)
 	case "failed":
 		return fmt.Sprintf("⚠️ The core move from *%s* to *%s* failed (move %s): %s", source, target, move, detail)
 	}
 	return fmt.Sprintf("❓ The core move from *%s* to *%s* (move %s) did not say how it ended: %s", source, target, move, detail)
+}
+
+// CoreSecretsQuestion asks, after a move, whether host keeps its copy of
+// the host secrets; CoreSecretsKeep and CoreSecretsForget are the
+// options. No vote in hours counts as forget.
+func CoreSecretsQuestion(host string, hours int) string {
+	return fmt.Sprintf("🔐 Keep the host secrets on %s? It no longer runs the core. Keeping them makes the next move faster; forgetting removes what moves brought it: the host secrets, the secret files and the core's data dir with the WhatsApp session, never what it held before. No vote within %d hours forgets them. Or reply !approve to keep them, !deny to forget them.", textx.Truncate(host, 60), hours)
+}
+
+// CoreSecretsKeep is the keep option of CoreSecretsQuestion.
+func CoreSecretsKeep(host string) string {
+	return "🔐 Keep them on " + textx.Truncate(host, 60)
+}
+
+// CoreSecretsForget is the forget option of CoreSecretsQuestion.
+func CoreSecretsForget(host string) string {
+	return "🧹 Forget them on " + textx.Truncate(host, 60)
+}
+
+// CoreSecretsKept answers a keep vote.
+func CoreSecretsKept(host string) string {
+	return fmt.Sprintf("🔐 *%s* keeps its copy of the host secrets, and what else moves brought it. Revoking it (`!revoke`) makes it forget them first.", host)
+}
+
+// CoreSecretsForgotten says what forgetting what moves brought host did
+// (r), and whether no vote decided it (expired).
+func CoreSecretsForgotten(host string, r CoreForgetReport, expired bool) string {
+	why := ""
+	if expired {
+		why = "No vote in time, so: "
+	}
+	lines := r.removed()
+	var msg string
+	switch {
+	case len(lines) == 0 && r.Failure != "":
+		msg = fmt.Sprintf("⚠️ %s*%s* could not forget what moves brought it: %s. Revoking it while it is online (`!revoke`) makes it try again; docs/CORE.md, \"Forgetting a former core host\", says how to remove it by hand and which keys to rotate.", why, host, textx.Truncate(r.Failure, 300))
+	case len(lines) == 0:
+		msg = fmt.Sprintf("🧹 %s*%s* held nothing a move brought it: what it holds was there before, and stays.", why, host)
+	default:
+		msg = fmt.Sprintf("🧹 %s*%s* forgot what moves brought it:\n%s", why, host, strings.Join(lines, "\n"))
+		if r.Failure != "" {
+			msg += fmt.Sprintf("\n⚠️ Not all of it: %s. docs/CORE.md, \"Forgetting a former core host\", says how to remove the rest by hand.", textx.Truncate(r.Failure, 300))
+		}
+	}
+	return msg + r.dataNote()
+}
+
+// CoreMoveSiteAnswers says the site answers at its domain once the core
+// runs on target.
+func CoreMoveSiteAnswers(domain, target string) string {
+	return fmt.Sprintf("🌐 The site answers at %s, from *%s*.", domain, target)
+}
+
+// CoreMoveSiteDown says the site does not answer at its domain after the
+// move: why, as the domain check says.
+func CoreMoveSiteDown(domain, target, why string) string {
+	return fmt.Sprintf("🌐 The site does not answer at %s since the core runs on *%s*: %s", domain, target, textx.Truncate(why, 300))
+}
+
+// NodeFrideApprovedNote follows !approve's answer when it approved fride:
+// what that means (meaning, nodeproto.FrideApproval).
+func NodeFrideApprovedNote(meaning string) string {
+	return "⚠️ That includes fride. " + meaning + " `!revoke <id>` takes it back."
+}
+
+// NodeRevokedCoreSecretsNote follows !revoke's answer for a core host:
+// what forgetting what moves brought it did there first (r).
+func NodeRevokedCoreSecretsNote(r CoreForgetReport) string {
+	lines := r.removed()
+	switch {
+	case len(lines) == 0 && r.Failure != "":
+		return fmt.Sprintf("🔐 It is a core host and could not forget what moves brought it first (%s). If it held host secrets, rotate them: docs/CORE.md, \"A core host that is gone\".", textx.Truncate(r.Failure, 200)) + r.dataNote()
+	case len(lines) == 0:
+		return "🔐 It is a core host; it held nothing a move brought it." + r.dataNote()
+	}
+	msg := "🔐 It is a core host, and forgot what moves brought it first:\n" + strings.Join(lines, "\n")
+	if r.Failure != "" {
+		msg += fmt.Sprintf("\n⚠️ Not all of it: %s. docs/CORE.md, \"Forgetting a former core host\", says how to remove the rest by hand.", textx.Truncate(r.Failure, 200))
+	}
+	return msg + r.dataNote()
 }

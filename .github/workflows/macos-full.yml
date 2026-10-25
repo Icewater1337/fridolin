@@ -1,0 +1,88 @@
+name: macOS full suite
+
+# Pull requests and pushes test on macOS only what differs there from Linux
+# (go-macos in ci.yml, scripts/os-tests.sh). This runs every Go test on
+# macOS, nightly and on demand (Actions → macOS full suite → Run workflow),
+# so what the selection leaves out cannot rot unseen.
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run per branch at a time; a second waits instead of cancelling.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+# Actions are pinned to a full commit SHA, as in ci.yml.
+
+jobs:
+  go-macos-full:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Three slices on macOS, where the race tests take about half as
+        # long again as on Linux (scripts/test-shard.sh).
+        shard: [1, 2, 3]
+    name: go-macos-full (${{ matrix.shard }}/3)
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The same cache as ci.yml's go slices: every package with -race.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache: true
+          cache-dependency-path: |
+            go.mod
+            go.sum
+
+      - name: test
+        run: make race-shard SHARD=${{ matrix.shard }}/3
+
+      - name: repeat provider process tests
+        if: matrix.shard == 3
+        run: make race-process
+
+      - name: smoke test
+        if: matrix.shard == 3
+        run: make smoke
+
+  # A failure opens an issue labelled ci-macos-nightly, "macOS nightly:
+  # TestX failing" (scripts/ci-report.sh), which a later run that passes
+  # closes. Its own label: a push to main, which runs only part of the
+  # macOS tests, must not close it. On main, never in a fork.
+  report:
+    needs: [go-macos-full]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && !github.event.repository.fork }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read # the run's jobs and their logs
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: report in issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          HEAD_SHA: ${{ github.sha }}
+          SELF_JOB: report
+          REPORT_NAME: macOS nightly
+          REPORT_LABEL: ci-macos-nightly
+          REPORT_WORKFLOW: .github/workflows/macos-full.yml
+        run: scripts/ci-report.sh

@@ -26,8 +26,19 @@ var slowCalls = map[string]time.Duration{
 	nodeproto.MethodFrideRepoNew:   5 * time.Minute,
 	// A Gradle build: the node's own timeout, and time to stage the APK.
 	nodeproto.MethodAndroidBuild: time.Duration(nodeproto.AndroidBuildTimeoutSeconds)*time.Second + 2*time.Minute,
-	// core.check runs setup-machine --core, which asks Docker.
-	nodeproto.MethodCoreCheck: 2 * time.Minute,
+	// core.check runs setup-machine --core, which asks Docker, and reads
+	// the core's status and secret files through one-off containers.
+	nodeproto.MethodCoreCheck: 5 * time.Minute,
+	// A host that never ran this version pulls the whole image (GBs; the
+	// agent gives it an hour), and a rehearsal imports the latest export.
+	nodeproto.MethodCoreImagePull: 45 * time.Minute,
+	nodeproto.MethodCoreRehearse:  30 * time.Minute,
+	// The secret files go through a one-off container on each side.
+	nodeproto.MethodCoreSecretsSend:    6 * time.Minute,
+	nodeproto.MethodCoreSecretsReceive: 6 * time.Minute,
+	// Forgetting reads the lease and removes the data dir and the secret
+	// files through one-off containers.
+	nodeproto.MethodCoreSecretsForget: 10 * time.Minute,
 }
 
 // FrideTask hands the FrIDE of node id a message.

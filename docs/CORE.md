@@ -149,6 +149,26 @@ binary's version); `--compose PATH` runs a compose file of your own.
 `docker volume rm fridolin-data` without a fresh export: the volume holds the
 WhatsApp pairing.
 
+### Signing in to the dashboard
+
+The dashboard token is the container's, in the volume
+(`/data/dashboard.token`), not in a `~/.fridolin` on the host. To sign a
+browser in on the machine that runs the core:
+
+```bash
+fridolin open                                     # asks the container, opens the browser
+docker exec fridolin-core fridolin open --print   # the same by hand: open the link it prints
+```
+
+The link works once, within a minute. From another device, send
+`!dashboard` in your WhatsApp chat (a link that works once, within 10
+minutes), or `fridolin open --print --tailnet`. The sign-in page knows
+the bridge runs in the container (`"container": true` in `/ready`) and
+names these steps; pasting the token is its last resort, read with
+`docker exec fridolin-core cat /data/dashboard.token`. `fridolin open`
+with `--config PATH` or `$FRIDOLIN_CONFIG` always means a native
+bridge's config.
+
 ### Secrets
 
 `core start` and `core update` read the secrets from the host and put them
@@ -720,8 +740,8 @@ which copy the new one back). In a brain's run the bridge sets
 
 Between two core hosts ([docs/NODES.md, "core-host"](NODES.md#core-host))
 the core moves on its own, without the steps of the next section by hand
-(#187, second slice). This slice is driven from the CLI; `!movecore` on
-WhatsApp, with an approval poll, comes next.
+(#187). The owner asks for it in their WhatsApp chat with `!movecore
+<node>` ([below](#moving-the-core-from-whatsapp)), or from the CLI:
 
 ```sh
 fridolin nodes move-check SRC DST       # the pre-flight, read only (POST /api/nodes/move-check)
@@ -733,12 +753,14 @@ fridolin nodes move-status ID           # how move ID went (GET /api/nodes/moves
 **Before.** SRC and DST are core hosts the owner approved, both online,
 and SRC pins DST's device key (`fridolin node core-host trust` on SRC).
 For the way back, DST pins SRC the same way. Both run the core's version
-(`fridolin nodes update ID` first), and both are native hosts: the core
-in a box comes with #191 phase 4, and a Windows node service cannot
-reach the owner's Docker Desktop, so both refuse with a reason. DST
-needs Docker and GitHub's `gh` (`brew install gh`, `apt-get install
-gh`; no login), which checks the image's provenance before it is
-pulled; the pre-flight refuses a DST without the image and without
+(`fridolin nodes update ID` first). Each is a native host or a box
+([below](#moving-the-core-to-a-box)); a native Windows node service
+cannot reach the owner's Docker Desktop and refuses with a reason (make
+that machine a box instead). A native DST
+needs Docker and a current GitHub `gh` (`brew install gh`; on Linux
+from GitHub's own apt repository, <https://cli.github.com>: Ubuntu
+24.04's `gh` 2.45 lacks `attestation verify --source-ref`; no login),
+which checks the image's provenance before it is pulled; the pre-flight refuses a DST without the image and without
 `gh`. On Ubuntu, run `sudo fridolin core apparmor` once on DST.
 
 **The pre-flight** asks both agents (`core.check`): the versions; the
@@ -762,6 +784,21 @@ blocks the move is listed under "It cannot run".
    volume `fridolin-move-rehearsal`, every member and database checked,
    the volume removed; never `fridolin-data`, never the lease). A failure
    here stops nothing.
+   **Secret files.** With the host secrets go the secret files of the
+   core's credentials folder (`sandbox.credentials_dir`, a folder under
+   `~`): `google_oauth_web_credentials.json`, `dashboard-users.json`,
+   `google_calendar_credentials_<brain>.json` and
+   `google_calendar_token_<brain>.json`, nothing else of the folder.
+   SRC reads them through its core's container (`fridolin core run core
+   files export`), seals them and the folder's name under `~` beside the
+   secrets to DST's one-time key, and DST writes them through its own
+   (`core files import`) into that folder under its core's home: each
+   0600, only the files it has not got, so a machine that ran the core
+   before (a Mac whose `compose.host.yaml` binds its own folder) keeps it
+   exactly as it was. Elsewhere the container's home is the volume
+   `fridolin-home`, which no export carries. The core relays them and
+   sees their names only. A `credentials_dir` in the data dir needs
+   none of this: the export carries it.
 2. The core signs a **move plan** with its update key (the one nodes
    already pin for updates): the move id, SRC and DST, SRC's data dir by
    its lease device id, the version, the image, when it was issued, the
@@ -804,10 +841,13 @@ in each agent's state dir, and a restarted agent goes on from there.
 | DST released the lease without an export of the move | SRC waits 15 minutes for one, then starts on its own data. |
 | DST stopped renewing the lease (power) | Once the lease is stale (20 minutes), SRC imports DST's last export of the move, or starts on its own when there is none; what DST received since is lost, and WhatsApp may ask to pair again ([Recovery](#recovery)). |
 
-The owner hears how it ended from the core that runs afterwards: "The
-core moved to DST", or "The core move to DST failed and the core runs on
-SRC again", with what the hosts said. A lockdown refuses a move, and
-every step of one through `fridolin nodes call`.
+The owner hears, just before SRC is told to stop, that the core stops
+now and how long it is expected to be offline, and how the move ended
+from the core that runs afterwards: "Running on DST now", with what does
+not work there and `!movecore SRC` to move back, or "The core move to
+DST failed and the core runs on SRC again", with what the hosts said. A
+lockdown refuses a move, and every step of one through `fridolin nodes
+call`.
 
 The commands the agents run, also by hand on a host: `fridolin core
 status --json` (this data dir's device id, the lease, the latest
@@ -815,11 +855,190 @@ export's info), `core export --move ID --json`, `core release`, `core
 pull --from REF@sha256:… [--check] [--json]` and `core rehearse
 [--json]`.
 
+### Moving the core to a box
+
+A [node in a box](NODES.md#the-core-in-a-box) can be SRC or DST of the
+same move, with the same plan, lease and rollback: the agent in the
+box's `node` container does each step itself, with the same `fridolin
+core` commands, on the box's data volume `fridolin-box-data` instead of
+a core container's `fridolin-data`, and runs the core as its own child
+(`fridolin run --container --box`). Nothing of it reaches Docker:
+
+| Step | A native host | A box |
+| --- | --- | --- |
+| The image | `core pull --from REF@sha256:…` | the box runs its image by digest; a box on another version is updated first (`fridolin nodes update ID`) |
+| The host secrets | the keychain (macOS) or files under `~/.config` | the box's sealed store in its node volume; the core gets them in its environment, the names `core start` passes |
+| The secret files | `core run core files import` into the core's home | `core files import` into the box's home volume `fridolin-box-home` |
+| The rehearsal | the scratch volume `fridolin-move-rehearsal` | a scratch folder in the node's volume |
+| Stop, start | `fridolin core stop`, `core start` (compose) | the agent stops its core (SIGTERM) or starts it, and writes the box's role (`core-role.json`), which a restarted box follows |
+
+What changes for the owner when the core runs in a box (the pre-flight
+says so): the brain folders live in the volume `fridolin-box-data`,
+not in a folder of that machine (Finder, Obsidian there cannot edit
+them), and travel with every export; the dashboard is at
+`http://127.0.0.1:8765` on the box's host (`FRIDOLIN_BOX_DASHBOARD_PORT`),
+the site at its port 8780 for a Cloudflare tunnel on that host; what was
+bound to SRC (scripts on a Mac, Apple builds) stays there and runs on
+its node over the node channel while it is online. The box needs its
+core settings (`core.yaml`) and, on Linux with AppArmor,
+`FRIDOLIN_BOX_APPARMOR` ([NODES.md](NODES.md#the-core-in-a-box)); the
+pre-flight refuses it without them. A Windows PC becomes a core host
+this way, without WSL commands or a Credential Manager: Docker Desktop
+runs the box.
+
+### Moving the core from WhatsApp
+
+In the owner's direct chat with Fridolin (never a group, `/ingest`, the
+site, Plaud, or a message the bridge's own account sent; no brain has a
+tool for it):
+
+- **`!movecore`** lists the core hosts in plain words: which one runs
+  the core now (the one whose data dir holds the lease, as `core.check`
+  says), and for each other one whether the core can move there
+  ("ready: `!movecore icebase`"), the first thing that keeps it from
+  moving there, that it is offline, or that its core-host waits for
+  `!approve`.
+- **`!movecore <node>`**, by name or id, answers "Checking…", runs the
+  same pre-flight as `fridolin nodes move-check`, and sends the report:
+  source → target, what the target is (box or node, OS, id, device key
+  fingerprint), the expected time offline, what does not work on the
+  target (the machine-bound scan), what becomes of the site, and the
+  warnings. When something blocks the move, the report ends with it and
+  no poll. Otherwise a poll follows: **Move now** / **Cancel**.
+- The poll is an approval of the question kind (M5's approvals): only a
+  vote from the owner's numbers counts, a vote from anyone else is
+  recorded in the audit log and ignored, the dashboard cannot answer it
+  (a stolen dashboard session alone cannot move the core), and no vote
+  within 30 minutes is a no ("No vote in time"). One move at a time, and
+  `!movecore <node>` answers at most 3 times an hour.
+- **Move now** runs the move exactly as `fridolin nodes move SRC DST
+  --yes` does (the same code, `nodes.StartMove`, which checks again
+  first): "Moving the core…", then "Stopping the core on SRC now", then
+  the end, from whichever core runs. During a lockdown `!movecore` is
+  refused, and a "Move now" from before is a no.
+- **The way back** is the same command the other way round:
+  `!movecore mac-mini`. DST must pin SRC first
+  (`fridolin node core-host trust` on DST), a change of DST's
+  `core-host.json` the owner approves again.
+
+**Keep or forget the secrets.** After a move, the core asks in a second
+poll whether the machine it left keeps its copy of the host secrets:
+**Keep them on SRC** makes the next move faster; **Forget them on SRC**
+runs `core.secrets.forget` there, which removes what moves brought that
+machine and nothing it held before ([Forgetting a former core
+host](#forgetting-a-former-core-host)): the host secrets it received
+over the node channel, the secret files they wrote, and the core's data
+dir when a move's import put it into an empty one. No vote within 24
+hours forgets them. After a move that failed once the secrets had gone
+to DST, the same poll asks about DST. Revoking a core host (`!revoke`,
+the Nodes page, `fridolin nodes revoke`) has it forget them first when
+it is connected, and `!revoke` says what it forgot.
+
+### Forgetting a former core host
+
+A machine the core moved away from must not keep the WhatsApp session or
+the credentials a move brought it once the owner says forget (#266). It
+must not lose what it held before either: the core's original home keeps
+its own data dir, to move back to, and a machine keeps the secrets typed
+on it. So the node agent records each thing a move brings as it comes,
+in `core-secrets-received.json` in its state dir, and forgetting removes
+exactly what that record names:
+
+| What | Recorded when | Removed by forgetting |
+| --- | --- | --- |
+| Host secrets | `core.secrets.receive` stored one the machine did not hold | from its secret store (keychain, files, a box's sealed store) |
+| Secret files of `sandbox.credentials_dir` | the move wrote one that was not there (one that was is kept as it was, and never recorded) | `fridolin core run core files forget`, those names only, regular files only |
+| The core's data dir (`fridolin-data`) | the move's import found it empty: nothing but its device id (`core status --json` says `"data_dir": "empty"`) | `fridolin core run core forget-data`: `bridge.db` (the WhatsApp session), `vault.db`, `config.json`, the tokens, the brain folders a move put into `brains-folders/`, `core/` with what later imports moved aside |
+
+A data dir that held a core's data when a move first imported into it
+is the machine's own from before the moves (`"own_data"` in the record):
+forgetting keeps it, and says so ("Its own data dir stays: it held the
+core's data before move … imported into it"). One a move brought stays
+the moves' through later moves, also when the core ran on it meanwhile.
+
+The data dir goes only when it is safe, checked by the agent and again
+by `core forget-data` itself, which holds the data dir's lock while it
+works: no move runs on the machine (it waits a few polls for the
+source's watch to end), no core runs on the data dir, and another
+device's core holds the lease, live. Otherwise the data dir and the
+files stay and the report says why ("the core runs here", "no other
+machine's core holds the lease, so this copy may be the core's only
+one"); the host secrets go regardless. The order is the data dir, the
+files, then the secrets, since reading the lease takes the bucket's
+keys. What could not be removed stays in the record for the next forget.
+
+The owner's message lists what went:
+
+```text
+🧹 *icebase* forgot what moves brought it:
+• host secrets: fridolin.claude.oauth.token, fridolin.b2.vault.keyid, …
+• secret files: ~/.config/fridolin/dashboard-users.json, …
+• the core's data dir: bridge.db, brains-folders/Personal, config.json, core, vault.db
+```
+
+The volume `fridolin-data` stays, empty: a later move into it is a move
+into a fresh core host. The `fridolin-home` volume keeps everything but
+the files named. Removing is deleting files; on an SSD nothing can
+promise the blocks are overwritten, so rotate what the machine held when
+it is lost or no longer trusted ([A core host that is
+gone](#recovery)).
+
+`fridolin doctor --node` on the machine says what is left there
+(`node-core-leftovers`), from the record alone: a warning for a former
+core host (the source of its latest move, done, or the target of one
+that did not end there) that still holds what moves brought it, or its
+own data dir from before them, which forgetting never removes.
+
+**By hand.** A data dir an older fridolin imported (before #266: the
+record has no word on it, and doctor says so) or one forgetting could
+not remove: on that machine, once the core runs elsewhere, `fridolin core
+run core status` must show another device holding the lease; then
+`fridolin core run core forget-data` empties the volume (or `docker
+volume rm fridolin-data` with no container on it). The secret files are
+in the `fridolin-home` volume, under the folder `sandbox.credentials_dir`
+names; `fridolin core secrets` lists the host secrets, and the machine's
+keychain or `~/.config/fridolin/secrets/` holds them.
+
+The audit log has `core_move_requested` (each `!movecore <node>`, and
+whether a poll went out), `core_move_approved` (the vote: started,
+cancelled, expired, refused), `core_move_ended` (done, rolled back,
+failed) and `core_secrets` (kept, or forgotten with the number of host
+secrets, secret files and entries of the data dir removed).
+
+### The site's tunnel
+
+The site and its Cloudflare tunnel token live in the data dir
+(`site/`), which the export carries. **When the tunnel runs inside the
+core** (*Run the tunnel* on the Site page, `site.tunnel`), it moves with
+the core: once the core runs on DST, `cloudflared` connects from there
+with the same token, and Cloudflare sends the domain's requests to the
+new connector by itself. That holds the same way for a core in a box
+(#191): the box has no `cloudflared` of the host's, the tunnel is a
+process of the core in the box, and the token moves in the export like
+every other file of the data dir, not as a host secret.
+
+The pre-flight says what becomes of the site:
+
+| The site | The report says |
+| --- | --- |
+| tunnel in the core, running | it moves with the core: the domain answers from DST once the core runs there |
+| tunnel in the core, turned on but not running | the same, and a warning: the domain does not answer now either |
+| tunnel run by a launchd/systemd job on SRC (the machine-bound scan) | the domain goes offline once the core moves: turn on *Run the tunnel* first ([The site](#the-site)) |
+| on, without a tunnel in the core | the site moves to DST, reachable only as the core is there |
+
+After a move that is done, the core that runs on DST asks whether the
+site answers at its domain (`https://<domain>/_fridolin/health`, a few
+times over three minutes, while the tunnel connects) and tells the owner
+"The site answers at …, from DST", or what the domain check found.
+
 ## Moving the core to another machine
 
 The runbook a coding agent follows when the owner clones the repository on
 another machine and says "move the core to this machine" (AGENTS.md, path
-C), to test a takeover or for good. The new machine runs the same
+C), to test a takeover or for good. When the machine is (or can become) a
+[node in a box](NODES.md#the-core-in-a-box) and both machines are core
+hosts, [the core moves itself](#moving-the-core-to-a-box) instead, with
+no steps by hand. The new machine runs the same
 container image with Docker; on Windows that is Docker Desktop on WSL2.
 `fridolin setup-machine --core` says at any point what is done and what
 is next; it only looks.
@@ -1111,6 +1330,14 @@ sign-ins do not work there, and a brain's own scripts that call
   in `core/import/<time>/`.
 - **The age identity is lost.** Exports made with it cannot be decrypted.
   Keep a copy of it outside the machines (a password manager).
+- **A core host that is gone** (lost, stolen, or revoked while
+  offline, so it could not forget what moves brought it first): rotate what
+  it held. New B2 application keys (the vault's and the snapshots'), a
+  new Claude token (`claude setup-token`), new vault, restic and
+  Litestream passwords; then `fridolin core secrets set NAME` for each on
+  the core host. A new age identity and export key only protect the
+  exports made from then on: the old machine can still decrypt the
+  exports it could reach.
 - **WhatsApp asks to pair again** after a move: the export was older than
   the session's last key update or `bridge.db` did not come along. Never
   delete `bridge.db` to fix it; import again or pair again.

@@ -11,6 +11,7 @@ import (
 // retain the original runtime, and the status warning must distinguish that
 // runtime from a newly routed brain with the same ID.
 func TestPlaudTargetRetainsRuntimeAcrossReplacement(t *testing.T) {
+	t.Parallel()
 	const first = "15551234567@s.whatsapp.net"
 	const second = "15559876543@s.whatsapp.net"
 	mgr := &BrainManager{Manager: brain.NewManager(brain.Options{})}

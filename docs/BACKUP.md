@@ -81,9 +81,12 @@ new repository at its next run.
 
 ### In Google Cloud Console
 
-If you already set up a client for Google Calendar (docs/CALENDAR.md),
-use the same project and client; else create both as that page says.
-Then:
+Settings → Google sign-in walks you through these steps with a link to
+each page (docs/CALENDAR.md, "One-time setup"), and enables the Drive API
+and adds `drive.file` along with the calendar's. If you already set up a
+client for Google Calendar, use the same project and client; else create
+both as that page says. A build with a [built-in client](CALENDAR.md#built-in-client)
+needs none of this. By hand:
 
 1. **Enable the Google Drive API**: APIs & Services → Library → *Google
    Drive API* → **Enable**

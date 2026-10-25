@@ -1,8 +1,11 @@
 # A node in a box (docs/NODES.md, "Node in a box"): the node of a
 # fridolin core as two containers, from the images CI publishes.
 #
-# box.sh / box.ps1 write this file (fridolin box compose prints it) and a
-# .env beside it that pins both images by digest, then join the node:
+# box.sh / box.ps1 write this file (fridolin box compose prints it), the
+# core's settings beside it as core.yaml (box-core.yaml: the standby
+# core's volumes, ports and sandbox profile, docs/NODES.md "The core in a
+# box"), and a .env that names both in COMPOSE_FILE and pins both images
+# by digest, then join the node:
 #
 #     FRIDOLIN_BOX_NODE_IMAGE   ghcr.io/<owner>/fridolin-core@sha256:…
 #     FRIDOLIN_BOX_FRIDE_IMAGE  ghcr.io/<owner>/fridolin-fride@sha256:…
@@ -67,7 +70,9 @@ services:
 
 # The box's own network: the node reaches FrIDE as fride, FrIDE the node
 # as node, and both the internet (the tailnet, GitHub). Nothing is
-# published on the host.
+# published on the host but, once the box runs the core, its dashboard
+# and site on the host's loopback (core.yaml), which the node's agent
+# keeps FrIDE's address from.
 networks:
   box: {}
 

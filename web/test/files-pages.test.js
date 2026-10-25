@@ -105,6 +105,16 @@ test('a folder lists its entries, folders and files each to their page', async (
   assert.match(root.textContent, /2\.0 KB|2 KB|2\.0 KiB/);
 });
 
+test('a folder the bridge cut short says only the first entries are shown', async (t) => {
+  const listing = (truncated) => async (t2) => (await open(t2, filesPage, { root: 'brain:main', path: 'docs' }, (path) => {
+    if (path === '/api/files/roots') return ROOTS;
+    if (path.startsWith('/api/files/list')) return { root: 'brain:main', path: 'docs', truncated, entries: [{ name: 'a.md', size: 1, mod_time: '2026-10-01T00:00:00Z' }] };
+    return { status: 404, body: { error: 'no' } };
+  })).root;
+  await t.test('cut short', async (t2) => assert.match((await listing(true)(t2)).textContent, /Only the first entries are shown/));
+  await t.test('whole', async (t2) => assert.doesNotMatch((await listing(false)(t2)).textContent, /Only the first entries/));
+});
+
 test('a Markdown file is rendered, its links and images through the bridge', async (t) => {
   const { root } = await open(t, filePage, { root: 'brain:main', path: 'wiki/people/alex.md' }, (path) => {
     if (path === '/api/files/roots') return ROOTS;
@@ -199,7 +209,8 @@ test('a writable folder takes uploads, and its entries are renamed and deleted',
   assert.deepEqual(calls.find((c) => c.path === '/api/files/delete').body, { root: 'brain:main', path: 'docs/plan.pdf' });
 
   const input = root.querySelector('.files-upload input[type=file]');
-  input.files = [new File(['x'], 'a.txt')];
+  // The fake DOM's input takes a plain array for its FileList.
+  input.files = /** @type {FileList} */ (/** @type {unknown} */ ([new File(['x'], 'a.txt')]));
   input.dispatchEvent(new Event('change'));
   await settle(10);
   const up = calls.find((c) => c.path.startsWith('/api/files/upload'));

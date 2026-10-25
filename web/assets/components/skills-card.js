@@ -3,7 +3,7 @@
 // the brain wrote or changed itself counts as read-only until you
 // approve it here, or edit its policy, which writes it into the file.
 
-import { get, post, put } from '../app/api.js';
+import { get, post, put, errorStatus } from '../app/api.js';
 import { h, paint } from '../lib/dom.js';
 import { btn } from './buttons.js';
 import { openDialog } from './dialog.js';
@@ -11,7 +11,11 @@ import { field, linesArea, linesOf, select } from './fields.js';
 import { toast } from './toast.js';
 import { badge, callout, empty, loading, mono } from './common.js';
 import { riskBadge } from './policy.js';
+import { errorMessage } from '../lib/errors.js';
 
+/** @import { BrainSkills, Risk, Skill, SkillPolicy, SkillStatus } from '../../types/api.js' */
+
+/** @type {Record<SkillStatus, [string, string, string]>} */
 const STATUS = {
   approved: ['approved', 'ok', 'The policy in the file is the one you approved.'],
   starter: ['starter', 'ok', 'As Fridolin wrote it into the new brain.'],
@@ -21,8 +25,10 @@ const STATUS = {
   invalid: ['invalid', 'bad', 'Its frontmatter does not read.'],
 };
 
+/** @param {string[] | null | undefined} v */
 const list = (v) => (v && v.length ? v.join(', ') : '—');
 
+/** @param {SkillPolicy} p */
 function policyLines(p) {
   return h('dl.kv',
     h('dt', 'Risk'), h('dd', riskBadge(p.risk)),
@@ -31,7 +37,11 @@ function policyLines(p) {
     h('dt', 'Vault'), h('dd', list(p.vault)));
 }
 
-/** skillsCard(brainId, {signal}) is the card of brainId's skills. */
+/**
+ * skillsCard(brainId, {signal}) is the card of brainId's skills.
+ * @param {string} brainId
+ * @param {{signal?: AbortSignal}} [options]
+ */
 export function skillsCard(brainId, { signal } = {}) {
   const el = h('div.stack', h('div.card', loading('Reading skills…')));
   const base = `/api/brains/${encodeURIComponent(brainId)}/skills`;
@@ -41,12 +51,13 @@ export function skillsCard(brainId, { signal } = {}) {
     try {
       data = await get(base, { signal });
     } catch (e) {
-      if (e && e.status === 404) { paint(el, 'gone', () => h('div.card', empty('Not running', 'Skills show once the brain runs.'))); return; }
+      if (errorStatus(e) === 404) { paint(el, 'gone', () => h('div.card', empty('Not running', 'Skills show once the brain runs.'))); return; }
       throw e;
     }
     render(data);
   }
 
+  /** @param {Skill & {declared: SkillPolicy, risks: Risk[]}} s */
   function edit(s) {
     const p = s.declared;
     const risk = select((s.risks || ['read', 'write', 'irreversible']).map((r) => [r, r]), p.risk || 'read');
@@ -76,9 +87,14 @@ export function skillsCard(brainId, { signal } = {}) {
     });
   }
 
+  /**
+   * @param {Skill} s
+   * @param {Risk[]} risks
+   */
   function skillCard(s, risks) {
     const [label, kind, why] = STATUS[s.status] || [s.status, 'neutral', ''];
     const declared = { ...s.fridolin, risks };
+    /** @type {HTMLElement[]} */
     const actions = [];
     if (s.status === 'new' || s.status === 'changed') {
       actions.push(btn('Approve as declared', {
@@ -103,15 +119,16 @@ export function skillsCard(brainId, { signal } = {}) {
       actions.length ? h('div.actions', actions) : null);
   }
 
+  /** @param {BrainSkills | null} data */
   function render(data) {
     const skills = (data && data.skills) || [];
     if (!skills.length) {
       paint(el, 'none', () => h('div.card', empty('No skills', 'Skills are markdown files in the brain’s skills/ folder.')));
       return;
     }
-    paint(el, skills.map((s) => `${s.path}:${s.status}:${s.hash}`).join(','), () => skills.map((s) => skillCard(s, data.risks)));
+    paint(el, skills.map((s) => `${s.path}:${s.status}:${s.hash}`).join(','), () => skills.map((s) => skillCard(s, data ? data.risks : [])));
   }
 
-  refresh().catch((e) => paint(el, 'error', () => h('div.card', callout('bad', 'Could not read the skills', h('p', e.message || String(e))))));
+  refresh().catch((e) => paint(el, 'error', () => h('div.card', callout('bad', 'Could not read the skills', h('p', errorMessage(e))))));
   return el;
 }

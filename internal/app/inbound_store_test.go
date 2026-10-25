@@ -15,6 +15,7 @@ import (
 // is opened again, in the order the next start takes it up, and taking it
 // empties the queue.
 func TestInboundQueueKeepsWhatTheStopLeft(t *testing.T) {
+	t.Parallel()
 	sent := time.Date(2026, 10, 18, 9, 30, 0, 0, time.UTC)
 	logged := func(id, text string) history.Entry {
 		return history.Entry{TS: sent.Format(time.RFC3339), From: "15551234567", Chat: harnessDM, Text: text, Type: history.In, ID: id}
@@ -96,6 +97,7 @@ func TestInboundQueueKeepsWhatTheStopLeft(t *testing.T) {
 // A row the bridge cannot read, written by another version say, is left
 // out with an error, and the rest is taken all the same.
 func TestInboundQueueSkipsARowItCannotRead(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "bridge.db")
 	s := openTestStore(t, path)
 	db := testStoreSQL(t, path)

@@ -64,9 +64,8 @@ func alive(pid int) bool {
 // got a recorded PID since, nor anything recorded in an earlier boot, and
 // it forgets every record.
 func TestReapOrphanedRuns(t *testing.T) {
-	prev := reapGrace
-	reapGrace = 500 * time.Millisecond
-	t.Cleanup(func() { reapGrace = prev })
+	t.Parallel()
+	const grace = 500 * time.Millisecond
 	boot, err := bootID()
 	if err != nil {
 		t.Skip("no boot id on this system:", err)
@@ -95,7 +94,7 @@ func TestReapOrphanedRuns(t *testing.T) {
 			dataDir := t.TempDir()
 			cmd, pids := groupOf(t, `sleep 60 & echo $!; wait`, 1)
 			tc.record(t, dataDir, cmd.Process.Pid)
-			reapOrphanedRuns(dataDir)
+			reapOrphanedRuns(dataDir, grace)
 			if entries, _ := os.ReadDir(runsDir(dataDir)); len(entries) != 0 {
 				t.Errorf("records left: %v", entries)
 			}
@@ -122,7 +121,7 @@ func TestReapOrphanedRuns(t *testing.T) {
 		if !alive(pids[0]) {
 			t.Fatal("the command went with its shell")
 		}
-		reapOrphanedRuns(dataDir)
+		reapOrphanedRuns(dataDir, grace)
 		deadline := time.Now().Add(5 * time.Second)
 		for alive(pids[0]) && time.Now().Before(deadline) {
 			time.Sleep(20 * time.Millisecond)
@@ -138,7 +137,7 @@ func TestReapOrphanedRuns(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(runsDir(dataDir), "junk.json"), []byte("{"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		reapOrphanedRuns(dataDir)
+		reapOrphanedRuns(dataDir, grace)
 		if entries, _ := os.ReadDir(runsDir(dataDir)); len(entries) != 0 {
 			t.Errorf("records left: %v", entries)
 		}
@@ -149,25 +148,24 @@ func TestReapOrphanedRuns(t *testing.T) {
 // runs recorded there before any brain runs, which TestReapOrphanedRuns
 // only shows for reapOrphanedRuns on its own.
 func TestBridgeReapsWhenItStarts(t *testing.T) {
-	prev := reapGrace
-	reapGrace = 500 * time.Millisecond
-	t.Cleanup(func() { reapGrace = prev })
+	t.Parallel()
+	optionsOf(t).waits.reapGrace = 500 * time.Millisecond
 	if _, err := bootID(); err != nil {
 		t.Skip("no boot id on this system:", err)
 	}
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	data := filepath.Join(home, "data")
 	cmd, pids := groupOf(t, `sleep 60 & echo $!; wait`, 1)
 	if recordRun(data, "a", cmd.Process.Pid) == "" {
 		t.Fatal("not recorded")
 	}
-	cfgs, err := OpenConfigStore(writeConfig(t, `{"brain_mode": true, "data_dir": "`+data+`"}`))
+	cfgs, err := openConfigStore(t, writeConfig(t, `{"brain_mode": true, "data_dir": "`+data+`"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
 	requireTestDataDir(t, cfgs.Get())
-	b, err := New(Options{Config: cfgs, NoWhatsApp: true})
+	b, err := New(bridgeOptions(t, cfgs))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,6 +196,7 @@ func writeRunRecord(t *testing.T, dataDir string, rec runRecord) {
 // TestRunsAreRecordedWhileTheyRun: a brain's run is in data_dir/runs while
 // it lasts, with the brain and its process group, and is gone after it.
 func TestRunsAreRecordedWhileTheyRun(t *testing.T) {
+	t.Parallel()
 	mgr, d, home := queueTestManager(t, 30000, "")
 	br := mgr.Get("a")
 	if _, _, _, err := mgr.Submit(dm("long")); err != nil {

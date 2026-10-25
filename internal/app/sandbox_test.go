@@ -28,6 +28,7 @@ import (
 // to fall back to an unsandboxed spawn that still skipped every permission
 // prompt.
 func TestSandboxFailsClosed(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		breakIt func(sp *SandboxProfiler, home string)
@@ -49,7 +50,7 @@ func TestSandboxFailsClosed(t *testing.T) {
 				}
 			})
 			argsLog := filepath.Join(home, "args.log")
-			t.Setenv("FRIDOLIN_FAKE_ARGS_LOG", argsLog)
+			setenv(t, "FRIDOLIN_FAKE_ARGS_LOG", argsLog)
 
 			sp := mgr.profiler
 			sp.mu.Lock()
@@ -98,6 +99,7 @@ func TestSandboxFailsClosed(t *testing.T) {
 // runs refuse to start without it, so enabling it elsewhere is rejected when
 // the config loads instead of failing every message.
 func TestSandboxConfigNeedsMacOS(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		goos    string
 		enabled bool
@@ -125,8 +127,9 @@ func TestSandboxConfigNeedsMacOS(t *testing.T) {
 // TestSandboxCommandPassesProfileInline: the profile travels as an argument,
 // never through a file in the shared TMPDIR that another brain could swap.
 func TestSandboxCommandPassesProfileInline(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	sp := NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}, "b": {filepath.Join(home, "b")}},
 		resolvedSettings(t, &config.File{DataDir: filepath.Join(home, "data")}))
 	sp.execPath = os.Args[0] // any file that exists
@@ -160,8 +163,9 @@ func mustProfile(t *testing.T, sp *SandboxProfiler, brainID string) string {
 // TestSandboxProfileRefusesUnquotablePaths: a path that cannot be written
 // into the profile fails the whole profile instead of dropping its rule.
 func TestSandboxProfileRefusesUnquotablePaths(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	cases := map[string]func(cfg *config.Settings, dirs map[string][]string){
 		"other brain's folder": func(cfg *config.Settings, dirs map[string][]string) { dirs["b"] = []string{home + "/b\nc"} },
 		"other brain's folder, second spelling": func(cfg *config.Settings, dirs map[string][]string) {
@@ -192,6 +196,7 @@ func TestSandboxProfileRefusesUnquotablePaths(t *testing.T) {
 // credentials dir and a deny path all reached through symlinks, the profile
 // carries each rule for the configured and for the real path.
 func TestSandboxProfileCoversRealPaths(t *testing.T) {
+	t.Parallel()
 	root := fsx.Canonical(t.TempDir())
 	realHome := filepath.Join(root, "home-real")
 	home := filepath.Join(root, "home")
@@ -211,7 +216,7 @@ func TestSandboxProfileCoversRealPaths(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	cfg := &config.File{
 		DataDir: filepath.Join(home, ".fridolin"),
 		Sandbox: config.SandboxConfig{
@@ -242,6 +247,7 @@ func TestSandboxProfileCoversRealPaths(t *testing.T) {
 // only HOME and the data, credentials and media dirs, never such a
 // symlink, or the brain would be allowed into its target.
 func TestSandboxAllowsDoNotFollowSymlinks(t *testing.T) {
+	t.Parallel()
 	root := fsx.Canonical(t.TempDir())
 	home := filepath.Join(root, "home")
 	secret := filepath.Join(root, "secret")
@@ -260,7 +266,7 @@ func TestSandboxAllowsDoNotFollowSymlinks(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	cfg := &config.File{
 		DataDir: filepath.Join(home, ".fridolin"),
 		Sandbox: config.SandboxConfig{AllowPaths: []string{filepath.Join(home, "Documents", "share")}},
@@ -286,6 +292,7 @@ func TestSandboxAllowsDoNotFollowSymlinks(t *testing.T) {
 // empty path, would turn rules into ones that match nothing (or, made
 // absolute, the bridge's working directory), so the profile fails instead.
 func TestSandboxProfileNeedsAbsolutePaths(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name, home string
 		allow      []string
@@ -296,8 +303,7 @@ func TestSandboxProfileNeedsAbsolutePaths(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("HOME", tc.home)
-			cfg := &config.Settings{Boot: config.Boot{DataDir: "/Users/you/.fridolin"}, Live: config.Live{Sandbox: config.SandboxConfig{GitConfig: "read", AllowPaths: tc.allow}}}
+			cfg := &config.Settings{Boot: config.Boot{Home: tc.home, DataDir: "/Users/you/.fridolin"}, Live: config.Live{Sandbox: config.SandboxConfig{GitConfig: "read", AllowPaths: tc.allow}}}
 			if profile, err := NewSandboxProfiler(map[string][]string{"a": {"/Users/you/a"}}, cfg).Profile("a"); err == nil {
 				t.Errorf("Profile succeeded:\n%s", profile)
 			}
@@ -309,6 +315,7 @@ func TestSandboxProfileNeedsAbsolutePaths(t *testing.T) {
 // credentials dir) must be absolute after ~ expansion. A relative entry used
 // to load fine and protect nothing.
 func TestSandboxConfigRejectsUnusablePaths(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		sandbox string
@@ -327,8 +334,8 @@ func TestSandboxConfigRejectsUnusablePaths(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
-			_, err := LoadConfig(writeConfig(t, `{"sandbox": `+tc.sandbox+`}`))
+			setenv(t, "HOME", t.TempDir())
+			_, err := loadConfig(t, writeConfig(t, `{"sandbox": `+tc.sandbox+`}`))
 			switch {
 			case tc.wantErr == "" && err != nil:
 				t.Fatalf("Load: %v", err)
@@ -346,6 +353,7 @@ func TestSandboxConfigRejectsUnusablePaths(t *testing.T) {
 // target alone does not cover. Read rules leave the link alone, because
 // following it reads it, and that would block what is allowed behind it.
 func TestSandboxDeniesEverySpelling(t *testing.T) {
+	t.Parallel()
 	root := fsx.Canonical(t.TempDir())
 	home := filepath.Join(root, "home")
 	for _, d := range []string{"home", "dotfiles/config", "vault/gh", "vault/git"} {
@@ -362,7 +370,7 @@ func TestSandboxDeniesEverySpelling(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	profile := mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}}, resolvedSettings(t, &config.File{})), "a")
 	for _, c := range []struct {
 		op, path string
@@ -394,6 +402,7 @@ func TestSandboxDeniesEverySpelling(t *testing.T) {
 // default deny on the way (~/Documents, say) won, and lost the denies on
 // the CLAUDE.md and .claude above the real folders of every brain.
 func TestSandboxProfileCoversBrainFoldersBothWays(t *testing.T) {
+	t.Parallel()
 	root := fsx.Canonical(t.TempDir())
 	home := filepath.Join(root, "home")
 	volume := filepath.Join(root, "volume", "assistant") // ~/assistant
@@ -408,7 +417,7 @@ func TestSandboxProfileCoversBrainFoldersBothWays(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	dirs := brainDirsJSON(t,
 		brainFolder(t, "~/assistant/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 		brainFolder(t, "~/ext/b", manifest.Manifest{ID: "b"}),
@@ -434,7 +443,7 @@ func TestSandboxProfileCoversBrainFoldersBothWays(t *testing.T) {
 			deny("file-read*", "literal", root+"/volume/CLAUDE.md"), deny("file-read*", "subpath", root+"/volume/.claude")}, false},
 	}
 	for _, inherit := range []bool{false, true} {
-		cfg, err := LoadConfig(writeConfig(t, fmt.Sprintf(`{"data_dir": %q, "inherit_claude_user_config": %v%s}`, home+"/data", inherit, dirs)))
+		cfg, err := loadConfig(t, writeConfig(t, fmt.Sprintf(`{"data_dir": %q, "inherit_claude_user_config": %v%s}`, home+"/data", inherit, dirs)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -467,6 +476,7 @@ func TestSandboxProfileCoversBrainFoldersBothWays(t *testing.T) {
 // other brains' profiles must still deny it, which the folder as
 // configured no longer gives.
 func TestSandboxProfileCoversTheFolderABrainRunsIn(t *testing.T) {
+	t.Parallel()
 	root := fsx.Canonical(t.TempDir())
 	home := filepath.Join(root, "home")
 	volume := filepath.Join(root, "volume", "assistant") // ~/assistant when loaded
@@ -480,12 +490,12 @@ func TestSandboxProfileCoversTheFolderABrainRunsIn(t *testing.T) {
 	if err := os.Symlink(volume, link); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	dirs := brainDirsJSON(t,
 		brainFolder(t, "~/assistant/a", manifest.Manifest{ID: "a", Routing: manifest.Routing{HandlesDMs: true}}),
 		brainFolder(t, "~/b", manifest.Manifest{ID: "b"}),
 	)
-	cfg, err := LoadConfig(writeConfig(t, fmt.Sprintf(`{"data_dir": %q%s}`, home+"/data", dirs)))
+	cfg, err := loadConfig(t, writeConfig(t, fmt.Sprintf(`{"data_dir": %q%s}`, home+"/data", dirs)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -534,6 +544,7 @@ func TestSandboxProfileCoversTheFolderABrainRunsIn(t *testing.T) {
 // brain's own folder is its own. inherit_claude_user_config drops all of it
 // again.
 func TestSandboxProfileDeniesInstructionsAboveBrains(t *testing.T) {
+	t.Parallel()
 	root := fsx.Canonical(t.TempDir())
 	home := filepath.Join(root, "home")
 	outside := fsx.Canonical(t.TempDir()) // a sibling of root, not inside it
@@ -546,7 +557,7 @@ func TestSandboxProfileDeniesInstructionsAboveBrains(t *testing.T) {
 	if err := os.Symlink(vol+"/brains", home+"/linked"); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	dirs := map[string][]string{
 		"a": {home + "/assistant/a"},
 		"b": {home + "/assistant/b"},
@@ -616,6 +627,7 @@ func sbplRegex(p string) string {
 // allow it must be written again: the last matching rule wins, so leaving
 // it out there would let the allow open the path.
 func TestSandboxProfileWritesEachDenyOnce(t *testing.T) {
+	t.Parallel()
 	home := fsx.Canonical(t.TempDir())
 	t.Run("no deny twice between allows", func(t *testing.T) {
 		sp, home, _ := precedenceFixture(t, false)
@@ -638,7 +650,7 @@ func TestSandboxProfileWritesEachDenyOnce(t *testing.T) {
 		}
 	})
 	t.Run("a deny again after an allow", func(t *testing.T) {
-		t.Setenv("HOME", home)
+		setenv(t, "HOME", home)
 		team, b := filepath.Join(home, "team"), filepath.Join(home, "team", "b")
 		cfg := &config.File{Sandbox: config.SandboxConfig{DenyPaths: []string{b}, AllowPaths: []string{team}}}
 		lines := strings.Split(mustProfile(t, NewSandboxProfiler(map[string][]string{"a": {filepath.Join(home, "a")}, "b": {b}}, resolvedSettings(t, cfg)), "a"), "\n")
@@ -674,6 +686,7 @@ func browserProfileRules(home string, both func(filter, p string) []string) []st
 // beside the stable one included. The prefix rule is a regex, matched here
 // with Go's; TestSandboxDeniesBrowserProfiles checks the real sandbox.
 func TestBrowserProfilesDenyEveryChannel(t *testing.T) {
+	t.Parallel()
 	const home = "/Users/you"
 	prefixes := regexp.MustCompile("^" + regexp.QuoteMeta(home+"/Library/Application Support") + sandbox.BrowserProfilePattern())
 	denied := func(p string) bool {
@@ -726,8 +739,10 @@ func TestBrowserProfilesDenyEveryChannel(t *testing.T) {
 // moved to ~/.fridolin can leave the old ~/.whatsapp-claude-bridge behind
 // with older copies of the same keys and tokens.
 func TestSandboxProfileDeniesBridgeSecrets(t *testing.T) {
+	// Serial: changes the process's working directory, against which a
+	// relative data_dir resolves.
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	tmp := fsx.Canonical(os.TempDir())
 	both := func(filter, p string) []string {
 		return []string{`(deny file-read* (` + filter + ` "` + p + `"))`, `(deny file-write* (` + filter + ` "` + p + `"))`}
@@ -808,8 +823,9 @@ func TestSandboxProfileDeniesBridgeSecrets(t *testing.T) {
 // the dashboard token. Inside the data dir the data dir deny covers them
 // already.
 func TestSandboxProfileDeniesTheConfigFile(t *testing.T) {
+	t.Parallel()
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -854,6 +870,7 @@ func TestSandboxProfileDeniesTheConfigFile(t *testing.T) {
 // TestBridgeTellsTheSandboxItsConfigFile: the bridge hands the profiler the
 // config file it loaded, so every brain's profile denies it.
 func TestBridgeTellsTheSandboxItsConfigFile(t *testing.T) {
+	t.Parallel()
 	tb := newTestBridge(t, "")
 	rule := `(deny file-read* (literal "` + tb.cfgs.Path() + `"))`
 	if profile := mustProfile(t, tb.brainMgr.profiler, "a"); !strings.Contains(profile, rule) {
@@ -868,8 +885,9 @@ func TestBridgeTellsTheSandboxItsConfigFile(t *testing.T) {
 // "deny" used to write-protect nothing. git's credential file in
 // ~/.config/git is unreadable in both.
 func TestSandboxGitConfigModes(t *testing.T) {
+	t.Parallel()
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	writeTestFile(t, filepath.Join(home, ".gitconfig"), "[include]\n\tpath = .gitconfig-extra ; local settings\n")
 	for _, mode := range []string{"read", "deny"} {
 		t.Run(mode, func(t *testing.T) {
@@ -901,8 +919,9 @@ func TestSandboxGitConfigModes(t *testing.T) {
 // that happens to cover the data dir, the credentials dir, the database or
 // the folder that holds the brains opens none of it.
 func TestSandboxAllowPathsCannotOpenBridgeSecrets(t *testing.T) {
+	t.Parallel()
 	home := fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	cfg := &config.File{
 		DataDir: home + "/.fridolin",
 		DBPath:  home + "/wa-store/bridge.db",
@@ -954,7 +973,7 @@ func profileRules(profile string) []string {
 func precedenceFixture(t *testing.T, inherit bool) (sp *SandboxProfiler, home, own string) {
 	t.Helper()
 	home = fsx.Canonical(t.TempDir())
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	own = home + "/assistant/a"
 	cfg := &config.File{
 		DataDir:                 home + "/.fridolin",
@@ -982,6 +1001,7 @@ func precedenceFixture(t *testing.T, inherit bool) (sp *SandboxProfiler, home, o
 // inbox, state and brain API tokens follow those; and what must stay
 // closed inside the brain's own places comes last.
 func TestSandboxProfilePrecedence(t *testing.T) {
+	t.Parallel()
 	sp, home, own := precedenceFixture(t, false)
 	rules := profileRules(mustProfile(t, sp, "a"))
 	q := func(op, filter, p string) string { return `(` + op + ` (` + filter + ` "` + p + `"))` }
@@ -1061,6 +1081,7 @@ func TestSandboxProfilePrecedence(t *testing.T) {
 // Plaud CLI does when it refreshes it, and set the mode of its folder,
 // but neither remove nor replace the file.
 func TestSandboxProfileWritesOnlyItsOwnPlaces(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ inherit, plaud bool }{{false, false}, {true, false}, {false, true}} {
 		t.Run(fmt.Sprintf("inherit_claude_user_config=%v,plaud.brain_access=%v", tc.inherit, tc.plaud), func(t *testing.T) {
 			sp, home, own := precedenceFixture(t, tc.inherit)
@@ -1098,6 +1119,7 @@ func TestSandboxProfileWritesOnlyItsOwnPlaces(t *testing.T) {
 
 // TestNodePackage finds the npm package folder of an installed file.
 func TestNodePackage(t *testing.T) {
+	t.Parallel()
 	cases := []struct{ in, want string }{
 		{"/n/lib/node_modules/@plaud-ai/cli/dist/index.js", "/n/lib/node_modules/@plaud-ai/cli"},
 		{"/n/lib/node_modules/@anthropic-ai/claude-code/cli.js", "/n/lib/node_modules/@anthropic-ai/claude-code"},
@@ -1172,6 +1194,8 @@ func bridgeProgramsFixture(t *testing.T, home string) *config.File {
 // brain's own folder (HOME on PATH) is left to the default deny, or the
 // brain could not write its own folder.
 func TestSandboxProfileProtectsTheBridgesPrograms(t *testing.T) {
+	// Serial: bridgeProgramsFixture puts programs on the process's PATH and
+	// under its HOME, where the bridge finds them, and sets tmuxPath.
 	home := fsx.Canonical(t.TempDir())
 	cfg := bridgeProgramsFixture(t, home)
 	own := home + "/a"
@@ -1232,6 +1256,8 @@ func TestSandboxProfileProtectsTheBridgesPrograms(t *testing.T) {
 // again. Their denies now come again after that allow; those outside the
 // config dir do not, the profile goes inline on every run.
 func TestSandboxProfileKeepsProgramsInASharedClaudeDir(t *testing.T) {
+	// Serial: bridgeProgramsFixture puts programs on the process's PATH and
+	// under its HOME, where the bridge finds them, and sets tmuxPath.
 	home := fsx.Canonical(t.TempDir())
 	cfg := bridgeProgramsFixture(t, home)
 	local := home + "/.claude/local"
@@ -1281,6 +1307,8 @@ func TestSandboxProfileKeepsProgramsInASharedClaudeDir(t *testing.T) {
 // any more, which used to be refused: the bridge runs nothing from it once
 // the folder is a brain's (see SetBridgePATH).
 func TestSandboxRefusesBrainFoldersHoldingItsPrograms(t *testing.T) {
+	// Serial: bridgeProgramsFixture puts programs on the process's PATH and
+	// under its HOME, where the bridge finds them, and sets tmuxPath.
 	home := fsx.Canonical(t.TempDir())
 	cfg := bridgeProgramsFixture(t, home)
 	nvm := home + "/.nvm/versions/node/v22.0.0"
@@ -1326,6 +1354,7 @@ func TestSandboxRefusesBrainFoldersHoldingItsPrograms(t *testing.T) {
 // again and write the CLI's state there, but never the configuration
 // itself, nor another session's records, nor a symlink among them.
 func TestSandboxProfileKeepsYourClaudeSetup(t *testing.T) {
+	t.Parallel()
 	q := func(op, filter, p string) string { return `(` + op + ` (` + filter + ` "` + p + `"))` }
 	for _, inherit := range []bool{false, true} {
 		t.Run(fmt.Sprintf("inherit_claude_user_config=%v", inherit), func(t *testing.T) {
@@ -1375,9 +1404,10 @@ func TestSandboxProfileKeepsYourClaudeSetup(t *testing.T) {
 // would open that. Both are refused rather than run with less protection,
 // except a folder that is a deny_paths entry: that keeps it from the others.
 func TestSandboxRefusesBrainFoldersItCannotProtect(t *testing.T) {
+	t.Parallel()
 	root := fsx.Canonical(t.TempDir())
 	home := root + "/home"
-	t.Setenv("HOME", home)
+	setenv(t, "HOME", home)
 	cases := []struct {
 		name, a string // brain a's folder
 		wantErr string

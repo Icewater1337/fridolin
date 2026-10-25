@@ -1,11 +1,11 @@
 # Plaud Sync (Android)
 
-A small Android app that takes a Plaud NotePin's recordings off the pin as soon as they stop,
+A small Android app that takes a Plaud NotePin's recordings off the pin in the background,
 instead of waiting until Plaud's own app is opened (on Android, Plaud's app syncs a NotePin only
 while it is open).
 
-It keeps a Bluetooth link to the pin from a foreground service. When a recording stops it
-downloads it as MP3 into the phone's `Documents/PlaudSync/`, deletes it on the pin once it is
+From a foreground service it checks in with the pin over Bluetooth (see [Sync and the pin's
+battery](#sync-and-the-pins-battery)). For each new recording it downloads it as MP3 into the phone's `Documents/PlaudSync/`, deletes it on the pin once it is
 saved, has Plaud's Transcription API transcribe it and saves the transcript next to it:
 
 ```
@@ -37,6 +37,35 @@ recognizer), becomes a question, and the answer, encrypted to a key in the phone
 read aloud with Android's on-device text-to-speech (`Voice.kt`, behind the small `SpeechVoice` interface so a better voice can replace it; `SpeechText.kt`, `VoiceCrypto.kt`). See
 [docs/PLAUD.md](../docs/PLAUD.md#voice-mode).
 
+## Sync and the pin's battery
+
+A NotePin cannot sleep while it is connected, so a permanent link runs its battery down fast.
+The **Sync** setting on the app's screen picks the trade-off:
+
+- **Smart** (default): connects every 10 minutes, and when you open the app, plug the phone in
+  or unlock it, or the pin comes back in range. It fetches what is new and disconnects. While the
+  pin records it stays connected, so the end of the recording is seen at once.
+- **Every N minutes** (2–240): only on that timer and when you open the app. The pin sleeps
+  longest.
+- **Instant**: stays connected, as up to version 0.3. Recordings arrive seconds after they stop,
+  and the pin's battery runs down fast.
+
+**Fetch now**, on the screen and in the notification, checks in at once. With voice mode on,
+smart and every N minutes check in at least every 2 minutes. A pin out of reach is tried less
+and less often (the interval doubling up to an hour, or 10 minutes with voice mode on; in
+instant mode 30 seconds up to 10 minutes). Each check-in first looks for the pin with the app's
+own scan, which is filtered by Plaud's Bluetooth company id rather than an address and runs with
+the screen off. It then connects to the address the pin uses at that moment, and the same scan
+at low power notices the pin coming back. The screen shows the pin's battery as of the last
+synced recording, and the log keeps each reading.
+
+Why not event-driven: the pin's advertisement, as Plaud's SDK reads it, says who it is but not
+whether it records or holds files. Recording events arrive only over a connection. The SDK
+gives the app no say over the connection interval either. The app tests whether this pin's raw
+advertisement changes with recordings anyway, and uses that if it does. The findings are in
+[docs/PLAUD.md](../docs/PLAUD.md#the-pins-battery). The scheduling and backoff rules are in
+`SyncPolicy.kt`, and the Android side is in `SyncService.kt` and `PinWatch.kt`.
+
 ## What you need
 
 - A Plaud developer app at [portal.plaud.ai](https://portal.plaud.ai) (free tier: one device,
@@ -67,7 +96,8 @@ ANDROID_HOME=$(brew --prefix)/share/android-commandlinetools ./gradlew assembleD
 ANDROID_HOME=$(brew --prefix)/share/android-commandlinetools ./gradlew testDebugUnitTest
 ```
 
-The unit tests run on the JVM: the text made for speech, and opening an answer the bridge
+The unit tests run on the JVM: when to check in with the pin and how to back off
+(`SyncPolicyTest`), the text made for speech, and opening an answer the bridge
 sealed (the vector of `TestVoiceSealVector` in `internal/plaud/voice_test.go`).
 
 The first build fetches the SDK into `app/libs/` and checks its hash. The credentials are built
@@ -82,17 +112,20 @@ debug key, so a new APK installs over the old one and keeps the pairing.
 2. Copy the APK to the phone and install it (allow installing from that source).
 3. Open it, allow **Nearby devices** and notifications, tap **Pair NotePin** with the pin close
    by, then **Allow running in background**.
-4. Record something. It shows up in `Documents/PlaudSync` seconds after you stop it, and the
-   transcript once Plaud is done. Built by Fridolin, the app then sends the transcript on; its
+4. Record something. It shows up in `Documents/PlaudSync` at the next check-in (seconds after
+   you stop it in instant mode, or tap **Fetch now**), and the transcript once Plaud is done. Built by Fridolin, the app then sends the transcript on; its
    screen says whether it is paired and how many transcripts wait to be sent (offline, say).
 
 **Share log** sends the app's log (connections, downloads, errors; never a recording's content).
-**Unpair** gives the pin back to Plaud's app; it needs the pin connected.
+**Unpair** gives the pin back to Plaud's app; it connects to the pin first, so keep it close by.
 
 ## Limits
 
-- Out of range, recordings wait on the pin. The app looks for the pin again, but with the screen
-  off Android may hold the search until the screen is next on, as the SDK's scan has no filter.
+- Out of range, recordings wait on the pin until it is back. The app's own scan is filtered, so
+  it works with the screen off. The SDK's unfiltered scan, which the app uses only to pair (or
+  when it has no record of the pin yet), may wait until the screen is next on.
+- The check-in timer is an Android alarm that Doze lets through inexactly, so on a phone left
+  still for a long time the 10 minutes can stretch.
 - Plaud's Transcription API runs in the US; other regions need Plaud's sales team. Plaud keeps a
   transcription for 7 days.
 - No Plaud AI summaries: the brain that gets the transcript writes its own.

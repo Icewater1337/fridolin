@@ -73,6 +73,11 @@ On the host that runs Docker:
                        check the image's build provenance (GitHub's attestation
                        for image.yml on main), pull it by digest and tag it as
                        this version's, for start (--check: only say whether it is here)
+  fridolin core files export|import|forget
+                       in the core's container (core run core files …): the secret
+                       files of sandbox.credentials_dir a core move carries, as
+                       JSON; import (from stdin) writes only those not there, 0600;
+                       forget removes those named on stdin (what a move wrote)
   fridolin core rehearse [--json]
                        import the latest export into a scratch volume
                        (fridolin-move-rehearsal), check it, and remove the volume:
@@ -100,6 +105,11 @@ In the core (docker exec fridolin-core fridolin core ...):
                                  a core running (a core move's target that gives up)
   fridolin core status [--json]  who holds the core lease, this device's id and the
                                  latest export (with --json: as a core move reads it)
+  fridolin core forget-data [--json]
+                                 empty this data dir, which a core move brought to a
+                                 machine the core has left (its agent runs it when the
+                                 owner says forget): refused while a core runs on it,
+                                 and unless another device's core holds the lease
   core export takes --move ID (a core move's id, written into the export's
   manifest and info) and --json (print the export's info).
 
@@ -144,7 +154,7 @@ func runCore(args []string, env coreEnv) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	switch sub {
-	case "export", "import", "promote", "status", "release":
+	case "export", "import", "promote", "status", "release", "forget-data":
 		return coreInside(ctx, sub, args, env)
 	case "start", "stop", "update", "run", "build", "pull", "rehearse":
 		return coreHost(ctx, sub, args, env, defaultHostDeps(env))
@@ -152,6 +162,8 @@ func runCore(args []string, env coreEnv) int {
 		return coreMigrate(ctx, args, env, defaultHostDeps(env))
 	case "secrets":
 		return coreSecrets(args, env, defaultHostDeps(env))
+	case "files":
+		return coreFiles(args, env)
 	case "send", "receive":
 		return coreTransfer(ctx, sub, args, env, defaultHostDeps(env))
 	case "apparmor":
@@ -193,7 +205,7 @@ func coreInside(ctx context.Context, sub string, args []string, env coreEnv) int
 		fs.BoolVar(&f.drift, "drift", false, "say only which brains' brain.json or scheduled agents on disk differ from the manifests you approved, and export nothing; exits 1 when the export would refuse")
 		fs.BoolVar(&f.useApproved, "use-approved", false, "take the brain folders along by the approved manifests although a brain.json on disk keeps more of its folder home")
 	}
-	if sub == "export" || sub == "status" {
+	if sub == "export" || sub == "status" || sub == "forget-data" {
 		fs.BoolVar(&f.asJSON, "json", false, "print the answer as JSON")
 	}
 	if sub == "import" {
@@ -234,6 +246,8 @@ func coreInside(ctx context.Context, sub string, args []string, env coreEnv) int
 		err = coreStatus(ctx, f, env)
 	case "release":
 		err = coreRelease(ctx, f, env)
+	case "forget-data":
+		err = coreForgetData(ctx, f, env)
 	}
 	if err != nil {
 		fmt.Fprintf(env.stderr, "fridolin core %s: %v\n", sub, err)
@@ -735,6 +749,9 @@ type hostDeps struct {
 	tailnet secretxfer.Tailnet
 	// run runs a program with exactly env as its environment.
 	run func(ctx context.Context, name string, args, env []string, stdout, stderr io.Writer) error
+	// runStdin is run with stdin, for core run core files import, which
+	// reads the secret files there; nil runs without.
+	runStdin func(ctx context.Context, name string, args, env []string, stdin io.Reader, stdout, stderr io.Writer) error
 	// docker is the docker CLI's path.
 	docker      string
 	composePath string
@@ -791,7 +808,7 @@ func hostZone(getenv func(string) string) string {
 }
 
 func defaultHostDeps(env coreEnv) hostDeps {
-	d := hostDeps{run: runProgram, version: version.String(), newIdentity: func() (string, error) {
+	d := hostDeps{run: runProgram, runStdin: runProgramStdin, version: version.String(), newIdentity: func() (string, error) {
 		id, err := age.GenerateHybridIdentity()
 		if err != nil {
 			return "", err
@@ -828,7 +845,7 @@ func defaultHostDeps(env coreEnv) hostDeps {
 		gh = lookPathIn("gh", envValue(env.environ, "PATH"))
 	}
 	if gh == "" {
-		d.noVerify = "GitHub's CLI (gh) is not installed, which checks the image's provenance before it is pulled (no login needed): install it (brew install gh, apt-get install gh, winget install GitHub.cli)"
+		d.noVerify = "GitHub's CLI (gh) is not installed, which checks the image's provenance before it is pulled (no login needed): install a current one (brew install gh, winget install GitHub.cli, on Linux from GitHub's apt repository: https://cli.github.com)"
 	}
 	d.verify = provenance.Verifier{Gh: gh, Environ: env.environ}.Verify
 	d.secrets = hostsecrets.ForHost(d.goos, env.getenv, d.home)
@@ -940,42 +957,39 @@ func lookPathIn(name, path string) string {
 }
 
 func runProgram(ctx context.Context, name string, args, env []string, stdout, stderr io.Writer) error {
+	return runProgramStdin(ctx, name, args, env, nil, stdout, stderr)
+}
+
+func runProgramStdin(ctx context.Context, name string, args, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.Env, cmd.Stdout, cmd.Stderr = env, stdout, stderr
+	cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = env, stdin, stdout, stderr
 	return cmd.Run()
 }
 
 // containerSecrets map the keychain's secrets onto the container's
-// environment (compose.yaml lists the same names). made marks those core
-// start makes when the keychain has none: the post-quantum age identity
-// and the keys of the second layers (docs/VAULT.md, "Encryption"). The
-// X25519 identity of before is passed on while the keychain has it, only
-// to read the exports and node-target passwords made for it. optional
-// ones are not named as missing: most cores never have them.
-var containerSecrets = []struct {
+// environment (hostsecrets.CoreEnv, which compose.yaml lists). made marks
+// those core start makes when the keychain has none: the post-quantum age
+// identity and the keys of the second layers (docs/VAULT.md,
+// "Encryption").
+var containerSecrets = func() []struct {
 	env, secret string
 	made        madeSecret
 	optional    bool
-}{
-	{"FRIDOLIN_AGE_IDENTITY_PQ", hostsecrets.AgeIdentityPQ, madeIdentity, false},
-	{"FRIDOLIN_AGE_IDENTITY", hostsecrets.AgeIdentity, notMade, false},
-	{"FRIDOLIN_EXPORT_KEY", hostsecrets.ExportKey, madeKey, false},
-	{"CLAUDE_CODE_OAUTH_TOKEN", hostsecrets.ClaudeOAuthToken, notMade, false},
-	{"TS_AUTHKEY", hostsecrets.TailscaleAuthKey, notMade, false},
-	{"B2_VAULT_KEY_ID", hostsecrets.B2VaultKeyID, notMade, false},
-	{"B2_VAULT_KEY", hostsecrets.B2VaultKey, notMade, false},
-	{"B2_SNAPSHOTS_KEY_ID", hostsecrets.B2SnapshotsKeyID, notMade, false},
-	{"B2_SNAPSHOTS_KEY", hostsecrets.B2SnapshotsKey, notMade, false},
-	{"FRIDOLIN_VAULT_CRYPT_PASSWORD", hostsecrets.VaultCryptPassword, notMade, false},
-	{"FRIDOLIN_VAULT_CRYPT_PASSWORD2", hostsecrets.VaultCryptSalt, notMade, false},
-	{"FRIDOLIN_VAULT_SEAL_KEY", hostsecrets.VaultSealKey, madeKey, false},
-	{"RESTIC_PASSWORD", hostsecrets.ResticPassword, notMade, false},
-	{"FRIDOLIN_SNAPSHOTS_CRYPT_PASSWORD", hostsecrets.SnapshotsCryptPassword, madeKey, false},
-	{"FRIDOLIN_LITESTREAM_SEAL_KEY", hostsecrets.LitestreamSealKey, madeKey, false},
-	// A typed GitHub token, the second choice to a connected GitHub App
-	// (docs/GITHUB.md).
-	{"FRIDOLIN_GITHUB_TOKEN", hostsecrets.GitHubToken, notMade, true},
-}
+} {
+	made := map[string]madeSecret{
+		hostsecrets.AgeIdentityPQ: madeIdentity, hostsecrets.ExportKey: madeKey, hostsecrets.VaultSealKey: madeKey,
+		hostsecrets.SnapshotsCryptPassword: madeKey, hostsecrets.LitestreamSealKey: madeKey,
+	}
+	out := make([]struct {
+		env, secret string
+		made        madeSecret
+		optional    bool
+	}, len(hostsecrets.CoreEnv))
+	for i, e := range hostsecrets.CoreEnv {
+		out[i].env, out[i].secret, out[i].made, out[i].optional = e.Env, e.Name, made[e.Name], e.Optional
+	}
+	return out
+}()
 
 // madeSecret says whether and how core start makes a missing secret.
 type madeSecret int
@@ -1005,10 +1019,18 @@ func imageTag(v string) string {
 // returns them as NAME=value. It never prints a value; it names what it
 // made, for the recovery sheet.
 func secretEnv(d hostDeps, stderr io.Writer) ([]string, error) {
+	return containerSecretEnv(d, stderr, true)
+}
+
+// containerSecretEnv is secretEnv, making none unless mint: a command
+// other than core start (core run core status, which the move pre-flight
+// runs on a host that is not the core yet) must not make keys of its own,
+// which the core's would then not replace (#187).
+func containerSecretEnv(d hostDeps, stderr io.Writer, mint bool) ([]string, error) {
 	var env, missing, made []string
 	for _, s := range containerSecrets {
 		v, err := d.secrets.Get(s.secret)
-		if errors.Is(err, hostsecrets.ErrNotFound) && s.made != notMade {
+		if errors.Is(err, hostsecrets.ErrNotFound) && s.made != notMade && mint {
 			if v, err = d.makeSecret(s.made); err == nil {
 				if err = d.secrets.Set(s.secret, v); err == nil {
 					made = append(made, s.secret)
@@ -1099,7 +1121,7 @@ func coreHost(ctx context.Context, sub string, args []string, env coreEnv, d hos
 		fmt.Fprintln(env.stderr, "Could not tell this machine's time zone, so the core runs in UTC: set FRIDOLIN_TZ (such as Europe/Zurich) for core start, or \"timezone\" in the core's config.")
 	}
 	if sub != "stop" {
-		secrets, err := secretEnv(d, env.stderr)
+		secrets, err := containerSecretEnv(d, env.stderr, sub == "start" || sub == "update")
 		if err != nil {
 			fmt.Fprintf(env.stderr, "fridolin core %s: %v\n", sub, err)
 			return 1
@@ -1139,6 +1161,12 @@ func coreHost(ctx context.Context, sub string, args []string, env coreEnv, d hos
 		}
 	case "run":
 		// No published ports: the one-off container is no second dashboard.
+		if (slices.Equal(fs.Args(), []string{"core", "files", "import"}) || slices.Equal(fs.Args(), []string{"core", "files", "forget"})) && d.runStdin != nil {
+			// The secret files, or the names of those to remove, come on
+			// stdin (a core move, #187; forgetting what it brought, #266).
+			err = d.runStdin(ctx, d.docker, append(composeArgs(path, override, armor), append([]string{"run", "--rm", "--no-deps", "-T", "core"}, fs.Args()...)...), childEnv, env.stdin, env.stdout, env.stderr)
+			break
+		}
 		err = compose1(append([]string{"run", "--rm", "--no-deps", "core"}, fs.Args()...)...)
 	case "rehearse":
 		return coreRehearse(ctx, pull.asJSON, path, override, armor, childEnv, env, d)

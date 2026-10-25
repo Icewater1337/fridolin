@@ -4,13 +4,14 @@
 // A new process of another version serves other modules, and pages load
 // theirs on first visit, so the page reloads instead of mixing the two.
 
-import { get, post } from './api.js';
+import { get, post, errorStatus } from './api.js';
 import { store, setStatus } from './store.js';
 import { h, mount } from '../lib/dom.js';
 import { toast, toastError } from '../components/toast.js';
 import { openDialog } from '../components/dialog.js';
 import { spinner } from '../components/common.js';
 
+/** @param {number} ms */
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** reload is location.reload, unless a test says otherwise. */
@@ -49,7 +50,7 @@ export async function restartBridge({ reload = () => location.reload() } = {}) {
         return true;
       }
     } catch (e) {
-      if (e.status === 401) { close(); return false; }
+      if (errorStatus(e) === 401) { close(); return false; }
       sawDown = true;
     }
     await sleep(1000);
