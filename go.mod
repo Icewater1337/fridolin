@@ -3,12 +3,12 @@ module github.com/Icewater1337/fridolin
 go 1.26.6
 
 require (
-	filippo.io/age v1.3.1
+	filippo.io/age v1.3.2
 	github.com/coder/websocket v1.8.15
 	github.com/creack/pty v1.1.24
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/kardianos/service v1.3.0
-	github.com/klauspost/compress v1.19.1
+	github.com/klauspost/compress v1.20.3
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/yuin/goldmark v1.8.6
 	go.mau.fi/whatsmeow v0.0.0-20260730092514-662ad1dc6900
