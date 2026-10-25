@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 
@@ -102,7 +103,9 @@ func FuzzGroupSenderAllowed(f *testing.F) {
 			}
 			return s
 		}
-		listed := resolved && slices.ContainsFunc(members, func(m string) bool { return canon(m) == canon(number) })
+		// A sender that is not UTF-8 is refused whatever the list holds
+		// (access.GroupSenderAllowed): it cannot be a number anyone wrote.
+		listed := resolved && utf8.ValidString(number) && slices.ContainsFunc(members, func(m string) bool { return canon(m) == canon(number) })
 		if resolved && chat.IsPhoneNumber(number) && slices.Contains(members, number) && !got {
 			t.Errorf("group_members %q refused %q, which it lists as it is", members, number)
 		}
