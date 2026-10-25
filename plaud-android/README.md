@@ -52,8 +52,12 @@ The **Sync** setting on the app's screen picks the trade-off:
 
 **Fetch now**, on the screen and in the notification, checks in at once. With voice mode on,
 smart and every N minutes check in at least every 2 minutes. A pin out of reach is tried less
-and less often (the interval doubling up to an hour; in instant mode 30 seconds up to 10
-minutes), and a low-power scan for its address notices it coming back.
+and less often (the interval doubling up to an hour, or 10 minutes with voice mode on; in
+instant mode 30 seconds up to 10 minutes). Each check-in first looks for the pin with the app's
+own scan, which is filtered by Plaud's Bluetooth company id rather than an address and runs with
+the screen off. It then connects to the address the pin uses at that moment, and the same scan
+at low power notices the pin coming back. The screen shows the pin's battery as of the last
+synced recording, and the log keeps each reading.
 
 Why not event-driven: the pin's advertisement, as Plaud's SDK reads it, says who it is but not
 whether it records or holds files. Recording events arrive only over a connection. The SDK
@@ -117,10 +121,9 @@ debug key, so a new APK installs over the old one and keeps the pairing.
 
 ## Limits
 
-- Out of range, recordings wait on the pin until it is back. A check-in connects straight to
-  the pin as last found and the app's own scan is filtered, so both work with the screen off.
-  The SDK's unfiltered scan, which the app uses after pairing and now and then to find the pin
-  afresh, may wait until the screen is next on.
+- Out of range, recordings wait on the pin until it is back. The app's own scan is filtered, so
+  it works with the screen off. The SDK's unfiltered scan, which the app uses only to pair (or
+  when it has no record of the pin yet), may wait until the screen is next on.
 - The check-in timer is an Android alarm that Doze lets through inexactly, so on a phone left
   still for a long time the 10 minutes can stretch.
 - Plaud's Transcription API runs in the US; other regions need Plaud's sales team. Plaud keeps a
