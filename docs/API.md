@@ -224,7 +224,8 @@ here, since it is no run's.
 answers as MCP's `tools/call` does: `{"content": [{"type": "text",
 "text": …}], "isError": …}`, `isError` for a tool that ran and failed.
 A `delegate` call waits for the sub-brain's answer, up to its
-`timeout_seconds`; `request_approval`, `ask_user` and `check_approval`
+`timeout_seconds`, and may hand over the owner's approval of the task's
+step as `approval_id` (docs/BRAINS.md, "You are asked once"); `request_approval`, `ask_user` and `check_approval`
 wait for the owner's answer up to their `wait_seconds` (at most 600), then
 answer `pending` with the approval's id. Every call is a `tool_call` line
 of the audit log, its arguments left out.

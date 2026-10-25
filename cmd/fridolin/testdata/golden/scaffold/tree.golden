@@ -201,7 +201,7 @@ brain-prompt.md -rw------- 47e25dd327960149
 
 	<!-- Add your own sections below: who you work with, recurring tasks, tools
 	     you use, project context. This file is the assistant's personality. -->
-brain.json -rw------- 6eca85eeebcd3aca
+brain.json -rw------- e03acf0282b9489e
 	{
 	  "version": 1,
 	  "id": "notes",
@@ -215,6 +215,7 @@ brain.json -rw------- 6eca85eeebcd3aca
 	  },
 	  "prompt_file": "brain-prompt.md",
 	  "observe": "history",
+	  "approvals": "ask",
 	  "backup": {
 	    "enabled": true,
 	    "exclude": [

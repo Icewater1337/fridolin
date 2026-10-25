@@ -26,6 +26,7 @@
     "prompt_file": {"type": "string", "not": {"pattern": "^(/|\\.\\.)"}, "description": "Relative to the brain's folder, and inside it. Default brain-prompt.md."},
     "reply_chat": {"type": "string"},
     "observe": {"enum": ["", "history", "run"]},
+    "approvals": {"enum": ["", "ask", "auto"], "description": "ask (the default): request_approval puts a poll in your chat and waits for your vote. auto: it answers approved at once, recorded as approved by \"auto\"; lockdown, the run's risk budget, policy.max_pending_irreversible and observe-only runs still hold. A security trade-off: the brain then takes irreversible steps without your yes."},
     "backup": {
       "type": "object",
       "additionalProperties": false,

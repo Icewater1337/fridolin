@@ -6,7 +6,7 @@ README.txt -rw------- aee0d4de8f1f57ac
 	again from the dashboard.
 	The WhatsApp session, .env files and tokens are deliberately not backed up.
 brains/ -rwx------
-brains/main.brain.json -rw------- e3f60208265f5cbf
+brains/main.brain.json -rw------- d5f2c441f45b5dff
 	{
 	  "version": 1,
 	  "id": "main",
@@ -20,6 +20,7 @@ brains/main.brain.json -rw------- e3f60208265f5cbf
 	  },
 	  "prompt_file": "brain-prompt.md",
 	  "observe": "history",
+	  "approvals": "ask",
 	  "backup": {
 	    "enabled": true,
 	    "exclude": [
@@ -37,7 +38,7 @@ brains/main.brain.json -rw------- e3f60208265f5cbf
 	    "default": "you@example.com"
 	  }
 	}
-config.json -rw------- f76a73f0dfa097b3
+config.json -rw------- ca4420e6c8bcc3f2
 	{
 	  "version": 2,
 	  "allowed_numbers": [
@@ -69,6 +70,7 @@ config.json -rw------- f76a73f0dfa097b3
 	        },
 	        "prompt_file": "brain-prompt.md",
 	        "observe": "history",
+	        "approvals": "ask",
 	        "backup": {
 	          "enabled": true,
 	          "exclude": [

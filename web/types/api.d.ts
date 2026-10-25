@@ -19,6 +19,9 @@
 /** How a brain's group messages that do not address it are handled. */
 export type Observe = 'history' | 'run';
 
+/** Whether a brain's request_approval asks you (ask) or answers approved at once (auto). */
+export type ApprovalsMode = 'ask' | 'auto';
+
 /** Which chats a brain answers (manifest.Routing). */
 export interface Routing {
   handles_dms: boolean;
@@ -113,6 +116,7 @@ export interface BrainManifest {
   /** Where replies to files handed in through /ingest go. */
   reply_chat?: string;
   observe?: Observe;
+  approvals?: ApprovalsMode;
   backup: BrainBackup;
   calendar?: BrainCalendar;
   /** "core" for the brain that may reach the others through its grants. */

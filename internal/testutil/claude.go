@@ -157,7 +157,7 @@ func runFakeClaude(version string, polls func(io.Writer) int) {
 	wd, _ := os.Getwd()
 	out := fmt.Sprintf("echo:%s:%s", wd, msg)
 	if steps := os.Getenv("FRIDOLIN_FAKE_MCP"); steps != "" && strings.Contains(msg, FakeMCPTrigger) {
-		out += fakeMCP(args, steps)
+		out += fakeMCP(args, msg, steps)
 	}
 	if p := os.Getenv("FRIDOLIN_FAKE_READ"); p != "" {
 		switch _, err := os.ReadFile(p); {

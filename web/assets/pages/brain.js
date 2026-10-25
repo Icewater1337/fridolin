@@ -10,7 +10,7 @@ import { calendarCard } from '../components/calendar.js';
 import { h, mount, paint } from '../lib/dom.js';
 import { fmtDuration, plural, prettyJSON } from '../lib/format.js';
 import { phoneish, isGroupJid } from '../lib/jid.js';
-import { OBSERVE, issueLabel, brainLabel, takeover } from '../lib/brain.js';
+import { APPROVALS, OBSERVE, issueLabel, brainLabel, takeover } from '../lib/brain.js';
 import { sortKeys, fieldDiff, lineDiff } from '../lib/diff.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
@@ -309,6 +309,7 @@ export default /** @satisfies {PageModule} */ ({
       const routing = routingEditor({ routing: m.routing || {}, selfId: id, brains: others, allowedGroups, onChange: changed, signal: ctx.signal });
       const fields = brainSettingsFields(m, eff);
       const observeSel = select(OBSERVE, m.observe || 'history', { name: 'observe' });
+      const approvalsSel = select(APPROVALS, m.approvals || 'ask', { name: 'approvals' });
       const override = Array.isArray(m.disallowed_tools);
       const globalTools = eff.disallowed_tools.length ? eff.disallowed_tools.join(', ') : 'none';
       const toolsIn = textInput({ value: m.disallowed_tools ? m.disallowed_tools.join(', ') : '', class: 'mono', placeholder: 'e.g. WebFetch, Bash', disabled: !override });
@@ -340,6 +341,7 @@ export default /** @satisfies {PageModule} */ ({
           routing: routing.getValue(),
           ...fields.value(),
           observe: observeSel.value,
+          approvals: approvalsSel.value,
           prompt_file: promptIn.value.trim(),
           reply_chat: replyIn.value.trim(),
         };
@@ -364,6 +366,8 @@ export default /** @satisfies {PageModule} */ ({
           field({ label: 'Id', control: h('div.static', mono(m.id)), help: 'Ids cannot change. To use a new id, remove the brain and add the folder again.' })),
         h('fieldset.fieldset', h('legend', 'Chats'), routing,
           field({ label: 'Untagged group messages', control: observeSel, help: 'Messages in a group that nobody addressed to the brain. They go into its history either way, for its next run there, and get no reply. A run of its own for each lets the brain take notes as the conversation goes, but costs a full Claude run, with tools, on whatever any member the group admits (Chats → Allowed groups → Members) writes; a message addressed to the brain stops it.' })),
+        h('fieldset.fieldset', h('legend', 'Approvals'),
+          field({ label: 'Before an irreversible step', control: approvalsSel, help: 'Sending to someone else, posting, paying, submitting, deleting outside its folder, and the steps its skills mark: asked first, the brain puts a poll in your chat and waits for your yes. Acting without asking is a security trade-off: the brain takes those steps on its own judgement, which a message, file or web page it reads may sway. Each step is still recorded on the Approvals page as approved by “auto”, and a lockdown, the run’s risk level and the limit on waiting approvals still hold. A task this brain delegates follows the other brain’s own setting.' })),
         h('fieldset.fieldset', h('legend', 'Model and tools'),
           fields.model,
           h('div.field', toolsSw, h('div.help', `Off: use the global list of blocked tools (${globalTools}).`)),

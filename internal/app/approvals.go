@@ -207,8 +207,15 @@ func (a approvalArgs) wait() time.Duration {
 }
 
 func (b *App) describeRequestApproval(c mcpCaller) mcp.Tool {
+	note := ""
+	if c.autoApproves() {
+		note = "This brain acts without asking (approvals: auto): this answers approved at once, without a poll, and records the step; say in your reply what you did. "
+	}
+	if p := c.run.Policy; p != nil && p.Approval != "" {
+		note += fmt.Sprintf("The owner approved %q already, before this task was delegated to you (approval_id %s): do not ask for that again. ", textx.Truncate(p.ApprovedAction, 300), p.Approval)
+	}
 	return mcp.Tool{
-		Description: "Ask the person you work for to approve an action before you take it, with a poll in their WhatsApp chat (Yes / No / Show me the draft). " +
+		Description: note + "Ask the person you work for to approve an action before you take it, with a poll in their WhatsApp chat (Yes / No / Show me the draft). " +
 			"Call it before every irreversible step (submitting, sending to anyone else, paying, deleting outside your folder, publishing) and every step a skill lists under metadata.fridolin.approve; take the step only when this answers approved. " +
 			fmt.Sprintf("Waits up to wait_seconds (default %d, at most %d). Unanswered by then it answers pending with an approval_id: wait again with check_approval, or end your turn, and the answer comes to you as a new message. ", int(defaultApprovalWait/time.Second), int(maxApprovalWait/time.Second)) +
 			fmt.Sprintf("No answer within %d hours counts as no. This run's risk level is %s.", b.cfgs.Get().Live.Policy.ApprovalTimeoutHours, c.risk()),
@@ -286,11 +293,57 @@ func (b *App) callRequestApproval(ctx context.Context, c mcpCaller, raw json.Raw
 			return mcp.ErrorResult(fmt.Sprintf("%d irreversible actions wait for approval already, the most policy.max_pending_irreversible allows: wait for those to be answered. Do not take the action.", n)), nil
 		}
 	}
-	a, err := b.ask(ctx, c, store.Approval{Kind: approvalKind, Action: args.Action, Details: strings.TrimSpace(args.Details), Risk: string(risk), Step: strings.TrimSpace(args.Step)})
+	req := store.Approval{Kind: approvalKind, Action: args.Action, Details: strings.TrimSpace(args.Details), Risk: string(risk), Step: strings.TrimSpace(args.Step)}
+	if c.autoApproves() {
+		a, err := b.autoApprove(ctx, c, req)
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		return mcp.TextResult(fmt.Sprintf("approved: this brain acts without asking (approvals: auto), so the owner was not asked; the step is recorded (approval_id %s). Take exactly this action, nothing more; pass approval_id %s to a tool that asks for one, and say in your reply what you did.", a.ID, a.ID)), nil
+	}
+	a, err := b.ask(ctx, c, req)
 	if err != nil {
 		return mcp.ErrorResult(err.Error()), nil
 	}
 	return b.awaitAnswer(ctx, a, args.wait()), nil
+}
+
+// autoApprovedBy is who decided an approval the brain's approvals: auto
+// answered (store.Approval.DecidedBy).
+const autoApprovedBy = "auto"
+
+// autoApproves reports whether the run's request_approval answers
+// approved without a poll: its brain's approvals setting is auto, and
+// its risk budget allows more than reading. A run held to read, by its
+// skill or a lockdown, asks the owner as any brain's would: auto never
+// lets through what the budget does not.
+func (c mcpCaller) autoApproves() bool {
+	return c.manifest.AutoApproves() && c.risk().Rank() > skill.RiskRead.Rank()
+}
+
+// autoApprove records a as approved by "auto", without a poll, for a
+// brain whose owner lets it act without asking: it shows in the
+// approvals' history and the audit log as any other.
+func (b *App) autoApprove(ctx context.Context, c mcpCaller, a store.Approval) (store.Approval, error) {
+	now := time.Now()
+	b.fillApproval(c, &a, now)
+	if err := b.store.AddApproval(ctx, a); err != nil {
+		return a, fmt.Errorf("the bridge could not record the request: %w", err)
+	}
+	decided, err := b.store.DecideApproval(ctx, a.ID, store.ApprovalApproved, "", autoApprovedBy, now)
+	if err != nil {
+		return a, fmt.Errorf("the bridge could not record the request: %w", err)
+	}
+	detail := a.Action
+	if a.Step != "" {
+		detail += " (step " + a.Step + ")"
+		// A skill's approve step goes ahead without the owner's yes: say so.
+		log.Printf("brain %s: step %q of skill %q approved by approvals: auto, without asking the owner (%s)", a.Brain, a.Step, a.Skill, a.ID)
+	}
+	b.audit.Append(audit.Entry{Kind: audit.ApprovalRequested, Thread: a.Thread, Chat: a.Chat, Brain: a.Brain, Run: a.Run, ID: a.ID, Skill: a.Skill, Risk: a.Risk, Detail: detail, Outcome: "pending"})
+	b.audit.Append(audit.Entry{Kind: audit.ApprovalDecided, Thread: a.Thread, Chat: a.Chat, Brain: a.Brain, Run: a.Run, ID: a.ID, Risk: a.Risk, By: autoApprovedBy, Outcome: store.ApprovalApproved})
+	log.Printf("brain %s: approved without asking the owner (approvals: auto, %s)", a.Brain, a.ID)
+	return decided, nil
 }
 
 func (b *App) callAskUser(ctx context.Context, c mcpCaller, raw json.RawMessage) (*mcp.CallResult, error) {
@@ -336,6 +389,22 @@ func (b *App) callCheckApproval(ctx context.Context, c mcpCaller, raw json.RawMe
 	return b.awaitAnswer(ctx, a, args.wait()), nil
 }
 
+// fillApproval gives a, a request of c's run, its id, where it belongs
+// and when it ends.
+func (b *App) fillApproval(c mcpCaller, a *store.Approval, now time.Time) {
+	p := c.run.Policy
+	if p == nil {
+		p = &runPolicy{ID: c.run.ID, Brain: c.run.Brain, Chat: c.run.Chat, Thread: c.run.Chat, Risk: defaultRisk}
+	}
+	a.ID = "a" + randomToken(9)
+	a.Brain, a.Run, a.Thread, a.Chat, a.Skill = c.run.Brain, p.ID, p.Thread, b.approvalChat(p), p.Skill
+	a.Notify = c.run.Brain
+	if p.FromBrain != "" {
+		a.Notify = p.FromBrain // a delegated run is over by then: its core brain hears
+	}
+	a.CreatedAt, a.ExpiresAt = now, now.Add(b.approvalTimeout())
+}
+
 // ask stores a and puts its poll (or question) into the owner's chat.
 func (b *App) ask(ctx context.Context, c mcpCaller, a store.Approval) (store.Approval, error) {
 	p := c.run.Policy
@@ -347,13 +416,7 @@ func (b *App) ask(ctx context.Context, c mcpCaller, a store.Approval) (store.App
 		return a, errors.New("there is nobody to ask: allowed_numbers holds no number of the owner. Do not take the action; say so in your reply")
 	}
 	now := time.Now()
-	a.ID = "a" + randomToken(9)
-	a.Brain, a.Run, a.Thread, a.Chat, a.Skill = c.run.Brain, p.ID, p.Thread, target, p.Skill
-	a.Notify = c.run.Brain
-	if p.FromBrain != "" {
-		a.Notify = p.FromBrain // a delegated run is over by then: its core brain hears
-	}
-	a.CreatedAt, a.ExpiresAt = now, now.Add(b.approvalTimeout())
+	b.fillApproval(c, &a, now)
 	if err := b.store.AddApproval(ctx, a); err != nil {
 		return a, fmt.Errorf("the bridge could not record the request: %w", err)
 	}
@@ -717,10 +780,11 @@ func (b *App) dashboardDecide(ctx context.Context, id string, approve bool) (any
 }
 
 // useApproval takes approval id for one call of an irreversible tool by
-// the run of c: approved, of the same brain, not taken before.
+// the run of c: approved, of the same brain or handed to the run with its
+// delegated task (runPolicy.Approval), not taken before.
 func (b *App) useApproval(ctx context.Context, c mcpCaller, id string) error {
 	a, err := b.store.ApprovalByID(ctx, id)
-	if err != nil || a.Brain != c.run.Brain {
+	if err != nil || (a.Brain != c.run.Brain && !c.handed(id)) {
 		return fmt.Errorf("there is no approval %q of yours", id)
 	}
 	if a.Status != store.ApprovalApproved {
@@ -734,4 +798,10 @@ func (b *App) useApproval(ctx context.Context, c mcpCaller, id string) error {
 		return fmt.Errorf("approval %s was used already: ask again for another action", id)
 	}
 	return nil
+}
+
+// handed reports whether approval id came to the run with its delegated
+// task: the owner approved the step in the core run that delegated it.
+func (c mcpCaller) handed(id string) bool {
+	return id != "" && c.run.Policy != nil && c.run.Policy.Approval == id
 }

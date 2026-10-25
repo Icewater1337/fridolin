@@ -21,6 +21,7 @@
   "prompt_file": "prompts/family.md",
   "reply_chat": "120363000000000000@g.us",
   "observe": "run",
+  "approvals": "auto",
   "backup": {
     "enabled": true,
     "exclude": [

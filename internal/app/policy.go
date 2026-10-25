@@ -34,6 +34,11 @@ type runPolicy struct {
 	// From is, for a delegated task's run, the core run that delegated it,
 	// and FromBrain its brain.
 	From, FromBrain string
+	// Approval is, for a delegated task's run, the owner's approval the
+	// core run handed over with the task (delegate's approval_id), and
+	// ApprovedAction what it approved: the run takes that step without
+	// asking again, and its irreversible tools take the id.
+	Approval, ApprovedAction string
 	// Silent is an observe-only run, which asks nobody anything.
 	Silent bool
 	// Scheduled is, for a scheduled agent's run, the agent; Timeout and
@@ -168,6 +173,7 @@ func (b *App) admitRun(spec brainruntime.RunSpec) (*runPolicy, error) {
 		if d := b.delegations.get(spec.Message.ID); d != nil && d.from.Policy != nil {
 			from := d.from.Policy
 			p.Thread, p.Skill, p.Risk, p.From, p.FromBrain = from.Thread, from.Skill, from.Risk, from.ID, from.Brain
+			p.Approval, p.ApprovedAction = d.approval.ID, d.approval.Action
 		}
 	} else {
 		p.Skill, p.Risk = b.inferSkill(spec.ID, spec.Message.Text)
@@ -200,6 +206,9 @@ func (b *App) admitRun(spec brainruntime.RunSpec) (*runPolicy, error) {
 	detail := ""
 	if p.From != "" {
 		detail = "delegated by run " + p.From + " of " + p.FromBrain
+		if p.Approval != "" {
+			detail += ", with approval " + p.Approval
+		}
 	}
 	if p.Scheduled != "" {
 		detail = "scheduled agent " + p.Scheduled

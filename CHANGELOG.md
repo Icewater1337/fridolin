@@ -10,6 +10,17 @@ for compatibility.
 
 ### Added
 
+- **A brain can act without asking** (`"approvals": "auto"` in
+  brain.json, the brain page's *Approvals*): its `request_approval`
+  answers approved at once, without a poll, recorded in the Approvals
+  page's history and the audit log as approved by `auto`. A lockdown, the
+  run's risk level, `policy.max_pending_irreversible` and observe-only
+  runs still hold, and a delegated task follows the other brain's own
+  setting. It is a security trade-off: set it only on a brain only you
+  talk to (docs/BRAINS.md, "Acting without asking"). Brains without the
+  field ask, as before; the dashboard and API now show `"approvals":
+  "ask"` for them, and a new brain's brain.json has it.
+
 - **The secret folders go to the vault.** With the vault on, the
   credentials folder (`sandbox.credentials_dir`: the Google OAuth
   client, the calendar credentials and tokens, the dashboard users) and
@@ -1091,6 +1102,13 @@ for compatibility.
   folder of the calendar tokens; nothing in `tools/` read it any more.
 
 ### Fixed
+
+- **One poll for a delegated step, not two.** The core brain asked you
+  to approve the delegation and the delegated brain asked again for the
+  step. Now the core asks once, for the step, and hands the approval over
+  with `delegate`'s new `approval_id`; the delegated run takes that step
+  without asking again and still asks for any other (docs/BRAINS.md,
+  "You are asked once, at the start").
 
 - **Voice mode no longer posts the question to WhatsApp.** A NotePin
   recording or a spoken question in voice mode used to arrive in the chat
