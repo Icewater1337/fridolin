@@ -300,14 +300,14 @@ func TestSiteReviewManifest(t *testing.T) {
 	wider := map[string]any{
 		"route": "/a", "access": map[string]any{"roles": []any{"*"}},
 		"app":          map[string]any{"dist": "d", "public": []any{"x.json"}},
-		"server":       map[string]any{"entry": "server.ts"},
+		"server":       map[string]any{"entry": "server.ts", "public": []any{"/intake"}},
 		"capabilities": map[string]any{"files": map[string]any{"db": map[string]any{"path": "~/x.db", "access": "write"}}},
 	}
 	var fields []string
 	for _, it := range reviewManifest(old, wider) {
 		fields = append(fields, it.Field)
 	}
-	if got := strings.Join(fields, ","); got != "access,server,capabilities.files,app.public" {
+	if got := strings.Join(fields, ","); got != "access,server,server.public,capabilities.files,app.public" {
 		t.Errorf("review fields = %s", got)
 	}
 }

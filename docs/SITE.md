@@ -153,6 +153,7 @@ For every module that changes, the dashboard lists the fields of
 | `route` | where it is served |
 | `access` | who may open it |
 | `server`, `server.mount`, `server.access` | code that runs on this machine, where it answers, and who may call it |
+| `server.public` | paths of that code anyone can call without signing in |
 | `capabilities.files`, `.commands`, `.secrets` | what that code touches — on macOS, all it can touch |
 | `app.dist` | the files it serves |
 | `app.public` | files anyone can fetch without signing in |
@@ -255,6 +256,7 @@ The folder name is the module's `id`.
 | `server.entry` | A file in the module folder whose default export returns an Express router. |
 | `server.mount` | Where the router answers. Default `<route>/api`; must be under the route or `/api/<id>`. |
 | `server.access` | Who may call it. Default: `access`. |
+| `server.public` | Paths under `server.mount` that answer **without sign-in**, e.g. `["/intake"]`: that path and everything below it. Letters, digits, `.`, `_`, `-` and `/`; no wildcards. See *Public paths*. |
 | `capabilities.files` | Named paths the server code uses, `{ "path", "access": "read" \| "write" }`, same path rules. A path ending in `/` (or one that is a folder) covers everything below it. |
 | `capabilities.commands` | Programs the server code runs: a name on the site's `PATH`, an absolute or `~/…` path, or a path in the module folder. |
 | `capabilities.secrets` | Secrets it needs, by name: a letter, then up to 63 letters, digits, `_` or `-`. |
@@ -262,7 +264,8 @@ The folder name is the module's `id`.
 | `capabilities.search` | Brains whose folder it may search with `ctx.search`, by id (see *Searching a brain's folder*). |
 
 A module needs `app`, `server` or both. Everything is behind sign-in and the
-module's `access`; there is no public module, only public files.
+module's `access`, except the files in `app.public` and the paths in
+`server.public`.
 
 Server code gets its paths through `ctx.file('db')` and its secrets through
 `ctx.secret('API_KEY')`, which refuse a name the manifest does not list. On
@@ -294,6 +297,29 @@ to a brain: nothing needs declaring for it.
 (for a password account, `email` is the username). TypeScript runs as is. The
 site repository's `package.json` must say `"type": "module"` and list what
 modules import (`express`, …); the deploy runs `npm install`.
+
+### Public paths
+
+Some pages must reach people without an account — a form a patient fills in
+from a link in an email, a webhook. `server.public` lists the paths of the
+module's server that answer without sign-in:
+
+```json
+"server": { "entry": "server.ts", "public": ["/intake"] }
+```
+
+A request to `<mount>/intake` or below goes to the router without the
+sign-in check and without `req.user`; whatever the router does not answer
+there falls through to sign-in as usual. The router decides what such a
+request may do — a one-time token in the link, a signature from the sender —
+and parses its own bodies with a size limit (`express.json({ limit: '64kb' })`).
+The site allows 120 requests a minute per client address and module on public
+paths and answers `429` above that. The deploy review lists `server.public`
+for every module that adds or changes it.
+
+The page that calls them is a public file (`app.public`), e.g. one
+self-contained `intake.html` with its script and styles inline, since the
+app's other files stay behind sign-in.
 
 **Where the `package.json` goes.** Node looks for a package in
 `node_modules` beside the file that imports it and in every folder above, so

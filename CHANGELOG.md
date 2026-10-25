@@ -10,6 +10,14 @@ for compatibility.
 
 ### Added
 
+- **Public paths for site modules** (`server.public` in module.json, e.g.
+  `["/intake"]`): those paths of a module's server answer without sign-in,
+  so a form opened from an email link or a webhook can reach it. The router
+  checks what such a request may do itself (a one-time token, a signature);
+  the site limits public paths to 120 requests a minute per client address
+  and module. The deploy review lists the field (docs/SITE.md, "Public
+  paths").
+
 - **A brain can act without asking** (`"approvals": "auto"` in
   brain.json, the brain page's *Approvals*): its `request_approval`
   answers approved at once, without a poll, recorded in the Approvals
