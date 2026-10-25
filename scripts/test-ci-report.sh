@@ -279,6 +279,18 @@ jobs "20:success:go-macos-full (1/2)"
 REPORT_NAME='x`y' run
 check "nightly: a name with a backtick is refused" grep -q 'exit status 2' "$FAKE/out"
 
+# ── the report job waits for every other job of ci.yml ──
+# A job left out of its needs can still be running when the report reads
+# the run, and its failure is never reported.
+ci="$here/../.github/workflows/ci.yml"
+jobs_of_ci="$(awk '/^jobs:/ { in_jobs = 1; next } in_jobs && /^  [a-z][a-z0-9_-]*:$/ { sub(/^  /, ""); sub(/:$/, ""); if ($0 != "report") print }' "$ci" | LC_ALL=C sort)"
+needs_of_report="$(awk '/^  report:$/ { in_report = 1; next } in_report && /^    needs:/ { sub(/^    needs: *\[/, ""); sub(/\].*/, ""); gsub(/ /, ""); gsub(/,/, "\n"); print; exit }' "$ci" | LC_ALL=C sort)"
+FAKE="$work/needs"
+mkdir -p "$FAKE"
+printf 'jobs:  %s\nneeds: %s\n' "$(echo $jobs_of_ci)" "$(echo $needs_of_report)" >"$FAKE/out"
+: >"$FAKE/calls"
+check "ci.yml: the report job needs every other job" test -n "$jobs_of_ci" -a "$jobs_of_ci" = "$needs_of_report"
+
 if [ "$failed" -gt 0 ]; then
 	echo "$failed case(s) failed"
 	exit 1
