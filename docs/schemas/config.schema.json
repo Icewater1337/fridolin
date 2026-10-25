@@ -221,6 +221,13 @@
         "snapshots_bucket": {"$ref": "#/$defs/bucket", "description": "Default fridolin-snapshots."},
         "endpoint": {"type": "string", "pattern": "^$|^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$", "description": "The S3 endpoint's host name. Default s3.eu-central-003.backblazeb2.com."},
         "b2_daily_budget": {"type": "integer", "minimum": 0, "maximum": 10000000, "description": "Class B and Class C transactions a day each that doctor and the dashboard measure B2 use against, warning at 70%. Default 2000."},
+        "secret_dirs": {
+          "type": ["array", "null"],
+          "maxItems": 16,
+          "description": "Folders of secrets the vault backs up besides sandbox.credentials_dir, to B2 only, encrypted twice; it only reads them (docs/VAULT.md, Secret folders). Absolute or ~-relative.",
+          "items": {"type": "string", "pattern": "^(/|~/)"}
+        },
+        "secret_keep_days": {"type": "integer", "minimum": 0, "maximum": 36500, "description": "Days of the secret folders' versions kept, one a day besides those of the last 24 hours. Default 30."},
         "targets": {
           "type": ["array", "null"],
           "maxItems": 16,

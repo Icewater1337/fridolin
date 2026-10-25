@@ -1041,6 +1041,11 @@ it cannot tell such a copy from a file of yours: delete the copies by
 hand, unless something else of yours uses them. That matters most on
 Linux or with the sandbox off, where brains can read this folder.
 
+With the vault on, this folder is backed up to B2 only, encrypted twice,
+and never goes to Google Drive, a node target or the snapshots
+([VAULT.md](VAULT.md#secret-folders)); `vault.secret_dirs` adds more such
+folders.
+
 This is containment, not a jail — it raises the cost of a prompt injection
 rather than eliminating it. Linux has no `sandbox-exec`: the bridge refuses a
 config with `sandbox.enabled` on there (the Linux default is off), except in
@@ -1590,6 +1595,8 @@ does: `$FRIDOLIN_CORE_STORE`, else `vault.bucket` *(restart)* with
 | `endpoint` | `"s3.eu-central-003.backblazeb2.com"` | the buckets' S3 endpoint: a host name, without `https://` or a path |
 | `b2_daily_budget` | `2000` | Class B and Class C transactions a day each that `fridolin doctor` and the dashboard measure the bridge's B2 use against: they warn at 70%. B2's free tier caps each class at 2,500 a day ([VAULT.md](VAULT.md#b2-transactions)) |
 | `targets` | `[]` | backup targets besides the cloud: restic repositories in folders on nodes, below ([VAULT.md](VAULT.md#node-targets)) |
+| `secret_dirs` | `[]` | folders of secrets the vault backs up besides `sandbox.credentials_dir`, such as `["~/.personal-calendar"]`: absolute or starting with `~/` (hidden folders too), up to 16. They go to B2 only, encrypted twice, never to Google Drive or a node target, and the vault only reads them ([VAULT.md](VAULT.md#secret-folders)) |
+| `secret_keep_days` | `30` | days of the secret folders' versions kept: every version of the last 24 hours, and the newest of each day before |
 
 A bucket name is 6 to 63 lower-case letters, digits and `-`, starting and
 ending with a letter or digit and not with `b2-`. The keys to the buckets

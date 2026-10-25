@@ -579,6 +579,7 @@ config:
 | --- | --- | --- |
 | each brain folder outside the data dir | read-write | the brain's own folder |
 | `sandbox.credentials_dir` | read-write | the calendar tokens: the bridge saves a refreshed token or a new Google sign-in there, as natively. Brains never see the folder |
+| each of `vault.secret_dirs` | read-only | folders of secrets the vault backs up to B2 ([VAULT.md](VAULT.md#secret-folders)); it never writes there |
 | `sandbox.allow_paths`, `startup_checks.required_files` | read-only | |
 | `~/.plaud` with `plaud.brain_access` | read-write | the Plaud CLI's login, which it refreshes there |
 | `plaud.phone_dir` | read-write | |

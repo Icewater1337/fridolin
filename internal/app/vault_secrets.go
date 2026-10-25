@@ -196,32 +196,45 @@ func b2RawStore(rclone string, base []string, c vaultCreds, bucket string, usage
 // what is not copied over yet from the single-layer folder until that is
 // retired (docs/VAULT.md, "Encryption"). The vault closes it when it
 // stops.
-func b2ColdStore(rclone string, base []string, c vaultCreds, bucket string, usage *cloud.Usage, st encryptionState) (cloud.ObjectStore, func() error, error) {
+func b2ColdStore(rclone string, base []string, c vaultCreds, bucket string, usage *cloud.Usage, st encryptionState) (cloud.ObjectStore, *cloud.Sealed, func() error, error) {
 	env, remote, err := cloud.VaultRemote{Name: vaultRemoteName, KeyID: c.VaultKeyID, Key: c.VaultKey, Bucket: bucket, Path: vaultColdPath,
 		Password: c.CryptPassword, Password2: c.CryptSalt}.Env()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	var sealedRemote string
+	var sealedRemote, secretsRemote string
 	if c.VaultSealKey != "" {
 		sealedRemote = vaultRemoteName + "sealedcrypt"
 		more, err := cloud.CryptEnv(sealedRemote, vaultRemoteName+":"+bucket+"/"+vaultSealedPath, c.CryptPassword, c.CryptSalt)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
+		}
+		env = append(env, more...)
+		// The secret folders' versions, beside the cold tier with its
+		// layers, on the same daemon.
+		secretsRemote = vaultRemoteName + "secretscrypt"
+		more, err = cloud.CryptEnv(secretsRemote, vaultRemoteName+":"+bucket+"/"+secretFoldersPath, c.CryptPassword, c.CryptSalt)
+		if err != nil {
+			return nil, nil, nil, err
 		}
 		env = append(env, more...)
 	}
 	d := &cloud.RcloneDaemon{Binary: rclone, Env: append(append([]string{}, base...), env...), Secrets: c.secrets(), Usage: usage, Op: "vault", FastList: true}
 	old := d.Store(remote)
 	if sealedRemote == "" {
-		return old, d.Close, nil
+		return old, nil, d.Close, nil
 	}
 	sealed, err := cloud.NewSealed(d.Store(sealedRemote+":"), c.VaultSealKey)
 	if err != nil {
 		_ = d.Close()
-		return nil, nil, fmt.Errorf("%s: %w", hostsecrets.VaultSealKey, err)
+		return nil, nil, nil, fmt.Errorf("%s: %w", hostsecrets.VaultSealKey, err)
 	}
-	return layeredCold(sealed, old, st), d.Close, nil
+	secrets, err := cloud.NewSealed(d.Store(secretsRemote+":"), c.VaultSealKey)
+	if err != nil {
+		_ = d.Close()
+		return nil, nil, nil, fmt.Errorf("%s: %w", hostsecrets.VaultSealKey, err)
+	}
+	return layeredCold(sealed, old, st), secrets, d.Close, nil
 }
 
 // layeredCold is the two-layer cold tier, with the old one behind it

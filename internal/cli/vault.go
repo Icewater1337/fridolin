@@ -40,6 +40,17 @@ Usage:
                                       take a snapshot now (to node target NAME)
   fridolin vault check [--target NAME]
                                       check the snapshots' repository (of node target NAME)
+  fridolin vault backup-secrets      back up the secret folders (sandbox.credentials_dir,
+                                      vault.secret_dirs) to B2 now
+  fridolin vault restore-secrets [--to DIR] [--at DATE] [--force] [--list]
+                                      restore the newest version of the secret folders
+                                      (at or before DATE: 2026-10-20, 2026-10-20T14:30
+                                      or RFC 3339) into DIR, a new or empty folder
+                                      in the home folder or the data dir (default core/restored-secrets-<time> in the data
+                                      dir); --force restores over the live folders
+                                      instead, after copying them to
+                                      core/replaced-secrets-<time>/; --list lists the
+                                      versions (docs/VAULT.md, "Secret folders")
   fridolin vault migrate-encryption --dry-run | --run [--delete-old]
                                       move what has one layer of encryption to the
                                       stores with two (docs/VAULT.md, "Encryption"):
@@ -50,9 +61,12 @@ Node targets (vault.targets, docs/VAULT.md "Node targets") are restic
 repositories in folders on nodes; status lists them, and the Vault page adds
 them.
 
-Each asks the running bridge; sync, evict, rebuild, restore-drill, snapshot
-and check start a job and return, and status shows how it went. status reads
-what the bridge last wrote when none runs.
+Each asks the running bridge; sync, evict, rebuild, restore-drill, snapshot,
+check and backup-secrets start a job and return, and status shows how it
+went; restore-secrets waits for its restore. status reads what the bridge
+last wrote when none runs. In the core, run them in its container (docker
+exec fridolin-core fridolin vault ...): restore-secrets' folders are the
+container's.
 
 Flags:
   --config PATH     config file (default: $FRIDOLIN_CONFIG, else
@@ -62,7 +76,7 @@ Flags:
 // vaultJobs are the subcommands that start a job, by their route.
 var vaultJobs = map[string]string{
 	"sync": "/api/vault/sync", "evict": "/api/vault/evict", "rebuild": "/api/vault/rebuild", "restore-drill": "/api/vault/restore-drill",
-	"snapshot": "/api/vault/snapshot", "check": "/api/vault/check",
+	"snapshot": "/api/vault/snapshot", "check": "/api/vault/check", "backup-secrets": "/api/vault/secret-folders/backup",
 }
 
 func vaultCmd(args []string, stdout, stderr io.Writer) int {
@@ -84,6 +98,10 @@ func vaultCmd(args []string, stdout, stderr io.Writer) int {
 	dryRun := fs.Bool("dry-run", false, "migrate-encryption: say what would be copied, change nothing")
 	runIt := fs.Bool("run", false, "migrate-encryption: copy and verify")
 	deleteOld := fs.Bool("delete-old", false, "migrate-encryption --run: delete the single-layer copies once verified")
+	to := fs.String("to", "", "restore-secrets: a new or empty folder to restore into (default core/restored-secrets-<time> in the data dir)")
+	at := fs.String("at", "", "restore-secrets: the newest version at or before this date or time (default the newest)")
+	force := fs.Bool("force", false, "restore-secrets: restore over the live folders, after copying them aside")
+	list := fs.Bool("list", false, "restore-secrets: list the versions, restore nothing")
 	switch err := fs.Parse(args); {
 	case errors.Is(err, flag.ErrHelp):
 		return 0
@@ -148,6 +166,9 @@ func vaultCmd(args []string, stdout, stderr io.Writer) int {
 		}
 		fmt.Fprintf(stdout, "forget %s started; fridolin vault status shows how it went\n", fs.Arg(0))
 		return 0
+	}
+	if sub == "restore-secrets" {
+		return vaultRestoreSecrets(cfg, fs.Args(), *to, *at, *force, *list, stdout, stderr)
 	}
 	if sub == "migrate-encryption" {
 		return vaultMigrate(cfg, fs.Args(), *dryRun, *runIt, *deleteOld, stdout, stderr)

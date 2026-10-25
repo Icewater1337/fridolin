@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -85,6 +86,15 @@ type VaultConfig struct {
 	// or not the vault itself is on; each brain's brain.json says which of
 	// them get its folder.
 	Targets []VaultTarget `json:"targets,omitempty"`
+	// SecretDirs are folders of secrets the vault backs up besides
+	// sandbox.credentials_dir (docs/VAULT.md, "Secret folders"): to B2
+	// only, through both layers, never to Drive or a node target. The
+	// vault only reads them. Absolute or ~-relative, as credentials_dir.
+	SecretDirs []string `json:"secret_dirs,omitempty"`
+	// SecretKeepDays is how many days of the secret folders' versions
+	// the vault keeps, one a day besides those of the last 24 hours
+	// (default 30).
+	SecretKeepDays int `json:"secret_keep_days,omitempty"`
 }
 
 // VaultTarget is one backup target besides the cloud.
@@ -258,6 +268,31 @@ func checkTargets(ts []VaultTarget) error {
 	return nil
 }
 
+// maxSecretDirs bounds vault.secret_dirs.
+const maxSecretDirs = 16
+
+// checkSecretDirs checks vault.secret_dirs once ~ is expanded: each an
+// absolute path, a folder of its own (not the root), none twice.
+func checkSecretDirs(dirs []string) error {
+	if len(dirs) > maxSecretDirs {
+		return fmt.Errorf("vault.secret_dirs: at most %d", maxSecretDirs)
+	}
+	seen := map[string]bool{}
+	for _, d := range dirs {
+		clean := filepath.Clean(d)
+		switch {
+		case d == "" || strings.ContainsRune(d, 0) || !filepath.IsAbs(d):
+			return fmt.Errorf("vault.secret_dirs: %q must be an absolute path or start with ~/", d)
+		case clean == string(filepath.Separator):
+			return fmt.Errorf("vault.secret_dirs: %q is the root folder, not a folder of secrets", d)
+		case seen[clean]:
+			return fmt.Errorf("vault.secret_dirs: %q is listed twice", d)
+		}
+		seen[clean] = true
+	}
+	return nil
+}
+
 // NodesConfig is the port nodes connect to.
 type NodesConfig struct {
 	// Enabled accepts node connections.
@@ -298,6 +333,7 @@ const (
 	DefaultSnapshotsBucket        = "fridolin-snapshots"
 	DefaultVaultEndpoint          = "s3.eu-central-003.backblazeb2.com"
 	DefaultB2DailyBudget          = 2000
+	DefaultSecretKeepDays         = 30
 	DefaultNodesListen            = ":8766"
 	DefaultMaxRunsPerHour         = 20
 	DefaultMaxPendingIrreversible = 3
@@ -328,6 +364,7 @@ func fillFleetDefaults(c *File) {
 	defStr(&c.Vault.SnapshotsBucket, DefaultSnapshotsBucket)
 	defStr(&c.Vault.Endpoint, DefaultVaultEndpoint)
 	def(&c.Vault.B2DailyBudget, DefaultB2DailyBudget)
+	def(&c.Vault.SecretKeepDays, DefaultSecretKeepDays)
 	defStr(&c.Nodes.Listen, DefaultNodesListen)
 	def(&c.Policy.MaxRunsPerHour, DefaultMaxRunsPerHour)
 	def(&c.Policy.MaxPendingIrreversible, DefaultMaxPendingIrreversible)
@@ -406,6 +443,7 @@ func (c *File) validateFleet() error {
 		{"vault.cold_after_days", c.Vault.ColdAfterDays, maxDays},
 		{"vault.headroom_percent", c.Vault.HeadroomPercent, maxHeadroomPercent},
 		{"vault.b2_daily_budget", c.Vault.B2DailyBudget, maxB2DailyBudget},
+		{"vault.secret_keep_days", c.Vault.SecretKeepDays, maxDays},
 		{"policy.max_runs_per_hour", c.Policy.MaxRunsPerHour, maxRunsPerHour},
 		{"policy.max_pending_irreversible", c.Policy.MaxPendingIrreversible, maxPendingIrreversible},
 		{"policy.approval_timeout_hours", c.Policy.ApprovalTimeoutHours, maxApprovalTimeoutHours},
@@ -430,6 +468,9 @@ func (c *File) validateFleet() error {
 		return fmt.Errorf("vault.endpoint %q must be a host name such as %s, without https:// or a path", c.Vault.Endpoint, DefaultVaultEndpoint)
 	}
 	if err := checkTargets(c.Vault.Targets); err != nil {
+		return err
+	}
+	if err := checkSecretDirs(c.Vault.SecretDirs); err != nil {
 		return err
 	}
 	if !ValidListenAddr(c.Nodes.Listen) {

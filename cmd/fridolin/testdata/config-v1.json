@@ -166,6 +166,8 @@
     "snapshots_bucket": "example-snapshots",
     "endpoint": "s3.example-region.backblazeb2.com",
     "b2_daily_budget": 1500,
+    "secret_dirs": ["~/.personal-calendar"],
+    "secret_keep_days": 45,
     "targets": [
       {
         "name": "nas",

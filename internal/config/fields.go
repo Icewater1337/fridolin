@@ -110,6 +110,8 @@ var fields = []fieldSpec{
 	{Field: Field{Name: "vault.endpoint"}},
 	{Field: Field{Name: "vault.b2_daily_budget"}},
 	{Field: Field{Name: "vault.targets"}},
+	{Field: Field{Name: "vault.secret_dirs"}},
+	{Field: Field{Name: "vault.secret_keep_days"}},
 	{Field: Field{Name: "policy.max_runs_per_hour"}},
 	{Field: Field{Name: "policy.max_pending_irreversible"}},
 	{Field: Field{Name: "policy.approval_timeout_hours"}},

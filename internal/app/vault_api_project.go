@@ -12,6 +12,10 @@ type vaultAPIService struct{ *vaultService }
 
 func (s vaultAPIService) Status(ctx context.Context) any { return s.vaultService.Status(ctx) }
 
+func (s vaultAPIService) RestoreSecretFolders(ctx context.Context, to, at string, force bool) (any, error) {
+	return s.vaultService.RestoreSecretFolders(ctx, secretRestoreRequest{To: to, At: at, Force: force})
+}
+
 // targetsAPIService adapts the node targets to the HTTP adapter's
 // interface.
 type targetsAPIService struct{ *targetService }

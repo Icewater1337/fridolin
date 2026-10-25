@@ -17,7 +17,7 @@ import { pill, callout, timeAgo, mono, empty, pageHeader, spinner, loading, kv }
 
 /** @import { PageModule } from '../app/page.js' */
 /** @import { Child } from '../lib/dom.js' */
-/** @import { B2Usage, BrainBackup, DeletionHold, DrillRecord, DriveSnapshotsStatus, LitestreamStatus, SnapshotRecord, SnapshotsStatus, TargetRetention, VaultEvictRecord, VaultEviction, VaultFileCounts, VaultReach, VaultStatus, VaultSyncRecord, VaultTarget } from '../../types/api.js' */
+/** @import { B2Usage, BrainBackup, DeletionHold, DrillRecord, DriveSnapshotsStatus, LitestreamStatus, SecretFoldersStatus, SnapshotRecord, SnapshotsStatus, TargetRetention, VaultEvictRecord, VaultEviction, VaultFileCounts, VaultReach, VaultStatus, VaultSyncRecord, VaultTarget } from '../../types/api.js' */
 
 /**
  * What the hot tier's card shows, from the status.
@@ -41,6 +41,7 @@ import { pill, callout, timeAgo, mono, empty, pageHeader, spinner, loading, kv }
  * @property {HTMLDivElement} head
  * @property {HTMLDivElement} hot
  * @property {HTMLDivElement} snapshots
+ * @property {HTMLDivElement} secrets
  * @property {HTMLDivElement} litestream
  * @property {HTMLDivElement} b2
  * @property {HTMLDivElement} drill
@@ -62,6 +63,7 @@ const JOBS = {
   snapshot: 'Snapshot',
   check: 'Snapshot check',
   'restore-drill': 'Restore drill',
+  'secret-folders backup': 'Backup of the secret folders',
 };
 const jobName = (/** @type {string} */ job) => JOBS[job] || job;
 
@@ -146,6 +148,7 @@ export default /** @satisfies {PageModule} */ ({
         head: h('div'),
         hot: h('div'),
         snapshots: h('div'),
+        secrets: h('div'),
         litestream: h('div'),
         b2: h('div'),
         drill: h('div'),
@@ -156,6 +159,7 @@ export default /** @satisfies {PageModule} */ ({
         regions.head,
         h('section.section', h('h2.section-title', 'Hot tier'), regions.hot),
         h('section.section', h('h2.section-title', 'Snapshots'), regions.snapshots),
+        h('section.section', h('h2.section-title', 'Secret folders'), regions.secrets),
         h('section.section', h('h2.section-title', 'Litestream'), regions.litestream),
         h('section.section', h('h2.section-title', 'B2 transactions'), regions.b2),
         h('section.section', h('h2.section-title', 'Restore drill'), regions.drill),
@@ -182,6 +186,7 @@ export default /** @satisfies {PageModule} */ ({
         reachable: s.reachable || null,
       }, renderHot);
       paint(regions.snapshots, { snap: s.snapshots || null, job }, renderSnapshots);
+      paint(regions.secrets, { sf: s.secret_folders || null, job }, renderSecretFolders);
       paint(regions.litestream, s.litestream || null, renderLitestream);
       paint(regions.b2, s.b2 || null, renderB2);
       paint(regions.drill, { drill: s.last_drill || null, job }, renderDrill);
@@ -313,10 +318,11 @@ export default /** @satisfies {PageModule} */ ({
     /**
      * @param {DeletionHold} hold
      * @param {boolean} running
+     * @param {string} [what] what was taken: a snapshot, or a version of the secret folders
      */
-    function renderHold(hold, running) {
+    function renderHold(hold, running, what = 'Snapshot') {
       return callout('warn', 'Pruning is on hold',
-        h('p', 'Snapshot ', mono(hold.snapshot || ''), ` holds ${plural(hold.files || 0, 'file')}, down from ${hold.prev_files || 0} in the one before`,
+        h('p', `${what} `, mono(hold.snapshot || ''), ` holds ${plural(hold.files || 0, 'file')}, down from ${hold.prev_files || 0} in the one before`,
           hold.since ? [' (held ', timeAgo(hold.since), ')'] : null,
           '. Older snapshots are kept until you allow pruning, so nothing deleted by mistake is lost.'),
         h('div.actions', btn('Allow pruning…', {
@@ -335,6 +341,39 @@ export default /** @satisfies {PageModule} */ ({
             await refresh();
           },
         })));
+    }
+
+    // ── Secret folders ──
+    // The credentials folder and vault.secret_dirs, backed up to B2 only:
+    // their names and numbers, never a file.
+    /** @param {{sf: SecretFoldersStatus | null, job: string}} shown */
+    function renderSecretFolders({ sf, job }) {
+      if (!sf) {
+        return h('div.card', h('div.card-body', h('p.muted', 'No secret folder is set: sandbox.credentials_dir or vault.secret_dirs.')));
+      }
+      if (!sf.enabled) {
+        return h('div.card', h('div.card-body', callout('bad', 'Not backed up', sf.error || 'The vault has not looked at them yet.')));
+      }
+      const ok = sf.last_ok;
+      const last = sf.last;
+      const versions = sf.versions || [];
+      const restore = sf.last_restore;
+      return h('div.card',
+        h('div.card-body',
+          last && last.error ? callout('bad', 'The last backup failed', last.error) : null,
+          sf.prune_hold ? renderHold(sf.prune_hold, !!job, 'Version') : null,
+          kv([
+            ['Where', mono(sf.where || '')],
+            ...(sf.folders || []).map(f => /** @type {[string, Child]} */ ([f.label,
+              h('span', mono(f.path), ` · ${f.source} · `, f.error ? h('span.error-text', f.error) : `${plural(f.files || 0, 'file')}, ${fmtBytes(f.bytes || 0)}`)])),
+            ['Last backup', ok && ok.at ? h('span', mono(ok.version || ''), ' ', timeAgo(ok.at), ` · ${plural(ok.files || 0, 'file')}`) : h('span.muted', 'never')],
+            ['Versions', versions.length ? `${versions.length}, ${sf.keep_days} days kept` : h('span.muted', 'none yet')],
+            ['Last restore', restore && restore.at ? h('span', restore.error ? pill('Failed', 'bad') : pill('OK', 'ok'), ' ', timeAgo(restore.at), errorLine(restore.error)) : h('span.muted', 'never')],
+          ]),
+          h('div.actions', btn('Back up now', {
+            small: true, icon: 'backup', disabled: !!job,
+            onClick: () => start('/api/vault/secret-folders/backup', {}, 'Backup of the secret folders'),
+          }))));
     }
 
     // ── Litestream ──

@@ -428,6 +428,7 @@ func New(opts Options) (_ *App, err error) {
 	b.housekeeping = newHousekeeping(b, opts.Container)
 	b.vault.usage = b.b2
 	b.vault.tick, b.vault.backends = b.waits.vaultTick, opts.hooks.vaultBackends
+	b.vault.secretChange = b.waits.secretFoldersChange
 	b.targets = newTargetService(cfgs, b.vault, b.nodes, opts.Container, b.logger)
 	b.github = newGitHubService(cfgs, b.env, opts.Container, b.logger)
 	b.vault.targets = b.targets

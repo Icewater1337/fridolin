@@ -33,7 +33,9 @@ folders also `.git/`, `node_modules/`, `.venv/`, `__pycache__/`,
 `.DS_Store` and the brains' `claude-stream.log`. The nightly snapshot
 covers the rest of the data dir. A brain folder outside the data dir (a
 native install's `~/brains/...`) is not in the vault; the snapshots cover
-it.
+it. The secret folders (`sandbox.credentials_dir`, `vault.secret_dirs`)
+are in neither: they have a backup of their own, to B2 only
+([below](#secret-folders)).
 
 Every file is uploaded within a minute or so of being written (the
 service watches the hot tier, and walks all of it every six hours), so the
@@ -154,6 +156,94 @@ snapshot daily, which keep its calls to B2 within the free caps (below). Its con
 `LITESTREAM_ACCESS_KEY_ID` and `LITESTREAM_SECRET_ACCESS_KEY` in its
 environment only. Litestream switches both databases to WAL mode.
 
+## Secret folders
+
+The credentials folder, `sandbox.credentials_dir` (the Google OAuth
+client, the calendar credentials and tokens, the dashboard users), and
+each folder of `vault.secret_dirs` ([settings](CONFIGURATION.md#vault);
+such as `["~/.personal-calendar"]`, absolute or starting with `~/`,
+hidden folders too) are backed up by the vault on their own:
+
+Without `sandbox.credentials_dir` the calendar tokens are in the data
+dir, which the nightly snapshot keeps as before (and with it the weekly
+copy on Drive); set it to a folder of its own to keep them to B2 only. The data dir, or a folder holding
+it, is never a secret folder: the vault refuses it, and doctor says so.
+
+- **to B2 only**: the vault bucket's `secret-folders-sealed/`, through the
+  cold tier's two layers (rclone crypt outside, seal inside,
+  [Encryption](#encryption)). Never to Google Drive, a node target or the
+  snapshots, which go to Drive and the targets too: a secret folder that
+  lies in the data dir or a brain folder is left out of the snapshots and
+  of the cold tier (which could evict from it). Without the cold tier's
+  inner key (`fridolin.vault.seal.key`) they are not backed up at all,
+  and the status and doctor say so.
+- **read only**: the vault opens each file read-only and never writes,
+  moves or deletes anything in these folders. Only a restore with
+  `--force` writes there (below). In the container,
+  `fridolin core migrate` binds `vault.secret_dirs` read-only.
+- **when**: a version each day, whether or not anything changed, and
+  after a change once the folders were quiet for a minute, at most every
+  ten minutes; a failed one again after ten minutes. The vault looks at
+  names, sizes, modes and times each minute, without opening a file.
+- **what**: one version is a tar of every folder, streamed through both
+  layers (nothing of it is written to disk on the way), named by its UTC
+  time (`20261025T030000Z.tar`): a manifest saying which folder is which,
+  then each folder under its name (`.fridolin-secrets/`,
+  `.personal-calendar/`) with its files' bytes, modes and times. Symbolic
+  links and special files are left out (the status counts them). The
+  folders together may hold 10,000 files and 64 MB.
+- **kept**: every version of the last 24 hours, the newest of each day of
+  the last `vault.secret_keep_days` (default 30), and the newest however
+  old. A version that lost most of the files of the one before (the
+  snapshots' rule, [above](#brain-folders-and-their-backup-settings))
+  holds pruning until *Allow pruning…* on the Vault page
+  (`POST /api/vault/prune/allow`).
+- **cost**: an upload and a size check per version (Class A, one Class
+  B), a listing per version for the pruning (one Class C); the vault's
+  rclone daemon carries them.
+
+The log and the status name the folders and count files and bytes, never
+a file's content. `fridolin vault status` lists each folder with its
+numbers, the last backup, the versions and the last restore;
+`fridolin vault backup-secrets` takes a version now; `fridolin doctor`
+(`vault-secret-folders`) warns while there is no version younger than two
+days, while the last try failed and while pruning is held.
+
+### Restoring the secret folders
+
+```sh
+fridolin vault restore-secrets --list                # the versions
+fridolin vault restore-secrets                       # the newest, into a new folder
+fridolin vault restore-secrets --at 2026-10-20       # the newest of that day or before
+fridolin vault restore-secrets --to ~/restored-secrets   # into a new or empty folder of yours
+fridolin vault restore-secrets --force               # over the live folders
+```
+
+A restore takes the newest version at or before `--at` (a date, which is
+the end of that day, `2026-10-20T14:30` in the bridge's timezone, or RFC
+3339; default the newest) and writes each folder of it, with its files'
+bytes, modes and times, into a new folder: `--to DIR` (new, or empty,
+inside the home folder or the data dir, and neither a live secret folder
+nor a folder holding one) or, by
+default, `core/restored-secrets-<time>/` in the data dir, which no
+snapshot takes. It prints which folder there is which live one; copy what
+you need over by hand.
+
+`--force` restores over the live folders instead: first each is copied
+whole to `core/replaced-secrets-<time>/<name>/` in the data dir (which no
+snapshot takes either), then each file of the version is written over
+the live one through a temp file in its folder; a live file the version
+does not have stays, and the command counts them. Every folder of the
+version must still be a secret folder of the settings. A folder bound
+into the container read-only cannot be restored over: restore it into a
+new folder and copy it on the host.
+
+In the core, run them in its container (`docker exec fridolin-core
+fridolin vault restore-secrets …`; `docker cp` brings a restored folder
+out). Each asks the running bridge, whose vault must run: on a fresh
+machine, put the [recovery sheet](#recovery-sheet)'s keys in place and
+start the core first.
+
 ## B2 transactions
 
 Backblaze B2 bills its API calls by class, and a free account caps two of
@@ -210,6 +300,7 @@ search leaves about 128 bits).
 | Store | Where | Outer layer (key) | Inner layer (key) |
 |---|---|---|---|
 | Cold tier | vault bucket, `vault-sealed/` | rclone crypt, XSalsa20-Poly1305, names too (`fridolin.vault.crypt.password`, `.password2`) | seal, XChaCha20-Poly1305 per file (`fridolin.vault.seal.key`) |
+| Secret folders | vault bucket, `secret-folders-sealed/` | rclone crypt, names too (`fridolin.vault.crypt.password`, `.password2`) | seal (`fridolin.vault.seal.key`) |
 | Snapshots (restic) | snapshots bucket, `restic-crypt/` | rclone crypt (`fridolin.snapshots.crypt.password`) | restic, AES-256-CTR + Poly1305 (`fridolin.restic.password`) |
 | Weekly copy on Drive | Drive, `fridolin-restic-crypt/` | rclone crypt (`fridolin.snapshots.crypt.password`) | restic (`fridolin.restic.password`) |
 | Node targets | the target's folder on the node | rclone crypt's format, written by the core, names in the clear (`fridolin.snapshots.crypt.password`) | restic (`fridolin.restic.node.<name>`) |
@@ -294,8 +385,8 @@ restores everything (`fridolin core secrets set NAME` stores each one):
 |---|---|
 | `fridolin.age.identity.pq` (AGE-SECRET-KEY-PQ-1…) | **new**: the exports' outer layer |
 | `fridolin.export.key` | **new**: the exports' inner layer |
-| `fridolin.vault.crypt.password`, `fridolin.vault.crypt.password2` | the cold tier's outer layer |
-| `fridolin.vault.seal.key` | **new**: the cold tier's inner layer |
+| `fridolin.vault.crypt.password`, `fridolin.vault.crypt.password2` | the cold tier's and the secret folders' outer layer |
+| `fridolin.vault.seal.key` | **new**: the cold tier's and the secret folders' inner layer |
 | `fridolin.restic.password` | the snapshots' inner layer |
 | `fridolin.snapshots.crypt.password` | **new**: the outer layer of the snapshots, the Drive copy, the node targets and Litestream |
 | `fridolin.litestream.seal.key` | **new**: Litestream's inner layer |
@@ -305,6 +396,12 @@ restores everything (`fridolin core secrets set NAME` stores each one):
 
 Read one back on macOS with `security find-generic-password -a fridolin
 -s NAME -w`.
+
+The secret folders (the Google OAuth client, the calendar tokens, the
+dashboard users, `vault.secret_dirs`) are not on the sheet: they are in
+the vault bucket, and with the vault's B2 key and the three keys of its
+two layers a fresh core gets them back with `fridolin vault
+restore-secrets` ([Restoring the secret folders](#restoring-the-secret-folders)).
 
 ## Keys and passwords
 
@@ -339,6 +436,8 @@ fridolin vault get media/main/recording.m4a   # bring one back, print where
 fridolin vault rebuild           # rebuild vault.db from the cold tier, bring back the pinned files
 fridolin vault forget brains-folders/Personal   # forget a folder the vault no longer keeps
 fridolin vault restore-drill     # restore the latest snapshot into an empty folder and check it
+fridolin vault backup-secrets    # back up the secret folders now
+fridolin vault restore-secrets [--to DIR] [--at DATE] [--force] [--list]   # restore them
 fridolin vault restore-drill --target nas   # the same for a node target
 fridolin vault snapshot [--target nas] [--hourly]
 fridolin vault check [--target nas]
@@ -353,8 +452,9 @@ tier answered within 45 minutes (the vault's own uploads and downloads
 show it; it probes only after 30 quiet minutes), that no file has waited
 more than an hour for its upload, that a snapshot is less than 26 hours
 old, that Litestream runs, that no brain folder is left out for a
-brain.json it cannot read, and that the day's B2 transactions stay within
-the budget.
+brain.json it cannot read, that the day's B2 transactions stay within
+the budget, and that the secret folders have a version younger than two
+days.
 
 ### Forgetting a folder
 

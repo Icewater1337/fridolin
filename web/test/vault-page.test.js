@@ -55,7 +55,7 @@ const button = (root, label) => root.querySelectorAll('button').find((b) => b.te
 test('a running vault shows every section', async (t) => {
   const { root } = await open(t, (path) => (path.startsWith('/api/vault/status') ? running() : {}));
   const titles = root.querySelectorAll('h2.section-title').map((e) => e.textContent);
-  assert.deepEqual(titles, ['Hot tier', 'Snapshots', 'Litestream', 'B2 transactions', 'Restore drill', 'Evictions', 'Backup targets']);
+  assert.deepEqual(titles, ['Hot tier', 'Snapshots', 'Secret folders', 'Litestream', 'B2 transactions', 'Restore drill', 'Evictions', 'Backup targets']);
   const text = root.textContent;
   assert.ok(text.includes('Running'), 'the state pill');
   assert.ok(text.includes('/data'), 'the hot tier folder');
@@ -72,6 +72,34 @@ test('a running vault shows every section', async (t) => {
   const rows = root.querySelectorAll('.vault-table tbody tr');
   assert.equal(rows.length, 2);
   assert.ok(rows[0].textContent.includes('media/main/rec.m4a') && rows[0].textContent.includes('transcribed-media'), 'newest first');
+});
+
+test('the secret folders show their numbers, never a file, and back up on request', async (t) => {
+  const withSecrets = () => ({
+    ...running(),
+    secret_folders: {
+      enabled: true, where: 'vault bucket, secret-folders-sealed/', keep_days: 30,
+      folders: [{ path: '/home/you/.fridolin-secrets', source: 'sandbox.credentials_dir', label: '.fridolin-secrets', files: 3, bytes: 2048 }],
+      last: { at: '2026-10-20T03:00:00Z', version: '20261020T030000Z.tar', reason: 'daily', files: 3, bytes: 2048 },
+      last_ok: { at: '2026-10-20T03:00:00Z', version: '20261020T030000Z.tar', reason: 'daily', files: 3, bytes: 2048 },
+      versions: [{ version: '20261020T030000Z.tar', at: '2026-10-20T03:00:00Z', bytes: 4096 }],
+      prune_hold: { since: '2026-10-20T03:00:00Z', snapshot: '20261020T030000Z.tar', kind: 'secret-folders', prev_files: 30, files: 3 },
+    },
+  });
+  const { root, calls } = await open(t, (path) => (path.startsWith('/api/vault/status') ? withSecrets() : { status: 202, body: { status: 'started' } }));
+  const text = root.textContent;
+  assert.ok(text.includes('/home/you/.fridolin-secrets') && text.includes('sandbox.credentials_dir') && text.includes('3 files'), text);
+  assert.ok(text.includes('20261020T030000Z.tar') && text.includes('1, 30 days kept'), 'the last backup and the versions');
+  assert.ok(text.includes('Version 20261020T030000Z.tar holds 3 files, down from 30'), 'the hold');
+  button(root, 'Back up now').click();
+  await settle();
+  assert.ok(calls.some((c) => c.method === 'POST' && c.path === '/api/vault/secret-folders/backup'), 'the backup');
+});
+
+test('a vault without secret folders says how to set them, and one without their key says it is not backed up', async (t) => {
+  const { root } = await open(t, (path) => (path.startsWith('/api/vault/status')
+    ? { ...running(), secret_folders: { enabled: false, error: 'the cold tier\'s inner layer has no key', keep_days: 30, folders: [] } } : {}));
+  assert.ok(root.textContent.includes('Not backed up') && root.textContent.includes('inner layer has no key'), root.textContent);
 });
 
 test('a vault that made no B2 transactions today says so', async (t) => {
