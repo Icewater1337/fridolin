@@ -1221,6 +1221,20 @@ for compatibility.
   Compose", and `docker compose down -v` left it, with the node's key,
   behind. A box that has one keeps it; `docker volume rm fridolin-node`
   after `down -v` removes it.
+- A node in a box joins from Windows. `box.ps1` kept the core's
+  settings in `$core`, which in PowerShell is `-Core` too: the join got
+  `core.yaml` instead of the core's address and stopped with "fridolin
+  node join takes the join code", and `core.yaml` came out as one
+  comment line. The core's settings then repeated `box.yaml`'s
+  `no-new-privileges:true`, which compose refuses once it merges the two
+  ("security_opt items at 0 and 3 are equal"), so every compose command
+  of the box stopped; the repeat is now spelled `no-new-privileges`, and
+  a box gets it with its next update. Under Windows PowerShell 5.1, a
+  line on a program's stderr ended `box.ps1`, the first time while it
+  waited for FrIDE. And `box.sh` and `box.ps1` check the images'
+  provenance against the repository as GitHub spells it, not as the
+  registry's lowercase name: an owner with a capital letter got "no
+  valid build provenance".
 - `fridolin nodes join-code` prints the line for a node in a box first,
   as `!join` does, when the core knows where its box script is
   published.
