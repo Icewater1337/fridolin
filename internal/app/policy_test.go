@@ -111,11 +111,11 @@ func (h *harness) waitPoll(jid, substr string) sent {
 	return got
 }
 
-// vote votes in poll as voter, through the dev chat, as a vote from
+// vote ticks options in poll as voter, through the dev chat, as a vote from
 // WhatsApp arrives.
-func (h *harness) vote(poll, voter, option string) {
+func (h *harness) vote(poll, voter string, options ...string) {
 	h.t.Helper()
-	if w := h.Do("POST", "/api/dev/vote", map[string]any{"poll": poll, "voter": voter, "options": []string{option}}); w.Code != http.StatusAccepted {
+	if w := h.Do("POST", "/api/dev/vote", map[string]any{"poll": poll, "voter": voter, "options": options}); w.Code != http.StatusAccepted {
 		h.t.Fatalf("vote: %d %s", w.Code, w.Body.String())
 	}
 }

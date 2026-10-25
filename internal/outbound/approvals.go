@@ -44,6 +44,10 @@ func ApprovalExpiredWhy(since, now time.Time) string {
 	return "It has waited since " + when(since, now) + ", longer than approvals are good for."
 }
 
+// ApprovalUnseenWhy is why a vote that ticked something the owner was
+// never told of asks again.
+const ApprovalUnseenWhy = "You had not been told of it before."
+
 // when says when t was, for an approval: "Fri 23 Oct 14:03 (5 minutes
 // ago)".
 func when(t, now time.Time) string {

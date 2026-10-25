@@ -395,15 +395,24 @@ approvalsWaitingAlert
 	2. *Main* has a new skill, *taxes* — Tue 20 Oct 10:30 (an hour ago)
 	   ⚠️ Unexpected: it was written into the brain's folder, not made in the dashboard.
 
-	Reply !approve to pick one to approve, or !deny to pick one to turn down.
+	Reply !approve to tick the ones to approve, or !deny to tick the ones to turn down.
 approvalPickQuestion(approve)
-	🔐 3 things wait for you. Which one do you approve?
+	🔐 3 things wait for you. Tick the ones you approve.
 approvalPickQuestion(deny)
-	🚫 3 things wait for you. Which one do you turn down?
+	🚫 3 things wait for you. Tick the ones you turn down.
 approvalPickNotice(approve)
-	🗳️ Tap the one to approve in the poll above. Your vote approves it; nobody else's counts.
+	🗳️ Tick every one you approve in the poll above; each tick approves it. Nobody else's vote counts.
+
+	Their refs, for `!approve <ref>`:
+	• laptop (Linux) joins as a node: `n1a2b3`
+	• Main: new skill taxes: `main/skills/taxes/SKILL.md`
 approvalPickNotice(deny)
-	🗳️ Tap the one to turn down in the poll above. Your vote turns it down; nobody else's counts.
+	🗳️ Tick every one you turn down in the poll above; each tick turns it down. Nobody else's vote counts.
+
+	Their refs, for `!deny <ref>`:
+	• laptop (Linux) joins as a node: `n1a2b3`
+
+	2 more wait than a poll has room for: send !deny again for them.
 nothingPendingReply
 	✅ Nothing waits for your approval.
 approvalConfirmReply(unexpected)
@@ -418,12 +427,23 @@ approvalConfirmReply(expired)
 	It has waited since Sun 18 Oct 10:00 (2 days ago), longer than approvals are good for.
 
 	To be sure: reply !approve again within 2 minutes to approve it, or !deny to turn it down.
+approvalsConfirmReply
+	⚠️ To be sure, 2 of them wait for a second word:
+
+	1. *laptop* (Windows) wants to join as a node.
+	   This is unexpected: its join code came neither from your !join nor from the dashboard.
+	2. *Main* has a new skill, *taxes*.
+	   You had not been told of it before.
+
+	Reply !approve again within 2 minutes to approve them all, or !deny to turn them all down.
 approvedReply
 	✅ Approved: the skill *taxes* of Main. It applies as its file says from now on.
 deniedReply
 	🚫 Turned down: the skill *taxes* of Main. What you approved before stays (or, for a new one, it only reads); it waits on the brain's Skills page.
 approvalPollStale
 	⌛ That poll is out of date. Send !approve (or !deny) again for what waits now.
+approvalPollGone
+	⌛ No longer waiting, so nothing done: mini (Linux) joins as a node; Main: new skill taxes.
 approvalFailedReply
 	❌ That did not work for the new brain.json of *Main*: the brain.json on disk changed again
 fleetWaitingNote(1)

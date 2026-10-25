@@ -571,8 +571,8 @@ func ScheduleCommandResult(agent, node string, exitCode int, output string) stri
 	return head
 }
 
-// The owner's approvals (approvals.go): the alert, the poll that picks
-// one, and the replies to !approve and !deny.
+// The owner's approvals (approvals.go): the alert, the multi-select poll
+// that picks, and the replies to !approve and !deny.
 
 // ApprovalAlert tells the owner that a waits for their approval.
 func ApprovalAlert(a OwnerApproval, now time.Time) string {
@@ -617,25 +617,40 @@ func ApprovalsWaitingAlert(list []OwnerApproval, now time.Time) string {
 			b.WriteString("\n   ⚠️ Unexpected: " + a.Unexpected)
 		}
 	}
-	b.WriteString("\n\nReply !approve to pick one to approve, or !deny to pick one to turn down.")
+	b.WriteString("\n\nReply !approve to tick the ones to approve, or !deny to tick the ones to turn down.")
 	return b.String()
 }
 
-// ApprovalPickQuestion is the question of the poll !approve (approve
-// true) or !deny sends while several things wait.
+// ApprovalPickQuestion is the question of the multi-select poll !approve
+// (approve true) or !deny sends while n things wait.
 func ApprovalPickQuestion(approve bool, n int) string {
 	if approve {
-		return fmt.Sprintf("🔐 %d things wait for you. Which one do you approve?", n)
+		return fmt.Sprintf("🔐 %d things wait for you. Tick the ones you approve.", n)
 	}
-	return fmt.Sprintf("🚫 %d things wait for you. Which one do you turn down?", n)
+	return fmt.Sprintf("🚫 %d things wait for you. Tick the ones you turn down.", n)
 }
 
-// ApprovalPickNotice follows that poll.
-func ApprovalPickNotice(approve bool) string {
+// ApprovalPickNotice follows that poll: how to vote, the refs of its
+// options ("option: `ref`"), and how many more wait than it has room for.
+func ApprovalPickNotice(approve bool, refs []string, more int) string {
+	var b strings.Builder
+	cmd := "!approve"
 	if approve {
-		return "🗳️ Tap the one to approve in the poll above. Your vote approves it; nobody else's counts."
+		b.WriteString("🗳️ Tick every one you approve in the poll above; each tick approves it. Nobody else's vote counts.")
+	} else {
+		cmd = "!deny"
+		b.WriteString("🗳️ Tick every one you turn down in the poll above; each tick turns it down. Nobody else's vote counts.")
 	}
-	return "🗳️ Tap the one to turn down in the poll above. Your vote turns it down; nobody else's counts."
+	if len(refs) > 0 {
+		b.WriteString("\n\nTheir refs, for `" + cmd + " <ref>`:")
+		for _, r := range refs {
+			b.WriteString("\n• " + r)
+		}
+	}
+	if more > 0 {
+		fmt.Fprintf(&b, "\n\n%d more wait than a poll has room for: send %s again for them.", more, cmd)
+	}
+	return b.String()
 }
 
 // NothingPendingReply answers !approve or !deny while nothing waits.
@@ -646,6 +661,18 @@ const NothingPendingReply = "✅ Nothing waits for your approval."
 // only on a second !approve within minutes.
 func ApprovalConfirmReply(a OwnerApproval, why string, minutes int) string {
 	return fmt.Sprintf("⚠️ %s.\n\n%s\n\nTo be sure: reply !approve again within %d minutes to approve it, or !deny to turn it down.", a.Subject, why, minutes)
+}
+
+// ApprovalsConfirmReply answers a vote that ticked several of list, each
+// asking for a second !approve for its reason in whys.
+func ApprovalsConfirmReply(list []OwnerApproval, whys []string, minutes int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "⚠️ To be sure, %d of them wait for a second word:\n", len(list))
+	for i, a := range list {
+		fmt.Fprintf(&b, "\n%d. %s.\n   %s", i+1, a.Subject, whys[i])
+	}
+	fmt.Fprintf(&b, "\n\nReply !approve again within %d minutes to approve them all, or !deny to turn them all down.", minutes)
+	return b.String()
 }
 
 // ApprovedReply answers an approval of what label names, and what it
@@ -671,6 +698,12 @@ func DeniedReply(label, done string) string {
 // ApprovalPollStale answers a vote in a poll whose list changed since,
 // or that the bridge no longer knows (it restarted).
 const ApprovalPollStale = "⌛ That poll is out of date. Send !approve (or !deny) again for what waits now."
+
+// ApprovalPollGone answers the ticks of a vote whose options no longer
+// wait: approved or turned down elsewhere since.
+func ApprovalPollGone(options []string) string {
+	return "⌛ No longer waiting, so nothing done: " + strings.Join(options, "; ") + "."
+}
 
 // ApprovalFailedReply answers an approval or denial of what label names
 // that did not go through: why.

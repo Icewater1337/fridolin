@@ -176,56 +176,114 @@ func TestApproveExpired(t *testing.T) {
 	}
 }
 
-// TestApproveSeveral: with several waiting, !approve sends a poll with
-// one plain option each; only the owner's vote counts, and it approves
-// that one. A second vote in the same poll is out of date. `!approve
-// <ref>` still names one.
+// TestApproveSeveral: with several waiting, !approve sends a
+// multi-select poll with one plain option each, and the refs under it;
+// only the owner's vote counts. One vote that ticks two approves both, in
+// one message; a later vote that drops one revokes nothing, and one that
+// ticks the third approves only that. `!approve <ref>` still names one.
 func TestApproveSeveral(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, `{"nodes": {"enabled": true}}`)
 	addr := h.StartNodes()
-	laptop := h.joinNode(addr, "laptop", nodes.JoinedFromChat, nodeproto.Capabilities{Host: true})
-	h.WaitSent(harnessDM, "*laptop*")
-	mini := h.joinNode(addr, "mini", nodes.JoinedFromChat, nodeproto.Capabilities{Host: true})
-	h.WaitSent(harnessDM, "*mini*")
-	pi := h.joinNode(addr, "pi", nodes.JoinedFromChat, nodeproto.Capabilities{Host: true})
-	h.WaitSent(harnessDM, "*pi*")
+	ids := map[string]string{}
+	for _, name := range []string{"laptop", "mini", "pi", "nas"} {
+		ids[name] = h.joinNode(addr, name, nodes.JoinedFromChat, nodeproto.Capabilities{Host: true})
+		h.WaitSent(harnessDM, "*"+name+"*")
+	}
 
-	if got := h.Answer(inbound{JID: harnessDM, Text: "!approve"}); got != outboundmsg.ApprovalPickNotice(true) {
-		t.Fatalf("!approve with three waiting: %q", got)
+	notice := h.Answer(inbound{JID: harnessDM, Text: "!approve"})
+	if !strings.HasPrefix(notice, "🗳️ Tick every one you approve in the poll above; each tick approves it. Nobody else's vote counts.") {
+		t.Fatalf("!approve with four waiting: %q", notice)
 	}
-	poll := h.waitPoll(harnessDM, "Which one do you approve?")
-	if len(poll.Poll) != 3 || poll.Poll[0] != "laptop (Linux) joins as a node" && !strings.HasSuffix(poll.Poll[0], "joins as a node") {
-		t.Fatalf("the poll: %+v", poll)
-	}
-	option := ""
-	for _, o := range poll.Poll {
-		if strings.HasPrefix(o, "mini ") {
-			option = o
+	for name, id := range ids {
+		if !strings.Contains(notice, "• "+name+" (Linux) joins as a node: `"+id+"`") {
+			t.Errorf("the notice lacks the ref of %s:\n%s", name, notice)
 		}
 	}
-	n := len(h.SentTo(harnessDM))
-	h.vote(poll.ID, strangerNumber, option)
-	h.vote(poll.ID, "15551234567", option)
-	got := h.WaitSent(harnessDM, "is approved")
-	if !strings.HasPrefix(got, "✅ *mini* is approved") || len(h.SentTo(harnessDM)) != n+1 {
-		t.Fatalf("the vote: %q (%q)", got, h.SentTo(harnessDM)[n:])
+	poll := h.waitPoll(harnessDM, "4 things wait for you. Tick the ones you approve.")
+	option := map[string]string{}
+	for _, o := range poll.Poll {
+		name, _, _ := strings.Cut(o, " ")
+		option[name] = o
 	}
-	if h.device(mini) != nodeproto.DeviceApproved || h.device(laptop) != nodeproto.DevicePending || h.device(pi) != nodeproto.DevicePending {
-		t.Errorf("after the vote: %+v", h.nodeViews())
-	}
-	h.vote(poll.ID, "15551234567", poll.Poll[0])
-	h.WaitSent(harnessDM, outboundmsg.ApprovalPollStale)
-	if l := h.auditOf("owner_approval"); len(l) < 3 || l[1]["outcome"] != "ignored: not the owner" {
-		t.Errorf("audit of the votes: %v", l)
+	if len(poll.Poll) != 4 || option["mini"] != "mini (Linux) joins as a node" {
+		t.Fatalf("the poll: %+v", poll)
 	}
 
-	if got := h.Answer(inbound{JID: harnessDM, Text: "!approve " + pi}); !strings.HasPrefix(got, "✅ *pi* is approved") {
+	n := len(h.SentTo(harnessDM))
+	h.vote(poll.ID, strangerNumber, option["mini"], option["pi"])
+	h.vote(poll.ID, "15551234567", option["mini"], option["pi"])
+	got := h.WaitSent(harnessDM, "is approved")
+	if !strings.Contains(got, "✅ *mini* is approved") || !strings.Contains(got, "✅ *pi* is approved") || len(h.SentTo(harnessDM)) != n+1 {
+		t.Fatalf("the vote for two: %q (%q)", got, h.SentTo(harnessDM)[n:])
+	}
+	approved := func() (out []string) {
+		for _, name := range []string{"laptop", "mini", "pi", "nas"} {
+			if h.device(ids[name]) == nodeproto.DeviceApproved {
+				out = append(out, name)
+			}
+		}
+		return out
+	}
+	if a := approved(); strings.Join(a, " ") != "mini pi" {
+		t.Errorf("approved after the vote for two: %v", a)
+	}
+
+	// Dropping pi revokes nothing, and says nothing.
+	h.vote(poll.ID, "15551234567", option["mini"])
+	// Ticking laptop as well approves laptop alone.
+	h.vote(poll.ID, "15551234567", option["mini"], option["laptop"])
+	got = h.WaitSent(harnessDM, "*laptop* is approved")
+	if strings.Contains(got, "*mini*") || len(h.SentTo(harnessDM)) != n+2 {
+		t.Fatalf("the later votes: %q", h.SentTo(harnessDM)[n:])
+	}
+	if a := approved(); strings.Join(a, " ") != "laptop mini pi" {
+		t.Errorf("approved after the later votes: %v", a)
+	}
+	var outcomes []string
+	for _, l := range h.auditOf("owner_approval") {
+		outcomes = append(outcomes, l["outcome"].(string))
+	}
+	if strings.Join(outcomes, "|") != "poll sent: 4 options|ignored: not the owner|picked 2|ignored: nothing newly ticked|picked 1" {
+		t.Errorf("audit of the votes: %q", outcomes)
+	}
+
+	if got := h.Answer(inbound{JID: harnessDM, Text: "!approve " + ids["nas"]}); !strings.HasPrefix(got, "✅ *nas* is approved") {
 		t.Errorf("!approve <ref>: %q", got)
 	}
-	// One left: !deny alone takes it.
-	if got := h.Answer(inbound{JID: harnessDM, Text: "!revoke"}); got != outboundmsg.NodeRevokedReply("laptop", laptop) {
-		t.Errorf("!revoke alone: %q", got)
+	// Ticking nas now: it no longer waits.
+	h.vote(poll.ID, "15551234567", option["mini"], option["laptop"], option["nas"])
+	h.WaitSent(harnessDM, outboundmsg.ApprovalPollStale)
+}
+
+// TestApproveSeveralUnexpected: a vote that ticks several unexpected
+// ones asks once for all of them; the second !approve approves them all.
+func TestApproveSeveralUnexpected(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, `{"nodes": {"enabled": true}}`)
+	addr := h.StartNodes()
+	a := h.joinNode(addr, "a", "", nodeproto.Capabilities{Host: true})
+	h.WaitSent(harnessDM, "*a*")
+	b := h.joinNode(addr, "b", "", nodeproto.Capabilities{Host: true})
+	h.WaitSent(harnessDM, "*b*")
+	h.Answer(inbound{JID: harnessDM, Text: "!approve"})
+	poll := h.waitPoll(harnessDM, "Tick the ones you approve.")
+	h.vote(poll.ID, "15551234567", poll.Poll...)
+	ask := h.WaitSent(harnessDM, "wait for a second word")
+	for _, want := range []string{"⚠️ To be sure, 2 of them wait for a second word:", ". *a* (Linux) wants to join as a node.\n   This is unexpected", ". *b* (Linux) wants to join", "within 2 minutes to approve them all"} {
+		if !strings.Contains(ask, want) {
+			t.Errorf("the ask lacks %q:\n%s", want, ask)
+		}
+	}
+	if h.device(a) != nodeproto.DevicePending || h.device(b) != nodeproto.DevicePending {
+		t.Fatalf("approved on the vote alone: %+v", h.nodeViews())
+	}
+	got := h.Answer(inbound{JID: harnessDM, Text: "!approve"})
+	if !strings.Contains(got, "✅ *a* is approved") || !strings.Contains(got, "✅ *b* is approved") {
+		t.Fatalf("the second !approve: %q", got)
+	}
+	if h.device(a) != nodeproto.DeviceApproved || h.device(b) != nodeproto.DeviceApproved {
+		t.Errorf("after the second !approve: %+v", h.nodeViews())
 	}
 }
 
