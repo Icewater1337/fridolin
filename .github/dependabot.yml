@@ -15,6 +15,13 @@ updates:
       go-modules:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # tailscale.com v1.104 needs Go 1.27.1 (its go directive), but go.mod
+      # stays at oldstable, Go 1.26, which CI tests and the core image
+      # builds with (ci.yml, container/Dockerfile). Drop this once Go 1.28
+      # is out and oldstable, and the directive, move to 1.27.
+      - dependency-name: tailscale.com
+        versions: [">= 1.104.0"]
 
   # The actions the workflows pin by commit SHA.
   - package-ecosystem: github-actions
