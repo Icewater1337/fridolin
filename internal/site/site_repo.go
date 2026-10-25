@@ -632,7 +632,7 @@ func (m *SiteManager) prepareCheckout(ctx context.Context, job *SiteJob, commit,
 	root := filepath.Join(dir, filepath.FromSlash(m.Settings().Repo.Subdir))
 	// A data dir moved to another machine (docs/CORE.md) comes without
 	// node_modules, so a build whose dependencies are gone is done again.
-	if fsx.Exists(ready) && (!fsx.Exists(filepath.Join(root, "package.json")) || fsx.Exists(filepath.Join(root, "node_modules"))) {
+	if fsx.Exists(ready) && len(missingDeps(packageDirs(dir, root))) == 0 {
 		job.step("Reusing the build of %s", commit[:12])
 		return nil
 	}
@@ -649,10 +649,10 @@ func (m *SiteManager) prepareCheckout(ctx context.Context, job *SiteJob, commit,
 	if _, err := m.git(ctx, m.repoDir(), "worktree", "add", "--force", "--detach", dir, commit); err != nil {
 		return err
 	}
-	if fsx.Exists(filepath.Join(root, "package.json")) {
-		job.step("Installing dependencies (npm)")
-		if err := m.npmInstall(ctx, root, false); err != nil {
-			return err
+	for _, pkg := range packageDirs(dir, root) {
+		job.step("Installing dependencies (npm) in %s", relDir(dir, pkg))
+		if err := m.installDeploy(ctx, pkg); err != nil {
+			return fmt.Errorf("installing the dependencies in %s: %w", relDir(dir, pkg), err)
 		}
 	}
 	modulesDir := filepath.Join(root, "modules")

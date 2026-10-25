@@ -20,8 +20,8 @@
 import express from 'express'
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { isAbsolute, join, resolve, sep } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { page, type SessionUser } from './auth.ts'
 import { makeIngest, makeSearch, type IngestRequest, type IngestResult, type SearchRequest } from './ingest.ts'
 
@@ -365,7 +365,7 @@ export async function mountModules(
       mountModule(app, mod, router, requireAuth)
       mounted.push(mod)
     } catch (err) {
-      broken.push({ id: mod.manifest.id, error: explain(err) })
+      broken.push({ id: mod.manifest.id, error: explain(err, mod.dir) })
     }
   }
 
@@ -390,16 +390,37 @@ export async function mountModules(
   return { mounted: mounted.map(m => m.manifest.id), broken }
 }
 
-// Load errors, with a hint for the two everyone hits once.
-function explain(err: unknown): string {
+// Load errors, with a hint for the two everyone hits once. Both name the
+// package.json Node goes by: the nearest one above the file that imports
+// (the module's folder when the message names none).
+function explain(err: unknown, moduleDir: string): string {
   const msg = err instanceof Error ? err.message : String(err)
+  const from = /imported from (\S+)/.exec(msg)?.[1]
+  const pkg = nearestPackageJson(from ? dirname(from.startsWith('file:') ? fileURLToPath(from) : from) : moduleDir)
   if (/require\(\) ES Module|Cannot use import statement/.test(msg)) {
-    return `${msg} — the site repository's package.json needs "type": "module"`
+    return pkg
+      ? `${msg} — ${pkg} needs "type": "module"`
+      : `${msg} — no package.json in ${moduleDir} or a folder above it: add one with "type": "module"`
   }
   if (/Cannot find (package|module) '([^.'/][^']*)'/.test(msg)) {
-    return `${msg} — add it to the site repository's package.json; Fridolin runs npm install when it deploys`
+    if (!pkg) {
+      return `${msg} — no package.json in ${moduleDir} or a folder above it: add one that lists it, beside modules/ or in the module's folder; Fridolin runs npm install there when it deploys`
+    }
+    if (!existsSync(join(dirname(pkg), 'node_modules'))) {
+      return `${msg} — ${pkg} has no node_modules beside it: deploy again, and Fridolin runs npm install there`
+    }
+    return `${msg} — add it to ${pkg}; Fridolin runs npm install there when it deploys`
   }
   return msg
+}
+
+// nearestPackageJson is the package.json in dir or the nearest folder above it.
+function nearestPackageJson(dir: string): string | undefined {
+  for (let d = resolve(dir); ; d = dirname(d)) {
+    const p = join(d, 'package.json')
+    if (existsSync(p)) return p
+    if (dirname(d) === d) return undefined
+  }
 }
 
 async function loadServer(mod: SiteModule, secrets: ModuleSecrets | undefined, host: ModuleHost): Promise<express.Router> {

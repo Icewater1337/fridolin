@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 
@@ -112,6 +113,19 @@ func (m *SiteManager) SandboxStatus() SiteSandboxStatus {
 	return SiteSandboxStatus{On: true, Note: "module code reaches only the files, programs and secrets its module.json declares"}
 }
 
+// siteDeps are the node_modules folders whose programs the live site may
+// run: the shell's, root's, and those beside the package.json of each module
+// (site_deps.go), all inside the deploy, which the site reads anyway.
+func siteDeps(shell, deploy, root string) []string {
+	deps := []string{shell, filepath.Join(root, "node_modules")}
+	for _, d := range packageDirs(deploy, root) {
+		if nm := filepath.Join(d, "node_modules"); !slices.Contains(deps, nm) {
+			deps = append(deps, nm)
+		}
+	}
+	return deps
+}
+
 // sandboxInput gathers what the live site's profile is built from.
 func (m *SiteManager) sandboxInput(node, deploy, root, rtFile string, mods []sandbox.SiteModule) sandbox.SitePolicy {
 	in := sandbox.SitePolicy{
@@ -119,7 +133,7 @@ func (m *SiteManager) sandboxInput(node, deploy, root, rtFile string, mods []san
 		DataDir: m.dataDir,
 		Shell:   m.dir("shell"),
 		Deploy:  deploy,
-		Deps:    []string{m.dir("shell", "node_modules"), filepath.Join(root, "node_modules")},
+		Deps:    siteDeps(m.dir("shell", "node_modules"), deploy, root),
 		Tmp:     m.dir("tmp"),
 		Data:    m.dir("data"),
 		Spool:   m.spoolDir(),

@@ -798,6 +798,7 @@ func (m *SiteManager) processCommand(ctx context.Context, name, listen, modulesD
 }
 
 func (m *SiteManager) siteCommand(ctx context.Context) (*exec.Cmd, error) {
+	m.ensureLiveDeps(ctx)
 	s := m.Settings()
 	return m.processCommand(ctx, "site", s.Listen, m.modulesDirOf(s.Approved), "")
 }

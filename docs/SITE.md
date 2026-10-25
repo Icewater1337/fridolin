@@ -106,8 +106,9 @@ Dashboard → **Site** → *Modules from your repository*. In order:
    Removing someone or changing their role takes effect at once.
 5. **Deploy.** *Check for changes* lists the new commits and, per module, what
    an approver must look at (below). *Approve and deploy* checks the commit out
-   into its own folder, runs `npm install` and every module's build, and only
-   then switches the site to it.
+   into its own folder, runs `npm install` (in every folder that holds a
+   module's `package.json`, see "Where the `package.json` goes" below) and every
+   module's build, and only then switches the site to it.
 6. **The site** listens on `127.0.0.1:8780` by default — on this machine
    only. A core in a container publishes that port on the host's loopback
    ([CORE.md](CORE.md#the-site)).
@@ -293,6 +294,24 @@ to a brain: nothing needs declaring for it.
 (for a password account, `email` is the username). TypeScript runs as is. The
 site repository's `package.json` must say `"type": "module"` and list what
 modules import (`express`, …); the deploy runs `npm install`.
+
+**Where the `package.json` goes.** Node looks for a package in
+`node_modules` beside the file that imports it and in every folder above, so
+a module uses the `package.json` nearest above its `module.json`: beside
+`modules/` (`dashboard/package.json` for modules in `dashboard/modules`), at
+the repository's root, or in the module's own folder. The deploy runs `npm
+install` in each folder that is the nearest one for some module, and in the
+site's folder when it has one (`npm ci` where there is a
+`package-lock.json`); a builder's workspace gets the same installs, as the
+brain, and a module that brings a `package.json` later gets its own before a
+check or preview. A folder with a lock file is installed once per lock file:
+`<data_dir>/site/npm-cache` keeps the last few installs by the hash of the
+lock file, `package.json`, node and the platform, and a deploy whose
+dependencies did not change copies them from there. When the site starts on
+a deploy whose `node_modules` are gone (a data dir moved to another machine
+leaves them out, [CORE.md](CORE.md)), it installs them first. A module that
+imports a package it cannot find names the `package.json` Node went by, and
+says when that one has no `node_modules` beside it.
 
 A module that fails to load — an invalid manifest, server code that throws —
 is skipped: the site's log says why, admins see it on the home page, and the
