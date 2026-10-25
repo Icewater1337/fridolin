@@ -51,6 +51,9 @@ const (
 	TriggerSchedule = "schedule"
 	TriggerMissed   = "missed"
 	TriggerManual   = "manual"
+	// TriggerFride is FrIDE's news about work the agent handed it: a
+	// question, or work done or failed (Task.Fride).
+	TriggerFride = "fride"
 )
 
 // The kinds of run (Run.Kind).

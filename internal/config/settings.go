@@ -71,6 +71,7 @@ type Live struct {
 	Policy                     PolicyConfig
 	Housekeeping               HousekeepingSettings
 	Schedules                  SchedulesSettings
+	Fride                      FrideConfig
 }
 type QueueSettings struct {
 	Mode       QueueMode
@@ -163,6 +164,7 @@ func liveOf(c *File) Live {
 		Policy:                     c.Policy,
 		Housekeeping:               housekeepingSettingsOf(c.Housekeeping),
 		Schedules:                  schedulesSettingsOf(c.Schedules),
+		Fride:                      c.Fride,
 	}
 }
 func queueSettingsOf(c QueueConfig) QueueSettings {
@@ -277,6 +279,7 @@ func fileOf(c Live) File {
 		Policy:                     c.Policy,
 		Housekeeping:               housekeepingConfigOf(c.Housekeeping),
 		Schedules:                  schedulesConfigOf(c.Schedules),
+		Fride:                      c.Fride,
 	}
 }
 func queueConfigOf(c QueueSettings) QueueConfig {

@@ -31,6 +31,7 @@ Content-Type: application/json
     "debounce": {
       "quiet_ms": 0
     },
+    "fride": {},
     "housekeeping": {},
     "http_listen": "",
     "ingest": {
@@ -106,6 +107,9 @@ Content-Type: application/json
     "debounce": {
       "max_wait_ms": 10000,
       "quiet_ms": 0
+    },
+    "fride": {
+      "news": "quiet"
     },
     "housekeeping": {
       "cpu_percent": 80,

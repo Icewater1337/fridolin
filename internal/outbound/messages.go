@@ -386,7 +386,7 @@ func RateLimitedNotice(max int) string {
 
 // FrideNewsMessage says FrIDE's news in the chat.
 func FrideNewsMessage(n FrideNews) string {
-	body := frideBody(n.Text)
+	body := frideShort(frideBody(n.Text))
 	head := fmt.Sprintf("*FrIDE #%d*", n.Thread)
 	work := ""
 	if n.Task != "" {
@@ -421,6 +421,32 @@ func FrideNewsMessage(n FrideNews) string {
 		b.WriteString("\n" + body)
 	}
 	return b.String()
+}
+
+// FrideFanoutMessage says FrIDE's news that node sent, in one text, for
+// several threads: once, naming them.
+func FrideFanoutMessage(node, kind string, threads []int64, text string) string {
+	ids := make([]string, len(threads))
+	for i, t := range threads {
+		ids[i] = fmt.Sprintf("#%d", t)
+	}
+	icon := "🛠️"
+	switch kind {
+	case "question":
+		icon = "❓"
+	case "done":
+		icon = "✅"
+	case "failed":
+		icon = "⚠️"
+	}
+	msg := fmt.Sprintf("%s *FrIDE on %s* (%s):", icon, node, strings.Join(ids, ", "))
+	if body := frideShort(frideBody(text)); body != "" {
+		msg += "\n" + body
+	}
+	if kind == "question" {
+		msg += "\nAnswer here naming the thread, and I'll pass it on."
+	}
+	return msg
 }
 
 // FrideQueuedNotice says a thread waits for a node whose FrIDE can take

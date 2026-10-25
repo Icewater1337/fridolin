@@ -42,6 +42,9 @@
     "max_wait_ms": 10000,
     "quiet_ms": 2000
   },
+  "fride": {
+    "news": "quiet"
+  },
   "housekeeping": {
     "cpu_percent": 80,
     "dry_run": true,

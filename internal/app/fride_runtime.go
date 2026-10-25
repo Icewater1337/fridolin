@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
@@ -48,6 +49,12 @@ type frideRuntime struct {
 	// are the threads a move or a close works on.
 	locks map[int64]*sync.Mutex
 	busy  map[int64]string
+	// lastErr is the last failure each thread's chat was told of, which
+	// a quiet chat is not told again; sent is when the relay last sent a
+	// node's text to a chat (frideSentKey), which it does not send again
+	// within waits.frideRepeat. The relay alone uses both.
+	lastErr map[int64]string
+	sent    map[string]time.Time
 }
 
 type frideNews struct {
@@ -58,7 +65,7 @@ type frideNews struct {
 func newFrideRuntime(b *App) *frideRuntime {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &frideRuntime{b: b, ctx: ctx, cancel: cancel, news: make(chan frideNews, 256), kick: make(chan struct{}, 1),
-		locks: map[int64]*sync.Mutex{}, busy: map[int64]string{}}
+		locks: map[int64]*sync.Mutex{}, busy: map[int64]string{}, lastErr: map[int64]string{}, sent: map[string]time.Time{}}
 }
 
 // start runs the relay and the queue once.
@@ -109,14 +116,38 @@ func (f *frideRuntime) onDeclare(n *nodes.Node) {
 	}
 }
 
+// relayLoop relays FrIDE's news in batches: what arrives within
+// waits.frideGather of the first goes together, so that one text a node
+// sends for several threads at once is sent once.
 func (f *frideRuntime) relayLoop() {
 	for {
+		var batch []frideNews
 		select {
 		case <-f.ctx.Done():
 			return
 		case n := <-f.news:
-			f.relay(n.node, n.ev)
+			batch = append(batch, n)
 		}
+		gather := time.NewTimer(f.b.waits.frideGather)
+	collect:
+		for {
+			select {
+			case <-f.ctx.Done():
+				gather.Stop()
+				return
+			case n := <-f.news:
+				batch = append(batch, n)
+			case <-gather.C:
+				break collect
+			}
+		}
+		var posts []fridePost
+		for _, n := range batch {
+			if p, ok := f.relay(n.node, n.ev); ok {
+				posts = append(posts, p)
+			}
+		}
+		f.post(posts)
 	}
 }
 
@@ -172,22 +203,35 @@ func (f *frideRuntime) nodeName(id string) string {
 
 // say sends text to the thread's chat and records it in the history of the
 // brain that started the work, as FrIDE's: the core brain sees FrIDE's
-// question there when the answer comes.
+// question there when the answer comes. A scheduled agent's thread only
+// records it: its chat is no WhatsApp chat.
 func (f *frideRuntime) say(t store.FrideThread, text string) {
-	ctx, cancel := context.WithTimeout(f.ctx, 30*time.Second)
-	defer cancel()
-	if err := f.b.wa.SendChunked(ctx, t.Chat, text); err != nil {
-		log.Printf("fride: telling %s about FrIDE #%d: %v", t.Chat, t.ID, err)
-		return
+	if !chat.IsInternalChat(t.Chat) {
+		ctx, cancel := context.WithTimeout(f.ctx, 30*time.Second)
+		defer cancel()
+		if err := f.b.wa.SendChunked(ctx, t.Chat, text); err != nil {
+			log.Printf("fride: telling %s about FrIDE #%d: %v", t.Chat, t.ID, err)
+			return
+		}
 	}
 	if br := f.b.brainMgr.Get(t.Brain); br != nil {
 		br.AppendEntry(history.Entry{From: "fride", Chat: t.Chat, Text: text, Type: history.Out, Via: "fride"})
 	}
 }
 
-// relay takes FrIDE's news about one of its threads to the chat that
-// started the work.
-func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) {
+// fridePost is a piece of FrIDE's news that relay decided a chat gets.
+type fridePost struct {
+	t    store.FrideThread
+	node string // its id
+	kind string
+	news outboundmsg.FrideNews
+}
+
+// relay takes FrIDE's news about one of its threads: it records it, and
+// reports whether, and as what, the chat that started the work gets it
+// (post sends it). A scheduled agent's work goes to a run of that agent
+// instead (frideNews).
+func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) (fridePost, bool) {
 	ctx := f.ctx
 	t, err := f.b.store.FrideThreadOn(ctx, node, ev.ThreadID)
 	if err != nil {
@@ -196,13 +240,13 @@ func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) {
 		} else {
 			log.Printf("fride: news of thread %d on node %s, which no chat started here (moved away, or started elsewhere); dropped", ev.ThreadID, node)
 		}
-		return
+		return fridePost{}, false
 	}
 	unlock := f.lock(t.ID)
 	t, err = f.b.store.GetFrideThread(ctx, t.ID)
 	if err != nil || t.Node != node || t.FrideThread != ev.ThreadID {
 		unlock()
-		return
+		return fridePost{}, false
 	}
 	if ev.Status != "" {
 		t.FrideStatus = ev.Status
@@ -216,7 +260,16 @@ func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) {
 	if err := f.b.store.SaveFrideThread(ctx, t); err != nil {
 		log.Printf("fride: recording FrIDE #%d: %v", t.ID, err)
 	}
-	if ev.Kind() == nodeproto.FrideFailed && nodeproto.FrideNotLoggedIn(ev.Text) {
+	kind := ev.Kind()
+	if kind == nodeproto.FrideQuestion && !outboundmsg.FrideAsks(ev.Text) {
+		// Progress FrIDE marked as needing a reply (fride#16): news.
+		kind = nodeproto.FrideUpdate
+	}
+	if err := f.b.store.AddFrideNews(ctx, store.FrideNewsItem{Thread: t.ID, Kind: kind, Text: ev.Text}); err != nil {
+		log.Printf("fride: keeping FrIDE #%d's news: %v", t.ID, err)
+	}
+	quiet := f.b.cfgs.Get().Live.Fride.News != config.FrideNewsAll
+	if kind == nodeproto.FrideFailed && nodeproto.FrideNotLoggedIn(ev.Text) {
 		// FrIDE there cannot think (#288): the work goes to another
 		// FrIDE if one takes it, and stays here for a retry otherwise.
 		moved := t
@@ -229,14 +282,99 @@ func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) {
 		if placed {
 			t, to = moved, f.nodeName(moved.Node)
 		}
-		f.say(t, outboundmsg.FrideNotLoggedInNotice(t.ID, f.nodeName(node), to, nodeproto.FrideLoginFix))
-		return
+		notice := outboundmsg.FrideNotLoggedInNotice(t.ID, f.nodeName(node), to, nodeproto.FrideLoginFix)
+		if quiet && !placed && f.lastErr[t.ID] == notice {
+			return fridePost{}, false
+		}
+		f.lastErr[t.ID] = notice
+		f.say(t, notice)
+		return fridePost{}, false
 	}
 	unlock()
-	f.say(t, outboundmsg.FrideNewsMessage(outboundmsg.FrideNews{
-		Thread: t.ID, Node: f.nodeName(node), Kind: ev.Kind(), Text: ev.Text,
+	news := outboundmsg.FrideNews{
+		Thread: t.ID, Node: f.nodeName(node), Kind: kind, Text: ev.Text,
 		Task: t.TaskID, Branch: t.Branch, Rationale: orDefault(ev.RationalePath, t.Rationale),
-	}))
+	}
+	if chat.IsScheduleChat(t.Chat) {
+		f.toAgent(t, news)
+		return fridePost{}, false
+	}
+	if quiet {
+		switch kind {
+		case nodeproto.FrideDone, nodeproto.FrideQuestion:
+		case nodeproto.FrideFailed:
+			if f.lastErr[t.ID] == ev.Text {
+				return fridePost{}, false
+			}
+			f.lastErr[t.ID] = ev.Text
+		default:
+			// Progress and bookkeeping stay on the FrIDE page; a merge
+			// does not, whatever FrIDE calls it.
+			if outboundmsg.FrideBookkeeping(ev.Text) || !outboundmsg.FrideMerged(ev.Text) {
+				return fridePost{}, false
+			}
+		}
+	}
+	return fridePost{t: t, node: node, kind: kind, news: news}, true
+}
+
+// toAgent hands news of a scheduled agent's thread to that agent: it is
+// recorded in the agent's chat, and a question, or work done or failed,
+// starts a run of the agent with it.
+func (f *frideRuntime) toAgent(t store.FrideThread, n outboundmsg.FrideNews) {
+	text := outboundmsg.FrideAgentNews(n, t.Message)
+	if br := f.b.brainMgr.Get(t.Brain); br != nil {
+		br.AppendEntry(history.Entry{From: "fride", Chat: t.Chat, Text: text, Type: history.Out, Via: "fride"})
+	}
+	switch n.Kind {
+	case nodeproto.FrideQuestion, nodeproto.FrideDone, nodeproto.FrideFailed:
+		f.b.agents.frideNews(t.Brain, strings.TrimPrefix(t.Chat, chat.ScheduleChatPrefix), text)
+	}
+}
+
+// frideSentKey names a text node sent, as chat got it.
+func frideSentKey(node, chat, kind, text string) string {
+	return node + "\x00" + chat + "\x00" + kind + "\x00" + outboundmsg.FrideBodyKey(text)
+}
+
+// post sends the news relay let through: one text a node sent for
+// several threads goes to each chat once, naming its threads, and not
+// again within waits.frideRepeat.
+func (f *frideRuntime) post(posts []fridePost) {
+	now := time.Now()
+	for k, at := range f.sent {
+		if now.Sub(at) > f.b.waits.frideRepeat {
+			delete(f.sent, k)
+		}
+	}
+	var order []string
+	groups := map[string][]fridePost{}
+	for _, p := range posts {
+		k := frideSentKey(p.node, p.t.Chat, p.kind, p.news.Text)
+		if _, ok := groups[k]; !ok {
+			order = append(order, k)
+		}
+		groups[k] = append(groups[k], p)
+	}
+	for _, k := range order {
+		g := groups[k]
+		if _, ok := f.sent[k]; ok {
+			log.Printf("fride: news of FrIDE #%d from %s went to %s a moment ago; not sent again", g[0].t.ID, g[0].news.Node, g[0].t.Chat)
+			continue
+		}
+		f.sent[k] = now
+		if len(g) == 1 {
+			f.say(g[0].t, outboundmsg.FrideNewsMessage(g[0].news))
+			continue
+		}
+		var ids []int64
+		for _, p := range g {
+			if !slices.Contains(ids, p.t.ID) {
+				ids = append(ids, p.t.ID)
+			}
+		}
+		f.say(g[0].t, outboundmsg.FrideFanoutMessage(g[0].news.Node, g[0].kind, ids, g[0].news.Text))
+	}
 }
 
 // frideNodes are the online nodes whose FrIDE may serve the core now and

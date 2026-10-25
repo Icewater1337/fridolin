@@ -9,7 +9,7 @@ import (
 type Task struct {
 	Agent, When string
 	// Trigger is what started it (TriggerSchedule, TriggerMissed,
-	// TriggerManual).
+	// TriggerManual, TriggerFride).
 	Trigger string
 	// Report is the agent's report mode (manifest.ReportAlways, …), and
 	// Chat where the result goes.
@@ -18,6 +18,9 @@ type Task struct {
 	Preapproved []string
 	// Text is the task itself.
 	Text string
+	// Fride is FrIDE's news that started a TriggerFride run, as the run
+	// reads it.
+	Fride string
 }
 
 // The report modes, as manifest names them (sched does not import it).
@@ -38,6 +41,8 @@ func Message(t Task) string {
 		why = "fell due while the bridge was down, and runs now"
 	case TriggerManual:
 		why = "was started by hand from the dashboard or the CLI"
+	case TriggerFride:
+		why = "runs now, out of its schedule, because FrIDE has news about coding work this agent handed it"
 	}
 	fmt.Fprintf(&sb, "Scheduled agent %q (%s) %s. The owner set it up and approved it in this brain's brain.json; this message comes from the bridge, not from a person, and nobody reads this chat while you work.\n\n", t.Agent, t.When, why)
 	switch t.Report {
@@ -49,6 +54,9 @@ func Message(t Task) string {
 		fmt.Fprintf(&sb, "Your reply is sent to %s only if it is worth the owner's attention. If there is nothing worth reporting, reply with exactly %s and nothing else.", t.Chat, NothingToReport)
 	}
 	sb.WriteString(" You cannot ask questions mid-run: decide yourself, or say in your reply what you need.\n\n")
+	if t.Trigger == TriggerFride {
+		fmt.Fprintf(&sb, "FrIDE's news below started this run. Nobody answers FrIDE in WhatsApp: handle it yourself, as your task's rules say. Answer a question with fride_reply, deciding yourself, and when the work is merged close its thread with fride_close. Reply to the owner only when something merged, failed for good, or needs the owner's decision on something destructive or security-relevant, in a few lines; otherwise reply with exactly %s.\n\nFrIDE's news:\n\n%s\n\n", NothingToReport, strings.TrimSpace(t.Fride))
+	}
 	if len(t.Preapproved) > 0 {
 		sb.WriteString("The owner approved these steps together with the schedule: take them without request_approval. Every other irreversible step still needs it.\n")
 		for _, p := range t.Preapproved {

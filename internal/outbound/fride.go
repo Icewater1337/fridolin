@@ -1,6 +1,9 @@
 package outbound
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // FrideNews is FrIDE's news about a thread (its webhook, relayed by the
 // node), as FrideNewsMessage says it in the chat that started the work.
@@ -26,4 +29,116 @@ func frideBody(text string) string {
 		return strings.TrimSpace(rest)
 	}
 	return text
+}
+
+// The longest FrIDE text a chat gets: a few lines; the dashboard's FrIDE
+// page keeps it whole.
+const (
+	frideMaxLines = 3
+	frideMaxRunes = 300
+)
+
+// FrideMore points from a shortened FrIDE text to where it is whole.
+const FrideMore = "… more in the dashboard (FrIDE page)"
+
+// frideShort is text cut to frideMaxLines lines and frideMaxRunes
+// characters, with FrideMore when it was cut.
+func frideShort(text string) string {
+	var lines []string
+	cut := false
+	for l := range strings.SplitSeq(text, "\n") {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		if len(lines) == frideMaxLines {
+			cut = true
+			break
+		}
+		lines = append(lines, strings.TrimRight(l, " \t"))
+	}
+	out := strings.Join(lines, "\n")
+	if r := []rune(out); len(r) > frideMaxRunes {
+		out, cut = strings.TrimSpace(string(r[:frideMaxRunes])), true
+	}
+	if cut {
+		out += "\n" + FrideMore
+	}
+	return out
+}
+
+// FrideBookkeeping reports whether text is only FrIDE's bookkeeping: the
+// task it made ("Created task …") or the brief it passed to an agent
+// ("• → agent: …"), which the chat that wrote the brief knows.
+func FrideBookkeeping(text string) bool {
+	body := frideBody(text)
+	if body == "" {
+		return true
+	}
+	for l := range strings.SplitSeq(body, "\n") {
+		l = strings.TrimSpace(l)
+		switch {
+		case l == "":
+		case strings.HasPrefix(l, "Created task "), strings.HasPrefix(l, "• →"), strings.HasPrefix(l, "→ "):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// frideAskPhrases mark a question that has no question mark.
+var frideAskPhrases = []string{"should i", "shall i", "do you want", "would you like", "please confirm", "please decide", "please choose", "which one", "let me know", "your call", "need your", "needs your decision"}
+
+// FrideAsks reports whether text asks something. FrIDE marks progress as
+// needing a reply too (fride#16): a text with no question mark and none
+// of frideAskPhrases is news, not a question.
+func FrideAsks(text string) bool {
+	body := strings.ToLower(frideBody(text))
+	if strings.Contains(body, "?") {
+		return true
+	}
+	for _, p := range frideAskPhrases {
+		if strings.Contains(body, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// FrideMerged reports whether text says work was merged: news a quiet
+// chat gets, whatever FrIDE calls it.
+func FrideMerged(text string) bool {
+	return strings.Contains(strings.ToLower(frideBody(text)), "merged")
+}
+
+// FrideBodyKey is text as two pieces of news compare: the same text sent
+// for several threads is one piece of news.
+func FrideBodyKey(text string) string { return frideBody(text) }
+
+// FrideAgentNews is FrIDE's news about work a scheduled agent handed it,
+// as a run of that agent reads it: the thread, what it was asked to do
+// (brief, shortened), and FrIDE's text whole.
+func FrideAgentNews(n FrideNews, brief string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "FrIDE #%d on %s: %s", n.Thread, n.Node, n.Kind)
+	if n.Task != "" {
+		fmt.Fprintf(&b, " (task %s", n.Task)
+		if n.Branch != "" {
+			fmt.Fprintf(&b, ", branch %s", n.Branch)
+		}
+		b.WriteString(")")
+	}
+	if n.Kind == "question" {
+		fmt.Fprintf(&b, ". Answer it with fride_reply, thread %d", n.Thread)
+	}
+	b.WriteString(".\n")
+	if brief = strings.TrimSpace(brief); brief != "" {
+		r := []rune(brief)
+		if len(r) > 400 {
+			brief = string(r[:400]) + "…"
+		}
+		b.WriteString("The work you handed it: " + brief + "\n")
+	}
+	b.WriteString("FrIDE says:\n" + frideBody(n.Text))
+	return b.String()
 }

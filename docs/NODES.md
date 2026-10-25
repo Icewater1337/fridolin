@@ -1105,11 +1105,26 @@ chat hears when it found a node.
 
 **News.** `bridge.db` (`fride_threads`) keeps each thread: the chat and
 brain that started it, the node, FrIDE's thread there, the task and its
-branch. FrIDE's news arrives in that chat: a question with the question
-(the owner answers there, and the core brain passes the answer on with
-`fride_reply`), `started` and `done` with the task and branch, `done`
-with the rationale's path, `failed`, and everything else as an update.
-The lines go into the core brain's history as FrIDE's, so its next run
+branch; `fride_news` keeps the latest 50 pieces of each thread's news
+whole, which the dashboard's FrIDE page shows. FrIDE's news arrives in
+that chat: a question with the question (the owner answers there, and
+the core brain passes the answer on with `fride_reply`), `started` and
+`done` with the task and branch, `done` with the rationale's path,
+`failed`, and everything else as an update. Each is at most three lines
+and 300 characters there, with a pointer to the FrIDE page. By default
+(`fride.news: "quiet"`, docs/CONFIGURATION.md) the chat gets only
+`done`, `failed`, real questions and updates that say something merged;
+"Created task …", FrIDE's echo of the brief ("• → agent: …") and
+progress stay on the page, and an identical failure goes out once per
+thread. A question whose text asks nothing (no question mark, none of
+"should I", "please confirm" and the like) is taken as an update: FrIDE
+marks progress as needing a reply too (fride#16). The relay gathers
+news for a few seconds: one text a node sends for several threads goes
+to each chat once, as "FrIDE on mini (#9, #10, …)", and the same text
+from that node is not sent there again within a minute. Work a scheduled
+agent handed over goes to that agent instead
+([BRAINS.md](BRAINS.md#scheduled-agents)). The lines go into the
+history of the brain that started the work as FrIDE's, so its next run
 sees what FrIDE asked. FrIDE says `done` at its next look at a closed
 task, every 15 seconds.
 

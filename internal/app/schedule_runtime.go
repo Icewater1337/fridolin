@@ -64,6 +64,10 @@ type agents struct {
 	byID    map[string]*agentRun
 	// recovered is set once the runs a stop cut short were ended.
 	recovered bool
+	// frideWaiting is FrIDE's news for an agent, by agent key, that waits
+	// for a run of it: one at a time, and what arrives meanwhile goes into
+	// the next.
+	frideWaiting map[string][]string
 }
 
 // agentRun is one run in progress.
@@ -76,11 +80,13 @@ type agentRun struct {
 	// What the policy gives a brain run (admitScheduled).
 	risk    skill.Risk
 	timeout time.Duration
+	// fride is FrIDE's news a TriggerFride run handles.
+	fride []string
 }
 
 func newAgents(b *App, layout config.Layout) *agents {
 	return &agents{b: b, store: sched.NewStore(layout.Schedules()),
-		running: map[string]*agentRun{}, byID: map[string]*agentRun{}}
+		running: map[string]*agentRun{}, byID: map[string]*agentRun{}, frideWaiting: map[string][]string{}}
 }
 
 // recover ends, once, the runs the state says are running: the bridge
@@ -197,13 +203,22 @@ var errAgentRunning = apperr.New(apperr.Conflict, "this agent's last run is stil
 // start starts a run of agent s of br, for trigger, by whoever asked
 // for a manual one, and returns it as it starts.
 func (a *agents) start(br *brainruntime.Brain, s manifest.Schedule, trigger, by string) (sched.Run, error) {
+	return a.startWith(br, s, trigger, by, nil)
+}
+
+// startWith is start, with FrIDE's news for a TriggerFride run; when the
+// agent runs already, the news waits for its next run.
+func (a *agents) startWith(br *brainruntime.Brain, s manifest.Schedule, trigger, by string, fride []string) (sched.Run, error) {
 	key := sched.Key(br.ID(), s.Name)
 	now := time.Now()
 	r := sched.Run{ID: sched.NewRunID(now), Brain: br.ID(), Agent: s.Name, Kind: runKind(s), Trigger: trigger, By: by, Started: now, Status: sched.StatusRunning}
 	cfg := a.b.cfgs.Get()
-	ar := &agentRun{run: r, agent: s, chat: a.resultChat(br, s, cfg)}
+	ar := &agentRun{run: r, agent: s, chat: a.resultChat(br, s, cfg), fride: fride}
 	a.mu.Lock()
 	if a.running[key] != nil {
+		if len(fride) > 0 {
+			a.frideWaiting[key] = append(fride, a.frideWaiting[key]...)
+		}
 		a.mu.Unlock()
 		return sched.Run{}, errAgentRunning
 	}
@@ -315,9 +330,14 @@ func (a *agents) startBrainRun(br *brainruntime.Brain, ar *agentRun) error {
 	if s.TimeoutMinutes > 0 {
 		ar.timeout = time.Duration(s.TimeoutMinutes) * time.Minute
 	}
+	report := s.ReportMode()
+	if len(ar.fride) > 0 && report != manifest.ReportSilent {
+		// FrIDE's news reaches the owner only when it matters.
+		report = manifest.ReportWorth
+	}
 	msg := sched.Message(sched.Task{
-		Agent: s.Name, When: s.When, Trigger: ar.run.Trigger, Report: s.ReportMode(), Chat: chatLabel(ar.chat),
-		Preapproved: s.Preapproved, Text: text,
+		Agent: s.Name, When: s.When, Trigger: ar.run.Trigger, Report: report, Chat: chatLabel(ar.chat),
+		Preapproved: s.Preapproved, Text: text, Fride: strings.Join(ar.fride, "\n\n"),
 	})
 	id := ar.run.ID
 	m := brainruntime.Inbound{Inbound: chat.Inbound{
@@ -427,7 +447,7 @@ func (a *agents) finished(br *brainruntime.Brain, m brainruntime.Inbound, res cl
 		a.complete(ar, status, res.LastText, why, res.Usage, notice)
 	case s.ReportMode() == manifest.ReportSilent:
 		a.complete(ar, sched.StatusOK, res.Text, "", res.Usage, "")
-	case s.ReportMode() == manifest.ReportWorth && !sched.Worth(res.Text):
+	case (s.ReportMode() == manifest.ReportWorth || len(ar.fride) > 0) && !sched.Worth(res.Text):
 		a.complete(ar, sched.StatusNothing, res.Text, "", res.Usage, "")
 	case strings.TrimSpace(res.Text) == "":
 		// Nothing to send: said in the log, so that a lost report shows.
@@ -517,6 +537,63 @@ func (a *agents) complete(ar *agentRun, status, result, why string, usage claude
 	log.Printf("brain %s: scheduled agent %s: run %s %s", r.Brain, r.Agent, r.ID, status)
 	if _, err := a.prune(time.Now()); err != nil {
 		log.Printf("scheduled agents: keeping the history within its limits: %v", err)
+	}
+	a.mu.Lock()
+	waiting := len(a.frideWaiting[sched.Key(r.Brain, r.Agent)]) > 0
+	a.mu.Unlock()
+	if waiting {
+		go a.frideRun(r.Brain, r.Agent)
+	}
+}
+
+// frideNews hands FrIDE's news about work agent of brain handed it to a
+// run of that agent: at once, or after the run in progress, together
+// with whatever else arrives until then.
+func (a *agents) frideNews(brain, agent, news string) {
+	key := sched.Key(brain, agent)
+	a.mu.Lock()
+	a.frideWaiting[key] = append(a.frideWaiting[key], news)
+	running := a.running[key] != nil
+	a.mu.Unlock()
+	if !running {
+		a.frideRun(brain, agent)
+	}
+}
+
+// frideRun starts a run of agent of brain for the FrIDE news waiting for
+// it. An agent that is gone, paused, turned off or runs a program drops
+// it: the news stays on the dashboard's FrIDE page.
+func (a *agents) frideRun(brain, agent string) {
+	key := sched.Key(brain, agent)
+	a.mu.Lock()
+	news := a.frideWaiting[key]
+	if len(news) == 0 || a.running[key] != nil {
+		a.mu.Unlock()
+		return
+	}
+	delete(a.frideWaiting, key)
+	a.mu.Unlock()
+	br := a.b.brainMgr.Get(brain)
+	var s *manifest.Schedule
+	if br != nil {
+		for _, sc := range br.Manifest().EffectiveSchedules() {
+			if sc.Name == agent {
+				s = &sc
+				break
+			}
+		}
+	}
+	states, _ := a.store.States()
+	switch {
+	case s == nil:
+		log.Printf("brain %s: FrIDE's news for scheduled agent %s, which it no longer has: dropped", brain, agent)
+		return
+	case s.Command != nil || !s.IsEnabled() || states[key].Paused:
+		log.Printf("brain %s: FrIDE's news for scheduled agent %s, which is paused, off or runs a program: dropped", brain, agent)
+		return
+	}
+	if _, err := a.startWith(br, *s, sched.TriggerFride, "", news); err != nil && !errors.Is(err, errAgentRunning) {
+		log.Printf("brain %s: scheduled agent %s did not start for FrIDE's news: %v", brain, agent, err)
 	}
 }
 
