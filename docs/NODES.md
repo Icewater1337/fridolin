@@ -750,8 +750,11 @@ side by side, with different node ids.
      the user is logged in unless lingering is on: `sudo loginctl
      enable-linger $USER` (the script reminds you);
    - FrIDE: runs `claude setup-token` in the `fride` container (open its
-     link and sign in), takes the token it shows without echo and stores
-     it in FrIDE's volume, asks for the git name and email the agents
+     link and sign in; the browser shows a code with a `#` in it, which
+     goes into `setup-token`'s own prompt), takes the token it then
+     prints, which starts with `sk-ant-oat`, without echo and stores it
+     in FrIDE's volume (anything else, such as that code, is refused, and
+     it asks again), asks for the git name and email the agents
      commit with, and pairs FrIDE with the node (`fride pair-companion`
      piped into `fridolin node fride pair --code -`, so the code is never
      shown).
@@ -941,7 +944,14 @@ statusline offer as made. Nothing secret is in the image:
 - **The Claude token** (from `claude setup-token`, typed by the owner)
   goes into the home volume through stdin, never a command line:
   `docker compose exec -T fride /opt/fride/entrypoint.sh set-claude-token`,
-  then `docker compose restart fride`.
+  then `docker compose restart fride`. It takes only a token as
+  `setup-token` prints it (`sk-ant-oat`, then letters, digits, `-` and
+  `_`) and refuses anything else, such as the browser's sign-in code
+  (it has a `#`), with why; it drops what Windows PowerShell adds to
+  what it pipes (a carriage return at the end, sometimes a byte order
+  mark in front) and spaces around the token. A
+  stored token of another shape makes FrIDE's log say so at its start
+  (`docker compose logs fride`).
 - **The git identity** the agents commit with:
   `docker compose exec fride git config --global user.name NAME` (and
   `user.email`).

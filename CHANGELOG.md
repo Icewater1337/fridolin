@@ -1130,6 +1130,21 @@ for compatibility.
 
 ### Fixed
 
+- **A box's FrIDE no longer stores a Claude token that cannot sign in.**
+  On Windows, `box.ps1` piped the token through Windows PowerShell,
+  which ends it with a carriage return (and can start it with a byte
+  order mark) that `set-claude-token` kept, and the prompt took
+  anything, such as the browser's sign-in code (`…#…`) still on the
+  clipboard; FrIDE's agents then failed with "401 Invalid bearer
+  token". `set-claude-token` now drops a byte order mark, carriage
+  return and spaces, refuses what is not a token from `claude
+  setup-token` (`sk-ant-oat…`) and says why; `box.sh` and `box.ps1`
+  name that token at the prompt and ask again, three times at most. A
+  box whose stored token has another shape gets a note in `docker
+  compose logs fride` at FrIDE's start, which also drops a stored byte
+  order mark or carriage return; store a new token with
+  `set-claude-token` (docs/NODES.md, "The FrIDE image").
+
 - **FrIDE work no longer sticks on a node whose FrIDE has no Claude
   login.** When FrIDE fails a thread with "Not logged in", the node says
   so in what it offers (`fride (Claude not logged in)`, and `fridolin

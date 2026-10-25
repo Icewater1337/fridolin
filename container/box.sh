@@ -275,21 +275,28 @@ if [ "$fride" = 1 ]; then
 	done
 	restart=0
 	if ! docker compose exec -T fride test -s /var/lib/fride/.config/fridolin-box/claude-token; then
-		echo "FrIDE's agents need a Claude sign-in. claude setup-token runs in the box now: open the link it prints, sign in, and it shows a token."
+		echo "FrIDE's agents need a Claude sign-in. claude setup-token runs in the box now: open the link it prints and sign in, paste the code the browser shows into its prompt, and it prints a token that starts with sk-ant-oat."
 		docker compose exec fride claude setup-token </dev/tty >/dev/tty 2>&1 || true
-		printf 'Paste the token (it is not shown): ' >/dev/tty
-		stty -echo </dev/tty 2>/dev/null || true
+		# set-claude-token refuses what is not a token (the browser's code,
+		# say) and says why: ask again, three times at most.
+		tries=0
+		while [ "$tries" -lt 3 ] && [ "$restart" = 0 ]; do
+			tries=$((tries + 1))
+			printf 'Paste the token that starts with sk-ant-oat, not the code from the browser (it is not shown): ' >/dev/tty
+			stty -echo </dev/tty 2>/dev/null || true
+			token=""
+			IFS= read -r token </dev/tty || true
+			stty echo </dev/tty 2>/dev/null || true
+			printf '\n' >/dev/tty
+			[ -n "$token" ] || break
+			if printf '%s\n' "$token" | docker compose exec -T fride /opt/fride/entrypoint.sh set-claude-token; then
+				restart=1
+			fi
+		done
 		token=""
-		IFS= read -r token </dev/tty || true
-		stty echo </dev/tty 2>/dev/null || true
-		printf '\n' >/dev/tty
-		if [ -n "$token" ]; then
-			printf '%s\n' "$token" | docker compose exec -T fride /opt/fride/entrypoint.sh set-claude-token
-			restart=1
-		else
-			echo "note: no token; later: docker compose exec -T fride /opt/fride/entrypoint.sh set-claude-token, then docker compose restart fride"
+		if [ "$restart" = 0 ]; then
+			echo "note: no token stored; later: claude setup-token, then pipe the token into docker compose exec -T fride /opt/fride/entrypoint.sh set-claude-token, then docker compose restart fride"
 		fi
-		token=""
 	fi
 	if [ -z "$(docker compose exec -T fride git config --global user.email 2>/dev/null || true)" ]; then
 		ask "The name FrIDE's agents commit with: " git_name
