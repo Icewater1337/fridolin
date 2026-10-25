@@ -366,6 +366,25 @@ func TestCoreStoreFrom(t *testing.T) {
 	}
 }
 
+// Under launchd's short PATH, a gh installed in ~/.local/bin is found (#249).
+func TestLookGhInHomeBin(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the node agent finds gh on Windows through exec.LookPath")
+	}
+	home := t.TempDir()
+	bin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "gh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A PATH without gh, since CI's runners have one in /usr/bin.
+	if got := lookGh("/nonexistent/bin:/nonexistent/sbin", home); got != filepath.Join(bin, "gh") {
+		t.Fatalf("lookGh = %q, want %q", got, filepath.Join(bin, "gh"))
+	}
+}
+
 // The node agent of a core host runs from launchd with PATH
 // /usr/bin:/bin:/usr/sbin:/sbin, without Docker Desktop's /usr/local/bin.
 func TestWithDockerPath(t *testing.T) {
