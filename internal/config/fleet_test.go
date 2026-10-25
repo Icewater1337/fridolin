@@ -150,6 +150,7 @@ func TestLayoutNamesTheDataDirsPaths(t *testing.T) {
 		l.Lock():              "bridge.lock",
 		l.DashboardToken():    "dashboard.token",
 		l.DashboardSessions(): "dashboard-sessions.json",
+		l.OwnerApprovals():    "owner-approvals.json",
 		l.ScriptsToken():      "scripts.token",
 		l.Backup():            "backup",
 		l.RcloneConf():        "rclone/rclone.conf",

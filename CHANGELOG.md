@@ -36,6 +36,30 @@ for compatibility.
   `vault.secret_dirs` into the core read-only (docs/VAULT.md, "Secret
   folders").
 
+- **Approvals in plain words, without codes**: everything that waits for
+  the owner (a node's device, what a node offers and core-host, a
+  brain's scheduled agent, changed brain.json or skill, a run's request)
+  is told in their WhatsApp chat the same way: what wants what, when,
+  where it connected from and how it was started, what approving lets it
+  do in one sentence per capability, and "Was this you? Reply !approve —
+  or !deny if not", with the id last, for reference. `!approve` and the
+  new `!deny` work alone: on the one thing waiting, or through a poll
+  that picks one when several wait (only the owner's vote counts).
+  Something the owner did not start (a join code from neither `!join`
+  nor the dashboard, a node asking for more on its own, a file a brain
+  wrote), or that waited over a day, asks for a second `!approve` within
+  2 minutes. Brain files, schedules and skills are now told in WhatsApp
+  too, within a minute. `!approve <ref>` still works; `!revoke` alone
+  is `!deny`. `!fleet` and the Nodes page use the same wording; `GET
+  /api/nodes` gives each node `allows` and `joined_via`. The same holds
+  for what came since: fride and core-host say what approving them
+  means, a scheduled agent that runs a program on a node says what
+  approving does to that node's allowlist, and `!movecore`'s poll (Move
+  now / Cancel) and the keep/forget poll after a move answer to
+  `!approve` and `!deny` too. New audit kind
+  `owner_approval`; new file `<data_dir>/owner-approvals.json`
+  (docs/NODES.md, "Approving from WhatsApp").
+
 - **The core in a box** (#191 phase 4): a node in a box can take the
   core and give it back, with the same `!movecore` / `fridolin nodes
   move`, plan, lease and automatic rollback as a native core host. The
@@ -730,6 +754,10 @@ for compatibility.
 
 ### Changed
 
+- `!approve` without an id no longer answers with its usage: it approves
+  what waits. The node alerts' and `!fleet`'s wording changed (pinned in
+  `messages.golden`), and `nodeproto.CoreHostApproval` reads plainer.
+
 - **The Plaud Sync app lets the NotePin sleep** (docs/PLAUD.md, "The
   pin's battery"). A permanent Bluetooth link kept the pin awake and
   emptied its battery fast. The app's new **Sync** setting is **smart**
@@ -1063,6 +1091,13 @@ for compatibility.
   folder of the calendar tokens; nothing in `tools/` read it any more.
 
 ### Fixed
+
+- **Voice mode no longer posts the question to WhatsApp.** A NotePin
+  recording or a spoken question in voice mode used to arrive in the chat
+  as `🎙️ <the question>` before the answer. Now only the answer goes
+  there (and none with `plaud.voice_quiet`). The brain is told to file the
+  question with its notes, the way its `skills/plaud.md` files recordings,
+  without mentioning it in the answer (docs/PLAUD.md, "Voice mode").
 
 - **Plaud Sync 0.5 reaches the NotePin with the screen off.** In 0.4 the
   check-ins connected to the pin's last known address and missed it all

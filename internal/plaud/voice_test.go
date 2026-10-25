@@ -130,11 +130,11 @@ func TestVoiceQuestionIsAnsweredToThePhoneThatAsked(t *testing.T) {
 	if len(rec.asked) != 1 || !strings.HasPrefix(rec.asked[0], voicePrompt) || !strings.HasSuffix(rec.asked[0], "\n\nWas steht morgen an?") {
 		t.Fatalf("the brain was asked %q", rec.asked)
 	}
-	// Into the owner's private chat, with the question before the answer.
+	// Into the owner's private chat, where only the answer goes: the question never does.
 	if rec.jids[0] != "15551234567@s.whatsapp.net" || rec.quiet[0] {
 		t.Errorf("asked in %q, quiet %v", rec.jids[0], rec.quiet[0])
 	}
-	if out := f.dev.Outbox(); len(out) != 1 || out[0].Text != "🎙️ Was steht morgen an?" || out[0].JID != rec.jids[0] {
+	if out := f.dev.Outbox(); len(out) != 0 {
 		t.Errorf("chat got %+v", out)
 	}
 

@@ -359,6 +359,28 @@ export default /** @satisfies {PageModule} */ ({
       ];
     }
 
+    // What waits for approval, in the words of the owner's WhatsApp
+    // alert: how it was started, and what approving lets it do.
+    /** @param {StableNode} n */
+    function waitingCallout(n) {
+      let title;
+      if (n.device === 'pending') title = 'Waiting for you to approve this device';
+      else if (n.device === 'approved' && n.commands === 'pending') title = n.commands_approved_at ? 'It asks to do more than you approved' : 'Waiting for you to approve what it offers';
+      else return null;
+      const started = n.device !== 'pending' ? 'The machine asked for this itself.'
+        : n.joined_via === 'chat' ? 'Started with a join code you asked for with !join.'
+          : n.joined_via === 'dashboard' ? 'Started with a join code from this dashboard (or fridolin nodes join-code).'
+            : 'Unexpected: its join code came neither from your !join nor from the dashboard.';
+      const allows = n.allows || [];
+      return callout('warn', title,
+        h('p', started, ' Was this you?'),
+        allows.length ? h('p', 'If you approve, it can:') : null,
+        allows.length ? h('ul', allows.map((a) => h('li', a))) : null,
+        h('p.muted.small', n.commands_approved_at && n.device === 'approved'
+          ? `Until you approve, it serves only what you approved before: ${capSummary(n.approved)}.`
+          : 'It serves nothing until you approve. In WhatsApp, !approve does the same.'));
+    }
+
     /** @param {StableNode} n */
     function card(n) {
       const region = h('div.node-live');
@@ -367,13 +389,7 @@ export default /** @satisfies {PageModule} */ ({
         h('div.card-head',
           h('div.card-title', h('h2', n.name), h('span.muted', osName(n.os), n.arch ? ` · ${n.arch}` : '')),
           h('div.node-state', statePills(n))),
-        n.device === 'pending' ? callout('warn', 'Waiting for approval', `Approve this device if you just joined ${n.name} yourself. What it offers is approved in a second step.`) : null,
-        n.device === 'approved' && n.commands === 'pending' && !n.commands_approved_at
-          ? callout('warn', 'Waiting for you to approve what it offers', `It offers ${capSummary(n.declared)}, listed below. It serves nothing until you approve.`)
-          : null,
-        n.device === 'approved' && n.commands === 'pending' && n.commands_approved_at
-          ? callout('warn', 'It offers more than you approved', `Approved so far: ${capSummary(n.approved)}. It now offers: ${capSummary(n.declared)}. Until you approve, it serves only what both include.`)
-          : null,
+        waitingCallout(n),
         n.core_host && n.core_host.pending && n.device === 'approved'
           ? callout('warn', 'core-host waits for your approval', n.core_host.approval)
           : null,

@@ -97,6 +97,16 @@ func TestCommandAgentAddsItsProgram(t *testing.T) {
 	if a.Program == nil || a.Program.State != ProgramWaiting || !strings.Contains(a.Program.Detail, "approving the agent adds it") {
 		t.Fatalf("a pending agent: %+v", a.Program)
 	}
+	// The owner's WhatsApp approval says the same, in its plain words.
+	var facts []string
+	for _, it := range h.b.waiting(context.Background()) {
+		if it.kind == pendingSchedule && it.msg.Ref == "main/daily" {
+			facts = it.msg.Facts
+		}
+	}
+	if !slices.Contains(facts, "Program: approving the agent adds it to node laptop's allowlist, with exactly these arguments") {
+		t.Errorf("the approval's facts: %q", facts)
+	}
 	if w := h.Do("POST", "/api/schedules/main/daily/approve", map[string]any{"schedule": a.Review.Disk}); w.Code != http.StatusOK {
 		t.Fatalf("approve: %d %s", w.Code, w.Body.String())
 	}

@@ -51,6 +51,20 @@ async function openPage(t, first) {
   return { root, calls, bridge };
 }
 
+test('a waiting node says how it was started and what approving lets it do, as WhatsApp does', async (t) => {
+  const allows = ['report its system details (OS, disk, memory)', 'read and change the files in /Users/you/Shared'];
+  const { root } = await openPage(t, [node({ joined_via: 'chat', allows })]);
+  assert.match(root.textContent, /Waiting for you to approve this device/);
+  assert.match(root.textContent, /Started with a join code you asked for with !join\. Was this you\?/);
+  assert.match(root.textContent, /If you approve, it can:report its system details \(OS, disk, memory\)read and change the files in \/Users\/you\/Shared/);
+  assert.doesNotMatch(root.textContent, /Unexpected/);
+});
+
+test('a node whose join code came from neither !join nor the dashboard is flagged', async (t) => {
+  const { root } = await openPage(t, [node({ allows: [] })]);
+  assert.match(root.textContent, /Unexpected: its join code came neither from your !join nor from the dashboard\./);
+});
+
 test('a node goes through both approvals and can be revoked', async (t) => {
   const { root, calls } = await openPage(t, [node()]);
   assert.match(root.textContent, /laptop/);

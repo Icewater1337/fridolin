@@ -305,11 +305,12 @@ func TestPlaudVoiceQuestionIsAnsweredThroughABrain(t *testing.T) {
 			}
 			continue
 		}
-		testutil.WaitFor(t, 5*time.Second, "the WhatsApp answer", func() bool { return len(tb.dev.Outbox()) == 2 })
-		out = tb.dev.Outbox() // newest first
-		if out[1].Text != "🎙️ Was steht morgen an?" || out[0].JID != out[1].JID ||
-			strings.Contains(out[0].Text, "[SPOKEN]") || !strings.Contains(out[0].Text, "Was steht morgen an?") {
-			t.Errorf("WhatsApp got %.80q, then %.200q", out[1].Text, out[0].Text)
+		// Only the answer reaches WhatsApp, never the question on its own
+		testutil.WaitFor(t, 5*time.Second, "the WhatsApp answer", func() bool { return len(tb.dev.Outbox()) >= 1 })
+		time.Sleep(200 * time.Millisecond)
+		out = tb.dev.Outbox()
+		if len(out) != 1 || strings.Contains(out[0].Text, "[SPOKEN]") || strings.HasPrefix(out[0].Text, "🎙") {
+			t.Errorf("WhatsApp got %+v", out)
 		}
 	}
 }

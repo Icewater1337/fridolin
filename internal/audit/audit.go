@@ -55,6 +55,10 @@ const (
 	DashboardLink = "dashboard_link"
 	NodeApproved  = "node_approved"
 	NodeRevoked   = "node_revoked"
+	// OwnerApproval is the owner's !approve or !deny of something that is
+	// not a node, a vote in the poll that picks one, and the confirmation
+	// an unexpected one asks for (owner_approvals.go).
+	OwnerApproval = "owner_approval"
 	// The core's move from the owner's chat (#187): !movecore asked
 	// (ID the target, Outcome whether a poll went out), the owner's
 	// "Move now" (ID the approval, Detail source and target), how a move

@@ -732,6 +732,8 @@ export interface Node {
   device_approved_at?: string;
   commands_approved_at?: string;
   revoked_at?: string;
+  /** Where its join code came from: chat (!join) or dashboard; left out when neither. */
+  joined_via?: 'chat' | 'dashboard';
   last_seen?: string;
   address?: string;
   resources?: HostStats;
@@ -746,6 +748,8 @@ export interface Node {
   /** Why the node cannot be updated. */
   update_note?: string;
   core_host?: CoreHostView;
+  /** What approving what it offers lets it do, one plain sentence each. */
+  allows: string[];
   /** What approving fride means, while the node offers a fride that waits for approval. */
   fride_approval?: string;
   /** Left out when no list went out since the core started. */

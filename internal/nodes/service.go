@@ -602,6 +602,11 @@ func (s *Service) SetTags(id string, tags []string) (*Node, error) { return s.re
 // NewJoinCode makes a join code.
 func (s *Service) NewJoinCode() (string, time.Time, error) { return s.reg.NewJoinCode() }
 
+// NewJoinCodeFrom makes a join code origin asked for (Registry.NewJoinCodeFrom).
+func (s *Service) NewJoinCodeFrom(origin string) (string, time.Time, error) {
+	return s.reg.NewJoinCodeFrom(origin)
+}
+
 // ErrCall is a call the core refuses before sending it.
 var ErrCall = errors.New("refused")
 
@@ -730,6 +735,10 @@ type View struct {
 	// CoreHost is set for a node that offers core-host, or had it
 	// approved (CoreHostView).
 	CoreHost *CoreHostView `json:"core_host,omitempty"`
+	// Allows says what approving what it offers lets it do, one plain
+	// sentence each (nodeproto.Capabilities.Plain), as the owner's
+	// WhatsApp alert says it.
+	Allows []string `json:"allows"`
 	// FrideApproval is what approving fride means, set while the node
 	// offers fride that waits for approval.
 	FrideApproval string `json:"fride_approval,omitempty"`
@@ -746,6 +755,7 @@ func (s *Service) Views() ([]View, error) {
 		v := View{Node: n, Commands: n.Commands(), Effective: n.Effective(), Online: s.Online(n.ID)}
 		v.UpdateTo, v.UpdateNote = s.UpdateTarget(n)
 		v.CoreHost = coreHostView(n)
+		v.Allows = append([]string{}, n.Declared.Plain()...)
 		if FridePending(n) {
 			v.FrideApproval = nodeproto.FrideApproval
 		}
