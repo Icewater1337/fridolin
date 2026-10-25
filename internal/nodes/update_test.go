@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
@@ -99,6 +100,23 @@ func TestCoreVersionsAreRemembered(t *testing.T) {
 	for v, want := range map[string]bool{"abc123": true, "def456": true, "0789ff": false, "fff000": false} {
 		if got := svc.ranBefore(v); got != want {
 			t.Errorf("ranBefore(%q) = %v", v, got)
+		}
+	}
+}
+
+// The core waits as long as the box says its updater takes, so a box made
+// before the hourly updater keeps its shorter wait.
+func TestBoxUpdateWait(t *testing.T) {
+	for _, c := range []struct {
+		minutes int
+		want    time.Duration
+	}{
+		{2, 32 * time.Minute},
+		{60, 90 * time.Minute},
+		{0, time.Duration(nodeproto.BoxUpdaterMinutes)*time.Minute + 30*time.Minute},
+	} {
+		if got := boxUpdateWait(c.minutes); got != c.want {
+			t.Errorf("boxUpdateWait(%d) = %s, want %s", c.minutes, got, c.want)
 		}
 	}
 }
