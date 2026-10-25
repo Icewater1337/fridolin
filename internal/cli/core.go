@@ -842,7 +842,7 @@ func defaultHostDeps(env coreEnv) hostDeps {
 	}
 	gh, _ := exec.LookPath("gh")
 	if d.goos != "windows" {
-		gh = lookPathIn("gh", envValue(env.environ, "PATH"))
+		gh = lookGh(envValue(env.environ, "PATH"), d.home)
 	}
 	if gh == "" {
 		d.noVerify = "GitHub's CLI (gh) is not installed, which checks the image's provenance before it is pulled (no login needed): install a current one (brew install gh, winget install GitHub.cli, on Linux from GitHub's apt repository: https://cli.github.com)"
@@ -941,6 +941,12 @@ func envValue(environ []string, name string) string {
 		}
 	}
 	return ""
+}
+
+// lookGh finds gh on path, then in ~/.local/bin and ~/bin, where gh's own
+// installer and `go install` put it and which launchd's PATH lacks (#249).
+func lookGh(path, home string) string {
+	return lookPathIn("gh", strings.Join([]string{path, filepath.Join(home, ".local", "bin"), filepath.Join(home, "bin")}, string(os.PathListSeparator)))
 }
 
 // lookPathIn is exec.LookPath against path instead of this process's PATH.
