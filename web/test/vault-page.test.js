@@ -79,7 +79,7 @@ test('the secret folders show their numbers, never a file, and back up on reques
     ...running(),
     secret_folders: {
       enabled: true, where: 'vault bucket, secret-folders-sealed/', keep_days: 30,
-      folders: [{ path: '/home/you/.fridolin-secrets', source: 'sandbox.credentials_dir', label: '.fridolin-secrets', files: 3, bytes: 2048 }],
+      folders: [{ path: '/home/you/.app-secrets', source: 'sandbox.credentials_dir', label: '.app-secrets', files: 3, bytes: 2048 }],
       last: { at: '2026-10-20T03:00:00Z', version: '20261020T030000Z.tar', reason: 'daily', files: 3, bytes: 2048 },
       last_ok: { at: '2026-10-20T03:00:00Z', version: '20261020T030000Z.tar', reason: 'daily', files: 3, bytes: 2048 },
       versions: [{ version: '20261020T030000Z.tar', at: '2026-10-20T03:00:00Z', bytes: 4096 }],
@@ -88,7 +88,7 @@ test('the secret folders show their numbers, never a file, and back up on reques
   });
   const { root, calls } = await open(t, (path) => (path.startsWith('/api/vault/status') ? withSecrets() : { status: 202, body: { status: 'started' } }));
   const text = root.textContent;
-  assert.ok(text.includes('/home/you/.fridolin-secrets') && text.includes('sandbox.credentials_dir') && text.includes('3 files'), text);
+  assert.ok(text.includes('/home/you/.app-secrets') && text.includes('sandbox.credentials_dir') && text.includes('3 files'), text);
   assert.ok(text.includes('20261020T030000Z.tar') && text.includes('1, 30 days kept'), 'the last backup and the versions');
   assert.ok(text.includes('Version 20261020T030000Z.tar holds 3 files, down from 30'), 'the hold');
   button(root, 'Back up now').click();
