@@ -26,7 +26,7 @@ var imports = map[string][]string{
 	"internal/app/apptest":  {"internal/app", "internal/config", "internal/httpapi"},
 	"internal/controlcli":   {"internal/config", "internal/httpapi", "internal/platform"},
 	"internal/toolcli":      {"internal/fsx", "internal/google", "internal/history", "internal/version", "internal/mcp"},
-	"internal/cli":          {"internal/tailnet", "internal/provenance", "container", "examples", "internal/app", "internal/coreexport", "internal/hostsecrets", "internal/lease", "internal/store", "internal/claudecli", "internal/config", "internal/controlcli", "internal/fsx", "internal/httpapi", "internal/logx", "internal/manifest", "internal/platform", "internal/prompt", "internal/registry", "internal/testutil", "internal/toolcli", "internal/version", "internal/nodeagent", "internal/nodeproto", "internal/cloud", "internal/secretxfer", "internal/seal", "internal/nodes"},
+	"internal/cli":          {"internal/tailnet", "internal/provenance", "container", "examples", "internal/app", "internal/coreexport", "internal/hostsecrets", "internal/lease", "internal/store", "internal/claudecli", "internal/config", "internal/controlcli", "internal/fsx", "internal/httpapi", "internal/logx", "internal/manifest", "internal/platform", "internal/prompt", "internal/registry", "internal/testutil", "internal/toolcli", "internal/version", "internal/nodeagent", "internal/nodeproto", "internal/cloud", "internal/secretxfer", "internal/seal", "internal/nodes", "internal/housekeeping"},
 	"cmd/fridolin":          {"internal/cli"},
 	"examples":              nil,
 	"container":             nil,

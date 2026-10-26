@@ -1,24 +1,22 @@
-package app
+package housekeeping
 
 import (
 	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/Icewater1337/fridolin/internal/housekeeping"
 )
 
-// HousekeepingReportText is a report for the terminal.
-func HousekeepingReportText(raw []byte, now time.Time) (string, error) {
-	var r housekeeping.Report
+// ReportText is a report (the JSON of one run) for the terminal.
+func ReportText(raw []byte, now time.Time) (string, error) {
+	var r Report
 	if err := json.Unmarshal(raw, &r); err != nil {
 		return "", fmt.Errorf("reading the report: %w", err)
 	}
 	return reportText(r, now), nil
 }
 
-func reportText(r housekeeping.Report, now time.Time) string {
+func reportText(r Report, now time.Time) string {
 	var b strings.Builder
 	mode := "acting"
 	if r.DryRun {
@@ -43,15 +41,15 @@ func reportText(r housekeeping.Report, now time.Time) string {
 	return b.String()
 }
 
-// HousekeepingStatusText is GET /api/housekeeping, or the state file, for
-// the terminal.
-func HousekeepingStatusText(raw []byte, now time.Time) (string, error) {
+// StatusText is GET /api/housekeeping, or the state file, for the
+// terminal.
+func StatusText(raw []byte, now time.Time) (string, error) {
 	var v struct {
-		Enabled    *bool                `json:"enabled"`
-		DryRun     *bool                `json:"dry_run"`
-		EveryHours int                  `json:"every_hours"`
-		NextRun    string               `json:"next_run"`
-		Last       *housekeeping.Report `json:"last"`
+		Enabled    *bool   `json:"enabled"`
+		DryRun     *bool   `json:"dry_run"`
+		EveryHours int     `json:"every_hours"`
+		NextRun    string  `json:"next_run"`
+		Last       *Report `json:"last"`
 		// Asked is a list in the API's answer, a map by approval in the
 		// state file.
 		Asked json.RawMessage `json:"asked"`
@@ -80,9 +78,9 @@ func HousekeepingStatusText(raw []byte, now time.Time) (string, error) {
 	} else {
 		b.WriteString(reportText(*v.Last, now))
 	}
-	var asked []housekeeping.Finding
+	var asked []Finding
 	if json.Unmarshal(v.Asked, &asked) != nil {
-		var byID map[string]housekeeping.Finding
+		var byID map[string]Finding
 		_ = json.Unmarshal(v.Asked, &byID)
 		for _, f := range byID {
 			asked = append(asked, f)
