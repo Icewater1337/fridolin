@@ -14,8 +14,9 @@ import (
 // /api/nodes/moves/{id} follows it, also from the core that runs after
 // it, which the record reaches in the final export.
 
-// MoveRequest is the body of both POSTs. The timings are for a test or a
-// slow machine; the defaults are 15 minutes and 10.
+// MoveRequest is the body of both POSTs. Source and Target name each
+// node by its id or its name. The timings are for a test or a slow
+// machine; the defaults are 15 minutes and 10.
 type MoveRequest struct {
 	Source             string `json:"source"`
 	Target             string `json:"target"`
@@ -37,7 +38,7 @@ func decodeMove(w http.ResponseWriter, r *http.Request) (MoveRequest, bool) {
 		return req, false
 	}
 	if req.Source == "" || req.Target == "" {
-		WriteErr(w, http.StatusBadRequest, "source and target are the ids of two nodes")
+		WriteErr(w, http.StatusBadRequest, "source and target are two nodes, by id or name")
 		return req, false
 	}
 	if req.DeadlineSeconds < 0 || req.ReadyWithinSeconds < 0 || req.DeadlineSeconds > 3600 || req.ReadyWithinSeconds > 3600 {
@@ -47,13 +48,28 @@ func decodeMove(w http.ResponseWriter, r *http.Request) (MoveRequest, bool) {
 	return req, true
 }
 
+// moveEnds are the ids of the nodes a move's request names.
+func (a *NodesAPI) moveEnds(w http.ResponseWriter, req MoveRequest) (src, dst string, ok bool) {
+	if src, ok = a.nodeID(w, req.Source); !ok {
+		return "", "", false
+	}
+	if dst, ok = a.nodeID(w, req.Target); !ok {
+		return "", "", false
+	}
+	return src, dst, true
+}
+
 // MoveCheck answers POST /api/nodes/move-check.
 func (a *NodesAPI) MoveCheck(w http.ResponseWriter, r *http.Request) {
 	req, ok := decodeMove(w, r)
 	if !ok {
 		return
 	}
-	rep, err := a.Nodes().MoveCheck(r.Context(), req.Source, req.Target)
+	src, dst, ok := a.moveEnds(w, req)
+	if !ok {
+		return
+	}
+	rep, err := a.Nodes().MoveCheck(r.Context(), src, dst)
 	if err != nil {
 		writeNodeErr(w, err)
 		return
@@ -68,7 +84,11 @@ func (a *NodesAPI) StartMove(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rec, err := a.Nodes().StartMove(r.Context(), req.Source, req.Target, nodes.MoveOptions{
+	src, dst, ok := a.moveEnds(w, req)
+	if !ok {
+		return
+	}
+	rec, err := a.Nodes().StartMove(r.Context(), src, dst, nodes.MoveOptions{
 		HandoffDeadline: time.Duration(req.DeadlineSeconds) * time.Second, ReadyWithin: time.Duration(req.ReadyWithinSeconds) * time.Second})
 	switch {
 	case errors.Is(err, nodes.ErrUnknownNode), errors.Is(err, nodes.ErrInvalidInput):

@@ -117,30 +117,11 @@ func (s *Service) CoreHosts(ctx context.Context) ([]CoreHostState, error) {
 	return out, nil
 }
 
-// FindNode is the node the owner names: by its id, or by its name when
-// exactly one node that is not revoked has it (any case).
+// FindNode is the node the owner names, in a chat command, a CLI
+// command or the API: by its id, or by its name in any case
+// (Registry.Resolve).
 func (s *Service) FindNode(nameOrID string) (*Node, error) {
-	if n, err := s.reg.Get(nameOrID); err == nil {
-		return n, nil
-	}
-	all, err := s.reg.List()
-	if err != nil {
-		return nil, err
-	}
-	var found *Node
-	for _, n := range all {
-		if n.Device == nodeproto.DeviceRevoked || !strings.EqualFold(n.Name, nameOrID) {
-			continue
-		}
-		if found != nil {
-			return nil, fmt.Errorf("%w: two nodes are called %s: name it by its id", ErrInvalidInput, nameOrID)
-		}
-		found = n
-	}
-	if found == nil {
-		return nil, fmt.Errorf("%w %q", ErrUnknownNode, nameOrID)
-	}
-	return found, nil
+	return s.reg.Resolve(nameOrID)
 }
 
 // CoreForget is what asking a core host to forget what moves brought it

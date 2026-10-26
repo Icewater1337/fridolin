@@ -96,6 +96,10 @@ func (b *App) moveCoreCommand(args []string, record func(id, outcome string)) st
 		return b.coreMoveTargets()
 	}
 	dst, err := b.nodes.FindNode(args[0])
+	if reply, ok := ambiguousNodeReply("!movecore", err); ok {
+		record(args[0], "refused: ambiguous name")
+		return reply
+	}
 	switch {
 	case errors.Is(err, nodes.ErrUnknownNode):
 		record(args[0], "refused: unknown node")

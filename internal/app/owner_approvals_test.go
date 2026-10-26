@@ -155,6 +155,55 @@ func TestDenyRefKeepsApprovedNode(t *testing.T) {
 	}
 }
 
+// TestNodeCommandsTakeNames: !approve, !deny and !revoke name a node by
+// its name too, in any case, as fridolin nodes does (#251). A name two
+// nodes have changes nothing and lists each with its ref; a revoked node
+// steps aside for the other one with its name.
+func TestNodeCommandsTakeNames(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, `{"nodes": {"enabled": true}}`)
+	addr := h.StartNodes()
+	id := h.joinNode(addr, "Laptop", nodes.JoinedFromChat, nodeproto.Capabilities{Host: true})
+	h.WaitSent(harnessDM, "*Laptop*")
+	if got := h.Answer(inbound{JID: harnessDM, Text: "!approve laptop"}); !strings.HasPrefix(got, "✅ *Laptop* is approved") {
+		t.Fatalf("!approve laptop: %q", got)
+	}
+	if d := h.device(id); d != nodeproto.DeviceApproved {
+		t.Errorf("after !approve laptop: %s", d)
+	}
+
+	other := h.joinNode(addr, "laptop", nodes.JoinedFromChat, nodeproto.Capabilities{Host: true})
+	h.WaitSent(harnessDM, "*laptop*")
+	for _, cmd := range []string{"!revoke", "!deny"} {
+		got := h.Answer(inbound{JID: harnessDM, Text: cmd + " LAPTOP"})
+		for _, want := range []string{"2 nodes are called *LAPTOP*, so nothing changed", "*Laptop* (", "`" + cmd + " " + id + "`", "`" + cmd + " " + other + "`"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s LAPTOP: %q lacks %q", cmd, got, want)
+			}
+		}
+	}
+	if h.device(id) != nodeproto.DeviceApproved || h.device(other) != nodeproto.DevicePending {
+		t.Fatalf("an ambiguous name changed a node: %s %s", h.device(id), h.device(other))
+	}
+
+	if got := h.Answer(inbound{JID: harnessDM, Text: "!deny " + other}); got != outboundmsg.NodeRevokedReply("laptop", other) {
+		t.Errorf("!deny %s: %q", other, got)
+	}
+	if got := h.Answer(inbound{JID: harnessDM, Text: "!revoke LAPTOP"}); got != outboundmsg.NodeRevokedReply("Laptop", id) {
+		t.Errorf("!revoke LAPTOP with the other one revoked: %q", got)
+	}
+	if got := h.Answer(inbound{JID: harnessDM, Text: "!revoke desktop"}); got != outboundmsg.NodeUnknownReply("desktop") {
+		t.Errorf("!revoke desktop: %q", got)
+	}
+	var outcomes []string
+	for _, l := range h.auditOf("node_revoked") {
+		outcomes = append(outcomes, l["outcome"].(string))
+	}
+	if strings.Join(outcomes, "|") != "refused: ambiguous name|refused: ambiguous name|denied|ok|refused: unknown node" {
+		t.Errorf("audit: %q", outcomes)
+	}
+}
+
 // TestApproveExpired: a machine that waited longer than approvalFreshFor
 // is not approved by !approve alone without a second one.
 func TestApproveExpired(t *testing.T) {
