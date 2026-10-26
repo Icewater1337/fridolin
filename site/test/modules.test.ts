@@ -46,6 +46,11 @@ test('validateManifest refuses what it must', () => {
   assert.throws(invalid({ server: { entry: 's.ts', mount: '/auth' } }), /"server.mount"/)
   assert.throws(invalid({ server: { entry: 's.ts', mount: '/demo-other' } }), /"server.mount"/)
   assert.throws(invalid({ server: { entry: 's.ts', mount: '/api/other' } }), /"server.mount"/)
+  assert.throws(invalid({ server: { entry: 's.ts', public: 'intake' } }), /"server.public" must be a list/)
+  for (const p of ['intake', '/', '/../x', '/a/..', '/a/*', '/a b', '/a//b', '/a/']) {
+    assert.throws(invalid({ server: { entry: 's.ts', public: [p] } }), /"server.public" entry/, p)
+  }
+  validateManifest({ ...base, server: { entry: 's.ts', public: ['/intake', '/v1/form.json', '/a_b-c'] } }, 'demo')
   assert.throws(invalid({ capabilities: { files: { db: { path: 'x' } } } }), /"read" or "write"/)
   assert.throws(invalid({ capabilities: { secrets: ['API KEY'] } }), /"capabilities.secrets" entry "API KEY"/)
   assert.throws(invalid({ capabilities: { secrets: ['_key'] } }), /"capabilities.secrets"/)
@@ -93,7 +98,7 @@ test('mountModules serves apps and APIs behind sign-in and access, and isolates 
     order: 2,
     access: { roles: ['team', 'admin'] },
     app: { dist: 'dist', base: 'inject', public: ['sw.js'] },
-    server: { entry: 'server.ts', access: { roles: ['*'] } },
+    server: { entry: 'server.ts', access: { roles: ['*'] }, public: ['/open'] },
     capabilities: { files: { note: { path: 'data/note.txt', access: 'read' } } },
   }, {
     'dist/index.html': html,
@@ -105,6 +110,8 @@ import { readFileSync } from 'fs'
 export default (ctx) => {
   const r = express.Router()
   r.get('/note', (_req, res) => res.json({ id: ctx.id, note: readFileSync(ctx.file('note'), 'utf8') }))
+  r.get('/open/ping', (req, res) => res.json({ signedIn: !!req.user }))
+  r.get('/opener', (_req, res) => res.json({ ok: true }))
   return r
 }
 `,
@@ -160,6 +167,14 @@ export default (ctx) => {
   assert.equal((await get('/alpha/api/note')).status, 302)
   assert.equal((await get('/alpha/sw.js')).status, 200)
 
+  // Public server paths answer without sign-in, with no user; only that path and below.
+  const open = await get('/alpha/api/open/ping')
+  assert.equal(open.status, 200)
+  assert.deepEqual(await open.json(), { signedIn: false })
+  assert.equal((await get('/alpha/api/opener')).status, 302)
+  // A public path the router does not answer falls through to sign-in.
+  assert.equal((await get('/alpha/api/open/missing')).status, 302)
+
   // Allowed: index with <base> injected (also without the slash and for client routes), assets, API.
   for (const path of ['/alpha', '/alpha/', '/alpha/some/client/route']) {
     const r = await get(path, team)
@@ -193,6 +208,30 @@ export default (ctx) => {
 
   // The note file was only read through the manifest.
   assert.equal(readFileSync(join(root, 'alpha/data/note.txt'), 'utf8'), 'hello from the manifest')
+})
+
+test('public server paths are rate limited per client', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'site-modules-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  writeFileSync(join(root, 'package.json'), '{ "type": "module" }')
+  symlinkSync(join(SITE_DIR, 'node_modules'), join(root, 'node_modules'))
+  writeModule(root, 'form', {
+    access: { roles: ['admin'] },
+    server: { entry: 'server.ts', public: ['/submit'] },
+  }, {
+    'server.ts': `import express from 'express'
+export default () => { const r = express.Router(); r.post('/submit', (_req, res) => res.json({ ok: true })); return r }
+`,
+  })
+  const app = express()
+  await mountModules(app, loadModules(root), (_req, res) => { res.redirect('/') })
+  const server = app.listen(0)
+  t.after(() => { server.close() })
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/form/api/submit`
+  const statuses: number[] = []
+  for (let i = 0; i < 125; i++) statuses.push((await fetch(url, { method: 'POST' })).status)
+  assert.equal(statuses.filter(s => s === 200).length, 120)
+  assert.equal(statuses.at(-1), 429)
 })
 
 // ── A package.json in a subfolder ─────────────────────────────────────────────

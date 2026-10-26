@@ -471,6 +471,7 @@ func reviewManifest(oldM, newM map[string]any) []ReviewItem {
 		{"server", "runs code on this machine"},
 		{"server.access", "who may call its server"},
 		{"server.mount", "where its server answers"},
+		{"server.public", "paths of its server anyone can call without signing in"},
 		{"capabilities.files", "files its code may use"},
 		{"capabilities.commands", "programs its code runs"},
 		{"capabilities.secrets", "secrets it needs"},
