@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/doctor"
 )
 
 // zone is the owner's time zone (timezone), else the process's: the zone
@@ -76,34 +77,37 @@ func utcZone(name string) bool {
 	return false
 }
 
+// timezoneDoctorCheck is doctor's check of the zone schedules are read in.
+var timezoneDoctorCheck = doctor.Check{ID: "timezone", Title: "time zone of schedules", Run: checkTimezone}
+
 // checkTimezone is doctor's "timezone" check: the zone schedules are read
 // in, and a warning when it is likely not the owner's: unset with the
 // process in UTC (the core container's default), or set but the
 // container's TZ another zone.
-func checkTimezone(_ context.Context, env *DoctorEnv) DoctorResult {
+func checkTimezone(_ context.Context, env *doctor.Env) doctor.Result {
 	tz := strings.TrimPrefix(strings.TrimSpace(env.Getenv("TZ")), ":")
 	const fixUnset = `set "timezone" in config.json to your IANA zone (such as Europe/Zurich), on the dashboard under Settings; for the core, fridolin core start also passes the host's zone into the container as TZ`
 	if env.Config == nil {
-		return DoctorResult{Status: DoctorMissing, Detail: "config did not load"}
+		return doctor.Result{Status: doctor.Missing, Detail: "config did not load"}
 	}
 	if name := env.Config.Timezone; name != "" {
 		// In the core's container the entrypoint gives the bridge this zone
 		// as TZ (#250); doctor, run through docker exec, has the
 		// container's own TZ instead.
 		if tz != "" && tz != name && env.ConfigGOOS != config.ContainerGOOS {
-			return DoctorResult{Status: DoctorWarn,
+			return doctor.Result{Status: doctor.Warn,
 				Detail: fmt.Sprintf("schedules run in %s (timezone), but the process's TZ is %s: programs that read the clock themselves see another zone", name, tz),
 				Fix:    "start the core with fridolin core start, which passes the host's zone as TZ (FRIDOLIN_TZ sets another), or set timezone to the zone you mean"}
 		}
-		return DoctorResult{Status: DoctorOK, Detail: name + " (timezone)"}
+		return doctor.Result{Status: doctor.OK, Detail: name + " (timezone)"}
 	}
 	switch {
 	case utcZone(tz), tz == "" && env.ConfigGOOS == config.ContainerGOOS:
-		return DoctorResult{Status: DoctorWarn,
+		return doctor.Result{Status: doctor.Warn,
 			Detail: "timezone is unset and the bridge runs in UTC: a \"daily 21:00\" agent runs at 21:00 UTC",
 			Fix:    fixUnset}
 	case tz != "":
-		return DoctorResult{Status: DoctorOK, Detail: tz + " (TZ; timezone is unset)"}
+		return doctor.Result{Status: doctor.OK, Detail: tz + " (TZ; timezone is unset)"}
 	}
-	return DoctorResult{Status: DoctorOK, Detail: "the system's zone (timezone is unset)"}
+	return doctor.Result{Status: doctor.OK, Detail: "the system's zone (timezone is unset)"}
 }

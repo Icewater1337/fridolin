@@ -19,6 +19,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/app"
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/controlcli"
+	"github.com/Icewater1337/fridolin/internal/doctor"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/logx"
@@ -629,8 +630,8 @@ func checkCmd(args []string) {
 // written, 2 for a bad flag.
 func doctorCmd(args []string, stdout io.Writer) int {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	var o app.DoctorOptions
-	fs.StringVar(&o.Config, "config", "", configFlagHelp)
+	var o doctor.Options
+	cfgPath := fs.String("config", "", configFlagHelp)
 	fs.BoolVar(&o.JSON, "json", false, "print the checks as JSON")
 	fs.BoolVar(&o.Redact, "redact", false, "mask phone numbers, JIDs and email addresses, and write ~ for the home folder, to paste the output into a bug report")
 	node := fs.Bool("node", false, "check this machine as a node of a core")
@@ -645,11 +646,11 @@ func doctorCmd(args []string, stdout io.Writer) int {
 		fmt.Fprintf(fs.Output(), "doctor takes no arguments, got %q\n", fs.Args())
 		return 2
 	}
-	if *node || *stateDir != "" || isNodeMachine(o.Config) {
+	if *node || *stateDir != "" || isNodeMachine(*cfgPath) {
 		return nodeDoctor(*stateDir, o.JSON, stdout)
 	}
-	if err := app.WriteDoctor(stdout, o); err != nil {
-		if !errors.Is(err, app.ErrDoctorFailed) {
+	if err := app.WriteDoctor(stdout, *cfgPath, o); err != nil {
+		if !errors.Is(err, doctor.ErrFailed) {
 			log.Print(err)
 		}
 		return 1

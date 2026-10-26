@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/doctor"
 	"github.com/Icewater1337/fridolin/internal/nodeagent"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/nodes"
@@ -156,12 +157,12 @@ func TestDoctorPlaudAppBuild(t *testing.T) {
 		status    string
 		detail    string
 	}{
-		{"local toolchain", true, false, "", DoctorOK, "builds the app here"},
-		{"a node builds it", false, true, `{"nodes":[{"id":"a","name":"mac-mini","device":"approved",` + fresh + `,"declared":{` + ab + `},"approved":{` + ab + `}}]}`, DoctorOK, "on a node: mac-mini"},
-		{"offered, not approved", false, true, `{"nodes":[{"id":"a","name":"mac-mini","device":"approved",` + fresh + `,"declared":{` + ab + `},"approved":{}}]}`, DoctorWarn, "offers android-build, not approved"},
-		{"approved, not heard from", false, true, `{"nodes":[{"id":"a","name":"mac-mini","device":"approved","declared":{` + ab + `},"approved":{` + ab + `}}]}`, DoctorWarn, "not heard from"},
-		{"approved, no JDK any more", false, true, `{"nodes":[{"id":"a","name":"mac-mini","device":"approved",` + fresh + `,"declared":{},"approved":{` + ab + `}}]}`, DoctorWarn, "finds no JDK"},
-		{"nothing", false, false, "", DoctorWarn, "nodes are off"},
+		{"local toolchain", true, false, "", doctor.OK, "builds the app here"},
+		{"a node builds it", false, true, `{"nodes":[{"id":"a","name":"mac-mini","device":"approved",` + fresh + `,"declared":{` + ab + `},"approved":{` + ab + `}}]}`, doctor.OK, "on a node: mac-mini"},
+		{"offered, not approved", false, true, `{"nodes":[{"id":"a","name":"mac-mini","device":"approved",` + fresh + `,"declared":{` + ab + `},"approved":{}}]}`, doctor.Warn, "offers android-build, not approved"},
+		{"approved, not heard from", false, true, `{"nodes":[{"id":"a","name":"mac-mini","device":"approved","declared":{` + ab + `},"approved":{` + ab + `}}]}`, doctor.Warn, "not heard from"},
+		{"approved, no JDK any more", false, true, `{"nodes":[{"id":"a","name":"mac-mini","device":"approved",` + fresh + `,"declared":{},"approved":{` + ab + `}}]}`, doctor.Warn, "finds no JDK"},
+		{"nothing", false, false, "", doctor.Warn, "nodes are off"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -180,16 +181,16 @@ func TestDoctorPlaudAppBuild(t *testing.T) {
 				}
 				return os.ErrNotExist
 			}
-			got := result(t, RunDoctor(context.Background(), env, DoctorRegistry), "plaud-app-build")
+			got := result(t, doctor.Run(context.Background(), env, DoctorRegistry.Checks()), "plaud-app-build")
 			if got.Status != tc.status || !strings.Contains(got.Detail, tc.detail) {
 				t.Errorf("%s %q, want %s with %q", got.Status, got.Detail, tc.status, tc.detail)
 			}
-			if got.Status != DoctorOK && got.Fix == "" {
+			if got.Status != doctor.OK && got.Fix == "" {
 				t.Error("a warning without a fix")
 			}
 		})
 	}
-	rep := RunDoctor(context.Background(), healthyMac().doctorEnv(doctorConfig(nil), nil), DoctorRegistry)
+	rep := doctor.Run(context.Background(), healthyMac().doctorEnv(doctorConfig(nil), nil), DoctorRegistry.Checks())
 	for _, c := range rep.Checks {
 		if c.ID == "plaud-app-build" {
 			t.Error("the check runs without plaud.phone_upload")

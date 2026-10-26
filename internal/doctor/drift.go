@@ -1,4 +1,4 @@
-package app
+package doctor
 
 import (
 	"context"
@@ -13,9 +13,9 @@ import (
 // runs the approved ones, and a core export takes the brain folders along
 // by them; whoever reads brain.json for what stays home reads the wrong
 // file until the change is approved (#189).
-func checkBrainDrift(_ context.Context, env *DoctorEnv) DoctorResult {
+func checkBrainDrift(_ context.Context, env *Env) Result {
 	if env.Config == nil {
-		return noConfig
+		return NoConfig
 	}
 	var lines []string
 	keepsHome := false
@@ -31,11 +31,11 @@ func checkBrainDrift(_ context.Context, env *DoctorEnv) DoctorResult {
 		lines = append(lines, fmt.Sprintf("%s: %s", ref.Approved.ID, d.Describe()))
 	}
 	if len(lines) == 0 {
-		return DoctorResult{Status: DoctorOK, Detail: "every brain folder is as you approved it"}
+		return Result{Status: OK, Detail: "every brain folder is as you approved it"}
 	}
 	fix := "review and approve the changes in the dashboard (Brains); until then the bridge, the backups and a core export follow the approved manifests"
 	if keepsHome {
 		fix += ", and core export refuses while a brain.json on disk keeps more home than the approved one: approve it first, or pass --use-approved"
 	}
-	return DoctorResult{Status: DoctorWarn, Detail: strings.Join(lines, "; "), Fix: fix}
+	return Result{Status: Warn, Detail: strings.Join(lines, "; "), Fix: fix}
 }

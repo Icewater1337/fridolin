@@ -11,13 +11,14 @@ import (
 	"testing"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/doctor"
 )
 
 // The node checks apply with nodes.enabled: the port must answer (M2's
 // gate), and approved nodes not heard from for 5 minutes are a warning.
 func TestDoctorNodeChecks(t *testing.T) {
 	t.Parallel()
-	off := RunDoctor(context.Background(), healthyMac().doctorEnv(doctorConfig(nil), nil), DoctorRegistry)
+	off := doctor.Run(context.Background(), healthyMac().doctorEnv(doctorConfig(nil), nil), DoctorRegistry.Checks())
 	for _, c := range off.Checks {
 		if strings.HasPrefix(c.ID, "nodes-") {
 			t.Errorf("%s runs with nodes off", c.ID)
@@ -37,18 +38,18 @@ func TestDoctorNodeChecks(t *testing.T) {
 		detail    string
 		ok        bool
 	}{
-		{"port up", ":8766", "127.0.0.1:8766", "", "nodes-port", DoctorOK, "answers on 127.0.0.1:8766", true},
-		{"port up on an address", "100.64.0.1:9000", "100.64.0.1:9000", "", "nodes-port", DoctorOK, "100.64.0.1:9000", true},
-		{"port down", ":8766", "", "", "nodes-port", DoctorFail, "nothing answers on 127.0.0.1:8766", false},
-		{"no registry", ":8766", "127.0.0.1:8766", "", "nodes-seen", DoctorOK, "no nodes yet", true},
-		{"only pending", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"pending"}]}`, "nodes-seen", DoctorOK, "no approved nodes", true},
-		{"fresh", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"approved","last_seen":"2026-10-20T11:58:00Z"},{"id":"r","name":"R","device":"revoked","last_seen":"2026-01-01T00:00:00Z"}]}`, "nodes-seen", DoctorOK, "1 approved nodes, each heard from", true},
-		{"stale", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"approved","last_seen":"2026-10-20T11:00:00Z"},{"id":"b","name":"B","device":"approved"},{"id":"c","name":"C","device":"approved","last_seen":"2026-10-20T11:59:00Z"}]}`, "nodes-seen", DoctorWarn, "2 of 3 approved nodes not heard from in 5m0s: A (a, 1h0m0s ago); B (b, never)", true},
-		{"broken registry", ":8766", "127.0.0.1:8766", `{`, "nodes-seen", DoctorWarn, "does not read", true},
-		{"no FrIDE", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"approved","last_seen":"2026-10-20T11:59:00Z"}]}`, "nodes-fride", DoctorOK, "no node offers FrIDE yet", true},
-		{"FrIDE answers", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"approved","last_seen":"2026-10-20T11:59:00Z","declared":{"fride":{"url":"http://127.0.0.1:7777"}},"approved":{"fride":{"url":"http://127.0.0.1:7777"}}}]}`, "nodes-fride", DoctorOK, "FrIDE answers on A (http://127.0.0.1:7777)", true},
-		{"FrIDE not logged in", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"approved","last_seen":"2026-10-20T11:59:00Z","declared":{"fride":{"url":"http://127.0.0.1:7777","not_logged_in":true}},"approved":{"fride":{"url":"http://127.0.0.1:7777"}}}]}`, "nodes-fride", DoctorWarn, "1 of 1 nodes with FrIDE cannot take work: A (a, FrIDE's Claude is not logged in)", true},
-		{"FrIDE down", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"approved","last_seen":"2026-10-20T11:59:00Z","approved":{"fride":{"url":"http://127.0.0.1:7777"}}},{"id":"b","name":"B","device":"approved","last_seen":"2026-10-20T10:00:00Z","declared":{"fride":{"url":"http://127.0.0.1:7777"}},"approved":{"fride":{"url":"http://127.0.0.1:7777"}}}]}`, "nodes-fride", DoctorWarn, "2 of 2 nodes with FrIDE cannot take work: A (a, FrIDE does not answer); B (b, not heard from)", true},
+		{"port up", ":8766", "127.0.0.1:8766", "", "nodes-port", doctor.OK, "answers on 127.0.0.1:8766", true},
+		{"port up on an address", "100.64.0.1:9000", "100.64.0.1:9000", "", "nodes-port", doctor.OK, "100.64.0.1:9000", true},
+		{"port down", ":8766", "", "", "nodes-port", doctor.Fail, "nothing answers on 127.0.0.1:8766", false},
+		{"no registry", ":8766", "127.0.0.1:8766", "", "nodes-seen", doctor.OK, "no nodes yet", true},
+		{"only pending", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"pending"}]}`, "nodes-seen", doctor.OK, "no approved nodes", true},
+		{"fresh", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"approved","last_seen":"2026-10-20T11:58:00Z"},{"id":"r","name":"R","device":"revoked","last_seen":"2026-01-01T00:00:00Z"}]}`, "nodes-seen", doctor.OK, "1 approved nodes, each heard from", true},
+		{"stale", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"approved","last_seen":"2026-10-20T11:00:00Z"},{"id":"b","name":"B","device":"approved"},{"id":"c","name":"C","device":"approved","last_seen":"2026-10-20T11:59:00Z"}]}`, "nodes-seen", doctor.Warn, "2 of 3 approved nodes not heard from in 5m0s: A (a, 1h0m0s ago); B (b, never)", true},
+		{"broken registry", ":8766", "127.0.0.1:8766", `{`, "nodes-seen", doctor.Warn, "does not read", true},
+		{"no FrIDE", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"approved","last_seen":"2026-10-20T11:59:00Z"}]}`, "nodes-fride", doctor.OK, "no node offers FrIDE yet", true},
+		{"FrIDE answers", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"approved","last_seen":"2026-10-20T11:59:00Z","declared":{"fride":{"url":"http://127.0.0.1:7777"}},"approved":{"fride":{"url":"http://127.0.0.1:7777"}}}]}`, "nodes-fride", doctor.OK, "FrIDE answers on A (http://127.0.0.1:7777)", true},
+		{"FrIDE not logged in", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"approved","last_seen":"2026-10-20T11:59:00Z","declared":{"fride":{"url":"http://127.0.0.1:7777","not_logged_in":true}},"approved":{"fride":{"url":"http://127.0.0.1:7777"}}}]}`, "nodes-fride", doctor.Warn, "1 of 1 nodes with FrIDE cannot take work: A (a, FrIDE's Claude is not logged in)", true},
+		{"FrIDE down", ":8766", "127.0.0.1:8766", `{"nodes":[{"id":"a","name":"A","device":"approved","last_seen":"2026-10-20T11:59:00Z","approved":{"fride":{"url":"http://127.0.0.1:7777"}}},{"id":"b","name":"B","device":"approved","last_seen":"2026-10-20T10:00:00Z","declared":{"fride":{"url":"http://127.0.0.1:7777"}},"approved":{"fride":{"url":"http://127.0.0.1:7777"}}}]}`, "nodes-fride", doctor.Warn, "2 of 2 nodes with FrIDE cannot take work: A (a, FrIDE does not answer); B (b, not heard from)", true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -57,12 +58,12 @@ func TestDoctorNodeChecks(t *testing.T) {
 			if tc.nodesJSON != "" {
 				s.contents = map[string]string{registry: tc.nodesJSON}
 			}
-			rep := RunDoctor(context.Background(), s.doctorEnv(on(tc.listen), nil), DoctorRegistry)
+			rep := doctor.Run(context.Background(), s.doctorEnv(on(tc.listen), nil), DoctorRegistry.Checks())
 			got := result(t, rep, tc.id)
 			if got.Status != tc.status || !strings.Contains(got.Detail, tc.detail) {
 				t.Errorf("%s: %s %q, want %s with %q", tc.id, got.Status, got.Detail, tc.status, tc.detail)
 			}
-			if got.Status != DoctorOK && got.Fix == "" {
+			if got.Status != doctor.OK && got.Fix == "" {
 				t.Errorf("%s is %s without a fix", tc.id, got.Status)
 			}
 			if rep.OK != tc.ok {
@@ -92,9 +93,9 @@ func TestDoctorNodeChecksPreferTheBridge(t *testing.T) {
 		status                  string
 		seenDetail, frideDetail string
 	}{
-		{"bridge answers", answer(live, nil), DoctorOK, "1 approved nodes, each heard from", "FrIDE answers on mac-mini"},
-		{"bridge down", answer("", errors.New("connection refused")), DoctorWarn, "mac-mini (m, 1h0m0s ago)", "mac-mini (m, not heard from)"},
-		{"bridge answers garbage", answer("<html>", nil), DoctorWarn, "mac-mini (m, 1h0m0s ago)", "mac-mini (m, not heard from)"},
+		{"bridge answers", answer(live, nil), doctor.OK, "1 approved nodes, each heard from", "FrIDE answers on mac-mini"},
+		{"bridge down", answer("", errors.New("connection refused")), doctor.Warn, "mac-mini (m, 1h0m0s ago)", "mac-mini (m, not heard from)"},
+		{"bridge answers garbage", answer("<html>", nil), doctor.Warn, "mac-mini (m, 1h0m0s ago)", "mac-mini (m, not heard from)"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -103,7 +104,7 @@ func TestDoctorNodeChecksPreferTheBridge(t *testing.T) {
 			s.contents = map[string]string{registry: file}
 			env := s.doctorEnv(cfg, nil)
 			env.LiveNodes = tc.live
-			rep := RunDoctor(context.Background(), env, DoctorRegistry)
+			rep := doctor.Run(context.Background(), env, DoctorRegistry.Checks())
 			if got := result(t, rep, "nodes-seen"); got.Status != tc.status || !strings.Contains(got.Detail, tc.seenDetail) {
 				t.Errorf("nodes-seen: %s %q, want %s with %q", got.Status, got.Detail, tc.status, tc.seenDetail)
 			}
@@ -157,17 +158,17 @@ func TestDoctorNodesVersion(t *testing.T) {
 	for _, tc := range []struct {
 		name, live, status, detail string
 	}{
-		{"current", `{"version":"v1.2.0","nodes":[{"id":"a","name":"A","device":"approved","version":"v1.2.0"},{"id":"p","name":"P","device":"pending","version":"v0.1.0"}]}`, DoctorOK, "1 approved nodes run v1.2.0"},
-		{"older", `{"version":"v1.2.0","nodes":[{"id":"a","name":"A","device":"approved","version":"v1.1.0"},{"id":"b","name":"B","device":"approved","version":"v1.3.0"}]}`, DoctorWarn, "1 of 2 approved nodes run an older or other fridolin than the core's v1.2.0: A (a, v1.1.0)"},
-		{"same commit, other abbreviation", `{"version":"06ab6d82","nodes":[{"id":"a","name":"A","device":"approved","version":"dev-06ab6d8"},{"id":"b","name":"B","device":"approved","version":"06ab6d8"}]}`, DoctorOK, "2 approved nodes run 06ab6d82"},
-		{"failed", `{"version":"v1.2.0","nodes":[{"id":"a","name":"A","device":"approved","version":"v1.2.0","update":{"state":"failed","to":"v1.2.0","error":"no luck"}}]}`, DoctorWarn, "the last update failed on A (a, to v1.2.0: no luck)"},
+		{"current", `{"version":"v1.2.0","nodes":[{"id":"a","name":"A","device":"approved","version":"v1.2.0"},{"id":"p","name":"P","device":"pending","version":"v0.1.0"}]}`, doctor.OK, "1 approved nodes run v1.2.0"},
+		{"older", `{"version":"v1.2.0","nodes":[{"id":"a","name":"A","device":"approved","version":"v1.1.0"},{"id":"b","name":"B","device":"approved","version":"v1.3.0"}]}`, doctor.Warn, "1 of 2 approved nodes run an older or other fridolin than the core's v1.2.0: A (a, v1.1.0)"},
+		{"same commit, other abbreviation", `{"version":"06ab6d82","nodes":[{"id":"a","name":"A","device":"approved","version":"dev-06ab6d8"},{"id":"b","name":"B","device":"approved","version":"06ab6d8"}]}`, doctor.OK, "2 approved nodes run 06ab6d82"},
+		{"failed", `{"version":"v1.2.0","nodes":[{"id":"a","name":"A","device":"approved","version":"v1.2.0","update":{"state":"failed","to":"v1.2.0","error":"no luck"}}]}`, doctor.Warn, "the last update failed on A (a, to v1.2.0: no luck)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := healthyMac()
 			s.listening = map[string]bool{"127.0.0.1:8766": true}
 			env := s.doctorEnv(cfg, nil)
 			env.LiveNodes = func(context.Context, *config.Settings) ([]byte, error) { return []byte(tc.live), nil }
-			got := result(t, RunDoctor(context.Background(), env, DoctorRegistry), "nodes-version")
+			got := result(t, doctor.Run(context.Background(), env, DoctorRegistry.Checks()), "nodes-version")
 			if got.Status != tc.status || !strings.Contains(got.Detail, tc.detail) {
 				t.Errorf("nodes-version: %s %q, want %s with %q", got.Status, got.Detail, tc.status, tc.detail)
 			}

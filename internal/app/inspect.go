@@ -7,20 +7,14 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
-	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/config"
-	"github.com/Icewater1337/fridolin/internal/fsx"
-	"github.com/Icewater1337/fridolin/internal/google"
-	"github.com/Icewater1337/fridolin/internal/logx"
+	"github.com/Icewater1337/fridolin/internal/doctor"
 	"github.com/Icewater1337/fridolin/internal/registry"
-	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 // CheckOptions are the check command's flags.
@@ -61,36 +55,36 @@ func leftOutBrains(issues []registry.Issue) []string {
 // redacted: the output then goes into a public bug report as it is.
 func WriteCheck(w io.Writer, o CheckOptions) error {
 	inputs := ConfigOptions()
-	var red *redactor
+	var red *doctor.Redactor
 	if o.Redact {
-		red = newRedactor(inputs.Paths.Home)
-		red.addChats(o.Routes...)
+		red = doctor.NewRedactor(inputs.Paths.Home)
+		red.AddChats(o.Routes...)
 		// The log entries of loading the config name paths, and the
 		// allowed chats it finds odd, as they are written.
 		prev := log.Writer()
-		log.SetOutput(redactingWriter{prev, red})
+		log.SetOutput(red.Writer(prev))
 		defer log.SetOutput(prev)
 	}
 	path, _ := ConfigPathFromPaths(o.Config, inputs.Paths)
 	if red != nil {
-		red.addConfig(path)
+		red.AddConfig(path)
 	}
 	cfg, err := config.LoadExisting(path, inputs)
 	if err != nil {
-		return red.err(fmt.Errorf("loading config: %w", err))
+		return red.Err(fmt.Errorf("loading config: %w", err))
 	}
 	if red == nil {
 		return CheckReport(w, path, cfg, o)
 	}
-	red.addChats(cfg.AllowedNumbers...)
-	red.addGroups(cfg.AllowedGroups...)
-	red.addGroupMembers(cfg.GroupMembers)
+	red.AddChats(cfg.AllowedNumbers...)
+	red.AddGroups(cfg.AllowedGroups...)
+	red.AddGroupMembers(cfg.GroupMembers)
 	var buf bytes.Buffer
 	err = CheckReport(&buf, path, cfg, o)
-	if _, werr := io.WriteString(w, red.text(buf.String())); werr != nil && err == nil {
+	if _, werr := io.WriteString(w, red.Text(buf.String())); werr != nil && err == nil {
 		err = werr
 	}
-	return red.err(err)
+	return red.Err(err)
 }
 
 // CheckReport writes what check says of cfg, the config loaded from path.
@@ -226,145 +220,4 @@ func dmAllowSummary(cfg *config.Settings) string {
 		return "nobody (allowed_numbers is empty)"
 	}
 	return fmt.Sprint(cfg.AllowedNumbers)
-}
-
-// redactor masks what check --redact must not show: phone numbers down to
-// the country code and the last two digits, group JIDs and LIDs down to
-// their last two digits, email addresses as GoogleMaskEmail does, and the home
-// folder, written as ~ in every path. Two numbers or groups still tell
-// apart, and paths still say where under the home folder they are.
-type redactor struct {
-	// The configured chats, which are printed without a JID too, each
-	// with its masked form; the longest first, since one may hold another.
-	chats []redactedChat
-	homes []*regexp.Regexp
-}
-
-type redactedChat struct{ value, masked string }
-
-// newRedactor redacts home, as given and with its symlinks resolved, in
-// each way a path is written: plain, in a regular expression, and quoted
-// in a sandbox profile.
-func newRedactor(home string) *redactor {
-	r := &redactor{}
-	if home == "" || home == string(filepath.Separator) {
-		return r // every path would match
-	}
-	var spellings []string
-	for _, h := range []string{home, fsx.Resolve(home)} {
-		spellings = append(spellings, h, textx.EscapeSBPL(h), regexp.QuoteMeta(h), textx.EscapeSBPL(regexp.QuoteMeta(h)))
-	}
-	// The longest first, since one may begin with another; equal ones next
-	// to each other, for Compact.
-	slices.SortFunc(spellings, func(a, b string) int {
-		if len(a) != len(b) {
-			return len(b) - len(a)
-		}
-		return strings.Compare(a, b)
-	})
-	for _, h := range slices.Compact(spellings) {
-		// Only the folder itself, not a sibling whose name begins like it.
-		r.homes = append(r.homes, regexp.MustCompile(regexp.QuoteMeta(h)+`([^A-Za-z0-9._-]|$)`))
-	}
-	return r
-}
-
-// addConfig adds the allowed numbers and groups and group_members of the
-// config file at path as they are written, read before it loads: loading
-// logs the entries it finds odd, a number with a note after it say, as
-// they are. A file that does not parse adds nothing.
-func (r *redactor) addConfig(path string) {
-	var file struct {
-		AllowedNumbers []string            `json:"allowed_numbers"`
-		AllowedGroups  []string            `json:"allowed_groups"`
-		GroupMembers   map[string][]string `json:"group_members"`
-	}
-	if data, err := os.ReadFile(path); err == nil && json.Unmarshal(data, &file) == nil {
-		r.addChats(file.AllowedNumbers...)
-		r.addGroups(file.AllowedGroups...)
-		r.addGroupMembers(file.GroupMembers)
-	}
-}
-
-// addGroupMembers adds the groups of group_members and the numbers each
-// lists, which check prints as digits alone.
-func (r *redactor) addGroupMembers(members map[string][]string) {
-	for g, list := range members {
-		r.addGroups(g)
-		r.addChats(list...)
-	}
-}
-
-// addChats adds phone numbers and chat JIDs to mask wherever they are
-// printed without a JID too, as written and as digits alone.
-func (r *redactor) addChats(chats ...string) { r.add(false, chats) }
-
-// addGroups adds group JIDs as addChats does, also when one is written
-// without @g.us.
-func (r *redactor) addGroups(groups ...string) { r.add(true, groups) }
-
-func (r *redactor) add(groups bool, chats []string) {
-	for _, c := range chats {
-		id, server, _ := strings.Cut(strings.TrimSpace(c), "@")
-		digits := digitsOf(id)
-		if len(digits) < 6 {
-			continue
-		}
-		masked := logx.MaskPhone(digits)
-		if groups || server == "g.us" || server == "lid" {
-			masked = logx.MaskDigits(digits, 0)
-		}
-		written := masked
-		if strings.HasPrefix(id, "+") {
-			written = "+" + masked
-		}
-		r.chats = append(r.chats, redactedChat{id, written}, redactedChat{digits, masked})
-	}
-	slices.SortStableFunc(r.chats, func(a, b redactedChat) int { return len(b.value) - len(a.value) })
-}
-
-// text returns s redacted.
-func (r *redactor) text(s string) string {
-	s = logx.RedactIdentifiers(s, google.MaskEmail)
-	for _, c := range r.chats {
-		s = strings.ReplaceAll(s, c.value, c.masked)
-	}
-	for _, re := range r.homes {
-		s = re.ReplaceAllString(s, "~$1")
-	}
-	return s
-}
-
-// err returns err redacted, or err itself without a redactor. The
-// redacted error still wraps err, so that what check exits with is the
-// same with --redact: errors.Is still finds ErrBrainsLeftOut in it.
-func (r *redactor) err(err error) error {
-	if r == nil || err == nil {
-		return err
-	}
-	return redactedError{r.text(err.Error()), err}
-}
-
-// redactingWriter writes what it is given redacted. The log package writes
-// each entry whole, so a number is never split between two writes.
-type redactingWriter struct {
-	w   io.Writer
-	red *redactor
-}
-
-func (rw redactingWriter) Write(p []byte) (int, error) {
-	if _, err := io.WriteString(rw.w, rw.red.text(string(p))); err != nil {
-		return 0, err
-	}
-	return len(p), nil
-}
-
-// digitsOf is s without anything but its digits.
-func digitsOf(s string) string {
-	return strings.Map(func(r rune) rune {
-		if r >= '0' && r <= '9' {
-			return r
-		}
-		return -1
-	}, s)
 }

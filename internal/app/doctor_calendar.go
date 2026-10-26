@@ -7,35 +7,34 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/doctor"
 	"github.com/Icewater1337/fridolin/internal/google"
 )
 
 // The calendar grants' doctor check: a brain whose Google sign-in Google
 // refused, or that needs a new consent, has no calendar until the owner
 // connects it again.
-var calendarDoctorChecks = []DoctorCheck{
+var calendarDoctorChecks = []doctor.Check{
 	{ID: "calendar-grants", Title: "brains' Google Calendar sign-ins work", Run: checkCalendarGrants},
 }
-
-func init() { DoctorRegistry = append(DoctorRegistry, calendarDoctorChecks...) }
 
 // checkCalendarGrants reads the bridge's record of the grants
 // (google/calendar_health.json) and warns about each configured brain
 // whose grant broke.
-func checkCalendarGrants(_ context.Context, env *DoctorEnv) DoctorResult {
+func checkCalendarGrants(_ context.Context, env *doctor.Env) doctor.Result {
 	if env.Config == nil {
-		return noConfig
+		return doctor.NoConfig
 	}
 	data, err := env.ReadFile(env.Config.Boot.Layout().CalendarHealth())
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return DoctorResult{Status: DoctorOK, Detail: "no brain's calendar has been used yet"}
+		return doctor.Result{Status: doctor.OK, Detail: "no brain's calendar has been used yet"}
 	case err != nil:
-		return DoctorResult{Status: DoctorWarn, Detail: "cannot read the calendar health file: " + err.Error()}
+		return doctor.Result{Status: doctor.Warn, Detail: "cannot read the calendar health file: " + err.Error()}
 	}
 	grants, err := google.ReadGrantHealth(data)
 	if err != nil {
-		return DoctorResult{Status: DoctorWarn, Detail: "the calendar health file is unreadable: " + err.Error()}
+		return doctor.Result{Status: doctor.Warn, Detail: "the calendar health file is unreadable: " + err.Error()}
 	}
 	configured := map[string]bool{}
 	for _, ref := range env.Config.BrainDirs {
@@ -50,10 +49,10 @@ func checkCalendarGrants(_ context.Context, env *DoctorEnv) DoctorResult {
 		}
 	}
 	if len(broken) == 0 {
-		return DoctorResult{Status: DoctorOK, Detail: "no brain's calendar sign-in is broken"}
+		return doctor.Result{Status: doctor.OK, Detail: "no brain's calendar sign-in is broken"}
 	}
 	slices.Sort(broken)
-	return DoctorResult{Status: DoctorWarn,
+	return doctor.Result{Status: doctor.Warn,
 		Detail: "Google Calendar does not work for " + strings.Join(broken, "; "),
 		Fix:    "Dashboard → Brains → the brain → Calendar → Reconnect (docs/CALENDAR.md, Calendar overview)"}
 }
