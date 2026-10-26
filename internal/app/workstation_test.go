@@ -69,9 +69,11 @@ func (h *harness) workstationNode(name, addr, folder string) (string, *nodeagent
 	done := make(chan struct{})
 	go func() { _ = agent.Run(ctx); close(done) }()
 	t.Cleanup(func() { cancel(); <-done })
+	// The agent's own connection, not Join's, which may still count as
+	// online and then drop (#301).
 	h.WaitFor(name+" offering agent and terminal", func() bool {
 		n, err := h.b.nodes.Registry().Get(j.ID)
-		return err == nil && h.b.nodes.Online(j.ID) && n.Declared.Agent != nil && n.Declared.Terminal != nil
+		return err == nil && agent.Connected() && h.b.nodes.Online(j.ID) && n.Declared.Agent != nil && n.Declared.Terminal != nil
 	})
 	return j.ID, agent
 }
