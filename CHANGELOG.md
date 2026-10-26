@@ -1152,6 +1152,13 @@ for compatibility.
 
 ### Fixed
 
+- **`fridolin nodes update` waits for a box as long as the core does.**
+  It gave up after 12 minutes with "still updating after 12m0s", while a
+  box's hourly updater takes up to an hour and the core waits an hour
+  and a half. The core now gives each update's end of wait
+  (`wait_until` in `GET /api/nodes`), the command waits until then, and
+  says every minute that the update is still going.
+
 - **`!deny <ref>` no longer shuts out an approved node.** With nothing
   waiting under that ref, for instance a second `!deny` of a node's
   request for more, it fell through to `!revoke`: the node was shut out
