@@ -502,6 +502,56 @@ func TestDeletedHotFileKeepsItsColdCopy(t *testing.T) {
 	}
 }
 
+// An upload that reached cold but failed a later check must record what
+// cold now holds, or a delete leaves a row whose hash no copy matches.
+func TestUploadFailingAfterPutRecordsWhatColdHolds(t *testing.T) {
+	for name, fail := range map[string]func(f *fixture) func(op, key string) error{
+		"verify fails": func(f *fixture) func(op, key string) error {
+			return func(op, key string) error {
+				if op == "stat" {
+					f.cold.Fail = nil
+					return errors.New("network blip")
+				}
+				return nil
+			}
+		},
+		"changed during upload": func(f *fixture) func(op, key string) error {
+			return func(op, key string) error {
+				if op == "put" {
+					f.cold.Fail = nil
+					f.clock.Advance(time.Minute)
+					f.write("documents/a.md", "B, saved again", 0)
+				}
+				return nil
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.write("documents/a.md", "A", 0)
+			f.sync()
+			f.clock.Advance(time.Minute)
+			f.write("documents/a.md", "B, edited", 0)
+			f.cold.Fail = fail(f)
+			if rep := f.sync(); rep.Failed["documents/a.md"] == "" {
+				t.Fatalf("sync = %+v", rep)
+			}
+			want, _ := f.coldBytes("documents/a.md")
+			if err := os.Remove(filepath.Join(f.root, "documents/a.md")); err != nil {
+				t.Fatal(err)
+			}
+			f.sync()
+			p, err := f.v.Get(bg, "documents/a.md", GetOptions{})
+			if err != nil {
+				t.Fatalf("Get = %v", err)
+			}
+			if got := readAll(t, p); got != want {
+				t.Fatalf("Get = %q, cold holds %q", got, want)
+			}
+		})
+	}
+}
+
 func TestRemovedFolderSyncsItsRows(t *testing.T) {
 	f := newFixture(t)
 	f.write("dir/sub/a.md", "a", 0)
