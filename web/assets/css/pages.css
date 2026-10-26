@@ -214,6 +214,13 @@ blockquote.preview {
 
 .handoff { max-width: 40rem; margin: 48px auto; padding: 0 16px; display: grid; gap: 16px; }
 
+/* ── integrations: OpenAI and ElevenLabs (components/connection-card.js) ── */
+
+.connection-part { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
+.connection-part:empty { display: none; }
+.connection-part > h3 { margin: 0; font-size: 14px; }
+.connection-brains { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+
 /* ── site ───────────────────────────────────────────────────────────────── */
 
 .site-block { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }

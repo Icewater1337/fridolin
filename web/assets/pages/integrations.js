@@ -1,7 +1,10 @@
 // Integrations: services that feed brains and that runs reach. GitHub
-// (components/github-card.js), and the Plaud recorder: connect with Plaud's
+// (components/github-card.js); the Plaud recorder: connect with Plaud's
 // own sign-in, pick the brain that receives recordings, and see what was
-// handed over last.
+// handed over last; and the connections of Fridolin, OpenAI and ElevenLabs
+// (components/connection-card.js): one API key each that the bridge holds
+// and calls the provider with for site modules and the brains you pick,
+// with each one's usage this month.
 
 import { del, download, post, put } from '../app/api.js';
 import { brainsResource, resource } from '../app/resources.js';
@@ -16,6 +19,7 @@ import { pill, callout, timeAgo, mono, pageHeader, loading } from '../components
 import { chatEl, chatName } from '../components/chat.js';
 import { liveForm } from '../components/live-form.js';
 import { githubCard } from '../components/github-card.js';
+import { connectionCard } from '../components/connection-card.js';
 
 /** @import { PageModule } from '../app/page.js' */
 /** @import { Brain, PlaudAppBuild, PlaudConnectJob, PlaudForward, PlaudGivenUp, PlaudPhone, PlaudSettings, PlaudStatus } from '../../types/api.js' */
@@ -53,9 +57,11 @@ export default /** @satisfies {PageModule} */ ({
   title: 'Integrations',
   render(root, ctx) {
     const card = h('section.card', loading('Checking Plaud…'));
+    const openai = connectionCard(ctx, 'openai');
+    const elevenlabs = connectionCard(ctx, 'elevenlabs');
     mount(root,
-      pageHeader('Integrations', 'Services that hand things to your brains on their own, and that their runs may use.'),
-      h('div.page-stack', githubCard(ctx), card));
+      pageHeader('Integrations', 'Services that hand things to your brains on their own, and that their runs and your site’s modules may use.'),
+      h('div.page-stack', githubCard(ctx), card, openai, elevenlabs));
 
     // The status never waits for Plaud: who is signed in is what the
     // bridge asked last.
@@ -81,7 +87,7 @@ export default /** @satisfies {PageModule} */ ({
     const phonesBox = h('div');
     const appBox = h('div.stack', keysBox, buildBox, phonesBox);
     const settings = liveForm({ build: buildSettings, edits: (d) => d.st });
-    ctx.dirty = () => settings.dirty();
+    ctx.dirty = () => settings.dirty() || openai.dirty() || elevenlabs.dirty();
 
     /** @type {(state: string, kind: string) => HTMLElement} */
     const head = (state, kind) => h('div.card-head',

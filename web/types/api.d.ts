@@ -533,6 +533,7 @@ export interface ConfigFile {
   startup_checks: StartupChecksConfig;
   backup: BackupConfig;
   plaud: PlaudConfig;
+  connections?: ConnectionsConfig;
   dashboard: DashboardConfig;
   script_api: ScriptAPIConfig;
   core: CoreConfig;
@@ -1875,6 +1876,63 @@ export interface PlaudStatus {
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/connections
+export interface Connection {
+  id: 'openai' | 'elevenlabs';
+  title: string;
+  configured: boolean;
+  /** The key's last characters, or "". */
+  key_hint: string;
+  organization?: string;
+  project?: string;
+  /** ElevenLabs: the default voice id, or "". */
+  voice?: string;
+  ops: string[];
+  brains: string[];
+  brain_monthly_usd: number;
+}
+export interface ConnectionModule {
+  module: string;
+  connection: 'openai' | 'elevenlabs';
+  use: string[];
+  models: string[];
+  monthly_usd: number;
+}
+export interface ConnectionUsage {
+  connection: 'openai' | 'elevenlabs';
+  /** "module:<id>" or "brain:<id>" */
+  caller: string;
+  requests: number;
+  errors: number;
+  audio_seconds: number;
+  input_tokens: number;
+  output_tokens: number;
+  characters: number;
+  /** Estimated cost in USD. */
+  usd: number;
+  /** The caller's monthly limit in USD; 0 for none. */
+  limit_usd: number;
+}
+export interface Connections {
+  /** "YYYY-MM", UTC */
+  month: string;
+  connections: Connection[];
+  modules: ConnectionModule[];
+  usage: ConnectionUsage[];
+}
+
+export interface ConnectionConfig {
+  brains?: string[];
+  brain_monthly_usd?: number;
+  /** ElevenLabs only: the default voice id. */
+  voice?: string;
+}
+export interface ConnectionsConfig {
+  openai?: ConnectionConfig;
+  elevenlabs?: ConnectionConfig;
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/housekeeping
 
 export interface HousekeepingMember {
@@ -2413,6 +2471,7 @@ export interface ApiGet {
   '/api/site/proposals': SiteProposals;
   '/api/site/builders': SiteBuilders;
   '/api/plaud/status': PlaudStatus;
+  '/api/connections': Connections;
   '/api/housekeeping': HousekeepingStatus;
   '/api/github': GitHubStatus;
   '/api/google/client': GoogleClient;

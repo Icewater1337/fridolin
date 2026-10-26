@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseTs, relTime, hhmmss, stamp, fmtDuration, fmtBytes, plural, prettyJSON } from '../assets/lib/format.js';
+import { parseTs, relTime, hhmmss, stamp, fmtDuration, fmtBytes, fmtUSD, plural, prettyJSON } from '../assets/lib/format.js';
 
 test('parseTs', async (t) => {
   /** @type {[string, import('../assets/lib/format.js').Timestamp, number | null][]} */
@@ -102,6 +102,23 @@ test('fmtBytes', async (t) => {
   ];
   for (const [input, want] of cases) {
     await t.test(String(input), () => assert.equal(fmtBytes(input), want));
+  }
+});
+
+test('fmtUSD', async (t) => {
+  /** @type {[number | undefined, string][]} */
+  const cases = [
+    [20, '$20'],
+    [0, '$0'],
+    [undefined, '$0'],
+    [0.05, '$0.05'],
+    [1.5, '$1.50'],
+    [19.999, '$20.00'],
+    [0.004, 'under $0.01'],
+    [0.005, '$0.01'],
+  ];
+  for (const [input, want] of cases) {
+    await t.test(String(input), () => assert.equal(fmtUSD(input), want));
   }
 });
 
