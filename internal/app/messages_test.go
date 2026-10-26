@@ -169,6 +169,7 @@ func catalogue() []struct{ name, text string } {
 		{"nodeRevokedReply", outboundmsg.NodeRevokedReply("laptop", "8233270f8a24")},
 		{"nodeIsRevokedReply", outboundmsg.NodeIsRevokedReply("laptop", "8233270f8a24")},
 		{"nodeUnknownReply", outboundmsg.NodeUnknownReply("nope")},
+		{"nodeNothingWaitsReply", outboundmsg.NodeNothingWaitsReply("abc123")},
 		{"approvalYes", outboundmsg.ApprovalYes},
 		{"approvalNo", outboundmsg.ApprovalNo},
 		{"approvalDraft", outboundmsg.ApprovalDraft},

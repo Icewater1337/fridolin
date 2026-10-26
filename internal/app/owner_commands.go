@@ -111,6 +111,12 @@ func (b *App) ownerCommand(m brainruntime.Inbound, command string, args []string
 		}
 	}
 	if command == "!deny" {
+		// Only a node still waiting to join is shut out; an approved one
+		// keeps its approval, as only !revoke <ref> takes that away.
+		if cur, err := b.nodes.Registry().Get(args[0]); err == nil && cur.Device != nodeproto.DevicePending {
+			record(args[0], "refused: nothing waits")
+			return outboundmsg.NodeNothingWaitsReply(args[0])
+		}
 		command = "!revoke"
 	}
 	return b.nodeCommand(command, args[0], record)

@@ -136,6 +136,25 @@ func TestApproveUnexpected(t *testing.T) {
 	}
 }
 
+// TestDenyRefKeepsApprovedNode: !deny <ref> for an approved node with
+// nothing waiting, sent twice as a resend would, leaves it approved.
+func TestDenyRefKeepsApprovedNode(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, `{"nodes": {"enabled": true}}`)
+	addr := h.StartNodes()
+	id := h.joinNode(addr, "laptop", nodes.JoinedFromChat, nodeproto.Capabilities{Host: true})
+	h.WaitSent(harnessDM, "*laptop*")
+	h.approveNode(id)
+	for range 2 {
+		if got := h.Answer(inbound{JID: harnessDM, Text: "!deny " + id}); got != outboundmsg.NodeNothingWaitsReply(id) {
+			t.Errorf("!deny %s: %q", id, got)
+		}
+	}
+	if d := h.device(id); d != nodeproto.DeviceApproved {
+		t.Errorf("after !deny: %s", d)
+	}
+}
+
 // TestApproveExpired: a machine that waited longer than approvalFreshFor
 // is not approved by !approve alone without a second one.
 func TestApproveExpired(t *testing.T) {

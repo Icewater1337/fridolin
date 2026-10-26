@@ -1152,6 +1152,14 @@ for compatibility.
 
 ### Fixed
 
+- **`!deny <ref>` no longer shuts out an approved node.** With nothing
+  waiting under that ref, for instance a second `!deny` of a node's
+  request for more, it fell through to `!revoke`: the node was shut out
+  and its core-host secrets forgotten. It now answers that nothing
+  waits and leaves the node as it was; only a node still waiting to
+  join is shut out, and `!revoke <ref>` is the way to shut out an
+  approved one.
+
 - **A box's FrIDE no longer stores a Claude token that cannot sign in.**
   On Windows, `box.ps1` piped the token through Windows PowerShell,
   which ends it with a carriage return (and can start it with a byte
