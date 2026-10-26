@@ -552,7 +552,7 @@ class FFmpegTest(TempDirTestCase):
 
 class ScriptMetadataTest(unittest.TestCase):
     """`uv run --script` installs the PEP 723 block at the top of
-    transcribe.py, pip and Dependabot read requirements-transcription.txt:
+    transcribe.py, pip and Renovate read requirements-transcription.txt:
     the two lists must not drift apart."""
 
     # The reference regular expression of PEP 723.

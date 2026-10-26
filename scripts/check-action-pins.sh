@@ -2,7 +2,7 @@
 #
 # Fail when a GitHub workflow uses an action by tag or branch instead of a
 # full commit SHA. A tag can be moved to other code after it was reviewed; a
-# SHA cannot. Dependabot moves the pins and the release comments next to
+# SHA cannot. Renovate moves the pins and the release comments next to
 # them. A local action (./path) needs no pin, and a docker:// image needs a
 # digest.
 #

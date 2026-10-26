@@ -52,12 +52,17 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 # ── restic, rclone and litestream, from their releases ────────────────────
 FROM ${RUNTIME_IMAGE} AS tools
 ARG TARGETARCH
+# renovate: datasource=github-releases depName=restic/restic
 ARG RESTIC_VERSION=0.19.1
+# renovate: datasource=github-releases depName=rclone/rclone
 ARG RCLONE_VERSION=1.75.1
+# renovate: datasource=github-releases depName=benbjohnson/litestream
 ARG LITESTREAM_VERSION=0.5.17
 # What brains' skills run besides: GitHub's CLI and Cloudflare's tunnel
 # (quick tunnels to a dev server).
+# renovate: datasource=github-releases depName=cli/cli
 ARG GH_VERSION=2.102.0
+# renovate: datasource=github-releases depName=cloudflare/cloudflared
 ARG CLOUDFLARED_VERSION=2026.10.0
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl bzip2 unzip \
@@ -120,13 +125,16 @@ RUN python3 -m venv /opt/fridolin/venv \
 # such as the Plaud CLI and the site process.
 FROM ${NODE_IMAGE} AS node
 # At least the version internal/claudecli tests against (TestedClaudeVersion).
+# renovate: datasource=npm depName=@anthropic-ai/claude-code
 ARG CLAUDE_CODE_VERSION=2.1.303
 # Codex (agent_provider "codex"), at least the version the bridge is tested
 # against; its package installs the native build for the image's platform.
 # Each brain signs in to it with a file of its own (brains/<id>/codex/
 # auth.json in the data dir), so a sign-in moves with an export.
+# renovate: datasource=npm depName=@openai/codex
 ARG CODEX_VERSION=0.163.0
 # The Plaud CLI (plaud.enabled), as docs/PLAUD.md installs it.
+# renovate: datasource=npm depName=@plaud-ai/cli
 ARG PLAUD_CLI_VERSION=0.3.15
 RUN npm install -g --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
       "@openai/codex@${CODEX_VERSION}" "@plaud-ai/cli@${PLAUD_CLI_VERSION}" \

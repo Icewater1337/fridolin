@@ -1,0 +1,139 @@
+// Renovate (the Mend Renovate GitHub app) proposes the dependency updates:
+// Go modules, the actions the workflows pin by SHA, the Python tools, the
+// site's npm packages, the containers' base images, and the versions the
+// Dockerfiles and the Makefile pin by hand (marked with a "# renovate:"
+// comment above them). The daily dependency agent merges what it opens
+// (docs/DEPENDENCIES.md).
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: ["config:recommended"],
+  timezone: "Europe/Zurich",
+  // PRs come in the early morning; the dependency agent runs after.
+  schedule: ["before 6am"],
+  // A release has to be a week old before it is proposed, which keeps a
+  // hijacked release that is yanked within days out of the proposals.
+  // Security fixes come at once (vulnerabilityAlerts below).
+  minimumReleaseAge: "7 days",
+  internalChecksFilter: "strict",
+  // The dependency agent works through the queue; there is no reason to
+  // hold PRs back.
+  prHourlyLimit: 0,
+  prConcurrentLimit: 20,
+  labels: ["dependencies"],
+  dependencyDashboard: true,
+  osvVulnerabilityAlerts: true,
+  vulnerabilityAlerts: {
+    labels: ["dependencies", "security"],
+    minimumReleaseAge: null,
+    schedule: ["at any time"],
+  },
+  // A Go major release moves to a new import path; Renovate rewrites the
+  // imports along with go.mod.
+  postUpdateOptions: ["gomodTidy", "gomodUpdateImportPaths"],
+
+  packageRules: [
+    // Minor and patch releases of an ecosystem come grouped in one PR; a
+    // major release comes on its own, so a breaking change is looked at
+    // by itself.
+    {
+      matchManagers: ["gomod"],
+      matchUpdateTypes: ["minor", "patch", "digest"],
+      groupName: "Go modules",
+    },
+    {
+      matchManagers: ["github-actions"],
+      matchUpdateTypes: ["minor", "patch", "digest"],
+      groupName: "GitHub Actions",
+    },
+    {
+      matchManagers: ["pip_requirements"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "Python tools",
+    },
+    {
+      matchManagers: ["npm"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "site npm packages",
+    },
+    {
+      matchFileNames: ["container/**"],
+      matchUpdateTypes: ["minor", "patch", "digest"],
+      groupName: "container images and tools",
+    },
+    // The Plaud phone app (plaud-android/), which no CI job builds: the
+    // dependency agent builds it before merging (docs/DEPENDENCIES.md).
+    {
+      matchManagers: ["gradle", "gradle-wrapper"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "Plaud Android app",
+    },
+    {
+      matchFileNames: ["Makefile"],
+      matchUpdateTypes: ["minor", "patch"],
+      groupName: "Makefile tools",
+    },
+
+    // go.mod's go directive stays at oldstable, the Go release CI tests
+    // as the minimum (ci.yml); it moves by hand when a new Go release
+    // moves oldstable on.
+    {
+      matchManagers: ["gomod"],
+      matchDepTypes: ["golang", "toolchain"],
+      enabled: false,
+    },
+    // tailscale.com v1.104 needs Go 1.27.1 (its go directive), but go.mod
+    // stays at Go 1.26. Drop this once Go 1.28 is out and oldstable, and
+    // the directive, move to 1.27.
+    {
+      matchPackageNames: ["tailscale.com"],
+      allowedVersions: "<1.104.0",
+    },
+    // The core image builds the bridge with the go directive's release
+    // (container/Dockerfile); it moves with go.mod, not on its own.
+    {
+      matchFileNames: ["container/Dockerfile"],
+      matchDatasources: ["docker"],
+      matchPackageNames: ["golang"],
+      allowedVersions: "<1.27",
+    },
+    // debian:bookworm-YYYYMMDD-slim: a newer snapshot of the same release,
+    // which the versioning calls a major one; it goes with the container
+    // group all the same.
+    {
+      matchDatasources: ["docker"],
+      matchPackageNames: ["debian"],
+      versioning: "regex:^(?<compatibility>[a-z]+)-(?<major>\\d{8})-slim$",
+      groupName: "container images and tools",
+      separateMajorMinor: false,
+    },
+    // tools/requirements*.txt: the ">=" floors are deliberate (the oldest
+    // release each feature was checked with), and the "<" ceilings the
+    // next major release, so a range only moves when a new release falls
+    // outside it; exact pins (ruff) move with every release.
+    {
+      matchManagers: ["pip_requirements"],
+      rangeStrategy: "widen",
+    },
+    {
+      matchFileNames: ["tools/requirements-dev.txt"],
+      rangeStrategy: "replace",
+    },
+  ],
+
+  customManagers: [
+    // A version pinned by hand, with a comment above it:
+    //
+    //     # renovate: datasource=github-releases depName=restic/restic
+    //     ARG RESTIC_VERSION=0.19.1
+    //
+    // The version is written without a leading v; tags with one match too.
+    {
+      customType: "regex",
+      managerFilePatterns: ["/(^|/)Dockerfile$/", "/^Makefile$/"],
+      matchStrings: [
+        "#\\s*renovate:\\s*datasource=(?<datasource>\\S+)\\s+depName=(?<depName>\\S+)\\s*\\n(?:ARG\\s+)?[A-Z_]+_VERSION\\s*:?=\\s*(?<currentValue>\\S+)",
+      ],
+      extractVersionTemplate: "^v?(?<version>.+)$",
+    },
+  ],
+}

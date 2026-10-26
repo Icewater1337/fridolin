@@ -560,5 +560,6 @@ machine must already be a node (path B). In short:
   ("How it works"); configuration in `docs/CONFIGURATION.md`; brains in
   `docs/BRAINS.md`; backups in `docs/BACKUP.md`; Google Calendar in
   `docs/CALENDAR.md`; the Plaud recorder in `docs/PLAUD.md`; the site in
-  `docs/SITE.md`; what stays compatible between versions, and how something
-  is retired, in `docs/COMPATIBILITY.md`.
+  `docs/SITE.md`; dependency updates (Renovate and the daily agent that
+  merges them) in `docs/DEPENDENCIES.md`; what stays compatible between
+  versions, and how something is retired, in `docs/COMPATIBILITY.md`.

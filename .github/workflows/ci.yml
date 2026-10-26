@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 # Actions are pinned to a full commit SHA, which unlike a tag cannot be moved
-# to other code; the comment names the release. Dependabot proposes updates,
+# to other code; the comment names the release. Renovate proposes updates,
 # and scripts/check-action-pins.sh (make lint-actions) fails on a tag.
 
 jobs:
