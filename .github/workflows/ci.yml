@@ -289,36 +289,11 @@ jobs:
           go-version: stable
           cache: true
 
-      # go test fuzzes one target of one package at a time, so each target
-      # in turn, found by name: a new one needs no change here. The list is
-      # taken first, so a test binary that does not build fails the step
-      # instead of leaving nothing to fuzz. A short -fuzzminimizetime keeps
-      # the engine from spending a target's twenty seconds shrinking one new
-      # input (60 seconds each by default).
+      # fuzz-short (Makefile) fuzzes each target in turn, found by name, so
+      # a new one needs no change here. It goes on past a target that fails,
+      # and fails at the end.
       - name: fuzz each target for 20 seconds
-        run: |
-          failed=""
-          for pkg in $(go list ./...); do
-            list=$(go test -list '^Fuzz' "$pkg") || exit 1
-            targets=$(printf '%s\n' "$list" | grep '^Fuzz' || true)
-            [ -n "$targets" ] || continue
-            # The tests link testdata in their working directory to the
-            # package's (linkTestdata), and the engine saves a failing input
-            # there: without the directory the link dangles, and the input
-            # would only be in the log.
-            mkdir -p "$(go list -f '{{.Dir}}' "$pkg")/testdata"
-            for target in $targets; do
-              echo "::group::$target ($pkg)"
-              if ! go test -run='^$' -fuzz="^${target}\$" -fuzztime=20s -fuzzminimizetime=5s "$pkg"; then
-                failed="$failed $target"
-              fi
-              echo "::endgroup::"
-            done
-          done
-          if [ -n "$failed" ]; then
-            echo "::error::fuzzing found a failing input for:$failed"
-            exit 1
-          fi
+        run: make fuzz-short FUZZTIME=20s
 
       # The engine saves a failing input under testdata/fuzz/<target> in the
       # package. Commit it with the fix, and go test runs it from then on.
