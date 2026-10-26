@@ -260,7 +260,10 @@ func TestApproveSeveral(t *testing.T) {
 		h.WaitSent(harnessDM, "*"+name+"*")
 	}
 
-	notice := h.Answer(inbound{JID: harnessDM, Text: "!approve"})
+	// The poll and the notice under it may reach the outbox in either
+	// order, so wait for the notice by its text rather than take the first.
+	h.Inject(inbound{JID: harnessDM, Text: "!approve"})
+	notice := h.WaitSent(harnessDM, "Tick every one you approve in the poll above")
 	if !strings.HasPrefix(notice, "🗳️ Tick every one you approve in the poll above; each tick approves it. Nobody else's vote counts.") {
 		t.Fatalf("!approve with four waiting: %q", notice)
 	}
