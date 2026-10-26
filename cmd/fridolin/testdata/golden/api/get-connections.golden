@@ -1,0 +1,41 @@
+GET /api/connections
+200 OK
+Content-Type: application/json
+
+{
+  "connections": [
+    {
+      "brain_monthly_usd": 10,
+      "brains": [
+        "main"
+      ],
+      "configured": true,
+      "id": "openai",
+      "key_hint": "…a1b2",
+      "ops": [
+        "transcribe",
+        "responses"
+      ],
+      "organization": "",
+      "project": "",
+      "title": "OpenAI"
+    },
+    {
+      "brain_monthly_usd": 0,
+      "brains": [],
+      "configured": false,
+      "id": "elevenlabs",
+      "key_hint": "",
+      "ops": [
+        "tts",
+        "transcribe",
+        "voices"
+      ],
+      "title": "ElevenLabs",
+      "voice": ""
+    }
+  ],
+  "modules": [],
+  "month": "<MONTH>",
+  "usage": []
+}

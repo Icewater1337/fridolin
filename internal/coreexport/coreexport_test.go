@@ -99,6 +99,8 @@ func dataDir(t *testing.T) string {
 	write(t, dir, "brains-folders/family/CLAUDE.md", "# family", 0o644)
 	write(t, dir, "brains-folders/family/node_modules/x/index.js", "x", 0o644)
 	write(t, dir, "google/oauth_client.json", "{}", 0o600)
+	write(t, dir, "connections/openai.json", "{}", 0o600)
+	write(t, dir, "connections/usage.json", "{}", 0o600)
 	write(t, dir, "otp/family.json", "{}", 0o600)
 	write(t, dir, "rclone/rclone.conf", "[drive]", 0o600)
 	write(t, dir, "tsnet/tailscaled.state", "state", 0o600)
@@ -195,7 +197,7 @@ func TestExportImportRoundTrip(t *testing.T) {
 	}
 	want := []string{
 		"audit/2026-10-20.jsonl", "brains-folders/family/CLAUDE.md", "brains/family/claude/settings.json",
-		"bridge.db", "config.json", "core/encryption.json", "dashboard.token", "google/oauth_client.json", "nodes/registry.json",
+		"bridge.db", "config.json", "connections/openai.json", "connections/usage.json", "core/encryption.json", "dashboard.token", "google/oauth_client.json", "nodes/registry.json",
 		"otp/family.json", "rclone/rclone.conf", "scripts.token", "secrets/b2.age", "tsnet/tailscaled.state", "vault.db",
 	}
 	if got := listFiles(t, staging); !slices.Equal(got, want) {

@@ -608,7 +608,9 @@ func missingKeys(data []byte, t reflect.Type, prefix string) []string {
 		}
 		raw, ok := obj[name]
 		if !ok {
-			if !slices.Contains(strings.Split(opts, ","), "omitempty") {
+			// A key Go leaves out when it is empty (omitempty) or zero
+			// (omitzero) may be left out here too.
+			if o := strings.Split(opts, ","); !slices.Contains(o, "omitempty") && !slices.Contains(o, "omitzero") {
 				out = append(out, prefix+name)
 			}
 			continue
@@ -647,6 +649,8 @@ var securitySettings = []struct {
 	{"http_listen", func(c *Settings) any { return c.HTTPListen }},
 	{"data_dir", func(c *Settings) any { return c.DataDir }},
 	{"db_path", func(c *Settings) any { return c.DBPath }},
+	{"connections.openai.brains", func(c *Settings) any { return c.Connections.OpenAI.Brains }},
+	{"connections.elevenlabs.brains", func(c *Settings) any { return c.Connections.ElevenLabs.Brains }},
 }
 
 // LogSecurityChanges logs, in one line, how an update changed the security

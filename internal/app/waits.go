@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/connections"
 	"github.com/Icewater1337/fridolin/internal/nodes"
 )
 
@@ -106,4 +107,7 @@ type testHooks struct {
 	// vaultBackends builds the vault's backends in place of
 	// defaultVaultBackends: tests hand in local ones.
 	vaultBackends func(ctx context.Context, s *vaultService, cfg *config.Settings) (vaultBackends, error)
+	// connections points the calls of the connections at fake OpenAI and
+	// ElevenLabs servers in place of the real ones.
+	connections *connections.Endpoints
 }

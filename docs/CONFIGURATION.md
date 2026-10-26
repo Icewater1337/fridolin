@@ -1156,7 +1156,8 @@ folders of their own in the data dir: `secrets/` (age-encrypted files),
 `audit/` (the audit log, JSONL), `vault.db` (the vault's index), `vault/`
 (with `documents/` and `workspaces/`), `nodes/` (the node registry and
 keys), `tsnet/` (the tailnet node's state) and `core/` (the lease's state
-and exports being staged). Each is made, with mode 0700, by the feature
+and exports being staged). `connections/` holds the OpenAI and ElevenLabs
+keys and their usage log ([CONNECTIONS.md](CONNECTIONS.md)). Each is made, with mode 0700, by the feature
 that uses it when it runs; the bridge does not make them as it starts, so
 a data dir with all of these features off has none of them.
 
@@ -1739,6 +1740,30 @@ threads within a minute goes out once, naming the threads. Work that a
 scheduled agent handed to FrIDE never posts to a chat: its news goes to
 the agent, which answers FrIDE itself and reports only what matters
 ([BRAINS.md](BRAINS.md#scheduled-agents)).
+
+### `connections`
+
+Which brains may use Fridolin's OpenAI and ElevenLabs keys through their
+tools, and what each may spend a month
+([CONNECTIONS.md](CONNECTIONS.md)). The keys themselves are not here:
+the dashboard keeps them in `connections/` in the data dir.
+
+```json
+"connections": {
+  "openai":     { "brains": ["personal"], "brain_monthly_usd": 10 },
+  "elevenlabs": { "brains": ["personal"], "brain_monthly_usd": 5, "voice": "21m00Tcm4TlvDq8ikWAM" }
+}
+```
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `openai.brains`, `elevenlabs.brains` | none | the brains whose runs get the connection's tools, while it has a key |
+| `openai.brain_monthly_usd`, `elevenlabs.brain_monthly_usd` | `0` | each brain's monthly limit in US dollars, estimated; `0` is no limit of Fridolin's; at most 10000 |
+| `elevenlabs.voice` | none | the voice id text-to-speech uses when a caller names none |
+
+The log names every change to the `brains` lists, as it does for the
+other settings that decide what brains may reach. Site modules declare
+their own use and limit in their `module.json`, not here.
 
 ---
 

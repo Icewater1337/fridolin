@@ -217,5 +217,20 @@
   },
   "fride": {
     "news": "all"
+  },
+  "connections": {
+    "openai": {
+      "brains": [
+        "main"
+      ],
+      "brain_monthly_usd": 10
+    },
+    "elevenlabs": {
+      "brains": [
+        "main"
+      ],
+      "brain_monthly_usd": 5,
+      "voice": "21m00Tcm4TlvDq8ikWAM"
+    }
   }
 }

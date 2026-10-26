@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/connections"
 	"github.com/Icewater1337/fridolin/internal/google"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
@@ -63,6 +64,8 @@ func goldenBridge(t *testing.T) (h *harness, s *scrubber, fakes string) {
 	fakes = fsx.Canonical(t.TempDir())
 	rclone := fakeRclone(t, fakes)
 	newFakePlaud(t)
+	// No call of the connections may leave the test.
+	optionsOf(t).hooks.connections = &connections.Endpoints{OpenAI: "http://127.0.0.1:9", ElevenLabs: "http://127.0.0.1:9"}
 	h = newHarness(t, `{
 		"ingest": {"enabled": true},
 		"backup": {"enabled": true, "rclone_path": "`+rclone+`"},
@@ -93,6 +96,14 @@ func goldenBridge(t *testing.T) (h *harness, s *scrubber, fakes string) {
 	}
 	if err := os.WriteFile(filepath.Join(h.DataDir(), "google_calendar_token_main.json"), tok, 0o600); err != nil {
 		t.Fatal(err)
+	}
+
+	// An OpenAI key, which main may use.
+	if w := h.Do("PUT", "/api/connections/openai", map[string]string{"api_key": goldenOpenAIKey}); w.Code != http.StatusOK {
+		t.Fatalf("the OpenAI key: %d %s", w.Code, w.Body.String())
+	}
+	if w := h.Do("PUT", "/api/connections/openai/brains", map[string]any{"brains": []string{"main"}, "brain_monthly_usd": 10}); w.Code != http.StatusOK {
+		t.Fatalf("the OpenAI brains: %d %s", w.Code, w.Body.String())
 	}
 
 	h.Inject(inbound{JID: harnessDM, Text: "hello"})
@@ -195,6 +206,8 @@ func TestGoldenGETEndpoints(t *testing.T) {
 		{"threads", "/api/threads", []string{"run", "duration_ms"}},
 		{"audit", "/api/audit", []string{"run", "duration_ms"}},
 		{"fride", "/api/fride", nil},
+		// This month.
+		{"connections", "/api/connections", []string{"month"}},
 		{"brain-skills", "/api/brains/main/skills", nil},
 		{"brain-skills-unknown-brain", "/api/brains/nope/skills", nil},
 		{"unknown-endpoint", "/api/nope", nil},

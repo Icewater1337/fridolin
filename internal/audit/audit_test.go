@@ -63,6 +63,7 @@ func TestScrubCommandLines(t *testing.T) {
 		"gh auth login --with-token ghp_abcdefgh1234":            "ghp_abcdefgh1234",
 		"mysql --password=hunter2hunter -u root":                 "hunter2hunter",
 		"TOKEN=abc123 ./deploy.sh":                               "abc123",
+		"ElevenLabs: invalid key sk_0123abcd4567":                "sk_0123abcd4567",
 	} {
 		if out := Scrub(in); strings.Contains(out, leak) {
 			t.Errorf("Scrub(%q) = %q, still has %q", in, out, leak)

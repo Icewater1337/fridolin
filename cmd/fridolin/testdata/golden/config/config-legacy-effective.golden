@@ -20,6 +20,7 @@
   "codex_effort": "high",
   "codex_model": "gpt-6.1-sol",
   "codex_path": "codex",
+  "connections": {},
   "core": {
     "lease": {
       "enabled": false,

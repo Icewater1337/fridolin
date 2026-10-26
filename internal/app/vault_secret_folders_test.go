@@ -346,6 +346,12 @@ func TestSecretFoldersStayOutOfTheColdTierAndSnapshots(t *testing.T) {
 	if !slices.Contains(ex, cfg.Sandbox.CredentialsDir) || !slices.Contains(ex, cfg.Vault.SecretDirs[0]) {
 		t.Errorf("the snapshots' excludes: %q", ex)
 	}
+	// The connections' keys and usage go with the data dir's snapshot.
+	for _, ex := range dataDirExcludes(cfg.DataDir, nil) {
+		if m, _ := filepath.Match(ex, filepath.Join(cfg.DataDir, "connections", "openai.json")); m || strings.HasPrefix(filepath.Join(cfg.DataDir, "connections"), ex) {
+			t.Errorf("%s keeps the connections out of the snapshot", ex)
+		}
+	}
 	if ex := dataDirExcludes(cfg.DataDir, nil); !slices.Contains(ex, filepath.Join(cfg.DataDir, "core", "restored-secrets-*")) {
 		t.Errorf("the data dir's excludes: %q", ex)
 	}

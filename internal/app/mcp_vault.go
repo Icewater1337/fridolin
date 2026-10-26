@@ -202,7 +202,7 @@ func (b *App) callVaultPut(ctx context.Context, c mcpCaller, raw json.RawMessage
 		}
 		body = strings.NewReader(*args.Text)
 	} else {
-		f, err := b.openRunFile(c.run.Brain, args.From)
+		f, err := b.openRunFile(c.run.Brain, "from", args.From)
 		if err != nil {
 			return mcp.ErrorResult(err.Error()), nil
 		}
@@ -216,13 +216,14 @@ func (b *App) callVaultPut(ctx context.Context, c mcpCaller, raw json.RawMessage
 	return jsonResult(e), nil
 }
 
-// openRunFile opens from, a file brain id's run may read and hands to
-// vault_put: one in its folder, its media inbox or its temp folder. It
-// opens it through os.Root, so a symlink cannot lead out of them: the
-// bridge, which reads it, runs outside the sandbox.
-func (b *App) openRunFile(id, from string) (*os.File, error) {
+// openRunFile opens from, a file brain id's run may read and hands to a
+// tool as its argument arg (vault_put's from, a recording's path): one in
+// its folder, its media inbox or its temp folder. It opens it through
+// os.Root, so a symlink cannot lead out of them: the bridge, which reads
+// it, runs outside the sandbox.
+func (b *App) openRunFile(id, arg, from string) (*os.File, error) {
 	if !filepath.IsAbs(from) {
-		return nil, errors.New("from must be an absolute path")
+		return nil, errors.New(arg + " must be an absolute path")
 	}
 	from = filepath.Clean(from)
 	dirs := append(b.readableTrees(id), brainStateOf(AbsPath(b.cfgs.Boot().DataDir), id).tmp)
@@ -239,15 +240,15 @@ func (b *App) openRunFile(id, from string) (*os.File, error) {
 		f, err := root.Open(rel)
 		_ = root.Close()
 		if err != nil {
-			return nil, fmt.Errorf("from: %w", err)
+			return nil, fmt.Errorf("%s: %w", arg, err)
 		}
 		if st, err := f.Stat(); err != nil || !st.Mode().IsRegular() {
 			f.Close()
-			return nil, errors.New("from is not a regular file")
+			return nil, errors.New(arg + " is not a regular file")
 		}
 		return f, nil
 	}
-	return nil, errors.New("from must be a file in your folder, your media inbox or your temp folder")
+	return nil, errors.New(arg + " must be a file in your folder, your media inbox or your temp folder")
 }
 
 func (b *App) callVaultSearch(ctx context.Context, c mcpCaller, raw json.RawMessage) (*mcp.CallResult, error) {

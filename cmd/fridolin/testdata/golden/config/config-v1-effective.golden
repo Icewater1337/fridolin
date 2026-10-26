@@ -55,6 +55,21 @@
   "codex_effort": "high",
   "codex_model": "gpt-6.1-sol",
   "codex_path": "codex",
+  "connections": {
+    "elevenlabs": {
+      "brain_monthly_usd": 5,
+      "brains": [
+        "main"
+      ],
+      "voice": "21m00Tcm4TlvDq8ikWAM"
+    },
+    "openai": {
+      "brain_monthly_usd": 10,
+      "brains": [
+        "main"
+      ]
+    }
+  },
   "core": {
     "lease": {
       "enabled": true,

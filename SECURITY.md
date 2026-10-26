@@ -46,7 +46,12 @@ In scope, for example:
 - **Token exposure**: a way for a brain, a web page or another user of the
   computer to get the dashboard token or a dashboard session, the scripts
   token, another run's brain token, a Google token or the OAuth client's
-  secret, or the WhatsApp session in `bridge.db`.
+  secret, the OpenAI or ElevenLabs key of the connections, or the WhatsApp
+  session in `bridge.db`.
+- **The connections** ([docs/CONNECTIONS.md](docs/CONNECTIONS.md)): a
+  module calling OpenAI or ElevenLabs beyond what its live manifest
+  declares, a brain using a connection it is not granted, or a call that
+  gets past a caller's budget other than by calls at the same time.
 - **`/send` and `/ingest`**: a token reaching chats or brains it does not
   allow ([docs/API.md](docs/API.md#who-may-call)), a file taken in from
   outside the media folder, or a request a web page sent getting through.

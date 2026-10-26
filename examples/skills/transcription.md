@@ -26,6 +26,22 @@ If the file is audio or video but the *content* doesn't matter as text — a son
 a clip someone sent for fun, a voice memo being kept as a memento — use the
 **media-management** skill instead and leave it untranscribed.
 
+## Fridolin's transcription tools
+
+When your tools include `openai_transcribe` or `elevenlabs_transcribe`, the
+owner has let you use Fridolin's OpenAI or ElevenLabs key. Prefer them for
+**audio up to 25 MB**, such as voice notes: pass the file's path as the
+message gives it, and the `language` when you know it. The bridge makes the
+call; you never see or need a key. Then write the text to `transcripts/`
+yourself, as the local tool would (a `.txt` with the date and a short title,
+the original moved next to it with the same stem), and go on with
+[Afterwards](#afterwards).
+
+Use the local tool below instead when the owner wants this brain's audio to
+stay on this machine, for video, for a file over 25 MB, or when the tool
+answers an error such as an exhausted monthly budget. Without those tools,
+the local tool is the only way.
+
 ## Where things go
 
 Both the transcript and the original media land in `transcripts/` in your own
@@ -45,7 +61,8 @@ never overwrites an earlier recording: a stem that is already taken gets
 
 ## Do not improvise
 
-**Always call the transcription tool.** Never:
+**Always use a transcription tool: Fridolin's, or the local one below.**
+Never:
 
 - import `whisper` or `transformers` and run a model yourself
 - call a transcription API directly with `curl` or an SDK
