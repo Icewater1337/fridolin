@@ -12,6 +12,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/doctor"
 	"github.com/Icewater1337/fridolin/internal/lease"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
 )
@@ -20,30 +21,23 @@ import (
 // bubblewrap sandbox in the container. The first two read what the
 // running core writes to <data>/core (core_runtime.go), so doctor, run in
 // the container with docker exec, reaches no network itself.
-var coreDoctorChecks = []DoctorCheck{
+var coreDoctorChecks = []doctor.Check{
 	{ID: "tailnet", Title: "tailnet node and MagicDNS name", Required: true, Needed: "M1",
-		Applies: func(env *DoctorEnv) bool { return env.Config != nil && env.Config.Core.Tailnet.Enabled },
+		Applies: func(env *doctor.Env) bool { return env.Config != nil && env.Config.Core.Tailnet.Enabled },
 		Run:     checkTailnetUp},
 	{ID: "lease", Title: "core lease renewed", Required: true, Needed: "M1",
-		Applies: func(env *DoctorEnv) bool { return env.Config != nil && env.Config.Core.Lease.Enabled },
+		Applies: func(env *doctor.Env) bool { return env.Config != nil && env.Config.Core.Lease.Enabled },
 		Run:     checkLeaseFresh},
 	{ID: "container-sandbox", Title: "bubblewrap for brain runs", Required: true, Needed: "M1",
-		Applies: func(env *DoctorEnv) bool {
+		Applies: func(env *doctor.Env) bool {
 			return env.ConfigGOOS == config.ContainerGOOS && env.Config != nil && env.Config.Sandbox.Enabled
 		},
 		Run: checkContainerSandbox},
 }
 
-func init() { DoctorRegistry = append(DoctorRegistry, coreDoctorChecks...) }
-
-// onHost leaves out a check of the host (its Docker, its Tailscale, the
-// secrets in its keychain) when doctor runs inside the core's container,
-// which has none of them: the container gets the secrets as variables.
-func onHost(env *DoctorEnv) bool { return env.ConfigGOOS != config.ContainerGOOS }
-
 // readCoreState reads <data>/core/name into v; false when the core has
 // not written it.
-func (env *DoctorEnv) readCoreState(name string, v any) (bool, error) {
+func readCoreState(env *doctor.Env, name string, v any) (bool, error) {
 	data, err := env.ReadFile(filepath.Join(env.Config.Layout().Core(), name))
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
@@ -54,40 +48,40 @@ func (env *DoctorEnv) readCoreState(name string, v any) (bool, error) {
 	return true, json.Unmarshal(data, v)
 }
 
-func checkTailnetUp(_ context.Context, env *DoctorEnv) DoctorResult {
+func checkTailnetUp(_ context.Context, env *doctor.Env) doctor.Result {
 	var st tailnetStateRecord
-	ok, err := env.readCoreState(tailnetStateFile, &st)
+	ok, err := readCoreState(env, tailnetStateFile, &st)
 	switch {
 	case err != nil:
-		return DoctorResult{Status: DoctorFail, Detail: "reading the core's tailnet state: " + err.Error()}
+		return doctor.Result{Status: doctor.Fail, Detail: "reading the core's tailnet state: " + err.Error()}
 	case !ok:
-		return DoctorResult{Status: DoctorMissing, Detail: "the core has not started its tailnet node",
+		return doctor.Result{Status: doctor.Missing, Detail: "the core has not started its tailnet node",
 			Fix: "start the core (fridolin core start) with fridolin.tailscale.authkey in the keychain"}
 	}
-	when := " (as the core said " + env.now().Sub(st.UpdatedAt).Round(time.Second).String() + " ago)"
+	when := " (as the core said " + env.Time().Sub(st.UpdatedAt).Round(time.Second).String() + " ago)"
 	switch st.State {
 	case "up":
 		if !st.MagicDNS {
-			return DoctorResult{Status: DoctorWarn, Detail: "up as " + st.DNSName + ", but MagicDNS is off" + when,
+			return doctor.Result{Status: doctor.Warn, Detail: "up as " + st.DNSName + ", but MagicDNS is off" + when,
 				Fix: "turn MagicDNS on in the Tailscale admin console (DNS page)"}
 		}
-		return DoctorResult{Status: DoctorOK, Detail: "up as " + st.DNSName + ", dashboard at " + st.URL + when}
+		return doctor.Result{Status: doctor.OK, Detail: "up as " + st.DNSName + ", dashboard at " + st.URL + when}
 	case "starting":
-		return DoctorResult{Status: DoctorWarn, Detail: "joining the tailnet" + when + strings.TrimSuffix(": "+st.Error, ": "),
+		return doctor.Result{Status: doctor.Warn, Detail: "joining the tailnet" + when + strings.TrimSuffix(": "+st.Error, ": "),
 			Fix: "check the core's log for a sign-in link; store a reusable auth key as fridolin.tailscale.authkey"}
 	}
-	return DoctorResult{Status: DoctorFail, Detail: "the tailnet node failed: " + st.Error + when,
+	return doctor.Result{Status: doctor.Fail, Detail: "the tailnet node failed: " + st.Error + when,
 		Fix: "check fridolin.tailscale.authkey (a reusable key tagged tag:fridolin-core) and the core's log"}
 }
 
-func checkLeaseFresh(_ context.Context, env *DoctorEnv) DoctorResult {
+func checkLeaseFresh(_ context.Context, env *doctor.Env) doctor.Result {
 	var st leaseStateRecord
-	ok, err := env.readCoreState(leaseStateFile, &st)
+	ok, err := readCoreState(env, leaseStateFile, &st)
 	switch {
 	case err != nil:
-		return DoctorResult{Status: DoctorFail, Detail: "reading the core's lease state: " + err.Error()}
+		return doctor.Result{Status: doctor.Fail, Detail: "reading the core's lease state: " + err.Error()}
 	case !ok:
-		return DoctorResult{Status: DoctorMissing, Detail: "the core has not taken the lease on this data dir",
+		return doctor.Result{Status: doctor.Missing, Detail: "the core has not taken the lease on this data dir",
 			Fix: "fridolin core promote, then start the core"}
 	}
 	switch st.State {
@@ -96,52 +90,52 @@ func checkLeaseFresh(_ context.Context, env *DoctorEnv) DoctorResult {
 		if st.Holder != "" {
 			detail += "; device " + st.Holder + " holds it"
 		}
-		return DoctorResult{Status: DoctorFail, Detail: detail + ". This copy's channels are stopped",
+		return doctor.Result{Status: doctor.Fail, Detail: detail + ". This copy's channels are stopped",
 			Fix: "stop this copy (fridolin core stop); to move the core back, export there and import and promote here"}
 	case "released":
-		return DoctorResult{Status: DoctorWarn, Detail: "released by a clean stop; the core is not running here",
+		return doctor.Result{Status: doctor.Warn, Detail: "released by a clean stop; the core is not running here",
 			Fix: "fridolin core start"}
 	case lease.StateUnverified:
 		detail := "unverified: the lease store did not answer (" + st.Error + "). The channels keep running, because this device held the lease last"
 		if st.RenewedAt != nil {
-			detail += fmt.Sprintf("; last renewed %s ago", env.now().Sub(*st.RenewedAt).Round(time.Second))
+			detail += fmt.Sprintf("; last renewed %s ago", env.Time().Sub(*st.RenewedAt).Round(time.Second))
 		}
 		if cloud.IsCapExceeded(errors.New(st.Error)) {
-			return DoctorResult{Status: DoctorFail, Detail: detail, Fix: cloud.CapFix}
+			return doctor.Result{Status: doctor.Fail, Detail: detail, Fix: cloud.CapFix}
 		}
-		return DoctorResult{Status: DoctorWarn, Detail: detail, Fix: "check the core's log and its connection to the vault bucket; it keeps retrying"}
+		return doctor.Result{Status: doctor.Warn, Detail: detail, Fix: "check the core's log and its connection to the vault bucket; it keeps retrying"}
 	}
 	if st.RenewedAt == nil {
-		return DoctorResult{Status: DoctorFail, Detail: "the lease state has no renewal time"}
+		return doctor.Result{Status: doctor.Fail, Detail: "the lease state has no renewal time"}
 	}
-	age := env.now().Sub(*st.RenewedAt)
+	age := env.Time().Sub(*st.RenewedAt)
 	renew := time.Duration(st.RenewSeconds) * time.Second
 	stale := time.Duration(st.StaleSeconds) * time.Second
 	detail := fmt.Sprintf("held by device %s (%s), renewed %s ago", st.DeviceID, st.Hostname, age.Round(time.Second))
 	switch {
 	case stale > 0 && age >= stale:
-		return DoctorResult{Status: DoctorFail, Detail: detail + ": stale, another device may take it",
+		return doctor.Result{Status: doctor.Fail, Detail: detail + ": stale, another device may take it",
 			Fix: "is the core running? fridolin core status shows who holds the lease now"}
 	case renew > 0 && age > 2*renew:
-		return DoctorResult{Status: DoctorWarn, Detail: detail + ": renewals are late (the bucket unreachable, or the core stopped?)",
+		return doctor.Result{Status: doctor.Warn, Detail: detail + ": renewals are late (the bucket unreachable, or the core stopped?)",
 			Fix: "check the core's log and its connection to the vault bucket"}
 	}
-	return DoctorResult{Status: DoctorOK, Detail: detail}
+	return doctor.Result{Status: doctor.OK, Detail: detail}
 }
 
 // checkContainerSandbox runs bubblewrap with a brain run's namespaces, as
 // the bridge does before the first sandboxed run.
-func checkContainerSandbox(ctx context.Context, env *DoctorEnv) DoctorResult {
+func checkContainerSandbox(ctx context.Context, env *doctor.Env) doctor.Result {
 	if _, err := env.Stat(sandbox.BwrapPath); err != nil {
-		return DoctorResult{Status: DoctorFail, Detail: sandbox.BwrapPath + " is missing, so brains refuse every message",
+		return doctor.Result{Status: doctor.Fail, Detail: sandbox.BwrapPath + " is missing, so brains refuse every message",
 			Fix: "use the fridolin-core image, which has bubblewrap"}
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if _, err := env.Run(ctx, sandbox.BwrapPath, "--unshare-user", "--unshare-pid", "--unshare-ipc",
 		"--ro-bind", "/", "/", "--proc", "/proc", "--dev", "/dev", "--die-with-parent", "--", "/bin/true"); err != nil {
-		return DoctorResult{Status: DoctorFail, Detail: "bubblewrap cannot make a brain's namespaces here: " + err.Error(),
+		return doctor.Result{Status: doctor.Fail, Detail: "bubblewrap cannot make a brain's namespaces here: " + err.Error(),
 			Fix: "run the core with compose.yaml's security_opt (seccomp profile, systempaths=unconfined); on an AppArmor host also apparmor=unconfined (docs/CORE.md)"}
 	}
-	return DoctorResult{Status: DoctorOK, Detail: "brain runs get their own user, mount and PID namespaces"}
+	return doctor.Result{Status: doctor.OK, Detail: "brain runs get their own user, mount and PID namespaces"}
 }

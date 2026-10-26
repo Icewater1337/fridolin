@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/doctor"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -184,15 +185,15 @@ func TestCheckRedact(t *testing.T) {
 		}
 	})
 
-	// The chats of the config file, read before it loads (addConfig), are
+	// The chats of the config file, read before it loads (AddConfig), are
 	// masked as written: loading logs what it finds odd that way. No such
 	// log names a group_members number today, so only this case needs
-	// addConfig to add them; the report masks the loaded ones.
+	// AddConfig to add them; the report masks the loaded ones.
 	t.Run("as written", func(t *testing.T) {
-		r := newRedactor(home)
-		r.addConfig(path)
+		r := doctor.NewRedactor(home)
+		r.AddConfig(path)
 		for _, s := range []string{owner, otherWritten, oddGroup, allowedGroup, memberOnly} {
-			if got := r.text(s); strings.Contains(got, s) {
+			if got := r.Text(s); strings.Contains(got, s) {
 				t.Errorf("%q, from the config file, is redacted to %q", s, got)
 			}
 		}
@@ -212,47 +213,6 @@ func TestCheckRedact(t *testing.T) {
 			}
 		}
 	})
-}
-
-func TestRedactorText(t *testing.T) {
-	t.Parallel()
-	// Made-up numbers outside the placeholders' country carry
-	// personal-data:ignore.
-	r := newRedactor("/srv/first.last")
-	r.addChats("15551234567", "+15559876543", "15559876543@s.whatsapp.net")
-	r.addGroups("120363000000000001@g.us", "120363000000000009")
-	cases := []struct{ in, want string }{
-		{"15551234567@s.whatsapp.net", "1…67@s.whatsapp.net"},
-		{"15551234567:12@s.whatsapp.net", "1…67@s.whatsapp.net"},           // a device's JID
-		{"491701234567@s.whatsapp.net", "49…67@s.whatsapp.net"},            // a two-digit country code; personal-data:ignore
-		{"3530000000099@s.whatsapp.net", "353…99@s.whatsapp.net"},          // a three-digit one; personal-data:ignore
-		{"120363000000000001@g.us", "…01@g.us"},                            // a group
-		{"15551234567-1600000000@g.us", "…00@g.us"},                        // a group named by its creator's number; personal-data:ignore
-		{strings.Repeat("7", 15) + "@lid", "…77@lid"},                      // a LID
-		{"[15551234567 15559876543]", "[1…67 1…43]"},                       // numbers configured or routed
-		{`"120363000000000009" (digits@g.us)`, `"…09" (digits@g.us)`},      // a group written without @g.us
-		{"+15559876543 and +4917012345678", "+1…43 and +49…78"},            // international format; personal-data:ignore
-		{"you@example.com", "y…@example.com"},                              // as GoogleMaskEmail
-		{"/srv/first.last/.fridolin", "~/.fridolin"},                       // a path
-		{`(subpath "/srv/first.last")`, `(subpath "~")`},                   // the folder itself
-		{`(regex "^/srv/first\\.last/x(/.*)?$")`, `(regex "^~/x(/.*)?$")`}, // in a sandbox profile's regular expression
-		{"/srv/first.lastname/x", "/srv/first.lastname/x"},                 // another folder
-		{"127.0.0.1:8765 and 2.1.400", "127.0.0.1:8765 and 2.1.400"},       // what is no number
-		{"12345@g.us", "…@g.us"},                                           // too short to keep any digit
-		{"allowed_groups (digits@g.us)", "allowed_groups (digits@g.us)"},   // no JID, and no address either
-		{"brain-120363000000000005@g.us", "brain-…05@g.us"},                // a JID right after a name
-		{"main.120363000000000005@g.us", "main.…05@g.us"},                  // or a word
-		{"x15550001111@s.whatsapp.net", "x1…11@s.whatsapp.net"},            // a number's; personal-data:ignore
-		{"x" + strings.Repeat("6", 15) + "@lid", "x…66@lid"},               // a LID's
-	}
-	for _, c := range cases {
-		if got := r.text(c.in); got != c.want {
-			t.Errorf("text(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-	if got := newRedactor("/").text("/usr/bin"); got != "/usr/bin" {
-		t.Errorf("a home of / redacted %q", got)
-	}
 }
 
 func TestCheckDisabledDashboardAndUnknownSandboxBrain(t *testing.T) {

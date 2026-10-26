@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/cloud"
+	"github.com/Icewater1337/fridolin/internal/doctor"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/lease"
 	"github.com/Icewater1337/fridolin/internal/tailnet"
@@ -195,9 +196,9 @@ func TestNodesPortListensOnTheTailnet(t *testing.T) {
 		data, err := os.ReadFile(filepath.Join(c.home, "data", "core", "tailnet.json"))
 		return err == nil && json.Unmarshal(data, &st) == nil && st.State == "up"
 	})
-	env := &DoctorEnv{Config: c.cfgs.Get(), ReadFile: os.ReadFile, Now: time.Now,
+	env := &doctor.Env{Config: c.cfgs.Get(), ReadFile: os.ReadFile, Now: time.Now,
 		Dial: func(context.Context, string) error { return errors.New("doctor dialed loopback") }}
-	if r := checkNodesPort(context.Background(), env); r.Status != DoctorOK || !strings.Contains(r.Detail, "fridolin-core.example.ts.net:8766") {
+	if r := checkNodesPort(context.Background(), env); r.Status != doctor.OK || !strings.Contains(r.Detail, "fridolin-core.example.ts.net:8766") {
 		t.Errorf("nodes-port = %+v", r)
 	}
 }

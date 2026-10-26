@@ -6,20 +6,20 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/doctor"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
 // plaudPhoneUpload applies the phone app's checks where the Plaud Sync
 // app uploads through the site (plaud.phone_upload): the dashboard builds
 // it then.
-func plaudPhoneUpload(env *DoctorEnv) bool {
+func plaudPhoneUpload(env *doctor.Env) bool {
 	return env.Config != nil && env.Config.Plaud.PhoneUpload
 }
 
-func init() {
-	DoctorRegistry = append(DoctorRegistry, DoctorCheck{
-		ID: "plaud-app-build", Title: "a way to build the Plaud phone app", Applies: plaudPhoneUpload, Run: checkPlaudAppBuild,
-	})
+// plaudDoctorCheck is the check of a way to build the Plaud phone app.
+var plaudDoctorCheck = doctor.Check{
+	ID: "plaud-app-build", Title: "a way to build the Plaud phone app", Applies: plaudPhoneUpload, Run: checkPlaudAppBuild,
 }
 
 // checkPlaudAppBuild: the Plaud card's Build phone app needs a JDK 17+
@@ -27,18 +27,18 @@ func init() {
 // Android apps (android-build) that is approved and heard from. The app
 // already on the phone keeps working without either; a new phone, or one
 // that was unpaired, needs a build.
-func checkPlaudAppBuild(ctx context.Context, env *DoctorEnv) DoctorResult {
+func checkPlaudAppBuild(ctx context.Context, env *doctor.Env) doctor.Result {
 	local := errors.New("doctor cannot look for a JDK here")
 	if env.AndroidToolchain != nil {
 		local = env.AndroidToolchain()
 	}
 	if local == nil {
-		return DoctorResult{Status: DoctorOK, Detail: "this computer has a JDK 17+ and the Android SDK: the dashboard builds the app here"}
+		return doctor.Result{Status: doctor.OK, Detail: "this computer has a JDK 17+ and the Android SDK: the dashboard builds the app here"}
 	}
 	var ready, waiting []string
 	if env.Config.Nodes.Enabled {
 		list, _ := readNodes(ctx, env)
-		now := env.now()
+		now := env.Time()
 		for _, n := range list {
 			if n.Device != nodeproto.DeviceApproved {
 				continue
@@ -59,7 +59,7 @@ func checkPlaudAppBuild(ctx context.Context, env *DoctorEnv) DoctorResult {
 	slices.Sort(ready)
 	slices.Sort(waiting)
 	if len(ready) > 0 {
-		return DoctorResult{Status: DoctorOK, Detail: "the dashboard builds the app on a node: " + strings.Join(ready, ", ")}
+		return doctor.Result{Status: doctor.OK, Detail: "the dashboard builds the app on a node: " + strings.Join(ready, ", ")}
 	}
 	why, _, _ := strings.Cut(local.Error(), ":")
 	detail := "nothing can build the phone app: on this computer, " + why
@@ -68,6 +68,6 @@ func checkPlaudAppBuild(ctx context.Context, env *DoctorEnv) DoctorResult {
 	} else if !env.Config.Nodes.Enabled {
 		detail += "; nodes are off (nodes.enabled)"
 	}
-	return DoctorResult{Status: DoctorWarn, Detail: detail,
+	return doctor.Result{Status: doctor.Warn, Detail: detail,
 		Fix: "the app on the phone keeps working; to build it again, join a machine with a JDK 17+ and the Android SDK as a node and approve its commands (fridolin nodes approve <id> --commands; docs/NODES.md, android-build), or install them here (docs/PLAUD.md)"}
 }
