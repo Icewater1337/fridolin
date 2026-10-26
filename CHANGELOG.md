@@ -1163,6 +1163,13 @@ for compatibility.
 
 ### Fixed
 
+- **A node hears an approval that came while it connected** (#324).
+  An approval (`!approve`, the Nodes page, `fridolin nodes approve`)
+  or a backup folder approved just as a node connected could reach no
+  connection: the node stayed "commands pending" and served nothing
+  until it connected again. One a moment later reached the node before
+  its welcome, which broke the connection. The core now welcomes a node
+  first and then tells it what changed since.
 - **A box's core stops and starts again cleanly** (#311). A stop of the
   core in a box returned before the box let go of the run it stopped:
   a start right after it, as a move's source does when the stop failed,

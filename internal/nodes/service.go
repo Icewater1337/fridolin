@@ -1,6 +1,7 @@
 package nodes
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -130,6 +131,11 @@ type Service struct {
 	progs     programsState
 	onConnect func(*Node)
 	onApprove func(*Node)
+
+	// handshook and registered, when set, run in accept right after the
+	// handshake and right after the connection is registered. Tests stop
+	// a connection there to change its node meanwhile.
+	handshook, registered func(id string)
 }
 
 // New opens the registry in opts.Dir.
@@ -241,6 +247,11 @@ type session struct {
 	mu      sync.Mutex
 	pending map[string]chan nodeproto.Response
 	gone    bool
+
+	// told is the state the node was told last, in its welcome or since,
+	// as JSON. stateMu orders telling it (Service.tell).
+	stateMu sync.Mutex
+	told    []byte
 }
 
 func (ss *session) send(typ, id string, body any) error {
@@ -301,13 +312,28 @@ func (s *Service) accept(w http.ResponseWriter, r *http.Request) {
 	}
 	ss.id = node.ID
 	conn.SetReadLimit(nodeproto.MaxMessageBytes)
+	if s.handshook != nil {
+		s.handshook(node.ID)
+	}
 
+	// The welcome goes first, before the connection is live: the agent
+	// takes nothing else during its handshake, so no state or call may
+	// reach it before.
+	s.logf("nodes: %s (%s, %s) connected from %s, device %s, commands %s", node.Name, node.ID, node.OS, r.RemoteAddr, node.Device, node.Commands())
+	welcome := s.stateOf(node)
+	ss.told, _ = json.Marshal(welcome)
+	if err := ss.send(nodeproto.TypeWelcome, "", welcome); err != nil {
+		return
+	}
 	s.mu.Lock()
 	old := s.sessions[node.ID]
 	s.sessions[node.ID] = ss
 	s.mu.Unlock()
 	if old != nil {
 		old.close(nodeproto.CloseReplaced, "a newer connection of this node replaced this one")
+	}
+	if s.registered != nil {
+		s.registered(node.ID)
 	}
 	defer func() {
 		s.mu.Lock()
@@ -320,13 +346,18 @@ func (s *Service) accept(w http.ResponseWriter, r *http.Request) {
 			s.logf("nodes: recording when %s was last heard from: %v", node.ID, err)
 		}
 	}()
-	// A revocation between the handshake and here closes it now.
-	if cur, err := s.reg.Get(node.ID); err == nil && cur.Device == nodeproto.DeviceRevoked {
-		ss.close(nodeproto.CloseRevoked, "this node was revoked")
-		return
+	// A change since the handshake read the node did not reach this
+	// connection, which was not live yet (#324). A revocation closes it
+	// now, anything else is told now. A change from here on finds it.
+	if cur, err := s.reg.Get(node.ID); err == nil {
+		if cur.Device == nodeproto.DeviceRevoked {
+			ss.close(nodeproto.CloseRevoked, "this node was revoked")
+			return
+		}
+		node = cur
 	}
-	s.logf("nodes: %s (%s, %s) connected from %s, device %s, commands %s", node.Name, node.ID, node.OS, r.RemoteAddr, node.Device, node.Commands())
-	if err := ss.send(nodeproto.TypeWelcome, "", s.stateOf(node)); err != nil {
+	if err := s.tell(ss, nil, true); err != nil {
+		s.logf("nodes: telling %s its new state: %v", node.ID, err)
 		return
 	}
 	// A node that runs an older version than the core, with auto updates
@@ -520,15 +551,50 @@ func (s *Service) pushState(n *Node) {
 	}
 	s.mu.Unlock()
 	if ss == nil {
+		// A connection that is not live yet hears it once it is (accept).
 		return
 	}
 	if n.Device == nodeproto.DeviceRevoked {
 		ss.close(nodeproto.CloseRevoked, "this node was revoked")
 		return
 	}
-	if err := ss.send(nodeproto.TypeState, "", s.stateOf(n)); err != nil {
+	if err := s.tell(ss, n, false); err != nil {
 		s.logf("nodes: telling %s its new state: %v", n.ID, err)
 	}
+}
+
+// tell sends ss's node what it may do as the registry has it now, or as
+// n has it when the registry cannot say. With onlyNews it sends nothing
+// when that is what the node was told last. It reads the registry as it
+// sends, one at a time per connection: of two changes told at once, the
+// node keeps the later one.
+func (s *Service) tell(ss *session, n *Node, onlyNews bool) error {
+	ss.stateMu.Lock()
+	defer ss.stateMu.Unlock()
+	cur, err := s.reg.Get(ss.id)
+	if err != nil {
+		if n == nil {
+			return nil
+		}
+		cur = n
+	}
+	if cur.Device == nodeproto.DeviceRevoked {
+		// Its revocation closes the connection (pushState, accept).
+		return nil
+	}
+	st := s.stateOf(cur)
+	data, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
+	if onlyNews && bytes.Equal(data, ss.told) {
+		return nil
+	}
+	if err := ss.send(nodeproto.TypeState, "", st); err != nil {
+		return err
+	}
+	ss.told = data
+	return nil
 }
 
 // ApproveDevice approves node id's device and tells it.

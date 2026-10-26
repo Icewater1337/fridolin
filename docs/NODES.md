@@ -2022,7 +2022,9 @@ another version is refused.
    `unknown-device`; a revoked one gets `revoked`) and sends `welcome`
    with the node's state: `device` (`pending`, `approved`, `revoked`),
    `commands` (`none`, `pending`, `approved`) and `approved`, the part of
-   its declaration it may serve. Each approval later sends `state`.
+   its declaration it may serve. Nothing but `close` comes before
+   `welcome`. Each approval after the core recorded the node sends
+   `state`, also one that came while the node was still connecting.
 4. The node sends `heartbeat` every 20 seconds with its free resources;
    the core closes a connection it heard nothing from for 90 seconds.
 5. The core sends `request` (`id`, `method`, `params`) and the node answers
