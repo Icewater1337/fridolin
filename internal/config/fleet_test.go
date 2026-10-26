@@ -156,6 +156,7 @@ func TestLayoutNamesTheDataDirsPaths(t *testing.T) {
 		l.RcloneConf():        "rclone/rclone.conf",
 		l.GoogleClient():      "google/oauth_client.json",
 		l.Plaud():             "plaud",
+		l.Connections():       "connections",
 		l.OTP():               "otp",
 		l.SiteDevices():       "site/devices.json",
 		l.Secrets():           "secrets",

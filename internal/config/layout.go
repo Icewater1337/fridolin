@@ -63,6 +63,10 @@ func (l Layout) DriveClient() string { return l.join("google", "drive_oauth_clie
 // Plaud is the Plaud integration's state.
 func (l Layout) Plaud() string { return l.join("plaud") }
 
+// Connections holds the keys of Fridolin's connections to OpenAI and
+// ElevenLabs and their usage log (internal/connections).
+func (l Layout) Connections() string { return l.join("connections") }
+
 // OTP holds the one-time-code hand-off files, one per brain.
 func (l Layout) OTP() string { return l.join("otp") }
 

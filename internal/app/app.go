@@ -27,6 +27,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/cloud"
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/connections"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/intent"
@@ -135,6 +136,10 @@ type App struct {
 	fileTickets *httpapi.Tickets
 	// siteBridge serves the site's /files and /wiki (site_bridge.go).
 	siteBridge siteBridge
+	// conns are Fridolin's connections to OpenAI and ElevenLabs, which
+	// site modules and brains call through the bridge
+	// (connections_runtime.go).
+	conns *connections.Service
 	// intents are the brains' standing intents and scheduled jobs, which
 	// sched fires.
 	intents *intent.Store
@@ -317,6 +322,7 @@ func New(opts Options) (_ *App, err error) {
 	}
 	b.exe = bridgeBinary()
 	b.audit = newAuditLog(cfg.DataDir)
+	b.conns = b.newConnections()
 	b.wikis = wiki.NewManager()
 	b.fileTickets = httpapi.NewTickets()
 	b.loadPolicy()

@@ -128,6 +128,11 @@ var fields = []fieldSpec{
 	{Field: Field{Name: "schedules.max_total_mb"}},
 	{Field: Field{Name: "schedules.max_log_kb"}},
 	{Field: Field{Name: "fride.news"}},
+	{Field: Field{Name: "connections.openai.brains"}},
+	{Field: Field{Name: "connections.openai.brain_monthly_usd"}},
+	{Field: Field{Name: "connections.elevenlabs.brains"}},
+	{Field: Field{Name: "connections.elevenlabs.brain_monthly_usd"}},
+	{Field: Field{Name: "connections.elevenlabs.voice"}},
 }
 
 // Fields returns an owned copy of the complete configuration field inventory.

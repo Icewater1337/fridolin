@@ -24,8 +24,20 @@ type SiteModule struct {
 	Secrets   []string
 	Ingest    []string // brains it may hand files to (site_ingest.go)
 	Search    []string // brains whose folder it may search (site_ingest.go)
+	// Connections are what it declares of Fridolin's connections, by
+	// connection: capabilities.openai and capabilities.elevenlabs
+	// (internal/connections).
+	Connections map[string]ConnectionCapability
 	// Dist is the resolved app.dist, the files the site serves; "" without an app.
 	Dist string
+}
+
+// ConnectionCapability is a module's capabilities.openai or
+// capabilities.elevenlabs: the operations it may call, the models (none
+// listed: any) and its monthly limit in US dollars (0: none).
+type ConnectionCapability struct {
+	Use, Models []string
+	MonthlyUSD  float64
 }
 
 // siteFileCap is one capabilities.files entry.

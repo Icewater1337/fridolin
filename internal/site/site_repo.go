@@ -26,6 +26,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -477,6 +478,8 @@ func reviewManifest(oldM, newM map[string]any) []ReviewItem {
 		{"capabilities.secrets", "secrets it needs"},
 		{"capabilities.ingest", "brains it may hand files to"},
 		{"capabilities.search", "brains whose folder it may search with a read-only Claude agent"},
+		{"capabilities.openai", "what it may ask of OpenAI; the bridge makes those calls with Fridolin's key"},
+		{"capabilities.elevenlabs", "what it may ask of ElevenLabs; the bridge makes those calls with Fridolin's key"},
 		{"app.dist", "the files it serves"},
 		{"app.public", "files anyone can fetch without signing in"},
 		{"app.build", "a command Fridolin runs when deploying"},
@@ -489,11 +492,61 @@ func reviewManifest(oldM, newM map[string]any) []ReviewItem {
 			// Only whether there is server code, the details are listed separately.
 			o, n = boolOrNil(o != nil), boolOrNil(n != nil)
 		}
+		if f.path == "capabilities.openai" || f.path == "capabilities.elevenlabs" {
+			o, n = connectionSummary(o), connectionSummary(n)
+		}
 		if !reflect.DeepEqual(o, n) {
 			items = append(items, ReviewItem{Field: f.path, Old: o, New: n, Note: f.note})
 		}
 	}
 	return items
+}
+
+// connectionSummary says a capabilities.openai or capabilities.elevenlabs
+// in words: "transcribe, responses; models a, b; up to $20 a month", or
+// "any model" and "no monthly limit". What does not read as one stays as
+// it is.
+func connectionSummary(v any) any {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return v
+	}
+	words := func(key string) ([]string, bool) {
+		if m[key] == nil {
+			return nil, true
+		}
+		list, ok := m[key].([]any)
+		if !ok {
+			return nil, false
+		}
+		var out []string
+		for _, x := range list {
+			s, ok := x.(string)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, s)
+		}
+		return out, true
+	}
+	use, okUse := words("use")
+	models, okModels := words("models")
+	limit, okLimit := m["monthly_usd"].(float64)
+	if !okUse || !okModels || (!okLimit && m["monthly_usd"] != nil) {
+		return v
+	}
+	parts := []string{strings.Join(use, ", ")}
+	if len(models) == 0 {
+		parts = append(parts, "any model")
+	} else {
+		parts = append(parts, "models "+strings.Join(models, ", "))
+	}
+	if limit > 0 {
+		parts = append(parts, "up to $"+strconv.FormatFloat(limit, 'f', -1, 64)+" a month")
+	} else {
+		parts = append(parts, "no monthly limit")
+	}
+	return strings.Join(parts, "; ")
 }
 
 func boolOrNil(b bool) any {

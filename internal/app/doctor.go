@@ -37,6 +37,7 @@ func newDoctorRegistry() *doctor.Registry {
 	r.Add(encryptionDoctorCheck)
 	r.Add(housekeepingDoctorChecks...)
 	r.Add(plaudDoctorCheck)
+	r.Add(connectionDoctorChecks...)
 	r.Add(targetDoctorChecks...)
 	r.Add(vaultDoctorChecks...)
 	return &r
@@ -105,8 +106,9 @@ func SystemDoctorEnv(configFlag string) *doctor.Env {
 			}
 			return c.Close()
 		},
-		Now:       time.Now,
-		LiveNodes: askBridgeNodes,
+		Now:             time.Now,
+		LiveNodes:       askBridgeNodes,
+		CheckConnection: checkConnectionKey,
 	}
 }
 

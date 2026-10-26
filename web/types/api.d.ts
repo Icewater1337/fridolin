@@ -487,6 +487,17 @@ export interface SchedulesConfig {
   max_log_kb?: number;
 }
 
+export interface ConnectionConfig {
+  brains?: string[];
+  brain_monthly_usd?: number;
+  /** ElevenLabs only: the default voice id. */
+  voice?: string;
+}
+export interface ConnectionsConfig {
+  openai?: ConnectionConfig;
+  elevenlabs?: ConnectionConfig;
+}
+
 /**
  * config.json (config.File), less brain_dirs, which GET /api/config never
  * sends: brains have their own endpoints. In `effective` the defaults are
@@ -542,6 +553,7 @@ export interface ConfigFile {
   policy: PolicyConfig;
   housekeeping: HousekeepingConfig;
   schedules: SchedulesConfig;
+  connections?: ConnectionsConfig;
   /** The IANA zone schedules are read in; left out for the bridge's own. */
   timezone?: string;
 }
@@ -2435,6 +2447,54 @@ export interface WikiSearch {
 }
 
 // ---------------------------------------------------------------------------
+// Connections (docs/CONNECTIONS.md)
+
+// GET /api/connections
+export interface Connection {
+  id: 'openai' | 'elevenlabs';
+  title: string;
+  configured: boolean;
+  /** The key's last characters, or "". */
+  key_hint: string;
+  organization?: string;
+  project?: string;
+  /** ElevenLabs: the default voice id, or "". */
+  voice?: string;
+  ops: string[];
+  brains: string[];
+  brain_monthly_usd: number;
+}
+export interface ConnectionModule {
+  module: string;
+  connection: 'openai' | 'elevenlabs';
+  use: string[];
+  models: string[];
+  monthly_usd: number;
+}
+export interface ConnectionUsage {
+  connection: 'openai' | 'elevenlabs';
+  /** "module:<id>" or "brain:<id>" */
+  caller: string;
+  requests: number;
+  errors: number;
+  audio_seconds: number;
+  input_tokens: number;
+  output_tokens: number;
+  characters: number;
+  /** Estimated cost in USD. */
+  usd: number;
+  /** The caller's monthly limit in USD; 0 for none. */
+  limit_usd: number;
+}
+export interface Connections {
+  /** "YYYY-MM", UTC */
+  month: string;
+  connections: Connection[];
+  modules: ConnectionModule[];
+  usage: ConnectionUsage[];
+}
+
+// ---------------------------------------------------------------------------
 // Paths
 
 /** GET /api/schedules/preview?when=: when a schedule would run next, without jitter. */
@@ -2458,6 +2518,7 @@ export interface ApiGet {
   '/api/activity': ActivityEntry[];
   '/api/threads': Thread[];
   '/api/fride': FrideResponse;
+  '/api/connections': Connections;
   '/api/audit': AuditEntry[];
   '/api/approvals': Approvals;
   '/api/policy': PolicyStatus;

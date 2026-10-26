@@ -169,6 +169,21 @@
       "required": false,
       "status": "ok",
       "detail": "off (housekeeping.enabled), and never run here"
+    },
+    {
+      "id": "openai",
+      "title": "OpenAI connection",
+      "required": false,
+      "status": "ok",
+      "detail": "the key works"
+    },
+    {
+      "id": "elevenlabs",
+      "title": "ElevenLabs connection",
+      "required": false,
+      "status": "warn",
+      "detail": "ElevenLabs says the key is wrong (401)",
+      "fix": "set the key again on the dashboard's Integrations page, or remove it there"
     }
   ]
 }
