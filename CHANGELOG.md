@@ -1169,7 +1169,10 @@ for compatibility.
   connection: the node stayed "commands pending" and served nothing
   until it connected again. One a moment later reached the node before
   its welcome, which broke the connection. The core now welcomes a node
-  first and then tells it what changed since.
+  first and then tells it what changed since. A call that a change just
+  allowed, such as a FrIDE task once FrIDE is offered again, could also
+  reach the node before the change did, and the node refused it; the
+  node now hears the change first.
 - **A box's core stops and starts again cleanly** (#311). A stop of the
   core in a box returned before the box let go of the run it stopped:
   a start right after it, as a move's source does when the stop failed,

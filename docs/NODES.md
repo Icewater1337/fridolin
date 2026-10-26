@@ -2024,7 +2024,8 @@ another version is refused.
    `commands` (`none`, `pending`, `approved`) and `approved`, the part of
    its declaration it may serve. Nothing but `close` comes before
    `welcome`. Each approval after the core recorded the node sends
-   `state`, also one that came while the node was still connecting.
+   `state`, also one that came while the node was still connecting,
+   and the node hears it before any `request` it allows.
 4. The node sends `heartbeat` every 20 seconds with its free resources;
    the core closes a connection it heard nothing from for 90 seconds.
 5. The core sends `request` (`id`, `method`, `params`) and the node answers

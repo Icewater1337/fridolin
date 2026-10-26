@@ -133,9 +133,10 @@ type Service struct {
 	onApprove func(*Node)
 
 	// handshook and registered, when set, run in accept right after the
-	// handshake and right after the connection is registered. Tests stop
-	// a connection there to change its node meanwhile.
-	handshook, registered func(id string)
+	// handshake and right after the connection is registered, pushing in
+	// pushState before it tells the node. Tests stop there to change the
+	// node, or call it, meanwhile.
+	handshook, registered, pushing func(id string)
 }
 
 // New opens the registry in opts.Dir.
@@ -543,6 +544,9 @@ func eventMethod(kind string) string {
 
 // pushState sends the node its state after an approval changed it.
 func (s *Service) pushState(n *Node) {
+	if s.pushing != nil {
+		s.pushing(n.ID)
+	}
 	s.mu.Lock()
 	ss := s.sessions[n.ID]
 	if ss != nil && n.Device == nodeproto.DeviceRevoked {
@@ -711,6 +715,12 @@ func (s *Service) Call(ctx context.Context, id, method string, params, out any) 
 	s.mu.Unlock()
 	if ss == nil {
 		return nodeproto.Errorf(nodeproto.CodeUnavailable, "node %s is not connected", id)
+	}
+	// The node hears the state that allows the call before the call: the
+	// change the core just recorded may not have been told it yet, and
+	// the node checks the call against what it was told.
+	if err := s.tell(ss, nil, true); err != nil {
+		return nodeproto.Errorf(nodeproto.CodeUnavailable, "telling node %s its state: %v", id, err)
 	}
 	reqID := strconv.FormatUint(s.nextID.Add(1), 10)
 	ch := make(chan nodeproto.Response, 1)
