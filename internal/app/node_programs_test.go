@@ -15,6 +15,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/nodeagent"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/nodes"
 	"github.com/Icewater1337/fridolin/internal/sched"
 )
 
@@ -174,6 +175,92 @@ func TestCommandAgentAddsItsProgram(t *testing.T) {
 	h.WaitFor("the program removed", func() bool { return !coreRuleFor(agent.State().Approved, daily) })
 	if code, _, ecode := h.nodeCall(j.ID, nodeproto.MethodExec, nodeproto.ExecParams{Argv: []string{daily, "--quiet"}}); code != http.StatusForbidden || ecode != nodeproto.CodeDenied {
 		t.Fatalf("the removed program: %d %s", code, ecode)
+	}
+}
+
+// TestCommandAgentsNameTheirNode: a command agent's node is found as the
+// owner names a node everywhere (#251). A name two nodes have adds the
+// program to neither, and the Schedules page says why; a revoked node
+// steps aside for the one that has its name now.
+func TestCommandAgentsNameTheirNode(t *testing.T) {
+	t.Parallel()
+	accepts := nodeproto.Capabilities{Exec: &nodeproto.ExecCap{AcceptFromCore: []string{"/opt/tools"}}}
+	view := func(id, name, device string) nodes.View {
+		return nodes.View{Node: &nodes.Node{ID: id, Name: name, Device: device, Declared: accepts}, Effective: accepts, Online: true}
+	}
+	views := []nodes.View{
+		view("aaaaaaaaaaaa", "laptop", nodeproto.DeviceRevoked),
+		view("bbbbbbbbbbbb", "Laptop", nodeproto.DeviceApproved),
+		view("cccccccccccc", "desktop", nodeproto.DeviceApproved),
+		view("dddddddddddd", "Desktop", nodeproto.DeviceApproved),
+	}
+	daily := []string{"/opt/tools/daily.sh"}
+	got := wantedPrograms(views, []commandProgram{
+		{Node: "LAPTOP", Argv: daily, Agent: "main/laptop"},
+		{Node: "desktop", Argv: daily, Agent: "main/desktop"},
+	})
+	if l := got["bbbbbbbbbbbb"]; len(l) != 1 || l[0].Name != daily[0] || !slices.Equal(l[0].Agents, []string{"main/laptop"}) {
+		t.Errorf("the node a revoked one shares its name with: %+v", l)
+	}
+	for _, id := range []string{"aaaaaaaaaaaa", "cccccccccccc", "dddddddddddd"} {
+		if len(got[id]) != 0 {
+			t.Errorf("node %s got %+v", id, got[id])
+		}
+	}
+
+	if p := programOn(views, "laptop", daily, false); p.Node != "bbbbbbbbbbbb" || p.State != ProgramWaiting {
+		t.Errorf("laptop: %+v", p)
+	}
+	if p := programOn(views, "Desktop", daily, false); p.State != ProgramNoNode || p.Detail != `2 nodes are called "Desktop": Desktop (dddddddddddd), desktop (cccccccccccc); name one by its id` {
+		t.Errorf("a name two nodes have: %+v", p)
+	}
+	if p := programOn(views, "dddddddddddd", daily, false); p.Node != "dddddddddddd" || p.State != ProgramWaiting {
+		t.Errorf("by its id: %+v", p)
+	}
+	if p := programOn(views, "nope", daily, false); p.State != ProgramNoNode || p.Detail != `there is no node "nope" (the Nodes page lists them)` {
+		t.Errorf("no such node: %+v", p)
+	}
+}
+
+// TestCommandAgentRunsOnTheNodeItNames: a command agent's run finds its
+// node as the owner names a node everywhere (#251). A name two nodes have
+// runs on neither and says so, with both ids; once one of them is
+// revoked, the name is the other one's.
+func TestCommandAgentRunsOnTheNodeItNames(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, `{"nodes": {"enabled": true}}`)
+	addr := h.StartNodes()
+	dir := h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}})
+	caps := nodeproto.Capabilities{Exec: &nodeproto.ExecCap{Allow: []nodeproto.ExecRule{{Name: "hostname"}}}}
+	first := h.joinNode(addr, "Laptop", "", caps)
+	second := h.joinNode(addr, "laptop", "", caps)
+
+	writeAgentFile(t, dir, "daily", `{"when": "daily 21:00", "command": {"node": "LAPTOP", "argv": ["hostname"]}}`)
+	if w := h.Do("POST", "/api/schedules/main/daily/approve", map[string]any{"schedule": h.agent("main", "daily").Review.Disk}); w.Code != http.StatusOK {
+		t.Fatalf("approve: %d %s", w.Code, w.Body.String())
+	}
+	run := func(n int) sched.Run {
+		t.Helper()
+		if w := h.Do("POST", "/api/schedules/main/daily/run", nil); w.Code != http.StatusOK {
+			t.Fatalf("run: %d %s", w.Code, w.Body.String())
+		}
+		return h.waitRunEnded("main", "daily", n)
+	}
+	r := run(1)
+	if r.Status != sched.StatusFailed || r.Node != "" {
+		t.Fatalf("a name two nodes have: %+v", r)
+	}
+	for _, want := range []string{`2 nodes are called "LAPTOP"`, "Laptop (" + first + ")", "laptop (" + second + ")", "name one by its id"} {
+		if !strings.Contains(r.Error, want) {
+			t.Errorf("%q lacks %q", r.Error, want)
+		}
+	}
+
+	if w := h.Do("POST", "/api/nodes/"+first+"/revoke", nil); w.Code != http.StatusOK {
+		t.Fatalf("revoke: %d %s", w.Code, w.Body.String())
+	}
+	if r := run(2); r.Node != second {
+		t.Errorf("with its namesake revoked: %+v, want node %s", r, second)
 	}
 }
 

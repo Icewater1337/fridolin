@@ -1172,6 +1172,12 @@ for compatibility.
   transfer) and `!approve`, `!deny` and `!revoke`. A name more than one
   node has is refused, with each node's id; a revoked node answers to
   its name only when no other node has it.
+  A scheduled agent that runs a program on a node finds its node the
+  same way: its runs, the programs the core adds to a node's allowlist,
+  the Schedules page, the agent wizard and `fridolin doctor` took the
+  first node with the name, which could be a revoked one or either of
+  two. A name two nodes have now runs nothing and says which nodes have
+  it; the wizard offers such a node by its id.
 - **FrIDE's stall notices stay quiet** (#306). "Agent … has not moved
   for 2h", every half hour, reached the DM in quiet mode, and in a
   scheduled agent's chat started a run of it each time. It is now

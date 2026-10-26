@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"slices"
@@ -72,19 +73,12 @@ func approvedCommands(brainDirs []config.BrainRef) []commandProgram {
 	return out
 }
 
-// nodeNamed is the node ref names, by id or by name; nil for none.
-func nodeNamed(views []nodes.View, ref string) *nodes.View {
-	for i := range views {
-		if views[i].ID == ref {
-			return &views[i]
-		}
-	}
-	for i := range views {
-		if strings.EqualFold(views[i].Name, ref) {
-			return &views[i]
-		}
-	}
-	return nil
+// nodeNamed is the node ref names, by id or by name, as the owner names
+// a node everywhere (nodes.Registry.Resolve, #251). It fails for a ref
+// no node answers to, and for a name more than one node has
+// (*nodes.AmbiguousNodeError), which names none of them.
+func nodeNamed(views []nodes.View, ref string) (nodes.View, error) {
+	return nodes.ResolveIn(views, ref, func(v nodes.View) *nodes.Node { return v.Node })
 }
 
 // ownRules are the exec rules of n that node.json allows and the owner
@@ -108,8 +102,9 @@ func wantedPrograms(views []nodes.View, cmds []commandProgram) map[string][]node
 		}
 	}
 	for _, c := range cmds {
-		v := nodeNamed(views, c.Node)
-		if v == nil {
+		// A name more than one node has adds the program to none.
+		v, err := nodeNamed(views, c.Node)
+		if err != nil {
 			continue
 		}
 		list, ok := out[v.ID]
@@ -251,7 +246,8 @@ const (
 	// ProgramNotAccepted: the node accepts no programs from the core, or
 	// the owner did not approve that it does.
 	ProgramNotAccepted = "not-accepted"
-	// ProgramNoNode: there is no such node.
+	// ProgramNoNode: there is no such node, or more than one node has
+	// the name the agent gives.
 	ProgramNoNode = "no-node"
 )
 
@@ -270,8 +266,11 @@ type programView struct {
 // programOn is how argv stands on the node ref names, approved saying
 // whether its agent is approved.
 func programOn(views []nodes.View, ref string, argv []string, approved bool) programView {
-	v := nodeNamed(views, ref)
-	if v == nil {
+	v, err := nodeNamed(views, ref)
+	switch {
+	case errors.Is(err, nodes.ErrAmbiguousNode):
+		return programView{State: ProgramNoNode, Detail: err.Error()}
+	case err != nil:
 		return programView{State: ProgramNoNode, Detail: fmt.Sprintf("there is no node %q (the Nodes page lists them)", ref)}
 	}
 	out := programView{Node: v.ID, NodeName: v.Name}

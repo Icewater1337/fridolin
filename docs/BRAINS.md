@@ -737,7 +737,10 @@ where you answer them as usual; a `silent` agent's runs may not.
 
 A program runs on the node through `exec` ([NODES.md](NODES.md#what-a-node-offers)),
 no shell: its `argv[0]` must be on the node's allowlist, the node's
-commands approved, and the node online. A node whose `node.json` names
+commands approved, and the node online. `command.node` names the node
+by its id or its name, in any case, as `fridolin nodes` does: a name
+more than one node has runs nothing until you give the id, and a
+revoked node steps aside for another with its name. A node whose `node.json` names
 folders in `exec.accept_from_core` takes the program of an agent you
 approve when it lies in one of them: approving the agent adds it to the
 node's allowlist with exactly its arguments, and deleting the agent
