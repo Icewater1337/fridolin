@@ -191,18 +191,24 @@ export function connectionCard(ctx, id) {
   async function saveKey() {
     const form = keyForm.form();
     if (!form) return;
-    const body = form.value();
+    const v = form.value();
     const conn = ((data && data.connections) || []).find((c) => c.id === id);
-    if (!(conn && conn.configured) && !body.api_key.trim()) {
+    if (!(conn && conn.configured) && !v.api_key.trim()) {
       toast(`Paste the ${title} key first`, 'warn');
       return;
     }
+    // Only what changed goes along, so the audit says what was saved:
+    // a blank key keeps the key, a field left out keeps its value.
+    /** @type {{api_key: string, organization?: string, project?: string}} */
+    const body = { api_key: v.api_key };
+    if (v.organization !== undefined && v.organization !== ((conn && conn.organization) || '')) body.organization = v.organization;
+    if (v.project !== undefined && v.project !== ((conn && conn.project) || '')) body.project = v.project;
     await put(`/api/connections/${id}`, body);
     form.key.value = ''; // never kept in the page once it is saved
     keyForm.saved();
     replacing = false;
     failed = null;
-    toast(body.api_key.trim() ? `${title} key saved` : `${title} settings saved`, 'ok');
+    toast(v.api_key.trim() ? `${title} key saved` : `${title} settings saved`, 'ok');
     await refresh();
   }
 

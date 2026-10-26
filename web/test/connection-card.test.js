@@ -63,7 +63,8 @@ async function openCard(t, id, first, { check = { ok: true, detail: 'the key wor
       const c = entry();
       if (!body.api_key && !c.configured) return { status: 400, body: { error: 'set a key first' } };
       if (body.api_key) Object.assign(c, { configured: true, key_hint: `…${body.api_key.slice(-4)}` });
-      if (id === 'openai') Object.assign(c, { organization: body.organization, project: body.project });
+      if (body.organization !== undefined) c.organization = body.organization;
+      if (body.project !== undefined) c.project = body.project;
       return c;
     }
     if (path === `/api/connections/${id}` && method === 'DELETE') {
@@ -162,7 +163,7 @@ test('a connection with a key checks it, replaces it and removes it', async (t) 
   type(inputFor(root, 'Project'), 'proj_new');
   button(root, 'Save key').click();
   await settle();
-  assert.deepEqual(sent('/api/connections/openai', 'PUT').map((c) => c.body), [{ api_key: '', organization: '', project: 'proj_new' }]);
+  assert.deepEqual(sent('/api/connections/openai', 'PUT').map((c) => c.body), [{ api_key: '', project: 'proj_new' }], 'only what changed');
   assert.ok(toasts().includes('OpenAI settings saved'));
   assert.equal(root.querySelector('input[type=password]'), null, 'closed again');
   assert.match(root.textContent, /Key ending …9z9z\. Project proj_new\./);
