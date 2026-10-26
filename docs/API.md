@@ -247,6 +247,27 @@ paths and, for a core run, those of the brains it is granted `files`; a
 path outside them is answered as a failed call the model reads, not with
 an HTTP error.
 
+A run whose brain may use Fridolin's [connections](CONNECTIONS.md#brains)
+(`connections.<id>.brains`, while the connection has a key) also gets
+`openai_transcribe`, `elevenlabs_transcribe`, `elevenlabs_speak` and
+`elevenlabs_voices`. A recording goes by its path; speech is written into
+the run's temp folder. A call the bridge refuses (no budget left, a model
+the provider does not know) is a failed call the model reads.
+
+## The connections' dashboard routes
+
+The Integrations page's OpenAI and ElevenLabs cards use these, guarded
+like the rest of `/api/` (not a contract either). `{id}` is `openai` or
+`elevenlabs`; another is `404`. No answer ever holds a key.
+
+| Route | Does |
+| --- | --- |
+| `GET /api/connections` | `{"month", "connections", "modules", "usage"}`: each connection with `configured`, `key_hint` (the key's last four characters), OpenAI's `organization` and `project` or ElevenLabs' `voice`, its `ops`, `brains` and `brain_monthly_usd`; what the live site's modules declare; this month's usage per caller with its `limit_usd`; ETag-cached |
+| `PUT /api/connections/{id}` | `{"api_key", "organization", "project"}` (OpenAI) or `{"api_key"}`: saves the key, 8 to 512 characters; a blank one keeps the key there is, and a first save without one is `400`; answers the connection |
+| `DELETE /api/connections/{id}` | deletes the key; usage and settings stay; `204` |
+| `PUT /api/connections/{id}/brains` | `{"brains", "brain_monthly_usd", "voice"}` (`voice` ElevenLabs' only): writes `connections.<id>` in `config.json`; a brain that is not running and not listed yet is `400`; answers the connection |
+| `POST /api/connections/{id}/check` | asks the provider whether the key works: `{"ok": true, "detail"}` or `{"ok": false, "error"}` |
+
 ## The vault's dashboard routes
 
 `fridolin vault` and the dashboard's Vault page use these, with the

@@ -57,6 +57,9 @@ type fakeSystem struct {
 	ran      []string
 	// listening are the addresses Dial reaches.
 	listening map[string]bool
+	// connErr is what OpenAI or ElevenLabs say of their key, by
+	// connection: nil, the key works.
+	connErr map[string]error
 }
 
 // doctorNow is the time of every doctor test.
@@ -112,6 +115,15 @@ func (s *fakeSystem) doctorEnv(cfg *config.Settings, cfgErr error) *doctor.Env {
 			return errors.New("connection refused")
 		},
 		Now: func() time.Time { return doctorNow },
+		CheckConnection: func(_ context.Context, dataDir, id string) (string, error) {
+			if dataDir != "/home/you/.fridolin" {
+				return "", fmt.Errorf("asked about the data dir %s", dataDir)
+			}
+			if err := s.connErr[id]; err != nil {
+				return "", err
+			}
+			return "the key works", nil
+		},
 	}
 }
 
@@ -202,6 +214,9 @@ func TestGoldenDoctor(t *testing.T) {
 	s.runs["/usr/bin/security find-generic-password -a fridolin -s fridolin.b2.snapshots.key"] = fakeRun{err: fakeExit(44)}
 	s.runs["/usr/bin/security find-generic-password -a fridolin -s fridolin.b2.snapshots.keyid"] = fakeRun{err: fakeExit(44)}
 	s.free = 12 << 30
+	// Both keys are set; ElevenLabs refuses its.
+	s.files = map[string]fs.FileMode{"/home/you/.fridolin/connections/openai.json": 0o600, "/home/you/.fridolin/connections/elevenlabs.json": 0o600}
+	s.connErr = map[string]error{"elevenlabs": errors.New("ElevenLabs says the key is wrong (401)")}
 	rep := doctor.Run(context.Background(), s.doctorEnv(doctorConfig(func(c *config.Settings) { c.Sandbox.Enabled = true }), nil), DoctorRegistry.Checks())
 	var text bytes.Buffer
 	if err := rep.WriteText(&text); err != nil {

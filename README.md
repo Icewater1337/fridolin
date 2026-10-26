@@ -149,7 +149,7 @@ phone.
 
 ## Setup
 
-Guides: [Setup](docs/SETUP.md), [Usage](docs/USAGE.md), [Security model](docs/SECURITY-MODEL.md), [Troubleshooting](docs/TROUBLESHOOTING.md), [Tools](docs/TOOLS.md).
+Guides: [Setup](docs/SETUP.md), [Usage](docs/USAGE.md), [Security model](docs/SECURITY-MODEL.md), [Troubleshooting](docs/TROUBLESHOOTING.md), [Tools](docs/TOOLS.md), [OpenAI and ElevenLabs](docs/CONNECTIONS.md).
 
 Copy the HTTPS clone URL from this repository’s **Code** menu (or your fork).
 Replace the example URL below with that URL before running it.
@@ -562,6 +562,14 @@ transcript with Plaud's summary. A NotePin can also skip Plaud's slow cloud
 sync: the Android app in [plaud-android/](plaud-android/README.md) pulls
 each recording off the pin as it stops and uploads its transcript through
 your site; the Plaud card builds and pairs it. See [docs/PLAUD.md](docs/PLAUD.md).
+
+### OpenAI and ElevenLabs
+
+Dashboard → *Integrations → OpenAI* and *ElevenLabs* keep one key each.
+Site modules (`ctx.openai`, `ctx.elevenlabs`) and the brains you pick use
+them through the bridge, which makes the calls; no module or brain ever
+sees a key. Each caller has a monthly limit, estimated, and the page shows
+what each used this month. See [docs/CONNECTIONS.md](docs/CONNECTIONS.md).
 
 ### Backups
 

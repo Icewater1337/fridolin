@@ -208,6 +208,9 @@ type File struct {
 	Schedules SchedulesConfig `json:"schedules"`
 	// Fride is how FrIDE's news reaches the chats (fride.go).
 	Fride FrideConfig `json:"fride"`
+	// Connections are the brains that may use Fridolin's OpenAI and
+	// ElevenLabs keys, and what they may spend (connections.go).
+	Connections ConnectionsConfig `json:"connections"`
 }
 
 // retiredBrainMode is the brain_mode key. A missing key, null and true all
@@ -682,6 +685,9 @@ func (c *File) Validate(goos string) error {
 		return err
 	}
 	if err := c.validateFleet(); err != nil {
+		return err
+	}
+	if err := c.Connections.Validate(); err != nil {
 		return err
 	}
 	return c.Plaud.Validate()

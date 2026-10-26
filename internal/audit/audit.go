@@ -94,6 +94,17 @@ const (
 	// Brain and ID the agent's brain and run, Detail the agent, node and
 	// program (not its arguments), Outcome how it ended.
 	ScheduledCommand = "scheduled_command"
+	// ConnectionCall is a call of Fridolin's connections to OpenAI and
+	// ElevenLabs (docs/CONNECTIONS.md): By is "module:<id>" or
+	// "brain:<id>" (Brain and Run then the run's), Detail the connection,
+	// the operation and the model ("openai transcribe
+	// gpt-4o-mini-transcribe"), Outcome ok or why it failed or was
+	// refused. Never what was sent or answered.
+	ConnectionCall = "connection_call"
+	// ConnectionKey is a connection's key set, changed or removed on the
+	// dashboard: By is "dashboard", Detail the connection and what
+	// changed. Never the key.
+	ConnectionKey = "connection_key"
 )
 
 // Entry is one line. Fields are added, never renamed; a reader ignores
@@ -133,8 +144,9 @@ var (
 	tokenRe  = regexp.MustCompile(`[A-Za-z0-9_\-+/=]{32,}`)
 	secretRe = regexp.MustCompile(`(?i)\b(password|passwd|secret|token|api[_-]?key|pin)\s*[:=]\s*\S+`)
 	// prefixRe matches credentials by their known prefixes, shorter than
-	// tokenRe's run, and secret flags and headers on a command line.
-	prefixRe = regexp.MustCompile(`(?i)\b(sk-[a-z0-9_-]{8,}|gh[pousr]_[a-z0-9]{8,}|github_pat_[a-z0-9_]{8,}|xox[abprs]-[a-z0-9-]{8,}|AKIA[0-9A-Z]{12,}|glpat-[a-z0-9_-]{8,})|(--?(password|passwd|token|secret|api-key|apikey|auth)[= ]\S+)|((bearer|basic)\s+\S+)`)
+	// tokenRe's run (OpenAI's sk-…, ElevenLabs' sk_…), and secret flags
+	// and headers on a command line.
+	prefixRe = regexp.MustCompile(`(?i)\b(sk[-_][a-z0-9_-]{8,}|gh[pousr]_[a-z0-9]{8,}|github_pat_[a-z0-9_]{8,}|xox[abprs]-[a-z0-9-]{8,}|AKIA[0-9A-Z]{12,}|glpat-[a-z0-9_-]{8,})|(--?(password|passwd|token|secret|api-key|apikey|auth)[= ]\S+)|((bearer|basic)\s+\S+)`)
 )
 
 // Scrub shortens s for a line and masks what looks like a secret in it.

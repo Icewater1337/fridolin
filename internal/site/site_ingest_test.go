@@ -329,3 +329,47 @@ func TestSiteSpoolSearch(t *testing.T) {
 		t.Errorf("searches run: %v", prompts)
 	}
 }
+
+// The live commit's capabilities.openai and capabilities.elevenlabs, as
+// the site bridge checks a module's calls of Fridolin's connections
+// against them. One that does not parse grants nothing.
+func TestSiteLiveConnectionCaps(t *testing.T) {
+	m := newTestSite(t)
+	if mods := m.LiveModules(); mods != nil {
+		t.Errorf("modules with nothing live: %v", mods)
+	}
+	if _, err := m.LiveModule("dictation"); err == nil {
+		t.Error("a module with nothing live")
+	}
+	commit := strings.Repeat("c", 40)
+	m.settings.Approved = commit
+	mods := m.modulesDirOf(commit)
+	for id, caps := range map[string]string{
+		"dictation": `{"openai": {"use": ["transcribe"], "models": ["gpt-4o-transcribe"], "monthly_usd": 20}, "elevenlabs": {"use": ["tts", "voices"]}}`,
+		"broken":    `{"openai": {"use": "transcribe"}, "elevenlabs": {"use": ["tts"], "monthly_usd": -1}}`,
+		"empty":     `{"openai": {"use": []}, "elevenlabs": null}`,
+	} {
+		os.MkdirAll(filepath.Join(mods, id), 0o700)
+		os.WriteFile(filepath.Join(mods, id, "module.json"), []byte(`{"version": 1, "id": "`+id+`", "capabilities": `+caps+`}`), 0o600)
+	}
+	d, err := m.LiveModule("dictation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oa := d.Connections["openai"]; len(oa.Use) != 1 || oa.Models[0] != "gpt-4o-transcribe" || oa.MonthlyUSD != 20 || len(d.Connections["elevenlabs"].Use) != 2 {
+		t.Errorf("dictation %+v", d.Connections)
+	}
+	for _, id := range []string{"broken", "empty"} {
+		if mod, err := m.LiveModule(id); err != nil || mod.Connections != nil {
+			t.Errorf("%s: %+v %v", id, mod.Connections, err)
+		}
+	}
+	// The dashboard lists them only while the site is on.
+	if mods := m.LiveModules(); mods != nil {
+		t.Errorf("modules while the site is off: %v", mods)
+	}
+	m.settings.Enabled = true
+	if mods := m.LiveModules(); len(mods) != 3 {
+		t.Errorf("modules while the site is on: %v", mods)
+	}
+}

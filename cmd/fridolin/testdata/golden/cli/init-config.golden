@@ -9,6 +9,7 @@
   "brain_mode": true,
   "brain_model": "",
   "claude_path": "/opt/claude/bin/claude",
+  "connections": {},
   "core": {
     "lease": {
       "enabled": false

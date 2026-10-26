@@ -38,7 +38,7 @@ brains/main.brain.json -rw------- d5f2c441f45b5dff
 	    "default": "you@example.com"
 	  }
 	}
-config.json -rw------- 9ce50255ee9b9a3d
+config.json -rw------- 8b1f926e039eb9cb
 	{
 	  "version": 2,
 	  "allowed_numbers": [
@@ -132,5 +132,13 @@ config.json -rw------- 9ce50255ee9b9a3d
 	  "policy": {},
 	  "housekeeping": {},
 	  "schedules": {},
-	  "fride": {}
+	  "fride": {},
+	  "connections": {
+	    "openai": {
+	      "brains": [
+	        "main"
+	      ],
+	      "brain_monthly_usd": 10
+	    }
+	  }
 	}

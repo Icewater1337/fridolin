@@ -22,5 +22,12 @@ Content-Type: application/json
     "run": "<RUN>",
     "thread": "15551234567@s.whatsapp.net",
     "ts": "<TIME>"
+  },
+  {
+    "by": "dashboard",
+    "detail": "openai: key set",
+    "kind": "connection_key",
+    "outcome": "ok",
+    "ts": "<TIME>"
   }
 ]

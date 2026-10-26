@@ -195,6 +195,19 @@ what the model says:
 | `request_approval(action, details, risk, step)`, `ask_user(question, options)`, `check_approval(id)` | ask you in WhatsApp and wait for the answer, see [Skills, risk and approvals](#skills-risk-and-approvals) | the same, in the core run's chat; not in an observe-only run |
 | `node_update(node)` | with nodes on: updates a node's fridolin to the core's version, a write action ([NODES.md](NODES.md#updates)) | absent |
 
+Any brain, core or not, also gets the tools of Fridolin's
+[connections](CONNECTIONS.md#brains) while the connection has a key and
+`connections.<id>.brains` lists the brain. The bridge makes the call with
+the key, which the run never sees, and counts it against the brain's
+`brain_monthly_usd`:
+
+| Tool | What |
+| --- | --- |
+| `openai_transcribe(path, language, prompt, model)` | a recording's text, from OpenAI; a write action, since the audio leaves the machine |
+| `elevenlabs_transcribe(path, language, model)` | a recording's text and language, from ElevenLabs; a write action |
+| `elevenlabs_speak(text, voice, model, format)` | reads a text aloud into `speech/` in the run's temp folder and answers the file's path; a write action. The bridge cannot send it to WhatsApp yet |
+| `elevenlabs_voices()` | the ElevenLabs account's voices |
+
 A tool a run is not granted is absent, not refused: it is not in the
 run's list, and a call of it is a call of a tool there is none of.
 

@@ -10,6 +10,21 @@ for compatibility.
 
 ### Added
 
+- **OpenAI and ElevenLabs as connections of Fridolin** (#284). The
+  Integrations page keeps one OpenAI key (with an optional organization
+  and project) and one ElevenLabs key, in `connections/` in the data dir.
+  Site modules declare `capabilities.openai` and
+  `capabilities.elevenlabs` in module.json (the deploy review lists
+  them) and call the providers through the bridge; brains listed in the
+  new `connections` section of config.json get the tools
+  `openai_transcribe`, `elevenlabs_transcribe`, `elevenlabs_speak` and
+  `elevenlabs_voices`. The bridge makes every call with the key, which no
+  module or brain sees, checks what the caller declared and its monthly
+  limit, and counts the usage per caller and month, with an estimated
+  cost; the audit log gets `connection_call` and `connection_key` lines.
+  `fridolin doctor` checks each key that is set. An older bridge rolled
+  back to ignores the `connections` section, and drops it when the
+  dashboard saves; the keys stay in the data dir (docs/CONNECTIONS.md).
 - **A scheduled agent's own effort and a longer timeout.** An agent's
   file takes `effort` (`low` … `max`, the dashboard's *More settings*):
   its runs, and those FrIDE's news starts for it, think that hard, while
@@ -1163,6 +1178,14 @@ for compatibility.
 
 ### Fixed
 
+- **Pairing FrIDE again works at once.** After `fridolin node fride
+  pair` on a node whose agent runs, FrIDE takes only the new token,
+  while the agent kept the old one until its next check, up to half a
+  minute later. Until then the core's FrIDE work failed with "FrIDE
+  refused the node's token: pair again", right after the pairing, and
+  the node refused FrIDE's news, which FrIDE does not send again. The
+  agent now reads the token again when FrIDE refuses it or news is
+  signed with another, and goes on with the new one.
 - **A node hears an approval that came while it connected** (#324).
   An approval (`!approve`, the Nodes page, `fridolin nodes approve`)
   or a backup folder approved just as a node connected could reach no

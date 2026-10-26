@@ -187,6 +187,21 @@ func (m *SiteManager) liveCaps(module string) (sandbox.SiteModule, error) {
 	return sandbox.SiteModule{}, fmt.Errorf("module %q is not live", module)
 }
 
+// LiveModule is what module id of the live commit declares, or an error
+// when no commit is live or it has no such module. The site bridge checks
+// a module's calls of Fridolin's connections against it.
+func (m *SiteManager) LiveModule(id string) (sandbox.SiteModule, error) { return m.liveCaps(id) }
+
+// LiveModules are the modules of the live commit; none when the site is
+// off or nothing is deployed.
+func (m *SiteManager) LiveModules() []sandbox.SiteModule {
+	s := m.Settings()
+	if !s.Enabled || s.Approved == "" {
+		return nil
+	}
+	return readModuleCaps(m.modulesDirOf(s.Approved), m.host.Home())
+}
+
 // ── ctx.ingest ────────────────────────────────────────────────────────────
 
 // takeSpoolEntry checks one request and hands its files to the brain.

@@ -64,16 +64,26 @@ func readModuleCaps(modulesDir, home string) []sandbox.SiteModule {
 					Path   string `json:"path"`
 					Access string `json:"access"`
 				} `json:"files"`
-				Commands []string `json:"commands"`
-				Secrets  []string `json:"secrets"`
-				Ingest   []string `json:"ingest"`
-				Search   []string `json:"search"`
+				Commands   []string        `json:"commands"`
+				Secrets    []string        `json:"secrets"`
+				Ingest     []string        `json:"ingest"`
+				Search     []string        `json:"search"`
+				OpenAI     json.RawMessage `json:"openai"`
+				ElevenLabs json.RawMessage `json:"elevenlabs"`
 			} `json:"capabilities"`
 		}
 		if json.Unmarshal(data, &mf) != nil || mf.ID != e.Name() {
 			continue
 		}
 		c := sandbox.SiteModule{ID: mf.ID, Title: mf.Title, Dir: dir, Commands: mf.Capabilities.Commands, Secrets: mf.Capabilities.Secrets, Ingest: mf.Capabilities.Ingest, Search: mf.Capabilities.Search}
+		for name, raw := range map[string]json.RawMessage{"openai": mf.Capabilities.OpenAI, "elevenlabs": mf.Capabilities.ElevenLabs} {
+			if d, ok := connectionCap(raw); ok {
+				if c.Connections == nil {
+					c.Connections = map[string]sandbox.ConnectionCapability{}
+				}
+				c.Connections[name] = d
+			}
+		}
 		if mf.App != nil && mf.App.Dist != "" {
 			c.Dist = sandbox.ResolveModulePath(mf.App.Dist, dir, home)
 		}
@@ -88,6 +98,21 @@ func readModuleCaps(modulesDir, home string) []sandbox.SiteModule {
 		out = append(out, c)
 	}
 	return out
+}
+
+// connectionCap reads capabilities.openai or capabilities.elevenlabs.
+// One that does not parse grants nothing: the site refuses the module
+// (validateManifest), and the bridge must not read it as no limit.
+func connectionCap(raw json.RawMessage) (sandbox.ConnectionCapability, bool) {
+	var d struct {
+		Use        []string `json:"use"`
+		Models     []string `json:"models"`
+		MonthlyUSD float64  `json:"monthly_usd"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &d) != nil || len(d.Use) == 0 || d.MonthlyUSD < 0 {
+		return sandbox.ConnectionCapability{}, false
+	}
+	return sandbox.ConnectionCapability{Use: d.Use, Models: d.Models, MonthlyUSD: d.MonthlyUSD}, true
 }
 
 // errSiteNoSandbox: the system has no sandbox-exec.

@@ -12,12 +12,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/connections"
 	"github.com/Icewater1337/fridolin/internal/files"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
 
 // The site bridge: where the live site reads the built-in /files and
-// /wiki (docs/FILES.md).
+// /wiki (docs/FILES.md), and where its modules call Fridolin's
+// connections to OpenAI and ElevenLabs (docs/CONNECTIONS.md).
 //
 // The site's sandbox keeps module code off the bridge's own port (the
 // dashboard, /send, /ingest), so the bridge answers the site on a port of
@@ -34,6 +36,13 @@ import (
 // requests, as it can read users.json and session.key: approving module
 // code trusts it with what the site's roles may read (docs/SITE.md, "One
 // process").
+//
+// A call of a connection names its module in X-Fridolin-Module. The
+// bridge checks it against the live commit's manifest of that module:
+// the operations and models it declares, and its monthly budget. The
+// keys stay in the bridge: no module ever sees one. Module code in the one
+// process could name another module; it gets that module's declaration,
+// which approving the deploy allowed too.
 
 // siteUserHeader names the signed-in site account in a request.
 const siteUserHeader = "X-Fridolin-Site-User"
@@ -65,8 +74,9 @@ func (b *App) filesBridge() (string, string, error) {
 	}
 	sb.token = hex.EncodeToString(tok)
 	sb.url = "http://" + ln.Addr().String()
+	routes := siteBridgeRoutes(b.newFilesAPI().SiteHandler(b.siteScope), b.conns.SiteMux(b.liveDeclarations))
 	sb.srv = &http.Server{
-		Handler:           siteBridgeHandler(ln.Addr().String(), sb.token, b.newFilesAPI().SiteHandler(b.siteScope)),
+		Handler:           siteBridgeHandler(ln.Addr().String(), sb.token, routes),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func(srv *http.Server) {
@@ -88,13 +98,36 @@ func (b *App) stopSiteBridge() {
 	}
 }
 
-// siteWrites are the calls of the site bridge that change files, with the
-// body each takes.
-var siteWrites = map[string]string{
-	"PUT /site-api/files/text":    "application/json",
-	"POST /site-api/files/move":   "application/json",
-	"POST /site-api/files/delete": "application/json",
-	"POST /site-api/files/upload": "multipart/form-data",
+// siteBridgeRoutes serves a connection's call on conns and everything
+// else on files.
+func siteBridgeRoutes(files http.Handler, conns *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h, pattern := conns.Handler(r); pattern != "" {
+			h.ServeHTTP(w, r)
+			return
+		}
+		files.ServeHTTP(w, r)
+	})
+}
+
+// siteBody is what a call of the site bridge sends, and how much of it.
+type siteBody struct {
+	ctype string
+	limit int64
+}
+
+// siteWrites are the calls of the site bridge that send a body: those
+// that change files, and the calls of the connections, with the body
+// each takes.
+var siteWrites = map[string]siteBody{
+	"PUT /site-api/files/text":                         {"application/json", 1 << 20},
+	"POST /site-api/files/move":                        {"application/json", 1 << 20},
+	"POST /site-api/files/delete":                      {"application/json", 1 << 20},
+	"POST /site-api/files/upload":                      {"multipart/form-data", httpapi.MaxUploadBody},
+	"POST /site-api/connections/openai/transcribe":     {"multipart/form-data", connections.SiteAudioBody},
+	"POST /site-api/connections/openai/responses":      {"application/json", connections.SiteResponsesBody},
+	"POST /site-api/connections/elevenlabs/tts":        {"application/json", connections.SiteSpeechBody},
+	"POST /site-api/connections/elevenlabs/transcribe": {"multipart/form-data", connections.SiteAudioBody},
 }
 
 // siteBridgeHandler admits a request to next only from this machine
@@ -116,20 +149,16 @@ func siteBridgeHandler(addr, token string, next http.Handler) http.Handler {
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			ct, ok := siteWrites[r.Method+" "+r.URL.Path]
+			body, ok := siteWrites[r.Method+" "+r.URL.Path]
 			if !ok {
 				httpapi.WriteErr(w, http.StatusMethodNotAllowed, "no such change on the site bridge")
 				return
 			}
-			if !strings.HasPrefix(r.Header.Get("Content-Type"), ct) {
-				httpapi.WriteErr(w, http.StatusUnsupportedMediaType, "send "+ct)
+			if !strings.HasPrefix(r.Header.Get("Content-Type"), body.ctype) {
+				httpapi.WriteErr(w, http.StatusUnsupportedMediaType, "send "+body.ctype)
 				return
 			}
-			limit := int64(1 << 20)
-			if ct != "application/json" {
-				limit = httpapi.MaxUploadBody
-			}
-			r.Body = http.MaxBytesReader(w, r.Body, limit)
+			r.Body = http.MaxBytesReader(w, r.Body, body.limit)
 		}
 		next.ServeHTTP(w, r)
 	})

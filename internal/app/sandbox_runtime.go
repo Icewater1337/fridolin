@@ -443,7 +443,7 @@ func (sp *SandboxProfiler) bwrapPolicy(id string) (sandbox.BwrapPolicy, error) {
 	// its secrets: they are masked then.
 	l := config.Layout{Root: sp.DataDir}
 	p.Mask = append(p.Mask, l.Secrets(), l.Tsnet(), l.Core(), l.DashboardToken(), l.DashboardSessions(),
-		l.ScriptsToken(), filepath.Dir(l.RcloneConf()), filepath.Dir(l.GoogleClient()), l.Nodes(),
+		l.ScriptsToken(), filepath.Dir(l.RcloneConf()), filepath.Dir(l.GoogleClient()), l.Nodes(), l.Connections(),
 		// The vault's index and documents, the audit log, the memory
 		// indexes and standing intents: brains reach them through the
 		// brain API and their MCP tools only.

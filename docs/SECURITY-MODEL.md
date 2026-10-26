@@ -25,6 +25,15 @@ data. A dedicated OS user limits exposure to the rest of the system; it does not
 isolate brains from the bridge. Disabling the macOS or container sandbox has the
 same broad consequence.
 
+The OpenAI and ElevenLabs keys of Fridolin's connections never leave the
+bridge ([CONNECTIONS.md](CONNECTIONS.md)). Site modules and brains ask the
+bridge, which checks what each declared or was granted and its monthly budget,
+and calls the provider itself. The keys are not in `config.json`, a child's
+environment, a log, the audit log or a dashboard answer, and a provider's error
+is scrubbed of key-like text before it is passed on. They are files in the data
+dir, so they are as safe as the data dir: where brains or the site run without a
+sandbox, they can read them.
+
 On the tailnet (`core.tailnet`) the dashboard always requires its token or a
 session; the caller's tailnet identity is logged and audited but is not
 authentication by itself.

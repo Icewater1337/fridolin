@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -309,6 +310,27 @@ func TestSiteReviewManifest(t *testing.T) {
 	}
 	if got := strings.Join(fields, ","); got != "access,server,server.public,capabilities.files,app.public" {
 		t.Errorf("review fields = %s", got)
+	}
+
+	// Fridolin's connections, in words.
+	withAI := map[string]any{"route": "/a", "access": old["access"], "app": old["app"], "capabilities": map[string]any{
+		"openai":     map[string]any{"use": []any{"transcribe", "responses"}, "models": []any{"gpt-4o-transcribe", "gpt-4o-mini-transcribe"}, "monthly_usd": 20.0},
+		"elevenlabs": map[string]any{"use": []any{"tts"}},
+	}}
+	items := reviewManifest(old, withAI)
+	if len(items) != 2 || items[0].Field != "capabilities.openai" || items[0].Old != nil ||
+		items[0].New != "transcribe, responses; models gpt-4o-transcribe, gpt-4o-mini-transcribe; up to $20 a month" ||
+		!strings.Contains(items[0].Note, "Fridolin's key") || items[1].Field != "capabilities.elevenlabs" || items[1].New != "tts; any model; no monthly limit" {
+		t.Errorf("connection rows %+v", items)
+	}
+	// What does not read as a declaration is shown as it is.
+	for _, odd := range []any{"transcribe", map[string]any{"use": "transcribe"}, map[string]any{"use": []any{1}}, map[string]any{"use": []any{"tts"}, "monthly_usd": "5"}} {
+		if got := connectionSummary(odd); !reflect.DeepEqual(got, odd) {
+			t.Errorf("connectionSummary(%v) = %v", odd, got)
+		}
+	}
+	if got := connectionSummary(nil); got != nil {
+		t.Errorf("nothing: %v", got)
 	}
 }
 

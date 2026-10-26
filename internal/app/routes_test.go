@@ -55,6 +55,10 @@ const (
 	// classSiteBridge is on the site bridge's own listener
 	// (site_bridge.go): its token, and a site account.
 	classSiteBridge = "site-bridge"
+	// classSiteConnection is a call of Fridolin's connections on the site
+	// bridge's own listener: its token, and a module of the live commit
+	// that declares the call (docs/CONNECTIONS.md).
+	classSiteConnection = "site-connection"
 )
 
 // httpRoute is one registered pattern. probe is a concrete request path for it,
@@ -124,6 +128,11 @@ var routeInventory = []httpRoute{
 	{"POST", "/site-api/files/upload", classSiteBridge, ""},
 	{"POST", "/site-api/files/move", classSiteBridge, ""},
 	{"POST", "/site-api/files/delete", classSiteBridge, ""},
+	{"POST", "/site-api/connections/openai/transcribe", classSiteConnection, ""},
+	{"POST", "/site-api/connections/openai/responses", classSiteConnection, ""},
+	{"POST", "/site-api/connections/elevenlabs/tts", classSiteConnection, ""},
+	{"POST", "/site-api/connections/elevenlabs/transcribe", classSiteConnection, ""},
+	{"GET", "/site-api/connections/elevenlabs/voices", classSiteConnection, ""},
 
 	{"GET", "/api/status", classAPI, ""},
 	{"POST", "/api/logout", classAPI, ""},
@@ -294,6 +303,11 @@ var routeInventory = []httpRoute{
 	{"GET", "/api/schedules/{brain}/{name}/runs/{run}/log", classAPI, "/api/schedules/main/brief/runs/20261023T060000-abcdef/log"},
 	{"PUT", "/api/schedules/{brain}/{name}", classAPI, "/api/schedules/main/brief"},
 	{"DELETE", "/api/schedules/{brain}/{name}", classAPI, "/api/schedules/main/brief"},
+	{"GET", "/api/connections", classAPI, ""},
+	{"PUT", "/api/connections/{id}", classAPI, "/api/connections/openai"},
+	{"DELETE", "/api/connections/{id}", classAPI, "/api/connections/openai"},
+	{"PUT", "/api/connections/{id}/brains", classAPI, "/api/connections/openai/brains"},
+	{"POST", "/api/connections/{id}/check", classAPI, "/api/connections/openai/check"},
 	{"POST", "/api/dev/inbound", classAPI, ""},
 	{"GET", "/api/dev/outbox", classAPI, ""},
 	{"POST", "/api/dev/vote", classAPI, ""},
@@ -386,8 +400,8 @@ func TestRouteInventoryIsComplete(t *testing.T) {
 
 // reachesOutside are the routes whose handlers act outside the test: they
 // re-execute the process, open a folder picker on the desktop, pair a
-// phone with WhatsApp, reach GitHub or a git remote, or restore a backup
-// over a brain's folder. TestRouteInventoryGuards only looks them up in
+// phone with WhatsApp, reach GitHub, a git remote, OpenAI or ElevenLabs,
+// or restore a backup over a brain's folder. TestRouteInventoryGuards only looks them up in
 // the API mux and never sends them a request, which a guard that stopped
 // working would let through. TestRestartInATestFailsTheRun probes the
 // restart for real, in a test binary of its own.
@@ -404,6 +418,7 @@ var reachesOutside = map[string]bool{
 	"POST /api/backup/restore":         true,
 	"POST /api/github/test":            true,
 	"POST /api/site/check-domain":      true,
+	"POST /api/connections/{id}/check": true,
 }
 
 // TestRouteInventoryGuards probes every route of the inventory for the
@@ -424,8 +439,9 @@ func TestRouteInventoryGuards(t *testing.T) {
 	}
 	token := h.token()
 	// What a GET must never show: the dashboard token, and the secrets
-	// the golden bridge holds (the Google client's, the calendar token's).
-	secrets := []string{token, "TEST-CLIENT-SECRET", "golden-refresh-token", "golden-access-token"}
+	// the golden bridge holds (the Google client's, the calendar token's,
+	// the OpenAI key).
+	secrets := []string{token, "TEST-CLIENT-SECRET", "golden-refresh-token", "golden-access-token", goldenOpenAIKey}
 
 	request := func(method, path, body string, mutate ...func(*http.Request)) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "http://"+config.DefaultHTTPListen+path, strings.NewReader(body))
@@ -605,7 +621,7 @@ func TestRouteInventoryGuards(t *testing.T) {
 				if rt.method == "" {
 					want = http.StatusNotFound
 				}
-				ct := siteWrites[method+" "+rt.path()]
+				ct := siteWrites[method+" "+rt.path()].ctype
 				if code, _ := siteBridgeCall(t, method, url, siteToken, "u_nobody", rt.path(), ct); code != want {
 					t.Errorf("for no site account: %d, want %d", code, want)
 				}
@@ -616,6 +632,37 @@ func TestRouteInventoryGuards(t *testing.T) {
 				}
 				// The dashboard's own pages answer a GET; anything else is refused.
 				want = http.StatusNotFound
+				if method != "GET" {
+					want = http.StatusMethodNotAllowed
+				}
+				if w := request(method, rt.path(), "", withToken); w.Code != want {
+					t.Errorf("on the dashboard's listener: %d, want %d", w.Code, want)
+				}
+			case classSiteConnection:
+				url, siteToken, err := h.b.filesBridge()
+				if err != nil {
+					t.Fatal(err)
+				}
+				ct := siteWrites[method+" "+rt.path()].ctype
+				for _, c := range []struct {
+					name, token, module, ct string
+					want                    int
+				}{
+					{"without its token", "", "m", ct, http.StatusUnauthorized},
+					{"with the dashboard token", token, "m", ct, http.StatusUnauthorized},
+					{"for no module", siteToken, "", ct, http.StatusUnauthorized},
+					{"for a module that is not live", siteToken, "ghost", ct, http.StatusNotFound},
+				} {
+					if code, body := siteConnectionCall(t, method, url, c.token, c.module, rt.path(), c.ct, nil); code != c.want {
+						t.Errorf("%s: %d %s, want %d", c.name, code, body, c.want)
+					}
+				}
+				if method != "GET" {
+					if code, _ := siteConnectionCall(t, method, url, siteToken, "m", rt.path(), "text/plain", nil); code != http.StatusUnsupportedMediaType {
+						t.Errorf("another body: %d, want 415", code)
+					}
+				}
+				want := http.StatusNotFound
 				if method != "GET" {
 					want = http.StatusMethodNotAllowed
 				}

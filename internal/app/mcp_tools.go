@@ -90,6 +90,7 @@ func (b *App) newMCPTools() *tools.Set[mcpCaller] {
 	b.registerFrideTools(r)
 	b.registerNodeTools(r)
 	b.registerWorkstationTools(r)
+	b.registerConnectionTools(r)
 	return r
 }
 

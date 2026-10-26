@@ -295,6 +295,30 @@
         "min_age_minutes": {"type": "integer", "minimum": 0, "maximum": 10080, "description": "Processes younger than this are left alone. Default 60."}
       }
     },
+    "connections": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Which brains may use Fridolin's OpenAI and ElevenLabs keys through their tools, and what each may spend a month (docs/CONNECTIONS.md). The keys are not here: the dashboard keeps them in the data dir.",
+      "properties": {
+        "openai": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "brains": {"$ref": "#/$defs/connection_brains"},
+            "brain_monthly_usd": {"$ref": "#/$defs/connection_monthly_usd"}
+          }
+        },
+        "elevenlabs": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "brains": {"$ref": "#/$defs/connection_brains"},
+            "brain_monthly_usd": {"$ref": "#/$defs/connection_monthly_usd"},
+            "voice": {"type": "string", "pattern": "^[A-Za-z0-9_-]{0,64}$", "description": "The voice id text-to-speech uses when a caller names none."}
+          }
+        }
+      }
+    },
     "fride": {
       "type": "object",
       "additionalProperties": false,
@@ -352,6 +376,8 @@
     "brains": {"type": ["array", "null"], "maxItems": 0, "deprecated": true, "description": "Retired in version 2: inline brains, refused unless the list is empty."}
   },
   "$defs": {
+    "connection_brains": {"type": "array", "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$"}, "description": "The brains whose runs may use the connection through their tools; none by default."},
+    "connection_monthly_usd": {"type": "number", "minimum": 0, "maximum": 10000, "description": "Each brain's monthly limit in US dollars, estimated; 0 for none of Fridolin's."},
     "bucket": {"type": "string", "pattern": "^$|^[a-z0-9][a-z0-9-]{4,61}[a-z0-9]$", "not": {"pattern": "^b2-"}, "description": "A B2 bucket name: 6 to 63 lower-case letters, digits and -, not starting with b2-."},
     "absolute_path": {"type": "string", "pattern": "^(/|~/|~$)", "description": "An absolute path, or one that starts with ~/."},
     "phone_number": {

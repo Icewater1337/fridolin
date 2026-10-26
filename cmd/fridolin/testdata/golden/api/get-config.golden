@@ -17,6 +17,14 @@ Content-Type: application/json
     "brain_mode": true,
     "brain_model": "",
     "claude_path": "<TEST_BINARY>",
+    "connections": {
+      "openai": {
+        "brain_monthly_usd": 10,
+        "brains": [
+          "main"
+        ]
+      }
+    },
     "core": {
       "lease": {
         "enabled": false
@@ -86,6 +94,14 @@ Content-Type: application/json
     "codex_effort": "high",
     "codex_model": "gpt-6.1-sol",
     "codex_path": "codex",
+    "connections": {
+      "openai": {
+        "brain_monthly_usd": 10,
+        "brains": [
+          "main"
+        ]
+      }
+    },
     "core": {
       "lease": {
         "enabled": false,
