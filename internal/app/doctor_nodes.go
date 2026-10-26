@@ -115,6 +115,11 @@ type doctorNode struct {
 	} `json:"approved"`
 }
 
+// node is n as much as nodes.ResolveIn needs to find it by its ref.
+func (n doctorNode) node() *nodes.Node {
+	return &nodes.Node{ID: n.ID, Name: n.Name, Device: n.Device}
+}
+
 // stale reports whether the core has not heard from n for nodeStaleAfter
 // at now: never while it is connected.
 func (n doctorNode) stale(now time.Time) bool {
@@ -259,16 +264,19 @@ func checkNodesPrograms(ctx context.Context, env *doctor.Env) doctor.Result {
 	}
 	var bad []string
 	fix := "approve the node's commands on the Nodes page, and add the program's folder to exec.accept_from_core in the node's node.json (docs/NODES.md, Programs from the core)"
+	ambiguous := false
 	for _, c := range cmds {
-		i := slices.IndexFunc(list, func(n doctorNode) bool { return n.ID == c.Node })
-		if i < 0 {
-			i = slices.IndexFunc(list, func(n doctorNode) bool { return strings.EqualFold(n.Name, c.Node) })
-		}
-		if i < 0 {
+		// The node as the agent's runs find it (#251).
+		n, err := nodes.ResolveIn(list, c.Node, doctorNode.node)
+		switch {
+		case errors.Is(err, nodes.ErrAmbiguousNode):
+			bad = append(bad, fmt.Sprintf("%s: %v", c.Agent, err))
+			ambiguous = true
+			continue
+		case err != nil:
 			bad = append(bad, fmt.Sprintf("%s: there is no node %q", c.Agent, c.Node))
 			continue
 		}
-		n := list[i]
 		eff := nodeproto.Intersect(nodeproto.Capabilities{Exec: n.Declared.Exec}, nodeproto.Capabilities{Exec: n.Approved.Exec})
 		switch {
 		case n.Device != nodeproto.DeviceApproved:
@@ -282,6 +290,9 @@ func checkNodesPrograms(ctx context.Context, env *doctor.Env) doctor.Result {
 	}
 	if len(bad) > 0 {
 		slices.Sort(bad)
+		if ambiguous {
+			fix += "; where more than one node has the name an agent gives, give the node's id in the agent's command instead"
+		}
 		return doctor.Result{Status: doctor.Warn, Detail: fmt.Sprintf("%d of %d command agents cannot run: %s", len(bad), len(cmds), strings.Join(bad, "; ")), Fix: fix}
 	}
 	return doctor.Result{Status: doctor.OK, Detail: fmt.Sprintf("the nodes allow the programs of all %d command agents", len(cmds))}

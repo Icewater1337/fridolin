@@ -132,14 +132,52 @@ export function fromBase64(b64, decoder = new TextDecoder()) {
 }
 
 /**
- * The node of a's list a command agent names, by id or by name; null for none.
+ * The nodes of a's list a command agent's ref could name, as the bridge
+ * finds its node (nodes.ResolveIn, #251): the one with that id, else
+ * those with that name in any case, a revoked one only when no other
+ * has the name. One is the node it names; more name none of them.
  * @param {Node[] | null | undefined} nodes
  * @param {string} ref
- * @returns {Node | null}
+ * @returns {Node[]}
  */
-export function nodeNamed(nodes, ref) {
+export function nodesNamed(nodes, ref) {
   const list = nodes || [];
-  return list.find((n) => n.id === ref) || list.find((n) => (n.name || '').toLowerCase() === String(ref || '').toLowerCase()) || null;
+  const want = String(ref || '').trim();
+  if (!want) return [];
+  const byID = list.find((n) => n.id === want);
+  if (byID) return [byID];
+  const called = list.filter((n) => (n.name || '').toLowerCase() === want.toLowerCase());
+  const live = called.filter((n) => n.device !== 'revoked');
+  return live.length ? live : called;
+}
+
+/**
+ * How a command agent names node n of nodes: by its name when that names
+ * n alone (nodesNamed), else by its id.
+ * @param {Node[]} nodes
+ * @param {Node} n
+ */
+export function nodeRef(nodes, n) {
+  const found = n.name ? nodesNamed(nodes, n.name) : [];
+  return found.length === 1 && found[0] === n ? n.name : n.id;
+}
+
+/**
+ * How a command agent's program stands on the node ref names, before the
+ * agent is saved: programOnNode, or why ref names no node, as the
+ * bridge's programOn says it.
+ * @param {Node[] | null | undefined} nodes
+ * @param {string} ref
+ * @param {string[]} argv
+ * @returns {{state: ScheduleProgram['state'], text: string}}
+ */
+export function programOn(nodes, ref, argv) {
+  const found = nodesNamed(nodes, ref);
+  if (found.length > 1) {
+    const which = found.map((n) => `${n.name} (${n.id})`).join(', ');
+    return { state: 'no-node', text: `${found.length} nodes are called ${String(ref).trim()}: ${which}. Name one by its id.` };
+  }
+  return programOnNode(found[0] || null, argv);
 }
 
 /** @type {(a: string[] | null, b: string[]) => boolean} */

@@ -8,7 +8,7 @@
 
 import { get } from '../app/api.js';
 import { h, mount } from '../lib/dom.js';
-import { nodeNamed, programOnNode } from '../lib/nodes.js';
+import { nodeRef, nodesNamed, programOn } from '../lib/nodes.js';
 import { WEEKDAYS, fieldsOf, fileJSON, inTime, permissionsOf, presetOf, riskText, runTime, scheduleOf, whenOf } from '../lib/schedules.js';
 import { btn } from './buttons.js';
 import { callout } from './common.js';
@@ -141,12 +141,13 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
     // How the program stands on its node: allowed, added on saving, or
     // what the node must opt into first.
     const argvOf = () => f.argv.split('\n').map((x) => x.trim()).filter(Boolean);
-    const programNow = () => programOnNode(nodeNamed(nodes, f.node.trim()), argvOf());
+    const programNow = () => programOn(nodes, f.node.trim(), argvOf());
     const programCallout = () => {
       const p = programNow();
       const tone = p.state === 'allowed' ? 'ok' : p.state === 'waiting' ? 'info' : 'warn';
+      const noNode = nodesNamed(nodes, f.node).length > 1 ? 'Which node?' : 'No such node';
       /** @type {Partial<Record<ScheduleProgram['state'], string>>} */
-      const titles = { allowed: `Node ${f.node} runs it`, waiting: `Saving adds it to node ${f.node}`, 'no-node': 'No such node' };
+      const titles = { allowed: `Node ${f.node} runs it`, waiting: `Saving adds it to node ${f.node}`, 'no-node': noNode };
       const title = titles[p.state] || `Node ${f.node || '…'} would not run it`;
       return callout(tone, title, p.text);
     };
@@ -295,7 +296,14 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
 
     function detailsStep() {
       if (f.kind === 'command') {
-        const node = nodes.length ? select([['', 'Choose a node'], ...nodes.map((n) => /** @type {[string, string]} */ ([n.name || n.id, n.name ? `${n.name}${n.online === false ? ' (offline)' : ''}` : n.id]))], f.node) : textInput({ value: f.node, placeholder: 'mac-mini' });
+        // A node goes by its name, or by its id where another node has
+        // that name too.
+        /** @type {(n: Node) => [string, string]} */
+        const option = (n) => {
+          const ref = nodeRef(nodes, n);
+          return [ref, n.name ? `${n.name}${ref === n.id ? ` (${n.id})` : ''}${n.online === false ? ' (offline)' : ''}` : n.id];
+        };
+        const node = nodes.length ? select([['', 'Choose a node'], ...nodes.map(option)], f.node) : textInput({ value: f.node, placeholder: 'mac-mini' });
         node.addEventListener('change', () => set('node', node.value));
         node.addEventListener('input', () => set('node', node.value));
         const argv = h('textarea.mono', { rows: 3, id: nextId('argv'), placeholder: '/Users/you/bin/scrape.sh\n--quiet' });

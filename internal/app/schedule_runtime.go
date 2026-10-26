@@ -23,6 +23,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/intent"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/nodes"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/sched"
 	"github.com/Icewater1337/fridolin/internal/skill"
@@ -724,18 +725,18 @@ func (a *agents) runCommand(ar *agentRun) {
 	}
 }
 
-// nodeID is the id of the node ref names, by id or by name.
+// nodeID is the id of the node ref names, by id or by name, as the owner
+// names a node everywhere (nodes.Registry.Resolve, #251). A name more
+// than one node has runs on none of them.
 func (a *agents) nodeID(ref string) (string, error) {
-	views, err := a.b.nodes.Views()
-	if err != nil {
+	n, err := a.b.nodes.FindNode(ref)
+	switch {
+	case errors.Is(err, nodes.ErrUnknownNode):
+		return "", fmt.Errorf("there is no node %q (fridolin nodes lists them)", ref)
+	case err != nil:
 		return "", err
 	}
-	for _, v := range views {
-		if v.ID == ref || strings.EqualFold(v.Name, ref) {
-			return v.ID, nil
-		}
-	}
-	return "", fmt.Errorf("there is no node %q (fridolin nodes lists them)", ref)
+	return n.ID, nil
 }
 
 // commandEnded records how ar's program ended, in the audit log too, and

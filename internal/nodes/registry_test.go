@@ -466,3 +466,42 @@ func TestResolve(t *testing.T) {
 		t.Errorf("a revoked node's own name: %+v %v", n, err)
 	}
 }
+
+// TestResolveIn: a list of nodes in another shape names one by the rules
+// of Resolve, and gives back the item, not only its node (#251).
+func TestResolveIn(t *testing.T) {
+	views := []View{
+		{Node: &Node{ID: "aaaaaaaaaaaa", Name: "laptop", Device: nodeproto.DeviceRevoked}},
+		{Node: &Node{ID: "bbbbbbbbbbbb", Name: "Laptop", Device: nodeproto.DeviceApproved}, Online: true},
+		{Node: &Node{ID: "cccccccccccc", Name: "desktop", Device: nodeproto.DeviceApproved}},
+		{Node: &Node{ID: "dddddddddddd", Name: "Desktop", Device: nodeproto.DevicePending}},
+		{Node: &Node{ID: "eeeeeeeeeeee", Name: "old", Device: nodeproto.DeviceRevoked}},
+	}
+	node := func(v View) *Node { return v.Node }
+	for ref, want := range map[string]string{
+		"laptop":        "bbbbbbbbbbbb", // the revoked namesake steps aside
+		" LAPTOP ":      "bbbbbbbbbbbb",
+		"aaaaaaaaaaaa":  "aaaaaaaaaaaa", // its id still names it
+		"cccccccccccc":  "cccccccccccc",
+		"old":           "eeeeeeeeeeee", // alone with its name
+		" dddddddddddd": "dddddddddddd",
+	} {
+		v, err := ResolveIn(views, ref, node)
+		if err != nil || v.ID != want {
+			t.Errorf("ResolveIn(%q): %+v %v, want %s", ref, v.Node, err, want)
+		}
+	}
+	if v, err := ResolveIn(views, "laptop", node); err != nil || !v.Online {
+		t.Errorf("ResolveIn gave back another item than the one with the node: %+v %v", v, err)
+	}
+	_, err := ResolveIn(views, "DESKTOP", node)
+	amb, ok := errors.AsType[*AmbiguousNodeError](err)
+	if !ok || len(amb.Matches) != 2 || err.Error() != `2 nodes are called "DESKTOP": Desktop (dddddddddddd), desktop (cccccccccccc); name one by its id` {
+		t.Errorf("an ambiguous name: %v", err)
+	}
+	for _, ref := range []string{"nope", "", "lap"} {
+		if v, err := ResolveIn(views, ref, node); !errors.Is(err, ErrUnknownNode) || v.Node != nil {
+			t.Errorf("ResolveIn(%q): %+v %v, want no such node", ref, v.Node, err)
+		}
+	}
+}
