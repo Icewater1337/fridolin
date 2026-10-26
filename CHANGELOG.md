@@ -1163,6 +1163,14 @@ for compatibility.
 
 ### Fixed
 
+- **A box's core stops and starts again cleanly** (#311). A stop of the
+  core in a box returned before the box let go of the run it stopped:
+  a start right after it, as a move's source does when the stop failed,
+  could start nothing while the move said the core runs again, and the
+  box could still count the core as running. A core that ended by
+  itself and waited to start again could also start after a move stood
+  the box down. A stop now drops that start, and the agent ends only
+  once no core runs and none waits to start.
 - **`fridolin nodes` takes a node's name** (#251). `move-check`,
   `move`, `core-secrets-transfer`, `approve`, `revoke`, `update`,
   `auto-update`, `tags` and `call` took only the 12-hex id, and said

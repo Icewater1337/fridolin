@@ -138,6 +138,13 @@ type BoxCore struct {
 	proc    *boxProc
 	ctx     context.Context
 	stopped bool
+	// restart is the pending start of a core that ended by itself. The
+	// start happens only while restart is still its channel; halt and
+	// launch close it.
+	restart chan struct{}
+	// watchers wait for the runs of the core (watch); Supervise waits
+	// for them, so that no core and no pending start outlive the agent.
+	watchers sync.WaitGroup
 }
 
 // boxProc is one run of the core.
@@ -401,6 +408,11 @@ var errBoxStopping = errors.New("the agent is stopping; the core starts with it 
 func (b *BoxCore) launch() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	return b.launchLocked()
+}
+
+// launchLocked is launch with b.mu held.
+func (b *BoxCore) launchLocked() error {
 	if b.proc != nil {
 		return nil
 	}
@@ -422,9 +434,18 @@ func (b *BoxCore) launch() error {
 	}
 	bp := &boxProc{p: p, done: make(chan struct{}), started: time.Now()}
 	b.proc = bp
+	b.cancelRestart()
 	b.logf("node: box: the core runs in this box")
-	go b.watch(bp)
+	b.watchers.Go(func() { b.watch(bp) })
 	return nil
+}
+
+// cancelRestart drops a pending start of the core; b.mu is held.
+func (b *BoxCore) cancelRestart() {
+	if b.restart != nil {
+		close(b.restart)
+		b.restart = nil
+	}
 }
 
 // spawn runs the image's entrypoint, as the core container runs it, with
@@ -449,16 +470,20 @@ func (p execProc) Kill() error              { return p.cmd.Process.Kill() }
 func (p execProc) Wait() error              { return p.cmd.Wait() }
 
 // watch waits for a run of the core to end, and starts it again when it
-// ended by itself while the box is the core.
+// ended by itself while the box is the core, unless a stop (halt) or a
+// start comes first.
 func (b *BoxCore) watch(bp *boxProc) {
-	bp.err = bp.p.Wait()
-	close(bp.done)
+	err := bp.p.Wait()
 	b.mu.Lock()
+	bp.err = err
 	if b.proc == bp {
 		b.proc = nil
 	}
 	again := !bp.stopping && !b.stopped
 	b.mu.Unlock()
+	// done only now, with the run gone from b.proc: halt returns on it,
+	// and a Running, Import or Start right after must not find the run.
+	close(bp.done)
 	if !again {
 		return
 	}
@@ -470,21 +495,44 @@ func (b *BoxCore) watch(bp *boxProc) {
 	if time.Since(bp.started) < time.Minute {
 		wait *= 6
 	}
+	pending := make(chan struct{})
+	b.mu.Lock()
+	if b.stopped || b.proc != nil {
+		b.mu.Unlock()
+		return
+	}
+	b.cancelRestart()
+	b.restart = pending
+	b.mu.Unlock()
 	b.logf("node: box: the core ended by itself (%v); starting it again in %s", bp.err, wait)
-	time.AfterFunc(wait, func() {
-		if role, err := LoadCoreRole(b.StateDir); err == nil && role == RoleCore {
-			if err := b.launch(); err != nil {
-				b.logf("node: box: starting the core again: %v", err)
-			}
-		}
-	})
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	select {
+	case <-t.C:
+	case <-pending:
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.restart != pending {
+		return
+	}
+	b.restart = nil
+	// The role again, under the lock: a Stop writes it before its halt.
+	if role, err := LoadCoreRole(b.StateDir); err != nil || role != RoleCore {
+		return
+	}
+	if err := b.launchLocked(); err != nil {
+		b.logf("node: box: starting the core again: %v", err)
+	}
 }
 
 // halt stops the core, if it runs, as docker stop does: SIGTERM, then a
-// kill once StopWait passed. A killed core may not have released the
-// lease, which the move then sees.
+// kill once StopWait passed, and drops a pending start. A killed core may
+// not have released the lease, which the move then sees.
 func (b *BoxCore) halt(ctx context.Context) error {
 	b.mu.Lock()
+	b.cancelRestart()
 	bp := b.proc
 	if bp != nil {
 		bp.stopping = true
@@ -535,6 +583,8 @@ func (b *BoxCore) Supervise(ctx context.Context) {
 	if err := b.halt(context.Background()); err != nil {
 		b.logf("node: box: %v", err)
 	}
+	// No run of the core and no pending start outlive the agent.
+	b.watchers.Wait()
 	wg.Wait()
 }
 

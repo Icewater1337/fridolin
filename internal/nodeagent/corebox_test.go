@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -170,6 +171,111 @@ func TestBoxCoreKillsACoreThatDoesNotStop(t *testing.T) {
 	}
 	if err := b.Stop(context.Background()); err == nil || !strings.Contains(err.Error(), "killed") || !stuck.killed {
 		t.Fatalf("stopping a stuck core: %v (killed %v)", err, stuck.killed)
+	}
+	if b.Running() {
+		t.Error("the killed core still runs after Stop")
+	}
+}
+
+// Once Stop returns, the core is gone: Running says so, and a Start
+// right after it starts the core again (a move's source after a failed
+// stop, #311).
+func TestBoxCoreStartsRightAfterAStop(t *testing.T) {
+	sp := &spawner{}
+	b, _ := testBoxCore(t, sp)
+	ctx := context.Background()
+	for i := 1; i <= 100; i++ {
+		if err := b.Start(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if n := sp.count(); n != i || !b.Running() {
+			t.Fatalf("start %d: %d cores started, running %v", i, n, b.Running())
+		}
+		if err := b.Stop(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if b.Running() {
+			t.Fatalf("stop %d: the core runs after Stop", i)
+		}
+	}
+}
+
+// A core that ended by itself waits to start again. A Stop drops that
+// start, and so does the agent's stop: nothing of the box starts or logs
+// once Supervise returned (#311).
+func TestBoxCoreStopDropsAPendingStart(t *testing.T) {
+	sp := &spawner{}
+	b, _ := testBoxCore(t, sp)
+	var mu sync.Mutex
+	var logs []string
+	b.Logf = func(format string, args ...any) {
+		line := fmt.Sprintf(format, args...)
+		mu.Lock()
+		logs = append(logs, line)
+		mu.Unlock()
+		t.Log(line)
+	}
+	// pending reports whether the n-th start of a core that ended by
+	// itself is pending.
+	pending := func(n int) func() bool {
+		return func() bool {
+			mu.Lock()
+			defer mu.Unlock()
+			seen := 0
+			for _, l := range logs {
+				if strings.Contains(l, "starting it again") {
+					seen++
+				}
+			}
+			return seen == n
+		}
+	}
+	// A core that ran less than a minute starts again after 6×20ms.
+	b.RestartWait = 20 * time.Millisecond
+	past := 300 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { b.Supervise(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	waitFor(t, "the supervisor", func() bool { b.mu.Lock(); defer b.mu.Unlock(); return b.ctx != nil })
+
+	// A move stands the box down while the start is pending.
+	if err := b.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	sp.last().die()
+	waitFor(t, "the start to be pending", pending(1))
+	if err := b.Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(past)
+	if n := sp.count(); n != 1 || b.Running() {
+		t.Fatalf("a stood-down box started the core: %d starts, running %v", n, b.Running())
+	}
+
+	// The agent stops (docker stop) while the start is pending.
+	if err := b.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	sp.last().die()
+	waitFor(t, "the start to be pending", pending(2))
+	cancel()
+	<-done
+	mu.Lock()
+	n := len(logs)
+	mu.Unlock()
+	time.Sleep(past)
+	if c := sp.count(); c != 2 || b.Running() {
+		t.Errorf("the core started after the agent stopped: %d starts, running %v", c, b.Running())
+	}
+	mu.Lock()
+	late := slices.Clone(logs[n:])
+	mu.Unlock()
+	if len(late) > 0 {
+		t.Errorf("the box logged after the agent stopped: %q", late)
+	}
+	if r, _ := LoadCoreRole(b.StateDir); r != RoleCore {
+		t.Errorf("a container stop stood the box down: %s", r)
 	}
 }
 
