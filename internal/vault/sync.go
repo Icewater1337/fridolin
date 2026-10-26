@@ -276,7 +276,9 @@ func (v *Vault) reconcile(ctx context.Context, r row, rep *SyncReport) error {
 }
 
 // upload sends rel to the cold tier. The row goes to tier hot first, so
-// that a crash part way never leaves an older cold copy looking current.
+// that a crash part way never leaves an older cold copy looking current,
+// and once Put returned it names the bytes Put sent (Store.Put replaces
+// an object whole or not at all).
 func (v *Vault) upload(ctx context.Context, rel string, r row, known bool, prov Provenance, rep *SyncReport) error {
 	now := v.now()
 	f, err := v.root.Open(filepath.FromSlash(rel))
@@ -342,29 +344,30 @@ func (v *Vault) upload(ctx context.Context, rel string, r row, known bool, prov 
 		return nil
 	}
 	sum := hex.EncodeToString(h.Sum(nil))
+	// Put replaced the cold object, so from here the row names what went
+	// up, even when a check below fails: the old hash no longer holds.
+	r.ColdKey, r.ColdSHA256 = key, sum
 	info, err := v.opts.Store.Stat(ctx, key)
-	if err != nil {
-		rep.fail(rel, fmt.Errorf("verify: %w", err))
-		return nil
-	}
-	if info.Size != counter.n {
-		rep.fail(rel, fmt.Errorf("verify: cold copy has %d bytes, uploaded %d", info.Size, counter.n))
-		return nil
+	if err == nil && info.Size != counter.n {
+		err = fmt.Errorf("cold copy has %d bytes, uploaded %d", info.Size, counter.n)
+		r.ColdKey, r.ColdSHA256 = "", "" // cold holds bytes nobody hashed
 	}
 	v.mu.Lock()
 	defer v.mu.Unlock()
+	if err != nil {
+		rep.fail(rel, fmt.Errorf("verify: %w", err))
+		return putRow(ctx, v.db, r)
+	}
 	after, err := v.lstat(rel)
 	if err != nil || after.Size() != counter.n || after.ModTime().UnixNano() != r.MtimeNS || !after.Mode().IsRegular() {
 		// Written to while uploading: what went up may be torn. Stay hot;
 		// the change brings another sync.
 		rep.fail(rel, errors.New("changed during upload; retried on the next sync"))
-		return nil
+		return putRow(ctx, v.db, r)
 	}
 	r.SHA256 = sum
 	r.Size = counter.n
 	r.Tier = TierBoth
-	r.ColdKey = key
-	r.ColdSHA256 = sum
 	r.UploadedAt = ms(v.now())
 	r.UpdatedAt = r.UploadedAt
 	if err := putRow(ctx, v.db, r); err != nil {
