@@ -10,8 +10,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -26,7 +28,8 @@ import (
 // loopback API under /api/companion/, the DELETE /api/tasks/<task>,
 // GET /api/settings and POST /api/config of its UI's API, and its signed
 // webhook. Tests drive what FrIDE's orchestrator
-// would do with Emit, Ask, Start and Finish.
+// would do with Emit, Ask, Start and Finish, and put something between a
+// request and FrIDE's answer with BeforeNext and HoldNext.
 type FakeFride struct {
 	t   testing.TB
 	srv *http.Server
@@ -45,6 +48,8 @@ type FakeFride struct {
 	threads   map[int]*fakeThread
 	tasks     map[string]*fakeTask
 	nextID    int
+	// before and hold are the hooks of BeforeNext and HoldNext, by path.
+	before, hold map[string]func()
 	// Calls records "METHOD path" of every request, in order.
 	calls []string
 }
@@ -213,7 +218,51 @@ func (f *FakeFride) Start(thread int, task, branch string) int {
 	return f.Emit(map[string]any{"event": "started", "thread_id": thread, "task_id": task, "text": fmt.Sprintf("FrIDE inbox #%d · following · %s", thread, task), "status": "active", "branch": branch})
 }
 
+// BeforeNext runs fn once, when the next request to path comes and before
+// FrIDE reads it. fn may call FrIDE.
+func (f *FakeFride) BeforeNext(path string, fn func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.before == nil {
+		f.before = map[string]func(){}
+	}
+	f.before[path] = fn
+}
+
+// HoldNext runs fn once, when FrIDE has answered the next request to path
+// and before the answer goes out: its caller hears what FrIDE knew before
+// fn ran. fn may call FrIDE.
+func (f *FakeFride) HoldNext(path string, fn func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.hold == nil {
+		f.hold = map[string]func(){}
+	}
+	f.hold[path] = fn
+}
+
 func (f *FakeFride) serve(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	before, hold := f.before[r.URL.Path], f.hold[r.URL.Path]
+	delete(f.before, r.URL.Path)
+	delete(f.hold, r.URL.Path)
+	f.mu.Unlock()
+	if before != nil {
+		before()
+	}
+	if hold == nil {
+		f.answer(w, r)
+		return
+	}
+	rec := httptest.NewRecorder()
+	f.answer(rec, r)
+	hold()
+	maps.Copy(w.Header(), rec.Header())
+	w.WriteHeader(rec.Code)
+	_, _ = w.Write(rec.Body.Bytes())
+}
+
+func (f *FakeFride) answer(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, r.Method+" "+r.URL.Path)

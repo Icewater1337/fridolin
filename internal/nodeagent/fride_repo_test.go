@@ -2,6 +2,7 @@ package nodeagent
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"os/exec"
@@ -219,9 +220,10 @@ func TestFrideRepoAdd(t *testing.T) {
 	// without one named.
 	//
 	// Pairing again gives FrIDE a new token, and the old one stops working.
-	// A check the agent began before may ask FrIDE with the old one: it is
-	// refused, the node stops offering fride until its next check, and the
-	// core refuses fride calls until it hears the offer again (#273). A
+	// A check that asks FrIDE then, before pair wrote the new token, is
+	// refused with the old one: the node stops offering fride until its
+	// next check, and the core refuses fride calls until it hears the
+	// offer again (#273). A
 	// repository FrIDE reads only after the pairing marks the node's first
 	// offer since. The core takes a node's offers in order: once it has
 	// that repository, no older offer can follow.
@@ -268,4 +270,40 @@ func (a *Agent) frideBase() string {
 		return "-"
 	}
 	return a.fride.cfg.Base
+}
+
+// The periodic check and the one after a repository was added overlap: the
+// periodic one asks FrIDE before the repository is there and hears the
+// answer after the other one applied its own. Its older view does not take
+// the repository back out of what the node offers.
+func TestFrideOlderCheckDoesNotWin(t *testing.T) {
+	repoTestEnv(t)
+	ff := testutil.StartFakeFride(t, "web")
+	repos, _ := filepath.EvalSymlinks(t.TempDir())
+	ff.SetBaseFolders(repos)
+	a := pairedAgent(t, ff)
+	ctx := context.Background()
+	var added nodeproto.FrideRepo
+	ff.HoldNext("/api/companion/info", func() {
+		out, e := a.frideCall(ctx, nodeproto.MethodFrideRepoNew, json.RawMessage(`{"name":"api"}`))
+		if e != nil {
+			t.Error(e)
+			return
+		}
+		added = out.(nodeproto.FrideRepo)
+	})
+	if a.frideCheck(ctx) {
+		t.Error("the older check changed what the node offers")
+	}
+	if !added.Rescanned || !slices.Contains(added.Repos, "api") {
+		t.Fatalf("fride.repo_new: %+v", added)
+	}
+	if c := a.frideOffered(); c == nil || !slices.Equal(c.Repos, []string{"web", "api"}) {
+		t.Fatalf("offered after the older check: %+v", c)
+	}
+	// Later checks still count.
+	ff.Stop()
+	if !a.frideCheck(ctx) || a.frideOffered() != nil {
+		t.Fatalf("a check after FrIDE quit: %+v", a.frideOffered())
+	}
 }

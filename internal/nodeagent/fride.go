@@ -97,6 +97,13 @@ const (
 
 // fride is the agent's link to FrIDE.
 type fride struct {
+	// checkMu holds the checks (frideCheck) and frideRepaired to one at a
+	// time while they read the settings; checks counts the checks begun,
+	// and applied is the one cap is from.
+	checkMu sync.Mutex
+	checks  uint64
+	applied uint64
+
 	mu    sync.Mutex
 	cfg   *FrideConfig
 	token string
@@ -155,16 +162,26 @@ func (e *FrideError) Error() string {
 	return fmt.Sprintf("FrIDE answered %d: %s", e.Status, e.Message)
 }
 
-// frideDo calls FrIDE at base+path with token, sending body (JSON, or an
-// io.Reader as it is) and decoding the answer into out (nil to drop it, an
-// io.Writer to copy it there).
+// fileBody is a request body frideDo sends from the file at this path, a
+// bundle.
+type fileBody string
+
+// frideDo calls FrIDE at base+path with token, sending body (JSON, or a
+// fileBody) and decoding the answer into out (nil to drop it, an io.Writer
+// to copy it there).
 func frideDo(ctx context.Context, base, token, method, path string, body, out any) error {
 	var rd io.Reader
 	ctype := ""
 	switch b := body.(type) {
 	case nil:
-	case io.Reader:
-		rd, ctype = b, "application/gzip"
+	case fileBody:
+		// Opened for each call, so that a call can be made again; the
+		// request closes it.
+		f, err := os.Open(string(b))
+		if err != nil {
+			return err
+		}
+		rd, ctype = f, "application/gzip"
 	default:
 		data, err := json.Marshal(b)
 		if err != nil {
@@ -174,6 +191,9 @@ func frideDo(ctx context.Context, base, token, method, path string, body, out an
 	}
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(base, "/")+path, rd)
 	if err != nil {
+		if c, ok := rd.(io.Closer); ok {
+			_ = c.Close()
+		}
 		return err
 	}
 	if ctype != "" {
@@ -222,6 +242,90 @@ func ProbeFride(ctx context.Context, base, token string) (FrideInfo, error) {
 	return info, nil
 }
 
+// frideConn is what the agent calls FrIDE with: its settings and the
+// token, which the token paired since takes over from when FrIDE refuses
+// it.
+type frideConn struct {
+	a     *Agent
+	cfg   *FrideConfig
+	token string
+}
+
+// try calls call with the token, and once more with the one in the state
+// dir when FrIDE refused it and `fridolin node fride pair` wrote another
+// since.
+func (c *frideConn) try(call func(token string) error) error {
+	err := call(c.token)
+	if !frideRefused(err) {
+		return err
+	}
+	fresh := c.a.frideRepaired(c.token)
+	if fresh == "" {
+		return err
+	}
+	c.token = fresh
+	return call(fresh)
+}
+
+// do is frideDo with the token.
+func (c *frideConn) do(ctx context.Context, method, path string, body, out any) error {
+	return c.try(func(token string) error { return frideDo(ctx, c.cfg.URL, token, method, path, body, out) })
+}
+
+// probe is ProbeFride with the token.
+func (c *frideConn) probe(ctx context.Context) (FrideInfo, error) {
+	var info FrideInfo
+	err := c.try(func(token string) error {
+		var err error
+		info, err = ProbeFride(ctx, c.cfg.URL, token)
+		return err
+	})
+	return info, err
+}
+
+// frideRefused reports whether err is FrIDE refusing the token.
+func frideRefused(err error) bool {
+	fe, ok := errors.AsType[*FrideError](err)
+	return ok && (fe.Status == http.StatusUnauthorized || fe.Status == http.StatusForbidden)
+}
+
+// frideRepaired is the token in the state dir when it is not stale, the
+// one FrIDE refused or did not sign with; "" when there is no other. Pairing
+// again ends the old token at once, while the agent reads the settings
+// only at its next check: from now on it uses the new token.
+func (a *Agent) frideRepaired(stale string) string {
+	if a.Dir == "" {
+		return ""
+	}
+	f := &a.fride
+	// In turn with the checks, so that none keeps a token read before.
+	f.checkMu.Lock()
+	defer f.checkMu.Unlock()
+	tok, err := readFrideToken(a.Dir)
+	if err != nil || tok == "" || tok == stale {
+		return ""
+	}
+	f.mu.Lock()
+	kept := f.token == stale
+	if kept {
+		f.token = tok
+	}
+	f.mu.Unlock()
+	if kept {
+		a.logf("node: FrIDE was paired again; using its new token")
+	}
+	return tok
+}
+
+// readFrideToken reads the token from the state dir.
+func readFrideToken(dir string) (string, error) {
+	tok, err := os.ReadFile(filepath.Join(dir, FrideTokenFile))
+	if err != nil {
+		return "", fmt.Errorf("the FrIDE token: %w (pair again: fridolin node fride pair)", err)
+	}
+	return strings.TrimSpace(string(tok)), nil
+}
+
 // loadFride reads the fride section and the token from the state dir.
 func loadFride(dir string) (*FrideConfig, string, error) {
 	cfg, err := LoadConfig(dir)
@@ -231,19 +335,25 @@ func loadFride(dir string) (*FrideConfig, string, error) {
 	if cfg.Fride == nil {
 		return nil, "", nil
 	}
-	tok, err := os.ReadFile(filepath.Join(dir, FrideTokenFile))
-	if err != nil {
-		return cfg.Fride, "", fmt.Errorf("the FrIDE token: %w (pair again: fridolin node fride pair)", err)
-	}
-	return cfg.Fride, strings.TrimSpace(string(tok)), nil
+	tok, err := readFrideToken(dir)
+	return cfg.Fride, tok, err
 }
 
 // frideCheck reads the fride settings again, keeps the webhook listening
 // and asks FrIDE whether it answers. It reports whether what the node
 // declares changed.
+//
+// The periodic check and the one after a repository was added
+// (frideRescan) can overlap. They read the settings one at a time, and
+// FrIDE's answer to one is dropped when a check that began after it was
+// applied first: an older view would take the new repository back out of
+// what the node offers until the next check.
 func (a *Agent) frideCheck(ctx context.Context) bool {
 	f := &a.fride
 	f.init()
+	f.checkMu.Lock()
+	f.checks++
+	seq := f.checks
 	cfg, token := a.Config.Fride, a.FrideToken
 	if a.Dir != "" {
 		c, t, err := loadFride(a.Dir)
@@ -268,11 +378,12 @@ func (a *Agent) frideCheck(ctx context.Context) bool {
 	f.cfg, f.token = cfg, token
 	f.mu.Unlock()
 	a.frideListen(cfg)
+	f.checkMu.Unlock()
 
 	var next *nodeproto.FrideCap
 	if cfg != nil && token != "" {
 		pctx, cancel := context.WithTimeout(ctx, frideProbeTimeout)
-		info, err := ProbeFride(pctx, cfg.URL, token)
+		info, err := (&frideConn{a: a, cfg: cfg, token: token}).probe(pctx)
 		cancel()
 		if err == nil {
 			next = &nodeproto.FrideCap{URL: cfg.URL, Repos: info.Repos}
@@ -282,6 +393,11 @@ func (a *Agent) frideCheck(ctx context.Context) bool {
 		}
 	}
 	f.mu.Lock()
+	if seq < f.applied {
+		f.mu.Unlock()
+		return false
+	}
+	f.applied = seq
 	old := f.cap
 	if next == nil {
 		// FrIDE went away, or restarts with the login fixed.
@@ -424,7 +540,13 @@ func (a *Agent) frideWebhook(w http.ResponseWriter, r *http.Request) {
 	a.fride.mu.Lock()
 	token := a.fride.token
 	a.fride.mu.Unlock()
-	if token == "" || !hmac.Equal([]byte(r.Header.Get("X-Fride-Signature")), []byte(SignFride(token, body))) {
+	sig := r.Header.Get("X-Fride-Signature")
+	signed := func(token string) bool {
+		return token != "" && hmac.Equal([]byte(sig), []byte(SignFride(token, body)))
+	}
+	// FrIDE paired again signs with the new token at once, and does not
+	// send what is refused again.
+	if !signed(token) && !signed(a.frideRepaired(token)) {
 		a.logf("node: refused a FrIDE webhook whose signature does not match the token")
 		http.Error(w, "bad signature", http.StatusUnauthorized)
 		return
@@ -519,6 +641,7 @@ func (a *Agent) frideCall(ctx context.Context, method string, raw json.RawMessag
 	if cfg == nil || token == "" {
 		return nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "FrIDE is not paired with this node")
 	}
+	fc := &frideConn{a: a, cfg: cfg, token: token}
 	decode := func(v any) *nodeproto.Error {
 		if len(raw) == 0 {
 			return nil
@@ -533,7 +656,7 @@ func (a *Agent) frideCall(ctx context.Context, method string, raw json.RawMessag
 		if e := decode(&p); e != nil {
 			return nil, e
 		}
-		return a.frideRepo(ctx, method, cfg, token, p)
+		return a.frideRepo(ctx, method, fc, p)
 	}
 	timeout := frideCallTimeout
 	if method == nodeproto.MethodFrideExport || method == nodeproto.MethodFrideImport || method == nodeproto.MethodFrideClose || method == nodeproto.MethodFrideDelete {
@@ -542,7 +665,7 @@ func (a *Agent) frideCall(ctx context.Context, method string, raw json.RawMessag
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	do := func(m, path string, body, out any) *nodeproto.Error {
-		if err := frideDo(ctx, cfg.URL, token, m, path, body, out); err != nil {
+		if err := fc.do(ctx, m, path, body, out); err != nil {
 			return frideErr(err)
 		}
 		return nil
@@ -676,17 +799,15 @@ func (a *Agent) frideCall(ctx context.Context, method string, raw json.RawMessag
 		if p.StartAgent {
 			q.Set("start_agent", "1")
 		}
-		f, err := os.Open(path)
-		if err != nil {
+		if _, err := os.Stat(path); err != nil {
 			return nil, nodeproto.Errorf(nodeproto.CodeNotFound, "no transfer %s", p.ID)
 		}
-		defer f.Close()
 		u := "/api/companion/tasks/import"
 		if len(q) > 0 {
 			u += "?" + q.Encode()
 		}
 		var out nodeproto.FrideTask
-		return out, do(http.MethodPost, u, f, &out)
+		return out, do(http.MethodPost, u, fileBody(path), &out)
 	}
 	return nil, nodeproto.Errorf(nodeproto.CodeUnsupported, "no method %q", method)
 }
@@ -866,7 +987,8 @@ type FridePairOptions struct {
 // PairFride trades the code for FrIDE's companion token, gives FrIDE the
 // webhook, and keeps both in the state dir: the token in fride.token
 // (0600), the addresses in node.json. A running agent picks them up at its
-// next check of FrIDE.
+// next check of FrIDE, and the token already when FrIDE refuses the old
+// one.
 func PairFride(ctx context.Context, o FridePairOptions) (FrideInfo, error) {
 	if err := nodeproto.CheckLoopbackURL(o.URL); err != nil {
 		return FrideInfo{}, fmt.Errorf("--url: %w", err)
