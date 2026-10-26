@@ -12,6 +12,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/app"
 	"github.com/Icewater1337/fridolin/internal/controlcli"
+	"github.com/Icewater1337/fridolin/internal/housekeeping"
 	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
@@ -84,7 +85,7 @@ func housekeepingCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stdout, string(raw))
 			return 0
 		}
-		text, err := app.HousekeepingStatusText(raw, time.Now())
+		text, err := housekeeping.StatusText(raw, time.Now())
 		if err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
@@ -106,7 +107,7 @@ func housekeepingCmd(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stdout, string(raw))
 			return 0
 		}
-		text, err := app.HousekeepingReportText(raw, time.Now())
+		text, err := housekeeping.ReportText(raw, time.Now())
 		if err != nil {
 			fmt.Fprintln(stderr, err)
 			return 1
