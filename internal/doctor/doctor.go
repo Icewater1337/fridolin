@@ -111,6 +111,9 @@ type Env struct {
 	// AndroidToolchain says why this machine cannot build the Plaud phone
 	// app (no JDK 17+ or Android SDK), nil when it can.
 	AndroidToolchain func() error
+	// CheckConnection asks OpenAI or ElevenLabs (id) whether the key in
+	// the data dir works, and answers what to say when it does.
+	CheckConnection func(ctx context.Context, dataDir, id string) (string, error)
 }
 
 // Time is the time the checks judge ages by: Now's, else the system's.
