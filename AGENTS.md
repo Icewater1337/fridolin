@@ -424,7 +424,7 @@ machine must already be a node (path B). In short:
   `/ingest`, and every message the bridge itself sends into chats, which
   live in `internal/outbound/messages.go`. Times, temp paths, PIDs and the version are
   masked, so a second run writes the same bytes. A change meant to change
-  one rewrites it with `go test -run 'TestName' -update ./internal/app`, and
+  one rewrites it with `go test ./internal/app -run 'TestName' -update`, and
   the pull request says why. A new setting also goes into
   `cmd/fridolin/testdata/config-v1.json`, which sets every one, and into
   `docs/schemas/config.schema.json` (a field of brain.json into

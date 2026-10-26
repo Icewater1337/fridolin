@@ -329,6 +329,12 @@ func NodeUnknownReply(id string) string {
 	return "❓ Nothing waits with the ref " + textx.Truncate(id, 40) + ", and no node has it. Send !approve alone to see what waits; `!fleet` lists the nodes."
 }
 
+// NodeNothingWaitsReply answers !deny <ref> for a node that is not waiting
+// to join and has nothing else waiting.
+func NodeNothingWaitsReply(id string) string {
+	return "❓ Nothing waits with the ref " + textx.Truncate(id, 40) + ", so nothing changed. `!revoke " + textx.Truncate(id, 40) + "` shuts that node out."
+}
+
 // The approval poll: a run's request_approval asks the owner with
 // ApprovalQuestion(action) and these options, of which "Show me the
 // draft" sends ApprovalDraftReply and leaves the poll open.
