@@ -1,4 +1,4 @@
-package app
+package doctor
 
 import (
 	"bufio"
@@ -12,6 +12,17 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/audit"
 )
+
+// OwnerChecks are the checks of what waits for the owner, in the order
+// doctor prints them: approvals not answered, brain folders that changed
+// since the owner approved them, and the lockdown.
+func OwnerChecks() []Check {
+	return []Check{
+		{ID: "approvals", Title: "approvals waiting", Run: checkPendingApprovals},
+		{ID: "brain-drift", Title: "brain folders as approved", Run: checkBrainDrift},
+		{ID: "lockdown", Title: "lockdown", Run: checkLockdown},
+	}
+}
 
 // The policy's doctor checks (M5) read the audit log, not bridge.db:
 // doctor runs beside a bridge that has the database open, and the log
@@ -28,7 +39,7 @@ type policyLog struct {
 	lock    *audit.Entry
 }
 
-func readPolicyLog(env *DoctorEnv) (policyLog, error) {
+func readPolicyLog(env *Env) (policyLog, error) {
 	out := policyLog{pending: map[string]time.Time{}}
 	files, err := env.Glob(filepath.Join(env.Config.Boot.Layout().Audit(), "*.jsonl"))
 	if err != nil {
@@ -68,18 +79,18 @@ func readPolicyLog(env *DoctorEnv) (policyLog, error) {
 
 // checkPendingApprovals warns about approvals that have waited more than
 // an hour for the owner's vote.
-func checkPendingApprovals(_ context.Context, env *DoctorEnv) DoctorResult {
+func checkPendingApprovals(_ context.Context, env *Env) Result {
 	if env.Config == nil {
-		return noConfig
+		return NoConfig
 	}
 	l, err := readPolicyLog(env)
 	if err != nil {
-		return DoctorResult{Status: DoctorWarn, Detail: "cannot read the audit log: " + err.Error()}
+		return Result{Status: Warn, Detail: "cannot read the audit log: " + err.Error()}
 	}
 	if len(l.pending) == 0 {
-		return DoctorResult{Status: DoctorOK, Detail: "none waiting"}
+		return Result{Status: OK, Detail: "none waiting"}
 	}
-	now := env.now()
+	now := env.Time()
 	old, oldest := 0, now
 	for _, t := range l.pending {
 		if now.Sub(t) > approvalWarnAfter {
@@ -91,24 +102,24 @@ func checkPendingApprovals(_ context.Context, env *DoctorEnv) DoctorResult {
 	}
 	detail := fmt.Sprintf("%d waiting for an answer, the oldest for %s", len(l.pending), now.Sub(oldest).Round(time.Minute))
 	if old == 0 {
-		return DoctorResult{Status: DoctorOK, Detail: detail}
+		return Result{Status: OK, Detail: detail}
 	}
-	return DoctorResult{Status: DoctorWarn, Detail: detail,
+	return Result{Status: Warn, Detail: detail,
 		Fix: "vote in the polls on WhatsApp, or answer them on the dashboard's Approvals page; no answer counts as no once policy.approval_timeout_hours is over"}
 }
 
 // checkLockdown shows whether the bridge is in lockdown.
-func checkLockdown(_ context.Context, env *DoctorEnv) DoctorResult {
+func checkLockdown(_ context.Context, env *Env) Result {
 	if env.Config == nil {
-		return noConfig
+		return NoConfig
 	}
 	l, err := readPolicyLog(env)
 	if err != nil {
-		return DoctorResult{Status: DoctorWarn, Detail: "cannot read the audit log: " + err.Error()}
+		return Result{Status: Warn, Detail: "cannot read the audit log: " + err.Error()}
 	}
 	if l.lock == nil || l.lock.Kind == audit.Unlock {
-		return DoctorResult{Status: DoctorOK, Detail: "off"}
+		return Result{Status: OK, Detail: "off"}
 	}
-	return DoctorResult{Status: DoctorWarn, Detail: fmt.Sprintf("on since %s (by %s): only read-only work runs", l.lock.TS, l.lock.By),
+	return Result{Status: Warn, Detail: fmt.Sprintf("on since %s (by %s): only read-only work runs", l.lock.TS, l.lock.By),
 		Fix: "send !unlock from an allowed number, or unlock it on the dashboard's Approvals page"}
 }
