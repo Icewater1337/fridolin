@@ -518,7 +518,17 @@ func (r *renderer) wiki(n *wikiLink) Node {
 	case file != "":
 		return Node{T: "a", File: file, C: []Node{txt(label)}}
 	}
-	return Node{T: "a", Page: target, Missing: true, C: []Node{txt(label)}}
+	// A page that does not exist yet keeps its path, cleaned, to be told.
+	// A target that names no path in the root ([[/]], [[../x]]) can never
+	// be a page: it is only its label.
+	missing := cleanTarget(target)
+	if missing != "" {
+		missing = path.Clean(missing)
+	}
+	if missing == "" || missing == "." || missing == ".." || strings.HasPrefix(missing, "../") {
+		return Node{T: "a", C: []Node{txt(label)}}
+	}
+	return Node{T: "a", Page: missing, Missing: true, C: []Node{txt(label)}}
 }
 
 // slugOf is the anchor a heading of this text gets.

@@ -94,6 +94,26 @@ func TestRenderIsSafe(t *testing.T) {
 	}
 }
 
+// TestRenderMissingWikiLinks: a [[link]] to no page keeps its path,
+// cleaned; one that names no path in the root is only its label (#328).
+func TestRenderMissingWikiLinks(t *testing.T) {
+	doc := Render([]byte("[[nowhere]] [[a/../b/]] [[/]] [[../up|Up]] [[x/../../y]]"), "wiki/p.md", nil)
+	checkSafe(t, doc)
+	data, _ := json.Marshal(doc)
+	s := string(data)
+	for _, want := range []string{
+		`{"t":"a","c":[{"x":"nowhere"}],"page":"nowhere","missing":true}`,
+		`{"t":"a","c":[{"x":"a/../b/"}],"page":"b","missing":true}`,
+		`{"t":"a","c":[{"x":"/"}]}`,
+		`{"t":"a","c":[{"x":"Up"}]}`,
+		`{"t":"a","c":[{"x":"x/../../y"}]}`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %s in %s", want, s)
+		}
+	}
+}
+
 func TestRenderStructure(t *testing.T) {
 	src := "---\ntitle: \"Alex\"\ntags: [people, team]\n---\n# Heading one\n\nText with **bold**, *em*, ~~gone~~ and `code`.\n\n## Same\n## Same\n\n- [x] done\n- [ ] open\n\n3. three\n4. four\n\n| a | b |\n|:-|-:|\n| 1 | 2 |\n\n```go\nfunc x() {}\n```\n\n> quoted\n\n---\n"
 	doc := Render([]byte(src), "wiki/alex.md", nil)
