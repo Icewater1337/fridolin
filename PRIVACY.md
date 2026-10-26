@@ -96,6 +96,12 @@ policy describes what that copy does with data.
   transcripts as that tool does. When the phone uploads through your
   site instead, its transcripts also pass through the site's tunnel,
   including Cloudflare while that tunnel is on.
+- **OpenAI and ElevenLabs**, through Fridolin's connections, only while
+  a key is set ([docs/CONNECTIONS.md](docs/CONNECTIONS.md)): the
+  recordings and texts a site module or a granted brain sends with
+  `ctx.openai`, `ctx.elevenlabs` or the connections' tools, under the
+  account of the key and that provider's terms. The bridge passes them
+  on and keeps nothing of them but the counts of its usage log.
 - **Groq**, only when `GROQ_API_KEY` reaches a brain: `tools/transcribe.py`
   sends the audio it transcribes to Groq's API with `--engine groq`, and
   with the default engine whenever the local model is not installed or
@@ -148,6 +154,7 @@ only what the last column says.
 | Transcripts uploaded by paired phones | `plaud.phone_dir`, or `plaud/inbox/` in the data folder | Until you delete them; deleting a recording on the phone does not delete an uploaded copy | Your user; brains only if the configured folder permits it, or through their own media inbox after hand-off |
 | Paired phones' public keys and pairing-code hashes; Plaud developer keys and the built phone app | `plaud/devices.json`, `plaud/developer.json` and `plaud/app/` in the data folder, with a public-key copy in `site/devices.json`; copies of the APK wherever you download it | Until unpaired or deleted; used and expired pairing codes are dropped on the next device update | Your user; the site reads public keys; the APK contains developer keys, so anyone with a copy can extract them |
 | Sign-ins: each brain's Google token, the OAuth client, the Drive link (rclone), the Plaud login, the dashboard and scripts tokens | The data folder, or `sandbox.credentials_dir` for the Google tokens; the Plaud login is in `~/.plaud/` while "Let brains use the Plaud CLI" is on | Until you disconnect, or delete them | Your user and the bridge; not brains, except that Plaud login |
+| The OpenAI and ElevenLabs keys of the connections, and their usage per month and caller (requests, audio seconds, tokens, characters, estimated cost; never what was sent) | `connections/` in the data folder | A key until you remove it; the usage for 13 months | Your user and the bridge; not brains, nor the site under the macOS sandbox |
 | The keys you put in the service's environment, such as the Claude login sandboxed brains use (`CLAUDE_CODE_OAUTH_TOKEN`), the Codex API key (`CODEX_API_KEY`), or `GROQ_API_KEY` | macOS: `~/Library/LaunchAgents/ai.fridolin.bridge.plist`; Linux: the drop-in `systemctl --user edit fridolin` made | Until you remove them | Your user; the selected provider gets its login, and brains get the keys `child_env_passthrough` names, in their environment, and can read the service file |
 | The bridge's log: connections, routing, runs and errors, naming chats, senders' numbers, group names, poll questions and votes, but not what messages say | macOS: `~/Library/Logs/fridolin/`; Linux: your user journal (`journalctl --user -u fridolin`) | macOS: up to 10 MB a file, and one older file; Linux: as journald is set to keep it | Your user; not brains |
 | Claude Code's transcript of every run: the prompt, every tool call and its output, the reply | With the macOS sandbox, the brain's own Claude Code config folder, `brains/<brain id>/claude/` in the data folder; without it, or with `inherit_claude_user_config`, `~/.claude/projects/` | As Claude Code's `cleanupPeriodDays` says (30 days by default) | Your user and that brain; with `inherit_claude_user_config`, your user only: the macOS sandbox keeps every brain out of `~/.claude/projects/`, its own transcripts included |
