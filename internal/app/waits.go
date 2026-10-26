@@ -34,6 +34,13 @@ type waits struct {
 	// once goes out once; frideRepeat is how long after that the same
 	// text from that node is still taken as sent.
 	frideGather, frideRepeat time.Duration
+	// frideStallRepeat is how long the relay drops a thread's stall notice
+	// that only repeats the last one.
+	frideStallRepeat time.Duration
+	// frideAgentGap is the least time between two runs of a scheduled
+	// agent that FrIDE's news starts; what comes meanwhile waits for the
+	// next.
+	frideAgentGap time.Duration
 	// nodeSessionMinAge is the least age of a node session housekeeping
 	// stops (see nodeSessionFindings).
 	nodeSessionMinAge time.Duration
@@ -66,6 +73,8 @@ func defaultWaits() waits {
 		frideRetry:          30 * time.Second,
 		frideGather:         3 * time.Second,
 		frideRepeat:         time.Minute,
+		frideStallRepeat:    6 * time.Hour,
+		frideAgentGap:       time.Hour,
 		nodeSessionMinAge:   time.Minute,
 		reapGrace:           3 * time.Second,
 		vaultTick:           time.Minute,

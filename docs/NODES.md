@@ -1116,7 +1116,9 @@ and 300 characters there, with a pointer to the FrIDE page. By default
 `done`, `failed`, real questions and updates that say something merged;
 "Created task …", FrIDE's echo of the brief ("• → agent: …") and
 progress stay on the page, and an identical failure goes out once per
-thread. A question whose text asks nothing (no question mark, none of
+thread. FrIDE's notice that an agent "has not moved for 2h" is progress
+however it asks, and one that only repeats the thread's last, but for
+its hours, is dropped for six hours, also with `fride.news: "all"`. A question whose text asks nothing (no question mark, none of
 "should I", "please confirm" and the like) is taken as an update: FrIDE
 marks progress as needing a reply too (fride#16). The relay gathers
 news for a few seconds: one text a node sends for several threads goes

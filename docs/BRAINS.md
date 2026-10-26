@@ -718,8 +718,14 @@ and the work it was handed: that run answers FrIDE itself
 chat the agent reports to only when something merged, failed for good
 or needs your decision on something destructive or security-relevant
 (else it ends with `NOTHING_TO_REPORT`, whatever the agent's `report`;
-a `silent` agent tells nobody). One such run at a time: news that
-arrives while a run of the agent goes on waits for one more, together.
+a `silent` agent tells nobody). Progress, and FrIDE's notice that an
+agent "has not moved" for a while, start none. One such run at a time,
+and at most one an hour per agent: news that arrives while a run of the
+agent goes on, or within the hour after the last such run, waits for one
+more, together. Work an agent handed FrIDE before its news stayed with
+it, which reported to your DM, goes back to the agent when the relay
+starts: a thread that began during a run of exactly one agent of its
+brain, or whose first line is in that agent's task.
 A paused or switched-off agent, or one that runs a program, gets no run;
 the news stays on the FrIDE page. A run of an agent that reports
 somewhere may also start a session on a workstation node

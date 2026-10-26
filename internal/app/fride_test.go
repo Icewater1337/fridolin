@@ -275,8 +275,8 @@ func TestFrideNotLoggedIn(t *testing.T) {
 
 // FrIDE's news in a chat that handed it work, quiet by default: one text
 // the node sends for every thread goes out once naming the threads;
-// bookkeeping, progress and progress dressed up as a question stay on
-// the dashboard; an identical error goes out once per thread; a long text
+// bookkeeping, progress, progress dressed up as a question and a stall
+// notice stay on the dashboard; an identical error goes out once per thread; a long text
 // is cut to a few lines, whole on the dashboard.
 func TestFrideNewsQuiet(t *testing.T) {
 	t.Parallel()
@@ -316,6 +316,8 @@ func TestFrideNewsQuiet(t *testing.T) {
 	ff.Emit(map[string]any{"event": "update", "thread_id": 1, "text": "• → agent: Fix GitHub issue #1", "status": "running"})
 	ff.Emit(map[string]any{"event": "started", "thread_id": 2, "task_id": "fix-2", "text": "started", "status": "running"})
 	ff.Emit(map[string]any{"event": "question", "thread_id": 2, "text": "FrIDE inbox #2 · needs your reply\nThe agent is still working; I'd resend it later.", "status": "needs_reply"})
+	// A stall notice is progress, however it asks (#306).
+	ff.Emit(map[string]any{"event": "question", "thread_id": 3, "text": "FrIDE inbox #3 · needs your reply\nAgent fix-3 has not moved for 2h. Should I nudge it?", "status": "needs_reply"})
 	// An error twice: once.
 	for range 2 {
 		ff.Emit(map[string]any{"event": "failed", "thread_id": 4, "text": "the build broke", "status": "failed"})
@@ -332,9 +334,40 @@ func TestFrideNewsQuiet(t *testing.T) {
 
 	// The dashboard has every piece in full.
 	w := h.Do("GET", "/api/fride", nil)
-	for _, want := range []string{"Created task fix-1", "Option four", "resend it later"} {
+	for _, want := range []string{"Created task fix-1", "Option four", "resend it later", "has not moved for 2h"} {
 		if !strings.Contains(w.Body.String(), want) {
 			t.Errorf("GET /api/fride lacks %q", want)
 		}
+	}
+}
+
+// A stall notice that only repeats the last one, but for its hours, is
+// dropped, even where the chat hears all of FrIDE's news (#306).
+func TestFrideStallNoticeOnce(t *testing.T) {
+	t.Parallel()
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	ff := testutil.StartFakeFride(t, "api")
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}, "fride": {"news": "all"}}`)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	addr := h.StartNodes()
+	h.fakeFrideNode("mini", addr, ff)
+	if reply := h.coreSays("fix it", step("fride_task", `{"message":"Fix issue","repos":["api"]}`)); !strings.Contains(reply, "as FrIDE #1") {
+		t.Fatalf("fride_task:\n%s", reply)
+	}
+	dm := len(h.SentTo(harnessDM))
+	for _, n := range []string{"2", "3"} {
+		ff.Emit(map[string]any{"event": "update", "thread_id": 1, "text": "Agent fix-1 has not moved for " + n + "h.", "status": "running"})
+		time.Sleep(200 * time.Millisecond)
+	}
+	ff.Emit(map[string]any{"event": "update", "thread_id": 1, "text": "Tests pass now.", "status": "running"})
+	h.WaitSent(harnessDM, "Tests pass now.")
+	var stalls int
+	for _, m := range h.SentTo(harnessDM)[dm:] {
+		if strings.Contains(m, "has not moved") {
+			stalls++
+		}
+	}
+	if stalls != 1 {
+		t.Errorf("the DM got the stall notice %d times: %q", stalls, h.SentTo(harnessDM)[dm:])
 	}
 }
