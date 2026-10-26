@@ -335,6 +335,18 @@ func NodeNothingWaitsReply(id string) string {
 	return "❓ Nothing waits with the ref " + textx.Truncate(id, 40) + ", so nothing changed. `!revoke " + textx.Truncate(id, 40) + "` shuts that node out."
 }
 
+// NodeAmbiguousReply answers !approve, !deny, !revoke or !movecore with
+// a name more than one node has (#251): each of them, with command and
+// its ref, which names it alone.
+func NodeAmbiguousReply(command, name string, matches []FleetNode) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "❓ %d nodes are called *%s*, so nothing changed. Name the one you mean by its ref:", len(matches), textx.Truncate(name, 40))
+	for _, n := range matches {
+		fmt.Fprintf(&b, "\n• *%s* (%s): `%s %s`", n.Name, osLabel(n.OS), command, n.ID)
+	}
+	return b.String()
+}
+
 // The approval poll: a run's request_approval asks the owner with
 // ApprovalQuestion(action) and these options, of which "Show me the
 // draft" sends ApprovalDraftReply and leaves the poll open.

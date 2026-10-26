@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -24,18 +25,18 @@ Usage:
   fridolin nodes [list] [--json]           every node: approval, online, what it may do
   fridolin nodes join-code                 a single-use code (10 minutes) and the line
                                            to paste on the new machine
-  fridolin nodes approve ID                approve a node's device (first stage)
-  fridolin nodes approve ID --commands     approve what it offers (second stage; again
+  fridolin nodes approve NODE              approve a node's device (first stage)
+  fridolin nodes approve NODE --commands   approve what it offers (second stage; again
                                            whenever it offers more)
-  fridolin nodes revoke ID                 disconnect it and refuse it from now on
-  fridolin nodes tags ID [TAG,...]         replace its tags ("" clears them)
-  fridolin nodes call ID METHOD [JSON]     call a capability: exec, fs.list, fs.read,
+  fridolin nodes revoke NODE               disconnect it and refuse it from now on
+  fridolin nodes tags NODE [TAG,...]       replace its tags ("" clears them)
+  fridolin nodes call NODE METHOD [JSON]   call a capability: exec, fs.list, fs.read,
                                            fs.write, host.info, notify
-  fridolin nodes update ID|--all [--force] [--no-wait]
+  fridolin nodes update NODE|--all [--force] [--no-wait]
                                            update a node's fridolin to the core's version
                                            (--all: every node that runs an older one);
                                            waits until it runs it or went back
-  fridolin nodes auto-update ID on|off     update it by itself whenever it runs an
+  fridolin nodes auto-update NODE on|off   update it by itself whenever it runs an
                                            older version than the core
   fridolin nodes core-secrets-transfer SRC DST [--yes] [--replace]
                                            move the host secrets from core host SRC to
@@ -49,6 +50,10 @@ Usage:
                                            then a signed plan both hosts carry out;
                                            without --yes only the pre-flight
   fridolin nodes move-status ID            how move ID goes, from the core that runs
+
+NODE, SRC and DST name a node by its id or by its name, in any case, as
+fridolin nodes lists them. A name more than one node has is refused, with
+their ids; a revoked node answers to its name only when no other has it.
 
 Each asks the running bridge, with the dashboard token. Flags:
   --config PATH     config file (default: $FRIDOLIN_CONFIG, else
@@ -106,7 +111,7 @@ func nodesCmd(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if sub == "update" && *all == (len(pos) == 1) {
-		fmt.Fprintln(stderr, "fridolin nodes update takes a node's id, or --all")
+		fmt.Fprintln(stderr, "fridolin nodes update takes a node (its id or name), or --all")
 		return 2
 	}
 	if sub == "auto-update" && pos[1] != "on" && pos[1] != "off" {
@@ -276,7 +281,8 @@ func nodesUpdate(pos []string, all, force, noWait bool, call func(method, path s
 			failed = true
 			continue
 		}
-		started[id] = resp.To
+		// The core answers with the id of the node a name names.
+		started[cmp.Or(resp.ID, id)] = resp.To
 		fmt.Fprintf(stdout, "Updating %s to %s…\n", id, resp.To)
 	}
 	if noWait || len(started) == 0 {

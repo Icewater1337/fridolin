@@ -5,6 +5,7 @@
 package nodes
 
 import (
+	"cmp"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base32"
@@ -161,7 +162,28 @@ var (
 	ErrNotApproved  = errors.New("the device is not approved yet: approve it first")
 	ErrBadJoinCode  = errors.New("the join code is unknown, used or expired")
 	ErrInvalidInput = errors.New("invalid")
+	// ErrAmbiguousNode is a name more than one node has: an
+	// *AmbiguousNodeError says which (Resolve).
+	ErrAmbiguousNode = errors.New("more than one node has that name")
 )
+
+// AmbiguousNodeError is a name Resolve refuses because more than one
+// node has it. Matches are those nodes, by name and then id.
+type AmbiguousNodeError struct {
+	Name    string
+	Matches []*Node
+}
+
+func (e *AmbiguousNodeError) Error() string {
+	refs := make([]string, len(e.Matches))
+	for i, n := range e.Matches {
+		refs[i] = n.Name + " (" + n.ID + ")"
+	}
+	return fmt.Sprintf("%d nodes are called %q: %s; name one by its id", len(e.Matches), e.Name, strings.Join(refs, ", "))
+}
+
+// Unwrap makes errors.Is(err, ErrAmbiguousNode) hold.
+func (e *AmbiguousNodeError) Unwrap() error { return ErrAmbiguousNode }
 
 // Registry is nodes.json. It reads the file again when it changed on disk,
 // so tags edited there by hand while the core runs are kept.
@@ -334,6 +356,53 @@ func (r *Registry) Get(id string) (*Node, error) {
 		return nil, fmt.Errorf("%w %q", ErrUnknownNode, id)
 	}
 	return clone(n), nil
+}
+
+// Resolve returns a copy of the node the owner names with ref (#251):
+// the node with that id, else the one with that name, in any case. A
+// name names a node that is not revoked; a revoked node answers to its
+// name only when no other node has it, so that approving it says it is
+// revoked. A name more than one such node has is refused with an
+// *AmbiguousNodeError that lists them.
+func (r *Registry) Resolve(ref string) (*Node, error) {
+	ref = strings.TrimSpace(ref)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_ = r.load()
+	if ref == "" {
+		return nil, fmt.Errorf("%w %q", ErrUnknownNode, ref)
+	}
+	if n := r.file.find(ref); n != nil {
+		return clone(n), nil
+	}
+	var live, revoked []*Node
+	for _, n := range r.file.Nodes {
+		switch {
+		case !strings.EqualFold(n.Name, ref):
+		case n.Device == nodeproto.DeviceRevoked:
+			revoked = append(revoked, n)
+		default:
+			live = append(live, n)
+		}
+	}
+	found := live
+	if len(found) == 0 {
+		found = revoked
+	}
+	switch len(found) {
+	case 0:
+		return nil, fmt.Errorf("%w %q", ErrUnknownNode, ref)
+	case 1:
+		return clone(found[0]), nil
+	}
+	matches := make([]*Node, len(found))
+	for i, n := range found {
+		matches[i] = clone(n)
+	}
+	slices.SortFunc(matches, func(a, b *Node) int {
+		return cmp.Or(strings.Compare(a.Name, b.Name), strings.Compare(a.ID, b.ID))
+	})
+	return nil, &AmbiguousNodeError{Name: ref, Matches: matches}
 }
 
 // codeAlphabet spells join codes: lower case, no padding.

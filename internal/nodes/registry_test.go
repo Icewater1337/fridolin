@@ -393,3 +393,76 @@ func TestCoreHostConfirmation(t *testing.T) {
 		t.Fatalf("a core-host approved before: %+v %v", n, err)
 	}
 }
+
+// joinNamed joins a node called name to r and returns its id.
+func joinNamed(t *testing.T, r *Registry, name string) string {
+	t.Helper()
+	code, _, err := r.NewJoinCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := hello(t, code, nodeproto.Capabilities{Host: true})
+	h.Name = name
+	if _, err := r.Hello(h, ""); err != nil {
+		t.Fatal(err)
+	}
+	return h.DeviceID
+}
+
+// TestResolve: a node is named by its id or by its name in any case
+// (#251). An unknown ref is no such node, a name two nodes have is
+// refused with both listed, and a revoked node answers to its name only
+// when no other node has it.
+func TestResolve(t *testing.T) {
+	r, err := OpenRegistry(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mini := joinNamed(t, r, "mac-mini")
+	droplet := joinNamed(t, r, "fridolin-droplet")
+	for _, ref := range []string{mini, "mac-mini", "Mac-Mini", " MAC-MINI "} {
+		if n, err := r.Resolve(ref); err != nil || n.ID != mini {
+			t.Errorf("Resolve(%q): %+v %v, want %s", ref, n, err, mini)
+		}
+	}
+	if n, err := r.Resolve("fridolin-droplet"); err != nil || n.ID != droplet {
+		t.Errorf("Resolve(fridolin-droplet): %+v %v", n, err)
+	}
+	for _, ref := range []string{"nope", "", "mac"} {
+		if _, err := r.Resolve(ref); !errors.Is(err, ErrUnknownNode) || err.Error() != `no such node "`+ref+`"` {
+			t.Errorf("Resolve(%q): %v, want no such node", ref, err)
+		}
+	}
+
+	// A second node with the name, in another case: neither is picked.
+	other := joinNamed(t, r, "Mac-Mini")
+	_, err = r.Resolve("mac-mini")
+	amb, ok := errors.AsType[*AmbiguousNodeError](err)
+	if !ok || !errors.Is(err, ErrAmbiguousNode) || len(amb.Matches) != 2 {
+		t.Fatalf("an ambiguous name: %v", err)
+	}
+	for _, want := range []string{`2 nodes are called "mac-mini"`, "mac-mini (" + mini + ")", "Mac-Mini (" + other + ")", "name one by its id"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("%q lacks %q", err, want)
+		}
+	}
+	// Its id still names each.
+	if n, err := r.Resolve(other); err != nil || n.ID != other {
+		t.Errorf("Resolve(%s): %+v %v", other, n, err)
+	}
+
+	// Revoked, the old one steps aside for the node that has the name now.
+	if _, err := r.Revoke(mini); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := r.Resolve("MAC-MINI"); err != nil || n.ID != other {
+		t.Errorf("a name a revoked node shares: %+v %v, want %s", n, err, other)
+	}
+	// And alone with it, the revoked node answers to its name.
+	if _, err := r.Revoke(droplet); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := r.Resolve("fridolin-droplet"); err != nil || n.ID != droplet || n.Device != nodeproto.DeviceRevoked {
+		t.Errorf("a revoked node's own name: %+v %v", n, err)
+	}
+}

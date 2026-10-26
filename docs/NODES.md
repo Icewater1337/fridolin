@@ -404,6 +404,13 @@ nodes, whether each is online, what each may do in plain words, and what
 waits for your approval ("⏳ wants to join — reply !approve"), with each
 node's id last, for reference.
 
+Each `fridolin nodes` command that takes a node takes its id or its
+name, in any case: `fridolin nodes approve mac-mini` is `fridolin nodes
+approve <its id>`. So do `!approve`, `!deny`, `!revoke` and `!movecore`,
+and the API's node routes. A name more than one node has is refused,
+with each node's id to use instead; a revoked node answers to its name
+only when no other node has it.
+
 ### Approving from WhatsApp
 
 Everything that waits for the owner is told in their direct chat the same
@@ -445,7 +452,8 @@ list.
   poll vote that ticks several such ones lists them in one message, and
   the second `!approve` approves them all.
 - `!approve <ref>` and `!deny <ref>` still name one by the ref the alert
-  ends with; `!revoke <ref>` shuts out a node, approved or not.
+  ends with; `!revoke <ref>` shuts out a node, approved or not. A node's
+  name, in any case, stands for its ref.
 - Only the owner, in their direct chat. Every `!approve`, `!deny`, vote
   and confirmation goes into the audit log (`node_approved`,
   `node_revoked`, and `owner_approval` for the rest). What the owner was
@@ -1907,8 +1915,9 @@ fridolin nodes core-secrets-transfer SRC DST --yes --replace   # let a value rep
 ```
 
 (`POST /api/nodes/core-secrets-transfer` with `source`, `target`, `run`,
-`replace`.) Both devices must be approved and online, and DST pinned by
-SRC or confirmed by the owner. Then:
+`replace`.) SRC and DST are each a node's id or its name. Both devices
+must be approved and online, and DST pinned by SRC or confirmed by the
+owner. Then:
 
 1. DST (`core.secrets.offer`) makes a one-time post-quantum age key
    (ML-KEM-768 + X25519), held in memory for 10 minutes, and signs it,

@@ -105,21 +105,50 @@ func (b *App) ownerCommand(m brainruntime.Inbound, command string, args []string
 	}
 	// !revoke <ref> shuts a node out, approved or not; !approve and !deny
 	// <ref> settle what waits with that ref, a node's too.
+	ref := args[0]
 	if command != "!revoke" {
-		if reply, ok := b.ownerDecideRef(ctx, by, args[0], approve); ok {
+		if reply, ok := b.ownerDecideRef(ctx, by, ref, approve); ok {
 			return reply
+		}
+	}
+	// A node's name stands for its ref (#251).
+	n, err := b.nodes.FindNode(ref)
+	if reply, ok := ambiguousNodeReply(command, err); ok {
+		record(ref, "refused: ambiguous name")
+		return reply
+	}
+	if err == nil && n.ID != ref {
+		ref = n.ID
+		if command != "!revoke" {
+			if reply, ok := b.ownerDecideRef(ctx, by, ref, approve); ok {
+				return reply
+			}
 		}
 	}
 	if command == "!deny" {
 		// Only a node still waiting to join is shut out; an approved one
 		// keeps its approval, as only !revoke <ref> takes that away.
-		if cur, err := b.nodes.Registry().Get(args[0]); err == nil && cur.Device != nodeproto.DevicePending {
-			record(args[0], "refused: nothing waits")
-			return outboundmsg.NodeNothingWaitsReply(args[0])
+		if cur, err := b.nodes.Registry().Get(ref); err == nil && cur.Device != nodeproto.DevicePending {
+			record(ref, "refused: nothing waits")
+			return outboundmsg.NodeNothingWaitsReply(ref)
 		}
 		command = "!revoke"
 	}
-	return b.nodeCommand(command, args[0], record)
+	return b.nodeCommand(command, ref, record)
+}
+
+// ambiguousNodeReply answers command when err is a name several nodes
+// have (nodes.AmbiguousNodeError), and reports whether it is.
+func ambiguousNodeReply(command string, err error) (string, bool) {
+	amb, ok := errors.AsType[*nodes.AmbiguousNodeError](err)
+	if !ok {
+		return "", false
+	}
+	list := make([]outboundmsg.FleetNode, len(amb.Matches))
+	for i, n := range amb.Matches {
+		list[i] = outboundmsg.FleetNode{ID: n.ID, Name: n.Name, OS: n.OS}
+	}
+	return outboundmsg.NodeAmbiguousReply(command, amb.Name, list), true
 }
 
 // joinCommand answers !join: a join code, as `fridolin nodes join-code`

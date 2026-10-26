@@ -170,6 +170,7 @@ func catalogue() []struct{ name, text string } {
 		{"nodeIsRevokedReply", outboundmsg.NodeIsRevokedReply("laptop", "8233270f8a24")},
 		{"nodeUnknownReply", outboundmsg.NodeUnknownReply("nope")},
 		{"nodeNothingWaitsReply", outboundmsg.NodeNothingWaitsReply("abc123")},
+		{"nodeAmbiguousReply", outboundmsg.NodeAmbiguousReply("!revoke", "laptop", []outboundmsg.FleetNode{{ID: "8233270f8a24", Name: "Laptop", OS: "darwin"}, {ID: "b14c0de5e7a1", Name: "laptop", OS: "windows"}})},
 		{"approvalYes", outboundmsg.ApprovalYes},
 		{"approvalNo", outboundmsg.ApprovalNo},
 		{"approvalDraft", outboundmsg.ApprovalDraft},
