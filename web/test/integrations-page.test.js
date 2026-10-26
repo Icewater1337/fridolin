@@ -20,14 +20,18 @@ const button = (root, label) => root.querySelectorAll('button').find((b) => b.te
  * @typedef {ReturnType<typeof import('../assets/components/fields.js').toggle>} Switch
  */
 
-/** @param {object} [first] the Plaud status the bridge holds at first */
-async function openPage(t, first = status('2026-10-18T10:00:00Z')) {
+/**
+ * @param {object} [first] the Plaud status the bridge holds at first
+ * @param {object} [connections] what GET /api/connections answers
+ */
+async function openPage(t, first = status('2026-10-18T10:00:00Z'), connections = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
   const bridge = { status: first };
   const calls = serve(t, (path) => {
     if (path.startsWith('/api/plaud/status')) return bridge.status;
+    if (path === '/api/connections') return connections;
     if (path.startsWith('/api/brains')) return [{ id: 'work', name: 'Work' }, { id: 'personal', name: 'Personal' }];
     return {};
   });
@@ -305,4 +309,18 @@ test('voice mode is offered with the phone app, and its brain once it is on', as
 test('without the phone app there is no voice mode', async (t) => {
   const { root } = await openPage(t);
   assert.doesNotMatch(root.textContent, /Voice mode/);
+});
+
+test('the OpenAI and ElevenLabs cards follow one request, after Plaud', async (t) => {
+  const conn = (id, title) => ({ id, title, configured: false, key_hint: '', ops: [], brains: [], brain_monthly_usd: 0 });
+  const { root, ctx, calls } = await openPage(t, status('2026-10-18T10:00:00Z'), {
+    month: '2026-10', connections: [conn('openai', 'OpenAI'), conn('elevenlabs', 'ElevenLabs')], modules: [], usage: [],
+  });
+  assert.equal(calls.filter((c) => c.path === '/api/connections').length, 1, 'both cards share the one resource');
+  const titles = root.querySelectorAll('section.card h2').map((x) => x.textContent);
+  assert.deepEqual(titles, ['GitHub', 'Plaud recorder', 'OpenAI', 'ElevenLabs']);
+  assert.equal(ctx.dirty(), false);
+  const openai = root.querySelectorAll('section.card').find((c) => c.querySelector('h2').textContent === 'OpenAI');
+  type(openai.querySelector('input[type=password]'), 'sk-test-typed');
+  assert.equal(ctx.dirty(), true, 'a key being typed is unsaved, and leaving asks first');
 });
