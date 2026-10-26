@@ -401,6 +401,8 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
       const enabled = toggle({ checked: f.enabled, label: 'Runs on its schedule (off: only Run now)', onChange: (on) => setP('enabled', on) });
       const timeout = textInput({ type: 'number', min: 0, value: f.timeout, placeholder: 'run_timeout_minutes' });
       timeout.addEventListener('input', () => setP('timeout', timeout.value));
+      const effort = select([['', 'The brain’s'], ['low', 'low'], ['medium', 'medium'], ['high', 'high'], ['xhigh', 'xhigh'], ['max', 'max']], f.effort || '');
+      effort.addEventListener('change', () => setP('effort', effort.value));
       const missed = select([['', 'Run it once when the bridge is back'], ['skip', 'Skip it, wait for the next time']], f.missed);
       missed.addEventListener('change', () => setP('missed', missed.value));
       const jitter = textInput({ type: 'number', min: 0, value: f.jitter, placeholder: 'schedules.jitter_minutes' });
@@ -412,7 +414,8 @@ export function agentWizard({ templates, brains, repos = [], nodes = [], mode = 
       parts.push(h('details.details', h('summary', 'More settings'),
         h('div.form-grid',
           field({ label: 'State', control: enabled }),
-          field({ label: 'Timeout (minutes)', help: 'It can only shorten run_timeout_minutes.', control: timeout }),
+          f.kind !== 'command' ? field({ label: 'Effort', help: 'Its runs’ reasoning effort, in place of the brain’s; Codex keeps codex_effort.', control: effort }) : null,
+          field({ label: 'Timeout (minutes)', help: 'In place of run_timeout_minutes, shorter or longer (at most 1440). A long timeout at a high effort can use a lot.', control: timeout }),
           field({ label: 'Missed while the bridge was down', control: missed }),
           field({ label: 'Jitter (minutes)', control: jitter }),
           f.kind !== 'command' ? field({ label: 'Tools', control: h('div', ownTools, tools), wide: true }) : null)));

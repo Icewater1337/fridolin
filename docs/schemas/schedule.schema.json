@@ -110,11 +110,22 @@
       },
       "description": "Left out, the brain's list; [] allows every tool."
     },
+    "effort": {
+      "enum": [
+        "",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ],
+      "description": "Its runs' reasoning effort in Claude mode, in place of the brain's; left out, the brain's. Codex mode keeps codex_effort."
+    },
     "timeout_minutes": {
       "type": "integer",
       "minimum": 0,
       "maximum": 1440,
-      "description": "Stop a run that takes longer; 0 is run_timeout_minutes, which it can only shorten."
+      "description": "Stop a run that takes longer, in place of run_timeout_minutes, shorter or longer; 0 is run_timeout_minutes."
     },
     "missed": {
       "enum": [

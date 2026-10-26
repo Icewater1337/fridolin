@@ -21,6 +21,7 @@
  * @property {string} dir
  * @property {string | Record<string, string>} vars name=value lines, or the wizard's {name: value}
  * @property {string} risk
+ * @property {string} [effort] low … max; "" is the brain's
  * @property {string} preapproved
  * @property {string} githubRepos
  * @property {string} githubPermissions
@@ -103,7 +104,7 @@ export function fieldsOf(s = {}) {
     name: s.name || '', when: s.when || '', description: s.description || '', enabled: s.enabled !== false,
     kind: taskKind(s), template: s.template || '', prompt: s.prompt || '', promptFile: s.prompt_file || '',
     node: s.command ? s.command.node || '' : '', argv: s.command ? (s.command.argv || []).join('\n') : '', dir: s.command ? s.command.dir || '' : '',
-    vars: { ...(s.vars || {}) }, risk: s.risk || '', preapproved: (s.preapproved || []).join('\n'),
+    vars: { ...(s.vars || {}) }, risk: s.risk || '', effort: s.effort || '', preapproved: (s.preapproved || []).join('\n'),
     githubRepos: s.github ? (s.github.repos || []).join('\n') : '', githubPermissions: s.github ? varsText(s.github.permissions) : '',
     ownTools: Array.isArray(s.disallowed_tools), tools: (s.disallowed_tools || []).join('\n'),
     report: s.report || '', chat: s.chat || '', timeout: s.timeout_minutes ? String(s.timeout_minutes) : '',
@@ -113,7 +114,7 @@ export function fieldsOf(s = {}) {
 
 // The order of the fields in the file the bridge writes (the Go type's).
 /** @type {(keyof Schedule)[]} */
-const FILE_ORDER = ['name', 'when', 'enabled', 'description', 'prompt', 'prompt_file', 'template', 'command', 'vars', 'report', 'chat', 'risk', 'disallowed_tools', 'timeout_minutes', 'missed', 'jitter_minutes', 'preapproved', 'github'];
+const FILE_ORDER = ['name', 'when', 'enabled', 'description', 'prompt', 'prompt_file', 'template', 'command', 'vars', 'report', 'chat', 'risk', 'disallowed_tools', 'effort', 'timeout_minutes', 'missed', 'jitter_minutes', 'preapproved', 'github'];
 /** @param {Record<string, string>} o */
 const sortedObj = (o) => Object.fromEntries(Object.keys(o).sort().map((k) => [k, o[k]]));
 
@@ -163,6 +164,7 @@ export function scheduleOf(f) {
     const vars = parseVars(f.vars);
     if (Object.keys(vars).length) s.vars = vars;
     if (f.risk) s.risk = f.risk;
+    if (f.effort) s.effort = f.effort;
     if (f.ownTools) s.disallowed_tools = lines(f.tools);
     const pre = lines(f.preapproved);
     if (pre.length) s.preapproved = pre;

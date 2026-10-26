@@ -449,3 +449,63 @@ func TestScheduledAgentSecretsAndFailures(t *testing.T) {
 	}
 	h.WaitSent(harnessDM, "Scheduled agent *scrape* (brain main) failed")
 }
+
+// TestScheduledAgentsOwnEffortAndTimeout: an agent's effort replaces the
+// brain's for its runs only, and its timeout_minutes replaces
+// run_timeout_minutes, longer too, while an agent without one keeps the
+// global limit.
+func TestScheduledAgentsOwnEffortAndTimeout(t *testing.T) {
+	t.Parallel()
+	// run_timeout_minutes 30 is 1.2 s, the agent's 120 is 4.8 s.
+	optionsOf(t).waits.runTimeoutUnit = 40 * time.Millisecond
+	argsLog := filepath.Join(t.TempDir(), "args")
+	setenv(t, "FRIDOLIN_FAKE_ARGS_LOG", argsLog)
+	h := newHarness(t, `{"run_timeout_minutes": 30, "brain_effort": "medium"}`)
+	h.AddBrain(manifest.Manifest{ID: "main", Name: "Main", Routing: manifest.Routing{HandlesDMs: true}, Schedules: []manifest.Schedule{
+		{Name: "deep", When: "daily 03:00", Prompt: "think hard", Effort: "max", TimeoutMinutes: 120, Report: manifest.ReportSilent},
+		{Name: "plain", When: "daily 04:00", Prompt: "think", Report: manifest.ReportSilent},
+	}})
+	effortOf := func(n int) string {
+		t.Helper()
+		data, _ := os.ReadFile(argsLog)
+		lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+		if len(lines) < n {
+			t.Fatalf("%d runs logged, want %d: %q", len(lines), n, data)
+		}
+		f := strings.Fields(lines[n-1])
+		if i := slices.Index(f, "--effort"); i >= 0 && i+1 < len(f) {
+			return f[i+1]
+		}
+		return ""
+	}
+
+	h.Answer(inbound{JID: harnessDM, Text: "hello"})
+	if got := effortOf(1); got != "medium" {
+		t.Errorf("the DM's run has effort %q, want the brain's medium", got)
+	}
+
+	// Each run takes 2.4 s: longer than run_timeout_minutes, shorter
+	// than the agent's own timeout.
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "2400")
+	if w := h.Do("POST", "/api/schedules/main/deep/run", nil); w.Code != http.StatusOK {
+		t.Fatalf("run: %d %s", w.Code, w.Body.String())
+	}
+	if r := h.waitRunEnded("main", "deep", 1); r.Status != sched.StatusOK {
+		t.Errorf("the agent with timeout_minutes 120 was stopped: %+v", r)
+	}
+	if got := effortOf(2); got != "max" {
+		t.Errorf("the agent's run has effort %q, want its own max", got)
+	}
+	if w := h.Do("POST", "/api/schedules/main/plain/run", nil); w.Code != http.StatusOK {
+		t.Fatalf("run: %d %s", w.Code, w.Body.String())
+	}
+	if r := h.waitRunEnded("main", "plain", 1); r.Status != sched.StatusFailed || !strings.Contains(r.Error, "took too long") {
+		t.Errorf("the agent without a timeout outlived run_timeout_minutes: %+v", r)
+	}
+
+	setenv(t, "FRIDOLIN_FAKE_SLEEP_MS", "10")
+	h.Answer(inbound{JID: harnessDM, Text: "again"})
+	if got := effortOf(3); got != "medium" {
+		t.Errorf("the DM's run after the agent's has effort %q, want the brain's medium", got)
+	}
+}

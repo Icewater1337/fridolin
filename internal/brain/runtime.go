@@ -501,7 +501,12 @@ func (br *Brain) worker() {
 		}
 		br.takeTurnLocked(m.JID)
 		s := br.settings.Load()
-		ctx, cancel := runContext(s.RunTimeout)
+		timeout := s.RunTimeout
+		if m.RunTimeout > 0 {
+			// A scheduled agent's own timeout_minutes.
+			timeout = m.RunTimeout
+		}
+		ctx, cancel := runContext(timeout)
 		run := &brainRun{cancel: cancel, done: make(chan struct{}), msg: m, started: time.Now()}
 		br.current = run
 		br.mu.Unlock()

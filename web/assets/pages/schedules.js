@@ -443,6 +443,7 @@ function details(a) {
       ['Last run', a.last_run ? h('span', outcomeBadge(a.last_run.status), ' ', timeAgo(a.last_run.started), a.last_run.duration_ms ? ` · took ${fmtDuration(a.last_run.duration_ms / 1000)}` : '') : 'never'],
       ['State', h('span', stateBadge(a), s.enabled === false ? ' runs only when you start it' : '')],
       ['May do', h('ul.plain-list', permissionsOf(s, a.chat).map((x) => h('li', x)))],
+      ['Effort', s.command ? null : s.effort || 'the brain’s'],
       ['Timeout', s.timeout_minutes ? `${s.timeout_minutes} min` : 'run_timeout_minutes'],
       ['Missed while the bridge was down', s.missed === 'skip' ? 'skipped' : 'run once when it is back'],
       ['Jitter', s.jitter_minutes !== undefined ? `${s.jitter_minutes} min` : 'schedules.jitter_minutes'],

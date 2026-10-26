@@ -49,15 +49,23 @@ func (r *commandRunner) Run(ctx context.Context, spec brain.RunSpec, callbacks c
 func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks claudecli.Callbacks, pol *runPolicy) claudecli.Result {
 	s, prompt := spec.Settings, spec.Prompt
 	deadline := claudecli.TimedOut(s.RunTimeout)
-	if pol != nil && pol.DisallowedTools != nil {
-		// A scheduled agent's own list, for its runs only.
+	if pol != nil && (pol.DisallowedTools != nil || pol.Effort != "" && s.Provider != "codex") {
+		// A scheduled agent's own list and effort, for its runs only.
+		// Codex keeps codex_effort, as it does for a brain's effort.
 		own := *s
-		own.DisallowedTools = *pol.DisallowedTools
+		if pol.DisallowedTools != nil {
+			own.DisallowedTools = *pol.DisallowedTools
+		}
+		if pol.Effort != "" && s.Provider != "codex" {
+			own.Effort = pol.Effort
+		}
 		s = &own
 	}
-	if pol != nil && pol.Timeout > 0 && (s.RunTimeout <= 0 || pol.Timeout < s.RunTimeout) {
-		// A scheduled agent's timeout, which only shortens
-		// run_timeout_minutes.
+	if pol != nil && pol.Timeout > 0 {
+		// A scheduled agent's timeout, in place of run_timeout_minutes:
+		// the brain's worker set the run's context by it already
+		// (chat.Inbound.RunTimeout); this names it in the error, and
+		// holds a run that reached here without it.
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, pol.Timeout)
 		defer cancel()
