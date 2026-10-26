@@ -24,6 +24,13 @@ import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { page, type SessionUser } from './auth.ts'
 import { makeIngest, makeSearch, type IngestRequest, type IngestResult, type SearchRequest } from './ingest.ts'
+import type { Bridge } from './builtin.ts'
+import {
+  CONNECTION_OPS, makeConnections,
+  type ConnectionCapability, type ElevenLabsConnection, type ElevenLabsOp, type OpenAIConnection, type OpenAIOp,
+} from './connections.ts'
+
+export { ConnectionError } from './connections.ts'
 
 // ── Manifest ──────────────────────────────────────────────────────────────────
 
@@ -83,6 +90,10 @@ export type ModuleManifest = {
     ingest?: string[]
     /** Brains whose folder the module may search with ctx.search. */
     search?: string[]
+    /** What the module may ask of OpenAI through Fridolin, with ctx.openai. */
+    openai?: ConnectionCapability<OpenAIOp>
+    /** What the module may ask of ElevenLabs through Fridolin, with ctx.elevenlabs. */
+    elevenlabs?: ConnectionCapability<ElevenLabsOp>
   }
 }
 
@@ -99,6 +110,10 @@ const ID_RE = /^[a-z0-9][a-z0-9-]*$/
 const SECRET_RE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/
 // A brain's id, as Fridolin's manifest.go checks it.
 const BRAIN_ID_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/
+/** A model name in capabilities.openai.models and .elevenlabs.models. */
+const MODEL_RE = /^[A-Za-z0-9._:-]{1,64}$/
+/** The highest monthly_usd a module may declare. */
+const MAX_MONTHLY_USD = 10_000
 
 /** Checks a parsed module.json; throws an Error saying what is wrong. */
 /** A public path: "/" plus segments of letters, digits, . _ - — no "..", no wildcards. */
@@ -204,9 +219,43 @@ export function validateManifest(raw: unknown, folder: string): ModuleManifest {
         if (!BRAIN_ID_RE.test(b)) fail(`"capabilities.${k}" entry "${b}" is not a brain id`)
       }
     }
+    for (const conn of Object.keys(CONNECTION_OPS) as (keyof typeof CONNECTION_OPS)[]) {
+      if (c[conn] !== undefined) checkConnection(conn, c[conn])
+    }
   }
 
   return m as unknown as ModuleManifest
+
+  // capabilities.openai and .elevenlabs: { use, models?, monthly_usd? }.
+  function checkConnection(conn: keyof typeof CONNECTION_OPS, v: unknown) {
+    const where = `capabilities.${conn}`
+    const ops: readonly string[] = CONNECTION_OPS[conn]
+    if (!isObject(v)) fail(`"${where}" must be { "use": [...], "models"?: [...], "monthly_usd"?: N }`)
+    const cc = v as Record<string, unknown>
+    for (const k of Object.keys(cc)) {
+      if (!['use', 'models', 'monthly_usd'].includes(k)) fail(`"${where}" has an unknown field "${k}"; it takes "use", "models" and "monthly_usd"`)
+    }
+    if (!isStringArray(cc.use) || (cc.use as string[]).length === 0) fail(`"${where}.use" must list at least one of: ${ops.join(', ')}`)
+    const seen = new Set<string>()
+    for (const op of cc.use as string[]) {
+      if (!ops.includes(op)) fail(`"${where}.use" entry "${op}" is not one of: ${ops.join(', ')}`)
+      if (seen.has(op)) fail(`"${where}.use" lists "${op}" twice`)
+      seen.add(op)
+    }
+    if (cc.models !== undefined) {
+      if (!isStringArray(cc.models)) fail(`"${where}.models" must be a list of model names`)
+      if ((cc.models as string[]).length === 0) fail(`"${where}.models" must not be empty; leave it out to allow any model`)
+      for (const model of cc.models as string[]) {
+        if (!MODEL_RE.test(model)) fail(`"${where}.models" entry "${model}" must be 1 to 64 letters, digits, ".", "_", ":" or "-"`)
+      }
+    }
+    if (cc.monthly_usd !== undefined) {
+      const usd = cc.monthly_usd
+      if (typeof usd !== 'number' || !Number.isFinite(usd) || usd <= 0 || usd > MAX_MONTHLY_USD) {
+        fail(`"${where}.monthly_usd" must be a number of US dollars above 0 and at most ${MAX_MONTHLY_USD}`)
+      }
+    }
+  }
 
   function checkAccess(v: unknown, where: string) {
     if (!isObject(v)) fail(`"${where}" is required: { "roles": [...] } ("*" = any signed-in user)`)
@@ -301,6 +350,14 @@ export type ModuleContext = {
    * stream-json events. Only the live site can.
    */
   search: (req: SearchRequest) => AsyncGenerator<unknown>
+  /**
+   * OpenAI through Fridolin, with Fridolin's key: the calls listed in
+   * capabilities.openai.use. Throws a ConnectionError for one it does not
+   * list, when the bridge or OpenAI says no, and in previews and checks.
+   */
+  openai: OpenAIConnection
+  /** ElevenLabs through Fridolin, as ctx.openai: the calls in capabilities.elevenlabs.use. */
+  elevenlabs: ElevenLabsConnection
   log: (...args: unknown[]) => void
 }
 
@@ -310,6 +367,10 @@ export type ModuleHost = {
   dataDir?: string
   /** The handoff folder Fridolin watches (ctx.ingest); unset in previews and checks. */
   spoolDir?: string
+  /** The bridge's site listener (ctx.openai, ctx.elevenlabs); unset in previews and checks. */
+  bridge?: Bridge
+  /** For tests: how ctx.openai and ctx.elevenlabs reach the bridge. */
+  fetch?: typeof fetch
 }
 
 /**
@@ -472,6 +533,7 @@ async function loadServer(mod: SiteModule, secrets: ModuleSecrets | undefined, h
     dataDir: moduleDataDir(id, host),
     ingest: makeIngest(id, mod.manifest.capabilities?.ingest ?? [], host.spoolDir),
     search: makeSearch(id, mod.manifest.capabilities?.search ?? [], host.spoolDir),
+    ...makeConnections(id, mod.manifest.capabilities, host.bridge, host.fetch),
     log: (...args) => console.log(`[module:${id}]`, ...args),
   }
   return exported(ctx)

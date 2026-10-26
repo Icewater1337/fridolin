@@ -155,6 +155,9 @@ For every module that changes, the dashboard lists the fields of
 | `server`, `server.mount`, `server.access` | code that runs on this machine, where it answers, and who may call it |
 | `server.public` | paths of that code anyone can call without signing in |
 | `capabilities.files`, `.commands`, `.secrets` | what that code touches — on macOS, all it can touch |
+| `capabilities.ingest` | brains it may hand files to |
+| `capabilities.search` | brains whose folder it may search with a read-only Claude agent |
+| `capabilities.openai`, `capabilities.elevenlabs` | the calls and models it may ask of OpenAI or ElevenLabs, and its monthly limit: the bridge makes them with Fridolin's key, at Fridolin's cost |
 | `app.dist` | the files it serves |
 | `app.public` | files anyone can fetch without signing in |
 | `app.build` | a command Fridolin runs when deploying |
@@ -262,6 +265,8 @@ The folder name is the module's `id`.
 | `capabilities.secrets` | Secrets it needs, by name: a letter, then up to 63 letters, digits, `_` or `-`. |
 | `capabilities.ingest` | Brains it may hand files to with `ctx.ingest`, by id (see *Handing files to a brain*). |
 | `capabilities.search` | Brains whose folder it may search with `ctx.search`, by id (see *Searching a brain's folder*). |
+| `capabilities.openai` | What it may ask of OpenAI with `ctx.openai`, through Fridolin's key: `{ "use", "models"?, "monthly_usd"? }` (see *OpenAI and ElevenLabs*). |
+| `capabilities.elevenlabs` | The same for ElevenLabs, with `ctx.elevenlabs`. |
 
 A module needs `app`, `server` or both. Everything is behind sign-in and the
 module's `access`, except the files in `app.public` and the paths in
@@ -289,7 +294,8 @@ export default function finance(ctx: ModuleContext): express.Router {
 ```
 
 `ctx` has `id`, `dir` (the module folder), `file(name)`, `secret(name)`,
-`dataDir`, `ingest(...)`, `search(...)` and `log(...)`. `dataDir` is a folder of the module's
+`dataDir`, `ingest(...)`, `search(...)`, `openai`, `elevenlabs` and
+`log(...)`. `dataDir` is a folder of the module's
 own that survives deploys (`<data_dir>/site/data/<id>` on the live site, one in
 the builder's workspace in a preview), for logs, state and uploads on their way
 to a brain: nothing needs declaring for it.
@@ -414,8 +420,10 @@ own, but within one process they are no wall: server code you approve can
 reach every module's declared files, the site's own `users.json` (password
 hashes) and `session.key` (which signs every sign-in), and, through the
 token the site reads the built-in Files and Wiki with, whatever any role may
-read there ([FILES.md](FILES.md#on-your-site)). Approving server code is
-trusting it with all of that.
+read there ([FILES.md](FILES.md#on-your-site)). The same token reaches
+OpenAI and ElevenLabs through the bridge, which goes by the module the site
+names in each call: server code could name another module and use what that
+one declares. Approving server code is trusting it with all of that.
 
 **Deploys are not sandboxed.** `npm install` and the modules' `app.build`
 commands run as you when you approve a commit, outside the sandbox: a
@@ -481,12 +489,102 @@ listings, and stops whatever the agent left running when it ends. At most
 four searches run at once, each for up to three minutes; aborting `signal`
 stops one.
 
-### Secrets
+### OpenAI and ElevenLabs
 
-A module lists the secrets it needs by name:
+OpenAI and ElevenLabs are connections of Fridolin: it holds one key for
+each, set once in the dashboard (Integrations). A module never sees a key.
+It declares what it calls in `module.json`, and its server code calls
+`ctx.openai` and `ctx.elevenlabs`. The site passes each call to the bridge,
+naming the module. The bridge checks that the live commit's `module.json`
+declares the call and the model, checks the module's monthly budget, calls
+the provider with the key and logs the usage. Setting the keys, what brains
+can do with them and the usage per module are in
+[CONNECTIONS.md](CONNECTIONS.md).
 
 ```json
-"capabilities": { "secrets": ["OPENAI_API_KEY"] }
+"capabilities": {
+  "openai": { "use": ["transcribe", "responses"], "models": ["gpt-4o-mini-transcribe", "gpt-5-mini"], "monthly_usd": 20 },
+  "elevenlabs": { "use": ["tts", "voices"], "monthly_usd": 5 }
+}
+```
+
+- `use` (required): the calls the module makes. OpenAI: `transcribe` and
+  `responses`. ElevenLabs: `tts`, `transcribe` and `voices`.
+- `models`: the models it may use, each 1 to 64 letters, digits, `.`, `_`,
+  `:` or `-`. Without it, any model. A call that names no model uses the
+  default, which must then be in the list too.
+- `monthly_usd`: its limit per calendar month (UTC) in US dollars, above 0
+  and at most 10000. Without it, Fridolin sets no limit.
+
+```ts
+import express from 'express'
+import type { ModuleContext } from '../../types/fridolin-site'
+
+export default function dictation(ctx: ModuleContext): express.Router {
+  const api = express.Router()
+  api.post('/transcribe', express.raw({ type: 'audio/*', limit: '25mb' }), async (req, res) => {
+    try {
+      const { text } = await ctx.openai.transcribe({ audio: req.body, contentType: req.get('content-type'), language: 'de' })
+      res.json({ text })
+    } catch (err) {
+      // A ConnectionError: its status says why (see below).
+      const status = (err as { status?: number }).status === 429 ? 429 : 503
+      res.status(status).json({ error: (err as Error).message })
+    }
+  })
+  return api
+}
+```
+
+| Call | What it does | Answers |
+| --- | --- | --- |
+| `ctx.openai.transcribe({ audio, contentType?, filename?, model?, language?, prompt? })` | Transcribes a clip of up to 25 MiB. Default model `gpt-4o-mini-transcribe`. | `{ text }` |
+| `ctx.openai.responses(body)` | OpenAI's Responses API, with the body as OpenAI takes it, up to 20 MiB. `model` is required; `stream: true` is refused. | OpenAI's JSON as it is |
+| `ctx.elevenlabs.tts({ text, voice?, model?, format?, language?, voiceSettings? })` | Text to speech, up to 10,000 characters. Defaults: the voice set in the dashboard, `eleven_multilingual_v2`, `mp3_44100_128`. | `{ audio, contentType }`: a Buffer and its type, e.g. `audio/mpeg` |
+| `ctx.elevenlabs.transcribe({ audio, contentType?, filename?, model?, language? })` | Speech to text, up to 25 MiB. Default model `scribe_v1`. | `{ text, language? }` |
+| `ctx.elevenlabs.voices()` | The voices of the account. | `[{ id, name }]` |
+
+`audio` is a Buffer, a Uint8Array, an ArrayBuffer or a Blob. The provider
+tells the format by the file name's extension: give `contentType`
+(`audio/webm`) or `filename` (`note.webm`); a File keeps its own name. Each
+call takes a `signal` to abort it: in its options, or as
+`responses(body, { signal })` and `voices({ signal })`.
+
+A call that fails throws a `ConnectionError` (`err.name`), with the
+bridge's `status`, and `upstreamStatus` and `code` when the provider
+answered an error:
+
+| Status | Why |
+| --- | --- |
+| 400 | A bad request: no model, `stream: true`, text too long, no voice. |
+| 403 | `module.json` does not declare the call or the model. The site checks the call itself before it asks the bridge. |
+| 429 | The module is over its `monthly_usd` this month. |
+| 502 | The provider failed or said no, e.g. `upstreamStatus` 404 and `code` `model_not_found`. |
+| 503 | No key is set in the dashboard, or there is no bridge (a preview or a check). |
+| 504 | The provider did not answer in time: 2 minutes for OpenAI's transcription and for speech, 3 minutes for responses and ElevenLabs's transcription, 30 seconds for the voices. |
+
+**Budgets are estimates.** The bridge prices each call from a small table:
+transcription by the minute, responses by their tokens, speech by its
+characters, and a model it does not know at the dearest rate. A module at or
+over its `monthly_usd` is refused until the month ends. The provider's bill
+is what counts: for a hard limit, set a budget on the OpenAI project as well.
+
+**Previews and checks** have no bridge. There every call throws "not
+available in previews" (503), after the same check of `module.json`, so a
+builder sees a missing declaration there too. Call them in a request
+handler, so that the module still loads.
+
+Not covered yet: streaming, OpenAI's Realtime API for live transcription,
+and the providers' other endpoints. For another service, a module keeps its
+own key as a secret (below).
+
+### Secrets
+
+For OpenAI and ElevenLabs, use the connections above. Module secrets stay for
+other services. A module lists the secrets it needs by name:
+
+```json
+"capabilities": { "secrets": ["STRIPE_API_KEY"] }
 ```
 
 Site → **Secrets** lists every secret the live modules declare; set the values
@@ -495,7 +593,7 @@ only by you (and, under the sandbox, by no module), never shown again and
 never in the repository. When the site starts, Fridolin hands it the values
 each module declares through a pipe the site reads once and closes — in no
 file and no environment variable module code could read. Server code asks for
-one with `ctx.secret('OPENAI_API_KEY')`, which throws for a name its
+one with `ctx.secret('STRIPE_API_KEY')`, which throws for a name its
 `module.json` does not list and for one without a value yet. Saving or removing
 a secret restarts the site. Previews and checks get no secrets.
 
