@@ -162,9 +162,9 @@ func (e *FrideError) Error() string {
 	return fmt.Sprintf("FrIDE answered %d: %s", e.Status, e.Message)
 }
 
-// fileBody is a request body frideDo sends from the file at this path, a
-// bundle.
-type fileBody string
+// fileBody opens a request body frideDo sends, a bundle: for each call, so
+// that a call can be made again. The request closes it.
+type fileBody func() (*os.File, error)
 
 // frideDo calls FrIDE at base+path with token, sending body (JSON, or a
 // fileBody) and decoding the answer into out (nil to drop it, an io.Writer
@@ -175,9 +175,7 @@ func frideDo(ctx context.Context, base, token, method, path string, body, out an
 	switch b := body.(type) {
 	case nil:
 	case fileBody:
-		// Opened for each call, so that a call can be made again; the
-		// request closes it.
-		f, err := os.Open(string(b))
+		f, err := b()
 		if err != nil {
 			return err
 		}
@@ -807,7 +805,7 @@ func (a *Agent) frideCall(ctx context.Context, method string, raw json.RawMessag
 			u += "?" + q.Encode()
 		}
 		var out nodeproto.FrideTask
-		return out, do(http.MethodPost, u, fileBody(path), &out)
+		return out, do(http.MethodPost, u, fileBody(func() (*os.File, error) { return os.Open(path) }), &out)
 	}
 	return nil, nodeproto.Errorf(nodeproto.CodeUnsupported, "no method %q", method)
 }
