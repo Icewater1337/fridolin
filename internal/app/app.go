@@ -33,7 +33,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/lease"
 	"github.com/Icewater1337/fridolin/internal/logx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
-	"github.com/Icewater1337/fridolin/internal/mcp"
+	"github.com/Icewater1337/fridolin/internal/mcp/tools"
 	"github.com/Icewater1337/fridolin/internal/nodes"
 	"github.com/Icewater1337/fridolin/internal/otp"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
@@ -126,7 +126,7 @@ type App struct {
 	// mcpTools are the tools runs reach through fridolin mcp (mcpTools),
 	// delegations the tasks core runs handed to sub-brains that have not
 	// ended, and audit the log they are written to.
-	mcpTools    *mcp.Registry[mcpCaller]
+	mcpTools    *tools.Set[mcpCaller]
 	delegations delegations
 	audit       *audit.Log
 	// wikis caches the brains' wiki indexes (files_runtime.go).

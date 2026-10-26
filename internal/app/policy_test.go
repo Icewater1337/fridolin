@@ -13,6 +13,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/mcp"
+	"github.com/Icewater1337/fridolin/internal/mcp/tools"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/skill"
 	"github.com/Icewater1337/fridolin/internal/store"
@@ -529,8 +530,8 @@ func TestIrreversibleToolNeedsApproval(t *testing.T) {
 	h := policyHarness(t, "", []testutil.FakeMCPStep{})
 	h.b.mcpTools.Register(mcp.Entry[mcpCaller]{
 		Name:     "submit_form",
-		Describe: func(mcpCaller) mcp.Tool { return mcp.Tool{Description: "test", InputSchema: schema(nil)} },
-		Call: h.b.guarded(skill.RiskIrreversible, func(context.Context, mcpCaller, json.RawMessage) (*mcp.CallResult, error) {
+		Describe: func(mcpCaller) mcp.Tool { return mcp.Tool{Description: "test", InputSchema: tools.Schema(nil)} },
+		Call: h.b.mcpTools.Guarded(skill.RiskIrreversible, func(context.Context, mcpCaller, json.RawMessage) (*mcp.CallResult, error) {
 			return mcp.TextResult("submitted"), nil
 		}),
 	})
