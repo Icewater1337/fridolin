@@ -17,6 +17,20 @@ for compatibility.
   the site limits public paths to 120 requests a minute per client address
   and module. The deploy review lists the field (docs/SITE.md, "Public
   paths").
+- **FrIDE is quiet in WhatsApp.** A new setting, `fride.news`
+  (Settings → Messages), is `"quiet"` by default: a chat gets only work
+  that is done or merged, failures (an identical one once per thread)
+  and real questions; "Created task …", FrIDE's echo of the brief and
+  progress stay on the new FrIDE page of the dashboard, which keeps each
+  thread's news whole. `"all"` sends every piece of news, as before.
+  Either way a FrIDE message is at most three lines, and one text a
+  node sends for several threads goes out once, naming the threads.
+  Work a scheduled agent hands to FrIDE never posts to WhatsApp any
+  more: FrIDE's questions, and work done or failed, start a run of that
+  agent, which answers FrIDE itself and tells you only what merged,
+  failed for good or needs your decision. A question from FrIDE that
+  asks nothing is shown as news. `bridge.db` gets a table,
+  `fride_news` (migration 7); an older bridge rolled back to ignores it.
 
 - **A brain can act without asking** (`"approvals": "auto"` in
   brain.json, the brain page's *Approvals*): its `request_approval`
@@ -1137,6 +1151,29 @@ for compatibility.
   folder of the calendar tokens; nothing in `tools/` read it any more.
 
 ### Fixed
+
+- **A box's FrIDE no longer stores a Claude token that cannot sign in.**
+  On Windows, `box.ps1` piped the token through Windows PowerShell,
+  which ends it with a carriage return (and can start it with a byte
+  order mark) that `set-claude-token` kept, and the prompt took
+  anything, such as the browser's sign-in code (`…#…`) still on the
+  clipboard; FrIDE's agents then failed with "401 Invalid bearer
+  token". `set-claude-token` now drops a byte order mark, carriage
+  return and spaces, refuses what is not a token from `claude
+  setup-token` (`sk-ant-oat…`) and says why; `box.sh` and `box.ps1`
+  name that token at the prompt and ask again, three times at most. A
+  box whose stored token has another shape gets a note in `docker
+  compose logs fride` at FrIDE's start, which also drops a stored byte
+  order mark or carriage return; store a new token with
+  `set-claude-token` (docs/NODES.md, "The FrIDE image").
+- **`fridolin doctor --node` in a box no longer fails what a box does
+  not have.** Inside a box's `node` container it reported the host's
+  Tailscale missing, the core's port unreachable (a dial from the
+  container misses the box's own tailnet device) and no node service or
+  systemd unit, while the box was connected. With `box` in node.json it
+  now leaves those out and checks `node-box-core` instead: that the
+  agent was connected to the core within the last 90 seconds, as
+  `fridolin node health` does. `setup-machine --node` checks the same.
 
 - **FrIDE work no longer sticks on a node whose FrIDE has no Claude
   login.** When FrIDE fails a thread with "Not logged in", the node says

@@ -295,6 +295,17 @@
         "min_age_minutes": {"type": "integer", "minimum": 0, "maximum": 10080, "description": "Processes younger than this are left alone. Default 60."}
       }
     },
+    "fride": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How FrIDE's news reaches the chats that handed it work (docs/NODES.md, FrIDE).",
+      "properties": {
+        "news": {
+          "enum": ["", "quiet", "all"],
+          "description": "quiet (default): only done or merged work, failures and real questions, each a few lines, an identical error once per thread; all: every piece of news, as FrIDE sends it."
+        }
+      }
+    },
     "schedules": {
       "type": "object",
       "additionalProperties": false,

@@ -750,8 +750,11 @@ side by side, with different node ids.
      the user is logged in unless lingering is on: `sudo loginctl
      enable-linger $USER` (the script reminds you);
    - FrIDE: runs `claude setup-token` in the `fride` container (open its
-     link and sign in), takes the token it shows without echo and stores
-     it in FrIDE's volume, asks for the git name and email the agents
+     link and sign in; the browser shows a code with a `#` in it, which
+     goes into `setup-token`'s own prompt), takes the token it then
+     prints, which starts with `sk-ant-oat`, without echo and stores it
+     in FrIDE's volume (anything else, such as that code, is refused, and
+     it asks again), asks for the git name and email the agents
      commit with, and pairs FrIDE with the node (`fride pair-companion`
      piped into `fridolin node fride pair --code -`, so the code is never
      shown).
@@ -768,6 +771,10 @@ side by side, with different node ids.
    services running; `docker compose exec node fridolin node fride status
    --state-dir /node` says FrIDE answers; the core lists the node online
    with `host`, `backup` and `fride` (`!fleet`, or the Nodes page).
+   `docker compose exec node fridolin doctor --node --state-dir /node`
+   checks the box from inside: it leaves out the host's Tailscale and a
+   node service, which a box does not have, and checks that the agent is
+   connected to the core over the box's own tailnet device.
 
 **Updating by hand**: the same line with `--update` and the core's
 version, no code (`-Update` in PowerShell). It pulls and pins the new
@@ -941,7 +948,14 @@ statusline offer as made. Nothing secret is in the image:
 - **The Claude token** (from `claude setup-token`, typed by the owner)
   goes into the home volume through stdin, never a command line:
   `docker compose exec -T fride /opt/fride/entrypoint.sh set-claude-token`,
-  then `docker compose restart fride`.
+  then `docker compose restart fride`. It takes only a token as
+  `setup-token` prints it (`sk-ant-oat`, then letters, digits, `-` and
+  `_`) and refuses anything else, such as the browser's sign-in code
+  (it has a `#`), with why; it drops what Windows PowerShell adds to
+  what it pipes (a carriage return at the end, sometimes a byte order
+  mark in front) and spaces around the token. A
+  stored token of another shape makes FrIDE's log say so at its start
+  (`docker compose logs fride`).
 - **The git identity** the agents commit with:
   `docker compose exec fride git config --global user.name NAME` (and
   `user.email`).
@@ -1091,11 +1105,26 @@ chat hears when it found a node.
 
 **News.** `bridge.db` (`fride_threads`) keeps each thread: the chat and
 brain that started it, the node, FrIDE's thread there, the task and its
-branch. FrIDE's news arrives in that chat: a question with the question
-(the owner answers there, and the core brain passes the answer on with
-`fride_reply`), `started` and `done` with the task and branch, `done`
-with the rationale's path, `failed`, and everything else as an update.
-The lines go into the core brain's history as FrIDE's, so its next run
+branch; `fride_news` keeps the latest 50 pieces of each thread's news
+whole, which the dashboard's FrIDE page shows. FrIDE's news arrives in
+that chat: a question with the question (the owner answers there, and
+the core brain passes the answer on with `fride_reply`), `started` and
+`done` with the task and branch, `done` with the rationale's path,
+`failed`, and everything else as an update. Each is at most three lines
+and 300 characters there, with a pointer to the FrIDE page. By default
+(`fride.news: "quiet"`, docs/CONFIGURATION.md) the chat gets only
+`done`, `failed`, real questions and updates that say something merged;
+"Created task …", FrIDE's echo of the brief ("• → agent: …") and
+progress stay on the page, and an identical failure goes out once per
+thread. A question whose text asks nothing (no question mark, none of
+"should I", "please confirm" and the like) is taken as an update: FrIDE
+marks progress as needing a reply too (fride#16). The relay gathers
+news for a few seconds: one text a node sends for several threads goes
+to each chat once, as "FrIDE on mini (#9, #10, …)", and the same text
+from that node is not sent there again within a minute. Work a scheduled
+agent handed over goes to that agent instead
+([BRAINS.md](BRAINS.md#scheduled-agents)). The lines go into the
+history of the brain that started the work as FrIDE's, so its next run
 sees what FrIDE asked. FrIDE says `done` at its next look at a closed
 task, every 15 seconds.
 

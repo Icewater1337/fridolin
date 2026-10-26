@@ -837,6 +837,34 @@ export interface Thread {
   runs: ThreadRun[];
 }
 
+/** A piece of FrIDE's news about a thread, whole (GET /api/fride). */
+export interface FrideNewsItem {
+  kind: string;
+  text: string;
+  at: string;
+}
+
+/** One FrIDE thread of GET /api/fride, the newest first. */
+export interface FrideThread {
+  thread: number;
+  state: string;
+  chat: string;
+  brain: string;
+  message: string;
+  node?: string;
+  task?: string;
+  branch?: string;
+  fride_status?: string;
+  archive?: string;
+  updated: string;
+  news: FrideNewsItem[];
+}
+
+/** GET /api/fride. */
+export interface FrideResponse {
+  threads: FrideThread[];
+}
+
 /** One line of GET /api/audit, newest first (audit.Entry). */
 export interface AuditEntry {
   ts: string;
@@ -2366,6 +2394,7 @@ export interface ApiGet {
   '/api/nodes': NodesResponse;
   '/api/activity': ActivityEntry[];
   '/api/threads': Thread[];
+  '/api/fride': FrideResponse;
   '/api/audit': AuditEntry[];
   '/api/approvals': Approvals;
   '/api/policy': PolicyStatus;

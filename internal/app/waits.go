@@ -29,6 +29,11 @@ type waits struct {
 	// frideRetry is how often waiting work is offered to the nodes again,
 	// besides whenever a node's FrIDE comes up.
 	frideRetry time.Duration
+	// frideGather is how long the relay gathers FrIDE's news before it
+	// sends any, so that one text a node sends for several threads at
+	// once goes out once; frideRepeat is how long after that the same
+	// text from that node is still taken as sent.
+	frideGather, frideRepeat time.Duration
 	// nodeSessionMinAge is the least age of a node session housekeeping
 	// stops (see nodeSessionFindings).
 	nodeSessionMinAge time.Duration
@@ -59,6 +64,8 @@ func defaultWaits() waits {
 		runWaitDelay:        5 * time.Second,
 		runTimeoutUnit:      time.Minute,
 		frideRetry:          30 * time.Second,
+		frideGather:         3 * time.Second,
+		frideRepeat:         time.Minute,
 		nodeSessionMinAge:   time.Minute,
 		reapGrace:           3 * time.Second,
 		vaultTick:           time.Minute,

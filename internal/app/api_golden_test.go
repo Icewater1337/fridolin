@@ -194,6 +194,7 @@ func TestGoldenGETEndpoints(t *testing.T) {
 		// Run ids are random, and how long a run took is the machine's.
 		{"threads", "/api/threads", []string{"run", "duration_ms"}},
 		{"audit", "/api/audit", []string{"run", "duration_ms"}},
+		{"fride", "/api/fride", nil},
 		{"brain-skills", "/api/brains/main/skills", nil},
 		{"brain-skills-unknown-brain", "/api/brains/nope/skills", nil},
 		{"unknown-endpoint", "/api/nope", nil},

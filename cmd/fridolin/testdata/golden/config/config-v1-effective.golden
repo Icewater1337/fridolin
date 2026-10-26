@@ -80,6 +80,9 @@
   "disallowed_tools": [
     "WebFetch"
   ],
+  "fride": {
+    "news": "all"
+  },
   "group_members": {
     "120363000000000000@g.us": [
       "15551234567",

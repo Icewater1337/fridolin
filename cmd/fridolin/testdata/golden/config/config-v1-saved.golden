@@ -214,5 +214,8 @@
     "keep_runs": 50,
     "max_total_mb": 100,
     "max_log_kb": 512
+  },
+  "fride": {
+    "news": "all"
   }
 }
