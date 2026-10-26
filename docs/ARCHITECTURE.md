@@ -17,7 +17,7 @@ has no Go package; build with `go build -o bin/fridolin ./cmd/fridolin`.
 | `config`, `manifest`, `registry`, `route` | Configuration transactions, brain documents and discovery, and pure routing. |
 | `brain`, `claudecli`, `prompt`, `sandbox` | Queues and runs, provider process protocol, prompt construction and sandbox policy. |
 | `skill`, `audit` | Skill files: the frontmatter parser (a YAML subset, with a fuzz target), validation and the policy under `metadata.fridolin`; the audit log's one schema, appender and filtered reader. |
-| `mcp` | The MCP server protocol (JSON-RPC 2.0 over stdio) and the tool registry with a per-caller availability predicate; `fridolin mcp --run` serves a run's tools with it. |
+| `mcp`, `mcp/tools` | The MCP server protocol (JSON-RPC 2.0 over stdio) and the tool registry with a per-caller availability predicate; `fridolin mcp --run` serves a run's tools with it. `mcp/tools` is the plumbing of the bridge's tools: the caller (a run's brain, what its manifest grants, whether it is a core run), the set of tools with the guard that tools which act go through (lockdown, risk level, approvals) and the audit line of each call, and the input-schema helpers. `internal/app` (`mcp_tools.go`) registers the tools and supplies the guard and the audit log. |
 | `whatsapp`, `access`, `pipeline` | Transport events, authorization/classification and inbound delivery. |
 | `outbound`, `otp`, `media` | Reply delivery, one-time-code handoff and attachment storage. |
 | `backup`, `google`, `plaud`, `site` | Integration services, each with injected host capabilities. |
@@ -68,7 +68,7 @@ reads; the tests are those in `internal/app` that are about the piece.
 | --- | --- | --- | --- |
 | Vault service | 23 files, 6,368: `vault_runtime` 1,089, `vault_targets` 818, `vault_snapshots` 757, `vault_backends` 472, `vault_migrate` 411, `mcp_vault` 272, `vault_encryption` 270, `vault_text` 258, `b2usage` 254, `vault_secrets` 243, `vault_layout`, `vault_target_secrets`, `vault_brain_backup`, `vault_forget`, `vault_retire`, `vault_migrate_text`, `vault_restic_crypt`, `vault_api_project`, `doctor_{vault,b2,targets,encryption,drive}` | `vault`, `targets`, `b2`, `b2Warned`, `nodes`, `brainMgr` | `vault_test`, `vault_targets_test`, `vault_brain_backup_test`, `vault_live_test`, `vault_retire_test`, `vault_migrate_test`, `vault_secrets_test`, `vault_target_secrets_test`, `doctor_{vault,b2,targets,encryption,drive}_test` |
 | Brains, runs, sandbox, child processes | 21 files, 2,504: `sandbox_runtime` 608, `childenv` 261, `runner` 231, `runner_settings` 223, `brainpath` 181, `sandbox_try` 146, `brainreg` 118, `brain_manager` 112, `brain_hooks` 109, `runrecord*` 155, `brain_project`, `claudecli`, `helperbin`, `procstart_*`, `viewer_factory`, `brain_policy`, `template_assets` | the brain manager and its runner; free functions over the config and the layout | `brain_queue_test`, `brainreg_test`, `brainpath_test`, `childenv_test`, `claudecli_test`, `codexcli_test`, `runrecord_test`, `sandbox*_test`, `helperbin_test`, `brainwrite*_test` |
-| Policy, approvals, audit, skills, MCP registry | 8 files, 2,072: `approvals` 731, `skills` 371, `mcp_tools` 300, `policy` 285, `mcp_delegate` 273, `audit` 95, `command_tokens`, `command_quote` | 54 App methods; `policy`, `audit`, `mcpTools`, `runTokens`, `delegations`, `waiters`, `outbox`, `store`, `brainMgr`, `work`, `agents`, `pipeline` | `policy_test`, `contracts_test`, `commands_test` |
+| Policy, approvals, audit, skills, delegation | 7 files, 1,988: `approvals` 808, `mcp_delegate` 402, `skills` 371, `policy` 295, `audit` 95, `command_tokens`, `command_quote` | 54 App methods; `policy`, `audit`, `runTokens`, `delegations`, `waiters`, `outbox`, `store`, `brainMgr`, `work`, `agents`, `pipeline` | `policy_test`, `contracts_test`, `commands_test` |
 | Composition, lifecycle, config, CLI entry points | 17 files, 1,802: `app` 771, `inspect` 370, `config_runtime` 133, `supervisor` 113, `project` 98, `run`, `stop`, `startup_cli`, `check_runtime`, `cli_runtime`, `config_path`, `layout_runtime`, small error and doc files | all of it | the harness, `lifecycle_external_test`, `supervisor_test`, `stop_test`, `inspect*_test`, `config*_test`, `cli_golden_test`, `run_golden_test`, `layout_test`, `project_test` |
 | Scheduled agents and reminders | 4 files, 1,324: `schedule_runtime` 638, `schedules_api_project` 482, `timezone` 106, `reminder_files` 98 | `agents`, `store` | `schedules_test`, `schedule_files_test`, `timezone_test` |
 | Workstation (agent sessions, terminals) | 6 files, 1,218: `workstation_runtime` 380, `workstation_terms` 267, `mcp_workstation_agent` 160, `mcp_workstation` 151, `mcp_workstation_term` 148, `workstation_dashboard` 112 | `work`, `nodes`, `nodesEnabled`, `outbox`, `audit`, `store` | `workstation_test`, `tmux_session_test` |
@@ -85,6 +85,7 @@ reads; the tests are those in `internal/app` that are about the piece.
 | Plaud host | 6 files, 465: `plaud_host` 163, `plaud_runtime` 124, `plaud_nodes` 82, `doctor_plaud` 73, the API adapters | `plaud`, `brainMgr` | `plaud_test`, `plaud_app_test`, `plaud_golden_test`, `plaud_nodes_test`, `plaud_runtime_test`, `plaud_fixture_test` |
 | Backup and Google | 6 files, 323: `backup_runtime` 116, `backup_projection` 86, `backup_restore_target` 60, `google_project`, the API adapters | `backup`, `google`, `registry`, `brainMgr`, `wa` | `backup_test`, `backup_integration_test`, `google_test`, `calendar_cmd_test` |
 | Required files (moved) | `bridge_health` 36: the projection and the two App methods left | `cfgs`, `outbox` | `health_test` |
+| MCP tool plumbing (moved) | `mcp_tools` 145: the registration of the bridge's tools, `mcpCaller`, `mcpGuard`, the caller a run's token stands for and the audit line | `mcpTools`, `runTokens`, `brainMgr`, `audit` | `policy_test`, `approvals_handover_test`, `core_brain_test` |
 
 ### Order
 
@@ -100,7 +101,7 @@ setup, lease and run-timeout tests) change wait until those merge.
 | 1 | Required files (`health.go`) | `startupcheck` | `Settings` per look; `Send(ctx, chat, text, maxChunk)` (the outbox) | done (#230's first PR) |
 | 2 | Housekeeping's terminal text (`housekeeping_text.go`) | `housekeeping` | nothing: `internal/cli` calls it with the report's bytes | done |
 | 3 | Doctor checks: `DoctorCheck`, `DoctorEnv`, `DoctorRegistry`, `DoctorResult`, the redactor (`doctor.go`, `doctor_policy.go`, `doctor_drift.go`) | `internal/doctor` | config options and paths; a registry each feature adds its checks to, so `doctor_{nodes,plaud,vault,…}.go` later move with their feature | — |
-| 4 | MCP tool plumbing: `mcpCaller`, `schema`/`strProp`, `guarded` (`mcp_tools.go`) | `internal/mcp` (a `tools` part) | a `Caller` (core or sub-brain, the run), a `Guard` (lockdown, risk budget), an audit appender | — |
+| 4 | MCP tool plumbing: `mcpCaller`, `schema`/`strProp`, `guarded` (`mcp_tools.go`) | `internal/mcp/tools` | a `Caller` (the brain, its manifest, whether the run is delegated, which brains run), a `Guard` (lockdown, the run's risk level, its approvals), an audit appender | done |
 | 5 | Scheduled agents, reminders, timezone (`schedule_runtime.go`, `schedules_api_project.go`, `reminder_files.go`, `timezone.go`) | `sched` | `BrainQueue` (submit a run, learn it finished or was interrupted), `NodeExec` for a program on a node, the run policy and risk check, a clock | 3 |
 | 6 | Owner approvals (`approvals.go`) | `internal/approvals` | `Poll`/`Text` delivery (the outbox), the approval store, audit, a clock; each feature registers its kind's decision function (housekeeping, workstation, schedules, nodes) | #218/#223 |
 | 7 | GitHub App runtime (`github_runtime.go`, `github_secrets.go`) | `ghapp` (a runtime part) | a host secret store, the runs' token directory, a clock, a logger | #218/#223 |
@@ -110,10 +111,24 @@ setup, lease and run-timeout tests) change wait until those merge.
 | 11 | Workstation (`workstation_*.go`, `mcp_workstation*.go`) | `internal/workstation` | `NodeCaller`, approvals (6), the outbox, audit, the MCP plumbing (4) | 4, 6; #218/#223 |
 | 12 | FrIDE's core side (`fride_runtime.go`, `mcp_fride.go`) | `internal/fridecore` | `NodeCaller`, the vault's views and tracking, the store, the MCP plumbing (4) | 4; #218/#223 |
 | 13 | Nodes runtime and programs (`nodes_*.go`, `node_programs.go`, `doctor_nodes.go`) | `nodes` | the core's tailnet state and node listener, FrIDE's declare hook (12), workstation (11), the vault's target service, the program store | 3, 11, 12 |
-| 14 | Memory and files (`memory_*.go`, `mcp_memory.go`, `files_runtime.go`) | `memindex`, `files` | the brain manager, the vault (sync, views, change), a run lookup, `mayRead` policy | 4; #218/#223 |
+| 14 | Memory and files (`memory_*.go`, `mcp_memory.go`, `files_runtime.go`) | `memindex`, `files` | the brain manager, the vault (sync, views, change), a run lookup, `tools.Caller.MayRead` | 4; #218/#223 |
 | 15 | Core lease and tailnet (`core_runtime.go`, `doctor_core.go`) | `lease`, `tailnet` | a WhatsApp gate (connect, send, pairing), the listener binding, B2 usage, the outbox, audit | 3; #228 |
 | 16 | Child processes, runs, sandbox (`childenv.go`, `runner*.go`, `runrecord*.go`, `sandbox_*.go`, `procstart_*.go`) | `brain`, `sandbox`, `platform` | the environment (`Options.Env`), helper paths, the layout | #218/#223, #228 |
 | 17 | Vault service, in steps: layout, secrets and encryption; B2 usage and the status text; backends, targets, snapshots and migration; its MCP tools last | `vault`, `cloud` | `NodeCaller` for node targets, the core state writer, brain states, doctor (3), the MCP plumbing (4) | 3, 4; #218/#223 |
+
+Piece 4 left in `app` what knows the run beyond the `tools.Caller`:
+`mcpCaller` is a `tools.Caller` plus the `runInfo` (its chat, policy
+and message, which the approval, FrIDE, schedule and workstation tools
+read); `mcpGuard` reads the lockdown, the run's risk level and the
+approval store; the caller a token stands for comes from the run tokens
+and the brain manager; the audit entry takes the thread, skill and risk
+from the run's policy; an unknown tool answers 404. The tools stay with
+their features (`mcp_delegate`, `mcp_memory`, `mcp_vault`, `mcp_fride`,
+`mcp_workstation*`, `nodes_update`, `approvals`) and register on the
+`*tools.Set`, behind `Set.Guarded` when they act. A feature that moves
+with its tools takes the `Set` and reads its caller through a small
+accessor of its own, generic in the caller's type, or the fields it
+needs move from `runInfo` into `tools.Caller`.
 
 What stays in `app` is the composition (`app.go`, `supervisor.go`,
 `stop.go`, `run.go`), the configuration projections (`*_project.go`,
