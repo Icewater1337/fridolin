@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  # macOS and Windows, and the Python and shell tests there, run weekly
+  # and on demand (Actions → CI → Run workflow) rather than on each pull
+  # request or push: their runner minutes cost the most. Pull requests test
+  # the current Go release on Linux; pushes to main test both.
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
 
 # The jobs only read the repository; nothing here needs to write to it.
 permissions:
@@ -44,6 +51,9 @@ jobs:
         # once per release are go-checks, beside them, but for the two that
         # build with -race.
         shard: [1, 2]
+        # A pull request tests the current release; main tests both.
+        exclude:
+          - go: ${{ github.event_name == 'pull_request' && 'oldstable' || 'none' }}
     name: go (${{ matrix.os }}, ${{ matrix.go }}, ${{ matrix.shard }}/2)
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -119,6 +129,8 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         go: [oldstable, stable]
+        exclude:
+          - go: ${{ github.event_name == 'pull_request' && 'oldstable' || 'none' }}
     name: go checks (${{ matrix.os }}, ${{ matrix.go }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
@@ -199,9 +211,8 @@ jobs:
         # GitHub runs only a few macOS jobs at a time per account, so a
         # pull request tests macOS on the current release alone; each
         # push to main tests both. "none" matches no release.
-        exclude:
-          - go: ${{ github.event_name == 'pull_request' && 'oldstable' || 'none' }}
     name: go (macos-latest, ${{ matrix.go }})
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: macos-latest
     timeout-minutes: 30
     env:
@@ -236,6 +247,7 @@ jobs:
   # Windows. No race detector (it needs cgo there) and none of the
   # POSIX-shell targets.
   go-windows:
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
     runs-on: windows-latest
     timeout-minutes: 30
     env:
@@ -334,7 +346,7 @@ jobs:
   # fails until it does).
   report:
     needs: [go, go-checks, go-macos, go-windows, fuzz, scripts, python, web, site, personal-data]
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && !github.event.repository.fork }}
+    if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'schedule') && github.ref == 'refs/heads/main' && !github.event.repository.fork }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -364,6 +376,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        exclude:
+          - os: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'none' || 'macos-latest' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
@@ -383,18 +397,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # The oldest Python the README promises, so a newer-only feature
-          # fails here first, and the newest release, so something it
-          # removed fails too. Ubuntu 24.04 rather than ubuntu-latest:
-          # Python 3.9 is past its end of life, and setup-python only has
-          # builds of it for the images that exist now.
-          - {os: ubuntu-24.04, python: '3.9'}
-          - {os: ubuntu-24.04, python: '3.x'}
-          # macOS's own /usr/bin/python3, which brains run the tools with,
-          # and the one system with sandbox-exec, which a test needs.
-          - {os: macos-latest, python: system}
-    runs-on: ${{ matrix.os }}
+        # The oldest Python the README promises, so a newer-only feature
+        # fails here first, and the newest release, so something it
+        # removed fails too, both on Ubuntu 24.04 rather than ubuntu-latest:
+        # Python 3.9 is past its end of life, and setup-python only has
+        # builds of it for the images that exist now. And macOS's own
+        # /usr/bin/python3 ("system"), which brains run the tools with, and
+        # the one system with sandbox-exec, which a test needs: weekly.
+        python: ['3.9', '3.x', system]
+        exclude:
+          - python: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'none' || 'system' }}
+    runs-on: ${{ matrix.python == 'system' && 'macos-latest' || 'ubuntu-24.04' }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -448,6 +461,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+        exclude:
+          - os: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'none' || 'macos-latest' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:

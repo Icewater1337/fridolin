@@ -2,11 +2,11 @@ name: macOS full suite
 
 # Pull requests and pushes test on macOS only what differs there from Linux
 # (go-macos in ci.yml, scripts/os-tests.sh). This runs every Go test on
-# macOS, nightly and on demand (Actions → macOS full suite → Run workflow),
+# macOS, weekly and on demand (Actions → macOS full suite → Run workflow),
 # so what the selection leaves out cannot rot unseen.
 on:
   schedule:
-    - cron: '17 3 * * *'
+    - cron: '17 3 * * 0'
   workflow_dispatch:
 
 permissions:
