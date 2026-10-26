@@ -198,7 +198,8 @@ func TestConnectionsDashboard(t *testing.T) {
 		t.Errorf("a blank key: %d %s", w.Code, w.Body.String())
 	}
 
-	w = h.Do("PUT", "/api/connections/openai/brains", map[string]any{"brains": []string{"personal", "personal"}, "brain_monthly_usd": 10})
+	// An empty voice is no voice: a page may send it for OpenAI too.
+	w = h.Do("PUT", "/api/connections/openai/brains", map[string]any{"brains": []string{"personal", "personal"}, "brain_monthly_usd": 10, "voice": ""})
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"brains":["personal"],"brain_monthly_usd":10`) {
 		t.Fatalf("the brains: %d %s", w.Code, w.Body.String())
 	}

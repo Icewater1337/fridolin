@@ -161,7 +161,7 @@ func (b *App) setConnectionBrains(_ context.Context, id string, req httpapi.Conn
 	if !connections.Known(id) {
 		return nil, noConnection(id)
 	}
-	if req.Voice != nil && id != connections.ElevenLabs {
+	if req.Voice != nil && *req.Voice != "" && id != connections.ElevenLabs {
 		return nil, badRequest("%s has no voice", connections.Title(id))
 	}
 	if req.Brains != nil {

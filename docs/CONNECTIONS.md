@@ -66,8 +66,8 @@ declares.
 
 ## Brains
 
-Dashboard → the connection's card → **Brains that may use it**, or in
-`config.json`:
+Dashboard → **Integrations**, on the connection's card: the brains that
+may use it and each brain's monthly limit. Or in `config.json`:
 
 ```json
 "connections": {
