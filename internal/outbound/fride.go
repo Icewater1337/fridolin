@@ -111,6 +111,25 @@ func FrideMerged(text string) bool {
 	return strings.Contains(strings.ToLower(frideBody(text)), "merged")
 }
 
+// FrideStalled reports whether text is FrIDE's notice that an agent has
+// not moved for a while ("agent … has not moved for 2h"): progress, even
+// when FrIDE marks it as needing a reply (#306).
+func FrideStalled(text string) bool {
+	body := strings.ToLower(frideBody(text))
+	return strings.Contains(body, "has not moved") || strings.Contains(body, "hasn't moved")
+}
+
+// FrideStallKey is a stall notice as two compare: the same but for its
+// numbers, which count the hours.
+func FrideStallKey(text string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return -1
+		}
+		return r
+	}, frideBody(text))
+}
+
 // FrideBodyKey is text as two pieces of news compare: the same text sent
 // for several threads is one piece of news.
 func FrideBodyKey(text string) string { return frideBody(text) }

@@ -55,6 +55,14 @@ type frideRuntime struct {
 	// within waits.frideRepeat. The relay alone uses both.
 	lastErr map[int64]string
 	sent    map[string]time.Time
+	// stalled is the last stall notice of each thread the relay took
+	// (FrideStallKey), which it drops again within waits.frideStallRepeat.
+	stalled map[int64]frideStall
+}
+
+type frideStall struct {
+	key string
+	at  time.Time
 }
 
 type frideNews struct {
@@ -65,7 +73,7 @@ type frideNews struct {
 func newFrideRuntime(b *App) *frideRuntime {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &frideRuntime{b: b, ctx: ctx, cancel: cancel, news: make(chan frideNews, 256), kick: make(chan struct{}, 1),
-		locks: map[int64]*sync.Mutex{}, busy: map[int64]string{}, lastErr: map[int64]string{}, sent: map[string]time.Time{}}
+		locks: map[int64]*sync.Mutex{}, busy: map[int64]string{}, lastErr: map[int64]string{}, sent: map[string]time.Time{}, stalled: map[int64]frideStall{}}
 }
 
 // start runs the relay and the queue once.
@@ -120,6 +128,7 @@ func (f *frideRuntime) onDeclare(n *nodes.Node) {
 // waits.frideGather of the first goes together, so that one text a node
 // sends for several threads at once is sent once.
 func (f *frideRuntime) relayLoop() {
+	f.adoptAgentThreads()
 	for {
 		var batch []frideNews
 		select {
@@ -265,6 +274,17 @@ func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) (fridePost, b
 		// Progress FrIDE marked as needing a reply (fride#16): news.
 		kind = nodeproto.FrideUpdate
 	}
+	if outboundmsg.FrideStalled(ev.Text) && (kind == nodeproto.FrideQuestion || kind == nodeproto.FrideUpdate) {
+		// "agent … has not moved for 2h", every half hour (#306): progress,
+		// and the same again within hours is not news at all.
+		kind = nodeproto.FrideUpdate
+		key, now := outboundmsg.FrideStallKey(ev.Text), time.Now()
+		if last, ok := f.stalled[t.ID]; ok && last.key == key && now.Sub(last.at) < f.b.waits.frideStallRepeat {
+			unlock()
+			return fridePost{}, false
+		}
+		f.stalled[t.ID] = frideStall{key: key, at: now}
+	}
 	if err := f.b.store.AddFrideNews(ctx, store.FrideNewsItem{Thread: t.ID, Kind: kind, Text: ev.Text}); err != nil {
 		log.Printf("fride: keeping FrIDE #%d's news: %v", t.ID, err)
 	}
@@ -316,6 +336,43 @@ func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) (fridePost, b
 		}
 	}
 	return fridePost{t: t, node: node, kind: kind, news: news}, true
+}
+
+// adoptAgentThreads gives the open threads a scheduled agent started
+// before their news stayed with it (#300) to that agent's chat, so that
+// their news follows the agent's routing (#306). A thread is the agent's
+// when it began while a run of it went on, or its message's first line is
+// in the agent's task, and that holds for no other agent of its brain.
+func (f *frideRuntime) adoptAgentThreads() {
+	threads, err := f.b.store.FrideThreads(f.ctx, "")
+	if err != nil {
+		log.Printf("fride: listing the threads scheduled agents may have started: %v", err)
+		return
+	}
+	for _, t := range threads {
+		if t.State == store.FrideClosed || chat.IsInternalChat(t.Chat) {
+			continue
+		}
+		br := f.b.brainMgr.Get(t.Brain)
+		if br == nil {
+			continue
+		}
+		var by []string
+		for _, s := range br.Manifest().EffectiveSchedules() {
+			if s.Command == nil && f.b.agents.startedFride(br, s, t) {
+				by = append(by, s.Name)
+			}
+		}
+		if len(by) != 1 {
+			continue
+		}
+		to := chat.ScheduleChatPrefix + by[0]
+		if err := f.b.store.SetFrideThreadChat(f.ctx, t.ID, to); err != nil {
+			log.Printf("fride: giving FrIDE #%d to scheduled agent %s: %v", t.ID, by[0], err)
+			continue
+		}
+		log.Printf("fride: FrIDE #%d, which scheduled agent %s of brain %s started, now reports to it, not to %s", t.ID, by[0], t.Brain, t.Chat)
+	}
 }
 
 // toAgent hands news of a scheduled agent's thread to that agent: it is

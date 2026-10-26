@@ -1,14 +1,17 @@
 package app
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/sched"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
@@ -29,6 +32,7 @@ func (h *harness) runAgentNow(brain, name string, n int) sched.Run {
 // chat that hears it, which a silent agent has not.
 func TestScheduledAgentsHandWorkToFride(t *testing.T) {
 	t.Parallel()
+	optionsOf(t).waits.frideAgentGap = 2 * time.Second
 	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
 	prompts := filepath.Join(t.TempDir(), "prompts.log")
 	setenv(t, "FRIDOLIN_FAKE_PROMPT_LOG", prompts)
@@ -39,7 +43,7 @@ func TestScheduledAgentsHandWorkToFride(t *testing.T) {
 	h.fakeFrideNode("laptop", addr, ff)
 
 	for name, report := range map[string]string{"fix-bugs": "", "quiet": manifest.ReportSilent} {
-		if w := h.Do("PUT", "/api/schedules/core/"+name, map[string]any{"when": "daily 18:00", "prompt": "Fix the bugs " + testutil.FakeMCPTrigger, "report": report}); w.Code != http.StatusOK {
+		if w := h.Do("PUT", "/api/schedules/core/"+name, map[string]any{"when": "daily 18:00", "prompt": "Fix the bugs of " + name + " " + testutil.FakeMCPTrigger, "report": report}); w.Code != http.StatusOK {
 			t.Fatalf("PUT %s: %d %s", name, w.Code, w.Body.String())
 		}
 	}
@@ -70,13 +74,15 @@ func TestScheduledAgentsHandWorkToFride(t *testing.T) {
 			t.Errorf("the run's prompt lacks %q:\n%s", want, data)
 		}
 	}
-	// Progress starts no run; work done does.
+	// Progress and a stall notice start no run; work done does, once
+	// frideAgentGap has passed since the last.
 	ff.Start(1, "fix-12", "fix/12")
 	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	ff.Emit(map[string]any{"event": "question", "thread_id": 1, "text": "Agent fix-12 has not moved for 2h. Should I nudge it?", "status": "needs_reply"})
 	ff.Emit(map[string]any{"event": "done", "thread_id": 1, "task_id": "fix-12", "text": "PR merged", "status": "done"})
-	r = h.waitRunEnded("core", "fix-bugs", 3)
-	if r.Trigger != sched.TriggerFride {
-		t.Fatalf("the run for FrIDE's done: %+v", r)
+	r3 := h.waitRunEnded("core", "fix-bugs", 3)
+	if r3.Trigger != sched.TriggerFride || r3.Started.Sub(r.Started) < 2*time.Second {
+		t.Fatalf("the run for FrIDE's done: %+v, %s after the last", r3, r3.Started.Sub(r.Started))
 	}
 	if runs := h.agentRuns("core", "fix-bugs"); len(runs) != 3 {
 		t.Errorf("%d runs; progress started one", len(runs))
@@ -103,6 +109,24 @@ func TestScheduledAgentsHandWorkToFride(t *testing.T) {
 	}
 	if strings.Contains(r.Result, "Started Agent") {
 		t.Errorf("a workstation session started from a silent agent: %+v", r)
+	}
+
+	// Threads an agent started before #300 report to the owner's DM: they
+	// go back to the agent that started them, by the run they began in
+	// or by its task; the owner's own stays.
+	ctx := context.Background()
+	for _, id := range []int64{1, 2} {
+		if err := h.b.store.SetFrideThreadChat(ctx, id, harnessDM); err != nil {
+			t.Fatal(err)
+		}
+	}
+	byTask, _ := h.b.store.AddFrideThread(ctx, store.FrideThread{Chat: harnessDM, Brain: "core", Message: "Fix the bugs of fix-bugs\nissue #14"})
+	own, _ := h.b.store.AddFrideThread(ctx, store.FrideThread{Chat: harnessDM, Brain: "core", Message: "Fix the login page, it looks odd"})
+	h.b.fride.adoptAgentThreads()
+	for id, want := range map[int64]string{1: "schedule:fix-bugs", 2: "schedule:quiet", byTask: "schedule:fix-bugs", own: harnessDM} {
+		if th, _ := h.b.store.GetFrideThread(ctx, id); th.Chat != want {
+			t.Errorf("FrIDE #%d reports to %q, want %q", id, th.Chat, want)
+		}
 	}
 }
 

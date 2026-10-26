@@ -26,6 +26,7 @@ import (
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/sched"
 	"github.com/Icewater1337/fridolin/internal/skill"
+	"github.com/Icewater1337/fridolin/internal/store"
 	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
@@ -68,6 +69,11 @@ type agents struct {
 	// for a run of it: one at a time, and what arrives meanwhile goes into
 	// the next.
 	frideWaiting map[string][]string
+	// frideLast is when FrIDE's news last started a run of each agent,
+	// and frideLater the timer of the next one, which waits.frideAgentGap
+	// keeps apart (#306).
+	frideLast  map[string]time.Time
+	frideLater map[string]*time.Timer
 }
 
 // agentRun is one run in progress.
@@ -86,7 +92,8 @@ type agentRun struct {
 
 func newAgents(b *App, layout config.Layout) *agents {
 	return &agents{b: b, store: sched.NewStore(layout.Schedules()),
-		running: map[string]*agentRun{}, byID: map[string]*agentRun{}, frideWaiting: map[string][]string{}}
+		running: map[string]*agentRun{}, byID: map[string]*agentRun{}, frideWaiting: map[string][]string{},
+		frideLast: map[string]time.Time{}, frideLater: map[string]*time.Timer{}}
 }
 
 // recover ends, once, the runs the state says are running: the bridge
@@ -552,8 +559,9 @@ func (a *agents) complete(ar *agentRun, status, result, why string, usage claude
 }
 
 // frideNews hands FrIDE's news about work agent of brain handed it to a
-// run of that agent: at once, or after the run in progress, together
-// with whatever else arrives until then.
+// run of that agent: at once, or after the run in progress or once
+// waits.frideAgentGap has passed since the last such run, together with
+// whatever else arrives until then.
 func (a *agents) frideNews(brain, agent, news string) {
 	key := sched.Key(brain, agent)
 	a.mu.Lock()
@@ -565,18 +573,51 @@ func (a *agents) frideNews(brain, agent, news string) {
 	}
 }
 
+// startedFride reports whether thread t looks like work agent s of br
+// handed FrIDE: it began during a run of s, or its message's first line
+// is in s's task.
+func (a *agents) startedFride(br *brainruntime.Brain, s manifest.Schedule, t store.FrideThread) bool {
+	runs, err := a.store.Runs(br.ID(), s.Name, 0)
+	if err != nil {
+		log.Printf("brain %s: scheduled agent %s: its runs: %v", br.ID(), s.Name, err)
+	}
+	for _, r := range runs {
+		if !t.CreatedAt.Before(r.Started) && !r.Ended.IsZero() && !t.CreatedAt.After(r.Ended) {
+			return true
+		}
+	}
+	first, _, _ := strings.Cut(strings.TrimSpace(t.Message), "\n")
+	if first = strings.TrimSpace(first); len([]rune(first)) < 20 {
+		return false
+	}
+	task, err := a.task(br, s)
+	return err == nil && strings.Contains(task, first)
+}
+
 // frideRun starts a run of agent of brain for the FrIDE news waiting for
-// it. An agent that is gone, paused, turned off or runs a program drops
-// it: the news stays on the dashboard's FrIDE page.
+// it, or sets it for when waits.frideAgentGap allows one. An agent that is
+// gone, paused, turned off or runs a program drops it: the news stays on
+// the dashboard's FrIDE page.
 func (a *agents) frideRun(brain, agent string) {
 	key := sched.Key(brain, agent)
 	a.mu.Lock()
 	news := a.frideWaiting[key]
-	if len(news) == 0 || a.running[key] != nil {
+	if len(news) == 0 || a.running[key] != nil || a.frideLater[key] != nil {
+		a.mu.Unlock()
+		return
+	}
+	if wait := time.Until(a.frideLast[key].Add(a.b.waits.frideAgentGap)); wait > 0 {
+		a.frideLater[key] = time.AfterFunc(wait, func() {
+			a.mu.Lock()
+			delete(a.frideLater, key)
+			a.mu.Unlock()
+			a.frideRun(brain, agent)
+		})
 		a.mu.Unlock()
 		return
 	}
 	delete(a.frideWaiting, key)
+	a.frideLast[key] = time.Now()
 	a.mu.Unlock()
 	br := a.b.brainMgr.Get(brain)
 	var s *manifest.Schedule

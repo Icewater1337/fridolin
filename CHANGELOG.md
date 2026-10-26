@@ -1163,6 +1163,13 @@ for compatibility.
 
 ### Fixed
 
+- **FrIDE's stall notices stay quiet** (#306). "Agent … has not moved
+  for 2h", every half hour, reached the DM in quiet mode, and in a
+  scheduled agent's chat started a run of it each time. It is now
+  progress (the FrIDE page only), the same notice again within six hours
+  is dropped, and FrIDE's news starts at most one run an hour per
+  agent, with what came meanwhile. Open threads a scheduled agent
+  started before its news stayed with it go back to that agent.
 - **`fridolin nodes update` waits for a box as long as the core does.**
   It gave up after 12 minutes with "still updating after 12m0s", while a
   box's hourly updater takes up to an hour and the core waits an hour

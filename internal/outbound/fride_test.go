@@ -41,6 +41,17 @@ func TestFrideBookkeepingAndAsks(t *testing.T) {
 	}
 }
 
+func TestFrideStalled(t *testing.T) {
+	a := "FrIDE inbox #4 · needs your reply\nAgent fix-12 has not moved for 2h. Should I nudge it?"
+	b := "FrIDE inbox #4 · needs your reply\nAgent fix-12 has not moved for 3h. Should I nudge it?"
+	if !FrideStalled(a) || !FrideStalled("The agent hasn't moved since noon") || FrideStalled("Which fix?") {
+		t.Error("FrideStalled")
+	}
+	if FrideStallKey(a) != FrideStallKey(b) || FrideStallKey(a) == FrideStallKey("Agent review has not moved for 2h") {
+		t.Error("FrideStallKey")
+	}
+}
+
 func TestFrideFanoutMessage(t *testing.T) {
 	got := FrideFanoutMessage("mini", "update", []int64{9, 10, 15}, "FrIDE inbox #9 · update\nAll merged.")
 	if want := "🛠️ *FrIDE on mini* (#9, #10, #15):\nAll merged."; got != want {

@@ -119,6 +119,18 @@ func (s *Store) SaveFrideThread(ctx context.Context, t FrideThread) error {
 	return nil
 }
 
+// SetFrideThreadChat makes chat where thread id's news goes.
+func (s *Store) SetFrideThreadChat(ctx context.Context, id int64, chat string) error {
+	res, err := s.db.ExecContext(ctx, `UPDATE fride_threads SET chat_jid = ?, updated_at = ? WHERE id = ?`, chat, time.Now().UTC(), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrNoFrideThread
+	}
+	return nil
+}
+
 // GetFrideThread reads thread id.
 func (s *Store) GetFrideThread(ctx context.Context, id int64) (FrideThread, error) {
 	return scanFride(s.db.QueryRowContext(ctx, `SELECT `+frideColumns+` FROM fride_threads WHERE id = ?`, id))
