@@ -221,3 +221,125 @@ func TestConfigRefusesDeclaredFride(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+// pairedAgent is the agent of a node in a state dir of its own, paired
+// with ff and checked once, which runs without a core.
+func pairedAgent(t *testing.T, ff *testutil.FakeFride) *Agent {
+	t.Helper()
+	dir := t.TempDir()
+	cfg := Config{Core: "core.example:8766", Name: "test node"}
+	if err := SaveConfig(dir, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PairFride(context.Background(), FridePairOptions{Dir: dir, URL: ff.URL, Code: ff.NewCode()}); err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{Dir: dir, Config: cfg, Logf: t.Logf}
+	t.Cleanup(func() { a.frideListen(nil) })
+	if !a.frideCheck(context.Background()) || a.frideOffered() == nil {
+		t.Fatal("the first check does not offer fride")
+	}
+	return a
+}
+
+// frideOffered is the fride capability the agent offers now.
+func (a *Agent) frideOffered() *nodeproto.FrideCap {
+	a.fride.mu.Lock()
+	defer a.fride.mu.Unlock()
+	return a.fride.cap
+}
+
+// frideTokenNow is the token the agent calls FrIDE with now.
+func (a *Agent) frideTokenNow() string {
+	a.fride.mu.Lock()
+	defer a.fride.mu.Unlock()
+	return a.fride.token
+}
+
+// Pairing again while the agent runs: FrIDE takes only the new token from
+// then on, which the agent would read only at its next check. When FrIDE
+// refuses the old one, the agent takes the new one from the state dir, for
+// a call, for a check and for FrIDE's news. A token FrIDE refuses that is
+// the one in the state dir is refused as before.
+func TestFrideTokenAfterPairingAgain(t *testing.T) {
+	ff := testutil.StartFakeFride(t, "api")
+	a := pairedAgent(t, ff)
+	ctx := context.Background()
+	pair := func() (string, error) {
+		if _, err := PairFride(ctx, FridePairOptions{Dir: a.Dir, URL: ff.URL, Code: ff.NewCode()}); err != nil {
+			return "", err
+		}
+		data, err := os.ReadFile(filepath.Join(a.Dir, FrideTokenFile))
+		return strings.TrimSpace(string(data)), err
+	}
+	mustPair := func() string {
+		t.Helper()
+		tok, err := pair()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+	call := func(method string, params any) (any, *nodeproto.Error) {
+		t.Helper()
+		raw, err := json.Marshal(params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return a.frideCall(ctx, method, raw)
+	}
+
+	// A call.
+	tok := mustPair()
+	if _, e := call(nodeproto.MethodFrideMem, nil); e != nil {
+		t.Fatalf("fride.mem right after pairing again: %v", e)
+	}
+	if got := a.frideTokenNow(); got != tok {
+		t.Errorf("the agent still calls with %q, want the new %q", got, tok)
+	}
+
+	// A call that sends a bundle, read again for the second try.
+	if _, e := call(nodeproto.MethodFrideTask, nodeproto.FrideTaskParams{Message: "add a health endpoint"}); e != nil {
+		t.Fatal(e)
+	}
+	ff.Start(1, "health", "feat/health")
+	out, e := call(nodeproto.MethodFrideExport, nodeproto.FrideExportParams{TaskID: "health"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	mustPair()
+	if _, e := call(nodeproto.MethodFrideImport, nodeproto.FrideImportParams{ID: out.(nodeproto.FrideTransfer).ID, As: "health-2"}); e != nil {
+		t.Fatalf("fride.import right after pairing again: %v", e)
+	}
+	if exists, _ := ff.Task("health-2"); !exists {
+		t.Error("the import did not reach FrIDE")
+	}
+
+	// A check that read the old token before the pairing, and asks after.
+	ff.BeforeNext("/api/companion/info", func() {
+		if _, err := pair(); err != nil {
+			t.Error(err)
+		}
+	})
+	if a.frideCheck(ctx) || a.frideOffered() == nil {
+		t.Fatalf("pairing again during a check withdrew fride: %+v", a.frideOffered())
+	}
+
+	// News FrIDE signs with the new token.
+	mustPair()
+	if code := ff.Emit(map[string]any{"event": "update", "thread_id": 1, "text": "x"}); code != http.StatusNoContent {
+		t.Fatalf("news signed with the new token: %d", code)
+	}
+
+	// FrIDE paired with someone else: the state dir holds the token it
+	// refuses.
+	if err := frideDo(ctx, ff.URL, "", http.MethodPost, "/api/companion/pair", map[string]string{"code": ff.NewCode(), "webhook_url": ff.Webhook()}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, e := call(nodeproto.MethodFrideMem, nil); e == nil || e.Code != nodeproto.CodeDenied || !strings.Contains(e.Message, "pair again") {
+		t.Fatalf("a token FrIDE refuses: %v", e)
+	}
+	if code := ff.Emit(map[string]any{"event": "update", "thread_id": 1, "text": "x"}); code != http.StatusUnauthorized {
+		t.Fatalf("news signed with a token the node does not have: %d", code)
+	}
+}

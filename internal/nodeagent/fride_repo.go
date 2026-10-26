@@ -106,11 +106,11 @@ func checkBaseDir(dir string) (string, error) {
 // frideBaseFolders are FrIDE's base folders, from its settings (the API
 // its UI uses), as checkBaseDir has them; those that are no folder are
 // left out.
-func frideBaseFolders(ctx context.Context, cfg *FrideConfig, token string) ([]string, error) {
+func frideBaseFolders(ctx context.Context, fc *frideConn) ([]string, error) {
 	var s struct {
 		BaseFolders []string `json:"baseFolders"`
 	}
-	if err := frideDo(ctx, cfg.URL, token, http.MethodGet, "/api/settings", nil, &s); err != nil {
+	if err := fc.do(ctx, http.MethodGet, "/api/settings", nil, &s); err != nil {
 		return nil, err
 	}
 	var out []string
@@ -125,10 +125,10 @@ func frideBaseFolders(ctx context.Context, cfg *FrideConfig, token string) ([]st
 // frideRepoBase is the folder repositories are added to: node.json's
 // fride.base, which must be one of FrIDE's base folders while FrIDE says
 // which those are, else FrIDE's only one.
-func frideRepoBase(ctx context.Context, cfg *FrideConfig, token string) (string, *nodeproto.Error) {
-	folders, ferr := frideBaseFolders(ctx, cfg, token)
-	if cfg.Base != "" {
-		base, err := checkBaseDir(cfg.Base)
+func frideRepoBase(ctx context.Context, fc *frideConn) (string, *nodeproto.Error) {
+	folders, ferr := frideBaseFolders(ctx, fc)
+	if fc.cfg.Base != "" {
+		base, err := checkBaseDir(fc.cfg.Base)
 		if err != nil {
 			return "", nodeproto.Errorf(nodeproto.CodeFailed, "fride.base in node.json: %v", err)
 		}
@@ -196,7 +196,7 @@ func runRepoTool(ctx context.Context, timeout time.Duration, dir, prog string, a
 }
 
 // frideRepo serves fride.repo_clone and fride.repo_new.
-func (a *Agent) frideRepo(ctx context.Context, method string, cfg *FrideConfig, token string, p nodeproto.FrideRepoParams) (any, *nodeproto.Error) {
+func (a *Agent) frideRepo(ctx context.Context, method string, fc *frideConn, p nodeproto.FrideRepoParams) (any, *nodeproto.Error) {
 	if a.Config.Box != nil {
 		// FrIDE's base folders are in the fride service's volume, which
 		// the node's container never mounts.
@@ -215,7 +215,7 @@ func (a *Agent) frideRepo(ctx context.Context, method string, cfg *FrideConfig, 
 		return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "a new repository takes no URL")
 	}
 	pctx, cancel := context.WithTimeout(ctx, frideCallTimeout)
-	base, perr := frideRepoBase(pctx, cfg, token)
+	base, perr := frideRepoBase(pctx, fc)
 	cancel()
 	if perr != nil {
 		return nil, perr
@@ -257,7 +257,7 @@ func (a *Agent) frideRepo(ctx context.Context, method string, cfg *FrideConfig, 
 			a.logf("node: %s", out.Warning)
 		}
 	}
-	out.Repos, out.Rescanned = a.frideRescan(ctx, cfg, token)
+	out.Repos, out.Rescanned = a.frideRescan(ctx, fc)
 	return out, nil
 }
 
@@ -303,14 +303,14 @@ func githubCreate(ctx context.Context, dest, name string, public bool) (ghURL, w
 // frideRescan has FrIDE read its base folders again and tells the core
 // what the node offers since. It reports the repositories FrIDE knows
 // then, and whether it rescanned.
-func (a *Agent) frideRescan(ctx context.Context, cfg *FrideConfig, token string) ([]string, bool) {
+func (a *Agent) frideRescan(ctx context.Context, fc *frideConn) ([]string, bool) {
 	ctx, cancel := context.WithTimeout(ctx, frideCallTimeout)
 	defer cancel()
-	if err := frideDo(ctx, cfg.URL, token, http.MethodPost, "/api/config", nil, nil); err != nil {
+	if err := fc.do(ctx, http.MethodPost, "/api/config", nil, nil); err != nil {
 		a.logf("node: asking FrIDE to read its base folders again: %v", err)
 		return nil, false
 	}
-	info, err := ProbeFride(ctx, cfg.URL, token)
+	info, err := fc.probe(ctx)
 	if err != nil {
 		return nil, true
 	}
