@@ -12,6 +12,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/mcp"
+	"github.com/Icewater1337/fridolin/internal/mcp/tools"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/skill"
 	"github.com/Icewater1337/fridolin/internal/store"
@@ -23,8 +24,8 @@ import (
 func (h *harness) registerPostMessage() {
 	h.b.mcpTools.Register(mcp.Entry[mcpCaller]{
 		Name:     "post_message",
-		Describe: func(mcpCaller) mcp.Tool { return mcp.Tool{Description: "test", InputSchema: schema(nil)} },
-		Call: h.b.guarded(skill.RiskIrreversible, func(context.Context, mcpCaller, json.RawMessage) (*mcp.CallResult, error) {
+		Describe: func(mcpCaller) mcp.Tool { return mcp.Tool{Description: "test", InputSchema: tools.Schema(nil)} },
+		Call: h.b.mcpTools.Guarded(skill.RiskIrreversible, func(context.Context, mcpCaller, json.RawMessage) (*mcp.CallResult, error) {
 			return mcp.TextResult("posted"), nil
 		}),
 	})
@@ -252,7 +253,7 @@ func TestAutoApprovesOnlyAboveRead(t *testing.T) {
 		{manifest.Manifest{ID: "a", Name: "A"}, skill.RiskWrite, false},
 		{manifest.Manifest{ID: "a", Name: "A", Approvals: manifest.ApprovalsAsk}, skill.RiskIrreversible, false},
 	} {
-		c := mcpCaller{run: runInfo{Brain: "a", Policy: &runPolicy{Risk: tc.risk}}, manifest: tc.m}
+		c := mcpCaller{Caller: tools.Caller{Manifest: tc.m}, run: runInfo{Brain: "a", Policy: &runPolicy{Risk: tc.risk}}}
 		if got := c.autoApproves(); got != tc.want {
 			t.Errorf("approvals %q at %s: %v, want %v", tc.m.Approvals, tc.risk, got, tc.want)
 		}

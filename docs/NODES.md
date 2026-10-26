@@ -1163,7 +1163,7 @@ repository already it says so and does nothing, else it calls
 `fride.repo_clone` or `fride.repo_new` on the first.
 
 **Policy.** `fride_task`, `fride_reply`, `fride_move`, `fride_close`
-and `fride_repo_add` are write actions of M5's policy (`App.guarded`): a lockdown refuses them,
+and `fride_repo_add` are write actions of M5's policy (`tools.Guarded`): a lockdown refuses them,
 as it refuses `!move`, and so does a run whose risk budget is read;
 `fride_status` only reads. Every call is a `tool_call` line in the audit
 log.

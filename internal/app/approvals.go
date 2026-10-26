@@ -19,6 +19,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/history"
 	"github.com/Icewater1337/fridolin/internal/mcp"
+	"github.com/Icewater1337/fridolin/internal/mcp/tools"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/skill"
 	"github.com/Icewater1337/fridolin/internal/store"
@@ -219,11 +220,11 @@ func (b *App) describeRequestApproval(c mcpCaller) mcp.Tool {
 			"Call it before every irreversible step (submitting, sending to anyone else, paying, deleting outside your folder, publishing) and every step a skill lists under metadata.fridolin.approve; take the step only when this answers approved. " +
 			fmt.Sprintf("Waits up to wait_seconds (default %d, at most %d). Unanswered by then it answers pending with an approval_id: wait again with check_approval, or end your turn, and the answer comes to you as a new message. ", int(defaultApprovalWait/time.Second), int(maxApprovalWait/time.Second)) +
 			fmt.Sprintf("No answer within %d hours counts as no. This run's risk level is %s.", b.cfgs.Get().Live.Policy.ApprovalTimeoutHours, c.risk()),
-		InputSchema: schema(map[string]any{
-			"action":       strProp("What you want to do, in one sentence the person can say yes or no to, e.g. \"Submit the 2025 tax return through ELSTER\"."),
-			"details":      strProp("The draft or the particulars: what exactly will be sent, submitted, paid or deleted. Shown when they ask to see the draft."),
+		InputSchema: tools.Schema(map[string]any{
+			"action":       tools.Str("What you want to do, in one sentence the person can say yes or no to, e.g. \"Submit the 2025 tax return through ELSTER\"."),
+			"details":      tools.Str("The draft or the particulars: what exactly will be sent, submitted, paid or deleted. Shown when they ask to see the draft."),
 			"risk":         map[string]any{"type": "string", "enum": []string{"write", "irreversible"}, "description": "irreversible (default) or write."},
-			"step":         strProp("The skill's step this approves, as named under metadata.fridolin.approve, if any."),
+			"step":         tools.Str("The skill's step this approves, as named under metadata.fridolin.approve, if any."),
 			"wait_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": int(maxApprovalWait / time.Second)},
 		}, "action"),
 	}
@@ -234,8 +235,8 @@ func (b *App) describeAskUser(mcpCaller) mcp.Tool {
 		Description: "Ask the person you work for a question in their WhatsApp chat and wait for the answer: with options, as a poll they tap; without, as a message whose reply is the answer. " +
 			fmt.Sprintf("Waits up to wait_seconds (default %d, at most %d); unanswered by then it answers pending with an id for check_approval, and a later answer comes to you as a new message. ", int(defaultApprovalWait/time.Second), int(maxApprovalWait/time.Second)) +
 			"Ask only what you cannot find out yourself.",
-		InputSchema: schema(map[string]any{
-			"question":     strProp("The question."),
+		InputSchema: tools.Schema(map[string]any{
+			"question":     tools.Str("The question."),
 			"options":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "minItems": 2, "maxItems": outboundmsg.MaxPollOptions, "description": "The answers to choose from, for a poll; leave out for a free answer."},
 			"wait_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": int(maxApprovalWait / time.Second)},
 		}, "question"),
@@ -245,8 +246,8 @@ func (b *App) describeAskUser(mcpCaller) mcp.Tool {
 func describeCheckApproval(mcpCaller) mcp.Tool {
 	return mcp.Tool{
 		Description: "Wait again for the answer to a request_approval or ask_user of yours that answered pending, by its id.",
-		InputSchema: schema(map[string]any{
-			"id":           strProp("The approval_id it answered."),
+		InputSchema: tools.Schema(map[string]any{
+			"id":           tools.Str("The approval_id it answered."),
 			"wait_seconds": map[string]any{"type": "integer", "minimum": 1, "maximum": int(maxApprovalWait / time.Second)},
 		}, "id"),
 	}
@@ -318,7 +319,7 @@ const autoApprovedBy = "auto"
 // skill or a lockdown, asks the owner as any brain's would: auto never
 // lets through what the budget does not.
 func (c mcpCaller) autoApproves() bool {
-	return c.manifest.AutoApproves() && c.risk().Rank() > skill.RiskRead.Rank()
+	return c.Manifest.AutoApproves() && c.risk().Rank() > skill.RiskRead.Rank()
 }
 
 // autoApprove records a as approved by "auto", without a poll, for a

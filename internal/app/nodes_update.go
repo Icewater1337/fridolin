@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/mcp"
+	"github.com/Icewater1337/fridolin/internal/mcp/tools"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/nodes"
 	"github.com/Icewater1337/fridolin/internal/skill"
@@ -89,19 +90,19 @@ func (t *targetService) busyOn(node string) string {
 // before it says the update goes on.
 var nodeUpdateWait = 3 * time.Minute
 
-func (b *App) registerNodeTools(r *mcp.Registry[mcpCaller]) {
+func (b *App) registerNodeTools(r *tools.Set[mcpCaller]) {
 	r.Register(mcp.Entry[mcpCaller]{
 		Name:      "node_update",
-		Available: func(c mcpCaller) bool { return c.core() && b.nodesEnabled },
+		Available: func(c mcpCaller) bool { return c.Core() && b.nodesEnabled },
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
 				Description: "Update one of the owner's machines (a node) to this core's fridolin version: the core sends it the signed build of its version, the node swaps it in and restarts, and goes back to its old version by itself if the new one does not connect. Only when the person asks to update a node, or after telling them a node runs an older version and they agree. Refused while the node runs a FrIDE task or a backup, or when the node's update is not approved.",
-				InputSchema: schema(map[string]any{
-					"node": strProp("The node: its name or id, as !fleet lists it."),
+				InputSchema: tools.Schema(map[string]any{
+					"node": tools.Str("The node: its name or id, as !fleet lists it."),
 				}, "node"),
 			}
 		},
-		Call: b.guarded(skill.RiskWrite, b.callNodeUpdate),
+		Call: r.Guarded(skill.RiskWrite, b.callNodeUpdate),
 	})
 }
 

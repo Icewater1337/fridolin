@@ -16,6 +16,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/mcp"
+	"github.com/Icewater1337/fridolin/internal/mcp/tools"
 )
 
 // The folders of a brain read_memory reads: its notes (only their
@@ -26,7 +27,7 @@ const (
 )
 
 func describeReadMemory(c mcpCaller) mcp.Tool {
-	brains := append([]string{c.run.Brain}, c.granted(manifest.GrantRead)...)
+	brains := append([]string{c.run.Brain}, c.Granted(manifest.GrantRead)...)
 	desc := "Read a brain's notes: a markdown file under memories/ or any file under skills/, or list such a folder (a path that is a folder, or none for memories/). "
 	if len(brains) > 1 {
 		desc += "You may read your own (" + c.run.Brain + ", the default) and those of: " + strings.Join(brains[1:], ", ") + ". What you learn about another brain goes into your own notes, never its files."
@@ -35,9 +36,9 @@ func describeReadMemory(c mcpCaller) mcp.Tool {
 	}
 	return mcp.Tool{
 		Description: desc,
-		InputSchema: schema(map[string]any{
+		InputSchema: tools.Schema(map[string]any{
 			"brain": map[string]any{"type": "string", "enum": brains, "description": "Whose notes; default your own."},
-			"path":  strProp("Relative to the brain's folder, such as memories/people.md or skills/; default memories/."),
+			"path":  tools.Str("Relative to the brain's folder, such as memories/people.md or skills/; default memories/."),
 		}),
 	}
 }
@@ -54,7 +55,7 @@ func (b *App) callReadMemory(_ context.Context, c mcpCaller, raw json.RawMessage
 	if id == "" {
 		id = c.run.Brain
 	}
-	if !c.mayRead(id) {
+	if !c.MayRead(id) {
 		return mcp.ErrorResult(fmt.Sprintf("you may not read brain %q's notes", id)), nil
 	}
 	br := b.brainMgr.Get(id)

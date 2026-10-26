@@ -12,6 +12,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/mcp"
+	"github.com/Icewater1337/fridolin/internal/mcp/tools"
 	"github.com/Icewater1337/fridolin/internal/skill"
 	"github.com/Icewater1337/fridolin/internal/vault"
 )
@@ -36,20 +37,20 @@ func (b *App) vaultScope(c mcpCaller, granted bool) (*vault.Scope, error) {
 	l := b.vault.currentLayout()
 	prefixes := l.brainPrefixes(c.run.Brain)
 	if granted {
-		for _, id := range c.granted(manifest.GrantFiles) {
+		for _, id := range c.Granted(manifest.GrantFiles) {
 			prefixes = append(prefixes, l.brainPrefixes(id)...)
 		}
 	}
 	return v.Scoped(prefixes)
 }
 
-func (b *App) registerVaultTools(r *mcp.Registry[mcpCaller]) {
+func (b *App) registerVaultTools(r *tools.Set[mcpCaller]) {
 	available := func(mcpCaller) bool { return b.vault != nil && b.vault.Running() }
 	r.Register(mcp.Entry[mcpCaller]{
 		Name: "vault_ls", Available: available,
 		Describe: func(c mcpCaller) mcp.Tool {
 			return mcp.Tool{Description: "List a folder of the vault: its files, on disk (tier hot or both) or only in the encrypted cold tier (tier cold), and its subfolders. Paths are relative to the vault, such as " + b.vaultExample(c) + "; leave path empty to see the folders you may use.",
-				InputSchema: schema(map[string]any{"path": strProp("The folder, relative to the vault; empty for the top.")})}
+				InputSchema: tools.Schema(map[string]any{"path": tools.Str("The folder, relative to the vault; empty for the top.")})}
 		},
 		Call: b.callVaultLs,
 	})
@@ -57,8 +58,8 @@ func (b *App) registerVaultTools(r *mcp.Registry[mcpCaller]) {
 		Name: "vault_get", Available: available,
 		Describe: func(c mcpCaller) mcp.Tool {
 			return mcp.Tool{Description: "Bring a vault file back from the cold tier (when it is cold) and get a path you can read it at. A file that would take the hot tier over its budget is refused: ask the person first, then call again with allow_over_budget.",
-				InputSchema: schema(map[string]any{
-					"path":              strProp("The file's vault path, as vault_ls or vault_search show it, or its absolute path (a message's file, or a .cold.json's folder plus the name)."),
+				InputSchema: tools.Schema(map[string]any{
+					"path":              tools.Str("The file's vault path, as vault_ls or vault_search show it, or its absolute path (a message's file, or a .cold.json's folder plus the name)."),
 					"allow_over_budget": map[string]any{"type": "boolean", "description": "Only after the person agreed: bring the file back even though the hot tier goes over its budget."},
 				}, "path")}
 		},
@@ -68,22 +69,22 @@ func (b *App) registerVaultTools(r *mcp.Registry[mcpCaller]) {
 		Name: "vault_put", Available: available,
 		Describe: func(c mcpCaller) mcp.Tool {
 			return mcp.Tool{Description: "Store a file in the vault at a path of yours (such as " + b.vaultExample(c) + "/notes.md): give its text, or from, a file in your folder, your media inbox or your temp folder. It is kept on disk and, encrypted, in the cold tier.",
-				InputSchema: schema(map[string]any{
-					"path": strProp("Where in the vault, relative to it."),
-					"text": strProp("The file's content, as text."),
-					"from": strProp("A file to copy instead: an absolute path in your folder, your media inbox or your temp folder."),
+				InputSchema: tools.Schema(map[string]any{
+					"path": tools.Str("Where in the vault, relative to it."),
+					"text": tools.Str("The file's content, as text."),
+					"from": tools.Str("A file to copy instead: an absolute path in your folder, your media inbox or your temp folder."),
 				}, "path")}
 		},
 		// Writing, behind the policy: not in a lockdown, nor in a run whose
 		// budget is read (M5).
-		Call: b.guarded(skill.RiskWrite, b.callVaultPut),
+		Call: r.Guarded(skill.RiskWrite, b.callVaultPut),
 	})
 	r.Register(mcp.Entry[mcpCaller]{
 		Name: "vault_search", Available: available,
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{Description: "Find vault files whose path contains every word of the query (not their contents), most recently used first, hot and cold alike.",
-				InputSchema: schema(map[string]any{
-					"query": strProp("Words of the path."),
+				InputSchema: tools.Schema(map[string]any{
+					"query": tools.Str("Words of the path."),
 					"limit": map[string]any{"type": "integer", "minimum": 1, "maximum": 200, "description": "At most this many (default 50)."},
 				}, "query")}
 		},

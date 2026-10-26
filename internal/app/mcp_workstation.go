@@ -2,6 +2,7 @@ package app
 
 import (
 	"github.com/Icewater1337/fridolin/internal/mcp"
+	"github.com/Icewater1337/fridolin/internal/mcp/tools"
 	"github.com/Icewater1337/fridolin/internal/skill"
 )
 
@@ -14,11 +15,11 @@ import (
 // and stopping are not.
 
 func (b *App) agentTools(c mcpCaller) bool {
-	return c.core() && b.nodesEnabled && b.work.anyWorkNode("agent")
+	return c.Core() && b.nodesEnabled && b.work.anyWorkNode("agent")
 }
 
 func (b *App) terminalTools(c mcpCaller) bool {
-	return c.core() && b.nodesEnabled && b.work.anyWorkNode("terminal")
+	return c.Core() && b.nodesEnabled && b.work.anyWorkNode("terminal")
 }
 
 func sessionProp() map[string]any {
@@ -30,36 +31,36 @@ func termProp() map[string]any {
 }
 
 func nodeProp() map[string]any {
-	return strProp("The machine: a node's name, id or tag; leave it out when only one node offers this.")
+	return tools.Str("The machine: a node's name, id or tag; leave it out when only one node offers this.")
 }
 
 func folderProp() map[string]any {
-	return strProp("The folder on the node: an absolute path under a folder the node granted, or a path relative to its first granted folder; leave it out for that folder.")
+	return tools.Str("The folder on the node: an absolute path under a folder the node granted, or a path relative to its first granted folder; leave it out for that folder.")
 }
 
-func (b *App) registerWorkstationTools(r *mcp.Registry[mcpCaller]) {
+func (b *App) registerWorkstationTools(r *tools.Set[mcpCaller]) {
 	b.registerAgentTools(r)
 	b.registerTerminalTools(r)
 }
 
-func (b *App) registerAgentTools(r *mcp.Registry[mcpCaller]) {
+func (b *App) registerAgentTools(r *tools.Set[mcpCaller]) {
 	r.Register(mcp.Entry[mcpCaller]{
 		Name:      "node_agent_run",
 		Available: b.agentTools,
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
 				Description: "Start a Claude Code (or Codex) session in a folder on one of the owner's machines, to just do something there: look into a build, fix a small thing, tidy a folder. Use FrIDE (fride_task) instead for real coding work in a repository (a feature, a refactor, a branch to review). The session runs with the node's own login and permission rules; its questions, the steps it needs approved, and its end with what changed arrive in this chat as messages naming the session (Agent #2). Returns the session's number.",
-				InputSchema: schema(map[string]any{
-					"prompt":         strProp("What the session is to do, in full: it cannot see this chat."),
+				InputSchema: tools.Schema(map[string]any{
+					"prompt":         tools.Str("What the session is to do, in full: it cannot see this chat."),
 					"node":           nodeProp(),
 					"folder":         folderProp(),
 					"provider":       map[string]any{"type": "string", "enum": []string{"claude", "codex"}, "description": "claude or codex; leave it out for the node's first."},
-					"model":          strProp("The provider's model, only when the person named one."),
+					"model":          tools.Str("The provider's model, only when the person named one."),
 					"use_core_login": map[string]any{"type": "boolean", "description": "Lend the core's Claude login to this one session instead of the node's own. Only when the person explicitly asked for it for this session; default false."},
 				}, "prompt"),
 			}
 		},
-		Call: b.guarded(skill.RiskWrite, b.callAgentRun),
+		Call: r.Guarded(skill.RiskWrite, b.callAgentRun),
 	})
 	r.Register(mcp.Entry[mcpCaller]{
 		Name:      "node_agent_status",
@@ -67,7 +68,7 @@ func (b *App) registerAgentTools(r *mcp.Registry[mcpCaller]) {
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
 				Description: "What an agent session is doing: its state, what it asks, its recent events, and once done its summary and the files it changed. Without a session, lists the sessions.",
-				InputSchema: schema(map[string]any{"session": sessionProp()}),
+				InputSchema: tools.Schema(map[string]any{"session": sessionProp()}),
 			}
 		},
 		Call: b.callAgentStatus,
@@ -78,10 +79,10 @@ func (b *App) registerAgentTools(r *mcp.Registry[mcpCaller]) {
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
 				Description: "Pass the person's answer to an agent session's question, or more instructions once it is done. Steps that need approval are answered by the person's vote on the approval poll, never here.",
-				InputSchema: schema(map[string]any{"session": sessionProp(), "text": strProp("The answer or instruction, in the person's words.")}, "session", "text"),
+				InputSchema: tools.Schema(map[string]any{"session": sessionProp(), "text": tools.Str("The answer or instruction, in the person's words.")}, "session", "text"),
 			}
 		},
-		Call: b.guarded(skill.RiskWrite, b.callAgentReply),
+		Call: r.Guarded(skill.RiskWrite, b.callAgentReply),
 	})
 	r.Register(mcp.Entry[mcpCaller]{
 		Name:      "node_agent_stop",
@@ -89,24 +90,24 @@ func (b *App) registerAgentTools(r *mcp.Registry[mcpCaller]) {
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
 				Description: "Stop an agent session; returns what it changed so far.",
-				InputSchema: schema(map[string]any{"session": sessionProp()}, "session"),
+				InputSchema: tools.Schema(map[string]any{"session": sessionProp()}, "session"),
 			}
 		},
 		Call: b.callAgentStop,
 	})
 }
 
-func (b *App) registerTerminalTools(r *mcp.Registry[mcpCaller]) {
+func (b *App) registerTerminalTools(r *tools.Set[mcpCaller]) {
 	r.Register(mcp.Entry[mcpCaller]{
 		Name:      "node_terminal_open",
 		Available: b.terminalTools,
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
 				Description: "Open a shell in a folder on one of the owner's machines, for commands a node's exec allowlist does not cover. Every command line typed is in the audit log. Returns the terminal's number; close it when done.",
-				InputSchema: schema(map[string]any{"node": nodeProp(), "folder": folderProp()}),
+				InputSchema: tools.Schema(map[string]any{"node": nodeProp(), "folder": folderProp()}),
 			}
 		},
-		Call: b.guarded(skill.RiskWrite, b.callTerminalOpen),
+		Call: r.Guarded(skill.RiskWrite, b.callTerminalOpen),
 	})
 	r.Register(mcp.Entry[mcpCaller]{
 		Name:      "node_terminal_send",
@@ -114,14 +115,14 @@ func (b *App) registerTerminalTools(r *mcp.Registry[mcpCaller]) {
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
 				Description: "Type into a terminal. A command needs its Enter: end it with a newline (the default adds one). Then read its output with node_terminal_read.",
-				InputSchema: schema(map[string]any{
+				InputSchema: tools.Schema(map[string]any{
 					"terminal": termProp(),
-					"text":     strProp("What to type."),
+					"text":     tools.Str("What to type."),
 					"enter":    map[string]any{"type": "boolean", "description": "Press Enter after text (default true)."},
 				}, "terminal", "text"),
 			}
 		},
-		Call: b.guarded(skill.RiskWrite, b.callTerminalSend),
+		Call: r.Guarded(skill.RiskWrite, b.callTerminalSend),
 	})
 	r.Register(mcp.Entry[mcpCaller]{
 		Name:      "node_terminal_read",
@@ -129,7 +130,7 @@ func (b *App) registerTerminalTools(r *mcp.Registry[mcpCaller]) {
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
 				Description: "Read what a terminal printed since the last read, waiting up to wait_seconds for output when there is none yet.",
-				InputSchema: schema(map[string]any{
+				InputSchema: tools.Schema(map[string]any{
 					"terminal":     termProp(),
 					"wait_seconds": map[string]any{"type": "integer", "minimum": 0, "maximum": 20, "description": "How long to wait for output (default 2)."},
 				}, "terminal"),
@@ -143,7 +144,7 @@ func (b *App) registerTerminalTools(r *mcp.Registry[mcpCaller]) {
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
 				Description: "Close a terminal: its shell and what it started end.",
-				InputSchema: schema(map[string]any{"terminal": termProp()}, "terminal"),
+				InputSchema: tools.Schema(map[string]any{"terminal": termProp()}, "terminal"),
 			}
 		},
 		Call: b.callTerminalClose,
