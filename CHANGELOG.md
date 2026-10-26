@@ -1178,6 +1178,14 @@ for compatibility.
 
 ### Fixed
 
+- **Pairing FrIDE again works at once.** After `fridolin node fride
+  pair` on a node whose agent runs, FrIDE takes only the new token,
+  while the agent kept the old one until its next check, up to half a
+  minute later. Until then the core's FrIDE work failed with "FrIDE
+  refused the node's token: pair again", right after the pairing, and
+  the node refused FrIDE's news, which FrIDE does not send again. The
+  agent now reads the token again when FrIDE refuses it or news is
+  signed with another, and goes on with the new one.
 - **A node hears an approval that came while it connected** (#324).
   An approval (`!approve`, the Nodes page, `fridolin nodes approve`)
   or a backup folder approved just as a node connected could reach no
