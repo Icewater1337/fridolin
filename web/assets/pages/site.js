@@ -1,25 +1,27 @@
 // Site: your own website (docs/SITE.md). Link a domain through a Cloudflare
 // tunnel, choose which brains each role sees on the built-in Files and Wiki,
 // manage who may sign in, and, optionally, link the repository that holds
-// more modules and approve what goes live. Everything here stays on this
-// machine; the site itself only reads the result.
+// more modules, approve what goes live and see what the live modules spend
+// through Fridolin's connections (OpenAI, ElevenLabs). Everything here
+// stays on this machine; the site itself only reads the result.
 
 import { post, put, del } from '../app/api.js';
 import { resource } from '../app/resources.js';
 import { store } from '../app/store.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { brainLabel } from '../lib/brain.js';
+import { budgetState, spendText } from '../lib/connections.js';
 import { icon } from '../components/icons.js';
 import { toast, toastError } from '../components/toast.js';
 import { btn, copyButton } from '../components/buttons.js';
 import { confirmDialog, openDialog } from '../components/dialog.js';
 import { field, toggle, select, textInput } from '../components/fields.js';
-import { pill, callout, mono, pageHeader, loading, timeAgo, kv } from '../components/common.js';
+import { pill, badge, callout, mono, pageHeader, loading, timeAgo, kv } from '../components/common.js';
 import { liveForm } from '../components/live-form.js';
 
 /** @import { PageModule } from '../app/page.js' */
 /** @import { Child } from '../lib/dom.js' */
-/** @import { BrainRuntime, ModuleChange, ProposalSnapshot, SiteDeploy, SiteDeploySnapshot, SiteModuleSecrets, SiteProcStatus, SiteStatus, SiteUser } from '../../types/api.js' */
+/** @import { BrainRuntime, Connections, ModuleChange, ProposalSnapshot, SiteDeploy, SiteDeploySnapshot, SiteModuleSecrets, SiteProcStatus, SiteStatus, SiteUser } from '../../types/api.js' */
 
 /**
  * What Check for changes finds: POST /api/site/fetch (site.SiteUpdates).
@@ -28,6 +30,11 @@ import { liveForm } from '../components/live-form.js';
  * @property {string} approved
  * @property {{commit: string, subject: string, author: string, at: string}[]} commits
  * @property {ModuleChange[]} changes
+ */
+
+/**
+ * A live module's spend through one connection this month.
+ * @typedef {{module: string, title: string, usd: number, limit: number}} ModuleSpend
  */
 
 /**
@@ -92,6 +99,7 @@ export default /** @satisfies {PageModule} */ ({
     const proposals = resource('/api/site/proposals');
     const secrets = resource('/api/site/secrets');
     const users = resource('/api/site/users');
+    const connections = resource('/api/connections');
     /** @type {SiteStatus | null} */
     let st = null; // the newest GET /api/site
     /** @type {SiteUpdates | null} */
@@ -128,6 +136,7 @@ export default /** @satisfies {PageModule} */ ({
     const proposalsBox = region();
     const buildersBox = region();
     const secretsBox = region(loading('Loading the secrets…'));
+    const spendBox = region();
 
     const googleBox = region();
     const tunnelGuide = region();
@@ -191,7 +200,7 @@ export default /** @satisfies {PageModule} */ ({
         h('section.card', head('brain', 'Builders'), buildersBox),
         h('section.card', head('key', 'Secrets'),
           h('p.small', 'API keys and passwords a module needs, by the names its ', mono('module.json'), ' lists in ', mono('capabilities.secrets'), '. A value is never shown again. Only the module that declares a secret gets it, through ', mono('ctx.secret(name)'), ', when the site starts; saving one restarts the site.'),
-          secretsBox));
+          secretsBox, spendBox));
     }
 
     /** @param {SiteStatus} st the newest GET /api/site */
@@ -218,7 +227,8 @@ export default /** @satisfies {PageModule} */ ({
       if (seenDeps) {
         if (deps.builders !== seenDeps.builders) builders.refresh();
         if (deps.proposals !== seenDeps.proposals) proposals.refresh();
-        if (deps.secrets !== seenDeps.secrets) secrets.refresh();
+        // The live commit's modules declare secrets and connections.
+        if (deps.secrets !== seenDeps.secrets) { secrets.refresh(); connections.refresh(); }
         if (deps.users !== seenDeps.users) users.refresh();
       }
       seenDeps = deps;
@@ -633,6 +643,30 @@ export default /** @satisfies {PageModule} */ ({
         h('ul.site-secrets', [...new Set([...m.declared, ...m.set])].map((name) => row(m, name)))));
     }
 
+    // ── what the live modules spend through Fridolin's connections ─────
+    /** @param {Connections} c */
+    function paintSpend(c) {
+      const titles = new Map(((c && c.connections) || []).map((x) => [x.id, x.title]));
+      const usage = (c && c.usage) || [];
+      paint(spendBox, ((c && c.modules) || []).map((m) => {
+        const u = usage.find((x) => x.connection === m.connection && x.caller === `module:${m.module}`);
+        return { module: m.module, title: titles.get(m.connection) || m.connection, usd: u ? u.usd : 0, limit: m.monthly_usd || 0 };
+      }), renderSpend);
+    }
+
+    /** @param {ModuleSpend[]} rows */
+    function renderSpend(rows) {
+      if (!rows.length) return null;
+      return h('div.site-block',
+        h('h3', 'Connections'),
+        h('p.small', 'These modules use a connection of Fridolin, whose key is set under ', h('a', { href: '#/integrations' }, 'Integrations'), ': they need no secret of their own for it. What they spent this month, as Fridolin estimates it:'),
+        h('ul.site-secrets', rows.map((r) => {
+          const state = budgetState(r.usd, r.limit);
+          return h('li', mono(r.module), ` ${r.title}: ${spendText(r.usd, r.limit)}${r.limit ? '' : ', no monthly limit'}`,
+            state === 'over' ? badge('over its limit', 'bad') : state === 'near' ? badge('near its limit', 'warn') : null);
+        })));
+    }
+
     // ── domain and sign-in ─────────────────────────────────────────────
     /** @param {SiteStatus} st the newest GET /api/site */
     function paintDomain(st) {
@@ -912,6 +946,7 @@ export default /** @satisfies {PageModule} */ ({
     ctx.follow(builders, () => { if (st) paintBuilders(st); }, SLOW_MS);
     ctx.follow(proposals, () => { if (st) paintProposals(st); }, SLOW_MS);
     ctx.follow(secrets, paintSecrets, SLOW_MS);
+    ctx.follow(connections, paintSpend, SLOW_MS);
     ctx.follow(users, paintPeople, SLOW_MS);
   },
 });

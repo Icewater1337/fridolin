@@ -39,7 +39,7 @@ function siteStatus() {
 
 const proposal = { proposal: { brain: 'web', title: 'Events page', summary: 'A page with this month’s events.', commit: commit('c'), at: '2026-10-18T10:00:00Z' }, changes: [], preview: null };
 
-async function openPage(t, first = siteStatus(), { proposals = [], brains = [{ id: 'web', name: 'Web' }], secrets = [] } = {}) {
+async function openPage(t, first = siteStatus(), { proposals = [], brains = [{ id: 'web', name: 'Web' }], secrets = [], connections = {} } = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
@@ -95,6 +95,7 @@ async function openPage(t, first = siteStatus(), { proposals = [], brains = [{ i
     }
     if (path === '/api/site/proposals') return { proposals: bridge.proposals };
     if (path === '/api/site/secrets') return { modules: secrets };
+    if (path === '/api/connections') return connections;
     if (path === '/api/site/github-repo' && method === 'POST') return { url: `git@github.com:you/${body.name}.git` };
     if (path === '/api/site/deploy-key/github' && method === 'POST') return bridge.github;
     return { ok: true };
@@ -555,4 +556,42 @@ test('each role is given the brains it sees on Files and Wiki', async (t) => {
   up.dispatchEvent(new Event('change', { bubbles: true }));
   await settle();
   assert.deepEqual(calls.filter((c) => c.path === '/api/site/roles' && c.method === 'PUT').pop().body, { uploads: { member: ['work'] } });
+});
+
+test('a module that asks for a connection shows it in the review', async (t) => {
+  const first = siteStatus();
+  first.settings.builders = ['web'];
+  first.settings.proposals = [proposal.proposal];
+  const review = [{ field: 'capabilities.openai', note: 'what the bridge calls OpenAI with Fridolin’s key for', old: null, new: { use: ['transcribe'], monthly_usd: 20 } }];
+  const { root } = await openPage(t, first, { proposals: [{ ...proposal, changes: [{ id: 'dictation', status: 'added', review }] }] });
+  const rows = root.querySelectorAll('.site-review li').map((li) => li.textContent);
+  assert.deepEqual(rows, ['capabilities.openai — what the bridge calls OpenAI with Fridolin’s key for: none → {"use":["transcribe"],"monthly_usd":20}']);
+});
+
+test('the live modules’ spend through Fridolin’s connections', async (t) => {
+  const connections = {
+    month: '2026-10',
+    connections: [{ id: 'openai', title: 'OpenAI' }, { id: 'elevenlabs', title: 'ElevenLabs' }],
+    modules: [
+      { module: 'hands-study', connection: 'openai', use: ['transcribe'], models: [], monthly_usd: 20 },
+      { module: 'reader', connection: 'elevenlabs', use: ['tts'], models: [], monthly_usd: 0 },
+      { module: 'busy', connection: 'openai', use: ['responses'], models: [], monthly_usd: 1 },
+    ],
+    usage: [
+      { connection: 'openai', caller: 'module:hands-study', requests: 3, errors: 0, audio_seconds: 60, input_tokens: 0, output_tokens: 0, characters: 0, usd: 0.05, limit_usd: 20 },
+      { connection: 'openai', caller: 'module:busy', requests: 90, errors: 0, audio_seconds: 0, input_tokens: 9e5, output_tokens: 1e5, characters: 0, usd: 1.2, limit_usd: 1 },
+    ],
+  };
+  const { root, calls, poll } = await openPage(t, siteStatus(), { connections });
+  const lines = root.querySelectorAll('.site-secrets li').map((li) => li.textContent);
+  assert.deepEqual(lines, ['hands-study OpenAI: $0.05 of $20', 'reader ElevenLabs: $0, no monthly limit', 'busy OpenAI: $1.20 of $1over its limit']);
+  assert.ok(root.querySelectorAll('a').some((a) => a.getAttribute('href') === '#/integrations'));
+
+  // A deploy changes the live modules, so what they declare is asked again.
+  const asked = () => calls.filter((c) => c.path === '/api/connections').length;
+  const before = asked();
+  const deployed = siteStatus();
+  deployed.settings.approved = commit('b');
+  await poll(deployed);
+  assert.equal(asked(), before + 1);
 });

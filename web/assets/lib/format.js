@@ -97,6 +97,17 @@ export function fmtBytes(n) {
 }
 
 /**
+ * An amount in US dollars: "$20", "$0.05", "under $0.01"; whole dollars
+ * without cents, everything else to the cent.
+ * @param {number | null | undefined} n
+ */
+export function fmtUSD(n) {
+  const v = n || 0;
+  if (v > 0 && v < 0.005) return 'under $0.01';
+  return Number.isInteger(v) ? `$${v}` : `$${v.toFixed(2)}`;
+}
+
+/**
  * "1 brain", "3 brains"; many for an irregular plural.
  * @param {number} n
  * @param {string} one
