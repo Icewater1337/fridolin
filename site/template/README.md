@@ -13,6 +13,9 @@ parts of the site, one folder per module in `modules/`.
 
 Never commit secrets: modules declare the secrets they need by name in
 `capabilities.secrets`, the values are set in Fridolin's dashboard (Site →
-Secrets), and server code reads them with `ctx.secret(name)`. On macOS the
+Secrets), and server code reads them with `ctx.secret(name)`. OpenAI and
+ElevenLabs need no secret: declare `capabilities.openai` or
+`capabilities.elevenlabs` and call `ctx.openai` or `ctx.elevenlabs`, which
+use Fridolin's keys. On macOS the
 live site runs in a sandbox that holds module code to what `capabilities`
 declares.

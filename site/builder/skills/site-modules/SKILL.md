@@ -57,9 +57,11 @@ description: The module format of a Fridolin site — module.json fields, apps (
 | `server.access` | default: `access` |
 | `server.public` | paths under the mount that answer without sign-in (`["/intake"]`: that path and below); the router checks a token or signature itself, `req.user` is not set; 120 requests/min per client |
 | `capabilities.files` | every path the server code uses, named, with `read` or `write`; a path ending in `/` is a folder and everything in it |
-| `capabilities.commands`, `.secrets` | programs it runs (a name on PATH or a path); secrets it needs, by name (`OPENAI_API_KEY`) |
+| `capabilities.commands`, `.secrets` | programs it runs (a name on PATH or a path); secrets it needs, by name (`STRIPE_API_KEY`), never for OpenAI or ElevenLabs |
 | `capabilities.ingest` | brains it may hand files to with `ctx.ingest` (their ids) |
 | `capabilities.search` | brains whose folder it may search with `ctx.search` (their ids) |
+| `capabilities.openai` | `{ "use": [...], "models"?: [...], "monthly_usd"?: N }` for `ctx.openai`; `use` from `transcribe`, `responses` |
+| `capabilities.elevenlabs` | the same for `ctx.elevenlabs`; `use` from `tts`, `transcribe`, `voices` |
 
 Everything is behind sign-in and `access`, except `app.public` files and `server.public` paths. Use those only when the person asks for something people without an account must reach (a form opened from an email link, a webhook), and say so in the proposal.
 
@@ -127,6 +129,26 @@ export default function expenses(ctx: ModuleContext): express.Router {
   folder of a brain listed in `capabilities.search`, under that brain's
   sandbox, and yields its stream-json events. Modules cannot start Claude
   themselves. It throws in previews.
+- OpenAI and ElevenLabs go through Fridolin, which holds the keys: never
+  declare an `OPENAI_API_KEY` or ElevenLabs secret, and never call their APIs
+  with `fetch`. Declare the calls in `capabilities.openai` /
+  `.elevenlabs` (`use`; `models` to pin the models; `monthly_usd` as the
+  module's monthly limit, an estimate) and call:
+  ```ts
+  const { text } = await ctx.openai.transcribe({ audio: buf, contentType: 'audio/webm', language: 'de', prompt })
+  const out = await ctx.openai.responses({ model: 'gpt-5-mini', input })   // OpenAI's JSON; no stream or background
+  const { audio, contentType } = await ctx.elevenlabs.tts({ text, voice })  // a Buffer, e.g. audio/mpeg
+  const { text: said, language } = await ctx.elevenlabs.transcribe({ audio: buf, contentType: 'audio/wav' })
+  const voices = await ctx.elevenlabs.voices()                              // [{ id, name }]
+  ```
+  `audio` is a Buffer, Uint8Array, ArrayBuffer or Blob, up to 25 MiB; give
+  `contentType` or `filename` so the provider knows the format. A call
+  throws a `ConnectionError` (`err.name`) with `status`: 403 not declared,
+  429 over the monthly limit, 502 the provider said no (`upstreamStatus`,
+  `code`), 503 no key set, and always in previews and `site_check`. Call it
+  in a request handler and answer with an error when it throws, so the
+  module still loads. In the proposal, say what the module calls and why
+  its `monthly_usd` is what it is.
 - On the live site (macOS) the code runs in a sandbox built from
   `capabilities`: it reads and writes only the declared paths (a file declared
   `write` includes SQLite's `-journal`/`-wal`/`-shm`; declare the folder to

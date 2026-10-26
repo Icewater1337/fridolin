@@ -30,7 +30,7 @@ export type SiteOptions = {
   googleFetch?: typeof fetch
   /** For tests: the modules' secrets, instead of reading rt.secrets_fd. */
   secrets?: ModuleSecrets
-  /** For tests: how the built-in pages reach the bridge. */
+  /** For tests: how the built-in pages and ctx.openai and ctx.elevenlabs reach the bridge. */
   bridgeFetch?: typeof fetch
 }
 
@@ -115,7 +115,11 @@ export async function createSite(rt: Runtime, opts: SiteOptions = {}): Promise<e
     fetch: opts.bridgeFetch,
     page: (res) => res.sendFile('builtin.html', { root: WEB_DIR }),
   }))
-  await mountModules(app, loadModules(rt.modules_dir), auth.requireAuth, secrets, { dataDir: rt.data_dir, spoolDir: rt.spool_dir })
+  // Modules reach OpenAI and ElevenLabs through the same listener
+  // (connections.ts), naming themselves; the bridge holds the keys.
+  await mountModules(app, loadModules(rt.modules_dir), auth.requireAuth, secrets, {
+    dataDir: rt.data_dir, spoolDir: rt.spool_dir, bridge, fetch: opts.bridgeFetch,
+  })
   // Old addresses, after the modules: a module's own route comes first.
   try {
     app.use(redirectRoutes(loadRedirects(rt.modules_dir)))

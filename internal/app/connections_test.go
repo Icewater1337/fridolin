@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -363,6 +364,106 @@ func TestConnectionsFromSiteModules(t *testing.T) {
 	if !strings.Contains(strings.Join(calls2, "|"), "module:plain openai transcribe module plain does not declare transcribe in capabilities.openai.use") {
 		t.Errorf("the refusal is not audited: %v", calls2)
 	}
+}
+
+// siteConnectionsScript calls every ctx.openai and ctx.elevenlabs call of
+// site/server/connections.ts against the bridge in BRIDGE_URL, as module
+// talker, and as quiet and ghost, which claim what their live manifest
+// does not declare, and prints each answer, or its error, as JSON.
+const siteConnectionsScript = `import { pathToFileURL } from 'node:url'
+const { makeConnections, ConnectionError } = await import(pathToFileURL(process.env.CONNECTIONS_TS).href)
+const bridge = { url: process.env.BRIDGE_URL, token: process.env.BRIDGE_TOKEN }
+const all = { openai: { use: ['transcribe', 'responses'] }, elevenlabs: { use: ['tts', 'transcribe', 'voices'] } }
+const [talker, quiet, ghost] = ['talker', 'quiet', 'ghost'].map(id => makeConnections(id, all, bridge))
+const out = {}
+const run = async (name, call) => {
+  try { out[name] = await call() } catch (e) { out[name] = e instanceof ConnectionError ? { status: e.status, error: e.message } : { thrown: String(e) } }
+}
+await run('transcribe', () => talker.openai.transcribe({ audio: Buffer.from('webm-audio'), contentType: 'audio/webm', language: 'de' }))
+await run('responses', () => talker.openai.responses({ model: 'gpt-4o-mini', input: 'hi' }))
+await run('tts', async () => { const r = await talker.elevenlabs.tts({ text: 'Hallo', voice: 'v1' }); return { audio: r.audio.toString(), contentType: r.contentType } })
+await run('elevenlabs_transcribe', () => talker.elevenlabs.transcribe({ audio: Buffer.from('ogg-audio'), contentType: 'audio/ogg' }))
+await run('voices', () => talker.elevenlabs.voices())
+await run('stream', () => talker.openai.responses({ model: 'gpt-4o-mini', input: 'hi', stream: true }))
+await run('background', () => talker.openai.responses({ model: 'gpt-4o-mini', input: 'hi', background: true }))
+await run('undeclared', () => quiet.openai.responses({ model: 'gpt-4o-mini', input: 'hi' }))
+await run('ghost', () => ghost.elevenlabs.voices())
+console.log(JSON.stringify(out))
+`
+
+// TestSiteModuleCallsConnections: the site's own client of the
+// connections (site/server/connections.ts, what ctx.openai and
+// ctx.elevenlabs are) against the real site bridge, with the providers
+// faked: what it sends is what the bridge reads, and the bridge's answers
+// and errors come back as module code sees them.
+func TestSiteModuleCallsConnections(t *testing.T) {
+	t.Parallel()
+	node, err := findNode()
+	if err != nil {
+		t.Skip("node not installed")
+	}
+	siteDir := filepath.Join(repoDir, "site")
+	if _, err := os.Stat(filepath.Join(siteDir, "node_modules", "tsx")); err != nil {
+		t.Skip("run npm install in site/ first")
+	}
+	fake := useFakeAI(t)
+	h := newHarness(t, "")
+	h.setConnectionKeys()
+	h.liveSite(map[string]string{
+		"talker": `{"openai": {"use": ["transcribe", "responses"]}, "elevenlabs": {"use": ["tts", "transcribe", "voices"]}}`,
+		"quiet":  `{}`,
+	})
+	url, token, err := h.b.filesBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := t.TempDir()
+	script := filepath.Join(tmp, "calls.mts")
+	if err := os.WriteFile(script, []byte(siteConnectionsScript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(node, "--import", "tsx/esm", script)
+	cmd.Dir = siteDir
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"), "HOME=" + tmp, "TMPDIR=" + tmp,
+		"CONNECTIONS_TS=" + filepath.Join(siteDir, "server", "connections.ts"),
+		"BRIDGE_URL=" + url, "BRIDGE_TOKEN=" + token,
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &got); err != nil {
+		t.Fatalf("the script printed %s", out)
+	}
+	for name, want := range map[string]string{
+		"transcribe":            `{"text":"transcribed by openai"}`,
+		"tts":                   `{"audio":"ID3fake","contentType":"audio/mpeg"}`,
+		"elevenlabs_transcribe": `{"text":"transcribed by elevenlabs","language":"deu"}`,
+		"voices":                `[{"id":"v1","name":"Rachel"}]`,
+		"stream":                `{"status":400,"error":"stream: true is not supported: the bridge answers with the whole response"}`,
+		"background":            `{"status":400,"error":"background: true is not supported: the bridge answers with the whole response"}`,
+		"undeclared":            `{"status":403,"error":"module quiet does not declare responses in capabilities.openai.use"}`,
+	} {
+		if string(got[name]) != want {
+			t.Errorf("%s: %s, want %s", name, got[name], want)
+		}
+	}
+	if !strings.Contains(string(got["responses"]), `"output_text":"hi"`) {
+		t.Errorf("responses: %s", got["responses"])
+	}
+	var ghost struct{ Status int }
+	if json.Unmarshal(got["ghost"], &ghost) != nil || ghost.Status != http.StatusNotFound {
+		t.Errorf("ghost: %s", got["ghost"])
+	}
+	calls, _, files := fake.seen()
+	if strings.Join(calls, ",") != "POST /v1/audio/transcriptions,POST /v1/responses,POST /v1/text-to-speech/v1,POST /v1/speech-to-text,GET /v1/voices" ||
+		len(files) != 2 || string(files[0]) != "webm-audio" || string(files[1]) != "ogg-audio" {
+		t.Errorf("the providers got %v %q", calls, files)
+	}
+	noKeys(t, "the script's output", out)
 }
 
 // TestConnectionsBrainTools: a brain's runs have the connections' tools
