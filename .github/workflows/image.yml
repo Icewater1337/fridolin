@@ -103,6 +103,8 @@ jobs:
           docker run --rm --entrypoint sh fridolin-core:ci -c 'grep -q "\"version\": \"'"$VERSION"'\"" /opt/fridolin/node-binaries/manifest.json && ls -l /opt/fridolin/node-binaries'
       - name: FrIDE and its tools answer
         if: matrix.image == 'fridolin-fride'
+        env:
+          PRIVATE_REPO: ${{ github.event.repository.private }}
         run: |
           docker run --rm --entrypoint sh fridolin-fride:ci -c 'test -x /opt/fride/bin/fride && claude --version && gh --version | head -1 && go version && node --version && git --version && socat -V | head -1 && test -f /opt/fride/plugins/ponytail/README.md'
           # FrIDE starts with the box's config, its config check passes,
@@ -112,7 +114,10 @@ jobs:
             docker exec fride-ci curl -fsS -o /dev/null http://127.0.0.1:17840/ && break
             sleep 2
           done
-          docker exec fride-ci fride config check
+          # The starter repositories are cloned without credentials, which
+          # a private repository refuses; its config then names a repository
+          # the box does not have, so only a public one checks the config.
+          if [ "$PRIVATE_REPO" != true ]; then docker exec fride-ci fride config check; fi
           docker exec fride-ci curl -fsS -o /dev/null http://127.0.0.1:17840/
           docker exec fride-ci sh -c 'curl -fsS -o /dev/null "http://$(hostname -i | cut -d" " -f1):17840/" -H "Host: 127.0.0.1:17840"'
           docker rm -f fride-ci
