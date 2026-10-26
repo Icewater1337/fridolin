@@ -44,6 +44,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 # ── GitHub's CLI, from its release ────────────────────────────────────────
 FROM ${GO_IMAGE} AS tools
 ARG TARGETARCH
+# renovate: datasource=github-releases depName=cli/cli
 ARG GH_VERSION=2.102.0
 WORKDIR /dl
 RUN set -eu; \
@@ -60,6 +61,7 @@ RUN set -eu; \
 # ── Node and Claude Code ──────────────────────────────────────────────────
 FROM ${NODE_IMAGE} AS node
 # The version the core's image has (container/Dockerfile).
+# renovate: datasource=npm depName=@anthropic-ai/claude-code
 ARG CLAUDE_CODE_VERSION=2.1.303
 RUN npm install -g --no-fund --no-audit "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
  && npm cache clean --force

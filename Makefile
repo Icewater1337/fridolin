@@ -38,14 +38,16 @@ NODE   ?= node
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 
-# Go linters are pinned: staticcheck and exhaustive are go.mod tools so
-# Dependabot sees them; actionlint remains an explicit version here. ruff
+# Go linters are pinned: staticcheck and exhaustive are go.mod tools;
+# actionlint is an explicit version here, which Renovate moves through
+# the "renovate:" comment above it (.github/renovate.json5). ruff
 # comes from tools/requirements-dev.txt and shellcheck from your package
 # manager.
-ACTIONLINT_VERSION  := v1.7.12
+# renovate: datasource=github-releases depName=rhysd/actionlint
+ACTIONLINT_VERSION  := 1.7.12
 STATICCHECK ?= $(GO) tool staticcheck
 EXHAUSTIVE  ?= $(GO) tool exhaustive
-ACTIONLINT  ?= $(GO) run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
+ACTIONLINT  ?= $(GO) run github.com/rhysd/actionlint/cmd/actionlint@v$(ACTIONLINT_VERSION)
 RUFF        ?= ruff
 SHELLCHECK  ?= shellcheck
 
@@ -180,9 +182,9 @@ test-web: ## syntax-check the dashboard JS and run its unit tests
 # network), so nothing is installed into the checkout and a local run and
 # CI run the same ESLint. Only ESLint itself is pinned: npm resolves
 # its dependencies afresh for each new cache, within the ranges ESLint
-# allows, and runs none of their install scripts. Dependabot does not see
-# this pin either, so move it by hand; 10.12.0 was two weeks old when it
-# was pinned. It needs Node 20.19+, 22.13+ or 24+.
+# allows, and runs none of their install scripts. Renovate moves the pin
+# through the comment above it. It needs Node 20.19+, 22.13+ or 24+.
+# renovate: datasource=npm depName=eslint
 ESLINT_VERSION := 10.12.0
 NPX    ?= npx
 ESLINT ?= $(NPX) --yes eslint@$(ESLINT_VERSION)
@@ -196,10 +198,11 @@ lint-web: ## ESLint on the dashboard's JS (npx fetches it)
 # does ESLint, so nothing is installed into the checkout. TypeScript 7 is
 # the native compiler, whose only dependencies are its binaries, one per
 # platform, at the same version. With no node_modules in web/, tsc finds
-# @types/node in npx's cache through --typeRoots. Dependabot does not see
-# these pins either, so move them by hand; both were over two weeks old
-# when pinned.
+# @types/node in npx's cache through --typeRoots. Renovate moves the pins
+# through the comments above them.
+# renovate: datasource=npm depName=typescript
 TYPESCRIPT_VERSION := 7.0.2
+# renovate: datasource=npm depName=@types/node
 TYPES_NODE_VERSION := 24.19.1
 TSC_NPX ?= $(NPX) --yes -p typescript@$(TYPESCRIPT_VERSION) -p @types/node@$(TYPES_NODE_VERSION)
 typecheck-web: ## tsc --noEmit on the dashboard's JS and tests (npx fetches it)
