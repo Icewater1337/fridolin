@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/doctor"
 )
 
 func TestDoctorHousekeeping(t *testing.T) {
@@ -15,7 +16,7 @@ func TestDoctorHousekeeping(t *testing.T) {
 	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
 	cfg := &config.Settings{Boot: config.Boot{DataDir: "/data"}}
 	cfg.Housekeeping = config.HousekeepingSettings{Enabled: true, DryRun: true, Every: 48 * time.Hour}
-	run := func(file string) DoctorResult {
+	run := func(file string) doctor.Result {
 		contents := map[string]string{}
 		if file != "" {
 			contents["/data/core/housekeeping.json"] = file
@@ -31,11 +32,11 @@ func TestDoctorHousekeeping(t *testing.T) {
 	for _, tc := range []struct {
 		name, file, status, want string
 	}{
-		{"no run yet", "", DoctorOK, "no run yet"},
-		{"fresh and clean", report("2026-10-20T12:00:00Z", ""), DoctorOK, "last run 24h0m0s ago"},
-		{"would stop", report("2026-10-20T12:00:00Z", `{"kind":"run-orphan","action":"stop","pid":7,"reason":"r","outcome":"would stop"}`), DoctorOK, "dry_run to false"},
-		{"overdue", report("2026-10-15T12:00:00Z", ""), DoctorWarn, "due every 48h0m0s"},
-		{"a problem", report("2026-10-21T11:00:00Z", `{"kind":"zombie","action":"report","pid":9,"name":"sh","reason":"not collected","problem":true,"outcome":"reported"}`), DoctorWarn, "zombie PID 9"},
+		{"no run yet", "", doctor.OK, "no run yet"},
+		{"fresh and clean", report("2026-10-20T12:00:00Z", ""), doctor.OK, "last run 24h0m0s ago"},
+		{"would stop", report("2026-10-20T12:00:00Z", `{"kind":"run-orphan","action":"stop","pid":7,"reason":"r","outcome":"would stop"}`), doctor.OK, "dry_run to false"},
+		{"overdue", report("2026-10-15T12:00:00Z", ""), doctor.Warn, "due every 48h0m0s"},
+		{"a problem", report("2026-10-21T11:00:00Z", `{"kind":"zombie","action":"report","pid":9,"name":"sh","reason":"not collected","problem":true,"outcome":"reported"}`), doctor.Warn, "zombie PID 9"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := run(tc.file)

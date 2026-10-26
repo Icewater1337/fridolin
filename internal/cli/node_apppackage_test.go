@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Icewater1337/fridolin/internal/app"
+	"github.com/Icewater1337/fridolin/internal/doctor"
 	"github.com/Icewater1337/fridolin/internal/nodeagent"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/platform"
@@ -135,7 +135,7 @@ func TestNodeChecksSeeTheServiceStateDir(t *testing.T) {
 	running := func() (string, error) { return "running", nil }
 	registered := func() (string, error) { return dir, nil }
 	env := doctorEnvFor("fridolin-core.example.ts.net:8766", nil)
-	check := func(rep app.DoctorReport, id string) app.DoctorCheckReport {
+	check := func(rep doctor.Report, id string) doctor.CheckReport {
 		t.Helper()
 		for _, c := range rep.Checks {
 			if c.ID == id {
@@ -143,23 +143,23 @@ func TestNodeChecksSeeTheServiceStateDir(t *testing.T) {
 			}
 		}
 		t.Fatalf("no %s check: %+v", id, rep)
-		return app.DoctorCheckReport{}
+		return doctor.CheckReport{}
 	}
 	// From a normal PowerShell: not joined here, but the node's files are in
 	// the package's copy.
-	rep := app.RunDoctor(context.Background(), env, nodeChecks(dir, nodeService{status: stopped, stateDir: registered, pkg: outside}))
-	if c := check(rep, "node-joined"); c.Status != app.DoctorFail || !strings.Contains(c.Detail, copyDir) || !strings.Contains(c.Fix, packageDoc) {
+	rep := doctor.Run(context.Background(), env, nodeChecks(dir, nodeService{status: stopped, stateDir: registered, pkg: outside}))
+	if c := check(rep, "node-joined"); c.Status != doctor.Fail || !strings.Contains(c.Detail, copyDir) || !strings.Contains(c.Fix, packageDoc) {
 		t.Errorf("node-joined: %+v", c)
 	}
 	// From inside the app, which sees its copy in dir (here, a second copy
 	// stands in for that view): joined, and the service stopped because it
 	// does not see it.
 	joinedIn(t, dir)
-	rep = app.RunDoctor(context.Background(), env, nodeChecks(dir, nodeService{status: stopped, stateDir: registered, pkg: inside}))
-	if c := check(rep, "node-joined"); c.Status != app.DoctorOK {
+	rep = doctor.Run(context.Background(), env, nodeChecks(dir, nodeService{status: stopped, stateDir: registered, pkg: inside}))
+	if c := check(rep, "node-joined"); c.Status != doctor.OK {
 		t.Errorf("node-joined inside the package: %+v", c)
 	}
-	if c := check(rep, "node-service"); c.Status != app.DoctorFail || !strings.Contains(c.Detail, "1053") || !strings.Contains(c.Detail, copyDir) {
+	if c := check(rep, "node-service"); c.Status != doctor.Fail || !strings.Contains(c.Detail, "1053") || !strings.Contains(c.Detail, copyDir) {
 		t.Errorf("node-service inside the package: %+v", c)
 	}
 	var out bytes.Buffer
@@ -168,8 +168,8 @@ func TestNodeChecksSeeTheServiceStateDir(t *testing.T) {
 	}
 	// A service that runs says which state dir it has, if another.
 	other := inside.outsideDir()
-	rep = app.RunDoctor(context.Background(), env, nodeChecks(dir, nodeService{status: running, stateDir: func() (string, error) { return other, nil }, pkg: inside}))
-	if c := check(rep, "node-service"); c.Status != app.DoctorOK || !strings.Contains(c.Detail, "with --state-dir "+other) {
+	rep = doctor.Run(context.Background(), env, nodeChecks(dir, nodeService{status: running, stateDir: func() (string, error) { return other, nil }, pkg: inside}))
+	if c := check(rep, "node-service"); c.Status != doctor.OK || !strings.Contains(c.Detail, "with --state-dir "+other) {
 		t.Errorf("node-service running elsewhere: %+v", c)
 	}
 }

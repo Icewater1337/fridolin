@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/doctor"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/nodes"
@@ -26,8 +27,20 @@ import (
 // doctor warns: agents report every 20 seconds.
 const nodeStaleAfter = 5 * time.Minute
 
+// The node checks, where nodes.enabled is on: doctor prints FrIDE's
+// after the others.
+var (
+	nodesDoctorChecks = []doctor.Check{
+		{ID: "nodes-port", Title: "node port", Required: true, Applies: nodesOn, Run: checkNodesPort},
+		{ID: "nodes-seen", Title: "approved nodes heard from", Applies: nodesOn, Run: checkNodesSeen},
+		{ID: "nodes-version", Title: "nodes run the core's version", Applies: nodesOn, Run: checkNodesVersion},
+		{ID: "nodes-programs", Title: "command agents' programs allowed on their nodes", Applies: nodesOn, Run: checkNodesPrograms},
+	}
+	nodesFrideDoctorCheck = doctor.Check{ID: "nodes-fride", Title: "FrIDE on the nodes", Required: true, Applies: nodesOn, Run: checkNodesFride}
+)
+
 // nodesOn applies the node checks where nodes.enabled is on.
-func nodesOn(env *DoctorEnv) bool { return env.Config != nil && env.Config.Nodes.Enabled }
+func nodesOn(env *doctor.Env) bool { return env.Config != nil && env.Config.Nodes.Enabled }
 
 // localAddress is where doctor reaches a port bound to listen: loopback
 // for every interface.
@@ -46,34 +59,34 @@ func localAddress(listen string) string {
 }
 
 // checkNodesPort is M2's gate on this machine: the node port answers.
-func checkNodesPort(ctx context.Context, env *DoctorEnv) DoctorResult {
+func checkNodesPort(ctx context.Context, env *doctor.Env) doctor.Result {
 	listen := env.Config.Nodes.Listen
 	if env.Config.Core.Tailnet.Enabled {
 		return checkNodesPortOnTailnet(env, listen)
 	}
 	addr := localAddress(listen)
 	if err := env.Dial(ctx, addr); err != nil {
-		return DoctorResult{Status: DoctorFail, Detail: fmt.Sprintf("nothing answers on %s (nodes.listen %s): %v", addr, listen, err),
+		return doctor.Result{Status: doctor.Fail, Detail: fmt.Sprintf("nothing answers on %s (nodes.listen %s): %v", addr, listen, err),
 			Fix: "start the bridge (fridolin service status); its log says why the node port did not open, such as another program on the port"}
 	}
-	return DoctorResult{Status: DoctorOK, Detail: "the node port answers on " + addr}
+	return doctor.Result{Status: doctor.OK, Detail: "the node port answers on " + addr}
 }
 
 // checkNodesPortOnTailnet: with core.tailnet on, the node port listens
 // on the core's tailnet node only (App.NodeListener), which doctor does
 // not reach from here; it answers once that node is up.
-func checkNodesPortOnTailnet(env *DoctorEnv, listen string) DoctorResult {
+func checkNodesPortOnTailnet(env *doctor.Env, listen string) doctor.Result {
 	var st tailnetStateRecord
-	ok, err := env.readCoreState(tailnetStateFile, &st)
+	ok, err := readCoreState(env, tailnetStateFile, &st)
 	switch {
 	case err != nil:
-		return DoctorResult{Status: DoctorFail, Detail: "reading the core's tailnet state: " + err.Error()}
+		return doctor.Result{Status: doctor.Fail, Detail: "reading the core's tailnet state: " + err.Error()}
 	case !ok || st.State != "up":
-		return DoctorResult{Status: DoctorFail, Detail: fmt.Sprintf("the node port (nodes.listen %s) listens on the tailnet, and the core's tailnet node is not up", listen),
+		return doctor.Result{Status: doctor.Fail, Detail: fmt.Sprintf("the node port (nodes.listen %s) listens on the tailnet, and the core's tailnet node is not up", listen),
 			Fix: "see the tailnet check; nodes connect once the core is on the tailnet"}
 	}
 	_, port, _ := net.SplitHostPort(listen)
-	return DoctorResult{Status: DoctorOK, Detail: "the node port listens on the tailnet at " + net.JoinHostPort(strings.TrimSuffix(st.DNSName, "."), port)}
+	return doctor.Result{Status: doctor.OK, Detail: "the node port listens on the tailnet at " + net.JoinHostPort(strings.TrimSuffix(st.DNSName, "."), port)}
 }
 
 // doctorNode is a node as doctor reads it from the running bridge or
@@ -111,7 +124,7 @@ func (n doctorNode) stale(now time.Time) bool {
 // liveNodesTimeout bounds asking the running bridge for its nodes.
 const liveNodesTimeout = 5 * time.Second
 
-// askBridgeNodes is DoctorEnv.LiveNodes on the real system: GET /api/nodes
+// askBridgeNodes is doctor.Env.LiveNodes on the real system: GET /api/nodes
 // of the bridge on cfg's http_listen, with the dashboard token, as
 // `fridolin nodes` asks it.
 func askBridgeNodes(ctx context.Context, cfg *config.Settings) ([]byte, error) {
@@ -144,14 +157,14 @@ func askBridgeNodes(ctx context.Context, cfg *config.Settings) ([]byte, error) {
 // knows which are connected now, and else from the registry file, whose
 // last_seen the bridge writes once a minute. A result is what to report
 // when there is nothing to read.
-func readNodes(ctx context.Context, env *DoctorEnv) ([]doctorNode, *DoctorResult) {
+func readNodes(ctx context.Context, env *doctor.Env) ([]doctorNode, *doctor.Result) {
 	list, _, res := readNodesVersion(ctx, env)
 	return list, res
 }
 
 // readNodesVersion is readNodes with the core's version: the running
 // bridge's, else this binary's.
-func readNodesVersion(ctx context.Context, env *DoctorEnv) ([]doctorNode, string, *DoctorResult) {
+func readNodesVersion(ctx context.Context, env *doctor.Env) ([]doctorNode, string, *doctor.Result) {
 	var live struct {
 		Version string       `json:"version"`
 		Nodes   []doctorNode `json:"nodes"`
@@ -167,20 +180,20 @@ func readNodesVersion(ctx context.Context, env *DoctorEnv) ([]doctorNode, string
 
 // readNodesFile reads the registry file, which knows nothing of who is
 // connected.
-func readNodesFile(env *DoctorEnv) ([]doctorNode, *DoctorResult) {
+func readNodesFile(env *doctor.Env) ([]doctorNode, *doctor.Result) {
 	path := filepath.Join(env.Config.Layout().Nodes(), nodes.RegistryFile)
 	data, err := env.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, &DoctorResult{Status: DoctorOK, Detail: "no nodes yet"}
+		return nil, &doctor.Result{Status: doctor.OK, Detail: "no nodes yet"}
 	}
 	if err != nil {
-		return nil, &DoctorResult{Status: DoctorWarn, Detail: err.Error(), Fix: "check the permissions of " + path}
+		return nil, &doctor.Result{Status: doctor.Warn, Detail: err.Error(), Fix: "check the permissions of " + path}
 	}
 	var file struct {
 		Nodes []doctorNode `json:"nodes"`
 	}
 	if err := json.Unmarshal(data, &file); err != nil {
-		return nil, &DoctorResult{Status: DoctorWarn, Detail: fmt.Sprintf("%s does not read: %v", path, err), Fix: "fix the JSON by hand, or restore it from a backup"}
+		return nil, &doctor.Result{Status: doctor.Warn, Detail: fmt.Sprintf("%s does not read: %v", path, err), Fix: "fix the JSON by hand, or restore it from a backup"}
 	}
 	for i := range file.Nodes {
 		// Only the bridge knows which are connected.
@@ -192,12 +205,12 @@ func readNodesFile(env *DoctorEnv) ([]doctorNode, *DoctorResult) {
 // checkNodesFride is M6's gate on the core: every node whose FrIDE the
 // owner approved offers it now, which its agent does only while FrIDE
 // answers there, and was heard from lately.
-func checkNodesFride(ctx context.Context, env *DoctorEnv) DoctorResult {
+func checkNodesFride(ctx context.Context, env *doctor.Env) doctor.Result {
 	list, res := readNodes(ctx, env)
 	if res != nil {
 		return *res
 	}
-	now := env.now()
+	now := env.Time()
 	var ok, down []string
 	noLogin := false
 	for _, n := range list {
@@ -217,7 +230,7 @@ func checkNodesFride(ctx context.Context, env *DoctorEnv) DoctorResult {
 		}
 	}
 	if len(ok)+len(down) == 0 {
-		return DoctorResult{Status: DoctorOK, Detail: "no node offers FrIDE yet; coding work waits until one does"}
+		return doctor.Result{Status: doctor.OK, Detail: "no node offers FrIDE yet; coding work waits until one does"}
 	}
 	if len(down) > 0 {
 		slices.Sort(down)
@@ -225,20 +238,20 @@ func checkNodesFride(ctx context.Context, env *DoctorEnv) DoctorResult {
 		if noLogin {
 			fix += "; where its Claude is not logged in, " + nodeproto.FrideLoginFix
 		}
-		return DoctorResult{Status: DoctorWarn,
+		return doctor.Result{Status: doctor.Warn,
 			Detail: fmt.Sprintf("%d of %d nodes with FrIDE cannot take work: %s", len(down), len(ok)+len(down), strings.Join(down, "; ")),
 			Fix:    fix}
 	}
 	slices.Sort(ok)
-	return DoctorResult{Status: DoctorOK, Detail: "FrIDE answers on " + strings.Join(ok, ", ")}
+	return doctor.Result{Status: doctor.OK, Detail: "FrIDE answers on " + strings.Join(ok, ", ")}
 }
 
 // checkNodesPrograms warns about approved command agents whose node does
 // not run their program: not in its allowlist, and not added by the core.
-func checkNodesPrograms(ctx context.Context, env *DoctorEnv) DoctorResult {
+func checkNodesPrograms(ctx context.Context, env *doctor.Env) doctor.Result {
 	cmds := approvedCommands(env.Config.BrainDirs)
 	if len(cmds) == 0 {
-		return DoctorResult{Status: DoctorOK, Detail: "no approved agent runs a program on a node"}
+		return doctor.Result{Status: doctor.OK, Detail: "no approved agent runs a program on a node"}
 	}
 	list, res := readNodes(ctx, env)
 	if res != nil {
@@ -269,20 +282,20 @@ func checkNodesPrograms(ctx context.Context, env *DoctorEnv) DoctorResult {
 	}
 	if len(bad) > 0 {
 		slices.Sort(bad)
-		return DoctorResult{Status: DoctorWarn, Detail: fmt.Sprintf("%d of %d command agents cannot run: %s", len(bad), len(cmds), strings.Join(bad, "; ")), Fix: fix}
+		return doctor.Result{Status: doctor.Warn, Detail: fmt.Sprintf("%d of %d command agents cannot run: %s", len(bad), len(cmds), strings.Join(bad, "; ")), Fix: fix}
 	}
-	return DoctorResult{Status: DoctorOK, Detail: fmt.Sprintf("the nodes allow the programs of all %d command agents", len(cmds))}
+	return doctor.Result{Status: doctor.OK, Detail: fmt.Sprintf("the nodes allow the programs of all %d command agents", len(cmds))}
 }
 
 // checkNodesSeen warns about approved nodes the core has not heard from
 // for nodeStaleAfter.
-func checkNodesSeen(ctx context.Context, env *DoctorEnv) DoctorResult {
+func checkNodesSeen(ctx context.Context, env *doctor.Env) doctor.Result {
 	list, res := readNodes(ctx, env)
 	if res != nil {
 		return *res
 	}
 	file := struct{ Nodes []doctorNode }{list}
-	now := env.now()
+	now := env.Time()
 	approved := 0
 	var stale []string
 	for _, n := range file.Nodes {
@@ -299,20 +312,20 @@ func checkNodesSeen(ctx context.Context, env *DoctorEnv) DoctorResult {
 		}
 	}
 	if approved == 0 {
-		return DoctorResult{Status: DoctorOK, Detail: "no approved nodes yet"}
+		return doctor.Result{Status: doctor.OK, Detail: "no approved nodes yet"}
 	}
 	if len(stale) > 0 {
 		slices.Sort(stale)
-		return DoctorResult{Status: DoctorWarn,
+		return doctor.Result{Status: doctor.Warn,
 			Detail: fmt.Sprintf("%d of %d approved nodes not heard from in %v: %s", len(stale), approved, nodeStaleAfter, strings.Join(stale, "; ")),
 			Fix:    "on each, fridolin node status shows whether its agent runs; fridolin node start starts it"}
 	}
-	return DoctorResult{Status: DoctorOK, Detail: fmt.Sprintf("%d approved nodes, each heard from in the last %v", approved, nodeStaleAfter)}
+	return doctor.Result{Status: doctor.OK, Detail: fmt.Sprintf("%d approved nodes, each heard from in the last %v", approved, nodeStaleAfter)}
 }
 
 // checkNodesVersion warns about approved nodes that run an older fridolin
 // than the core, and about updates that failed (docs/NODES.md, Updates).
-func checkNodesVersion(ctx context.Context, env *DoctorEnv) DoctorResult {
+func checkNodesVersion(ctx context.Context, env *doctor.Env) doctor.Result {
 	list, core, res := readNodesVersion(ctx, env)
 	if res != nil {
 		return *res
@@ -332,7 +345,7 @@ func checkNodesVersion(ctx context.Context, env *DoctorEnv) DoctorResult {
 		}
 	}
 	if approved == 0 {
-		return DoctorResult{Status: DoctorOK, Detail: "no approved nodes yet"}
+		return doctor.Result{Status: doctor.OK, Detail: "no approved nodes yet"}
 	}
 	slices.Sort(older)
 	slices.Sort(failed)
@@ -344,8 +357,8 @@ func checkNodesVersion(ctx context.Context, env *DoctorEnv) DoctorResult {
 		parts = append(parts, "the last update failed on "+strings.Join(failed, "; "))
 	}
 	if len(parts) > 0 {
-		return DoctorResult{Status: DoctorWarn, Detail: strings.Join(parts, "; and "),
+		return doctor.Result{Status: doctor.Warn, Detail: strings.Join(parts, "; and "),
 			Fix: "fridolin nodes update <id> (or --all), or Update on the Nodes page; a node whose fridolin predates updates is updated by hand once (docs/NODES.md, Updates)"}
 	}
-	return DoctorResult{Status: DoctorOK, Detail: fmt.Sprintf("%d approved nodes run %s, the core's version", approved, core)}
+	return doctor.Result{Status: doctor.OK, Detail: fmt.Sprintf("%d approved nodes run %s, the core's version", approved, core)}
 }

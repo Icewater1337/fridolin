@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/cloud"
+	"github.com/Icewater1337/fridolin/internal/doctor"
 )
 
 // The B2 transactions check: what the running bridge counted today in
@@ -17,29 +18,27 @@ import (
 // lease and the vault last said. A refusal that a successful call came
 // after is a cap the owner raised since: it warns, and does not fail. It
 // applies with the lease or the vault on.
-var b2DoctorChecks = []DoctorCheck{
+var b2DoctorChecks = []doctor.Check{
 	{ID: "b2-transactions", Title: "B2 transactions within the daily caps", Required: true, Applies: b2On, Run: checkB2Transactions},
 }
 
-func init() { DoctorRegistry = append(DoctorRegistry, b2DoctorChecks...) }
-
-func b2On(env *DoctorEnv) bool {
+func b2On(env *doctor.Env) bool {
 	return env.Config != nil && (env.Config.Vault.Enabled || env.Config.Core.Lease.Enabled)
 }
 
-func checkB2Transactions(_ context.Context, env *DoctorEnv) DoctorResult {
+func checkB2Transactions(_ context.Context, env *doctor.Env) doctor.Result {
 	budget := env.Config.Vault.B2DailyBudget
-	today := env.now().UTC().Format("2006-01-02")
+	today := env.Time().UTC().Format("2006-01-02")
 	rec, err := ReadB2UsageFile(env.Config.DataDir, env.ReadFile)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return DoctorResult{Status: DoctorFail, Detail: err.Error()}
+		return doctor.Result{Status: doctor.Fail, Detail: err.Error()}
 	}
 	counted := err == nil && rec.Today.Day == today
 	var day cloud.UsageDay
 	if counted {
 		day = rec.Today
 	}
-	ev := env.b2Evidence(day)
+	ev := b2EvidenceOf(env, day)
 	detail := "no B2 transactions counted today (UTC)"
 	if counted {
 		detail = fmt.Sprintf("today (UTC) class B %d, class C %d of a daily budget of %d each; class A (free) %d",
@@ -50,10 +49,10 @@ func checkB2Transactions(_ context.Context, env *DoctorEnv) DoctorResult {
 	// succeeded after it.
 	if r, ok := ev.active(); ok {
 		if r.fromUsage {
-			return DoctorResult{Status: DoctorFail, Detail: fmt.Sprintf("Backblaze B2 refused a call at %s UTC (%s); %s",
+			return doctor.Result{Status: doctor.Fail, Detail: fmt.Sprintf("Backblaze B2 refused a call at %s UTC (%s); %s",
 				r.at.Format("15:04"), r.msg, detail), Fix: cloud.CapFix}
 		}
-		return DoctorResult{Status: DoctorFail, Detail: "Backblaze B2 refused a call: " + r.msg, Fix: cloud.CapFix}
+		return doctor.Result{Status: doctor.Fail, Detail: "Backblaze B2 refused a call: " + r.msg, Fix: cloud.CapFix}
 	}
 	// A refusal calls succeeded after is said, and only warns.
 	lifted := ""
@@ -63,15 +62,15 @@ func checkB2Transactions(_ context.Context, env *DoctorEnv) DoctorResult {
 	}
 	for _, c := range []cloud.Class{cloud.ClassB, cloud.ClassC} {
 		if counted && budget > 0 && day.Count(c)*100 >= int64(budget)*b2WarnPercent {
-			return DoctorResult{Status: DoctorWarn, Detail: fmt.Sprintf("%s%s: class %s is over %d%% of the budget (most: %s)", lifted, detail, c, b2WarnPercent, topOps(day, c, 3)),
+			return doctor.Result{Status: doctor.Warn, Detail: fmt.Sprintf("%s%s: class %s is over %d%% of the budget (most: %s)", lifted, detail, c, b2WarnPercent, topOps(day, c, 3)),
 				Fix: "B2's free tier refuses every call past 2,500 a class until midnight UTC: raise the caps under B2 → Caps & Alerts, or lower the vault's activity"}
 		}
 	}
 	if lifted != "" {
-		return DoctorResult{Status: DoctorWarn, Detail: lifted + detail,
+		return doctor.Result{Status: doctor.Warn, Detail: lifted + detail,
 			Fix: "nothing to do if the caps were raised under B2 → Caps & Alerts; this note goes at 00:00 UTC"}
 	}
-	return DoctorResult{Status: DoctorOK, Detail: detail}
+	return doctor.Result{Status: doctor.OK, Detail: detail}
 }
 
 // b2Refusal is a cap-exceeded error of B2 and when it came; a zero time
@@ -111,9 +110,9 @@ func (ev b2Evidence) lifted(day string) (b2Refusal, bool) {
 	return out, !out.at.IsZero()
 }
 
-// b2Evidence reads the refusals and the successes from today's counts
+// b2EvidenceOf reads the refusals and the successes from today's counts
 // (day, zero for none) and the lease's and the vault's state files.
-func (env *DoctorEnv) b2Evidence(day cloud.UsageDay) b2Evidence {
+func b2EvidenceOf(env *doctor.Env, day cloud.UsageDay) b2Evidence {
 	var ev b2Evidence
 	ok := func(at time.Time) {
 		if at.After(ev.lastOK) {
@@ -142,7 +141,7 @@ func (env *DoctorEnv) b2Evidence(day cloud.UsageDay) b2Evidence {
 	}
 	ok(day.LastOK)
 	var ls leaseStateRecord
-	if found, _ := env.readCoreState(leaseStateFile, &ls); found {
+	if found, _ := readCoreState(env, leaseStateFile, &ls); found {
 		switch {
 		case ls.Error != "":
 			refused(ls.Error, ls.UpdatedAt)

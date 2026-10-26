@@ -317,3 +317,13 @@ func TestLogSecurityChangesNamesGroupMembers(t *testing.T) {
 		}
 	}
 }
+
+// digitsOf is s without anything but its digits.
+func digitsOf(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, s)
+}

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/doctor"
 )
 
 // secretTree is a folder's state: each entry's mode, bytes and time, by
@@ -387,12 +388,12 @@ func TestDoctorVaultSecretFolders(t *testing.T) {
 		status string
 		detail string
 	}{
-		{"fresh", &secretFoldersStatus{Enabled: true, LastOK: ok, Last: ok, Folders: make([]secretFolderView, 2)}, DoctorOK, "2 folders, 4 files"},
-		{"never", &secretFoldersStatus{Enabled: true, Last: &secretBackupRecord{At: now, Error: "stat: no such file or directory"}}, DoctorWarn, "no backup of the secret folders yet: stat"},
-		{"old", &secretFoldersStatus{Enabled: true, LastOK: &secretBackupRecord{At: now.Add(-50 * time.Hour)}, Last: &secretBackupRecord{At: now.Add(-50 * time.Hour)}}, DoctorWarn, "is 50h0m0s old"},
-		{"last failed", &secretFoldersStatus{Enabled: true, LastOK: ok, Last: &secretBackupRecord{At: now, Error: "403"}}, DoctorWarn, "the last try failed: 403"},
-		{"no store", &secretFoldersStatus{Error: errSecretFoldersOneLayer}, DoctorWarn, "both layers"},
-		{"not looked at yet", nil, DoctorWarn, "not looked at"},
+		{"fresh", &secretFoldersStatus{Enabled: true, LastOK: ok, Last: ok, Folders: make([]secretFolderView, 2)}, doctor.OK, "2 folders, 4 files"},
+		{"never", &secretFoldersStatus{Enabled: true, Last: &secretBackupRecord{At: now, Error: "stat: no such file or directory"}}, doctor.Warn, "no backup of the secret folders yet: stat"},
+		{"old", &secretFoldersStatus{Enabled: true, LastOK: &secretBackupRecord{At: now.Add(-50 * time.Hour)}, Last: &secretBackupRecord{At: now.Add(-50 * time.Hour)}}, doctor.Warn, "is 50h0m0s old"},
+		{"last failed", &secretFoldersStatus{Enabled: true, LastOK: ok, Last: &secretBackupRecord{At: now, Error: "403"}}, doctor.Warn, "the last try failed: 403"},
+		{"no store", &secretFoldersStatus{Error: errSecretFoldersOneLayer}, doctor.Warn, "both layers"},
+		{"not looked at yet", nil, doctor.Warn, "not looked at"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := healthyMac()
@@ -403,7 +404,7 @@ func TestDoctorVaultSecretFolders(t *testing.T) {
 				c.Vault.Enabled, c.Sandbox.CredentialsDir = true, "/home/you/.app-secrets"
 			}), nil)
 			env.Now = func() time.Time { return now }
-			got := result(t, RunDoctor(context.Background(), env, DoctorRegistry), "vault-secret-folders")
+			got := result(t, doctor.Run(context.Background(), env, DoctorRegistry.Checks()), "vault-secret-folders")
 			if got.Status != tc.status || !strings.Contains(got.Detail, tc.detail) {
 				t.Errorf("%+v, want %s with %q", got, tc.status, tc.detail)
 			}
@@ -411,7 +412,7 @@ func TestDoctorVaultSecretFolders(t *testing.T) {
 	}
 	// Without a secret folder the check does not apply.
 	env := healthyMac().doctorEnv(doctorConfig(func(c *config.Settings) { c.Vault.Enabled = true }), nil)
-	for _, c := range RunDoctor(context.Background(), env, DoctorRegistry).Checks {
+	for _, c := range doctor.Run(context.Background(), env, DoctorRegistry.Checks()).Checks {
 		if c.ID == "vault-secret-folders" {
 			t.Error("the check applies without a secret folder")
 		}

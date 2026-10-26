@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/doctor"
 	"github.com/Icewater1337/fridolin/internal/google"
 	"github.com/Icewater1337/fridolin/internal/manifest"
 )
@@ -106,8 +107,8 @@ func TestCalendarGrantHealth(t *testing.T) {
 	}
 
 	// doctor reads the same record.
-	env := &DoctorEnv{Config: tb.cfgs.Get(), ReadFile: os.ReadFile}
-	if r := checkCalendarGrants(context.Background(), env); r.Status != DoctorWarn || !strings.Contains(r.Detail, "a (") || !strings.Contains(r.Fix, "Reconnect") {
+	env := &doctor.Env{Config: tb.cfgs.Get(), ReadFile: os.ReadFile}
+	if r := checkCalendarGrants(context.Background(), env); r.Status != doctor.Warn || !strings.Contains(r.Detail, "a (") || !strings.Contains(r.Fix, "Reconnect") {
 		t.Errorf("doctor = %+v", r)
 	}
 
@@ -116,7 +117,7 @@ func TestCalendarGrantHealth(t *testing.T) {
 	if h := calendarHealthOf(t, tb, "a", false); h.State != google.GrantValid || h.Since != nil {
 		t.Errorf("after reconnecting: %+v", h)
 	}
-	if r := checkCalendarGrants(context.Background(), env); r.Status != DoctorOK {
+	if r := checkCalendarGrants(context.Background(), env); r.Status != doctor.OK {
 		t.Errorf("doctor after reconnecting = %+v", r)
 	}
 	expiredCalendarToken(t, tb, "REVOKED")

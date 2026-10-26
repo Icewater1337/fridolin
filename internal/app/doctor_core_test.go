@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/doctor"
 	"github.com/Icewater1337/fridolin/internal/sandbox"
 )
 
@@ -20,7 +21,7 @@ func TestDoctorCoreChecks(t *testing.T) {
 	cfg.Core.Tailnet.Enabled = true
 	cfg.Core.Lease.Enabled = true
 	cfg.Sandbox.Enabled = true
-	env := func(contents map[string]string) *DoctorEnv {
+	env := func(contents map[string]string) *doctor.Env {
 		s := &fakeSystem{goos: "linux", contents: contents, files: map[string]fs.FileMode{sandbox.BwrapPath: 0o755},
 			runs: map[string]fakeRun{}}
 		e := s.doctorEnv(cfg, nil)
@@ -29,20 +30,20 @@ func TestDoctorCoreChecks(t *testing.T) {
 		return e
 	}
 	tests := []struct {
-		check  func(context.Context, *DoctorEnv) DoctorResult
+		check  func(context.Context, *doctor.Env) doctor.Result
 		file   string
 		status string
 		detail string
 	}{
-		{checkTailnetUp, "", DoctorMissing, "has not started"},
-		{checkTailnetUp, `{"state":"up","dns_name":"fridolin-core.example.ts.net","magic_dns":true,"url":"https://fridolin-core.example.ts.net/","updated_at":"2026-10-20T11:59:00Z"}`, DoctorOK, "up as fridolin-core.example.ts.net"},
-		{checkTailnetUp, `{"state":"up","dns_name":"fridolin-core.example.ts.net","magic_dns":false}`, DoctorWarn, "MagicDNS is off"},
-		{checkTailnetUp, `{"state":"error","error":"invalid key"}`, DoctorFail, "invalid key"},
-		{checkLeaseFresh, "", DoctorMissing, "has not taken"},
-		{checkLeaseFresh, `{"state":"held","device_id":"d1","hostname":"mini","renewed_at":"2026-10-20T11:59:30Z","renew_seconds":60,"stale_seconds":300}`, DoctorOK, "renewed 30s ago"},
-		{checkLeaseFresh, `{"state":"held","device_id":"d1","renewed_at":"2026-10-20T11:57:00Z","renew_seconds":60,"stale_seconds":300}`, DoctorWarn, "late"},
-		{checkLeaseFresh, `{"state":"held","device_id":"d1","renewed_at":"2026-10-20T11:50:00Z","renew_seconds":60,"stale_seconds":300}`, DoctorFail, "stale"},
-		{checkLeaseFresh, `{"state":"lost","error":"taken","holder":"d2 (vm)"}`, DoctorFail, "d2 (vm) holds it"},
+		{checkTailnetUp, "", doctor.Missing, "has not started"},
+		{checkTailnetUp, `{"state":"up","dns_name":"fridolin-core.example.ts.net","magic_dns":true,"url":"https://fridolin-core.example.ts.net/","updated_at":"2026-10-20T11:59:00Z"}`, doctor.OK, "up as fridolin-core.example.ts.net"},
+		{checkTailnetUp, `{"state":"up","dns_name":"fridolin-core.example.ts.net","magic_dns":false}`, doctor.Warn, "MagicDNS is off"},
+		{checkTailnetUp, `{"state":"error","error":"invalid key"}`, doctor.Fail, "invalid key"},
+		{checkLeaseFresh, "", doctor.Missing, "has not taken"},
+		{checkLeaseFresh, `{"state":"held","device_id":"d1","hostname":"mini","renewed_at":"2026-10-20T11:59:30Z","renew_seconds":60,"stale_seconds":300}`, doctor.OK, "renewed 30s ago"},
+		{checkLeaseFresh, `{"state":"held","device_id":"d1","renewed_at":"2026-10-20T11:57:00Z","renew_seconds":60,"stale_seconds":300}`, doctor.Warn, "late"},
+		{checkLeaseFresh, `{"state":"held","device_id":"d1","renewed_at":"2026-10-20T11:50:00Z","renew_seconds":60,"stale_seconds":300}`, doctor.Fail, "stale"},
+		{checkLeaseFresh, `{"state":"lost","error":"taken","holder":"d2 (vm)"}`, doctor.Fail, "d2 (vm) holds it"},
 	}
 	for _, tc := range tests {
 		contents := map[string]string{}
@@ -60,23 +61,23 @@ func TestDoctorCoreChecks(t *testing.T) {
 	}
 
 	e := env(nil)
-	if got := checkContainerSandbox(context.Background(), e); got.Status != DoctorFail {
+	if got := checkContainerSandbox(context.Background(), e); got.Status != doctor.Fail {
 		t.Errorf("bubblewrap that fails: %+v", got)
 	}
 	s := &fakeSystem{goos: "linux", files: map[string]fs.FileMode{sandbox.BwrapPath: 0o755}, runs: map[string]fakeRun{
 		sandbox.BwrapPath + " --unshare-user --unshare-pid --unshare-ipc --ro-bind / / --proc /proc --dev /dev --die-with-parent -- /bin/true": {},
 	}}
-	if got := checkContainerSandbox(context.Background(), s.doctorEnv(cfg, nil)); got.Status != DoctorOK {
+	if got := checkContainerSandbox(context.Background(), s.doctorEnv(cfg, nil)); got.Status != doctor.OK {
 		t.Errorf("bubblewrap that works: %+v", got)
 	}
 
 	// The host's checks stay out of the container, and the core's out of
 	// a config without them.
-	for _, c := range DoctorRegistry {
+	for _, c := range DoctorRegistry.Checks() {
 		if c.ID == "docker" && c.Applies(e) {
 			t.Error("the Docker check applies inside the container")
 		}
-		if c.ID == "tailnet" && c.Applies(&DoctorEnv{Config: &config.Settings{}}) {
+		if c.ID == "tailnet" && c.Applies(&doctor.Env{Config: &config.Settings{}}) {
 			t.Error("the tailnet check applies with core.tailnet off")
 		}
 	}

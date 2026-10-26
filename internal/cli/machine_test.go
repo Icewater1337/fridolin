@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"filippo.io/age"
-	"github.com/Icewater1337/fridolin/internal/app"
+	"github.com/Icewater1337/fridolin/internal/doctor"
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/nodeagent"
@@ -288,10 +288,10 @@ func TestCoreSendReceive(t *testing.T) {
 	}
 }
 
-// doctorEnvFor is a DoctorEnv whose dial reaches only reachable, and
+// doctorEnvFor is a doctor.Env whose dial reaches only reachable, and
 // whose docker answers from docker.
-func doctorEnvFor(reachable string, docker map[string]string) *app.DoctorEnv {
-	return &app.DoctorEnv{
+func doctorEnvFor(reachable string, docker map[string]string) *doctor.Env {
+	return &doctor.Env{
 		GOOS: "linux", Getenv: func(string) string { return "" },
 		LookPath: func(f string) (string, error) { return "/usr/bin/" + f, nil },
 		Stat:     func(string) (fs.FileInfo, error) { return nil, fs.ErrNotExist },
@@ -319,8 +319,8 @@ func doctorEnvFor(reachable string, docker map[string]string) *app.DoctorEnv {
 func TestNodeChecks(t *testing.T) {
 	dir := t.TempDir()
 	running := func() (string, error) { return "running", nil }
-	rep := app.RunDoctor(context.Background(), doctorEnvFor("", nil), nodeChecks(dir, nodeService{status: running}))
-	if rep.OK || rep.Checks[1].ID != "node-joined" || rep.Checks[1].Status != app.DoctorFail || !strings.Contains(rep.Checks[1].Fix, "join-code") {
+	rep := doctor.Run(context.Background(), doctorEnvFor("", nil), nodeChecks(dir, nodeService{status: running}))
+	if rep.OK || rep.Checks[1].ID != "node-joined" || rep.Checks[1].Status != doctor.Fail || !strings.Contains(rep.Checks[1].Fix, "join-code") {
 		t.Fatalf("not joined: %+v", rep)
 	}
 	if _, err := nodeagent.NewKey(dir); err != nil {
@@ -329,15 +329,15 @@ func TestNodeChecks(t *testing.T) {
 	if err := nodeagent.SaveConfig(dir, nodeagent.Config{Core: "ws://fridolin-core.example.ts.net:8766", Name: "winbox", Capabilities: nodeproto.Capabilities{Host: true}}); err != nil {
 		t.Fatal(err)
 	}
-	rep = app.RunDoctor(context.Background(), linuxNodeEnv(doctorEnvFor("fridolin-core.example.ts.net:8766", nil), "default.target", "yes"), nodeChecks(dir, nodeService{status: running}))
+	rep = doctor.Run(context.Background(), linuxNodeEnv(doctorEnvFor("fridolin-core.example.ts.net:8766", nil), "default.target", "yes"), nodeChecks(dir, nodeService{status: running}))
 	if !rep.OK {
 		t.Errorf("joined, reachable, running: %+v", rep)
 	}
 	stopped := func() (string, error) { return "installed, stopped", nil }
-	rep = app.RunDoctor(context.Background(), linuxNodeEnv(doctorEnvFor("", nil), "default.target", "yes"), nodeChecks(dir, nodeService{status: stopped}))
+	rep = doctor.Run(context.Background(), linuxNodeEnv(doctorEnvFor("", nil), "default.target", "yes"), nodeChecks(dir, nodeService{status: stopped}))
 	var failed []string
 	for _, c := range rep.Checks {
-		if c.Status == app.DoctorFail {
+		if c.Status == doctor.Fail {
 			failed = append(failed, c.ID)
 		}
 	}
@@ -353,7 +353,7 @@ func TestNodeChecks(t *testing.T) {
 // linuxNodeEnv makes env a Linux node's whose systemd user unit is
 // enabled into target ("" for not enabled) and whose user lingers when
 // linger is "yes".
-func linuxNodeEnv(env *app.DoctorEnv, target, linger string) *app.DoctorEnv {
+func linuxNodeEnv(env *doctor.Env, target, linger string) *doctor.Env {
 	env.GOOS, env.Home = "linux", "/home/you"
 	env.Getenv = func(name string) string {
 		if name == "USER" {
@@ -390,36 +390,36 @@ func TestNodeBootChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	running := func() (string, error) { return "running", nil }
-	check := func(env *app.DoctorEnv, id string) app.DoctorCheckReport {
+	check := func(env *doctor.Env, id string) doctor.CheckReport {
 		t.Helper()
-		for _, c := range app.RunDoctor(context.Background(), env, nodeChecks(dir, nodeService{status: running})).Checks {
+		for _, c := range doctor.Run(context.Background(), env, nodeChecks(dir, nodeService{status: running})).Checks {
 			if c.ID == id {
 				return c
 			}
 		}
 		t.Fatalf("no check %s", id)
-		return app.DoctorCheckReport{}
+		return doctor.CheckReport{}
 	}
 	reachable := "fridolin-core.example.ts.net:8766"
-	if c := check(linuxNodeEnv(doctorEnvFor(reachable, nil), "default.target", "yes"), "node-boot"); c.Status != app.DoctorOK {
+	if c := check(linuxNodeEnv(doctorEnvFor(reachable, nil), "default.target", "yes"), "node-boot"); c.Status != doctor.OK {
 		t.Errorf("default.target: %+v", c)
 	}
-	if c := check(linuxNodeEnv(doctorEnvFor(reachable, nil), "multi-user.target", "yes"), "node-boot"); c.Status != app.DoctorFail || !strings.Contains(c.Fix, "fridolin node start") {
+	if c := check(linuxNodeEnv(doctorEnvFor(reachable, nil), "multi-user.target", "yes"), "node-boot"); c.Status != doctor.Fail || !strings.Contains(c.Fix, "fridolin node start") {
 		t.Errorf("multi-user.target: %+v", c)
 	}
-	if c := check(linuxNodeEnv(doctorEnvFor(reachable, nil), "", "yes"), "node-boot"); c.Status != app.DoctorFail || !strings.Contains(c.Fix, "systemctl --user enable fridolin-node") {
+	if c := check(linuxNodeEnv(doctorEnvFor(reachable, nil), "", "yes"), "node-boot"); c.Status != doctor.Fail || !strings.Contains(c.Fix, "systemctl --user enable fridolin-node") {
 		t.Errorf("not enabled: %+v", c)
 	}
 	env := linuxNodeEnv(doctorEnvFor(reachable, nil), "default.target", "no")
-	if c := check(env, "node-linger"); c.Status != app.DoctorWarn || c.Fix != "sudo loginctl enable-linger you" {
+	if c := check(env, "node-linger"); c.Status != doctor.Warn || c.Fix != "sudo loginctl enable-linger you" {
 		t.Errorf("no linger: %+v", c)
 	}
-	if rep := app.RunDoctor(context.Background(), env, nodeChecks(dir, nodeService{status: running})); !rep.OK {
+	if rep := doctor.Run(context.Background(), env, nodeChecks(dir, nodeService{status: running})); !rep.OK {
 		t.Errorf("linger is only a warning: %+v", rep)
 	}
 	env = doctorEnvFor(reachable, nil)
 	env.GOOS = "darwin"
-	for _, c := range app.RunDoctor(context.Background(), env, nodeChecks(dir, nodeService{status: running})).Checks {
+	for _, c := range doctor.Run(context.Background(), env, nodeChecks(dir, nodeService{status: running})).Checks {
 		if c.ID == "node-boot" || c.ID == "node-linger" {
 			t.Errorf("%s checked on macOS", c.ID)
 		}
@@ -441,15 +441,15 @@ func TestNodeChecksInABox(t *testing.T) {
 	}
 	noService := func() (string, error) { return "", errors.New("exit status 1") }
 	now := time.Now()
-	run := func(at time.Time) (rep app.DoctorReport, ids, failed []string) {
+	run := func(at time.Time) (rep doctor.Report, ids, failed []string) {
 		t.Helper()
 		env := linuxNodeEnv(doctorEnvFor("", nil), "", "no")
 		env.LookPath = func(string) (string, error) { return "", errors.New("not found") }
 		env.Now = func() time.Time { return at }
-		rep = app.RunDoctor(context.Background(), env, nodeChecks(dir, nodeService{status: noService}))
+		rep = doctor.Run(context.Background(), env, nodeChecks(dir, nodeService{status: noService}))
 		for _, c := range rep.Checks {
 			ids = append(ids, c.ID)
-			if c.Status == app.DoctorFail {
+			if c.Status == doctor.Fail {
 				failed = append(failed, c.ID)
 			}
 		}
@@ -479,13 +479,13 @@ func TestNodeChecksInABox(t *testing.T) {
 func TestCoreMachineChecks(t *testing.T) {
 	d, _ := hostFixture(t, mapSecrets{hostsecrets.AgeIdentityPQ: "a", hostsecrets.ExportKey: "k", hostsecrets.B2VaultKeyID: "b", hostsecrets.B2VaultKey: "c"})
 	docker := map[string]string{"info": "29.0.0"}
-	rep := app.RunDoctor(context.Background(), doctorEnvFor("", docker), coreMachineChecks(d))
+	rep := doctor.Run(context.Background(), doctorEnvFor("", docker), coreMachineChecks(d))
 	var out bytes.Buffer
 	if code := writeMachineReport(&out, rep, "x", false); code != 1 || !strings.Contains(out.String(), "Next: in the repository's folder: fridolin core build") {
 		t.Errorf("no image: %s", out.String())
 	}
 	docker["image inspect"], docker["volume inspect"], docker["ps"] = "sha256:x", "fridolin-data", "Up 3 minutes (healthy)"
-	rep = app.RunDoctor(context.Background(), doctorEnvFor("", docker), coreMachineChecks(d))
+	rep = doctor.Run(context.Background(), doctorEnvFor("", docker), coreMachineChecks(d))
 	out.Reset()
 	if code := writeMachineReport(&out, rep, "x", false); code != 0 || !strings.Contains(out.String(), "Next: fridolin core receive") {
 		t.Errorf("all there but the optional secrets: %d %s", code, out.String())
@@ -502,20 +502,20 @@ func TestCoreLeftoversResult(t *testing.T) {
 		status string
 		want   string
 	}{
-		{"no moves", nodeagent.CoreLeftovers{}, app.DoctorOK, "no core moved away"},
-		{"runs the core", nodeagent.CoreLeftovers{Secrets: []string{"fridolin.claude.oauth.token"}, DataMove: "m-20261024-1200-0001", LastMove: "m-20261024-1200-0001"}, app.DoctorOK, "for the core that runs or may run here"},
-		{"former, holds", nodeagent.CoreLeftovers{Former: true, LastMove: "m-20261024-1300-0002", Files: []string{"~/.creds/dashboard-users.json"}, DataMove: "m-20261024-1200-0001"}, app.DoctorWarn, "the core's data dir that move m-20261024-1200-0001 brought"},
-		{"former, unrecorded", nodeagent.CoreLeftovers{Former: true, LastMove: "m-20261024-1300-0002", Unrecorded: true}, app.DoctorWarn, "before fridolin recorded"},
-		{"former, forgotten", nodeagent.CoreLeftovers{Former: true, LastMove: "m-20261024-1300-0002", DataForgotten: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}, app.DoctorOK, "forgotten (2026-10-24)"},
-		{"former, original home", nodeagent.CoreLeftovers{Former: true, LastMove: "m-20261024-1300-0002"}, app.DoctorWarn, "ran the core before any move"},
-		{"former, own data", nodeagent.CoreLeftovers{Former: true, LastMove: "m-20261024-1300-0002", OwnDataMove: "m-20261024-1200-0001"}, app.DoctorWarn, "before move m-20261024-1200-0001 imported"},
+		{"no moves", nodeagent.CoreLeftovers{}, doctor.OK, "no core moved away"},
+		{"runs the core", nodeagent.CoreLeftovers{Secrets: []string{"fridolin.claude.oauth.token"}, DataMove: "m-20261024-1200-0001", LastMove: "m-20261024-1200-0001"}, doctor.OK, "for the core that runs or may run here"},
+		{"former, holds", nodeagent.CoreLeftovers{Former: true, LastMove: "m-20261024-1300-0002", Files: []string{"~/.creds/dashboard-users.json"}, DataMove: "m-20261024-1200-0001"}, doctor.Warn, "the core's data dir that move m-20261024-1200-0001 brought"},
+		{"former, unrecorded", nodeagent.CoreLeftovers{Former: true, LastMove: "m-20261024-1300-0002", Unrecorded: true}, doctor.Warn, "before fridolin recorded"},
+		{"former, forgotten", nodeagent.CoreLeftovers{Former: true, LastMove: "m-20261024-1300-0002", DataForgotten: time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)}, doctor.OK, "forgotten (2026-10-24)"},
+		{"former, original home", nodeagent.CoreLeftovers{Former: true, LastMove: "m-20261024-1300-0002"}, doctor.Warn, "ran the core before any move"},
+		{"former, own data", nodeagent.CoreLeftovers{Former: true, LastMove: "m-20261024-1300-0002", OwnDataMove: "m-20261024-1200-0001"}, doctor.Warn, "before move m-20261024-1200-0001 imported"},
 	}
 	for _, c := range cases {
 		r := coreLeftoversResult(c.l)
 		if r.Status != c.status || !strings.Contains(r.Detail, c.want) {
 			t.Errorf("%s: %s %q, want %s %q", c.name, r.Status, r.Detail, c.status, c.want)
 		}
-		if r.Status == app.DoctorWarn && !strings.Contains(r.Fix, "Forgetting a former core host") {
+		if r.Status == doctor.Warn && !strings.Contains(r.Fix, "Forgetting a former core host") {
 			t.Errorf("%s: the fix %q", c.name, r.Fix)
 		}
 	}
