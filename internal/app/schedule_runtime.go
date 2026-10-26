@@ -328,7 +328,8 @@ func (a *agents) startBrainRun(br *brainruntime.Brain, ar *agentRun) error {
 	}
 	ar.risk = skill.Risk(s.Risk)
 	if s.TimeoutMinutes > 0 {
-		ar.timeout = time.Duration(s.TimeoutMinutes) * time.Minute
+		// In run_timeout_minutes' unit, which a test shortens.
+		ar.timeout = time.Duration(s.TimeoutMinutes) * a.b.waits.runTimeoutUnit
 	}
 	report := s.ReportMode()
 	if len(ar.fride) > 0 && report != manifest.ReportSilent {
@@ -355,6 +356,10 @@ func (a *agents) startBrainRun(br *brainruntime.Brain, ar *agentRun) error {
 		// brainRunEnv mints its GitHub token as the run starts
 		// (withGitHubToken).
 		GitHub: s.GitHub,
+		// Its own timeout_minutes, which may also be longer than
+		// run_timeout_minutes: the brain's worker sets the run's
+		// deadline by it.
+		RunTimeout: ar.timeout,
 	}}
 	if _, _, _, err := a.b.brainMgr.Submit(m); err != nil {
 		return fmt.Errorf("the brain did not take the run: %w", err)
@@ -729,8 +734,7 @@ func cmpOr(a, b string) string {
 
 // admitScheduled is admitRun for a scheduled agent's run: its risk
 // budget is the agent's risk, else what its task's skill triggers say,
-// and it may be cut short by its own timeout, with its own tools and
-// secrets. In a lockdown, an agent that declares more than reading is
+// and it runs with its own timeout, effort, tools and secrets. In a lockdown, an agent that declares more than reading is
 // refused, as a skill that writes is.
 func (a *agents) admitScheduled(p *runPolicy, msg chat.Inbound) {
 	ar := a.lookup(msg.ID)
@@ -742,6 +746,7 @@ func (a *agents) admitScheduled(p *runPolicy, msg chat.Inbound) {
 		p.Risk = ar.risk
 	}
 	p.Timeout = ar.timeout
+	p.Effort = ar.agent.Effort
 	p.DisallowedTools = ar.agent.DisallowedTools
 }
 

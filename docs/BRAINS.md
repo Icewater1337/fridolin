@@ -640,6 +640,7 @@ Personal/
     morning-briefing.json   {"when": "daily 06:00", "template": "morning-briefing"}
     inbox.json              {"when": "every 6h", "prompt": "Look in inbox/ for new files and tell me what needs me.", "report": "worth"}
     weekly-plan.json        {"when": "weekly mon 08:00", "report": "always"}
+    fix-bugs.json           {"when": "daily 03:00", "prompt_file": "skills/fix-bugs.md", "effort": "max", "timeout_minutes": 180}
     scrape.json             {"when": "daily 21:00", "command": {"node": "laptop", "argv": ["/Users/you/bin/scrape.sh"]}, "report": "silent", "timeout_minutes": 15}
 ```
 
@@ -655,7 +656,8 @@ Personal/
 | `chat` | the chat results go to, a JID; default the brain's `reply_chat` |
 | `risk` | the run's risk budget, `read`, `write` or `irreversible`; left out, what the task's skill triggers say, else `write` ([Skills, risk and approvals](#skills-risk-and-approvals)) |
 | `disallowed_tools` | its own blocked tools; left out, the brain's |
-| `timeout_minutes` | stops a run that takes longer; it can only shorten `run_timeout_minutes` (for a program, the node's exec timeout) |
+| `effort` | its runs' reasoning effort, `low`, `medium`, `high`, `xhigh` or `max`, in place of the brain's (`brain.json`'s `effort`, else [`brain_effort`](CONFIGURATION.md)), so an agent can think harder than the brain's chats without making them slower; the runs FrIDE's news starts for the agent use it too. Left out, the brain's. In Codex mode it is ignored, as a brain's `effort` is: `codex_effort` applies |
+| `timeout_minutes` | stops a run that takes longer, in place of `run_timeout_minutes`: shorter or longer, up to 1440 (24 hours); left out or 0, `run_timeout_minutes`. A long timeout with a high effort can cost a lot of usage when a run goes in circles (for a program, it is the node's exec timeout, which the node's own limit still caps) |
 | `missed` | a run that fell due while the bridge was down: `run` (the default) runs it once when the bridge is back, however many times it fell due; `skip` waits for the next time |
 | `jitter_minutes` | each run starts a fixed number of seconds within this many minutes after its time, the same for every run of the agent; left out, [`schedules.jitter_minutes`](CONFIGURATION.md#schedules) (2) |
 | `preapproved` | steps the owner approved together with the schedule (`"file GitHub issues on example/repo"`): the run is told it may take them without `request_approval`; every other irreversible step still asks |

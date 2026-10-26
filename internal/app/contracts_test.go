@@ -564,6 +564,7 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 		{"schedule report", "schedule.schema.json#/properties/report", manifest.ScheduleReports(), `{"name": "s", "when": "every 6h", "report": %s}`},
 		{"schedule missed", "schedule.schema.json#/properties/missed", manifest.ScheduleMissed(), `{"name": "s", "when": "every 6h", "missed": %s}`},
 		{"schedule risk", "schedule.schema.json#/properties/risk", manifest.ScheduleRisks(), `{"name": "s", "when": "every 6h", "risk": %s}`},
+		{"schedule effort", "schedule.schema.json#/properties/effort", manifest.Efforts(), `{"name": "s", "when": "every 6h", "effort": %s}`},
 	}
 	set := newSchemaSet(t)
 	setenv(t, "HOME", t.TempDir())

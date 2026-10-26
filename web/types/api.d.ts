@@ -94,6 +94,9 @@ export interface Schedule {
   risk?: string;
   /** Overrides the brain's list for these runs; [] allows every tool. */
   disallowed_tools?: string[];
+  /** low, medium, high, xhigh or max; left out, the brain's. */
+  effort?: string;
+  /** In place of run_timeout_minutes, shorter or longer. */
   timeout_minutes?: number;
   /** run (the default) or skip. */
   missed?: string;

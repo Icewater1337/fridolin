@@ -41,11 +41,12 @@ type runPolicy struct {
 	Approval, ApprovedAction string
 	// Silent is an observe-only run, which asks nobody anything.
 	Silent bool
-	// Scheduled is, for a scheduled agent's run, the agent; Timeout and
-	// DisallowedTools are what the agent sets for its runs
+	// Scheduled is, for a scheduled agent's run, the agent; Timeout,
+	// Effort and DisallowedTools are what the agent sets for its runs
 	// (agents.admitScheduled).
 	Scheduled       string
 	Timeout         time.Duration
+	Effort          string
 	DisallowedTools *[]string
 	started         time.Time
 }

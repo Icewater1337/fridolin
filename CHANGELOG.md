@@ -10,6 +10,17 @@ for compatibility.
 
 ### Added
 
+- **A scheduled agent's own effort and a longer timeout.** An agent's
+  file takes `effort` (`low` … `max`, the dashboard's *More settings*):
+  its runs, and those FrIDE's news starts for it, think that hard, while
+  the brain's chats keep the brain's effort. Codex mode ignores it, as
+  it ignores a brain's `effort`. `timeout_minutes` now replaces
+  `run_timeout_minutes` for the agent's runs, longer as well as shorter
+  (up to 1440): an agent that set one longer than the global limit, and
+  was stopped at the global limit until now, runs as long as it says.
+  A bridge rolled back to lists an agent file that sets `effort` as
+  not valid (an unknown field) until it is taken out, and holds a
+  timeout to `run_timeout_minutes` again.
 - **Public paths for site modules** (`server.public` in module.json, e.g.
   `["/intake"]`): those paths of a module's server answer without sign-in,
   so a form opened from an email link or a webhook can reach it. The router

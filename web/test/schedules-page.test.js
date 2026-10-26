@@ -312,7 +312,7 @@ test('the schedule helpers', () => {
   assert.throws(() => scheduleOf({ ...base, name: 'Bad Name' }), /name/);
   assert.deepEqual(scheduleOf({ ...base, vars: { repos: 'a/b', empty: ' ' } }).vars, { repos: 'a/b' });
   // fieldsOf is scheduleOf's inverse.
-  for (const s of [{ name: 'a', when: 'daily 07:00', prompt: 'p', risk: 'read', timeout_minutes: 5, jitter_minutes: 0 }, { name: 'b', when: 'every 2h', command: { node: 'n', argv: ['x', 'y'], dir: '/d' }, enabled: false }]) {
+  for (const s of [{ name: 'a', when: 'daily 07:00', prompt: 'p', risk: 'read', effort: 'max', timeout_minutes: 120, jitter_minutes: 0 }, { name: 'b', when: 'every 2h', command: { node: 'n', argv: ['x', 'y'], dir: '/d' }, enabled: false }]) {
     assert.deepEqual(scheduleOf(fieldsOf(s)), s);
   }
   // The file as Go writes it: its fields in order, maps sorted.

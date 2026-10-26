@@ -79,6 +79,7 @@
       "disallowed_tools": [
         "WebFetch"
       ],
+      "effort": "high",
       "timeout_minutes": 45,
       "missed": "skip",
       "jitter_minutes": 10,

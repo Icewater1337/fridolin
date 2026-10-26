@@ -51,6 +51,11 @@ type Inbound struct {
 	// GitHub, when set, asks for a GitHub token for the run that answers
 	// the message (docs/GITHUB.md): a scheduled agent's grant.
 	GitHub *GitHubGrant
+	// RunTimeout, when set, stops the run that answers the message after
+	// that long, in place of run_timeout_minutes, shorter or longer: a
+	// scheduled agent's timeout_minutes. A merged message keeps the
+	// first one's.
+	RunTimeout time.Duration
 	// Answer, when set, hears the text of the run's answer before it is
 	// delivered, and returns what the chat gets of it: the Plaud Sync
 	// app's voice mode reads a spoken version aloud on the phone and keeps

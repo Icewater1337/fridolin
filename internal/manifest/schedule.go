@@ -59,8 +59,12 @@ type Schedule struct {
 	// DisallowedTools overrides the brain's list for these runs; nil keeps
 	// it, [] allows every tool.
 	DisallowedTools *[]string `json:"disallowed_tools,omitempty"`
-	// TimeoutMinutes stops a run that takes longer; 0 is
-	// run_timeout_minutes, which it can only shorten.
+	// Effort is its runs' reasoning effort in Claude mode, in place of
+	// the brain's (brain.json effort, else brain_effort); "" keeps that.
+	// Codex mode keeps codex_effort, as it does for the brain's.
+	Effort string `json:"effort,omitempty"`
+	// TimeoutMinutes stops a run that takes longer, in place of
+	// run_timeout_minutes, shorter or longer; 0 is run_timeout_minutes.
 	TimeoutMinutes int `json:"timeout_minutes,omitempty"`
 	// Missed is what a run that fell due while the bridge was down does:
 	// MissedRun (the default) runs once on start, MissedSkip waits for the
@@ -264,6 +268,9 @@ func (s Schedule) Validate() error {
 	if !validMissed[s.Missed] {
 		return fmt.Errorf("%s: missed %q must be %q or %q", at, s.Missed, MissedRun, MissedSkip)
 	}
+	if !ValidEffort(s.Effort) {
+		return fmt.Errorf("%s: effort %q must be one of low, medium, high, xhigh, max", at, s.Effort)
+	}
 	if s.TimeoutMinutes < 0 || s.TimeoutMinutes > MaxScheduleTimeout {
 		return fmt.Errorf("%s: timeout_minutes must be between 1 and %d, or 0 for run_timeout_minutes", at, MaxScheduleTimeout)
 	}
@@ -291,8 +298,8 @@ func (s Schedule) Validate() error {
 				return fmt.Errorf("%s: command arguments must be single lines", at)
 			}
 		}
-		if s.Risk != "" || s.DisallowedTools != nil || s.GitHub != nil || len(s.Preapproved) > 0 || len(s.Vars) > 0 {
-			return fmt.Errorf("%s: risk, disallowed_tools, github, preapproved and vars are for brain runs, not a command", at)
+		if s.Risk != "" || s.Effort != "" || s.DisallowedTools != nil || s.GitHub != nil || len(s.Preapproved) > 0 || len(s.Vars) > 0 {
+			return fmt.Errorf("%s: risk, effort, disallowed_tools, github, preapproved and vars are for brain runs, not a command", at)
 		}
 		return nil
 	}
