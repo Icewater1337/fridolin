@@ -1,9 +1,9 @@
 # Build, test and lint Fridolin. CI's build, lint and test jobs run these
 # same targets, so a passing `make check` here should mean those pass in CI
-# too (on this OS). CI also runs the site's tests (site/, which need its
-# npm packages), the fuzz targets on pushes to main (fuzz-short runs them
-# here), govulncheck, CodeQL and the personal-data scan of the pushed
-# commits; make check does not.
+# too (on this OS). CI's fuzz job runs fuzz-short, for 20 seconds a target,
+# on pushes to main. CI also runs the site's tests (site/, which need its
+# npm packages), govulncheck, CodeQL and the personal-data scan of the
+# pushed commits; make check runs none of these, nor fuzz-short.
 #
 #   make build        bin/fridolin
 #   make check        what CI's build, lint and test jobs run
@@ -51,8 +51,11 @@ ACTIONLINT  ?= $(GO) run github.com/rhysd/actionlint/cmd/actionlint@v$(ACTIONLIN
 RUFF        ?= ruff
 SHELLCHECK  ?= shellcheck
 
-# How long fuzz-short runs each fuzz target.
-FUZZTIME ?= 10s
+# How long fuzz-short runs each fuzz target, and how long the engine may
+# spend shrinking a failing input it found (60 seconds by default, longer
+# than a target's run).
+FUZZTIME         ?= 10s
+FUZZMINIMIZETIME ?= 5s
 
 .DEFAULT_GOAL := build
 .PHONY: help build install node-binaries test race race-shard race-process os-tests vet fmt fmt-check tidy-check root-check \
@@ -230,16 +233,34 @@ smoke: ## build with -race in a temp dir, start it in dev mode and stop it
 	$(GO) build -race -ldflags "$(VERSION_LDFLAGS)" -o "$$tmp/fridolin" $(MAIN_PKG); \
 	scripts/smoke.sh "$$tmp/fridolin" "$(VERSION)"
 
-# go test -fuzz takes one target in one package at a time. Listing the
-# targets first makes a package that does not compile fail here too.
+# go test -fuzz takes one target in one package at a time, so each target
+# in turn, found by name: a new one needs no change here. Listing the
+# targets first makes a package that does not compile fail here too. A
+# target that fails does not stop the others; the run fails at the end and
+# names them. The tests link testdata in their working directory to the
+# package's (LinkTestdata in internal/testutil), and the engine saves a
+# failing input there: without the folder the link dangles, and the input
+# would only be in the log. In GitHub Actions each target is a group of
+# the log, and the failing ones an error.
 fuzz-short: ## run every fuzz target for FUZZTIME (default 10s)
-	@set -e; for pkg in $$($(GO) list ./...); do \
+	@set -e; gha="$${GITHUB_ACTIONS:-}"; failed=""; \
+	for pkg in $$($(GO) list ./...); do \
 	  list="$$($(GO) test -list '^Fuzz' "$$pkg")"; \
-	  for fn in $$(printf '%s\n' "$$list" | grep '^Fuzz' || true); do \
-	    echo "$$pkg $$fn"; \
-	    $(GO) test -run '^$$' -fuzz "^$$fn$$" -fuzztime $(FUZZTIME) "$$pkg"; \
+	  targets="$$(printf '%s\n' "$$list" | grep '^Fuzz' || true)"; \
+	  [ -n "$$targets" ] || continue; \
+	  mkdir -p "$$($(GO) list -f '{{.Dir}}' "$$pkg")/testdata"; \
+	  for fn in $$targets; do \
+	    if [ -n "$$gha" ]; then echo "::group::$$fn ($$pkg)"; else echo "$$pkg $$fn"; fi; \
+	    $(GO) test -run '^$$' -fuzz "^$$fn$$" -fuzztime $(FUZZTIME) -fuzzminimizetime $(FUZZMINIMIZETIME) "$$pkg" || \
+	      failed="$$failed $$fn"; \
+	    if [ -n "$$gha" ]; then echo "::endgroup::"; fi; \
 	  done; \
-	done
+	done; \
+	if [ -n "$$failed" ]; then \
+	  if [ -n "$$gha" ]; then echo "::error::fuzzing found a failing input for:$$failed"; \
+	  else echo "fuzzing found a failing input for:$$failed" >&2; fi; \
+	  exit 1; \
+	fi
 
 # The image's Python packages (container/python), pinned with hashes for
 # linux/arm64 and linux/amd64 alike: torch from the PyTorch CPU index, and
