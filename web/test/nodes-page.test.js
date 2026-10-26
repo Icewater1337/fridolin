@@ -4,7 +4,7 @@ import { installDom } from './fake-dom.js';
 import { serve, settle, noConsoleErrors } from './serve.js';
 import { h } from '../assets/lib/dom.js';
 import { createPage } from '../assets/app/page.js';
-import { capSummary, gb, nodeNamed, osName, parseTags, programOnNode, ruleText, updateText } from '../assets/lib/nodes.js';
+import { capSummary, gb, nodeRef, nodesNamed, osName, parseTags, programOn, programOnNode, ruleText, updateText } from '../assets/lib/nodes.js';
 import page from '../assets/pages/nodes.js';
 
 /** @import { Node as FleetNode } from '../types/api.js' */
@@ -274,8 +274,9 @@ test('how a program stands on a node, before its agent is saved', () => {
   const node = (o) => /** @type {FleetNode} */ (/** @type {unknown} */ (o));
   const exec = { allow: [{ name: '/opt/bin/backup', args: ['--all'] }, { name: '/Users/you/tools/a.sh', args: [], exact: true, core: true }], accept_from_core: ['/Users/you/tools'] };
   const n = node({ id: 'abc', name: 'mini', declared: { exec }, effective: { exec } });
-  assert.equal(nodeNamed([n], 'MINI'), n);
-  assert.equal(nodeNamed([n], 'abc'), n);
+  assert.deepEqual(nodesNamed([n], 'MINI'), [n]);
+  assert.deepEqual(nodesNamed([n], ' abc '), [n]);
+  assert.deepEqual(nodesNamed([n], 'max'), []);
   assert.equal(programOnNode(null, ['/x']).state, 'no-node');
   assert.equal(programOnNode(n, ['/opt/bin/backup', '--all']).state, 'allowed');
   assert.equal(programOnNode(n, ['/Users/you/tools/a.sh']).state, 'allowed');
@@ -289,4 +290,31 @@ test('how a program stands on a node, before its agent is saved', () => {
   assert.match(programOnNode(none, ['/Users/you/tools/b.sh']).text, /accepts no programs from the core/);
   assert.equal(ruleText({ name: '/a.sh', args: ['x'], exact: true }), '/a.sh x (exactly)');
   assert.equal(capSummary({ exec: { allow: [], accept_from_core: ['/Users/you/tools'] } }), 'exec from the core (/Users/you/tools)');
+});
+
+test('a command agent names its node as the bridge finds it (#251)', () => {
+  /** @type {(o: object) => FleetNode} */
+  const node = (o) => /** @type {FleetNode} */ (/** @type {unknown} */ (o));
+  const exec = { allow: [], accept_from_core: ['/Users/you/tools'] };
+  const old = node({ id: 'aaa', name: 'laptop', device: 'revoked', declared: { exec }, effective: { exec } });
+  const laptop = node({ id: 'bbb', name: 'Laptop', device: 'approved', declared: { exec }, effective: { exec } });
+  const desk1 = node({ id: 'ccc', name: 'desktop', device: 'approved', declared: { exec }, effective: { exec } });
+  const desk2 = node({ id: 'ddd', name: 'Desktop', device: 'pending', declared: { exec }, effective: { exec } });
+  const gone = node({ id: 'eee', name: 'old', device: 'revoked', declared: { exec }, effective: { exec } });
+  const fleet = [old, laptop, desk1, desk2, gone];
+  // A revoked node steps aside for the one that has its name now, and
+  // answers to it alone; its id still names it.
+  assert.deepEqual(nodesNamed(fleet, 'LAPTOP'), [laptop]);
+  assert.deepEqual(nodesNamed(fleet, 'old'), [gone]);
+  assert.deepEqual(nodesNamed(fleet, 'aaa'), [old]);
+  assert.equal(programOn(fleet, 'laptop', ['/Users/you/tools/b.sh']).state, 'waiting');
+  // A name two nodes have names neither, and the text lists both.
+  assert.deepEqual(nodesNamed(fleet, 'desktop'), [desk1, desk2]);
+  const p = programOn(fleet, ' desktop ', ['/Users/you/tools/b.sh']);
+  assert.equal(p.state, 'no-node');
+  assert.equal(p.text, '2 nodes are called desktop: desktop (ccc), Desktop (ddd). Name one by its id.');
+  assert.equal(programOn(fleet, 'ddd', ['/Users/you/tools/b.sh']).state, 'waiting');
+  assert.equal(programOn(fleet, 'nope', ['/x']).state, 'no-node');
+  // The wizard offers each by a ref that names it alone.
+  assert.deepEqual(fleet.map((n) => nodeRef(fleet, n)), ['aaa', 'Laptop', 'ccc', 'ddd', 'old']);
 });

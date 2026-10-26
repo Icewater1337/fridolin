@@ -12,6 +12,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/doctor"
+	"github.com/Icewater1337/fridolin/internal/manifest"
 )
 
 // The node checks apply with nodes.enabled: the port must answer (M2's
@@ -171,6 +172,54 @@ func TestDoctorNodesVersion(t *testing.T) {
 			got := result(t, doctor.Run(context.Background(), env, DoctorRegistry.Checks()), "nodes-version")
 			if got.Status != tc.status || !strings.Contains(got.Detail, tc.detail) {
 				t.Errorf("nodes-version: %s %q, want %s with %q", got.Status, got.Detail, tc.status, tc.detail)
+			}
+		})
+	}
+}
+
+// TestDoctorNodesProgramsNameANode: the programs check finds a command
+// agent's node as its runs do (#251): by id, else by a name only one
+// node has, where a revoked node steps aside for one that has its name.
+// A name two nodes have is a warning that lists both.
+func TestDoctorNodesProgramsNameANode(t *testing.T) {
+	t.Parallel()
+	const allows = `"declared":{"exec":{"allow":[{"name":"/opt/tools/daily.sh","args":null}]}},"approved":{"exec":{"allow":[{"name":"/opt/tools/daily.sh","args":null}]}}`
+	agentOn := func(node string) *config.Settings {
+		return doctorConfig(func(c *config.Settings) {
+			c.Nodes = config.NodesConfig{Enabled: true, Listen: ":8766"}
+			c.BrainDirs = []config.BrainRef{{Path: "/home/you/main", Approved: &manifest.Manifest{ID: "main", Schedules: []manifest.Schedule{
+				{Name: "daily", Command: &manifest.ScheduleCommand{Node: node, Argv: []string{"/opt/tools/daily.sh"}}},
+			}}}}
+		})
+	}
+	for _, tc := range []struct {
+		name, node, live, status, detail, fix string
+	}{
+		{"a name two nodes have", "laptop",
+			`{"nodes":[{"id":"aaaaaaaaaaaa","name":"laptop","device":"approved",` + allows + `},{"id":"bbbbbbbbbbbb","name":"Laptop","device":"approved",` + allows + `}]}`,
+			doctor.Warn, `main/daily: 2 nodes are called "laptop": Laptop (bbbbbbbbbbbb), laptop (aaaaaaaaaaaa); name one by its id`, "give the node's id in the agent's command"},
+		{"its id", "bbbbbbbbbbbb",
+			`{"nodes":[{"id":"aaaaaaaaaaaa","name":"laptop","device":"approved"},{"id":"bbbbbbbbbbbb","name":"Laptop","device":"approved",` + allows + `}]}`,
+			doctor.OK, "the nodes allow the programs of all 1 command agents", ""},
+		{"a revoked namesake", "LAPTOP",
+			`{"nodes":[{"id":"aaaaaaaaaaaa","name":"laptop","device":"revoked"},{"id":"bbbbbbbbbbbb","name":"Laptop","device":"approved",` + allows + `}]}`,
+			doctor.OK, "the nodes allow the programs of all 1 command agents", ""},
+		{"revoked alone with its name", "laptop",
+			`{"nodes":[{"id":"aaaaaaaaaaaa","name":"laptop","device":"revoked",` + allows + `}]}`,
+			doctor.Warn, "main/daily: node laptop is revoked", ""},
+		{"no such node", "desktop",
+			`{"nodes":[{"id":"aaaaaaaaaaaa","name":"laptop","device":"approved",` + allows + `}]}`,
+			doctor.Warn, `main/daily: there is no node "desktop"`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := healthyMac().doctorEnv(agentOn(tc.node), nil)
+			env.LiveNodes = func(context.Context, *config.Settings) ([]byte, error) { return []byte(tc.live), nil }
+			got := checkNodesPrograms(context.Background(), env)
+			if got.Status != tc.status || !strings.Contains(got.Detail, tc.detail) {
+				t.Errorf("nodes-programs: %s %q, want %s with %q", got.Status, got.Detail, tc.status, tc.detail)
+			}
+			if tc.fix != "" && !strings.Contains(got.Fix, tc.fix) {
+				t.Errorf("nodes-programs' fix %q lacks %q", got.Fix, tc.fix)
 			}
 		})
 	}

@@ -365,24 +365,41 @@ func (r *Registry) Get(id string) (*Node, error) {
 // revoked. A name more than one such node has is refused with an
 // *AmbiguousNodeError that lists them.
 func (r *Registry) Resolve(ref string) (*Node, error) {
-	ref = strings.TrimSpace(ref)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	_ = r.load()
+	n, err := ResolveIn(r.file.Nodes, ref, func(n *Node) *Node { return n })
+	if err != nil {
+		return nil, err
+	}
+	return clone(n), nil
+}
+
+// ResolveIn is the item of list whose node ref names, by the rules of
+// Registry.Resolve; node gives an item's node. It names a node the same
+// way where the nodes come in another shape: a View, or what doctor
+// reads.
+func ResolveIn[T any](list []T, ref string, node func(T) *Node) (T, error) {
+	var zero T
+	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return nil, fmt.Errorf("%w %q", ErrUnknownNode, ref)
+		return zero, fmt.Errorf("%w %q", ErrUnknownNode, ref)
 	}
-	if n := r.file.find(ref); n != nil {
-		return clone(n), nil
+	all := make([]*Node, len(list))
+	for i, item := range list {
+		all[i] = node(item)
 	}
-	var live, revoked []*Node
-	for _, n := range r.file.Nodes {
+	if i := slices.IndexFunc(all, func(n *Node) bool { return n.ID == ref }); i >= 0 {
+		return list[i], nil
+	}
+	var live, revoked []int
+	for i, n := range all {
 		switch {
 		case !strings.EqualFold(n.Name, ref):
 		case n.Device == nodeproto.DeviceRevoked:
-			revoked = append(revoked, n)
+			revoked = append(revoked, i)
 		default:
-			live = append(live, n)
+			live = append(live, i)
 		}
 	}
 	found := live
@@ -391,18 +408,18 @@ func (r *Registry) Resolve(ref string) (*Node, error) {
 	}
 	switch len(found) {
 	case 0:
-		return nil, fmt.Errorf("%w %q", ErrUnknownNode, ref)
+		return zero, fmt.Errorf("%w %q", ErrUnknownNode, ref)
 	case 1:
-		return clone(found[0]), nil
+		return list[found[0]], nil
 	}
 	matches := make([]*Node, len(found))
-	for i, n := range found {
-		matches[i] = clone(n)
+	for i, at := range found {
+		matches[i] = clone(all[at])
 	}
 	slices.SortFunc(matches, func(a, b *Node) int {
 		return cmp.Or(strings.Compare(a.Name, b.Name), strings.Compare(a.ID, b.ID))
 	})
-	return nil, &AmbiguousNodeError{Name: ref, Matches: matches}
+	return zero, &AmbiguousNodeError{Name: ref, Matches: matches}
 }
 
 // codeAlphabet spells join codes: lower case, no padding.
