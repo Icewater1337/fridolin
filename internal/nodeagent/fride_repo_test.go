@@ -2,6 +2,7 @@ package nodeagent
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -216,10 +217,30 @@ func TestFrideRepoAdd(t *testing.T) {
 
 	// A base FrIDE does not scan is refused, as are several base folders
 	// without one named.
+	//
+	// Pairing again gives FrIDE a new token, and the old one stops working.
+	// A check the agent began before may ask FrIDE with the old one: it is
+	// refused, the node stops offering fride until its next check, and the
+	// core refuses fride calls until it hears the offer again (#273). A
+	// repository FrIDE reads only after the pairing marks the node's first
+	// offer since. The core takes a node's offers in order: once it has
+	// that repository, no older offer can follow.
 	if _, err := PairFride(ctx, FridePairOptions{Dir: a.Dir, URL: ff.URL, Code: ff.NewCode(), Base: other}); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "the new base read", func() bool { return a.frideBase() == other })
+	byHand := filepath.Join(repos, "notes")
+	if err := os.Mkdir(byHand, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, byHand, "init", "--quiet")
+	// What Re-check in FrIDE's settings does.
+	if err := frideDo(ctx, ff.URL, "", http.MethodPost, "/api/config", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the new base read, and the offer since the pairing at the core", func() bool {
+		n, err := c.svc.Registry().Get(a.ID())
+		return err == nil && n.Declared.Fride != nil && slices.Contains(n.Declared.Fride.Repos, "notes") && a.frideBase() == other
+	})
 	if _, err := c.svc.FrideRepoNew(ctx, a.ID(), nodeproto.FrideRepoParams{Name: "elsewhere"}); err == nil || !strings.Contains(err.Error(), "FrIDE does not scan") {
 		t.Fatalf("a base FrIDE does not scan: %v", err)
 	}
