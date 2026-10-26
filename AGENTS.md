@@ -379,13 +379,16 @@ machine must already be a node (path B). In short:
   CI also runs the site's tests and the fuzz targets (both below),
   govulncheck, CodeQL and the personal-data scan of the pushed commits.
   CI runs every Go test on Linux, and vets and lints macOS's and
-  Windows's files there too (`GOOS`, `make lint-go-os`). macOS and
-  Windows test only what differs there (`make os-tests`,
+  Windows's files there too (`GOOS`, `make lint-go-os`). A pull request
+  tests the current Go release on Linux and builds the images for amd64;
+  a push to main adds the previous release and arm64. macOS and
+  Windows, weekly and on demand (Actions → CI → Run workflow), test only
+  what differs there (`make os-tests`,
   `scripts/os-tests.sh`): packages built from other files for that
   system, the tests in files with a build constraint, and what
   `.github/os-specific-packages.txt` adds. A package whose code takes
   another way through `runtime.GOOS`, or drives a program only one
-  system has, goes into that file. The whole macOS suite runs nightly
+  system has, goes into that file. The whole macOS suite runs weekly
   and on demand (`.github/workflows/macos-full.yml`); its failures open
   issues labelled `ci-macos-nightly`.
   `make check` builds only into temp dirs; `make build` writes
@@ -424,7 +427,7 @@ machine must already be a node (path B). In short:
   `/ingest`, and every message the bridge itself sends into chats, which
   live in `internal/outbound/messages.go`. Times, temp paths, PIDs and the version are
   masked, so a second run writes the same bytes. A change meant to change
-  one rewrites it with `go test -run 'TestName' -update ./internal/app`, and
+  one rewrites it with `go test ./internal/app -run 'TestName' -update`, and
   the pull request says why. A new setting also goes into
   `cmd/fridolin/testdata/config-v1.json`, which sets every one, and into
   `docs/schemas/config.schema.json` (a field of brain.json into

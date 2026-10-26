@@ -62,9 +62,11 @@ jobs:
         include:
           - { image: fridolin-core, dockerfile: container/Dockerfile }
           - { image: fridolin-fride, dockerfile: container/fride/Dockerfile }
-          - { platform: linux/amd64, runner: ubuntu-latest, arch: amd64 }
-          - { platform: linux/arm64, runner: ubuntu-24.04-arm, arch: arm64 }
-    runs-on: ${{ matrix.runner }}
+        # A pull request builds for amd64 alone; main builds both, which
+        # the published multi-arch image needs.
+        exclude:
+          - platform: ${{ github.event_name == 'pull_request' && 'linux/arm64' || 'none' }}
+    runs-on: ${{ matrix.platform == 'linux/arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 45
     permissions:
       contents: read
@@ -162,7 +164,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: github.event_name == 'push'
         with:
-          name: digests-${{ matrix.image }}-${{ matrix.arch }}
+          name: digests-${{ matrix.image }}-${{ matrix.platform == 'linux/arm64' && 'arm64' || 'amd64' }}
           path: digests/*
           if-no-files-found: error
           retention-days: 1

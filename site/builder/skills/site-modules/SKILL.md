@@ -55,12 +55,13 @@ description: The module format of a Fridolin site — module.json fields, apps (
 | `server.entry` | file in the module; default export returns an Express router |
 | `server.mount` | default `<route>/api`; must be under the route or `/api/<id>` |
 | `server.access` | default: `access` |
+| `server.public` | paths under the mount that answer without sign-in (`["/intake"]`: that path and below); the router checks a token or signature itself, `req.user` is not set; 120 requests/min per client |
 | `capabilities.files` | every path the server code uses, named, with `read` or `write`; a path ending in `/` is a folder and everything in it |
 | `capabilities.commands`, `.secrets` | programs it runs (a name on PATH or a path); secrets it needs, by name (`OPENAI_API_KEY`) |
 | `capabilities.ingest` | brains it may hand files to with `ctx.ingest` (their ids) |
 | `capabilities.search` | brains whose folder it may search with `ctx.search` (their ids) |
 
-Everything is behind sign-in and `access`. There are no public pages.
+Everything is behind sign-in and `access`, except `app.public` files and `server.public` paths. Use those only when the person asks for something people without an account must reach (a form opened from an email link, a webhook), and say so in the proposal.
 
 ## A static page (no build)
 

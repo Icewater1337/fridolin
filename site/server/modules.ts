@@ -67,6 +67,12 @@ export type ModuleManifest = {
     mount?: string
     /** Who may call it. Default: the module's access. */
     access?: Access
+    /**
+     * Paths under the mount that answer without sign-in, e.g. ["/intake"]
+     * (that path and everything below it). The router must check what such a
+     * request may do itself: it has no req.user.
+     */
+    public?: string[]
   }
   /** What the module touches. Declared here so it can be reviewed in one place. */
   capabilities?: {
@@ -95,6 +101,12 @@ const SECRET_RE = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/
 const BRAIN_ID_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/
 
 /** Checks a parsed module.json; throws an Error saying what is wrong. */
+/** A public path: "/" plus segments of letters, digits, . _ - — no "..", no wildcards. */
+const PUBLIC_PATH_RE = /^(\/(?!\.\.?(\/|$))[\w.-]+)+$/
+
+/** Requests per client address and module a public path answers in a minute. */
+const PUBLIC_RATE_PER_MINUTE = 120
+
 export function validateManifest(raw: unknown, folder: string): ModuleManifest {
   const fail = (why: string): never => { throw new Error(why) }
   if (!isObject(raw)) fail('module.json must be a JSON object')
@@ -156,6 +168,12 @@ export function validateManifest(raw: unknown, folder: string): ModuleManifest {
       if (!ok) fail(`"server.mount" must be under ${route} or ${ownApi}`)
     }
     if (s.access !== undefined) checkAccess(s.access, 'server.access')
+    if (s.public !== undefined) {
+      if (!isStringArray(s.public)) fail('"server.public" must be a list of paths')
+      for (const p of s.public as string[]) {
+        if (!PUBLIC_PATH_RE.test(p)) fail(`"server.public" entry "${p}" must be a path like "/intake" (letters, digits, . _ - and /)`)
+      }
+    }
   }
 
   if (m.capabilities !== undefined) {
@@ -467,6 +485,24 @@ function moduleDataDir(id: string, host: ModuleHost): string {
   return dir
 }
 
+/** A fixed one-minute window per key; true while the key is under its limit. */
+function rateLimiter(perMinute: number): (key: string) => boolean {
+  const windows = new Map<string, { start: number; count: number }>()
+  return (key) => {
+    const now = Date.now()
+    if (windows.size > 10_000) {
+      for (const [k, w] of windows) if (now - w.start >= 60_000) windows.delete(k)
+    }
+    const w = windows.get(key)
+    if (!w || now - w.start >= 60_000) {
+      windows.set(key, { start: now, count: 1 })
+      return true
+    }
+    w.count++
+    return w.count <= perMinute
+  }
+}
+
 function mountModule(app: express.Express, mod: SiteModule, router: express.Router | undefined, requireAuth: express.RequestHandler) {
   const m = mod.manifest
   const access = gate(m.access, false)
@@ -482,6 +518,17 @@ function mountModule(app: express.Express, mod: SiteModule, router: express.Rout
   // The API before the app, so the app's fallback route cannot shadow it.
   if (router) {
     const mount = m.server!.mount ?? `${m.route}/api`
+    const publicPaths = m.server!.public ?? []
+    if (publicPaths.length > 0) {
+      // Public paths reach the router without sign-in, limited per client.
+      // What the router does not answer falls through to the signed-in mount.
+      const limit = rateLimiter(PUBLIC_RATE_PER_MINUTE)
+      app.use(mount, (req, res, next) => {
+        if (!publicPaths.some(p => req.path === p || req.path.startsWith(p + '/'))) { next(); return }
+        if (!limit(req.ip ?? '')) { res.status(429).json({ error: 'Too many requests' }); return }
+        router(req, res, next)
+      })
+    }
     app.use(mount, requireAuth, gate(m.server!.access ?? m.access, true), router)
   }
 

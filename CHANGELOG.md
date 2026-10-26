@@ -10,6 +10,13 @@ for compatibility.
 
 ### Added
 
+- **Public paths for site modules** (`server.public` in module.json, e.g.
+  `["/intake"]`): those paths of a module's server answer without sign-in,
+  so a form opened from an email link or a webhook can reach it. The router
+  checks what such a request may do itself (a one-time token, a signature);
+  the site limits public paths to 120 requests a minute per client address
+  and module. The deploy review lists the field (docs/SITE.md, "Public
+  paths").
 - **FrIDE is quiet in WhatsApp.** A new setting, `fride.news`
   (Settings → Messages), is `"quiet"` by default: a chat gets only work
   that is done or merged, failures (an identical one once per thread)
@@ -1151,6 +1158,14 @@ for compatibility.
   and a half. The core now gives each update's end of wait
   (`wait_until` in `GET /api/nodes`), the command waits until then, and
   says every minute that the update is still going.
+
+- **`!deny <ref>` no longer shuts out an approved node.** With nothing
+  waiting under that ref, for instance a second `!deny` of a node's
+  request for more, it fell through to `!revoke`: the node was shut out
+  and its core-host secrets forgotten. It now answers that nothing
+  waits and leaves the node as it was; only a node still waiting to
+  join is shut out, and `!revoke <ref>` is the way to shut out an
+  approved one.
 
 - **A box's FrIDE no longer stores a Claude token that cannot sign in.**
   On Windows, `box.ps1` piped the token through Windows PowerShell,

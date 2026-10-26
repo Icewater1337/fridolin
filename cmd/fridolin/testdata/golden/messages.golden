@@ -461,6 +461,8 @@ nodeIsRevokedReply
 	_ref 8233270f8a24_
 nodeUnknownReply
 	❓ Nothing waits with the ref nope, and no node has it. Send !approve alone to see what waits; `!fleet` lists the nodes.
+nodeNothingWaitsReply
+	❓ Nothing waits with the ref abc123, so nothing changed. `!revoke abc123` shuts that node out.
 approvalYes
 	✅ Yes
 approvalNo
