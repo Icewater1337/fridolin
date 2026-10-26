@@ -58,7 +58,8 @@ export type OpenAIConnection = {
   }) => Promise<{ text: string }>
   /**
    * OpenAI's Responses API: the request body as OpenAI takes it ("model" is
-   * required; no streaming). Answers OpenAI's JSON as it is.
+   * required; "stream" and "background" are refused). Answers OpenAI's JSON
+   * as it is.
    */
   responses: (body: Record<string, unknown>, opts?: { signal?: AbortSignal }) => Promise<any>
 }
@@ -78,7 +79,10 @@ export type ElevenLabsConnection = {
     voiceSettings?: Record<string, unknown>
     signal?: AbortSignal
   }) => Promise<{ audio: Buffer; contentType: string }>
-  /** Speech to text, at most 25 MiB. Default model: scribe_v1. */
+  /**
+   * Speech to text, at most 25 MiB. Default model: scribe_v1. language is
+   * ElevenLabs's code as it is, which may have three letters, e.g. "deu".
+   */
   transcribe: (opts: {
     audio: AudioInput
     contentType?: string
@@ -99,8 +103,9 @@ export interface ConnectionError extends Error {
   name: 'ConnectionError'
   /**
    * Fridolin's HTTP status: 400 a bad request, 403 not declared in
-   * module.json, 429 over the module's monthly budget, 502 the provider
-   * failed, 503 no key set or a preview, 504 the provider timed out.
+   * module.json, 404 the module is not live, 429 over the module's monthly
+   * budget, 502 the provider failed, 503 no key set or a preview, 504 the
+   * provider timed out.
    */
   status: number
   /** The provider's own HTTP status, when it answered an error. */

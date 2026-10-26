@@ -261,7 +261,7 @@ test('arguments the bridge would refuse are refused here, without a request', as
   await rejectsWith(c.openai.transcribe({} as never), { status: 400, message: /needs the audio as a Uint8Array/ })
   await rejectsWith(c.openai.transcribe({ audio: 'not bytes' } as never), { status: 400, message: /needs the audio/ })
   await rejectsWith(c.openai.transcribe({ audio: new Uint8Array(0) }), { status: 400, message: /the audio is empty/ })
-  await rejectsWith(c.elevenlabs.transcribe({ audio: Buffer.alloc(MAX_AUDIO_BYTES + 1) }), { status: 413, message: /larger than 25 MiB/ })
+  await rejectsWith(c.elevenlabs.transcribe({ audio: Buffer.alloc(MAX_AUDIO_BYTES + 1) }), { status: 400, message: /more than 25 MiB/ })
   await rejectsWith(c.openai.transcribe({ audio: Buffer.from('x'), language: 7 } as never), { status: 400, message: /"language" must be a string/ })
   await rejectsWith(c.openai.responses([] as never), { status: 400, message: /needs the request as an object/ })
   await rejectsWith(c.elevenlabs.tts({ text: '  ' }), { status: 400, message: /needs text/ })

@@ -75,14 +75,14 @@ export type ElevenLabsTTSOptions = {
 export type OpenAIConnection = {
   /** Transcribes a clip (at most 25 MiB). */
   transcribe: (opts: OpenAITranscribeOptions) => Promise<{ text: string }>
-  /** OpenAI's Responses API: the request body as OpenAI takes it ("model" required, no streaming); answers OpenAI's JSON. */
+  /** OpenAI's Responses API: the request body as OpenAI takes it ("model" required, no stream or background); answers OpenAI's JSON. */
   responses: (body: Record<string, unknown>, opts?: { signal?: AbortSignal }) => Promise<any>
 }
 
 export type ElevenLabsConnection = {
   /** Text to speech: the audio and its type (audio/mpeg by default). */
   tts: (opts: ElevenLabsTTSOptions) => Promise<{ audio: Buffer; contentType: string }>
-  /** Speech to text (at most 25 MiB). */
+  /** Speech to text (at most 25 MiB); language is ElevenLabs's code as it is, e.g. "deu". */
   transcribe: (opts: ElevenLabsTranscribeOptions) => Promise<{ text: string; language?: string }>
   /** The voices of the account. */
   voices: (opts?: { signal?: AbortSignal }) => Promise<Array<{ id: string; name: string }>>
@@ -90,9 +90,10 @@ export type ElevenLabsConnection = {
 
 /**
  * What a call throws: status is the bridge's HTTP status (400 a bad request,
- * 403 not declared, 429 over the monthly budget, 502 the provider failed,
- * 503 no key or no bridge, 504 the provider timed out), upstreamStatus and
- * code what the provider answered, when the bridge passed them on.
+ * 403 not declared, 404 no such module live, 429 over the monthly budget,
+ * 502 the provider failed, 503 no key or no bridge, 504 the provider timed
+ * out), upstreamStatus and code what the provider answered, when the bridge
+ * passed them on.
  */
 export class ConnectionError extends Error {
   readonly status: number
@@ -293,7 +294,7 @@ function audioFile(opts: { audio: AudioInput; contentType?: string; filename?: s
     throw new ConnectionError(`${where} needs the audio as a Uint8Array, a Buffer, an ArrayBuffer or a Blob`, 400)
   }
   if (blob.size === 0) throw new ConnectionError(`${where}: the audio is empty`, 400)
-  if (blob.size > MAX_AUDIO_BYTES) throw new ConnectionError(`${where}: the audio is larger than 25 MiB`, 413)
+  if (blob.size > MAX_AUDIO_BYTES) throw new ConnectionError(`${where}: the audio is more than 25 MiB`, 400)
   if (opts.filename !== undefined && typeof opts.filename !== 'string') throw new ConnectionError(`${where}: "filename" must be a string`, 400)
   const own = typeof File !== 'undefined' && a instanceof File ? a.name : ''
   const type = blob.type.split(';')[0].trim().toLowerCase()

@@ -136,7 +136,7 @@ export default function expenses(ctx: ModuleContext): express.Router {
   module's monthly limit, an estimate) and call:
   ```ts
   const { text } = await ctx.openai.transcribe({ audio: buf, contentType: 'audio/webm', language: 'de', prompt })
-  const out = await ctx.openai.responses({ model: 'gpt-5-mini', input })   // OpenAI's JSON; no stream
+  const out = await ctx.openai.responses({ model: 'gpt-5-mini', input })   // OpenAI's JSON; no stream or background
   const { audio, contentType } = await ctx.elevenlabs.tts({ text, voice })  // a Buffer, e.g. audio/mpeg
   const { text: said, language } = await ctx.elevenlabs.transcribe({ audio: buf, contentType: 'audio/wav' })
   const voices = await ctx.elevenlabs.voices()                              // [{ id, name }]

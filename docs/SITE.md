@@ -539,9 +539,9 @@ export default function dictation(ctx: ModuleContext): express.Router {
 | Call | What it does | Answers |
 | --- | --- | --- |
 | `ctx.openai.transcribe({ audio, contentType?, filename?, model?, language?, prompt? })` | Transcribes a clip of up to 25 MiB. Default model `gpt-4o-mini-transcribe`. | `{ text }` |
-| `ctx.openai.responses(body)` | OpenAI's Responses API, with the body as OpenAI takes it, up to 20 MiB. `model` is required; `stream: true` is refused. | OpenAI's JSON as it is |
+| `ctx.openai.responses(body)` | OpenAI's Responses API, with the body as OpenAI takes it, up to 20 MiB. `model` is required; `stream: true` and `background: true` are refused. | OpenAI's JSON as it is |
 | `ctx.elevenlabs.tts({ text, voice?, model?, format?, language?, voiceSettings? })` | Text to speech, up to 10,000 characters. Defaults: the voice set in the dashboard, `eleven_multilingual_v2`, `mp3_44100_128`. | `{ audio, contentType }`: a Buffer and its type, e.g. `audio/mpeg` |
-| `ctx.elevenlabs.transcribe({ audio, contentType?, filename?, model?, language? })` | Speech to text, up to 25 MiB. Default model `scribe_v1`. | `{ text, language? }` |
+| `ctx.elevenlabs.transcribe({ audio, contentType?, filename?, model?, language? })` | Speech to text, up to 25 MiB. Default model `scribe_v1`. | `{ text, language? }`, with ElevenLabs's language code as it is, which may have three letters (`deu`) |
 | `ctx.elevenlabs.voices()` | The voices of the account. | `[{ id, name }]` |
 
 `audio` is a Buffer, a Uint8Array, an ArrayBuffer or a Blob. The provider
@@ -556,8 +556,10 @@ answered an error:
 
 | Status | Why |
 | --- | --- |
-| 400 | A bad request: no model, `stream: true`, text too long, no voice. |
+| 400 | A bad request: no model, `stream: true` or `background: true`, audio over 25 MiB, text too long, no voice. |
+| 401 | The call names no module in `X-Fridolin-Module`, or has not the site's token. `ctx` always sends both. |
 | 403 | `module.json` does not declare the call or the model. The site checks the call itself before it asks the bridge. |
+| 404 | The module is not in the live commit. |
 | 429 | The module is over its `monthly_usd` this month. |
 | 502 | The provider failed or said no, e.g. `upstreamStatus` 404 and `code` `model_not_found`. |
 | 503 | No key is set in the dashboard, or there is no bridge (a preview or a check). |
