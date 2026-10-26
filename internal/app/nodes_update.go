@@ -86,33 +86,6 @@ func (t *targetService) busyOn(node string) string {
 	return ""
 }
 
-// findNode finds a node by its id or its name (any case).
-func (b *App) findNode(ref string) (*nodes.Node, error) {
-	ref = strings.TrimSpace(ref)
-	list, err := b.nodes.Registry().List()
-	if err != nil && list == nil {
-		return nil, err
-	}
-	for _, n := range list {
-		if n.ID == ref {
-			return n, nil
-		}
-	}
-	var found []*nodes.Node
-	for _, n := range list {
-		if strings.EqualFold(n.Name, ref) && n.Device != nodeproto.DeviceRevoked {
-			found = append(found, n)
-		}
-	}
-	switch len(found) {
-	case 0:
-		return nil, fmt.Errorf("no node %q", ref)
-	case 1:
-		return found[0], nil
-	}
-	return nil, fmt.Errorf("%d nodes are called %q: name one by its id", len(found), ref)
-}
-
 // nodeUpdateWait is how long node_update waits for the update to end
 // before it says the update goes on.
 var nodeUpdateWait = 3 * time.Minute
@@ -140,7 +113,7 @@ func (b *App) callNodeUpdate(ctx context.Context, _ mcpCaller, raw json.RawMessa
 	if err := json.Unmarshal(raw, &args); err != nil || strings.TrimSpace(args.Node) == "" {
 		return mcp.ErrorResult("node is missing: the node's name or id"), nil
 	}
-	n, err := b.findNode(args.Node)
+	n, err := b.nodes.FindNode(args.Node)
 	if err != nil {
 		return mcp.ErrorResult(err.Error()), nil
 	}

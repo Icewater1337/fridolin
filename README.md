@@ -386,7 +386,7 @@ writes there is not read.
 | `!join` | Owner only, direct chat: a single-use join code for a new [node](docs/NODES.md#joining-a-machine) (10 minutes) and the lines to paste on it. 5 an hour, audited |
 | `!dashboard` | Owner only, direct chat: a dashboard sign-in link that works once within 10 minutes, at the core's tailnet address and on the core machine, so another device signs in without the token. 5 an hour, audited |
 | `!approve`, `!deny` | Owner only, direct chat: approve, or turn down, what waits for you: a node, a brain's scheduled agent, changed brain.json or skill, a run's request. The bridge tells you of each in plain words; with several waiting a multi-select poll approves each one you tick, and one you did not start asks for a second `!approve` ([NODES.md](docs/NODES.md#approving-from-whatsapp)). `!approve <ref>` names one. Audited |
-| `!revoke <ref>` | Owner only, direct chat: shut a node out, approved or not. Audited |
+| `!revoke <ref>` | Owner only, direct chat: shut a node out, approved or not, named by its ref or its name. Audited |
 | `!lockdown` | Owner only (a number in `allowed_numbers`): pause all work but reading, everywhere, until `!unlock` or the dashboard's *Unlock* ([BRAINS.md](docs/BRAINS.md#skills-risk-and-approvals)) |
 | `!unlock` | Owner only: end a lockdown |
 

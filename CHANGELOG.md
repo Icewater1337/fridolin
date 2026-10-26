@@ -1163,6 +1163,15 @@ for compatibility.
 
 ### Fixed
 
+- **`fridolin nodes` takes a node's name** (#251). `move-check`,
+  `move`, `core-secrets-transfer`, `approve`, `revoke`, `update`,
+  `auto-update`, `tags` and `call` took only the 12-hex id, and said
+  `no such node "mac-mini"` to a name. Each now takes the id or the
+  name, in any case, as `!movecore` did. So do the API's node routes
+  (`/api/nodes/{id}/…`, and `source` and `target` of a move or a
+  transfer) and `!approve`, `!deny` and `!revoke`. A name more than one
+  node has is refused, with each node's id; a revoked node answers to
+  its name only when no other node has it.
 - **FrIDE's stall notices stay quiet** (#306). "Agent … has not moved
   for 2h", every half hour, reached the DM in quiet mode, and in a
   scheduled agent's chat started a run of it each time. It is now

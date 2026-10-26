@@ -47,3 +47,29 @@ func TestNodesUpdateWaitsAsLongAsTheCore(t *testing.T) {
 		t.Errorf("stdout %q: no progress line", stdout.String())
 	}
 }
+
+// TestNodesUpdateByName: the core answers an update of a node named by
+// its name with the node's id, which the wait follows (#251).
+func TestNodesUpdateByName(t *testing.T) {
+	poll, wait := nodeUpdatePoll, nodeUpdateWait
+	t.Cleanup(func() { nodeUpdatePoll, nodeUpdateWait = poll, wait })
+	nodeUpdatePoll, nodeUpdateWait = time.Millisecond, time.Second
+	var asked string
+	call := func(method, path string, body, out any) bool {
+		var v any = httpapi.NodeUpdateResponse{ID: "n1", To: "v2"}
+		if method == http.MethodGet {
+			v = httpapi.NodesResponse{Nodes: []nodes.View{{Node: &nodes.Node{ID: "n1", Name: "icebase", Update: &nodes.UpdateStatus{State: nodes.UpdateOK, To: "v2"}}}}}
+		} else {
+			asked = path
+		}
+		b, _ := json.Marshal(v)
+		return json.Unmarshal(b, out) == nil
+	}
+	var stdout, stderr bytes.Buffer
+	if code := nodesUpdate([]string{"IceBase"}, false, false, false, call, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit %d, stderr %q", code, stderr.String())
+	}
+	if asked != "/api/nodes/IceBase/update" || !strings.Contains(stdout.String(), "icebase (n1) runs v2 now.") {
+		t.Errorf("asked %s, stdout %q", asked, stdout.String())
+	}
+}

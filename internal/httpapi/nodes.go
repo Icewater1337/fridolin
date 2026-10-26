@@ -17,6 +17,8 @@ import (
 // core's fleet (internal/nodes).
 type NodesService interface {
 	Views() ([]nodes.View, error)
+	// FindNode is the node a ref names: its id, or its name (#251).
+	FindNode(ref string) (*nodes.Node, error)
 	ApproveDevice(id string) (*nodes.Node, error)
 	ApproveCommands(id string) (*nodes.Node, error)
 	Revoke(id string) (*nodes.Node, error)
@@ -33,7 +35,7 @@ type NodesService interface {
 
 // CoreSecretsTransferRequest is POST /api/nodes/core-secrets-transfer:
 // the host secrets from one core host to another (#187), a dry run
-// unless Run.
+// unless Run. Source and Target name each node by its id or its name.
 type CoreSecretsTransferRequest struct {
 	Source  string `json:"source"`
 	Target  string `json:"target"`
@@ -57,10 +59,18 @@ func (a *NodesAPI) CoreSecretsTransfer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Source == "" || req.Target == "" {
-		WriteErr(w, http.StatusBadRequest, "source and target are the ids of two nodes")
+		WriteErr(w, http.StatusBadRequest, "source and target are two nodes, by id or name")
 		return
 	}
-	rep, err := a.Nodes().CoreSecretsTransfer(r.Context(), req.Source, req.Target, nodes.CoreTransferOptions{Run: req.Run, Replace: req.Replace})
+	src, ok := a.nodeID(w, req.Source)
+	if !ok {
+		return
+	}
+	dst, ok := a.nodeID(w, req.Target)
+	if !ok {
+		return
+	}
+	rep, err := a.Nodes().CoreSecretsTransfer(r.Context(), src, dst, nodes.CoreTransferOptions{Run: req.Run, Replace: req.Replace})
 	switch {
 	case errors.Is(err, nodes.ErrUnknownNode), errors.Is(err, nodes.ErrInvalidInput):
 		writeNodeErr(w, err)
@@ -191,7 +201,11 @@ func (a *NodesAPI) change(w http.ResponseWriter, r *http.Request, fn func(string
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	n, err := fn(r.PathValue("id"))
+	id, ok := a.nodeID(w, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	n, err := fn(id)
 	if err != nil {
 		writeNodeErr(w, err)
 		return
@@ -199,11 +213,27 @@ func (a *NodesAPI) change(w http.ResponseWriter, r *http.Request, fn func(string
 	WriteJSON(w, http.StatusOK, NodeResponse{Node: n})
 }
 
+// nodeID is the id of the node ref names: its id, or its name in any
+// case (#251), as the owner gives it to `fridolin nodes`. A ref no node
+// answers to goes on as it is, for the call to refuse as it always did;
+// a name several nodes have is refused here, with each of them listed.
+func (a *NodesAPI) nodeID(w http.ResponseWriter, ref string) (string, bool) {
+	n, err := a.Nodes().FindNode(ref)
+	switch {
+	case err == nil:
+		return n.ID, true
+	case errors.Is(err, nodes.ErrUnknownNode):
+		return ref, true
+	}
+	writeNodeErr(w, err)
+	return "", false
+}
+
 func writeNodeErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, nodes.ErrUnknownNode):
 		WriteErr(w, http.StatusNotFound, err.Error())
-	case errors.Is(err, nodes.ErrRevoked), errors.Is(err, nodes.ErrNotApproved):
+	case errors.Is(err, nodes.ErrAmbiguousNode), errors.Is(err, nodes.ErrRevoked), errors.Is(err, nodes.ErrNotApproved):
 		WriteErr(w, http.StatusConflict, err.Error())
 	case errors.Is(err, nodes.ErrInvalidInput):
 		WriteErr(w, http.StatusUnprocessableEntity, err.Error())
@@ -239,7 +269,11 @@ func (a *NodesAPI) Tags(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	n, err := a.Nodes().SetTags(r.PathValue("id"), req.Tags)
+	id, ok := a.nodeID(w, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	n, err := a.Nodes().SetTags(id, req.Tags)
 	if err != nil {
 		writeNodeErr(w, err)
 		return
@@ -265,7 +299,10 @@ func (a *NodesAPI) Update(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	id := r.PathValue("id")
+	id, ok := a.nodeID(w, r.PathValue("id"))
+	if !ok {
+		return
+	}
 	to, err := a.Nodes().StartUpdate(id, nodes.UpdateOptions{Force: req.Force})
 	if err != nil {
 		writeNodeErr(w, err)
@@ -287,7 +324,11 @@ func (a *NodesAPI) UpdatePolicy(w http.ResponseWriter, r *http.Request) {
 		WriteErr(w, http.StatusBadRequest, "auto is missing: true or false")
 		return
 	}
-	n, err := a.Nodes().SetUpdateAuto(r.PathValue("id"), *req.Auto)
+	id, ok := a.nodeID(w, r.PathValue("id"))
+	if !ok {
+		return
+	}
+	n, err := a.Nodes().SetUpdateAuto(id, *req.Auto)
 	if err != nil {
 		writeNodeErr(w, err)
 		return
@@ -343,8 +384,12 @@ func (a *NodesAPI) Call(w http.ResponseWriter, r *http.Request) {
 	if len(params) == 0 {
 		params = json.RawMessage(`{}`)
 	}
+	id, ok := a.nodeID(w, r.PathValue("id"))
+	if !ok {
+		return
+	}
 	var out json.RawMessage
-	err := a.Nodes().Call(r.Context(), r.PathValue("id"), req.Method, params, &out)
+	err := a.Nodes().Call(r.Context(), id, req.Method, params, &out)
 	if pe, ok := errors.AsType[*nodeproto.Error](err); ok {
 		status := http.StatusBadGateway
 		switch pe.Code {

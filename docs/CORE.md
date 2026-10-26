@@ -753,6 +753,10 @@ fridolin nodes move SRC DST --yes       # move the core, and follow it to its en
 fridolin nodes move-status ID           # how move ID went (GET /api/nodes/moves/{id})
 ```
 
+SRC and DST are each a node's id or its name, in any case
+(`fridolin nodes move-check mac-mini fridolin-droplet`). A name more
+than one node has is refused, with each node's id.
+
 **Before.** SRC and DST are approved nodes, both online, neither with
 core-host turned off. A DST that never held the core needs the owner's
 vote: `!movecore DST` says so in its report, and "Move now" confirms
