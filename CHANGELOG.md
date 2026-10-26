@@ -1145,6 +1145,13 @@ for compatibility.
 
 ### Fixed
 
+- **`fridolin nodes update` waits for a box as long as the core does.**
+  It gave up after 12 minutes with "still updating after 12m0s", while a
+  box's hourly updater takes up to an hour and the core waits an hour
+  and a half. The core now gives each update's end of wait
+  (`wait_until` in `GET /api/nodes`), the command waits until then, and
+  says every minute that the update is still going.
+
 - **A box's FrIDE no longer stores a Claude token that cannot sign in.**
   On Windows, `box.ps1` piped the token through Windows PowerShell,
   which ends it with a carriage return (and can start it with a byte

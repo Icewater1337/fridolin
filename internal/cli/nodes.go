@@ -231,9 +231,15 @@ func nodesCmd(args []string, stdout, stderr io.Writer) int {
 }
 
 // nodeUpdatePoll and nodeUpdateWait pace `fridolin nodes update`'s wait.
+// nodeUpdateWait holds until the core says how long it waits itself (the
+// update's wait_until: an hour and a half for a box), and a little after
+// that, for the core to record how it ended. nodeUpdateProgress is how
+// often the wait says it is still going.
 var (
-	nodeUpdatePoll = 2 * time.Second
-	nodeUpdateWait = 12 * time.Minute
+	nodeUpdatePoll     = 2 * time.Second
+	nodeUpdateWait     = 12 * time.Minute
+	nodeUpdateGrace    = time.Minute
+	nodeUpdateProgress = time.Minute
 )
 
 // nodesUpdate starts the updates and, unless noWait, waits for each to
@@ -279,17 +285,40 @@ func nodesUpdate(pos []string, all, force, noWait bool, call func(method, path s
 		}
 		return 0
 	}
-	deadline := time.Now().Add(nodeUpdateWait)
-	for len(started) > 0 && time.Now().Before(deadline) {
+	begun := time.Now()
+	deadlines := map[string]time.Time{}
+	for id := range started {
+		deadlines[id] = begun.Add(nodeUpdateWait)
+	}
+	waiting := func() bool {
+		for id := range started {
+			if time.Now().Before(deadlines[id]) {
+				return true
+			}
+		}
+		return false
+	}
+	progress := begun.Add(nodeUpdateProgress)
+	for len(started) > 0 && waiting() {
 		time.Sleep(nodeUpdatePoll)
 		var resp httpapi.NodesResponse
 		if !call(http.MethodGet, "/api/nodes", nil, &resp) {
 			return 1
 		}
+		say := time.Now().After(progress)
+		if say {
+			progress = time.Now().Add(nodeUpdateProgress)
+		}
 		for _, n := range resp.Nodes {
 			to, ok := started[n.ID]
 			if !ok || n.Update == nil || n.Update.To != to {
 				continue
+			}
+			if u := n.Update.WaitUntil; u != nil && u.Add(nodeUpdateGrace).After(deadlines[n.ID]) {
+				deadlines[n.ID] = u.Add(nodeUpdateGrace)
+			}
+			if say && n.Update.Running() {
+				fmt.Fprintf(stdout, "%s (%s): still updating (%s, %v so far), the core waits until %s\n", n.Name, n.ID, n.Update.State, time.Since(begun).Round(time.Second), deadlines[n.ID].Add(-nodeUpdateGrace).Local().Format("15:04"))
 			}
 			switch n.Update.State {
 			case "ok": // nodes.UpdateOK
@@ -303,7 +332,7 @@ func nodesUpdate(pos []string, all, force, noWait bool, call func(method, path s
 		}
 	}
 	for id := range started {
-		fmt.Fprintf(stderr, "%s: still updating after %v; fridolin nodes shows how it ends\n", id, nodeUpdateWait)
+		fmt.Fprintf(stderr, "%s: still updating after %v; fridolin nodes shows how it ends\n", id, time.Since(begun).Round(time.Second))
 		failed = true
 	}
 	if failed {

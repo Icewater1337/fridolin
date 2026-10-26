@@ -62,6 +62,9 @@ type UpdateStatus struct {
 	FailedVersion string     `json:"failed_version,omitempty"`
 	StartedAt     *time.Time `json:"started_at,omitempty"`
 	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+	// WaitUntil is when the core gives up waiting for the node to come
+	// back: an hour and a half out for a box, whose updater runs hourly.
+	WaitUntil *time.Time `json:"wait_until,omitempty"`
 }
 
 // Running reports whether an update is under way.
@@ -498,6 +501,10 @@ func (s *Service) awaitUpdated(ctx context.Context, id string, before *session) 
 
 // awaitUpdatedWithin is awaitUpdated with its own wait.
 func (s *Service) awaitUpdatedWithin(ctx context.Context, id string, before *session, wait time.Duration) error {
+	s.setUpdate(id, func(u *UpdateStatus, now time.Time) {
+		until := now.Add(wait)
+		u.WaitUntil = &until
+	})
 	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
 	t := time.NewTicker(updatePoll)

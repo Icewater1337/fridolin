@@ -714,6 +714,8 @@ export interface NodeUpdateStatus {
   failed_version?: string;
   started_at?: string;
   finished_at?: string;
+  /** When the core gives up waiting for the node to come back. */
+  wait_until?: string;
 }
 
 export type NodeDevice = 'pending' | 'approved' | 'revoked';
