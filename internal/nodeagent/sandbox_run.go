@@ -48,16 +48,15 @@ type stdoutWriter struct {
 func (w stdoutWriter) Write(p []byte) (int, error) {
 	r := w.r
 	r.mu.Lock()
-	room := nodeproto.SandboxRunBuffer - len(r.out)
-	first := false
-	if len(p) > room {
-		r.out = append(r.out, p[:max(room, 0)]...)
-		first = !r.overflow
+	keep := min(len(p), max(nodeproto.SandboxRunBuffer-len(r.out), 0))
+	r.out = append(r.out, p[:keep]...)
+	first := keep < len(p) && !r.overflow
+	if keep < len(p) {
 		r.overflow = true
-	} else {
-		r.out = append(r.out, p...)
 	}
-	r.notify()
+	if keep > 0 {
+		r.notify()
+	}
 	r.mu.Unlock()
 	if first && w.overflowed != nil {
 		go w.overflowed()

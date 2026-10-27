@@ -245,7 +245,7 @@ func readRun(t *testing.T, a *Agent, run string) (string, nodeproto.SandboxReadR
 	t.Helper()
 	var out strings.Builder
 	var off int64
-	for range 200 {
+	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); {
 		res, perr := sbCall(t, a, nodeproto.MethodSandboxRead, nodeproto.SandboxReadParams{Run: run, Offset: off, WaitMS: 5000})
 		if perr != nil {
 			t.Fatal(perr)
@@ -257,7 +257,7 @@ func readRun(t *testing.T, a *Agent, run string) (string, nodeproto.SandboxReadR
 			return out.String(), r
 		}
 	}
-	t.Fatal("the run did not end")
+	t.Fatalf("the run did not end; %d bytes read", out.Len())
 	return "", nodeproto.SandboxReadResult{}
 }
 
@@ -316,6 +316,109 @@ func TestSandboxRun(t *testing.T) {
 	a.pruneRuns(time.Now().Add(nodeproto.SandboxRunForget + time.Second))
 	if _, perr := sbCall(t, a, nodeproto.MethodSandboxRead, nodeproto.SandboxReadParams{Run: "r1"}); perr == nil || perr.Code != nodeproto.CodeNotFound {
 		t.Errorf("a forgotten run: %v", perr)
+	}
+}
+
+// waitStarted reads until the run printed "started".
+func waitStarted(t *testing.T, a *Agent, run string) int64 {
+	t.Helper()
+	var off int64
+	var seen string
+	for range 100 {
+		res, perr := sbCall(t, a, nodeproto.MethodSandboxRead, nodeproto.SandboxReadParams{Run: run, Offset: off, WaitMS: 5000})
+		if perr != nil {
+			t.Fatal(perr)
+		}
+		r := res.(nodeproto.SandboxReadResult)
+		seen += r.Data
+		off = r.Next
+		if strings.Contains(seen, "started") || r.Done {
+			return off
+		}
+	}
+	t.Fatal("the run did not start")
+	return 0
+}
+
+func TestSandboxStop(t *testing.T) {
+	a, fake, _ := sandboxAgent(t)
+	p := readyBrain(t, a, "claude", "fake-agent", "wait")
+	if _, perr := sbCall(t, a, nodeproto.MethodSandboxRun, p); perr != nil {
+		t.Fatal(perr)
+	}
+	waitStarted(t, a, "r1")
+	// A read with nothing new waits, then answers empty.
+	start := time.Now()
+	res, perr := sbCall(t, a, nodeproto.MethodSandboxRead, nodeproto.SandboxReadParams{Run: "r1", Offset: int64(len("started\n")), WaitMS: 200})
+	if perr != nil || res.(nodeproto.SandboxReadResult).Data != "" || res.(nodeproto.SandboxReadResult).Done || time.Since(start) < 150*time.Millisecond {
+		t.Fatalf("an idle read: %+v %v after %v", res, perr, time.Since(start))
+	}
+	if _, perr := sbCall(t, a, nodeproto.MethodSandboxStop, nodeproto.SandboxStopParams{Run: "r1", GraceS: 5}); perr != nil {
+		t.Fatal(perr)
+	}
+	if _, end := readRun(t, a, "r1"); end.ExitCode != 143 {
+		t.Errorf("stopped: %+v", end)
+	}
+	want := []string{"exec", "fridolin-work", "sh", "-c", `kill -TERM -"$(cat "$0")"`, "/tmp/fridolin-run-r1.pid"}
+	if !called(fakeCalls(t, fake), want...) {
+		t.Errorf("no TERM to the run's process group inside the VM")
+	}
+	// One that ignores TERM gets KILL after the grace.
+	p.Run, p.Argv = "r2", []string{"fake-agent", "wait", "ignore-term"}
+	if _, perr := sbCall(t, a, nodeproto.MethodSandboxRun, p); perr != nil {
+		t.Fatal(perr)
+	}
+	waitStarted(t, a, "r2")
+	if _, perr := sbCall(t, a, nodeproto.MethodSandboxStop, nodeproto.SandboxStopParams{Run: "r2", GraceS: 1}); perr != nil {
+		t.Fatal(perr)
+	}
+	if _, end := readRun(t, a, "r2"); end.ExitCode != 137 {
+		t.Errorf("killed: %+v", end)
+	}
+	if _, perr := sbCall(t, a, nodeproto.MethodSandboxStop, nodeproto.SandboxStopParams{Run: "nope"}); perr == nil || perr.Code != nodeproto.CodeNotFound {
+		t.Errorf("stopping an unknown run: %v", perr)
+	}
+}
+
+// A run that writes past the buffer is stopped and says why; its output
+// up to the buffer is still there.
+func TestSandboxRunOverflow(t *testing.T) {
+	a, _, _ := sandboxAgent(t)
+	p := readyBrain(t, a, "claude", "fake-agent", "flood")
+	if _, perr := sbCall(t, a, nodeproto.MethodSandboxRun, p); perr != nil {
+		t.Fatal(perr)
+	}
+	out, end := readRun(t, a, "r1")
+	if len(out) != nodeproto.SandboxRunBuffer || end.Error == "" || end.ExitCode != 143 {
+		t.Errorf("overflow: %d bytes, %+v", len(out), end)
+	}
+}
+
+// Codex runs get sbx's provider settings as -c options and no Claude
+// token.
+func TestSandboxRunCodex(t *testing.T) {
+	a, fake, _ := sandboxAgent(t)
+	if err := os.WriteFile(filepath.Join(fake, "codex"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := readyBrain(t, a, "codex", "fake-agent", "echo", "0")
+	if _, perr := sbCall(t, a, nodeproto.MethodSandboxRun, p); perr != nil {
+		t.Fatal(perr)
+	}
+	out, end := readRun(t, a, "r1")
+	if end.ExitCode != 0 || !strings.Contains(out, "token: false") {
+		t.Errorf("codex run: %+v\n%s", end, out)
+	}
+	if !strings.Contains(out, `-c model_provider="sandboxd"`) || !strings.Contains(out, "model_providers.sandboxd.base_url") {
+		t.Errorf("no provider settings in codex's argv:\n%s", out)
+	}
+	if got := withCodexConfig([]string{"codex", "exec", "--json", "-"}); got[1] != "exec" || got[2] != "-c" || got[len(got)-1] != "-" {
+		t.Errorf("withCodexConfig: %v", got)
+	}
+	for _, c := range fakeCalls(t, fake) {
+		if c.TokenEnv {
+			t.Errorf("the Claude token went to %v", c.Args)
+		}
 	}
 }
 

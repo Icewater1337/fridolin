@@ -179,14 +179,25 @@ func fakeExec(dir string, args []string, tok string) int {
 // delivers into the VM; "fake-agent flood" writes past the node's
 // buffer first, then waits.
 func fakeAgentRun(dir, pidFile string, argv, env []string, tok string) int {
-	if len(argv) < 2 || argv[0] != "fake-agent" {
+	// Its mode words, without the -c options a Codex run gets.
+	full := argv
+	var words []string
+	for i := 0; i < len(argv); i++ {
+		if argv[i] == "-c" {
+			i++
+			continue
+		}
+		words = append(words, argv[i])
+	}
+	if len(words) < 2 || words[0] != "fake-agent" {
 		return 127
 	}
+	argv = words
 	switch argv[1] {
 	case "echo":
 		in, _ := io.ReadAll(os.Stdin)
 		fmt.Printf("prompt: %s\n", in)
-		fmt.Printf("argv: %s\n", strings.Join(argv, " "))
+		fmt.Printf("argv: %s\n", strings.Join(full, " "))
 		fmt.Printf("env: %s\n", strings.Join(env, " "))
 		fmt.Printf("token: %v\n", tok != "" && slices.Contains(env, "CLAUDE_CODE_OAUTH_TOKEN"))
 		fmt.Print("grüße\n")
