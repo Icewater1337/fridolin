@@ -321,6 +321,11 @@ type joinFlags struct {
 	workRoots                       multiFlag
 	box, boxNoFride                 bool
 	boxHostname                     string
+	// service makes a second node on the machine, with a service of its
+	// own, and noAndroid keeps it from offering android-build: set by
+	// `fridolin node fride sandbox join`, not flags of node join.
+	service   string
+	noAndroid bool
 }
 
 func (o *joinFlags) register(fs *flag.FlagSet) {
@@ -506,7 +511,10 @@ func nodeJoin(code, dir string, o joinFlags, pkg appPackage, stdout, stderr io.W
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	jo := nodeagent.JoinOptions{Dir: dir, Core: o.core, Code: code, Name: name, Capabilities: caps, Version: version.String()}
+	jo := nodeagent.JoinOptions{Dir: dir, Core: o.core, Code: code, Name: name, Capabilities: caps, Version: version.String(), Service: o.service}
+	if o.noAndroid {
+		jo.AndroidBuild = new(false)
+	}
 	if o.box {
 		box := &nodeagent.BoxConfig{Hostname: o.boxHostname, Fride: nodeagent.BoxFride}
 		if box.Hostname == "" {
@@ -568,7 +576,7 @@ func nodeJoin(code, dir string, o joinFlags, pkg appPackage, stdout, stderr io.W
 			return 1
 		}
 	}
-	fmt.Fprintf(stdout, "The service %s runs the agent from %s.\n", svc.Name, exe)
+	fmt.Fprintf(stdout, "The service %s runs the agent from %s.\n", svc.Name, svc.Executable)
 	return 0
 }
 
