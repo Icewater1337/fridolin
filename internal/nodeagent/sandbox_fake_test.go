@@ -161,6 +161,8 @@ func fakeExec(dir string, args []string, tok string) int {
 	cmd := args[1:]
 	_ = os.MkdirAll(filepath.Join(dir, "vm"), 0o700)
 	switch {
+	case cmd[0] == "sh" && strings.HasPrefix(cmd[2], "# fride-sandbox: "):
+		return fakeFrideScript(dir, cmd[2], cmd[4:])
 	case cmd[0] == "sh" && strings.Contains(cmd[2], `cat > "$0"`):
 		b, _ := io.ReadAll(os.Stdin)
 		_ = os.WriteFile(vmPath(dir, cmd[3]), b, 0o600)

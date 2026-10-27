@@ -104,6 +104,10 @@ type Agent struct {
 	// The Claude token for runs comes from CoreSecrets, the host's store.
 	SandboxSbx    string
 	SandboxDriver sbxDriver
+	// FrideSandboxPoll is how often the agent reads fride-sandbox.json
+	// to keep the sandboxed FrIDE running (DefaultFrideSandboxPoll when
+	// zero).
+	FrideSandboxPoll time.Duration
 	// checkSandboxBin checks a linux fridolin the core sent for the
 	// sandboxes (nil: checkLinuxBinary; tests send fakes).
 	checkSandboxBin func(path, arch string) (string, error)
@@ -333,6 +337,8 @@ func (a *Agent) Run(ctx context.Context) error {
 	defer fwg.Wait()
 	defer stopFride()
 	a.boxForward(fctx, &fwg)
+	// FrIDE in a Docker Sandbox, while fride-sandbox.json says run.
+	a.frideSandboxSupervise(fctx, &fwg)
 	// The core in a box: its ports, and the core when the box is it.
 	if s, ok := a.CoreRunner.(interface{ Supervise(context.Context) }); ok {
 		fwg.Go(func() { s.Supervise(fctx) })
