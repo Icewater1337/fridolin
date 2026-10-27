@@ -4,6 +4,9 @@ import { BRAIN_ID_RE, BRIDGE_BACKUP_ID, slugify, routingSummary, brainLabel, bac
 import { installDom } from './fake-dom.js';
 import { brainStatusPill, runtimeSummary, sandboxFact, sandboxPill } from '../assets/components/brain.js';
 import { h } from '../assets/lib/dom.js';
+import { serve, settle, noConsoleErrors } from './serve.js';
+import { createPage } from '../assets/app/page.js';
+import brainsPage from '../assets/pages/brains.js';
 
 test('slugify', async (t) => {
   const cases = [
@@ -150,6 +153,35 @@ test('a brain’s runtime as a pill and a sentence, with the sites it may reach'
     'Runs in a Docker Sandbox on Mac mini· also reaches api.github.com, *.wikipedia.org');
   assert.equal(sandboxFact(where({ configured: 'bubblewrap', effective: 'bubblewrap', egress: ['api.github.com'] })).textContent,
     'Runs in Fridolin’s sandbox', 'the sites matter only in a Docker Sandbox');
+});
+
+test('each brain card on the Brains page says where its runs happen', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  installDom();
+  noConsoleErrors(t);
+  const card = (id, sandbox) => ({ id, name: id, path: `/Users/you/${id}`, status: 'ok', issues: [], fallback: false, sandbox,
+    manifest: { version: 1, id, name: id, routing: { handles_dms: false, default: false, groups: [] } } });
+  const brains = [
+    card('home', where({})),
+    card('work', where({ effective: 'bubblewrap', ready: false, reason: 'the Mac mini is offline since 14:02', egress: ['api.github.com'] })),
+    card('club', where({ configured: 'bubblewrap', effective: 'bubblewrap' })),
+    card('old', undefined),
+  ];
+  serve(t, (path) => (path.startsWith('/api/brains') ? brains : {}));
+  const root = h('div');
+  document.body.append(root);
+  const ctx = createPage();
+  t.after(() => ctx.destroy());
+  brainsPage.render(root, ctx);
+  await settle();
+  const cards = root.querySelectorAll('.brain-card');
+  assert.deepEqual(cards.map((c) => c.querySelector('.bc-pills').textContent), ['ActiveDocker Sandbox', 'ActiveFallback', 'ActiveFridolin’s sandbox', 'Active']);
+  assert.deepEqual(cards.map((c) => (c.querySelector('.sandbox-fact') || { textContent: null }).textContent), [
+    'Runs in a Docker Sandbox on Mac mini',
+    'Docker Sandbox set, but runs in Fridolin’s sandbox now: the Mac mini is offline since 14:02· also reaches api.github.com',
+    'Runs in Fridolin’s sandbox',
+    null,
+  ]);
 });
 
 test('egressProblem takes hosts and patterns as sbx does', () => {
