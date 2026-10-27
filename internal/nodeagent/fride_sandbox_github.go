@@ -9,8 +9,15 @@ import (
 // host, as setHostToken does, and returns the placeholder that stands
 // for it there.
 func FrideSandboxSetHostToken(ctx context.Context, o FrideSandboxOptions, host, token string) (string, error) {
-	if _, err := o.loadMade(); err != nil {
+	st, err := o.loadMade()
+	if err != nil {
 		return "", err
+	}
+	// sbx reads the token file on the host; the VM must not reach it.
+	for _, mount := range []string{st.Base, st.Caches} {
+		if _, in := within(mount, o.Dir); mount != "" && in {
+			return "", fmt.Errorf("the state dir %s lies in %s, which the sandbox can write: its tokens cannot be kept there", o.Dir, mount)
+		}
 	}
 	if status, err := o.sandboxStatus(ctx); err != nil {
 		return "", err

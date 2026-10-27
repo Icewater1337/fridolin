@@ -128,8 +128,11 @@ func TestFrideSandboxLiveGitHubCachesHistory(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	t.Logf("created %s in %s", o.sandbox(), time.Since(start).Round(time.Second))
-	if err := FrideSandboxGitHub(ctx, o, string(ghTok)); err != nil {
-		t.Fatalf("github: %v", err)
+	// Twice, as after gh auth refresh: the second replaces the first.
+	for i := range 2 {
+		if err := FrideSandboxGitHub(ctx, o, string(ghTok)); err != nil {
+			t.Fatalf("github (%d): %v", i+1, err)
+		}
 	}
 	liveGitHub(ctx, t, o, string(ghTok))
 	liveOtherHosts(ctx, t, o)
