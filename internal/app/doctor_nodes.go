@@ -133,6 +133,18 @@ const liveNodesTimeout = 5 * time.Second
 // of the bridge on cfg's http_listen, with the dashboard token, as
 // `fridolin nodes` asks it.
 func askBridgeNodes(ctx context.Context, cfg *config.Settings) ([]byte, error) {
+	return askBridge(ctx, cfg, "/api/nodes")
+}
+
+// askBridgeBrains is doctor.Env.LiveBrains on the real system: GET
+// /api/brains, as askBridgeNodes asks.
+func askBridgeBrains(ctx context.Context, cfg *config.Settings) ([]byte, error) {
+	return askBridge(ctx, cfg, "/api/brains")
+}
+
+// askBridge GETs path of the bridge on cfg's http_listen, with the
+// dashboard token.
+func askBridge(ctx context.Context, cfg *config.Settings, path string) ([]byte, error) {
 	if !cfg.HTTPEnabled || cfg.HTTPListen == "" {
 		return nil, errors.New("the bridge's HTTP server is off")
 	}
@@ -142,7 +154,7 @@ func askBridgeNodes(ctx context.Context, cfg *config.Settings) ([]byte, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, liveNodesTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+localAddress(cfg.HTTPListen)+"/api/nodes", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+localAddress(cfg.HTTPListen)+path, nil)
 	if err != nil {
 		return nil, err
 	}
