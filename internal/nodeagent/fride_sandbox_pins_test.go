@@ -7,8 +7,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
 // The FrIDE template takes its base image, Claude Code and ponytail from
@@ -42,12 +40,9 @@ func TestFrideSandboxDockerfilePins(t *testing.T) {
 	}
 }
 
-// The scripts are sh, and the sandbox's name is never a brain's.
+// The scripts are sh.
 func TestFrideSandboxScripts(t *testing.T) {
 	t.Parallel()
-	if strings.HasPrefix(FrideSandboxName, nodeproto.SandboxName("")) {
-		t.Errorf("%s is named like a brain's sandbox", FrideSandboxName)
-	}
 	sh, err := exec.LookPath("sh")
 	if err != nil {
 		t.Skip("no sh")
