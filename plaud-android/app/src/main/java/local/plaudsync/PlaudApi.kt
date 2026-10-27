@@ -103,7 +103,7 @@ object PlaudApi {
             val task = call(withApiKey("$BASE/open/partner/ai/transcriptions/$id").get())
             when (val status = task.optString("status").uppercase()) {
                 "SUCCESS" -> return format(task.getJSONObject("data"))
-                "FAILURE", "REVOKED" -> error("transcription $id: $status")
+                "FAILURE", "REVOKED" -> throw TranscriptionFailed("transcription $id: $status")
             }
         }
         error("transcription $id timed out")
@@ -131,11 +131,17 @@ object PlaudApi {
 
     private fun JSONObject.body(): RequestBody = toString().toRequestBody(JSON)
 
+    /** Plaud gave up on a recording (FAILURE or REVOKED): sending it again does not help. */
+    class TranscriptionFailed(message: String) : IllegalStateException(message)
+
+    /** A non-2xx answer from Plaud: 401 means the token ran out or was refused. */
+    class HttpError(val code: Int, message: String) : IllegalStateException(message)
+
     /** Throws on non-2xx with method, path and status only; bodies may hold recording data. */
     private fun call(builder: Request.Builder): JSONObject {
         val req = builder.build()
         return http.newCall(req).execute().use { r ->
-            check(r.isSuccessful) { "${req.method} ${req.url.encodedPath}: HTTP ${r.code}" }
+            if (!r.isSuccessful) throw HttpError(r.code, "${req.method} ${req.url.encodedPath}: HTTP ${r.code}")
             // org.json's parse error quotes the whole body, which then would reach the log
             runCatching { JSONObject(r.body!!.string()) }
                 .getOrElse { error("${req.method} ${req.url.encodedPath}: the answer is not JSON") }

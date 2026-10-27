@@ -1201,6 +1201,19 @@ for compatibility.
 
 ### Fixed
 
+- **Plaud Sync 0.6: recordings that come off the NotePin together all
+  reach Fridolin.** When a check-in found several recordings, only the
+  first was transcribed. The others waited in the app until the next
+  recording, hours or days later, and nothing about them was logged. Now
+  every recording saved while one is transcribed is transcribed too, and
+  each check-in (also opening the app) tries again what still waits:
+  recordings to transcribe, transcripts to upload, voice questions. The
+  app renews Plaud's token by its age, also while the phone sleeps, and
+  once more when Plaud refuses it; before, a sleeping phone could keep a
+  token that had run out, and transcription failed. A voice-mode
+  recording with nothing said in it is now logged instead of dropped
+  silently. Build the app again and install it over the old one: it keeps
+  its pairing and what waits in it.
 - **Your own FrIDE threads stay in your chat** (#337). At every start,
   the bridge gave a scheduled agent the open threads it seemed to have
   started, among them any that began while a run of the agent was
