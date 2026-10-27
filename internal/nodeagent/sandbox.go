@@ -14,8 +14,9 @@ import (
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
-// Docker Sandboxes on the node (#149): the agent declares sandbox while
-// it finds sbx and sbx answers, and runs brains' runs in one microVM per
+// Docker Sandboxes on the node (#149): the agent declares sandbox once
+// `fridolin node sandbox setup` recorded a template, while it finds sbx
+// and sbx answers, and runs brains' runs in one microVM per
 // brain, fridolin-<brain>, as the core asks (sandbox.* methods).
 
 // Files of the sandbox in the state dir.
