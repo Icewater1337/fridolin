@@ -153,13 +153,15 @@ func frideSandboxRemove(ctx context.Context, o nodeagent.FrideSandboxOptions, f 
 		if term.readLine == nil {
 			return fail("removing the sandbox removes its workspaces and any work in them that is not committed: pass --yes")
 		}
-		fmt.Fprintf(stderr, "This removes the sandbox %s with FrIDE's workspaces and any work in them that is not committed; the repositories on this Mac stay.\n", nodeagent.FrideSandboxName)
+		fmt.Fprintf(stderr, "This removes the sandbox %s with FrIDE's workspaces and any work in them that is not committed; the repositories on this Mac stay. %s\n",
+			nodeagent.FrideSandboxName, yesNo(f.noHistory, "The agents' sessions and FrIDE's tasks go with it (--no-history).", "The agents' sessions and FrIDE's tasks are saved first; create puts them back."))
 		answer, err := term.readLine("Remove it? [y/N] ")
 		if err != nil || !strings.EqualFold(answer, "y") && !strings.EqualFold(answer, "yes") {
 			fmt.Fprintln(stdout, "Nothing removed.")
 			return 1
 		}
 	}
+	o.SkipHistory = f.noHistory
 	if err := nodeagent.FrideSandboxRemove(ctx, o); err != nil {
 		return fail("%v", err)
 	}

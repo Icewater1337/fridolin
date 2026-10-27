@@ -162,8 +162,9 @@ func FrideSandboxStop(ctx context.Context, o FrideSandboxOptions) error {
 	return o.exec(ctx, nil, frideSandboxStop)
 }
 
-// FrideSandboxRemove removes the sandbox, with its workspaces, and the
-// state; the base folder and the node's pairing stay.
+// FrideSandboxRemove saves the history (unless SkipHistory), then
+// removes the sandbox, with its workspaces, and the state; the base
+// folder, the history, the host tokens and the node's pairing stay.
 func FrideSandboxRemove(ctx context.Context, o FrideSandboxOptions) error {
 	if st, err := LoadFrideSandbox(o.Dir); err == nil && st != nil && st.Run {
 		st.Run = false
@@ -174,6 +175,11 @@ func FrideSandboxRemove(ctx context.Context, o FrideSandboxOptions) error {
 	status, err := o.sandboxStatus(ctx)
 	if err != nil {
 		return err
+	}
+	if status != "" && !o.SkipHistory {
+		if err := o.saveHistory(ctx, status); err != nil {
+			return fmt.Errorf("%w; nothing removed (--no-history removes it without saving)", err)
+		}
 	}
 	if status != "" {
 		if _, stderr, err := o.sbx().run(ctx, nil, nil, "rm", "-f", o.sandbox()); err != nil {
@@ -233,4 +239,20 @@ func CheckClaudeToken(token string) (string, error) {
 		return "", errors.New("that has characters a token never has (copied with other text?)")
 	}
 	return tok, nil
+}
+
+// saveHistory ends FrIDE, so that its state rests, and saves the history
+// into the history folder.
+func (o FrideSandboxOptions) saveHistory(ctx context.Context, status string) error {
+	if status == "running" {
+		if err := o.exec(ctx, nil, frideSandboxStop); err != nil {
+			return err
+		}
+	}
+	n, err := o.saveVM(ctx, o.historyDir(), frideSandboxHistory)
+	if err != nil {
+		return fmt.Errorf("saving the history: %w", err)
+	}
+	fmt.Fprintf(o.Out, "Saved %d folders and files of history (the agents' sessions, FrIDE's tasks) to %s; create puts them back.\n", n, o.historyDir())
+	return nil
 }

@@ -99,7 +99,7 @@ func FrideSandboxCreate(ctx context.Context, o FrideSandboxOptions) error {
 	if err := o.newSandbox(ctx, st); err != nil {
 		return err
 	}
-	if err := o.makeInside(ctx, &st, config, commit); err != nil {
+	if err := o.makeInside(ctx, &st, config, commit, o.historyDir(), frideSandboxHistory); err != nil {
 		_, _, _ = d.run(context.WithoutCancel(ctx), nil, nil, "rm", "-f", o.sandbox())
 		return fmt.Errorf("%w; the sandbox is removed again", err)
 	}
@@ -151,9 +151,10 @@ func (o FrideSandboxOptions) newSandbox(ctx context.Context, st FrideSandboxStat
 	return nil
 }
 
-// makeInside sets the new sandbox's rules, then prepares FrIDE's folders
-// and config, the git identity, and builds FrIDE at commit.
-func (o FrideSandboxOptions) makeInside(ctx context.Context, st *FrideSandboxState, config []byte, commit string) error {
+// makeInside sets the new sandbox's rules and tokens, puts back keep
+// from store, prepares FrIDE's folders and config, the git identity, and
+// builds FrIDE at commit.
+func (o FrideSandboxOptions) makeInside(ctx context.Context, st *FrideSandboxState, config []byte, commit, store string, keep []string) error {
 	d := o.sbx()
 	rules := [][]string{
 		{"allow", "localhost:" + strconv.Itoa(FrideSandboxWebhookPort)},
@@ -171,6 +172,11 @@ func (o FrideSandboxOptions) makeInside(ctx context.Context, st *FrideSandboxSta
 		fmt.Fprintf(o.Out, "Note: %v; set it again (fridolin node fride sandbox github).\n", err)
 	} else if hosts := hostTokenHosts(o.Dir, o.sandbox()); len(hosts) > 0 {
 		fmt.Fprintf(o.Out, "Gave the sandbox its tokens for %s again.\n", strings.Join(hosts, ", "))
+	}
+	if n, err := o.restoreVM(ctx, store, keep); err != nil {
+		return err
+	} else if n > 0 {
+		fmt.Fprintf(o.Out, "Put back %d saved folders and files (the agents' sessions, FrIDE's tasks) from %s.\n", n, store)
 	}
 	if err := o.exec(ctx, bytes.NewReader(config), frideSandboxPrepare); err != nil {
 		return err

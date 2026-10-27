@@ -46,8 +46,10 @@ Usage:
                   build FrIDE again at the commit the checkout pins, and restart it
   fridolin node fride sandbox status
                   the sandbox, FrIDE, the pairing, the login
-  fridolin node fride sandbox rm [--yes]
-                  remove the sandbox, with its workspaces (asks first)
+  fridolin node fride sandbox rm [--yes] [--no-history]
+                  save the agents' sessions and FrIDE's tasks to the state dir
+                  (create puts them back), then remove the sandbox, with its
+                  workspaces (asks first)
 
 Flags:
   --state-dir DIR   the sandboxed FrIDE's node (default: the node's state dir with -sbx)
@@ -59,7 +61,7 @@ type frideSandboxFlags struct {
 	stateDir, repo, base, frideRepo, gitName, gitEmail string
 	core, name, dockerDisk                             string
 	setupToken, yes, noService, noCaches               bool
-	remove, tokenStdin                                 bool
+	remove, tokenStdin, noHistory                      bool
 }
 
 // frideSandboxStateDir is the sandboxed FrIDE's node's default state dir:
@@ -106,6 +108,7 @@ func nodeFrideSandboxCmd(args []string, stdout, stderr io.Writer) int {
 		fs.BoolVar(&f.setupToken, "setup-token", false, "run claude setup-token in the sandbox first")
 	case "rm":
 		fs.BoolVar(&f.yes, "yes", false, "do not ask")
+		fs.BoolVar(&f.noHistory, "no-history", false, "do not save the agents' sessions and FrIDE's tasks first")
 	case "start", "stop", "status":
 	default:
 		fmt.Fprintf(stderr, "unknown node fride sandbox command %q\n\n%s", sub, nodeFrideSandboxUsage)

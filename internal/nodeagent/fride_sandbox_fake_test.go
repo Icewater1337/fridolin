@@ -12,8 +12,10 @@ import (
 // sbx's VM, by the name on its first line. Its files are under
 // dir/fride: config.json (prepare), git (the identity), built and
 // builds.log (build), serves.log and running (serve, which runs until
-// stopped or crash appears), stops.log, token (login); code is the
-// pairing code pair-code prints, fail-<name> fails a script.
+// stopped or crash appears), stops.log, token (login), credentials (git's
+// helpers), owns.log (own); code is the pairing code pair-code prints,
+// fail-<name> fails a script. list and mkdirs work on dir/vmhome, the
+// VM's home, which cp copies to and from.
 func fakeFrideScript(dir, script string, args []string) int {
 	name, _, _ := strings.Cut(strings.TrimPrefix(script, "# fride-sandbox: "), "\n")
 	vm := filepath.Join(dir, "fride")
@@ -63,6 +65,20 @@ func fakeFrideScript(dir, script string, args []string) int {
 	case "login":
 		b, _ := io.ReadAll(os.Stdin)
 		_ = os.WriteFile(at("token"), b, 0o600)
+	case "list":
+		fmt.Println("home=" + fakeVMHome)
+		for _, p := range args {
+			if _, err := os.Stat(filepath.Join(dir, "vmhome", p)); err == nil {
+				fmt.Println("have=" + p)
+			}
+		}
+	case "mkdirs":
+		for _, p := range args {
+			_ = os.MkdirAll(filepath.Join(dir, "vmhome", p), 0o755)
+		}
+	case "own":
+		appendFile(at("owns.log"), strings.Join(args, " ")+"\n")
+		_ = os.Remove(filepath.Join(dir, "vmhome", "fride-companion", "home", "fride.pid"))
 	case "credential":
 		appendFile(at("credentials"), strings.Join(args, " ")+"\n")
 	case "uncredential":

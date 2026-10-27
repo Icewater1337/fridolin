@@ -39,6 +39,8 @@ type FrideSandboxOptions struct {
 	// DefaultFrideSandboxDockerDisk); Caches the host folder of the
 	// shared Go and npm caches ("": none) (create).
 	DockerDisk, Caches string
+	// SkipHistory has rm remove the sandbox without saving its history.
+	SkipHistory bool
 	// Out gets what is done, for the person who runs it.
 	Out io.Writer
 	// env is added to each program's environment (tests: the fakes');

@@ -53,7 +53,8 @@ func TestFrideSandboxScripts(t *testing.T) {
 		t.Skip("no sh")
 	}
 	for _, s := range []string{frideSandboxPrepare, frideSandboxGit, frideSandboxBuild, frideSandboxServe,
-		frideSandboxStop, frideSandboxPairCode, frideSandboxLogin, frideSandboxStatus, frideSandboxCredential, frideSandboxUncredential} {
+		frideSandboxStop, frideSandboxPairCode, frideSandboxLogin, frideSandboxStatus, frideSandboxCredential, frideSandboxUncredential,
+		frideSandboxList, frideSandboxMkdirs, frideSandboxOwn} {
 		if out, err := exec.Command(sh, "-n", "-c", s).CombinedOutput(); err != nil || !strings.HasPrefix(s, "# fride-sandbox: ") {
 			t.Errorf("%v %s\n%s", err, out, s)
 		}
