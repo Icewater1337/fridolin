@@ -14,12 +14,13 @@ import (
 	"strings"
 )
 
-// Per-host tokens of a sandbox (docs/NODES.md, "Git hosts"): a token for
-// a git host never enters the VM. The VM gets a placeholder, and sbx's
-// proxy puts the token in its place in every request to the host: in an
-// Authorization header (Bearer, token) and in git's Basic auth. The
-// token waits on the host in a file only the node reads, which sbx reads
-// (`--command`) when it sets the secret and when it refreshes it.
+// Per-host tokens of a sandbox (docs/NODES.md, "GitHub and other git
+// hosts"): a token for a git host never enters the VM. The VM gets a
+// placeholder, and sbx's proxy puts the token in its place in every
+// request to the host: in an Authorization header (Bearer, token) and in
+// git's Basic auth. The token waits on the host in a file only the node
+// reads, which sbx reads (`--command`) when it sets the secret and when
+// it refreshes it.
 //
 // setHostToken and removeHostToken are the helpers; they work for any
 // host (github.com, gitlab.example.com:8443). For github.com the sandbox
@@ -35,6 +36,9 @@ const sbxTokensDir = "sbx-tokens"
 // is for.
 var hostTokenRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:[0-9]{1,5})?$`)
 
+// brainSandboxNameRe is a brain's sandbox's name: one path element.
+var brainSandboxNameRe = regexp.MustCompile(`^fridolin-[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+
 // githubHost is the host whose token also goes to sbx's github service.
 const githubHost = "github.com"
 
@@ -43,7 +47,7 @@ func hostTokenFiles(dir, sandbox, host string) (token, placeholder string, err e
 	if !hostTokenRe.MatchString(host) || len(host) > 253 {
 		return "", "", fmt.Errorf("%q is not a host (like github.com or gitlab.example.com:8443)", host)
 	}
-	if !frideSandboxNameRe.MatchString(sandbox) && !strings.HasPrefix(sandbox, "fridolin-") {
+	if !frideSandboxNameRe.MatchString(sandbox) && !brainSandboxNameRe.MatchString(sandbox) {
 		return "", "", fmt.Errorf("%q is not a sandbox of fridolin's", sandbox)
 	}
 	base := filepath.Join(dir, sbxTokensDir, sandbox, strings.ReplaceAll(host, ":", "_"))
@@ -149,7 +153,8 @@ func setHostToken(ctx context.Context, d sbxDriver, dir, sandbox, host, token st
 		return "", fmt.Errorf("sbx could not set the secret for %s: %w", host, redact(err, stderr))
 	}
 	if host == githubHost {
-		if _, stderr, err := d.run(ctx, strings.NewReader(tok), nil, "secret", "set", "github", "--sandbox", sandbox); err != nil {
+		// --force replaces the secret set before, which sbx otherwise asks about.
+		if _, stderr, err := d.run(ctx, strings.NewReader(tok), nil, "secret", "set", "github", "--sandbox", sandbox, "--force"); err != nil {
 			return "", fmt.Errorf("sbx could not set its github secret: %w", redact(err, stderr))
 		}
 	}

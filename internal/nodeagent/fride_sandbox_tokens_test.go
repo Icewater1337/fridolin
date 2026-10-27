@@ -40,8 +40,9 @@ func TestFrideSandboxHostTokens(t *testing.T) {
 	if got := fakeCustom(fake, ph); got != "github.com,api.github.com="+gh {
 		t.Errorf("the custom secret: %q", got)
 	}
-	if got, _ := os.ReadFile(filepath.Join(fake, "github-secret")); string(got) != gh {
-		t.Errorf("sbx's github secret: %q", got)
+	if got, _ := os.ReadFile(filepath.Join(fake, "github-secret")); string(got) != gh ||
+		!called(fakeCalls(t, fake), "secret", "set", "github", "--sandbox", FrideSandboxName, "--force") {
+		t.Errorf("sbx's github secret: %q (replaced with --force, as sbx asks otherwise)", got)
 	}
 	if got := fakeFile(fake, "credentials"); got != "https://github.com x-access-token "+ph+"\n" {
 		t.Errorf("git's helper in the VM: %q", got)
