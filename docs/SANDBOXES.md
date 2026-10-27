@@ -118,11 +118,61 @@ comes with the next look: the next run of such a brain, or the dashboard.
    VM's fridolin (`bin_path` from `sandbox.info`); the node sets
    `FRIDOLIN_API`, `FRIDOLIN_BRAIN_TOKEN_FILE`, `FRIDOLIN_BIN`,
    `FRIDOLIN_TOOLS_DIR` and the login. The run token goes to the node
-   alone, and sbx's proxy puts it into the run's calls to the core.
+   alone, and sbx's proxy puts it into the run's calls to the core. A
+   run with a GitHub grant gets its token the same way (below).
 4. `sandbox.read` brings the output back as it comes, into the same
    parser, notices and deadlines as under bubblewrap.
 5. A stop or a timeout calls `sandbox.stop`, which ends the run inside
    the VM. The sandbox stops by itself 30 seconds after the run.
+
+## GitHub in a run
+
+A run with a GitHub grant (docs/GITHUB.md) gets its token through sbx,
+not as gh's login:
+
+- The core sends the token to the node in `sandbox.run`'s
+  `github_token`, never in the run's environment or arguments.
+- The node stores it, through stdin, as the sandbox's own `github`
+  secret. sbx's proxy sets it on every call to GitHub's hosts, whatever
+  the client sends: gh's `Authorization: Bearer` and git's Basic auth
+  alike. The VM has only sbx's placeholder in `GH_TOKEN`.
+- So `gh` and git over HTTPS work as they are, with no credential
+  helper.
+- While the run goes on, the sandbox may reach `github.com`,
+  `api.github.com`, `codeload.github.com`,
+  `objects.githubusercontent.com` and `raw.githubusercontent.com`. The
+  node adds these rules for the run, and removes them and the secret
+  when it ends. A host the brain's own `egress` names keeps its rule.
+- A run without a grant reaches none of them, unless the brain's egress
+  names them. Its `GH_TOKEN` is the placeholder, which GitHub refuses.
+- A brain's runs go one at a time, so one secret per sandbox is enough.
+  Two runs that overlap share it until the last one ends.
+- If the node's agent stops during a run, the brain's next ensure
+  removes what that run opened: `state.json` names the rules.
+
+Tested with sbx v0.50.0: `gh api user` and `git ls-remote` of a private
+repository answered, and a scan of the VM as root found no token.
+
+## The agent's sessions
+
+Claude keeps each session in `~/.claude/projects` in the VM. sbx's kit
+puts that folder on a volume of the sandbox's own, which goes when the
+sandbox is made again: when its template, mounts, memory or egress
+change.
+
+So the node keeps the sessions on the host, in
+`<state dir>/sandbox/history/<brain>/claude` (`codex` for Codex's
+`~/.codex/sessions`). It binds that folder over the VM's after each
+create, with `sbx mount`, and sbx restores the bind at each start.
+Nothing is copied, and a rebuild loses nothing. Removing a brain's
+sandbox keeps its sessions; delete the folder to drop them.
+
+Brain runs do not resume a session: each starts from the chat's recent
+history, as under bubblewrap, and Codex runs with `--ephemeral`. The
+sessions are there for you to read.
+
+A sandbox made before this version is made again once, at its next run.
+The sessions in it until then go with it.
 
 ## Limits of this version
 
@@ -132,7 +182,6 @@ comes with the next look: the next run of such a brain, or the dashboard.
 - `sandbox.deny_paths` inside a brain folder cannot be hidden in the VM.
 - A brain allowed to build the site keeps its builder's plugin only under
   bubblewrap.
-- A run's GitHub token (docs/GITHUB.md) is not handed into the VM yet.
 - Claude's login is the node's setup-token in the run's environment, as
   under bubblewrap. TODO: sbx's own `/login`, which keeps the token out
   of the VM, once it is tested.
