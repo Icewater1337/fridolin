@@ -382,6 +382,14 @@ func TestSandboxStop(t *testing.T) {
 	if _, perr := sbCall(t, a, nodeproto.MethodSandboxStop, nodeproto.SandboxStopParams{Run: "nope"}); perr == nil || perr.Code != nodeproto.CodeNotFound {
 		t.Errorf("stopping an unknown run: %v", perr)
 	}
+	// One past its timeout is stopped inside, and says why.
+	p.Run, p.Argv, p.TimeoutS = "r3", []string{"fake-agent", "wait"}, 1
+	if _, perr := sbCall(t, a, nodeproto.MethodSandboxRun, p); perr != nil {
+		t.Fatal(perr)
+	}
+	if _, end := readRun(t, a, "r3"); end.ExitCode != 143 || !strings.Contains(end.Error, "timeout") {
+		t.Errorf("timed out: %+v", end)
+	}
 }
 
 // A run that writes past the buffer is stopped and says why; its output

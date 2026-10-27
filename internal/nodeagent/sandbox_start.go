@@ -197,7 +197,12 @@ func (a *Agent) sandboxRunStart(ctx context.Context, p nodeproto.SandboxRunParam
 	r.mu.Unlock()
 	var timer *time.Timer
 	if p.TimeoutS > 0 {
-		timer = time.AfterFunc(time.Duration(p.TimeoutS)*time.Second, stop)
+		timer = time.AfterFunc(time.Duration(p.TimeoutS)*time.Second, func() {
+			r.mu.Lock()
+			r.timedOut = true
+			r.mu.Unlock()
+			stop()
+		})
 	}
 	go func() {
 		code, msg := exitCode(cmd.Wait())

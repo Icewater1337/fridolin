@@ -20,6 +20,7 @@ type sandboxRun struct {
 	out      []byte
 	stderr   []byte
 	overflow bool
+	timedOut bool
 	done     bool
 	exitCode int
 	errMsg   string
@@ -82,8 +83,12 @@ func (w stderrWriter) Write(p []byte) (int, error) {
 func (r *sandboxRun) finish(code int, msg string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.overflow && msg == "" {
+	switch {
+	case msg != "":
+	case r.overflow:
 		msg = "the run's output went past the node's buffer, so it was stopped"
+	case r.timedOut:
+		msg = "the run went past its timeout, so it was stopped"
 	}
 	r.done, r.exitCode, r.errMsg, r.ended = true, code, msg, time.Now()
 	r.notify()
