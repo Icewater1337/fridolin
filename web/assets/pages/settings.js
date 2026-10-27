@@ -8,7 +8,7 @@ import { configResource } from '../app/resources.js';
 import { h, mount, paint } from '../lib/dom.js';
 import { plural } from '../lib/format.js';
 import { getPath, setPath } from '../lib/keypath.js';
-import { EFFORTS, RUNTIME_NAMES } from '../lib/brain.js';
+import { EFFORTS } from '../lib/brain.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn } from '../components/buttons.js';
@@ -111,15 +111,6 @@ const SECTIONS = [
       { key: 'otp_markers', type: 'list', label: 'Phrases that ask for a code', placeholder: 'verification code', addLabel: 'Add phrase', help: 'Matched in any letter case, as whole words. Empty uses the built-in list: 🔐, OTP, 2FA, one-time code, verification code.' },
       { key: 'fride.news', type: 'select', def: 'quiet', label: 'FrIDE’s news in the chat', options: [['quiet', 'Quiet — results, failures and real questions'], ['all', 'All — every piece of FrIDE’s news']], help: 'Quiet sends what is done or merged, what failed and what FrIDE really asks, a few lines each, and an identical error only once per thread; progress and bookkeeping stay on the FrIDE page. Work a scheduled agent handed to FrIDE never posts here: its agent handles it, and reports only what matters.' },
       { key: 'ingest.enabled', type: 'bool', label: 'Accept files through /ingest', help: 'Lets local programs (a web upload, a recorder sync) hand files they write to the top of the media folder to a brain with POST /ingest. Every call needs a token: your programs send the one in scripts.token in the data folder (Authorization: Bearer …); a brain sends its own, and may hand only files in its own inbox, only to itself.' },
-    ],
-  },
-  {
-    id: 'runtime',
-    title: 'Where brains run',
-    intro: 'In Fridolin’s sandbox, beside the bridge, or each in a Docker Sandbox: a small virtual machine of its own on a node, which reaches only its AI provider, Fridolin and the sites its brain allows. A brain can choose its own on its page. More in docs/SANDBOXES.md.',
-    fields: [
-      { key: 'sandbox.runtime', type: 'select', def: 'bubblewrap', label: 'Brains run in', options: [['bubblewrap', `${RUNTIME_NAMES.bubblewrap} (default)`], ['docker-sandbox', RUNTIME_NAMES['docker-sandbox']]], help: 'While a brain’s Docker Sandbox is not available, it runs in Fridolin’s sandbox and you get a message, unless the brain is set to refuse.' },
-      { key: 'sandbox.node', type: 'text', mono: true, label: 'Node for Docker Sandboxes', placeholder: 'the node on this machine', help: 'The node, by name or id, whose Docker Sandboxes run the brains. Empty: the approved node on the core’s machine that offers them (see Nodes).' },
     ],
   },
   {

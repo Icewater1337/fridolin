@@ -135,21 +135,6 @@ test('an edited nested setting is saved inside its object, beside the others', a
   });
 });
 
-test('where brains run by default, and the node of their Docker Sandboxes, are saved in sandbox', async (t) => {
-  const { bridge, inputFor, save } = await openPage(t, { config: { claude_path: 'claude', sandbox: { enabled: true, deny_paths: ['~/clients'] } } });
-  const runtime = inputFor('Brains run in');
-  assert.equal(runtime.value, 'bubblewrap', 'unset is Fridolin’s sandbox');
-  assert.deepEqual(runtime.querySelectorAll('option').map((o) => o.textContent), ['Fridolin’s sandbox (default)', 'Docker Sandbox']);
-  assert.equal(inputFor('Node for Docker Sandboxes').getAttribute('placeholder'), 'the node on this machine');
-  runtime.value = 'docker-sandbox';
-  runtime.dispatchEvent(new Event('change'));
-  type(inputFor('Node for Docker Sandboxes'), 'Mac mini');
-  await save();
-  assert.equal(bridge.puts.length, 1);
-  assert.deepEqual(bridge.config.sandbox, { enabled: true, deny_paths: ['~/clients'], runtime: 'docker-sandbox', node: 'Mac mini' }, 'beside the sandbox’s other settings');
-  assert.equal(inputFor('Brains run in').value, 'docker-sandbox', 'and shown as saved');
-});
-
 test('a dangerous setting says why in a warning beside it', async (t) => {
   const { inputFor } = await openPage(t);
   const field = inputFor('Let brains use tools without asking').closest('.field');

@@ -105,22 +105,6 @@ export interface Schedule {
   github?: GitHubGrant;
 }
 
-/** Where a brain's runs happen: Fridolin's own sandbox, or a Docker Sandbox (docs/SANDBOXES.md). */
-export type SandboxRuntime = 'bubblewrap' | 'docker-sandbox';
-
-/** What a docker-sandbox brain does while its sandbox is not available. */
-export type SandboxFallback = 'bubblewrap' | 'refuse';
-
-/** A brain's own sandbox settings (brain.json "sandbox"). */
-export interface BrainSandbox {
-  /** Overrides config.json's sandbox.runtime; unset inherits it. */
-  runtime?: SandboxRuntime;
-  /** bubblewrap (the default) or refuse. */
-  fallback?: SandboxFallback;
-  /** Extra hosts the brain may reach beyond its provider and the core's API, in sbx's host pattern syntax; at most 50. */
-  egress?: string[];
-}
-
 /** A brain's brain.json (manifest.Manifest), normalized. */
 export interface BrainManifest {
   version: number;
@@ -144,7 +128,6 @@ export interface BrainManifest {
   grants?: Record<string, string[]>;
   memory?: BrainMemory;
   schedules?: Schedule[];
-  sandbox?: BrainSandbox;
 }
 
 /** Why a configured brain needs attention. */
@@ -235,32 +218,6 @@ export interface Intent {
   fired?: number;
 }
 
-/**
- * Where a brain's next run happens: a runtime, sandbox-exec (a native
- * Mac's own sandbox, Fridolin's sandbox there) or refused (its fallback is
- * refuse while its Docker Sandbox is not ready).
- */
-export type EffectiveRuntime = SandboxRuntime | 'sandbox-exec' | 'refused';
-
-/**
- * Where a brain's runs happen and why (httpapi.BrainSandbox), from a look
- * at the node at most 30 s old.
- */
-export interface BrainSandboxRuntime {
-  /** What its brain.json, or else config.json, chose. */
-  configured: SandboxRuntime;
-  /** What the next run would use. */
-  effective: EffectiveRuntime;
-  fallback: SandboxFallback;
-  /** The node whose Docker Sandboxes run it. */
-  node: string;
-  /** Its Docker Sandbox can run it now. */
-  ready: boolean;
-  /** Why it is not ready, in words. */
-  reason: string;
-  egress: string[];
-}
-
 /** One entry of GET /api/brains, and GET /api/brains/{id}. */
 export interface Brain {
   /** "" while the entry has no approved manifest. */
@@ -276,8 +233,6 @@ export interface Brain {
   issues: BrainIssue[];
   /** Left out for a brain that does not run. */
   runtime?: BrainRuntime;
-  /** Where its runs happen. */
-  sandbox?: BrainSandboxRuntime;
   /** The brain that takes the chats no other brain claims. */
   fallback: boolean;
   intents?: Intent[];
@@ -397,10 +352,6 @@ export interface SandboxConfig {
   /** read (the default) or deny. */
   git_config?: string;
   credentials_dir?: string;
-  /** The default for every brain; bubblewrap when unset. */
-  runtime?: SandboxRuntime;
-  /** The node, by id or name, whose sandbox capability runs the brains; "" for the one on the core's machine. */
-  node?: string;
 }
 
 export interface QueueConfig {
@@ -716,26 +667,6 @@ export interface NodeCapabilities {
   agent?: WorkstationCap;
   terminal?: WorkstationCap;
   core_host?: CoreHostCap;
-  sandbox?: SandboxCap;
-}
-
-/** Docker Sandboxes (sbx) on the node: brains' runs in microVMs (nodeproto.SandboxCap). */
-export interface SandboxCap {
-  /** sbx version. */
-  version: string;
-  signed_in: boolean;
-  /** sandboxd answers. */
-  daemon: boolean;
-  /** Fridolin's global settings hold. */
-  settings: boolean;
-  /** The template name fridolin made, "" before setup. */
-  template?: string;
-  /** "claude", "codex": those with a usable login. */
-  providers?: string[];
-  /** Why it is not ready, plain. */
-  problem?: string;
-  /** The version of the linux fridolin the sandboxes mount, "" before the core sent one. */
-  bin?: string;
 }
 
 /** The machine may take over the core (nodeproto.CoreHostCap; docs/NODES.md, "core-host"). */
