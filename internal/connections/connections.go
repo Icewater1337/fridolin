@@ -137,7 +137,8 @@ type Options struct {
 	Dir string
 	// Settings are config.json's connections, read at each call.
 	Settings func() Settings
-	// HTTP is the client the calls go out with; nil makes one.
+	// HTTP is the client the calls go out with; nil makes one. The
+	// service uses a copy that follows no redirect.
 	HTTP *http.Client
 	// Endpoints are the providers' addresses; an empty one is the real.
 	Endpoints Endpoints
@@ -170,12 +171,22 @@ func New(o Options) *Service {
 	if o.Endpoints.ElevenLabs == "" {
 		o.Endpoints.ElevenLabs = DefaultElevenLabs
 	}
-	client := o.HTTP
-	if client == nil {
-		// Each call has a deadline of its own (its context).
-		client = &http.Client{}
+	// Each call has a deadline of its own (its context).
+	client := &http.Client{}
+	if o.HTTP != nil {
+		c := *o.HTTP
+		client = &c
 	}
+	client.CheckRedirect = refuseRedirect
 	return &Service{o: o, http: client}
+}
+
+// refuseRedirect makes a 3xx the answer of the call instead of following
+// it. Go drops Authorization on a redirect to another host, but copies
+// ElevenLabs' xi-api-key header, so a redirect could send the key
+// elsewhere. Neither provider's API redirects.
+func refuseRedirect(*http.Request, []*http.Request) error {
+	return http.ErrUseLastResponse
 }
 
 func (s *Service) base(conn string) string {

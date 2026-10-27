@@ -1197,6 +1197,11 @@ for compatibility.
   questions started runs of the agent. Now only threads from before
   agents kept their FrIDE news (#300, 25 October 2026) go to an agent.
   A thread that was already moved stays with the agent.
+- **Connections follow no redirect** (#335). A call to OpenAI or
+  ElevenLabs that answers with a redirect now fails with that answer
+  ("it answered 302 Found"). Before, the bridge followed it, and Go
+  copies ElevenLabs' `xi-api-key` header on to another host, so a
+  redirect there would have sent the key along. Neither API redirects.
 - **Pairing FrIDE again works at once.** After `fridolin node fride
   pair` on a node whose agent runs, FrIDE takes only the new token,
   while the agent kept the old one until its next check, up to half a
