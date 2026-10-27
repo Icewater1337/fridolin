@@ -194,7 +194,12 @@
   },
   "nodes": {
     "enabled": true,
-    "listen": "127.0.0.1:9766"
+    "listen": "127.0.0.1:9766",
+    "git_identities": {
+      "mini": [
+        "github"
+      ]
+    }
   },
   "policy": {
     "max_runs_per_hour": 30,

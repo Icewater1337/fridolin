@@ -120,6 +120,13 @@ func (a *Agent) pushIdentities(ctx context.Context) nodeproto.FrideIdentitiesRes
 	if !have {
 		return res
 	}
+	// None to give and none given before: nothing to ask FrIDE.
+	if len(want) == 0 && len(a.pushedIdentities()) == 0 {
+		a.fride.mu.Lock()
+		res.Supported = a.fride.takesIDs
+		a.fride.mu.Unlock()
+		return res
+	}
 	if cfg == nil || token == "" {
 		res.Pending, res.Error = true, "FrIDE is not paired with this node"
 		return res

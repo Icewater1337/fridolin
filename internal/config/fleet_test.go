@@ -32,7 +32,7 @@ func TestFleetSectionsDefaultOff(t *testing.T) {
 		Nodes:  NodesConfig{Listen: ":8766"},
 		Policy: PolicyConfig{MaxRunsPerHour: 20, MaxPendingIrreversible: 3, ApprovalTimeoutHours: 24},
 	}
-	if s.Core != want.Core || !reflect.DeepEqual(s.Vault, want.Vault) || s.Nodes != want.Nodes || s.Policy != want.Policy {
+	if s.Core != want.Core || !reflect.DeepEqual(s.Vault, want.Vault) || !reflect.DeepEqual(s.Nodes, want.Nodes) || s.Policy != want.Policy {
 		t.Fatalf("defaults:\n got %+v %+v %+v %+v\nwant %+v %+v %+v %+v", s.Core, s.Vault, s.Nodes, s.Policy, want.Core, want.Vault, want.Nodes, want.Policy)
 	}
 	if s.Core.Lease.Renew() != 5*time.Minute || s.Core.Lease.Stale() != 20*time.Minute || s.Policy.ApprovalTimeout() != 24*time.Hour {
@@ -46,7 +46,7 @@ func TestFleetSectionsKeepWhatIsSet(t *testing.T) {
 	t.Parallel()
 	data := []byte(`{"core": {"tailnet": {"enabled": true, "hostname": "core-2"}, "lease": {"enabled": true, "renew_seconds": 10, "stale_seconds": 11}, "memory_limit_gb": 2},
 		"vault": {"enabled": true, "hot_budget_gb": 1, "activity_days": 2, "cold_after_days": 3, "headroom_percent": 4, "bucket": "my-vault", "snapshots_bucket": "my-snaps", "endpoint": "localhost", "b2_daily_budget": 900, "secret_dirs": ["/srv/secrets"], "secret_keep_days": 7},
-		"nodes": {"enabled": true, "listen": "[::1]:9000"},
+		"nodes": {"enabled": true, "listen": "[::1]:9000", "git_identities": {"mini": ["github"]}},
 		"policy": {"max_runs_per_hour": 1, "max_pending_irreversible": 1, "approval_timeout_hours": 1}}`)
 	var f File
 	if err := json.Unmarshal(data, &f); err != nil {
@@ -57,11 +57,11 @@ func TestFleetSectionsKeepWhatIsSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Core != want.Core || !reflect.DeepEqual(s.Vault, want.Vault) || s.Nodes != want.Nodes || s.Policy != want.Policy {
+	if s.Core != want.Core || !reflect.DeepEqual(s.Vault, want.Vault) || !reflect.DeepEqual(s.Nodes, want.Nodes) || s.Policy != want.Policy {
 		t.Fatalf("got %+v %+v %+v %+v", s.Core, s.Vault, s.Nodes, s.Policy)
 	}
 	eff := EffectiveFile(s)
-	if eff.Core != want.Core || !reflect.DeepEqual(eff.Vault, want.Vault) || eff.Nodes != want.Nodes || eff.Policy != want.Policy {
+	if eff.Core != want.Core || !reflect.DeepEqual(eff.Vault, want.Vault) || !reflect.DeepEqual(eff.Nodes, want.Nodes) || eff.Policy != want.Policy {
 		t.Fatal("the effective file lost a setting")
 	}
 }
@@ -98,6 +98,9 @@ func TestFleetSectionsRefuse(t *testing.T) {
 		{`{"nodes": {"listen": ":65536"}}`, "nodes.listen"},
 		{`{"nodes": {"listen": ":08766"}}`, "nodes.listen"},
 		{`{"nodes": {"listen": "bad_host:8766"}}`, "nodes.listen"},
+		{`{"nodes": {"git_identities": {"mini": ["svn"]}}}`, "nodes.git_identities.mini"},
+		{`{"nodes": {"git_identities": {"mini": ["github", "github"]}}}`, "names github twice"},
+		{`{"nodes": {"git_identities": {" ": ["github"]}}}`, "not a node's id or name"},
 		{`{"policy": {"max_runs_per_hour": -1}}`, "policy.max_runs_per_hour"},
 		{`{"policy": {"max_pending_irreversible": 1001}}`, "policy.max_pending_irreversible"},
 		{`{"policy": {"approval_timeout_hours": 721}}`, "policy.approval_timeout_hours"},
