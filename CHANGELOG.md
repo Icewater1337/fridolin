@@ -23,6 +23,8 @@ for compatibility.
   (renewed before it ends; only when the app may write code) or the typed
   token, and `gitlab`. The node puts them into a FrIDE that takes them
   (FrIDE c5dd87b9, now pinned) and removes the ones it no longer gets.
+  The FrIDE in a Docker Sandbox gets none; the FrIDE instances that
+  replace it will get placeholders (`setHostToken`).
   config.json's new `nodes.git_identities` says which a node gets; a node
   it does not name gets both. `fridolin doctor` checks the GitLab token.
   New routes: `GET`/`PUT`/`DELETE /api/gitlab`, `POST /api/gitlab/check`,

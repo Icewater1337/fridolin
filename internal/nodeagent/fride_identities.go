@@ -267,12 +267,18 @@ func (a *Agent) savePushedIdentities(ids []string) error {
 
 // identitiesHeld says why this node keeps the identities from its FrIDE:
 // the FrIDE in a Docker Sandbox (the node of service fride-sandbox) must
-// never hold a real token in its VM, and gets them only once the node can
-// hand it placeholders that sbx's proxy swaps for the token on the way
-// out. "" for a node that passes them on.
+// never hold a real token in its VM. "" for a node that passes them on.
+//
+// This "-sbx" node goes away: FrIDE instances in Docker Sandboxes, which
+// the core starts through a node (docs/VISION.md), replace it. An
+// instance gets its identities as placeholders, never the tokens:
+// setHostToken (fride_sandbox_tokens.go) keeps each token on the host in
+// a sandbox-scoped sbx secret that swaps the placeholder for it on the way
+// to its host, and FrIDE gets the placeholder as the identity's token.
+// That is wired with the instances, not here.
 func (a *Agent) identitiesHeld() string {
 	if a.Config.Service == FrideSandboxService {
-		return "the FrIDE in a Docker Sandbox gets no git token until the node can hand it placeholders for sbx's proxy"
+		return "the FrIDE in a Docker Sandbox gets no git token: FrIDE instances will get placeholders instead"
 	}
 	return ""
 }

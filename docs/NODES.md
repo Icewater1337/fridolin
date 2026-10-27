@@ -1236,10 +1236,15 @@ identities its FrIDE took and when, or why not (`GET
 /api/git-identities`). No token is in a log, the audit, a GET or the
 dashboard.
 
-**The FrIDE in a Docker Sandbox** gets none yet: a real token must never
+**The FrIDE in a Docker Sandbox** gets none: a real token must never
 enter its VM, so its node (service `fride-sandbox`) holds them back and
-says so (`held`), and the dashboard shows why. Handing it placeholders
-that sbx's proxy swaps for the real token on the way out comes next.
+says so (`held`), and the dashboard shows why. That node goes away:
+FrIDE instances in Docker Sandboxes, which the core starts through a
+node, replace it (docs/VISION.md). An instance will get its
+identities as placeholders, through `setHostToken` (see [GitHub and other
+git hosts](#github-and-other-git-hosts)): the token stays on the host in
+a sandbox-scoped sbx secret, which swaps the placeholder for it on the
+way to its host, and FrIDE gets the placeholder as the token.
 
 ## Setting up FrIDE on a node
 
