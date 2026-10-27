@@ -1240,7 +1240,7 @@ dashboard.
 enter its VM, so its node (service `fride-sandbox`) holds them back and
 says so (`held`), and the dashboard shows why. That node goes away:
 FrIDE instances in Docker Sandboxes, which the core starts through a
-node, replace it (docs/VISION.md). An instance will get its
+node, replace it ([VISION.md](VISION.md)). An instance will get its
 identities as placeholders, through `setHostToken` (see [GitHub and other
 git hosts](#github-and-other-git-hosts)): the token stays on the host in
 a sandbox-scoped sbx secret, which swaps the placeholder for it on the
