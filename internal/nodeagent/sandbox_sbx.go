@@ -30,12 +30,7 @@ type sbxCLI struct {
 }
 
 func (s sbxCLI) cmd(ctx context.Context, stdin io.Reader, env []string, args []string) *exec.Cmd {
-	var c *exec.Cmd
-	if ctx != nil {
-		c = exec.CommandContext(ctx, s.path, args...)
-	} else {
-		c = exec.Command(s.path, args...)
-	}
+	c := exec.CommandContext(ctx, s.path, args...)
 	c.Env = slices.Concat(sbxEnv(os.Environ()), s.env, env)
 	if stdin == nil {
 		stdin = strings.NewReader("")
@@ -44,12 +39,17 @@ func (s sbxCLI) cmd(ctx context.Context, stdin io.Reader, env []string, args []s
 	return c
 }
 
-// sbxEnv is the environment sbx runs with: the agent's, with telemetry
-// off.
+// sbxDropped are variables of the agent's environment sbx never gets:
+// telemetry's (set below) and credentials, which a run passes itself.
+var sbxDropped = []string{"SBX_NO_TELEMETRY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY"}
+
+// sbxEnv is the environment sbx runs with: the agent's, without
+// sbxDropped, with telemetry off.
 func sbxEnv(base []string) []string {
 	out := make([]string, 0, len(base)+1)
 	for _, kv := range base {
-		if !strings.HasPrefix(kv, "SBX_NO_TELEMETRY=") {
+		name, _, _ := strings.Cut(kv, "=")
+		if !slices.Contains(sbxDropped, name) {
 			out = append(out, kv)
 		}
 	}
@@ -65,7 +65,8 @@ func (s sbxCLI) run(ctx context.Context, stdin io.Reader, env []string, args ...
 }
 
 func (s sbxCLI) start(stdin io.Reader, stdout, stderr io.Writer, env []string, args ...string) (*exec.Cmd, error) {
-	c := s.cmd(nil, stdin, env, args)
+	// A run ends by itself or through sandbox.stop, never by a context.
+	c := s.cmd(context.Background(), stdin, env, args)
 	c.Stdout, c.Stderr = stdout, stderr
 	if err := c.Start(); err != nil {
 		return nil, err
