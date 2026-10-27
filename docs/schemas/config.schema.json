@@ -95,7 +95,9 @@
         "deny_paths": {"type": ["array", "null"], "items": {"$ref": "#/$defs/absolute_path"}},
         "allow_paths": {"type": ["array", "null"], "items": {"$ref": "#/$defs/absolute_path"}},
         "git_config": {"enum": ["", "read", "deny"]},
-        "credentials_dir": {"anyOf": [{"const": ""}, {"$ref": "#/$defs/absolute_path"}]}
+        "credentials_dir": {"anyOf": [{"const": ""}, {"$ref": "#/$defs/absolute_path"}]},
+        "runtime": {"enum": ["", "bubblewrap", "docker-sandbox"], "description": "Where brains run by default: bubblewrap (today's sandbox, the default) or docker-sandbox (a Docker Sandbox on a node, docs/SANDBOXES.md)."},
+        "node": {"type": "string", "maxLength": 128, "description": "The node, by id or name, whose sandbox capability runs the brains; empty for the one on the core's machine."}
       }
     },
     "otp_guard": {"type": "boolean"},
