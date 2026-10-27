@@ -172,12 +172,19 @@ func liveGitHub(ctx context.Context, t *testing.T, o FrideSandboxOptions, tok st
 	} else {
 		t.Logf("GitHub in the VM: gh api user is %s, ls-remote HEAD %s, push --dry-run ok", login, head[:12])
 	}
+	// The scan finds what is there: the placeholder in git's config.
+	_, phFile, _ := hostTokenFiles(o.Dir, o.sandbox(), githubHost)
+	ph, _ := readPlaceholder(phFile)
+	kv = liveExec(ctx, t, o, "root", ph+"\n", liveScanScript, filepath.Base(o.Base), filepath.Base(o.Caches))
+	if !strings.Contains(kv["files"], ".gitconfig") {
+		t.Fatalf("the scan does not find the placeholder in ~/.gitconfig: %q", kv["files"])
+	}
 	start := time.Now()
 	kv = liveExec(ctx, t, o, "root", strings.TrimSpace(tok)+"\n", liveScanScript, filepath.Base(o.Base), filepath.Base(o.Caches))
 	if strings.TrimSpace(kv["files"]) != "" || strings.TrimSpace(kv["procs"]) != "" {
 		t.Errorf("the token is in the VM: files %q, processes %q", kv["files"], kv["procs"])
 	} else {
-		t.Logf("the token is in no file, environment or argument in the VM (scanned in %s)", time.Since(start).Round(time.Second))
+		t.Logf("the token is in no file, environment or argument in the VM (scanned in %s; the same scan finds the placeholder in ~/.gitconfig)", time.Since(start).Round(time.Second))
 	}
 }
 
@@ -377,6 +384,10 @@ func liveRecreate(ctx context.Context, t *testing.T, o FrideSandboxOptions, tags
 	tag, _ := FrideSandboxTemplateTag(repo)
 	tags[tag] = true
 	liveExec(ctx, t, o, "", "", liveMarkScript)
+	// rm took the login with the sandbox; update carries it.
+	if err := FrideSandboxLogin(ctx, o, "sk-ant-"+"oat01-live-made-up"); err != nil {
+		t.Fatal(err)
+	}
 	start := time.Now()
 	if err := FrideSandboxUpdate(ctx, o); err != nil {
 		t.Fatalf("update with a new template: %v", err)
