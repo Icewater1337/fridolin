@@ -1,9 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BRAIN_ID_RE, BRIDGE_BACKUP_ID, slugify, routingSummary, brainLabel, backupOwner, issueLabel } from '../assets/lib/brain.js';
+import { BRAIN_ID_RE, BRIDGE_BACKUP_ID, slugify, routingSummary, brainLabel, backupOwner, issueLabel, runtimeName, runtimeState, egressProblem, sandboxWeaker } from '../assets/lib/brain.js';
 import { installDom } from './fake-dom.js';
-import { brainStatusPill, runtimeSummary } from '../assets/components/brain.js';
+import { brainStatusPill, runtimeSummary, sandboxFact, sandboxPill } from '../assets/components/brain.js';
 import { h } from '../assets/lib/dom.js';
+import { serve, settle, noConsoleErrors } from './serve.js';
+import { createPage } from '../assets/app/page.js';
+import brainsPage from '../assets/pages/brains.js';
 
 test('slugify', async (t) => {
   const cases = [
@@ -105,5 +108,109 @@ test('runtimeSummary', async (t) => {
   ];
   for (const [name, rt, want] of cases) {
     await t.test(name, () => assert.equal(h('div', runtimeSummary(rt)).textContent, want));
+  }
+});
+
+// Where a brain's runs happen (#149), as /api/brains gives it.
+const where = (o) => ({ configured: 'docker-sandbox', effective: 'docker-sandbox', fallback: 'bubblewrap', node: 'Mac mini', ready: true, reason: '', egress: [], ...o });
+
+test('runtimeState says where a brain runs, and never says bubblewrap', async (t) => {
+  /** @type {[string, object | null, string | null, string | null][]} */
+  const cases = [
+    // name, the view, the sentence, the pill
+    ['in a Docker Sandbox', where({}), 'Runs in a Docker Sandbox on Mac mini', 'Docker Sandbox'],
+    ['in a Docker Sandbox on no named node', where({ node: '' }), 'Runs in a Docker Sandbox', 'Docker Sandbox'],
+    ['in Fridolin’s sandbox, as set', where({ configured: 'bubblewrap', effective: 'bubblewrap', ready: false, reason: 'sbx is not installed' }), 'Runs in Fridolin’s sandbox', 'Fridolin’s sandbox'],
+    ['in a native Mac’s sandbox-exec, as set', where({ configured: 'bubblewrap', effective: 'sandbox-exec' }), 'Runs in Fridolin’s sandbox', 'Fridolin’s sandbox'],
+    ['falling back', where({ effective: 'bubblewrap', ready: false, reason: 'the Mac mini is offline since 14:02' }), 'Docker Sandbox set, but runs in Fridolin’s sandbox now: the Mac mini is offline since 14:02', 'Fallback'],
+    ['falling back to sandbox-exec', where({ effective: 'sandbox-exec', ready: false, reason: 'sbx is not running' }), 'Docker Sandbox set, but runs in Fridolin’s sandbox now: sbx is not running', 'Fallback'],
+    ['falling back without a reason', where({ effective: 'bubblewrap', ready: false }), 'Docker Sandbox set, but runs in Fridolin’s sandbox now', 'Fallback'],
+    ['refusing', where({ effective: 'refused', fallback: 'refuse', ready: false, reason: 'sbx is not signed in' }), 'Refusing runs until its Docker Sandbox is back: sbx is not signed in', 'Refusing runs'],
+    ['from a bridge without the view', null, null, null],
+  ];
+  for (const [name, rs, text, pill] of cases) {
+    await t.test(name, () => {
+      const st = runtimeState(/** @type {any} */ (rs));
+      assert.equal(st ? st.text : null, text);
+      assert.equal(st ? st.pill : null, pill);
+      assert.doesNotMatch(st ? st.text : '', /bubblewrap|sandbox-exec/);
+    });
+  }
+  assert.equal(runtimeName('docker-sandbox'), 'Docker Sandbox');
+  assert.equal(runtimeName(''), 'Fridolin’s sandbox');
+  assert.equal(runtimeName(undefined), 'Fridolin’s sandbox');
+});
+
+test('a brain’s runtime as a pill and a sentence, with the sites it may reach', () => {
+  installDom();
+  const pillOf = (rs) => sandboxPill(rs);
+  assert.equal(pillOf(where({})).className, 'pill ok');
+  assert.equal(pillOf(where({ effective: 'bubblewrap', ready: false })).className, 'pill warn');
+  assert.equal(pillOf(where({ effective: 'refused', fallback: 'refuse', ready: false })).className, 'pill bad');
+  assert.equal(pillOf(where({ configured: 'bubblewrap', effective: 'bubblewrap' })).className, 'pill neutral');
+  assert.equal(pillOf(where({ reason: 'x' })).getAttribute('title'), 'Runs in a Docker Sandbox on Mac mini');
+  assert.equal(sandboxPill(undefined), null);
+  assert.equal(sandboxFact(undefined), null);
+  assert.equal(sandboxFact(where({ egress: ['api.github.com', '*.wikipedia.org'] })).textContent,
+    'Runs in a Docker Sandbox on Mac mini· also reaches api.github.com, *.wikipedia.org');
+  assert.equal(sandboxFact(where({ configured: 'bubblewrap', effective: 'bubblewrap', egress: ['api.github.com'] })).textContent,
+    'Runs in Fridolin’s sandbox', 'the sites matter only in a Docker Sandbox');
+});
+
+test('each brain card on the Brains page says where its runs happen', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  installDom();
+  noConsoleErrors(t);
+  const card = (id, sandbox) => ({ id, name: id, path: `/Users/you/${id}`, status: 'ok', issues: [], fallback: false, sandbox,
+    manifest: { version: 1, id, name: id, routing: { handles_dms: false, default: false, groups: [] } } });
+  const brains = [
+    card('home', where({})),
+    card('work', where({ effective: 'bubblewrap', ready: false, reason: 'the Mac mini is offline since 14:02', egress: ['api.github.com'] })),
+    card('club', where({ configured: 'bubblewrap', effective: 'bubblewrap' })),
+    card('old', undefined),
+  ];
+  serve(t, (path) => (path.startsWith('/api/brains') ? brains : {}));
+  const root = h('div');
+  document.body.append(root);
+  const ctx = createPage();
+  t.after(() => ctx.destroy());
+  brainsPage.render(root, ctx);
+  await settle();
+  const cards = root.querySelectorAll('.brain-card');
+  assert.deepEqual(cards.map((c) => c.querySelector('.bc-pills').textContent), ['ActiveDocker Sandbox', 'ActiveFallback', 'ActiveFridolin’s sandbox', 'Active']);
+  assert.deepEqual(cards.map((c) => (c.querySelector('.sandbox-fact') || { textContent: null }).textContent), [
+    'Runs in a Docker Sandbox on Mac mini',
+    'Docker Sandbox set, but runs in Fridolin’s sandbox now: the Mac mini is offline since 14:02· also reaches api.github.com',
+    'Runs in Fridolin’s sandbox',
+    null,
+  ]);
+});
+
+test('egressProblem takes hosts and patterns as sbx does', () => {
+  for (const ok of ['api.github.com', '*.wikipedia.org', '**:443', 'localhost:8765', 'example.com:*', '']) {
+    assert.equal(egressProblem(ok), '', ok);
+  }
+  assert.match(egressProblem('https://example.com'), /without https:\/\//);
+  assert.match(egressProblem('example.com/path'), /without https:\/\/ or a path/);
+  assert.match(egressProblem('two words'), /A host such as/);
+  assert.match(egressProblem('example.com:http'), /A host such as/);
+});
+
+test('sandboxWeaker names what a brain.json on disk gives up', async (t) => {
+  const m = (sandbox) => ({ sandbox });
+  /** @type {[string, object, object, string, string[]][]} */
+  const cases = [
+    // name, approved, on disk, the config's default, what it says
+    ['a Docker Sandbox given up', m({ runtime: 'docker-sandbox' }), m({ runtime: 'bubblewrap' }), '', ['It would run in Fridolin’s sandbox instead of a Docker Sandbox.']],
+    ['the inherited Docker Sandbox given up', m(undefined), m({ runtime: 'bubblewrap' }), 'docker-sandbox', ['It would run in Fridolin’s sandbox instead of a Docker Sandbox.']],
+    ['dropped, to inherit Fridolin’s sandbox', m({ runtime: 'docker-sandbox' }), m(undefined), 'bubblewrap', ['It would run in Fridolin’s sandbox instead of a Docker Sandbox.']],
+    ['falling back where it refused', m({ runtime: 'docker-sandbox', fallback: 'refuse' }), m({ runtime: 'docker-sandbox' }), '', ['While its Docker Sandbox is not available, it would run in Fridolin’s sandbox instead of refusing.']],
+    ['more sites', m({ egress: ['api.github.com'] }), m({ egress: ['api.github.com', '**:443'] }), 'docker-sandbox', ['It could also reach **:443.']],
+    ['a stronger sandbox', m(undefined), m({ runtime: 'docker-sandbox', fallback: 'refuse' }), '', []],
+    ['fewer sites', m({ egress: ['a.example', 'b.example'] }), m({ egress: ['a.example'] }), 'docker-sandbox', []],
+    ['nothing of the sandbox', {}, {}, 'docker-sandbox', []],
+  ];
+  for (const [name, a, disk, def, want] of cases) {
+    await t.test(name, () => assert.deepEqual(sandboxWeaker(a, disk, def), want));
   }
 });

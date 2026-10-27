@@ -10,17 +10,17 @@ import { calendarCard } from '../components/calendar.js';
 import { h, mount, paint } from '../lib/dom.js';
 import { fmtDuration, plural, prettyJSON } from '../lib/format.js';
 import { phoneish, isGroupJid } from '../lib/jid.js';
-import { APPROVALS, OBSERVE, issueLabel, brainLabel, takeover } from '../lib/brain.js';
+import { APPROVALS, OBSERVE, issueLabel, brainLabel, takeover, sandboxWeaker } from '../lib/brain.js';
 import { sortKeys, fieldDiff, lineDiff } from '../lib/diff.js';
 import { icon } from '../components/icons.js';
 import { toast } from '../components/toast.js';
 import { btn, runBusy } from '../components/buttons.js';
 import { confirmDialog } from '../components/dialog.js';
 import { field, textInput, select, toggle } from '../components/fields.js';
-import { brainSettingsFields } from '../components/brain-fields.js';
+import { brainSettingsFields, brainSandboxFields } from '../components/brain-fields.js';
 import { pill, badge, callout, timeAgo, mono, empty, loading } from '../components/common.js';
 import { chatEl, chatName } from '../components/chat.js';
-import { outcomePill, brainStatusPill } from '../components/brain.js';
+import { outcomePill, brainStatusPill, sandboxFact, sandboxPill } from '../components/brain.js';
 import { saveBar } from '../components/save-bar.js';
 import { liveForm } from '../components/live-form.js';
 import { grantsEditor } from '../components/grants-editor.js';
@@ -41,7 +41,7 @@ import { errorMessage } from '../lib/errors.js';
  * @typedef {object} SettingsData
  * @property {BrainManifest} manifest
  * @property {boolean} drift
- * @property {{brain_model: string, brain_effort: string, disallowed_tools: string[]}} eff the inherited settings
+ * @property {{brain_model: string, brain_effort: string, disallowed_tools: string[], sandbox_runtime: string}} eff the inherited settings
  * @property {string[]} allowedGroups
  * @property {OtherBrain[]} others
  */
@@ -121,7 +121,7 @@ export default /** @satisfies {PageModule} */ ({
       }
       sections.forEach((s) => { s.hidden = false; });
       ctx.setTitle(brain.name || brain.id);
-      paint(head, { name: brain.name, id: brain.id, status: brain.status, path: brain.path }, renderHead);
+      paint(head, { name: brain.name, id: brain.id, status: brain.status, path: brain.path, sandbox: brain.sandbox }, renderHead);
       paint(issuesBox, (brain.issues || []).filter((is) => is.kind !== 'drift'), renderIssues);
       paintDrift(brain);
       paintLive();
@@ -152,16 +152,19 @@ export default /** @satisfies {PageModule} */ ({
       paintLive();
     });
 
-    /** @param {Pick<Brain, 'name' | 'id' | 'status' | 'path'>} b */
+    /** @param {Pick<Brain, 'name' | 'id' | 'status' | 'path' | 'sandbox'>} b */
     function renderHead(b) {
+      const where = sandboxFact(b.sandbox);
       return h('header.page-header',
         h('div.page-heading',
           h('a.back-link', { href: '#/brains' }, icon('left'), 'Brains'),
           h('h1', b.name || b.id),
           h('div.head-meta',
             brainStatusPill(b.status),
+            sandboxPill(b.sandbox),
             h('code.mono.muted', b.id)),
-          h('div.path-line', icon('folder'), mono(b.path, { copy: true }))));
+          h('div.path-line', icon('folder'), mono(b.path, { copy: true })),
+          where ? h('div.path-line', where) : null));
     }
 
     /** @param {BrainIssue[]} issues */
@@ -174,22 +177,27 @@ export default /** @satisfies {PageModule} */ ({
     function paintDrift(b) {
       const drift = (b.issues || []).find((is) => is.kind === 'drift');
       if (b.status !== 'drift' && !drift) { paint(driftBox, null, () => null); return; }
-      paint(driftBox, { manifest: b.manifest, disk: b.disk_manifest || null, detail: drift ? drift.detail : '', path: b.path }, renderDrift);
+      // A brain.json without a runtime of its own inherits the config's.
+      const eff = /** @type {Partial<ConfigFile>} */ ((cfg && cfg.effective) || {});
+      const runtime = (eff.sandbox && eff.sandbox.runtime) || '';
+      paint(driftBox, { manifest: b.manifest, disk: b.disk_manifest || null, detail: drift ? drift.detail : '', path: b.path, runtime }, renderDrift);
     }
 
-    /** @param {{manifest: BrainManifest | null, disk: BrainManifest | null, detail: string, path: string}} drift */
-    function renderDrift({ manifest, disk, detail, path }) {
+    /** @param {{manifest: BrainManifest | null, disk: BrainManifest | null, detail: string, path: string, runtime: string}} drift */
+    function renderDrift({ manifest, disk, detail, path, runtime }) {
       if (!disk) {
         return callout('warn', 'brain.json on disk cannot be read', detail, h('div.muted.small', 'The bridge keeps running the approved version. Fix the file, or save the settings below to overwrite it.'));
       }
       const a = manifest || {};
       const rows = fieldDiff(a, disk);
-      const sensitive = rows.some((r) => /^(routing|disallowed_tools|prompt_file|reply_chat|role|grants)/.test(r.path));
+      // A weaker sandbox is asked about as a wider reach is.
+      const weaker = sandboxWeaker(a, disk, runtime);
+      const sensitive = weaker.length > 0 || rows.some((r) => /^(routing|disallowed_tools|prompt_file|reply_chat|role|grants)/.test(r.path));
       const approveBtn = btn('Approve changes', {
         kind: 'primary', icon: 'check',
         onClick: async () => {
           if (sensitive) {
-            const ok = await confirmDialog({ title: 'Approve these changes?', message: 'They change which chats reach this brain, what it may do or which other brains it may reach. Only approve changes you or someone you trust made.', confirm: 'Approve', danger: false });
+            const ok = await confirmDialog({ title: 'Approve these changes?', message: 'They change which chats reach this brain, what it may do or reach, or which other brains it may reach. Only approve changes you or someone you trust made.', confirm: 'Approve', danger: false });
             if (!ok) return;
           }
           // The bridge approves only the brain.json shown here: if the brain
@@ -212,9 +220,10 @@ export default /** @satisfies {PageModule} */ ({
         h('div.card-head', h('div.card-title', icon('alert'), h('h2', 'brain.json changed on disk')), pill('Waiting for approval', 'warn')),
         h('p', 'Someone — possibly the brain itself — edited ', mono(`${path}/brain.json`), '. The bridge keeps running the version you approved until you accept the change.'),
         sensitive ? callout('warn', 'Check routing and tool changes carefully', 'A brain can edit its own brain.json. Changes to routing decide which chats reach it; changes to tools decide what it may do.') : null,
+        weaker.length ? callout('warn', 'This weakens its sandbox', h('ul', weaker.map((w) => h('li', w)))) : null,
         rows.length ? h('div.table-wrap', h('table.table.diff-table',
           h('thead', h('tr', h('th', 'Setting'), h('th', 'Approved'), h('th', 'On disk'))),
-          h('tbody', rows.map((r) => h(`tr${/^(routing|disallowed_tools|role|grants)/.test(r.path) ? '.sensitive' : ''}`,
+          h('tbody', rows.map((r) => h(`tr${/^(routing|disallowed_tools|role|grants|sandbox)/.test(r.path) ? '.sensitive' : ''}`,
             h('td', h('code.mono', r.path)),
             h('td.diff-old', h('code.mono', r.a)),
             h('td.diff-new', h('code.mono', r.b))))))) : h('p.muted', 'Only formatting differs.'),
@@ -294,7 +303,7 @@ export default /** @satisfies {PageModule} */ ({
       settings.set({
         manifest: m,
         drift: b.status === 'drift',
-        eff: { brain_model: eff.brain_model || '', brain_effort: eff.brain_effort || '', disallowed_tools: eff.disallowed_tools || [] },
+        eff: { brain_model: eff.brain_model || '', brain_effort: eff.brain_effort || '', disallowed_tools: eff.disallowed_tools || [], sandbox_runtime: (eff.sandbox && eff.sandbox.runtime) || '' },
         allowedGroups: (cfg && cfg.config && cfg.config.allowed_groups) || eff.allowed_groups || [],
         others: brains.flatMap((o) => (o.id && o.id !== id && o.manifest ? [{ id: o.id, name: o.name, manifest: { routing: o.manifest.routing, role: o.manifest.role || '' } }] : [])),
       });
@@ -308,6 +317,7 @@ export default /** @satisfies {PageModule} */ ({
       const nameIn = textInput({ value: m.name || '', spellcheck: 'true' });
       const routing = routingEditor({ routing: m.routing || {}, selfId: id, brains: others, allowedGroups, onChange: changed, signal: ctx.signal });
       const fields = brainSettingsFields(m, eff);
+      const sandbox = brainSandboxFields(m.sandbox, eff.sandbox_runtime, changed);
       const observeSel = select(OBSERVE, m.observe || 'history', { name: 'observe' });
       const approvalsSel = select(APPROVALS, m.approvals || 'ask', { name: 'approvals' });
       const override = Array.isArray(m.disallowed_tools);
@@ -347,6 +357,9 @@ export default /** @satisfies {PageModule} */ ({
         };
         if (toolsSw.input.checked) manifest.disallowed_tools = toolsIn.value.split(',').map((t) => t.trim()).filter(Boolean);
         else delete manifest.disallowed_tools;
+        const sb = sandbox.value();
+        if (sb) manifest.sandbox = sb;
+        else delete manifest.sandbox;
         delete manifest.role;
         delete manifest.grants;
         if (coreSw.input.checked) {
@@ -372,6 +385,7 @@ export default /** @satisfies {PageModule} */ ({
           fields.model,
           h('div.field', toolsSw, h('div.help', `Off: use the global list of blocked tools (${globalTools}).`)),
           field({ label: 'Blocked tools', control: toolsIn, help: 'Comma-separated tool names this brain may not use. Leave empty to allow every tool.' })),
+        h('fieldset.fieldset', h('legend', 'Sandbox'), sandbox.el),
         h('fieldset.fieldset', h('legend', 'Files and replies'),
           h('div.form-grid',
             field({ label: 'Prompt file', control: promptIn, help: 'The brain’s instructions, relative to its folder.' }),
@@ -386,6 +400,8 @@ export default /** @satisfies {PageModule} */ ({
       form.addEventListener('submit', (e) => {
         e.preventDefault();
         if (!nameIn.value.trim()) { nameIn.focus(); toast('The brain needs a name'); return; }
+        const problem = sandbox.problem();
+        if (problem) { toast(problem); return; }
         runBusy(saveBtn, async () => {
           await put(`/api/brains/${encodeURIComponent(id)}`, { manifest: value() });
           settings.saved();

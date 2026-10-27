@@ -1,13 +1,13 @@
-// Status pills for brains: whether a brain runs, and how its last run
-// ended; and the invitation to add the first brain.
+// Status pills for brains: whether a brain runs, how its last run ended
+// and where its runs happen; and the invitation to add the first brain.
 
 import { h } from '../lib/dom.js';
-import { issueLabel } from '../lib/brain.js';
+import { issueLabel, runtimeState } from '../lib/brain.js';
 import { icon } from './icons.js';
 import { btn } from './buttons.js';
 import { pill, badge, timeAgo } from './common.js';
 
-/** @import { BrainRuntime, RunInfo } from '../../types/api.js' */
+/** @import { BrainRuntime, BrainSandboxRuntime, RunInfo } from '../../types/api.js' */
 
 /**
  * How a brain's last run ended, as a pill.
@@ -43,6 +43,33 @@ export function runtimeSummary(rt) {
     queued ? badge(`${queued} queued`, 'warn') : null,
     h('span.run-last', outcomePill(rt.last), rt.last ? h('span.muted.small', timeAgo(rt.last.finished)) : null),
   ];
+}
+
+// How each state of runtimeState shows on its pill.
+/** @type {Record<string, string>} */
+const RUNTIME_PILLS = { docker: 'ok', fridolin: 'neutral', fallback: 'warn', refused: 'bad' };
+
+/**
+ * Where a brain's runs happen, as a small pill whose title says it in a
+ * sentence; null from a bridge that does not say.
+ * @param {BrainSandboxRuntime | null | undefined} rs
+ */
+export function sandboxPill(rs) {
+  const st = runtimeState(rs);
+  return st ? pill(st.pill, RUNTIME_PILLS[st.state], { title: st.text }) : null;
+}
+
+/**
+ * Where a brain's runs happen, in a sentence, and the extra hosts a
+ * Docker Sandbox lets it reach; null from a bridge that does not say.
+ * @param {BrainSandboxRuntime | null | undefined} rs
+ */
+export function sandboxFact(rs) {
+  const st = runtimeState(rs);
+  if (!rs || !st) return null;
+  const egress = rs.configured === 'docker-sandbox' ? rs.egress || [] : [];
+  return h(`span.sandbox-fact.${st.state}`, icon('shield'), h('span', st.text),
+    egress.length ? h('span.muted', `· also reaches ${egress.join(', ')}`) : null);
 }
 
 /** The card shown while there is no brain at all. */
