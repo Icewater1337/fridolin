@@ -180,6 +180,7 @@ func fakeExec(dir string, args []string, tok string) int {
 	case cmd[0] == "sh" && strings.HasPrefix(cmd[2], "kill -"):
 		sig := strings.Fields(strings.TrimPrefix(cmd[2], "kill -"))[0]
 		appendFile(vmPath(dir, cmd[3])+".signal", sig+"\n")
+	case cmd[0] == "true":
 	case cmd[0] == "rm":
 		for _, f := range cmd[2:] {
 			_ = os.Remove(vmPath(dir, f))

@@ -48,6 +48,10 @@ type sandboxSpec struct {
 	Egress   []string                 `json:"egress"`
 	APIPort  int                      `json:"api_port"`
 	Provider string                   `json:"provider"`
+	// History is where the provider's sessions are in the VM, over which
+	// ensure binds their host folder (sandbox_history.go); "" without a
+	// state dir.
+	History string `json:"history,omitempty"`
 }
 
 func (s sandboxSpec) key() string {
@@ -90,6 +94,7 @@ func (a *Agent) specOf(p nodeproto.SandboxEnsureParams, template string) sandbox
 	// its host path, so ensure links the binary to sandboxBinPath.
 	if a.Dir != "" {
 		s.Mounts = append(s.Mounts, nodeproto.SandboxMount{Path: a.sandboxBinHostDir(), ReadOnly: true})
+		s.History = sandboxHistoryTarget(s.Provider)
 	}
 	if s.Mounts == nil {
 		s.Mounts = []nodeproto.SandboxMount{}
@@ -141,6 +146,12 @@ func (a *Agent) sandboxEnsure(ctx context.Context, p nodeproto.SandboxEnsurePara
 			if st.Sandboxes[p.Brain].GitHub != nil && sb.ghRuns[p.Brain] == 0 {
 				a.githubCloseLocked(ctx, d, p.Brain)
 			}
+			// sbx starts the sandbox only while its mounts' folders exist.
+			if spec.History != "" {
+				if _, perr := a.sandboxHistoryFolder(p.Brain, spec); perr != nil {
+					return nil, perr
+				}
+			}
 			return nodeproto.SandboxEnsureResult{Name: name, State: nodeproto.SandboxReady}, nil
 		}
 		if a.sandboxBusy(p.Brain) {
@@ -161,6 +172,9 @@ func (a *Agent) sandboxEnsure(ctx context.Context, p nodeproto.SandboxEnsurePara
 	perr = a.sandboxRules(ctx, d, name, spec)
 	if perr == nil {
 		perr = a.sandboxLinkBin(ctx, d, name)
+	}
+	if perr == nil {
+		perr = a.sandboxMountHistory(ctx, d, name, p.Brain, spec)
 	}
 	if perr != nil {
 		_, _, _ = d.run(context.WithoutCancel(ctx), nil, nil, "rm", "-f", name)
