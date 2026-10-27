@@ -185,7 +185,7 @@ func (r *brainRuntimes) observe(s sandboxrun.State) {
 	case sandboxrun.Back:
 		log.Printf("docker sandboxes: available again on %s", node)
 		text = outboundmsg.SandboxBackAlert(node)
-	default:
+	case sandboxrun.Same:
 		return
 	}
 	cfg := r.b.cfgs.Get()
