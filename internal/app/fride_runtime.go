@@ -128,7 +128,7 @@ func (f *frideRuntime) onDeclare(n *nodes.Node) {
 // waits.frideGather of the first goes together, so that one text a node
 // sends for several threads at once is sent once.
 func (f *frideRuntime) relayLoop() {
-	f.adoptAgentThreads()
+	f.adoptAgentThreadsOnce()
 	for {
 		var batch []frideNews
 		select {
@@ -338,16 +338,36 @@ func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) (fridePost, b
 	return fridePost{t: t, node: node, kind: kind, news: news}, true
 }
 
+// adoptAgentThreadsOnce runs adoptAgentThreads the first time the relay
+// starts, never again: a thread made since has its chat from the start,
+// and one the owner's DM began during an agent's run is the owner's (#337).
+func (f *frideRuntime) adoptAgentThreadsOnce() {
+	const job = "adopt-agent-threads"
+	if done, err := f.b.store.DoneOnce(f.ctx, job); done || err != nil {
+		if err != nil {
+			log.Printf("fride: whether scheduled agents got their threads: %v", err)
+		}
+		return
+	}
+	if !f.adoptAgentThreads() {
+		return
+	}
+	if err := f.b.store.SetDoneOnce(f.ctx, job); err != nil {
+		log.Printf("fride: recording that scheduled agents got their threads: %v", err)
+	}
+}
+
 // adoptAgentThreads gives the open threads a scheduled agent started
 // before their news stayed with it (#300) to that agent's chat, so that
 // their news follows the agent's routing (#306). A thread is the agent's
 // when it began while a run of it went on, or its message's first line is
 // in the agent's task, and that holds for no other agent of its brain.
-func (f *frideRuntime) adoptAgentThreads() {
+// It reports whether it could list the threads.
+func (f *frideRuntime) adoptAgentThreads() bool {
 	threads, err := f.b.store.FrideThreads(f.ctx, "")
 	if err != nil {
 		log.Printf("fride: listing the threads scheduled agents may have started: %v", err)
-		return
+		return false
 	}
 	for _, t := range threads {
 		if t.State == store.FrideClosed || chat.IsInternalChat(t.Chat) {
@@ -373,6 +393,7 @@ func (f *frideRuntime) adoptAgentThreads() {
 		}
 		log.Printf("fride: FrIDE #%d, which scheduled agent %s of brain %s started, now reports to it, not to %s", t.ID, by[0], t.Brain, t.Chat)
 	}
+	return true
 }
 
 // toAgent hands news of a scheduled agent's thread to that agent: it is

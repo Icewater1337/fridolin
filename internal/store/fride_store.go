@@ -229,3 +229,29 @@ func (s *Store) FrideNews(ctx context.Context, thread int64) ([]FrideNewsItem, e
 	}
 	return out, rows.Err()
 }
+
+// The done_once table names the one-off jobs the bridge has done, such as
+// giving scheduled agents the FrIDE threads they started before #300, so
+// that a restart does not do them again.
+
+// migrateV8 adds done_once.
+func migrateV8(tx *sql.Tx) error {
+	_, err := tx.Exec(`CREATE TABLE done_once (
+		name TEXT PRIMARY KEY,
+		at   DATETIME NOT NULL
+	)`)
+	return err
+}
+
+// DoneOnce reports whether the one-off job name was done.
+func (s *Store) DoneOnce(ctx context.Context, name string) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM done_once WHERE name = ?`, name).Scan(&n)
+	return n > 0, err
+}
+
+// SetDoneOnce records that the one-off job name was done.
+func (s *Store) SetDoneOnce(ctx context.Context, name string) error {
+	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO done_once (name, at) VALUES (?, ?)`, name, time.Now().UTC())
+	return err
+}

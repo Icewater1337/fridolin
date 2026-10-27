@@ -128,6 +128,16 @@ func TestScheduledAgentsHandWorkToFride(t *testing.T) {
 			t.Errorf("FrIDE #%d reports to %q, want %q", id, th.Chat, want)
 		}
 	}
+	// The relay did it once when it started: a later start leaves the
+	// threads where they are, even one the owner's DM began during an
+	// agent's run (#337).
+	if err := h.b.store.SetFrideThreadChat(ctx, 1, harnessDM); err != nil {
+		t.Fatal(err)
+	}
+	h.b.fride.adoptAgentThreadsOnce()
+	if th, _ := h.b.store.GetFrideThread(ctx, 1); th.Chat != harnessDM {
+		t.Errorf("a second adoption moved FrIDE #1 to %q", th.Chat)
+	}
 }
 
 // A run that writes its summary and then only calls tools ends with an

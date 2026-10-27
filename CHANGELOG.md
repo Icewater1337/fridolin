@@ -1226,6 +1226,13 @@ for compatibility.
   is dropped, and FrIDE's news starts at most one run an hour per
   agent, with what came meanwhile. Open threads a scheduled agent
   started before its news stayed with it go back to that agent.
+- **Your own FrIDE threads stay yours** (#337). Giving scheduled agents
+  the threads they started before #300 ran at every start of the
+  bridge, and took any open thread that began while one of the agents
+  ran, also one you started from your DM: its news then went to the
+  agent, not to you. It now runs once, the first start after this
+  update. `bridge.db` gets a table, `done_once` (migration 8); an older
+  bridge rolled back to ignores it.
 - **`fridolin nodes update` waits for a box as long as the core does.**
   It gave up after 12 minutes with "still updating after 12m0s", while a
   box's hourly updater takes up to an hour and the core waits an hour
