@@ -402,31 +402,68 @@ func foldRetiredKeys(obj map[string]json.RawMessage) ([]string, error) {
 // every brain runs under bubblewrap, or sandbox-exec natively, as with
 // the default "bubblewrap".
 func dropBrainSandboxKeys(obj map[string]json.RawMessage) ([]string, error) {
-	raw, ok := obj["sandbox"]
-	if !ok {
-		return nil, nil
-	}
-	var sb map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &sb); err != nil || sb == nil {
-		// Not an object: the decoder says why.
-		return nil, nil
-	}
+	const why = "is retired and is dropped the next time the dashboard saves: brains run under bubblewrap, Docker Sandboxes for brains were removed"
 	var notes []string
-	for _, k := range []string{"runtime", "node"} {
-		if v, ok := sb[k]; ok {
-			delete(sb, k)
-			notes = append(notes, fmt.Sprintf("sandbox.%s (%s) is retired and is dropped the next time the dashboard saves: brains run under bubblewrap, Docker Sandboxes for brains were removed", k, v))
+	if raw, ok := obj["sandbox"]; ok {
+		out, dropped := dropJSONKeys(raw, "runtime", "node")
+		for _, d := range dropped {
+			notes = append(notes, "sandbox."+d+" "+why)
 		}
+		obj["sandbox"] = out
 	}
-	if len(notes) == 0 {
-		return nil, nil
+	// An approved brain.json in brain_dirs could hold the brain's own
+	// "sandbox" (compat: brain.json ignores it now, retiredManifestKey).
+	var dirs []json.RawMessage
+	if raw, ok := obj["brain_dirs"]; !ok || json.Unmarshal(raw, &dirs) != nil {
+		return notes, nil
 	}
-	b, err := json.Marshal(sb)
+	for i, d := range dirs {
+		var ref map[string]json.RawMessage
+		if json.Unmarshal(d, &ref) != nil || ref == nil || ref["approved"] == nil {
+			continue
+		}
+		out, dropped := dropJSONKeys(ref["approved"], "sandbox")
+		if len(dropped) == 0 {
+			continue
+		}
+		ref["approved"] = out
+		b, err := json.Marshal(ref)
+		if err != nil {
+			return nil, err
+		}
+		dirs[i] = b
+		notes = append(notes, fmt.Sprintf("brain_dirs[%d].approved.sandbox %s", i, why))
+	}
+	b, err := json.Marshal(dirs)
 	if err != nil {
 		return nil, err
 	}
-	obj["sandbox"] = b
+	obj["brain_dirs"] = b
 	return notes, nil
+}
+
+// dropJSONKeys takes keys out of raw, a JSON object, and says which it
+// had. Anything else comes back as it is, for the decoder to judge.
+func dropJSONKeys(raw json.RawMessage, keys ...string) (json.RawMessage, []string) {
+	var o map[string]json.RawMessage
+	if json.Unmarshal(raw, &o) != nil || o == nil {
+		return raw, nil
+	}
+	var dropped []string
+	for _, k := range keys {
+		if _, ok := o[k]; ok {
+			delete(o, k)
+			dropped = append(dropped, k)
+		}
+	}
+	if len(dropped) == 0 {
+		return raw, nil
+	}
+	b, err := json.Marshal(o)
+	if err != nil {
+		return raw, nil
+	}
+	return b, dropped
 }
 
 // ClassicModeRemoved is the error for a setting that asks for classic mode:
@@ -462,7 +499,6 @@ type SandboxConfig struct {
 	// bridge uses for the brains. Brains are denied the whole directory.
 	// Absolute or ~-relative.
 	CredentialsDir string `json:"credentials_dir,omitempty"`
-
 }
 
 // QueueConfig decides what happens when a message arrives while the brain is

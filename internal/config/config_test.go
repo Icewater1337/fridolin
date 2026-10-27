@@ -33,6 +33,8 @@ func TestMigrateConfig(t *testing.T) {
 		{"version 2 with a sandbox of another type", `{"version": 2, "sandbox": true}`, 2, map[string]string{"version": "3", "sandbox": "true"}, ""},
 		{"version 3 keeps unknown sandbox keys", `{"version": 3, "sandbox": {"runtime": "docker-sandbox"}}`, 3,
 			map[string]string{"sandbox": `{"runtime": "docker-sandbox"}`}, ""},
+		{"version 2 with an approved brain sandbox", `{"version": 2, "brain_dirs": [{"path": "/x", "approved": {"id": "a", "sandbox": {"runtime": "docker-sandbox"}}}, {"path": "/y"}]}`, 2,
+			map[string]string{"brain_dirs": `[{"approved":{"id":"a"},"path":"/x"},{"path":"/y"}]`}, ""},
 		{"version 1 with inline brains", `{"brains": [{"name": "a"}]}`, 1, nil, `lists brains inline under "brains"`},
 		{"newer", `{"version": 4}`, 4, nil, "version 4 is newer than the version 3 this build of Fridolin reads"},
 		{"zero", `{"version": 0}`, 0, nil, "version 0: must be a whole number from 1 to 3"},
