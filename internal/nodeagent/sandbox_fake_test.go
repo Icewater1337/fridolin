@@ -164,6 +164,9 @@ func fakeExec(dir string, args []string, tok string) int {
 	case cmd[0] == "sh" && strings.Contains(cmd[2], `cat > "$0"`):
 		b, _ := io.ReadAll(os.Stdin)
 		_ = os.WriteFile(vmPath(dir, cmd[3]), b, 0o600)
+	case cmd[0] == "sh" && strings.Contains(cmd[2], "ln -sfn"):
+		// The link of fridolin into the VM: link-<name> beside vm/ holds its target.
+		_ = os.WriteFile(filepath.Join(dir, "link-"+filepath.Base(cmd[4])), []byte(cmd[3]), 0o600)
 	case cmd[0] == "sh" && strings.HasPrefix(cmd[2], "kill -"):
 		sig := strings.Fields(strings.TrimPrefix(cmd[2], "kill -"))[0]
 		appendFile(vmPath(dir, cmd[3])+".signal", sig+"\n")

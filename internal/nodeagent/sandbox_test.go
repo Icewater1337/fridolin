@@ -206,9 +206,18 @@ func TestSandboxEnsure(t *testing.T) {
 		t.Fatalf("first ensure: %+v %v", res, perr)
 	}
 	calls := fakeCalls(t, fake)
-	want := []string{"create", "--name", "fridolin-work", "--memory", "4096m", "-t", "fridolin-brain:v1", "--pull", "never", "claude", folder, "/opt/shared:ro"}
+	want := []string{"create", "--name", "fridolin-work", "--memory", "4096m", "-t", "fridolin-brain:v1", "--pull", "never", "claude", folder, "/opt/shared:ro",
+		a.sandboxBinHostDir() + ":ro"}
 	if !called(calls, want...) {
 		t.Errorf("no %v in %v", want, calls)
+	}
+	// The linux fridolin on its read-only mount, linked where runs find it.
+	link, err := os.ReadFile(filepath.Join(fake, "link-fridolin"))
+	if err != nil || string(link) != filepath.Join(a.sandboxBinHostDir(), "fridolin") {
+		t.Errorf("the link of fridolin: %q %v", link, err)
+	}
+	if !called(calls, "exec", "-u", "root", "fridolin-work", "sh", "-c") {
+		t.Error("the link was not made as root")
 	}
 	for _, rule := range [][]string{
 		{"policy", "allow", "network", "--sandbox", "fridolin-work", "localhost:8765"},

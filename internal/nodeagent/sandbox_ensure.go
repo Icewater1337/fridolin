@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -85,6 +86,11 @@ func (a *Agent) specOf(p nodeproto.SandboxEnsureParams, template string) sandbox
 			s.Mounts = append(s.Mounts, m)
 		}
 	}
+	// The linux fridolin's folder, read-only: sbx mounts a folder only at
+	// its host path, so ensure links the binary to sandboxBinPath.
+	if a.Dir != "" {
+		s.Mounts = append(s.Mounts, nodeproto.SandboxMount{Path: a.sandboxBinHostDir(), ReadOnly: true})
+	}
 	if s.Mounts == nil {
 		s.Mounts = []nodeproto.SandboxMount{}
 	}
@@ -148,7 +154,11 @@ func (a *Agent) sandboxEnsure(ctx context.Context, p nodeproto.SandboxEnsurePara
 	if _, stderr, err := d.run(ctx, nil, nil, spec.createArgs(name)...); err != nil {
 		return nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "sbx could not create %s: %v", name, sbxError(err, stderr))
 	}
-	if perr := a.sandboxRules(ctx, d, name, spec); perr != nil {
+	perr = a.sandboxRules(ctx, d, name, spec)
+	if perr == nil {
+		perr = a.sandboxLinkBin(ctx, d, name)
+	}
+	if perr != nil {
 		_, _, _ = d.run(context.WithoutCancel(ctx), nil, nil, "rm", "-f", name)
 		return nil, perr
 	}
@@ -181,6 +191,21 @@ func (a *Agent) sandboxRules(ctx context.Context, d sbxDriver, name string, s sa
 		if _, stderr, err := d.run(ctx, nil, nil, "policy", r[0], "network", "--sandbox", name, r[1]); err != nil {
 			return nodeproto.Errorf(nodeproto.CodeFailed, "sbx could not %s %s for %s: %v", r[0], r[1], name, sbxError(err, stderr))
 		}
+	}
+	return nil
+}
+
+// sandboxLinkBin links the linux fridolin on its read-only mount to
+// sandboxBinPath in the VM, whose disk keeps the link across stops. A
+// link that cannot be made fails ensure (CodeFailed).
+func (a *Agent) sandboxLinkBin(ctx context.Context, d sbxDriver, name string) *nodeproto.Error {
+	if a.Dir == "" {
+		return nil
+	}
+	bin := filepath.Join(a.sandboxBinHostDir(), sandboxBinFile)
+	if _, stderr, err := d.run(ctx, nil, nil, "exec", "-u", "root", name, "sh", "-c", `mkdir -p "$(dirname "$1")" && ln -sfn "$0" "$1"`,
+		bin, sandboxBinPath); err != nil {
+		return nodeproto.Errorf(nodeproto.CodeFailed, "linking fridolin into %s: %v", name, sbxError(err, stderr))
 	}
 	return nil
 }
