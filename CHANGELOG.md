@@ -10,6 +10,17 @@ for compatibility.
 
 ### Added
 
+- **Brains in Docker Sandboxes** (#149). A brain can run in a Docker
+  Sandbox, a microVM of `sbx` on a node on the core's machine, instead of
+  bubblewrap: config.json's new `sandbox.runtime` (`bubblewrap`, the
+  default, or `docker-sandbox`) and `sandbox.node`, and brain.json's new
+  `sandbox` with `runtime`, `fallback` and `egress`. While the sandbox is
+  not available, runs fall back to bubblewrap, and you get one WhatsApp
+  message per outage and one when it is back; `"fallback": "refuse"`
+  refuses instead. `GET /api/brains` adds each brain's `sandbox`,
+  `fridolin doctor` the check `brain-runtime`, and the audit's `run_end`
+  a `runtime` for such brains. Nothing changes for brains on bubblewrap.
+  See docs/SANDBOXES.md.
 - **OpenAI and ElevenLabs as connections of Fridolin** (#284). The
   Integrations page keeps one OpenAI key (with an optional organization
   and project) and one ElevenLabs key, in `connections/` in the data dir.

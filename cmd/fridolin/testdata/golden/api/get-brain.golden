@@ -100,5 +100,14 @@ Content-Type: application/json
     },
     "running": null
   },
+  "sandbox": {
+    "configured": "bubblewrap",
+    "effective": "bubblewrap",
+    "egress": [],
+    "fallback": "bubblewrap",
+    "node": "",
+    "ready": true,
+    "reason": ""
+  },
   "status": "ok"
 }

@@ -86,6 +86,9 @@ type Manifest struct {
 	// brain's folder (docs/FILES.md, "Uploads"); nil takes them only from
 	// you.
 	Files *Files `json:"files,omitempty"`
+	// Sandbox is where the brain runs and what it may reach there
+	// (sandbox.go); nil takes config.json's sandbox.runtime.
+	Sandbox *Sandbox `json:"sandbox,omitempty"`
 }
 
 // Files is brain.json's "files": the folders that take uploads from site
@@ -436,6 +439,9 @@ func (m *Manifest) Validate() error {
 			seen[u.Folder] = true
 		}
 	}
+	if err := m.Sandbox.validate(m.ID); err != nil {
+		return err
+	}
 	if err := m.validateSchedules(); err != nil {
 		return err
 	}
@@ -492,6 +498,16 @@ func (m Manifest) Normalized() Manifest {
 		} else {
 			m.Files = &Files{Uploads: slices.Clone(m.Files.Uploads)}
 			slices.SortFunc(m.Files.Uploads, func(a, b UploadFolder) int { return strings.Compare(a.Folder, b.Folder) })
+		}
+	}
+	if s := m.Sandbox; s != nil {
+		if s.Runtime == "" && s.Fallback == "" && len(s.Egress) == 0 {
+			m.Sandbox = nil
+		} else {
+			m.Sandbox = &Sandbox{Runtime: s.Runtime, Fallback: s.Fallback, Egress: slices.Clone(s.Egress)}
+			if len(m.Sandbox.Egress) == 0 {
+				m.Sandbox.Egress = nil
+			}
 		}
 	}
 	return m

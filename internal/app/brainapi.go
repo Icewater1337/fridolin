@@ -119,6 +119,10 @@ type runAccess struct {
 	// Done revokes the run's token and removes its files, once the run is
 	// over.
 	Done func()
+	// RunID and Token are the run's id and its brain API token, for a run
+	// in a Docker Sandbox: the token goes to the node in sandbox.run's
+	// token, never in an environment, argument or log.
+	RunID, Token string
 }
 
 // mcpServerName is the name a run's MCP server goes by in the CLI, which
@@ -157,6 +161,7 @@ func (b *App) brainRunEnv(run runInfo) runAccess {
 		return access
 	}
 	api := "http://" + b.listen
+	access.RunID, access.Token = run.ID, tok
 	var files []string
 	if b.exe != "" {
 		cmd := []string{b.exe, "mcp", "--run", run.ID}

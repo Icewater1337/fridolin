@@ -426,6 +426,32 @@ type SandboxConfig struct {
 	// bridge uses for the brains. Brains are denied the whole directory.
 	// Absolute or ~-relative.
 	CredentialsDir string `json:"credentials_dir,omitempty"`
+
+	// Runtime is where brains run by default: RuntimeBubblewrap (the
+	// default: today's sandbox, bubblewrap in the container, sandbox-exec
+	// on a native Mac) or RuntimeDockerSandbox (a Docker Sandbox on a
+	// node, docs/SANDBOXES.md). A brain's brain.json may say otherwise.
+	Runtime string `json:"runtime,omitempty"`
+	// Node is the node, by id or name, whose sandbox capability runs the
+	// brains; "" for the one approved node with it on the core's machine.
+	Node string `json:"node,omitempty"`
+}
+
+// The runtimes a brain runs in (sandbox.runtime, brain.json's sandbox).
+const (
+	RuntimeBubblewrap    = manifest.RuntimeBubblewrap
+	RuntimeDockerSandbox = manifest.RuntimeDockerSandbox
+)
+
+// Runtimes are the values sandbox.runtime takes.
+func Runtimes() []string { return manifest.Runtimes() }
+
+// RuntimeOr is runtime, or the default for "".
+func RuntimeOr(runtime string) string {
+	if runtime == "" {
+		return RuntimeBubblewrap
+	}
+	return runtime
 }
 
 // QueueConfig decides what happens when a message arrives while the brain is
@@ -710,6 +736,12 @@ func SandboxSupported(goos string) bool { return goos == "darwin" || goos == Con
 func (sc SandboxConfig) Validate(goos string) error {
 	if sc.Enabled && !SandboxSupported(goos) {
 		return fmt.Errorf("sandbox.enabled needs macOS (sandbox-exec) or the fridolin-core container (bubblewrap), and this is %s: set it to false and run the bridge as a dedicated user instead, or run the core in its container (docs/CORE.md)", goos)
+	}
+	if sc.Runtime != "" && !slices.Contains(Runtimes(), sc.Runtime) {
+		return fmt.Errorf("sandbox.runtime must be %q or %q, not %q", RuntimeBubblewrap, RuntimeDockerSandbox, sc.Runtime)
+	}
+	if len(sc.Node) > 128 || strings.ContainsAny(sc.Node, "\x00\r\n") {
+		return fmt.Errorf("sandbox.node %q is not a node's id or name", sc.Node)
 	}
 	// A relative path is relative to whatever folder a brain runs in, so as
 	// a rule it would protect (or open) nothing anyone meant.
