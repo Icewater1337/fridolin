@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -113,6 +114,9 @@ type testHooks struct {
 	// connections points the calls of the connections at fake OpenAI and
 	// ElevenLabs servers in place of the real ones.
 	connections *connections.Endpoints
+	// gitlab is the client the GitLab check goes out with: tests hand in
+	// one that trusts their fake GitLab's certificate.
+	gitlab *http.Client
 	// sandboxFleet is the nodes with Docker Sandboxes in place of the
 	// nodes service: tests hand in a fake node.
 	sandboxFleet sandboxFleet

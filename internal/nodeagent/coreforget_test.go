@@ -68,7 +68,8 @@ func TestCoreForgetRemovesWhatMovesBrought(t *testing.T) {
 	if err := a.noteReceived([]string{hostsecrets.ClaudeOAuthToken}); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.noteFilesReceived("~/.credentials", []string{"dashboard-users.json"}); err != nil {
+	// The local GitLab connection goes into the core's data dir.
+	if err := a.noteFilesReceived("~/.credentials", []string{"dashboard-users.json", "local:gitlab.json"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := a.noteDataImport(testMove, nodeproto.DataDirEmpty); err != nil {
@@ -84,7 +85,7 @@ func TestCoreForgetRemovesWhatMovesBrought(t *testing.T) {
 	if perr != nil || len(res.Data) != 0 || len(res.Files) != 0 || core.data || len(res.Problems) != 1 || !strings.Contains(res.Problems[0], "the core runs here") {
 		t.Fatalf("forget where the core runs: %+v %v", res, perr)
 	}
-	if l := ReadCoreLeftovers(a.Dir); l.DataMove != testMove || len(l.Files) != 1 {
+	if l := ReadCoreLeftovers(a.Dir); l.DataMove != testMove || !slices.Equal(l.Files, []string{"core/local-secrets/gitlab.json", "~/.credentials/dashboard-users.json"}) {
 		t.Errorf("the record after a refused forget: %+v", l)
 	}
 
@@ -97,10 +98,10 @@ func TestCoreForgetRemovesWhatMovesBrought(t *testing.T) {
 	// Another core holds it: everything the moves brought goes.
 	core.status.Lease = &nodeproto.CoreLease{Device: otherDevice, State: nodeproto.LeaseLive}
 	res, perr = callCore[nodeproto.CoreSecretsForgotten](t, a, nodeproto.MethodCoreSecretsForget, struct{}{})
-	if perr != nil || len(res.Problems) != 0 || !slices.Equal(res.Data, []string{"bridge.db", "config.json"}) || !slices.Equal(res.Files, []string{"~/.credentials/dashboard-users.json"}) {
+	if perr != nil || len(res.Problems) != 0 || !slices.Equal(res.Data, []string{"bridge.db", "config.json"}) || !slices.Equal(res.Files, []string{"~/.credentials/dashboard-users.json", "/local:gitlab.json"}) {
 		t.Fatalf("forget: %+v %v", res, perr)
 	}
-	if !slices.Equal(core.files["~/.credentials"], []string{"dashboard-users.json"}) {
+	if !slices.Equal(core.files["~/.credentials"], []string{"dashboard-users.json"}) || !slices.Equal(core.files[""], []string{"local:gitlab.json"}) {
 		t.Errorf("files asked to forget: %+v", core.files)
 	}
 	// The token went when the earlier forgets ran; the B2 key was there
@@ -152,13 +153,14 @@ func TestCoreReceivedRecordIsChecked(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{
 		"names": []string{hostsecrets.ClaudeOAuthToken, "login.keychain"},
 		"files": map[string][]string{"~/.credentials": {"dashboard-users.json", "../../.ssh/id_ed25519"}, "/etc": {"dashboard-users.json"}},
+		"local": []string{"local:gitlab.json", "local:../bridge.db"},
 		"data":  map[string]any{"move": "../../x", "at": time.Now()},
 	})
 	if err := os.WriteFile(filepath.Join(a.Dir, coreReceivedFile), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	s := a.readReceived()
-	if !slices.Equal(s.Names, []string{hostsecrets.ClaudeOAuthToken}) || len(s.Files) != 1 || !slices.Equal(s.Files["~/.credentials"], []string{"dashboard-users.json"}) || s.Data != nil {
+	if !slices.Equal(s.Names, []string{hostsecrets.ClaudeOAuthToken}) || len(s.Files) != 1 || !slices.Equal(s.Files["~/.credentials"], []string{"dashboard-users.json"}) || s.Data != nil || !slices.Equal(s.Local, []string{"local:gitlab.json"}) {
 		t.Errorf("the checked record: %+v", s)
 	}
 }

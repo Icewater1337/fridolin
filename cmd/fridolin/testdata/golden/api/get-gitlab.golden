@@ -1,0 +1,13 @@
+GET /api/gitlab
+200 OK
+Content-Type: application/json
+
+{
+  "base_url": "https://gitlab.example.com",
+  "configured": true,
+  "email": "jane@example.com",
+  "host": "gitlab.example.com",
+  "name": "Jane Doe",
+  "token_hint": "…c3d4",
+  "where": "this machine's data folder (core/local-secrets): never in a backup, a snapshot or an export; a core move carries it end to end"
+}

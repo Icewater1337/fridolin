@@ -1034,6 +1034,7 @@ refused: FrIDE is never declared by hand.
 | `fride.delete` | `DELETE /api/tasks/<t>` | remove a task's workspace |
 | `fride.repo_clone` | `git clone`, then `POST /api/config` | clone a repository into the base folder |
 | `fride.repo_new` | `git init`, a commit, `gh repo create`, then `POST /api/config` | make a new repository in the base folder |
+| `fride.identities` | `PUT`/`DELETE /api/companion/git/identities/<id>` | hand FrIDE its git identities ([below](#git-identities-for-fride)) |
 
 **Repositories.** `fride.repo_clone` and `fride.repo_new` stay inside
 the base folder (`fride.base`, see above): the name is one folder name
@@ -1173,6 +1174,77 @@ dashboard shows the FrIDE address each node reports and links it; FrIDE's
 UI is on the node's loopback, so the link works on the node itself until
 the node agent publishes it over the tailnet. `fridolin doctor`'s
 `nodes-fride` warns about nodes whose approved FrIDE does not answer.
+
+### Git identities for FrIDE
+
+FrIDE can hold several git identities, and a workspace (task) is created
+under one of them (FrIDE's docs/GIT.md). The core hands each FrIDE the
+ones Fridolin has, with their tokens:
+
+| Id | Kind, host | Token | Commit name and email |
+| --- | --- | --- | --- |
+| `github` | github, `github.com` | the GitHub app's installation token ([GITHUB.md](GITHUB.md)), or the typed token when no app is connected | the GitHub card's, optional |
+| `gitlab` | gitlab, the host of the GitLab address | the GitLab connection's ([CONNECTIONS.md](CONNECTIONS.md#gitlab)) | the GitLab card's, optional |
+
+**Which nodes.** Every online node whose `fride` is approved and offered
+gets both, by default. `nodes.git_identities` in config.json narrows it
+by node id or name ([CONFIGURATION.md](CONFIGURATION.md#nodes)), for a
+work GitLab token that should not be on every machine:
+
+```json
+"nodes": {"git_identities": {"mini": ["github"], "laptop-sbx": []}}
+```
+
+**How.** The core sends a node all of its identities in one call,
+`fride.identities` (at most 8; ids as FrIDE takes them, never `none`,
+which FrIDE reserves). The node keeps them in memory only and, once
+FrIDE answers `git_identities: true` in `/api/companion/info`, puts each
+into FrIDE with `PUT /api/companion/git/identities/<id>`. FrIDE keeps
+them apart from its own `config.json`, in
+`<FRIDE_HOME>/git-identities.companion.json`, and the token in
+`<FRIDE_HOME>/secrets/git/<id>.token` (0600). One the node put there
+before that is not in the call it removes (`DELETE`; FrIDE's 404 counts
+as removed). The state dir keeps only which ids it put there
+(`fride-identities.json`), never a token. A FrIDE that does not take
+identities yet gets them once it is updated; a FrIDE paired anew gets
+them at the node's next check.
+
+The core sends them when a node connects, when its `fride` is approved
+or comes up, when an identity changes on the dashboard, and every five
+minutes to a node that did not take them. Nothing goes in a lockdown.
+
+**The GitHub token.** An installation token of the app's installation
+on its owner (else its first one), for all its repositories and
+permissions, which lasts an hour. 25 minutes before it ends the node
+asks the core for a new one (the event `fride.identities`), and the
+core mints one when the one it handed out has less than 30 minutes left.
+git asks FrIDE's credential helper at each push and so always gets the
+current token; `gh` and `glab` read theirs when a session starts. The
+app must let it write code (*Contents: Read and write* in the app's
+settings on GitHub, accepted on the installation): an app that may only
+read code gives FrIDE no GitHub identity, so that the node's own git
+login keeps pushing, and the dashboard says why. A typed token goes as
+it is.
+
+**Collisions.** An identity of FrIDE's own `config.json` with the same id
+wins for its label, host, name and email, but the token Fridolin hands
+over replaces its token: there is one token file per id. Keep your own
+identities under other ids than `github` and `gitlab`.
+
+**What it shows.** Integrations → GitLab lists each FrIDE node with the
+identities its FrIDE took and when, or why not (`GET
+/api/git-identities`). No token is in a log, the audit, a GET or the
+dashboard.
+
+**The FrIDE in a Docker Sandbox** gets none: a real token must never
+enter its VM, so its node (service `fride-sandbox`) holds them back and
+says so (`held`), and the dashboard shows why. That node goes away:
+FrIDE instances in Docker Sandboxes, which the core starts through a
+node, replace it ([VISION.md](VISION.md)). An instance will get its
+identities as placeholders, through `setHostToken` (see [GitHub and other
+git hosts](#github-and-other-git-hosts)): the token stays on the host in
+a sandbox-scoped sbx secret, which swaps the placeholder for it on the
+way to its host, and FrIDE gets the placeholder as the token.
 
 ## Setting up FrIDE on a node
 

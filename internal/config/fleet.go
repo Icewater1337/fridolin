@@ -1,13 +1,16 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // The sections below are the settings of the containerized core, its
@@ -299,6 +302,45 @@ type NodesConfig struct {
 	Enabled bool `json:"enabled"`
 	// Listen is the node port's address, host:port (default :8766).
 	Listen string `json:"listen,omitempty"`
+	// GitIdentities says, by node id or name, which git identities that
+	// node's FrIDE gets (GitIdentityIDs); a node it does not name gets
+	// all (docs/NODES.md, "Git identities for FrIDE").
+	GitIdentities map[string][]string `json:"git_identities,omitempty"`
+}
+
+// GitIdentityIDs are the git identities Fridolin hands the nodes' FrIDEs.
+var GitIdentityIDs = []string{"github", "gitlab"}
+
+// checkNodeGitIdentities reports what is wrong with nodes.git_identities.
+func checkNodeGitIdentities(m map[string][]string) error {
+	if len(m) > 256 {
+		return errors.New("nodes.git_identities names more than 256 nodes")
+	}
+	for node, ids := range m {
+		if strings.TrimSpace(node) == "" || len(node) > 128 || strings.ContainsFunc(node, unicode.IsControl) {
+			return fmt.Errorf("nodes.git_identities: %q is not a node's id or name", node)
+		}
+		for i, id := range ids {
+			if !slices.Contains(GitIdentityIDs, id) {
+				return fmt.Errorf("nodes.git_identities.%s: %q is none of %s", node, id, strings.Join(GitIdentityIDs, ", "))
+			}
+			if slices.Contains(ids[:i], id) {
+				return fmt.Errorf("nodes.git_identities.%s names %s twice", node, id)
+			}
+		}
+	}
+	return nil
+}
+
+// GitIdentityPairs lists nodes.git_identities as node=id,id, sorted, for
+// the log of security changes.
+func GitIdentityPairs(m map[string][]string) []string {
+	out := make([]string, 0, len(m))
+	for node, ids := range m {
+		out = append(out, node+"="+strings.Join(ids, ","))
+	}
+	slices.Sort(out)
+	return out
 }
 
 // PolicyConfig limits what brains may do without asking.
@@ -475,6 +517,9 @@ func (c *File) validateFleet() error {
 	}
 	if !ValidListenAddr(c.Nodes.Listen) {
 		return fmt.Errorf("nodes.listen %q must be host:port, such as %s for every interface", c.Nodes.Listen, DefaultNodesListen)
+	}
+	if err := checkNodeGitIdentities(c.Nodes.GitIdentities); err != nil {
+		return err
 	}
 	if err := c.Housekeeping.validate(); err != nil {
 		return err

@@ -24,6 +24,8 @@ const (
 	testElevenLabsKey = "sk_test_0000000000000000000000000000app"
 	// goldenOpenAIKey is the OpenAI key of goldenBridge.
 	goldenOpenAIKey = "sk-test-golden-00000000000000000000a1b2"
+	// goldenGitLabToken is the GitLab token of goldenBridge.
+	goldenGitLabToken = "test-gitlab-golden-0000c3d4"
 )
 
 // fakeAI is OpenAI and ElevenLabs on one test server: every call works,

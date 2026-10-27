@@ -118,3 +118,54 @@ func TestCoreFilesForget(t *testing.T) {
 		}
 	}
 }
+
+// The data dir's local files (core/local-secrets: the GitLab connection)
+// go along named "local:…", with or without a credentials folder; import
+// writes them into the target's data dir, replacing one that differs, and
+// forget removes them there.
+func TestCoreFilesLocal(t *testing.T) {
+	src := t.TempDir()
+	makeFiles(t, filepath.Join(src, "core", "local-secrets"), "gitlab.json")
+	cfg := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfg, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if code := runCore([]string{"files", "export"}, coreEnv{environ: []string{"HOME=" + t.TempDir(), "FRIDOLIN_CONFIG=" + cfg, "FRIDOLIN_HOME=" + src}, stdout: &out, stderr: io.Discard}); code != 0 {
+		t.Fatalf("export: exit %d", code)
+	}
+	var got secretFiles
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil || got.Dir != "" || len(got.Files) != 1 || got.Files["local:gitlab.json"] == nil {
+		t.Fatalf("export: %s, %v", out.String(), err)
+	}
+
+	dst := t.TempDir()
+	makeFiles(t, filepath.Join(dst, "core", "local-secrets"), "github.json")
+	got.Files["local:github.json"] = []byte(`{"name":"new"}`)
+	in, _ := json.Marshal(got)
+	out.Reset()
+	env := []string{"HOME=" + t.TempDir(), "FRIDOLIN_HOME=" + dst}
+	if code := runCore([]string{"files", "import"}, coreEnv{environ: env, stdin: bytes.NewReader(in), stdout: &out, stderr: io.Discard}); code != 0 {
+		t.Fatalf("import: exit %d", code)
+	}
+	var res secretFilesResult
+	if err := json.Unmarshal(out.Bytes(), &res); err != nil || !slices.Equal(res.Stored, []string{"local:gitlab.json"}) || !slices.Equal(res.Replaced, []string{"local:github.json"}) {
+		t.Fatalf("import: %s, %v", out.String(), err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dst, "core", "local-secrets", "github.json")); string(b) != `{"name":"new"}` {
+		t.Errorf("the target's old file stays: %s", b)
+	}
+
+	out.Reset()
+	body := `{"dir": "", "names": ["local:gitlab.json"]}`
+	if code := runCore([]string{"files", "forget"}, coreEnv{environ: env, stdin: strings.NewReader(body), stdout: &out, stderr: io.Discard}); code != 0 || !strings.Contains(out.String(), `"core/local-secrets/gitlab.json"`) {
+		t.Fatalf("forget: %d %s", code, out.String())
+	}
+	if _, err := os.Stat(filepath.Join(dst, "core", "local-secrets", "gitlab.json")); !os.IsNotExist(err) {
+		t.Errorf("forgotten, still there: %v", err)
+	}
+	// A credentials file still needs its folder.
+	if code := runCore([]string{"files", "forget"}, coreEnv{environ: env, stdin: strings.NewReader(`{"dir": "", "names": ["dashboard-users.json"]}`), stdout: io.Discard, stderr: io.Discard}); code != 2 {
+		t.Errorf("a credentials file without its folder: exit %d", code)
+	}
+}

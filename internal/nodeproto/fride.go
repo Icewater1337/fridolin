@@ -136,7 +136,7 @@ const (
 var FrideMethods = []string{
 	MethodFrideTask, MethodFrideStatus, MethodFrideReply, MethodFrideTaskInfo, MethodFrideClose, MethodFrideMem,
 	MethodFrideExport, MethodFrideRead, MethodFrideWrite, MethodFrideImport, MethodFrideDrop, MethodFrideDelete,
-	MethodFrideRepoClone, MethodFrideRepoNew,
+	MethodFrideRepoClone, MethodFrideRepoNew, MethodFrideIdentities,
 }
 
 // FrideChunkBytes is the most one fride.read returns and one fride.write

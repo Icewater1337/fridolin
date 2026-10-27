@@ -25,6 +25,20 @@ Content-Type: application/json
   },
   {
     "by": "dashboard",
+    "detail": "github: commit name and email saved",
+    "kind": "connection_key",
+    "outcome": "ok",
+    "ts": "<TIME>"
+  },
+  {
+    "by": "dashboard",
+    "detail": "gitlab: token set; address https://gitlab.example.com; commit name and email saved",
+    "kind": "connection_key",
+    "outcome": "ok",
+    "ts": "<TIME>"
+  },
+  {
+    "by": "dashboard",
     "detail": "openai: key set",
     "kind": "connection_key",
     "outcome": "ok",

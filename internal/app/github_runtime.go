@@ -37,6 +37,12 @@ type githubService struct {
 	status   *httpapi.GitHubStatus
 	installs []ghapp.Installation
 	readAt   time.Time
+	// frideTok is the installation token the nodes' FrIDEs have now
+	// (FrideToken), until it nears its end.
+	frideTok ghapp.Token
+	// onChange hears that what the FrIDEs get from GitHub changed; nil
+	// for nothing.
+	onChange func()
 }
 
 // githubPending is a manifest flow started from the dashboard.
@@ -79,6 +85,80 @@ func newGitHubService(cfgs *config.Store, env Environment, container bool, logge
 func (g *githubService) forgetStatus() {
 	g.mu.Lock()
 	g.status, g.installs = nil, nil
+	g.mu.Unlock()
+}
+
+// githubFrideReuse is how long a FrIDE token must still last to be handed
+// out again; the node asks for a new one sooner than that before the end
+// (nodeagent identitiesRefreshBefore), so it gets a fresh one.
+const githubFrideReuse = 30 * time.Minute
+
+// FrideToken is the GitHub credential the nodes' FrIDEs get (docs/NODES.md,
+// "Git identities for FrIDE"). With the app: an installation token of its
+// installation on the app's owner (else the first one), for all its
+// repositories and permissions, handed out again while it lasts more
+// than githubFrideReuse. The installation must let it write code, else
+// FrIDE could not push with it and gets none, so that its own git login
+// keeps working. Without the app: the typed token as it is, which does
+// not end.
+func (g *githubService) FrideToken(ctx context.Context) (string, time.Time, error) {
+	creds, ok, err := g.secrets.load()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	if !ok {
+		if t := g.secrets.typedToken(); t != "" {
+			return t, time.Time{}, nil
+		}
+		return "", time.Time{}, errNoGitHub
+	}
+	g.mu.Lock()
+	cached := g.frideTok
+	g.mu.Unlock()
+	if cached.Value != "" && cached.ExpiresAt.Sub(g.now()) > githubFrideReuse {
+		return cached.Value, cached.ExpiresAt, nil
+	}
+	// GitHub not answering now does not take the FrIDEs' token away
+	// while it lasts.
+	keep := func(err error) (string, time.Time, error) {
+		if cached.Value != "" && cached.ExpiresAt.Sub(g.now()) > 5*time.Minute {
+			g.log.Warn("github: no new token for FrIDE; the one it has lasts a while yet", "err", err)
+			return cached.Value, cached.ExpiresAt, nil
+		}
+		return "", time.Time{}, err
+	}
+	insts, err := g.readInstallations(ctx, creds)
+	if err != nil {
+		return keep(fmt.Errorf("asking GitHub where the app is installed: %w", err))
+	}
+	insts = slices.DeleteFunc(slices.Clone(insts), func(in ghapp.Installation) bool { return in.Suspended })
+	if len(insts) == 0 {
+		return "", time.Time{}, fmt.Errorf("the GitHub app %s is installed nowhere: Integrations → GitHub → Install", creds.Slug)
+	}
+	in := insts[0]
+	if i := slices.IndexFunc(insts, func(in ghapp.Installation) bool { return strings.EqualFold(in.Account, creds.Owner) }); i >= 0 {
+		in = insts[i]
+	}
+	if in.Permissions["contents"] != "write" {
+		return "", time.Time{}, fmt.Errorf("the GitHub app %s may only read code on %s, so FrIDE could not push with its token: give it Contents: Read and write in its settings on GitHub and accept that on the installation", creds.Slug, in.Account)
+	}
+	tok, err := g.client.Mint(ctx, creds, in.ID, nil, nil)
+	if err != nil {
+		return keep(fmt.Errorf("minting a GitHub token for FrIDE: %w", err))
+	}
+	if tok.ExpiresAt.IsZero() {
+		tok.ExpiresAt = g.now().Add(time.Hour)
+	}
+	g.mu.Lock()
+	g.frideTok = tok
+	g.mu.Unlock()
+	return tok.Value, tok.ExpiresAt, nil
+}
+
+// forgetFrideToken drops the FrIDE token: the app it is of went.
+func (g *githubService) forgetFrideToken() {
+	g.mu.Lock()
+	g.frideTok = ghapp.Token{}
 	g.mu.Unlock()
 }
 
@@ -153,11 +233,24 @@ func (g *githubService) Created(ctx context.Context, code, state string) (string
 		return "", fmt.Errorf("keeping the GitHub app's key failed: %w. Delete the app %s on GitHub and connect again", err, creds.Slug)
 	}
 	g.forgetStatus()
+	g.changed()
 	g.log.Info("github: connected", "app", creds.Slug, "owner", creds.Owner, "kept_in", g.secrets.where())
 	return ghapp.InstallURL(g.web, creds.Slug), nil
 }
 
-func (g *githubService) Installed() { g.forgetStatus() }
+func (g *githubService) Installed() {
+	g.forgetStatus()
+	g.changed()
+}
+
+// changed drops the FrIDE token and tells onChange that what the FrIDEs
+// get changed: an app came, was installed elsewhere, or went.
+func (g *githubService) changed() {
+	g.forgetFrideToken()
+	if g.onChange != nil {
+		go g.onChange()
+	}
+}
 
 // readInstallations asks GitHub where the app is installed, or reuses
 // what Status read within the minute.
@@ -347,6 +440,7 @@ func (g *githubService) Disconnect() (httpapi.GitHubDisconnected, error) {
 		return httpapi.GitHubDisconnected{}, err
 	}
 	g.forgetStatus()
+	g.changed()
 	res := httpapi.GitHubDisconnected{Status: "disconnected"}
 	if ok {
 		res.DeleteURL = ghapp.DeleteURL(g.web, creds)

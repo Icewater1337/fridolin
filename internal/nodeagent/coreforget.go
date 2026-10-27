@@ -34,6 +34,8 @@ type CoreForgetter interface {
 	// ForgetFiles removes the named secret files from dir (a folder
 	// under ~) in the core's home (fridolin core files forget), and
 	// returns those it removed as ~/dir/name; one not there is no error.
+	// Local files ("local:gitlab.json") go from the core's data dir,
+	// with dir "".
 	ForgetFiles(ctx context.Context, dir string, names []string) ([]string, error)
 	// ForgetData empties the core's data dir (fridolin core forget-data),
 	// which refuses while a core runs on it or no other device's core
@@ -50,6 +52,9 @@ type coreReceivedState struct {
 	// folder, by that folder under ~; never one that was there before,
 	// which a move keeps as it is.
 	Files map[string][]string `json:"files,omitempty"`
+	// Local are the local files moves wrote into the core's data dir
+	// (secretxfer.LocalFileName, "local:gitlab.json") that were not there.
+	Local []string `json:"local,omitempty"`
 	// Data is set when a move's import put the core's data dir into an
 	// empty one: it, and whatever a core on it wrote since, came with the
 	// moves, and forgetting removes it.
@@ -71,7 +76,7 @@ type coreDataRecord struct {
 }
 
 func (s coreReceivedState) empty() bool {
-	return len(s.Names) == 0 && len(s.Files) == 0 && s.Data == nil && s.OwnData == nil && s.DataForgotten.IsZero()
+	return len(s.Names) == 0 && len(s.Files) == 0 && len(s.Local) == 0 && s.Data == nil && s.OwnData == nil && s.DataForgotten.IsZero()
 }
 
 // readReceived reads the record, keeping only what a move carries: a name
@@ -95,6 +100,7 @@ func (a *Agent) readReceived() coreReceivedState {
 		}
 		s.Files[dir] = names
 	}
+	s.Local = slices.DeleteFunc(s.Local, func(n string) bool { return !secretxfer.LocalFileName(n) })
 	for _, r := range []**coreDataRecord{&s.Data, &s.OwnData} {
 		if *r != nil && nodeproto.CheckMoveID((*r).Move) != nil {
 			*r = nil
@@ -135,18 +141,35 @@ func (a *Agent) noteReceived(names []string) error {
 	return a.writeReceived(s)
 }
 
-// noteFilesReceived records the secret files a move wrote into dir.
+// noteFilesReceived records the secret files a move wrote into dir, and
+// the local files it wrote into the core's data dir.
 func (a *Agent) noteFilesReceived(dir string, names []string) error {
-	if len(names) == 0 || secretxfer.CheckFilesDir(dir) != nil {
+	var creds, local []string
+	for _, n := range names {
+		if secretxfer.LocalFileName(n) {
+			local = append(local, n)
+		} else {
+			creds = append(creds, n)
+		}
+	}
+	if secretxfer.CheckFilesDir(dir) != nil {
+		creds = nil
+	}
+	if len(creds) == 0 && len(local) == 0 {
 		return nil
 	}
 	s := a.readReceived()
-	if s.Files == nil {
-		s.Files = map[string][]string{}
+	if len(creds) > 0 {
+		if s.Files == nil {
+			s.Files = map[string][]string{}
+		}
+		all := append(s.Files[dir], creds...)
+		sort.Strings(all)
+		s.Files[dir] = slices.Compact(all)
 	}
-	all := append(s.Files[dir], names...)
-	sort.Strings(all)
-	s.Files[dir] = slices.Compact(all)
+	s.Local = append(s.Local, local...)
+	sort.Strings(s.Local)
+	s.Local = slices.Compact(s.Local)
 	return a.writeReceived(s)
 }
 
@@ -183,7 +206,7 @@ func (a *Agent) noteDataImport(move, state string) error {
 func (a *Agent) coreForget(ctx context.Context) (any, *nodeproto.Error) {
 	rec := a.readReceived()
 	res := nodeproto.CoreSecretsForgotten{Forgotten: []string{}}
-	if rec.Data != nil || len(rec.Files) > 0 {
+	if rec.Data != nil || len(rec.Files) > 0 || len(rec.Local) > 0 {
 		f, why := a.coreForgetter(ctx)
 		if why != "" {
 			res.Problems = append(res.Problems, "kept the core's data dir and the secret files a move brought: "+why)
@@ -209,6 +232,16 @@ func (a *Agent) coreForget(ctx context.Context) (any, *nodeproto.Error) {
 				}
 				res.Files = append(res.Files, removed...)
 				delete(rec.Files, dir)
+			}
+			// The local files (the GitLab connection) a move wrote into
+			// the data dir; gone already with it when it went whole.
+			if len(rec.Local) > 0 {
+				removed, err := f.ForgetFiles(ctx, "", rec.Local)
+				if err != nil {
+					res.Problems = append(res.Problems, "removing the local files in the core's data dir: "+err.Error())
+				} else {
+					res.Files, rec.Local = append(res.Files, removed...), nil
+				}
 			}
 		}
 	}
@@ -380,6 +413,9 @@ func ReadCoreLeftovers(dir string) CoreLeftovers {
 		for _, n := range names {
 			l.Files = append(l.Files, d+"/"+n)
 		}
+	}
+	for _, n := range rec.Local {
+		l.Files = append(l.Files, secretxfer.LocalDir+"/"+strings.TrimPrefix(n, secretxfer.LocalPrefix))
 	}
 	sort.Strings(l.Files)
 	if rec.Data != nil {

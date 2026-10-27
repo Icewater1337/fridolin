@@ -174,14 +174,27 @@ app's settings → **Delete GitHub App**.
 To connect again, click Connect GitHub. That makes a new app; delete the
 old one on GitHub.
 
+## FrIDE
+
+The FrIDEs of the nodes get the app as their `github` identity
+([NODES.md](NODES.md#git-identities-for-fride)): an installation token of
+the app's installation on its owner (else its first one), for all its
+repositories and permissions. It lasts an hour; each node asks for a new
+one 25 minutes before it ends. The installation must let it write code:
+set *Contents* to *Read and write* in the app's settings on GitHub, and
+*Pull requests* to *Read and write* for pull requests (the app made with
+*Let FrIDE open pull requests* has the second), then accept the change
+on the installation. Until then FrIDE gets no GitHub token, and its
+node's own git login keeps pushing. Without an app, FrIDE gets the typed
+token as it is.
+
+The GitHub card's optional commit name and email are what FrIDE commits
+with in a GitHub workspace.
+
 ## Later
 
-The same app is meant to serve these. They are not wired yet:
+The same app is meant to serve this. It is not wired yet:
 
-- **FrIDE pushes and pull requests:** a token with `contents: write` and
-  `pull_requests: write` for the task's repository. It needs the app made
-  with *Let FrIDE open pull requests*, or that permission added on GitHub
-  (GitHub then asks you to accept it on the installation).
 - **The site's repository deploy:** a `contents: read` token for the
   site's repository in place of its deploy key ([SITE.md](SITE.md)).
 

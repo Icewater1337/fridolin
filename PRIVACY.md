@@ -49,6 +49,16 @@ policy describes what that copy does with data.
   provider's terms: **Anthropic** in Claude mode (or your configured Claude
   provider), or **OpenAI** in Codex mode.
 - Backups go to **your own Google Drive**.
+- The **GitLab access token**, a work credential for a self-hosted GitLab,
+  never goes to the cloud. It stays on your machines: the core's data
+  folder (`core/local-secrets/`, which no backup, snapshot or export takes),
+  the next core a move carries it to (end to end, sealed), the nodes whose
+  FrIDE gets it (over the node channel on your tailnet, and kept in memory
+  by the node), and FrIDE's home there. It goes to your GitLab only, as
+  git's and `glab`'s credential, and when **Check** asks GitLab who the
+  token is ([CONNECTIONS.md](docs/CONNECTIONS.md#gitlab)). Code the coding
+  agents read through it goes to the model provider like anything else a
+  FrIDE agent reads.
 - Plaud transcripts are saved as text files on your computer and handed to the
   brain you chose, so they reach the selected model provider like any message
   the brain answers.
@@ -155,6 +165,7 @@ only what the last column says.
 | Paired phones' public keys and pairing-code hashes; Plaud developer keys and the built phone app | `plaud/devices.json`, `plaud/developer.json` and `plaud/app/` in the data folder, with a public-key copy in `site/devices.json`; copies of the APK wherever you download it | Until unpaired or deleted; used and expired pairing codes are dropped on the next device update | Your user; the site reads public keys; the APK contains developer keys, so anyone with a copy can extract them |
 | Sign-ins: each brain's Google token, the OAuth client, the Drive link (rclone), the Plaud login, the dashboard and scripts tokens | The data folder, or `sandbox.credentials_dir` for the Google tokens; the Plaud login is in `~/.plaud/` while "Let brains use the Plaud CLI" is on | Until you disconnect, or delete them | Your user and the bridge; not brains, except that Plaud login |
 | The OpenAI and ElevenLabs keys of the connections, and their usage per month and caller (requests, audio seconds, tokens, characters, estimated cost; never what was sent) | `connections/` in the data folder | A key until you remove it; the usage for 13 months | Your user and the bridge; not brains, nor the site under the macOS sandbox |
+| The GitLab connection (address, access token, commit name and email) and GitHub's commit name and email, for FrIDE | `core/local-secrets/` in the data folder, on this machine only: never in a backup, a snapshot, the vault's cold tier or an export; a core move carries it end to end to the next core; and in FrIDE's home on each node whose FrIDE gets it (`<FRIDE_HOME>/secrets/git/`) | Until you remove it; FrIDE loses it at the core's next hand-over | Your user and the bridge; on a node, its agent (in memory) and FrIDE, whose coding agents use the token for git and `glab` |
 | The keys you put in the service's environment, such as the Claude login sandboxed brains use (`CLAUDE_CODE_OAUTH_TOKEN`), the Codex API key (`CODEX_API_KEY`), or `GROQ_API_KEY` | macOS: `~/Library/LaunchAgents/ai.fridolin.bridge.plist`; Linux: the drop-in `systemctl --user edit fridolin` made | Until you remove them | Your user; the selected provider gets its login, and brains get the keys `child_env_passthrough` names, in their environment, and can read the service file |
 | The bridge's log: connections, routing, runs and errors, naming chats, senders' numbers, group names, poll questions and votes, but not what messages say | macOS: `~/Library/Logs/fridolin/`; Linux: your user journal (`journalctl --user -u fridolin`) | macOS: up to 10 MB a file, and one older file; Linux: as journald is set to keep it | Your user; not brains |
 | Claude Code's transcript of every run: the prompt, every tool call and its output, the reply | With the macOS sandbox, the brain's own Claude Code config folder, `brains/<brain id>/claude/` in the data folder; without it, or with `inherit_claude_user_config`, `~/.claude/projects/` | As Claude Code's `cleanupPeriodDays` says (30 days by default) | Your user and that brain; with `inherit_claude_user_config`, your user only: the macOS sandbox keeps every brain out of `~/.claude/projects/`, its own transcripts included |

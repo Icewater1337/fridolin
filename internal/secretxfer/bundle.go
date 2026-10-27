@@ -35,12 +35,13 @@ func SealBundle(from string, secrets map[string]string, recipient string) ([]byt
 
 // SealBundleFiles is SealBundle with the secret files of the core's
 // credentials folder (FileNames) beside the secrets, and that folder
-// under ~ (dir).
+// under ~ (dir), and the local files of its data dir (LocalFileName),
+// which need no folder.
 func SealBundleFiles(from string, secrets map[string]string, files map[string][]byte, dir, recipient string) ([]byte, error) {
 	if err := checkFiles(files); err != nil {
 		return nil, err
 	}
-	if len(files) > 0 {
+	if creds, _ := SplitFiles(files); len(creds) > 0 {
 		if err := CheckFilesDir(dir); err != nil {
 			return nil, err
 		}

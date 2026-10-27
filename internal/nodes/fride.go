@@ -71,6 +71,13 @@ func (s *Service) FrideClose(ctx context.Context, id, task string) (nodeproto.Fr
 	return out, s.Call(ctx, id, nodeproto.MethodFrideClose, nodeproto.FrideTaskRef{TaskID: task}, &out)
 }
 
+// FrideIdentities hands node id all the git identities of its FrIDE,
+// with their tokens (docs/NODES.md, "Git identities for FrIDE").
+func (s *Service) FrideIdentities(ctx context.Context, id string, p nodeproto.FrideIdentities) (nodeproto.FrideIdentitiesResult, error) {
+	var out nodeproto.FrideIdentitiesResult
+	return out, s.Call(ctx, id, nodeproto.MethodFrideIdentities, p, &out)
+}
+
 // FrideMem asks node id's FrIDE whether a stack may start now.
 func (s *Service) FrideMem(ctx context.Context, id string) (nodeproto.FrideMem, error) {
 	var out nodeproto.FrideMem

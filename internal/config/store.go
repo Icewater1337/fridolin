@@ -648,6 +648,7 @@ var securitySettings = []struct {
 	{"core.tailnet.enabled", func(c *Settings) any { return fmt.Sprint(c.Core.Tailnet.Enabled) }},
 	{"nodes.enabled", func(c *Settings) any { return fmt.Sprint(c.Nodes.Enabled) }},
 	{"nodes.listen", func(c *Settings) any { return c.Nodes.Listen }},
+	{"nodes.git_identities", func(c *Settings) any { return GitIdentityPairs(c.Nodes.GitIdentities) }},
 	{"http_listen", func(c *Settings) any { return c.HTTPListen }},
 	{"data_dir", func(c *Settings) any { return c.DataDir }},
 	{"db_path", func(c *Settings) any { return c.DBPath }},

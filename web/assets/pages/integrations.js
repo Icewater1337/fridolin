@@ -1,5 +1,8 @@
 // Integrations: services that feed brains and that runs reach. GitHub
-// (components/github-card.js); the Plaud recorder: connect with Plaud's
+// (components/github-card.js), with the commit identity FrIDE's GitHub
+// commits carry; a GitLab of your own (components/gitlab-card.js), whose
+// token the FrIDEs of your nodes get, and what each node's FrIDE got of
+// both; the Plaud recorder: connect with Plaud's
 // own sign-in, pick the brain that receives recordings, and see what was
 // handed over last; and the connections of Fridolin, OpenAI and ElevenLabs
 // (components/connection-card.js): one API key each that the bridge holds
@@ -19,6 +22,7 @@ import { pill, callout, timeAgo, mono, pageHeader, loading } from '../components
 import { chatEl, chatName } from '../components/chat.js';
 import { liveForm } from '../components/live-form.js';
 import { githubCard } from '../components/github-card.js';
+import { gitlabCard } from '../components/gitlab-card.js';
 import { connectionCard } from '../components/connection-card.js';
 
 /** @import { PageModule } from '../app/page.js' */
@@ -57,11 +61,13 @@ export default /** @satisfies {PageModule} */ ({
   title: 'Integrations',
   render(root, ctx) {
     const card = h('section.card', loading('Checking Plaud…'));
+    const github = githubCard(ctx);
+    const gitlab = gitlabCard(ctx);
     const openai = connectionCard(ctx, 'openai');
     const elevenlabs = connectionCard(ctx, 'elevenlabs');
     mount(root,
       pageHeader('Integrations', 'Services that hand things to your brains on their own, and that their runs and your site’s modules may use.'),
-      h('div.page-stack', githubCard(ctx), card, openai, elevenlabs));
+      h('div.page-stack', github, gitlab, card, openai, elevenlabs));
 
     // The status never waits for Plaud: who is signed in is what the
     // bridge asked last.
@@ -87,7 +93,7 @@ export default /** @satisfies {PageModule} */ ({
     const phonesBox = h('div');
     const appBox = h('div.stack', keysBox, buildBox, phonesBox);
     const settings = liveForm({ build: buildSettings, edits: (d) => d.st });
-    ctx.dirty = () => settings.dirty() || openai.dirty() || elevenlabs.dirty();
+    ctx.dirty = () => settings.dirty() || github.dirty() || gitlab.dirty() || openai.dirty() || elevenlabs.dirty();
 
     /** @type {(state: string, kind: string) => HTMLElement} */
     const head = (state, kind) => h('div.card-head',

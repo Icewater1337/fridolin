@@ -96,3 +96,82 @@ func TestSecretFilesTravelSealed(t *testing.T) {
 		t.Fatal("stored a file outside the names")
 	}
 }
+
+// The local files (the data dir's core/local-secrets: the GitLab
+// connection) travel sealed too, with or without a credentials folder,
+// and replace what the target has.
+func TestLocalFilesTravelSealed(t *testing.T) {
+	src := t.TempDir()
+	dir := filepath.Join(src, filepath.FromSlash(LocalDir))
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{"gitlab.json": `{"token":"new"}`, "github.json": `{"name":"Jane"}`, "notes.txt": "not a secret file"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, err := ReadLocalFiles(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 || string(files["local:gitlab.json"]) != `{"token":"new"}` {
+		t.Fatalf("read %q", files)
+	}
+	if none, err := ReadLocalFiles(t.TempDir()); err != nil || len(none) != 0 {
+		t.Errorf("no folder: %v %v", none, err)
+	}
+	id, err := age.GenerateHybridIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No credentials folder is needed for local files alone.
+	ct, err := SealBundleFiles("mini", map[string]string{"fridolin.export.key": "k1"}, files, "", id.Recipient().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, got, filesDir, _, err := OpenBundleFiles(ct, id)
+	if err != nil || filesDir != "" || len(got) != 2 {
+		t.Fatalf("opened %q %q: %v", got, filesDir, err)
+	}
+	if _, _, err := StoreFiles(t.TempDir(), got); err == nil {
+		t.Error("StoreFiles wrote local files into a credentials folder")
+	}
+	creds, local := SplitFiles(got)
+	if len(creds) != 0 || len(local) != 2 {
+		t.Errorf("split %q %q", creds, local)
+	}
+
+	dst := t.TempDir()
+	ddir := filepath.Join(dst, filepath.FromSlash(LocalDir))
+	if err := os.MkdirAll(ddir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ddir, "gitlab.json"), []byte(`{"token":"old"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stored, replaced, err := StoreLocalFiles(dst, local)
+	if err != nil || !slices.Equal(stored, []string{"local:github.json"}) || !slices.Equal(replaced, []string{"local:gitlab.json"}) {
+		t.Fatalf("stored %q replaced %q: %v", stored, replaced, err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(ddir, "gitlab.json")); string(b) != `{"token":"new"}` {
+		t.Errorf("the old connection stays: %s", b)
+	}
+	if fi, err := os.Stat(filepath.Join(ddir, "github.json")); err != nil || (runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600) {
+		t.Errorf("mode %v: %v", fi, err)
+	}
+	// The same again changes nothing.
+	if stored, replaced, err := StoreLocalFiles(dst, local); err != nil || len(stored)+len(replaced) != 0 {
+		t.Errorf("again: %q %q %v", stored, replaced, err)
+	}
+	if _, _, err := StoreLocalFiles(dst, map[string][]byte{"local:../x.json": []byte("x")}); err == nil {
+		t.Error("stored a name a move does not carry")
+	}
+	removed, err := RemoveLocalFiles(dst, []string{"local:gitlab.json", "local:github.json", "local:github.json"})
+	if err != nil || !slices.Equal(removed, []string{"core/local-secrets/gitlab.json", "core/local-secrets/github.json"}) {
+		t.Errorf("removed %q: %v", removed, err)
+	}
+	if _, err := RemoveLocalFiles(dst, []string{"dashboard-users.json"}); err == nil {
+		t.Error("removed a file of the credentials folder")
+	}
+}
