@@ -67,7 +67,7 @@ case "$pid" in '' | *[!0-9]*) pid= ;; esac
 if [ -n "$pid" ] && [ "$(cat "/proc/$pid/comm" 2>/dev/null)" = fride ]; then
 	echo "FrIDE runs ($pid)."
 else
-	[ -z "$pid" ] || { kill -TERM -- "-$pid" 2>/dev/null; sleep 1; }
+	[ -z "$pid" ] || { kill -TERM -"$pid" 2>/dev/null; sleep 1; }
 	[ -x "$c/bin/fride" ] || { echo "FrIDE is not built here: fridolin node fride sandbox update" >&2; exit 2; }
 	ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([0-9.]*\).*/\1/p')
 	[ -n "$ip" ] || ip=$(hostname -I 2>/dev/null | awk '{print $1}')
@@ -91,10 +91,10 @@ const frideSandboxStop = `# fride-sandbox: stop
 h="$HOME/fride-companion/home"
 pid=$(cat "$h/fride.pid" 2>/dev/null || true)
 case "$pid" in '' | *[!0-9]*) exit 0 ;; esac
-kill -TERM -- "-$pid" 2>/dev/null
+kill -TERM -"$pid" 2>/dev/null
 i=0
 while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do sleep 0.5; i=$((i + 1)); done
-kill -KILL -- "-$pid" 2>/dev/null
+kill -KILL -"$pid" 2>/dev/null
 rm -f "$h/fride.pid"
 `
 

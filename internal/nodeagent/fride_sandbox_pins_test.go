@@ -57,6 +57,10 @@ func TestFrideSandboxScripts(t *testing.T) {
 		if out, err := exec.Command(sh, "-n", "-c", s).CombinedOutput(); err != nil || !strings.HasPrefix(s, "# fride-sandbox: ") {
 			t.Errorf("%v %s\n%s", err, out, s)
 		}
+		// The VM's sh is dash, whose kill takes no "--" ("Illegal number").
+		if strings.Contains(s, "kill -TERM --") || strings.Contains(s, "kill -KILL --") {
+			t.Errorf("a kill with -- in:\n%s", s)
+		}
 	}
 }
 
