@@ -20,8 +20,8 @@ import (
 // and FrIDE built from this checkout's pins), stores a made-up Claude
 // token, has an agent keep FrIDE running, pairs with it on 17850, checks
 // the webhook's way to the host on 17851, updates, stops, and removes the
-// sandbox and its template. It refuses to run while a sandbox
-// fride-sandbox exists, or 17850 or 17851 is taken.
+// sandbox and its template. Its sandbox has a scratch name, never
+// fride-sandbox's; it skips while 17850 or 17851 is taken.
 func TestFrideSandboxLive(t *testing.T) {
 	// Serial: it drives the machine's one sbx, its ports and a VM.
 	if os.Getenv("FRIDOLIN_LIVE_SBX") != "1" {
@@ -59,15 +59,16 @@ func TestFrideSandboxLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	o := FrideSandboxOptions{Dir: dir, Sbx: sbx, Docker: docker, Repo: repo, Base: filepath.Join(t.TempDir(), "repos"),
-		FrideRepo: frideRepo, GitName: "Live Test", GitEmail: "you@example.com", Out: tlogWriter{t}}
+		FrideRepo: frideRepo, GitName: "Live Test", GitEmail: "you@example.com", Out: tlogWriter{t}, name: liveSandboxName(t)}
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Minute)
 	defer cancel()
 	if status, err := o.sandboxStatus(ctx); err != nil || status != "" {
-		t.Fatalf("a sandbox %s is there already (%q %v): this test makes and removes its own", FrideSandboxName, status, err)
+		t.Fatalf("a sandbox %s is there already (%q %v): this test makes and removes its own", o.sandbox(), status, err)
 	}
 	tag, _ := FrideSandboxTemplateTag(repo)
 	t.Cleanup(func() {
 		ctx := context.Background()
+		o.SkipHistory = true
 		if err := FrideSandboxRemove(ctx, o); err != nil {
 			t.Errorf("rm: %v", err)
 		}
@@ -111,7 +112,7 @@ func frideSandboxLiveRun(ctx context.Context, t *testing.T, o FrideSandboxOption
 	if err != nil || !r.Answers || !r.Paired || r.Inside["login"] != "yes" || r.Inside["running"] != "yes" || r.Inside["git"] != "yes" {
 		t.Errorf("status: %+v %v", r, err)
 	}
-	out, stderr, err := o.sbx().run(ctx, nil, nil, "exec", FrideSandboxName, "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
+	out, stderr, err := o.sbx().run(ctx, nil, nil, "exec", o.sandbox(), "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
 		"-X", "POST", "http://127.0.0.1:17851/fride")
 	if err != nil || string(out) != "204" || hits.n.Load() == 0 {
 		t.Errorf("the webhook's way to the host: %q %v %s (hits %d)", out, err, stderr, hits.n.Load())
@@ -136,10 +137,10 @@ func frideSandboxLiveRun(ctx context.Context, t *testing.T, o FrideSandboxOption
 	stopLoop()
 	<-done
 	// The login stays on the VM's disk across a stop of the VM.
-	if _, stderr, err := o.sbx().run(ctx, nil, nil, "stop", FrideSandboxName); err != nil {
+	if _, stderr, err := o.sbx().run(ctx, nil, nil, "stop", o.sandbox()); err != nil {
 		t.Fatalf("sbx stop: %v", sbxError(err, stderr))
 	}
-	out, _, err = o.sbx().run(ctx, nil, nil, append([]string{"exec", FrideSandboxName}, frideSandboxScript(frideSandboxStatus)...)...)
+	out, _, err = o.sbx().run(ctx, nil, nil, append([]string{"exec", o.sandbox()}, frideSandboxScript(frideSandboxStatus)...)...)
 	if kv := parseKeyValues(out); err != nil || kv["login"] != "yes" || kv["git"] != "yes" {
 		t.Errorf("after the VM stopped: %v %v", kv, err)
 	}
