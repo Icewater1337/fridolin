@@ -116,6 +116,8 @@ type fride struct {
 	// noLogin is when FrIDE last failed a thread for want of a Claude
 	// login; zero for not since its news said otherwise.
 	noLogin time.Time
+	// takesIDs says FrIDE answered its last check taking git identities.
+	takesIDs bool
 
 	// events is the news on its way to the core; changed says the
 	// declaration changed.
@@ -147,6 +149,9 @@ type FrideInfo struct {
 	Profiles     []string `json:"profiles"`
 	WebhookURL   string   `json:"webhook_url"`
 	Orchestrator bool     `json:"orchestrator"`
+	// GitIdentities says FrIDE takes git identities from its companion
+	// (fride_identities.go).
+	GitIdentities bool `json:"git_identities"`
 }
 
 // FrideError is FrIDE's answer to a call that failed.
@@ -379,6 +384,7 @@ func (a *Agent) frideCheck(ctx context.Context) bool {
 	f.checkMu.Unlock()
 
 	var next *nodeproto.FrideCap
+	takesIDs := false
 	if cfg != nil && token != "" {
 		pctx, cancel := context.WithTimeout(ctx, frideProbeTimeout)
 		info, err := (&frideConn{a: a, cfg: cfg, token: token}).probe(pctx)
@@ -388,6 +394,7 @@ func (a *Agent) frideCheck(ctx context.Context) bool {
 			if next.Check() != nil {
 				next.Repos = nil
 			}
+			takesIDs = info.GitIdentities
 		}
 	}
 	f.mu.Lock()
@@ -395,7 +402,7 @@ func (a *Agent) frideCheck(ctx context.Context) bool {
 		f.mu.Unlock()
 		return false
 	}
-	f.applied = seq
+	f.applied, f.takesIDs = seq, takesIDs
 	old := f.cap
 	if next == nil {
 		// FrIDE went away, or restarts with the login fixed.
@@ -434,6 +441,9 @@ func (a *Agent) frideLoop(ctx context.Context) {
 		case <-t.C:
 		}
 		fc := a.frideCheck(ctx)
+		// The git identities: to a FrIDE paired anew, and a new GitHub
+		// token before the one it has runs out.
+		a.identitiesTick(ctx)
 		// core-host.json written by `fridolin node core-host` while the
 		// agent runs: declared again, to wait for the owner's approval.
 		ac, cc, sc := a.androidCheck(false), a.coreHostChanged(), a.sandboxCheck(ctx, false)

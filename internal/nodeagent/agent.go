@@ -122,6 +122,7 @@ type Agent struct {
 	state     nodeproto.State
 	connected bool
 	fride     fride
+	gitIDs    gitIdentities
 	android   android
 	work      workstation
 	sandbox   sandbox
@@ -439,11 +440,19 @@ func (a *Agent) session(ctx context.Context) error {
 	// FrIDE's news, and what the node offers when FrIDE comes or goes.
 	a.fride.init()
 	a.work.init()
+	asks := a.gitIDs.init()
 	wg.Go(func() {
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case ask := <-asks:
+				data, _ := json.Marshal(ask)
+				if err := c.send(ctx, nodeproto.TypeEvent, "", nodeproto.Event{Kind: nodeproto.EventFrideIdentities, Data: data}); err != nil {
+					a.logf("node: asking the core for FrIDE's git identities: %v", err)
+					cancel()
+					return
+				}
 			case <-a.fride.changed:
 				if err := c.send(ctx, nodeproto.TypeDeclare, "", nodeproto.Declare{Capabilities: a.declared()}); err != nil {
 					cancel()
