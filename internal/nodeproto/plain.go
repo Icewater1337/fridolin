@@ -59,7 +59,7 @@ func (c Capabilities) Plain() []string {
 		out = append(out, "open a terminal in "+folders(c.Terminal.Roots)+" — anything you could type there")
 	}
 	if c.Sandbox != nil {
-		out = append(out, SandboxApproval)
+		out = append(out, "run brains in Docker Sandboxes on this machine")
 	}
 	return out
 }

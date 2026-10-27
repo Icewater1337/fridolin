@@ -25,6 +25,9 @@ func TestMain(m *testing.M) {
 	if os.Getenv("FAKE_AGENT") != "" {
 		os.Exit(fakeAgent())
 	}
+	if dir := os.Getenv("FAKE_SBX_DIR"); dir != "" {
+		os.Exit(fakeSbx(dir))
+	}
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "helper-echo":

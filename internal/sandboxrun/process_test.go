@@ -77,7 +77,7 @@ func TestProcessFailures(t *testing.T) {
 	if _, err := sandboxrun.Start(context.Background(), node.Call, nodeproto.SandboxRunParams{Run: "r4"}, &bytes.Buffer{}, sandboxrun.Options{}); err == nil {
 		t.Error("an offline node started a run")
 	}
-	big := nodeproto.SandboxRunParams{Run: "r5", Stdin: strings.Repeat("x", nodeproto.MaxSandboxStdinBytes+1)}
+	big := nodeproto.SandboxRunParams{Run: "r5", Stdin: strings.Repeat("x", nodeproto.MaxSandboxStdin+1)}
 	if _, err := sandboxrun.Start(context.Background(), node.Call, big, &bytes.Buffer{}, sandboxrun.Options{}); err == nil || !strings.Contains(err.Error(), "more than") {
 		t.Errorf("a big prompt: %v", err)
 	}

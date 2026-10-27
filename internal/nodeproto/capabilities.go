@@ -35,7 +35,9 @@ type Capabilities struct {
 	// of its own: the owner's vote on the first move to the machine is
 	// that (nodes.Node.CoreHostConfirmedAt).
 	CoreHost *CoreHostCap `json:"core_host,omitempty"`
-	// Sandbox runs brains in Docker Sandboxes on the node (sandbox.go).
+	// Sandbox is Docker Sandboxes (sbx) on the node, which runs brains'
+	// runs in microVMs (sandbox.go). Approved like FrIDE: its methods run
+	// agents on the machine.
 	Sandbox *SandboxCap `json:"sandbox,omitempty"`
 }
 
@@ -358,7 +360,8 @@ func (c Capabilities) Empty() bool {
 // host and notify. A declaration that grows past what was approved needs
 // approval again. FrIDE and android-build are covered by having been
 // approved at all: FrIDE's address and repositories, and the JDK and
-// platforms, are only what the node reports; so is update. Backup is covered for the
+// platforms, are only what the node reports; so are update and sbx's
+// state in sandbox. Backup is covered for the
 // places the approval lends (coversBackup); its folders are the
 // approval's own. core-host is always covered: it is no approval of
 // commands, and Empty leaves it out (see Capabilities.CoreHost).
@@ -369,7 +372,6 @@ func Covers(approved, declared Capabilities) bool {
 	if declared.AndroidBuild != nil && approved.AndroidBuild == nil || declared.Update != nil && approved.Update == nil {
 		return false
 	}
-	// Like fride: sbx's facts are only what the node reports.
 	if declared.Sandbox != nil && approved.Sandbox == nil {
 		return false
 	}
@@ -542,11 +544,7 @@ func (c Capabilities) Summary() string {
 		parts = append(parts, c.CoreHost.summary())
 	}
 	if c.Sandbox != nil {
-		if c.Sandbox.NotReady() != "" {
-			parts = append(parts, "sandbox (not ready)")
-		} else {
-			parts = append(parts, "sandbox")
-		}
+		parts = append(parts, c.Sandbox.summary())
 	}
 	if len(parts) == 0 {
 		return "nothing"

@@ -26,7 +26,7 @@ type Options struct {
 	// Label names the run in the brain's log ("sandbox run r1 on mini").
 	Label string
 	// Grace is how long the node waits after TERM before it kills the
-	// run's processes (default 5 s).
+	// run's processes (default nodeproto.DefaultSandboxGraceS).
 	Grace time.Duration
 	// ReadWait is each read's long poll (default 15 s).
 	ReadWait time.Duration
@@ -54,8 +54,8 @@ type Process struct {
 // Start starts the run p on the node and copies its output to out. The
 // run is stopped on the node when ctx ends.
 func Start(ctx context.Context, call Caller, p nodeproto.SandboxRunParams, out io.Writer, o Options) (*Process, error) {
-	if len(p.Stdin) > nodeproto.MaxSandboxStdinBytes {
-		return nil, fmt.Errorf("the prompt is %d bytes, more than a Docker Sandbox run takes (%d)", len(p.Stdin), nodeproto.MaxSandboxStdinBytes)
+	if len(p.Stdin) > nodeproto.MaxSandboxStdin {
+		return nil, fmt.Errorf("the prompt is %d bytes, more than a Docker Sandbox run takes (%d)", len(p.Stdin), nodeproto.MaxSandboxStdin)
 	}
 	o = withDefaults(o)
 	var res nodeproto.SandboxRunResult
@@ -79,7 +79,7 @@ func Start(ctx context.Context, call Caller, p nodeproto.SandboxRunParams, out i
 
 func withDefaults(o Options) Options {
 	if o.Grace <= 0 {
-		o.Grace = 5 * time.Second
+		o.Grace = nodeproto.DefaultSandboxGraceS * time.Second
 	}
 	if o.ReadWait <= 0 {
 		o.ReadWait = 15 * time.Second
@@ -122,7 +122,7 @@ func (p *Process) StderrTail() string {
 func (p *Process) Stop() {
 	p.stopOnce.Do(func() {
 		close(p.stop)
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), p.o.Grace+30*time.Second)
 		defer cancel()
 		_ = p.call(ctx, nodeproto.MethodSandboxStop, nodeproto.SandboxStopParams{Run: p.run, GraceS: int(p.o.Grace / time.Second)}, nil)
 		p.ackOnce.Do(func() { close(p.acked) })

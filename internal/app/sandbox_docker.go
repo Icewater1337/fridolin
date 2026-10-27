@@ -25,8 +25,6 @@ import (
 // the core that runs the brain in a Docker Sandbox (brainRuntimes.marker).
 const markerFile = ".fridolin-runtime-id"
 
-// sandboxMemoryMB is each brain sandbox's memory cap.
-const sandboxMemoryMB = 4096
 
 // writeMarker writes marker into dir's markerFile, through the folder:
 // a brain cannot point it elsewhere with a symlink.
@@ -54,7 +52,7 @@ func (r *brainRuntimes) ensure(ctx context.Context, spec brain.RunSpec, c runtim
 		return fmt.Errorf("%w: writing %s: %v", errSandboxUnavailable, markerFile, err)
 	}
 	cfg := r.b.cfgs.Get()
-	p := nodeproto.SandboxEnsureParams{Brain: spec.ID, Folder: spec.Dir, Marker: r.marker, MemoryMB: sandboxMemoryMB,
+	p := nodeproto.SandboxEnsureParams{Brain: spec.ID, Folder: spec.Dir, Marker: r.marker, MemoryMB: nodeproto.DefaultSandboxMemoryMB,
 		Egress: c.Egress, APIPort: r.apiPort(), Provider: spec.Settings.Provider}
 	for _, a := range cfg.Sandbox.AllowPaths {
 		p.Mounts = append(p.Mounts, nodeproto.SandboxMount{Path: AbsPath(a), ReadOnly: true})
@@ -96,7 +94,7 @@ func vmAccess(access runAccess, info nodeproto.SandboxInfo) runAccess {
 // secret. The node adds the provider's login, FRIDOLIN_API and
 // FRIDOLIN_BRAIN_TOKEN_FILE; the run token goes only in sandbox.run's
 // token.
-func vmEnv(spec brain.RunSpec, info nodeproto.SandboxInfo) map[string]string {
+func vmEnv(spec brain.RunSpec) map[string]string {
 	s := spec.Settings
 	env := map[string]string{"FRIDOLIN_BRAIN_ID": spec.ID, "DISABLE_AUTOUPDATER": "1"}
 	kvs := append(google.CalendarEnv(spec.ID, s.Manifest, ""), plaudOptOut...)
@@ -108,11 +106,11 @@ func vmEnv(spec brain.RunSpec, info nodeproto.SandboxInfo) map[string]string {
 			env[k] = v
 		}
 	}
-	if info.BinPath != "" {
-		env["FRIDOLIN_BIN"] = info.BinPath
-	}
-	if info.ToolsPath != "" {
-		env["FRIDOLIN_TOOLS_DIR"] = info.ToolsPath
+	// The node sets these itself (FRIDOLIN_BIN and FRIDOLIN_TOOLS_DIR at
+	// info's bin_path and tools_path, the login, the proxy): the core
+	// never sends them.
+	for _, k := range nodeproto.SandboxNodeEnv {
+		delete(env, k)
 	}
 	return env
 }
@@ -154,7 +152,7 @@ func (r *brainRuntimes) launcher(spec brain.RunSpec, c runtimeChoice, access run
 	node, fleet := c.state.Node, r.b.sandboxFleet()
 	return func(ctx context.Context, s claudecli.Spawn) (claudecli.Process, error) {
 		p := nodeproto.SandboxRunParams{Brain: spec.ID, Run: access.RunID, Folder: spec.Dir, Argv: append([]string{s.Binary}, s.Args...),
-			Env: vmEnv(spec, c.state.Info), Stdin: s.Prompt, Token: access.Token, APIPort: r.apiPort(), Provider: spec.Settings.Provider, TimeoutS: int(timeout / time.Second)}
+			Env: vmEnv(spec), Stdin: s.Prompt, Token: access.Token, APIPort: r.apiPort(), Provider: spec.Settings.Provider, TimeoutS: int(timeout / time.Second)}
 		if p.Run == "" {
 			p.Run = "r" + randomToken(9)
 		}

@@ -72,7 +72,7 @@ func (r *brainRuntimes) look(ctx context.Context) sandboxrun.State {
 		if err := fleet.Call(ctx, s.Node, nodeproto.MethodSandboxInfo, struct{}{}, &s.Info); err != nil {
 			s.Why = "asking " + s.Name + " about its Docker Sandboxes failed: " + err.Error()
 		} else {
-			s.Why = s.Info.NotReady()
+			s.Why = sandboxNotReady(&s.Info.SandboxCap, "")
 		}
 	}
 	r.observe(s)
@@ -131,7 +131,7 @@ func (r *brainRuntimes) choose(ctx context.Context, sb *manifest.Sandbox, provid
 	case why == "" && s.At.IsZero():
 		why = "not looked at yet"
 	case why == "":
-		why = s.Info.Ready(cmp.Or(provider, "claude"))
+		why = sandboxNotReady(&s.Info.SandboxCap, cmp.Or(provider, nodeproto.SandboxProviderClaude))
 	}
 	c.Ready, c.Reason = why == "", why
 	switch {
@@ -146,6 +146,27 @@ func (r *brainRuntimes) choose(ctx context.Context, sb *manifest.Sandbox, provid
 		c.Reason += ", since " + since.Format("15:04")
 	}
 	return c
+}
+
+// sandboxNotReady says why the node's sandboxes cannot run brains now,
+// "" when sbx is ready; with a provider, also when its login is missing
+// (nodeproto.SandboxCap.Ready is the test).
+func sandboxNotReady(c *nodeproto.SandboxCap, provider string) string {
+	switch {
+	case c == nil:
+		return "the node offers no Docker Sandboxes"
+	case c.Problem != "":
+		return c.Problem
+	case !c.Daemon:
+		return "sbx's daemon does not answer"
+	case !c.SignedIn:
+		return "sbx is not signed in to Docker"
+	case !c.Settings:
+		return "sbx's global settings are not Fridolin's"
+	case provider != "" && !c.Ready(provider):
+		return provider + " has no login in Docker Sandboxes on the node"
+	}
+	return ""
 }
 
 // observe tells the owner, once per outage, that the sandboxes stopped
