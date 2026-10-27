@@ -151,7 +151,8 @@ func (r *brainRuntimes) launcher(spec brain.RunSpec, c runtimeChoice, access run
 	node, fleet := c.state.Node, r.b.sandboxFleet()
 	return func(ctx context.Context, s claudecli.Spawn) (claudecli.Process, error) {
 		p := nodeproto.SandboxRunParams{Brain: spec.ID, Run: access.RunID, Folder: spec.Dir, Argv: append([]string{s.Binary}, s.Args...),
-			Env: vmEnv(spec), Stdin: s.Prompt, Token: access.Token, APIPort: r.apiPort(), Provider: spec.Settings.Provider, TimeoutS: int(timeout / time.Second)}
+			Env: vmEnv(spec), Stdin: s.Prompt, Token: access.Token, APIPort: r.apiPort(), Provider: spec.Settings.Provider, TimeoutS: int(timeout / time.Second),
+			GitHubToken: access.GitHubToken}
 		if p.Run == "" {
 			p.Run = "r" + randomToken(9)
 		}

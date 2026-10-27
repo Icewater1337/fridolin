@@ -47,9 +47,13 @@ type sandbox struct {
 	cap     *nodeproto.SandboxCap
 	checked time.Time
 	lastErr string
-	// ensure serializes creating and removing sandboxes, and state.json.
+	// ensure serializes creating and removing sandboxes, their secrets
+	// and rules, and state.json.
 	ensure sync.Mutex
 	runs   map[string]*sandboxRun
+	// ghRuns counts each brain's runs that use GitHub (sandbox_github.go),
+	// under ensure.
+	ghRuns map[string]int
 }
 
 // sandboxState is state.json: the template fridolin made, and per brain
@@ -60,10 +64,12 @@ type sandboxState struct {
 }
 
 // sandboxRecord is one brain's sandbox: the key of its mounts, memory,
-// template, egress, API port and provider, and its memory.
+// template, egress, API port and provider, its memory, and the GitHub
+// its runs opened, while they have it.
 type sandboxRecord struct {
-	Key      string `json:"key"`
-	MemoryMB int    `json:"memory_mb"`
+	Key      string         `json:"key"`
+	MemoryMB int            `json:"memory_mb"`
+	GitHub   *sandboxGitHub `json:"github,omitempty"`
 }
 
 func (st sandboxState) memory(brain string) int { return st.Sandboxes[brain].MemoryMB }

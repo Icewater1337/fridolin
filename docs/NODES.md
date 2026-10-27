@@ -1776,6 +1776,24 @@ leaves to setup, since replacing it stops every sandbox. It reports the
 daemon, the sign-in, the template, the linux fridolin and the logins in
 the capability, and why it is not ready (`problem`).
 
+### What the node keeps per sandbox
+
+- **The run token.** For each run, a sandbox-scoped custom secret whose
+  value sbx reads from a 0600 file in `<state dir>/sandbox/runs`
+  (`sbx secret set-custom --command "/bin/cat FILE"`). sbx runs that
+  command with no prompt, also when the agent runs with no terminal.
+  sbx asks to approve host commands only for an `sbx env` environment
+  (`env.rememberHostCommands`), which fridolin does not use, so setup
+  leaves that setting alone.
+- **GitHub.** For a run with a GitHub token, the sandbox's own `github`
+  secret, given on stdin, and rules for GitHub's hosts, both removed
+  when the run ends ([docs/SANDBOXES.md](SANDBOXES.md), "GitHub in a
+  run"). `state.json` names the rules while they are open.
+- **Sessions.** `<state dir>/sandbox/history/<brain>/claude` (or
+  `codex`), bound over the VM's session folder with `sbx mount`. They
+  outlive a rebuild of the sandbox and its removal. On a Mac that is
+  `~/Library/Application Support/fridolin-node/sandbox/history`.
+
 TODO: sbx's own Claude login (`/login` in a sandbox, held on the host)
 would keep the token out of the VM; it is not tested yet.
 

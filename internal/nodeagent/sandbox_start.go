@@ -205,10 +205,21 @@ func (a *Agent) sandboxRunStart(ctx context.Context, p nodeproto.SandboxRunParam
 		a.cleanupRun(d, r.name, p.Run, ph)
 		return fail(nodeproto.CodeFailed, "the run's token file in the VM: %v", sbxError(err, stderr))
 	}
+	// The run's GitHub (sandbox_github.go), until it ends.
+	endGitHub := func() {}
+	if p.GitHubToken != "" {
+		if perr := a.githubOpen(ctx, d, p.Brain, p.GitHubToken); perr != nil {
+			a.cleanupRun(d, r.name, p.Run, ph)
+			a.dropRun(p.Run)
+			return nil, perr
+		}
+		endGitHub = func() { a.githubClose(d, p.Brain) }
+	}
 	stop := func() { a.stopRun(r, nodeproto.DefaultSandboxGraceS*time.Second) }
 	cmd, err := d.start(strings.NewReader(p.Stdin), stdoutWriter{r: r, overflowed: stop}, stderrWriter{r: r}, credEnv, execArgs(p, credNames)...)
 	if err != nil {
 		a.cleanupRun(d, r.name, p.Run, ph)
+		endGitHub()
 		return fail(nodeproto.CodeFailed, "sbx could not start the run: %v", err)
 	}
 	r.mu.Lock()
@@ -229,6 +240,7 @@ func (a *Agent) sandboxRunStart(ctx context.Context, p nodeproto.SandboxRunParam
 			timer.Stop()
 		}
 		a.cleanupRun(d, r.name, p.Run, ph)
+		endGitHub()
 		r.finish(code, msg)
 		a.logf("node: sandbox run %s in %s ended with %d", p.Run, r.name, code)
 	}()

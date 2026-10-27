@@ -29,6 +29,18 @@ for compatibility.
   `PUT /api/github/identity`, `GET /api/git-identities`. See
   docs/CONNECTIONS.md, "GitLab", and docs/NODES.md, "Git identities for
   FrIDE".
+- **GitHub in a brain's Docker Sandbox** (#149). A run with a GitHub
+  grant now gets its token in a Docker Sandbox too. The core sends it in
+  `sandbox.run`'s new `github_token`, and the node stores it as the
+  sandbox's own `github` secret for the run, through stdin. sbx's proxy
+  puts it into every call to GitHub, so `gh` and git over HTTPS work
+  with only a placeholder in the VM. The sandbox reaches GitHub's hosts
+  only while such a run goes on. See docs/SANDBOXES.md, "GitHub in a
+  run".
+- **A brain's sessions survive a rebuild of its sandbox** (#149). The
+  node keeps them on the host, in `<state dir>/sandbox/history/<brain>`,
+  bound over the VM's `~/.claude/projects` with `sbx mount`. Each
+  brain's sandbox is made again once, at its next run.
 - **FrIDE in a Docker Sandbox** (#149). `fridolin node fride sandbox
   join|create|login|start|stop|update|status|rm` runs a whole FrIDE, with
   its coding agents, in one sbx microVM on a Mac, beside the native
