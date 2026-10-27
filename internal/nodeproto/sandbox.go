@@ -19,6 +19,10 @@ type SandboxCap struct {
 	Template  string   `json:"template,omitempty"`  // the template name fridolin made, "" before setup
 	Providers []string `json:"providers,omitempty"` // "claude", "codex": those with a usable login
 	Problem   string   `json:"problem,omitempty"`   // why it is not ready, plain
+	// Bin is the version of the linux fridolin the node mounts into each
+	// sandbox, "" before the core sent one (sandbox.bin). The core sends
+	// its own when they differ, and runs no brain there until they match.
+	Bin string `json:"bin,omitempty"`
 }
 
 // The providers a sandbox runs.
@@ -48,11 +52,21 @@ const (
 	// MethodSandboxRemove removes the brain's sandbox (SandboxRemoveParams
 	// → nothing).
 	MethodSandboxRemove = "sandbox.remove"
+	// MethodSandboxBinWrite appends a chunk of the gzip'd linux fridolin
+	// the core sends for the sandboxes, as update.write does
+	// (FrideChunkParams → FrideTransfer).
+	MethodSandboxBinWrite = "sandbox.bin_write"
+	// MethodSandboxBin puts the sent binary in place of the one the
+	// sandboxes mount, once its signature, platform and SHA-256 check
+	// out (UpdateApplyParams with OS "linux" → nothing). The node declares
+	// its version as SandboxCap.Bin.
+	MethodSandboxBin = "sandbox.bin"
 )
 
 // SandboxMethods lists the sandbox methods.
 var SandboxMethods = []string{
 	MethodSandboxInfo, MethodSandboxEnsure, MethodSandboxRun, MethodSandboxRead, MethodSandboxStop, MethodSandboxRemove,
+	MethodSandboxBinWrite, MethodSandboxBin,
 }
 
 // Bounds of the sandbox methods.
@@ -138,6 +152,9 @@ func (s *SandboxCap) Check() error {
 	}
 	if !sandboxVerRe.MatchString(s.Version) {
 		return fmt.Errorf("sandbox: version %q", s.Version)
+	}
+	if !sandboxVerRe.MatchString(s.Bin) {
+		return fmt.Errorf("sandbox: bin %q", s.Bin)
 	}
 	if s.Template != "" && !checkSandboxTemplate(s.Template) {
 		return fmt.Errorf("sandbox: template %q", s.Template)

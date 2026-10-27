@@ -40,12 +40,21 @@ func fakeSbx(dir string) int {
 		}
 		b, _ := json.Marshal(rows)
 		fmt.Println(string(b))
-	case "settings":
-		fmt.Print(cannedOr(dir, "settings", "ssh.agentForwardingEnabled  false\nbrowser.enabled  false\n"))
-	case "policy":
-		if len(args) > 1 && args[1] == "ls" {
-			fmt.Print(cannedOr(dir, "policy", "Global policy: deny-all\n"))
+	case "diagnose":
+		status := func(file string) string {
+			if _, err := os.Stat(filepath.Join(dir, file)); err == nil {
+				return "fail"
+			}
+			return "pass"
 		}
+		fmt.Printf(`{"version":"1.0","checks":[{"name":"Daemon","status":%q},{"name":"Authentication","status":%q}]}`+"\n", status("daemon-down"), status("signed-out"))
+	case "settings":
+		return fakeSettings(dir, args[1:])
+	case "policy":
+		return fakePolicy(dir, args[1:])
+	case "template":
+		return fakeTemplate(dir, args[1:])
+	case "daemon":
 	case "secret":
 		return fakeSecret(dir, args[1:])
 	case "create":
@@ -98,10 +107,11 @@ func saveFakeSandboxes(dir string, names []string) {
 func fakeSecret(dir string, args []string) int {
 	switch args[0] {
 	case "ls":
-		if _, err := os.Stat(filepath.Join(dir, "codex")); err == nil {
-			fmt.Println(`[{"service":"openai","scope":"global","value":"oai-…f00d"}]`)
+		// As sbx v0.50.0 prints `secret ls -g --service openai --json`.
+		if _, err := os.Stat(filepath.Join(dir, "codex")); err == nil && slices.Contains(args, "-g") {
+			fmt.Println(`{"secrets":[{"name":"openai","scope":"(global)","secret":"oai-…f00d","type":"oauth"}],"custom_secrets":[],"shadowed_services":[],"env_only_count":0}`)
 		} else {
-			fmt.Println(`[]`)
+			fmt.Println(`{"secrets":[],"custom_secrets":[{"name":"x"}],"shadowed_services":[],"env_only_count":0}`)
 		}
 	case "set-custom":
 		cmd := args[slices.Index(args, "--command")+1]
@@ -154,6 +164,9 @@ func fakeExec(dir string, args []string, tok string) int {
 	case cmd[0] == "sh" && strings.Contains(cmd[2], `cat > "$0"`):
 		b, _ := io.ReadAll(os.Stdin)
 		_ = os.WriteFile(vmPath(dir, cmd[3]), b, 0o600)
+	case cmd[0] == "sh" && strings.Contains(cmd[2], "ln -sfn"):
+		// The link of fridolin into the VM: link-<name> beside vm/ holds its target.
+		_ = os.WriteFile(filepath.Join(dir, "link-"+filepath.Base(cmd[4])), []byte(cmd[3]), 0o600)
 	case cmd[0] == "sh" && strings.HasPrefix(cmd[2], "kill -"):
 		sig := strings.Fields(strings.TrimPrefix(cmd[2], "kill -"))[0]
 		appendFile(vmPath(dir, cmd[3])+".signal", sig+"\n")

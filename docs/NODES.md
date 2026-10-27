@@ -1636,6 +1636,82 @@ The node stops offering `fride` within 30 seconds. `fride.token` and
 the `fride` entry in `node.json` can stay. Removing `~/fride-companion`
 deletes the workspaces and any uncommitted work in them, so ask first.
 
+## Docker Sandboxes
+
+A node with Docker Sandboxes (`sbx`) can run brains' runs in microVMs,
+one sandbox per brain (docs/SANDBOXES.md says how the core chooses and
+falls back). It offers the capability `sandbox` only once you set it up.
+macOS first; fridolin is tested with sbx v0.50.0.
+
+### Setting it up
+
+1. Install sbx and sign in: `brew install --cask sbx`, then `sbx login`.
+   Docker Desktop or OrbStack must run too: setup builds the template
+   with Docker.
+2. In a fridolin checkout of the core's version, run:
+
+   ```sh
+   fridolin node sandbox setup --repo .
+   ```
+
+   It does four things, and is safe to run again:
+   - **sbx's global settings.** Fridolin owns them on this machine: the
+     network policy `deny-all`, `ssh.agentForwardingEnabled` and
+     `browser.enabled` off. They apply to your own sandboxes too. It
+     replaces another policy (`sbx policy reset` removes every rule),
+     and restarts sbx's daemon when no sandbox runs.
+   - **The template.** It builds `container/sandbox/Dockerfile` with
+     Docker: the image of sbx's Claude kit with fridolin's Claude Code
+     and Codex, ffmpeg and `tools/`. It saves the image and loads it
+     with `sbx template load`, which needs no terminal. The tag,
+     `fridolin-brain:<hash>`, is a hash of the Dockerfile and `tools/`,
+     so a second run builds nothing.
+   - **The linux fridolin** with `--bin PATH`, optional (below).
+   - **`<state dir>/sandbox/state.json`** records the template. From
+     then on the agent declares `sandbox`; before, it does not, so no
+     approval is asked for.
+3. For Codex in the sandboxes, sign in once: `sbx secret set openai
+   --oauth`. One ChatGPT login serves every sandbox on the Mac. For
+   Claude, the node uses the token in its host secret store
+   (`fridolin core secrets set claude.oauth.token`).
+4. Approve the capability on the core: `!approve`, the Nodes page, or
+   `fridolin nodes approve ID --commands`.
+5. Check: `fridolin node sandbox status` and `fridolin doctor --node`.
+
+`fridolin node sandbox off` stops offering it, `on` offers it again.
+
+### The linux fridolin in each sandbox
+
+A run's MCP server is `fridolin mcp --run <id>` inside the VM, so each
+sandbox needs a linux fridolin of the core's version. The node keeps
+it in `<state dir>/sandbox/bin/fridolin`; each sandbox mounts that
+folder read-only (sbx mounts a folder only at its host path), and
+`sandbox.ensure` links it to `/opt/fridolin/bin/fridolin`.
+
+The core sends it, as it sends updates: from its binaries folder,
+signed with its update key, through `sandbox.bin_write` and
+`sandbox.bin`. It does so whenever the approved node declares another
+version (`bin` in the capability): after setup, and after each update
+of the core. Until the versions match, brains fall back. A core
+without node binaries (a native core without `make node-binaries`)
+cannot send it; then build one and pass it to setup:
+
+```sh
+GOOS=linux GOARCH=arm64 make build BINARY=/tmp/fridolin-linux
+fridolin node sandbox setup --repo . --bin /tmp/fridolin-linux
+```
+
+### What the agent keeps checking
+
+Every few minutes the agent asks sbx again. It sets a setting that
+drifted and initializes a missing network policy; another policy it
+leaves to setup, since replacing it stops every sandbox. It reports the
+daemon, the sign-in, the template, the linux fridolin and the logins in
+the capability, and why it is not ready (`problem`).
+
+TODO: sbx's own Claude login (`/login` in a sandbox, held on the host)
+would keep the token out of the VM; it is not tested yet.
+
 ## Backups
 
 A node with the capability `backup` lends its disks to the core's

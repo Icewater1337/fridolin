@@ -27,6 +27,18 @@ func (a *Agent) sandboxCall(ctx context.Context, method string, raw json.RawMess
 			return nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "sbx does not run on this node: %v", err)
 		}
 		return info, nil
+	case nodeproto.MethodSandboxBinWrite:
+		var p nodeproto.FrideChunkParams
+		if perr := decode(&p); perr != nil {
+			return nil, perr
+		}
+		return a.sandboxBinWrite(p)
+	case nodeproto.MethodSandboxBin:
+		var p nodeproto.UpdateApplyParams
+		if perr := decode(&p); perr != nil {
+			return nil, perr
+		}
+		return a.sandboxBinApply(ctx, p)
 	case nodeproto.MethodSandboxEnsure:
 		var p nodeproto.SandboxEnsureParams
 		if perr := decode(&p); perr != nil {

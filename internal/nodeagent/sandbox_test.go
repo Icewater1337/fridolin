@@ -58,7 +58,24 @@ func sandboxAgent(t *testing.T) (*Agent, string, *syncLog) {
 	if err := a.saveSandboxState(sandboxState{Template: "fridolin-brain:v1"}); err != nil {
 		t.Fatal(err)
 	}
+	putSandboxBin(t, a, "v1.2.3")
 	return a, fake, log
+}
+
+// putSandboxBin puts a linux fridolin of version in a's state dir, as
+// sandbox.bin does (the file's content does not matter here).
+func putSandboxBin(t *testing.T, a *Agent, version string) {
+	t.Helper()
+	if err := os.MkdirAll(a.sandboxBinHostDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tmp := filepath.Join(a.sandboxBinHostDir(), ".new")
+	if err := os.WriteFile(tmp, []byte("#!/bin/sh\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.installSandboxBin(tmp, sandboxBinInfo{Version: version, Arch: runtime.GOARCH}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // fakeCalls are the sbx calls the fake recorded.
@@ -189,9 +206,18 @@ func TestSandboxEnsure(t *testing.T) {
 		t.Fatalf("first ensure: %+v %v", res, perr)
 	}
 	calls := fakeCalls(t, fake)
-	want := []string{"create", "--name", "fridolin-work", "--memory", "4096m", "-t", "fridolin-brain:v1", "--pull", "never", "claude", folder, "/opt/shared:ro"}
+	want := []string{"create", "--name", "fridolin-work", "--memory", "4096m", "-t", "fridolin-brain:v1", "--pull", "never", "claude", folder, "/opt/shared:ro",
+		a.sandboxBinHostDir() + ":ro"}
 	if !called(calls, want...) {
 		t.Errorf("no %v in %v", want, calls)
+	}
+	// The linux fridolin on its read-only mount, linked where runs find it.
+	link, err := os.ReadFile(filepath.Join(fake, "link-fridolin"))
+	if err != nil || string(link) != filepath.Join(a.sandboxBinHostDir(), "fridolin") {
+		t.Errorf("the link of fridolin: %q %v", link, err)
+	}
+	if !called(calls, "exec", "-u", "root", "fridolin-work", "sh", "-c") {
+		t.Error("the link was not made as root")
 	}
 	for _, rule := range [][]string{
 		{"policy", "allow", "network", "--sandbox", "fridolin-work", "localhost:8765"},
@@ -492,8 +518,12 @@ func TestSandboxEnsureRefuses(t *testing.T) {
 	if _, perr := ensure(a, p); perr == nil || perr.Code != nodeproto.CodeUnavailable {
 		t.Fatalf("create fails: %v", perr)
 	}
-	// Not signed in: sbx ls says so, and ensure is unavailable.
+	// Not signed in: sbx diagnose and ls say so, and ensure is
+	// unavailable.
 	if err := os.WriteFile(filepath.Join(fake, "fail-ls"), []byte("You are not signed in. Run sbx login."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fake, "signed-out"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, perr := ensure(a, p); perr == nil || perr.Code != nodeproto.CodeUnavailable || !strings.Contains(perr.Message, "signed in") {

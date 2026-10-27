@@ -12,6 +12,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/sandboxrun"
+	"github.com/Icewater1337/fridolin/internal/version"
 )
 
 // brainRuntimes chooses where each brain's runs happen: under the
@@ -165,6 +166,9 @@ func sandboxNotReady(c *nodeproto.SandboxCap, provider string) string {
 		return "sbx is not signed in to Docker"
 	case !c.Settings:
 		return "sbx's global settings are not Fridolin's"
+	case c.Bin != "" && c.Bin != version.String():
+		// The core sends its own (nodes, sandbox_bin.go); runs wait for it.
+		return "the node's sandboxes have fridolin " + c.Bin + ", not this core's " + version.String() + " yet"
 	case provider != "" && !c.Ready(provider):
 		return provider + " has no login in Docker Sandboxes on the node"
 	}

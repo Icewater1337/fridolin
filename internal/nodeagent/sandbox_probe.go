@@ -18,13 +18,30 @@ const sandboxProbeTimeout = 30 * time.Second
 // errNoSbx is a node without sbx, or with the capability turned off.
 var errNoSbx = errors.New("sbx is not installed here, or sandbox is turned off")
 
+// ErrSandboxNotSetUp is sbx on a node where `fridolin node sandbox
+// setup` has not run: the node does not declare sandbox, so the owner is
+// asked to approve it only once it can work.
+var ErrSandboxNotSetUp = errors.New("not set up: run fridolin node sandbox setup")
+
 // sandboxProbe asks sbx how it is: what sandbox.info answers. An error
-// means sbx does not run at all (not found, or `sbx version` fails).
+// means sbx does not run at all (not found, or `sbx version` fails), or
+// is not set up for fridolin (ErrSandboxNotSetUp).
 func (a *Agent) sandboxProbe(ctx context.Context) (nodeproto.SandboxInfo, error) {
 	var info nodeproto.SandboxInfo
 	d := a.sbx()
 	if d == nil || !a.sandboxOffered() {
 		return info, errNoSbx
+	}
+	st, err := a.loadSandboxState()
+	if err != nil {
+		return info, err
+	}
+	if !checkTemplate(st.Template) {
+		st.Template = ""
+	}
+	// Doctor looks before setup too; the agent declares nothing then.
+	if st.Template == "" && !a.sandboxLookOnly {
+		return info, ErrSandboxNotSetUp
 	}
 	ctx, cancel := context.WithTimeout(ctx, sandboxProbeTimeout)
 	defer cancel()
@@ -38,26 +55,11 @@ func (a *Agent) sandboxProbe(ctx context.Context) (nodeproto.SandboxInfo, error)
 	if _, avail, err := platform.Memory(); err == nil {
 		info.FreeMemoryMB = int64(avail >> 20)
 	}
-	st, _ := a.loadSandboxState()
 	info.Template = st.Template
-	if !checkTemplate(info.Template) {
-		info.Template = ""
-	}
+	info.Bin = a.sandboxBinVersion()
 
-	out, stderr, err = d.run(ctx, nil, nil, "ls", "--json")
-	list, parsed := parseSbxList(out)
-	switch {
-	case err == nil && parsed:
-		info.Daemon, info.SignedIn = true, true
-	case err == nil:
-		info.Daemon, info.SignedIn = true, true
-		info.Problem = "sbx ls --json printed what this node does not read"
-	case sbxSaysSignIn(firstLine(stderr)):
-		info.Daemon = true
-		info.Problem = "sbx is not signed in to Docker: run sbx login on this machine"
-	default:
-		info.Problem = "sbx's daemon does not answer: " + orUnknownErr(firstLine(stderr), err)
-	}
+	diag, list, problem := sbxState(ctx, d)
+	info.Daemon, info.SignedIn, info.Problem = diag.Daemon, diag.SignedIn, problem
 	for _, s := range list {
 		brain, ok := strings.CutPrefix(s.Name, "fridolin-")
 		if !ok || s.Name == "" {
@@ -66,29 +68,81 @@ func (a *Agent) sandboxProbe(ctx context.Context) (nodeproto.SandboxInfo, error)
 		info.Sandboxes = append(info.Sandboxes, nodeproto.SandboxVM{Name: s.Name, Brain: brain, Status: s.Status, MemoryMB: st.memory(brain)})
 	}
 
-	settings, _, serr := d.run(ctx, nil, nil, "settings", "ls")
-	policy, _, perr := d.run(ctx, nil, nil, "policy", "ls")
-	info.Settings = serr == nil && perr == nil && sbxSettingsHold(settings, policy)
-
-	if a.claudeToken() != "" {
-		info.Providers = append(info.Providers, nodeproto.SandboxProviderClaude)
+	settingsWhy := "sbx's daemon does not answer"
+	tplThere := false
+	if info.Daemon {
+		if a.sandboxLookOnly {
+			info.Settings, settingsWhy = sbxSettingsLook(ctx, d)
+		} else {
+			info.Settings, settingsWhy = a.sandboxSettings(ctx, d)
+		}
+		tplThere = info.Template != "" && sbxHasTemplate(ctx, d, info.Template)
 	}
-	// The listing is never logged: sbx prints parts of some values.
-	if secrets, _, err := d.run(ctx, nil, nil, "secret", "ls", "--json"); err == nil && sbxCodexLogin(secrets) {
-		info.Providers = append(info.Providers, nodeproto.SandboxProviderCodex)
-	}
+	info.Providers = a.sandboxProviders(ctx, d)
 
 	if info.Problem == "" {
 		switch {
-		case !info.Settings:
-			info.Problem = "sbx's global settings are not fridolin's (network policy deny-all, SSH agent forwarding and the browser off)"
 		case info.Template == "":
-			info.Problem = "the sandbox template is not set up yet"
+			info.Problem = ErrSandboxNotSetUp.Error()
+		case !info.Settings:
+			info.Problem = "sbx's global settings are not fridolin's (network policy deny-all, SSH agent forwarding and the browser off): " + settingsWhy
+		case !tplThere:
+			info.Problem = "sbx no longer has the template " + info.Template + ": run fridolin node sandbox setup again"
+		case info.Bin == "":
+			info.Problem = "the linux fridolin for the sandboxes is not here yet: the core sends it once the capability is approved"
 		case len(info.Providers) == 0:
 			info.Problem = "neither the Claude token nor sbx's Codex login is on this machine"
 		}
 	}
+	if len(info.Problem) > nodeproto.MaxSandboxProblemLen {
+		info.Problem = strings.ToValidUTF8(info.Problem[:nodeproto.MaxSandboxProblemLen-3], "") + "…"
+	}
 	return info, nil
+}
+
+// sbxHasTemplate reports whether sbx's image store holds the template.
+func sbxHasTemplate(ctx context.Context, d sbxDriver, tpl string) bool {
+	out, _, err := d.run(ctx, nil, nil, "template", "ls", "--json")
+	return err == nil && sbxListsTemplate(out, tpl)
+}
+
+// sandboxProviders are the providers whose login is on this machine.
+func (a *Agent) sandboxProviders(ctx context.Context, d sbxDriver) []string {
+	var out []string
+	if a.claudeToken() != "" {
+		out = append(out, nodeproto.SandboxProviderClaude)
+	}
+	// The listing is never logged: sbx prints part of each value.
+	if secrets, _, err := d.run(ctx, nil, nil, "secret", "ls", "-g", "--service", "openai", "--json"); err == nil && sbxCodexLogin(secrets) {
+		out = append(out, nodeproto.SandboxProviderCodex)
+	}
+	return out
+}
+
+// sbxState is the daemon and Docker's sign-in, as `sbx diagnose --json`
+// says, and fridolin's sandboxes from `sbx ls --json`. problem says why
+// brains cannot run, "" when they can.
+func sbxState(ctx context.Context, d sbxDriver) (sbxDiagnosis, []sbxSandbox, string) {
+	// diagnose exits non-zero when a check fails, and still prints them.
+	dout, _, _ := d.run(ctx, nil, nil, "diagnose", "--json")
+	diag, known := parseSbxDiagnose(dout)
+	out, stderr, err := d.run(ctx, nil, nil, "ls", "--json")
+	list, parsed := parseSbxList(out)
+	if !known {
+		// An sbx without diagnose: what ls says.
+		diag = sbxDiagnosis{Daemon: err == nil || sbxSaysSignIn(firstLine(stderr)), SignedIn: err == nil}
+	}
+	switch {
+	case !diag.Daemon:
+		return diag, list, "sbx's daemon does not answer: " + orUnknownErr(firstLine(stderr), err)
+	case !diag.SignedIn:
+		return diag, list, "sbx is not signed in to Docker: run sbx login on this machine"
+	case err != nil:
+		return diag, list, "sbx ls: " + orUnknownErr(firstLine(stderr), err)
+	case !parsed:
+		return diag, list, "sbx ls --json printed what this node does not read"
+	}
+	return diag, list, ""
 }
 
 func checkTemplate(t string) bool {
@@ -147,7 +201,11 @@ func (a *Agent) sandboxCheck(ctx context.Context, force bool) bool {
 	old := sb.cap
 	sb.cap = next
 	if msg != "" && msg != sb.lastErr {
-		a.logf("node: sbx does not run, so no sandbox: %s", msg)
+		if errors.Is(err, ErrSandboxNotSetUp) {
+			a.logf("node: sbx is here, but no sandbox is offered: %s", msg)
+		} else {
+			a.logf("node: sbx does not run, so no sandbox: %s", msg)
+		}
 	}
 	sb.lastErr = msg
 	changed := (old == nil) != (next == nil) || old != nil && !sameSandboxCap(*old, *next)
@@ -166,7 +224,7 @@ func problemNote(p string) string {
 
 func sameSandboxCap(a, b nodeproto.SandboxCap) bool {
 	return a.Version == b.Version && a.SignedIn == b.SignedIn && a.Daemon == b.Daemon && a.Settings == b.Settings &&
-		a.Template == b.Template && a.Problem == b.Problem && slices.Equal(a.Providers, b.Providers)
+		a.Template == b.Template && a.Bin == b.Bin && a.Problem == b.Problem && slices.Equal(a.Providers, b.Providers)
 }
 
 // sandboxDeclared is the sandbox the node declares now.
