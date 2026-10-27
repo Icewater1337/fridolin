@@ -7,10 +7,12 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -707,5 +709,35 @@ func TestAudioTypeAndSpeechExt(t *testing.T) {
 		if got := SpeechExt(in[0], in[1]); got != want {
 			t.Errorf("SpeechExt(%q, %q) = %q, want %q", in[0], in[1], got, want)
 		}
+	}
+}
+
+// The default client refuses a redirect, so the ElevenLabs key never
+// follows one to another host.
+func TestDefaultClientRefusesRedirects(t *testing.T) {
+	t.Parallel()
+	var reached atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached.Add(1)
+	}))
+	defer other.Close()
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.Path, http.StatusFound)
+	}))
+	defer provider.Close()
+	s := New(Options{
+		Dir:       filepath.Join(t.TempDir(), "connections"),
+		Settings:  func() Settings { return Settings{ElevenLabs: Policy{Voice: "v"}} },
+		Endpoints: Endpoints{OpenAI: provider.URL, ElevenLabs: provider.URL},
+	})
+	if err := s.SetKey(ElevenLabs, KeyUpdate{APIKey: testElevenLabsKey}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := s.Speak(context.Background(), Caller{ID: "brain:personal"}, SpeakRequest{Text: "Hallo"})
+	if errStatus(t, err) != http.StatusBadGateway || !strings.Contains(err.Error(), "redirect refused") || strings.Contains(err.Error(), testElevenLabsKey) {
+		t.Errorf("speak through a redirect: %v", err)
+	}
+	if n := reached.Load(); n != 0 {
+		t.Errorf("the redirect's host got %d requests", n)
 	}
 }

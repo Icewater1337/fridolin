@@ -172,8 +172,12 @@ func New(o Options) *Service {
 	}
 	client := o.HTTP
 	if client == nil {
-		// Each call has a deadline of its own (its context).
-		client = &http.Client{}
+		// Each call has a deadline of its own (its context). A redirect is
+		// refused: Go would copy ElevenLabs' xi-api-key header to any host
+		// it names, and neither provider's API needs one.
+		client = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+			return errors.New("redirect refused")
+		}}
 	}
 	return &Service{o: o, http: client}
 }
