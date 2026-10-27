@@ -10,6 +10,25 @@ for compatibility.
 
 ### Added
 
+- **FrIDE in a Docker Sandbox** (#149). `fridolin node fride sandbox
+  join|create|login|start|stop|update|status|rm` runs a whole FrIDE, with
+  its coding agents, in one sbx microVM on a Mac, beside the native
+  companion FrIDE: on `127.0.0.1:17850` (webhook 17851), with the
+  repositories in `~/fride-sandbox/repos` (`--base`) and egress for
+  GitHub, Go, npm and Anthropic only. A node pairs with one FrIDE, so the
+  sandboxed one is paired to a node of its own: `join` makes it in the
+  node's state dir with `-sbx`, offering nothing but `fride`, with its own
+  copy of fridolin and its own service (`ai.fridolin.node.fride-sandbox`).
+  The node's agent keeps FrIDE running while it should. FrIDE's agents
+  log in through `login`, which takes the token `claude setup-token`
+  prints without echo or from a pipe. Nothing changes for the native
+  companion or the machine's node. See docs/NODES.md, "FrIDE in a Docker
+  Sandbox".
+- **node.json's `service`** (#149) names a second node's service on a
+  machine (`fridolin-node-<service>`, `ai.fridolin.node.<service>` on
+  macOS), run from its state dir's own `bin/fridolin`; `fridolin node
+  install|start|stop|status|uninstall --state-dir` follow it. Unset, as on
+  every node so far, nothing changes.
 - **Brains in Docker Sandboxes** (#149). A brain can run in a Docker
   Sandbox, a microVM of `sbx` on a node on the core's machine, instead of
   bubblewrap: config.json's new `sandbox.runtime` (`bubblewrap`, the

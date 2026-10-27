@@ -61,8 +61,11 @@ func (o FrideSandboxOptions) exec(ctx context.Context, stdin io.Reader, script s
 		flags = append(flags, "-i")
 	}
 	out, stderr, err := o.sbx().run(ctx, stdin, nil, slices.Concat(flags, []string{FrideSandboxName}, frideSandboxScript(script, args...))...)
-	o.Out.Write(out)
-	o.Out.Write(stderr)
+	for _, b := range [][]byte{out, stderr} {
+		if len(b) > 0 {
+			o.Out.Write(b)
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("in the sandbox: %w", sbxError(err, lastLineOf(stderr)))
 	}

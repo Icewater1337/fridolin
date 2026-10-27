@@ -136,3 +136,6 @@ comes with the next look: the next run of such a brain, or the dashboard.
 - Claude's login is the node's setup-token in the run's environment, as
   under bubblewrap. TODO: sbx's own `/login`, which keeps the token out
   of the VM, once it is tested.
+
+FrIDE, with its coding agents, can run in a Docker Sandbox of its own
+too: docs/NODES.md, "FrIDE in a Docker Sandbox".
