@@ -262,7 +262,7 @@ func TestSchema(t *testing.T) {
 	if got := string(Schema(map[string]any{"path": Str("Where.")}, "path")); got != `{"additionalProperties":false,"properties":{"path":{"description":"Where.","type":"string"}},"required":["path"],"type":"object"}` {
 		t.Errorf("with a required property: %s", got)
 	}
-	if got := string(Schema(nil)); got != `{"additionalProperties":false,"properties":null,"type":"object"}` {
+	if got := string(Schema(nil)); got != `{"additionalProperties":false,"properties":{},"type":"object"}` {
 		t.Errorf("without properties: %s", got)
 	}
 }
