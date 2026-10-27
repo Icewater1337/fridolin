@@ -16,6 +16,11 @@ import (
 // frideCloneTimeout bounds a starter repository's clone on the host.
 const frideCloneTimeout = 10 * time.Minute
 
+// sandboxClaudeDenied are the hosts a Claude sandbox may not reach
+// although the kit opens them: updates (the template pins Claude Code)
+// and remote control.
+var sandboxClaudeDenied = []string{"downloads.claude.ai", "bridge.claudeusercontent.com"}
+
 // FrideSandboxCreate makes the sandboxed FrIDE: the template when sbx
 // lacks it, the sandbox with the base folder, its port and its egress,
 // FrIDE's config and git identity, and FrIDE built at the pinned commit.
@@ -39,12 +44,15 @@ func FrideSandboxCreate(ctx context.Context, o FrideSandboxOptions) error {
 	} else if v := parseSbxVersion(out); v != TestedSbxVersion {
 		fmt.Fprintf(o.Out, "Note: sbx is %s; fridolin is tested with %s.\n", orUnknown(v), TestedSbxVersion)
 	}
-	diag, _, problem := sbxState(ctx, d)
+	diag, list, problem := sbxState(ctx, d)
 	switch {
 	case !diag.Daemon:
 		return errors.New(problem)
 	case !diag.SignedIn:
 		return errSbxSignedOut
+	}
+	if err := sbxOwnSettings(ctx, d, list, o.Out); err != nil {
+		return err
 	}
 	if status, err := o.sandboxStatus(ctx); err != nil {
 		return err
@@ -118,8 +126,7 @@ func (o FrideSandboxOptions) ensureTemplate(ctx context.Context, tag string) err
 		fmt.Fprintf(o.Out, "sbx has the template %s already.\n", tag)
 		return nil
 	}
-	so := SandboxSetupOptions{Dir: o.Dir, Sbx: o.Sbx, Docker: o.Docker, Repo: o.Repo, Out: o.Out, env: o.env}
-	return so.buildTemplate(ctx, d, tag, filepath.Join(o.Repo, filepath.FromSlash(frideSandboxDockerfile)))
+	return o.buildTemplate(ctx, d, tag, filepath.Join(o.Repo, filepath.FromSlash(frideSandboxDockerfile)))
 }
 
 // newSandbox makes st's sandbox with sbx create: its template, memory

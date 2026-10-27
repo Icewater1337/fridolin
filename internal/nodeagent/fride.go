@@ -436,8 +436,9 @@ func (a *Agent) frideLoop(ctx context.Context) {
 		fc := a.frideCheck(ctx)
 		// core-host.json written by `fridolin node core-host` while the
 		// agent runs: declared again, to wait for the owner's approval.
-		ac, cc, sc := a.androidCheck(false), a.coreHostChanged(), a.sandboxCheck(ctx, false)
-		if fc || ac || cc || sc {
+		ac, cc := a.androidCheck(false), a.coreHostChanged()
+		a.sbxSettingsCheck(ctx)
+		if fc || ac || cc {
 			select {
 			case a.fride.changed <- struct{}{}:
 			default:
@@ -473,7 +474,6 @@ func (a *Agent) declared() nodeproto.Capabilities {
 	a.fride.mu.Unlock()
 	a.declareWork(&c)
 	c.CoreHost = a.coreHostDeclared()
-	c.Sandbox = a.sandboxDeclared()
 	a.declareCorePrograms(&c)
 	return c
 }

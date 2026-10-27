@@ -98,33 +98,27 @@ type Agent struct {
 	CoreRunner                          CoreRunner
 	CoreScan                            func() []string
 	MovePoll, MoveGrace, MoveExportWait time.Duration
-	// SandboxSbx is the sbx binary of the sandbox capability ("" for
-	// none, so no sandbox; `node run` sets what it finds);
-	// SandboxDriver, when set, runs sbx instead (tests).
-	// The Claude token for runs comes from CoreSecrets, the host's store.
+	// SandboxSbx is the sbx binary of the sandboxed FrIDE ("" for none;
+	// `node run` sets what it finds); SandboxDriver, when set, runs sbx
+	// instead (tests).
 	SandboxSbx    string
 	SandboxDriver sbxDriver
 	// FrideSandboxPoll is how often the agent reads fride-sandbox.json
 	// to keep the sandboxed FrIDE running (DefaultFrideSandboxPoll when
 	// zero).
 	FrideSandboxPoll time.Duration
-	// checkSandboxBin checks a linux fridolin the core sent for the
-	// sandboxes (nil: checkLinuxBinary; tests send fakes).
-	checkSandboxBin func(path, arch string) (string, error)
-	// sandboxLookOnly probes sbx without setting anything (doctor).
-	sandboxLookOnly bool
 
-	core      coreHost
-	moves     coreMoves
-	upd       updater
-	progs     execPrograms
-	mu        sync.Mutex
-	state     nodeproto.State
-	connected bool
-	fride     fride
-	android   android
-	work      workstation
-	sandbox   sandbox
+	core        coreHost
+	moves       coreMoves
+	upd         updater
+	progs       execPrograms
+	mu          sync.Mutex
+	state       nodeproto.State
+	connected   bool
+	fride       fride
+	android     android
+	work        workstation
+	sbxSettings sbxSettingsState
 }
 
 // Load makes the agent of the node in dir.
@@ -325,7 +319,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.frideCheck(ctx)
 	a.androidCheck(true)
 	a.coreHostChanged()
-	a.sandboxCheck(ctx, true)
+	a.sbxSettingsCheck(ctx)
 	a.coreMovesStart(ctx)
 	defer a.coreMovesStop()
 	if a.Dir != "" {

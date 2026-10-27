@@ -41,7 +41,7 @@ type frideServe struct {
 // frideSandboxSupervise starts the loop that keeps the sandboxed FrIDE
 // running, on a node with sbx and a state dir.
 func (a *Agent) frideSandboxSupervise(ctx context.Context, wg *sync.WaitGroup) {
-	if a.Dir == "" || a.sbx() == nil || !a.sandboxOffered() {
+	if a.Dir == "" || a.sbx() == nil || !sbxOS() {
 		return
 	}
 	wg.Go(func() { a.frideSandboxLoop(ctx) })
