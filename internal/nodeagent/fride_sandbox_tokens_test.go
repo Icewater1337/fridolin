@@ -72,7 +72,7 @@ func TestFrideSandboxHostTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	if fakeCustom(fake, glPh) != "" || strings.Contains(fakeFile(fake, "credentials"), "gitlab") ||
-		!called(fakeCalls(t, fake), "policy", "rm", "network", "--sandbox", FrideSandboxName, "--resource", "gitlab.example.com:8443", "-f") {
+		!called(fakeCalls(t, fake), "policy", "rm", "network", "--sandbox", FrideSandboxName, "--resource", "gitlab.example.com:8443", "--force") {
 		t.Errorf("gitlab after remove: %q %q", fakeCustom(fake, glPh), fakeFile(fake, "credentials"))
 	}
 	if hosts := FrideSandboxHosts(o); len(hosts) != 1 {

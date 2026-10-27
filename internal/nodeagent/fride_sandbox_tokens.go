@@ -204,7 +204,7 @@ func removeHostToken(ctx context.Context, d sbxDriver, dir, sandbox, host string
 			}
 		}
 		if _, rule := hostPort(host); !slices.Contains(frideSandboxEgress, rule) {
-			if _, stderr, err := d.run(ctx, nil, nil, "policy", "rm", "network", "--sandbox", sandbox, "--resource", rule, "-f"); err != nil {
+			if _, stderr, err := d.run(ctx, nil, nil, "policy", "rm", "network", "--sandbox", sandbox, "--resource", rule, "--force"); err != nil {
 				errs = append(errs, fmt.Errorf("sbx could not remove the rule for %s: %w", rule, sbxError(err, stderr)))
 			}
 		}

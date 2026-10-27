@@ -33,6 +33,10 @@ func fakeFrideSbx(dir string, args []string) (int, bool) {
 		// The VM's disk goes with the sandbox.
 		_ = os.RemoveAll(filepath.Join(dir, "vmhome"))
 		return 0, false
+	case len(args) > 2 && args[0] == "policy" && args[1] == "rm" && slices.Contains(args, "--resource"):
+		// sbx removes a rule by its resource too; the shared fake knows ids only.
+		record()
+		return 0, true
 	case args[0] == "cp":
 		record()
 		return fakeCp(dir, args[1], args[2]), true
