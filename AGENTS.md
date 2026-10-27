@@ -284,7 +284,9 @@ each brain's backup settings keep home, and come back on the way back
 FrIDE is where fridolin's code changes happen (docs/NODES.md, "FrIDE").
 This path gives a node its own companion FrIDE. The full runbook, with
 every command, is docs/NODES.md, "Setting up FrIDE on a node". The
-machine must already be a node (path B). In short:
+machine must already be a node (path B). A FrIDE in a Docker Sandbox,
+beside the native one, is `fridolin node fride sandbox` on a node of its
+own (docs/NODES.md, "FrIDE in a Docker Sandbox"). In short:
 
 1. **Where FrIDE runs.** On macOS and Linux it runs natively. On
    Windows it runs in WSL2 (Ubuntu), because FrIDE does not build for
