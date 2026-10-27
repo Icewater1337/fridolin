@@ -1,11 +1,14 @@
 package nodeagent
 
 import (
+	"crypto/sha256"
 	"debug/buildinfo"
 	"debug/elf"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -137,6 +140,30 @@ func (a *Agent) placeSandboxBin(path string, p nodeproto.UpdateApplyParams) erro
 		return err
 	}
 	return nil
+}
+
+// copyToTemp copies the file at src to a new file in dir, and returns
+// its path and SHA-256.
+func copyToTemp(src, dir string) (string, string, error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return "", "", err
+	}
+	defer in.Close()
+	out, err := os.CreateTemp(dir, ".fridolin.new-*")
+	if err != nil {
+		return "", "", err
+	}
+	h := sha256.New()
+	_, err = io.Copy(io.MultiWriter(out, h), io.LimitReader(in, nodeproto.MaxBinaryBytes+1))
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(out.Name())
+		return "", "", err
+	}
+	return out.Name(), hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // errNoStateDir is an agent without a state dir.
