@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/platform"
 	"github.com/Icewater1337/fridolin/internal/secretxfer"
 )
 
@@ -26,6 +29,9 @@ type secretFiles struct {
 type secretFilesResult struct {
 	Stored []string `json:"stored"`
 	Kept   []string `json:"kept"`
+	// Replaced are the local files that were there and differed: the
+	// moving core's replace them.
+	Replaced []string `json:"replaced,omitempty"`
 }
 
 // coreFiles is core files export|import, run in the core's container
@@ -37,6 +43,10 @@ type secretFilesResult struct {
 // keeps its folder as it was. The container's home is the volume
 // fridolin-home, unless a Mac's compose.host.yaml binds its own folders.
 //
+// The local files of the data dir (core/local-secrets: the GitLab
+// connection, which no export takes) go along as "local:<name>", and
+// import writes them there, replacing one that differs.
+//
 // Forget removes the files named on stdin that a move wrote (#266): the
 // agent of a former core host sends only those its record names.
 func coreFiles(args []string, env coreEnv) int {
@@ -45,8 +55,9 @@ func coreFiles(args []string, env coreEnv) int {
 		return 2
 	}
 	home := envValue(env.environ, "HOME")
+	dataDir, derr := insideDataDir(insideFlags{}, env)
 	if args[0] == "forget" {
-		return coreFilesForget(home, env)
+		return coreFilesForget(home, dataDir, derr, env)
 	}
 	if args[0] == "export" {
 		out := secretFiles{Files: map[string][]byte{}}
@@ -61,6 +72,16 @@ func coreFiles(args []string, env coreEnv) int {
 				return 1
 			}
 			out.Dir = dir
+		}
+		// The local files of the data dir (the GitLab connection), which
+		// no export takes: the move carries them instead.
+		if derr == nil {
+			local, err := secretxfer.ReadLocalFiles(dataDir)
+			if err != nil {
+				fmt.Fprintf(env.stderr, "fridolin core files export: %v\n", err)
+				return 1
+			}
+			maps.Copy(out.Files, local)
 		}
 		if err := json.NewEncoder(env.stdout).Encode(out); err != nil {
 			return 1
@@ -82,17 +103,31 @@ func coreFiles(args []string, env coreEnv) int {
 		}
 	}()
 	res := secretFilesResult{Stored: []string{}, Kept: []string{}}
-	if len(in.Files) > 0 {
+	creds, local := secretxfer.SplitFiles(in.Files)
+	if len(creds) > 0 {
 		if err := secretxfer.CheckFilesDir(in.Dir); err != nil {
 			fmt.Fprintf(env.stderr, "fridolin core files import: %v\n", err)
 			return 2
 		}
-		stored, kept, err := secretxfer.StoreFiles(expandTilde(in.Dir, home), in.Files)
+		stored, kept, err := secretxfer.StoreFiles(expandTilde(in.Dir, home), creds)
 		if err != nil {
 			fmt.Fprintf(env.stderr, "fridolin core files import: %v\n", err)
 			return 1
 		}
 		res.Stored, res.Kept = append(res.Stored, stored...), append(res.Kept, kept...)
+	}
+	if len(local) > 0 {
+		if derr != nil {
+			fmt.Fprintf(env.stderr, "fridolin core files import: the data dir: %v\n", derr)
+			return 1
+		}
+		// Into core/, which the import that follows keeps.
+		stored, replaced, err := secretxfer.StoreLocalFiles(dataDir, local)
+		res.Stored, res.Replaced = append(res.Stored, stored...), replaced
+		if err != nil {
+			fmt.Fprintf(env.stderr, "fridolin core files import: %v\n", err)
+			return 1
+		}
 	}
 	_ = json.NewEncoder(env.stdout).Encode(res)
 	return 0
@@ -140,7 +175,7 @@ func expandTilde(dir, home string) string {
 // folder, a regular file only (never through a link), printing those it
 // removed as ~/x/name. A name a move never carries is refused; one not
 // there is skipped.
-func coreFilesForget(home string, env coreEnv) int {
+func coreFilesForget(home, dataDir string, derr error, env coreEnv) int {
 	var in struct {
 		Dir   string   `json:"dir"`
 		Names []string `json:"names"`
@@ -153,19 +188,45 @@ func coreFilesForget(home string, env coreEnv) int {
 		fmt.Fprintf(env.stderr, "fridolin core files forget: %v\n", err)
 		return 2
 	}
-	if err := secretxfer.CheckFilesDir(in.Dir); err != nil {
-		fmt.Fprintf(env.stderr, "fridolin core files forget: %v\n", err)
-		return 2
-	}
+	var names, local []string
 	for _, n := range in.Names {
-		if !secretxfer.FileName(n) {
+		switch {
+		case secretxfer.LocalFileName(n):
+			local = append(local, n)
+		case secretxfer.FileName(n):
+			names = append(names, n)
+		default:
 			fmt.Fprintf(env.stderr, "fridolin core files forget: %q is no secret file a move carries\n", n)
 			return 2
 		}
 	}
-	dir := expandTilde(in.Dir, home)
+	if err := secretxfer.CheckFilesDir(in.Dir); err != nil && len(names) > 0 {
+		fmt.Fprintf(env.stderr, "fridolin core files forget: %v\n", err)
+		return 2
+	}
 	removed := []string{}
-	for _, n := range in.Names {
+	// The local files a move wrote into the data dir's core/local-secrets.
+	if len(local) > 0 {
+		if derr != nil {
+			fmt.Fprintf(env.stderr, "fridolin core files forget: the data dir: %v\n", derr)
+			return 1
+		}
+		// Never under a core that runs on the data dir.
+		l, err := platform.AcquireLock(config.Layout{Root: dataDir}.Lock())
+		if err != nil {
+			fmt.Fprintf(env.stderr, "fridolin core files forget: %v: a core runs on %s; its local files stay\n", err, dataDir)
+			return 1
+		}
+		defer l.Release()
+		gone, err := secretxfer.RemoveLocalFiles(dataDir, local)
+		removed = append(removed, gone...)
+		if err != nil {
+			fmt.Fprintf(env.stderr, "fridolin core files forget: %v\n", err)
+			return 1
+		}
+	}
+	dir := expandTilde(in.Dir, home)
+	for _, n := range names {
 		p := filepath.Join(dir, n)
 		st, err := os.Lstat(p)
 		if errors.Is(err, fs.ErrNotExist) {
