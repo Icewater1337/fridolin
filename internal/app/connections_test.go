@@ -501,6 +501,25 @@ func TestConnectionsBrainTools(t *testing.T) {
 	if got := tools(workTok, "r2"); strings.Contains(got, "openai_") || strings.Contains(got, "elevenlabs_") {
 		t.Errorf("work's tools: %s", got)
 	}
+	// Every tool's properties is an object, also for elevenlabs_voices,
+	// which takes no arguments: Claude Code refuses the whole list when
+	// one is null, and the run then has none of the bridge's tools.
+	var listed struct {
+		Tools []struct {
+			Name        string `json:"name"`
+			InputSchema struct {
+				Properties *map[string]any `json:"properties"`
+			} `json:"inputSchema"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal([]byte(got), &listed); err != nil || len(listed.Tools) == 0 {
+		t.Fatalf("the tool list: %v %s", err, got)
+	}
+	for _, tool := range listed.Tools {
+		if tool.InputSchema.Properties == nil {
+			t.Errorf("%s: properties is not an object", tool.Name)
+		}
+	}
 
 	note := filepath.Join(dir, "voice.ogg")
 	if err := os.WriteFile(note, []byte("ogg-audio"), 0o600); err != nil {
