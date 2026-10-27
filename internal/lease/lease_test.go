@@ -502,6 +502,17 @@ func TestDeviceID(t *testing.T) {
 	if _, err := DeviceID(dir); err == nil {
 		t.Error("accepted a broken device id")
 	}
+	// An empty file, left by a first start that crashed (#338), gets a new id.
+	if err := os.WriteFile(filepath.Join(dir, "core", "device-id"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := DeviceID(dir)
+	if err != nil || len(fresh) != 32 {
+		t.Fatalf("after an empty file: %q, %v", fresh, err)
+	}
+	if again, err := DeviceID(dir); err != nil || again != fresh {
+		t.Errorf("after an empty file, second call %q, %v; want %q", again, err, fresh)
+	}
 }
 
 func TestReleaseDevice(t *testing.T) {
