@@ -55,7 +55,7 @@ func SandboxSetup(ctx context.Context, o SandboxSetupOptions) error {
 	}
 	if sbxHasTemplate(ctx, d, tag) {
 		fmt.Fprintf(o.Out, "sbx has the template %s already.\n", tag)
-	} else if err := o.buildTemplate(ctx, d, tag); err != nil {
+	} else if err := o.buildTemplate(ctx, d, tag, filepath.Join(o.Repo, "container", "sandbox", "Dockerfile")); err != nil {
 		return err
 	}
 
@@ -79,11 +79,10 @@ func SandboxSetup(ctx context.Context, o SandboxSetupOptions) error {
 	return nil
 }
 
-// buildTemplate builds the template's image with Docker and loads it
-// into sbx's own image store.
-func (o SandboxSetupOptions) buildTemplate(ctx context.Context, d sbxCLI, tag string) error {
+// buildTemplate builds the template's image from dockerfile with Docker
+// and loads it into sbx's own image store.
+func (o SandboxSetupOptions) buildTemplate(ctx context.Context, d sbxCLI, tag, dockerfile string) error {
 	fmt.Fprintf(o.Out, "Building the template %s with Docker (a few minutes the first time)…\n", tag)
-	dockerfile := filepath.Join(o.Repo, "container", "sandbox", "Dockerfile")
 	if err := o.run(ctx, o.Docker, "build", "-f", dockerfile, "-t", tag, o.Repo); err != nil {
 		return err
 	}

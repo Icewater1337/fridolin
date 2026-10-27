@@ -51,6 +51,11 @@ type Config struct {
 	Update *bool `json:"update,omitempty"`
 	// Box is set for a node in a box (box.go); nil for a native node.
 	Box *BoxConfig `json:"box,omitempty"`
+	// Service names the service of a second node on this machine, such
+	// as the sandboxed FrIDE's (fride_sandbox.go): fridolin-node-<service>,
+	// ai.fridolin.node.<service> on macOS, run from the state dir's own
+	// fridolin (OwnBinary). Empty: the machine's node, fridolin-node.
+	Service string `json:"service,omitempty"`
 }
 
 // DefaultCapabilities is what a node offers when its owner says nothing
@@ -95,6 +100,9 @@ func (c Config) Check() error {
 	}
 	if err := c.Box.Check(); err != nil {
 		return err
+	}
+	if c.Service != "" && !serviceNameRe.MatchString(c.Service) {
+		return fmt.Errorf("service: %q is not a service name (a-z, 0-9 and -, at most 32)", c.Service)
 	}
 	if b := c.Capabilities.Backup; b != nil {
 		for _, r := range b.Roots {
