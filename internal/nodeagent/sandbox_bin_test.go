@@ -72,7 +72,10 @@ func TestSandboxBinFromTheCore(t *testing.T) {
 	}
 	a := n.start()
 	id := a.ID()
-	waitFor(t, "the sandbox declared", func() bool { d := nodeOf(t, c, id).Declared.Sandbox; return d != nil && d.Bin == "" && d.Template != "" })
+	waitFor(t, "the sandbox declared", func() bool {
+		d := nodeOf(t, c, id).Declared.Sandbox
+		return d != nil && d.Bin == "" && d.Template != ""
+	})
 	approveUpd(t, c, id)
 	waitFor(t, "the binary declared", func() bool { d := nodeOf(t, c, id).Declared.Sandbox; return d != nil && d.Bin == vB })
 	got, err := os.ReadFile(filepath.Join(n.dir, "sandbox", "bin", "fridolin"))
