@@ -124,7 +124,11 @@ func (a *Agent) placeSandboxBin(path string, p nodeproto.UpdateApplyParams) erro
 	if err != nil {
 		return err
 	}
-	if _, err := checkLinuxBinary(tmp, p.Arch); err != nil {
+	check := a.checkSandboxBin
+	if check == nil {
+		check = checkLinuxBinary
+	}
+	if _, err := check(tmp, p.Arch); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}

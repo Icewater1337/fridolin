@@ -402,39 +402,19 @@ func (s *Service) runUpdate(ctx context.Context, n *Node, bin Binary, path strin
 	if n.Declared.Update.Box {
 		return s.runBoxUpdate(ctx, n, key)
 	}
-	f, err := os.Open(path)
+	tr, transferSum, err := s.sendFile(ctx, id, nodeproto.MethodUpdateWrite, path)
 	if err != nil {
-		return err
-	}
-	defer f.Close()
-	var tr nodeproto.FrideTransfer
-	h := sha256.New()
-	buf := make([]byte, nodeproto.FrideChunkBytes)
-	for {
-		k, rerr := io.ReadFull(f, buf)
-		if k > 0 || tr.ID == "" {
-			h.Write(buf[:k])
-			if err := s.Call(ctx, id, nodeproto.MethodUpdateWrite, nodeproto.FrideChunkParams{ID: tr.ID, Offset: tr.Size, Data: buf[:k]}, &tr); err != nil {
-				if tr.ID != "" {
-					s.dropUpdate(id, tr.ID)
-				}
-				return fmt.Errorf("sending the binary: %w", err)
-			}
-		}
-		if rerr == io.EOF || rerr == io.ErrUnexpectedEOF {
-			break
-		}
-		if rerr != nil {
+		if tr.ID != "" {
 			s.dropUpdate(id, tr.ID)
-			return rerr
 		}
+		return err
 	}
 	s.mu.Lock()
 	before := s.sessions[id]
 	s.mu.Unlock()
 	p := nodeproto.UpdateApplyParams{
 		ID: tr.ID, Version: s.version, OS: n.OS, Arch: n.Arch, SHA256: bin.SHA256, Size: bin.Size,
-		TransferSHA256: hex.EncodeToString(h.Sum(nil)),
+		TransferSHA256: transferSum,
 		Signature:      nodeproto.SignUpdate(key, s.version, n.OS, n.Arch, bin.SHA256),
 	}
 	var res nodeproto.UpdateApplyResult
@@ -445,6 +425,36 @@ func (s *Service) runUpdate(ctx context.Context, n *Node, bin Binary, path strin
 	s.setUpdate(id, func(u *UpdateStatus, _ time.Time) { u.State = UpdateRestarting })
 	s.logf("nodes: %s (%s) put %s in place of %s at %s and restarts", n.Name, id, res.To, res.From, res.Executable)
 	return s.awaitUpdated(ctx, id, before)
+}
+
+// sendFile streams the file at path to node id in chunks through method
+// (update.write, sandbox.bin_write), and returns the transfer and the
+// SHA-256 of what it sent. A transfer with an ID is left for the caller
+// to drop when it fails.
+func (s *Service) sendFile(ctx context.Context, id, method, path string) (nodeproto.FrideTransfer, string, error) {
+	var tr nodeproto.FrideTransfer
+	f, err := os.Open(path)
+	if err != nil {
+		return tr, "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	buf := make([]byte, nodeproto.FrideChunkBytes)
+	for {
+		k, rerr := io.ReadFull(f, buf)
+		if k > 0 || tr.ID == "" {
+			h.Write(buf[:k])
+			if err := s.Call(ctx, id, method, nodeproto.FrideChunkParams{ID: tr.ID, Offset: tr.Size, Data: buf[:k]}, &tr); err != nil {
+				return tr, "", fmt.Errorf("sending the binary: %w", err)
+			}
+		}
+		if rerr == io.EOF || rerr == io.ErrUnexpectedEOF {
+			return tr, hex.EncodeToString(h.Sum(nil)), nil
+		}
+		if rerr != nil {
+			return tr, "", rerr
+		}
+	}
 }
 
 // boxUpdateWait is how long the core waits for a box to come back on the

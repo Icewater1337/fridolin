@@ -117,6 +117,9 @@ type Service struct {
 	// they reported meanwhile.
 	updating map[string]bool
 	reports  map[string]nodeproto.UpdateReport
+	// sandboxBin is when the core last began to send a node the linux
+	// fridolin for its sandboxes (sandbox_bin.go).
+	sandboxBin map[string]time.Time
 
 	// Core moves (coremove.go): the records followed in this process,
 	// the move that runs ("" for none).
@@ -153,7 +156,7 @@ func New(opts Options) (*Service, error) {
 	s := &Service{
 		reg: reg, logf: logf, onEvent: opts.OnEvent, onDeclare: opts.OnDeclare, onJoin: opts.OnJoin, ctx: ctx, cancel: cancel, sessions: map[string]*session{},
 		dir: opts.Dir, version: opts.Version, binDir: opts.BinariesDir, busy: opts.Busy, hold: opts.Hold, boxImages: opts.BoxImages,
-		updating: map[string]bool{}, reports: map[string]nodeproto.UpdateReport{}, onConnect: opts.OnConnect, onApprove: opts.OnApprove,
+		updating: map[string]bool{}, reports: map[string]nodeproto.UpdateReport{}, sandboxBin: map[string]time.Time{}, onConnect: opts.OnConnect, onApprove: opts.OnApprove,
 		moves: map[string]*MoveRecord{}, onMove: opts.OnMove, onStopping: opts.OnMoveStopping, site: opts.Site, movePollEvery: opts.MovePoll,
 	}
 	s.resumeMoves()
@@ -365,6 +368,8 @@ func (s *Service) accept(w http.ResponseWriter, r *http.Request) {
 	// on, is updated now: after the core itself was updated, every node
 	// connects again.
 	s.wg.Go(func() { s.maybeAuto(node.ID) })
+	// Its sandboxes get the linux fridolin of this version.
+	s.wg.Go(func() { s.maybeSandboxBin(node.ID) })
 	if s.onConnect != nil {
 		s.wg.Go(func() { s.onConnect(clone(node)) })
 	}
@@ -495,6 +500,7 @@ func (s *Service) readLoop(ss *session) {
 			}
 			s.logf("nodes: %s (%s) offers now: %s; commands %s", n.Name, n.ID, n.Declared.Summary(), n.Commands())
 			s.pushState(n)
+			s.wg.Go(func() { s.maybeSandboxBin(n.ID) })
 			if s.onDeclare != nil {
 				s.onDeclare(n)
 			}
@@ -617,6 +623,7 @@ func (s *Service) ApproveCommands(id string) (*Node, error) {
 	if err == nil {
 		s.logf("nodes: approved what %s (%s) offers: %s", n.Name, n.ID, n.Approved.Summary())
 		s.pushState(n)
+		s.wg.Go(func() { s.maybeSandboxBin(n.ID) })
 		if s.onApprove != nil {
 			s.wg.Go(func() { s.onApprove(clone(n)) })
 		}

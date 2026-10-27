@@ -104,6 +104,9 @@ type Agent struct {
 	// The Claude token for runs comes from CoreSecrets, the host's store.
 	SandboxSbx    string
 	SandboxDriver sbxDriver
+	// checkSandboxBin checks a linux fridolin the core sent for the
+	// sandboxes (nil: checkLinuxBinary; tests send fakes).
+	checkSandboxBin func(path, arch string) (string, error)
 
 	core      coreHost
 	moves     coreMoves
