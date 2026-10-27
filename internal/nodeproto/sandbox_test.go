@@ -130,6 +130,11 @@ func TestSandboxRunCheck(t *testing.T) {
 	if err := ok.Check(); err != nil {
 		t.Fatal(err)
 	}
+	withGitHub := ok
+	withGitHub.GitHubToken = "test-github-token"
+	if err := withGitHub.Check(); err != nil {
+		t.Errorf("a run with a GitHub token: %v", err)
+	}
 	for name, change := range map[string]func(*SandboxRunParams){
 		"run":       func(p *SandboxRunParams) { p.Run = "a/b" },
 		"run space": func(p *SandboxRunParams) { p.Run = "a b" },
@@ -140,6 +145,9 @@ func TestSandboxRunCheck(t *testing.T) {
 		"node env":  func(p *SandboxRunParams) { p.Env = map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "x"} },
 		"proxy env": func(p *SandboxRunParams) { p.Env = map[string]string{"NO_PROXY": "*"} },
 		"api env":   func(p *SandboxRunParams) { p.Env = map[string]string{"FRIDOLIN_API": "http://x"} },
+		"gh env":    func(p *SandboxRunParams) { p.Env = map[string]string{"GH_TOKEN": "x"} },
+		"gh token":  func(p *SandboxRunParams) { p.GitHubToken = "a b" },
+		"gh big":    func(p *SandboxRunParams) { p.GitHubToken = strings.Repeat("x", MaxSandboxTokenLen+1) },
 		"stdin":     func(p *SandboxRunParams) { p.Stdin = strings.Repeat("x", MaxSandboxStdin+1) },
 		"token":     func(p *SandboxRunParams) { p.Token = "" },
 		"token nl":  func(p *SandboxRunParams) { p.Token = "a\nb" },

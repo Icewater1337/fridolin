@@ -63,6 +63,9 @@ func fakeSbx(dir string) int {
 	case "rm":
 		name := args[len(args)-1]
 		saveFakeSandboxes(dir, slices.DeleteFunc(names, func(n string) bool { return n == name }))
+		fakeForget(dir, name)
+	case "mount":
+		return fakeMount(dir, args[1:])
 	case "exec":
 		return fakeExec(dir, args[1:], tok)
 	default:
@@ -113,6 +116,13 @@ func fakeSecret(dir string, args []string) int {
 		} else {
 			fmt.Println(`{"secrets":[],"custom_secrets":[{"name":"x"}],"shadowed_services":[],"env_only_count":0}`)
 		}
+	case "set", "rm":
+		if len(args) > 1 && args[1] == "github" {
+			return fakeGitHubSecret(dir, args)
+		}
+		if args[0] == "rm" {
+			fmt.Println("Removed secret sbx-r…cdef") // part of a value: never logged
+		}
 	case "set-custom":
 		cmd := args[slices.Index(args, "--command")+1]
 		file, ok := strings.CutPrefix(cmd, "/bin/cat ")
@@ -126,8 +136,6 @@ func fakeSecret(dir string, args []string) int {
 		}
 		_ = os.WriteFile(filepath.Join(dir, "secret-value"), b, 0o600)
 		fmt.Println("Applied secret to sandbox")
-	case "rm":
-		fmt.Println("Removed secret sbx-r…cdef") // part of a value: never logged
 	}
 	return 0
 }
@@ -172,6 +180,7 @@ func fakeExec(dir string, args []string, tok string) int {
 	case cmd[0] == "sh" && strings.HasPrefix(cmd[2], "kill -"):
 		sig := strings.Fields(strings.TrimPrefix(cmd[2], "kill -"))[0]
 		appendFile(vmPath(dir, cmd[3])+".signal", sig+"\n")
+	case cmd[0] == "true":
 	case cmd[0] == "rm":
 		for _, f := range cmd[2:] {
 			_ = os.Remove(vmPath(dir, f))
@@ -180,6 +189,7 @@ func fakeExec(dir string, args []string, tok string) int {
 		// setsid -w sh -c SCRIPT PIDFILE PROGRAM ARGS…
 		pidFile := cmd[5]
 		_ = os.WriteFile(vmPath(dir, pidFile), []byte("42"), 0o600)
+		_ = os.Setenv("FAKE_SBX_SANDBOX", args[0])
 		return fakeAgentRun(dir, pidFile, cmd[6:], env, tok)
 	default:
 		fmt.Fprintf(os.Stderr, "the fake runs no %q\n", cmd[0])
@@ -215,6 +225,7 @@ func fakeAgentRun(dir, pidFile string, argv, env []string, tok string) int {
 		fmt.Printf("argv: %s\n", strings.Join(full, " "))
 		fmt.Printf("env: %s\n", strings.Join(env, " "))
 		fmt.Printf("token: %v\n", tok != "" && slices.Contains(env, "CLAUDE_CODE_OAUTH_TOKEN"))
+		fmt.Printf("github: %s\n", fakeGitHubSeen(dir, os.Getenv("FAKE_SBX_SANDBOX")))
 		fmt.Print("grüße\n")
 		fmt.Fprintln(os.Stderr, "a warning")
 		code := 0

@@ -52,18 +52,24 @@ const fakeDenyAll = `{"rules":[{"id":"default-fs-read-allow-all","scope":"global
 // fakeBalanced is a global policy that allows hosts.
 const fakeBalanced = `{"rules":[{"id":"ai","scope":"global","resource_type":"network","decision":"allow","resources":["api.anthropic.com:443"],"status":"active"}]}`
 
-// fakePolicy is `sbx policy ls --json | init deny-all | reset --force |
-// allow|deny network --sandbox NAME HOST`. The file policy-unset is a
-// policy never initialized; policy holds another.
+// fakePolicy is `sbx policy ls [NAME] --json | init deny-all | reset
+// --force | allow|deny network --sandbox NAME HOSTS | rm network
+// --sandbox NAME --id ID --force`. The file policy-unset is a policy
+// never initialized; policy holds another. Sandboxes' rules are in
+// sandbox_fake_rules_test.go.
 func fakePolicy(dir string, args []string) int {
 	unset := filepath.Join(dir, "policy-unset")
 	switch args[0] {
+	case "allow", "deny":
+		return fakeRuleAdd(dir, args[0], args)
+	case "rm":
+		return fakeRuleRm(dir, args)
 	case "ls":
 		if _, err := os.Stat(unset); err == nil {
 			fmt.Fprintln(os.Stderr, "error: global network policy has not been initialized\n  try: sbx policy init <allow-all|balanced|deny-all>")
 			return 1
 		}
-		fmt.Println(cannedOr(dir, "policy", fakeDenyAll))
+		fmt.Println(fakePolicyJSON(dir, cannedOr(dir, "policy", fakeDenyAll)))
 	case "init":
 		if _, err := os.Stat(unset); err != nil {
 			fmt.Fprintln(os.Stderr, "error: the global network policy is initialized already")
