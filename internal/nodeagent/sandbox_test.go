@@ -106,6 +106,7 @@ func sandboxInfo(t *testing.T, a *Agent) nodeproto.SandboxInfo {
 }
 
 func TestSandboxInfoAndDeclaration(t *testing.T) {
+	t.Parallel()
 	a, fake, _ := sandboxAgent(t)
 	info := sandboxInfo(t, a)
 	if info.Version != "v0.50.0" || !info.Daemon || !info.SignedIn || !info.Settings || info.Template != "fridolin-brain:v1" || info.Problem != "" {
@@ -178,6 +179,7 @@ func ensure(a *Agent, p nodeproto.SandboxEnsureParams) (nodeproto.SandboxEnsureR
 }
 
 func TestSandboxEnsure(t *testing.T) {
+	t.Parallel()
 	a, fake, _ := sandboxAgent(t)
 	folder := brainFolder(t, "rt-1")
 	p := nodeproto.SandboxEnsureParams{Brain: "work", Folder: folder, Marker: "rt-1", APIPort: 8765, Provider: "claude",
@@ -262,6 +264,7 @@ func readRun(t *testing.T, a *Agent, run string) (string, nodeproto.SandboxReadR
 }
 
 func TestSandboxRun(t *testing.T) {
+	t.Parallel()
 	a, fake, log := sandboxAgent(t)
 	p := readyBrain(t, a, "claude", "fake-agent", "echo", "3")
 	if res, perr := sbCall(t, a, nodeproto.MethodSandboxRun, p); perr != nil || res.(nodeproto.SandboxRunResult).Run != "r1" {
@@ -341,6 +344,7 @@ func waitStarted(t *testing.T, a *Agent, run string) int64 {
 }
 
 func TestSandboxStop(t *testing.T) {
+	t.Parallel()
 	a, fake, _ := sandboxAgent(t)
 	p := readyBrain(t, a, "claude", "fake-agent", "wait")
 	if _, perr := sbCall(t, a, nodeproto.MethodSandboxRun, p); perr != nil {
@@ -383,6 +387,7 @@ func TestSandboxStop(t *testing.T) {
 // A run that writes past the buffer is stopped and says why; its output
 // up to the buffer is still there.
 func TestSandboxRunOverflow(t *testing.T) {
+	t.Parallel()
 	a, _, _ := sandboxAgent(t)
 	p := readyBrain(t, a, "claude", "fake-agent", "flood")
 	if _, perr := sbCall(t, a, nodeproto.MethodSandboxRun, p); perr != nil {
@@ -397,6 +402,7 @@ func TestSandboxRunOverflow(t *testing.T) {
 // Codex runs get sbx's provider settings as -c options and no Claude
 // token.
 func TestSandboxRunCodex(t *testing.T) {
+	t.Parallel()
 	a, fake, _ := sandboxAgent(t)
 	if err := os.WriteFile(filepath.Join(fake, "codex"), nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -423,6 +429,7 @@ func TestSandboxRunCodex(t *testing.T) {
 }
 
 func TestSandboxEnsureRefuses(t *testing.T) {
+	t.Parallel()
 	a, fake, _ := sandboxAgent(t)
 	p := nodeproto.SandboxEnsureParams{Brain: "work", Folder: brainFolder(t, "rt-old"), Marker: "rt-new", APIPort: 8765, Provider: "claude"}
 	// Another core's folder (a stale copy after a move): unavailable.
