@@ -66,8 +66,6 @@ var fields = []fieldSpec{
 	{Field: Field{Name: "sandbox.allow_paths"}},
 	{Field: Field{Name: "sandbox.git_config"}},
 	{Field: Field{Name: "sandbox.credentials_dir"}},
-	{Field: Field{Name: "sandbox.runtime"}},
-	{Field: Field{Name: "sandbox.node"}},
 	{Field: Field{Name: "otp_guard"}},
 	{Field: Field{Name: "otp_markers"}},
 	{Field: Field{Name: "viewer"}},

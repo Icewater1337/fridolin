@@ -234,10 +234,6 @@ func (b *App) brainViews() []httpapi.BrainView {
 			out[i].Fallback = br == fallback
 			out[i].Intents, _ = b.intents.List(br.ID())
 		}
-		if v.Manifest != nil && b.runtimes != nil {
-			c := b.runtimes.choose(context.Background(), v.Manifest.Sandbox, string(cfg.AgentProvider), false)
-			out[i].Sandbox = &httpapi.BrainSandbox{Configured: c.Configured, Effective: c.Effective, Fallback: c.Fallback, Node: c.Node, Ready: c.Ready, Reason: c.Reason, Egress: c.Egress}
-		}
 	}
 	return nonNil(out)
 }

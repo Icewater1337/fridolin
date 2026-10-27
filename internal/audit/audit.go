@@ -129,10 +129,6 @@ type Entry struct {
 	Detail     string `json:"detail,omitempty"`
 	Outcome    string `json:"outcome,omitempty"`
 	DurationMS int64  `json:"duration_ms,omitempty"`
-	// Runtime is where a run of a brain set to Docker Sandboxes ran:
-	// docker-sandbox, or bubblewrap when it fell back; "refused" when
-	// it did not run (docs/SANDBOXES.md). Other runs leave it out.
-	Runtime string `json:"runtime,omitempty"`
 }
 
 // DirName is the data dir's folder of audit logs.

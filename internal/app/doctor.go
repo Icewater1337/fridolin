@@ -29,7 +29,7 @@ func newDoctorRegistry() *doctor.Registry {
 	r.Add(nodesDoctorChecks...)
 	r.Add(memoryDoctorCheck)
 	r.Add(doctor.OwnerChecks()...)
-	r.Add(timezoneDoctorCheck, nodesFrideDoctorCheck, brainRuntimeCheck)
+	r.Add(timezoneDoctorCheck, nodesFrideDoctorCheck)
 	r.Add(b2DoctorChecks...)
 	r.Add(calendarDoctorChecks...)
 	r.Add(coreDoctorChecks...)
@@ -108,7 +108,6 @@ func SystemDoctorEnv(configFlag string) *doctor.Env {
 		},
 		Now:             time.Now,
 		LiveNodes:       askBridgeNodes,
-		LiveBrains:      askBridgeBrains,
 		CheckConnection: checkConnectionKey,
 	}
 }

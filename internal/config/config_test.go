@@ -17,18 +17,26 @@ func TestMigrateConfig(t *testing.T) {
 		want         map[string]string // keys of the migrated file, as JSON; "" for a key it lacks
 		err          string            // part of the error, "" when it migrates
 	}{
-		{"no version", `{"log_level": "debug"}`, 1, map[string]string{"version": "2", "log_level": `"debug"`}, ""},
-		{"null", `{"version": null}`, 1, map[string]string{"version": "2"}, ""},
+		{"no version", `{"log_level": "debug"}`, 1, map[string]string{"version": "3", "log_level": `"debug"`}, ""},
+		{"null", `{"version": null}`, 1, map[string]string{"version": "3"}, ""},
 		{"version 1 with retired keys", `{"version": 1, "model": "sonnet", "work_dir": "~/a", "brains": []}`, 1,
-			map[string]string{"version": "2", "brain_model": `"sonnet"`, "model": "", "work_dir": "", "brains": ""}, ""},
+			map[string]string{"version": "3", "brain_model": `"sonnet"`, "model": "", "work_dir": "", "brains": ""}, ""},
 		{"version 1 keeps its brain_model", `{"model": "sonnet", "brain_model": "opus"}`, 1, map[string]string{"brain_model": `"opus"`, "model": ""}, ""},
 		// The retired keys are version 1's: in a version 2 file they are
 		// unknown keys, which no migration touches.
-		{"version 2", `{"version": 2, "model": "sonnet"}`, 2, map[string]string{"version": "2", "model": `"sonnet"`, "brain_model": ""}, ""},
+		{"version 2", `{"version": 2, "model": "sonnet"}`, 2, map[string]string{"version": "3", "model": `"sonnet"`, "brain_model": ""}, ""},
+		// Docker Sandboxes for brains were removed: version 3 drops their
+		// keys and keeps the rest of sandbox.
+		{"version 2 with the brain runtime", `{"version": 2, "sandbox": {"enabled": true, "runtime": "docker-sandbox", "node": "mini"}}`, 2,
+			map[string]string{"version": "3", "sandbox": `{"enabled":true}`}, ""},
+		{"version 1 with the brain runtime", `{"sandbox": {"runtime": "bubblewrap"}}`, 1, map[string]string{"sandbox": `{}`}, ""},
+		{"version 2 with a sandbox of another type", `{"version": 2, "sandbox": true}`, 2, map[string]string{"version": "3", "sandbox": "true"}, ""},
+		{"version 3 keeps unknown sandbox keys", `{"version": 3, "sandbox": {"runtime": "docker-sandbox"}}`, 3,
+			map[string]string{"sandbox": `{"runtime": "docker-sandbox"}`}, ""},
 		{"version 1 with inline brains", `{"brains": [{"name": "a"}]}`, 1, nil, `lists brains inline under "brains"`},
-		{"newer", `{"version": 3}`, 3, nil, "version 3 is newer than the version 2 this build of Fridolin reads"},
-		{"zero", `{"version": 0}`, 0, nil, "version 0: must be a whole number from 1 to 2"},
-		{"negative", `{"version": -1}`, 0, nil, "version -1: must be a whole number from 1 to 2"},
+		{"newer", `{"version": 4}`, 4, nil, "version 4 is newer than the version 3 this build of Fridolin reads"},
+		{"zero", `{"version": 0}`, 0, nil, "version 0: must be a whole number from 1 to 3"},
+		{"negative", `{"version": -1}`, 0, nil, "version -1: must be a whole number from 1 to 3"},
 		{"a string", `{"version": "2"}`, 0, nil, `version "2": must be a whole number`},
 		{"a fraction", `{"version": 1.5}`, 0, nil, "version 1.5: must be a whole number"},
 	}

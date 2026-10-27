@@ -246,7 +246,7 @@ const MigrateBuild = "2592376"
 // when a key is renamed or removed or comes to mean something else, so
 // that a file written before needs a migration to keep its meaning; a key
 // that is only added needs none, as an older file simply lacks it.
-const Version = 2
+const Version = 3
 
 // configMigrations take config.json from one version to the next: the one
 // at index i reads version i+1 and makes it version i+2. Each works on the
@@ -262,6 +262,9 @@ var configMigrations = []func(obj map[string]json.RawMessage) ([]string, error){
 	// Version 2 is the file after classic mode and inline brains were
 	// removed: the keys only they read are retired.
 	foldRetiredKeys,
+	// Version 3 is the file after Docker Sandboxes for brains were
+	// removed (docs/VISION.md): sandbox.runtime and sandbox.node go.
+	dropBrainSandboxKeys,
 }
 
 // ErrTooNew means a config.json, or a dashboard save, is of a version
@@ -393,6 +396,39 @@ func foldRetiredKeys(obj map[string]json.RawMessage) ([]string, error) {
 	return notes, nil
 }
 
+// dropBrainSandboxKeys takes sandbox.runtime and sandbox.node out of a
+// version 2 file. They chose Docker Sandboxes on a node for brains, which
+// were removed (docs/VISION.md, "Why not Docker Sandboxes for brains"):
+// every brain runs under bubblewrap, or sandbox-exec natively, as with
+// the default "bubblewrap".
+func dropBrainSandboxKeys(obj map[string]json.RawMessage) ([]string, error) {
+	raw, ok := obj["sandbox"]
+	if !ok {
+		return nil, nil
+	}
+	var sb map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &sb); err != nil || sb == nil {
+		// Not an object: the decoder says why.
+		return nil, nil
+	}
+	var notes []string
+	for _, k := range []string{"runtime", "node"} {
+		if v, ok := sb[k]; ok {
+			delete(sb, k)
+			notes = append(notes, fmt.Sprintf("sandbox.%s (%s) is retired and is dropped the next time the dashboard saves: brains run under bubblewrap, Docker Sandboxes for brains were removed", k, v))
+		}
+	}
+	if len(notes) == 0 {
+		return nil, nil
+	}
+	b, err := json.Marshal(sb)
+	if err != nil {
+		return nil, err
+	}
+	obj["sandbox"] = b
+	return notes, nil
+}
+
 // ClassicModeRemoved is the error for a setting that asks for classic mode:
 // what names it, fix says what to change.
 func ClassicModeRemoved(what, fix string) error {
@@ -427,31 +463,6 @@ type SandboxConfig struct {
 	// Absolute or ~-relative.
 	CredentialsDir string `json:"credentials_dir,omitempty"`
 
-	// Runtime is where brains run by default: RuntimeBubblewrap (the
-	// default: today's sandbox, bubblewrap in the container, sandbox-exec
-	// on a native Mac) or RuntimeDockerSandbox (a Docker Sandbox on a
-	// node, docs/SANDBOXES.md). A brain's brain.json may say otherwise.
-	Runtime string `json:"runtime,omitempty"`
-	// Node is the node, by id or name, whose sandbox capability runs the
-	// brains; "" for the one approved node with it on the core's machine.
-	Node string `json:"node,omitempty"`
-}
-
-// The runtimes a brain runs in (sandbox.runtime, brain.json's sandbox).
-const (
-	RuntimeBubblewrap    = manifest.RuntimeBubblewrap
-	RuntimeDockerSandbox = manifest.RuntimeDockerSandbox
-)
-
-// Runtimes are the values sandbox.runtime takes.
-func Runtimes() []string { return manifest.Runtimes() }
-
-// RuntimeOr is runtime, or the default for "".
-func RuntimeOr(runtime string) string {
-	if runtime == "" {
-		return RuntimeBubblewrap
-	}
-	return runtime
 }
 
 // QueueConfig decides what happens when a message arrives while the brain is
@@ -736,12 +747,6 @@ func SandboxSupported(goos string) bool { return goos == "darwin" || goos == Con
 func (sc SandboxConfig) Validate(goos string) error {
 	if sc.Enabled && !SandboxSupported(goos) {
 		return fmt.Errorf("sandbox.enabled needs macOS (sandbox-exec) or the fridolin-core container (bubblewrap), and this is %s: set it to false and run the bridge as a dedicated user instead, or run the core in its container (docs/CORE.md)", goos)
-	}
-	if sc.Runtime != "" && !slices.Contains(Runtimes(), sc.Runtime) {
-		return fmt.Errorf("sandbox.runtime must be %q or %q, not %q", RuntimeBubblewrap, RuntimeDockerSandbox, sc.Runtime)
-	}
-	if len(sc.Node) > 128 || strings.ContainsAny(sc.Node, "\x00\r\n") {
-		return fmt.Errorf("sandbox.node %q is not a node's id or name", sc.Node)
 	}
 	// A relative path is relative to whatever folder a brain runs in, so as
 	// a rule it would protect (or open) nothing anyone meant.
