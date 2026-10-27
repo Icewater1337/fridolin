@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/app"
@@ -44,8 +43,6 @@ type nodeService struct {
 	// (nodeagent.ServiceStateDir), "" where it is not known; nil for none.
 	stateDir func() (string, error)
 	pkg      appPackage
-	// sandbox looks at Docker Sandboxes once; nil leaves their checks out.
-	sandbox func() nodeagent.SandboxStatus
 }
 
 // boxHealthMaxAge is how old a box agent's last word may be for it to
@@ -188,7 +185,7 @@ func nodeChecks(dir string, svc nodeService) []doctor.Check {
 			return coreLeftoversResult(nodeagent.ReadCoreLeftovers(dir))
 		}},
 	}
-	return append(checks, sandboxChecks(svc.sandbox)...)
+	return checks
 }
 
 // coreLeftoversResult flags a former core host that still holds the
@@ -403,7 +400,6 @@ func systemNodeService(dir string) nodeService {
 		status:   func() (string, error) { return nodeagent.ServiceStatus(cfg) },
 		stateDir: func() (string, error) { return nodeagent.ServiceStateDir(cfg) },
 		pkg:      thisAppPackage(),
-		sandbox:  sync.OnceValue(func() nodeagent.SandboxStatus { return lookAtSandbox(dir) }),
 	}
 }
 
