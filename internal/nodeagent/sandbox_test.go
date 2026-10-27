@@ -451,6 +451,21 @@ func TestSandboxEnsureRefuses(t *testing.T) {
 	if called(fakeCalls(t, fake), "create") {
 		t.Error("a sandbox was made for a folder that is not the core's")
 	}
+	// A marker that links out of the folder does not count.
+	elsewhere := brainFolder(t, "rt-new")
+	p.Folder = brainFolder(t, "")
+	if err := os.Symlink(filepath.Join(elsewhere, nodeproto.SandboxMarkerFile), filepath.Join(p.Folder, nodeproto.SandboxMarkerFile)); err != nil {
+		t.Fatal(err)
+	}
+	if _, perr := ensure(a, p); perr == nil || perr.Code != nodeproto.CodeUnavailable {
+		t.Fatalf("a marker linked from elsewhere: %v", perr)
+	}
+	// A run's token file is one name in the state dir, never a path.
+	for _, run := range []string{"../x", "a/b", "", ".."} {
+		if _, err := a.tokenPath(run); err == nil {
+			t.Errorf("token path of %q", run)
+		}
+	}
 	// Codex without sbx's login: unavailable.
 	p.Folder, p.Marker, p.Provider = brainFolder(t, "rt-2"), "rt-2", "codex"
 	if _, perr := ensure(a, p); perr == nil || perr.Code != nodeproto.CodeUnavailable {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -101,17 +102,35 @@ func placeholder() (string, error) {
 	return "sbx-run-" + hex.EncodeToString(b), nil
 }
 
-// tokenFile writes the run token to a 0600 file in the state dir, which
-// sbx's custom secret reads on the host.
-func (a *Agent) tokenFile(run, token string) (string, error) {
+// runIDRe is a run id: one name, never a path.
+var runIDRe = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// tokenPath is the host file of run's token, which must be a run id:
+// one name in the state dir's runs folder, never a path.
+func (a *Agent) tokenPath(run string) (string, error) {
 	if a.Dir == "" {
 		return "", errors.New("this agent has no state dir")
 	}
-	dir := filepath.Join(a.Dir, sandboxDir, sandboxRunsDir)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if !runIDRe.MatchString(run) {
+		return "", fmt.Errorf("%q is not a run id", run)
+	}
+	name := filepath.Base("run-" + run + ".token")
+	if name != "run-"+run+".token" || strings.Contains(name, "..") {
+		return "", fmt.Errorf("%q is not a run id", run)
+	}
+	return filepath.Join(a.Dir, sandboxDir, sandboxRunsDir, name), nil
+}
+
+// tokenFile writes the run token to a 0600 file in the state dir, which
+// sbx's custom secret reads on the host.
+func (a *Agent) tokenFile(run, token string) (string, error) {
+	path, err := a.tokenPath(run)
+	if err != nil {
 		return "", err
 	}
-	path := filepath.Join(dir, "run-"+run+".token")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", err
+	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return "", err
@@ -178,18 +197,18 @@ func (a *Agent) sandboxRunStart(ctx context.Context, p nodeproto.SandboxRunParam
 	}
 	if _, stderr, err := d.run(ctx, nil, nil, "secret", "set-custom", "--sandbox", r.name, "--host", "localhost",
 		"--placeholder", ph, "--command", "/bin/cat "+hostFile); err != nil {
-		a.cleanupRun(d, r.name, p.Run, "", hostFile)
+		a.cleanupRun(d, r.name, p.Run, "")
 		return fail(nodeproto.CodeFailed, "sbx could not set the run's secret: %v", sbxError(err, stderr))
 	}
 	if _, stderr, err := d.run(ctx, strings.NewReader(ph), nil, "exec", "-i", r.name, "sh", "-c", `umask 077; cat > "$0"`,
 		nodeproto.SandboxTokenFile(p.Run)); err != nil {
-		a.cleanupRun(d, r.name, p.Run, ph, hostFile)
+		a.cleanupRun(d, r.name, p.Run, ph)
 		return fail(nodeproto.CodeFailed, "the run's token file in the VM: %v", sbxError(err, stderr))
 	}
 	stop := func() { a.stopRun(r, nodeproto.DefaultSandboxGraceS*time.Second) }
 	cmd, err := d.start(strings.NewReader(p.Stdin), stdoutWriter{r: r, overflowed: stop}, stderrWriter{r: r}, credEnv, execArgs(p, credNames)...)
 	if err != nil {
-		a.cleanupRun(d, r.name, p.Run, ph, hostFile)
+		a.cleanupRun(d, r.name, p.Run, ph)
 		return fail(nodeproto.CodeFailed, "sbx could not start the run: %v", err)
 	}
 	r.mu.Lock()
@@ -209,7 +228,7 @@ func (a *Agent) sandboxRunStart(ctx context.Context, p nodeproto.SandboxRunParam
 		if timer != nil {
 			timer.Stop()
 		}
-		a.cleanupRun(d, r.name, p.Run, ph, hostFile)
+		a.cleanupRun(d, r.name, p.Run, ph)
 		r.finish(code, msg)
 		a.logf("node: sandbox run %s in %s ended with %d", p.Run, r.name, code)
 	}()
@@ -219,14 +238,14 @@ func (a *Agent) sandboxRunStart(ctx context.Context, p nodeproto.SandboxRunParam
 
 // cleanupRun removes the run's secret and both token files. The output
 // of `sbx secret rm` is never logged: it prints part of the value.
-func (a *Agent) cleanupRun(d sbxDriver, name, run, ph, hostFile string) {
+func (a *Agent) cleanupRun(d sbxDriver, name, run, ph string) {
 	ctx, cancel := context.WithTimeout(context.Background(), sandboxProbeTimeout)
 	defer cancel()
 	if ph != "" {
 		_, _, _ = d.run(ctx, nil, nil, "secret", "rm", "--placeholder", ph, "--sandbox", name, "-f")
 	}
 	_, _, _ = d.run(ctx, nil, nil, "exec", name, "rm", "-f", nodeproto.SandboxTokenFile(run), nodeproto.SandboxPidFile(run))
-	if hostFile != "" {
-		_ = os.Remove(hostFile)
+	if p, err := a.tokenPath(run); err == nil {
+		_ = os.Remove(p)
 	}
 }

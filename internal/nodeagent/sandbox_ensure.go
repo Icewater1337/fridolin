@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -22,7 +21,11 @@ var sandboxClaudeDenied = []string{"downloads.claude.ai", "bridge.claudeusercont
 // checkMarker reports whether folder holds the core's runtime marker:
 // that the core's brain folder and this node's are the same.
 func checkMarker(folder, marker string) *nodeproto.Error {
-	f, err := os.Open(filepath.Join(folder, nodeproto.SandboxMarkerFile))
+	if err := nodeproto.CheckAbsPath(folder); err != nil {
+		return nodeproto.Errorf(nodeproto.CodeBadRequest, "the brain's folder: %v", err)
+	}
+	// The marker is one name in the folder, and no link out of it.
+	f, err := os.OpenInRoot(folder, nodeproto.SandboxMarkerFile)
 	if err != nil {
 		return nodeproto.Errorf(nodeproto.CodeUnavailable, "the brain's folder here holds no runtime marker: it is not the core's folder")
 	}
