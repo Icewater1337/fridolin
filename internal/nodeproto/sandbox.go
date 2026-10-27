@@ -154,17 +154,9 @@ func (s *SandboxCap) Ready(provider string) bool {
 	return s != nil && s.Problem == "" && s.SignedIn && s.Daemon && s.Settings && slices.Contains(s.Providers, provider)
 }
 
-// summary is the capability in a few words: "sandbox (claude, codex)",
-// "sandbox (not ready)".
-func (s *SandboxCap) summary() string {
-	switch {
-	case s.Problem != "" || !s.Daemon || !s.SignedIn:
-		return "sandbox (not ready)"
-	case len(s.Providers) == 0:
-		return "sandbox (no login)"
-	}
-	return "sandbox (" + strings.Join(s.Providers, ", ") + ")"
-}
+// summary is the capability's word, as the dashboard shows it too:
+// whether it is ready is in its fields, not in the word.
+func (s *SandboxCap) summary() string { return "sandbox" }
 
 func checkSandboxTemplate(t string) bool {
 	return len(t) <= 256 && utf8.ValidString(t) && !strings.ContainsAny(t, " \t\r\n\x00") && !strings.HasPrefix(t, "-")

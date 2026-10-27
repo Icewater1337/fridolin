@@ -44,16 +44,14 @@ func TestSandboxCapability(t *testing.T) {
 	if (Capabilities{Sandbox: s}).Empty() {
 		t.Error("sandbox alone is nothing")
 	}
-	for c, want := range map[*SandboxCap]string{
-		s: "sandbox (claude)",
-		{SignedIn: true, Daemon: true, Providers: []string{"claude", "codex"}}: "sandbox (claude, codex)",
-		{SignedIn: true, Daemon: true}:                                         "sandbox (no login)",
-		{SignedIn: true, Daemon: false, Providers: []string{"claude"}}:         "sandbox (not ready)",
-		{SignedIn: true, Daemon: true, Problem: "no template"}:                 "sandbox (not ready)",
-	} {
-		if got := (Capabilities{Sandbox: c}).Summary(); got != want {
-			t.Errorf("summary of %+v: %q, want %q", c, got, want)
+	// The word is "sandbox", ready or not, as the dashboard says it.
+	for _, c := range []*SandboxCap{s, {}, {Problem: "no template"}} {
+		if got := (Capabilities{Sandbox: c}).Summary(); got != "sandbox" {
+			t.Errorf("summary of %+v: %q", c, got)
 		}
+	}
+	if got := declared.Summary(); got != "host, sandbox" {
+		t.Errorf("summary %q", got)
 	}
 	if !s.Ready("claude") || s.Ready("codex") || (&SandboxCap{Providers: []string{"claude"}}).Ready("claude") {
 		t.Error("Ready")

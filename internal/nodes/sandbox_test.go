@@ -43,7 +43,7 @@ func TestSandboxNeedsTheCommandsApproval(t *testing.T) {
 	if n, err = r.Hello(h, ""); err != nil || n.Commands() != nodeproto.CommandsApproved || n.Effective().Sandbox.Problem == "" {
 		t.Fatalf("sbx's state changed: %+v %v", n, err)
 	}
-	if got := n.Effective().Summary(); got != "host, sandbox (not ready)" {
+	if got := n.Effective().Summary(); got != "host, sandbox" {
 		t.Errorf("summary %q", got)
 	}
 }
