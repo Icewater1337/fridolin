@@ -119,6 +119,9 @@
 .path-line { display: flex; align-items: center; gap: 6px; margin-top: 8px; min-width: 0; }
 .path-line > .icon { color: var(--muted); width: 16px; height: 16px; }
 .path-line > code { min-width: 0; }
+/* Where a brain's runs happen: the shield, the sentence, the extra hosts. */
+.sandbox-fact { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.sandbox-fact > .icon { color: var(--muted); width: 16px; height: 16px; flex: none; }
 
 .section { display: flex; flex-direction: column; gap: 12px; }
 .section:empty { display: none; }

@@ -1,4 +1,5 @@
-// Brains: a card per brain with its routing, live state and issues.
+// Brains: a card per brain with its routing, where its runs happen, live
+// state and issues.
 
 import { del, qs } from '../app/api.js';
 import { brainsResource } from '../app/resources.js';
@@ -9,7 +10,7 @@ import { btn } from '../components/buttons.js';
 import { confirmDialog } from '../components/dialog.js';
 import { toast } from '../components/toast.js';
 import { mono, pageHeader, spinner } from '../components/common.js';
-import { brainStatusPill, runtimeSummary, firstBrainHero } from '../components/brain.js';
+import { brainStatusPill, runtimeSummary, sandboxFact, sandboxPill, firstBrainHero } from '../components/brain.js';
 
 /** @import { PageModule } from '../app/page.js' */
 /** @import { Brain, BrainManifest } from '../../types/api.js' */
@@ -51,13 +52,14 @@ function brainCard({ b, noDMBrain }) {
       h('div.bc-title',
         h('h3', b.name || b.id || 'Unnamed brain'),
         b.id ? h('code.mono.muted', b.id) : null),
-      h('div.bc-pills', brainStatusPill(b.status))),
+      h('div.bc-pills', brainStatusPill(b.status), sandboxPill(b.sandbox))),
     h('div.bc-path', icon('folder'), mono(b.path)),
     h('div.bc-facts',
       h('span', icon('chats'), routingSummary(routing, { fallback: b.fallback, noDMBrain })),
       m.model ? h('span', icon('sparkle'), m.model) : null,
       m.effort ? h('span', `effort: ${m.effort}`) : null,
-      m.backup ? h('span', icon('backup'), m.backup.enabled ? 'Backed up' : 'No backup') : null),
+      m.backup ? h('span', icon('backup'), m.backup.enabled ? 'Backed up' : 'No backup') : null,
+      sandboxFact(b.sandbox)),
     rt ? h('div.bc-runtime', runtimeSummary(rt))
       : (b.status === 'ok' ? null : h('div.bc-runtime', h('span.muted.small', 'Not running'))),
     (b.issues || []).length ? h('ul.issue-list', b.issues.map((is) => h('li', h('strong', `${issueLabel(is.kind)}: `), is.detail))) : null,
