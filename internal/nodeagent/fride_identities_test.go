@@ -16,14 +16,14 @@ import (
 
 // Fake tokens, never real ones.
 const (
-	testGitHubToken = "test-github-token-0001"
-	testGitLabToken = "test-gitlab-token-0001"
+	testFrideGitHubToken = "test-github-token-0001"
+	testFrideGitLabToken = "test-gitlab-token-0001"
 )
 
 func testIdentities(expires time.Time) []nodeproto.GitIdentity {
 	return []nodeproto.GitIdentity{
-		{ID: "github", Label: "GitHub", Kind: "github", Host: "github.com", Token: testGitHubToken, Expires: expires},
-		{ID: "gitlab", Label: "GitLab", Kind: "gitlab", Host: "gitlab.example.com", Name: "Jane Doe", Email: "jane@example.com", Token: testGitLabToken},
+		{ID: "github", Label: "GitHub", Kind: "github", Host: "github.com", Token: testFrideGitHubToken, Expires: expires},
+		{ID: "gitlab", Label: "GitLab", Kind: "gitlab", Host: "gitlab.example.com", Name: "Jane Doe", Email: "jane@example.com", Token: testFrideGitLabToken},
 	}
 }
 
@@ -67,7 +67,7 @@ func TestFrideIdentities(t *testing.T) {
 		t.Fatalf("first push: %+v %v", res, perr)
 	}
 	got := ff.GitIdentities()
-	if got["github"].Token != testGitHubToken || got["gitlab"].Token != testGitLabToken || got["gitlab"].Host != "gitlab.example.com" || got["gitlab"].Email != "jane@example.com" {
+	if got["github"].Token != testFrideGitHubToken || got["gitlab"].Token != testFrideGitLabToken || got["gitlab"].Host != "gitlab.example.com" || got["gitlab"].Email != "jane@example.com" {
 		t.Fatalf("FrIDE has %+v", got)
 	}
 	// The same again: FrIDE has them from this pairing.
@@ -103,7 +103,7 @@ func TestFrideIdentities(t *testing.T) {
 	if err != nil || string(data) != "{\"pushed\":[\"github\",\"gitlab\"]}\n" {
 		t.Errorf("the record: %s %v", data, err)
 	}
-	for _, tok := range []string{testGitHubToken, testGitLabToken, "test-github-token-0002"} {
+	for _, tok := range []string{testFrideGitHubToken, testFrideGitLabToken, "test-github-token-0002"} {
 		if strings.Contains(logs.String(), tok) {
 			t.Errorf("the log shows a token: %s", logs.String())
 		}
