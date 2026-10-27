@@ -24,16 +24,18 @@ type Invocation struct {
 // Callbacks keep process supervision independent of brains and delivery.
 // All callbacks are supplied by the runtime. Start serialises publication
 // with force-stop; Started may return cleanup that runs after process reaping.
+// Started gets the process's PID here, 0 for a run elsewhere (Spawn.Launch);
+// OpenStream and Stderr get its ID, which names the run in the log.
 type Callbacks struct {
-	Start        func(context.Context, Spawn) (*Process, error)
+	Start        func(context.Context, Spawn) (Process, error)
 	Started      func(pid int) func()
 	Reaped       func()
-	OpenStream   func(pid int, result func(Result)) (StreamSink, func())
+	OpenStream   func(id string, result func(Result)) (StreamSink, func())
 	ReadPanic    func(any, []byte)
 	Notice       func()
 	GraceExpired func()
 	SlowResponse func(time.Duration)
-	Stderr       func(pid int, text string)
+	Stderr       func(id string, text string)
 }
 
 // Run owns one process, output parser and cancellation path. Its
@@ -66,7 +68,7 @@ func Run(ctx context.Context, spec Invocation, callbacks Callbacks) Result {
 		}
 		return Result{Err: fmt.Errorf("starting %s: %w", AgentName(spec.Provider), err)}
 	}
-	pid := proc.PID()
+	pid, id := proc.PID(), proc.ID()
 	if cleanup := callbacks.Started(pid); cleanup != nil {
 		defer cleanup()
 	}
@@ -110,7 +112,7 @@ func Run(ctx context.Context, spec Invocation, callbacks Callbacks) Result {
 			}
 		}()
 		parseDone <- func() Result {
-			sink, closeStream := callbacks.OpenStream(pid, func(res Result) {
+			sink, closeStream := callbacks.OpenStream(id, func(res Result) {
 				resultOnce.Do(func() {
 					recordedResult = res
 					close(resultSeen)
@@ -173,7 +175,7 @@ func Run(ctx context.Context, spec Invocation, callbacks Callbacks) Result {
 	}
 
 	stderr := proc.StderrTail()
-	callbacks.Stderr(pid, stderr)
+	callbacks.Stderr(id, stderr)
 	// Whether the result event came: readStream has returned, so it would
 	// have closed resultSeen by now.
 	gotResult := false

@@ -27,7 +27,7 @@ func TestRunWaitsForStreamClose(t *testing.T) {
 			releaseClose := sync.OnceFunc(func() { close(release) })
 			defer releaseClose()
 			callbacks := quietRunCallbacks()
-			callbacks.OpenStream = func(_ int, result func(Result)) (StreamSink, func()) {
+			callbacks.OpenStream = func(_ string, result func(Result)) (StreamSink, func()) {
 				return &testRunSink{recordingSink: &recordingSink{}, result: result}, func() {
 					close(closing)
 					<-release
@@ -79,13 +79,13 @@ func quietRunCallbacks() Callbacks {
 		Start:   Start,
 		Started: func(int) func() { return nil },
 		Reaped:  func() {},
-		OpenStream: func(_ int, result func(Result)) (StreamSink, func()) {
+		OpenStream: func(_ string, result func(Result)) (StreamSink, func()) {
 			return &testRunSink{recordingSink: &recordingSink{}, result: result}, func() {}
 		},
 		ReadPanic:    func(any, []byte) {},
 		Notice:       func() {},
 		GraceExpired: func() {},
 		SlowResponse: func(time.Duration) {},
-		Stderr:       func(int, string) {},
+		Stderr:       func(string, string) {},
 	}
 }

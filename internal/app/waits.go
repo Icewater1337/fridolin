@@ -45,6 +45,9 @@ type waits struct {
 	// nodeSessionMinAge is the least age of a node session housekeeping
 	// stops (see nodeSessionFindings).
 	nodeSessionMinAge time.Duration
+	// sandboxLook is how long a look at the node with Docker Sandboxes
+	// serves (sandboxrun.MaxAge when 0).
+	sandboxLook time.Duration
 	// reapGrace is how long reapOrphanedRuns gives a group to end after
 	// SIGTERM before it kills it.
 	reapGrace time.Duration
@@ -110,4 +113,7 @@ type testHooks struct {
 	// connections points the calls of the connections at fake OpenAI and
 	// ElevenLabs servers in place of the real ones.
 	connections *connections.Endpoints
+	// sandboxFleet is the nodes with Docker Sandboxes in place of the
+	// nodes service: tests hand in a fake node.
+	sandboxFleet sandboxFleet
 }

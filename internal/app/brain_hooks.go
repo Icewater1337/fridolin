@@ -59,6 +59,9 @@ type BrainHooks struct {
 	// ended.
 	Admit func(spec brain.RunSpec) (*runPolicy, error)
 	Ended func(p *runPolicy, res claudecli.Result)
+	// Runtimes chooses where a run happens (brain_runtime.go); nil runs
+	// every brain under the bridge's own sandbox.
+	Runtimes *brainRuntimes
 }
 
 // brainHooksSink keeps command callbacks compatible while runtime users move

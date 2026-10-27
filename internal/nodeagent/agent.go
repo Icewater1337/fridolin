@@ -98,6 +98,12 @@ type Agent struct {
 	CoreRunner                          CoreRunner
 	CoreScan                            func() []string
 	MovePoll, MoveGrace, MoveExportWait time.Duration
+	// SandboxSbx is the sbx binary of the sandbox capability ("" for
+	// none, so no sandbox; `node run` sets what it finds);
+	// SandboxDriver, when set, runs sbx instead (tests).
+	// The Claude token for runs comes from CoreSecrets, the host's store.
+	SandboxSbx    string
+	SandboxDriver sbxDriver
 
 	core      coreHost
 	moves     coreMoves
@@ -109,6 +115,7 @@ type Agent struct {
 	fride     fride
 	android   android
 	work      workstation
+	sandbox   sandbox
 }
 
 // Load makes the agent of the node in dir.
@@ -309,6 +316,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.frideCheck(ctx)
 	a.androidCheck(true)
 	a.coreHostChanged()
+	a.sandboxCheck(ctx, true)
 	a.coreMovesStart(ctx)
 	defer a.coreMovesStop()
 	if a.Dir != "" {

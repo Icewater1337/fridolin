@@ -15,6 +15,7 @@ func TestPlain(t *testing.T) {
 		Exec: &ExecCap{Allow: []ExecRule{{Name: "git"}}}, FS: &FSCap{Roots: []FSRoot{{Path: "/a"}, {Path: "/b", Write: true}}},
 		Host: true, Notify: true, Fride: &FrideCap{}, AndroidBuild: &AndroidBuildCap{}, Backup: &BackupCap{}, Update: &UpdateCap{},
 		Agent: &WorkstationCap{Roots: []string{"/w"}}, Terminal: &WorkstationCap{Roots: []string{"/1", "/2", "/3", "/4"}}, CoreHost: &CoreHostCap{},
+		Sandbox: &SandboxCap{},
 	}
 	got := strings.Join(c.Plain(), "\n")
 	want := strings.Join([]string{
@@ -29,6 +30,7 @@ func TestPlain(t *testing.T) {
 		"update Fridolin there to the core's version",
 		"run Claude Code or Codex sessions in /w — they can run any command there",
 		"open a terminal in /1, /2 and 2 more folders — anything you could type there",
+		"run brains in Docker Sandboxes on this machine",
 	}, "\n")
 	if got != want {
 		t.Errorf("Plain:\n%s\nwant:\n%s", got, want)

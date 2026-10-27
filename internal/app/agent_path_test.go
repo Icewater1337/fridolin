@@ -84,7 +84,7 @@ func TestRunnerHandsBwrapTheAgentsAbsolutePath(t *testing.T) {
 				ID: "personal", Dir: folder, Prompt: "hi", BeforeStart: func() {},
 				Settings: &brain.Settings{Provider: provider, ClaudePath: "claude", CodexPath: "codex", DataDir: data, MediaDir: filepath.Join(data, "media")},
 			}, claudecli.Callbacks{
-				Start: func(_ context.Context, s claudecli.Spawn) (*claudecli.Process, error) {
+				Start: func(_ context.Context, s claudecli.Spawn) (claudecli.Process, error) {
 					spawned = s
 					return nil, refused
 				},

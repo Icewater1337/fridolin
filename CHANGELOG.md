@@ -10,6 +10,17 @@ for compatibility.
 
 ### Added
 
+- **Brains in Docker Sandboxes** (#149). A brain can run in a Docker
+  Sandbox, a microVM of `sbx` on a node on the core's machine, instead of
+  bubblewrap: config.json's new `sandbox.runtime` (`bubblewrap`, the
+  default, or `docker-sandbox`) and `sandbox.node`, and brain.json's new
+  `sandbox` with `runtime`, `fallback` and `egress`. While the sandbox is
+  not available, runs fall back to bubblewrap, and you get one WhatsApp
+  message per outage and one when it is back; `"fallback": "refuse"`
+  refuses instead. `GET /api/brains` adds each brain's `sandbox`,
+  `fridolin doctor` the check `brain-runtime`, and the audit's `run_end`
+  a `runtime` for such brains. Nothing changes for brains on bubblewrap.
+  See docs/SANDBOXES.md.
 - **OpenAI and ElevenLabs as connections of Fridolin** (#284). The
   Integrations page keeps one OpenAI key (with an optional organization
   and project) and one ElevenLabs key, in `connections/` in the data dir.
@@ -1178,6 +1189,14 @@ for compatibility.
 
 ### Fixed
 
+- **Your own FrIDE threads stay in your chat** (#337). At every start,
+  the bridge gave a scheduled agent the open threads it seemed to have
+  started, among them any that began while a run of the agent was
+  queued or went on. A thread your DM started in that time went to the
+  agent at the next restart: its news no longer reached you, and its
+  questions started runs of the agent. Now only threads from before
+  agents kept their FrIDE news (#300, 25 October 2026) go to an agent.
+  A thread that was already moved stays with the agent.
 - **Pairing FrIDE again works at once.** After `fridolin node fride
   pair` on a node whose agent runs, FrIDE takes only the new token,
   while the agent kept the old one until its next check, up to half a

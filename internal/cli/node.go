@@ -51,6 +51,9 @@ Usage:
   fridolin node core-host show | on | off | trust ID --key KEY | untrust ID
                        this machine as a core host, which the core may move to and
                        which holds host secrets; fridolin node core-host help for more
+  fridolin node sandbox on | off
+                       offer Docker Sandboxes (sbx) for brains' runs, where sbx is
+                       installed (the default), or stop offering them
   fridolin node fride pair --url http://127.0.0.1:PORT | status
                        FrIDE on this machine, offered to the core while it runs;
                        fridolin node fride help for more
@@ -169,6 +172,8 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 		return nodeWorkstation(pos, ws, dir, thisAppPackage(), stdout, stderr)
 	case "core-host":
 		return nodeCoreHost(pos, ch, dir, thisAppPackage(), stdout, stderr)
+	case "sandbox":
+		return nodeSandbox(pos, dir, thisAppPackage(), stdout, stderr)
 	case "run", "install", "start", "stop", "status", "uninstall", "rollback":
 		if len(pos) != 0 {
 			fmt.Fprintf(stderr, "fridolin node %s takes no arguments\n", sub)
@@ -197,6 +202,8 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 			// core-host keeps host secrets where fridolin core does.
 			home, _ := os.UserHomeDir()
 			a.CoreSecrets, a.CoreSecretsPlace = nodeagent.HostSecretStore(runtime.GOOS, os.Getenv, home)
+			// Docker Sandboxes, where sbx is installed (and not turned off).
+			a.SandboxSbx = findSbx()
 		}
 		if a.Config.Box != nil {
 			if err := boxCoreRunner(a, exe, dir); err != nil {
