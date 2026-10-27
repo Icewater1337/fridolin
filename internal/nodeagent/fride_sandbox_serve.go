@@ -31,6 +31,7 @@ const (
 
 // frideServe is the held exec of the serve script.
 type frideServe struct {
+	name    string
 	cmd     *exec.Cmd
 	done    chan struct{}
 	started time.Time
@@ -68,7 +69,7 @@ func (a *Agent) frideSandboxLoop(ctx context.Context) {
 		want := err == nil && st != nil && st.Run
 		switch {
 		case want && cur == nil && !time.Now().Before(next):
-			cur, err = a.frideServeStart()
+			cur, err = a.frideServeStart(st.Name)
 			if msg := errText(err); msg != startErr && msg != "" {
 				a.logf("node: starting the sandboxed FrIDE: %s", msg)
 			}
@@ -104,15 +105,15 @@ func (a *Agent) frideSandboxLoop(ctx context.Context) {
 }
 
 // frideServeStart starts the serve script's exec and returns it held.
-func (a *Agent) frideServeStart() (*frideServe, error) {
+func (a *Agent) frideServeStart(name string) (*frideServe, error) {
 	w := &lineLogger{logf: a.logf, prefix: "node: the sandboxed FrIDE: ", left: frideServeLogLines}
-	args := append([]string{"exec", FrideSandboxName}, frideSandboxScript(frideSandboxServe,
+	args := append([]string{"exec", name}, frideSandboxScript(frideSandboxServe,
 		strconv.Itoa(FrideSandboxPort), strconv.Itoa(FrideSandboxWebhookPort))...)
 	cmd, err := a.sbx().start(nil, w, w, nil, args...)
 	if err != nil {
 		return nil, err
 	}
-	s := &frideServe{cmd: cmd, done: make(chan struct{}), started: time.Now()}
+	s := &frideServe{name: name, cmd: cmd, done: make(chan struct{}), started: time.Now()}
 	go func() {
 		s.err = cmd.Wait()
 		close(s.done)
@@ -124,7 +125,7 @@ func (a *Agent) frideServeStart() (*frideServe, error) {
 func (a *Agent) frideServeStop(s *frideServe) {
 	ctx, cancel := context.WithTimeout(context.Background(), frideServeStopWait)
 	defer cancel()
-	args := append([]string{"exec", FrideSandboxName}, frideSandboxScript(frideSandboxStop)...)
+	args := append([]string{"exec", s.name}, frideSandboxScript(frideSandboxStop)...)
 	if _, stderr, err := a.sbx().run(ctx, nil, nil, args...); err != nil {
 		a.logf("node: ending the sandboxed FrIDE: %v", sbxError(err, stderr))
 	}

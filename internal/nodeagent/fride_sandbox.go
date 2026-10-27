@@ -54,6 +54,11 @@ const (
 	frideCompanionConfig = "container/fride/companion.json"
 )
 
+// frideSandboxNameRe is the sandbox's name in fride-sandbox.json:
+// fride-sandbox, or a name after it that the live test makes; never a
+// brain's (fridolin-<brain>).
+var frideSandboxNameRe = regexp.MustCompile(`^fride-sandbox(-[a-z0-9]+)?$`)
+
 // frideSandboxURL is FrIDE's address on the host.
 var frideSandboxURL = "http://127.0.0.1:" + strconv.Itoa(FrideSandboxPort)
 
@@ -96,7 +101,7 @@ func LoadFrideSandbox(dir string) (*FrideSandboxState, error) {
 	if err := json.Unmarshal(b, &st); err != nil {
 		return nil, fmt.Errorf("%s: %w", frideSandboxFile, err)
 	}
-	if st.Name != FrideSandboxName || !filepath.IsAbs(st.Base) {
+	if !frideSandboxNameRe.MatchString(st.Name) || !filepath.IsAbs(st.Base) {
 		return nil, fmt.Errorf("%s: not a sandboxed FrIDE's state", frideSandboxFile)
 	}
 	return &st, nil

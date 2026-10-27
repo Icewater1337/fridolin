@@ -49,7 +49,7 @@ func FrideSandboxCreate(ctx context.Context, o FrideSandboxOptions) error {
 	if status, err := o.sandboxStatus(ctx); err != nil {
 		return err
 	} else if status != "" {
-		return fmt.Errorf("sbx has a sandbox %s already (%s): fridolin node fride sandbox rm", FrideSandboxName, status)
+		return fmt.Errorf("sbx has a sandbox %s already (%s): fridolin node fride sandbox rm", o.sandbox(), status)
 	}
 	commit, err := FridePin(o.Repo)
 	if err != nil {
@@ -92,15 +92,15 @@ func FrideSandboxCreate(ctx context.Context, o FrideSandboxOptions) error {
 	}
 	o.starters(ctx, base)
 
-	fmt.Fprintf(o.Out, "Creating the sandbox %s (memory %s, FrIDE on 127.0.0.1:%d, the repositories in %s)…\n", FrideSandboxName, frideSandboxMemory, FrideSandboxPort, base)
+	fmt.Fprintf(o.Out, "Creating the sandbox %s (memory %s, FrIDE on 127.0.0.1:%d, the repositories in %s)…\n", o.sandbox(), frideSandboxMemory, FrideSandboxPort, base)
 	publish := fmt.Sprintf("127.0.0.1:%d:%d", FrideSandboxPort, FrideSandboxPort)
-	if _, stderr, err := d.run(ctx, nil, nil, "create", "--name", FrideSandboxName, "--memory", frideSandboxMemory,
+	if _, stderr, err := d.run(ctx, nil, nil, "create", "--name", o.sandbox(), "--memory", frideSandboxMemory,
 		"-t", tag, "--pull", "never", "-p", publish, "claude", base); err != nil {
-		return fmt.Errorf("sbx could not create %s: %w", FrideSandboxName, sbxError(err, stderr))
+		return fmt.Errorf("sbx could not create %s: %w", o.sandbox(), sbxError(err, stderr))
 	}
-	st := FrideSandboxState{Name: FrideSandboxName, Base: base, Template: tag, Repo: o.FrideRepo}
+	st := FrideSandboxState{Name: o.sandbox(), Base: base, Template: tag, Repo: o.FrideRepo}
 	if err := o.makeInside(ctx, &st, config, commit); err != nil {
-		_, _, _ = d.run(context.WithoutCancel(ctx), nil, nil, "rm", "-f", FrideSandboxName)
+		_, _, _ = d.run(context.WithoutCancel(ctx), nil, nil, "rm", "-f", o.sandbox())
 		return fmt.Errorf("%w; the sandbox is removed again", err)
 	}
 	if err := saveFrideSandbox(o.Dir, st); err != nil {
@@ -122,7 +122,7 @@ func (o FrideSandboxOptions) makeInside(ctx context.Context, st *FrideSandboxSta
 		rules = append(rules, []string{"deny", h})
 	}
 	for _, r := range rules {
-		if _, stderr, err := d.run(ctx, nil, nil, "policy", r[0], "network", "--sandbox", FrideSandboxName, r[1]); err != nil {
+		if _, stderr, err := d.run(ctx, nil, nil, "policy", r[0], "network", "--sandbox", o.sandbox(), r[1]); err != nil {
 			return fmt.Errorf("sbx could not %s %s: %w", r[0], r[1], sbxError(err, stderr))
 		}
 	}

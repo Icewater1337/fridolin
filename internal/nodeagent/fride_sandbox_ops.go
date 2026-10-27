@@ -31,7 +31,7 @@ func FrideSandboxUpdate(ctx context.Context, o FrideSandboxOptions) error {
 	if status, err := o.sandboxStatus(ctx); err != nil {
 		return err
 	} else if status == "" {
-		return fmt.Errorf("sbx has no sandbox %s any more: fridolin node fride sandbox rm, then create", FrideSandboxName)
+		return fmt.Errorf("sbx has no sandbox %s any more: fridolin node fride sandbox rm, then create", o.sandbox())
 	}
 	if tag, err := FrideSandboxTemplateTag(o.Repo); err == nil && tag != st.Template {
 		fmt.Fprintf(o.Out, "Note: the template changed (%s, the sandbox has %s). update builds FrIDE only; for the new template, rm and create the sandbox (its workspaces go with it).\n", tag, st.Template)
@@ -132,7 +132,7 @@ func waitAnswers(ctx context.Context, url string, wait time.Duration) error {
 // pairCode is a pairing code from FrIDE in the sandbox. It is never
 // printed or logged.
 func (o FrideSandboxOptions) pairCode(ctx context.Context) (string, error) {
-	out, stderr, err := o.sbx().run(ctx, nil, nil, append([]string{"exec", FrideSandboxName}, frideSandboxScript(frideSandboxPairCode)...)...)
+	out, stderr, err := o.sbx().run(ctx, nil, nil, append([]string{"exec", o.sandbox()}, frideSandboxScript(frideSandboxPairCode)...)...)
 	if err != nil {
 		return "", fmt.Errorf("fride pair-companion in the sandbox: %w", sbxError(err, stderr))
 	}
@@ -176,8 +176,8 @@ func FrideSandboxRemove(ctx context.Context, o FrideSandboxOptions) error {
 		return err
 	}
 	if status != "" {
-		if _, stderr, err := o.sbx().run(ctx, nil, nil, "rm", "-f", FrideSandboxName); err != nil {
-			return fmt.Errorf("sbx could not remove %s: %w", FrideSandboxName, sbxError(err, stderr))
+		if _, stderr, err := o.sbx().run(ctx, nil, nil, "rm", "-f", o.sandbox()); err != nil {
+			return fmt.Errorf("sbx could not remove %s: %w", o.sandbox(), sbxError(err, stderr))
 		}
 	}
 	return removeFrideSandbox(o.Dir)
@@ -194,7 +194,7 @@ func FrideSandboxLogin(ctx context.Context, o FrideSandboxOptions, token string)
 		return err
 	}
 	if _, stderr, err := o.sbx().run(ctx, strings.NewReader(tok+"\n"), nil,
-		append([]string{"exec", "-i", FrideSandboxName}, frideSandboxScript(frideSandboxLogin)...)...); err != nil {
+		append([]string{"exec", "-i", o.sandbox()}, frideSandboxScript(frideSandboxLogin)...)...); err != nil {
 		return fmt.Errorf("storing the token in the sandbox: %w", sbxError(err, lastLineOf(stderr)))
 	}
 	return nil
@@ -203,7 +203,7 @@ func FrideSandboxLogin(ctx context.Context, o FrideSandboxOptions, token string)
 // FrideSandboxSetupToken is `claude setup-token` in the sandbox, on the
 // terminal of the person who runs it.
 func FrideSandboxSetupToken(o FrideSandboxOptions) *exec.Cmd {
-	c := exec.Command(o.Sbx, "exec", "-it", FrideSandboxName, "claude", "setup-token")
+	c := exec.Command(o.Sbx, "exec", "-it", o.sandbox(), "claude", "setup-token")
 	c.Env = append(sbxEnv(c.Environ()), o.env...)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return c

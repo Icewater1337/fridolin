@@ -38,14 +38,24 @@ type FrideSandboxOptions struct {
 	// Out gets what is done, for the person who runs it.
 	Out io.Writer
 	// env is added to each program's environment (tests: the fakes');
-	// url is FrIDE's address and wait how long start waits for it
+	// url is FrIDE's address and wait how long start waits for it; name
+	// is the sandbox, FrideSandboxName unless a test names another
 	// (tests).
 	env  []string
 	url  string
 	wait time.Duration
+	name string
 }
 
 func (o FrideSandboxOptions) sbx() sbxCLI { return sbxCLI{path: o.Sbx, env: o.env} }
+
+// sandbox is the sandbox's name.
+func (o FrideSandboxOptions) sandbox() string {
+	if o.name != "" {
+		return o.name
+	}
+	return FrideSandboxName
+}
 
 func (o FrideSandboxOptions) frideURL() string {
 	if o.url != "" {
@@ -60,7 +70,7 @@ func (o FrideSandboxOptions) exec(ctx context.Context, stdin io.Reader, script s
 	if stdin != nil {
 		flags = append(flags, "-i")
 	}
-	out, stderr, err := o.sbx().run(ctx, stdin, nil, slices.Concat(flags, []string{FrideSandboxName}, frideSandboxScript(script, args...))...)
+	out, stderr, err := o.sbx().run(ctx, stdin, nil, slices.Concat(flags, []string{o.sandbox()}, frideSandboxScript(script, args...))...)
 	for _, b := range [][]byte{out, stderr} {
 		if len(b) > 0 {
 			o.Out.Write(b)
@@ -141,7 +151,7 @@ func (o FrideSandboxOptions) sandboxStatus(ctx context.Context) (string, error) 
 		return "", fmt.Errorf("sbx does not list its sandboxes: %s", orUnknownErr(firstLine(stderr), err))
 	}
 	for _, s := range list {
-		if s.Name == FrideSandboxName {
+		if s.Name == o.sandbox() {
 			return orUnknown(s.Status), nil
 		}
 	}
