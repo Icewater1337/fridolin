@@ -107,6 +107,8 @@ type Agent struct {
 	// checkSandboxBin checks a linux fridolin the core sent for the
 	// sandboxes (nil: checkLinuxBinary; tests send fakes).
 	checkSandboxBin func(path, arch string) (string, error)
+	// sandboxLookOnly probes sbx without setting anything (doctor).
+	sandboxLookOnly bool
 
 	core      coreHost
 	moves     coreMoves

@@ -36,7 +36,11 @@ func (a *Agent) sandboxProbe(ctx context.Context) (nodeproto.SandboxInfo, error)
 	if err != nil {
 		return info, err
 	}
-	if st.Template == "" || !checkTemplate(st.Template) {
+	if !checkTemplate(st.Template) {
+		st.Template = ""
+	}
+	// Doctor looks before setup too; the agent declares nothing then.
+	if st.Template == "" && !a.sandboxLookOnly {
 		return info, ErrSandboxNotSetUp
 	}
 	ctx, cancel := context.WithTimeout(ctx, sandboxProbeTimeout)
@@ -67,13 +71,19 @@ func (a *Agent) sandboxProbe(ctx context.Context) (nodeproto.SandboxInfo, error)
 	settingsWhy := "sbx's daemon does not answer"
 	tplThere := false
 	if info.Daemon {
-		info.Settings, settingsWhy = a.sandboxSettings(ctx, d)
-		tplThere = sbxHasTemplate(ctx, d, info.Template)
+		if a.sandboxLookOnly {
+			info.Settings, settingsWhy = sbxSettingsLook(ctx, d)
+		} else {
+			info.Settings, settingsWhy = a.sandboxSettings(ctx, d)
+		}
+		tplThere = info.Template != "" && sbxHasTemplate(ctx, d, info.Template)
 	}
 	info.Providers = a.sandboxProviders(ctx, d)
 
 	if info.Problem == "" {
 		switch {
+		case info.Template == "":
+			info.Problem = ErrSandboxNotSetUp.Error()
 		case !info.Settings:
 			info.Problem = "sbx's global settings are not fridolin's (network policy deny-all, SSH agent forwarding and the browser off): " + settingsWhy
 		case !tplThere:
@@ -85,7 +95,7 @@ func (a *Agent) sandboxProbe(ctx context.Context) (nodeproto.SandboxInfo, error)
 		}
 	}
 	if len(info.Problem) > nodeproto.MaxSandboxProblemLen {
-		info.Problem = info.Problem[:nodeproto.MaxSandboxProblemLen-3] + "…"
+		info.Problem = strings.ToValidUTF8(info.Problem[:nodeproto.MaxSandboxProblemLen-3], "") + "…"
 	}
 	return info, nil
 }

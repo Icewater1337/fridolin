@@ -65,6 +65,29 @@ func sbxEnforce(ctx context.Context, d sbxDriver, replace bool) (changed []strin
 	return append(changed, "network policy deny-all"), restart, nil
 }
 
+// sbxSettingsLook reports whether fridolin's global settings hold,
+// changing nothing (doctor), and says why not when they do not.
+func sbxSettingsLook(ctx context.Context, d sbxDriver) (bool, string) {
+	settings, stderr, err := d.run(ctx, nil, nil, "settings", "ls", "--json")
+	if err != nil {
+		return false, "sbx settings ls: " + sbxError(err, stderr).Error()
+	}
+	var why []string
+	for _, k := range sbxSettingsDrift(settings) {
+		why = append(why, k+" is not "+sbxOwnedSettings[k])
+	}
+	policy, stderr, err := d.run(ctx, nil, nil, "policy", "ls", "--json")
+	switch {
+	case err != nil && sbxPolicyUnset(stderr):
+		why = append(why, "the network policy is not initialized")
+	case err != nil:
+		why = append(why, "sbx policy ls: "+sbxError(err, stderr).Error())
+	case !sbxDenyAll(policy):
+		why = append(why, "the network policy is not deny-all")
+	}
+	return len(why) == 0, strings.Join(why, "; ")
+}
+
 // sandboxSettings makes fridolin's global settings hold where that stops
 // no sandbox, and says why not when they do not.
 func (a *Agent) sandboxSettings(ctx context.Context, d sbxDriver) (bool, string) {
