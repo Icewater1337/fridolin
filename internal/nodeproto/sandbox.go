@@ -112,6 +112,15 @@ const SandboxMarkerFile = ".fridolin-runtime-id"
 // SandboxName is the name of a brain's sandbox.
 func SandboxName(brain string) string { return "fridolin-" + brain }
 
+// SandboxTokenFile is the run's token file inside the VM, which the node
+// names in FRIDOLIN_BRAIN_TOKEN_FILE. It holds a placeholder that sbx's
+// proxy swaps for the run token on the way to the core's API.
+func SandboxTokenFile(run string) string { return "/tmp/fridolin-run-" + run + ".token" }
+
+// SandboxPidFile is the run's process group id inside the VM, which
+// sandbox.stop signals.
+func SandboxPidFile(run string) string { return "/tmp/fridolin-run-" + run + ".pid" }
+
 var (
 	sandboxBrainRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}$`)
 	sandboxRunRe   = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
