@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -23,14 +25,52 @@ const (
 	ServiceLabelDarwin = "ai.fridolin.node"
 )
 
+// serviceNameRe is node.json's service: a second node's service name.
+var serviceNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
+
+// OwnBinary is the fridolin a second node (node.json's service) runs
+// from its state dir, so that the core's updates to it never replace the
+// machine's node's binary.
+func OwnBinary(dir string) string {
+	name := "fridolin"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return filepath.Join(dir, "bin", name)
+}
+
+// NodeServiceConfig is the service of the node in dir: ServiceConfig, or
+// for a second node (node.json's service) its own service, run from its
+// own binary once that is there.
+func NodeServiceConfig(goos, exe, dir string) *service.Config {
+	cfg, err := LoadConfig(dir)
+	if err != nil || cfg.Service == "" {
+		return ServiceConfig(goos, exe, dir)
+	}
+	if fi, err := os.Stat(OwnBinary(dir)); err == nil && fi.Mode().IsRegular() {
+		exe = OwnBinary(dir)
+	}
+	return ServiceConfigNamed(goos, exe, dir, cfg.Service)
+}
+
 // ServiceConfig is the service that runs `exe node run --state-dir dir`
 // at login (macOS, as a launchd user agent), as a systemd user unit
 // (Linux) or as a Windows Service started at boot, restarted when it
 // stops.
 func ServiceConfig(goos, exe, dir string) *service.Config {
+	return ServiceConfigNamed(goos, exe, dir, "")
+}
+
+// ServiceConfigNamed is ServiceConfig for a second node on the machine,
+// whose service is named after suffix ("" for the machine's node).
+func ServiceConfigNamed(goos, exe, dir, suffix string) *service.Config {
+	name, label, display := ServiceName, ServiceLabelDarwin, "Fridolin node"
+	if suffix != "" {
+		name, label, display = name+"-"+suffix, label+"."+suffix, display+" ("+suffix+")"
+	}
 	c := &service.Config{
-		Name:        ServiceName,
-		DisplayName: "Fridolin node",
+		Name:        name,
+		DisplayName: display,
 		Description: "Connects this machine to the Fridolin core and serves what its owner approved.",
 		Executable:  exe,
 		Arguments:   []string{"node", "run", "--state-dir", dir},
@@ -38,7 +78,7 @@ func ServiceConfig(goos, exe, dir string) *service.Config {
 	}
 	switch goos {
 	case "darwin":
-		c.Name = ServiceLabelDarwin
+		c.Name = label
 		c.Option["UserService"] = true
 		c.Option["KeepAlive"] = true
 		c.Option["RunAtLoad"] = true

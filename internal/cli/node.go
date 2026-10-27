@@ -193,7 +193,7 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	svc := nodeagent.ServiceConfig(runtime.GOOS, exe, dir)
+	svc := nodeagent.NodeServiceConfig(runtime.GOOS, exe, dir)
 	switch sub {
 	case "run":
 		a, err := nodeagent.Load(dir, version.String())
@@ -555,7 +555,7 @@ func nodeJoin(code, dir string, o joinFlags, pkg appPackage, stdout, stderr io.W
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	svc := nodeagent.ServiceConfig(runtime.GOOS, exe, dir)
+	svc := nodeagent.NodeServiceConfig(runtime.GOOS, exe, dir)
 	repairNodeBootTarget(stdout)
 	for _, action := range []string{"install", "start"} {
 		if err := nodeagent.ControlService(svc, action); err != nil {
