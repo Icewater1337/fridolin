@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 )
 
@@ -24,6 +25,8 @@ type sbxDriver interface {
 // terminal (stdin is what the caller gives, else nothing).
 type sbxCLI struct {
 	path string
+	// env is added to every call's environment (tests: the fake's dir).
+	env []string
 }
 
 func (s sbxCLI) cmd(ctx context.Context, stdin io.Reader, env []string, args []string) *exec.Cmd {
@@ -33,7 +36,7 @@ func (s sbxCLI) cmd(ctx context.Context, stdin io.Reader, env []string, args []s
 	} else {
 		c = exec.Command(s.path, args...)
 	}
-	c.Env = append(sbxEnv(os.Environ()), env...)
+	c.Env = slices.Concat(sbxEnv(os.Environ()), s.env, env)
 	if stdin == nil {
 		stdin = strings.NewReader("")
 	}
