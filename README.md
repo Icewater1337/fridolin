@@ -149,7 +149,7 @@ phone.
 
 ## Setup
 
-Guides: [Setup](docs/SETUP.md), [Usage](docs/USAGE.md), [Security model](docs/SECURITY-MODEL.md), [Troubleshooting](docs/TROUBLESHOOTING.md), [Tools](docs/TOOLS.md), [OpenAI and ElevenLabs](docs/CONNECTIONS.md).
+Guides: [Vision: what each part is for](docs/VISION.md), [Setup](docs/SETUP.md), [Usage](docs/USAGE.md), [Security model](docs/SECURITY-MODEL.md), [Troubleshooting](docs/TROUBLESHOOTING.md), [Tools](docs/TOOLS.md), [OpenAI and ElevenLabs](docs/CONNECTIONS.md).
 
 Copy the HTTPS clone URL from this repository’s **Code** menu (or your fork).
 Replace the example URL below with that URL before running it.
