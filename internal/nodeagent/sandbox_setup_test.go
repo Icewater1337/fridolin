@@ -78,7 +78,7 @@ func TestSandboxSetup(t *testing.T) {
 	}
 	docker, _ := os.ReadFile(filepath.Join(fake, "docker.log"))
 	wantBuild := "build -f " + filepath.Join(o.Repo, "container", "sandbox", "Dockerfile") + " -t " + tag + " " + o.Repo
-	if !strings.Contains(string(docker), wantBuild) || !strings.Contains(string(docker), "save "+tag+" -o ") {
+	if !strings.Contains(string(docker), wantBuild) || !strings.Contains(string(docker), "save "+tag+" -o ") || !strings.Contains(string(docker), "image rm "+tag) {
 		t.Errorf("docker: %s", docker)
 	}
 	if _, err := os.Stat(filepath.Join(o.Dir, "sandbox", "template.tar")); !os.IsNotExist(err) {

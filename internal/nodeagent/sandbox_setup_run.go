@@ -103,6 +103,10 @@ func (o SandboxSetupOptions) buildTemplate(ctx context.Context, d sbxCLI, tag st
 	if !sbxHasTemplate(ctx, d, tag) {
 		return fmt.Errorf("sbx loaded the image, but does not list the template %s", tag)
 	}
+	// sbx keeps its own copy; Docker's is not needed (several GB).
+	if err := o.run(ctx, o.Docker, "image", "rm", tag); err != nil {
+		fmt.Fprintf(o.Out, "Note: could not remove Docker's copy of %s: %v\n", tag, err)
+	}
 	return nil
 }
 

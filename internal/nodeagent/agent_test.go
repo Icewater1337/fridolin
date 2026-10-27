@@ -25,7 +25,7 @@ func TestMain(m *testing.M) {
 	if os.Getenv("FAKE_AGENT") != "" {
 		os.Exit(fakeAgent())
 	}
-	if dir := os.Getenv("FAKE_DOCKER_DIR"); dir != "" && len(os.Args) > 1 && (os.Args[1] == "build" || os.Args[1] == "save") {
+	if dir := os.Getenv("FAKE_DOCKER_DIR"); dir != "" && len(os.Args) > 1 && (os.Args[1] == "build" || os.Args[1] == "save" || os.Args[1] == "image") {
 		os.Exit(fakeDocker(dir))
 	}
 	if dir := os.Getenv("FAKE_SBX_DIR"); dir != "" {
