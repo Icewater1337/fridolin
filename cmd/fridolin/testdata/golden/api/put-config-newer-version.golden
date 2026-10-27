@@ -3,5 +3,5 @@ PUT /api/config
 Content-Type: application/json
 
 {
-  "error": "invalid config: version 3 is newer than the version 2 this build of Fridolin reads: a newer Fridolin wrote it, and this one could drop the settings it does not know"
+  "error": "invalid config: version 4 is newer than the version 3 this build of Fridolin reads: a newer Fridolin wrote it, and this one could drop the settings it does not know"
 }

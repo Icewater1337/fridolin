@@ -67,7 +67,7 @@ Content-Type: application/json
     "vault": {
       "enabled": false
     },
-    "version": 2,
+    "version": 3,
     "viewer": false
   },
   "effective": {
@@ -197,7 +197,7 @@ Content-Type: application/json
       "secret_keep_days": 30,
       "snapshots_bucket": "fridolin-snapshots"
     },
-    "version": 2,
+    "version": 3,
     "viewer": false
   },
   "etag": "<ETAG>",

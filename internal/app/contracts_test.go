@@ -421,7 +421,7 @@ func TestConfigSchemaRefusesWhatTheBridgeRefuses(t *testing.T) {
 	t.Parallel()
 	set := newSchemaSet(t)
 	for _, configValue := range []string{
-		`{"version": 3}`,
+		`{"version": 4}`,
 		`{"version": 0}`,
 		`{"version": "2"}`,
 		`{"allowed_numbers": "15551234567"}`,

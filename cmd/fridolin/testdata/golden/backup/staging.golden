@@ -38,9 +38,9 @@ brains/main.brain.json -rw------- d5f2c441f45b5dff
 	    "default": "you@example.com"
 	  }
 	}
-config.json -rw------- 8b1f926e039eb9cb
+config.json -rw------- b4615b87942a7f8f
 	{
-	  "version": 2,
+	  "version": 3,
 	  "allowed_numbers": [
 	    "15551234567"
 	  ],

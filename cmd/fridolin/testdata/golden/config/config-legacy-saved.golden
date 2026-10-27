@@ -1,6 +1,6 @@
 {
   "_comment": "A config as versions before the legacy removal wrote it: the retired keys model, work_dir, brain_mode and an empty brains list. Synthetic values only.",
-  "version": 2,
+  "version": 3,
   "allowed_numbers": [
     "15551234567"
   ],

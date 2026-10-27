@@ -637,8 +637,8 @@ func TestConfigVersionOnDisk(t *testing.T) {
 			t.Fatal(err)
 		}
 		raw := readRawConfig(t, path)
-		if string(raw["version"]) != "2" || string(raw["brain_model"]) != `"sonnet"` || raw["model"] != nil {
-			t.Errorf("saved version %s, brain_model %s, model %s; want 2, \"sonnet\" and no model", raw["version"], raw["brain_model"], raw["model"])
+		if string(raw["version"]) != "3" || string(raw["brain_model"]) != `"sonnet"` || raw["model"] != nil {
+			t.Errorf("saved version %s, brain_model %s, model %s; want 3, \"sonnet\" and no model", raw["version"], raw["brain_model"], raw["model"])
 		}
 		if _, err := openConfigStore(t, path); err != nil {
 			t.Errorf("the saved file does not load: %v", err)
@@ -655,8 +655,8 @@ func TestConfigVersionOnDisk(t *testing.T) {
 		if _, err := cs.Update(cs.ETag(), func(c *config.File) error { c.Version = 0; return nil }); err != nil {
 			t.Fatal(err)
 		}
-		if v := string(readRawConfig(t, path)["version"]); v != "2" {
-			t.Errorf("the first save wrote version %s, want 2", v)
+		if v := string(readRawConfig(t, path)["version"]); v != "3" {
+			t.Errorf("the first save wrote version %s, want 3", v)
 		}
 	})
 
@@ -678,13 +678,13 @@ func TestConfigVersionOnDisk(t *testing.T) {
 
 	t.Run("a newer file", func(t *testing.T) {
 		setenv(t, "HOME", t.TempDir())
-		const body = `{"version": 3, "allowed_numbers": ["15551234567"], "a_newer_setting": true}`
+		const body = `{"version": 4, "allowed_numbers": ["15551234567"], "a_newer_setting": true}`
 		path := writeConfig(t, body)
 		_, err := openConfigStore(t, path)
 		if err == nil || !errors.Is(err, config.ErrTooNew) {
 			t.Fatalf("err = %v, want errConfigTooNew", err)
 		}
-		for _, part := range []string{"version 3 is newer than the version 2", "Run that newer version again", "docs/CONFIGURATION.md#version"} {
+		for _, part := range []string{"version 4 is newer than the version 3", "Run that newer version again", "docs/CONFIGURATION.md#version"} {
 			if !strings.Contains(err.Error(), part) {
 				t.Errorf("error %q does not say %q", err, part)
 			}
@@ -704,9 +704,9 @@ func TestConfigVersionOnDisk(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		newer := strings.Replace(string(whole), `"version":2`, `"version":3`, 1)
+		newer := strings.Replace(string(whole), `"version":3`, `"version":4`, 1)
 		if _, err := config.DecodeReplacement([]byte(newer)); !errors.Is(err, config.ErrTooNew) {
-			t.Errorf("a version 3 save: err = %v, want errConfigTooNew", err)
+			t.Errorf("a version 4 save: err = %v, want errConfigTooNew", err)
 		}
 		if _, err := config.DecodeReplacement(whole); err != nil {
 			t.Errorf("a version 2 save: %v", err)

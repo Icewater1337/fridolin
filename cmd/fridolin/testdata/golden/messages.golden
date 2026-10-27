@@ -98,14 +98,6 @@ plaudGivenUpAlert
 	⚠️ Plaud: the recording “Team sync” was not handed to brain notes: brain notes is not configured. It is still in Plaud, and the dashboard lists it (Integrations → Plaud).
 plaudExpiredAlert
 	⚠️ Plaud: the login expired, so new recordings are not arriving. Reconnect in the Fridolin dashboard (Integrations → Plaud).
-sandboxDownAlert
-	⚠️ Docker Sandboxes are off on mini: the node is offline. Brains set to them run under bubblewrap until they are back, and those set to refuse do not run. This is the only message about it until they are back.
-sandboxBackAlert
-	✅ Docker Sandboxes are back on mini: brains set to them run there again.
-sandboxRefusedNotice
-	🔒 This brain runs only in a Docker Sandbox, which is not available now, so this message was not run. Send it again once it is back.
-sandboxSetupFailedNotice
-	❌ The Docker Sandbox for this brain could not be set up, so this message was not run (details in the bridge log).
 calendarGrantBrokenAlert(revoked)
 	⚠️ Google Calendar stopped working for Family: Google no longer accepts its sign-in (the access was removed, it expired, or the password changed). Open the Fridolin dashboard, Brains → Family → Calendar, and press Reconnect. This is the only message about it until it works again.
 calendarGrantBrokenAlert(reconsent)
