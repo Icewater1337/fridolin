@@ -155,7 +155,8 @@ func TestNodeHearsWhatChangedWhileItConnected(t *testing.T) {
 // A node whose state did not change while it connected hears its welcome
 // and nothing more.
 func TestNodeConnectingWithoutChangeHearsOnlyTheWelcome(t *testing.T) {
-	svc := serveNodes(t, func(*Service) {})
+	var conns <-chan string
+	svc := serveNodes(t, func(s *Service) { conns = connected(s) })
 	code, _, err := svc.NewJoinCode()
 	if err != nil {
 		t.Fatal(err)
@@ -170,7 +171,9 @@ func TestNodeConnectingWithoutChangeHearsOnlyTheWelcome(t *testing.T) {
 	if env, err := readEnvelope(ctx, ws); err != nil || env.Type != nodeproto.TypeWelcome {
 		t.Fatalf("the first message after auth: %+v %v", env, err)
 	}
-	waitOnline(t, svc, nodeproto.DeviceIDFor(key.Public().(ed25519.PublicKey)))
+	// The core has told the node what changed while it connected, if
+	// anything: from here on it says nothing.
+	waitConnected(t, conns, nodeproto.DeviceIDFor(key.Public().(ed25519.PublicKey)))
 	quiet, cancelQuiet := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancelQuiet()
 	if env, err := readEnvelope(quiet, ws); !errors.Is(err, context.DeadlineExceeded) {
@@ -184,12 +187,14 @@ func TestNodeConnectingWithoutChangeHearsOnlyTheWelcome(t *testing.T) {
 func TestNodeHearsTheStateBeforeACallItAllows(t *testing.T) {
 	var (
 		svc   *Service
+		conns <-chan string
 		armed atomic.Bool
 		msgs  = make(chan nodeproto.Envelope, 16)
 		first = make(chan nodeproto.Envelope, 1)
 		calls = make(chan error, 1)
 	)
 	svc = serveNodes(t, func(s *Service) {
+		conns = connected(s)
 		s.pushing = func(id string) {
 			if !armed.CompareAndSwap(true, false) {
 				return
@@ -247,7 +252,11 @@ func TestNodeHearsTheStateBeforeACallItAllows(t *testing.T) {
 	if env := next("the welcome"); env.Type != nodeproto.TypeWelcome {
 		t.Fatalf("the first message after auth is a %s", env.Type)
 	}
-	waitOnline(t, svc, id)
+	// Not just online: a connection is online before the core told the
+	// node what changed while it connected. An approval then is told
+	// twice, by the push and by that catch-up, and the second state
+	// would be taken for the one the call below sends.
+	waitConnected(t, conns, id)
 	if _, err := svc.ApproveDevice(id); err != nil {
 		t.Fatal(err)
 	}
@@ -289,6 +298,28 @@ func TestNodeHearsTheStateBeforeACallItAllows(t *testing.T) {
 	}
 	if err := <-calls; err != nil {
 		t.Fatalf("the call: %v", err)
+	}
+}
+
+// connected has svc say on the channel it returns which node's
+// connection is set up: welcomed, told what changed while it connected,
+// and live (Options.OnConnect).
+func connected(svc *Service) <-chan string {
+	ch := make(chan string, 4)
+	svc.onConnect = func(n *Node) { ch <- n.ID }
+	return ch
+}
+
+// waitConnected waits until node id's connection is set up (connected).
+func waitConnected(t *testing.T, conns <-chan string, id string) {
+	t.Helper()
+	select {
+	case got := <-conns:
+		if got != id {
+			t.Fatalf("node %s connected, want %s", got, id)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the node's connection was never set up")
 	}
 }
 
