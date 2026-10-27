@@ -128,7 +128,7 @@ func (f *frideRuntime) onDeclare(n *nodes.Node) {
 // waits.frideGather of the first goes together, so that one text a node
 // sends for several threads at once is sent once.
 func (f *frideRuntime) relayLoop() {
-	f.adoptAgentThreads()
+	f.adoptAgentThreads(agentThreadsBefore)
 	for {
 		var batch []frideNews
 		select {
@@ -338,19 +338,27 @@ func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) (fridePost, b
 	return fridePost{t: t, node: node, kind: kind, news: news}, true
 }
 
+// agentThreadsBefore is when #300 shipped. From then on, a thread a
+// scheduled agent starts reports to the agent's chat from its start, so
+// only older threads may need adopting. A newer thread in a person's chat
+// is that person's, even when it began while a run of an agent went on
+// (#337).
+var agentThreadsBefore = time.Date(2026, 10, 25, 19, 55, 29, 0, time.UTC)
+
 // adoptAgentThreads gives the open threads a scheduled agent started
 // before their news stayed with it (#300) to that agent's chat, so that
 // their news follows the agent's routing (#306). A thread is the agent's
-// when it began while a run of it went on, or its message's first line is
-// in the agent's task, and that holds for no other agent of its brain.
-func (f *frideRuntime) adoptAgentThreads() {
+// when it began before cutoff, and while a run of it went on or with its
+// message's first line in the agent's task, and that holds for no other
+// agent of its brain. The relay passes agentThreadsBefore.
+func (f *frideRuntime) adoptAgentThreads(cutoff time.Time) {
 	threads, err := f.b.store.FrideThreads(f.ctx, "")
 	if err != nil {
 		log.Printf("fride: listing the threads scheduled agents may have started: %v", err)
 		return
 	}
 	for _, t := range threads {
-		if t.State == store.FrideClosed || chat.IsInternalChat(t.Chat) {
+		if t.State == store.FrideClosed || chat.IsInternalChat(t.Chat) || !t.CreatedAt.Before(cutoff) {
 			continue
 		}
 		br := f.b.brainMgr.Get(t.Brain)

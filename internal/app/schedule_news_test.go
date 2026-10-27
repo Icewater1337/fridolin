@@ -122,7 +122,17 @@ func TestScheduledAgentsHandWorkToFride(t *testing.T) {
 	}
 	byTask, _ := h.b.store.AddFrideThread(ctx, store.FrideThread{Chat: harnessDM, Brain: "core", Message: "Fix the bugs of fix-bugs\nissue #14"})
 	own, _ := h.b.store.AddFrideThread(ctx, store.FrideThread{Chat: harnessDM, Brain: "core", Message: "Fix the login page, it looks odd"})
-	h.b.fride.adoptAgentThreads()
+	// A thread that began after #300 stays where it is, even when it began
+	// while a run of an agent went on: the owner's DM run may have started
+	// it then (#337). The relay adopts only older ones, at every start.
+	h.b.fride.adoptAgentThreads(agentThreadsBefore)
+	for _, id := range []int64{1, 2, byTask, own} {
+		if th, _ := h.b.store.GetFrideThread(ctx, id); th.Chat != harnessDM {
+			t.Errorf("FrIDE #%d, newer than #300, reports to %q", id, th.Chat)
+		}
+	}
+	// As if they all began before #300.
+	h.b.fride.adoptAgentThreads(time.Now().Add(time.Minute))
 	for id, want := range map[int64]string{1: "schedule:fix-bugs", 2: "schedule:quiet", byTask: "schedule:fix-bugs", own: harnessDM} {
 		if th, _ := h.b.store.GetFrideThread(ctx, id); th.Chat != want {
 			t.Errorf("FrIDE #%d reports to %q, want %q", id, th.Chat, want)
