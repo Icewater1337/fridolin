@@ -137,6 +137,10 @@ func (a *Agent) sandboxEnsure(ctx context.Context, p nodeproto.SandboxEnsurePara
 	state := nodeproto.SandboxCreated
 	if exists {
 		if st.Sandboxes[p.Brain].Key == key {
+			// GitHub left open by an agent that stopped during a run.
+			if st.Sandboxes[p.Brain].GitHub != nil && sb.ghRuns[p.Brain] == 0 {
+				a.githubCloseLocked(ctx, d, p.Brain)
+			}
 			return nodeproto.SandboxEnsureResult{Name: name, State: nodeproto.SandboxReady}, nil
 		}
 		if a.sandboxBusy(p.Brain) {
