@@ -38,11 +38,3 @@ func LookAtSandbox(ctx context.Context, dir, sbx string, secrets hostsecrets.Sto
 	s.Info, s.Err = a.sandboxProbe(ctx)
 	return s
 }
-
-// lookAtSandboxWith is LookAtSandbox with a driver (tests).
-func lookAtSandboxWith(ctx context.Context, a *Agent) SandboxStatus {
-	a.sandboxLookOnly = true
-	s := SandboxStatus{Sbx: "fake", Off: SandboxOff(a.Dir), ClaudeToken: a.claudeToken() != ""}
-	s.Info, s.Err = a.sandboxProbe(ctx)
-	return s
-}

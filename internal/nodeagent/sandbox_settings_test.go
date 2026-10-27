@@ -42,6 +42,28 @@ func TestSandboxNotDeclaredBeforeSetup(t *testing.T) {
 	}
 }
 
+// Doctor's look changes nothing, and before setup still reads sbx.
+func TestSandboxLookOnly(t *testing.T) {
+	t.Parallel()
+	a, fake, _ := sandboxAgent(t)
+	if err := a.saveSandboxState(sandboxState{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fake, "settings.json"), []byte(`{"browser.enabled":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.sandboxLookOnly = true
+	info, err := a.sandboxProbe(context.Background())
+	if err != nil || info.Version != "v0.50.0" || info.Settings || info.Problem != ErrSandboxNotSetUp.Error() {
+		t.Fatalf("look before setup: %+v %v", info, err)
+	}
+	for _, c := range fakeCalls(t, fake) {
+		if c.Args[0] == "settings" && c.Args[1] == "set" || c.Args[0] == "policy" && c.Args[1] != "ls" {
+			t.Errorf("the look changed %v", c.Args)
+		}
+	}
+}
+
 // The agent sets the owned settings again when they drifted, and
 // initializes a missing network policy; another policy it leaves to
 // setup, since replacing it stops every sandbox.
