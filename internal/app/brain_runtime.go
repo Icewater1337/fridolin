@@ -72,7 +72,9 @@ func (r *brainRuntimes) look(ctx context.Context) sandboxrun.State {
 		if err := fleet.Call(ctx, s.Node, nodeproto.MethodSandboxInfo, struct{}{}, &s.Info); err != nil {
 			s.Why = "asking " + s.Name + " about its Docker Sandboxes failed: " + err.Error()
 		} else {
-			s.Why = sandboxNotReady(&s.Info.SandboxCap, "")
+			// With the provider every brain runs (agent_provider): its login
+			// missing in sbx is an outage too.
+			s.Why = sandboxNotReady(&s.Info.SandboxCap, cmp.Or(string(r.b.cfgs.Get().AgentProvider), nodeproto.SandboxProviderClaude))
 		}
 	}
 	r.observe(s)
