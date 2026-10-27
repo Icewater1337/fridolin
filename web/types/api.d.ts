@@ -734,6 +734,8 @@ export interface SandboxCap {
   providers?: string[];
   /** Why it is not ready, plain. */
   problem?: string;
+  /** The version of the linux fridolin the sandboxes mount, "" before the core sent one. */
+  bin?: string;
 }
 
 /** The machine may take over the core (nodeproto.CoreHostCap; docs/NODES.md, "core-host"). */
