@@ -110,4 +110,7 @@ type testHooks struct {
 	// connections points the calls of the connections at fake OpenAI and
 	// ElevenLabs servers in place of the real ones.
 	connections *connections.Endpoints
+	// sandboxFleet is the nodes with Docker Sandboxes in place of the
+	// nodes service: tests hand in a fake node.
+	sandboxFleet sandboxFleet
 }
