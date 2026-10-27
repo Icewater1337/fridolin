@@ -234,7 +234,11 @@ gh api user --jq .login >/dev/null 2>&1 && echo "github: open" || echo "github: 
 	if !strings.Contains(out, `{"live":1}`) || !strings.Contains(out, "github: closed") {
 		t.Errorf("after the rebuild:\n%s", out)
 	}
-	if _, err := os.Stat(filepath.Join(a.sandboxHistoryDir("livegh", "claude"), "live", "session.jsonl")); err != nil {
+	hist, err := a.sandboxHistoryDir("livegh", "claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(hist, "live", "session.jsonl")); err != nil {
 		t.Errorf("the session is not on the host: %v", err)
 	}
 }

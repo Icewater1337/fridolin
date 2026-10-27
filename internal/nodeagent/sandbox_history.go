@@ -2,8 +2,11 @@ package nodeagent
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
@@ -35,16 +38,36 @@ func sandboxHistoryTarget(provider string) string {
 	return sandboxHome + "/.claude/projects"
 }
 
+// sandboxBrainIDRe is a brain's id: one name, never a path.
+var sandboxBrainIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,39}$`)
+
 // sandboxHistoryDir is the host folder of brain's sessions with
-// provider; brain is an id (nodeproto's check), never a path.
-func (a *Agent) sandboxHistoryDir(brain, provider string) string {
-	return filepath.Join(a.Dir, sandboxDir, sandboxHistoryDirName, brain, provider)
+// provider. brain must be an id: one name in the history folder.
+func (a *Agent) sandboxHistoryDir(brain, provider string) (string, error) {
+	if a.Dir == "" {
+		return "", errors.New("this agent has no state dir")
+	}
+	if !sandboxBrainIDRe.MatchString(brain) {
+		return "", fmt.Errorf("%q is not a brain id", brain)
+	}
+	name := filepath.Base(brain)
+	if name != brain || strings.Contains(name, "..") {
+		return "", fmt.Errorf("%q is not a brain id", brain)
+	}
+	sub := nodeproto.SandboxProviderClaude
+	if provider == nodeproto.SandboxProviderCodex {
+		sub = nodeproto.SandboxProviderCodex
+	}
+	return filepath.Join(a.Dir, sandboxDir, sandboxHistoryDirName, name, sub), nil
 }
 
 // sandboxHistoryFolder makes the host folder of the spec's sessions, so
 // that sbx finds it when it restores the mount at a start.
 func (a *Agent) sandboxHistoryFolder(brain string, s sandboxSpec) (string, *nodeproto.Error) {
-	dir := a.sandboxHistoryDir(brain, s.Provider)
+	dir, err := a.sandboxHistoryDir(brain, s.Provider)
+	if err != nil {
+		return "", nodeproto.Errorf(nodeproto.CodeFailed, "the folder of the sessions: %v", err)
+	}
 	if strings.ContainsAny(dir, ":,") {
 		return "", nodeproto.Errorf(nodeproto.CodeFailed, "the state dir %s has a : or , that sbx's mounts split on", a.Dir)
 	}

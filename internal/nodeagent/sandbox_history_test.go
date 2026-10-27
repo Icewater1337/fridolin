@@ -76,6 +76,24 @@ func TestSandboxHistory(t *testing.T) {
 	}
 }
 
+// The history folder is one name per brain in the state dir: an id that
+// is a path, or no id, gets none.
+func TestSandboxHistoryDirRefusesPaths(t *testing.T) {
+	t.Parallel()
+	a := &Agent{Dir: t.TempDir()}
+	for _, brain := range []string{"", "..", "../x", "a/b", "/etc", "A"} {
+		if dir, err := a.sandboxHistoryDir(brain, "claude"); err == nil {
+			t.Errorf("%q: %s", brain, dir)
+		}
+	}
+	if dir, err := a.sandboxHistoryDir("work", "evil/../x"); err != nil || filepath.Base(dir) != "claude" {
+		t.Errorf("an unknown provider: %q %v", dir, err)
+	}
+	if _, err := (&Agent{}).sandboxHistoryDir("work", "claude"); err == nil {
+		t.Error("an agent without a state dir has a history folder")
+	}
+}
+
 // Codex keeps its sessions elsewhere; a mount that fails fails ensure,
 // and the sandbox goes.
 func TestSandboxHistoryCodexAndFailure(t *testing.T) {
