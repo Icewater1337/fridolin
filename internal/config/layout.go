@@ -102,6 +102,13 @@ func (l Layout) Tsnet() string { return l.join("tsnet") }
 // Core holds the core lease's state and the staging of exports.
 func (l Layout) Core() string { return l.join("core") }
 
+// LocalSecrets holds what stays on the machines (internal/gitident): the
+// GitLab connection and the git identities' commit names. It lies in
+// core/, which no export takes and an import keeps; the restic snapshots
+// leave it out too (dataDirExcludes), and a core move carries it sealed
+// (internal/secretxfer, LocalDir).
+func (l Layout) LocalSecrets() string { return l.join("core", "local-secrets") }
+
 // The memory index and standing intents (M7).
 
 // MemoryIndex is brain id's memory index, derived from its folder and
