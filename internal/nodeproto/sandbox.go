@@ -345,13 +345,27 @@ type SandboxRunParams struct {
 	APIPort  int               `json:"api_port"`
 	Provider string            `json:"provider"`
 	TimeoutS int               `json:"timeout_s,omitempty"`
+	// GitHubToken is the run's GitHub token (docs/GITHUB.md), "" for a
+	// run without a grant. The node stores it as the sandbox's own
+	// `github` secret while the run goes on, and opens SandboxGitHubHosts
+	// for it: sbx's proxy puts it into the run's calls to GitHub, and the
+	// VM holds only sbx's placeholder in GH_TOKEN.
+	GitHubToken string `json:"github_token,omitempty"`
+}
+
+// SandboxGitHubHosts are the hosts a run with a GitHub token may reach:
+// the API, git over HTTPS, archives and raw files.
+var SandboxGitHubHosts = []string{
+	"github.com", "api.github.com", "codeload.github.com", "objects.githubusercontent.com", "raw.githubusercontent.com",
 }
 
 // SandboxNodeEnv are the variables the node sets for a run itself, and
-// the proxy settings that are the VM's own: the core may not send them.
+// the proxy settings and credentials' placeholders that are the VM's
+// own: the core may not send them.
 var SandboxNodeEnv = []string{
 	"FRIDOLIN_API", "FRIDOLIN_BRAIN_TOKEN_FILE", "FRIDOLIN_BIN", "FRIDOLIN_TOOLS_DIR",
 	"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY",
+	"GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR",
 	"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy",
 }
 
@@ -399,6 +413,9 @@ func (p SandboxRunParams) Check() error {
 	}
 	if p.Token == "" || len(p.Token) > MaxSandboxTokenLen || strings.ContainsAny(p.Token, "\x00\r\n") {
 		return errors.New("sandbox: the run token is empty, too long or not one line")
+	}
+	if len(p.GitHubToken) > MaxSandboxTokenLen || strings.ContainsAny(p.GitHubToken, "\x00\r\n\t ") {
+		return errors.New("sandbox: the GitHub token is too long or not one word")
 	}
 	if err := checkSandboxPort(p.APIPort); err != nil {
 		return err
