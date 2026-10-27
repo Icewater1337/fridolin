@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
@@ -216,6 +217,105 @@ func TestSandboxEnsure(t *testing.T) {
 	}
 	if info := sandboxInfo(t, a); len(info.Sandboxes) != 1 || info.Sandboxes[0].Brain != "work" || info.Sandboxes[0].MemoryMB != 4096 {
 		t.Errorf("info's sandboxes: %+v", info.Sandboxes)
+	}
+}
+
+// readyBrain ensures brain's sandbox and returns run params for it.
+func readyBrain(t *testing.T, a *Agent, provider string, argv ...string) nodeproto.SandboxRunParams {
+	t.Helper()
+	folder := brainFolder(t, "rt-1")
+	if _, perr := ensure(a, nodeproto.SandboxEnsureParams{Brain: "work", Folder: folder, Marker: "rt-1", APIPort: 8765, Provider: provider}); perr != nil {
+		t.Fatal(perr)
+	}
+	return nodeproto.SandboxRunParams{Brain: "work", Run: "r1", Folder: folder, Argv: argv, Env: map[string]string{"BRIDGE_CHAT": "dm"},
+		Stdin: "hello there", Token: "run-token-secret-1234", APIPort: 8765, Provider: provider}
+}
+
+func sbCall(t *testing.T, a *Agent, method string, params any) (any, *nodeproto.Error) {
+	t.Helper()
+	raw, err := json.Marshal(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return a.sandboxCall(context.Background(), method, raw)
+}
+
+// readRun reads a run to its end, as the core does.
+func readRun(t *testing.T, a *Agent, run string) (string, nodeproto.SandboxReadResult) {
+	t.Helper()
+	var out strings.Builder
+	var off int64
+	for range 200 {
+		res, perr := sbCall(t, a, nodeproto.MethodSandboxRead, nodeproto.SandboxReadParams{Run: run, Offset: off, WaitMS: 5000})
+		if perr != nil {
+			t.Fatal(perr)
+		}
+		r := res.(nodeproto.SandboxReadResult)
+		out.WriteString(r.Data)
+		off = r.Next
+		if r.Done {
+			return out.String(), r
+		}
+	}
+	t.Fatal("the run did not end")
+	return "", nodeproto.SandboxReadResult{}
+}
+
+func TestSandboxRun(t *testing.T) {
+	a, fake, log := sandboxAgent(t)
+	p := readyBrain(t, a, "claude", "fake-agent", "echo", "3")
+	if res, perr := sbCall(t, a, nodeproto.MethodSandboxRun, p); perr != nil || res.(nodeproto.SandboxRunResult).Run != "r1" {
+		t.Fatalf("run: %v %v", res, perr)
+	}
+	if _, perr := sbCall(t, a, nodeproto.MethodSandboxRun, p); perr == nil {
+		t.Error("the same run id started twice")
+	}
+	out, end := readRun(t, a, "r1")
+	if end.ExitCode != 3 || end.Error != "" || !strings.Contains(end.StderrTail, "a warning") {
+		t.Errorf("end: %+v", end)
+	}
+	for _, want := range []string{"prompt: hello there", "argv: fake-agent echo 3", "token: true", "grüße",
+		"BRIDGE_CHAT=dm", "FRIDOLIN_API=http://host.docker.internal:8765", "FRIDOLIN_BRAIN_TOKEN_FILE=/tmp/fridolin-run-r1.token",
+		"FRIDOLIN_BIN=/opt/fridolin/bin/fridolin", "FRIDOLIN_TOOLS_DIR=/opt/fridolin/tools"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the run's output lacks %q:\n%s", want, out)
+		}
+	}
+	// The run token reached sandboxd through the 0600 file, and the VM
+	// had only the placeholder.
+	if b, _ := os.ReadFile(filepath.Join(fake, "secret-value")); string(b) != p.Token {
+		t.Errorf("sandboxd read %q from the token file", b)
+	}
+	calls := fakeCalls(t, fake)
+	for _, c := range calls {
+		joined := strings.Join(c.Args, " ")
+		if strings.Contains(joined, p.Token) || strings.Contains(joined, testClaudeToken) {
+			t.Errorf("a secret in sbx's arguments: %v", c.Args)
+		}
+		if c.TokenEnv != (c.Args[0] == "exec" && slices.Contains(c.Args, "setsid")) {
+			t.Errorf("the Claude token in the environment of %v: %v", c.Args, c.TokenEnv)
+		}
+	}
+	if s := log.String(); strings.Contains(s, p.Token) || strings.Contains(s, testClaudeToken) || strings.Contains(s, "sbx-r") {
+		t.Errorf("a secret in the log:\n%s", s)
+	}
+	// Cleaned up: the secret, both token files, the pid file.
+	if !called(calls, "secret", "rm", "--placeholder") {
+		t.Error("the run's secret was not removed")
+	}
+	if ents, _ := os.ReadDir(filepath.Join(a.Dir, sandboxDir, sandboxRunsDir)); len(ents) != 0 {
+		t.Errorf("token files stay on the host: %v", ents)
+	}
+	if ents, _ := os.ReadDir(filepath.Join(fake, "vm")); len(ents) != 0 {
+		t.Errorf("files stay in the VM: %v", ents)
+	}
+	// A read past the output is refused; a finished run is forgotten later.
+	if _, perr := sbCall(t, a, nodeproto.MethodSandboxRead, nodeproto.SandboxReadParams{Run: "r1", Offset: 1 << 20}); perr == nil {
+		t.Error("a read past the output")
+	}
+	a.pruneRuns(time.Now().Add(nodeproto.SandboxRunForget + time.Second))
+	if _, perr := sbCall(t, a, nodeproto.MethodSandboxRead, nodeproto.SandboxReadParams{Run: "r1"}); perr == nil || perr.Code != nodeproto.CodeNotFound {
+		t.Errorf("a forgotten run: %v", perr)
 	}
 }
 
