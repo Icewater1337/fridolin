@@ -149,17 +149,7 @@ func companionConfig(repo, base string) ([]byte, error) {
 // sandboxStatus is sbx's status of the sandboxed FrIDE's sandbox: "" for
 // none.
 func (o FrideSandboxOptions) sandboxStatus(ctx context.Context) (string, error) {
-	out, stderr, err := o.sbx().run(ctx, nil, nil, "ls", "--json")
-	list, ok := parseSbxList(out)
-	if err != nil || !ok {
-		return "", fmt.Errorf("sbx does not list its sandboxes: %s", orUnknownErr(firstLine(stderr), err))
-	}
-	for _, s := range list {
-		if s.Name == o.sandbox() {
-			return orUnknown(s.Status), nil
-		}
-	}
-	return "", nil
+	return sbxSandboxStatus(ctx, o.sbx(), o.sandbox())
 }
 
 // errNoFrideSandbox is a node without the sandboxed FrIDE.

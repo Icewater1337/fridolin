@@ -167,6 +167,11 @@ func (o FrideSandboxOptions) makeInside(ctx context.Context, st *FrideSandboxSta
 			return fmt.Errorf("sbx could not %s %s: %w", r[0], r[1], sbxError(err, stderr))
 		}
 	}
+	if err := reapplyHostTokens(ctx, d, o.Dir, o.sandbox()); err != nil {
+		fmt.Fprintf(o.Out, "Note: %v; set it again (fridolin node fride sandbox github).\n", err)
+	} else if hosts := hostTokenHosts(o.Dir, o.sandbox()); len(hosts) > 0 {
+		fmt.Fprintf(o.Out, "Gave the sandbox its tokens for %s again.\n", strings.Join(hosts, ", "))
+	}
 	if err := o.exec(ctx, bytes.NewReader(config), frideSandboxPrepare); err != nil {
 		return err
 	}

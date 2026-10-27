@@ -93,6 +93,8 @@ func frideSandbox(sub string, f frideSandboxFlags, dir, sbx string, stdout, stde
 		fmt.Fprintln(stdout, "Updated the sandboxed FrIDE.")
 	case "login":
 		return frideSandboxLogin(ctx, o, f, stdout, fail)
+	case "github":
+		return frideSandboxGitHub(ctx, o, f, stdout, fail)
 	case "start":
 		info, err := nodeagent.FrideSandboxStart(ctx, o)
 		if err != nil {
@@ -140,6 +142,7 @@ func frideSandboxCreate(ctx context.Context, o nodeagent.FrideSandboxOptions, f 
 	if err := nodeagent.FrideSandboxCreate(ctx, o); err != nil {
 		return fail("%v", err)
 	}
+	frideSandboxGitHubAfterCreate(ctx, o, o.Out)
 	return 0
 }
 

@@ -29,7 +29,11 @@ Usage:
                   mounted read-write; default ~/fride-sandbox/repos; a 40 GB Docker
                   disk; Go and npm caches in ~/.cache/fridolin-sbx, shared with the
                   next sandbox) and build FrIDE inside at the commit the checkout in
-                  --repo pins (default: .)
+                  --repo pins (default: .); with gh logged in, also what github does
+  fridolin node fride sandbox github [--token-stdin] [--remove]
+                  give the sandbox GitHub: this machine's gh auth token (or stdin)
+                  goes to sbx's proxy, never into the VM, so that gh and git over
+                  https work inside; again after gh auth refresh; --remove takes it
   fridolin node fride sandbox login [--setup-token]
                   the Claude login of FrIDE's agents: paste the token claude
                   setup-token printed (not shown), or pipe it in; --setup-token runs
@@ -55,6 +59,7 @@ type frideSandboxFlags struct {
 	stateDir, repo, base, frideRepo, gitName, gitEmail string
 	core, name, dockerDisk                             string
 	setupToken, yes, noService, noCaches               bool
+	remove, tokenStdin                                 bool
 }
 
 // frideSandboxStateDir is the sandboxed FrIDE's node's default state dir:
@@ -94,6 +99,9 @@ func nodeFrideSandboxCmd(args []string, stdout, stderr io.Writer) int {
 			fs.StringVar(&f.dockerDisk, "docker-disk", nodeagent.DefaultFrideSandboxDockerDisk, "the size of the sandbox's Docker disk")
 			fs.BoolVar(&f.noCaches, "no-caches", false, "no Go and npm caches shared with other sandboxes")
 		}
+	case "github":
+		fs.BoolVar(&f.tokenStdin, "token-stdin", false, "read the token from stdin instead of gh auth token")
+		fs.BoolVar(&f.remove, "remove", false, "take GitHub's token from the sandbox")
 	case "login":
 		fs.BoolVar(&f.setupToken, "setup-token", false, "run claude setup-token in the sandbox first")
 	case "rm":

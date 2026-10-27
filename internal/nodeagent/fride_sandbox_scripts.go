@@ -130,6 +130,19 @@ if [ -n "$pid" ] && [ "$(cat "/proc/$pid/comm" 2>/dev/null)" = fride ]; then ech
 echo "commit=$(git -C "$c/src/fride" rev-parse HEAD 2>/dev/null)"
 `
 
+// frideSandboxCredential sets git's credential helper for the URL $1 in
+// the VM: it answers user $2 and the placeholder $3, which sbx's proxy
+// swaps for the token on the way out. Neither is a secret.
+const frideSandboxCredential = `# fride-sandbox: credential
+set -eu
+git config --global --replace-all "credential.$1.helper" "!f() { test \"\$1\" = get || exit 0; echo username=$2; echo password=$3; }; f"
+`
+
+// frideSandboxUncredential removes the helper for the URL $1.
+const frideSandboxUncredential = `# fride-sandbox: uncredential
+git config --global --unset-all "credential.$1.helper" || true
+`
+
 // frideSandboxScript is the argv of `sbx exec` for script with args.
 func frideSandboxScript(script string, args ...string) []string {
 	return append([]string{"sh", "-c", script, FrideSandboxName}, args...)

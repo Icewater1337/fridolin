@@ -63,6 +63,17 @@ func fakeFrideScript(dir, script string, args []string) int {
 	case "login":
 		b, _ := io.ReadAll(os.Stdin)
 		_ = os.WriteFile(at("token"), b, 0o600)
+	case "credential":
+		appendFile(at("credentials"), strings.Join(args, " ")+"\n")
+	case "uncredential":
+		b, _ := os.ReadFile(at("credentials"))
+		var keep []string
+		for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			if l != "" && !strings.HasPrefix(l, args[0]+" ") {
+				keep = append(keep, l+"\n")
+			}
+		}
+		_ = os.WriteFile(at("credentials"), []byte(strings.Join(keep, "")), 0o600)
 	case "status":
 		yes := func(f string) string {
 			if exists(f) {
