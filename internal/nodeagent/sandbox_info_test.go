@@ -31,32 +31,38 @@ func TestSbxParsers(t *testing.T) {
 		t.Error("ls read a table as JSON")
 	}
 	held := []string{
-		"ssh.agentForwardingEnabled  false\nbrowser.enabled  false\n",
-		"ssh.agentForwardingEnabled = false\nbrowser.enabled: false",
+		// sbx v0.50.0's `settings ls --json`.
+		`[{"key":"browser.enabled","value":false,"type":"bool","source":"override"},{"key":"ssh.agentForwardingEnabled","value":false,"requires_restart":true}]`,
+		"ssh.agentForwardingEnabled  false  bool  override  yes\nbrowser.enabled  false  bool\n",
 		`{"ssh":{"agentForwardingEnabled":false},"browser":{"enabled":false}}`,
-		`{"ssh.agentForwardingEnabled":"false","browser.enabled":false}`,
-		`[{"key":"ssh.agentForwardingEnabled","value":false},{"key":"browser.enabled","value":"false"}]`,
 	}
 	for _, s := range held {
-		if !sbxSettingsHold([]byte(s), []byte("Global: deny-all")) {
+		if !sbxSettingsHold([]byte(s), []byte(fakeDenyAll)) {
 			t.Errorf("settings %q do not hold", s)
 		}
 	}
-	for _, s := range []string{"ssh.agentForwardingEnabled true\nbrowser.enabled false", "browser.enabled false", "{}"} {
-		if sbxSettingsHold([]byte(s), []byte("deny-all")) {
+	for _, s := range []string{`[{"key":"browser.enabled","value":false},{"key":"ssh.agentForwardingEnabled","value":true}]`, "browser.enabled false", "{}"} {
+		if sbxSettingsHold([]byte(s), []byte(fakeDenyAll)) {
 			t.Errorf("settings %q hold", s)
 		}
 	}
-	if sbxSettingsHold([]byte(held[0]), []byte("balanced")) || sbxSettingsHold([]byte(held[0]), []byte("policy not initialized (deny-all suggested)")) {
-		t.Error("a policy other than deny-all holds")
+	if got := sbxSettingsDrift([]byte(`[{"key":"browser.enabled","value":true}]`)); !slices.Equal(got, []string{"browser.enabled", "ssh.agentForwardingEnabled"}) {
+		t.Errorf("drift %v", got)
+	}
+	for _, p := range []string{fakeBalanced, `{"rules":[]}`, "default-deny-all local all network: 1 deny", `{"rules":[{"scope":"global","resource_type":"network","decision":"deny","resources":["**"],"status":"inactive"}]}`} {
+		if sbxSettingsHold([]byte(held[0]), []byte(p)) {
+			t.Errorf("policy %s holds", p)
+		}
+	}
+	if !sbxPolicyUnset([]byte("error: global network policy has not been initialized\n  try: sbx policy init")) {
+		t.Error("sbxPolicyUnset")
 	}
 	for in, want := range map[string]bool{
-		`[{"service":"openai","scope":"global","value":"oai-…f00d"}]`: true,
-		`[{"name":"openai"}]`: true,
-		`[{"service":"openai","scope":"sandbox","sandbox":"fridolin-a"}]`: false,
-		`[{"service":"anthropic","scope":"global"}]`:                      false,
-		`{"secrets":[{"service":"OpenAI","scope":"global"}]}`:             true,
-		`openai global oai-…f00d`:                                         false,
+		`{"secrets":[{"name":"openai","scope":"(global)","secret":"oai-…f00d","type":"oauth"}],"custom_secrets":[]}`: true,
+		`{"secrets":[],"custom_secrets":[{"name":"openai"}]}`:                                                        false,
+		`{"secrets":[{"name":"anthropic","scope":"(global)"}]}`:                                                      false,
+		`[{"name":"openai"}]`:     false,
+		`openai global oai-…f00d`: false,
 	} {
 		if got := sbxCodexLogin([]byte(in)); got != want {
 			t.Errorf("codex login in %s: %v", in, got)
@@ -64,6 +70,19 @@ func TestSbxParsers(t *testing.T) {
 	}
 	if !sbxSaysSignIn("Error: you are not signed in; run sbx login") || sbxSaysSignIn("cannot connect to sandboxd") {
 		t.Error("sbxSaysSignIn")
+	}
+	// sbx v0.50.0's `diagnose --json`, shortened.
+	diag := `{"version":"1.0","checks":[{"name":"CLI binary","status":"pass"},{"name":"Daemon","status":"pass","message":"healthy"},` +
+		`{"name":"Authentication","status":"fail","message":"not authenticated"}],"summary":{"pass":2,"fail":1}}`
+	if d, ok := parseSbxDiagnose([]byte(diag)); !ok || !d.Daemon || d.SignedIn {
+		t.Errorf("diagnose: %+v %v", d, ok)
+	}
+	if _, ok := parseSbxDiagnose([]byte(`{"checks":[{"name":"Daemon","status":"pass"}]}`)); ok {
+		t.Error("diagnose without Authentication read")
+	}
+	tpls := `[{"id":"4a94","repository":"docker.io/docker/sandbox-templates","tag":"claude-code-docker"},{"id":"6179","repository":"docker.io/library/fridolin-brain","tag":"0123abcd"}]`
+	if !sbxListsTemplate([]byte(tpls), "fridolin-brain:0123abcd") || sbxListsTemplate([]byte(tpls), "fridolin-brain:v1") || sbxListsTemplate([]byte("[]"), "x:y") {
+		t.Error("sbxListsTemplate")
 	}
 	if got := string(completeRunes([]byte("abü")[:3])); got != "ab" {
 		t.Errorf("a cut ü: %q", got)
