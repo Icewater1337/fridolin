@@ -52,6 +52,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/cloud"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
 // Key is the lease object's key in the vault bucket.
@@ -511,6 +512,14 @@ func DeviceID(dataDir string) (string, error) {
 	path := filepath.Join(dataDir, filepath.FromSlash(DeviceIDFile))
 	if data, err := os.ReadFile(path); err == nil {
 		id := strings.TrimSpace(string(data))
+		if id == "" {
+			// Left by a first start that crashed between create and write,
+			// before ids were written atomically (#338): make a new one.
+			if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return "", err
+			}
+			return DeviceID(dataDir)
+		}
 		if len(id) != 32 {
 			return "", fmt.Errorf("%s does not hold a device id", path)
 		}
@@ -526,21 +535,14 @@ func DeviceID(dataDir string) (string, error) {
 		return "", err
 	}
 	id := hex.EncodeToString(b[:])
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", err
-	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	err := fsx.CreateFileAtomic(path, []byte(id+"\n"), 0o600)
 	if errors.Is(err, fs.ErrExist) {
 		return DeviceID(dataDir) // made meanwhile by another process
 	}
 	if err != nil {
 		return "", err
 	}
-	if _, err := f.WriteString(id + "\n"); err != nil {
-		f.Close()
-		return "", err
-	}
-	return id, f.Close()
+	return id, nil
 }
 
 // ReleaseDevice frees the lease when device holds it, live or stale, from

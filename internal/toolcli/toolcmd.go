@@ -106,8 +106,13 @@ func BrainClientFor(t IO) (*brainClient, error) {
 		// A calendar call can take several Google requests; the bridge gives
 		// each 20 seconds.
 		Timeout: 2 * time.Minute,
-		// The bridge is on loopback: never through a proxy from the environment.
-		Transport: &http.Transport{Proxy: nil},
+		// The proxy from the environment: in a Docker Sandbox the run
+		// reaches the bridge as host.docker.internal through sbx's proxy,
+		// which swaps the placeholder in the token file for the run's
+		// token (docs/SANDBOXES.md). Go never sends a request for
+		// localhost or a loopback address through a proxy, so natively
+		// and under bubblewrap the bridge is reached directly, as before.
+		Transport: &http.Transport{Proxy: http.ProxyFromEnvironment},
 	}}, nil
 }
 

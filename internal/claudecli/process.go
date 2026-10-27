@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,10 +44,33 @@ type Spawn struct {
 	Prompt    string        // goes on stdin, for the -p the arguments end in
 	Stdout    io.Writer     // gets the stream-json output
 	WaitDelay time.Duration // copy-pipe deadline, supplied by the caller
+	// Launch starts the run somewhere other than a process here, in a
+	// Docker Sandbox on a node say; nil starts Binary on this machine.
+	// It gets the Spawn with Stdout set, and ends the run when ctx ends.
+	Launch func(ctx context.Context, s Spawn) (Process, error)
 }
 
-// Process is a run of the CLI that Start started.
-type Process struct {
+// Process is a run of the CLI that Start started: a process on this
+// machine, or a run elsewhere that Spawn.Launch started.
+type Process interface {
+	// PID is the CLI's process ID on this machine, which leads its
+	// process group, or 0 for a run that is no process here.
+	PID() int
+	// ID names the run in the brain's activity log: "pid 1234" for a
+	// process here.
+	ID() string
+	// Wait waits for the run to end and for what it wrote to be copied.
+	Wait() error
+	// StderrTail is the end of what the run wrote to stderr, without the
+	// space around it.
+	StderrTail() string
+	// Stopped closes once the run was told to stop, or Wait finished. It
+	// does not wait for output hooks or delivery.
+	Stopped() <-chan struct{}
+}
+
+// localProcess is a run of the CLI as a process on this machine.
+type localProcess struct {
 	cmd    *exec.Cmd
 	stderr *tailBuffer
 	// stopped closes after the supervisor signalled the group, or Wait
@@ -57,8 +81,12 @@ type Process struct {
 
 // Start starts the CLI as r says, in a process group of its own,
 // which is killed when ctx is done, with everything the CLI started that
-// stayed in it (isolateProcessGroup).
-func Start(ctx context.Context, r Spawn) (*Process, error) {
+// stayed in it (isolateProcessGroup). With r.Launch, it starts the run
+// that way instead.
+func Start(ctx context.Context, r Spawn) (Process, error) {
+	if r.Launch != nil {
+		return r.Launch(ctx, r)
+	}
 	cmd := exec.CommandContext(ctx, r.Binary, r.Args...)
 	cmd.Dir = r.Dir
 	cmd.Env = r.Env
@@ -74,7 +102,7 @@ func Start(ctx context.Context, r Spawn) (*Process, error) {
 	// Only the end of stderr is kept: the CLI, or something it started that
 	// holds on to its stderr, could otherwise make the bridge hold any
 	// amount of it, and only the last error is of use.
-	p := &Process{cmd: cmd, stderr: newTailBuffer(stderrTailBytes), stopped: make(chan struct{})}
+	p := &localProcess{cmd: cmd, stderr: newTailBuffer(stderrTailBytes), stopped: make(chan struct{})}
 	cancel := cmd.Cancel
 	cmd.Cancel = func() error {
 		defer p.acknowledgeStop()
@@ -88,26 +116,29 @@ func Start(ctx context.Context, r Spawn) (*Process, error) {
 	return p, nil
 }
 
-// pid is the CLI's process ID, which leads its process group.
-func (p *Process) PID() int { return p.cmd.Process.Pid }
+// PID is the CLI's process ID, which leads its process group.
+func (p *localProcess) PID() int { return p.cmd.Process.Pid }
 
-// wait waits for the CLI to exit and for what it wrote to be copied, for
+// ID is "pid" and the PID.
+func (p *localProcess) ID() string { return "pid " + strconv.Itoa(p.PID()) }
+
+// Wait waits for the CLI to exit and for what it wrote to be copied, for
 // runWaitDelay at most once it exited, and then kills what is left of its
 // process group, a command it left running in the background say, which
 // nothing else stops.
-func (p *Process) Wait() error {
+func (p *localProcess) Wait() error {
 	err := p.cmd.Wait()
 	_ = platform.KillProcessGroup(p.PID())
 	p.acknowledgeStop()
 	return err
 }
 
-func (p *Process) acknowledgeStop() { p.stopOnce.Do(func() { close(p.stopped) }) }
+func (p *localProcess) acknowledgeStop() { p.stopOnce.Do(func() { close(p.stopped) }) }
 
-// stderrTail is the end of what the CLI wrote to stderr, without the space
+// StderrTail is the end of what the CLI wrote to stderr, without the space
 // around it.
-func (p *Process) StderrTail() string { return strings.TrimSpace(p.stderr.String()) }
+func (p *localProcess) StderrTail() string { return strings.TrimSpace(p.stderr.String()) }
 
 // Stopped closes after the process group was signalled or Wait finished.
 // It does not wait for output hooks or delivery.
-func (p *Process) Stopped() <-chan struct{} { return p.stopped }
+func (p *localProcess) Stopped() <-chan struct{} { return p.stopped }

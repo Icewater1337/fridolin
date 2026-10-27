@@ -116,7 +116,9 @@ A call that goes wrong answers an error the caller can act on: 400 for a
 bad request, 403 for something not declared, 429 over the budget, 503
 without a key, 502 when the provider refused (with its status and code),
 504 when it took too long. A provider's message is scrubbed of anything
-that looks like a key before it is passed on.
+that looks like a key before it is passed on. The bridge follows no
+redirect: a 3xx is a refusal like any other, so the key never goes on to
+another host.
 
 ## Usage and budgets
 

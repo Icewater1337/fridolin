@@ -7,10 +7,12 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -707,5 +709,63 @@ func TestAudioTypeAndSpeechExt(t *testing.T) {
 		if got := SpeechExt(in[0], in[1]); got != want {
 			t.Errorf("SpeechExt(%q, %q) = %q, want %q", in[0], in[1], got, want)
 		}
+	}
+}
+
+// TestRedirectsAreRefused: a provider's 3xx is the call's answer. The
+// key, which ElevenLabs takes in a header Go copies on a redirect to
+// another host, never goes on to where the redirect points.
+func TestRedirectsAreRefused(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	var elsewhere []http.Header
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		elsewhere = append(elsewhere, r.Header.Clone())
+		mu.Unlock()
+		writeJSON(w, 200, map[string]any{"voices": []any{}})
+	}))
+	t.Cleanup(other.Close)
+	ts := newTestService(t, false)
+	// The same, with the client the service makes itself.
+	own := New(Options{Dir: ts.o.Dir, Endpoints: Endpoints{OpenAI: ts.fake.URL, ElevenLabs: ts.fake.URL}})
+	c := Caller{ID: "brain:personal"}
+	calls := []struct {
+		name string
+		call func(*Service) error
+	}{
+		{"voices", func(s *Service) error { _, err := s.Voices(context.Background(), c); return err }},
+		{"speak", func(s *Service) error {
+			_, err := s.Speak(context.Background(), c, SpeakRequest{Text: "Hallo", Voice: "v1"})
+			return err
+		}},
+		{"responses", func(s *Service) error {
+			_, err := s.Responses(context.Background(), c, []byte(`{"model": "gpt-4o"}`))
+			return err
+		}},
+	}
+	for _, status := range []int{http.StatusFound, http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		ts.fake.setAnswer(func(w http.ResponseWriter, s seen) bool {
+			w.Header().Set("Location", other.URL+s.Path)
+			w.WriteHeader(status)
+			return true
+		})
+		for _, svc := range []*Service{ts.Service, own} {
+			for _, tc := range calls {
+				err := tc.call(svc)
+				e, ok := errors.AsType[*Error](err)
+				if !ok || e.Status != 502 || e.UpstreamStatus != status {
+					t.Errorf("%d %s: %v", status, tc.name, err)
+				}
+			}
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(elsewhere) != 0 {
+		t.Errorf("the other host got %d requests, the first with xi-api-key %q", len(elsewhere), elsewhere[0].Get("xi-api-key"))
+	}
+	if ts.fake.Client().CheckRedirect != nil {
+		t.Error("the client handed in was changed")
 	}
 }

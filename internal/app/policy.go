@@ -49,6 +49,9 @@ type runPolicy struct {
 	Effort          string
 	DisallowedTools *[]string
 	started         time.Time
+	// Runtime is where the run of a brain set to Docker Sandboxes ran,
+	// for its audit line (see runtimeFor); "" for other runs.
+	Runtime string
 }
 
 // defaultRisk is the budget of a run no skill trigger matched: ordinary
@@ -231,7 +234,7 @@ func (b *App) runEnded(p *runPolicy, res claudecli.Result) {
 	default:
 		outcome = "failed"
 	}
-	b.audit.Append(audit.Entry{Kind: audit.RunEnd, Thread: p.Thread, Chat: p.Chat, Brain: p.Brain, Run: p.ID, Skill: p.Skill, Risk: string(p.Risk), Outcome: outcome, DurationMS: time.Since(p.started).Milliseconds()})
+	b.audit.Append(audit.Entry{Kind: audit.RunEnd, Thread: p.Thread, Chat: p.Chat, Brain: p.Brain, Run: p.ID, Skill: p.Skill, Risk: string(p.Risk), Outcome: outcome, DurationMS: time.Since(p.started).Milliseconds(), Runtime: p.Runtime})
 }
 
 // inferSkill is the skill a message is for, and the run's budget: of the

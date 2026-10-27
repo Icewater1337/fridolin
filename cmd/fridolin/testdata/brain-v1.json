@@ -131,5 +131,13 @@
         "folder": "inbox/scans"
       }
     ]
+  },
+  "sandbox": {
+    "runtime": "docker-sandbox",
+    "fallback": "refuse",
+    "egress": [
+      "api.github.com",
+      "*.wikipedia.org"
+    ]
   }
 }
