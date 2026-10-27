@@ -105,7 +105,13 @@ class SyncService : Service() {
         get() = prefs.getString("sn", null)
         set(v) = prefs.edit().putString("sn", v).apply()
 
-    private var token = ""
+    // Plaud's user token, renewed by its age on a clock that runs while the phone sleeps
+    private val tokens = PlaudToken(SystemClock::elapsedRealtime) {
+        PlaudApi.userToken().also { t ->
+            AppLog.i("token renewed")
+            scope.launch { if (sdkReady) NiceBuildSdk.setPartnerToken(t) } // the SDK keeps a copy
+        }
+    }
     private var sdkReady = false
     private var pairing = false
     private var connecting = false
@@ -143,8 +149,8 @@ class SyncService : Service() {
             Intent(this, SyncService::class.java).setAction(ACTION_CHECK_IN).putExtra(EXTRA_TRIGGER, Trigger.TIMER.key),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }
-    private val transcribing = Mutex()
-    private val uploading = Mutex()
+    private val transcribing = RunAgain()
+    private val uploading = RunAgain()
     private val pendingDir by lazy { File(filesDir, "pending").apply { mkdirs() } }
     // Transcripts waiting to reach Fridolin (Fridolin.kt), when the app was built for it
     private val outboxDir by lazy { File(filesDir, "outbox").apply { mkdirs() } }
@@ -197,7 +203,10 @@ class SyncService : Service() {
                 AppLog.i("pairing: looking for a NotePin S / Note Pro")
                 scan()
             }
-            ACTION_CHECK_IN -> trigger(Trigger.of(intent.getStringExtra(EXTRA_TRIGGER)))
+            ACTION_CHECK_IN -> {
+                trigger(Trigger.of(intent.getStringExtra(EXTRA_TRIGGER)))
+                retryWaiting()
+            }
             ACTION_UNPAIR -> unpair()
             ACTION_ASK -> intent.getStringExtra(EXTRA_TEXT)?.let { queueQuestion(it) }
             ACTION_STOP_SPEECH -> speaker.stop()
@@ -220,7 +229,7 @@ class SyncService : Service() {
     }
 
     private suspend fun run() {
-        token = renewToken()
+        val token = firstToken()
         // SDK quirk (see Plaud's template app): its partner API defaults to the JP host and
         // ignores customDomain, so the RSA key fetch fails unless we point it at our region.
         NiceBuildSdk.getPartnerApiManager().updateBaseUrl("https://${PlaudApi.DOMAIN}")
@@ -238,19 +247,28 @@ class SyncService : Service() {
                 delay(15 * 60_000L) // what failed (offline, say) is tried again
             }
         }
-        while (true) {
-            delay(12 * 3600_000L) // user tokens live 24 h
-            token = renewToken()
-            NiceBuildSdk.setPartnerToken(token)
+    }
+
+    /**
+     * What waits for Plaud or Fridolin is tried again with each check-in, whether or not it
+     * reaches the pin: its alarm wakes the phone, while a coroutine's delay counts only the time
+     * the phone is awake. The token is renewed here too once it is old, so the SDK's copy stays
+     * current.
+     */
+    private fun retryWaiting() {
+        if (!sdkReady) return
+        scope.launch {
+            withContext(Dispatchers.IO) { runCatching { tokens.get() } }
             transcribePending()
         }
     }
 
-    private suspend fun renewToken(): String {
+    /** The token the SDK starts with, asked for until Plaud gives one. */
+    private suspend fun firstToken(): String {
         var wait = 10_000L
         while (true) {
             try {
-                return withContext(Dispatchers.IO) { PlaudApi.userToken() }.also { AppLog.i("token renewed") }
+                return withContext(Dispatchers.IO) { tokens.get() }
             } catch (e: Exception) {
                 AppLog.i("token failed (${e.message}), retrying in ${wait / 1000}s")
             }
@@ -424,9 +442,8 @@ class SyncService : Service() {
         setStatus("Connected")
         if (!cloudBound) {
             cloudBound = true
-            val t = token
             scope.launch(Dispatchers.IO) {
-                runCatching { PlaudApi.binding(t, "bind", sn) }.onFailure { AppLog.i("cloud bind: ${it.message}") }
+                runCatching { PlaudApi.binding(tokens.get(), "bind", sn) }.onFailure { AppLog.i("cloud bind: ${it.message}") }
             }
         }
         PlaudDeviceAgent.syncTime()
@@ -584,10 +601,9 @@ class SyncService : Service() {
         SyncPrefs.setDevice(this, null)
         alarms.cancel(checkInAlarm)
         watch.stop()
-        val t = token
         scope.launch {
             withContext(Dispatchers.IO) {
-                runCatching { PlaudApi.binding(t, "unbind", sn) }.onFailure { AppLog.i("cloud unbind: ${it.message}") }
+                runCatching { PlaudApi.binding(tokens.get(), "unbind", sn) }.onFailure { AppLog.i("cloud unbind: ${it.message}") }
             }
             PlaudDeviceAgent.depair(false)
             delay(3_000)
@@ -656,7 +672,10 @@ class SyncService : Service() {
             val kb = file.length() / 1024
             withContext(Dispatchers.IO) {
                 saveToDocuments("$name.mp3", "audio/mpeg") { out -> file.inputStream().use { it.copyTo(out) } }
-                file.copyTo(File(pendingDir, "$name.mp3"), overwrite = true) // kept until transcribed
+                // Kept until transcribed. Copied under another name first: a transcription pass
+                // running meanwhile takes only whole .mp3 files.
+                val part = file.copyTo(File(pendingDir, "$name.mp3.part"), overwrite = true)
+                check(part.renameTo(File(pendingDir, "$name.mp3"))) { "could not keep $name.mp3 for transcription" }
                 file.delete()
             }
             AppLog.i("saved $name.mp3 ($kb KB)")
@@ -673,54 +692,80 @@ class SyncService : Service() {
         scope.launch { transcribePending() }
     }
 
-    private suspend fun transcribePending() {
-        val pending = pendingDir.listFiles().orEmpty().sortedBy { it.name }
-        if (pending.isEmpty()) return
-        if (BuildConfig.API_KEY.isEmpty()) return AppLog.i("no api_key in this build, ${pending.size} transcript(s) waiting")
-        if (!transcribing.tryLock()) return
-        try {
-            for (mp3 in pending) {
-                AppLog.i("transcribing ${mp3.name}")
-                try {
-                    val t = token
-                    val text = withContext(Dispatchers.IO) { PlaudApi.transcribe(t, mp3) }
-                    withContext(Dispatchers.IO) {
-                        saveToDocuments("${mp3.nameWithoutExtension}.txt", "text/plain") { it.write(text.toByteArray()) }
-                        // In voice mode a recording is a question, not a transcript to hand over.
-                        if (Fridolin.enabled && VoicePrefs.enabled(this@SyncService)) writeQuestion(SpeechText.question(text))
-                        else if (Fridolin.enabled) File(outboxDir, "${mp3.nameWithoutExtension}.txt").writeBytes(text.toByteArray())
-                    }
-                    mp3.delete()
-                    AppLog.i("transcript saved: ${mp3.nameWithoutExtension}.txt")
-                } catch (e: Exception) {
-                    AppLog.i("transcription of ${mp3.name} failed, will retry: ${e.message}")
+    /** Transcribes what waits, then sends it on; a call while that runs makes it run again ([RunAgain]). */
+    private suspend fun transcribePending() = transcribing.run { transcribePass() }
+
+    /**
+     * Transcribes the recordings in pending/, oldest first, those saved meanwhile too, up to the
+     * first that fails (the next check-in tries it again); then sends the transcripts and questions.
+     */
+    private suspend fun transcribePass() {
+        if (BuildConfig.API_KEY.isEmpty()) {
+            val waiting = pendingMp3s().size
+            if (waiting > 0) AppLog.i("no api_key in this build, $waiting transcript(s) waiting")
+            return
+        }
+        while (true) {
+            val mp3 = pendingMp3s().firstOrNull() ?: break
+            AppLog.i("transcribing ${mp3.name}")
+            try {
+                val text = withContext(Dispatchers.IO) { transcribe(mp3) }
+                val name = mp3.nameWithoutExtension
+                withContext(Dispatchers.IO) {
+                    saveToDocuments("$name.txt", "text/plain") { it.write(text.toByteArray()) }
+                    // In voice mode a recording is a question, not a transcript to hand over.
+                    if (Fridolin.enabled && VoicePrefs.enabled(this@SyncService)) {
+                        val question = SpeechText.question(text)
+                        if (question.isBlank()) AppLog.i("voice: nothing said in $name, so nothing asked")
+                        else writeQuestion(question)
+                    } else if (Fridolin.enabled) File(outboxDir, "$name.txt").writeBytes(text.toByteArray())
+                }
+                AppLog.i("transcript saved: $name.txt")
+                if (!mp3.delete()) {
+                    AppLog.i("could not remove ${mp3.name} from the transcription queue")
                     break
                 }
+            } catch (e: PlaudApi.TranscriptionFailed) {
+                // Not tried again with every check-in, and not in the way of the recordings after it
+                AppLog.i("Plaud could not transcribe ${mp3.name} (${e.message}): skipped, the audio is in Documents/PlaudSync")
+                if (!mp3.renameTo(File(pendingDir, "${mp3.name}.failed"))) break
+            } catch (e: Exception) {
+                AppLog.i("transcription of ${mp3.name} failed, will retry: ${e.message}")
+                break
             }
-        } finally {
-            transcribing.unlock()
         }
         uploadPending()
         // In voice mode the loop above wrote questions: ask them now, not at the next start
         if (Fridolin.enabled) sendQuestions()
     }
 
+    private fun pendingMp3s() = pendingDir.listFiles { f -> f.name.endsWith(".mp3") }.orEmpty().sortedBy { it.name }
+
+    /** Plaud's transcript of [mp3]. A token Plaud refuses is renewed, and the call tried once more. */
+    private fun transcribe(mp3: File): String = try {
+        PlaudApi.transcribe(tokens.get(), mp3)
+    } catch (e: PlaudApi.HttpError) {
+        if (e.code != 401) throw e
+        AppLog.i("Plaud refused the token: renewing it")
+        tokens.invalidate()
+        PlaudApi.transcribe(tokens.get(), mp3)
+    }
+
     /** Sends the transcripts in the outbox to Fridolin, oldest first; what fails waits for the next try. */
     private suspend fun uploadPending() {
-        if (!Fridolin.enabled || !uploading.tryLock()) return
-        try {
-            for (txt in outboxDir.listFiles().orEmpty().sortedBy { it.name }) {
-                try {
-                    withContext(Dispatchers.IO) { Fridolin.upload(this@SyncService, txt.nameWithoutExtension, txt.readBytes()) }
-                    txt.delete()
-                    AppLog.i("sent ${txt.name} to Fridolin")
-                } catch (e: Exception) {
-                    AppLog.i("sending ${txt.name} to Fridolin failed, will retry: ${e.message}")
-                    break
-                }
+        if (Fridolin.enabled) uploading.run { uploadPass() }
+    }
+
+    private suspend fun uploadPass() {
+        for (txt in outboxDir.listFiles().orEmpty().sortedBy { it.name }) {
+            try {
+                withContext(Dispatchers.IO) { Fridolin.upload(this@SyncService, txt.nameWithoutExtension, txt.readBytes()) }
+                txt.delete()
+                AppLog.i("sent ${txt.name} to Fridolin")
+            } catch (e: Exception) {
+                AppLog.i("sending ${txt.name} to Fridolin failed, will retry: ${e.message}")
+                break
             }
-        } finally {
-            uploading.unlock()
         }
     }
 

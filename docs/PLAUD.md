@@ -100,7 +100,9 @@ The site checks the signature to turn junk away, and Fridolin checks it
 again, since module code runs in the site's process; it keeps only the
 phones' public keys. A transcript that passes goes into
 `<data_dir>/plaud/inbox/` and from there to the brain at once, as described
-below. A phone offline meanwhile keeps its transcripts and sends them later.
+below. A phone offline meanwhile keeps its transcripts and sends them later:
+with each check-in with the pin, and when the app is opened, it tries again
+what still waits, recordings to transcribe as well as transcripts to send.
 
 The card lists the paired phones; **Unpair** refuses a phone's uploads from
 then on. The developer keys are inside the app too, so keep the APK to
