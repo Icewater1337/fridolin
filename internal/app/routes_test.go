@@ -308,6 +308,12 @@ var routeInventory = []httpRoute{
 	{"DELETE", "/api/connections/{id}", classAPI, "/api/connections/openai"},
 	{"PUT", "/api/connections/{id}/brains", classAPI, "/api/connections/openai/brains"},
 	{"POST", "/api/connections/{id}/check", classAPI, "/api/connections/openai/check"},
+	{"GET", "/api/gitlab", classAPI, ""},
+	{"PUT", "/api/gitlab", classAPI, ""},
+	{"DELETE", "/api/gitlab", classAPI, ""},
+	{"POST", "/api/gitlab/check", classAPI, ""},
+	{"PUT", "/api/github/identity", classAPI, ""},
+	{"GET", "/api/git-identities", classAPI, ""},
 	{"POST", "/api/dev/inbound", classAPI, ""},
 	{"GET", "/api/dev/outbox", classAPI, ""},
 	{"POST", "/api/dev/vote", classAPI, ""},
@@ -419,6 +425,7 @@ var reachesOutside = map[string]bool{
 	"POST /api/github/test":            true,
 	"POST /api/site/check-domain":      true,
 	"POST /api/connections/{id}/check": true,
+	"POST /api/gitlab/check":           true,
 }
 
 // TestRouteInventoryGuards probes every route of the inventory for the
@@ -441,7 +448,7 @@ func TestRouteInventoryGuards(t *testing.T) {
 	// What a GET must never show: the dashboard token, and the secrets
 	// the golden bridge holds (the Google client's, the calendar token's,
 	// the OpenAI key).
-	secrets := []string{token, "TEST-CLIENT-SECRET", "golden-refresh-token", "golden-access-token", goldenOpenAIKey}
+	secrets := []string{token, "TEST-CLIENT-SECRET", "golden-refresh-token", "golden-access-token", goldenOpenAIKey, goldenGitLabToken}
 
 	request := func(method, path, body string, mutate ...func(*http.Request)) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, "http://"+config.DefaultHTTPListen+path, strings.NewReader(body))

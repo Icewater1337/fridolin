@@ -1,0 +1,25 @@
+GET /api/git-identities
+200 OK
+Content-Type: application/json
+
+{
+  "identities": [
+    {
+      "email": "you@example.com",
+      "host": "github.com",
+      "id": "github",
+      "kind": "github",
+      "name": "Jane Doe",
+      "set": false
+    },
+    {
+      "email": "jane@example.com",
+      "host": "gitlab.example.com",
+      "id": "gitlab",
+      "kind": "gitlab",
+      "name": "Jane Doe",
+      "set": true
+    }
+  ],
+  "nodes": []
+}

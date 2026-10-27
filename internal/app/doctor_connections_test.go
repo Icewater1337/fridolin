@@ -44,6 +44,32 @@ func TestDoctorConnectionChecks(t *testing.T) {
 	}
 }
 
+// The GitLab check applies where the connection is kept on this machine,
+// core/local-secrets, and warns when GitLab refuses the token.
+func TestDoctorGitLabCheck(t *testing.T) {
+	t.Parallel()
+	gitlab := connectionDoctorChecks[2]
+	if gitlab.ID != "gitlab" || gitlab.Required || gitlab.Title != "GitLab connection" {
+		t.Fatalf("check %+v", gitlab)
+	}
+	s := healthyMac()
+	if gitlab.Applies(s.doctorEnv(doctorConfig(nil), nil)) {
+		t.Error("applies without a connection")
+	}
+	s.files = map[string]fs.FileMode{"/home/you/.fridolin/core/local-secrets/gitlab.json": 0o600}
+	env := s.doctorEnv(doctorConfig(nil), nil)
+	if !gitlab.Applies(env) {
+		t.Fatal("does not apply with a connection")
+	}
+	s.connErr = map[string]error{"gitlab": errors.New("GitLab says the token is wrong or expired (401)")}
+	if r := gitlab.Run(context.Background(), s.doctorEnv(doctorConfig(nil), nil)); r.Status != doctor.Warn || !strings.Contains(r.Detail, "401") || !strings.Contains(r.Fix, "write_repository") {
+		t.Errorf("refused: %+v", r)
+	}
+	if _, err := checkConnectionKey(context.Background(), t.TempDir(), "gitlab"); err == nil || !strings.Contains(err.Error(), "no GitLab connection") {
+		t.Errorf("without a connection: %v", err)
+	}
+}
+
 // checkConnectionKey reads the key from the data dir's connections/;
 // without one it asks no one. (With one it would ask the real provider,
 // which no test may: internal/connections tests the check on fakes.)

@@ -105,6 +105,13 @@ func goldenBridge(t *testing.T) (h *harness, s *scrubber, fakes string) {
 	if w := h.Do("PUT", "/api/connections/openai/brains", map[string]any{"brains": []string{"main"}, "brain_monthly_usd": 10}); w.Code != http.StatusOK {
 		t.Fatalf("the OpenAI brains: %d %s", w.Code, w.Body.String())
 	}
+	// A GitLab connection, kept on this machine, and GitHub's commit name.
+	if w := h.Do("PUT", "/api/gitlab", map[string]string{"base_url": "https://gitlab.example.com", "token": goldenGitLabToken, "name": "Jane Doe", "email": "jane@example.com"}); w.Code != http.StatusOK {
+		t.Fatalf("the GitLab connection: %d %s", w.Code, w.Body.String())
+	}
+	if w := h.Do("PUT", "/api/github/identity", map[string]string{"name": "Jane Doe", "email": "you@example.com"}); w.Code != http.StatusOK {
+		t.Fatalf("the GitHub identity: %d %s", w.Code, w.Body.String())
+	}
 
 	h.Inject(inbound{JID: harnessDM, Text: "hello"})
 	h.WaitSent(harnessDM, "hello")
@@ -208,6 +215,8 @@ func TestGoldenGETEndpoints(t *testing.T) {
 		{"fride", "/api/fride", nil},
 		// This month.
 		{"connections", "/api/connections", []string{"month"}},
+		{"gitlab", "/api/gitlab", nil},
+		{"git-identities", "/api/git-identities", nil},
 		{"brain-skills", "/api/brains/main/skills", nil},
 		{"brain-skills-unknown-brain", "/api/brains/nope/skills", nil},
 		{"unknown-endpoint", "/api/nope", nil},
