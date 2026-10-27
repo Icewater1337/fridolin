@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
 
 	"github.com/Icewater1337/fridolin/internal/nodeagent"
 )
@@ -19,6 +21,23 @@ turned off here:
 The running node agent sees the change within minutes. The core asks the
 owner to approve the capability before it uses it.
 `
+
+// findSbx is where `fridolin node run` looks for sbx: the PATH, then
+// where Homebrew puts it (a launchd agent's PATH is plain). "" for
+// nowhere. The agent is told sbx's path only from here
+// (nodeagent.Agent.SandboxSbx), so that agents made in tests never run
+// the machine's sbx.
+func findSbx() string {
+	if p, err := exec.LookPath("sbx"); err == nil {
+		return p
+	}
+	for _, p := range []string{"/opt/homebrew/bin/sbx", "/usr/local/bin/sbx"} {
+		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() && fi.Mode()&0o111 != 0 {
+			return p
+		}
+	}
+	return ""
+}
 
 // nodeSandbox runs `fridolin node sandbox`.
 func nodeSandbox(pos []string, dir string, pkg appPackage, stdout, stderr io.Writer) int {

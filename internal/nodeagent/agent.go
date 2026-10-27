@@ -99,7 +99,7 @@ type Agent struct {
 	CoreScan                            func() []string
 	MovePoll, MoveGrace, MoveExportWait time.Duration
 	// SandboxSbx is the sbx binary of the sandbox capability ("" for
-	// none, so no sandbox; `node run` sets what FindSbx finds);
+	// none, so no sandbox; `node run` sets what it finds);
 	// SandboxDriver, when set, runs sbx instead (tests).
 	// The Claude token for runs comes from CoreSecrets, the host's store.
 	SandboxSbx    string

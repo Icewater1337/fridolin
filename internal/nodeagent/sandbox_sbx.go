@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"os"
 	"os/exec"
 	"slices"
 	"strings"
@@ -31,7 +30,7 @@ type sbxCLI struct {
 
 func (s sbxCLI) cmd(ctx context.Context, stdin io.Reader, env []string, args []string) *exec.Cmd {
 	c := exec.CommandContext(ctx, s.path, args...)
-	c.Env = slices.Concat(sbxEnv(os.Environ()), s.env, env)
+	c.Env = slices.Concat(sbxEnv(c.Environ()), s.env, env)
 	if stdin == nil {
 		stdin = strings.NewReader("")
 	}
@@ -72,22 +71,6 @@ func (s sbxCLI) start(stdin io.Reader, stdout, stderr io.Writer, env []string, a
 		return nil, err
 	}
 	return c, nil
-}
-
-// FindSbx is where `fridolin node run` looks for sbx: the PATH, then
-// where Homebrew puts it (a launchd agent's PATH is plain). "" for
-// nowhere. An agent is only told sbx's path by its caller (SandboxSbx),
-// so that agents made in tests never run the machine's sbx.
-func FindSbx() string {
-	if p, err := exec.LookPath("sbx"); err == nil {
-		return p
-	}
-	for _, p := range []string{"/opt/homebrew/bin/sbx", "/usr/local/bin/sbx"} {
-		if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() && fi.Mode()&0o111 != 0 {
-			return p
-		}
-	}
-	return ""
 }
 
 // firstLine is the first line of b, trimmed and cut short: what an sbx

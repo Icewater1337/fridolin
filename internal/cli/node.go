@@ -203,7 +203,7 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 			home, _ := os.UserHomeDir()
 			a.CoreSecrets, a.CoreSecretsPlace = nodeagent.HostSecretStore(runtime.GOOS, os.Getenv, home)
 			// Docker Sandboxes, where sbx is installed (and not turned off).
-			a.SandboxSbx = nodeagent.FindSbx()
+			a.SandboxSbx = findSbx()
 		}
 		if a.Config.Box != nil {
 			if err := boxCoreRunner(a, exe, dir); err != nil {
