@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/Icewater1337/fridolin/internal/nodeagent"
 	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
@@ -22,10 +23,17 @@ Usage:
                   but fride, runs from its own copy of fridolin and as a service
                   of its own (fridolin-node-fride-sandbox; --no-service: none)
   fridolin node fride sandbox create [--repo DIR] [--base DIR] [--git-name NAME --git-email EMAIL]
+                  [--docker-disk 40g] [--no-caches]
                   build the template, make the sandbox fride-sandbox (6 GB,
                   127.0.0.1:17850, egress for GitHub, Go, npm and Anthropic, --base
-                  mounted read-write; default ~/fride-sandbox/repos) and build FrIDE
-                  inside at the commit the checkout in --repo pins (default: .)
+                  mounted read-write; default ~/fride-sandbox/repos; a 40 GB Docker
+                  disk; Go and npm caches in ~/.cache/fridolin-sbx, shared with the
+                  next sandbox) and build FrIDE inside at the commit the checkout in
+                  --repo pins (default: .); with gh logged in, also what github does
+  fridolin node fride sandbox github [--token-stdin] [--remove]
+                  give the sandbox GitHub: this machine's gh auth token (or stdin)
+                  goes to sbx's proxy, never into the VM, so that gh and git over
+                  https work inside; again after gh auth refresh; --remove takes it
   fridolin node fride sandbox login [--setup-token]
                   the Claude login of FrIDE's agents: paste the token claude
                   setup-token printed (not shown), or pipe it in; --setup-token runs
@@ -35,11 +43,15 @@ Usage:
   fridolin node fride sandbox stop
                   stop FrIDE; the agent no longer starts it
   fridolin node fride sandbox update [--repo DIR]
-                  build FrIDE again at the commit the checkout pins, and restart it
+                  build FrIDE again at the commit the checkout pins, and restart it;
+                  when the checkout's template changed, make the sandbox anew from
+                  it and carry its workspaces, sessions, FrIDE's tasks and login over
   fridolin node fride sandbox status
                   the sandbox, FrIDE, the pairing, the login
-  fridolin node fride sandbox rm [--yes]
-                  remove the sandbox, with its workspaces (asks first)
+  fridolin node fride sandbox rm [--yes] [--no-history]
+                  save the agents' sessions and FrIDE's tasks to the state dir
+                  (create puts them back), then remove the sandbox, with its
+                  workspaces (asks first)
 
 Flags:
   --state-dir DIR   the sandboxed FrIDE's node (default: the node's state dir with -sbx)
@@ -49,8 +61,9 @@ Flags:
 // frideSandboxFlags are the flags of fridolin node fride sandbox.
 type frideSandboxFlags struct {
 	stateDir, repo, base, frideRepo, gitName, gitEmail string
-	core, name                                         string
-	setupToken, yes, noService                         bool
+	core, name, dockerDisk                             string
+	setupToken, yes, noService, noCaches               bool
+	remove, tokenStdin, noHistory                      bool
 }
 
 // frideSandboxStateDir is the sandboxed FrIDE's node's default state dir:
@@ -87,11 +100,17 @@ func nodeFrideSandboxCmd(args []string, stdout, stderr io.Writer) int {
 		fs.StringVar(&f.gitEmail, "git-email", "", "the git email FrIDE's agents commit with")
 		if sub == "create" {
 			fs.StringVar(&f.base, "base", "", "the host folder for FrIDE's repositories")
+			fs.StringVar(&f.dockerDisk, "docker-disk", nodeagent.DefaultFrideSandboxDockerDisk, "the size of the sandbox's Docker disk")
+			fs.BoolVar(&f.noCaches, "no-caches", false, "no Go and npm caches shared with other sandboxes")
 		}
+	case "github":
+		fs.BoolVar(&f.tokenStdin, "token-stdin", false, "read the token from stdin instead of gh auth token")
+		fs.BoolVar(&f.remove, "remove", false, "take GitHub's token from the sandbox")
 	case "login":
 		fs.BoolVar(&f.setupToken, "setup-token", false, "run claude setup-token in the sandbox first")
 	case "rm":
 		fs.BoolVar(&f.yes, "yes", false, "do not ask")
+		fs.BoolVar(&f.noHistory, "no-history", false, "do not save the agents' sessions and FrIDE's tasks first")
 	case "start", "stop", "status":
 	default:
 		fmt.Fprintf(stderr, "unknown node fride sandbox command %q\n\n%s", sub, nodeFrideSandboxUsage)

@@ -38,7 +38,7 @@ func FrideSandboxStatus(ctx context.Context, o FrideSandboxOptions) (FrideSandbo
 		r.Sandbox = status
 	}
 	if r.Sandbox == "running" {
-		args := append([]string{"exec", FrideSandboxName}, frideSandboxScript(frideSandboxStatus)...)
+		args := append([]string{"exec", o.sandbox()}, frideSandboxScript(frideSandboxStatus)...)
 		if out, _, err := o.sbx().run(ctx, nil, nil, args...); err == nil {
 			r.Inside = parseKeyValues(out)
 		}

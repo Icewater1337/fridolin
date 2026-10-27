@@ -20,10 +20,9 @@ import (
 // FrIDE, which the first time downloads a few GB.
 func frideSandboxTimeout(sub string) time.Duration {
 	switch sub {
-	case "create":
+	case "create", "update":
+		// update makes the sandbox anew when the template changed.
 		return 45 * time.Minute
-	case "update":
-		return 15 * time.Minute
 	case "start":
 		return 5 * time.Minute
 	}
@@ -93,6 +92,8 @@ func frideSandbox(sub string, f frideSandboxFlags, dir, sbx string, stdout, stde
 		fmt.Fprintln(stdout, "Updated the sandboxed FrIDE.")
 	case "login":
 		return frideSandboxLogin(ctx, o, f, stdout, fail)
+	case "github":
+		return frideSandboxGitHub(ctx, o, f, stdout, fail)
 	case "start":
 		info, err := nodeagent.FrideSandboxStart(ctx, o)
 		if err != nil {
@@ -129,9 +130,18 @@ func frideSandboxCreate(ctx context.Context, o nodeagent.FrideSandboxOptions, f 
 	if o.Base, err = filepath.Abs(platform.ExpandHome(base)); err != nil {
 		return fail("%v", err)
 	}
+	o.DockerDisk = f.dockerDisk
+	if !f.noCaches {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fail("%v; pass --no-caches", err)
+		}
+		o.Caches = filepath.Join(home, ".cache", "fridolin-sbx")
+	}
 	if err := nodeagent.FrideSandboxCreate(ctx, o); err != nil {
 		return fail("%v", err)
 	}
+	frideSandboxGitHubAfterCreate(ctx, o, o.Out)
 	return 0
 }
 
@@ -142,13 +152,15 @@ func frideSandboxRemove(ctx context.Context, o nodeagent.FrideSandboxOptions, f 
 		if term.readLine == nil {
 			return fail("removing the sandbox removes its workspaces and any work in them that is not committed: pass --yes")
 		}
-		fmt.Fprintf(stderr, "This removes the sandbox %s with FrIDE's workspaces and any work in them that is not committed; the repositories on this Mac stay.\n", nodeagent.FrideSandboxName)
+		fmt.Fprintf(stderr, "This removes the sandbox %s with FrIDE's workspaces and any work in them that is not committed; the repositories on this Mac stay. %s\n",
+			nodeagent.FrideSandboxName, yesNo(f.noHistory, "The agents' sessions and FrIDE's tasks go with it (--no-history).", "The agents' sessions and FrIDE's tasks are saved first; create puts them back."))
 		answer, err := term.readLine("Remove it? [y/N] ")
 		if err != nil || !strings.EqualFold(answer, "y") && !strings.EqualFold(answer, "yes") {
 			fmt.Fprintln(stdout, "Nothing removed.")
 			return 1
 		}
 	}
+	o.SkipHistory = f.noHistory
 	if err := nodeagent.FrideSandboxRemove(ctx, o); err != nil {
 		return fail("%v", err)
 	}

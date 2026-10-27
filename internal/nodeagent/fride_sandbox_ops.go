@@ -18,7 +18,10 @@ const frideSandboxWait = 3 * time.Minute
 
 // FrideSandboxUpdate builds FrIDE again in the sandbox at the commit the
 // checkout pins, and has the agent start the new one when FrIDE runs.
-// The sandbox, its workspaces and FrIDE's config stay.
+// The sandbox, its workspaces and FrIDE's config stay. When the
+// checkout's template differs from the sandbox's, it makes the sandbox
+// anew from it and carries over its workspaces, history and login
+// (recreate), and finishes such a carry an earlier update left.
 func FrideSandboxUpdate(ctx context.Context, o FrideSandboxOptions) error {
 	st, err := o.loadMade()
 	if err != nil {
@@ -28,16 +31,26 @@ func FrideSandboxUpdate(ctx context.Context, o FrideSandboxOptions) error {
 	if err != nil {
 		return err
 	}
-	if status, err := o.sandboxStatus(ctx); err != nil {
+	tag, err := FrideSandboxTemplateTag(o.Repo)
+	if err != nil {
 		return err
-	} else if status == "" {
-		return fmt.Errorf("sbx has no sandbox %s any more: fridolin node fride sandbox rm, then create", FrideSandboxName)
 	}
-	if tag, err := FrideSandboxTemplateTag(o.Repo); err == nil && tag != st.Template {
-		fmt.Fprintf(o.Out, "Note: the template changed (%s, the sandbox has %s). update builds FrIDE only; for the new template, rm and create the sandbox (its workspaces go with it).\n", tag, st.Template)
+	status, err := o.sandboxStatus(ctx)
+	if err != nil {
+		return err
 	}
 	if o.FrideRepo != "" {
 		st.Repo = o.FrideRepo
+	}
+	switch {
+	case status == "" && o.carrying():
+		fmt.Fprintf(o.Out, "An earlier update left the sandbox's things in %s; making the sandbox from %s and putting them back…\n", o.carryDir(), tag)
+		return o.recreate(ctx, st, status, tag, commit)
+	case status == "":
+		return fmt.Errorf("sbx has no sandbox %s any more: fridolin node fride sandbox rm, then create", o.sandbox())
+	case tag != st.Template:
+		fmt.Fprintf(o.Out, "The template changed (%s, the sandbox has %s): making the sandbox anew, with its workspaces, sessions, FrIDE's tasks and login…\n", tag, st.Template)
+		return o.recreate(ctx, st, status, tag, commit)
 	}
 	if o.GitName != "" || o.GitEmail != "" {
 		if err := o.gitIdentity(ctx); err != nil {
@@ -132,7 +145,7 @@ func waitAnswers(ctx context.Context, url string, wait time.Duration) error {
 // pairCode is a pairing code from FrIDE in the sandbox. It is never
 // printed or logged.
 func (o FrideSandboxOptions) pairCode(ctx context.Context) (string, error) {
-	out, stderr, err := o.sbx().run(ctx, nil, nil, append([]string{"exec", FrideSandboxName}, frideSandboxScript(frideSandboxPairCode)...)...)
+	out, stderr, err := o.sbx().run(ctx, nil, nil, append([]string{"exec", o.sandbox()}, frideSandboxScript(frideSandboxPairCode)...)...)
 	if err != nil {
 		return "", fmt.Errorf("fride pair-companion in the sandbox: %w", sbxError(err, stderr))
 	}
@@ -162,8 +175,9 @@ func FrideSandboxStop(ctx context.Context, o FrideSandboxOptions) error {
 	return o.exec(ctx, nil, frideSandboxStop)
 }
 
-// FrideSandboxRemove removes the sandbox, with its workspaces, and the
-// state; the base folder and the node's pairing stay.
+// FrideSandboxRemove saves the history (unless SkipHistory), then
+// removes the sandbox, with its workspaces, and the state; the base
+// folder, the history, the host tokens and the node's pairing stay.
 func FrideSandboxRemove(ctx context.Context, o FrideSandboxOptions) error {
 	if st, err := LoadFrideSandbox(o.Dir); err == nil && st != nil && st.Run {
 		st.Run = false
@@ -175,9 +189,14 @@ func FrideSandboxRemove(ctx context.Context, o FrideSandboxOptions) error {
 	if err != nil {
 		return err
 	}
+	if status != "" && !o.SkipHistory {
+		if err := o.saveHistory(ctx, status); err != nil {
+			return fmt.Errorf("%w; nothing removed (--no-history removes it without saving)", err)
+		}
+	}
 	if status != "" {
-		if _, stderr, err := o.sbx().run(ctx, nil, nil, "rm", "-f", FrideSandboxName); err != nil {
-			return fmt.Errorf("sbx could not remove %s: %w", FrideSandboxName, sbxError(err, stderr))
+		if _, stderr, err := o.sbx().run(ctx, nil, nil, "rm", "-f", o.sandbox()); err != nil {
+			return fmt.Errorf("sbx could not remove %s: %w", o.sandbox(), sbxError(err, stderr))
 		}
 	}
 	return removeFrideSandbox(o.Dir)
@@ -194,7 +213,7 @@ func FrideSandboxLogin(ctx context.Context, o FrideSandboxOptions, token string)
 		return err
 	}
 	if _, stderr, err := o.sbx().run(ctx, strings.NewReader(tok+"\n"), nil,
-		append([]string{"exec", "-i", FrideSandboxName}, frideSandboxScript(frideSandboxLogin)...)...); err != nil {
+		append([]string{"exec", "-i", o.sandbox()}, frideSandboxScript(frideSandboxLogin)...)...); err != nil {
 		return fmt.Errorf("storing the token in the sandbox: %w", sbxError(err, lastLineOf(stderr)))
 	}
 	return nil
@@ -203,7 +222,7 @@ func FrideSandboxLogin(ctx context.Context, o FrideSandboxOptions, token string)
 // FrideSandboxSetupToken is `claude setup-token` in the sandbox, on the
 // terminal of the person who runs it.
 func FrideSandboxSetupToken(o FrideSandboxOptions) *exec.Cmd {
-	c := exec.Command(o.Sbx, "exec", "-it", FrideSandboxName, "claude", "setup-token")
+	c := exec.Command(o.Sbx, "exec", "-it", o.sandbox(), "claude", "setup-token")
 	c.Env = append(sbxEnv(c.Environ()), o.env...)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	return c
@@ -233,4 +252,20 @@ func CheckClaudeToken(token string) (string, error) {
 		return "", errors.New("that has characters a token never has (copied with other text?)")
 	}
 	return tok, nil
+}
+
+// saveHistory ends FrIDE, so that its state rests, and saves the history
+// into the history folder.
+func (o FrideSandboxOptions) saveHistory(ctx context.Context, status string) error {
+	if status == "running" {
+		if err := o.exec(ctx, nil, frideSandboxStop); err != nil {
+			return err
+		}
+	}
+	n, err := o.saveVM(ctx, o.historyDir(), frideSandboxHistory)
+	if err != nil {
+		return fmt.Errorf("saving the history: %w", err)
+	}
+	fmt.Fprintf(o.Out, "Saved %d folders and files of history (the agents' sessions, FrIDE's tasks) to %s; create puts them back.\n", n, o.historyDir())
+	return nil
 }

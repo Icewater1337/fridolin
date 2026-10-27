@@ -45,6 +45,12 @@ func TestNodeFrideSandbox(t *testing.T) {
 	if code, e := call("login", frideSandboxFlags{}, "/nonexistent/sbx"); code != 1 || !strings.Contains(e, "create first") {
 		t.Errorf("login without a sandbox: %d %q", code, e)
 	}
+	if code, e := call("github", frideSandboxFlags{tokenStdin: true}, "/nonexistent/sbx"); code != 1 || !strings.Contains(e, "create first") {
+		t.Errorf("github without a sandbox: %d %q", code, e)
+	}
+	if code, _, e := run("github", "--remove", "--token-stdin", "--state-dir", dir, "extra"); code != 2 {
+		t.Errorf("github with an argument: %d %q", code, e)
+	}
 	if code, e := call("rm", frideSandboxFlags{}, "/nonexistent/sbx"); code != 1 || !strings.Contains(e, "--yes") {
 		t.Errorf("rm without --yes and no terminal: %d %q", code, e)
 	}

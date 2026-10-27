@@ -29,6 +29,27 @@ for compatibility.
   `PUT /api/github/identity`, `GET /api/git-identities`. See
   docs/CONNECTIONS.md, "GitLab", and docs/NODES.md, "Git identities for
   FrIDE".
+- **GitHub, a bigger Docker disk, shared caches and kept history for the
+  sandboxed FrIDE** (#149).
+  - `fridolin node fride sandbox github` gives the sandbox the Mac's `gh
+    auth token` (or one on stdin with `--token-stdin`; `--remove` takes
+    it): sbx's github service and a placeholder for git, scoped to the
+    sandbox. FrIDE's agents push and use `gh` inside; the token never
+    enters the VM. `create` does it when `gh` is logged in.
+  - The same works for any git host, such as a self-hosted GitLab, in
+    the node's code (`setHostToken`): a placeholder that sbx's proxy
+    swaps for the token in Bearer headers and in git's Basic auth.
+  - `create` makes the sandbox's Docker disk 40 GB (`--docker-disk`),
+    and shares Go's and npm's caches in `~/.cache/fridolin-sbx` with the
+    next sandbox (`--no-caches`). The Mac never reads them.
+  - `rm` saves the agents' sessions and FrIDE's tasks to the node's
+    state dir first (`--no-history` does not), and `create` puts them
+    back.
+  - `update` with a new template now makes the sandbox anew and keeps
+    its workspaces, sessions, tasks and login, where it used to only say
+    that `rm` and `create` were needed.
+
+  See docs/NODES.md, "FrIDE in a Docker Sandbox".
 - **GitHub in a brain's Docker Sandbox** (#149). A run with a GitHub
   grant now gets its token in a Docker Sandbox too. The core sends it in
   `sandbox.run`'s new `github_token`, and the node stores it as the

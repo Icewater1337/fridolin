@@ -34,6 +34,7 @@ func frideSandboxFixture(t *testing.T) (FrideSandboxOptions, string, *bytes.Buff
 		writeTestFile(t, filepath.Join(repo, filepath.FromSlash(name)), body)
 	}
 	writeTestFile(t, filepath.Join(fake, "templates.json"), "[]")
+	writeTestFile(t, filepath.Join(fake, "fride-fake"), "")
 	if err := SaveConfig(dir, Config{Core: "core:8766", Name: "mac-sbx", Service: FrideSandboxService}); err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +42,8 @@ func frideSandboxFixture(t *testing.T) (FrideSandboxOptions, string, *bytes.Buff
 	exe := testExe(t)
 	return FrideSandboxOptions{Dir: dir, Sbx: exe, Docker: exe, Repo: repo, Base: filepath.Join(t.TempDir(), "repos"),
 		FrideRepo: "https://github.com/you/fride", GitName: "You", GitEmail: "you@example.com", Out: out,
-		env: []string{"FAKE_SBX_DIR=" + fake, "FAKE_DOCKER_DIR=" + fake}, url: "http://127.0.0.1:1", wait: time.Second}, fake, out
+		Caches: filepath.Join(t.TempDir(), "caches"),
+		env:    []string{"FAKE_SBX_DIR=" + fake, "FAKE_DOCKER_DIR=" + fake}, url: "http://127.0.0.1:1", wait: time.Second}, fake, out
 }
 
 func writeTestFile(t *testing.T, path, body string) {
@@ -85,10 +87,21 @@ func TestFrideSandboxCreate(t *testing.T) {
 	if st.Base != base || st.Template != tag || st.Commit != testFridePin || st.Repo != o.FrideRepo || st.Run || st.Built.IsZero() {
 		t.Errorf("state %+v", st)
 	}
+	caches, _ := filepath.EvalSymlinks(o.Caches)
+	if st.DockerDisk != "40g" || st.Caches != caches || fakeFile(fake, "../disk.log") != "40g\n" {
+		t.Errorf("Docker disk %q (sbx got %q), caches %q", st.DockerDisk, fakeFile(fake, "../disk.log"), st.Caches)
+	}
+	for _, d := range []string{"gomod", "gobuild", "npm"} {
+		if fi, err := os.Stat(filepath.Join(caches, d)); err != nil || !fi.IsDir() {
+			t.Errorf("the cache %s: %v", d, err)
+		}
+	}
 	calls := fakeCalls(t, fake)
 	for _, want := range [][]string{
 		{"template", "load"},
-		{"create", "--name", "fride-sandbox", "--memory", "6g", "-t", tag, "--pull", "never", "-p", "127.0.0.1:17850:17850", "claude", base},
+		{"create", "--name", "fride-sandbox", "--memory", "6g", "-t", tag, "--pull", "never", "-p", "127.0.0.1:17850:17850",
+			"-e", "GOMODCACHE=" + caches + "/gomod", "-e", "GOCACHE=" + caches + "/gobuild", "-e", "npm_config_cache=" + caches + "/npm",
+			"-e", "GOFLAGS=-modcacherw", "claude", base, caches},
 		{"policy", "allow", "network", "--sandbox", "fride-sandbox", "localhost:17851"},
 		{"policy", "deny", "network", "--sandbox", "fride-sandbox", "downloads.claude.ai"},
 	} {
@@ -202,7 +215,7 @@ func TestFrideSandboxSupervise(t *testing.T) {
 }
 
 // update builds FrIDE again at the checkout's new pin, keeps the sandbox,
-// and the agent starts the new FrIDE; a changed template is only noted.
+// and the agent starts the new FrIDE.
 func TestFrideSandboxUpdate(t *testing.T) {
 	t.Parallel()
 	o, fake, out := createdSandbox(t)
@@ -215,7 +228,6 @@ func TestFrideSandboxUpdate(t *testing.T) {
 	waitFor(t, "FrIDE to run", func() bool { return lines(fakeFile(fake, "serves.log")) == 1 })
 	const newPin = "1111111111111111111111111111111111111111"
 	writeTestFile(t, filepath.Join(o.Repo, filepath.FromSlash(frideImageDockerfile)), "ARG FRIDE_COMMIT="+newPin+"\n")
-	writeTestFile(t, filepath.Join(o.Repo, filepath.FromSlash(frideSandboxDockerfile)), "FROM y\n")
 	out.Reset()
 	o.GitName, o.GitEmail = "New Name", ""
 	if err := FrideSandboxUpdate(context.Background(), o); err != nil {
@@ -227,8 +239,8 @@ func TestFrideSandboxUpdate(t *testing.T) {
 	if got, _ := LoadFrideSandbox(o.Dir); got.Commit != newPin || !got.Run || got.Template != st.Template {
 		t.Errorf("state after update: %+v", got)
 	}
-	if !strings.Contains(out.String(), "the template changed") || called(fakeCalls(t, fake), "rm") {
-		t.Errorf("update with a new template:\n%s", out)
+	if called(fakeCalls(t, fake), "rm") {
+		t.Errorf("update with the same template made the sandbox anew:\n%s", out)
 	}
 	waitFor(t, "the new FrIDE to run", func() bool { return lines(fakeFile(fake, "serves.log")) == 2 })
 	if n := lines(fakeFile(fake, "stops.log")); n != 1 {

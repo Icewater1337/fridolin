@@ -67,6 +67,9 @@ func frideSandboxStatus(ctx context.Context, o nodeagent.FrideSandboxOptions, st
 	fmt.Fprintf(stdout, "Sandbox: %s, %s (template %s)\n", st.Name, orDash(r.Sandbox), st.Template)
 	fmt.Fprintf(stdout, "FrIDE: %s from %s, built %s\n", orDash(st.Commit), st.Repo, st.Built.Local().Format("2006-01-02 15:04"))
 	fmt.Fprintf(stdout, "Repositories: %s\n", st.Base)
+	fmt.Fprintf(stdout, "Docker disk: %s; caches: %s\n", orDash(st.DockerDisk), yesNo(st.Caches != "", st.Caches, "none"))
+	fmt.Fprintf(stdout, "Git hosts with a token: %s\n", yesNo(len(nodeagent.FrideSandboxHosts(o)) > 0,
+		strings.Join(nodeagent.FrideSandboxHosts(o), ", "), "none (fridolin node fride sandbox github)"))
 	fmt.Fprintf(stdout, "Kept running: %s\n", yesNo(st.Run, "yes", "no (fridolin node fride sandbox start)"))
 	fmt.Fprintf(stdout, "Answers: %s\n", yesNo(r.Answers, "yes, at http://127.0.0.1:17850", "no"))
 	fmt.Fprintf(stdout, "Paired: %s\n", yesNo(r.Paired, "yes, repositories "+orNone(r.Repos), "no (start pairs)"))
