@@ -51,6 +51,9 @@ func (s *gitIdentityService) Start(ctx context.Context) {
 // name, the GitHub app.
 func (s *gitIdentityService) changed() {
 	if s != nil {
+		s.mu.Lock()
+		s.ghAt = time.Time{}
+		s.mu.Unlock()
 		s.kick("", false)
 	}
 }

@@ -118,9 +118,18 @@ func (g *githubService) FrideToken(ctx context.Context) (string, time.Time, erro
 	if cached.Value != "" && cached.ExpiresAt.Sub(g.now()) > githubFrideReuse {
 		return cached.Value, cached.ExpiresAt, nil
 	}
+	// GitHub not answering now does not take the FrIDEs' token away
+	// while it lasts.
+	keep := func(err error) (string, time.Time, error) {
+		if cached.Value != "" && cached.ExpiresAt.Sub(g.now()) > 5*time.Minute {
+			g.log.Warn("github: no new token for FrIDE; the one it has lasts a while yet", "err", err)
+			return cached.Value, cached.ExpiresAt, nil
+		}
+		return "", time.Time{}, err
+	}
 	insts, err := g.readInstallations(ctx, creds)
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("asking GitHub where the app is installed: %w", err)
+		return keep(fmt.Errorf("asking GitHub where the app is installed: %w", err))
 	}
 	insts = slices.DeleteFunc(slices.Clone(insts), func(in ghapp.Installation) bool { return in.Suspended })
 	if len(insts) == 0 {
@@ -135,7 +144,7 @@ func (g *githubService) FrideToken(ctx context.Context) (string, time.Time, erro
 	}
 	tok, err := g.client.Mint(ctx, creds, in.ID, nil, nil)
 	if err != nil {
-		return "", time.Time{}, fmt.Errorf("minting a GitHub token for FrIDE: %w", err)
+		return keep(fmt.Errorf("minting a GitHub token for FrIDE: %w", err))
 	}
 	if tok.ExpiresAt.IsZero() {
 		tok.ExpiresAt = g.now().Add(time.Hour)

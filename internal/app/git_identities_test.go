@@ -161,6 +161,61 @@ func TestGitLabConnection(t *testing.T) {
 	}
 }
 
+// TestGitHubFrideToken: FrIDE gets an installation token only from an app
+// that may write code; it is handed out again while it lasts more than 30
+// minutes, minted anew after, and kept while GitHub does not answer.
+func TestGitHubFrideToken(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, "")
+	g := h.b.github
+	ctx := context.Background()
+	if _, _, err := g.FrideToken(ctx); err == nil || !strings.Contains(err.Error(), "not connected") {
+		t.Fatalf("without an app: %v", err)
+	}
+	fake := useFakeGitHub(t, g)
+	creds, err := g.client.Convert(ctx, ghapptest.Code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := g.secrets.save(creds); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := g.FrideToken(ctx); err == nil || !strings.Contains(err.Error(), "Contents: Read and write") {
+		t.Fatalf("an app that may only read code: %v", err)
+	}
+	fake.SetPermissions(map[string]string{"contents": "write", "metadata": "read"})
+	g.forgetStatus()
+	tok, exp, err := g.FrideToken(ctx)
+	if err != nil || tok == "" || time.Until(exp) < 50*time.Minute {
+		t.Fatalf("the token: %q %v %v", tok, exp, err)
+	}
+	if again, _, _ := g.FrideToken(ctx); again != tok || len(fake.Live()) != 1 {
+		t.Errorf("not handed out again: %q, %d minted", again, len(fake.Live()))
+	}
+	g.mu.Lock()
+	g.frideTok.ExpiresAt = time.Now().Add(20 * time.Minute)
+	g.mu.Unlock()
+	fresh, _, err := g.FrideToken(ctx)
+	if err != nil || fresh == tok {
+		t.Fatalf("with 20 minutes left: %q %v", fresh, err)
+	}
+	// GitHub does not answer: the token FrIDE has stays while it lasts.
+	g.client.API = "http://127.0.0.1:9"
+	g.forgetStatus()
+	g.mu.Lock()
+	g.frideTok.ExpiresAt = time.Now().Add(20 * time.Minute)
+	g.mu.Unlock()
+	if kept, _, err := g.FrideToken(ctx); err != nil || kept != fresh {
+		t.Errorf("GitHub away: %q %v", kept, err)
+	}
+	g.mu.Lock()
+	g.frideTok.ExpiresAt = time.Now().Add(time.Minute)
+	g.mu.Unlock()
+	if _, _, err := g.FrideToken(ctx); err == nil {
+		t.Error("an ending token was handed out while GitHub is away")
+	}
+}
+
 // TestGitIdentitiesReachFrIDE: the FrIDE of every node with fride gets the
 // GitHub app's installation token and the GitLab connection, or what
 // nodes.git_identities names for it; a removed connection goes from

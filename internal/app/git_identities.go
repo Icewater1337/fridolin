@@ -34,8 +34,11 @@ type gitIdentityService struct {
 	// nodes is what each node's FrIDE took last, by node id.
 	nodes map[string]*gitIDNode
 	// githubNote says why the FrIDEs got no GitHub identity the last
-	// time the core tried.
+	// time the core tried; ghSet whether GitHub is connected, as the
+	// secret store said at ghAt.
 	githubNote string
+	ghSet      bool
+	ghAt       time.Time
 	// pending are the nodes to hand them to (true: even when unchanged);
 	// all says every node. One hand-over runs at a time.
 	pending map[string]bool
@@ -218,6 +221,24 @@ type gitIdentityNode struct {
 	Held string `json:"held,omitempty"`
 }
 
+// githubSet reports whether GitHub is connected or a token typed, asking
+// the secret store (a keychain natively) at most once a minute: the
+// dashboard polls the view.
+func (s *gitIdentityService) githubSet() bool {
+	s.mu.Lock()
+	if !s.ghAt.IsZero() && time.Since(s.ghAt) < time.Minute {
+		defer s.mu.Unlock()
+		return s.ghSet
+	}
+	s.mu.Unlock()
+	_, app, _ := s.b.github.secrets.load()
+	set := app || s.b.github.secrets.typedToken() != ""
+	s.mu.Lock()
+	s.ghSet, s.ghAt = set, time.Now()
+	s.mu.Unlock()
+	return set
+}
+
 func (s *gitIdentityService) view(context.Context) (any, error) {
 	commit, err := s.store.GitHubCommit()
 	if err != nil {
@@ -227,12 +248,11 @@ func (s *gitIdentityService) view(context.Context) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, app, _ := s.b.github.secrets.load()
 	s.mu.Lock()
 	note := s.githubNote
 	s.mu.Unlock()
 	out := gitIdentitiesView{Identities: []gitIdentityRow{
-		{ID: gitident.GitHub, Kind: "github", Host: "github.com", Name: commit.Name, Email: commit.Email, Set: app || s.b.github.secrets.typedToken() != "", Note: note},
+		{ID: gitident.GitHub, Kind: "github", Host: "github.com", Name: commit.Name, Email: commit.Email, Set: s.githubSet(), Note: note},
 		{ID: gitident.GitLab, Kind: "gitlab", Host: gl.Host(), Name: gl.Name, Email: gl.Email, Set: glSet},
 	}, Nodes: []gitIdentityNode{}}
 	if s.b.nodes == nil {
