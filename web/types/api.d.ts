@@ -236,14 +236,21 @@ export interface Intent {
 }
 
 /**
- * Where a brain's runs happen and why (#149), from a readiness the bridge
- * caches for at most 30 s.
+ * Where a brain's next run happens: a runtime, sandbox-exec (a native
+ * Mac's own sandbox, Fridolin's sandbox there) or refused (its fallback is
+ * refuse while its Docker Sandbox is not ready).
+ */
+export type EffectiveRuntime = SandboxRuntime | 'sandbox-exec' | 'refused';
+
+/**
+ * Where a brain's runs happen and why (httpapi.BrainSandbox), from a look
+ * at the node at most 30 s old.
  */
 export interface BrainSandboxRuntime {
   /** What its brain.json, or else config.json, chose. */
   configured: SandboxRuntime;
   /** What the next run would use. */
-  effective: SandboxRuntime;
+  effective: EffectiveRuntime;
   fallback: SandboxFallback;
   /** The node whose Docker Sandboxes run it. */
   node: string;

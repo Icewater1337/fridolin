@@ -230,13 +230,13 @@ test('a node with terminal approved and online has a Terminal button', async (t)
 test('Docker Sandboxes show what the node found, what is missing, and wait for approval', async (t) => {
   const sbx = { version: '0.24.1', signed_in: true, daemon: true, settings: false, template: '', providers: ['claude'], problem: 'Fridolin’s settings do not hold: run fridolin node sandbox setup' };
   const decl = { ...declared, sandbox: sbx };
-  const allows = ['runs brains in Docker Sandboxes on this machine'];
+  const allows = ['run brains in Docker Sandboxes on this machine'];
   const { root, calls } = await openPage(t, [node({ device: 'approved', commands: 'pending', declared: decl, allows })]);
   const line = root.querySelector('.node-sandbox');
   assert.equal(line.textContent, 'Docker Sandboxes: sbx 0.24.1 · signed in · running · Fridolin’s settings do not hold · no template yet · logins: Claude · not approved yet'
     + 'Fridolin’s settings do not hold: run fridolin node sandbox setup');
   assert.deepEqual(line.querySelectorAll('span.warn-text').map((s) => s.textContent), ['Fridolin’s settings do not hold', 'no template yet'], 'what is missing stands out');
-  assert.match(root.textContent, /If you approve, it can:runs brains in Docker Sandboxes on this machine/);
+  assert.match(root.textContent, /If you approve, it can:run brains in Docker Sandboxes on this machine/);
   assert.match(root.textContent, /Offers.*sandbox/);
   button(root, 'Approve what it offers').click();
   await settle();

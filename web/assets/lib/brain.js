@@ -35,24 +35,25 @@ export function runtimeName(rt) {
 }
 
 /**
- * Where a brain's runs happen, from its runtime view in /api/brains:
- * state docker (in a Docker Sandbox), fridolin (in Fridolin's sandbox, as
- * set), fallback (a Docker Sandbox is set but not available, so
- * Fridolin's sandbox runs it) or refused (not available, and the brain
- * refuses rather than fall back); text says it in a sentence, pill in a
- * word or two. null without a view, from a bridge that has none.
+ * Where a brain's runs happen, from its sandbox view in /api/brains:
+ * state docker (in a Docker Sandbox), fridolin (in Fridolin's sandbox,
+ * bubblewrap or a native Mac's sandbox-exec, as set), fallback (a Docker
+ * Sandbox is set but not available, so Fridolin's sandbox runs it) or
+ * refused (not available, and the brain refuses rather than fall back);
+ * text says it in a sentence, pill in a word or two. null without a
+ * view, from a bridge that has none.
  * @param {BrainSandboxRuntime | null | undefined} rs
  * @returns {{state: 'docker' | 'fridolin' | 'fallback' | 'refused', text: string, pill: string} | null}
  */
 export function runtimeState(rs) {
   if (!rs) return null;
   const why = (/** @type {string} */ s) => (rs.reason ? `${s}: ${rs.reason}` : s);
-  if (rs.configured !== 'docker-sandbox') return { state: 'fridolin', text: 'Runs in Fridolin’s sandbox', pill: 'Fridolin’s sandbox' };
-  if (rs.effective === 'docker-sandbox' && rs.ready !== false) {
-    return { state: 'docker', text: rs.node ? `Runs in a Docker Sandbox on ${rs.node}` : 'Runs in a Docker Sandbox', pill: 'Docker Sandbox' };
+  if (rs.effective === 'refused') {
+    return { state: 'refused', text: why('Refusing runs until its Docker Sandbox is back'), pill: 'Refusing runs' };
   }
-  if (rs.fallback === 'refuse' && rs.effective !== 'bubblewrap') {
-    return { state: 'refused', text: why('Docker Sandbox set, but runs are refused until it is back'), pill: 'Refusing runs' };
+  if (rs.configured !== 'docker-sandbox') return { state: 'fridolin', text: 'Runs in Fridolin’s sandbox', pill: 'Fridolin’s sandbox' };
+  if (rs.effective === 'docker-sandbox') {
+    return { state: 'docker', text: rs.node ? `Runs in a Docker Sandbox on ${rs.node}` : 'Runs in a Docker Sandbox', pill: 'Docker Sandbox' };
   }
   return { state: 'fallback', text: why('Docker Sandbox set, but runs in Fridolin’s sandbox now'), pill: 'Fallback' };
 }

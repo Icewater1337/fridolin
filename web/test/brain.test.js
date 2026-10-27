@@ -121,9 +121,11 @@ test('runtimeState says where a brain runs, and never says bubblewrap', async (t
     ['in a Docker Sandbox', where({}), 'Runs in a Docker Sandbox on Mac mini', 'Docker Sandbox'],
     ['in a Docker Sandbox on no named node', where({ node: '' }), 'Runs in a Docker Sandbox', 'Docker Sandbox'],
     ['in Fridolin’s sandbox, as set', where({ configured: 'bubblewrap', effective: 'bubblewrap', ready: false, reason: 'sbx is not installed' }), 'Runs in Fridolin’s sandbox', 'Fridolin’s sandbox'],
+    ['in a native Mac’s sandbox-exec, as set', where({ configured: 'bubblewrap', effective: 'sandbox-exec' }), 'Runs in Fridolin’s sandbox', 'Fridolin’s sandbox'],
     ['falling back', where({ effective: 'bubblewrap', ready: false, reason: 'the Mac mini is offline since 14:02' }), 'Docker Sandbox set, but runs in Fridolin’s sandbox now: the Mac mini is offline since 14:02', 'Fallback'],
+    ['falling back to sandbox-exec', where({ effective: 'sandbox-exec', ready: false, reason: 'sbx is not running' }), 'Docker Sandbox set, but runs in Fridolin’s sandbox now: sbx is not running', 'Fallback'],
     ['falling back without a reason', where({ effective: 'bubblewrap', ready: false }), 'Docker Sandbox set, but runs in Fridolin’s sandbox now', 'Fallback'],
-    ['refusing', where({ fallback: 'refuse', ready: false, reason: 'sbx is not signed in' }), 'Docker Sandbox set, but runs are refused until it is back: sbx is not signed in', 'Refusing runs'],
+    ['refusing', where({ effective: 'refused', fallback: 'refuse', ready: false, reason: 'sbx is not signed in' }), 'Refusing runs until its Docker Sandbox is back: sbx is not signed in', 'Refusing runs'],
     ['from a bridge without the view', null, null, null],
   ];
   for (const [name, rs, text, pill] of cases) {
@@ -131,7 +133,7 @@ test('runtimeState says where a brain runs, and never says bubblewrap', async (t
       const st = runtimeState(/** @type {any} */ (rs));
       assert.equal(st ? st.text : null, text);
       assert.equal(st ? st.pill : null, pill);
-      assert.doesNotMatch(st ? st.text : '', /bubblewrap/);
+      assert.doesNotMatch(st ? st.text : '', /bubblewrap|sandbox-exec/);
     });
   }
   assert.equal(runtimeName('docker-sandbox'), 'Docker Sandbox');
@@ -144,7 +146,7 @@ test('a brain’s runtime as a pill and a sentence, with the sites it may reach'
   const pillOf = (rs) => sandboxPill(rs);
   assert.equal(pillOf(where({})).className, 'pill ok');
   assert.equal(pillOf(where({ effective: 'bubblewrap', ready: false })).className, 'pill warn');
-  assert.equal(pillOf(where({ fallback: 'refuse', ready: false })).className, 'pill bad');
+  assert.equal(pillOf(where({ effective: 'refused', fallback: 'refuse', ready: false })).className, 'pill bad');
   assert.equal(pillOf(where({ configured: 'bubblewrap', effective: 'bubblewrap' })).className, 'pill neutral');
   assert.equal(pillOf(where({ reason: 'x' })).getAttribute('title'), 'Runs in a Docker Sandbox on Mac mini');
   assert.equal(sandboxPill(undefined), null);
