@@ -22,6 +22,26 @@ type BrainView struct {
 	// Intents are the brain's standing intents (docs/BRAINS.md), none
 	// left out.
 	Intents []intent.Intent `json:"intents,omitempty"`
+	// Sandbox is where the brain's next run happens (docs/SANDBOXES.md).
+	Sandbox *BrainSandbox `json:"sandbox,omitempty"`
+}
+
+// BrainSandbox is where a brain's next run happens, from a look at the
+// node at most 30 seconds old: the GET never waits for a node.
+type BrainSandbox struct {
+	// Configured is brain.json's sandbox.runtime, or config.json's.
+	Configured string `json:"configured"`
+	// Effective is docker-sandbox, bubblewrap, sandbox-exec (a native
+	// Mac's own sandbox) or refused (fallback "refuse" while the Docker
+	// Sandbox is not ready).
+	Effective string `json:"effective"`
+	// Fallback is bubblewrap or refuse.
+	Fallback string `json:"fallback"`
+	// Node is the name of the node whose sandboxes run the brain.
+	Node   string   `json:"node"`
+	Ready  bool     `json:"ready"`
+	Reason string   `json:"reason"`
+	Egress []string `json:"egress"`
 }
 
 type BrainRegistry interface {
