@@ -112,6 +112,8 @@ func dataDir(t *testing.T) string {
 	write(t, dir, "core/device-id", "0123456789abcdef0123456789abcdef", 0o600)
 	write(t, dir, "core/encryption.json", `{"retired":["drive"]}`, 0o600)
 	write(t, dir, "core/restic-cache/x", "cache", 0o600)
+	// What stays on the machines (internal/gitident): never in an export.
+	write(t, dir, "core/local-secrets/gitlab.json", `{"token": "test-gitlab-token"}`, 0o600)
 	write(t, dir, "bridge.lock", "", 0o600)
 	write(t, dir, "config.json.tmp", "half", 0o600)
 	liveDB(t, filepath.Join(dir, "bridge.db"), "whatsapp-session")
@@ -388,8 +390,13 @@ func TestActivate(t *testing.T) {
 		target := t.TempDir()
 		write(t, target, "bridge.db", "old", 0o600)
 		write(t, target, "config.json", "old", 0o600)
+		// A move's secret files wrote it before the import: it stays.
+		write(t, target, "core/local-secrets/gitlab.json", "moved", 0o600)
 		if err := Activate(staged(t, target), target, true, t0, noLock); err != nil {
 			t.Fatal(err)
+		}
+		if data, _ := os.ReadFile(filepath.Join(target, "core", "local-secrets", "gitlab.json")); string(data) != "moved" {
+			t.Errorf("the local secrets did not stay in place: %q", data)
 		}
 		aside := filepath.Join(target, "core", "replaced-20261020T120000Z")
 		if data, _ := os.ReadFile(filepath.Join(aside, "bridge.db")); string(data) != "old" {
