@@ -35,6 +35,10 @@ type Capabilities struct {
 	// of its own: the owner's vote on the first move to the machine is
 	// that (nodes.Node.CoreHostConfirmedAt).
 	CoreHost *CoreHostCap `json:"core_host,omitempty"`
+	// Sandbox is Docker Sandboxes (sbx) on the node, which runs brains'
+	// runs in microVMs (sandbox.go). Approved like FrIDE: its methods run
+	// agents on the machine.
+	Sandbox *SandboxCap `json:"sandbox,omitempty"`
 }
 
 // ExecCap runs allowlisted commands.
@@ -206,6 +210,9 @@ func (c Capabilities) Check() error {
 	if err := c.CoreHost.Check(); err != nil {
 		return err
 	}
+	if err := c.Sandbox.Check(); err != nil {
+		return err
+	}
 	return c.Fride.Check()
 }
 
@@ -336,13 +343,16 @@ func (c Capabilities) Allows(method string) bool {
 	if slices.Contains(CoreHostMethods, method) {
 		return c.CoreHost != nil
 	}
+	if slices.Contains(SandboxMethods, method) {
+		return c.Sandbox != nil
+	}
 	return false
 }
 
 // Empty reports whether nothing that needs the owner's approval is
 // offered: core-host does not (see Capabilities.CoreHost).
 func (c Capabilities) Empty() bool {
-	return (c.Exec == nil || len(c.Exec.Allow) == 0 && len(c.Exec.AcceptFromCore) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil && c.AndroidBuild == nil && c.Backup == nil && c.Update == nil && c.Agent == nil && c.Terminal == nil
+	return (c.Exec == nil || len(c.Exec.Allow) == 0 && len(c.Exec.AcceptFromCore) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil && c.AndroidBuild == nil && c.Backup == nil && c.Update == nil && c.Agent == nil && c.Terminal == nil && c.Sandbox == nil
 }
 
 // Covers reports whether approved covers every part of declared: each
@@ -350,7 +360,8 @@ func (c Capabilities) Empty() bool {
 // host and notify. A declaration that grows past what was approved needs
 // approval again. FrIDE and android-build are covered by having been
 // approved at all: FrIDE's address and repositories, and the JDK and
-// platforms, are only what the node reports; so is update. Backup is covered for the
+// platforms, are only what the node reports; so are update and sbx's
+// state in sandbox. Backup is covered for the
 // places the approval lends (coversBackup); its folders are the
 // approval's own. core-host is always covered: it is no approval of
 // commands, and Empty leaves it out (see Capabilities.CoreHost).
@@ -359,6 +370,9 @@ func Covers(approved, declared Capabilities) bool {
 		return false
 	}
 	if declared.AndroidBuild != nil && approved.AndroidBuild == nil || declared.Update != nil && approved.Update == nil {
+		return false
+	}
+	if declared.Sandbox != nil && approved.Sandbox == nil {
 		return false
 	}
 	if !coversBackup(approved.Backup, declared.Backup) {
@@ -414,6 +428,11 @@ func Intersect(declared, approved Capabilities) Capabilities {
 		f := *declared.Fride
 		f.Repos = slices.Clone(f.Repos)
 		out.Fride = &f
+	}
+	if declared.Sandbox != nil && approved.Sandbox != nil {
+		sb := *declared.Sandbox
+		sb.Providers = slices.Clone(sb.Providers)
+		out.Sandbox = &sb
 	}
 	if declared.AndroidBuild != nil && approved.AndroidBuild != nil {
 		ab := *declared.AndroidBuild
@@ -523,6 +542,9 @@ func (c Capabilities) Summary() string {
 	}
 	if c.CoreHost != nil {
 		parts = append(parts, c.CoreHost.summary())
+	}
+	if c.Sandbox != nil {
+		parts = append(parts, c.Sandbox.summary())
 	}
 	if len(parts) == 0 {
 		return "nothing"
