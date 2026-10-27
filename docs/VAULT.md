@@ -87,7 +87,9 @@ and the run asks again with `allow_over_budget`.
 restic, to the repository `b2:<snapshots_bucket>:restic`:
 
 - every night after 03:00 local time, the whole data dir (less what is
-  rebuilt: run tokens, the brains' `tmp/` and `cache/`), every brain folder
+  rebuilt: run tokens, the brains' `tmp/` and `cache/`; and less
+  `core/local-secrets/`, the GitLab connection, which never goes to the
+  cloud: [CONNECTIONS.md](CONNECTIONS.md#gitlab)), every brain folder
   outside it (each as its backup settings say, below), and `VACUUM INTO` copies of `bridge.db` and `vault.db` in
   `core/snapshot-staging/`; never the live database files;
 - every hour, the brain folders and `audit/`;

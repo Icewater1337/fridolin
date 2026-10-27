@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -51,6 +52,12 @@ type gitIDNode struct {
 	supported bool
 	pending   bool
 	err       string
+	held      string
+}
+
+// say is what the log says of it: the same twice is said once.
+func (n *gitIDNode) say() string {
+	return n.err + "\x00" + n.held + "\x00" + strings.Join(n.got, ",") + "\x00" + strconv.FormatBool(n.supported)
 }
 
 func newGitIdentities(b *App, client *http.Client) *gitIdentityService {
@@ -207,6 +214,8 @@ type gitIdentityNode struct {
 	Supported bool       `json:"supported"`
 	Pending   bool       `json:"pending,omitempty"`
 	Error     string     `json:"error,omitempty"`
+	// Held says why the node keeps them from its FrIDE on purpose.
+	Held string `json:"held,omitempty"`
 }
 
 func (s *gitIdentityService) view(context.Context) (any, error) {
@@ -242,7 +251,7 @@ func (s *gitIdentityService) view(context.Context) (any, error) {
 		s.mu.Lock()
 		if st := s.nodes[v.ID]; st != nil {
 			at := st.at
-			n.Got, n.At, n.Supported, n.Pending, n.Error = slices.Clone(st.got), &at, st.supported, st.pending, st.err
+			n.Got, n.At, n.Supported, n.Pending, n.Error, n.Held = slices.Clone(st.got), &at, st.supported, st.pending, st.err, st.held
 			if n.Got == nil {
 				n.Got = []string{}
 			}

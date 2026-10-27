@@ -2554,6 +2554,8 @@ export interface GitIdentityNode {
   /** Its FrIDE did not answer: it gets them once it does. */
   pending?: boolean;
   error?: string;
+  /** Why the node keeps them from its FrIDE on purpose (the FrIDE in a Docker Sandbox). */
+  held?: string;
 }
 
 /** GET /api/git-identities */

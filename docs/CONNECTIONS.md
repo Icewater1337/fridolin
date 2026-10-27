@@ -1,4 +1,6 @@
-# Connections: OpenAI and ElevenLabs
+# Connections: OpenAI, ElevenLabs and GitLab
+
+GitLab is a connection of its own kind, for FrIDE: see [GitLab](#gitlab).
 
 Fridolin can hold one OpenAI key and one ElevenLabs key. Site modules and
 brains then use OpenAI and ElevenLabs through the bridge. The bridge makes
@@ -165,6 +167,65 @@ Neither ever holds a key, a text, a recording or an answer.
   On Linux without the container, brains and the site run without a
   sandbox and can read what your user can, the keys included
   ([SECURITY-MODEL.md](SECURITY-MODEL.md)).
+
+## GitLab
+
+Fridolin can also hold one GitLab connection: the address of a
+self-hosted GitLab (such as a work `gitlab.example.com`) and an access
+token. It is for FrIDE: the core hands it to the FrIDEs of its nodes,
+so that a workspace can be created under the GitLab identity
+([NODES.md](NODES.md#git-identities-for-fride)). Brains and site modules
+never get it.
+
+**Setting it.** Dashboard → **Integrations → GitLab**:
+
+- **GitLab address**: `https://gitlab.example.com`, https only; a GitLab
+  under a path (`https://example.com/gitlab`) works too.
+- **Access token**: a personal, group or project access token. FrIDE's
+  git needs `read_repository` and `write_repository`; **Check** needs
+  `read_user`; `glab` in FrIDE's agents needs `api`. The field is
+  write-only: the card shows "saved — type to replace" and the last four
+  characters. A blank token keeps the one saved.
+- **Commit name and email**, optional, both or neither: the identity
+  FrIDE commits with in a GitLab workspace. Empty: git's own config.
+
+**Check** calls `GET <address>/api/v4/user` with the token in
+`PRIVATE-TOKEN` and shows the username. It follows no redirect, so the
+token never goes to another host. **Remove** deletes the connection; the
+FrIDEs lose the identity at the core's next hand-over.
+
+The GitHub card has an optional commit name and email of its own, for
+the `github` identity.
+
+**Where the token stays.** The owner's rule is that work data never goes
+to the cloud, and the GitLab token is a work credential. So it is not in
+`connections/` with the OpenAI and ElevenLabs keys, but in the data
+dir's `core/local-secrets/` (`gitlab.json`, and `github.json` with
+GitHub's commit name), 0600 in a 0700 folder:
+
+| Where data goes | `core/local-secrets/` |
+| --- | --- |
+| restic snapshots (to B2, their weekly copy on Drive, node targets) | left out |
+| the vault's cold tier (B2) | never a vault file |
+| Drive backup | never in it |
+| `fridolin core export` (to the bucket) | left out, like all of `core/` |
+| a core move over the node channel | carried end to end, sealed to the target's one-time key with the host secrets, as `local:gitlab.json`; the target writes it into its data dir's `core/local-secrets/`, which the import keeps |
+| a former core host the owner forgets | removed, if the move brought it |
+
+A move done by hand (`fridolin core send`/`receive`, [CORE.md](CORE.md))
+carries only the host secrets: set the GitLab connection again on the new
+core. `fridolin doctor` checks the token while one is set. Setting or
+removing it writes a `connection_key` line to the audit log, never the
+token.
+
+| Route | |
+| --- | --- |
+| `GET /api/gitlab` | the address, host, the token's last four characters, the commit name and email; never the token |
+| `PUT /api/gitlab` | `{"base_url", "token", "name", "email"}`; a blank token keeps the saved one, a field left out keeps its value |
+| `DELETE /api/gitlab` | removes it |
+| `POST /api/gitlab/check` | `{"ok", "detail"}` or `{"ok": false, "error"}` |
+| `PUT /api/github/identity` | GitHub's `{"name", "email"}` |
+| `GET /api/git-identities` | the identities (never a token), and what each FrIDE node took |
 
 ## Not yet
 

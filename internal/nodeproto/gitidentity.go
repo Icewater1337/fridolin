@@ -87,6 +87,10 @@ type FrideIdentitiesResult struct {
 	// Pushed are the ids FrIDE took, Removed those it no longer has.
 	Pushed  []string `json:"pushed"`
 	Removed []string `json:"removed"`
+	// Held says why the node keeps them from its FrIDE on purpose, such
+	// as the FrIDE in a Docker Sandbox, which must never hold a real
+	// token; the core does not send them again until they change.
+	Held string `json:"held,omitempty"`
 	// Error says what went wrong, without a token.
 	Error string `json:"error,omitempty"`
 }

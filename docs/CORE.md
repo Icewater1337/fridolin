@@ -810,6 +810,14 @@ blocks the move is listed under "It cannot run".
    `fridolin-home`, which no export carries. The core relays them and
    sees their names only. A `credentials_dir` in the data dir needs
    none of this: the export carries it.
+   **Local files.** What stays on the machines, the data dir's
+   `core/local-secrets/` (the GitLab connection and GitHub's commit name,
+   [CONNECTIONS.md](CONNECTIONS.md#gitlab)), is in no export. It goes the
+   same way, named `local:gitlab.json` and `local:github.json`, and DST
+   writes it into its data dir's `core/local-secrets/`, which the import
+   keeps; there one that differs is replaced, since the moving core's is
+   the newer. Forgetting a former core host removes those a move wrote
+   that were not there.
 2. The core signs a **move plan** with its update key (the one nodes
    already pin for updates): the move id, SRC and DST, SRC's data dir by
    its lease device id, the version, the image, when it was issued, the

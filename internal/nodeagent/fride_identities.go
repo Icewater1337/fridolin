@@ -120,6 +120,10 @@ func (a *Agent) pushIdentities(ctx context.Context) nodeproto.FrideIdentitiesRes
 	if !have {
 		return res
 	}
+	if why := a.identitiesHeld(); why != "" {
+		res.Held = why
+		return res
+	}
 	// None to give and none given before: nothing to ask FrIDE.
 	if len(want) == 0 && len(a.pushedIdentities()) == 0 {
 		a.fride.mu.Lock()
@@ -261,12 +265,27 @@ func (a *Agent) savePushedIdentities(ids []string) error {
 	return writeFile(p, append(data, '\n'), 0o600)
 }
 
+// identitiesHeld says why this node keeps the identities from its FrIDE:
+// the FrIDE in a Docker Sandbox (the node of service fride-sandbox) must
+// never hold a real token in its VM, and gets them only once the node can
+// hand it placeholders that sbx's proxy swaps for the token on the way
+// out. "" for a node that passes them on.
+func (a *Agent) identitiesHeld() string {
+	if a.Config.Service == FrideSandboxService {
+		return "the FrIDE in a Docker Sandbox gets no git token until the node can hand it placeholders for sbx's proxy"
+	}
+	return ""
+}
+
 // identitiesTick runs with each check of FrIDE: it puts the identities
 // into a FrIDE that does not have them yet from this pairing, and asks
 // the core for new ones before a token runs out, or for the first ones.
 func (a *Agent) identitiesTick(ctx context.Context) {
 	g := &a.gitIDs
 	g.init()
+	if a.identitiesHeld() != "" {
+		return
+	}
 	a.fride.mu.Lock()
 	up, token, base := a.fride.cap != nil && a.fride.takesIDs && a.fride.cfg != nil, a.fride.token, ""
 	if up {

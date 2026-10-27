@@ -156,7 +156,9 @@ func (s *gitIdentityService) handOver(pending map[string]bool, all bool) {
 		fp := identitiesFingerprint(set)
 		s.mu.Lock()
 		st := s.nodes[v.ID]
-		same := st != nil && st.sent == fp && st.err == "" && !st.pending && st.supported
+		// Settled: the node's FrIDE took them, or the node holds them
+		// back on purpose.
+		same := st != nil && st.sent == fp && (st.held != "" || st.err == "" && !st.pending && st.supported)
 		s.mu.Unlock()
 		if same && !pending[v.ID] {
 			continue
@@ -164,14 +166,20 @@ func (s *gitIdentityService) handOver(pending map[string]bool, all bool) {
 		ctx, cancel := context.WithTimeout(context.Background(), s.timeout)
 		res, err := b.nodes.FrideIdentities(ctx, v.ID, nodeproto.FrideIdentities{Identities: set})
 		cancel()
-		next := &gitIDNode{sent: fp, at: time.Now().UTC().Truncate(time.Second), got: res.Pushed, supported: res.Supported, pending: res.Pending, err: res.Error}
+		next := &gitIDNode{sent: fp, at: time.Now().UTC().Truncate(time.Second), got: res.Pushed, supported: res.Supported, pending: res.Pending, err: res.Error, held: res.Held}
 		if err != nil {
 			next.err = err.Error()
 		}
-		if next.err != "" {
-			log.Printf("git identities: node %s (%s): %s", v.Name, v.ID, next.err)
-		} else if !res.Pending && res.Supported {
-			log.Printf("git identities: FrIDE on %s has %s", v.Name, listOrNone(res.Pushed))
+		// Said once, not at every retry.
+		if st == nil || st.say() != next.say() {
+			switch {
+			case next.err != "":
+				log.Printf("git identities: node %s (%s): %s", v.Name, v.ID, next.err)
+			case next.held != "":
+				log.Printf("git identities: node %s (%s) holds them back: %s", v.Name, v.ID, next.held)
+			case !res.Pending && res.Supported:
+				log.Printf("git identities: FrIDE on %s has %s", v.Name, listOrNone(res.Pushed))
+			}
 		}
 		s.mu.Lock()
 		s.nodes[v.ID] = next

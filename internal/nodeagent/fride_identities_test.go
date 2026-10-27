@@ -154,6 +154,29 @@ func TestFrideIdentitiesWaitForFrIDE(t *testing.T) {
 	}
 }
 
+// The node of the FrIDE in a Docker Sandbox holds the identities back: a
+// real token must never enter the VM. It says why, and asks for none.
+func TestFrideIdentitiesHeldFromTheSandbox(t *testing.T) {
+	ff := testutil.StartFakeFride(t)
+	a := pairedAgent(t, ff)
+	a.Config.Service = FrideSandboxService
+	a.setState(nodeproto.State{Device: nodeproto.DeviceApproved, Approved: nodeproto.Capabilities{Fride: &nodeproto.FrideCap{URL: ff.URL}}})
+	res, perr := identitiesCall(t, a, testIdentities(time.Now().Add(time.Minute)))
+	if perr != nil || res.Held == "" || len(res.Pushed) != 0 || len(ff.GitIdentities()) != 0 || countCalls(ff, "PUT ") != 0 {
+		t.Fatalf("the sandboxed FrIDE: %+v %v, FrIDE has %v", res, perr, ff.GitIdentities())
+	}
+	asks := a.gitIDs.init()
+	a.identitiesTick(context.Background())
+	select {
+	case q := <-asks:
+		t.Errorf("the sandbox's node asked: %+v", q)
+	default:
+	}
+	if len(ff.GitIdentities()) != 0 {
+		t.Errorf("the tick passed them on: %v", ff.GitIdentities())
+	}
+}
+
 // The node asks the core for its identities when it has none yet, and
 // for a new GitHub token well before the one FrIDE has runs out.
 func TestFrideIdentitiesAsk(t *testing.T) {
