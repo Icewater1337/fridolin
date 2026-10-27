@@ -35,6 +35,10 @@ type FrideSandboxOptions struct {
 	FrideRepo string
 	// GitName and GitEmail are the identity FrIDE's agents commit with.
 	GitName, GitEmail string
+	// DockerDisk is the size of the sandbox's /var/lib/docker ("":
+	// DefaultFrideSandboxDockerDisk); Caches the host folder of the
+	// shared Go and npm caches ("": none) (create).
+	DockerDisk, Caches string
 	// Out gets what is done, for the person who runs it.
 	Out io.Writer
 	// env is added to each program's environment (tests: the fakes');

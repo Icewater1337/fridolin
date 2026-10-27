@@ -86,6 +86,11 @@ type FrideSandboxState struct {
 	Built  time.Time `json:"built,omitzero"`
 	// Run says the agent keeps FrIDE running (start; stop clears it).
 	Run bool `json:"run"`
+	// DockerDisk is the size of the sandbox's Docker disk, Caches the
+	// host folder of the shared caches ("" for none). Both are made at
+	// create, and again when update makes the sandbox anew.
+	DockerDisk string `json:"docker_disk,omitempty"`
+	Caches     string `json:"caches,omitempty"`
 }
 
 // LoadFrideSandbox reads fride-sandbox.json; nil for none.

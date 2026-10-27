@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/Icewater1337/fridolin/internal/nodeagent"
 	"github.com/Icewater1337/fridolin/internal/platform"
 )
 
@@ -22,10 +23,13 @@ Usage:
                   but fride, runs from its own copy of fridolin and as a service
                   of its own (fridolin-node-fride-sandbox; --no-service: none)
   fridolin node fride sandbox create [--repo DIR] [--base DIR] [--git-name NAME --git-email EMAIL]
+                  [--docker-disk 40g] [--no-caches]
                   build the template, make the sandbox fride-sandbox (6 GB,
                   127.0.0.1:17850, egress for GitHub, Go, npm and Anthropic, --base
-                  mounted read-write; default ~/fride-sandbox/repos) and build FrIDE
-                  inside at the commit the checkout in --repo pins (default: .)
+                  mounted read-write; default ~/fride-sandbox/repos; a 40 GB Docker
+                  disk; Go and npm caches in ~/.cache/fridolin-sbx, shared with the
+                  next sandbox) and build FrIDE inside at the commit the checkout in
+                  --repo pins (default: .)
   fridolin node fride sandbox login [--setup-token]
                   the Claude login of FrIDE's agents: paste the token claude
                   setup-token printed (not shown), or pipe it in; --setup-token runs
@@ -49,8 +53,8 @@ Flags:
 // frideSandboxFlags are the flags of fridolin node fride sandbox.
 type frideSandboxFlags struct {
 	stateDir, repo, base, frideRepo, gitName, gitEmail string
-	core, name                                         string
-	setupToken, yes, noService                         bool
+	core, name, dockerDisk                             string
+	setupToken, yes, noService, noCaches               bool
 }
 
 // frideSandboxStateDir is the sandboxed FrIDE's node's default state dir:
@@ -87,6 +91,8 @@ func nodeFrideSandboxCmd(args []string, stdout, stderr io.Writer) int {
 		fs.StringVar(&f.gitEmail, "git-email", "", "the git email FrIDE's agents commit with")
 		if sub == "create" {
 			fs.StringVar(&f.base, "base", "", "the host folder for FrIDE's repositories")
+			fs.StringVar(&f.dockerDisk, "docker-disk", nodeagent.DefaultFrideSandboxDockerDisk, "the size of the sandbox's Docker disk")
+			fs.BoolVar(&f.noCaches, "no-caches", false, "no Go and npm caches shared with other sandboxes")
 		}
 	case "login":
 		fs.BoolVar(&f.setupToken, "setup-token", false, "run claude setup-token in the sandbox first")

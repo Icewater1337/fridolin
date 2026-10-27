@@ -34,6 +34,7 @@ func frideSandboxFixture(t *testing.T) (FrideSandboxOptions, string, *bytes.Buff
 		writeTestFile(t, filepath.Join(repo, filepath.FromSlash(name)), body)
 	}
 	writeTestFile(t, filepath.Join(fake, "templates.json"), "[]")
+	writeTestFile(t, filepath.Join(fake, "fride-fake"), "")
 	if err := SaveConfig(dir, Config{Core: "core:8766", Name: "mac-sbx", Service: FrideSandboxService}); err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +42,8 @@ func frideSandboxFixture(t *testing.T) (FrideSandboxOptions, string, *bytes.Buff
 	exe := testExe(t)
 	return FrideSandboxOptions{Dir: dir, Sbx: exe, Docker: exe, Repo: repo, Base: filepath.Join(t.TempDir(), "repos"),
 		FrideRepo: "https://github.com/you/fride", GitName: "You", GitEmail: "you@example.com", Out: out,
-		env: []string{"FAKE_SBX_DIR=" + fake, "FAKE_DOCKER_DIR=" + fake}, url: "http://127.0.0.1:1", wait: time.Second}, fake, out
+		Caches: filepath.Join(t.TempDir(), "caches"),
+		env:    []string{"FAKE_SBX_DIR=" + fake, "FAKE_DOCKER_DIR=" + fake}, url: "http://127.0.0.1:1", wait: time.Second}, fake, out
 }
 
 func writeTestFile(t *testing.T, path, body string) {
@@ -85,10 +87,21 @@ func TestFrideSandboxCreate(t *testing.T) {
 	if st.Base != base || st.Template != tag || st.Commit != testFridePin || st.Repo != o.FrideRepo || st.Run || st.Built.IsZero() {
 		t.Errorf("state %+v", st)
 	}
+	caches, _ := filepath.EvalSymlinks(o.Caches)
+	if st.DockerDisk != "40g" || st.Caches != caches || fakeFile(fake, "../disk.log") != "40g\n" {
+		t.Errorf("Docker disk %q (sbx got %q), caches %q", st.DockerDisk, fakeFile(fake, "../disk.log"), st.Caches)
+	}
+	for _, d := range []string{"gomod", "gobuild", "npm"} {
+		if fi, err := os.Stat(filepath.Join(caches, d)); err != nil || !fi.IsDir() {
+			t.Errorf("the cache %s: %v", d, err)
+		}
+	}
 	calls := fakeCalls(t, fake)
 	for _, want := range [][]string{
 		{"template", "load"},
-		{"create", "--name", "fride-sandbox", "--memory", "6g", "-t", tag, "--pull", "never", "-p", "127.0.0.1:17850:17850", "claude", base},
+		{"create", "--name", "fride-sandbox", "--memory", "6g", "-t", tag, "--pull", "never", "-p", "127.0.0.1:17850:17850",
+			"-e", "GOMODCACHE=" + caches + "/gomod", "-e", "GOCACHE=" + caches + "/gobuild", "-e", "npm_config_cache=" + caches + "/npm",
+			"-e", "GOFLAGS=-modcacherw", "claude", base, caches},
 		{"policy", "allow", "network", "--sandbox", "fride-sandbox", "localhost:17851"},
 		{"policy", "deny", "network", "--sandbox", "fride-sandbox", "downloads.claude.ai"},
 	} {

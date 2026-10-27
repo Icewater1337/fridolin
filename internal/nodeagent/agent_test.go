@@ -29,6 +29,9 @@ func TestMain(m *testing.M) {
 		os.Exit(fakeDocker(dir))
 	}
 	if dir := os.Getenv("FAKE_SBX_DIR"); dir != "" {
+		if code, ok := fakeFrideSbx(dir, os.Args[1:]); ok {
+			os.Exit(code)
+		}
 		os.Exit(fakeSbx(dir))
 	}
 	if len(os.Args) > 1 {

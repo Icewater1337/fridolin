@@ -82,23 +82,23 @@ func FrideSandboxCreate(ctx context.Context, o FrideSandboxOptions) error {
 	if err != nil {
 		return err
 	}
-	if sbxHasTemplate(ctx, d, tag) {
-		fmt.Fprintf(o.Out, "sbx has the template %s already.\n", tag)
-	} else {
-		so := SandboxSetupOptions{Dir: o.Dir, Sbx: o.Sbx, Docker: o.Docker, Repo: o.Repo, Out: o.Out, env: o.env}
-		if err := so.buildTemplate(ctx, d, tag, filepath.Join(o.Repo, filepath.FromSlash(frideSandboxDockerfile))); err != nil {
-			return err
-		}
+	disk, err := checkDockerDisk(o.DockerDisk)
+	if err != nil {
+		return err
+	}
+	caches, err := prepareCaches(o.Caches, base)
+	if err != nil {
+		return fmt.Errorf("--caches: %w", err)
+	}
+	if err := o.ensureTemplate(ctx, tag); err != nil {
+		return err
 	}
 	o.starters(ctx, base)
 
-	fmt.Fprintf(o.Out, "Creating the sandbox %s (memory %s, FrIDE on 127.0.0.1:%d, the repositories in %s)…\n", o.sandbox(), frideSandboxMemory, FrideSandboxPort, base)
-	publish := fmt.Sprintf("127.0.0.1:%d:%d", FrideSandboxPort, FrideSandboxPort)
-	if _, stderr, err := d.run(ctx, nil, nil, "create", "--name", o.sandbox(), "--memory", frideSandboxMemory,
-		"-t", tag, "--pull", "never", "-p", publish, "claude", base); err != nil {
-		return fmt.Errorf("sbx could not create %s: %w", o.sandbox(), sbxError(err, stderr))
+	st := FrideSandboxState{Name: o.sandbox(), Base: base, Template: tag, Repo: o.FrideRepo, DockerDisk: disk, Caches: caches}
+	if err := o.newSandbox(ctx, st); err != nil {
+		return err
 	}
-	st := FrideSandboxState{Name: o.sandbox(), Base: base, Template: tag, Repo: o.FrideRepo}
 	if err := o.makeInside(ctx, &st, config, commit); err != nil {
 		_, _, _ = d.run(context.WithoutCancel(ctx), nil, nil, "rm", "-f", o.sandbox())
 		return fmt.Errorf("%w; the sandbox is removed again", err)
@@ -107,6 +107,47 @@ func FrideSandboxCreate(ctx context.Context, o FrideSandboxOptions) error {
 		return err
 	}
 	fmt.Fprintf(o.Out, "Made the sandboxed FrIDE (%s). Next: its agents' Claude login (fridolin node fride sandbox login), then fridolin node fride sandbox start.\n", short(commit))
+	return nil
+}
+
+// ensureTemplate builds the template tag and loads it into sbx, unless
+// sbx has it.
+func (o FrideSandboxOptions) ensureTemplate(ctx context.Context, tag string) error {
+	d := o.sbx()
+	if sbxHasTemplate(ctx, d, tag) {
+		fmt.Fprintf(o.Out, "sbx has the template %s already.\n", tag)
+		return nil
+	}
+	so := SandboxSetupOptions{Dir: o.Dir, Sbx: o.Sbx, Docker: o.Docker, Repo: o.Repo, Out: o.Out, env: o.env}
+	return so.buildTemplate(ctx, d, tag, filepath.Join(o.Repo, filepath.FromSlash(frideSandboxDockerfile)))
+}
+
+// newSandbox makes st's sandbox with sbx create: its template, memory
+// and port, the base folder and the caches read-write at their own
+// paths, the caches' environment, and its Docker disk.
+func (o FrideSandboxOptions) newSandbox(ctx context.Context, st FrideSandboxState) error {
+	caches := "no shared caches"
+	if st.Caches != "" {
+		caches = "the caches in " + st.Caches
+	}
+	fmt.Fprintf(o.Out, "Creating the sandbox %s (memory %s, Docker disk %s, FrIDE on 127.0.0.1:%d, the repositories in %s, %s)…\n",
+		st.Name, frideSandboxMemory, st.DockerDisk, FrideSandboxPort, st.Base, caches)
+	args := []string{"create", "--name", st.Name, "--memory", frideSandboxMemory, "-t", st.Template, "--pull", "never",
+		"-p", fmt.Sprintf("127.0.0.1:%d:%d", FrideSandboxPort, FrideSandboxPort)}
+	for _, kv := range frideSandboxCacheEnv(st.Caches) {
+		args = append(args, "-e", kv)
+	}
+	args = append(args, "claude", st.Base)
+	if st.Caches != "" {
+		args = append(args, st.Caches)
+	}
+	var env []string
+	if st.DockerDisk != "" {
+		env = []string{frideSandboxDiskEnv + "=" + st.DockerDisk}
+	}
+	if _, stderr, err := o.sbx().run(ctx, nil, env, args...); err != nil {
+		return fmt.Errorf("sbx could not create %s: %w", st.Name, sbxError(err, stderr))
+	}
 	return nil
 }
 

@@ -129,6 +129,14 @@ func frideSandboxCreate(ctx context.Context, o nodeagent.FrideSandboxOptions, f 
 	if o.Base, err = filepath.Abs(platform.ExpandHome(base)); err != nil {
 		return fail("%v", err)
 	}
+	o.DockerDisk = f.dockerDisk
+	if !f.noCaches {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fail("%v; pass --no-caches", err)
+		}
+		o.Caches = filepath.Join(home, ".cache", "fridolin-sbx")
+	}
 	if err := nodeagent.FrideSandboxCreate(ctx, o); err != nil {
 		return fail("%v", err)
 	}
