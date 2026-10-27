@@ -45,6 +45,9 @@ type waits struct {
 	// nodeSessionMinAge is the least age of a node session housekeeping
 	// stops (see nodeSessionFindings).
 	nodeSessionMinAge time.Duration
+	// sandboxLook is how long a look at the node with Docker Sandboxes
+	// serves (sandboxrun.MaxAge when 0).
+	sandboxLook time.Duration
 	// reapGrace is how long reapOrphanedRuns gives a group to end after
 	// SIGTERM before it kills it.
 	reapGrace time.Duration

@@ -27,21 +27,26 @@ type State struct {
 
 // Cache keeps the last look at the node, MaxAge old at most.
 type Cache struct {
-	look func(ctx context.Context) State
-	now  func() time.Time
+	look   func(ctx context.Context) State
+	now    func() time.Time
+	maxAge time.Duration
 
 	mu      sync.Mutex
 	last    State
 	looking bool
 }
 
-// NewCache makes a cache that looks with look; now is the clock (nil:
+// NewCache makes a cache that looks with look and keeps a look for
+// maxAge (MaxAge when 0); now is the clock (nil:
 // the system's).
-func NewCache(look func(ctx context.Context) State, now func() time.Time) *Cache {
+func NewCache(look func(ctx context.Context) State, maxAge time.Duration, now func() time.Time) *Cache {
+	if maxAge <= 0 {
+		maxAge = MaxAge
+	}
 	if now == nil {
 		now = time.Now
 	}
-	return &Cache{look: look, now: now}
+	return &Cache{look: look, now: now, maxAge: maxAge}
 }
 
 // Fresh is a look at most MaxAge old, made now when the last is older.
@@ -49,7 +54,7 @@ func (c *Cache) Fresh(ctx context.Context) State {
 	c.mu.Lock()
 	last := c.last
 	c.mu.Unlock()
-	if !last.At.IsZero() && c.now().Sub(last.At) < MaxAge {
+	if !last.At.IsZero() && c.now().Sub(last.At) < c.maxAge {
 		return last
 	}
 	return c.Look(ctx)
@@ -61,7 +66,7 @@ func (c *Cache) Fresh(ctx context.Context) State {
 func (c *Cache) Peek() State {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if (c.last.At.IsZero() || c.now().Sub(c.last.At) >= MaxAge) && !c.looking {
+	if (c.last.At.IsZero() || c.now().Sub(c.last.At) >= c.maxAge) && !c.looking {
 		c.looking = true
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

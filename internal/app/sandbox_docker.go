@@ -25,7 +25,6 @@ import (
 // the core that runs the brain in a Docker Sandbox (brainRuntimes.marker).
 const markerFile = ".fridolin-runtime-id"
 
-
 // writeMarker writes marker into dir's markerFile, through the folder:
 // a brain cannot point it elsewhere with a symlink.
 func writeMarker(dir, marker string) error {

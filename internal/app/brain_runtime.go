@@ -31,7 +31,7 @@ type brainRuntimes struct {
 
 func newBrainRuntimes(b *App) *brainRuntimes {
 	r := &brainRuntimes{b: b, marker: randomToken(16)}
-	r.cache = sandboxrun.NewCache(r.look, nil)
+	r.cache = sandboxrun.NewCache(r.look, b.waits.sandboxLook, nil)
 	return r
 }
 

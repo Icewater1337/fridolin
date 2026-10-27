@@ -19,7 +19,7 @@ func TestCache(t *testing.T) {
 	c := sandboxrun.NewCache(func(context.Context) sandboxrun.State {
 		looks.Add(1)
 		return sandboxrun.State{Node: "n1", Why: ""}
-	}, clock)
+	}, 0, clock)
 	if s := c.Fresh(context.Background()); s.Node != "n1" || looks.Load() != 1 {
 		t.Fatalf("first look: %+v, %d looks", s, looks.Load())
 	}
