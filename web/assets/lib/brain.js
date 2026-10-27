@@ -2,7 +2,7 @@
 
 import { plural } from './format.js';
 
-/** @import { Brain, Routing } from '../../types/api.js' */
+/** @import { Brain, BrainManifest, BrainSandboxRuntime, Routing, SandboxRuntime } from '../../types/api.js' */
 
 export const BRAIN_ID_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/;
 /** @type {[string, string][]} [value, label] */
@@ -14,6 +14,89 @@ export const OBSERVE = [['history', 'Keep them in the history'], ['run', 'Also r
 /** @type {[string, string][]} [value, label] */
 export const APPROVALS = [['ask', 'Ask me first, with a poll'], ['auto', 'Act without asking']];
 export const DEFAULT_BACKUP_EXCLUDES = ['node_modules/', '*.log', '.DS_Store', '.venv/', '__pycache__/'];
+
+// Where a brain's runs happen (config.json and brain.json "sandbox",
+// docs/SANDBOXES.md). The UI never says bubblewrap: on a native Mac it is
+// sandbox-exec, and either way it is Fridolin's own sandbox.
+/** @type {Record<SandboxRuntime, string>} */
+export const RUNTIME_NAMES = { bubblewrap: 'Fridolin’s sandbox', 'docker-sandbox': 'Docker Sandbox' };
+// What a docker-sandbox brain does while its sandbox is not available.
+/** @type {[string, string][]} [value, label] */
+export const SANDBOX_FALLBACKS = [['bubblewrap', 'Fall back to Fridolin’s sandbox'], ['refuse', 'Refuse']];
+// The most extra hosts a brain may reach (brain.json sandbox.egress).
+export const MAX_EGRESS = 50;
+
+/**
+ * The name of a runtime; bubblewrap for one unset or unknown.
+ * @param {string | null | undefined} rt
+ */
+export function runtimeName(rt) {
+  return rt === 'docker-sandbox' ? RUNTIME_NAMES['docker-sandbox'] : RUNTIME_NAMES.bubblewrap;
+}
+
+/**
+ * Where a brain's runs happen, from its sandbox view in /api/brains:
+ * state docker (in a Docker Sandbox), fridolin (in Fridolin's sandbox,
+ * bubblewrap or a native Mac's sandbox-exec, as set), fallback (a Docker
+ * Sandbox is set but not available, so Fridolin's sandbox runs it) or
+ * refused (not available, and the brain refuses rather than fall back);
+ * text says it in a sentence, pill in a word or two. null without a
+ * view, from a bridge that has none.
+ * @param {BrainSandboxRuntime | null | undefined} rs
+ * @returns {{state: 'docker' | 'fridolin' | 'fallback' | 'refused', text: string, pill: string} | null}
+ */
+export function runtimeState(rs) {
+  if (!rs) return null;
+  const why = (/** @type {string} */ s) => (rs.reason ? `${s}: ${rs.reason}` : s);
+  if (rs.effective === 'refused') {
+    return { state: 'refused', text: why('Refusing runs until its Docker Sandbox is back'), pill: 'Refusing runs' };
+  }
+  if (rs.configured !== 'docker-sandbox') return { state: 'fridolin', text: 'Runs in Fridolin’s sandbox', pill: 'Fridolin’s sandbox' };
+  if (rs.effective === 'docker-sandbox') {
+    return { state: 'docker', text: rs.node ? `Runs in a Docker Sandbox on ${rs.node}` : 'Runs in a Docker Sandbox', pill: 'Docker Sandbox' };
+  }
+  return { state: 'fallback', text: why('Docker Sandbox set, but runs in Fridolin’s sandbox now'), pill: 'Fallback' };
+}
+
+/**
+ * Why an extra host is not one sbx takes, or "": a host or pattern such
+ * as api.github.com, *.wikipedia.org or **:443, with an optional port,
+ * and nothing else.
+ * @param {string} host
+ */
+export function egressProblem(host) {
+  const v = String(host || '').trim();
+  if (!v) return '';
+  if (/:\/\/|\//.test(v)) return 'Only the host, without https:// or a path';
+  if (!/^[A-Za-z0-9*._-]+(:(\d{1,5}|\*))?$/.test(v)) return 'A host such as api.github.com or *.wikipedia.org, with :port if needed';
+  return '';
+}
+
+/**
+ * How brain.json disk weakens the sandbox of the approved brain.json a,
+ * one sentence each: a Docker Sandbox given up, falling back where it
+ * refused, or more hosts to reach. defaultRuntime is config.json's
+ * sandbox.runtime, which a brain.json without its own inherits.
+ * @param {Partial<BrainManifest> | null | undefined} a
+ * @param {Partial<BrainManifest> | null | undefined} disk
+ * @param {string | null | undefined} defaultRuntime
+ * @returns {string[]}
+ */
+export function sandboxWeaker(a, disk, defaultRuntime) {
+  const rt = (/** @type {Partial<BrainManifest> | null | undefined} */ m) => (m && m.sandbox && m.sandbox.runtime) || defaultRuntime || 'bubblewrap';
+  const refuses = (/** @type {Partial<BrainManifest> | null | undefined} */ m) => !!(m && m.sandbox && m.sandbox.fallback === 'refuse');
+  const egress = (/** @type {Partial<BrainManifest> | null | undefined} */ m) => (m && m.sandbox && m.sandbox.egress) || [];
+  const out = [];
+  if (rt(a) === 'docker-sandbox' && rt(disk) !== 'docker-sandbox') {
+    out.push('It would run in Fridolin’s sandbox instead of a Docker Sandbox.');
+  } else if (rt(disk) === 'docker-sandbox' && refuses(a) && !refuses(disk)) {
+    out.push('While its Docker Sandbox is not available, it would run in Fridolin’s sandbox instead of refusing.');
+  }
+  const before = new Set(egress(a));
+  const added = egress(disk).filter((x) => !before.has(x));
+  if (added.length) out.push(`It could also reach ${added.join(', ')}.`);
+  return out;
+}
 
 /**
  * A brain id suggested from a name: lowercase, dashes, at most 40 characters.

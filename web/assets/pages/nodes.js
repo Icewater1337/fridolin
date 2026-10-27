@@ -8,7 +8,7 @@ import { ApiError, post, put } from '../app/api.js';
 import { nodesResource } from '../app/resources.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { absTime } from '../lib/format.js';
-import { capSummary, gb, osName, parseTags, ruleText, updateText } from '../lib/nodes.js';
+import { capSummary, gb, osName, parseTags, ruleText, sandboxFacts, updateText } from '../lib/nodes.js';
 import { btn } from '../components/buttons.js';
 import { confirmDialog, openDialog } from '../components/dialog.js';
 import { select, textInput, toggle } from '../components/fields.js';
@@ -17,7 +17,7 @@ import { toast } from '../components/toast.js';
 import { badge, callout, empty, kv, mono, pageHeader, pill, spinner, timeAgo } from '../components/common.js';
 
 /** @import { PageModule } from '../app/page.js' */
-/** @import { BackupCap, CoreHostView, ExecRule, FrideCap, HostStats, Node as FleetNode, NodesResponse, WorkstationCap } from '../../types/api.js' */
+/** @import { BackupCap, CoreHostView, ExecRule, FrideCap, HostStats, Node as FleetNode, NodesResponse, SandboxCap, WorkstationCap } from '../../types/api.js' */
 
 /**
  * A node as its card shows it: everything but what its live region shows,
@@ -227,7 +227,24 @@ export default /** @satisfies {PageModule} */ ({
         backupLine(declared.backup, n.approved && n.approved.backup),
         workLine('Agent sessions', declared.agent),
         workLine('Terminal', declared.terminal),
+        sandboxLine(declared.sandbox, !!(n.effective && n.effective.sandbox)),
         coreHostLine(n.core_host));
+    }
+
+    // Docker Sandboxes (docs/SANDBOXES.md): what the node found of sbx,
+    // what is missing before it can run brains, and whether you approved
+    // it, which "Approve what it offers" does as for the rest.
+    /**
+     * @param {SandboxCap | undefined} s
+     * @param {boolean} approved
+     */
+    function sandboxLine(s, approved) {
+      if (!s) return null;
+      const { facts, ready } = sandboxFacts(s);
+      return h('div.node-sandbox', h('strong', 'Docker Sandboxes: '),
+        facts.map(([text, ok]) => (ok ? h('span', text) : h('span.warn-text', text))).flatMap((el, i) => (i ? [' · ', el] : [el])),
+        h('span.muted', approved ? (ready ? ' · runs brains' : '') : ' · not approved yet'),
+        s.problem ? h('div.warn-text.small', s.problem) : null);
     }
 
     // core-host (docs/NODES.md, "core-host"): every node is one unless

@@ -4,7 +4,7 @@ import { installDom } from './fake-dom.js';
 import { serve, settle, noConsoleErrors } from './serve.js';
 import { h } from '../assets/lib/dom.js';
 import { createPage } from '../assets/app/page.js';
-import { capSummary, gb, nodeRef, nodesNamed, osName, parseTags, programOn, programOnNode, ruleText, updateText } from '../assets/lib/nodes.js';
+import { capSummary, gb, nodeRef, nodesNamed, osName, parseTags, programOn, programOnNode, ruleText, sandboxFacts, updateText } from '../assets/lib/nodes.js';
 import page from '../assets/pages/nodes.js';
 
 /** @import { Node as FleetNode } from '../types/api.js' */
@@ -225,6 +225,35 @@ test('a node with terminal approved and online has a Terminal button', async (t)
   await nodesResource.refresh();
   await settle();
   assert.equal(button(root, 'Terminal'), undefined, 'not while it is offline');
+});
+
+test('Docker Sandboxes show what the node found, what is missing, and wait for approval', async (t) => {
+  const sbx = { version: '0.24.1', signed_in: true, daemon: true, settings: false, template: '', providers: ['claude'], problem: 'Fridolin’s settings do not hold: run fridolin node sandbox setup' };
+  const decl = { ...declared, sandbox: sbx };
+  const allows = ['run brains in Docker Sandboxes on this machine'];
+  const { root, calls } = await openPage(t, [node({ device: 'approved', commands: 'pending', declared: decl, allows })]);
+  const line = root.querySelector('.node-sandbox');
+  assert.equal(line.textContent, 'Docker Sandboxes: sbx 0.24.1 · signed in · running · Fridolin’s settings do not hold · no template yet · logins: Claude · not approved yet'
+    + 'Fridolin’s settings do not hold: run fridolin node sandbox setup');
+  assert.deepEqual(line.querySelectorAll('span.warn-text').map((s) => s.textContent), ['Fridolin’s settings do not hold', 'no template yet'], 'what is missing stands out');
+  assert.match(root.textContent, /If you approve, it can:run brains in Docker Sandboxes on this machine/);
+  assert.match(root.textContent, /Offers.*sandbox/);
+  button(root, 'Approve what it offers').click();
+  await settle();
+  assert.ok(calls.some((c) => c.method === 'POST' && c.path === '/api/nodes/8233270f8a24/approve-commands'), 'approved with the rest');
+});
+
+test('approved Docker Sandboxes that are ready run brains', async (t) => {
+  const sbx = { version: '0.24.1', signed_in: true, daemon: true, settings: true, template: 'fridolin-brain', providers: ['claude', 'codex'] };
+  const decl = { ...declared, sandbox: sbx };
+  const { root } = await openPage(t, [node({ device: 'approved', commands: 'approved', declared: decl, approved: decl, effective: decl })]);
+  const line = root.querySelector('.node-sandbox');
+  assert.equal(line.textContent, 'Docker Sandboxes: sbx 0.24.1 · signed in · running · Fridolin’s settings hold · template fridolin-brain · logins: Claude, Codex · runs brains');
+  assert.equal(line.querySelector('.warn-text'), null);
+  assert.equal(capSummary({ sandbox: sbx }), 'sandbox');
+  assert.deepEqual(sandboxFacts({ ...sbx, signed_in: false, daemon: false, providers: [] }).facts.filter(([, ok]) => !ok).map(([text]) => text), ['not signed in', 'not running', 'no AI login']);
+  assert.equal(sandboxFacts(sbx).ready, true);
+  assert.equal(sandboxFacts({ ...sbx, problem: 'the daemon is restarting' }).ready, false);
 });
 
 test('core-host shows the device key and whether the owner confirmed it, and asks nothing', async (t) => {
