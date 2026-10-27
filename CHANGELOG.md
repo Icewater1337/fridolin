@@ -21,6 +21,18 @@ for compatibility.
   `fridolin doctor` the check `brain-runtime`, and the audit's `run_end`
   a `runtime` for such brains. Nothing changes for brains on bubblewrap.
   See docs/SANDBOXES.md.
+- **`fridolin node sandbox setup`, `status`, and doctor's sandbox checks**
+  (#149). Setup makes sbx's global settings fridolin's on that machine
+  (network policy `deny-all`, SSH agent forwarding and the browser off;
+  this also applies to your own sandboxes), builds the template
+  `container/sandbox/Dockerfile` with Docker and loads it into sbx. A
+  node offers the `sandbox` capability only after setup, so no approval
+  is asked for before. The core sends the node a linux fridolin of its
+  own version for the sandboxes, as it sends updates, whenever the node
+  holds another (new methods `sandbox.bin_write` and `sandbox.bin`; the
+  capability's new `bin`). `fridolin doctor --node` checks sbx's version,
+  setup, sign-in, settings, template, that binary, the logins and free
+  memory. See docs/NODES.md, "Docker Sandboxes".
 - **OpenAI and ElevenLabs as connections of Fridolin** (#284). The
   Integrations page keeps one OpenAI key (with an optional organization
   and project) and one ElevenLabs key, in `connections/` in the data dir.
