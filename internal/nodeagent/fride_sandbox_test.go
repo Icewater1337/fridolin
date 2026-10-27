@@ -215,7 +215,7 @@ func TestFrideSandboxSupervise(t *testing.T) {
 }
 
 // update builds FrIDE again at the checkout's new pin, keeps the sandbox,
-// and the agent starts the new FrIDE; a changed template is only noted.
+// and the agent starts the new FrIDE.
 func TestFrideSandboxUpdate(t *testing.T) {
 	t.Parallel()
 	o, fake, out := createdSandbox(t)
@@ -228,7 +228,6 @@ func TestFrideSandboxUpdate(t *testing.T) {
 	waitFor(t, "FrIDE to run", func() bool { return lines(fakeFile(fake, "serves.log")) == 1 })
 	const newPin = "1111111111111111111111111111111111111111"
 	writeTestFile(t, filepath.Join(o.Repo, filepath.FromSlash(frideImageDockerfile)), "ARG FRIDE_COMMIT="+newPin+"\n")
-	writeTestFile(t, filepath.Join(o.Repo, filepath.FromSlash(frideSandboxDockerfile)), "FROM y\n")
 	out.Reset()
 	o.GitName, o.GitEmail = "New Name", ""
 	if err := FrideSandboxUpdate(context.Background(), o); err != nil {
@@ -240,8 +239,8 @@ func TestFrideSandboxUpdate(t *testing.T) {
 	if got, _ := LoadFrideSandbox(o.Dir); got.Commit != newPin || !got.Run || got.Template != st.Template {
 		t.Errorf("state after update: %+v", got)
 	}
-	if !strings.Contains(out.String(), "the template changed") || called(fakeCalls(t, fake), "rm") {
-		t.Errorf("update with a new template:\n%s", out)
+	if called(fakeCalls(t, fake), "rm") {
+		t.Errorf("update with the same template made the sandbox anew:\n%s", out)
 	}
 	waitFor(t, "the new FrIDE to run", func() bool { return lines(fakeFile(fake, "serves.log")) == 2 })
 	if n := lines(fakeFile(fake, "stops.log")); n != 1 {

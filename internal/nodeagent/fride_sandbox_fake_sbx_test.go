@@ -29,6 +29,10 @@ func fakeFrideSbx(dir string, args []string) (int, bool) {
 	case args[0] == "create":
 		appendFile(filepath.Join(dir, "disk.log"), os.Getenv(frideSandboxDiskEnv)+"\n")
 		return 0, false
+	case args[0] == "rm":
+		// The VM's disk goes with the sandbox.
+		_ = os.RemoveAll(filepath.Join(dir, "vmhome"))
+		return 0, false
 	case args[0] == "cp":
 		record()
 		return fakeCp(dir, args[1], args[2]), true

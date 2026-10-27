@@ -20,10 +20,9 @@ import (
 // FrIDE, which the first time downloads a few GB.
 func frideSandboxTimeout(sub string) time.Duration {
 	switch sub {
-	case "create":
+	case "create", "update":
+		// update makes the sandbox anew when the template changed.
 		return 45 * time.Minute
-	case "update":
-		return 15 * time.Minute
 	case "start":
 		return 5 * time.Minute
 	}

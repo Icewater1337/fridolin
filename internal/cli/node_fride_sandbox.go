@@ -43,7 +43,9 @@ Usage:
   fridolin node fride sandbox stop
                   stop FrIDE; the agent no longer starts it
   fridolin node fride sandbox update [--repo DIR]
-                  build FrIDE again at the commit the checkout pins, and restart it
+                  build FrIDE again at the commit the checkout pins, and restart it;
+                  when the checkout's template changed, make the sandbox anew from
+                  it and carry its workspaces, sessions, FrIDE's tasks and login over
   fridolin node fride sandbox status
                   the sandbox, FrIDE, the pairing, the login
   fridolin node fride sandbox rm [--yes] [--no-history]

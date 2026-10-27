@@ -18,7 +18,10 @@ const frideSandboxWait = 3 * time.Minute
 
 // FrideSandboxUpdate builds FrIDE again in the sandbox at the commit the
 // checkout pins, and has the agent start the new one when FrIDE runs.
-// The sandbox, its workspaces and FrIDE's config stay.
+// The sandbox, its workspaces and FrIDE's config stay. When the
+// checkout's template differs from the sandbox's, it makes the sandbox
+// anew from it and carries over its workspaces, history and login
+// (recreate), and finishes such a carry an earlier update left.
 func FrideSandboxUpdate(ctx context.Context, o FrideSandboxOptions) error {
 	st, err := o.loadMade()
 	if err != nil {
@@ -28,16 +31,26 @@ func FrideSandboxUpdate(ctx context.Context, o FrideSandboxOptions) error {
 	if err != nil {
 		return err
 	}
-	if status, err := o.sandboxStatus(ctx); err != nil {
+	tag, err := FrideSandboxTemplateTag(o.Repo)
+	if err != nil {
 		return err
-	} else if status == "" {
-		return fmt.Errorf("sbx has no sandbox %s any more: fridolin node fride sandbox rm, then create", o.sandbox())
 	}
-	if tag, err := FrideSandboxTemplateTag(o.Repo); err == nil && tag != st.Template {
-		fmt.Fprintf(o.Out, "Note: the template changed (%s, the sandbox has %s). update builds FrIDE only; for the new template, rm and create the sandbox (its workspaces go with it).\n", tag, st.Template)
+	status, err := o.sandboxStatus(ctx)
+	if err != nil {
+		return err
 	}
 	if o.FrideRepo != "" {
 		st.Repo = o.FrideRepo
+	}
+	switch {
+	case status == "" && o.carrying():
+		fmt.Fprintf(o.Out, "An earlier update left the sandbox's things in %s; making the sandbox from %s and putting them back…\n", o.carryDir(), tag)
+		return o.recreate(ctx, st, status, tag, commit)
+	case status == "":
+		return fmt.Errorf("sbx has no sandbox %s any more: fridolin node fride sandbox rm, then create", o.sandbox())
+	case tag != st.Template:
+		fmt.Fprintf(o.Out, "The template changed (%s, the sandbox has %s): making the sandbox anew, with its workspaces, sessions, FrIDE's tasks and login…\n", tag, st.Template)
+		return o.recreate(ctx, st, status, tag, commit)
 	}
 	if o.GitName != "" || o.GitEmail != "" {
 		if err := o.gitIdentity(ctx); err != nil {
