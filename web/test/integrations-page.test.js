@@ -32,6 +32,8 @@ async function openPage(t, first = status('2026-10-18T10:00:00Z'), connections =
   const calls = serve(t, (path) => {
     if (path.startsWith('/api/plaud/status')) return bridge.status;
     if (path === '/api/connections') return connections;
+    if (path === '/api/gitlab') return { configured: false, base_url: '', host: '', token_hint: '', name: '', email: '', where: 'this machine’s data folder' };
+    if (path === '/api/git-identities') return { identities: [], nodes: [] };
     if (path.startsWith('/api/brains')) return [{ id: 'work', name: 'Work' }, { id: 'personal', name: 'Personal' }];
     return {};
   });
@@ -42,9 +44,12 @@ async function openPage(t, first = status('2026-10-18T10:00:00Z'), connections =
   page.render(root, ctx);
   await settle();
   const poll = async (next) => { bridge.status = next; await resource('/api/plaud/status').refresh(); await settle(); };
-  const note = () => /** @type {HTMLElement} */ (root.querySelector('.live-form').firstChild); // the "changed elsewhere" note
+  const note = () => /** @type {HTMLElement} */ (plaudCard(root).querySelector('.live-form').firstChild); // the "changed elsewhere" note
   return { root, ctx, poll, note, calls };
 }
+
+// The Plaud card, apart from the GitHub and GitLab cards above it.
+const plaudCard = (root) => root.querySelectorAll('section.card').find((c) => c.textContent.includes('Plaud recorder'));
 
 test('the Plaud status keeps refreshing while its settings have edits', async (t) => {
   const { root, ctx, poll, note } = await openPage(t);
@@ -124,8 +129,7 @@ for (const c of [
 
 test('a card that was never connected offers Connect, or the phone app instead, but no Disconnect', async (t) => {
   const { root } = await openPage(t, { ...status('2026-10-18T10:00:00Z'), connected: false });
-  const plaud = root.querySelectorAll('section.card').find((c) => c.textContent.includes('Plaud recorder'));
-  assert.deepEqual(plaud.querySelectorAll('button').map((b) => b.textContent), ['Connect Plaud', 'Use the Plaud Sync phone app instead']);
+  assert.deepEqual(plaudCard(root).querySelectorAll('button').map((b) => b.textContent), ['Connect Plaud', 'Use the Plaud Sync phone app instead']);
 });
 
 test('the brains to pick are named with their ids', async (t) => {
@@ -217,7 +221,7 @@ test('a phone folder needs no Plaud CLI or login on the card', async (t) => {
   assert.match(root.textContent, /\/Users\/you\/PlaudSync/);
   assert.doesNotMatch(root.textContent, /Install Plaud’s command-line tool|Login stored in|Let brains use|AI-cleaned/);
   assert.equal(button(root, 'Disconnect'), undefined);
-  assert.ok(button(root, 'Save') && button(root, 'Check now'));
+  assert.ok(button(plaudCard(root), 'Save') && button(root, 'Check now'));
 });
 
 test('the phone app part: keys, the build, its download and the paired phones', async (t) => {
@@ -236,10 +240,10 @@ test('the phone app part: keys, the build, its download and the paired phones', 
   assert.ok(button(root, 'Download app (APK)') && button(root, 'Build again') && button(root, 'Unpair'));
   assert.match(root.textContent, /dev_abc/);
 
-  const key = root.querySelector('input[type=password]');
+  const key = plaudCard(root).querySelector('input[type=password]');
   type(key, 'typed');
   await poll({ ...s, cli: { found: false }, account: '', settings: { ...s.settings, phone_upload: true }, app: { ...app, devices: [] } });
-  assert.equal(root.querySelector('input[type=password]').value, 'typed', 'a refresh keeps keys being typed');
+  assert.equal(plaudCard(root).querySelector('input[type=password]').value, 'typed', 'a refresh keeps keys being typed');
   assert.match(root.textContent, /No phone is paired yet/);
 
   button(root, 'Build again').click();
@@ -298,7 +302,7 @@ test('voice mode is offered with the phone app, and its brain once it is on', as
   assert.match(root.textContent, /Brain for voice questions/);
   assert.match(root.textContent, /go to the phone only, not WhatsApp/);
 
-  button(root, 'Save').click();
+  button(plaudCard(root), 'Save').click();
   await settle();
   const saved = calls.find((c) => c.path === '/api/plaud/settings' && c.method === 'PUT');
   assert.equal(saved.body.voice, true);
@@ -318,9 +322,17 @@ test('the OpenAI and ElevenLabs cards follow one request, after Plaud', async (t
   });
   assert.equal(calls.filter((c) => c.path === '/api/connections').length, 1, 'both cards share the one resource');
   const titles = root.querySelectorAll('section.card h2').map((x) => x.textContent);
-  assert.deepEqual(titles, ['GitHub', 'Plaud recorder', 'OpenAI', 'ElevenLabs']);
+  assert.deepEqual(titles, ['GitHub', 'GitLab', 'Plaud recorder', 'OpenAI', 'ElevenLabs']);
   assert.equal(ctx.dirty(), false);
   const openai = root.querySelectorAll('section.card').find((c) => c.querySelector('h2').textContent === 'OpenAI');
   type(openai.querySelector('input[type=password]'), 'sk-test-typed');
   assert.equal(ctx.dirty(), true, 'a key being typed is unsaved, and leaving asks first');
+});
+
+test('a GitLab token being typed is unsaved too', async (t) => {
+  const { root, ctx } = await openPage(t);
+  assert.equal(ctx.dirty(), false);
+  const gitlab = root.querySelectorAll('section.card').find((c) => c.querySelector('h2').textContent === 'GitLab');
+  type(gitlab.querySelector('input[type=password]'), 'test-gitlab-token-typed');
+  assert.equal(ctx.dirty(), true);
 });
