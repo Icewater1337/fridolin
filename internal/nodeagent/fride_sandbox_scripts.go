@@ -8,7 +8,8 @@ package nodeagent
 // (FRIDE_HOME: its config, serve.log, fride.pid) and workspaces.
 
 // frideSandboxPrepare makes FrIDE's folders, writes its config from
-// stdin unless one is there, marks ponytail's statusline offer as made
+// stdin (of one put back from history, only its base folders and
+// workspace root), marks ponytail's statusline offer as made
 // and the workspaces as trusted by Claude Code.
 const frideSandboxPrepare = `# fride-sandbox: prepare
 set -eu
@@ -16,7 +17,12 @@ c="$HOME/fride-companion"
 h="$c/home"
 mkdir -p "$h" "$c/workspaces" "$c/bin" "$c/src" "$HOME/.claude"
 umask 077
-if [ -s "$h/config.json" ]; then cat >/dev/null; else cat >"$h/config.json"; fi
+if [ -s "$h/config.json" ]; then
+	jq --slurpfile n /dev/stdin '.baseFolders = $n[0].baseFolders | .workspaceRoot = $n[0].workspaceRoot' "$h/config.json" >"$h/config.json.tmp"
+	mv "$h/config.json.tmp" "$h/config.json"
+else
+	cat >"$h/config.json"
+fi
 touch "$HOME/.claude/.ponytail-statusline-nudged"
 s="$HOME/.claude.json"
 [ -s "$s" ] || echo '{}' >"$s"
@@ -128,6 +134,43 @@ h="$c/home"
 pid=$(cat "$h/fride.pid" 2>/dev/null || true)
 if [ -n "$pid" ] && [ "$(cat "/proc/$pid/comm" 2>/dev/null)" = fride ]; then echo running=yes; else echo running=no; fi
 echo "commit=$(git -C "$c/src/fride" rev-parse HEAD 2>/dev/null)"
+`
+
+// frideSandboxCredential sets git's credential helper for the URL $1 in
+// the VM: it answers user $2 and the placeholder $3, which sbx's proxy
+// swaps for the token on the way out. Neither is a secret.
+const frideSandboxCredential = `# fride-sandbox: credential
+set -eu
+git config --global --replace-all "credential.$1.helper" "!f() { test \"\$1\" = get || exit 0; echo username=$2; echo password=$3; }; f"
+`
+
+// frideSandboxUncredential removes the helper for the URL $1.
+const frideSandboxUncredential = `# fride-sandbox: uncredential
+git config --global --unset-all "credential.$1.helper" || true
+`
+
+// frideSandboxList prints the VM's home and which of the paths under it,
+// the arguments, are there.
+const frideSandboxList = `# fride-sandbox: list
+echo "home=$HOME"
+for p; do [ ! -e "$HOME/$p" ] || echo "have=$p"; done
+`
+
+// frideSandboxMkdirs makes the folders under the VM's home.
+const frideSandboxMkdirs = `# fride-sandbox: mkdirs
+set -eu
+for p; do mkdir -p "$HOME/$p"; done
+`
+
+// frideSandboxOwn, as root, gives the paths under the home $1 to the
+// home's owner, and removes the pid file of a FrIDE that ran elsewhere.
+const frideSandboxOwn = `# fride-sandbox: own
+set -eu
+h=$1
+shift
+u=$(stat -c %u:%g "$h")
+for p; do [ ! -e "$h/$p" ] || chown -R "$u" "$h/$p"; done
+rm -f "$h/fride-companion/home"/fride.pid
 `
 
 // frideSandboxScript is the argv of `sbx exec` for script with args.
