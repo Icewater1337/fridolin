@@ -1178,6 +1178,14 @@ for compatibility.
 
 ### Fixed
 
+- **Your own FrIDE threads stay in your chat** (#337). At every start,
+  the bridge gave a scheduled agent the open threads it seemed to have
+  started, among them any that began while a run of the agent was
+  queued or went on. A thread your DM started in that time went to the
+  agent at the next restart: its news no longer reached you, and its
+  questions started runs of the agent. Now only threads from before
+  agents kept their FrIDE news (#300, 25 October 2026) go to an agent.
+  A thread that was already moved stays with the agent.
 - **Pairing FrIDE again works at once.** After `fridolin node fride
   pair` on a node whose agent runs, FrIDE takes only the new token,
   while the agent kept the old one until its next check, up to half a
