@@ -14,6 +14,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/nodeagent"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/nodes"
 	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/testutil"
 )
@@ -277,12 +278,63 @@ func TestNodeExecThroughNodes(t *testing.T) {
 		t.Errorf("the line of the upgrade with the approval_id: %v", l)
 	}
 
-	// A lockdown refuses running; the rules still read.
-	if _, err := h.b.setLockdown(context.Background(), true, "dashboard"); err != nil {
-		t.Fatal(err)
+	// A lockdown that starts while a command waits for the yes: the yes
+	// runs nothing.
+	reply = h.coreSaysWhile("upgrade once more", func() {
+		h.WaitFor("the approval of the upgrade", func() bool {
+			pending, _ := h.approvals()
+			return len(pending) > 0 && strings.Contains(pending[len(pending)-1]["action"].(string), upgrade)
+		})
+		if _, err := h.b.setLockdown(context.Background(), true, "dashboard"); err != nil {
+			t.Fatal(err)
+		}
+		h.decidePending(upgrade, true)
+	}, step("node_exec", execArgs([]string{brew, "upgrade"}, `"wait_seconds":60`)))
+	if !strings.Contains(reply, "[core:node_exec failed] the bridge is in lockdown") {
+		t.Fatalf("a yes in a lockdown:\n%s", reply)
 	}
+	if got := ranLog(); got != "upgrade\nupgrade\n" {
+		t.Errorf("ran in a lockdown: %q", got)
+	}
+	if l := h.auditOf("node_exec"); l[len(l)-1]["outcome"] != "refused: lockdown" {
+		t.Errorf("the lockdown's line: %v", l[len(l)-1])
+	}
+
+	// In a lockdown nothing runs; the rules still read.
 	reply = h.coreSays("locked", step("node_exec", execArgs([]string{status}, "")), step("node_exec_rules", `{"node":"mac-mini"}`))
 	if !strings.Contains(reply, "[core:node_exec failed] the bridge is in lockdown") || !strings.Contains(reply, "[core:node_exec_rules] ") || !strings.Contains(reply, status+" (no arguments)") {
 		t.Fatalf("in a lockdown:\n%s", reply)
+	}
+}
+
+// The approval names the command whole, or, when the poll could not show
+// all of it, in short, never cut; the draft has all of it.
+func TestNodeExecApprovalText(t *testing.T) {
+	t.Parallel()
+	v := nodes.View{Node: &nodes.Node{ID: "n1", Name: "mac-mini"}}
+	action, details := execApproval(v, []string{"brew", "upgrade", "--greedy"}, "")
+	if action != "Run `brew upgrade --greedy` on mac-mini" {
+		t.Errorf("action %q", action)
+	}
+	if details != "On mac-mini (node n1): brew upgrade --greedy\nargv: [\"brew\",\"upgrade\",\"--greedy\"]\nThe rule on mac-mini that allows it asks you each time." {
+		t.Errorf("details %q", details)
+	}
+	action, details = execApproval(v, []string{"/Users/you/bin/backup.sh", "two words", "it's", ""}, "/Users/you/Backups")
+	if action != "Run `/Users/you/bin/backup.sh 'two words' 'it'\\''s' ''` in /Users/you/Backups on mac-mini" || !strings.Contains(details, "\nin: /Users/you/Backups\n") {
+		t.Errorf("quoted, in a folder: %q\n%s", action, details)
+	}
+	long := []string{"/Users/you/bin/backup.sh"}
+	for range 20 {
+		long = append(long, "--exclude=/Users/you/Library/Caches")
+	}
+	action, details = execApproval(v, long, "")
+	if len(action) > maxExecAction || action != "Run a long backup.sh command (20 arguments) on mac-mini: Show me the draft has all of it" {
+		t.Errorf("a long command: %q", action)
+	}
+	if !strings.Contains(details, commandLine(long)) {
+		t.Errorf("the draft lacks the command:\n%s", details)
+	}
+	if got := outboundmsg.ApprovalQuestion(action); strings.HasSuffix(got, "…") {
+		t.Errorf("the poll cuts it: %q", got)
 	}
 }

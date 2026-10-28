@@ -18,6 +18,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/nodes"
 	"github.com/Icewater1337/fridolin/internal/skill"
 	"github.com/Icewater1337/fridolin/internal/store"
+	"github.com/Icewater1337/fridolin/internal/textx"
 )
 
 // The core brain runs commands on the owner's machines (docs/NODES.md,
@@ -208,9 +209,10 @@ func commandLine(argv []string) string {
 	return strings.Join(out, " ")
 }
 
-// maxExecAction is how much of an approval's action the poll shows
-// (outboundmsg.ApprovalQuestion): a longer command is named in short, and
-// the owner reads it whole with "Show me the draft".
+// maxExecAction is how much of an approval's action the poll shows, in
+// bytes (outboundmsg.ApprovalQuestion): a longer command is named in
+// short, never cut where the owner cannot see it, and the owner reads it
+// whole with "Show me the draft".
 const maxExecAction = 200
 
 // execApproval is the action and the details of the approval that asks
@@ -223,12 +225,12 @@ func execApproval(v nodes.View, argv []string, dir string) (action, details stri
 		in = " in " + dir
 	}
 	action = fmt.Sprintf("Run `%s`%s on %s", line, in, v.Name)
-	if len([]rune(action)) > maxExecAction {
+	if len(action) > maxExecAction {
 		prog := argv[0]
 		if i := strings.LastIndexAny(prog, `/\`); i >= 0 {
 			prog = prog[i+1:]
 		}
-		action = fmt.Sprintf("Run a long %s command (%d arguments) on %s: tap Show me the draft to read all of it", prog, len(argv)-1, v.Name)
+		action = fmt.Sprintf("Run a long %s command (%d arguments) on %s: Show me the draft has all of it", textx.Truncate(prog, 40), len(argv)-1, textx.Truncate(v.Name, 40))
 	}
 	argvJSON, _ := json.Marshal(argv)
 	details = fmt.Sprintf("On %s (node %s): %s\nargv: %s", v.Name, v.ID, line, argvJSON)
