@@ -116,9 +116,14 @@ type FrideInstanceIdentity struct {
 	Email string `json:"email,omitempty"`
 }
 
-// frideInstanceDir is the folder of the instance name.
+// frideInstanceDir is the folder of the instance name. Each name is
+// checked where it comes in; one that is no instance name anyway gets a
+// folder that holds nothing, never a path outside the instances folder.
 func frideInstanceDir(dir, name string) string {
-	return filepath.Join(dir, frideInstancesDir, name)
+	if nodeproto.FrideInstanceName.MatchString(name) {
+		return filepath.Join(dir, frideInstancesDir, name)
+	}
+	return filepath.Join(dir, frideInstancesDir, "_not-an-instance")
 }
 
 // frideInstanceURL is FrIDE's address on the host for port.

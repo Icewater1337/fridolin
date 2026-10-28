@@ -65,9 +65,17 @@ func (o instanceOps) vmHas(ctx context.Context, sandbox string, paths []string) 
 	if !path.IsAbs(home) {
 		return "", nil, errors.New("the sandbox does not say where its home is")
 	}
-	var have []string
+	// What the VM says only picks from paths: a path the node copies to
+	// or from is always one of its own, never one the VM made up.
+	said := map[string]bool{}
 	for line := range strings.Lines(string(out)) {
-		if p, ok := strings.CutPrefix(strings.TrimSpace(line), "have="); ok && slices.Contains(paths, p) {
+		if p, ok := strings.CutPrefix(strings.TrimSpace(line), "have="); ok {
+			said[p] = true
+		}
+	}
+	var have []string
+	for _, p := range paths {
+		if said[p] {
 			have = append(have, p)
 		}
 	}
