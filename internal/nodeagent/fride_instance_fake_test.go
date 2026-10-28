@@ -34,6 +34,10 @@ func fakeFrideScript(dir, sandbox, script string, args []string) int {
 	switch name {
 	case "prepare":
 		b, _ := io.ReadAll(os.Stdin)
+		if len(b) == 0 {
+			// The template's own, as the published template has it.
+			b = []byte(`{"name":"fridolin companion (instance)","from":"the template"}`)
+		}
 		if !exists("config.json") {
 			_ = os.WriteFile(at("config.json"), b, 0o600)
 		}

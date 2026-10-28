@@ -3,12 +3,16 @@
 # The template of the FrIDE instances' Docker Sandboxes (docs/NODES.md,
 # "FrIDE instances"): the image of sbx's Claude kit, which has Go, Node,
 # git, gh, socat, jq, ripgrep and lsof, with FrIDE at /opt/fride/bin/fride,
-# the Claude Code fridolin is tested with and the pinned ponytail plugin at
-# /opt/fride/plugins/ponytail, as in the fridolin-fride image.
-# `fridolin node fride host setup` builds it with Docker and loads it into
-# sbx (`sbx template load`). FrIDE is built here, so that an instance needs
-# neither FrIDE's source nor GitHub; a new FrIDE is a new template, which
-# an instance gets when the node makes its sandbox anew.
+# its config at /opt/fride/companion.json, the Claude Code fridolin is
+# tested with and the pinned ponytail plugin at /opt/fride/plugins/ponytail,
+# as in the fridolin-fride image. CI publishes it for amd64 and arm64 as
+# ghcr.io/<owner>/fridolin-fride-sandbox (.github/workflows/image.yml),
+# which sbx pulls on a node that set up with `fridolin node fride host
+# setup --no-build`; `fridolin node fride host setup` with Docker builds
+# it here instead and loads it into sbx (`sbx template load`). FrIDE is
+# built here, so that an instance needs neither FrIDE's source nor GitHub;
+# a new FrIDE is a new template, which an instance gets when the node
+# makes its sandbox anew.
 #
 # It holds no secret and no data. FrIDE's commit, Go, Claude Code and
 # ponytail are the ones container/fride/Dockerfile names; a test holds
@@ -60,10 +64,13 @@ RUN apt-get update \
  && git -C /opt/fride/plugins/ponytail checkout -q --detach "${PONYTAIL_COMMIT}" \
  && rm -rf /opt/fride/plugins/ponytail/.git
 COPY --from=fride /out/fride /opt/fride/bin/fride
+# The box's FrIDE config, which a new instance's starts from when the node
+# gives none (a template from the core: fride host setup --no-build).
+COPY container/fride/companion.json /opt/fride/companion.json
 
 ENV DISABLE_AUTOUPDATER=1
 USER agent
 RUN claude --version && go version && node --version && gh --version \
- && test -x /opt/fride/bin/fride \
+ && test -x /opt/fride/bin/fride && jq -e .companion /opt/fride/companion.json >/dev/null \
  && command -v socat jq lsof setsid ip \
  && test -f /opt/fride/plugins/ponytail/.claude-plugin/plugin.json

@@ -21,7 +21,8 @@ import (
 // The fride_host capability (docs/NODES.md, "FrIDE instances"): a native
 // node declares it once `fridolin node fride host setup` ran on its
 // machine (fride-host.json), with sbx's version, whether sbx is ready,
-// the machine's memory, what it keeps for itself and the instances. The
+// whether it needs the core's template, the machine's memory, what it
+// keeps for itself and the instances. The
 // declaration is read again at most every frideHostEvery, and right
 // after an instance changes state. A box never declares it.
 
@@ -107,7 +108,8 @@ func (a *Agent) frideHostRead(ctx context.Context) *nodeproto.FrideHostCap {
 	if host == nil && err == nil {
 		return nil
 	}
-	c := &nodeproto.FrideHostCap{ReserveMB: a.Config.reserveMB()}
+	// Without a template of its own, each start names the core's.
+	c := &nodeproto.FrideHostCap{ReserveMB: a.Config.reserveMB(), NeedsTemplate: host != nil && host.Template == ""}
 	memory := a.inst.memory
 	if memory == nil {
 		memory = hostMemory
@@ -126,7 +128,9 @@ func (a *Agent) frideHostRead(ctx context.Context) *nodeproto.FrideHostCap {
 	}
 	var statuses map[string]string
 	if d == nil {
-		problems = append(problems, "sbx is not installed (or not where the agent looks: on the PATH, /opt/homebrew/bin, /usr/local/bin)")
+		problems = append(problems, sbxNotInstalled())
+	} else if why := d.unavailable(); why != "" {
+		problems = append(problems, why)
 	} else {
 		if out, _, err := d.run(ctx, nil, nil, "version"); err == nil {
 			c.Version = parseSbxVersion(out)
@@ -140,7 +144,7 @@ func (a *Agent) frideHostRead(ctx context.Context) *nodeproto.FrideHostCap {
 			if serr != nil || perr != nil || !sbxSettingsHold(settings, policy) {
 				problems = append(problems, "sbx's global settings are not fridolin's (network policy deny-all, SSH agent forwarding and the browser off): fridolin node fride host setup")
 			}
-			if host != nil && !sbxHasTemplate(ctx, d, host.Template) {
+			if host != nil && host.Template != "" && !sbxHasTemplate(ctx, d, host.Template) {
 				problems = append(problems, "sbx has no template "+host.Template+": fridolin node fride host setup")
 			}
 			statuses = map[string]string{}

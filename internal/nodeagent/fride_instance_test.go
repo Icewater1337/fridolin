@@ -774,3 +774,73 @@ func TestFrideInstanceNotes(t *testing.T) {
 		t.Errorf("declared %+v", c)
 	}
 }
+
+// On a node that built no template, a new instance's sandbox is made
+// from the template the start names, which sbx pulls, with the
+// template's own FrIDE config; a start that names none makes no new
+// sandbox, but brings a made one up to date. A new template from the
+// core makes a stopped instance's sandbox anew, never a running one's.
+func TestFrideInstanceTemplateFromCore(t *testing.T) {
+	t.Parallel()
+	f := newInstFix(t)
+	if err := saveFrideHost(f.a.Dir, FrideHostState{FromCore: true, DockerDisk: "40g"}); err != nil {
+		t.Fatal(err)
+	}
+	const v1, v2 = "ghcr.io/you/fridolin-fride-sandbox:t-0123456789ab", "ghcr.io/you/fridolin-fride-sandbox:t-ba9876543210"
+	p := nodeproto.FrideInstanceStartParams{Name: "work", MemoryMB: 4096}
+	if _, perr := f.a.frideInstanceStart(context.Background(), p); perr == nil || !strings.Contains(perr.Message, "the core sends none") {
+		t.Fatalf("a start without a template: %v", perr)
+	}
+	f.fride("work")
+	p.Template = v1
+	f.start(p)
+	st, _ := loadFrideInstance(f.a.Dir, "work")
+	if st.Template != v1 || st.Caches != "" {
+		t.Errorf("state %+v", st)
+	}
+	if calls := fakeCalls(t, f.fake); !called(calls, "create", "--name", "fride-work", "--memory", "4096m", "-t", v1, "--pull", "missing") {
+		t.Errorf("no create from %s in %v", v1, calls)
+	}
+	if cfg := f.vm("work", "config.json"); !strings.Contains(cfg, `"from":"the template"`) {
+		t.Errorf("FrIDE's config: %s", cfg)
+	}
+
+	// A running instance keeps its sandbox; a start without a template
+	// still brings it up to date.
+	p.Template = v2
+	f.start(p)
+	p.Template = ""
+	f.start(p)
+	if n := strings.Count(string(mustRead(t, filepath.Join(f.fake, "disk.log"))), "\n"); n != 1 {
+		t.Errorf("%d sandboxes made", n)
+	}
+	// Stopped, it is made anew from the new one.
+	if _, err := f.a.instanceOps().stop(context.Background(), "work"); err != nil {
+		t.Fatal(err)
+	}
+	f.fride("work")
+	p.Template = v2
+	f.start(p)
+	if st, _ := loadFrideInstance(f.a.Dir, "work"); st.Template != v2 {
+		t.Errorf("after the new template: %+v", st)
+	}
+	if calls := fakeCalls(t, f.fake); !called(calls, "create", "--name", "fride-work", "--memory", "4096m", "-t", v2, "--pull", "missing") {
+		t.Errorf("no create from %s in %v", v2, calls)
+	}
+	if !strings.Contains(f.log.String(), "making the FrIDE instance work anew (a new template, "+v2+")") {
+		t.Errorf("log:\n%s", f.log)
+	}
+}
+
+// The node's own template wins over the one the start names.
+func TestFrideInstanceOwnTemplateWins(t *testing.T) {
+	t.Parallel()
+	f := newInstFix(t)
+	f.fride("work")
+	p := workParams()
+	p.Template = "ghcr.io/you/fridolin-fride-sandbox:v1"
+	f.start(p)
+	if calls := fakeCalls(t, f.fake); !called(calls, "create", "--name", "fride-work", "--memory", "4096m", "-t", testTemplate, "--pull", "never") {
+		t.Errorf("not made from the node's own template: %v", calls)
+	}
+}

@@ -86,12 +86,15 @@ func (a *Agent) frideHostReady(ctx context.Context) (instanceOps, *FrideHostStat
 	if o.d == nil {
 		return o, nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "sbx is not installed on this node")
 	}
+	if why := o.d.unavailable(); why != "" {
+		return o, nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "%s", why)
+	}
 	sctx, cancel := context.WithTimeout(ctx, sbxSettingsTimeout)
 	defer cancel()
 	if _, _, problem := sbxState(sctx, o.d); problem != "" {
 		return o, nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "%s", problem)
 	}
-	if !sbxHasTemplate(sctx, o.d, host.Template) {
+	if host.Template != "" && !sbxHasTemplate(sctx, o.d, host.Template) {
 		return o, nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "sbx has no template %s: fridolin node fride host setup", host.Template)
 	}
 	return o, host, nil
@@ -119,11 +122,17 @@ func checkInstanceIdentities(ids []nodeproto.FrideIdentity) error {
 }
 
 // ensureInstance has the instance's sandbox, made with p's memory from
-// the host's template: it makes it, or makes it anew, as needed.
+// the host's template (or, on a node that built none, the one p names):
+// it makes it, or makes it anew, as needed.
 func (a *Agent) ensureInstance(ctx context.Context, o instanceOps, host *FrideHostState, p nodeproto.FrideInstanceStartParams) (*FrideInstanceState, error) {
+	// A sandbox there is runs on without a template; a new one needs it.
+	tpl, _, terr := host.templateFor(p.Template)
 	st, err := loadFrideInstance(a.Dir, p.Name)
 	if errors.Is(err, errNoFrideInstance) {
-		st, err = a.newInstance(o, host, p)
+		if terr != nil {
+			return nil, terr
+		}
+		st, err = a.newInstance(o, host, tpl, p)
 	}
 	if err != nil {
 		return st, err
@@ -133,23 +142,26 @@ func (a *Agent) ensureInstance(ctx context.Context, o instanceOps, host *FrideHo
 		return st, err
 	}
 	// fresh is what a new sandbox is made with: the start's memory, the
-	// host's template, Docker disk and caches.
+	// template, the host's Docker disk and caches.
 	fresh := func() {
-		st.MemoryMB, st.Template, st.DockerDisk = p.MemoryMB, host.Template, host.DockerDisk
+		st.MemoryMB, st.Template, st.DockerDisk = p.MemoryMB, tpl, host.DockerDisk
 		caches, err := instanceCaches(host, st.Name, a.Dir)
 		if err != nil {
 			o.say("Note: %v; %s has no shared caches.", err, st.Name)
 		}
 		st.Caches = caches
 	}
+	newTemplate := terr == nil && st.Template != tpl && status != "running"
 	switch {
+	case status == "" && terr != nil, st.MemoryMB != p.MemoryMB && terr != nil:
+		return st, terr
 	case status == "":
 		fresh()
 		return st, o.make(ctx, st, host)
-	case st.MemoryMB != p.MemoryMB || st.Template != host.Template && status != "running":
+	case st.MemoryMB != p.MemoryMB || newTemplate:
 		why := fmt.Sprintf("memory %d MB, now %d MB", st.MemoryMB, p.MemoryMB)
 		if st.MemoryMB == p.MemoryMB {
-			why = "a new template, " + host.Template
+			why = "a new template, " + tpl
 		}
 		a.logf("node: making the FrIDE instance %s anew (%s), with its workspaces, repositories, sessions and login", st.Name, why)
 		if st.Run {
@@ -168,14 +180,14 @@ func (a *Agent) ensureInstance(ctx context.Context, o instanceOps, host *FrideHo
 
 // newInstance is a new instance's state, with a free pair of ports,
 // saved so that no other instance takes them.
-func (a *Agent) newInstance(o instanceOps, host *FrideHostState, p nodeproto.FrideInstanceStartParams) (*FrideInstanceState, error) {
+func (a *Agent) newInstance(o instanceOps, host *FrideHostState, tpl string, p nodeproto.FrideInstanceStartParams) (*FrideInstanceState, error) {
 	a.inst.allocMu.Lock()
 	defer a.inst.allocMu.Unlock()
 	port, hook, err := freePortPair(a.Dir, o.portBase)
 	if err != nil {
 		return nil, err
 	}
-	st := &FrideInstanceState{Name: p.Name, Sandbox: FrideInstanceSandbox(p.Name), MemoryMB: p.MemoryMB, Template: host.Template,
+	st := &FrideInstanceState{Name: p.Name, Sandbox: FrideInstanceSandbox(p.Name), MemoryMB: p.MemoryMB, Template: tpl,
 		Port: port, WebhookPort: hook, DockerDisk: host.DockerDisk}
 	return st, saveFrideInstance(a.Dir, st)
 }

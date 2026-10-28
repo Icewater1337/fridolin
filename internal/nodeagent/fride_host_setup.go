@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
@@ -33,6 +34,9 @@ type FrideHostSetupOptions struct {
 	// ReserveMB, when not 0, is the memory the node keeps for itself
 	// (node.json's fride_host.reserve_mb).
 	ReserveMB int
+	// NoBuild builds no template: each start names the core's published
+	// one, which sbx pulls (Docker, Git, Repo and FrideRepo are unused).
+	NoBuild bool
 	// Out gets what is done, for the person who runs it.
 	Out io.Writer
 	// env is added to each program's environment (tests: the fakes').
@@ -42,7 +46,8 @@ type FrideHostSetupOptions struct {
 // FrideHostSetup sets this machine up to run FrIDE instances: it checks
 // sbx (running, signed in), makes sbx's global settings fridolin's,
 // builds the template with FrIDE at the commit the checkout pins unless
-// sbx has it, and records it all in fride-host.json, after which the
+// sbx has it (with NoBuild, it records that the template comes from the
+// core instead), and records it all in fride-host.json, after which the
 // node's agent offers fride_host. Run again, it builds the template of a
 // newer checkout; instances get it when their sandbox is made anew.
 func FrideHostSetup(ctx context.Context, o FrideHostSetupOptions) error {
@@ -69,41 +74,14 @@ func FrideHostSetup(ctx context.Context, o FrideHostSetupOptions) error {
 	if err := sbxOwnSettings(ctx, d, list, o.Out); err != nil {
 		return err
 	}
-	commit, err := FridePin(o.Repo)
-	if err != nil {
-		return err
-	}
-	frideRepo := o.FrideRepo
-	if frideRepo == "" {
-		if o.Git == "" {
-			return errors.New("FrIDE's git URL is missing: pass --fride-repo")
-		}
-		c := exec.CommandContext(ctx, o.Git, "-C", o.Repo, "remote", "get-url", "origin")
-		c.Env = append(c.Environ(), "GIT_TERMINAL_PROMPT=0")
-		origin, err := c.Output()
-		if err != nil {
-			return fmt.Errorf("fridolin's origin in %s: %w (pass --fride-repo)", o.Repo, err)
-		}
-		if frideRepo, err = frideRepoFrom(string(origin)); err != nil {
-			return err
-		}
-	}
-	if err := checkCloneURL(frideRepo); err != nil {
-		return fmt.Errorf("--fride-repo: %w", err)
-	}
-	companion, err := companionConfig(o.Repo)
-	if err != nil {
-		return err
-	}
-	tag, err := FrideTemplateTag(o.Repo, frideRepo)
-	if err != nil {
-		return err
-	}
 	disk, err := checkDockerDisk(o.DockerDisk)
 	if err != nil {
 		return err
 	}
 	caches := ""
+	if o.Caches != "" && runtime.GOOS == "windows" {
+		return errors.New(errWindowsCaches)
+	}
 	if o.Caches != "" {
 		if err := os.MkdirAll(o.Caches, 0o755); err != nil {
 			return fmt.Errorf("--caches: %w", err)
@@ -112,12 +90,15 @@ func FrideHostSetup(ctx context.Context, o FrideHostSetupOptions) error {
 			return fmt.Errorf("--caches: %w", err)
 		}
 	}
-	if err := o.ensureTemplate(ctx, d, tag, frideRepo); err != nil {
-		return err
-	}
 	old, _ := LoadFrideHost(o.Dir)
-	if err := saveFrideHost(o.Dir, FrideHostState{Template: tag, FrideRepo: frideRepo, FrideCommit: commit, Companion: companion,
-		DockerDisk: disk, Caches: caches, SetUp: time.Now().UTC().Truncate(time.Second)}); err != nil {
+	state := FrideHostState{FromCore: true}
+	if !o.NoBuild {
+		if state, err = o.buildTemplate(ctx, d); err != nil {
+			return err
+		}
+	}
+	state.DockerDisk, state.Caches, state.SetUp = disk, caches, time.Now().UTC().Truncate(time.Second)
+	if err := saveFrideHost(o.Dir, state); err != nil {
 		return err
 	}
 	if o.ReserveMB > 0 {
@@ -126,14 +107,64 @@ func FrideHostSetup(ctx context.Context, o FrideHostSetupOptions) error {
 			return err
 		}
 	}
-	fmt.Fprintf(o.Out, "Set up FrIDE instances on this machine: the template %s (FrIDE %s), a %s Docker disk per instance, %s.\n",
-		tag, short(commit), disk, yesNo(caches != "", "Go and npm caches in "+caches+" (a folder per instance)", "no shared caches"))
-	if old != nil && old.Template != tag {
+	what := fmt.Sprintf("the template %s (FrIDE %s)", state.Template, short(state.FrideCommit))
+	if state.FromCore {
+		what = "the template the core publishes (" + nodeproto.FrideSandboxImage + ", which sbx pulls at an instance's first start)"
+	}
+	fmt.Fprintf(o.Out, "Set up FrIDE instances on this machine: %s, a %s Docker disk per instance, %s.\n",
+		what, disk, yesNo(caches != "", "Go and npm caches in "+caches+" (a folder per instance)", "no shared caches"))
+	if old != nil && old.Template != "" && old.Template != state.Template {
 		fmt.Fprintf(o.Out, "Instances get the new template when the node makes their sandbox anew: at their next start while they are stopped. The old one stays in sbx: sbx template rm %s\n", old.Template)
 	}
 	fmt.Fprintf(o.Out, "The node's agent offers fride_host to the core within a minute. On the core, approve it once (!approve in your chat, the Nodes page, or fridolin nodes approve ID --commands).\n")
 	return nil
 }
+
+// buildTemplate builds the template with FrIDE at the commit the
+// checkout pins, unless sbx has it, and returns what setup records of
+// it.
+func (o FrideHostSetupOptions) buildTemplate(ctx context.Context, d sbxDriver) (FrideHostState, error) {
+	var none FrideHostState
+	commit, err := FridePin(o.Repo)
+	if err != nil {
+		return none, err
+	}
+	frideRepo := o.FrideRepo
+	if frideRepo == "" {
+		if o.Git == "" {
+			return none, errors.New("FrIDE's git URL is missing: pass --fride-repo")
+		}
+		c := exec.CommandContext(ctx, o.Git, "-C", o.Repo, "remote", "get-url", "origin")
+		c.Env = append(c.Environ(), "GIT_TERMINAL_PROMPT=0")
+		origin, err := c.Output()
+		if err != nil {
+			return none, fmt.Errorf("fridolin's origin in %s: %w (pass --fride-repo)", o.Repo, err)
+		}
+		if frideRepo, err = frideRepoFrom(string(origin)); err != nil {
+			return none, err
+		}
+	}
+	if err := checkCloneURL(frideRepo); err != nil {
+		return none, fmt.Errorf("--fride-repo: %w", err)
+	}
+	companion, err := companionConfig(o.Repo)
+	if err != nil {
+		return none, err
+	}
+	tag, err := FrideTemplateTag(o.Repo, frideRepo)
+	if err != nil {
+		return none, err
+	}
+	if err := o.ensureTemplate(ctx, d, tag, frideRepo); err != nil {
+		return none, err
+	}
+	return FrideHostState{Template: tag, FrideRepo: frideRepo, FrideCommit: commit, Companion: companion}, nil
+}
+
+// errWindowsCaches refuses shared caches on Windows: where sbx puts a
+// Windows folder inside the VM, which the caches' variables must name,
+// is not settled yet.
+const errWindowsCaches = "shared Go and npm caches are not supported on Windows yet (where sbx mounts a Windows folder in the VM is not settled): set up with --no-caches; each instance keeps its caches on its own disk"
 
 // short is a commit's first 12 characters.
 func short(commit string) string {

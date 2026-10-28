@@ -13,10 +13,11 @@ package nodeagent
 const frideInstanceScriptPrefix = "# fride-instance: "
 
 // frideInstancePrepare makes FrIDE's folders, writes its config from
-// stdin (of one put back from history, only its base folders and
-// workspace root), with the VM's own base folder and workspaces, marks
-// ponytail's statusline offer as made and the workspaces as trusted by
-// Claude Code.
+// stdin, else from the template's own (/opt/fride/companion.json, which
+// the published template has), named for an instance (of one put back
+// from history, only its base folders and workspace root), with the VM's
+// own base folder and workspaces, marks ponytail's statusline offer as
+// made and the workspaces as trusted by Claude Code.
 const frideInstancePrepare = `# fride-instance: prepare
 set -eu
 c="$HOME/fride-companion"
@@ -27,6 +28,11 @@ if [ -s "$h/config.json" ]; then
 	cp "$h/config.json" "$h/config.json.old"
 else
 	cat >"$h/config.json.old"
+	if [ ! -s "$h/config.json.old" ]; then
+		t=/opt/fride/companion.json
+		[ -s "$t" ] || { echo "the template has no FrIDE config ($t), and the node gave none: fridolin node fride host setup" >&2; exit 2; }
+		jq '.name = "fridolin companion (instance)"' "$t" >"$h/config.json.old"
+	fi
 fi
 jq --arg r "$c/repos" --arg w "$c/workspaces" '.baseFolders = [$r] | .workspaceRoot = $w' "$h/config.json.old" >"$h/config.json.tmp"
 mv "$h/config.json.tmp" "$h/config.json"
