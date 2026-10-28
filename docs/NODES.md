@@ -1364,7 +1364,7 @@ node that offers `fride_host`, for one trust domain that
 `fride.instances` names ([CONFIGURATION.md](CONFIGURATION.md); the
 direction is in [VISION.md](VISION.md#fride-instances)). The core starts
 one when work needs it and stops it once it idles; the node side is in
-[FrIDE in a Docker Sandbox](#fride-in-a-docker-sandbox).
+[FrIDE instances](#fride-instances).
 
 **Tools.** With instances configured, the core brain has three more, and
 its prompt lists each instance with its description and repositories,
