@@ -1742,6 +1742,37 @@ scheduled agent handed to FrIDE never posts to a chat: its news goes to
 the agent, which answers FrIDE itself and reports only what matters
 ([BRAINS.md](BRAINS.md#scheduled-agents)).
 
+### `fride.instances`
+
+The FrIDE instances the core brain may start on its nodes, by name:
+each a whole FrIDE in a Docker Sandbox of its own, for one trust domain
+([NODES.md](NODES.md#fride-instances), [VISION.md](VISION.md)). The
+core brain starts one when a task needs it (`fride_spawn`, or
+`fride_task` with `instance`), sizes its memory, and stops it once it
+idles.
+
+```json
+"fride": {
+  "instances": {
+    "fridolin": { "description": "fridolin and FrIDE themselves", "repos": ["https://github.com/you/fridolin.git"], "identities": ["github"] },
+    "work":     { "description": "work repositories", "repos": ["https://gitlab.example.com/group/app.git"], "identities": ["gitlab"], "egress": ["registry.example.com"] }
+  }
+}
+```
+
+A name is a lower-case letter, then up to 23 lower-case letters, digits
+and dashes; `native` is the node's own FrIDE and taken.
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `description` | | What the instance is for, shown to the core brain so it picks the right one |
+| `repos` | | Git URLs, cloned inside the instance when missing |
+| `identities` | none | The git identities it gets, `github` and `gitlab` ([CONNECTIONS.md](CONNECTIONS.md#gitlab)); only these reach it, as placeholders that sbx's proxy swaps for the tokens on the node |
+| `egress` | | Hosts it may reach beyond its baseline: its AI provider, its identities' hosts, Go's proxy, npm and Docker Hub |
+| `nodes` | any | Where it may run, by node id or name; empty: any approved node that offers `fride_host` |
+| `memory_mb` | `0` | A fixed memory size, 2048 to 65536; `0`: the core decides at each start from the task and the node's free memory |
+| `idle_stop_minutes` | `0` | It stops after this long with no open thread and no news: `0` is 30 minutes, `-1` never |
+
 ### `connections`
 
 Which brains may use Fridolin's OpenAI and ElevenLabs keys through their

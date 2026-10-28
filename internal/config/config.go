@@ -706,6 +706,9 @@ func (c *File) Validate(goos string) error {
 	if !validFrideNews[c.Fride.News] {
 		return fmt.Errorf("fride.news must be %q or %q, not %q", FrideNewsQuiet, FrideNewsAll, c.Fride.News)
 	}
+	if err := validateFrideInstances(c.Fride.Instances); err != nil {
+		return err
+	}
 	if !validQueueModes[c.Queue.Mode] {
 		return fmt.Errorf("queue.mode must be %q or %q, not %q", QueueModeQueue, QueueModeInterrupt, c.Queue.Mode)
 	}

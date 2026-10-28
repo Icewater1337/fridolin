@@ -221,7 +221,26 @@
     "max_log_kb": 512
   },
   "fride": {
-    "news": "all"
+    "news": "all",
+    "instances": {
+      "work": {
+        "description": "work repositories",
+        "repos": [
+          "https://gitlab.example.com/group/app.git"
+        ],
+        "identities": [
+          "gitlab"
+        ],
+        "egress": [
+          "registry.example.com"
+        ],
+        "nodes": [
+          "mini"
+        ],
+        "memory_mb": 8192,
+        "idle_stop_minutes": 45
+      }
+    }
   },
   "connections": {
     "openai": {

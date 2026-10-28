@@ -336,6 +336,24 @@
         "news": {
           "enum": ["", "quiet", "all"],
           "description": "quiet (default): only done or merged work, failures and real questions, each a few lines, an identical error once per thread; all: every piece of news, as FrIDE sends it."
+        },
+        "instances": {
+          "type": "object",
+          "description": "The FrIDE instances the core brain may start on its nodes, by name: each a whole FrIDE in a Docker Sandbox of its own, for one trust domain (docs/NODES.md, FrIDE instances).",
+          "propertyNames": {"pattern": "^[a-z][a-z0-9-]{0,23}$", "not": {"const": "native"}},
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "description": {"type": "string", "description": "What the instance is for, shown to the core brain so it picks the right one."},
+              "repos": {"type": "array", "maxItems": 64, "items": {"type": "string", "minLength": 1}, "description": "Git URLs, cloned inside the instance when missing."},
+              "identities": {"type": "array", "items": {"enum": ["github", "gitlab"]}, "description": "The git identities it gets; only these reach it, as placeholders for their tokens."},
+              "egress": {"type": "array", "maxItems": 64, "items": {"type": "string", "minLength": 1}, "description": "Hosts it may reach beyond its baseline (its provider, its identities' hosts, Go, npm and Docker Hub)."},
+              "nodes": {"type": "array", "maxItems": 64, "items": {"type": "string", "minLength": 1}, "description": "Where it may run, by node id or name; empty: any approved node that offers fride_host."},
+              "memory_mb": {"type": "integer", "minimum": 0, "maximum": 65536, "description": "A fixed memory size, at least 2048; 0 (default): the core decides at each start."},
+              "idle_stop_minutes": {"type": "integer", "minimum": -1, "maximum": 1440, "description": "It stops after this long with no open thread and no news: 0 (default) is 30, -1 never."}
+            }
+          }
         }
       }
     },

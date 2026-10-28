@@ -86,8 +86,10 @@ func CheckLoopbackURL(u string) error {
 	return nil
 }
 
-// The fride methods. Each needs the fride capability; the node passes the
-// call to FrIDE's companion API with its pairing token.
+// The fride methods. The node passes each call to the companion API of
+// the FrIDE its params' instance names (FrideOn), with that FrIDE's
+// pairing token: "" is the node's own FrIDE (the fride capability),
+// another name one of its FrIDE instances (fride_host).
 const (
 	// MethodFrideTask hands FrIDE a message (FrideTaskParams → FrideThread).
 	MethodFrideTask = "fride.task"
@@ -102,7 +104,7 @@ const (
 	// stopped, its slot freed (FrideTaskRef → FrideTask).
 	MethodFrideClose = "fride.close"
 	// MethodFrideMem is FrIDE's check whether a stack may start now
-	// (nothing → FrideMem).
+	// (FrideOn → FrideMem).
 	MethodFrideMem = "fride.mem"
 	// MethodFrideExport writes a task's bundle into a transfer on the node
 	// (FrideExportParams → FrideTransfer); read it with fride.read.
@@ -145,6 +147,7 @@ const FrideChunkBytes = 8 << 20
 
 // FrideTaskParams hands FrIDE's inbox a message.
 type FrideTaskParams struct {
+	FrideOn
 	Message string   `json:"message"`
 	Repos   []string `json:"repos,omitempty"`
 	// Ref is the sender's own id: the same ref again returns the thread it
@@ -176,6 +179,7 @@ type FrideMessage struct {
 
 // FrideStatusParams names a thread.
 type FrideStatusParams struct {
+	FrideOn
 	ThreadID int `json:"thread_id"`
 }
 
@@ -187,18 +191,21 @@ type FrideStatus struct {
 
 // FrideReplyParams answers a thread.
 type FrideReplyParams struct {
+	FrideOn
 	ThreadID int    `json:"thread_id"`
 	Text     string `json:"text"`
 }
 
 // FrideTaskRef names a task.
 type FrideTaskRef struct {
+	FrideOn
 	TaskID string `json:"task_id"`
 }
 
 // FrideDeleteParams removes a task's workspace. Force discards what is not
 // committed: only once an archive holds it.
 type FrideDeleteParams struct {
+	FrideOn
 	TaskID string `json:"task_id"`
 	Force  bool   `json:"force,omitempty"`
 }
@@ -227,6 +234,7 @@ type FrideTask struct {
 // with GitHub, creates it on GitHub with gh (private unless Public) and
 // pushes it.
 type FrideRepoParams struct {
+	FrideOn
 	Name   string `json:"name"`
 	URL    string `json:"url,omitempty"`
 	GitHub bool   `json:"github,omitempty"`
@@ -262,6 +270,7 @@ type FrideMem struct {
 // FrideExportParams exports a task; Stop stops its agents and stack first,
 // so the conversation and the files are complete.
 type FrideExportParams struct {
+	FrideOn
 	TaskID string `json:"task_id"`
 	Stop   bool   `json:"stop,omitempty"`
 }
@@ -276,6 +285,7 @@ type FrideTransfer struct {
 // FrideChunkParams reads from or writes to a transfer. A write at offset 0
 // with no ID makes a new transfer.
 type FrideChunkParams struct {
+	FrideOn
 	ID     string `json:"id,omitempty"`
 	Offset int64  `json:"offset"`
 	// Max bounds a read (0: FrideChunkBytes).
@@ -292,6 +302,7 @@ type FrideChunk struct {
 // FrideImportParams imports a transfer as a task: As names it when its id
 // is taken here, StartAgent reopens its agent with its conversation.
 type FrideImportParams struct {
+	FrideOn
 	ID         string `json:"id"`
 	As         string `json:"as,omitempty"`
 	StartAgent bool   `json:"start_agent,omitempty"`
@@ -309,6 +320,9 @@ const (
 
 // FrideEvent is thread news from FrIDE's webhook, verified by the node.
 type FrideEvent struct {
+	// Instance is the FrIDE instance the news is from, "" for the node's
+	// own FrIDE.
+	Instance      string `json:"instance,omitempty"`
 	Event         string `json:"event"`
 	ThreadID      int    `json:"thread_id"`
 	TaskID        string `json:"task_id"`
