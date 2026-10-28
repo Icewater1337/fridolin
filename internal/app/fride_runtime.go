@@ -899,10 +899,7 @@ func (f *frideRuntime) reply(ctx context.Context, id int64, text string) (string
 	case t.State == store.FrideClosed:
 		return "", fmt.Errorf("FrIDE #%d is closed", id)
 	}
-	if err := f.instanceUp(ctx, t); err != nil {
-		return "", err
-	}
-	if why := f.unreachableOn(t.Node, t.Instance); why != "" {
+	if why := f.reachable(ctx, t); why != "" {
 		return "", errors.New(why)
 	}
 	name := f.where(t.Node, t.Instance)
@@ -928,15 +925,22 @@ func (f *frideRuntime) reply(ctx context.Context, id int64, text string) (string
 	return fmt.Sprintf("Passed on to FrIDE #%d on %s (FrIDE's status: %s).", id, name, orDefault(th.Status, "unknown")), nil
 }
 
-// instanceUp starts the FrIDE instance of thread t again where its work
-// is, when it stopped (forced, or its node restarted); nothing for a
-// node's own FrIDE.
-func (f *frideRuntime) instanceUp(ctx context.Context, t store.FrideThread) error {
+// reachable says why the FrIDE of thread t's work cannot serve now, ""
+// when it can. Its FrIDE instance is started again where the work is
+// when it stopped (forced, or its node restarted): what the start
+// answered counts, before the node's declaration says it runs.
+func (f *frideRuntime) reachable(ctx context.Context, t store.FrideThread) string {
 	if t.Instance == "" {
-		return nil
+		return f.unreachable(t.Node)
 	}
-	_, err := f.inst.ensure(ctx, t.Instance, "", "core brain", fmt.Sprintf("FrIDE #%d", t.ID), false)
-	return err
+	s, err := f.inst.ensure(ctx, t.Instance, "", "core brain", fmt.Sprintf("FrIDE #%d", t.ID), false)
+	switch {
+	case err != nil:
+		return err.Error()
+	case s.NodeID != t.Node:
+		return fmt.Sprintf("the FrIDE instance %s runs on %s, but the work of FrIDE #%d is on %s", t.Instance, s.Node, t.ID, f.nodeName(t.Node))
+	}
+	return ""
 }
 
 // vaultWorkspaces is the vault's workspaces folder, made when missing.
@@ -1161,10 +1165,7 @@ func (f *frideRuntime) close(ctx context.Context, id int64) (string, error) {
 	if t.State == store.FrideClosed {
 		return fmt.Sprintf("FrIDE #%d is closed already; its archive is %s.", id, orDefault(t.Archive, "not in the vault")), nil
 	}
-	if err := f.instanceUp(ctx, t); err != nil {
-		return "", err
-	}
-	if why := f.unreachableOn(t.Node, t.Instance); why != "" {
+	if why := f.reachable(ctx, t); why != "" {
 		return "", errors.New(why)
 	}
 	f.inst.touch(t.Instance)
