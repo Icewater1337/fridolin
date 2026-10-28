@@ -10,6 +10,24 @@ for compatibility.
 
 ### Added
 
+- **A native node in one line.** `!join`, the Nodes page's **New join
+  code** and `fridolin nodes join-code` now offer first a line that
+  makes the machine a node natively, one agent per machine
+  (docs/VISION.md): `container/node.sh` (macOS, Linux) and `node.ps1`
+  (Windows) of the core's commit say what they will do and ask first,
+  install Tailscale where it is missing and open its sign-in link, fetch
+  the core's fridolin from the core with the join code, check its
+  SHA-256, install it (`~/.local/lib/fridolin/fridolin`, Windows
+  `%ProgramFiles%\fridolin\fridolin.exe` with one UAC prompt for it and
+  the service) and run `fridolin node join`. The box comes second, the
+  fallback where Docker Sandboxes cannot run, and the plain `fridolin
+  node join` last. The node port serves the binary at `GET
+  /join/<code>/fridolin` and its SHA-256, size and version at
+  `/join/<code>/fridolin.sha256` (`?os=&arch=`), only while the code is
+  valid and unused, without spending it, rate-limited. `POST
+  /api/nodes/join-code` adds `native_command` and
+  `native_command_powershell`; its other fields stay. See
+  docs/NODES.md, "The one-liner".
 - **Git identities for FrIDE, and a GitLab connection.** Integrations →
   **GitLab** keeps a self-hosted GitLab's address, an access token and an
   optional commit name and email; **Check** asks GitLab who the token is.

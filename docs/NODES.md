@@ -30,16 +30,21 @@ and resources at least once a minute and when the node disconnects.
 
 ## Joining a machine
 
-A machine joins as a [node in a box](#node-in-a-box) by default: Docker
-and the line `!join` sends, nothing else to install. This section is the
-native install, for a machine that needs what a container cannot do
-(Apple builds, USB devices, notifications, the workstation mode on host
-folders), or a core that offers no box line.
+A machine joins natively by default: one fridolin agent on it
+([VISION.md](VISION.md#the-technology-for-each-role)), which can start
+the VMs of FrIDE instances, keep backups and run the core in Docker when
+the core moves there, and does what a container cannot (Apple builds,
+USB devices, notifications, the workstation mode on host folders). The
+[one-liner](#the-one-liner) that `!join` sends installs it. A [node in a
+box](#node-in-a-box) is the fallback where Docker Sandboxes cannot run,
+such as a machine without virtualization. Building fridolin from source,
+steps 1 to 5 below, is the last resort.
 
 This is the runbook a coding agent follows when the owner clones the
 repository on a new machine and says "set this machine up as a node of my
-fridolin core" (AGENTS.md, path B). The agent does every step itself
-except the three only the owner can do: signing in to Tailscale,
+fridolin core" (AGENTS.md, path B). The agent runs the one-liner in a
+terminal the owner sees, or does every step itself, except the three
+only the owner can do: signing in to Tailscale,
 getting a join code from the core (`!join` in their WhatsApp chat with
 the bridge), and approving the node (`!approve` there, or the Nodes
 page). None of them needs the dashboard token on the new machine. The
@@ -49,6 +54,92 @@ is done and what to do next; it only looks and may be run again and again.
 The core must have `nodes.enabled` and `core.tailnet.enabled` on (the
 owner's container core on the Mac mini has both): the node reaches it on
 the tailnet at `fridolin-core.<tailnet>.ts.net:8766`.
+
+### The one-liner
+
+The owner sends `!join` to fridolin in their WhatsApp chat (or clicks
+**Nodes → New join code**, or runs `fridolin nodes join-code` on the
+core). A core that knows where its install scripts are published (an
+image CI built, `FRIDOLIN_BOX_SOURCE`) answers with the native line
+first:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/OWNER/fridolin/COMMIT/container/node.sh | sh -s -- \
+  --core fridolin-core.TAILNET.ts.net:8766 --code CODE
+```
+
+On Windows, in PowerShell, not as administrator (the script asks for
+that once, for the one step that needs it):
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/OWNER/fridolin/COMMIT/container/node.ps1))) `
+  -Core fridolin-core.TAILNET.ts.net:8766 -Code CODE
+```
+
+The script is the one of the core's own commit. Add the folder to lend
+and the commands: `--root ~/Fridolin:rw --no-exec` (PowerShell: `-Root
+"$env:USERPROFILE\Fridolin:rw" -NoExec`); the script makes a folder that
+does not exist yet. `node.sh` passes every option it does not know on
+to `fridolin node join` (`--allow`, `--workstation`, `--name`,
+`--no-service`…; `--dir` puts fridolin elsewhere); `node.ps1` takes
+`-Root`, `-NoExec`, `-Allow`, `-Backup`, `-BackupRoot`, `-Workstation`,
+`-WorkstationRoot`, `-Name` and `-StateDir`, and the rest in
+`-JoinArgs`. Run it in a terminal the owner sees: it says what it will
+do and asks before it changes anything (`--yes`, `-Yes`: it does not
+ask), on the terminal, also when it came through the pipe (over SSH:
+`ssh -t`). It never asks for a secret.
+
+1. **Tailscale.** Where it is missing, the script installs it (macOS:
+   `brew install --cask tailscale`, or it opens the download page and
+   waits; Linux: Tailscale's install script, with sudo; Windows: `winget
+   install --id Tailscale.Tailscale -e`, which shows a UAC prompt). Where
+   the machine is not signed in, it runs `tailscale up` (Linux: with
+   sudo), prints the sign-in link and opens it where there is a desktop;
+   the owner signs in with the account of the core's tailnet. Then it
+   waits until the core's address answers.
+2. **fridolin.** It fetches the core's own build for this OS and
+   architecture from the core, on the node port, with the join code:
+   `GET /join/CODE/fridolin.sha256?os=OS&arch=ARCH` answers `<sha256>
+   <size> <version>`, and `GET /join/CODE/fridolin?os=OS&arch=ARCH` the
+   binary, from the builds the core keeps for [updates](#updates). It
+   checks the binary's size and SHA-256 and installs nothing that does
+   not match: on macOS and Linux as `~/.local/lib/fridolin/fridolin`,
+   with `~/.local/bin/fridolin` linked to it and the one it replaces kept
+   as `fridolin.prev`; on Windows as `%ProgramFiles%\fridolin\fridolin.exe`,
+   where only administrators can change it.
+3. **The join.** `fridolin node join CODE --core HOST:8766` with the
+   options passed on, which spends the code. On macOS and Linux it
+   installs and starts the node service as the owner (a launchd agent;
+   a systemd user unit, after which the script offers to turn lingering
+   on). On Windows it joins with `--no-service` as the owner; then one
+   elevated step, one UAC prompt, copies `fridolin.exe` into Program
+   Files (the one it replaces kept as `fridolin.exe.prev`) and runs
+   `node install` and `node start` there. The state dir is
+   `%LOCALAPPDATA%\fridolin-node`, or `%USERPROFILE%\.fridolin-node` when
+   the script runs inside an app package such as the Claude desktop app
+   ([Inside an app package](#inside-an-app-package)). Declining the UAC
+   prompt leaves the node joined, the binary in
+   `%USERPROFILE%\.fridolin-install-…` and the commands to finish in an
+   administrator's PowerShell.
+
+Then the core tells the owner that the node joined, and `!approve` lets
+it in ([6. Approve on the core](#6-approve-on-the-core), [7.
+Verify](#7-verify)). A code that ran out while the owner signed in to
+Tailscale: `!join` again, and the same line with the new code.
+
+The node port serves the binary only for a code that is valid and
+unused, and the download does not spend it. Nothing there lists codes:
+an unknown, used or expired code gets `403`, a platform other than
+`darwin`, `linux` or `windows` on `amd64` or `arm64` gets `400`, and a
+core without node binaries of its version (a native core without `make
+node-binaries`) `503`. A host may ask 20 times in 10 minutes and all
+hosts 100 times, and four binaries go out at once; beyond that, `429`.
+WireGuard carries it on the tailnet, as it carries the nodes'
+WebSocket; everything else on the port is as it was.
+
+The numbered steps below are the native install by hand, building
+fridolin from source: for a core that offers no native line (a local
+build), or a machine the scripts do not cover.
 
 ### 1. Tools
 
@@ -366,19 +457,25 @@ owner wants. Joining again later makes a new device with a new code.
 1. Send `!join` to the bridge in your WhatsApp chat, or on the core run
    `fridolin nodes join-code` (or **Nodes → New join code** in the
    dashboard). It gives a single-use code, valid for 10 minutes,
-   and the lines to paste (sh and PowerShell):
+   and the lines to paste, each for sh and for PowerShell: the native
+   [one-liner](#the-one-liner) first, then a [node in a
+   box](#node-in-a-box), then the plain join for a machine that has
+   fridolin already:
 
    ```
+   curl -fsSL https://raw.githubusercontent.com/OWNER/fridolin/COMMIT/container/node.sh | sh -s -- --core fridolin-core.example.ts.net:8766 --code fj-abcd…
    fridolin node join fj-abcd… --core fridolin-core.example.ts.net:8766
    ```
 
    On the tailnet the address is the core's MagicDNS name once it joined,
    so it resolves on every device of the tailnet. The core keeps only the
    code's SHA-256 in `nodes/nodes.json`.
-2. On the new machine, with fridolin installed, paste that line. It makes
-   the node's device key, writes `node.json`, connects once with the code,
-   and installs and starts the node service. `--no-service` only joins;
-   `fridolin node run` then runs the agent in the foreground.
+2. On the new machine, paste the native line. It installs Tailscale and
+   the core's fridolin, fetched from the core with the code, and joins.
+   With fridolin installed already, the plain line does the join: it
+   makes the node's device key, writes `node.json`, connects once with
+   the code, and installs and starts the node service. `--no-service`
+   only joins; `fridolin node run` then runs the agent in the foreground.
 3. On the core, approve the device:
    `fridolin nodes approve <id>` (or **Approve device** on the Nodes page).
 4. Then approve what it offers, separately:
@@ -660,11 +757,14 @@ memory. A lockdown refuses the build, as it refuses `exec`.
 
 A node in a box runs as containers made from fridolin's own images,
 instead of a native install (issue #191): Docker and one compose file,
-the same on Windows, macOS and Linux. It is the default way to join a
-machine; join natively (above) for what a container cannot do: Apple
-builds (Xcode), USB phones, desktop notifications, the workstation mode
-on the host's own folders. A machine may run a box and a native node
-side by side, with different node ids.
+the same on Windows, macOS and Linux. It is the fallback where Docker
+Sandboxes cannot run, such as a machine without virtualization: join
+natively ([above](#joining-a-machine)) wherever the machine can, since
+only a native agent can start the VMs of FrIDE instances, and it does
+what a container cannot (Apple builds, USB phones, desktop
+notifications, the workstation mode on the host's own folders). A
+machine may run a box and a native node side by side, with different
+node ids.
 
 | Service | Image | Holds | Volumes |
 | --- | --- | --- | --- |
@@ -715,8 +815,9 @@ side by side, with different node ids.
 2. **The line from `!join`.** The owner sends `!join` to fridolin in
    their WhatsApp chat. A core that knows where its box script is
    published (an image CI built, or `fridolin core build` of a clean
-   checkout of a GitHub repository) answers with a line for a box first
-   (`fridolin nodes join-code` on the core prints the same):
+   checkout of a GitHub repository) answers with a line for a box second,
+   after the [native one-liner](#the-one-liner) (`fridolin nodes
+   join-code` on the core prints the same):
 
    ```bash
    curl -fsSL https://raw.githubusercontent.com/OWNER/fridolin/COMMIT/container/box.sh | sh -s -- \

@@ -142,8 +142,45 @@ rollback`.
 
 ## B. Join this machine as a node
 
-**A box by default** (docs/NODES.md, "Node in a box"): Docker and one
-line, no Go, no Tailscale on the host, no service of its own.
+**Natively by default** (docs/NODES.md, "The one-liner"): one agent per
+machine, which can run FrIDE instances, keep backups and become the
+core. One line installs Tailscale and the core's fridolin and joins; no
+Go, no clone.
+
+1. **The line**: ask the person to send `!join` to Fridolin in their
+   own WhatsApp chat and paste the native line it replies with first
+   (sh on macOS and Linux, PowerShell on Windows), and ask which folder
+   the core may use (`--root PATH:rw`, in PowerShell `-Root PATH:rw`;
+   the script makes it) and which commands to allow (on a Windows PC
+   none, `--no-exec` / `-NoExec`, unless they name programs). Run it in
+   a terminal the person sees, on Windows in a PowerShell that is not
+   elevated: it says what it will do and asks first; installs
+   Tailscale where it is missing (a UAC prompt on Windows); prints
+   Tailscale's sign-in link and opens it (they sign in with the core's
+   tailnet account); fetches the core's fridolin from the core with the
+   code and checks its SHA-256; installs it (`~/.local/lib/fridolin/`,
+   Windows `%ProgramFiles%\fridolin\`); and joins, which installs and
+   starts the node service (on Windows one UAC prompt, for Program Files
+   and the service). Inside the Claude desktop app it picks the state
+   dir outside AppData itself (docs/NODES.md, "Inside an app package").
+   On Linux it offers lingering: yes on a machine that should serve
+   while nobody is logged in. A code that ran out while they signed in:
+   `!join` again, and the same line with the new code.
+2. **Approve**: they reply `!approve` when Fridolin says the node
+   joined.
+3. **Verify**: `fridolin node status`, `fridolin doctor --node`,
+   `fridolin setup-machine --node` (exit 0); on Windows `&
+   "$env:ProgramFiles\fridolin\fridolin.exe"` with the `--state-dir` the
+   script printed. The core lists the node online and approved.
+
+Rollback: `!revoke ID` (the ref `!fleet` shows); `fridolin node stop`
+and `fridolin node uninstall` here (elevated on Windows), then remove the
+state dir and the binary (`~/.local/lib/fridolin`, `~/.local/bin/fridolin`;
+Windows `%ProgramFiles%\fridolin`).
+
+**A box** instead (docs/NODES.md, "Node in a box"), the fallback where
+Docker Sandboxes cannot run, such as a machine without virtualization:
+Docker and one line, no Tailscale on the host, no service of its own.
 
 1. **Docker**: Windows `winget install --id Docker.DockerDesktop -e`
    (UAC prompt; open Docker Desktop once for its terms, and turn on
@@ -173,10 +210,10 @@ Rollback: `!revoke ID` (the ref `!fleet` shows), then `docker compose down -v` i
 folder (it deletes the node's key, the backups in the volume and FrIDE's
 workspaces: ask first).
 
-**Natively** instead, when the machine needs what a container cannot do
-(Apple builds, USB phones, notifications, the workstation mode on host
-folders), or the `!join` reply has no box line. The full runbook, with
-every command per OS, is docs/NODES.md, "Joining a machine". In short:
+**Built from source**, the last resort: when the `!join` reply has no
+native line (a core built locally) or the machine is one the scripts do
+not cover. The full runbook, with every command per OS, is
+docs/NODES.md, "Joining a machine". In short:
 
 1. **Tools**: Git, Go, Tailscale. Windows:
    `winget install --id Git.Git -e`, `winget install --id GoLang.Go -e`,
