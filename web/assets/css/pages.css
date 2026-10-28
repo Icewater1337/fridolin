@@ -165,6 +165,8 @@ blockquote.preview {
 .node-live { display: flex; flex-direction: column; gap: 8px; }
 .node-online { display: flex; align-items: center; gap: 8px; }
 .node-offers { display: flex; flex-direction: column; gap: 4px; font-size: 13px; overflow-wrap: anywhere; }
+.node-fride-host { display: flex; flex-direction: column; gap: 2px; }
+.fride-host-instances li { padding: 4px 0; }
 .node-auto-update { margin: 10px 0; font-size: 13px; }
 .tag-list { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .join-command { margin: 10px 0; overflow-wrap: anywhere; }

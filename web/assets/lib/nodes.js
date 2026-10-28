@@ -4,7 +4,7 @@
 /** @import { ExecCap, ExecRule, Node, NodeCapabilities, NodeUpdateStatus, ScheduleProgram } from '../../types/api.js' */
 
 /**
- * "exec (uname, df), fs (2 roots, 1 writable), host, notify, fride, backup (1 folder)", or "nothing".
+ * "exec (uname, df), fs (2 roots, 1 writable), host, notify, fride, fride-host (2 instances), backup (1 folder)", or "nothing".
  * @param {NodeCapabilities | null | undefined} c
  */
 export function capSummary(c) {
@@ -24,6 +24,11 @@ export function capSummary(c) {
   if (c && c.host) parts.push('host');
   if (c && c.notify) parts.push('notify');
   if (c && c.fride) parts.push('fride');
+  const host = c && c.fride_host;
+  if (host) {
+    const n = (host.instances || []).length;
+    parts.push(host.ready ? `fride-host (${n} instance${n === 1 ? '' : 's'})` : 'fride-host (not ready)');
+  }
   if (c && c.backup) {
     const n = (c.backup.folders || []).length;
     parts.push(n ? `backup (${n} folder${n === 1 ? '' : 's'})` : 'backup');

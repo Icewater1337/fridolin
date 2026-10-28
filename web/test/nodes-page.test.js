@@ -25,12 +25,21 @@ const node = (over) => ({
 
 const button = (root, label) => root.querySelectorAll('button').find((b) => b.textContent === label);
 
-async function openPage(t, first) {
+/**
+ * Opens the page on a bridge whose nodes are first. route answers what
+ * the bridge's stand-in does not (undefined: it does).
+ * @param {import('node:test').TestContext} t
+ * @param {object[]} first
+ * @param {(path: string, init: import('./serve.js').RouteInit) => unknown} [route]
+ */
+async function openPage(t, first, route = () => undefined) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
   const bridge = { nodes: first, enabled: true };
   const calls = serve(t, (path, init) => {
+    const own = route(path, init);
+    if (own !== undefined) return own;
     if (path === '/api/nodes') return { enabled: bridge.enabled, listen: '127.0.0.1:8766', nodes: bridge.nodes };
     if (path === '/api/nodes/join-code') return { code: 'fj-abc', expires_at: '2026-10-20T10:10:00Z', command: 'fridolin node join fj-abc --core mini:8766' };
     if (init.method === 'POST' && path.endsWith('/approve')) { bridge.nodes = [node({ device: 'approved' })]; return { node: bridge.nodes[0] }; }
@@ -119,6 +128,86 @@ test('a node whose FrIDE answers links its UI', async (t) => {
   assert.match(root.textContent, /FrIDE: http:\/\/127\.0\.0\.1:7777 · api, web/);
 });
 
+// fride_host: sbx on the node, its memory and its instances. Their
+// figures move with every report, which repaints them alone.
+test('a node that hosts FrIDE instances shows sbx, its memory and its instances', async (t) => {
+  const host = (over = {}) => ({
+    version: '0.9.1', ready: true, total_memory_mb: 65536, available_memory_mb: 40960, reserve_mb: 6144,
+    instances: [
+      { name: 'work', state: 'running', memory_mb: 6144, url: 'http://127.0.0.1:17850', repos: ['app'] },
+      { name: 'fridolin', state: 'failed', memory_mb: 3072, problem: 'its FrIDE did not answer' },
+    ],
+    ...over,
+  });
+  const hosting = (fh) => node({ device: 'approved', commands: 'approved', declared: { ...declared, fride_host: fh }, approved: { ...declared, fride_host: host() }, effective: { ...declared, fride_host: fh } });
+  const { root, bridge } = await openPage(t, [hosting(host())]);
+  assert.match(root.textContent, /May runexec \(hostname, git, go\), fs \(2 roots, 1 writable\), host, fride-host \(2 instances\)/);
+  assert.match(root.textContent, /FrIDE instances: sbx 0\.9\.1 · ready · memory 64 GB, 40 GB available, 6 GB kept for the machine: 34 GB for instances/);
+  assert.match(root.textContent, /work running 6 GB/);
+  assert.match(root.textContent, /fridolin failed 3 GB · its FrIDE did not answer/);
+  assert.equal(root.querySelectorAll('button').filter((b) => b.textContent === 'Stop').length, 1, 'only the running one stops');
+
+  const revoke = button(root, 'Revoke');
+  bridge.nodes = [hosting(host({ available_memory_mb: 30720 }))];
+  const { nodesResource } = await import('../assets/app/resources.js');
+  await nodesResource.refresh();
+  await settle();
+  assert.match(root.textContent, /30 GB available/, 'the figures follow');
+  assert.equal(button(root, 'Revoke'), revoke, 'the card stays');
+
+  bridge.nodes = [hosting(host({ ready: false, problem: 'sbx is not signed in', instances: [] }))];
+  await nodesResource.refresh();
+  await settle();
+  assert.match(root.textContent, /fride-host \(not ready\)/);
+  assert.match(root.textContent, /sbx 0\.9\.1 · not ready: sbx is not signed in/);
+  assert.match(root.textContent, /No instances yet/);
+});
+
+test('a running FrIDE instance is stopped from its node, asking first while it has an open thread', async (t) => {
+  const running = { version: '0.9.1', ready: true, total_memory_mb: 32768, available_memory_mb: 16384, reserve_mb: 6144, instances: [{ name: 'work', state: 'running', memory_mb: 6144 }] };
+  const stopped = { ...running, instances: [{ name: 'work', state: 'stopped', memory_mb: 6144 }] };
+  const hosting = (fh, over = {}) => node({ device: 'approved', commands: 'approved', declared: { fride_host: fh }, approved: { fride_host: fh }, effective: { fride_host: fh }, ...over });
+  /** @type {{nodes?: object[]}} */
+  const after = {};
+  const { root, calls, bridge } = await openPage(t, [hosting(running)], (path, init) => {
+    if (path !== '/api/fride/instances/work/stop') return undefined;
+    if (!JSON.parse(init.body).force) return { status: 409, body: { error: 'work has an open thread (#12).' } };
+    bridge.nodes = after.nodes;
+    return { ok: true };
+  });
+  after.nodes = [hosting(stopped)];
+
+  button(root, 'Stop').click();
+  await settle();
+  const dialog = document.querySelector('dialog');
+  assert.match(dialog.textContent, /Stop work anyway\?/);
+  assert.match(dialog.textContent, /work has an open thread \(#12\)\. Stopping it cuts off the work in progress/);
+  dialog.querySelectorAll('button').find((b) => b.textContent === 'Cancel').click();
+  await settle();
+  assert.deepEqual(calls.filter((c) => c.path === '/api/fride/instances/work/stop').map((c) => c.body), [{}], 'cancelled: no force');
+
+  button(root, 'Stop').click();
+  await settle();
+  document.querySelectorAll('dialog button').find((b) => b.textContent === 'Stop anyway').click();
+  await settle();
+  assert.deepEqual(calls.filter((c) => c.path === '/api/fride/instances/work/stop').map((c) => c.body), [{}, {}, { force: true }]);
+  assert.ok(document.querySelectorAll('.toast').some((el) => el.textContent.includes('Stopped work')));
+  assert.match(root.textContent, /work stopped/);
+  assert.equal(button(root, 'Stop'), undefined);
+
+  // Offline, or with fride_host not approved, nothing is stopped from here.
+  bridge.nodes = [hosting(running, { online: false })];
+  const { nodesResource } = await import('../assets/app/resources.js');
+  await nodesResource.refresh();
+  await settle();
+  assert.equal(button(root, 'Stop'), undefined, 'not while it is offline');
+  bridge.nodes = [hosting(running, { commands: 'pending', effective: {} })];
+  await nodesResource.refresh();
+  await settle();
+  assert.match(root.textContent, /work running/, 'what it offers shows before it is approved');
+  assert.equal(button(root, 'Stop'), undefined, 'not before fride_host is approved');
+});
+
 test('the join code dialog shows the line to paste', async (t) => {
   const { root, calls } = await openPage(t, []);
   assert.match(root.textContent, /No nodes yet/);
@@ -164,6 +253,10 @@ test('nodes off says so and makes no codes', async (t) => {
 test('the capability words match the bridge\'s', () => {
   assert.equal(capSummary(declared), 'exec (hostname, git, go), fs (2 roots, 1 writable), host');
   assert.equal(capSummary({ host: true, fride: { url: 'http://127.0.0.1:7777' } }), 'host, fride');
+  const fh = { version: '1', ready: true, total_memory_mb: 0, available_memory_mb: 0, reserve_mb: 0 };
+  assert.equal(capSummary({ fride_host: fh }), 'fride-host (0 instances)');
+  assert.equal(capSummary({ fride_host: { ...fh, instances: [{ name: 'work', state: 'running', memory_mb: 0 }] } }), 'fride-host (1 instance)');
+  assert.equal(capSummary({ fride_host: { ...fh, ready: false, instances: [{ name: 'work', state: 'running', memory_mb: 0 }] } }), 'fride-host (not ready)');
   assert.equal(capSummary({ backup: {} }), 'backup');
   assert.equal(capSummary({ backup: { folders: ['D:\\B'] } }), 'backup (1 folder)');
   assert.equal(capSummary({}), 'nothing');
