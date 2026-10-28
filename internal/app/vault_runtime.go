@@ -1017,10 +1017,18 @@ func (s *vaultService) hydrate(ctx context.Context, brainID string, paths []stri
 // lets it read and write. The copy is a file of its own (not a hard link),
 // so a run that writes to it cannot change the vault's file.
 func readableCopy(dataDir, id, rel, abs string) (string, error) {
-	dst := filepath.Join(brainStateOf(AbsPath(dataDir), id).tmp, "vault", filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+	tmpDir := brainStateOf(AbsPath(dataDir), id).tmp
+	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
 		return "", err
 	}
+	// The run writes in its temp folder too: the copy goes through os.Root,
+	// so a symlink it planted there cannot lead the write out of it.
+	root, err := os.OpenRoot(tmpDir)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	name := filepath.Join("vault", filepath.FromSlash(rel))
 	src, err := os.Open(abs)
 	if err != nil {
 		return "", err
@@ -1030,25 +1038,14 @@ func readableCopy(dataDir, id, rel, abs string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if old, err := os.Stat(dst); err == nil && old.Size() == st.Size() && old.ModTime().Equal(st.ModTime()) {
+	dst := filepath.Join(tmpDir, name)
+	if old, err := root.Lstat(name); err == nil && old.Mode().IsRegular() && old.Size() == st.Size() && old.ModTime().Equal(st.ModTime()) {
 		return dst, nil
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(dst), "."+filepath.Base(dst)+".*.tmp")
-	if err != nil {
+	if err := fsx.WriteInRoot(root, name, src, 0o600); err != nil {
 		return "", err
 	}
-	defer os.Remove(tmp.Name())
-	if _, err := io.Copy(tmp, src); err != nil {
-		tmp.Close()
-		return "", err
-	}
-	if err := tmp.Close(); err != nil {
-		return "", err
-	}
-	if err := os.Chtimes(tmp.Name(), st.ModTime(), st.ModTime()); err != nil {
-		return "", err
-	}
-	if err := os.Rename(tmp.Name(), dst); err != nil {
+	if err := root.Chtimes(name, st.ModTime(), st.ModTime()); err != nil {
 		return "", err
 	}
 	return dst, nil

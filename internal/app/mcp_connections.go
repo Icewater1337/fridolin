@@ -153,18 +153,28 @@ func (b *App) callElevenLabsSpeak(ctx context.Context, c mcpCaller, raw json.Raw
 	if err != nil {
 		return connectionResult(err), nil
 	}
-	dir := filepath.Join(brainStateOf(AbsPath(b.cfgs.Boot().DataDir), c.run.Brain).tmp, "speech")
-	path, err := writeNewFile(dir, time.Now().UTC().Format("20060102-150405"), connections.SpeechExt(sp.Format, sp.ContentType), sp.Audio)
+	tmp := brainStateOf(AbsPath(b.cfgs.Boot().DataDir), c.run.Brain).tmp
+	path, err := writeNewFile(tmp, "speech", time.Now().UTC().Format("20060102-150405"), connections.SpeechExt(sp.Format, sp.ContentType), sp.Audio)
 	if err != nil {
 		return mcp.ErrorResult("could not write the audio: " + err.Error()), nil
 	}
 	return jsonResult(map[string]any{"path": path, "content_type": sp.ContentType, "characters": sp.Characters}), nil
 }
 
-// writeNewFile writes data to a new file stem+ext in dir, 0600, or
-// stem-2+ext and on when that is taken, and returns its path.
-func writeNewFile(dir, stem, ext string, data []byte) (string, error) {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+// writeNewFile writes data to a new file stem+ext in dir below base, 0600,
+// or stem-2+ext and on when that is taken, and returns its path. The run
+// writes in base too: every step goes through os.Root, so a symlink it
+// planted there cannot lead the write out of base.
+func writeNewFile(base, dir, stem, ext string, data []byte) (string, error) {
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		return "", err
+	}
+	root, err := os.OpenRoot(base)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	if err := root.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
 	for i := 1; ; i++ {
@@ -172,8 +182,8 @@ func writeNewFile(dir, stem, ext string, data []byte) (string, error) {
 		if i > 1 {
 			name = fmt.Sprintf("%s-%d%s", stem, i, ext)
 		}
-		p := filepath.Join(dir, name)
-		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		rel := filepath.Join(dir, name)
+		f, err := root.OpenFile(rel, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if errors.Is(err, fs.ErrExist) && i < 100 {
 			continue
 		}
@@ -185,10 +195,10 @@ func writeNewFile(dir, stem, ext string, data []byte) (string, error) {
 			err = cerr
 		}
 		if err != nil {
-			os.Remove(p)
+			root.Remove(rel)
 			return "", err
 		}
-		return p, nil
+		return filepath.Join(base, rel), nil
 	}
 }
 

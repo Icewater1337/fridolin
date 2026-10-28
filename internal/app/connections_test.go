@@ -586,16 +586,32 @@ func TestConnectionsBrainTools(t *testing.T) {
 
 func TestWriteNewFile(t *testing.T) {
 	t.Parallel()
-	dir := filepath.Join(t.TempDir(), "speech")
-	a, err := writeNewFile(dir, "x", ".mp3", []byte("a"))
+	base := t.TempDir()
+	a, err := writeNewFile(base, "speech", "x", ".mp3", []byte("a"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := writeNewFile(dir, "x", ".mp3", []byte("b"))
-	if err != nil || filepath.Base(a) != "x.mp3" || filepath.Base(b) != "x-2.mp3" {
+	b, err := writeNewFile(base, "speech", "x", ".mp3", []byte("b"))
+	if err != nil || a != filepath.Join(base, "speech", "x.mp3") || filepath.Base(b) != "x-2.mp3" {
 		t.Errorf("%s %s %v", a, b, err)
 	}
-	if _, err := writeNewFile(filepath.Join(a, "sub"), "x", ".mp3", nil); err == nil {
+	if _, err := writeNewFile(base, filepath.Join("speech", "x.mp3", "sub"), "x", ".mp3", nil); err == nil {
 		t.Error("a folder below a file")
+	}
+}
+
+// The run writes in its temp folder; a link it planted there does not lead
+// the bridge's write out of it.
+func TestWriteNewFileFollowsNoSymlinkOut(t *testing.T) {
+	t.Parallel()
+	base, out := t.TempDir(), t.TempDir()
+	if err := os.Symlink(out, filepath.Join(base, "speech")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeNewFile(base, "speech", "x", ".mp3", []byte("a")); err == nil {
+		t.Error("the audio was written through a symlink")
+	}
+	if es, _ := os.ReadDir(out); len(es) > 0 {
+		t.Errorf("written outside: %v", es)
 	}
 }
