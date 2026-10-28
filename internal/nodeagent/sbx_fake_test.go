@@ -124,9 +124,8 @@ func fakeSecret(dir string, args []string) int {
 			fmt.Println("Removed secret sbx-r…cdef") // part of a value: never logged
 		}
 	case "set-custom":
-		cmd := args[slices.Index(args, "--command")+1]
-		file, ok := strings.CutPrefix(cmd, "/bin/cat ")
-		if !ok {
+		file := sbxSecretFileOf(args[slices.Index(args, "--command")+1])
+		if file == "" {
 			return 2
 		}
 		b, err := os.ReadFile(file)

@@ -3,7 +3,6 @@ package nodeagent
 import (
 	"context"
 	"errors"
-	"runtime"
 )
 
 // TestedSbxVersion is the sbx release fridolin's sandboxes were tested
@@ -13,16 +12,14 @@ const TestedSbxVersion = "v0.50.0"
 // errSbxSignedOut is sbx without Docker's sign-in.
 var errSbxSignedOut = errors.New("sbx is not signed in to Docker: run sbx login, then the command again")
 
-// sbxOS reports whether this system runs Docker Sandboxes: macOS and
-// Linux.
-func sbxOS() bool { return runtime.GOOS == "darwin" || runtime.GOOS == "linux" }
-
-// sbx is the driver of sbx, nil without one.
+// sbx is the driver of sbx, nil without one. On Windows a service has
+// one without a path: it looks for the signed-in user's sbx with each
+// call.
 func (a *Agent) sbx() sbxDriver {
 	if a.SandboxDriver != nil {
 		return a.SandboxDriver
 	}
-	if a.SandboxSbx == "" {
+	if a.SandboxSbx == "" && !sbxInSession() {
 		return nil
 	}
 	return sbxCLI{path: a.SandboxSbx}

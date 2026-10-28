@@ -40,6 +40,10 @@ func (a *Agent) sbxSettingsCheck(ctx context.Context) {
 	if h, err := LoadFrideHost(a.Dir); err != nil || h == nil || a.Config.Box != nil {
 		return
 	}
+	// Nobody signed in to Windows: the declaration says so.
+	if d.unavailable() != "" {
+		return
+	}
 	ctx, cancel := context.WithTimeout(ctx, sbxSettingsTimeout)
 	defer cancel()
 	ok, why := a.sandboxSettings(ctx, d)

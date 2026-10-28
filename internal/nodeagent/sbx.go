@@ -18,24 +18,40 @@ type sbxDriver interface {
 	run(ctx context.Context, stdin io.Reader, env []string, args ...string) (stdout, stderr []byte, err error)
 	// start starts sbx with args and returns it running.
 	start(stdin io.Reader, stdout, stderr io.Writer, env []string, args ...string) (*exec.Cmd, error)
+	// unavailable says why sbx cannot run now, before any call: on
+	// Windows, when nobody is signed in whose session it runs in. ""
+	// when it can.
+	unavailable() string
+	// hostFolder gives dir, a folder of the node's that sbx reads or
+	// writes on the host (a sandbox's tokens, its history), to the user
+	// who runs sbx and nobody else: on Windows that user and SYSTEM; on
+	// macOS and Linux the agent is that user, and the folder is 0700.
+	hostFolder(dir string) error
 }
 
 // sbxCLI runs the sbx binary at path: without telemetry, and without a
-// terminal (stdin is what the caller gives, else nothing).
+// terminal (stdin is what the caller gives, else nothing). On Windows,
+// from the node's service, it runs in the signed-in user's session as
+// that user (sbx_windows.go), and path "" is their sbx.
 type sbxCLI struct {
 	path string
 	// env is added to every call's environment (tests: the fake's dir).
 	env []string
 }
 
-func (s sbxCLI) cmd(ctx context.Context, stdin io.Reader, env []string, args []string) *exec.Cmd {
-	c := exec.CommandContext(ctx, s.path, args...)
-	c.Env = slices.Concat(sbxEnv(c.Environ()), s.env, env)
+// cmd is the call of sbx with args; done releases what it holds once
+// sbx started.
+func (s sbxCLI) cmd(ctx context.Context, stdin io.Reader, env []string, args []string) (c *exec.Cmd, done func(), err error) {
+	c, base, done, err := sbxCommand(ctx, s.path, args)
+	if err != nil {
+		return nil, nil, err
+	}
+	c.Env = slices.Concat(sbxEnv(base), s.env, env)
 	if stdin == nil {
 		stdin = strings.NewReader("")
 	}
 	c.Stdin = stdin
-	return c
+	return c, done, nil
 }
 
 // sbxDropped are variables of the agent's environment sbx never gets:
@@ -56,16 +72,24 @@ func sbxEnv(base []string) []string {
 }
 
 func (s sbxCLI) run(ctx context.Context, stdin io.Reader, env []string, args ...string) ([]byte, []byte, error) {
-	c := s.cmd(ctx, stdin, env, args)
+	c, done, err := s.cmd(ctx, stdin, env, args)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer done()
 	var out, errb bytes.Buffer
 	c.Stdout, c.Stderr = &out, &errb
-	err := c.Run()
+	err = c.Run()
 	return out.Bytes(), errb.Bytes(), err
 }
 
 func (s sbxCLI) start(stdin io.Reader, stdout, stderr io.Writer, env []string, args ...string) (*exec.Cmd, error) {
 	// A run ends by itself or through sandbox.stop, never by a context.
-	c := s.cmd(context.Background(), stdin, env, args)
+	c, done, err := s.cmd(context.Background(), stdin, env, args)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
 	c.Stdout, c.Stderr = stdout, stderr
 	if err := c.Start(); err != nil {
 		return nil, err

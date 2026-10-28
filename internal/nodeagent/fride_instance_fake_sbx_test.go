@@ -103,7 +103,8 @@ func fakeFrideSbx(dir string, args []string) (int, bool) {
 }
 
 // fakeSetCustom is `secret set-custom --sandbox S --host H… --placeholder
-// P --command "/bin/cat 'FILE'"`: it reads FILE as sbx would.
+// P --command "/bin/cat 'FILE'"` (on Windows fridolin.exe's sbx-secret):
+// it reads FILE as sbx would.
 func fakeSetCustom(dir string, args []string) int {
 	var hosts []string
 	ph, cmd := "", ""
@@ -117,9 +118,8 @@ func fakeSetCustom(dir string, args []string) int {
 			cmd = args[i+1]
 		}
 	}
-	file, ok := strings.CutPrefix(cmd, "/bin/cat '")
-	file, ok2 := strings.CutSuffix(file, "'")
-	if !ok || !ok2 || ph == "" {
+	file := sbxSecretFileOf(cmd)
+	if file == "" || ph == "" {
 		fmt.Fprintf(os.Stderr, "set-custom: %v\n", args)
 		return 2
 	}
