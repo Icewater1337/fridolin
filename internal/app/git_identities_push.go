@@ -48,13 +48,16 @@ func (s *gitIdentityService) Start(ctx context.Context) {
 }
 
 // changed hands every node what changed: the GitLab connection, a commit
-// name, the GitHub app.
+// name, the GitHub app; and the running FrIDE instances theirs.
 func (s *gitIdentityService) changed() {
 	if s != nil {
 		s.mu.Lock()
 		s.ghAt = time.Time{}
 		s.mu.Unlock()
 		s.kick("", false)
+		if s.b.fride != nil {
+			s.b.fride.inst.changed()
+		}
 	}
 }
 

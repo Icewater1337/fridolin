@@ -473,6 +473,18 @@ func FrideQueuedNotice(thread int64, why string) string {
 	return fmt.Sprintf("⏳ *FrIDE #%d* waits: no node with FrIDE can take it now (%s). It starts as soon as one can, and I'll say so here.", thread, why)
 }
 
+// FrideInstanceQueuedNotice says a thread waits for its FrIDE instance,
+// which cannot start now, and why.
+func FrideInstanceQueuedNotice(thread int64, instance, why string) string {
+	return fmt.Sprintf("⏳ *FrIDE #%d* waits: the FrIDE instance %s cannot take it now (%s). It starts as soon as it can, and I'll say so here.", thread, instance, why)
+}
+
+// FrideInstanceSmallerNotice says a FrIDE instance started on node with
+// less memory than it asked for, as no node had more room.
+func FrideInstanceSmallerNotice(instance, node string, got, wanted int) string {
+	return fmt.Sprintf("⚠️ The FrIDE instance %s started on %s with %d MB, less than the %d MB asked: no node had more room. A heavy stack may not fit until others stop.", instance, node, got, wanted)
+}
+
 // FrideNotLoggedInNotice says thread failed on node because FrIDE's
 // Claude is not logged in there, where it went instead (to; "" for
 // nowhere), and fix.

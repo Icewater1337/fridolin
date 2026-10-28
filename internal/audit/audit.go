@@ -105,6 +105,11 @@ const (
 	// dashboard: By is "dashboard", Detail the connection and what
 	// changed. Never the key.
 	ConnectionKey = "connection_key"
+	// FrideInstance is a FrIDE instance started or stopped on a node
+	// (docs/NODES.md, "The core and FrIDE instances"): By is "core brain",
+	// "dashboard" or "idle", ID the instance, Detail the node, the memory
+	// and why, Outcome ok or why it failed. Never a token.
+	FrideInstance = "fride_instance"
 )
 
 // Entry is one line. Fields are added, never renamed; a reader ignores

@@ -79,6 +79,8 @@ func (b *App) newPolicyAPI() *httpapi.PolicyAPI {
 		SetSkillPolicy: func(ctx context.Context, id string, req httpapi.SkillPolicyRequest) (any, error) {
 			return b.setSkillPolicy(ctx, id, req)
 		},
-		Fride: func(ctx context.Context) (any, error) { return b.frideView(ctx) },
+		Fride:              func(ctx context.Context) (any, error) { return b.frideView(ctx) },
+		StopFrideInstance:  b.stopFrideInstance,
+		StartFrideInstance: b.startFrideInstance,
 	}
 }

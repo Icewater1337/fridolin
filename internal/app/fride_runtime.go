@@ -58,6 +58,9 @@ type frideRuntime struct {
 	// stalled is the last stall notice of each thread the relay took
 	// (FrideStallKey), which it drops again within waits.frideStallRepeat.
 	stalled map[int64]frideStall
+
+	// inst are the FrIDE instances (fride_instances.go).
+	inst *frideInstances
 }
 
 type frideStall struct {
@@ -72,15 +75,21 @@ type frideNews struct {
 
 func newFrideRuntime(b *App) *frideRuntime {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &frideRuntime{b: b, ctx: ctx, cancel: cancel, news: make(chan frideNews, 256), kick: make(chan struct{}, 1),
+	f := &frideRuntime{b: b, ctx: ctx, cancel: cancel, news: make(chan frideNews, 256), kick: make(chan struct{}, 1),
 		locks: map[int64]*sync.Mutex{}, busy: map[int64]string{}, lastErr: map[int64]string{}, sent: map[string]time.Time{}, stalled: map[int64]frideStall{}}
+	f.inst = newFrideInstances(f)
+	return f
 }
 
-// start runs the relay and the queue once.
+// start runs the relay, the queue and the instances' loop once.
 func (f *frideRuntime) start() {
+	if f.ctx.Err() != nil {
+		return
+	}
 	f.once.Do(func() {
 		f.wg.Go(f.relayLoop)
 		f.wg.Go(f.queueLoop)
+		f.wg.Go(f.inst.loop)
 	})
 }
 
@@ -104,6 +113,7 @@ func (f *frideRuntime) onEvent(node string, ev nodeproto.Event) {
 		return
 	}
 	f.start()
+	f.inst.touch(fe.Instance)
 	select {
 	case f.news <- frideNews{node: node, ev: fe}:
 	default:
@@ -112,12 +122,17 @@ func (f *frideRuntime) onEvent(node string, ev nodeproto.Event) {
 }
 
 // onDeclare hears that a node offers something new: waiting work may go
-// there now.
+// there now, or to an instance that came up there.
 func (f *frideRuntime) onDeclare(n *nodes.Node) {
-	if n.Declared.Fride == nil || f.ctx.Err() != nil {
+	if n.Declared.Fride == nil && n.Declared.FrideHost == nil || f.ctx.Err() != nil {
 		return
 	}
 	f.start()
+	f.kickQueue()
+}
+
+// kickQueue offers waiting work to the nodes now.
+func (f *frideRuntime) kickQueue() {
 	select {
 	case f.kick <- struct{}{}:
 	default:
@@ -202,6 +217,14 @@ func (f *frideRuntime) claim(id int64, what string) (release func(), err error) 
 	}, nil
 }
 
+// onConnect hears a node connect: one with FrIDE instances may run some
+// that idle, from before the core started.
+func (f *frideRuntime) onConnect(n *nodes.Node) {
+	if n.Declared.FrideHost != nil {
+		f.start()
+	}
+}
+
 // nodeName is how the chat names node id.
 func (f *frideRuntime) nodeName(id string) string {
 	if n, err := f.b.nodes.Registry().Get(id); err == nil && n.Name != "" {
@@ -209,6 +232,19 @@ func (f *frideRuntime) nodeName(id string) string {
 	}
 	return id
 }
+
+// where is how the chat names the FrIDE of instance on node id: the
+// node's name, and the instance's after a slash.
+func (f *frideRuntime) where(id, instance string) string {
+	if instance == "" {
+		return f.nodeName(id)
+	}
+	return f.nodeName(id) + "/" + instance
+}
+
+// frideInstanceLoginFix is how the owner gives a node's FrIDE instances
+// a Claude login again.
+const frideInstanceLoginFix = "renew the Claude login of that node's FrIDE instances (fridolin node fride host setup there), then stop the instance (fride_stop): the next work starts it again"
 
 // say sends text to the thread's chat and records it in the history of the
 // brain that started the work, as FrIDE's: the core brain sees FrIDE's
@@ -231,7 +267,7 @@ func (f *frideRuntime) say(t store.FrideThread, text string) {
 // fridePost is a piece of FrIDE's news that relay decided a chat gets.
 type fridePost struct {
 	t    store.FrideThread
-	node string // its id
+	node string // its id, and its instance after a NUL
 	kind string
 	news outboundmsg.FrideNews
 }
@@ -289,6 +325,17 @@ func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) (fridePost, b
 		log.Printf("fride: keeping FrIDE #%d's news: %v", t.ID, err)
 	}
 	quiet := f.b.cfgs.Get().Live.Fride.News != config.FrideNewsAll
+	if kind == nodeproto.FrideFailed && nodeproto.FrideNotLoggedIn(ev.Text) && t.Instance != "" {
+		// An instance's work stays on it: the owner logs it in again.
+		unlock()
+		notice := outboundmsg.FrideNotLoggedInNotice(t.ID, f.where(node, t.Instance), "", frideInstanceLoginFix)
+		if quiet && f.lastErr[t.ID] == notice {
+			return fridePost{}, false
+		}
+		f.lastErr[t.ID] = notice
+		f.say(t, notice)
+		return fridePost{}, false
+	}
 	if kind == nodeproto.FrideFailed && nodeproto.FrideNotLoggedIn(ev.Text) {
 		// FrIDE there cannot think (#288): the work goes to another
 		// FrIDE if one takes it, and stays here for a retry otherwise.
@@ -312,7 +359,7 @@ func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) (fridePost, b
 	}
 	unlock()
 	news := outboundmsg.FrideNews{
-		Thread: t.ID, Node: f.nodeName(node), Kind: kind, Text: ev.Text,
+		Thread: t.ID, Node: f.where(node, t.Instance), Kind: kind, Text: ev.Text,
 		Task: t.TaskID, Branch: t.Branch, Rationale: orDefault(ev.RationalePath, t.Rationale),
 	}
 	if chat.IsScheduleChat(t.Chat) {
@@ -335,7 +382,7 @@ func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) (fridePost, b
 			}
 		}
 	}
-	return fridePost{t: t, node: node, kind: kind, news: news}, true
+	return fridePost{t: t, node: node + "\x00" + t.Instance, kind: kind, news: news}, true
 }
 
 // agentThreadsBefore is when #300 shipped. From then on, a thread a
@@ -534,9 +581,44 @@ func (f *frideRuntime) place(ctx context.Context, t *store.FrideThread, skip str
 	return false, strings.Join(reasons, "; ")
 }
 
+// placeOnInstance hands thread t to its FrIDE instance, which it starts
+// first when it does not run (medium, unless its config fixes the
+// memory); auto is the queue's own try (frideInstances.ensure). It
+// reports why it could not, and what a start did.
+func (f *frideRuntime) placeOnInstance(ctx context.Context, t *store.FrideThread, by string, auto bool) (placed bool, why string, started frideStarted) {
+	s, err := f.inst.ensure(ctx, t.Instance, "", by, fmt.Sprintf("FrIDE #%d", t.ID), auto)
+	if err != nil {
+		return false, err.Error(), s
+	}
+	th, err := f.b.nodes.FrideTask(ctx, s.NodeID, nodeproto.FrideTaskParams{FrideOn: nodeproto.FrideOn{Instance: t.Instance}, Message: t.Message, Repos: t.Repos, Ref: "fridolin-" + strconv.FormatInt(t.ID, 10), Source: "fridolin"})
+	if err != nil {
+		return false, fmt.Sprintf("%s: %v", f.where(s.NodeID, t.Instance), err), s
+	}
+	t.Node, t.FrideThread, t.State, t.FrideStatus, t.TaskID = s.NodeID, th.ThreadID, store.FrideSent, th.Status, th.TaskID
+	if err := f.b.store.SaveFrideThread(ctx, *t); err != nil {
+		log.Printf("fride: recording where FrIDE #%d went: %v", t.ID, err)
+	}
+	f.inst.touch(t.Instance)
+	log.Printf("fride: FrIDE #%d went to the FrIDE instance %s on %s (%s) as its thread %d", t.ID, t.Instance, s.Node, s.NodeID, th.ThreadID)
+	return true, "", s
+}
+
+// instanceNotice is what the chat of thread t hears of a start its work
+// made: that the instance got less memory than it asked for.
+func (f *frideRuntime) instanceNotice(t store.FrideThread, s frideStarted) {
+	if s.less() {
+		f.say(t, outboundmsg.FrideInstanceSmallerNotice(s.Name, s.Node, s.MemoryMB, s.Wanted))
+	}
+}
+
 // addRepo adds a repository to the FrIDE of a node that matches a.Node:
-// the first, in the registry's order, unless one has it already.
+// the first, in the registry's order, unless one has it already. With
+// a.Instance, to that FrIDE instance, which it starts first when it does
+// not run.
 func (f *frideRuntime) addRepo(ctx context.Context, a repoAddArgs) (string, error) {
+	if a.Instance != "" {
+		return f.addRepoOn(ctx, a)
+	}
 	cands := f.frideNodes(a.Node, nil)
 	if len(cands) == 0 {
 		return "", errors.New(noFrideNode(a.Node, nil))
@@ -561,11 +643,40 @@ func (f *frideRuntime) addRepo(ctx context.Context, a repoAddArgs) (string, erro
 		return "", fmt.Errorf("adding %s to FrIDE on %s: %w", a.Name, v.Name, err)
 	}
 	log.Printf("fride: added the repository %s to FrIDE on %s (%s) at %s", a.Name, v.Name, v.ID, repo.Path)
+	return repoAddedText(a, repo, v.Name), nil
+}
+
+// addRepoOn is addRepo for a FrIDE instance.
+func (f *frideRuntime) addRepoOn(ctx context.Context, a repoAddArgs) (string, error) {
+	s, err := f.inst.ensure(ctx, a.Instance, "", "core brain", "fride_repo_add "+a.Name, false)
+	if err != nil {
+		return "", err
+	}
+	where := f.where(s.NodeID, a.Instance)
+	p := nodeproto.FrideRepoParams{FrideOn: nodeproto.FrideOn{Instance: a.Instance}, Name: a.Name, URL: a.URL}
+	var repo nodeproto.FrideRepo
+	if a.URL != "" {
+		repo, err = f.b.nodes.FrideRepoClone(ctx, s.NodeID, p)
+	} else {
+		p.GitHub = a.GitHub == nil || *a.GitHub
+		p.Public = a.Private != nil && !*a.Private
+		repo, err = f.b.nodes.FrideRepoNew(ctx, s.NodeID, p)
+	}
+	if err != nil {
+		return "", fmt.Errorf("adding %s to FrIDE on %s: %w", a.Name, where, err)
+	}
+	f.inst.touch(a.Instance)
+	log.Printf("fride: added the repository %s to the FrIDE instance %s on %s at %s", a.Name, a.Instance, s.Node, repo.Path)
+	return repoAddedText(a, repo, where), nil
+}
+
+// repoAddedText says what adding a repository to FrIDE on where did.
+func repoAddedText(a repoAddArgs, repo nodeproto.FrideRepo, where string) string {
 	var sb strings.Builder
 	if a.URL != "" {
-		fmt.Fprintf(&sb, "Cloned %s into %s on %s.", a.URL, repo.Path, v.Name)
+		fmt.Fprintf(&sb, "Cloned %s into %s on %s.", a.URL, repo.Path, where)
 	} else {
-		fmt.Fprintf(&sb, "Made the repository %s in %s on %s, with an initial commit.", a.Name, repo.Path, v.Name)
+		fmt.Fprintf(&sb, "Made the repository %s in %s on %s, with an initial commit.", a.Name, repo.Path, where)
 		if repo.GitHubURL != "" {
 			fmt.Fprintf(&sb, " On GitHub: %s.", repo.GitHubURL)
 		}
@@ -581,7 +692,7 @@ func (f *frideRuntime) addRepo(ctx context.Context, a repoAddArgs) (string, erro
 	default:
 		sb.WriteString(" FrIDE could not be asked to read its folders again; it knows the repository after its next re-check or restart.")
 	}
-	return sb.String(), nil
+	return sb.String()
 }
 
 func orDefault(s, def string) string {
@@ -609,6 +720,18 @@ func (f *frideRuntime) retryQueued() {
 			unlock()
 			continue
 		}
+		if t.Instance != "" {
+			// A start may make its sandbox and clone its repositories.
+			ctx, cancel := context.WithTimeout(f.ctx, 25*time.Minute)
+			placed, _, s := f.placeOnInstance(ctx, &t, "queue", true)
+			cancel()
+			unlock()
+			if placed {
+				f.instanceNotice(t, s)
+				f.say(t, outboundmsg.FridePlacedNotice(t.ID, f.where(t.Node, t.Instance)))
+			}
+			continue
+		}
 		ctx, cancel := context.WithTimeout(f.ctx, 2*time.Minute)
 		placed, _ := f.place(ctx, &t, "")
 		cancel()
@@ -620,22 +743,41 @@ func (f *frideRuntime) retryQueued() {
 }
 
 // newWork records work the core brain hands to FrIDE for chat and tries to
-// place it at once. A thread no node can take waits, and its chat is told.
-func (f *frideRuntime) newWork(ctx context.Context, chat, brain, message string, repos []string, want string) (store.FrideThread, bool, string, error) {
+// place it at once: on instance when it names one (started first when it
+// does not run), else on a node's own FrIDE. A thread nothing can take
+// waits, and its chat is told.
+func (f *frideRuntime) newWork(ctx context.Context, chat, brain, message string, repos []string, want, instance string) (store.FrideThread, bool, string, frideStarted, error) {
+	if instance != "" {
+		if _, ok := f.inst.configured()[instance]; !ok {
+			return store.FrideThread{}, false, "", frideStarted{}, f.inst.errUnknown(instance)
+		}
+	}
 	f.start()
-	t := store.FrideThread{Chat: chat, Brain: brain, Message: message, Repos: repos, WantNode: want, State: store.FrideQueued}
+	t := store.FrideThread{Chat: chat, Brain: brain, Message: message, Repos: repos, WantNode: want, Instance: instance, State: store.FrideQueued}
 	id, err := f.b.store.AddFrideThread(ctx, t)
 	if err != nil {
-		return t, false, "", err
+		return t, false, "", frideStarted{}, err
 	}
 	t.ID = id
 	unlock := f.lock(id)
-	placed, why := f.place(ctx, &t, "")
-	unlock()
-	if !placed {
-		f.say(t, outboundmsg.FrideQueuedNotice(t.ID, why))
+	var placed bool
+	var why string
+	var s frideStarted
+	if instance != "" {
+		placed, why, s = f.placeOnInstance(ctx, &t, "core brain", false)
+	} else {
+		placed, why = f.place(ctx, &t, "")
 	}
-	return t, placed, why, nil
+	unlock()
+	switch {
+	case !placed && instance != "":
+		f.say(t, outboundmsg.FrideInstanceQueuedNotice(t.ID, instance, why))
+	case !placed:
+		f.say(t, outboundmsg.FrideQueuedNotice(t.ID, why))
+	default:
+		f.instanceNotice(t, s)
+	}
+	return t, placed, why, s, nil
 }
 
 // thread reads thread id for a tool or a command.
@@ -647,7 +789,33 @@ func (f *frideRuntime) thread(ctx context.Context, id int64) (store.FrideThread,
 	return t, err
 }
 
-// online reports why node id cannot serve FrIDE now, "" when it can.
+// unreachableOn reports why instance's FrIDE on node id cannot serve now
+// ("" for the node's own FrIDE), "" when it can.
+func (f *frideRuntime) unreachableOn(id, instance string) string {
+	if instance == "" {
+		return f.unreachable(id)
+	}
+	n, err := f.b.nodes.Registry().Get(id)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("node %s is not in the registry", id)
+	case !f.b.nodes.Online(id):
+		return n.Name + " is offline"
+	case n.Effective().FrideHost == nil:
+		return n.Name + " does not offer FrIDE instances now, or they are not approved there"
+	}
+	in := n.Effective().FrideHost.Instance(instance)
+	switch {
+	case in == nil:
+		return fmt.Sprintf("%s has no FrIDE instance %s", n.Name, instance)
+	case in.State != nodeproto.FrideInstanceRunning:
+		return fmt.Sprintf("the FrIDE instance %s on %s is %s", instance, n.Name, in.State)
+	}
+	return ""
+}
+
+// unreachable reports why node id's own FrIDE cannot serve now, "" when
+// it can.
 func (f *frideRuntime) unreachable(id string) string {
 	n, err := f.b.nodes.Registry().Get(id)
 	switch {
@@ -667,7 +835,7 @@ func (f *frideRuntime) status(ctx context.Context, t store.FrideThread) map[stri
 	if t.Node != "" {
 		out["node"] = f.nodeName(t.Node)
 	}
-	for k, v := range map[string]string{"task": t.TaskID, "branch": t.Branch, "fride_status": t.FrideStatus, "archive": t.Archive, "wants_node": t.WantNode} {
+	for k, v := range map[string]string{"task": t.TaskID, "branch": t.Branch, "fride_status": t.FrideStatus, "archive": t.Archive, "wants_node": t.WantNode, "instance": t.Instance} {
 		if v != "" {
 			out[k] = v
 		}
@@ -675,13 +843,13 @@ func (f *frideRuntime) status(ctx context.Context, t store.FrideThread) map[stri
 	if t.State == store.FrideQueued || t.State == store.FrideClosed || t.Node == "" {
 		return out
 	}
-	if why := f.unreachable(t.Node); why != "" {
+	if why := f.unreachableOn(t.Node, t.Instance); why != "" {
 		out["live"] = "not available: " + why
 		return out
 	}
 	if t.FrideThread == 0 {
 		if t.TaskID != "" {
-			if task, err := f.b.nodes.FrideTaskInfo(ctx, t.Node, t.TaskID); err == nil {
+			if task, err := f.b.nodes.FrideTaskInfoOn(ctx, t.Node, t.Instance, t.TaskID); err == nil {
 				out["fride_task"] = task
 			} else {
 				out["live"] = "not available: " + err.Error()
@@ -689,7 +857,7 @@ func (f *frideRuntime) status(ctx context.Context, t store.FrideThread) map[stri
 		}
 		return out
 	}
-	st, err := f.b.nodes.FrideStatus(ctx, t.Node, t.FrideThread)
+	st, err := f.b.nodes.FrideStatusOn(ctx, t.Node, t.Instance, t.FrideThread)
 	if err != nil {
 		out["live"] = "not available: " + err.Error()
 		return out
@@ -702,7 +870,7 @@ func (f *frideRuntime) status(ctx context.Context, t store.FrideThread) map[stri
 		out["fride_task"] = st.Task
 	}
 	unlock := f.lock(t.ID)
-	if cur, err := f.b.store.GetFrideThread(ctx, t.ID); err == nil && cur.Node == t.Node && cur.FrideThread == t.FrideThread {
+	if cur, err := f.b.store.GetFrideThread(ctx, t.ID); err == nil && cur.Node == t.Node && cur.Instance == t.Instance && cur.FrideThread == t.FrideThread {
 		cur.FrideStatus = st.Thread.Status
 		if st.Thread.TaskID != "" {
 			cur.TaskID = st.Thread.TaskID
@@ -731,13 +899,17 @@ func (f *frideRuntime) reply(ctx context.Context, id int64, text string) (string
 	case t.State == store.FrideClosed:
 		return "", fmt.Errorf("FrIDE #%d is closed", id)
 	}
-	if why := f.unreachable(t.Node); why != "" {
+	if err := f.instanceUp(ctx, t); err != nil {
+		return "", err
+	}
+	if why := f.unreachableOn(t.Node, t.Instance); why != "" {
 		return "", errors.New(why)
 	}
-	name := f.nodeName(t.Node)
+	name := f.where(t.Node, t.Instance)
+	f.inst.touch(t.Instance)
 	if t.FrideThread == 0 {
 		msg := fmt.Sprintf("%s\n\n(This continues task %s, which was moved here.)", text, t.TaskID)
-		th, err := f.b.nodes.FrideTask(ctx, t.Node, nodeproto.FrideTaskParams{Message: msg, Ref: fmt.Sprintf("fridolin-%d-%d", t.ID, time.Now().UnixNano()), Source: "fridolin"})
+		th, err := f.b.nodes.FrideTask(ctx, t.Node, nodeproto.FrideTaskParams{FrideOn: nodeproto.FrideOn{Instance: t.Instance}, Message: msg, Ref: fmt.Sprintf("fridolin-%d-%d", t.ID, time.Now().UnixNano()), Source: "fridolin"})
 		if err != nil {
 			return "", err
 		}
@@ -747,13 +919,24 @@ func (f *frideRuntime) reply(ctx context.Context, id int64, text string) (string
 		}
 		return fmt.Sprintf("Passed on to FrIDE on %s, as a new thread there for task %s (it was moved).", name, t.TaskID), nil
 	}
-	th, err := f.b.nodes.FrideReply(ctx, t.Node, t.FrideThread, text)
+	th, err := f.b.nodes.FrideReplyOn(ctx, t.Node, t.Instance, t.FrideThread, text)
 	if err != nil {
 		return "", err
 	}
 	t.FrideStatus = th.Status
 	_ = f.b.store.SaveFrideThread(ctx, t)
 	return fmt.Sprintf("Passed on to FrIDE #%d on %s (FrIDE's status: %s).", id, name, orDefault(th.Status, "unknown")), nil
+}
+
+// instanceUp starts the FrIDE instance of thread t again where its work
+// is, when it stopped (forced, or its node restarted); nothing for a
+// node's own FrIDE.
+func (f *frideRuntime) instanceUp(ctx context.Context, t store.FrideThread) error {
+	if t.Instance == "" {
+		return nil
+	}
+	_, err := f.inst.ensure(ctx, t.Instance, "", "core brain", fmt.Sprintf("FrIDE #%d", t.ID), false)
+	return err
 }
 
 // vaultWorkspaces is the vault's workspaces folder, made when missing.
@@ -764,13 +947,13 @@ func (f *frideRuntime) vaultWorkspaces(sub ...string) (string, error) {
 // fetch exports task from node into the vault folder dir as name, through a
 // temporary file, and checks it is a whole gzip'd tar. It returns the
 // path and the size.
-func (f *frideRuntime) fetch(ctx context.Context, node, task string, stop bool, dir, name string) (string, int64, error) {
+func (f *frideRuntime) fetch(ctx context.Context, node, instance, task string, stop bool, dir, name string) (string, int64, error) {
 	tmp, err := os.CreateTemp(dir, "."+name+".*.tmp")
 	if err != nil {
 		return "", 0, err
 	}
 	defer os.Remove(tmp.Name())
-	n, _, err := f.b.nodes.FrideExport(ctx, node, nodeproto.FrideExportParams{TaskID: task, Stop: stop}, tmp)
+	n, _, err := f.b.nodes.FrideExport(ctx, node, nodeproto.FrideExportParams{FrideOn: nodeproto.FrideOn{Instance: instance}, TaskID: task, Stop: stop}, tmp)
 	if cerr := tmp.Close(); err == nil {
 		err = cerr
 	}
@@ -866,6 +1049,9 @@ func (f *frideRuntime) move(ctx context.Context, id int64, want string) (string,
 	if err != nil {
 		return "", err
 	}
+	if t.Instance != "" {
+		return "", fmt.Errorf("FrIDE #%d is work of the FrIDE instance %s, and stays on it: an instance's work does not move to another node or instance", id, t.Instance)
+	}
 	if t.State != store.FrideSent {
 		return "", fmt.Errorf("FrIDE #%d is %s; only work FrIDE has can move", id, t.State)
 	}
@@ -901,7 +1087,7 @@ func (f *frideRuntime) move(ctx context.Context, id int64, want string) (string,
 	if err != nil {
 		return "", err
 	}
-	path, size, err := f.fetch(ctx, t.Node, t.TaskID, true, dir, t.TaskID+".bundle")
+	path, size, err := f.fetch(ctx, t.Node, "", t.TaskID, true, dir, t.TaskID+".bundle")
 	if err != nil {
 		return "", err
 	}
@@ -975,9 +1161,13 @@ func (f *frideRuntime) close(ctx context.Context, id int64) (string, error) {
 	if t.State == store.FrideClosed {
 		return fmt.Sprintf("FrIDE #%d is closed already; its archive is %s.", id, orDefault(t.Archive, "not in the vault")), nil
 	}
-	if why := f.unreachable(t.Node); why != "" {
+	if err := f.instanceUp(ctx, t); err != nil {
+		return "", err
+	}
+	if why := f.unreachableOn(t.Node, t.Instance); why != "" {
 		return "", errors.New(why)
 	}
+	f.inst.touch(t.Instance)
 	if t.TaskID == "" {
 		f.status(ctx, t)
 		if t, err = f.thread(ctx, id); err != nil {
@@ -987,8 +1177,8 @@ func (f *frideRuntime) close(ctx context.Context, id int64) (string, error) {
 			return "", fmt.Errorf("FrIDE has not started a task for #%d, so there is nothing to close; it may still be asking (fride_status)", id)
 		}
 	}
-	name := f.nodeName(t.Node)
-	closed, err := f.b.nodes.FrideClose(ctx, t.Node, t.TaskID)
+	name := f.where(t.Node, t.Instance)
+	closed, err := f.b.nodes.FrideCloseOn(ctx, t.Node, t.Instance, t.TaskID)
 	if err != nil {
 		return "", fmt.Errorf("closing task %s on %s: %w", t.TaskID, name, err)
 	}
@@ -1007,7 +1197,7 @@ func (f *frideRuntime) close(ctx context.Context, id int64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	path, size, err := f.fetch(ctx, t.Node, t.TaskID, false, dir, t.TaskID+".fride.tar.gz")
+	path, size, err := f.fetch(ctx, t.Node, t.Instance, t.TaskID, false, dir, t.TaskID+".fride.tar.gz")
 	if err != nil {
 		return "", fmt.Errorf("task %s is closed on %s, but its workspace stays there: %w", t.TaskID, name, err)
 	}
@@ -1015,7 +1205,7 @@ func (f *frideRuntime) close(ctx context.Context, id int64) (string, error) {
 	// (archived-workspace) lets it go cold at once.
 	f.b.vault.track(ctx, path)
 	removed := fmt.Sprintf("and removed from %s", name)
-	if err := f.b.nodes.FrideDelete(ctx, t.Node, t.TaskID, true); err != nil {
+	if err := f.b.nodes.FrideDeleteOn(ctx, t.Node, t.Instance, t.TaskID, true); err != nil {
 		log.Printf("fride: FrIDE #%d: removing task %s from %s: %v", id, t.TaskID, name, err)
 		removed = fmt.Sprintf("but removing it from %s failed (%v)", name, err)
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Icewater1337/fridolin/internal/apperr"
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/mcp"
 	"github.com/Icewater1337/fridolin/internal/mcp/tools"
@@ -33,14 +34,17 @@ func (b *App) registerFrideTools(r *tools.Set[mcpCaller]) {
 		Name:      "fride_task",
 		Available: b.frideTools,
 		Describe: func(mcpCaller) mcp.Tool {
-			return mcp.Tool{
-				Description: "Hand coding work to FrIDE, the coding IDE on one of the owner's machines: anything that changes code (a feature, a fix, a refactor) goes here, never into a repository you edit yourself. FrIDE's orchestrator decides how to do it, may ask back, and reports in this chat; its questions and news arrive here as messages naming the thread (FrIDE #3). Returns the thread number. If no machine can take it now, it waits and starts when one can.",
-				InputSchema: tools.Schema(map[string]any{
-					"message": tools.Str("What to build or change, in full: the person's request with everything FrIDE needs. FrIDE cannot see this chat."),
-					"repos":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "The repositories to work in, by folder name, when the person named them."},
-					"node":    tools.Str("The machine to run it on: a node's name, id or tag (such as macos or gpu), when the person asked for one; leave it out to let fridolin pick."),
-				}, "message"),
+			desc := "Hand coding work to FrIDE, the coding IDE on one of the owner's machines: anything that changes code (a feature, a fix, a refactor) goes here, never into a repository you edit yourself. FrIDE's orchestrator decides how to do it, may ask back, and reports in this chat; its questions and news arrive here as messages naming the thread (FrIDE #3). Returns the thread number. If no machine can take it now, it waits and starts when one can."
+			props := map[string]any{
+				"message": tools.Str("What to build or change, in full: the person's request with everything FrIDE needs. FrIDE cannot see this chat."),
+				"repos":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "The repositories to work in, by folder name, when the person named them."},
+				"node":    tools.Str("The machine to run it on: a node's name, id or tag (such as macos or gpu), when the person asked for one; leave it out to let fridolin pick. Not with instance."),
 			}
+			if list := b.frideInstanceList(); list != "" {
+				desc += " Work that belongs to one of the FrIDE instances goes to that instance (instance): each is a FrIDE of its own for one trust domain, which is started when work needs it (medium, unless it runs) and keeps the work until it is closed. Pick it by what the work is for: " + list + ". Work that belongs to none of them goes to a machine's own FrIDE (leave instance out)."
+				props["instance"] = tools.Str("The FrIDE instance to run it in, by name, when the work belongs to one: " + list + ".")
+			}
+			return mcp.Tool{Description: desc, InputSchema: tools.Schema(props, "message")}
 		},
 		Call: r.Guarded(skill.RiskWrite, b.callFrideTask),
 	})
@@ -71,7 +75,7 @@ func (b *App) registerFrideTools(r *tools.Set[mcpCaller]) {
 		Available: b.frideTools,
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
-				Description: "Move a FrIDE thread's task to another machine: its agents stop, the task travels with its branches, uncommitted work and conversation, and continues there. Only when the person asks for it.",
+				Description: "Move a FrIDE thread's task to another machine: its agents stop, the task travels with its branches, uncommitted work and conversation, and continues there. Only when the person asks for it. Work of a FrIDE instance does not move.",
 				InputSchema: tools.Schema(map[string]any{"thread": threadProp(), "node": tools.Str("The machine to move it to: a node's name, id or tag.")}, "thread", "node"),
 			}
 		},
@@ -95,26 +99,29 @@ func (b *App) registerFrideTools(r *tools.Set[mcpCaller]) {
 			return mcp.Tool{
 				Description: "Add a repository to FrIDE on a machine, so fride_task can work in it: clone it from url, or with new make an empty one (an initial commit, and by default a private GitHub repository the owner's gh account creates and pushes to). FrIDE knows it at once. Use it when the person wants work in a repository FrIDE does not have, or asks for a new one.",
 				InputSchema: tools.Schema(map[string]any{
-					"name":    tools.Str("The repository's folder name on the machine, and for new its name on GitHub: letters, digits, '.', '_' and '-'."),
-					"url":     tools.Str("The repository to clone: an https:// or ssh:// URL, or git@host:owner/repo.git. Leave it out with new."),
-					"new":     map[string]any{"type": "boolean", "description": "Make a new, empty repository instead of cloning one."},
-					"github":  map[string]any{"type": "boolean", "description": "With new: also create it on GitHub and push (default true); false keeps it on the machine only."},
-					"private": map[string]any{"type": "boolean", "description": "With new on GitHub: private (default true); false only when the person asked for a public repository."},
-					"node":    tools.Str("The machine: a node's name, id or tag, when the person asked for one; leave it out to let fridolin pick."),
+					"name":     tools.Str("The repository's folder name on the machine, and for new its name on GitHub: letters, digits, '.', '_' and '-'."),
+					"url":      tools.Str("The repository to clone: an https:// or ssh:// URL, or git@host:owner/repo.git. Leave it out with new."),
+					"new":      map[string]any{"type": "boolean", "description": "Make a new, empty repository instead of cloning one."},
+					"github":   map[string]any{"type": "boolean", "description": "With new: also create it on GitHub and push (default true); false keeps it on the machine only."},
+					"private":  map[string]any{"type": "boolean", "description": "With new on GitHub: private (default true); false only when the person asked for a public repository."},
+					"node":     tools.Str("The machine: a node's name, id or tag, when the person asked for one; leave it out to let fridolin pick."),
+					"instance": tools.Str("The FrIDE instance to add it to, by name, for a repository of its trust domain (started first when it does not run); not with node."),
 				}, "name"),
 			}
 		},
 		Call: r.Guarded(skill.RiskWrite, b.callFrideRepoAdd),
 	})
+	b.registerFrideInstanceTools(r)
 }
 
 // frideArgs reads a FrIDE tool's arguments.
 type frideArgs struct {
-	Message string   `json:"message"`
-	Repos   []string `json:"repos"`
-	Node    string   `json:"node"`
-	Thread  int64    `json:"thread"`
-	Text    string   `json:"text"`
+	Message  string   `json:"message"`
+	Repos    []string `json:"repos"`
+	Node     string   `json:"node"`
+	Instance string   `json:"instance"`
+	Thread   int64    `json:"thread"`
+	Text     string   `json:"text"`
 }
 
 func readFrideArgs(raw json.RawMessage, needThread bool) (frideArgs, *mcp.CallResult) {
@@ -125,7 +132,7 @@ func readFrideArgs(raw json.RawMessage, needThread bool) (frideArgs, *mcp.CallRe
 	if needThread && a.Thread <= 0 {
 		return a, mcp.ErrorResult("thread is missing: the number of the FrIDE thread (FrIDE #3 is 3)")
 	}
-	a.Node = strings.TrimSpace(a.Node)
+	a.Node, a.Instance = strings.TrimSpace(a.Node), strings.TrimSpace(a.Instance)
 	return a, nil
 }
 
@@ -140,21 +147,38 @@ func (b *App) callFrideTask(ctx context.Context, c mcpCaller, raw json.RawMessag
 	// Policy (PLAN.md, M5): fride_task is a write action, checked by
 	// tools.Guarded (registerFrideTools) before anything leaves the core: a
 	// lockdown or a run whose budget is read gets its error result.
+	if a.Node != "" && a.Instance != "" {
+		return mcp.ErrorResult("give node or instance, not both: an instance runs where fride.instances lets it"), nil
+	}
 	chatJID := b.frideChat(c)
 	if chatJID == "" {
 		return mcp.ErrorResult("this run answers no chat, so FrIDE's questions and news would have nowhere to go"), nil
 	}
-	t, placed, _, err := b.fride.newWork(ctx, chatJID, c.run.Brain, a.Message, a.Repos, a.Node)
+	t, placed, why, started, err := b.fride.newWork(ctx, chatJID, c.run.Brain, a.Message, a.Repos, a.Node, a.Instance)
 	if err != nil {
+		if apperr.KindOf(err) == apperr.NotFound {
+			return mcp.ErrorResult(err.Error()), nil
+		}
 		return mcp.ErrorResult("recording the work failed: " + err.Error()), nil
+	}
+	if !placed && a.Instance != "" {
+		return mcp.TextResult(fmt.Sprintf("FrIDE #%d waits: the FrIDE instance %s cannot take it now (%s). The chat has been told, and hears when it starts; you need not repeat it.", t.ID, a.Instance, why)), nil
 	}
 	if !placed {
 		return mcp.TextResult(fmt.Sprintf("FrIDE #%d waits: no machine with FrIDE can take it now. The chat has been told, and hears when it starts; you need not repeat it.", t.ID)), nil
 	}
-	if chat.IsScheduleChat(chatJID) {
-		return mcp.TextResult(fmt.Sprintf("Handed to FrIDE on %s as FrIDE #%d (FrIDE's status: %s). Its news does not go to WhatsApp: when FrIDE asks, or the work is done or failed, a run of this agent starts with FrIDE's text, to answer it (fride_reply) or follow up (fride_close).", b.fride.nodeName(t.Node), t.ID, orDefault(t.FrideStatus, "queued"))), nil
+	where := b.fride.where(t.Node, t.Instance)
+	note := ""
+	if a.Instance != "" && !started.Already {
+		note = " " + started.Text()
+		if started.less() {
+			note += " The chat has been told it got less memory."
+		}
 	}
-	return mcp.TextResult(fmt.Sprintf("Handed to FrIDE on %s as FrIDE #%d (FrIDE's status: %s). Its questions and news will arrive in %s as messages naming FrIDE #%d.", b.fride.nodeName(t.Node), t.ID, orDefault(t.FrideStatus, "queued"), newsWhere(c, chatJID), t.ID)), nil
+	if chat.IsScheduleChat(chatJID) {
+		return mcp.TextResult(fmt.Sprintf("Handed to FrIDE on %s as FrIDE #%d (FrIDE's status: %s). Its news does not go to WhatsApp: when FrIDE asks, or the work is done or failed, a run of this agent starts with FrIDE's text, to answer it (fride_reply) or follow up (fride_close).%s", where, t.ID, orDefault(t.FrideStatus, "queued"), note)), nil
+	}
+	return mcp.TextResult(fmt.Sprintf("Handed to FrIDE on %s as FrIDE #%d (FrIDE's status: %s). Its questions and news will arrive in %s as messages naming FrIDE #%d.%s", where, t.ID, orDefault(t.FrideStatus, "queued"), newsWhere(c, chatJID), t.ID, note)), nil
 }
 
 // frideChat is where the news of FrIDE work a run hands over goes: a
@@ -191,7 +215,7 @@ func (b *App) callFrideStatus(ctx context.Context, _ mcpCaller, raw json.RawMess
 		list := []map[string]any{}
 		for _, t := range all {
 			e := map[string]any{"thread": t.ID, "state": t.State, "message": truncateRunes(t.Message, 200)}
-			for k, v := range map[string]string{"node": t.Node, "task": t.TaskID, "branch": t.Branch, "fride_status": t.FrideStatus, "archive": t.Archive} {
+			for k, v := range map[string]string{"node": t.Node, "instance": t.Instance, "task": t.TaskID, "branch": t.Branch, "fride_status": t.FrideStatus, "archive": t.Archive} {
 				if v != "" {
 					e[k] = v
 				}
@@ -216,12 +240,13 @@ func (b *App) callFrideStatus(ctx context.Context, _ mcpCaller, raw json.RawMess
 // repoAddArgs reads fride_repo_add's arguments; GitHub and Private are
 // true unless given.
 type repoAddArgs struct {
-	Name    string `json:"name"`
-	URL     string `json:"url"`
-	New     bool   `json:"new"`
-	GitHub  *bool  `json:"github"`
-	Private *bool  `json:"private"`
-	Node    string `json:"node"`
+	Name     string `json:"name"`
+	URL      string `json:"url"`
+	New      bool   `json:"new"`
+	GitHub   *bool  `json:"github"`
+	Private  *bool  `json:"private"`
+	Node     string `json:"node"`
+	Instance string `json:"instance"`
 }
 
 func (b *App) callFrideRepoAdd(ctx context.Context, _ mcpCaller, raw json.RawMessage) (*mcp.CallResult, error) {
@@ -229,12 +254,14 @@ func (b *App) callFrideRepoAdd(ctx context.Context, _ mcpCaller, raw json.RawMes
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return mcp.ErrorResult("unreadable arguments: " + err.Error()), nil
 	}
-	a.Name, a.URL, a.Node = strings.TrimSpace(a.Name), strings.TrimSpace(a.URL), strings.TrimSpace(a.Node)
+	a.Name, a.URL, a.Node, a.Instance = strings.TrimSpace(a.Name), strings.TrimSpace(a.URL), strings.TrimSpace(a.Node), strings.TrimSpace(a.Instance)
 	switch {
 	case a.Name == "":
 		return mcp.ErrorResult("name is missing: the repository's folder name"), nil
 	case a.New == (a.URL != ""):
 		return mcp.ErrorResult("give either url, to clone a repository, or new, to make one"), nil
+	case a.Node != "" && a.Instance != "":
+		return mcp.ErrorResult("give node or instance, not both"), nil
 	}
 	text, err := b.fride.addRepo(ctx, a)
 	if err != nil {
