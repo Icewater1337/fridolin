@@ -42,6 +42,7 @@ func TestDoctorFrideInstances(t *testing.T) {
 		{"not ready", `{"nodes":[` + notReady + `]}`, "", true, "", doctor.Warn, "fridolin: no node can run it (box: sbx is not signed in)"},
 		{"no GitLab", `{"nodes":[` + host("a", "mini", "") + `]}`, "", false, "", doctor.Warn, "1 of 2 FrIDE instances cannot run: work: the core holds no gitlab identity"},
 		{"no GitHub, as the bridge says", `{"nodes":[` + host("a", "mini", "") + `]}`, `{"identities":[{"id":"github","set":false},{"id":"gitlab","set":true}]}`, false, "", doctor.Warn, "1 of 2 FrIDE instances cannot run: fridolin: the core holds no github identity"},
+		{"a GitHub app that may only read", `{"nodes":[` + host("a", "mini", "") + `]}`, `{"identities":[{"id":"github","set":true,"note":"the GitHub app may only read code"},{"id":"gitlab","set":true}]}`, false, "", doctor.Warn, "1 of 2 FrIDE instances cannot run: fridolin: the core cannot hand out its github identity: the GitHub app may only read code"},
 		{"no template for a node that built none", `{"nodes":[` + needsTemplate + `]}`, "", true, "", doctor.Warn, "fridolin: no node can run it (mini: it built no FrIDE template, and this core does not know where its images are published (FRIDOLIN_BOX_REGISTRY)"},
 		{"the core's template", `{"nodes":[` + needsTemplate + `]}`, "", true, "ghcr.io/you", doctor.OK, "each can start on an approved node, with its identities: fridolin, work"},
 	}

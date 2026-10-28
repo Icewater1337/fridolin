@@ -26,9 +26,17 @@ func frideInstancesOn(env *doctor.Env) bool {
 	return nodesOn(env) && len(env.Config.Fride.Instances) > 0
 }
 
+// liveIdentity is a git identity as the running bridge has it: set, and
+// why it cannot hand it out when it cannot (the GitHub app may only
+// read code, say).
+type liveIdentity struct {
+	set  bool
+	note string
+}
+
 // liveIdentities are the git identities the running bridge holds, by id;
 // nil when it does not answer.
-func liveIdentities(ctx context.Context, env *doctor.Env) map[string]bool {
+func liveIdentities(ctx context.Context, env *doctor.Env) map[string]liveIdentity {
 	if env.LiveGet == nil {
 		return nil
 	}
@@ -38,16 +46,17 @@ func liveIdentities(ctx context.Context, env *doctor.Env) map[string]bool {
 	}
 	var view struct {
 		Identities []struct {
-			ID  string `json:"id"`
-			Set bool   `json:"set"`
+			ID   string `json:"id"`
+			Set  bool   `json:"set"`
+			Note string `json:"note"`
 		} `json:"identities"`
 	}
 	if json.Unmarshal(data, &view) != nil {
 		return nil
 	}
-	out := map[string]bool{}
+	out := map[string]liveIdentity{}
 	for _, id := range view.Identities {
-		out[id.ID] = id.Set
+		out[id.ID] = liveIdentity{set: id.Set, note: id.Note}
 	}
 	return out
 }
@@ -56,7 +65,7 @@ func liveIdentities(ctx context.Context, env *doctor.Env) map[string]bool {
 // node for it, none with room for its smallest start, and identities the
 // core does not hold (have, from the bridge; nil when it does not answer,
 // and only GitLab's file is looked at then).
-func frideInstanceProblems(env *doctor.Env, name string, ic config.FrideInstanceConfig, list []doctorNode, have map[string]bool) []string {
+func frideInstanceProblems(env *doctor.Env, name string, ic config.FrideInstanceConfig, list []doctorNode, have map[string]liveIdentity) []string {
 	var problems []string
 	now := env.Time()
 	least := frideTries(ic.MemoryMB, frideSizeSmall)[0]
@@ -97,9 +106,11 @@ func frideInstanceProblems(env *doctor.Env, name string, ic config.FrideInstance
 		problems = append(problems, why)
 	}
 	for _, id := range ic.Identities {
-		switch set, known := have[id]; {
-		case known && !set:
+		switch live, known := have[id]; {
+		case known && !live.set:
 			problems = append(problems, "the core holds no "+id+" identity")
+		case known && live.note != "":
+			problems = append(problems, "the core cannot hand out its "+id+" identity: "+live.note)
 		case !known && id == gitident.GitLab:
 			if _, err := env.Stat(filepath.Join(config.Layout{Root: env.Config.DataDir}.LocalSecrets(), gitident.GitLabFile)); err != nil {
 				problems = append(problems, "the core holds no gitlab identity")
