@@ -352,8 +352,7 @@ docker exec fridolin-core fridolin nodes approve <id> --commands
 
 ```powershell
 & $fridolin node status --state-dir $state     # Service fridolin-node: running
-& $fridolin doctor --node --state-dir $state   # Tailscale, joined, core reachable, service
-& $fridolin setup-machine --node --state-dir $state
+& $fridolin doctor --node --state-dir $state   # Tailscale, joined, core reachable, service; the next step
 ```
 
 On the core, `fridolin nodes` (or the Nodes page) shows the node online,

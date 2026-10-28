@@ -329,21 +329,17 @@ func setupMachineCmd(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, setupMachineUsage)
 		return 2
 	}
-	env := app.SystemDoctorEnv("")
-	var checks []doctor.Check
-	var where string
 	if *node {
 		dir, err := nodeStateDirFlag(*stateDir)
 		if err != nil {
 			fmt.Fprintf(stderr, "fridolin setup-machine: %v\n", err)
 			return 1
 		}
-		checks, where = nodeChecks(dir, systemNodeService(dir)), dir
-	} else {
-		d := defaultHostDeps(coreEnv{environ: os.Environ(), stdout: stdout, stderr: stderr})
-		checks, where = coreMachineChecks(d), filepath.Dir(d.composePath)
+		return nodeMachineReport(stdout, dir, *asJSON)
 	}
-	return writeMachineReport(stdout, doctor.Run(context.Background(), env, checks), where, *asJSON)
+	d := defaultHostDeps(coreEnv{environ: os.Environ(), stdout: stdout, stderr: stderr})
+	rep := doctor.Run(context.Background(), app.SystemDoctorEnv(""), coreMachineChecks(d))
+	return writeMachineReport(stdout, rep, filepath.Dir(d.composePath), *asJSON)
 }
 
 // writeMachineReport prints a report of checks, with the next step: the
@@ -410,20 +406,18 @@ func nodeDoctor(stateDir string, asJSON bool, stdout io.Writer) int {
 		fmt.Fprintf(stdout, "fridolin doctor --node: %v\n", err)
 		return 1
 	}
+	return nodeMachineReport(stdout, dir, asJSON)
+}
+
+// nodeMachineReport runs the node machine's checks on the state dir and
+// prints them with the next step: what doctor --node and setup-machine
+// --node both print.
+func nodeMachineReport(w io.Writer, dir string, asJSON bool) int {
 	rep := doctor.Run(context.Background(), app.SystemDoctorEnv(""), nodeChecks(dir, systemNodeService(dir)))
-	rep.Config = dir
-	if asJSON {
-		enc := json.NewEncoder(stdout)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(rep)
-	} else {
-		fmt.Fprintf(stdout, "Node machine (state dir %s):\n", dir)
-		_ = rep.WriteText(stdout)
+	if !asJSON {
+		fmt.Fprintf(w, "Node machine (state dir %s):\n", dir)
 	}
-	if !rep.OK {
-		return 1
-	}
-	return 0
+	return writeMachineReport(w, rep, dir, asJSON)
 }
 
 // isNodeMachine says whether doctor without --node should check this
