@@ -48,6 +48,9 @@ type Input struct {
 	// CodeToFride marks a core brain run that has FrIDE's tools: it is
 	// told FrideRule.
 	CodeToFride bool
+	// FrideInstances are the FrIDE instances fride.instances names, by
+	// name: a CodeToFride run is told FrideInstancesNote with each.
+	FrideInstances []FrideInstanceNote
 	// AutoApprove marks a run of a brain whose approvals setting is auto:
 	// it is told AutoPolicyNote in place of PolicyNote.
 	AutoApprove bool
@@ -77,6 +80,19 @@ const VaultNote = "<vault>\nSome of your files live in the vault's cold tier, no
 // FrideRule is the core brain's one rule about code (docs/PLAN.md,
 // Workstream E): FrIDE does every change to a repository.
 const FrideRule = "<code_rule>\nAnything that changes code goes to FrIDE: hand it over with the fride_task tool, and never edit a repository yourself. To work on a repository FrIDE does not have, add it with fride_repo_add first. You may answer questions about code. FrIDE's questions and news about its work arrive in this chat as messages from FrIDE, each naming its thread (FrIDE #3); when the person answers one of FrIDE's questions, pass the answer on with fride_reply on that thread. If you have node_agent_run, it is for the lightweight rest: a quick look or a small fix in a folder on one of the owner's machines that is not repository work to review (a build that fails, a folder to tidy, a script to run); real code changes still go to FrIDE. Its questions and end arrive as messages naming the session (Agent #2): pass the person's answer on with node_agent_reply; a step it needs approved is the person's vote on the approval poll.\n</code_rule>"
+
+// FrideInstanceNote is a FrIDE instance as a run is told of it: what the
+// owner wrote it is for, and its repositories.
+type FrideInstanceNote struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Repos       []string `json:"repos,omitempty"`
+}
+
+// FrideInstancesNote tells a core run with FrIDE's tools how coding work
+// picks a FrIDE instance (docs/NODES.md, "The core and FrIDE instances").
+// The instances follow it, one JSON object each.
+const FrideInstancesNote = "Coding work for the repositories or the purpose of one of these FrIDE instances goes to that instance: name it as fride_task's instance. Each is a FrIDE of its own for one trust domain, which fridolin starts when work needs it and stops once it idles; its work stays on it. fride_instances shows where each runs; fride_spawn starts one at another size (small for code and unit tests, medium with the project's stack, large for a heavy stack); fride_stop stops one. Work that belongs to none of them goes to fride_task without instance. The instances, each a JSON object (what the owner wrote it is for, and its repositories):"
 
 // MachinesRule is the core brain's rule about the owner's machines
 // (docs/NODES.md, "The core brain runs commands"), told with FrideRule:
@@ -130,6 +146,13 @@ func Build(in Input) string {
 
 	if in.CodeToFride && m.Source != chat.SourceDelegate {
 		sb.WriteString(FrideRule + "\n\n")
+		if len(in.FrideInstances) > 0 {
+			sb.WriteString("<fride_instances>\n" + FrideInstancesNote + "\n")
+			for _, fi := range in.FrideInstances {
+				sb.WriteString(promptJSON(fi) + "\n")
+			}
+			sb.WriteString("</fride_instances>\n\n")
+		}
 		sb.WriteString(MachinesRule + "\n\n")
 	}
 

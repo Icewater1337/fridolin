@@ -9,22 +9,46 @@ import { nodesResource } from '../app/resources.js';
 import { h, mount, paint, reconcile } from '../lib/dom.js';
 import { absTime } from '../lib/format.js';
 import { capSummary, gb, osName, parseTags, ruleText, updateText } from '../lib/nodes.js';
+import { hostMemoryText, memText } from '../lib/fride.js';
 import { btn } from '../components/buttons.js';
 import { confirmDialog, openDialog } from '../components/dialog.js';
 import { select, textInput, toggle } from '../components/fields.js';
+import { instanceBadge, stopInstance } from '../components/fride-instance.js';
 import { nodeTerminal } from '../components/node-terminal.js';
 import { toast } from '../components/toast.js';
 import { badge, callout, empty, kv, mono, pageHeader, pill, spinner, timeAgo } from '../components/common.js';
 
 /** @import { PageModule } from '../app/page.js' */
-/** @import { BackupCap, CoreHostView, ExecRule, FrideCap, HostStats, JoinCodeResponse, Node as FleetNode, NodesResponse, WorkstationCap } from '../../types/api.js' */
+/** @import { BackupCap, CoreHostView, ExecRule, FrideCap, FrideHostCap, HostStats, JoinCodeResponse, Node as FleetNode, NodeCapabilities, NodesResponse, WorkstationCap } from '../../types/api.js' */
 
 /**
- * A node as its card shows it: everything but what its live region shows,
- * which changes with every poll and so would rebuild the card.
- * @typedef {Omit<FleetNode, LiveField> & Partial<Record<LiveField, undefined>>} StableNode
+ * A node as its card shows it: everything but what its live regions show,
+ * which changes with every poll and so would rebuild the card: whether it
+ * is online and its resources, and fride_host, whose memory and instances
+ * change as they run. The card keeps what its capabilities come to in
+ * words (capSummary), fride_host included.
+ * @typedef {Omit<FleetNode, LiveField> & Partial<Record<LiveField, undefined>> & {summary: Record<CapSet, string>}} StableNode
  * @typedef {'online' | 'last_seen' | 'resources' | 'address'} LiveField
+ * @typedef {'declared' | 'approved' | 'effective'} CapSet
  */
+
+/**
+ * What a node's FrIDE host region shows: fride_host as it reports it, and
+ * whether its instances can be stopped from here.
+ * @typedef {{cap: FrideHostCap, canStop: boolean}} HostView
+ */
+
+/**
+ * c without fride_host.
+ * @param {NodeCapabilities} c
+ * @returns {NodeCapabilities}
+ */
+function withoutHost(c) {
+  if (!c || !c.fride_host) return c;
+  const rest = { ...c };
+  delete rest.fride_host;
+  return rest;
+}
 
 /**
  * A node's terminal as its card offers it: the folders granted for it.
@@ -233,8 +257,11 @@ export default /** @satisfies {PageModule} */ ({
       return out;
     }
 
-    /** @param {StableNode} n */
-    function offers(n) {
+    /**
+     * @param {StableNode} n
+     * @param {HTMLElement} hostRegion where fride_host goes (paintAll)
+     */
+    function offers(n, hostRegion) {
       const declared = n.declared || {};
       const rules = ((declared.exec && declared.exec.allow) || []).filter((r) => !r.core);
       const roots = (declared.fs && declared.fs.roots) || [];
@@ -243,6 +270,7 @@ export default /** @satisfies {PageModule} */ ({
         programsLines(n),
         roots.length ? h('div', h('strong', 'Folders: '), roots.map((r) => mono(`${r.path}${r.write ? ' (read and write)' : ' (read only)'}`)).flatMap((el, i) => (i ? [', ', el] : [el]))) : null,
         frideLine(declared.fride),
+        hostRegion,
         backupLine(declared.backup, n.approved && n.approved.backup),
         workLine('Agent sessions', declared.agent),
         workLine('Terminal', declared.terminal),
@@ -326,6 +354,44 @@ export default /** @satisfies {PageModule} */ ({
         repos.length ? h('span.muted', ` · ${repos.join(', ')}`) : null);
     }
 
+    // FrIDE instances (fride_host): sbx on the node, its memory, and the
+    // instances it has. A running one can be stopped here once fride_host
+    // is approved; the core starts them when a job needs one, or the FrIDE
+    // page does.
+    /** @param {string} name */
+    async function stop(name) {
+      if (await stopInstance(name)) await refresh();
+    }
+
+    /** @param {HostView | null} v */
+    function hostView(v) {
+      if (!v) return null;
+      const { cap, canStop } = v;
+      const instances = cap.instances || [];
+      return [
+        h('div', h('strong', 'FrIDE instances: '), cap.version ? `sbx ${cap.version}` : 'sbx', ' · ',
+          cap.ready ? 'ready' : h('span.warn-text', cap.problem ? `not ready: ${cap.problem}` : 'not ready'),
+          h('span.muted', ` · memory ${hostMemoryText(cap)}`)),
+        instances.length
+          ? h('ul.plain-list.fride-host-instances', instances.map((i) => h('li',
+            h('span', mono(i.name), ' ', instanceBadge(i.state),
+              i.memory_mb ? h('span.muted', ` ${memText(i.memory_mb)}`) : null,
+              i.problem ? h('span.warn-text', ` · ${i.problem}`) : null),
+            canStop && i.state === 'running' ? btn('Stop', { small: true, kind: 'danger', icon: 'stop', title: `Stop ${i.name}`, onClick: () => stop(i.name) }) : null)))
+          : h('div.muted', 'No instances yet: the core brain starts one here when a job needs it.'),
+      ];
+    }
+
+    /**
+     * @param {FleetNode} n
+     * @returns {HostView | null}
+     */
+    const hostOf = (n) => {
+      const approved = n.effective && n.effective.fride_host;
+      const cap = approved || (n.declared && n.declared.fride_host);
+      return cap ? { cap, canStop: !!approved && n.online && n.device === 'approved' } : null;
+    };
+
     // What changes with every heartbeat: whether it is online and its
     // free resources. It is painted into the card on its own, so the card
     // and its buttons stay while a node reports (see paintAll).
@@ -343,8 +409,13 @@ export default /** @satisfies {PageModule} */ ({
      * @param {FleetNode} n
      * @returns {StableNode}
      */
-    const stableOf = (n) => ({ ...n, online: undefined, last_seen: undefined, resources: undefined, address: undefined });
+    const stableOf = (n) => ({
+      ...n, online: undefined, last_seen: undefined, resources: undefined, address: undefined,
+      declared: withoutHost(n.declared), approved: withoutHost(n.approved), effective: withoutHost(n.effective),
+      summary: { declared: capSummary(n.declared), approved: capSummary(n.approved), effective: capSummary(n.effective) },
+    });
     const liveRegions = new Map(); // node id → its live region
+    const hostRegions = new Map(); // node id → its FrIDE host region
 
     /** @param {ReturnType<typeof liveOf>} l */
     function live(l) {
@@ -383,7 +454,7 @@ export default /** @satisfies {PageModule} */ ({
         allows.length ? h('p', 'If you approve, it can:') : null,
         allows.length ? h('ul', allows.map((a) => h('li', a))) : null,
         h('p.muted.small', n.commands_approved_at && n.device === 'approved'
-          ? `Until you approve, it serves only what you approved before: ${capSummary(n.approved)}.`
+          ? `Until you approve, it serves only what you approved before: ${n.summary.approved}.`
           : 'It serves nothing until you approve. In WhatsApp, !approve does the same.'));
     }
 
@@ -391,6 +462,8 @@ export default /** @satisfies {PageModule} */ ({
     function card(n) {
       const region = h('div.node-live');
       liveRegions.set(n.id, region);
+      const hostRegion = h('div.node-fride-host', { hidden: true });
+      hostRegions.set(n.id, hostRegion);
       return h('section.card.node-card',
         h('div.card-head',
           h('div.card-title', h('h2', n.name), h('span.muted', osName(n.os), n.arch ? ` · ${n.arch}` : '')),
@@ -402,8 +475,8 @@ export default /** @satisfies {PageModule} */ ({
         region,
         kv([
           ['ID', mono(n.id, { copy: true })],
-          ['May run', capSummary(n.effective)],
-          ['Offers', capSummary(n.declared)],
+          ['May run', n.summary.effective],
+          ['Offers', n.summary.declared],
           ['Tags', n.tags && n.tags.length ? h('span.tag-list', n.tags.map((t) => badge(t))) : h('span.muted', 'none')],
           ['Version', n.version || null],
           ['Update', updateText(n.update) || n.update_note || null],
@@ -411,7 +484,7 @@ export default /** @satisfies {PageModule} */ ({
         n.device === 'approved' && n.effective && n.effective.update
           ? h('div.node-auto-update', toggle({ checked: !!(n.update && n.update.auto), label: 'Update by itself when the core runs a newer version', onChange: (v) => setAuto(n, v) }))
           : null,
-        offers(n),
+        offers(n, hostRegion),
         h('div.actions', actions(n)));
     }
 
@@ -432,6 +505,12 @@ export default /** @satisfies {PageModule} */ ({
       for (const n of nodes) {
         const region = liveRegions.get(n.id);
         if (region && region.isConnected) paint(region, liveOf(n), live);
+        const host = hostRegions.get(n.id);
+        if (host && host.isConnected) {
+          const v = hostOf(n);
+          host.hidden = !v;
+          paint(host, v, hostView);
+        }
       }
     }
 

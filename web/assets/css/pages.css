@@ -165,6 +165,8 @@ blockquote.preview {
 .node-live { display: flex; flex-direction: column; gap: 8px; }
 .node-online { display: flex; align-items: center; gap: 8px; }
 .node-offers { display: flex; flex-direction: column; gap: 4px; font-size: 13px; overflow-wrap: anywhere; }
+.node-fride-host { display: flex; flex-direction: column; gap: 2px; }
+.fride-host-instances li { padding: 4px 0; }
 .node-auto-update { margin: 10px 0; font-size: 13px; }
 .tag-list { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .join-command { margin: 10px 0; overflow-wrap: anywhere; }
@@ -330,6 +332,10 @@ blockquote.preview {
 
 .fride-news-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .fride-text { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; font-size: 13px; }
+.fride-instances-card { gap: 6px; }
+.fride-instance { flex-wrap: wrap; }
+.fride-instance-main { display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.fride-instance .actions select { width: auto; min-height: 30px; padding: 3px 8px; font-size: 13px; }
 .skill-policy { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
 
 /* ── files and wiki ─────────────────────────────────────────────────────── */

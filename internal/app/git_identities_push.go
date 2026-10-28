@@ -48,13 +48,16 @@ func (s *gitIdentityService) Start(ctx context.Context) {
 }
 
 // changed hands every node what changed: the GitLab connection, a commit
-// name, the GitHub app.
+// name, the GitHub app; and the running FrIDE instances theirs.
 func (s *gitIdentityService) changed() {
 	if s != nil {
 		s.mu.Lock()
 		s.ghAt = time.Time{}
 		s.mu.Unlock()
 		s.kick("", false)
+		if s.b.fride != nil {
+			s.b.fride.inst.changed()
+		}
 	}
 }
 
@@ -124,9 +127,11 @@ func (s *gitIdentityService) wait() {
 	}
 }
 
-// takesIdentities reports whether node v can take its identities now.
+// takesIdentities reports whether node v can take its identities now:
+// its own FrIDE's. A node's FrIDE instances get theirs when they start
+// (fride.instance.start, fride_instances.go).
 func takesIdentities(v nodes.View) bool {
-	return v.Device == nodeproto.DeviceApproved && v.Online && v.Effective.Allows(nodeproto.MethodFrideIdentities)
+	return v.Device == nodeproto.DeviceApproved && v.Online && v.Effective.Fride != nil && v.Effective.Allows(nodeproto.MethodFrideIdentities)
 }
 
 // handOver sends the nodes in pending (all of them with all) their

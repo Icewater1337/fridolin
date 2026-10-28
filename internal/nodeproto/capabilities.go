@@ -17,6 +17,9 @@ type Capabilities struct {
 	Notify bool     `json:"notify,omitempty"`
 	// Fride is FrIDE on the node, declared while it answers.
 	Fride *FrideCap `json:"fride,omitempty"`
+	// FrideHost (fride_host) runs FrIDE instances, each in a Docker
+	// Sandbox of its own (fride_host.go).
+	FrideHost *FrideHostCap `json:"fride_host,omitempty"`
 	// AndroidBuild (android-build) is Gradle with a JDK and the Android
 	// SDK on the node, declared while the agent finds them.
 	AndroidBuild *AndroidBuildCap `json:"android_build,omitempty"`
@@ -212,6 +215,9 @@ func (c Capabilities) Check() error {
 	if err := c.CoreHost.Check(); err != nil {
 		return err
 	}
+	if err := c.FrideHost.Check(); err != nil {
+		return err
+	}
 	return c.Fride.Check()
 }
 
@@ -363,7 +369,10 @@ func (c Capabilities) Allows(method string) bool {
 		return c.Notify
 	}
 	if slices.Contains(FrideMethods, method) {
-		return c.Fride != nil
+		return c.Fride != nil || c.FrideHost != nil
+	}
+	if slices.Contains(FrideHostMethods, method) {
+		return c.FrideHost != nil
 	}
 	if slices.Contains(AndroidMethods, method) {
 		return c.AndroidBuild != nil
@@ -389,7 +398,7 @@ func (c Capabilities) Allows(method string) bool {
 // Empty reports whether nothing that needs the owner's approval is
 // offered: core-host does not (see Capabilities.CoreHost).
 func (c Capabilities) Empty() bool {
-	return (c.Exec == nil || len(c.Exec.Allow) == 0 && len(c.Exec.AcceptFromCore) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil && c.AndroidBuild == nil && c.Backup == nil && c.Update == nil && c.Agent == nil && c.Terminal == nil
+	return (c.Exec == nil || len(c.Exec.Allow) == 0 && len(c.Exec.AcceptFromCore) == 0) && (c.FS == nil || len(c.FS.Roots) == 0) && !c.Host && !c.Notify && c.Fride == nil && c.FrideHost == nil && c.AndroidBuild == nil && c.Backup == nil && c.Update == nil && c.Agent == nil && c.Terminal == nil
 }
 
 // Covers reports whether approved covers every part of declared: each
@@ -404,6 +413,9 @@ func (c Capabilities) Empty() bool {
 // commands, and Empty leaves it out (see Capabilities.CoreHost).
 func Covers(approved, declared Capabilities) bool {
 	if declared.Host && !approved.Host || declared.Notify && !approved.Notify || declared.Fride != nil && approved.Fride == nil {
+		return false
+	}
+	if declared.FrideHost != nil && approved.FrideHost == nil {
 		return false
 	}
 	if declared.AndroidBuild != nil && approved.AndroidBuild == nil || declared.Update != nil && approved.Update == nil {
@@ -462,6 +474,9 @@ func Intersect(declared, approved Capabilities) Capabilities {
 		f := *declared.Fride
 		f.Repos = slices.Clone(f.Repos)
 		out.Fride = &f
+	}
+	if declared.FrideHost != nil && approved.FrideHost != nil {
+		out.FrideHost = declared.FrideHost.clone()
 	}
 	if declared.AndroidBuild != nil && approved.AndroidBuild != nil {
 		ab := *declared.AndroidBuild
@@ -541,6 +556,16 @@ func (c Capabilities) Summary() string {
 			parts = append(parts, "fride (Claude not logged in)")
 		} else {
 			parts = append(parts, "fride")
+		}
+	}
+	if h := c.FrideHost; h != nil {
+		switch {
+		case !h.Ready:
+			parts = append(parts, "fride-host (not ready)")
+		case len(h.Instances) == 1:
+			parts = append(parts, "fride-host (1 instance)")
+		default:
+			parts = append(parts, fmt.Sprintf("fride-host (%d instances)", len(h.Instances)))
 		}
 	}
 	if c.AndroidBuild != nil {

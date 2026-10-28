@@ -276,8 +276,10 @@ func TestStoreMigratesFromEachVersion(t *testing.T) {
 				t.Errorf("from %d: table %s: %d %v", from, table, n, err)
 			}
 		}
-		if _, err := s.AddFrideThread(t.Context(), FrideThread{Chat: "15551234567@s.whatsapp.net", Message: "x"}); err != nil {
+		if id, err := s.AddFrideThread(t.Context(), FrideThread{Chat: "15551234567@s.whatsapp.net", Message: "x", Instance: "work"}); err != nil {
 			t.Errorf("from %d: fride_threads: %v", from, err)
+		} else if got, err := s.GetFrideThread(t.Context(), id); err != nil || got.Instance != "work" {
+			t.Errorf("from %d: fride_threads' instance: %+v %v", from, got, err)
 		}
 		if err := s.SetPolicyState(t.Context(), "lockdown", "", time.Now()); err != nil {
 			t.Errorf("from %d: policy_state: %v", from, err)

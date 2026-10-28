@@ -58,6 +58,9 @@ func (c Capabilities) Plain() []string {
 	if c.Fride != nil {
 		out = append(out, "run FrIDE coding tasks on this machine — that means it can run any command there")
 	}
+	if c.FrideHost != nil {
+		out = append(out, "run FrIDE instances in Docker Sandboxes on this machine — each runs any command inside its own sandbox")
+	}
 	if c.AndroidBuild != nil {
 		out = append(out, "build Android apps there")
 	}

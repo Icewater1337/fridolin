@@ -96,6 +96,25 @@
     "WebFetch"
   ],
   "fride": {
+    "instances": {
+      "work": {
+        "description": "work repositories",
+        "egress": [
+          "registry.example.com"
+        ],
+        "identities": [
+          "gitlab"
+        ],
+        "idle_stop_minutes": 45,
+        "memory_mb": 8192,
+        "nodes": [
+          "mini"
+        ],
+        "repos": [
+          "https://gitlab.example.com/group/app.git"
+        ]
+      }
+    },
     "news": "all"
   },
   "group_members": {

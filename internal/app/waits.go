@@ -39,6 +39,10 @@ type waits struct {
 	// frideStallRepeat is how long the relay drops a thread's stall notice
 	// that only repeats the last one.
 	frideStallRepeat time.Duration
+	// frideIdleCheck is how often the core looks for FrIDE instances that
+	// idled long enough to stop; frideIdleUnit is what one of their
+	// idle_stop_minutes is.
+	frideIdleCheck, frideIdleUnit time.Duration
 	// frideAgentGap is the least time between two runs of a scheduled
 	// agent that FrIDE's news starts; what comes meanwhile waits for the
 	// next.
@@ -76,6 +80,8 @@ func defaultWaits() waits {
 		frideGather:         3 * time.Second,
 		frideRepeat:         time.Minute,
 		frideStallRepeat:    6 * time.Hour,
+		frideIdleCheck:      time.Minute,
+		frideIdleUnit:       time.Minute,
 		frideAgentGap:       time.Hour,
 		nodeSessionMinAge:   time.Minute,
 		reapGrace:           3 * time.Second,

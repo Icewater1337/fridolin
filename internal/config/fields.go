@@ -130,6 +130,8 @@ var fields = []fieldSpec{
 	{Field: Field{Name: "schedules.max_total_mb"}},
 	{Field: Field{Name: "schedules.max_log_kb"}},
 	{Field: Field{Name: "fride.news"}},
+	// Read at each start of an instance and by the idle stop.
+	{Field: Field{Name: "fride.instances"}},
 	{Field: Field{Name: "connections.openai.brains"}},
 	{Field: Field{Name: "connections.openai.brain_monthly_usd"}},
 	{Field: Field{Name: "connections.elevenlabs.brains"}},

@@ -106,11 +106,13 @@ type doctorNode struct {
 	Declared struct {
 		Exec         *nodeproto.ExecCap         `json:"exec"`
 		Fride        *nodeproto.FrideCap        `json:"fride"`
+		FrideHost    *nodeproto.FrideHostCap    `json:"fride_host"`
 		AndroidBuild *nodeproto.AndroidBuildCap `json:"android_build"`
 	} `json:"declared"`
 	Approved struct {
 		Exec         *nodeproto.ExecCap         `json:"exec"`
 		Fride        *nodeproto.FrideCap        `json:"fride"`
+		FrideHost    *nodeproto.FrideHostCap    `json:"fride_host"`
 		AndroidBuild *nodeproto.AndroidBuildCap `json:"android_build"`
 	} `json:"approved"`
 }

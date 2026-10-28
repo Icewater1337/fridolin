@@ -553,6 +553,10 @@ frideNotLoggedInNotice(stays)
 	To fix it: in the node's box run docker compose exec fride claude setup-token and set-claude-token, then docker compose restart fride (natively: log in to claude as FrIDE's user and restart fride serve). Then answer here to make it try again.
 fridePlacedNotice
 	🛠️ *FrIDE #3* went to laptop now.
+frideInstanceQueuedNotice
+	⏳ *FrIDE #4* waits: the FrIDE instance work cannot take it now (no node has room for the FrIDE instance work (6144 MB, or 3072 MB at the least): mini has 1000 MB free beyond its reserve). It starts as soon as it can, and I'll say so here.
+frideInstanceSmallerNotice
+	⚠️ The FrIDE instance work started on mini with 3072 MB, less than the 6144 MB asked: no node had more room. A heavy stack may not fit until others stop.
 frideMoveUsage
 	🚚 Use `!move <thread> <node>` to move FrIDE's work to another node, e.g. `!move 3 laptop`.
 frideMoveGroupNotice

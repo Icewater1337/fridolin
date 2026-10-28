@@ -1357,6 +1357,73 @@ UI is on the node's loopback, so the link works on the node itself until
 the node agent publishes it over the tailnet. `fridolin doctor`'s
 `nodes-fride` warns about nodes whose approved FrIDE does not answer.
 
+### The core and FrIDE instances
+
+A FrIDE instance is a whole FrIDE in a Docker Sandbox of its own on a
+node that offers `fride_host`, for one trust domain that
+`fride.instances` names ([CONFIGURATION.md](CONFIGURATION.md); the
+direction is in [VISION.md](VISION.md#fride-instances)). The core starts
+one when work needs it and stops it once it idles; the node side is in
+[FrIDE instances](#fride-instances).
+
+**Tools.** With instances configured, the core brain has three more, and
+its prompt lists each instance with its description and repositories,
+so it picks the instance by what the work is for:
+
+| Tool | |
+| --- | --- |
+| `fride_task(…, instance?)` | with `instance`, starts it unless it runs (`medium`) and hands it the work; without, a node's own FrIDE as above |
+| `fride_instances()` | each instance: description, repositories, identities, where it runs, its state, memory and open threads; and the nodes that run instances, with their free memory |
+| `fride_spawn(instance, size?, reason)` | starts one ahead, or remakes a running one with no open thread at another size |
+| `fride_stop(instance)` | stops one with no open thread |
+
+`fride_repo_add` takes `instance` too. Work on an instance stays on it:
+its thread is (node, instance, FrIDE's thread there), every call for it
+names the instance, and `fride_move` refuses it. A reply or a close to
+work whose instance stopped starts it again on its node.
+
+**Sizes.** `small` 3072 MB (code and unit tests), `medium` 6144 MB (with
+the project's stack), `large` 12288 MB (a heavy stack);
+`memory_mb` in the instance's config is a fixed size instead.
+
+**Placement.** The nodes it may run on (its `nodes`, else every
+approved node whose `fride_host` is ready), with its open threads' node
+only when it has some. A node's room is its available memory less its
+reserve (6144 MB unless node.json says otherwise), and the instance's
+own memory where it runs already. The core picks the node with the most
+room that fits, the one that has the instance's sandbox (its disk)
+first; else it stops idle instances of other trust domains (no open
+thread, the longest idle first) on the node with the most room where
+that is enough; else it tries the next smaller size, down to `small`,
+and tells the chat the instance got less; else it refuses, naming what
+runs where. An instance with an open thread is never stopped to make
+room. One start or stop goes at a time.
+
+**Identities.** A start (`fride.instance.start`) carries the instance's
+repositories, egress, and the identities its `identities` names, with
+their tokens, from the GitHub and GitLab connections as in [Git
+identities for FrIDE](#git-identities-for-fride); the first one with a
+commit name and email gives `git`. When one changes, and every five
+minutes, a running instance whose identities, repositories or egress
+changed is started again at its memory, which the node takes as an
+update. No token goes into a log, the audit or `bridge.db`.
+
+**Idle stop.** An instance with no open thread and no news for its
+`idle_stop_minutes` (default 30; -1 never) stops; its disk stays. Work
+that cannot get an instance waits, its chat told why, and goes once it
+can; a node's start that failed is tried again by the queue after five
+minutes. Every start and stop is an audit line of kind `fride_instance`
+(by `core brain`, `dashboard`, `queue`, `idle`, or `core` for one
+stopped to make room).
+
+**Dashboard and doctor.** `GET /api/fride` lists the instances with
+their node, state, memory and open threads; `POST
+/api/fride/instances/{name}/stop` (`{"force": true}` for one with open
+threads) and `/start` (`{"size": …}`) stop and start one. In a lockdown
+`/start`, `fride_spawn` and `fride_task` start none. `fridolin doctor`'s
+`fride-instances` warns about an instance no node can run and about
+identities the core does not hold.
+
 ### Git identities for FrIDE
 
 FrIDE can hold several git identities, and a workspace (task) is created
@@ -1418,15 +1485,13 @@ identities its FrIDE took and when, or why not (`GET
 /api/git-identities`). No token is in a log, the audit, a GET or the
 dashboard.
 
-**The FrIDE in a Docker Sandbox** gets none: a real token must never
-enter its VM, so its node (service `fride-sandbox`) holds them back and
-says so (`held`), and the dashboard shows why. That node goes away:
-FrIDE instances in Docker Sandboxes, which the core starts through a
-node, replace it ([VISION.md](VISION.md)). An instance will get its
-identities as placeholders, through `setHostToken` (see [GitHub and other
-git hosts](#github-and-other-git-hosts)): the token stays on the host in
-a sandbox-scoped sbx secret, which swaps the placeholder for it on the
-way to its host, and FrIDE gets the placeholder as the token.
+**FrIDE instances** get theirs with `fride.instance.start`, as
+placeholders ([Tokens as placeholders](#tokens-as-placeholders)): the
+token stays on the host in a sandbox-scoped sbx secret, which swaps the
+placeholder for it on the way to its host, and FrIDE gets the
+placeholder as the token. The old sandboxed FrIDE's node (service
+`fride-sandbox`) gets none: a real token must never enter its VM, so it
+holds them back and says so (`held`), and the dashboard shows why.
 
 ## Setting up FrIDE on a node
 
@@ -1892,9 +1957,9 @@ deletes the workspaces and any uncommitted work in them, so ask first.
 
 ## Docker Sandboxes
 
-FrIDE can run in a Docker Sandboxes (`sbx`) microVM on a Mac
-([FrIDE in a Docker Sandbox](#fride-in-a-docker-sandbox)). Brains do not:
-they run under bubblewrap in the core's container, or sandbox-exec
+FrIDE instances run in Docker Sandboxes (`sbx`) microVMs on a Mac, or a
+Linux machine with KVM ([FrIDE instances](#fride-instances)). Brains do
+not: they run under bubblewrap in the core's container, or sandbox-exec
 natively ([VISION.md](VISION.md#why-not-docker-sandboxes-for-brains)).
 Fridolin is tested with sbx v0.50.0.
 
@@ -1903,250 +1968,252 @@ Fridolin is tested with sbx v0.50.0.
   Docker.
 - **sbx's global settings** are fridolin's on this machine: the network
   policy `deny-all`, `ssh.agentForwardingEnabled` and `browser.enabled`
-  off. They apply to your own sandboxes too. `fridolin node fride
-  sandbox create` makes them hold: it replaces another policy (`sbx
-  policy reset` removes every rule), and restarts sbx's daemon when no
-  sandbox runs. Every few minutes the agent of the sandboxed FrIDE's
-  node sets a setting that drifted again and initializes a missing
-  network policy; another policy it leaves to `create`, since replacing
-  it stops every sandbox.
+  off. They apply to your own sandboxes too. `fridolin node fride host
+  setup` makes them hold: it replaces another policy (`sbx policy
+  reset` removes every rule), and restarts sbx's daemon when no sandbox
+  runs. Every few minutes the agent of a node that offers `fride_host`
+  sets a setting that drifted again and initializes a missing network
+  policy; another policy it leaves to `host setup`, since replacing it
+  stops every sandbox.
 
-## FrIDE in a Docker Sandbox
+## FrIDE instances
 
-A whole FrIDE, with its coding agents, in one sbx microVM on a Mac (or a
-Linux machine with KVM): what the agents run stays in the VM, and they
-reach only the hosts below. Nothing in FrIDE changes. It runs beside the
-native companion FrIDE ([Setting up FrIDE on a node](#setting-up-fride-on-a-node)):
+A FrIDE instance is one whole FrIDE, unchanged, with its coding agents,
+in a Docker Sandbox of its own on a node, for one trust domain: for
+example `fridolin` (GitHub) and `work` (a self-hosted GitLab). What the
+agents run stays in the VM, and they reach only the hosts the instance
+may reach. Workspaces inside one instance share its VM, so the instance,
+not the workspace, is the wall between trust domains
+([VISION.md](VISION.md), "FrIDE instances").
 
-| | native companion | sandboxed |
+The core starts an instance when a task needs it, sizes its memory at
+start, hands it work with the `fride_task` flow, and stops it once it
+has been idle for a while; the instances are named in its config
+([CONFIGURATION.md](CONFIGURATION.md#frideinstances)). The machine's own
+node agent runs them: there is no second node per FrIDE. A node can host
+several instances, each with its own sandbox, ports, pairing, webhook,
+repositories, git identities and network allowlist.
+
+The native companion FrIDE ([Setting up FrIDE on a node](#setting-up-fride-on-a-node))
+runs beside them on the same node, as the instance `""`:
+
+| | native companion | an instance, such as `work` |
 | --- | --- | --- |
-| FrIDE | `http://127.0.0.1:17840` | `http://127.0.0.1:17850`, published from the sandbox `fride-sandbox` |
+| FrIDE | `http://127.0.0.1:17840` | `http://127.0.0.1:17850`, published from the sandbox `fride-work` |
 | webhook | `127.0.0.1:17841` | `127.0.0.1:17851`, forwarded out of the VM |
-| node | the machine's node | a node of its own (below) |
-| repositories | `~/fride-companion/repos` | `~/fride-sandbox/repos` (`--base`), mounted at the same path |
+| repositories | `~/fride-companion/repos` on the host | `~/fride-companion/repos` in the VM, cloned there |
 | workspaces | `~/fride-companion/workspaces` | `~/fride-companion/workspaces` in the VM |
-| GitHub | the Mac's git and gh | the Mac's `gh auth token`, added by sbx's proxy; never in the VM |
-| Go and npm caches | the Mac's own | `~/.cache/fridolin-sbx`, shared with the next sandbox |
+| git | the machine's git and gh | placeholders, which sbx's proxy swaps for the tokens; never a token in the VM |
+| state on the node | `node.json`'s `fride`, `fride.token` | `fride-instances/work/` in the state dir |
 
-### A node of its own
+The ports come in pairs from 17850 up, FrIDE's and its webhook's, the
+first pair no other instance has and nothing listens on; the node keeps
+an instance's pair for as long as it has the instance.
 
-A node pairs with one FrIDE: node.json has one `fride` section, and the
-node declares one `fride` capability, which the core's placement, threads
-and moves all go by. So the sandboxed FrIDE is paired to a second node
-on the same machine, which joins the core with a join code like any
-node:
+### Setting a machine up
 
-- **State dir**: the node's with `-sbx`, on macOS
-  `~/Library/Application Support/fridolin-node-sbx` (Linux
-  `~/.local/state/fridolin-node-sbx`). It is the default of every
-  `fridolin node fride sandbox` command; the machine's node is never
-  touched.
-- **Service**: node.json's `"service": "fride-sandbox"` gives it one of
-  its own, `ai.fridolin.node.fride-sandbox` (Linux and Windows:
-  `fridolin-node-fride-sandbox`). `fridolin node status|stop|start|uninstall
-  --state-dir <its state dir>` manage it.
-- **Binary**: it runs its own copy of fridolin, `bin/fridolin` in its
-  state dir, which the core's updates replace without touching the
-  machine's node's binary (and its `.prev`).
-- **Offers** nothing but `fride` (and updates): no commands, host facts,
-  notifications or android-build. On the core it is one more node with
-  `fride`; `fride_task(node=…)` picks it by name.
+The machine is a node already ([Joining a machine](#joining-a-machine)),
+with sbx as in [Docker Sandboxes](#docker-sandboxes) (installed, and
+`sbx login`) and Docker. In a fridolin checkout of the core's version:
 
-### Setting it up
+```sh
+fridolin node fride host setup --repo .
+```
 
-The machine has sbx as in [Docker Sandboxes](#docker-sandboxes)
-(installed, and `sbx login`) and Docker; `create` makes sbx's global
-settings fridolin's.
+It checks sbx (running, signed in), makes sbx's global settings
+fridolin's, and builds the template unless sbx has it: the image of
+sbx's Claude kit with FrIDE built at the commit the checkout pins
+(`FRIDE_COMMIT` in
+[container/sandbox/fride.Dockerfile](../container/sandbox/fride.Dockerfile),
+which a test holds to [container/fride/Dockerfile](../container/fride/Dockerfile)'s),
+the Claude Code fridolin is tested with, and ponytail at the commit
+[Ponytail for every agent](#ponytail-for-every-agent) names. Docker
+builds it (a few minutes the first time), sbx loads it as
+`fridolin-fride-sbx:<hash>`, and Docker's copy goes. FrIDE's git URL is
+the checkout's origin with `fridolin` replaced by `fride`, on GitHub
+(`--fride-repo URL`). Setup records it all in `fride-host.json` in the
+node's state dir; from then on the node's agent offers `fride_host`.
 
-1. **Join.** Send `!join` to fridolin in your own chat, then, with the
-   core's address from its answer:
+Flags: `--docker-disk 40g` (each sandbox's Docker disk), `--no-caches`
+(see [Shared caches](#shared-caches)), `--reserve-mb N` (below),
+`--state-dir DIR`.
 
-   ```sh
-   fridolin node fride sandbox join CODE --core fridolin-core.<tailnet>.ts.net:8766
-   ```
+Then approve `fride_host` on the core once: `!approve`, the Nodes page,
+or `fridolin nodes approve ID --commands`. As with `fride`, approving it
+approves arbitrary commands, here inside the instances' VMs.
 
-   It copies this fridolin into the new state dir, joins as
-   `<host>-sbx` (`--name`), and installs and starts its service. Approve
-   the node when fridolin asks (`!approve`).
-2. **Create**, in a fridolin checkout of the core's version:
+`fridolin node fride host status` shows the template, sbx, whether the
+node is ready, the memory and the instances. Run `host setup` again in
+an updated checkout for a newer FrIDE, Claude Code or ponytail: an
+instance gets the new template when the node makes its sandbox anew,
+at its next start while it is stopped. The old template stays in sbx
+(`sbx template rm` frees its few GB).
 
-   ```sh
-   fridolin node fride sandbox create --repo . --git-name "NAME" --git-email EMAIL
-   ```
+### What the node offers
 
-   It builds the template (below) with Docker unless sbx has it, clones
-   `fridolin` and `fride` into the base folder with this machine's git,
-   makes the sandbox and builds FrIDE in it: a few minutes the first
-   time. FrIDE's git URL is the checkout's origin with `fridolin`
-   replaced by `fride`, on GitHub over https (`--fride-repo URL`).
-   When `gh` is logged in on the Mac, it also gives the sandbox GitHub
-   ([GitHub and other git hosts](#github-and-other-git-hosts)); else run
-   `gh auth login`, then `fridolin node fride sandbox github`.
-3. **Log in** FrIDE's agents (below):
+The capability `fride_host` (`nodeproto.FrideHostCap`) says, for the
+core's placement:
 
-   ```sh
-   claude setup-token                    # on the Mac; prints sk-ant-oat…
-   fridolin node fride sandbox login     # paste it; it is not shown
-   ```
+- `version` (sbx's) and `ready`: sbx answers and is signed in,
+  fridolin's settings hold, and sbx has the template; else `problem`
+  says what is missing.
+- `total_memory_mb` and `available_memory_mb`: what the OS can give
+  now. On macOS that is the free, inactive, purgeable and speculative
+  pages (`vm_stat`), not only the free ones; on Linux `MemAvailable`.
+- `reserve_mb`: what the machine keeps for itself, which the core
+  starts no instance into: 6144 MB, or `node.json`'s
+  `"fride_host": {"reserve_mb": N}` (`host setup --reserve-mb N`
+  writes it).
+- `instances`: each with its `state` (`starting`, `running`,
+  `stopped`, `failed`), `memory_mb`, FrIDE's `url` and `repos` while it
+  runs, and a `problem`.
 
-4. **Start**: `fridolin node fride sandbox start`. The node's agent starts
-   FrIDE within seconds; start waits for it, takes a pairing code from
-   `fride pair-companion` in the sandbox and pairs, with the webhook on
-   17851 and the base folder as `fride.base`.
-5. **Approve** `fride` on the core within half a minute: `!approve`, the
-   Nodes page's **Approve commands**, or `fridolin nodes approve ID
-   --commands`. As everywhere, approving `fride` approves arbitrary
-   commands, here inside the VM ([FrIDE](#fride)).
-6. **Check**: `fridolin node fride sandbox status` (sandbox, FrIDE
-   answers, paired, login, git identity, Docker disk, caches, the git
-   hosts with a token), and `!fleet`.
+The agent reads it again at most every minute, and right after an
+instance changes state. A node in a box never offers it.
 
-### What create makes
+### What an instance gets
 
-- **The template** `fridolin-fride-sandbox:<hash>`, from
-  [container/sandbox/fride.Dockerfile](../container/sandbox/fride.Dockerfile):
-  the image of sbx's Claude kit (Go, Node, git, gh, socat, jq, ripgrep,
-  lsof), the Claude Code fridolin is tested with, iproute2, and ponytail
-  at `/opt/fride/plugins/ponytail` at the commit [Ponytail for every
-  agent](#ponytail-for-every-agent) names. A test holds Claude Code and
-  ponytail to the fridolin-fride image's. Docker's copy is removed once sbx has it.
-- **The sandbox** `fride-sandbox`: `--memory 6g`, `-p
-  127.0.0.1:17850:17850`, the base folder and the caches folder
-  read-write at their own paths, and a 40 GB Docker disk (below).
-  Its own network rules, on top of the global `deny-all`: `localhost:17851`
-  (the webhook), GitHub (`github.com`, `api.github.com`,
-  `codeload.github.com`, `objects.githubusercontent.com`,
-  `raw.githubusercontent.com`), Go's module proxy and checksum database
-  (`proxy.golang.org`, `sum.golang.org`, `storage.googleapis.com`), npm
-  (`registry.npmjs.org`) and `api.anthropic.com`, all on 443; the kit
-  adds Claude's own hosts. `downloads.claude.ai` and
-  `bridge.claudeusercontent.com` are denied, as for brains.
-- **FrIDE** in `~/fride-companion` in the VM, as on a native node:
-  `src/fride` (a clone, at the commit `FRIDE_COMMIT` in
-  [container/fride/Dockerfile](../container/fride/Dockerfile) pins),
-  `bin/fride`, `home` (its `config.json`, `serve.log`) and `workspaces`,
-  which Claude Code trusts. The config is the box's
-  ([container/fride/companion.json](../container/fride/companion.json))
-  with the base folder as its only `baseFolders`.
-- **`fride-sandbox.json`** in the node's state dir: the base folder, the
-  template, FrIDE's URL and commit, `run`, the Docker disk's size and
-  the caches folder.
+`fride.instance.start` (from the core) makes the instance when the
+node does not have it, and then, at every start, brings it up to date.
+It answers once FrIDE answers and is paired, with the instance as
+`fride_host` lists it. A first start takes a minute or two, plus the
+clones of large repositories; the node gives it 20 minutes at most.
+
+- **The sandbox** `fride-<name>`: from the template, `--memory` the
+  start's `memory_mb`, `-p 127.0.0.1:P:P` for FrIDE's port, a 40 GB
+  Docker disk ([Docker disk](#docker-disk)) and its own Go and npm caches
+  ([Shared caches](#shared-caches)). No other folder of the host's goes
+  in. `downloads.claude.ai` and `bridge.claudeusercontent.com` are
+  denied: the template pins Claude Code, and remote control stays off.
+- **Its network**, on top of the global `deny-all` and the hosts sbx's
+  Claude kit opens: Anthropic's API, Go's module proxy and checksum
+  database, npm, Docker Hub, its webhook port on `localhost`; GitHub's
+  hosts with a GitHub identity, each identity's host, OpenAI's hosts
+  when sbx holds the ChatGPT login Codex runs with, and the start's
+  `egress` (a host, `*.domain`, with a port when not 443). Every start
+  adds what is new and removes what went.
+- **Its git identities**, as placeholders ([Tokens as
+  placeholders](#tokens-as-placeholders)): the node pushes each to
+  FrIDE (`PUT /api/companion/git/identities/<id>`) with the placeholder
+  as its token, and removes the ones it pushed before that are gone. An
+  instance takes one identity per host.
+- **The Claude login** of FrIDE's agents ([The Claude login](#the-claude-login)).
+- **The git identity** for commits outside an identity's workspaces:
+  the start's `git` name and email.
+- **Its repositories**: each URL of the start that its base folder
+  lacks is cloned in the VM, over https, with the placeholders; FrIDE
+  then reads its base folder again. The core's `fride_repo_add` for an
+  instance clones (or makes, with `gh repo create` inside) there too.
+- **FrIDE** runs from the template, its home, workspaces and base
+  folder in `~/fride-companion` in the VM. Its config starts from the
+  box's ([container/fride/companion.json](../container/fride/companion.json)),
+  with the VM's base folder and workspaces; Claude Code trusts the
+  workspaces.
+
+A start of an instance that runs with the same memory only brings the
+network, tokens, login, identities and repositories up to date: the
+core starts it again when a token changes. Another memory makes the
+sandbox anew at the new size (sbx cannot resize a running VM), and
+carries over what lived only on the old VM's disk ([History](#history)).
+A start that fails stops the VM and leaves the instance `failed`, with
+why, until the next start.
+
+`fride.instance.stop` stops the VM; its disk stays, and the next start
+runs it again within seconds. `fride.instance.remove` saves the
+instance's history, removes the sandbox with its workspaces and
+repositories, and the instance's state, pairing and tokens on the node.
+
+### Tokens as placeholders
+
+No token ever enters a VM. For each identity the node calls
+`setHostToken(sandbox, host, token)` (`internal/nodeagent/sbx_tokens.go`):
+
+- the token waits in `fride-instances/<name>/tokens/<host>.token` in
+  the node's state dir (0600), which sbx reads (`--command`) when it
+  sets the secret;
+- a sandbox-scoped custom secret (`sbx secret set-custom`) has sbx's
+  proxy swap the placeholder for the token in every request to the
+  host (for github.com also api.github.com), in a Bearer header and
+  inside git's Basic auth;
+- for github.com, sbx's github service gets the token too, so that `gh`
+  and git work as they are;
+- git's credential helper for `https://<host>` in the VM hands git the
+  placeholder (user `x-access-token` for GitHub, else `oauth2`).
+
+The core sends the real tokens over the node channel with each start;
+a new token replaces the old one under the same placeholder.
+`removeHostToken` undoes it all for a host an instance no longer has.
+The token is never an argument, a log line or chat.
+
+### The Claude login
+
+FrIDE starts its agents without any `CLAUDE_CODE_*` variable
+(`agent.CleanEnv`), so the token cannot come from `fride serve`'s
+environment. Each start puts the Claude token of this machine's host
+secret store (`fridolin.claude.oauth.token`, which `fridolin core
+secrets set claude.oauth.token` stores; on a Mac in the login keychain)
+where Claude Code reads it itself: `env.CLAUDE_CODE_OAUTH_TOKEN` in
+`~/.claude/settings.json` in the VM (0600), on stdin. Without it, FrIDE
+runs and the instance's `problem` says so.
+
+This one token sits inside the VM, unlike the git tokens, until sbx
+can inject subscription logins: an agent turned against you could read
+it. It is a long-lived Claude Code token (`claude setup-token`), which
+you revoke in your Claude account.
 
 ### How it runs
 
-While `run` is set (`start` sets it, `stop` clears it), the node's agent
-holds `sbx exec fride-sandbox sh -c <serve>` open: sbx stops a sandbox
-30 seconds after its last exec ends, and a published port does not
-count. The script starts `fride serve --under-fridolin --port 17850` in
-a session of its own, unless it runs, with two forwarders, as in the
-box: the VM's address, where sbx publishes 17850, to FrIDE on the
-loopback, and the loopback's 17851 to `host.docker.internal:17851`, the
-agent's webhook. With the same ports inside and out, FrIDE's Host check
-and its webhook URL work unchanged. The script then waits for FrIDE.
+While an instance's state says run (a start sets it, a stop clears it),
+the node's agent holds `sbx exec fride-<name> sh -c <serve>` open: sbx
+stops a sandbox 30 seconds after its last exec ends, and a published
+port does not count. The script starts `fride serve --under-fridolin
+--port P` in a session of its own, unless it runs, with two forwarders,
+as in the box: the VM's address, where sbx publishes P, to FrIDE on the
+loopback, and the loopback's P+1 to `host.docker.internal:P+1`, where
+the agent hears the instance's webhook. With the same ports inside and
+out, FrIDE's Host check and its webhook URL work unchanged. The agent
+sends the news on to the core as the instance's (`FrideEvent.instance`),
+whatever the news says.
 
-When it ends, the agent starts it again: 2 seconds later, then twice as
-long after each quick end, up to 5 minutes; a run of 2 minutes resets
-that. `stop` ends FrIDE's session (TERM, KILL after 10 seconds) and the
-agent lets it be. When the agent itself stops or updates, FrIDE runs on
-until the VM stops, and the agent's next start holds it again. FrIDE's
-log is `serve.log` in FrIDE's home in the VM (`sbx exec -it
-fride-sandbox bash`). It costs about 1.1 GB while idle.
-
-### The Claude login of FrIDE's agents
-
-FrIDE starts its agents without any `CLAUDE_CODE_*` variable
-(`agent.CleanEnv`), so the token cannot come from the environment of
-`fride serve`. `login` puts it where Claude Code reads it itself:
-`env.CLAUDE_CODE_OAUTH_TOKEN` in `~/.claude/settings.json` in the VM
-(0600), merged into what is there. The token goes in on stdin, never
-in an argument, a log or chat: typed without echo when `login` runs in a
-terminal, else read from a pipe, such as the node's own token:
-
-```sh
-security find-generic-password -a fridolin -s fridolin.claude.oauth.token -w | fridolin node fride sandbox login
-```
-
-It takes only what `claude setup-token` prints (`sk-ant-oat…`) and
-refuses the browser's sign-in code. `--setup-token` runs `claude
-setup-token` in the sandbox first, on your terminal. The token stays on
-the VM's disk across stops, until `rm`; agents started afterwards use
-it, without a restart. sbx's own login capture would keep it out of the
-VM; it is not tested yet.
-
-### GitHub and other git hosts
-
-FrIDE's agents push branches and use `gh` from inside the VM, but no
-token ever enters it. sbx's proxy adds the token on the way out:
-
-```sh
-fridolin node fride sandbox github                  # this Mac's gh auth token
-gh auth token | fridolin node fride sandbox github --token-stdin
-fridolin node fride sandbox github --remove
-```
-
-`create` does the first by itself when `gh` is logged in. Run it again
-after `gh auth refresh` or a new `gh auth login`: the sandbox keeps the
-token it was given. It sets:
-
-- **sbx's github service**, scoped to the sandbox, with the token on
-  stdin. The proxy then adds it to every request to GitHub's hosts, so
-  `gh` and `git` over https work as they are.
-- **A placeholder for github.com**: a sandbox-scoped custom secret
-  (`sbx secret set-custom`) that the proxy swaps for the token in
-  requests to `github.com` and `api.github.com`, in a Bearer header and
-  inside git's Basic auth. git's credential helper in the VM
-  (`credential.https://github.com.helper`) hands git the placeholder.
-
-The token waits in `sbx-tokens/<sandbox>/github.com.token` in the node's
-state dir (0600), which sbx reads when it sets the secret. It is never
-an argument, a log line or chat. sbx drops a sandbox's secrets and rules
-with it, so `create` gives a sandbox made anew the tokens again.
-
-The same works for any git host, such as a self-hosted GitLab:
-`setHostToken(sandbox, host, token)` in `internal/nodeagent` sets the
-custom secret, the egress to the host (443, or the port in
-`gitlab.example.com:8443`) and git's helper (user `oauth2`, else
-`x-access-token` for GitHub), and returns the placeholder, which
-another tool, such as FrIDE's own credential helper, can hand to git.
-`removeHostToken` undoes it. The live test checks the swap in Basic and
-Bearer auth on a host other than GitHub, and git against a git server
-that takes only its token.
+When the exec ends, the agent starts it again: 2 seconds later, then
+twice as long after each quick end, up to 5 minutes; a run of 2 minutes
+resets that. When the agent itself stops or updates, FrIDE runs on until
+the VM stops, and the agent's next start holds it again. FrIDE's log is
+`serve.log` in its home in the VM: `fridolin node fride instance logs
+NAME`. An idle instance costs about 1.1 GB.
 
 ### Docker disk
 
 A sandbox's `/var/lib/docker` is a disk of its own, which sbx never
 grows; at its default of 10 GB, a compose stack soon fails with `No
-space left on device`. `create` makes it 40 GB (`--docker-disk 40g`;
-sbx v0.50.0 has no flag for it, so fridolin sets
+space left on device`. Each instance's is 40 GB (`host setup
+--docker-disk`; sbx v0.50.0 has no flag for it, so fridolin sets
 `DOCKER_SANDBOXES_DOCKER_SIZE` for that one `sbx create`). It is a
-sparse file on the Mac, so it takes only what is used.
+sparse file on the host, so it takes only what is used.
 
 ### Shared caches
 
-`create` mounts `~/.cache/fridolin-sbx` read-write at the same path in
-the VM, with `gomod/`, `gobuild/` and `npm/`, and sets `GOMODCACHE`,
-`GOCACHE` and `npm_config_cache` there (and `GOFLAGS=-modcacherw`, so
-that the Mac can delete the module cache). sbx puts them into every
-exec, so FrIDE and its agents use them. A sandbox made anew, or a
-second one, finds what the first downloaded and built: FrIDE's build
-after `rm` and `create` takes seconds. `--no-caches` leaves them out.
+Each instance gets `~/.cache/fridolin-sbx/<name>` mounted read-write at
+the same path in the VM, with `gomod/`, `gobuild/` and `npm/`, and
+`GOMODCACHE`, `GOCACHE` and `npm_config_cache` set there (and
+`GOFLAGS=-modcacherw`, so that the host can delete the module cache).
+sbx puts them into every exec, so FrIDE and its agents use them. A
+sandbox made anew for the same instance finds what the last one
+downloaded and built. `host setup --no-caches` leaves them out.
 
-The trade-off: the sandbox writes into these caches, and what one
-sandbox writes, the next one uses. Go checks a module against `go.sum`
-and its checksum database when it downloads it, and npm checks a
-lockfile's integrity hashes, but what is in a cache already is trusted,
-and so is Go's build cache. An agent turned against you could leave a
-changed module or build output for the next sandbox. So the caches are
-the sandboxes' alone: the Mac never reads them, and keeps its own
-(`~/go/pkg/mod`, `~/Library/Caches/go-build`, `~/.npm`). Delete the
-folder to start afresh (`go clean -modcache` with `GOMODCACHE` set to
-it, or `rm -rf`).
+The caches are the instance's alone: what one sandbox writes, the next
+one of the same instance uses, never another trust domain's. Go checks
+a module against `go.sum` and its checksum database when it downloads
+it, and npm checks a lockfile's integrity hashes, but what is in a cache
+already is trusted, and so is Go's build cache. The host never reads
+them, and keeps its own. Delete a folder to start afresh.
 
 ### History
 
 FrIDE's agents' sessions and FrIDE's own state live on the VM's disk,
-which goes with the sandbox. So `rm` first ends FrIDE and saves, with
-`sbx cp`, into `fride-sandbox/history/` in the node's state dir:
+which goes with the sandbox. So removing an instance first ends FrIDE
+and saves, with `sbx cp`, into `fride-instances/<name>/history/` in the
+node's state dir:
 
 - Claude Code's `~/.claude/projects` (what `--resume` lists),
   `history.jsonl` and `file-history`, and Codex's `~/.codex/sessions`
@@ -2155,42 +2222,43 @@ which goes with the sandbox. So `rm` first ends FrIDE and saves, with
   threads), the journal, its companion pairing and its config.
 
 Each save merges into what an earlier one saved, so a session an agent
-pruned since stays. `create` puts it all back, gives it to the VM's
-user, and sets the config's base folder to the new one. A save that
-fails keeps the sandbox; `rm --no-history` removes it without saving.
-The workspaces and the Claude login go with `rm`.
+pruned since stays. The next sandbox of that name gets it all back,
+owned by the VM's user. A save that fails keeps the sandbox.
 
-`update` with a new template keeps more: it builds the template first,
-ends FrIDE, saves the history, the workspaces, the Claude login and
-Claude Code's and git's settings into `fride-sandbox/carry/`, makes the
-sandbox anew with the same base folder, Docker disk, caches and tokens,
-puts them back and builds FrIDE; FrIDE runs again if it ran. Should it
-fail on the way, the carry stays, and the next `update` finishes. The
-old template stays in sbx (`sbx template rm` frees its few GB).
+A remake (another memory, or a new template) keeps more: it ends FrIDE,
+saves the history, the workspaces, the repositories, the Claude login
+and Claude Code's and git's settings into `fride-instances/<name>/carry/`,
+makes the sandbox anew, puts them back, and removes the carry. Should
+it fail on the way, the carry stays, and the next start finishes it.
+What Docker held in the old VM (images, volumes) does not come along.
 
-### Repositories, updates, removal
+### On the machine
 
-- **Repositories** live in the base folder on the Mac, at the same path
-  in the VM, so the core's `fride_repo_add` works unchanged: the node
-  clones on the Mac, with its git and credentials, and FrIDE sees the
-  repository at once. FrIDE's agents push their branches and use `gh`
-  from inside the VM ([GitHub and other git hosts](#github-and-other-git-hosts)).
-  Workspaces and worktrees stay on the VM's disk.
-- **Update**: `fridolin node fride sandbox update --repo .` in a checkout
-  of the new version builds FrIDE at the commit it pins (seconds with the
-  shared Go caches) and restarts it; the sandbox, its workspaces and
-  FrIDE's config stay. `--git-name`, `--git-email` and `--fride-repo`
-  change those too. When the checkout's template differs (another Claude
-  Code or ponytail), update makes the sandbox anew and keeps what was in
-  it ([History](#history)).
-- **Stop** keeps everything; **rm** asks, saves the history
-  ([History](#history)), then removes the sandbox with its workspaces
-  and `fride-sandbox.json`. The base folder, the history, the git hosts'
-  tokens and the node's pairing stay (`--yes` does not ask).
-- **Rollback**: `rm`, then `!revoke ID` for its node (`!fleet` shows it),
-  `fridolin node stop --state-dir <its state dir>` and `fridolin node
-  uninstall --state-dir <its state dir>`, then remove that state dir. The
-  machine's node and the native companion are not touched by any of it.
+```sh
+fridolin node fride instance ls                 # state, memory, ports, FrIDE's address, git hosts
+fridolin node fride instance stop NAME          # the VM stops; the core's next start runs it again
+fridolin node fride instance rm NAME            # asks; saves the history first (--no-history: not)
+fridolin node fride instance logs NAME          # the end of FrIDE's log (--lines N)
+```
+
+They work on the state dir while the agent runs; the core sees the
+change within a minute. The core's own `fride.instance.*` calls are the
+usual way.
+
+### Rollback
+
+Stop and remove the instances (`fridolin node fride instance rm NAME`),
+then remove `fride-host.json` from the node's state dir: the node stops
+offering `fride_host`. The template stays in sbx until `sbx template rm`.
+The machine's node and the native companion are not touched by any of
+it.
+
+The sandboxed FrIDE of before, on a second node of its own (state dir
+`…-sbx`, service `fride-sandbox`), is gone: `!revoke ID` for that node,
+`fridolin node stop --state-dir <its state dir>`, `fridolin node
+uninstall --state-dir <its state dir>`, `sbx rm fride-sandbox`, then
+remove its state dir. Until then its node keeps git identities from its
+FrIDE.
 
 ## Backups
 

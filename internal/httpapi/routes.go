@@ -306,6 +306,8 @@ func (a *PolicyAPI) Register(mux *http.ServeMux) {
 	}))
 	mux.HandleFunc("GET /api/audit", a.get(a.Audit))
 	mux.HandleFunc("GET /api/fride", a.get(func(r *http.Request) (any, error) { return a.Fride(r.Context()) }))
+	mux.HandleFunc("POST /api/fride/instances/{name}/stop", a.StopFrideInstanceHandler)
+	mux.HandleFunc("POST /api/fride/instances/{name}/start", a.StartFrideInstanceHandler)
 	mux.HandleFunc("GET /api/approvals", a.get(func(r *http.Request) (any, error) { return a.Approvals(r.Context()) }))
 	mux.HandleFunc("POST /api/approvals/{id}", a.DecideHandler)
 	mux.HandleFunc("GET /api/brains/{id}/skills", a.get(func(r *http.Request) (any, error) { return a.Skills(r.Context(), r.PathValue("id")) }))

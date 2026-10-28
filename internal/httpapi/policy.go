@@ -76,8 +76,63 @@ type PolicyAPI struct {
 	Skills         func(ctx context.Context, brain string) (any, error)
 	ApproveSkill   func(ctx context.Context, brain string, req SkillApproveRequest) (any, error)
 	SetSkillPolicy func(ctx context.Context, brain string, req SkillPolicyRequest) (any, error)
-	// Fride lists the FrIDE threads with their news (GET /api/fride).
+	// Fride lists the FrIDE threads with their news, and the FrIDE
+	// instances (GET /api/fride).
 	Fride func(context.Context) (any, error)
+	// StopFrideInstance stops a FrIDE instance; one with open threads only
+	// with force (POST /api/fride/instances/{name}/stop).
+	StopFrideInstance func(ctx context.Context, name string, force bool) error
+	// StartFrideInstance starts one at size ("" for medium) and answers
+	// its view (POST /api/fride/instances/{name}/start).
+	StartFrideInstance func(ctx context.Context, name, size string) (any, error)
+}
+
+// FrideInstanceStopRequest is the optional body of POST
+// /api/fride/instances/{name}/stop: force stops one with open threads.
+type FrideInstanceStopRequest struct {
+	Force bool `json:"force"`
+}
+
+// FrideInstanceStartRequest is the optional body of POST
+// /api/fride/instances/{name}/start: small, medium (the default) or
+// large.
+type FrideInstanceStartRequest struct {
+	Size string `json:"size"`
+}
+
+// StopFrideInstanceHandler is POST /api/fride/instances/{name}/stop.
+func (a *PolicyAPI) StopFrideInstanceHandler(w http.ResponseWriter, r *http.Request) {
+	var req FrideInstanceStopRequest
+	if err := DecodeOptionalJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := a.StopFrideInstance(r.Context(), r.PathValue("name"), req.Force); err != nil {
+		writeStatusErr(w, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// StartFrideInstanceHandler is POST /api/fride/instances/{name}/start.
+func (a *PolicyAPI) StartFrideInstanceHandler(w http.ResponseWriter, r *http.Request) {
+	var req FrideInstanceStartRequest
+	if err := DecodeOptionalJSON(r, &req); err != nil {
+		WriteErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	switch req.Size {
+	case "", "small", "medium", "large":
+	default:
+		WriteErr(w, http.StatusUnprocessableEntity, `size must be "small", "medium" or "large"`)
+		return
+	}
+	out, err := a.StartFrideInstance(r.Context(), r.PathValue("name"), req.Size)
+	if err != nil {
+		writeStatusErr(w, err)
+		return
+	}
+	WriteJSON(w, http.StatusOK, out)
 }
 
 // get answers a GET with what fn returns, with an ETag.
