@@ -27,12 +27,14 @@ const button = (root, label) => root.querySelectorAll('button').find((b) => b.te
 
 /**
  * Opens the page on a bridge whose nodes are first. route answers what
- * the bridge's stand-in does not (undefined: it does).
+ * the bridge's stand-in does not (undefined: it does); joinCode is what
+ * a new join code answers.
  * @param {import('node:test').TestContext} t
  * @param {object[]} first
  * @param {(path: string, init: import('./serve.js').RouteInit) => unknown} [route]
+ * @param {object} [joinCode]
  */
-async function openPage(t, first, route = () => undefined) {
+async function openPage(t, first, route = () => undefined, joinCode = { code: 'fj-abc', expires_at: '2026-10-20T10:10:00Z', command: 'fridolin node join fj-abc --core mini:8766' }) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
@@ -41,7 +43,7 @@ async function openPage(t, first, route = () => undefined) {
     const own = route(path, init);
     if (own !== undefined) return own;
     if (path === '/api/nodes') return { enabled: bridge.enabled, listen: '127.0.0.1:8766', nodes: bridge.nodes };
-    if (path === '/api/nodes/join-code') return { code: 'fj-abc', expires_at: '2026-10-20T10:10:00Z', command: 'fridolin node join fj-abc --core mini:8766' };
+    if (path === '/api/nodes/join-code') return joinCode;
     if (init.method === 'POST' && path.endsWith('/approve')) { bridge.nodes = [node({ device: 'approved' })]; return { node: bridge.nodes[0] }; }
     if (init.method === 'POST' && path.endsWith('/approve-commands')) {
       bridge.nodes = [node({ device: 'approved', commands: 'approved', approved: declared, effective: declared })];
@@ -219,6 +221,32 @@ test('the join code dialog shows the line to paste', async (t) => {
   assert.ok(calls.some((c) => c.method === 'POST' && c.path === '/api/nodes/join-code'));
 });
 
+test('the join code dialog offers the native line first, then the box, then the plain join', async (t) => {
+  const { root } = await openPage(t, [], () => undefined, {
+    code: 'fj-abc', expires_at: '2026-10-20T10:10:00Z', core: 'mini:8766',
+    command: 'fridolin node join fj-abc --core mini:8766',
+    command_powershell: '& "$env:ProgramFiles\\fridolin\\fridolin.exe" node join fj-abc --core mini:8766',
+    native_command: 'curl -fsSL https://example.com/f/container/node.sh | sh -s -- --core mini:8766 --code fj-abc',
+    native_command_powershell: '& ([scriptblock]::Create((irm https://example.com/f/container/node.ps1))) -Core mini:8766 -Code fj-abc',
+    box_command: 'curl -fsSL https://example.com/f/container/box.sh | sh -s -- --registry ghcr.io/owner --version v1 --core mini:8766 --code fj-abc',
+    box_command_powershell: '& ([scriptblock]::Create((irm https://example.com/f/container/box.ps1))) -Registry ghcr.io/owner -Version v1 -Core mini:8766 -Code fj-abc',
+  });
+  button(root, 'New join code').click();
+  await settle();
+  const text = document.querySelector('dialog').textContent;
+  const at = (s) => {
+    const i = text.indexOf(s);
+    assert.ok(i >= 0, `the dialog shows ${s}`);
+    return i;
+  };
+  assert.ok(at('Natively') < at('node.sh') && at('node.sh') < at('node.ps1'), 'the native lines first');
+  assert.ok(at('node.ps1') < at('In a box') && at('In a box') < at('box.sh') && at('box.sh') < at('box.ps1'), 'then the box');
+  assert.ok(at('box.ps1') < at('With fridolin installed already') && at('With fridolin installed already') < at('fridolin node join fj-abc'), 'then the plain join');
+  assert.match(text, /can run FrIDE instances, keep backups and become the core/);
+  assert.match(text, /where Docker Sandboxes can't run/);
+  assert.match(text, /-Root PATH:rw/);
+});
+
 test('tags are edited in a dialog', async (t) => {
   const { root, calls } = await openPage(t, [node({ device: 'approved', commands: 'approved' })]);
   button(root, 'Tags').click();
@@ -263,6 +291,9 @@ test('the capability words match the bridge\'s', () => {
   assert.equal(capSummary(null), 'nothing');
   assert.equal(ruleText({ name: 'git', args: ['status', 'log'] }), 'git status | log');
   assert.equal(ruleText({ name: 'go', args: null }), 'go (any arguments)');
+  assert.equal(ruleText({ name: 'brew', args: ['upgrade', 'update'], approve: true }), 'brew upgrade | update · asks you each time');
+  assert.equal(ruleText({ name: 'shutdown', args: ['-r', 'now'], exact: true, approve: true }), 'shutdown -r now (exactly) · asks you each time');
+  assert.equal(ruleText({ name: 'softwareupdate', args: [], approve: true }), 'softwareupdate (no arguments) · asks you each time');
   assert.equal(osName('darwin'), 'macOS');
   assert.equal(osName('plan9'), 'plan9');
   assert.equal(gb(16 * 2 ** 30), '16 GB');

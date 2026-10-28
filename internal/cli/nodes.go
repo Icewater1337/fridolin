@@ -348,7 +348,9 @@ func nodesUpdate(pos []string, all, force, noWait bool, call func(method, path s
 }
 
 // writeJoinCode prints a join code with the lines to paste on the new
-// machine, for sh (macOS, Linux) and for PowerShell (Windows).
+// machine, for sh (macOS, Linux) and for PowerShell (Windows): natively
+// first and in a box, where the core knows where their scripts are
+// published, as !join does (docs/NODES.md), then with fridolin installed.
 func writeJoinCode(w io.Writer, resp httpapi.JoinCodeResponse) {
 	sh, ps := resp.Command, resp.CommandPowerShell
 	if resp.Core != "" && ps == "" {
@@ -356,20 +358,31 @@ func writeJoinCode(w io.Writer, resp httpapi.JoinCodeResponse) {
 		sh, ps = httpapi.JoinCommands(resp.Code, resp.Core)
 	}
 	fmt.Fprintf(w, "Join code %s, valid once until %s (core %s).\nOn the new machine, paste one line:\n\n", resp.Code, resp.ExpiresAt.Local().Format("15:04"), resp.Core)
-	if resp.BoxCommand != "" {
-		// A core that knows where its box script is published offers a
-		// node in a box first, as !join does (docs/NODES.md).
-		fmt.Fprintf(w, "A node in a box (Docker; it asks for the rest):\n  macOS, Linux (sh):\n    %s\n", resp.BoxCommand)
-		if resp.BoxCommandPowerShell != "" {
-			fmt.Fprintf(w, "  Windows (PowerShell):\n    %s\n", resp.BoxCommandPowerShell)
+	pair := func(sh, ps string) {
+		fmt.Fprintf(w, "  macOS, Linux (sh):\n    %s\n", sh)
+		if ps != "" {
+			fmt.Fprintf(w, "  Windows (PowerShell):\n    %s\n", ps)
 		}
-		fmt.Fprint(w, "\nOr natively, with fridolin installed on it:\n")
 	}
-	fmt.Fprintf(w, "  macOS, Linux (sh):\n    %s\n", sh)
-	if ps != "" {
-		fmt.Fprintf(w, "  Windows (PowerShell):\n    %s\n", ps)
+	if resp.NativeCommand != "" {
+		fmt.Fprint(w, "Natively, one agent per machine: it can run FrIDE instances, keep backups and become\nthe core. The line installs Tailscale and fridolin, and asks before it changes anything:\n")
+		pair(resp.NativeCommand, resp.NativeCommandPowerShell)
+		fmt.Fprintln(w)
 	}
-	fmt.Fprintln(w, "\nAdd --root PATH[:rw] to share a folder, --no-exec to allow no commands (docs/NODES.md).\nThen approve it here: fridolin nodes approve <id>, and fridolin nodes approve <id> --commands")
+	if resp.BoxCommand != "" {
+		fmt.Fprint(w, "In a box (Docker), the fallback where Docker Sandboxes can't run, e.g. a machine\nwithout virtualization:\n")
+		pair(resp.BoxCommand, resp.BoxCommandPowerShell)
+		fmt.Fprintln(w)
+	}
+	if resp.NativeCommand != "" || resp.BoxCommand != "" {
+		fmt.Fprint(w, "With fridolin installed already:\n")
+	}
+	pair(sh, ps)
+	fmt.Fprint(w, "\nAdd --root PATH[:rw] to share a folder, --no-exec to allow no commands (docs/NODES.md)")
+	if resp.NativeCommandPowerShell != "" {
+		fmt.Fprint(w, ";\nnode.ps1 takes them as -Root PATH[:rw] and -NoExec")
+	}
+	fmt.Fprintln(w, ".\nThen approve it here: fridolin nodes approve <id>, and fridolin nodes approve <id> --commands")
 }
 
 // parseInterspersed parses fs from args with flags before, between and

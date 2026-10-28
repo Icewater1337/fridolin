@@ -76,6 +76,13 @@ const (
 	// NodeCommand is a command line typed into a node's terminal, its
 	// secrets masked (Scrub).
 	NodeCommand = "node_command"
+	// NodeExec is a command the core brain ran on a node with node_exec,
+	// or asked the owner to approve: Brain and Run the run's, Detail the
+	// node and the command line, its secrets masked (Scrub), and for a
+	// command whose rule asks the owner, ID the approval and By who
+	// approved it; Outcome the exit code ("exit 0"), "timed out",
+	// "pending", "denied", or why it failed or was refused.
+	NodeExec = "node_exec"
 	// FileView is a file, folder or wiki page read on the Files page, the
 	// wiki or the site's /files and /wiki (docs/FILES.md): By is
 	// "dashboard" or "site:<account>", Brain the brain whose folder it is,

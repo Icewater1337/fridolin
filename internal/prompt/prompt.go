@@ -94,6 +94,12 @@ type FrideInstanceNote struct {
 // The instances follow it, one JSON object each.
 const FrideInstancesNote = "Coding work for the repositories or the purpose of one of these FrIDE instances goes to that instance: name it as fride_task's instance. Each is a FrIDE of its own for one trust domain, which fridolin starts when work needs it and stops once it idles; its work stays on it. fride_instances shows where each runs; fride_spawn starts one at another size (small for code and unit tests, medium with the project's stack, large for a heavy stack); fride_stop stops one. Work that belongs to none of them goes to fride_task without instance. The instances, each a JSON object (what the owner wrote it is for, and its repositories):"
 
+// MachinesRule is the core brain's rule about the owner's machines
+// (docs/NODES.md, "The core brain runs commands"), told with FrideRule:
+// which of node_exec, node_agent_run and FrIDE does what, and that a
+// command that asks the owner asks through node_exec itself.
+const MachinesRule = "<machines_rule>\nIf you have node_exec, it runs one command on one of the owner's machines, as that machine's allowlist allows it: quick things such as a status, opening an app, an update, a backup script. node_exec_rules lists what each machine allows. Work in a folder that takes more than one command goes to node_agent_run, code to FrIDE. Some commands ask the owner each time: node_exec puts that approval poll to them itself, so never ask them for that yes in the chat or with request_approval. When it answers pending, wait with check_approval, and once approved call node_exec again with the same command and the approval_id. Never try to get a command a machine does not allow run another way.\n</machines_rule>"
+
 // ObserveOnlyNote is what an observe-only run is told instead of how its
 // replies reach the chat: it has nobody to answer and nothing to do but
 // take notes. The example prompt says the same.
@@ -147,6 +153,7 @@ func Build(in Input) string {
 			}
 			sb.WriteString("</fride_instances>\n\n")
 		}
+		sb.WriteString(MachinesRule + "\n\n")
 	}
 
 	if len(in.Recall) > 0 {

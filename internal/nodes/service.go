@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -101,6 +102,9 @@ type Service struct {
 	boxImages            func(context.Context, string) (string, string, error)
 	keyMu                sync.Mutex
 	key                  ed25519.PrivateKey
+	// joins limits the node binaries sent to joining machines
+	// (join_binary.go).
+	joins joinLimiter
 
 	// ctx ends with Stop, and with it every connection.
 	ctx    context.Context
@@ -183,13 +187,18 @@ func (s *Service) Serve(ln net.Listener) error {
 		_ = ln.Close()
 		return errors.New("the node port is already open")
 	}
-	// The node port serves one path and none of the dashboard's routes.
+	// The node port serves the nodes' WebSocket, and a machine that holds
+	// a join code the fridolin it installs (join_binary.go); none of the
+	// dashboard's routes.
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != nodeproto.Path {
+		switch {
+		case r.URL.Path == nodeproto.Path:
+			s.accept(w, r)
+		case strings.HasPrefix(r.URL.Path, joinPrefix):
+			s.serveJoin(w, r)
+		default:
 			http.NotFound(w, r)
-			return
 		}
-		s.accept(w, r)
 	})
 	s.srv = &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	s.addr = ln.Addr().String()

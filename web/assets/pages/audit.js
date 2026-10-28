@@ -27,7 +27,7 @@ const KINDS = [
   ['node_approved', 'Node approved (!approve)'], ['node_revoked', 'Node revoked (!revoke)'],
   ['core_move_requested', 'Core move asked (!movecore)'], ['core_move_approved', 'Core move voted'],
   ['core_move_ended', 'Core move ended'], ['core_secrets', 'Host secrets kept or forgotten'],
-  ['scheduled_command', 'Scheduled program on a node'],
+  ['scheduled_command', 'Scheduled program on a node'], ['node_exec', 'Command on a node (node_exec)'],
 ];
 const KIND_LABEL = Object.fromEntries(KINDS);
 

@@ -112,23 +112,33 @@ type JoinCodeResponse struct {
 	ExpiresAt time.Time `json:"expires_at"`
 	// Core is the core's node address, host:port.
 	Core string `json:"core"`
-	// Command is the line to paste on a macOS or Linux machine,
-	// CommandPowerShell the one for PowerShell on Windows, where the
-	// runbook installs fridolin.exe in Program Files (AGENTS.md).
+	// Command is the line to paste on a macOS or Linux machine that has
+	// fridolin already, CommandPowerShell the one for PowerShell on
+	// Windows, where fridolin.exe lies in Program Files (AGENTS.md).
 	Command           string `json:"command"`
 	CommandPowerShell string `json:"command_powershell"`
+	// NativeCommand and NativeCommandPowerShell make the machine a node
+	// natively, the default (docs/NODES.md, "Joining a machine"): they
+	// install Tailscale and the core's fridolin, which they fetch from the
+	// core with the code, and join; empty when the core does not know
+	// where its install scripts are published (a local build).
+	NativeCommand           string `json:"native_command,omitempty"`
+	NativeCommandPowerShell string `json:"native_command_powershell,omitempty"`
 	// BoxCommand and BoxCommandPowerShell install a node in a box
-	// instead (docs/NODES.md, "Node in a box"); empty when the core does
-	// not know where its box script is published (a local build).
+	// instead, the fallback where Docker Sandboxes cannot run (docs/
+	// NODES.md, "Node in a box"); empty when the core does not know where
+	// its box script is published.
 	BoxCommand           string `json:"box_command,omitempty"`
 	BoxCommandPowerShell string `json:"box_command_powershell,omitempty"`
 }
 
-// BoxSource is where a node in a box of the core's version comes from:
-// the published box.sh and box.ps1 (Source, a URL their container/
-// folder is under, at the core's commit) and the registry of the images
-// (Registry, ghcr.io/<owner>). The core's image carries both
-// (FRIDOLIN_BOX_SOURCE, FRIDOLIN_BOX_REGISTRY); either empty is none.
+// BoxSource is where a node of the core's version comes from: the
+// published install scripts, node.sh and node.ps1 for a native node and
+// box.sh and box.ps1 for a node in a box (Source, a URL their container/
+// folder is under, at the core's commit), and the registry of the box's
+// images (Registry, ghcr.io/<owner>). The core's image carries both
+// (FRIDOLIN_BOX_SOURCE, FRIDOLIN_BOX_REGISTRY); a box needs both, a
+// native node the Source.
 type BoxSource struct {
 	Source, Registry, Version string
 }
@@ -151,8 +161,22 @@ func BoxCommands(code, core string, src BoxSource) (sh, powershell string) {
 	return sh, powershell
 }
 
-// JoinCommands are the lines to paste on a new machine for code: for sh,
-// and for PowerShell.
+// NativeCommands are the lines that make a new machine a node natively
+// with code: container/node.sh for sh, node.ps1 for PowerShell, of the
+// core's version, which install Tailscale and the fridolin the core
+// serves on its node port at core, then join; empty when src is not
+// known.
+func NativeCommands(code, core string, src BoxSource) (sh, powershell string) {
+	if src.Source == "" {
+		return "", ""
+	}
+	sh = "curl -fsSL " + src.Source + "/container/node.sh | sh -s -- --core " + core + " --code " + code
+	powershell = "& ([scriptblock]::Create((irm " + src.Source + "/container/node.ps1))) -Core " + core + " -Code " + code
+	return sh, powershell
+}
+
+// JoinCommands are the lines to paste on a new machine that has
+// fridolin for code: for sh, and for PowerShell.
 func JoinCommands(code, core string) (sh, powershell string) {
 	args := " node join " + code + " --core " + core
 	return "fridolin" + args, `& "$env:ProgramFiles\fridolin\fridolin.exe"` + args
@@ -191,8 +215,10 @@ func (a *NodesAPI) JoinCode(w http.ResponseWriter, r *http.Request) {
 	}
 	core := a.CoreAddress()
 	sh, ps := JoinCommands(code, core)
+	nsh, nps := NativeCommands(code, core, a.Box)
 	bsh, bps := BoxCommands(code, core, a.Box)
-	WriteJSON(w, http.StatusOK, JoinCodeResponse{Code: code, ExpiresAt: exp, Core: core, Command: sh, CommandPowerShell: ps, BoxCommand: bsh, BoxCommandPowerShell: bps})
+	WriteJSON(w, http.StatusOK, JoinCodeResponse{Code: code, ExpiresAt: exp, Core: core,
+		NativeCommand: nsh, NativeCommandPowerShell: nps, BoxCommand: bsh, BoxCommandPowerShell: bps, Command: sh, CommandPowerShell: ps})
 }
 
 func (a *NodesAPI) change(w http.ResponseWriter, r *http.Request, fn func(string) (*nodes.Node, error)) {

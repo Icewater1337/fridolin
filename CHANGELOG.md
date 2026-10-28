@@ -10,6 +10,41 @@ for compatibility.
 
 ### Added
 
+- **The core brain runs commands on your machines** (docs/VISION.md, step
+  4). The core brain gets `node_exec`, which runs one command a node's
+  exec allowlist allows (no shell, checked on the core and on the node),
+  and `node_exec_rules`, which lists what each node allows; both only
+  while a node whose `exec` you approved is online. An exec rule in
+  `node.json` with `"approve": true` asks you before every call it
+  allows: `node_exec` puts the poll in your chat itself ("Run `brew
+  upgrade` on mac-mini"), waits like `request_approval`, and runs the
+  command on yes; unanswered it answers pending with an `approval_id`,
+  which runs exactly that command on that node once. A call another rule
+  without `approve` allows does not ask. Turning `approve` on or off is a
+  change the node's commands wait for your approval of again. The Nodes
+  page marks such rules "asks you each time"; every call is a `node_exec`
+  line of the audit log. A node that marks a rule `approve` needs a core
+  of this version: an older one approves the rule without it, which the
+  node then refuses to run. See docs/NODES.md, "The core brain runs
+  commands".
+- **A native node in one line.** `!join`, the Nodes page's **New join
+  code** and `fridolin nodes join-code` now offer first a line that
+  makes the machine a node natively, one agent per machine
+  (docs/VISION.md): `container/node.sh` (macOS, Linux) and `node.ps1`
+  (Windows) of the core's commit say what they will do and ask first,
+  install Tailscale where it is missing and open its sign-in link, fetch
+  the core's fridolin from the core with the join code, check its
+  SHA-256, install it (`~/.local/lib/fridolin/fridolin`, Windows
+  `%ProgramFiles%\fridolin\fridolin.exe` with one UAC prompt for it and
+  the service) and run `fridolin node join`. The box comes second, the
+  fallback where Docker Sandboxes cannot run, and the plain `fridolin
+  node join` last. The node port serves the binary at `GET
+  /join/<code>/fridolin` and its SHA-256, size and version at
+  `/join/<code>/fridolin.sha256` (`?os=&arch=`), only while the code is
+  valid and unused, without spending it, rate-limited. `POST
+  /api/nodes/join-code` adds `native_command` and
+  `native_command_powershell`; its other fields stay. See
+  docs/NODES.md, "The one-liner".
 - **FrIDE instances, on the core.** The core starts the FrIDE instances
   `fride.instances` names on nodes that offer `fride_host`, sizes each at
   its start (small 3 GB, medium 6 GB, large 12 GB, or the config's

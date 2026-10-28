@@ -68,15 +68,11 @@ func catalogue() []struct{ name, text string } {
 		{"ownerCommandOwnerOnly", outboundmsg.OwnerCommandOwnerOnly},
 		{"ownerCommandRateLimited", outboundmsg.OwnerCommandRateLimited("!join", 5)},
 		{"nodeCommandUsage", outboundmsg.NodeCommandUsage},
-		{"joinCodeReply", outboundmsg.JoinCodeReply("fj-abcdefghijklmnopqrstuvwx", "fridolin-core.example.ts.net:8766",
-			"fridolin node join fj-abcdefghijklmnopqrstuvwx --core fridolin-core.example.ts.net:8766",
-			`& "$env:ProgramFiles\fridolin\fridolin.exe" node join fj-abcdefghijklmnopqrstuvwx --core fridolin-core.example.ts.net:8766`, "", "", 10)},
-		{"joinCodeReply(box)", func() string {
-			code, core := "fj-abcdefghijklmnopqrstuvwx", "fridolin-core.example.ts.net:8766"
-			sh, ps := httpapi.JoinCommands(code, core)
-			bsh, bps := httpapi.BoxCommands(code, core, httpapi.BoxSource{Source: "https://example.com/fridolin/0123abcd", Registry: "ghcr.io/owner", Version: "0123abcd"})
-			return outboundmsg.JoinCodeReply(code, core, sh, ps, bsh, bps, 10)
-		}()},
+		{"joinCodeReply", outboundmsg.JoinCodeReply("fj-abcdefghijklmnopqrstuvwx", "fridolin-core.example.ts.net:8766", outboundmsg.JoinLines{
+			Sh:         "fridolin node join fj-abcdefghijklmnopqrstuvwx --core fridolin-core.example.ts.net:8766",
+			PowerShell: `& "$env:ProgramFiles\fridolin\fridolin.exe" node join fj-abcdefghijklmnopqrstuvwx --core fridolin-core.example.ts.net:8766`}, 10)},
+		{"joinCodeReply(published)", outboundmsg.JoinCodeReply("fj-abcdefghijklmnopqrstuvwx", "fridolin-core.example.ts.net:8766",
+			joinLines("fj-abcdefghijklmnopqrstuvwx", "fridolin-core.example.ts.net:8766", httpapi.BoxSource{Source: "https://example.com/fridolin/0123abcd", Registry: "ghcr.io/owner", Version: "0123abcd"}), 10)},
 		{"dashboardOffNotice", outboundmsg.DashboardOffNotice},
 		{"dashboardLinkReply(tailnet)", outboundmsg.DashboardLinkReply("http://fridolin-core.example.ts.net/#login=CODE", "http://127.0.0.1:8765/#login=CODE", 10)},
 		{"dashboardLinkReply(local)", outboundmsg.DashboardLinkReply("", "http://127.0.0.1:8765/#login=CODE", 10)},

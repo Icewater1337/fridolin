@@ -155,14 +155,22 @@ joinCodeReply
 	```& "$env:ProgramFiles\fridolin\fridolin.exe" node join fj-abcdefghijklmnopqrstuvwx --core fridolin-core.example.ts.net:8766```
 
 	Core: fridolin-core.example.ts.net:8766. Add `--root PATH:rw` to share a folder, `--no-exec` to allow no commands (docs/NODES.md). Once it connects I'll tell you here, and !approve lets it in.
-joinCodeReply(box)
+joinCodeReply(published)
 	🔑 Join code for a new node, single-use, valid 10 minutes:
 
 	fj-abcdefghijklmnopqrstuvwx
 
 	On the new machine, paste one line.
 
-	*A node in a box* (Docker; it asks for the rest):
+	*Natively*, one agent per machine: it can run FrIDE instances, keep backups and become the core. The line installs Tailscale and fridolin, and asks before it changes anything:
+
+	*macOS, Linux:*
+	```curl -fsSL https://example.com/fridolin/0123abcd/container/node.sh | sh -s -- --core fridolin-core.example.ts.net:8766 --code fj-abcdefghijklmnopqrstuvwx```
+
+	*Windows (PowerShell):*
+	```& ([scriptblock]::Create((irm https://example.com/fridolin/0123abcd/container/node.ps1))) -Core fridolin-core.example.ts.net:8766 -Code fj-abcdefghijklmnopqrstuvwx```
+
+	*In a box* (Docker), the fallback where Docker Sandboxes can't run, e.g. a machine without virtualization:
 
 	*macOS, Linux:*
 	```curl -fsSL https://example.com/fridolin/0123abcd/container/box.sh | sh -s -- --registry ghcr.io/owner --version 0123abcd --core fridolin-core.example.ts.net:8766 --code fj-abcdefghijklmnopqrstuvwx```
@@ -170,7 +178,7 @@ joinCodeReply(box)
 	*Windows (PowerShell):*
 	```& ([scriptblock]::Create((irm https://example.com/fridolin/0123abcd/container/box.ps1))) -Registry ghcr.io/owner -Version 0123abcd -Core fridolin-core.example.ts.net:8766 -Code fj-abcdefghijklmnopqrstuvwx```
 
-	*Or natively*, with fridolin installed on it:
+	*With fridolin installed already:*
 
 	*macOS, Linux (sh):*
 	```fridolin node join fj-abcdefghijklmnopqrstuvwx --core fridolin-core.example.ts.net:8766```
@@ -178,7 +186,7 @@ joinCodeReply(box)
 	*Windows (PowerShell):*
 	```& "$env:ProgramFiles\fridolin\fridolin.exe" node join fj-abcdefghijklmnopqrstuvwx --core fridolin-core.example.ts.net:8766```
 
-	Core: fridolin-core.example.ts.net:8766. Add `--root PATH:rw` to share a folder, `--no-exec` to allow no commands (docs/NODES.md). Once it connects I'll tell you here, and !approve lets it in.
+	Core: fridolin-core.example.ts.net:8766. Add `--root PATH:rw` (PowerShell: `-Root PATH:rw`) to share a folder, `--no-exec` (`-NoExec`) to allow no commands (docs/NODES.md). Once it connects I'll tell you here, and !approve lets it in.
 dashboardOffNotice
 	🔗 The dashboard is turned off (dashboard.disabled or http_enabled), so there is nothing to sign in to.
 dashboardLinkReply(tailnet)

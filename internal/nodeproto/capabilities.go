@@ -69,6 +69,12 @@ type ExecRule struct {
 	// Core marks a rule the core added (exec_programs.go), which is
 	// always Exact and names an absolute path.
 	Core bool `json:"core,omitempty"`
+	// Approve makes every call the rule allows wait for the owner's yes,
+	// which the core asks for each time (docs/NODES.md, "The core brain
+	// runs commands"). A call that a rule without it allows too does not
+	// ask (ExecNeedsApproval). Turning it on or off is a new declaration,
+	// which waits for the owner's approval like any other.
+	Approve bool `json:"approve,omitempty"`
 }
 
 // FSCap reads, and where granted writes, files under its roots.
@@ -230,6 +236,8 @@ func (r ExecRule) Check() error {
 		return fmt.Errorf("exec: %s: a rule the core added is exact and names an absolute path", r.Name)
 	case r.Core && IsInterpreter(r.Name):
 		return fmt.Errorf("exec: %s: the core never adds an interpreter", r.Name)
+	case r.Core && r.Approve:
+		return fmt.Errorf("exec: %s: a rule the core added never asks: approving its agent was the owner's yes", r.Name)
 	}
 	for _, p := range r.Args {
 		if r.Exact {
@@ -277,8 +285,26 @@ func (r ExecRule) Matches(argv []string) bool {
 	return true
 }
 
+// equal reports whether r and o are the same rule, approve included: a
+// rule that starts or stops asking the owner is one the owner approves
+// again.
 func (r ExecRule) equal(o ExecRule) bool {
-	return r.Name == o.Name && (r.Args == nil) == (o.Args == nil) && slices.Equal(r.Args, o.Args) && r.Exact == o.Exact && r.Core == o.Core
+	return r.Name == o.Name && (r.Args == nil) == (o.Args == nil) && slices.Equal(r.Args, o.Args) && r.Exact == o.Exact && r.Core == o.Core && r.Approve == o.Approve
+}
+
+// Text is how the rule reads for the owner and the core brain: "git
+// status | log", "hostname (no arguments)", "go (any arguments)",
+// "/opt/backup --all (exactly)". Whether it asks is not part of it.
+func (r ExecRule) Text() string {
+	switch {
+	case r.Exact:
+		return strings.Join(append([]string{r.Name}, r.Args...), " ") + " (exactly)"
+	case r.Args == nil:
+		return r.Name + " (any arguments)"
+	case len(r.Args) == 0:
+		return r.Name + " (no arguments)"
+	}
+	return r.Name + " " + strings.Join(r.Args, " | ")
 }
 
 // ErrNotAllowed is an exec call no rule allows.
@@ -302,6 +328,27 @@ func (c Capabilities) PermitsExec(argv []string) error {
 		}
 	}
 	return fmt.Errorf("%w: %s", ErrNotAllowed, argv[0])
+}
+
+// ExecNeedsApproval reports whether argv, which PermitsExec allows, waits
+// for the owner's yes: every rule that allows it has Approve. A rule
+// without it that allows argv as well wins, so that "brew --version" may
+// run freely beside a "brew upgrade" that asks.
+func (c Capabilities) ExecNeedsApproval(argv []string) bool {
+	if c.Exec == nil {
+		return false
+	}
+	asks := false
+	for _, r := range c.Exec.Allow {
+		if !r.Matches(argv) {
+			continue
+		}
+		if !r.Approve {
+			return false
+		}
+		asks = true
+	}
+	return asks
 }
 
 // Allows reports whether the capabilities grant method at all; exec

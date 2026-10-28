@@ -264,20 +264,45 @@ func OwnerCommandRateLimited(command string, max int) string {
 // word after it.
 const NodeCommandUsage = "🔐 Send !approve or !deny alone: I ask which one when several things wait. `!revoke <ref>` shuts out a node `!fleet` lists."
 
+// JoinLines are the lines a join code's reply offers to paste on the
+// new machine, each for sh (macOS, Linux) and for PowerShell (Windows):
+// Native makes it a node natively, installing Tailscale and fridolin;
+// Box makes it a node in a box; both are empty when the core does not
+// know where its install scripts are published. Sh and PowerShell join
+// a machine that has fridolin already.
+type JoinLines struct {
+	NativeSh, NativePowerShell string
+	BoxSh, BoxPowerShell       string
+	Sh, PowerShell             string
+}
+
 // JoinCodeReply answers !join: a single-use join code, valid for minutes,
-// the lines to paste on the new machine for sh and PowerShell, and the
-// core's node address. boxSh and boxPowerShell, when set, install a node
-// in a box instead, and come first.
-func JoinCodeReply(code, core, sh, powershell, boxSh, boxPowerShell string, minutes int) string {
-	box := ""
-	if boxSh != "" {
-		box = fmt.Sprintf("*A node in a box* (Docker; it asks for the rest):\n\n*macOS, Linux:*\n```%s```\n\n*Windows (PowerShell):*\n```%s```\n\n"+
-			"*Or natively*, with fridolin installed on it:\n\n", boxSh, boxPowerShell)
+// the lines to paste on the new machine and the core's node address. The
+// native lines come first, one agent per machine being the default
+// (docs/VISION.md); the box is the fallback; the plain join comes last.
+func JoinCodeReply(code, core string, lines JoinLines, minutes int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "🔑 Join code for a new node, single-use, valid %d minutes:\n\n%s\n\nOn the new machine, paste one line.\n\n", minutes, code)
+	pair := func(sh, powershell string) {
+		fmt.Fprintf(&b, "*macOS, Linux:*\n```%s```\n\n*Windows (PowerShell):*\n```%s```\n\n", sh, powershell)
 	}
-	return fmt.Sprintf("🔑 Join code for a new node, single-use, valid %d minutes:\n\n%s\n\n"+
-		"On the new machine, paste one line.\n\n%s*macOS, Linux (sh):*\n```%s```\n\n*Windows (PowerShell):*\n```%s```\n\n"+
-		"Core: %s. Add `--root PATH:rw` to share a folder, `--no-exec` to allow no commands (docs/NODES.md). "+
-		"Once it connects I'll tell you here, and !approve lets it in.", minutes, code, box, sh, powershell, core)
+	hint := "Add `--root PATH:rw` to share a folder, `--no-exec` to allow no commands"
+	if lines.NativeSh != "" {
+		b.WriteString("*Natively*, one agent per machine: it can run FrIDE instances, keep backups and become the core. " +
+			"The line installs Tailscale and fridolin, and asks before it changes anything:\n\n")
+		pair(lines.NativeSh, lines.NativePowerShell)
+		hint = "Add `--root PATH:rw` (PowerShell: `-Root PATH:rw`) to share a folder, `--no-exec` (`-NoExec`) to allow no commands"
+	}
+	if lines.BoxSh != "" {
+		b.WriteString("*In a box* (Docker), the fallback where Docker Sandboxes can't run, e.g. a machine without virtualization:\n\n")
+		pair(lines.BoxSh, lines.BoxPowerShell)
+	}
+	if lines.NativeSh != "" || lines.BoxSh != "" {
+		b.WriteString("*With fridolin installed already:*\n\n")
+	}
+	fmt.Fprintf(&b, "*macOS, Linux (sh):*\n```%s```\n\n*Windows (PowerShell):*\n```%s```\n\n", lines.Sh, lines.PowerShell)
+	fmt.Fprintf(&b, "Core: %s. %s (docs/NODES.md). Once it connects I'll tell you here, and !approve lets it in.", core, hint)
+	return b.String()
 }
 
 // DashboardOffNotice answers !dashboard while the dashboard is off.

@@ -19,7 +19,7 @@ import { toast } from '../components/toast.js';
 import { badge, callout, empty, kv, mono, pageHeader, pill, spinner, timeAgo } from '../components/common.js';
 
 /** @import { PageModule } from '../app/page.js' */
-/** @import { BackupCap, CoreHostView, ExecRule, FrideCap, FrideHostCap, HostStats, Node as FleetNode, NodeCapabilities, NodesResponse, WorkstationCap } from '../../types/api.js' */
+/** @import { BackupCap, CoreHostView, ExecRule, FrideCap, FrideHostCap, HostStats, JoinCodeResponse, Node as FleetNode, NodeCapabilities, NodesResponse, WorkstationCap } from '../../types/api.js' */
 
 /**
  * A node as its card shows it: everything but what its live regions show,
@@ -71,29 +71,48 @@ export default /** @satisfies {PageModule} */ ({
 
     const refresh = () => nodesResource.refresh();
 
+    // A join code and the lines to paste on the new machine: natively
+    // first (one agent per machine, docs/VISION.md), then in a box, the
+    // fallback where Docker Sandboxes cannot run, then with fridolin
+    // installed already. A core that does not know where its install
+    // scripts are published (a local build) offers only the last.
     async function newJoinCode() {
+      /** @type {JoinCodeResponse} */
       const r = await post('/api/nodes/join-code', {});
+      /**
+       * @param {string | undefined} sh
+       * @param {string | undefined} powershell
+       */
+      const lines = (sh, powershell) => [
+        h('p.muted.small', 'macOS, Linux:'),
+        h('div.join-command', mono(sh || '', { copy: true })),
+        ...(powershell ? [
+          h('p.muted.small', 'Windows, in PowerShell:'),
+          h('div.join-command', mono(powershell, { copy: true })),
+        ] : []),
+      ];
+      const until = absTime(r.expires_at);
+      const published = Boolean(r.native_command || r.box_command);
       await openDialog({
         title: 'Join a new machine',
         wide: true,
         body: [
-          ...(r.box_command ? [
-            h('p', `A node in a box: on the new machine, with Docker, run this line. It asks before it starts, and for the rest. The code works once, until ${absTime(r.expires_at)}.`),
-            h('p.muted.small', 'macOS, Linux:'),
-            h('div.join-command', mono(r.box_command, { copy: true })),
-            h('p.muted.small', 'Windows, in PowerShell:'),
-            h('div.join-command', mono(r.box_command_powershell, { copy: true })),
-            h('p', 'Or natively, with fridolin installed on it (Apple builds, USB devices, notifications):'),
-          ] : [
-            h('p', `On the new machine, with fridolin installed, run this line. The code works once, until ${absTime(r.expires_at)}.`),
-          ]),
-          h('p.muted.small', 'macOS, Linux:'),
-          h('div.join-command', mono(r.command, { copy: true })),
-          ...(r.command_powershell ? [
-            h('p.muted.small', 'Windows, in PowerShell:'),
-            h('div.join-command', mono(r.command_powershell, { copy: true })),
+          published
+            ? h('p', `On the new machine, run one line. The code works once, until ${until}.`)
+            : h('p', `On the new machine, with fridolin installed, run this line. The code works once, until ${until}.`),
+          ...(r.native_command ? [
+            h('p', h('strong', 'Natively'), ', one agent per machine: it can run FrIDE instances, keep backups and become the core. The line installs Tailscale and fridolin, and asks before it changes anything.'),
+            ...lines(r.native_command, r.native_command_powershell),
           ] : []),
-          h('p.muted.small', 'It joins and installs the node service. The node then shows up here, waiting for you to approve it.'),
+          ...(r.box_command ? [
+            h('p', h('strong', 'In a box'), " (Docker), the fallback where Docker Sandboxes can't run, e.g. a machine without virtualization. It asks before it starts, and for the rest."),
+            ...lines(r.box_command, r.box_command_powershell),
+          ] : []),
+          ...(published ? [h('p', h('strong', 'With fridolin installed already:'))] : []),
+          ...lines(r.command, r.command_powershell),
+          h('p.muted.small', r.native_command_powershell
+            ? 'Add --root PATH:rw (PowerShell: -Root PATH:rw) to share a folder, --no-exec (-NoExec) to allow no commands. The node then shows up here, waiting for you to approve it.'
+            : 'Add --root PATH:rw to share a folder, --no-exec to allow no commands. It joins and installs the node service; the node then shows up here, waiting for you to approve it.'),
         ],
       });
       await refresh();
