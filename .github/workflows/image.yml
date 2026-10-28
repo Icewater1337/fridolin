@@ -24,21 +24,27 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
-# Builds the core's image (container/Dockerfile) and the box's FrIDE image
-# (container/fride/Dockerfile) for both architectures fridolin runs on, so
-# a change that breaks one fails here. On main it publishes both to GHCR,
-# as one multi-arch image each, tagged with the version `fridolin version`
-# reports (git describe --tags --always --abbrev=8), with build provenance
-# from GitHub's attestations and an SBOM. Machines pull them by digest and
-# check the provenance before they run one (docs/CORE.md, "On GHCR").
-# The registry is the repository owner's (ghcr.io/<owner>), so a fork
-# publishes to its own.
+# Builds the core's image (container/Dockerfile), the box's FrIDE image
+# (container/fride/Dockerfile) and the FrIDE instances' sbx template
+# (container/sandbox/fride.Dockerfile) for both architectures fridolin
+# runs on, so a change that breaks one fails here. On main it publishes
+# them to GHCR, as one multi-arch image each, tagged with the version
+# `fridolin version` reports (git describe --tags --always --abbrev=8),
+# with build provenance from GitHub's attestations and an SBOM. Machines
+# pull the core's and the box's by digest and check the provenance before
+# they run one (docs/CORE.md, "On GHCR"); sbx pulls the template on a node
+# that builds none (docs/NODES.md, "FrIDE instances"), by the tag the
+# core's image names: a hash of what goes into the template, so that a
+# core of a new version names the same template while that is the same,
+# and no instance is made anew for nothing. The registry is the
+# repository owner's (ghcr.io/<owner>), so a fork publishes to its own.
 jobs:
   version:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.v.outputs.version }}
       registry: ${{ steps.v.outputs.registry }}
+      sandbox_tag: ${{ steps.v.outputs.sandbox_tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -46,22 +52,29 @@ jobs:
           fetch-depth: 0
       # The version a build of this commit reports, as the Makefile and
       # setup.sh stamp it; core start and box updates look for this tag.
-      # GHCR's names are lower case.
+      # GHCR's names are lower case. The template's own tag hashes its
+      # Dockerfile (which pins FrIDE, Claude Code, ponytail and the base),
+      # the FrIDE config it copies and FrIDE's URL.
       - id: v
+        env:
+          FRIDE_REPO: ${{ github.server_url }}/${{ github.repository_owner }}/fride
         run: |
           echo "version=$(git describe --tags --always --abbrev=8)" >> "$GITHUB_OUTPUT"
           echo "registry=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+          sum=$({ cat container/sandbox/fride.Dockerfile; printf '\0'; cat container/fride/companion.json; printf '\0%s' "$FRIDE_REPO"; } | sha256sum)
+          echo "sandbox_tag=t-${sum:0:12}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: version
     strategy:
       fail-fast: false
       matrix:
-        image: [fridolin-core, fridolin-fride]
+        image: [fridolin-core, fridolin-fride, fridolin-fride-sandbox]
         platform: [linux/amd64, linux/arm64]
         include:
           - { image: fridolin-core, dockerfile: container/Dockerfile }
           - { image: fridolin-fride, dockerfile: container/fride/Dockerfile }
+          - { image: fridolin-fride-sandbox, dockerfile: container/sandbox/fride.Dockerfile }
         # A pull request builds for amd64 alone; main builds both, which
         # the published multi-arch image needs.
         exclude:
@@ -74,13 +87,16 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
       REGISTRY: ${{ needs.version.outputs.registry }}
-      # Where the FrIDE image gets FrIDE and its starter repositories.
+      # Where the FrIDE image and the template get FrIDE, and the FrIDE
+      # image its starter repositories; the core's image names the
+      # template's tag.
       BUILD_ARGS: |
         VERSION=${{ needs.version.outputs.version }}
         FRIDOLIN_REPO=${{ github.server_url }}/${{ github.repository }}
         FRIDE_REPO=${{ github.server_url }}/${{ github.repository_owner }}/fride
         FRIDOLIN_BOX_SOURCE=https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}
         FRIDOLIN_BOX_REGISTRY=${{ needs.version.outputs.registry }}
+        FRIDOLIN_FRIDE_SANDBOX_TAG=${{ needs.version.outputs.sandbox_tag }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -130,6 +146,13 @@ jobs:
           docker exec fride-ci curl -fsS -o /dev/null http://127.0.0.1:17840/
           docker exec fride-ci sh -c 'curl -fsS -o /dev/null "http://$(hostname -i | cut -d" " -f1):17840/" -H "Host: 127.0.0.1:17840"'
           docker rm -f fride-ci
+      - name: the template's FrIDE and tools answer
+        if: matrix.image == 'fridolin-fride-sandbox'
+        run: |
+          # As the sandbox's user, with what the node's scripts in the VM
+          # use (fride_instance_scripts.go) and the FrIDE config a new
+          # instance starts from; Claude Code never updates itself.
+          docker run --rm --entrypoint sh fridolin-fride-sandbox:ci -c 'test "$(id -un)" = agent && test "$DISABLE_AUTOUPDATER" = 1 && test -x /opt/fride/bin/fride && claude --version && go version && node --version && gh --version | head -1 && git --version && command -v socat jq lsof setsid ip && jq -e ".companion.enabled" /opt/fride/companion.json && test -f /opt/fride/plugins/ponytail/.claude-plugin/plugin.json'
 
       # On main: the same build again, pushed by digest (the layers come
       # from the cache of the build above), with an SBOM and buildx's own
@@ -161,10 +184,12 @@ jobs:
         run: |
           mkdir -p digests
           touch "digests/${DIGEST#sha256:}"
+      # Named architecture first: a pattern that ends in the image's name
+      # takes fridolin-fride's alone, not fridolin-fride-sandbox's too.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: github.event_name == 'push'
         with:
-          name: digests-${{ matrix.image }}-${{ matrix.platform == 'linux/arm64' && 'arm64' || 'amd64' }}
+          name: digests-${{ matrix.platform == 'linux/arm64' && 'arm64' || 'amd64' }}-${{ matrix.image }}
           path: digests/*
           if-no-files-found: error
           retention-days: 1
@@ -174,7 +199,7 @@ jobs:
     needs: [version, build]
     strategy:
       matrix:
-        image: [fridolin-core, fridolin-fride]
+        image: [fridolin-core, fridolin-fride, fridolin-fride-sandbox]
     runs-on: ubuntu-latest
     # Writes the package, and signs its provenance with the workflow's
     # identity (Sigstore, through GitHub's attestations).
@@ -186,11 +211,13 @@ jobs:
     env:
       VERSION: ${{ needs.version.outputs.version }}
       IMAGE: ${{ needs.version.outputs.registry }}/${{ matrix.image }}
+      # The template is tagged with its own tag too, which the core names.
+      OWN_TAG: ${{ matrix.image == 'fridolin-fride-sandbox' && needs.version.outputs.sandbox_tag || '' }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: digests
-          pattern: digests-${{ matrix.image }}-*
+          pattern: digests-*-${{ matrix.image }}
           merge-multiple: true
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -204,7 +231,9 @@ jobs:
         run: |
           refs=()
           for d in *; do refs+=("$IMAGE@sha256:$d"); done
-          docker buildx imagetools create -t "$IMAGE:$VERSION" -t "$IMAGE:main" "${refs[@]}"
+          tags=(-t "$IMAGE:$VERSION" -t "$IMAGE:main")
+          if [ -n "$OWN_TAG" ]; then tags+=(-t "$IMAGE:$OWN_TAG"); fi
+          docker buildx imagetools create "${tags[@]}" "${refs[@]}"
           digest=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{json .Manifest}}' | jq -r .digest)
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           echo "$IMAGE:$VERSION is $IMAGE@$digest" >> "$GITHUB_STEP_SUMMARY"

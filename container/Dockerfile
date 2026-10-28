@@ -146,9 +146,13 @@ ARG VERSION=dev
 # Where box.sh and box.ps1 of this version are published, and the
 # registry of its images: what the core's !join reply puts in the line
 # that installs a node in a box. CI passes the repository owner's; a
-# local build without them offers native nodes only.
+# local build without them offers native nodes only. The tag of the FrIDE
+# instances' template there (fridolin-fride-sandbox), which a node that
+# built none makes its instances from; without it the core names the
+# template of its version.
 ARG FRIDOLIN_BOX_SOURCE=
 ARG FRIDOLIN_BOX_REGISTRY=
+ARG FRIDOLIN_FRIDE_SANDBOX_TAG=
 LABEL org.opencontainers.image.title="fridolin-core" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.licenses="MIT"
@@ -208,6 +212,7 @@ ENV HOME=/var/lib/fridolin \
     FRIDOLIN_CONTAINER=1 \
     FRIDOLIN_BOX_SOURCE=${FRIDOLIN_BOX_SOURCE} \
     FRIDOLIN_BOX_REGISTRY=${FRIDOLIN_BOX_REGISTRY} \
+    FRIDOLIN_FRIDE_SANDBOX_TAG=${FRIDOLIN_FRIDE_SANDBOX_TAG} \
     LANG=C.UTF-8
 WORKDIR /data
 VOLUME ["/data"]
