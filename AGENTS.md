@@ -168,10 +168,10 @@ Go, no clone.
    `!join` again, and the same line with the new code.
 2. **Approve**: they reply `!approve` when Fridolin says the node
    joined.
-3. **Verify**: `fridolin node status`, `fridolin doctor --node`,
-   `fridolin setup-machine --node` (exit 0); on Windows `&
-   "$env:ProgramFiles\fridolin\fridolin.exe"` with the `--state-dir` the
-   script printed. The core lists the node online and approved.
+3. **Verify**: `fridolin node status`, `fridolin doctor --node` (exit
+   0); on Windows `& "$env:ProgramFiles\fridolin\fridolin.exe"` with the
+   `--state-dir` the script printed. The core lists the node online and
+   approved.
 
 Rollback: `!revoke ID` (the ref `!fleet` shows); `fridolin node stop`
 and `fridolin node uninstall` here (elevated on Windows), then remove the
@@ -262,8 +262,8 @@ docs/NODES.md, "Joining a machine". In short:
    Nodes page (or `fridolin nodes approve ID` and `fridolin nodes approve
    ID --commands` on the core).
 7. **Verify**: `fridolin node status` (service running), `fridolin doctor
-   --node`, `fridolin setup-machine --node` (exit 0); the core's Nodes page
-   shows the node online and approved.
+   --node` (exit 0); the core's Nodes page shows the node online and
+   approved.
 
 Rollback: `!revoke ID` in the person's chat, or `fridolin nodes revoke ID` on the core; `fridolin node stop` and
 `fridolin node uninstall` here (elevated on Windows), then remove the state

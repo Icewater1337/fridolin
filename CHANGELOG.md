@@ -970,6 +970,12 @@ for compatibility.
 
 ### Changed
 
+- **`fridolin doctor --node` says the next step, like `setup-machine
+  --node`.** Both print the node machine's checks the same way now: a
+  `Node machine (state dir …)` line, the checks, and `Next:` with the
+  first fix to take (`next` in `--json`). The runbooks ask for `doctor
+  --node` alone.
+
 - **Every node is a core host, and moving the core is one vote.** A
   node no longer needs `fridolin node core-host on`, an approval of
   core-host, or a `core-host trust` pin on the machine the core runs on:
