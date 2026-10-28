@@ -188,6 +188,9 @@ type served struct {
 	// letGo is when the agent began to let go of cur: its run was
 	// cleared. Zero while it holds it.
 	letGo time.Time
+	// started is the instance's last start the loop saw: a new one ends
+	// the wait.
+	started time.Time
 }
 
 // frideInstancesSupervise starts the loop that keeps the instances'
@@ -309,6 +312,10 @@ func (a *Agent) frideInstancesPass(runs map[string]*served, hooks map[string]*in
 		if r == nil {
 			r = &served{backoff: frideServeMinBackoff}
 			runs[name] = r
+		}
+		if !st.Started.Equal(r.started) {
+			// A start waits for FrIDE now, not for the last failure's wait.
+			r.started, r.next, r.backoff = st.Started, time.Time{}, frideServeMinBackoff
 		}
 		if r.cur != nil || time.Now().Before(r.next) {
 			continue
