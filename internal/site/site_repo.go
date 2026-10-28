@@ -12,7 +12,6 @@ package site
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -312,7 +311,13 @@ func (m *SiteManager) AddStarter(ctx context.Context) error {
 	if fsx.Exists(filepath.Join(root, "modules")) {
 		return errors.New("the repository already has a modules folder")
 	}
-	if err := copyEmbedded(site.FS, "template", root); err != nil {
+	wr, err := os.OpenRoot(work)
+	if err != nil {
+		return err
+	}
+	err = copyEmbedded(site.FS, "template", wr, filepath.Join(".", filepath.FromSlash(s.Repo.Subdir)))
+	wr.Close()
+	if err != nil {
 		return err
 	}
 	if _, err := m.git(ctx, work, "add", "-A"); err != nil {
@@ -324,24 +329,25 @@ func (m *SiteManager) AddStarter(ctx context.Context) error {
 	if _, err := m.git(ctx, work, "push", "origin", "HEAD:refs/heads/"+s.Repo.Branch); err != nil {
 		return err
 	}
-	_, err := m.Fetch(ctx)
+	_, err = m.Fetch(ctx)
 	return err
 }
 
-func copyEmbedded(fsys fs.FS, root, dst string) error {
-	return fs.WalkDir(fsys, root, func(p string, d fs.DirEntry, err error) error {
+// copyEmbedded copies the folder src of fsys to dst, relative to root.
+func copyEmbedded(fsys fs.FS, src string, root *os.Root, dst string) error {
+	return fs.WalkDir(fsys, src, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		out := filepath.Join(dst, strings.TrimPrefix(strings.TrimPrefix(p, root), "/"))
+		out := filepath.Join(dst, strings.TrimPrefix(strings.TrimPrefix(p, src), "/"))
 		if d.IsDir() {
-			return os.MkdirAll(out, 0o755)
+			return root.MkdirAll(out, 0o755)
 		}
 		data, err := fs.ReadFile(fsys, p)
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(out, data, 0o644)
+		return fsx.WriteInRoot(root, out, bytes.NewReader(data), 0o644)
 	})
 }
 
@@ -458,8 +464,8 @@ func (m *SiteManager) manifestAt(ctx context.Context, commit, file string) map[s
 		return nil
 	}
 	var v map[string]any
-	if json.Unmarshal([]byte(data), &v) != nil {
-		return map[string]any{"invalid": "module.json is not valid JSON"}
+	if decodeManifest([]byte(data), &v) != nil {
+		return map[string]any{"invalid": "module.json is not valid JSON, or has a key twice"}
 	}
 	return v
 }
@@ -727,7 +733,7 @@ func (m *SiteManager) prepareCheckout(ctx context.Context, job *SiteJob, commit,
 				} `json:"build"`
 			} `json:"app"`
 		}
-		if json.Unmarshal(data, &mf) != nil || mf.App == nil || mf.App.Build == nil || len(mf.App.Build.Run) == 0 {
+		if decodeManifest(data, &mf) != nil || mf.App == nil || mf.App.Build == nil || len(mf.App.Build.Run) == 0 {
 			continue
 		}
 		job.step("Building %s: %s", e.Name(), strings.Join(mf.App.Build.Run, " "))

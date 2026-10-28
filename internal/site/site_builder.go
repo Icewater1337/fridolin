@@ -16,11 +16,12 @@ package site
 // accounts. A brain can propose; only you merge and deploy, in the dashboard.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-
+	"io/fs"
 	"log"
 	"net"
 	"os"
@@ -46,6 +47,29 @@ func (m *SiteManager) builderBase(brainID string) string {
 		return ""
 	}
 	return filepath.Join(dir, ".fridolin-site")
+}
+
+// builderRoot opens the brain's .fridolin-site, making it when it is not
+// there. The brain writes in its folder, so the bridge writes there only
+// through this os.Root: a symlink the brain planted, at .fridolin-site or
+// below it, cannot lead a write out of the brain's folder.
+func (m *SiteManager) builderRoot(brainID string) (*os.Root, error) {
+	dir := ""
+	if m.hooks.BrainDir != nil {
+		dir = m.hooks.BrainDir(brainID)
+	}
+	if dir == "" {
+		return nil, fmt.Errorf("no brain %q", brainID)
+	}
+	brain, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer brain.Close()
+	if err := brain.MkdirAll(".fridolin-site", 0o700); err != nil {
+		return nil, err
+	}
+	return brain.OpenRoot(".fridolin-site")
 }
 
 func builderBranch(brainID string) string { return "builder/" + brainID }
@@ -133,18 +157,13 @@ func (m *SiteManager) CodexBuilder(brainID string) ([]string, []string, string, 
 // ensureBuilder writes the plugin and MCP config and, the first time, the
 // workspace and its copy of the site process.
 func (m *SiteManager) ensureBuilder(ctx context.Context, brainID string) error {
-	base := m.builderBase(brainID)
-	if base == "" {
-		return fmt.Errorf("no brain %q", brainID)
-	}
-	if err := os.MkdirAll(base, 0o700); err != nil {
+	root, err := m.builderRoot(brainID)
+	if err != nil {
 		return err
 	}
-	plugin := filepath.Join(base, "plugin")
-	if err := os.MkdirAll(plugin, 0o700); err != nil {
-		return err
-	}
-	if err := copyEmbedded(site.FS, "builder", plugin); err != nil {
+	err = copyEmbedded(site.FS, "builder", root, "plugin")
+	root.Close()
+	if err != nil {
 		return err
 	}
 	if err := m.writeMCPConfig(brainID); err != nil {
@@ -153,8 +172,7 @@ func (m *SiteManager) ensureBuilder(ctx context.Context, brainID string) error {
 	if err := m.ensureBuilderShell(ctx, brainID); err != nil {
 		return err
 	}
-	ws := filepath.Join(base, "workspace")
-	if fsx.Exists(filepath.Join(ws, ".git")) {
+	if fsx.Exists(filepath.Join(m.workspace(brainID), ".git")) {
 		return nil
 	}
 	return m.createWorkspace(ctx, brainID)
@@ -181,7 +199,12 @@ func (m *SiteManager) writeMCPConfig(brainID string) error {
 		},
 	}}
 	data, _ := json.MarshalIndent(cfg, "", "  ")
-	return fsx.WriteFileAtomic(filepath.Join(m.builderBase(brainID), "mcp.json"), data, 0o600, false)
+	root, err := m.builderRoot(brainID)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return fsx.WriteInRoot(root, "mcp.json", bytes.NewReader(data), 0o600)
 }
 
 // builderToken is the brain's token for /builder/, made once per bridge run.
@@ -218,19 +241,69 @@ func (m *SiteManager) ensureBuilderShell(ctx context.Context, brainID string) er
 	if err != nil {
 		return err
 	}
-	dst := filepath.Join(m.builderBase(brainID), "shell")
-	want, _ := os.ReadFile(filepath.Join(shell, ".fridolin-shell"))
-	if have, err := os.ReadFile(filepath.Join(dst, ".fridolin-shell")); err == nil && string(have) == string(want) {
-		return nil
-	}
-	if err := os.MkdirAll(dst, 0o700); err != nil {
-		return err
-	}
-	// cp keeps node_modules' symlinks (its .bin) as they are.
-	if out, err := exec.CommandContext(ctx, "cp", "-R", shell+"/.", dst).CombinedOutput(); err != nil {
-		return fmt.Errorf("copying the site process: %v %s", err, out)
+	if err := m.copyShell(shell, brainID); err != nil {
+		return fmt.Errorf("copying the site process: %w", err)
 	}
 	return nil
+}
+
+// copyShell copies the site process in shell to the brain's shell folder
+// unless it has this version already, through the brain's builderRoot. It
+// keeps node_modules' symlinks (its .bin) as they are, and writes the
+// version stamp last, so that a copy cut short is made again.
+func (m *SiteManager) copyShell(shell, brainID string) error {
+	const stamp = ".fridolin-shell"
+	root, err := m.builderRoot(brainID)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	want, _ := os.ReadFile(filepath.Join(shell, stamp))
+	if have, err := root.ReadFile(filepath.Join("shell", stamp)); err == nil && bytes.Equal(have, want) {
+		return nil
+	}
+	if err := root.MkdirAll("shell", 0o700); err != nil {
+		return err
+	}
+	err = filepath.WalkDir(shell, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(shell, p)
+		if err != nil || rel == stamp {
+			return err
+		}
+		out := filepath.Join("shell", rel)
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		switch {
+		case d.IsDir():
+			return root.MkdirAll(out, info.Mode().Perm()|0o700)
+		case d.Type()&fs.ModeSymlink != 0:
+			target, err := os.Readlink(p)
+			if err != nil {
+				return err
+			}
+			if err := root.RemoveAll(out); err != nil {
+				return err
+			}
+			return root.Symlink(target, out)
+		case d.Type().IsRegular():
+			f, err := os.Open(p)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			return fsx.WriteInRoot(root, out, f, info.Mode().Perm())
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	return fsx.WriteInRoot(root, filepath.Join("shell", stamp), bytes.NewReader(want), 0o600)
 }
 
 // sandboxed runs a command as the brain: under its sandbox, in dir.
@@ -277,12 +350,34 @@ func (m *SiteManager) writeBundle(ctx context.Context, brainID string) (string, 
 	if _, err := m.git(ctx, m.repoDir(), "update-ref", "refs/heads/"+siteBaseRef, "refs/remotes/origin/"+branch); err != nil {
 		return "", err
 	}
-	bundle := filepath.Join(m.builderBase(brainID), "site.bundle")
-	_ = os.Remove(bundle)
-	if _, err := m.git(ctx, m.repoDir(), "bundle", "create", bundle, "refs/heads/"+siteBaseRef); err != nil {
+	// git writes the bundle in Fridolin's own folder; it goes into the
+	// brain's through its builderRoot.
+	if err := os.MkdirAll(m.dir("work"), 0o700); err != nil {
 		return "", err
 	}
-	return bundle, nil
+	work, err := os.MkdirTemp(m.dir("work"), "bundle-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(work)
+	tmp := filepath.Join(work, "site.bundle")
+	if _, err := m.git(ctx, m.repoDir(), "bundle", "create", tmp, "refs/heads/"+siteBaseRef); err != nil {
+		return "", err
+	}
+	f, err := os.Open(tmp)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	root, err := m.builderRoot(brainID)
+	if err != nil {
+		return "", err
+	}
+	defer root.Close()
+	if err := fsx.WriteInRoot(root, "site.bundle", f, 0o644); err != nil {
+		return "", err
+	}
+	return filepath.Join(m.builderBase(brainID), "site.bundle"), nil
 }
 
 // createWorkspace clones the branch from a bundle into the brain's workspace
@@ -353,7 +448,7 @@ func (m *SiteManager) liveModules() []map[string]any {
 			continue
 		}
 		var mf map[string]any
-		if json.Unmarshal(data, &mf) == nil {
+		if decodeManifest(data, &mf) == nil {
 			out = append(out, map[string]any{"id": mf["id"], "title": mf["title"], "route": mf["route"], "access": mf["access"]})
 		}
 	}
@@ -445,8 +540,8 @@ func (m *SiteManager) reviewWorkspace(ctx context.Context, brainID string) []Mod
 		oldM := m.manifestAt(ctx, s.Approved, prefix+id+"/module.json")
 		var newM map[string]any
 		if data, err := os.ReadFile(filepath.Join(m.workspaceModules(brainID), id, "module.json")); err == nil {
-			if json.Unmarshal(data, &newM) != nil {
-				newM = map[string]any{"invalid": "module.json is not valid JSON"}
+			if decodeManifest(data, &newM) != nil {
+				newM = map[string]any{"invalid": "module.json is not valid JSON, or has a key twice"}
 			}
 		}
 		c := ModuleChange{ID: id, Review: reviewManifest(oldM, newM), Files: []string{}}
@@ -496,9 +591,13 @@ func (m *SiteManager) BuilderPropose(ctx context.Context, brainID, title, summar
 	if len(summary) > 4000 {
 		summary = summary[:4000]
 	}
-	base := m.builderBase(brainID)
-	bundle := filepath.Join(base, "proposal.bundle")
-	_ = os.Remove(bundle)
+	root, err := m.builderRoot(brainID)
+	if err != nil {
+		return SiteProposal{}, nil, err
+	}
+	_ = root.Remove("proposal.bundle")
+	root.Close()
+	bundle := filepath.Join(m.builderBase(brainID), "proposal.bundle")
 	if _, err := m.sandboxed(ctx, brainID, m.workspace(brainID), time.Minute, m.host.GitPath(), "bundle", "create", bundle, "HEAD"); err != nil {
 		return SiteProposal{}, nil, err
 	}
@@ -653,7 +752,13 @@ func (m *SiteManager) BuilderPreview(ctx context.Context, brainID string) (map[s
 	}
 	data, _ := json.MarshalIndent(rt, "", "  ")
 	rtFile := filepath.Join(base, "preview.runtime.json")
-	if err := fsx.WriteFileAtomic(rtFile, data, 0o600, false); err != nil {
+	root, err := m.builderRoot(brainID)
+	if err != nil {
+		return nil, err
+	}
+	err = fsx.WriteInRoot(root, "preview.runtime.json", bytes.NewReader(data), 0o600)
+	root.Close()
+	if err != nil {
 		return nil, err
 	}
 	shell := filepath.Join(base, "shell")

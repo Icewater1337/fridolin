@@ -635,3 +635,37 @@ func (s heldPuts) Put(ctx context.Context, key string, r io.Reader) error {
 	}
 	return s.ObjectStore.Put(ctx, key, r)
 }
+
+// vault_get's copy goes into the run's temp folder, where the run writes
+// too: a link it planted on the way does not lead the copy out of it.
+func TestReadableCopyFollowsNoSymlinkOut(t *testing.T) {
+	t.Parallel()
+	dataDir, out := t.TempDir(), t.TempDir()
+	src := filepath.Join(t.TempDir(), "f")
+	if err := os.WriteFile(src, []byte("chosen"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	links := filepath.Join(brainStateOf(dataDir, "b").tmp, "vault", "vault", "documents", "b")
+	if err := os.MkdirAll(links, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(out, filepath.Join(links, "x")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readableCopy(dataDir, "b", "vault/documents/b/x/f", src); err == nil {
+		t.Error("the copy was written through a symlink")
+	}
+	if es, _ := os.ReadDir(out); len(es) > 0 {
+		t.Errorf("written outside: %v", es)
+	}
+	// Without a link the copy lands in the temp folder, with the file's time.
+	p, err := readableCopy(dataDir, "b", "vault/documents/b/y/f", src)
+	if data, _ := os.ReadFile(p); err != nil || string(data) != "chosen" || p != filepath.Join(links, "y", "f") {
+		t.Errorf("copy %s: %q %v", p, data, err)
+	}
+	if a, b := statOrNil(src), statOrNil(p); a == nil || b == nil || !a.ModTime().Equal(b.ModTime()) {
+		t.Error("the copy does not carry the file's time")
+	}
+}
+
+func statOrNil(p string) os.FileInfo { fi, _ := os.Stat(p); return fi }

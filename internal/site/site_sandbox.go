@@ -72,7 +72,7 @@ func readModuleCaps(modulesDir, home string) []sandbox.SiteModule {
 				ElevenLabs json.RawMessage `json:"elevenlabs"`
 			} `json:"capabilities"`
 		}
-		if json.Unmarshal(data, &mf) != nil || mf.ID != e.Name() {
+		if decodeManifest(data, &mf) != nil || mf.ID != e.Name() {
 			continue
 		}
 		c := sandbox.SiteModule{ID: mf.ID, Title: mf.Title, Dir: dir, Commands: mf.Capabilities.Commands, Secrets: mf.Capabilities.Secrets, Ingest: mf.Capabilities.Ingest, Search: mf.Capabilities.Search}
@@ -109,7 +109,7 @@ func connectionCap(raw json.RawMessage) (sandbox.ConnectionCapability, bool) {
 		Models     []string `json:"models"`
 		MonthlyUSD float64  `json:"monthly_usd"`
 	}
-	if len(raw) == 0 || json.Unmarshal(raw, &d) != nil || len(d.Use) == 0 || d.MonthlyUSD < 0 {
+	if len(raw) == 0 || decodeManifest(raw, &d) != nil || len(d.Use) == 0 || d.MonthlyUSD < 0 {
 		return sandbox.ConnectionCapability{}, false
 	}
 	return sandbox.ConnectionCapability{Use: d.Use, Models: d.Models, MonthlyUSD: d.MonthlyUSD}, true

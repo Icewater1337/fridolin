@@ -216,7 +216,9 @@ modules/
     └── spa/            the app's source; spa/dist is what gets served
 ```
 
-The folder name is the module's `id`.
+The folder name is the module's `id`. Keys are written exactly as below,
+each once per object: Fridolin grants nothing to a manifest with a key in
+other letters (`"Capabilities"`) or written twice.
 
 ```json
 {

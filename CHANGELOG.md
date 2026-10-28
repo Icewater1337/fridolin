@@ -1355,6 +1355,16 @@ for compatibility.
 
 ### Fixed
 
+- **A module.json key in other letters, or written twice, no longer
+  grants what the approver did not see.** Fridolin read a manifest's keys
+  case-insensitively (`"Capabilities"` counted as `capabilities`) and
+  merged a key written twice, while the site and the approval review read
+  them exactly. A module so written could get programs, files, secrets or
+  an `app.build` command into the live site's sandbox and deploys that the
+  review never listed. Now such a manifest grants nothing: Fridolin leaves
+  the module out of the sandbox and the build, and the review marks a key
+  written twice as invalid. Write every key exactly as docs/SITE.md does.
+
 - **Plaud Sync 0.6: recordings that come off the NotePin together all
   reach Fridolin.** When a check-in found several recordings, only the
   first was transcribed. The others waited in the app until the next
