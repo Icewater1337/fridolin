@@ -196,6 +196,9 @@ test('the capability words match the bridge\'s', () => {
   assert.equal(capSummary(null), 'nothing');
   assert.equal(ruleText({ name: 'git', args: ['status', 'log'] }), 'git status | log');
   assert.equal(ruleText({ name: 'go', args: null }), 'go (any arguments)');
+  assert.equal(ruleText({ name: 'brew', args: ['upgrade', 'update'], approve: true }), 'brew upgrade | update · asks you each time');
+  assert.equal(ruleText({ name: 'shutdown', args: ['-r', 'now'], exact: true, approve: true }), 'shutdown -r now (exactly) · asks you each time');
+  assert.equal(ruleText({ name: 'softwareupdate', args: [], approve: true }), 'softwareupdate (no arguments) · asks you each time');
   assert.equal(osName('darwin'), 'macOS');
   assert.equal(osName('plan9'), 'plan9');
   assert.equal(gb(16 * 2 ** 30), '16 GB');

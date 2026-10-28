@@ -610,6 +610,8 @@ export interface ExecRule {
   exact?: boolean;
   /** The core added it, for an approved agent's program (exact, an absolute path). */
   core?: boolean;
+  /** Every call it allows waits for the owner's yes, which the core asks for each time. */
+  approve?: boolean;
 }
 
 export interface ExecCap {

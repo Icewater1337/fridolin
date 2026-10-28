@@ -17,18 +17,18 @@ func TestFrideRule(t *testing.T) {
 	in := Input{Now: now, BrainID: "core", CodeToFride: true, History: []history.Entry{news},
 		Message: chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "the no-results one"}}
 	p := Build(in)
-	if !strings.Contains(p, FrideRule) {
-		t.Error("the rule is missing")
+	if !strings.Contains(p, FrideRule) || !strings.Contains(p, MachinesRule) {
+		t.Error("a rule is missing")
 	}
 	if !strings.Contains(p, `"from":"FrIDE (its news, relayed by the bridge)"`) {
 		t.Errorf("FrIDE's news reads as someone else's:\n%s", p)
 	}
 	in.Message.Source = chat.SourceDelegate
-	if strings.Contains(Build(in), FrideRule) {
-		t.Error("a delegated run is told the rule")
+	if p := Build(in); strings.Contains(p, FrideRule) || strings.Contains(p, MachinesRule) {
+		t.Error("a delegated run is told the rules")
 	}
 	in.Message.Source, in.CodeToFride = "", false
-	if strings.Contains(Build(in), FrideRule) {
-		t.Error("a run without the tools is told the rule")
+	if p := Build(in); strings.Contains(p, FrideRule) || strings.Contains(p, MachinesRule) {
+		t.Error("a run without the tools is told the rules")
 	}
 }

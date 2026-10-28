@@ -612,6 +612,12 @@ program that runs others (`sh`, `bash`, `zsh`, `fish`, `cmd`,
 node refuses to load such a `node.json`, and both sides refuse such a call
 whatever a rule says. An interpreter you allow (`python`, `node`) can still
 run anything; allow one only with argument patterns that pin what it runs.
+`"exact": true` makes `args` the arguments themselves, in order. A rule
+with `"approve": true` asks you before every call it allows, each time
+(see [The core brain runs commands](#the-core-brain-runs-commands)); a
+call that a rule without it allows too runs without asking. Turning
+`approve` on or off changes the rule, so the node's commands wait for your
+approval again, and until then that rule allows nothing.
 Without `--allow` or `--no-exec`, a node offers its OS's report-only
 commands: `uname`, `uptime`, `df` (and `sw_vers` on macOS), or `hostname`,
 `whoami`, `systeminfo` on Windows.
@@ -705,6 +711,81 @@ The Schedules page and the wizard say, for each command agent, whether
 its node runs its program, whether approving or saving adds it, or what
 the node must opt into first; `fridolin doctor` warns about approved
 command agents whose node does not allow their program (`nodes-programs`).
+
+### The core brain runs commands
+
+The core brain runs a command on one of your machines with
+`node_exec(argv, node?, dir?, timeout_seconds?, approval_id?,
+wait_seconds?)`, and lists what each machine allows with
+`node_exec_rules(node?)`. Both exist only on the core brain, and only
+while a node whose `exec` you approved is online; a sub-brain and a
+delegated task never have them. It is for quick things (a status, opening
+an app, an update, a backup script): work in a folder goes to an
+[agent session](#workstation), code to [FrIDE](#fride), and the core
+brain's prompt says when to use which. `node` is the node's name or id,
+and may be left out while only one node runs commands. The core checks
+the call against what you approved of the node before it sends anything,
+and the node against its `node.json` again; a shell never runs, whatever
+a rule says. The answer is the exit code, stdout and stderr (each cut at
+`max_output_bytes`), whether it timed out, and how long it took. `dir` is
+the working directory the brain picks, so allow a program only with
+arguments that are safe in any folder.
+
+A wider list for a Mac, in `node.json`: the report-only commands run when
+the core brain asks, the rest only with your yes each time.
+
+```json
+"exec": {
+  "allow": [
+    {"name": "uname", "args": ["-[amnrsv]+"]},
+    {"name": "sw_vers", "args": []},
+    {"name": "uptime", "args": []},
+    {"name": "df", "args": ["-[hkP]+"]},
+    {"name": "pmset", "args": ["-g", "batt"], "exact": true},
+    {"name": "brew", "args": ["outdated", "list", "--version"]},
+    {"name": "softwareupdate", "args": ["--list", "-l"]},
+    {"name": "open", "args": ["-a", "Music"], "exact": true},
+    {"name": "open", "args": ["-a", "Safari"], "exact": true},
+    {"name": "brew", "args": ["upgrade", "update"], "approve": true},
+    {"name": "softwareupdate", "args": ["--install", "-i", "--all", "-a"], "approve": true},
+    {"name": "shutdown", "args": ["-r", "now"], "exact": true, "approve": true},
+    {"name": "launchctl", "args": ["kickstart", "-k", "gui/501/com\\.example\\.[a-z]+"], "approve": true},
+    {"name": "/Users/you/bin/backup.sh", "args": [], "approve": true}
+  ],
+  "timeout_seconds": 1800
+}
+```
+
+Restart the node (`fridolin node stop`, `fridolin node start`) and approve
+what it offers on the Nodes page, which marks each rule that asks "asks
+you each time". `open` with any argument can open a script or an app that
+runs one, so allow it only for the apps you name, exactly. A node that
+runs as you cannot run what needs root: `shutdown` and `softwareupdate
+--install` answer that they must be run as root there, and fridolin never
+runs `sudo`.
+
+**How you approve.** For a command whose rule asks, `node_exec` asks you
+itself, as `request_approval` does: a poll in your chat, "🔐 Approve? Run
+`brew upgrade` on mac-mini", with Yes, No and Show me the draft (the
+whole command, the node's id and the folder), and the same approval on
+the dashboard's Approvals page. The brain never asks you for that yes
+itself. The call waits for your vote up to `wait_seconds` (default 5
+minutes); Yes runs the command, No does not, and no answer within
+`policy.approval_timeout_hours` counts as no. Unanswered by then, the call
+answers pending with an `approval_id`; the brain waits on with
+`check_approval`, or hears your answer as a new message, and calls
+`node_exec` again with it. An approval runs exactly the command, node and
+folder it named, once: another command, or a second run, asks again. A
+brain set to `approvals: auto` still asks for these, since the rule is
+the machine's word that the command asks. A lockdown refuses `node_exec`,
+and a yes that comes during one runs nothing. A scheduled agent of kind
+`command` does not ask at each run: approving the agent was the yes for
+its command.
+
+Every call is a `node_exec` line of the audit log: the node and the
+command line (token-like strings masked), the approval and who said yes
+for a command that asks, and the exit code, `timed out`, `pending`,
+`denied` or why it failed or was refused.
 
 ## android-build
 
