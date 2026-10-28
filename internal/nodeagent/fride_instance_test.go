@@ -431,6 +431,10 @@ func TestFrideInstanceStartRefuses(t *testing.T) {
 	if calls := fakeCalls(t, f.fake); len(calls) != 0 {
 		t.Errorf("sbx was asked: %v", calls)
 	}
+	writeTestFile(t, filepath.Join(f.fake, "templates.json"), `[]`)
+	if _, perr := f.a.frideInstanceStart(ctx, workParams()); perr == nil || perr.Code != nodeproto.CodeUnavailable || !strings.Contains(perr.Message, "no template") {
+		t.Errorf("without the template: %v", perr)
+	}
 	if err := os.Remove(filepath.Join(f.a.Dir, frideHostFile)); err != nil {
 		t.Fatal(err)
 	}

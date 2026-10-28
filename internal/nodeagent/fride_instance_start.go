@@ -91,6 +91,9 @@ func (a *Agent) frideHostReady(ctx context.Context) (instanceOps, *FrideHostStat
 	if _, _, problem := sbxState(sctx, o.d); problem != "" {
 		return o, nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "%s", problem)
 	}
+	if !sbxHasTemplate(sctx, o.d, host.Template) {
+		return o, nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "sbx has no template %s: fridolin node fride host setup", host.Template)
+	}
 	return o, host, nil
 }
 

@@ -131,7 +131,7 @@ func (a *Agent) frideHostRead(ctx context.Context) *nodeproto.FrideHostCap {
 		if out, _, err := d.run(ctx, nil, nil, "version"); err == nil {
 			c.Version = parseSbxVersion(out)
 		}
-		_, _, problem := sbxState(ctx, d)
+		_, list, problem := sbxState(ctx, d)
 		if problem != "" {
 			problems = append(problems, problem)
 		} else {
@@ -143,7 +143,10 @@ func (a *Agent) frideHostRead(ctx context.Context) *nodeproto.FrideHostCap {
 			if host != nil && !sbxHasTemplate(ctx, d, host.Template) {
 				problems = append(problems, "sbx has no template "+host.Template+": fridolin node fride host setup")
 			}
-			statuses, _ = sbxStatuses(ctx, d)
+			statuses = map[string]string{}
+			for _, sb := range list {
+				statuses[sb.Name] = orUnknown(sb.Status)
+			}
 		}
 	}
 	c.Ready = len(problems) == 0
