@@ -22,8 +22,10 @@ import (
 // in a Docker Sandbox (sbx microVM) of its own, for one trust domain,
 // which the core starts and stops on a node through fride.instance.*.
 // The node's own agent runs them: `fridolin node fride host setup`
-// builds the template (FrIDE, Claude Code and ponytail) once, and the
-// node then offers fride_host. Each instance has its sandbox
+// builds the template (FrIDE, Claude Code and ponytail) once, or with
+// --no-build takes the one the core publishes, and the node then offers
+// fride_host. On Windows the node's service runs sbx in the signed-in
+// user's session (sbx_windows.go). Each instance has its sandbox
 // fride-<name>, a pair of loopback ports from 17850 up (FrIDE's and its
 // webhook's), a FrIDE paired with the node, its repositories cloned in
 // the VM, git identities whose tokens stay on the host (sbx's proxy
