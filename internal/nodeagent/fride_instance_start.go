@@ -48,6 +48,12 @@ func (a *Agent) frideInstanceStart(ctx context.Context, p nodeproto.FrideInstanc
 	lock := a.inst.lock(p.Name)
 	lock.Lock()
 	defer lock.Unlock()
+	if p.UpdateOnly {
+		if st, err := loadFrideInstance(a.Dir, p.Name); err != nil || st == nil || !st.Run {
+			// Not running: stays so, as the answer says.
+			return nodeproto.FrideInstance{Name: p.Name, State: nodeproto.FrideInstanceStopped, MemoryMB: p.MemoryMB}, nil
+		}
+	}
 	a.inst.setStarting(p.Name, true)
 	a.frideHostKick()
 	defer func() {

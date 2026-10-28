@@ -1405,8 +1405,10 @@ their tokens, from the GitHub and GitLab connections as in [Git
 identities for FrIDE](#git-identities-for-fride); the first one with a
 commit name and email gives `git`. When one changes, and every five
 minutes, a running instance whose identities, repositories or egress
-changed is started again at its memory, which the node takes as an
-update. No token goes into a log, the audit or `bridge.db`.
+changed is started again at its memory with `update_only`, which the
+node takes as an update and which never starts one that stopped (an
+idle stop whose declaration has yet to reach the core stands). No
+token goes into a log, the audit or `bridge.db`.
 
 **Idle stop.** An instance with no open thread and no news for its
 `idle_stop_minutes` (default 30; -1 never) stops; its disk stays. Work

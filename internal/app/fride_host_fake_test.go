@@ -259,6 +259,10 @@ func (f *fakeHost) handle(req nodeproto.Request) (any, *nodeproto.Error) {
 			return nil, nodeproto.Errorf(nodeproto.CodeFailed, "%s", msg)
 		}
 		in := f.cap.Instance(p.Name)
+		if p.UpdateOnly && (in == nil || in.State != nodeproto.FrideInstanceRunning) {
+			f.mu.Unlock()
+			return nodeproto.FrideInstance{Name: p.Name, State: nodeproto.FrideInstanceStopped}, nil
+		}
 		if in == nil {
 			f.cap.Instances = append(f.cap.Instances, nodeproto.FrideInstance{Name: p.Name, State: nodeproto.FrideInstanceStopped})
 			in = &f.cap.Instances[len(f.cap.Instances)-1]

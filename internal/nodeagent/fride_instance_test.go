@@ -376,6 +376,22 @@ func TestFrideInstanceStopRemove(t *testing.T) {
 	if l := res.(nodeproto.FrideInstances).Instances; len(l) != 1 || l[0].State != nodeproto.FrideInstanceStopped || l[0].URL != "" {
 		t.Errorf("status after stop: %+v", l)
 	}
+	// The core's refresh of identities (update_only) leaves it stopped:
+	// it must never undo a stop whose declaration has yet to arrive.
+	before := len(fakeCalls(t, f.fake))
+	up := workParams()
+	up.UpdateOnly = true
+	if in, perr := f.a.frideInstanceStart(ctx, up); perr != nil || in.State != nodeproto.FrideInstanceStopped {
+		t.Errorf("update_only on a stopped instance: %+v %v", in, perr)
+	}
+	if st, _ := loadFrideInstance(f.a.Dir, "work"); st.Run {
+		t.Error("update_only set run")
+	}
+	for _, c := range fakeCalls(t, f.fake)[before:] {
+		if len(c.Args) > 0 && slices.Contains([]string{"run", "start", "create", "exec", "cp", "policy", "secret"}, c.Args[0]) {
+			t.Errorf("update_only on a stopped instance ran sbx %v", c.Args)
+		}
+	}
 	writeTestFile(t, f.home("work", ".claude/projects/p1/a.jsonl"), "session")
 	writeTestFile(t, f.home("work", "fride-companion/workspaces/w1/x.go"), "package x")
 	if _, perr := f.a.frideInstanceCall(ctx, nodeproto.MethodFrideInstanceRemove, json.RawMessage(`{"name":"work"}`)); perr != nil {
@@ -629,7 +645,11 @@ func TestFrideHostDeclared(t *testing.T) {
 	if f.a.frideHostRefresh(ctx, false) {
 		t.Error("read again within a minute")
 	}
-	f.a.Config.FrideHost = &FrideHostConfig{ReserveMB: 2048}
+	// host setup --reserve-mb writes node.json under the running agent,
+	// whose next declaration takes it.
+	if err := SaveConfig(f.a.Dir, Config{Core: "core:8766", Name: "mac", FrideHost: &FrideHostConfig{ReserveMB: 2048}}); err != nil {
+		t.Fatal(err)
+	}
 	if !f.a.frideHostRefresh(ctx, true) || f.a.frideHostDeclared().ReserveMB != 2048 {
 		t.Error("node.json's reserve_mb")
 	}

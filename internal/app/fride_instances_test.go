@@ -155,6 +155,10 @@ func TestFrideInstances(t *testing.T) {
 		last := s[len(s)-1]
 		return len(last.Identities) == 1 && last.Identities[0].Token == testGitLabToken2
 	})
+	// Only as an update: a stop the core has yet to hear of stands.
+	if s := instanceStarts(mini, "work"); !s[len(s)-1].UpdateOnly {
+		t.Error("the new token went as a start, which undoes a stop")
+	}
 	if s := instanceStarts(mini, "fridolin"); len(s) != 1 {
 		t.Errorf("fridolin, which nothing changed for, was started again: %d", len(s))
 	}
