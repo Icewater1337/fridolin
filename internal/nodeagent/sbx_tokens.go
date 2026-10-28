@@ -122,7 +122,7 @@ func setHostToken(ctx context.Context, d sbxDriver, dir, sandbox, host, token st
 	if err := d.hostFolder(filepath.Dir(tokFile)); err != nil {
 		return "", err
 	}
-	command, err := sbxSecretCommand(tokFile)
+	command, err := d.secretCommand(tokFile)
 	if err != nil {
 		return "", err
 	}

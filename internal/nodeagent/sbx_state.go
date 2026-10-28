@@ -22,7 +22,7 @@ func (a *Agent) sbx() sbxDriver {
 	if a.SandboxSbx == "" && !sbxInSession() {
 		return nil
 	}
-	return sbxCLI{path: a.SandboxSbx}
+	return sbxCLI{path: a.SandboxSbx, self: a.Executable}
 }
 
 // sbxHasTemplate reports whether sbx's image store holds the template.

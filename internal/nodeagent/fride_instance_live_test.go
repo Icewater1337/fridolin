@@ -77,7 +77,8 @@ func TestFrideInstanceLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, _ := LoadConfig(dir)
-	a := &Agent{Dir: dir, Config: cfg, SandboxSbx: sbx, CoreSecrets: store, Logf: t.Logf, FrideInstancePoll: time.Second}
+	// On Windows sbx reads the git token with the test binary as fridolin.exe.
+	a := &Agent{Dir: dir, Config: cfg, SandboxSbx: sbx, Executable: testExe(t), CoreSecrets: store, Logf: t.Logf, FrideInstancePoll: time.Second}
 	a.inst.portBase = 17950
 	lctx, stopLoop := context.WithCancel(ctx)
 	var wg sync.WaitGroup

@@ -27,7 +27,7 @@ func (sbxCLI) unavailable() string { return "" }
 // alone.
 func (sbxCLI) hostFolder(dir string) error { return os.Chmod(dir, 0o700) }
 
-// sbxSecretCommand is the host command sbx runs to read the token file.
-func sbxSecretCommand(file string) (string, error) {
+// secretCommand is the host command sbx runs to read the token file.
+func (sbxCLI) secretCommand(file string) (string, error) {
 	return sbxSecretCommandFor(runtime.GOOS, "", file)
 }

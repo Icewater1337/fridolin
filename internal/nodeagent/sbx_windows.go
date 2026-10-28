@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -152,15 +151,14 @@ func (sbxCLI) hostFolder(dir string) error {
 	return nil
 }
 
-// sbxSecretCommand is the host command sbx runs to read the token file:
+// secretCommand is the host command sbx runs to read the token file:
 // the node's own fridolin.exe with sbx-secret, by short (8.3) paths,
 // which hold no space.
-func sbxSecretCommand(file string) (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", err
+func (s sbxCLI) secretCommand(file string) (string, error) {
+	if s.self == "" {
+		return "", errors.New("the node's own program is not known, which sbx reads the tokens with: run the node as its service (fridolin node install)")
 	}
-	return sbxSecretCommandFor("windows", shortPath(exe), filepath.Join(shortPath(filepath.Dir(file)), filepath.Base(file)))
+	return sbxSecretCommandFor("windows", shortPath(s.self), filepath.Join(shortPath(filepath.Dir(file)), filepath.Base(file)))
 }
 
 // shortPath is p's short (8.3) form when p holds a space and the volume

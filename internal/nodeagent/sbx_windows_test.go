@@ -87,7 +87,7 @@ func TestHostTokensOnWindows(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state dir", frideInstancesDir, "work", frideInstanceTokens)
 	writeTestFile(t, filepath.Join(fake, "fride-fake"), "")
 	saveFakeSandboxes(fake, []string{"fride-work"})
-	d := sbxCLI{path: testExe(t), env: []string{"FAKE_SBX_DIR=" + fake}}
+	d := sbxCLI{path: testExe(t), env: []string{"FAKE_SBX_DIR=" + fake}, self: testExe(t)}
 	const gl = "glpat-madeUp-789" // personal-data:ignore (a made-up token)
 	ph, err := setHostToken(context.Background(), d, dir, "fride-work", "gitlab.example.com", gl)
 	if err != nil {

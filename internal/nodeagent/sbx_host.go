@@ -20,7 +20,7 @@ import (
 // the node's own fridolin.exe instead of /bin/cat. These are the helpers
 // that do not need Windows to run, so that every system tests them.
 
-// sbxSecretArg is the hidden subcommand sbx runs on Windows to read a
+// sbxSecretArgs are the hidden subcommand sbx runs on Windows to read a
 // token file: fridolin node fride host sbx-secret FILE.
 var sbxSecretArgs = []string{"node", "fride", "host", "sbx-secret"}
 

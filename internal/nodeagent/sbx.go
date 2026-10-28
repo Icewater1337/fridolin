@@ -27,6 +27,10 @@ type sbxDriver interface {
 	// who runs sbx and nobody else: on Windows that user and SYSTEM; on
 	// macOS and Linux the agent is that user, and the folder is 0700.
 	hostFolder(dir string) error
+	// secretCommand is the host command sbx runs to read the token in
+	// file (sbx secret set-custom --command): /bin/cat, on Windows the
+	// node's own fridolin.exe (sbxSecretCommandFor).
+	secretCommand(file string) (string, error)
 }
 
 // sbxCLI runs the sbx binary at path: without telemetry, and without a
@@ -37,6 +41,9 @@ type sbxCLI struct {
 	path string
 	// env is added to every call's environment (tests: the fake's dir).
 	env []string
+	// self is the node's own program, which sbx runs on Windows to read
+	// a token (Agent.Executable).
+	self string
 }
 
 // cmd is the call of sbx with args; done releases what it holds once
