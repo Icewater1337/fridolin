@@ -144,7 +144,7 @@ func TestExecRuleText(t *testing.T) {
 // Plain says the programs that ask apart from those that run when asked.
 func TestPlainSaysWhatAsks(t *testing.T) {
 	c := Capabilities{Exec: &ExecCap{Allow: []ExecRule{
-		{Name: "uptime", Args: []string{}}, {Name: "brew", Args: []string{"list"}},
+		{Name: "uptime", Args: []string{}}, {Name: "brew", Args: []string{"list"}}, {Name: "brew", Args: []string{"--version"}},
 		{Name: "brew", Args: []string{"upgrade"}, Approve: true}, {Name: "shutdown", Approve: true}, {Name: "brew", Args: []string{"update"}, Approve: true},
 	}}}
 	got := strings.Join(c.Plain(), "\n")

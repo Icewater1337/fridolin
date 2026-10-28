@@ -14,15 +14,16 @@ func (c Capabilities) Plain() []string {
 	var out []string
 	if c.Exec != nil && len(c.Exec.Allow) > 0 {
 		// A rule that asks the owner each time is said apart: approving it
-		// lets the core ask, not run.
+		// lets the core ask, not run. A program with several rules is
+		// named once in each.
 		var free, asks []string
 		for _, r := range c.Exec.Allow {
+			list := &free
 			if r.Approve {
-				if !slices.Contains(asks, r.Name) {
-					asks = append(asks, r.Name)
-				}
-			} else {
-				free = append(free, r.Name)
+				list = &asks
+			}
+			if !slices.Contains(*list, r.Name) {
+				*list = append(*list, r.Name)
 			}
 		}
 		if len(free) > 0 {
