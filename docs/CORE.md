@@ -39,7 +39,14 @@ gh attestation verify oci://ghcr.io/OWNER/fridolin-core@sha256:DIGEST \
 An SBOM and buildx's own provenance are attached to each platform's
 image. The same workflow publishes `ghcr.io/OWNER/fridolin-fride`,
 the FrIDE image of a node in a box ([NODES.md](NODES.md#node-in-a-box)),
-with the same version tags and provenance.
+and `ghcr.io/OWNER/fridolin-fride-sandbox`, the template of the FrIDE
+instances' Docker Sandboxes ([NODES.md](NODES.md#fride-instances)),
+with the same version tags and provenance. The template is tagged with
+its own tag too, `t-` and a hash of what goes into it, which the core's
+image names (`FRIDOLIN_FRIDE_SANDBOX_TAG`): the core sends it with each
+start to a node that built no template, and sbx there pulls it by that
+tag (it checks no provenance), so a new core makes no instance anew
+while the template stays the same.
 
 ### What is in it
 

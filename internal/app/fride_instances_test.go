@@ -338,3 +338,58 @@ func TestFrideInstanceMakesRoom(t *testing.T) {
 		t.Errorf("the audit: %v", h.auditOf("fride_instance"))
 	}
 }
+
+// The core sends the published FrIDE template with each start once it
+// knows where its images are (its image's registry, and the template's
+// own tag, else its version); a node that built no template of its own
+// gets no instance from a core that knows none, and says why.
+func TestFrideInstanceTemplate(t *testing.T) {
+	t.Parallel()
+	optionsOf(t).waits.frideRetry = 100 * time.Millisecond
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}, "fride": {"instances": {"work": {"nodes": ["mini"]}}}}`)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	addr := h.StartNodes()
+	mini := h.fakeHostNode("mini", addr, 32768, 16000, 6144)
+	mini.mu.Lock()
+	mini.cap.NeedsTemplate = true
+	mini.mu.Unlock()
+	mini.declare()
+	h.WaitFor("mini needs a template", func() bool {
+		n, err := h.b.nodes.Registry().Get(mini.ID)
+		return err == nil && n.Effective().FrideHost != nil && n.Effective().FrideHost.NeedsTemplate
+	})
+
+	reply := h.coreSays("fix it", step("fride_task", `{"message":"Fix it","instance":"work"}`))
+	if !strings.Contains(reply, "mini: it built no FrIDE template, and this core does not know where its images are published (FRIDOLIN_BOX_REGISTRY)") {
+		t.Fatalf("fride_task:\n%s", reply)
+	}
+	if s := instanceStarts(mini, "work"); len(s) != 0 {
+		t.Fatalf("work started on mini without a template: %+v", s)
+	}
+
+	setenv(t, "FRIDOLIN_BOX_REGISTRY", "ghcr.io/you")
+	setenv(t, "FRIDOLIN_FRIDE_SANDBOX_TAG", "t-0123456789ab")
+	h.WaitSent(harnessDM, "🛠️ *FrIDE #1* went to mini/work now.")
+	if s := instanceStarts(mini, "work"); len(s) != 1 || s[0].Template != "ghcr.io/you/fridolin-fride-sandbox:t-0123456789ab" {
+		t.Errorf("work's starts: %+v", s)
+	}
+}
+
+func TestFrideSandboxTemplate(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		registry, tag, version, want string
+	}{
+		{"ghcr.io/you", "t-0123456789ab", "v1.2.3", "ghcr.io/you/fridolin-fride-sandbox:t-0123456789ab"},
+		{"ghcr.io/you/", "", "v1.2.3-4-gabcdef12", "ghcr.io/you/fridolin-fride-sandbox:v1.2.3-4-gabcdef12"},
+		{"", "t-0123456789ab", "v1.2.3", ""},
+		{"ghcr.io/you", "", "", ""},
+		{"ghcr.io/you", "", "1.0+local", ""},
+	} {
+		env := map[string]string{"FRIDOLIN_BOX_REGISTRY": c.registry, "FRIDOLIN_FRIDE_SANDBOX_TAG": c.tag}
+		if got := frideSandboxTemplate(func(n string) string { return env[n] }, c.version); got != c.want {
+			t.Errorf("%+v: %q", c, got)
+		}
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/doctor"
 	"github.com/Icewater1337/fridolin/internal/gitident"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/version"
 )
 
 // frideInstancesDoctorCheck checks each FrIDE instance fride.instances
@@ -59,6 +60,7 @@ func frideInstanceProblems(env *doctor.Env, name string, ic config.FrideInstance
 	var problems []string
 	now := env.Time()
 	least := frideTries(ic.MemoryMB, frideSizeSmall)[0]
+	tpl := frideSandboxTemplate(env.Getenv, version.String())
 	var hosts, notReady, small []string
 	for _, n := range list {
 		if n.Device != nodeproto.DeviceApproved || n.Approved.FrideHost == nil || n.Declared.FrideHost == nil {
@@ -73,6 +75,8 @@ func frideInstanceProblems(env *doctor.Env, name string, ic config.FrideInstance
 			notReady = append(notReady, n.Name+" not heard from")
 		case !fh.Ready:
 			notReady = append(notReady, n.Name+": "+orDefault(fh.Problem, "its sandboxes are not ready"))
+		case fh.NeedsTemplate && tpl == "":
+			notReady = append(notReady, n.Name+": "+noTemplate)
 		case fh.TotalMemoryMB > 0 && fh.TotalMemoryMB-fh.ReserveMB < least:
 			small = append(small, fmt.Sprintf("%s (%d MB beyond its reserve)", n.Name, fh.TotalMemoryMB-fh.ReserveMB))
 		default:

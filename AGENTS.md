@@ -323,11 +323,19 @@ This path gives a node its own companion FrIDE. The full runbook, with
 every command, is docs/NODES.md, "Setting up FrIDE on a node". The
 machine must already be a node (path B). FrIDE instances, each a FrIDE
 in a Docker Sandbox of its own that the core starts and stops, need no
-FrIDE set up by hand: on a macOS or Linux node with sbx (signed in) and
-Docker, run `fridolin node fride host setup --repo .` in a fridolin
-checkout of the core's version, then have the owner approve
-`fride_host` (docs/NODES.md, "FrIDE instances"). The companion, in
-short:
+FrIDE set up by hand: on a macOS, Linux or Windows 11 x64 node with sbx
+(`brew install --cask sbx`, or `winget install -h Docker.sbx` as the
+user who signs in; then `sbx login`, which the owner does in the
+browser), run `fridolin node fride host setup --no-build` (the core's
+published template; on Windows in the owner's own PowerShell, not
+elevated, with the node's `--state-dir`, after the Windows Hypervisor
+Platform is on: `Enable-WindowsOptionalFeature -Online -FeatureName
+HypervisorPlatform -All` elevated, and a restart if Windows asks), or
+with Docker `fridolin node fride host setup --repo .` in a fridolin
+checkout of the core's version to build the template there; then have
+the owner approve `fride_host` and check `fridolin node fride host
+status` says `Ready: yes` (docs/NODES.md, "FrIDE instances", and "FrIDE
+instances on Windows"). The companion, in short:
 
 1. **Where FrIDE runs.** On macOS and Linux it runs natively. On
    Windows it runs in WSL2 (Ubuntu), because FrIDE does not build for

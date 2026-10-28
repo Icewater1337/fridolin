@@ -1957,15 +1957,20 @@ deletes the workspaces and any uncommitted work in them, so ask first.
 
 ## Docker Sandboxes
 
-FrIDE instances run in Docker Sandboxes (`sbx`) microVMs on a Mac, or a
-Linux machine with KVM ([FrIDE instances](#fride-instances)). Brains do
+FrIDE instances run in Docker Sandboxes (`sbx`) microVMs on a Mac, a
+Linux machine with KVM, or Windows 11 on x64 with the Windows Hypervisor
+Platform ([FrIDE instances](#fride-instances); Windows:
+[FrIDE instances on Windows](#fride-instances-on-windows)). Brains do
 not: they run under bubblewrap in the core's container, or sandbox-exec
 natively ([VISION.md](VISION.md#why-not-docker-sandboxes-for-brains)).
 Fridolin is tested with sbx v0.50.0.
 
-- **Install and sign in**: `brew install --cask sbx`, then `sbx login`.
-  Docker Desktop or OrbStack must run too: the template is built with
-  Docker.
+- **Install and sign in**: `brew install --cask sbx` on a Mac,
+  `winget install -h Docker.sbx` on Windows, then `sbx login` as the
+  user whose sbx it is. sbx needs no Docker. Docker Desktop or OrbStack
+  only builds the template on the machine itself; without Docker the
+  node takes the template the core publishes
+  ([Setting a machine up](#setting-a-machine-up)).
 - **sbx's global settings** are fridolin's on this machine: the network
   policy `deny-all`, `ssh.agentForwardingEnabled` and `browser.enabled`
   off. They apply to your own sandboxes too. `fridolin node fride host
@@ -2014,52 +2019,142 @@ an instance's pair for as long as it has the instance.
 
 The machine is a node already ([Joining a machine](#joining-a-machine)),
 with sbx as in [Docker Sandboxes](#docker-sandboxes) (installed, and
-`sbx login`) and Docker. In a fridolin checkout of the core's version:
+`sbx login`).
 
-```sh
-fridolin node fride host setup --repo .
-```
+**The template.** Every instance's sandbox is made from one image, from
+[container/sandbox/fride.Dockerfile](../container/sandbox/fride.Dockerfile):
+sbx's Claude kit with FrIDE built at the commit fridolin pins
+(`FRIDE_COMMIT`, which a test holds to
+[container/fride/Dockerfile](../container/fride/Dockerfile)'s), its
+config (`/opt/fride/companion.json`, the box's), the Claude Code
+fridolin is tested with, and ponytail at the commit
+[Ponytail for every agent](#ponytail-for-every-agent) names. It holds no
+secret. The node gets it one of two ways:
 
-It checks sbx (running, signed in), makes sbx's global settings
-fridolin's, and builds the template unless sbx has it: the image of
-sbx's Claude kit with FrIDE built at the commit the checkout pins
-(`FRIDE_COMMIT` in
-[container/sandbox/fride.Dockerfile](../container/sandbox/fride.Dockerfile),
-which a test holds to [container/fride/Dockerfile](../container/fride/Dockerfile)'s),
-the Claude Code fridolin is tested with, and ponytail at the commit
-[Ponytail for every agent](#ponytail-for-every-agent) names. Docker
-builds it (a few minutes the first time), sbx loads it as
-`fridolin-fride-sbx:<hash>`, and Docker's copy goes. FrIDE's git URL is
-the checkout's origin with `fridolin` replaced by `fride`, on GitHub
-(`--fride-repo URL`). Setup records it all in `fride-host.json` in the
+- **From the core** (the default where no Docker is found, and the way
+  on Windows): CI publishes the template for amd64 and arm64 with the
+  core's images, `ghcr.io/OWNER/fridolin-fride-sandbox`
+  ([CORE.md](CORE.md#on-ghcr)), and the core names it in each start
+  (`fride.instance.start`'s `template`): `<registry>/fridolin-fride-sandbox:t-<hash>`,
+  with the tag its image names, which changes only with what goes into
+  the template, else its version. sbx pulls it the first time a sandbox
+  is made from it (a few GB). Nothing to build, and no checkout:
+
+  ```sh
+  fridolin node fride host setup --no-build
+  ```
+
+  A core that does not know where its images are published (a local
+  build, without `FRIDOLIN_BOX_REGISTRY`) names none, and places no
+  instance on such a node: its doctor and `fride_task` say why.
+- **Built here**, with Docker, in a fridolin checkout of the core's
+  version:
+
+  ```sh
+  fridolin node fride host setup --repo .
+  ```
+
+  Docker builds the template unless sbx has it (a few minutes the first
+  time), sbx loads it as `fridolin-fride-sbx:<hash>`, and Docker's copy
+  goes. FrIDE's git URL is the checkout's origin with `fridolin`
+  replaced by `fride`, on GitHub (`--fride-repo URL`). The node's own
+  template wins over the one the core names.
+
+Either way setup checks sbx (running, signed in), makes sbx's global
+settings fridolin's, and records it all in `fride-host.json` in the
 node's state dir; from then on the node's agent offers `fride_host`.
 
-Flags: `--docker-disk 40g` (each sandbox's Docker disk), `--no-caches`
-(see [Shared caches](#shared-caches)), `--reserve-mb N` (below),
-`--state-dir DIR`.
+Flags: `--no-build` (the template from the core), `--docker-disk 40g`
+(each sandbox's Docker disk), `--no-caches` (see [Shared
+caches](#shared-caches)), `--reserve-mb N` (below), `--state-dir DIR`.
 
 Then approve `fride_host` on the core once: `!approve`, the Nodes page,
 or `fridolin nodes approve ID --commands`. As with `fride`, approving it
 approves arbitrary commands, here inside the instances' VMs.
 
 `fridolin node fride host status` shows the template, sbx, whether the
-node is ready, the memory and the instances. Run `host setup` again in
-an updated checkout for a newer FrIDE, Claude Code or ponytail: an
-instance gets the new template when the node makes its sandbox anew,
-at its next start while it is stopped. The old template stays in sbx
-(`sbx template rm` frees its few GB).
+node is ready, the memory and the instances. A newer FrIDE, Claude Code
+or ponytail comes with a new template: from the core, once a core
+publishes one; built here, by running `host setup` again in an updated
+checkout. An instance gets the new template when the node makes its
+sandbox anew, at its next start while it is stopped. The old template
+stays in sbx (`sbx template rm` frees its few GB).
+
+### FrIDE instances on Windows
+
+Windows 11 on x64 runs Docker Sandboxes with the Windows Hypervisor
+Platform; sbx needs no Docker Desktop. The node is native
+([Joining a machine](#joining-a-machine)): its service runs as
+LocalSystem. Once, as the person who uses the machine:
+
+1. **The Windows Hypervisor Platform**, in an administrator PowerShell
+   (then restart, if Windows asks):
+
+   ```powershell
+   Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -All
+   ```
+
+2. **sbx**, in their own PowerShell (not elevated): `winget install -h
+   Docker.sbx`, then `sbx login` (the browser signs in to Docker) and
+   `sbx version`.
+3. **Setup**, in the same PowerShell, with the state dir the node joined
+   with:
+
+   ```powershell
+   & "$env:ProgramFiles\fridolin\fridolin.exe" node fride host setup --no-build --state-dir "$env:LOCALAPPDATA\fridolin-node"
+   ```
+
+   A node that joined from inside the Claude desktop app has its state
+   dir at `"$env:USERPROFILE\.fridolin-node"` instead
+   ([Inside an app package](#inside-an-app-package)).
+4. **Approve** `fride_host` on the core, as above, and check with
+   `fridolin node fride host status` (same `--state-dir`): `Ready: yes`.
+
+How it runs there:
+
+- **sbx is the signed-in user's.** Its login and its VMs belong to the
+  user who ran `sbx login`. The node's service runs every sbx call in
+  the signed-in user's session, as that user: with their token
+  (`WTSQueryUserToken`, the console's session first, else an active
+  Remote Desktop one), their environment and their profile folder,
+  without a window, and their `sbx.exe` from their `PATH` or WinGet's
+  links. While nobody is signed in, `fride_host` is not ready ("nobody
+  is signed in to Windows: sbx runs in the signed-in user's session"),
+  and the instances' FrIDEs stop with their VMs; once that user signs
+  in again, the agent starts those it keeps running (within its wait of
+  up to 5 minutes), and the core starts the others when work needs
+  them. So the user who set up sbx is the one who signs in; another user
+  has another sbx, without the instances. Started from a terminal as the
+  user (`fridolin node run`), the agent runs sbx itself.
+- **The tokens** wait in the instance's `tokens` folder in the state
+  dir, which only that user and SYSTEM may open (its ACL inherits
+  nothing). sbx reads one with the node's own `fridolin.exe node fride
+  host sbx-secret FILE`, by short paths without spaces, instead of
+  `/bin/cat`. The history's and the carry's folders are theirs and
+  SYSTEM's alone too, since `sbx cp` writes them as the user.
+- **Memory**: `available_memory_mb` is what `GlobalMemoryStatusEx` calls
+  available.
+- **Not yet on Windows**: shared caches (where sbx puts a Windows folder
+  in the VM is not settled; setup keeps none, `--no-caches`), Windows on
+  Arm (sbx has no build), a sandbox while nobody is signed in. Building
+  the template with Docker there is untried: take the core's.
 
 ### What the node offers
 
 The capability `fride_host` (`nodeproto.FrideHostCap`) says, for the
 core's placement:
 
-- `version` (sbx's) and `ready`: sbx answers and is signed in,
-  fridolin's settings hold, and sbx has the template; else `problem`
-  says what is missing.
+- `version` (sbx's) and `ready`: sbx answers and is signed in (on
+  Windows: someone is signed in to Windows, whose session sbx runs in),
+  fridolin's settings hold, and sbx has the template the node built;
+  else `problem` says what is missing.
+- `needs_template`: the node built no template (`host setup
+  --no-build`), so each start names the core's; a core that knows none
+  places no instance there.
 - `total_memory_mb` and `available_memory_mb`: what the OS can give
   now. On macOS that is the free, inactive, purgeable and speculative
-  pages (`vm_stat`), not only the free ones; on Linux `MemAvailable`.
+  pages (`vm_stat`), not only the free ones; on Linux `MemAvailable`; on
+  Windows what `GlobalMemoryStatusEx` calls available.
 - `reserve_mb`: what the machine keeps for itself, which the core
   starts no instance into: 6144 MB, or `node.json`'s
   `"fride_host": {"reserve_mb": N}` (`host setup --reserve-mb N`
@@ -2079,11 +2174,12 @@ It answers once FrIDE answers and is paired, with the instance as
 `fride_host` lists it. A first start takes a minute or two, plus the
 clones of large repositories; the node gives it 20 minutes at most.
 
-- **The sandbox** `fride-<name>`: from the template, `--memory` the
-  start's `memory_mb`, `-p 127.0.0.1:P:P` for FrIDE's port, a 40 GB
-  Docker disk ([Docker disk](#docker-disk)) and its own Go and npm caches
-  ([Shared caches](#shared-caches)). No other folder of the host's goes
-  in. `downloads.claude.ai` and `bridge.claudeusercontent.com` are
+- **The sandbox** `fride-<name>`: from the template (the node's own,
+  `--pull never`; else the one the start names, `--pull missing`),
+  `--memory` the start's `memory_mb`, `-p 127.0.0.1:P:P` for FrIDE's
+  port, a 40 GB Docker disk ([Docker disk](#docker-disk)) and its own Go
+  and npm caches ([Shared caches](#shared-caches)). No other folder of
+  the host's goes in. `downloads.claude.ai` and `bridge.claudeusercontent.com` are
   denied: the template pins Claude Code, and remote control stays off.
 - **Its network**, on top of the global `deny-all` and the hosts sbx's
   Claude kit opens: Anthropic's API, Go's module proxy and checksum
@@ -2106,9 +2202,10 @@ clones of large repositories; the node gives it 20 minutes at most.
   instance clones (or makes, with `gh repo create` inside) there too.
 - **FrIDE** runs from the template, its home, workspaces and base
   folder in `~/fride-companion` in the VM. Its config starts from the
-  box's ([container/fride/companion.json](../container/fride/companion.json)),
-  with the VM's base folder and workspaces; Claude Code trusts the
-  workspaces.
+  box's ([container/fride/companion.json](../container/fride/companion.json),
+  from the checkout a template was built from, else the template's own
+  copy), with the VM's base folder and workspaces; Claude Code trusts
+  the workspaces.
 
 A start of an instance that runs with the same memory only brings the
 network, tokens, login, identities and repositories up to date: the
@@ -2129,8 +2226,10 @@ No token ever enters a VM. For each identity the node calls
 `setHostToken(sandbox, host, token)` (`internal/nodeagent/sbx_tokens.go`):
 
 - the token waits in `fride-instances/<name>/tokens/<host>.token` in
-  the node's state dir (0600), which sbx reads (`--command`) when it
-  sets the secret;
+  the node's state dir (0600; on Windows the folder is the signed-in
+  user's and SYSTEM's alone), which sbx reads (`--command`: `/bin/cat`,
+  on Windows `fridolin.exe node fride host sbx-secret`) when it sets the
+  secret and when it refreshes it;
 - a sandbox-scoped custom secret (`sbx secret set-custom`) has sbx's
   proxy swap the placeholder for the token in every request to the
   host (for github.com also api.github.com), in a Bearer header and
@@ -2199,7 +2298,8 @@ the same path in the VM, with `gomod/`, `gobuild/` and `npm/`, and
 `GOFLAGS=-modcacherw`, so that the host can delete the module cache).
 sbx puts them into every exec, so FrIDE and its agents use them. A
 sandbox made anew for the same instance finds what the last one
-downloaded and built. `host setup --no-caches` leaves them out.
+downloaded and built. `host setup --no-caches` leaves them out; on
+Windows there are none yet.
 
 The caches are the instance's alone: what one sandbox writes, the next
 one of the same instance uses, never another trust domain's. Go checks
@@ -2249,7 +2349,9 @@ usual way.
 
 Stop and remove the instances (`fridolin node fride instance rm NAME`),
 then remove `fride-host.json` from the node's state dir: the node stops
-offering `fride_host`. The template stays in sbx until `sbx template rm`.
+offering `fride_host`. The template stays in sbx until `sbx template rm`
+(`sbx template ls` lists it: `fridolin-fride-sbx:<hash>` built here, or
+`fridolin-fride-sandbox` pulled from the core).
 The machine's node and the native companion are not touched by any of
 it.
 

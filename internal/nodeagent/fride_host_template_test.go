@@ -181,3 +181,55 @@ func TestFrideHostSetupRefuses(t *testing.T) {
 		t.Error("a refused setup recorded one")
 	}
 }
+
+// Setup with NoBuild needs no checkout, Docker or Git: it makes sbx's
+// settings fridolin's and records that the template comes from the
+// core; the node then declares fride_host ready, needing the core's
+// template. A node set up before keeps reading its fride-host.json.
+func TestFrideHostSetupNoBuild(t *testing.T) {
+	t.Parallel()
+	o, fake, out := setupFixture(t)
+	o.NoBuild, o.Repo, o.Docker, o.FrideRepo = true, filepath.Join(t.TempDir(), "no-checkout"), "", ""
+	ctx := context.Background()
+	if err := FrideHostSetup(ctx, o); err != nil {
+		t.Fatalf("setup: %v\n%s", err, out)
+	}
+	h, err := LoadFrideHost(o.Dir)
+	if err != nil || h == nil || !h.FromCore || h.Template != "" || h.companion() != nil || h.DockerDisk != "40g" {
+		t.Fatalf("fride-host.json %+v %v", h, err)
+	}
+	if _, err := os.Stat(filepath.Join(fake, "docker.log")); err == nil {
+		t.Error("NoBuild ran Docker")
+	}
+	calls := fakeCalls(t, fake)
+	if called(calls, "template", "load") || !called(calls, "settings", "ls") || !called(calls, "policy", "ls") {
+		t.Errorf("calls %v", calls)
+	}
+	if !strings.Contains(out.String(), "the template the core publishes (fridolin-fride-sandbox") {
+		t.Errorf("setup said:\n%s", out)
+	}
+	cfg, _ := LoadConfig(o.Dir)
+	a := &Agent{Dir: o.Dir, Config: cfg, Logf: func(string, ...any) {}, SandboxDriver: sbxCLI{path: o.Sbx, env: o.env}}
+	a.inst.memory = func() (uint64, uint64, error) { return 16 << 30, 10 << 30, nil }
+	c := a.frideHostRead(ctx)
+	if c == nil || !c.Ready || !c.NeedsTemplate || c.Problem != "" {
+		t.Errorf("declared %+v", c)
+	}
+
+	// The fride-host.json of a setup that built its template, as an older
+	// node wrote it, reads as it did.
+	writeTestFile(t, filepath.Join(o.Dir, frideHostFile), `{"template":"`+testTemplate+`","fride_repo":"https://github.com/you/fride","fride_commit":"`+testFridePin+`","companion":{"version":1},"docker_disk":"40g"}`)
+	h, err = LoadFrideHost(o.Dir)
+	if err != nil || h.FromCore || h.Template != testTemplate || string(h.companion()) != `{"version":1}` {
+		t.Errorf("an older fride-host.json: %+v %v", h, err)
+	}
+	if tpl, pull, err := h.templateFor("ghcr.io/you/fridolin-fride-sandbox:v1"); tpl != testTemplate || pull != sbxPullNever || err != nil {
+		t.Errorf("its own template: %q %q %v", tpl, pull, err)
+	}
+	for _, bad := range []string{`{"docker_disk":"40g"}`, `{"template":"x","docker_disk":"40g"}`} {
+		writeTestFile(t, filepath.Join(o.Dir, frideHostFile), bad)
+		if _, err := LoadFrideHost(o.Dir); err == nil {
+			t.Errorf("%s: no error", bad)
+		}
+	}
+}

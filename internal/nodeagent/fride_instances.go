@@ -1,6 +1,7 @@
 package nodeagent
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,8 +22,10 @@ import (
 // in a Docker Sandbox (sbx microVM) of its own, for one trust domain,
 // which the core starts and stops on a node through fride.instance.*.
 // The node's own agent runs them: `fridolin node fride host setup`
-// builds the template (FrIDE, Claude Code and ponytail) once, and the
-// node then offers fride_host. Each instance has its sandbox
+// builds the template (FrIDE, Claude Code and ponytail) once, or with
+// --no-build takes the one the core publishes, and the node then offers
+// fride_host. On Windows the node's service runs sbx in the signed-in
+// user's session (sbx_windows.go). Each instance has its sandbox
 // fride-<name>, a pair of loopback ports from 17850 up (FrIDE's and its
 // webhook's), a FrIDE paired with the node, its repositories cloned in
 // the VM, git identities whose tokens stay on the host (sbx's proxy
@@ -228,14 +231,19 @@ func portFree(port int) bool {
 // setup` set up on the machine. The node offers fride_host while it is
 // there.
 type FrideHostState struct {
-	// Template is the sbx template instances are made from: FrIDE at
-	// FrideCommit from FrideRepo, Claude Code and ponytail.
+	// Template is the sbx template instances are made from, which setup
+	// built here: FrIDE at FrideCommit from FrideRepo, Claude Code and
+	// ponytail. "" when FromCore.
 	Template    string `json:"template"`
-	FrideRepo   string `json:"fride_repo"`
-	FrideCommit string `json:"fride_commit"`
+	FrideRepo   string `json:"fride_repo,omitempty"`
+	FrideCommit string `json:"fride_commit,omitempty"`
+	// FromCore says the node built no template (setup --no-build): each
+	// start names the core's published one, which sbx pulls.
+	FromCore bool `json:"template_from_core,omitempty"`
 	// Companion is the FrIDE config a new instance starts from
-	// (container/fride/companion.json).
-	Companion json.RawMessage `json:"companion"`
+	// (container/fride/companion.json); nil for the template's own
+	// (/opt/fride/companion.json), which a template from the core has.
+	Companion json.RawMessage `json:"companion,omitempty"`
 	// DockerDisk is the size of a new sandbox's Docker disk, Caches the
 	// host folder of the shared Go and npm caches ("" for none).
 	DockerDisk string    `json:"docker_disk"`
@@ -256,10 +264,52 @@ func LoadFrideHost(dir string) (*FrideHostState, error) {
 	if err := json.Unmarshal(b, &h); err != nil {
 		return nil, fmt.Errorf("%s: %w", frideHostFile, err)
 	}
-	if h.Template == "" || !json.Valid(h.Companion) {
+	if h.Template == "" && !h.FromCore || h.Template != "" && !json.Valid(h.Companion) {
 		return nil, fmt.Errorf("%s: no template or FrIDE config: run fridolin node fride host setup again", frideHostFile)
 	}
 	return &h, nil
+}
+
+// companion is the FrIDE config a new instance's prepare script gets on
+// stdin: nil for the template's own.
+func (h *FrideHostState) companion() []byte {
+	if c := bytes.TrimSpace(h.Companion); len(c) > 0 && string(c) != "null" {
+		return c
+	}
+	return nil
+}
+
+// Pull policies of sbx create: the node's own template is in sbx's store
+// (setup loaded it); the core's is pulled when sbx lacks it.
+const (
+	sbxPullNever   = "never"
+	sbxPullMissing = "missing"
+)
+
+// errNoTemplate is a start that names no template on a node that built
+// none.
+var errNoTemplate = errors.New("this node built no FrIDE template (fridolin node fride host setup --no-build), and the core sends none: " +
+	"it does not know where its images are published (FRIDOLIN_BOX_REGISTRY); set the core up from its published image, or run fridolin node fride host setup with Docker here")
+
+// templateFor is the template a new sandbox is made from, and sbx's pull
+// policy for it: the node's own when setup built one, else core, the
+// one the start names.
+func (h *FrideHostState) templateFor(core string) (tpl, pull string, err error) {
+	switch {
+	case h.Template != "":
+		return h.Template, sbxPullNever, nil
+	case core != "":
+		return core, sbxPullMissing, nil
+	}
+	return "", "", errNoTemplate
+}
+
+// pullFor is sbx's pull policy for tpl: never for the node's own.
+func (h *FrideHostState) pullFor(tpl string) string {
+	if h.Template != "" && tpl == h.Template {
+		return sbxPullNever
+	}
+	return sbxPullMissing
 }
 
 // saveFrideHost writes fride-host.json.

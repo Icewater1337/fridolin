@@ -17,9 +17,10 @@ import (
 // a token for a git host never enters the VM. The VM gets a placeholder,
 // and sbx's proxy puts the token in its place in every request to the
 // host: in an Authorization header (Bearer, token) and in git's Basic
-// auth. The token waits on the host in a file only the node reads, which
-// sbx reads (`--command`) when it sets the secret and when it refreshes
-// it.
+// auth. The token waits on the host in a file only the node and the user
+// who runs sbx read, which sbx reads (`--command`: /bin/cat, on Windows
+// `fridolin node fride host sbx-secret`) when it sets the secret and when
+// it refreshes it.
 //
 // setHostToken and removeHostToken are the helpers; they work for any
 // host (github.com, gitlab.example.com:8443). For github.com the sandbox
@@ -97,10 +98,11 @@ func gitUser(host string) string {
 
 // setHostToken gives sandbox token for host and returns the placeholder
 // that stands for it in the VM: the token in a 0600 file in dir (the
-// folder of the sandbox's tokens), a sandbox-scoped sbx custom secret
-// that swaps the placeholder for it in requests to host (for github.com,
-// also to api.github.com), and git's credential helper for https://host
-// in the VM, which hands git the placeholder. For github.com, sbx's
+// folder of the sandbox's tokens, the user's who runs sbx alone), a
+// sandbox-scoped sbx custom secret that swaps the placeholder for it in
+// requests to host (for github.com, also to api.github.com), whose
+// command reads the file (sbxSecretCommand), and git's credential helper
+// for https://host in the VM, which hands git the placeholder. For github.com, sbx's
 // github service gets the token too, on stdin. Set again, it keeps the
 // placeholder and replaces the token. The token is never an argument,
 // printed or logged.
@@ -114,6 +116,14 @@ func setHostToken(ctx context.Context, d sbxDriver, dir, sandbox, host, token st
 		return "", err
 	}
 	if err := os.MkdirAll(filepath.Dir(tokFile), 0o700); err != nil {
+		return "", err
+	}
+	// sbx reads the token as its user; nobody else may.
+	if err := d.hostFolder(filepath.Dir(tokFile)); err != nil {
+		return "", err
+	}
+	command, err := d.secretCommand(tokFile)
+	if err != nil {
 		return "", err
 	}
 	ph, err := readPlaceholder(phFile)
@@ -140,7 +150,7 @@ func setHostToken(ctx context.Context, d sbxDriver, dir, sandbox, host, token st
 	if host == githubHost {
 		args = append(args, "--host", "api.github.com")
 	}
-	args = append(args, "--placeholder", ph, "--command", "/bin/cat '"+tokFile+"'")
+	args = append(args, "--placeholder", ph, "--command", command)
 	if _, stderr, err := d.run(ctx, nil, nil, args...); err != nil {
 		return "", fmt.Errorf("sbx could not set the secret for %s: %w", host, redact(err, stderr))
 	}

@@ -5,6 +5,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -56,7 +57,17 @@ replicate)
 esac
 exit 2
 `
-	if err := os.WriteFile(bin, []byte(script), 0o700); err != nil {
+	// cp writes the executable, not this process, as fakeRestic does: a
+	// write handle here could reach a parallel test's fork before its
+	// exec, and running a file open for writing fails with ETXTBSY.
+	src := bin + ".src"
+	if err := os.WriteFile(src, []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("cp", src, bin).CombinedOutput(); err != nil {
+		t.Fatalf("cp: %v %s", err, out)
+	}
+	if err := os.Chmod(bin, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	return bin, calls

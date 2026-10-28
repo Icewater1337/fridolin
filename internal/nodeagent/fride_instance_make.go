@@ -99,13 +99,16 @@ func (o instanceOps) status(ctx context.Context, st *FrideInstanceState) (string
 // and remote control.
 var sandboxClaudeDenied = []string{"downloads.claude.ai", "bridge.claudeusercontent.com"}
 
-// newSandbox makes st's sandbox with sbx create: its template, memory
-// and port, the instance's caches read-write at their own path with
-// their environment, and its Docker disk. No folder of the host's but
-// the caches goes in.
-func (o instanceOps) newSandbox(ctx context.Context, st *FrideInstanceState) error {
-	o.say("Creating the sandbox %s (memory %d MB, Docker disk %s, FrIDE on 127.0.0.1:%d)…", st.Sandbox, st.MemoryMB, st.DockerDisk, st.Port)
-	args := []string{"create", "--name", st.Sandbox, "--memory", strconv.Itoa(st.MemoryMB) + "m", "-t", st.Template, "--pull", "never",
+// newSandbox makes st's sandbox with sbx create: its template (with
+// sbx's pull policy pull), memory and port, the instance's caches
+// read-write at their own path with their environment, and its Docker
+// disk. No folder of the host's but the caches goes in.
+func (o instanceOps) newSandbox(ctx context.Context, st *FrideInstanceState, pull string) error {
+	o.say("Creating the sandbox %s from %s (memory %d MB, Docker disk %s, FrIDE on 127.0.0.1:%d)…", st.Sandbox, st.Template, st.MemoryMB, st.DockerDisk, st.Port)
+	if pull == sbxPullMissing {
+		o.say("sbx pulls the template unless it has it: a few GB the first time.")
+	}
+	args := []string{"create", "--name", st.Sandbox, "--memory", strconv.Itoa(st.MemoryMB) + "m", "-t", st.Template, "--pull", pull,
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", st.Port, st.Port)}
 	for _, h := range sandboxClaudeDenied {
 		args = append(args, "--deny-network", h)
@@ -137,7 +140,11 @@ func (o instanceOps) makeInside(ctx context.Context, st *FrideInstanceState, hos
 	} else if n > 0 {
 		o.say("Put back %d saved folders and files (the agents' sessions, FrIDE's tasks) from %s.", n, store)
 	}
-	return o.exec(ctx, st.Sandbox, bytes.NewReader(host.Companion), frideInstancePrepare)
+	var companion io.Reader
+	if c := host.companion(); c != nil {
+		companion = bytes.NewReader(c)
+	}
+	return o.exec(ctx, st.Sandbox, companion, frideInstancePrepare)
 }
 
 // make makes the instance's sandbox, which sbx does not have: from the
@@ -149,7 +156,7 @@ func (o instanceOps) make(ctx context.Context, st *FrideInstanceState, host *Fri
 		store, keep = o.carryDir(st.Name), frideInstanceCarry
 		o.say("An earlier remake of %s left its things in %s; making the sandbox and putting them back…", st.Name, store)
 	}
-	if err := o.newSandbox(ctx, st); err != nil {
+	if err := o.newSandbox(ctx, st, host.pullFor(st.Template)); err != nil {
 		return err
 	}
 	if err := o.makeInside(ctx, st, host, store, keep); err != nil {

@@ -15,10 +15,13 @@ import (
 )
 
 // The FrIDE template (docs/NODES.md, "FrIDE instances"): the image every
-// instance's sandbox is made from, built with Docker from
-// container/sandbox/fride.Dockerfile in a fridolin checkout and loaded
-// into sbx's own image store. It holds FrIDE, built at the commit the
-// checkout pins, Claude Code and ponytail, and no secret.
+// instance's sandbox is made from, from container/sandbox/fride.Dockerfile.
+// CI publishes it beside the core's images (fridolin-fride-sandbox), and
+// the core names it in each start, which sbx pulls on a node that set up
+// with --no-build; with Docker, setup builds it from a fridolin checkout
+// instead and loads it into sbx's own image store, and the node then uses
+// its own. It holds FrIDE, built at the commit the checkout pins, its
+// config, Claude Code and ponytail, and no secret.
 const (
 	// frideTemplateRepo is the template's image name.
 	frideTemplateRepo = "fridolin-fride-sbx"
@@ -60,13 +63,17 @@ func dockerfileArg(path, name string, re *regexp.Regexp) (string, error) {
 
 // FrideTemplateTag is the template's name for the checkout at repo and
 // FrIDE's git URL: a hash of the Dockerfile, which pins all that goes in,
-// and of the URL.
+// of the FrIDE config it copies and of the URL.
 func FrideTemplateTag(repo, frideRepo string) (string, error) {
-	b, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(frideTemplateDockerfile)))
-	if err != nil {
-		return "", fmt.Errorf("%s is not a fridolin checkout: %w", repo, err)
+	var b []byte
+	for _, f := range []string{frideTemplateDockerfile, frideCompanionConfig} {
+		c, err := os.ReadFile(filepath.Join(repo, filepath.FromSlash(f)))
+		if err != nil {
+			return "", fmt.Errorf("%s is not a fridolin checkout: %w", repo, err)
+		}
+		b = append(append(b, c...), 0)
 	}
-	sum := sha256.Sum256(append(append(b, 0), frideRepo...))
+	sum := sha256.Sum256(append(b, frideRepo...))
 	return frideTemplateRepo + ":" + hex.EncodeToString(sum[:])[:12], nil
 }
 

@@ -28,6 +28,15 @@ func TestMain(m *testing.M) {
 	if dir := os.Getenv("FAKE_DOCKER_DIR"); dir != "" && len(os.Args) > 1 && (os.Args[1] == "build" || os.Args[1] == "save" || os.Args[1] == "image") {
 		os.Exit(fakeDocker(dir))
 	}
+	// sbx runs the test binary as fridolin.exe to read a token on
+	// Windows (the live test).
+	if len(os.Args) == 6 && slices.Equal(os.Args[1:5], sbxSecretArgs) {
+		if err := PrintSbxSecret(os.Stdout, os.Args[5]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	if dir := os.Getenv("FAKE_SBX_DIR"); dir != "" {
 		if code, ok := fakeFrideSbx(dir, os.Args[1:]); ok {
 			os.Exit(code)

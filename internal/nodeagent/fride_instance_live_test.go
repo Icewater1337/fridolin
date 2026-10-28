@@ -21,9 +21,12 @@ import (
 // TestFrideInstanceLive runs a FrIDE instance against the machine's real
 // sbx and Docker, only with FRIDOLIN_LIVE_SBX=1 (never in CI), in a
 // scratch state dir: it sets the host up (the template built from this
-// checkout's pins, unless sbx has it), starts an instance with a made-up
-// Claude token, checks that FrIDE answers and is paired and that the
-// instance's webhook reaches the agent from inside the VM, starts it
+// checkout's pins, unless sbx has it; with FRIDOLIN_LIVE_TEMPLATE=IMAGE
+// --no-build instead, the instance made from IMAGE, which sbx pulls: no
+// Docker needed, as on Windows), starts an instance with a made-up
+// Claude token and a made-up GitLab token (which sbx's secret command
+// reads on the host), checks that FrIDE answers and is paired and that
+// the instance's webhook reaches the agent from inside the VM, starts it
 // again with more memory (a remake), stops and removes it, and removes
 // the template when it built it. Its instance has a scratch name, and its
 // ports are the first free pair from 17950 up.
@@ -36,9 +39,10 @@ func TestFrideInstanceLive(t *testing.T) {
 	if err != nil {
 		t.Skip("no sbx")
 	}
+	tpl := os.Getenv("FRIDOLIN_LIVE_TEMPLATE")
 	docker, err := exec.LookPath("docker")
-	if err != nil {
-		t.Skip("no docker")
+	if err != nil && tpl == "" {
+		t.Skip("no docker: set FRIDOLIN_LIVE_TEMPLATE to a published template")
 	}
 	git, _ := exec.LookPath("git")
 	_, file, _, _ := runtime.Caller(0)
@@ -51,8 +55,13 @@ func TestFrideInstanceLive(t *testing.T) {
 	defer cancel()
 	d := sbxCLI{path: sbx}
 	o := FrideHostSetupOptions{Dir: dir, Sbx: sbx, Docker: docker, Git: git, Repo: repo, Caches: filepath.Join(t.TempDir(), "caches"), Out: tlogWriter{t}}
-	host, err := liveTemplate(ctx, t, d, o)
-	if err != nil {
+	if runtime.GOOS == "windows" {
+		o.Caches = ""
+	}
+	host := tpl
+	if tpl != "" {
+		o.NoBuild = true
+	} else if host, err = liveTemplate(ctx, t, d, o); err != nil {
 		t.Fatal(err)
 	}
 	if err := FrideHostSetup(ctx, o); err != nil {
@@ -68,7 +77,8 @@ func TestFrideInstanceLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg, _ := LoadConfig(dir)
-	a := &Agent{Dir: dir, Config: cfg, SandboxSbx: sbx, CoreSecrets: store, Logf: t.Logf, FrideInstancePoll: time.Second}
+	// On Windows sbx reads the git token with the test binary as fridolin.exe.
+	a := &Agent{Dir: dir, Config: cfg, SandboxSbx: sbx, Executable: testExe(t), CoreSecrets: store, Logf: t.Logf, FrideInstancePoll: time.Second}
 	a.inst.portBase = 17950
 	lctx, stopLoop := context.WithCancel(ctx)
 	var wg sync.WaitGroup
@@ -83,8 +93,9 @@ func TestFrideInstanceLive(t *testing.T) {
 	})
 
 	start := time.Now()
-	out, perr := a.frideInstanceStart(ctx, nodeproto.FrideInstanceStartParams{Name: name, MemoryMB: 3072,
-		Git: &nodeproto.FrideGitUser{Name: "Live Test", Email: "you@example.com"}})
+	out, perr := a.frideInstanceStart(ctx, nodeproto.FrideInstanceStartParams{Name: name, MemoryMB: 3072, Template: tpl,
+		Identities: []nodeproto.FrideIdentity{{ID: "live", Kind: "gitlab", Host: "gitlab.example.com", Token: "glpat-live-" + "made-up"}},
+		Git:        &nodeproto.FrideGitUser{Name: "Live Test", Email: "you@example.com"}})
 	if perr != nil {
 		t.Fatalf("start: %v", perr)
 	}
@@ -101,7 +112,7 @@ func TestFrideInstanceLive(t *testing.T) {
 	}
 
 	start = time.Now()
-	out, perr = a.frideInstanceStart(ctx, nodeproto.FrideInstanceStartParams{Name: name, MemoryMB: 4096})
+	out, perr = a.frideInstanceStart(ctx, nodeproto.FrideInstanceStartParams{Name: name, MemoryMB: 4096, Template: tpl})
 	if perr != nil {
 		t.Fatalf("start with more memory: %v", perr)
 	}

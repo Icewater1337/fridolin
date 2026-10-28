@@ -89,6 +89,16 @@ func (o instanceOps) saveVM(ctx context.Context, sandbox, store string, paths []
 	if err != nil {
 		return 0, err
 	}
+	if len(have) > 0 {
+		// sbx cp writes there as its user. A store made for nothing would
+		// stand for a remake's carry.
+		if err := os.MkdirAll(store, 0o700); err != nil {
+			return 0, err
+		}
+		if err := o.d.hostFolder(store); err != nil {
+			return 0, err
+		}
+	}
 	for _, p := range have {
 		dst := filepath.Join(store, filepath.FromSlash(path.Dir(p)))
 		if err := os.MkdirAll(dst, 0o700); err != nil {
@@ -116,6 +126,10 @@ func (o instanceOps) restoreVM(ctx context.Context, sandbox, store string, paths
 	}
 	if len(have) == 0 {
 		return 0, nil
+	}
+	// sbx cp reads there as its user.
+	if err := o.d.hostFolder(store); err != nil {
+		return 0, err
 	}
 	home, _, err := o.vmHas(ctx, sandbox, nil)
 	if err != nil {
