@@ -12,7 +12,6 @@ package site
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -458,8 +457,8 @@ func (m *SiteManager) manifestAt(ctx context.Context, commit, file string) map[s
 		return nil
 	}
 	var v map[string]any
-	if json.Unmarshal([]byte(data), &v) != nil {
-		return map[string]any{"invalid": "module.json is not valid JSON"}
+	if decodeManifest([]byte(data), &v) != nil {
+		return map[string]any{"invalid": "module.json is not valid JSON, or has a key twice"}
 	}
 	return v
 }
@@ -727,7 +726,7 @@ func (m *SiteManager) prepareCheckout(ctx context.Context, job *SiteJob, commit,
 				} `json:"build"`
 			} `json:"app"`
 		}
-		if json.Unmarshal(data, &mf) != nil || mf.App == nil || mf.App.Build == nil || len(mf.App.Build.Run) == 0 {
+		if decodeManifest(data, &mf) != nil || mf.App == nil || mf.App.Build == nil || len(mf.App.Build.Run) == 0 {
 			continue
 		}
 		job.step("Building %s: %s", e.Name(), strings.Join(mf.App.Build.Run, " "))
