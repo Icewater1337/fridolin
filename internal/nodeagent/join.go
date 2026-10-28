@@ -27,9 +27,6 @@ type JoinOptions struct {
 	// (tests whose nodes must not depend on the machine's tools); nil
 	// offers it then.
 	AndroidBuild *bool
-	// Service makes the node a second node on this machine, with a
-	// service of its own (Config.Service).
-	Service string
 	// Box makes the node a node in a box; Dial is how it reaches the core
 	// (nil: the host's network).
 	Box     *BoxConfig
@@ -61,7 +58,7 @@ func Join(ctx context.Context, o JoinOptions) (Joined, error) {
 	if o.Code == "" {
 		return Joined{}, errors.New("the join code is missing: send !join to the bridge in your WhatsApp chat, or run fridolin nodes join-code on the core")
 	}
-	cfg := Config{Core: o.Core, Name: o.Name, Capabilities: o.Capabilities, AndroidBuild: o.AndroidBuild, Box: o.Box, Service: o.Service}
+	cfg := Config{Core: o.Core, Name: o.Name, Capabilities: o.Capabilities, AndroidBuild: o.AndroidBuild, Box: o.Box}
 	if err := cfg.Check(); err != nil {
 		return Joined{}, err
 	}

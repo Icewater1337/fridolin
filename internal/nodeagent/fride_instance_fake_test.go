@@ -8,17 +8,22 @@ import (
 	"strings"
 )
 
-// fakeFrideScript is a script of fride_sandbox_scripts.go in the fake
-// sbx's VM, by the name on its first line. Its files are under
-// dir/fride: config.json (prepare), git (the identity), built and
-// builds.log (build), serves.log and running (serve, which runs until
-// stopped or crash appears), stops.log, token (login), credentials (git's
+// fakeVM is the folder of sandbox's FrIDE in the fake sbx: what the
+// scripts leave there.
+func fakeVM(dir, sandbox string) string { return filepath.Join(dir, "fride", sandbox) }
+
+// fakeFrideScript is a script of fride_instance_scripts.go in the fake
+// sbx's VM of sandbox, by the name on its first line. Its files are
+// under fride/<sandbox>/: config.json (prepare), git (the identity),
+// serves.log and running (serve, which runs until stopped, crash or the
+// VM's stop appears), stops.log, token (login), credentials (git's
 // helpers), owns.log (own); code is the pairing code pair-code prints,
-// fail-<name> fails a script. list and mkdirs work on dir/vmhome, the
-// VM's home, which cp copies to and from.
-func fakeFrideScript(dir, script string, args []string) int {
-	name, _, _ := strings.Cut(strings.TrimPrefix(script, "# fride-sandbox: "), "\n")
-	vm := filepath.Join(dir, "fride")
+// fail-<name> fails a script. list, mkdirs, clone and repo-new work on
+// vmhome/<sandbox>/, the VM's home, which cp copies to and from.
+func fakeFrideScript(dir, sandbox, script string, args []string) int {
+	name, _, _ := strings.Cut(strings.TrimPrefix(script, frideInstanceScriptPrefix), "\n")
+	vm := fakeVM(dir, sandbox)
+	home := filepath.Join(dir, "vmhome", sandbox)
 	_ = os.MkdirAll(vm, 0o700)
 	at := func(f string) string { return filepath.Join(vm, f) }
 	exists := func(f string) bool { _, err := os.Stat(at(f)); return err == nil }
@@ -32,12 +37,9 @@ func fakeFrideScript(dir, script string, args []string) int {
 		if !exists("config.json") {
 			_ = os.WriteFile(at("config.json"), b, 0o600)
 		}
+		_ = os.MkdirAll(filepath.Join(home, "fride-companion", "repos"), 0o755)
 	case "git":
 		_ = os.WriteFile(at("git"), []byte(strings.Join(args, "|")), 0o600)
-	case "build":
-		_ = os.WriteFile(at("built"), []byte(args[1]), 0o600)
-		appendFile(at("builds.log"), strings.Join(args, " ")+"\n")
-		fmt.Printf("Built FrIDE %s.\n", args[1])
 	case "serve":
 		_ = os.Remove(at("stopped"))
 		appendFile(at("serves.log"), strings.Join(args, " ")+"\n")
@@ -68,17 +70,17 @@ func fakeFrideScript(dir, script string, args []string) int {
 	case "list":
 		fmt.Println("home=" + fakeVMHome)
 		for _, p := range args {
-			if _, err := os.Stat(filepath.Join(dir, "vmhome", p)); err == nil {
+			if _, err := os.Stat(filepath.Join(home, p)); err == nil {
 				fmt.Println("have=" + p)
 			}
 		}
 	case "mkdirs":
 		for _, p := range args {
-			_ = os.MkdirAll(filepath.Join(dir, "vmhome", p), 0o755)
+			_ = os.MkdirAll(filepath.Join(home, p), 0o755)
 		}
 	case "own":
 		appendFile(at("owns.log"), strings.Join(args, " ")+"\n")
-		_ = os.Remove(filepath.Join(dir, "vmhome", "fride-companion", "home", "fride.pid"))
+		_ = os.Remove(filepath.Join(home, "fride-companion", "home", "fride.pid"))
 	case "credential":
 		appendFile(at("credentials"), strings.Join(args, " ")+"\n")
 	case "uncredential":
@@ -90,17 +92,30 @@ func fakeFrideScript(dir, script string, args []string) int {
 			}
 		}
 		_ = os.WriteFile(at("credentials"), []byte(strings.Join(keep, "")), 0o600)
-	case "status":
-		yes := func(f string) string {
-			if exists(f) {
-				return "yes"
-			}
-			return "no"
+	case "clone":
+		d := filepath.Join(home, "fride-companion", "repos", args[1])
+		fmt.Println("path=" + fakeVMHome + "/fride-companion/repos/" + args[1])
+		if _, err := os.Stat(d); err == nil {
+			fmt.Println("clone=have")
+			return 0
 		}
-		built, _ := os.ReadFile(at("built"))
-		fmt.Printf("login=%s\ngit=%s\nrunning=%s\ncommit=%s\n", yes("token"), yes("git"), yes("running"), built)
+		appendFile(at("clones.log"), args[0]+"\n")
+		_ = os.MkdirAll(filepath.Join(d, ".git"), 0o755)
+		fmt.Println("clone=done")
+	case "repo-new":
+		d := filepath.Join(home, "fride-companion", "repos", args[0])
+		if _, err := os.Stat(d); err == nil {
+			fmt.Fprintf(os.Stderr, "%s already exists in the base folder\n", args[0])
+			return 3
+		}
+		_ = os.MkdirAll(filepath.Join(d, ".git"), 0o755)
+		fmt.Println("path=" + fakeVMHome + "/fride-companion/repos/" + args[0])
+	case "gh-create":
+		fmt.Println("https://github.com/you/" + args[0])
+	case "logs":
+		fmt.Printf("the last %s lines of FrIDE's log\n", args[0])
 	default:
-		fmt.Fprintf(os.Stderr, "the fake runs no fride-sandbox script %q\n", name)
+		fmt.Fprintf(os.Stderr, "the fake runs no fride-instance script %q\n", name)
 		return 127
 	}
 	return 0

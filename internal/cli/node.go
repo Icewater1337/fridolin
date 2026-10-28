@@ -54,6 +54,9 @@ Usage:
   fridolin node fride pair --url http://127.0.0.1:PORT | status
                        FrIDE on this machine, offered to the core while it runs;
                        fridolin node fride help for more
+  fridolin node fride host setup|status | instance ls|stop|rm|logs
+                       FrIDE instances, each in a Docker Sandbox of its own, which
+                       the core starts on this machine
 
 Join flags:
   --name NAME          how the core shows this node (default: the host name)
@@ -311,11 +314,6 @@ type joinFlags struct {
 	workRoots                       multiFlag
 	box, boxNoFride                 bool
 	boxHostname                     string
-	// service makes a second node on the machine, with a service of its
-	// own, and noAndroid keeps it from offering android-build: set by
-	// `fridolin node fride sandbox join`, not flags of node join.
-	service   string
-	noAndroid bool
 }
 
 func (o *joinFlags) register(fs *flag.FlagSet) {
@@ -501,10 +499,7 @@ func nodeJoin(code, dir string, o joinFlags, pkg appPackage, stdout, stderr io.W
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	jo := nodeagent.JoinOptions{Dir: dir, Core: o.core, Code: code, Name: name, Capabilities: caps, Version: version.String(), Service: o.service}
-	if o.noAndroid {
-		jo.AndroidBuild = new(false)
-	}
+	jo := nodeagent.JoinOptions{Dir: dir, Core: o.core, Code: code, Name: name, Capabilities: caps, Version: version.String()}
 	if o.box {
 		box := &nodeagent.BoxConfig{Hostname: o.boxHostname, Fride: nodeagent.BoxFride}
 		if box.Hostname == "" {

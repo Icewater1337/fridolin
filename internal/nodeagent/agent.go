@@ -98,15 +98,14 @@ type Agent struct {
 	CoreRunner                          CoreRunner
 	CoreScan                            func() []string
 	MovePoll, MoveGrace, MoveExportWait time.Duration
-	// SandboxSbx is the sbx binary of the sandboxed FrIDE ("" for none;
+	// SandboxSbx is the sbx binary of the FrIDE instances ("" for none;
 	// `node run` sets what it finds); SandboxDriver, when set, runs sbx
 	// instead (tests).
 	SandboxSbx    string
 	SandboxDriver sbxDriver
-	// FrideSandboxPoll is how often the agent reads fride-sandbox.json
-	// to keep the sandboxed FrIDE running (DefaultFrideSandboxPoll when
-	// zero).
-	FrideSandboxPoll time.Duration
+	// FrideInstancePoll is how often the agent reads the instances' state
+	// to keep their FrIDEs running (DefaultFrideInstancePoll when zero).
+	FrideInstancePoll time.Duration
 
 	core        coreHost
 	moves       coreMoves
@@ -120,6 +119,7 @@ type Agent struct {
 	android     android
 	work        workstation
 	sbxSettings sbxSettingsState
+	inst        frideInstances
 }
 
 // Load makes the agent of the node in dir.
@@ -315,9 +315,10 @@ func (a *Agent) Run(ctx context.Context) error {
 		maxB = time.Minute
 	}
 	backoff := minB
-	// FrIDE and the Android toolchain first, so that the first hello
-	// declares them when they are there.
+	// FrIDE, fride_host and the Android toolchain first, so that the
+	// first hello declares them when they are there.
 	a.frideCheck(ctx)
+	a.frideHostRefresh(ctx, true)
 	a.androidCheck(true)
 	a.coreHostChanged()
 	a.sbxSettingsCheck(ctx)
@@ -332,8 +333,8 @@ func (a *Agent) Run(ctx context.Context) error {
 	defer fwg.Wait()
 	defer stopFride()
 	a.boxForward(fctx, &fwg)
-	// FrIDE in a Docker Sandbox, while fride-sandbox.json says run.
-	a.frideSandboxSupervise(fctx, &fwg)
+	// The FrIDE instances whose state says run.
+	a.frideInstancesSupervise(fctx, &fwg)
 	// The core in a box: its ports, and the core when the box is it.
 	if s, ok := a.CoreRunner.(interface{ Supervise(context.Context) }); ok {
 		fwg.Go(func() { s.Supervise(fctx) })

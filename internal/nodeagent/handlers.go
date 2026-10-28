@@ -60,10 +60,19 @@ func (a *Agent) call(ctx context.Context, req nodeproto.Request) (any, *nodeprot
 		return a.execProgramsCall(req.Params)
 	}
 	if req.Method == nodeproto.MethodFrideIdentities {
+		if eff.Fride == nil {
+			return nil, nodeproto.Errorf(nodeproto.CodeDenied, "%s: this node's own FrIDE is not approved here; FrIDE instances get their identities with %s", req.Method, nodeproto.MethodFrideInstanceStart)
+		}
 		return a.frideIdentitiesCall(ctx, req.Params)
 	}
 	if slices.Contains(nodeproto.FrideMethods, req.Method) {
+		if perr := frideApproved(eff, req.Method, req.Params); perr != nil {
+			return nil, perr
+		}
 		return a.frideCall(ctx, req.Method, req.Params)
+	}
+	if slices.Contains(nodeproto.FrideHostMethods, req.Method) {
+		return a.frideInstanceCall(ctx, req.Method, req.Params)
 	}
 	if slices.Contains(nodeproto.AndroidMethods, req.Method) {
 		return a.androidCall(ctx, req.Method, req.Params)

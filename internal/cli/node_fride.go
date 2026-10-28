@@ -29,9 +29,13 @@ Usage:
                        gives FrIDE a loopback webhook for its news
   fridolin node fride status
                        what is paired, and whether FrIDE answers
-  fridolin node fride sandbox join|create|login|start|stop|update|status|rm
-                       FrIDE in a Docker Sandbox, on a node of its own;
-                       fridolin node fride sandbox help for more
+  fridolin node fride host setup|status
+                       set this machine up to run FrIDE instances, each a FrIDE in
+                       a Docker Sandbox of its own, which the core starts;
+                       fridolin node fride host help for more
+  fridolin node fride instance ls|stop NAME|rm NAME|logs NAME
+                       the FrIDE instances on this machine;
+                       fridolin node fride instance help for more
 
 Flags:
   --fride PATH         the fride program (default: fride on the PATH)
@@ -54,8 +58,8 @@ func nodeFrideCmd(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	sub, args := args[0], args[1:]
-	if sub == "sandbox" {
-		return nodeFrideSandboxCmd(args, stdout, stderr)
+	if sub == "host" || sub == "instance" {
+		return nodeFrideHostCmd(sub == "instance", args, stdout, stderr)
 	}
 	fs := flag.NewFlagSet("node fride "+sub, flag.ContinueOnError)
 	fs.SetOutput(stderr)

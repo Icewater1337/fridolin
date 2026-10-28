@@ -11,8 +11,8 @@ import (
 
 // Fridolin owns sbx's global settings on the node's machine (#149): the
 // network policy deny-all, the SSH agent and the host's browser out of
-// reach. `fridolin node fride sandbox create` makes them hold, and the
-// agent of the sandboxed FrIDE's node sets them again when they drift
+// reach. `fridolin node fride host setup` makes them hold, and the agent
+// of a fride_host node sets them again when they drift
 // (sbxSettingsCheck).
 
 // sbxRestartSettings are owned settings that take full effect only after
@@ -20,7 +20,7 @@ import (
 var sbxRestartSettings = map[string]bool{"ssh.agentForwardingEnabled": true}
 
 // errPolicyNotDenyAll is a global network policy other than deny-all,
-// which only create replaces, or you by hand: `sbx policy reset` deletes every rule and
+// which only host setup replaces, or you by hand: `sbx policy reset` deletes every rule and
 // stops the daemon, and every sandbox with it.
 var errPolicyNotDenyAll = errors.New("sbx's global network policy is not deny-all: sbx policy reset --force, then sbx policy init deny-all, replace it (and stop every sandbox)")
 
@@ -33,7 +33,7 @@ func sbxPolicyUnset(stderr []byte) bool {
 // sbxEnforce makes fridolin's global settings hold: it sets each owned
 // setting that drifted, and initializes the network policy to deny-all
 // where there is none. Another policy is replaced only when replace says
-// so (create). It returns what it changed, and whether one of the changes
+// so (host setup). It returns what it changed, and whether one of the changes
 // waits for a daemon restart.
 func sbxEnforce(ctx context.Context, d sbxDriver, replace bool) (changed []string, restart bool, err error) {
 	settings, stderr, err := d.run(ctx, nil, nil, "settings", "ls", "--json")
@@ -85,7 +85,7 @@ func (a *Agent) sandboxSettings(ctx context.Context, d sbxDriver) (bool, string)
 	return true, ""
 }
 
-// sbxOwnSettings makes fridolin's global settings hold for create: it
+// sbxOwnSettings makes fridolin's global settings hold for host setup: it
 // replaces another network policy, and restarts sbx's daemon for a
 // setting that needs it when no sandbox runs (list).
 func sbxOwnSettings(ctx context.Context, d sbxDriver, list []sbxSandbox, out io.Writer) error {
