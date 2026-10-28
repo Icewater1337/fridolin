@@ -1329,6 +1329,9 @@ export interface SnapshotsStatus {
   last?: SnapshotRecord;
   last_hourly?: SnapshotRecord;
   last_nightly?: SnapshotRecord;
+  /** The last hourly and nightly snapshots taken (with an ID, incomplete ones too), which the mass-deletion guard compares a new one with. */
+  taken_hourly?: SnapshotRecord;
+  taken_nightly?: SnapshotRecord;
   last_check?: CheckRecord;
   last_read_data?: CheckRecord;
   last_prune?: VaultRecord;
@@ -1449,6 +1452,9 @@ export interface VaultTarget {
   job?: string;
   last_hourly?: SnapshotRecord;
   last_nightly?: SnapshotRecord;
+  /** The last hourly and nightly snapshots taken (with an ID, incomplete ones too), which the mass-deletion guard compares a new one with. */
+  taken_hourly?: SnapshotRecord;
+  taken_nightly?: SnapshotRecord;
   last?: SnapshotRecord;
   last_check?: CheckRecord;
   last_read_data?: CheckRecord;

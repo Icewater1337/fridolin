@@ -669,3 +669,54 @@ func TestReadableCopyFollowsNoSymlinkOut(t *testing.T) {
 }
 
 func statOrNil(p string) os.FileInfo { fi, _ := os.Stat(p); return fi }
+
+// TestSnapshotMassDeletionBase is #356: the guard compares a snapshot with
+// the last one of its kind that was taken, past failed tries and
+// incomplete snapshots, and with the last try in a status from before
+// the taken ones were kept.
+func TestSnapshotMassDeletionBase(t *testing.T) {
+	t.Parallel()
+	type try struct {
+		kind  string
+		files int
+		taken bool // it has an ID; an incomplete snapshot has one too
+	}
+	tests := []struct {
+		name  string
+		prev  *snapshotRecord // the last try kept by a version before
+		tries []try
+		held  int // the files of the snapshot the last try is held against; 0 for none
+	}{
+		{"a failed nightly in between", nil, []try{{snapshotNightly, 10000, true}, {snapshotNightly, 0, false}, {snapshotNightly, 200, true}}, 10000},
+		{"incomplete ones", nil, []try{{snapshotNightly, 10000, true}, {snapshotNightly, 9990, true}, {snapshotNightly, 200, true}}, 9990},
+		{"hourly ones in between", nil, []try{{snapshotNightly, 10000, true}, {snapshotHourly, 50, true}, {snapshotNightly, 9900, true}}, 0},
+		{"tidying up", nil, []try{{snapshotHourly, 1000, true}, {snapshotHourly, 990, true}}, 0},
+		{"the first one", nil, []try{{snapshotHourly, 3, true}}, 0},
+		{"a status from before", &snapshotRecord{Kind: snapshotNightly, ID: "abc", Files: 5000, Error: "incomplete"}, []try{{snapshotNightly, 100, true}}, 5000},
+		{"a failed try from before", &snapshotRecord{Kind: snapshotNightly, Error: "offline"}, []try{{snapshotNightly, 100, true}}, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var st takenSnapshots
+			last := map[string]*snapshotRecord{snapshotNightly: tc.prev}
+			var base *snapshotRecord
+			for i, tr := range tc.tries {
+				rec := &snapshotRecord{Kind: tr.kind, Files: tr.files}
+				prev := last[tr.kind]
+				last[tr.kind] = rec
+				base = nil
+				if tr.taken {
+					rec.ID = strconv.Itoa(i + 1)
+					base = st.massDeletion(tr.kind, prev, rec)
+				}
+			}
+			switch {
+			case tc.held == 0 && base != nil:
+				t.Errorf("held against %+v", base)
+			case tc.held != 0 && (base == nil || base.Files != tc.held):
+				t.Errorf("held against %+v, want one of %d files", base, tc.held)
+			}
+		})
+	}
+}
