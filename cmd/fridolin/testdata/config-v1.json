@@ -86,9 +86,7 @@
       "~/Documents/shared"
     ],
     "git_config": "deny",
-    "credentials_dir": "~/.fridolin/credentials",
-    "runtime": "docker-sandbox",
-    "node": "mini"
+    "credentials_dir": "~/.fridolin/credentials"
   },
   "otp_guard": true,
   "otp_markers": [

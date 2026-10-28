@@ -133,12 +133,6 @@ The run gets it as **gh's own login**, not as a variable:
 - **What is not passed on:** the bridge's own variables,
   `FRIDOLIN_GITHUB_TOKEN` included.
 
-A run of a brain in a **Docker Sandbox** (docs/SANDBOXES.md) gets the
-token another way. The core sends it to the node, and sbx's proxy holds
-it: the VM never sees it. `gh`, and git over HTTPS, work as they are,
-with no credential helper. The sandbox reaches GitHub only while such a
-run goes on.
-
 When the run ends, the bridge revokes the token
 (`DELETE /installation/token`) and removes the folder; a bridge that
 stopped without doing so removes it at its next start. A token that cannot be minted leaves the

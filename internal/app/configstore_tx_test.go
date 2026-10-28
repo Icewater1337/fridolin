@@ -658,7 +658,7 @@ func TestConfigExternalEditMigrationKeepsItsETag(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := readRawConfig(t, cs.Path())
-	if string(raw["version"]) != "2" || string(raw["brain_model"]) != `"opus"` || raw["model"] != nil {
+	if string(raw["version"]) != "3" || string(raw["brain_model"]) != `"opus"` || raw["model"] != nil {
 		t.Fatalf("saved migration = %v", raw)
 	}
 	data, err := os.ReadFile(cs.Path())
@@ -678,7 +678,7 @@ func TestConfigUpdateRefusesANewerExternalVersion(t *testing.T) {
 	t.Parallel()
 	cs := openTxStore(t, `{"version":2,"brain_model":"sonnet"}`)
 	before := cs.Snapshot()
-	const external = `{"version":3,"brain_model":"opus","a_new_setting":true}`
+	const external = `{"version":4,"brain_model":"opus","a_new_setting":true}`
 	if err := os.WriteFile(cs.Path(), []byte(external), 0600); err != nil {
 		t.Fatal(err)
 	}

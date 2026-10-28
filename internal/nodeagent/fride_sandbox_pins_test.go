@@ -7,13 +7,10 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
-// The FrIDE template takes its base image, Claude Code and ponytail from
-// the brain template and the fridolin-fride image, and this checkout pins
-// FrIDE's commit.
+// The FrIDE template takes Claude Code and ponytail from the
+// fridolin-fride image, and this checkout pins FrIDE's commit.
 func TestFrideSandboxDockerfilePins(t *testing.T) {
 	t.Parallel()
 	repo := filepath.Join("..", "..")
@@ -27,8 +24,8 @@ func TestFrideSandboxDockerfilePins(t *testing.T) {
 		return v
 	}
 	for name, file := range map[string]string{
-		"BASE_IMAGE": "container/sandbox/Dockerfile", "CLAUDE_CODE_VERSION": "container/sandbox/Dockerfile",
-		"PONYTAIL_REPO": frideImageDockerfile, "PONYTAIL_COMMIT": frideImageDockerfile,
+		"CLAUDE_CODE_VERSION": frideImageDockerfile,
+		"PONYTAIL_REPO":       frideImageDockerfile, "PONYTAIL_COMMIT": frideImageDockerfile,
 	} {
 		if got, want := arg(frideSandboxDockerfile, name), arg(file, name); got != want {
 			t.Errorf("%s: %s in %s, %s in %s", name, got, frideSandboxDockerfile, want, file)
@@ -42,12 +39,9 @@ func TestFrideSandboxDockerfilePins(t *testing.T) {
 	}
 }
 
-// The scripts are sh, and the sandbox's name is never a brain's.
+// The scripts are sh.
 func TestFrideSandboxScripts(t *testing.T) {
 	t.Parallel()
-	if strings.HasPrefix(FrideSandboxName, nodeproto.SandboxName("")) {
-		t.Errorf("%s is named like a brain's sandbox", FrideSandboxName)
-	}
 	sh, err := exec.LookPath("sh")
 	if err != nil {
 		t.Skip("no sh")

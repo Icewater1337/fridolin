@@ -149,8 +149,6 @@ type App struct {
 	// agents are the brains' scheduled agents (schedule_runtime.go),
 	// which sched starts when they fall due.
 	agents *agents
-	// runtimes chooses where brains run (brain_runtime.go).
-	runtimes *brainRuntimes
 	// policy is the lockdown and the runs' rate, waiters the tool calls
 	// that wait for the owner's answer (approvals.go).
 	policy  policyState
@@ -392,7 +390,6 @@ func New(opts Options) (_ *App, err error) {
 	b.intents = intent.NewStore(cfgs.Boot().Layout().Intents)
 	b.sched = &scheduler{b: b, every: schedulerEvery}
 	b.agents = newAgents(b, cfgs.Boot().Layout())
-	b.runtimes = newBrainRuntimes(b)
 	// Runs the last stop cut short end now, before anyone lists them.
 	b.agents.recover(time.Now())
 	b.brainMgr.SetHooks(BrainHooks{
@@ -413,7 +410,6 @@ func New(opts Options) (_ *App, err error) {
 		Hydrate:    func(ctx context.Context, id string, paths []string) { b.vault.hydrate(ctx, id, paths) },
 		Admit:      b.admitRun,
 		Ended:      b.runEnded,
-		Runtimes:   b.runtimes,
 	})
 	for _, br := range b.brainMgr.Brains() {
 		seedActivity(b.activity, br)

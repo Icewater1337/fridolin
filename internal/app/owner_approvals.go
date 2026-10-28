@@ -644,8 +644,6 @@ func (b *App) brainItem(id, brainName string, disk, approved manifest.Manifest, 
 	if changed := changedFields(disk, approved); len(changed) > 0 {
 		m.Allows = []string{"run with these settings changed: " + strings.Join(changed, ", ")}
 	}
-	// A weaker runtime, a fallback to bubblewrap or wider egress, named.
-	m.Allows = append(m.Allows, manifest.Loosens(approved.Sandbox, disk.Sandbox, b.cfgs.Get().Sandbox.Runtime)...)
 	freshness(&it, since)
 	it.approve = func(context.Context, string) (string, error) {
 		if err := b.registry.Approve(id, disk); err != nil {

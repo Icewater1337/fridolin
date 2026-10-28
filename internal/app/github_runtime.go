@@ -455,8 +455,7 @@ func (g *githubService) Disconnect() (httpapi.GitHubDisconnected, error) {
 // brain may read, and GH_CONFIG_DIR naming it. The token stays out of the
 // run's environment, which macOS shows to the user's other processes,
 // other brains' runs among them (TestRunTokenStaysOutOfTheEnvironment).
-// gh reads it from there, and git through gh auth git-credential. A run
-// in a Docker Sandbox gets it through the node instead (GitHubToken). Done
+// gh reads it from there, and git through gh auth git-credential. Done
 // revokes it and removes the folder once the run is over. A token that
 // cannot be minted leaves the run without one, and the log says why.
 func (b *App) withGitHubToken(access runAccess, brain string, grant chat.GitHubGrant) runAccess {
@@ -474,7 +473,6 @@ func (b *App) withGitHubToken(access runAccess, brain string, grant chat.GitHubG
 		return access
 	}
 	access.Env = append(access.Env, "GH_CONFIG_DIR="+dir, "GH_PROMPT_DISABLED=1", "GH_NO_UPDATE_NOTIFIER=1")
-	access.GitHubToken = tok
 	prev := access.Done
 	access.Done = func() {
 		done()

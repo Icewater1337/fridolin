@@ -1046,16 +1046,6 @@ and never goes to Google Drive, a node target or the snapshots
 ([VAULT.md](VAULT.md#secret-folders)); `vault.secret_dirs` adds more such
 folders.
 
-### `sandbox.runtime` and `sandbox.node`
-
-Where brains run by default: `bubblewrap` (the default: the sandbox
-described here, bubblewrap in the container, sandbox-exec on a native
-Mac) or `docker-sandbox`, a Docker Sandbox on a node, which falls back to
-bubblewrap while it is not available. A brain's brain.json may say
-otherwise (`sandbox` there). `sandbox.node` names the node, by id or
-name, whose sandboxes run the brains; empty takes the one approved node
-that offers them. See [SANDBOXES.md](SANDBOXES.md).
-
 This is containment, not a jail — it raises the cost of a prompt injection
 rather than eliminating it. Linux has no `sandbox-exec`: the bridge refuses a
 config with `sandbox.enabled` on there (the Linux default is off), except in

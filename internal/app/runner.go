@@ -14,7 +14,6 @@ import (
 	"github.com/Icewater1337/fridolin/internal/brain"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/google"
-	"github.com/Icewater1337/fridolin/internal/manifest"
 	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 )
 
@@ -72,21 +71,6 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 		defer cancel()
 		deadline = claudecli.TimedOut(pol.Timeout)
 	}
-	// Where the run happens (brain_runtime.go), settled before anything
-	// starts and never changed after. Brains on bubblewrap, the default,
-	// run as they always did.
-	var choice runtimeChoice
-	if r.hooks != nil && r.hooks.Runtimes != nil {
-		c, err := r.hooks.Runtimes.forRun(ctx, spec)
-		if pol != nil && c.Configured == manifest.RuntimeDockerSandbox {
-			pol.Runtime = c.Effective
-		}
-		if err != nil {
-			return claudecli.Result{Err: err}
-		}
-		choice = c
-	}
-	inVM := choice.Effective == manifest.RuntimeDockerSandbox
 
 	mcpConfig, settings := "", ""
 	if s.Provider != "codex" && !s.InheritUser {
@@ -98,11 +82,11 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 		if err := claudecli.ValidateCodexTools(s.DisallowedTools); err != nil {
 			return claudecli.Result{Err: err}
 		}
-		args = codexArgs(s, spec.Dir, inVM || r.sandbox != nil && r.sandbox.Enabled())
+		args = codexArgs(s, spec.Dir, r.sandbox != nil && r.sandbox.Enabled())
 		prompt = strings.ReplaceAll(prompt, prompttext.AskUserQuestionNote, "If you need clarification, ask in your final reply and end the turn. The answer arrives as a new message.")
 	}
 	var providerEnv []string
-	if s.Provider == "codex" && !inVM && r.hooks != nil && r.hooks.CodexSetup != nil {
+	if s.Provider == "codex" && r.hooks != nil && r.hooks.CodexSetup != nil {
 		extra, env, instructions, err := r.hooks.CodexSetup(spec.ID)
 		if err != nil {
 			return claudecli.Result{Err: err}
@@ -111,50 +95,22 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 		providerEnv = env
 		prompt = instructions + prompt
 	}
-	if s.Provider != "codex" && !inVM && r.hooks != nil && r.hooks.ExtraArgs != nil {
+	if s.Provider != "codex" && r.hooks != nil && r.hooks.ExtraArgs != nil {
 		extra := r.hooks.ExtraArgs(spec.ID)
 		args = withArgsBeforePrint(args, extra)
 	}
 	var runEnv []string
-	var access runAccess
 	if r.hooks != nil && r.hooks.RunEnv != nil {
 		run := runInfoFor(spec.ID, spec.Message)
 		run.Policy = pol
-		access = r.hooks.RunEnv(run)
+		access := r.hooks.RunEnv(run)
 		// After Wait: the tools the run started have exited by then, or
 		// are left behind and lose the brain API with the run.
 		defer access.Done()
 		runEnv = access.Env
 		// The bridge's own tools, for every run: which of them a run
-		// gets, the bridge decides by the run's token (mcpTools). In a
-		// Docker Sandbox, the VM's fridolin serves them.
-		mcp := access
-		if inVM {
-			mcp = vmAccess(access, choice.state.Info)
-		}
-		args = withArgsBeforePrint(args, runMCPArgs(s.Provider, mcp))
-	}
-	if inVM {
-		// The node runs the CLI of the VM, by name, in the brain's folder
-		// at the same path: no binary, environment or profile of this
-		// machine's goes along (sandbox_docker.go).
-		spec.BeforeStart()
-		bin := "claude"
-		if s.Provider == "codex" {
-			bin = "codex"
-		}
-		timeout := s.RunTimeout
-		if pol != nil && pol.Timeout > 0 {
-			timeout = pol.Timeout
-		}
-		callbacks.GraceExpired = func() {
-			log.Printf("brain %s: %s's output was still open %v after its result; stopping the run in its Docker Sandbox", spec.ID, claudecli.AgentName(s.Provider), r.waits.postResultGrace)
-		}
-		return claudecli.Run(ctx, claudecli.Invocation{
-			Run:      claudecli.Spawn{Binary: bin, Args: args, Dir: spec.Dir, Prompt: prompt, Launch: r.hooks.Runtimes.launcher(spec, choice, access, timeout+time.Minute)},
-			Provider: s.Provider, ExitGrace: r.waits.postResultGrace, NoticeAfter: r.waits.workingNotice,
-			DeadlineError: deadline,
-		}, callbacks)
+		// gets, the bridge decides by the run's token (mcpTools).
+		args = withArgsBeforePrint(args, runMCPArgs(s.Provider, access))
 	}
 
 	// Wrap the spawn in sandbox-exec so prompt injection in an incoming message

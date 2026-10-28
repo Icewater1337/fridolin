@@ -4,22 +4,25 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"slices"
 	"strings"
 )
 
 // Fridolin owns sbx's global settings on the node's machine (#149): the
 // network policy deny-all, the SSH agent and the host's browser out of
-// reach. `fridolin node sandbox setup` makes them hold, and the agent
-// sets them again at each check when they drifted.
+// reach. `fridolin node fride sandbox create` makes them hold, and the
+// agent of the sandboxed FrIDE's node sets them again when they drift
+// (sbxSettingsCheck).
 
 // sbxRestartSettings are owned settings that take full effect only after
 // `sbx daemon restart` (sbx says so when one is set).
 var sbxRestartSettings = map[string]bool{"ssh.agentForwardingEnabled": true}
 
 // errPolicyNotDenyAll is a global network policy other than deny-all,
-// which only setup replaces: `sbx policy reset` deletes every rule and
+// which only create replaces, or you by hand: `sbx policy reset` deletes every rule and
 // stops the daemon, and every sandbox with it.
-var errPolicyNotDenyAll = errors.New("sbx's global network policy is not deny-all: run fridolin node sandbox setup on this machine")
+var errPolicyNotDenyAll = errors.New("sbx's global network policy is not deny-all: sbx policy reset --force, then sbx policy init deny-all, replace it (and stop every sandbox)")
 
 // sbxPolicyUnset reports whether sbx's error says the global network
 // policy was never initialized.
@@ -30,7 +33,7 @@ func sbxPolicyUnset(stderr []byte) bool {
 // sbxEnforce makes fridolin's global settings hold: it sets each owned
 // setting that drifted, and initializes the network policy to deny-all
 // where there is none. Another policy is replaced only when replace says
-// so (setup). It returns what it changed, and whether one of the changes
+// so (create). It returns what it changed, and whether one of the changes
 // waits for a daemon restart.
 func sbxEnforce(ctx context.Context, d sbxDriver, replace bool) (changed []string, restart bool, err error) {
 	settings, stderr, err := d.run(ctx, nil, nil, "settings", "ls", "--json")
@@ -65,29 +68,6 @@ func sbxEnforce(ctx context.Context, d sbxDriver, replace bool) (changed []strin
 	return append(changed, "network policy deny-all"), restart, nil
 }
 
-// sbxSettingsLook reports whether fridolin's global settings hold,
-// changing nothing (doctor), and says why not when they do not.
-func sbxSettingsLook(ctx context.Context, d sbxDriver) (bool, string) {
-	settings, stderr, err := d.run(ctx, nil, nil, "settings", "ls", "--json")
-	if err != nil {
-		return false, "sbx settings ls: " + sbxError(err, stderr).Error()
-	}
-	var why []string
-	for _, k := range sbxSettingsDrift(settings) {
-		why = append(why, k+" is not "+sbxOwnedSettings[k])
-	}
-	policy, stderr, err := d.run(ctx, nil, nil, "policy", "ls", "--json")
-	switch {
-	case err != nil && sbxPolicyUnset(stderr):
-		why = append(why, "the network policy is not initialized")
-	case err != nil:
-		why = append(why, "sbx policy ls: "+sbxError(err, stderr).Error())
-	case !sbxDenyAll(policy):
-		why = append(why, "the network policy is not deny-all")
-	}
-	return len(why) == 0, strings.Join(why, "; ")
-}
-
 // sandboxSettings makes fridolin's global settings hold where that stops
 // no sandbox, and says why not when they do not.
 func (a *Agent) sandboxSettings(ctx context.Context, d sbxDriver) (bool, string) {
@@ -103,4 +83,28 @@ func (a *Agent) sandboxSettings(ctx context.Context, d sbxDriver) (bool, string)
 		return false, err.Error()
 	}
 	return true, ""
+}
+
+// sbxOwnSettings makes fridolin's global settings hold for create: it
+// replaces another network policy, and restarts sbx's daemon for a
+// setting that needs it when no sandbox runs (list).
+func sbxOwnSettings(ctx context.Context, d sbxDriver, list []sbxSandbox, out io.Writer) error {
+	changed, restart, err := sbxEnforce(ctx, d, true)
+	for _, c := range changed {
+		fmt.Fprintf(out, "Set sbx's %s.\n", c)
+	}
+	if err != nil {
+		return err
+	}
+	if restart {
+		if slices.ContainsFunc(list, func(s sbxSandbox) bool { return s.Status == "running" }) {
+			fmt.Fprintln(out, "A sandbox runs: restart sbx's daemon (sbx daemon restart) once none does, for the SSH agent setting to apply to all.")
+		} else if _, stderr, err := d.run(ctx, nil, nil, "daemon", "restart"); err != nil {
+			return fmt.Errorf("sbx daemon restart: %w", sbxError(err, stderr))
+		} else {
+			fmt.Fprintln(out, "Restarted sbx's daemon.")
+		}
+	}
+	fmt.Fprintln(out, "sbx's global settings are fridolin's: network policy deny-all, SSH agent forwarding and the browser off.")
+	return nil
 }

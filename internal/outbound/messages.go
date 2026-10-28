@@ -171,28 +171,6 @@ func CalendarGrantBrokenAlert(name string, revoked bool) string {
 		"This is the only message about it until it works again.", name, why, name)
 }
 
-// SandboxDownAlert tells the owner that Docker Sandboxes on node cannot
-// run brains now, and why: once per outage.
-func SandboxDownAlert(node, why string) string {
-	return fmt.Sprintf("⚠️ Docker Sandboxes are off on %s: %s. Brains set to them run under bubblewrap until they are back, and those set to refuse do not run. "+
-		"This is the only message about it until they are back.", node, why)
-}
-
-// SandboxBackAlert tells the owner that Docker Sandboxes on node run
-// brains again, after SandboxDownAlert.
-func SandboxBackAlert(node string) string {
-	return fmt.Sprintf("✅ Docker Sandboxes are back on %s: brains set to them run there again.", node)
-}
-
-// SandboxRefusedNotice tells a chat that its brain runs only in a Docker
-// Sandbox (fallback "refuse"), which is not available now. The owner's
-// alert says why.
-const SandboxRefusedNotice = "🔒 This brain runs only in a Docker Sandbox, which is not available now, so this message was not run. Send it again once it is back."
-
-// SandboxSetupFailedNotice tells a chat that its brain's Docker Sandbox
-// started but could not be set up; the cause goes to the log only.
-const SandboxSetupFailedNotice = "❌ The Docker Sandbox for this brain could not be set up, so this message was not run (details in the bridge log)."
-
 // PlaudExpiredAlert tells the owner that the Plaud login expired.
 const PlaudExpiredAlert = "⚠️ Plaud: the login expired, so new recordings are not arriving. Reconnect in the Fridolin dashboard (Integrations → Plaud)."
 

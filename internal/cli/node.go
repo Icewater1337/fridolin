@@ -51,10 +51,6 @@ Usage:
   fridolin node core-host show | on | off | trust ID --key KEY | untrust ID
                        this machine as a core host, which the core may move to and
                        which holds host secrets; fridolin node core-host help for more
-  fridolin node sandbox setup [--repo DIR] [--bin PATH] | status | on | off
-                       Docker Sandboxes (sbx) for brains' runs: setup makes sbx's
-                       settings fridolin's and loads the template, and only then
-                       does the node offer them; fridolin node sandbox help for more
   fridolin node fride pair --url http://127.0.0.1:PORT | status
                        FrIDE on this machine, offered to the core while it runs;
                        fridolin node fride help for more
@@ -108,7 +104,6 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 	var backupRoots multiFlag
 	var ws workstationFlags
 	var ch coreHostFlags
-	var sbf sandboxFlags
 	switch sub {
 	case "core-host":
 		fs.StringVar(&ch.key, "key", "", "trust: the target's device key, hex")
@@ -125,9 +120,6 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 		fs.StringVar(&o.name, "name", "", "the node's name, which the default tailnet name is made of (default: the host name)")
 	case "backup":
 		fs.Var(&backupRoots, "root", "lend only this drive or folder (repeatable)")
-	case "sandbox":
-		fs.StringVar(&sbf.repo, "repo", "", "setup: the fridolin checkout to build the template from (default: the current folder)")
-		fs.StringVar(&sbf.bin, "bin", "", "setup: a linux fridolin to mount into the sandboxes")
 	}
 	pos, err := parseInterspersed(fs, args)
 	if errors.Is(err, flag.ErrHelp) {
@@ -177,8 +169,6 @@ func nodeCmd(args []string, stdout, stderr io.Writer) int {
 		return nodeWorkstation(pos, ws, dir, thisAppPackage(), stdout, stderr)
 	case "core-host":
 		return nodeCoreHost(pos, ch, dir, thisAppPackage(), stdout, stderr)
-	case "sandbox":
-		return nodeSandbox(pos, sbf, dir, thisAppPackage(), stdout, stderr)
 	case "run", "install", "start", "stop", "status", "uninstall", "rollback":
 		if len(pos) != 0 {
 			fmt.Fprintf(stderr, "fridolin node %s takes no arguments\n", sub)

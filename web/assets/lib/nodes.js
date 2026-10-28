@@ -1,7 +1,7 @@
 // What the Nodes page says about a node's capabilities, as the bridge's
 // Capabilities.Summary says it in the CLI and !fleet.
 
-/** @import { ExecCap, ExecRule, Node, NodeCapabilities, NodeUpdateStatus, SandboxCap, ScheduleProgram } from '../../types/api.js' */
+/** @import { ExecCap, ExecRule, Node, NodeCapabilities, NodeUpdateStatus, ScheduleProgram } from '../../types/api.js' */
 
 /**
  * "exec (uname, df), fs (2 roots, 1 writable), host, notify, fride, backup (1 folder)", or "nothing".
@@ -34,30 +34,7 @@ export function capSummary(c) {
     if (n) parts.push(`${k} (${n} folder${n === 1 ? '' : 's'})`);
   }
   if (c && c.core_host) parts.push('core-host');
-  if (c && c.sandbox) parts.push('sandbox');
   return parts.length ? parts.join(', ') : 'nothing';
-}
-
-/**
- * What a node says of its Docker Sandboxes (the sandbox capability), as
- * facts in a few words each, and whether they are ready to run brains:
- * {facts: [text, ok][], ready}.
- * @param {SandboxCap} s
- * @returns {{facts: [string, boolean][], ready: boolean}}
- */
-export function sandboxFacts(s) {
-  const providers = s.providers || [];
-  const names = /** @type {Record<string, string>} */ ({ claude: 'Claude', codex: 'Codex' });
-  /** @type {[string, boolean][]} */
-  const facts = [
-    [s.version ? `sbx ${s.version}` : 'sbx', true],
-    [s.signed_in ? 'signed in' : 'not signed in', !!s.signed_in],
-    [s.daemon ? 'running' : 'not running', !!s.daemon],
-    [s.settings ? 'Fridolin’s settings hold' : 'Fridolin’s settings do not hold', !!s.settings],
-    [s.template ? `template ${s.template}` : 'no template yet', !!s.template],
-    [providers.length ? `logins: ${providers.map((p) => names[p] || p).join(', ')}` : 'no AI login', providers.length > 0],
-  ];
-  return { facts, ready: facts.every(([, ok]) => ok) && !s.problem };
 }
 
 /**

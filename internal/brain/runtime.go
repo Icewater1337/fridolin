@@ -1059,8 +1059,8 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *Settings, m Inbou
 			return nil
 		},
 		Reaped: func() { br.setRunPID(run, 0) },
-		OpenStream: func(id string, result func(claudecli.Result)) (claudecli.StreamSink, func()) {
-			return br.openRunStream(m, runHeading(m, s, id), result)
+		OpenStream: func(pid int, result func(claudecli.Result)) (claudecli.StreamSink, func()) {
+			return br.openRunStream(m, runHeading(m, s, pid), result)
 		},
 		ReadPanic: func(p any, stack []byte) {
 			log.Printf("brain %s: reading the output of the run for %s panicked: %v\n%s", br.id, m.JID, p, stack)
@@ -1073,22 +1073,21 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *Settings, m Inbou
 		SlowResponse: func(elapsed time.Duration) {
 			log.Printf("brain %s: response took %v for %s (slow response)", br.id, elapsed, m.JID)
 		},
-		Stderr: func(id string, text string) { br.logStderr(m, id, text) },
+		Stderr: func(pid int, text string) { br.logStderr(m, pid, text) },
 	})
 }
 
 // logStderr adds what the CLI wrote to stderr to the brain's activity log,
 // the end of it when there is much, where a failed run can be looked into
 // even when the run succeeded or its error kept only a little of it. The
-// block names the run, the run for m with the id its process gave ("pid
-// 1234" for a process here), as its heading does (runHeading): runs can
-// end out of the order they started in.
-func (br *Brain) logStderr(m Inbound, id, stderr string) {
+// block names the run, the run for m with process pid, as its heading
+// does (runHeading): runs can end out of the order they started in.
+func (br *Brain) logStderr(m Inbound, pid int, stderr string) {
 	if stderr == "" {
 		return
 	}
 	if m.Log != nil {
-		m.Log(fmt.Sprintf("stderr of the run, %s:\n%s", id, textx.Tail(stderr, stderrLogBytes)))
+		m.Log(fmt.Sprintf("stderr of the run, pid %d:\n%s", pid, textx.Tail(stderr, stderrLogBytes)))
 	}
 	f, err := fsx.OpenInFolder(br.root, StreamLogName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
@@ -1096,8 +1095,8 @@ func (br *Brain) logStderr(m Inbound, id, stderr string) {
 		return
 	}
 	defer f.Close()
-	_, _ = fmt.Fprintf(f, "[%s] stderr of the run for %s from %s, %s:\n%s\n",
-		time.Now().Format("15:04:05"), m.JID, m.Sender, id, textx.Tail(stderr, stderrLogBytes))
+	_, _ = fmt.Fprintf(f, "[%s] stderr of the run for %s from %s, pid %d:\n%s\n",
+		time.Now().Format("15:04:05"), m.JID, m.Sender, pid, textx.Tail(stderr, stderrLogBytes))
 }
 
 // stderrLogBytes is how much of a run's stderr goes to its activity log.
@@ -1231,12 +1230,12 @@ func (br *Brain) buildPrompt(s *Settings, m Inbound) string {
 // runHeading starts a run's part of the activity log: what it answers and
 // with what, so that it can be told from the others and matched to the
 // run the dashboard shows.
-func runHeading(m Inbound, s *Settings, id string) string {
+func runHeading(m Inbound, s *Settings, pid int) string {
 	model := s.Model
 	if model == "" {
 		model = "the CLI's default"
 	}
-	return fmt.Sprintf("── Run for %s from %s, %s, model %s ──", m.JID, m.Sender, id, model)
+	return fmt.Sprintf("── Run for %s from %s, pid %d, model %s ──", m.JID, m.Sender, pid, model)
 }
 
 // runHeadingRE matches a heading runHeading wrote, after the time
@@ -1365,7 +1364,7 @@ func (br *Brain) setRunPID(run *brainRun, pid int) {
 
 // startProcess publishes a started process before a force-stop can return.
 // Ordinary stops still use only context cancellation through os/exec.
-func (run *brainRun) startProcess(ctx context.Context, spec claudecli.Spawn) (claudecli.Process, error) {
+func (run *brainRun) startProcess(ctx context.Context, spec claudecli.Spawn) (*claudecli.Process, error) {
 	run.processMu.Lock()
 	defer run.processMu.Unlock()
 	if run.forceStopped {

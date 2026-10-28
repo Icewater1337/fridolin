@@ -12,8 +12,7 @@ const manifest = (name) => ({ version: 1, id: 'work', name, routing: { handles_d
 const view = (name, runtime = null) => ({ id: 'work', name, path: '/Users/you/work', status: 'ok', manifest: manifest(name), issues: [], runtime });
 
 // opts.brains is what the bridge holds at first, opts.approve what it
-// answers POST /api/brains/work/approve with, opts.effective the settings
-// in effect it gives with config.json.
+// answers POST /api/brains/work/approve with.
 async function openPage(t, opts = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
@@ -29,7 +28,7 @@ async function openPage(t, opts = {}) {
       return b ? { status: 200, body: b } : { status: 404, body: { error: 'no such brain' } };
     }
     if (path.startsWith('/api/brains')) return bridge.brains;
-    if (path.startsWith('/api/config')) return { etag: 'e1', path: '/Users/you/.fridolin/config.json', config: {}, effective: opts.effective || {} };
+    if (path.startsWith('/api/config')) return { etag: 'e1', path: '/Users/you/.fridolin/config.json', config: {}, effective: {} };
     if (path.startsWith('/api/whatsapp/groups')) return [];
     if (path.startsWith('/api/activity')) return [];
     return {};
@@ -306,78 +305,6 @@ test('standing intents are listed, and one is removed after a confirmation', asy
   dialog.querySelectorAll('button').find((b) => b.textContent === 'Remove').click();
   await settle();
   assert.ok(calls.some((c) => c.method === 'DELETE' && c.path === '/api/brains/work/intents/i1a2b3c'), 'the intent was removed');
-});
-
-// Where the brain's runs happen (#149), as /api/brains gives it.
-const where = (o) => ({ configured: 'docker-sandbox', effective: 'docker-sandbox', fallback: 'bubblewrap', node: 'Mac mini', ready: true, reason: '', egress: [], ...o });
-const choose = (sel, value) => {
-  sel.value = value;
-  sel.dispatchEvent(new Event('change', { bubbles: true }));
-};
-
-test('the header says where the brain runs, and why it falls back', async (t) => {
-  const falling = where({ effective: 'bubblewrap', ready: false, reason: 'the Mac mini is offline since 14:02' });
-  const { root, poll } = await openPage(t, { brains: [{ ...view('Work'), sandbox: falling }] });
-  const head = () => root.querySelector('.page-header');
-  assert.match(head().textContent, /Docker Sandbox set, but runs in Fridolin’s sandbox now: the Mac mini is offline since 14:02/);
-  assert.equal(head().querySelector('.head-meta .pill.warn').textContent, 'Fallback');
-  await poll([{ ...view('Work'), sandbox: where({}) }]);
-  assert.match(head().textContent, /Runs in a Docker Sandbox on Mac mini/, 'and follows it');
-  assert.deepEqual(head().querySelectorAll('.head-meta .pill.ok').map((p) => p.textContent), ['Active', 'Docker Sandbox']);
-  await poll([view('Work')]);
-  assert.equal(head().querySelector('.sandbox-fact'), null, 'a bridge that does not say shows nothing');
-});
-
-test('the sandbox settings are saved in brain.json', async (t) => {
-  const { root, calls } = await openPage(t, { effective: { sandbox: { runtime: 'docker-sandbox' } } });
-  const set = fieldset(root, 'Sandbox');
-  const runtime = set.querySelector('select[name=sandbox-runtime]');
-  assert.equal(runtime.value, '', 'a brain.json without one inherits the config’s');
-  assert.equal(runtime.querySelector('option').textContent, 'Default (Docker Sandbox)');
-  assert.doesNotMatch(set.textContent, /bubblewrap/);
-  const docker = set.querySelector('.form-grid');
-  assert.equal(docker.hidden, false, 'the Docker Sandbox’s own settings show while it is the one');
-  choose(set.querySelector('select[name=sandbox-fallback]'), 'refuse');
-  set.querySelectorAll('button').find((b) => b.textContent === 'Add site').click();
-  type(set.querySelector('.list-row input'), 'api.github.com');
-  assert.deepEqual((await save(root, calls)).map((m) => m.sandbox), [{ fallback: 'refuse', egress: ['api.github.com'] }]);
-
-  choose(runtime, 'bubblewrap');
-  assert.equal(docker.hidden, true, 'Fridolin’s sandbox neither falls back nor keeps to sites');
-  const saved = await save(root, calls);
-  assert.deepEqual(saved[saved.length - 1].sandbox, { runtime: 'bubblewrap', fallback: 'refuse', egress: ['api.github.com'] }, 'what was typed is kept for the way back');
-});
-
-test('a brain.json’s sandbox survives a save untouched, and a site that is no host is not saved', async (t) => {
-  const sandbox = { runtime: 'docker-sandbox', fallback: 'bubblewrap', egress: [] };
-  const { root, calls, ctx } = await openPage(t, { brains: [{ ...view('Work'), manifest: { ...manifest('Work'), sandbox } }] });
-  assert.equal(ctx.dirty(), false);
-  assert.deepEqual((await save(root, calls)).map((m) => m.sandbox), [sandbox]);
-  const set = fieldset(root, 'Sandbox');
-  set.querySelectorAll('button').find((b) => b.textContent === 'Add site').click();
-  type(set.querySelector('.list-row input'), 'https://example.com/x');
-  assert.equal((await save(root, calls)).length, 1, 'nothing more was saved');
-  const toasts = document.querySelectorAll('.toast').map((el) => el.textContent);
-  assert.ok(toasts.some((m) => /not a host/.test(m)), `toasts: ${toasts}`);
-});
-
-test('a brain.json on disk that weakens the sandbox says how, and asks first', async (t) => {
-  const approved = { ...manifest('Work'), sandbox: { runtime: 'docker-sandbox', fallback: 'refuse' } };
-  const disk = { ...manifest('Work'), sandbox: { runtime: 'bubblewrap', egress: ['**:443'] } };
-  const drifted = { ...view('Work'), manifest: approved, status: 'drift', disk_manifest: disk, issues: [{ kind: 'drift', detail: 'brain.json changed on disk' }] };
-  const { root, calls } = await openPage(t, { brains: [drifted], approve: { status: 'approved' } });
-  const card = root.querySelector('.drift-card');
-  assert.match(card.textContent, /This weakens its sandbox/);
-  assert.match(card.textContent, /It would run in Fridolin’s sandbox instead of a Docker Sandbox\./);
-  assert.match(card.textContent, /It could also reach \*\*:443\./);
-  assert.ok(card.querySelectorAll('tr.sensitive').some((tr) => /sandbox/.test(tr.textContent)), 'its rows stand out');
-  card.querySelectorAll('button').find((b) => b.textContent.includes('Approve changes')).click();
-  await settle();
-  const dialog = document.querySelector('dialog');
-  assert.ok(dialog, 'approving asks first');
-  dialog.querySelectorAll('button').find((b) => b.textContent === 'Approve').click();
-  await settle();
-  assert.ok(calls.some((c) => c.method === 'POST' && c.path === '/api/brains/work/approve'));
 });
 
 test('a brain without standing intents says how one is set', async (t) => {

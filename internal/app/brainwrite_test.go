@@ -212,13 +212,15 @@ func TestANewerBrainJSONIsRefusedAndKept(t *testing.T) {
 }
 
 // A field brain.json has but this version does not know is logged by its
-// path, once, while the brain loads as before.
+// path, once, while the brain loads as before. The retired "sandbox"
+// (Docker Sandboxes for brains, removed) loads without a word.
 func TestUnknownBrainJSONFieldsAreLogged(t *testing.T) {
 	// Serial: captureLog takes over the process's standard logger, which
 	// every bridge writes to.
 	setenv(t, "HOME", t.TempDir())
 	dir := t.TempDir()
-	body := `{"version": 1, "id": "a", "name": "A", "nmae": "x", "routing": {"handles_dm": true, "groups": []}}`
+	body := `{"version": 1, "id": "a", "name": "A", "nmae": "x", "routing": {"handles_dm": true, "groups": []},
+		"sandbox": {"runtime": "docker-sandbox", "fallback": "refuse", "egress": ["api.github.com"]}}`
 	if err := os.WriteFile(filepath.Join(dir, manifest.File), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}

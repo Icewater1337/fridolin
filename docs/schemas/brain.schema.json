@@ -64,16 +64,6 @@
         "consolidate": {"type": "string", "pattern": "^$|^\\s*(([Ww][Ee][Ee][Kk][Ll][Yy]\\s+)?[A-Za-z]{3,9}|[Dd][Aa][Ii][Ll][Yy])\\s+[0-9]{1,2}:[0-9]{2}\\s*$", "description": "When the brain runs skills/memory-consolidation.md: \"weekly sun 18:00\" or \"daily 07:00\", in the bridge's time zone; empty never."}
       }
     },
-    "sandbox": {
-      "type": ["object", "null"],
-      "additionalProperties": false,
-      "description": "Where the brain runs and what it may reach there (docs/SANDBOXES.md). Owner-approved like the rest of brain.json.",
-      "properties": {
-        "runtime": {"enum": ["", "bubblewrap", "docker-sandbox"], "description": "Overrides config.json's sandbox.runtime."},
-        "fallback": {"enum": ["", "bubblewrap", "refuse"], "description": "When the Docker Sandbox is not available: run under bubblewrap (the default) or refuse the run."},
-        "egress": {"type": ["array", "null"], "maxItems": 50, "items": {"type": "string", "pattern": "^[A-Za-z0-9*][A-Za-z0-9.*-]*(:[0-9]{1,5})?$"}, "description": "Hosts the brain may reach beyond its provider and the core's API, in sbx's host patterns."}
-      }
-    },
     "files": {
       "type": "object",
       "additionalProperties": false,

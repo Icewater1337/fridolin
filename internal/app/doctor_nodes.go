@@ -136,12 +136,6 @@ func askBridgeNodes(ctx context.Context, cfg *config.Settings) ([]byte, error) {
 	return askBridge(ctx, cfg, "/api/nodes")
 }
 
-// askBridgeBrains is doctor.Env.LiveBrains on the real system: GET
-// /api/brains, as askBridgeNodes asks.
-func askBridgeBrains(ctx context.Context, cfg *config.Settings) ([]byte, error) {
-	return askBridge(ctx, cfg, "/api/brains")
-}
-
 // askBridge GETs path of the bridge on cfg's http_listen, with the
 // dashboard token.
 func askBridge(ctx context.Context, cfg *config.Settings, path string) ([]byte, error) {

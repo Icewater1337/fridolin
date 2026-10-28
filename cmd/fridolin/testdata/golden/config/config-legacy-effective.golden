@@ -115,6 +115,6 @@
     "secret_keep_days": 30,
     "snapshots_bucket": "fridolin-snapshots"
   },
-  "version": 2,
+  "version": 3,
   "viewer": false
 }

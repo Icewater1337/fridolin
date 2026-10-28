@@ -168,9 +168,7 @@
       "<HOME>/clients"
     ],
     "enabled": false,
-    "git_config": "deny",
-    "node": "mini",
-    "runtime": "docker-sandbox"
+    "git_config": "deny"
   },
   "schedules": {
     "enabled": true,
@@ -238,6 +236,6 @@
       }
     ]
   },
-  "version": 2,
+  "version": 3,
   "viewer": false
 }

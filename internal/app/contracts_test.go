@@ -421,7 +421,7 @@ func TestConfigSchemaRefusesWhatTheBridgeRefuses(t *testing.T) {
 	t.Parallel()
 	set := newSchemaSet(t)
 	for _, configValue := range []string{
-		`{"version": 3}`,
+		`{"version": 4}`,
 		`{"version": 0}`,
 		`{"version": "2"}`,
 		`{"allowed_numbers": "15551234567"}`,
@@ -555,15 +555,12 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 		{"fride.news", "config.schema.json#/properties/fride/properties/news", config.FrideNewsModes(), `{"fride": {"news": %s}}`},
 		{"queue.mode", "config.schema.json#/properties/queue/properties/mode", config.QueueModes(), `{"queue": {"mode": %s}}`},
 		{"sandbox.git_config", "config.schema.json#/properties/sandbox/properties/git_config", config.GitConfigs(), `{"sandbox": {"git_config": %s}}`},
-		{"sandbox.runtime", "config.schema.json#/properties/sandbox/properties/runtime", append([]string{""}, config.Runtimes()...), `{"sandbox": {"runtime": %s}}`},
 		{"triggers match", "config.schema.json#/properties/triggers/items/oneOf/1/properties/match", matches, `{"triggers": [{"text": "@c", "match": %s}]}`},
 		{"log_level", "config.schema.json#/properties/log_level", levels, `{"log_level": %s}`},
 		{"brain.json effort", "brain.schema.json#/properties/effort", manifest.Efforts(), `{"id": "a", "name": "A", "effort": %s}`},
 		{"brain.json observe", "brain.schema.json#/properties/observe", manifest.ObserveModes(), `{"id": "a", "name": "A", "observe": %s}`},
 		{"brain.json approvals", "brain.schema.json#/properties/approvals", manifest.ApprovalsModes(), `{"id": "a", "name": "A", "approvals": %s}`},
 		{"brain.json role", "brain.schema.json#/properties/role", manifest.Roles(), `{"id": "a", "name": "A", "role": %s}`},
-		{"brain.json sandbox runtime", "brain.schema.json#/properties/sandbox/properties/runtime", append([]string{""}, manifest.Runtimes()...), `{"id": "a", "name": "A", "sandbox": {"runtime": %s}}`},
-		{"brain.json sandbox fallback", "brain.schema.json#/properties/sandbox/properties/fallback", append([]string{""}, manifest.Fallbacks()...), `{"id": "a", "name": "A", "sandbox": {"fallback": %s}}`},
 		{"schedule report", "schedule.schema.json#/properties/report", manifest.ScheduleReports(), `{"name": "s", "when": "every 6h", "report": %s}`},
 		{"schedule missed", "schedule.schema.json#/properties/missed", manifest.ScheduleMissed(), `{"name": "s", "when": "every 6h", "missed": %s}`},
 		{"schedule risk", "schedule.schema.json#/properties/risk", manifest.ScheduleRisks(), `{"name": "s", "when": "every 6h", "risk": %s}`},

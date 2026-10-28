@@ -86,9 +86,6 @@ type Manifest struct {
 	// brain's folder (docs/FILES.md, "Uploads"); nil takes them only from
 	// you.
 	Files *Files `json:"files,omitempty"`
-	// Sandbox is where the brain runs and what it may reach there
-	// (sandbox.go); nil takes config.json's sandbox.runtime.
-	Sandbox *Sandbox `json:"sandbox,omitempty"`
 }
 
 // Files is brain.json's "files": the folders that take uploads from site
@@ -439,9 +436,6 @@ func (m *Manifest) Validate() error {
 			seen[u.Folder] = true
 		}
 	}
-	if err := m.Sandbox.validate(m.ID); err != nil {
-		return err
-	}
 	if err := m.validateSchedules(); err != nil {
 		return err
 	}
@@ -498,16 +492,6 @@ func (m Manifest) Normalized() Manifest {
 		} else {
 			m.Files = &Files{Uploads: slices.Clone(m.Files.Uploads)}
 			slices.SortFunc(m.Files.Uploads, func(a, b UploadFolder) int { return strings.Compare(a.Folder, b.Folder) })
-		}
-	}
-	if s := m.Sandbox; s != nil {
-		if s.Runtime == "" && s.Fallback == "" && len(s.Egress) == 0 {
-			m.Sandbox = nil
-		} else {
-			m.Sandbox = &Sandbox{Runtime: s.Runtime, Fallback: s.Fallback, Egress: slices.Clone(s.Egress)}
-			if len(m.Sandbox.Egress) == 0 {
-				m.Sandbox.Egress = nil
-			}
 		}
 	}
 	return m
@@ -573,7 +557,7 @@ var loggedManifestKeys sync.Map // path → the keys, joined
 // left out where the bridge uses the manifest, and dropped from the file
 // the next time the dashboard writes it.
 func warnUnknownManifestKeys(path string, data []byte) {
-	keys := jsonx.UnknownKeys(data, reflect.TypeFor[Manifest](), "")
+	keys := slices.DeleteFunc(jsonx.UnknownKeys(data, reflect.TypeFor[Manifest](), ""), retiredManifestKey)
 	joined := strings.Join(keys, " ")
 	if prev, ok := loggedManifestKeys.Swap(path, joined); ok && prev == joined || !ok && joined == "" {
 		return
@@ -581,6 +565,16 @@ func warnUnknownManifestKeys(path string, data []byte) {
 	if len(keys) > 0 {
 		log.Printf("brain %s: ignoring unknown fields %v (an edit in the dashboard drops them)", path, keys)
 	}
+}
+
+// retiredManifestKey reports whether k is a brain.json key that an
+// older fridolin read and this one ignores without a word. compat:
+// "sandbox" chose the Docker Sandbox runtime for brains, removed in
+// 2026-10 (docs/VISION.md, "Why not Docker Sandboxes for brains"); a
+// brain.json that still has it loads as before, and the next edit in
+// the dashboard drops it.
+func retiredManifestKey(k string) bool {
+	return k == "sandbox" || strings.HasPrefix(k, "sandbox.")
 }
 
 // Encode returns the contents Write writes for m, or why m

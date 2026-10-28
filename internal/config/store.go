@@ -640,8 +640,6 @@ var securitySettings = []struct {
 	{"sandbox.allow_paths", func(c *Settings) any { return c.Sandbox.AllowPaths }},
 	{"sandbox.git_config", func(c *Settings) any { return c.Sandbox.GitConfig }},
 	{"sandbox.credentials_dir", func(c *Settings) any { return c.Sandbox.CredentialsDir }},
-	{"sandbox.runtime", func(c *Settings) any { return RuntimeOr(c.Sandbox.Runtime) }},
-	{"sandbox.node", func(c *Settings) any { return c.Sandbox.Node }},
 	{"dashboard.require_token", func(c *Settings) any { return fmt.Sprint(c.Dashboard.RequireToken) }},
 	{"ingest.enabled", func(c *Settings) any { return fmt.Sprint(c.Ingest.Enabled) }},
 	{"script_api.tokenless_send", func(c *Settings) any { return fmt.Sprint(c.ScriptAPI.TokenlessSend) }},

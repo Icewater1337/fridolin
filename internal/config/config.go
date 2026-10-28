@@ -246,7 +246,7 @@ const MigrateBuild = "2592376"
 // when a key is renamed or removed or comes to mean something else, so
 // that a file written before needs a migration to keep its meaning; a key
 // that is only added needs none, as an older file simply lacks it.
-const Version = 2
+const Version = 3
 
 // configMigrations take config.json from one version to the next: the one
 // at index i reads version i+1 and makes it version i+2. Each works on the
@@ -262,6 +262,9 @@ var configMigrations = []func(obj map[string]json.RawMessage) ([]string, error){
 	// Version 2 is the file after classic mode and inline brains were
 	// removed: the keys only they read are retired.
 	foldRetiredKeys,
+	// Version 3 is the file after Docker Sandboxes for brains were
+	// removed (docs/VISION.md): sandbox.runtime and sandbox.node go.
+	dropBrainSandboxKeys,
 }
 
 // ErrTooNew means a config.json, or a dashboard save, is of a version
@@ -393,6 +396,76 @@ func foldRetiredKeys(obj map[string]json.RawMessage) ([]string, error) {
 	return notes, nil
 }
 
+// dropBrainSandboxKeys takes sandbox.runtime and sandbox.node out of a
+// version 2 file. They chose Docker Sandboxes on a node for brains, which
+// were removed (docs/VISION.md, "Why not Docker Sandboxes for brains"):
+// every brain runs under bubblewrap, or sandbox-exec natively, as with
+// the default "bubblewrap".
+func dropBrainSandboxKeys(obj map[string]json.RawMessage) ([]string, error) {
+	const why = "is retired and is dropped the next time the dashboard saves: brains run under bubblewrap, Docker Sandboxes for brains were removed"
+	var notes []string
+	if raw, ok := obj["sandbox"]; ok {
+		out, dropped := dropJSONKeys(raw, "runtime", "node")
+		for _, d := range dropped {
+			notes = append(notes, "sandbox."+d+" "+why)
+		}
+		obj["sandbox"] = out
+	}
+	// An approved brain.json in brain_dirs could hold the brain's own
+	// "sandbox" (compat: brain.json ignores it now, retiredManifestKey).
+	var dirs []json.RawMessage
+	if raw, ok := obj["brain_dirs"]; !ok || json.Unmarshal(raw, &dirs) != nil {
+		return notes, nil
+	}
+	for i, d := range dirs {
+		var ref map[string]json.RawMessage
+		if json.Unmarshal(d, &ref) != nil || ref == nil || ref["approved"] == nil {
+			continue
+		}
+		out, dropped := dropJSONKeys(ref["approved"], "sandbox")
+		if len(dropped) == 0 {
+			continue
+		}
+		ref["approved"] = out
+		b, err := json.Marshal(ref)
+		if err != nil {
+			return nil, err
+		}
+		dirs[i] = b
+		notes = append(notes, fmt.Sprintf("brain_dirs[%d].approved.sandbox %s", i, why))
+	}
+	b, err := json.Marshal(dirs)
+	if err != nil {
+		return nil, err
+	}
+	obj["brain_dirs"] = b
+	return notes, nil
+}
+
+// dropJSONKeys takes keys out of raw, a JSON object, and says which it
+// had. Anything else comes back as it is, for the decoder to judge.
+func dropJSONKeys(raw json.RawMessage, keys ...string) (json.RawMessage, []string) {
+	var o map[string]json.RawMessage
+	if json.Unmarshal(raw, &o) != nil || o == nil {
+		return raw, nil
+	}
+	var dropped []string
+	for _, k := range keys {
+		if _, ok := o[k]; ok {
+			delete(o, k)
+			dropped = append(dropped, k)
+		}
+	}
+	if len(dropped) == 0 {
+		return raw, nil
+	}
+	b, err := json.Marshal(o)
+	if err != nil {
+		return raw, nil
+	}
+	return b, dropped
+}
+
 // ClassicModeRemoved is the error for a setting that asks for classic mode:
 // what names it, fix says what to change.
 func ClassicModeRemoved(what, fix string) error {
@@ -426,32 +499,6 @@ type SandboxConfig struct {
 	// bridge uses for the brains. Brains are denied the whole directory.
 	// Absolute or ~-relative.
 	CredentialsDir string `json:"credentials_dir,omitempty"`
-
-	// Runtime is where brains run by default: RuntimeBubblewrap (the
-	// default: today's sandbox, bubblewrap in the container, sandbox-exec
-	// on a native Mac) or RuntimeDockerSandbox (a Docker Sandbox on a
-	// node, docs/SANDBOXES.md). A brain's brain.json may say otherwise.
-	Runtime string `json:"runtime,omitempty"`
-	// Node is the node, by id or name, whose sandbox capability runs the
-	// brains; "" for the one approved node with it on the core's machine.
-	Node string `json:"node,omitempty"`
-}
-
-// The runtimes a brain runs in (sandbox.runtime, brain.json's sandbox).
-const (
-	RuntimeBubblewrap    = manifest.RuntimeBubblewrap
-	RuntimeDockerSandbox = manifest.RuntimeDockerSandbox
-)
-
-// Runtimes are the values sandbox.runtime takes.
-func Runtimes() []string { return manifest.Runtimes() }
-
-// RuntimeOr is runtime, or the default for "".
-func RuntimeOr(runtime string) string {
-	if runtime == "" {
-		return RuntimeBubblewrap
-	}
-	return runtime
 }
 
 // QueueConfig decides what happens when a message arrives while the brain is
@@ -736,12 +783,6 @@ func SandboxSupported(goos string) bool { return goos == "darwin" || goos == Con
 func (sc SandboxConfig) Validate(goos string) error {
 	if sc.Enabled && !SandboxSupported(goos) {
 		return fmt.Errorf("sandbox.enabled needs macOS (sandbox-exec) or the fridolin-core container (bubblewrap), and this is %s: set it to false and run the bridge as a dedicated user instead, or run the core in its container (docs/CORE.md)", goos)
-	}
-	if sc.Runtime != "" && !slices.Contains(Runtimes(), sc.Runtime) {
-		return fmt.Errorf("sandbox.runtime must be %q or %q, not %q", RuntimeBubblewrap, RuntimeDockerSandbox, sc.Runtime)
-	}
-	if len(sc.Node) > 128 || strings.ContainsAny(sc.Node, "\x00\r\n") {
-		return fmt.Errorf("sandbox.node %q is not a node's id or name", sc.Node)
 	}
 	// A relative path is relative to whatever folder a brain runs in, so as
 	// a rule it would protect (or open) nothing anyone meant.

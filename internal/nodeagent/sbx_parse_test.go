@@ -84,12 +84,6 @@ func TestSbxParsers(t *testing.T) {
 	if !sbxListsTemplate([]byte(tpls), "fridolin-brain:0123abcd") || sbxListsTemplate([]byte(tpls), "fridolin-brain:v1") || sbxListsTemplate([]byte("[]"), "x:y") {
 		t.Error("sbxListsTemplate")
 	}
-	if got := string(completeRunes([]byte("abü")[:3])); got != "ab" {
-		t.Errorf("a cut ü: %q", got)
-	}
-	if got := string(completeRunes([]byte("abü"))); got != "abü" {
-		t.Errorf("a whole ü: %q", got)
-	}
 	// sbx never inherits a credential, and runs without telemetry.
 	env := sbxEnv([]string{"HOME=/Users/you", "CLAUDE_CODE_OAUTH_TOKEN=x", "OPENAI_API_KEY=y", "SBX_NO_TELEMETRY=0"})
 	if !slices.Equal(env, []string{"HOME=/Users/you", "SBX_NO_TELEMETRY=1"}) {

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Fridolin config.json",
-  "description": "The bridge's configuration, version 2, as docs/CONFIGURATION.md describes it. A file without \"version\", or with null, is version 1, which may also have the retired keys model, work_dir and brains. Every key is optional: the bridge fills in a default for each one left out. Keys are added in later versions without a new version; one renamed, removed or given another meaning comes with a new version.",
+  "description": "The bridge's configuration, version 3, as docs/CONFIGURATION.md describes it. A file without \"version\", or with null, is version 1, which may also have the retired keys model, work_dir and brains. Every key is optional: the bridge fills in a default for each one left out. Keys are added in later versions without a new version; one renamed, removed or given another meaning comes with a new version.",
   "type": "object",
   "additionalProperties": false,
   "anyOf": [
@@ -10,7 +10,7 @@
   ],
   "properties": {
     "_comment": {"type": "string", "description": "A note for whoever reads the file; the bridge keeps it as it is."},
-    "version": {"type": ["integer", "null"], "minimum": 1, "maximum": 2, "description": "The version of this file, written by the bridge on every save; absent or null is 1."},
+    "version": {"type": ["integer", "null"], "minimum": 1, "maximum": 3, "description": "The version of this file, written by the bridge on every save; absent or null is 1."},
     "allowed_numbers": {"type": ["array", "null"], "items": {"type": "string"}, "description": "Phone numbers, with the country code, that may DM the bridge."},
     "allow_any_dm": {"type": "boolean", "description": "true lets anyone DM while allowed_numbers is empty; unset or false lets nobody."},
     "allowed_groups": {"type": ["array", "null"], "items": {"type": "string"}, "description": "Group JIDs (…@g.us) the bridge answers in."},
@@ -95,9 +95,7 @@
         "deny_paths": {"type": ["array", "null"], "items": {"$ref": "#/$defs/absolute_path"}},
         "allow_paths": {"type": ["array", "null"], "items": {"$ref": "#/$defs/absolute_path"}},
         "git_config": {"enum": ["", "read", "deny"]},
-        "credentials_dir": {"anyOf": [{"const": ""}, {"$ref": "#/$defs/absolute_path"}]},
-        "runtime": {"enum": ["", "bubblewrap", "docker-sandbox"], "description": "Where brains run by default: bubblewrap (today's sandbox, the default) or docker-sandbox (a Docker Sandbox on a node, docs/SANDBOXES.md)."},
-        "node": {"type": "string", "maxLength": 128, "description": "The node, by id or name, whose sandbox capability runs the brains; empty for the one on the core's machine."}
+        "credentials_dir": {"anyOf": [{"const": ""}, {"$ref": "#/$defs/absolute_path"}]}
       }
     },
     "otp_guard": {"type": "boolean"},

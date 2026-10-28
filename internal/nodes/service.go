@@ -368,8 +368,6 @@ func (s *Service) accept(w http.ResponseWriter, r *http.Request) {
 	// on, is updated now: after the core itself was updated, every node
 	// connects again.
 	s.wg.Go(func() { s.maybeAuto(node.ID) })
-	// Its sandboxes get the linux fridolin of this version.
-	s.wg.Go(func() { s.maybeSandboxBin(node.ID) })
 	if s.onConnect != nil {
 		s.wg.Go(func() { s.onConnect(clone(node)) })
 	}
@@ -500,7 +498,6 @@ func (s *Service) readLoop(ss *session) {
 			}
 			s.logf("nodes: %s (%s) offers now: %s; commands %s", n.Name, n.ID, n.Declared.Summary(), n.Commands())
 			s.pushState(n)
-			s.wg.Go(func() { s.maybeSandboxBin(n.ID) })
 			if s.onDeclare != nil {
 				s.onDeclare(n)
 			}
@@ -625,7 +622,6 @@ func (s *Service) ApproveCommands(id string) (*Node, error) {
 	if err == nil {
 		s.logf("nodes: approved what %s (%s) offers: %s", n.Name, n.ID, n.Approved.Summary())
 		s.pushState(n)
-		s.wg.Go(func() { s.maybeSandboxBin(n.ID) })
 		if s.onApprove != nil {
 			s.wg.Go(func() { s.onApprove(clone(n)) })
 		}
