@@ -84,6 +84,8 @@ POST /api/chats/members
 POST /api/chats/revoke
 POST /api/dev/inbound
 POST /api/dev/vote
+POST /api/fride/instances/{name}/start
+POST /api/fride/instances/{name}/stop
 POST /api/fs/pick
 POST /api/github/connect
 POST /api/github/disconnect
