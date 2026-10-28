@@ -80,6 +80,35 @@ type deletionHold struct {
 	Files     int       `json:"files"`
 }
 
+// takenSnapshots are the last hourly and nightly snapshot that were taken
+// (they have an ID; an incomplete one too): what the mass-deletion guard
+// compares a new one with, whatever failed in between. LastHourly and
+// LastNightly are the last tries, failed ones too.
+type takenSnapshots struct {
+	TakenHourly  *snapshotRecord `json:"taken_hourly,omitempty"`
+	TakenNightly *snapshotRecord `json:"taken_nightly,omitempty"`
+}
+
+// massDeletion keeps rec, a snapshot of kind that was taken, as the one
+// the next is compared with, and returns the one before it whose files
+// it lost most of, or nil. prev, the last try of kind, stands in for the
+// one before in a status from before these were kept.
+func (t *takenSnapshots) massDeletion(kind string, prev, rec *snapshotRecord) *snapshotRecord {
+	taken := &t.TakenHourly
+	if kind == snapshotNightly {
+		taken = &t.TakenNightly
+	}
+	base := *taken
+	if base == nil && prev != nil && prev.ID != "" {
+		base = prev
+	}
+	*taken = rec
+	if base != nil && snapshot.MassDeletion(base.Files, rec.Files) {
+		return base
+	}
+	return nil
+}
+
 type driveStatus struct {
 	Enabled       bool         `json:"enabled"`
 	Repo          string       `json:"repo,omitempty"`
@@ -88,17 +117,18 @@ type driveStatus struct {
 }
 
 type snapshotsStatus struct {
-	Enabled      bool            `json:"enabled"`
-	Repo         string          `json:"repo,omitempty"`
-	Error        string          `json:"error,omitempty"`
-	Last         *snapshotRecord `json:"last,omitempty"`
-	LastHourly   *snapshotRecord `json:"last_hourly,omitempty"`
-	LastNightly  *snapshotRecord `json:"last_nightly,omitempty"`
-	LastCheck    *checkRecord    `json:"last_check,omitempty"`
-	LastReadData *checkRecord    `json:"last_read_data,omitempty"`
-	LastPrune    *vaultRecord    `json:"last_prune,omitempty"`
-	DeletionHold *deletionHold   `json:"deletion_hold,omitempty"`
-	Drive        driveStatus     `json:"drive"`
+	Enabled     bool            `json:"enabled"`
+	Repo        string          `json:"repo,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	Last        *snapshotRecord `json:"last,omitempty"`
+	LastHourly  *snapshotRecord `json:"last_hourly,omitempty"`
+	LastNightly *snapshotRecord `json:"last_nightly,omitempty"`
+	takenSnapshots
+	LastCheck    *checkRecord  `json:"last_check,omitempty"`
+	LastReadData *checkRecord  `json:"last_read_data,omitempty"`
+	LastPrune    *vaultRecord  `json:"last_prune,omitempty"`
+	DeletionHold *deletionHold `json:"deletion_hold,omitempty"`
+	Drive        driveStatus   `json:"drive"`
 	// SkippedBrains are the brain folders the snapshots and the cold tier
 	// leave out whole, and why: backup.enabled off, or a brain.json that
 	// cannot be read (brainBackup).
@@ -466,12 +496,14 @@ func (vs *vaultSnapshots) snapshotLocked(ctx context.Context, kind string) {
 		}
 		st.Last = rec
 		// The mass-deletion guard of the Drive backup, for snapshots: a
-		// snapshot that lost most of the files of the one before holds
-		// pruning until the person says the deletion was meant.
-		if err == nil && prev != nil && prev.Error == "" && snapshot.MassDeletion(prev.Files, rec.Files) && st.DeletionHold == nil {
-			st.DeletionHold = &deletionHold{Since: rec.At, Snapshot: rec.ID, Kind: kind, PrevFiles: prev.Files, Files: rec.Files}
-			vs.s.log.Warn("vault: a snapshot lost most of the files of the one before; pruning waits until you allow it on the Vault page",
-				"kind", kind, "files", rec.Files, "before", prev.Files)
+		// snapshot that lost most of the files of the one taken before
+		// holds pruning until the person says the deletion was meant.
+		if err == nil {
+			if base := st.massDeletion(kind, prev, rec); base != nil && st.DeletionHold == nil {
+				st.DeletionHold = &deletionHold{Since: rec.At, Snapshot: rec.ID, Kind: kind, PrevFiles: base.Files, Files: rec.Files}
+				vs.s.log.Warn("vault: a snapshot lost most of the files of the one before; pruning waits until you allow it on the Vault page",
+					"kind", kind, "files", rec.Files, "before", base.Files)
+			}
 		}
 	})
 	if err != nil || kind != snapshotNightly {

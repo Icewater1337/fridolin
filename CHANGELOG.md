@@ -1355,6 +1355,18 @@ for compatibility.
 
 ### Fixed
 
+- **A wipe after a failed or incomplete snapshot now holds pruning too.**
+  The vault compared a new snapshot only with the last try of its kind,
+  and only when that try had no error. After a nightly that failed (a B2
+  timeout, say), the next one was compared with nothing; and once one
+  unreadable file made every snapshot incomplete, the guard never fired
+  again. Folders wiped in between were pruned away without a hold. Now a
+  snapshot is compared with the last one of its kind that was taken,
+  incomplete ones included, whatever failed in between. The vault status
+  shows them as `taken_hourly` and `taken_nightly`, for the cloud
+  snapshots and for each node target. The first snapshot after the
+  upgrade still compares with the last try, when that one was taken.
+
 - **A module.json key in other letters, or written twice, no longer
   grants what the approver did not see.** Fridolin read a manifest's keys
   case-insensitively (`"Capabilities"` counted as `capabilities`) and

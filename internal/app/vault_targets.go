@@ -51,8 +51,9 @@ var targetRetryAfter = time.Hour
 
 // targetStatus is what one target did, as the status file keeps it.
 type targetStatus struct {
-	LastHourly   *snapshotRecord `json:"last_hourly,omitempty"`
-	LastNightly  *snapshotRecord `json:"last_nightly,omitempty"`
+	LastHourly  *snapshotRecord `json:"last_hourly,omitempty"`
+	LastNightly *snapshotRecord `json:"last_nightly,omitempty"`
+	takenSnapshots
 	Last         *snapshotRecord `json:"last,omitempty"`
 	LastCheck    *checkRecord    `json:"last_check,omitempty"`
 	LastReadData *checkRecord    `json:"last_read_data,omitempty"`
@@ -507,10 +508,12 @@ func (r *targetRun) snapshot(ctx context.Context, kind string) {
 			prev, st.LastNightly = st.LastNightly, rec
 		}
 		st.Last = rec
-		if err == nil && prev != nil && prev.Error == "" && snapshot.MassDeletion(prev.Files, rec.Files) && st.DeletionHold == nil {
-			st.DeletionHold = &deletionHold{Since: rec.At, Snapshot: rec.ID, Kind: kind, PrevFiles: prev.Files, Files: rec.Files}
-			r.t.log.Warn("vault: a snapshot to a node target lost most of the files of the one before; pruning waits until you allow it",
-				"target", name, "files", rec.Files, "before", prev.Files)
+		if err == nil {
+			if base := st.massDeletion(kind, prev, rec); base != nil && st.DeletionHold == nil {
+				st.DeletionHold = &deletionHold{Since: rec.At, Snapshot: rec.ID, Kind: kind, PrevFiles: base.Files, Files: rec.Files}
+				r.t.log.Warn("vault: a snapshot to a node target lost most of the files of the one before; pruning waits until you allow it",
+					"target", name, "files", rec.Files, "before", base.Files)
+			}
 		}
 		hold = st.DeletionHold != nil
 	})
