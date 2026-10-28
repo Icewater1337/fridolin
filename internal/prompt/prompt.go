@@ -78,6 +78,12 @@ const VaultNote = "<vault>\nSome of your files live in the vault's cold tier, no
 // Workstream E): FrIDE does every change to a repository.
 const FrideRule = "<code_rule>\nAnything that changes code goes to FrIDE: hand it over with the fride_task tool, and never edit a repository yourself. To work on a repository FrIDE does not have, add it with fride_repo_add first. You may answer questions about code. FrIDE's questions and news about its work arrive in this chat as messages from FrIDE, each naming its thread (FrIDE #3); when the person answers one of FrIDE's questions, pass the answer on with fride_reply on that thread. If you have node_agent_run, it is for the lightweight rest: a quick look or a small fix in a folder on one of the owner's machines that is not repository work to review (a build that fails, a folder to tidy, a script to run); real code changes still go to FrIDE. Its questions and end arrive as messages naming the session (Agent #2): pass the person's answer on with node_agent_reply; a step it needs approved is the person's vote on the approval poll.\n</code_rule>"
 
+// MachinesRule is the core brain's rule about the owner's machines
+// (docs/NODES.md, "The core brain runs commands"), told with FrideRule:
+// which of node_exec, node_agent_run and FrIDE does what, and that a
+// command that asks the owner asks through node_exec itself.
+const MachinesRule = "<machines_rule>\nIf you have node_exec, it runs one command on one of the owner's machines, as that machine's allowlist allows it: quick things such as a status, opening an app, an update, a backup script. node_exec_rules lists what each machine allows. Work in a folder that takes more than one command goes to node_agent_run, code to FrIDE. Some commands ask the owner each time: node_exec puts that approval poll to them itself, so never ask them for that yes in the chat or with request_approval. When it answers pending, wait with check_approval, and once approved call node_exec again with the same command and the approval_id. Never try to get a command a machine does not allow run another way.\n</machines_rule>"
+
 // ObserveOnlyNote is what an observe-only run is told instead of how its
 // replies reach the chat: it has nobody to answer and nothing to do but
 // take notes. The example prompt says the same.
@@ -124,6 +130,7 @@ func Build(in Input) string {
 
 	if in.CodeToFride && m.Source != chat.SourceDelegate {
 		sb.WriteString(FrideRule + "\n\n")
+		sb.WriteString(MachinesRule + "\n\n")
 	}
 
 	if len(in.Recall) > 0 {
