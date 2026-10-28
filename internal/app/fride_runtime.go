@@ -242,7 +242,7 @@ type fridePost struct {
 // instead (frideNews).
 func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) (fridePost, bool) {
 	ctx := f.ctx
-	t, err := f.b.store.FrideThreadOn(ctx, node, ev.ThreadID)
+	t, err := f.b.store.FrideThreadOn(ctx, node, ev.Instance, ev.ThreadID)
 	if err != nil {
 		if !errors.Is(err, store.ErrNoFrideThread) {
 			log.Printf("fride: finding the thread of FrIDE's news: %v", err)
@@ -253,7 +253,7 @@ func (f *frideRuntime) relay(node string, ev nodeproto.FrideEvent) (fridePost, b
 	}
 	unlock := f.lock(t.ID)
 	t, err = f.b.store.GetFrideThread(ctx, t.ID)
-	if err != nil || t.Node != node || t.FrideThread != ev.ThreadID {
+	if err != nil || t.Node != node || t.Instance != ev.Instance || t.FrideThread != ev.ThreadID {
 		unlock()
 		return fridePost{}, false
 	}
