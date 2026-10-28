@@ -2,6 +2,7 @@ package nodeproto
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -12,11 +13,24 @@ import (
 func (c Capabilities) Plain() []string {
 	var out []string
 	if c.Exec != nil && len(c.Exec.Allow) > 0 {
-		names := make([]string, len(c.Exec.Allow))
-		for i, r := range c.Exec.Allow {
-			names[i] = r.Name
+		// A rule that asks the owner each time is said apart: approving it
+		// lets the core ask, not run.
+		var free, asks []string
+		for _, r := range c.Exec.Allow {
+			if r.Approve {
+				if !slices.Contains(asks, r.Name) {
+					asks = append(asks, r.Name)
+				}
+			} else {
+				free = append(free, r.Name)
+			}
 		}
-		out = append(out, "run these programs there when asked: "+strings.Join(names, ", "))
+		if len(free) > 0 {
+			out = append(out, "run these programs there when asked: "+strings.Join(free, ", "))
+		}
+		if len(asks) > 0 {
+			out = append(out, "run these programs there only with your yes each time: "+strings.Join(asks, ", "))
+		}
 	}
 	if c.FS != nil && len(c.FS.Roots) > 0 {
 		var read, write []string
