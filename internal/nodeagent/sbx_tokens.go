@@ -10,53 +10,43 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
 )
 
-// Per-host tokens of a sandbox (docs/NODES.md, "GitHub and other git
-// hosts"): a token for a git host never enters the VM. The VM gets a
-// placeholder, and sbx's proxy puts the token in its place in every
-// request to the host: in an Authorization header (Bearer, token) and in
-// git's Basic auth. The token waits on the host in a file only the node
-// reads, which sbx reads (`--command`) when it sets the secret and when
-// it refreshes it.
+// Per-host tokens of a sandbox (docs/NODES.md, "Tokens as placeholders"):
+// a token for a git host never enters the VM. The VM gets a placeholder,
+// and sbx's proxy puts the token in its place in every request to the
+// host: in an Authorization header (Bearer, token) and in git's Basic
+// auth. The token waits on the host in a file only the node reads, which
+// sbx reads (`--command`) when it sets the secret and when it refreshes
+// it.
 //
 // setHostToken and removeHostToken are the helpers; they work for any
 // host (github.com, gitlab.example.com:8443). For github.com the sandbox
 // also gets sbx's own github service, which puts the token into every
 // request to GitHub's hosts, so that gh and git work without the
-// placeholder too.
-//
-// The git identities the core hands FrIDE (fride_identities.go) will
-// reach FrIDE instances in Docker Sandboxes this way: the token through
-// setHostToken, the placeholder as the identity's token. Until the
-// instances come, the node of the sandboxed FrIDE holds them back
-// (identitiesHeld).
-
-// sbxTokensDir is where a state dir keeps its sandboxes' host tokens:
-// <dir>/sbx-tokens/<sandbox>/<host>.token and .placeholder, 0600.
-const sbxTokensDir = "sbx-tokens"
+// placeholder too. A FrIDE instance gets its git identities this way:
+// the token through setHostToken, the placeholder as the identity's token
+// in FrIDE (fride_instance_start.go). The egress to the host is the
+// instance's network rules' (fride_instance_net.go), not theirs.
 
 // hostTokenRe is a host with an optional port, lower case: what a token
 // is for.
 var hostTokenRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*(:[0-9]{1,5})?$`)
 
-// brainSandboxNameRe is a brain's sandbox's name: one path element.
-var brainSandboxNameRe = regexp.MustCompile(`^fridolin-[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
-
 // githubHost is the host whose token also goes to sbx's github service.
 const githubHost = "github.com"
 
-// hostTokenFiles are host's token and placeholder files for sandbox.
+// hostTokenFiles are host's token and placeholder files in dir, the
+// folder of sandbox's tokens.
 func hostTokenFiles(dir, sandbox, host string) (token, placeholder string, err error) {
 	if !hostTokenRe.MatchString(host) || len(host) > 253 {
 		return "", "", fmt.Errorf("%q is not a host (like github.com or gitlab.example.com:8443)", host)
 	}
-	if !frideSandboxNameRe.MatchString(sandbox) && !brainSandboxNameRe.MatchString(sandbox) {
+	if !frideInstanceSandboxRe.MatchString(sandbox) {
 		return "", "", fmt.Errorf("%q is not a sandbox of fridolin's", sandbox)
 	}
-	base := filepath.Join(dir, sbxTokensDir, sandbox, strings.ReplaceAll(host, ":", "_"))
+	base := filepath.Join(dir, strings.ReplaceAll(host, ":", "_"))
 	if strings.Contains(base, "'") {
 		return "", "", fmt.Errorf("the state dir %s has a ' in its path, which sbx's command cannot quote", dir)
 	}
@@ -106,13 +96,14 @@ func gitUser(host string) string {
 }
 
 // setHostToken gives sandbox token for host and returns the placeholder
-// that stands for it in the VM: the token in a 0600 file in dir, a
-// sandbox-scoped sbx custom secret that swaps the placeholder for it in
-// requests to host (for github.com, also to api.github.com), the egress
-// to host, and git's credential helper for https://host in the VM, which
-// hands git the placeholder. For github.com, sbx's github service gets
-// the token too, on stdin. Set again, it keeps the placeholder and
-// replaces the token. The token is never an argument, printed or logged.
+// that stands for it in the VM: the token in a 0600 file in dir (the
+// folder of the sandbox's tokens), a sandbox-scoped sbx custom secret
+// that swaps the placeholder for it in requests to host (for github.com,
+// also to api.github.com), and git's credential helper for https://host
+// in the VM, which hands git the placeholder. For github.com, sbx's
+// github service gets the token too, on stdin. Set again, it keeps the
+// placeholder and replaces the token. The token is never an argument,
+// printed or logged.
 func setHostToken(ctx context.Context, d sbxDriver, dir, sandbox, host, token string) (string, error) {
 	tok, err := CheckHostToken(token)
 	if err != nil {
@@ -144,12 +135,7 @@ func setHostToken(ctx context.Context, d sbxDriver, dir, sandbox, host, token st
 	redact := func(err error, stderr []byte) error {
 		return errors.New(strings.ReplaceAll(sbxError(err, stderr).Error(), tok, "…"))
 	}
-	name, rule := hostPort(host)
-	if !slices.Contains(frideSandboxEgress, rule) {
-		if _, stderr, err := d.run(ctx, nil, nil, "policy", "allow", "network", "--sandbox", sandbox, rule); err != nil {
-			return "", fmt.Errorf("sbx could not allow %s: %w", rule, redact(err, stderr))
-		}
-	}
+	name, _ := hostPort(host)
 	args := []string{"secret", "set-custom", "--sandbox", sandbox, "--host", name}
 	if host == githubHost {
 		args = append(args, "--host", "api.github.com")
@@ -164,7 +150,7 @@ func setHostToken(ctx context.Context, d sbxDriver, dir, sandbox, host, token st
 			return "", fmt.Errorf("sbx could not set its github secret: %w", redact(err, stderr))
 		}
 	}
-	script := frideSandboxScript(frideSandboxCredential, "https://"+host, gitUser(host), ph)
+	script := frideInstanceScript(frideInstanceCredential, "https://"+host, gitUser(host), ph)
 	if _, stderr, err := d.run(ctx, nil, nil, append([]string{"exec", sandbox}, script...)...); err != nil {
 		return "", fmt.Errorf("git's credential helper in the sandbox: %w", redact(err, lastLineOf(stderr)))
 	}
@@ -185,9 +171,9 @@ func readPlaceholder(file string) (string, error) {
 }
 
 // removeHostToken takes host's token from sandbox: its secret (and sbx's
-// github service for github.com), the egress setHostToken added, git's
-// helper in the VM while the sandbox runs, and the files. A sandbox sbx
-// no longer has lost its secrets and rules with it.
+// github service for github.com), git's helper in the VM while the
+// sandbox runs, and the files. A sandbox sbx no longer has lost its
+// secrets with it.
 func removeHostToken(ctx context.Context, d sbxDriver, dir, sandbox, host string) error {
 	tokFile, phFile, err := hostTokenFiles(dir, sandbox, host)
 	if err != nil {
@@ -214,14 +200,9 @@ func removeHostToken(ctx context.Context, d sbxDriver, dir, sandbox, host string
 				errs = append(errs, errors.New("sbx could not remove its github secret"))
 			}
 		}
-		if _, rule := hostPort(host); !slices.Contains(frideSandboxEgress, rule) {
-			if _, stderr, err := d.run(ctx, nil, nil, "policy", "rm", "network", "--sandbox", sandbox, "--resource", rule, "--force"); err != nil {
-				errs = append(errs, fmt.Errorf("sbx could not remove the rule for %s: %w", rule, sbxError(err, stderr)))
-			}
-		}
 	}
 	if status == "running" {
-		script := frideSandboxScript(frideSandboxUncredential, "https://"+host)
+		script := frideInstanceScript(frideInstanceUncredential, "https://"+host)
 		if _, stderr, err := d.run(ctx, nil, nil, append([]string{"exec", sandbox}, script...)...); err != nil {
 			errs = append(errs, fmt.Errorf("git's credential helper in the sandbox: %w", sbxError(err, lastLineOf(stderr))))
 		}
@@ -234,9 +215,9 @@ func removeHostToken(ctx context.Context, d sbxDriver, dir, sandbox, host string
 	return errors.Join(errs...)
 }
 
-// hostTokenHosts are the hosts sandbox has tokens for in dir.
-func hostTokenHosts(dir, sandbox string) []string {
-	files, _ := filepath.Glob(filepath.Join(dir, sbxTokensDir, sandbox, "*.placeholder"))
+// hostTokenHosts are the hosts with tokens in dir.
+func hostTokenHosts(dir string) []string {
+	files, _ := filepath.Glob(filepath.Join(dir, "*.placeholder"))
 	var hosts []string
 	for _, f := range files {
 		host := strings.ReplaceAll(strings.TrimSuffix(filepath.Base(f), ".placeholder"), "_", ":")
@@ -245,25 +226,6 @@ func hostTokenHosts(dir, sandbox string) []string {
 		}
 	}
 	return hosts
-}
-
-// reapplyHostTokens gives a sandbox made anew the tokens of the one
-// before: sbx removed its secrets and rules with it.
-func reapplyHostTokens(ctx context.Context, d sbxDriver, dir, sandbox string) error {
-	for _, host := range hostTokenHosts(dir, sandbox) {
-		tokFile, _, err := hostTokenFiles(dir, sandbox, host)
-		if err != nil {
-			return err
-		}
-		tok, err := os.ReadFile(tokFile)
-		if err != nil {
-			return fmt.Errorf("the token for %s: %w", host, err)
-		}
-		if _, err := setHostToken(ctx, d, dir, sandbox, host, string(tok)); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // sbxSandboxStatus is sbx's status of the sandbox name, "" for none.

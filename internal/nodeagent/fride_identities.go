@@ -137,7 +137,7 @@ func (a *Agent) pushIdentities(ctx context.Context) nodeproto.FrideIdentitiesRes
 	}
 	ctx, cancel := context.WithTimeout(ctx, frideCallTimeout)
 	defer cancel()
-	fc := &frideConn{a: a, cfg: cfg, token: token}
+	fc := a.nativeConn(cfg, token)
 	info, err := fc.probe(ctx)
 	if err != nil {
 		res.Pending, res.Error = true, scrubTokens(frideErr(err).Message, want)
@@ -265,20 +265,20 @@ func (a *Agent) savePushedIdentities(ids []string) error {
 	return writeFile(p, append(data, '\n'), 0o600)
 }
 
+// legacyFrideSandboxService is the service of the second node a
+// sandboxed FrIDE had before FrIDE instances replaced it. compat: a
+// node set up so before still runs until its owner removes it, and its
+// FrIDE's VM must never hold a real token.
+const legacyFrideSandboxService = "fride-sandbox"
+
 // identitiesHeld says why this node keeps the identities from its FrIDE:
-// the FrIDE in a Docker Sandbox (the node of service fride-sandbox) must
-// never hold a real token in its VM. "" for a node that passes them on.
-//
-// This "-sbx" node goes away: FrIDE instances in Docker Sandboxes, which
-// the core starts through a node (docs/VISION.md), replace it. An
-// instance gets its identities as placeholders, never the tokens:
-// setHostToken (fride_sandbox_tokens.go) keeps each token on the host in
-// a sandbox-scoped sbx secret that swaps the placeholder for it on the way
-// to its host, and FrIDE gets the placeholder as the identity's token.
-// That is wired with the instances, not here.
+// the FrIDE of the old "-sbx" node (service fride-sandbox) must never
+// hold a real token in its VM. "" for a node that passes them on. FrIDE
+// instances get theirs with fride.instance.start, as placeholders
+// (sbx_tokens.go).
 func (a *Agent) identitiesHeld() string {
-	if a.Config.Service == FrideSandboxService {
-		return "the FrIDE in a Docker Sandbox gets no git token: FrIDE instances will get placeholders instead"
+	if a.Config.Service == legacyFrideSandboxService {
+		return "the FrIDE in a Docker Sandbox gets no git token: FrIDE instances get placeholders instead"
 	}
 	return ""
 }

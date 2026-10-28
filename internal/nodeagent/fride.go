@@ -245,13 +245,21 @@ func ProbeFride(ctx context.Context, base, token string) (FrideInfo, error) {
 	return info, nil
 }
 
-// frideConn is what the agent calls FrIDE with: its settings and the
+// frideConn is what the agent calls a FrIDE with: its settings and the
 // token, which the token paired since takes over from when FrIDE refuses
 // it.
 type frideConn struct {
-	a     *Agent
 	cfg   *FrideConfig
 	token string
+	// repaired is the token paired since the stale one, "" for none
+	// (frideRepaired); nil for a FrIDE the agent pairs itself (an
+	// instance's).
+	repaired func(stale string) string
+}
+
+// nativeConn is the link to the node's own FrIDE.
+func (a *Agent) nativeConn(cfg *FrideConfig, token string) *frideConn {
+	return &frideConn{cfg: cfg, token: token, repaired: a.frideRepaired}
 }
 
 // try calls call with the token, and once more with the one in the state
@@ -259,10 +267,10 @@ type frideConn struct {
 // since.
 func (c *frideConn) try(call func(token string) error) error {
 	err := call(c.token)
-	if !frideRefused(err) {
+	if !frideRefused(err) || c.repaired == nil {
 		return err
 	}
-	fresh := c.a.frideRepaired(c.token)
+	fresh := c.repaired(c.token)
 	if fresh == "" {
 		return err
 	}
@@ -387,7 +395,7 @@ func (a *Agent) frideCheck(ctx context.Context) bool {
 	takesIDs := false
 	if cfg != nil && token != "" {
 		pctx, cancel := context.WithTimeout(ctx, frideProbeTimeout)
-		info, err := (&frideConn{a: a, cfg: cfg, token: token}).probe(pctx)
+		info, err := a.nativeConn(cfg, token).probe(pctx)
 		cancel()
 		if err == nil {
 			next = &nodeproto.FrideCap{URL: cfg.URL, Repos: info.Repos}
@@ -433,14 +441,22 @@ func (a *Agent) frideLoop(ctx context.Context) {
 	t := time.NewTicker(every)
 	defer t.Stop()
 	pruned := time.Time{}
+	a.inst.init()
 	for {
 		select {
 		case <-ctx.Done():
 			a.frideListen(nil)
 			return
+		case <-a.inst.refresh:
+			// An instance changed state: fride_host's declaration now.
+			if a.frideHostRefresh(ctx, true) {
+				a.declareAgain()
+			}
+			continue
 		case <-t.C:
 		}
 		fc := a.frideCheck(ctx)
+		hc := a.frideHostRefresh(ctx, false)
 		// The git identities: to a FrIDE paired anew, and a new GitHub
 		// token before the one it has runs out.
 		a.identitiesTick(ctx)
@@ -448,11 +464,8 @@ func (a *Agent) frideLoop(ctx context.Context) {
 		// agent runs: declared again, to wait for the owner's approval.
 		ac, cc := a.androidCheck(false), a.coreHostChanged()
 		a.sbxSettingsCheck(ctx)
-		if fc || ac || cc {
-			select {
-			case a.fride.changed <- struct{}{}:
-			default:
-			}
+		if fc || hc || ac || cc {
+			a.declareAgain()
 		}
 		if a.Dir != "" {
 			pruneAndroid(filepath.Join(a.Dir, androidTransfers), time.Now(), androidTransferTTL)
@@ -464,8 +477,18 @@ func (a *Agent) frideLoop(ctx context.Context) {
 	}
 }
 
+// declareAgain has the session tell the core what the node offers now.
+func (a *Agent) declareAgain() {
+	a.fride.init()
+	select {
+	case a.fride.changed <- struct{}{}:
+	default:
+	}
+}
+
 // declared is what the node offers now: node.json's capabilities, FrIDE
-// while it answers, and android-build while the toolchain is there.
+// while it answers, fride_host once it is set up, and android-build
+// while the toolchain is there.
 func (a *Agent) declared() nodeproto.Capabilities {
 	c := a.Config.Capabilities
 	c.AndroidBuild = a.androidDeclared()
@@ -482,6 +505,7 @@ func (a *Agent) declared() nodeproto.Capabilities {
 		c.Fride = nil
 	}
 	a.fride.mu.Unlock()
+	c.FrideHost = a.frideHostDeclared()
 	a.declareWork(&c)
 	c.CoreHost = a.coreHostDeclared()
 	a.declareCorePrograms(&c)
@@ -531,9 +555,28 @@ func SignFride(token string, body []byte) string {
 	return "sha256=" + hex.EncodeToString(m.Sum(nil))
 }
 
-// frideWebhook hears FrIDE's thread news: a POST from this machine, signed
-// with the token, which goes on to the core while fride is approved.
+// frideWebhook hears the node's own FrIDE's thread news (frideNews).
 func (a *Agent) frideWebhook(w http.ResponseWriter, r *http.Request) {
+	a.frideNews(w, r, "", func(sig string, body []byte) bool {
+		a.fride.mu.Lock()
+		token := a.fride.token
+		a.fride.mu.Unlock()
+		// FrIDE paired again signs with the new token at once, and does not
+		// send what is refused again.
+		return signedBy(token, sig, body) || signedBy(a.frideRepaired(token), sig, body)
+	})
+}
+
+// signedBy reports whether sig is body's signature with token.
+func signedBy(token, sig string, body []byte) bool {
+	return token != "" && hmac.Equal([]byte(sig), []byte(SignFride(token, body)))
+}
+
+// frideNews hears a FrIDE's thread news: a POST from this machine, which
+// signed says is signed with the token the node paired with, and which
+// goes on to the core as the news of instance ("" for the node's own
+// FrIDE, whatever the news says) while the core approved that FrIDE.
+func (a *Agent) frideNews(w http.ResponseWriter, r *http.Request, instance string, signed func(sig string, body []byte) bool) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
 		return
@@ -547,17 +590,12 @@ func (a *Agent) frideWebhook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unreadable or too large", http.StatusBadRequest)
 		return
 	}
-	a.fride.mu.Lock()
-	token := a.fride.token
-	a.fride.mu.Unlock()
-	sig := r.Header.Get("X-Fride-Signature")
-	signed := func(token string) bool {
-		return token != "" && hmac.Equal([]byte(sig), []byte(SignFride(token, body)))
+	who := "FrIDE"
+	if instance != "" {
+		who = "the FrIDE instance " + instance
 	}
-	// FrIDE paired again signs with the new token at once, and does not
-	// send what is refused again.
-	if !signed(token) && !signed(a.frideRepaired(token)) {
-		a.logf("node: refused a FrIDE webhook whose signature does not match the token")
+	if !signed(r.Header.Get("X-Fride-Signature"), body) {
+		a.logf("node: refused a webhook of %s whose signature does not match the token", who)
 		http.Error(w, "bad signature", http.StatusUnauthorized)
 		return
 	}
@@ -567,18 +605,25 @@ func (a *Agent) frideWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ev.Text = clean(ev.Text, 16<<10)
+	ev.Instance = instance
 	// News is FrIDE's to report only while the core lets this node serve
-	// fride: what happens before the approval, or after it is withdrawn,
-	// is dropped here rather than queued, so that it cannot reach the core
+	// it: what happens before the approval, or after it is withdrawn, is
+	// dropped here rather than queued, so that it cannot reach the core
 	// once an approval arrives behind it. FrIDE gets its 204 all the same:
 	// a refusal would only make it retry into the approval.
-	if st := a.State(); st.Device != nodeproto.DeviceApproved || !st.Approved.Allows(nodeproto.MethodFrideStatus) {
-		a.logf("node: dropped FrIDE's %s of thread %d: fride is not approved on this node", ev.Event, ev.ThreadID)
+	st := a.State()
+	approved := st.Approved.Fride != nil
+	if instance != "" {
+		approved = st.Approved.FrideHost != nil
+	}
+	if st.Device != nodeproto.DeviceApproved || !approved {
+		a.logf("node: dropped the %s of thread %d from %s: it is not approved on this node", ev.Event, ev.ThreadID, who)
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	a.fride.init()
 	switch {
+	case instance != "":
 	case ev.Kind() == nodeproto.FrideFailed && nodeproto.FrideNotLoggedIn(ev.Text):
 		a.frideLogin(time.Now())
 	case ev.Kind() != nodeproto.FrideFailed:
@@ -643,15 +688,72 @@ func frideErr(err error) *nodeproto.Error {
 	return nodeproto.Errorf(nodeproto.CodeUnavailable, "FrIDE does not answer: %v", err)
 }
 
-// frideCall serves a fride.* method.
-func (a *Agent) frideCall(ctx context.Context, method string, raw json.RawMessage) (any, *nodeproto.Error) {
-	a.fride.mu.Lock()
-	cfg, token := a.fride.cfg, a.fride.token
-	a.fride.mu.Unlock()
-	if cfg == nil || token == "" {
-		return nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "FrIDE is not paired with this node")
+// frideApproved refuses a fride.* call for a FrIDE the core did not
+// approve here: the node's own needs fride, an instance fride_host.
+// Params that do not read are frideCall's to refuse.
+func frideApproved(eff nodeproto.Capabilities, method string, raw json.RawMessage) *nodeproto.Error {
+	var on nodeproto.FrideOn
+	if len(raw) > 0 && json.Unmarshal(raw, &on) != nil {
+		return nil
 	}
-	fc := &frideConn{a: a, cfg: cfg, token: token}
+	switch {
+	case on.Instance == "" && eff.Fride == nil:
+		return nodeproto.Errorf(nodeproto.CodeDenied, "%s: this node's own FrIDE is not approved here, or does not answer; name one of its FrIDE instances", method)
+	case on.Instance != "" && eff.FrideHost == nil:
+		return nodeproto.Errorf(nodeproto.CodeDenied, "%s: FrIDE instances are not approved on this node", method)
+	}
+	return nil
+}
+
+// frideConnFor is the link to the FrIDE a fride.* call is for: the
+// node's own for "", else the instance's, which must run.
+func (a *Agent) frideConnFor(instance string) (*frideConn, *nodeproto.Error) {
+	if instance == "" {
+		a.fride.mu.Lock()
+		cfg, token := a.fride.cfg, a.fride.token
+		a.fride.mu.Unlock()
+		if cfg == nil || token == "" {
+			return nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "FrIDE is not paired with this node")
+		}
+		return a.nativeConn(cfg, token), nil
+	}
+	if err := nodeproto.CheckFrideInstanceName(instance); err != nil {
+		return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "%v", err)
+	}
+	if a.Dir == "" {
+		return nil, nodeproto.Errorf(nodeproto.CodeNotFound, "no FrIDE instance %s on this node", instance)
+	}
+	st, err := loadFrideInstance(a.Dir, instance)
+	if err != nil {
+		return nil, instanceErr(instance, err)
+	}
+	tok := readInstanceToken(a.Dir, instance)
+	if !st.Run || tok == "" {
+		return nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "the FrIDE instance %s is not running: fride.instance.start starts it", instance)
+	}
+	return &frideConn{cfg: &FrideConfig{URL: a.instanceOps().urlOf(st), Webhook: webhookAddr(st.WebhookPort)}, token: tok}, nil
+}
+
+// frideCall serves a fride.* method, for the FrIDE its params name.
+func (a *Agent) frideCall(ctx context.Context, method string, raw json.RawMessage) (any, *nodeproto.Error) {
+	var on nodeproto.FrideOn
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &on); err != nil {
+			return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "%s params: %v", method, err)
+		}
+	}
+	chunk := method == nodeproto.MethodFrideRead || method == nodeproto.MethodFrideWrite || method == nodeproto.MethodFrideDrop
+	var fc *frideConn
+	if !chunk || on.Instance == "" {
+		// A bundle staged on the node needs no FrIDE, but the node's own
+		// FrIDE's calls have always asked for its pairing.
+		var perr *nodeproto.Error
+		if fc, perr = a.frideConnFor(on.Instance); perr != nil {
+			return nil, perr
+		}
+	} else if err := nodeproto.CheckFrideInstanceName(on.Instance); err != nil {
+		return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "%v", err)
+	}
 	decode := func(v any) *nodeproto.Error {
 		if len(raw) == 0 {
 			return nil
@@ -665,6 +767,9 @@ func (a *Agent) frideCall(ctx context.Context, method string, raw json.RawMessag
 		var p nodeproto.FrideRepoParams
 		if e := decode(&p); e != nil {
 			return nil, e
+		}
+		if on.Instance != "" {
+			return a.instanceRepo(ctx, method, on.Instance, fc, p)
 		}
 		return a.frideRepo(ctx, method, fc, p)
 	}
@@ -1034,21 +1139,31 @@ func PairFride(ctx context.Context, o FridePairOptions) (FrideInfo, error) {
 	if err := fc.Check(); err != nil {
 		return FrideInfo{}, err
 	}
-	var paired struct {
-		Token string `json:"token"`
+	token, err := pairCompanion(ctx, fc.URL, o.Code, webhook)
+	if err != nil {
+		return FrideInfo{}, err
 	}
-	if err := frideDo(ctx, fc.URL, "", http.MethodPost, "/api/companion/pair", map[string]string{"code": strings.TrimSpace(o.Code), "webhook_url": webhookURL(webhook)}, &paired); err != nil {
-		return FrideInfo{}, fmt.Errorf("pairing with FrIDE at %s: %w", fc.URL, err)
-	}
-	if !strings.HasPrefix(paired.Token, "frc_") {
-		return FrideInfo{}, fmt.Errorf("FrIDE at %s answered the pairing without a token", fc.URL)
-	}
-	if err := writeFile(filepath.Join(o.Dir, FrideTokenFile), []byte(paired.Token+"\n"), 0o600); err != nil {
+	if err := writeFile(filepath.Join(o.Dir, FrideTokenFile), []byte(token+"\n"), 0o600); err != nil {
 		return FrideInfo{}, err
 	}
 	cfg.Fride = fc
 	if err := SaveConfig(o.Dir, cfg); err != nil {
 		return FrideInfo{}, err
 	}
-	return ProbeFride(ctx, fc.URL, paired.Token)
+	return ProbeFride(ctx, fc.URL, token)
+}
+
+// pairCompanion trades code for the companion token of the FrIDE at
+// base, giving it the webhook address for its news.
+func pairCompanion(ctx context.Context, base, code, webhook string) (string, error) {
+	var paired struct {
+		Token string `json:"token"`
+	}
+	if err := frideDo(ctx, base, "", http.MethodPost, "/api/companion/pair", map[string]string{"code": strings.TrimSpace(code), "webhook_url": webhookURL(webhook)}, &paired); err != nil {
+		return "", fmt.Errorf("pairing with FrIDE at %s: %w", base, err)
+	}
+	if !strings.HasPrefix(paired.Token, "frc_") {
+		return "", fmt.Errorf("FrIDE at %s answered the pairing without a token", base)
+	}
+	return paired.Token, nil
 }

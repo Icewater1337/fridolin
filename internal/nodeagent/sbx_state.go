@@ -7,7 +7,7 @@ import (
 )
 
 // TestedSbxVersion is the sbx release fridolin's sandboxes were tested
-// with; FrIDE's create notes another.
+// with; fride host setup notes another.
 const TestedSbxVersion = "v0.50.0"
 
 // errSbxSignedOut is sbx without Docker's sign-in.

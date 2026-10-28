@@ -10,13 +10,16 @@ import (
 	"strings"
 )
 
-// fakeFrideSbx stands in for the sbx commands only the sandboxed FrIDE
-// uses, in a fake dir its fixture marked (fride-fake), before fakeSbx
-// gets the rest: create records the Docker disk's size (disk.log); cp
-// copies between the host and vmhome/, the VM's home, as sbx does (a
-// folder into an existing one merges, a missing source fails); secret
-// keeps the github service's value in github-secret and each custom
-// secret in custom/<placeholder> (its hosts and value).
+// fakeFrideSbx stands in for the sbx commands only the FrIDE instances
+// use, in a fake dir its fixture marked (fride-fake), before fakeSbx
+// gets the rest: create records the Docker disk's size (disk.log) and
+// its arguments; stop marks a sandbox stopped (stopped-<name>), which ls
+// shows and an exec boots; rm takes the VM's disk; cp copies between the
+// host and vmhome/<sandbox>/, the VM's home, as sbx does (a folder into
+// an existing one merges, a missing source fails); policy rm removes a
+// rule by its resource; secret keeps the github service's value in
+// github-secret and each custom secret in custom/<placeholder> (its
+// hosts and value).
 func fakeFrideSbx(dir string, args []string) (int, bool) {
 	if _, err := os.Stat(filepath.Join(dir, "fride-fake")); err != nil || len(args) == 0 {
 		return 0, false
@@ -27,15 +30,54 @@ func fakeFrideSbx(dir string, args []string) (int, bool) {
 	}
 	switch {
 	case args[0] == "create":
-		appendFile(filepath.Join(dir, "disk.log"), os.Getenv(frideSandboxDiskEnv)+"\n")
+		appendFile(filepath.Join(dir, "disk.log"), os.Getenv(frideInstanceDiskEnv)+"\n")
+		if _, err := os.Stat(filepath.Join(dir, "fail-create")); err == nil {
+			return 0, false
+		}
+		name := args[slices.Index(args, "--name")+1]
+		_ = os.MkdirAll(filepath.Join(dir, "vmhome", name), 0o755)
+		return 0, false
+	case args[0] == "ls":
+		record()
+		rows := []map[string]string{}
+		for _, n := range fakeSandboxes(dir) {
+			status := "running"
+			if _, err := os.Stat(filepath.Join(dir, "stopped-"+n)); err == nil {
+				status = "stopped"
+			}
+			rows = append(rows, map[string]string{"name": n, "status": status, "agent": "claude"})
+		}
+		b, _ := json.Marshal(rows)
+		fmt.Println(string(b))
+		return 0, true
+	case args[0] == "stop":
+		record()
+		for _, n := range args[1:] {
+			_ = os.WriteFile(filepath.Join(dir, "stopped-"+n), nil, 0o600)
+			// The VM stops, and every exec in it ends.
+			_ = os.WriteFile(filepath.Join(fakeVM(dir, n), "stopped"), nil, 0o600)
+		}
+		return 0, true
+	case args[0] == "exec":
+		for _, a := range args[1:] {
+			if !strings.HasPrefix(a, "-") && slices.Contains(fakeSandboxes(dir), a) {
+				_ = os.Remove(filepath.Join(dir, "stopped-"+a))
+				break
+			}
+		}
 		return 0, false
 	case args[0] == "rm":
 		// The VM's disk goes with the sandbox.
-		_ = os.RemoveAll(filepath.Join(dir, "vmhome"))
+		name := args[len(args)-1]
+		_ = os.RemoveAll(filepath.Join(dir, "vmhome", name))
+		_ = os.RemoveAll(fakeVM(dir, name))
+		_ = os.Remove(filepath.Join(dir, "stopped-"+name))
 		return 0, false
 	case len(args) > 2 && args[0] == "policy" && args[1] == "rm" && slices.Contains(args, "--resource"):
-		// sbx removes a rule by its resource too; the shared fake knows ids only.
 		record()
+		i, j := slices.Index(args, "--sandbox"), slices.Index(args, "--resource")
+		scope, res := "sandbox:"+args[i+1], args[j+1]
+		saveFakeRules(dir, slices.DeleteFunc(fakeRules(dir), func(r fakeRule) bool { return r.Scope == scope && slices.Contains(r.Resources, res) }))
 		return 0, true
 	case args[0] == "cp":
 		record()
@@ -109,7 +151,7 @@ func fakeCp(dir, src, dst string) int {
 		if !ok {
 			return "", true
 		}
-		return filepath.Join(dir, "vmhome", rel), true
+		return filepath.Join(dir, "vmhome", name, rel), true
 	}
 	from, inVM := resolve(src)
 	to, toVM := resolve(dst)

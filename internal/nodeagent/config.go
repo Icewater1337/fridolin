@@ -51,11 +51,14 @@ type Config struct {
 	Update *bool `json:"update,omitempty"`
 	// Box is set for a node in a box (box.go); nil for a native node.
 	Box *BoxConfig `json:"box,omitempty"`
-	// Service names the service of a second node on this machine, such
-	// as the sandboxed FrIDE's (fride_sandbox.go): fridolin-node-<service>,
-	// ai.fridolin.node.<service> on macOS, run from the state dir's own
-	// fridolin (OwnBinary). Empty: the machine's node, fridolin-node.
+	// Service names the service of a second node on this machine:
+	// fridolin-node-<service>, ai.fridolin.node.<service> on macOS, run
+	// from the state dir's own fridolin (OwnBinary). Empty: the machine's
+	// node, fridolin-node.
 	Service string `json:"service,omitempty"`
+	// FrideHost tunes fride_host, which the agent declares once `fridolin
+	// node fride host setup` ran (fride_instances.go); nil for defaults.
+	FrideHost *FrideHostConfig `json:"fride_host,omitempty"`
 }
 
 // DefaultCapabilities is what a node offers when its owner says nothing
@@ -86,6 +89,9 @@ func (c Config) Check() error {
 	if c.Capabilities.CoreHost != nil {
 		return errors.New("capabilities.core_host: core-host lives in core-host.json, which only this machine writes: fridolin node core-host on")
 	}
+	if c.Capabilities.FrideHost != nil {
+		return errors.New(`capabilities.fride_host: the agent declares it once fridolin node fride host setup ran; node.json's "fride_host" section only tunes it (reserve_mb)`)
+	}
 	if c.Capabilities.Update != nil {
 		return errors.New(`capabilities.update: the agent declares it; "update": false turns it off`)
 	}
@@ -99,6 +105,9 @@ func (c Config) Check() error {
 		return err
 	}
 	if err := c.Box.Check(); err != nil {
+		return err
+	}
+	if err := c.FrideHost.Check(); err != nil {
 		return err
 	}
 	if c.Service != "" && !serviceNameRe.MatchString(c.Service) {

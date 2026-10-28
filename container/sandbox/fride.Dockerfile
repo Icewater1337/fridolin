@@ -1,25 +1,39 @@
 # syntax=docker/dockerfile:1
 #
-# The template of the sandboxed FrIDE's Docker Sandbox (docs/NODES.md,
-# "FrIDE in a Docker Sandbox"): the image of sbx's Claude kit, which has
-# Go, Node, git, gh, socat, jq, ripgrep and lsof, with the Claude Code
-# fridolin is tested with and the pinned ponytail plugin at
+# The template of the FrIDE instances' Docker Sandboxes (docs/NODES.md,
+# "FrIDE instances"): the image of sbx's Claude kit, which has Go, Node,
+# git, gh, socat, jq, ripgrep and lsof, with FrIDE at /opt/fride/bin/fride,
+# the Claude Code fridolin is tested with and the pinned ponytail plugin at
 # /opt/fride/plugins/ponytail, as in the fridolin-fride image.
-# `fridolin node fride sandbox create` builds it with Docker and loads it
-# into sbx (`sbx template load`); FrIDE itself is built inside the sandbox,
-# at the commit container/fride/Dockerfile pins, so that an update needs
-# no new template.
+# `fridolin node fride host setup` builds it with Docker and loads it into
+# sbx (`sbx template load`). FrIDE is built here, so that an instance needs
+# neither FrIDE's source nor GitHub; a new FrIDE is a new template, which
+# an instance gets when the node makes its sandbox anew.
 #
-# It holds no secret and no data. The base image, Claude Code and ponytail
-# are the ones container/sandbox/Dockerfile and container/fride/Dockerfile
-# name; a test holds them to the same values.
+# It holds no secret and no data. FrIDE's commit, Go, Claude Code and
+# ponytail are the ones container/fride/Dockerfile names; a test holds
+# them to the same values.
 #
 # Build from the repository's root:
 #
-#     docker build -f container/sandbox/fride.Dockerfile -t fridolin-fride-sandbox:dev .
+#     docker build -f container/sandbox/fride.Dockerfile \
+#       --build-arg FRIDE_REPO=https://github.com/OWNER/fride -t fridolin-fride-sbx:dev .
 
 # sbx's Claude kit image, pinned by digest (Go 1.27, Node 22, git, gh, socat).
 ARG BASE_IMAGE=docker/sandbox-templates:claude-code-docker@sha256:4a94d9144a70df744fd9247e0c365a14cfb97024afab8db7597c8ba3e0637642
+ARG GO_IMAGE=golang:1.27.2-bookworm
+
+# ── FrIDE ─────────────────────────────────────────────────────────────────
+FROM ${GO_IMAGE} AS fride
+ARG FRIDE_REPO
+ARG FRIDE_COMMIT=c5dd87b92ed1147b70a8f27f792ad62298f5691b
+RUN test -n "${FRIDE_REPO}" || { echo "pass --build-arg FRIDE_REPO=<FrIDE's git URL>" >&2; exit 1; }; \
+    git clone -q "${FRIDE_REPO}" /src/fride \
+ && git -C /src/fride checkout -q --detach "${FRIDE_COMMIT}"
+WORKDIR /src/fride
+RUN CGO_ENABLED=0 go build -trimpath -o /out/fride .
+
+# ── the template ──────────────────────────────────────────────────────────
 FROM ${BASE_IMAGE}
 
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
@@ -45,9 +59,11 @@ RUN apt-get update \
  && git clone -q "${PONYTAIL_REPO}" /opt/fride/plugins/ponytail \
  && git -C /opt/fride/plugins/ponytail checkout -q --detach "${PONYTAIL_COMMIT}" \
  && rm -rf /opt/fride/plugins/ponytail/.git
+COPY --from=fride /out/fride /opt/fride/bin/fride
 
 ENV DISABLE_AUTOUPDATER=1
 USER agent
 RUN claude --version && go version && node --version && gh --version \
+ && test -x /opt/fride/bin/fride \
  && command -v socat jq lsof setsid ip \
  && test -f /opt/fride/plugins/ponytail/.claude-plugin/plugin.json

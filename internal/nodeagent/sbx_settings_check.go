@@ -22,9 +22,9 @@ type sbxSettingsState struct {
 }
 
 // sbxSettingsCheck makes fridolin's global settings hold again, when it
-// is due, on the node of a sandboxed FrIDE: it sets a setting that
-// drifted and initializes a missing network policy. Another policy it
-// leaves alone, since replacing it stops every sandbox.
+// is due, on a node that runs FrIDE instances (fride_host): it sets a
+// setting that drifted and initializes a missing network policy. Another
+// policy it leaves alone, since replacing it stops every sandbox.
 func (a *Agent) sbxSettingsCheck(ctx context.Context) {
 	d := a.sbx()
 	if d == nil || a.Dir == "" || !sbxOS() {
@@ -37,7 +37,7 @@ func (a *Agent) sbxSettingsCheck(ctx context.Context) {
 		return
 	}
 	s.checked = time.Now()
-	if st, err := LoadFrideSandbox(a.Dir); err != nil || st == nil {
+	if h, err := LoadFrideHost(a.Dir); err != nil || h == nil || a.Config.Box != nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, sbxSettingsTimeout)

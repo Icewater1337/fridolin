@@ -159,7 +159,7 @@ func TestFrideIdentitiesWaitForFrIDE(t *testing.T) {
 func TestFrideIdentitiesHeldFromTheSandbox(t *testing.T) {
 	ff := testutil.StartFakeFride(t)
 	a := pairedAgent(t, ff)
-	a.Config.Service = FrideSandboxService
+	a.Config.Service = legacyFrideSandboxService
 	a.setState(nodeproto.State{Device: nodeproto.DeviceApproved, Approved: nodeproto.Capabilities{Fride: &nodeproto.FrideCap{URL: ff.URL}}})
 	res, perr := identitiesCall(t, a, testIdentities(time.Now().Add(time.Minute)))
 	if perr != nil || res.Held == "" || len(res.Pushed) != 0 || len(ff.GitIdentities()) != 0 || countCalls(ff, "PUT ") != 0 {

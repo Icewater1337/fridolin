@@ -1,7 +1,6 @@
 package nodeagent
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,26 +41,6 @@ func TestNodeServiceConfig(t *testing.T) {
 		if err := (Config{Core: "c:1", Name: "n", Service: bad}).Check(); err == nil {
 			t.Errorf("service %q passed", bad)
 		}
-	}
-}
-
-// The sandboxed FrIDE's node joins offering nothing, with its service
-// and without android-build in node.json.
-func TestJoinSecondNode(t *testing.T) {
-	t.Parallel()
-	c := startCore(t, t.TempDir())
-	dir := t.TempDir()
-	_, err := Join(context.Background(), JoinOptions{Dir: dir, Core: c.addr, Code: c.code(t), Name: "mac-sbx",
-		AndroidBuild: new(false), Service: FrideSandboxService, Version: "test", Logf: t.Logf})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := LoadConfig(dir)
-	if err != nil || cfg.Service != FrideSandboxService || cfg.AndroidBuild == nil || *cfg.AndroidBuild || cfg.Capabilities.Exec != nil || cfg.Capabilities.Host {
-		t.Fatalf("node.json: %+v %v", cfg, err)
-	}
-	if c := NodeServiceConfig("darwin", "/opt/fridolin", dir); c.Name != "ai.fridolin.node.fride-sandbox" {
-		t.Errorf("its service: %q", c.Name)
 	}
 }
 

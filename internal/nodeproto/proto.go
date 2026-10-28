@@ -380,7 +380,7 @@ const (
 )
 
 // Methods lists every method.
-var Methods = slices.Concat([]string{MethodExec, MethodExecPrograms, MethodFSList, MethodFSRead, MethodFSWrite, MethodHostInfo, MethodNotify}, FrideMethods, AndroidMethods, BackupMethods, UpdateMethods, AgentMethods, TerminalMethods, CoreHostMethods)
+var Methods = slices.Concat([]string{MethodExec, MethodExecPrograms, MethodFSList, MethodFSRead, MethodFSWrite, MethodHostInfo, MethodNotify}, FrideMethods, FrideHostMethods, AndroidMethods, BackupMethods, UpdateMethods, AgentMethods, TerminalMethods, CoreHostMethods)
 
 // ExecParams runs argv on the node.
 type ExecParams struct {
