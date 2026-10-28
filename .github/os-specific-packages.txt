@@ -32,11 +32,12 @@ darwin internal/app ^Test(Sandbox|SiteAPISecrets|ExampleConfigIsValid|GoldenStar
 # Windows; one joins the list once its tests do.
 #
 # Built from other files on Windows, but not passing there yet: fixtures
-# write Windows paths into JSON unescaped (cli), tests expect POSIX modes
-# and paths (fsx, snapshot), and fsx.Resolve and Canonical turn
-# C:\Users\… into \C:Users\…. Each joins once it passes.
+# write Windows paths into JSON unescaped (cli, but for the FrIDE host
+# commands, which a Windows node runs), tests expect POSIX modes and
+# paths (fsx, snapshot), and fsx.Resolve and Canonical turn C:\Users\…
+# into \C:Users\…. Each joins once it passes.
 windows internal/app -        # no tests of its own for Windows
-windows internal/cli -
+windows internal/cli ^TestNodeFrideHost(Args|SbxSecret)$
 windows internal/fsx -
 windows internal/snapshot -
 windows internal/access
