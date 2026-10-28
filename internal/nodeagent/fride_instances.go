@@ -97,8 +97,11 @@ type FrideInstanceState struct {
 	// Pushed is the fingerprint of what it took.
 	Identities []FrideInstanceIdentity `json:"identities,omitempty"`
 	Pushed     string                  `json:"pushed,omitempty"`
-	// Problem says why the last start failed; "" when it did not.
+	// Problem says why the last start failed; "" when it did not. Notes
+	// say what did not work in the last start that did (a repository that
+	// did not clone, no Claude login), for as long as it runs.
 	Problem string    `json:"problem,omitempty"`
+	Notes   string    `json:"notes,omitempty"`
 	Made    time.Time `json:"made,omitzero"`
 	Started time.Time `json:"started,omitzero"`
 }

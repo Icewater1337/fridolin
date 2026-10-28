@@ -748,3 +748,21 @@ func writeTestFile(t *testing.T, path, body string) {
 		t.Fatal(err)
 	}
 }
+
+// What did not work in a start that did is the instance's problem while
+// it runs: no Claude login, a repository that did not clone.
+func TestFrideInstanceNotes(t *testing.T) {
+	t.Parallel()
+	f := newInstFix(t)
+	f.a.CoreSecrets = hostsecrets.Files{Dir: t.TempDir()}
+	f.fride("work")
+	writeTestFile(t, filepath.Join(fakeVM(f.fake, "fride-work"), "fail-clone"), "fatal: repository not found\n")
+	out := f.start(workParams())
+	if out.State != nodeproto.FrideInstanceRunning || !strings.Contains(out.Problem, "no Claude login") || !strings.Contains(out.Problem, "repository not found") {
+		t.Errorf("start answered %+v", out)
+	}
+	f.a.frideHostRefresh(context.Background(), true)
+	if c := f.a.frideHostDeclared(); c == nil || len(c.Instances) != 1 || c.Instances[0].Problem != out.Problem {
+		t.Errorf("declared %+v", c)
+	}
+}

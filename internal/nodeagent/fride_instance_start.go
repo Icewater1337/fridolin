@@ -129,18 +129,19 @@ func (a *Agent) ensureInstance(ctx context.Context, o instanceOps, host *FrideHo
 	if err != nil {
 		return st, err
 	}
-	fresh := func() error {
+	// fresh is what a new sandbox is made with: the start's memory, the
+	// host's template, Docker disk and caches.
+	fresh := func() {
 		st.MemoryMB, st.Template, st.DockerDisk = p.MemoryMB, host.Template, host.DockerDisk
 		caches, err := instanceCaches(host, st.Name, a.Dir)
 		if err != nil {
 			o.say("Note: %v; %s has no shared caches.", err, st.Name)
 		}
 		st.Caches = caches
-		return nil
 	}
 	switch {
 	case status == "":
-		_ = fresh()
+		fresh()
 		return st, o.make(ctx, st, host)
 	case st.MemoryMB != p.MemoryMB || st.Template != host.Template && status != "running":
 		why := fmt.Sprintf("memory %d MB, now %d MB", st.MemoryMB, p.MemoryMB)
@@ -156,7 +157,7 @@ func (a *Agent) ensureInstance(ctx context.Context, o instanceOps, host *FrideHo
 			}
 			a.inst.syncServe(ctx)
 		}
-		_ = fresh()
+		fresh()
 		return st, o.remake(ctx, st, host, status)
 	}
 	return st, nil
@@ -209,7 +210,7 @@ func (a *Agent) readyInstance(ctx context.Context, o instanceOps, st *FrideInsta
 			return nodeproto.FrideInstance{}, err
 		}
 	}
-	st.Run, st.Problem, st.Repos, st.Started = true, "", slices.Clone(p.Repos), time.Now().UTC().Truncate(time.Second)
+	st.Run, st.Problem, st.Notes, st.Repos, st.Started = true, "", "", slices.Clone(p.Repos), time.Now().UTC().Truncate(time.Second)
 	if err := saveFrideInstance(a.Dir, st); err != nil {
 		return nodeproto.FrideInstance{}, err
 	}
@@ -235,11 +236,12 @@ func (a *Agent) readyInstance(ctx context.Context, o instanceOps, st *FrideInsta
 			info = i
 		}
 	}
+	st.Notes = problemText(strings.Join(notes, "; "))
 	if err := saveFrideInstance(a.Dir, st); err != nil {
 		return nodeproto.FrideInstance{}, err
 	}
 	out := nodeproto.FrideInstance{Name: st.Name, State: nodeproto.FrideInstanceRunning, MemoryMB: st.MemoryMB, URL: url,
-		Repos: info.Repos, Problem: problemText(strings.Join(notes, "; "))}
+		Repos: info.Repos, Problem: st.Notes}
 	if (&nodeproto.FrideHostCap{Instances: []nodeproto.FrideInstance{out}}).Check() != nil {
 		out.Repos = nil
 	}
