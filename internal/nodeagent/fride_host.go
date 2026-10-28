@@ -147,7 +147,7 @@ func (a *Agent) frideHostRead(ctx context.Context) *nodeproto.FrideHostCap {
 		}
 	}
 	c.Ready = len(problems) == 0
-	c.Problem = clean(strings.Join(problems, "; "), 1000)
+	c.Problem = problemText(strings.Join(problems, "; "))
 	o := a.instanceOps()
 	for _, st := range listFrideInstances(a.Dir) {
 		status := "unknown"

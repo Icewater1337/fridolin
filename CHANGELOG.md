@@ -10,6 +10,28 @@ for compatibility.
 
 ### Added
 
+- **FrIDE instances on a node** (docs/VISION.md, "FrIDE instances"). A
+  node runs whole FrIDEs, each in a Docker Sandbox of its own, for one
+  trust domain, which the core starts, stops and removes
+  (`fride.instance.start|stop|remove|status`). `fridolin node fride host
+  setup` in a fridolin checkout builds the template (FrIDE at the pinned
+  commit, Claude Code, ponytail) and makes sbx's settings fridolin's;
+  then the node offers `fride_host`, with sbx's state, the machine's
+  memory (on macOS free, inactive, purgeable and speculative pages), the
+  memory it keeps for itself (6144 MB, or node.json's
+  `fride_host.reserve_mb`) and its instances. Each instance, `fride-<name>`
+  in sbx, gets a pair of ports from 17850 up, its repositories cloned in
+  its VM, a network allowlist (Anthropic, Go, npm, Docker Hub, its git
+  hosts and the core's `egress`), its git identities as placeholders that
+  sbx's proxy swaps for the tokens (which stay in the node's state dir),
+  and the Claude login from the machine's host secret store, which sits
+  in the VM until sbx can inject subscription logins. A start with
+  another memory makes the sandbox anew and keeps its workspaces,
+  repositories, sessions, tasks and login. The `fride.*` methods take an
+  `instance`, and FrIDE's news says which. `fridolin node fride instance
+  ls|stop|rm|logs NAME` show and stop them on the machine. Nothing
+  changes for the native companion FrIDE. See docs/NODES.md, "FrIDE
+  instances".
 - **Git identities for FrIDE, and a GitLab connection.** Integrations →
   **GitLab** keeps a self-hosted GitLab's address, an access token and an
   optional commit name and email; **Check** asks GitLab who the token is.
@@ -1246,6 +1268,14 @@ for compatibility.
   ignores that capability and its approval. `fridolin node sandbox
   setup|status` and doctor's checks of it are gone; the dashboard no
   longer shows a brain's runtime. FrIDE in a Docker Sandbox stays.
+- **The sandboxed FrIDE's second node**, added earlier in this release
+  cycle (#149), is gone: FrIDE instances replace it, run by the
+  machine's own node. `fridolin node fride sandbox
+  join|create|login|start|stop|update|status|rm|github` and its `-sbx`
+  state dir are gone, and so is joining a second node on a machine.
+  node.json's `service` stays. A node set up so before still holds git
+  identities back from its FrIDE until its owner removes it
+  (docs/NODES.md, "Rollback" under "FrIDE instances").
 - Brain runs no longer get `BRIDGE_CREDENTIALS_DIR`, which named the
   folder of the calendar tokens; nothing in `tools/` read it any more.
 
@@ -1829,6 +1859,10 @@ From earlier versions of the bridge:
 - A brain.json with a `sandbox` key, which chose the Docker Sandbox
   runtime for brains, loads without a warning; the next edit in the
   dashboard drops it.
+- A node whose node.json says `"service": "fride-sandbox"`, the
+  sandboxed FrIDE's second node of before FrIDE instances, keeps holding
+  git identities back from its FrIDE, whose VM must never hold a real
+  token; it goes once no such node is left.
 - Malformed configuration and brain manifest JSON keeps the Go type names
   shown before those types moved into packages, including manifests nested
   in configuration or dashboard requests. This preserves the existing

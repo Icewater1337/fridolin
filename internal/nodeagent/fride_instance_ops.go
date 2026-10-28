@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
@@ -61,25 +62,26 @@ func (o instanceOps) waitOr() time.Duration {
 // not, or outside the agent).
 func (o instanceOps) view(ctx context.Context, st *FrideInstanceState, status string, starting bool, serveProblem string) nodeproto.FrideInstance {
 	v := nodeproto.FrideInstance{Name: st.Name, State: nodeproto.FrideInstanceStopped, MemoryMB: st.MemoryMB, Problem: st.Problem}
+	info, answers := FrideInfo{}, false
+	if st.Run && status != "" {
+		info, answers = o.probe(ctx, st)
+	}
 	switch {
+	case answers:
+		// Also while a start brings it up to date: it serves meanwhile.
+		v.State, v.URL, v.Repos = nodeproto.FrideInstanceRunning, o.urlOf(st), info.Repos
 	case starting:
 		v.State = nodeproto.FrideInstanceStarting
 	case st.Run && status == "":
 		v.State, v.Problem = nodeproto.FrideInstanceFailed, fmt.Sprintf("sbx has no sandbox %s any more: the next start makes it again", st.Sandbox)
+	case st.Run && serveProblem != "" && time.Since(st.Started) > o.waitOr():
+		v.State, v.Problem = nodeproto.FrideInstanceFailed, "its FrIDE does not answer: "+serveProblem
 	case st.Run:
-		info, ok := o.probe(ctx, st)
-		switch {
-		case ok:
-			v.State, v.URL, v.Repos = nodeproto.FrideInstanceRunning, o.urlOf(st), info.Repos
-		case serveProblem != "" && time.Since(st.Started) > o.waitOr():
-			v.State, v.Problem = nodeproto.FrideInstanceFailed, "its FrIDE does not answer: "+serveProblem
-		default:
-			v.State = nodeproto.FrideInstanceStarting
-		}
+		v.State = nodeproto.FrideInstanceStarting
 	case st.Problem != "":
 		v.State = nodeproto.FrideInstanceFailed
 	}
-	v.Problem = clean(v.Problem, 1000)
+	v.Problem = problemText(v.Problem)
 	if (&nodeproto.FrideHostCap{Instances: []nodeproto.FrideInstance{v}}).Check() != nil {
 		v.Repos = nil
 	}
@@ -389,4 +391,15 @@ func parseKeyValues(b []byte) map[string]string {
 		}
 	}
 	return m
+}
+
+// problemText is s as a problem the node reports: printable, and short
+// enough for nodeproto's bound (1024 bytes).
+func problemText(s string) string {
+	s = clean(s, 1000)
+	for len(s) > 1000 {
+		_, n := utf8.DecodeLastRuneInString(s)
+		s = s[:len(s)-n]
+	}
+	return s
 }

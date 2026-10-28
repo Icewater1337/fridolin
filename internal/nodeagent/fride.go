@@ -728,7 +728,7 @@ func (a *Agent) frideConnFor(instance string) (*frideConn, *nodeproto.Error) {
 		return nil, instanceErr(instance, err)
 	}
 	tok := readInstanceToken(a.Dir, instance)
-	if !st.Run || tok == "" || a.inst.isStarting(instance) {
+	if !st.Run || tok == "" {
 		return nil, nodeproto.Errorf(nodeproto.CodeUnavailable, "the FrIDE instance %s is not running: fride.instance.start starts it", instance)
 	}
 	return &frideConn{cfg: &FrideConfig{URL: a.instanceOps().urlOf(st), Webhook: webhookAddr(st.WebhookPort)}, token: tok}, nil

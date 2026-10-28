@@ -154,7 +154,7 @@ func (a *Agent) ensureInstance(ctx context.Context, o instanceOps, host *FrideHo
 			if err := saveFrideInstance(a.Dir, st); err != nil {
 				return st, err
 			}
-			a.inst.kickServe()
+			a.inst.syncServe(ctx)
 		}
 		_ = fresh()
 		return st, o.remake(ctx, st, host, status)
@@ -239,7 +239,7 @@ func (a *Agent) readyInstance(ctx context.Context, o instanceOps, st *FrideInsta
 		return nodeproto.FrideInstance{}, err
 	}
 	out := nodeproto.FrideInstance{Name: st.Name, State: nodeproto.FrideInstanceRunning, MemoryMB: st.MemoryMB, URL: url,
-		Repos: info.Repos, Problem: clean(strings.Join(notes, "; "), 1000)}
+		Repos: info.Repos, Problem: problemText(strings.Join(notes, "; "))}
 	if (&nodeproto.FrideHostCap{Instances: []nodeproto.FrideInstance{out}}).Check() != nil {
 		out.Repos = nil
 	}
@@ -250,16 +250,16 @@ func (a *Agent) readyInstance(ctx context.Context, o instanceOps, st *FrideInsta
 // FrIDE and stops the sandbox, so that it holds no memory; the instance
 // is failed until the next start.
 func (a *Agent) instanceFailed(o instanceOps, name string, st *FrideInstanceState, err error) *nodeproto.Error {
-	msg := clean(err.Error(), 1000)
+	msg := problemText(err.Error())
 	a.logf("node: the FrIDE instance %s did not start: %s", name, msg)
 	if st != nil {
 		st.Run, st.Problem = false, msg
 		if serr := saveFrideInstance(a.Dir, st); serr != nil {
 			a.logf("node: the FrIDE instance %s: %v", name, serr)
 		}
-		a.inst.kickServe()
 		ctx, cancel := context.WithTimeout(context.Background(), frideServeStopWait)
 		defer cancel()
+		a.inst.syncServe(ctx)
 		if status, _ := o.status(ctx, st); status == "running" {
 			_ = o.exec(ctx, st.Sandbox, nil, frideInstanceStop)
 			_, _, _ = o.d.run(ctx, nil, nil, "stop", st.Sandbox)
