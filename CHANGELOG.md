@@ -10,6 +10,23 @@ for compatibility.
 
 ### Added
 
+- **The core brain runs commands on your machines** (docs/VISION.md, step
+  4). The core brain gets `node_exec`, which runs one command a node's
+  exec allowlist allows (no shell, checked on the core and on the node),
+  and `node_exec_rules`, which lists what each node allows; both only
+  while a node whose `exec` you approved is online. An exec rule in
+  `node.json` with `"approve": true` asks you before every call it
+  allows: `node_exec` puts the poll in your chat itself ("Run `brew
+  upgrade` on mac-mini"), waits like `request_approval`, and runs the
+  command on yes; unanswered it answers pending with an `approval_id`,
+  which runs exactly that command on that node once. A call another rule
+  without `approve` allows does not ask. Turning `approve` on or off is a
+  change the node's commands wait for your approval of again. The Nodes
+  page marks such rules "asks you each time"; every call is a `node_exec`
+  line of the audit log. A node that marks a rule `approve` needs a core
+  of this version: an older one approves the rule without it, which the
+  node then refuses to run. See docs/NODES.md, "The core brain runs
+  commands".
 - **Git identities for FrIDE, and a GitLab connection.** Integrations →
   **GitLab** keeps a self-hosted GitLab's address, an access token and an
   optional commit name and email; **Check** asks GitLab who the token is.

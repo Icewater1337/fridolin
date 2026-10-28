@@ -78,7 +78,7 @@ reads; the tests are those in `internal/app` that are about the piece.
 | HTTP and dashboard adapters | 14 files, 1,141: `dashboard_api` 379, `brainapi` 277, `server` 134, `scripttoken` 62, `dashboard` 46, the `*_api_project.go` adapters | 24 fields: the server's, the sessions', the tokens' | `dashboard_test`, `dashboard_api_test`, `brainapi_test`, `server_test`, `scripttoken_test`, `script_contract_test`, `routes_test`, `api_golden_test` |
 | FrIDE, the core's side | 2 files, 1,126: `fride_runtime` 856, `mcp_fride` 270 | `fride`, `nodesEnabled`, `store` | `fride_test`, `fride_gate_test` |
 | Chat intake, WhatsApp projection, owner commands | 20 files, 1,123: `owner_commands` 227, `inbound_store` 158, `identity` 120, `whatsapp_projection` 103, `intake`, `polls`, `group_policy`, `pipeline_project`, `whatsapp_outbound`, `otp_runtime`, small adapters | `wa`, `outbox`, `store`, `brainMgr`, `otp`, `sessions`, `ownerAsks` | `identity_test`, `group_policy_test`, `inbound*_test`, `media_test`, `observe_test`, `otp_test`, `owner_commands_test`, `polls_test`, `whatsapp_*_test`, `addressing_test` |
-| Nodes runtime and programs | 4 files, 1,051: `doctor_nodes` 343, `node_programs` 329, `nodes_runtime` 208, `nodes_update` 171 | `nodes`, `nodesListen`, `programs`, `targets`, `work`, `fride`, `exe` | `nodes_test`, `node_programs_test`, `doctor_nodes_test`, `coremove_test` |
+| Nodes runtime and programs | 5 files, 1,427: `doctor_nodes` 343, `mcp_node_exec` 376, `node_programs` 329, `nodes_runtime` 208, `nodes_update` 171 | `nodes`, `nodesListen`, `programs`, `targets`, `work`, `fride`, `exe`, `store`, `waiters` | `nodes_test`, `node_programs_test`, `doctor_nodes_test`, `coremove_test`, `node_exec_test` |
 | Memory and files | 7 files, 969: `files_runtime` 257, `memory_runtime` 224, `mcp_memory` 182, `memory_cmd` 153, `doctor_memory` 68, `memory_api_project`, `filesystem_api_project` | `brainMgr`, `intents`, `wikis`, `fileTickets`, `registry`, `audit`, `nodes`, `programs` | `memory_test`, `brainfiles_test`, `files_*golden_test`, `files_write_test` |
 | Housekeeping job | 3 files, 739: `housekeeping_runtime` 636, `doctor_housekeeping` 60, `housekeeping_nodes` 43 (its terminal text moved) | `housekeeping`, `audit`, `outbox`, `store` | `housekeeping_test`, `doctor_housekeeping_test` |
 | Core lease and tailnet | 2 files, 789: `core_runtime` 642, `doctor_core` 147 | `core`, `wa`, `listen`, `bind`, `b2`, `outbox`, `audit` | `core_runtime_test`, `core_lease_store_test`, `core_brain_test`, `corehost_test`, `tailnet_signin_test`, `doctor_core_test` |
@@ -138,7 +138,7 @@ approval store; the caller a token stands for comes from the run tokens
 and the brain manager; the audit entry takes the thread, skill and risk
 from the run's policy; an unknown tool answers 404. The tools stay with
 their features (`mcp_delegate`, `mcp_memory`, `mcp_vault`, `mcp_fride`,
-`mcp_workstation*`, `nodes_update`, `approvals`) and register on the
+`mcp_workstation*`, `mcp_node_exec`, `nodes_update`, `approvals`) and register on the
 `*tools.Set`, behind `Set.Guarded` when they act. A feature that moves
 with its tools takes the `Set` and reads its caller through a small
 accessor of its own, generic in the caller's type, or the fields it
