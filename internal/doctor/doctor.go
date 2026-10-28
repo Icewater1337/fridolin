@@ -108,6 +108,10 @@ type Env struct {
 	// now (GET /api/nodes); an error when it does not answer, and the
 	// node checks read nodes.json instead. nil never asks.
 	LiveNodes func(ctx context.Context, cfg *config.Settings) ([]byte, error)
+	// LiveGet asks the running bridge for another GET of its API, such as
+	// /api/git-identities; an error when it does not answer. nil never
+	// asks.
+	LiveGet func(ctx context.Context, cfg *config.Settings, path string) ([]byte, error)
 	// AndroidToolchain says why this machine cannot build the Plaud phone
 	// app (no JDK 17+ or Android SDK), nil when it can.
 	AndroidToolchain func() error
