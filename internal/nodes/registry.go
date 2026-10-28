@@ -455,6 +455,23 @@ func (r *Registry) NewJoinCodeFrom(origin string) (code string, expires time.Tim
 	return code, expires, err
 }
 
+// JoinCodeValid reports whether code is a join code that is valid and
+// unused now. It does not use the code up: the install script asks with
+// it for the fridolin it installs (join_binary.go), and node join then
+// spends it.
+func (r *Registry) JoinCodeValid(code string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.load(); err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(code) == "" {
+		return false, nil
+	}
+	want, now := hashCode(code), r.now()
+	return slices.ContainsFunc(r.file.JoinCodes, func(c joinCode) bool { return c.Hash == want && now.Before(c.ExpiresAt) }), nil
+}
+
 func (f *registryFile) pruneCodes(now time.Time) {
 	f.JoinCodes = slices.DeleteFunc(f.JoinCodes, func(c joinCode) bool { return !now.Before(c.ExpiresAt) })
 }
