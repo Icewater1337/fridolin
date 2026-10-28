@@ -38,14 +38,16 @@ export function capSummary(c) {
 }
 
 /**
- * How an exec rule reads: "git status|log", "hostname (no arguments)", "go (any arguments)".
+ * How an exec rule reads: "git status|log", "hostname (no arguments)", "go (any arguments)",
+ * and "brew upgrade · asks you each time" for a rule whose every call waits for the owner's yes.
  * @param {ExecRule} r
  */
 export function ruleText(r) {
-  if (r.exact) return `${[r.name, ...(r.args || [])].join(' ')} (exactly)`;
-  if (r.args === null || r.args === undefined) return `${r.name} (any arguments)`;
-  if (!r.args.length) return `${r.name} (no arguments)`;
-  return `${r.name} ${r.args.join(' | ')}`;
+  const asks = r.approve ? ' · asks you each time' : '';
+  if (r.exact) return `${[r.name, ...(r.args || [])].join(' ')} (exactly)${asks}`;
+  if (r.args === null || r.args === undefined) return `${r.name} (any arguments)${asks}`;
+  if (!r.args.length) return `${r.name} (no arguments)${asks}`;
+  return `${r.name} ${r.args.join(' | ')}${asks}`;
 }
 
 /**
