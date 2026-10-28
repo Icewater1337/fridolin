@@ -169,10 +169,18 @@ func (b *App) joinCommand(record func(id, outcome string)) string {
 		return outboundmsg.ChatErrGeneric
 	}
 	core := b.joinCore()
-	sh, ps := httpapi.JoinCommands(code, core)
-	bsh, bps := httpapi.BoxCommands(code, core, b.boxSource())
 	record("", "ok")
-	return outboundmsg.JoinCodeReply(code, core, sh, ps, bsh, bps, int(nodes.JoinCodeTTL/time.Minute))
+	return outboundmsg.JoinCodeReply(code, core, joinLines(code, core, b.boxSource()), int(nodes.JoinCodeTTL/time.Minute))
+}
+
+// joinLines are the lines !join offers for code: natively and in a box
+// where src says where their scripts are published, and the plain join.
+func joinLines(code, core string, src httpapi.BoxSource) outboundmsg.JoinLines {
+	var l outboundmsg.JoinLines
+	l.NativeSh, l.NativePowerShell = httpapi.NativeCommands(code, core, src)
+	l.BoxSh, l.BoxPowerShell = httpapi.BoxCommands(code, core, src)
+	l.Sh, l.PowerShell = httpapi.JoinCommands(code, core)
+	return l
 }
 
 // dashboardCommand answers !dashboard: a login code that lasts

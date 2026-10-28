@@ -32,13 +32,16 @@ func TestGoldenJoinCode(t *testing.T) {
 		Core: "fridolin-core.example.ts.net:8766", Command: sh, CommandPowerShell: ps,
 	})
 	assertGolden(t, "cli/nodes-join-code.golden", out.Bytes())
-	// A core that knows where its box script is published: the box first.
+	// A core that knows where its install scripts are published: natively
+	// first, then the box.
 	var box bytes.Buffer
-	bsh, bps := httpapi.BoxCommands("fj-abcd1234", "fridolin-core.example.ts.net:8766",
-		httpapi.BoxSource{Source: "https://raw.githubusercontent.com/OWNER/fridolin/COMMIT", Registry: "ghcr.io/owner", Version: "abcd1234"})
+	src := httpapi.BoxSource{Source: "https://raw.githubusercontent.com/OWNER/fridolin/COMMIT", Registry: "ghcr.io/owner", Version: "abcd1234"}
+	nsh, nps := httpapi.NativeCommands("fj-abcd1234", "fridolin-core.example.ts.net:8766", src)
+	bsh, bps := httpapi.BoxCommands("fj-abcd1234", "fridolin-core.example.ts.net:8766", src)
 	writeJoinCode(&box, httpapi.JoinCodeResponse{
 		Code: "fj-abcd1234", ExpiresAt: time.Date(2026, 10, 21, 14, 5, 0, 0, time.Local),
-		Core: "fridolin-core.example.ts.net:8766", Command: sh, CommandPowerShell: ps, BoxCommand: bsh, BoxCommandPowerShell: bps,
+		Core: "fridolin-core.example.ts.net:8766", Command: sh, CommandPowerShell: ps,
+		NativeCommand: nsh, NativeCommandPowerShell: nps, BoxCommand: bsh, BoxCommandPowerShell: bps,
 	})
 	assertGolden(t, "cli/nodes-join-code-box.golden", box.Bytes())
 	// A core from before the PowerShell line: built from its address.
