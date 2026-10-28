@@ -929,7 +929,7 @@ export interface FrideThread {
   brain: string;
   message: string;
   node?: string;
-  /** The FrIDE instance it went to; left out for the node's own FrIDE. */
+  /** The FrIDE instance its work is on; absent for a node's own FrIDE. */
   instance?: string;
   task?: string;
   branch?: string;
@@ -940,31 +940,39 @@ export interface FrideThread {
 }
 
 /**
- * A configured FrIDE instance of GET /api/fride, with where it runs: its
- * fride.instances entry (idle_stop_minutes in effect: 0 is never), and
- * how its node reports it. Also what POST /api/fride/instances/{name}/start
- * answers.
+ * A FrIDE instance of GET /api/fride: its config (fride.instances), and
+ * where and how it runs. POST /api/fride/instances/{name}/start answers
+ * one; .../stop answers {ok: true}, a 404 for an unknown instance and a
+ * 409 for one with open threads unless its body is {force: true}.
  */
-export interface FrideInstanceView extends FrideInstanceConfig {
+export interface FrideInstanceView {
   name: string;
+  description: string;
+  repos: string[];
+  identities: string[];
+  egress: string[];
+  /** Where it may run (node ids or names); empty is any. */
+  nodes: string[];
+  /** The config's fixed memory; 0 lets the core decide at each start. */
   memory_mb: number;
+  /** The effective idle stop; 0 is never. */
   idle_stop_minutes: number;
-  /** "" while no node has it. */
-  state: FrideInstanceState | '';
-  /** The node that has it, "" for none. */
+  /** "" when no node has it; else starting, running, stopped or failed. */
+  state: '' | 'starting' | 'running' | 'stopped' | 'failed';
+  /** The node that has it, and its id; empty when none. */
   node: string;
   node_id: string;
-  /** What it was started with, while a node has it. */
+  /** Its memory while it starts or runs, else 0. */
   running_memory_mb: number;
   open_threads: number;
-  problem?: string;
+  problem: string;
 }
 
 /** GET /api/fride. */
 export interface FrideResponse {
   threads: FrideThread[];
   /** The configured instances, by name. */
-  instances?: FrideInstanceView[] | null;
+  instances: FrideInstanceView[];
 }
 
 /** One line of GET /api/audit, newest first (audit.Entry). */

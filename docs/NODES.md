@@ -1175,6 +1175,73 @@ UI is on the node's loopback, so the link works on the node itself until
 the node agent publishes it over the tailnet. `fridolin doctor`'s
 `nodes-fride` warns about nodes whose approved FrIDE does not answer.
 
+### The core and FrIDE instances
+
+A FrIDE instance is a whole FrIDE in a Docker Sandbox of its own on a
+node that offers `fride_host`, for one trust domain that
+`fride.instances` names ([CONFIGURATION.md](CONFIGURATION.md); the
+direction is in [VISION.md](VISION.md#fride-instances)). The core starts
+one when work needs it and stops it once it idles; the node side is in
+[FrIDE in a Docker Sandbox](#fride-in-a-docker-sandbox).
+
+**Tools.** With instances configured, the core brain has three more, and
+its prompt lists each instance with its description and repositories,
+so it picks the instance by what the work is for:
+
+| Tool | |
+| --- | --- |
+| `fride_task(…, instance?)` | with `instance`, starts it unless it runs (`medium`) and hands it the work; without, a node's own FrIDE as above |
+| `fride_instances()` | each instance: description, repositories, identities, where it runs, its state, memory and open threads; and the nodes that run instances, with their free memory |
+| `fride_spawn(instance, size?, reason)` | starts one ahead, or remakes a running one with no open thread at another size |
+| `fride_stop(instance)` | stops one with no open thread |
+
+`fride_repo_add` takes `instance` too. Work on an instance stays on it:
+its thread is (node, instance, FrIDE's thread there), every call for it
+names the instance, and `fride_move` refuses it. A reply or a close to
+work whose instance stopped starts it again on its node.
+
+**Sizes.** `small` 3072 MB (code and unit tests), `medium` 6144 MB (with
+the project's stack), `large` 12288 MB (a heavy stack);
+`memory_mb` in the instance's config is a fixed size instead.
+
+**Placement.** The nodes it may run on (its `nodes`, else every
+approved node whose `fride_host` is ready), with its open threads' node
+only when it has some. A node's room is its available memory less its
+reserve (6144 MB unless node.json says otherwise), and the instance's
+own memory where it runs already. The core picks the node with the most
+room that fits, the one that has the instance's sandbox (its disk)
+first; else it stops idle instances of other trust domains (no open
+thread, the longest idle first) on the node with the most room where
+that is enough; else it tries the next smaller size, down to `small`,
+and tells the chat the instance got less; else it refuses, naming what
+runs where. An instance with an open thread is never stopped to make
+room. One start or stop goes at a time.
+
+**Identities.** A start (`fride.instance.start`) carries the instance's
+repositories, egress, and the identities its `identities` names, with
+their tokens, from the GitHub and GitLab connections as in [Git
+identities for FrIDE](#git-identities-for-fride); the first one with a
+commit name and email gives `git`. When one changes, and every five
+minutes, a running instance whose identities, repositories or egress
+changed is started again at its memory, which the node takes as an
+update. No token goes into a log, the audit or `bridge.db`.
+
+**Idle stop.** An instance with no open thread and no news for its
+`idle_stop_minutes` (default 30; -1 never) stops; its disk stays. Work
+that cannot get an instance waits, its chat told why, and goes once it
+can; a node's start that failed is tried again by the queue after five
+minutes. Every start and stop is an audit line of kind `fride_instance`
+(by `core brain`, `dashboard`, `queue`, `idle`, or `core` for one
+stopped to make room).
+
+**Dashboard and doctor.** `GET /api/fride` lists the instances with
+their node, state, memory and open threads; `POST
+/api/fride/instances/{name}/stop` (`{"force": true}` for one with open
+threads) and `/start` (`{"size": …}`) stop and start one. In a lockdown
+`/start`, `fride_spawn` and `fride_task` start none. `fridolin doctor`'s
+`fride-instances` warns about an instance no node can run and about
+identities the core does not hold.
+
 ### Git identities for FrIDE
 
 FrIDE can hold several git identities, and a workspace (task) is created

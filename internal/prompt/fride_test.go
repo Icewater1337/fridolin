@@ -32,3 +32,26 @@ func TestFrideRule(t *testing.T) {
 		t.Error("a run without the tools is told the rule")
 	}
 }
+
+// A core run with FrIDE's tools is told the FrIDE instances, what each is
+// for, as JSON; one with none configured, or a delegated run, is not.
+func TestFrideInstancesNote(t *testing.T) {
+	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	in := Input{Now: now, BrainID: "core", CodeToFride: true,
+		FrideInstances: []FrideInstanceNote{{Name: "work", Description: "work <repositories>", Repos: []string{"https://gitlab.example.com/group/app.git"}}},
+		Message:        chat.Inbound{JID: "15551234567@s.whatsapp.net", Sender: "15551234567", Text: "fix the login"}}
+	p := Build(in)
+	want := "<fride_instances>\n" + FrideInstancesNote + "\n" + `{"name":"work","description":"work \u003crepositories>","repos":["https://gitlab.example.com/group/app.git"]}` + "\n</fride_instances>"
+	if !strings.Contains(p, want) {
+		t.Errorf("the instances are missing:\n%s", p)
+	}
+	in.FrideInstances = nil
+	if strings.Contains(Build(in), "<fride_instances>") {
+		t.Error("told of instances there are none of")
+	}
+	in.FrideInstances = []FrideInstanceNote{{Name: "work"}}
+	in.Message.Source = chat.SourceDelegate
+	if strings.Contains(Build(in), "<fride_instances>") {
+		t.Error("a delegated run is told the instances")
+	}
+}

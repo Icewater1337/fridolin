@@ -11,8 +11,10 @@ import (
 // The fride_threads table: coding work the core brain handed to FrIDE on a
 // node (docs/NODES.md, "FrIDE"). A row ties fridolin's thread number, which
 // the chat and the core brain's tools use, to the chat that started it and
-// to where the work is now: the node, FrIDE's own thread there and the
-// task it went to. A move changes the node and the task; the number stays.
+// to where the work is now: the node, the FrIDE instance on it ('' for
+// the node's own FrIDE), FrIDE's own thread there and the task it went
+// to. A move changes the node and the task; the number stays. A thread on
+// an instance stays on it.
 
 // migrateV6 adds fride_threads (after M5's policy tables, migrateV5).
 func migrateV6(tx *sql.Tx) error {
@@ -54,13 +56,16 @@ const (
 
 // FrideThread is one row of fride_threads.
 type FrideThread struct {
-	ID          int64
-	Chat        string
-	Brain       string
-	Message     string
-	Repos       []string
-	WantNode    string
-	Node        string
+	ID       int64
+	Chat     string
+	Brain    string
+	Message  string
+	Repos    []string
+	WantNode string
+	Node     string
+	// Instance is the FrIDE instance the work is for and stays on (docs/
+	// NODES.md, "The core and FrIDE instances"); "" is a node's own FrIDE.
+	Instance    string
 	FrideThread int
 	TaskID      string
 	Branch      string
@@ -75,12 +80,12 @@ type FrideThread struct {
 // ErrNoFrideThread is a thread number fride_threads does not have.
 var ErrNoFrideThread = errors.New("no such FrIDE thread")
 
-const frideColumns = `id, chat_jid, brain, message, repos, want_node, node, fride_thread, task_id, branch, state, fride_status, archive, rationale, created_at, updated_at`
+const frideColumns = `id, chat_jid, brain, message, repos, want_node, node, instance, fride_thread, task_id, branch, state, fride_status, archive, rationale, created_at, updated_at`
 
 func scanFride(row interface{ Scan(...any) error }) (FrideThread, error) {
 	var t FrideThread
 	var repos string
-	err := row.Scan(&t.ID, &t.Chat, &t.Brain, &t.Message, &repos, &t.WantNode, &t.Node, &t.FrideThread, &t.TaskID, &t.Branch, &t.State, &t.FrideStatus, &t.Archive, &t.Rationale, &t.CreatedAt, &t.UpdatedAt)
+	err := row.Scan(&t.ID, &t.Chat, &t.Brain, &t.Message, &repos, &t.WantNode, &t.Node, &t.Instance, &t.FrideThread, &t.TaskID, &t.Branch, &t.State, &t.FrideStatus, &t.Archive, &t.Rationale, &t.CreatedAt, &t.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return t, ErrNoFrideThread
 	}
@@ -97,8 +102,8 @@ func (s *Store) AddFrideThread(ctx context.Context, t FrideThread) (int64, error
 		return 0, err
 	}
 	now := time.Now().UTC()
-	res, err := s.db.ExecContext(ctx, `INSERT INTO fride_threads (chat_jid, brain, message, repos, want_node, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.Chat, t.Brain, t.Message, string(repos), t.WantNode, FrideQueued, now, now)
+	res, err := s.db.ExecContext(ctx, `INSERT INTO fride_threads (chat_jid, brain, message, repos, want_node, instance, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.Chat, t.Brain, t.Message, string(repos), t.WantNode, t.Instance, FrideQueued, now, now)
 	if err != nil {
 		return 0, err
 	}
@@ -106,7 +111,8 @@ func (s *Store) AddFrideThread(ctx context.Context, t FrideThread) (int64, error
 }
 
 // SaveFrideThread writes where t is now: node, FrIDE's thread, task,
-// branch, state, status and archive.
+// branch, state, status and archive. The instance stays what
+// AddFrideThread recorded.
 func (s *Store) SaveFrideThread(ctx context.Context, t FrideThread) error {
 	res, err := s.db.ExecContext(ctx, `UPDATE fride_threads SET node = ?, fride_thread = ?, task_id = ?, branch = ?, state = ?, fride_status = ?, archive = ?, rationale = ?, updated_at = ? WHERE id = ?`,
 		t.Node, t.FrideThread, t.TaskID, t.Branch, t.State, t.FrideStatus, t.Archive, t.Rationale, time.Now().UTC(), t.ID)
@@ -136,9 +142,10 @@ func (s *Store) GetFrideThread(ctx context.Context, id int64) (FrideThread, erro
 	return scanFride(s.db.QueryRowContext(ctx, `SELECT `+frideColumns+` FROM fride_threads WHERE id = ?`, id))
 }
 
-// FrideThreadOn finds the thread whose work is FrIDE's thread on node.
-func (s *Store) FrideThreadOn(ctx context.Context, node string, frideThread int) (FrideThread, error) {
-	return scanFride(s.db.QueryRowContext(ctx, `SELECT `+frideColumns+` FROM fride_threads WHERE node = ? AND fride_thread = ? ORDER BY id DESC LIMIT 1`, node, frideThread))
+// FrideThreadOn finds the thread whose work is FrIDE's thread on node, in
+// its FrIDE instance ("" for the node's own FrIDE).
+func (s *Store) FrideThreadOn(ctx context.Context, node, instance string, frideThread int) (FrideThread, error) {
+	return scanFride(s.db.QueryRowContext(ctx, `SELECT `+frideColumns+` FROM fride_threads WHERE node = ? AND instance = ? AND fride_thread = ? ORDER BY id DESC LIMIT 1`, node, instance, frideThread))
 }
 
 // FrideThreads lists the threads in state ("" for all), oldest first.
@@ -161,6 +168,21 @@ func (s *Store) FrideThreads(ctx context.Context, state string) ([]FrideThread, 
 		out = append(out, t)
 	}
 	return out, rows.Err()
+}
+
+// migrateV8 adds the FrIDE instance a thread is on: ” for a node's own
+// FrIDE, which every thread before it was.
+func migrateV8(tx *sql.Tx) error {
+	stmts := []string{
+		`ALTER TABLE fride_threads ADD COLUMN instance TEXT NOT NULL DEFAULT ''`,
+		`CREATE INDEX fride_threads_by_instance ON fride_threads (node, instance, fride_thread)`,
+	}
+	for _, s := range stmts {
+		if _, err := tx.Exec(s); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // The fride_news table keeps what FrIDE said about each thread in full:

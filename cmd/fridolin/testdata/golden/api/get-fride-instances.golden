@@ -1,0 +1,73 @@
+GET /api/fride
+200 OK
+Content-Type: application/json
+
+{
+  "instances": [
+    {
+      "description": "fridolin and FrIDE themselves",
+      "egress": [],
+      "identities": [
+        "github"
+      ],
+      "idle_stop_minutes": 30,
+      "memory_mb": 0,
+      "name": "fridolin",
+      "node": "mini",
+      "node_id": "<NODE_ID>",
+      "nodes": [],
+      "open_threads": 0,
+      "problem": "",
+      "repos": [
+        "https://github.com/example/fridolin.git"
+      ],
+      "running_memory_mb": 3072,
+      "state": "running"
+    },
+    {
+      "description": "work repositories",
+      "egress": [
+        "registry.example.com"
+      ],
+      "identities": [
+        "gitlab"
+      ],
+      "idle_stop_minutes": 30,
+      "memory_mb": 0,
+      "name": "work",
+      "node": "mini",
+      "node_id": "<NODE_ID>",
+      "nodes": [
+        "mini"
+      ],
+      "open_threads": 1,
+      "problem": "",
+      "repos": [
+        "https://gitlab.example.com/group/app.git"
+      ],
+      "running_memory_mb": 6144,
+      "state": "running"
+    }
+  ],
+  "threads": [
+    {
+      "brain": "core",
+      "chat": "15551234567@s.whatsapp.net",
+      "fride_status": "running",
+      "instance": "work",
+      "message": "Fix the login",
+      "news": [
+        {
+          "at": "<AT>",
+          "kind": "question",
+          "text": "Which provider?"
+        }
+      ],
+      "node": "mini",
+      "state": "sent",
+      "task": "login",
+      "thread": 1,
+      "updated": "<UPDATED>"
+    }
+  ]
+}

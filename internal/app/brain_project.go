@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/brain"
@@ -39,8 +41,20 @@ func brainGlobalsOf(cfg *config.Settings, timeoutUnit time.Duration) brain.Globa
 			Vault:      cfg.Vault.Enabled,
 			Zone:       ownerZone(cfg),
 			FrideTools: cfg.NodesEnabled,
+			// The FrIDE instances the core brain picks from by purpose.
+			FrideInstances: frideInstanceNotes(cfg.Fride.Instances),
 		},
 	}
+}
+
+// frideInstanceNotes are the FrIDE instances as runs are told of them,
+// sorted by name.
+func frideInstanceNotes(in map[string]config.FrideInstanceConfig) []prompttext.FrideInstanceNote {
+	var out []prompttext.FrideInstanceNote
+	for _, name := range slices.Sorted(maps.Keys(in)) {
+		out = append(out, prompttext.FrideInstanceNote{Name: name, Description: in[name].Description, Repos: slices.Clone(in[name].Repos)})
+	}
+	return out
 }
 
 // dataEnv tells brains where the bridge keeps its data. The tools in

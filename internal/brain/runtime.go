@@ -138,8 +138,10 @@ type Settings struct {
 	// is told is its, and the run gets it as TZ. nil is the process's.
 	Zone *time.Location
 	// FrideTools says the core brain has FrIDE.s tools (nodes are on): its
-	// runs are told prompt.FrideRule.
-	FrideTools bool
+	// runs are told prompt.FrideRule, and FrideInstances, the FrIDE
+	// instances, by name.
+	FrideTools     bool
+	FrideInstances []prompttext.FrideInstanceNote
 	// ownPATH are the folders of the bridge's PATH inside this brain's
 	// folder, which setBridgePATH took out of the bridge's: they go first
 	// on the PATH of this brain's runs, and of no one else's.
@@ -1210,7 +1212,7 @@ func (br *Brain) buildPrompt(s *Settings, m Inbound) string {
 	if s.Zone != nil {
 		now = now.In(s.Zone)
 	}
-	in := prompttext.Input{Now: now, BrainID: br.id, Message: m.Inbound, BuildChat: br.input.BuildChat != nil && br.input.BuildChat(m.JID), ObserveOnly: m.Silent, Vault: s.Vault, CodeToFride: s.FrideTools && s.Manifest.IsCore(), AutoApprove: s.Manifest.AutoApproves()}
+	in := prompttext.Input{Now: now, BrainID: br.id, Message: m.Inbound, BuildChat: br.input.BuildChat != nil && br.input.BuildChat(m.JID), ObserveOnly: m.Silent, Vault: s.Vault, CodeToFride: s.FrideTools && s.Manifest.IsCore(), FrideInstances: s.FrideInstances, AutoApprove: s.Manifest.AutoApproves()}
 	if name := s.PromptFile; name != "" {
 		if data, err := br.readFile(name); err != nil {
 			log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)

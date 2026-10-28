@@ -10,6 +10,26 @@ for compatibility.
 
 ### Added
 
+- **FrIDE instances, on the core.** The core starts the FrIDE instances
+  `fride.instances` names on nodes that offer `fride_host`, sizes each at
+  its start (small 3 GB, medium 6 GB, large 12 GB, or the config's
+  `memory_mb`) on the node with the most room beyond its reserve, stopping
+  idle instances of other trust domains or giving a smaller size when
+  nothing else fits (the chat is told), and stops one after its
+  `idle_stop_minutes` with no open thread and no news. Each start carries
+  the instance's repositories, egress and the git identities it names,
+  with their tokens, sent again when they change. The core brain gets
+  `fride_instances`, `fride_spawn` and `fride_stop`, and `instance` on
+  `fride_task` and `fride_repo_add`; its prompt lists the instances, so
+  it picks one by purpose. Work handed to an instance stays on it
+  (`fride_move` refuses it); `bridge.db`'s `fride_threads` gets an
+  `instance` column (migration 8, which only adds). `GET /api/fride`
+  lists the instances and each thread's instance; new routes `POST
+  /api/fride/instances/{name}/stop` and `/start`. Starts and stops are
+  audit lines of kind `fride_instance`; `fridolin doctor` gets
+  `fride-instances`. Native git identities (`fride.identities`) now go
+  only to nodes with a FrIDE of their own. See docs/NODES.md, "The core
+  and FrIDE instances".
 - **Git identities for FrIDE, and a GitLab connection.** Integrations →
   **GitLab** keeps a self-hosted GitLab's address, an access token and an
   optional commit name and email; **Check** asks GitLab who the token is.

@@ -3,5 +3,6 @@ GET /api/fride
 Content-Type: application/json
 
 {
+  "instances": [],
   "threads": []
 }

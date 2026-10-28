@@ -196,6 +196,8 @@ func catalogue() []struct{ name, text string } {
 		{"frideNotLoggedInNotice(moved)", outboundmsg.FrideNotLoggedInNotice(3, "box", "laptop", nodeproto.FrideLoginFix)},
 		{"frideNotLoggedInNotice(stays)", outboundmsg.FrideNotLoggedInNotice(3, "box", "", nodeproto.FrideLoginFix)},
 		{"fridePlacedNotice", outboundmsg.FridePlacedNotice(3, "laptop")},
+		{"frideInstanceQueuedNotice", outboundmsg.FrideInstanceQueuedNotice(4, "work", "no node has room for the FrIDE instance work (6144 MB, or 3072 MB at the least): mini has 1000 MB free beyond its reserve")},
+		{"frideInstanceSmallerNotice", outboundmsg.FrideInstanceSmallerNotice("work", "mini", 3072, 6144)},
 		{"frideMoveUsage", outboundmsg.FrideMoveUsage},
 		{"frideMoveGroupNotice", outboundmsg.FrideMoveGroupNotice},
 		{"frideMovingNotice", outboundmsg.FrideMovingNotice(3, "laptop")},
