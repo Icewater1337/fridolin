@@ -108,8 +108,14 @@ func (a *Agent) frideHostRead(ctx context.Context) *nodeproto.FrideHostCap {
 	if host == nil && err == nil {
 		return nil
 	}
-	// Without a template of its own, each start names the core's.
-	c := &nodeproto.FrideHostCap{ReserveMB: a.Config.reserveMB(), NeedsTemplate: host != nil && host.Template == ""}
+	// Without a template of its own, each start names the core's. The
+	// reserve is node.json's as it is now: host setup --reserve-mb
+	// changes it under a running agent.
+	reserve := a.Config.reserveMB()
+	if cfg, err := LoadConfig(a.Dir); err == nil {
+		reserve = cfg.reserveMB()
+	}
+	c := &nodeproto.FrideHostCap{ReserveMB: reserve, NeedsTemplate: host != nil && host.Template == ""}
 	memory := a.inst.memory
 	if memory == nil {
 		memory = hostMemory

@@ -500,12 +500,15 @@ func (s *Service) readLoop(ss *session) {
 				ss.close(nodeproto.CloseProtocol, err.Error())
 				return
 			}
+			prev, _ := s.reg.Get(ss.id)
 			n, err := s.reg.Declare(ss.id, d.Capabilities)
 			if err != nil {
 				s.logf("nodes: recording what %s offers now: %v", ss.id, err)
 				continue
 			}
-			s.logf("nodes: %s (%s) offers now: %s; commands %s", n.Name, n.ID, n.Declared.Summary(), n.Commands())
+			if offersChanged(prev, n) {
+				s.logf("nodes: %s (%s) offers now: %s; commands %s", n.Name, n.ID, n.Declared.Summary(), n.Commands())
+			}
 			s.pushState(n)
 			if s.onDeclare != nil {
 				s.onDeclare(n)
@@ -863,4 +866,11 @@ func (s *Service) ListenAndServe(addr string, listen func(network, addr string) 
 		return fmt.Errorf("listening for nodes on %s: %w", addr, err)
 	}
 	return s.Serve(ln)
+}
+
+// offersChanged reports whether a declaration says something new about
+// what the node offers: a fride_host node declares again whenever its
+// free memory or an instance changes, which is no news for the log.
+func offersChanged(prev, n *Node) bool {
+	return prev == nil || prev.Declared.Summary() != n.Declared.Summary() || prev.Commands() != n.Commands()
 }

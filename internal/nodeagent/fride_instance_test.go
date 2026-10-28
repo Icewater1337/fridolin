@@ -629,7 +629,11 @@ func TestFrideHostDeclared(t *testing.T) {
 	if f.a.frideHostRefresh(ctx, false) {
 		t.Error("read again within a minute")
 	}
-	f.a.Config.FrideHost = &FrideHostConfig{ReserveMB: 2048}
+	// host setup --reserve-mb writes node.json under the running agent,
+	// whose next declaration takes it.
+	if err := SaveConfig(f.a.Dir, Config{Core: "core:8766", Name: "mac", FrideHost: &FrideHostConfig{ReserveMB: 2048}}); err != nil {
+		t.Fatal(err)
+	}
 	if !f.a.frideHostRefresh(ctx, true) || f.a.frideHostDeclared().ReserveMB != 2048 {
 		t.Error("node.json's reserve_mb")
 	}
