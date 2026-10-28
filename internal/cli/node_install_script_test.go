@@ -10,10 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/Icewater1337/fridolin/internal/httpapi"
 	"github.com/Icewater1337/fridolin/internal/nodes"
 )
 
@@ -105,7 +107,8 @@ func TestNodeInstallScriptInstallsTheCoresFridolinAndJoins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	home, out, ok := runInstallScript(t, "--core", svc.Addr(), "--code", code, "--yes", "--root", "/srv/shared:rw", "--no-exec", "--no-service")
+	shared := filepath.Join(t.TempDir(), "Fridolin")
+	home, out, ok := runInstallScript(t, "--core", svc.Addr(), "--code", code, "--yes", "--root", shared+":rw", "--no-exec", "--no-service")
 	if !ok {
 		t.Fatalf("node.sh failed:\n%s", out)
 	}
@@ -124,8 +127,11 @@ func TestNodeInstallScriptInstallsTheCoresFridolinAndJoins(t *testing.T) {
 		t.Fatalf("~/.local/bin/fridolin: %q %v", link, err)
 	}
 	ran, _ := os.ReadFile(calls)
-	if want := "node join " + code + " --core " + svc.Addr() + " --root /srv/shared:rw --no-exec --no-service\n"; string(ran) != want {
+	if want := "node join " + code + " --core " + svc.Addr() + " --root " + shared + ":rw --no-exec --no-service\n"; string(ran) != want {
 		t.Fatalf("fridolin ran %q, want %q\n%s", ran, want, out)
+	}
+	if st, err := os.Stat(shared); err != nil || !st.IsDir() {
+		t.Fatalf("the folder it lends was not made: %v", err)
 	}
 	if !strings.Contains(out, "SHA-256 ") || !strings.Contains(out, "reply !approve") {
 		t.Fatalf("the output:\n%s", out)
@@ -194,5 +200,44 @@ func TestNodeInstallScriptRefusals(t *testing.T) {
 	}
 	if valid, _ := svc.Registry().JoinCodeValid(code); !valid {
 		t.Fatal("a refusal spent the code")
+	}
+}
+
+// The lines !join sends name the scripts' options, and the reply's hint
+// names -Root and -NoExec for PowerShell: both scripts must take them.
+func TestNodeInstallScriptsTakeTheOptionsTheReplyNames(t *testing.T) {
+	sh, ps := httpapi.NativeCommands("fj-code", "core.example.ts.net:8766", httpapi.BoxSource{Source: "https://example.com/fridolin/abc"})
+	shScript, err := os.ReadFile(filepath.Join(repoDir, "container", "node.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	psScript, err := os.ReadFile(filepath.Join(repoDir, "container", "node.ps1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The options are the labels of node.sh's case on its arguments.
+	options := map[string]bool{}
+	for _, m := range regexp.MustCompile(`(?m)^\t(--[-a-z |]+)\)`).FindAllStringSubmatch(string(shScript), -1) {
+		for o := range strings.SplitSeq(m[1], " | ") {
+			options[o] = true
+		}
+	}
+	for _, f := range strings.Fields(sh) {
+		if strings.HasPrefix(f, "--") && f != "--" && !options[f] {
+			t.Errorf("node.sh does not take %s (it takes %v)", f, options)
+		}
+	}
+	params := regexp.MustCompile(`(?m)^\s+\[(?:string|string\[\]|switch)\]\$(\w+)`).FindAllStringSubmatch(string(psScript), -1)
+	took := map[string]bool{}
+	for _, p := range params {
+		took[p[1]] = true
+	}
+	for _, f := range append(strings.Fields(ps), "-Root", "-NoExec") {
+		if name, ok := strings.CutPrefix(f, "-"); ok && name != "" && name[0] >= 'A' && name[0] <= 'Z' && !took[name] {
+			t.Errorf("node.ps1 does not take %s (it takes %v)", f, took)
+		}
+	}
+	if len(took) < 3 {
+		t.Fatalf("node.ps1's parameters: %v", took)
 	}
 }

@@ -126,6 +126,30 @@ if [ "$noservice" = 0 ]; then
 	fi
 fi
 
+# lent_roots list|make ARGS...: the folders the --root flags among ARGS
+# name that do not exist yet: list prints them, make makes them.
+lent_roots() {
+	act=$1
+	shift
+	prev=""
+	for a in "$@"; do
+		r=""
+		case "$prev" in --root | -root) r=$a ;; esac
+		case "$a" in --root=* | -root=*) r=${a#*=} ;; esac
+		prev=$a
+		[ -n "$r" ] || continue
+		r=${r%:rw}
+		r=${r%:ro}
+		[ ! -d "$r" ] || continue
+		if [ "$act" = make ]; then
+			mkdir -p "$r" || die "could not make $r"
+		else
+			printf '%s\n' "$r"
+		fi
+	done
+}
+missing=$(lent_roots list "$@" | tr '\n' ' ')
+
 find_tailscale() {
 	if command -v tailscale >/dev/null 2>&1; then
 		ts=tailscale
@@ -175,13 +199,15 @@ become the core.
      (and ~/.local/bin/fridolin)${existing:+;
      $existing}
   3. join the core: fridolin node join CODE --core $core${*:+ $*}${service:+,
-     which installs and starts the node service ($service)}
+     which installs and starts the node service ($service)}${missing:+
+  It makes the folders it lends first: $missing}
 EOF
 if [ -f "$HOME/Library/LaunchAgents/ai.fridolin.bridge.plist" ] || [ -f "$HOME/.config/systemd/user/fridolin.service" ]; then
 	printf '\nnote: a fridolin bridge is installed on this machine (setup.sh). If it runs from %s, it runs the core'"'"'s version after its next restart; --dir puts the node elsewhere.\n' "$bin"
 fi
 printf '\nThe node serves nothing until you approve it on the core, and the code works once.\n'
 yes_to "Continue?" || die "stopped; nothing was changed"
+lent_roots make "$@"
 
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
