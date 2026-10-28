@@ -9,9 +9,11 @@ import { badge } from './common.js';
 import { confirmDialog } from './dialog.js';
 import { toast } from './toast.js';
 
-/** @import { FrideInstanceState } from '../../types/api.js' */
+/** @import { FrideInstanceState, FrideInstanceView } from '../../types/api.js' */
 
-// Stopping waits for sbx to stop the VM.
+// Starting makes or wakes the sandbox, waits for its FrIDE and may clone
+// its repositories first; stopping waits for sbx to stop the VM.
+const START_TIMEOUT_MS = 15 * 60 * 1000;
 const STOP_TIMEOUT_MS = 3 * 60 * 1000;
 
 /** @param {string} name */
@@ -48,4 +50,19 @@ export async function stopInstance(name) {
   }
   toast(`Stopped ${name}`, 'ok');
   return true;
+}
+
+/**
+ * Starts the instance called name, at size (small, medium or large) or the
+ * core's choice when none; resolves with the instance as it runs now.
+ * @param {string} name
+ * @param {string} [size]
+ * @returns {Promise<FrideInstanceView>}
+ */
+export async function startInstance(name, size) {
+  /** @type {FrideInstanceView} */
+  const view = await post(`${base(name)}/start`, size ? { size } : {}, { timeout: START_TIMEOUT_MS });
+  const where = view && view.node ? ` on ${view.node}` : '';
+  toast(`Started ${name}${where}`, 'ok');
+  return view;
 }

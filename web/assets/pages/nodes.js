@@ -358,7 +358,7 @@ export default /** @satisfies {PageModule} */ ({
             h('span', mono(i.name), ' ', instanceBadge(i.state),
               i.memory_mb ? h('span.muted', ` ${memText(i.memory_mb)}`) : null,
               i.problem ? h('span.warn-text', ` · ${i.problem}`) : null),
-            canStop && i.state === 'running' ? btn('Stop', { small: true, kind: 'danger', icon: 'x', title: `Stop ${i.name}`, onClick: () => stop(i.name) }) : null)))
+            canStop && i.state === 'running' ? btn('Stop', { small: true, kind: 'danger', icon: 'stop', title: `Stop ${i.name}`, onClick: () => stop(i.name) }) : null)))
           : h('div.muted', 'No instances yet: the core brain starts one here when a job needs it.'),
       ];
     }

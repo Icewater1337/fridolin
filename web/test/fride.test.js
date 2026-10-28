@@ -36,7 +36,7 @@ test('memory and idle time read as people say them', () => {
 });
 
 test('the states, sizes and bounds are the bridge’s', () => {
-  assert.deepEqual(['running', 'starting', 'stopped', 'failed', ''].map(stateKind), ['ok', 'info', 'neutral', 'bad', 'neutral']);
+  assert.deepEqual(/** @type {const} */ (['running', 'starting', 'stopped', 'failed', '']).map((s) => stateKind(s)), ['ok', 'info', 'neutral', 'bad', 'neutral']);
   assert.deepEqual(INSTANCE_SIZES, [['small', 3072], ['medium', 6144], ['large', 12288]]);
   assert.deepEqual(INSTANCE_IDENTITIES, ['github', 'gitlab']);
   assert.equal(IDLE_STOP_DEFAULT, 30);
