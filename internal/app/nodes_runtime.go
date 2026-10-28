@@ -28,12 +28,21 @@ func newNodes(b *App) (*nodes.Service, error) {
 	onEvent := func(node string, ev nodeproto.Event) {
 		b.fride.onEvent(node, ev)
 		b.work.onEvent(node, ev)
+		b.gitIDs.onEvent(node, ev)
+	}
+	// A FrIDE that came up takes its git identities, unless it has them.
+	onDeclare := func(n *nodes.Node) {
+		b.fride.onDeclare(n)
+		if n.Declared.Fride != nil {
+			b.gitIDs.nodeReady(n.ID, false)
+		}
 	}
 	return nodes.New(nodes.Options{
-		Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: onEvent, OnDeclare: b.fride.onDeclare, OnJoin: b.nodeJoined, OnMove: b.coreMoveEnded, OnMoveStopping: b.coreMoveStopping, Site: b.moveSite,
-		// A node that connects takes the programs of its command agents.
-		OnConnect: func(n *nodes.Node) { b.programs.connected(n.ID) },
-		OnApprove: func(n *nodes.Node) { b.programs.connected(n.ID) },
+		Dir: b.cfgs.Boot().Layout().Nodes(), OnEvent: onEvent, OnDeclare: onDeclare, OnJoin: b.nodeJoined, OnMove: b.coreMoveEnded, OnMoveStopping: b.coreMoveStopping, Site: b.moveSite,
+		// A node that connects takes the programs of its command agents,
+		// and its FrIDE its git identities.
+		OnConnect: func(n *nodes.Node) { b.programs.connected(n.ID); b.gitIDs.nodeReady(n.ID, true) },
+		OnApprove: func(n *nodes.Node) { b.programs.connected(n.ID); b.gitIDs.nodeReady(n.ID, true) },
 		// Updates: the core's own version, its builds for the nodes, and
 		// what keeps a node from being updated now (nodes_update.go).
 		Version: version.String(), BinariesDir: nodeBinariesDir(b.exe), Busy: b.nodeBusy, Hold: b.nodeHold,

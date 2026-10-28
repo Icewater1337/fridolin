@@ -123,6 +123,11 @@
   "media_dir": "<HOME>/.fridolin/media",
   "nodes": {
     "enabled": true,
+    "git_identities": {
+      "mini": [
+        "github"
+      ]
+    },
     "listen": "127.0.0.1:9766"
   },
   "otp_guard": true,

@@ -59,6 +59,9 @@ func (a *Agent) call(ctx context.Context, req nodeproto.Request) (any, *nodeprot
 	if req.Method == nodeproto.MethodExecPrograms {
 		return a.execProgramsCall(req.Params)
 	}
+	if req.Method == nodeproto.MethodFrideIdentities {
+		return a.frideIdentitiesCall(ctx, req.Params)
+	}
 	if slices.Contains(nodeproto.FrideMethods, req.Method) {
 		return a.frideCall(ctx, req.Method, req.Params)
 	}

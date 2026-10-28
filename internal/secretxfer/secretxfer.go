@@ -275,7 +275,9 @@ type bundle struct {
 	From    string            `json:"from"`
 	Secrets map[string]string `json:"secrets"`
 	// Files are the secret files of the core's credentials folder
-	// (FileNames), by name; only a move over the node channel sends them.
+	// (FileNames), by name, and the local files of its data dir
+	// (LocalFileName, "local:gitlab.json"); only a move over the node
+	// channel sends them.
 	Files map[string][]byte `json:"files,omitempty"`
 	// FilesDir is the credentials folder under ~ they belong in.
 	FilesDir string `json:"files_dir,omitempty"`
@@ -312,7 +314,7 @@ func DecodeBundle(data []byte) (map[string]string, string, error) {
 	if err := checkFiles(b.Files); err != nil {
 		return nil, "", err
 	}
-	if len(b.Files) > 0 {
+	if creds, _ := SplitFiles(b.Files); len(creds) > 0 {
 		if err := CheckFilesDir(b.FilesDir); err != nil {
 			return nil, "", err
 		}

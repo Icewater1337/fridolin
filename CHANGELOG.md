@@ -10,6 +10,27 @@ for compatibility.
 
 ### Added
 
+- **Git identities for FrIDE, and a GitLab connection.** Integrations →
+  **GitLab** keeps a self-hosted GitLab's address, an access token and an
+  optional commit name and email; **Check** asks GitLab who the token is.
+  The token is kept in the data dir's `core/local-secrets/`, on the
+  machines only: no restic snapshot, vault cold tier, Drive backup or core
+  export takes it, and a core move over the node channel carries it end to
+  end, sealed with the host secrets. The GitHub card gets an optional
+  commit name and email. The core hands every node whose `fride` is
+  approved its FrIDE's identities with their tokens (the new node method
+  `fride.identities`): `github`, with the GitHub app's installation token
+  (renewed before it ends; only when the app may write code) or the typed
+  token, and `gitlab`. The node puts them into a FrIDE that takes them
+  (FrIDE c5dd87b9, now pinned) and removes the ones it no longer gets.
+  The FrIDE in a Docker Sandbox gets none; the FrIDE instances that
+  replace it will get placeholders (`setHostToken`).
+  config.json's new `nodes.git_identities` says which a node gets; a node
+  it does not name gets both. `fridolin doctor` checks the GitLab token.
+  New routes: `GET`/`PUT`/`DELETE /api/gitlab`, `POST /api/gitlab/check`,
+  `PUT /api/github/identity`, `GET /api/git-identities`. See
+  docs/CONNECTIONS.md, "GitLab", and docs/NODES.md, "Git identities for
+  FrIDE".
 - **GitHub, a bigger Docker disk, shared caches and kept history for the
   sandboxed FrIDE** (#149).
   - `fridolin node fride sandbox github` gives the sandbox the Mac's `gh

@@ -27,6 +27,12 @@ import (
 // also gets sbx's own github service, which puts the token into every
 // request to GitHub's hosts, so that gh and git work without the
 // placeholder too.
+//
+// The git identities the core hands FrIDE (fride_identities.go) will
+// reach FrIDE instances in Docker Sandboxes this way: the token through
+// setHostToken, the placeholder as the identity's token. Until the
+// instances come, the node of the sandboxed FrIDE holds them back
+// (identitiesHeld).
 
 // sbxTokensDir is where a state dir keeps its sandboxes' host tokens:
 // <dir>/sbx-tokens/<sandbox>/<host>.token and .placeholder, 0600.

@@ -124,6 +124,8 @@ type APIDeps struct {
 	Files        func() *FilesAPI
 	Schedules    func() *SchedulesAPI
 	Connections  func() *ConnectionsAPI
+	// GitIdentities are the GitLab connection and what the FrIDEs get.
+	GitIdentities func() *GitIdentitiesAPI
 }
 
 func NewAPIMux(d APIDeps) http.Handler {
@@ -245,6 +247,7 @@ func NewAPIMux(d APIDeps) http.Handler {
 	d.Housekeeping().Register(mux)
 	d.Schedules().Register(mux)
 	d.Connections().Register(mux)
+	d.GitIdentities().Register(mux)
 
 	// Only in dev mode: outside it they are not there at all (404).
 	if d.DevMode {

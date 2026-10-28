@@ -328,6 +328,26 @@ func TestParseSecretAt(t *testing.T) {
 	}
 }
 
+// What stays on the machines (core/local-secrets: the GitLab connection)
+// is neither a vault file nor in a snapshot, even with the data dir's
+// brain folders and media in the vault.
+func TestLocalSecretsStayOffTheCloud(t *testing.T) {
+	t.Parallel()
+	cfg := &config.Settings{}
+	cfg.DataDir = filepath.Join(t.TempDir(), ".fridolin")
+	cfg.MediaDir = filepath.Join(cfg.DataDir, "media")
+	local := config.Layout{Root: cfg.DataDir}.LocalSecrets()
+	l := vaultLayoutOf(cfg, map[string]string{"main": filepath.Join(cfg.DataDir, "brains-folders", "main")}, nil)
+	for _, rel := range []string{"core/local-secrets", "core/local-secrets/gitlab.json", "core/local-secrets/github.json"} {
+		if !l.ignore(rel) {
+			t.Errorf("%s is a vault file", rel)
+		}
+	}
+	if !slices.Contains(dataDirExcludes(cfg.DataDir, nil), local) {
+		t.Errorf("the snapshots take %s: %q", local, dataDirExcludes(cfg.DataDir, nil))
+	}
+}
+
 // The secret folders are neither vault files nor in a snapshot: the cold
 // tier evicts, and the snapshots go to Drive and node targets too.
 func TestSecretFoldersStayOutOfTheColdTierAndSnapshots(t *testing.T) {

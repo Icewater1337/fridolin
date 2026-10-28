@@ -152,8 +152,10 @@ const EncryptionState = "core/encryption.json"
 func excluded(rel string, dir bool) bool {
 	parts := strings.Split(rel, "/")
 	base := parts[len(parts)-1]
-	// core/ is this machine's own (the lease's state, staging, caches),
-	// but for EncryptionState: which stores of the buckets are encrypted
+	// core/ is this machine's own (the lease's state, staging, caches,
+	// and core/local-secrets, which never goes to the cloud: a move
+	// carries it sealed, internal/secretxfer), but for EncryptionState:
+	// which stores of the buckets are encrypted
 	// twice and which single-layer copies are retired, which is the
 	// buckets' state and moves with the core (#187).
 	if parts[0] == "core" && len(parts) > 1 {

@@ -1637,6 +1637,7 @@ Each of `vault.targets` (the Vault page's *Add target…* writes them; up to
 | --- | --- | --- |
 | `enabled` | `false` | accept connections from nodes |
 | `listen` | `":8766"` | the node port, `host:port`; an empty host is every interface, otherwise an IP address or a host name |
+| `git_identities` | `{}` | which git identities each node's FrIDE gets, by node id or name: `{"mini": ["github"]}` gives the mini GitHub but not GitLab, `[]` none. A node it does not name gets all: `github` and `gitlab` ([NODES.md](NODES.md#git-identities-for-fride)) |
 
 `nodes.enabled` and `nodes.listen` wait for a restart: the bridge opens the
 node port as it starts, on the address it had then. The registry of nodes,

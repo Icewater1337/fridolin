@@ -50,6 +50,10 @@ type FakeFride struct {
 	nextID    int
 	// before and hold are the hooks of BeforeNext and HoldNext, by path.
 	before, hold map[string]func()
+	// gitIDs are the identities the companion set, by id; noGitIDs makes
+	// it a FrIDE from before git identities.
+	gitIDs   map[string]FakeGitIdentity
+	noGitIDs bool
 	// Calls records "METHOD path" of every request, in order.
 	calls []string
 }
@@ -318,7 +322,17 @@ func (f *FakeFride) answer(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(path, "/api/companion/")
 	switch {
 	case rest == "info":
-		reply(http.StatusOK, map[string]any{"mode": "companion", "configured": true, "repos": f.repos, "profiles": []string{"local"}, "webhook_url": f.webhook, "orchestrator": true})
+		info := map[string]any{"mode": "companion", "configured": true, "repos": f.repos, "profiles": []string{"local"}, "webhook_url": f.webhook, "orchestrator": true}
+		if !f.noGitIDs {
+			info["git_identities"] = true
+		}
+		reply(http.StatusOK, info)
+	case rest == "git/identities" || strings.HasPrefix(rest, "git/identities/"):
+		if f.noGitIDs {
+			fail(http.StatusNotFound, "not found")
+			return
+		}
+		f.gitIdentity(w, r, strings.TrimPrefix(strings.TrimPrefix(rest, "git/identities"), "/"), reply, fail)
 	case rest == "mem":
 		reason := ""
 		if !f.canStart {

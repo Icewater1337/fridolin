@@ -537,6 +537,8 @@ func eventMethod(kind string) string {
 	switch kind {
 	case nodeproto.EventFride:
 		return nodeproto.MethodFrideStatus
+	case nodeproto.EventFrideIdentities:
+		return nodeproto.MethodFrideIdentities
 	case nodeproto.EventUpdate:
 		return nodeproto.MethodUpdateApply
 	case nodeproto.EventAgent:

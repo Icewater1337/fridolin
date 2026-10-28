@@ -28,6 +28,8 @@ var fields = []fieldSpec{
 	// had then.
 	{Field: Field{Name: "nodes.enabled", Boot: true}, get: func(c *Settings) string { return fmt.Sprint(c.Nodes.Enabled) }},
 	{Field: Field{Name: "nodes.listen", Boot: true}, get: func(c *Settings) string { return c.Nodes.Listen }},
+	// Read at each hand-over of the git identities (git_identities.go).
+	{Field: Field{Name: "nodes.git_identities"}},
 	// The tailnet node joins, and the core lease is taken, as the bridge
 	// starts (internal/tailnet, internal/lease), with these values.
 	{Field: Field{Name: "core.tailnet.enabled", Boot: true}, get: func(c *Settings) string { return fmt.Sprint(c.Core.Tailnet.Enabled) }},

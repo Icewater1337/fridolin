@@ -43,6 +43,7 @@ type Server struct {
 	live     map[string]Minted
 	Minted   []Minted // every token made, in order
 	Revoked  []string // tokens revoked
+	perms    map[string]string
 }
 
 // Minted is one token the fake made, and what it was asked for.
@@ -62,6 +63,23 @@ func New() *Server {
 		Repos: []string{"you/fridolin", "you/fride"}, live: map[string]Minted{}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	return s
+}
+
+// SetPermissions sets what the installation may do; by default contents
+// read, issues write and metadata read, as the app's manifest asks.
+func (s *Server) SetPermissions(p map[string]string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.perms = p
+}
+
+func (s *Server) permissions() map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.perms != nil {
+		return s.perms
+	}
+	return map[string]string{"contents": "read", "issues": "write", "metadata": "read"}
 }
 
 // PEM is the app's private key, as GitHub hands it over.
@@ -216,7 +234,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []map[string]any{{
 			"id": s.InstallationID, "account": map[string]string{"login": s.Account, "type": "User"},
 			"html_url": s.URL + "/settings/installations/" + strconv.FormatInt(s.InstallationID, 10), "repository_selection": "selected",
-			"permissions": map[string]string{"contents": "read", "issues": "write", "metadata": "read"},
+			"permissions": s.permissions(),
 		}})
 	case r.Method == "POST" && p == "/app/installations/"+strconv.FormatInt(s.InstallationID, 10)+"/access_tokens":
 		if !s.checkJWT(r) {
@@ -250,7 +268,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		perms := req.Permissions
 		if perms == nil {
-			perms = map[string]string{"contents": "read", "issues": "write", "metadata": "read"}
+			perms = s.permissions()
 		}
 		writeJSON(w, http.StatusCreated, map[string]any{"token": m.Token, "expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
 			"permissions": perms, "repositories": repos})

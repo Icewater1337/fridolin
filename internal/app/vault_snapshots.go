@@ -357,6 +357,10 @@ func dataDirExcludes(data string, dbs map[string]string) []string {
 		// What a restore of the secret folders wrote (core/replaced-*
 		// holds what a forced one replaced): they go to B2 only.
 		filepath.Join(data, "core", "restored-secrets-*"),
+		// What stays on the machines, such as the GitLab connection
+		// (internal/gitident): never to the cloud, so never in a
+		// snapshot, whose copies go to B2, Drive and the node targets.
+		config.Layout{Root: data}.LocalSecrets(),
 	)
 }
 

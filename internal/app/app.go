@@ -84,6 +84,8 @@ type App struct {
 	plaud        *plaud.Manager
 	// github is the GitHub App and the runs' tokens (github_runtime.go).
 	github *githubService
+	// gitIDs are the git identities the nodes' FrIDEs get.
+	gitIDs *gitIdentityService
 	site   *sitesvc.SiteManager
 	// nodes is the fleet's registry and node port; nodesEnabled and
 	// nodesListen are nodes.enabled and nodes.listen as the bridge
@@ -437,6 +439,8 @@ func New(opts Options) (_ *App, err error) {
 	b.vault.secretChange = b.waits.secretFoldersChange
 	b.targets = newTargetService(cfgs, b.vault, b.nodes, opts.Container, b.logger)
 	b.github = newGitHubService(cfgs, b.env, opts.Container, b.logger)
+	b.gitIDs = newGitIdentities(b, opts.hooks.gitlab)
+	b.github.onChange = b.gitIDs.changed
 	b.vault.targets = b.targets
 	googleOptions := googleOptionsFor(cfgs)
 	googleOptions.OnBroken = b.calendarGrantBroken
@@ -483,7 +487,7 @@ func (b *App) Start(ctx context.Context) error {
 		Resume:           func(ctx context.Context) { b.outbox.Start(); b.resume(ctx) }, Connect: b.connectLoop,
 		Watch: func(ctx context.Context) { b.watchRequiredFiles(ctx, requiredFilesEvery) },
 		// The tailnet first: the node port listens on it.
-		Background: []func(context.Context){b.startTailnet, b.runLease, b.runB2Usage, b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start, b.vault.Start, b.targets.Start, b.watchApprovals, b.housekeeping.Start, b.watchCalendarGrants},
+		Background: []func(context.Context){b.startTailnet, b.runLease, b.runB2Usage, b.backup.Start, b.plaud.Start, b.site.Start, b.startNodes, b.sched.Start, b.vault.Start, b.targets.Start, b.watchApprovals, b.housekeeping.Start, b.watchCalendarGrants, b.gitIDs.Start},
 	})
 }
 

@@ -25,7 +25,7 @@ func TestFrideSandboxDockerfilePins(t *testing.T) {
 	}
 	for name, file := range map[string]string{
 		"CLAUDE_CODE_VERSION": frideImageDockerfile,
-		"PONYTAIL_REPO": frideImageDockerfile, "PONYTAIL_COMMIT": frideImageDockerfile,
+		"PONYTAIL_REPO":       frideImageDockerfile, "PONYTAIL_COMMIT": frideImageDockerfile,
 	} {
 		if got, want := arg(frideSandboxDockerfile, name), arg(file, name); got != want {
 			t.Errorf("%s: %s in %s, %s in %s", name, got, frideSandboxDockerfile, want, file)

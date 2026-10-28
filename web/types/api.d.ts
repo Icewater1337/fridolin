@@ -461,6 +461,8 @@ export interface VaultConfig {
 export interface NodesConfig {
   enabled: boolean;
   listen?: string;
+  /** By node id or name, the git identities that node's FrIDE gets; a node not named gets all. */
+  git_identities?: Record<string, GitIdentityID[]>;
 }
 
 export interface PolicyConfig {
@@ -2436,6 +2438,63 @@ export interface Connections {
   usage: ConnectionUsage[];
 }
 
+// Git identities for FrIDE (docs/CONNECTIONS.md#gitlab, docs/NODES.md)
+
+export type GitIdentityID = 'github' | 'gitlab';
+
+/** GET /api/gitlab: the GitLab connection, never its token. */
+export interface GitLabConnection {
+  configured: boolean;
+  /** https://gitlab.example.com, maybe with a path. */
+  base_url: string;
+  /** The host of base_url, with its port: what FrIDE keys the identity by. */
+  host: string;
+  /** "…" and the token's last four characters; "" for a short one. */
+  token_hint: string;
+  name: string;
+  email: string;
+  /** Where the token is kept, in words. */
+  where: string;
+}
+
+/** One identity of GET /api/git-identities. */
+export interface GitIdentityRow {
+  id: GitIdentityID;
+  kind: 'github' | 'gitlab';
+  host: string;
+  name: string;
+  email: string;
+  /** GitHub connected (or a typed token), GitLab set. */
+  set: boolean;
+  /** Why the FrIDEs got none the last time the core tried. */
+  note?: string;
+}
+
+/** A node whose fride is approved, and what its FrIDE took. */
+export interface GitIdentityNode {
+  id: string;
+  name: string;
+  online: boolean;
+  /** What nodes.git_identities gives it. */
+  allowed: GitIdentityID[];
+  /** What its FrIDE took last, at `at`. */
+  got: GitIdentityID[];
+  at?: string;
+  /** Its FrIDE takes git identities. */
+  supported: boolean;
+  /** Its FrIDE did not answer: it gets them once it does. */
+  pending?: boolean;
+  error?: string;
+  /** Why the node keeps them from its FrIDE on purpose (the FrIDE in a Docker Sandbox). */
+  held?: string;
+}
+
+/** GET /api/git-identities */
+export interface GitIdentities {
+  identities: GitIdentityRow[];
+  nodes: GitIdentityNode[];
+}
+
 // ---------------------------------------------------------------------------
 // Paths
 
@@ -2461,6 +2520,8 @@ export interface ApiGet {
   '/api/threads': Thread[];
   '/api/fride': FrideResponse;
   '/api/connections': Connections;
+  '/api/gitlab': GitLabConnection;
+  '/api/git-identities': GitIdentities;
   '/api/audit': AuditEntry[];
   '/api/approvals': Approvals;
   '/api/policy': PolicyStatus;
