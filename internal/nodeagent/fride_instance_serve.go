@@ -191,6 +191,8 @@ type served struct {
 	// started is the instance's last start the loop saw: a new one ends
 	// the wait.
 	started time.Time
+	// hookErr is why its webhook last could not listen, logged once.
+	hookErr string
 }
 
 // frideInstancesSupervise starts the loop that keeps the instances'
@@ -301,17 +303,20 @@ func (a *Agent) frideInstancesPass(runs map[string]*served, hooks map[string]*in
 		}
 	}
 	for name, st := range want {
-		if hooks[name] == nil {
-			if h, err := a.listenInstanceHook(name, st.WebhookPort); err != nil {
-				a.logf("node: the FrIDE instance %s's webhook cannot listen on %d, so its news does not reach the core: %v", name, st.WebhookPort, err)
-			} else {
-				hooks[name] = h
-			}
-		}
 		r := runs[name]
 		if r == nil {
 			r = &served{backoff: frideServeMinBackoff}
 			runs[name] = r
+		}
+		if hooks[name] == nil {
+			h, err := a.listenInstanceHook(name, st.WebhookPort)
+			if msg := errText(err); msg != "" && msg != r.hookErr {
+				a.logf("node: the FrIDE instance %s's webhook cannot listen on %d, so its news does not reach the core: %v", name, st.WebhookPort, err)
+			}
+			r.hookErr = errText(err)
+			if err == nil {
+				hooks[name] = h
+			}
 		}
 		if !st.Started.Equal(r.started) {
 			// A start waits for FrIDE now, not for the last failure's wait.
