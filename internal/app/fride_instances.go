@@ -651,11 +651,17 @@ func (i *frideInstances) refreshAll(ctx context.Context, again bool) {
 		if same && !again {
 			continue
 		}
+		// Only an update: an instance stopped since the declaration the
+		// core holds (an idle stop a moment ago) stays stopped.
+		p.UpdateOnly = true
 		cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-		_, err := i.f.b.nodes.FrideInstanceStart(cctx, w.v.ID, p)
+		got, err := i.f.b.nodes.FrideInstanceStart(cctx, w.v.ID, p)
 		cancel()
 		if err != nil {
 			log.Printf("fride: giving the FrIDE instance %s on %s its identities, repositories and egress: %v", name, w.v.Name, err)
+			continue
+		}
+		if got.State != nodeproto.FrideInstanceRunning {
 			continue
 		}
 		i.st.Lock()

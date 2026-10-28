@@ -212,6 +212,11 @@ type FrideInstanceStartParams struct {
 	// lacks it. "" when the core does not know where its images are
 	// published (a local build); a node's own template always wins.
 	Template string `json:"template,omitempty"`
+	// UpdateOnly brings an instance that runs up to date and starts none:
+	// one that is stopped stays so, and the answer says it is. The core's
+	// refresh of identities sends it, so that it never undoes a stop
+	// whose declaration has yet to arrive.
+	UpdateOnly bool `json:"update_only,omitempty"`
 }
 
 // FrideSandboxImage is the name of the published FrIDE template under
