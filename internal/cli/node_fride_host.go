@@ -26,25 +26,34 @@ whole FrIDE in a Docker Sandbox of its own, for one trust domain. This
 node's agent runs them; these commands set the machine up for it.
 
 Usage:
-  fridolin node fride host setup [--repo DIR] [--fride-repo URL] [--docker-disk 40g]
-                  [--no-caches] [--reserve-mb N]
+  fridolin node fride host setup [--no-build] [--repo DIR] [--fride-repo URL]
+                  [--docker-disk 40g] [--no-caches] [--reserve-mb N]
                   check sbx (installed, running, signed in), make sbx's global
                   settings fridolin's, build the template (FrIDE at the commit the
                   fridolin checkout in --repo pins, default .; Claude Code; ponytail)
                   with Docker and load it into sbx; the node then offers fride_host.
-                  Again after updating the checkout, for a newer FrIDE
+                  Again after updating the checkout, for a newer FrIDE.
+                  With --no-build (the default where no Docker is found), it builds
+                  nothing: each instance's sandbox is made from the template the
+                  core publishes (fridolin-fride-sandbox), which sbx pulls
   fridolin node fride host status
                   sbx, the template, the memory and what the node offers
 
 Flags:
   --state-dir DIR   the node's state folder
+  --no-build        take the core's published template instead of building one
   --fride-repo URL  FrIDE's git URL (default: --repo's origin, fridolin → fride, on GitHub)
   --docker-disk SIZE
                     each sandbox's Docker disk (default 40g)
   --no-caches       no Go and npm caches kept between an instance's sandboxes
-                    (default: ~/.cache/fridolin-sbx, a folder per instance)
+                    (default: ~/.cache/fridolin-sbx, a folder per instance; on
+                    Windows always, which shares no caches yet)
   --reserve-mb N    the memory the machine keeps for itself, which no instance is
                     started into (default 6144; node.json's fride_host.reserve_mb)
+
+On Windows (11, x64, with the Windows Hypervisor Platform), run setup as the
+user who signs in: sbx and its sandboxes are that user's, and the node's
+service runs sbx in their session (docs/NODES.md, FrIDE instances on Windows).
 `
 
 const nodeFrideInstanceUsage = `fridolin node fride instance — the FrIDE instances on this machine (docs/NODES.md, FrIDE instances)
@@ -73,8 +82,10 @@ Flags:
 // frideHostFlags are the flags of fridolin node fride host and instance.
 type frideHostFlags struct {
 	stateDir, repo, frideRepo, dockerDisk string
-	noCaches, yes, noHistory              bool
+	noCaches, noBuild, yes, noHistory     bool
 	reserveMB, lines                      int
+	// set are the flags given.
+	set map[string]bool
 }
 
 // nodeFrideHostCmd runs `fridolin node fride host` (instance false) or
@@ -89,6 +100,18 @@ func nodeFrideHostCmd(instance bool, args []string, stdout, stderr io.Writer) in
 		return 0
 	}
 	sub, args := args[0], args[1:]
+	if !instance && sub == "sbx-secret" {
+		// sbx runs it on Windows to read a git host's token (hidden).
+		if len(args) != 1 {
+			fmt.Fprintln(stderr, "fridolin node fride host sbx-secret takes a token file")
+			return 2
+		}
+		if err := nodeagent.PrintSbxSecret(stdout, args[0]); err != nil {
+			fmt.Fprintf(stderr, "fridolin node fride host sbx-secret: %v\n", err)
+			return 1
+		}
+		return 0
+	}
 	fs := flag.NewFlagSet("node fride "+what+" "+sub, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { fmt.Fprint(stderr, usage) }
@@ -101,6 +124,7 @@ func nodeFrideHostCmd(instance bool, args []string, stdout, stderr io.Writer) in
 		fs.StringVar(&f.frideRepo, "fride-repo", "", "FrIDE's git URL")
 		fs.StringVar(&f.dockerDisk, "docker-disk", nodeagent.DefaultFrideInstanceDockerDisk, "each sandbox's Docker disk")
 		fs.BoolVar(&f.noCaches, "no-caches", false, "no Go and npm caches kept between an instance's sandboxes")
+		fs.BoolVar(&f.noBuild, "no-build", false, "take the core's published template instead of building one")
 		fs.IntVar(&f.reserveMB, "reserve-mb", 0, "the memory the machine keeps for itself")
 	case !instance && sub == "status", instance && sub == "ls":
 	case instance && sub == "stop":
@@ -123,6 +147,12 @@ func nodeFrideHostCmd(instance bool, args []string, stdout, stderr io.Writer) in
 	if err != nil {
 		return 2
 	}
+	f.set = map[string]bool{}
+	fs.Visit(func(fl *flag.Flag) { f.set[fl.Name] = true })
+	if f.noBuild && (f.set["repo"] || f.set["fride-repo"]) {
+		fmt.Fprintf(stderr, "fridolin node fride %s %s: --repo and --fride-repo are for a template built here; --no-build takes the core's\n", what, sub)
+		return 2
+	}
 	if len(pos) != names {
 		if names == 1 {
 			fmt.Fprintf(stderr, "fridolin node fride %s %s takes the instance's name\n", what, sub)
@@ -141,8 +171,8 @@ func nodeFrideHostCmd(instance bool, args []string, stdout, stderr io.Writer) in
 		fmt.Fprintf(stderr, "fridolin node fride %s %s: a negative number\n", what, sub)
 		return 2
 	}
-	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
-		fmt.Fprintf(stderr, "fridolin node fride %s: Docker Sandboxes run on macOS (and Linux with KVM), not on %s\n", what, runtime.GOOS)
+	if why := nodeagent.SbxUnsupported(); why != "" {
+		fmt.Fprintf(stderr, "fridolin node fride %s: %s\n", what, why)
 		return 1
 	}
 	dir := f.stateDir
@@ -179,7 +209,7 @@ func runFrideHost(cmd string, pos []string, f frideHostFlags, dir, sbx string, s
 		return 1
 	}
 	if sbx == "" && cmd != "host status" {
-		return fail("sbx is not installed: install Docker Sandboxes (on a Mac: brew install --cask sbx), run sbx login, then this again")
+		return fail("sbx is not installed: %s; then this again", nodeagent.SbxInstallHint())
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
@@ -188,7 +218,7 @@ func runFrideHost(cmd string, pos []string, f frideHostFlags, dir, sbx string, s
 	o := nodeagent.FrideInstanceOptions{Dir: dir, Sbx: sbx, Out: stdout}
 	switch cmd {
 	case "host setup":
-		return frideHostSetup(ctx, f, dir, sbx, stdout, fail)
+		return frideHostSetup(ctx, f, dir, sbx, findDocker(), runtime.GOOS, stdout, fail)
 	case "host status":
 		return frideHostStatus(ctx, dir, sbx, stdout, fail)
 	case "instance ls":
@@ -251,8 +281,10 @@ func instanceError(err error) error {
 	return err
 }
 
-// frideHostSetup is host setup, with the default caches folder.
-func frideHostSetup(ctx context.Context, f frideHostFlags, dir, sbx string, stdout io.Writer, fail func(string, ...any) int) int {
+// frideHostSetup is host setup on goos with the docker found ("" for
+// none): with the default caches folder, and without a build where no
+// Docker is.
+func frideHostSetup(ctx context.Context, f frideHostFlags, dir, sbx, docker, goos string, stdout io.Writer, fail func(string, ...any) int) int {
 	repo := f.repo
 	if repo == "" {
 		repo = "."
@@ -261,12 +293,23 @@ func frideHostSetup(ctx context.Context, f frideHostFlags, dir, sbx string, stdo
 	if err != nil {
 		return fail("%v", err)
 	}
-	o := nodeagent.FrideHostSetupOptions{Dir: dir, Sbx: sbx, Docker: findDocker(), Repo: repo, FrideRepo: f.frideRepo,
-		DockerDisk: f.dockerDisk, ReserveMB: f.reserveMB, Out: stdout}
+	o := nodeagent.FrideHostSetupOptions{Dir: dir, Sbx: sbx, Docker: docker, Repo: repo, FrideRepo: f.frideRepo,
+		DockerDisk: f.dockerDisk, ReserveMB: f.reserveMB, NoBuild: f.noBuild, Out: stdout}
+	if docker == "" && !f.noBuild {
+		if f.set["repo"] || f.set["fride-repo"] {
+			return fail("docker is not installed: a template is built with Docker (Docker Desktop or OrbStack); without it, set up with --no-build, which takes the core's published template")
+		}
+		o.NoBuild = true
+		fmt.Fprintln(stdout, "No Docker here: taking the template the core publishes (--no-build).")
+	}
 	if git, err := exec.LookPath("git"); err == nil {
 		o.Git = git
 	}
-	if !f.noCaches {
+	switch {
+	case f.noCaches:
+	case goos == "windows":
+		fmt.Fprintln(stdout, "Note: no shared Go and npm caches on Windows yet; each instance keeps its caches on its own disk.")
+	default:
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return fail("%v; pass --no-caches", err)
@@ -292,7 +335,11 @@ func frideHostStatus(ctx context.Context, dir, sbx string, stdout io.Writer, fai
 		return 1
 	}
 	h := r.Host
-	fmt.Fprintf(stdout, "Template: %s (FrIDE %s from %s), set up %s\n", h.Template, h.FrideCommit, h.FrideRepo, h.SetUp.Local().Format("2006-01-02 15:04"))
+	if h.FromCore {
+		fmt.Fprintf(stdout, "Template: the core's (%s, which sbx pulls when an instance's sandbox is made), set up %s\n", nodeproto.FrideSandboxImage, h.SetUp.Local().Format("2006-01-02 15:04"))
+	} else {
+		fmt.Fprintf(stdout, "Template: %s (FrIDE %s from %s), set up %s\n", h.Template, h.FrideCommit, h.FrideRepo, h.SetUp.Local().Format("2006-01-02 15:04"))
+	}
 	fmt.Fprintf(stdout, "Docker disk: %s per instance; caches: %s\n", h.DockerDisk, yesNo(h.Caches != "", h.Caches+" (a folder per instance)", "none"))
 	c := r.Declared
 	if c == nil {

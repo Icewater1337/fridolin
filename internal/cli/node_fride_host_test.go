@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -118,5 +120,94 @@ func TestNodeFrideInstance(t *testing.T) {
 	}
 	if code, out, _ := call("instance ls", nil, frideHostFlags{}); code != 0 || !strings.Contains(out, "No FrIDE instances") {
 		t.Errorf("ls after rm: %q", out)
+	}
+}
+
+// fakeSetupSbx is a stand-in for sbx that answers what host setup asks
+// of a node set up before: running, signed in, fridolin's settings.
+const fakeSetupSbx = `#!/bin/sh
+echo "$@" >>"$(dirname "$0")/calls.log"
+case "$1" in
+version) echo "sbx version v0.50.0" ;;
+diagnose) echo '{"version":"1.0","checks":[{"name":"Daemon","status":"pass"},{"name":"Authentication","status":"pass"}]}' ;;
+ls) echo '[]' ;;
+settings) echo '[{"key":"browser.enabled","value":false},{"key":"ssh.agentForwardingEnabled","value":false}]' ;;
+policy) echo '{"rules":[{"id":"d","scope":"global","resource_type":"network","decision":"deny","resources":["**"],"status":"active"}]}' ;;
+*) echo "the fake runs no $1" >&2; exit 1 ;;
+esac
+`
+
+// Without Docker, setup takes the core's template (--no-build) and
+// needs no checkout; a checkout named without Docker, or with
+// --no-build, is refused; on Windows it keeps no shared caches.
+func TestNodeFrideHostSetupWithoutDocker(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("the fake sbx is a shell script")
+	}
+	dir, _ := joinedState(t, "mini")
+	sbx := filepath.Join(t.TempDir(), "sbx")
+	if err := os.WriteFile(sbx, []byte(fakeSetupSbx), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fail := func(errOut *bytes.Buffer) func(string, ...any) int {
+		return func(format string, args ...any) int { fmt.Fprintf(errOut, format, args...); return 1 }
+	}
+	var out, errOut bytes.Buffer
+	f := frideHostFlags{noCaches: true, set: map[string]bool{}}
+	if code := frideHostSetup(context.Background(), f, dir, sbx, "", "linux", &out, fail(&errOut)); code != 0 {
+		t.Fatalf("setup: %d %s %s", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "No Docker here: taking the template the core publishes (--no-build).") ||
+		!strings.Contains(out.String(), "the template the core publishes (fridolin-fride-sandbox") {
+		t.Errorf("setup said:\n%s", out.String())
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, "fride-host.json"))
+	if !strings.Contains(string(b), `"template_from_core": true`) {
+		t.Errorf("fride-host.json: %s", b)
+	}
+	out.Reset()
+	if code := runFrideHost("host status", nil, frideHostFlags{}, dir, sbx, &out, &errOut); code != 0 || !strings.Contains(out.String(), "Template: the core's (fridolin-fride-sandbox") || !strings.Contains(out.String(), "Ready: yes") {
+		t.Errorf("status: %d %s %s", code, out.String(), errOut.String())
+	}
+
+	errOut.Reset()
+	f.set["repo"] = true
+	if code := frideHostSetup(context.Background(), f, dir, sbx, "", "linux", &out, fail(&errOut)); code != 1 || !strings.Contains(errOut.String(), "--no-build") {
+		t.Errorf("a checkout without Docker: %d %q", code, errOut.String())
+	}
+	out.Reset()
+	f = frideHostFlags{noBuild: true, set: map[string]bool{}}
+	if code := frideHostSetup(context.Background(), f, dir, sbx, "", "windows", &out, fail(&errOut)); code != 0 || !strings.Contains(out.String(), "no shared Go and npm caches on Windows") {
+		t.Errorf("on Windows: %d %s %s", code, out.String(), errOut.String())
+	}
+	var code int
+	code = nodeCmd([]string{"fride", "host", "setup", "--no-build", "--repo", ".", "--state-dir", dir}, &out, &errOut)
+	if code != 2 || !strings.Contains(errOut.String(), "--no-build takes the core's") {
+		t.Errorf("--no-build with --repo: %d %q", code, errOut.String())
+	}
+}
+
+// sbx-secret prints an instance's token file for sbx, and nothing else.
+func TestNodeFrideHostSbxSecret(t *testing.T) {
+	t.Parallel()
+	tokens := filepath.Join(t.TempDir(), "fride-instances", "work", "tokens")
+	if err := os.MkdirAll(tokens, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(tokens, "github.com.token")
+	if err := os.WriteFile(file, []byte("ghs_madeUp"), 0o600); err != nil { // personal-data:ignore (a made-up token)
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if code := nodeCmd([]string{"fride", "host", "sbx-secret", file}, &out, &errOut); code != 0 || out.String() != "ghs_madeUp" {
+		t.Errorf("%d %q %q", code, out.String(), errOut.String())
+	}
+	out.Reset()
+	if code := nodeCmd([]string{"fride", "host", "sbx-secret", filepath.Join(tokens, "..", "instance.json")}, &out, &errOut); code != 1 || out.Len() != 0 {
+		t.Errorf("another file: %d %q", code, out.String())
+	}
+	if code := nodeCmd([]string{"fride", "host", "sbx-secret"}, &out, &errOut); code != 2 {
+		t.Errorf("no file: %d", code)
 	}
 }
