@@ -686,6 +686,16 @@ dialog.dialog::backdrop { background: var(--backdrop); }
 .fb-new { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .fb-new input { flex: 1; min-width: 180px; }
 
+/* ── FrIDE instances editor (settings) ─────────────────────────────────── */
+
+.fride-instances-editor { display: flex; flex-direction: column; gap: 12px; }
+.fride-instance-list { display: flex; flex-direction: column; gap: 12px; }
+.fride-instance-edit { display: flex; flex-direction: column; gap: 14px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
+.fride-instance-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.fride-instance-head > .field { flex: 1 1 240px; }
+.fride-instance-name { margin: 0; font-size: 15px; }
+.check-list { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+
 /* ── routing editor ─────────────────────────────────────────────────────── */
 
 .routing-editor { display: flex; flex-direction: column; gap: 14px; }

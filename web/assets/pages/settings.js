@@ -18,6 +18,7 @@ import { callout, mono, pageHeader, loading } from '../components/common.js';
 import { googleClientCard } from '../components/calendar.js';
 import { saveBar } from '../components/save-bar.js';
 import { liveForm } from '../components/live-form.js';
+import { frideInstancesEditor, normalizeInstances } from '../components/fride-instances-editor.js';
 
 /** @import { PageModule } from '../app/page.js' */
 /** @import { ConfigFile, ConfigResponse, Trigger } from '../../types/api.js' */
@@ -25,7 +26,7 @@ import { liveForm } from '../components/live-form.js';
 /**
  * A setting on the page: the dotted key in config.json it edits, and its
  * control. Only the allow lists, which the Chats page edits, have no key.
- * @typedef {FieldOptions & ({type: 'allowLists', key?: undefined} | {type: 'bool' | 'text' | 'int' | 'select' | 'list' | 'triggers', key: string})} SettingField
+ * @typedef {FieldOptions & ({type: 'allowLists', key?: undefined} | {type: 'bool' | 'text' | 'int' | 'select' | 'list' | 'triggers' | 'frideInstances', key: string})} SettingField
  */
 
 /**
@@ -123,6 +124,14 @@ const SECTIONS = [
       { key: 'sandbox.allow_paths', type: 'list', mono: true, label: 'Re-allow', placeholder: '~/Documents/assistant-share', validate: absPath, addLabel: 'Add folder', help: 'Folders brains may read again despite the built-in blocks (reading only), except other brains’ folders, the bridge’s own data, the keychains and your CLAUDE.md files above a brain’s folder. Rarely needed. Absolute, or starting with ~/.' },
       { key: 'sandbox.git_config', type: 'select', def: 'read', label: 'Git settings (~/.gitconfig)', options: [['read', 'Readable — brains can commit in their folder'], ['deny', 'Blocked']] },
       { key: 'sandbox.credentials_dir', type: 'text', mono: true, label: 'Credentials folder', placeholder: 'not set', help: 'A folder for the brains’ calendar tokens, which the bridge uses for them. No brain may read it. Absolute, or starting with ~/.' },
+    ],
+  },
+  {
+    id: 'fride',
+    title: 'FrIDE instances',
+    intro: 'Each instance is a whole FrIDE in a Docker Sandbox of its own, on a node that offers fride_host, for one trust domain: its own repositories, git identities and network. The core brain starts one when a job needs it, sizes its memory, and stops it once it idles. The FrIDE and Nodes pages show where each runs.',
+    fields: [
+      { key: 'fride.instances', type: 'frideInstances', label: 'FrIDE instances' },
     ],
   },
   {
@@ -428,6 +437,18 @@ function makeControl(f, cfg, eff, onChange) {
       read = () => JSON.stringify(triggers.getValues());
       serialize = () => triggers.getValues().map((t) => (t.match === 'anywhere' ? t.text : { text: t.text, match: t.match }));
       break;
+    }
+    case 'frideInstances': {
+      const editor = frideInstancesEditor({ instances: fileVal, onChange });
+      initial = JSON.stringify(normalizeInstances(fileVal));
+      read = () => JSON.stringify(editor.getValue());
+      serialize = () => {
+        const v = editor.getValue();
+        return Object.keys(v).length ? v : undefined;
+      };
+      isValid = () => editor.isValid();
+      // The section's title names it; each instance's fields have labels.
+      return finish(field({ control: editor, help: f.help, wide: true }));
     }
     default:
       throw new Error(`unknown field type ${type}`);

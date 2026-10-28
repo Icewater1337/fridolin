@@ -500,6 +500,32 @@ export interface ConnectionsConfig {
   elevenlabs?: ConnectionConfig;
 }
 
+/** One FrIDE instance of fride.instances (config.FrideInstanceConfig). */
+export interface FrideInstanceConfig {
+  /** What it is for, shown to the core brain so it picks the right one. */
+  description?: string;
+  /** Git URLs, cloned inside it when missing. */
+  repos?: string[];
+  /** The git identities it gets, as placeholders for their tokens. */
+  identities?: GitIdentityID[];
+  /** Hosts it may reach beyond its baseline. */
+  egress?: string[];
+  /** Where it may run, by node id or name; empty: any approved node that offers fride_host. */
+  nodes?: string[];
+  /** A fixed size, 2048 to 65536; 0 (left out): the core decides at each start. */
+  memory_mb?: number;
+  /** It stops after this long idle: 0 (left out) is 30, -1 never, at most 1440. */
+  idle_stop_minutes?: number;
+}
+
+/** fride (config.FrideConfig). */
+export interface FrideConfig {
+  /** quiet or all. */
+  news?: string;
+  /** By name: a lower-case letter, then up to 23 lower-case letters, digits and dashes; not "native". */
+  instances?: Record<string, FrideInstanceConfig>;
+}
+
 /**
  * config.json (config.File), less brain_dirs, which GET /api/config never
  * sends: brains have their own endpoints. In `effective` the defaults are
@@ -555,6 +581,7 @@ export interface ConfigFile {
   housekeeping: HousekeepingConfig;
   schedules: SchedulesConfig;
   connections?: ConnectionsConfig;
+  fride?: FrideConfig;
   /** The IANA zone schedules are read in; left out for the bridge's own. */
   timezone?: string;
 }
@@ -634,6 +661,36 @@ export interface FrideCap {
   repos?: string[];
 }
 
+/** How a FrIDE instance stands on its node. */
+export type FrideInstanceState = 'starting' | 'running' | 'stopped' | 'failed';
+
+/** One FrIDE instance on a node (nodeproto.FrideInstance). */
+export interface FrideInstance {
+  name: string;
+  state: FrideInstanceState;
+  memory_mb: number;
+  /** Its FrIDE's loopback address on the node, while it runs. */
+  url?: string;
+  /** The repositories its FrIDE knows. */
+  repos?: string[];
+  problem?: string;
+}
+
+/** The node runs FrIDE instances in Docker Sandboxes (nodeproto.FrideHostCap). */
+export interface FrideHostCap {
+  /** sbx's version. */
+  version: string;
+  /** sbx signed in, its daemon up, fridolin's settings held, the FrIDE template built. */
+  ready: boolean;
+  problem?: string;
+  total_memory_mb: number;
+  /** What the OS can give now. */
+  available_memory_mb: number;
+  /** Kept for the machine itself: no instance is started into it. */
+  reserve_mb: number;
+  instances?: FrideInstance[];
+}
+
 export interface AndroidBuildCap {
   java?: string;
   platforms?: string[];
@@ -663,6 +720,7 @@ export interface NodeCapabilities {
   host?: boolean;
   notify?: boolean;
   fride?: FrideCap;
+  fride_host?: FrideHostCap;
   android_build?: AndroidBuildCap;
   backup?: BackupCap;
   update?: UpdateCap;
@@ -871,6 +929,8 @@ export interface FrideThread {
   brain: string;
   message: string;
   node?: string;
+  /** The FrIDE instance it went to; left out for the node's own FrIDE. */
+  instance?: string;
   task?: string;
   branch?: string;
   fride_status?: string;
@@ -879,9 +939,32 @@ export interface FrideThread {
   news: FrideNewsItem[];
 }
 
+/**
+ * A configured FrIDE instance of GET /api/fride, with where it runs: its
+ * fride.instances entry (idle_stop_minutes in effect: 0 is never), and
+ * how its node reports it. Also what POST /api/fride/instances/{name}/start
+ * answers.
+ */
+export interface FrideInstanceView extends FrideInstanceConfig {
+  name: string;
+  memory_mb: number;
+  idle_stop_minutes: number;
+  /** "" while no node has it. */
+  state: FrideInstanceState | '';
+  /** The node that has it, "" for none. */
+  node: string;
+  node_id: string;
+  /** What it was started with, while a node has it. */
+  running_memory_mb: number;
+  open_threads: number;
+  problem?: string;
+}
+
 /** GET /api/fride. */
 export interface FrideResponse {
   threads: FrideThread[];
+  /** The configured instances, by name. */
+  instances?: FrideInstanceView[] | null;
 }
 
 /** One line of GET /api/audit, newest first (audit.Entry). */

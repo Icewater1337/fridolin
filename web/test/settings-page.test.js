@@ -177,3 +177,98 @@ test('AI mode defaults to Claude and preserves separate model settings when swit
   await save();
   assert.equal(bridge.config.agent_provider, 'claude');
 });
+
+// fride.instances: one box per instance. A new one is named once; a
+// saved one keeps its name. What the bridge would refuse is flagged and
+// not saved; what is saved sits beside fride.news.
+test('FrIDE instances are added, edited and removed in fride.instances', async (t) => {
+  const work = {
+    description: 'work repositories',
+    repos: ['https://gitlab.example.com/group/app.git'],
+    identities: ['gitlab'],
+    egress: ['registry.example.com'],
+    nodes: ['mac-mini'],
+  };
+  const { ctx, root, bridge, save } = await openPage(t, { config: { claude_path: 'claude', fride: { news: 'all', instances: { work } } } });
+  // A save builds the form again, from the settings saved.
+  const editor = () => root.querySelector('.fride-instances-editor');
+  const boxes = () => editor().querySelectorAll('.fride-instance-edit');
+  /** @type {(box: FakeElement, label: string) => FakeElement} */
+  const inBox = (box, label) => {
+    const l = box.querySelectorAll('label').find((x) => x.textContent === label);
+    return /** @type {FakeElement} */ (document.getElementById(l.getAttribute('for')));
+  };
+  const tick = (box, label, on) => {
+    const cb = inBox(box, label);
+    cb.checked = on;
+    cb.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  const click = (el, label) => el.querySelectorAll('button').find((b) => b.textContent === label).click();
+
+  assert.equal(boxes().length, 1);
+  assert.equal(boxes()[0].querySelector('h3').textContent, 'work');
+  assert.equal(inBox(boxes()[0], 'Repositories').value, 'https://gitlab.example.com/group/app.git');
+  assert.equal(inBox(boxes()[0], 'GitLab').checked, true);
+  assert.equal(inBox(boxes()[0], 'GitHub').checked, false);
+  assert.equal(ctx.dirty(), false, 'a form nobody touched holds what the file holds');
+
+  click(editor(), 'Add instance');
+  await settle();
+  assert.equal(boxes().length, 2);
+  const added = boxes()[1];
+  assert.equal(ctx.dirty(), true);
+  type(inBox(added, 'Name'), 'Work');
+  assert.match(added.textContent, /A lower-case letter, then up to 23/);
+  type(inBox(added, 'Name'), 'work');
+  assert.match(added.textContent, /Another instance has this name/);
+  type(inBox(added, 'Name'), 'native');
+  assert.match(added.textContent, /“native” is the name of a node’s own FrIDE/);
+  type(inBox(added, 'Name'), 'fridolin');
+  type(inBox(added, 'Description'), 'fridolin and FrIDE themselves');
+  type(inBox(added, 'Repositories'), 'https://github.com/you/fridolin.git\n\n https://github.com/you/fride.git \n');
+  tick(added, 'GitHub', true);
+  type(inBox(added, 'More hosts it may reach'), 'https://registry.example.com');
+  type(inBox(added, 'Memory (MB)'), '1000');
+  type(inBox(added, 'Stop when idle for (minutes)'), '-1');
+  assert.match(added.textContent, /no host name: no scheme, path or port/);
+  assert.match(added.textContent, /0, or from 2048 to 65536 MB/);
+
+  await save();
+  assert.equal(bridge.puts.length, 0, 'nothing is saved while an entry is wrong');
+  assert.ok(document.querySelectorAll('.toast').some((el) => /Check “FrIDE instances”/.test(el.textContent)));
+
+  type(inBox(added, 'More hosts it may reach'), '');
+  type(inBox(added, 'Memory (MB)'), '8192');
+  type(inBox(boxes()[0], 'Description'), 'work repositories, on the company GitLab');
+  await save();
+  assert.equal(bridge.puts.length, 1);
+  assert.deepEqual(bridge.config.fride, {
+    news: 'all',
+    instances: {
+      work: { ...work, description: 'work repositories, on the company GitLab' },
+      fridolin: {
+        description: 'fridolin and FrIDE themselves',
+        repos: ['https://github.com/you/fridolin.git', 'https://github.com/you/fride.git'],
+        identities: ['github'],
+        memory_mb: 8192,
+        idle_stop_minutes: -1,
+      },
+    },
+  });
+  assert.equal(ctx.dirty(), false);
+
+  // Saved, the new instance keeps its name.
+  const saved = boxes().find((b) => b.querySelector('h3') && b.querySelector('h3').textContent === 'fridolin');
+  assert.ok(saved, 'fridolin is a saved instance now');
+  click(boxes().find((b) => b.querySelector('h3').textContent === 'work'), 'Remove');
+  await settle();
+  assert.equal(ctx.dirty(), true);
+  await save();
+  assert.deepEqual(Object.keys(bridge.config.fride.instances), ['fridolin']);
+
+  click(boxes()[0], 'Remove');
+  await settle();
+  assert.match(editor().textContent, /None yet/);
+  await save();
+  assert.deepEqual(bridge.config.fride, { news: 'all' }, 'no instances left: the key goes, fride.news stays');
+});
