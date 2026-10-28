@@ -2104,6 +2104,9 @@ LocalSystem. Once, as the person who uses the machine:
    & "$env:ProgramFiles\fridolin\fridolin.exe" node fride host setup --no-build --state-dir "$env:LOCALAPPDATA\fridolin-node"
    ```
 
+   A node that joined from inside the Claude desktop app has its state
+   dir at `"$env:USERPROFILE\.fridolin-node"` instead
+   ([Inside an app package](#inside-an-app-package)).
 4. **Approve** `fride_host` on the core, as above, and check with
    `fridolin node fride host status` (same `--state-dir`): `Ready: yes`.
 
@@ -2117,11 +2120,12 @@ How it runs there:
   without a window, and their `sbx.exe` from their `PATH` or WinGet's
   links. While nobody is signed in, `fride_host` is not ready ("nobody
   is signed in to Windows: sbx runs in the signed-in user's session"),
-  and the instances' FrIDEs stop with their VMs; they run again once
-  that user signs in and the core starts them. So the user who set up
-  sbx is the one who signs in; another user has another sbx, without
-  the instances. Started from a terminal as the user
-  (`fridolin node run`), the agent runs sbx itself.
+  and the instances' FrIDEs stop with their VMs; once that user signs
+  in again, the agent starts those it keeps running (within its wait of
+  up to 5 minutes), and the core starts the others when work needs
+  them. So the user who set up sbx is the one who signs in; another user
+  has another sbx, without the instances. Started from a terminal as the
+  user (`fridolin node run`), the agent runs sbx itself.
 - **The tokens** wait in the instance's `tokens` folder in the state
   dir, which only that user and SYSTEM may open (its ACL inherits
   nothing). sbx reads one with the node's own `fridolin.exe node fride

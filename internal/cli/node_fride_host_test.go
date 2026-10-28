@@ -186,8 +186,7 @@ func TestNodeFrideHostSetupWithoutDocker(t *testing.T) {
 	if code := frideHostSetup(context.Background(), f, dir, sbx, "/usr/bin/docker", "linux", &out, fail(&errOut)); code != 1 || !strings.Contains(errOut.String(), "no fridolin checkout in") {
 		t.Errorf("Docker without a checkout: %d %q", code, errOut.String())
 	}
-	var code int
-	code = nodeCmd([]string{"fride", "host", "setup", "--no-build", "--repo", ".", "--state-dir", dir}, &out, &errOut)
+	code := nodeCmd([]string{"fride", "host", "setup", "--no-build", "--repo", ".", "--state-dir", dir}, &out, &errOut)
 	if code != 2 || !strings.Contains(errOut.String(), "--no-build takes the core's") {
 		t.Errorf("--no-build with --repo: %d %q", code, errOut.String())
 	}
