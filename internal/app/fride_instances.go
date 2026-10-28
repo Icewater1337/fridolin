@@ -236,18 +236,53 @@ func allowedOn(ic config.FrideInstanceConfig, v nodes.View) bool {
 	})
 }
 
-// hostReady reports whether v can start instances now.
-func hostReady(v nodes.View) bool {
+// hostReady reports whether v can start instances now: tpl is the
+// template the core sends ("" for none), which a node that built none
+// needs.
+func hostReady(v nodes.View, tpl string) bool {
 	h := v.Effective.FrideHost
-	return v.Device == nodeproto.DeviceApproved && v.Online && h != nil && h.Ready
+	return v.Device == nodeproto.DeviceApproved && v.Online && h != nil && h.Ready && (tpl != "" || !h.NeedsTemplate)
+}
+
+// noTemplate says why a node that built no template cannot start
+// instances of this core.
+const noTemplate = "it built no FrIDE template, and this core does not know where its images are published (FRIDOLIN_BOX_REGISTRY): run fridolin node fride host setup with Docker there"
+
+// frideSandboxTemplate is the published FrIDE template a node that built
+// none makes its instances from: <registry>/fridolin-fride-sandbox:<tag>,
+// with the tag the core's image names (FRIDOLIN_FRIDE_SANDBOX_TAG, which
+// changes only with what goes into the template, so that a new core does
+// not have every instance made anew), else the core's version. "" when
+// the core does not know its registry (a local build).
+func frideSandboxTemplate(getenv func(string) string, version string) string {
+	reg := strings.TrimRight(strings.TrimSpace(getenv("FRIDOLIN_BOX_REGISTRY")), "/")
+	tag := strings.TrimSpace(getenv("FRIDOLIN_FRIDE_SANDBOX_TAG"))
+	if tag == "" {
+		tag = version
+	}
+	if reg == "" || tag == "" {
+		return ""
+	}
+	ref := reg + "/" + nodeproto.FrideSandboxImage + ":" + tag
+	if nodeproto.CheckTemplateRef(ref) != nil {
+		return ""
+	}
+	return ref
+}
+
+// template is the FrIDE template the core sends with each start.
+func (i *frideInstances) template() string {
+	b := i.f.b
+	return frideSandboxTemplate(func(name string) string { return getenv(b.env, name) }, b.nodes.Version())
 }
 
 // hosts are the nodes instance name may start on (only pin, when set),
 // as placement sees them.
 func (i *frideInstances) hosts(name string, ic config.FrideInstanceConfig, views []nodes.View, pin string, open map[string][]store.FrideThread) []frideHost {
 	var out []frideHost
+	tpl := i.template()
 	for _, v := range views {
-		if !hostReady(v) || !allowedOn(ic, v) || pin != "" && v.ID != pin {
+		if !hostReady(v, tpl) || !allowedOn(ic, v) || pin != "" && v.ID != pin {
 			continue
 		}
 		fh := v.Effective.FrideHost
@@ -271,8 +306,9 @@ func (i *frideInstances) hosts(name string, ic config.FrideInstanceConfig, views
 	return out
 }
 
-// noHost says why no node can start instance name.
-func noHost(name string, ic config.FrideInstanceConfig, views []nodes.View, pin string) string {
+// noHost says why no node can start instance name; tpl is the template
+// the core sends.
+func noHost(name string, ic config.FrideInstanceConfig, views []nodes.View, pin, tpl string) string {
 	if pin != "" {
 		why := "is not in the registry"
 		if i := slices.IndexFunc(views, func(v nodes.View) bool { return v.ID == pin }); i >= 0 {
@@ -282,6 +318,8 @@ func noHost(name string, ic config.FrideInstanceConfig, views []nodes.View, pin 
 				why = "is offline"
 			case v.Effective.FrideHost == nil:
 				why = "does not offer FrIDE instances now"
+			case v.Effective.FrideHost.Ready && v.Effective.FrideHost.NeedsTemplate && tpl == "":
+				why = "cannot start instances of this core: " + noTemplate
 			default:
 				why = "cannot start instances now: " + orDefault(v.Effective.FrideHost.Problem, "its sandboxes are not ready")
 			}
@@ -299,6 +337,8 @@ func noHost(name string, ic config.FrideInstanceConfig, views []nodes.View, pin 
 			problems = append(problems, v.Name+" is offline")
 		case !v.Effective.FrideHost.Ready:
 			problems = append(problems, v.Name+": "+orDefault(v.Effective.FrideHost.Problem, "its sandboxes are not ready"))
+		case v.Effective.FrideHost.NeedsTemplate && tpl == "":
+			problems = append(problems, v.Name+": "+noTemplate)
 		}
 	}
 	why := "no approved node offers FrIDE instances (fride_host)"
@@ -422,7 +462,7 @@ func (i *frideInstances) start(ctx context.Context, name, size, by, why string) 
 	}
 	hosts := i.hosts(name, ic, views, pin, open)
 	if len(hosts) == 0 {
-		return frideStarted{}, i.fail(name, by, why, apperr.New(apperr.Unavailable, noHost(name, ic, views, pin)), false)
+		return frideStarted{}, i.fail(name, by, why, apperr.New(apperr.Unavailable, noHost(name, ic, views, pin, i.template())), false)
 	}
 	spot, ok := placeFrideInstance(name, tries, hosts)
 	if !ok {
@@ -551,7 +591,8 @@ func (i *frideInstances) stop(ctx context.Context, name, by, why string, force b
 // their tokens, from the GitHub and the GitLab connection. missing are
 // those the core does not hold.
 func (i *frideInstances) params(ctx context.Context, name string, ic config.FrideInstanceConfig, mb int) (nodeproto.FrideInstanceStartParams, []string) {
-	p := nodeproto.FrideInstanceStartParams{Name: name, MemoryMB: mb, Repos: slices.Clone(ic.Repos), Egress: slices.Clone(ic.Egress)}
+	p := nodeproto.FrideInstanceStartParams{Name: name, MemoryMB: mb, Repos: slices.Clone(ic.Repos), Egress: slices.Clone(ic.Egress),
+		Template: i.template()}
 	if len(ic.Identities) == 0 || i.f.b.gitIDs == nil {
 		return p, slices.Clone(ic.Identities)
 	}
@@ -599,7 +640,7 @@ func (i *frideInstances) refreshAll(ctx context.Context, again bool) {
 	views := i.views()
 	for _, name := range slices.Sorted(maps.Keys(i.configured())) {
 		w, ok := locate(name, views)
-		if !ok || !w.running() || !hostReady(w.v) {
+		if !ok || !w.running() || !hostReady(w.v, i.template()) {
 			continue
 		}
 		p, _ := i.params(ctx, name, i.configured()[name], w.in.MemoryMB)

@@ -100,6 +100,7 @@ func TestFrideInstanceStartParamsCheck(t *testing.T) {
 		"a repo with space":        func(p *FrideInstanceStartParams) { p.Repos = []string{"a b"} },
 		"an identity without host": func(p *FrideInstanceStartParams) { p.Identities[0].Host = "" },
 		"an egress path":           func(p *FrideInstanceStartParams) { p.Egress = []string{"example.com/x"} },
+		"a template without a tag": func(p *FrideInstanceStartParams) { p.Template = "ghcr.io/you/fridolin-fride-sandbox" },
 	} {
 		p := ok
 		p.Identities = append([]FrideIdentity(nil), ok.Identities...)
@@ -107,5 +108,40 @@ func TestFrideInstanceStartParamsCheck(t *testing.T) {
 		if err := p.Check(); err == nil {
 			t.Errorf("%s: no error", name)
 		}
+	}
+}
+
+// A template is an image on a registry, with a tag or a digest, and never
+// an option of sbx.
+func TestCheckTemplateRef(t *testing.T) {
+	t.Parallel()
+	digest := "@sha256:" + strings.Repeat("ab", 32)
+	for _, ok := range []string{
+		"ghcr.io/you/fridolin-fride-sandbox:v1.2.3-4-gabcdef12",
+		"ghcr.io/you/fridolin-fride-sandbox:t-0123456789ab",
+		"registry.example.com:5000/team/fridolin-fride-sandbox:main",
+		"ghcr.io/you/fridolin-fride-sandbox" + digest,
+		"ghcr.io/you/fridolin-fride-sandbox:v1" + digest,
+	} {
+		if err := CheckTemplateRef(ok); err != nil {
+			t.Errorf("%s: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{
+		"", "fridolin-fride-sandbox:v1", "ghcr.io/you/fridolin-fride-sandbox", "--pull=always",
+		"ghcr.io/you/Fridolin:v1", "ghcr.io/you/x:-v1", "ghcr.io/you/x:v1 y", "ghcr.io/you/x:" + strings.Repeat("a", 129),
+	} {
+		if err := CheckTemplateRef(bad); err == nil {
+			t.Errorf("%q: no error", bad)
+		}
+	}
+	p := FrideInstanceStartParams{Name: "work", MemoryMB: 4096, Template: "ghcr.io/you/fridolin-fride-sandbox:v1"}
+	if err := p.Check(); err != nil {
+		t.Error(err)
+	}
+	// Without one, the params are as an older core sends them.
+	b, _ := json.Marshal(FrideInstanceStartParams{Name: "work", MemoryMB: 4096})
+	if strings.Contains(string(b), "template") {
+		t.Errorf("%s", b)
 	}
 }

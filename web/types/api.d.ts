@@ -682,7 +682,7 @@ export interface FrideInstance {
 export interface FrideHostCap {
   /** sbx's version. */
   version: string;
-  /** sbx signed in, its daemon up, fridolin's settings held, the FrIDE template built. */
+  /** sbx signed in, its daemon up, fridolin's settings held, the FrIDE template built (or taken from the core). */
   ready: boolean;
   problem?: string;
   total_memory_mb: number;
@@ -690,6 +690,8 @@ export interface FrideHostCap {
   available_memory_mb: number;
   /** Kept for the machine itself: no instance is started into it. */
   reserve_mb: number;
+  /** It built no template of its own: each start names the core's published one. */
+  needs_template?: boolean;
   instances?: FrideInstance[];
 }
 

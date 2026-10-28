@@ -17,7 +17,8 @@ type FrideHostCap struct {
 	// Version is sbx's.
 	Version string `json:"version"`
 	// Ready says sbx is signed in, its daemon runs, fridolin's global
-	// settings hold and the FrIDE template is built.
+	// settings hold and the FrIDE template is built, or comes from the
+	// core (NeedsTemplate).
 	Ready   bool   `json:"ready"`
 	Problem string `json:"problem,omitempty"`
 	// TotalMemoryMB is the machine's memory.
@@ -28,6 +29,12 @@ type FrideHostCap struct {
 	// ReserveMB is kept for the machine itself: no instance is started
 	// into it.
 	ReserveMB int `json:"reserve_mb"`
+	// NeedsTemplate says the node built no template of its own (host
+	// setup --no-build, the default where no Docker is found): each start
+	// names the image to make a sandbox from (FrideInstanceStartParams.
+	// Template), which sbx pulls. A core that knows none places no
+	// instance there.
+	NeedsTemplate bool `json:"needs_template,omitempty"`
 	// Instances are the instances the node has, running or not.
 	Instances []FrideInstance `json:"instances,omitempty"`
 }
@@ -199,6 +206,29 @@ type FrideInstanceStartParams struct {
 	Egress []string `json:"egress,omitempty"`
 	// Git is the commit name and email for workspaces of no identity.
 	Git *FrideGitUser `json:"git,omitempty"`
+	// Template is the image a new sandbox is made from when the node
+	// built none of its own: the core's published FrIDE template
+	// (<registry>/fridolin-fride-sandbox:<tag>), which sbx pulls when it
+	// lacks it. "" when the core does not know where its images are
+	// published (a local build); a node's own template always wins.
+	Template string `json:"template,omitempty"`
+}
+
+// FrideSandboxImage is the name of the published FrIDE template under
+// the core's registry (.github/workflows/image.yml).
+const FrideSandboxImage = "fridolin-fride-sandbox"
+
+// templateRefRE is an image a sandbox may be made from: a registry path
+// with a tag, a digest or both, never an option.
+var templateRefRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*(?:\.[a-z0-9._-]+)*(?::[0-9]+)?(?:/[a-z0-9][a-z0-9._-]*)+(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(?:@sha256:[0-9a-f]{64})?$`)
+
+// CheckTemplateRef reports what is wrong with an image a sandbox is to
+// be made from.
+func CheckTemplateRef(ref string) error {
+	if len(ref) > 512 || !templateRefRE.MatchString(ref) || !strings.ContainsAny(ref[strings.LastIndexByte(ref, '/')+1:], ":@") {
+		return fmt.Errorf("template %q is not an image on a registry with a tag or digest (like ghcr.io/owner/%s:v1.2.3)", ref, FrideSandboxImage)
+	}
+	return nil
 }
 
 // FrideIdentity is a git identity for an instance, with its token.
@@ -255,6 +285,9 @@ func (p FrideInstanceStartParams) Check() error {
 		if h == "" || len(h) > maxHostLen || strings.ContainsAny(h, "\x00\r\n /") {
 			return fmt.Errorf("egress host %q", h)
 		}
+	}
+	if p.Template != "" {
+		return CheckTemplateRef(p.Template)
 	}
 	return nil
 }
