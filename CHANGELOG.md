@@ -87,6 +87,25 @@ for compatibility.
   ls|stop|rm|logs NAME` show and stop them on the machine. Nothing
   changes for the native companion FrIDE. See docs/NODES.md, "FrIDE
   instances".
+- **FrIDE instances from the core's template, and on Windows.** CI
+  publishes the instances' template, `ghcr.io/OWNER/fridolin-fride-sandbox`,
+  for amd64 and arm64 beside the core's images, tagged with the version
+  and with a hash of what goes into it, which the core's image names
+  (`FRIDOLIN_FRIDE_SANDBOX_TAG`). `fridolin node fride host setup
+  --no-build` (the default where no Docker is found) builds nothing and
+  needs no checkout: the node then offers `fride_host` with
+  `needs_template`, and makes each new sandbox from the template the core
+  names in `fride.instance.start` (`template`), which sbx pulls; a
+  template the node built itself still wins. A core without
+  `FRIDOLIN_BOX_REGISTRY` places no instance on such a node, and
+  `fride_task` and doctor say why. A native Windows 11 x64 node is a
+  FrIDE host too: with the Windows Hypervisor Platform, `winget install
+  -h Docker.sbx` and `sbx login` as the user who signs in, the node's
+  service runs every sbx call in that user's session as that user;
+  nobody signed in makes `fride_host` not ready. sbx reads git tokens
+  there with `fridolin.exe node fride host sbx-secret`, from folders only
+  that user and SYSTEM may open. No shared caches on Windows yet. See
+  docs/NODES.md, "Setting a machine up" and "FrIDE instances on Windows".
 - **Git identities for FrIDE, and a GitLab connection.** Integrations →
   **GitLab** keeps a self-hosted GitLab's address, an access token and an
   optional commit name and email; **Check** asks GitLab who the token is.
