@@ -35,8 +35,14 @@ import (
 // failed before it starts the instance again on its own.
 const frideInstanceBackoff = 5 * time.Minute
 
-// frideByQueue is who the queue's own starts are by, in the audit.
-const frideByQueue = "queue"
+// Who starts and stops are by, in the audit, besides "core brain" and
+// "dashboard": the queue's own starts, the stops that make room for
+// another instance, and the idle stop.
+const (
+	frideByQueue = "queue"
+	frideByRoom  = "core"
+	frideByIdle  = "idle"
+)
 
 // frideInstanceRefreshEvery is how often running instances are given
 // their identities, repositories and egress again where they changed: a
@@ -105,7 +111,7 @@ func (i *frideInstances) lastActive(name string) time.Time {
 func (i *frideInstances) changed() { i.kick(false) }
 
 func (i *frideInstances) kick(again bool) {
-	if len(i.configured()) == 0 {
+	if !i.f.b.nodesEnabled || len(i.configured()) == 0 {
 		return
 	}
 	i.f.start()
@@ -425,7 +431,7 @@ func (i *frideInstances) start(ctx context.Context, name, size, by, why string) 
 	node := hosts[slices.IndexFunc(hosts, func(h frideHost) bool { return h.ID == spot.Node })]
 	out := frideStarted{Name: name, Node: node.Name, NodeID: node.ID, MemoryMB: spot.MemoryMB, Wanted: tries[0]}
 	for _, other := range spot.Stop {
-		if err := i.stopOn(ctx, node.ID, node.Name, other, "core", "to make room for "+name); err != nil {
+		if err := i.stopOn(ctx, node.ID, node.Name, other, frideByRoom, "to make room for "+name); err != nil {
 			return frideStarted{}, i.fail(name, by, why, fmt.Errorf("making room on %s: %w", node.Name, err), true)
 		}
 		out.Stopped = append(out.Stopped, other)
@@ -549,8 +555,11 @@ func (i *frideInstances) params(ctx context.Context, name string, ic config.Frid
 	if len(ic.Identities) == 0 || i.f.b.gitIDs == nil {
 		return p, slices.Clone(ic.Identities)
 	}
+	// GitHub may be asked for a new token: not for ever.
+	bctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
 	have := map[string]nodeproto.GitIdentity{}
-	for _, g := range i.f.b.gitIDs.build(ctx) {
+	for _, g := range i.f.b.gitIDs.build(bctx) {
 		have[g.ID] = g
 	}
 	var missing []string
@@ -658,7 +667,7 @@ func (i *frideInstances) idleStop(ctx context.Context) {
 				continue
 			}
 			why := fmt.Sprintf("idle for %d minutes", minutes)
-			if _, err := i.stop(ctx, in.Name, "idle", why, false); err != nil {
+			if _, err := i.stop(ctx, in.Name, frideByIdle, why, false); err != nil {
 				log.Printf("fride: the idle stop of the FrIDE instance %s: %v", in.Name, err)
 			}
 		}

@@ -312,3 +312,29 @@ func TestFrideInstanceWaits(t *testing.T) {
 		t.Errorf("GET /api/fride does not say why site did not start:\n%s", w.Body.String())
 	}
 }
+
+// A start with no room stops an idle instance of another trust domain on
+// the node to make room, and says so.
+func TestFrideInstanceMakesRoom(t *testing.T) {
+	t.Parallel()
+	optionsOf(t).waits.frideRetry = time.Hour
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}, "fride": {"instances": {"work": {}, "site": {}}}}`)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	addr := h.StartNodes()
+	// 7000 MB beyond its reserve.
+	mini := h.fakeHostNode("mini", addr, 16384, 13144, 6144)
+
+	reply := h.coreSays("start them", step("fride_spawn", `{"instance":"site","size":"small","reason":"ahead"}`), step("fride_task", `{"message":"Fix it","instance":"work"}`))
+	if !strings.Contains(reply, "Started the FrIDE instance work on mini with 6144 MB. To make room, the idle instance site stopped.") {
+		t.Fatalf("making room:\n%s", reply)
+	}
+	if in, _ := mini.Instance("site"); in.State != nodeproto.FrideInstanceStopped {
+		t.Errorf("site is %s", in.State)
+	}
+	if !slices.ContainsFunc(h.auditOf("fride_instance"), func(l map[string]any) bool {
+		return l["id"] == "site" && l["by"] == "core" && l["detail"] == "stopped on mini ("+mini.ID+"): to make room for work"
+	}) {
+		t.Errorf("the audit: %v", h.auditOf("fride_instance"))
+	}
+}

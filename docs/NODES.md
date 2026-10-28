@@ -1231,7 +1231,8 @@ update. No token goes into a log, the audit or `bridge.db`.
 that cannot get an instance waits, its chat told why, and goes once it
 can; a node's start that failed is tried again by the queue after five
 minutes. Every start and stop is an audit line of kind `fride_instance`
-(by `core brain`, `dashboard`, `queue` or `idle`).
+(by `core brain`, `dashboard`, `queue`, `idle`, or `core` for one
+stopped to make room).
 
 **Dashboard and doctor.** `GET /api/fride` lists the instances with
 their node, state, memory and open threads; `POST
