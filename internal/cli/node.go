@@ -51,10 +51,6 @@ Usage:
   fridolin node core-host show | on | off | trust ID --key KEY | untrust ID
                        this machine as a core host, which the core may move to and
                        which holds host secrets; fridolin node core-host help for more
-  fridolin node sandbox setup [--repo DIR] [--bin PATH] | status | on | off
-                       Docker Sandboxes (sbx) for brains' runs: setup makes sbx's
-                       settings fridolin's and loads the template, and only then
-                       does the node offer them; fridolin node sandbox help for more
   fridolin node fride pair --url http://127.0.0.1:PORT | status
                        FrIDE on this machine, offered to the core while it runs;
                        fridolin node fride help for more
