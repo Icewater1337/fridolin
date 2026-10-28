@@ -554,6 +554,10 @@ func TestFrideInstanceRouting(t *testing.T) {
 	if resp, _ := call(nodeproto.MethodFrideStatus, `{"instance":"work","thread_id":1}`); resp.Error == nil || resp.Error.Code != nodeproto.CodeUnavailable {
 		t.Errorf("a stopped instance: %v", resp.Error)
 	}
+	// A bundle staged on the node needs no FrIDE.
+	if resp, _ := call(nodeproto.MethodFrideWrite, `{"instance":"work","offset":0,"data":"aGk="}`); resp.Error != nil {
+		t.Errorf("staging a bundle for a stopped instance: %v", resp.Error)
+	}
 	// Without fride_host approved, an instance is not reached at all.
 	f.approve(nodeproto.Capabilities{Fride: &nodeproto.FrideCap{}})
 	if resp, _ := call(nodeproto.MethodFrideTask, `{"instance":"work","message":"x"}`); resp.Error == nil || resp.Error.Code != nodeproto.CodeDenied {

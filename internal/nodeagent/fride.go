@@ -742,9 +742,17 @@ func (a *Agent) frideCall(ctx context.Context, method string, raw json.RawMessag
 			return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "%s params: %v", method, err)
 		}
 	}
-	fc, perr := a.frideConnFor(on.Instance)
-	if perr != nil {
-		return nil, perr
+	chunk := method == nodeproto.MethodFrideRead || method == nodeproto.MethodFrideWrite || method == nodeproto.MethodFrideDrop
+	var fc *frideConn
+	if !chunk || on.Instance == "" {
+		// A bundle staged on the node needs no FrIDE, but the node's own
+		// FrIDE's calls have always asked for its pairing.
+		var perr *nodeproto.Error
+		if fc, perr = a.frideConnFor(on.Instance); perr != nil {
+			return nil, perr
+		}
+	} else if err := nodeproto.CheckFrideInstanceName(on.Instance); err != nil {
+		return nil, nodeproto.Errorf(nodeproto.CodeBadRequest, "%v", err)
 	}
 	decode := func(v any) *nodeproto.Error {
 		if len(raw) == 0 {
