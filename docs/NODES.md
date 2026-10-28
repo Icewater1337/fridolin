@@ -1835,7 +1835,7 @@ clones of large repositories; the node gives it 20 minutes at most.
   Docker disk ([Docker disk](#docker-disk)) and its own Go and npm caches
   ([Shared caches](#shared-caches)). No other folder of the host's goes
   in. `downloads.claude.ai` and `bridge.claudeusercontent.com` are
-  denied, as for brains.
+  denied: the template pins Claude Code, and remote control stays off.
 - **Its network**, on top of the global `deny-all` and the hosts sbx's
   Claude kit opens: Anthropic's API, Go's module proxy and checksum
   database, npm, Docker Hub, its webhook port on `localhost`; GitHub's
