@@ -344,7 +344,7 @@ nodes speak on their own port.
 | Route | Does |
 | --- | --- |
 | `GET /api/nodes` | `{"enabled", "listen", "version", "nodes": [...]}`: every node of `nodes/nodes.json` with `device`, `commands`, `declared`, `approved`, `effective`, `online`, `last_seen`, `resources`, `tags`, `version`, `update` (the auto policy and the last update), and `update_to` (the core's version, when the node can be updated to it now) or `update_note` (why it cannot) |
-| `POST /api/nodes/join-code` | `{"code", "expires_at", "core", "command", "command_powershell"}`: a single-use code for 10 minutes, the core's node address (its MagicDNS name on the tailnet) and the line to paste on the new machine, for sh and for PowerShell; `409` while `nodes.enabled` is off |
+| `POST /api/nodes/join-code` | `{"code", "expires_at", "core", "command", "command_powershell", "native_command", "native_command_powershell", "box_command", "box_command_powershell"}`: a single-use code for 10 minutes, the core's node address (its MagicDNS name on the tailnet) and the lines to paste on the new machine, each for sh and for PowerShell: `native_command*` installs Tailscale and the core's fridolin and joins (container/node.sh, node.ps1), `box_command*` makes a node in a box, `command*` joins a machine that has fridolin; the native and box lines are left out when the core does not know where its scripts are published (a local build); `409` while `nodes.enabled` is off |
 | `POST /api/nodes/{id}/approve` | approves the device (first stage) |
 | `POST /api/nodes/{id}/approve-commands` | approves what the node declares now (second stage); `409` before the device is approved |
 | `POST /api/nodes/{id}/revoke` | revokes it and closes its connection |

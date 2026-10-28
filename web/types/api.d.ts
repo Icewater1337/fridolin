@@ -822,6 +822,26 @@ export interface NodesResponse {
   nodes: Node[];
 }
 
+/**
+ * POST /api/nodes/join-code: a single-use code and the lines to paste on
+ * the new machine, each for sh (macOS, Linux) and for PowerShell.
+ */
+export interface JoinCodeResponse {
+  code: string;
+  expires_at: string;
+  /** The core's node address, host:port. */
+  core: string;
+  /** Joins a machine that has fridolin already. */
+  command: string;
+  command_powershell: string;
+  /** Installs Tailscale and the core's fridolin, then joins (container/node.sh, node.ps1); left out by a core that does not know where its scripts are published. */
+  native_command?: string;
+  native_command_powershell?: string;
+  /** Makes a node in a box, the fallback where Docker Sandboxes cannot run; left out likewise. */
+  box_command?: string;
+  box_command_powershell?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Activity, threads, audit, approvals, policy, skills
 
