@@ -353,7 +353,7 @@ func (m *SiteManager) liveModules() []map[string]any {
 			continue
 		}
 		var mf map[string]any
-		if json.Unmarshal(data, &mf) == nil {
+		if decodeManifest(data, &mf) == nil {
 			out = append(out, map[string]any{"id": mf["id"], "title": mf["title"], "route": mf["route"], "access": mf["access"]})
 		}
 	}
@@ -445,8 +445,8 @@ func (m *SiteManager) reviewWorkspace(ctx context.Context, brainID string) []Mod
 		oldM := m.manifestAt(ctx, s.Approved, prefix+id+"/module.json")
 		var newM map[string]any
 		if data, err := os.ReadFile(filepath.Join(m.workspaceModules(brainID), id, "module.json")); err == nil {
-			if json.Unmarshal(data, &newM) != nil {
-				newM = map[string]any{"invalid": "module.json is not valid JSON"}
+			if decodeManifest(data, &newM) != nil {
+				newM = map[string]any{"invalid": "module.json is not valid JSON, or has a key twice"}
 			}
 		}
 		c := ModuleChange{ID: id, Review: reviewManifest(oldM, newM), Files: []string{}}
