@@ -61,15 +61,15 @@ const (
 
 var frideInstanceStates = []string{FrideInstanceStarting, FrideInstanceRunning, FrideInstanceStopped, FrideInstanceFailed}
 
-// frideInstanceName is what an instance may be called: also the name of
+// FrideInstanceName is what an instance may be called: also the name of
 // its sandbox (fride-<name>) and a folder on the node.
-var frideInstanceName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
+var FrideInstanceName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,23}$`)
 
 // CheckFrideInstanceName reports whether name may name an instance.
 // "native" is reserved for the node's own FrIDE, which is the instance
 // "" in a fride call.
 func CheckFrideInstanceName(name string) error {
-	if !frideInstanceName.MatchString(name) || name == "native" {
+	if !FrideInstanceName.MatchString(name) || name == "native" {
 		return fmt.Errorf("a FrIDE instance's name is a lower-case letter, then up to 23 lower-case letters, digits and dashes, and not %q: %q", "native", name)
 	}
 	return nil
