@@ -181,6 +181,11 @@ func TestNodeFrideHostSetupWithoutDocker(t *testing.T) {
 	if code := frideHostSetup(context.Background(), f, dir, sbx, "", "windows", &out, fail(&errOut)); code != 0 || !strings.Contains(out.String(), "no shared Go and npm caches on Windows") {
 		t.Errorf("on Windows: %d %s %s", code, out.String(), errOut.String())
 	}
+	errOut.Reset()
+	f = frideHostFlags{noCaches: true, set: map[string]bool{}}
+	if code := frideHostSetup(context.Background(), f, dir, sbx, "/usr/bin/docker", "linux", &out, fail(&errOut)); code != 1 || !strings.Contains(errOut.String(), "no fridolin checkout in") {
+		t.Errorf("Docker without a checkout: %d %q", code, errOut.String())
+	}
 	var code int
 	code = nodeCmd([]string{"fride", "host", "setup", "--no-build", "--repo", ".", "--state-dir", dir}, &out, &errOut)
 	if code != 2 || !strings.Contains(errOut.String(), "--no-build takes the core's") {

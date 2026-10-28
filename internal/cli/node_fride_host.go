@@ -302,6 +302,9 @@ func frideHostSetup(ctx context.Context, f frideHostFlags, dir, sbx, docker, goo
 		o.NoBuild = true
 		fmt.Fprintln(stdout, "No Docker here: taking the template the core publishes (--no-build).")
 	}
+	if _, err := nodeagent.FridePin(repo); err != nil && !o.NoBuild && !f.set["repo"] {
+		return fail("no fridolin checkout in %s: pass --repo DIR to build the template here with Docker, or --no-build to take the one the core publishes", repo)
+	}
 	if git, err := exec.LookPath("git"); err == nil {
 		o.Git = git
 	}
