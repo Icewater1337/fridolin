@@ -9,9 +9,8 @@ import (
 	"testing"
 )
 
-// The FrIDE template takes its base image, Claude Code and ponytail from
-// the brain template and the fridolin-fride image, and this checkout pins
-// FrIDE's commit.
+// The FrIDE template takes Claude Code and ponytail from the
+// fridolin-fride image, and this checkout pins FrIDE's commit.
 func TestFrideSandboxDockerfilePins(t *testing.T) {
 	t.Parallel()
 	repo := filepath.Join("..", "..")
@@ -25,7 +24,7 @@ func TestFrideSandboxDockerfilePins(t *testing.T) {
 		return v
 	}
 	for name, file := range map[string]string{
-		"BASE_IMAGE": "container/sandbox/Dockerfile", "CLAUDE_CODE_VERSION": "container/sandbox/Dockerfile",
+		"CLAUDE_CODE_VERSION": frideImageDockerfile,
 		"PONYTAIL_REPO": frideImageDockerfile, "PONYTAIL_COMMIT": frideImageDockerfile,
 	} {
 		if got, want := arg(frideSandboxDockerfile, name), arg(file, name); got != want {

@@ -31,18 +31,6 @@ for compatibility.
     that `rm` and `create` were needed.
 
   See docs/NODES.md, "FrIDE in a Docker Sandbox".
-- **GitHub in a brain's Docker Sandbox** (#149). A run with a GitHub
-  grant now gets its token in a Docker Sandbox too. The core sends it in
-  `sandbox.run`'s new `github_token`, and the node stores it as the
-  sandbox's own `github` secret for the run, through stdin. sbx's proxy
-  puts it into every call to GitHub, so `gh` and git over HTTPS work
-  with only a placeholder in the VM. The sandbox reaches GitHub's hosts
-  only while such a run goes on. See docs/SANDBOXES.md, "GitHub in a
-  run".
-- **A brain's sessions survive a rebuild of its sandbox** (#149). The
-  node keeps them on the host, in `<state dir>/sandbox/history/<brain>`,
-  bound over the VM's `~/.claude/projects` with `sbx mount`. Each
-  brain's sandbox is made again once, at its next run.
 - **FrIDE in a Docker Sandbox** (#149). `fridolin node fride sandbox
   join|create|login|start|stop|update|status|rm` runs a whole FrIDE, with
   its coding agents, in one sbx microVM on a Mac, beside the native
@@ -62,29 +50,6 @@ for compatibility.
   macOS), run from its state dir's own `bin/fridolin`; `fridolin node
   install|start|stop|status|uninstall --state-dir` follow it. Unset, as on
   every node so far, nothing changes.
-- **Brains in Docker Sandboxes** (#149). A brain can run in a Docker
-  Sandbox, a microVM of `sbx` on a node on the core's machine, instead of
-  bubblewrap: config.json's new `sandbox.runtime` (`bubblewrap`, the
-  default, or `docker-sandbox`) and `sandbox.node`, and brain.json's new
-  `sandbox` with `runtime`, `fallback` and `egress`. While the sandbox is
-  not available, runs fall back to bubblewrap, and you get one WhatsApp
-  message per outage and one when it is back; `"fallback": "refuse"`
-  refuses instead. `GET /api/brains` adds each brain's `sandbox`,
-  `fridolin doctor` the check `brain-runtime`, and the audit's `run_end`
-  a `runtime` for such brains. Nothing changes for brains on bubblewrap.
-  See docs/SANDBOXES.md.
-- **`fridolin node sandbox setup`, `status`, and doctor's sandbox checks**
-  (#149). Setup makes sbx's global settings fridolin's on that machine
-  (network policy `deny-all`, SSH agent forwarding and the browser off;
-  this also applies to your own sandboxes), builds the template
-  `container/sandbox/Dockerfile` with Docker and loads it into sbx. A
-  node offers the `sandbox` capability only after setup, so no approval
-  is asked for before. The core sends the node a linux fridolin of its
-  own version for the sandboxes, as it sends updates, whenever the node
-  holds another (new methods `sandbox.bin_write` and `sandbox.bin`; the
-  capability's new `bin`). `fridolin doctor --node` checks sbx's version,
-  setup, sign-in, settings, template, that binary, the logins and free
-  memory. See docs/NODES.md, "Docker Sandboxes".
 - **OpenAI and ElevenLabs as connections of Fridolin** (#284). The
   Integrations page keeps one OpenAI key (with an optional organization
   and project) and one ElevenLabs key, in `connections/` in the data dir.
@@ -1248,6 +1213,18 @@ for compatibility.
 
 ### Removed
 
+- **Brains in Docker Sandboxes**, added earlier in this release cycle
+  (#149), are gone again: every brain runs under bubblewrap in the
+  core's container, or sandbox-exec natively, as before. A microVM per
+  brain cost a node, memory and a second login, and kept nothing out that
+  the brain's own sandbox does not (docs/VISION.md, "Why not Docker
+  Sandboxes for brains"). `config.json` is now version 3: a version 2
+  file with `sandbox.runtime` or `sandbox.node` loads, and the next save
+  leaves them out. A brain.json `sandbox` key is ignored. A node that
+  still declares the `sandbox` capability joins and works, and the core
+  ignores that capability and its approval. `fridolin node sandbox
+  setup|status` and doctor's checks of it are gone; the dashboard no
+  longer shows a brain's runtime. FrIDE in a Docker Sandbox stays.
 - Brain runs no longer get `BRIDGE_CREDENTIALS_DIR`, which named the
   folder of the calendar tokens; nothing in `tools/` read it any more.
 
@@ -1828,6 +1805,9 @@ because they are on disk or because scripts rely on them:
 
 From earlier versions of the bridge:
 
+- A brain.json with a `sandbox` key, which chose the Docker Sandbox
+  runtime for brains, loads without a warning; the next edit in the
+  dashboard drops it.
 - Malformed configuration and brain manifest JSON keeps the Go type names
   shown before those types moved into packages, including manifests nested
   in configuration or dashboard requests. This preserves the existing
