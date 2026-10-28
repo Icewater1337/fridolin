@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"maps"
 	"strings"
 	"testing"
 
@@ -26,19 +27,23 @@ func TestDoctorFrideInstances(t *testing.T) {
 		"work":     {Identities: []string{"gitlab"}, Nodes: []string{"mini"}},
 		"fridolin": {Identities: []string{"github"}},
 	}
+	needsTemplate := strings.Replace(host("a", "mini", ""), `"reserve_mb":6144,`, `"reserve_mb":6144,"needs_template":true,`, 1)
 	tests := []struct {
 		name, nodes string
 		live        string
 		gitlab      bool
+		registry    string
 		status      string
 		detail      string
 	}{
-		{"no nodes", "", "", true, doctor.Warn, "2 of 2 FrIDE instances cannot run: fridolin: no approved node offers FrIDE instances (fride_host); work: no approved node offers FrIDE instances (fride_host) among mini"},
-		{"ready, no bridge", `{"nodes":[` + host("a", "mini", "") + `]}`, "", true, doctor.OK, "each can start on an approved node, with its identities: fridolin, work"},
-		{"only elsewhere", `{"nodes":[` + host("a", "laptop", "") + `]}`, "", true, doctor.Warn, "1 of 2 FrIDE instances cannot run: work: no approved node offers FrIDE instances (fride_host) among mini"},
-		{"not ready", `{"nodes":[` + notReady + `]}`, "", true, doctor.Warn, "fridolin: no node can run it (box: sbx is not signed in)"},
-		{"no GitLab", `{"nodes":[` + host("a", "mini", "") + `]}`, "", false, doctor.Warn, "1 of 2 FrIDE instances cannot run: work: the core holds no gitlab identity"},
-		{"no GitHub, as the bridge says", `{"nodes":[` + host("a", "mini", "") + `]}`, `{"identities":[{"id":"github","set":false},{"id":"gitlab","set":true}]}`, false, doctor.Warn, "1 of 2 FrIDE instances cannot run: fridolin: the core holds no github identity"},
+		{"no nodes", "", "", true, "", doctor.Warn, "2 of 2 FrIDE instances cannot run: fridolin: no approved node offers FrIDE instances (fride_host); work: no approved node offers FrIDE instances (fride_host) among mini"},
+		{"ready, no bridge", `{"nodes":[` + host("a", "mini", "") + `]}`, "", true, "", doctor.OK, "each can start on an approved node, with its identities: fridolin, work"},
+		{"only elsewhere", `{"nodes":[` + host("a", "laptop", "") + `]}`, "", true, "", doctor.Warn, "1 of 2 FrIDE instances cannot run: work: no approved node offers FrIDE instances (fride_host) among mini"},
+		{"not ready", `{"nodes":[` + notReady + `]}`, "", true, "", doctor.Warn, "fridolin: no node can run it (box: sbx is not signed in)"},
+		{"no GitLab", `{"nodes":[` + host("a", "mini", "") + `]}`, "", false, "", doctor.Warn, "1 of 2 FrIDE instances cannot run: work: the core holds no gitlab identity"},
+		{"no GitHub, as the bridge says", `{"nodes":[` + host("a", "mini", "") + `]}`, `{"identities":[{"id":"github","set":false},{"id":"gitlab","set":true}]}`, false, "", doctor.Warn, "1 of 2 FrIDE instances cannot run: fridolin: the core holds no github identity"},
+		{"no template for a node that built none", `{"nodes":[` + needsTemplate + `]}`, "", true, "", doctor.Warn, "fridolin: no node can run it (mini: it built no FrIDE template, and this core does not know where its images are published (FRIDOLIN_BOX_REGISTRY)"},
+		{"the core's template", `{"nodes":[` + needsTemplate + `]}`, "", true, "ghcr.io/you", doctor.OK, "each can start on an approved node, with its identities: fridolin, work"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -50,6 +55,13 @@ func TestDoctorFrideInstances(t *testing.T) {
 			}
 			if tc.gitlab {
 				s.files = map[string]fs.FileMode{gitlabFile: 0o600}
+			}
+			if tc.registry != "" {
+				s.env = maps.Clone(s.env)
+				if s.env == nil {
+					s.env = map[string]string{}
+				}
+				s.env["FRIDOLIN_BOX_REGISTRY"] = tc.registry
 			}
 			cfg := doctorConfig(func(c *config.Settings) {
 				c.Nodes = config.NodesConfig{Enabled: true, Listen: ":8766"}
