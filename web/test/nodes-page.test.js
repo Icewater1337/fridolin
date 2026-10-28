@@ -25,14 +25,14 @@ const node = (over) => ({
 
 const button = (root, label) => root.querySelectorAll('button').find((b) => b.textContent === label);
 
-async function openPage(t, first) {
+async function openPage(t, first, joinCode = { code: 'fj-abc', expires_at: '2026-10-20T10:10:00Z', command: 'fridolin node join fj-abc --core mini:8766' }) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   installDom();
   noConsoleErrors(t);
   const bridge = { nodes: first, enabled: true };
   const calls = serve(t, (path, init) => {
     if (path === '/api/nodes') return { enabled: bridge.enabled, listen: '127.0.0.1:8766', nodes: bridge.nodes };
-    if (path === '/api/nodes/join-code') return { code: 'fj-abc', expires_at: '2026-10-20T10:10:00Z', command: 'fridolin node join fj-abc --core mini:8766' };
+    if (path === '/api/nodes/join-code') return joinCode;
     if (init.method === 'POST' && path.endsWith('/approve')) { bridge.nodes = [node({ device: 'approved' })]; return { node: bridge.nodes[0] }; }
     if (init.method === 'POST' && path.endsWith('/approve-commands')) {
       bridge.nodes = [node({ device: 'approved', commands: 'approved', approved: declared, effective: declared })];
@@ -128,6 +128,32 @@ test('the join code dialog shows the line to paste', async (t) => {
   assert.ok(dialog, 'a dialog');
   assert.match(dialog.textContent, /fridolin node join fj-abc --core mini:8766/);
   assert.ok(calls.some((c) => c.method === 'POST' && c.path === '/api/nodes/join-code'));
+});
+
+test('the join code dialog offers the native line first, then the box, then the plain join', async (t) => {
+  const { root } = await openPage(t, [], {
+    code: 'fj-abc', expires_at: '2026-10-20T10:10:00Z', core: 'mini:8766',
+    command: 'fridolin node join fj-abc --core mini:8766',
+    command_powershell: '& "$env:ProgramFiles\\fridolin\\fridolin.exe" node join fj-abc --core mini:8766',
+    native_command: 'curl -fsSL https://example.com/f/container/node.sh | sh -s -- --core mini:8766 --code fj-abc',
+    native_command_powershell: '& ([scriptblock]::Create((irm https://example.com/f/container/node.ps1))) -Core mini:8766 -Code fj-abc',
+    box_command: 'curl -fsSL https://example.com/f/container/box.sh | sh -s -- --registry ghcr.io/owner --version v1 --core mini:8766 --code fj-abc',
+    box_command_powershell: '& ([scriptblock]::Create((irm https://example.com/f/container/box.ps1))) -Registry ghcr.io/owner -Version v1 -Core mini:8766 -Code fj-abc',
+  });
+  button(root, 'New join code').click();
+  await settle();
+  const text = document.querySelector('dialog').textContent;
+  const at = (s) => {
+    const i = text.indexOf(s);
+    assert.ok(i >= 0, `the dialog shows ${s}`);
+    return i;
+  };
+  assert.ok(at('Natively') < at('node.sh') && at('node.sh') < at('node.ps1'), 'the native lines first');
+  assert.ok(at('node.ps1') < at('In a box') && at('In a box') < at('box.sh') && at('box.sh') < at('box.ps1'), 'then the box');
+  assert.ok(at('box.ps1') < at('With fridolin installed already') && at('With fridolin installed already') < at('fridolin node join fj-abc'), 'then the plain join');
+  assert.match(text, /can run FrIDE instances, keep backups and become the core/);
+  assert.match(text, /where Docker Sandboxes can't run/);
+  assert.match(text, /-Root PATH:rw/);
 });
 
 test('tags are edited in a dialog', async (t) => {
