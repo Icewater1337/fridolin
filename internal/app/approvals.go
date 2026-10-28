@@ -458,14 +458,26 @@ func (b *App) ask(ctx context.Context, c mcpCaller, a store.Approval) (store.App
 
 // awaitAnswer waits up to wait for a's answer, and says what it is.
 func (b *App) awaitAnswer(ctx context.Context, a store.Approval, wait time.Duration) *mcp.CallResult {
+	got, res := b.awaitDecision(ctx, a, wait)
+	if res != nil {
+		return res
+	}
+	return answerResult(got)
+}
+
+// awaitDecision waits up to wait for a's answer. It returns the decided
+// approval when this call has the answer to act on, or else, with
+// nothing to act on, the result to answer: pending, or an answer that went
+// on to the brain as a message (decidedResult).
+func (b *App) awaitDecision(ctx context.Context, a store.Approval, wait time.Duration) (store.Approval, *mcp.CallResult) {
 	ch := b.waiters.add(a.ID)
 	// Decided already: by an answer that found this waiter, and is in the
 	// channel, or by one that found none, and went on to the brain.
 	if cur, late, err := b.settledApproval(ctx, a.ID); err == nil && cur.Status != store.ApprovalPending {
 		if b.waiters.take(a.ID) == nil {
-			return answerResult(<-ch)
+			return <-ch, nil
 		}
-		return decidedResult(cur, late)
+		return decidedFor(cur, late)
 	}
 	deadline := wait
 	if left := time.Until(a.ExpiresAt); left < deadline {
@@ -475,13 +487,13 @@ func (b *App) awaitAnswer(ctx context.Context, a store.Approval, wait time.Durat
 	defer timer.Stop()
 	select {
 	case got := <-ch:
-		return answerResult(got)
+		return got, nil
 	case <-timer.C:
 	case <-ctx.Done():
 	}
 	if b.waiters.take(a.ID) == nil {
 		// Taken by an answer as the wait ended: it is in the channel.
-		return answerResult(<-ch)
+		return <-ch, nil
 	}
 	if b.hooks.approvalWaitEnded != nil {
 		b.hooks.approvalWaitEnded(a.ID)
@@ -490,14 +502,24 @@ func (b *App) awaitAnswer(ctx context.Context, a store.Approval, wait time.Durat
 	// as a message, which decidedResult does not hand over a second time.
 	if !time.Now().Before(a.ExpiresAt) {
 		if got, ok := b.decide(context.WithoutCancel(ctx), a.ID, store.ApprovalExpired, "", "timeout", callerAnswers); ok {
-			return answerResult(got)
+			return got, nil
 		}
 	}
 	cur, late, err := b.settledApproval(context.WithoutCancel(ctx), a.ID)
 	if err == nil && cur.Status != store.ApprovalPending {
-		return decidedResult(cur, late)
+		return decidedFor(cur, late)
 	}
-	return mcp.TextResult(fmt.Sprintf("pending: no answer yet after %s (approval_id %s). Call check_approval with this id to wait again, or end your turn: the answer comes to you as a new message in this chat. Until it is approved, do not take the action.", wait.Round(time.Second), a.ID))
+	return a, mcp.TextResult(fmt.Sprintf("pending: no answer yet after %s (approval_id %s). Call check_approval with this id to wait again, or end your turn: the answer comes to you as a new message in this chat. Until it is approved, do not take the action.", wait.Round(time.Second), a.ID))
+}
+
+// decidedFor is decided a, which no waiting call took, for the call that
+// finds it: the answer to act on, unless it went on to the brain as a
+// message (late), where the brain acts on it (decidedResult).
+func decidedFor(a store.Approval, late bool) (store.Approval, *mcp.CallResult) {
+	if !late {
+		return a, nil
+	}
+	return a, decidedResult(a, late)
 }
 
 // settledApproval reads approval id once no decide is under way, and
