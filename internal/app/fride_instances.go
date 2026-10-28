@@ -35,6 +35,9 @@ import (
 // failed before it starts the instance again on its own.
 const frideInstanceBackoff = 5 * time.Minute
 
+// frideByQueue is who the queue's own starts are by, in the audit.
+const frideByQueue = "queue"
+
 // frideInstanceRefreshEvery is how often running instances are given
 // their identities, repositories and egress again where they changed: a
 // GitHub token is renewed before it runs out, the config was edited.
@@ -60,9 +63,14 @@ type frideInstances struct {
 	refresh chan bool
 }
 
+// frideFailure is a start that did not happen: node says a node's start
+// failed, which the queue does not try again within
+// frideInstanceBackoff; else no node could take it, which it tries again
+// once one might.
 type frideFailure struct {
-	at  time.Time
-	why string
+	at   time.Time
+	why  string
+	node bool
 }
 
 func newFrideInstances(f *frideRuntime) *frideInstances {
@@ -359,7 +367,7 @@ func (i *frideInstances) ensure(ctx context.Context, name, size, by, why string,
 		i.st.Lock()
 		last, failed := i.failed[name]
 		i.st.Unlock()
-		if failed && time.Since(last.at) < frideInstanceBackoff {
+		if failed && last.node && time.Since(last.at) < frideInstanceBackoff {
 			return frideStarted{}, fmt.Errorf("its last start failed (%s); the next try is after %s", last.why, last.at.Add(frideInstanceBackoff).Format("15:04"))
 		}
 	}
@@ -408,17 +416,17 @@ func (i *frideInstances) start(ctx context.Context, name, size, by, why string) 
 	}
 	hosts := i.hosts(name, ic, views, pin, open)
 	if len(hosts) == 0 {
-		return frideStarted{}, i.fail(name, by, why, apperr.New(apperr.Unavailable, noHost(name, ic, views, pin)))
+		return frideStarted{}, i.fail(name, by, why, apperr.New(apperr.Unavailable, noHost(name, ic, views, pin)), false)
 	}
 	spot, ok := placeFrideInstance(name, tries, hosts)
 	if !ok {
-		return frideStarted{}, i.fail(name, by, why, apperr.New(apperr.Unavailable, frideNoRoom(name, tries, hosts)))
+		return frideStarted{}, i.fail(name, by, why, apperr.New(apperr.Unavailable, frideNoRoom(name, tries, hosts)), false)
 	}
 	node := hosts[slices.IndexFunc(hosts, func(h frideHost) bool { return h.ID == spot.Node })]
 	out := frideStarted{Name: name, Node: node.Name, NodeID: node.ID, MemoryMB: spot.MemoryMB, Wanted: tries[0]}
 	for _, other := range spot.Stop {
 		if err := i.stopOn(ctx, node.ID, node.Name, other, "core", "to make room for "+name); err != nil {
-			return frideStarted{}, i.fail(name, by, why, fmt.Errorf("making room on %s: %w", node.Name, err))
+			return frideStarted{}, i.fail(name, by, why, fmt.Errorf("making room on %s: %w", node.Name, err), true)
 		}
 		out.Stopped = append(out.Stopped, other)
 	}
@@ -429,7 +437,7 @@ func (i *frideInstances) start(ctx context.Context, name, size, by, why string) 
 		err = fmt.Errorf("it is %s: %s", orDefault(in.State, "not running"), orDefault(in.Problem, "the node gave no reason"))
 	}
 	if err != nil {
-		return frideStarted{}, i.fail(name, by, why, fmt.Errorf("starting the FrIDE instance %s on %s: %w", name, node.Name, err))
+		return frideStarted{}, i.fail(name, by, why, fmt.Errorf("starting the FrIDE instance %s on %s: %w", name, node.Name, err), true)
 	}
 	if in.MemoryMB > 0 {
 		out.MemoryMB = in.MemoryMB
@@ -450,11 +458,16 @@ func (i *frideInstances) start(ctx context.Context, name, size, by, why string) 
 	return out, nil
 }
 
-// fail records that a start of name failed, and returns err.
-func (i *frideInstances) fail(name, by, why string, err error) error {
+// fail records that a start of name did not happen (node: a node's start
+// failed), and returns err. The queue's own tries that found no node are
+// neither logged nor audited: it tries every few seconds.
+func (i *frideInstances) fail(name, by, why string, err error, node bool) error {
 	i.st.Lock()
-	i.failed[name] = frideFailure{at: time.Now(), why: err.Error()}
+	i.failed[name] = frideFailure{at: time.Now(), why: err.Error(), node: node}
 	i.st.Unlock()
+	if by == frideByQueue && !node {
+		return err
+	}
 	detail := "start"
 	if why != "" {
 		detail += ": " + why

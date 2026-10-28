@@ -261,3 +261,54 @@ func TestFrideInstanceIdleStop(t *testing.T) {
 		t.Errorf("the audit has no idle stop of site: %v", idle)
 	}
 }
+
+// Work for an instance that cannot start waits, its chat told why, and
+// goes once a node has room; a node's start that failed is not tried
+// again at once, and the queue's own tries are not in the audit.
+func TestFrideInstanceWaits(t *testing.T) {
+	t.Parallel()
+	optionsOf(t).waits.frideRetry = 100 * time.Millisecond
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}, "fride": {"instances": {
+		"work": {"memory_mb": 8192}, "site": {"nodes": ["mini"]}}}}`)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	addr := h.StartNodes()
+	mini := h.fakeHostNode("mini", addr, 16384, 10144, 6144)
+	mini.mu.Lock()
+	mini.failStart = "the FrIDE template is not built"
+	mini.mu.Unlock()
+
+	reply := h.coreSays("fix it", step("fride_task", `{"message":"Fix it","instance":"work"}`), step("fride_task", `{"message":"Build the site","instance":"site"}`))
+	if !strings.Contains(reply, "FrIDE #1 waits: the FrIDE instance work cannot take it now (no node has room for the FrIDE instance work (8192 MB): mini has 4000 MB free beyond its reserve)") ||
+		!strings.Contains(reply, "FrIDE #2 waits: the FrIDE instance site cannot take it now (starting the FrIDE instance site on mini: failed: the FrIDE template is not built)") {
+		t.Fatalf("fride_task:\n%s", reply)
+	}
+	h.WaitSent(harnessDM, "⏳ *FrIDE #1* waits: the FrIDE instance work cannot take it now (no node has room")
+	h.WaitSent(harnessDM, "⏳ *FrIDE #2* waits: the FrIDE instance site cannot take it now (starting the FrIDE instance site on mini: failed: the FrIDE template is not built)")
+
+	big := h.fakeHostNode("big", addr, 65536, 40000, 6144)
+	h.WaitSent(harnessDM, "🛠️ *FrIDE #1* went to big/work now.")
+	if s := instanceStarts(big, "work"); len(s) != 1 || s[0].MemoryMB != 8192 {
+		t.Errorf("work on big: %+v", s)
+	}
+	time.Sleep(time.Second)
+	if s := instanceStarts(mini, "site"); len(s) != 1 {
+		t.Errorf("site's start on mini that failed was tried %d times", len(s))
+	}
+	if len(instanceStarts(big, "site")) != 0 {
+		t.Error("site, which may run on mini only, started on big")
+	}
+	var failed []string
+	for _, l := range h.auditOf("fride_instance") {
+		if strings.HasPrefix(l["outcome"].(string), "failed") {
+			failed = append(failed, l["id"].(string)+" by "+l["by"].(string))
+		}
+	}
+	if !slices.Equal(failed, []string{"work by core brain", "site by core brain"}) {
+		t.Errorf("the audit's failed starts: %q", failed)
+	}
+	w := h.Do("GET", "/api/fride", nil)
+	if !strings.Contains(w.Body.String(), `"problem":"the last start failed: starting the FrIDE instance site on mini: failed: the FrIDE template is not built"`) {
+		t.Errorf("GET /api/fride does not say why site did not start:\n%s", w.Body.String())
+	}
+}

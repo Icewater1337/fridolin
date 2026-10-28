@@ -723,7 +723,7 @@ func (f *frideRuntime) retryQueued() {
 		if t.Instance != "" {
 			// A start may make its sandbox and clone its repositories.
 			ctx, cancel := context.WithTimeout(f.ctx, 25*time.Minute)
-			placed, _, s := f.placeOnInstance(ctx, &t, "queue", true)
+			placed, _, s := f.placeOnInstance(ctx, &t, frideByQueue, true)
 			cancel()
 			unlock()
 			if placed {
