@@ -99,3 +99,46 @@ func TestFrideInstanceRemoveWithoutHistory(t *testing.T) {
 		t.Error("removing without history saved history")
 	}
 }
+
+// Removing an instance after a failed remake keeps the history the carry
+// holds, merged into what an earlier removal saved; the rest of the carry
+// goes.
+func TestFrideInstanceRemoveAfterFailedRemake(t *testing.T) {
+	t.Parallel()
+	f := newInstFix(t)
+	f.fride("work")
+	f.start(workParams())
+	o := f.a.instanceOps()
+	ctx := context.Background()
+	writeTestFile(t, filepath.Join(o.historyDir("work"), ".claude/projects/p0/old.jsonl"), "old")
+	writeTestFile(t, filepath.Join(o.historyDir("work"), fh+"/tasks.json"), "stale")
+	for p, body := range map[string]string{
+		".claude/projects/p1/a.jsonl":        "session",
+		fh + "/tasks.json":                   "[]",
+		"fride-companion/workspaces/w1/x.go": "package x",
+	} {
+		writeTestFile(t, f.home("work", p), body)
+	}
+	writeTestFile(t, filepath.Join(f.fake, "fail-create"), "no room\n")
+	p := workParams()
+	p.MemoryMB = 8192
+	if _, perr := f.a.frideInstanceStart(ctx, p); perr == nil || !o.carrying("work") {
+		t.Fatalf("the remake did not fail with a carry: %v\n%s", perr, f.log)
+	}
+	if err := o.remove(ctx, "work", false); err != nil {
+		t.Fatal(err)
+	}
+	saved := func(p string) string {
+		b, _ := os.ReadFile(filepath.Join(o.historyDir("work"), filepath.FromSlash(p)))
+		return string(b)
+	}
+	if saved(".claude/projects/p1/a.jsonl") != "session" || saved(".claude/projects/p0/old.jsonl") != "old" || saved(fh+"/tasks.json") != "[]" {
+		t.Errorf("the carry's history was not kept:\n%s", f.log)
+	}
+	if _, err := os.Stat(filepath.Join(o.historyDir("work"), "fride-companion/workspaces")); err == nil {
+		t.Error("remove kept the workspaces as history")
+	}
+	if o.carrying("work") {
+		t.Error("the carry stayed")
+	}
+}
