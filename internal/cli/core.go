@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -1197,8 +1199,14 @@ func coreBuild(ctx context.Context, repo, ref string, env coreEnv, d hostDeps) i
 		return 2
 	}
 	args := []string{"build", "-f", dockerfile, "--build-arg", "VERSION=" + d.version}
-	if src, reg := boxBuildSource(repo, d); src != "" {
+	if src, reg, fride := boxBuildSource(repo, d); src != "" {
 		args = append(args, "--build-arg", "FRIDOLIN_BOX_SOURCE="+src, "--build-arg", "FRIDOLIN_BOX_REGISTRY="+reg)
+		// The FrIDE template's own tag, as image.yml makes it: without
+		// it the core names the template by its version, and every
+		// update has the nodes make their stopped instances anew.
+		if tag := frideSandboxTag(repo, fride); tag != "" {
+			args = append(args, "--build-arg", "FRIDOLIN_FRIDE_SANDBOX_TAG="+tag)
+		}
 	}
 	args = append(args, "-t", ref, repo)
 	if err := d.run(ctx, d.docker, args, d.baseEnv, env.stdout, env.stderr); err != nil {
@@ -1213,31 +1221,53 @@ func coreBuild(ctx context.Context, repo, ref string, env coreEnv, d hostDeps) i
 var githubRemoteRE = regexp.MustCompile(`^(?:https://github\.com/|git@github\.com:|ssh://git@github\.com/)([A-Za-z0-9-]+)/([A-Za-z0-9._-]+?)(?:\.git)?/?$`)
 
 // boxBuildSource is where the box script of the checkout's commit is
-// published, and the registry of its images, for an image core build
-// makes: the GitHub repository of the checkout's origin at its HEAD, so
-// that the core's !join reply can offer a node in a box. Empty when the
-// origin is not on GitHub or the checkout has local changes, whose
-// commit no box can fetch.
-func boxBuildSource(repo string, d hostDeps) (source, registry string) {
+// published, the registry of its images and FrIDE's repository beside
+// it, for an image core build makes: the GitHub repository of the
+// checkout's origin at its HEAD, so that the core's !join reply can offer
+// a node in a box. Empty when the origin is not on GitHub or the
+// checkout has local changes, whose commit no box can fetch.
+func boxBuildSource(repo string, d hostDeps) (source, registry, frideRepo string) {
 	if d.git == nil {
-		return "", ""
+		return "", "", ""
 	}
 	remote, err := d.git(repo, "remote", "get-url", "origin")
 	if err != nil {
-		return "", ""
+		return "", "", ""
 	}
 	m := githubRemoteRE.FindStringSubmatch(remote)
 	if m == nil {
-		return "", ""
+		return "", "", ""
 	}
 	if dirty, err := d.git(repo, "status", "--porcelain", "--untracked-files=no"); err != nil || dirty != "" {
-		return "", ""
+		return "", "", ""
 	}
 	head, err := d.git(repo, "rev-parse", "HEAD")
 	if err != nil || len(head) != 40 {
-		return "", ""
+		return "", "", ""
 	}
-	return "https://raw.githubusercontent.com/" + m[1] + "/" + m[2] + "/" + head, "ghcr.io/" + strings.ToLower(m[1])
+	return "https://raw.githubusercontent.com/" + m[1] + "/" + m[2] + "/" + head, "ghcr.io/" + strings.ToLower(m[1]), "https://github.com/" + m[1] + "/fride"
+}
+
+// frideSandboxTag is the FrIDE template's own tag, as image.yml makes it
+// from the checkout in repo: t- and 12 hex digits of the SHA-256 of its
+// Dockerfile, a NUL, the FrIDE config it copies, a NUL and FrIDE's
+// repository, fride. "" when the checkout has no template.
+func frideSandboxTag(repo, fride string) string {
+	dockerfile, err := os.ReadFile(filepath.Join(repo, "container", "sandbox", "fride.Dockerfile"))
+	if err != nil {
+		return ""
+	}
+	companion, err := os.ReadFile(filepath.Join(repo, "container", "fride", "companion.json"))
+	if err != nil {
+		return ""
+	}
+	h := sha256.New()
+	h.Write(dockerfile)
+	h.Write([]byte{0})
+	h.Write(companion)
+	h.Write([]byte{0})
+	h.Write([]byte(fride))
+	return "t-" + hex.EncodeToString(h.Sum(nil))[:12]
 }
 
 // dockerMissing is what the host commands say without a docker CLI.

@@ -1391,6 +1391,15 @@ for compatibility.
 
 ### Fixed
 
+- **A core built with `fridolin core build` no longer has every FrIDE
+  instance made anew at each update.** It named the FrIDE template by
+  its own version, as it did not know the template's own tag, so after
+  each update the nodes took the template for a new one and remade
+  every stopped instance (and on Windows that remake stopped at the
+  repositories' symlinks). It now gives the image the template's tag as
+  image.yml does (a hash of the template's Dockerfile, its FrIDE config
+  and FrIDE's repository), which changes only with the template.
+
 - **A FrIDE host waiting for your approval asks once, not every
   minute.** A node that runs FrIDE instances declares again whenever
   its free memory or an instance changes. While its `fride_host` waited
