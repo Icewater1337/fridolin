@@ -62,6 +62,9 @@ type frideInstances struct {
 	supervising atomic.Bool
 	// refresh says the declaration is due (frideLoop).
 	refresh chan struct{}
+	// lent says a start since the agent started logged in with the
+	// core's token: the node lacking one of its own is no news then.
+	lent atomic.Bool
 	// The declaration, refreshed at most every frideHostEvery.
 	refreshMu sync.Mutex
 	capMu     sync.Mutex

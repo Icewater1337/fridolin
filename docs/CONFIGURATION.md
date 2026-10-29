@@ -1772,6 +1772,7 @@ and dashes; `native` is the node's own FrIDE and taken.
 | `nodes` | any | Where it may run, by node id or name; empty: any approved node that offers `fride_host` |
 | `memory_mb` | `0` | A fixed memory size, 2048 to 65536; `0`: the core decides at each start from the task and the node's free memory |
 | `idle_stop_minutes` | `0` | It stops after this long with no open thread and no news: `0` is 30 minutes, `-1` never |
+| `core_login` | `false` | Lend the core's Claude token (`CLAUDE_CODE_OAUTH_TOKEN` in the core's environment) to its agents with each start, so that a node needs no token of its own ([NODES.md](NODES.md#the-claude-login)). The token then sits in the instance's VM, as a node's own would |
 
 ### `connections`
 

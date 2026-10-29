@@ -906,3 +906,38 @@ func TestFrideInstanceClaudeLogin(t *testing.T) {
 		t.Errorf("after the update: %+v", c)
 	}
 }
+
+// A start that lends the core's Claude token logs the agents in with it,
+// though the node has none of its own, and the node no longer declares
+// that it lacks one; a lent token that does not read is no login.
+func TestFrideInstanceLentLogin(t *testing.T) {
+	t.Parallel()
+	f := newInstFix(t)
+	f.a.CoreSecrets = hostsecrets.Files{Dir: t.TempDir()}
+	f.fride("work")
+	f.a.frideHostRefresh(context.Background(), true)
+	if c := f.a.frideHostDeclared(); c == nil || c.NoLogin == "" {
+		t.Fatalf("before the core lent its token: %+v", c)
+	}
+	const lent = "sk-ant-oat01-madeUp_lent-123" // personal-data:ignore (a made-up token)
+	p := workParams()
+	p.CoreToken = lent
+	out := f.start(p)
+	if out.NoLogin != "" || strings.Contains(out.Problem, "no Claude login") {
+		t.Fatalf("start answered %+v", out)
+	}
+	if got := f.vm("work", "token"); got != lent+"\n" {
+		t.Errorf("the sandbox got %q", got)
+	}
+	f.a.frideHostRefresh(context.Background(), true)
+	if c := f.a.frideHostDeclared(); c.NoLogin != "" || c.Instances[0].NoLogin != "" {
+		t.Errorf("after a lent login: %+v", c)
+	}
+	if strings.Contains(f.log.String(), lent) {
+		t.Error("the log holds the lent token")
+	}
+	p.CoreToken = "ABCD-1234#state"
+	if out := f.start(p); !strings.Contains(out.NoLogin, "the Claude token the core lent does not read") {
+		t.Errorf("a lent token that does not read: %+v", out)
+	}
+}

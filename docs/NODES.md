@@ -2281,6 +2281,13 @@ one the join printed; `no_login` names it):
 & "$env:ProgramFiles\fridolin\fridolin.exe" node secrets set claude.oauth.token --state-dir "<state dir>"
 ```
 
+**Or lent by the core**: an instance whose config says `"core_login":
+true` (docs/CONFIGURATION.md, `fride.instances`) gets the core's own
+token (`CLAUDE_CODE_OAUTH_TOKEN` in the core's environment) with each
+start and refresh, in the start's `core_token`, which wins over the
+node's. The node never stores or logs it, and declares no `no_login`
+once a start logged in with it. Nothing is then set up on the node.
+
 **Without it**, the node says so in `fride_host`'s `no_login`, with
 that command, and an instance that started meanwhile in its own
 `no_login`. The core then starts no instance on that node and hands no

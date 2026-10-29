@@ -242,16 +242,33 @@ func allowedOn(ic config.FrideInstanceConfig, v nodes.View) bool {
 
 // hostReady reports whether v can start instances now: tpl is the
 // template the core sends ("" for none), which a node that built none
-// needs.
-func hostReady(v nodes.View, tpl string) bool {
+// needs; lent says the core lends the instance its Claude token, so that
+// the node needs none of its own.
+func hostReady(v nodes.View, tpl string, lent bool) bool {
 	h := v.Effective.FrideHost
-	return v.Device == nodeproto.DeviceApproved && v.Online && h != nil && h.Ready && (tpl != "" || !h.NeedsTemplate) && h.NoLogin == ""
+	return v.Device == nodeproto.DeviceApproved && v.Online && h != nil && h.Ready && (tpl != "" || !h.NeedsTemplate) && (h.NoLogin == "" || lent)
+}
+
+// coreToken is the core's Claude token, which instances whose config
+// says core_login get with each start: "" for none.
+func (i *frideInstances) coreToken() string {
+	return strings.TrimSpace(getenv(i.f.b.env, "CLAUDE_CODE_OAUTH_TOKEN"))
+}
+
+// lends reports whether the core lends instance config ic its Claude
+// token.
+func (i *frideInstances) lends(ic config.FrideInstanceConfig) bool {
+	return ic.CoreLogin && i.coreToken() != ""
 }
 
 // noLoginOn are the nodes instance config ic may run on that are ready
-// but whose instances' agents cannot log in to Claude, by id, with why.
-func noLoginOn(ic config.FrideInstanceConfig, views []nodes.View) map[string]frideNoLogin {
+// but whose instances' agents cannot log in to Claude, by id, with why;
+// none when the core lends its token (lent).
+func noLoginOn(ic config.FrideInstanceConfig, views []nodes.View, lent bool) map[string]frideNoLogin {
 	out := map[string]frideNoLogin{}
+	if lent {
+		return out
+	}
 	for _, v := range views {
 		h := v.Effective.FrideHost
 		if v.Device == nodeproto.DeviceApproved && v.Online && h != nil && h.Ready && h.NoLogin != "" && allowedOn(ic, v) {
@@ -316,9 +333,9 @@ func (i *frideInstances) template() string {
 // as placement sees them.
 func (i *frideInstances) hosts(name string, ic config.FrideInstanceConfig, views []nodes.View, pin string, open map[string][]store.FrideThread) []frideHost {
 	var out []frideHost
-	tpl := i.template()
+	tpl, lent := i.template(), i.lends(ic)
 	for _, v := range views {
-		if !hostReady(v, tpl) || !allowedOn(ic, v) || pin != "" && v.ID != pin {
+		if !hostReady(v, tpl, lent) || !allowedOn(ic, v) || pin != "" && v.ID != pin {
 			continue
 		}
 		fh := v.Effective.FrideHost
@@ -343,8 +360,8 @@ func (i *frideInstances) hosts(name string, ic config.FrideInstanceConfig, views
 }
 
 // noHost says why no node can start instance name; tpl is the template
-// the core sends.
-func noHost(name string, ic config.FrideInstanceConfig, views []nodes.View, pin, tpl string) string {
+// the core sends, lent whether it lends its Claude token.
+func noHost(name string, ic config.FrideInstanceConfig, views []nodes.View, pin, tpl string, lent bool) string {
 	if pin != "" {
 		why := "is not in the registry"
 		if i := slices.IndexFunc(views, func(v nodes.View) bool { return v.ID == pin }); i >= 0 {
@@ -356,7 +373,7 @@ func noHost(name string, ic config.FrideInstanceConfig, views []nodes.View, pin,
 				why = "does not offer FrIDE instances now"
 			case v.Effective.FrideHost.Ready && v.Effective.FrideHost.NeedsTemplate && tpl == "":
 				why = "cannot start instances of this core: " + noTemplate
-			case v.Effective.FrideHost.Ready && v.Effective.FrideHost.NoLogin != "":
+			case v.Effective.FrideHost.Ready && v.Effective.FrideHost.NoLogin != "" && !lent:
 				why = "cannot log in FrIDE's agents to Claude: " + v.Effective.FrideHost.NoLogin
 			default:
 				why = "cannot start instances now: " + orDefault(v.Effective.FrideHost.Problem, "its sandboxes are not ready")
@@ -377,7 +394,7 @@ func noHost(name string, ic config.FrideInstanceConfig, views []nodes.View, pin,
 			problems = append(problems, v.Name+": "+orDefault(v.Effective.FrideHost.Problem, "its sandboxes are not ready"))
 		case v.Effective.FrideHost.NeedsTemplate && tpl == "":
 			problems = append(problems, v.Name+": "+noTemplate)
-		case v.Effective.FrideHost.NoLogin != "":
+		case v.Effective.FrideHost.NoLogin != "" && !lent:
 			problems = append(problems, v.Name+": its instances' agents cannot log in to Claude: "+v.Effective.FrideHost.NoLogin)
 		}
 	}
@@ -487,7 +504,7 @@ func (i *frideInstances) start(ctx context.Context, name, size, by, why string) 
 	var stale *frideWhere
 	if w, ok := locate(name, views); ok && w.running() && w.in.NoLogin != "" {
 		stale = &w
-		if hostReady(w.v, i.template()) {
+		if hostReady(w.v, i.template(), i.lends(ic)) {
 			pin = w.v.ID
 		}
 	} else if ok && w.running() {
@@ -511,9 +528,9 @@ func (i *frideInstances) start(ctx context.Context, name, size, by, why string) 
 		}
 	}
 	hosts := i.hosts(name, ic, views, pin, open)
-	i.tellNoLogin(noLoginOn(ic, views))
+	i.tellNoLogin(noLoginOn(ic, views, i.lends(ic)))
 	if len(hosts) == 0 {
-		return frideStarted{}, i.fail(name, by, why, apperr.New(apperr.Unavailable, noHost(name, ic, views, pin, i.template())), false)
+		return frideStarted{}, i.fail(name, by, why, apperr.New(apperr.Unavailable, noHost(name, ic, views, pin, i.template(), i.lends(ic))), false)
 	}
 	spot, ok := placeFrideInstance(name, tries, hosts)
 	if !ok {
@@ -649,6 +666,9 @@ func (i *frideInstances) stop(ctx context.Context, name, by, why string, force b
 func (i *frideInstances) params(ctx context.Context, name string, ic config.FrideInstanceConfig, mb int) (nodeproto.FrideInstanceStartParams, []string) {
 	p := nodeproto.FrideInstanceStartParams{Name: name, MemoryMB: mb, Repos: slices.Clone(ic.Repos), Egress: slices.Clone(ic.Egress),
 		Template: i.template()}
+	if ic.CoreLogin {
+		p.CoreToken = i.coreToken()
+	}
 	if len(ic.Identities) == 0 || i.f.b.gitIDs == nil {
 		return p, slices.Clone(ic.Identities)
 	}
@@ -675,8 +695,8 @@ func (i *frideInstances) params(ctx context.Context, name string, ic config.Frid
 }
 
 // startFingerprint tells apart what starts give a running instance:
-// identities with their tokens, repositories, egress and git user, not
-// its memory. It stays in memory.
+// identities with their tokens, the core's Claude token, repositories,
+// egress and git user, not its memory. It stays in memory.
 func startFingerprint(p nodeproto.FrideInstanceStartParams) string {
 	p.MemoryMB = 0
 	data, _ := json.Marshal(p)
@@ -696,7 +716,7 @@ func (i *frideInstances) refreshAll(ctx context.Context, again bool) {
 	views := i.views()
 	for _, name := range slices.Sorted(maps.Keys(i.configured())) {
 		w, ok := locate(name, views)
-		if !ok || !w.running() || !hostReady(w.v, i.template()) {
+		if !ok || !w.running() || !hostReady(w.v, i.template(), i.lends(i.configured()[name])) {
 			continue
 		}
 		p, _ := i.params(ctx, name, i.configured()[name], w.in.MemoryMB)

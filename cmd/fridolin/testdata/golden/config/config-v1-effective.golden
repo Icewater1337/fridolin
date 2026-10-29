@@ -98,6 +98,7 @@
   "fride": {
     "instances": {
       "work": {
+        "core_login": true,
         "description": "work repositories",
         "egress": [
           "registry.example.com"

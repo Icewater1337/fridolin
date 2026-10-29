@@ -222,7 +222,8 @@
         "egress": ["registry.example.com"],
         "nodes": ["mini"],
         "memory_mb": 8192,
-        "idle_stop_minutes": 45
+        "idle_stop_minutes": 45,
+        "core_login": true
       }
     }
   },

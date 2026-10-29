@@ -37,8 +37,9 @@ type FrideHostCap struct {
 	NeedsTemplate bool `json:"needs_template,omitempty"`
 	// NoLogin says why the agents of its instances cannot log in to
 	// Claude, with what fixes it (no Claude token in the node's secret
-	// store); "" when they can. The core starts no instance and hands no
-	// work to one where its agents cannot think.
+	// store, and none lent by the core since the agent started); "" when
+	// they can. The core starts no instance there and hands no work to
+	// one whose agents cannot think, unless it lends its own token.
 	NoLogin string `json:"no_login,omitempty"`
 	// Instances are the instances the node has, running or not.
 	Instances []FrideInstance `json:"instances,omitempty"`
@@ -226,6 +227,10 @@ type FrideInstanceStartParams struct {
 	// refresh of identities sends it, so that it never undoes a stop
 	// whose declaration has yet to arrive.
 	UpdateOnly bool `json:"update_only,omitempty"`
+	// CoreToken is the core's Claude login token, lent to the instance's
+	// agents when its config says core_login; "" has them log in with
+	// the node's own token. The node never stores or logs it.
+	CoreToken string `json:"core_token,omitempty"`
 }
 
 // FrideSandboxImage is the name of the published FrIDE template under
@@ -299,6 +304,9 @@ func (p FrideInstanceStartParams) Check() error {
 		if h == "" || len(h) > maxHostLen || strings.ContainsAny(h, "\x00\r\n /") {
 			return fmt.Errorf("egress host %q", h)
 		}
+	}
+	if len(p.CoreToken) > maxTokenLen || strings.ContainsAny(p.CoreToken, " \t\r\n\x00") {
+		return errors.New("the core token is malformed")
 	}
 	if p.Template != "" {
 		return CheckTemplateRef(p.Template)

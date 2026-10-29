@@ -220,11 +220,20 @@ func (o instanceOps) claudeToken() (tok, why string) {
 	return tok, ""
 }
 
-// login stores the Claude token for FrIDE's agents in the sandbox, from
-// the node's secret store: on stdin, never as an argument. It says why
-// they have none; noLogin is that reason when the node has no token.
-func (o instanceOps) login(ctx context.Context, sandbox string) (problem, noLogin string) {
+// login stores the Claude token for FrIDE's agents in the sandbox: lent,
+// the core's (the start's core_token), else the node's own; on stdin,
+// never as an argument. It says why they have none; noLogin is that
+// reason when there is no token.
+func (o instanceOps) login(ctx context.Context, sandbox, lent string) (problem, noLogin string) {
 	tok, why := o.claudeToken()
+	if lent != "" {
+		tok, why = "", ""
+		if t, err := CheckClaudeToken(lent); err == nil {
+			tok = t
+		} else {
+			why = "the Claude token the core lent does not read: " + err.Error()
+		}
+	}
 	if why != "" {
 		return "no Claude login for FrIDE's agents: " + why, why
 	}
