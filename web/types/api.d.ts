@@ -676,6 +676,8 @@ export interface FrideInstance {
   /** The repositories its FrIDE knows. */
   repos?: string[];
   problem?: string;
+  /** Why its agents did not log in to Claude when it last started. */
+  no_login?: string;
 }
 
 /** The node runs FrIDE instances in Docker Sandboxes (nodeproto.FrideHostCap). */
@@ -692,6 +694,8 @@ export interface FrideHostCap {
   reserve_mb: number;
   /** It built no template of its own: each start names the core's published one. */
   needs_template?: boolean;
+  /** Why its instances' agents cannot log in to Claude, with the fix; absent when they can. */
+  no_login?: string;
   instances?: FrideInstance[];
 }
 

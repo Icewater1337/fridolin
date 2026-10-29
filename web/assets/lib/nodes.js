@@ -27,7 +27,9 @@ export function capSummary(c) {
   const host = c && c.fride_host;
   if (host) {
     const n = (host.instances || []).length;
-    parts.push(host.ready ? `fride-host (${n} instance${n === 1 ? '' : 's'})` : 'fride-host (not ready)');
+    if (!host.ready) parts.push('fride-host (not ready)');
+    else if (host.no_login) parts.push('fride-host (no Claude login)');
+    else parts.push(`fride-host (${n} instance${n === 1 ? '' : 's'})`);
   }
   if (c && c.backup) {
     const n = (c.backup.folders || []).length;

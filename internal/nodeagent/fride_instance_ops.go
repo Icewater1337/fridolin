@@ -69,7 +69,7 @@ func (o instanceOps) view(ctx context.Context, st *FrideInstanceState, status st
 	switch {
 	case answers:
 		// Also while a start brings it up to date: it serves meanwhile.
-		v.State, v.URL, v.Repos, v.Problem = nodeproto.FrideInstanceRunning, o.urlOf(st), info.Repos, st.Notes
+		v.State, v.URL, v.Repos, v.Problem, v.NoLogin = nodeproto.FrideInstanceRunning, o.urlOf(st), info.Repos, st.Notes, problemText(st.NoLogin)
 	case starting:
 		v.State = nodeproto.FrideInstanceStarting
 	case st.Run && status == "":

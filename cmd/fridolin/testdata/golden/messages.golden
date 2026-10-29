@@ -551,6 +551,9 @@ frideNotLoggedInNotice(moved)
 frideNotLoggedInNotice(stays)
 	⚠️ *FrIDE #3* could not start on box: FrIDE's Claude there is not logged in, and no other node can take it now.
 	To fix it: in the node's box run docker compose exec fride claude setup-token and set-claude-token, then docker compose restart fride (natively: log in to claude as FrIDE's user and restart fride serve). Then answer here to make it try again.
+frideHostNoLoginNotice
+	⚠️ FrIDE instances on icebase cannot log in to Claude, so the core starts none there and hands them no work: no Claude token is stored for FrIDE's agents; in an administrator PowerShell there: fridolin node secrets set claude.oauth.token --state-dir "C:\Users\you\.fridolin-node", with the token claude setup-token prints.
+	Once the token is stored, the core logs in the instance running there within a few minutes.
 fridePlacedNotice
 	🛠️ *FrIDE #3* went to laptop now.
 frideInstanceQueuedNotice

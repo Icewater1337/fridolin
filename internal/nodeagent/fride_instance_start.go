@@ -223,15 +223,16 @@ func (a *Agent) readyInstance(ctx context.Context, o instanceOps, st *FrideInsta
 	if err != nil {
 		return nodeproto.FrideInstance{}, err
 	}
-	if why := o.login(ctx, st.Sandbox); why != "" {
-		notes = append(notes, why)
+	problem, noLogin := o.login(ctx, st.Sandbox)
+	if problem != "" {
+		notes = append(notes, problem)
 	}
 	if g := p.Git; g != nil && (g.Name != "" || g.Email != "") {
 		if err := o.exec(ctx, st.Sandbox, nil, frideInstanceGit, g.Name, g.Email); err != nil {
 			return nodeproto.FrideInstance{}, err
 		}
 	}
-	st.Run, st.Problem, st.Notes, st.Repos, st.Started = true, "", "", slices.Clone(p.Repos), time.Now().UTC().Truncate(time.Second)
+	st.Run, st.Problem, st.Notes, st.NoLogin, st.Repos, st.Started = true, "", "", noLogin, slices.Clone(p.Repos), time.Now().UTC().Truncate(time.Second)
 	if err := saveFrideInstance(a.Dir, st); err != nil {
 		return nodeproto.FrideInstance{}, err
 	}
@@ -262,7 +263,7 @@ func (a *Agent) readyInstance(ctx context.Context, o instanceOps, st *FrideInsta
 		return nodeproto.FrideInstance{}, err
 	}
 	out := nodeproto.FrideInstance{Name: st.Name, State: nodeproto.FrideInstanceRunning, MemoryMB: st.MemoryMB, URL: url,
-		Repos: info.Repos, Problem: st.Notes}
+		Repos: info.Repos, Problem: st.Notes, NoLogin: problemText(st.NoLogin)}
 	if (&nodeproto.FrideHostCap{Instances: []nodeproto.FrideInstance{out}}).Check() != nil {
 		out.Repos = nil
 	}

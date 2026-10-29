@@ -24,6 +24,8 @@ func TestFrideHostCheck(t *testing.T) {
 		"a URL elsewhere":             func(h *FrideHostCap) { h.Instances[0].URL = "http://192.0.2.1:17850" },
 		"negative memory":             func(h *FrideHostCap) { h.AvailableMemoryMB = -1 },
 		"a repository with a newline": func(h *FrideHostCap) { h.Instances[0].Repos = []string{"a\nb"} },
+		"a long no_login":             func(h *FrideHostCap) { h.NoLogin = strings.Repeat("x", maxProblemLen+1) },
+		"an instance's long no_login": func(h *FrideHostCap) { h.Instances[0].NoLogin = strings.Repeat("x", maxProblemLen+1) },
 	} {
 		h := frideHost()
 		mutate(h)
@@ -194,5 +196,20 @@ func TestAsked(t *testing.T) {
 	_ = c.Asked()
 	if c.FrideHost.AvailableMemoryMB != 14000 || c.Fride.URL == "" || c.CoreHost == nil {
 		t.Errorf("Asked changed the declaration: %+v", c)
+	}
+}
+
+// A ready host whose agents cannot log in to Claude says so in a few
+// words.
+func TestFrideHostSummaryNoLogin(t *testing.T) {
+	t.Parallel()
+	h := frideHost()
+	h.NoLogin = "no Claude token is stored for FrIDE's agents"
+	if got := (Capabilities{FrideHost: h}).Summary(); got != "fride-host (no Claude login)" {
+		t.Errorf("summary %q", got)
+	}
+	h.Ready = false
+	if got := (Capabilities{FrideHost: h}).Summary(); got != "fride-host (not ready)" {
+		t.Errorf("not ready: %q", got)
 	}
 }

@@ -157,6 +157,12 @@ test('a node that hosts FrIDE instances shows sbx, its memory and its instances'
   assert.match(root.textContent, /30 GB available/, 'the figures follow');
   assert.equal(button(root, 'Revoke'), revoke, 'the card stays');
 
+  bridge.nodes = [hosting(host({ no_login: 'no Claude token is stored for FrIDE\'s agents' }))];
+  await nodesResource.refresh();
+  await settle();
+  assert.match(root.textContent, /fride-host \(no Claude login\)/);
+  assert.match(root.textContent, /No Claude login for its agents, so the core gives them no work: no Claude token is stored for FrIDE's agents/);
+
   bridge.nodes = [hosting(host({ ready: false, problem: 'sbx is not signed in', instances: [] }))];
   await nodesResource.refresh();
   await settle();
@@ -285,6 +291,8 @@ test('the capability words match the bridge\'s', () => {
   assert.equal(capSummary({ fride_host: fh }), 'fride-host (0 instances)');
   assert.equal(capSummary({ fride_host: { ...fh, instances: [{ name: 'work', state: 'running', memory_mb: 0 }] } }), 'fride-host (1 instance)');
   assert.equal(capSummary({ fride_host: { ...fh, ready: false, instances: [{ name: 'work', state: 'running', memory_mb: 0 }] } }), 'fride-host (not ready)');
+  assert.equal(capSummary({ fride_host: { ...fh, no_login: 'no Claude token is stored' } }), 'fride-host (no Claude login)');
+  assert.equal(capSummary({ fride_host: { ...fh, ready: false, no_login: 'no Claude token is stored' } }), 'fride-host (not ready)');
   assert.equal(capSummary({ backup: {} }), 'backup');
   assert.equal(capSummary({ backup: { folders: ['D:\\B'] } }), 'backup (1 folder)');
   assert.equal(capSummary({}), 'nothing');

@@ -84,7 +84,7 @@ func (a *Agent) frideHostRefresh(ctx context.Context, force bool) bool {
 		a.logf("node: offering fride_host to the core (%s)", frideHostSummary(next))
 	case old != nil && next == nil:
 		a.logf("node: no longer offering fride_host")
-	case old != nil && (old.Ready != next.Ready || old.Problem != next.Problem):
+	case old != nil && (old.Ready != next.Ready || old.Problem != next.Problem || old.NoLogin != next.NoLogin):
 		a.logf("node: fride_host: %s", frideHostSummary(next))
 	}
 	return !reflect.DeepEqual(old, next)
@@ -95,7 +95,11 @@ func frideHostSummary(c *nodeproto.FrideHostCap) string {
 	if !c.Ready {
 		return "not ready: " + c.Problem
 	}
-	return fmt.Sprintf("ready, %d of %d MB available, %d kept, %d instances", c.AvailableMemoryMB, c.TotalMemoryMB, c.ReserveMB, len(c.Instances))
+	s := fmt.Sprintf("ready, %d of %d MB available, %d kept, %d instances", c.AvailableMemoryMB, c.TotalMemoryMB, c.ReserveMB, len(c.Instances))
+	if c.NoLogin != "" {
+		s += "; no Claude login for its agents: " + c.NoLogin
+	}
+	return s
 }
 
 // frideHostRead is the declaration now: nil without setup, in a box or
@@ -162,6 +166,8 @@ func (a *Agent) frideHostRead(ctx context.Context) *nodeproto.FrideHostCap {
 	c.Ready = len(problems) == 0
 	c.Problem = problemText(strings.Join(problems, "; "))
 	o := a.instanceOps()
+	_, why := o.claudeToken()
+	c.NoLogin = problemText(why)
 	for _, st := range listFrideInstances(a.Dir) {
 		status := "unknown"
 		if statuses != nil {

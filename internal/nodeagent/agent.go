@@ -87,7 +87,10 @@ type Agent struct {
 	// checks instead of running the agent's own binary.
 	CoreSecrets      hostsecrets.Store
 	CoreSecretsPlace string
-	CoreSetup        func(ctx context.Context) ([]nodeproto.CoreCheckItem, bool, string)
+	// FrideSecrets is where FrIDE instances' Claude token is
+	// (FrideSecretStore): nil is CoreSecrets.
+	FrideSecrets hostsecrets.Store
+	CoreSetup    func(ctx context.Context) ([]nodeproto.CoreCheckItem, bool, string)
 	// CoreRunner does what a core move does to the core here; nil is
 	// NativeCore with Executable (coremove.go). CoreScan, when set, is the
 	// machine-bound scan instead of the files it reads. MovePoll is how

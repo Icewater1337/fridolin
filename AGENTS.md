@@ -335,7 +335,11 @@ with Docker `fridolin node fride host setup --repo .` in a fridolin
 checkout of the core's version to build the template there; then have
 the owner approve `fride_host` and check `fridolin node fride host
 status` says `Ready: yes` (docs/NODES.md, "FrIDE instances", and "FrIDE
-instances on Windows"). The companion, in short:
+instances on Windows"). The instances' agents log in to Claude with a
+token the owner makes with `claude setup-token` and types into
+`fridolin node secrets set claude.oauth.token` on the node, without
+echo (on Windows in an administrator PowerShell, with the node's
+`--state-dir`; docs/NODES.md, "The Claude login"); never in chat. The companion, in short:
 
 1. **Where FrIDE runs.** On macOS and Linux it runs natively. On
    Windows it runs in WSL2 (Ubuntu), because FrIDE does not build for

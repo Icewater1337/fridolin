@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/nodeagent"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/platform"
@@ -86,6 +87,9 @@ type frideHostFlags struct {
 	reserveMB, lines                      int
 	// set are the flags given.
 	set map[string]bool
+	// secrets opens the store of FrIDE's Claude token for host status;
+	// nil looks at none.
+	secrets nodeSecretsOpen
 }
 
 // nodeFrideHostCmd runs `fridolin node fride host` (instance false) or
@@ -115,7 +119,7 @@ func nodeFrideHostCmd(instance bool, args []string, stdout, stderr io.Writer) in
 	fs := flag.NewFlagSet("node fride "+what+" "+sub, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() { fmt.Fprint(stderr, usage) }
-	var f frideHostFlags
+	f := frideHostFlags{secrets: systemNodeSecrets}
 	fs.StringVar(&f.stateDir, "state-dir", "", "the node's state folder")
 	names := 0
 	switch {
@@ -220,7 +224,7 @@ func runFrideHost(cmd string, pos []string, f frideHostFlags, dir, sbx string, s
 	case "host setup":
 		return frideHostSetup(ctx, f, dir, sbx, findDocker(), runtime.GOOS, stdout, fail)
 	case "host status":
-		return frideHostStatus(ctx, dir, sbx, stdout, fail)
+		return frideHostStatus(ctx, dir, sbx, f.secrets, stdout, fail)
 	case "instance ls":
 		rows, err := nodeagent.ListFrideInstances(ctx, o)
 		if err != nil {
@@ -327,8 +331,17 @@ func frideHostSetup(ctx context.Context, f frideHostFlags, dir, sbx, docker, goo
 
 // frideHostStatus prints fride_host: 1 when it is not set up or not
 // ready.
-func frideHostStatus(ctx context.Context, dir, sbx string, stdout io.Writer, fail func(string, ...any) int) int {
-	r, err := nodeagent.FrideHostStatus(ctx, dir, sbx)
+func frideHostStatus(ctx context.Context, dir, sbx string, secrets nodeSecretsOpen, stdout io.Writer, fail func(string, ...any) int) int {
+	var store hostsecrets.Store
+	secretsErr := "it was not looked at"
+	if secrets != nil {
+		if s, _, err := secrets(dir); err == nil {
+			store, secretsErr = s, ""
+		} else {
+			secretsErr = err.Error() + deniedHint(err)
+		}
+	}
+	r, err := nodeagent.FrideHostStatus(ctx, dir, sbx, store)
 	if err != nil {
 		return fail("%v", err)
 	}
@@ -351,6 +364,14 @@ func frideHostStatus(ctx context.Context, dir, sbx string, stdout io.Writer, fai
 	}
 	fmt.Fprintf(stdout, "sbx: %s\n", orDash(c.Version))
 	fmt.Fprintf(stdout, "Ready: %s\n", yesNo(c.Ready, "yes", "no: "+c.Problem))
+	switch {
+	case secretsErr != "":
+		fmt.Fprintf(stdout, "Claude login for its agents: cannot tell: %s\n", secretsErr)
+	case c.NoLogin != "":
+		fmt.Fprintf(stdout, "Claude login for its agents: no: %s\n", c.NoLogin)
+	default:
+		fmt.Fprintln(stdout, "Claude login for its agents: yes")
+	}
 	fmt.Fprintf(stdout, "Memory: %d MB, %d MB available now, %d MB kept for the machine\n", c.TotalMemoryMB, c.AvailableMemoryMB, c.ReserveMB)
 	fmt.Fprintf(stdout, "Instances: %d", len(c.Instances))
 	for _, in := range c.Instances {

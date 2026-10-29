@@ -35,6 +35,11 @@ type FrideHostCap struct {
 	// Template), which sbx pulls. A core that knows none places no
 	// instance there.
 	NeedsTemplate bool `json:"needs_template,omitempty"`
+	// NoLogin says why the agents of its instances cannot log in to
+	// Claude, with what fixes it (no Claude token in the node's secret
+	// store); "" when they can. The core starts no instance and hands no
+	// work to one where its agents cannot think.
+	NoLogin string `json:"no_login,omitempty"`
 	// Instances are the instances the node has, running or not.
 	Instances []FrideInstance `json:"instances,omitempty"`
 }
@@ -49,6 +54,10 @@ type FrideInstance struct {
 	// Repos are the repositories its FrIDE knows.
 	Repos   []string `json:"repos,omitempty"`
 	Problem string   `json:"problem,omitempty"`
+	// NoLogin says why its agents did not log in to Claude when it last
+	// started; "" when they did. A start again, once the node has the
+	// token, logs them in.
+	NoLogin string `json:"no_login,omitempty"`
 }
 
 // The states of a FrIDE instance.
@@ -86,8 +95,8 @@ func (f *FrideHostCap) Check() error {
 	if f == nil {
 		return nil
 	}
-	if len(f.Version) > 64 || len(f.Problem) > maxProblemLen || !utf8.ValidString(f.Problem) {
-		return errors.New("fride_host: version or problem too long")
+	if len(f.Version) > 64 || len(f.Problem) > maxProblemLen || !utf8.ValidString(f.Problem) || len(f.NoLogin) > maxProblemLen || !utf8.ValidString(f.NoLogin) {
+		return errors.New("fride_host: version, problem or no_login too long")
 	}
 	if f.TotalMemoryMB < 0 || f.AvailableMemoryMB < 0 || f.ReserveMB < 0 {
 		return errors.New("fride_host: negative memory")
@@ -107,8 +116,8 @@ func (f *FrideHostCap) Check() error {
 		if !slices.Contains(frideInstanceStates, in.State) {
 			return fmt.Errorf("fride_host: instance %s: state %q", in.Name, in.State)
 		}
-		if in.MemoryMB < 0 || len(in.Problem) > maxProblemLen || !utf8.ValidString(in.Problem) {
-			return fmt.Errorf("fride_host: instance %s: memory or problem", in.Name)
+		if in.MemoryMB < 0 || len(in.Problem) > maxProblemLen || !utf8.ValidString(in.Problem) || len(in.NoLogin) > maxProblemLen || !utf8.ValidString(in.NoLogin) {
+			return fmt.Errorf("fride_host: instance %s: memory, problem or no_login", in.Name)
 		}
 		if in.URL != "" {
 			if err := CheckLoopbackURL(in.URL); err != nil {

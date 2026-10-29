@@ -10,6 +10,27 @@ for compatibility.
 
 ### Added
 
+- **FrIDE instances on Windows can log in to Claude, and work never goes
+  to an instance that cannot.** A Windows node runs as LocalSystem and
+  kept no secrets, so its instances' agents had no Claude login: work
+  sent there failed with "the orchestrator could not think". Now:
+  - `fridolin node secrets set claude.oauth.token` stores the token
+    `claude setup-token` prints, typed without echo. On macOS and Linux
+    it goes where `fridolin core secrets` keeps it; on Windows into the
+    node's own store, sealed in its state dir under a key from its device
+    key (run it in an administrator PowerShell, with `--state-dir`).
+    `fridolin node secrets` lists it, and `fridolin node fride host
+    status` says whether the agents can log in.
+  - A node without the token says so in `fride_host`'s new `no_login`,
+    with that command, and so does an instance that started without one.
+    The core starts no instance on such a node and hands no work to an
+    instance whose agents did not log in: the work goes to a node that
+    has the token, or waits and says why. The owner hears it once in
+    their chat, the Nodes page shows "fride-host (no Claude login)", and
+    `fridolin doctor` warns until the token is stored.
+  - Once it is, the core's next start or refresh logs the running
+    instance's agents in, without stopping it.
+
 - **The core brain runs commands on your machines** (docs/VISION.md, step
   4). The core brain gets `node_exec`, which runs one command a node's
   exec allowlist allows (no shell, checked on the core and on the node),
