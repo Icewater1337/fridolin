@@ -121,8 +121,28 @@ func TestCoreBuild(t *testing.T) {
 	if got := (*ran)[1].args; !slices.Equal(got, want) {
 		t.Errorf("ran %q", got)
 	}
+	// With the FrIDE template in the checkout: its own tag, as image.yml
+	// hashes it (the value is that shell's).
+	if err := os.MkdirAll(filepath.Join(repo, "container", "sandbox"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "container", "fride"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "container", "sandbox", "fride.Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "container", "fride", "companion.json"), []byte(`{"version":1}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := coreHost(context.Background(), "build", []string{"--repo", repo}, env, d); code != 0 {
+		t.Fatal(code)
+	}
+	if got := (*ran)[2].args; !slices.Contains(got, "FRIDOLIN_FRIDE_SANDBOX_TAG=t-1f8431daf6ef") {
+		t.Errorf("ran %q", got)
+	}
 	for _, remote := range []string{"https://gitlab.com/owner/fridolin.git", "/srv/git/fridolin"} {
-		if src, _ := boxBuildSource(repo, hostDeps{git: func(_ string, args ...string) (string, error) {
+		if src, _, _ := boxBuildSource(repo, hostDeps{git: func(_ string, args ...string) (string, error) {
 			if args[0] == "remote" {
 				return remote, nil
 			}
