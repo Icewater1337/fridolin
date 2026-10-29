@@ -219,7 +219,9 @@ func (b *App) nodeItem(ctx context.Context, n *nodes.Node) (pendingItem, bool) {
 		return pendingItem{}, false
 	}
 	os := osName(n.OS)
-	it := pendingItem{kind: pendingNode, key: "node:" + n.ID + ":" + n.Device + ":" + hashOf(n.Declared)}
+	// What it asks, not what it reports: a FrIDE host declares again
+	// whenever its free memory changes, which is no new request.
+	it := pendingItem{kind: pendingNode, key: "node:" + n.ID + ":" + n.Device + ":" + hashOf(n.Declared.Asked())}
 	m := &it.msg
 	m.Ref = n.ID
 	m.Label = "*" + n.Name + "*"

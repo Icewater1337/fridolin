@@ -145,3 +145,54 @@ func TestCheckTemplateRef(t *testing.T) {
 		t.Errorf("%s", b)
 	}
 }
+
+// Asked leaves out what a node only reports, so that a FrIDE host whose
+// free memory changes asks nothing new; what it asks still counts.
+func TestAsked(t *testing.T) {
+	t.Parallel()
+	declare := func(mutate func(*Capabilities)) Capabilities {
+		c := Capabilities{Host: true, FS: &FSCap{Roots: []FSRoot{{Path: "/srv/files", Write: true}}}, FrideHost: frideHost(),
+			Fride: &FrideCap{URL: "http://127.0.0.1:17840", Repos: []string{"fridolin"}}, AndroidBuild: &AndroidBuildCap{Java: "21"},
+			CoreHost: &CoreHostCap{Hash: "abc"}}
+		if mutate != nil {
+			mutate(&c)
+		}
+		return c
+	}
+	asked := func(c Capabilities) string {
+		data, err := json.Marshal(c.Asked())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	base := asked(declare(nil))
+	for name, mutate := range map[string]func(*Capabilities){
+		"free memory":       func(c *Capabilities) { c.FrideHost.AvailableMemoryMB = 9000 },
+		"not ready":         func(c *Capabilities) { c.FrideHost.Ready, c.FrideHost.Problem = false, "sbx is not signed in" },
+		"no instances":      func(c *Capabilities) { c.FrideHost.Instances = nil },
+		"FrIDE's repos":     func(c *Capabilities) { c.Fride.Repos = nil },
+		"Claude logged out": func(c *Capabilities) { c.Fride.NotLoggedIn = true },
+		"the JDK":           func(c *Capabilities) { c.AndroidBuild.Java = "17" },
+		"core-host":         func(c *Capabilities) { c.CoreHost = nil },
+	} {
+		if got := asked(declare(mutate)); got != base {
+			t.Errorf("%s asks something else:\n%s\n%s", name, got, base)
+		}
+	}
+	for name, mutate := range map[string]func(*Capabilities){
+		"another root":  func(c *Capabilities) { c.FS.Roots = append(c.FS.Roots, FSRoot{Path: "/home/you"}) },
+		"notify":        func(c *Capabilities) { c.Notify = true },
+		"no FrIDE host": func(c *Capabilities) { c.FrideHost = nil },
+		"no FrIDE":      func(c *Capabilities) { c.Fride = nil },
+	} {
+		if asked(declare(mutate)) == base {
+			t.Errorf("%s asks the same", name)
+		}
+	}
+	c := declare(nil)
+	_ = c.Asked()
+	if c.FrideHost.AvailableMemoryMB != 14000 || c.Fride.URL == "" || c.CoreHost == nil {
+		t.Errorf("Asked changed the declaration: %+v", c)
+	}
+}

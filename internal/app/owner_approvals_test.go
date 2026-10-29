@@ -443,3 +443,35 @@ func TestApproveRunRequest(t *testing.T) {
 
 // hostOS is the OS label of the machine the tests run on: test agents report runtime.GOOS.
 var hostOS = osName(runtime.GOOS)
+
+// TestNodeRequestIgnoresFreeMemory: an approved node that asks for more
+// is one request, told once, while its FrIDE host declares again with
+// other free memory or instances; asking for something else is another.
+func TestNodeRequestIgnoresFreeMemory(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, `{"nodes": {"enabled": true}}`)
+	now := time.Now()
+	node := func(available int, notify bool) *nodes.Node {
+		host := &nodeproto.FrideHostCap{Version: "v0.50.0", Ready: true, TotalMemoryMB: 32768, AvailableMemoryMB: available, ReserveMB: 6144}
+		if available < 10000 {
+			host.Instances = []nodeproto.FrideInstance{{Name: "work", State: nodeproto.FrideInstanceRunning, MemoryMB: 6144}}
+		}
+		return &nodes.Node{ID: "1c708eb0693b", Name: "icebase", OS: "windows", Device: nodeproto.DeviceApproved, CommandsApprovedAt: &now, DeclaredAt: &now,
+			Approved: nodeproto.Capabilities{Host: true}, Declared: nodeproto.Capabilities{Host: true, Notify: notify, FrideHost: host}}
+	}
+	key := func(n *nodes.Node) string {
+		t.Helper()
+		it, ok := h.b.nodeItem(context.Background(), n)
+		if !ok {
+			t.Fatal("nothing waits")
+		}
+		return it.key
+	}
+	first := key(node(20000, false))
+	if k := key(node(8000, false)); k != first {
+		t.Errorf("other free memory and an instance are another request: %s, %s", first, k)
+	}
+	if k := key(node(20000, true)); k == first {
+		t.Error("asking for notify too is the same request")
+	}
+}
