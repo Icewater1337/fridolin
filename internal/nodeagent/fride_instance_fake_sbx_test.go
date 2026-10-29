@@ -81,6 +81,10 @@ func fakeFrideSbx(dir string, args []string) (int, bool) {
 		return 0, true
 	case args[0] == "cp":
 		record()
+		if b, err := os.ReadFile(filepath.Join(dir, "fail-cp")); err == nil {
+			fmt.Fprint(os.Stderr, string(b))
+			return 1, true
+		}
 		return fakeCp(dir, args[1], args[2]), true
 	case args[0] == "secret" && len(args) > 2 && args[1] == "set" && args[2] == "github":
 		record()

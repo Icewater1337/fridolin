@@ -188,6 +188,7 @@ func (o instanceOps) remake(ctx context.Context, st *FrideInstanceState, host *F
 	}
 	n, err := o.saveVM(ctx, st.Sandbox, carry, frideInstanceCarry)
 	if err != nil {
+		_ = os.RemoveAll(carry) // the old sandbox stays; a partial carry would be restored over newer files
 		return fmt.Errorf("saving the sandbox's things: %w; the sandbox stays as it is", err)
 	}
 	o.say("Saved %d folders and files of %s (workspaces, repositories, sessions, FrIDE's tasks, the login) to %s.", n, st.Sandbox, carry)

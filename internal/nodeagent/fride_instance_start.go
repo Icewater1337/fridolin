@@ -178,8 +178,14 @@ func (a *Agent) ensureInstance(ctx context.Context, o instanceOps, host *FrideHo
 			}
 			a.inst.syncServe(ctx)
 		}
+		old := *st
 		fresh()
-		return st, o.remake(ctx, st, host, status)
+		err := o.remake(ctx, st, host, status)
+		// With the old sandbox still there, the state must keep describing it.
+		if now, serr := o.status(ctx, st); err != nil && serr == nil && now != "" {
+			*st = old
+		}
+		return st, err
 	}
 	return st, nil
 }
