@@ -392,6 +392,24 @@ func (p *Manager) privateHome() string { return filepath.Join(p.dir(), "home") }
 
 func (p *Manager) tokenPath() string { return filepath.Join(p.cliHome(), ".plaud", "tokens.json") }
 
+// LoginFiles are the files in ~/.plaud in which the Plaud CLI keeps its login:
+// tokens.json in the versions this was written for, plaud-secrets in later ones.
+// Whichever the installed CLI uses, Fridolin must see it as the login, check it
+// is no link, and share it with brains, or a login the CLI refreshes there
+// reads as signed out, or the refresh a brain makes is lost.
+var LoginFiles = []string{"tokens.json", "plaud-secrets"}
+
+// loginFilesIn lists the login files that exist in the CLI home home.
+func loginFilesIn(home string) []string {
+	var found []string
+	for _, f := range LoginFiles {
+		if p := filepath.Join(home, ".plaud", f); fsx.Exists(p) {
+			found = append(found, p)
+		}
+	}
+	return found
+}
+
 // The states of the Plaud login, as loginStatus reports them.
 const (
 	plaudSignedOut = "signed out"
@@ -448,7 +466,7 @@ func (p *Manager) loginStays(home string) bool {
 }
 
 // hasLogin reports whether the CLI has a login in the CLI home in use.
-func (p *Manager) hasLogin() bool { return fsx.Exists(p.tokenPath()) }
+func (p *Manager) hasLogin() bool { return len(loginFilesIn(p.cliHome())) > 0 }
 
 // loginStamp changes whenever the login file does: a sign-in, a sign-out, a
 // token refresh, or brain_access switching to the other login. "" means
@@ -457,11 +475,13 @@ func (p *Manager) loginStamp() string {
 	if dir := p.phoneDir(); dir != "" {
 		return "phone " + dir
 	}
-	fi, err := os.Stat(p.tokenPath())
-	if err != nil {
-		return ""
+	var stamp []string
+	for _, f := range loginFilesIn(p.cliHome()) {
+		if fi, err := os.Stat(f); err == nil {
+			stamp = append(stamp, fmt.Sprintf("%s %d %d", f, fi.Size(), fi.ModTime().UnixNano()))
+		}
 	}
-	return fmt.Sprintf("%s %d %d", p.tokenPath(), fi.Size(), fi.ModTime().UnixNano())
+	return strings.Join(stamp, "; ")
 }
 
 // cliPath finds the plaud binary.
@@ -580,16 +600,18 @@ func checkPlaudLogin(home string) error {
 	if fi, err := os.Lstat(dir); err == nil && !fi.IsDir() {
 		return plaudLoginRefused(dir, fi, "not a folder")
 	}
-	p := filepath.Join(dir, "tokens.json")
-	fi, err := os.Lstat(p)
-	if err != nil {
-		return nil
-	}
-	if !fi.Mode().IsRegular() {
-		return plaudLoginRefused(p, fi, "not a regular file")
-	}
-	if n, ok := fsx.LinkCount(p, fi); ok && n != 1 {
-		return plaudLoginRefused(p, fi, "a file with another name too (a hard link)")
+	for _, f := range LoginFiles {
+		p := filepath.Join(dir, f)
+		fi, err := os.Lstat(p)
+		if err != nil {
+			continue
+		}
+		if !fi.Mode().IsRegular() {
+			return plaudLoginRefused(p, fi, "not a regular file")
+		}
+		if n, ok := fsx.LinkCount(p, fi); ok && n != 1 {
+			return plaudLoginRefused(p, fi, "a file with another name too (a hard link)")
+		}
 	}
 	return nil
 }
@@ -1969,7 +1991,7 @@ func (p *Manager) Connect() error {
 				log.Printf("plaud: signing out the refused login: %v", err)
 			}
 			if home == p.privateHome() {
-				_ = os.Remove(filepath.Join(home, ".plaud", "tokens.json")) // our private copy, as in Disconnect
+				removeLogin(home) // our private copy, as in Disconnect
 			}
 		}
 		var seen bytes.Buffer
@@ -2080,19 +2102,19 @@ func (p *Manager) Disconnect() error {
 	if err != nil {
 		return err
 	}
-	token := filepath.Join(p.privateHome(), ".plaud", "tokens.json")
+	home := p.privateHome()
 	if shared {
-		token = p.tokenPath()
+		home = p.cliHome()
 		_, err = p.run(ctx, "logout")
 	} else {
-		_, err = p.runCLIIn(ctx, p.privateHome(), nil, "logout")
-		_ = os.Remove(token) // our private copy; the shared one is the CLI's to manage
+		_, err = p.runCLIIn(ctx, home, nil, "logout")
+		removeLogin(home) // our private copy; the shared one is the CLI's to manage
 	}
 	if err != nil && !errors.Is(err, errPlaudAuth) {
 		log.Printf("plaud: logout: %v", err)
 	}
-	if fsx.Exists(token) {
-		return fmt.Errorf("the sign-out did not remove %s, so Plaud's login is still there — run `plaud logout` in a terminal", token)
+	if left := loginFilesIn(home); len(left) > 0 {
+		return fmt.Errorf("the sign-out did not remove %s, so Plaud's login is still there — run `plaud logout` in a terminal", left[0])
 	}
 	return nil
 }
@@ -2155,4 +2177,11 @@ func (p *Manager) Resend(id string) error {
 		log.Printf("plaud %s: sent again at the next check: %v", id, err)
 	}
 	return nil
+}
+
+// removeLogin deletes the login files of the CLI home home.
+func removeLogin(home string) {
+	for _, f := range loginFilesIn(home) {
+		_ = os.Remove(f)
+	}
 }

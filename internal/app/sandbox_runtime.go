@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Icewater1337/fridolin/internal/platform"
+	plaudpkg "github.com/Icewater1337/fridolin/internal/plaud"
 
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
@@ -435,8 +436,10 @@ func (sp *SandboxProfiler) bwrapPolicy(id string) (sandbox.BwrapPolicy, error) {
 		// refreshes the login (as on macOS: it cannot replace the file).
 		plaudDir := filepath.Join(ctx.Home, ".plaud")
 		p.Read = append(p.Read, plaudDir)
-		if tokens := filepath.Join(plaudDir, "tokens.json"); sp.kind(tokens) == "file" {
-			p.Write = append(p.Write, tokens)
+		for _, f := range plaudpkg.LoginFiles {
+			if login := filepath.Join(plaudDir, f); sp.kind(login) == "file" {
+				p.Write = append(p.Write, login)
+			}
 		}
 	}
 	// The data dir is not bound, but a folder bound above it would show
