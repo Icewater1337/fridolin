@@ -53,6 +53,60 @@ func (o instanceOps) carrying(name string) bool {
 	return err == nil
 }
 
+// keepCarryHistory moves the history in the carry an unfinished remake
+// left into the history folder, merging into what an earlier removal
+// saved, as saving it from the VM would have. On an error what is not
+// moved stays in the carry.
+func (o instanceOps) keepCarryHistory(name string) error {
+	carry, store := o.carryDir(name), o.historyDir(name)
+	n := 0
+	for _, p := range frideInstanceHistory {
+		src := filepath.Join(carry, filepath.FromSlash(p))
+		if _, err := os.Lstat(src); errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err := mergeMove(src, filepath.Join(store, filepath.FromSlash(p))); err != nil {
+			return fmt.Errorf("keeping the history of an unfinished remake: %w", err)
+		}
+		n++
+	}
+	o.say("Kept %d folders and files of %s's history from the unfinished remake's %s in %s.", n, name, carry, store)
+	return nil
+}
+
+// mergeMove moves src to dst; into a folder dst a folder src merges, a
+// file of src replacing the one of dst. Both are on the node's disk, in
+// the instance's folder.
+func mergeMove(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+		return err
+	}
+	sfi, err := os.Lstat(src)
+	if err != nil {
+		return err
+	}
+	dfi, err := os.Lstat(dst)
+	if errors.Is(err, fs.ErrNotExist) || (err == nil && !sfi.IsDir() && !dfi.IsDir()) {
+		return os.Rename(src, dst)
+	}
+	if err != nil {
+		return err
+	}
+	if !sfi.IsDir() || !dfi.IsDir() {
+		return fmt.Errorf("%s and %s are not both folders", src, dst)
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if err := mergeMove(filepath.Join(src, e.Name()), filepath.Join(dst, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // vmHas is the VM's home and which of paths are there.
 func (o instanceOps) vmHas(ctx context.Context, sandbox string, paths []string) (string, []string, error) {
 	args := append([]string{"exec", sandbox}, frideInstanceScript(frideInstanceList, paths...)...)
