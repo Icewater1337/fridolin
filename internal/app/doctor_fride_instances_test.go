@@ -97,3 +97,41 @@ func TestDoctorFrideInstances(t *testing.T) {
 		}
 	}
 }
+
+// A node without a Claude token of its own is no warning while the core
+// lends its token to every instance (core_login and a token there).
+func TestDoctorFrideInstancesLent(t *testing.T) {
+	t.Parallel()
+	const registry = "/home/you/.fridolin/nodes/nodes.json"
+	noLogin := `{"id":"a","name":"ice","device":"approved","last_seen":"2026-10-20T11:59:00Z","declared":{"fride_host":{"version":"1","ready":true,"total_memory_mb":32768,"available_memory_mb":20000,"reserve_mb":6144,"no_login":"no Claude token is stored for FrIDE's agents"}},"approved":{"fride_host":{"version":"1","ready":true,"total_memory_mb":0,"available_memory_mb":0,"reserve_mb":0}}}`
+	for _, tc := range []struct {
+		name   string
+		token  string
+		status string
+	}{
+		{"lent", "sk-ant-oat01-madeUp-1", doctor.OK}, // personal-data:ignore (a made-up token)
+		{"core_login without a token", "", doctor.Warn},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := healthyMac()
+			s.listening = map[string]bool{"127.0.0.1:8766": true}
+			s.contents = map[string]string{registry: `{"nodes":[` + noLogin + `]}`}
+			s.env = maps.Clone(s.env)
+			if s.env == nil {
+				s.env = map[string]string{}
+			}
+			if tc.token != "" {
+				s.env["CLAUDE_CODE_OAUTH_TOKEN"] = tc.token
+			}
+			cfg := doctorConfig(func(c *config.Settings) {
+				c.Nodes = config.NodesConfig{Enabled: true, Listen: ":8766"}
+				c.Fride.Instances = map[string]config.FrideInstanceConfig{"fridolin": {CoreLogin: true}}
+			})
+			got := result(t, doctor.Run(context.Background(), s.doctorEnv(cfg, nil), DoctorRegistry.Checks()), "fride-instances")
+			if got.Status != tc.status {
+				t.Errorf("%s %q, want %s", got.Status, got.Detail, tc.status)
+			}
+		})
+	}
+}

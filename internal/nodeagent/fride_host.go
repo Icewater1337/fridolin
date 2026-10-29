@@ -166,8 +166,9 @@ func (a *Agent) frideHostRead(ctx context.Context) *nodeproto.FrideHostCap {
 	c.Ready = len(problems) == 0
 	c.Problem = problemText(strings.Join(problems, "; "))
 	o := a.instanceOps()
-	_, why := o.claudeToken()
-	c.NoLogin = problemText(why)
+	if _, why := o.claudeToken(); why != "" && !a.inst.lent.Load() {
+		c.NoLogin = problemText(why)
+	}
 	for _, st := range listFrideInstances(a.Dir) {
 		status := "unknown"
 		if statuses != nil {

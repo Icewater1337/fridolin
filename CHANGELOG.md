@@ -33,6 +33,12 @@ for compatibility.
   - `fride_close` closes work FrIDE never made a task of (it failed
     there, or still waits in FrIDE's queue) on the core alone, so that
     it no longer keeps its instance on that node; news of it still comes.
+  - Or the core lends its own Claude token: an instance whose config
+    says `"core_login": true` gets `CLAUDE_CODE_OAUTH_TOKEN` from the
+    core's environment with each start (and refresh), as the workstation
+    lends it to one session, so that a node needs no token of its own.
+    The node never stores or logs it; it sits in the instance's VM as a
+    node's own would.
 
 - **The core brain runs commands on your machines** (docs/VISION.md, step
   4). The core brain gets `node_exec`, which runs one command a node's

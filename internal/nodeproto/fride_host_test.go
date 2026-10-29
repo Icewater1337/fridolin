@@ -213,3 +213,18 @@ func TestFrideHostSummaryNoLogin(t *testing.T) {
 		t.Errorf("not ready: %q", got)
 	}
 }
+
+// The core's lent token is one line of token characters.
+func TestFrideInstanceStartCoreToken(t *testing.T) {
+	t.Parallel()
+	p := FrideInstanceStartParams{Name: "work", MemoryMB: 6144, CoreToken: "sk-ant-oat01-madeUp-1"} // personal-data:ignore (a made-up token)
+	if err := p.Check(); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"two words", "line\nbreak", strings.Repeat("x", maxTokenLen+1)} {
+		p.CoreToken = bad
+		if p.Check() == nil {
+			t.Errorf("%q passed", bad)
+		}
+	}
+}

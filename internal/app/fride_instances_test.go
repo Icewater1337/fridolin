@@ -549,3 +549,34 @@ func TestFrideInstanceNoClaudeLogin(t *testing.T) {
 		t.Errorf("docs on mini still has no login: %+v", in)
 	}
 }
+
+// An instance whose config says core_login gets the core's Claude token
+// with each start, so it starts and takes work on a node without a token
+// of its own; one without it still waits there.
+func TestFrideInstanceCoreLogin(t *testing.T) {
+	t.Parallel()
+	optionsOf(t).waits.frideRetry = time.Hour
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	const tok = "sk-ant-oat01-madeUp_core-123" // personal-data:ignore (a made-up token)
+	setenv(t, "CLAUDE_CODE_OAUTH_TOKEN", tok)
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}, "fride": {"instances": {"site": {"core_login": true}, "docs": {}}}}`)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	addr := h.StartNodes()
+	ice := h.fakeHostNode("ice", addr, 65536, 40000, 6144)
+	ice.setNoLogin("no Claude token is stored for FrIDE's agents", nil)
+	h.WaitFor("ice declares no_login", func() bool {
+		n, err := h.b.nodes.Registry().Get(ice.ID)
+		return err == nil && n.Declared.FrideHost != nil && n.Declared.FrideHost.NoLogin != ""
+	})
+
+	reply := h.coreSays("build", step("fride_task", `{"message":"Build the site","instance":"site"}`), step("fride_task", `{"message":"Write the docs","instance":"docs"}`))
+	if !strings.Contains(reply, "Handed to FrIDE on ice/site as FrIDE #1") || !strings.Contains(reply, "FrIDE #2 waits") {
+		t.Fatalf("fride_task:\n%s", reply)
+	}
+	if s := instanceStarts(ice, "site"); len(s) != 1 || s[0].CoreToken != tok {
+		t.Errorf("site's start lent %d starts, the first with the core's token: %v", len(s), len(s) == 1 && s[0].CoreToken == tok)
+	}
+	if len(instanceStarts(ice, "docs")) != 0 {
+		t.Error("docs, which borrows nothing, started on ice")
+	}
+}

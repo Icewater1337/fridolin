@@ -39,6 +39,9 @@ type FrideInstanceConfig struct {
 	// IdleStopMinutes stops it after this long with no open thread and
 	// no news: 0 takes FrideIdleStopDefault, -1 never stops it.
 	IdleStopMinutes int `json:"idle_stop_minutes,omitempty"`
+	// CoreLogin lends the core's Claude token (CLAUDE_CODE_OAUTH_TOKEN)
+	// to its agents with each start, instead of the node's own.
+	CoreLogin bool `json:"core_login,omitempty"`
 }
 
 // FrideIdleStopDefault is how long an instance idles before it stops,

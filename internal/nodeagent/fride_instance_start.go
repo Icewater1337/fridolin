@@ -223,7 +223,10 @@ func (a *Agent) readyInstance(ctx context.Context, o instanceOps, st *FrideInsta
 	if err != nil {
 		return nodeproto.FrideInstance{}, err
 	}
-	problem, noLogin := o.login(ctx, st.Sandbox)
+	problem, noLogin := o.login(ctx, st.Sandbox, p.CoreToken)
+	if p.CoreToken != "" && noLogin == "" {
+		a.inst.lent.Store(true)
+	}
 	if problem != "" {
 		notes = append(notes, problem)
 	}

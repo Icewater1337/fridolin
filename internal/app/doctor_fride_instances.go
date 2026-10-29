@@ -86,7 +86,7 @@ func frideInstanceProblems(env *doctor.Env, name string, ic config.FrideInstance
 			notReady = append(notReady, n.Name+": "+orDefault(fh.Problem, "its sandboxes are not ready"))
 		case fh.NeedsTemplate && tpl == "":
 			notReady = append(notReady, n.Name+": "+noTemplate)
-		case fh.NoLogin != "":
+		case fh.NoLogin != "" && !coreLends(env, ic):
 			notReady = append(notReady, n.Name+": its instances' agents cannot log in to Claude")
 		case fh.TotalMemoryMB > 0 && fh.TotalMemoryMB-fh.ReserveMB < least:
 			small = append(small, fmt.Sprintf("%s (%d MB beyond its reserve)", n.Name, fh.TotalMemoryMB-fh.ReserveMB))
@@ -122,6 +122,12 @@ func frideInstanceProblems(env *doctor.Env, name string, ic config.FrideInstance
 	return problems
 }
 
+// coreLends reports whether the core lends instance config ic its Claude
+// token: core_login, and a token in the core's environment.
+func coreLends(env *doctor.Env, ic config.FrideInstanceConfig) bool {
+	return ic.CoreLogin && strings.TrimSpace(env.Getenv("CLAUDE_CODE_OAUTH_TOKEN")) != ""
+}
+
 // checkFrideInstances checks every instance; a warning names each one
 // that cannot run, and why.
 func checkFrideInstances(ctx context.Context, env *doctor.Env) doctor.Result {
@@ -139,9 +145,17 @@ func checkFrideInstances(ctx context.Context, env *doctor.Env) doctor.Result {
 		}
 	}
 	// A node whose instances' agents cannot log in to Claude gets no work,
-	// even while another node takes it.
+	// even while another node takes it, unless the core lends every
+	// instance its token.
 	var noLogin, loginFix []string
+	lendsAll := true
+	for _, ic := range env.Config.Fride.Instances {
+		lendsAll = lendsAll && coreLends(env, ic)
+	}
 	for _, n := range list {
+		if lendsAll {
+			break
+		}
 		if n.Device != nodeproto.DeviceApproved || n.Approved.FrideHost == nil || n.Declared.FrideHost == nil || n.stale(env.Time()) {
 			continue
 		}
