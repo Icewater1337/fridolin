@@ -453,6 +453,25 @@ func Covers(approved, declared Capabilities) bool {
 	return true
 }
 
+// Asked is what c asks the owner to approve: c without what the node only
+// reports, which Covers leaves out too (FrIDE's address, repositories and
+// login, a FrIDE host's state, memory and instances, the JDK and
+// platforms), and without core-host. Two declarations that ask the same
+// are one request, however often a FrIDE host's free memory changes.
+func (c Capabilities) Asked() Capabilities {
+	if c.Fride != nil {
+		c.Fride = &FrideCap{}
+	}
+	if c.FrideHost != nil {
+		c.FrideHost = &FrideHostCap{}
+	}
+	if c.AndroidBuild != nil {
+		c.AndroidBuild = &AndroidBuildCap{}
+	}
+	c.CoreHost = nil
+	return c
+}
+
 // Intersect is the part of declared that approved covers: what a node
 // whose declaration grew may still serve while the rest waits.
 func Intersect(declared, approved Capabilities) Capabilities {

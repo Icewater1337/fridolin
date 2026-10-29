@@ -1361,6 +1361,16 @@ for compatibility.
 
 ### Fixed
 
+- **A FrIDE host waiting for your approval asks once, not every
+  minute.** A node that runs FrIDE instances declares again whenever
+  its free memory or an instance changes. While its `fride_host` waited
+  for approval, each new declaration counted as a new request, so the
+  same "asks to do more than you approved" alert came again every minute
+  or two. Now a request is what the node asks for: what it only reports
+  (a FrIDE host's memory, state and instances, FrIDE's repositories,
+  the JDK) changes nothing, and asking for more, such as another folder,
+  is still a new request.
+
 - **A wipe after a failed or incomplete snapshot now holds pruning too.**
   The vault compared a new snapshot only with the last try of its kind,
   and only when that try had no error. After a nightly that failed (a B2
