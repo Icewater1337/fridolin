@@ -1,6 +1,7 @@
 package nodeagent
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -35,6 +36,14 @@ var frideInstanceHistory = []string{
 // back.
 var frideInstanceCarry = append(slices.Clone(frideInstanceHistory),
 	"fride-companion/workspaces", "fride-companion/repos", ".claude/settings.json", ".claude.json", ".gitconfig")
+
+// frideInstanceTarball is the file in the carry folder that holds the
+// carry's repositories, workspaces and settings, made by tar in the VM:
+// sbx cp would extract them on the host, where a symlink in a repository
+// needs a privilege a Windows node's user lacks. The history stays
+// plain files, which a later start merges (keepCarryHistory); an older
+// carry holds everything as plain files, and restoreVM still reads it.
+const frideInstanceTarball = "carry.tar.gz"
 
 // historyDir is the folder of an instance's saved history.
 func (o instanceOps) historyDir(name string) string {
@@ -153,7 +162,12 @@ func (o instanceOps) saveVM(ctx context.Context, sandbox, store string, paths []
 			return 0, err
 		}
 	}
+	var tarred []string
 	for _, p := range have {
+		if !slices.Contains(frideInstanceHistory, p) {
+			tarred = append(tarred, p)
+			continue
+		}
 		dst := filepath.Join(store, filepath.FromSlash(path.Dir(p)))
 		if err := os.MkdirAll(dst, 0o700); err != nil {
 			return 0, err
@@ -162,7 +176,31 @@ func (o instanceOps) saveVM(ctx context.Context, sandbox, store string, paths []
 			return 0, fmt.Errorf("sbx could not copy %s out of the sandbox: %w", p, sbxError(err, stderr))
 		}
 	}
+	if len(tarred) > 0 {
+		if err := o.tarOut(sandbox, filepath.Join(store, frideInstanceTarball), home, tarred); err != nil {
+			return 0, err
+		}
+	}
 	return len(have), nil
+}
+
+// tarOut has the VM tar those of paths under home into the file tarball
+// on the host, which only stores it.
+func (o instanceOps) tarOut(sandbox, tarball, home string, paths []string) error {
+	f, err := os.OpenFile(tarball, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var stderr bytes.Buffer
+	c, err := o.d.start(nil, f, &stderr, nil, append([]string{"exec", sandbox, "tar", "-cz", "-C", home}, paths...)...)
+	if err == nil {
+		err = c.Wait()
+	}
+	if err != nil {
+		return fmt.Errorf("sbx could not tar %s out of the sandbox: %w", strings.Join(paths, ", "), sbxError(err, stderr.Bytes()))
+	}
+	return f.Close()
 }
 
 // restoreVM copies those of paths store has into the VM, into what is
@@ -178,7 +216,12 @@ func (o instanceOps) restoreVM(ctx context.Context, sandbox, store string, paths
 			return 0, err
 		}
 	}
-	if len(have) == 0 {
+	tarball := filepath.Join(store, frideInstanceTarball)
+	_, terr := os.Stat(tarball)
+	if terr != nil && !errors.Is(terr, fs.ErrNotExist) {
+		return 0, terr
+	}
+	if len(have) == 0 && terr != nil {
 		return 0, nil
 	}
 	// sbx cp reads there as its user.
@@ -201,6 +244,17 @@ func (o instanceOps) restoreVM(ctx context.Context, sandbox, store string, paths
 		if _, stderr, err := o.d.run(ctx, nil, nil, "cp", src, sandbox+":"+path.Join(home, path.Dir(p))+"/"); err != nil {
 			return 0, fmt.Errorf("sbx could not copy %s into the sandbox: %w", p, sbxError(err, stderr))
 		}
+	}
+	if terr == nil {
+		f, err := os.Open(tarball)
+		if err != nil {
+			return 0, err
+		}
+		defer f.Close()
+		if _, stderr, err := o.d.run(ctx, f, nil, "exec", "-i", sandbox, "tar", "-xz", "-C", home); err != nil {
+			return 0, fmt.Errorf("sbx could not untar the saved things into the sandbox: %w", sbxError(err, stderr))
+		}
+		have = append(have, frideInstanceCarry...)
 	}
 	args := append([]string{"exec", "-u", "root", sandbox}, frideInstanceScript(frideInstanceOwn, append([]string{home}, have...)...)...)
 	if _, stderr, err := o.d.run(ctx, nil, nil, args...); err != nil {

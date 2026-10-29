@@ -1000,6 +1000,12 @@ for compatibility.
 
 ### Changed
 
+- **Remaking a FrIDE instance on Windows no longer stops at a symlink
+  in a repository.** The repositories, workspaces and settings are carried
+  out as a tarball made inside the VM and unpacked inside the new one, so
+  the node never creates a symlink on the host. A carry folder an older
+  version left is still put back.
+
 - **`fridolin doctor --node` says the next step, like `setup-machine
   --node`.** Both print the node machine's checks the same way now: a
   `Node machine (state dir …)` line, the checks, and `Next:` with the
