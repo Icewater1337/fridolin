@@ -1137,6 +1137,27 @@ func (f *frideRuntime) importTo(ctx context.Context, node, path, task string, st
 	return out, err
 }
 
+// drop closes thread id, sent to FrIDE but never a task there (it
+// failed, or still waits in FrIDE's queue), here only: news of it still
+// reaches its chat.
+func (f *frideRuntime) drop(ctx context.Context, id int64, t store.FrideThread) (string, error) {
+	unlock := f.lock(id)
+	defer unlock()
+	cur, err := f.thread(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	cur.State = store.FrideClosed
+	if err := f.b.store.SaveFrideThread(ctx, cur); err != nil {
+		return "", err
+	}
+	where := f.where(t.Node, t.Instance)
+	if t.FrideStatus == "queued" {
+		return fmt.Sprintf("FrIDE #%d never became a task in FrIDE on %s, where it still waits in the queue: closed here. Should FrIDE start it after all, its news still comes here.", id, where), nil
+	}
+	return fmt.Sprintf("FrIDE #%d never became a task in FrIDE on %s, where it failed: closed here, with nothing to archive.", id, where), nil
+}
+
 // close closes thread id's task in FrIDE, archives its workspace into the
 // vault (workspaces/<task>.fride.tar.gz), which keeps it cold, and removes
 // the workspace from the node once the archive reads whole. Work still
@@ -1164,6 +1185,12 @@ func (f *frideRuntime) close(ctx context.Context, id int64) (string, error) {
 	}
 	if t.State == store.FrideClosed {
 		return fmt.Sprintf("FrIDE #%d is closed already; its archive is %s.", id, orDefault(t.Archive, "not in the vault")), nil
+	}
+	if t.TaskID == "" && (t.FrideStatus == "failed" || t.FrideStatus == "queued") {
+		// It never became a task there (FrIDE could not think, say):
+		// nothing to archive, and it no longer keeps its instance where
+		// it is, which need not be reachable for that.
+		return f.drop(ctx, id, t)
 	}
 	if why := f.reachable(ctx, t); why != "" {
 		return "", errors.New(why)

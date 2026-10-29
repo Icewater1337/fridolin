@@ -30,6 +30,9 @@ for compatibility.
     `fridolin doctor` warns until the token is stored.
   - Once it is, the core's next start or refresh logs the running
     instance's agents in, without stopping it.
+  - `fride_close` closes work FrIDE never made a task of (it failed
+    there, or still waits in FrIDE's queue) on the core alone, so that
+    it no longer keeps its instance on that node; news of it still comes.
 
 - **The core brain runs commands on your machines** (docs/VISION.md, step
   4). The core brain gets `node_exec`, which runs one command a node's

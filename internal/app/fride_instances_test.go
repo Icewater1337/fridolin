@@ -505,6 +505,25 @@ func TestFrideInstanceNoClaudeLogin(t *testing.T) {
 		t.Errorf("the owner was told %d times about ice", n)
 	}
 
+	// Work FrIDE never made a task of (it failed there without a login)
+	// closes here although site cannot take work, and no longer keeps
+	// site on ice.
+	th, err = h.b.store.GetFrideThread(context.Background(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	th.FrideStatus, th.TaskID = "failed", ""
+	if err := h.b.store.SaveFrideThread(context.Background(), th); err != nil {
+		t.Fatal(err)
+	}
+	reply = h.coreSays("close", step("fride_close", `{"thread":2}`))
+	if !strings.Contains(reply, "FrIDE #2 never became a task in FrIDE on ice/site, where it failed: closed here") {
+		t.Fatalf("fride_close of work FrIDE never started:\n%s", reply)
+	}
+	if th, err := h.b.store.GetFrideThread(context.Background(), 2); err != nil || th.State != store.FrideClosed {
+		t.Errorf("FrIDE #2: %+v %v", th, err)
+	}
+
 	// ice gets the token again: the waiting work starts site again
 	// there, which logs its agents in, and goes to it.
 	ice.setNoLogin("", nil)
