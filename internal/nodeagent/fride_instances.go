@@ -103,8 +103,11 @@ type FrideInstanceState struct {
 	// Problem says why the last start failed; "" when it did not. Notes
 	// say what did not work in the last start that did (a repository that
 	// did not clone, no Claude login), for as long as it runs.
-	Problem string    `json:"problem,omitempty"`
-	Notes   string    `json:"notes,omitempty"`
+	Problem string `json:"problem,omitempty"`
+	Notes   string `json:"notes,omitempty"`
+	// NoLogin says why its agents did not log in to Claude in the last
+	// start that worked; "" when they did.
+	NoLogin string    `json:"no_login,omitempty"`
 	Made    time.Time `json:"made,omitzero"`
 	Started time.Time `json:"started,omitzero"`
 }

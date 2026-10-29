@@ -864,3 +864,45 @@ func TestFrideInstanceOwnTemplateWins(t *testing.T) {
 		t.Errorf("not made from the node's own template: %v", calls)
 	}
 }
+
+// Without a Claude token, the node declares why its instances' agents
+// cannot log in, with the fix, and an instance started meanwhile says it
+// too; once the token is stored, both clear, and a start again (the
+// core's update) logs the running instance in.
+func TestFrideInstanceClaudeLogin(t *testing.T) {
+	t.Parallel()
+	f := newInstFix(t)
+	secrets := hostsecrets.Files{Dir: t.TempDir()}
+	f.a.CoreSecrets = secrets
+	f.fride("work")
+	out := f.start(workParams())
+	if out.State != nodeproto.FrideInstanceRunning || !strings.Contains(out.NoLogin, "no Claude token is stored for FrIDE's agents") ||
+		!strings.Contains(out.NoLogin, "fridolin node secrets set claude.oauth.token") {
+		t.Fatalf("start answered %+v", out)
+	}
+	f.a.frideHostRefresh(context.Background(), true)
+	c := f.a.frideHostDeclared()
+	if c == nil || !strings.Contains(c.NoLogin, "no Claude token is stored") || len(c.Instances) != 1 || c.Instances[0].NoLogin != out.NoLogin {
+		t.Fatalf("declared %+v", c)
+	}
+	if got := (nodeproto.Capabilities{FrideHost: c}).Summary(); got != "fride-host (no Claude login)" {
+		t.Errorf("summary %q", got)
+	}
+
+	if err := secrets.Set(hostsecrets.ClaudeOAuthToken, testClaudeToken); err != nil {
+		t.Fatal(err)
+	}
+	f.a.frideHostRefresh(context.Background(), true)
+	if c := f.a.frideHostDeclared(); c.NoLogin != "" || c.Instances[0].NoLogin == "" {
+		t.Fatalf("with the token, before the update: %+v", c)
+	}
+	p := workParams()
+	p.UpdateOnly = true
+	if out := f.start(p); out.NoLogin != "" || strings.Contains(out.Problem, "no Claude login") {
+		t.Errorf("the update answered %+v", out)
+	}
+	f.a.frideHostRefresh(context.Background(), true)
+	if c := f.a.frideHostDeclared(); c.NoLogin != "" || c.Instances[0].NoLogin != "" {
+		t.Errorf("after the update: %+v", c)
+	}
+}

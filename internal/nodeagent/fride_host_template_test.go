@@ -155,7 +155,7 @@ func TestFrideHostSetup(t *testing.T) {
 	if !strings.Contains(out.String(), "has the template") {
 		t.Errorf("setup again:\n%s", out)
 	}
-	r, err := FrideHostStatus(ctx, o.Dir, "")
+	r, err := FrideHostStatus(ctx, o.Dir, "", nil)
 	if err != nil || r.Host == nil || r.Declared == nil || r.Declared.Ready || !strings.Contains(r.Declared.Problem, "sbx is not installed") {
 		t.Errorf("status without sbx: %+v %v", r.Declared, err)
 	}

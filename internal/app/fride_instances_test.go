@@ -12,6 +12,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/manifest"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
+	"github.com/Icewater1337/fridolin/internal/store"
 )
 
 // frideInstancesConfig names two instances: work, on mini only, with the
@@ -395,5 +396,156 @@ func TestFrideSandboxTemplate(t *testing.T) {
 		if got := frideSandboxTemplate(func(n string) string { return env[n] }, c.version); got != c.want {
 			t.Errorf("%+v: %q", c, got)
 		}
+	}
+}
+
+// A node whose instances' agents cannot log in to Claude gets no new
+// instance and no work: the work waits, saying why and what fixes it,
+// and the owner is told once. Once the node has the token, the waiting
+// work goes there. An instance that runs without a login is started
+// again in place once its node has the token, which logs it in; while
+// its node has none, it is stopped there and started on a node that has
+// one, unless open threads keep it there, which the work is told.
+func TestFrideInstanceNoClaudeLogin(t *testing.T) {
+	t.Parallel()
+	optionsOf(t).waits.frideRetry = 100 * time.Millisecond
+	setenv(t, "FRIDOLIN_FAKE_MCP", "[]")
+	h := newServedHarness(t, `{"nodes": {"enabled": true, "listen": "127.0.0.1:8766"}, "fride": {"instances": {"site": {}, "docs": {}}}}`)
+	h.AddBrain(manifest.Manifest{ID: "core", Name: "Core", Role: manifest.RoleCore, Routing: manifest.Routing{HandlesDMs: true}})
+	addr := h.StartNodes()
+	const why = "no Claude token is stored for FrIDE's agents; there: fridolin node secrets set claude.oauth.token, with the token claude setup-token prints"
+	ice := h.fakeHostNode("ice", addr, 65536, 40000, 6144)
+	seen := func(f *fakeHost, host string) {
+		t.Helper()
+		h.WaitFor(f.name+" declares no_login "+host, func() bool {
+			n, err := h.b.nodes.Registry().Get(f.ID)
+			return err == nil && n.Declared.FrideHost != nil && n.Declared.FrideHost.NoLogin == host
+		})
+	}
+	ice.setNoLogin(why, nil)
+	seen(ice, why)
+
+	reply := h.coreSays("build", step("fride_task", `{"message":"Build the site","instance":"site"}`), step("fride_task", `{"message":"Build it again","instance":"site"}`))
+	if !strings.Contains(reply, "FrIDE #1 waits: the FrIDE instance site cannot take it now (the FrIDE instance site cannot start: no node can start FrIDE instances now (ice: its instances' agents cannot log in to Claude: "+why+"))") {
+		t.Fatalf("fride_task:\n%s", reply)
+	}
+	if n := len(instanceStarts(ice, "site")); n != 0 {
+		t.Fatalf("site started %d times on ice", n)
+	}
+	h.WaitSent(harnessDM, "⚠️ FrIDE instances on ice cannot log in to Claude, so the core starts none there and hands them no work: "+why+".")
+	told := func() int {
+		n := 0
+		for _, m := range h.SentTo(harnessDM) {
+			if strings.Contains(m, "FrIDE instances on ice cannot log in to Claude") {
+				n++
+			}
+		}
+		return n
+	}
+
+	// The token arrives: the waiting work goes there, and its agents log in.
+	ice.setNoLogin("", nil)
+	h.WaitSent(harnessDM, "🛠️ *FrIDE #1* went to ice/site now.")
+	h.WaitSent(harnessDM, "🛠️ *FrIDE #2* went to ice/site now.")
+	if in, _ := ice.Instance("site"); in.State != nodeproto.FrideInstanceRunning || in.NoLogin != "" {
+		t.Errorf("site on ice: %+v", in)
+	}
+
+	// docs runs on ice without a login, as it did before the node had the
+	// token: work for it starts it again there, which logs it in.
+	ice.setNoLogin("", map[string]string{"docs": why})
+	h.WaitFor("docs running on ice without a login", func() bool {
+		w, ok := locate("docs", h.b.fride.inst.views())
+		return ok && w.running() && w.in.NoLogin != ""
+	})
+	reply = h.coreSays("docs", step("fride_task", `{"message":"Write the docs","instance":"docs"}`))
+	if !strings.Contains(reply, "Handed to FrIDE on ice/docs as FrIDE #3") {
+		t.Fatalf("docs on ice:\n%s", reply)
+	}
+	if s := instanceStarts(ice, "docs"); len(s) != 1 {
+		t.Errorf("docs was started %d times on ice, not once to log it in", len(s))
+	}
+	if in, _ := ice.Instance("docs"); in.NoLogin != "" {
+		t.Errorf("docs on ice still has no login: %+v", in)
+	}
+
+	// ice loses the token while docs again runs without a login and has no
+	// open thread (closed): docs moves to mini, which has one.
+	th, err := h.b.store.GetFrideThread(context.Background(), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	th.State = store.FrideClosed
+	if err := h.b.store.SaveFrideThread(context.Background(), th); err != nil {
+		t.Fatal(err)
+	}
+	ice.setNoLogin(why, map[string]string{"docs": why})
+	seen(ice, why)
+	mini := h.fakeHostNode("mini", addr, 32768, 16000, 6144)
+	reply = h.coreSays("docs again", step("fride_task", `{"message":"Write more docs","instance":"docs"}`))
+	if !strings.Contains(reply, "Handed to FrIDE on mini/docs as FrIDE #4") || !strings.Contains(reply, "Started the FrIDE instance docs on mini") {
+		t.Fatalf("docs to mini:\n%s", reply)
+	}
+	if in, _ := ice.Instance("docs"); in.State != nodeproto.FrideInstanceStopped {
+		t.Errorf("docs was not stopped on ice: %+v", in)
+	}
+
+	// site runs on ice without a login and has open threads there: work
+	// for it waits, and says why.
+	ice.setNoLogin(why, map[string]string{"site": why})
+	h.WaitFor("site running on ice without a login", func() bool {
+		w, ok := locate("site", h.b.fride.inst.views())
+		return ok && w.in.NoLogin != ""
+	})
+	reply = h.coreSays("site again", step("fride_task", `{"message":"Fix the site","instance":"site"}`))
+	if !strings.Contains(reply, "has open threads on ice, which cannot log in FrIDE's agents to Claude: "+why) {
+		t.Fatalf("site with open threads on ice:\n%s", reply)
+	}
+	if n := told(); n != 1 {
+		t.Errorf("the owner was told %d times about ice", n)
+	}
+
+	// Work FrIDE never made a task of (it failed there without a login)
+	// closes here although site cannot take work, and no longer keeps
+	// site on ice.
+	th, err = h.b.store.GetFrideThread(context.Background(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	th.FrideStatus, th.TaskID = "failed", ""
+	if err := h.b.store.SaveFrideThread(context.Background(), th); err != nil {
+		t.Fatal(err)
+	}
+	reply = h.coreSays("close", step("fride_close", `{"thread":2}`))
+	if !strings.Contains(reply, "FrIDE #2 never became a task in FrIDE on ice/site, where it failed: closed here") {
+		t.Fatalf("fride_close of work FrIDE never started:\n%s", reply)
+	}
+	if th, err := h.b.store.GetFrideThread(context.Background(), 2); err != nil || th.State != store.FrideClosed {
+		t.Errorf("FrIDE #2: %+v %v", th, err)
+	}
+
+	// ice gets the token again: the waiting work starts site again
+	// there, which logs its agents in, and goes to it.
+	ice.setNoLogin("", nil)
+	h.WaitSent(harnessDM, "🛠️ *FrIDE #5* went to ice/site now.")
+	if in, _ := ice.Instance("site"); in.NoLogin != "" {
+		t.Errorf("site on ice still has no login: %+v", in)
+	}
+
+	// Without work waiting, the refresh gives an instance that runs
+	// without a login on a node with the token an update, which logs its
+	// agents in.
+	mini.setNoLogin("", map[string]string{"docs": why})
+	h.WaitFor("docs running on mini without a login", func() bool {
+		w, ok := locate("docs", h.b.fride.inst.views())
+		return ok && w.v.ID == mini.ID && w.in.NoLogin != ""
+	})
+	before := len(instanceStarts(mini, "docs"))
+	h.b.fride.inst.refreshAll(context.Background(), false)
+	if s := instanceStarts(mini, "docs"); len(s) != before+1 || !s[len(s)-1].UpdateOnly {
+		t.Errorf("docs's starts on mini: %d, then %+v", before, s)
+	}
+	if in, _ := mini.Instance("docs"); in.NoLogin != "" {
+		t.Errorf("docs on mini still has no login: %+v", in)
 	}
 }

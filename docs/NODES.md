@@ -2133,6 +2133,10 @@ How it runs there:
   host sbx-secret FILE`, by short paths without spaces, instead of
   `/bin/cat`. The history's and the carry's folders are theirs and
   SYSTEM's alone too, since `sbx cp` writes them as the user.
+- **The Claude token** of FrIDE's agents is the node's own, sealed in
+  its state dir: `fridolin node secrets set claude.oauth.token
+  --state-dir DIR` in an administrator PowerShell ([The Claude
+  login](#the-claude-login)).
 - **Memory**: `available_memory_mb` is what `GlobalMemoryStatusEx` calls
   available.
 - **Not yet on Windows**: shared caches (where sbx puts a Windows folder
@@ -2160,9 +2164,12 @@ core's placement:
   starts no instance into: 6144 MB, or `node.json`'s
   `"fride_host": {"reserve_mb": N}` (`host setup --reserve-mb N`
   writes it).
+- `no_login`: why its instances' agents cannot log in to Claude, with
+  the fix ([The Claude login](#the-claude-login)); absent when they can.
 - `instances`: each with its `state` (`starting`, `running`,
   `stopped`, `failed`), `memory_mb`, FrIDE's `url` and `repos` while it
-  runs, and a `problem`.
+  runs, a `problem`, and `no_login` when its agents did not log in at
+  its last start.
 
 The agent reads it again at most every minute, and right after an
 instance changes state. A node in a box never offers it.
@@ -2249,12 +2256,39 @@ The token is never an argument, a log line or chat.
 
 FrIDE starts its agents without any `CLAUDE_CODE_*` variable
 (`agent.CleanEnv`), so the token cannot come from `fride serve`'s
-environment. Each start puts the Claude token of this machine's host
-secret store (`fridolin.claude.oauth.token`, which `fridolin core
-secrets set claude.oauth.token` stores; on a Mac in the login keychain)
-where Claude Code reads it itself: `env.CLAUDE_CODE_OAUTH_TOKEN` in
-`~/.claude/settings.json` in the VM (0600), on stdin. Without it, FrIDE
-runs and the instance's `problem` says so.
+environment. Each start puts the Claude token of this machine's secret
+store (`fridolin.claude.oauth.token`) where Claude Code reads it
+itself: `env.CLAUDE_CODE_OAUTH_TOKEN` in `~/.claude/settings.json` in
+the VM (0600), on stdin.
+
+**Storing it**: the owner runs `claude setup-token` (anywhere Claude
+Code is logged in; it prints `sk-ant-oat…`) and types the token into
+
+```sh
+fridolin node secrets set claude.oauth.token
+```
+
+on the node, without echo; `fridolin node secrets` lists it. On macOS
+and Linux that is the store `fridolin core secrets` uses (on a Mac the
+login keychain). On Windows the node's service runs as LocalSystem,
+whose Credential Manager is not the owner's, so the node keeps it in
+its own store: sealed files in `node-secrets` in the state dir, under a
+key derived from its device key, as a box keeps host secrets. There it
+runs in an administrator PowerShell, with the service's state dir (the
+one the join printed; `no_login` names it):
+
+```powershell
+& "$env:ProgramFiles\fridolin\fridolin.exe" node secrets set claude.oauth.token --state-dir "<state dir>"
+```
+
+**Without it**, the node says so in `fride_host`'s `no_login`, with
+that command, and an instance that started meanwhile in its own
+`no_login`. The core then starts no instance on that node and hands no
+work to an instance whose agents did not log in: work that wanted one
+goes to another node that has the token, or waits and says why, and
+the owner hears it once in their chat. `fridolin doctor` warns until
+it is stored. The agent sees a stored token within a minute; the core's
+next start, or its refresh of a running instance, logs the agents in.
 
 This one token sits inside the VM, unlike the git tokens, until sbx
 can inject subscription logins: an agent turned against you could read

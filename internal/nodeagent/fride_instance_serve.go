@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
@@ -165,8 +166,17 @@ func (f *frideInstances) syncServe(ctx context.Context) {
 // instanceOps are the agent's instanceOps.
 func (a *Agent) instanceOps() instanceOps {
 	a.inst.init()
-	return instanceOps{dir: a.Dir, d: a.sbx(), out: &lineLogger{logf: a.logf, prefix: "node: ", left: 200}, secrets: a.CoreSecrets,
+	return instanceOps{dir: a.Dir, d: a.sbx(), out: &lineLogger{logf: a.logf, prefix: "node: ", left: 200}, secrets: a.frideSecrets(),
 		url: a.inst.url, wait: a.inst.wait, portBase: a.inst.portBase}
+}
+
+// frideSecrets is where FrIDE's Claude token is: FrideSecrets, else the
+// store core-host keeps host secrets in.
+func (a *Agent) frideSecrets() hostsecrets.Store {
+	if a.FrideSecrets != nil {
+		return a.FrideSecrets
+	}
+	return a.CoreSecrets
 }
 
 // frideServe is the held exec of an instance's serve script.

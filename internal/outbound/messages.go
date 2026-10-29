@@ -520,6 +520,13 @@ func FrideNotLoggedInNotice(thread int64, node, to, fix string) string {
 	return fmt.Sprintf("⚠️ *FrIDE #%d* could not start on %s: FrIDE's Claude there is not logged in, and no other node can take it now.\nTo fix it: %s. Then answer here to make it try again.", thread, node, fix)
 }
 
+// FrideHostNoLoginNotice tells the owner that work wanted a FrIDE
+// instance on node, whose instances' agents cannot log in to Claude, and
+// why, with what fixes it.
+func FrideHostNoLoginNotice(node, why string) string {
+	return fmt.Sprintf("⚠️ FrIDE instances on %s cannot log in to Claude, so the core starts none there and hands them no work: %s.\nOnce the token is stored, the core logs in the instance running there within a few minutes.", node, strings.TrimSuffix(why, "."))
+}
+
 // FridePlacedNotice says a waiting thread went to node.
 func FridePlacedNotice(thread int64, node string) string {
 	return fmt.Sprintf("🛠️ *FrIDE #%d* went to %s now.", thread, node)

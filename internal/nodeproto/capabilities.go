@@ -581,6 +581,8 @@ func (c Capabilities) Summary() string {
 		switch {
 		case !h.Ready:
 			parts = append(parts, "fride-host (not ready)")
+		case h.NoLogin != "":
+			parts = append(parts, "fride-host (no Claude login)")
 		case len(h.Instances) == 1:
 			parts = append(parts, "fride-host (1 instance)")
 		default:

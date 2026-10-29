@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/Icewater1337/fridolin/internal/hostsecrets"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 )
 
@@ -191,8 +192,9 @@ type FrideHostReport struct {
 }
 
 // FrideHostStatus looks at fride_host on the node in dir with the sbx at
-// sbx ("" for none), as the agent would declare it.
-func FrideHostStatus(ctx context.Context, dir, sbx string) (FrideHostReport, error) {
+// sbx ("" for none) and FrIDE's Claude token in secrets (nil for none),
+// as the agent would declare it.
+func FrideHostStatus(ctx context.Context, dir, sbx string, secrets hostsecrets.Store) (FrideHostReport, error) {
 	var r FrideHostReport
 	cfg, err := LoadConfig(dir)
 	if err != nil {
@@ -201,7 +203,7 @@ func FrideHostStatus(ctx context.Context, dir, sbx string) (FrideHostReport, err
 	if r.Host, err = LoadFrideHost(dir); err != nil {
 		return r, err
 	}
-	a := &Agent{Dir: dir, Config: cfg, SandboxSbx: sbx, Logf: func(string, ...any) {}}
+	a := &Agent{Dir: dir, Config: cfg, SandboxSbx: sbx, FrideSecrets: secrets, Logf: func(string, ...any) {}}
 	r.Declared = a.frideHostRead(ctx)
 	return r, nil
 }

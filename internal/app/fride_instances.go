@@ -20,6 +20,7 @@ import (
 	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/nodeproto"
 	"github.com/Icewater1337/fridolin/internal/nodes"
+	outboundmsg "github.com/Icewater1337/fridolin/internal/outbound"
 	"github.com/Icewater1337/fridolin/internal/store"
 )
 
@@ -64,6 +65,9 @@ type frideInstances struct {
 	active map[string]time.Time
 	failed map[string]frideFailure
 	sent   map[string]string
+	// toldNoLogin is, by node, the reason its instances' agents cannot
+	// log in to Claude that the owner was told of.
+	toldNoLogin map[string]string
 	// refresh asks the loop to give running instances what changed (true:
 	// even what did not).
 	refresh chan bool
@@ -80,7 +84,7 @@ type frideFailure struct {
 }
 
 func newFrideInstances(f *frideRuntime) *frideInstances {
-	return &frideInstances{f: f, active: map[string]time.Time{}, failed: map[string]frideFailure{}, sent: map[string]string{}, refresh: make(chan bool, 1)}
+	return &frideInstances{f: f, active: map[string]time.Time{}, failed: map[string]frideFailure{}, sent: map[string]string{}, toldNoLogin: map[string]string{}, refresh: make(chan bool, 1)}
 }
 
 // configured are the instances fride.instances names.
@@ -241,7 +245,39 @@ func allowedOn(ic config.FrideInstanceConfig, v nodes.View) bool {
 // needs.
 func hostReady(v nodes.View, tpl string) bool {
 	h := v.Effective.FrideHost
-	return v.Device == nodeproto.DeviceApproved && v.Online && h != nil && h.Ready && (tpl != "" || !h.NeedsTemplate)
+	return v.Device == nodeproto.DeviceApproved && v.Online && h != nil && h.Ready && (tpl != "" || !h.NeedsTemplate) && h.NoLogin == ""
+}
+
+// noLoginOn are the nodes instance config ic may run on that are ready
+// but whose instances' agents cannot log in to Claude, by id, with why.
+func noLoginOn(ic config.FrideInstanceConfig, views []nodes.View) map[string]frideNoLogin {
+	out := map[string]frideNoLogin{}
+	for _, v := range views {
+		h := v.Effective.FrideHost
+		if v.Device == nodeproto.DeviceApproved && v.Online && h != nil && h.Ready && h.NoLogin != "" && allowedOn(ic, v) {
+			out[v.ID] = frideNoLogin{node: v.Name, why: h.NoLogin}
+		}
+	}
+	return out
+}
+
+// frideNoLogin is a node whose instances' agents cannot log in to Claude.
+type frideNoLogin struct{ node, why string }
+
+// tellNoLogin tells the owner, once per node and reason while the core
+// runs, that work wanted a FrIDE instance where its agents cannot log in
+// to Claude, and how to fix it.
+func (i *frideInstances) tellNoLogin(on map[string]frideNoLogin) {
+	for _, id := range slices.Sorted(maps.Keys(on)) {
+		n := on[id]
+		i.st.Lock()
+		told := i.toldNoLogin[id] == n.why
+		i.toldNoLogin[id] = n.why
+		i.st.Unlock()
+		if !told {
+			i.f.b.tellOwner(outboundmsg.FrideHostNoLoginNotice(n.node, n.why))
+		}
+	}
 }
 
 // noTemplate says why a node that built no template cannot start
@@ -320,6 +356,8 @@ func noHost(name string, ic config.FrideInstanceConfig, views []nodes.View, pin,
 				why = "does not offer FrIDE instances now"
 			case v.Effective.FrideHost.Ready && v.Effective.FrideHost.NeedsTemplate && tpl == "":
 				why = "cannot start instances of this core: " + noTemplate
+			case v.Effective.FrideHost.Ready && v.Effective.FrideHost.NoLogin != "":
+				why = "cannot log in FrIDE's agents to Claude: " + v.Effective.FrideHost.NoLogin
 			default:
 				why = "cannot start instances now: " + orDefault(v.Effective.FrideHost.Problem, "its sandboxes are not ready")
 			}
@@ -339,6 +377,8 @@ func noHost(name string, ic config.FrideInstanceConfig, views []nodes.View, pin,
 			problems = append(problems, v.Name+": "+orDefault(v.Effective.FrideHost.Problem, "its sandboxes are not ready"))
 		case v.Effective.FrideHost.NeedsTemplate && tpl == "":
 			problems = append(problems, v.Name+": "+noTemplate)
+		case v.Effective.FrideHost.NoLogin != "":
+			problems = append(problems, v.Name+": its instances' agents cannot log in to Claude: "+v.Effective.FrideHost.NoLogin)
 		}
 	}
 	why := "no approved node offers FrIDE instances (fride_host)"
@@ -402,7 +442,7 @@ func (i *frideInstances) errUnknown(name string) error {
 // frideInstanceBackoff after a start that failed, and makes none in a
 // lockdown.
 func (i *frideInstances) ensure(ctx context.Context, name, size, by, why string, auto bool) (frideStarted, error) {
-	if w, ok := locate(name, i.views()); ok && w.running() {
+	if w, ok := locate(name, i.views()); ok && w.running() && w.in.NoLogin == "" {
 		i.touch(name)
 		return frideStarted{Name: name, Node: w.v.Name, NodeID: w.v.ID, MemoryMB: w.in.MemoryMB, Already: true}, nil
 	}
@@ -440,7 +480,17 @@ func (i *frideInstances) start(ctx context.Context, name, size, by, why string) 
 	views := i.views()
 	tries := frideTries(ic.MemoryMB, size)
 	pin := ""
-	if w, ok := locate(name, views); ok && w.running() {
+	// stale is where it runs with agents that did not log in to Claude:
+	// started again there once that node has the token, which logs them
+	// in; else stopped there and started on a node that has it, unless
+	// open threads keep it where it is.
+	var stale *frideWhere
+	if w, ok := locate(name, views); ok && w.running() && w.in.NoLogin != "" {
+		stale = &w
+		if hostReady(w.v, i.template()) {
+			pin = w.v.ID
+		}
+	} else if ok && w.running() {
 		if size == "" || ic.MemoryMB > 0 || w.in.MemoryMB == tries[0] {
 			i.touch(name)
 			return frideStarted{Name: name, Node: w.v.Name, NodeID: w.v.ID, MemoryMB: w.in.MemoryMB, Already: true}, nil
@@ -461,6 +511,7 @@ func (i *frideInstances) start(ctx context.Context, name, size, by, why string) 
 		}
 	}
 	hosts := i.hosts(name, ic, views, pin, open)
+	i.tellNoLogin(noLoginOn(ic, views))
 	if len(hosts) == 0 {
 		return frideStarted{}, i.fail(name, by, why, apperr.New(apperr.Unavailable, noHost(name, ic, views, pin, i.template())), false)
 	}
@@ -470,6 +521,11 @@ func (i *frideInstances) start(ctx context.Context, name, size, by, why string) 
 	}
 	node := hosts[slices.IndexFunc(hosts, func(h frideHost) bool { return h.ID == spot.Node })]
 	out := frideStarted{Name: name, Node: node.Name, NodeID: node.ID, MemoryMB: spot.MemoryMB, Wanted: tries[0]}
+	if stale != nil && stale.v.ID != node.ID {
+		if err := i.stopOn(ctx, stale.v.ID, stale.v.Name, name, by, "its agents cannot log in to Claude there; it starts on "+node.Name); err != nil {
+			return frideStarted{}, i.fail(name, by, why, fmt.Errorf("stopping it on %s, where its agents cannot log in to Claude: %w", stale.v.Name, err), true)
+		}
+	}
 	for _, other := range spot.Stop {
 		if err := i.stopOn(ctx, node.ID, node.Name, other, frideByRoom, "to make room for "+name); err != nil {
 			return frideStarted{}, i.fail(name, by, why, fmt.Errorf("making room on %s: %w", node.Name, err), true)
@@ -648,7 +704,9 @@ func (i *frideInstances) refreshAll(ctx context.Context, again bool) {
 		i.st.Lock()
 		same := i.sent[name] == fp
 		i.st.Unlock()
-		if same && !again {
+		if same && !again && w.in.NoLogin == "" {
+			// Its agents logged in; one that did not is given the
+			// token now that its node has one.
 			continue
 		}
 		// Only an update: an instance stopped since the declaration the

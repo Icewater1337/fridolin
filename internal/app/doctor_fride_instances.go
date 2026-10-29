@@ -86,6 +86,8 @@ func frideInstanceProblems(env *doctor.Env, name string, ic config.FrideInstance
 			notReady = append(notReady, n.Name+": "+orDefault(fh.Problem, "its sandboxes are not ready"))
 		case fh.NeedsTemplate && tpl == "":
 			notReady = append(notReady, n.Name+": "+noTemplate)
+		case fh.NoLogin != "":
+			notReady = append(notReady, n.Name+": its instances' agents cannot log in to Claude")
 		case fh.TotalMemoryMB > 0 && fh.TotalMemoryMB-fh.ReserveMB < least:
 			small = append(small, fmt.Sprintf("%s (%d MB beyond its reserve)", n.Name, fh.TotalMemoryMB-fh.ReserveMB))
 		default:
@@ -136,10 +138,29 @@ func checkFrideInstances(ctx context.Context, env *doctor.Env) doctor.Result {
 			ok = append(ok, name)
 		}
 	}
-	if len(bad) > 0 {
-		return doctor.Result{Status: doctor.Warn,
-			Detail: fmt.Sprintf("%d of %d FrIDE instances cannot run: %s", len(bad), len(bad)+len(ok), strings.Join(bad, "; ")),
-			Fix:    "on a node that is to run them, run fridolin node fride host setup and approve what it offers on the Nodes page (fride.instances.<name>.nodes names where each may run); connect the identities an instance names on the dashboard's Integrations page"}
+	// A node whose instances' agents cannot log in to Claude gets no work,
+	// even while another node takes it.
+	var noLogin, loginFix []string
+	for _, n := range list {
+		if n.Device != nodeproto.DeviceApproved || n.Approved.FrideHost == nil || n.Declared.FrideHost == nil || n.stale(env.Time()) {
+			continue
+		}
+		if fh := n.Declared.FrideHost; fh.Ready && fh.NoLogin != "" {
+			noLogin = append(noLogin, n.Name)
+			loginFix = append(loginFix, n.Name+": "+fh.NoLogin)
+		}
+	}
+	if len(bad) > 0 || len(noLogin) > 0 {
+		var detail, fix []string
+		if len(bad) > 0 {
+			detail = append(detail, fmt.Sprintf("%d of %d FrIDE instances cannot run: %s", len(bad), len(bad)+len(ok), strings.Join(bad, "; ")))
+			fix = append(fix, "on a node that is to run them, run fridolin node fride host setup and approve what it offers on the Nodes page (fride.instances.<name>.nodes names where each may run); connect the identities an instance names on the dashboard's Integrations page")
+		}
+		if len(noLogin) > 0 {
+			detail = append(detail, "FrIDE instances on "+strings.Join(noLogin, ", ")+" cannot log in to Claude, so the core gives them no work")
+			fix = append(fix, strings.Join(loginFix, "; "))
+		}
+		return doctor.Result{Status: doctor.Warn, Detail: strings.Join(detail, "; "), Fix: strings.Join(fix, "; ")}
 	}
 	return doctor.Result{Status: doctor.OK, Detail: "each can start on an approved node, with its identities: " + strings.Join(ok, ", ")}
 }

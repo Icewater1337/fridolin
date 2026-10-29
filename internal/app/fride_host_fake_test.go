@@ -185,6 +185,28 @@ func (f *fakeHost) declare() {
 	f.send(nodeproto.TypeDeclare, "", nodeproto.Declare{Capabilities: f.declared()})
 }
 
+// setNoLogin sets why the node's instances' agents cannot log in to
+// Claude ("" when they can), adds or changes the running instances in
+// running (name → why its agents did not log in), and declares it.
+func (f *fakeHost) setNoLogin(why string, running map[string]string) {
+	f.mu.Lock()
+	f.cap.NoLogin = why
+	for name, no := range running {
+		in := f.cap.Instance(name)
+		if in == nil {
+			f.cap.Instances = append(f.cap.Instances, nodeproto.FrideInstance{Name: name})
+			in = &f.cap.Instances[len(f.cap.Instances)-1]
+		}
+		if in.State != nodeproto.FrideInstanceRunning {
+			in.MemoryMB = 3072
+			f.cap.AvailableMemoryMB -= in.MemoryMB
+		}
+		in.State, in.URL, in.NoLogin = nodeproto.FrideInstanceRunning, "http://127.0.0.1:17852", no
+	}
+	f.mu.Unlock()
+	f.declare()
+}
+
 // emit sends FrIDE's news, as the node relays it.
 func (f *fakeHost) emit(ev nodeproto.FrideEvent) {
 	data, _ := json.Marshal(ev)
@@ -271,7 +293,8 @@ func (f *fakeHost) handle(req nodeproto.Request) (any, *nodeproto.Error) {
 			f.cap.AvailableMemoryMB += in.MemoryMB
 		}
 		f.cap.AvailableMemoryMB -= p.MemoryMB
-		in.State, in.MemoryMB, in.URL, in.Problem = nodeproto.FrideInstanceRunning, p.MemoryMB, "http://127.0.0.1:17850", ""
+		// Its agents log in when the node has the token.
+		in.State, in.MemoryMB, in.URL, in.Problem, in.NoLogin = nodeproto.FrideInstanceRunning, p.MemoryMB, "http://127.0.0.1:17850", "", f.cap.NoLogin
 		in.Repos = nil
 		for _, r := range p.Repos {
 			in.Repos = append(in.Repos, strings.TrimSuffix(r[strings.LastIndex(r, "/")+1:], ".git"))

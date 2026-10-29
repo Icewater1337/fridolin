@@ -28,6 +28,7 @@ func TestDoctorFrideInstances(t *testing.T) {
 		"fridolin": {Identities: []string{"github"}},
 	}
 	needsTemplate := strings.Replace(host("a", "mini", ""), `"reserve_mb":6144,`, `"reserve_mb":6144,"needs_template":true,`, 1)
+	noLogin := strings.Replace(host("a", "mini", ""), `"reserve_mb":6144,`, `"reserve_mb":6144,"no_login":"no Claude token is stored for FrIDE's agents; there: fridolin node secrets set claude.oauth.token",`, 1)
 	tests := []struct {
 		name, nodes string
 		live        string
@@ -45,6 +46,8 @@ func TestDoctorFrideInstances(t *testing.T) {
 		{"a GitHub app that may only read", `{"nodes":[` + host("a", "mini", "") + `]}`, `{"identities":[{"id":"github","set":true,"note":"the GitHub app may only read code"},{"id":"gitlab","set":true}]}`, false, "", doctor.Warn, "1 of 2 FrIDE instances cannot run: fridolin: the core cannot hand out its github identity: the GitHub app may only read code"},
 		{"no template for a node that built none", `{"nodes":[` + needsTemplate + `]}`, "", true, "", doctor.Warn, "fridolin: no node can run it (mini: it built no FrIDE template, and this core does not know where its images are published (FRIDOLIN_BOX_REGISTRY)"},
 		{"the core's template", `{"nodes":[` + needsTemplate + `]}`, "", true, "ghcr.io/you", doctor.OK, "each can start on an approved node, with its identities: fridolin, work"},
+		{"no Claude login", `{"nodes":[` + noLogin + `]}`, "", true, "", doctor.Warn, "2 of 2 FrIDE instances cannot run: fridolin: no node can run it (mini: its instances' agents cannot log in to Claude)"},
+		{"no Claude login on another", `{"nodes":[` + host("a", "mini", "") + `,` + strings.Replace(noLogin, `"id":"a","name":"mini"`, `"id":"b","name":"ice"`, 1) + `]}`, "", true, "", doctor.Warn, "FrIDE instances on ice cannot log in to Claude, so the core gives them no work"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -81,6 +84,9 @@ func TestDoctorFrideInstances(t *testing.T) {
 			}
 			if got.Status != doctor.OK && got.Fix == "" {
 				t.Error("a warning without a fix")
+			}
+			if strings.Contains(tc.nodes, "no_login") && !strings.Contains(got.Fix, "fridolin node secrets set claude.oauth.token") {
+				t.Errorf("the fix does not say how to log in: %q", got.Fix)
 			}
 		})
 	}

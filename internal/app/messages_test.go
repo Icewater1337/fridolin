@@ -191,6 +191,7 @@ func catalogue() []struct{ name, text string } {
 		{"frideQueuedNotice", outboundmsg.FrideQueuedNotice(3, "laptop: not enough memory for another stack")},
 		{"frideNotLoggedInNotice(moved)", outboundmsg.FrideNotLoggedInNotice(3, "box", "laptop", nodeproto.FrideLoginFix)},
 		{"frideNotLoggedInNotice(stays)", outboundmsg.FrideNotLoggedInNotice(3, "box", "", nodeproto.FrideLoginFix)},
+		{"frideHostNoLoginNotice", outboundmsg.FrideHostNoLoginNotice("icebase", `no Claude token is stored for FrIDE's agents; in an administrator PowerShell there: fridolin node secrets set claude.oauth.token --state-dir "C:\Users\you\.fridolin-node", with the token claude setup-token prints`)},
 		{"fridePlacedNotice", outboundmsg.FridePlacedNotice(3, "laptop")},
 		{"frideInstanceQueuedNotice", outboundmsg.FrideInstanceQueuedNotice(4, "work", "no node has room for the FrIDE instance work (6144 MB, or 3072 MB at the least): mini has 1000 MB free beyond its reserve")},
 		{"frideInstanceSmallerNotice", outboundmsg.FrideInstanceSmallerNotice("work", "mini", 3072, 6144)},

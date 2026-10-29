@@ -372,6 +372,7 @@ export default /** @satisfies {PageModule} */ ({
         h('div', h('strong', 'FrIDE instances: '), cap.version ? `sbx ${cap.version}` : 'sbx', ' · ',
           cap.ready ? 'ready' : h('span.warn-text', cap.problem ? `not ready: ${cap.problem}` : 'not ready'),
           h('span.muted', ` · memory ${hostMemoryText(cap)}`)),
+        cap.ready && cap.no_login ? h('div.warn-text', `No Claude login for its agents, so the core gives them no work: ${cap.no_login}`) : null,
         instances.length
           ? h('ul.plain-list.fride-host-instances', instances.map((i) => h('li',
             h('span', mono(i.name), ' ', instanceBadge(i.state),

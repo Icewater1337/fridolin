@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -199,25 +200,40 @@ func (o instanceOps) remake(ctx context.Context, st *FrideInstanceState, host *F
 	return nil
 }
 
-// login stores the Claude token for FrIDE's agents in the sandbox, from
-// the host's secret store: on stdin, never as an argument. It says why
-// there is none.
-func (o instanceOps) login(ctx context.Context, sandbox string) string {
+// claudeToken is the Claude token FrIDE's agents log in with, from the
+// node's secret store (FrideSecretStore), or why there is none, with what
+// fixes it.
+func (o instanceOps) claudeToken() (tok, why string) {
 	if o.secrets == nil {
-		return "no Claude login for FrIDE's agents: this machine has no secret store"
+		return "", "the node keeps no secrets: it was started without a secret store"
 	}
 	tok, err := o.secrets.Get(hostsecrets.ClaudeOAuthToken)
-	if err == nil {
+	switch {
+	case errors.Is(err, hostsecrets.ErrNotFound):
+		return "", "no Claude token is stored for FrIDE's agents; " + claudeTokenFix(runtime.GOOS, o.dir)
+	case err == nil:
 		tok, err = CheckClaudeToken(tok)
 	}
 	if err != nil {
-		return fmt.Sprintf("no Claude login for FrIDE's agents: %s in this machine's secret store: %v (fridolin core secrets set claude.oauth.token)", hostsecrets.ClaudeOAuthToken, err)
+		return "", fmt.Sprintf("the Claude token for FrIDE's agents does not read (%v); %s", err, claudeTokenFix(runtime.GOOS, o.dir))
+	}
+	return tok, ""
+}
+
+// login stores the Claude token for FrIDE's agents in the sandbox, from
+// the node's secret store: on stdin, never as an argument. It says why
+// they have none; noLogin is that reason when the node has no token.
+func (o instanceOps) login(ctx context.Context, sandbox string) (problem, noLogin string) {
+	tok, why := o.claudeToken()
+	if why != "" {
+		return "no Claude login for FrIDE's agents: " + why, why
 	}
 	if _, stderr, err := o.d.run(ctx, strings.NewReader(tok+"\n"), nil,
 		append([]string{"exec", "-i", sandbox}, frideInstanceScript(frideInstanceLogin)...)...); err != nil {
-		return "storing the Claude login in the sandbox: " + strings.ReplaceAll(sbxError(err, lastLineOf(stderr)).Error(), tok, "…")
+		why := "storing the Claude login in the sandbox: " + strings.ReplaceAll(sbxError(err, lastLineOf(stderr)).Error(), tok, "…")
+		return why, why
 	}
-	return ""
+	return "", ""
 }
 
 // CheckClaudeToken is token as `claude setup-token` prints it, without
