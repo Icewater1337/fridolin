@@ -133,6 +133,7 @@ class SyncService : Service() {
     private var runJob: Job? = null
     private var pulled = 0
     private var misses = 0
+    private var lastCheckIn = -SyncPolicy.UNLOCK_GAP_MS
     private var nextCheckIn = 0L
     private var leaving = false
     private var unpairing = false
