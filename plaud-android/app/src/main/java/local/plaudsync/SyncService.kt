@@ -128,8 +128,11 @@ class SyncService : Service() {
     private var cloudBound = false
     // Check-ins (SyncPolicy): the pin as last found, misses in a row, when the last one started
     private var device: BleDevice? = null
+    private val pinAddress = PinAddress()
+    private val stall = StallWatch(System::currentTimeMillis)
+    private var runJob: Job? = null
+    private var pulled = 0
     private var misses = 0
-    private var lastCheckIn = -SyncPolicy.UNLOCK_GAP_MS
     private var nextCheckIn = 0L
     private var leaving = false
     private var unpairing = false
@@ -192,7 +195,50 @@ class SyncService : Service() {
         registerReceiver(charging, IntentFilter(Intent.ACTION_POWER_CONNECTED))
         watch = PinWatch(this) { dev, adv -> scope.launch { onSeen(dev, adv) } }
         AppLog.i("service started")
-        scope.launch { run() }
+        runJob = scope.launch { run() }
+        scope.launch { watchdog() }
+    }
+
+    /**
+     * Nothing may leave the sync standing still without a word. Every minute the state is looked at:
+     * the same busy state for too long (a connect, scan or download the SDK never answers, an
+     * error that left a flag set), an alarm that never came, or a start-up that died, and the
+     * sync is reset and begun again, with a line in the log saying so.
+     */
+    private suspend fun watchdog() {
+        while (true) {
+            delay(60_000)
+            val now = System.currentTimeMillis()
+            val busy = connecting || searching || connected || exporting != null
+            val key: String
+            val limit: Long
+            when {
+                !sdkReady -> { key = "start"; limit = 10 * 60_000L; if (runJob?.isActive == true) continue }
+                exporting != null -> { key = "exporting $exporting ${queue.size}"; limit = 45 * 60_000L }
+                connected && SyncPolicy.stayConnected(SyncPrefs.mode(this), recordingSid != null, unpairing) -> continue
+                busy -> { key = "busy $connecting $searching $connected ${queue.size} $leaving"; limit = 8 * 60_000L }
+                savedSn != null && nextCheckIn > 0 && now > nextCheckIn + 5 * 60_000L -> { key = "overdue $nextCheckIn"; limit = 5 * 60_000L }
+                else -> { key = "idle"; limit = Long.MAX_VALUE }
+            }
+            if (!stall.stalled(key, limit)) continue
+            AppLog.i("watchdog: the sync stood still ($key), starting over")
+            setStatus("Sync stalled, restarted ${clock(now)}")
+            if (!sdkReady) {
+                runJob = scope.launch { run() }
+                continue
+            }
+            runCatching { PlaudDeviceAgent.stopScan() }
+            runCatching { PlaudDeviceAgent.disconnect() }
+            endSearch()
+            watch.stop()
+            connectTimeout?.cancel()
+            idleJob?.cancel()
+            connecting = false; connected = false; leaving = false
+            exporting = null; recordingSid = null; listAgain = false
+            queue.clear()
+            if (wakeLock.isHeld) wakeLock.release()
+            checkIn(Trigger.TIMER)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -404,7 +450,7 @@ class SyncService : Service() {
         idleJob?.cancel()
         when {
             wasConnecting -> {
-                AppLog.i("connect failed (state $state)" + if (pairing) ". If this repeats, the NotePin is probably still bound to the Plaud app" else "")
+                AppLog.i("connect failed (state $state)" + if (pairing) ". If this repeats, the NotePin is probably still bound to the Plaud app" else ", will retry")
                 missed(seen = true)
             }
             wasConnected && leaving -> {
@@ -434,7 +480,7 @@ class SyncService : Service() {
             savedSn = sn
             SyncPrefs.setAdvertSignal(this, AdvertSignal())
             AppLog.i("paired with ${sn.take(3)}…${sn.takeLast(4)}")
-        } else if (SyncPrefs.mode(this) == SyncMode.INSTANT) {
+        } else {
             AppLog.i("connected")
         }
         device?.let { SyncPrefs.setDevice(this, it) }
@@ -459,6 +505,8 @@ class SyncService : Service() {
 
     /** Nothing left to fetch: let the pin go, unless [SyncPolicy.stayConnected] keeps the link. */
     private fun syncDone() {
+        AppLog.i("sync done: $pulled recording(s) pulled")
+        pulled = 0
         if (wakeLock.isHeld) wakeLock.release()
         if (advertCheckIn) learnAdvert(advertHit)
         if (SyncPolicy.stayConnected(SyncPrefs.mode(this), recordingSid != null, unpairing)) {
@@ -515,8 +563,8 @@ class SyncService : Service() {
         misses++
         lastMissUnseen = !seen
         val wait = SyncPolicy.backoff(SyncPrefs.mode(this), SyncPrefs.minutes(this), voice, misses)
-        if (misses == 1 || misses % 10 == 0) {
-            AppLog.i((if (seen) "NotePin seen but not connected ($misses): still bound to the Plaud app?"
+        if (seen || misses == 1 || misses % 10 == 0) {
+            AppLog.i((if (seen) "NotePin seen but not connected ($misses): the Plaud app may still hold it, or the link failed."
                 else "NotePin not seen ($misses): out of range?") +
                 " Next try in ${wait / 1000}s" + if (seen) "" else ", or when it is back in range")
         }
@@ -545,8 +593,8 @@ class SyncService : Service() {
     private fun onSeen(dev: BleDevice, adv: ByteArray) {
         if (savedSn == null || dev.getSerialNumber() != savedSn) return
         if (seeking) {
-            val before = device?.getMacAddress()
-            if (before != null && before != dev.getMacAddress()) AppLog.i("the NotePin's Bluetooth address changed since it was last found")
+            // The pin is matched by serial number above; a rotated address is only noted, never acted on
+            if (pinAddress.changed(dev.getMacAddress())) AppLog.d("the NotePin's Bluetooth address changed")
             return connect(dev)
         }
         if (connected || connecting || leaving || searching) return
@@ -626,6 +674,7 @@ class SyncService : Service() {
         // Saved earlier but the delete didn't stick: retry the delete instead of downloading again
         onDevice.filter { it in synced }.forEach { PlaudDeviceAgent.deleteFile(it) }
         prefs.edit().putStringSet("synced", synced.filter { it in onDevice }.map { it.toString() }.toSet()).apply()
+        AppLog.i("files listed: ${onDevice.size} on device")
         val fresh = onDevice
             .filter { it !in synced && it != exporting && it != recordingSid && it !in queue }
             .sorted()
@@ -678,6 +727,7 @@ class SyncService : Service() {
                 check(part.renameTo(File(pendingDir, "$name.mp3"))) { "could not keep $name.mp3 for transcription" }
                 file.delete()
             }
+            pulled++
             AppLog.i("saved $name.mp3 ($kb KB)")
             PlaudDeviceAgent.getChargingState() // → bleChargingState: the pin's battery, logged with each recording
             // Only now is the audio safe on the phone, so free it on the device

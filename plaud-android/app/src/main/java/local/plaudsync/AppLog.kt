@@ -36,6 +36,11 @@ object AppLog {
         onChange?.invoke()
     }
 
+    /** Debug detail for logcat only; it stays out of the file the user shares. */
+    fun d(msg: String) {
+        Log.d("PlaudSync", msg)
+    }
+
     @Synchronized
     fun tail(n: Int): List<String> = file?.takeIf { it.exists() }?.readLines()?.takeLast(n).orEmpty()
 }
