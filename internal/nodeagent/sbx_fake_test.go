@@ -1,6 +1,8 @@
 package nodeagent
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -179,6 +181,8 @@ func fakeExec(dir string, args []string, tok string) int {
 	case cmd[0] == "sh" && strings.HasPrefix(cmd[2], "kill -"):
 		sig := strings.Fields(strings.TrimPrefix(cmd[2], "kill -"))[0]
 		appendFile(vmPath(dir, cmd[3])+".signal", sig+"\n")
+	case cmd[0] == "tar":
+		return fakeTar(dir, args[0], cmd[1:])
 	case cmd[0] == "true":
 	case cmd[0] == "rm":
 		for _, f := range cmd[2:] {
@@ -250,4 +254,107 @@ func fakeAgentRun(dir, pidFile string, argv, env []string, tok string) int {
 		sleepMS(10)
 	}
 	return 99
+}
+
+// fakeTar is `tar -cz -C DIR PATH…` (to stdout) and `tar -xz -C DIR`
+// (from stdin) in the VM's home, keeping symlinks as tar does.
+func fakeTar(dir, sandbox string, args []string) int {
+	if len(args) < 3 || args[1] != "-C" || args[2] != fakeVMHome {
+		fmt.Fprintf(os.Stderr, "the fake tars only under %s: %v\n", fakeVMHome, args)
+		return 2
+	}
+	home := filepath.Join(dir, "vmhome", sandbox)
+	var err error
+	if args[0] == "-cz" {
+		err = tarCreate(home, args[3:], os.Stdout)
+	} else {
+		err = tarExtract(home, os.Stdin)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "tar:", err)
+		return 2
+	}
+	return 0
+}
+
+func tarCreate(home string, paths []string, w io.Writer) error {
+	gz := gzip.NewWriter(w)
+	tw := tar.NewWriter(gz)
+	for _, p := range paths {
+		err := filepath.WalkDir(filepath.Join(home, p), func(f string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			fi, err := os.Lstat(f)
+			if err != nil {
+				return err
+			}
+			link := ""
+			if fi.Mode()&os.ModeSymlink != 0 {
+				if link, err = os.Readlink(f); err != nil {
+					return err
+				}
+			}
+			h, err := tar.FileInfoHeader(fi, link)
+			if err != nil {
+				return err
+			}
+			h.Name, _ = filepath.Rel(home, f)
+			h.Name = filepath.ToSlash(h.Name)
+			if err := tw.WriteHeader(h); err != nil {
+				return err
+			}
+			if fi.Mode().IsRegular() {
+				b, err := os.ReadFile(f)
+				if err != nil {
+					return err
+				}
+				_, err = tw.Write(b)
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	if err := tw.Close(); err != nil {
+		return err
+	}
+	return gz.Close()
+}
+
+func tarExtract(home string, r io.Reader) error {
+	gz, err := gzip.NewReader(r)
+	if err != nil {
+		return err
+	}
+	tr := tar.NewReader(gz)
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		out := filepath.Join(home, filepath.FromSlash(h.Name))
+		switch h.Typeflag {
+		case tar.TypeDir:
+			err = os.MkdirAll(out, 0o755)
+		case tar.TypeSymlink:
+			_ = os.MkdirAll(filepath.Dir(out), 0o755)
+			_ = os.Remove(out)
+			err = os.Symlink(h.Linkname, out)
+		default:
+			_ = os.MkdirAll(filepath.Dir(out), 0o755)
+			var b []byte
+			if b, err = io.ReadAll(tr); err == nil {
+				err = os.WriteFile(out, b, 0o644)
+			}
+		}
+		if err != nil {
+			return err
+		}
+	}
 }

@@ -941,3 +941,43 @@ func TestFrideInstanceLentLogin(t *testing.T) {
 		t.Errorf("a lent token that does not read: %+v", out)
 	}
 }
+
+// A remake carries repositories out as a tarball made in the VM, so that
+// no symlink is created on the host (Windows refuses them), and puts the
+// symlink back; an older carry of plain files is still put back.
+func TestFrideInstanceRemakeCarriesSymlinksAsTarball(t *testing.T) {
+	t.Parallel()
+	f := newInstFix(t)
+	f.fride("work")
+	f.start(workParams())
+	writeTestFile(t, f.home("work", "fride-companion/repos/app/cmd/testdata/x"), "x")
+	if err := os.Symlink("../../cmd/testdata", f.home("work", "fride-companion/repos/app/testdata")); err != nil {
+		t.Fatal(err)
+	}
+	p := workParams()
+	p.MemoryMB = 8192
+	f.start(p)
+	if got, err := os.Readlink(f.home("work", "fride-companion/repos/app/testdata")); err != nil || got != "../../cmd/testdata" {
+		t.Errorf("the symlink after the remake: %q %v", got, err)
+	}
+	for _, c := range fakeCalls(t, f.fake) {
+		if len(c.Args) > 1 && c.Args[0] == "cp" && strings.Contains(strings.Join(c.Args, " "), "repos") {
+			t.Errorf("the repositories went out with sbx cp: %v", c.Args)
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(f.a.instanceOps().carryDir("work"), "fride-companion")); err == nil {
+		t.Error("the carry holds plain files")
+	}
+}
+
+// A carry an older version left, of plain files, is put back.
+func TestFrideInstanceOldCarryStillRestored(t *testing.T) {
+	t.Parallel()
+	f := newInstFix(t)
+	f.fride("work")
+	writeTestFile(t, filepath.Join(f.a.instanceOps().carryDir("work"), "fride-companion/repos/r/README"), "r")
+	f.start(workParams())
+	if got, _ := os.ReadFile(f.home("work", "fride-companion/repos/r/README")); string(got) != "r" {
+		t.Errorf("after the start: %q", got)
+	}
+}

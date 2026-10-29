@@ -2370,7 +2370,11 @@ owned by the VM's user. A save that fails keeps the sandbox.
 A remake (another memory, or a new template) keeps more: it ends FrIDE,
 saves the history, the workspaces, the repositories, the Claude login
 and Claude Code's and git's settings into `fride-instances/<name>/carry/`,
-makes the sandbox anew, puts them back, and removes the carry. Should
+makes the sandbox anew, puts them back, and removes the carry. The
+repositories, workspaces and settings go out as one tarball (`carry.tar.gz`)
+that tar makes in the VM and the new sandbox unpacks, so that no symlink of a
+repository is ever created on the host (Windows refuses them without a
+privilege); a carry of plain files from an older version is still put back. Should
 it fail on the way, the carry stays, and the next start finishes it.
 What Docker held in the old VM (images, volumes) does not come along.
 
