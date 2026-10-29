@@ -142,3 +142,36 @@ func TestFrideInstanceRemoveAfterFailedRemake(t *testing.T) {
 		t.Error("the carry stayed")
 	}
 }
+
+// A remake that fails with the old sandbox in place leaves the instance's
+// state as it was and removes the partial carry, so the next start makes
+// the sandbox anew instead of reporting the new memory over the old VM.
+func TestFrideInstanceFailedRemakeKeepsState(t *testing.T) {
+	t.Parallel()
+	f := newInstFix(t)
+	f.fride("work")
+	f.start(workParams())
+	o := f.a.instanceOps()
+	writeTestFile(t, f.home("work", ".claude/projects/p1/a.jsonl"), "session")
+	writeTestFile(t, filepath.Join(f.fake, "fail-cp"), "no space\n")
+	p := workParams()
+	p.MemoryMB = 8192
+	if _, perr := f.a.frideInstanceStart(context.Background(), p); perr == nil {
+		t.Fatalf("the remake did not fail\n%s", f.log)
+	}
+	if o.carrying("work") {
+		t.Error("the partial carry stayed")
+	}
+	if st, err := loadFrideInstance(f.a.Dir, "work"); err != nil || st.MemoryMB != workParams().MemoryMB {
+		t.Fatalf("state after the failed remake: %+v, %v", st, err)
+	}
+	if err := os.Remove(filepath.Join(f.fake, "fail-cp")); err != nil {
+		t.Fatal(err)
+	}
+	if out := f.start(p); out.MemoryMB != 8192 {
+		t.Errorf("the next start: %+v", out)
+	}
+	if !called(fakeCalls(t, f.fake), "create", "--name", "fride-work", "--memory", "8192m") {
+		t.Error("the next start did not remake")
+	}
+}
