@@ -8,6 +8,17 @@ for compatibility.
 
 ## Unreleased
 
+### Fixed
+
+- **The Plaud Sync app no longer stalls silently.** A connect, scan or
+  download the Bluetooth SDK never answered could leave the sync waiting
+  for good, with nothing in the log. A watchdog now notices a sync that
+  stands still (or a lost alarm) and starts it over, logging
+  "watchdog: the sync stood still". The log also says each step now:
+  connected, files listed, recordings pulled, and every failed connect
+  with its retry; the pin's rotating Bluetooth address is noted once, in
+  logcat only.
+
 ### Added
 
 - **FrIDE instances on Windows can log in to Claude, and work never goes
