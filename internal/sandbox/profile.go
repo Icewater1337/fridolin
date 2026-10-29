@@ -569,9 +569,10 @@ func (sp Policy) profile(brainID string) (string, error) {
 	// next sign-in through it, and chmod what it points to.
 	if sp.PlaudShared {
 		plaud := filepath.Join(home, ".plaud")
-		tokens := filepath.Join(plaud, "tokens.json")
-		b.allow("file-write-data", "literal", tokens)
-		b.allow("file-write-mode", "literal", tokens)
+		for _, f := range []string{"tokens.json", "plaud-secrets"} { // plaud.LoginFiles
+			b.allow("file-write-data", "literal", filepath.Join(plaud, f))
+			b.allow("file-write-mode", "literal", filepath.Join(plaud, f))
+		}
 		b.allow("file-write-mode", "literal", plaud)
 	}
 	// The folders above those places, and above the brain's folder, may be

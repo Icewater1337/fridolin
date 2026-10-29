@@ -10,6 +10,18 @@ for compatibility.
 
 ### Fixed
 
+- **A Plaud login kept in `plaud-secrets` is now seen and shared.** Later
+  versions of Plaud's CLI keep the login in `~/.plaud/plaud-secrets`
+  instead of `tokens.json`. Fridolin looked only for `tokens.json`, so
+  that login read as signed out (recordings stopped arriving) and, with
+  "Let brains use the Plaud CLI", brains could not save a refreshed login
+  and their `plaud` failed with `[AUTH_FAILED]`. Fridolin now treats both
+  files as the login: it checks neither is a link, removes both on
+  sign-out, and lets brains rewrite whichever exists in place, so
+  there is one live login for the bridge and the brains.
+
+### Fixed
+
 - **The Plaud Sync app no longer stalls silently.** A connect, scan or
   download the Bluetooth SDK never answered could leave the sync waiting
   for good, with nothing in the log. A watchdog now notices a sync that

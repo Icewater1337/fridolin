@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Icewater1337/fridolin/internal/config"
@@ -38,5 +39,22 @@ func TestContainerHostHome(t *testing.T) {
 	t.Setenv("FRIDOLIN_CONTAINER", "")
 	if got := ContainerHostHome(); got != "" {
 		t.Errorf("outside the container: %q", got)
+	}
+}
+
+// The Plaud login is shared writable whichever file the CLI keeps it in.
+func TestBwrapSharesEveryPlaudLoginFile(t *testing.T) {
+	t.Parallel()
+	sp := bwrapProfiler(t, config.SandboxConfig{}, map[string][]string{"main": {"/Users/you/Main"}},
+		map[string]string{"/Users/you/.plaud/plaud-secrets": "file"})
+	sp.hostHome = "/Users/you"
+	sp.home = "/Users/you"
+	sp.PlaudShared = true
+	got, err := sp.Profile("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "--bind\n/Users/you/.plaud/plaud-secrets\n/Users/you/.plaud/plaud-secrets") {
+		t.Errorf("plaud-secrets not bound:\n%s", got)
 	}
 }

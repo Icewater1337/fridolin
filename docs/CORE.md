@@ -611,7 +611,7 @@ Brains' runs: with `FRIDOLIN_HOST_HOME` set, a run's `HOME` is the Mac's
 home folder too, an empty, private tmpfs under its binds: the brain's own
 folder at its path, its state (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, caches)
 in the volume as before, `~/.gitconfig` read-only, `~/.plaud` read-only
-but for `tokens.json` with `plaud.brain_access`, and the `allow_paths`.
+but for `tokens.json` and `plaud-secrets` with `plaud.brain_access`, and the `allow_paths`.
 What a run writes elsewhere in `~` goes with the run. The credentials
 folder, the other brains' folders and the rest of the home folder are not
 there. `~/.local/bin` is the container's own, read-only for runs: the

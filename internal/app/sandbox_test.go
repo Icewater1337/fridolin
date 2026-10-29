@@ -1100,6 +1100,8 @@ func TestSandboxProfileWritesOnlyItsOwnPlaces(t *testing.T) {
 			if tc.plaud {
 				want = append(want, `(allow file-write-data (literal "`+home+`/.plaud/tokens.json"))`,
 					`(allow file-write-mode (literal "`+home+`/.plaud/tokens.json"))`,
+					`(allow file-write-data (literal "`+home+`/.plaud/plaud-secrets"))`,
+					`(allow file-write-mode (literal "`+home+`/.plaud/plaud-secrets"))`,
 					`(allow file-write-mode (literal "`+home+`/.plaud"))`)
 			}
 			var got []string
