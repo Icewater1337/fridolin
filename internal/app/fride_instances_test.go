@@ -548,6 +548,35 @@ func TestFrideInstanceNoClaudeLogin(t *testing.T) {
 	if in, _ := mini.Instance("docs"); in.NoLogin != "" {
 		t.Errorf("docs on mini still has no login: %+v", in)
 	}
+
+	// Work FrIDE answered without a task (it cancelled it, as work that
+	// moved) closes on the core too.
+	th, err = h.b.store.GetFrideThread(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	th.State, th.FrideStatus, th.TaskID = store.FrideSent, "answered", ""
+	if err := h.b.store.SaveFrideThread(context.Background(), th); err != nil {
+		t.Fatal(err)
+	}
+	if reply := h.coreSays("close", step("fride_close", `{"thread":1}`)); !strings.Contains(reply, "FrIDE #1 never became a task in FrIDE on ice/site, which answered it without one (answered): closed here") {
+		t.Errorf("fride_close of work FrIDE answered:\n%s", reply)
+	}
+	if th, err := h.b.store.GetFrideThread(context.Background(), 1); err != nil || th.State != store.FrideClosed {
+		t.Errorf("FrIDE #1: %+v %v", th, err)
+	}
+}
+
+// Work FrIDE made no task of closes on the core alone once FrIDE is
+// done with it, never while FrIDE still asks or works.
+func TestFrideDroppable(t *testing.T) {
+	t.Parallel()
+	for status, want := range map[string]bool{"failed": true, "queued": true, "answered": true, "done": true, "cancelled": true,
+		"needs_reply": false, "running": false, "active": false, "": false} {
+		if got := droppable(status); got != want {
+			t.Errorf("droppable(%q) = %v", status, got)
+		}
+	}
 }
 
 // An instance whose config says core_login gets the core's Claude token

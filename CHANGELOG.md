@@ -77,8 +77,10 @@ for compatibility.
   - Once it is, the core's next start or refresh logs the running
     instance's agents in, without stopping it.
   - `fride_close` closes work FrIDE never made a task of (it failed
-    there, or still waits in FrIDE's queue) on the core alone, so that
-    it no longer keeps its instance on that node; news of it still comes.
+    there, still waits in FrIDE's queue, or FrIDE answered or finished it
+    without one, as when it cancels work that moved) on the core alone,
+    so that it no longer keeps its instance on that node; news of it
+    still comes. Work whose FrIDE still asks stays open.
   - Or the core lends its own Claude token: an instance whose config
     says `"core_login": true` gets `CLAUDE_CODE_OAUTH_TOKEN` from the
     core's environment with each start (and refresh), as the workstation
