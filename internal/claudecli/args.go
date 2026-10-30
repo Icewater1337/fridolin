@@ -22,6 +22,10 @@ func Args(s Options, mcpConfig, settings string) []string {
 	}
 	if s.Dangerously {
 		args = append(args, "--dangerously-skip-permissions")
+	} else {
+		// Nobody can approve a prompt in -p, so without this the web tools
+		// are refused. DisallowedTools still wins over it.
+		args = append(args, "--allowed-tools", "WebSearch,WebFetch")
 	}
 	if s.Model != "" {
 		args = append(args, "--model", s.Model)
