@@ -10,6 +10,12 @@ for compatibility.
 
 ### Added
 
+- **Approve by reaction.** A 👍 on an approval poll (`request_approval`,
+  `node_exec`, a skill's approve step) from your own number counts as Yes,
+  a 👎 as No, as a tap in the poll does. A reaction from anyone else, any
+  other emoji, or one on a poll that is not an approval counts for
+  nothing, and the poll keeps working. Reactions are logged as
+  `approval_vote` lines in the audit log.
 - **The Plaud Sync phone app updates itself.** Each build on the Plaud
   card (**Build and update phones**), or one the core brain starts with
   `plaud_app_update` when you ask it, is the release the paired phones

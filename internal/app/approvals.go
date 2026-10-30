@@ -668,8 +668,14 @@ func (b *App) approvalVote(id string, v pollVote) {
 		log.Printf("a vote for approval %s, which the bridge does not know: %v", id, err)
 		return
 	}
+	if v.Reaction != "" && a.Kind != approvalKind {
+		return // a question's options are its own: no thumb answers it
+	}
 	voter := v.Voter.User
 	entry := audit.Entry{Kind: audit.ApprovalVote, Thread: a.Thread, Chat: a.Chat, Brain: a.Brain, Run: a.Run, ID: a.ID, Risk: a.Risk, By: voter, Detail: strings.Join(v.Selected, ", ")}
+	if v.Reaction != "" {
+		entry.Detail = "reaction " + v.Reaction
+	}
 	switch {
 	case !b.isOwner(voter):
 		entry.Outcome = "ignored: not an allowed number"
@@ -711,6 +717,25 @@ func (b *App) approvalVote(id string, v pollVote) {
 		entry.Outcome = "ignored: not an option"
 		b.audit.Append(entry)
 	}
+}
+
+// approvalReaction takes a 👍 or 👎 on an approval's poll as a vote for
+// Yes or No, with approvalVote's checks: only the owner's counts. Other
+// emoji, and the polls of questions and choices (core moves, owner picks),
+// which have no Yes and No, are ignored.
+func (b *App) approvalReaction(id string, r pollReaction) {
+	// Skin tones and variation selectors do not change the thumb.
+	emoji := strings.Map(func(c rune) rune {
+		if c == '\uFE0F' || (c >= 0x1F3FB && c <= 0x1F3FF) {
+			return -1
+		}
+		return c
+	}, r.Emoji)
+	option, ok := outboundmsg.ApprovalReactions[emoji]
+	if !ok || !slices.Contains(r.Poll.Options, outboundmsg.ApprovalYes) || !slices.Contains(r.Poll.Options, outboundmsg.ApprovalNo) {
+		return
+	}
+	b.approvalVote(id, pollVote{Poll: r.Poll, Voter: r.Reactor, Selected: []string{option}, Reaction: r.Emoji})
 }
 
 // answerText takes m, from the owner, as the answer to the free-text

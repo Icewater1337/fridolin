@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/testutil"
+	"go.mau.fi/whatsmeow/proto/waCommon"
 
 	"github.com/Icewater1337/fridolin/internal/access"
 
@@ -1483,5 +1484,28 @@ func TestStoredLIDMessagesShareThePhoneQueue(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+// A reaction on a poll the bridge sent goes to OnReaction, whoever
+// reacted (the bridge decides what it counts for); one on any other
+// message, or a reaction taken back, goes nowhere.
+func TestReactionOnAPollIsHandedOn(t *testing.T) {
+	tw := newTestWhatsApp(t)
+	tw.polls = testQueuedPolls{poll: SentPoll{Chat: testDMChat, Options: []string{"Yes", "No"}, Ref: "approval:a1"}}
+	var got []Reaction
+	tw.onReact = func(r Reaction) { got = append(got, r) }
+	react := func(emoji string) *events.Message {
+		return dmEventFrom(otherNumber, "3EB0R", &waE2E.Message{ReactionMessage: &waE2E.ReactionMessage{Key: &waCommon.MessageKey{ID: proto.String("3EB0POLL")}, Text: proto.String(emoji)}})
+	}
+	tw.ProcessMessage(react("👍"))
+	tw.ProcessMessage(react(""))
+	if len(got) != 1 || got[0].Emoji != "👍" || got[0].Reactor.User != otherNumber || got[0].Poll.Ref != "approval:a1" {
+		t.Errorf("handed on %+v, want the one 👍 from the stranger", got)
+	}
+	tw.polls = testNoPolls{}
+	tw.ProcessMessage(react("👍"))
+	if len(got) != 1 {
+		t.Errorf("a reaction on a message that is no poll was handed on: %+v", got)
 	}
 }

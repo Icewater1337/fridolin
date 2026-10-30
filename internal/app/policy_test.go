@@ -121,6 +121,14 @@ func (h *harness) vote(poll, voter string, options ...string) {
 	}
 }
 
+// react reacts to poll with emoji as voter, through the dev chat.
+func (h *harness) react(poll, voter, emoji string) {
+	h.t.Helper()
+	if w := h.Do("POST", "/api/dev/vote", map[string]any{"poll": poll, "voter": voter, "reaction": emoji}); w.Code != http.StatusAccepted {
+		h.t.Fatalf("react: %d %s", w.Code, w.Body.String())
+	}
+}
+
 // approvals is GET /api/approvals.
 func (h *harness) approvals() (pending, history []map[string]any) {
 	h.t.Helper()
@@ -227,6 +235,36 @@ func TestIrreversibleStepWaitsForApproval(t *testing.T) {
 	}
 	if d := h.auditOf("approval_decided"); len(d) != 2 || d[1]["outcome"] != "expired" || d[1]["by"] != "timeout" {
 		t.Errorf("approval_decided: %v", d)
+	}
+}
+
+// TestReactionAnswersAnApproval: a 👍 or 👎 on the approval's poll votes
+// like its options, but only from the owner; anyone else's, and any other
+// emoji, count for nothing, and the poll keeps working.
+func TestReactionAnswersAnApproval(t *testing.T) {
+	t.Parallel()
+	h := policyHarness(t, "", nil)
+	reply := h.answerAfter(inbound{JID: harnessDM, Text: "Steuer, bitte #mcp"}, func() {
+		poll := h.waitPoll(harnessDM, "Submit")
+		h.react(poll.ID, strangerNumber, "👍")
+		h.react(poll.ID, "15551234567", "🎉")
+		if pending, _ := h.approvals(); len(pending) != 1 {
+			t.Errorf("a stranger's thumb or another emoji decided: %v", pending)
+		}
+		h.react(poll.ID, "15551234567", "👍🏽")
+	})
+	if !strings.Contains(reply, "[taxes:request_approval] approved") {
+		t.Errorf("the run's answer:\n%s", reply)
+	}
+	v := h.auditOf("approval_vote")
+	if len(v) != 2 || v[0]["outcome"] != "ignored: not an allowed number" || v[1]["outcome"] != "approved" || v[1]["detail"] != "reaction 👍🏽" {
+		t.Errorf("approval_vote: %v", v)
+	}
+	// A 👎 after the decision changes nothing.
+	poll := h.waitPoll(harnessDM, "Submit")
+	h.react(poll.ID, "15551234567", "👎")
+	if _, history := h.approvals(); len(history) != 1 || history[0]["status"] != "approved" {
+		t.Errorf("history: %v", history)
 	}
 }
 

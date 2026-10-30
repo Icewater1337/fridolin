@@ -40,6 +40,7 @@ type Client struct {
 	handler   func(context.Context, chat.Inbound)
 	onIgnored IgnoredHandler
 	onVote    func(Vote)        // a vote was recorded; may be nil
+	onReact   func(Reaction)    // a reaction on one of the bridge's polls; may be nil
 	onChange  func(chat.Change) // an edit or a deletion; may be nil
 	// groupRules is what addresses the bridge in a group, by its brain's
 	// routing; nil means defaultGroupRules.
@@ -112,6 +113,7 @@ func New(opts Options) (*Client, error) {
 		handler:    opts.OnInbound,
 		onIgnored:  opts.OnIgnored,
 		onVote:     opts.OnVote,
+		onReact:    opts.OnReaction,
 		onChange:   opts.OnChange,
 		groupRules: opts.GroupRules,
 		log:        logger,
@@ -279,7 +281,27 @@ func (wa *Client) ProcessMessage(evt *events.Message) {
 		wa.handlePollVote(evt)
 		return
 	}
+	if r := evt.Message.GetReactionMessage(); r != nil {
+		wa.handleReaction(evt, r)
+		return
+	}
 	wa.handleMessage(evt)
+}
+
+// handleReaction tells onReact of a reaction on a poll the bridge sent.
+// It checks nobody: whether the reactor may decide anything is the
+// bridge's to say, as for a vote. A reaction on any other message, the
+// ordinary case, is dropped here.
+func (wa *Client) handleReaction(evt *events.Message, r *waE2E.ReactionMessage) {
+	if wa.onReact == nil || r.GetText() == "" { // empty: the reaction was taken back
+		return
+	}
+	poll, err := wa.polls.SentPoll(wa.storeCtx(), r.GetKey().GetID())
+	if err != nil {
+		return
+	}
+	voter := wa.identity.Canonical(wa.storeCtx(), wa.LIDStore(), evt.Info.Sender, evt.Info.SenderAlt)
+	wa.onReact(Reaction{Poll: poll, Reactor: voter, Emoji: r.GetText()})
 }
 
 // handlePollVote decrypts a poll vote and records it (see recordVote).

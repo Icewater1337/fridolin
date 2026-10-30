@@ -2,6 +2,7 @@ package whatsapp
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log"
 	"strings"
@@ -116,3 +117,10 @@ func isConnected(c interface{ Connected() <-chan struct{} }) bool {
 		return false
 	}
 }
+
+type testNoPolls struct{}
+
+func (testNoPolls) SentPoll(context.Context, string) (SentPoll, error) {
+	return SentPoll{}, sql.ErrNoRows
+}
+func (testNoPolls) SavePollVote(string, string, []string) error { return nil }

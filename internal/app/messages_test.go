@@ -312,6 +312,8 @@ var notChatText = map[string]string{
 	"❌ Error: ":  "a line of a run's activity log",
 	"✅ Result: ": "a line of a run's activity log",
 	"🔐":          "one of the OTP guard's markers, which it looks for in what a brain sends",
+	"👍":          "a reaction that answers an approval poll, not a message",
+	"👎":          "a reaction that answers an approval poll, not a message",
 }
 
 // TestChatMessagesLiveInTheCatalogue: no production Go file but messages.go has a
