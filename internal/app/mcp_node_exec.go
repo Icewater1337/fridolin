@@ -92,7 +92,7 @@ func (b *App) registerNodeExecTools(r *tools.Set[mcpCaller]) {
 		Available: b.execTools,
 		Describe: func(mcpCaller) mcp.Tool {
 			return mcp.Tool{
-				Description: "List the commands node_exec may run on each of the owner's machines that runs commands now, and which of them ask the owner each time.",
+				Description: "List the commands node_exec may run on each of the owner's machines that runs commands now, and which of them ask the owner each time. A machine that runs no commands is not listed, however online it is: node_list says which machines are online.",
 				InputSchema: tools.Schema(map[string]any{
 					"node": tools.Str("One node's name or id; leave it out for every node."),
 				}),
@@ -100,6 +100,76 @@ func (b *App) registerNodeExecTools(r *tools.Set[mcpCaller]) {
 		},
 		Call: b.callNodeExecRules,
 	})
+	r.Register(mcp.Entry[mcpCaller]{
+		Name:      "node_list",
+		Available: func(c mcpCaller) bool { return c.Core() && b.nodesEnabled },
+		Describe: func(mcpCaller) mcp.Tool {
+			return mcp.Tool{
+				Description: "List the owner's machines (nodes) as the core sees them now: whether each is online or when it was last seen, what it may do, and its FrIDE instances. Check it before telling the owner a machine is offline: what the chat said earlier may be old.",
+				InputSchema: tools.Schema(map[string]any{}),
+			}
+		},
+		Call: b.callNodeList,
+	})
+}
+
+// callNodeList answers node_list: every node that is not shut out.
+func (b *App) callNodeList(context.Context, mcpCaller, json.RawMessage) (*mcp.CallResult, error) {
+	views, err := b.nodes.Views()
+	if err != nil {
+		return mcp.ErrorResult("reading the nodes: " + err.Error()), nil
+	}
+	return mcp.TextResult(nodeListText(views, time.Now())), nil
+}
+
+// nodeListText says, for each node that is not revoked, whether it is
+// online (or when it was last seen), what waits for the owner, what it
+// may do, and its FrIDE instances.
+func nodeListText(views []nodes.View, now time.Time) string {
+	var sb strings.Builder
+	shown, online := 0, 0
+	for _, v := range views {
+		if v.Device == nodeproto.DeviceRevoked {
+			continue
+		}
+		shown++
+		state := "offline, never seen"
+		switch {
+		case v.Online:
+			state = "online"
+			online++
+		case v.LastSeen != nil:
+			state = "offline, last seen " + now.Sub(*v.LastSeen).Round(time.Minute).String() + " ago"
+		}
+		fmt.Fprintf(&sb, "- %s (%s, id %s): %s", v.Name, v.OS, v.ID, state)
+		switch {
+		case v.Device == nodeproto.DevicePending:
+			sb.WriteString("; waits for the owner to approve it")
+		case v.Commands == nodeproto.CommandsPending:
+			sb.WriteString("; asks the owner to approve more than it may do now")
+		}
+		if can := v.Effective.Plain(); len(can) > 0 {
+			sb.WriteString("\n  may: " + strings.Join(can, "; "))
+		}
+		if h := v.Effective.FrideHost; h != nil {
+			var ins []string
+			for _, in := range h.Instances {
+				ins = append(ins, fmt.Sprintf("%s %s", in.Name, in.State))
+			}
+			if len(ins) == 0 {
+				ins = []string{"none yet"}
+			}
+			sb.WriteString("\n  FrIDE instances: " + strings.Join(ins, ", "))
+			if h.NoLogin != "" {
+				sb.WriteString(" (no Claude token of its own)")
+			}
+		}
+		sb.WriteString("\n")
+	}
+	if shown == 0 {
+		return "The core has no nodes."
+	}
+	return fmt.Sprintf("%d nodes, %d online now:\n%s", shown, online, sb.String())
 }
 
 // execNode is the node ref names, by name or id, or, for "", the one node
@@ -172,14 +242,38 @@ func (b *App) callNodeExecRules(_ context.Context, _ mcpCaller, raw json.RawMess
 		}
 		list = []nodes.View{v}
 	}
+	quiet := b.onlineWithoutCommands(args.Node)
 	if len(list) == 0 {
-		return mcp.TextResult("No node runs commands now."), nil
+		return mcp.TextResult("No node runs commands now." + quiet), nil
 	}
 	parts := []string{execRulesNote}
 	for _, v := range list {
 		parts = append(parts, execRulesText(v))
 	}
-	return mcp.TextResult(strings.Join(parts, "\n\n")), nil
+	return mcp.TextResult(strings.Join(parts, "\n\n") + quiet), nil
+}
+
+// onlineWithoutCommands names the nodes that are online but run no
+// commands, which node_exec_rules leaves out, so that none of them reads
+// as offline; "" when there are none, or when one node was asked for.
+func (b *App) onlineWithoutCommands(asked string) string {
+	if strings.TrimSpace(asked) != "" {
+		return ""
+	}
+	views, err := b.nodes.Views()
+	if err != nil {
+		return ""
+	}
+	var names []string
+	for _, v := range views {
+		if v.Device == nodeproto.DeviceApproved && v.Online && !runsCommands(v) {
+			names = append(names, v.Name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return "\n\nOnline, but running no commands for the core: " + strings.Join(names, ", ") + " (node_list says what they do)."
 }
 
 type nodeExecArgs struct {

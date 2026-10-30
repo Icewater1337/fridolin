@@ -29,6 +29,16 @@ for compatibility.
 
 ### Fixed
 
+- **The core brain no longer calls a machine offline that is online.**
+  Its only look at the nodes was `node_exec_rules`, which lists the
+  machines that run commands, so a machine that runs none (a Windows PC
+  that joined with `-NoExec`, say) looked offline, and the brain went on
+  saying so from what the chat said hours before. It now has
+  `node_list`: every machine as the core sees it now, online or when it
+  was last seen, what it may do and its FrIDE instances; and
+  `node_exec_rules` names the machines it leaves out because they run no
+  commands.
+
 - **The Plaud Sync app builds again.** A change to its sync watchdog had
   left `SyncService.kt` without the declaration of `lastCheckIn`, so
   **Build phone app** failed with "Unresolved reference".
