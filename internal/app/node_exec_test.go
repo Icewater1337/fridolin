@@ -172,6 +172,16 @@ func TestNodeExecThroughNodes(t *testing.T) {
 		}
 	}
 
+	// A node online that runs no commands is named, so that it does not
+	// read as offline, and node_list lists every node as it is now.
+	ice := h.fakeHostNode("ice", addr, 65536, 40000, 6144)
+	reply = h.coreSays("rules", step("node_exec_rules", `{}`), step("node_list", `{}`))
+	for _, want := range []string{"Online, but running no commands for the core: ice", "2 nodes, 2 online now:", "- ice (", "id " + ice.ID + "): online", "FrIDE instances: none yet", "- mac-mini (", "may: run these programs there when asked"} {
+		if !strings.Contains(reply, want) {
+			t.Errorf("node_exec_rules and node_list lack %q:\n%s", want, reply)
+		}
+	}
+
 	// A command that does not ask runs at once; so does one a rule
 	// without approve allows beside one with it.
 	reply = h.coreSays("status", step("node_exec", execArgs([]string{status}, "")), step("node_exec", execArgs([]string{brew, "--version"}, `"node":"MAC-MINI"`)))
@@ -336,5 +346,33 @@ func TestNodeExecApprovalText(t *testing.T) {
 	}
 	if got := outboundmsg.ApprovalQuestion(action); strings.HasSuffix(got, "…") {
 		t.Errorf("the poll cuts it: %q", got)
+	}
+}
+
+// node_list says each node's state as it is now: online, offline since
+// when, or waiting for the owner; a node shut out is left out.
+func TestNodeListText(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 30, 14, 0, 0, 0, time.UTC)
+	seen := now.Add(-3*time.Hour - 20*time.Minute)
+	host := &nodeproto.FrideHostCap{Ready: true, NoLogin: "no Claude token", Instances: []nodeproto.FrideInstance{{Name: "fridolin", State: nodeproto.FrideInstanceRunning}}}
+	views := []nodes.View{
+		{Node: &nodes.Node{ID: "a1", Name: "ice", OS: "windows", Device: nodeproto.DeviceApproved}, Online: true, Effective: nodeproto.Capabilities{Host: true, FrideHost: host}},
+		{Node: &nodes.Node{ID: "b2", Name: "laptop", OS: "darwin", Device: nodeproto.DeviceApproved, LastSeen: &seen}, Effective: nodeproto.Capabilities{Notify: true}},
+		{Node: &nodes.Node{ID: "c3", Name: "new", OS: "linux", Device: nodeproto.DevicePending}},
+		{Node: &nodes.Node{ID: "d4", Name: "old", OS: "linux", Device: nodeproto.DeviceRevoked}},
+	}
+	got := nodeListText(views, now)
+	for _, want := range []string{"3 nodes, 1 online now:", "- ice (windows, id a1): online\n  may: report its system details (OS, disk, memory); run FrIDE instances",
+		"FrIDE instances: fridolin running (no Claude token of its own)", "- laptop (darwin, id b2): offline, last seen 3h20m0s ago", "- new (linux, id c3): offline, never seen; waits for the owner to approve it"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "old") {
+		t.Errorf("a node shut out is listed:\n%s", got)
+	}
+	if got := nodeListText(nil, now); got != "The core has no nodes." {
+		t.Errorf("no nodes: %q", got)
 	}
 }
