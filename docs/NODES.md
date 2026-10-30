@@ -1852,10 +1852,19 @@ more with the owner later (see FrIDE's SETUP.md).
   },
   "companion": {
     "enabled": true,
-    "claudePlugins": ["~/fride-companion/plugins/ponytail"]
+    "claudePlugins": ["~/fride-companion/plugins/ponytail"],
+    "claudeAllow": ["Bash(gh pr merge:*)"]
   }
 }
 ```
+
+`claudeAllow` lets every task agent merge its own pull request once CI is
+green, as the bug fixer asks: Claude Code's auto mode, which FrIDE's agents
+run in, otherwise refuses by default to merge a pull request no human
+approved, now and then (FrIDE's docs/COMPANION.md, "Rules for task
+agents"). Leave it out where a person is to merge every pull request. The
+FrIDE instances' template and the box's FrIDE carry the same rule
+(`container/fride/companion.json`).
 
 ### Ponytail for every agent
 

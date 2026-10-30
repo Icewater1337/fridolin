@@ -29,6 +29,16 @@ for compatibility.
 
 ### Fixed
 
+- **FrIDE's agents merge their own green pull requests again.** They run
+  Claude Code in auto mode, whose own judgement refuses by default to
+  merge a pull request no human approved, so now and then a fix the bug
+  fixer handed out stayed open with CI green, waiting for you. FrIDE now
+  takes `companion.claudeAllow`, Claude Code permission rules every task
+  agent has (fride#49), and the FrIDE instances' template and the box's
+  FrIDE allow `Bash(gh pr merge:*)`. A companion FrIDE set up by hand
+  gets the rule in its `config.json` (docs/NODES.md); the instances are
+  made anew from the new template at their next start.
+
 - **The core brain no longer calls a machine offline that is online.**
   Its only look at the nodes was `node_exec_rules`, which lists the
   machines that run commands, so a machine that runs none (a Windows PC
