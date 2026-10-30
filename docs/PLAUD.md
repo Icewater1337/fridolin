@@ -86,7 +86,8 @@ for you:
    (`plaud-app-build`) while `phone_upload` is on; the app already on a
    phone keeps working either way.
 4. **Download app (APK)**, copy it to the phone and install it. Remove the
-   NotePin from Plaud's app, then tap **Pair NotePin** in Plaud Sync.
+   NotePin from Plaud's app, then tap **Pair NotePin** in Plaud Sync. Later
+   builds reach the phone on their own ([Updates](#updates)).
 
 The app carries your site's address and a pairing code that works once,
 within 24 hours; build again for another phone, or after one was unpaired.
@@ -108,6 +109,72 @@ The card lists the paired phones; **Unpair** refuses a phone's uploads from
 then on. The developer keys are inside the app too, so keep the APK to
 yourself; the key a phone pairs with is not.
 
+### Updates
+
+Each build is the release the paired phones update to: **Build and update
+phones** on the card (**Build phone app** or **Build again** while no
+phone is paired), or ask the core brain, which has `plaud_app_update` and
+`plaud_app_status` while `phone_upload` is on.
+
+1. Fridolin builds the app as above. The build's versionCode is past the
+   build before and past what each phone runs; its versionName is the
+   source's (`0.7`). Fridolin keeps it with its SHA-256 and the certificate
+   it is signed with (`<data_dir>/plaud/app/release.json`).
+2. At its check-ins (at most every 10 minutes, and at once when the app is
+   opened or was just updated), the app asks for the release through the
+   site, at `/_fridolin/devices/app/release` with a JWT (aud
+   `fridolin:app-release`) that says which version it runs, the SHA-256 of
+   the certificate it is signed with and how its last update went. The
+   card shows that for each phone: **Up to date**, **Updates to N**, or
+   **Cannot update**, and the last update's result.
+3. When the release is newer and signed with the app's own key, the app
+   fetches it from `/_fridolin/devices/app/apk` (aud `fridolin:app-apk`),
+   naming the build by its SHA-256. Fridolin encrypts it for the phone's
+   agreement key, as it does voice answers: ECDH P-256 with a fresh key,
+   HKDF-SHA256, AES-256-GCM, in pieces of 64 KiB, each bound to the build's
+   SHA-256, its place and whether it is the last. The site, where module
+   code runs, passes on ciphertext only, so the developer keys inside the
+   APK stay out of it. Neither route is a public link: each wants a JWT
+   that a paired phone's keystore key signed, which Fridolin checks again.
+4. The app checks what it got: the SHA-256 Fridolin named, and that
+   Android reads it as Plaud Sync, at that version, signed with the app's
+   own key. A build that fails these checks is not fetched again; the next
+   one is. Once the sync is idle (not looking for the pin, fetching from
+   it, while the pin records or an answer is read aloud), the app hands it
+   to Android's PackageInstaller and asks it not to ask the owner
+   (`USER_ACTION_NOT_REQUIRED`). The update ends the app; Android starts
+   the new version, which carries on the sync. The pairing, the keys, the
+   settings and the recordings, transcripts and questions that wait are in
+   the app's own storage and keystore, which an update keeps. A build
+   Android refuses is tried again after six hours, or when the app is
+   opened.
+
+**Once per phone:**
+
+- A Plaud Sync from before updates (0.6 or older) does not update itself:
+  install a build from the card by hand once (**Download app (APK)**),
+  over the old one. It keeps its pairing.
+- Allow Plaud Sync to install apps: its **Allow app updates** button opens
+  Android's **Install unknown apps** page for it (Settings → Apps →
+  Special app access). Until then, the app shows a notification and the
+  card says the update waits for it.
+- The first update asks for a tap: Android asks to confirm it, since the
+  app was installed by hand, not by itself. With the app open the
+  question shows at once, else in a notification, **Plaud Sync update
+  ready**. Declined, it asks again when the app is next opened. From then
+  on the app installed itself, and Android 12 and newer install its
+  updates without asking.
+
+**The signing key.** Android installs an update only when it is signed
+with the key of the app it replaces. Builds are signed with the debug key
+of the machine that builds them (`~/.android/debug.keystore` of the user
+the bridge, or the node, runs as), so keep building on the same machine.
+The app does not fetch a build signed with another key, and the card says
+**Cannot update** for that phone. Then build where the app on the phone was
+built, or uninstall the app on the phone and install the new build by hand:
+it pairs again with the new build's code, and the old entry can be
+unpaired.
+
 ### Voice mode
 
 With uploads through the site, the app can also be a voice line to
@@ -116,8 +183,8 @@ still reaches WhatsApp unless you turn that off.
 
 1. Dashboard → **Integrations → Plaud**: turn on **Voice mode** (`voice`),
    pick the **Brain for voice questions** (default: the brain that gets your
-   DMs) and save. Build the app again and install it over the old one: it
-   keeps its pairing.
+   DMs) and save. Build the app again: the phone installs it at its next
+   check-in ([Updates](#updates)), and keeps its pairing.
 2. In the app, turn on **Voice mode**. Its notification says so, and offers
    **Ask**, **Stop** and **Skip**.
 

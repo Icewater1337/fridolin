@@ -237,8 +237,9 @@ test('the phone app part: keys, the build, its download and the paired phones', 
   });
   assert.match(root.textContent, /Phone app/);
   assert.doesNotMatch(root.textContent, /Install Plaud’s command-line tool|Login stored in|AI-cleaned/);
-  assert.ok(button(root, 'Download app (APK)') && button(root, 'Build again') && button(root, 'Unpair'));
+  assert.ok(button(root, 'Download app (APK)') && button(root, 'Build and update phones') && button(root, 'Unpair'));
   assert.match(root.textContent, /dev_abc/);
+  assert.match(root.textContent, /Its app has not said its version yet/);
 
   const key = plaudCard(root).querySelector('input[type=password]');
   type(key, 'typed');
@@ -249,6 +250,27 @@ test('the phone app part: keys, the build, its download and the paired phones', 
   button(root, 'Build again').click();
   await settle();
   assert.ok(calls.some((c) => c.path === '/api/plaud/app/build' && c.method === 'POST'), 'Build was posted');
+});
+
+test('the card shows the latest build, what each phone runs and how its last update went', async (t) => {
+  const s = status('2026-10-18T10:00:00Z');
+  const release = { version_code: 9, version_name: '0.7', sha256: 'ab', cert_sha256: 'cd', size: 3, built: '2026-10-18T09:00:00Z', node: 'mac-mini' };
+  const asked = '2026-10-18T09:55:00Z';
+  const app = {
+    credentials: true, site_url: 'https://example.com', built: '2026-10-18T09:00:00Z', release,
+    devices: [
+      { id: 'dev_old', paired: '2026-10-18T09:10:00Z', app: { version_code: 8, version_name: '0.7', asked, update: { version_code: 9, state: 'confirm' } } },
+      { id: 'dev_new', paired: '2026-10-18T09:10:00Z', app: { version_code: 9, version_name: '0.7', asked, update: { version_code: 9, state: 'installed', at: asked } } },
+      { id: 'dev_key', paired: '2026-10-18T09:10:00Z', other_key: true, app: { version_code: 8, version_name: '0.7', asked, update: { version_code: 9, state: 'failed', error: 'the new build is signed with another key' } } },
+    ],
+  };
+  const { root } = await openPage(t, { ...s, settings: { ...s.settings, phone_upload: true }, app });
+  const text = plaudCard(root).textContent;
+  assert.match(text, /Latest build 0\.7 \(9\), built .* on mac-mini/);
+  assert.match(text, /App 0\.7 \(8\) Updates to 9.*Last update, to 9: waits for a tap on the phone/);
+  assert.match(text, /App 0\.7 \(9\) Up to date.*Last update, to 9: installed/);
+  assert.match(text, /Cannot update.*signed with another key than the app on this phone.*failed: the new build is signed with another key/);
+  assert.ok(button(root, 'Build and update phones'));
 });
 
 test('without a site domain or keys, the app cannot be built', async (t) => {

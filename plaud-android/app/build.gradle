@@ -32,14 +32,17 @@ android {
         applicationId 'local.plaudsync'
         minSdk 31
         targetSdk 35
-        versionCode 6
-        versionName '0.6'
+        versionCode 7
+        versionName '0.7'
         ['client_id', 'client_secret', 'api_key', 'site_url', 'pairing_code'].each { k ->
             buildConfigField 'String', k.toUpperCase(), "\"${secrets.getProperty(k, '').trim()}\""
         }
         // Plain http only for a site on this computer (a test); a real one is https.
         manifestPlaceholders = [cleartext: secrets.getProperty('site_url', '').startsWith('http://').toString()]
     }
+    // Fridolin numbers each build past the one before (version_code), so a phone takes it as an
+    // update (docs/PLAUD.md, "Updates"); a build by hand keeps the versionCode above.
+    if (secrets.getProperty('version_code', '').trim()) defaultConfig.versionCode = secrets.getProperty('version_code').trim().toInteger()
 
     buildFeatures { buildConfig true }
 

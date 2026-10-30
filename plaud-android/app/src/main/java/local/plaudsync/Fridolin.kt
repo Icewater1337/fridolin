@@ -34,12 +34,18 @@ import javax.crypto.KeyAgreement
  *
  * Voice mode asks Fridolin a question the same way ([ask]) and fetches the answer ([reply]),
  * which comes back encrypted to a second keystore key, one for key agreement only ([VoiceCrypto]).
+ *
+ * Updates (docs/PLAUD.md, "Updates"): the app asks for Fridolin's current build ([release]),
+ * saying how it is itself, and fetches a newer one ([fetchApp]), encrypted to that same key, since
+ * the build carries Plaud's developer keys and passes through the site ([UpdateCrypto]).
  */
 object Fridolin {
     private const val ALIAS = "fridolin-device"
     private const val VOICE_ALIAS = "fridolin-voice"
     private val b64 = Base64.getUrlEncoder().withoutPadding()
     private val http = OkHttpClient.Builder().callTimeout(60, TimeUnit.SECONDS).build()
+    // A build is megabytes: it may take minutes on a slow network, as long as bytes keep coming.
+    private val download = http.newBuilder().callTimeout(15, TimeUnit.MINUTES).readTimeout(60, TimeUnit.SECONDS).build()
 
     /** An answer other than 2xx from the site, with its reason. */
     class Refused(val code: Int, message: String) : Exception(message)
@@ -88,18 +94,66 @@ object Fridolin {
         throw e
     }
 
-    /** Opens a sealed answer with the voice key, which never leaves the keystore. */
-    private fun open(rid: String, sealed: JSONObject): String {
-        val d = Base64.getUrlDecoder()
-        val epk = sealed.getJSONObject("epk")
+    /**
+     * Fridolin's current build of the app, or null while it has none, pairing first if need be.
+     * The request says which version this app is, which key signs it and how its last update
+     * went ([report]), which Fridolin's dashboard shows.
+     */
+    fun release(ctx: Context, own: Updater.Own, report: UpdateReport?): Release? {
+        val device = device(ctx) ?: pair(ctx)
+        val now = System.currentTimeMillis() / 1000
+        val claims = JSONObject().put("iss", device).put("aud", "fridolin:app-release").put("iat", now).put("exp", now + 300)
+            .put("ver", own.code).put("vname", own.name)
+        own.cert?.let { claims.put("cert", it) }
+        report?.let { r ->
+            claims.put("upd", JSONObject().put("code", r.code).put("state", r.state).put("at", r.at / 1000).apply { r.error?.let { put("error", it) } })
+        }
+        val r = unpairedOn401(ctx) { post("/_fridolin/devices/app/release", ByteArray(0).toRequestBody(null), sign(claims)) }
+        val rel = r.optJSONObject("release") ?: return null
+        return Release(rel.getLong("version_code"), rel.optString("version_name"), rel.getString("sha256"), rel.getString("cert_sha256"), rel.optLong("size"))
+    }
+
+    /**
+     * Fetches the build whose SHA-256 is [sha256] into [out], opening it as it arrives with the
+     * agreement key, which never leaves the keystore; returns the SHA-256 of what it wrote, hex.
+     */
+    fun fetchApp(ctx: Context, sha256: String, out: java.io.OutputStream): String {
+        val device = device(ctx) ?: throw IllegalStateException("not paired")
+        val now = System.currentTimeMillis() / 1000
+        val jwt = sign(JSONObject().put("iss", device).put("aud", "fridolin:app-apk").put("iat", now).put("exp", now + 300)
+            .put("apk", sha256).put("enc", voiceJwk()))
+        val req = Request.Builder().url(BuildConfig.SITE_URL.trimEnd('/') + "/_fridolin/devices/app/apk")
+            .post(ByteArray(0).toRequestBody(null)).header("Authorization", "Bearer $jwt").build()
+        return unpairedOn401(ctx) {
+            download.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) {
+                    val json = runCatching { JSONObject(r.body!!.string()) }.getOrNull()
+                    throw Refused(r.code, "HTTP ${r.code}" + (json?.optString("error")?.takeIf { it.isNotEmpty() }?.let { ": $it" } ?: ""))
+                }
+                val input = r.body!!.byteStream()
+                val header = UpdateCrypto.header(input)
+                UpdateCrypto.open(agree(header.epk), header, sha256.chunked(2).map { it.toInt(16).toByte() }.toByteArray(), input, out)
+            }
+        }
+    }
+
+    /** The ECDH secret of the agreement key and [epk], an uncompressed P-256 point. */
+    private fun agree(epk: ByteArray): ByteArray {
         val (private, public) = voiceKeys()
-        val point = ECPoint(BigInteger(1, d.decode(epk.getString("x"))), BigInteger(1, d.decode(epk.getString("y"))))
+        val point = ECPoint(BigInteger(1, epk.copyOfRange(1, 33)), BigInteger(1, epk.copyOfRange(33, 65)))
         val theirs = KeyFactory.getInstance("EC").generatePublic(ECPublicKeySpec(point, public.params))
-        val secret = KeyAgreement.getInstance("ECDH", "AndroidKeyStore").run {
+        return KeyAgreement.getInstance("ECDH", "AndroidKeyStore").run {
             init(private)
             doPhase(theirs, true)
             generateSecret()
         }
+    }
+
+    /** Opens a sealed answer with the voice key, which never leaves the keystore. */
+    private fun open(rid: String, sealed: JSONObject): String {
+        val d = Base64.getUrlDecoder()
+        val epk = sealed.getJSONObject("epk")
+        val secret = agree(byteArrayOf(4) + d.decode(epk.getString("x")) + d.decode(epk.getString("y")))
         return VoiceCrypto.open(secret, rid, d.decode(sealed.getString("iv")), d.decode(sealed.getString("ct")))
     }
 

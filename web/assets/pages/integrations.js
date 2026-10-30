@@ -26,7 +26,7 @@ import { gitlabCard } from '../components/gitlab-card.js';
 import { connectionCard } from '../components/connection-card.js';
 
 /** @import { PageModule } from '../app/page.js' */
-/** @import { Brain, PlaudAppBuild, PlaudConnectJob, PlaudForward, PlaudGivenUp, PlaudPhone, PlaudSettings, PlaudStatus } from '../../types/api.js' */
+/** @import { Brain, PlaudAppBuild, PlaudAppUpdate, PlaudConnectJob, PlaudForward, PlaudGivenUp, PlaudPhone, PlaudRelease, PlaudSettings, PlaudStatus } from '../../types/api.js' */
 
 /**
  * What the connected card's facts show, from the status.
@@ -229,8 +229,11 @@ export default /** @satisfies {PageModule} */ ({
       appBox.hidden = !app;
       if (app) {
         paint(keysBox, { saved: !!app.credentials }, renderKeys);
-        paint(buildBox, { site: app.site_url || '', saved: !!app.credentials, build: app.build || null, built: app.built || '', buildsOn: app.builds_on || '', noBuilder: app.no_builder || '' }, renderBuild);
-        paint(phonesBox, app.devices || [], renderPhones);
+        paint(buildBox, {
+          site: app.site_url || '', saved: !!app.credentials, build: app.build || null, built: app.built || '', buildsOn: app.builds_on || '',
+          noBuilder: app.no_builder || '', release: app.release || null, phones: (app.devices || []).length,
+        }, renderBuild);
+        paint(phonesBox, { devices: app.devices || [], release: app.release || null }, renderPhones);
       }
     }
 
@@ -284,11 +287,14 @@ export default /** @satisfies {PageModule} */ ({
 
     // Where the app is built: here, where this computer has a JDK and the
     // Android SDK, else on a node that builds Android apps (android-build).
-    /** @param {{site: string, saved: boolean, build: PlaudAppBuild | null, built: string, buildsOn: string, noBuilder: string}} view */
-    function renderBuild({ site, saved, build, built, buildsOn, noBuilder }) {
+    // Each build is the release the paired phones update to (docs/PLAUD.md,
+    // "Updates").
+    /** @param {{site: string, saved: boolean, build: PlaudAppBuild | null, built: string, buildsOn: string, noBuilder: string, release: PlaudRelease | null, phones: number}} view */
+    function renderBuild({ site, saved, build, built, buildsOn, noBuilder, release, phones }) {
       const running = !!(build && build.state === 'running');
       const expires = build && build.pairing_expires ? ` Its pairing code works once, until ${new Date(build.pairing_expires).toLocaleString()}.` : '';
       const where = build && build.node ? ` on ${build.node}` : '';
+      const label = running ? 'Building… (a few minutes)' : phones ? 'Build and update phones' : built ? 'Build again' : 'Build phone app';
       return [
         site ? null : callout('warn', 'The site has no domain yet', 'The app uploads through your site: give it a domain on the Site page first.'),
         !running && noBuilder ? callout('warn', 'Nothing here can build the app',
@@ -296,24 +302,55 @@ export default /** @satisfies {PageModule} */ ({
           h('div.muted.small', noBuilder)) : null,
         build && build.state === 'error' ? callout('bad', `Building the app${where} failed`, h('div', build.error), build.log ? h('pre.small', build.log) : null) : null,
         running && build.stage ? h('p', icon('refresh'), ' ', build.stage, '…') : null,
-        built && !running ? h('p', 'Built ', timeAgo(built), where && build && build.state === 'done' ? where : '', '.', expires) : null,
+        release && !running ? h('p', 'Latest build ', h('strong', `${release.version_name || ''} (${release.version_code})`), ', built ', timeAgo(release.built),
+          release.node ? ` on ${release.node}` : '', '.', expires)
+          : built && !running ? h('p', 'Built ', timeAgo(built), where && build && build.state === 'done' ? where : '', '.', expires) : null,
         !running && buildsOn && buildsOn !== 'this computer' ? h('p.muted.small', 'This computer has no JDK and Android SDK: the node ', h('strong', buildsOn), ' builds the app and sends it back.') : null,
         h('div.actions',
-          btn(running ? 'Building… (a few minutes)' : built ? 'Build again' : 'Build phone app', {
+          btn(label, {
             kind: built ? undefined : 'primary', icon: 'phone', disabled: running || !site || !saved || !!noBuilder,
             onClick: async () => {
               await post('/api/plaud/app/build');
-              toast('Building the phone app…', 'info');
+              toast(phones ? 'Building the phone app; the phones install it at their next check-in' : 'Building the phone app…', 'info');
               await refresh();
             },
           }),
           built && !running ? btn('Download app (APK)', { kind: 'primary', icon: 'download', onClick: () => download('/api/plaud/app.apk', 'plaud-sync.apk') }) : null),
         h('p.muted.small', 'Copy it to the phone and install it, remove the NotePin from Plaud’s app, then tap Pair NotePin in Plaud Sync. On its first start the app makes a key that never leaves the phone and pairs it with Fridolin; build again for another phone.'),
+        h('p.muted.small', 'Paired phones update themselves: each new build is fetched at the phone’s next check-in, encrypted for that phone, and installed. The first update asks for a tap on the phone, and Plaud Sync must be allowed to install unknown apps; later ones install without asking.'),
       ];
     }
 
-    /** @param {PlaudPhone[]} devices */
-    function renderPhones(devices) {
+    /** @param {PlaudAppUpdate} u */
+    function updateText(u) {
+      switch (u.state) {
+        case 'waiting': return 'downloaded, installs once the app is not syncing';
+        case 'installing': return 'handed to Android to install';
+        case 'confirm': return 'waits for a tap on the phone: open the Plaud Sync notification';
+        case 'not_allowed': return 'waits until Plaud Sync may install apps: Settings → Apps → Special app access → Install unknown apps';
+        case 'installed': return 'installed';
+        case 'failed': return `failed: ${u.error || 'no reason given'}`;
+      }
+      return u.state;
+    }
+
+    // What a phone runs against the latest build, and how its last update went.
+    /** @param {PlaudPhone} d @param {PlaudRelease | null} release */
+    function phoneApp(d, release) {
+      const a = d.app;
+      if (!a) return h('div.muted.small', 'Its app has not said its version yet: a build from before updates, which you install by hand once, or it has not checked in since.');
+      const behind = release && a.version_code < release.version_code;
+      const u = a.update && (!release || a.update.version_code <= release.version_code) ? a.update : null;
+      return h('div.small',
+        'App ', mono(`${a.version_name || ''} (${a.version_code})`), ' ',
+        d.other_key ? pill('Cannot update', 'bad') : behind ? pill(`Updates to ${release ? release.version_code : ''}`, 'info') : release ? pill('Up to date', 'ok') : null,
+        h('span.muted', ' · asked ', timeAgo(a.asked)),
+        d.other_key ? h('div', 'The latest build is signed with another key than the app on this phone, so Android will not install it over it. Build where the app on the phone was built, or uninstall it there and install the new one by hand (it pairs again).') : null,
+        u ? h('div.muted', `Last update, to ${u.version_code}: ${updateText(u)}`, u.at ? [' (', timeAgo(u.at), ')'] : null) : null);
+    }
+
+    /** @param {{devices: PlaudPhone[], release: PlaudRelease | null}} view */
+    function renderPhones({ devices, release }) {
       if (!devices.length) return h('p.muted', 'No phone is paired yet.');
       /** @param {string} id */
       const unpair = (id) => btn('Unpair', {
@@ -327,7 +364,7 @@ export default /** @satisfies {PageModule} */ ({
         },
       });
       return h('div.facts', devices.map((d) => h('div', 'Phone ', mono(d.id), ' paired ', timeAgo(d.paired),
-        d.last_upload ? h('span', ' · last transcript ', timeAgo(d.last_upload)) : ' · nothing sent yet', ' ', unpair(d.id))));
+        d.last_upload ? h('span', ' · last transcript ', timeAgo(d.last_upload)) : ' · nothing sent yet', ' ', unpair(d.id), phoneApp(d, release))));
     }
 
     /**

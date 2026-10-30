@@ -28,6 +28,8 @@ class MainActivity : Activity() {
     private val blePermissions = arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
     private lateinit var statusView: TextView
     private lateinit var logView: TextView
+    private lateinit var allowUpdates: Button
+    private val own by lazy { Updater.own(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -60,6 +62,8 @@ class MainActivity : Activity() {
         showVoice(VoicePrefs.enabled(this))
 
         statusView = TextView(this).apply { textSize = 16f }
+        // Android lets the app install Fridolin's builds only once this is allowed (Updater.kt).
+        allowUpdates = button("Allow app updates") { startActivity(Updater.allowIntent(this)) }
         logView = TextView(this).apply { typeface = Typeface.MONOSPACE; textSize = 11f; setTextIsSelectable(true) }
         setContentView(ScrollView(this).apply {
             fitsSystemWindows = true
@@ -68,6 +72,7 @@ class MainActivity : Activity() {
                 setPadding(pad, pad, pad, pad)
                 addView(statusView)
                 if (Fridolin.enabled) {
+                    addView(allowUpdates)
                     addView(voice)
                     addView(ask)
                     addView(speakLocked)
@@ -91,12 +96,14 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        Updater.foreground = true
         AppLog.onChange = { runOnUiThread { render() } }
         if (bleAllowed()) SyncService.checkIn(this, Trigger.OPENED)
         render()
     }
 
     override fun onPause() {
+        Updater.foreground = false
         AppLog.onChange = null
         super.onPause()
     }
@@ -176,8 +183,14 @@ class MainActivity : Activity() {
                     if (waiting > 0) ", $waiting transcript(s) waiting to be sent" else "")
             }
             if (Fridolin.enabled && VoicePrefs.enabled(this@MainActivity)) appendLine("Voice mode: on")
+            appendLine("App: ${own.name} (${own.code})")
+            if (Fridolin.enabled) {
+                Updater.describe(this@MainActivity)?.let { appendLine(it) }
+                if (!Updater.allowed(this@MainActivity)) appendLine("App updates: NOT allowed, tap the button below")
+            }
             append("Files: Documents/PlaudSync")
         }
+        allowUpdates.visibility = if (Updater.allowed(this)) View.GONE else View.VISIBLE
         logView.text = AppLog.tail(200).asReversed().joinToString("\n")
     }
 

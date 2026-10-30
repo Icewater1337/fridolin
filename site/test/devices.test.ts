@@ -41,12 +41,14 @@ async function start(t: import('node:test').TestContext, answer: (req: { op: str
       const r = JSON.parse(readFileSync(req, 'utf8'))
       const body = join(spool, e, 'body.txt')
       seen.push({ ...r, body: existsSync(body) ? readFileSync(body, 'utf8') : undefined })
-      writeFileSync(join(spool, e, 'result.json'), JSON.stringify(answer(r)))
+      const a = answer(r) as { file?: string }
+      if (a.file) writeFileSync(join(spool, e, a.file), `sealed app for ${r.op}`)
+      writeFileSync(join(spool, e, 'result.json'), JSON.stringify(a))
     }
   }, 20)
   t.after(() => { clearInterval(bridge); server.close(); rmSync(dir, { recursive: true, force: true }) })
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-  return { url, seen, pairDevice: (id: string, jwk: Jwk) => writeFileSync(devices, JSON.stringify({ devices: [{ id, key: jwk }] })) }
+  return { url, seen, spool, pairDevice: (id: string, jwk: Jwk) => writeFileSync(devices, JSON.stringify({ devices: [{ id, key: jwk }] })) }
 }
 
 const pair = (url: string, assertion: string) => fetch(`${url}/_fridolin/devices/pair`, {
@@ -175,4 +177,57 @@ test('a failed voice question says why', async (t) => {
   const p = phone()
   pairDevice('dev_1', p.jwk)
   assert.deepEqual(await (await fetchReply(url, p.key)).json(), { state: 'failed', error: 'the question was stopped before it was answered' })
+})
+
+const SHA = 'ab'.repeat(32)
+
+function appRequest(url: string, path: 'release' | 'apk', key: KeyObject, claims: object = {}) {
+  const aud = path === 'release' ? 'fridolin:app-release' : 'fridolin:app-apk'
+  const base = path === 'release' ? { ver: 7, vname: '0.7' } : { apk: SHA, enc: phone().jwk }
+  const token = jwt(key, { iss: 'dev_1', aud, iat: now(), exp: now() + 300, ...base, ...claims })
+  return fetch(`${url}/_fridolin/devices/app/${path}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+}
+
+test('a phone asks for the current build of the app, signed', async (t) => {
+  const release = { version_code: 8, version_name: '0.7', sha256: SHA, cert_sha256: SHA, size: 3 }
+  const { url, seen, pairDevice } = await start(t, r => (r.op === 'app_release' ? { ok: true, release } : { ok: true }))
+  const p = phone()
+  pairDevice('dev_1', p.jwk)
+  const res = await appRequest(url, 'release', p.key)
+  assert.equal(res.status, 200)
+  assert.deepEqual(await res.json(), { release })
+  assert.equal(seen.at(-1)?.op, 'app_release')
+
+  const n = seen.length
+  assert.equal((await appRequest(url, 'release', phone().key)).status, 401, 'an unpaired phone')
+  assert.equal((await appRequest(url, 'release', p.key, { aud: 'fridolin:app-apk' })).status, 401, 'another audience')
+  assert.equal(seen.length, n)
+})
+
+test('a phone fetches a build as the bridge sealed it, which then leaves the spool', async (t) => {
+  const { url, seen, spool, pairDevice } = await start(t, r => (r.op === 'app_apk' ? { ok: true, file: 'app.sealed', size: 20 } : { ok: true }))
+  const p = phone()
+  pairDevice('dev_1', p.jwk)
+  const res = await appRequest(url, 'apk', p.key)
+  assert.equal(res.status, 200)
+  assert.equal(res.headers.get('content-type'), 'application/octet-stream')
+  assert.equal(await res.text(), 'sealed app for app_apk')
+  assert.equal(seen.at(-1)?.op, 'app_apk')
+  for (let i = 0; i < 50 && readdirSync(spool).length > 0; i++) await new Promise(r => setTimeout(r, 20))
+  assert.deepEqual(readdirSync(spool), [], 'the sealed app is gone once sent')
+
+  const n = seen.length
+  assert.equal((await appRequest(url, 'apk', p.key, { apk: 'not a sha' })).status, 400, 'no build named')
+  assert.equal((await appRequest(url, 'apk', p.key, { enc: undefined })).status, 400, 'no key to seal it for')
+  assert.equal((await appRequest(url, 'apk', phone().key)).status, 401, 'an unpaired phone')
+  assert.equal(seen.length, n)
+})
+
+test('the bridge’s refusal of a fetch reaches the phone', async (t) => {
+  const { url, pairDevice } = await start(t, () => ({ ok: false, error: 'that build is not the current one any more: ask for the release again' }))
+  const p = phone()
+  pairDevice('dev_1', p.jwk)
+  const res = await appRequest(url, 'apk', p.key)
+  assert.equal(res.status, 403)
+  assert.match((await res.json() as { error: string }).error, /not the current one/)
 })

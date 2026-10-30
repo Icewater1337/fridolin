@@ -309,6 +309,10 @@ type spoolDevice struct {
 	Assertion string `json:"assertion"`
 }
 
+// spoolAppFile is where the bridge puts the phone app a phone fetches
+// (op app_apk), sealed for that phone, for the site to send it on.
+const spoolAppFile = "app.sealed"
+
 // takeDeviceEntry hands a phone's request to the bridge, which checks the
 // phone's signature itself (plaud_app.go).
 func (m *SiteManager) takeDeviceEntry(root *os.Root, entry string) (map[string]any, error) {
@@ -319,6 +323,9 @@ func (m *SiteManager) takeDeviceEntry(root *os.Root, entry string) (map[string]a
 	var req spoolDevice
 	if err := json.Unmarshal(data, &req); err != nil {
 		return nil, errors.New("the request is not valid JSON")
+	}
+	if req.Op == "app_apk" {
+		return m.takeAppFetch(root, entry, req)
 	}
 	var body []byte
 	if spoolHas(root, entry, "body.txt") {
@@ -332,17 +339,45 @@ func (m *SiteManager) takeDeviceEntry(root *os.Root, entry string) (map[string]a
 	return m.hooks.Device(req.Op, req.Assertion, body)
 }
 
-// deviceWaits reports whether a phone's request may wait for its answer:
-// a fetch of a voice answer (voice_reply), which the bridge holds until
-// the answer is there (plaud.VoiceReplyWait). It is answered off the
-// spool's loop, so that it holds up no other request.
+// takeAppFetch writes the phone app, sealed for the phone that asks, to
+// spoolAppFile in entry, a file of its own (O_EXCL), and answers with its
+// name and size; the site sends it on and removes it.
+func (m *SiteManager) takeAppFetch(root *os.Root, entry string, req spoolDevice) (map[string]any, error) {
+	if m.hooks.DeviceDownload == nil {
+		return nil, errors.New("this Fridolin hands no app to phones")
+	}
+	name := path.Join(entry, spoolAppFile)
+	f, err := root.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	extra, err := m.hooks.DeviceDownload(req.Op, req.Assertion, f)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = root.Remove(name)
+		return nil, err
+	}
+	out := map[string]any{"file": spoolAppFile}
+	for k, v := range extra {
+		out[k] = v
+	}
+	return out, nil
+}
+
+// deviceWaits reports whether a phone's request is answered off the
+// spool's loop, so that it holds up no other request: a fetch of a voice
+// answer (voice_reply), which the bridge holds until the answer is there
+// (plaud.VoiceReplyWait), and a fetch of the app (app_apk), which writes
+// megabytes.
 func (m *SiteManager) deviceWaits(root *os.Root, entry string) bool {
 	data, err := spoolRead(root, path.Join(entry, "device.json"), 16*1024)
 	if err != nil {
 		return false
 	}
 	var req spoolDevice
-	return json.Unmarshal(data, &req) == nil && req.Op == "voice_reply"
+	return json.Unmarshal(data, &req) == nil && (req.Op == "voice_reply" || req.Op == "app_apk")
 }
 
 // startDeviceWait answers a waiting request once, as startSpoolSearch

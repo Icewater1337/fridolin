@@ -29,6 +29,18 @@ Two ways, both in [docs/PLAUD.md](../docs/PLAUD.md#without-plauds-cloud-the-phon
   `Documents/PlaudSync` to a folder on the computer Fridolin runs on, for example with
   [Syncthing](https://syncthing.net) (Syncthing-Fork on the phone).
 
+## Updates
+
+Built by Fridolin, the app updates itself to each new build from the dashboard
+([docs/PLAUD.md](../docs/PLAUD.md#updates)): at check-ins it asks Fridolin for the current
+build, saying which version it runs, fetches a newer one encrypted for its keystore, checks its
+SHA-256 and that Android reads it as this app, signed with its own key, and installs it with
+`PackageInstaller` once the sync is idle (`Updater.kt`, `UpdateReceiver.kt`; the decisions and
+the decryption are in `AppUpdate.kt`). The first update asks for a tap on the phone, and the app
+needs **Install unknown apps** (its **Allow app updates** button); later ones install without
+asking. Fridolin numbers its builds past `versionCode` in `app/build.gradle`
+(`version_code`).
+
 ## Voice mode
 
 Built by Fridolin, with voice mode on in the dashboard, the app's **Voice mode** switch lets you
@@ -97,8 +109,10 @@ ANDROID_HOME=$(brew --prefix)/share/android-commandlinetools ./gradlew testDebug
 ```
 
 The unit tests run on the JVM: when to check in with the pin and how to back off
-(`SyncPolicyTest`), the text made for speech, and opening an answer the bridge
-sealed (the vector of `TestVoiceSealVector` in `internal/plaud/voice_test.go`).
+(`SyncPolicyTest`), the text made for speech, opening an answer the bridge
+sealed (the vector of `TestVoiceSealVector` in `internal/plaud/voice_test.go`), and when to
+fetch and install an update and opening a build the bridge sealed (`UpdatePolicyTest`,
+`UpdateCryptoTest`, the vector of `TestSealAppVector` in `internal/plaud/app_release_test.go`).
 
 The first build fetches the SDK into `app/libs/` and checks its hash. The credentials are built
 into the APK, so keep the APK to yourself. Fridolin's build passes `-PfridolinConfig=<file>` (the

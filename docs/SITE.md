@@ -462,7 +462,11 @@ app ([PLAUD.md](PLAUD.md#through-your-site)): `POST /_fridolin/devices/pair`,
 [voice mode](PLAUD.md#voice-mode) `POST /_fridolin/devices/voice/ask` and
 `POST /_fridolin/devices/voice/reply`, whose answer is encrypted for the
 phone and which Fridolin answers off the spool's loop, holding it up to 15
-seconds until the answer is there. They need no sign-in, but
+seconds until the answer is there. For [updates of the app](PLAUD.md#updates)
+there are `POST /_fridolin/devices/app/release` and
+`POST /_fridolin/devices/app/apk`: Fridolin writes the build, encrypted for
+the phone, into the request's spool folder, and the site sends it on and
+removes it. They need no sign-in, but
 each request carries a JWT signed with a key only that phone has. The site
 checks it against the public keys Fridolin writes to
 `<data_dir>/site/devices.json` and passes what passes on through the spool,
