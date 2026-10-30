@@ -2,6 +2,7 @@ package brain
 
 import (
 	"context"
+	prompttext "github.com/Icewater1337/fridolin/internal/prompt"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/claudecli"
@@ -20,6 +21,9 @@ type RunSpec struct {
 	ID, Dir, Prompt string
 	Settings        *Settings
 	BeforeStart     func()
+	// LivePrompt is the prompt of a turn of a live session, which the
+	// session's first turn and its later ones are told differently.
+	LivePrompt func(prompttext.LiveTurn) string
 	// Message is what the run answers: the brain API's token for the run
 	// knows who asked, and where (see the bridge's standing intents), and
 	// what the run may do through the bridge's tools depends on its chat

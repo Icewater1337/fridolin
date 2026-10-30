@@ -56,6 +56,7 @@ GET /api/whatsapp/qr
 GET /brain/calendar/calendars
 GET /brain/calendar/events
 GET /brain/intents
+GET /brain/live/next
 GET /brain/mcp/tools
 GET /brain/memory/search
 GET /brain/polls
@@ -147,6 +148,7 @@ POST /api/whatsapp/pair
 POST /brain/calendar/events
 POST /brain/calendar/freebusy
 POST /brain/intents
+POST /brain/live/turn-end
 POST /brain/mcp/call
 POST /builder/check
 POST /builder/preview

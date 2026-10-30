@@ -81,6 +81,7 @@ func TestManifestValidate(t *testing.T) {
 		"absolute prompt":    func(m *Manifest) { m.PromptFile = "/etc/passwd" },
 		"escaping prompt":    func(m *Manifest) { m.PromptFile = "../other/brain-prompt.md" },
 		"bad effort":         func(m *Manifest) { m.Effort = "huge" },
+		"bad live_session":   func(m *Manifest) { m.LiveSession = "always" },
 		"group not a group":  func(m *Manifest) { m.Routing.Groups = []string{"15551234567@s.whatsapp.net"} },
 		"filter injection":   func(m *Manifest) { m.Backup.Exclude = []string{"+ /secret"} },
 		"newline in exclude": func(m *Manifest) { m.Backup.Exclude = []string{"a\n+ b"} },

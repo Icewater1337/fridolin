@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/Icewater1337/fridolin/internal/apperr"
 	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
+	"github.com/Icewater1337/fridolin/internal/claudecli"
 	"github.com/Icewater1337/fridolin/internal/google"
 	"net/http"
 	"slices"
@@ -37,6 +38,63 @@ type BrainAPI struct {
 	// run id the server was started with, which must be the token's.
 	MCPTools func(ctx context.Context, token, run string) (any, error)
 	MCPCall  func(ctx context.Context, token, run string, call MCPCallRequest) (any, error)
+	// LiveNext and LiveEnd serve a brain's live session (fridolin mcp
+	// --live, and its Stop hook, fridolin live-turn-end): the next
+	// message for it, waiting up to the given time, and the end of its
+	// turn with its last text.
+	LiveNext func(ctx context.Context, token string, wait time.Duration) (claudecli.LiveEvent, bool, error)
+	LiveEnd  func(ctx context.Context, token, text string) error
+}
+
+// maxLiveWait is the longest GET /brain/live/next waits for an event.
+const maxLiveWait = 60 * time.Second
+
+// maxTurnEndBody is the most POST /brain/live/turn-end takes: an answer.
+const maxTurnEndBody = 8 << 20
+
+// LiveTurnEnd is the body of POST /brain/live/turn-end.
+type LiveTurnEnd struct {
+	Text string `json:"text"`
+}
+
+// brainLiveNext answers GET /brain/live/next?wait=SECONDS with the next
+// event for the live session, or 204 when none came in time.
+func (a *BrainAPI) brainLiveNext(w http.ResponseWriter, r *http.Request, _ *brainruntime.Brain) {
+	wait := 25 * time.Second
+	if s := r.URL.Query().Get("wait"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 1 {
+			WriteErr(w, http.StatusBadRequest, "wait is a number of seconds")
+			return
+		}
+		wait = min(time.Duration(n)*time.Second, maxLiveWait)
+	}
+	tok, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	ev, ok, err := a.LiveNext(r.Context(), tok, wait)
+	if err != nil {
+		WriteErr(w, statusFor(apperr.KindOf(err)), err.Error())
+		return
+	}
+	if !ok {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	WriteJSON(w, http.StatusOK, ev)
+}
+
+// brainLiveTurnEnd answers POST /brain/live/turn-end.
+func (a *BrainAPI) brainLiveTurnEnd(w http.ResponseWriter, r *http.Request, _ *brainruntime.Brain) {
+	var req LiveTurnEnd
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		WriteErr(w, http.StatusBadRequest, `the body is {"text": "<the turn's last text>"}`)
+		return
+	}
+	tok, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if err := a.LiveEnd(r.Context(), tok, req.Text); err != nil {
+		WriteErr(w, statusFor(apperr.KindOf(err)), err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, OperationResponse{Status: "ok"})
 }
 
 // MCPCallRequest is the body of POST /brain/mcp/call.
@@ -80,6 +138,11 @@ func (a *BrainAPI) brainMCPCall(w http.ResponseWriter, r *http.Request, _ *brain
 // brainCall authenticates a brain API call by the run's token and hands
 // the brain it belongs to on to fn.
 func (a *BrainAPI) brainCall(fn func(w http.ResponseWriter, r *http.Request, br *brainruntime.Brain)) http.HandlerFunc {
+	return a.brainCallLimit(64<<10, fn)
+}
+
+// brainCallLimit is brainCall for a call whose body may be up to limit bytes.
+func (a *BrainAPI) brainCallLimit(limit int64, fn func(w http.ResponseWriter, r *http.Request, br *brainruntime.Brain)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tok, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 		br := a.BrainForToken(tok)
@@ -89,7 +152,7 @@ func (a *BrainAPI) brainCall(fn func(w http.ResponseWriter, r *http.Request, br 
 		}
 		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != http.MethodGet {
-			r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+			r.Body = http.MaxBytesReader(w, r.Body, limit)
 		}
 		fn(w, r, br)
 	}

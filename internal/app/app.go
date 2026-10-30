@@ -124,6 +124,8 @@ type App struct {
 	// runs reach the brain API there with a token from runTokens.
 	listen    string
 	runTokens runTokens
+	// live keeps the brains' live sessions (live_runtime.go).
+	live *liveHost
 	// exe is the binary brains run (see brainRunEnv).
 	exe string
 	// mcpTools are the tools runs reach through fridolin mcp (mcpTools),
@@ -303,6 +305,7 @@ func New(opts Options) (_ *App, err error) {
 			leaseStore: opts.LeaseStore, leaseSettle: opts.LeaseSettle, leaseRetry: opts.LeaseRetry, leaseClock: opts.LeaseClock},
 		b2: loadB2Usage(cfgs.Boot()),
 	}
+	b.live = newLiveHost(b)
 	if st, ok := opts.LeaseStore.(interface{ SetUsage(*cloud.Usage, string) }); ok {
 		st.SetUsage(b.b2, "lease")
 	}
@@ -393,6 +396,7 @@ func New(opts Options) (_ *App, err error) {
 	// Runs the last stop cut short end now, before anyone lists them.
 	b.agents.recover(time.Now())
 	b.brainMgr.SetHooks(BrainHooks{
+		Live:        b.live,
 		Notice:      b.workingNotice,
 		Question:    b.askQuestion,
 		Deliver:     b.deliverRun,
@@ -534,7 +538,7 @@ func (b *App) stopResources() {
 				b.keep(InboundHeld, "", m)
 			}
 		},
-		Brains: b.brainMgr.Stop, Outbox: b.outbox.Stop, OTP: b.otp.Stop,
+		Brains: func() { b.brainMgr.Stop(); b.live.Stop() }, Outbox: b.outbox.Stop, OTP: b.otp.Stop,
 		Disconnect: b.wa.Disconnect, ConnectionGrace: connectStopWait,
 		EndIntake: b.intake.End, CloseStore: b.store.Close,
 		// The lease goes free once nothing here sends any more, and before

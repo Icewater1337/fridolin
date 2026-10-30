@@ -27,6 +27,7 @@
     "reply_chat": {"type": "string"},
     "observe": {"enum": ["", "history", "run"]},
     "approvals": {"enum": ["", "ask", "auto"], "description": "ask (the default): request_approval puts a poll in your chat and waits for your vote. auto: it answers approved at once, recorded as approved by \"auto\"; lockdown, the run's risk budget, policy.max_pending_irreversible and observe-only runs still hold. A security trade-off: the brain then takes irreversible steps without your yes."},
+    "live_session": {"enum": ["", "off", "owner_dm"], "description": "off (the default): every message runs claude -p. owner_dm: the brain keeps one Claude Code session running, started with --dangerously-load-development-channels, and wakes it with the messages you write in a direct chat; any other message, and any the session cannot take, runs claude -p as before. Needs dangerously_skip_permissions and not inherit_claude_user_config (docs/BRAINS.md, Live session)."},
     "backup": {
       "type": "object",
       "additionalProperties": false,

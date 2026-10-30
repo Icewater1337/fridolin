@@ -45,6 +45,10 @@ func runFakeClaude(version string, polls func(io.Writer) int) {
 		fmt.Println(version + " (Claude Code)")
 		return
 	}
+	if slices.Contains(args, "--dangerously-load-development-channels") {
+		fakeLive(args)
+		return
+	}
 	// Like the CLI, it reads the prompt from stdin when -p comes last.
 	prompt := ""
 	for i, a := range args {

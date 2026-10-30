@@ -142,6 +142,8 @@ func Main() {
 		os.Exit(pathsCmd(args, os.Stdout, os.Stderr))
 	case "mcp":
 		os.Exit(mcpCmd(args))
+	case "live-turn-end":
+		os.Exit(liveTurnEndCmd())
 	case "mcp-site":
 		mcpSiteCmd()
 	case "service":

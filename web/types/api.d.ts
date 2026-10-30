@@ -21,6 +21,8 @@ export type Observe = 'history' | 'run';
 
 /** Whether a brain's request_approval asks you (ask) or answers approved at once (auto). */
 export type ApprovalsMode = 'ask' | 'auto';
+/** Whether the brain keeps a live Claude Code session for the owner's direct messages. */
+export type LiveSessionMode = 'off' | 'owner_dm';
 
 /** Which chats a brain answers (manifest.Routing). */
 export interface Routing {
@@ -120,6 +122,7 @@ export interface BrainManifest {
   reply_chat?: string;
   observe?: Observe;
   approvals?: ApprovalsMode;
+  live_session?: LiveSessionMode;
   backup: BrainBackup;
   calendar?: BrainCalendar;
   /** "core" for the brain that may reach the others through its grants. */

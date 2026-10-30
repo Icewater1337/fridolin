@@ -560,6 +560,7 @@ func TestSchemaEnumsAreTheBridgesValues(t *testing.T) {
 		{"brain.json effort", "brain.schema.json#/properties/effort", manifest.Efforts(), `{"id": "a", "name": "A", "effort": %s}`},
 		{"brain.json observe", "brain.schema.json#/properties/observe", manifest.ObserveModes(), `{"id": "a", "name": "A", "observe": %s}`},
 		{"brain.json approvals", "brain.schema.json#/properties/approvals", manifest.ApprovalsModes(), `{"id": "a", "name": "A", "approvals": %s}`},
+		{"brain.json live_session", "brain.schema.json#/properties/live_session", manifest.LiveSessionModes(), `{"id": "a", "name": "A", "live_session": %s}`},
 		{"brain.json role", "brain.schema.json#/properties/role", manifest.Roles(), `{"id": "a", "name": "A", "role": %s}`},
 		{"schedule report", "schedule.schema.json#/properties/report", manifest.ScheduleReports(), `{"name": "s", "when": "every 6h", "report": %s}`},
 		{"schedule missed", "schedule.schema.json#/properties/missed", manifest.ScheduleMissed(), `{"name": "s", "when": "every 6h", "missed": %s}`},
