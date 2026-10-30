@@ -1152,10 +1152,25 @@ func (f *frideRuntime) drop(ctx context.Context, id int64, t store.FrideThread) 
 		return "", err
 	}
 	where := f.where(t.Node, t.Instance)
-	if t.FrideStatus == "queued" {
+	switch t.FrideStatus {
+	case "queued":
 		return fmt.Sprintf("FrIDE #%d never became a task in FrIDE on %s, where it still waits in the queue: closed here. Should FrIDE start it after all, its news still comes here.", id, where), nil
+	case "failed":
+		return fmt.Sprintf("FrIDE #%d never became a task in FrIDE on %s, where it failed: closed here, with nothing to archive.", id, where), nil
 	}
-	return fmt.Sprintf("FrIDE #%d never became a task in FrIDE on %s, where it failed: closed here, with nothing to archive.", id, where), nil
+	return fmt.Sprintf("FrIDE #%d never became a task in FrIDE on %s, which answered it without one (%s): closed here, with nothing to archive.", id, where, t.FrideStatus), nil
+}
+
+// droppable reports whether a thread FrIDE made no task of, in FrIDE's
+// status, closes on the core alone: it failed, waits in FrIDE's queue,
+// or FrIDE answered or finished it without a task (it cancelled it, say).
+// One whose FrIDE still asks (needs_reply) or works does not.
+func droppable(status string) bool {
+	switch status {
+	case "failed", "queued", "answered", "done", "cancelled":
+		return true
+	}
+	return false
 }
 
 // close closes thread id's task in FrIDE, archives its workspace into the
@@ -1186,7 +1201,7 @@ func (f *frideRuntime) close(ctx context.Context, id int64) (string, error) {
 	if t.State == store.FrideClosed {
 		return fmt.Sprintf("FrIDE #%d is closed already; its archive is %s.", id, orDefault(t.Archive, "not in the vault")), nil
 	}
-	if t.TaskID == "" && (t.FrideStatus == "failed" || t.FrideStatus == "queued") {
+	if t.TaskID == "" && droppable(t.FrideStatus) {
 		// It never became a task there (FrIDE could not think, say):
 		// nothing to archive, and it no longer keeps its instance where
 		// it is, which need not be reachable for that.
