@@ -35,6 +35,12 @@ for compatibility.
 
 ### Fixed
 
+- **`!approved` approves.** Typed in the past tense, the owner's
+  `!approve`, `!deny` and `!revoke` went to the brain, which knows
+  nothing of the bridge's own approvals and answered that nothing waited
+  (2026-10-29, while a node's request did). `!approved`, `!denied` and
+  `!revoked` now mean the commands.
+
 - **FrIDE's questions reach your chat whole.** Every piece of FrIDE's news
   was cut to three lines and 300 characters, inside a word if need be, so
   a question you had to answer often ended mid-sentence ("… more in the
