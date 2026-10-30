@@ -59,6 +59,9 @@ type BrainHooks struct {
 	// ended.
 	Admit func(spec brain.RunSpec) (*runPolicy, error)
 	Ended func(p *runPolicy, res claudecli.Result)
+	// Live keeps the brains' live sessions, which take the owner's direct
+	// messages when a brain has one ready; nil for none.
+	Live *liveHost
 }
 
 // brainHooksSink keeps command callbacks compatible while runtime users move

@@ -1054,6 +1054,7 @@ func (br *Brain) invoke(run *brainRun, ctx context.Context, s *Settings, m Inbou
 	return br.runner.Run(ctx, RunSpec{
 		ID: br.id, Dir: br.workDir, Settings: s, Prompt: br.buildPrompt(s, m), Message: m.Inbound,
 		BeforeStart: func() { br.ensureViewer(s) },
+		LivePrompt:  func(turn prompttext.LiveTurn) string { return br.buildPromptFor(s, m, turn) },
 	}, claudecli.Callbacks{
 		Start: run.startProcess,
 		Started: func(pid int) func() {
@@ -1208,11 +1209,17 @@ func (br *Brain) identities() map[string]string {
 // prompt file, the chat's recent history and the identity map. renderPrompt
 // puts it into words.
 func (br *Brain) buildPrompt(s *Settings, m Inbound) string {
+	return br.buildPromptFor(s, m, prompttext.LiveNone)
+}
+
+// buildPromptFor is buildPrompt for a turn of a live session, or for a
+// one-off run with LiveNone.
+func (br *Brain) buildPromptFor(s *Settings, m Inbound, live prompttext.LiveTurn) string {
 	now := time.Now()
 	if s.Zone != nil {
 		now = now.In(s.Zone)
 	}
-	in := prompttext.Input{Now: now, BrainID: br.id, Message: m.Inbound, BuildChat: br.input.BuildChat != nil && br.input.BuildChat(m.JID), ObserveOnly: m.Silent, Vault: s.Vault, CodeToFride: s.FrideTools && s.Manifest.IsCore(), FrideInstances: s.FrideInstances, AutoApprove: s.Manifest.AutoApproves()}
+	in := prompttext.Input{Now: now, BrainID: br.id, Message: m.Inbound, BuildChat: br.input.BuildChat != nil && br.input.BuildChat(m.JID), ObserveOnly: m.Silent, Vault: s.Vault, CodeToFride: s.FrideTools && s.Manifest.IsCore(), FrideInstances: s.FrideInstances, AutoApprove: s.Manifest.AutoApproves(), Live: live}
 	if name := s.PromptFile; name != "" {
 		if data, err := br.readFile(name); err != nil {
 			log.Printf("brain %s: could not read prompt file %s: %v", br.id, name, err)
@@ -1921,4 +1928,14 @@ func (bm *Manager) Stop() {
 		})
 	}
 	wg.Wait()
+}
+
+// Backlog is the end of chat's history, at most limit entries, oldest first:
+// what a live session reads to catch up.
+func (br *Brain) Backlog(chatJID string, limit int) []history.Entry {
+	n := 0
+	return history.ForChat(br.root, br.id, br.input.Chats(chat.Inbound{JID: chatJID}), promptHistoryBudget, func(history.Entry) bool {
+		n++
+		return n >= limit
+	})
 }

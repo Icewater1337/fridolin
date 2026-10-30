@@ -10,6 +10,16 @@ for compatibility.
 
 ### Added
 
+- **A live Claude session per brain, for your direct messages.** With
+  `"live_session": "owner_dm"` in a brain's `brain.json`, the brain keeps one
+  Claude Code session running and wakes it with each message you write to it
+  in a direct chat, instead of starting `claude -p` for each, so it keeps the
+  conversation and Claude's prompt cache. It uses Claude Code's channels
+  (a research preview) with the development-channels flag and the brain's own
+  sandbox and login; groups, other senders, scheduled agents and the rest
+  still run `claude -p`, which is also the fallback whenever the session is
+  not up, was refused channels, or died. Off by default.
+  [docs/BRAINS.md](docs/BRAINS.md#live-session)
 - **The Plaud Sync phone app updates itself.** Each build on the Plaud
   card (**Build and update phones**), or one the core brain starts with
   `plaud_app_update` when you ask it, is the release the paired phones

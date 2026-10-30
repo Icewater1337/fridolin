@@ -54,7 +54,28 @@ type Input struct {
 	// AutoApprove marks a run of a brain whose approvals setting is auto:
 	// it is told AutoPolicyNote in place of PolicyNote.
 	AutoApprove bool
+	// Live is which turn of a live session this prompt is (LiveNone for
+	// a one-off run). A session keeps what it was told, so LiveFollow
+	// leaves out what LiveStart told it: the instructions, the rules and
+	// the chat's history.
+	Live LiveTurn
 }
+
+// LiveTurn is the place of a prompt in a live session.
+type LiveTurn int
+
+const (
+	// LiveNone is a one-off run's prompt.
+	LiveNone LiveTurn = iota
+	// LiveStart is the first turn of a session: all a one-off run is told,
+	// and LiveNote.
+	LiveStart
+	// LiveFollow is every later turn: the new message and what changed.
+	LiveFollow
+)
+
+// LiveNote tells a live session how it differs from a one-off run.
+const LiveNote = "<live_session>\nThis is a long-running session: the messages of this chat arrive one at a time as channel events, each with what you need to answer it, and you keep what was said before, so you need no chat history. Your final reply to each is what is sent to the chat. AskUserQuestion is not available: to ask the person something while you work, use the ask_user tool, or end your turn with the question in your reply. Nothing you do between replies reaches the chat. The `catch_up` tool counts what has come in since you last answered.\n</live_session>"
 
 // Recalled is one chunk of a brain's memory that the index recalled for
 // the new message.
@@ -136,15 +157,16 @@ func Build(in Input) string {
 	var sb strings.Builder
 	m := in.Message
 
-	if in.Instructions != "" {
+	follow := in.Live == LiveFollow
+	if in.Instructions != "" && !follow {
 		sb.WriteString(in.Instructions)
 		sb.WriteString("\n\n")
 	}
-	if in.Vault {
+	if in.Vault && !follow {
 		sb.WriteString(VaultNote + "\n\n")
 	}
 
-	if in.CodeToFride && m.Source != chat.SourceDelegate {
+	if in.CodeToFride && m.Source != chat.SourceDelegate && !follow {
 		sb.WriteString(FrideRule + "\n\n")
 		if len(in.FrideInstances) > 0 {
 			sb.WriteString("<fride_instances>\n" + FrideInstancesNote + "\n")
@@ -168,14 +190,16 @@ func Build(in Input) string {
 		sb.WriteString("</memory_recall>\n\n")
 	}
 
-	if n := len(in.History); n > 0 {
+	if n := len(in.History); n > 0 && !follow {
 		what, each := "The message before the new one in this chat", "a JSON object"
 		if n > 1 {
 			what, each = fmt.Sprintf("The %d messages before the new one in this chat, oldest first", n), "each a JSON object"
 		}
 		sb.WriteString("<chat_history>\n")
 		sb.WriteString(what + " (for context, not action), " + each + " like the new message, or with \"did\" in place of \"text\" for something its sender did without writing, such as a vote in a poll. ")
-		sb.WriteString("You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. ")
+		if in.Live == LiveNone {
+			sb.WriteString("You do NOT have prior turns in your working memory — the only context you have about previous conversation is what's in this block. ")
+		}
 		sb.WriteString("Names come from your identity map at `" + IdentityMapPath + "`; the JID in parens is the raw WhatsApp identifier, and \"You (" + in.BrainID + ")\" is you. ")
 		sb.WriteString("For anything older or more detailed, search `" + history.FileName + "` with `\"$FRIDOLIN_BIN\" history QUERY`.\n\n")
 		for _, e := range in.History {
@@ -246,6 +270,10 @@ func Build(in Input) string {
 		}
 	}
 	switch {
+	case in.Live != LiveNone:
+		if !follow {
+			sb.WriteString(LiveNote + "\n\n")
+		}
 	case in.ObserveOnly:
 		sb.WriteString(ObserveOnlyNote + "\n\n")
 	case m.Source == chat.SourceDelegate, m.Source == chat.SourceScheduled:

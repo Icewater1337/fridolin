@@ -39,6 +39,35 @@ func promptCases() map[string]Input {
 			Names:   names,
 			Message: chat.Inbound{JID: alex + "@s.whatsapp.net", Sender: alex, Text: "Tuesday at 3?", At: now.Add(-time.Minute)},
 		},
+		"live-start": {
+			// A live session's first turn: all a one-off run is told, and how a
+			// session differs.
+			Now:          now,
+			Instructions: "You are Main, Alex's assistant.",
+			BrainID:      "main",
+			Live:         LiveStart,
+			History: []history.Entry{
+				{TS: "2026-10-12T09:12:00+02:00", From: alex, Chat: alex + "@s.whatsapp.net", Text: "Can we meet next week?", Type: history.In},
+				{TS: "2026-10-12T09:13:00+02:00", From: "main", Chat: alex + "@s.whatsapp.net", Text: "Sure, which day?", Type: history.Out},
+			},
+			Names:   names,
+			Message: chat.Inbound{JID: alex + "@s.whatsapp.net", Sender: alex, Text: "Tuesday at 3?", At: now.Add(-time.Minute)},
+		},
+		"live-follow": {
+			// Every later turn: the instructions, the rules and the history are
+			// in the session already.
+			Now:          now,
+			Instructions: "You are Main, Alex's assistant.",
+			BrainID:      "main",
+			Live:         LiveFollow,
+			Vault:        true,
+			History: []history.Entry{
+				{TS: "2026-10-12T09:12:00+02:00", From: alex, Chat: alex + "@s.whatsapp.net", Text: "Can we meet next week?", Type: history.In},
+			},
+			Since:   []history.Entry{{TS: "2026-10-18T09:30:00+02:00", From: "main", Chat: alex + "@s.whatsapp.net", Text: "Sent from a script", Type: history.Out, Via: "script"}},
+			Names:   names,
+			Message: chat.Inbound{JID: alex + "@s.whatsapp.net", Sender: alex, Text: "And Wednesday?", At: now.Add(-time.Minute)},
+		},
 		"dm-vault": {
 			Now:          now,
 			Instructions: "You are Main, Alex's assistant.",

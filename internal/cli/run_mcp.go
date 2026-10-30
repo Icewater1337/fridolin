@@ -15,3 +15,10 @@ func mcpCmd(args []string) int {
 	defer stop()
 	return toolcli.RunMCP(ctx, args, os.Stdin, processToolIO())
 }
+
+// liveTurnEndCmd is `fridolin live-turn-end`, the Stop hook of a brain's live session.
+func liveTurnEndCmd() int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return toolcli.LiveTurnEnd(ctx, os.Stdin, processToolIO())
+}

@@ -230,6 +230,15 @@ wait for the owner's answer up to their `wait_seconds` (at most 600), then
 answer `pending` with the approval's id. Every call is a `tool_call` line
 of the audit log, its arguments left out.
 
+A brain with a [live session](BRAINS.md#live-session) also uses two routes
+with the session's token: `GET /brain/live/next?wait=SECONDS` (at most 60)
+answers the next message for the session as `{"content": "…", "meta": {…}}`,
+or `204` when none came in time (`fridolin mcp --live` passes it on as a
+channel notification), and `POST /brain/live/turn-end` takes
+`{"text": "…"}`, the last text of the turn the session finished (its Stop hook,
+`fridolin live-turn-end`). Both answer `404` for a token that is no live
+session's.
+
 | Status | When |
 | --- | --- |
 | `200` | The tools, or the call's result (which can be a failure the model reads). |

@@ -30,6 +30,7 @@ func RunMCP(ctx context.Context, args []string, stdin io.Reader, t IO) int {
 	fs := flag.NewFlagSet("fridolin mcp", flag.ContinueOnError)
 	fs.SetOutput(t.Stderr)
 	run := fs.String("run", "", "the run whose tools to serve (the bridge starts the server with it)")
+	live := fs.Bool("live", false, "serve a live session: also pass the bridge's messages on as Claude Code channel notifications")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -37,7 +38,7 @@ func RunMCP(ctx context.Context, args []string, stdin io.Reader, t IO) int {
 		return 2
 	}
 	if *run == "" || fs.NArg() > 0 {
-		fmt.Fprintln(t.Stderr, "usage: fridolin mcp --run ID (a brain's run starts it; it speaks MCP on stdin and stdout)")
+		fmt.Fprintln(t.Stderr, "usage: fridolin mcp --run ID [--live] (a brain's run starts it; it speaks MCP on stdin and stdout)")
 		return 2
 	}
 	client, err := BrainClientFor(t)
@@ -51,6 +52,15 @@ func RunMCP(ctx context.Context, args []string, stdin io.Reader, t IO) int {
 		Name: "fridolin", Version: version.String(), Instructions: runMCPInstructions,
 		Handler: runTools{client: client, run: *run},
 		Logf:    func(format string, a ...any) { fmt.Fprintf(t.Stderr, format+"\n", a...) },
+	}
+	if *live {
+		events := make(chan mcp.Notification)
+		srv.Experimental = map[string]any{"claude/channel": map[string]any{}}
+		srv.Instructions = liveMCPInstructions
+		srv.Events = events
+		pumpCtx, stopPump := context.WithCancel(ctx)
+		defer stopPump()
+		go pumpLive(pumpCtx, client, events, srv.Logf)
 	}
 	if err := srv.Serve(ctx, stdin, t.Stdout); err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintf(t.Stderr, "fridolin mcp: %v\n", err)

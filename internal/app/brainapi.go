@@ -36,6 +36,11 @@ type runInfo struct {
 	// Policy is the run's standing with the policy (admitRun); nil for a
 	// run the policy did not see, a test's say.
 	Policy *runPolicy
+	// Live marks the token of a brain's live session, which speaks for
+	// one turn after another: the bridge swaps the rest of this in with
+	// each (runTokens.replace), and the session's MCP server, started
+	// once, is not held to the run id it was started with.
+	Live bool
 }
 
 // runInfoFor is the run of brain that answers m.
@@ -84,6 +89,22 @@ func (rt *runTokens) mintRun(run runInfo) (string, func()) {
 	}
 }
 
+// replace makes tok speak for run from now on, for a live session's next
+// turn. It reports whether tok is a live session's token.
+func (rt *runTokens) replace(tok string, run runInfo) bool {
+	sum := sha256.Sum256([]byte(tok))
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	old, ok := rt.brains[sum]
+	if !ok || !old.Live {
+		return false
+	}
+	run.Live, run.Brain = true, old.Brain
+	run.Message.Done = nil
+	rt.brains[sum] = run
+	return true
+}
+
 // brainOf returns the brain a token was minted for, or "".
 func (rt *runTokens) brainOf(tok string) string {
 	run, _ := rt.runOf(tok)
@@ -110,7 +131,9 @@ func (rt *runTokens) runOf(tok string) (runInfo, bool) {
 // runAccess is what one run gets to reach the bridge: environment
 // variables, and the MCP server that serves it the bridge's tools.
 type runAccess struct {
-	Env []string
+	// Token is the run's brain API token, which the files named in Env hold.
+	Token string
+	Env   []string
 	// MCPConfig is the file to pass Claude Code with --mcp-config, which
 	// starts MCPCommand; "" without a brain API or a binary to start.
 	MCPConfig string
@@ -160,6 +183,9 @@ func (b *App) brainRunEnv(run runInfo) runAccess {
 	var files []string
 	if b.exe != "" {
 		cmd := []string{b.exe, "mcp", "--run", run.ID}
+		if run.Live {
+			cmd = append(cmd, "--live")
+		}
 		cfg, err := writeRunMCPConfig(dir, run.ID, cmd, map[string]string{"FRIDOLIN_API": api, "FRIDOLIN_BRAIN_TOKEN_FILE": path})
 		if err != nil {
 			log.Printf("brain %s: no Fridolin tools for this run: %v", brain, err)
@@ -169,6 +195,7 @@ func (b *App) brainRunEnv(run runInfo) runAccess {
 		}
 	}
 	files = append(files, path)
+	access.Token = tok
 	access.Env = append(access.Env, "FRIDOLIN_API="+api, "FRIDOLIN_BRAIN_TOKEN_FILE="+path)
 	githubDone := access.Done
 	access.Done = func() {

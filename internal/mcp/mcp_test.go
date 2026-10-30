@@ -301,3 +301,78 @@ func TestRegistryKeepsUnavailableToolsOut(t *testing.T) {
 	}()
 	r.Register(Entry[caller]{Name: "delegate", Describe: func(caller) Tool { return Tool{} }, Call: func(context.Context, caller, json.RawMessage) (*CallResult, error) { return nil, nil }})
 }
+
+// A channel server declares its experimental capability and passes the
+// events it is given on to the client, unasked, one JSON line each.
+func TestServerSendsChannelEvents(t *testing.T) {
+	inR, inW := io.Pipe()
+	outR, outW := io.Pipe()
+	events := make(chan Notification)
+	srv := &Server{Name: "test", Version: "1", Handler: &fakeHandler{}, Experimental: map[string]any{"claude/channel": map[string]any{}}, Events: events}
+	done := make(chan error, 1)
+	go func() { done <- srv.Serve(context.Background(), inR, outW); outW.Close() }()
+	t.Cleanup(func() { inW.Close() })
+	out := bufio.NewScanner(outR)
+
+	io.WriteString(inW, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`+"\n")
+	if !out.Scan() {
+		t.Fatal("no answer to initialize")
+	}
+	var init struct {
+		Result struct {
+			Capabilities struct {
+				Experimental map[string]any `json:"experimental"`
+			} `json:"capabilities"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &init); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := init.Result.Capabilities.Experimental["claude/channel"]; !ok {
+		t.Errorf("capabilities: %s", out.Text())
+	}
+
+	events <- Notification{Method: "notifications/claude/channel", Params: map[string]any{"content": "hi", "meta": map[string]string{"kind": "message"}}}
+	if !out.Scan() {
+		t.Fatal("no event")
+	}
+	var ev struct {
+		ID     *json.RawMessage `json:"id"`
+		Method string           `json:"method"`
+		Params struct {
+			Content string            `json:"content"`
+			Meta    map[string]string `json:"meta"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &ev); err != nil {
+		t.Fatal(err)
+	}
+	if ev.ID != nil || ev.Method != "notifications/claude/channel" || ev.Params.Content != "hi" || ev.Params.Meta["kind"] != "message" {
+		t.Errorf("event: %s", out.Text())
+	}
+
+	inW.Close()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Serve did not end with its input")
+	}
+}
+
+// Without channel settings the server declares nothing experimental.
+func TestServerDeclaresNoChannelByDefault(t *testing.T) {
+	s := newSession(t, &fakeHandler{})
+	s.send(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`)
+	if got := s.recv(); strings.Contains(string(mustJSON(t, got)), "experimental") {
+		t.Errorf("initialize: %v", got)
+	}
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	data, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}

@@ -64,6 +64,17 @@ type waits struct {
 	// coreMovePoll and coreSecretsPoll are how long the !movecore poll
 	// and the keep/forget poll after a move wait for a vote.
 	coreMovePoll, coreSecretsPoll time.Duration
+	// liveReady is how long a live session gets to start and answer its
+	// check, liveIdle how long one may idle, and liveBackoff how long a
+	// brain's sessions are left alone after the first that did not come up
+	// (doubling to three times).
+	liveReady, liveIdle, liveBackoff, liveSettle time.Duration
+	// liveSettle is how long a session's channel server is left to register
+	// with the CLI before the first message is passed to it.
+	// liveTurns and liveAge are how many turns and how long a session
+	// serves before a new one takes over.
+	liveTurns int
+	liveAge   time.Duration
 	// coreMove are a move's timings (the defaults of nodes when zero).
 	coreMove nodes.MoveOptions
 }
@@ -89,6 +100,12 @@ func defaultWaits() waits {
 		secretFoldersChange: 10 * time.Minute,
 		coreMovePoll:        30 * time.Minute,
 		coreSecretsPoll:     24 * time.Hour,
+		liveReady:           90 * time.Second,
+		liveIdle:            30 * time.Minute,
+		liveBackoff:         5 * time.Minute,
+		liveSettle:          3 * time.Second,
+		liveTurns:           50,
+		liveAge:             12 * time.Hour,
 	}
 }
 
