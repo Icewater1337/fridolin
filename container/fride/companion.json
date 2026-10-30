@@ -33,6 +33,7 @@
   },
   "companion": {
     "enabled": true,
-    "claudePlugins": ["/opt/fride/plugins/ponytail"]
+    "claudePlugins": ["/opt/fride/plugins/ponytail"],
+    "claudeAllow": ["Bash(gh pr merge:*)"]
   }
 }
