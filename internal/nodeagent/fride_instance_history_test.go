@@ -175,3 +175,34 @@ func TestFrideInstanceFailedRemakeKeepsState(t *testing.T) {
 		t.Error("the next start did not remake")
 	}
 }
+
+// A remake that runs out of time before the old sandbox goes keeps the
+// instance's state although sbx can no longer be asked (#392).
+func TestFrideInstanceTimedOutRemakeKeepsState(t *testing.T) {
+	t.Parallel()
+	f := newInstFix(t)
+	f.fride("work")
+	f.start(workParams())
+	writeTestFile(t, f.home("work", ".claude/projects/p1/a.jsonl"), "session")
+	writeTestFile(t, filepath.Join(f.fake, "fail-cp"), "context deadline exceeded\n")
+	writeTestFile(t, filepath.Join(f.fake, "fail-ls-after-cp"), "")
+	p := workParams()
+	p.MemoryMB = 8192
+	if _, perr := f.a.frideInstanceStart(context.Background(), p); perr == nil {
+		t.Fatalf("the remake did not fail\n%s", f.log)
+	}
+	if st, err := loadFrideInstance(f.a.Dir, "work"); err != nil || st.MemoryMB != workParams().MemoryMB {
+		t.Fatalf("state after the timed-out remake: %+v, %v", st, err)
+	}
+	for _, n := range []string{"fail-cp", "fail-ls-after-cp", "fail-ls"} {
+		if err := os.Remove(filepath.Join(f.fake, n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out := f.start(p); out.MemoryMB != 8192 {
+		t.Errorf("the next start: %+v", out)
+	}
+	if !called(fakeCalls(t, f.fake), "create", "--name", "fride-work", "--memory", "8192m") {
+		t.Error("the next start did not remake")
+	}
+}

@@ -178,27 +178,27 @@ func (o instanceOps) make(ctx context.Context, st *FrideInstanceState, host *Fri
 // Code's and git's settings (frideInstanceCarry). The old sandbox goes
 // only once its things are on the host; should the new one fail, they
 // wait in the carry folder for the next start. status is sbx's status of
-// the old sandbox.
-func (o instanceOps) remake(ctx context.Context, st *FrideInstanceState, host *FrideHostState, status string) error {
+// the old sandbox; removed is whether remake took it away.
+func (o instanceOps) remake(ctx context.Context, st *FrideInstanceState, host *FrideHostState, status string) (removed bool, err error) {
 	carry := o.carryDir(st.Name)
 	if status == "running" {
 		if err := o.exec(ctx, st.Sandbox, nil, frideInstanceStop); err != nil {
-			return err
+			return false, err
 		}
 	}
 	n, err := o.saveVM(ctx, st.Sandbox, carry, frideInstanceCarry)
 	if err != nil {
 		_ = os.RemoveAll(carry) // the old sandbox stays; a partial carry would be restored over newer files
-		return fmt.Errorf("saving the sandbox's things: %w; the sandbox stays as it is", err)
+		return false, fmt.Errorf("saving the sandbox's things: %w; the sandbox stays as it is", err)
 	}
 	o.say("Saved %d folders and files of %s (workspaces, repositories, sessions, FrIDE's tasks, the login) to %s.", n, st.Sandbox, carry)
 	if _, stderr, err := o.d.run(ctx, nil, nil, "rm", "-f", st.Sandbox); err != nil {
-		return fmt.Errorf("sbx could not remove %s: %w", st.Sandbox, sbxError(err, stderr))
+		return false, fmt.Errorf("sbx could not remove %s: %w", st.Sandbox, sbxError(err, stderr))
 	}
 	if err := o.make(ctx, st, host); err != nil {
-		return fmt.Errorf("%w; what the old sandbox held is in %s, and the next start puts it back", err, carry)
+		return true, fmt.Errorf("%w; what the old sandbox held is in %s, and the next start puts it back", err, carry)
 	}
-	return nil
+	return true, nil
 }
 
 // claudeToken is the Claude token FrIDE's agents log in with, from the

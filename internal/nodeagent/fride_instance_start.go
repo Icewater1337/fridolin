@@ -180,9 +180,10 @@ func (a *Agent) ensureInstance(ctx context.Context, o instanceOps, host *FrideHo
 		}
 		old := *st
 		fresh()
-		err := o.remake(ctx, st, host, status)
-		// With the old sandbox still there, the state must keep describing it.
-		if now, serr := o.status(ctx, st); err != nil && serr == nil && now != "" {
+		removed, err := o.remake(ctx, st, host, status)
+		// With the old sandbox still there, the state must keep describing it,
+		// also when ctx ran out and sbx could no longer be asked.
+		if err != nil && !removed {
 			*st = old
 		}
 		return st, err
