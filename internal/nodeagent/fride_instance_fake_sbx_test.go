@@ -19,7 +19,9 @@ import (
 // an existing one merges, a missing source fails); policy rm removes a
 // rule by its resource; secret keeps the github service's value in
 // github-secret and each custom secret in custom/<placeholder> (its
-// hosts and value).
+// hosts and value). fail-cp fails cp with its text, fail-ls fails ls, and
+// fail-ls-after-cp has a failed cp make sbx stop listing, as an expired
+// context does.
 func fakeFrideSbx(dir string, args []string) (int, bool) {
 	if _, err := os.Stat(filepath.Join(dir, "fride-fake")); err != nil || len(args) == 0 {
 		return 0, false
@@ -39,6 +41,9 @@ func fakeFrideSbx(dir string, args []string) (int, bool) {
 		return 0, false
 	case args[0] == "ls":
 		record()
+		if _, err := os.Stat(filepath.Join(dir, "fail-ls")); err == nil {
+			return 1, true
+		}
 		rows := []map[string]string{}
 		for _, n := range fakeSandboxes(dir) {
 			status := "running"
@@ -83,6 +88,9 @@ func fakeFrideSbx(dir string, args []string) (int, bool) {
 		record()
 		if b, err := os.ReadFile(filepath.Join(dir, "fail-cp")); err == nil {
 			fmt.Fprint(os.Stderr, string(b))
+			if _, err := os.Stat(filepath.Join(dir, "fail-ls-after-cp")); err == nil {
+				_ = os.WriteFile(filepath.Join(dir, "fail-ls"), nil, 0o600)
+			}
 			return 1, true
 		}
 		return fakeCp(dir, args[1], args[2]), true
