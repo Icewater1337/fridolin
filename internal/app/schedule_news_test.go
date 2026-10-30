@@ -58,6 +58,7 @@ func TestScheduledAgentsHandWorkToFride(t *testing.T) {
 
 	// FrIDE asks: a run of the agent answers, and the DM hears nothing.
 	setenv(t, "FRIDOLIN_FAKE_MCP", `[{"brain":"core","tool":"fride_reply","args":{"thread":1,"text":"the small one"}}]`)
+	asked := time.Now()
 	if code := ff.Ask(1, "Which fix?"); code != http.StatusNoContent {
 		t.Fatalf("the webhook answered %d", code)
 	}
@@ -81,8 +82,10 @@ func TestScheduledAgentsHandWorkToFride(t *testing.T) {
 	ff.Emit(map[string]any{"event": "question", "thread_id": 1, "text": "Agent fix-12 has not moved for 2h. Should I nudge it?", "status": "needs_reply"})
 	ff.Emit(map[string]any{"event": "done", "thread_id": 1, "task_id": "fix-12", "text": "PR merged", "status": "done"})
 	r3 := h.waitRunEnded("core", "fix-bugs", 3)
-	if r3.Trigger != sched.TriggerFride || r3.Started.Sub(r.Started) < 2*time.Second {
-		t.Fatalf("the run for FrIDE's done: %+v, %s after the last", r3, r3.Started.Sub(r.Started))
+	if r3.Trigger != sched.TriggerFride || r3.Started.Sub(asked) < 2*time.Second {
+		// The gap counts from when the relay started run 2, which is after
+		// asked but before r.Started: under load r.Started lags by seconds.
+		t.Fatalf("the run for FrIDE's done: %+v, %s after the question", r3, r3.Started.Sub(asked))
 	}
 	if runs := h.agentRuns("core", "fix-bugs"); len(runs) != 3 {
 		t.Errorf("%d runs; progress started one", len(runs))
