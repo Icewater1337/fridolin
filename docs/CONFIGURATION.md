@@ -422,7 +422,11 @@ the CLI default. Brains can override it.
 ### `disallowed_tools`
 
 Tools brains may not use, passed as `--disallowed-tools`, e.g.
-`["WebFetch", "WebSearch"]`. Brains can override the list.
+`["WebFetch", "WebSearch"]`. Brains can override the list. WebSearch and
+WebFetch are on unless listed here; without `dangerously_skip_permissions`
+the bridge allows them explicitly (`--allowed-tools`), since `claude -p`
+cannot ask. A brain that lacks them has them in its own or the global
+`disallowed_tools`: set `[]` on the brain to allow every tool.
 
 ### `dangerously_skip_permissions`
 
