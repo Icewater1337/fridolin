@@ -61,6 +61,25 @@ type Workflow struct {
 // shutting a node out, and moving the core to another core host (#187).
 var OwnerCommands = []string{"!join", "!dashboard", "!approve", "!deny", "!revoke", "!movecore"}
 
+// ownerCommandAliases are the past tense the owner types now and then
+// ("!approved"), each the command it means: sent to the brain instead,
+// it would answer that nothing waits, while the bridge's own approval
+// does.
+var ownerCommandAliases = map[string]string{"!approved": "!approve", "!denied": "!deny", "!revoked": "!revoke"}
+
+// ownerCommandOf is the OwnerCommands entry word is, in lower case, its
+// alias resolved; "" for none.
+func ownerCommandOf(word string) string {
+	w := strings.ToLower(word)
+	if c, ok := ownerCommandAliases[w]; ok {
+		return c
+	}
+	if slices.Contains(OwnerCommands, w) {
+		return w
+	}
+	return ""
+}
+
 // handleInbound is the entry point for every allowed message. Access control
 // already happened, for WhatsApp and dev messages alike: groups against
 // allowed_groups and their senders against group_members (whom
@@ -130,8 +149,8 @@ func (p *Workflow) Handle(ctx context.Context, m brainruntime.Inbound) {
 // handleCommand runs !help, !reset, !stop, !fleet, !move, !lockdown,
 // !unlock and the OwnerCommands. It reports whether text was one.
 func (p *Workflow) handleCommand(ctx context.Context, m brainruntime.Inbound, settings Settings) bool {
-	if f := strings.Fields(m.Text); len(f) > 0 && p.Owner != nil && slices.Contains(OwnerCommands, strings.ToLower(f[0])) {
-		_ = p.Notice(ctx, m.JID, p.Owner(m, strings.ToLower(f[0]), f[1:]))
+	if f := strings.Fields(m.Text); len(f) > 0 && p.Owner != nil && ownerCommandOf(f[0]) != "" {
+		_ = p.Notice(ctx, m.JID, p.Owner(m, ownerCommandOf(f[0]), f[1:]))
 		return true
 	}
 	if f := strings.Fields(m.Text); len(f) > 0 && strings.EqualFold(f[0], "!move") && p.Move != nil {
