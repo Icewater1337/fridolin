@@ -1300,8 +1300,12 @@ whole, which the dashboard's FrIDE page shows. FrIDE's news arrives in
 that chat: a question with the question (the owner answers there, and
 the core brain passes the answer on with `fride_reply`), `started` and
 `done` with the task and branch, `done` with the rationale's path,
-`failed`, and everything else as an update. Each is at most three lines
-and 300 characters there, with a pointer to the FrIDE page. By default
+`failed`, and everything else as an update. A question comes whole,
+since the owner answers it (only a runaway text over 4000 characters is
+cut); a failure keeps its reason up to 1500 characters; other news is at
+most five lines and 600 characters. A text that is cut ends at a
+sentence or a word, never inside one, with a pointer to the FrIDE page,
+which keeps every text whole. By default
 (`fride.news: "quiet"`, docs/CONFIGURATION.md) the chat gets only
 `done`, `failed`, real questions and updates that say something merged;
 "Created task …", FrIDE's echo of the brief ("• → agent: …") and

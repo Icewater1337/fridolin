@@ -322,10 +322,10 @@ func TestFrideNewsQuiet(t *testing.T) {
 	for range 2 {
 		ff.Emit(map[string]any{"event": "failed", "thread_id": 4, "text": "the build broke", "status": "failed"})
 	}
-	// A real question, long: cut short.
+	// A real question, long: whole, since the owner has to answer it.
 	long := "Which way should I fix it?\nOption one\nOption two\nOption three\nOption four"
 	ff.Emit(map[string]any{"event": "question", "thread_id": 5, "text": long, "status": "needs_reply"})
-	h.WaitSent(harnessDM, "❓ *FrIDE #5* asks (on mini):\n\nWhich way should I fix it?\nOption one\nOption two\n"+outboundmsg.FrideMore)
+	h.WaitSent(harnessDM, "❓ *FrIDE #5* asks (on mini):\n\n"+long+"\n\nAnswer here, and I'll pass it on.")
 	h.WaitSent(harnessDM, "⚠️ *FrIDE #4* failed on mini.\nthe build broke")
 	time.Sleep(time.Second)
 	if got := since(); len(got) != 3 {

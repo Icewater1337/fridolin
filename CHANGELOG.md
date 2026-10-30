@@ -29,6 +29,14 @@ for compatibility.
 
 ### Fixed
 
+- **FrIDE's questions reach your chat whole.** Every piece of FrIDE's news
+  was cut to three lines and 300 characters, inside a word if need be, so
+  a question you had to answer often ended mid-sentence ("… more in the
+  dashboard"). Now a question comes whole (only a runaway text over 4000
+  characters is cut), a failure keeps its reason up to 1500 characters,
+  and other news is up to five lines and 600 characters, cut at the end of
+  a sentence or a word.
+
 - **FrIDE's agents merge their own green pull requests again.** They run
   Claude Code in auto mode, whose own judgement refuses by default to
   merge a pull request no human approved, so now and then a fix the bug

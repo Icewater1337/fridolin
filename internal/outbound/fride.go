@@ -31,39 +31,74 @@ func frideBody(text string) string {
 	return text
 }
 
-// The longest FrIDE text a chat gets: a few lines; the dashboard's FrIDE
-// page keeps it whole.
+// How much of FrIDE's text a chat gets; the dashboard's FrIDE page keeps
+// every text whole. A question is the owner's to answer, so it comes
+// whole: only a runaway text reaches its bound. A failure keeps its
+// reason. Other news is a few lines.
 const (
-	frideMaxLines = 3
-	frideMaxRunes = 300
+	frideMaxLines         = 5
+	frideMaxRunes         = 600
+	frideMaxFailedRunes   = 1500
+	frideMaxQuestionRunes = 4000
 )
 
 // FrideMore points from a shortened FrIDE text to where it is whole.
 const FrideMore = "… more in the dashboard (FrIDE page)"
 
-// frideShort is text cut to frideMaxLines lines and frideMaxRunes
+// frideShort is news cut to frideMaxLines lines and frideMaxRunes
 // characters, with FrideMore when it was cut.
-func frideShort(text string) string {
+func frideShort(text string) string { return frideCut(text, frideMaxLines, frideMaxRunes) }
+
+// frideFor is FrIDE's text for news of kind: a question nearly whole, a
+// failure at length, other news short.
+func frideFor(kind, text string) string {
+	switch kind {
+	case "question":
+		return frideCut(text, 0, frideMaxQuestionRunes)
+	case "failed":
+		return frideCut(text, 0, frideMaxFailedRunes)
+	}
+	return frideShort(text)
+}
+
+// frideCut is text without empty lines, cut to maxLines lines (0: any)
+// and maxRunes characters, at the end of a sentence or word, never inside
+// one, with FrideMore when it was cut.
+func frideCut(text string, maxLines, maxRunes int) string {
 	var lines []string
 	cut := false
 	for l := range strings.SplitSeq(text, "\n") {
 		if strings.TrimSpace(l) == "" {
 			continue
 		}
-		if len(lines) == frideMaxLines {
+		if maxLines > 0 && len(lines) == maxLines {
 			cut = true
 			break
 		}
 		lines = append(lines, strings.TrimRight(l, " \t"))
 	}
 	out := strings.Join(lines, "\n")
-	if r := []rune(out); len(r) > frideMaxRunes {
-		out, cut = strings.TrimSpace(string(r[:frideMaxRunes])), true
+	if r := []rune(out); len(r) > maxRunes {
+		out, cut = cutAtBoundary(string(r[:maxRunes])), true
 	}
 	if cut {
 		out += "\n" + FrideMore
 	}
 	return out
+}
+
+// cutAtBoundary is s up to its last sentence end (., ?, ! or a line break)
+// in its second half, else up to its last space, else s: the reader gets
+// whole words.
+func cutAtBoundary(s string) string {
+	half := len(s) / 2
+	if i := strings.LastIndexAny(s, ".?!\n"); i >= half {
+		return strings.TrimSpace(s[:i+1])
+	}
+	if i := strings.LastIndexAny(s, " \t"); i > 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return strings.TrimSpace(s)
 }
 
 // FrideBookkeeping reports whether text is only FrIDE's bookkeeping: the
