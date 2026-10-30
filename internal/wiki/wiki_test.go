@@ -277,3 +277,13 @@ func FuzzRender(f *testing.F) {
 		checkSafe(t, Render([]byte(src), "wiki/p.md", nil))
 	})
 }
+
+// Lowercasing Ⱥ (2 bytes) gives ⱥ (3 bytes), which moved the match offset.
+func TestSnippetSurvivesLowercaseGrowth(t *testing.T) {
+	text := strings.Repeat("Ⱥ", 200) + " needle " + strings.Repeat("Ⱥ", 200)
+	got := snippet(text, "needle")
+	if !strings.Contains(got, "needle") {
+		t.Fatalf("snippet = %q, want it around needle", got)
+	}
+	_ = snippet(strings.Repeat("Ⱥ", 300), "zzz")
+}

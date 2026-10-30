@@ -452,6 +452,9 @@ func snippet(text, word string) string {
 	if i < 0 {
 		i = 0
 	}
+	// ToLower maps rune for rune but can change a rune's byte length (Ⱥ), so
+	// carry the match over to plain by rune count, not by byte offset.
+	i = len(string([]rune(plain)[:utf8.RuneCountInString(low[:i])]))
 	start, end := max(0, i-70), min(len(plain), i+len(word)+110)
 	for start > 0 && !utf8.RuneStart(plain[start]) {
 		start--
