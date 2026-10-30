@@ -47,6 +47,13 @@ type Vote struct {
 	Selected []string
 }
 
+// Reaction is an emoji on a poll the bridge sent.
+type Reaction struct {
+	Poll    SentPoll
+	Reactor types.JID
+	Emoji   string
+}
+
 type GroupRules struct{ Files, Forwards bool }
 
 type Options struct {
@@ -56,6 +63,7 @@ type Options struct {
 	OnInbound  func(context.Context, chat.Inbound)
 	OnIgnored  IgnoredHandler
 	OnVote     func(Vote)
+	OnReaction func(Reaction)
 	OnChange   func(chat.Change)
 	GroupRules func(string) GroupRules
 	Log        waLog.Logger

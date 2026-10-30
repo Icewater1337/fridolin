@@ -19,6 +19,7 @@ type pollVote struct {
 	Poll     store.SentPoll
 	Voter    types.JID // as canonicalUser has them
 	Selected []string  // empty: the vote was taken back
+	Reaction string    // the emoji, when the vote is a reaction on the poll
 }
 
 // recordVote writes a vote into the history of the brain that sent the
@@ -43,6 +44,22 @@ func (b *App) recordVote(v pollVote) {
 		return
 	}
 	br.AppendHistory(v.Poll.Chat, v.Voter.User, voteText(v.Poll.Question, v.Selected), history.Event)
+}
+
+// pollReaction is an emoji on one of the bridge's polls.
+type pollReaction struct {
+	Poll    store.SentPoll
+	Reactor types.JID
+	Emoji   string
+}
+
+// recordReaction takes a reaction on a poll as a vote, where the poll
+// is an approval's: 👍 votes Yes and 👎 No (approvalReaction). A
+// reaction anywhere else is nothing the bridge reads.
+func (b *App) recordReaction(r pollReaction) {
+	if id, ok := strings.CutPrefix(r.Poll.Ref, approvalRefPrefix); ok {
+		b.approvalReaction(id, r)
+	}
 }
 
 // voteText is how a vote reads in a brain's history, after the voter's
