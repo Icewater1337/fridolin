@@ -60,9 +60,15 @@ func (b *App) siteBuilderHooks() sitesvc.SiteBuilderHooks {
 			}
 			return l
 		},
-		MediaDir:    func() string { return b.cfgs.Boot().MediaDir },
-		Search:      b.runBrainSearch,
-		Device:      b.plaud.DeviceRequest,
+		MediaDir: func() string { return b.cfgs.Boot().MediaDir },
+		Search:   b.runBrainSearch,
+		Device:   b.plaud.DeviceRequest,
+		DeviceDownload: func(op, assertion string, w io.Writer) (map[string]any, error) {
+			if op != "app_apk" {
+				return nil, fmt.Errorf("unknown request %q", op)
+			}
+			return b.plaud.AppDownload(assertion, w)
+		},
 		FilesBridge: b.filesBridge,
 		// As /ingest: the brain's reply chat gets the answer, and the brain
 		// must take the files now (its queue is not full).

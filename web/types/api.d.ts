@@ -1961,12 +1961,45 @@ export interface PlaudAppBuild {
   /** The node that builds it, "" for this machine. */
   node?: string;
   stage?: string;
+  version_code?: number;
+}
+
+/** The current build of the phone app, the one paired phones update to. */
+export interface PlaudRelease {
+  version_code: number;
+  version_name?: string;
+  sha256: string;
+  cert_sha256: string;
+  size: number;
+  built: string;
+  /** The node that built it, "" for this machine. */
+  node?: string;
+}
+
+/** A phone's word on its last update of the app. */
+export interface PlaudAppUpdate {
+  version_code: number;
+  state: 'waiting' | 'installing' | 'confirm' | 'not_allowed' | 'installed' | 'failed';
+  error?: string;
+  at?: string;
+}
+
+/** What a phone said of its app when it last asked for the release. */
+export interface PlaudPhoneApp {
+  version_code: number;
+  version_name?: string;
+  cert_sha256?: string;
+  update?: PlaudAppUpdate;
+  asked: string;
 }
 
 export interface PlaudPhone {
   id: string;
   paired: string;
   last_upload?: string;
+  app?: PlaudPhoneApp;
+  /** Its app is signed with another key than the release. */
+  other_key?: boolean;
 }
 
 /** The phone app that uploads through the site. */
@@ -1975,6 +2008,7 @@ export interface PlaudAppStatus {
   site_url?: string;
   built?: string;
   build?: PlaudAppBuild;
+  release?: PlaudRelease;
   devices: PlaudPhone[];
   /** "this computer", or the node that builds it; "" when nothing can. */
   builds_on?: string;

@@ -5,6 +5,14 @@
 //   POST /_fridolin/devices/plaud/transcripts      Authorization: Bearer JWT, the transcript as the body
 //   POST /_fridolin/devices/voice/ask              Authorization: Bearer JWT, a voice question as the body
 //   POST /_fridolin/devices/voice/reply            Authorization: Bearer JWT naming the question
+//   POST /_fridolin/devices/app/release            Authorization: Bearer JWT saying how the phone's app is
+//   POST /_fridolin/devices/app/apk                Authorization: Bearer JWT naming the build and a key
+//
+// Updates of the app (docs/PLAUD.md, "Updates"): a phone asks for the
+// current build at its check-ins, and fetches a newer one. The bridge
+// encrypts it for a key of the phone's keystore, since it carries Plaud's
+// developer keys: this process passes on ciphertext only, from the spool
+// folder the bridge wrote it to, and removes it once sent.
 //
 // Voice mode (docs/PLAUD.md, "Voice mode"): the answer to a question comes
 // back encrypted to a key of the phone's keystore, so this process only
@@ -19,13 +27,13 @@
 
 import express from 'express'
 import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto'
-import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { createReadStream, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { awaitAnswer, RefusedError } from './ingest.ts'
 
 export type Jwk = { kty: string; crv: string; x: string; y: string }
 type Device = { id: string; key: Jwk }
-type Claims = { iss?: string; aud?: string; iat?: number; exp?: number; code?: string; key?: Jwk; name?: string; sha256?: string; rid?: string; enc?: Jwk }
+type Claims = { iss?: string; aud?: string; iat?: number; exp?: number; code?: string; key?: Jwk; name?: string; sha256?: string; rid?: string; enc?: Jwk; apk?: string }
 
 const PAIR_AUD = 'fridolin:pair'
 const TRANSCRIPT_AUD = 'fridolin:plaud-transcript'
@@ -36,6 +44,11 @@ const VOICE_AUD = 'fridolin:voice'
 const VOICE_REPLY_AUD = 'fridolin:voice-reply'
 const QUESTION_MAX = 16 * 1024
 const RID = /^[A-Za-z0-9_-]{16,64}$/
+const RELEASE_AUD = 'fridolin:app-release'
+const APK_AUD = 'fridolin:app-apk'
+const SHA256_HEX = /^[0-9a-f]{64}$/
+/** Where the bridge puts the app a phone fetches, in the request's spool folder. */
+const APP_FILE = 'app.sealed'
 
 /** The claims of an ES256 JWT, unchecked: they name the key to check it with. */
 export function jwtClaims(token: string): Claims | null {
@@ -88,13 +101,18 @@ class DeviceList {
 
 /** Puts a request for the bridge into the spool and waits for its answer. */
 async function handOver(spoolDir: string, request: object, body?: Buffer): Promise<Record<string, unknown>> {
+  return (await handOverAt(spoolDir, request, body)).answer
+}
+
+/** handOver, and the spool folder the request and its answer are in. */
+async function handOverAt(spoolDir: string, request: object, body?: Buffer): Promise<{ dir: string; answer: Record<string, unknown> }> {
   const dir = join(spoolDir, randomBytes(12).toString('hex'))
   mkdirSync(dir, { recursive: true })
   if (body) writeFileSync(join(dir, 'body.txt'), body)
   // The bridge reads device.json only once it is whole, and body.txt is there by then.
   writeFileSync(join(dir, 'device.json.part'), JSON.stringify(request))
   renameSync(join(dir, 'device.json.part'), join(dir, 'device.json'))
-  return awaitAnswer(dir, 'Fridolin refused the request')
+  return { dir, answer: await awaitAnswer(dir, 'Fridolin refused the request') }
 }
 
 export function deviceRoutes(devicesFile: string, spoolDir: string): express.Router {
@@ -158,13 +176,18 @@ export function deviceRoutes(devicesFile: string, spoolDir: string): express.Rou
   })
 
   const bearer = (req: express.Request) => /^Bearer (\S+)$/.exec(req.get('authorization') ?? '')?.[1] ?? ''
-  /** The claims of a request a paired phone signed for aud and that names a question, or null. */
-  const signed = (req: express.Request, aud: string): Claims | null => {
+  /** The claims of a request a paired phone signed for aud, or null. */
+  const signedBy = (req: express.Request, aud: string): Claims | null => {
     const token = bearer(req)
     const claims = jwtClaims(token)
     const device = devices.byId(claims?.iss)
-    if (!claims || !device || !verifyJwt(token, device.key, aud) || !RID.test(claims.rid ?? '')) return null
+    if (!claims || !device || !verifyJwt(token, device.key, aud)) return null
     return claims
+  }
+  /** The claims of a request a paired phone signed for aud and that names a question, or null. */
+  const signed = (req: express.Request, aud: string): Claims | null => {
+    const claims = signedBy(req, aud)
+    return claims && RID.test(claims.rid ?? '') ? claims : null
   }
 
   router.post('/_fridolin/devices/voice/ask', express.raw({ type: () => true, limit: QUESTION_MAX }), async (req, res) => {
@@ -189,6 +212,50 @@ export function deviceRoutes(devicesFile: string, spoolDir: string): express.Rou
     // The bridge holds this one until the answer is there, at most 15 seconds.
     await answer(req, res, () => handOver(spoolDir, { op: 'voice_reply', assertion: bearer(req) }),
       r => res.json({ state: r.state, ...(r.reply ? { reply: r.reply } : {}), ...(r.error ? { error: r.error } : {}) }))
+  })
+
+  // The current build of the app, for a phone that says how its own is.
+  router.post('/_fridolin/devices/app/release', async (req, res) => {
+    if (!signedBy(req, RELEASE_AUD)) {
+      refuse(req, res, 401, 'Not signed by a paired phone')
+      return
+    }
+    await answer(req, res, () => handOver(spoolDir, { op: 'app_release', assertion: bearer(req) }), r => res.json(r.release ? { release: r.release } : {}))
+  })
+
+  // A build, sealed by the bridge for the key the request names.
+  router.post('/_fridolin/devices/app/apk', async (req, res) => {
+    const claims = signedBy(req, APK_AUD)
+    if (!claims) {
+      refuse(req, res, 401, 'Not signed by a paired phone')
+      return
+    }
+    if (!SHA256_HEX.test(claims.apk ?? '') || !claims.enc) {
+      refuse(req, res, 400, 'The request names no build, or no key to encrypt it for')
+      return
+    }
+    let dir = ''
+    await answer(req, res, async () => {
+      const r = await handOverAt(spoolDir, { op: 'app_apk', assertion: bearer(req) })
+      dir = r.dir
+      return r.answer
+    }, () => {
+      const file = join(dir, APP_FILE)
+      const gone = () => rmSync(dir, { recursive: true, force: true })
+      let size: number
+      try {
+        size = statSync(file).size
+      } catch {
+        gone()
+        res.status(503).json({ error: 'Fridolin wrote no app' })
+        return
+      }
+      res.status(200).set({ 'Content-Type': 'application/octet-stream', 'Content-Length': String(size), 'Cache-Control': 'no-store' })
+      const stream = createReadStream(file)
+      stream.on('error', () => res.destroy())
+      res.on('close', gone)
+      stream.pipe(res)
+    })
   })
   return router
 }

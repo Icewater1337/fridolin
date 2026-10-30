@@ -2,7 +2,8 @@ package site
 
 import (
 	"context"
-
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -84,5 +85,48 @@ func TestSiteSpoolLetsAVoiceFetchWait(t *testing.T) {
 	defer mu.Unlock()
 	if calls["voice_reply"] != 1 {
 		t.Errorf("the fetch was passed on %d times", calls["voice_reply"])
+	}
+}
+
+// A fetch of the phone app is written to a file of its own in the
+// request's folder, off the spool's loop, for the site to send on; one
+// that fails leaves no file.
+func TestSiteSpoolWritesTheAppAPhoneFetches(t *testing.T) {
+	m := newTestSite(t)
+	m.hooks.DeviceDownload = func(op, assertion string, w io.Writer) (map[string]any, error) {
+		if assertion == "refused" {
+			_, _ = w.Write([]byte("half"))
+			return nil, errors.New("that build is not the current one any more")
+		}
+		n, err := w.Write([]byte("sealed app for " + assertion))
+		return map[string]any{"size": n}, err
+	}
+	spool := func(name, req string) string {
+		dir := filepath.Join(m.spoolDir(), strings.Repeat(name, 24))
+		os.MkdirAll(dir, 0o700)
+		os.WriteFile(filepath.Join(dir, "device.json"), []byte(req), 0o600)
+		return dir
+	}
+	ok := spool("a", `{"op":"app_apk","assertion":"a.b.c"}`)
+	refused := spool("b", `{"op":"app_apk","assertion":"refused"}`)
+	m.processSpool(context.Background())
+	answered := func(dir string) bool {
+		_, err := os.Stat(filepath.Join(dir, "result.json"))
+		return err == nil
+	}
+	for deadline := time.Now().Add(5 * time.Second); !(answered(ok) && answered(refused)) && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if a := readSpoolAnswer(t, ok); a["ok"] != true || a["file"] != "app.sealed" || a["size"] != float64(len("sealed app for a.b.c")) {
+		t.Errorf("answer = %v", a)
+	}
+	if data, err := os.ReadFile(filepath.Join(ok, "app.sealed")); err != nil || string(data) != "sealed app for a.b.c" {
+		t.Errorf("the file: %q, %v", data, err)
+	}
+	if a := readSpoolAnswer(t, refused); a["ok"] != false || !strings.Contains(a["error"].(string), "not the current one") {
+		t.Errorf("refused answer = %v", a)
+	}
+	if _, err := os.Stat(filepath.Join(refused, "app.sealed")); err == nil {
+		t.Error("a refused fetch left its half-written file")
 	}
 }

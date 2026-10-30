@@ -16,6 +16,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Icewater1337/fridolin/internal/testutil"
 )
 
 // appSourceDir is a plaud-android/ with what a build there leaves.
@@ -23,7 +25,7 @@ func appSourceDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	for name, content := range map[string]string{
-		"gradlew": "#!/bin/sh\n", "settings.gradle": "", "app/build.gradle": "", "app/src/main/A.kt": "",
+		"gradlew": "#!/bin/sh\n", "settings.gradle": "", "app/build.gradle": "android {\n    defaultConfig {\n        versionCode 7\n        versionName '0.7'\n    }\n}\n", "app/src/main/A.kt": "",
 		"build/x": "", "app/build/y": "", ".gradle/z": "", "app/libs/plaud-sdk.aar": "", "local.properties": "sdk.dir=x", "app/old.apk": "",
 	} {
 		p := filepath.Join(dir, filepath.FromSlash(name))
@@ -89,8 +91,16 @@ func (n *nodeBuild) build(_ context.Context, id string, source []byte, props map
 	if fail {
 		return "FAILURE: Build failed with an exception.", errors.New("the build failed: exit status 1")
 	}
-	_, err := apk.Write([]byte("PK fake apk"))
+	_, err := apk.Write(testAPK(props["version_code"]))
 	return "", err
+}
+
+// testAPKCert is the certificate the test builds are signed with.
+var testAPKCert = []byte("fake DER certificate of the builder's debug key")
+
+// testAPK is a test build of versionCode code.
+func testAPK(code string) []byte {
+	return testutil.SignedAPK(testAPKCert, map[string]string{"AndroidManifest.xml": "versionCode " + code})
 }
 
 func appBuildManager(t *testing.T, builders []AppBuilder, node *nodeBuild) (*plaudServiceFixture, *Manager) {
@@ -144,7 +154,7 @@ func TestBuildAppOnANode(t *testing.T) {
 	if job.State != "done" || job.Node != "mac-mini" || job.Stage != "" || job.PairingExpires.IsZero() {
 		t.Fatalf("job %+v", job)
 	}
-	if data, err := os.ReadFile(m.AppFile()); err != nil || string(data) != "PK fake apk" {
+	if data, err := os.ReadFile(m.AppFile()); err != nil || !bytes.Equal(data, testAPK("7")) {
 		t.Fatalf("the app: %q, %v", data, err)
 	}
 	node.mu.Lock()

@@ -39,11 +39,13 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"maps"
 	"math/big"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -100,6 +102,16 @@ type plaudClaims struct {
 	// it, and the key its answer is encrypted to.
 	Rid string    `json:"rid,omitempty"`
 	Enc *plaudJWK `json:"enc,omitempty"`
+	// Ver, VName, Cert and Upd are a release request's (app_release.go):
+	// the app's versionCode and versionName, the SHA-256 of the
+	// certificate it is signed with, and how its last update went. APK
+	// names the build a phone fetches by its SHA-256 (hex); Enc is then
+	// the key it is encrypted for.
+	Ver   int             `json:"ver,omitempty"`
+	VName string          `json:"vname,omitempty"`
+	Cert  string          `json:"cert,omitempty"`
+	Upd   *appUpdateClaim `json:"upd,omitempty"`
+	APK   string          `json:"apk,omitempty"`
 }
 
 // parsePlaudJWT reads the claims of a compact ES256 JWS without checking
@@ -159,6 +171,9 @@ type plaudDevice struct {
 	Key        plaudJWK  `json:"key"`
 	Paired     time.Time `json:"paired"`
 	LastUpload time.Time `json:"last_upload,omitzero"`
+	// App is what the phone said of its app when it last asked for the
+	// release (app_release.go).
+	App *PhoneApp `json:"app,omitempty"`
 }
 
 // plaudPairing is a pairing code a built app carries: its SHA-256, hex.
@@ -261,8 +276,10 @@ var ErrUnknownDevice = errors.New("there is no such paired phone")
 
 // DeviceRequest answers a phone's request that the site passed on:
 // "pair", "transcript" with the transcript in body, "voice" with a voice
-// question in body, or "voice_reply", which waits up to VoiceReplyWait
-// for the answer to one (site_ingest.go).
+// question in body, "voice_reply", which waits up to VoiceReplyWait
+// for the answer to one (site_ingest.go), or "app_release", which asks
+// for the current build of the app (app_release.go; AppDownload fetches
+// it).
 // Its errors go back to the phone, so they name what is wrong and nothing
 // the request carried.
 func (p *Manager) DeviceRequest(op, assertion string, body []byte) (map[string]any, error) {
@@ -279,6 +296,8 @@ func (p *Manager) DeviceRequest(op, assertion string, body []byte) (map[string]a
 		return p.takeVoice(assertion, body, time.Now())
 	case "voice_reply":
 		return p.voiceReply(assertion, time.Now())
+	case "app_release":
+		return p.appRelease(assertion, time.Now())
 	}
 	return nil, fmt.Errorf("unknown request %q", op)
 }
@@ -440,6 +459,8 @@ type plaudAppJob struct {
 	// what the build is doing while it runs.
 	Node  string `json:"node,omitempty"`
 	Stage string `json:"stage,omitempty"`
+	// VersionCode is the build's (nextVersion).
+	VersionCode int `json:"version_code,omitempty"`
 }
 
 var ErrAppBuilding = errors.New("the phone app is being built already")
@@ -448,10 +469,11 @@ func (p *Manager) appDir() string  { return filepath.Join(p.dir(), "app") }
 func (p *Manager) AppFile() string { return filepath.Join(p.appDir(), "plaud-sync.apk") }
 
 // BuildApp starts building the phone app in the background, with the
-// site's address and a new pairing code: Gradle, in plaud-android/ of the
-// checkout Fridolin was installed from, on this machine where it has a
-// JDK and the Android SDK, else on a node that builds Android apps
-// (android-build).
+// site's address, a new pairing code and the next versionCode: Gradle, in
+// plaud-android/ of the checkout Fridolin was installed from, on this
+// machine where it has a JDK and the Android SDK, else on a node that
+// builds Android apps (android-build). The build becomes the release the
+// paired phones update to (app_release.go).
 func (p *Manager) BuildApp() error {
 	select {
 	case <-p.lifetime().Done():
@@ -485,6 +507,10 @@ func (p *Manager) BuildApp() error {
 		}
 		node = &builders[0]
 	}
+	version, err := p.nextVersion(src)
+	if err != nil {
+		return err
+	}
 	p.mu.Lock()
 	if p.stopping {
 		p.mu.Unlock()
@@ -494,7 +520,7 @@ func (p *Manager) BuildApp() error {
 		p.mu.Unlock()
 		return ErrAppBuilding
 	}
-	job := &plaudAppJob{State: "running", Started: time.Now(), Stage: "Building on this computer"}
+	job := &plaudAppJob{State: "running", Started: time.Now(), Stage: "Building on this computer", VersionCode: version.Code}
 	if node != nil {
 		job.Node, job.Stage = node.Name, "Packing the app's source for "+node.Name
 	}
@@ -512,9 +538,9 @@ func (p *Manager) BuildApp() error {
 		var out string
 		var err error
 		if node != nil {
-			exp, out, err = p.buildAppOnNode(p.lifetime(), *node, src, site, dev, stage)
+			exp, out, err = p.buildAppOnNode(p.lifetime(), *node, src, site, dev, version, stage)
 		} else {
-			exp, out, err = p.buildApp(p.lifetime(), src, javaHome, sdk, site, dev)
+			exp, out, err = p.buildApp(p.lifetime(), src, javaHome, sdk, site, dev, version)
 		}
 		p.mu.Lock()
 		defer p.mu.Unlock()
@@ -527,7 +553,7 @@ func (p *Manager) BuildApp() error {
 			job.State, job.Error, job.Log = "error", err.Error(), out
 			log.Printf("plaud: building the phone app%s failed: %v", where, err)
 		} else {
-			log.Printf("plaud: built the phone app%s", where)
+			log.Printf("plaud: built the phone app %s (%d)%s", version.Name, version.Code, where)
 		}
 	}()
 	return nil
@@ -549,14 +575,17 @@ func (p *Manager) appBuilders() []AppBuilder {
 }
 
 // appProperties is what the app is built with: Plaud's developer keys,
-// the site to upload to and the pairing code.
-func appProperties(dev Developer, site, code string) map[string]string {
-	return map[string]string{"client_id": dev.ClientID, "client_secret": dev.ClientSecret, "api_key": dev.APIKey, "site_url": site, "pairing_code": code}
+// the site to upload to, the pairing code and the versionCode.
+func appProperties(dev Developer, site, code string, v appVersion) map[string]string {
+	return map[string]string{
+		"client_id": dev.ClientID, "client_secret": dev.ClientSecret, "api_key": dev.APIKey, "site_url": site, "pairing_code": code,
+		"version_code": strconv.Itoa(v.Code),
+	}
 }
 
-// buildAppOnNode has node build the app and saves it to AppFile. On
+// buildAppOnNode has node build the app and saves it as the release. On
 // failure it returns the end of Gradle's output.
-func (p *Manager) buildAppOnNode(ctx context.Context, node AppBuilder, src, site string, dev Developer, stage func(string)) (time.Time, string, error) {
+func (p *Manager) buildAppOnNode(ctx context.Context, node AppBuilder, src, site string, dev Developer, v appVersion, stage func(string)) (time.Time, string, error) {
 	archive, err := AppSourceArchive(src)
 	if err != nil {
 		return time.Time{}, "", fmt.Errorf("packing the app's source: %w", err)
@@ -570,7 +599,7 @@ func (p *Manager) buildAppOnNode(ctx context.Context, node AppBuilder, src, site
 	}
 	stage("Building on " + node.Name + " (a few minutes)")
 	var apk bytes.Buffer
-	out, err := p.options.BuildOnNode(ctx, node.ID, archive, appProperties(dev, site, code), &apk)
+	out, err := p.options.BuildOnNode(ctx, node.ID, archive, appProperties(dev, site, code, v), &apk)
 	if err != nil {
 		return time.Time{}, out, fmt.Errorf("on node %s: %w", node.Name, err)
 	}
@@ -578,7 +607,8 @@ func (p *Manager) buildAppOnNode(ctx context.Context, node AppBuilder, src, site
 		return time.Time{}, "", fmt.Errorf("node %s sent no app", node.Name)
 	}
 	stage("Saving the app")
-	return exp, "", fsx.WriteFileAtomic(p.AppFile(), apk.Bytes(), 0o600, false)
+	_, err = p.saveBuild(apk.Bytes(), v, node.Name, time.Now())
+	return exp, "", err
 }
 
 // appSourceSkips are what AppSourceArchive leaves out of plaud-android/:
@@ -645,9 +675,9 @@ func AppSourceArchive(dir string) ([]byte, error) {
 	return buf.Bytes(), err
 }
 
-// buildApp runs the build and copies the app to AppFile. On failure it
+// buildApp runs the build and saves the app as the release. On failure it
 // returns the end of Gradle's output.
-func (p *Manager) buildApp(ctx context.Context, src, javaHome, sdk, site string, dev Developer) (time.Time, string, error) {
+func (p *Manager) buildApp(ctx context.Context, src, javaHome, sdk, site string, dev Developer, v appVersion) (time.Time, string, error) {
 	dir := p.appDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return time.Time{}, "", err
@@ -658,20 +688,21 @@ func (p *Manager) buildApp(ctx context.Context, src, javaHome, sdk, site string,
 	}
 	// What the app is built with; the build reads it, then it goes. The
 	// build itself stays in the data folder, which brains cannot read.
-	props := filepath.Join(dir, "build.properties")
+	propsFile := filepath.Join(dir, "build.properties")
 	content := ""
-	for _, k := range []string{"client_id", "client_secret", "api_key", "site_url", "pairing_code"} {
-		content += k + "=" + appProperties(dev, site, code)[k] + "\n"
+	props := appProperties(dev, site, code, v)
+	for _, k := range slices.Sorted(maps.Keys(props)) {
+		content += k + "=" + props[k] + "\n"
 	}
-	if err := fsx.WriteFileAtomic(props, []byte(content), 0o600, false); err != nil {
+	if err := fsx.WriteFileAtomic(propsFile, []byte(content), 0o600, false); err != nil {
 		return time.Time{}, "", err
 	}
-	defer os.Remove(props)
+	defer os.Remove(propsFile)
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, filepath.Join(src, "gradlew"), "--no-daemon", "--console=plain", "-p", src,
 		"--project-cache-dir", filepath.Join(dir, "gradle"),
-		"-PfridolinConfig="+props, "-PfridolinBuildDir="+filepath.Join(dir, "build"), "assembleDebug")
+		"-PfridolinConfig="+propsFile, "-PfridolinBuildDir="+filepath.Join(dir, "build"), "assembleDebug")
 	cmd.Dir = src
 	cmd.Env = p.options.AppEnviron(ctx, javaHome, sdk)
 	out := &cappedBuffer{limit: 256 << 10}
@@ -684,7 +715,8 @@ func (p *Manager) buildApp(ctx context.Context, src, javaHome, sdk, site string,
 	if err != nil {
 		return time.Time{}, "", err
 	}
-	return exp, "", fsx.WriteFileAtomic(p.AppFile(), apk, 0o600, false)
+	_, err = p.saveBuild(apk, v, "", time.Now())
+	return exp, "", err
 }
 
 // ── the dashboard ────────────────────────────────────────────────────────
@@ -698,7 +730,9 @@ type AppStatus struct {
 	SiteURL string       `json:"site_url,omitempty"`
 	Built   *time.Time   `json:"built,omitempty"`
 	Build   *plaudAppJob `json:"build,omitempty"`
-	Devices []PhoneRow   `json:"devices"`
+	// Release is the current build, the one the paired phones update to.
+	Release *Release   `json:"release,omitempty"`
+	Devices []PhoneRow `json:"devices"`
 	// BuildsOn is where the next build runs: "this computer", or the name
 	// of the node that builds it; "" when nothing can, and NoBuilder then
 	// says why and what to do.
@@ -711,6 +745,12 @@ type PhoneRow struct {
 	ID         string    `json:"id"`
 	Paired     time.Time `json:"paired"`
 	LastUpload time.Time `json:"last_upload,omitzero"`
+	// App is what the phone said of its app, nil before it asked for a
+	// release (an app without updates never does).
+	App *PhoneApp `json:"app,omitempty"`
+	// OtherKey says that its app is signed with another key than the
+	// release, which Android therefore will not install over it.
+	OtherKey bool `json:"other_key,omitempty"`
 }
 
 func (p *Manager) appStatus() *AppStatus {
@@ -729,6 +769,7 @@ func (p *Manager) appStatus() *AppStatus {
 		t := st.ModTime()
 		s.Built = &t
 	}
+	s.Release = p.loadRelease()
 	p.mu.Lock()
 	if p.appJob != nil {
 		job := *p.appJob
@@ -737,7 +778,9 @@ func (p *Manager) appStatus() *AppStatus {
 	p.mu.Unlock()
 	if st, err := p.loadDevices(); err == nil {
 		for _, d := range st.Devices {
-			s.Devices = append(s.Devices, PhoneRow{d.ID, d.Paired, d.LastUpload})
+			row := PhoneRow{ID: d.ID, Paired: d.Paired, LastUpload: d.LastUpload, App: d.App}
+			row.OtherKey = d.App != nil && d.App.CertSHA256 != "" && s.Release != nil && d.App.CertSHA256 != s.Release.CertSHA256
+			s.Devices = append(s.Devices, row)
 		}
 	}
 	return s

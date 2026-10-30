@@ -92,6 +92,7 @@ func (b *App) newMCPTools() *tools.Set[mcpCaller] {
 	b.registerNodeExecTools(r)
 	b.registerWorkstationTools(r)
 	b.registerConnectionTools(r)
+	b.registerPlaudTools(r)
 	return r
 }
 

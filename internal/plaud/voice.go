@@ -215,31 +215,11 @@ func (q *voiceQuestion) answer() map[string]any {
 // voiceDevice checks that a paired phone signed assertion for aud and
 // returns its claims.
 func (p *Manager) voiceDevice(assertion, aud string, now time.Time) (plaudClaims, error) {
-	cfg := p.cfg()
-	if !cfg.Plaud.PhoneUpload {
-		return plaudClaims{}, errPhoneUploadOff
-	}
-	if !cfg.Plaud.Voice {
+	if p.cfg().Plaud.PhoneUpload && !p.cfg().Plaud.Voice {
 		return plaudClaims{}, errVoiceOff
 	}
-	c, err := parsePlaudJWT(assertion)
+	c, err := p.pairedPhone(assertion, aud, now)
 	if err != nil {
-		return c, err
-	}
-	st, err := p.loadDevices()
-	if err != nil {
-		return c, err
-	}
-	i := -1
-	for j, d := range st.Devices {
-		if d.ID == c.Iss {
-			i = j
-		}
-	}
-	if c.Iss == "" || i < 0 {
-		return c, errors.New("this phone is not paired, or was unpaired")
-	}
-	if c, err = verifyPlaudJWT(assertion, st.Devices[i].Key, aud, now); err != nil {
 		return c, err
 	}
 	if !voiceIDRE.MatchString(c.Rid) {
