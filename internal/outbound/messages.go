@@ -429,7 +429,7 @@ func RateLimitedNotice(max int) string {
 
 // FrideNewsMessage says FrIDE's news in the chat.
 func FrideNewsMessage(n FrideNews) string {
-	body := frideShort(frideBody(n.Text))
+	body := frideFor(n.Kind, frideBody(n.Text))
 	head := fmt.Sprintf("*FrIDE #%d*", n.Thread)
 	work := ""
 	if n.Task != "" {
@@ -483,7 +483,7 @@ func FrideFanoutMessage(node, kind string, threads []int64, text string) string 
 		icon = "⚠️"
 	}
 	msg := fmt.Sprintf("%s *FrIDE on %s* (%s):", icon, node, strings.Join(ids, ", "))
-	if body := frideShort(frideBody(text)); body != "" {
+	if body := frideFor(kind, frideBody(text)); body != "" {
 		msg += "\n" + body
 	}
 	if kind == "question" {

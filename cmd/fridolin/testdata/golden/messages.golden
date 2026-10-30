@@ -537,7 +537,8 @@ frideNewsMessage(long)
 	Which way should I fix it?
 	Option one
 	Option two
-	… more in the dashboard (FrIDE page)
+	Option three
+	Option four
 
 	Answer here, and I'll pass it on.
 frideFanoutMessage
