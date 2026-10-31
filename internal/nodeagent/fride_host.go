@@ -166,10 +166,14 @@ func (a *Agent) frideHostRead(ctx context.Context) *nodeproto.FrideHostCap {
 	c.Ready = len(problems) == 0
 	c.Problem = problemText(strings.Join(problems, "; "))
 	o := a.instanceOps()
-	if _, why := o.claudeToken(); why != "" && !a.inst.lent.Load() {
+	states := listFrideInstances(a.Dir)
+	// An instance running on the core's token makes the node lacking one
+	// of its own no news.
+	lent := slices.ContainsFunc(states, func(st *FrideInstanceState) bool { return st.Run && st.LentLogin })
+	if _, why := o.claudeToken(); why != "" && !lent {
 		c.NoLogin = problemText(why)
 	}
-	for _, st := range listFrideInstances(a.Dir) {
+	for _, st := range states {
 		status := "unknown"
 		if statuses != nil {
 			status = statuses[st.Sandbox]
