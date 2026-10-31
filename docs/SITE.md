@@ -459,7 +459,8 @@ is full, when `ingest.enabled` is off, and in previews and checks.
 The site also takes requests from phones Fridolin paired, the Plaud Sync
 app ([PLAUD.md](PLAUD.md#through-your-site)): `POST /_fridolin/devices/pair`,
 `POST /_fridolin/devices/plaud/transcripts`, and for
-[voice mode](PLAUD.md#voice-mode) `POST /_fridolin/devices/voice/ask` and
+[voice mode](PLAUD.md#voice-mode) `POST /_fridolin/devices/voice/ask` (a
+question, or a recording from the pin) and
 `POST /_fridolin/devices/voice/reply`, whose answer is encrypted for the
 phone and which Fridolin answers off the spool's loop, holding it up to 15
 seconds until the answer is there. For [updates of the app](PLAUD.md#updates)

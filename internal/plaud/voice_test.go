@@ -9,6 +9,8 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -19,6 +21,7 @@ import (
 type voiceTestAsk struct {
 	mu    sync.Mutex
 	asked []string
+	media [][]string
 	quiet []bool
 	jids  []string
 	ans   func(string) string
@@ -33,13 +36,13 @@ func voiceTest(t *testing.T, extra string) (*Manager, *plaudServiceFixture, *voi
 	rec := &voiceTestAsk{}
 	target := &Target{BrainID: "p", ReplyChat: func() string { return "" }, OtherOwner: func(string) string { return "" },
 		Submit: func(_, _, _ string, _ []string, done func(error)) error { done(nil); return nil },
-		Ask: func(jid, sender, text string, quiet bool, answer func(string) string, done func(error)) error {
+		Ask: func(jid, sender, text string, media []string, quiet bool, answer func(string) string, done func(error)) error {
 			rec.mu.Lock()
 			defer rec.mu.Unlock()
 			if sender != voiceSender {
 				t.Errorf("sender = %q", sender)
 			}
-			rec.asked, rec.quiet, rec.jids = append(rec.asked, text), append(rec.quiet, quiet), append(rec.jids, jid)
+			rec.asked, rec.media, rec.quiet, rec.jids = append(rec.asked, text), append(rec.media, media), append(rec.quiet, quiet), append(rec.jids, jid)
 			rec.ans, rec.done = answer, done
 			return nil
 		}}
@@ -361,5 +364,140 @@ func TestSpokenAnswer(t *testing.T) {
 	// A full stop inside a number or a time is no sentence's end.
 	if s := shortenSpoken("It costs 3.50 francs. "+long, 10); s != "It costs 3.50 francs." {
 		t.Errorf("shortened to %q", s)
+	}
+}
+
+const voiceTestPinName = "2026-10-18_10-00-00"
+
+// voicePin sends transcript as the app sends a recording from the pin in
+// voice mode: through the voice route, with src "pin" and its start time.
+func voicePin(t *testing.T, p *Manager, phone serviceTestPhone, enc *ecdh.PrivateKey, rid, name, transcript string) (map[string]any, error) {
+	t.Helper()
+	now := time.Now().Unix()
+	sum := sha256.Sum256([]byte(transcript))
+	tok := phone.sign(t, plaudClaims{Iss: "dev_1", Aud: plaudVoiceAud, Iat: now, Exp: now + 300, Rid: rid,
+		SHA256: base64.RawURLEncoding.EncodeToString(sum[:]), Enc: voiceJWK(enc), Src: voiceSrcPin, Name: name})
+	return p.DeviceRequest("voice", tok, []byte(transcript))
+}
+
+// A recording from the pin goes to the voice brain as a recording does,
+// with its transcript whole in a file of the brain's inbox, and the brain
+// decides whether it was spoken to; its answer comes back to the phone as
+// a question's does.
+func TestVoicePinRecordingReachesTheVoiceBrainAsARecording(t *testing.T) {
+	p, f, rec, phone, enc := voiceTest(t, "")
+	transcript := "[00:00 - 00:04] Speaker 1: Erinnere mich morgen um neun an den Zahnarzt.\n[00:04 - 00:07] Speaker 1: Danke."
+	if got, err := voicePin(t, p, phone, enc, voiceTestRid, voiceTestPinName, transcript+"\n"); err != nil || got["state"] != voiceWaiting {
+		t.Fatalf("pin = %v, %v", got, err)
+	}
+	if len(rec.asked) != 1 {
+		t.Fatalf("asked %d times", len(rec.asked))
+	}
+	text := rec.asked[0]
+	want := voicePinPrompt + "\n\n" + `[Plaud] New recording "Pin recording" (2026-10-18 10:00, 00:07).`
+	if !strings.HasPrefix(text, want) || !strings.Contains(text, defaultPlaudMessage) || !strings.HasSuffix(text, "\n\n=== Transcript ===\n"+transcript) {
+		t.Fatalf("the brain was told %q", text)
+	}
+	if strings.Contains(text, voicePrompt) {
+		t.Error("a recording got the prompt of a question")
+	}
+	// The transcript, speaker labels and all, as a recording's file.
+	if len(rec.media[0]) != 1 {
+		t.Fatalf("media = %q", rec.media[0])
+	}
+	file := rec.media[0][0]
+	if filepath.Base(filepath.Dir(file)) != "plaud" || filepath.Base(file) != "2026-10-18 - Pin recording - phone_"+voiceTestPinName+".txt" {
+		t.Errorf("filed as %s", file)
+	}
+	data, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(data), "Plaud recording: Pin recording\nRecorded: 2026-10-18 10:00\nDuration: 00:07\nPlaud ID: phone_"+voiceTestPinName+"\n") ||
+		!strings.HasSuffix(string(data), "=== Transcript ===\n"+transcript+"\n") {
+		t.Errorf("the file says %q", data)
+	}
+	if rec.jids[0] != "15551234567@s.whatsapp.net" || len(f.dev.Outbox()) != 0 {
+		t.Errorf("asked in %q, chat got %+v", rec.jids[0], f.dev.Outbox())
+	}
+	// It counts as the phone's last transcript.
+	if st, err := p.loadDevices(); err != nil || st.Devices[0].LastUpload.IsZero() {
+		t.Errorf("no last upload noted: %v", err)
+	}
+
+	// The answer: the spoken sentence to the phone, the summary to the chat.
+	chat := rec.ans("[SPOKEN]Abgelegt: eine Erinnerung an den Zahnarzt.[/SPOKEN]\n\nErinnerung: morgen 09:00 Zahnarzt.")
+	if chat != "Erinnerung: morgen 09:00 Zahnarzt." {
+		t.Errorf("the chat gets %q", chat)
+	}
+	m, err := voiceFetch(t, p, phone, "dev_1", voiceTestRid)
+	if err != nil || m["state"] != voiceDone {
+		t.Fatalf("fetch = %v, %v", m, err)
+	}
+	if s := openVoiceReply(t, enc, voiceTestRid, m["reply"].(map[string]any)); s != "Abgelegt: eine Erinnerung an den Zahnarzt." {
+		t.Errorf("the phone hears %q", s)
+	}
+
+	// Sent again (its answer got lost): nothing new.
+	if got, err := voicePin(t, p, phone, enc, voiceTestRid, voiceTestPinName, transcript+"\n"); err != nil || got["state"] != voiceDone || len(rec.asked) != 1 {
+		t.Errorf("again: %v, %v, asked %d times", got, err, len(rec.asked))
+	}
+}
+
+// A recording may be as long as a transcript; past the length of a
+// question it is in the file only, not in the prompt. Plaud's instruction
+// for recordings (plaud.message) is the one the brain gets.
+func TestVoicePinRecordingMayBeLong(t *testing.T) {
+	p, _, rec, phone, enc := voiceTest(t, `, "message": "File it under meetings."`)
+	line := "[00:00 - 00:10] Speaker 2: " + strings.Repeat("Wir besprechen das Budget. ", 10) + "\n"
+	long := strings.TrimSpace(strings.Repeat(line, VoiceQuestionMax/len(line)+10))
+	if len(long) <= VoiceQuestionMax {
+		t.Fatalf("only %d bytes", len(long))
+	}
+	if _, err := voicePin(t, p, phone, enc, voiceTestRid, voiceTestPinName, long); err != nil {
+		t.Fatal(err)
+	}
+	text := rec.asked[0]
+	if !strings.HasSuffix(text, "File it under meetings.") || strings.Contains(text, "Wir besprechen") || strings.Contains(text, defaultPlaudMessage) {
+		t.Errorf("the brain was told %.300q…", text)
+	}
+	if data, err := os.ReadFile(rec.media[0][0]); err != nil || !strings.Contains(string(data), long) {
+		t.Errorf("the file: %v", err)
+	}
+
+	// A question of that length is too long.
+	if _, err := voiceAsk(t, p, phone, enc, "dev_1", "q_another_question_1", long); err == nil || !strings.Contains(err.Error(), "question is too long") {
+		t.Errorf("a long question: %v", err)
+	}
+	// A recording longer than a transcript is too.
+	tooLong := strings.Repeat("x", TranscriptMax+1)
+	if _, err := voicePin(t, p, phone, enc, "q_another_question_2", voiceTestPinName, tooLong); err == nil || !strings.Contains(err.Error(), "recording is too long") {
+		t.Errorf("a recording past TranscriptMax: %v", err)
+	}
+	if len(rec.asked) != 1 {
+		t.Errorf("asked %d times", len(rec.asked))
+	}
+}
+
+func TestVoicePinRecordingsAreRefused(t *testing.T) {
+	p, _, rec, phone, enc := voiceTest(t, "")
+	text := "[00:00 - 00:02] Speaker 1: Hallo."
+	sum := sha256.Sum256([]byte(text))
+	now := time.Now().Unix()
+	good := plaudClaims{Iss: "dev_1", Aud: plaudVoiceAud, Iat: now, Exp: now + 300, Rid: voiceTestRid,
+		SHA256: base64.RawURLEncoding.EncodeToString(sum[:]), Enc: voiceJWK(enc), Src: voiceSrcPin, Name: voiceTestPinName}
+	for what, change := range map[string]func(c *plaudClaims){
+		"no name":               func(c *plaudClaims) { c.Name = "" },
+		"a name that is a path": func(c *plaudClaims) { c.Name = "../../2026-10-18_10-00-00" },
+		"another kind":          func(c *plaudClaims) { c.Src = "watch" },
+	} {
+		c := good
+		change(&c)
+		if _, err := p.DeviceRequest("voice", phone.sign(t, c), []byte(text)); err == nil {
+			t.Errorf("%s: accepted", what)
+		}
+	}
+	if len(rec.asked) != 0 {
+		t.Errorf("the brain was asked %q", rec.asked)
 	}
 }

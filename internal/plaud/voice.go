@@ -10,7 +10,14 @@ package plaud
 // bridge hands the question to plaud.voice_brain, in that brain's private
 // chat, where the answer goes as usual unless plaud.voice_quiet. The
 // question itself never goes to the chat: the brain files it with its
-// notes (voicePrompt). The
+// notes (voicePrompt).
+//
+// A recording from the pin comes the same way, as Plaud transcribed it,
+// with src "pin" and its start time as its name in the JWT: the brain
+// gets its transcript as it gets a recording, in a file in its inbox, and
+// decides whether it was spoken to (a question, a task) or is a recording
+// to file (a meeting, a dictation), and answers for the ear either way
+// (voicePinPrompt). The
 // answer is encrypted to the phone's key (sealVoiceReply) and waits here,
 // in memory, until the phone fetches it with a JWT naming the question
 // (aud fridolin:voice-reply). The site, which runs module code, carries
@@ -38,7 +45,9 @@ import (
 const (
 	plaudVoiceAud      = "fridolin:voice"
 	plaudVoiceReplyAud = "fridolin:voice-reply"
-	// VoiceQuestionMax bounds a voice question.
+	// VoiceQuestionMax bounds a voice question; a recording from the pin
+	// may be as long as a transcript (TranscriptMax), and is in the
+	// prompt only while it fits in this.
 	VoiceQuestionMax = 16 << 10
 	// VoiceReplyWait is how long a fetch of an answer waits for it; the
 	// site waits a little longer for the bridge (ingest.ts, ANSWER_MS).
@@ -51,6 +60,11 @@ const (
 	voiceSealInfo = "fridolin voice reply v1"
 	// voiceSender is who a voice question comes from, for the brain.
 	voiceSender = "voice"
+	// voiceSrcPin is the src claim of a recording from the pin.
+	voiceSrcPin = "pin"
+	// voicePinName is what a recording from the pin is called, as
+	// fetchPhone calls an upload "Phone recording".
+	voicePinName = "Pin recording"
 )
 
 // The states of a voice question.
@@ -68,6 +82,16 @@ const voicePrompt = `[Voice question from the owner's phone (Plaud Sync voice mo
 Answer for the ear: one to three short spoken sentences, the most important point first. No lists, tables, links, code, markdown or emoji. Write numbers, dates and times the way they are said ("half past nine on Tuesday", not "09:30, Tue"). Answer in the language of the question.
 If the answer needs more detail than that, put the spoken sentences in a block of their own, [SPOKEN]like this[/SPOKEN], then write the details as usual after it, and say in the spoken part that the details are in WhatsApp. Only the block is read aloud; the details go to this chat.
 The question is not shown in this chat. Keep it with your notes, as a voice question with today's date, the way skills/plaud.md files recordings (without that skill, wherever your notes go), and do not mention that in your answer.]`
+
+// voicePinPrompt goes before a recording from the pin, the
+// recordingMessage of it and, while it is short, its transcript: the brain
+// decides whether it was spoken to or is a recording to file, and answers
+// for the ear either way, as voicePrompt says.
+const voicePinPrompt = `[A recording from the owner's Plaud pin (Plaud Sync voice mode), transcribed by Plaud with speaker labels and timestamps. Your answer is read aloud on the owner's phone.
+First decide what it is. When the owner speaks to you in it (a question, a task, a reminder, something to note or to add to the backlog), do it as you would a message from the owner, and answer that. Otherwise (a meeting, a conversation, a dictation, a note to self) it is a recording: handle it as the instruction after "[Plaud] New recording" below says, with the summary and the action items for this chat, and say in one spoken sentence what you filed.
+Answer for the ear: one to three short spoken sentences, the most important point first. No lists, tables, links, code, markdown or emoji. Write numbers, dates and times the way they are said ("half past nine on Tuesday", not "09:30, Tue"). Answer in the language of the recording.
+If the answer needs more detail than that, put the spoken sentences in a block of their own, [SPOKEN]like this[/SPOKEN], then write the details as usual after it, and say in the spoken part that the details are in WhatsApp. Only the block is read aloud; the details go to this chat.
+Either way, keep the transcript with your notes: file the attached .txt the way skills/plaud.md files recordings (without that skill, wherever your notes go). The recording is not shown in this chat; when it was spoken to you, do not mention filing it in your answer.]`
 
 // maxSpokenWords caps what the phone reads of an answer that came back
 // long anyway: it is cut at the last sentence that fits.
@@ -228,8 +252,9 @@ func (p *Manager) voiceDevice(assertion, aud string, now time.Time) (plaudClaims
 	return c, nil
 }
 
-// takeVoice hands a phone's voice question to the voice brain. The same
-// question again (a retry whose answer got lost) asks nothing new.
+// takeVoice hands a phone's voice question, or a recording from its pin,
+// to the voice brain. The same question again (a retry whose answer got
+// lost) asks nothing new.
 func (p *Manager) takeVoice(assertion string, body []byte, now time.Time) (map[string]any, error) {
 	c, err := p.voiceDevice(assertion, plaudVoiceAud, now)
 	if err != nil {
@@ -245,14 +270,27 @@ func (p *Manager) takeVoice(assertion string, body []byte, now time.Time) (map[s
 	if _, err := c.Enc.publicKey(); err != nil {
 		return nil, fmt.Errorf("the answer's key: %w", err)
 	}
+	var started time.Time
+	limit, what := VoiceQuestionMax, "question"
+	switch c.Src {
+	case "":
+	case voiceSrcPin:
+		limit, what = TranscriptMax, "recording"
+		// The name goes into a file name: only the app's own form goes.
+		if started, err = time.ParseInLocation(plaudPhoneLayout, c.Name, time.Local); err != nil {
+			return nil, errors.New("the recording's name is not its start time")
+		}
+	default:
+		return nil, errors.New("the question is of a kind this Fridolin does not know: update it")
+	}
 	question := strings.TrimSpace(string(body))
 	switch {
-	case len(body) > VoiceQuestionMax:
-		return nil, errors.New("the question is too long")
+	case len(body) > limit:
+		return nil, fmt.Errorf("the %s is too long", what)
 	case !utf8.ValidString(question):
-		return nil, errors.New("the question is not text")
+		return nil, fmt.Errorf("the %s is not text", what)
 	case question == "":
-		return nil, errors.New("the question is empty")
+		return nil, fmt.Errorf("the %s is empty", what)
 	}
 	key := voiceKey(c.Iss, c.Rid)
 	if q, _ := p.voice.lookup(key, now); q != nil {
@@ -272,6 +310,19 @@ func (p *Manager) takeVoice(assertion string, body []byte, now time.Time) (map[s
 	jid := p.summaryChat(cfg, br)
 	if jid == "" {
 		return nil, fmt.Errorf("no private chat for brain %s's answers: add your number under Chats → Allowed numbers", br.ID())
+	}
+	text := voicePrompt + "\n\n" + question
+	var media []string
+	if c.Src == voiceSrcPin {
+		rec := phoneRecording(voicePinName, started, question)
+		path, err := p.inboxRecording(cfg, br, plaudPhonePrefix+c.Name, rec)
+		if err != nil {
+			return nil, err
+		}
+		text, media = voicePinPrompt+"\n\n"+recordingMessage(cfg, rec), []string{path}
+		if len(question) <= VoiceQuestionMax {
+			text += "\n\n=== Transcript ===\n" + question
+		}
 	}
 	if err := p.voice.add(key, &voiceQuestion{state: voiceWaiting, asked: now, key: *c.Enc}); err != nil {
 		return nil, err
@@ -306,11 +357,17 @@ func (p *Manager) takeVoice(assertion string, body []byte, now time.Time) (map[s
 			}
 		})
 	}
-	if err := br.Ask(jid, voiceSender, voicePrompt+"\n\n"+question, quiet, answer, done); err != nil {
+	if err := br.Ask(jid, voiceSender, text, media, quiet, answer, done); err != nil {
 		p.voice.remove(key)
-		return nil, fmt.Errorf("brain %s did not take the question: %w", br.ID(), err)
+		return nil, fmt.Errorf("brain %s did not take the %s: %w", br.ID(), what, err)
 	}
-	log.Printf("plaud: phone %s asked brain %s by voice", c.Iss, br.ID())
+	if c.Src == voiceSrcPin {
+		p.noteUpload(c.Iss, now)
+		// Its name is the time it started, as an upload's is in the log.
+		log.Printf("plaud %s%s: sent by phone %s in voice mode, to brain %s", plaudPhonePrefix, c.Name, c.Iss, br.ID())
+	} else {
+		log.Printf("plaud: phone %s asked brain %s by voice", c.Iss, br.ID())
+	}
 	return map[string]any{"state": voiceWaiting}, nil
 }
 

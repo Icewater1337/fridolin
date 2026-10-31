@@ -15,7 +15,7 @@ import java.util.Locale
 object VoicePrefs {
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("voice", Context.MODE_PRIVATE)
 
-    /** Voice mode: NotePin recordings are questions, and answers are read aloud. */
+    /** Voice mode: NotePin recordings go to the voice brain, which answers aloud, as it does questions. */
     fun enabled(ctx: Context) = prefs(ctx).getBoolean("enabled", false)
     fun setEnabled(ctx: Context, on: Boolean) = prefs(ctx).edit().putBoolean("enabled", on).apply()
 

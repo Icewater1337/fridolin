@@ -99,9 +99,12 @@ type plaudClaims struct {
 	Name   string    `json:"name,omitempty"`
 	SHA256 string    `json:"sha256,omitempty"`
 	// Rid and Enc are a voice question's (voice.go): the id the app gave
-	// it, and the key its answer is encrypted to.
+	// it, and the key its answer is encrypted to. Src "pin" makes it a
+	// recording from the pin instead, whose Name is then the time it
+	// started, as an upload's is.
 	Rid string    `json:"rid,omitempty"`
 	Enc *plaudJWK `json:"enc,omitempty"`
+	Src string    `json:"src,omitempty"`
 	// Ver, VName, Cert and Upd are a release request's (app_release.go):
 	// the app's versionCode and versionName, the SHA-256 of the
 	// certificate it is signed with, and how its last update went. APK
@@ -381,14 +384,7 @@ func (p *Manager) takeTranscript(assertion string, body []byte, now time.Time) e
 	if err := fsx.WriteFileAtomic(filepath.Join(dir, c.Name+".txt"), body, 0o600, false); err != nil {
 		return err
 	}
-	_ = p.updateDevices(func(st *plaudDevices) error {
-		for i := range st.Devices {
-			if st.Devices[i].ID == c.Iss {
-				st.Devices[i].LastUpload = now
-			}
-		}
-		return nil
-	})
+	p.noteUpload(c.Iss, now)
 	log.Printf("plaud %s%s: uploaded by phone %s", plaudPhonePrefix, c.Name, c.Iss)
 	// Handed over now rather than at the next check.
 	if cfg.Plaud.Enabled {
@@ -397,6 +393,19 @@ func (p *Manager) takeTranscript(assertion string, body []byte, now time.Time) e
 		}
 	}
 	return nil
+}
+
+// noteUpload notes that phone id sent a transcript at now, as an upload
+// or, in voice mode, a recording from the pin (voice.go).
+func (p *Manager) noteUpload(id string, now time.Time) {
+	_ = p.updateDevices(func(st *plaudDevices) error {
+		for i := range st.Devices {
+			if st.Devices[i].ID == id {
+				st.Devices[i].LastUpload = now
+			}
+		}
+		return nil
+	})
 }
 
 // ── building the app ─────────────────────────────────────────────────────

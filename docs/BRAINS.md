@@ -910,12 +910,14 @@ voice question just works.
 ```
 
 Only runs that answer the owner get it: a direct message from a number
-in `allowed_numbers` to the brain, and a question from the Plaud Sync
-app's voice mode, which only your paired phone can sign. A run for a
-group, for someone else's DM, for a hand-off (`/ingest`, a Plaud
-recording, an upload), for a task the core brain delegated, or for
-untagged chatter gets none, so what other people write cannot reach your
-GitHub through it. A scheduled agent keeps its own grant. The token is
+in `allowed_numbers` to the brain, and what the Plaud Sync app's voice
+mode sends, which only your paired phone can sign: a question, or a
+recording from your pin. A pin recording can hold other people's voices
+(a meeting), and the brain decides whether you spoke to it, so keep the
+grant narrow. A run for a group, for someone else's DM, for a hand-off
+(`/ingest`, a Plaud recording with voice mode off, an upload), for a
+task the core brain delegated, or for untagged chatter gets none, so
+what other people write cannot reach your GitHub through it. A scheduled agent keeps its own grant. The token is
 minted per run from the GitHub App (or the typed fallback token) and
 revoked when the run ends, as [above](#github-for-scheduled-agents).
 

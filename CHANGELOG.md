@@ -50,6 +50,31 @@ for compatibility.
   when a phone cannot update to a build signed with another key.
   [docs/PLAUD.md](docs/PLAUD.md#updates)
 
+### Changed
+
+- **In voice mode, whatever you record on the pin reaches the voice brain
+  whole, and the brain decides what it is.** A NotePin recording used to
+  be sent as a question: its speaker labels and timestamps were dropped,
+  the brain answered a meeting in a few spoken sentences, and the
+  instruction for recordings (`plaud.message`, `skills/plaud.md`) was
+  never applied. Now the Plaud Sync app (0.8) sends the whole transcript
+  through the voice route, marked as a recording from the pin, and the
+  voice brain (`plaud.voice_brain`, not `plaud.brain`) gets it as it gets
+  any recording: a file in the `plaud` folder of its inbox and the
+  `[Plaud] New recording` line with the instruction for recordings. Spoken
+  to (a question, a task, a reminder), it does that and answers aloud;
+  otherwise (a meeting, a dictation) it files it as a recording, sends the
+  summary and action items to WhatsApp, and says in one spoken sentence
+  what it filed. Questions asked with **Ask** stay plain questions, with
+  the same prompt as before. A recording may now be 512 KiB long, as an
+  upload (a question stays at 16 KiB), and one Fridolin refuses (too long,
+  `plaud.voice` off, the brain's queue full) goes as a transcript to the
+  Plaud brain instead; a refused question is dropped. Before, one long
+  recording was refused and blocked every later question on the phone for
+  good, and the app now also stops a transcript too long for Fridolin from
+  holding up the ones after it. Build the app again on the dashboard so the
+  phones update. [docs/PLAUD.md](docs/PLAUD.md#voice-mode)
+
 ### Fixed
 
 - **A node whose FrIDE instances run on the core's Claude login no

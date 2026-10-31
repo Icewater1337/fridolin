@@ -49,7 +49,7 @@ class MainActivity : Activity() {
             ask.visibility = if (on) android.view.View.VISIBLE else android.view.View.GONE
             speakLocked.visibility = ask.visibility
         }
-        val voice = switch("Voice mode: recordings are questions, answers are read aloud", VoicePrefs.enabled(this)) {
+        val voice = switch("Voice mode: recordings go to Fridolin's voice brain, answers are read aloud", VoicePrefs.enabled(this)) {
             VoicePrefs.setEnabled(this, it)
             AppLog.i(if (it) "voice mode on" else "voice mode off")
             showVoice(it)
