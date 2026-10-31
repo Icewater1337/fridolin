@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -20,7 +21,8 @@ import (
 // hook of its --settings with the answer as last_assistant_message.
 //
 // FRIDOLIN_FAKE_LIVE_LOG gets one JSON line per start and per message
-// (args, content, pid); FRIDOLIN_FAKE_LIVE_DEAF=1 makes it ignore every
+// (args, content, pid, and the gh login it sees: ghLogin);
+// FRIDOLIN_FAKE_LIVE_DEAF=1 makes it ignore every
 // notification, as a CLI with channels off would; FRIDOLIN_FAKE_LIVE_EXIT_ON
 // makes it exit at a message holding that text, before it answers;
 // FRIDOLIN_FAKE_LIVE_HANG_ON makes it sit a minute on a message holding
@@ -40,7 +42,7 @@ func fakeLive(args []string) {
 			f.Close()
 		}
 	}
-	logLine(map[string]any{"event": "start", "args": args, "brain": os.Getenv("FRIDOLIN_BRAIN_ID")})
+	logLine(map[string]any{"event": "start", "args": args, "brain": os.Getenv("FRIDOLIN_BRAIN_ID"), "gh_config_dir": os.Getenv("GH_CONFIG_DIR")})
 	if os.Getenv("FRIDOLIN_FAKE_LIVE_NO_DIALOG") != "1" {
 		fmt.Print("WARNING: Loading development channels\r\n\r\n 1. I am using this for local development\r\n 2. Exit\r\n\r\nEnter to confirm\r\n")
 		if _, err := bufio.NewReader(os.Stdin).ReadString('\n'); err != nil {
@@ -103,7 +105,7 @@ func fakeLive(args []string) {
 			continue
 		}
 		content := m.Params.Content
-		logLine(map[string]any{"event": "message", "kind": m.Params.Meta["kind"], "turn": m.Params.Meta["turn"], "content": content})
+		logLine(map[string]any{"event": "message", "kind": m.Params.Meta["kind"], "turn": m.Params.Meta["turn"], "content": content, "gh": ghLogin()})
 		if log := os.Getenv("FRIDOLIN_FAKE_PROMPT_LOG"); log != "" {
 			if f, err := os.OpenFile(log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600); err == nil {
 				fmt.Fprintf(f, "%s\n%s\n", PromptMark, content)
@@ -141,6 +143,25 @@ func fakeLive(args []string) {
 			fmt.Fprintln(os.Stderr, "the Stop hook failed:", err)
 		}
 	}
+}
+
+// ghLogin is the token gh would use: the oauth_token in
+// $GH_CONFIG_DIR/hosts.yml, "" without one.
+func ghLogin() string {
+	dir := os.Getenv("GH_CONFIG_DIR")
+	if dir == "" {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "hosts.yml"))
+	if err != nil {
+		return ""
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if tok, ok := strings.CutPrefix(strings.TrimSpace(line), "oauth_token: "); ok {
+			return tok
+		}
+	}
+	return ""
 }
 
 // stopHook is the command of the Stop hook in the --settings argument.

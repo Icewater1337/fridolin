@@ -99,6 +99,13 @@ func (s *Server) Live() []string {
 	return out
 }
 
+// AllMinted is every token's record, in the order they were made.
+func (s *Server) AllMinted() []Minted {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.Minted)
+}
+
 // LastMinted is the newest token's record, zero without one.
 func (s *Server) LastMinted() Minted {
 	s.mu.Lock()

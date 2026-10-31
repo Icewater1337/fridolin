@@ -31,7 +31,9 @@ for compatibility.
   (a research preview) with the development-channels flag and the brain's own
   sandbox and login; groups, other senders, scheduled agents and the rest
   still run `claude -p`, which is also the fallback whenever the session is
-  not up, was refused channels, or died. Off by default.
+  not up, was refused channels, or died. A brain's own `github` grant
+  goes with it: each turn gets a token of its own, revoked when the turn
+  ends. Off by default.
   [docs/BRAINS.md](docs/BRAINS.md#live-session)
 - **The Plaud Sync phone app updates itself.** Each build on the Plaud
   card (**Build and update phones**), or one the core brain starts with

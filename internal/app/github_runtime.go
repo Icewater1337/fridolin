@@ -16,6 +16,7 @@ import (
 
 	"github.com/Icewater1337/fridolin/internal/chat"
 	"github.com/Icewater1337/fridolin/internal/config"
+	"github.com/Icewater1337/fridolin/internal/fsx"
 	"github.com/Icewater1337/fridolin/internal/ghapp"
 	"github.com/Icewater1337/fridolin/internal/httpapi"
 )
@@ -487,6 +488,21 @@ func (b *App) withGitHubToken(access runAccess, brain string, grant chat.GitHubG
 // writeGitHubLogin writes gh's hosts.yml with tok into a new folder in
 // dir, readable by the bridge's user only, and returns the folder.
 func writeGitHubLogin(dir, tok string) (string, error) {
+	gh, err := newGitHubConfigDir(dir)
+	if err != nil {
+		return "", err
+	}
+	if err := writeGitHubHosts(gh, tok); err != nil {
+		_ = os.RemoveAll(gh)
+		return "", err
+	}
+	return gh, nil
+}
+
+// newGitHubConfigDir makes a new folder for gh's config in dir, readable
+// by the bridge's user only, with no login in it yet. Its name, run-*.gh,
+// is the one pruneRunTokens removes after a crash.
+func newGitHubConfigDir(dir string) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("creating %s: %w", dir, err)
 	}
@@ -494,6 +510,20 @@ func writeGitHubLogin(dir, tok string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// version 1 is gh's config of more than one account, which hosts.yml
+	// is written as: without it gh migrates the folder, which asks GitHub
+	// for the user and fails for an installation token.
+	if err := os.WriteFile(filepath.Join(gh, "config.yml"), []byte("version: \"1\"\n"), 0o600); err != nil {
+		_ = os.RemoveAll(gh)
+		return "", err
+	}
+	return gh, nil
+}
+
+// writeGitHubHosts logs gh in to GitHub with tok: hosts.yml in gh, which
+// replaces the one there whole, so that a gh running meanwhile reads the
+// old login or the new one.
+func writeGitHubHosts(gh, tok string) error {
 	// The user an installation token acts as; gh only shows it.
 	const user = "x-access-token"
 	hosts := "github.com:\n" +
@@ -503,14 +533,5 @@ func writeGitHubLogin(dir, tok string) (string, error) {
 		"    git_protocol: https\n" +
 		"    oauth_token: " + tok + "\n" +
 		"    user: " + user + "\n"
-	// version 1 is gh's config of more than one account, which hosts.yml
-	// is written as: without it gh migrates the folder, which asks GitHub
-	// for the user and fails for an installation token.
-	for name, data := range map[string]string{"hosts.yml": hosts, "config.yml": "version: \"1\"\n"} {
-		if err := os.WriteFile(filepath.Join(gh, name), []byte(data), 0o600); err != nil {
-			_ = os.RemoveAll(gh)
-			return "", err
-		}
-	}
-	return gh, nil
+	return fsx.WriteFileAtomic(filepath.Join(gh, "hosts.yml"), []byte(hosts), 0o600, false)
 }

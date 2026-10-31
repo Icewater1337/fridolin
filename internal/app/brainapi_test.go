@@ -399,3 +399,37 @@ func TestBrainAPIRefusals(t *testing.T) {
 		})
 	}
 }
+
+// TestPruneRunTokens: at start the bridge removes what runs and live
+// sessions left in their token folders when it went down: their tokens,
+// --mcp-config files and gh logins, and nothing else there.
+func TestPruneRunTokens(t *testing.T) {
+	t.Parallel()
+	data := t.TempDir()
+	var stale []string
+	for _, dir := range []string{runTokenDir(data, "a"), liveTokenDir(data, "a")} {
+		for _, name := range []string{"run-1.token", "run-1.mcp.json", "run-1.gh/hosts.yml"} {
+			path := filepath.Join(dir, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			stale = append(stale, path)
+		}
+	}
+	keep := filepath.Join(liveTokenDir(data, "a"), "notes.txt")
+	if err := os.WriteFile(keep, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pruneRunTokens(data)
+	for _, path := range stale {
+		if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s is left: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("a file of another name went too: %v", err)
+	}
+}

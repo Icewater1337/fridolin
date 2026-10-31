@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -76,6 +77,10 @@ type liveSession struct {
 	chat string
 	// fingerprint is liveFingerprint of what it was started with.
 	fingerprint string
+	// gh is the folder of the session's gh config (GH_CONFIG_DIR), which
+	// holds a login only while a turn is under way; "" for a brain
+	// without a GitHub grant.
+	gh string
 
 	// Under liveHost.mu.
 	proc      *claudecli.LiveProc
@@ -132,13 +137,12 @@ func (h *liveHost) Stop() {
 // the brain has one, and it is its owner's direct message to it, from
 // WhatsApp, in a brain that runs the CLI as the session needs it (without
 // asking for permissions, which a session has nobody to answer, and in its
-// own sandboxed state). A brain with a GitHub grant of its own answers
-// with one-off runs, each logged in to gh with a token of its own: a
-// session outlives GitHub's tokens, which last an hour.
+// own sandboxed state). A brain's own GitHub grant goes with the session
+// as with a one-off run: each turn gets a token of its own (loginGitHub).
 func (h *liveHost) eligible(spec brain.RunSpec) bool {
 	s, m := spec.Settings, spec.Message
 	switch {
-	case s.Manifest.LiveSession != manifest.LiveSessionOwnerDM, s.Provider == "codex", !s.Dangerously, s.InheritUser, s.Manifest.GitHub != nil:
+	case s.Manifest.LiveSession != manifest.LiveSessionOwnerDM, s.Provider == "codex", !s.Dangerously, s.InheritUser:
 		return false
 	case m.Silent, m.IsGroup(), m.HandedIn(), m.GitHub != nil, chat.IsInternalChat(m.JID):
 		return false
@@ -258,6 +262,24 @@ func (h *liveHost) launch(r *commandRunner, spec brain.RunSpec, s *liveSession) 
 	if access.Token == "" || access.MCPConfig == "" {
 		access.Done()
 		return errors.New("the brain API has no token or tools for the session (the HTTP server is off, or the bridge has no binary)")
+	}
+	if st.Manifest.GitHub != nil && h.b.github != nil {
+		// gh reads its login anew each time it runs: loginGitHub puts one
+		// there for each turn, which outlives no turn.
+		gh, err := newGitHubConfigDir(access.TokenDir)
+		if err != nil {
+			access.Done()
+			return fmt.Errorf("the session's gh folder: %w", err)
+		}
+		access.Env = append(access.Env, "GH_CONFIG_DIR="+gh, "GH_PROMPT_DISABLED=1", "GH_NO_UPDATE_NOTIFIER=1")
+		prev := access.Done
+		access.Done = func() {
+			if err := os.RemoveAll(gh); err != nil {
+				log.Printf("brain %s: removing the live session's gh folder: %v", spec.ID, err)
+			}
+			prev()
+		}
+		s.gh = gh
 	}
 	s.access = access
 	fail := func(err error) error {
@@ -402,6 +424,9 @@ func (h *liveHost) turn(ctx context.Context, r *commandRunner, s *liveSession, s
 	notice := time.AfterFunc(r.waits.workingNotice, cb.Notice)
 	defer notice.Stop()
 
+	if s.gh != "" {
+		defer h.loginGitHub(s, spec)()
+	}
 	if err := s.hub.Deliver(claudecli.LiveEvent{Content: spec.LivePrompt(kind), Meta: map[string]string{"kind": "message", "turn": strconv.Itoa(n)}}); err != nil {
 		return claudecli.Result{Err: err}
 	}
@@ -425,6 +450,38 @@ func (h *liveHost) turn(ctx context.Context, r *commandRunner, s *liveSession, s
 	}
 	sink.Result(res)
 	return res
+}
+
+// loginGitHub logs the gh of s in for the turn of spec's message, with a
+// token of the brain's grant minted for it, as a one-off run's gh is
+// (withGitHubToken); what it returns logs gh out and revokes the token,
+// once the turn is over. A token that cannot be minted leaves the turn
+// without one, and the log says why.
+func (h *liveHost) loginGitHub(s *liveSession, spec brain.RunSpec) func() {
+	run := runInfoFor(spec.ID, spec.Message)
+	run.OwnerGitHub = spec.Settings.Manifest.GitHub
+	g := githubGrantOf(run, h.b.cfgs.Get())
+	if g == nil {
+		return func() {}
+	}
+	ctx, cancel := context.WithTimeout(h.ctx, 30*time.Second)
+	defer cancel()
+	tok, done, err := h.b.github.Mint(ctx, *g)
+	if err != nil {
+		log.Printf("brain %s: github: no token for this turn of the live session (repos %s): %v", spec.ID, strings.Join(g.Repos, ","), err)
+		return func() {}
+	}
+	if err := writeGitHubHosts(s.gh, tok); err != nil {
+		done()
+		log.Printf("brain %s: github: no token for this turn of the live session: %v", spec.ID, err)
+		return func() {}
+	}
+	return func() {
+		if err := os.Remove(filepath.Join(s.gh, "hosts.yml")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			log.Printf("brain %s: logging the live session's gh out: %v", spec.ID, err)
+		}
+		done()
+	}
 }
 
 // reap ends the sessions that idled for liveIdle.
