@@ -35,6 +35,13 @@ for compatibility.
 
 ### Fixed
 
+- **A node whose FrIDE instances run on the core's Claude login no
+  longer says it has no login after an update.** The node agent kept in
+  memory only that the core lent its token, so once an update restarted
+  it, `fridolin nodes` and `fridolin node fride host status` said "no
+  Claude login" until the core started an instance again, while the
+  running instance was logged in all along. The node now keeps it in
+  the instance's state.
 - **WebFetch is no longer on by default for brains without
   `dangerously_skip_permissions`** (#410). Since #406 such a brain got
   `--allowed-tools WebSearch,WebFetch`, while the docs said it could not

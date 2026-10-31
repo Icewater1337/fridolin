@@ -909,7 +909,8 @@ func TestFrideInstanceClaudeLogin(t *testing.T) {
 
 // A start that lends the core's Claude token logs the agents in with it,
 // though the node has none of its own, and the node no longer declares
-// that it lacks one; a lent token that does not read is no login.
+// that it lacks one, also once the agent restarted (an update); a lent
+// token that does not read is no login.
 func TestFrideInstanceLentLogin(t *testing.T) {
 	t.Parallel()
 	f := newInstFix(t)
@@ -932,6 +933,12 @@ func TestFrideInstanceLentLogin(t *testing.T) {
 	f.a.frideHostRefresh(context.Background(), true)
 	if c := f.a.frideHostDeclared(); c.NoLogin != "" || c.Instances[0].NoLogin != "" {
 		t.Errorf("after a lent login: %+v", c)
+	}
+	again := &Agent{Dir: f.a.Dir, Config: f.a.Config, Logf: f.log.logf, CoreSecrets: f.a.CoreSecrets, SandboxDriver: f.a.SandboxDriver}
+	again.inst.url, again.inst.memory = f.url, f.a.inst.memory
+	again.frideHostRefresh(context.Background(), true)
+	if c := again.frideHostDeclared(); c == nil || c.NoLogin != "" || len(c.Instances) != 1 {
+		t.Errorf("after the agent restarted: %+v", c)
 	}
 	if strings.Contains(f.log.String(), lent) {
 		t.Error("the log holds the lent token")

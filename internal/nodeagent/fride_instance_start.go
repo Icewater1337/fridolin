@@ -231,9 +231,6 @@ func (a *Agent) readyInstance(ctx context.Context, o instanceOps, st *FrideInsta
 		return nodeproto.FrideInstance{}, err
 	}
 	problem, noLogin := o.login(ctx, st.Sandbox, p.CoreToken)
-	if p.CoreToken != "" && noLogin == "" {
-		a.inst.lent.Store(true)
-	}
 	if problem != "" {
 		notes = append(notes, problem)
 	}
@@ -243,6 +240,7 @@ func (a *Agent) readyInstance(ctx context.Context, o instanceOps, st *FrideInsta
 		}
 	}
 	st.Run, st.Problem, st.Notes, st.NoLogin, st.Repos, st.Started = true, "", "", noLogin, slices.Clone(p.Repos), time.Now().UTC().Truncate(time.Second)
+	st.LentLogin = p.CoreToken != "" && noLogin == ""
 	if err := saveFrideInstance(a.Dir, st); err != nil {
 		return nodeproto.FrideInstance{}, err
 	}
