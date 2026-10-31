@@ -287,3 +287,11 @@ func TestSnippetSurvivesLowercaseGrowth(t *testing.T) {
 	}
 	_ = snippet(strings.Repeat("Ⱥ", 300), "zzz")
 }
+
+// Each invalid byte lowers to a 3-byte U+FFFD, which pushed the offset past plain.
+func TestSnippetSurvivesInvalidUTF8(t *testing.T) {
+	got := snippet(strings.Repeat("\xe4", 100)+" steuer", "steuer")
+	if !strings.Contains(got, "steuer") {
+		t.Fatalf("snippet = %q, want it around steuer", got)
+	}
+}

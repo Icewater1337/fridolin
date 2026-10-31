@@ -446,7 +446,8 @@ func (ix *Index) Search(q string) []Hit {
 // snippet is a line of text around the first place word is, without most
 // Markdown punctuation.
 func snippet(text, word string) string {
-	plain := stripInline(text)
+	// Invalid bytes would become U+FFFD in ToLower and break the rune-for-rune mapping.
+	plain := strings.ToValidUTF8(stripInline(text), "\uFFFD")
 	low := strings.ToLower(plain)
 	i := strings.Index(low, word)
 	if i < 0 {
