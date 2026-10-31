@@ -171,6 +171,7 @@ func TestLiveSessionOnlyForTheOwnersDMs(t *testing.T) {
 		{"a brain that asks for permissions", nil, func(s *brain.Settings) { s.Dangerously = false }, false},
 		{"a brain on the user's own Claude config", nil, func(s *brain.Settings) { s.InheritUser = true }, false},
 		{"a brain with the setting off", nil, func(s *brain.Settings) { s.Manifest.LiveSession = "" }, false},
+		{"a brain with a GitHub grant", nil, func(s *brain.Settings) { s.Manifest.GitHub = &chat.GitHubGrant{Repos: []string{"you/a"}} }, false},
 	} {
 		if got := with(c.f, c.g); got != c.want {
 			t.Errorf("%s: eligible = %v, want %v", c.name, got, c.want)

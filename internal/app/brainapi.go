@@ -14,6 +14,7 @@ import (
 	brainruntime "github.com/Icewater1337/fridolin/internal/brain"
 
 	"github.com/Icewater1337/fridolin/internal/chat"
+	"github.com/Icewater1337/fridolin/internal/config"
 	"github.com/Icewater1337/fridolin/internal/fsx"
 )
 
@@ -41,6 +42,9 @@ type runInfo struct {
 	// each (runTokens.replace), and the session's MCP server, started
 	// once, is not held to the run id it was started with.
 	Live bool
+	// OwnerGitHub is the brain's own GitHub grant (brain.json's github),
+	// which the run gets only when it answers the owner (githubGrantOf).
+	OwnerGitHub *chat.GitHubGrant
 }
 
 // runInfoFor is the run of brain that answers m.
@@ -146,6 +150,21 @@ type runAccess struct {
 	Done func()
 }
 
+// githubGrantOf is the GitHub access of run: the grant its message
+// carries (a scheduled agent's, a voice question's), else the brain's
+// own grant when the run answers the owner's direct message (ownerAsked),
+// else none. A group, a hand-off or a delegated task never gets the
+// brain's: what others write must not reach the owner's GitHub.
+func githubGrantOf(run runInfo, cfg *config.Settings) *chat.GitHubGrant {
+	if g := run.Message.GitHub; g != nil {
+		return g
+	}
+	if run.OwnerGitHub != nil && ownerAsked(run, cfg) {
+		return run.OwnerGitHub
+	}
+	return nil
+}
+
 // mcpServerName is the name a run's MCP server goes by in the CLI, which
 // prefixes its tools with it: mcp__fridolin__delegate.
 const mcpServerName = "fridolin"
@@ -163,7 +182,7 @@ func (b *App) brainRunEnv(run runInfo) runAccess {
 	if b.exe != "" {
 		access.Env = append(access.Env, "FRIDOLIN_BIN="+b.exe)
 	}
-	if g := run.Message.GitHub; g != nil && b.github != nil {
+	if g := githubGrantOf(run, b.cfgs.Get()); g != nil && b.github != nil {
 		access = b.withGitHubToken(access, brain, *g)
 	}
 	if b.listen == "" {

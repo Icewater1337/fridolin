@@ -85,6 +85,34 @@
         }
       }
     },
+    "github": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repos", "permissions"],
+      "description": "The GitHub access of the runs that answer the owner (direct messages and Plaud voice questions), never a group's, a hand-off's or a delegated task's: a token for these repositories and permissions, as gh's login, minted as a run starts and ended with it (docs/BRAINS.md, GitHub in your chats).",
+      "properties": {
+        "repos": {
+          "type": ["array", "null"],
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}$"
+          },
+          "description": "Repositories, as owner/name."
+        },
+        "permissions": {
+          "type": ["object", "null"],
+          "additionalProperties": {
+            "enum": ["read", "write"]
+          },
+          "propertyNames": {
+            "pattern": "^[a-z][a-z_]{1,39}$"
+          },
+          "description": "GitHub permissions by name: {\"issues\": \"write\", \"contents\": \"read\"}."
+        }
+      }
+    },
     "schedules": {
       "type": "array",
       "maxItems": 50,

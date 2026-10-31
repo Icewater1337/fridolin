@@ -91,6 +91,13 @@ type Manifest struct {
 	// brain's folder (docs/FILES.md, "Uploads"); nil takes them only from
 	// you.
 	Files *Files `json:"files,omitempty"`
+	// GitHub is the GitHub access of the runs that answer the owner: their
+	// direct messages and the Plaud Sync app's voice questions, never a
+	// group, a hand-off or another brain's task. Each such run gets a token
+	// for these repositories and permissions as gh's login, minted as it
+	// starts and ended with it (chat.GitHubGrant), as a scheduled agent's
+	// github does for its runs. nil gives them none.
+	GitHub *chat.GitHubGrant `json:"github,omitempty"`
 }
 
 // Files is brain.json's "files": the folders that take uploads from site
@@ -442,6 +449,11 @@ func (m *Manifest) Validate() error {
 				return fmt.Errorf("brain %q: files.uploads lists %q twice", m.ID, u.Folder)
 			}
 			seen[u.Folder] = true
+		}
+	}
+	if m.GitHub != nil {
+		if err := ValidateGitHubGrant(*m.GitHub); err != nil {
+			return fmt.Errorf("brain %q: %w", m.ID, err)
 		}
 	}
 	if err := m.validateSchedules(); err != nil {

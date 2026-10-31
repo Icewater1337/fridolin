@@ -132,11 +132,13 @@ func (h *liveHost) Stop() {
 // the brain has one, and it is its owner's direct message to it, from
 // WhatsApp, in a brain that runs the CLI as the session needs it (without
 // asking for permissions, which a session has nobody to answer, and in its
-// own sandboxed state).
+// own sandboxed state). A brain with a GitHub grant of its own answers
+// with one-off runs, each logged in to gh with a token of its own: a
+// session outlives GitHub's tokens, which last an hour.
 func (h *liveHost) eligible(spec brain.RunSpec) bool {
 	s, m := spec.Settings, spec.Message
 	switch {
-	case s.Manifest.LiveSession != manifest.LiveSessionOwnerDM, s.Provider == "codex", !s.Dangerously, s.InheritUser:
+	case s.Manifest.LiveSession != manifest.LiveSessionOwnerDM, s.Provider == "codex", !s.Dangerously, s.InheritUser, s.Manifest.GitHub != nil:
 		return false
 	case m.Silent, m.IsGroup(), m.HandedIn(), m.GitHub != nil, chat.IsInternalChat(m.JID):
 		return false

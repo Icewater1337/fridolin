@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/Icewater1337/fridolin/internal/chat"
 )
 
 func TestManifestDefaultsAndEnumListsAreOwned(t *testing.T) {
@@ -76,15 +78,19 @@ func TestManifestValidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	bad := map[string]func(m *Manifest){
-		"uppercase id":       func(m *Manifest) { m.ID = "Work" },
-		"empty name":         func(m *Manifest) { m.Name = " " },
-		"absolute prompt":    func(m *Manifest) { m.PromptFile = "/etc/passwd" },
-		"escaping prompt":    func(m *Manifest) { m.PromptFile = "../other/brain-prompt.md" },
-		"bad effort":         func(m *Manifest) { m.Effort = "huge" },
-		"bad live_session":   func(m *Manifest) { m.LiveSession = "always" },
-		"group not a group":  func(m *Manifest) { m.Routing.Groups = []string{"15551234567@s.whatsapp.net"} },
-		"filter injection":   func(m *Manifest) { m.Backup.Exclude = []string{"+ /secret"} },
-		"newline in exclude": func(m *Manifest) { m.Backup.Exclude = []string{"a\n+ b"} },
+		"uppercase id":         func(m *Manifest) { m.ID = "Work" },
+		"empty name":           func(m *Manifest) { m.Name = " " },
+		"absolute prompt":      func(m *Manifest) { m.PromptFile = "/etc/passwd" },
+		"escaping prompt":      func(m *Manifest) { m.PromptFile = "../other/brain-prompt.md" },
+		"bad effort":           func(m *Manifest) { m.Effort = "huge" },
+		"bad live_session":     func(m *Manifest) { m.LiveSession = "always" },
+		"group not a group":    func(m *Manifest) { m.Routing.Groups = []string{"15551234567@s.whatsapp.net"} },
+		"filter injection":     func(m *Manifest) { m.Backup.Exclude = []string{"+ /secret"} },
+		"newline in exclude":   func(m *Manifest) { m.Backup.Exclude = []string{"a\n+ b"} },
+		"github without repos": func(m *Manifest) { m.GitHub = &chat.GitHubGrant{Permissions: map[string]string{"issues": "write"}} },
+		"github bad access": func(m *Manifest) {
+			m.GitHub = &chat.GitHubGrant{Repos: []string{"you/a"}, Permissions: map[string]string{"issues": "all"}}
+		},
 	}
 	for name, mutate := range bad {
 		m := leafTestManifest("work")
