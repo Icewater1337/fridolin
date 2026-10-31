@@ -67,6 +67,13 @@
       matchUpdateTypes: ["minor", "patch"],
       groupName: "Plaud Android app",
     },
+    // Guava comes in two builds of each release, -android and -jre; the
+    // Plaud app wants the Android one. Maven's ordering puts -jre after
+    // -android, so without this Renovate proposes the switch as an update.
+    {
+      matchPackageNames: ["com.google.guava:guava"],
+      allowedVersions: "/-android$/",
+    },
     {
       matchFileNames: ["Makefile"],
       matchUpdateTypes: ["minor", "patch"],
