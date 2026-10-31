@@ -78,7 +78,7 @@ go4.org/mem v0.0.0-20240501181205-ae6ca9944745 (Apache-2.0)
 go4.org/netipx v0.0.0-20231129151722-fdeea329fbba (BSD-3-Clause)
 golang.org/x/crypto v0.58.0 (BSD-3-Clause)
 golang.org/x/exp v0.0.0-20260709172345-9ea1abe57597 (BSD-3-Clause)
-golang.org/x/net v0.61.0 (BSD-3-Clause)
+golang.org/x/net v0.62.0 (BSD-3-Clause)
 golang.org/x/oauth2 v0.36.0 (BSD-3-Clause)
 golang.org/x/sync v0.24.0 (BSD-3-Clause)
 golang.org/x/sys v0.49.0 (BSD-3-Clause)
@@ -4419,7 +4419,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ==============================================================================
-golang.org/x/net v0.61.0: LICENSE
+golang.org/x/net v0.62.0: LICENSE
 ==============================================================================
 
 Copyright 2009 The Go Authors.
