@@ -333,6 +333,8 @@ func (a *BrainAPI) Handler() http.Handler {
 	mux.HandleFunc("POST /brain/calendar/freebusy", a.brainCall(a.calendarCall(a.brainCalendarBusy)))
 	mux.HandleFunc("GET /brain/mcp/tools", a.brainCall(a.brainMCPTools))
 	mux.HandleFunc("POST /brain/mcp/call", a.brainCall(a.brainMCPCall))
+	mux.HandleFunc("GET /brain/live/next", a.brainCall(a.brainLiveNext))
+	mux.HandleFunc("POST /brain/live/turn-end", a.brainCallLimit(maxTurnEndBody, a.brainLiveTurnEnd))
 	mux.HandleFunc("GET /brain/memory/search", a.brainCall(a.brainMemorySearch))
 	mux.HandleFunc("GET /brain/intents", a.brainCall(a.brainIntents))
 	mux.HandleFunc("POST /brain/intents", a.brainCall(a.brainAddIntent))

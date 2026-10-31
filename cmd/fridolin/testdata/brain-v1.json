@@ -22,6 +22,7 @@
   "reply_chat": "120363000000000000@g.us",
   "observe": "run",
   "approvals": "auto",
+  "live_session": "owner_dm",
   "backup": {
     "enabled": true,
     "exclude": [

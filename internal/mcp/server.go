@@ -66,6 +66,13 @@ type Handler interface {
 	CallTool(ctx context.Context, name string, args json.RawMessage) (*CallResult, error)
 }
 
+// Notification is a message the server sends to the client unasked,
+// such as Claude Code's notifications/claude/channel.
+type Notification struct {
+	Method string
+	Params any
+}
+
 // Server answers MCP over one stdio connection.
 type Server struct {
 	Name, Version string
@@ -73,6 +80,15 @@ type Server struct {
 	// put them in the model's context.
 	Instructions string
 	Handler      Handler
+	// Experimental are the experimental capabilities initialize declares,
+	// such as "claude/channel": {} for a Claude Code channel.
+	Experimental map[string]any
+	// Events, when set, are sent to the client as they come, once it said
+	// it is initialized and until Serve ends. Closing it stops them.
+	Events <-chan Notification
+	// Initialized, when set, runs once the client said it is initialized
+	// (notifications/initialized): from then on it takes notifications.
+	Initialized func()
 	// Logf, when set, gets what the server logs; stdout is the protocol's.
 	Logf func(format string, args ...any)
 }
@@ -84,9 +100,29 @@ type Server struct {
 // Serve cancels the calls still running and waits for them.
 func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 	ctx, cancel := context.WithCancel(ctx)
-	c := &conn{s: s, out: out, inflight: map[string]context.CancelFunc{}}
+	c := &conn{s: s, out: out, inflight: map[string]context.CancelFunc{}, initialized: make(chan struct{})}
 	defer c.wg.Wait()
 	defer cancel()
+	if s.Events != nil {
+		c.wg.Go(func() {
+			select {
+			case <-c.initialized:
+			case <-ctx.Done():
+				return
+			}
+			for {
+				select {
+				case n, ok := <-s.Events:
+					if !ok {
+						return
+					}
+					c.notify(n)
+				case <-ctx.Done():
+					return
+				}
+			}
+		})
+	}
 	r := bufio.NewReaderSize(in, 64<<10)
 	for {
 		line, tooLong, err := readLine(r, MaxLine)
@@ -137,6 +173,9 @@ type conn struct {
 	mu       sync.Mutex
 	inflight map[string]context.CancelFunc // by the request's id
 	wg       sync.WaitGroup
+	// initialized closes once the client sent notifications/initialized.
+	initialized chan struct{}
+	initOnce    sync.Once
 }
 
 func (c *conn) logf(format string, args ...any) {
@@ -150,6 +189,20 @@ func (c *conn) write(r response) {
 	defer c.writeMu.Unlock()
 	if _, err := c.out.Write(r.encode()); err != nil {
 		c.logf("mcp: writing an answer: %v", err)
+	}
+}
+
+// notify sends n to the client, as one line.
+func (c *conn) notify(n Notification) {
+	data, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "method": n.Method, "params": n.Params})
+	if err != nil {
+		c.logf("mcp: encoding %s: %v", n.Method, err)
+		return
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	if _, err := c.out.Write(append(data, '\n')); err != nil {
+		c.logf("mcp: writing %s: %v", n.Method, err)
 	}
 }
 
@@ -215,9 +268,13 @@ func (c *conn) initialize(m Message) response {
 	if slices.Contains(ProtocolVersions, *p.ProtocolVersion) {
 		version = *p.ProtocolVersion
 	}
+	capabilities := map[string]any{"tools": map[string]any{"listChanged": false}}
+	if len(c.s.Experimental) > 0 {
+		capabilities["experimental"] = c.s.Experimental
+	}
 	result := map[string]any{
 		"protocolVersion": version,
-		"capabilities":    map[string]any{"tools": map[string]any{"listChanged": false}},
+		"capabilities":    capabilities,
 		"serverInfo":      map[string]any{"name": c.s.Name, "version": c.s.Version},
 	}
 	if c.s.Instructions != "" {
@@ -227,8 +284,17 @@ func (c *conn) initialize(m Message) response {
 }
 
 func (c *conn) notification(m Message) {
+	if m.Method == "notifications/initialized" {
+		c.initOnce.Do(func() {
+			close(c.initialized)
+			if c.s.Initialized != nil {
+				c.s.Initialized()
+			}
+		})
+		return
+	}
 	if m.Method != "notifications/cancelled" {
-		return // notifications/initialized and the rest need nothing
+		return // the rest need nothing
 	}
 	var p struct {
 		RequestID json.RawMessage `json:"requestId"`

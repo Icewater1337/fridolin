@@ -191,3 +191,32 @@ func TestBwrapRunReachesItsToolsAndNotTheirStores(t *testing.T) {
 		t.Errorf("vault.db is not masked:\n%s", got)
 	}
 }
+
+// A live session's token folder is bound read-only for the session alone,
+// and a run of the same brain gets an empty folder over every session's
+// where allow_paths holds the data dir (live_runtime.go).
+func TestBwrapLiveTokensOnlyForTheSession(t *testing.T) {
+	t.Parallel()
+	const own, mask = "--ro-bind-try\n/data/live-tokens/main\n", "--tmpfs\n/data/live-tokens\n--remount-ro\n/data/live-tokens\n"
+	for _, allow := range [][]string{nil, {"/data"}} {
+		sp := bwrapProfiler(t, config.SandboxConfig{AllowPaths: allow}, map[string][]string{"main": {"/data/brains-folders/main"}}, map[string]string{
+			"/data/live-tokens": "dir",
+		})
+		run, err := sp.Profile("main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		live, err := sp.profile("main", "/data/live-tokens/main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case strings.Contains(run, own) || strings.Contains(live, mask):
+			t.Errorf("allow_paths %q: a run reads the session's token folder, or the session cannot:\nrun:\n%s\nlive:\n%s", allow, run, live)
+		case allow == nil && !strings.Contains(live, own):
+			t.Errorf("the session's token folder is not bound for it:\n%s", live)
+		case allow != nil && !strings.Contains(run, mask):
+			t.Errorf("under allow_paths /data, a run sees the live sessions' tokens:\n%s", run)
+		}
+	}
+}

@@ -103,6 +103,8 @@ var routeInventory = []httpRoute{
 	{"POST", "/brain/calendar/freebusy", classBrainRun, ""},
 	{"GET", "/brain/mcp/tools", classBrainRun, ""},
 	{"POST", "/brain/mcp/call", classBrainRun, ""},
+	{"GET", "/brain/live/next", classBrainRun, ""},
+	{"POST", "/brain/live/turn-end", classBrainRun, ""},
 	{"GET", "/brain/memory/search", classBrainRun, ""},
 	{"GET", "/brain/intents", classBrainRun, ""},
 	{"POST", "/brain/intents", classBrainRun, ""},

@@ -93,6 +93,7 @@ func (b *App) newMCPTools() *tools.Set[mcpCaller] {
 	b.registerWorkstationTools(r)
 	b.registerConnectionTools(r)
 	b.registerPlaudTools(r)
+	b.registerLiveTools(r)
 	return r
 }
 
@@ -105,7 +106,7 @@ func (b *App) mcpCallerFor(token, run string) (mcpCaller, error) {
 	if !ok || br == nil {
 		return mcpCaller{}, apperr.New(apperr.NotFound, "the bridge does not know this run's token (FRIDOLIN_BRAIN_TOKEN_FILE): it works only inside the run it was made for")
 	}
-	if run != "" && run != info.ID {
+	if run != "" && run != info.ID && !info.Live {
 		return mcpCaller{}, apperr.New(apperr.Precondition, fmt.Sprintf("this token belongs to run %s, not %s", info.ID, run))
 	}
 	return newMCPCaller(info, br.Manifest(), func(id string) bool { return b.brainMgr.Get(id) != nil }), nil

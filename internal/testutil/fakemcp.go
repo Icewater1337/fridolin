@@ -70,7 +70,9 @@ func fakeMCP(args []string, msg, steps string) string {
 	if err != nil {
 		return " [mcp] " + err.Error()
 	}
-	cmd := exec.Command(server.Command, server.Args...)
+	// Not as the live session's channel server: that one is the fake live
+	// CLI's own, which would lose its messages to this one.
+	cmd := exec.Command(server.Command, slices.DeleteFunc(slices.Clone(server.Args), func(a string) bool { return a == "--live" })...)
 	cmd.Env = append(os.Environ(), "FRIDOLIN_TEST_RUN_MAIN=1")
 	for k, v := range server.Env {
 		cmd.Env = append(cmd.Env, k+"="+v)

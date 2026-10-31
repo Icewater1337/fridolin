@@ -64,6 +64,11 @@ type Manifest struct {
 	// the default) or answers approved at once (ApprovalsAuto).
 	Approvals string `json:"approvals,omitempty"`
 
+	// LiveSession is whether the brain keeps one Claude Code session
+	// running and wakes it with each message (LiveSessionOwnerDM) instead
+	// of starting `claude -p` per message (LiveSessionOff, the default).
+	LiveSession string `json:"live_session,omitempty"`
+
 	Backup Backup `json:"backup"`
 
 	// Calendar is the Google account this brain signed in with and the
@@ -381,6 +386,9 @@ func (m *Manifest) Validate() error {
 	}
 	if !ValidApprovals(m.Approvals) {
 		return fmt.Errorf("brain %q: approvals %q must be %q or %q", m.ID, m.Approvals, ApprovalsAsk, ApprovalsAuto)
+	}
+	if !ValidLiveSession(m.LiveSession) {
+		return fmt.Errorf("brain %q: live_session %q must be %q or %q", m.ID, m.LiveSession, LiveSessionOff, LiveSessionOwnerDM)
 	}
 	if m.PromptFile != "" {
 		if filepath.IsAbs(m.PromptFile) || strings.HasPrefix(filepath.Clean(m.PromptFile), "..") {
@@ -809,6 +817,26 @@ const (
 
 // validApprovals are the values brain.json may give approvals.
 var validApprovals = map[string]bool{"": true, ApprovalsAsk: true, ApprovalsAuto: true}
+
+// Whether a brain keeps a live Claude Code session: Manifest.LiveSession.
+const (
+	// LiveSessionOff, the default, runs `claude -p` per message.
+	LiveSessionOff = "off"
+	// LiveSessionOwnerDM wakes one long-running session with the messages
+	// the owner writes in a direct chat; every other message (groups,
+	// other senders, scheduled agents, delegated tasks) runs `claude -p`
+	// as before, and so does one the session cannot take.
+	LiveSessionOwnerDM = "owner_dm"
+)
+
+// validLiveSession are the values brain.json may give live_session.
+var validLiveSession = map[string]bool{"": true, LiveSessionOff: true, LiveSessionOwnerDM: true}
+
+// ValidLiveSession reports whether mode is a supported live_session setting.
+func ValidLiveSession(mode string) bool { return validLiveSession[mode] }
+
+// LiveSessionModes returns the accepted settings, including the unset value.
+func LiveSessionModes() []string { return slices.Sorted(maps.Keys(validLiveSession)) }
 
 // ValidID reports whether id is the stable slug accepted for a brain.
 func ValidID(id string) bool { return brainIDRe.MatchString(id) }

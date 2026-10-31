@@ -1068,6 +1068,29 @@ func TestSandboxProfilePrecedence(t *testing.T) {
 	}
 }
 
+// TestSandboxProfileLiveTokens: a live session's token folder opens for
+// reading in the session's own profile, after the data dir's deny, and in
+// no run's, which would take the session's token, which speaks for the
+// owner's direct messages for hours (live_runtime.go).
+func TestSandboxProfileLiveTokens(t *testing.T) {
+	t.Parallel()
+	sp, home, _ := precedenceFixture(t, false)
+	dir := home + "/.fridolin/live-tokens/a"
+	live, err := sp.profile("a", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := profileRules(live)
+	deny := slices.Index(rules, `(deny file-read* (subpath "`+home+`/.fridolin"))`)
+	allow := slices.Index(rules, `(allow file-read* (subpath "`+dir+`"))`)
+	if deny < 0 || allow < deny {
+		t.Errorf("the session's token folder (rule %d) does not follow the data dir's deny (rule %d)", allow, deny)
+	}
+	if run := mustProfile(t, sp, "a"); strings.Contains(run, "live-tokens") {
+		t.Error("a run's profile opens the live sessions' tokens")
+	}
+}
+
 // TestSandboxProfileWritesOnlyItsOwnPlaces: a brain could write anywhere
 // outside a short denylist: ~/.claude/settings.json hooks and CLAUDE.md,
 // which every other brain and your own sessions load, other sessions'

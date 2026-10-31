@@ -85,6 +85,8 @@ func TestPlanClassifies(t *testing.T) {
 		40: {"FRIDOLIN_BRAIN_TOKEN_FILE=/other/run-tokens/main/run-x.token"},
 		50: {"FRIDOLIN_BRAIN_TOKEN_FILE=/data/run-tokens/main/run-gone.token"},
 		60: {"FRIDOLIN_BRAIN_TOKEN_FILE=/data/run-tokens/main/run-rgone.token"},
+		62: {"FRIDOLIN_BRAIN_TOKEN_FILE=/data/live-tokens/main/run-gone.token"},
+		63: {"FRIDOLIN_BRAIN_TOKEN_FILE=/data/live-tokens/main/run-live.token"},
 	}
 	procs := []platform.Proc{
 		{PID: 1, Name: "init", Start: old},
@@ -101,6 +103,10 @@ func TestPlanClassifies(t *testing.T) {
 		// The MCP server of a run that is over, and one of a live run.
 		{PID: 60, PPID: 1, Name: "fridolin", Args: []string{"/opt/fridolin", "mcp", "--run", "rgone"}, Start: old},
 		{PID: 61, PPID: 1, Name: "fridolin", Args: []string{"/opt/fridolin", "mcp", "--run", "rlive"}, Start: old},
+		// What a live session that is over left, and what one that goes on
+		// started.
+		{PID: 62, PPID: 1, Name: "bash", Args: []string{"bash"}, Start: old},
+		{PID: 63, PPID: 1, Name: "bash", Args: []string{"bash"}, Start: old},
 		// The vault's rclone daemon without a bridge, and with one.
 		{PID: 70, PPID: 1, Name: "rclone", Args: []string{"rclone", "rcd", "--rc-addr", "unix:///tmp/fridolin-rc-1/rc.sock"}, Start: old},
 		{PID: 71, PPID: 10, Name: "rclone", Args: []string{"rclone", "rcd", "--rc-addr", "unix:///tmp/fridolin-rc-2/rc.sock"}, Start: old},
@@ -114,7 +120,7 @@ func TestPlanClassifies(t *testing.T) {
 		{PID: 95, PPID: 10, Name: "sh", Zombie: true},
 	}
 	s := Sample{At: now, Procs: procs, CPU: map[int]float64{80: 95}}
-	o := Ownership{Self: 10, Exe: "/opt/fridolin", RunTokensDir: tokens, CoreDir: "/data/core",
+	o := Ownership{Self: 10, Exe: "/opt/fridolin", RunTokensDir: tokens, LiveTokensDir: "/data/live-tokens", CoreDir: "/data/core",
 		TokenLive:  func(p string) bool { return strings.HasSuffix(p, "run-live.token") },
 		MCPRunLive: func(id string) bool { return id == "rlive" }}
 	env := func(pid int) ([]string, error) {
@@ -133,6 +139,7 @@ func TestPlanClassifies(t *testing.T) {
 		20: {KindRunOrphan, ActionStop},
 		50: {KindRunOrphan, ActionReport},
 		60: {KindMCPOrphan, ActionStop},
+		62: {KindRunOrphan, ActionStop},
 		70: {KindRcloneRcd, ActionStop},
 		90: {KindRestic, ActionStop},
 		91: {KindLitestream, ActionStop},

@@ -37,6 +37,11 @@ type runInfo struct {
 	// Policy is the run's standing with the policy (admitRun); nil for a
 	// run the policy did not see, a test's say.
 	Policy *runPolicy
+	// Live marks the token of a brain's live session, which speaks for
+	// one turn after another: the bridge swaps the rest of this in with
+	// each (runTokens.replace), and the session's MCP server, started
+	// once, is not held to the run id it was started with.
+	Live bool
 	// OwnerGitHub is the brain's own GitHub grant (brain.json's github),
 	// which the run gets only when it answers the owner (githubGrantOf).
 	OwnerGitHub *chat.GitHubGrant
@@ -88,6 +93,22 @@ func (rt *runTokens) mintRun(run runInfo) (string, func()) {
 	}
 }
 
+// replace makes tok speak for run from now on, for a live session's next
+// turn. It reports whether tok is a live session's token.
+func (rt *runTokens) replace(tok string, run runInfo) bool {
+	sum := sha256.Sum256([]byte(tok))
+	rt.mu.Lock()
+	defer rt.mu.Unlock()
+	old, ok := rt.brains[sum]
+	if !ok || !old.Live {
+		return false
+	}
+	run.Live, run.Brain = true, old.Brain
+	run.Message.Done = nil
+	rt.brains[sum] = run
+	return true
+}
+
 // brainOf returns the brain a token was minted for, or "".
 func (rt *runTokens) brainOf(tok string) string {
 	run, _ := rt.runOf(tok)
@@ -114,7 +135,11 @@ func (rt *runTokens) runOf(tok string) (runInfo, bool) {
 // runAccess is what one run gets to reach the bridge: environment
 // variables, and the MCP server that serves it the bridge's tools.
 type runAccess struct {
-	Env []string
+	// Token is the run's brain API token, which the files named in Env
+	// hold, in TokenDir.
+	Token    string
+	TokenDir string
+	Env      []string
 	// MCPConfig is the file to pass Claude Code with --mcp-config, which
 	// starts MCPCommand; "" without a brain API or a binary to start.
 	MCPConfig string
@@ -169,6 +194,9 @@ func (b *App) brainRunEnv(run runInfo) runAccess {
 	}
 	tok, revoke := b.runTokens.mintRun(run)
 	dir := runTokenDir(b.cfgs.Boot().DataDir, brain)
+	if run.Live {
+		dir = liveTokenDir(b.cfgs.Boot().DataDir, brain)
+	}
 	path, err := writeRunToken(dir, tok)
 	if err != nil {
 		revoke()
@@ -179,6 +207,9 @@ func (b *App) brainRunEnv(run runInfo) runAccess {
 	var files []string
 	if b.exe != "" {
 		cmd := []string{b.exe, "mcp", "--run", run.ID}
+		if run.Live {
+			cmd = append(cmd, "--live")
+		}
 		cfg, err := writeRunMCPConfig(dir, run.ID, cmd, map[string]string{"FRIDOLIN_API": api, "FRIDOLIN_BRAIN_TOKEN_FILE": path})
 		if err != nil {
 			log.Printf("brain %s: no Fridolin tools for this run: %v", brain, err)
@@ -188,6 +219,7 @@ func (b *App) brainRunEnv(run runInfo) runAccess {
 		}
 	}
 	files = append(files, path)
+	access.Token, access.TokenDir = tok, dir
 	access.Env = append(access.Env, "FRIDOLIN_API="+api, "FRIDOLIN_BRAIN_TOKEN_FILE="+path)
 	githubDone := access.Done
 	access.Done = func() {
@@ -231,6 +263,17 @@ func runTokenDir(dataDir, brain string) string {
 // runTokensDirName is the data dir's folder of run tokens.
 const runTokensDirName = "run-tokens"
 
+// liveTokenDir is the folder of brain's live session's brain API token
+// (live_runtime.go). Only the session's own profile opens it: the
+// session's token speaks for the owner's direct messages for hours, so
+// the brain's runs, which read runTokenDir, never see it.
+func liveTokenDir(dataDir, brain string) string {
+	return filepath.Join(AbsPath(dataDir), liveTokensDirName, brain)
+}
+
+// liveTokensDirName is the data dir's folder of live sessions' tokens.
+const liveTokensDirName = "live-tokens"
+
 // writeRunToken writes tok to a new file in dir, readable by the bridge's
 // user only, and returns its path. Each run gets a file of its own: one
 // brain's runs can overlap while an interrupted one winds down.
@@ -257,9 +300,13 @@ func writeRunToken(dir, tok string) (string, error) {
 // cleaning up left in dataDir. Their tokens died with it; only the files
 // are left.
 func pruneRunTokens(dataDir string) {
-	files, _ := filepath.Glob(filepath.Join(AbsPath(dataDir), runTokensDirName, "*", "run-*.token"))
-	configs, _ := filepath.Glob(filepath.Join(AbsPath(dataDir), runTokensDirName, "*", "run-*.mcp.json"))
-	files = append(files, configs...)
+	var files []string
+	for _, dir := range []string{runTokensDirName, liveTokensDirName} {
+		for _, pattern := range []string{"run-*.token", "run-*.mcp.json"} {
+			found, _ := filepath.Glob(filepath.Join(AbsPath(dataDir), dir, "*", pattern))
+			files = append(files, found...)
+		}
+	}
 	// And the runs' gh logins (withGitHubToken), whose tokens GitHub ends
 	// within the hour.
 	gh, _ := filepath.Glob(filepath.Join(AbsPath(dataDir), runTokensDirName, "*", "run-*.gh"))

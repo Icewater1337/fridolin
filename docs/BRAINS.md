@@ -64,6 +64,7 @@ restart.
   "reply_chat": "",
   "observe": "history",
   "approvals": "ask",
+  "live_session": "off",
   "backup": { "enabled": true, "exclude": ["node_modules/", "*.log", "/big-exports/"] }
 }
 ```
@@ -84,6 +85,7 @@ restart.
 | `reply_chat` | Where answers go for files handed in through `/ingest`. The files are handled by this brain even when the chat belongs to another one, so a brain without chats can answer in your DM. `!stop` and `!reset` in that chat also stop this brain's work on them, and `!reset` starts the chat afresh for this brain too. Default: the first allowed number for the brain that gets DMs (the DM brain, or the fallback brain when none handles DMs), else the brain's first group. |
 | `observe` | What the brain does with untagged group messages, the ones nobody addressed to it (see [triggers](CONFIGURATION.md#triggers)). `history`, the default, keeps them in its history, where its next run in that group reads them; they cost nothing. `run` also gives each one a run of its own (a bare "ok" or emoji excepted), for a brain that keeps notes as the conversation goes: its prompt marks it `<observe_only>`, nothing it writes is sent, and a message addressed to the brain stops it and goes first, but each costs a full Claude run, with tools, on whatever any member the group's `group_members` admits writes (see [group_members](CONFIGURATION.md#group_members)). Set in the dashboard under *Untagged group messages*. |
 | `approvals` | Whether the brain asks you before an irreversible step. `ask`, the default: `request_approval` puts a poll in your chat and waits for your yes ([Skills, risk and approvals](#skills-risk-and-approvals)). `auto`: it answers approved at once, without a poll, and the brain's prompt says it may act without asking and must say in its reply what it did. **A security trade-off**: the brain then sends, posts, pays, submits and deletes on its own judgement, which a message, file or web page it reads can sway; set it only on a brain you trust that far, such as your own core brain in your DM. See [Acting without asking](#acting-without-asking). Set in the dashboard under *Approvals*; like every field here, a change the brain makes itself waits for your approval. |
+| `live_session` | `off`, the default: every message runs `claude -p`. `owner_dm`: the brain keeps one Claude Code session running and wakes it with the messages you write to it in a direct chat; see [Live session](#live-session). Needs `dangerously_skip_permissions` and not `inherit_claude_user_config`; a change the brain makes itself waits for your approval, like every field here. |
 | `backup` | Where this folder is backed up; see [BACKUP.md](BACKUP.md) and [below](#backups-cloud-and-node-targets). `backup.exclude` applies to the Google Drive backup and to the vault's snapshots (and its cold tier, for a folder in the data dir), and to the node targets; `backup.enabled: false` keeps the folder out of every backup ([VAULT.md](VAULT.md#brain-folders-and-their-backup-settings)). `backup.targets` and `backup.node_only` send it, or parts of it, to [node targets](VAULT.md#node-targets). |
 | `calendar` | The Google account this brain signed in with and the calendars it may use; set by *Connect Google Calendar*, see [CALENDAR.md](CALENDAR.md). |
 | `role` | `core` for the [core brain](#the-core-brain-and-its-grants), the one brain that may reach others; left out for every other brain. At most one brain is the core. |
@@ -95,6 +97,78 @@ restart.
 
 [`schemas/brain.schema.json`](schemas/brain.schema.json) is a JSON Schema
 of the file, version 1.
+
+### Live session
+
+By default every message starts a new `claude -p` run, which is told the
+chat's recent history. With `"live_session": "owner_dm"` a brain keeps one
+interactive Claude Code running instead and wakes it with each message *you*
+write to it in a direct chat, so that it keeps what was said (and Claude
+Code's own prompt cache) between messages. It is the idea of the
+[whatsapp-claude-plugin](https://github.com/Rich627/whatsapp-claude-plugin):
+a Claude Code *channel*.
+
+- **Which messages.** Only a direct message from a number in
+  `allowed_numbers`, from WhatsApp. Groups, other senders, untagged chatter,
+  scheduled agents, delegated tasks, GitHub runs and the answers to approvals
+  run `claude -p` as before. (Widening this to more chats is a later setting;
+  `owner_dm` is the narrowest.) A session serves the direct chat it started
+  for: with more than one number in `allowed_numbers`, a message from
+  another runs `claude -p` meanwhile, so that no session mixes two chats.
+  A message that waits behind another waits in
+  the brain's queue as ever, and `!stop` and the run timeout stop a turn the
+  way they stop a run, by ending the session.
+- **How it starts.** The first message that could use a session runs as a
+  one-off while the session starts in the background. The session is *ready*
+  once it answered a check of its own, which proves that Claude Code accepted
+  the channel and the login. Channels are a research preview: an organisation
+  (`channelsEnabled`) or an account can have them off. A session that does
+  not come up is left alone for 5 minutes, then 10 and 20, and every message
+  runs `claude -p` meanwhile; the bridge log says what the CLI showed.
+- **How it runs.** Claude Code runs in a terminal of its own, inside the
+  brain's sandbox profile and with the brain's own Claude config, started with
+  `--dangerously-load-development-channels server:fridolin`. That flag is how
+  Claude Code loads a channel that is not on Anthropic's list; the bridge
+  answers its consent dialog ("I am using this for local development") with
+  its first choice. The channel is the bridge's own MCP server
+  (`fridolin mcp --run … --live`), the one that also serves the brain's
+  tools; it passes each message on as a `notifications/claude/channel`, and
+  the session's Stop hook (`fridolin live-turn-end`) brings the turn's last
+  text back, which is sent to the chat as a run's reply is: quiet mode, the
+  one-time-code guard, history and policy are the same. Each turn is admitted
+  by the policy as a run is (lockdown, risk, rate limit, audit `run_start` and
+  `run_end`), and the session's token speaks for the turn's message and chat.
+- **What it is told.** The first turn gets the whole prompt a one-off run
+  gets (instructions, history, reply context, files), and a note that it is in
+  a session. Later turns get the new message, what the bridge sent since, and
+  the policy note. The `catch_up` tool gives the counts of what came in since
+  the session last answered, and with `read: true` the last 10 lines of the
+  chat.
+- **When it ends.** After 50 turns, 12 hours, or 30 minutes idle (never in
+  the middle of a turn), when the brain's settings or its sandbox change (a
+  tool taken away, a path denied, another model or folder), and when the
+  bridge stops; Claude Code compacts its context itself meanwhile. The
+  next message runs as a one-off while a new session starts. A session that
+  dies in the middle of a turn ends that message in an error, as a failed run
+  would, and is not run again: it may have done something already.
+- **What it does not do.** `AskUserQuestion` is off in a session (use
+  `ask_user`). A brain with a [`github`](#github-in-your-chats) grant of its own answers
+  your messages with one-off runs, each logged in to `gh` with a token of
+  its own, since a session would outlive GitHub's tokens, which last an
+  hour. Activity shows in the brain's activity log as one line a turn,
+  not as the tool calls of a run. Without the sandbox (macOS and Linux with
+  `sandbox.enabled` off) the brain's folder must have been trusted once in an
+  interactive `claude` for the session to start. A session holds the brain's
+  login token in its environment as a run does, for as long as it lives.
+- **Security.** A session reads the owner's direct messages with the brain's
+  tools, as a run does. Its brain API token, which speaks for those messages
+  for as long as the session lives, is in a folder of its own,
+  `live-tokens/<brain>` in the data dir, which only the session's sandbox
+  opens: the brain's other runs (a group's, a scheduled agent's) read
+  `run-tokens/<brain>` and never see it. Nothing it can call changes who may message the
+  bridge: the allowed numbers and groups, the nodes and the pairing are
+  changed in the dashboard, the CLI, or by the owner's own chat commands,
+  never by a tool.
 
 ### Backups: cloud and node targets
 

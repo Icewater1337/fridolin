@@ -39,7 +39,13 @@ func (r *commandRunner) Run(ctx context.Context, spec brain.RunSpec, callbacks c
 		}
 		pol = p
 	}
-	res := r.run(ctx, spec, callbacks, pol)
+	res, handled := claudecli.Result{}, false
+	if r.hooks != nil {
+		res, handled = r.hooks.Live.run(r, ctx, spec, callbacks, pol)
+	}
+	if !handled {
+		res = r.run(ctx, spec, callbacks, pol)
+	}
 	if r.hooks != nil && r.hooks.Ended != nil {
 		r.hooks.Ended(pol, res)
 	}
@@ -114,13 +120,50 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 		args = withArgsBeforePrint(args, runMCPArgs(s.Provider, access))
 	}
 
+	binary, finalArgs, env, err := r.command(spec, s, args, providerEnv, runEnv, "")
+	if err != nil {
+		return claudecli.Result{Err: err}
+	}
+
+	// Only once the sandbox is settled: a refused run starts no process.
+	spec.BeforeStart()
+
+	started := callbacks.Started
+	callbacks.Started = func(pid int) func() {
+		cleanup := started(pid)
+		rec := recordRun(s.DataDir, spec.ID, pid)
+		return func() {
+			if rec != "" {
+				_ = os.Remove(rec)
+			}
+			if cleanup != nil {
+				cleanup()
+			}
+		}
+	}
+	callbacks.GraceExpired = func() {
+		log.Printf("brain %s: %s's output was still open %v after its result; stopping what is left of the run", spec.ID, claudecli.AgentName(s.Provider), r.waits.postResultGrace)
+	}
+	return claudecli.Run(ctx, claudecli.Invocation{
+		Run:      claudecli.Spawn{WaitDelay: r.waits.runWaitDelay, Binary: binary, Args: finalArgs, Dir: spec.Dir, Env: env, Prompt: prompt},
+		Provider: s.Provider, ExitGrace: r.waits.postResultGrace, NoticeAfter: r.waits.workingNotice,
+		DeadlineError: deadline,
+	}, callbacks)
+}
+
+// command is the process that runs the agent for spec: the resolved
+// binary, wrapped by the sandbox, with args, and the environment it gets
+// (providerEnv and runEnv are its own variables on top of the brain's).
+// It is the same for a one-off run and a live session, whose sandbox also
+// reads its own token folder, liveTokens ("" for a run).
+func (r *commandRunner) command(spec brain.RunSpec, s *brain.Settings, args, providerEnv, runEnv []string, liveTokens string) (binary string, finalArgs, env []string, err error) {
 	// Wrap the spawn in sandbox-exec so prompt injection in an incoming message
 	// cannot reach another brain's tree or cross-session Claude state. The brain
 	// still runs with --dangerously-skip-permissions for tool freedom; the
 	// sandbox enforces the read scope at the OS layer regardless. That is also
 	// why a sandbox that cannot be set up refuses the run instead of spawning
 	// without it: the fallback would quietly drop the only barrier left.
-	binary := s.ClaudePath
+	binary = s.ClaudePath
 	if s.Provider == "codex" {
 		binary = s.CodexPath
 	}
@@ -129,11 +172,11 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 	resolved, err := resolveAgentBinary(s.Provider, binary)
 	if err != nil {
 		log.Printf("brain %s: %v", spec.ID, err)
-		return claudecli.Result{Err: err}
+		return "", nil, nil, err
 	}
 	binary = resolved
 	agentBinary := binary
-	finalArgs := args
+	finalArgs = args
 	extraEnv := append([]string{"FRIDOLIN_BRAIN_ID=" + spec.ID}, dataEnv(s)...)
 	extraEnv = append(extraEnv, providerEnv...)
 	extraEnv = append(extraEnv, google.CalendarEnv(spec.ID, s.Manifest, s.CredsDir)...)
@@ -164,11 +207,11 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 		// environment.
 		stateEnv, err := prepareBrainState(s.DataDir, s.MediaDir, spec.ID, s.InheritUser)
 		if err == nil && r.sandbox != nil && r.sandbox.Enabled() {
-			binary, finalArgs, err = r.sandbox.Command(spec.ID, agentBinary, args)
+			binary, finalArgs, err = r.sandbox.command(spec.ID, liveTokens, agentBinary, args)
 		}
 		if err != nil {
 			log.Printf("brain %s: sandbox unavailable, refusing to run: %v", spec.ID, err)
-			return claudecli.Result{Err: brain.ErrSandboxUnavailable}
+			return "", nil, nil, brain.ErrSandboxUnavailable
 		}
 		extraEnv = append(extraEnv, stateEnv...)
 		if s.Provider == "codex" {
@@ -185,32 +228,8 @@ func (r *commandRunner) run(ctx context.Context, spec brain.RunSpec, callbacks c
 	if s.Provider == "codex" {
 		scope = codexChild
 	}
-	env := childEnv(r.env, scope, s.EnvPassthrough, extraEnv...)
-
-	// Only once the sandbox is settled: a refused run starts no process.
-	spec.BeforeStart()
-
-	started := callbacks.Started
-	callbacks.Started = func(pid int) func() {
-		cleanup := started(pid)
-		rec := recordRun(s.DataDir, spec.ID, pid)
-		return func() {
-			if rec != "" {
-				_ = os.Remove(rec)
-			}
-			if cleanup != nil {
-				cleanup()
-			}
-		}
-	}
-	callbacks.GraceExpired = func() {
-		log.Printf("brain %s: %s's output was still open %v after its result; stopping what is left of the run", spec.ID, claudecli.AgentName(s.Provider), r.waits.postResultGrace)
-	}
-	return claudecli.Run(ctx, claudecli.Invocation{
-		Run:      claudecli.Spawn{WaitDelay: r.waits.runWaitDelay, Binary: binary, Args: finalArgs, Dir: spec.Dir, Env: env, Prompt: prompt},
-		Provider: s.Provider, ExitGrace: r.waits.postResultGrace, NoticeAfter: r.waits.workingNotice,
-		DeadlineError: deadline,
-	}, callbacks)
+	env = childEnv(r.env, scope, s.EnvPassthrough, extraEnv...)
+	return binary, finalArgs, env, nil
 }
 
 // runMCPArgs are the CLI arguments that start a run's MCP server, the one

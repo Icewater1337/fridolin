@@ -135,7 +135,7 @@ func (l vaultLayout) secretExcludes() []string {
 func (l vaultLayout) reserved(rel string) bool {
 	first, _, _ := strings.Cut(rel, "/")
 	switch first {
-	case brainStatesDirName, runTokensDirName, "runs", "core", "rclone", "google", "plaud", "otp", "site", "tsnet", "nodes", "backup":
+	case brainStatesDirName, runTokensDirName, liveTokensDirName, "runs", "core", "rclone", "google", "plaud", "otp", "site", "tsnet", "nodes", "backup":
 		return true
 	}
 	return false

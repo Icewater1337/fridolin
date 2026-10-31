@@ -170,15 +170,17 @@ var errHousekeepingBusy = apperr.New(apperr.Conflict, "a housekeeping run is und
 func (h *housekeepingService) ownership() housekeeping.Ownership {
 	boot := h.b.cfgs.Boot()
 	tokens := filepath.Join(AbsPath(boot.DataDir), runTokensDirName)
+	live := filepath.Join(AbsPath(boot.DataDir), liveTokensDirName)
 	return housekeeping.Ownership{
-		Self: os.Getpid(), Exe: h.b.exe, RunTokensDir: tokens, CoreDir: boot.Layout().Core(),
+		Self: os.Getpid(), Exe: h.b.exe, RunTokensDir: tokens, LiveTokensDir: live, CoreDir: boot.Layout().Core(),
 		TokenLive: func(p string) bool {
 			_, err := os.Stat(p)
 			return err == nil
 		},
 		MCPRunLive: func(id string) bool {
 			m, _ := filepath.Glob(filepath.Join(tokens, "*", "run-"+id+".mcp.json"))
-			return len(m) > 0
+			l, _ := filepath.Glob(filepath.Join(live, "*", "run-"+id+".mcp.json"))
+			return len(m)+len(l) > 0
 		},
 	}
 }
