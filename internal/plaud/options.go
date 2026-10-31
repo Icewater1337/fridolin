@@ -89,11 +89,11 @@ type Target struct {
 	ReplyChat  func() string
 	OtherOwner func(jid string) string
 	Submit     func(jid, sender, text string, media []string, done func(error)) error
-	// Ask hands the brain a voice question (voice mode): answer hears the
-	// text of its answer and returns what jid gets of it, unless quiet,
-	// and done hears how the run ended. Nil where the brain takes no
-	// questions.
-	Ask func(jid, sender, text string, quiet bool, answer func(string) string, done func(error)) error
+	// Ask hands the brain a voice question (voice mode), with media for a
+	// recording from the pin: answer hears the text of its answer and
+	// returns what jid gets of it, unless quiet, and done hears how the
+	// run ended. Nil where the brain takes no questions.
+	Ask func(jid, sender, text string, media []string, quiet bool, answer func(string) string, done func(error)) error
 }
 
 func (t *Target) ID() string { return t.BrainID }

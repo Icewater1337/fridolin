@@ -32,8 +32,8 @@ android {
         applicationId 'local.plaudsync'
         minSdk 31
         targetSdk 35
-        versionCode 7
-        versionName '0.7'
+        versionCode 8
+        versionName '0.8'
         ['client_id', 'client_secret', 'api_key', 'site_url', 'pairing_code'].each { k ->
             buildConfigField 'String', k.toUpperCase(), "\"${secrets.getProperty(k, '').trim()}\""
         }

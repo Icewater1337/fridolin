@@ -118,7 +118,7 @@ phone is paired), or ask the core brain, which has `plaud_app_update` and
 
 1. Fridolin builds the app as above. The build's versionCode is past the
    build before and past what each phone runs; its versionName is the
-   source's (`0.7`). Fridolin keeps it with its SHA-256 and the certificate
+   source's (`0.8`). Fridolin keeps it with its SHA-256 and the certificate
    it is signed with (`<data_dir>/plaud/app/release.json`).
 2. At its check-ins (at most every 10 minutes, and at once when the app is
    opened or was just updated), the app asks for the release through the
@@ -178,30 +178,50 @@ unpaired.
 ### Voice mode
 
 With uploads through the site, the app can also be a voice line to
-Fridolin: you ask by voice and the phone reads the answer aloud. The answer
-still reaches WhatsApp unless you turn that off.
+Fridolin: whatever you record on the pin, and what you ask the phone, goes
+to one brain, and the phone reads its answer aloud. The answer still
+reaches WhatsApp unless you turn that off.
 
 1. Dashboard → **Integrations → Plaud**: turn on **Voice mode** (`voice`),
-   pick the **Brain for voice questions** (default: the brain that gets your
-   DMs) and save. Build the app again: the phone installs it at its next
-   check-in ([Updates](#updates)), and keeps its pairing.
+   pick the **Brain for voice questions** (`voice_brain`, default: the
+   brain that gets your DMs) and save. Build the app again: the phone
+   installs it at its next check-in ([Updates](#updates)), and keeps its
+   pairing.
 2. In the app, turn on **Voice mode**. Its notification says so, and offers
    **Ask**, **Stop** and **Skip**.
 
 While it is on:
 
-- **A NotePin recording is a question.** The app checks in with the pin
-  at least every 2 minutes then, and **Fetch now** in the app or in the
-  notification gets a question off the pin at once
-  ([The pin's battery](#the-pins-battery)). It is transcribed by Plaud as
-  usual and saved to `Documents/PlaudSync`, but it is sent as a question
-  instead of a transcript: the speaker labels and timestamps are dropped,
-  and it is not handed to the Plaud brain as a recording.
+- **A NotePin recording goes to the voice brain, whole, and the brain
+  decides what it is.** The app checks in with the pin at least every 2
+  minutes then, and **Fetch now** in the app or in the notification gets a
+  recording off the pin at once ([The pin's battery](#the-pins-battery)).
+  It is transcribed by Plaud as usual and saved to `Documents/PlaudSync`,
+  then sent to the voice brain, not to the Plaud brain (`brain`), with its
+  speaker labels and timestamps. The brain gets it as it gets any recording
+  ([What happens](#what-happens)): the transcript as a file in the `plaud`
+  folder of its inbox, `YYYY-MM-DD - Pin recording - phone_<start>.txt`,
+  the line `[Plaud] New recording "Pin recording" (…)` and the instruction
+  for recordings (`message`, else its `skills/plaud.md`). It is told to
+  decide first:
+  - **You speak to it** (a question, a task, a reminder, something to note
+    or to add to the backlog): it does that as it would for a message from
+    you, and answers for the ear.
+  - **Anything else** (a meeting, a conversation, a dictation, a note to
+    self): it handles it as a recording, as that instruction says (archive,
+    notes, a summary with the action items for WhatsApp), and says in one
+    spoken sentence what it filed.
+
+  Either way it files the transcript with its notes. While the transcript
+  fits in 16 KiB it is in the brain's prompt too, so that a short question
+  is answered without opening the file first; a recording may be as long
+  as an upload (512 KiB).
 - **Ask** (in the app and in the notification) opens the phone's own speech
-  recognizer, which needs no microphone permission for the app.
-- The question goes to the voice brain as a hand-off in its private chat,
-  as recordings do: never a group, and never a command. The brain is told
-  to answer for the ear: one to three short spoken sentences, the most
+  recognizer, which needs no microphone permission for the app. What you
+  say there is a question, and nothing else.
+- Both go to the voice brain as a hand-off in its private chat, as
+  recordings do: never a group, and never a command. The brain is told to
+  answer for the ear: one to three short spoken sentences, the most
   important point first, no lists, tables, links, code or emoji, numbers
   and times as they are said, in the language of the question. When the
   answer needs more, the brain writes the spoken part in a
@@ -209,12 +229,25 @@ While it is on:
   are in WhatsApp. Only the block is read aloud, and the details go to the
   chat without it. An answer that comes back long anyway is read only up
   to the last whole sentence within 60 words.
-- **The question itself never goes to WhatsApp.** The brain is told to
-  keep it with its notes, as a voice question with the day's date, the way
-  its `skills/plaud.md` files recordings (without that skill, wherever its
-  notes go), and not to mention that in its answer. WhatsApp gets the
-  answer in full, unless `voice_quiet` is on. Then nothing goes there, and
-  only the spoken part reaches the phone.
+- **Neither the question nor the recording goes to WhatsApp.** The brain is
+  told to keep a question with its notes, as a voice question with the
+  day's date, the way its `skills/plaud.md` files recordings (without that
+  skill, wherever its notes go), and not to mention that in its answer.
+  WhatsApp gets the answer in full, unless `voice_quiet` is on. Then
+  nothing goes there, not a recording's summary either (it is in the
+  brain's notes), and only the spoken part reaches the phone.
+- **What Fridolin does not take holds up nothing after it.** A recording it
+  refuses (longer than 512 KiB, voice mode off in Fridolin, no brain for
+  it, the brain's queue full) goes as a transcript instead, to the Plaud
+  brain, as it would with voice mode off; one too long for that too stays
+  in `Documents/PlaudSync` only. A question it refuses is dropped. Each
+  says so in the app's log. While Fridolin cannot be reached, everything
+  waits on the phone and goes later, oldest first.
+- A run that fails, or that you stop, is not repeated, for a recording no
+  more than for a question: the phone's log says so, and the transcript
+  stays in the brain's inbox and in `Documents/PlaudSync`. With voice mode
+  off, a recording goes through the Plaud brain's queue instead, which
+  repeats failed runs ([What happens](#what-happens)).
 - The phone reads the answer with Android's text-to-speech, with markdown
   stripped, links read as "a link to example.com" and polls read as a list.
   It picks German or English for each answer, where the phone has that
@@ -229,7 +262,10 @@ While it is on:
 How it works: the app sends the question to
 `/_fridolin/devices/voice/ask`, signed like a transcript (aud
 `fridolin:voice`). The JWT names the question's id and SHA-256, and the
-public half of a second keystore key, which can only agree keys. Fridolin
+public half of a second keystore key, which can only agree keys. A
+recording from the pin goes the same way, with `src: "pin"` and the
+recording's `name` (the time it started, as an upload's) in the JWT: the
+site reads up to 512 KiB for it, and 16 KiB for a question. Fridolin
 seals the answer for that key: ECDH P-256 with a fresh key, HKDF-SHA256,
 AES-256-GCM, with the question's id as associated data. The app fetches it
 from `/_fridolin/devices/voice/reply` with a JWT naming the question (aud
@@ -514,6 +550,6 @@ for updates either; `plaud` in your own terminal follows your own settings.
 | `phone_dir` | unset | a folder the phone app's files are synced to; recordings come from there instead of Plaud's cloud (see above) |
 | `phone_upload` | `false` | recordings come from the phone app, which uploads them through the site (see above); they go into `phone_dir` when that is set, else `<data_dir>/plaud/inbox` |
 | `voice` | `false` | voice mode for the phone app (see [Voice mode](#voice-mode)); needs `phone_upload` |
-| `voice_brain` | the DM brain, else the default brain | brain id that answers voice questions |
+| `voice_brain` | the DM brain, else the default brain | brain id that answers voice questions and, in voice mode, gets the recordings from the pin |
 | `voice_quiet` | `false` | answers to voice questions go to the phone only, not also to WhatsApp |
 | `cli_path` | found in the folders of `PATH` Fridolin takes its helpers from (see [CONFIGURATION.md](CONFIGURATION.md#helper-programs)), else in the newest nvm node version, else in `/opt/homebrew/bin` or `/usr/local/bin` | path to `plaud` |

@@ -44,8 +44,10 @@ asking. Fridolin numbers its builds past `versionCode` in `app/build.gradle`
 ## Voice mode
 
 Built by Fridolin, with voice mode on in the dashboard, the app's **Voice mode** switch lets you
-ask Fridolin by voice and hear the answer: a NotePin recording, or **Ask** (the phone's speech
-recognizer), becomes a question, and the answer, encrypted to a key in the phone's keystore, is
+talk to Fridolin and hear the answer: a NotePin recording goes, whole, to the voice brain, which
+answers it if you spoke to it and files it as a recording if not; **Ask** (the phone's speech
+recognizer) is a question. What waits to be sent is in `VoiceQueue.kt`, which also says what
+Fridolin refused for good. The answer, encrypted to a key in the phone's keystore, is
 read aloud with Android's on-device text-to-speech (`Voice.kt`, behind the small `SpeechVoice` interface so a better voice can replace it; `SpeechText.kt`, `VoiceCrypto.kt`). See
 [docs/PLAUD.md](../docs/PLAUD.md#voice-mode).
 
@@ -109,7 +111,8 @@ ANDROID_HOME=$(brew --prefix)/share/android-commandlinetools ./gradlew testDebug
 ```
 
 The unit tests run on the JVM: when to check in with the pin and how to back off
-(`SyncPolicyTest`), the text made for speech, opening an answer the bridge
+(`SyncPolicyTest`), the text made for speech, what waits to go in voice mode and which refusals
+are for good (`VoiceQueueTest`), opening an answer the bridge
 sealed (the vector of `TestVoiceSealVector` in `internal/plaud/voice_test.go`), and when to
 fetch and install an update and opening a build the bridge sealed (`UpdatePolicyTest`,
 `UpdateCryptoTest`, the vector of `TestSealAppVector` in `internal/plaud/app_release_test.go`).

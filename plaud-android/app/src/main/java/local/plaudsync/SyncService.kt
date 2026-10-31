@@ -50,9 +50,9 @@ import java.util.Locale
  * (connect → sync → disconnect) on a timer and on events, so the pin can sleep in between
  * (docs/PLAUD.md, "The pin's battery").
  *
- * In voice mode (docs/PLAUD.md, "Voice mode") a recording is a question for Fridolin instead,
- * as is what is said to the phone's speech recognizer ([AskActivity]); the answer is read aloud
- * ([Speaker]).
+ * In voice mode (docs/PLAUD.md, "Voice mode") a recording goes, whole, to Fridolin's voice brain
+ * instead, which takes it as a question or as a recording to file; what is said to the phone's
+ * speech recognizer ([AskActivity]) is a question. The answer is read aloud ([Speaker]).
  *
  * At check-ins it also asks Fridolin for a newer build of the app, and installs one once nothing
  * would be cut off by it ([Updater]; docs/PLAUD.md, "Updates").
@@ -166,7 +166,8 @@ class SyncService : Service() {
     // Transcripts waiting to reach Fridolin (Fridolin.kt), when the app was built for it
     private val outboxDir by lazy { File(filesDir, "outbox").apply { mkdirs() } }
     private val exportDir by lazy { File(cacheDir, "export").apply { mkdirs() } }
-    // Voice questions: <id>.ask waits to be sent, <id>.wait for its answer
+    // Voice mode: <id>.ask (a question) and <id>.pin (a recording) wait to be sent, <id>.wait for
+    // the answer ([VoiceQueue])
     private val voiceDir by lazy { File(filesDir, "voice").apply { mkdirs() } }
     private val asking = Mutex()
     private val awaiting = mutableSetOf<String>()
@@ -813,11 +814,11 @@ class SyncService : Service() {
                 val name = mp3.nameWithoutExtension
                 withContext(Dispatchers.IO) {
                     saveToDocuments("$name.txt", "text/plain") { it.write(text.toByteArray()) }
-                    // In voice mode a recording is a question, not a transcript to hand over.
+                    // In voice mode a recording goes to the voice brain whole, which takes it as a
+                    // question or as a recording to file, as it hears it, and answers aloud.
                     if (Fridolin.enabled && VoicePrefs.enabled(this@SyncService)) {
-                        val question = SpeechText.question(text)
-                        if (question.isBlank()) AppLog.i("voice: nothing said in $name, so nothing asked")
-                        else writeQuestion(question)
+                        if (SpeechText.question(text).isBlank()) AppLog.i("voice: nothing said in $name, so nothing sent")
+                        else writePin(name, text)
                     } else if (Fridolin.enabled) File(outboxDir, "$name.txt").writeBytes(text.toByteArray())
                 }
                 AppLog.i("transcript saved: $name.txt")
@@ -862,6 +863,15 @@ class SyncService : Service() {
                 withContext(Dispatchers.IO) { Fridolin.upload(this@SyncService, txt.nameWithoutExtension, txt.readBytes()) }
                 txt.delete()
                 AppLog.i("sent ${txt.name} to Fridolin")
+            } catch (e: Fridolin.Refused) {
+                // Longer than Fridolin takes: trying again would not change that, and it must not
+                // hold up the transcripts after it.
+                if (e.code != 413) {
+                    AppLog.i("sending ${txt.name} to Fridolin failed, will retry: ${e.message}")
+                    break
+                }
+                txt.delete()
+                AppLog.i("${txt.name} is too long for Fridolin, not sent: it is in Documents/PlaudSync")
             } catch (e: Exception) {
                 AppLog.i("sending ${txt.name} to Fridolin failed, will retry: ${e.message}")
                 break
@@ -874,7 +884,12 @@ class SyncService : Service() {
     /** Keeps a question until it is sent (so a restart or no network loses nothing). */
     private fun writeQuestion(text: String) {
         if (text.isBlank()) return
-        File(voiceDir, Fridolin.newQuestionId() + ".ask").writeText(text)
+        File(voiceDir, Fridolin.newQuestionId() + "." + VoiceQueue.ASK).writeText(text)
+    }
+
+    /** Keeps a recording from the pin, [name] its start time, until it is sent. */
+    private fun writePin(name: String, transcript: String) {
+        File(voiceDir, Fridolin.newQuestionId() + "." + VoiceQueue.PIN).writeText(VoiceQueue.pin(name, transcript))
     }
 
     private fun queueQuestion(text: String) {
@@ -893,27 +908,52 @@ class SyncService : Service() {
         scope.launch { sendQuestions() }
     }
 
-    /** Sends the questions waiting to go, oldest first; what fails waits for the next try. */
+    /**
+     * Sends the questions and recordings from the pin waiting to go, oldest first. When Fridolin
+     * cannot be reached, what is left waits for the next try; what it refuses for good
+     * ([VoiceQueue.refused]) holds up nothing: a recording goes as a transcript instead, to the
+     * Plaud brain, and a question is dropped.
+     */
     private suspend fun sendQuestions() {
         if (!asking.tryLock()) return
+        var asTranscripts = false
         try {
-            for (q in voiceDir.listFiles { f -> f.name.endsWith(".ask") }.orEmpty().sortedBy { it.lastModified() }) {
+            val waiting = voiceDir.listFiles { f -> f.extension == VoiceQueue.ASK || f.extension == VoiceQueue.PIN }.orEmpty()
+            for (q in waiting.sortedBy { it.lastModified() }) {
                 val rid = q.nameWithoutExtension
+                val pin = if (q.extension == VoiceQueue.PIN) withContext(Dispatchers.IO) { VoiceQueue.readPin(q.readText()) } else null
+                if (q.extension == VoiceQueue.PIN && pin == null) {
+                    AppLog.i("voice: ${q.name} holds no recording, dropped")
+                    q.delete()
+                    continue
+                }
                 try {
-                    withContext(Dispatchers.IO) { Fridolin.ask(this@SyncService, rid, q.readBytes()) }
+                    withContext(Dispatchers.IO) {
+                        if (pin != null) Fridolin.ask(this@SyncService, rid, pin.transcript.toByteArray(), pin.name)
+                        else Fridolin.ask(this@SyncService, rid, q.readBytes())
+                    }
                     val wait = File(voiceDir, "$rid.wait")
                     q.renameTo(wait)
-                    AppLog.i("voice: asked Fridolin")
+                    AppLog.i(if (pin != null) "voice: sent ${pin.name} to Fridolin" else "voice: asked Fridolin")
                     awaitAnswer(wait)
                 } catch (e: Exception) {
-                    AppLog.i("voice: asking failed, will retry: ${e.message}")
-                    scope.launch { delay(60_000); sendQuestions() }
-                    break
+                    if (e !is Fridolin.Refused || !VoiceQueue.refused(e.code)) {
+                        AppLog.i("voice: sending failed, will retry: ${e.message}")
+                        scope.launch { delay(60_000); sendQuestions() }
+                        break
+                    }
+                    if (pin != null) {
+                        withContext(Dispatchers.IO) { File(outboxDir, "${pin.name}.txt").writeBytes(pin.transcript.toByteArray()) }
+                        asTranscripts = true
+                        AppLog.i("voice: Fridolin did not take ${pin.name} (${e.message}), sending it as a transcript")
+                    } else AppLog.i("voice: Fridolin refused the question (${e.message}), dropped it")
+                    q.delete()
                 }
             }
         } finally {
             asking.unlock()
         }
+        if (asTranscripts) uploadPending()
         refreshNotification()
     }
 

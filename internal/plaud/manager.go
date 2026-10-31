@@ -860,25 +860,11 @@ func (p *Manager) forward(ctx context.Context, cfg *Snapshot, id string, item *p
 		return nil, err
 	}
 
-	// Into the plaud folder of the brain's own inbox: no other brain may
-	// read the recording.
-	file := plaudTranscriptPath(filepath.Join(p.options.Inbox(cfg.MediaDir).Path(br.ID()), "plaud"), rec.day, rec.name, id)
-	var body strings.Builder
-	fmt.Fprintf(&body, "Plaud recording: %s\nRecorded: %s\nDuration: %s\nPlaud ID: %s\n%s\n", rec.name, rec.when, rec.duration, id, rec.note)
-	if rec.summary != "" {
-		body.WriteString("=== Plaud AI summary ===\n" + rec.summary + "\n\n")
-	}
-	body.WriteString("=== Transcript ===\n" + strings.TrimSpace(rec.transcript) + "\n")
-	path, err := p.options.Inbox(cfg.MediaDir).Write(br.ID(), filepath.Join("plaud", filepath.Base(file)), []byte(body.String()))
+	path, err := p.inboxRecording(cfg, br, id, rec)
 	if err != nil {
 		return nil, err
 	}
-
-	instruction := cfg.Plaud.Message
-	if strings.TrimSpace(instruction) == "" {
-		instruction = defaultPlaudMessage
-	}
-	text := strings.NewReplacer("{name}", rec.name, "{when}", rec.when, "{duration}", rec.duration).Replace(plaudMessageHead + "\n\n" + strings.TrimSpace(instruction))
+	text := recordingMessage(cfg, rec)
 	// Marked as handed before the brain gets it, so that a run that ends
 	// at once finds it so.
 	fw := Forward{ID: id, Name: rec.name, Brain: br.ID(), At: time.Now(), Status: plaudRunHanded}
@@ -899,6 +885,31 @@ func (p *Manager) forward(ctx context.Context, cfg *Snapshot, id string, item *p
 type plaudRecording struct {
 	name, day, when, duration string
 	transcript, summary, note string
+}
+
+// inboxRecording writes rec, recording id, into the plaud folder of br's
+// own inbox, where no other brain may read it, as the file the brain gets
+// with it, and returns its path. The same recording again rewrites its
+// file.
+func (p *Manager) inboxRecording(cfg *Snapshot, br *Target, id string, rec *plaudRecording) (string, error) {
+	file := plaudTranscriptPath(filepath.Join(p.options.Inbox(cfg.MediaDir).Path(br.ID()), "plaud"), rec.day, rec.name, id)
+	var body strings.Builder
+	fmt.Fprintf(&body, "Plaud recording: %s\nRecorded: %s\nDuration: %s\nPlaud ID: %s\n%s\n", rec.name, rec.when, rec.duration, id, rec.note)
+	if rec.summary != "" {
+		body.WriteString("=== Plaud AI summary ===\n" + rec.summary + "\n\n")
+	}
+	body.WriteString("=== Transcript ===\n" + strings.TrimSpace(rec.transcript) + "\n")
+	return p.options.Inbox(cfg.MediaDir).Write(br.ID(), filepath.Join("plaud", filepath.Base(file)), []byte(body.String()))
+}
+
+// recordingMessage is what a brain is told of rec, whose file comes with
+// it: plaudMessageHead, then plaud.message or defaultPlaudMessage.
+func recordingMessage(cfg *Snapshot, rec *plaudRecording) string {
+	instruction := cfg.Plaud.Message
+	if strings.TrimSpace(instruction) == "" {
+		instruction = defaultPlaudMessage
+	}
+	return strings.NewReplacer("{name}", rec.name, "{when}", rec.when, "{duration}", rec.duration).Replace(plaudMessageHead + "\n\n" + strings.TrimSpace(instruction))
 }
 
 // fetchCloud fetches recording id from Plaud's cloud through the CLI: nil
@@ -1051,12 +1062,18 @@ func fetchPhone(_ context.Context, cfg *Snapshot, id string, item *plaudPending)
 	if transcript == "" {
 		transcript = "(Plaud heard no speech in this recording.)"
 	}
+	item.Name = "Phone recording"
+	return phoneRecording(item.Name, t, transcript), nil
+}
+
+// phoneRecording is a transcript the phone app wrote of a recording that
+// started at t, as one to hand over under name.
+func phoneRecording(name string, t time.Time, transcript string) *plaudRecording {
 	duration := "?"
 	if m := plaudPhoneEndRe.FindAllStringSubmatch(transcript, -1); m != nil {
 		duration = m[len(m)-1][1]
 	}
-	item.Name = "Phone recording"
-	return &plaudRecording{name: item.Name, day: t.Format("2006-01-02"), when: t.Format("2006-01-02 15:04"), duration: duration, transcript: transcript}, nil
+	return &plaudRecording{name: name, day: t.Format("2006-01-02"), when: t.Format("2006-01-02 15:04"), duration: duration, transcript: transcript}
 }
 
 // markHanded notes that the recording fw.ID is about to go to a brain.

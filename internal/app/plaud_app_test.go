@@ -174,6 +174,7 @@ type plaudPhoneFixtureClaims struct {
 	SHA256 string                `json:"sha256,omitempty"`
 	Rid    string                `json:"rid,omitempty"`
 	Enc    *plaudPhoneFixtureKey `json:"enc,omitempty"`
+	Src    string                `json:"src,omitempty"`
 }
 
 // A fresh app build persists the hash of its one-use pairing code. Arrangement
@@ -217,6 +218,19 @@ func voiceQuestion(t *testing.T, tb *testBridge, phone testPhone, device, rid, q
 	sum := sha256.Sum256([]byte(question))
 	return tb.plaud.DeviceRequest("voice", phone.sign(t, plaudPhoneFixtureClaims{Iss: device, Aud: "fridolin:voice", Iat: now, Exp: now + 300, Rid: rid,
 		SHA256: e(sum[:]), Enc: &plaudPhoneFixtureKey{Kty: "EC", Crv: "P-256", X: e(b[1:33]), Y: e(b[33:])}}), []byte(question))
+}
+
+// voicePinRecording sends transcript as the app sends a recording from
+// the pin in voice mode: by the voice route, with src "pin" and name, the
+// time it started.
+func voicePinRecording(t *testing.T, tb *testBridge, phone testPhone, device, rid, name, transcript string, enc *ecdh.PrivateKey) (map[string]any, error) {
+	t.Helper()
+	b := enc.PublicKey().Bytes()
+	e := base64.RawURLEncoding.EncodeToString
+	now := time.Now().Unix()
+	sum := sha256.Sum256([]byte(transcript))
+	return tb.plaud.DeviceRequest("voice", phone.sign(t, plaudPhoneFixtureClaims{Iss: device, Aud: "fridolin:voice", Iat: now, Exp: now + 300, Rid: rid,
+		SHA256: e(sum[:]), Enc: &plaudPhoneFixtureKey{Kty: "EC", Crv: "P-256", X: e(b[1:33]), Y: e(b[33:])}, Src: "pin", Name: name}), []byte(transcript))
 }
 
 // voiceAnswer fetches the answer to rid until it is there, and opens it.
@@ -312,5 +326,37 @@ func TestPlaudVoiceQuestionIsAnsweredThroughABrain(t *testing.T) {
 		if len(out) != 1 || strings.Contains(out[0].Text, "[SPOKEN]") || strings.HasPrefix(out[0].Text, "🎙") {
 			t.Errorf("WhatsApp got %+v", out)
 		}
+	}
+}
+
+// In voice mode a recording from the pin reaches the voice brain whole,
+// speaker labels and all, as a recording does: its transcript in a file of
+// the brain's inbox, which comes with the message, and the instruction to
+// decide whether it was spoken to and to answer for the ear either way.
+// The spoken part comes back to the phone.
+func TestPlaudVoicePinRecordingReachesTheVoiceBrain(t *testing.T) {
+	t.Parallel()
+	runs := fakeRuns(t)
+	tb, _ := plaudBridge(t, `, "phone_upload": true, "voice": true`)
+	phone := newTestPhone(t)
+	device := voicePair(t, tb, phone)
+	enc, _ := ecdh.P256().GenerateKey(rand.Reader)
+	rid := "q_pin_recording_01"
+	transcript := "[00:00 - 00:05] Speaker 1: Kurzes Update zum Budget, bitte festhalten.\n[00:05 - 00:12] Speaker 2: Wir verschieben die Bestellung auf Dezember."
+	if ans, err := voicePinRecording(t, tb, phone, device, rid, "2026-10-18_10-00-00", transcript, enc); err != nil || ans["state"] != "waiting" {
+		t.Fatalf("pin = %v, %v", ans, err)
+	}
+	if answer := voiceAnswer(t, tb, phone, device, rid, enc); answer != "like this" {
+		t.Errorf("the phone heard %q", answer)
+	}
+	r := runs()[len(runs())-1]
+	end := "auf Dezember."
+	i, j := strings.Index(r.Prompt, "[A recording from the owner's Plaud pin"), strings.Index(r.Prompt, end)
+	if i < 0 || j < i {
+		t.Fatalf("the run's prompt:\n%s", r.Prompt)
+	}
+	assertGolden(t, "run/prompt-voice-pin.golden", []byte(r.Prompt[i:j+len(end)]+"\n"))
+	if !strings.Contains(r.Prompt, `/plaud/2026-10-18 - Pin recording - phone_2026-10-18_10-00-00.txt"]`) {
+		t.Errorf("no transcript file came with it:\n%s", r.Prompt)
 	}
 }

@@ -155,6 +155,26 @@ test('a voice question reaches the bridge only when a paired phone signed it, wi
   assert.equal(seen.length, 1)
 })
 
+test('a recording from the pin may be as long as a transcript, a question may not', async (t) => {
+  const { url, seen, pairDevice } = await start(t, r => (r.op === 'voice' ? { ok: true, state: 'waiting' } : { ok: true }))
+  const p = phone()
+  pairDevice('dev_1', p.jwk)
+  const line = '[00:00 - 00:10] Speaker 1: Wir verschieben die Bestellung auf Dezember.\n'
+  const long = line.repeat(Math.ceil(100 * 1024 / line.length))
+  const pin = { src: 'pin', name: '2026-10-18_10-00-00' }
+
+  const res = await ask(url, p.key, long, pin)
+  assert.equal(res.status, 202)
+  assert.equal(seen.length, 1)
+  assert.equal(seen[0].body, long, 'spooled whole, speaker labels and all')
+
+  assert.equal((await ask(url, p.key, long)).status, 413, 'a question of that length')
+  assert.equal((await ask(url, p.key, 'x'.repeat(512 * 1024 + 1), pin)).status, 413, 'a recording longer than a transcript')
+  assert.equal((await ask(url, p.key, 'hi', { src: 'watch' })).status, 400, 'another kind')
+  assert.equal((await ask(url, p.key, 'hi', { src: 'pin' })).status, 400, 'a recording without its name')
+  assert.equal(seen.length, 1, 'none of them was spooled')
+})
+
 test('the answer to a voice question goes back as the bridge sealed it, and only to the phone that signs for it', async (t) => {
   const reply = { alg: 'ECDH-ES+HKDF-SHA256+A256GCM', epk: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' }, iv: 'iv', ct: 'ct' }
   const { url, seen, pairDevice } = await start(t, r => (r.op === 'voice_reply' ? { ok: true, state: 'done', reply } : { ok: true }))

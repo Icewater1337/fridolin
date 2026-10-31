@@ -61,15 +61,20 @@ object Fridolin {
     /** Where a voice question stands: "waiting", "done" (text is the answer, null when it had none), "failed" or "unknown". */
     data class Reply(val state: String, val text: String? = null, val error: String? = null)
 
-    /** Sends a voice question, pairing first if need be; its answer comes with [reply]. Throws when it did not arrive. */
-    fun ask(ctx: Context, rid: String, question: ByteArray): String {
+    /**
+     * Sends a voice question, pairing first if need be; its answer comes with [reply]. Throws when it
+     * did not arrive. With [pin], the name of a recording from the pin (the time it started), the
+     * question is that recording's transcript, whole, which the voice brain takes as a question or
+     * as a recording to file, as it hears it.
+     */
+    fun ask(ctx: Context, rid: String, question: ByteArray, pin: String? = null): String {
         val device = device(ctx) ?: pair(ctx)
         val now = System.currentTimeMillis() / 1000
         val sha256 = b64.encodeToString(MessageDigest.getInstance("SHA-256").digest(question))
-        val jwt = sign(
-            JSONObject().put("iss", device).put("aud", "fridolin:voice").put("iat", now).put("exp", now + 300)
-                .put("rid", rid).put("sha256", sha256).put("enc", voiceJwk())
-        )
+        val claims = JSONObject().put("iss", device).put("aud", "fridolin:voice").put("iat", now).put("exp", now + 300)
+            .put("rid", rid).put("sha256", sha256).put("enc", voiceJwk())
+        if (pin != null) claims.put("src", "pin").put("name", pin)
+        val jwt = sign(claims)
         return unpairedOn401(ctx) {
             post("/_fridolin/devices/voice/ask", question.toRequestBody("text/plain; charset=utf-8".toMediaType()), jwt).optString("state")
         }

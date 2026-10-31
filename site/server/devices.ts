@@ -3,7 +3,7 @@
 //
 //   POST /_fridolin/devices/pair                   {"assertion": JWT}
 //   POST /_fridolin/devices/plaud/transcripts      Authorization: Bearer JWT, the transcript as the body
-//   POST /_fridolin/devices/voice/ask              Authorization: Bearer JWT, a voice question as the body
+//   POST /_fridolin/devices/voice/ask              Authorization: Bearer JWT, a voice question or a recording from the pin as the body
 //   POST /_fridolin/devices/voice/reply            Authorization: Bearer JWT naming the question
 //   POST /_fridolin/devices/app/release            Authorization: Bearer JWT saying how the phone's app is
 //   POST /_fridolin/devices/app/apk                Authorization: Bearer JWT naming the build and a key
@@ -17,6 +17,8 @@
 // Voice mode (docs/PLAUD.md, "Voice mode"): the answer to a question comes
 // back encrypted to a key of the phone's keystore, so this process only
 // ever passes on ciphertext. A fetch of it waits up to 15 seconds for it.
+// A recording from the pin comes by the same route, its JWT saying so
+// (src "pin"), and may be as long as a transcript; a question is short.
 //
 // Each JWT is ES256, signed with a key the phone made in its keystore: the
 // pairing one with the key it pairs, which it carries, an upload with the
@@ -33,7 +35,7 @@ import { awaitAnswer, RefusedError } from './ingest.ts'
 
 export type Jwk = { kty: string; crv: string; x: string; y: string }
 type Device = { id: string; key: Jwk }
-type Claims = { iss?: string; aud?: string; iat?: number; exp?: number; code?: string; key?: Jwk; name?: string; sha256?: string; rid?: string; enc?: Jwk; apk?: string }
+type Claims = { iss?: string; aud?: string; iat?: number; exp?: number; code?: string; key?: Jwk; name?: string; sha256?: string; rid?: string; enc?: Jwk; src?: string; apk?: string }
 
 const PAIR_AUD = 'fridolin:pair'
 const TRANSCRIPT_AUD = 'fridolin:plaud-transcript'
@@ -43,6 +45,8 @@ const TRANSCRIPT_MAX = 512 * 1024
 const VOICE_AUD = 'fridolin:voice'
 const VOICE_REPLY_AUD = 'fridolin:voice-reply'
 const QUESTION_MAX = 16 * 1024
+/** The src claim of a recording from the pin, which may be as long as a transcript. */
+const PIN_SRC = 'pin'
 const RID = /^[A-Za-z0-9_-]{16,64}$/
 const RELEASE_AUD = 'fridolin:app-release'
 const APK_AUD = 'fridolin:app-apk'
@@ -190,7 +194,13 @@ export function deviceRoutes(devicesFile: string, spoolDir: string): express.Rou
     return claims && RID.test(claims.rid ?? '') ? claims : null
   }
 
-  router.post('/_fridolin/devices/voice/ask', express.raw({ type: () => true, limit: QUESTION_MAX }), async (req, res) => {
+  const questionBody = express.raw({ type: () => true, limit: QUESTION_MAX })
+  const recordingBody = express.raw({ type: () => true, limit: TRANSCRIPT_MAX })
+  /** The body's limit, by what the JWT in the header says it is, before the body is read; the signature is checked after, as an upload's. */
+  const voiceBody: express.RequestHandler = (req, res, next) =>
+    (jwtClaims(bearer(req))?.src === PIN_SRC ? recordingBody : questionBody)(req, res, next)
+
+  router.post('/_fridolin/devices/voice/ask', voiceBody, async (req, res) => {
     const claims = signed(req, VOICE_AUD)
     if (!claims) {
       refuse(req, res, 401, 'Not signed by a paired phone')
@@ -199,6 +209,10 @@ export function deviceRoutes(devicesFile: string, spoolDir: string): express.Rou
     const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0)
     if (claims.sha256 !== createHash('sha256').update(body).digest('base64url') || !claims.enc) {
       refuse(req, res, 400, 'The signature is for another question')
+      return
+    }
+    if (claims.src !== undefined && (claims.src !== PIN_SRC || typeof claims.name !== 'string')) {
+      refuse(req, res, 400, 'Neither a question nor a recording from the pin')
       return
     }
     await answer(req, res, () => handOver(spoolDir, { op: 'voice', assertion: bearer(req) }, body), r => res.status(202).json({ state: r.state }))
